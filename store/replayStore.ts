@@ -33,14 +33,27 @@ const MARKER_PRIORITY: Record<string, number> = {
 function precomputeMarkers(allCandles: CandleWithIndicators[]): void {
   const result: ChartSignalMarker[] = [];
   for (let i = 0; i < allCandles.length; i++) {
+    const c = allCandles[i];
+
+    // ── Trend filter (朱家泓：順勢操作，多頭才買，空頭才賣) ──────────────
+    const isBullish = c.ma5 != null && c.ma20 != null && c.ma5 > c.ma20;
+    const isBearish = c.ma5 != null && c.ma20 != null && c.ma5 < c.ma20;
+
     const signals = ruleEngine.evaluate(allCandles, i)
-      .filter(s => s.type !== 'WATCH');
+      .filter(s => s.type !== 'WATCH')
+      .filter(s => {
+        if (s.type === 'BUY' || s.type === 'ADD')    return isBullish;  // 只在多頭買進
+        if (s.type === 'SELL' || s.type === 'REDUCE') return isBearish; // 只在空頭賣出
+        return true;
+      });
+
     if (signals.length === 0) continue;
+
     // Pick highest-priority signal for this candle
     const best = signals.reduce((a, b) =>
       (MARKER_PRIORITY[b.type] ?? 0) > (MARKER_PRIORITY[a.type] ?? 0) ? b : a
     );
-    result.push({ date: allCandles[i].date, type: best.type, label: best.label });
+    result.push({ date: c.date, type: best.type, label: best.label });
   }
   _cachedMarkers = result;
 }
