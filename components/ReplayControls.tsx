@@ -64,21 +64,25 @@ export default function ReplayControls() {
       {/* Control buttons */}
       <div className="flex gap-1.5">
         <button onClick={prevCandle} disabled={currentIndex <= 0 || isPlaying}
+          suppressHydrationWarning
           className="flex-1 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-sm transition">
           ◀
         </button>
         {isPlaying ? (
           <button onClick={stopPlay}
+            suppressHydrationWarning
             className="flex-[2] py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-sm font-bold transition">
             ⏸ 暫停
           </button>
         ) : (
           <button onClick={startPlay} disabled={currentIndex >= total - 1}
+            suppressHydrationWarning
             className="flex-[2] py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-sm font-bold transition">
             ▶ 自動播放
           </button>
         )}
         <button onClick={nextCandle} disabled={currentIndex >= total - 1 || isPlaying}
+          suppressHydrationWarning
           className="flex-1 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-sm transition">
           ▶
         </button>

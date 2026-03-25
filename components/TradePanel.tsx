@@ -45,7 +45,7 @@ export default function TradePanel() {
   ];
 
   return (
-    <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-3">
+    <div suppressHydrationWarning className="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-bold text-slate-200">交易操作</h2>
