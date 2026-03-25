@@ -26,14 +26,12 @@ const CandleChart = dynamic(() => import('@/components/CandleChart'), {
 
 const IndicatorCharts = dynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
 
-const INTERVAL_LABEL: Record<string, string> = { '1d': '日線', '1wk': '週線', '1mo': '月線' };
-
 type SideTab = 'conditions' | 'trade' | 'account' | 'signals';
 
 export default function HomePage() {
   const {
     initData, visibleCandles, currentSignals, chartMarkers,
-    currentStock, currentInterval, isLoadingStock, allCandles, currentIndex,
+    isLoadingStock, allCandles, currentIndex,
     nextCandle, prevCandle, isPlaying, startPlay, stopPlay, metrics,
   } = useReplayStore();
 
@@ -72,33 +70,17 @@ export default function HomePage() {
   return (
     <div className="h-screen flex flex-col bg-[#0b1120] text-white overflow-hidden">
 
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <header className="shrink-0 border-b border-slate-800 px-3 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-bold text-white whitespace-nowrap">📈 走圖練習器</span>
-          {currentStock && (
-            <span className="text-sm text-yellow-400 font-mono font-bold truncate">
-              {currentStock.name}（{currentStock.ticker}）
-            </span>
-          )}
-          {currentInterval && (
-            <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-300 shrink-0">
-              {INTERVAL_LABEL[currentInterval] ?? currentInterval}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
+      {/* ── Header (includes stock selector) ───────────────────────────── */}
+      <header className="shrink-0 border-b border-slate-800 px-3 py-1.5 flex items-center gap-2">
+        <span className="text-sm font-bold text-white whitespace-nowrap shrink-0">📈</span>
+        <StockSelector />
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
           <Link href="/scanner" className="text-xs px-2.5 py-1 bg-blue-600/80 hover:bg-blue-500 rounded text-white font-medium transition">
             🔍 掃描
           </Link>
-          <span className="text-xs text-slate-600 hidden md:block">← → Space</span>
+          <span className="text-xs text-slate-600 hidden lg:block">← → Space</span>
         </div>
       </header>
-
-      {/* ── Stock Selector ─────────────────────────────────────────────── */}
-      <div className="shrink-0 px-3 pt-2">
-        <StockSelector />
-      </div>
 
       {/* ── Main: Chart (left) + Sidebar (right) ───────────────────────── */}
       <div className="flex-1 flex gap-2 px-3 py-2 min-h-0 overflow-hidden">
@@ -109,7 +91,7 @@ export default function HomePage() {
           {/* Chart wrapper — fixed height proportional to viewport */}
           <div
             className={`relative flex flex-col rounded-xl border border-slate-700 overflow-hidden bg-slate-900 transition-opacity ${isLoadingStock ? 'opacity-40 pointer-events-none' : ''}`}
-            style={{ height: 'calc(100vh - 148px)' }}
+            style={{ height: 'calc(100vh - 100px)' }}
           >
             {isLoadingStock && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/80">
