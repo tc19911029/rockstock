@@ -11,7 +11,7 @@ function TradeRow({ trade }: { trade: Trade }) {
   return (
     <tr className="border-b border-slate-700 hover:bg-slate-700/30 text-xs">
       <td className="py-1.5 px-2 text-slate-400">{trade.date}</td>
-      <td className={`py-1.5 px-2 font-bold ${isBuy ? 'text-green-400' : 'text-red-400'}`}>
+      <td className={`py-1.5 px-2 font-bold ${isBuy ? 'text-red-400' : 'text-green-400'}`}>
         {isBuy ? '買' : '賣'}
       </td>
       <td className="py-1.5 px-2 text-right font-mono">{trade.price.toFixed(2)}</td>
@@ -21,7 +21,7 @@ function TradeRow({ trade }: { trade: Trade }) {
       </td>
       <td className={`py-1.5 px-2 text-right font-mono ${
         pnl == null ? 'text-slate-500' :
-        pnl > 0 ? 'text-green-400' : pnl < 0 ? 'text-red-400' : 'text-slate-400'
+        pnl > 0 ? 'text-red-400' : pnl < 0 ? 'text-green-400' : 'text-slate-400'
       }`}>
         {pnl == null ? '—' : (pnl >= 0 ? '+' : '') + formatCurrency(pnl)}
       </td>
