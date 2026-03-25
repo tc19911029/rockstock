@@ -34,17 +34,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing symbol' }, { status: 400 });
   }
 
-  // Taiwan stock: add .TW suffix
-  const ticker = /^\d+$/.test(symbol) ? `${symbol}.TW` : symbol.toUpperCase();
+  // Taiwan stock: pure digits → try .TW first, fallback to .TWO (上櫃/OTC)
+  const isTwDigits = /^\d+$/.test(symbol);
+  const candidates = isTwDigits
+    ? [`${symbol}.TW`, `${symbol}.TWO`]
+    : [symbol.toUpperCase()];
 
-  try {
+  async function fetchYahoo(ticker: string) {
     const url = [
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`,
       `?interval=${interval}`,
       `&range=${period}`,
       `&includePrePost=false`,
     ].join('');
-
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
@@ -53,11 +55,25 @@ export async function GET(req: NextRequest) {
       },
       signal: AbortSignal.timeout(30000),
     });
+    return res;
+  }
+
+  try {
+    let res = await fetchYahoo(candidates[0]);
+    let ticker = candidates[0];
+
+    // If first candidate fails and we have a fallback, try it
+    if (!res.ok && candidates.length > 1) {
+      const res2 = await fetchYahoo(candidates[1]);
+      if (res2.ok) {
+        res   = res2;
+        ticker = candidates[1];
+      }
+    }
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => '');
       return NextResponse.json(
-        { error: `Yahoo Finance error ${res.status}. 請確認股票代號是否正確。` },
+        { error: `找不到股票代號 ${symbol}。台股格式：2330（上市）或 8299（上櫃）、美股：AAPL` },
         { status: 502 }
       );
     }
