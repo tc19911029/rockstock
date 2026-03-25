@@ -1,0 +1,118 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+/**
+ * API Route: /api/stock?symbol=2330&interval=1d&period=2y
+ *
+ * interval: 1d (日K) | 1wk (週K) | 1mo (月K)
+ * period:   1y | 2y | 3y | 5y | 10y
+ *
+ * Taiwan stocks: pure digits → append .TW automatically
+ * US stocks: use ticker directly (AAPL, TSLA, etc.)
+ */
+
+// Valid combinations for Yahoo Finance
+const PERIOD_MAP: Record<string, string> = {
+  '1d_1y':  '1y',
+  '1d_2y':  '2y',
+  '1d_3y':  '3y',
+  '1d_5y':  '5y',
+  '1wk_2y': '2y',
+  '1wk_5y': '5y',
+  '1wk_10y':'10y',
+  '1mo_5y': '5y',
+  '1mo_10y':'10y',
+  '1mo_20y':'20y',
+};
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const symbol   = searchParams.get('symbol')   ?? '';
+  const interval = searchParams.get('interval') ?? '1d';
+  const period   = searchParams.get('period')   ?? '2y';
+
+  if (!symbol) {
+    return NextResponse.json({ error: 'Missing symbol' }, { status: 400 });
+  }
+
+  // Taiwan stock: add .TW suffix
+  const ticker = /^\d+$/.test(symbol) ? `${symbol}.TW` : symbol.toUpperCase();
+
+  try {
+    const url = [
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`,
+      `?interval=${interval}`,
+      `&range=${period}`,
+      `&includePrePost=false`,
+    ].join('');
+
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      return NextResponse.json(
+        { error: `Yahoo Finance error ${res.status}. 請確認股票代號是否正確。` },
+        { status: 502 }
+      );
+    }
+
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+
+    if (!result) {
+      return NextResponse.json(
+        { error: '找不到該股票資料，請確認代號。台股格式：2330、美股格式：AAPL' },
+        { status: 404 }
+      );
+    }
+
+    const timestamps: number[] = result.timestamp ?? [];
+    const q = result.indicators.quote[0];
+
+    // Build candles, skip null/zero-volume bars
+    const candles = timestamps
+      .map((ts, i) => {
+        const o = q.open[i];
+        const h = q.high[i];
+        const l = q.low[i];
+        const c = q.close[i];
+        const v = q.volume[i];
+        if (o == null || h == null || l == null || c == null || isNaN(o)) return null;
+        return {
+          date:   new Date(ts * 1000).toISOString().split('T')[0],
+          open:   +o.toFixed(2),
+          high:   +h.toFixed(2),
+          low:    +l.toFixed(2),
+          close:  +c.toFixed(2),
+          volume: v ?? 0,
+        };
+      })
+      .filter(Boolean);
+
+    if (candles.length === 0) {
+      return NextResponse.json({ error: '資料為空，請嘗試其他期間' }, { status: 404 });
+    }
+
+    const meta  = result.meta;
+    const name  = meta.longName ?? meta.shortName ?? ticker;
+    const currency = meta.currency ?? '';
+
+    return NextResponse.json({
+      ticker,
+      name,
+      currency,
+      interval,
+      candles,
+      totalBars: candles.length,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `伺服器錯誤：${msg}` }, { status: 500 });
+  }
+}
