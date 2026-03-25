@@ -90,9 +90,9 @@ export default function CandleChart({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const chartHeight = fillContainer
+    const chartHeight = (fillContainer
       ? containerRef.current.clientHeight
-      : height;
+      : height) || 400;
 
     const chart = createChart(containerRef.current, {
       layout: {
