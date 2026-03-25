@@ -25,7 +25,7 @@ function makeChart(container: HTMLElement, height: number, showTimeAxis: boolean
       textColor: '#94a3b8',
     },
     grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
-    rightPriceScale: { borderColor: '#334155' },
+    rightPriceScale: { borderColor: '#334155', minimumWidth: 65 },
     timeScale: { borderColor: '#334155', timeVisible: showTimeAxis, visible: true },
     crosshair: { mode: 1 },
     width: container.clientWidth,
@@ -44,7 +44,7 @@ function VolumeChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]
   useEffect(() => {
     if (!containerRef.current) return;
     const chart = makeChart(containerRef.current, 90, false);
-    volRef.current  = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false });
+    volRef.current  = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false });
     mv5Ref.current  = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     mv20Ref.current = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     chartRef.current = chart;
