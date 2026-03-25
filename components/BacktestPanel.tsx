@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { ruleEngine } from '@/lib/rules/ruleEngine';
 
@@ -134,6 +134,13 @@ export default function BacktestPanel() {
   const [startDate,    setStartDate]    = useState(minDate);
   const [endDate,      setEndDate]      = useState(maxDate);
   const [capitalInput, setCapitalInput] = useState('1000000');
+
+  // Sync date range whenever stock changes
+  useEffect(() => {
+    if (minDate) setStartDate(minDate);
+    if (maxDate) setEndDate(maxDate);
+    setResult(null);
+  }, [minDate, maxDate]);
   const [positionPct,  setPositionPct]  = useState(1.0);
   const [result,       setResult]       = useState<BacktestResult | null>(null);
   const [show,         setShow]         = useState(false);
