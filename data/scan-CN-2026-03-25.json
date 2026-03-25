@@ -1,0 +1,29 @@
+{
+  "id": "CN-2026-03-25-1774438500235",
+  "market": "CN",
+  "date": "2026-03-25",
+  "scanTime": "2026-03-25T11:35:00.235Z",
+  "resultCount": 1,
+  "results": [
+    {
+      "symbol": "601939.SS",
+      "name": "建設銀行",
+      "market": "CN",
+      "price": 9.39,
+      "changePercent": 0.75,
+      "volume": 100644243,
+      "triggeredRules": [
+        {
+          "ruleId": "bullish-pullback-buy",
+          "ruleName": "回踩加碼點",
+          "signalType": "ADD",
+          "reason": "多頭排列中，前日低點 9.15 觸及 MA10(9.22)，今日紅K反彈確認支撐有效"
+        }
+      ],
+      "sixConditionsScore": 4,
+      "trendState": "多頭",
+      "trendPosition": "起漲段",
+      "scanTime": "2026-03-25T11:34:58.039Z"
+    }
+  ]
+}

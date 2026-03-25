@@ -67,10 +67,11 @@ interface CandleChartProps {
   avgCost?: number;
   onCrosshairMove?: (candle: CandleWithIndicators | null) => void;
   height?: number;
+  fillContainer?: boolean;
 }
 
 export default function CandleChart({
-  candles, signals, chartMarkers = [], avgCost, onCrosshairMove, height = 400,
+  candles, signals, chartMarkers = [], avgCost, onCrosshairMove, height = 400, fillContainer = false,
 }: CandleChartProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
@@ -89,6 +90,10 @@ export default function CandleChart({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const chartHeight = fillContainer
+      ? containerRef.current.clientHeight
+      : height;
+
     const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: '#0f172a' },
@@ -102,7 +107,7 @@ export default function CandleChart({
       rightPriceScale: { borderColor: '#334155' },
       timeScale: { borderColor: '#334155', timeVisible: true },
       width: containerRef.current.clientWidth,
-      height,
+      height: chartHeight,
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -144,7 +149,9 @@ export default function CandleChart({
     });
 
     const ro = new ResizeObserver(() => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+      if (!containerRef.current) return;
+      chart.applyOptions({ width: containerRef.current.clientWidth });
+      if (fillContainer) chart.applyOptions({ height: containerRef.current.clientHeight });
     });
     ro.observe(containerRef.current);
 
@@ -239,7 +246,7 @@ export default function CandleChart({
         </div>
       )}
 
-      <div ref={containerRef} className="w-full" style={{ height }} />
+      <div ref={containerRef} className={fillContainer ? 'w-full h-full' : 'w-full'} style={fillContainer ? undefined : { height }} />
     </div>
   );
 }

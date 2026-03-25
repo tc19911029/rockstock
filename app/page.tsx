@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useReplayStore } from '@/store/replayStore';
 import StockSelector from '@/components/StockSelector';
 import ReplayControls from '@/components/ReplayControls';
@@ -9,7 +10,6 @@ import TradePanel from '@/components/TradePanel';
 import AccountInfo from '@/components/AccountInfo';
 import RuleAlerts from '@/components/RuleAlerts';
 import TradeHistory from '@/components/TradeHistory';
-import Link from 'next/link';
 import BacktestPanel from '@/components/BacktestPanel';
 import AnalysisChat from '@/components/AnalysisChat';
 import TrendStateBar from '@/components/TrendStateBar';
@@ -18,7 +18,7 @@ import SixConditionsPanel from '@/components/SixConditionsPanel';
 const CandleChart = dynamic(() => import('@/components/CandleChart'), {
   ssr: false,
   loading: () => (
-    <div className="w-full bg-slate-900 flex items-center justify-center" style={{ height: 420 }}>
+    <div className="w-full bg-slate-900 flex items-center justify-center" style={{ height: 460 }}>
       <span className="text-slate-500 text-sm animate-pulse">載入K線圖中...</span>
     </div>
   ),
@@ -27,6 +27,8 @@ const CandleChart = dynamic(() => import('@/components/CandleChart'), {
 const IndicatorCharts = dynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
 
 const INTERVAL_LABEL: Record<string, string> = { '1d': '日線', '1wk': '週線', '1mo': '月線' };
+
+type SideTab = 'conditions' | 'trade' | 'account' | 'signals';
 
 export default function HomePage() {
   const {
@@ -37,7 +39,6 @@ export default function HomePage() {
 
   useEffect(() => { initData(); }, [initData]);
 
-  // Keyboard shortcuts
   const handleKey = useCallback((e: KeyboardEvent) => {
     if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
     if (e.key === 'ArrowRight') { e.preventDefault(); nextCandle(); }
@@ -51,122 +52,165 @@ export default function HomePage() {
   }, [handleKey]);
 
   const [hoverCandle, setHoverCandle] = useState<typeof allCandles[0] | null>(null);
+  const [sideTab, setSideTab] = useState<SideTab>('conditions');
 
-  // Show hover candle when crosshair moves, fall back to current candle
   const displayCandle = hoverCandle ?? allCandles[currentIndex];
-  const current = allCandles[currentIndex];
-  const prev    = hoverCandle
+  const prev = hoverCandle
     ? allCandles[allCandles.findIndex(c => c.date === hoverCandle.date) - 1]
     : allCandles[currentIndex - 1];
-  const chg     = displayCandle && prev ? displayCandle.close - prev.close : 0;
-  const chgPct  = displayCandle && prev ? (chg / prev.close) * 100 : 0;
-  const isUp    = chg >= 0;
+  const chg    = displayCandle && prev ? displayCandle.close - prev.close : 0;
+  const chgPct = displayCandle && prev ? (chg / prev.close) * 100 : 0;
+  const isUp   = chg >= 0;
+
+  const SIDE_TABS: Array<{ key: SideTab; label: string }> = [
+    { key: 'conditions', label: '六大條件' },
+    { key: 'trade',      label: '交易' },
+    { key: 'account',    label: '帳戶' },
+    { key: 'signals',    label: '訊號' },
+  ];
 
   return (
-    <div className="min-h-screen bg-[#0b1120] text-white">
-      {/* ── Header ───────────────────────────────────────────────────────── */}
-      <header className="border-b border-slate-800 px-4 py-2.5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-base font-bold text-white">📈 K線走圖練習器</span>
+    <div className="h-screen flex flex-col bg-[#0b1120] text-white overflow-hidden">
+
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <header className="shrink-0 border-b border-slate-800 px-3 py-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-bold text-white whitespace-nowrap">📈 走圖練習器</span>
           {currentStock && (
-            <span className="text-sm text-yellow-400 font-mono font-bold">
+            <span className="text-sm text-yellow-400 font-mono font-bold truncate">
               {currentStock.name}（{currentStock.ticker}）
             </span>
           )}
           {currentInterval && (
-            <span className="text-xs px-2 py-0.5 bg-slate-700 rounded text-slate-300">
+            <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-300 shrink-0">
               {INTERVAL_LABEL[currentInterval] ?? currentInterval}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <Link href="/scanner" className="text-xs px-3 py-1.5 bg-blue-600/80 hover:bg-blue-500 rounded-lg text-white font-medium transition">
-            🔍 市場掃描
+        <div className="flex items-center gap-2 shrink-0">
+          <Link href="/scanner" className="text-xs px-2.5 py-1 bg-blue-600/80 hover:bg-blue-500 rounded text-white font-medium transition">
+            🔍 掃描
           </Link>
-          <p className="text-xs text-slate-500 hidden sm:block">← → Space 鍵盤操作</p>
+          <span className="text-xs text-slate-600 hidden md:block">← → Space</span>
         </div>
       </header>
 
-      <div className="p-3 space-y-3">
-
-        {/* ── Row 1: Stock Selector ─────────────────────────────────────── */}
+      {/* ── Stock Selector ─────────────────────────────────────────────── */}
+      <div className="shrink-0 px-3 pt-2">
         <StockSelector />
+      </div>
 
-        {/* ── Row 2: Chart area ─────────────────────────────────────────── */}
-        <div className={`relative transition-opacity ${isLoadingStock ? 'opacity-40 pointer-events-none' : ''}`}>
-          {isLoadingStock && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/80 rounded-xl">
-              <div className="text-center">
-                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                <p className="text-sm text-slate-300">載入資料中...</p>
-              </div>
-            </div>
-          )}
+      {/* ── Main: Chart (left) + Sidebar (right) ───────────────────────── */}
+      <div className="flex-1 flex gap-2 px-3 py-2 min-h-0 overflow-hidden">
 
-          <div className="bg-slate-900 rounded-t-xl border border-b-0 border-slate-700 overflow-hidden">
-            {/* OHLCV info bar — 仿 WantGoo 顯示在圖表正上方 */}
-            {displayCandle && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 border-b border-slate-800 text-xs font-mono">
-                <span className={`text-slate-400 ${hoverCandle ? 'text-blue-400' : ''}`}>{displayCandle.date}</span>
-                <span className={`text-base font-bold ${isUp ? 'text-red-400' : 'text-green-400'}`}>
-                  {displayCandle.close.toFixed(2)}
-                </span>
-                <span className={`font-bold ${isUp ? 'text-red-400' : 'text-green-400'}`}>
-                  {isUp ? '▲' : '▼'} {Math.abs(chg).toFixed(2)} ({Math.abs(chgPct).toFixed(2)}%)
-                </span>
-                <span className="text-slate-400">開 <span className="text-white">{displayCandle.open.toFixed(2)}</span></span>
-                <span className="text-slate-400">高 <span className="text-red-400">{displayCandle.high.toFixed(2)}</span></span>
-                <span className="text-slate-400">低 <span className="text-green-400">{displayCandle.low.toFixed(2)}</span></span>
-                <span className="text-slate-400">量 <span className="text-slate-300">{(displayCandle.volume / 1000).toFixed(0)}K</span></span>
-                {metrics.shares > 0 && (
-                  <span className="text-slate-400 ml-auto">
-                    均價 <span className="text-yellow-400 font-bold">{metrics.avgCost.toFixed(2)}</span>
-                  </span>
-                )}
+        {/* ── Left: Chart column ────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 gap-2">
+
+          {/* Chart area */}
+          <div className={`relative flex-1 flex flex-col min-h-0 transition-opacity ${isLoadingStock ? 'opacity-40 pointer-events-none' : ''}`}>
+            {isLoadingStock && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/80 rounded-xl">
+                <div className="text-center">
+                  <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                  <p className="text-sm text-slate-300">載入資料中...</p>
+                </div>
               </div>
             )}
-            <CandleChart
-              candles={visibleCandles}
-              signals={currentSignals}
-              chartMarkers={chartMarkers}
-              avgCost={metrics.shares > 0 ? metrics.avgCost : undefined}
-              onCrosshairMove={setHoverCandle}
-              height={400}
-            />
+
+            {/* OHLCV bar */}
+            <div className="bg-slate-900 rounded-t-xl border border-b-0 border-slate-700 overflow-hidden shrink-0">
+              {displayCandle && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5 text-xs font-mono">
+                  <span className={hoverCandle ? 'text-blue-400' : 'text-slate-400'}>{displayCandle.date}</span>
+                  <span className={`text-sm font-bold ${isUp ? 'text-red-400' : 'text-green-400'}`}>
+                    {displayCandle.close.toFixed(2)}
+                  </span>
+                  <span className={`font-bold ${isUp ? 'text-red-400' : 'text-green-400'}`}>
+                    {isUp ? '▲' : '▼'}{Math.abs(chg).toFixed(2)} ({Math.abs(chgPct).toFixed(2)}%)
+                  </span>
+                  <span className="text-slate-500">開<span className="text-white ml-0.5">{displayCandle.open.toFixed(2)}</span></span>
+                  <span className="text-slate-500">高<span className="text-red-400 ml-0.5">{displayCandle.high.toFixed(2)}</span></span>
+                  <span className="text-slate-500">低<span className="text-green-400 ml-0.5">{displayCandle.low.toFixed(2)}</span></span>
+                  <span className="text-slate-500">量<span className="text-slate-300 ml-0.5">{(displayCandle.volume / 1000).toFixed(0)}K</span></span>
+                  {metrics.shares > 0 && (
+                    <span className="ml-auto text-slate-500">
+                      均價<span className="text-yellow-400 font-bold ml-0.5">{metrics.avgCost.toFixed(2)}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* K-line chart — fills remaining height */}
+            <div className="flex-1 min-h-0 border border-t-0 border-b-0 border-slate-700 bg-slate-900">
+              <CandleChart
+                candles={visibleCandles}
+                signals={currentSignals}
+                chartMarkers={chartMarkers}
+                avgCost={metrics.shares > 0 ? metrics.avgCost : undefined}
+                onCrosshairMove={setHoverCandle}
+                height={undefined}
+                fillContainer
+              />
+            </div>
+
+            {/* Indicator charts */}
+            <div className="shrink-0 rounded-b-xl border border-t-0 border-slate-700 overflow-hidden">
+              <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} />
+            </div>
           </div>
-          <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} />
+
+          {/* Trend bar + Replay controls — always visible under chart */}
+          <div className="shrink-0 space-y-1.5">
+            <div className="bg-slate-800/60 rounded-lg border border-slate-700 px-2 py-1">
+              <TrendStateBar />
+            </div>
+            <ReplayControls />
+          </div>
         </div>
 
-        {/* ── Row 3: Controls + Trade + Account ────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <ReplayControls />
-          <TradePanel />
-          <AccountInfo />
+        {/* ── Right: Sidebar ────────────────────────────────────────────── */}
+        <div className="w-72 shrink-0 flex flex-col min-h-0 gap-2">
+
+          {/* Tab switcher */}
+          <div className="shrink-0 flex rounded-lg overflow-hidden border border-slate-700 text-xs">
+            {SIDE_TABS.map(t => (
+              <button
+                key={t.key}
+                onClick={() => setSideTab(t.key)}
+                className={`flex-1 py-1.5 font-medium transition-colors ${
+                  sideTab === t.key
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content — scrollable */}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
+            {sideTab === 'conditions' && <SixConditionsPanel />}
+            {sideTab === 'trade'      && <TradePanel />}
+            {sideTab === 'account'    && <AccountInfo />}
+            {sideTab === 'signals'    && (
+              <div className="space-y-2">
+                <RuleAlerts />
+                <TradeHistory />
+              </div>
+            )}
+          </div>
         </div>
-
-        {/* ── Row 4: Trend State Bar ───────────────────────────────────── */}
-        <div className="bg-slate-800/60 rounded-xl border border-slate-700 px-2 py-1">
-          <TrendStateBar />
-        </div>
-
-        {/* ── Row 5: Six Conditions + Rule Alerts + Trade History ──────── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <SixConditionsPanel />
-          <RuleAlerts />
-          <TradeHistory />
-        </div>
-
-        {/* ── Row 6: Backtest ───────────────────────────────────────────── */}
-        <BacktestPanel />
-
-        {/* ── Row 6: AI Chat ────────────────────────────────────────────── */}
-        <AnalysisChat />
 
       </div>
 
-      <footer className="border-t border-slate-800 px-4 py-3 text-center text-xs text-slate-600">
-        本工具僅供學習練習，不構成投資建議。股市有風險，投資需謹慎。
-      </footer>
+      {/* ── Bottom: Backtest + Chat (collapsible) ──────────────────────── */}
+      <div className="shrink-0 px-3 pb-3 space-y-2 max-h-[40vh] overflow-y-auto">
+        <BacktestPanel />
+        <AnalysisChat />
+      </div>
+
     </div>
   );
 }
