@@ -8,7 +8,6 @@ import {
   ColorType,
   Time,
   CandlestickSeries,
-  HistogramSeries,
   LineSeries,
   createSeriesMarkers,
   ISeriesMarkersPluginApi,
@@ -76,7 +75,6 @@ export default function CandleChart({
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
   const candleRef      = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const volumeRef      = useRef<ISeriesApi<'Histogram'> | null>(null);
   const maRefs         = useRef<Record<string, ISeriesApi<'Line'>>>({});
   const markersPlugRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const avgCostLineRef = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
@@ -113,11 +111,6 @@ export default function CandleChart({
       wickUpColor: TW_RED, wickDownColor: TW_GREEN,
     });
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: 'volume',
-    });
-    chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-
     const maKeys = ['ma5', 'ma10', 'ma20', 'ma60'] as const;
     const newMARef: Record<string, ISeriesApi<'Line'>> = {};
     for (const key of maKeys) {
@@ -128,7 +121,6 @@ export default function CandleChart({
 
     chartRef.current  = chart;
     candleRef.current = candleSeries;
-    volumeRef.current = volumeSeries;
     maRefs.current    = newMARef;
     markersPlugRef.current = createSeriesMarkers(candleSeries, []);
 
@@ -159,16 +151,12 @@ export default function CandleChart({
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Load candle / volume / MA data ───────────────────────────────────────
+  // ── Load candle / MA data ────────────────────────────────────────────────
   useEffect(() => {
-    if (!candleRef.current || !volumeRef.current || candles.length === 0) return;
+    if (!candleRef.current || candles.length === 0) return;
 
     candleRef.current.setData(candles.map(c => ({
       time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close,
-    })));
-    volumeRef.current.setData(candles.map(c => ({
-      time: toTime(c.date), value: c.volume,
-      color: c.close >= c.open ? `${TW_RED}88` : `${TW_GREEN}88`,
     })));
     const maKeys = ['ma5', 'ma10', 'ma20', 'ma60'] as const;
     for (const key of maKeys) {

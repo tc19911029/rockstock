@@ -80,9 +80,11 @@ function VolumeChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]
     }).filter(Boolean) as { time: Time; value: number }[];
     mv5Ref.current.setData(mv5Data);
     mv20Ref.current.setData(mv20Data);
-    // setData 後重新套用主圖的時間範圍，避免自動重置視圖
-    const r = getLastRange();
-    if (r) chartRef.current?.timeScale().setVisibleRange(r as any);
+    const chart = chartRef.current;
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chart) chart.timeScale().setVisibleRange(r as any);
+    });
   }, [candles]);
 
   const last = candles[candles.length - 1];
@@ -139,8 +141,11 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
       time: toTime(c.date), value: c.macdOSC!,
       color: c.macdOSC! >= 0 ? '#ef444499' : '#22c55e99',
     })));
-    const r = getLastRange();
-    if (r) chartRef.current?.timeScale().setVisibleRange(r as any);
+    const chart = chartRef.current;
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chart) chart.timeScale().setVisibleRange(r as any);
+    });
   }, [candles]);
 
   const last = candles[candles.length - 1];
@@ -208,8 +213,11 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
         }));
       kMarkRef.current.setMarkers(dots);
     }
-    const r = getLastRange();
-    if (r) chartRef.current?.timeScale().setVisibleRange(r as any);
+    const chart = chartRef.current;
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chart) chart.timeScale().setVisibleRange(r as any);
+    });
   }, [candles]);
 
   const last = candles[candles.length - 1];
