@@ -80,17 +80,20 @@ export default function WatchlistPage() {
 
   return (
     <div className="min-h-screen bg-[#0b1120] text-white">
-      <header className="border-b border-slate-800 px-4 py-2.5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-slate-400 hover:text-white text-sm transition">← 返回走圖</Link>
-          <span className="text-base font-bold">⭐ 自選股清單</span>
-          <span className="text-xs text-slate-500">{items.length} 支</span>
+      <header className="border-b border-slate-800 bg-slate-950 px-4 py-2.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link href="/" className="text-sky-400 hover:text-sky-300 text-sm font-medium transition shrink-0">← 走圖</Link>
+          <span className="w-px h-4 bg-slate-700 shrink-0" />
+          <span className="text-base font-bold whitespace-nowrap">⭐ 自選股清單</span>
+          <span className="text-xs text-slate-500 shrink-0">{items.length} 支</span>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={refreshAll} className="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded transition text-slate-300">
-            ↻ 重新整理
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={refreshAll}
+            className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-slate-300 flex items-center gap-1.5 font-medium">
+            <span>↻</span><span>重新整理</span>
           </button>
-          <Link href="/settings" className="text-xs text-slate-400 hover:text-white transition">⚙ 設定</Link>
+          <Link href="/scanner"  className="text-xs px-2 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-slate-400 hover:text-white">掃描</Link>
+          <Link href="/settings" className="text-xs px-2 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-slate-400 hover:text-white">⚙</Link>
         </div>
       </header>
 
@@ -112,10 +115,13 @@ export default function WatchlistPage() {
         </div>
 
         {items.length === 0 && (
-          <div className="text-center py-16 text-slate-500">
-            <p className="text-4xl mb-3">⭐</p>
-            <p className="text-sm">輸入股票代號加入自選股</p>
-            <p className="text-xs text-slate-600 mt-1">掃描結果頁也可以直接加入</p>
+          <div className="text-center py-20 text-slate-500 border border-dashed border-slate-700 rounded-xl">
+            <p className="text-5xl mb-4">⭐</p>
+            <p className="text-sm font-medium text-slate-400">尚未加入任何自選股</p>
+            <p className="text-xs text-slate-600 mt-1">在上方輸入股票代號，或從掃描結果直接加入</p>
+            <Link href="/scanner" className="inline-block mt-4 text-xs px-4 py-1.5 bg-blue-600/80 hover:bg-blue-500 rounded-lg text-white font-medium transition">
+              前往掃描
+            </Link>
           </div>
         )}
 
@@ -185,13 +191,12 @@ export default function WatchlistPage() {
                   </div>
                 </div>
 
-                {/* Trend info */}
+                {/* Trend / position info row */}
                 {d && !d.loading && !d.error && (
-                  <div className="px-4 pb-2 flex items-center gap-3 text-[10px] text-slate-500">
-                    <span>{d.trend}</span>
-                    <span>·</span>
-                    <span>{d.position}</span>
-                    <span className="ml-auto text-slate-600">
+                  <div className="px-4 pb-2.5 flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700/80 text-slate-300 font-medium">{d.trend}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700/80 text-slate-300 font-medium">{d.position}</span>
+                    <span className="ml-auto text-[10px] text-slate-600">
                       加入 {new Date(item.addedAt).toLocaleDateString('zh-TW')}
                     </span>
                   </div>

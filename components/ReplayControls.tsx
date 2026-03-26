@@ -57,23 +57,27 @@ export default function ReplayControls() {
       <div className="flex gap-1 shrink-0">
         <button onClick={prevCandle} disabled={currentIndex <= 0 || isPlaying}
           suppressHydrationWarning
-          className="w-7 h-7 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-xs transition flex items-center justify-center">
+          title="上一根 K 棒 (←)"
+          className="w-8 h-7 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-xs transition flex items-center justify-center gap-0.5 font-bold text-slate-300">
           ◀
         </button>
         {isPlaying ? (
           <button onClick={stopPlay} suppressHydrationWarning
-            className="px-2 h-7 rounded bg-amber-600 hover:bg-amber-500 text-xs font-bold transition whitespace-nowrap">
-            ⏸
+            title="暫停 (Space)"
+            className="px-3 h-7 rounded bg-amber-600 hover:bg-amber-500 text-xs font-bold transition whitespace-nowrap flex items-center gap-1">
+            <span>⏸</span><span className="hidden sm:inline">暫停</span>
           </button>
         ) : (
           <button onClick={startPlay} disabled={currentIndex >= total - 1} suppressHydrationWarning
-            className="px-2 h-7 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-xs font-bold transition whitespace-nowrap">
-            ▶
+            title="播放 (Space)"
+            className="px-3 h-7 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-xs font-bold transition whitespace-nowrap flex items-center gap-1">
+            <span>▶</span><span className="hidden sm:inline">播放</span>
           </button>
         )}
         <button onClick={nextCandle} disabled={currentIndex >= total - 1 || isPlaying}
           suppressHydrationWarning
-          className="w-7 h-7 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-xs transition flex items-center justify-center">
+          title="下一根 K 棒 (→)"
+          className="w-8 h-7 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-xs transition flex items-center justify-center font-bold text-slate-300">
           ▶
         </button>
       </div>
@@ -108,9 +112,9 @@ export default function ReplayControls() {
 
       {/* Reset */}
       <button onClick={resetReplay}
-        className="shrink-0 w-7 h-7 rounded bg-slate-700 hover:bg-red-900/60 text-slate-400 hover:text-red-300 text-xs transition flex items-center justify-center"
-        title="重置走圖">
-        ↺
+        className="shrink-0 h-7 px-2 rounded bg-slate-700 hover:bg-red-900/60 text-slate-400 hover:text-red-300 text-xs transition flex items-center justify-center gap-1"
+        title="重置走圖（回到第一根）">
+        <span>↺</span><span className="hidden md:inline">重置</span>
       </button>
     </div>
   );

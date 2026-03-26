@@ -11,12 +11,15 @@ interface PriceData {
   error?: string;
 }
 
+const EMPTY_FORM = { symbol: '', name: '', shares: '', costPrice: '', buyDate: new Date().toISOString().split('T')[0] };
+
 export default function PortfolioPage() {
-  const { holdings, add, remove } = usePortfolioStore();
+  const { holdings, add, remove, update } = usePortfolioStore();
   const [prices, setPrices] = useState<Record<string, PriceData>>({});
-  const [form, setForm] = useState({ symbol: '', name: '', shares: '', costPrice: '', buyDate: new Date().toISOString().split('T')[0] });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [formLoading, setFormLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
 
   async function fetchPrice(symbol: string) {
     setPrices(prev => ({ ...prev, [symbol]: { ...prev[symbol], loading: true } as PriceData }));
@@ -34,17 +37,37 @@ export default function PortfolioPage() {
     holdings.forEach(h => fetchPrice(h.symbol));
   }, [holdings]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  function openEdit(h: PortfolioHolding) {
+    setEditId(h.id);
+    setForm({ symbol: h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, ''), name: h.name, shares: String(h.shares), costPrice: String(h.costPrice), buyDate: h.buyDate });
+    setShowForm(true);
+  }
+
+  function cancelForm() {
+    setShowForm(false);
+    setEditId(null);
+    setForm({ ...EMPTY_FORM, buyDate: new Date().toISOString().split('T')[0] });
+  }
+
   async function handleAdd() {
     if (!form.symbol || !form.shares || !form.costPrice) return;
     setFormLoading(true);
     try {
+      if (editId) {
+        // Edit existing holding
+        update(editId, { shares: Number(form.shares), costPrice: Number(form.costPrice), buyDate: form.buyDate, name: form.name || undefined });
+        setEditId(null);
+        setForm({ ...EMPTY_FORM, buyDate: new Date().toISOString().split('T')[0] });
+        setShowForm(false);
+        return;
+      }
       const res = await fetch(`/api/watchlist/conditions?symbol=${encodeURIComponent(form.symbol)}`);
       const json = await res.json();
       const name = res.ok ? json.name : form.symbol;
       const symbol = res.ok ? json.symbol : form.symbol.toUpperCase();
       add({ symbol, name, shares: Number(form.shares), costPrice: Number(form.costPrice), buyDate: form.buyDate });
       if (res.ok) setPrices(prev => ({ ...prev, [symbol]: { price: json.price, changePercent: json.changePercent, loading: false } }));
-      setForm({ symbol: '', name: '', shares: '', costPrice: '', buyDate: new Date().toISOString().split('T')[0] });
+      setForm({ ...EMPTY_FORM, buyDate: new Date().toISOString().split('T')[0] });
       setShowForm(false);
     } finally {
       setFormLoading(false);
@@ -67,13 +90,13 @@ export default function PortfolioPage() {
   const totalReturn = summary.totalCost > 0 ? (summary.totalPnL / summary.totalCost) * 100 : 0;
 
   return (
-    <div className="min-h-screen bg-[#0b1120] text-white">
-      <header className="border-b border-slate-800 px-4 py-2.5 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-950 text-white">
+      <header className="border-b border-slate-800 bg-slate-950 px-4 py-2.5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link href="/" className="text-slate-400 hover:text-white text-sm transition">← 返回走圖</Link>
+          <Link href="/" className="text-slate-400 hover:text-white text-sm transition">← 主頁</Link>
           <span className="text-base font-bold">💼 持倉追蹤</span>
         </div>
-        <button onClick={() => setShowForm(v => !v)}
+        <button onClick={() => { cancelForm(); setShowForm(v => !v); }}
           className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold transition">
           + 新增持倉
         </button>
@@ -97,30 +120,31 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* Add form */}
+        {/* Add / Edit form */}
         {showForm && (
           <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3">
-            <h3 className="text-sm font-bold text-slate-200">新增持倉</h3>
+            <h3 className="text-sm font-bold text-slate-200">{editId ? '編輯持倉' : '新增持倉'}</h3>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">股票代號</label>
                 <input value={form.symbol} onChange={e => setForm(f => ({ ...f, symbol: e.target.value }))}
                   placeholder="2330 / AAPL"
-                  className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500" />
+                  disabled={!!editId}
+                  className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-60" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">買進日期</label>
+                <label className="text-xs text-slate-400 mb-1 block">加入日期</label>
                 <input type="date" value={form.buyDate} onChange={e => setForm(f => ({ ...f, buyDate: e.target.value }))}
                   className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">股數</label>
+                <label className="text-xs text-slate-400 mb-1 block">持股數</label>
                 <input type="number" value={form.shares} onChange={e => setForm(f => ({ ...f, shares: e.target.value }))}
                   placeholder="1000"
                   className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500" />
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">買進均價</label>
+                <label className="text-xs text-slate-400 mb-1 block">成本價（買進均價）</label>
                 <input type="number" value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
                   placeholder="150.00"
                   className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500" />
@@ -129,9 +153,9 @@ export default function PortfolioPage() {
             <div className="flex gap-2">
               <button onClick={handleAdd} disabled={formLoading || !form.symbol || !form.shares || !form.costPrice}
                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-lg text-sm font-bold transition">
-                {formLoading ? '載入中...' : '確認新增'}
+                {formLoading ? '載入中...' : editId ? '儲存變更' : '確認新增'}
               </button>
-              <button onClick={() => setShowForm(false)}
+              <button onClick={cancelForm}
                 className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition">取消</button>
             </div>
           </div>
@@ -140,8 +164,9 @@ export default function PortfolioPage() {
         {holdings.length === 0 && !showForm && (
           <div className="text-center py-16 text-slate-500">
             <p className="text-4xl mb-3">💼</p>
-            <p className="text-sm">尚未新增任何持倉</p>
-            <p className="text-xs text-slate-600 mt-1">僅供學習參考，非實際交易記錄</p>
+            <p className="text-sm font-medium text-slate-400">尚未新增任何持倉</p>
+            <p className="text-xs text-slate-600 mt-1 mb-4">點擊右上角「+ 新增持倉」開始追蹤你的持股</p>
+            <p className="text-[10px] text-slate-700">* 資料存於本機，僅供學習參考，非實際交易記錄</p>
           </div>
         )}
 
@@ -199,8 +224,10 @@ export default function PortfolioPage() {
                   <div className="flex gap-1 shrink-0">
                     <Link href={`/?load=${h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
                       className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold transition">走圖</Link>
+                    <button onClick={() => openEdit(h)}
+                      className="px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs text-slate-400 hover:text-slate-200 transition">編輯</button>
                     <button onClick={() => remove(h.id)}
-                      className="px-2 py-1 bg-slate-700 hover:bg-red-900/60 hover:text-red-300 rounded text-xs text-slate-400 transition">✕</button>
+                      className="px-2 py-1 bg-slate-700 hover:bg-red-900/60 hover:text-red-300 rounded text-xs text-slate-400 transition">刪除</button>
                   </div>
                 </div>
 

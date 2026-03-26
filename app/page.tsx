@@ -97,18 +97,39 @@ export default function HomePage() {
     <div className="h-screen flex flex-col bg-[#0b1120] text-white overflow-hidden">
 
       {/* ── Header ── */}
-      <header className="shrink-0 border-b border-slate-800 px-3 py-1.5 flex items-center gap-2">
-        <span className="text-sm font-bold text-white whitespace-nowrap shrink-0">📈</span>
+      <header className="shrink-0 border-b border-slate-800 bg-slate-950 px-3 py-1.5 flex items-center gap-2 min-w-0">
+        {/* Left: Logo / Title */}
+        <span className="text-sm font-bold text-sky-400 whitespace-nowrap shrink-0 hidden sm:block">📈 K線走圖</span>
+        <span className="text-sm font-bold text-sky-400 whitespace-nowrap shrink-0 sm:hidden">📈</span>
+
+        {/* Stock Selector */}
         <StockSelector />
-        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-          <Link href="/scanner" className="text-xs px-2.5 py-1 bg-blue-600/80 hover:bg-blue-500 rounded text-white font-medium transition">🔍 掃描</Link>
-          <Link href="/backtest" className="text-xs px-2.5 py-1 bg-violet-700/80 hover:bg-violet-600 rounded text-white font-medium transition">📅 回測</Link>
-          <Link href="/history" className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 font-medium transition">📈 信號歷史</Link>
-          <Link href="/watchlist" className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 font-medium transition">⭐ 自選</Link>
-          <Link href="/portfolio" className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 font-medium transition">💼 持倉</Link>
-          <Link href="/settings" className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-400 transition">⚙</Link>
-          <span className="text-xs text-slate-600 hidden lg:block ml-1">← → Space</span>
-        </div>
+
+        {/* Center/Right: Nav links */}
+        <nav className="flex items-center gap-0.5 shrink-0 ml-auto">
+          {/* Primary nav */}
+          <div className="flex items-center gap-0.5">
+            <span className="text-[10px] font-bold text-sky-500 border border-sky-700/60 bg-sky-900/30 px-2 py-1 rounded cursor-default select-none whitespace-nowrap">
+              走圖
+            </span>
+            <Link href="/scanner"    className="text-[11px] px-2 py-1 rounded text-slate-300 hover:bg-slate-700 hover:text-white font-medium transition whitespace-nowrap">掃描</Link>
+            <Link href="/backtest"   className="text-[11px] px-2 py-1 rounded text-slate-300 hover:bg-slate-700 hover:text-white font-medium transition whitespace-nowrap">回測</Link>
+            <Link href="/report"     className="text-[11px] px-2 py-1 rounded text-slate-300 hover:bg-slate-700 hover:text-white font-medium transition whitespace-nowrap hidden md:block">報表</Link>
+            <Link href="/strategies" className="text-[11px] px-2 py-1 rounded text-slate-300 hover:bg-slate-700 hover:text-white font-medium transition whitespace-nowrap hidden md:block">策略</Link>
+          </div>
+
+          {/* Divider */}
+          <span className="w-px h-4 bg-slate-700 mx-1 shrink-0 hidden sm:block" />
+
+          {/* Secondary nav */}
+          <div className="flex items-center gap-0.5">
+            <Link href="/watchlist"  className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap hidden sm:block" title="自選股">⭐ 自選</Link>
+            <Link href="/portfolio"  className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap hidden sm:block" title="持倉">💼</Link>
+            <Link href="/settings"   className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap" title="設定">⚙</Link>
+          </div>
+
+          <span className="text-[10px] text-slate-600 hidden lg:block ml-1.5 whitespace-nowrap">← → Space</span>
+        </nav>
       </header>
 
       {/* ── Main ── */}

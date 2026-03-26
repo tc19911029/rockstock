@@ -93,9 +93,107 @@ function AiReport({ results }: { results: StockScanResult[] }) {
   );
 }
 
+// ── Scan info panel ────────────────────────────────────────────────────────────
+function ScanInfoPanel({ minScore }: { minScore: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-slate-700 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-800/60 hover:bg-slate-800 text-xs font-bold text-slate-300 transition"
+      >
+        <span>掃描說明</span>
+        <span className="text-slate-500 text-[10px]">{open ? '▲ 收起' : '▼ 展開'}</span>
+      </button>
+      {open && (
+        <div className="px-4 py-3 bg-slate-900/60 space-y-1.5 text-xs text-slate-400">
+          <p>• 只篩選符合朱老師六大條件 ≥{minScore} 分的股票</p>
+          <p>• 空頭趨勢股票自動排除</p>
+          <p>• 乖離率 &gt; 20% 自動排除（末升段）</p>
+          <p>• KD &gt; 88 自動排除（超買）</p>
+          <p>• 大盤多頭時門檻 4 分；盤整 5 分；空頭 6 分</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sort type ─────────────────────────────────────────────────────────────────
+type SortKey = 'score' | 'change' | 'volume';
+
+// ── Result stats banner ───────────────────────────────────────────────────────
+function ResultStatsBanner({
+  results,
+  marketTrend,
+}: {
+  results: StockScanResult[];
+  marketTrend: string | null;
+}) {
+  const maxScore = results.reduce((m, r) => Math.max(m, r.sixConditionsScore), 0);
+  const avgScore = results.length > 0
+    ? (results.reduce((s, r) => s + r.sixConditionsScore, 0) / results.length).toFixed(1)
+    : '0.0';
+  const trendColor =
+    marketTrend === '多頭' ? 'text-green-400' :
+    marketTrend === '空頭' ? 'text-red-400' :
+    'text-yellow-400';
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs">
+      <span className="text-slate-200 font-bold">找到 <span className="text-blue-400">{results.length}</span> 檔</span>
+      <span className="text-slate-500">｜</span>
+      <span className="text-slate-300">最高分 <span className="text-yellow-400 font-bold">{maxScore}/6</span></span>
+      <span className="text-slate-500">｜</span>
+      <span className="text-slate-300">平均分 <span className="text-slate-200 font-bold">{avgScore}/6</span></span>
+      {marketTrend && (
+        <>
+          <span className="text-slate-500">｜</span>
+          <span className="text-slate-300">大盤趨勢 <span className={`font-bold ${trendColor}`}>{marketTrend}</span></span>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Sort controls ─────────────────────────────────────────────────────────────
+function SortControls({ sort, setSort }: { sort: SortKey; setSort: (s: SortKey) => void }) {
+  const options: Array<{ key: SortKey; label: string }> = [
+    { key: 'score',  label: '評分由高到低' },
+    { key: 'change', label: '漲跌幅由高到低' },
+    { key: 'volume', label: '成交量由高到低' },
+  ];
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[10px] text-slate-500">排序：</span>
+      {options.map(o => (
+        <button
+          key={o.key}
+          onClick={() => setSort(o.key)}
+          className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition ${
+            sort === o.key
+              ? 'bg-blue-600 border-blue-500 text-white'
+              : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Sort helper ───────────────────────────────────────────────────────────────
+function sortResults(results: StockScanResult[], sort: SortKey): StockScanResult[] {
+  const copy = [...results];
+  if (sort === 'score')  return copy.sort((a, b) => b.sixConditionsScore - a.sixConditionsScore);
+  if (sort === 'change') return copy.sort((a, b) => b.changePercent - a.changePercent);
+  if (sort === 'volume') return copy.sort((a, b) => b.volume - a.volume);
+  return copy;
+}
+
 // ── Market scan panel ─────────────────────────────────────────────────────────
 function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean }) {
-  const { getMarket, runScan, getHistory } = useScannerStore();
+  const { getMarket, runScan, getHistory, setScanDate } = useScannerStore();
   const { add: addToWatchlist, has: inWatchlist } = useWatchlistStore();
   const { notifyEmail, notifyMinScore } = useSettingsStore();
   const state = getMarket(market);
@@ -103,12 +201,20 @@ function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean
 
   const notified = useNotifyOnScanComplete(state.results, notifyEmail, notifyMinScore, market);
 
+  // Track whether a scan has ever been attempted for this market this session
+  const hasScanned = useRef(false);
+  if (state.lastScanTime) hasScanned.current = true;
+
+  const [sort, setSort] = useState<SortKey>('score');
+
   const LABEL = market === 'TW' ? '台灣股市' : '中國A股';
   const DESC   = market === 'TW'
     ? '當日成交量前500大台股（上市+上櫃）'
     : '滬深主板市值前500大（排除創業板/科創板/ST）';
 
   if (!isActive) return null;
+
+  const sorted = sortResults(state.results, sort);
 
   return (
     <div className="space-y-4">
@@ -155,8 +261,39 @@ function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean
           </div>
         </div>
 
+        {/* Date picker — optional historical date */}
+        <div className="flex items-center gap-2 mt-3 mb-1">
+          <label className="text-xs text-slate-400 shrink-0">掃描日期：</label>
+          <input
+            type="date"
+            value={state.scanDate ?? ''}
+            max={new Date().toISOString().split('T')[0]}
+            onChange={e => setScanDate(market, e.target.value)}
+            className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+          />
+          {state.scanDate && (
+            <button
+              onClick={() => setScanDate(market, '')}
+              className="text-xs text-slate-500 hover:text-slate-300 transition"
+            >
+              ✕ 清除（改用最新）
+            </button>
+          )}
+        </div>
+
+        {/* Historical mode banner */}
+        {state.scanDate && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-amber-900/40 border border-amber-700/50 rounded-lg text-xs text-amber-300 mt-2">
+            <span className="text-sm">🕐</span>
+            <span>歷史模式：模擬 {state.scanDate} 收盤後掃描</span>
+          </div>
+        )}
+
+        {/* Scan info collapsible */}
+        <ScanInfoPanel minScore={notifyMinScore ?? 4} />
+
         {state.isScanning && (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 mt-3">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span>{state.scanningStock ? `正在掃描 ${state.scanningStock}` : '準備中...'}</span>
               <span>{state.scanningIndex > 0 && state.scanningTotal > 0 ? `${state.scanningIndex}/${state.scanningTotal}` : '...'}</span>
@@ -174,18 +311,27 @@ function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean
       {/* Results */}
       {state.results.length > 0 && (
         <div className="space-y-2">
-          <div className="flex items-center justify-between px-1">
+          {/* Stats banner */}
+          <ResultStatsBanner results={state.results} marketTrend={state.marketTrend} />
+
+          {/* Sort controls + header */}
+          <div className="flex items-center justify-between px-1 flex-wrap gap-2">
             <h3 className="text-sm font-bold text-slate-200">
               掃描結果 <span className="text-blue-400">{state.results.length}</span> 檔符合條件
             </h3>
-            <span className="text-xs text-slate-500">按六大條件得分排序</span>
+            <SortControls sort={sort} setSort={setSort} />
           </div>
 
           <AiReport results={state.results} />
 
-          {state.results.map((r, idx) => {
-            const isTop3  = idx < 3;
-            const crown   = ['🥇', '🥈', '🥉'][idx] ?? '';
+          {sorted.map((r, idx) => {
+            // Top 3 badge is based on original score ranking, recalculate index in original sorted-by-score list
+            const scoreRank = state.results
+              .slice()
+              .sort((a, b) => b.sixConditionsScore - a.sixConditionsScore)
+              .findIndex(x => x.symbol === r.symbol);
+            const isTop3  = scoreRank < 3;
+            const crown   = ['🥇', '🥈', '🥉'][scoreRank] ?? '';
             const watched = inWatchlist(r.symbol);
             const actions = (
               <>
@@ -209,7 +355,7 @@ function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean
                 {isTop3 && (
                   <div className="absolute -top-2 left-3 z-20">
                     <span className="text-xs bg-yellow-500 text-black font-bold px-1.5 py-0.5 rounded-full leading-none">
-                      {crown} Top {idx + 1}
+                      {crown} Top {scoreRank + 1}
                     </span>
                   </div>
                 )}
@@ -220,14 +366,25 @@ function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean
         </div>
       )}
 
+      {/* Empty states */}
       {!state.isScanning && state.results.length === 0 && (
         <div className="text-center py-10 text-slate-500">
-          <p className="text-3xl mb-2">🔍</p>
-          <p className="text-sm">點擊「開始掃描」尋找符合朱老師六大條件的股票</p>
-          {!notifyEmail && (
-            <Link href="/settings" className="mt-2 inline-block text-xs text-blue-400 hover:text-blue-300 transition">
-              📧 設定 Email 通知，掃描完自動發送 →
-            </Link>
+          {hasScanned.current ? (
+            <>
+              <p className="text-3xl mb-2">😶</p>
+              <p className="text-sm text-slate-400">今日市場條件嚴苛，無股票同時滿足 {notifyMinScore ?? 4} 大條件</p>
+              <p className="text-xs text-slate-500 mt-1">請降低最低分數門檻或選擇其他日期</p>
+            </>
+          ) : (
+            <>
+              <p className="text-3xl mb-2">🔍</p>
+              <p className="text-sm">點擊「開始掃描」尋找符合朱老師六大條件的股票</p>
+              {!notifyEmail && (
+                <Link href="/settings" className="mt-2 inline-block text-xs text-blue-400 hover:text-blue-300 transition">
+                  📧 設定 Email 通知，掃描完自動發送 →
+                </Link>
+              )}
+            </>
           )}
         </div>
       )}

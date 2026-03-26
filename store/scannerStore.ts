@@ -27,6 +27,7 @@ interface MarketScanState {
   lastScanTime: string | null;
   marketTrend: TrendState | null;  // 大盤趨勢（掃描時取得）
   error: string | null;
+  scanDate?: string;  // 掃描日期，空字串或 undefined 代表今天/最新
 }
 
 const DEFAULT_TW: MarketScanState = {
@@ -46,6 +47,7 @@ interface ScannerStore {
   cnHistory: ScanSession[];
 
   setActiveMarket: (market: MarketId) => void;
+  setScanDate: (market: MarketId, date: string) => void;
   runScan: (market: MarketId) => Promise<void>;
   getHistory: (market: MarketId) => ScanSession[];
   getMarket: (market: MarketId) => MarketScanState;
@@ -61,12 +63,17 @@ export const useScannerStore = create<ScannerStore>()(
       cnHistory: [],
 
       setActiveMarket: (market) => set({ activeMarket: market }),
+      setScanDate: (market, date) => {
+        const mKey = market === 'TW' ? 'tw' : 'cn';
+        set(s => ({ [mKey]: { ...s[mKey], scanDate: date } }));
+      },
       getHistory: (market) => market === 'TW' ? get().twHistory : get().cnHistory,
       getMarket: (market) => market === 'TW' ? get().tw : get().cn,
 
       runScan: async (market) => {
         const mKey  = market === 'TW' ? 'tw' : 'cn';
         const names = market === 'TW' ? TW_STOCK_NAMES : CN_STOCK_NAMES;
+        const scanDate = market === 'TW' ? get().tw.scanDate : get().cn.scanDate;
 
         set(s => ({
           [mKey]: { ...s[mKey], isScanning: true, progress: 0, scanningStock: '取得股票清單中...', scanningIndex: 0, scanningTotal: 0, error: null },
@@ -105,7 +112,7 @@ export const useScannerStore = create<ScannerStore>()(
             const res = await fetch('/api/scanner/chunk', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ market, stocks: chunk }),
+              body: JSON.stringify({ market, stocks: chunk, ...(scanDate ? { date: scanDate } : {}) }),
             });
             if (!res.ok) {
               const j = await res.json().catch(() => ({}));

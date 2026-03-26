@@ -7,6 +7,25 @@ import { StockForwardPerformance } from '@/lib/scanner/types';
 import { calcBacktestSummary } from '@/lib/backtest/ForwardAnalyzer';
 import { BacktestTrade, BacktestStats } from '@/lib/backtest/BacktestEngine';
 
+// ── CSV Export ─────────────────────────────────────────────────────────────────
+
+function exportToCsv(trades: BacktestTrade[], scanDate: string) {
+  const headers = ['代號','名稱','市場','訊號日','評分','趨勢','進場日','進場價','出場日','出場價','出場原因','持有天數','毛報酬%','淨報酬%','交易成本','命中原因'];
+  const rows = trades.map(t => [
+    t.symbol, t.name, t.market, t.signalDate, t.signalScore, t.trendState,
+    t.entryDate, t.entryPrice, t.exitDate, t.exitPrice, t.exitReason, t.holdDays,
+    t.grossReturn, t.netReturn, t.totalCost, t.signalReasons.join('|'),
+  ]);
+  const csv = '\uFEFF' + [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `backtest_${scanDate}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function retColor(v: number | null | undefined) {
@@ -386,6 +405,13 @@ export default function BacktestPage() {
                           {{ netReturn: '淨報酬', signalScore: '評分', holdDays: '持有天數' }[k]}
                         </button>
                       ))}
+                      <button
+                        onClick={() => exportToCsv(sortedTrades, scanDate)}
+                        disabled={sortedTrades.length === 0}
+                        className="ml-auto px-3 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded text-xs text-white transition-colors"
+                      >
+                        ↓ 匯出 CSV
+                      </button>
                     </div>
                     <table className="w-full text-xs">
                       <thead>

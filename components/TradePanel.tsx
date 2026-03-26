@@ -8,7 +8,7 @@ type Mode = 'percent' | 'shares' | 'amount';
 type Confirm = { action: 'buy' | 'sell'; shares: number; price: number } | null;
 
 export default function TradePanel() {
-  const { allCandles, currentIndex, metrics, buy, sell, buyPercent, sellPercent } = useReplayStore();
+  const { allCandles, currentIndex, metrics, buy, sell, buyPercent, sellPercent, sixConditions } = useReplayStore();
   const [input,   setInput]   = useState('');
   const [mode,    setMode]    = useState<Mode>('percent');
   const [mounted, setMounted] = useState(false);
@@ -34,6 +34,15 @@ export default function TradePanel() {
   const inputNum = parseFloat(input) || 0;
   const estimatedSharesFromAmount = currentPrice > 0 ? Math.floor(inputNum / currentPrice) : 0;
   const estimatedCostFromShares   = inputNum * currentPrice;
+
+  // ── Fee estimate ──────────────────────────────────────────────────────────
+  const FEE_RATE = 0.001425;
+  function calcCommission(shares: number, price: number, isBuy: boolean) {
+    const amount = shares * price;
+    const fee = Math.max(1, Math.round(amount * FEE_RATE));
+    const tax = isBuy ? 0 : Math.round(amount * 0.003);
+    return fee + tax;
+  }
 
   // ── Confirm helpers ──────────────────────────────────────────────────────
   function requestConfirm(action: 'buy' | 'sell', shares: number) {
@@ -129,6 +138,12 @@ export default function TradePanel() {
               <span className="text-slate-400">金額</span>
               <span className={confirm.action === 'buy' ? 'text-red-300' : 'text-green-300'}>
                 {confirm.action === 'buy' ? '-' : '+'}${(confirm.shares * confirm.price).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </span>
+            </div>
+            <div className="flex justify-between text-slate-400">
+              <span>手續費{confirm.action === 'sell' ? '+證交稅' : ''}</span>
+              <span className="text-orange-300 font-mono">
+                -${calcCommission(confirm.shares, confirm.price, confirm.action === 'buy').toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </span>
             </div>
           </div>
@@ -247,6 +262,38 @@ export default function TradePanel() {
               className="py-2.5 rounded-lg bg-green-700 hover:bg-green-600 disabled:opacity-30 text-sm font-bold transition">賣出</button>
           </div>
         </>
+      )}
+
+      {/* ── Six Conditions ── */}
+      {sixConditions && (
+        <div className="rounded-lg bg-slate-700/40 border border-slate-600 px-3 py-2 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-300">策略條件</span>
+            <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+              sixConditions.totalScore >= 5 ? 'bg-amber-500/20 text-amber-400' :
+              sixConditions.totalScore >= 4 ? 'bg-emerald-500/20 text-emerald-400' :
+              sixConditions.totalScore >= 3 ? 'bg-sky-500/20 text-sky-400' :
+              'bg-slate-600 text-slate-400'
+            }`}>
+              {sixConditions.totalScore}/6
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
+            {([
+              { label: '趨勢',   ok: sixConditions.trend.pass },
+              { label: '位置',   ok: sixConditions.position.pass },
+              { label: 'K棒',   ok: sixConditions.kbar.pass },
+              { label: '均線',   ok: sixConditions.ma.pass },
+              { label: '量能',   ok: sixConditions.volume.pass },
+              { label: '指標',   ok: sixConditions.indicator.pass },
+            ] as { label: string; ok: boolean }[]).map(({ label, ok }) => (
+              <div key={label} className="flex items-center gap-1">
+                <span className={ok ? 'text-emerald-400' : 'text-slate-600'}>{ok ? '✓' : '✗'}</span>
+                <span className={ok ? 'text-slate-300' : 'text-slate-600'}>{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* ── Stop-loss info (when holding) ── */}
