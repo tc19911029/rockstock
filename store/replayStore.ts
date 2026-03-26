@@ -200,6 +200,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     const p = period ?? defaultPeriod[interval] ?? '2y';
 
     set({ isLoadingStock: true, isPlaying: false });
+    _cachedMarkers = []; // clear stale markers while loading
     try {
       const res = await fetch(
         `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}`

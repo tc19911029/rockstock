@@ -48,6 +48,22 @@ export function broadcastRange(range: LogicalRange | null) {
   _syncing = false;
 }
 
+// ── Module-level crosshair time sync ─────────────────────────────────────────
+type CrosshairSyncCallback = (time: string | null) => void;
+const crosshairListeners = new Set<CrosshairSyncCallback>();
+let _crosshairSyncing = false;
+
+export function subscribeCrosshairSync(cb: CrosshairSyncCallback) {
+  crosshairListeners.add(cb);
+  return () => crosshairListeners.delete(cb);
+}
+export function broadcastCrosshairTime(time: string | null) {
+  if (_crosshairSyncing) return;
+  _crosshairSyncing = true;
+  crosshairListeners.forEach(cb => cb(time));
+  _crosshairSyncing = false;
+}
+
 // ── Signal marker config ───────────────────────────────────────────────────────
 const MARKER_CONFIG: Record<ChartSignalMarker['type'], {
   position: 'aboveBar' | 'belowBar';
@@ -137,15 +153,16 @@ export default function CandleChart({
       broadcastRange(range as { from: number; to: number } | null);
     });
 
-    // ── Crosshair → OHLCV display ─────────────────────────────────────
+    // ── Crosshair → OHLCV display + broadcast to sub-charts ─────────────
     chart.subscribeCrosshairMove(param => {
-      if (!onCrosshairRef.current) return;
       if (!param.time) {
         setHoverCandle(null);
         onCrosshairRef.current?.(null);
+        broadcastCrosshairTime(null);
         return;
       }
       const dateStr = param.time as string;
+      broadcastCrosshairTime(dateStr);
       const found = candlesRef.current.find(c => c.date === dateStr) ?? null;
       setHoverCandle(found);
       onCrosshairRef.current?.(found);

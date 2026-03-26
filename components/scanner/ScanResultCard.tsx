@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, ReactNode } from 'react';
 import { StockScanResult } from '@/lib/scanner/types';
 
 const SIGNAL_COLOR: Record<string, string> = {
@@ -20,7 +20,7 @@ const COND_LABELS: Array<{ key: keyof StockScanResult['sixConditionsBreakdown'];
   { key: 'indicator', name: '指標' },
 ];
 
-export default function ScanResultCard({ result: r }: { result: StockScanResult }) {
+export default function ScanResultCard({ result: r, actions }: { result: StockScanResult; actions?: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
 
   const changePos = r.changePercent >= 0;
@@ -35,53 +35,58 @@ export default function ScanResultCard({ result: r }: { result: StockScanResult 
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-      {/* Summary row */}
-      <button
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-700/40 transition text-left"
-        onClick={() => setExpanded(v => !v)}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-white">{r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</span>
-            <span className="text-xs text-slate-400 truncate">{r.name}</span>
-          </div>
-          {/* Six conditions chips */}
-          {bd && (
-            <div className="flex gap-1 mt-1 flex-wrap">
-              {COND_LABELS.map(({ key, name }) => (
-                <span key={key} className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                  bd[key] ? 'bg-green-800/60 text-green-300' : 'bg-slate-700 text-slate-500 line-through'
-                }`}>
-                  {name}
-                </span>
-              ))}
-            </div>
+      {/* Top row: symbol/name + price + actions */}
+      <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <span className="text-sm font-bold text-white font-mono">{r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</span>
+          <span className="text-xs text-slate-400 truncate">{r.name}</span>
+          {buyRules.length > 0 && (
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+              buyRules[0].signalType === 'BUY' ? 'border-red-500/50 text-red-400' : 'border-orange-500/50 text-orange-400'
+            }`}>
+              {SIGNAL_LABEL[buyRules[0].signalType]}
+            </span>
           )}
         </div>
-
+        {/* Price + change */}
         <div className="text-right shrink-0">
-          <div className="text-sm font-mono font-bold text-white">${r.price.toFixed(2)}</div>
+          <div className="text-sm font-mono font-bold text-white">{r.price.toFixed(2)}</div>
           <div className={`text-xs font-mono ${changePos ? 'text-red-400' : 'text-green-400'}`}>
             {changePos ? '+' : ''}{r.changePercent.toFixed(2)}%
           </div>
         </div>
-
-        <span className={`text-xs font-bold px-2 py-0.5 rounded shrink-0 ${scoreColor}`}>
+        {/* Score badge */}
+        <span className={`text-xs font-bold px-2 py-1 rounded shrink-0 ${scoreColor}`}>
           {r.sixConditionsScore}/6
         </span>
+        {/* Injected action buttons (watchlist + 走圖) */}
+        {actions && <div className="flex gap-1 shrink-0">{actions}</div>}
+      </div>
 
-        {buyRules.length > 0 && (
-          <span className={`text-xs font-bold shrink-0 ${SIGNAL_COLOR[buyRules[0].signalType]}`}>
-            {SIGNAL_LABEL[buyRules[0].signalType]}
-          </span>
-        )}
-        <span className="text-slate-600 text-xs shrink-0">{expanded ? '▲' : '▼'}</span>
+      {/* Six condition chips row */}
+      {bd && (
+        <div className="flex gap-1 px-4 pb-2 flex-wrap">
+          {COND_LABELS.map(({ key, name }) => (
+            <span key={key} className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+              bd[key] ? 'bg-green-800/60 text-green-300' : 'bg-slate-700 text-slate-500 line-through'
+            }`}>
+              {name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Expand toggle */}
+      <button
+        className="w-full flex items-center justify-between px-4 py-1.5 hover:bg-slate-700/40 transition text-left border-t border-slate-700/50"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <span className="text-[10px] text-slate-500">{r.trendState} · {r.trendPosition}</span>
+        <span className="text-slate-600 text-xs">{expanded ? '▲' : '▼'}</span>
       </button>
 
       {expanded && (
         <div className="border-t border-slate-700 px-4 pb-4 pt-3 space-y-3">
-          <div className="text-xs text-slate-400">{r.trendState} · {r.trendPosition}</div>
-
           {buyRules.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-red-400 mb-1">觸發買入規則</p>

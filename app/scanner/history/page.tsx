@@ -1,19 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useScannerStore } from '@/store/scannerStore';
 import { ScanSession, MarketId } from '@/lib/scanner/types';
 import ScanResultCard from '@/components/scanner/ScanResultCard';
 import { useWatchlistStore } from '@/store/watchlistStore';
 
-export default function ScanHistoryPage() {
-  const [market,   setMarket]   = useState<MarketId>('TW');
+function ScanHistoryContent() {
+  const searchParams = useSearchParams();
+  const initialMarket = (searchParams.get('market') as MarketId) || 'TW';
+  const initialId     = searchParams.get('id') ?? null;
+
+  const [market,   setMarket]   = useState<MarketId>(initialMarket);
   const [selected, setSelected] = useState<ScanSession | null>(null);
 
   const { getHistory } = useScannerStore();
   const { add: addToWatchlist, has: inWatchlist } = useWatchlistStore();
   const sessions = getHistory(market);
+
+  // Auto-select session from URL param
+  useEffect(() => {
+    if (initialId && sessions.length > 0) {
+      const found = sessions.find(s => s.id === initialId);
+      if (found) setSelected(found);
+    }
+  }, [initialId, sessions.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-screen bg-[#0b1120] text-white">
@@ -26,19 +39,31 @@ export default function ScanHistoryPage() {
 
         {/* Market toggle */}
         <div className="flex gap-2">
-          {(['TW', 'CN'] as MarketId[]).map(m => (
-            <button key={m} onClick={() => { setMarket(m); setSelected(null); }}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
-                market === m ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-              }`}>
-              {m === 'TW' ? '台股' : 'A股'}
-            </button>
-          ))}
+          {(['TW', 'CN'] as MarketId[]).map(m => {
+            const hist = getHistory(m);
+            return (
+              <button key={m} onClick={() => { setMarket(m); setSelected(null); }}
+                className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${
+                  market === m ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}>
+                {m === 'TW' ? '台股' : 'A股'}
+                {hist.length > 0 && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${market === m ? 'bg-blue-500' : 'bg-slate-600'}`}>
+                    {hist.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {sessions.length === 0 && (
           <div className="text-center py-12 text-slate-500">
-            <p className="text-sm">尚無掃描記錄，請先至掃描頁面執行掃描</p>
+            <p className="text-3xl mb-3">📭</p>
+            <p className="text-sm">尚無掃描記錄</p>
+            <Link href="/scanner" className="mt-2 inline-block text-xs text-blue-400 hover:text-blue-300 transition">
+              前往掃描 →
+            </Link>
           </div>
         )}
 
@@ -63,17 +88,27 @@ export default function ScanHistoryPage() {
         {selected && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold">
-                {selected.date} 掃描結果（{selected.resultCount} 檔）
-              </h2>
+              <div>
+                <h2 className="text-sm font-bold">
+                  {selected.date} 掃描結果（{selected.resultCount} 檔）
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {new Date(selected.scanTime).toLocaleString('zh-TW')}
+                </p>
+              </div>
               <button onClick={() => setSelected(null)}
                 className="text-xs text-slate-400 hover:text-white transition">
                 ← 返回列表
               </button>
             </div>
+
+            {selected.results.length === 0 && (
+              <p className="text-xs text-slate-500 text-center py-6">此次掃描無符合條件的股票</p>
+            )}
+
             {selected.results.map((r, idx) => {
-              const isTop3 = idx < 3;
-              const crown = ['🥇', '🥈', '🥉'][idx] ?? '';
+              const isTop3  = idx < 3;
+              const crown   = ['🥇', '🥈', '🥉'][idx] ?? '';
               const watched = inWatchlist(r.symbol);
               return (
                 <div key={r.symbol} className={`relative ${isTop3 ? 'ring-1 ring-yellow-500/60 rounded-xl' : ''}`}>
@@ -87,7 +122,7 @@ export default function ScanHistoryPage() {
                   <ScanResultCard result={r} />
                   <div className="absolute top-3 right-3 flex gap-1 z-10">
                     <button
-                      onClick={() => watched ? null : addToWatchlist(r.symbol, r.name)}
+                      onClick={() => watched ? undefined : addToWatchlist(r.symbol, r.name)}
                       className={`px-2 py-1 rounded text-xs font-bold transition ${
                         watched ? 'bg-yellow-500/20 text-yellow-400 cursor-default' : 'bg-slate-700 hover:bg-yellow-600/40 hover:text-yellow-300 text-slate-400'
                       }`}
@@ -108,5 +143,17 @@ export default function ScanHistoryPage() {
 
       </div>
     </div>
+  );
+}
+
+export default function ScanHistoryPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#0b1120] text-white flex items-center justify-center">
+        <p className="text-slate-500 text-sm animate-pulse">載入中...</p>
+      </div>
+    }>
+      <ScanHistoryContent />
+    </Suspense>
   );
 }

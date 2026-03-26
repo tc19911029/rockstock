@@ -46,3 +46,40 @@ export interface ScanSession {
   resultCount: number;
   results: StockScanResult[];
 }
+
+// ── Backtest types ─────────────────────────────────────────────────────────────
+
+export interface ForwardCandle {
+  date: string;
+  open:  number;
+  close: number;
+  high:  number;
+  low:   number;
+}
+
+export interface StockForwardPerformance {
+  symbol: string;
+  name: string;
+  scanDate: string;
+  scanPrice: number;
+  openReturn: number | null;  // next trading day open vs scan close (proxy for "隔天開盤")
+  d1Return:   number | null;  // % return after 1 trading day close
+  d2Return:   number | null;
+  d3Return:   number | null;
+  d4Return:   number | null;
+  d5Return:   number | null;
+  d10Return:  number | null;
+  d20Return:  number | null;
+  maxGain:    number;         // max intra-window % gain (vs scanPrice)
+  maxLoss:    number;         // max intra-window % loss (negative, vs scanPrice)
+  forwardCandles: ForwardCandle[];
+}
+
+export interface BacktestSession {
+  id: string;
+  market: MarketId;
+  scanDate: string;
+  createdAt: string;
+  scanResults: StockScanResult[];
+  performance: StockForwardPerformance[];
+}

@@ -32,7 +32,7 @@ export default function PortfolioPage() {
 
   useEffect(() => {
     holdings.forEach(h => fetchPrice(h.symbol));
-  }, [holdings.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [holdings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleAdd() {
     if (!form.symbol || !form.shares || !form.costPrice) return;
@@ -155,7 +155,8 @@ export default function PortfolioPage() {
             const pnlPos = pnl >= 0;
             const ma5StopLoss = currentPrice * 0.95; // simplified
             const costStopLoss = h.costPrice * 0.93;
-            const stopLoss = Math.max(ma5StopLoss, costStopLoss);
+            // Use the tighter (higher) stop, but never above current price
+            const stopLoss = Math.min(Math.max(ma5StopLoss, costStopLoss), currentPrice * 0.999);
 
             return (
               <div key={h.id} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">

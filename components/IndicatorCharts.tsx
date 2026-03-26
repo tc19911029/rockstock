@@ -14,7 +14,7 @@ import {
   SeriesMarker,
 } from 'lightweight-charts';
 import { CandleWithIndicators } from '@/types';
-import { subscribeRangeSync, getLastRange, LogicalRange } from './CandleChart';
+import { subscribeRangeSync, getLastRange, LogicalRange, subscribeCrosshairSync } from './CandleChart';
 
 function toTime(date: string): Time { return date as Time; }
 
@@ -35,11 +35,13 @@ function makeChart(container: HTMLElement, showTimeAxis: boolean): IChartApi {
 
 // ── Volume ────────────────────────────────────────────────────────────────────
 function VolumeChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; hoverCandle?: CandleWithIndicators | null }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef     = useRef<IChartApi | null>(null);
-  const volRef       = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const mv5Ref       = useRef<ISeriesApi<'Line'> | null>(null);
-  const mv20Ref      = useRef<ISeriesApi<'Line'> | null>(null);
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const chartRef      = useRef<IChartApi | null>(null);
+  const volRef        = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const mv5Ref        = useRef<ISeriesApi<'Line'> | null>(null);
+  const mv20Ref       = useRef<ISeriesApi<'Line'> | null>(null);
+  const candlesRef    = useRef<CandleWithIndicators[]>(candles);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -52,6 +54,13 @@ function VolumeChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]
     const unsub = subscribeRangeSync((range: LogicalRange | null) => {
       if (range) chart.timeScale().setVisibleLogicalRange(range);
     });
+    // ── Crosshair sync from main chart ────────────────────────────────────
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !volRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const c = candlesRef.current.find(x => x.date === time);
+      if (c) chartRef.current.setCrosshairPosition(c.volume, time as Time, volRef.current);
+    });
     const ro = new ResizeObserver(() => {
       if (containerRef.current) chart.applyOptions({
         width: containerRef.current.clientWidth,
@@ -59,7 +68,7 @@ function VolumeChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]
       });
     });
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); unsub(); chart.remove(); };
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
   }, []);
 
   useEffect(() => {
@@ -114,6 +123,8 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
   const difRef       = useRef<ISeriesApi<'Line'> | null>(null);
   const signalRef    = useRef<ISeriesApi<'Line'> | null>(null);
   const histRef      = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const candlesRef   = useRef<CandleWithIndicators[]>(candles);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -127,6 +138,14 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (range) chart.timeScale().setVisibleRange(range as any);
     });
+    // ── Crosshair sync from main chart ────────────────────────────────────
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !difRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const c = candlesRef.current.find(x => x.date === time);
+      if (c != null && c.macdDIF != null)
+        chartRef.current.setCrosshairPosition(c.macdDIF, time as Time, difRef.current);
+    });
     const ro = new ResizeObserver(() => {
       if (containerRef.current) chart.applyOptions({
         width: containerRef.current.clientWidth,
@@ -134,7 +153,7 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
       });
     });
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); unsub(); chart.remove(); };
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
   }, []);
 
   useEffect(() => {
@@ -181,6 +200,8 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
   const kRef         = useRef<ISeriesApi<'Line'> | null>(null);
   const dRef         = useRef<ISeriesApi<'Line'> | null>(null);
   const kMarkRef     = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const candlesRef   = useRef<CandleWithIndicators[]>(candles);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -197,6 +218,14 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (range) chart.timeScale().setVisibleRange(range as any);
     });
+    // ── Crosshair sync from main chart ────────────────────────────────────
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !kRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const c = candlesRef.current.find(x => x.date === time);
+      if (c != null && c.kdK != null)
+        chartRef.current.setCrosshairPosition(c.kdK, time as Time, kRef.current);
+    });
     const ro = new ResizeObserver(() => {
       if (containerRef.current) chart.applyOptions({
         width: containerRef.current.clientWidth,
@@ -204,7 +233,7 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
       });
     });
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); unsub(); chart.remove(); };
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
   }, []);
 
   useEffect(() => {

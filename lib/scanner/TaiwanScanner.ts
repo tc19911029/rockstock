@@ -24,30 +24,43 @@ const FALLBACK_TW_STOCKS: StockEntry[] = [
   { symbol: '2376.TW', name: '技嘉' },   { symbol: '2353.TW', name: '宏碁' },
 ];
 
-/** 從 TWSE 開放資料取得所有上市股票（4碼普通股） */
-async function fetchTWSEStocks(): Promise<StockEntry[]> {
+type TWSERow = { Code: string; Name: string; TradeVolume?: string };
+type TPExRow = { SecuritiesCompanyCode: string; CompanyName: string; TradingShares?: string };
+
+/** 從 TWSE 取得上市股票，按當日成交量排序 */
+async function fetchTWSEStocks(): Promise<(StockEntry & { vol: number })[]> {
   const res = await fetch(
     'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
     { signal: AbortSignal.timeout(15000) }
   );
   if (!res.ok) throw new Error('TWSE API error');
-  const data = await res.json() as Array<{ Code: string; Name: string }>;
+  const data = await res.json() as TWSERow[];
   return data
-    .filter(s => /^\d{4}$/.test(s.Code))  // 4碼普通股，排除 ETF(00xx)、權證等
-    .map(s => ({ symbol: `${s.Code}.TW`, name: s.Name }));
+    .filter(s => /^\d{4}$/.test(s.Code))
+    .map(s => ({
+      symbol: `${s.Code}.TW`,
+      name: s.Name,
+      vol: parseInt((s.TradeVolume ?? '0').replace(/,/g, ''), 10) || 0,
+    }))
+    .sort((a, b) => b.vol - a.vol);
 }
 
-/** 從 TPEx 取得所有上櫃股票（4碼普通股） */
-async function fetchTPExStocks(): Promise<StockEntry[]> {
+/** 從 TPEx 取得上櫃股票，按當日成交量排序 */
+async function fetchTPExStocks(): Promise<(StockEntry & { vol: number })[]> {
   const res = await fetch(
     'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes',
     { signal: AbortSignal.timeout(15000) }
   );
   if (!res.ok) throw new Error('TPEx API error');
-  const data = await res.json() as Array<{ SecuritiesCompanyCode: string; CompanyName: string }>;
+  const data = await res.json() as TPExRow[];
   return data
     .filter(s => /^\d{4}$/.test(s.SecuritiesCompanyCode))
-    .map(s => ({ symbol: `${s.SecuritiesCompanyCode}.TWO`, name: s.CompanyName }));
+    .map(s => ({
+      symbol: `${s.SecuritiesCompanyCode}.TWO`,
+      name: s.CompanyName,
+      vol: parseInt((s.TradingShares ?? '0').replace(/,/g, ''), 10) || 0,
+    }))
+    .sort((a, b) => b.vol - a.vol);
 }
 
 export class TaiwanScanner extends MarketScanner {
@@ -66,21 +79,23 @@ export class TaiwanScanner extends MarketScanner {
       fetchTPExStocks(),
     ]);
 
-    const stocks: StockEntry[] = [
+    const withVol: (StockEntry & { vol: number })[] = [
       ...(listed.status === 'fulfilled' ? listed.value : []),
       ...(otc.status    === 'fulfilled' ? otc.value    : []),
     ];
 
-    if (stocks.length === 0) {
+    if (withVol.length === 0) {
       console.warn('[TaiwanScanner] Exchange APIs failed, using fallback list');
       return FALLBACK_TW_STOCKS;
     }
 
-    // Deduplicate by symbol
-    return Array.from(new Map(stocks.map(s => [s.symbol, s])).values());
+    // Deduplicate, sort by volume (highest first), take top 500
+    const deduped = Array.from(new Map(withVol.map(s => [s.symbol, s])).values());
+    const top500  = deduped.sort((a, b) => b.vol - a.vol).slice(0, 500);
+    return top500.map(({ symbol, name }) => ({ symbol, name }));
   }
 
-  async fetchCandles(symbol: string): Promise<CandleWithIndicators[]> {
-    return fetchCandlesYahoo(symbol, '1y', 8000);
+  async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {
+    return fetchCandlesYahoo(symbol, '1y', 4000, asOfDate);
   }
 }

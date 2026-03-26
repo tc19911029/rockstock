@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 
 const QUICK_STOCKS = [
@@ -48,6 +48,13 @@ export default function StockSelector() {
   const [error,    setError]    = useState('');
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  // Sync input when stock is loaded externally (e.g. via ?load= URL param from scanner)
+  useEffect(() => {
+    if (currentStock?.ticker) {
+      setInput(rawSymbol(currentStock.ticker));
+    }
+  }, [currentStock?.ticker]);
+
   const handleLoad = async (symbol: string, iv = interval, pd = period) => {
     setError('');
     setShowDrop(false);
@@ -89,16 +96,21 @@ export default function StockSelector() {
   return (
     <div className="flex items-center gap-1.5 min-w-0 flex-1" onClick={closeOnOutside}>
       {/* Search input + dropdown */}
-      <div ref={wrapRef} className="relative w-44 shrink-0">
-        <input
-          type="text"
-          value={input}
-          onChange={e => { setInput(e.target.value); setShowDrop(true); }}
-          onFocus={() => setShowDrop(true)}
-          onKeyDown={e => { if (e.key === 'Enter' && input.trim()) handleLoad(input.trim()); }}
-          placeholder="代號或名稱"
-          className="w-full bg-slate-700 rounded px-2 py-1 text-xs text-white border border-slate-600 focus:border-blue-500 focus:outline-none"
-        />
+      <div ref={wrapRef} className="relative shrink-0">
+        <div className="flex items-center bg-slate-700 rounded border border-slate-600 focus-within:border-blue-500 overflow-hidden">
+          <input
+            type="text"
+            value={input}
+            onChange={e => { setInput(e.target.value); setShowDrop(true); }}
+            onFocus={() => setShowDrop(true)}
+            onKeyDown={e => { if (e.key === 'Enter' && input.trim()) handleLoad(input.trim()); }}
+            placeholder="代號或名稱"
+            className="w-24 bg-transparent px-2 py-1 text-xs text-white font-mono focus:outline-none"
+          />
+          {currentStock?.name && !showDrop && (
+            <span className="text-[10px] text-slate-400 pr-2 truncate max-w-[80px]">{currentStock.name}</span>
+          )}
+        </div>
         {showDrop && filtered.length > 0 && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-slate-700 border border-slate-600 rounded shadow-xl z-50 max-h-52 overflow-y-auto">
             {filtered.map(s => (

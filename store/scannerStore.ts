@@ -2,101 +2,138 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { StockScanResult, ScanSession, MarketId } from '@/lib/scanner/types';
 
-// Stock names for fake per-stock progress display
 const TW_STOCK_NAMES = [
   '台積電','聯發科','日月光投控','聯電','聯詠','瑞昱','矽力','華邦電','力積電','旺宏',
   '南亞科','京元電子','創意','力成','信驊','同欣電','環球晶','中美晶','鴻海','廣達',
   '台達電','緯穎','緯創','和碩','英業達','研華','臻鼎','光寶科','聯強','奇鋐',
-  '川湖','台光電','欣興','南電','華碩','技嘉','宏碁','可成','友達','群創',
-  '大立光','致茂','億光','中信金','國泰金','兆豐金','玉山金','富邦金','元大金','第一金',
-  '合庫金','華南金','台新金','開發金','永豐金','新光金','中華電','台灣大','遠傳','南亞',
-  '台塑','台塑化','台化','中鋼','台泥','亞泥','大成鋼','統一超','統一','和泰車',
-  '上銀','亞德客','長榮','陽明','萬海','華航','長榮航','儒鴻','聚陽','燿華',
-  '台燿','嘉澤','豐泰','裕融','智原','晶心科','采鈺','祥碩','台表科','晶豪科',
-  '合一','旭隼','零壹','天鈺','北極星藥業','卓越','精測','宏達電','光寶科','聯強',
 ];
 const CN_STOCK_NAMES = [
-  '寧德時代','貴州茅台','工商銀行','中國平安','招商銀行','恆瑞醫藥','美的集團',
-  '格力電器','五糧液','萬科A','中國建築','比亞迪','海天味業','農業銀行','中國銀行',
-  '建設銀行','中國人壽','中國石化','中石油','中遠海控',
+  '貴州茅台','中國平安','招商銀行','工商銀行','長江電力','農業銀行','建設銀行',
+  '中國銀行','紫金礦業','伊利股份','中國石化','恆瑞醫藥','五糧液','美的集團',
+  '比亞迪','格力電器','平安銀行','中信證券','興業銀行','海康威視',
 ];
 
-// Keep up to 30 sessions per market in localStorage
 const MAX_HISTORY = 30;
 
-interface ScannerStore {
-  activeMarket: MarketId;
+// ── Per-market scan state ──────────────────────────────────────────────────────
+interface MarketScanState {
   isScanning: boolean;
-  scanProgress: number;
+  progress: number;
   scanningStock: string;
   scanningIndex: number;
   scanningTotal: number;
-  currentResults: StockScanResult[];
-  // Persisted history keyed by market
-  twHistory: ScanSession[];
-  cnHistory: ScanSession[];
+  results: StockScanResult[];
   lastScanTime: string | null;
   error: string | null;
+}
+
+const DEFAULT_TW: MarketScanState = {
+  isScanning: false, progress: 0, scanningStock: '', scanningIndex: 0,
+  scanningTotal: 500, results: [], lastScanTime: null, error: null,
+};
+const DEFAULT_CN: MarketScanState = {
+  isScanning: false, progress: 0, scanningStock: '', scanningIndex: 0,
+  scanningTotal: 500, results: [], lastScanTime: null, error: null,
+};
+
+interface ScannerStore {
+  activeMarket: MarketId;
+  tw: MarketScanState;
+  cn: MarketScanState;
+  twHistory: ScanSession[];
+  cnHistory: ScanSession[];
 
   setActiveMarket: (market: MarketId) => void;
   runScan: (market: MarketId) => Promise<void>;
   getHistory: (market: MarketId) => ScanSession[];
+  getMarket: (market: MarketId) => MarketScanState;
 }
 
 export const useScannerStore = create<ScannerStore>()(
   persist(
     (set, get) => ({
-      activeMarket:   'TW',
-      isScanning:     false,
-      scanProgress:   0,
-      scanningStock:  '',
-      scanningIndex:  0,
-      scanningTotal:  1600,
-      currentResults: [],
-      twHistory:      [],
-      cnHistory:      [],
-      lastScanTime:   null,
-      error:          null,
+      activeMarket: 'TW',
+      tw: DEFAULT_TW,
+      cn: DEFAULT_CN,
+      twHistory: [],
+      cnHistory: [],
 
       setActiveMarket: (market) => set({ activeMarket: market }),
-
       getHistory: (market) => market === 'TW' ? get().twHistory : get().cnHistory,
+      getMarket: (market) => market === 'TW' ? get().tw : get().cn,
 
       runScan: async (market) => {
-        const total = market === 'TW' ? 1600 : 2000;
-        const estDurationMs = market === 'TW' ? 180000 : 240000;
-
-        set({ isScanning: true, scanProgress: 0, scanningStock: '取得股票清單中...', scanningIndex: 0, scanningTotal: total, error: null });
-
-        let elapsed = 0;
-        const TICK = 1500;
+        const mKey  = market === 'TW' ? 'tw' : 'cn';
         const names = market === 'TW' ? TW_STOCK_NAMES : CN_STOCK_NAMES;
-        const progressInterval = setInterval(() => {
-          elapsed += TICK;
-          const pct = Math.min(90, Math.round((elapsed / estDurationMs) * 90));
-          const nameIdx = Math.min(Math.floor((elapsed / estDurationMs) * names.length), names.length - 1);
-          const approxIdx = Math.min(Math.round((elapsed / estDurationMs) * total), total - 1);
-          set({ scanProgress: pct, scanningStock: names[nameIdx], scanningIndex: approxIdx + 1 });
-        }, TICK);
+
+        set(s => ({
+          [mKey]: { ...s[mKey], isScanning: true, progress: 0, scanningStock: '取得股票清單中...', scanningIndex: 0, scanningTotal: 0, error: null },
+        }));
 
         try {
-          const res = await fetch('/api/scanner/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ market }),
-          });
-          clearInterval(progressInterval);
+          // ── Step 1: Fetch complete stock list ──────────────────────────────
+          const listRes = await fetch(`/api/scanner/list?market=${market}`);
+          if (!listRes.ok) throw new Error('無法取得股票清單');
+          const listJson = await listRes.json() as { stocks: Array<{ symbol: string; name: string }> };
+          const stocks = listJson.stocks ?? [];
+          const total  = stocks.length;
 
-          if (!res.ok) {
-            const json = await res.json().catch(() => ({}));
-            throw new Error((json as { error?: string }).error ?? '掃描失敗');
-          }
+          set(s => ({
+            [mKey]: { ...s[mKey], scanningStock: '分析股票中...', scanningTotal: total, scanningIndex: 0 },
+          }));
 
-          const json = await res.json() as { results?: StockScanResult[] };
-          const results = json.results ?? [];
+          // ── Step 2: Split into 2 parallel chunks ───────────────────────────
+          const half   = Math.ceil(total / 2);
+          const chunk1 = stocks.slice(0, half);
+          const chunk2 = stocks.slice(half);
+
+          // Progress simulation over ~90s (typical scan duration)
+          const estMs = 90_000;
+          let elapsed = 0;
+          const TICK  = 1500;
+          const timer = setInterval(() => {
+            elapsed += TICK;
+            const pct = Math.min(88, Math.round((elapsed / estMs) * 88));
+            const ni  = Math.min(Math.floor((elapsed / estMs) * names.length), names.length - 1);
+            const ai  = Math.min(Math.round((elapsed / estMs) * total), total - 1);
+            set(s => ({ [mKey]: { ...s[mKey], progress: pct, scanningStock: names[ni], scanningIndex: ai + 1 } }));
+          }, TICK);
+
+          const scanChunk = async (chunk: Array<{ symbol: string; name: string }>) => {
+            const res = await fetch('/api/scanner/chunk', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ market, stocks: chunk }),
+            });
+            if (!res.ok) {
+              const j = await res.json().catch(() => ({}));
+              throw new Error((j as { error?: string }).error ?? '掃描失敗');
+            }
+            const j = await res.json() as { results?: StockScanResult[] };
+            return j.results ?? [];
+          };
+
+          // ── Step 3: Run both chunks in parallel ────────────────────────────
+          const [r1, r2] = await Promise.allSettled([
+            scanChunk(chunk1),
+            scanChunk(chunk2),
+          ]);
+          clearInterval(timer);
+
+          const results: StockScanResult[] = [
+            ...(r1.status === 'fulfilled' ? r1.value : []),
+            ...(r2.status === 'fulfilled' ? r2.value : []),
+          ].sort((a, b) =>
+            b.sixConditionsScore !== a.sixConditionsScore
+              ? b.sixConditionsScore - a.sixConditionsScore
+              : b.changePercent - a.changePercent
+          );
+
+          // Log if either chunk failed
+          if (r1.status === 'rejected') console.warn('[scanner] chunk1 failed:', r1.reason);
+          if (r2.status === 'rejected') console.warn('[scanner] chunk2 failed:', r2.reason);
+
           const now = new Date().toISOString();
-
-          // Build session and prepend to persisted history
           const session: ScanSession = {
             id:          `${market}-${now}`,
             market,
@@ -107,32 +144,41 @@ export const useScannerStore = create<ScannerStore>()(
           };
 
           const histKey = market === 'TW' ? 'twHistory' : 'cnHistory';
-          const prevHistory = market === 'TW' ? get().twHistory : get().cnHistory;
-          const newHistory = [session, ...prevHistory].slice(0, MAX_HISTORY);
+          const prev    = market === 'TW' ? get().twHistory : get().cnHistory;
+          const newHist = [session, ...prev].slice(0, MAX_HISTORY);
 
-          set({
-            currentResults: results,
-            lastScanTime:   now,
-            scanProgress:   100,
-            scanningStock:  '',
-            [histKey]:      newHistory,
-          });
+          set(s => ({
+            [mKey]:    { ...s[mKey], isScanning: false, progress: 100, scanningStock: '', results, lastScanTime: now, error: null },
+            [histKey]: newHist,
+          }));
         } catch (err) {
-          clearInterval(progressInterval);
-          set({ error: err instanceof Error ? err.message : '未知錯誤' });
-        } finally {
-          set({ isScanning: false });
+          set(s => ({
+            [mKey]: { ...s[mKey], isScanning: false, error: err instanceof Error ? err.message : '未知錯誤' },
+          }));
         }
       },
     }),
     {
-      name: 'scanner-v1',
-      // Only persist history and last scan time, not transient scan state
+      name: 'scanner-v3',
       partialize: (s) => ({
         twHistory:    s.twHistory,
         cnHistory:    s.cnHistory,
-        lastScanTime: s.lastScanTime,
+        twResults:    s.tw.results,
+        cnResults:    s.cn.results,
+        twLastScan:   s.tw.lastScanTime,
+        cnLastScan:   s.cn.lastScanTime,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        // Merge persisted flat fields back into nested market state
+        const p = state as unknown as Record<string, unknown>;
+        const twResults = Array.isArray(p.twResults) ? (p.twResults as StockScanResult[]) : [];
+        const cnResults = Array.isArray(p.cnResults) ? (p.cnResults as StockScanResult[]) : [];
+        const twLastScan = typeof p.twLastScan === 'string' ? p.twLastScan : null;
+        const cnLastScan = typeof p.cnLastScan === 'string' ? p.cnLastScan : null;
+        state.tw = { ...DEFAULT_TW, results: twResults, lastScanTime: twLastScan };
+        state.cn = { ...DEFAULT_CN, results: cnResults, lastScanTime: cnLastScan };
+      },
     }
   )
 );

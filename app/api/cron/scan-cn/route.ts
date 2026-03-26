@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const scanner = new ChinaScanner();
-    const results = await scanner.scan();
+    const { results, partial } = await scanner.scan();
+    if (partial) console.warn('[cron/scan-cn] Scan returned partial results due to timeout');
     const date = new Date().toISOString().split('T')[0];
 
     const session: ScanSession = {
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
       } catch {}
     }
 
-    return NextResponse.json({ ok: true, count: results.length, date });
+    return NextResponse.json({ ok: true, count: results.length, date, partial });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

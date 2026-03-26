@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Taiwan stock: pure digits → try .TW first, fallback to .TWO (上櫃/OTC)
+  // China stock (600519.SS / 000858.SZ) or US stock → pass directly
   const isTwDigits = /^\d+$/.test(symbol);
   const candidates = isTwDigits
     ? [`${symbol}.TW`, `${symbol}.TWO`]

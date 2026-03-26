@@ -29,11 +29,10 @@ const COND_KEYS = ['trend', 'position', 'kbar', 'ma', 'volume', 'indicator'] as 
 const COND_NAMES: Record<string, string> = { trend: '趨勢', position: '位置', kbar: 'K棒', ma: '均線', volume: '量能', indicator: '指標' };
 
 export default function WatchlistPage() {
-  const { items, remove } = useWatchlistStore();
+  const { items, remove, add } = useWatchlistStore();
   const [data, setData] = useState<Record<string, ConditionData>>({});
   const [addInput, setAddInput] = useState('');
   const [addLoading, setAddLoading] = useState(false);
-  const { add } = useWatchlistStore();
 
   const fetchConditions = useCallback(async (symbol: string) => {
     setData(prev => ({ ...prev, [symbol]: { ...prev[symbol], loading: true, error: undefined } as ConditionData }));
