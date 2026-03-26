@@ -103,6 +103,7 @@ export default function HomePage() {
         <div className="flex items-center gap-1.5 shrink-0 ml-auto">
           <Link href="/scanner" className="text-xs px-2.5 py-1 bg-blue-600/80 hover:bg-blue-500 rounded text-white font-medium transition">🔍 掃描</Link>
           <Link href="/backtest" className="text-xs px-2.5 py-1 bg-violet-700/80 hover:bg-violet-600 rounded text-white font-medium transition">📅 回測</Link>
+          <Link href="/history" className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 font-medium transition">📈 信號歷史</Link>
           <Link href="/watchlist" className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 font-medium transition">⭐ 自選</Link>
           <Link href="/portfolio" className="text-xs px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 font-medium transition">💼 持倉</Link>
           <Link href="/settings" className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-400 transition">⚙</Link>

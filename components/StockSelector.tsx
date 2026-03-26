@@ -20,6 +20,12 @@ const QUICK_STOCKS = [
   { symbol: 'AAPL',  name: 'Apple' },
   { symbol: 'TSLA',  name: 'Tesla' },
   { symbol: 'NVDA',  name: 'NVIDIA' },
+  { symbol: '600519', name: '貴州茅台' },
+  { symbol: '000858', name: '五糧液' },
+  { symbol: '601318', name: '中國平安' },
+  { symbol: '603986', name: '兆易創新' },
+  { symbol: '300750', name: '寧德時代' },
+  { symbol: '000333', name: '美的集團' },
 ];
 
 const INTERVALS = [
@@ -102,8 +108,8 @@ export default function StockSelector() {
             onChange={e => { setInput(e.target.value); setShowDrop(true); }}
             onFocus={() => setShowDrop(true)}
             onKeyDown={e => { if (e.key === 'Enter' && input.trim()) handleLoad(input.trim()); }}
-            placeholder="代號或名稱"
-            className="w-24 bg-transparent px-2 py-1 text-xs text-white font-mono focus:outline-none"
+            placeholder="代號/名稱"
+            className="w-28 bg-transparent px-2 py-1 text-xs text-white font-mono focus:outline-none"
           />
           {currentStock?.name && !showDrop && (
             <span className="text-[10px] text-slate-400 pr-2 truncate max-w-[80px]">{currentStock.name}</span>

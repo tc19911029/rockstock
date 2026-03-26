@@ -1,6 +1,6 @@
 import { CandleWithIndicators } from '@/types';
 import { ruleEngine } from '@/lib/rules/ruleEngine';
-import { evaluateSixConditions, detectTrend, detectTrendPosition } from '@/lib/analysis/trendAnalysis';
+import { evaluateSixConditions, detectTrend, detectTrendPosition, TrendState } from '@/lib/analysis/trendAnalysis';
 import { StockScanResult, MarketConfig, TriggeredRule } from './types';
 
 const CONCURRENCY = 15; // parallel requests per chunk
@@ -10,10 +10,29 @@ export abstract class MarketScanner {
   abstract getStockList(): Promise<Array<{ symbol: string; name: string }>>;
   abstract fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]>;
 
+  /**
+   * 大盤趨勢過濾：子類別實作，回傳大盤指數（0050.TW / 000300.SS）的趨勢狀態。
+   * 用於動態調整個股最低分數門檻：多頭→4分, 盤整→5分, 空頭→6分（幾乎不進場）
+   */
+  abstract getMarketTrend(asOfDate?: string): Promise<TrendState>;
+
+  /**
+   * 根據大盤趨勢動態計算個股最低分數門檻
+   * 大盤多頭：維持最低4分（朱老師標準門檻）
+   * 大盤盤整：提高至5分（只選最強勢股）
+   * 大盤空頭：要求6分（幾乎不進場，嚴格保護資金）
+   */
+  private marketTrendToMinScore(marketTrend: TrendState): number {
+    if (marketTrend === '多頭') return 4;
+    if (marketTrend === '盤整') return 5;
+    return 6; // 空頭
+  }
+
   private async scanOne(
     symbol: string,
     name: string,
     config: MarketConfig,
+    minScore: number,
     asOfDate?: string,
   ): Promise<StockScanResult | null> {
     try {
@@ -31,8 +50,8 @@ export abstract class MarketScanner {
       // ── 朱老師篩股硬性條件 ──────────────────────────────────────────────────
       // 1. 空頭趨勢：嚴禁做多
       if (trend === '空頭') return null;
-      // 2. 最低分數門檻：書中六大條件必須達4項以上才值得關注
-      if (sixConds.totalScore < 4) return null;
+      // 2. 最低分數門檻（依大盤趨勢動態調整）：多頭4分、盤整5分、空頭6分
+      if (sixConds.totalScore < minScore) return null;
       // 3. 乖離過大：收盤超過MA20的20%屬末升段禁追高（書中明確警告）
       if (last.ma20 && last.ma20 > 0) {
         const overExtended = (last.close - last.ma20) / last.ma20 > 0.20;
@@ -79,7 +98,7 @@ export abstract class MarketScanner {
   }
 
   /** Scan a provided sub-list of stocks (used by chunked parallel scanning) */
-  async scanList(stocks: Array<{ symbol: string; name: string }>): Promise<StockScanResult[]> {
+  async scanList(stocks: Array<{ symbol: string; name: string }>): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
     return this._scanChunk(stocks, undefined);
   }
 
@@ -87,17 +106,28 @@ export abstract class MarketScanner {
   async scanListAtDate(
     stocks: Array<{ symbol: string; name: string }>,
     asOfDate: string,
-  ): Promise<StockScanResult[]> {
+  ): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
     return this._scanChunk(stocks, asOfDate);
   }
 
   private async _scanChunk(
     stocks: Array<{ symbol: string; name: string }>,
     asOfDate: string | undefined,
-  ): Promise<StockScanResult[]> {
+  ): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
     const config = this.getMarketConfig();
     const results: StockScanResult[] = [];
     const DEADLINE = Date.now() + 110_000; // 110s per chunk
+
+    // ── 大盤趨勢過濾：動態調整最低分數門檻 ──────────────────────────────────
+    let minScore = 4; // 預設朱老師標準（大盤多頭）
+    let marketTrend: TrendState = '多頭';
+    try {
+      marketTrend = await this.getMarketTrend(asOfDate);
+      minScore = this.marketTrendToMinScore(marketTrend);
+      console.log(`[${config.marketId}] 大盤趨勢: ${marketTrend} → 最低門檻: ${minScore}分`);
+    } catch (e) {
+      console.warn(`[${config.marketId}] 大盤趨勢取得失敗，使用預設門檻4分`, e);
+    }
 
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       if (Date.now() > DEADLINE) {
@@ -106,21 +136,32 @@ export abstract class MarketScanner {
       }
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
-        batch.map(({ symbol, name }) => this.scanOne(symbol, name, config, asOfDate))
+        batch.map(({ symbol, name }) => this.scanOne(symbol, name, config, minScore, asOfDate))
       );
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);
       }
     }
-    return results;
+    return { results, marketTrend };
   }
 
-  async scan(): Promise<{ results: StockScanResult[]; partial: boolean }> {
+  async scan(): Promise<{ results: StockScanResult[]; partial: boolean; marketTrend?: TrendState }> {
     const config = this.getMarketConfig();
     const stocks = await this.getStockList();
     const results: StockScanResult[] = [];
     // Leave 30s buffer before Vercel's 300s hard limit
     const DEADLINE = Date.now() + 240_000;
+
+    // ── 大盤趨勢過濾 ────────────────────────────────────────────────────────
+    let minScore = 4;
+    let marketTrend: TrendState = '多頭';
+    try {
+      marketTrend = await this.getMarketTrend();
+      minScore = this.marketTrendToMinScore(marketTrend);
+      console.log(`[${config.marketId}] 大盤趨勢: ${marketTrend} → 最低門檻: ${minScore}分`);
+    } catch (e) {
+      console.warn(`[${config.marketId}] 大盤趨勢取得失敗，使用預設門檻4分`, e);
+    }
 
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       if (Date.now() > DEADLINE) {
@@ -130,11 +171,11 @@ export abstract class MarketScanner {
             ? b.sixConditionsScore - a.sixConditionsScore
             : b.changePercent - a.changePercent
         );
-        return { results: sorted, partial: true };
+        return { results: sorted, partial: true, marketTrend };
       }
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
-        batch.map(({ symbol, name }) => this.scanOne(symbol, name, config))
+        batch.map(({ symbol, name }) => this.scanOne(symbol, name, config, minScore))
       );
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);
@@ -148,6 +189,7 @@ export abstract class MarketScanner {
           : b.changePercent - a.changePercent
       ),
       partial: false,
+      marketTrend,
     };
   }
 }

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSettingsStore } from '@/store/settingsStore';
 
 export default function SettingsPage() {
-  const { notifyEmail, notifyMinScore, setNotifyEmail, setNotifyMinScore } = useSettingsStore();
+  const { notifyEmail, notifyMinScore, setNotifyEmail, setNotifyMinScore, strategy, setStrategy, resetStrategy } = useSettingsStore();
   const [emailInput, setEmailInput] = useState(notifyEmail);
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
   const [testMsg, setTestMsg] = useState('');
@@ -95,6 +95,83 @@ export default function SettingsPage() {
           {testMsg && (
             <p className={`text-xs ${testStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{testMsg}</p>
           )}
+        </div>
+
+        {/* Strategy Parameters */}
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-200 mb-0.5">🎯 選股策略參數</h2>
+              <p className="text-xs text-slate-500">調整六大條件的判斷門檻（朱老師預設值）</p>
+            </div>
+            <button onClick={resetStrategy}
+              className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded text-slate-400 transition">
+              重設預設
+            </button>
+          </div>
+
+          {/* KD上限 */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-300">KD 進場上限</span>
+              <span className="text-blue-400 font-mono font-bold">{strategy.kdMaxEntry}</span>
+            </div>
+            <input type="range" min={60} max={95} step={1}
+              value={strategy.kdMaxEntry}
+              onChange={e => setStrategy({ kdMaxEntry: +e.target.value })}
+              className="w-full h-1.5 rounded-full accent-blue-500 bg-slate-700" />
+            <div className="flex justify-between text-[10px] text-slate-500">
+              <span>60（保守）</span><span>95（寬鬆）</span>
+            </div>
+          </div>
+
+          {/* 乖離上限 */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-300">MA20 乖離上限</span>
+              <span className="text-blue-400 font-mono font-bold">{(strategy.deviationMax * 100).toFixed(0)}%</span>
+            </div>
+            <input type="range" min={10} max={35} step={1}
+              value={Math.round(strategy.deviationMax * 100)}
+              onChange={e => setStrategy({ deviationMax: +e.target.value / 100 })}
+              className="w-full h-1.5 rounded-full accent-blue-500 bg-slate-700" />
+            <div className="flex justify-between text-[10px] text-slate-500">
+              <span>10%（嚴格）</span><span>35%（寬鬆）</span>
+            </div>
+          </div>
+
+          {/* 量比 */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-300">量比門檻（倍）</span>
+              <span className="text-blue-400 font-mono font-bold">{strategy.volumeRatioMin.toFixed(1)}x</span>
+            </div>
+            <input type="range" min={10} max={30} step={1}
+              value={Math.round(strategy.volumeRatioMin * 10)}
+              onChange={e => setStrategy({ volumeRatioMin: +e.target.value / 10 })}
+              className="w-full h-1.5 rounded-full accent-blue-500 bg-slate-700" />
+            <div className="flex justify-between text-[10px] text-slate-500">
+              <span>1.0x（寬鬆）</span><span>3.0x（嚴格）</span>
+            </div>
+          </div>
+
+          {/* 最低分數 */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-300">最低六大條件分數</span>
+              <span className="text-blue-400 font-mono font-bold">{strategy.minScore}/6</span>
+            </div>
+            <div className="flex gap-2">
+              {[3, 4, 5, 6].map(n => (
+                <button key={n} onClick={() => setStrategy({ minScore: n })}
+                  className={`flex-1 py-1.5 rounded text-xs font-bold transition ${
+                    strategy.minScore === n ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                  }`}>
+                  {n}分
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Scan schedule */}

@@ -4,6 +4,40 @@ import { useReplayStore } from '@/store/replayStore';
 import { formatCurrency } from '@/lib/engines/statsEngine';
 import { Trade } from '@/types';
 
+function EquityCurveChart({ curve }: { curve: Array<{ date: string; totalAssets: number }> }) {
+  if (curve.length < 2) return null;
+  const H = 60;
+  const W = 300;
+  const min = Math.min(...curve.map(p => p.totalAssets));
+  const max = Math.max(...curve.map(p => p.totalAssets));
+  const range = max - min || 1;
+
+  const pts = curve.map((p, i) => {
+    const x = (i / (curve.length - 1)) * W;
+    const y = H - ((p.totalAssets - min) / range) * (H - 8) - 4;
+    return `${x},${y}`;
+  }).join(' ');
+
+  const isPositive = curve[curve.length - 1].totalAssets >= curve[0].totalAssets;
+  const color = isPositive ? '#f87171' : '#4ade80'; // red = profit in TW convention, green = loss
+
+  const lastX = W;
+  const lastY = H - ((curve[curve.length - 1].totalAssets - min) / range) * (H - 8) - 4;
+
+  return (
+    <div className="mb-3">
+      <div className="text-[10px] text-slate-500 mb-1">資金曲線</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-14 rounded bg-slate-900/50">
+        {/* baseline */}
+        <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="#334155" strokeWidth="1" strokeDasharray="3,3" />
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" />
+        {/* end dot */}
+        <circle cx={lastX} cy={lastY} r="3" fill={color} />
+      </svg>
+    </div>
+  );
+}
+
 function TradeRow({ trade }: { trade: Trade }) {
   const isBuy = trade.action === 'BUY';
   const pnl = trade.realizedPnL;
@@ -30,7 +64,7 @@ function TradeRow({ trade }: { trade: Trade }) {
 }
 
 export default function TradeHistory() {
-  const { account } = useReplayStore();
+  const { account, stats } = useReplayStore();
   const trades = [...account.trades].reverse(); // newest first
 
   return (
@@ -39,6 +73,8 @@ export default function TradeHistory() {
         <h2 className="text-sm font-semibold text-slate-300">交易紀錄</h2>
         <span className="text-xs text-slate-500">{account.trades.length} 筆</span>
       </div>
+
+      <EquityCurveChart curve={stats.equityCurve} />
 
       {trades.length === 0 ? (
         <p className="text-xs text-slate-500 text-center py-4">尚無交易紀錄</p>

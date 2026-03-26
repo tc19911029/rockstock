@@ -22,8 +22,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
-    const results = await scanner.scanList(stocks);
-    return NextResponse.json({ results });
+    const { results, marketTrend } = await scanner.scanList(stocks);
+    return NextResponse.json({ results, marketTrend });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

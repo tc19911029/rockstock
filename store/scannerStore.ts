@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { StockScanResult, ScanSession, MarketId } from '@/lib/scanner/types';
+import { TrendState } from '@/lib/analysis/trendAnalysis';
 
 const TW_STOCK_NAMES = [
   '台積電','聯發科','日月光投控','聯電','聯詠','瑞昱','矽力','華邦電','力積電','旺宏',
@@ -24,16 +25,17 @@ interface MarketScanState {
   scanningTotal: number;
   results: StockScanResult[];
   lastScanTime: string | null;
+  marketTrend: TrendState | null;  // 大盤趨勢（掃描時取得）
   error: string | null;
 }
 
 const DEFAULT_TW: MarketScanState = {
   isScanning: false, progress: 0, scanningStock: '', scanningIndex: 0,
-  scanningTotal: 500, results: [], lastScanTime: null, error: null,
+  scanningTotal: 500, results: [], lastScanTime: null, marketTrend: null, error: null,
 };
 const DEFAULT_CN: MarketScanState = {
   isScanning: false, progress: 0, scanningStock: '', scanningIndex: 0,
-  scanningTotal: 500, results: [], lastScanTime: null, error: null,
+  scanningTotal: 500, results: [], lastScanTime: null, marketTrend: null, error: null,
 };
 
 interface ScannerStore {
@@ -109,8 +111,8 @@ export const useScannerStore = create<ScannerStore>()(
               const j = await res.json().catch(() => ({}));
               throw new Error((j as { error?: string }).error ?? '掃描失敗');
             }
-            const j = await res.json() as { results?: StockScanResult[] };
-            return j.results ?? [];
+            const j = await res.json() as { results?: StockScanResult[]; marketTrend?: TrendState };
+            return { results: j.results ?? [], marketTrend: j.marketTrend ?? null };
           };
 
           // ── Step 3: Run both chunks in parallel ────────────────────────────
@@ -120,9 +122,15 @@ export const useScannerStore = create<ScannerStore>()(
           ]);
           clearInterval(timer);
 
+          // Use market trend from whichever chunk succeeded (should be the same)
+          const marketTrend: TrendState =
+            (r1.status === 'fulfilled' ? r1.value.marketTrend : null) ??
+            (r2.status === 'fulfilled' ? r2.value.marketTrend : null) ??
+            '多頭';
+
           const results: StockScanResult[] = [
-            ...(r1.status === 'fulfilled' ? r1.value : []),
-            ...(r2.status === 'fulfilled' ? r2.value : []),
+            ...(r1.status === 'fulfilled' ? r1.value.results : []),
+            ...(r2.status === 'fulfilled' ? r2.value.results : []),
           ].sort((a, b) =>
             b.sixConditionsScore !== a.sixConditionsScore
               ? b.sixConditionsScore - a.sixConditionsScore
@@ -148,7 +156,7 @@ export const useScannerStore = create<ScannerStore>()(
           const newHist = [session, ...prev].slice(0, MAX_HISTORY);
 
           set(s => ({
-            [mKey]:    { ...s[mKey], isScanning: false, progress: 100, scanningStock: '', results, lastScanTime: now, error: null },
+            [mKey]:    { ...s[mKey], isScanning: false, progress: 100, scanningStock: '', results, lastScanTime: now, marketTrend, error: null },
             [histKey]: newHist,
           }));
         } catch (err) {

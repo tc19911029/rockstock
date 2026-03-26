@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { SixConditionsResult } from '@/lib/analysis/trendAnalysis';
+import { detectSellSignals } from '@/lib/analysis/sellSignals';
 
 const CONDITION_LABELS = [
   { key: 'trend',     icon: '①', name: '趨勢' },
@@ -70,7 +71,11 @@ function ConditionRow({
 
 export default function SixConditionsPanel() {
   const sixConditions = useReplayStore(s => s.sixConditions);
+  const allCandles    = useReplayStore(s => s.allCandles);
+  const currentIndex  = useReplayStore(s => s.currentIndex);
   const [expanded, setExpanded] = useState<ConditionKey | null>(null);
+
+  const sellSignals = detectSellSignals(allCandles, currentIndex);
 
   if (!sixConditions) {
     return (
@@ -145,6 +150,25 @@ export default function SixConditionsPanel() {
           <p className="text-[10px] text-green-500 mt-0.5">仍需確認K線實際走勢與成交量</p>
         )}
       </div>
+
+      {/* Sell Signals */}
+      {sellSignals.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-700">
+          <div className="text-[10px] font-bold text-slate-400 mb-1.5">⚠ 出場警示</div>
+          <div className="space-y-1">
+            {sellSignals.map(sig => (
+              <div key={sig.type} className={`text-[10px] px-2 py-1 rounded flex items-start gap-1.5 ${
+                sig.severity === 'high' ? 'bg-red-900/40 text-red-300' :
+                sig.severity === 'medium' ? 'bg-orange-900/40 text-orange-300' :
+                'bg-yellow-900/30 text-yellow-400'
+              }`}>
+                <span className="font-bold shrink-0">{sig.label}</span>
+                <span className="text-[9px] opacity-80">{sig.detail}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

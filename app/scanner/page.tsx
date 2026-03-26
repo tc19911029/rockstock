@@ -116,7 +116,21 @@ function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean
       <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-sm font-bold">{LABEL} 掃描</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold">{LABEL} 掃描</h2>
+              {state.marketTrend && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  state.marketTrend === '多頭' ? 'bg-green-900/60 text-green-300' :
+                  state.marketTrend === '空頭' ? 'bg-red-900/60 text-red-300' :
+                  'bg-yellow-900/60 text-yellow-300'
+                }`}>
+                  大盤{state.marketTrend}
+                  {state.marketTrend === '多頭' ? ' ▲ 門檻4分' :
+                   state.marketTrend === '空頭' ? ' ▼ 門檻6分' :
+                   ' → 門檻5分'}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 mt-0.5">{DESC}</p>
             {state.lastScanTime && (
               <p className="text-xs text-slate-400 mt-0.5">

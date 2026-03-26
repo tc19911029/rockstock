@@ -1,4 +1,5 @@
 import { CandleWithIndicators } from '@/types';
+import type { StrategyParams } from '@/store/settingsStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -165,7 +166,13 @@ export function detectTrendPosition(
 export function evaluateSixConditions(
   candles: CandleWithIndicators[],
   index: number,
+  params?: Partial<StrategyParams>,
 ): SixConditionsResult {
+  const kdMax     = params?.kdMaxEntry      ?? 85;
+  const devMax    = params?.deviationMax    ?? 0.12;
+  const volMin    = params?.volumeRatioMin  ?? 1.5;
+  const shadowMax = params?.upperShadowMax  ?? 0.20;
+
   const c    = candles[index];
   const prev = index > 0 ? candles[index - 1] : null;
 
@@ -205,8 +212,8 @@ export function evaluateSixConditions(
     return false;
   })();
 
-  // Scenario B：初漲段（剛站上月線，乖離 0–12%）
-  const earlyRise = ma20Dev !== null && ma20Dev >= 0 && ma20Dev < 0.12;
+  // Scenario B：初漲段（剛站上月線，乖離 0–devMax）
+  const earlyRise = ma20Dev !== null && ma20Dev >= 0 && ma20Dev < devMax;
 
   const positionPass = pulledBackToMA10 || earlyRise;
 
@@ -214,7 +221,7 @@ export function evaluateSixConditions(
     const devStr = ma20Dev !== null ? `MA20乖離${(ma20Dev*100).toFixed(1)}%` : '';
     if (pulledBackToMA10) return `✅ 回測MA10後翻多（${devStr}，${stage}）`;
     if (earlyRise)        return `✅ 初漲段（${devStr}，${stage}）`;
-    if (ma20Dev !== null && ma20Dev >= 0.12) return `❌ 乖離過大禁追高（${devStr}）`;
+    if (ma20Dev !== null && ma20Dev >= devMax) return `❌ 乖離過大禁追高（${devStr}）`;
     if (ma20Dev !== null && ma20Dev < 0)     return `⚠️ 低於月線（${devStr}）`;
     return '均線資料不足';
   })();
@@ -234,7 +241,7 @@ export function evaluateSixConditions(
 
   const isLongRedK        = isRedK && bodyPct >= 0.02;
   const isHighClose       = closePos >= 0.5;               // 收在上半段
-  const noLongUpperShadow = upperShadowRatio < 0.20;       // 無長上影線（收盤靠近最高）
+  const noLongUpperShadow = upperShadowRatio < shadowMax;  // 無長上影線（收盤靠近最高）
 
   const kbarPass = isLongRedK && isHighClose && noLongUpperShadow;
   const kbarType = isLongRedK
@@ -301,13 +308,13 @@ export function evaluateSixConditions(
     return !(prev1BigUp && prev2BigUp); // 前2日同時大量上漲才排除（只排除連續追高）
   })();
 
-  const volumePass = ((volRatio !== null && volRatio >= 1.5) || isPullbackVol) && isFreshSignal;
+  const volumePass = ((volRatio !== null && volRatio >= volMin) || isPullbackVol) && isFreshSignal;
   const volumeDetail = volRatio !== null
     ? volumePass
       ? `✅ 成交量 ${volRatio}x 均量${isPullbackVol ? '（量縮回檔後量增）' : '（帶量上漲）'}`
       : !isFreshSignal
         ? `⚠️ 前2日已連續大量上漲，訊號陳舊（避免追高）`
-        : `⚠️ 成交量 ${volRatio}x 均量（未達1.5x基準）`
+        : `⚠️ 成交量 ${volRatio}x 均量（未達${volMin}x基準）`
     : '5日均量資料不足';
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -328,7 +335,7 @@ export function evaluateSixConditions(
   const kdBull   = c.kdK != null && c.kdD != null
     && c.kdK > c.kdD
     && c.kdK >= 20             // 不在超賣底部（等待反彈確認）
-    && c.kdK <= 85;            // 不在超買高點（避免追高）
+    && c.kdK <= kdMax;         // 不在超買高點（避免追高）
 
   const indicatorPass = macdBull || kdBull || kdCross;
   const indicatorDetail = [
@@ -337,7 +344,7 @@ export function evaluateSixConditions(
       ? `✅ KD黃金交叉(K=${c.kdK?.toFixed(0)}↑D=${c.kdD?.toFixed(0)})`
       : kdBull
       ? `✅ KD多排(K=${c.kdK?.toFixed(0)},D=${c.kdD?.toFixed(0)})`
-      : c.kdK != null && c.kdK > 85
+      : c.kdK != null && c.kdK > kdMax
       ? `❌ KD超買(K=${c.kdK?.toFixed(0)},過高風險大)`
       : `⚠️ KD未多排(K=${c.kdK?.toFixed(0) ?? '—'},D=${c.kdD?.toFixed(0) ?? '—'})`,
   ].join('；');

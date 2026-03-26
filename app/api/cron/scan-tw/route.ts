@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const scanner = new TaiwanScanner();
-    const { results, partial } = await scanner.scan();
+    const { results, partial, marketTrend } = await scanner.scan();
     if (partial) console.warn('[cron/scan-tw] Scan returned partial results due to timeout');
     const date = new Date().toISOString().split('T')[0];
 
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       } catch { /* notification failure is non-fatal */ }
     }
 
-    return NextResponse.json({ ok: true, count: results.length, date, partial });
+    return NextResponse.json({ ok: true, count: results.length, date, partial, marketTrend });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

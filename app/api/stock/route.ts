@@ -34,12 +34,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing symbol' }, { status: 400 });
   }
 
-  // Taiwan stock: pure digits → try .TW first, fallback to .TWO (上櫃/OTC)
-  // China stock (600519.SS / 000858.SZ) or US stock → pass directly
-  const isTwDigits = /^\d+$/.test(symbol);
-  const candidates = isTwDigits
-    ? [`${symbol}.TW`, `${symbol}.TWO`]
-    : [symbol.toUpperCase()];
+  // Taiwan: 4-digit (main board) or 5-digit (OTC)
+  const isTwDigits = /^\d{4,5}$/.test(symbol);
+  // China A-shares: exactly 6 digits
+  const isCnDigits = /^\d{6}$/.test(symbol);
+
+  let candidates: string[];
+  if (isCnDigits) {
+    // Shanghai: starts with 6 (main board) or 9 (B shares)
+    // Shenzhen: starts with 0, 2, 3
+    const firstDigit = symbol[0];
+    if (firstDigit === '6' || firstDigit === '9') {
+      candidates = [`${symbol}.SS`, `${symbol}.SZ`];
+    } else {
+      candidates = [`${symbol}.SZ`, `${symbol}.SS`];
+    }
+  } else if (isTwDigits) {
+    candidates = [`${symbol}.TW`, `${symbol}.TWO`];
+  } else {
+    candidates = [symbol.toUpperCase()];
+  }
 
   async function fetchYahoo(ticker: string) {
     const url = [
@@ -74,7 +88,7 @@ export async function GET(req: NextRequest) {
 
     if (!res.ok) {
       return NextResponse.json(
-        { error: `找不到股票代號 ${symbol}。台股格式：2330（上市）或 8299（上櫃）、美股：AAPL` },
+        { error: `找不到股票代號 ${symbol}。台股格式：2330（上市）/8299（上櫃）、陸股：603986（上海）/000858（深圳）、美股：AAPL` },
         { status: 502 }
       );
     }
@@ -84,7 +98,7 @@ export async function GET(req: NextRequest) {
 
     if (!result) {
       return NextResponse.json(
-        { error: '找不到該股票資料，請確認代號。台股格式：2330、美股格式：AAPL' },
+        { error: '找不到該股票資料，請確認代號。台股格式：2330（上市）/8299（上櫃）、陸股：603986（上海）/000858（深圳）、美股：AAPL' },
         { status: 404 }
       );
     }
