@@ -232,9 +232,9 @@ export function evaluateSixConditions(
   // 長上影線比例：(high - close)/(high - low)
   const upperShadowRatio = dayRange > 0 ? (c.high - c.close) / dayRange : 0;
 
-  const isLongRedK       = isRedK && bodyPct >= 0.02;
-  const isHighClose      = closePos >= 0.5;                // 收在上半段
-  const noLongUpperShadow = upperShadowRatio < 0.35;       // 無長上影線
+  const isLongRedK        = isRedK && bodyPct >= 0.02;
+  const isHighClose       = closePos >= 0.5;               // 收在上半段
+  const noLongUpperShadow = upperShadowRatio < 0.20;       // 無長上影線（收盤靠近最高）
 
   const kbarPass = isLongRedK && isHighClose && noLongUpperShadow;
   const kbarType = isLongRedK
@@ -291,11 +291,23 @@ export function evaluateSixConditions(
     isPullbackVol = allLow && todayUp && (volRatio ?? 0) >= 1.2; // 總量比至少1.2x
   }
 
-  const volumePass = (volRatio !== null && volRatio >= 1.5) || isPullbackVol;
+  // 「新鮮信號」過濾：前2日不能已有大量上漲日，避免買到追高的第N棒
+  const isFreshSignal = (() => {
+    if (index < 2 || !avgVol5) return true;
+    const prev1 = candles[index - 1];
+    const prev2 = candles[index - 2];
+    const prev1BigUp = prev1.volume >= avgVol5 * 1.3 && prev1.close > prev1.open;
+    const prev2BigUp = prev2.volume >= avgVol5 * 1.3 && prev2.close > prev2.open;
+    return !(prev1BigUp && prev2BigUp); // 前2日同時大量上漲才排除（只排除連續追高）
+  })();
+
+  const volumePass = ((volRatio !== null && volRatio >= 1.5) || isPullbackVol) && isFreshSignal;
   const volumeDetail = volRatio !== null
     ? volumePass
       ? `✅ 成交量 ${volRatio}x 均量${isPullbackVol ? '（量縮回檔後量增）' : '（帶量上漲）'}`
-      : `⚠️ 成交量 ${volRatio}x 均量（未達1.5x基準）`
+      : !isFreshSignal
+        ? `⚠️ 前2日已連續大量上漲，訊號陳舊（避免追高）`
+        : `⚠️ 成交量 ${volRatio}x 均量（未達1.5x基準）`
     : '5日均量資料不足';
 
   // ─────────────────────────────────────────────────────────────────────────

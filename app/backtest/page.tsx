@@ -48,30 +48,29 @@ function SummaryCard({
 }) {
   const stats = calcBacktestSummary(performance, horizon);
   if (!stats) return (
-    <div className="bg-slate-800 rounded-xl p-4 flex flex-col items-center gap-1 opacity-40">
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className="text-slate-500 text-sm">等待資料</div>
+    <div className="bg-slate-800/50 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 opacity-40 min-h-[80px]">
+      <div className="text-[10px] text-slate-400">{label}</div>
+      <div className="text-slate-500 text-xs">等待資料</div>
     </div>
   );
 
   return (
-    <div className="bg-slate-800 rounded-xl p-4 flex flex-col gap-2">
-      <div className="text-xs text-slate-400 font-medium">{label}績效</div>
-      <div className={`text-2xl font-bold ${retColor(stats.avgReturn)}`}>
+    <div className="bg-slate-800 rounded-lg p-2.5 flex flex-col gap-1.5">
+      <div className="text-[10px] text-slate-400 font-medium">{label}</div>
+      <div className={`text-lg font-bold leading-tight ${retColor(stats.avgReturn)}`}>
         {fmtRet(stats.avgReturn)}
-        <span className="text-xs font-normal text-slate-400 ml-1">平均</span>
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
         <span className="text-slate-400">勝率</span>
         <span className={stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}>
-          {stats.winRate}%（{stats.wins}↑{stats.losses}↓）
+          {stats.winRate}%
         </span>
-        <span className="text-slate-400">中位數</span>
+        <span className="text-slate-400">中位</span>
         <span className={retColor(stats.median)}>{fmtRet(stats.median)}</span>
-        <span className="text-slate-400">最大獲利</span>
-        <span className="text-emerald-400">+{stats.maxGain.toFixed(2)}%</span>
-        <span className="text-slate-400">最大虧損</span>
-        <span className="text-red-400">{stats.maxLoss.toFixed(2)}%</span>
+        <span className="text-slate-400">最高</span>
+        <span className="text-emerald-400">+{stats.maxGain.toFixed(1)}%</span>
+        <span className="text-slate-400">最低</span>
+        <span className="text-red-400">{stats.maxLoss.toFixed(1)}%</span>
       </div>
     </div>
   );
@@ -119,32 +118,38 @@ function ResultRow({
       {/* Forward returns */}
       {perf ? (
         <>
-          <td className={`py-2.5 px-2 text-right text-xs font-mono ${retColor(perf.openReturn)}`}>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.openReturn)}`}>
             {fmtRet(perf.openReturn)}
           </td>
-          <td className={`py-2.5 px-2 text-right text-xs font-mono ${retColor(perf.d1Return)}`}>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d1Return)}`}>
             {fmtRet(perf.d1Return)}
           </td>
-          <td className={`py-2.5 px-2 text-right text-xs font-mono ${retColor(perf.d3Return)}`}>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d2Return)}`}>
+            {fmtRet(perf.d2Return)}
+          </td>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d3Return)}`}>
             {fmtRet(perf.d3Return)}
           </td>
-          <td className={`py-2.5 px-2 text-right text-xs font-mono ${retColor(perf.d5Return)}`}>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d4Return)}`}>
+            {fmtRet(perf.d4Return)}
+          </td>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d5Return)}`}>
             {fmtRet(perf.d5Return)}
           </td>
-          <td className={`py-2.5 px-2 text-right text-xs font-mono ${retColor(perf.d10Return)}`}>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d10Return)}`}>
             {fmtRet(perf.d10Return)}
           </td>
-          <td className={`py-2.5 px-2 text-right text-xs font-mono ${retColor(perf.d20Return)}`}>
+          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d20Return)}`}>
             {fmtRet(perf.d20Return)}
           </td>
-          <td className="py-2.5 px-2 text-right text-xs">
+          <td className="py-2 px-1.5 text-right text-xs whitespace-nowrap">
             <span className="text-emerald-400">+{perf.maxGain.toFixed(1)}%</span>
             <span className="text-slate-500 mx-0.5">/</span>
             <span className="text-red-400">{perf.maxLoss.toFixed(1)}%</span>
           </td>
         </>
       ) : (
-        <td colSpan={8} className="py-2.5 px-3 text-center text-xs text-slate-500">
+        <td colSpan={10} className="py-2.5 px-3 text-center text-xs text-slate-500">
           計算中…
         </td>
       )}
@@ -211,9 +216,11 @@ export default function BacktestPage() {
   })();
 
   const horizonLabels: { key: BacktestHorizon; label: string }[] = [
-    { key: 'open', label: '隔天開盤' },
+    { key: 'open', label: '隔日開' },
     { key: 'd1',   label: '1日' },
+    { key: 'd2',   label: '2日' },
     { key: 'd3',   label: '3日' },
+    { key: 'd4',   label: '4日' },
     { key: 'd5',   label: '5日' },
     { key: 'd10',  label: '10日' },
     { key: 'd20',  label: '20日' },
@@ -318,7 +325,7 @@ export default function BacktestPage() {
             <h2 className="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wide">
               策略績效統計（{scanDate}）
             </h2>
-            <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
               {horizonLabels.map(({ key, label }) => (
                 <SummaryCard key={key} label={label} horizon={key} performance={performance} />
               ))}
@@ -364,16 +371,18 @@ export default function BacktestPage() {
                       <th className="py-2.5 px-3 text-right font-medium">收盤價</th>
                       {performance.length > 0 ? (
                         <>
-                          <th className="py-2.5 px-2 text-right font-medium">開盤</th>
-                          <th className="py-2.5 px-2 text-right font-medium">1日</th>
-                          <th className="py-2.5 px-2 text-right font-medium">3日</th>
-                          <th className="py-2.5 px-2 text-right font-medium">5日</th>
-                          <th className="py-2.5 px-2 text-right font-medium">10日</th>
-                          <th className="py-2.5 px-2 text-right font-medium">20日</th>
-                          <th className="py-2.5 px-2 text-right font-medium">最高/最低</th>
+                          <th className="py-2 px-1.5 text-right font-medium">隔日開</th>
+                          <th className="py-2 px-1.5 text-right font-medium">1日</th>
+                          <th className="py-2 px-1.5 text-right font-medium">2日</th>
+                          <th className="py-2 px-1.5 text-right font-medium">3日</th>
+                          <th className="py-2 px-1.5 text-right font-medium">4日</th>
+                          <th className="py-2 px-1.5 text-right font-medium">5日</th>
+                          <th className="py-2 px-1.5 text-right font-medium">10日</th>
+                          <th className="py-2 px-1.5 text-right font-medium">20日</th>
+                          <th className="py-2 px-1.5 text-right font-medium">最高/最低</th>
                         </>
                       ) : (
-                        <th className="py-2.5 px-3 text-center font-medium" colSpan={8}>後續績效</th>
+                        <th className="py-2.5 px-3 text-center font-medium" colSpan={10}>後續績效</th>
                       )}
                       <th className="py-2.5 px-3 text-center font-medium">操作</th>
                     </tr>
