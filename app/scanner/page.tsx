@@ -199,7 +199,7 @@ function MarketPanel({ market, isActive }: { market: MarketId; isActive: boolean
                   {watched ? '⭐' : '☆'}
                 </button>
                 <Link
-                  href={`/?load=${r.symbol.replace(/\.(TW|TWO)$/i, '')}`}
+                  href={`/?load=${r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
                   className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold text-white transition"
                 >走圖 →</Link>
               </>

@@ -1,7 +1,23 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
 export const runtime = 'nodejs';
+
+// Fallback: read .env.local directly if Next.js Turbopack didn't load it
+function getApiKey(): string | undefined {
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+  try {
+    const envPath = path.join(process.cwd(), '.env.local');
+    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
+    for (const line of lines) {
+      const t = line.trim();
+      if (t.startsWith('ANTHROPIC_API_KEY=')) return t.slice('ANTHROPIC_API_KEY='.length).trim();
+    }
+  } catch {}
+  return undefined;
+}
 
 const SYSTEM_PROMPT = `你是一位精通朱家泓老師技術分析理論的股市教練。你熟讀朱家泓老師的著作，包括：
 - 《做對5個實戰步驟，散戶變大師》
@@ -99,7 +115,10 @@ export async function POST(req: NextRequest) {
       ? `${SYSTEM_PROMPT}\n\n## 當前走圖情境：\n${context}`
       : SYSTEM_PROMPT;
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      return new Response('❌ 伺服器未設定 ANTHROPIC_API_KEY', { status: 500 });
+    }
     const client = new Anthropic({ apiKey });
 
     const encoder = new TextEncoder();
