@@ -3,28 +3,28 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useBacktestStore, BacktestHorizon } from '@/store/backtestStore';
-import { StockScanResult, StockForwardPerformance } from '@/lib/scanner/types';
+import { StockForwardPerformance } from '@/lib/scanner/types';
 import { calcBacktestSummary } from '@/lib/backtest/ForwardAnalyzer';
+import { BacktestTrade, BacktestStats } from '@/lib/backtest/BacktestEngine';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function retColor(v: number | null) {
-  if (v === null) return 'text-slate-500';
-  if (v > 0)  return 'text-emerald-400';
-  if (v < 0)  return 'text-red-400';
+function retColor(v: number | null | undefined) {
+  if (v == null) return 'text-slate-500';
+  if (v > 0) return 'text-emerald-400';
+  if (v < 0) return 'text-red-400';
   return 'text-slate-400';
 }
 
-function fmtRet(v: number | null) {
-  if (v === null) return '–';
+function fmtRet(v: number | null | undefined) {
+  if (v == null) return '–';
   return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
 }
 
 function scoreColor(s: number) {
   if (s >= 5) return 'text-amber-400 font-bold';
   if (s >= 4) return 'text-emerald-400 font-semibold';
-  if (s >= 3) return 'text-sky-400';
-  return 'text-slate-400';
+  return 'text-sky-400';
 }
 
 function trendBadge(t: string) {
@@ -32,28 +32,35 @@ function trendBadge(t: string) {
     t === '多頭' ? 'bg-emerald-900/60 text-emerald-300 border-emerald-700' :
     t === '空頭' ? 'bg-red-900/60 text-red-300 border-red-700' :
     'bg-slate-700/60 text-slate-300 border-slate-600';
-  return (
-    <span className={`px-1.5 py-0.5 text-xs rounded border ${cls}`}>{t}</span>
-  );
+  return <span className={`px-1.5 py-0.5 text-xs rounded border ${cls}`}>{t}</span>;
 }
 
-// ── Summary Card ───────────────────────────────────────────────────────────────
+function exitBadge(reason: string) {
+  const map: Record<string, string> = {
+    holdDays:   'bg-blue-900/40 text-blue-300 border-blue-700',
+    stopLoss:   'bg-red-900/40 text-red-300 border-red-700',
+    takeProfit: 'bg-emerald-900/40 text-emerald-300 border-emerald-700',
+    dataEnd:    'bg-slate-700/40 text-slate-400 border-slate-600',
+  };
+  const labels: Record<string, string> = {
+    holdDays: '持滿', stopLoss: '停損', takeProfit: '停利', dataEnd: '資料結束',
+  };
+  const cls = map[reason] ?? map.holdDays;
+  return <span className={`px-1 py-0.5 text-[10px] rounded border ${cls}`}>{labels[reason] ?? reason}</span>;
+}
 
-function SummaryCard({
-  label, horizon, performance,
-}: {
-  label: string;
-  horizon: BacktestHorizon;
-  performance: StockForwardPerformance[];
+// ── Summary Card (legacy horizon) ──────────────────────────────────────────────
+
+function HorizonCard({ label, horizon, performance }: {
+  label: string; horizon: BacktestHorizon; performance: StockForwardPerformance[];
 }) {
   const stats = calcBacktestSummary(performance, horizon);
   if (!stats) return (
     <div className="bg-slate-800/50 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 opacity-40 min-h-[80px]">
       <div className="text-[10px] text-slate-400">{label}</div>
-      <div className="text-slate-500 text-xs">等待資料</div>
+      <div className="text-slate-500 text-xs">–</div>
     </div>
   );
-
   return (
     <div className="bg-slate-800 rounded-lg p-2.5 flex flex-col gap-1.5">
       <div className="text-[10px] text-slate-400 font-medium">{label}</div>
@@ -62,9 +69,7 @@ function SummaryCard({
       </div>
       <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
         <span className="text-slate-400">勝率</span>
-        <span className={stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}>
-          {stats.winRate}%
-        </span>
+        <span className={stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}>{stats.winRate}%</span>
         <span className="text-slate-400">中位</span>
         <span className={retColor(stats.median)}>{fmtRet(stats.median)}</span>
         <span className="text-slate-400">最高</span>
@@ -76,90 +81,86 @@ function SummaryCard({
   );
 }
 
-// ── Result Row ─────────────────────────────────────────────────────────────────
+// ── Strict Stats Panel ──────────────────────────────────────────────────────────
 
-function ResultRow({
-  result, perf,
-}: {
-  result: StockScanResult;
-  perf:   StockForwardPerformance | undefined;
-}) {
-  const sym = result.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-  const marketSuffix = result.symbol.match(/\.(TW|TWO|SS|SZ)$/i)?.[1]?.toUpperCase() ?? '';
-
+function StrictStatsPanel({ stats, tradesCount }: { stats: BacktestStats; tradesCount: number }) {
   return (
-    <tr className="border-t border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-      <td className="py-2.5 px-3">
-        <div className="font-medium text-white text-sm">{result.name}</div>
-        <div className="text-xs text-slate-400">{sym}
-          <span className="ml-1 text-slate-600">.{marketSuffix}</span>
-        </div>
-      </td>
+    <div className="bg-slate-900 border border-sky-800/40 rounded-xl p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-2 h-2 rounded-full bg-sky-400" />
+        <h3 className="text-sm font-semibold text-slate-200">嚴謹回測統計（含成本）</h3>
+        <span className="text-xs text-slate-500 ml-auto">{tradesCount} 筆交易</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+        <Kpi label="勝率" value={`${stats.winRate}%`} color={stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'} />
+        <Kpi label="淨報酬均值" value={fmtRet(stats.avgNetReturn)} color={retColor(stats.avgNetReturn)} />
+        <Kpi label="毛報酬均值" value={fmtRet(stats.avgGrossReturn)} color={retColor(stats.avgGrossReturn)} />
+        <Kpi label="中位數" value={fmtRet(stats.medianReturn)} color={retColor(stats.medianReturn)} />
+        <Kpi label="最大獲利" value={fmtRet(stats.maxGain)} color="text-emerald-400" />
+        <Kpi label="最大虧損" value={fmtRet(stats.maxLoss)} color="text-red-400" />
+        <Kpi label="期望值" value={fmtRet(stats.expectancy)} color={retColor(stats.expectancy)} subtext="每筆平均淨賺" />
+        <Kpi label="最大連虧" value={fmtRet(stats.maxDrawdown)} color="text-red-400" subtext="累積" />
+        <Kpi label="勝 / 負" value={`${stats.wins} / ${stats.losses}`} color="text-slate-300" />
+        <Kpi label="淨報酬加總" value={fmtRet(stats.totalNetReturn)} color={retColor(stats.totalNetReturn)} subtext="非複利" />
+      </div>
+    </div>
+  );
+}
 
-      <td className="py-2.5 px-3 text-center">
-        <span className={`text-sm ${scoreColor(result.sixConditionsScore)}`}>
-          {result.sixConditionsScore}/6
-        </span>
-        <div className="flex justify-center gap-0.5 mt-1">
-          {Object.values(result.sixConditionsBreakdown).map((v, i) => (
-            <div key={i} className={`w-2 h-2 rounded-full ${v ? 'bg-amber-400' : 'bg-slate-600'}`} />
+function Kpi({ label, value, color, subtext }: {
+  label: string; value: string; color: string; subtext?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="text-[10px] text-slate-400">{label}</div>
+      <div className={`text-base font-bold ${color}`}>{value}</div>
+      {subtext && <div className="text-[10px] text-slate-600">{subtext}</div>}
+    </div>
+  );
+}
+
+// ── Trade Row ──────────────────────────────────────────────────────────────────
+
+function TradeRow({ t }: { t: BacktestTrade }) {
+  const sym = t.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  return (
+    <tr className="border-t border-slate-700/50 hover:bg-slate-700/20 transition-colors text-xs">
+      <td className="py-2 px-3">
+        <div className="font-medium text-white text-sm">{t.name}</div>
+        <div className="text-slate-500 font-mono">{sym}</div>
+      </td>
+      <td className="py-2 px-2 text-center">
+        <span className={scoreColor(t.signalScore)}>{t.signalScore}/6</span>
+      </td>
+      <td className="py-2 px-2 text-center">{trendBadge(t.trendState)}</td>
+      <td className="py-2 px-2 text-slate-400 text-center font-mono">{t.entryDate}</td>
+      <td className="py-2 px-2 text-right font-mono text-slate-200">{t.entryPrice.toFixed(2)}</td>
+      <td className="py-2 px-2 text-slate-400 text-center font-mono">{t.exitDate}</td>
+      <td className="py-2 px-2 text-right font-mono text-slate-200">{t.exitPrice.toFixed(2)}</td>
+      <td className="py-2 px-2 text-center">{exitBadge(t.exitReason)}</td>
+      <td className="py-2 px-2 text-center text-slate-400">{t.holdDays}日</td>
+      <td className={`py-2 px-2 text-right font-mono font-semibold ${retColor(t.grossReturn)}`}>
+        {fmtRet(t.grossReturn)}
+      </td>
+      <td className={`py-2 px-2 text-right font-mono font-bold ${retColor(t.netReturn)}`}>
+        {fmtRet(t.netReturn)}
+      </td>
+      <td className="py-2 px-2 text-right text-slate-500 font-mono">
+        {t.totalCost > 0 ? `-${t.totalCost.toLocaleString()}` : '–'}
+      </td>
+      <td className="py-2 px-2">
+        <div className="flex flex-wrap gap-0.5 max-w-[160px]">
+          {t.signalReasons.map(r => (
+            <span key={r} className="px-1 py-0.5 bg-slate-700 text-slate-300 rounded text-[10px]">{r}</span>
           ))}
         </div>
       </td>
-
-      <td className="py-2.5 px-3 text-center">
-        {trendBadge(result.trendState)}
-      </td>
-
-      <td className="py-2.5 px-3 text-right font-mono text-sm text-slate-200">
-        {result.price.toFixed(result.price >= 10 ? 2 : 3)}
-      </td>
-
-      {/* Forward returns */}
-      {perf ? (
-        <>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.openReturn)}`}>
-            {fmtRet(perf.openReturn)}
-          </td>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d1Return)}`}>
-            {fmtRet(perf.d1Return)}
-          </td>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d2Return)}`}>
-            {fmtRet(perf.d2Return)}
-          </td>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d3Return)}`}>
-            {fmtRet(perf.d3Return)}
-          </td>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d4Return)}`}>
-            {fmtRet(perf.d4Return)}
-          </td>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d5Return)}`}>
-            {fmtRet(perf.d5Return)}
-          </td>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d10Return)}`}>
-            {fmtRet(perf.d10Return)}
-          </td>
-          <td className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(perf.d20Return)}`}>
-            {fmtRet(perf.d20Return)}
-          </td>
-          <td className="py-2 px-1.5 text-right text-xs whitespace-nowrap">
-            <span className="text-emerald-400">+{perf.maxGain.toFixed(1)}%</span>
-            <span className="text-slate-500 mx-0.5">/</span>
-            <span className="text-red-400">{perf.maxLoss.toFixed(1)}%</span>
-          </td>
-        </>
-      ) : (
-        <td colSpan={10} className="py-2.5 px-3 text-center text-xs text-slate-500">
-          計算中…
-        </td>
-      )}
-
-      <td className="py-2.5 px-3 text-center">
+      <td className="py-2 px-3 text-center">
         <Link
-          href={`/?load=${result.symbol}`}
+          href={`/?load=${sym}`}
           className="text-xs text-sky-400 hover:text-sky-300 underline underline-offset-2"
         >
-          看圖
+          走圖
         </Link>
       </td>
     </tr>
@@ -171,9 +172,7 @@ function ResultRow({
 function SessionHistory() {
   const { sessions, loadSession, market, scanDate } = useBacktestStore();
   const filtered = sessions.filter(s => s.market === market);
-
   if (filtered.length === 0) return null;
-
   return (
     <div className="bg-slate-800 rounded-xl p-4">
       <h3 className="text-sm font-semibold text-slate-300 mb-3">回測歷史</h3>
@@ -186,8 +185,11 @@ function SessionHistory() {
               s.scanDate === scanDate ? 'bg-slate-700 text-white' : 'text-slate-400'
             }`}
           >
-            <span className="font-mono">{s.scanDate}</span>
-            <span className="ml-2 text-slate-500">選出 {s.scanResults.length} 檔</span>
+            <div className="font-mono">{s.scanDate}</div>
+            <div className="text-slate-500">
+              {s.scanResults.length} 檔
+              {s.stats ? ` ｜ 勝率 ${s.stats.winRate}%` : ''}
+            </div>
           </button>
         ))}
       </div>
@@ -199,32 +201,38 @@ function SessionHistory() {
 
 export default function BacktestPage() {
   const {
-    market, scanDate, setMarket, setScanDate,
+    market, scanDate, strategy,
+    setMarket, setScanDate, setStrategy,
     isScanning, scanProgress, scanError,
     scanResults, isFetchingForward, forwardError, performance,
+    trades, stats,
     runBacktest, clearCurrent,
   } = useBacktestStore();
 
-  const [activeHorizon, setActiveHorizon] = useState<BacktestHorizon>('d5');
+  const [tab, setTab]               = useState<'strict' | 'horizon'>('strict');
+  const [activeHorizon, setHorizon] = useState<BacktestHorizon>('d5');
+  const [sortBy, setSortBy]         = useState<'netReturn' | 'signalScore' | 'holdDays'>('netReturn');
 
-  const perfMap = new Map(performance.map(p => [p.symbol, p]));
-
-  const today = new Date().toISOString().split('T')[0];
   const maxDate = (() => {
     const d = new Date(); d.setDate(d.getDate() - 1);
     return d.toISOString().split('T')[0];
   })();
 
   const horizonLabels: { key: BacktestHorizon; label: string }[] = [
-    { key: 'open', label: '隔日開' },
-    { key: 'd1',   label: '1日' },
-    { key: 'd2',   label: '2日' },
-    { key: 'd3',   label: '3日' },
-    { key: 'd4',   label: '4日' },
-    { key: 'd5',   label: '5日' },
-    { key: 'd10',  label: '10日' },
-    { key: 'd20',  label: '20日' },
+    { key: 'open', label: '隔日開' }, { key: 'd1', label: '1日' },
+    { key: 'd2', label: '2日' },     { key: 'd3', label: '3日' },
+    { key: 'd4', label: '4日' },     { key: 'd5', label: '5日' },
+    { key: 'd10', label: '10日' },   { key: 'd20', label: '20日' },
   ];
+
+  const perfMap = new Map(performance.map(p => [p.symbol, p]));
+
+  const sortedTrades = [...trades].sort((a, b) => {
+    if (sortBy === 'netReturn')   return b.netReturn - a.netReturn;
+    if (sortBy === 'signalScore') return b.signalScore - a.signalScore;
+    if (sortBy === 'holdDays')    return a.holdDays - b.holdDays;
+    return 0;
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
@@ -234,8 +242,8 @@ export default function BacktestPage() {
           <Link href="/" className="text-slate-400 hover:text-slate-200 text-sm">← 主頁</Link>
           <div className="h-5 w-px bg-slate-700" />
           <h1 className="font-bold text-white">歷史掃描回測</h1>
-          <div className="ml-auto flex items-center gap-2">
-            <Link href="/scanner" className="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors">
+          <div className="ml-auto">
+            <Link href="/scanner" className="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">
               即時掃描
             </Link>
           </div>
@@ -252,15 +260,10 @@ export default function BacktestPage() {
               <label className="text-xs text-slate-400 font-medium">市場</label>
               <div className="flex gap-2">
                 {(['TW', 'CN'] as const).map(m => (
-                  <button
-                    key={m}
-                    onClick={() => { setMarket(m); clearCurrent(); }}
+                  <button key={m} onClick={() => { setMarket(m); clearCurrent(); }}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      market === m
-                        ? 'bg-sky-600 text-white'
-                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                    }`}
-                  >
+                      market === m ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}>
                     {m === 'TW' ? '台股' : '陸股'}
                   </button>
                 ))}
@@ -269,30 +272,60 @@ export default function BacktestPage() {
 
             {/* Date */}
             <div className="space-y-1.5">
-              <label className="text-xs text-slate-400 font-medium">掃描日期</label>
-              <input
-                type="date"
-                value={scanDate}
-                max={maxDate}
-                min="2020-01-01"
+              <label className="text-xs text-slate-400 font-medium">訊號日期</label>
+              <input type="date" value={scanDate} max={maxDate} min="2020-01-01"
                 onChange={e => { setScanDate(e.target.value); clearCurrent(); }}
                 className="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500"
               />
             </div>
 
-            {/* Scan button */}
-            <button
-              onClick={runBacktest}
+            {/* Strategy params */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400 font-medium">持有天數</label>
+              <select value={strategy.holdDays}
+                onChange={e => setStrategy({ holdDays: +e.target.value })}
+                className="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500">
+                {[1, 3, 5, 10, 20].map(d => <option key={d} value={d}>{d} 日</option>)}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400 font-medium">停損</label>
+              <select
+                value={strategy.stopLoss == null ? 'off' : String(strategy.stopLoss)}
+                onChange={e => setStrategy({ stopLoss: e.target.value === 'off' ? null : +e.target.value })}
+                className="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500">
+                <option value="off">不設停損</option>
+                <option value="-0.05">-5%</option>
+                <option value="-0.07">-7%（朱老師）</option>
+                <option value="-0.10">-10%</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400 font-medium">停利</label>
+              <select
+                value={strategy.takeProfit == null ? 'off' : String(strategy.takeProfit)}
+                onChange={e => setStrategy({ takeProfit: e.target.value === 'off' ? null : +e.target.value })}
+                className="bg-slate-800 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500">
+                <option value="off">不設停利</option>
+                <option value="0.10">+10%</option>
+                <option value="0.15">+15%</option>
+                <option value="0.20">+20%</option>
+              </select>
+            </div>
+
+            {/* Run */}
+            <button onClick={runBacktest}
               disabled={isScanning || isFetchingForward || !scanDate}
-              className="px-6 py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-semibold transition-colors"
-            >
+              className="px-6 py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-semibold transition-colors">
               {isScanning ? '掃描中…' : isFetchingForward ? '計算績效…' : '開始回測'}
             </button>
 
             {scanResults.length > 0 && !isScanning && (
               <div className="text-sm text-slate-400">
-                <span className="text-white font-semibold">{scanDate}</span> 共選出{' '}
-                <span className="text-amber-400 font-bold">{scanResults.length}</span> 檔
+                <span className="text-white font-semibold">{scanDate}</span>{' '}
+                選出 <span className="text-amber-400 font-bold">{scanResults.length}</span> 檔
               </div>
             )}
           </div>
@@ -301,13 +334,12 @@ export default function BacktestPage() {
           {(isScanning || isFetchingForward) && (
             <div className="mt-4 space-y-1">
               <div className="text-xs text-slate-400">
-                {isScanning ? `掃描歷史數據（${scanDate}）…` : '計算後續績效…'}
+                {isScanning ? `掃描歷史數據（${scanDate}）…` : '計算後續績效與回測引擎…'}
               </div>
-              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-sky-600 rounded-full transition-all duration-500"
-                  style={{ width: isScanning ? `${scanProgress}%` : '100%', animation: isFetchingForward ? 'pulse 1s ease-in-out infinite' : 'none' }}
-                />
+              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-sky-600 rounded-full transition-all duration-500"
+                  style={{ width: isScanning ? `${scanProgress}%` : '100%',
+                           animation: isFetchingForward ? 'pulse 1s infinite' : 'none' }} />
               </div>
             </div>
           )}
@@ -319,99 +351,153 @@ export default function BacktestPage() {
           )}
         </div>
 
-        {/* Summary grid – show once forward data is ready */}
-        {performance.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wide">
-              策略績效統計（{scanDate}）
-            </h2>
-            <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
-              {horizonLabels.map(({ key, label }) => (
-                <SummaryCard key={key} label={label} horizon={key} performance={performance} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Main content + sidebar */}
-        {scanResults.length > 0 && (
+        {/* Results */}
+        {(trades.length > 0 || performance.length > 0) && (
           <div className="flex gap-6">
-            {/* Results table */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide">
-                  選股結果 {isFetchingForward && <span className="text-sky-400 animate-pulse">（後續績效計算中…）</span>}
-                </h2>
-                {performance.length > 0 && (
-                  <div className="flex gap-1">
-                    {horizonLabels.map(({ key, label }) => (
-                      <button
-                        key={key}
-                        onClick={() => setActiveHorizon(key)}
-                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                          activeHorizon === key
-                            ? 'bg-sky-700 text-white'
-                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <div className="flex-1 min-w-0 space-y-4">
 
-              <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-700 text-xs text-slate-400">
-                      <th className="py-2.5 px-3 text-left font-medium">股票</th>
-                      <th className="py-2.5 px-3 text-center font-medium">評分</th>
-                      <th className="py-2.5 px-3 text-center font-medium">趨勢</th>
-                      <th className="py-2.5 px-3 text-right font-medium">收盤價</th>
-                      {performance.length > 0 ? (
-                        <>
-                          <th className="py-2 px-1.5 text-right font-medium">隔日開</th>
-                          <th className="py-2 px-1.5 text-right font-medium">1日</th>
-                          <th className="py-2 px-1.5 text-right font-medium">2日</th>
-                          <th className="py-2 px-1.5 text-right font-medium">3日</th>
-                          <th className="py-2 px-1.5 text-right font-medium">4日</th>
-                          <th className="py-2 px-1.5 text-right font-medium">5日</th>
-                          <th className="py-2 px-1.5 text-right font-medium">10日</th>
-                          <th className="py-2 px-1.5 text-right font-medium">20日</th>
-                          <th className="py-2 px-1.5 text-right font-medium">最高/最低</th>
-                        </>
-                      ) : (
-                        <th className="py-2.5 px-3 text-center font-medium" colSpan={10}>後續績效</th>
-                      )}
-                      <th className="py-2.5 px-3 text-center font-medium">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scanResults.map(r => (
-                      <ResultRow
-                        key={r.symbol}
-                        result={r}
-                        perf={perfMap.get(r.symbol)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Six conditions legend */}
-              <div className="mt-2 text-xs text-slate-500 flex gap-4 flex-wrap">
-                <span>六大條件：</span>
-                {['趨勢', '位置', 'K棒', '均線', '成交量', '指標'].map((n, i) => (
-                  <span key={i} className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
-                    {n}
-                  </span>
+              {/* Tab switcher */}
+              <div className="flex items-center gap-1 border-b border-slate-800 pb-0">
+                {(['strict', 'horizon'] as const).map(t => (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      tab === t
+                        ? 'border-sky-500 text-sky-400'
+                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}>
+                    {t === 'strict' ? '🔬 嚴謹回測（含成本）' : '📊 時間視角統計'}
+                  </button>
                 ))}
               </div>
+
+              {/* ── Tab: Strict ── */}
+              {tab === 'strict' && (
+                <div className="space-y-4">
+                  {stats && <StrictStatsPanel stats={stats} tradesCount={trades.length} />}
+
+                  <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800">
+                      <span className="text-xs text-slate-400">排序</span>
+                      {(['netReturn', 'signalScore', 'holdDays'] as const).map(k => (
+                        <button key={k} onClick={() => setSortBy(k)}
+                          className={`text-xs px-2 py-1 rounded transition-colors ${
+                            sortBy === k ? 'bg-sky-700 text-white' : 'text-slate-400 hover:text-slate-200'
+                          }`}>
+                          {{ netReturn: '淨報酬', signalScore: '評分', holdDays: '持有天數' }[k]}
+                        </button>
+                      ))}
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-[10px] text-slate-400 border-b border-slate-700">
+                          <th className="py-2 px-3 text-left">股票</th>
+                          <th className="py-2 px-2 text-center">評分</th>
+                          <th className="py-2 px-2 text-center">趨勢</th>
+                          <th className="py-2 px-2 text-center">進場日</th>
+                          <th className="py-2 px-2 text-right">進場價</th>
+                          <th className="py-2 px-2 text-center">出場日</th>
+                          <th className="py-2 px-2 text-right">出場價</th>
+                          <th className="py-2 px-2 text-center">出場原因</th>
+                          <th className="py-2 px-2 text-center">持有</th>
+                          <th className="py-2 px-2 text-right">毛報酬</th>
+                          <th className="py-2 px-2 text-right">淨報酬</th>
+                          <th className="py-2 px-2 text-right">交易成本</th>
+                          <th className="py-2 px-2 text-left">命中原因</th>
+                          <th className="py-2 px-3 text-center">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedTrades.map(t => <TradeRow key={t.symbol + t.entryDate} t={t} />)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Tab: Horizon ── */}
+              {tab === 'horizon' && performance.length > 0 && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+                    {horizonLabels.map(({ key, label }) => (
+                      <HorizonCard key={key} label={label} horizon={key} performance={performance} />
+                    ))}
+                  </div>
+
+                  <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
+                    <div className="flex gap-1 px-4 py-3 border-b border-slate-800">
+                      {horizonLabels.map(({ key, label }) => (
+                        <button key={key} onClick={() => setHorizon(key)}
+                          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                            activeHorizon === key ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                          }`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-700 text-xs text-slate-400">
+                          <th className="py-2.5 px-3 text-left">股票</th>
+                          <th className="py-2.5 px-3 text-center">評分</th>
+                          <th className="py-2.5 px-3 text-center">趨勢</th>
+                          <th className="py-2.5 px-3 text-right">收盤價</th>
+                          <th className="py-2 px-1.5 text-right">隔日開</th>
+                          <th className="py-2 px-1.5 text-right">1日</th>
+                          <th className="py-2 px-1.5 text-right">2日</th>
+                          <th className="py-2 px-1.5 text-right">3日</th>
+                          <th className="py-2 px-1.5 text-right">4日</th>
+                          <th className="py-2 px-1.5 text-right">5日</th>
+                          <th className="py-2 px-1.5 text-right">10日</th>
+                          <th className="py-2 px-1.5 text-right">20日</th>
+                          <th className="py-2 px-1.5 text-right">最高/最低</th>
+                          <th className="py-2.5 px-3 text-center">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {scanResults.map(r => {
+                          const p = perfMap.get(r.symbol);
+                          const sym = r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+                          return (
+                            <tr key={r.symbol} className="border-t border-slate-700/50 hover:bg-slate-700/20 text-sm">
+                              <td className="py-2.5 px-3">
+                                <div className="font-medium text-white">{r.name}</div>
+                                <div className="text-xs text-slate-400 font-mono">{sym}</div>
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <span className={scoreColor(r.sixConditionsScore)}>{r.sixConditionsScore}/6</span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center">{trendBadge(r.trendState)}</td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-200">
+                                {r.price.toFixed(r.price >= 10 ? 2 : 3)}
+                              </td>
+                              {p ? (
+                                <>
+                                  {[p.openReturn, p.d1Return, p.d2Return, p.d3Return, p.d4Return, p.d5Return, p.d10Return, p.d20Return].map((v, i) => (
+                                    <td key={i} className={`py-2 px-1.5 text-right text-xs font-mono ${retColor(v)}`}>{fmtRet(v)}</td>
+                                  ))}
+                                  <td className="py-2 px-1.5 text-right text-xs whitespace-nowrap">
+                                    <span className="text-emerald-400">+{p.maxGain.toFixed(1)}%</span>
+                                    <span className="text-slate-500 mx-0.5">/</span>
+                                    <span className="text-red-400">{p.maxLoss.toFixed(1)}%</span>
+                                  </td>
+                                </>
+                              ) : (
+                                <td colSpan={9} className="py-2 text-center text-xs text-slate-500">計算中…</td>
+                              )}
+                              <td className="py-2.5 px-3 text-center">
+                                <Link href={`/?load=${sym}`} className="text-xs text-sky-400 hover:text-sky-300 underline underline-offset-2">走圖</Link>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Sidebar: history */}
+            {/* Sidebar */}
             <div className="w-52 shrink-0 hidden lg:block">
               <SessionHistory />
             </div>
@@ -421,10 +507,10 @@ export default function BacktestPage() {
         {/* Empty state */}
         {!isScanning && !isFetchingForward && scanResults.length === 0 && !scanError && (
           <div className="text-center py-20 text-slate-500 space-y-2">
-            <div className="text-5xl">🔍</div>
-            <div className="text-lg font-medium text-slate-400">選擇市場與日期，開始歷史回測</div>
-            <div className="text-sm">系統將以當日收盤前的資料，跑一次朱老師選股規則</div>
-            <div className="text-sm">並自動計算選出股票之後 開盤/1/3/5/10/20 日的漲跌幅</div>
+            <div className="text-5xl">🔬</div>
+            <div className="text-lg font-medium text-slate-400">選擇市場、日期、策略，開始回測</div>
+            <div className="text-sm">嚴謹模式：進場用隔日開盤價，成本模型台股/陸股分開計算</div>
+            <div className="text-sm">每筆交易保留完整進出場紀錄與命中原因</div>
           </div>
         )}
 

@@ -82,4 +82,8 @@ export interface BacktestSession {
   createdAt: string;
   scanResults: StockScanResult[];
   performance: StockForwardPerformance[];
+  /** 嚴謹回測結果（v2+，含完整進出場紀錄） */
+  trades?: import('@/lib/backtest/BacktestEngine').BacktestTrade[];
+  stats?:  import('@/lib/backtest/BacktestEngine').BacktestStats;
+  strategyVersion?: string;
 }

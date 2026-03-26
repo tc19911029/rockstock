@@ -4,6 +4,10 @@ import {
   MarketId, StockScanResult, StockForwardPerformance, BacktestSession,
 } from '@/lib/scanner/types';
 import { calcBacktestSummary } from '@/lib/backtest/ForwardAnalyzer';
+import {
+  BacktestTrade, BacktestStats, BacktestStrategyParams,
+  DEFAULT_STRATEGY, runBatchBacktest, calcBacktestStats,
+} from '@/lib/backtest/BacktestEngine';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -19,6 +23,7 @@ interface BacktestState {
   // controls
   market:   MarketId;
   scanDate: string;
+  strategy: BacktestStrategyParams;
 
   // scan phase
   isScanning:   boolean;
@@ -31,17 +36,22 @@ interface BacktestState {
   forwardError:  string | null;
   performance:   StockForwardPerformance[];
 
+  // engine phase (v2 — strict backtest)
+  trades: BacktestTrade[];
+  stats:  BacktestStats | null;
+
   // history
   sessions: BacktestSession[];
 
   // actions
-  setMarket:   (m: MarketId) => void;
-  setScanDate: (d: string)   => void;
-  runBacktest: () => Promise<void>;
-  loadSession: (id: string)  => void;
+  setMarket:    (m: MarketId) => void;
+  setScanDate:  (d: string)   => void;
+  setStrategy:  (s: Partial<BacktestStrategyParams>) => void;
+  runBacktest:  () => Promise<void>;
+  loadSession:  (id: string)  => void;
   clearCurrent: () => void;
 
-  // helpers
+  // helpers (legacy horizon stats)
   getSummary: (horizon: BacktestHorizon) => BacktestSummary | null;
 }
 
@@ -60,6 +70,7 @@ export const useBacktestStore = create<BacktestState>()(
     (set, get) => ({
       market:   'TW',
       scanDate: todayMinus1(),
+      strategy: DEFAULT_STRATEGY,
 
       isScanning:   false,
       scanProgress: 0,
@@ -70,12 +81,17 @@ export const useBacktestStore = create<BacktestState>()(
       forwardError:  null,
       performance:   [],
 
+      trades: [],
+      stats:  null,
+
       sessions: [],
 
       setMarket:   (market)   => set({ market }),
       setScanDate: (scanDate) => set({ scanDate }),
+      setStrategy: (partial)  => set(s => ({ strategy: { ...s.strategy, ...partial } })),
+
       clearCurrent: () => set({
-        scanResults: [], performance: [],
+        scanResults: [], performance: [], trades: [], stats: null,
         scanError: null, forwardError: null,
         isScanning: false, isFetchingForward: false,
       }),
@@ -87,10 +103,11 @@ export const useBacktestStore = create<BacktestState>()(
       },
 
       runBacktest: async () => {
-        const { market, scanDate } = get();
+        const { market, scanDate, strategy } = get();
 
         // ── Phase 1: Get stock list ──────────────────────────────────────────
-        set({ isScanning: true, scanProgress: 5, scanError: null, scanResults: [], performance: [] });
+        set({ isScanning: true, scanProgress: 5, scanError: null,
+              scanResults: [], performance: [], trades: [], stats: null });
 
         let stocks: Array<{ symbol: string; name: string }>;
         try {
@@ -162,7 +179,17 @@ export const useBacktestStore = create<BacktestState>()(
           const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
           const performance = fwdJson.performance ?? [];
 
-          // Save session to history
+          // ── Phase 4: Run strict BacktestEngine ────────────────────────────
+          // Build forward candles map: symbol → ForwardCandle[]
+          const candlesMap: Record<string, typeof performance[0]['forwardCandles']> = {};
+          for (const p of performance) {
+            candlesMap[p.symbol] = p.forwardCandles;
+          }
+
+          const trades = runBatchBacktest(combined, candlesMap, strategy);
+          const stats  = calcBacktestStats(trades);
+
+          // ── Save session ──────────────────────────────────────────────────
           const session: BacktestSession = {
             id:          `${market}-${scanDate}-${Date.now()}`,
             market,
@@ -170,11 +197,17 @@ export const useBacktestStore = create<BacktestState>()(
             createdAt:   new Date().toISOString(),
             scanResults: combined,
             performance,
+            trades,
+            stats:       stats ?? undefined,
+            strategyVersion: `holdDays=${strategy.holdDays},sl=${strategy.stopLoss ?? 'off'},tp=${strategy.takeProfit ?? 'off'}`,
           };
+
           set(s => ({
             performance,
+            trades,
+            stats,
             isFetchingForward: false,
-            sessions: [session, ...s.sessions].slice(0, 20), // keep last 20
+            sessions: [session, ...s.sessions].slice(0, 20),
           }));
         } catch (e) {
           set({ isFetchingForward: false, forwardError: String(e) });
@@ -185,17 +218,20 @@ export const useBacktestStore = create<BacktestState>()(
         const session = get().sessions.find(s => s.id === id);
         if (!session) return;
         set({
-          market:     session.market,
-          scanDate:   session.scanDate,
+          market:      session.market,
+          scanDate:    session.scanDate,
           scanResults: session.scanResults,
           performance: session.performance,
+          trades:      session.trades ?? [],
+          stats:       session.stats  ?? null,
         });
       },
     }),
     {
-      name: 'backtest-v1',
+      name: 'backtest-v2',
       partialize: (s) => ({
-        market: s.market, scanDate: s.scanDate, sessions: s.sessions,
+        market: s.market, scanDate: s.scanDate,
+        strategy: s.strategy, sessions: s.sessions,
       }),
     }
   )
