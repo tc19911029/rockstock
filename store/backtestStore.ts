@@ -96,10 +96,8 @@ interface BacktestState {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function todayMinus1(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().split('T')[0];
+function today(): string {
+  return new Date().toISOString().split('T')[0];
 }
 
 // ── Store ──────────────────────────────────────────────────────────────────────
@@ -108,7 +106,7 @@ export const useBacktestStore = create<BacktestState>()(
   persist(
     (set, get) => ({
       market:             'TW',
-      scanDate:           todayMinus1(),
+      scanDate:           today(),
       strategy:           DEFAULT_STRATEGY,
       useCapitalMode:     false,
       capitalConstraints: DEFAULT_CAPITAL,

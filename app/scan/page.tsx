@@ -734,10 +734,7 @@ export default function UnifiedScanPage() {
   const [scanSort, setScanSort]     = useState<'score' | 'surge' | 'ai' | 'change' | 'volume'>('score');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
 
-  const maxDate = (() => {
-    const d = new Date(); d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
-  })();
+  const maxDate = new Date().toISOString().split('T')[0]; // 允許選今天
 
   const horizonLabels: { key: BacktestHorizon; label: string }[] = [
     { key: 'open', label: '隔日開' }, { key: 'd1', label: '1日' },
