@@ -40,6 +40,7 @@ const TWSE_INDUSTRY_MAP: Record<string, string> = {
   '28': '電子零組件', '29': '電子通路', '30': '資訊服務', '31': '其他電子',
   '32': '文化創意', '33': '農業科技', '34': '電子商務', '35': '綠能環保',
   '36': '數位雲端', '37': '運動休閒', '38': '居家生活',
+  '91': '存託憑證',
 };
 
 let industryCache: Map<string, string> | null = null;
@@ -88,9 +89,8 @@ async function fetchTWIndustryMap(): Promise<Map<string, string>> {
     if (res2.ok) {
       const data2 = await res2.json() as Array<Record<string, string>>;
       for (const row of data2) {
-        // TPEx 的欄位可能是「公司代號」或「SecuritiesCompanyCode」
-        const code = (row['公司代號'] ?? row['SecuritiesCompanyCode'])?.trim();
-        const indCode = (row['產業別'] ?? row['產業類別'] ?? row['SecuritiesIndustryCode'])?.trim();
+        const code = (row['SecuritiesCompanyCode'] || '').trim();
+        const indCode = (row['SecuritiesIndustryCode'] || '').trim();
         if (code && indCode) {
           map.set(code, TWSE_INDUSTRY_MAP[indCode] ?? indCode);
         }
