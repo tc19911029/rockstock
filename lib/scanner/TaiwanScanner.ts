@@ -90,10 +90,11 @@ export class TaiwanScanner extends MarketScanner {
       return FALLBACK_TW_STOCKS;
     }
 
-    // Deduplicate, sort by volume (highest first), take top 500
+    // Deduplicate, sort by volume (highest first) — 全部台股不設上限
     const deduped = Array.from(new Map(withVol.map(s => [s.symbol, s])).values());
-    const top500  = deduped.sort((a, b) => b.vol - a.vol).slice(0, 500);
-    return top500.map(({ symbol, name }) => ({ symbol, name }));
+    const sorted  = deduped.sort((a, b) => b.vol - a.vol);
+    console.log(`[TaiwanScanner] 取得 ${sorted.length} 檔台股`);
+    return sorted.map(({ symbol, name }) => ({ symbol, name }));
   }
 
   async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {

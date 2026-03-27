@@ -935,8 +935,9 @@ export class ChinaScanner extends MarketScanner {
   }
 
   async getStockList(): Promise<StockEntry[]> {
-    // Return top 500 by market importance (list is pre-ordered: major indices first)
-    return CN_STOCKS.slice(0, 500);
+    // 回傳全部 A 股名單（不設上限）
+    console.log(`[ChinaScanner] 回傳 ${CN_STOCKS.length} 檔 A 股`);
+    return CN_STOCKS;
   }
 
   async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {
