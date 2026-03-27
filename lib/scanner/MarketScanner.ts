@@ -8,9 +8,11 @@ import { computeSurgeScore } from '@/lib/analysis/surgeScore';
 
 const CONCURRENCY = 15; // parallel requests per chunk
 
+export type StockEntry = { symbol: string; name: string; industry?: string };
+
 export abstract class MarketScanner {
   abstract getMarketConfig(): MarketConfig;
-  abstract getStockList(): Promise<Array<{ symbol: string; name: string }>>;
+  abstract getStockList(): Promise<StockEntry[]>;
   abstract fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]>;
   abstract getMarketTrend(asOfDate?: string): Promise<TrendState>;
 
@@ -31,6 +33,7 @@ export abstract class MarketScanner {
     minScore: number,
     thresholds: StrategyThresholds,
     asOfDate?: string,
+    industry?: string,
   ): Promise<StockScanResult | null> {
     try {
       const candles = await this.fetchCandles(symbol, asOfDate);
@@ -98,6 +101,7 @@ export abstract class MarketScanner {
         symbol,
         name,
         market: config.marketId,
+        industry,
         price: last.close,
         changePercent,
         volume: last.volume,
@@ -128,7 +132,7 @@ export abstract class MarketScanner {
 
   /** Scan a provided sub-list of stocks (used by chunked parallel scanning) */
   async scanList(
-    stocks: Array<{ symbol: string; name: string }>,
+    stocks: StockEntry[],
     thresholds?: StrategyThresholds,
   ): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
     return this._scanChunk(stocks, undefined, thresholds);
@@ -136,7 +140,7 @@ export abstract class MarketScanner {
 
   /** Scan a provided sub-list of stocks as of a specific historical date (backtest mode) */
   async scanListAtDate(
-    stocks: Array<{ symbol: string; name: string }>,
+    stocks: StockEntry[],
     asOfDate: string,
     thresholds?: StrategyThresholds,
   ): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
@@ -144,7 +148,7 @@ export abstract class MarketScanner {
   }
 
   private async _scanChunk(
-    stocks: Array<{ symbol: string; name: string }>,
+    stocks: StockEntry[],
     asOfDate: string | undefined,
     thresholds?: StrategyThresholds,
   ): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
@@ -173,7 +177,7 @@ export abstract class MarketScanner {
       }
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
-        batch.map(({ symbol, name }) => this.scanOne(symbol, name, config, minScore, th, asOfDate))
+        batch.map(({ symbol, name, industry }) => this.scanOne(symbol, name, config, minScore, th, asOfDate, industry))
       );
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);
@@ -216,7 +220,7 @@ export abstract class MarketScanner {
       }
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
-        batch.map(({ symbol, name }) => this.scanOne(symbol, name, config, minScore, th))
+        batch.map(({ symbol, name, industry }) => this.scanOne(symbol, name, config, minScore, th, undefined, industry))
       );
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);

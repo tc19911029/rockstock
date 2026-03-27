@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useBacktestStore, BacktestHorizon, CapitalConstraints, WalkForwardResult } from '@/store/backtestStore';
+import { useWatchlistStore } from '@/store/watchlistStore';
 import { StockForwardPerformance } from '@/lib/scanner/types';
 import { calcBacktestSummary } from '@/lib/backtest/ForwardAnalyzer';
 import { BacktestTrade, BacktestStats } from '@/lib/backtest/BacktestEngine';
@@ -730,8 +731,9 @@ export default function UnifiedScanPage() {
 
   const [tab, setTab]               = useState<'strict' | 'horizon' | 'walkforward'>('strict');
   const [activeHorizon, setHorizon] = useState<BacktestHorizon>('d5');
-  const [sortBy, setSortBy]         = useState<'netReturn' | 'signalScore' | 'holdDays'>('netReturn');
-  const [scanSort, setScanSort]     = useState<'score' | 'surge' | 'ai' | 'change' | 'volume'>('score');
+  const [sortBy, setSortBy]         = useState<'netReturn' | 'signalScore' | 'surgeScore' | 'histWinRate' | 'holdDays'>('netReturn');
+  const [scanSort, setScanSort]     = useState<'score' | 'grade' | 'potential' | 'winRate' | 'price' | 'change'>('score');
+  const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
   const [gradeFilter, setGradeFilter] = useState<string>('all');
 
   // 用 state 避免 SSR hydration mismatch
@@ -748,10 +750,29 @@ export default function UnifiedScanPage() {
   const perfMap = new Map(performance.map(p => [p.symbol, p]));
 
   const sortedTrades = [...trades].sort((a, b) => {
-    if (sortBy === 'netReturn')   return b.netReturn - a.netReturn;
-    if (sortBy === 'signalScore') return b.signalScore - a.signalScore;
-    if (sortBy === 'holdDays')    return a.holdDays - b.holdDays;
+    if (sortBy === 'netReturn')    return b.netReturn - a.netReturn;
+    if (sortBy === 'signalScore')  return b.signalScore - a.signalScore;
+    if (sortBy === 'surgeScore')   return (b.surgeScore ?? 0) - (a.surgeScore ?? 0);
+    if (sortBy === 'histWinRate')  return (b.histWinRate ?? 0) - (a.histWinRate ?? 0);
+    if (sortBy === 'holdDays')     return a.holdDays - b.holdDays;
     return 0;
+  });
+
+  // 掃描結果排序
+  const sortedScanResults = [...scanResults].sort((a, b) => {
+    const dir = scanSortDir === 'desc' ? 1 : -1;
+    switch (scanSort) {
+      case 'score':     return dir * ((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0));
+      case 'grade': {
+        const gradeOrder: Record<string, number> = { S: 5, A: 4, B: 3, C: 2, D: 1 };
+        return dir * ((gradeOrder[b.surgeGrade ?? ''] ?? 0) - (gradeOrder[a.surgeGrade ?? ''] ?? 0));
+      }
+      case 'potential':  return dir * ((b.surgeScore ?? 0) - (a.surgeScore ?? 0));
+      case 'winRate':    return dir * ((b.histWinRate ?? 0) - (a.histWinRate ?? 0));
+      case 'price':      return dir * ((b.price ?? 0) - (a.price ?? 0));
+      case 'change':     return dir * ((b.changePercent ?? 0) - (a.changePercent ?? 0));
+      default:           return 0;
+    }
   });
 
   return (
@@ -1083,14 +1104,14 @@ export default function UnifiedScanPage() {
                                     走圖
                                   </Link>
                                   <button
-                                    onClick={() => {
-                                      try {
-                                        const list: string[] = JSON.parse(localStorage.getItem('watchlist') || '[]');
-                                        if (!list.includes(r.symbol)) { list.push(r.symbol); localStorage.setItem('watchlist', JSON.stringify(list)); }
-                                      } catch {}
+                                    onClick={(e) => {
+                                      useWatchlistStore.getState().add(r.symbol, r.name);
+                                      const btn = e.currentTarget;
+                                      btn.textContent = '✓ 已加';
+                                      setTimeout(() => { btn.textContent = '+自選'; }, 1200);
                                     }}
                                     className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-amber-700/50 hover:bg-amber-900/30">
-                                    +自選
+                                    {useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
                                   </button>
                                 </div>
 
@@ -1157,22 +1178,41 @@ export default function UnifiedScanPage() {
                         <tr className="text-slate-400 border-b border-slate-700">
                           <th className="text-left py-1.5 px-2">代號</th>
                           <th className="text-left py-1.5 px-2">名稱</th>
-                          <th className="text-center py-1.5 px-1">評分</th>
-                          <th className="text-center py-1.5 px-1">等級</th>
-                          <th className="text-center py-1.5 px-1">潛力</th>
-                          <th className="text-center py-1.5 px-1">勝率</th>
-                          <th className="text-right py-1.5 px-2">價格</th>
-                          <th className="text-right py-1.5 px-2">漲跌%</th>
+                          <th className="text-left py-1.5 px-1 text-[10px]">板塊</th>
+                          {([
+                            { key: 'score' as const, label: '評分', align: 'text-center', tooltip: '六大條件評分 (0-6)\n1.趨勢：頭頭高底底高+MA排列\n2.位置：MA20乖離0-12%或回踩MA10\n3.K棒：紅棒≥2%收上半部\n4.均線：MA5>MA10>MA20多頭排列\n5.量能：成交量≥5日均量×1.5倍\n6.指標：MACD紅柱或KD黃金交叉' },
+                            { key: 'grade' as const, label: '等級', align: 'text-center', tooltip: '飆股潛力等級\nS級(80+)：極強飆股特徵\nA級(65-79)：強勢股\nB級(50-64)：中等潛力\nC級(35-49)：偏弱\nD級(<35)：不具飆股特徵' },
+                            { key: 'potential' as const, label: '潛力', align: 'text-center', tooltip: '飆股潛力分數 (0-100)\n動能(18%)+波動率(12%)+量能(15%)\n+突破(15%)+趨勢品質(15%)\n+價格位置(5%)+K棒強度(5%)\n+指標共振(5%)+長期品質(10%)' },
+                            { key: 'winRate' as const, label: '勝率', align: 'text-center', tooltip: '歷史勝率：過去同類信號\n在相同策略參數下的獲利比率\n基於回測歷史交易計算' },
+                            { key: 'price' as const, label: '價格', align: 'text-right', tooltip: '' },
+                            { key: 'change' as const, label: '漲跌%', align: 'text-right', tooltip: '' },
+                          ]).map(({ key, label, align, tooltip }) => (
+                            <th key={key}
+                              className={`${align} py-1.5 px-1 cursor-pointer hover:text-white select-none group relative`}
+                              onClick={() => {
+                                if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                                else { setScanSort(key); setScanSortDir('desc'); }
+                              }}>
+                              <span>{label}</span>
+                              {scanSort === key && <span className="ml-0.5 text-sky-400">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
+                              {tooltip && (
+                                <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block w-56 p-2 rounded bg-slate-800 border border-slate-600 text-[10px] text-slate-300 whitespace-pre-line font-normal shadow-lg pointer-events-none">
+                                  {tooltip}
+                                </div>
+                              )}
+                            </th>
+                          ))}
                           <th className="text-left py-1.5 px-2">趨勢</th>
                           <th className="text-left py-1.5 px-2">位置</th>
                           <th className="text-center py-1.5 px-2">操作</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {scanResults.slice(0, 50).map((r, idx) => (
+                        {sortedScanResults.slice(0, 50).map((r, idx) => (
                           <tr key={r.symbol} className="border-b border-slate-800/50 hover:bg-slate-800/40">
                             <td className="py-1.5 px-2 font-mono font-bold text-white">{r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</td>
                             <td className="py-1.5 px-2 text-slate-300">{r.name}</td>
+                            <td className="py-1.5 px-1 text-[10px] text-slate-500 max-w-[60px] truncate" title={r.industry}>{r.industry ?? '—'}</td>
                             <td className="py-1.5 px-1 text-center">
                               <span className={`font-bold ${r.sixConditionsScore >= 5 ? 'text-red-400' : r.sixConditionsScore >= 4 ? 'text-orange-400' : 'text-yellow-400'}`}>
                                 {r.sixConditionsScore}/6
@@ -1208,18 +1248,14 @@ export default function UnifiedScanPage() {
                                 走圖
                               </Link>
                               <button
-                                onClick={() => {
-                                  try {
-                                    const key = 'watchlist';
-                                    const list: string[] = JSON.parse(localStorage.getItem(key) || '[]');
-                                    if (!list.includes(r.symbol)) {
-                                      list.push(r.symbol);
-                                      localStorage.setItem(key, JSON.stringify(list));
-                                    }
-                                  } catch {}
+                                onClick={(e) => {
+                                  useWatchlistStore.getState().add(r.symbol, r.name);
+                                  const btn = e.currentTarget;
+                                  btn.textContent = '✓ 已加';
+                                  setTimeout(() => { btn.textContent = '+自選'; }, 1200);
                                 }}
                                 className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-amber-700/50 hover:bg-amber-900/30">
-                                +自選
+                                {useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
                               </button>
                             </td>
                           </tr>
@@ -1276,10 +1312,12 @@ export default function UnifiedScanPage() {
                   <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800 bg-slate-800/30">
                       <span className="text-[11px] text-slate-500 font-medium">排序</span>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 flex-wrap">
                         {([
                           { key: 'netReturn' as const,   label: '淨報酬' },
                           { key: 'signalScore' as const, label: '評分' },
+                          { key: 'surgeScore' as const,  label: '飆股潛力' },
+                          { key: 'histWinRate' as const,  label: '勝率' },
                           { key: 'holdDays' as const,    label: '持有天數' },
                         ]).map(({ key, label }) => (
                           <button key={key} onClick={() => setSortBy(key)}

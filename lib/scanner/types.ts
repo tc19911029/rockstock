@@ -25,6 +25,7 @@ export interface StockScanResult {
   symbol: string;
   name: string;
   market: MarketId;
+  industry?: string;          // 產業板塊，e.g. "半導體", "記憶體", "金融保險"
   price: number;
   changePercent: number;
   volume: number;

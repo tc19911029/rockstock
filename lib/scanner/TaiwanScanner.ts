@@ -1,10 +1,8 @@
 import { CandleWithIndicators } from '@/types';
 import { fetchCandlesYahoo } from '@/lib/datasource/YahooFinanceDS';
-import { MarketScanner } from './MarketScanner';
+import { MarketScanner, StockEntry } from './MarketScanner';
 import { MarketConfig } from './types';
 import { detectTrend, TrendState } from '@/lib/analysis/trendAnalysis';
-
-type StockEntry = { symbol: string; name: string };
 
 // Fallback list if exchange APIs are unavailable
 const FALLBACK_TW_STOCKS: StockEntry[] = [
@@ -28,6 +26,75 @@ const FALLBACK_TW_STOCKS: StockEntry[] = [
 type TWSERow = { Code: string; Name: string; TradeVolume?: string };
 type TPExRow = { SecuritiesCompanyCode: string; CompanyName: string; TradingShares?: string };
 
+// ── 產業分類快取 ──────────────────────────────────────────────────────────────
+let industryCache: Map<string, string> | null = null;
+let industryCacheTime = 0;
+const INDUSTRY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24小時
+
+/**
+ * 從 TWSE 公開資訊觀測站取得上市公司產業分類
+ * API: 公司基本資料 (含產業分類)
+ */
+async function fetchTWIndustryMap(): Promise<Map<string, string>> {
+  if (industryCache && Date.now() - industryCacheTime < INDUSTRY_CACHE_TTL) {
+    return industryCache;
+  }
+
+  const map = new Map<string, string>();
+  try {
+    // TWSE 上市公司基本資料（含產業分類）
+    const res = await fetch(
+      'https://openapi.twse.com.tw/v1/opendata/t187ap03_L',
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (res.ok) {
+      const data = await res.json() as Array<{
+        公司代號: string;
+        產業類別: string;
+      }>;
+      for (const row of data) {
+        if (row.公司代號 && row.產業類別) {
+          map.set(row.公司代號.trim(), row.產業類別.trim());
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[TaiwanScanner] 取得上市產業分類失敗:', e);
+  }
+
+  try {
+    // TPEx 上櫃公司基本資料
+    const res2 = await fetch(
+      'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O',
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (res2.ok) {
+      const data2 = await res2.json() as Array<{
+        SecuritiesCompanyCode: string;
+        SecuritiesIndustryCode?: string;
+        產業類別?: string;
+        CompanyName?: string;
+      }>;
+      for (const row of data2) {
+        const code = row.SecuritiesCompanyCode?.trim();
+        const industry = row.產業類別?.trim() || row.SecuritiesIndustryCode?.trim();
+        if (code && industry) {
+          map.set(code, industry);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[TaiwanScanner] 取得上櫃產業分類失敗:', e);
+  }
+
+  if (map.size > 0) {
+    industryCache = map;
+    industryCacheTime = Date.now();
+    console.log(`[TaiwanScanner] 產業分類快取: ${map.size} 家公司`);
+  }
+  return map;
+}
+
 /** 從 TWSE 取得上市股票，按當日成交量排序 */
 async function fetchTWSEStocks(): Promise<(StockEntry & { vol: number })[]> {
   const res = await fetch(
@@ -37,10 +104,10 @@ async function fetchTWSEStocks(): Promise<(StockEntry & { vol: number })[]> {
   if (!res.ok) throw new Error('TWSE API error');
   const data = await res.json() as TWSERow[];
   return data
-    .filter(s => /^\d{4}$/.test(s.Code))
+    .filter(s => /^[1-9]\d{3}$/.test(s.Code)) // 4碼且首碼1-9：排除ETF(00xx)、權證、受益憑證
     .map(s => ({
       symbol: `${s.Code}.TW`,
-      name: s.Name,
+      name: s.Name.trim(),
       vol: parseInt((s.TradeVolume ?? '0').replace(/,/g, ''), 10) || 0,
     }))
     .sort((a, b) => b.vol - a.vol);
@@ -55,10 +122,10 @@ async function fetchTPExStocks(): Promise<(StockEntry & { vol: number })[]> {
   if (!res.ok) throw new Error('TPEx API error');
   const data = await res.json() as TPExRow[];
   return data
-    .filter(s => /^\d{4}$/.test(s.SecuritiesCompanyCode))
+    .filter(s => /^[1-9]\d{3}$/.test(s.SecuritiesCompanyCode)) // 4碼且首碼1-9：排除ETF、權證
     .map(s => ({
       symbol: `${s.SecuritiesCompanyCode}.TWO`,
-      name: s.CompanyName,
+      name: s.CompanyName.trim(),
       vol: parseInt((s.TradingShares ?? '0').replace(/,/g, ''), 10) || 0,
     }))
     .sort((a, b) => b.vol - a.vol);
@@ -75,9 +142,10 @@ export class TaiwanScanner extends MarketScanner {
   }
 
   async getStockList(): Promise<StockEntry[]> {
-    const [listed, otc] = await Promise.allSettled([
+    const [listed, otc, industryMap] = await Promise.allSettled([
       fetchTWSEStocks(),
       fetchTPExStocks(),
+      fetchTWIndustryMap(),
     ]);
 
     const withVol: (StockEntry & { vol: number })[] = [
@@ -90,11 +158,16 @@ export class TaiwanScanner extends MarketScanner {
       return FALLBACK_TW_STOCKS;
     }
 
+    const indMap = industryMap.status === 'fulfilled' ? industryMap.value : new Map<string, string>();
+
     // Deduplicate, sort by volume (highest first) — 全部台股不設上限
     const deduped = Array.from(new Map(withVol.map(s => [s.symbol, s])).values());
     const sorted  = deduped.sort((a, b) => b.vol - a.vol);
-    console.log(`[TaiwanScanner] 取得 ${sorted.length} 檔台股`);
-    return sorted.map(({ symbol, name }) => ({ symbol, name }));
+    console.log(`[TaiwanScanner] 取得 ${sorted.length} 檔台股（產業分類 ${indMap.size} 筆）`);
+    return sorted.map(({ symbol, name }) => {
+      const code = symbol.replace(/\.(TW|TWO)$/i, '');
+      return { symbol, name, industry: indMap.get(code) };
+    });
   }
 
   async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {

@@ -30,6 +30,9 @@ export interface TradeSignal {
   signalReasons: string[];  // 命中條件說明
   trendState:    string;    // 趨勢狀態
   trendPosition: string;    // 趨勢位置
+  surgeScore?:   number;    // 飆股潛力分數 0-100
+  surgeGrade?:   string;    // 飆股等級 S/A/B/C/D
+  histWinRate?:  number;    // 歷史勝率 %
 }
 
 /**
@@ -55,6 +58,9 @@ export function scanResultToSignal(scanResult: StockScanResult): TradeSignal {
     signalReasons: reasons,
     trendState,
     trendPosition,
+    surgeScore:    scanResult.surgeScore,
+    surgeGrade:    scanResult.surgeGrade,
+    histWinRate:   scanResult.histWinRate,
   };
 }
 
@@ -101,6 +107,11 @@ export interface BacktestTrade {
   exitPrice:  number;       // 出場價（含跳空/滑價）
   exitReason: string;       // 出場原因（'holdDays' | 'stopLoss' | 'takeProfit' | 'dataEnd'）
   holdDays:   number;       // 實際持有天數（交易日）
+
+  // ── 飆股指標 ──
+  surgeScore?:  number;     // 飆股潛力分數 0-100
+  surgeGrade?:  string;     // 飆股等級 S/A/B/C/D
+  histWinRate?: number;     // 歷史勝率 %
 
   // ── 績效 ──
   grossReturn: number;      // 毛報酬率 % (不含成本)
@@ -270,6 +281,9 @@ export function runSingleBacktest(
     signalReasons: signal.signalReasons,
     trendState:    signal.trendState,
     trendPosition: signal.trendPosition,
+    surgeScore:    signal.surgeScore,
+    surgeGrade:    signal.surgeGrade,
+    histWinRate:   signal.histWinRate,
 
     entryDate:  entryCandle.date,
     entryPrice: +entryPrice.toFixed(3),
