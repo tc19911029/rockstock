@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import {
   MarketId, StockScanResult, StockForwardPerformance, BacktestSession,
 } from '@/lib/scanner/types';
+import { TrendState } from '@/lib/analysis/trendAnalysis';
 import { calcBacktestSummary } from '@/lib/backtest/ForwardAnalyzer';
 import {
   BacktestTrade, BacktestStats, BacktestStrategyParams,
@@ -28,58 +29,68 @@ export interface BacktestSummary {
 export type { CapitalConstraints, WalkForwardResult };
 
 export interface WalkForwardConfig {
-  trainSize: number;  // 訓練窗口 session 數
-  testSize:  number;  // 測試窗口 session 數
-  stepSize:  number;  // 每步滾動 session 數
+  trainSize: number;
+  testSize:  number;
+  stepSize:  number;
 }
 
+/** 統一掃描+回測 Store（合併原 scannerStore + backtestStore） */
 interface BacktestState {
-  // controls
+  // ── 控制面板 ──
   market:              MarketId;
   scanDate:            string;
   strategy:            BacktestStrategyParams;
   useCapitalMode:      boolean;
   capitalConstraints:  CapitalConstraints;
 
-  // scan phase
-  isScanning:   boolean;
-  scanProgress: number;
-  scanError:    string | null;
-  scanResults:  StockScanResult[];
+  // ── 掃描階段 ──
+  isScanning:    boolean;
+  scanProgress:  number;
+  scanError:     string | null;
+  scanResults:   StockScanResult[];
+  marketTrend:   TrendState | null;   // 大盤趨勢（掃描時取得）
 
-  // forward phase
+  // ── 前瞻績效階段 ──
   isFetchingForward: boolean;
   forwardError:  string | null;
   performance:   StockForwardPerformance[];
 
-  // engine phase (v2 — strict backtest)
+  // ── 嚴謹回測階段 ──
   trades:           BacktestTrade[];
   stats:            BacktestStats | null;
-  skippedByCapital: number;      // 資本限制排除數
+  skippedByCapital: number;
   finalCapital:     number | null;
   capitalReturn:    number | null;
 
-  // history
+  // ── AI 排名 ──
+  aiRanking: { isRanking: boolean; error: string | null };
+
+  // ── 歷史記錄 ──
   sessions: BacktestSession[];
 
-  // walk-forward
+  // ── Walk-Forward ──
   walkForwardConfig:  WalkForwardConfig;
   walkForwardResult:  WalkForwardResult | null;
   isRunningWF:        boolean;
 
-  // actions
+  // ── 模式 ──
+  scanOnly: boolean;  // true = 只掃描不回測（今天的掃描）
+
+  // ── Actions ──
   setMarket:              (m: MarketId) => void;
   setScanDate:            (d: string)   => void;
   setStrategy:            (s: Partial<BacktestStrategyParams>) => void;
   setCapitalConstraints:  (c: Partial<CapitalConstraints>) => void;
   toggleCapitalMode:      () => void;
+  setScanOnly:            (v: boolean) => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
-  runBacktest:            () => Promise<void>;
+  runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
+  runAiRank:              () => Promise<void>;  // AI 排名
   loadSession:            (id: string)  => void;
   clearCurrent:           () => void;
 
-  // helpers (legacy horizon stats)
+  // helpers
   getSummary: (horizon: BacktestHorizon) => BacktestSummary | null;
 }
 
@@ -109,6 +120,7 @@ export const useBacktestStore = create<BacktestState>()(
       scanProgress: 0,
       scanError:    null,
       scanResults:  [],
+      marketTrend:  null,
 
       isFetchingForward: false,
       forwardError:  null,
@@ -120,10 +132,13 @@ export const useBacktestStore = create<BacktestState>()(
       finalCapital:     null,
       capitalReturn:    null,
 
+      aiRanking: { isRanking: false, error: null },
       sessions: [],
+      scanOnly: false,
 
       setMarket:             (market)   => set({ market }),
       setScanDate:           (scanDate) => set({ scanDate }),
+      setScanOnly:           (scanOnly) => set({ scanOnly }),
       setStrategy:           (partial)  => set(s => ({ strategy: { ...s.strategy, ...partial } })),
       setCapitalConstraints: (partial)  => set(s => ({ capitalConstraints: { ...s.capitalConstraints, ...partial } })),
       toggleCapitalMode:     ()         => set(s => ({ useCapitalMode: !s.useCapitalMode })),
@@ -178,8 +193,47 @@ export const useBacktestStore = create<BacktestState>()(
         return calcBacktestSummary(performance, horizon) as BacktestSummary | null;
       },
 
-      runBacktest: async () => {
-        const { market, scanDate, strategy, useCapitalMode, capitalConstraints } = get();
+      // ── AI 排名（從掃描器遷移） ──
+      runAiRank: async () => {
+        const { market, scanResults } = get();
+        if (scanResults.length === 0) return;
+        set({ aiRanking: { isRanking: true, error: null } });
+        try {
+          const top = scanResults
+            .filter(r => r.sixConditionsScore >= 4)
+            .slice(0, 15)
+            .map(r => ({
+              symbol: r.symbol, name: r.name, price: r.price,
+              change: r.changePercent, score: r.sixConditionsScore,
+              surgeScore: r.surgeScore, surgeGrade: r.surgeGrade,
+              histWinRate: r.histWinRate,
+            }));
+          const res = await fetch('/api/scanner/ai-rank', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ market, stocks: top }),
+          });
+          if (!res.ok) throw new Error('AI 排名失敗');
+          const json = await res.json();
+          const rankings: Array<{ symbol: string; rank: number; confidence: number; reason: string }> = json.rankings ?? [];
+
+          // Merge AI rankings into scanResults
+          const rankMap = new Map(rankings.map(r => [r.symbol, r]));
+          const updatedResults: StockScanResult[] = get().scanResults.map(r => {
+            const ai = rankMap.get(r.symbol);
+            if (!ai) return r;
+            const conf = ai.confidence >= 80 ? 'high' : ai.confidence >= 50 ? 'medium' : 'low';
+            return { ...r, aiRank: ai.rank, aiConfidence: conf as StockScanResult['aiConfidence'], aiReason: ai.reason };
+          });
+          set({ scanResults: updatedResults, aiRanking: { isRanking: false, error: null } });
+        } catch (e) {
+          set({ aiRanking: { isRanking: false, error: String(e) } });
+        }
+      },
+
+      // ── 統一掃描入口（掃描 + 可選回測） ──
+      runScan: async () => {
+        const { market, scanDate, strategy, useCapitalMode, capitalConstraints, scanOnly } = get();
 
         // ── Phase 1: Get stock list ──────────────────────────────────────────
         set({ isScanning: true, scanProgress: 5, scanError: null,
@@ -224,7 +278,7 @@ export const useBacktestStore = create<BacktestState>()(
           if (!res.ok) throw new Error(`掃描失敗 (${res.status})`);
           const json = await res.json() as { results?: StockScanResult[]; marketTrend?: string; error?: string };
           if (json.error) throw new Error(json.error);
-          return json.results ?? [];
+          return { results: json.results ?? [], marketTrend: json.marketTrend ?? null };
         };
 
         set({ scanProgress: 30 });
@@ -237,17 +291,24 @@ export const useBacktestStore = create<BacktestState>()(
         }
 
         const combined: StockScanResult[] = [
-          ...(r1.status === 'fulfilled' ? r1.value : []),
-          ...(r2.status === 'fulfilled' ? r2.value : []),
+          ...(r1.status === 'fulfilled' ? r1.value.results : []),
+          ...(r2.status === 'fulfilled' ? r2.value.results : []),
         ].sort((a, b) =>
           b.sixConditionsScore !== a.sixConditionsScore
             ? b.sixConditionsScore - a.sixConditionsScore
             : b.changePercent - a.changePercent
         );
 
-        set({ scanResults: combined, isScanning: false, scanProgress: 100 });
+        // 取得大盤趨勢（從第一個 chunk 的回應）
+        const mt = r1.status === 'fulfilled' ? r1.value.marketTrend : null;
+        const marketTrend = mt ? (mt as unknown as TrendState) : null;
+
+        set({ scanResults: combined, isScanning: false, scanProgress: 100, marketTrend });
 
         if (combined.length === 0) return;
+
+        // ── 掃描模式：到此為止，不做前瞻回測 ──
+        if (scanOnly) return;
 
         // ── Phase 3: Forward performance ─────────────────────────────────────
         set({ isFetchingForward: true, forwardError: null });

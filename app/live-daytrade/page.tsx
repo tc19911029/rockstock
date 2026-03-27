@@ -688,8 +688,7 @@ export default function LiveDaytradePage() {
         {/* Nav */}
         <nav className="flex items-center gap-0.5 ml-auto shrink-0">
           <Link href="/" className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-white transition">走圖</Link>
-          <Link href="/scanner" className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-white transition">掃描</Link>
-          <Link href="/backtest" className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-white transition">回測</Link>
+          <Link href="/scan" className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-white transition">掃描選股</Link>
           <span className="text-[10px] font-bold text-violet-500 border border-violet-700/60 bg-violet-900/30 px-2 py-1 rounded cursor-default select-none">當沖</span>
         </nav>
       </header>
