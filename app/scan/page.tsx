@@ -967,7 +967,7 @@ export default function UnifiedScanPage() {
         </div>
 
         {/* Results */}
-        {(trades.length > 0 || performance.length > 0 || sessions.filter(s => s.market === market).length > 0) && (
+        {(scanResults.length > 0 || trades.length > 0 || performance.length > 0 || sessions.filter(s => s.market === market).length > 0) && (
           <div className="flex gap-6">
             <div className="flex-1 min-w-0 space-y-4">
 
@@ -1123,8 +1123,83 @@ export default function UnifiedScanPage() {
                 );
               })()}
 
-              {/* Tab switcher */}
-              <div className="flex items-center gap-1 border-b border-slate-800">
+              {/* 掃描結果列表（scanOnly 模式） */}
+              {scanOnly && scanResults.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-bold text-white">掃描結果</span>
+                    <span className="text-slate-400">{scanResults.length} 檔符合條件</span>
+                    {marketTrend && (
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        marketTrend === '多頭' ? 'bg-red-900/50 text-red-300' :
+                        marketTrend === '空頭' ? 'bg-green-900/50 text-green-300' :
+                        'bg-yellow-900/50 text-yellow-300'
+                      }`}>{String(marketTrend)}</span>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-slate-700">
+                          <th className="text-left py-1.5 px-2">代號</th>
+                          <th className="text-left py-1.5 px-2">名稱</th>
+                          <th className="text-center py-1.5 px-1">評分</th>
+                          <th className="text-center py-1.5 px-1">等級</th>
+                          <th className="text-center py-1.5 px-1">潛力</th>
+                          <th className="text-center py-1.5 px-1">勝率</th>
+                          <th className="text-right py-1.5 px-2">價格</th>
+                          <th className="text-right py-1.5 px-2">漲跌%</th>
+                          <th className="text-left py-1.5 px-2">趨勢</th>
+                          <th className="text-left py-1.5 px-2">位置</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {scanResults.slice(0, 50).map((r, idx) => (
+                          <tr key={r.symbol} className="border-b border-slate-800/50 hover:bg-slate-800/40">
+                            <td className="py-1.5 px-2 font-mono font-bold text-white">{r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</td>
+                            <td className="py-1.5 px-2 text-slate-300">{r.name}</td>
+                            <td className="py-1.5 px-1 text-center">
+                              <span className={`font-bold ${r.sixConditionsScore >= 5 ? 'text-red-400' : r.sixConditionsScore >= 4 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                                {r.sixConditionsScore}/6
+                              </span>
+                            </td>
+                            <td className="py-1.5 px-1 text-center">
+                              {r.surgeGrade && (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                  r.surgeGrade === 'S' ? 'bg-red-600 text-white' :
+                                  r.surgeGrade === 'A' ? 'bg-orange-500 text-white' :
+                                  r.surgeGrade === 'B' ? 'bg-yellow-500 text-black' :
+                                  'bg-slate-600 text-slate-300'
+                                }`}>{r.surgeGrade}</span>
+                              )}
+                            </td>
+                            <td className="py-1.5 px-1 text-center font-mono text-slate-300">{r.surgeScore ?? '—'}</td>
+                            <td className="py-1.5 px-1 text-center">
+                              {r.histWinRate != null && (
+                                <span className={`text-[10px] px-1 rounded ${r.histWinRate >= 60 ? 'bg-green-900/60 text-green-300' : r.histWinRate >= 50 ? 'bg-yellow-900/60 text-yellow-300' : 'bg-red-900/60 text-red-300'}`}>
+                                  {r.histWinRate}%
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-1.5 px-2 text-right font-mono text-white">{r.price.toFixed(2)}</td>
+                            <td className={`py-1.5 px-2 text-right font-mono font-bold ${r.changePercent >= 0 ? 'text-red-400' : 'text-green-400'}`}>
+                              {r.changePercent >= 0 ? '+' : ''}{r.changePercent.toFixed(2)}%
+                            </td>
+                            <td className="py-1.5 px-2 text-[10px] text-slate-400">{r.trendState}</td>
+                            <td className="py-1.5 px-2 text-[10px] text-slate-400">{r.trendPosition}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {scanResults.length > 50 && (
+                    <div className="text-xs text-slate-500 text-center">顯示前 50 檔（共 {scanResults.length} 檔）</div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab switcher — 回測模式才顯示 */}
+              {!scanOnly && <><div className="flex items-center gap-1 border-b border-slate-800">
                 {([
                   { key: 'strict',      label: '嚴謹回測',    icon: '🔬' },
                   { key: 'horizon',     label: '時間視角',    icon: '📊' },
@@ -1309,6 +1384,7 @@ export default function UnifiedScanPage() {
                   onStepSize={n  => setWalkForwardConfig({ stepSize: n })}
                 />
               )}
+              </>}
             </div>
 
             {/* Sidebar */}
