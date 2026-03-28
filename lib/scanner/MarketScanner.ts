@@ -91,6 +91,21 @@ export abstract class MarketScanner {
       // 8. 末升段不進場 — 位置太高風險大
       if (position.includes('末升')) return null;
 
+      // 9. 連續放量確認 — 至少近 2 天有 1 天量 > 5日均量（避免假突破）
+      if (lastIdx >= 2 && last.avgVol5) {
+        const vol0 = candles[lastIdx].volume;
+        const vol1 = candles[lastIdx - 1].volume;
+        const avgVol = last.avgVol5;
+        const hasVolumeConfirm = vol0 > avgVol * 1.2 || vol1 > avgVol * 1.2;
+        if (!hasVolumeConfirm) return null;
+      }
+
+      // 10. MA5 必須在 MA20 之上（短期趨勢確認）
+      if (last.ma5 && last.ma20 && last.ma5 <= last.ma20) return null;
+
+      // 11. 收盤價必須在 MA5 之上（站穩短期均線）
+      if (last.ma5 && last.close < last.ma5) return null;
+
       const changePercent = prev?.close > 0
         ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
         : 0;
@@ -102,23 +117,33 @@ export abstract class MarketScanner {
         reason:     s.description,
       }));
 
-      // ── 歷史信號勝率（用已有 K 線快速計算）──────────────────────────────
+      // ── 歷史信號勝率（模擬真實交易：隔日開盤買→持有5天收盤賣）──────────
       let histWinRate: number | undefined;
       let histSignalCount = 0;
       let histWinCount = 0;
-      // 只回測最近 120 天內的信號（不含最後 20 天因為需要 forward data）
-      const histEnd = lastIdx - 20;
-      const histStart = Math.max(30, lastIdx - 120);
+      // 回測最近 90 天的信號（需預留 6 天 forward data）
+      const histEnd = lastIdx - 6;
+      const histStart = Math.max(60, lastIdx - 90);
       for (let h = histStart; h < histEnd; h++) {
         const hSix = evaluateSixConditions(candles, h, thresholds);
-        if (hSix.totalScore < 4) continue;
+        if (hSix.totalScore < minScore) continue;  // 用實際門檻
+        // 隔日開盤買入
+        const entryIdx = h + 1;
+        if (entryIdx >= candles.length) continue;
+        const entryPrice = candles[entryIdx].open;
+        if (!entryPrice || entryPrice <= 0) continue;
+        // 5 天後收盤賣出
+        const exitIdx = Math.min(entryIdx + 5, candles.length - 1);
+        const exitPrice = candles[exitIdx].close;
         histSignalCount++;
-        // 20 日回報 > 0 算贏
-        if (h + 20 < candles.length && candles[h + 20].close > candles[h].close) histWinCount++;
+        if (exitPrice > entryPrice) histWinCount++;
       }
       if (histSignalCount >= 3) {
         histWinRate = Math.round((histWinCount / histSignalCount) * 100);
       }
+
+      // 12. 歷史勝率過低 — 這支股票歷史上同類信號表現差，跳過
+      if (histWinRate !== undefined && histWinRate < 35) return null;
 
       return {
         symbol,
