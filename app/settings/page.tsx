@@ -113,7 +113,11 @@ export default function SettingsPage() {
           {/* KD上限 */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-slate-300">KD 進場上限</span>
+              <span className="text-slate-300 group relative cursor-help">KD 進場上限 <span className="text-slate-600">ⓘ</span>
+                <span className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-56 p-2 rounded bg-slate-700 border border-slate-600 text-[10px] text-slate-300 shadow-lg">
+                  KD 指標衡量股價超買/超賣程度。數值越低表示只在 KD 較低（未超買）時才進場，更保守。常見設定：短線 70-80、保守 60-65。
+                </span>
+              </span>
               <span className="text-blue-400 font-mono font-bold">{strategy.kdMaxEntry}</span>
             </div>
             <input type="range" min={60} max={95} step={1}
@@ -128,7 +132,11 @@ export default function SettingsPage() {
           {/* 乖離上限 */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-slate-300">MA20 乖離上限</span>
+              <span className="text-slate-300 group relative cursor-help">MA20 乖離上限 <span className="text-slate-600">ⓘ</span>
+                <span className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-56 p-2 rounded bg-slate-700 border border-slate-600 text-[10px] text-slate-300 shadow-lg">
+                  乖離率 = 股價偏離20日均線的程度。乖離越大，表示短線漲太多，回檔風險越高。設 15% 表示漲超過15%就不進場。
+                </span>
+              </span>
               <span className="text-blue-400 font-mono font-bold">{(strategy.deviationMax * 100).toFixed(0)}%</span>
             </div>
             <input type="range" min={10} max={35} step={1}
@@ -143,7 +151,11 @@ export default function SettingsPage() {
           {/* 量比 */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-slate-300">量比門檻（倍）</span>
+              <span className="text-slate-300 group relative cursor-help">量比門檻（倍） <span className="text-slate-600">ⓘ</span>
+                <span className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-56 p-2 rounded bg-slate-700 border border-slate-600 text-[10px] text-slate-300 shadow-lg">
+                  量比 = 今日成交量 ÷ 近期平均成交量。1.5x 表示今天的量是平常的1.5倍，代表有資金關注。設越高越嚴格。
+                </span>
+              </span>
               <span className="text-blue-400 font-mono font-bold">{strategy.volumeRatioMin.toFixed(1)}x</span>
             </div>
             <input type="range" min={10} max={30} step={1}

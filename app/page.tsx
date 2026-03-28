@@ -224,6 +224,7 @@ export default function HomePage() {
                 <span className="text-slate-500">高<span className="text-red-400 ml-0.5">{displayCandle.high.toFixed(2)}</span></span>
                 <span className="text-slate-500">低<span className="text-green-400 ml-0.5">{displayCandle.low.toFixed(2)}</span></span>
                 <span className="text-slate-500">量<span className="text-slate-300 ml-0.5">{(displayCandle.volume / 1000).toFixed(0)}K</span></span>
+                <span className="text-slate-600 text-[9px] hidden lg:block" title="資料來源：Yahoo Finance">Yahoo Finance</span>
                 {/* 工具列：均線開關 + 指標選擇 + 訊號 */}
                 <div className="ml-auto flex items-center gap-1 shrink-0 flex-wrap">
                   {/* 均線開關 */}

@@ -870,8 +870,18 @@ export default function UnifiedScanPage() {
 
         {/* Controls */}
         <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-800 bg-slate-800/30">
+          <div className="px-5 py-3 border-b border-slate-800 bg-slate-800/30 flex items-center justify-between">
             <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">回測參數設定</h2>
+            <span className="text-[10px] text-slate-600 hidden sm:block group relative cursor-help">
+              ❓ 這是什麼
+              <div className="absolute z-50 right-0 top-full mt-1 hidden group-hover:block w-72 p-3 rounded-lg bg-slate-800 border border-slate-600 text-[11px] text-slate-300 shadow-xl space-y-1.5">
+                <div className="font-medium text-white text-xs">📊 掃描選股 & 回測</div>
+                <p>系統會掃描所有股票，找出在<span className="text-sky-400">指定日期</span>符合六大技術條件的個股。</p>
+                <p><span className="text-violet-400">掃描選股</span>：僅列出符合條件的股票清單與評分。</p>
+                <p><span className="text-sky-400">掃描+回測</span>：模擬在訊號日買入、按停損/持有天數出場，計算每筆交易的真實績效（含手續費）。</p>
+                <p className="text-slate-500 text-[10px]">提示：選越近的日期，後續績效天數越少（因為還沒到）。</p>
+              </div>
+            </span>
           </div>
           <div className="p-5 flex flex-wrap items-end gap-4">
             {/* Market */}
