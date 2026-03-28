@@ -21,12 +21,19 @@ async function analyzeOne(
     const startStr = new Date(startMs).toISOString().split('T')[0];
     const endStr   = new Date(endMs).toISOString().split('T')[0];
 
-    const candles = await fetchCandlesRange(symbol, startStr, endStr, 8000);
+    // 今天的日期（防止取到未來數據）
+    const todayStr = new Date().toISOString().split('T')[0];
+    const safeEndStr = endStr > todayStr ? todayStr : endStr;
+
+    const candles = await fetchCandlesRange(symbol, startStr, safeEndStr, 8000);
     if (candles.length === 0) return null;
 
-    const forwardCandles: ForwardCandle[] = candles.map(c => ({
-      date: c.date, open: c.open, close: c.close, high: c.high, low: c.low,
-    }));
+    // 嚴格過濾：移除任何超過今天的 K 線（防止 Yahoo Finance 回傳預測數據）
+    const forwardCandles: ForwardCandle[] = candles
+      .filter(c => c.date <= todayStr)
+      .map(c => ({
+        date: c.date, open: c.open, close: c.close, high: c.high, low: c.low,
+      }));
 
     // 以訊號日收盤價（scanPrice）為基準的報酬率
     function retFromScan(idx: number): number | null {
