@@ -276,17 +276,93 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
   );
 }
 
+// ── RSI ──────────────────────────────────────────────────────────────────────
+function RSIChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; hoverCandle?: CandleWithIndicators | null }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef     = useRef<IChartApi | null>(null);
+  const rsiRef       = useRef<ISeriesApi<'Line'> | null>(null);
+  const markRef      = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const candlesRef   = useRef<CandleWithIndicators[]>(candles);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = makeChart(containerRef.current, true);
+
+    const rsiSeries = chart.addSeries(LineSeries, { color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+    rsiRef.current  = rsiSeries;
+    markRef.current = createSeriesMarkers(rsiSeries, []);
+    chartRef.current = chart;
+
+    const unsub = subscribeRangeSync(range => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (range) chart.timeScale().setVisibleRange(range as any);
+    });
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !rsiRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const c = candlesRef.current.find(x => x.date === time);
+      if (c != null && c.rsi14 != null)
+        chartRef.current.setCrosshairPosition(c.rsi14, time as Time, rsiRef.current);
+    });
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) chart.applyOptions({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight || 80,
+      });
+    });
+    ro.observe(containerRef.current);
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
+  }, []);
+
+  useEffect(() => {
+    if (!rsiRef.current || candles.length === 0) return;
+    rsiRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: c.rsi14 ?? 50 })));
+    if (markRef.current) {
+      const dots: SeriesMarker<Time>[] = candles
+        .filter(c => c.rsi14 != null && (c.rsi14 >= 70 || c.rsi14 <= 30))
+        .map(c => ({
+          time: toTime(c.date), position: 'inBar' as const, shape: 'circle' as const,
+          color: c.rsi14! >= 70 ? '#ef4444' : '#22c55e', size: 0.5,
+        }));
+      markRef.current.setMarkers(dots);
+    }
+    const chart = chartRef.current;
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chart) chart.timeScale().setVisibleLogicalRange(r);
+    });
+  }, [candles]);
+
+  const last = candles[candles.length - 1];
+  const display = hoverCandle ?? last;
+  const rsiVal = display?.rsi14;
+  const rsiColor = rsiVal != null ? (rsiVal >= 70 ? 'text-red-400' : rsiVal <= 30 ? 'text-green-400' : 'text-purple-400') : 'text-slate-500';
+  const rsiZone = rsiVal != null ? (rsiVal >= 70 ? '超買' : rsiVal <= 30 ? '超賣' : '') : '';
+
+  return (
+    <div className="relative h-full">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+        <span className="text-slate-400">RSI(14)</span>
+        <span className={rsiColor}>{rsiVal?.toFixed(2) ?? '—'} {rsiZone && <span className="text-[10px]">{rsiZone}</span>}</span>
+      </div>
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
+}
+
 // ── Combined ──────────────────────────────────────────────────────────────────
 export default function IndicatorCharts({ candles, hoverCandle, indicators }: {
   candles: CandleWithIndicators[];
   hoverCandle?: CandleWithIndicators | null;
-  indicators?: { macd: boolean; kd: boolean; volume: boolean };
+  indicators?: { macd: boolean; kd: boolean; volume: boolean; rsi?: boolean };
 }) {
   if (candles.length === 0) return null;
-  const show = indicators ?? { macd: true, kd: true, volume: true };
+  const show = indicators ?? { macd: true, kd: true, volume: true, rsi: false };
   const panels = [
     show.volume && <div key="vol" className="flex-1 min-h-0 bg-slate-900"><VolumeChart candles={candles} hoverCandle={hoverCandle} /></div>,
     show.kd && <div key="kd" className="flex-1 min-h-0 bg-slate-900"><KDChart candles={candles} hoverCandle={hoverCandle} /></div>,
+    show.rsi && <div key="rsi" className="flex-1 min-h-0 bg-slate-900"><RSIChart candles={candles} hoverCandle={hoverCandle} /></div>,
     show.macd && <div key="macd" className="flex-[1.4] min-h-0 bg-slate-900"><MACDChart candles={candles} hoverCandle={hoverCandle} /></div>,
   ].filter(Boolean);
 

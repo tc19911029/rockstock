@@ -71,8 +71,10 @@ export default function HomePage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   // 均線開關
   const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true });
+  // 布林通道開關
+  const [showBollinger, setShowBollinger] = useState(false);
   // 副圖指標開關
-  const [indicators, setIndicators] = useState({ macd: true, kd: true, volume: true });
+  const [indicators, setIndicators] = useState({ macd: true, kd: true, volume: true, rsi: false });
 
   const displayCandle = hoverCandle ?? allCandles[currentIndex];
   const prev = hoverCandle
@@ -228,10 +230,20 @@ export default function HomePage() {
                     >{label}</button>
                   ))}
                   <span className="w-px h-3 bg-slate-700 mx-0.5" />
+                  {/* 主圖疊加指標 */}
+                  <button
+                    onClick={() => setShowBollinger(v => !v)}
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition ${
+                      showBollinger ? 'bg-emerald-700/60 text-emerald-200' : 'bg-slate-800 text-slate-600'
+                    }`}
+                    title="布林通道 (20, 2)"
+                  >BB</button>
+                  <span className="w-px h-3 bg-slate-700 mx-0.5" />
                   {/* 副圖指標 */}
                   {([
                     { key: 'macd' as const, label: 'MACD' },
                     { key: 'kd' as const, label: 'KD' },
+                    { key: 'rsi' as const, label: 'RSI' },
                     { key: 'volume' as const, label: '量' },
                   ]).map(({ key, label }) => (
                     <button key={key}
@@ -282,6 +294,7 @@ export default function HomePage() {
                   onCrosshairMove={setHoverCandle}
                   fillContainer
                   maToggles={maToggles}
+                  showBollinger={showBollinger}
                 />
               </ErrorBoundary>
             </div>

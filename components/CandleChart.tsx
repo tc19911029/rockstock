@@ -87,16 +87,19 @@ interface CandleChartProps {
   height?: number;
   fillContainer?: boolean;
   maToggles?: { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean };
+  showBollinger?: boolean;
 }
 
 export default function CandleChart({
   candles, signals, chartMarkers = [], avgCost, stopLossPrice, onCrosshairMove, height = 400, fillContainer = false,
   maToggles = { ma5: true, ma10: true, ma20: true, ma60: true },
+  showBollinger = false,
 }: CandleChartProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
   const candleRef      = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const maRefs         = useRef<Record<string, ISeriesApi<'Line'>>>({});
+  const bbRefs         = useRef<{ upper?: ISeriesApi<'Line'>; lower?: ISeriesApi<'Line'> }>({});
   const markersPlugRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const avgCostLineRef   = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
   const stopLossLineRef  = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
@@ -144,6 +147,14 @@ export default function CandleChart({
         color: MA_COLORS[key], lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
       });
     }
+
+    // ── Bollinger Bands ──
+    bbRefs.current.upper = chart.addSeries(LineSeries, {
+      color: 'rgba(34, 197, 94, 0.5)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2,
+    });
+    bbRefs.current.lower = chart.addSeries(LineSeries, {
+      color: 'rgba(34, 197, 94, 0.5)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2,
+    });
 
     chartRef.current  = chart;
     candleRef.current = candleSeries;
@@ -193,6 +204,13 @@ export default function CandleChart({
         candles.filter(c => c[key] != null).map(c => ({ time: toTime(c.date), value: c[key]! }))
       );
     }
+    // Bollinger Bands
+    bbRefs.current.upper?.setData(
+      candles.filter(c => c.bbUpper != null).map(c => ({ time: toTime(c.date), value: c.bbUpper! }))
+    );
+    bbRefs.current.lower?.setData(
+      candles.filter(c => c.bbLower != null).map(c => ({ time: toTime(c.date), value: c.bbLower! }))
+    );
     // scrollToPosition 後稍等一個 tick 再廣播，確保 range 已更新
     const chart = chartRef.current;
     if (chart) {
@@ -220,6 +238,12 @@ export default function CandleChart({
       }
     }
   }, [maToggles]);
+
+  // ── Bollinger Bands visibility ──
+  useEffect(() => {
+    bbRefs.current.upper?.applyOptions({ visible: showBollinger });
+    bbRefs.current.lower?.applyOptions({ visible: showBollinger });
+  }, [showBollinger]);
 
   // ── Avg cost price line ───────────────────────────────────────────────────
   useEffect(() => {
