@@ -21,16 +21,20 @@ async function analyzeOne(
     const startStr = new Date(startMs).toISOString().split('T')[0];
     const endStr   = new Date(endMs).toISOString().split('T')[0];
 
-    // 今天的日期（防止取到未來數據）
-    const todayStr = new Date().toISOString().split('T')[0];
+    // 今天的日期（用台灣/中國時區 UTC+8，防止取到未來數據）
+    const now = new Date();
+    const utc8 = new Date(now.getTime() + 8 * 3600_000);
+    const todayStr = utc8.toISOString().split('T')[0];
     const safeEndStr = endStr > todayStr ? todayStr : endStr;
 
     const candles = await fetchCandlesRange(symbol, startStr, safeEndStr, 8000);
     if (candles.length === 0) return null;
 
-    // 嚴格過濾：移除任何超過今天的 K 線（防止 Yahoo Finance 回傳預測數據）
+    // 嚴格過濾：
+    // 1. 必須 > scanDate（排除信號日當天被 Yahoo 回傳的情況）
+    // 2. 必須 <= todayStr（排除未來數據）
     const forwardCandles: ForwardCandle[] = candles
-      .filter(c => c.date <= todayStr)
+      .filter(c => c.date > scanDate && c.date <= todayStr)
       .map(c => ({
         date: c.date, open: c.open, close: c.close, high: c.high, low: c.low,
       }));
