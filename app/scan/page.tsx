@@ -1567,20 +1567,25 @@ export default function UnifiedScanPage() {
                           <th className="text-left py-1.5 px-2">名稱</th>
                           <th className="text-left py-1.5 px-1 text-[10px]">概念</th>
                           {([
-                            { key: 'composite' as const, label: '綜合' },
-                            { key: 'signalScore' as const, label: '評分' },
-                            { key: 'surgeScore' as const, label: '等級' },
-                            { key: 'surgeScore' as const, label: '潛力' },
-                            { key: 'histWinRate' as const, label: '勝率' },
-                          ]).map(({ key, label }, i) => (
+                            { key: 'composite' as const, label: '綜合', tooltip: '綜合評分 (0-100)\n六條件35% + 潛力25% + 勝率20%\n+ 位置10% + 量能10%\n越高代表多維度共振越強' },
+                            { key: 'signalScore' as const, label: '評分', tooltip: '六大條件評分 (0-6)\n1.趨勢 2.位置 3.K棒\n4.均線 5.量能 6.指標\n≥4分才列入選股' },
+                            { key: 'surgeScore' as const, label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
+                            { key: 'surgeScore' as const, label: '潛力', tooltip: '飆股潛力分 (0-100)\n9大維度加權：動能18% 量能15%\n突破15% 趨勢15% 波動12%\n長線10% 位置5% K棒5% 共振5%' },
+                            { key: 'histWinRate' as const, label: '勝率', tooltip: '歷史勝率\n過去120天同類信號\n隔日開盤買→持有5日賣\n有多少次是賺錢的' },
+                          ]).map(({ key, label, tooltip }) => (
                             <th key={label}
-                              className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none"
+                              className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none group relative"
                               onClick={() => {
                                 if (sortBy === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
                                 else { setSortBy(key); setSortDir('desc'); }
                               }}>
                               {label}
                               {sortBy === key && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
+                              {tooltip && (
+                                <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block w-52 p-2 rounded bg-slate-800 border border-slate-600 text-[10px] text-slate-300 whitespace-pre-line font-normal shadow-lg pointer-events-none">
+                                  {tooltip}
+                                </div>
+                              )}
                             </th>
                           ))}
                           <th className="text-right py-1.5 px-2 whitespace-nowrap">進場價</th>
@@ -1640,22 +1645,27 @@ export default function UnifiedScanPage() {
                           <th className="text-left py-1.5 px-2">名稱</th>
                           <th className="text-left py-1.5 px-1 text-[10px]">概念</th>
                           {([
-                            { key: 'composite' as const, label: '綜合' },
-                            { key: 'score' as const, label: '評分' },
-                            { key: 'grade' as const, label: '等級' },
-                            { key: 'potential' as const, label: '潛力' },
-                            { key: 'winRate' as const, label: '勝率' },
-                            { key: 'price' as const, label: '價格' },
-                            { key: 'change' as const, label: '漲跌%' },
-                          ]).map(({ key, label }) => (
+                            { key: 'composite' as const, label: '綜合', tooltip: '綜合評分 (0-100)\n六條件35% + 潛力25% + 勝率20%\n+ 位置10% + 量能10%' },
+                            { key: 'score' as const, label: '評分', tooltip: '六大條件評分 (0-6)\n1.趨勢 2.位置 3.K棒\n4.均線 5.量能 6.指標' },
+                            { key: 'grade' as const, label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
+                            { key: 'potential' as const, label: '潛力', tooltip: '飆股潛力分 (0-100)\n9大維度加權計算' },
+                            { key: 'winRate' as const, label: '勝率', tooltip: '過去120天同類信號的歷史勝率' },
+                            { key: 'price' as const, label: '價格', tooltip: '' },
+                            { key: 'change' as const, label: '漲跌%', tooltip: '' },
+                          ]).map(({ key, label, tooltip }) => (
                             <th key={key}
-                              className={`${key === 'price' || key === 'change' ? 'text-right' : 'text-center'} py-1.5 px-1 cursor-pointer hover:text-white select-none`}
+                              className={`${key === 'price' || key === 'change' ? 'text-right' : 'text-center'} py-1.5 px-1 cursor-pointer hover:text-white select-none group relative`}
                               onClick={() => {
                                 if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
                                 else { setScanSort(key); setScanSortDir('desc'); }
                               }}>
                               {label}
                               {scanSort === key && <span className="ml-0.5 text-sky-400">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
+                              {tooltip && (
+                                <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block w-52 p-2 rounded bg-slate-800 border border-slate-600 text-[10px] text-slate-300 whitespace-pre-line font-normal shadow-lg pointer-events-none">
+                                  {tooltip}
+                                </div>
+                              )}
                             </th>
                           ))}
                           <th className="text-left py-1.5 px-2 whitespace-nowrap">趨勢</th>
