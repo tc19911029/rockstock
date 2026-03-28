@@ -1370,8 +1370,8 @@ export default function UnifiedScanPage() {
                             <td className={`py-1.5 px-2 text-right font-mono font-bold ${r.changePercent >= 0 ? 'text-red-400' : 'text-green-400'}`}>
                               {r.changePercent >= 0 ? '+' : ''}{r.changePercent.toFixed(2)}%
                             </td>
-                            <td className="py-1.5 px-2 text-[10px] text-slate-400">{r.trendState}</td>
-                            <td className="py-1.5 px-2 text-[10px] text-slate-400">{r.trendPosition}</td>
+                            <td className="py-1.5 px-2 text-[10px] text-slate-400 whitespace-nowrap">{r.trendState}</td>
+                            <td className="py-1.5 px-2 text-[10px] text-slate-400 whitespace-nowrap">{r.trendPosition}</td>
                             <td className="py-1.5 px-2 text-center whitespace-nowrap">
                               <Link href={`/?load=${r.symbol}`}
                                 className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">
@@ -1607,17 +1607,17 @@ export default function UnifiedScanPage() {
                               {scanSort === key && <span className="ml-0.5 text-sky-400">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
                             </th>
                           ))}
-                          <th className="text-left py-1.5 px-1">趨勢</th>
-                          <th className="text-left py-1.5 px-1">位置</th>
-                          <th className="text-right py-1.5 px-1">隔日開</th>
-                          <th className="text-right py-1.5 px-1">1日</th>
-                          <th className="text-right py-1.5 px-1">2日</th>
-                          <th className="text-right py-1.5 px-1">3日</th>
-                          <th className="text-right py-1.5 px-1">4日</th>
-                          <th className="text-right py-1.5 px-1">5日</th>
-                          <th className="text-right py-1.5 px-1">10日</th>
-                          <th className="text-right py-1.5 px-1">20日</th>
-                          <th className="text-right py-1.5 px-1">最高/最低</th>
+                          <th className="text-left py-1.5 px-2 whitespace-nowrap">趨勢</th>
+                          <th className="text-left py-1.5 px-2 whitespace-nowrap">位置</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">隔日開</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">1日</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">2日</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">3日</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">4日</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">5日</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">10日</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">20日</th>
+                          <th className="text-right py-1.5 px-1.5 whitespace-nowrap">最高/最低</th>
                           <th className="text-center py-1.5 px-2">操作</th>
                         </tr>
                       </thead>
