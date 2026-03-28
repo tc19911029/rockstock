@@ -784,7 +784,7 @@ export default function UnifiedScanPage() {
     skippedByCapital, finalCapital, capitalReturn,
     runScan, clearCurrent,
     scanOnly, setScanOnly,
-    marketTrend, aiRanking, runAiRank,
+    marketTrend,
   } = useBacktestStore();
 
   const [tab, setTab]               = useState<'strict' | 'horizon' | 'walkforward'>('strict');
@@ -1036,16 +1036,6 @@ export default function UnifiedScanPage() {
                 </div>
               )}
 
-              {/* AI 排名按鈕 */}
-              {scanResults.length > 0 && !isScanning && !isFetchingForward && (
-                <button onClick={runAiRank}
-                  disabled={aiRanking.isRanking}
-                  className="text-xs px-3 py-2 bg-purple-700 hover:bg-purple-600 disabled:bg-slate-700 text-white rounded-lg font-medium transition-colors relative">
-                  {aiRanking.isRanking ? 'AI分析中…' : '🤖 AI排名'}
-                  <span className="absolute -top-1.5 -right-1.5 text-[8px] bg-amber-500 text-black px-1 rounded-full font-bold">Pro</span>
-                </button>
-              )}
-
               <button onClick={runScan}
                 disabled={isScanning || isFetchingForward || !scanDate}
                 className={`px-6 py-2.5 ${scanOnly ? 'bg-violet-600 hover:bg-violet-500' : 'bg-sky-600 hover:bg-sky-500'} disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-semibold transition-colors whitespace-nowrap`}>
@@ -1087,8 +1077,7 @@ export default function UnifiedScanPage() {
               {/* 🎯 當日 Top 3 推薦績效追蹤 */}
               {scanResults.length > 0 && (() => {
                 // ── 校準版排名邏輯（基於15天歷史回測優化）──
-                // 綜合評分 = 六大條件(35%) + 飆股潛力(25%) + 歷史勝率(20%) + 趨勢位置(10%) + AI排名(10%)
-                // 六條件主導：Top1均1日+2.61%，吻合率47%（優於舊版+2.07%/40%）
+                // 綜合評分 = 六大條件(35%) + 飆股潛力(25%) + 歷史勝率(20%) + 趨勢位置(10%) + 覆蓋率(10%)
                 const scored = [...scanResults]
                   .filter(r => r.surgeScore != null && r.surgeScore >= 30)
                   .map(r => {
@@ -1098,8 +1087,8 @@ export default function UnifiedScanPage() {
                     const posBonus = r.trendPosition?.includes('起漲') ? 100
                                    : r.trendPosition?.includes('主升') ? 70
                                    : r.trendPosition?.includes('末升') ? 20 : 50;  // (權重10%)
-                    const aiBonus  = r.aiRank != null && r.aiRank <= 5 ? (6 - r.aiRank) * 20 : 50; // (權重10%)
-                    const composite = sixCon * 0.35 + surge * 0.25 + winR * 0.20 + posBonus * 0.10 + aiBonus * 0.10;
+                    const volBonus = (r.surgeComponents?.volume?.score ?? 50);       // (權重10%)
+                    const composite = sixCon * 0.35 + surge * 0.25 + winR * 0.20 + posBonus * 0.10 + volBonus * 0.10;
                     return { ...r, _composite: Math.round(composite * 10) / 10 };
                   })
                   .sort((a, b) => b._composite - a._composite)
@@ -1149,7 +1138,7 @@ export default function UnifiedScanPage() {
                       <span className="text-sm font-bold text-white">當日 Top 3 推薦績效追蹤</span>
                       <span className="text-[10px] text-slate-500">{scanDate}</span>
                       <span className="text-[10px] text-slate-600 ml-auto">
-                        綜合評分 = 六條件35% + 潛力25% + 勝率20% + 位置10% + AI10%（15日校準版）
+                        綜合評分 = 六條件35% + 潛力25% + 勝率20% + 位置10% + 量能10%
                       </span>
                     </div>
 
