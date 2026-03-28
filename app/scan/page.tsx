@@ -1510,16 +1510,16 @@ export default function UnifiedScanPage() {
                     />
                   )}
 
-                  <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
-                    <div className="flex items-center justify-end px-4 py-2 border-b border-slate-800 bg-slate-800/30">
-                      <button
-                        onClick={() => exportToCsv(sortedTrades, scanDate)}
-                        disabled={sortedTrades.length === 0}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded-lg text-[11px] text-slate-300 hover:text-white transition-colors"
-                      >
-                        匯出 CSV
-                      </button>
-                    </div>
+                  <div className="flex items-center justify-end mb-2">
+                    <button
+                      onClick={() => exportToCsv(sortedTrades, scanDate)}
+                      disabled={sortedTrades.length === 0}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded-lg text-[11px] text-slate-300 hover:text-white transition-colors"
+                    >
+                      匯出 CSV
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-slate-400 border-b border-slate-700">
@@ -1572,8 +1572,8 @@ export default function UnifiedScanPage() {
                     ))}
                   </div>
 
-                  <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
-                    <div className="flex gap-1 px-4 py-3 border-b border-slate-800">
+                  <div className="overflow-x-auto">
+                    <div className="flex gap-1 mb-2">
                       {horizonLabels.map(({ key, label }) => (
                         <button key={key} onClick={() => setHorizon(key)}
                           className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
