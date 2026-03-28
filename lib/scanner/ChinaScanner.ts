@@ -53,7 +53,8 @@ async function fetchEastMoneyStockList(): Promise<StockEntry[]> {
         const suffix = code.startsWith('6') || code.startsWith('9') ? '.SS' : '.SZ';
         // f100 = 所屬行業（產業板塊），e.g. "電子元件", "銀行", "軟件開發"
         const industry = (typeof item.f100 === 'string' && item.f100 !== '-') ? item.f100 : undefined;
-        return { symbol: `${code}${suffix}`, name: item.f14, industry };
+        const name = (item.f14 && item.f14 !== '-') ? item.f14 : code; // fallback 用代碼，後面再補
+        return { symbol: `${code}${suffix}`, name, industry };
       });
 
     all.push(...filtered);

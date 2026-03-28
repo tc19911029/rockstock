@@ -28,7 +28,7 @@ export abstract class MarketScanner {
 
   private async scanOne(
     symbol: string,
-    name: string,
+    rawName: string,
     config: MarketConfig,
     minScore: number,
     thresholds: StrategyThresholds,
@@ -36,6 +36,16 @@ export abstract class MarketScanner {
     industry?: string,
   ): Promise<StockScanResult | null> {
     try {
+      // 如果名字是純數字（東方財富 f14 為空的 fallback），動態補中文名
+      let name = rawName;
+      if (/^\d{4,6}$/.test(rawName)) {
+        try {
+          const { getCNChineseName } = await import('@/lib/datasource/TWSENames');
+          const cnName = await getCNChineseName(rawName);
+          if (cnName) name = cnName;
+        } catch { /* 查不到就用原名 */ }
+      }
+
       const candles = await this.fetchCandles(symbol, asOfDate);
       if (candles.length < 30) return null;
 
