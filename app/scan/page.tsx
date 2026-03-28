@@ -1102,8 +1102,8 @@ export default function UnifiedScanPage() {
 
         {/* Results */}
         {(scanResults.length > 0 || trades.length > 0 || performance.length > 0 || sessions.filter(s => s.market === market).length > 0) && (
-          <div className="flex gap-6">
-            <div className="flex-1 min-w-0 space-y-4">
+          <div className="flex gap-4">
+            <div className="flex-1 min-w-0 space-y-4 overflow-x-auto">
 
               {/* Research Assumptions Notice */}
               <ResearchAssumptions market={market} strategy={strategy} />
@@ -1781,7 +1781,7 @@ export default function UnifiedScanPage() {
             </div>
 
             {/* Sidebar */}
-            <div className="w-52 shrink-0 hidden lg:block">
+            <div className="w-44 shrink-0 hidden xl:block">
               <SessionHistory />
             </div>
           </div>
