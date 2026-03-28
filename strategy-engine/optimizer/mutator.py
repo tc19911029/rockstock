@@ -41,12 +41,17 @@ def mutate_strategy(strategy: StrategyConfig, hypothesis: dict) -> StrategyConfi
         max_possible = len(new.entry_conditions)
         new.min_conditions = min(max_possible, new.min_conditions + 1)
 
+    elif h_type == "toggle_filter":
+        param_name = hypothesis.get("param_name", "")
+        new_value = hypothesis.get("new_value", None)
+        if param_name and new_value is not None:
+            new.parameters[param_name] = new_value
+
     elif h_type == "adjust_parameter":
         param_name = hypothesis.get("param_name", "")
         new_value = hypothesis.get("new_value", None)
         if param_name and new_value is not None:
             new.parameters[param_name] = new_value
-            # 同步更新條件裡的參數
             _sync_condition_params(new, param_name, new_value)
 
     return new

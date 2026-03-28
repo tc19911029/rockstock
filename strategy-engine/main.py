@@ -19,6 +19,8 @@ from data.fetcher_tw import fetch_all as fetch_tw_stocks
 from data.resampler import resample
 from strategies.registry import load_strategy, save_strategy, next_version
 from backtest.engine import run_backtest
+from analysis.fundamental import fetch_fundamentals
+from analysis.chip import fetch_chips
 from optimizer.diagnoser import diagnose
 from optimizer.hypothesizer import generate_hypothesis
 from optimizer.mutator import mutate_strategy
@@ -118,6 +120,25 @@ def main():
         print("❌ 無法抓取任何數據，引擎結束。")
         return
 
+    # ── 抓取基本面 + 籌碼面數據 ───────────────────────────────────────────
+    print("\n📊 抓取基本面 + 籌碼面數據...")
+    fundamental_data = {}
+    chip_data = {}
+    for market in config.get("markets", []):
+        daily_data = all_data.get(market, {}).get("daily", {})
+        symbols = list(daily_data.keys())
+        if symbols:
+            try:
+                fundamental_data[market] = fetch_fundamentals(symbols, market)
+            except Exception as e:
+                print(f"  ⚠ {market} 基本面抓取失敗：{e}")
+                fundamental_data[market] = {}
+            try:
+                chip_data[market] = fetch_chips(symbols, market)
+            except Exception as e:
+                print(f"  ⚠ {market} 籌碼抓取失敗：{e}")
+                chip_data[market] = {}
+
     # ── 主循環 ────────────────────────────────────────────────────────────
     while not _should_stop:
         print(f"\n{'=' * 60}")
@@ -140,8 +161,8 @@ def main():
                     if not market_data:
                         continue
 
-                    train_result = run_backtest(strategy, market_data, market, "train", train_ratio, val_ratio)
-                    val_result = run_backtest(strategy, market_data, market, "validation", train_ratio, val_ratio)
+                    train_result = run_backtest(strategy, market_data, market, "train", train_ratio, val_ratio, fundamental_data=fundamental_data.get(market, {}), chip_data=chip_data.get(market, {}))
+                    val_result = run_backtest(strategy, market_data, market, "validation", train_ratio, val_ratio, fundamental_data=fundamental_data.get(market, {}), chip_data=chip_data.get(market, {}))
 
                     results[key] = {"train": train_result, "validation": val_result}
 
@@ -173,8 +194,8 @@ def main():
                     if not market_data:
                         continue
 
-                    new_train = run_backtest(new_strategy, market_data, market, "train", train_ratio, val_ratio)
-                    new_val = run_backtest(new_strategy, market_data, market, "validation", train_ratio, val_ratio)
+                    new_train = run_backtest(new_strategy, market_data, market, "train", train_ratio, val_ratio, fundamental_data=fundamental_data.get(market, {}), chip_data=chip_data.get(market, {}))
+                    new_val = run_backtest(new_strategy, market_data, market, "validation", train_ratio, val_ratio, fundamental_data=fundamental_data.get(market, {}), chip_data=chip_data.get(market, {}))
                     new_results[key] = {"train": new_train, "validation": new_val}
 
             # 7. 比較

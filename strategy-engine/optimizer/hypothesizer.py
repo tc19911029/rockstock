@@ -52,6 +52,52 @@ def generate_hypothesis(diagnosis: dict, strategy_params: dict) -> dict[str, Any
         })
 
     # ── 方案 C：調整各種參數（永遠可選）────────────────────────────────────
+    # ── 方案 D：開啟/關閉基本面和籌碼面過濾 ────────────────────────────────
+    if not strategy_params.get("use_fundamental_filter", False):
+        candidates.append({
+            "type": "toggle_filter",
+            "description": "開啟基本面過濾（篩掉基本面差的股票）",
+            "param_name": "use_fundamental_filter",
+            "old_value": False,
+            "new_value": True,
+            "changes": ["use_fundamental_filter: False → True"],
+            "priority": 3,
+        })
+
+    if not strategy_params.get("use_chip_filter", False):
+        candidates.append({
+            "type": "toggle_filter",
+            "description": "開啟籌碼面過濾（篩掉法人賣超的股票）",
+            "param_name": "use_chip_filter",
+            "old_value": False,
+            "new_value": True,
+            "changes": ["use_chip_filter: False → True"],
+            "priority": 3,
+        })
+
+    if strategy_params.get("use_fundamental_filter"):
+        candidates.append({
+            "type": "adjust_parameter",
+            "description": f"調整基本面門檻：{strategy_params.get('min_fundamental_score', 40)} → {strategy_params.get('min_fundamental_score', 40) + 10}",
+            "param_name": "min_fundamental_score",
+            "old_value": strategy_params.get("min_fundamental_score", 40),
+            "new_value": min(80, strategy_params.get("min_fundamental_score", 40) + 10),
+            "changes": ["提高基本面門檻"],
+            "priority": 2,
+        })
+
+    if strategy_params.get("use_chip_filter"):
+        candidates.append({
+            "type": "adjust_parameter",
+            "description": f"調整籌碼門檻：{strategy_params.get('min_chip_score', 40)} → {strategy_params.get('min_chip_score', 40) + 10}",
+            "param_name": "min_chip_score",
+            "old_value": strategy_params.get("min_chip_score", 40),
+            "new_value": min(80, strategy_params.get("min_chip_score", 40) + 10),
+            "changes": ["提高籌碼門檻"],
+            "priority": 2,
+        })
+
+    # ── 方案 C：調整各種參數（永遠可選）────────────────────────────────────
     adjustable_params = [
         ("volume_multiplier", 0.25, 0.5, 5.0, "量能倍數"),
         ("kbar_min_body_pct", 0.005, 0.005, 0.05, "K棒最小實體"),

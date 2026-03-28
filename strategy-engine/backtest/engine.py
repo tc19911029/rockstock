@@ -18,6 +18,8 @@ def run_backtest(
     train_ratio: float = 0.6,
     val_ratio: float = 0.2,
     cost_config: dict = None,
+    fundamental_data: dict = None,
+    chip_data: dict = None,
 ) -> dict:
     """
     對多支股票跑回測。
@@ -40,9 +42,31 @@ def run_backtest(
     all_trades = []
     per_stock = {}
 
+    # 基本面/籌碼面過濾門檻
+    use_fundamental = strategy.parameters.get("use_fundamental_filter", False)
+    min_fundamental_score = strategy.parameters.get("min_fundamental_score", 40)
+    use_chip = strategy.parameters.get("use_chip_filter", False)
+    min_chip_score = strategy.parameters.get("min_chip_score", 40)
+
     for symbol, df in data.items():
         if len(df) < 60:
             continue
+
+        # 基本面過濾
+        if use_fundamental and fundamental_data:
+            from analysis.fundamental import score_fundamental
+            f_score = score_fundamental(fundamental_data.get(symbol))
+            if f_score < min_fundamental_score:
+                per_stock[symbol] = {"skipped": "fundamental", "score": f_score}
+                continue
+
+        # 籌碼面過濾
+        if use_chip and chip_data:
+            from analysis.chip import score_chip
+            c_score = score_chip(chip_data.get(symbol), market)
+            if c_score < min_chip_score:
+                per_stock[symbol] = {"skipped": "chip", "score": c_score}
+                continue
 
         try:
             trades = _backtest_single(strategy, df, symbol, split, train_ratio, val_ratio, cost_config)
@@ -52,7 +76,6 @@ def run_backtest(
                 "wins": sum(1 for t in trades if t["net_return"] > 0),
             }
         except Exception as e:
-            # 單支股票失敗不停止
             per_stock[symbol] = {"error": str(e)}
 
     from backtest.metrics import calc_metrics
