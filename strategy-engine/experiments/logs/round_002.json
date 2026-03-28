@@ -1,35 +1,33 @@
 {
   "round": 2,
-  "timestamp": "2026-03-29T03:38:52.753214",
+  "timestamp": "2026-03-29T03:54:24.620914",
   "current_strategy": "v001",
   "new_strategy": "v002",
-  "what_changed": "微調短期均線天數：5 → 4",
+  "what_changed": "移除條件「position」（邊際價值 -7.7%）",
   "hypothesis": {
-    "type": "adjust_parameter",
-    "description": "微調短期均線天數：5 → 4",
-    "param_name": "ma_fast",
-    "old_value": 5,
-    "new_value": 4,
+    "type": "remove_condition",
+    "description": "移除條件「position」（邊際價值 -7.7%）",
+    "target_condition": "position",
     "changes": [
-      "ma_fast: 5 → 4"
+      "移除 position"
     ],
-    "priority": 1
+    "priority": 3
   },
   "comparison": {
     "is_better": false,
-    "score_diff": 0.0,
-    "reason": "變化不大",
+    "score_diff": 0.0088,
+    "reason": "勝率下降 -3.1%",
     "details": {
       "old_sharpe": -0.033,
-      "new_sharpe": -0.033,
+      "new_sharpe": -0.015,
       "old_win_rate": 40.4,
-      "new_win_rate": 40.4,
+      "new_win_rate": 37.4,
       "old_profit_factor": 0.91,
-      "new_profit_factor": 0.91,
+      "new_profit_factor": 0.959,
       "old_max_drawdown": -130.24,
-      "new_max_drawdown": -130.24,
+      "new_max_drawdown": -126.74,
       "old_expectancy": -0.197,
-      "new_expectancy": -0.197
+      "new_expectancy": -0.109
     }
   },
   "promoted": false,

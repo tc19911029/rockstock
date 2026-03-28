@@ -1,38 +1,38 @@
 {
   "round": 4,
-  "timestamp": "2026-03-29T03:39:14.298186",
+  "timestamp": "2026-03-29T03:54:47.372284",
   "current_strategy": "v001",
   "new_strategy": "v002",
-  "what_changed": "微調量能倍數：1.5 → 1.75",
+  "what_changed": "開啟基本面過濾（篩掉基本面差的股票）",
   "hypothesis": {
-    "type": "adjust_parameter",
-    "description": "微調量能倍數：1.5 → 1.75",
-    "param_name": "volume_multiplier",
-    "old_value": 1.5,
-    "new_value": 1.75,
+    "type": "toggle_filter",
+    "description": "開啟基本面過濾（篩掉基本面差的股票）",
+    "param_name": "use_fundamental_filter",
+    "old_value": false,
+    "new_value": true,
     "changes": [
-      "volume_multiplier: 1.5 → 1.75"
+      "use_fundamental_filter: False → True"
     ],
-    "priority": 1
+    "priority": 3
   },
   "comparison": {
-    "is_better": false,
-    "score_diff": -0.0016,
-    "reason": "變化不大",
+    "is_better": true,
+    "score_diff": 0.0108,
+    "reason": "綜合表現略有變化",
     "details": {
       "old_sharpe": -0.033,
-      "new_sharpe": -0.035,
+      "new_sharpe": -0.011,
       "old_win_rate": 40.4,
-      "new_win_rate": 39.7,
+      "new_win_rate": 38.9,
       "old_profit_factor": 0.91,
-      "new_profit_factor": 0.905,
+      "new_profit_factor": 0.97,
       "old_max_drawdown": -130.24,
-      "new_max_drawdown": -143.38,
+      "new_max_drawdown": -89.25,
       "old_expectancy": -0.197,
-      "new_expectancy": -0.211
+      "new_expectancy": -0.071
     }
   },
-  "promoted": false,
+  "promoted": true,
   "diagnosis_summary": {
     "total_train_trades": 1305,
     "total_val_trades": 408,

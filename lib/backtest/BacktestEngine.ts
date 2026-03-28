@@ -152,8 +152,8 @@ export interface BacktestStats {
 export const DEFAULT_STRATEGY: BacktestStrategyParams = {
   entryType:   'nextOpen',
   holdDays:    5,
-  stopLoss:    -0.07,      // -7% 停損（朱老師標準）
-  takeProfit:  null,       // 不設強制停利，讓它跑滿 holdDays
+  stopLoss:    -0.05,      // -7%→-5%：更快止血，減少大虧
+  takeProfit:  0.10,       // 新增 +10% 停利：鎖住利潤
   costParams:  { twFeeDiscount: 0.6 },  // 六折手續費（台灣市場常見折扣）
   slippagePct: 0.001,      // 0.1% 滑價（散戶實際成交偏移）
 };

@@ -1,51 +1,49 @@
 {
   "round": 5,
-  "timestamp": "2026-03-29T03:39:25.707777",
-  "current_strategy": "v001",
-  "new_strategy": "v002",
-  "what_changed": "微調量能倍數：1.5 → 1.25",
+  "timestamp": "2026-03-29T03:54:54.722630",
+  "current_strategy": "v002",
+  "new_strategy": "v003",
+  "what_changed": "移除條件「indicator」（邊際價值 -10.9%）",
   "hypothesis": {
-    "type": "adjust_parameter",
-    "description": "微調量能倍數：1.5 → 1.25",
-    "param_name": "volume_multiplier",
-    "old_value": 1.5,
-    "new_value": 1.25,
+    "type": "remove_condition",
+    "description": "移除條件「indicator」（邊際價值 -10.9%）",
+    "target_condition": "indicator",
     "changes": [
-      "volume_multiplier: 1.5 → 1.25"
+      "移除 indicator"
     ],
-    "priority": 1
+    "priority": 3
   },
   "comparison": {
-    "is_better": false,
-    "score_diff": 0.008,
-    "reason": "變化不大",
+    "is_better": true,
+    "score_diff": 0.0729,
+    "reason": "夏普率提升 +0.078；獲利因子提升 +0.229",
     "details": {
-      "old_sharpe": -0.033,
-      "new_sharpe": -0.024,
-      "old_win_rate": 40.4,
-      "new_win_rate": 40.2,
-      "old_profit_factor": 0.91,
-      "new_profit_factor": 0.932,
-      "old_max_drawdown": -130.24,
-      "new_max_drawdown": -134.9,
-      "old_expectancy": -0.197,
-      "new_expectancy": -0.146
+      "old_sharpe": -0.011,
+      "new_sharpe": 0.067,
+      "old_win_rate": 38.9,
+      "new_win_rate": 39.1,
+      "old_profit_factor": 0.97,
+      "new_profit_factor": 1.199,
+      "old_max_drawdown": -89.25,
+      "new_max_drawdown": -58.58,
+      "old_expectancy": -0.071,
+      "new_expectancy": 0.507
     }
   },
-  "promoted": false,
+  "promoted": true,
   "diagnosis_summary": {
-    "total_train_trades": 1305,
-    "total_val_trades": 408,
-    "train_win_rate": 45.9,
-    "val_win_rate": 40.44,
-    "train_sharpe": 0.046,
-    "val_sharpe": -0.033,
-    "train_pf": 1.141,
-    "val_pf": 0.91
+    "total_train_trades": 844,
+    "total_val_trades": 275,
+    "train_win_rate": 44.79,
+    "val_win_rate": 38.91,
+    "train_sharpe": 0.025,
+    "val_sharpe": -0.011,
+    "train_pf": 1.078,
+    "val_pf": 0.97
   },
   "suggestions": [
-    "🔍 條件「indicator」邊際價值為 -14.3%，有它的勝率反而更低，考慮移除或修改",
-    "🔍 條件「position」邊際價值為 -7.7%，有它的勝率反而更低，考慮移除或修改",
-    "📊 驗證集勝率 40.44%，尚有改善空間"
+    "🔍 條件「indicator」邊際價值為 -10.9%，有它的勝率反而更低，考慮移除或修改",
+    "🔍 條件「position」邊際價值為 -6.6%，有它的勝率反而更低，考慮移除或修改",
+    "📉 驗證集勝率僅 38.91%，策略需要大幅改善"
   ]
 }

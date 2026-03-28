@@ -58,26 +58,29 @@ export abstract class MarketScanner {
       const trend    = detectTrend(candles, lastIdx);
       const position = detectTrendPosition(candles, lastIdx);
 
-      // ── 篩股條件 ─────────────────────────────────────────────────────────
+      // ── 篩股條件（嚴格版 — 寧可錯過，不可做錯）────────────────────────────
       // 1. 空頭趨勢：嚴禁做多
       if (trend === '空頭') return null;
 
-      // 先計算 surgeScore（用於後續寬鬆篩選）
+      // 先計算 surgeScore
       const surge = computeSurgeScore(candles, lastIdx);
 
-      // 2. 六大條件門檻 — surgeScore 高分可降低門檻（飆股優先）
-      const effectiveMinScore = surge.totalScore >= 60
-        ? Math.max(minScore - 1, 3)  // 高潛力飆股門檻降 1 分，最低 3
-        : minScore;
-      if (sixConds.totalScore < effectiveMinScore) return null;
+      // 2. 六大條件門檻 — 不再降門檻，嚴格執行
+      if (sixConds.totalScore < minScore) return null;
 
-      // 3. 乖離過大 — 但 surgeScore 高分豁免（飆股本來就會乖離大）
-      if (surge.totalScore < 55 && last.ma20 && last.ma20 > 0) {
+      // 3. 最低飆股潛力分 — 過濾弱勢股（新增）
+      if (surge.totalScore < 40) return null;
+
+      // 4. 乖離過大 — 一律過濾（不再因 surgeScore 豁免）
+      if (last.ma20 && last.ma20 > 0) {
         const overExtended = (last.close - last.ma20) / last.ma20 > thresholds.deviationMax;
         if (overExtended) return null;
       }
-      // 4. KD 超買 — 但 surgeScore 高分豁免
-      if (surge.totalScore < 55 && last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
+      // 5. KD 超買 — 一律過濾
+      if (last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
+
+      // 6. 成交量太低 — 過濾冷門股（新增）
+      if (last.volume < 1000) return null;
 
       const changePercent = prev?.close > 0
         ? +((last.close - prev.close) / prev.close * 100).toFixed(2)

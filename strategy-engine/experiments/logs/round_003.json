@@ -1,33 +1,35 @@
 {
   "round": 3,
-  "timestamp": "2026-03-29T03:39:02.913386",
+  "timestamp": "2026-03-29T03:54:37.143456",
   "current_strategy": "v001",
   "new_strategy": "v002",
-  "what_changed": "移除條件「position」（邊際價值 -7.7%）",
+  "what_changed": "微調停損比例：-0.07 → -0.08",
   "hypothesis": {
-    "type": "remove_condition",
-    "description": "移除條件「position」（邊際價值 -7.7%）",
-    "target_condition": "position",
+    "type": "adjust_parameter",
+    "description": "微調停損比例：-0.07 → -0.08",
+    "param_name": "stop_loss_pct",
+    "old_value": -0.07,
+    "new_value": -0.08,
     "changes": [
-      "移除 position"
+      "stop_loss_pct: -0.07 → -0.08"
     ],
-    "priority": 3
+    "priority": 1
   },
   "comparison": {
     "is_better": false,
-    "score_diff": 0.0088,
-    "reason": "勝率下降 -3.1%",
+    "score_diff": -0.0051,
+    "reason": "變化不大",
     "details": {
       "old_sharpe": -0.033,
-      "new_sharpe": -0.015,
+      "new_sharpe": -0.041,
       "old_win_rate": 40.4,
-      "new_win_rate": 37.4,
+      "new_win_rate": 40.4,
       "old_profit_factor": 0.91,
-      "new_profit_factor": 0.959,
+      "new_profit_factor": 0.891,
       "old_max_drawdown": -130.24,
-      "new_max_drawdown": -126.74,
+      "new_max_drawdown": -142.66,
       "old_expectancy": -0.197,
-      "new_expectancy": -0.109
+      "new_expectancy": -0.246
     }
   },
   "promoted": false,
