@@ -20,10 +20,7 @@ const CN_NAME_MAP: Record<string, string> = Object.fromEntries(
  * @returns     中文公司名，若查無則回傳 null
  */
 export async function getCNChineseName(code: string): Promise<string | null> {
-  // 1. 靜態清單
-  if (CN_NAME_MAP[code]) return CN_NAME_MAP[code];
-
-  // 2. 快取
+  // 1. 快取（動態 API 取過的最新名字優先）
   const cacheKey = `cn:name:${code}`;
   const cached = globalCache.get<string>(cacheKey);
   if (cached) return cached;
@@ -65,7 +62,8 @@ export async function getCNChineseName(code: string): Promise<string | null> {
     }
   } catch { /* 騰訊也失敗 */ }
 
-  return null;
+  // 5. 最後 fallback：靜態清單（可能名字過期但總比沒有好）
+  return CN_NAME_MAP[code] ?? null;
 }
 
 const NAMES_CACHE_KEY = 'twse:names:all';
