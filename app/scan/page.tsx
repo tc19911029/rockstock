@@ -1336,18 +1336,14 @@ export default function UnifiedScanPage() {
                             { key: 'change' as const, label: '漲跌%', align: 'text-right', tooltip: '' },
                           ]).map(({ key, label, align, tooltip }) => (
                             <th key={key}
-                              className={`${align} py-1.5 px-1 cursor-pointer hover:text-white select-none group relative`}
+                              title={tooltip || undefined}
+                              className={`${align} py-1.5 px-1 cursor-pointer hover:text-white select-none`}
                               onClick={() => {
                                 if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
                                 else { setScanSort(key); setScanSortDir('desc'); }
                               }}>
-                              <span>{label}</span>
+                              {label}{tooltip && <span className="text-[8px] text-slate-600 ml-0.5">ⓘ</span>}
                               {scanSort === key && <span className="ml-0.5 text-sky-400">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
-                              {tooltip && (
-                                <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block w-56 p-2 rounded bg-slate-800 border border-slate-600 text-[10px] text-slate-300 whitespace-pre-line font-normal shadow-lg pointer-events-none">
-                                  {tooltip}
-                                </div>
-                              )}
                             </th>
                           ))}
                           <th className="text-left py-1.5 px-2 whitespace-nowrap">趨勢</th>
@@ -1574,18 +1570,14 @@ export default function UnifiedScanPage() {
                             { key: 'histWinRate' as const, label: '勝率', tooltip: '歷史勝率\n過去120天同類信號\n隔日開盤買→持有5日賣\n有多少次是賺錢的' },
                           ]).map(({ key, label, tooltip }) => (
                             <th key={label}
-                              className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none group relative"
+                              title={tooltip || undefined}
+                              className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none"
                               onClick={() => {
                                 if (sortBy === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
                                 else { setSortBy(key); setSortDir('desc'); }
                               }}>
-                              {label}
+                              {label}{tooltip && <span className="text-[8px] text-slate-600 ml-0.5">ⓘ</span>}
                               {sortBy === key && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
-                              {tooltip && (
-                                <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block w-52 p-2 rounded bg-slate-800 border border-slate-600 text-[10px] text-slate-300 whitespace-pre-line font-normal shadow-lg pointer-events-none">
-                                  {tooltip}
-                                </div>
-                              )}
                             </th>
                           ))}
                           <th className="text-right py-1.5 px-2 whitespace-nowrap">進場價</th>
@@ -1654,18 +1646,14 @@ export default function UnifiedScanPage() {
                             { key: 'change' as const, label: '漲跌%', tooltip: '' },
                           ]).map(({ key, label, tooltip }) => (
                             <th key={key}
-                              className={`${key === 'price' || key === 'change' ? 'text-right' : 'text-center'} py-1.5 px-1 cursor-pointer hover:text-white select-none group relative`}
+                              title={tooltip || undefined}
+                              className={`${key === 'price' || key === 'change' ? 'text-right' : 'text-center'} py-1.5 px-1 cursor-pointer hover:text-white select-none`}
                               onClick={() => {
                                 if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
                                 else { setScanSort(key); setScanSortDir('desc'); }
                               }}>
-                              {label}
+                              {label}{tooltip && <span className="text-[8px] text-slate-600 ml-0.5">ⓘ</span>}
                               {scanSort === key && <span className="ml-0.5 text-sky-400">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
-                              {tooltip && (
-                                <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-1 hidden group-hover:block w-52 p-2 rounded bg-slate-800 border border-slate-600 text-[10px] text-slate-300 whitespace-pre-line font-normal shadow-lg pointer-events-none">
-                                  {tooltip}
-                                </div>
-                              )}
                             </th>
                           ))}
                           <th className="text-left py-1.5 px-2 whitespace-nowrap">趨勢</th>
