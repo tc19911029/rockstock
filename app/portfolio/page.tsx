@@ -238,13 +238,15 @@ export default function PortfolioPage() {
                 {currentPrice > 0 && (() => {
                   const alerts: Array<{ level: 'danger' | 'warning' | 'profit'; text: string }> = [];
 
-                  // 止損警報
-                  if (pnlPct <= -7) alerts.push({ level: 'danger', text: `⚠️ 虧損 ${pnlPct.toFixed(1)}% — 已達止損線，建議立即賣出！` });
-                  else if (pnlPct <= -5) alerts.push({ level: 'warning', text: `⚠ 虧損 ${pnlPct.toFixed(1)}% — 接近止損，準備賣出` });
+                  // 止損警報（含具體建議動作）
+                  if (pnlPct <= -7) alerts.push({ level: 'danger', text: `虧損 ${pnlPct.toFixed(1)}% — 已達止損線！建議：開盤以市價單全數賣出，嚴守紀律不凹單` });
+                  else if (pnlPct <= -5) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 接近止損，建議：設定停損單在成本價×0.93，或明日開盤觀察若跌破立即出場` });
+                  else if (pnlPct <= -3) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 留意：觀察是否跌破 MA5 或支撐位` });
 
-                  // 止盈提醒
-                  if (pnlPct >= 15) alerts.push({ level: 'profit', text: `🎯 獲利 ${pnlPct.toFixed(1)}% — 建議至少減碼一半鎖住利潤！` });
-                  else if (pnlPct >= 10) alerts.push({ level: 'profit', text: `✅ 獲利 ${pnlPct.toFixed(1)}% — 可考慮分批停利` });
+                  // 止盈提醒（含具體建議動作）
+                  if (pnlPct >= 20) alerts.push({ level: 'profit', text: `獲利 ${pnlPct.toFixed(1)}% — 建議：至少減碼 1/2 鎖住利潤，剩餘以 MA5 為移動停利` });
+                  else if (pnlPct >= 15) alerts.push({ level: 'profit', text: `獲利 ${pnlPct.toFixed(1)}% — 建議：可分批停利 1/3，剩餘持股上移停損至成本價（保本出場）` });
+                  else if (pnlPct >= 10) alerts.push({ level: 'profit', text: `獲利 ${pnlPct.toFixed(1)}% — 可考慮將停損上移至成本價，確保不虧損` });
 
                   // 持有天數
                   const buyDateObj = new Date(h.buyDate);

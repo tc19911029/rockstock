@@ -37,6 +37,8 @@ export default function WatchlistPage() {
   const [data, setData] = useState<Record<string, ConditionData>>({});
   const [addInput, setAddInput] = useState('');
   const [addLoading, setAddLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchConditions = useCallback(async (symbol: string) => {
     setData(prev => ({ ...prev, [symbol]: { ...prev[symbol], loading: true, error: undefined } as ConditionData }));
@@ -50,8 +52,11 @@ export default function WatchlistPage() {
     }
   }, []);
 
-  const refreshAll = useCallback(() => {
-    items.forEach(item => fetchConditions(item.symbol));
+  const refreshAll = useCallback(async () => {
+    setIsRefreshing(true);
+    await Promise.allSettled(items.map(item => fetchConditions(item.symbol)));
+    setLastUpdated(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }));
+    setIsRefreshing(false);
   }, [items, fetchConditions]);
 
   useEffect(() => {
@@ -96,9 +101,10 @@ export default function WatchlistPage() {
           <span className="text-xs text-slate-500 shrink-0">{items.length} 支</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={refreshAll}
-            className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-slate-300 flex items-center gap-1.5 font-medium">
-            <span>↻</span><span>重新整理</span>
+          {lastUpdated && <span className="text-[10px] text-slate-600 hidden sm:block">{lastUpdated} 更新</span>}
+          <button onClick={refreshAll} disabled={isRefreshing}
+            className="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg transition text-slate-300 flex items-center gap-1.5 font-medium">
+            <span className={isRefreshing ? 'animate-spin' : ''}>↻</span><span>{isRefreshing ? '刷新中...' : '重新整理'}</span>
           </button>
           <Link href="/scanner"  className="text-xs px-2 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-slate-400 hover:text-white">掃描</Link>
           <Link href="/settings" className="text-xs px-2 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-slate-400 hover:text-white">⚙</Link>
