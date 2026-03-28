@@ -79,8 +79,17 @@ export abstract class MarketScanner {
       // 5. KD 超買 — 一律過濾
       if (last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
 
-      // 6. 成交量太低 — 過濾冷門股（新增）
+      // 6. 成交量太低 — 過濾冷門股
       if (last.volume < 1000) return null;
+
+      // 7. 漲停隔天不追 — 前一天漲幅 ≥ 9.5% 的不進場（追高容易被套）
+      if (prev && prev.close > 0) {
+        const prevChange = (last.close - prev.close) / prev.close;
+        if (prevChange >= 0.095) return null;
+      }
+
+      // 8. 末升段不進場 — 位置太高風險大
+      if (position.includes('末升')) return null;
 
       const changePercent = prev?.close > 0
         ? +((last.close - prev.close) / prev.close * 100).toFixed(2)

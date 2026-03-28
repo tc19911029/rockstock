@@ -81,6 +81,8 @@ export interface BacktestStrategyParams {
   holdDays:    number;         // 固定持有天數（主要出場規則）
   stopLoss:    number | null;  // 停損比例（負數，null = 不設停損）
   takeProfit:  number | null;  // 停利比例（正數，null = 不設停利）
+  trailingStop: number | null; // 移動停利：從最高點回撤 N% 就出場（如 0.03 = 3%）
+  trailingActivate: number | null; // 移動停利啟動門檻：漲到 N% 才開始追蹤（如 0.05 = 5%）
   costParams:  CostParams;
   slippagePct: number;         // 滑價百分比（如 0.001 = 0.1%，買入加 / 賣出減）
 }
@@ -152,10 +154,12 @@ export interface BacktestStats {
 export const DEFAULT_STRATEGY: BacktestStrategyParams = {
   entryType:   'nextOpen',
   holdDays:    5,
-  stopLoss:    -0.05,      // -7%→-5%：更快止血，減少大虧
-  takeProfit:  0.10,       // 新增 +10% 停利：鎖住利潤
-  costParams:  { twFeeDiscount: 0.6 },  // 六折手續費（台灣市場常見折扣）
-  slippagePct: 0.001,      // 0.1% 滑價（散戶實際成交偏移）
+  stopLoss:    -0.05,           // -5% 停損
+  takeProfit:  0.15,            // +15% 固定停利（安全網）
+  trailingStop: 0.03,           // 移動停利：從最高點回撤 3% 出場
+  trailingActivate: 0.05,       // 漲到 +5% 才啟動移動停利
+  costParams:  { twFeeDiscount: 0.6 },
+  slippagePct: 0.001,
 };
 
 // ── Engine ──────────────────────────────────────────────────────────────────────
@@ -217,36 +221,63 @@ export function runSingleBacktest(
   const stopLossPrice   = strategy.stopLoss   !== null ? entryPrice * (1 + strategy.stopLoss)   : null;
   const takeProfitPrice = strategy.takeProfit !== null ? entryPrice * (1 + strategy.takeProfit) : null;
 
+  // ── 移動停利追蹤 ────────────────────────────────────────────────────────
+  const trailingStop     = strategy.trailingStop     ?? null;
+  const trailingActivate = strategy.trailingActivate ?? null;
+  let   highestPrice     = entryPrice;  // 追蹤持有期間最高價
+  let   trailingActive   = false;       // 是否已啟動移動停利
+
   for (let i = 0; i < holdWindow.length; i++) {
     const c = holdWindow[i];
     holdDays = i + 1;
 
+    // 更新最高價（用收盤價追蹤，更穩定）
+    if (c.close > highestPrice) highestPrice = c.close;
+
+    // 檢查移動停利是否啟動（漲到 activate 門檻）
+    if (!trailingActive && trailingActivate !== null && trailingStop !== null) {
+      const currentReturn = (highestPrice - entryPrice) / entryPrice;
+      if (currentReturn >= trailingActivate) trailingActive = true;
+    }
+
     // 進場當天（i===0 且 nextOpen 模式）：只用收盤判斷停損/停利
-    // 因為日線 low/high 包含開盤前的跳空，無法確認是進場後才觸及
     const isEntryDay = i === 0 && strategy.entryType === 'nextOpen';
     const hitSL = stopLossPrice   !== null && (isEntryDay ? c.close <= stopLossPrice   : c.low  <= stopLossPrice);
     const hitTP = takeProfitPrice !== null && (isEntryDay ? c.close >= takeProfitPrice : c.high >= takeProfitPrice);
 
-    if (hitSL || hitTP) {
-      if (hitSL && hitTP) {
-        // 同一根 K 線兩者都觸及：用 open 到各觸發價的距離判斷誰先
-        const distSL = Math.abs(c.open - stopLossPrice!);
-        const distTP = Math.abs(c.open - takeProfitPrice!);
-        if (distSL <= distTP) {
+    // 移動停利觸發：從最高點回撤超過 trailingStop%
+    let hitTrailing = false;
+    let trailingExitPrice = 0;
+    if (trailingActive && trailingStop !== null && !isEntryDay) {
+      trailingExitPrice = highestPrice * (1 - trailingStop);
+      if (c.low <= trailingExitPrice) hitTrailing = true;
+    }
+
+    if (hitSL || hitTP || hitTrailing) {
+      if (hitSL && (hitTP || hitTrailing)) {
+        // 停損和停利/移動停利同時觸及
+        const distSL = Math.abs(c.open - (stopLossPrice ?? c.open));
+        const otherPrice = hitTP ? takeProfitPrice! : trailingExitPrice;
+        const distOther = Math.abs(c.open - otherPrice);
+        if (distSL <= distOther) {
           exitReason = 'stopLoss';
-          // 跳空跌停：若開盤已低於停損價，以開盤（含滑價）出場
           exitPrice = c.open <= stopLossPrice!
             ? +(c.open * (1 - strategy.slippagePct)).toFixed(3)
             : +stopLossPrice!.toFixed(3);
         } else {
-          exitReason = 'takeProfit';
-          exitPrice  = +takeProfitPrice!.toFixed(3);
+          exitReason = hitTP ? 'takeProfit' : 'trailingStop';
+          exitPrice  = +(hitTP ? takeProfitPrice! : trailingExitPrice).toFixed(3);
         }
       } else if (hitSL) {
         exitReason = 'stopLoss';
         exitPrice = c.open <= stopLossPrice!
           ? +(c.open * (1 - strategy.slippagePct)).toFixed(3)
           : +stopLossPrice!.toFixed(3);
+      } else if (hitTrailing) {
+        exitReason = 'trailingStop';
+        exitPrice = +(c.open <= trailingExitPrice
+          ? c.open * (1 - strategy.slippagePct)
+          : trailingExitPrice).toFixed(3);
       } else {
         exitReason = 'takeProfit';
         exitPrice  = +takeProfitPrice!.toFixed(3);

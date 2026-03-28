@@ -1,51 +1,49 @@
 {
   "round": 10,
-  "timestamp": "2026-03-29T03:40:18.662633",
-  "current_strategy": "v001",
-  "new_strategy": "v002",
-  "what_changed": "微調持有天數：5 → 6",
+  "timestamp": "2026-03-29T03:55:18.602142",
+  "current_strategy": "v005",
+  "new_strategy": "v006",
+  "what_changed": "微調持有天數：5 → 4",
   "hypothesis": {
     "type": "adjust_parameter",
-    "description": "微調持有天數：5 → 6",
+    "description": "微調持有天數：5 → 4",
     "param_name": "hold_days",
     "old_value": 5,
-    "new_value": 6,
+    "new_value": 4,
     "changes": [
-      "hold_days: 5 → 6"
+      "hold_days: 5 → 4"
     ],
     "priority": 1
   },
   "comparison": {
     "is_better": false,
-    "score_diff": -0.0023,
-    "reason": "變化不大",
+    "score_diff": -0.0203,
+    "reason": "勝率提升 +3.5%",
     "details": {
-      "old_sharpe": -0.033,
-      "new_sharpe": -0.032,
-      "old_win_rate": 40.4,
-      "new_win_rate": 39.0,
-      "old_profit_factor": 0.91,
-      "new_profit_factor": 0.911,
-      "old_max_drawdown": -130.24,
-      "new_max_drawdown": -134.41,
-      "old_expectancy": -0.197,
-      "new_expectancy": -0.214
+      "old_sharpe": 0.131,
+      "new_sharpe": 0.107,
+      "old_win_rate": 37.0,
+      "new_win_rate": 40.4,
+      "old_profit_factor": 1.402,
+      "new_profit_factor": 1.315,
+      "old_max_drawdown": -44.68,
+      "new_max_drawdown": -31.69,
+      "old_expectancy": 1.168,
+      "new_expectancy": 0.83
     }
   },
   "promoted": false,
   "diagnosis_summary": {
-    "total_train_trades": 1305,
-    "total_val_trades": 408,
-    "train_win_rate": 45.9,
-    "val_win_rate": 40.44,
-    "train_sharpe": 0.046,
-    "val_sharpe": -0.033,
-    "train_pf": 1.141,
-    "val_pf": 0.91
+    "total_train_trades": 74,
+    "total_val_trades": 46,
+    "train_win_rate": 37.84,
+    "val_win_rate": 36.96,
+    "train_sharpe": -0.044,
+    "val_sharpe": 0.131,
+    "train_pf": 0.885,
+    "val_pf": 1.402
   },
   "suggestions": [
-    "🔍 條件「indicator」邊際價值為 -14.3%，有它的勝率反而更低，考慮移除或修改",
-    "🔍 條件「position」邊際價值為 -7.7%，有它的勝率反而更低，考慮移除或修改",
-    "📊 驗證集勝率 40.44%，尚有改善空間"
+    "📉 驗證集勝率僅 36.96%，策略需要大幅改善"
   ]
 }

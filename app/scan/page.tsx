@@ -72,13 +72,14 @@ function trendBadge(t: string) {
 
 function exitBadge(reason: string) {
   const map: Record<string, string> = {
-    holdDays:   'bg-sky-900/50 text-sky-300',
-    stopLoss:   'bg-green-900/50 text-green-300',
-    takeProfit: 'bg-red-900/50 text-red-300',
-    dataEnd:    'bg-slate-700/50 text-slate-400',
+    holdDays:     'bg-sky-900/50 text-sky-300',
+    stopLoss:     'bg-green-900/50 text-green-300',
+    takeProfit:   'bg-red-900/50 text-red-300',
+    trailingStop: 'bg-amber-900/50 text-amber-300',
+    dataEnd:      'bg-slate-700/50 text-slate-400',
   };
   const labels: Record<string, string> = {
-    holdDays: '持滿', stopLoss: '停損', takeProfit: '停利', dataEnd: '缺資料',
+    holdDays: '持滿', stopLoss: '停損', takeProfit: '停利', trailingStop: '移停', dataEnd: '缺資料',
   };
   const cls = map[reason] ?? map.holdDays;
   return (
@@ -455,7 +456,8 @@ function ResearchAssumptions({ market, strategy }: {
               <li>• 進場方式：<span className="text-slate-200">訊號日隔日開盤價</span>（{strategy.entryType}）</li>
               <li>• 持有天數：<span className="text-slate-200">{strategy.holdDays} 個交易日後以收盤出場</span></li>
               <li>• 停損：<span className="text-slate-200">{strategy.stopLoss == null ? '未設定' : `${(strategy.stopLoss * 100).toFixed(0)}%（以停損價出場）`}</span></li>
-              <li>• 停利：<span className="text-slate-200">{strategy.takeProfit == null ? '未設定' : `+${(strategy.takeProfit * 100).toFixed(0)}%（以停利價出場）`}</span></li>
+              <li>• 停利：<span className="text-slate-200">{strategy.takeProfit == null ? '未設定' : `+${(strategy.takeProfit * 100).toFixed(0)}%（固定停利）`}</span></li>
+              <li>• 移動停利：<span className="text-slate-200">漲到 +{((strategy as any).trailingActivate ?? 0.05) * 100}% 啟動，從最高點回撤 {((strategy as any).trailingStop ?? 0.03) * 100}% 出場</span></li>
             </ul>
           </div>
           <div>
