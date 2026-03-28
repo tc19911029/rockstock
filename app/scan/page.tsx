@@ -358,6 +358,18 @@ function CapitalPanel({ trades, constraints, finalCapital, capitalReturn, skippe
 
 // ── Trade Row ──────────────────────────────────────────────────────────────────
 
+// 回測交易的綜合分（與掃描結果用同一公式）
+function calcTradeComposite(t: BacktestTrade): number {
+  const sixCon = (t.signalScore / 6) * 100;
+  const surge  = t.surgeScore ?? 0;
+  const winR   = t.histWinRate ?? 50;
+  const posBonus = t.trendPosition?.includes('起漲') ? 100
+                 : t.trendPosition?.includes('主升') ? 70
+                 : t.trendPosition?.includes('末升') ? 20 : 50;
+  const volBonus = 50; // 回測交易沒有 surgeComponents，用預設值
+  return Math.round((sixCon * 0.35 + surge * 0.25 + winR * 0.20 + posBonus * 0.10 + volBonus * 0.10) * 10) / 10;
+}
+
 function TradeRow({ t }: { t: BacktestTrade }) {
   const sym = t.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   return (
@@ -372,6 +384,9 @@ function TradeRow({ t }: { t: BacktestTrade }) {
         </div>
       </td>
       <td className="py-1.5 px-1 text-[10px] text-slate-500 max-w-[60px] truncate" title={t.industry}>{t.industry ?? '—'}</td>
+      <td className="py-1.5 px-1 text-center">
+        {(() => { const cs = calcTradeComposite(t); return <span className={`font-bold text-[11px] ${cs >= 70 ? 'text-sky-400' : cs >= 55 ? 'text-slate-200' : 'text-slate-500'}`}>{cs.toFixed(1)}</span>; })()}
+      </td>
       <td className="py-1.5 px-1 text-center">
         <span className={`font-bold ${t.signalScore >= 5 ? 'text-red-400' : t.signalScore >= 4 ? 'text-orange-400' : 'text-yellow-400'}`}>
           {t.signalScore}/6
@@ -789,7 +804,7 @@ export default function UnifiedScanPage() {
 
   const [tab, setTab]               = useState<'strict' | 'horizon' | 'walkforward'>('strict');
   const [activeHorizon, setHorizon] = useState<BacktestHorizon>('d5');
-  const [sortBy, setSortBy]         = useState<'netReturn' | 'signalScore' | 'surgeScore' | 'histWinRate' | 'holdDays'>('netReturn');
+  const [sortBy, setSortBy]         = useState<'composite' | 'netReturn' | 'signalScore' | 'surgeScore' | 'histWinRate' | 'holdDays'>('composite');
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc');
   const [scanSort, setScanSort]     = useState<'composite' | 'score' | 'grade' | 'potential' | 'winRate' | 'price' | 'change'>('composite');
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
@@ -812,6 +827,7 @@ export default function UnifiedScanPage() {
 
   const sortedTrades = [...trades].sort((a, b) => {
     const dir = sortDir === 'desc' ? 1 : -1;
+    if (sortBy === 'composite')    return dir * (calcTradeComposite(b) - calcTradeComposite(a));
     if (sortBy === 'netReturn')    return dir * (b.netReturn - a.netReturn);
     if (sortBy === 'signalScore')  return dir * (b.signalScore - a.signalScore);
     if (sortBy === 'surgeScore')   return dir * ((b.surgeScore ?? 0) - (a.surgeScore ?? 0));
@@ -1551,6 +1567,7 @@ export default function UnifiedScanPage() {
                           <th className="text-left py-1.5 px-2">名稱</th>
                           <th className="text-left py-1.5 px-1 text-[10px]">概念</th>
                           {([
+                            { key: 'composite' as const, label: '綜合' },
                             { key: 'signalScore' as const, label: '評分' },
                             { key: 'surgeScore' as const, label: '等級' },
                             { key: 'surgeScore' as const, label: '潛力' },
