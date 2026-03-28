@@ -394,10 +394,10 @@ function TradeRow({ t }: { t: BacktestTrade }) {
           </span>
         )}
       </td>
-      <td className="py-1.5 px-1 text-right font-mono text-white">{t.entryPrice.toFixed(2)}</td>
-      <td className="py-1.5 px-1 text-[10px] text-slate-400">{trendBadge(t.trendState)}</td>
-      <td className="py-1.5 px-1 text-[10px] text-slate-400">{t.trendPosition}</td>
-      <td className="py-1.5 px-1 text-right font-mono text-slate-400">{t.exitPrice.toFixed(2)}</td>
+      <td className="py-1.5 px-2 text-right font-mono text-white whitespace-nowrap">{t.entryPrice.toFixed(2)}</td>
+      <td className="py-1.5 px-2 text-[10px] text-slate-400 whitespace-nowrap">{trendBadge(t.trendState)}</td>
+      <td className="py-1.5 px-2 text-[10px] text-slate-400 whitespace-nowrap">{t.trendPosition}</td>
+      <td className="py-1.5 px-2 text-right font-mono text-slate-400 whitespace-nowrap">{t.exitPrice.toFixed(2)}</td>
       <td className="py-1.5 px-1 text-center text-slate-500">{t.holdDays}日</td>
       <td className={`py-1.5 px-1 text-right font-mono font-bold ${retColor(t.netReturn)}`}>{fmtRet(t.netReturn)}</td>
       <td className="py-1.5 px-1 text-center">{exitBadge(t.exitReason)}</td>
@@ -789,6 +789,7 @@ export default function UnifiedScanPage() {
   const [tab, setTab]               = useState<'strict' | 'horizon' | 'walkforward'>('strict');
   const [activeHorizon, setHorizon] = useState<BacktestHorizon>('d5');
   const [sortBy, setSortBy]         = useState<'netReturn' | 'signalScore' | 'surgeScore' | 'histWinRate' | 'holdDays'>('netReturn');
+  const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc');
   const [scanSort, setScanSort]     = useState<'score' | 'grade' | 'potential' | 'winRate' | 'price' | 'change'>('score');
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
@@ -809,11 +810,12 @@ export default function UnifiedScanPage() {
   const perfMap = new Map(performance.map(p => [p.symbol, p]));
 
   const sortedTrades = [...trades].sort((a, b) => {
-    if (sortBy === 'netReturn')    return b.netReturn - a.netReturn;
-    if (sortBy === 'signalScore')  return b.signalScore - a.signalScore;
-    if (sortBy === 'surgeScore')   return (b.surgeScore ?? 0) - (a.surgeScore ?? 0);
-    if (sortBy === 'histWinRate')  return (b.histWinRate ?? 0) - (a.histWinRate ?? 0);
-    if (sortBy === 'holdDays')     return a.holdDays - b.holdDays;
+    const dir = sortDir === 'desc' ? 1 : -1;
+    if (sortBy === 'netReturn')    return dir * (b.netReturn - a.netReturn);
+    if (sortBy === 'signalScore')  return dir * (b.signalScore - a.signalScore);
+    if (sortBy === 'surgeScore')   return dir * ((b.surgeScore ?? 0) - (a.surgeScore ?? 0));
+    if (sortBy === 'histWinRate')  return dir * ((b.histWinRate ?? 0) - (a.histWinRate ?? 0));
+    if (sortBy === 'holdDays')     return dir * (a.holdDays - b.holdDays);
     return 0;
   });
 
@@ -1316,8 +1318,8 @@ export default function UnifiedScanPage() {
                               )}
                             </th>
                           ))}
-                          <th className="text-left py-1.5 px-2">趨勢</th>
-                          <th className="text-left py-1.5 px-2">位置</th>
+                          <th className="text-left py-1.5 px-2 whitespace-nowrap">趨勢</th>
+                          <th className="text-left py-1.5 px-2 whitespace-nowrap">位置</th>
                           <th className="text-center py-1.5 px-2">操作</th>
                         </tr>
                       </thead>
@@ -1534,22 +1536,31 @@ export default function UnifiedScanPage() {
                           ]).map(({ key, label }, i) => (
                             <th key={label}
                               className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none"
-                              onClick={() => { if (sortBy === key) setSortBy(key); else setSortBy(key); }}>
+                              onClick={() => {
+                                if (sortBy === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                                else { setSortBy(key); setSortDir('desc'); }
+                              }}>
                               {label}
-                              {sortBy === key && <span className="ml-0.5 text-sky-400">▼</span>}
+                              {sortBy === key && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
                             </th>
                           ))}
-                          <th className="text-right py-1.5 px-1">進場價</th>
-                          <th className="text-center py-1.5 px-1">趨勢</th>
-                          <th className="text-left py-1.5 px-1">位置</th>
-                          <th className="text-right py-1.5 px-1">出場價</th>
-                          <th className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none"
-                            onClick={() => setSortBy('holdDays')}>
-                            持有{sortBy === 'holdDays' && <span className="ml-0.5 text-sky-400">▼</span>}
+                          <th className="text-right py-1.5 px-2 whitespace-nowrap">進場價</th>
+                          <th className="text-center py-1.5 px-2 whitespace-nowrap">趨勢</th>
+                          <th className="text-left py-1.5 px-2 whitespace-nowrap">位置</th>
+                          <th className="text-right py-1.5 px-2 whitespace-nowrap">出場價</th>
+                          <th className="text-center py-1.5 px-2 whitespace-nowrap cursor-pointer hover:text-white select-none"
+                            onClick={() => {
+                              if (sortBy === 'holdDays') setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                              else { setSortBy('holdDays'); setSortDir('desc'); }
+                            }}>
+                            持有{sortBy === 'holdDays' && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
                           </th>
-                          <th className="text-right py-1.5 px-1 cursor-pointer hover:text-white select-none"
-                            onClick={() => setSortBy('netReturn')}>
-                            淨報酬{sortBy === 'netReturn' && <span className="ml-0.5 text-sky-400">▼</span>}
+                          <th className="text-right py-1.5 px-2 whitespace-nowrap cursor-pointer hover:text-white select-none"
+                            onClick={() => {
+                              if (sortBy === 'netReturn') setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                              else { setSortBy('netReturn'); setSortDir('desc'); }
+                            }}>
+                            淨報酬{sortBy === 'netReturn' && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
                           </th>
                           <th className="text-center py-1.5 px-1">出場</th>
                           <th className="text-center py-1.5 px-2">操作</th>
@@ -1671,8 +1682,8 @@ export default function UnifiedScanPage() {
                               <td className={`py-1.5 px-2 text-right font-mono font-bold ${r.changePercent >= 0 ? 'text-red-400' : 'text-green-400'}`}>
                                 {r.changePercent >= 0 ? '+' : ''}{r.changePercent.toFixed(2)}%
                               </td>
-                              <td className="py-1.5 px-1 text-[10px] text-slate-400">{r.trendState}</td>
-                              <td className="py-1.5 px-1 text-[10px] text-slate-400">{r.trendPosition}</td>
+                              <td className="py-1.5 px-2 text-[10px] text-slate-400 whitespace-nowrap">{r.trendState}</td>
+                              <td className="py-1.5 px-2 text-[10px] text-slate-400 whitespace-nowrap">{r.trendPosition}</td>
                               {p ? (
                                 <>
                                   {[p.openReturn, p.d1Return, p.d2Return, p.d3Return, p.d4Return, p.d5Return, p.d10Return, p.d20Return].map((v, i) => (
