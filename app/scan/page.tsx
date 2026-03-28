@@ -1511,32 +1511,13 @@ export default function UnifiedScanPage() {
                   )}
 
                   <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
-                    <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800 bg-slate-800/30">
-                      <span className="text-[11px] text-slate-500 font-medium">排序</span>
-                      <div className="flex gap-1 flex-wrap">
-                        {([
-                          { key: 'netReturn' as const,   label: '淨報酬' },
-                          { key: 'signalScore' as const, label: '評分' },
-                          { key: 'surgeScore' as const,  label: '飆股潛力' },
-                          { key: 'histWinRate' as const,  label: '勝率' },
-                          { key: 'holdDays' as const,    label: '持有天數' },
-                        ]).map(({ key, label }) => (
-                          <button key={key} onClick={() => setSortBy(key)}
-                            className={`text-[11px] px-2.5 py-1 rounded-full transition-colors ${
-                              sortBy === key
-                                ? 'bg-sky-700 text-white font-medium'
-                                : 'text-slate-500 hover:text-slate-200 hover:bg-slate-700'
-                            }`}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="flex items-center justify-end px-4 py-2 border-b border-slate-800 bg-slate-800/30">
                       <button
                         onClick={() => exportToCsv(sortedTrades, scanDate)}
                         disabled={sortedTrades.length === 0}
-                        className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded-lg text-[11px] text-slate-300 hover:text-white transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 rounded-lg text-[11px] text-slate-300 hover:text-white transition-colors"
                       >
-                        <span>↓</span> 匯出 CSV
+                        匯出 CSV
                       </button>
                     </div>
                     <table className="w-full text-xs">
@@ -1545,16 +1526,31 @@ export default function UnifiedScanPage() {
                           <th className="text-left py-1.5 px-2">代號</th>
                           <th className="text-left py-1.5 px-2">名稱</th>
                           <th className="text-left py-1.5 px-1 text-[10px]">概念</th>
-                          <th className="text-center py-1.5 px-1">評分</th>
-                          <th className="text-center py-1.5 px-1">等級</th>
-                          <th className="text-center py-1.5 px-1">潛力</th>
-                          <th className="text-center py-1.5 px-1">勝率</th>
+                          {([
+                            { key: 'signalScore' as const, label: '評分' },
+                            { key: 'surgeScore' as const, label: '等級' },
+                            { key: 'surgeScore' as const, label: '潛力' },
+                            { key: 'histWinRate' as const, label: '勝率' },
+                          ]).map(({ key, label }, i) => (
+                            <th key={label}
+                              className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none"
+                              onClick={() => { if (sortBy === key) setSortBy(key); else setSortBy(key); }}>
+                              {label}
+                              {sortBy === key && <span className="ml-0.5 text-sky-400">▼</span>}
+                            </th>
+                          ))}
                           <th className="text-right py-1.5 px-1">進場價</th>
                           <th className="text-center py-1.5 px-1">趨勢</th>
                           <th className="text-left py-1.5 px-1">位置</th>
                           <th className="text-right py-1.5 px-1">出場價</th>
-                          <th className="text-center py-1.5 px-1">持有</th>
-                          <th className="text-right py-1.5 px-1">淨報酬</th>
+                          <th className="text-center py-1.5 px-1 cursor-pointer hover:text-white select-none"
+                            onClick={() => setSortBy('holdDays')}>
+                            持有{sortBy === 'holdDays' && <span className="ml-0.5 text-sky-400">▼</span>}
+                          </th>
+                          <th className="text-right py-1.5 px-1 cursor-pointer hover:text-white select-none"
+                            onClick={() => setSortBy('netReturn')}>
+                            淨報酬{sortBy === 'netReturn' && <span className="ml-0.5 text-sky-400">▼</span>}
+                          </th>
                           <th className="text-center py-1.5 px-1">出場</th>
                           <th className="text-center py-1.5 px-2">操作</th>
                         </tr>
@@ -1593,12 +1589,24 @@ export default function UnifiedScanPage() {
                           <th className="text-left py-1.5 px-2">代號</th>
                           <th className="text-left py-1.5 px-2">名稱</th>
                           <th className="text-left py-1.5 px-1 text-[10px]">概念</th>
-                          <th className="text-center py-1.5 px-1">評分</th>
-                          <th className="text-center py-1.5 px-1">等級</th>
-                          <th className="text-center py-1.5 px-1">潛力</th>
-                          <th className="text-center py-1.5 px-1">勝率</th>
-                          <th className="text-right py-1.5 px-2">價格</th>
-                          <th className="text-right py-1.5 px-2">漲跌%</th>
+                          {([
+                            { key: 'score' as const, label: '評分' },
+                            { key: 'grade' as const, label: '等級' },
+                            { key: 'potential' as const, label: '潛力' },
+                            { key: 'winRate' as const, label: '勝率' },
+                            { key: 'price' as const, label: '價格' },
+                            { key: 'change' as const, label: '漲跌%' },
+                          ]).map(({ key, label }) => (
+                            <th key={key}
+                              className={`${key === 'price' || key === 'change' ? 'text-right' : 'text-center'} py-1.5 px-1 cursor-pointer hover:text-white select-none`}
+                              onClick={() => {
+                                if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                                else { setScanSort(key); setScanSortDir('desc'); }
+                              }}>
+                              {label}
+                              {scanSort === key && <span className="ml-0.5 text-sky-400">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
+                            </th>
+                          ))}
                           <th className="text-left py-1.5 px-1">趨勢</th>
                           <th className="text-left py-1.5 px-1">位置</th>
                           <th className="text-right py-1.5 px-1">隔日開</th>
@@ -1614,7 +1622,7 @@ export default function UnifiedScanPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {scanResults.map(r => {
+                        {sortedScanResults.map(r => {
                           const p = perfMap.get(r.symbol);
                           const sym = r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
                           return (
