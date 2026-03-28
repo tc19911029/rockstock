@@ -37,22 +37,32 @@ export async function GET(req: NextRequest) {
   }
 
   // Taiwan: 4-digit (main board) or 5-digit (OTC)
-  const isTwDigits = /^\d{4,5}$/.test(symbol);
-  // China A-shares: exactly 6 digits
-  const isCnDigits = /^\d{6}$/.test(symbol);
+  const isTwDigits = /^\d{4,5}$/.test(symbol) || /^\d{4,5}\.(TW|TWO)$/i.test(symbol);
+  // China A-shares: exactly 6 digits, or with .SZ/.SS suffix
+  const isCnDigits = /^\d{6}$/.test(symbol) || /^\d{6}\.(SZ|SS)$/i.test(symbol);
+
+  // 提取純數字代碼（去掉 .SZ/.SS/.TW/.TWO 後綴）
+  const pureCode = symbol.replace(/\.(SZ|SS|TW|TWO)$/i, '');
 
   let candidates: string[];
   if (isCnDigits) {
-    // Shanghai: starts with 6 (main board) or 9 (B shares)
-    // Shenzhen: starts with 0, 2, 3
-    const firstDigit = symbol[0];
-    if (firstDigit === '6' || firstDigit === '9') {
-      candidates = [`${symbol}.SS`, `${symbol}.SZ`];
+    if (/\.(SZ|SS)$/i.test(symbol)) {
+      // 已帶後綴，直接用
+      candidates = [symbol.toUpperCase()];
     } else {
-      candidates = [`${symbol}.SZ`, `${symbol}.SS`];
+      const firstDigit = pureCode[0];
+      if (firstDigit === '6' || firstDigit === '9') {
+        candidates = [`${pureCode}.SS`, `${pureCode}.SZ`];
+      } else {
+        candidates = [`${pureCode}.SZ`, `${pureCode}.SS`];
+      }
     }
   } else if (isTwDigits) {
-    candidates = [`${symbol}.TW`, `${symbol}.TWO`];
+    if (/\.(TW|TWO)$/i.test(symbol)) {
+      candidates = [symbol.toUpperCase()];
+    } else {
+      candidates = [`${pureCode}.TW`, `${pureCode}.TWO`];
+    }
   } else {
     candidates = [symbol.toUpperCase()];
   }
@@ -140,10 +150,10 @@ export async function GET(req: NextRequest) {
     // A股優先使用靜態中文名稱對照表
     let name = yahooName;
     if (isTwDigits) {
-      const twName = await getTWChineseName(symbol).catch(() => null);
+      const twName = await getTWChineseName(pureCode).catch(() => null);
       if (twName) name = twName;
     } else if (isCnDigits) {
-      const cnName = await getCNChineseName(symbol);
+      const cnName = await getCNChineseName(pureCode);
       if (cnName) name = cnName;
     }
 
