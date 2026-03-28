@@ -251,6 +251,22 @@ export default function SettingsPage() {
           </Link>
         </div>
 
+        {/* 清除數據 */}
+        <div className="bg-slate-900 border border-red-900/30 rounded-xl p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-red-400">清除本機數據</h2>
+          <p className="text-[11px] text-slate-500">清除瀏覽器中儲存的所有設定、自選股、持倉、掃描歷史等資料。此操作不可恢復。</p>
+          <button
+            onClick={() => {
+              if (confirm('確定要清除所有本機數據嗎？此操作不可恢復。')) {
+                try { localStorage.clear(); window.location.href = '/'; } catch {}
+              }
+            }}
+            className="text-xs px-4 py-2 bg-red-900/40 hover:bg-red-800/60 text-red-300 rounded-lg border border-red-800/50 transition"
+          >
+            清除所有數據並重新開始
+          </button>
+        </div>
+
       </div>
     </div>
   );

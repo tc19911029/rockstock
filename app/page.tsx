@@ -68,6 +68,7 @@ export default function HomePage() {
   const [sideTab, setSideTab] = useState<SideTab>('conditions');
   const [showMarkers, setShowMarkers] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const displayCandle = hoverCandle ?? allCandles[currentIndex];
   const prev = hoverCandle
@@ -128,7 +129,34 @@ export default function HomePage() {
           <div className="flex items-center gap-0.5">
             <Link href="/watchlist"  className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap hidden sm:block" title="自選股">⭐ 自選</Link>
             <Link href="/portfolio"  className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap hidden sm:block" title="持倉">💼</Link>
-            <Link href="/settings"   className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap" title="設定">⚙</Link>
+            <Link href="/settings"   className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap hidden sm:block" title="設定">⚙</Link>
+            {/* 移動端漢堡選單 */}
+            <div className="relative sm:hidden">
+              <button onClick={() => setMobileMenuOpen(v => !v)}
+                className="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition text-sm">
+                ☰
+              </button>
+              {mobileMenuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-40 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 py-1">
+                  {[
+                    { href: '/scan', label: '🔍 掃描選股' },
+                    { href: '/watchlist', label: '⭐ 自選股' },
+                    { href: '/portfolio', label: '💼 持倉' },
+                    { href: '/report', label: '📊 報表' },
+                    { href: '/strategies', label: '⚙ 策略' },
+                    { href: '/live-daytrade', label: '⚡ 當沖' },
+                    { href: '/settings', label: '🔧 設定' },
+                    { href: '/disclaimer', label: '📋 免責聲明' },
+                  ].map(item => (
+                    <Link key={item.href} href={item.href}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="block px-3 py-2 text-xs text-slate-300 hover:bg-slate-700 hover:text-white transition">
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <span className="text-[10px] text-slate-600 hidden lg:block ml-1.5 whitespace-nowrap group relative cursor-help">
