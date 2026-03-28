@@ -819,6 +819,7 @@ export default function UnifiedScanPage() {
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
   const [gradeFilter, setGradeFilter] = useState<string>('all');
+  const [conceptFilter, setConceptFilter] = useState<string>('all');
 
   // 用 state 避免 SSR hydration mismatch
   const [maxDate, setMaxDate] = useState('2099-12-31');
@@ -842,8 +843,14 @@ export default function UnifiedScanPage() {
     return 0;
   });
 
-  // 掃描結果排序
-  const sortedScanResults = [...scanResults].sort((a, b) => {
+  // 掃描結果中出現的概念列表（用於篩選器）
+  const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
+
+  // 掃描結果篩選 + 排序
+  const filteredScanResults = conceptFilter === 'all'
+    ? scanResults
+    : scanResults.filter(r => r.industry === conceptFilter);
+  const sortedScanResults = [...filteredScanResults].sort((a, b) => {
     const dir = scanSortDir === 'desc' ? 1 : -1;
     switch (scanSort) {
       case 'score':     return dir * ((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0));
@@ -1278,6 +1285,25 @@ export default function UnifiedScanPage() {
                       匯出 CSV
                     </button>
                   </div>
+                  {/* 概念篩選器 */}
+                  {availableConcepts.length > 1 && (
+                    <div className="flex flex-wrap gap-1 items-center">
+                      <span className="text-[10px] text-slate-500 mr-1">篩選：</span>
+                      <button onClick={() => setConceptFilter('all')}
+                        className={`text-[10px] px-2 py-0.5 rounded-full transition ${conceptFilter === 'all' ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                        全部 ({scanResults.length})
+                      </button>
+                      {availableConcepts.sort().slice(0, 20).map(c => {
+                        const count = scanResults.filter(r => r.industry === c).length;
+                        return (
+                          <button key={c} onClick={() => setConceptFilter(c)}
+                            className={`text-[10px] px-2 py-0.5 rounded-full transition ${conceptFilter === c ? 'bg-sky-700 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                            {c} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>

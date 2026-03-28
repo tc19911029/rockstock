@@ -131,7 +131,15 @@ export default function HomePage() {
             <Link href="/settings"   className="text-[11px] px-2 py-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition whitespace-nowrap" title="設定">⚙</Link>
           </div>
 
-          <span className="text-[10px] text-slate-600 hidden lg:block ml-1.5 whitespace-nowrap">← → Space</span>
+          <span className="text-[10px] text-slate-600 hidden lg:block ml-1.5 whitespace-nowrap group relative cursor-help">
+            ← → Space
+            <div className="absolute z-50 right-0 top-full mt-1 hidden group-hover:block w-48 p-2.5 rounded-lg bg-slate-800 border border-slate-600 text-[10px] text-slate-300 shadow-lg space-y-1">
+              <div className="font-medium text-white mb-1">鍵盤快捷鍵</div>
+              <div className="flex justify-between"><span>→ 右箭頭</span><span className="text-slate-500">下一根K線</span></div>
+              <div className="flex justify-between"><span>← 左箭頭</span><span className="text-slate-500">上一根K線</span></div>
+              <div className="flex justify-between"><span>Space</span><span className="text-slate-500">播放/暫停</span></div>
+            </div>
+          </span>
         </nav>
       </header>
 

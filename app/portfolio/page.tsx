@@ -165,11 +165,21 @@ export default function PortfolioPage() {
         )}
 
         {holdings.length === 0 && !showForm && (
-          <div className="text-center py-16 text-slate-500">
-            <p className="text-4xl mb-3">💼</p>
+          <div className="text-center py-12 text-slate-500 space-y-4">
+            <p className="text-4xl">💼</p>
             <p className="text-sm font-medium text-slate-400">尚未新增任何持倉</p>
-            <p className="text-xs text-slate-600 mt-1 mb-4">點擊右上角「+ 新增持倉」開始追蹤你的持股</p>
-            <p className="text-[10px] text-slate-700">* 資料存於本機，僅供學習參考，非實際交易記錄</p>
+            <p className="text-xs text-slate-600">追蹤你的持股，即時查看損益、停損/停利提醒</p>
+            <div className="flex justify-center gap-3 mt-2">
+              <button onClick={() => setShowForm(true)}
+                className="text-xs px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition font-medium">
+                + 新增第一筆持倉
+              </button>
+              <Link href="/scan"
+                className="text-xs px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition border border-slate-700">
+                去掃描選股
+              </Link>
+            </div>
+            <p className="text-[10px] text-slate-700">* 資料存於本機瀏覽器，僅供學習參考</p>
           </div>
         )}
 
