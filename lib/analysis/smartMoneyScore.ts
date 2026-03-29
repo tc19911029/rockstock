@@ -348,8 +348,31 @@ function scoreRevenueMomentumProxy(candles: CandleWithIndicators[], idx: number)
     if (i >= 0 && candles[i].high > high60) high60 = candles[i].high;
   }
   if (c.close > high60) {
-    score += 25;
+    score += 20;
     details.push('new 60d high');
+  }
+
+  // Earnings surprise pattern: gap-up + high volume after tight consolidation
+  // This is the classic reaction to unexpectedly strong revenue/earnings
+  if (idx >= 15) {
+    // Check for tight consolidation in prior 10 days (range < 5%)
+    let rangeHigh = 0, rangeLow = Infinity;
+    for (let i = idx - 10; i < idx - 1; i++) {
+      if (i < 0) continue;
+      if (candles[i].high > rangeHigh) rangeHigh = candles[i].high;
+      if (candles[i].low < rangeLow) rangeLow = candles[i].low;
+    }
+    const consolidationRange = rangeLow > 0 ? (rangeHigh - rangeLow) / rangeLow : 1;
+    const isGapUp = c.open > candles[idx - 1].high;
+    const volRatio = c.avgVol5 && c.avgVol5 > 0 ? c.volume / c.avgVol5 : 1;
+
+    if (consolidationRange < 0.05 && isGapUp && volRatio > 2.0) {
+      score += 25;
+      details.push('earnings surprise pattern');
+    } else if (consolidationRange < 0.08 && isGapUp && volRatio > 1.5) {
+      score += 15;
+      details.push('possible earnings catalyst');
+    }
   }
 
   return { score: clamp(score), detail: details.join(', ') || 'neutral' };

@@ -130,10 +130,32 @@ Score = (Annualized Return% × 0.4) + (Win Rate% × 0.3) - (Max Drawdown% × 0.3
 
 ---
 
+## Round 7 — Earnings Surprise Detection (2026-03-29)
+
+**Changes:**
+- Enhanced `smartMoneyScore.ts` revenue momentum proxy: detects earnings surprise pattern
+  (gap-up + high volume after tight consolidation = classic earnings catalyst reaction)
+- Added `score_fundamental_detailed()` in Python: revenue surprise (YOY > 20%),
+  revenue acceleration (YOY > 30%), high ROE grower detection, revenue decline warning
+- Integrated detailed fundamental scoring into backtest engine
+
+**New Factors:**
+| Factor | Type | Description |
+|--------|------|-------------|
+| Earnings Surprise Pattern | Technical/Fundamental Proxy | Gap-up + vol spike after consolidation |
+| Revenue YOY > 20% | Fundamental | 營收驚喜 → +10 score bonus |
+| Revenue Acceleration > 30% | Fundamental | 營收加速成長 → +5 additional |
+| High ROE Grower | Fundamental | ROE>15% + EPS>2 → +5 bonus |
+| Revenue Decline Warning | Fundamental | YOY < -15% → -10 penalty |
+
+**Result:** Committed. Fundamental factors now have graduated scoring with surprise detection.
+
+---
+
 ## Pending Improvements
 
-- [ ] Earnings surprise momentum (營收年增率)
 - [ ] Intraday VWAP-based entry optimization
 - [ ] Portfolio-level risk parity / max drawdown constraint
 - [ ] Machine learning signal combination (gradient boosting on all factors)
 - [ ] Cross-market correlation (when TW semi leads, CN semi follows)
+- [ ] Options flow / put-call ratio as sentiment indicator

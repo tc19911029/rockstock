@@ -58,8 +58,9 @@ def run_backtest(
         c_score = 50.0
 
         if fundamental_data:
-            from analysis.fundamental import score_fundamental
-            f_score = score_fundamental(fundamental_data.get(symbol))
+            from analysis.fundamental import score_fundamental, score_fundamental_detailed
+            f_detail = score_fundamental_detailed(fundamental_data.get(symbol))
+            f_score = f_detail.get("total_score", score_fundamental(fundamental_data.get(symbol)))
 
         if chip_data:
             from analysis.chip import score_chip, score_chip_detailed
