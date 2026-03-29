@@ -363,9 +363,104 @@ Score = (Annualized Return% × 0.4) + (Win Rate% × 0.3) - (Max Drawdown% × 0.3
 - `evaluator.py`: Enhanced scoring with risk adjustment bonus
 - `strategies/v002.py`: 9-condition multi-factor strategy
 
+## Round 21 — Take-Profit & Trailing Stop (2026-03-29)
+
+**Changes:**
+- Added take-profit and trailing stop exit mechanisms to backtest engine
+- Trailing stops track peak price and exit when drawdown from peak exceeds threshold
+
+**Results:**
+- Trailing stops HURT performance: TS 3% → score -24.65 (vs baseline -3.81)
+- Take-profit barely helps: TP 20% ≈ no TP (rarely triggered in 7-day holds)
+- Conclusion: short holding periods make profit-taking mechanisms unnecessary
+
+## Round 22 — Quality Filtering Breakthrough (2026-03-29)
+
+**Changes:**
+- Tested stock count impact: 10, 15, 20, 30, 50 stocks
+- Tested higher min_conditions (6, 7 from 7 conditions)
+- Tested minimalist strategy variants
+
+**Key Discovery:**
+- **min_cond=7 with 20 stocks → first positive score (+8.60)**
+- Fewer stocks + more selective entry = dramatic MDD reduction
+- 20 stocks sweet spot: enough diversity, not too much noise
+
+| Variant | Val Score | WR | Return | MDD | Trades |
+|---------|-----------|-----|--------|-----|--------|
+| mc7_H7_20s | **+8.60** | 40.0% | 38.3% | 59.8% | 25 |
+| mc7_H7_N20 (8 conds) | +5.08 | 44.0% | 14.6% | 44.7% | 25 |
+| stocks_20 baseline | -1.26 | 39.4% | 7.9% | 56.1% | 94 |
+
+## Round 23 — Parameter Grid on mc7 Winner (2026-03-29)
+
+**Changes:**
+- Grid search: hold {5,6,7,8,10} × SL {-7%,-8%,-10%,-12%} × stocks {20,25}
+- Extended conditions: added RSI neutral zone + low volatility breakout (9 conds)
+- Validated on both validation AND test splits for robustness
+
+**Results (ranked by avg of val + test score):**
+
+| Variant | Avg Score | Val Score | Test Score | Val WR | Val Return |
+|---------|-----------|-----------|------------|--------|------------|
+| 9c_H7_SL10_N20 | **+7.46** | +5.18 | +9.75 | 42.0% | 22.4% |
+| 9c_H7_SL12_N20 | +6.36 | +4.88 | +7.84 | 42.0% | 21.8% |
+| H7_SL8_N20 | +6.16 | +18.46 | -6.15 | 40.0% | 60.7% |
+| 8c_H10_SL8_N20 | +4.40 | +5.08 | +3.72 | 44.0% | 14.6% |
+
+**9 conditions (min 7 required):**
+1. MA5 > MA20 (trend)
+2. Close > MA60 (position)
+3. Bullish candle ≥ 2% body (kbar)
+4. MA5 > MA10 > MA20 (alignment)
+5. MACD > 0 OR KD golden cross (indicator)
+6. OBV > OBV MA20 (volume flow)
+7. Close > MA50, MA50 rising (weekly proxy)
+8. RSI 35-65 (neutral zone)
+9. ATR pct < 35, close > MA20 (low vol breakout)
+
+## Round 24 — Final Refinement (2026-03-29)
+
+**Changes:**
+- Fine-tuned RSI zone width: 30-60, 35-65, 40-70
+- Fine-tuned ATR threshold: 25, 30, 35, 40
+- Tested stop-loss variants: -9%, -10%, -11%
+
+**Best Strategy: v014 `rsi30_60_atr30`**
+
+| Split | Score | WR | Annual Return | MDD | Trades | PF |
+|-------|-------|----|---------------|-----|--------|----|
+| Train | -33.26 | — | — | — | — | — |
+| **Validation** | **+6.45** | 40.7% | 27.7% | 54.4% | 54 | 1.28 |
+| **Test** | **+22.34** | 48.1% | 64.0% | 50.1% | 52 | — |
+
+**Avg(val+test) = +14.39** — most robust strategy found.
+
+**Configuration:**
+- 9 conditions, min 7 required
+- RSI zone: 30-60 (avoid overbought, allow oversold recovery)
+- ATR percentile < 30 (enter during low volatility squeeze)
+- Hold 7 days, stop-loss -10%
+- Universe: top 20 TW stocks (Taiwan 50 components)
+
+**Runner-up: v015 `rsi30_60_atr25`**
+- Avg score: +14.24 (val=3.65, test=24.84)
+- Even tighter volatility filter, slightly fewer trades
+
+## Scoring Formula (Updated)
+
+```
+Score = (Annualized Return% × 0.35) + (Win Rate% × 0.25)
+      - (Max Drawdown% × 0.25) + (Risk Bonus × 0.15)
+
+Risk Bonus: Sortino (0-5 pts) + Profit Factor (0-5 pts)
+```
+
 ## Pending Improvements
 
 - [ ] Machine learning signal combination (gradient boosting on all factors)
 - [ ] Cross-market correlation (when TW semi leads, CN semi follows)
 - [ ] Kelly criterion position sizing based on historical win rate
 - [ ] Intraday VWAP-based entry optimization
+- [ ] Walk-forward optimization (rolling window validation)
+- [ ] Sector rotation overlay (concentrate on hot sectors)

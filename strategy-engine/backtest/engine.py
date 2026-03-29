@@ -206,6 +206,10 @@ def _backtest_single(
         hold_days = max(2, base_hold_days - 1)
         stop_loss_pct = base_stop_loss * 1.15  # tighter stop (more negative)
 
+    # Take-profit and trailing stop parameters
+    take_profit_pct = strategy.parameters.get("take_profit_pct", None)  # e.g., 0.08 for 8%
+    trailing_stop_pct = strategy.parameters.get("trailing_stop_pct", None)  # e.g., 0.05 for 5% from peak
+
     trades = []
 
     i = 0
@@ -223,11 +227,12 @@ def _backtest_single(
         entry_price = entry_row["open"] * (1 + slippage)
         entry_date = str(entry_row["date"])[:10] if pd.notna(entry_row["date"]) else ""
 
-        # 出場邏輯：持有 N 天或觸發停損
+        # 出場邏輯：持有 N 天或觸發停損/停利/移動停損
         exit_price = None
         exit_date = ""
         exit_reason = "hold_days"
         hold = 0
+        peak_price = entry_price  # Track highest price for trailing stop
 
         for j in range(1, hold_days + 1):
             check_pos = entry_pos + j
@@ -237,14 +242,38 @@ def _backtest_single(
             row = df_ind.iloc[check_pos]
             hold += 1
 
-            # 停損檢查（盤中最低價）
+            # Update peak price (using intraday high)
+            if row["high"] > peak_price:
+                peak_price = row["high"]
+
             if entry_price > 0:
+                # 停損檢查（盤中最低價）
                 intraday_low_ret = (row["low"] - entry_price) / entry_price
                 if intraday_low_ret <= stop_loss_pct:
                     exit_price = entry_price * (1 + stop_loss_pct)
                     exit_date = str(row["date"])[:10] if pd.notna(row["date"]) else ""
                     exit_reason = "stop_loss"
                     break
+
+                # 停利檢查（盤中最高價）
+                if take_profit_pct is not None:
+                    intraday_high_ret = (row["high"] - entry_price) / entry_price
+                    if intraday_high_ret >= take_profit_pct:
+                        exit_price = entry_price * (1 + take_profit_pct)
+                        exit_date = str(row["date"])[:10] if pd.notna(row["date"]) else ""
+                        exit_reason = "take_profit"
+                        break
+
+                # 移動停損檢查（從最高點回落超過 trailing_stop_pct）
+                if trailing_stop_pct is not None and peak_price > entry_price:
+                    drawdown_from_peak = (row["low"] - peak_price) / peak_price
+                    if drawdown_from_peak <= -trailing_stop_pct:
+                        exit_price = peak_price * (1 - trailing_stop_pct)
+                        # Don't exit below entry stop loss
+                        exit_price = max(exit_price, entry_price * (1 + stop_loss_pct))
+                        exit_date = str(row["date"])[:10] if pd.notna(row["date"]) else ""
+                        exit_reason = "trailing_stop"
+                        break
 
             # 持有到期
             if j == hold_days:
