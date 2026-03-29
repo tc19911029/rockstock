@@ -34,6 +34,8 @@ export interface TradeSignal {
   surgeScore?:   number;    // 飆股潛力分數 0-100
   surgeGrade?:   string;    // 飆股等級 S/A/B/C/D
   histWinRate?:  number;    // 歷史勝率 %
+  smartMoneyScore?: number; // 智慧資金分數 0-100
+  compositeScore?:  number; // 綜合排名分數 0-100
 }
 
 /**
@@ -63,6 +65,57 @@ export function scanResultToSignal(scanResult: StockScanResult): TradeSignal {
     surgeScore:    scanResult.surgeScore,
     surgeGrade:    scanResult.surgeGrade,
     histWinRate:   scanResult.histWinRate,
+    smartMoneyScore: scanResult.smartMoneyScore,
+    compositeScore:  scanResult.compositeScore,
+  };
+}
+
+/**
+ * Adaptive exit parameters based on signal quality.
+ * Higher quality signals get longer hold + wider trailing stop.
+ * Lower quality signals get tighter risk management.
+ *
+ * Research basis:
+ * - S/A grade surge stocks benefit from longer holding (capture full trend)
+ * - High composite scores correlate with institutional backing (sticky trends)
+ * - Weak signals should cut losses faster
+ */
+export function resolveAdaptiveParams(
+  signal: TradeSignal,
+  baseStrategy: BacktestStrategyParams,
+): BacktestStrategyParams {
+  const grade = signal.surgeGrade ?? 'C';
+  const composite = signal.compositeScore ?? 50;
+
+  // Adaptive hold days: S=8, A=7, B=5, C/D=4
+  let holdDays = baseStrategy.holdDays;
+  if (grade === 'S') holdDays = Math.max(holdDays, 8);
+  else if (grade === 'A') holdDays = Math.max(holdDays, 7);
+  else if (grade === 'D') holdDays = Math.min(holdDays, 4);
+
+  // Adaptive trailing stop: wider for strong signals, tighter for weak
+  let trailingStop = baseStrategy.trailingStop;
+  let trailingActivate = baseStrategy.trailingActivate;
+  if (composite >= 70 && trailingStop !== null) {
+    trailingStop = Math.max(trailingStop, 0.05);     // wider 5% trailing
+    trailingActivate = trailingActivate !== null ? Math.max(trailingActivate, 0.07) : 0.07;
+  } else if (composite < 40 && trailingStop !== null) {
+    trailingStop = Math.min(trailingStop, 0.02);     // tight 2% trailing
+    trailingActivate = trailingActivate !== null ? Math.min(trailingActivate, 0.03) : 0.03;
+  }
+
+  // Adaptive stop loss: tighter for weak signals
+  let stopLoss = baseStrategy.stopLoss;
+  if (composite < 40 && stopLoss !== null) {
+    stopLoss = Math.max(stopLoss, -0.04); // tighter -4% stop
+  }
+
+  return {
+    ...baseStrategy,
+    holdDays,
+    trailingStop,
+    trailingActivate,
+    stopLoss,
   };
 }
 
@@ -360,7 +413,9 @@ export function runBatchBacktest(
 
   for (const result of scanResults) {
     const candles = forwardCandlesMap[result.symbol] ?? [];
-    const trade   = runSingleBacktest(scanResultToSignal(result), candles, strategy);
+    const signal = scanResultToSignal(result);
+    const adaptiveStrategy = resolveAdaptiveParams(signal, strategy);
+    const trade   = runSingleBacktest(signal, candles, adaptiveStrategy);
     if (trade) trades.push(trade);
     else skippedCount++;
   }
@@ -512,8 +567,9 @@ export function runBatchBacktestWithCapital(
   finalCapital:      number;   // 模擬結束後資金
   capitalReturn:     number;   // 整體資金報酬率 %
 } {
-  // 依綜合分排序（六條件35% + 潛力25% + 勝率20% + 位置10% + 量能10%）
+  // 依綜合分排序：優先使用 compositeScore（含 smart money），否則 fallback 舊邏輯
   function calcComposite(r: StockScanResult): number {
+    if (r.compositeScore != null) return r.compositeScore;
     const sixCon = (r.sixConditionsScore / 6) * 100;
     const surge  = r.surgeScore ?? 0;
     const winR   = r.histWinRate ?? 50;
@@ -536,7 +592,9 @@ export function runBatchBacktestWithCapital(
 
   for (const result of eligible) {
     const candles = forwardCandlesMap[result.symbol] ?? [];
-    const trade   = runSingleBacktest(scanResultToSignal(result), candles, strategy);
+    const signal = scanResultToSignal(result);
+    const adaptiveStrategy = resolveAdaptiveParams(signal, strategy);
+    const trade   = runSingleBacktest(signal, candles, adaptiveStrategy);
 
     if (!trade) {
       skippedCount++;

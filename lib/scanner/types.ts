@@ -53,6 +53,10 @@ export interface StockScanResult {
   // ── 歷史信號績效 ──────────────────────────────────────────────────────────
   histWinRate?: number;        // 歷史20日勝率 (%)
   histSignalCount?: number;    // 歷史信號次數
+  // ── Smart Money / Multi-Factor ──────────────────────────────────────────
+  smartMoneyScore?: number;       // 0-100 (institutional flow proxy)
+  smartMoneyGrade?: 'S' | 'A' | 'B' | 'C' | 'D';
+  compositeScore?: number;        // 0-100 (weighted multi-factor ranking)
   // ── AI 排名 ───────────────────────────────────────────────────────────────
   aiRank?: number;
   aiConfidence?: 'high' | 'medium' | 'low';

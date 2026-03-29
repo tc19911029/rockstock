@@ -42,38 +42,64 @@ def run_backtest(
     all_trades = []
     per_stock = {}
 
-    # 基本面/籌碼面過濾門檻
+    # Multi-factor scoring mode (v3): weighted scoring instead of binary filter
     use_fundamental = strategy.parameters.get("use_fundamental_filter", False)
     min_fundamental_score = strategy.parameters.get("min_fundamental_score", 40)
     use_chip = strategy.parameters.get("use_chip_filter", False)
     min_chip_score = strategy.parameters.get("min_chip_score", 40)
+    use_weighted_scoring = strategy.parameters.get("use_weighted_scoring", False)
 
     for symbol, df in data.items():
         if len(df) < 60:
             continue
 
-        # 基本面過濾
-        if use_fundamental and fundamental_data:
+        # Calculate multi-factor bonus scores
+        f_score = 50.0
+        c_score = 50.0
+
+        if fundamental_data:
             from analysis.fundamental import score_fundamental
             f_score = score_fundamental(fundamental_data.get(symbol))
-            if f_score < min_fundamental_score:
-                per_stock[symbol] = {"skipped": "fundamental", "score": f_score}
-                continue
 
-        # 籌碼面過濾
-        if use_chip and chip_data:
+        if chip_data:
             from analysis.chip import score_chip
             c_score = score_chip(chip_data.get(symbol), market)
-            if c_score < min_chip_score:
+
+        if use_weighted_scoring:
+            # Weighted scoring mode: chip + fundamental influence signal quality,
+            # not binary filter. Low scores penalize signal strength instead of
+            # removing the stock entirely.
+            # Only skip if both scores are very low (< 25)
+            if f_score < 25 and c_score < 25:
+                per_stock[symbol] = {
+                    "skipped": "multi_factor_too_weak",
+                    "f_score": f_score,
+                    "c_score": c_score,
+                }
+                continue
+        else:
+            # Legacy binary filter mode
+            if use_fundamental and f_score < min_fundamental_score:
+                per_stock[symbol] = {"skipped": "fundamental", "score": f_score}
+                continue
+            if use_chip and c_score < min_chip_score:
                 per_stock[symbol] = {"skipped": "chip", "score": c_score}
                 continue
 
         try:
-            trades = _backtest_single(strategy, df, symbol, split, train_ratio, val_ratio, cost_config)
+            # Pass multi-factor scores to single backtest for adaptive hold days
+            multi_factor_bonus = _calc_multi_factor_bonus(f_score, c_score)
+            trades = _backtest_single(
+                strategy, df, symbol, split, train_ratio, val_ratio,
+                cost_config, multi_factor_bonus=multi_factor_bonus,
+            )
             all_trades.extend(trades)
             per_stock[symbol] = {
                 "trade_count": len(trades),
                 "wins": sum(1 for t in trades if t["net_return"] > 0),
+                "f_score": round(f_score, 1),
+                "c_score": round(c_score, 1),
+                "multi_factor_bonus": round(multi_factor_bonus, 2),
             }
         except Exception as e:
             per_stock[symbol] = {"error": str(e)}
@@ -89,6 +115,22 @@ def run_backtest(
     }
 
 
+def _calc_multi_factor_bonus(f_score: float, c_score: float) -> float:
+    """
+    Calculate multi-factor bonus from fundamental + chip scores.
+
+    Returns a bonus multiplier (0.0 to 1.0):
+    - 1.0 = strong fundamental + chip support → longer hold, wider stop
+    - 0.5 = neutral
+    - 0.0 = weak → shorter hold, tighter stop
+
+    This replaces the binary filter with a graduated quality signal.
+    """
+    # Weighted: chip 60% (more timely), fundamental 40% (more stable)
+    weighted = c_score * 0.6 + f_score * 0.4
+    return max(0.0, min(1.0, weighted / 100.0))
+
+
 def _backtest_single(
     strategy: StrategyConfig,
     df: pd.DataFrame,
@@ -97,13 +139,14 @@ def _backtest_single(
     train_ratio: float,
     val_ratio: float,
     cost_config: dict,
+    multi_factor_bonus: float = 0.5,
 ) -> list[dict]:
     """單支股票回測"""
 
     # 1. 計算技術指標
     df_ind = compute_all_indicators(df)
 
-    # 2. 時間切分
+    # 2. ��間切分
     n = len(df_ind)
     if split == "train":
         df_ind = df_ind.iloc[:int(n * train_ratio)]
@@ -127,10 +170,26 @@ def _backtest_single(
     signal_mask = cond_df["total_score"] >= min_score
     signal_indices = df_ind.index[signal_mask].tolist()
 
-    # 5. 模擬交易
-    hold_days = strategy.parameters.get("hold_days", 5)
-    stop_loss_pct = strategy.parameters.get("stop_loss_pct", -0.07)
+    # 5. 模擬交易 with adaptive parameters based on multi-factor bonus
+    base_hold_days = strategy.parameters.get("hold_days", 5)
+    base_stop_loss = strategy.parameters.get("stop_loss_pct", -0.07)
     slippage = cost_config.get("slippage", 0.001)
+
+    # Adaptive hold days: strong multi-factor → hold longer
+    # bonus 0.8+ → +3 days, 0.6-0.8 → +1, 0.4-0.6 → 0, <0.4 → -1
+    if multi_factor_bonus >= 0.8:
+        hold_days = base_hold_days + 3
+        stop_loss_pct = base_stop_loss * 0.85  # wider stop (less negative)
+    elif multi_factor_bonus >= 0.6:
+        hold_days = base_hold_days + 1
+        stop_loss_pct = base_stop_loss
+    elif multi_factor_bonus >= 0.4:
+        hold_days = base_hold_days
+        stop_loss_pct = base_stop_loss
+    else:
+        hold_days = max(2, base_hold_days - 1)
+        stop_loss_pct = base_stop_loss * 1.15  # tighter stop (more negative)
+
     trades = []
 
     i = 0
@@ -211,6 +270,8 @@ def _backtest_single(
             "cost_pct": round(cost * 100, 4),
             "score": int(cond_row["total_score"]),
             "conditions_met": conditions_met,
+            "multi_factor_bonus": round(multi_factor_bonus, 2),
+            "adaptive_hold_days": hold_days,
         })
 
         # 跳過持有期間的信號（避免重複進場）

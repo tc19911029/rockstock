@@ -5,6 +5,7 @@ import { StockScanResult, MarketConfig, TriggeredRule } from './types';
 import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
 import { computeSurgeScore } from '@/lib/analysis/surgeScore';
+import { computeSmartMoneyScore, computeCompositeScore } from '@/lib/analysis/smartMoneyScore';
 
 const CONCURRENCY = 15; // parallel requests per chunk
 
@@ -136,6 +137,15 @@ export abstract class MarketScanner {
       // 12. 歷史勝率過低 — 這支股票歷史上同類信號表現差，跳過
       if (histWinRate !== undefined && histWinRate < 35) return null;
 
+      // ── Smart Money Score & Composite Ranking ────────────────────────────
+      const smartMoney = computeSmartMoneyScore(candles, lastIdx);
+      const composite = computeCompositeScore(
+        sixConds.totalScore,
+        surge.totalScore,
+        smartMoney.totalScore,
+        histWinRate,
+      );
+
       return {
         symbol,
         name,
@@ -163,6 +173,9 @@ export abstract class MarketScanner {
         surgeGrade: surge.grade,
         surgeFlags: surge.flags,
         surgeComponents: surge.components,
+        smartMoneyScore: smartMoney.totalScore,
+        smartMoneyGrade: smartMoney.grade,
+        compositeScore: composite.compositeScore,
       };
     } catch {
       return null;
@@ -268,9 +281,11 @@ export abstract class MarketScanner {
 
     return {
       results: results.sort((a, b) =>
-        b.sixConditionsScore !== a.sixConditionsScore
-          ? b.sixConditionsScore - a.sixConditionsScore
-          : b.changePercent - a.changePercent
+        (b.compositeScore ?? 0) !== (a.compositeScore ?? 0)
+          ? (b.compositeScore ?? 0) - (a.compositeScore ?? 0)
+          : (b.surgeScore ?? 0) !== (a.surgeScore ?? 0)
+          ? (b.surgeScore ?? 0) - (a.surgeScore ?? 0)
+          : b.sixConditionsScore - a.sixConditionsScore
       ),
       partial: false,
       marketTrend,
