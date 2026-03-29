@@ -10,6 +10,7 @@ import { computeRetailSentiment } from '@/lib/analysis/retailSentiment';
 import { analyzeSupportResistance } from '@/lib/analysis/supportResistance';
 import { detectVolatilityRegime } from '@/lib/analysis/volatilityRegime';
 import { computeMarketBreadth } from '@/lib/analysis/marketBreadth';
+import { computeSeasonality } from '@/lib/analysis/seasonality';
 
 const CONCURRENCY = 15; // parallel requests per chunk
 
@@ -176,6 +177,15 @@ export abstract class MarketScanner {
       if (sr.proximityScore !== 0) {
         composite.compositeScore = Math.max(0, Math.min(100,
           composite.compositeScore + sr.proximityScore
+        ));
+      }
+
+      // ── Calendar Seasonality ────────────────────────────────────────────
+      const scanDate = asOfDate ?? new Date().toISOString().split('T')[0];
+      const seasonality = computeSeasonality(scanDate, config.marketId);
+      if (seasonality.adjustment !== 0) {
+        composite.compositeScore = Math.max(0, Math.min(100,
+          composite.compositeScore + seasonality.adjustment
         ));
       }
 
