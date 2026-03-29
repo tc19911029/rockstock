@@ -68,8 +68,9 @@ export abstract class MarketScanner {
       // 2. 六大條件門檻 — 不再降門檻，嚴格執行
       if (sixConds.totalScore < minScore) return null;
 
-      // 3. 最低飆股潛力分 — 過濾弱勢股（新增）
-      if (surge.totalScore < 40) return null;
+      // 3. 最低飆股潛力分 — 過濾弱勢股
+      const minSurge = config.marketId === 'CN' ? 30 : 40;  // 陸股門檻稍低（波動結構不同）
+      if (surge.totalScore < minSurge) return null;
 
       // 4. 乖離過大 — 一律過濾（不再因 surgeScore 豁免）
       if (last.ma20 && last.ma20 > 0) {
@@ -79,13 +80,15 @@ export abstract class MarketScanner {
       // 5. KD 超買 — 一律過濾
       if (last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
 
-      // 6. 成交量太低 — 過濾冷門股
-      if (last.volume < 1000) return null;
+      // 6. 成交量太低 — 過濾冷門股（陸股量能單位不同，門檻不同）
+      const minVolume = config.marketId === 'CN' ? 50000 : 1000;  // A股用手，台股用張
+      if (last.volume < minVolume) return null;
 
-      // 7. 漲停隔天不追 — 前一天漲幅 ≥ 9.5% 的不進場（追高容易被套）
+      // 7. 漲停隔天不追 — 前一天漲幅過大的不進場
       if (prev && prev.close > 0) {
         const prevChange = (last.close - prev.close) / prev.close;
-        if (prevChange >= 0.095) return null;
+        const limitUp = config.marketId === 'CN' ? 0.095 : 0.095;  // A股和台股都用 9.5%
+        if (prevChange >= limitUp) return null;
       }
 
       // 8. 末升段不進場 — 位置太高風險大
@@ -103,8 +106,8 @@ export abstract class MarketScanner {
       // 10. MA5 必須在 MA20 之上（短期趨勢確認）
       if (last.ma5 && last.ma20 && last.ma5 <= last.ma20) return null;
 
-      // 11. 收盤價必須在 MA5 之上（站穩短期均線）
-      if (last.ma5 && last.close < last.ma5) return null;
+      // 11. 收盤價不能遠低於 MA5（允許 1% 以內的偏離）
+      if (last.ma5 && last.ma5 > 0 && last.close < last.ma5 * 0.99) return null;
 
       const changePercent = prev?.close > 0
         ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
