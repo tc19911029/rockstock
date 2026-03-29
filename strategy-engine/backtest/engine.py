@@ -177,6 +177,20 @@ def _backtest_single(
     base_stop_loss = strategy.parameters.get("stop_loss_pct", -0.07)
     slippage = cost_config.get("slippage", 0.001)
 
+    # Volatility regime adjustment
+    if "atr_pct" in df_ind.columns and len(df_ind) > 0:
+        last_atr_pct = df_ind["atr_pct"].iloc[-1]
+        if pd.notna(last_atr_pct):
+            if last_atr_pct >= 90:  # EXTREME
+                base_stop_loss = base_stop_loss * 1.5
+                base_hold_days = max(2, int(base_hold_days * 0.6))
+            elif last_atr_pct >= 70:  # HIGH
+                base_stop_loss = base_stop_loss * 1.25
+                base_hold_days = max(2, int(base_hold_days * 0.8))
+            elif last_atr_pct <= 20:  # LOW
+                base_stop_loss = base_stop_loss * 0.75
+                base_hold_days = min(10, int(base_hold_days * 1.2))
+
     # Adaptive hold days: strong multi-factor → hold longer
     # bonus 0.8+ → +3 days, 0.6-0.8 → +1, 0.4-0.6 → 0, <0.4 → -1
     if multi_factor_bonus >= 0.8:
