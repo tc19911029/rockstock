@@ -198,3 +198,94 @@ def score_chip(chip_df: pd.DataFrame | None, market: str = "tw_stocks") -> float
         score += 15
 
     return round(min(100, score), 1)
+
+
+def score_chip_detailed(chip_df: pd.DataFrame | None, market: str = "tw_stocks") -> dict:
+    """
+    詳細籌碼面評分，包含子因子分析。
+
+    Returns:
+        dict with: total_score, sub_scores, signals
+    """
+    base_score = score_chip(chip_df, market)
+
+    result = {
+        "total_score": base_score,
+        "trust_consecutive_buy": 0,    # 投信連買天數
+        "foreign_consecutive_buy": 0,  # 外資連買天數
+        "chip_concentration": 0,       # 籌碼集中度 0-100
+        "signals": [],
+    }
+
+    if chip_df is None or len(chip_df) < 5:
+        return result
+
+    if market == "tw_stocks":
+        # ── 投信連買天數（台股最強因子之一）──────────────────────────────────
+        if "trust_net" in chip_df.columns:
+            trust_vals = chip_df["trust_net"].values
+            consec = 0
+            for v in reversed(trust_vals):
+                if v > 0:
+                    consec += 1
+                else:
+                    break
+            result["trust_consecutive_buy"] = consec
+
+            if consec >= 5:
+                result["signals"].append(f"投信連買 {consec} 天（強力作帳訊號）")
+                result["total_score"] = min(100, base_score + 15)
+            elif consec >= 3:
+                result["signals"].append(f"投信連買 {consec} 天")
+                result["total_score"] = min(100, base_score + 8)
+
+        # ── 外資連買天數 ──────────────────────────────────────────────────────
+        if "foreign_net" in chip_df.columns:
+            foreign_vals = chip_df["foreign_net"].values
+            consec = 0
+            for v in reversed(foreign_vals):
+                if v > 0:
+                    consec += 1
+                else:
+                    break
+            result["foreign_consecutive_buy"] = consec
+
+            if consec >= 5:
+                result["signals"].append(f"外資連買 {consec} 天")
+                result["total_score"] = min(100, result["total_score"] + 10)
+            elif consec >= 3:
+                result["signals"].append(f"外資連買 {consec} 天")
+                result["total_score"] = min(100, result["total_score"] + 5)
+
+        # ── 籌碼集中度（三大法人同步買超）──────────────────────────────────
+        if all(c in chip_df.columns for c in ["foreign_net", "trust_net", "dealer_net"]):
+            last5 = chip_df.tail(5)
+            all_buy_days = 0
+            for _, row in last5.iterrows():
+                if row["foreign_net"] > 0 and row["trust_net"] > 0:
+                    all_buy_days += 1
+            concentration = int(all_buy_days / 5 * 100)
+            result["chip_concentration"] = concentration
+            if concentration >= 60:
+                result["signals"].append(f"三大法人同步買超 {all_buy_days}/5 天")
+                result["total_score"] = min(100, result["total_score"] + 5)
+
+    elif market == "a_shares":
+        # ── 主力連買天數 ──────────────────────────────────────────────────────
+        if "main_net" in chip_df.columns:
+            main_vals = chip_df["main_net"].values
+            consec = 0
+            for v in reversed(main_vals):
+                if v > 0:
+                    consec += 1
+                else:
+                    break
+
+            if consec >= 5:
+                result["signals"].append(f"主力連買 {consec} 天")
+                result["total_score"] = min(100, base_score + 15)
+            elif consec >= 3:
+                result["signals"].append(f"主力連買 {consec} 天")
+                result["total_score"] = min(100, base_score + 8)
+
+    return result

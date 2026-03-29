@@ -62,8 +62,9 @@ def run_backtest(
             f_score = score_fundamental(fundamental_data.get(symbol))
 
         if chip_data:
-            from analysis.chip import score_chip
-            c_score = score_chip(chip_data.get(symbol), market)
+            from analysis.chip import score_chip, score_chip_detailed
+            chip_detail = score_chip_detailed(chip_data.get(symbol), market)
+            c_score = chip_detail.get("total_score", score_chip(chip_data.get(symbol), market))
 
         if use_weighted_scoring:
             # Weighted scoring mode: chip + fundamental influence signal quality,
