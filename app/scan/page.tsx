@@ -1146,20 +1146,10 @@ export default function UnifiedScanPage() {
               {/* 🎯 當日 Top 3 推薦績效追蹤 */}
               {scanResults.length > 0 && (() => {
                 // ── 校準版排名邏輯（基於15天歷史回測優化）──
-                // 綜合評分 = 六大條件(35%) + 飆股潛力(25%) + 歷史勝率(20%) + 趨勢位置(10%) + 覆蓋率(10%)
+                // 綜合評分：統一用 calcComposite（跟下面表格同一個公式）
                 const scored = [...scanResults]
                   .filter(r => r.surgeScore != null && r.surgeScore >= 30)
-                  .map(r => {
-                    const sixCon = (r.sixConditionsScore / 6) * 100;                // 0-100 (權重35%)
-                    const surge  = (r.surgeScore ?? 0);                             // 0-100 (權重25%)
-                    const winR   = r.histWinRate ?? 50;                             // 0-100 (權重20%)
-                    const posBonus = r.trendPosition?.includes('起漲') ? 100
-                                   : r.trendPosition?.includes('主升') ? 70
-                                   : r.trendPosition?.includes('末升') ? 20 : 50;  // (權重10%)
-                    const volBonus = (r.surgeComponents?.volume?.score ?? 50);       // (權重10%)
-                    const composite = sixCon * 0.35 + surge * 0.25 + winR * 0.20 + posBonus * 0.10 + volBonus * 0.10;
-                    return { ...r, _composite: Math.round(composite * 10) / 10 };
-                  })
+                  .map(r => ({ ...r, _composite: calcComposite(r) }))
                   .sort((a, b) => b._composite - a._composite)
                   .slice(0, 3);
 
