@@ -15,6 +15,7 @@ import AnalysisChat from '@/components/AnalysisChat';
 import TrendStateBar from '@/components/TrendStateBar';
 import SixConditionsPanel from '@/components/SixConditionsPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import ChipDetailPanel from '@/components/ChipDetailPanel';
 
 const CandleChart = dynamic(() => import('@/components/CandleChart'), {
   ssr: false,
@@ -27,7 +28,7 @@ const CandleChart = dynamic(() => import('@/components/CandleChart'), {
 
 const IndicatorCharts = dynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
 
-type SideTab = 'conditions' | 'trade' | 'signals' | 'chat';
+type SideTab = 'conditions' | 'trade' | 'signals' | 'chat' | 'chip';
 
 export default function HomePage() {
   const {
@@ -102,6 +103,7 @@ export default function HomePage() {
     { key: 'conditions', label: '六大條件', alert: condAlert },
     { key: 'trade',      label: '交易/帳戶' },
     { key: 'signals',    label: '訊號' },
+    { key: 'chip',       label: '籌碼' },
     { key: 'chat',       label: '問老師' },
   ];
 
@@ -371,6 +373,9 @@ export default function HomePage() {
                   <RuleAlerts />
                   <TradeHistory />
                 </div>
+              )}
+              {sideTab === 'chip' && currentStock && (
+                <ChipDetailPanel symbol={currentStock.ticker} />
               )}
             </div>
           )}
