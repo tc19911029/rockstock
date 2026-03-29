@@ -305,6 +305,29 @@ export const useBacktestStore = create<BacktestState>()(
 
         if (combined.length === 0) return;
 
+        // ── 台股：異步補充籌碼面資料 ──────────────────────────────────────
+        if (market === 'TW') {
+          let chipDate = scanDate;
+          const cd = new Date(chipDate + 'T00:00:00');
+          if (cd.getDay() === 0) chipDate = new Date(cd.getTime() - 2 * 86400000).toISOString().slice(0, 10);
+          else if (cd.getDay() === 6) chipDate = new Date(cd.getTime() - 1 * 86400000).toISOString().slice(0, 10);
+          fetch(`/api/chip?date=${chipDate}`)
+            .then(r => r.json())
+            .then((chipJson: { data?: Array<{ symbol: string; chipScore: number; chipGrade: string; chipSignal: string; foreignBuy: number; trustBuy: number; dealerBuy: number; marginNet: number; shortNet: number }> }) => {
+              if (!chipJson.data) return;
+              const chipMap = new Map(chipJson.data.map(d => [d.symbol, d]));
+              const current = get().scanResults;
+              const enriched = current.map(r => {
+                const sym = r.symbol.replace(/\.(TW|TWO)$/i, '');
+                const chip = chipMap.get(sym);
+                if (!chip) return r;
+                return { ...r, chipScore: chip.chipScore, chipGrade: chip.chipGrade, chipSignal: chip.chipSignal, foreignBuy: chip.foreignBuy, trustBuy: chip.trustBuy, dealerBuy: chip.dealerBuy, marginNet: chip.marginNet, shortNet: chip.shortNet };
+              });
+              set({ scanResults: enriched });
+            })
+            .catch(() => {});
+        }
+
         // ── 掃描模式：到此為止，不做前瞻回測 ──
         if (scanOnly) return;
 

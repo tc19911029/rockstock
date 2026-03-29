@@ -246,7 +246,11 @@ export const useScannerStore = create<ScannerStore>()(
 
           // ── 台股：異步補充籌碼面資料 ──────────────────────────────────────
           if (market === 'TW' && results.length > 0) {
-            const chipDate = scanDate || now.split('T')[0];
+            // 如果是週末，往回找到最近的交易日
+            let chipDate = scanDate || now.split('T')[0];
+            const cd = new Date(chipDate + 'T00:00:00');
+            if (cd.getDay() === 0) chipDate = new Date(cd.getTime() - 2 * 86400000).toISOString().slice(0, 10); // 週日→週五
+            else if (cd.getDay() === 6) chipDate = new Date(cd.getTime() - 1 * 86400000).toISOString().slice(0, 10); // 週六→週五
             fetch(`/api/chip?date=${chipDate}`)
               .then(r => r.json())
               .then((chipJson: { data?: Array<{ symbol: string; chipScore: number; chipGrade: string; chipSignal: string; foreignBuy: number; trustBuy: number; dealerBuy: number; marginNet: number; shortNet: number }> }) => {
