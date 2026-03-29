@@ -255,10 +255,58 @@ Score = (Annualized Return% × 0.4) + (Win Rate% × 0.3) - (Max Drawdown% × 0.3
 | 10 | Volatility Adapt | Regime detection, adaptive stops/holds/sizing |
 | 11 | Macro Context | Market breadth, broad participation filter |
 
+## Round 12 — Calendar Seasonality (2026-03-29)
+
+**Changes:**
+- Month-end window dressing (投信作帳): +3 to +5 composite boost
+- Quarter-end: stronger effect, first days of quarter: -3 penalty
+- January effect, ex-dividend season, Friday effect, year-end rally
+- Market-specific: TW Friday effect, CN National Day anticipation
+
+---
+
+## Round 13 — Cross-Timeframe Confirmation (2026-03-29)
+
+**Changes:**
+- Synthesize weekly candles from daily data (no extra API needed)
+- Weekly trend alignment: MA10, MA direction, candle patterns, HH+HL
+- STRONG alignment: +10 composite, CONFLICTING: -10
+- Multi-timeframe confirmation = strongest edge multiplier
+
+---
+
+## Summary: 13 Rounds of Optimization
+
+| Round | Focus | Key Addition |
+|-------|-------|-------------|
+| 1 | Multi-Factor Foundation | Smart money score, composite ranking |
+| 2 | Volume-Price Analysis | Divergence detection, A-share mean reversion |
+| 3 | Momentum Detection | Consecutive bullish, market-specific weights |
+| 4 | Evaluation System | Scoring formula, investment trust factor |
+| 5 | Sector Analysis | Sector heat momentum, data retry logic |
+| 6 | Contrarian Signals | Retail sentiment, northbound flow, trend accel |
+| 7 | Fundamentals | Earnings surprise, revenue acceleration |
+| 8 | Risk Management | Sector limits, dynamic position sizing |
+| 9 | Entry Quality | Support/resistance proximity |
+| 10 | Volatility Adapt | Regime detection, adaptive stops/holds/sizing |
+| 11 | Macro Context | Market breadth, broad participation filter |
+| 12 | Timing | Calendar seasonality (月底作帳, quarter effects) |
+| 13 | Multi-Timeframe | Weekly trend confirmation from daily data |
+
+### Total New Analysis Modules Created:
+1. `smartMoneyScore.ts` — Institutional flow proxy (OBV, CLV, gaps)
+2. `retailSentiment.ts` — Margin trading contrarian signals
+3. `trendAcceleration.ts` — MA slope acceleration
+4. `supportResistance.ts` — S/R proximity + breakout detection
+5. `volatilityRegime.ts` — ATR percentile regime classification
+6. `marketBreadth.ts` — Broad market health from scan results
+7. `seasonality.ts` — Calendar effects (月底作帳, quarter-end)
+8. `crossTimeframe.ts` — Weekly trend synthesis + alignment
+
 ## Pending Improvements
 
 - [ ] Machine learning signal combination (gradient boosting on all factors)
 - [ ] Cross-market correlation (when TW semi leads, CN semi follows)
 - [ ] Kelly criterion position sizing based on historical win rate
-- [ ] Time-of-month seasonality (月底投信作帳效應)
 - [ ] Intraday VWAP-based entry optimization
+- [ ] Options flow / IV rank as sentiment indicator
