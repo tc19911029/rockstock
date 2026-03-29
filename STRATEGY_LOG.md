@@ -303,10 +303,69 @@ Score = (Annualized Return% × 0.4) + (Win Rate% × 0.3) - (Max Drawdown% × 0.3
 7. `seasonality.ts` — Calendar effects (月底作帳, quarter-end)
 8. `crossTimeframe.ts` — Weekly trend synthesis + alignment
 
+## Round 14 — Python Engine ATR/OBV Enhancement (2026-03-29)
+- ATR14, OBV, OBV_MA20, ATR percentile, MA50 added to Python technical module
+- New condition types: obv_trend, low_volatility_breakout, weekly_trend_confirm, rsi_neutral_zone
+- Volatility regime adjustment in Python backtest engine
+
+## Round 15 — v002 Multi-Factor Strategy (2026-03-29)
+- 9-condition strategy (6 original + OBV, weekly, RSI) with min_conditions=5
+- Relaxed thresholds, enabled weighted scoring mode
+
+## Round 16 — Smarter Optimizer Mutations (2026-03-29)
+- add_condition and swap_condition mutation types
+- OBV, weekly, RSI, low-vol breakout as addable conditions
+
+## Round 17 — Advanced Risk Metrics (2026-03-29)
+- Sortino ratio, Calmar ratio, recovery factor, max consecutive wins
+- Enhanced evaluator: 35/25/25/15 weighting + risk bonus up to +1.5
+
+---
+
+## Summary: 17 Rounds of Optimization
+
+| Round | Focus | Key Addition |
+|-------|-------|-------------|
+| 1 | Multi-Factor Foundation | Smart money score, composite ranking |
+| 2 | Volume-Price Analysis | Divergence detection, A-share mean reversion |
+| 3 | Momentum Detection | Consecutive bullish, market-specific weights |
+| 4 | Evaluation System | Scoring formula, investment trust factor |
+| 5 | Sector Analysis | Sector heat momentum, data retry logic |
+| 6 | Contrarian Signals | Retail sentiment, northbound flow, trend accel |
+| 7 | Fundamentals | Earnings surprise, revenue acceleration |
+| 8 | Risk Management | Sector limits, dynamic position sizing |
+| 9 | Entry Quality | Support/resistance proximity |
+| 10 | Volatility Adapt | Regime detection, adaptive stops/holds/sizing |
+| 11 | Macro Context | Market breadth, broad participation filter |
+| 12 | Timing | Calendar seasonality (月底作帳, quarter effects) |
+| 13 | Multi-Timeframe | Weekly trend confirmation from daily data |
+| 14 | Python Engine | ATR/OBV/MA50, vol regime in Python backtest |
+| 15 | Strategy v002 | 9-condition multi-factor strategy |
+| 16 | Optimizer | Add/swap condition mutations |
+| 17 | Risk Metrics | Sortino/Calmar/recovery + enhanced evaluator |
+
+### Analysis Modules (TypeScript):
+1. `smartMoneyScore.ts` — Institutional flow proxy (OBV, CLV, gaps)
+2. `retailSentiment.ts` — Margin trading contrarian signals
+3. `trendAcceleration.ts` — MA slope acceleration
+4. `supportResistance.ts` — S/R proximity + breakout detection
+5. `volatilityRegime.ts` — ATR percentile regime classification
+6. `marketBreadth.ts` — Broad market health from scan results
+7. `seasonality.ts` — Calendar effects (月底作帳, quarter-end)
+8. `crossTimeframe.ts` — Weekly trend synthesis + alignment
+
+### Python Engine Enhancements:
+- `analysis/technical.py`: ATR14, OBV, ATR percentile, MA50
+- `analysis/chip.py`: Northbound flow, detailed chip scoring
+- `analysis/fundamental.py`: Detailed fundamental + earnings surprise
+- `backtest/engine.py`: Volatility regime + multi-factor adaptive params
+- `backtest/metrics.py`: Sortino, Calmar, recovery factor
+- `evaluator.py`: Enhanced scoring with risk adjustment bonus
+- `strategies/v002.py`: 9-condition multi-factor strategy
+
 ## Pending Improvements
 
 - [ ] Machine learning signal combination (gradient boosting on all factors)
 - [ ] Cross-market correlation (when TW semi leads, CN semi follows)
 - [ ] Kelly criterion position sizing based on historical win rate
 - [ ] Intraday VWAP-based entry optimization
-- [ ] Options flow / IV rank as sentiment indicator
