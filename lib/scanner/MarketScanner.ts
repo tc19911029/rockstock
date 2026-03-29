@@ -13,6 +13,7 @@ import { computeMarketBreadth } from '@/lib/analysis/marketBreadth';
 import { computeSeasonality } from '@/lib/analysis/seasonality';
 import { analyzeCrossTimeframe } from '@/lib/analysis/crossTimeframe';
 import { computeRelativeStrength } from '@/lib/analysis/relativeStrength';
+import { analyzeGaps } from '@/lib/analysis/gapAnalysis';
 
 const CONCURRENCY = 15; // parallel requests per chunk
 
@@ -204,6 +205,14 @@ export abstract class MarketScanner {
       if (rs.compositeAdjust !== 0) {
         composite.compositeScore = Math.max(0, Math.min(100,
           composite.compositeScore + rs.compositeAdjust
+        ));
+      }
+
+      // ── Gap Analysis ───────────────────────────────────────────────────
+      const gapResult = analyzeGaps(candles, lastIdx);
+      if (gapResult.compositeAdjust !== 0) {
+        composite.compositeScore = Math.max(0, Math.min(100,
+          composite.compositeScore + gapResult.compositeAdjust
         ));
       }
 
