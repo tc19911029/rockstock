@@ -225,6 +225,28 @@ export abstract class MarketScanner {
         ));
       }
 
+      // ── Low Volatility Breakout Bonus ──────────────────────────────────
+      // Key finding from Python optimization: low ATR percentile (<25) with
+      // price above MA20 is the single strongest entry signal. Stocks in
+      // volatility squeeze that break out tend to have strong follow-through.
+      const volRegime = detectVolatilityRegime(candles, lastIdx);
+      if (volRegime.percentile <= 25 && last.ma20 && last.close > last.ma20) {
+        // Low vol squeeze breakout: strong bonus
+        composite.compositeScore = Math.max(0, Math.min(100,
+          composite.compositeScore + 10
+        ));
+      } else if (volRegime.percentile <= 35 && last.ma20 && last.close > last.ma20) {
+        // Moderate low vol: smaller bonus
+        composite.compositeScore = Math.max(0, Math.min(100,
+          composite.compositeScore + 5
+        ));
+      } else if (volRegime.percentile >= 80) {
+        // High volatility: penalty (signals less reliable)
+        composite.compositeScore = Math.max(0, Math.min(100,
+          composite.compositeScore - 5
+        ));
+      }
+
       return {
         symbol,
         name,

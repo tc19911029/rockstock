@@ -137,8 +137,10 @@ export function resolveAdaptiveParams(
     if (stopLoss !== null) stopLoss = stopLoss * 1.25;
     holdDays = Math.max(2, Math.round(holdDays * 0.8));
   } else if (volRegime === 'LOW') {
+    // Low volatility = strongest setup (Python optimization finding).
+    // Tighter stops work because noise is low; hold longer for follow-through.
     if (stopLoss !== null) stopLoss = Math.max(stopLoss, stopLoss * 0.75);
-    holdDays = Math.min(10, Math.round(holdDays * 1.2));
+    holdDays = Math.min(12, Math.round(holdDays * 1.3));
   }
 
   return {
