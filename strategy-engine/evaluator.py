@@ -66,12 +66,35 @@ def calc_strategy_score(metrics: dict, avg_hold_days: float = 5.0) -> dict:
     trades_per_year = 250.0 / max(hold_days, 1)
     annualized_return = avg_net_return * trades_per_year
 
-    # 分項得分
-    score_return = annualized_return * 0.4
-    score_winrate = win_rate * 0.3
-    score_drawdown = max_drawdown * 0.3  # 扣分項
+    # 核心分項得分
+    score_return = annualized_return * 0.35
+    score_winrate = win_rate * 0.25
+    score_drawdown = max_drawdown * 0.25  # 扣分項
 
-    total_score = score_return + score_winrate - score_drawdown
+    # 進階風險調整 bonus (15%):
+    # - Sortino > 1.0 → good, > 2.0 → excellent
+    # - Profit Factor > 1.5 → good, > 2.0 → excellent
+    sortino = metrics.get("sortino_ratio", 0)
+    profit_factor = metrics.get("profit_factor", 0)
+
+    risk_bonus = 0
+    if sortino > 2.0:
+        risk_bonus += 5
+    elif sortino > 1.0:
+        risk_bonus += 3
+    elif sortino > 0.5:
+        risk_bonus += 1
+
+    if profit_factor > 2.0:
+        risk_bonus += 5
+    elif profit_factor > 1.5:
+        risk_bonus += 3
+    elif profit_factor > 1.0:
+        risk_bonus += 1
+
+    score_risk = risk_bonus * 0.15
+
+    total_score = score_return + score_winrate - score_drawdown + score_risk
 
     return {
         "total_score": round(total_score, 2),
@@ -81,9 +104,13 @@ def calc_strategy_score(metrics: dict, avg_hold_days: float = 5.0) -> dict:
         "score_return": round(score_return, 2),
         "score_winrate": round(score_winrate, 2),
         "score_drawdown": round(score_drawdown, 2),
+        "score_risk_bonus": round(score_risk, 2),
         "trade_count": trade_count,
         "sharpe_ratio": metrics.get("sharpe_ratio", 0),
-        "profit_factor": metrics.get("profit_factor", 0),
+        "sortino_ratio": round(sortino, 3),
+        "profit_factor": round(profit_factor, 3),
+        "calmar_ratio": metrics.get("calmar_ratio", 0),
+        "recovery_factor": metrics.get("recovery_factor", 0),
         "avg_hold_days": round(hold_days, 1),
     }
 
@@ -99,11 +126,14 @@ def format_score_report(score: dict, version: str = "", label: str = "") -> str:
     lines.append(f"│ ─────────────────────────────────")
     lines.append(f"│ 年化報酬 (×0.4): {score['annualized_return']:>7.1f}% → {score['score_return']:>+.2f}")
     lines.append(f"│ 勝率     (×0.3): {score['win_rate']:>7.1f}% → {score['score_winrate']:>+.2f}")
-    lines.append(f"│ MDD      (×0.3): {score['max_drawdown']:>7.1f}% → {score['score_drawdown']:>-.2f}")
+    lines.append(f"│ MDD      (×0.25):{score['max_drawdown']:>7.1f}% → {score['score_drawdown']:>-.2f}")
+    lines.append(f"│ 風調 bonus(×0.15):             → {score.get('score_risk_bonus', 0):>+.2f}")
     lines.append(f"│ ─────────────────────────────────")
     lines.append(f"│ 交易筆數:        {score['trade_count']:>5d}")
     lines.append(f"│ 夏普率:          {score['sharpe_ratio']:>8.3f}")
+    lines.append(f"│ Sortino 率:      {score.get('sortino_ratio', 0):>8.3f}")
     lines.append(f"│ 獲利因子:        {score['profit_factor']:>8.3f}")
+    lines.append(f"│ Calmar 率:       {score.get('calmar_ratio', 0):>8.3f}")
     lines.append(f"│ 平均持有天數:    {score['avg_hold_days']:>8.1f}")
     lines.append(f"└{'─' * 55}")
     return "\n".join(lines)
