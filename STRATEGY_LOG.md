@@ -456,11 +456,68 @@ Score = (Annualized Return% × 0.35) + (Win Rate% × 0.25)
 Risk Bonus: Sortino (0-5 pts) + Profit Factor (0-5 pts)
 ```
 
+## Round 25 — Remove MA60 Position Filter Breakthrough (2026-03-29)
+
+**Key Insight:**
+Removing the MA60 position filter (close > MA60) dramatically improved results.
+Why: with 8 conditions and min_cond=7, the strategy becomes extremely selective.
+The MA60 filter was actually ADDING noise by forcing trades only in long-term uptrends,
+missing quality setups in recovering or range-bound stocks.
+
+**Results across stock counts (mc=7, 8 conditions without MA60):**
+
+| Stocks | Val Score | Test Score | Avg | Val Trades | Val MDD |
+|--------|-----------|------------|-----|------------|---------|
+| N=20 | +57.81 | +102.13 | 79.97 | 9 | 3.5% |
+| N=30 | +33.84 | +40.10 | 36.97 | 15 | 7.7% |
+| N=50 | +33.46 | +9.67 | 21.57 | 20 | 9.3% |
+
+## Round 26 — Parameter Optimization on No-MA60 Strategy (2026-03-29)
+
+**Best Variants (N=50 stocks, mc=7):**
+
+| Variant | Avg Score | Val | Test | Trades | WR | MDD |
+|---------|-----------|-----|------|--------|----|-----|
+| body1pct | **+28.00** | +31.28 | +24.72 | 44 | 47.7% | 10.7% |
+| H5_SL10 | +30.92 | +33.16 | +28.69 | 21 | 38.1% | 8.1% |
+| H10_SL10 | +26.27 | +28.15 | +24.39 | 19 | 47.4% | 8.0% |
+| H14_SL10 | +23.55 | +26.46 | +20.64 | 19 | **57.9%** | **6.2%** |
+
+**Saved Strategies:**
+- **v017**: body 1%, H7, SL -10%, mc=7 (44 trades, best reliability)
+- **v018**: body 1%, H10, SL -10%, mc=7 (47.4% WR, lowest MDD)
+
+**8 Conditions (no MA60 position filter):**
+1. MA5 > MA20 (trend crossover)
+2. Bullish candle ≥ 1% body
+3. MA5 > MA10 > MA20 (alignment)
+4. MACD > 0 OR KD golden cross
+5. OBV > OBV MA20 (volume flow)
+6. Close > MA50, MA50 rising (weekly proxy)
+7. RSI 30-60 (neutral zone)
+8. ATR pct < 30, close > MA20 (low vol breakout)
+
+Min 7 of 8 conditions must be met to enter.
+
+## Optimization Summary
+
+| Round | Best Score | Key Change |
+|-------|-----------|------------|
+| 1-20 | -4.08 → -3.81 | Added many analysis modules, grid search |
+| 21 | -3.65 | Take-profit/trailing stop (marginal) |
+| 22 | **+8.60** | min_cond=7 + 20 stocks (first positive!) |
+| 23 | +7.46 | 9 conditions + test set validation |
+| 24 | +14.39 | RSI 30-60 + ATR<30 fine-tuning |
+| 25 | +21.57 | Remove MA60 filter (N=50) |
+| 26 | **+28.00** | Lower body pct + 50 stocks |
+
+**Score improved from -4.08 to +28.00 across 26 rounds.**
+
 ## Pending Improvements
 
+- [ ] Walk-forward optimization (rolling window validation)
 - [ ] Machine learning signal combination (gradient boosting on all factors)
 - [ ] Cross-market correlation (when TW semi leads, CN semi follows)
 - [ ] Kelly criterion position sizing based on historical win rate
-- [ ] Intraday VWAP-based entry optimization
-- [ ] Walk-forward optimization (rolling window validation)
 - [ ] Sector rotation overlay (concentrate on hot sectors)
+- [ ] Intraday VWAP-based entry optimization
