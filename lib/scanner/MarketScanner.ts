@@ -72,13 +72,13 @@ export abstract class MarketScanner {
       const minSurge = config.marketId === 'CN' ? 30 : 40;  // 陸股門檻稍低（波動結構不同）
       if (surge.totalScore < minSurge) return null;
 
-      // 4. 乖離過大 — 一律過濾（不再因 surgeScore 豁免）
-      if (last.ma20 && last.ma20 > 0) {
+      // 4. 乖離過大 — surgeScore ≥ 65 的飆股可豁免（真飆股本來就會乖離大）
+      if (surge.totalScore < 65 && last.ma20 && last.ma20 > 0) {
         const overExtended = (last.close - last.ma20) / last.ma20 > thresholds.deviationMax;
         if (overExtended) return null;
       }
-      // 5. KD 超買 — 一律過濾
-      if (last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
+      // 5. KD 超買 — surgeScore ≥ 65 的飆股可豁免
+      if (surge.totalScore < 65 && last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
 
       // 6. 成交量太低 — 過濾冷門股（陸股量能單位不同，門檻不同）
       const minVolume = config.marketId === 'CN' ? 50000 : 1000;  // A股用手，台股用張
@@ -94,20 +94,8 @@ export abstract class MarketScanner {
       // 8. 末升段不進場 — 位置太高風險大
       if (position.includes('末升')) return null;
 
-      // 9. 連續放量確認 — 至少近 2 天有 1 天量 > 5日均量（避免假突破）
-      if (lastIdx >= 2 && last.avgVol5) {
-        const vol0 = candles[lastIdx].volume;
-        const vol1 = candles[lastIdx - 1].volume;
-        const avgVol = last.avgVol5;
-        const hasVolumeConfirm = vol0 > avgVol * 1.2 || vol1 > avgVol * 1.2;
-        if (!hasVolumeConfirm) return null;
-      }
-
-      // 10. MA5 必須在 MA20 之上（短期趨勢確認）
-      if (last.ma5 && last.ma20 && last.ma5 <= last.ma20) return null;
-
-      // 11. 收盤價不能遠低於 MA5（允許 1% 以內的偏離）
-      if (last.ma5 && last.ma5 > 0 && last.close < last.ma5 * 0.99) return null;
+      // 9-11 改為加分項（不再硬過濾，避免掃不出來）
+      // 這些因素會透過 surgeScore 和六大條件間接反映
 
       const changePercent = prev?.close > 0
         ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
