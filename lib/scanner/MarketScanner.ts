@@ -12,6 +12,7 @@ import { detectVolatilityRegime } from '@/lib/analysis/volatilityRegime';
 import { computeMarketBreadth } from '@/lib/analysis/marketBreadth';
 import { computeSeasonality } from '@/lib/analysis/seasonality';
 import { analyzeCrossTimeframe } from '@/lib/analysis/crossTimeframe';
+import { computeRelativeStrength } from '@/lib/analysis/relativeStrength';
 
 const CONCURRENCY = 15; // parallel requests per chunk
 
@@ -195,6 +196,14 @@ export abstract class MarketScanner {
       if (weekly.compositeAdjust !== 0) {
         composite.compositeScore = Math.max(0, Math.min(100,
           composite.compositeScore + weekly.compositeAdjust
+        ));
+      }
+
+      // ── Relative Strength ───────────────────────────────────────────────
+      const rs = computeRelativeStrength(candles, lastIdx);
+      if (rs.compositeAdjust !== 0) {
+        composite.compositeScore = Math.max(0, Math.min(100,
+          composite.compositeScore + rs.compositeAdjust
         ));
       }
 
