@@ -550,12 +550,14 @@ export interface CapitalConstraints {
   initialCapital:  number;  // 初始資金（元），例如 1_000_000
   maxPositions:    number;  // 最多同時持倉數，例如 3
   positionSizePct: number;  // 每筆倉位佔初始資金比例，例如 0.1 = 10%
+  maxPerSector?:   number;  // 同一產業最多持倉數（防集中風險）
 }
 
 export const DEFAULT_CAPITAL: CapitalConstraints = {
   initialCapital:  1_000_000,
   maxPositions:    5,
   positionSizePct: 0.1,
+  maxPerSector:    2,       // 同產業最多 2 檔
 };
 
 /**
@@ -597,8 +599,24 @@ export function runBatchBacktestWithCapital(
     (a, b) => calcComposite(b) - calcComposite(a),
   );
 
-  const eligible  = sorted.slice(0, constraints.maxPositions);
-  const excluded  = sorted.length - eligible.length;
+  // Apply sector concentration limit: pick top stocks but limit per-sector exposure
+  const maxPerSector = constraints.maxPerSector ?? Infinity;
+  const sectorCount = new Map<string, number>();
+  const eligible: StockScanResult[] = [];
+  let skippedBySector = 0;
+
+  for (const r of sorted) {
+    if (eligible.length >= constraints.maxPositions) break;
+    const sector = r.industry ?? '__unknown__';
+    const count = sectorCount.get(sector) ?? 0;
+    if (count >= maxPerSector) {
+      skippedBySector++;
+      continue;
+    }
+    sectorCount.set(sector, count + 1);
+    eligible.push(r);
+  }
+  const excluded = sorted.length - eligible.length - skippedBySector;
 
   const trades: BacktestTrade[] = [];
   let skippedCount = 0;
@@ -615,8 +633,13 @@ export function runBatchBacktestWithCapital(
       continue;
     }
 
-    // 以 positionSizePct * initialCapital 作為名義本金計算損益
-    const positionNominal = constraints.initialCapital * constraints.positionSizePct;
+    // Dynamic position sizing: higher composite → larger allocation (±30%)
+    const composite = result.compositeScore ?? 50;
+    const sizeMult = composite >= 75 ? 1.3
+                   : composite >= 60 ? 1.1
+                   : composite < 40  ? 0.7
+                   : 1.0;
+    const positionNominal = constraints.initialCapital * constraints.positionSizePct * sizeMult;
     const dollarPnL = (trade.netReturn / 100) * positionNominal;
     capital += dollarPnL;
 

@@ -152,10 +152,28 @@ Score = (Annualized Return% × 0.4) + (Win Rate% × 0.3) - (Max Drawdown% × 0.3
 
 ---
 
+## Round 8 — Portfolio Risk Management + Dynamic Position Sizing (2026-03-29)
+
+**Changes:**
+- Sector concentration limit: max 2 stocks per sector in capital-constrained backtest
+- Dynamic position sizing: composite ≥75 → 1.3x, ≥60 → 1.1x, <40 → 0.7x allocation
+- Prevents over-concentration in hot sectors while still allowing sector momentum bonus
+
+**New Features:**
+| Feature | Type | Description |
+|---------|------|-------------|
+| maxPerSector | Risk Mgmt | Limit per-sector exposure (default: 2) |
+| Dynamic Sizing | Portfolio | Signal quality determines allocation size |
+| Sector Diversification | Portfolio | Skip excess stocks from same sector |
+
+**Result:** Committed. Portfolio now balances sector momentum with diversification.
+
+---
+
 ## Pending Improvements
 
 - [ ] Intraday VWAP-based entry optimization
-- [ ] Portfolio-level risk parity / max drawdown constraint
 - [ ] Machine learning signal combination (gradient boosting on all factors)
 - [ ] Cross-market correlation (when TW semi leads, CN semi follows)
 - [ ] Options flow / put-call ratio as sentiment indicator
+- [ ] Kelly criterion position sizing based on historical win rate
