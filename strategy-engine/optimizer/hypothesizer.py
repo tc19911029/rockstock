@@ -97,6 +97,34 @@ def generate_hypothesis(diagnosis: dict, strategy_params: dict) -> dict[str, Any
             "priority": 2,
         })
 
+    # ── 方案 E：啟用多因子加權評分模式（取代二元過濾）────────────────────
+    mf_analysis = diagnosis.get("multi_factor_analysis", {})
+    if not strategy_params.get("use_weighted_scoring", False):
+        # Check if multi-factor data suggests weighted scoring would help
+        high_wr = mf_analysis.get("high_bonus_win_rate", 50)
+        low_wr = mf_analysis.get("low_bonus_win_rate", 50)
+        if high_wr > low_wr + 5:
+            candidates.append({
+                "type": "toggle_filter",
+                "description": f"啟用多因子加權評分（高 bonus 勝率 {high_wr:.0f}% > 低 bonus {low_wr:.0f}%）",
+                "param_name": "use_weighted_scoring",
+                "old_value": False,
+                "new_value": True,
+                "changes": ["use_weighted_scoring: False → True"],
+                "priority": 4,  # high priority - new feature
+            })
+
+    if strategy_params.get("use_weighted_scoring", False):
+        candidates.append({
+            "type": "toggle_filter",
+            "description": "關閉多因子加權評分（回到二元過濾）",
+            "param_name": "use_weighted_scoring",
+            "old_value": True,
+            "new_value": False,
+            "changes": ["use_weighted_scoring: True → False"],
+            "priority": 1,
+        })
+
     # ── 方案 C：調整各種參數（永遠可選）────────────────────────────────────
     adjustable_params = [
         ("volume_multiplier", 0.25, 0.5, 5.0, "量能倍數"),
@@ -107,6 +135,8 @@ def generate_hypothesis(diagnosis: dict, strategy_params: dict) -> dict[str, Any
         ("ma_slow", 2, 10, 30, "中期均線天數"),
         ("ma_long", 5, 40, 120, "長期均線天數"),
         ("volume_avg_period", 1, 3, 20, "量能均線天數"),
+        ("trailing_stop_pct", 0.005, 0.01, 0.08, "移動停利回撤比例"),
+        ("trailing_activate_pct", 0.01, 0.02, 0.10, "移動停利啟動門檻"),
     ]
 
     for param_name, step, min_val, max_val, label in adjustable_params:

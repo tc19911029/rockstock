@@ -5,7 +5,7 @@ import { StockScanResult, MarketConfig, TriggeredRule } from './types';
 import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
 import { computeSurgeScore } from '@/lib/analysis/surgeScore';
-import { computeSmartMoneyScore, computeCompositeScore } from '@/lib/analysis/smartMoneyScore';
+import { computeSmartMoneyScore, computeCompositeScore, detectConsecutiveBullish } from '@/lib/analysis/smartMoneyScore';
 
 const CONCURRENCY = 15; // parallel requests per chunk
 
@@ -149,11 +149,14 @@ export abstract class MarketScanner {
 
       // ── Smart Money Score & Composite Ranking ────────────────────────────
       const smartMoney = computeSmartMoneyScore(candles, lastIdx);
+      const { bonus: consecutiveBonus } = detectConsecutiveBullish(candles, lastIdx);
       const composite = computeCompositeScore(
         sixConds.totalScore,
         surge.totalScore,
         smartMoney.totalScore,
         histWinRate,
+        config.marketId,
+        consecutiveBonus,
       );
 
       return {

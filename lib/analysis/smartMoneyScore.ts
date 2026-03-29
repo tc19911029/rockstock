@@ -397,11 +397,43 @@ export interface CompositeScoreResult {
   breakdown: string;
 }
 
+/**
+ * Detect consecutive bullish momentum in recent candles.
+ * 3+ consecutive bullish closes with increasing volume = strong entry signal.
+ * Returns bonus 0-15 to add to composite score.
+ */
+export function detectConsecutiveBullish(
+  candles: CandleWithIndicators[],
+  idx: number,
+): { bonus: number; streak: number } {
+  if (idx < 5) return { bonus: 0, streak: 0 };
+
+  let streak = 0;
+  let volIncreasing = true;
+  for (let i = idx; i > idx - 5 && i > 0; i--) {
+    if (candles[i].close > candles[i - 1].close) {
+      streak++;
+      if (i < idx && candles[i].volume < candles[i - 1].volume * 0.8) {
+        volIncreasing = false;
+      }
+    } else {
+      break;
+    }
+  }
+
+  if (streak >= 4 && volIncreasing) return { bonus: 15, streak };
+  if (streak >= 3 && volIncreasing) return { bonus: 10, streak };
+  if (streak >= 3) return { bonus: 5, streak };
+  return { bonus: 0, streak };
+}
+
 export function computeCompositeScore(
   sixConditionsScore: number,
   surgeScore: number,
   smartMoneyScore: number,
   histWinRate: number | undefined,
+  market?: 'TW' | 'CN',
+  consecutiveBullishBonus?: number,
 ): CompositeScoreResult {
   // Normalize six conditions to 0-100
   const technicalScore = (sixConditionsScore / 6) * 100;
@@ -409,24 +441,35 @@ export function computeCompositeScore(
   // Effective win rate (default 50 if unknown)
   const effectiveWinRate = histWinRate ?? 50;
 
-  // Weighted composite:
-  // - Technical (six conditions): 20% - entry signal quality
-  // - Surge potential: 25% - momentum & volatility potential
-  // - Smart money: 30% - institutional activity (most predictive)
-  // - Historical win rate: 25% - track record
-  const compositeScore = Math.round(
-    technicalScore * 0.20 +
-    surgeScore * 0.25 +
-    smartMoneyScore * 0.30 +
-    effectiveWinRate * 0.25
+  // Market-specific weighting:
+  // Taiwan: smart money detection more reliable (transparent institutional data)
+  // A-shares: momentum/surge more important (retail-driven momentum)
+  let weights = { tech: 0.20, surge: 0.25, smart: 0.30, winRate: 0.25 };
+  if (market === 'TW') {
+    weights = { tech: 0.18, surge: 0.22, smart: 0.35, winRate: 0.25 };
+  } else if (market === 'CN') {
+    weights = { tech: 0.20, surge: 0.30, smart: 0.22, winRate: 0.28 };
+  }
+
+  let compositeScore = Math.round(
+    technicalScore * weights.tech +
+    surgeScore * weights.surge +
+    smartMoneyScore * weights.smart +
+    effectiveWinRate * weights.winRate
   );
+
+  // Add consecutive bullish bonus (capped at 100)
+  if (consecutiveBullishBonus) {
+    compositeScore = Math.min(100, compositeScore + consecutiveBullishBonus);
+  }
 
   const breakdown = [
     `Tech:${technicalScore.toFixed(0)}`,
     `Surge:${surgeScore}`,
     `Smart:${smartMoneyScore}`,
     `WinRate:${effectiveWinRate}`,
-  ].join(' | ');
+    consecutiveBullishBonus ? `Streak:+${consecutiveBullishBonus}` : '',
+  ].filter(Boolean).join(' | ');
 
   return {
     compositeScore,
