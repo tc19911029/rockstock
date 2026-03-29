@@ -1,5 +1,6 @@
 import { CandleWithIndicators } from '@/types';
 import { fetchCandlesYahoo } from '@/lib/datasource/YahooFinanceDS';
+import { fetchCandlesTWSE } from '@/lib/datasource/TWSEDataSource';
 import { MarketScanner, StockEntry } from './MarketScanner';
 import { MarketConfig } from './types';
 import { detectTrend, TrendState } from '@/lib/analysis/trendAnalysis';
@@ -184,7 +185,27 @@ export class TaiwanScanner extends MarketScanner {
   }
 
   async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {
-    return fetchCandlesYahoo(symbol, '1y', 4000, asOfDate);
+    // Primary: Yahoo Finance
+    try {
+      const candles = await fetchCandlesYahoo(symbol, '1y', 8000, asOfDate);
+      if (candles.length >= 30) return candles;
+    } catch (e) {
+      console.warn(`[TaiwanScanner] Yahoo failed for ${symbol}:`, (e as Error).message);
+    }
+
+    // Fallback: TWSE direct API (listed stocks only, no asOfDate support)
+    if (/\.TW$/i.test(symbol) && !asOfDate) {
+      const ticker = symbol.replace(/\.TW$/i, '');
+      console.log(`[TaiwanScanner] Using TWSE fallback for ${symbol}`);
+      try {
+        const candles = await fetchCandlesTWSE(ticker);
+        if (candles.length >= 30) return candles;
+      } catch (e) {
+        console.warn(`[TaiwanScanner] TWSE fallback also failed for ${symbol}:`, (e as Error).message);
+      }
+    }
+
+    return [];
   }
 
   /**

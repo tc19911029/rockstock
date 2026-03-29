@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { recordUsage } from '@/lib/ai/costTracker';
 
 export const runtime = 'nodejs';
 
@@ -141,6 +142,19 @@ export async function POST(req: NextRequest) {
               controller.enqueue(encoder.encode(event.delta.text));
             }
           }
+
+          // COST-01: Record token usage after stream completes
+          const final = await stream.finalMessage();
+          if (final.usage) {
+            recordUsage(
+              'claude-opus-4-6',
+              'chat',
+              final.usage.input_tokens,
+              final.usage.output_tokens,
+              (final.usage as unknown as Record<string, number>).cache_read_input_tokens ?? 0
+            );
+          }
+
           controller.close();
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);

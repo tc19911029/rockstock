@@ -858,8 +858,33 @@ export default function UnifiedScanPage() {
   const [scanSort, setScanSort]     = useState<'composite' | 'score' | 'grade' | 'potential' | 'winRate' | 'price' | 'change'>('composite');
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
+  const [newsCache, setNewsCache] = useState<Record<string, { sentiment: number; summary: string; hasNews: boolean; loading: boolean }>>({});
   const [gradeFilter, setGradeFilter] = useState<string>('all');
   const [conceptFilter, setConceptFilter] = useState<string>('all');
+
+  // Fetch news sentiment on-demand when a scan row is expanded
+  useEffect(() => {
+    if (!expandedStock) return;
+    const ticker = expandedStock.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    if (newsCache[ticker]) return; // already fetched or in progress
+    setNewsCache(c => ({ ...c, [ticker]: { sentiment: 0, summary: '', hasNews: false, loading: true } }));
+    fetch(`/api/news/${ticker}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then((d: { aggregateSentiment?: number; summary?: string; hasNews?: boolean }) => {
+        setNewsCache(c => ({
+          ...c,
+          [ticker]: {
+            sentiment: d.aggregateSentiment ?? 0,
+            summary: d.summary ?? '',
+            hasNews: d.hasNews ?? false,
+            loading: false,
+          },
+        }));
+      })
+      .catch(() => {
+        setNewsCache(c => ({ ...c, [ticker]: { sentiment: 0, summary: '無法取得', hasNews: false, loading: false } }));
+      });
+  }, [expandedStock]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 用 state 避免 SSR hydration mismatch
   const [maxDate, setMaxDate] = useState('2099-12-31');
@@ -1261,6 +1286,10 @@ export default function UnifiedScanPage() {
                                     className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 ml-1">
                                     走圖
                                   </Link>
+                                  <Link href={`/analysis/${r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
+                                    className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/50 hover:bg-violet-900/30 ml-1">
+                                    AI分析
+                                  </Link>
                                   <button
                                     onClick={(e) => {
                                       useWatchlistStore.getState().add(r.symbol, r.name);
@@ -1472,6 +1501,10 @@ export default function UnifiedScanPage() {
                                 className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">
                                 走圖
                               </Link>
+                              <Link href={`/analysis/${r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
+                                className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/50 hover:bg-violet-900/30 mr-1">
+                                AI分析
+                              </Link>
                               <button
                                 onClick={(e) => {
                                   useWatchlistStore.getState().add(r.symbol, r.name);
@@ -1547,6 +1580,36 @@ export default function UnifiedScanPage() {
                                       {r.triggeredRules.length === 0 && <span className="text-slate-600 text-[10px]">無觸發規則</span>}
                                     </div>
                                   </div>
+                                  {/* 新聞情緒（on-demand） */}
+                                  {(() => {
+                                    const tk = r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+                                    const nd = newsCache[tk];
+                                    if (!nd) return null;
+                                    return (
+                                      <div className="space-y-1.5">
+                                        <div className="text-slate-400 font-medium">新聞情緒</div>
+                                        {nd.loading ? (
+                                          <span className="text-[10px] text-slate-500 animate-pulse">載入中…</span>
+                                        ) : nd.hasNews ? (
+                                          <>
+                                            <div className="flex items-center gap-2">
+                                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                                                nd.sentiment > 0.1  ? 'bg-red-900/50 text-red-300' :
+                                                nd.sentiment < -0.1 ? 'bg-green-900/50 text-green-300' :
+                                                                       'bg-slate-700/50 text-slate-400'
+                                              }`}>
+                                                {nd.sentiment > 0.1 ? '偏多' : nd.sentiment < -0.1 ? '偏空' : '中性'}
+                                                <span className="ml-1 opacity-60 font-normal">({nd.sentiment.toFixed(2)})</span>
+                                              </span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 leading-relaxed">{nd.summary}</p>
+                                          </>
+                                        ) : (
+                                          <span className="text-[10px] text-slate-600">近期無相關新聞</span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </td>
                             </tr>
@@ -1811,6 +1874,8 @@ export default function UnifiedScanPage() {
                               <td className="py-1.5 px-2 text-center whitespace-nowrap">
                                 <Link href={`/?load=${sym}`}
                                   className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">走圖</Link>
+                                <Link href={`/analysis/${r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
+                                  className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/50 hover:bg-violet-900/30 mr-1">AI分析</Link>
                                 <button onClick={() => { useWatchlistStore.getState().add(r.symbol, r.name); }}
                                   className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-amber-700/50 hover:bg-amber-900/30">
                                   {useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
