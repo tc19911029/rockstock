@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useReplayStore } from '@/store/replayStore';
@@ -42,34 +42,39 @@ export default function HomePage() {
 
   // Handle ?load=SYMBOL&date=YYYY-MM-DD from scanner page, or auto-load 2330 on first visit
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [jumpToDate, setJumpToDate] = useState<string | null>(null);
+  const pendingJumpRef = useRef<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sym = params.get('load');
     const date = params.get('date');
     if (sym) {
-      // 從掃描頁跳過來，一定要載入指定股票
       setLoadError(null);
-      if (date) setJumpToDate(date);
+      if (date) pendingJumpRef.current = date;
       loadStock(sym, '1d', '2y').catch((e: Error) => {
         setLoadError(`載入 ${sym} 失敗：${e.message || '請稍後再試'}`);
       });
       window.history.replaceState({}, '', '/');
     } else if (allCandles.length === 0) {
-      // 首次進入，預設載入 2330
       loadStock('2330', '1d', '2y').catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 跳到指定日期的 K 線位置（等 allCandles 載入完成後才跳）
+  // 用 subscribe 監聽 allCandles 變化，載入完成後跳到指定日期
   useEffect(() => {
-    if (!jumpToDate || allCandles.length < 30) return; // 等數據載入完成（至少30根K線）
-    const idx = allCandles.findIndex(c => c.date >= jumpToDate);
-    if (idx >= 0) {
-      useReplayStore.getState().jumpToIndex(idx);
-    }
-    setJumpToDate(null); // 成功後才清除
-  }, [jumpToDate, allCandles.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!pendingJumpRef.current) return;
+    const unsub = useReplayStore.subscribe((state) => {
+      const target = pendingJumpRef.current;
+      if (!target || state.allCandles.length < 30 || state.isLoadingStock) return;
+      const idx = state.allCandles.findIndex(c => c.date >= target);
+      if (idx >= 0) {
+        pendingJumpRef.current = null;
+        // 用 setTimeout 確保在 set 之後執行
+        setTimeout(() => useReplayStore.getState().jumpToIndex(idx), 50);
+        unsub();
+      }
+    });
+    return unsub;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleKey = useCallback((e: KeyboardEvent) => {
     if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
