@@ -1,18 +1,22 @@
 /**
- * EastMoneyRealtime.ts — 東方財富 A 股即時報價
+ * EastMoneyRealtime.ts — 東方財富即時報價（A 股 + 美股）
  *
- * 從東方財富 push2 API 取得全市場 A 股即時 OHLCV，快取 30 秒。
+ * 從東方財富 push2 API 取得即時 OHLCV，快取 30 秒。
  * 用途：覆蓋 Yahoo Finance 延遲 15-20 分鐘的最後一根日 K。
  *
  * 東方財富欄位對照：
  *   f12=代碼, f14=名稱, f17=開盤, f15=最高, f16=最低, f2=最新價,
  *   f5=成交量(手), f6=成交額
+ *
+ * 市場代碼：
+ *   A 股: m:0+t:6(滬A主板), m:0+t:80(科創板), m:1+t:2(深A主板), m:1+t:23(創業板)
+ *   美股: m:105(NASDAQ), m:106(NYSE), m:107(AMEX)
  */
 
 import { globalCache } from './MemoryCache';
 
 export interface EastMoneyQuote {
-  code: string;       // 6 位代碼，如 "600519"
+  code: string;       // A股: "600519", 美股: "AAPL"
   name: string;
   open: number;
   high: number;
@@ -21,29 +25,31 @@ export interface EastMoneyQuote {
   volume: number;     // 成交量（股）
 }
 
-const REALTIME_CACHE_KEY = 'eastmoney:realtime:all';
+// ── A 股 ──────────────────────────────────────────────────────────────────────
+
+const CN_CACHE_KEY = 'eastmoney:cn:all';
+const US_CACHE_KEY = 'eastmoney:us:all';
 const REALTIME_TTL = 30 * 1000; // 30 秒
 
-let inflightPromise: Promise<Map<string, EastMoneyQuote>> | null = null;
+let cnInflight: Promise<Map<string, EastMoneyQuote>> | null = null;
+let usInflight: Promise<Map<string, EastMoneyQuote>> | null = null;
 
 /**
  * 取得全市場 A 股即時報價 Map（code → EastMoneyQuote）
  */
 export async function getEastMoneyRealtime(): Promise<Map<string, EastMoneyQuote>> {
-  const cached = globalCache.get<Map<string, EastMoneyQuote>>(REALTIME_CACHE_KEY);
+  const cached = globalCache.get<Map<string, EastMoneyQuote>>(CN_CACHE_KEY);
   if (cached) return cached;
 
-  if (inflightPromise) return inflightPromise;
+  if (cnInflight) return cnInflight;
 
-  inflightPromise = fetchAllQuotes();
+  cnInflight = fetchMarketQuotes('cn');
   try {
-    const result = await inflightPromise;
-    if (result.size > 0) {
-      globalCache.set(REALTIME_CACHE_KEY, result, REALTIME_TTL);
-    }
+    const result = await cnInflight;
+    if (result.size > 0) globalCache.set(CN_CACHE_KEY, result, REALTIME_TTL);
     return result;
   } finally {
-    inflightPromise = null;
+    cnInflight = null;
   }
 }
 
@@ -56,11 +62,41 @@ export async function getEastMoneyQuote(code: string): Promise<EastMoneyQuote | 
   return map.get(code) ?? null;
 }
 
+// ── 美股 ──────────────────────────────────────────────────────────────────────
+
+/**
+ * 取得美股即時報價 Map（ticker → EastMoneyQuote, 如 "AAPL"）
+ */
+export async function getUSStockRealtime(): Promise<Map<string, EastMoneyQuote>> {
+  const cached = globalCache.get<Map<string, EastMoneyQuote>>(US_CACHE_KEY);
+  if (cached) return cached;
+
+  if (usInflight) return usInflight;
+
+  usInflight = fetchMarketQuotes('us');
+  try {
+    const result = await usInflight;
+    if (result.size > 0) globalCache.set(US_CACHE_KEY, result, REALTIME_TTL);
+    return result;
+  } finally {
+    usInflight = null;
+  }
+}
+
+/**
+ * 取得單一美股的即時報價
+ * @param ticker 美股 ticker（如 "AAPL", "TSLA"）
+ */
+export async function getUSStockQuote(ticker: string): Promise<EastMoneyQuote | null> {
+  const map = await getUSStockRealtime();
+  return map.get(ticker.toUpperCase()) ?? null;
+}
+
 // ── 內部實作 ──────────────────────────────────────────────────────────────────
 
 interface EastMoneyItem {
   f2: number;   // 最新價
-  f5: number;   // 成交量（手，1手=100股）
+  f5: number;   // 成交量（手，A股1手=100股；美股1手=1股）
   f12: string;  // 代碼
   f14: string;  // 名稱
   f15: number;  // 最高
@@ -68,17 +104,22 @@ interface EastMoneyItem {
   f17: number;  // 開盤
 }
 
-async function fetchAllQuotes(): Promise<Map<string, EastMoneyQuote>> {
+// A 股市場代碼
+const CN_FS = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23';
+// 美股市場代碼（NASDAQ + NYSE + AMEX）
+const US_FS = 'm:105,m:106,m:107';
+
+async function fetchMarketQuotes(market: 'cn' | 'us'): Promise<Map<string, EastMoneyQuote>> {
   const map = new Map<string, EastMoneyQuote>();
   const pageSize = 5000;
-  const maxPages = 3;
+  const maxPages = market === 'us' ? 5 : 3; // 美股約 8000+ 檔，需更多頁
+  const fs = market === 'cn' ? CN_FS : US_FS;
 
   for (let page = 1; page <= maxPages; page++) {
     try {
-      // f2=最新價, f5=成交量(手), f12=代碼, f14=名稱, f15=最高, f16=最低, f17=開盤
       const url = 'https://push2.eastmoney.com/api/qt/clist/get?' +
         `pn=${page}&pz=${pageSize}&po=1&np=1&fltt=2&invt=2&fid=f6` +
-        '&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23' +
+        `&fs=${fs}` +
         '&fields=f2,f5,f12,f14,f15,f16,f17';
 
       const res = await fetch(url, {
@@ -94,32 +135,48 @@ async function fetchAllQuotes(): Promise<Map<string, EastMoneyQuote>> {
 
       for (const item of items) {
         const code = item.f12;
-        if (!/^\d{6}$/.test(code)) continue;
-        if (code.startsWith('900') || code.startsWith('200')) continue; // 排除 B 股
+        if (!code || code === '-') continue;
 
         const close = item.f2;
         if (!close || close <= 0 || close === '-' as unknown as number) continue;
 
-        map.set(code, {
-          code,
-          name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
-          open:   item.f17 > 0 ? item.f17 : close,
-          high:   item.f15 > 0 ? item.f15 : close,
-          low:    item.f16 > 0 ? item.f16 : close,
-          close,
-          volume: (item.f5 ?? 0) * 100, // 手 → 股
-        });
+        if (market === 'cn') {
+          // A 股：只保留 6 位數字，排除 B 股
+          if (!/^\d{6}$/.test(code)) continue;
+          if (code.startsWith('900') || code.startsWith('200')) continue;
+
+          map.set(code, {
+            code,
+            name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
+            open:   item.f17 > 0 ? item.f17 : close,
+            high:   item.f15 > 0 ? item.f15 : close,
+            low:    item.f16 > 0 ? item.f16 : close,
+            close,
+            volume: (item.f5 ?? 0) * 100, // 手 → 股
+          });
+        } else {
+          // 美股：ticker 為英文字母，東方財富美股成交量單位是股（不是手）
+          map.set(code.toUpperCase(), {
+            code: code.toUpperCase(),
+            name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
+            open:   item.f17 > 0 ? item.f17 : close,
+            high:   item.f15 > 0 ? item.f15 : close,
+            low:    item.f16 > 0 ? item.f16 : close,
+            close,
+            volume: item.f5 ?? 0, // 美股直接是股
+          });
+        }
       }
 
       if (items.length < pageSize) break;
     } catch (e) {
-      console.warn(`[EastMoneyRealtime] page ${page} error:`, e);
+      console.warn(`[EastMoneyRealtime] ${market} page ${page} error:`, e);
       break;
     }
   }
 
   if (map.size > 0) {
-    console.log(`[EastMoneyRealtime] 取得 ${map.size} 檔 A 股即時報價`);
+    console.log(`[EastMoneyRealtime] 取得 ${map.size} 檔${market === 'cn' ? 'A股' : '美股'}即時報價`);
   }
 
   return map;
