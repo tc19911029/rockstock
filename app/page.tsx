@@ -47,14 +47,17 @@ export default function HomePage() {
     const params = new URLSearchParams(window.location.search);
     const sym = params.get('load');
     const date = params.get('date');
-    const target = sym || (allCandles.length === 0 ? '2330' : null);
-    if (target) {
+    if (sym) {
+      // 從掃描頁跳過來，一定要載入指定股票
       setLoadError(null);
       if (date) setJumpToDate(date);
-      loadStock(target, '1d', '2y').catch((e: Error) => {
-        setLoadError(`載入 ${target} 失敗：${e.message || '請稍後再試'}`);
+      loadStock(sym, '1d', '2y').catch((e: Error) => {
+        setLoadError(`載入 ${sym} 失敗：${e.message || '請稍後再試'}`);
       });
-      if (sym) window.history.replaceState({}, '', '/');
+      window.history.replaceState({}, '', '/');
+    } else if (allCandles.length === 0) {
+      // 首次進入，預設載入 2330
+      loadStock('2330', '1d', '2y').catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
