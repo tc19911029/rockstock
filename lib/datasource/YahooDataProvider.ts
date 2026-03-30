@@ -12,7 +12,7 @@ const YF_HEADERS = {
 // 歷史資料 TTL：24 小時（歷史資料不會變）
 const HISTORICAL_TTL = 24 * 60 * 60 * 1000;
 // 近期資料 TTL：5 分鐘（當天資料可能更新）
-const RECENT_TTL = 5 * 60 * 1000;
+const RECENT_TTL = 1 * 60 * 1000;  // 盤中 1 分鐘快取（Yahoo 本身有 15-20 分鐘延遲）
 
 /** 原始 OHLC，不套用除權息調整（用於跨日期區間比較，避免調整基準不同） */
 function parseYahooCandlesRaw(json: unknown): Candle[] {
