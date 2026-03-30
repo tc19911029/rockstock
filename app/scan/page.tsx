@@ -178,7 +178,7 @@ function TradeRow({ t, chip, composite }: { t: BacktestTrade; chip?: { chipScore
       <td className={`py-1.5 px-1 text-right font-mono font-bold ${retColor(t.netReturn)}`}>{fmtRet(t.netReturn)}</td>
       <td className="py-1.5 px-1 text-center">{exitBadge(t.exitReason)}</td>
       <td className="py-1.5 px-2 text-center whitespace-nowrap">
-        <Link href={`/?load=${sym}`}
+        <Link href={`/?load=${sym}&date=${t.signalDate}`}
           className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">走圖
         </Link>
       </td>
@@ -680,7 +680,7 @@ export default function UnifiedScanPage() {
                                     </span>
                                   )}
                                   <span className="text-[10px] text-slate-500">買入 {r.price.toFixed(2)}</span>
-                                  <Link href={`/?load=${r.symbol}`}
+                                  <Link href={`/?load=${r.symbol}&date=${scanDate}`}
                                     className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 ml-1">
                                     走圖
                                   </Link>
@@ -927,7 +927,7 @@ export default function UnifiedScanPage() {
                               })()}
                             </td>
                             <td className="py-1.5 px-2 text-center whitespace-nowrap">
-                              <Link href={`/?load=${r.symbol}`}
+                              <Link href={`/?load=${r.symbol}&date=${scanDate}`}
                                 className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">
                                 走圖
                               </Link>
@@ -1302,7 +1302,7 @@ export default function UnifiedScanPage() {
                                 <td colSpan={9} className="py-1.5 text-center text-slate-600">—</td>
                               )}
                               <td className="py-1.5 px-2 text-center whitespace-nowrap">
-                                <Link href={`/?load=${sym}`}
+                                <Link href={`/?load=${sym}&date=${scanDate}`}
                                   className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">走圖</Link>
                                 <Link href={`/analysis/${r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
                                   className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/50 hover:bg-violet-900/30 mr-1">AI分析</Link>

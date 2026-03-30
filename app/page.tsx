@@ -40,20 +40,33 @@ export default function HomePage() {
 
   useEffect(() => { initData(); }, [initData]);
 
-  // Handle ?load=SYMBOL from scanner page, or auto-load 2330 on first visit
+  // Handle ?load=SYMBOL&date=YYYY-MM-DD from scanner page, or auto-load 2330 on first visit
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [jumpToDate, setJumpToDate] = useState<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sym = params.get('load');
+    const date = params.get('date');
     const target = sym || (allCandles.length === 0 ? '2330' : null);
     if (target) {
       setLoadError(null);
+      if (date) setJumpToDate(date);
       loadStock(target, '1d', '2y').catch((e: Error) => {
         setLoadError(`載入 ${target} 失敗：${e.message || '請稍後再試'}`);
       });
       if (sym) window.history.replaceState({}, '', '/');
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 跳到指定日期的 K 線位置
+  useEffect(() => {
+    if (!jumpToDate || allCandles.length === 0) return;
+    const idx = allCandles.findIndex(c => c.date >= jumpToDate);
+    if (idx >= 0) {
+      useReplayStore.getState().jumpToIndex(idx);
+    }
+    setJumpToDate(null);
+  }, [jumpToDate, allCandles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleKey = useCallback((e: KeyboardEvent) => {
     if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
