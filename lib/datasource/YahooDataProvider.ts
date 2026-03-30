@@ -4,7 +4,7 @@ import { computeIndicators } from '@/lib/indicators';
 import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
 import { getTWSEQuote } from './TWSERealtime';
-import { getEastMoneyQuote } from './EastMoneyRealtime';
+import { getEastMoneyQuote, getUSStockQuote } from './EastMoneyRealtime';
 
 /** 從 symbol 提取台股純數字代碼，非台股回傳 null */
 function extractTWCode(symbol: string): string | null {
@@ -16,6 +16,17 @@ function extractTWCode(symbol: string): string | null {
 function extractCNCode(symbol: string): string | null {
   const m = symbol.match(/^(\d{6})\.(SS|SZ)$/i);
   return m ? m[1] : null;
+}
+
+/** 從 symbol 提取美股 ticker，非美股回傳 null */
+function extractUSTicker(symbol: string): string | null {
+  // 美股 ticker: 純字母（1-5字母），不帶交易所後綴
+  // 排除台股（數字.TW）和 A 股（數字.SS/.SZ）
+  if (/^\d/.test(symbol)) return null;
+  if (/\.(TW|TWO|SS|SZ)$/i.test(symbol)) return null;
+  // 像 AAPL, TSLA, BRK-B 等
+  if (/^[A-Z]{1,5}(-[A-Z])?$/i.test(symbol)) return symbol.toUpperCase();
+  return null;
 }
 
 const YF_HEADERS = {
@@ -99,7 +110,7 @@ function parseYahooCandles(json: unknown): Candle[] {
 }
 
 /**
- * 即時報價覆蓋：根據 symbol 自動判斷台股或 A 股，用交易所 API 覆蓋最後一根日 K
+ * 即時報價覆蓋：根據 symbol 自動判斷台股/A股/美股，用交易所 API 覆蓋最後一根日 K
  * @param dateRangeStart 若提供，表示 getCandlesRange 模式，需檢查 today 在範圍內
  * @param dateRangeEnd   同上
  */
@@ -112,16 +123,27 @@ async function overlayRealtimeQuote(
   // 判斷市場並取得即時報價
   const twCode = extractTWCode(symbol);
   const cnCode = extractCNCode(symbol);
-  if (!twCode && !cnCode) return;
+  const usTicker = extractUSTicker(symbol);
+  if (!twCode && !cnCode && !usTicker) return;
 
   try {
     const quote = twCode
       ? await getTWSEQuote(twCode)
-      : await getEastMoneyQuote(cnCode!);
+      : cnCode
+        ? await getEastMoneyQuote(cnCode)
+        : await getUSStockQuote(usTicker!);
     if (!quote || quote.close <= 0) return;
 
-    // 台股 UTC+8, A股 UTC+8
-    const todayStr = new Date(Date.now() + 8 * 3600_000).toISOString().split('T')[0];
+    // 台股/A股 UTC+8, 美股 UTC-4（東部時間）
+    // 用各市場當地日期判斷「今天」
+    let todayStr: string;
+    if (usTicker) {
+      // 美股：使用 UTC-4 (EDT) 判斷交易日
+      todayStr = new Date(Date.now() - 4 * 3600_000).toISOString().split('T')[0];
+    } else {
+      // 台股/A股：UTC+8
+      todayStr = new Date(Date.now() + 8 * 3600_000).toISOString().split('T')[0];
+    }
 
     // getCandlesRange 模式：檢查 today 是否在請求範圍內
     if (dateRangeStart && dateRangeEnd) {
@@ -146,7 +168,7 @@ async function overlayRealtimeQuote(
       });
     }
   } catch (e) {
-    const market = twCode ? 'TWSE' : 'EastMoney';
+    const market = twCode ? 'TWSE' : cnCode ? 'EastMoney-CN' : 'EastMoney-US';
     console.warn(`[YahooDataProvider] ${market} overlay failed for ${symbol}:`, e);
   }
 }
