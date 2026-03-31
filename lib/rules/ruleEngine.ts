@@ -52,7 +52,7 @@ export class RuleEngine {
         if (signal) signals.push(signal);
       } catch (err) {
         // Isolate rule errors so one broken rule doesn't crash everything
-        console.warn(`Rule "${rule.id}" threw an error:`, err);
+        console.warn(`[RuleEngine] Rule "${rule.id}" failed:`, err instanceof Error ? err.message : err);
       }
     }
     return signals;

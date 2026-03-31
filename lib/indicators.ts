@@ -246,6 +246,9 @@ export function computeIndicators(candles: Candle[]): CandleWithIndicators[] {
       ma10:    sma(closes, i, 10),
       ma20:    sma(closes, i, 20),
       ma60:    sma(closes, i, 60),
+      ma3:     sma(closes, i, 3),
+      ma24:    sma(closes, i, 24),
+      ma100:   sma(closes, i, 100),
       avgVol5: avgVol(volumes, i, 5),
       macdDIF:    macd.dif[i],
       macdSignal: macd.signal[i],
@@ -274,7 +277,7 @@ export function computeIndicators(candles: Candle[]): CandleWithIndicators[] {
 export function crossedAbove(
   candles: CandleWithIndicators[],
   index: number,
-  maKey: 'ma5' | 'ma10' | 'ma20' | 'ma60'
+  maKey: 'ma3' | 'ma5' | 'ma10' | 'ma20' | 'ma24' | 'ma60' | 'ma100'
 ): boolean {
   if (index < 1) return false;
   const prev = candles[index - 1];
@@ -291,7 +294,7 @@ export function crossedAbove(
 export function crossedBelow(
   candles: CandleWithIndicators[],
   index: number,
-  maKey: 'ma5' | 'ma10' | 'ma20' | 'ma60'
+  maKey: 'ma3' | 'ma5' | 'ma10' | 'ma20' | 'ma24' | 'ma60' | 'ma100'
 ): boolean {
   if (index < 1) return false;
   const prev = candles[index - 1];

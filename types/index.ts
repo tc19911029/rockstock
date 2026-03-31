@@ -19,6 +19,12 @@ export interface CandleWithIndicators extends Candle {
   ma10?: number;
   ma20?: number;
   ma60?: number;
+  /** 3-day MA — 三條均線戰法用 */
+  ma3?: number;
+  /** 24-day MA — 三條/二條均線戰法用 */
+  ma24?: number;
+  /** 100-day MA — 近似20週均線 */
+  ma100?: number;
   /** Average volume over last 5 bars */
   avgVol5?: number;
 

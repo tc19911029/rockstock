@@ -180,6 +180,39 @@ function scoreSmartFlow(candles: CandleWithIndicators[], idx: number): SmartMone
     details.push('volume climax (bull)');
   }
 
+  // ── 出貨量偵測：高量 + 收盤在下半段 = 機構出貨 ──────────────────────
+  // 近 3 天放量但收盤位置偏低 → 扣分
+  let distributionCount = 0;
+  const avgVol = totalVol / lookback;
+  for (let i = idx; i > idx - 3 && i >= idx - lookback + 1; i--) {
+    const bar = candles[i];
+    const range = bar.high - bar.low;
+    const clv = range > 0 ? (bar.close - bar.low) / range : 0.5;
+    if (bar.volume > avgVol * 1.5 && clv < 0.4) {
+      distributionCount++;
+    }
+  }
+  if (distributionCount >= 2) {
+    score -= 30;
+    details.push('distribution detected (高量收低)');
+  } else if (distributionCount >= 1) {
+    score -= 15;
+    details.push('possible distribution');
+  }
+
+  // ── 量價背離：連 3 天放量但漲幅遞減 = 買盤衰竭 ────────────────────
+  if (idx >= 3) {
+    const bar0 = candles[idx], bar1 = candles[idx - 1], bar2 = candles[idx - 2];
+    const gain0 = bar0.close > bar0.open ? (bar0.close - bar0.open) / bar0.open * 100 : 0;
+    const gain1 = bar1.close > bar1.open ? (bar1.close - bar1.open) / bar1.open * 100 : 0;
+    const gain2 = bar2.close > bar2.open ? (bar2.close - bar2.open) / bar2.open * 100 : 0;
+    if (bar0.volume > avgVol * 1.3 && bar1.volume > avgVol * 1.3 && bar2.volume > avgVol * 1.3
+      && gain0 < gain1 && gain1 < gain2 && gain2 > 0) {
+      score -= 20;
+      details.push('volume-price divergence (量增價減)');
+    }
+  }
+
   return { score: clamp(score), detail: details.join(', ') || 'neutral' };
 }
 
@@ -234,6 +267,32 @@ function scoreBuyingPressure(candles: CandleWithIndicators[], idx: number): Smar
   if (todayCLV > 0.8 && today.close > today.open) {
     score += 15;
     details.push('today strong close');
+  }
+
+  // ── A-share BB Squeeze Reversal Bonus ──────────────────────────────────
+  // When Bollinger Bandwidth compresses (squeeze) and price breaks upper band,
+  // it signals a strong breakout from low-volatility accumulation.
+  if (today.bbBandwidth != null && today.bbUpper != null && today.bbLower != null) {
+    // Check if bandwidth is in squeeze territory (below historical median)
+    if (idx >= 20) {
+      let bwSum = 0;
+      let bwCount = 0;
+      for (let i = idx - 19; i <= idx; i++) {
+        if (candles[i].bbBandwidth != null) {
+          bwSum += candles[i].bbBandwidth!;
+          bwCount++;
+        }
+      }
+      if (bwCount > 0) {
+        const avgBW = bwSum / bwCount;
+        const isSqueeze = today.bbBandwidth < avgBW * 0.8;
+        const breaksUpper = today.close > today.bbUpper;
+        if (isSqueeze && breaksUpper) {
+          score += 15;
+          details.push('BB squeeze breakout');
+        }
+      }
+    }
   }
 
   return { score: clamp(score), detail: details.join(', ') || 'neutral' };
@@ -457,26 +516,42 @@ export function computeCompositeScore(
   histWinRate: number | undefined,
   market?: 'TW' | 'CN',
   consecutiveBullishBonus?: number,
+  riskMetrics?: {
+    profitFactor?: number;    // histGrossProfit / histGrossLoss
+    maxSingleLoss?: number;   // 最大單筆虧損 (negative %)
+    ma20Deviation?: number;   // 目前偏離 MA20 幅度 (%)
+    rsi?: number;             // RSI(14)
+    roc10?: number;           // 10 天漲幅 (%)
+  },
+  /** IC-based dynamic weights (from factorIC.ts blendWeights) */
+  icWeights?: { tech: number; surge: number; smart: number; winRate: number },
 ): CompositeScoreResult {
   // Normalize six conditions to 0-100
   const technicalScore = (sixConditionsScore / 6) * 100;
 
-  // Effective win rate (default 50 if unknown)
-  const effectiveWinRate = histWinRate ?? 50;
+  // Effective win rate (default 42 if unknown — conservative)
+  const effectiveWinRate = histWinRate ?? 42;
 
-  // Market-specific weighting:
-  // Taiwan: smart money detection more reliable (transparent institutional data)
-  // A-shares: momentum/surge more important (retail-driven momentum)
-  let weights = { tech: 0.20, surge: 0.25, smart: 0.30, winRate: 0.25 };
-  if (market === 'TW') {
-    weights = { tech: 0.18, surge: 0.22, smart: 0.35, winRate: 0.25 };
-  } else if (market === 'CN') {
-    weights = { tech: 0.20, surge: 0.30, smart: 0.22, winRate: 0.28 };
+  // Use IC-weighted dynamic weights if provided, otherwise static defaults
+  let weights: { tech: number; surge: number; smart: number; winRate: number };
+  if (icWeights) {
+    weights = icWeights;
+  } else {
+    // Market-specific static weighting (fallback)
+    weights = { tech: 0.20, surge: 0.15, smart: 0.30, winRate: 0.35 };
+    if (market === 'TW') {
+      weights = { tech: 0.20, surge: 0.12, smart: 0.33, winRate: 0.35 };
+    } else if (market === 'CN') {
+      weights = { tech: 0.20, surge: 0.18, smart: 0.25, winRate: 0.37 };
+    }
   }
+
+  // Surge 分數非線性轉換：防止極端 surge 主導排名（cap at 70）
+  const effectiveSurge = Math.min(surgeScore, 70);
 
   let compositeScore = Math.round(
     technicalScore * weights.tech +
-    surgeScore * weights.surge +
+    effectiveSurge * weights.surge +
     smartMoneyScore * weights.smart +
     effectiveWinRate * weights.winRate
   );
@@ -486,12 +561,51 @@ export function computeCompositeScore(
     compositeScore = Math.min(100, compositeScore + consecutiveBullishBonus);
   }
 
+  // ── Risk Penalties ─────────────────────────────────────────────────────
+  const penalties: string[] = [];
+  if (riskMetrics) {
+    const { profitFactor, maxSingleLoss, ma20Deviation, rsi, roc10 } = riskMetrics;
+
+    // Profit factor 懲罰：歷史信號虧多賺少
+    if (profitFactor != null && profitFactor < 0.7) {
+      compositeScore -= 20;
+      penalties.push('PF<0.7:-20');
+    } else if (profitFactor != null && profitFactor < 1.0) {
+      compositeScore -= 10;
+      penalties.push('PF<1:-10');
+    }
+
+    // 最大單筆虧損懲罰：有過大幅虧損的歷史
+    if (maxSingleLoss != null && maxSingleLoss < -8) {
+      compositeScore -= 5;
+      penalties.push('MaxLoss:-5');
+    }
+
+    // 過度延伸懲罰（加嚴版）：降低門檻、加重扣分
+    if (ma20Deviation != null && rsi != null && ma20Deviation > 10 && rsi > 65) {
+      compositeScore -= 12;
+      penalties.push('Overextend:-12');
+    }
+
+    // 短期漲幅過大懲罰（分級加重）
+    if (roc10 != null && roc10 > 20) {
+      compositeScore -= 15;
+      penalties.push('ROC10>20%:-15');
+    } else if (roc10 != null && roc10 > 15) {
+      compositeScore -= 8;
+      penalties.push('ROC10>15%:-8');
+    }
+  }
+
+  compositeScore = Math.max(0, Math.min(100, compositeScore));
+
   const breakdown = [
     `Tech:${technicalScore.toFixed(0)}`,
     `Surge:${surgeScore}`,
     `Smart:${smartMoneyScore}`,
     `WinRate:${effectiveWinRate}`,
     consecutiveBullishBonus ? `Streak:+${consecutiveBullishBonus}` : '',
+    ...penalties,
   ].filter(Boolean).join(' | ');
 
   return {
