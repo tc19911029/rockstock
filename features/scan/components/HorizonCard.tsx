@@ -5,16 +5,43 @@ import { StockForwardPerformance } from '@/lib/scanner/types';
 import { calcBacktestSummary } from '@/lib/backtest/ForwardAnalyzer';
 import { retColor, fmtRet } from '../utils';
 
-export function HorizonCard({ label, horizon, performance }: {
+/** 根據 horizon key 取得所需的最少交易日數 */
+function requiredDays(horizon: BacktestHorizon): number {
+  if (horizon === 'open') return 1;
+  const m = horizon.match(/^d(\d+)$/);
+  return m ? Number(m[1]) : 1;
+}
+
+/** 粗估掃描日到今天之間的交易日數（排除週末，不含假日） */
+function estimateTradingDays(scanDate: string): number {
+  const start = new Date(scanDate);
+  const now = new Date();
+  const utc8 = new Date(now.getTime() + 8 * 3600_000);
+  let count = 0;
+  const d = new Date(start);
+  d.setDate(d.getDate() + 1); // start from day after scan
+  while (d <= utc8) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
+}
+
+export function HorizonCard({ label, horizon, performance, scanDate }: {
   label: string; horizon: BacktestHorizon; performance: StockForwardPerformance[];
+  scanDate?: string;
 }) {
   const stats = calcBacktestSummary(performance, horizon);
-  if (!stats) return (
-    <div className="bg-slate-800/50 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 opacity-40 min-h-[80px]">
-      <div className="text-[10px] text-slate-400">{label}</div>
-      <div className="text-slate-500 text-xs">–</div>
-    </div>
-  );
+  if (!stats) {
+    const notYet = scanDate && estimateTradingDays(scanDate) < requiredDays(horizon);
+    return (
+      <div className="bg-slate-800/50 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 opacity-40 min-h-[80px]">
+        <div className="text-[10px] text-slate-400">{label}</div>
+        <div className="text-slate-500 text-xs">{notYet ? '尚未到期' : '–'}</div>
+      </div>
+    );
+  }
   return (
     <div className="bg-slate-800 rounded-lg p-2.5 flex flex-col gap-1.5">
       <div className="text-[10px] text-slate-400 font-medium">{label}</div>

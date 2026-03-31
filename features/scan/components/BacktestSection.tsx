@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useBacktestStore, BacktestHorizon } from '@/store/backtestStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { calcComposite, chipTooltip, retColor, fmtRet, exportToCsv } from '../utils';
@@ -33,7 +34,22 @@ export function BacktestSection() {
     scanOnly,
   } = useBacktestStore();
 
-  const [tab, setTab] = useState<'strict' | 'horizon' | 'walkforward'>('strict');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  type TabKey = 'strict' | 'horizon' | 'walkforward';
+  const validTabs: TabKey[] = ['strict', 'horizon', 'walkforward'];
+  const initialTab = ((): TabKey => {
+    const p = searchParams.get('tab');
+    return p && validTabs.includes(p as TabKey) ? p as TabKey : 'strict';
+  })();
+  const [tab, setTabState] = useState<TabKey>(initialTab);
+  const setTab = useCallback((t: TabKey) => {
+    setTabState(t);
+    const params = new URLSearchParams(searchParams.toString());
+    if (t === 'strict') { params.delete('tab'); } else { params.set('tab', t); }
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : '/scan', { scroll: false });
+  }, [searchParams, router]);
   const [activeHorizon, setHorizon] = useState<BacktestHorizon>('d5');
   const [sortBy, setSortBy] = useState<'composite' | 'netReturn' | 'signalScore' | 'surgeScore' | 'histWinRate' | 'holdDays'>('composite');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -206,7 +222,7 @@ export function BacktestSection() {
         <div className="space-y-4">
           <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
             {horizonLabels.map(({ key, label }) => (
-              <HorizonCard key={key} label={label} horizon={key} performance={performance} />
+              <HorizonCard key={key} label={label} horizon={key} performance={performance} scanDate={scanDate} />
             ))}
           </div>
 

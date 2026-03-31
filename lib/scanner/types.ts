@@ -147,6 +147,7 @@ export interface ForwardCandle {
   high:  number;
   low:   number;
   volume?: number;  // 成交量（SOP 出場規則需要）
+  ma5?:    number;  // 5日均線（朱老師獲利方程式：獲利>10%跌破MA5出場）
 }
 
 export interface StockForwardPerformance {

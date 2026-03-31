@@ -289,12 +289,146 @@ export const mistakeBuyOnLongBlack: TradingRule = {
   },
 };
 
+/** 錯誤8：週線遇壓力前進場（戒律④） */
+export const mistakeWeeklyResistance: TradingRule = {
+  id: 'zhu-mistake-weekly-resistance',
+  name: '⚠進場錯誤：週線遇壓力',
+  description: '股價接近週線壓力區（MA60附近），可能反轉下跌',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 60) return null;
+    const c = candles[index];
+    if (c.ma60 == null || c.ma20 == null) return null;
+
+    // 條件1：MA60 在上方且下彎（壓力線）
+    const prevMa60 = candles[index - 5]?.ma60;
+    if (prevMa60 == null || c.ma60 > prevMa60) return null; // MA60 未下彎
+    if (c.close >= c.ma60) return null; // 已突破則不算壓力
+
+    // 條件2：股價接近 MA60（距離 < 3%）
+    const distToMa60 = (c.ma60 - c.close) / c.close;
+    if (distToMa60 > 0.03 || distToMa60 < 0) return null;
+
+    // 條件3：今日收紅K（散戶可能覺得快要突破）
+    if (c.close <= c.open) return null;
+
+    return {
+      type: 'WATCH',
+      label: '⚠週線壓力勿追',
+      description: `收盤${c.close.toFixed(1)}接近MA60(${c.ma60.toFixed(1)})壓力，距離${(distToMa60 * 100).toFixed(1)}%`,
+      reason: [
+        '【朱家泓《活用技術分析寶典》10大戒律④】',
+        '週線遇壓力前，勿進場做多。',
+        'MA60下彎代表中長期趨勢仍弱，接近時容易受壓回檔。',
+        '應等股價突破MA60且MA60轉為上揚後再進場。',
+      ].join('\n'),
+      ruleId: this.id,
+    };
+  },
+};
+
+/** 錯誤9：回檔跌破MA20再上漲未突破MA20（戒律⑤） */
+export const mistakeFailedMA20Breakout: TradingRule = {
+  id: 'zhu-mistake-failed-ma20-breakout',
+  name: '⚠進場錯誤：未突破月線反彈',
+  description: '回檔跌破MA20後反彈，但尚未突破MA20就想做多',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 30) return null;
+    const c = candles[index];
+    if (c.ma20 == null) return null;
+
+    // 條件1：近期曾跌破MA20（20日內有收盤低於MA20）
+    let hadBreakBelow = false;
+    for (let i = Math.max(0, index - 20); i < index - 3; i++) {
+      const ci = candles[i];
+      if (ci.ma20 != null && ci.close < ci.ma20 * 0.99) {
+        hadBreakBelow = true;
+        break;
+      }
+    }
+    if (!hadBreakBelow) return null;
+
+    // 條件2：目前收盤仍在MA20之下或剛好碰到（未有效突破）
+    if (c.close > c.ma20 * 1.01) return null; // 有效突破了
+
+    // 條件3：今日收紅K上漲（看似反彈）
+    if (c.close <= c.open) return null;
+
+    // 條件4：MA20仍未上揚
+    const prevMa20 = candles[index - 3]?.ma20;
+    if (prevMa20 != null && c.ma20 > prevMa20 * 1.002) return null; // MA20已上揚
+
+    return {
+      type: 'WATCH',
+      label: '⚠未破月線勿追',
+      description: `回檔後反彈至MA20(${c.ma20.toFixed(1)})附近但未有效突破`,
+      reason: [
+        '【朱家泓《活用技術分析寶典》10大戒律⑤】',
+        '回檔跌破月線(MA20)後，再上漲未突破月線，勿進場做多。',
+        '月線是中期多空分界，未能有效突破表示多方力道不足。',
+        '應等收盤站上MA20且MA20上揚後再考慮進場。',
+      ].join('\n'),
+      ruleId: this.id,
+    };
+  },
+};
+
+/** 錯誤10：回檔跌破前低再上漲（戒律⑥） */
+export const mistakeBrokenPreviousLow: TradingRule = {
+  id: 'zhu-mistake-broken-previous-low',
+  name: '⚠進場錯誤：跌破前低反彈',
+  description: '回檔曾跌破前波低點，結構已破壞，反彈不宜做多',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 30) return null;
+    const c = candles[index];
+
+    // 找前波低點：往前20~60日之間的最低點
+    let prevSwingLow = Infinity;
+    for (let i = Math.max(0, index - 60); i <= index - 20; i++) {
+      if (candles[i].low < prevSwingLow) prevSwingLow = candles[i].low;
+    }
+    if (prevSwingLow === Infinity) return null;
+
+    // 條件1：近期曾跌破前波低點
+    let hadBreakLow = false;
+    for (let i = Math.max(0, index - 15); i < index; i++) {
+      if (candles[i].low < prevSwingLow * 0.99) {
+        hadBreakLow = true;
+        break;
+      }
+    }
+    if (!hadBreakLow) return null;
+
+    // 條件2：目前在反彈中（今日收紅K上漲）
+    if (c.close <= c.open) return null;
+
+    // 條件3：目前價格仍在前波低點附近或上方（不是繼續破底）
+    if (c.close < prevSwingLow * 0.95) return null;
+
+    return {
+      type: 'WATCH',
+      label: '⚠破前低勿追',
+      description: `近期曾跌破前波低點${prevSwingLow.toFixed(1)}，結構已破壞`,
+      reason: [
+        '【朱家泓《活用技術分析寶典》10大戒律⑥】',
+        '回檔跌破前低，再上漲勿進場做多。',
+        '前低被跌破代表「底底低」結構出現，多頭架構已破壞。',
+        '此時的反彈很可能只是修正反彈，不是新一波上漲。',
+        '應等出現新的「底底高」結構確認後再做多。',
+      ].join('\n'),
+      ruleId: this.id,
+    };
+  },
+};
+
 export const ENTRY_MISTAKE_RULES: TradingRule[] = [
   mistakeBelowMA20,
   mistakeChaseThirdWave,
   mistakeDivergenceHighKD,
+  mistakeWeeklyResistance,
+  mistakeFailedMA20Breakout,
+  mistakeBrokenPreviousLow,
   mistakeTradingInRange,
-  mistakeHighVolumeTop,
   mistakeBearBounce,
+  mistakeHighVolumeTop,
   mistakeBuyOnLongBlack,
 ];

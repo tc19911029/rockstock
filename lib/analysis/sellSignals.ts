@@ -6,7 +6,11 @@ export type SellSignalType =
   | 'KD_DEATH_CROSS'      // KD high-level death cross (K crosses below D when both > 70)
   | 'BREAK_MA5'           // Close breaks below MA5 after being above
   | 'BREAK_MA20'          // Close breaks below MA20 (serious)
-  | 'TREND_BEARISH';      // Trend has turned bearish
+  | 'TREND_BEARISH'       // Trend has turned bearish
+  // 朱老師獲利方程式（《活用技術分析寶典》p.54）
+  | 'LOWER_LOW'           // 收盤出現「頭頭低」
+  | 'PROFIT_BREAK_MA5'    // 獲利>10% + 跌破MA5
+  | 'PROFIT_CLIMAX_EXIT'; // 獲利>20% 或連續急漲+長黑覆蓋
 
 export interface SellSignal {
   type: SellSignalType;
@@ -106,10 +110,53 @@ export function detectSellSignals(
 
   // 6. 趨勢轉空
   // (imported separately via detectTrend, so we check MA cross as proxy)
-  if (ma5 != null && ma20 != null && ma5 < ma20) {
-    const prevBullish = prevMa5 != null && prevMa20 != null && prevMa5 > prevMa20;
-    if (!prevBullish) {
-      // Already been bearish for a while - check if it's a recent break
+
+  // ════════════════════════════════════════════════════════════════
+  // 朱老師獲利方程式（《活用技術分析寶典》p.54）
+  // ════════════════════════════════════════════════════════════════
+
+  // 獲利方程式 第3條：收盤出現「頭頭低」→ 出場
+  // 偵測：近期兩個波段高點，後面的高點比前面低
+  if (index >= 10) {
+    const recentHighs: { idx: number; price: number }[] = [];
+    for (let i = index - 1; i >= Math.max(1, index - 20) && recentHighs.length < 3; i--) {
+      const ci = candles[i];
+      const pi = candles[i - 1];
+      const ni = candles[i + 1];
+      if (ci.high > pi.high && ci.high > ni.high) {
+        recentHighs.push({ idx: i, price: ci.high });
+      }
+    }
+    if (recentHighs.length >= 2) {
+      const [newerHigh, olderHigh] = recentHighs;
+      if (newerHigh.price < olderHigh.price && c.close < newerHigh.price) {
+        signals.push({
+          type: 'LOWER_LOW',
+          label: '頭頭低出場',
+          detail: `近期高點${olderHigh.price.toFixed(1)}→${newerHigh.price.toFixed(1)}頭頭低，多頭力竭`,
+          severity: 'high',
+        });
+      }
+    }
+  }
+
+  // 獲利方程式 第7條：連續急漲3天+大量長黑K覆蓋或吞噬 → 當天出場
+  if (index >= 3) {
+    // 前3日連續上漲
+    const prev3Up = [candles[index-1], candles[index-2], candles[index-3]]
+      .every(x => x.close > x.open);
+    // 今日是長黑K
+    const isLongBlack = c.close < c.open && body > 0 && (c.open - c.close) / c.open >= 0.02;
+    // 帶量
+    const bigVolume = (volRatio5 ?? 0) > 1.5;
+
+    if (prev3Up && isLongBlack && bigVolume) {
+      signals.push({
+        type: 'PROFIT_CLIMAX_EXIT',
+        label: '急漲後長黑出場',
+        detail: `連續3日急漲後出現大量長黑K覆蓋，主力出貨訊號`,
+        severity: 'high',
+      });
     }
   }
 

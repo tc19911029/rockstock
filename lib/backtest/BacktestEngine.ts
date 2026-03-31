@@ -322,6 +322,7 @@ export function runSingleBacktest(
   const entryPrice = rawEntryPrice * (1 + strategy.slippagePct);
 
   // ── 出場模擬（逐根判斷停損/停利） ─────────────────────────────────────────
+  // 朱老師獲利方程式（《活用技術分析寶典》p.54）整合
   let exitDate:   string = '';
   let exitPrice:  number = 0;
   let exitReason: string = 'holdDays';
@@ -333,7 +334,15 @@ export function runSingleBacktest(
   const offset = strategy.entryType === 'nextOpen' ? 0 : 1;
   const holdWindow = forwardCandles.slice(offset, offset + strategy.holdDays);
 
-  const stopLossPrice   = strategy.stopLoss   !== null ? entryPrice * (1 + strategy.stopLoss)   : null;
+  // 獲利方程式第1條：停損設在進場紅K最低點（使用進場日的最低價）
+  // 如果進場日最低價距進場價 >7%，則用固定停損
+  const entryDayLow = forwardCandles[0]?.low ?? 0;
+  const dynamicStopPct = entryDayLow > 0 ? (entryDayLow - entryPrice) / entryPrice : -0.05;
+  const effectiveStopLoss = strategy.stopLoss !== null
+    ? (dynamicStopPct >= -0.07 && dynamicStopPct < 0 ? dynamicStopPct : strategy.stopLoss)
+    : null;
+
+  const stopLossPrice   = effectiveStopLoss !== null ? entryPrice * (1 + effectiveStopLoss) : null;
   const takeProfitPrice = strategy.takeProfit !== null ? entryPrice * (1 + strategy.takeProfit) : null;
 
   // ── 移動停利追蹤 ────────────────────────────────────────────────────────
@@ -399,6 +408,57 @@ export function runSingleBacktest(
       }
       exitDate = c.date;
       break;
+    }
+
+    // ── 朱老師獲利方程式出場規則（非進場日才判斷） ──────────────────────
+    if (!isEntryDay) {
+      const currentReturn = (c.close - entryPrice) / entryPrice;
+
+      // 獲利方程式第6條：獲利 >10%、收盤跌破 MA5 → 出場
+      if (currentReturn > 0.10 && c.ma5 != null && c.close < c.ma5) {
+        exitReason = 'profitBreakMA5';
+        exitPrice  = +(c.close * (1 - strategy.slippagePct)).toFixed(3);
+        exitDate   = c.date;
+        holdDays   = i + 1;
+        break;
+      }
+
+      // 獲利方程式第7條：獲利 >20% 或連續急漲3天+大量長黑 → 當天出場
+      if (currentReturn > 0.20) {
+        exitReason = 'profitClimaxExit';
+        exitPrice  = +(c.close * (1 - strategy.slippagePct)).toFixed(3);
+        exitDate   = c.date;
+        holdDays   = i + 1;
+        break;
+      }
+
+      // 連續3天急漲後出現長黑K
+      if (i >= 3) {
+        const prev3Up = [holdWindow[i-1], holdWindow[i-2], holdWindow[i-3]]
+          .every(x => x.close > x.open);
+        const isLongBlack = c.close < c.open && (c.open - c.close) / c.open >= 0.02;
+        if (prev3Up && isLongBlack) {
+          exitReason = 'profitClimaxExit';
+          exitPrice  = +(c.close * (1 - strategy.slippagePct)).toFixed(3);
+          exitDate   = c.date;
+          holdDays   = i + 1;
+          break;
+        }
+      }
+
+      // 獲利方程式第3條：收盤出現「頭頭低」→ 出場
+      if (i >= 4) {
+        // 簡化判斷：近期高點下降
+        const recentHighs = holdWindow.slice(Math.max(0, i - 4), i + 1).map(x => x.high);
+        const maxRecent = Math.max(...recentHighs.slice(0, -1));
+        if (c.high < maxRecent * 0.98 && c.close < c.open) {
+          exitReason = 'lowerHighExit';
+          exitPrice  = +(c.close * (1 - strategy.slippagePct)).toFixed(3);
+          exitDate   = c.date;
+          holdDays   = i + 1;
+          break;
+        }
+      }
     }
 
     // 最後一天：以收盤出場（含賣出滑價）

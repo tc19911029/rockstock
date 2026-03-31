@@ -159,9 +159,15 @@ async function overlayRealtimeQuote(
 
     const lastCandle = candles[candles.length - 1];
 
-    // 過期資料防護：TWSE STOCK_DAY_ALL 在收盤後灰區（~13:30-15:30）可能仍回傳前一交易日數據。
-    // 策略一：若有 previousClose 欄位，檢查 TWSE 昨收 ≈ Yahoo 倒數第二根 K（代表 TWSE 是昨日資料）。
-    // 策略二：若無 previousClose，用時段防護（台股/A股盤後灰區不覆蓋）。
+    // 過期資料防護 — 最可靠的方式：直接比對 quote 的日期欄位
+    // TWSE STOCK_DAY_ALL / TPEx 會在日期欄位標明資料所屬交易日
+    // 若 quote.date 存在且不等於 todayStr，代表 API 尚未更新，必須跳過
+    const quoteDate = 'date' in quote ? (quote.date as string | undefined) : undefined;
+    if (quoteDate && quoteDate !== todayStr) {
+      return; // API 回傳的是舊日資料，不覆蓋
+    }
+
+    // 備用防護：若無 date 欄位，使用 previousClose 或時段檢查
     const prevClose = 'previousClose' in quote ? (quote.previousClose as number | undefined) : undefined;
     if (lastCandle.date === todayStr) {
       if (prevClose !== undefined) {

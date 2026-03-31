@@ -21,12 +21,14 @@ export interface ConditionResult {
 
 export interface SixConditionsResult {
   trend:     ConditionResult & { state: TrendState };
-  position:  ConditionResult & { stage: TrendPosition };
-  kbar:      ConditionResult & { type: string };
   ma:        ConditionResult & { alignment: string };
+  position:  ConditionResult & { stage: TrendPosition };
   volume:    ConditionResult & { ratio: number | null };
+  kbar:      ConditionResult & { type: string };
   indicator: ConditionResult & { macd: boolean; kd: boolean };
   totalScore: number; // 0–6
+  coreScore:  number; // 0–5（前5個必要條件）
+  isCoreReady: boolean; // 前5個全過 = true
 }
 
 // ── Pivot detection ───────────────────────────────────────────────────────────
@@ -156,14 +158,16 @@ export function detectTrendPosition(
 // ── Six Conditions evaluator ──────────────────────────────────────────────────
 
 /**
- * 朱老師六大進場條件（全面修訂版）
+ * 朱老師六大進場條件（對齊《活用技術分析寶典》p.54 短線做多選股SOP）
  *
- * ① 趨勢確認：多頭架構（頭頭高底底高 + MA5 > MA20 > MA60）
- * ② 位置合理：乖離 MA20 在 0–15%（起漲段 / 主升段前段）
- * ③ K棒有效：長紅K（實體 ≥ 2%），且收盤在K棒上半段（非長上影線）
- * ④ 均線確認：MA5 > MA10 > MA20，且股價站上5日均線，且 MA5 向上
- * ⑤ 量能配合：成交量 ≥ 5日均量 × 1.5（書中強調帶量）
- * ⑥ 指標輔助：MACD 紅柱，或 KD 黃金交叉（K > D，且 20 ≤ K ≤ 85）
+ * ① 趨勢條件：日線波浪型態符合「頭頭高、底底高」多頭架構
+ * ② 均線條件：MA10、MA20 多頭排列，均線方向向上
+ * ③ 股價位置：收盤在 MA10、MA20 之上，判斷初升段/主升段/末升段
+ * ④ 成交量：攻擊量 ≥ 前一日 × 1.3（2倍更強）
+ * ⑤ 進場K線：價漲、量增、紅K實體棒 > 2%
+ * ⑥ 指標參考：MACD 綠柱縮短或紅柱延長；KD 黃金交叉向上多排
+ *
+ * 重要：條件 1~5 為必要條件，第6個（指標參考）為輔助確認，可後面補上
  */
 export function evaluateSixConditions(
   candles: CandleWithIndicators[],
@@ -172,14 +176,14 @@ export function evaluateSixConditions(
 ): SixConditionsResult {
   const kdMax     = params?.kdMaxEntry      ?? 85;
   const devMax    = params?.deviationMax    ?? 0.12;
-  const volMin    = params?.volumeRatioMin  ?? 1.5;
+  const volMin    = params?.volumeRatioMin  ?? 1.3; // 書上p.54：前一日×1.3
   const shadowMax = params?.upperShadowMax  ?? 0.20;
 
   const c    = candles[index];
   const prev = index > 0 ? candles[index - 1] : null;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ① 趨勢
+  // ① 趨勢條件（必要）
   // ─────────────────────────────────────────────────────────────────────────
   const trendState = detectTrend(candles, index);
   const trendPass  = trendState === '多頭';
@@ -190,12 +194,11 @@ export function evaluateSixConditions(
     : '⚠️ 盤整趨勢（方向不明）—— 觀望';
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ② 位置
-  // 書中林穎SOP：「低檔位置 = 已回測到MA10/MA20支撐區，且量縮回測」
-  // 朱老師原則：「乖離過大（>15%）禁止追高；末升段不進場」
+  // ③ 股價位置（必要）
+  // 書上p.54：股價收盤要在MA10、MA20之上，判斷初升段/主升段/末升段
   // 合格條件（兩種擇一）：
   //   A. 回後漲：近5日曾觸及MA10支撐（回測），今日收盤回站MA5以上
-  //   B. 初漲段：MA20乖離 0–12%（剛站上月線，還沒太貴）
+  //   B. 初漲段：MA20乖離 0–devMax（剛站上月線，還沒太貴）
   // ─────────────────────────────────────────────────────────────────────────
   const stage  = detectTrendPosition(candles, index);
   const ma20   = c.ma20;
@@ -229,8 +232,8 @@ export function evaluateSixConditions(
   })();
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ③ K棒
-  // 書中：「帶量實體長紅K，且收盤在K棒上半段（非長上影線）」
+  // ⑤ 進場K線（必要）
+  // 書上p.54：進場K線要價漲、量增、紅K實體棒＞2%
   // ─────────────────────────────────────────────────────────────────────────
   const bodyAbs   = Math.abs(c.close - c.open);
   const bodyPct   = c.open > 0 ? bodyAbs / c.open : 0;
@@ -255,8 +258,8 @@ export function evaluateSixConditions(
     : `❌ 黑K / 不符合`;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ④ 均線多頭排列 + 股價站上5日均線 + MA5 向上
-  // 書中：「均線多頭排列向上，股價站上5日均線，是進場的必要條件」
+  // ② 均線條件（必要）
+  // 書上p.54：日線MA10、MA20多頭排列，均線方向向上
   // ─────────────────────────────────────────────────────────────────────────
   const { ma5, ma10 } = c;
   const prevMa5  = prev?.ma5;
@@ -282,22 +285,26 @@ export function evaluateSixConditions(
     : '均線資料不足';
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ⑤ 量能（帶量上漲，書中強調暴大量）
-  // 標準：成交量 ≥ 5日均量 × 1.5
-  // 回檔後量增也算：前3日量縮，今日量增 ≥ 前日1.3x
+  // ④ 成交量（書上p.54：攻擊量 ≥ 前一日 × 1.3，2倍更強）
+  // 主要判斷：當天量 ≥ 前一日 × 1.3
+  // 次要判斷：量縮回檔後量增上漲
   // ─────────────────────────────────────────────────────────────────────────
-  const avgVol5 = c.avgVol5;
-  const volRatio = avgVol5 && avgVol5 > 0
-    ? +(c.volume / avgVol5).toFixed(2)
+  const prevDayVol = prev?.volume ?? 0;
+  const volVsPrevDay = prevDayVol > 0
+    ? +(c.volume / prevDayVol).toFixed(2)
     : null;
+  const avgVol5 = c.avgVol5;
 
-  // 「量縮回檔後量增上漲」：前3日量縮（<均量），今日量增且量比達1.2x以上
+  // 主要：當天量 ≥ 前一日 × 1.3（書上原則）
+  const attackVolume = volVsPrevDay !== null && volVsPrevDay >= volMin;
+
+  // 次要：「量縮回檔後量增上漲」：前3日量縮（<均量），今日量增 ≥ 前日1.3x
   let isPullbackVol = false;
   if (index >= 3 && avgVol5) {
     const recentVols = [candles[index-1], candles[index-2], candles[index-3]].map(x => x.volume);
-    const allLow = recentVols.every(v => v < avgVol5 * 0.9);  // 前3日量縮
-    const todayUp = index > 0 && c.volume > candles[index-1].volume * 1.3; // 今日量增≥1.3x昨日
-    isPullbackVol = allLow && todayUp && (volRatio ?? 0) >= 1.2; // 總量比至少1.2x
+    const allLow = recentVols.every(v => v < avgVol5 * 0.9);
+    const todayUp = prevDayVol > 0 && c.volume > prevDayVol * 1.3;
+    isPullbackVol = allLow && todayUp;
   }
 
   // 「新鮮信號」過濾：前2日不能已有大量上漲日，避免買到追高的第N棒
@@ -307,22 +314,21 @@ export function evaluateSixConditions(
     const prev2 = candles[index - 2];
     const prev1BigUp = prev1.volume >= avgVol5 * 1.3 && prev1.close > prev1.open;
     const prev2BigUp = prev2.volume >= avgVol5 * 1.3 && prev2.close > prev2.open;
-    return !(prev1BigUp && prev2BigUp); // 前2日同時大量上漲才排除（只排除連續追高）
+    return !(prev1BigUp && prev2BigUp);
   })();
 
-  const volumePass = ((volRatio !== null && volRatio >= volMin) || isPullbackVol) && isFreshSignal;
-  const volumeDetail = volRatio !== null
+  const volumePass = (attackVolume || isPullbackVol) && isFreshSignal;
+  const volumeDetail = volVsPrevDay !== null
     ? volumePass
-      ? `✅ 成交量 ${volRatio}x 均量${isPullbackVol ? '（量縮回檔後量增）' : '（帶量上漲）'}`
+      ? `✅ 成交量 ${volVsPrevDay}x 前日${isPullbackVol ? '（量縮回檔後量增）' : '（攻擊量）'}${volVsPrevDay >= 2 ? '🔥力道強' : ''}`
       : !isFreshSignal
         ? `⚠️ 前2日已連續大量上漲，訊號陳舊（避免追高）`
-        : `⚠️ 成交量 ${volRatio}x 均量（未達${volMin}x基準）`
-    : '5日均量資料不足';
+        : `⚠️ 成交量 ${volVsPrevDay}x 前日（未達${volMin}x基準）`
+    : '前日成交量資料不足';
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ⑥ 指標輔助（MACD + KD）
-  // KD修正：K>D 且 20≤K≤85（移除原K>50的錯誤限制，加入超買防護）
-  // 書中：「KD黃金交叉發生在20-50區間，勝率最高」
+  // ⑥ 指標參考（輔助，可後面補上）
+  // 書上p.54：MACD 綠柱縮短或紅柱延長；KD 黃金交叉向上多排
   // ─────────────────────────────────────────────────────────────────────────
   const macdBull = c.macdOSC != null && c.macdOSC > 0;
 
@@ -352,18 +358,23 @@ export function evaluateSixConditions(
   ].join('；');
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 總分
+  // 總分（書上順序：趨勢→均線→位置→成交量→K線→指標）
+  // 條件 1~5 為必要，第6個（指標參考）為輔助
   // ─────────────────────────────────────────────────────────────────────────
-  const conditions = [trendPass, positionPass, kbarPass, bullishAlign, volumePass, indicatorPass];
-  const totalScore = conditions.filter(Boolean).length;
+  const coreConditions = [trendPass, bullishAlign, positionPass, volumePass, kbarPass]; // 必要 1~5
+  const coreScore = coreConditions.filter(Boolean).length;
+  const isCoreReady = coreScore === 5; // 前5個全過
+  const totalScore = coreScore + (indicatorPass ? 1 : 0);
 
   return {
     trend:     { pass: trendPass,     state: trendState, detail: trendDetail },
-    position:  { pass: positionPass,  stage,             detail: positionDetail },
-    kbar:      { pass: kbarPass,      type: kbarType,    detail: kbarType },
     ma:        { pass: bullishAlign,  alignment: maAlignment, detail: maAlignment },
-    volume:    { pass: volumePass,    ratio: volRatio,   detail: volumeDetail },
+    position:  { pass: positionPass,  stage,             detail: positionDetail },
+    volume:    { pass: volumePass,    ratio: volVsPrevDay, detail: volumeDetail },
+    kbar:      { pass: kbarPass,      type: kbarType,    detail: kbarType },
     indicator: { pass: indicatorPass, macd: macdBull, kd: kdBull || kdCross, detail: indicatorDetail },
     totalScore,
+    coreScore,
+    isCoreReady,
   };
 }

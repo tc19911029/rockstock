@@ -89,8 +89,11 @@ export abstract class MarketScanner {
       // 先計算 surgeScore
       const surge = computeSurgeScore(candles, lastIdx);
 
-      // 2. 六大條件門檻 — 不再降門檻，嚴格執行
-      if (sixConds.totalScore < minScore) return null;
+      // 2. 六大條件門檻（書上：前5個必要，第6個可後面補上）
+      // 核心條件 (coreScore) 必須 ≥ minScore-1（因為第6個是輔助）
+      // 或 totalScore ≥ minScore（傳統邏輯相容）
+      const coreOk = sixConds.isCoreReady; // 前5個全過
+      if (!coreOk && sixConds.totalScore < minScore) return null;
 
       // 2.5 六大條件滿分陷阱 — 全部滿足時通常股票已漲完，回測顯示 6/6 虧最多
       if (sixConds.totalScore >= 6) return null;
@@ -546,7 +549,7 @@ export abstract class MarketScanner {
 
       // ── 純朱老師核心篩選（只有 8 條） ──
       if (trend === '空頭') return null;
-      if (sixConds.totalScore < minScore) return null;
+      if (!sixConds.isCoreReady && sixConds.totalScore < minScore) return null;
       if (last.close <= last.open) return null; // 非紅K
       // 乖離度
       if (last.ma20 && last.ma20 > 0) {

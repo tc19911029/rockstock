@@ -33,12 +33,20 @@ async function analyzeOne(
     // 嚴格過濾：
     // 1. 必須 > scanDate（排除信號日當天被 Yahoo 回傳的情況）
     // 2. 必須 <= todayStr（排除未來數據）
-    const forwardCandles: ForwardCandle[] = candles
-      .filter(c => c.date > scanDate && c.date <= todayStr)
-      .map(c => ({
+    const filteredCandles = candles.filter(c => c.date > scanDate && c.date <= todayStr);
+    const forwardCandles: ForwardCandle[] = filteredCandles.map((c, i) => {
+      // 計算 MA5：取包含自身的最近5根收盤價平均
+      let ma5: number | undefined;
+      if (i >= 4) {
+        const sum5 = filteredCandles.slice(i - 4, i + 1).reduce((s, x) => s + x.close, 0);
+        ma5 = +(sum5 / 5).toFixed(2);
+      }
+      return {
         date: c.date, open: c.open, close: c.close, high: c.high, low: c.low,
         volume: c.volume,
-      }));
+        ma5,
+      };
+    });
 
     // 以訊號日收盤價（scanPrice）為基準的報酬率
     function retFromScan(idx: number): number | null {

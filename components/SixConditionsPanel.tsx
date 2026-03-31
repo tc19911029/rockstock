@@ -8,12 +8,12 @@ import { SixConditionsResult } from '@/lib/analysis/trendAnalysis';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
 
 const CONDITION_LABELS = [
-  { key: 'trend',     icon: '①', name: '趨勢',   tip: '確認多頭結構：高點墊高、低點墊高、MA5 > MA20' },
-  { key: 'position',  icon: '②', name: '位置',   tip: '回測 MA10/MA20 後翻多，不在末升段（高檔過熱區）' },
-  { key: 'kbar',      icon: '③', name: 'K棒',    tip: '今日收紅K，且實體飽滿（實體/振幅 ≥ 設定比例）' },
-  { key: 'ma',        icon: '④', name: '均線',   tip: '均線多頭排列：MA5 > MA10 > MA20，MA5 向上' },
-  { key: 'volume',    icon: '⑤', name: '成交量', tip: '今日成交量 ≥ 5日均量的 1.5 倍（量能放大）' },
-  { key: 'indicator', icon: '⑥', name: '指標',   tip: 'MACD 柱狀翻紅，或 KD 金叉（K > D 且 20 ≤ K ≤ 85）' },
+  { key: 'trend',     icon: '①', name: '趨勢條件', tip: '日線波浪型態符合「頭頭高、底底高」多頭架構', required: true },
+  { key: 'ma',        icon: '②', name: '均線條件', tip: 'MA10、MA20 多頭排列，均線方向向上', required: true },
+  { key: 'position',  icon: '③', name: '股價位置', tip: '收盤在 MA10、MA20 之上，判斷初升/主升/末升段', required: true },
+  { key: 'volume',    icon: '④', name: '成交量',   tip: '攻擊量 ≥ 前一日 × 1.3（2倍更強）', required: true },
+  { key: 'kbar',      icon: '⑤', name: '進場K線', tip: '價漲、量增、紅K實體棒 > 2%', required: true },
+  { key: 'indicator', icon: '⑥', name: '指標參考', tip: 'MACD 綠柱縮短或紅柱延長；KD 黃金交叉向上多排', required: false },
 ] as const;
 
 type ConditionKey = typeof CONDITION_LABELS[number]['key'];
@@ -40,7 +40,7 @@ function ConditionRow({
   expanded,
   onToggle,
 }: {
-  label: { icon: string; name: string; tip: string };
+  label: { icon: string; name: string; tip: string; required: boolean };
   pass: boolean;
   detail: string;
   expanded: boolean;
@@ -58,7 +58,9 @@ function ConditionRow({
       >
         {dot}
         <span className="text-gray-400 text-xs w-4">{label.icon}</span>
-        <span className="text-xs font-medium text-gray-200 w-10" title={label.tip}>{label.name}</span>
+        <span className={`text-xs font-medium w-14 ${label.required ? 'text-gray-200' : 'text-gray-400 italic'}`} title={label.tip}>
+          {label.name}
+        </span>
         <span className="text-xs text-gray-400 flex-1 truncate" title={label.tip}>{detail}</span>
         <span className="text-gray-600 text-xs">{expanded ? '▲' : '▼'}</span>
       </button>
@@ -95,10 +97,12 @@ export default function SixConditionsPanel() {
 
   const sc = sixConditions as SixConditionsResult;
   const score = sc.totalScore;
+  const coreScore = sc.coreScore ?? 0;
+  const isCoreReady = sc.isCoreReady ?? false;
 
   const scoreColor =
-    score >= 5 ? 'text-green-400' :
-    score >= 3 ? 'text-yellow-400' :
+    isCoreReady ? 'text-green-400' :
+    coreScore >= 3 ? 'text-yellow-400' :
     'text-red-400';
 
   const toggle = (key: ConditionKey) =>
@@ -106,10 +110,10 @@ export default function SixConditionsPanel() {
 
   const rows: Array<{ key: ConditionKey; pass: boolean; detail: string }> = [
     { key: 'trend',     pass: sc.trend.pass,     detail: sc.trend.detail },
+    { key: 'ma',        pass: sc.ma.pass,        detail: sc.ma.detail },
     { key: 'position',  pass: sc.position.pass,  detail: sc.position.detail },
-    { key: 'kbar',      pass: sc.kbar.pass,      detail: sc.kbar.detail },
-    { key: 'ma',        pass: sc.ma.pass,         detail: sc.ma.detail },
     { key: 'volume',    pass: sc.volume.pass,     detail: sc.volume.detail },
+    { key: 'kbar',      pass: sc.kbar.pass,      detail: sc.kbar.detail },
     { key: 'indicator', pass: sc.indicator.pass,  detail: sc.indicator.detail },
   ];
 
@@ -119,7 +123,8 @@ export default function SixConditionsPanel() {
       <div className="flex items-center justify-between px-3 py-2 bg-gray-750 border-b border-gray-700">
         <span className="text-xs font-semibold text-gray-200">六大進場條件 ({strategyName})</span>
         <div className="flex items-center gap-2">
-          <ScoreDots score={score} />
+          <ScoreDots score={coreScore} total={5} />
+          {sc.indicator.pass && <span className="text-green-400 text-[10px]">+⑥</span>}
           <span className={`text-xs font-bold ${scoreColor}`}>{score}/6</span>
         </div>
       </div>
@@ -143,19 +148,21 @@ export default function SixConditionsPanel() {
 
       {/* Summary */}
       <div className={`px-3 py-2.5 border-t border-gray-700 ${
-        score >= 5 ? 'bg-green-900/40' : score >= 3 ? 'bg-yellow-900/30' : 'bg-slate-800/60'
+        isCoreReady ? 'bg-green-900/40' : coreScore >= 3 ? 'bg-yellow-900/30' : 'bg-slate-800/60'
       }`}>
         <p className={`text-xs font-bold ${
-          score >= 5 ? 'text-green-300' : score >= 3 ? 'text-yellow-300' : 'text-slate-400'
+          isCoreReady ? 'text-green-300' : coreScore >= 3 ? 'text-yellow-300' : 'text-slate-400'
         }`}>
-          {score >= 5
-            ? '✅ 條件充分 — 可考慮進場'
-            : score >= 3
-            ? '⏳ 條件部分符合 — 觀察後續'
-            : '🚫 條件不足 — 建議觀望'}
+          {isCoreReady
+            ? sc.indicator.pass
+              ? '✅ 六條件全過 — 可考慮進場'
+              : '✅ 核心5條件充分 — 指標待確認'
+            : coreScore >= 3
+            ? `⏳ 核心條件 ${coreScore}/5 — 觀察後續`
+            : `🚫 核心條件不足 ${coreScore}/5 — 建議觀望`}
         </p>
-        {score >= 5 && (
-          <p className="text-[10px] text-green-500 mt-0.5">仍需確認K線實際走勢與成交量</p>
+        {isCoreReady && !sc.indicator.pass && (
+          <p className="text-[10px] text-yellow-500 mt-0.5">第⑥指標參考為輔助條件，可後面補上</p>
         )}
       </div>
 
