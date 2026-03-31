@@ -43,6 +43,7 @@ export default function HomePage() {
   // Handle ?load=SYMBOL&date=YYYY-MM-DD from scanner page, or auto-load 2330 on first visit
   const [loadError, setLoadError] = useState<string | null>(null);
   const pendingJumpRef = useRef<string | null>(null);
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sym = params.get('load');
@@ -58,6 +59,7 @@ export default function HomePage() {
       loadStock('2330', '1d', '2y').catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 用 subscribe 監聽 allCandles 變化，載入完成後跳到指定日期
   useEffect(() => {

@@ -55,11 +55,13 @@ export default function StockSelector() {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Sync input when stock is loaded externally (e.g. via ?load= URL param from scanner)
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (currentStock?.ticker) {
       setInput(rawSymbol(currentStock.ticker));
     }
   }, [currentStock?.ticker]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleLoad = async (symbol: string, iv = interval, pd = period) => {
     setError('');

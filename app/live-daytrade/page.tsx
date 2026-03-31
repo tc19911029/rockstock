@@ -98,7 +98,9 @@ export default function LiveDaytradePage() {
   const [quickStocks, setQuickStocks] = useState(DEFAULT_QUICK_STOCKS);
   const [addStockInput, setAddStockInput] = useState('');
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { setQuickStocks(loadCustomStocks()); }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     loadData();

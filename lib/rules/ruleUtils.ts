@@ -307,3 +307,98 @@ export function findSwingLow(candles: CandleWithIndicators[], index: number, loo
   }
   return minLow === Infinity ? null : minLow;
 }
+
+// ─── Edwards & Magee 圖表型態工具函數 ─────────────────────────────────────────
+
+export interface SwingPoint {
+  idx: number;
+  price: number;
+}
+
+/**
+ * 找出所有局部高點（swing highs）
+ * margin: 左右各需 margin 根 K 線較低才算局部高點
+ */
+export function findSwingHighs(
+  candles: CandleWithIndicators[], index: number, lookback = 60, margin = 3,
+): SwingPoint[] {
+  const points: SwingPoint[] = [];
+  const start = Math.max(margin, index - lookback);
+  const end = index - margin; // 最近 margin 根無法判斷
+  for (let i = start; i <= end; i++) {
+    let isSwing = true;
+    for (let m = 1; m <= margin; m++) {
+      if (candles[i].high <= candles[i - m].high || candles[i].high <= candles[i + m].high) {
+        isSwing = false;
+        break;
+      }
+    }
+    if (isSwing) points.push({ idx: i, price: candles[i].high });
+  }
+  return points;
+}
+
+/**
+ * 找出所有局部低點（swing lows）
+ * margin: 左右各需 margin 根 K 線較高才算局部低點
+ */
+export function findSwingLows(
+  candles: CandleWithIndicators[], index: number, lookback = 60, margin = 3,
+): SwingPoint[] {
+  const points: SwingPoint[] = [];
+  const start = Math.max(margin, index - lookback);
+  const end = index - margin;
+  for (let i = start; i <= end; i++) {
+    let isSwing = true;
+    for (let m = 1; m <= margin; m++) {
+      if (candles[i].low >= candles[i - m].low || candles[i].low >= candles[i + m].low) {
+        isSwing = false;
+        break;
+      }
+    }
+    if (isSwing) points.push({ idx: i, price: candles[i].low });
+  }
+  return points;
+}
+
+/** 判斷兩個價位是否接近相等（容差 tolerance，預設 3%） */
+export function priceNear(a: number, b: number, tolerance = 0.03): boolean {
+  if (a === 0 && b === 0) return true;
+  const avg = (a + b) / 2;
+  return Math.abs(a - b) / avg <= tolerance;
+}
+
+/** 簡易線性回歸 */
+export function linearRegression(
+  points: { x: number; y: number }[],
+): { slope: number; intercept: number; r2: number } {
+  const n = points.length;
+  if (n < 2) return { slope: 0, intercept: 0, r2: 0 };
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+  for (const p of points) {
+    sumX += p.x;
+    sumY += p.y;
+    sumXY += p.x * p.y;
+    sumX2 += p.x * p.x;
+    sumY2 += p.y * p.y;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  if (denom === 0) return { slope: 0, intercept: sumY / n, r2: 0 };
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  const yMean = sumY / n;
+  let ssRes = 0, ssTot = 0;
+  for (const p of points) {
+    const predicted = slope * p.x + intercept;
+    ssRes += (p.y - predicted) ** 2;
+    ssTot += (p.y - yMean) ** 2;
+  }
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  return { slope, intercept, r2 };
+}
+
+/** 判斷是否為帶量突破（成交量 > avgVol5 * ratio） */
+export function isVolumeBreakout(c: CandleWithIndicators, ratio = 1.5): boolean {
+  if (c.avgVol5 == null || c.avgVol5 === 0) return false;
+  return c.volume > c.avgVol5 * ratio;
+}

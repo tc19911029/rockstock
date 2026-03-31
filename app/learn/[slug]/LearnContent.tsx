@@ -29,7 +29,6 @@ export function LearnContent({ content }: LearnContentProps) {
     ">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        children={content}
         components={{
           // Internal links (relative .md files) → Next.js Link
           a: ({ href, children, ...props }) => {
@@ -48,7 +47,7 @@ export function LearnContent({ content }: LearnContentProps) {
             );
           },
         }}
-      />
+      >{content}</ReactMarkdown>
     </article>
   );
 }

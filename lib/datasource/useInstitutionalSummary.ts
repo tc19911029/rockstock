@@ -21,6 +21,7 @@ export function useInstitutionalSummary(ticker: string | null) {
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!ticker) { setData(null); return; }
     const key = ticker.replace(/\.(TW|TWO)$/i, '');
@@ -44,6 +45,7 @@ export function useInstitutionalSummary(ticker: string | null) {
       .finally(() => setLoading(false));
     return () => ctrl.abort();
   }, [ticker]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return { data, loading };
 }

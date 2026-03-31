@@ -13,7 +13,9 @@ export default function TradePanel() {
   const [mode,    setMode]    = useState<Mode>('percent');
   const [mounted, setMounted] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => setMounted(true), []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const currentCandle = allCandles[currentIndex];
   const prevCandle    = allCandles[currentIndex - 1];

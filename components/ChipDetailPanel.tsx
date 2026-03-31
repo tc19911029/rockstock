@@ -153,6 +153,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
 
   const cleanSym = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!cleanSym) return;
     setLoading(true);
@@ -169,6 +170,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       .catch(() => setError('載入失敗'))
       .finally(() => setLoading(false));
   }, [cleanSym, date]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (loading) return (
     <div className="text-xs text-slate-500 py-6 text-center animate-pulse">載入籌碼資料中...</div>

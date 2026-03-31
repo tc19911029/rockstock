@@ -21,12 +21,14 @@ function ScanHistoryContent() {
   const sessions = getHistory(market);
 
   // Auto-select session from URL param
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (initialId && sessions.length > 0) {
       const found = sessions.find(s => s.id === initialId);
       if (found) setSelected(found);
     }
   }, [initialId, sessions.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <div className="min-h-screen bg-[#0b1120] text-white">

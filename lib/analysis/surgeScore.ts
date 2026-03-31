@@ -7,6 +7,7 @@
 
 import { CandleWithIndicators } from '@/types';
 import { detectTrend, detectTrendPosition } from './trendAnalysis';
+import { computeResonanceScore } from './resonanceScore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -369,7 +370,6 @@ function scoreIndicatorConfluence(candles: CandleWithIndicators[], idx: number):
   const details: string[] = [];
 
   // ── 使用六維共振評分 ──────────────────────────────────────────
-  const { computeResonanceScore } = require('./resonanceScore');
   const resonance = computeResonanceScore(candles, idx);
 
   if (resonance.direction === 'bullish') {

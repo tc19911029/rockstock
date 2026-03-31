@@ -22,6 +22,10 @@ import { singleMa20Buy, singleMa20Sell, tripleMaBuy, tripleMaSell, dualMaBuy, du
 import { surgeStockBreakout, surgeStockExit, momentumContinuationBuy, fibRetracementGrade } from './momentumRules';
 import { weeklyMa20Buy, weeklyMa20Sell, weeklyMa20Add } from './weeklyMaRules';
 import { flatBottomBreakout, higherBottomBreakout, falseBreakdownBreakout, flatTopBreakdown, lowerTopBreakdown, falseBreakoutBreakdown, consolidationBreakoutDirection } from './zhuReversalRules';
+// 朱家泓《活用技術分析寶典》新增規則
+import { TURNING_WAVE_RULES } from './turningWaveRules';
+import { BOTTOM_FORMATION_RULES } from './bottomFormationRules';
+import { ENTRY_MISTAKE_RULES } from './entryMistakeRules';
 
 export const DEFAULT_RULES: TradingRule[] = [
   // 趨勢確認
@@ -139,4 +143,11 @@ export const DEFAULT_RULES: TradingRule[] = [
   lowerTopBreakdown,
   falseBreakoutBreakdown,
   consolidationBreakoutDirection,
+  // ── 朱家泓《活用技術分析寶典》新增規則 ──────────────────────────────────────
+  // 轉折波系統（8條）
+  ...TURNING_WAVE_RULES,
+  // 底部型態偵測（4條）— 黃金右腳、草叢量、均線打底、半分價
+  ...BOTTOM_FORMATION_RULES,
+  // 10大進場錯誤（7條）— 負面篩選條件
+  ...ENTRY_MISTAKE_RULES,
 ];

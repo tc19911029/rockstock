@@ -62,6 +62,7 @@ export function ScanResultsTable() {
   }, [market, scanResults]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch news sentiment on-demand when a scan row is expanded
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!expandedStock) return;
     const ticker = expandedStock.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -84,6 +85,7 @@ export function ScanResultsTable() {
         setNewsCache(c => ({ ...c, [ticker]: { sentiment: 0, summary: '無法取得', hasNews: false, loading: false } }));
       });
   }, [expandedStock]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
 

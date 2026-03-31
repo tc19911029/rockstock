@@ -12,11 +12,13 @@ const DISCLAIMER_KEY = 'risk-disclaimer-accepted';
 export function RiskDisclaimerModal() {
   const [show, setShow] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     try {
       if (!localStorage.getItem(DISCLAIMER_KEY)) setShow(true);
     } catch {}
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const accept = () => {
     try { localStorage.setItem(DISCLAIMER_KEY, '1'); } catch {}
@@ -66,6 +68,7 @@ const GUIDE_KEY = 'feature-guide-seen';
 export function FeatureGuideModal() {
   const [show, setShow] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     try {
       // 只在已接受風險聲明且尚未看過導覽時顯示
@@ -75,6 +78,7 @@ export function FeatureGuideModal() {
       }
     } catch {}
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const dismiss = () => {
     try { localStorage.setItem(GUIDE_KEY, '1'); } catch {}

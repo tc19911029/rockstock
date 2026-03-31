@@ -54,7 +54,9 @@ export function TradeJournal() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Omit<JournalEntry, 'id'>>(EMPTY);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { setEntries(loadEntries()); }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const stats = useMemo(() => {
     if (entries.length === 0) return null;

@@ -40,7 +40,9 @@ export default function UnifiedScanPage() {
 
   // 用 state 避免 SSR hydration mismatch
   const [maxDate, setMaxDate] = useState('2099-12-31');
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { setMaxDate(new Date().toISOString().split('T')[0]); }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── Strategy picker ──
   const { activeStrategyId, customStrategies, setActiveStrategy } = useSettingsStore();

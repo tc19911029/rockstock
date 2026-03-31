@@ -25,6 +25,7 @@ export function FundamentalsPanel({ ticker }: FundamentalsPanelProps) {
   const [data, setData] = useState<FundamentalsData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const key = ticker.replace(/\.(TW|TWO)$/i, '');
     setLoading(true);
@@ -34,6 +35,7 @@ export function FundamentalsPanel({ ticker }: FundamentalsPanelProps) {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [ticker]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (loading) {
     return (

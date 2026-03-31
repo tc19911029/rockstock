@@ -183,17 +183,19 @@ export default function BacktestPanel() {
   const [startDate,    setStartDate]    = useState(minDate);
   const [endDate,      setEndDate]      = useState(maxDate);
   const [capitalInput, setCapitalInput] = useState('1000000');
+  const [positionPct,  setPositionPct]  = useState(1.0);
+  const [result,       setResult]       = useState<BacktestResult | null>(null);
+  const [show,         setShow]         = useState(false);
+  const [mode,         setMode]         = useState<'composite' | 'signal'>('composite');
 
   // Sync date range whenever stock changes
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (minDate) setStartDate(minDate);
     if (maxDate) setEndDate(maxDate);
     setResult(null);
   }, [minDate, maxDate]);
-  const [positionPct,  setPositionPct]  = useState(1.0);
-  const [result,       setResult]       = useState<BacktestResult | null>(null);
-  const [show,         setShow]         = useState(false);
-  const [mode,         setMode]         = useState<'composite' | 'signal'>('composite');
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function runBacktest() {
     if (allCandles.length === 0) return;

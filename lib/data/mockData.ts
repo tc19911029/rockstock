@@ -18,7 +18,7 @@ import { Candle } from '@/types';
 function generateMockData(): Candle[] {
   const data: Candle[] = [];
   let price = 45;
-  let date = new Date('2023-01-03');
+  const date = new Date('2023-01-03');
   const rng = (min: number, max: number) => min + Math.random() * (max - min);
 
   // Phase 1: 底部盤整 (40 days)
