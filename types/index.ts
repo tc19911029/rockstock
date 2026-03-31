@@ -132,6 +132,29 @@ export interface TradingRule {
   ): RuleSignal | null;
 }
 
+/** Enriched signal with group metadata (from evaluateDetailed) */
+export interface EnrichedSignal extends RuleSignal {
+  groupId: string;
+  groupName: string;
+}
+
+/** Conflict between opposing signals on the same candle */
+export interface SignalConflict {
+  buySignals: EnrichedSignal[];
+  sellSignals: EnrichedSignal[];
+  resolution: EnrichedSignal;
+}
+
+/** Detailed evaluation result (from evaluateDetailed) */
+export interface EvaluationResult {
+  /** Same as evaluate() — filtered signals */
+  signals: RuleSignal[];
+  /** All signals with group metadata */
+  allSignals: EnrichedSignal[];
+  /** Conflicts between opposing signals */
+  conflicts: SignalConflict[];
+}
+
 /** A signal marker to draw on the candlestick chart */
 export interface ChartSignalMarker {
   date: string;
