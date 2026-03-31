@@ -423,6 +423,15 @@ export function runSingleBacktest(
         break;
       }
 
+      // 長線第8條：股價上漲約1倍（50%以上），不做長線操作 → 強制出場
+      if (currentReturn > 0.50) {
+        exitReason = 'longTermGainLimit';
+        exitPrice  = +(c.close * (1 - strategy.slippagePct)).toFixed(3);
+        exitDate   = c.date;
+        holdDays   = i + 1;
+        break;
+      }
+
       // 獲利方程式第7條：獲利 >20% 或連續急漲3天+大量長黑 → 當天出場
       if (currentReturn > 0.20) {
         exitReason = 'profitClimaxExit';

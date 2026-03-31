@@ -169,6 +169,70 @@ function rule10_threeBlacks(candles: CandleWithIndicators[], idx: number): strin
 
 // ── Main Evaluator ──────────────────────────────────────────────────────────────
 
+/**
+ * 8. 三大法人連續賣超：下跌時出現爆大量長黑K或連3黑大量賣壓
+ * 注：rockstock 沒有法人買賣超資料，用「連續大量下跌」作為代理指標
+ */
+function rule08_institutionalSelling(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 5) return null;
+  // 近5日中有3天以上是大量黑K（量比>1.3 且收黑）
+  const recent5 = candles.slice(idx - 4, idx + 1);
+  const bigVolBlacks = recent5.filter(c =>
+    c.close < c.open &&
+    c.avgVol5 != null && c.avgVol5 > 0 && c.volume >= c.avgVol5 * 1.3
+  );
+  if (bigVolBlacks.length >= 3) {
+    return '淘汰8: 連續大量黑K賣壓（疑似法人連續賣超）';
+  }
+  return null;
+}
+
+/**
+ * 10. 看不懂的股票要避開：盤整中趨勢未明，出現明確訊號才順勢操作
+ * 補充判斷：長期盤整（30天以上）+ 均線糾結 + 量能萎縮
+ */
+function rule10b_longConsolidation(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 30) return null;
+  const c = candles[idx];
+  // 30天高低差 < 8%
+  const lookback = candles.slice(idx - 30, idx + 1);
+  const rangeHigh = Math.max(...lookback.map(x => x.high));
+  const rangeLow = Math.min(...lookback.map(x => x.low));
+  if (rangeLow <= 0) return null;
+  const spread = (rangeHigh - rangeLow) / rangeLow;
+  if (spread >= 0.08) return null;
+  // 均線糾結：MA5/MA10/MA20 差距 < 2%
+  if (c.ma5 != null && c.ma10 != null && c.ma20 != null) {
+    const maMax = Math.max(c.ma5, c.ma10, c.ma20);
+    const maMin = Math.min(c.ma5, c.ma10, c.ma20);
+    if (maMin > 0 && (maMax - maMin) / maMin < 0.02) {
+      return '淘汰10: 長期盤整趨勢不明（30天振幅<8%、均線糾結），看不懂勿進場';
+    }
+  }
+  return null;
+}
+
+/**
+ * 11. 有基本面沒技術面的股票要避開
+ * 技術面差的判斷：股價在MA20之下 + MA20下彎 + 均線空排
+ * （基本面好壞由用戶自行判斷，此處只偵測技術面差的股票）
+ */
+function rule11_noTechnical(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 20) return null;
+  const c = candles[idx];
+  if (c.ma5 == null || c.ma10 == null || c.ma20 == null) return null;
+  // 收紅K（看似有機會）但技術面全面轉壞
+  if (c.close <= c.open) return null; // 只在收紅時警告（散戶覺得跌深可買）
+  const belowMa20 = c.close < c.ma20;
+  const prevMa20_5 = idx > 5 ? candles[idx - 5]?.ma20 : null;
+  const ma20Declining = prevMa20_5 != null && c.ma20! < prevMa20_5;
+  const bearishAlign = c.ma5 < c.ma10 && c.ma10 < c.ma20;
+  if (belowMa20 && ma20Declining && bearishAlign) {
+    return '淘汰11: 技術面全面轉壞（均線空排、股價在月線下、月線下彎），基本面好也勿進場';
+  }
+  return null;
+}
+
 const ELIMINATION_RULES = [
   rule01_notOutOfBottom,
   rule02_resistanceBlockBreakMA5,
@@ -177,8 +241,11 @@ const ELIMINATION_RULES = [
   rule05_overExtended,
   rule06_resistanceLongBlack,
   rule07_indicatorDivergence,
+  rule08_institutionalSelling,
   rule09_highVolNoRise,
   rule10_threeBlacks,
+  rule10b_longConsolidation,
+  rule11_noTechnical,
 ];
 
 /**

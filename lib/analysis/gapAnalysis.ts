@@ -29,8 +29,22 @@ export interface GapAnalysisResult {
   /** Number of unfilled gap-ups in last 20 days */
   unfilledGapUps: number;
   /** Recent gap pattern detected */
-  pattern: 'breakaway' | 'continuation' | 'exhaustion' | 'none';
+  pattern: 'breakaway' | 'continuation' | 'exhaustion' | 'island_reversal_bear' | 'island_reversal_bull' | 'none';
   detail: string;
+  /** 缺口4層支撐/壓力（朱老師 Part 9） */
+  gapSupport?: GapSupportLevels;
+}
+
+/** 缺口形成的4個支撐/壓力價位（由強到弱） */
+export interface GapSupportLevels {
+  /** 上高：缺口後K線高點（最強支撐） */
+  upperHigh: number;
+  /** 上沿：缺口後K線低點 */
+  upperEdge: number;
+  /** 下沿：缺口前K線高點 */
+  lowerEdge: number;
+  /** 下底：缺口前K線低點（最弱支撐） */
+  lowerBottom: number;
 }
 
 /**
@@ -153,10 +167,66 @@ export function analyzeGaps(
     details.push('recent unfilled gap-down');
   }
 
+  // ── 島型反轉（朱老師 Part 9, p.607 + Part 12-4 #17）─────────────────
+  // 高檔島型反轉（bearish）：先向上跳空，幾天後再向下跳空 → 形成孤島
+  // 低檔島型反轉（bullish）：先向下跳空，幾天後再向上跳空 → V型反彈
+  for (let i = 0; i < gaps.length; i++) {
+    const g1 = gaps[i];
+    // 找 g1 之後方向相反的缺口
+    for (let j = i + 1; j < gaps.length; j++) {
+      const g2 = gaps[j];
+      if (g1.type === g2.type) continue;
+      const d1 = new Date(g1.date).getTime();
+      const d2 = new Date(g2.date).getTime();
+      const daysBetween = Math.abs(d2 - d1) / (1000 * 60 * 60 * 24);
+      if (daysBetween > 10) continue; // 島型反轉通常在10天內完成
+
+      // 高檔島型反轉：先向上跳空(up)後向下跳空(down)
+      if (g1.type === 'up' && g2.type === 'down') {
+        const isRecent = new Date(g2.date).getTime() >=
+          new Date(String(candles[Math.max(0, idx - 5)].date)).getTime();
+        if (isRecent) {
+          pattern = 'island_reversal_bear';
+          adjust -= 8;
+          details.push(`高檔島型反轉（${g1.date}向上跳空→${g2.date}向下跳空）`);
+        }
+      }
+      // 低檔島型反轉：先向下跳空(down)後向上跳空(up)
+      if (g1.type === 'down' && g2.type === 'up') {
+        const isRecent = new Date(g2.date).getTime() >=
+          new Date(String(candles[Math.max(0, idx - 5)].date)).getTime();
+        if (isRecent) {
+          pattern = 'island_reversal_bull';
+          adjust += 6;
+          details.push(`低檔島型反轉（${g1.date}向下跳空→${g2.date}向上跳空）`);
+        }
+      }
+    }
+  }
+
+  // ── 缺口4層支撐/壓力系統（朱老師 Part 9, p.617-618）──────────────────
+  // 取最近一個未回補的向上跳空缺口，計算4層支撐
+  let gapSupport: GapSupportLevels | undefined;
+  const lastUnfilledUp = gapUps.filter(g => !g.filled).slice(-1)[0];
+  if (lastUnfilledUp) {
+    const gapIdx = candles.findIndex(c => String(c.date) === lastUnfilledUp.date);
+    if (gapIdx > 0) {
+      const gapCandle = candles[gapIdx];
+      const prevCandle = candles[gapIdx - 1];
+      gapSupport = {
+        upperHigh: gapCandle.high,    // 上高（最強支撐）
+        upperEdge: gapCandle.low,     // 上沿
+        lowerEdge: prevCandle.high,   // 下沿
+        lowerBottom: prevCandle.low,  // 下底（最弱支撐）
+      };
+    }
+  }
+
   return {
     compositeAdjust: Math.max(-8, Math.min(8, adjust)),
     unfilledGapUps,
     pattern,
     detail: details.join(', ') || 'no significant gaps',
+    gapSupport,
   };
 }
