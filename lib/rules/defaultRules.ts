@@ -14,6 +14,8 @@ import { sopHighReversalWarning, sopLowReversalSignal } from './reversalPatternR
 import { KLINE_COMBO_RULES } from './klineComboRules';
 import { GAP_TRADING_RULES } from './gapTradingRules';
 import { KLINE_TRADING_RULES } from './klineTradingRules';
+import { TWO_BAR_REVERSAL_RULES } from './twoBarReversalRules';
+import { THREE_BAR_REVERSAL_RULES } from './threeBarReversalRules';
 // 朱家泓《抓住線圖 股民變股神》全書戰法
 import { smartKLineBuy, smartKLineSell, candleMergeSignal, lowLongRedAttack, lowHammerAttack, lowCrossAttack, lowEngulfAttack, lowThreeRedAttack, highShootingStar, highCrossSell, highEngulfSell, highEveningStar } from './smartKLineRules';
 import { singleMa20Buy, singleMa20Sell, tripleMaBuy, tripleMaSell, dualMaBuy, dualMaSell } from './maStrategyRules';
@@ -92,6 +94,10 @@ export const DEFAULT_RULES: TradingRule[] = [
   ...GAP_TRADING_RULES,
   // 朱家泓《抓住K線》K線交易法（4條）
   ...KLINE_TRADING_RULES,
+  // 朱家泓《抓住K線》2根K線轉折（8條）
+  ...TWO_BAR_REVERSAL_RULES,
+  // 朱家泓《抓住K線》3根K線轉折（6條）
+  ...THREE_BAR_REVERSAL_RULES,
   // ── 朱家泓《抓住線圖 股民變股神》全書戰法 ──────────────────────────────────
   // 智慧K線戰法
   smartKLineBuy,
