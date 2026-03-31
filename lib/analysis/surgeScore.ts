@@ -368,23 +368,29 @@ function scoreIndicatorConfluence(candles: CandleWithIndicators[], idx: number):
   let score = 0;
   const details: string[] = [];
 
-  const macdBull = c.macdOSC != null && c.macdOSC > 0;
-  const kdBull = c.kdK != null && c.kdD != null && c.kdK > c.kdD;
+  // ── 使用六維共振評分 ──────────────────────────────────────────
+  const { computeResonanceScore } = require('./resonanceScore');
+  const resonance = computeResonanceScore(candles, idx);
 
-  if (macdBull && kdBull) { score += 50; details.push('MACD+KD共振看多'); }
-  else if (macdBull) { score += 25; details.push('MACD看多'); }
-  else if (kdBull) { score += 20; details.push('KD看多'); }
+  if (resonance.direction === 'bullish') {
+    score += Math.round(resonance.score * 0.6); // 共振分佔 60%
+    details.push(`${resonance.alignedCount}/6維共振看多`);
+  } else if (resonance.direction === 'mixed') {
+    score += Math.round(resonance.score * 0.3);
+    details.push(`${resonance.alignedCount}/6維方向不一`);
+  }
 
+  // ── 保留原有的即時交叉加分 ─────────────────────────────────────
   // MACD golden cross today
   if (prev && c.macdOSC != null && prev.macdOSC != null && c.macdOSC > 0 && prev.macdOSC <= 0) {
-    score += 25;
+    score += 20;
     details.push('MACD金叉');
   }
 
   // KD golden cross today
   if (prev && c.kdK != null && c.kdD != null && prev.kdK != null && prev.kdD != null) {
     if (c.kdK > c.kdD && prev.kdK <= prev.kdD) {
-      score += 25;
+      score += 20;
       details.push('KD金叉');
     }
   }
