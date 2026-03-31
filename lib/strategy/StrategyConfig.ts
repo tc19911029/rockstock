@@ -30,7 +30,7 @@ export interface StrategyThresholds {
   upperShadowMax:  number;   // 上影線最大比例（預設 0.20 = 20%）
 
   // 量能條件
-  volumeRatioMin:  number;   // 量比門檻（預設 1.5x）
+  volumeRatioMin:  number;   // 量比門檻（書上：前一日×1.3）
 
   // KD條件
   kdMaxEntry:      number;   // KD 進場上限（預設 88）
@@ -95,7 +95,7 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   maLongPeriod:   20,
   kbarMinBodyPct: 0.02,
   upperShadowMax: 0.20,
-  volumeRatioMin: 1.8,  // 朱老師核心：帶量突破，1.5x太鬆
+  volumeRatioMin: 1.3,  // 書上p.54：攻擊量 ≥ 前一日 × 1.3
   kdMaxEntry:     88,
   deviationMax:   0.20,
   minScore:       4,    // 基本門檻 4 分
