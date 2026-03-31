@@ -126,7 +126,7 @@ export async function GET(req: NextRequest) {
     const q = result.indicators.quote[0];
 
     // Build candles, skip null/zero-volume bars
-    const candles = timestamps
+    const rawCandles = timestamps
       .map((ts, i) => {
         const o = q.open[i];
         const h = q.high[i];
@@ -143,7 +143,12 @@ export async function GET(req: NextRequest) {
           volume: v ?? 0,
         };
       })
-      .filter(Boolean);
+      .filter(Boolean) as { date: string; open: number; high: number; low: number; close: number; volume: number }[];
+
+    // 去重：同一日期保留最後一筆（Yahoo 有時對今日回傳多筆 timestamp）
+    const dateMap = new Map<string, typeof rawCandles[0]>();
+    for (const c of rawCandles) dateMap.set(c.date, c);
+    const candles: typeof rawCandles = Array.from(dateMap.values());
 
     if (candles.length === 0) {
       return NextResponse.json({ error: '資料為空，請嘗試其他期間' }, { status: 404 });

@@ -31,7 +31,9 @@ export type RuleGroupId =
   | 'trend-ma'         // 趨勢/均線（通用基礎）
   | 'volume'           // 量價（通用基礎）
   | 'oscillator'       // MACD/KD（通用基礎）
-  | 'consensus';       // 大師共識/共振
+  | 'consensus'        // 大師共識/共振
+  | 'larry-williams'   // Larry Williams 短線交易秘訣
+  | 'murphy';          // Murphy《金融市場技術分析》
 
 // ── 群組介面 ──────────────────────────────────────────────────────────────────
 
@@ -166,6 +168,15 @@ import {
 // 大師共識/共振
 import { masterConsensusBreakout } from './consensusRules';
 import { bullishResonance, bearishResonance } from './resonanceRules';
+// Larry Williams《短線交易秘訣》
+import { LARRY_WILLIAMS_RULES } from './larryWilliamsRules';
+// Murphy《金融市場技術分析》
+import { MURPHY_TREND_RULES } from './murphyTrendRules';
+import { MURPHY_VOLUME_RULES } from './murphyVolumeRules';
+import { MURPHY_OSCILLATOR_RULES } from './murphyOscillatorRules';
+import { MURPHY_RETRACEMENT_RULES } from './murphyRetracementRules';
+import { MURPHY_PATTERN_RULES } from './murphyPatternRules';
+import { MURPHY_MARKET_RULES } from './murphyMarketRules';
 
 // ── 註冊所有群組 ──────────────────────────────────────────────────────────────
 
@@ -339,6 +350,29 @@ function createDefaultRegistry(): RuleRegistry {
     author: '朱家泓 × 權證小哥 × 蔡森',
     description: '多師共識突破 + 多指標共振信號',
     rules: [masterConsensusBreakout, bullishResonance, bearishResonance],
+  });
+
+  registry.register({
+    id: 'larry-williams',
+    name: 'Larry Williams 短線交易秘訣',
+    author: 'Larry Williams',
+    description: '《短線交易秘訣》波動性突破(2條) + Oops反轉(2條) + TDW/TDM時間過濾(3條) + 失敗振盪(2條) + 大區間日(2條) + 三日波幅(1條)',
+    rules: [...LARRY_WILLIAMS_RULES],
+  });
+
+  registry.register({
+    id: 'murphy',
+    name: 'Murphy《金融市場技術分析》',
+    author: 'John Murphy',
+    description: '趨勢結構(6條) + 量價驗證(5條) + 擺動指數(6條) + 費波納奇回撤(4條) + 補充型態(5條) + 市場結構(3條)',
+    rules: [
+      ...MURPHY_TREND_RULES,
+      ...MURPHY_VOLUME_RULES,
+      ...MURPHY_OSCILLATOR_RULES,
+      ...MURPHY_RETRACEMENT_RULES,
+      ...MURPHY_PATTERN_RULES,
+      ...MURPHY_MARKET_RULES,
+    ],
   });
 
   return registry;
