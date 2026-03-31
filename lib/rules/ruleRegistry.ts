@@ -22,6 +22,7 @@ export type RuleGroupId =
   | 'zhu-ma-strategy'  // 朱家泓均線戰法（單線/雙線/三線 + 週線）
   | 'zhu-momentum'     // 朱家泓飆股/缺口
   | 'zhu-advanced'     // 朱家泓進階（轉折波 + 底部型態 + 進場錯誤）
+  | 'zhu-soar-stock'   // 朱家泓《抓住飆股輕鬆賺》— 9種價量診斷、4階段循環、位置評估
   | 'lin-sop'          // 林穎走圖 SOP
   | 'granville'        // 葛蘭碧八大法則
   | 'bollinger'        // 布林通道
@@ -126,6 +127,8 @@ import { GAP_TRADING_RULES } from './gapTradingRules';
 import { TURNING_WAVE_RULES } from './turningWaveRules';
 import { BOTTOM_FORMATION_RULES } from './bottomFormationRules';
 import { ENTRY_MISTAKE_RULES } from './entryMistakeRules';
+// 朱家泓《抓住飆股輕鬆賺》
+import { ZHU_SOAR_STOCK_RULES } from './zhuSoarStockRules';
 // 林穎走圖 SOP
 import {
   sopBullConfirmEntry, sopBullPullbackBuy, sopConsolidationBreakout,
@@ -238,6 +241,14 @@ function createDefaultRegistry(): RuleRegistry {
       ...BOTTOM_FORMATION_RULES,
       ...ENTRY_MISTAKE_RULES,
     ],
+  });
+
+  registry.register({
+    id: 'zhu-soar-stock',
+    name: '朱家泓《抓住飆股輕鬆賺》',
+    author: '朱家泓',
+    description: '9種價量關係診斷 + 市場循環4階段偵測 + 位置風險評估 + 巨量後觀察',
+    rules: [...ZHU_SOAR_STOCK_RULES],
   });
 
   registry.register({
