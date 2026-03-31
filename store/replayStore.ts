@@ -18,7 +18,7 @@ import {
   sharesFromPercent,
 } from '@/lib/engines/tradeEngine';
 import { computeStats } from '@/lib/engines/statsEngine';
-import { ruleEngine } from '@/lib/rules/ruleEngine';
+import { RuleEngine, ruleEngine } from '@/lib/rules/ruleEngine';
 import {
   detectTrend,
   detectTrendPosition,
@@ -34,13 +34,28 @@ const INITIAL_CAPITAL = 1_000_000;
 
 // ── Module-level signal marker cache (recomputed on data load) ────────────────
 let _cachedMarkers: ChartSignalMarker[] = [];
+/** 當前策略篩選後的引擎（precomputeMarkers 和 buildState 共用） */
+let _activeEngine: RuleEngine = ruleEngine;
 
 // Priority: SELL > BUY > REDUCE > ADD (one marker per candle)
 const MARKER_PRIORITY: Record<string, number> = {
   SELL: 4, BUY: 3, REDUCE: 2, ADD: 1, WATCH: 0,
 };
 
+/**
+ * 根據當前策略建立篩選後的 RuleEngine。
+ * 如果策略沒有指定 ruleGroups，就用預設的全規則引擎。
+ */
+function buildFilteredEngine(): RuleEngine {
+  const strategy = useSettingsStore.getState().getActiveStrategy();
+  if (strategy.ruleGroups && strategy.ruleGroups.length > 0) {
+    return new RuleEngine(undefined, strategy.ruleGroups);
+  }
+  return ruleEngine; // 全開（向後相容）
+}
+
 function precomputeMarkers(allCandles: CandleWithIndicators[]): void {
+  _activeEngine = buildFilteredEngine();
   const result: ChartSignalMarker[] = [];
   for (let i = 0; i < allCandles.length; i++) {
     const c = allCandles[i];
@@ -49,7 +64,7 @@ function precomputeMarkers(allCandles: CandleWithIndicators[]): void {
     const isBullish = c.ma5 != null && c.ma20 != null && c.ma5 > c.ma20;
     const isBearish = c.ma5 != null && c.ma20 != null && c.ma5 < c.ma20;
 
-    const signals = ruleEngine.evaluate(allCandles, i)
+    const signals = _activeEngine.evaluate(allCandles, i)
       .filter(s => s.type !== 'WATCH')
       .filter(s => {
         if (s.type === 'BUY' || s.type === 'ADD')    return isBullish;  // 只在多頭買進
@@ -133,7 +148,7 @@ function buildState(
   const currentPrice = allCandles[index]?.close ?? 0;
   const metrics = computeMetrics(account, currentPrice);
   const stats = computeStats(account, allCandles, index);
-  const signals = ruleEngine.evaluate(allCandles, index);
+  const signals = _activeEngine.evaluate(allCandles, index);
   const visibleCandles = allCandles.slice(0, index + 1);
   const currentDate = allCandles[index]?.date ?? '';
   const chartMarkers = _cachedMarkers.filter(m => m.date <= currentDate);

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useReplayStore } from '@/store/replayStore';
-import { ruleEngine } from '@/lib/rules/ruleEngine';
+import { RuleEngine, ruleEngine } from '@/lib/rules/ruleEngine';
+import { useSettingsStore } from '@/store/settingsStore';
 
 const MARKER_PRIORITY: Record<string, number> = { SELL: 4, BUY: 3, REDUCE: 2, ADD: 1, WATCH: 0 };
 
@@ -200,6 +201,12 @@ export default function BacktestPanel() {
   function runBacktest() {
     if (allCandles.length === 0) return;
 
+    // 根據當前策略建立篩選後的引擎
+    const strategy = useSettingsStore.getState().getActiveStrategy();
+    const engine = (strategy.ruleGroups && strategy.ruleGroups.length > 0)
+      ? new RuleEngine(undefined, strategy.ruleGroups)
+      : ruleEngine;
+
     const initialCapital = Math.max(10_000, Number(capitalInput.replace(/,/g, '')) || 1_000_000);
 
     const idxMap  = new Map(allCandles.map((c, i) => [c.date, i]));
@@ -294,7 +301,7 @@ export default function BacktestPanel() {
         const isBullish = c.ma5 != null && c.ma20 != null && c.ma5 > c.ma20;
         const isBearish = c.ma5 != null && c.ma20 != null && c.ma5 < c.ma20;
 
-        const signals = ruleEngine.evaluate(allCandles, globalIdx)
+        const signals = engine.evaluate(allCandles, globalIdx)
           .filter(s => s.type !== 'WATCH')
           .filter(s => {
             if (s.type === 'BUY' || s.type === 'ADD')    return isBullish;

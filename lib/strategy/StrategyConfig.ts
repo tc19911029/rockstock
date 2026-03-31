@@ -48,6 +48,8 @@ export interface StrategyThresholds {
   bearMinScore:    number;   // 空頭時最低分數（預設 6）
 }
 
+import type { RuleGroupId } from '@/lib/rules/ruleRegistry';
+
 export interface StrategyConfig {
   id:          string;     // 唯一識別碼，e.g. 'zhu-v1'
   name:        string;     // 顯示名稱
@@ -59,7 +61,31 @@ export interface StrategyConfig {
 
   conditions:  StrategyConditionToggles;
   thresholds:  StrategyThresholds;
+
+  /**
+   * 啟用的規則群組。
+   * undefined = 全部群組都啟用（向後相容）。
+   * 指定後，只有列出的群組規則會被評估。
+   */
+  ruleGroups?: RuleGroupId[];
 }
+
+// ── 規則群組預設組合 ─────────────────────────────────────────────────────────
+
+/** 通用基礎群組（趨勢/均線/量價/指標），多數策略都需要 */
+const BASE_GROUPS: RuleGroupId[] = ['trend-ma', 'volume', 'oscillator'];
+
+/** 朱家泓全部群組 */
+const ALL_ZHU_GROUPS: RuleGroupId[] = [
+  'zhu-5steps', 'zhu-kline', 'zhu-reversal',
+  'zhu-ma-strategy', 'zhu-momentum', 'zhu-advanced', 'zhu-soar-stock',
+];
+
+/** 朱家泓核心群組（不含進階寶典） */
+const CORE_ZHU_GROUPS: RuleGroupId[] = [
+  'zhu-5steps', 'zhu-kline', 'zhu-reversal',
+  'zhu-ma-strategy', 'zhu-momentum',
+];
 
 // ── 內建策略 ──────────────────────────────────────────────────────────────────
 
@@ -94,6 +120,7 @@ export const ZHU_V1: StrategyConfig = {
   isBuiltIn:   true,
   conditions:  ALL_CONDITIONS_ON,
   thresholds:  BASE_THRESHOLDS,
+  ruleGroups:  [...CORE_ZHU_GROUPS, ...BASE_GROUPS],
 };
 
 /** 朱老師寬鬆版（適合盤整市） */
@@ -112,6 +139,7 @@ export const ZHU_V2: StrategyConfig = {
     kdMaxEntry:     92,
     minScore:       4,
   },
+  ruleGroups:  [...CORE_ZHU_GROUPS, ...BASE_GROUPS],
 };
 
 /** 保守版（高分數才進場） */
@@ -130,6 +158,7 @@ export const ZHU_CONSERVATIVE: StrategyConfig = {
     minScore:       6,
     upperShadowMax: 0.15,
   },
+  ruleGroups:  [...CORE_ZHU_GROUPS, ...BASE_GROUPS],
 };
 
 /**
@@ -165,6 +194,7 @@ export const ZHU_V3_MULTIFACTOR: StrategyConfig = {
     sidewaysMinScore: 4,    // 盤整時維持
     bearMinScore:   5,      // 空頭時嚴格
   },
+  // 多因子策略：全開所有群組（不限制，靠排名篩選）
 };
 
 /**
@@ -193,6 +223,7 @@ export const ZHU_V3_TW: StrategyConfig = {
     sidewaysMinScore: 4,
     bearMinScore:   5,
   },
+  // 台股：全開所有群組
 };
 
 /**
@@ -221,6 +252,7 @@ export const ZHU_V3_CN: StrategyConfig = {
     sidewaysMinScore: 4,
     bearMinScore:   6,      // A 股空頭更危險，門檻更嚴
   },
+  // 陸股：全開所有群組
 };
 
 /**
@@ -257,6 +289,7 @@ export const MASTER_CONSENSUS: StrategyConfig = {
     sidewaysMinScore: 5,
     bearMinScore:   6,
   },
+  ruleGroups:  ['consensus', 'granville', ...BASE_GROUPS],
 };
 
 /**
@@ -291,6 +324,7 @@ export const ZHU_5STEPS: StrategyConfig = {
     sidewaysMinScore: 5,    // 盤整加嚴
     bearMinScore:   6,      // 逆勢操作勝率僅10%，極嚴格
   },
+  ruleGroups:  [...ALL_ZHU_GROUPS, ...BASE_GROUPS],
 };
 
 /**
@@ -329,6 +363,7 @@ export const CHART_WALKING_SOP: StrategyConfig = {
     sidewaysMinScore: 5,
     bearMinScore:   5,        // 空頭操作門檻（書中空頭不需量能，條件較寬）
   },
+  ruleGroups:  ['lin-sop', ...BASE_GROUPS],
 };
 
 export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
