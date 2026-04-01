@@ -19,6 +19,8 @@ const scannerChunkSchema = z.object({
   mode:       z.enum(['full', 'pure', 'sop']).default('full'),
   /** 排序因子（sop 模式用） */
   rankBy:     z.enum(['composite', 'surge', 'smartMoney', 'sixConditions', 'histWinRate']).default('sixConditions'),
+  /** 方向：long=做多, short=做空 */
+  direction:  z.enum(['long', 'short']).default('long'),
 });
 
 export async function POST(req: NextRequest) {
@@ -44,8 +46,12 @@ export async function POST(req: NextRequest) {
     const mode = parsed.data.mode;
 
     let scanResult;
-    if (mode === 'sop') {
-      // V2 簡化版：純朱老師 SOP（六條件+戒律+淘汰法）
+    if (mode === 'sop' && parsed.data.direction === 'short') {
+      // V2 做空版：做空六條件 + 做空戒律
+      const { candidates, marketTrend: mt } = await scanner.scanShortCandidates(stocks, asOfDate, thresholds);
+      scanResult = { results: candidates, marketTrend: mt };
+    } else if (mode === 'sop') {
+      // V2 做多版：六條件+戒律+淘汰法
       scanResult = await scanner.scanSOP(stocks, asOfDate, thresholds, parsed.data.rankBy);
     } else if (mode === 'pure' && asOfDate) {
       scanResult = await scanner.scanListAtDatePure(stocks, asOfDate, thresholds);

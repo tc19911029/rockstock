@@ -34,6 +34,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
     clearCurrent,
     scanOnly, setScanOnly,
     scanMode, setScanMode,
+    scanDirection, setScanDirection,
     marketTrend,
   } = useBacktestStore();
 
@@ -107,6 +108,27 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                 ))}
               </div>
             </div>
+
+            {/* Direction — SOP 模式顯示做多/做空切換 */}
+            {isSOPMode && (
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-500 font-medium">方向</label>
+                <div className="flex rounded-lg overflow-hidden border border-slate-700">
+                  <button onClick={() => { setScanDirection('long'); clearCurrent(); }}
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      scanDirection === 'long'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}>做多</button>
+                  <button onClick={() => { setScanDirection('short'); clearCurrent(); }}
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      scanDirection === 'short'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}>做空</button>
+                </div>
+              </div>
+            )}
 
             {/* Date */}
             <div className="space-y-1.5">

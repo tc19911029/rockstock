@@ -77,6 +77,8 @@ interface BacktestState {
   scanOnly: boolean;  // true = 只掃描不回測（今天的掃描）
   /** 掃描模式：full=完整管線, pure=純朱家泓(14規則), sop=V2簡化版(六條件+戒律+淘汰法) */
   scanMode: 'full' | 'pure' | 'sop';
+  /** 掃描方向：long=做多, short=做空 */
+  scanDirection: 'long' | 'short';
 
   // ── Actions ──
   setMarket:              (m: MarketId) => void;
@@ -86,6 +88,7 @@ interface BacktestState {
   toggleCapitalMode:      () => void;
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
+  setScanDirection:       (d: 'long' | 'short') => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
@@ -137,11 +140,13 @@ export const useBacktestStore = create<BacktestState>()(
       sessions: [],
       scanOnly: false,
       scanMode: 'full' as const,
+      scanDirection: 'long' as const,
 
       setMarket:             (market)   => set({ market }),
       setScanDate:           (scanDate) => set({ scanDate }),
       setScanOnly:           (scanOnly) => set({ scanOnly }),
       setScanMode:           (scanMode) => set({ scanMode }),
+      setScanDirection:      (scanDirection) => set({ scanDirection }),
       setStrategy:           (partial)  => set(s => ({ strategy: { ...s.strategy, ...partial } })),
       setCapitalConstraints: (partial)  => set(s => ({ capitalConstraints: { ...s.capitalConstraints, ...partial } })),
       toggleCapitalMode:     ()         => set(s => ({ useCapitalMode: !s.useCapitalMode })),
@@ -267,7 +272,7 @@ export const useBacktestStore = create<BacktestState>()(
           ? { strategyId: activeStrategy.id }
           : { thresholds: activeStrategy.thresholds };
 
-        const { scanMode } = get();
+        const { scanMode, scanDirection } = get();
         const scanChunk = async (chunk: typeof stocks) => {
           const res = await fetch('/api/scanner/chunk', {
             method:  'POST',
@@ -277,6 +282,7 @@ export const useBacktestStore = create<BacktestState>()(
               stocks: chunk,
               date: scanDate,
               mode: scanMode,
+              direction: scanDirection,
               ...strategyPayload,
             }),
           });

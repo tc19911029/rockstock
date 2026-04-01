@@ -74,7 +74,6 @@ function ShortConditionsSection() {
   const [expanded, setExpanded] = useState(false);
 
   if (!shortConditions) return null;
-  if (trendState !== '空頭') return null; // 只在空頭時顯示
 
   const score = shortConditions.totalScore;
   const ready = shortConditions.isCoreReady;
@@ -141,8 +140,8 @@ export default function ProhibitionAlerts() {
         />
       )}
 
-      {/* 做空戒律（空頭市場時主要顯示） */}
-      {shortProhibitions && trendState === '空頭' && (
+      {/* 做空戒律（永遠顯示，不限趨勢） */}
+      {shortProhibitions && (
         <ProhibitionSection
           title="做空"
           prohibited={shortProhibitions.prohibited}
@@ -155,7 +154,7 @@ export default function ProhibitionAlerts() {
       <ShortConditionsSection />
 
       {/* 進場評估摘要 */}
-      {longProhibitions && trendState !== '空頭' && (
+      {longProhibitions && (
         <div className={`text-xs px-3 py-2 rounded ${
           longProhibitions.prohibited
             ? 'bg-red-900/20 text-red-400 border border-red-800/40'
