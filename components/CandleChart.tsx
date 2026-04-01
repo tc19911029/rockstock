@@ -127,7 +127,7 @@ export default function CandleChart({
         vertLines: { color: '#1e293b' },
         horzLines: { color: '#1e293b' },
       },
-      crosshair: { mode: 1 },
+      crosshair: { mode: 1, vertLine: { labelVisible: false } },
       rightPriceScale: { borderColor: '#334155' },
       timeScale: { borderColor: '#334155', timeVisible: true },
       width: containerRef.current.clientWidth,

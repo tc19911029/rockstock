@@ -35,7 +35,7 @@ export function IntradayChartFull() {
         width: el.clientWidth, height: h,
         layout: { background: { color: '#0f172a' }, textColor: '#64748b', fontSize: 10 },
         grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
-        crosshair: { mode: 0 },
+        crosshair: { mode: 0, vertLine: { labelVisible: false } },
         timeScale: { timeVisible: true, secondsVisible: false },
         rightPriceScale: { borderColor: '#1e293b' },
       });

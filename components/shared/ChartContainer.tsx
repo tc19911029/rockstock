@@ -33,7 +33,7 @@ export function useChartTheme() {
         horzLines: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' },
       },
       crosshair: {
-        vertLine: { color: isDark ? '#475569' : '#94a3b8', labelBackgroundColor: isDark ? '#1e293b' : '#f1f5f9' },
+        vertLine: { color: isDark ? '#475569' : '#94a3b8', labelBackgroundColor: isDark ? '#1e293b' : '#f1f5f9', labelVisible: false },
         horzLine: { color: isDark ? '#475569' : '#94a3b8', labelBackgroundColor: isDark ? '#1e293b' : '#f1f5f9' },
       },
       timeScale: {

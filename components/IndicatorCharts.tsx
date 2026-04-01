@@ -27,7 +27,7 @@ function makeChart(container: HTMLElement, showTimeAxis: boolean): IChartApi {
     grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
     rightPriceScale: { borderColor: '#334155' },
     timeScale: { borderColor: '#334155', timeVisible: showTimeAxis, visible: true },
-    crosshair: { mode: 1 },
+    crosshair: { mode: 1, vertLine: { labelVisible: false } },
     width: container.clientWidth,
     height: container.clientHeight || 80,
   });
