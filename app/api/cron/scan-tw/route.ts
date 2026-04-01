@@ -15,8 +15,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const scanner = new TaiwanScanner();
-    const { results, partial, marketTrend } = await scanner.scan();
     const date = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).split(' ')[0];
+    const stocks = await scanner.getStockList();
+    const { results, marketTrend } = await scanner.scanSOP(stocks, date);
+    const partial = false;
 
     const session: ScanSession = {
       id: `TW-${date}-${Date.now()}`,

@@ -6,7 +6,7 @@ export function SessionHistory() {
   const {
     sessions, loadSession, market, scanDate,
     cronDates, isFetchingCron, loadCronSession, isLoadingCronSession,
-    isFetchingForward,
+    isFetchingForward, backfillHistory, isBackfilling, backfillProgress,
   } = useBacktestStore();
 
   const userSessions = sessions.filter(s => s.market === market);
@@ -36,7 +36,23 @@ export function SessionHistory() {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
       <div className="px-4 py-2.5 border-b border-slate-800 bg-slate-800/40">
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">回測歷史</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">回測歷史</h3>
+          {!isBackfilling && allDates.length < 5 && (
+            <button
+              onClick={() => backfillHistory(market, 20)}
+              className="text-[9px] px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-400 hover:bg-sky-800/50 transition-colors"
+              title="補齊過去20個交易日的掃描結果"
+            >
+              補齊20天
+            </button>
+          )}
+          {isBackfilling && (
+            <span className="text-[9px] text-sky-500">
+              {backfillProgress.done}/{backfillProgress.total} 補齊中…
+            </span>
+          )}
+        </div>
         {avgWinRate != null && sessionsWithStats.length >= 2 && (
           <div className="flex items-center gap-2 mt-1 text-[10px]">
             <span className="text-slate-500">{sessionsWithStats.length} 次掃描</span>

@@ -110,6 +110,11 @@ interface BacktestState {
   clearCurrent:           () => void;
   fetchCronDates:         (market: MarketId) => Promise<void>;
   loadCronSession:        (market: MarketId, date: string) => Promise<void>;
+  backfillHistory:        (market: MarketId, days?: number) => Promise<void>;
+
+  // ── Backfill ──
+  isBackfilling: boolean;
+  backfillProgress: { done: number; total: number };
 
   // helpers
   getSummary: (horizon: BacktestHorizon) => BacktestSummary | null;
@@ -159,6 +164,8 @@ export const useBacktestStore = create<BacktestState>()(
       cronDates: [],
       isFetchingCron: false,
       isLoadingCronSession: false,
+      isBackfilling: false,
+      backfillProgress: { done: 0, total: 0 },
 
       setMarket:             (market)   => set({ market }),
       setScanDate:           (scanDate) => set({ scanDate }),
@@ -449,6 +456,54 @@ export const useBacktestStore = create<BacktestState>()(
           stats:       session.stats  ?? null,
           scanOnly:    !hasTrades,
         });
+      },
+
+      // ── 補齊歷史：掃描過去 N 個交易日並存檔 ──
+      backfillHistory: async (market, days = 20) => {
+        const existingDates = new Set(get().cronDates.filter(c => c.market === market).map(c => c.date));
+
+        // 計算過去 N 個交易日（周一到周五）
+        const tradingDays: string[] = [];
+        const cursor = new Date();
+        cursor.setDate(cursor.getDate() - 1); // 從昨天開始（今天 cron 會跑）
+        while (tradingDays.length < days) {
+          const day = cursor.getDay();
+          if (day !== 0 && day !== 6) {
+            const dateStr = cursor.toISOString().split('T')[0];
+            if (!existingDates.has(dateStr)) tradingDays.push(dateStr);
+          }
+          cursor.setDate(cursor.getDate() - 1);
+        }
+
+        if (tradingDays.length === 0) return;
+
+        set({ isBackfilling: true, backfillProgress: { done: 0, total: tradingDays.length } });
+
+        for (let i = 0; i < tradingDays.length; i++) {
+          const date = tradingDays[i];
+          try {
+            const res = await fetch('/api/scanner/backfill', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ market, date }),
+            });
+            if (res.ok) {
+              const json = await res.json() as { count?: number; skipped?: boolean };
+              if (!json.skipped) {
+                // 新增到 cronDates
+                set(s => ({
+                  cronDates: [
+                    { market, date, resultCount: json.count ?? -1, scanTime: new Date().toISOString() },
+                    ...s.cronDates,
+                  ].sort((a, b) => b.date.localeCompare(a.date)),
+                }));
+              }
+            }
+          } catch { /* 單筆失敗不中斷整體 */ }
+          set({ backfillProgress: { done: i + 1, total: tradingDays.length } });
+        }
+
+        set({ isBackfilling: false });
       },
 
       // ── Cron 歷史：取得所有可用日期 ──
