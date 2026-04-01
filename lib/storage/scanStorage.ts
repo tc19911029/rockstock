@@ -84,9 +84,9 @@ export async function saveScanSession(session: ScanSession): Promise<void> {
 
   if (IS_VERCEL) {
     await blobPut(`scans/${session.market}/${session.date}.json`, data);
+  } else {
+    await fsPut(filename, data);
   }
-  // Always write to local fs too (for local dev; on Vercel this goes to /tmp but that's ok as backup)
-  try { await fsPut(filename, data); } catch { /* non-fatal on Vercel */ }
 }
 
 /** List all available scan dates for a market */

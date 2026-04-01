@@ -476,7 +476,7 @@ export const useBacktestStore = create<BacktestState>()(
         set({
           isLoadingCronSession: true,
           scanResults: [], performance: [], trades: [], stats: null,
-          scanError: null, forwardError: null,
+          scanError: null, forwardError: null, marketTrend: null,
           market, scanDate: date, scanOnly: false,
         });
 
@@ -557,6 +557,8 @@ export const useBacktestStore = create<BacktestState>()(
             isFetchingForward: false,
             isLoadingCronSession: false,
             sessions: [session, ...s.sessions].slice(0, 20),
+            // 已有 user session，從 cronDates 移除避免重複顯示
+            cronDates: s.cronDates.filter(c => !(c.market === market && c.date === date)),
           }));
         } catch (e) {
           set({ isFetchingForward: false, isLoadingCronSession: false, forwardError: String(e) });

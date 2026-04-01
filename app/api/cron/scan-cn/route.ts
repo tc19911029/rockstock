@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   try {
     const scanner = new ChinaScanner();
     const { results, partial, marketTrend } = await scanner.scan();
-    const date = new Date().toISOString().split('T')[0];
+    const date = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).split(' ')[0];
 
     const session: ScanSession = {
       id: `CN-${date}-${Date.now()}`,
