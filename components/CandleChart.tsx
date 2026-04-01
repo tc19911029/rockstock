@@ -275,12 +275,15 @@ export default function CandleChart({
     }
   }, [stopLossPrice]);
 
-  // ── Chart markers ─────────────────────────────────────────────────────────
+  // ── Chart markers（精簡版：無文字 + 大小分級） ───────────────────────────
   useEffect(() => {
     if (!markersPlugRef.current) return;
     const converted: SeriesMarker<Time>[] = chartMarkers.map(m => {
       const cfg = MARKER_CONFIG[m.type];
-      return { time: m.date as Time, position: cfg.position, shape: cfg.shape, color: cfg.color, text: m.label, size: 1 };
+      const s = m.strength ?? 1;
+      // 強訊號大箭頭、弱訊號小箭頭、都不帶文字
+      const size = s >= 4 ? 3 : s >= 3 ? 2 : 1;
+      return { time: m.date as Time, position: cfg.position, shape: cfg.shape, color: cfg.color, text: '', size };
     });
     markersPlugRef.current.setMarkers(converted);
   }, [chartMarkers]);
