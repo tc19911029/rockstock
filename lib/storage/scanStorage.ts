@@ -94,17 +94,22 @@ export async function listScanDates(market: MarketId): Promise<ScanDateEntry[]> 
   const entries: ScanDateEntry[] = [];
 
   if (IS_VERCEL) {
-    const blobs = await blobListPrefix(`scans/${market}/`);
-    for (const blob of blobs) {
-      // pathname: scans/TW/2026-03-25.json → extract date
-      const match = blob.pathname.match(/(\d{4}-\d{2}-\d{2})\.json$/);
-      if (!match) continue;
-      entries.push({
-        market,
-        date: match[1],
-        resultCount: -1, // will be filled if needed
-        scanTime: blob.uploadedAt.toISOString(),
-      });
+    try {
+      const blobs = await blobListPrefix(`scans/${market}/`);
+      for (const blob of blobs) {
+        // pathname: scans/TW/2026-03-25.json → extract date
+        const match = blob.pathname.match(/(\d{4}-\d{2}-\d{2})\.json$/);
+        if (!match) continue;
+        entries.push({
+          market,
+          date: match[1],
+          resultCount: -1, // will be filled if needed
+          scanTime: blob.uploadedAt.toISOString(),
+        });
+      }
+    } catch (err) {
+      console.error('[scanStorage] Blob listScanDates failed (token missing?):', err);
+      // Return empty — don't crash the API
     }
   } else {
     // Local dev: read from data/ directory
@@ -143,7 +148,11 @@ export async function loadScanSession(market: MarketId, date: string): Promise<S
   let raw: string | null = null;
 
   if (IS_VERCEL) {
-    raw = await blobGet(`scans/${market}/${date}.json`);
+    try {
+      raw = await blobGet(`scans/${market}/${date}.json`);
+    } catch (err) {
+      console.error('[scanStorage] Blob loadScanSession failed (token missing?):', err);
+    }
   }
 
   // Fallback to local filesystem
