@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
 import { useBacktestStore, BacktestHorizon } from '@/store/backtestStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { calcComposite, chipTooltip, retColor, fmtRet, exportToCsv } from '../utils';
@@ -11,10 +10,6 @@ import { chipBadge, TradeRow, calcTradeComposite } from './TradeRow';
 import { HorizonCard } from './HorizonCard';
 import { BacktestStatsPanel } from './BacktestStatsPanel';
 import { CapitalPanel } from './CapitalPanel';
-import { WalkForwardPanel } from './WalkForwardPanel';
-import { ABTestPanel } from './ABTestPanel';
-import { ObservationPanel } from './ObservationPanel';
-import { CapitalBacktestPanel } from './CapitalBacktestPanel';
 import { Button } from '@/components/ui/button';
 
 export function BacktestSection() {
@@ -41,22 +36,6 @@ export function BacktestSection() {
     strategy,
   } = useBacktestStore();
 
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  type TabKey = 'strict' | 'horizon' | 'observation' | 'capital' | 'walkforward' | 'ab-test';
-  const validTabs: TabKey[] = ['strict', 'horizon', 'observation', 'capital', 'walkforward', 'ab-test'];
-  const initialTab = ((): TabKey => {
-    const p = searchParams.get('tab');
-    return p && validTabs.includes(p as TabKey) ? p as TabKey : 'strict';
-  })();
-  const [tab, setTabState] = useState<TabKey>(initialTab);
-  const setTab = useCallback((t: TabKey) => {
-    setTabState(t);
-    const params = new URLSearchParams(searchParams.toString());
-    if (t === 'strict') { params.delete('tab'); } else { params.set('tab', t); }
-    const qs = params.toString();
-    router.replace(qs ? `?${qs}` : '/scanner', { scroll: false });
-  }, [searchParams, router]);
   const [activeHorizon, setHorizon] = useState<BacktestHorizon>('d5');
   const [sortBy, setSortBy] = useState<'composite' | 'netReturn' | 'signalScore' | 'surgeScore' | 'histWinRate' | 'holdDays'>('composite');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -104,40 +83,8 @@ export function BacktestSection() {
 
   return (
     <>
-      <div className="flex items-center gap-1 border-b border-border">
-        {([
-          { key: 'strict',      label: '嚴謹回測',    icon: '🔬' },
-          { key: 'horizon',     label: '時間視角',    icon: '📊' },
-          { key: 'observation', label: '觀察型',      icon: '👁️' },
-          { key: 'capital',     label: '資金模擬',    icon: '💰' },
-          { key: 'walkforward', label: 'Walk-Forward', icon: '🔁' },
-          { key: 'ab-test',     label: 'A/B 比較',     icon: '⚖️' },
-        ] as const).map(({ key, label, icon }) => (
-          <Button key={key} onClick={() => setTab(key)}
-            variant="ghost"
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 rounded-none h-auto transition-colors ${
-              tab === key
-                ? 'border-sky-500 text-sky-300'
-                : 'border-transparent text-muted-foreground hover:text-foreground/80'
-            }`}>
-            <span>{icon}</span>
-            <span>{label}</span>
-          </Button>
-        ))}
-      </div>
-
-      {/* Tab descriptions */}
-      <div className="bg-card/40 border border-border rounded-lg px-4 py-2.5 text-xs text-muted-foreground">
-        {tab === 'strict' && '🔬 嚴謹回測：模擬真實交易（含手續費0.1425%、證交稅0.3%、滑點），計算每筆交易的淨報酬。可設定止損/止盈/持有天數。'}
-        {tab === 'horizon' && '📊 時間視角：檢視信號發出後 1/5/10/20 天的報酬率分佈，了解不同持有期間的表現差異。'}
-        {tab === 'observation' && '👁️ 觀察型回測（模式A）：選出候選股後追蹤 1/2/3/5/10/20 日表現，驗證選股效果和排序因子有效性（Spearman IC）。'}
-        {tab === 'capital' && '💰 資金模擬回測（模式B）：設定起始資金（10萬~300萬），模擬真實交易流程，計算最終損益和資金曲線。'}
-        {tab === 'walkforward' && '🔁 Walk-Forward：將數據分成多個訓練/測試窗口，在訓練期優化策略後在測試期驗證，確保策略不是過度擬合。這是最嚴格的驗證方法。'}
-        {tab === 'ab-test' && '⚖️ A/B 比較：朱老師SOP選成交量最大 vs 完整多因子系統選第一名，頭對頭回測比較選股效果。兩組都用相同出場規則，差異只在選股邏輯。'}
-      </div>
-
-      {/* ── Tab: Strict ── */}
-      {tab === 'strict' && (
+      {/* ── Backtest Results ── */}
+      {trades.length > 0 && (
         <div className="space-y-4">
           {stats && <BacktestStatsPanel stats={stats} tradesCount={trades.length} trades={trades} />}
           {useCapitalMode && trades.length > 0 && (
@@ -253,8 +200,8 @@ export function BacktestSection() {
         </div>
       )}
 
-      {/* ── Tab: Horizon ── */}
-      {tab === 'horizon' && performance.length > 0 && (
+      {/* ── Horizon Performance ── */}
+      {performance.length > 0 && (
         <div className="space-y-4">
           <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
             {horizonLabels.map(({ key, label }) => (
@@ -407,53 +354,6 @@ export function BacktestSection() {
         </div>
       )}
 
-      {/* ── Tab: Observation (模式A) ── */}
-      {tab === 'observation' && (
-        <ObservationPanel
-          sessions={sessions.map(s => ({
-            id: s.id,
-            market: s.market,
-            date: s.scanDate,
-            scanTime: s.createdAt,
-            resultCount: s.scanResults.length,
-            results: s.scanResults,
-          }))}
-        />
-      )}
-
-      {/* ── Tab: Capital Simulation (模式B) ── */}
-      {tab === 'capital' && (
-        <CapitalBacktestPanel
-          sessions={sessions.map(s => ({
-            id: s.id,
-            market: s.market,
-            date: s.scanDate,
-            scanTime: s.createdAt,
-            resultCount: s.scanResults.length,
-            results: s.scanResults,
-          }))}
-        />
-      )}
-
-      {/* ── Tab: Walk-Forward ── */}
-      {tab === 'walkforward' && (
-        <WalkForwardPanel
-          result={walkForwardResult}
-          sessionCount={sessions.filter(s => s.market === market).length}
-          minRequired={walkForwardConfig.trainSize + walkForwardConfig.testSize}
-          isRunning={isRunningWF}
-          onRun={computeWalkForward}
-          trainSize={walkForwardConfig.trainSize}
-          testSize={walkForwardConfig.testSize}
-          stepSize={walkForwardConfig.stepSize}
-          onTrainSize={n => setWalkForwardConfig({ trainSize: n })}
-          onTestSize={n  => setWalkForwardConfig({ testSize: n })}
-          onStepSize={n  => setWalkForwardConfig({ stepSize: n })}
-        />
-      )}
-
-      {/* ── Tab: A/B Test ── */}
-      {tab === 'ab-test' && <ABTestPanel />}
     </>
   );
 }

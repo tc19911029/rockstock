@@ -6,8 +6,7 @@ import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun, TrendingUp,
   BarChart2, ScanSearch, Activity, FileBarChart, Settings2,
-  Star, Briefcase, Settings, Menu, BookOpen, ChevronDown,
-  History, FlaskConical, GitCompare, Scale,
+  Star, Briefcase, Settings, Menu, BookOpen, ChevronDown, Scale,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { Button } from '@/components/ui/button';
@@ -26,15 +25,6 @@ const PRIMARY_NAV = [
   { href: '/report',     label: '報表',   icon: FileBarChart },
   { href: '/strategies', label: '策略',   icon: Settings2 },
   { href: '/learn',      label: '教學',   icon: BookOpen },
-] as const;
-
-// Sub-items shown under "掃描" dropdown
-const SCAN_SUB = [
-  { href: '/scanner',          label: 'SOP 掃描',  icon: ScanSearch },
-  { href: '/scanner?mode=full', label: '完整掃描',  icon: ScanSearch },
-  { href: '/history',          label: '掃描歷史',  icon: History },
-  { href: '/rule-group-analysis', label: '規則回測', icon: FlaskConical },
-  { href: '/ab-test',          label: 'A/B 測試',  icon: GitCompare },
 ] as const;
 
 // Items under the settings (gear) dropdown
@@ -143,10 +133,6 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href.split('?')[0]);
 
-  const isScanActive = pathname.startsWith('/scanner') || pathname.startsWith('/scan')
-    || pathname.startsWith('/history') || pathname.startsWith('/rule-group-analysis')
-    || pathname.startsWith('/ab-test');
-
   const isSettingsActive = pathname.startsWith('/watchlist') || pathname.startsWith('/portfolio')
     || pathname.startsWith('/settings') || pathname.startsWith('/disclaimer');
 
@@ -180,34 +166,21 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
 
           {/* Primary Nav — desktop */}
           <nav aria-label="主要導覽" className="hidden md:flex items-center gap-0.5 ml-1">
-            {PRIMARY_NAV.map(({ href, label, icon: Icon }) => {
-              // 掃描 gets a dropdown
-              if (href === '/scanner') {
-                return (
-                  <NavDropdown
-                    key={href}
-                    isActive={isScanActive}
-                    trigger={<><Icon className="w-4 h-4" />{label}</>}
-                    items={SCAN_SUB}
-                  />
-                );
-              }
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                    isActive(href)
-                      ? 'bg-sky-500/15 text-sky-400'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary',
-                  )}
-                >
-                  <Icon className="w-4 h-4" />
-                  {label}
-                </Link>
-              );
-            })}
+            {PRIMARY_NAV.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                  isActive(href)
+                    ? 'bg-sky-500/15 text-sky-400'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary',
+                )}
+              >
+                <Icon className="w-4 h-4" />
+                {label}
+              </Link>
+            ))}
           </nav>
 
           {/* Spacer */}
@@ -295,9 +268,6 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
 
                   {/* Mobile: flat list of sub-pages */}
                   {[
-                    { href: '/history',             label: '掃描歷史',  icon: History },
-                    { href: '/rule-group-analysis', label: '規則回測',  icon: FlaskConical },
-                    { href: '/ab-test',             label: 'A/B 測試',  icon: GitCompare },
                     { href: '/watchlist',            label: '自選股',    icon: Star },
                     { href: '/portfolio',            label: '持倉',      icon: Briefcase },
                     { href: '/settings',             label: '設定',      icon: Settings },

@@ -23,8 +23,6 @@ interface ScanPageContentProps {
 }
 
 export default function ScanPageContent({ defaultMode = 'full' }: ScanPageContentProps) {
-  const [activeMode, setActiveMode] = useState<'sop' | 'full'>(defaultMode === 'sop' ? 'sop' : 'full');
-  const isSOPMode = activeMode === 'sop';
   const {
     market, scanDate, strategy,
     useCapitalMode, capitalConstraints,
@@ -44,9 +42,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
     cronDates, fetchCronDates,
   } = useBacktestStore();
 
-  // 根據 activeMode 設定掃描模式
   /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => { setScanMode(activeMode === 'sop' ? 'sop' : scanMode === 'sop' ? 'full' : scanMode); }, [activeMode]);
   // 載入 cron 歷史日期
   useEffect(() => { fetchCronDates(market); }, [market, fetchCronDates]);
 
@@ -64,8 +60,6 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
 
   // ── Backtest params collapsible ──
   const [showBacktestParams, setShowBacktestParams] = useState(false);
-  const [showPresetMenu, setShowPresetMenu] = useState(false);
-  const [presetName, setPresetName] = useState('');
 
   // ── One-click scan actions ──
   const isBusy = isScanning || isFetchingForward;
@@ -82,10 +76,9 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
     parts.push(`${strategy.holdDays}日`);
     parts.push(strategy.stopLoss != null ? `停損${(strategy.stopLoss * 100).toFixed(0)}%` : '不停損');
     parts.push(strategy.takeProfit != null ? `停利+${(strategy.takeProfit * 100).toFixed(0)}%` : '不停利');
-    if (strategy.ma5StopLoss) parts.push('MA5停損');
     parts.push(useCapitalMode ? '資本限制' : '無限資本');
     return parts.join(' · ');
-  }, [strategy.holdDays, strategy.stopLoss, strategy.takeProfit, strategy.ma5StopLoss, useCapitalMode]);
+  }, [strategy.holdDays, strategy.stopLoss, strategy.takeProfit, useCapitalMode]);
 
   return (
     <PageShell>
@@ -109,33 +102,18 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
               </div>
             </div>
 
-            {/* Mode — SOP / 完整模式切換 */}
+            {/* Direction — 做多/做空切換 */}
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground font-medium">模式</label>
+              <label className="text-xs text-muted-foreground font-medium">方向</label>
               <div className="flex rounded-lg overflow-hidden border border-border">
-                <Button onClick={() => { setActiveMode('sop'); clearCurrent(); }}
-                  variant={activeMode === 'sop' ? 'default' : 'secondary'}
-                  className="px-3 py-2 rounded-none text-sm font-medium">SOP</Button>
-                <Button onClick={() => { setActiveMode('full'); clearCurrent(); }}
-                  variant={activeMode === 'full' ? 'default' : 'secondary'}
-                  className="px-3 py-2 rounded-none text-sm font-medium">完整</Button>
+                <Button onClick={() => { setScanDirection('long'); clearCurrent(); }}
+                  variant={scanDirection === 'long' ? 'default' : 'secondary'}
+                  className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'long' ? 'bg-red-600 hover:bg-red-500' : ''}`}>做多</Button>
+                <Button onClick={() => { setScanDirection('short'); clearCurrent(); }}
+                  variant={scanDirection === 'short' ? 'default' : 'secondary'}
+                  className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'short' ? 'bg-green-600 hover:bg-green-500' : ''}`}>做空</Button>
               </div>
             </div>
-
-            {/* Direction — SOP 模式顯示做多/做空切換 */}
-            {isSOPMode && (
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground font-medium">方向</label>
-                <div className="flex rounded-lg overflow-hidden border border-border">
-                  <Button onClick={() => { setScanDirection('long'); clearCurrent(); }}
-                    variant={scanDirection === 'long' ? 'default' : 'secondary'}
-                    className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'long' ? 'bg-red-600 hover:bg-red-500' : ''}`}>做多</Button>
-                  <Button onClick={() => { setScanDirection('short'); clearCurrent(); }}
-                    variant={scanDirection === 'short' ? 'default' : 'secondary'}
-                    className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'short' ? 'bg-green-600 hover:bg-green-500' : ''}`}>做空</Button>
-                </div>
-              </div>
-            )}
 
             {/* Date */}
             <div className="space-y-1.5">
@@ -146,43 +124,6 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
               />
             </div>
 
-            {/* Strategy Picker — SOP 模式不需要（邏輯固定） */}
-            {!isSOPMode && (
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground font-medium">選股策略</label>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={activeStrategyId}
-                    onChange={e => setActiveStrategy(e.target.value)}
-                    className="bg-secondary border border-border text-foreground rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500"
-                  >
-                    {allStrategies.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <Link href="/strategies" className="text-xs text-muted-foreground hover:text-sky-400 transition-colors whitespace-nowrap">
-                    管理
-                  </Link>
-                </div>
-              </div>
-            )}
-
-            {/* 子模式切換 — 完整模式下可選 full/pure */}
-            {!isSOPMode && (
-              <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground font-medium">篩選子模式</label>
-                <div className="flex rounded-lg overflow-hidden border border-border">
-                  <Button onClick={() => { setScanMode('full'); clearCurrent(); }}
-                    variant={scanMode === 'full' ? 'default' : 'secondary'}
-                    className="px-3 py-2 rounded-none text-xs font-medium"
-                  >完整 (A)</Button>
-                  <Button onClick={() => { setScanMode('pure'); clearCurrent(); }}
-                    variant={scanMode === 'pure' ? 'default' : 'secondary'}
-                    className={`px-3 py-2 rounded-none text-xs font-medium ${scanMode === 'pure' ? 'bg-amber-600 hover:bg-amber-500' : ''}`}
-                  >純朱老師 (B)</Button>
-                </div>
-              </div>
-            )}
 
             {/* Scan Result Badge */}
             {scanResults.length > 0 && !isScanning && (
@@ -191,9 +132,6 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                 {' 選出 '}
                 <span className="text-amber-400 font-bold">{scanResults.length}</span>
                 {' 檔'}
-                {scanMode === 'pure' && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-900/50 text-amber-300">純朱老師</span>
-                )}
                 {scanMode === 'sop' && (
                   <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-900/50 text-amber-300">V2 SOP</span>
                 )}
@@ -233,34 +171,6 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                 </Button>
               )}
             </div>
-          </div>
-
-          {/* ── Scan Presets ── */}
-          <div className="border-t border-border px-5 py-2 flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground shrink-0">預設:</span>
-            {scanPresets.map(p => (
-              <span key={p.id} className="flex items-center gap-0.5 bg-secondary rounded px-2 py-1">
-                <Button onClick={() => loadScanPreset(p.id)} variant="ghost" size="sm" className="text-foreground/80 hover:text-foreground h-auto p-0">{p.name}</Button>
-                <Button onClick={() => deleteScanPreset(p.id)} variant="ghost" size="sm" className="text-muted-foreground hover:text-red-400 ml-1 h-auto p-0">✕</Button>
-              </span>
-            ))}
-            {showPresetMenu ? (
-              <span className="flex items-center gap-1">
-                <input
-                  value={presetName}
-                  onChange={e => setPresetName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && presetName.trim()) { saveScanPreset(presetName.trim()); setPresetName(''); setShowPresetMenu(false); } }}
-                  placeholder="預設名稱"
-                  className="w-24 bg-muted border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-500"
-                  autoFocus
-                />
-                <Button onClick={() => { if (presetName.trim()) { saveScanPreset(presetName.trim()); setPresetName(''); setShowPresetMenu(false); } }}
-                  variant="ghost" size="sm" className="text-sky-400 hover:text-sky-300 h-auto p-0">儲存</Button>
-                <Button onClick={() => setShowPresetMenu(false)} variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground h-auto p-0">取消</Button>
-              </span>
-            ) : (
-              <Button onClick={() => setShowPresetMenu(true)} variant="ghost" size="sm" className="text-sky-400 hover:text-sky-300 h-auto p-0">+ 儲存目前</Button>
-            )}
           </div>
 
           {/* ── Backtest Params (collapsible) ── */}
@@ -312,18 +222,6 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                     <option value="0.15">+15%</option>
                     <option value="0.20">+20%</option>
                   </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">MA5 停損</label>
-                  <Button
-                    onClick={() => setStrategy({ ma5StopLoss: !strategy.ma5StopLoss })}
-                    variant={strategy.ma5StopLoss ? 'default' : 'secondary'}
-                    className={`px-4 py-2 text-sm ${strategy.ma5StopLoss ? 'bg-violet-700/60 hover:bg-violet-600/60 border border-violet-600 text-violet-200' : ''}`}
-                    title="跌破 MA5 即出場，不論獲利或虧損"
-                  >
-                    {strategy.ma5StopLoss ? '跌破MA5出場' : '不使用'}
-                  </Button>
                 </div>
 
                 {/* Capital Mode Toggle */}

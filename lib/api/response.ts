@@ -28,19 +28,19 @@ interface ApiErrorResponse {
 
 export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 
-/** Return a success response */
-export function apiOk<T>(data: T, init?: ResponseInit): NextResponse<ApiSuccessResponse<T>> {
-  return NextResponse.json({ success: true as const, data }, init);
+/** Return a success response — spreads data at top level for backwards compatibility */
+export function apiOk<T>(data: T, init?: ResponseInit): NextResponse {
+  return NextResponse.json({ ok: true, ...(data as object) }, init);
 }
 
-/** Return an error response */
+/** Return an error response — uses { error } for backwards compatibility */
 export function apiError(
   message: string,
   status = 500,
   headers?: Record<string, string>,
-): NextResponse<ApiErrorResponse> {
+): NextResponse {
   return NextResponse.json(
-    { success: false as const, error: message },
+    { error: message },
     { status, headers },
   );
 }
@@ -48,13 +48,13 @@ export function apiError(
 /** Return a validation error from Zod */
 export function apiValidationError(
   error: ZodError,
-): NextResponse<ApiErrorResponse> {
+): NextResponse {
   const message = error.issues[0]?.message ?? '輸入格式錯誤';
   return apiError(message, 400);
 }
 
 /** Return a rate limit error */
-export function apiRateLimited(retryAfterMs: number): NextResponse<ApiErrorResponse> {
+export function apiRateLimited(retryAfterMs: number): NextResponse {
   return apiError('請求過於頻繁，請稍後再試', 429, {
     'Retry-After': String(Math.ceil(retryAfterMs / 1000)),
     'X-RateLimit-Remaining': '0',
