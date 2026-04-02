@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { PageShell } from '@/components/shared';
+import { Button } from '@/components/ui/button';
 import {
   RuleGroupAnalysisResult,
   MarketAnalysisResult,
@@ -77,6 +78,7 @@ function GroupStatsTable({ stats, title }: { stats: RuleGroupStats[]; title: str
     <th
       className="px-2 py-2 text-left text-xs cursor-pointer hover:text-blue-400 whitespace-nowrap"
       onClick={() => toggleSort(key)}
+      aria-sort={sortKey === key ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
     >
       {label} {sortKey === key ? (sortDir === 'desc' ? '↓' : '↑') : ''}
     </th>
@@ -295,17 +297,13 @@ export default function RuleGroupAnalysisPage() {
               對 18 個規則群組分別回測台股/陸股前 100 大，找出最有效的組合
             </p>
           </div>
-          <button
+          <Button
             onClick={startAnalysis}
             disabled={isRunning}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              isRunning
-                ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-500 text-foreground'
-            }`}
+            className="bg-blue-600 hover:bg-blue-500"
           >
             {isRunning ? '分析中...' : '開始分析'}
-          </button>
+          </Button>
         </div>
 
         {/* Progress */}
@@ -330,17 +328,15 @@ export default function RuleGroupAnalysisPage() {
             {/* Tab switch */}
             <div className="flex gap-2 border-b border-border pb-1">
               {(['TW', 'CN'] as const).map(m => (
-                <button
+                <Button
                   key={m}
                   onClick={() => setActiveTab(m)}
-                  className={`px-4 py-1.5 text-sm rounded-t-lg transition-colors ${
-                    activeTab === m
-                      ? 'bg-secondary text-foreground border-b-2 border-blue-500'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  variant={activeTab === m ? 'default' : 'secondary'}
+                  size="sm"
+                  className={activeTab === m ? 'rounded-t-lg rounded-b-none border-b-2 border-blue-500' : 'rounded-t-lg rounded-b-none'}
                 >
                   {m === 'TW' ? '台股' : '陸股'} 詳細排名
-                </button>
+                </Button>
               ))}
             </div>
 

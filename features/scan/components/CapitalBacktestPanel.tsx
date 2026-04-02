@@ -15,6 +15,7 @@ import { useState, useCallback } from 'react';
 import type { ScanSession } from '@/lib/scanner/types';
 import type { CapitalSimResult, CapitalSimTrade } from '@/lib/backtest/CapitalSimulator';
 import { retColor, fmtRet } from '../utils';
+import { Button } from '@/components/ui/button';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -291,13 +292,13 @@ export function CapitalBacktestPanel({ sessions }: CapitalBacktestPanelProps) {
         </div>
       </div>
 
-      <button
+      <Button
         onClick={run}
         disabled={loading || validSessions.length === 0}
-        className="px-6 py-2 text-sm font-medium rounded bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-foreground transition-colors"
+        className="px-6 py-2 text-sm font-medium bg-purple-600 hover:bg-purple-500 text-foreground"
       >
         {loading ? '模擬中…' : '執行資金模擬回測'}
-      </button>
+      </Button>
 
       {error && (
         <div className="text-sm text-red-400 bg-red-900/20 border border-red-800/40 rounded px-4 py-2">

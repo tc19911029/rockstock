@@ -254,6 +254,14 @@ export interface BacktestStats {
   coverageRate: number;         // 有效覆蓋率 % = count / (count + skippedCount)
   // ── 跳過原因分類（P0-2: 透明化倖存者偏差來源）──
   skipReasons?: SkipReasons;
+  // ── P2-4: 跳空缺口統計 ──
+  gapUpCount: number;           // 跳空高開 >5% 的筆數
+  // ── P2-7: 按市場狀態分類勝率 ──
+  winRateByRegime: {
+    bull:     { count: number; winRate: number } | null;
+    sideways: { count: number; winRate: number } | null;
+    bear:     { count: number; winRate: number } | null;
+  };
 }
 
 /** 回測跳過原因分類 */
@@ -386,9 +394,36 @@ export function runSingleBacktest(
   const stopLossPrice   = effectiveStopLoss !== null ? entryPrice * (1 + effectiveStopLoss) : null;
   const takeProfitPrice = strategy.takeProfit !== null ? entryPrice * (1 + strategy.takeProfit) : null;
 
+  // ── P2-2: ATR-based 移動停利（根據波動率動態調整追蹤距離）────────────────
+  // 計算 ATR14：使用進場後前 N 根 K 棒（最多 14 根）估計波動率
+  // 公式: TR = max(high-low, |high-prevClose|, |low-prevClose|)
+  let atrTrailingStop = strategy.trailingStop ?? null;
+  let atrTrailingActivate = strategy.trailingActivate ?? null;
+  const atrWindow = forwardCandles.slice(0, Math.min(14, forwardCandles.length));
+  if (atrWindow.length >= 5 && entryPrice > 0) {
+    let trSum = 0;
+    for (let ai = 0; ai < atrWindow.length; ai++) {
+      const c = atrWindow[ai];
+      const prev = ai > 0 ? atrWindow[ai - 1] : null;
+      const tr = prev
+        ? Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close))
+        : c.high - c.low;
+      trSum += tr;
+    }
+    const atr14 = trSum / atrWindow.length;
+    const atrPct = atr14 / entryPrice;
+    // 移動停利距離 = 2×ATR，啟動門檻 = 1.5×ATR（最小 2%，最大 12%）
+    const rawTrail = Math.min(Math.max(atrPct * 2, 0.02), 0.12);
+    const rawActivate = Math.min(Math.max(atrPct * 1.5, 0.015), 0.08);
+    if (strategy.trailingStop !== null) {
+      atrTrailingStop = rawTrail;
+      atrTrailingActivate = rawActivate;
+    }
+  }
+
   // ── 移動停利追蹤 ────────────────────────────────────────────────────────
-  const trailingStop     = strategy.trailingStop     ?? null;
-  const trailingActivate = strategy.trailingActivate ?? null;
+  const trailingStop     = atrTrailingStop;
+  const trailingActivate = atrTrailingActivate;
   let   highestPrice     = entryPrice;  // 追蹤持有期間最高價
   let   trailingActive   = false;       // 是否已啟動移動停利
 
@@ -568,6 +603,7 @@ export function runSingleBacktest(
     buyFee:    cost.buyFee,
     sellFee:   cost.sellFee,
     totalCost: cost.total,
+    ...(isGapUp && { isGapUp, gapUpPct }),
   };
 }
 
@@ -737,6 +773,14 @@ export function runSOPBacktest(
     const rangeRatio = entryCandle.low > 0 ? range / entryCandle.low : 0;
     const isLockUp = entryCandle.open === entryCandle.high && rangeRatio < 0.005;
     if (isLockUp) return null;
+  }
+
+  // P2-4: 跳空缺口標記
+  let isGapUp = false;
+  let gapUpPct: number | undefined;
+  if (signal.signalPrice && signal.signalPrice > 0) {
+    const gap = (rawEntryPrice - signal.signalPrice) / signal.signalPrice * 100;
+    if (gap >= 5) { isGapUp = true; gapUpPct = +gap.toFixed(2); }
   }
 
   const entryPrice = rawEntryPrice * (1 + strategy.slippagePct);
@@ -1056,6 +1100,7 @@ export function runSOPBacktest(
     buyFee:    cost.buyFee,
     sellFee:   cost.sellFee,
     totalCost: cost.total,
+    ...(isGapUp && { isGapUp, gapUpPct }),
   };
 }
 
@@ -1444,6 +1489,17 @@ export function calcBacktestStats(
     skippedCount,
     coverageRate,
     skipReasons,
+    gapUpCount: trades.filter(t => t.isGapUp).length,
+    // ── P2-7: 勝率按大盤狀態分類 ──
+    winRateByRegime: (() => {
+      function regimeStats(regime: string) {
+        const group = trades.filter(t => t.trendState === regime);
+        if (group.length === 0) return null;
+        const w = group.filter(t => t.netReturn > 0).length;
+        return { count: group.length, winRate: +(w / group.length * 100).toFixed(1) };
+      }
+      return { bull: regimeStats('多頭'), sideways: regimeStats('盤整'), bear: regimeStats('空頭') };
+    })(),
   };
 }
 

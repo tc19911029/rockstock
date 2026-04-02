@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { PageShell } from '@/components/shared';
+import { Button } from '@/components/ui/button';
 
 interface ConditionData {
   symbol: string;
@@ -35,7 +36,10 @@ const COND_KEYS = ['trend', 'position', 'kbar', 'ma', 'volume', 'indicator'] as 
 const COND_NAMES: Record<string, string> = { trend: '趨勢', position: '位置', kbar: 'K棒', ma: '均線', volume: '量能', indicator: '指標' };
 
 export default function WatchlistPage() {
-  const { items, remove, add } = useWatchlistStore();
+  const { items, remove, add, updateNote, addTag, removeTag } = useWatchlistStore();
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [noteInput, setNoteInput] = useState('');
+  const [tagInput, setTagInput] = useState<Record<string, string>>({});
   const [data, setData] = useState<Record<string, ConditionData>>({});
   const [addInput, setAddInput] = useState('');
   const [addLoading, setAddLoading] = useState(false);
@@ -101,10 +105,10 @@ export default function WatchlistPage() {
       <span className="font-bold text-sm whitespace-nowrap">⭐ 自選股</span>
       <span className="text-muted-foreground shrink-0">{items.length} 支</span>
       {lastUpdated && <span className="text-muted-foreground/60 hidden sm:block">{lastUpdated}</span>}
-      <button onClick={refreshAll} disabled={isRefreshing}
-        className="px-2 py-1 bg-muted hover:bg-muted/80 disabled:opacity-50 rounded transition text-foreground/80 flex items-center gap-1 font-medium">
+      <Button onClick={refreshAll} disabled={isRefreshing} variant="secondary" size="sm"
+        className="flex items-center gap-1">
         <span className={isRefreshing ? 'animate-spin' : ''}>↻</span><span className="hidden sm:inline">{isRefreshing ? '刷新中' : '刷新'}</span>
-      </button>
+      </Button>
     </div>
   );
 
@@ -121,10 +125,10 @@ export default function WatchlistPage() {
             placeholder="輸入股票代號（如：2330、AAPL）"
             className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-blue-500"
           />
-          <button onClick={handleAdd} disabled={addLoading || !addInput.trim()}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-lg text-sm font-bold transition">
+          <Button onClick={handleAdd} disabled={addLoading || !addInput.trim()}
+            className="bg-blue-600 hover:bg-blue-500 font-bold">
             {addLoading ? '載入中...' : '+ 加入'}
-          </button>
+          </Button>
         </div>
         {items.length === 0 && (
           <div className="text-center py-20 text-muted-foreground border border-dashed border-border rounded-xl">
@@ -206,16 +210,16 @@ export default function WatchlistPage() {
                       href={`/?load=${item.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
                       className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold transition"
                     >走圖</Link>
-                    <button onClick={() => remove(item.symbol)}
-                      className="px-2 py-1 bg-muted hover:bg-red-900/60 hover:text-red-300 rounded text-xs text-muted-foreground transition">
+                    <Button onClick={() => remove(item.symbol)} variant="ghost" size="sm"
+                      className="text-muted-foreground hover:bg-red-900/60 hover:text-red-300">
                       ✕
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
                 {/* Trend / position info row */}
                 {d && !d.loading && !d.error && (
-                  <div className="px-4 pb-2.5 flex items-center gap-2 flex-wrap">
+                  <div className="px-4 pb-1 flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-popover text-foreground/80 font-medium">{d.trend}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-popover text-foreground/80 font-medium">{d.position}</span>
                     <span className="ml-auto text-[10px] text-muted-foreground/60">
@@ -223,6 +227,56 @@ export default function WatchlistPage() {
                     </span>
                   </div>
                 )}
+
+                {/* Tags */}
+                <div className="px-4 pb-1.5 flex flex-wrap items-center gap-1 min-h-[28px]">
+                  {(item.tags ?? []).map(tag => (
+                    <span key={tag} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-sky-900/50 text-sky-300 border border-sky-700/40">
+                      {tag}
+                      <button onClick={() => removeTag(item.symbol, tag)} className="hover:text-red-400 transition-colors ml-0.5 leading-none">&times;</button>
+                    </span>
+                  ))}
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      value={tagInput[item.symbol] ?? ''}
+                      onChange={e => setTagInput(p => ({ ...p, [item.symbol]: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          const v = (tagInput[item.symbol] ?? '').trim();
+                          if (v) { addTag(item.symbol, v); setTagInput(p => ({ ...p, [item.symbol]: '' })); }
+                        }
+                      }}
+                      placeholder="+ 標籤"
+                      className="text-[10px] w-16 bg-transparent border-b border-border/50 focus:border-sky-500 outline-none text-muted-foreground placeholder-muted-foreground/50 py-0.5"
+                    />
+                  </div>
+                </div>
+
+                {/* Note */}
+                <div className="px-4 pb-2.5">
+                  {editingNote === item.symbol ? (
+                    <div className="flex gap-1">
+                      <textarea
+                        autoFocus
+                        value={noteInput}
+                        onChange={e => setNoteInput(e.target.value)}
+                        onBlur={() => { updateNote(item.symbol, noteInput); setEditingNote(null); }}
+                        onKeyDown={e => { if (e.key === 'Escape') { setNoteInput(item.note ?? ''); setEditingNote(null); } }}
+                        rows={2}
+                        className="flex-1 text-[11px] bg-muted/60 border border-sky-500/50 rounded px-2 py-1 text-foreground/80 resize-none focus:outline-none"
+                        placeholder="記錄觀察重點（如：等回測MA20、量能不足觀察中）"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setNoteInput(item.note ?? ''); setEditingNote(item.symbol); }}
+                      className="w-full text-left text-[11px] text-muted-foreground/60 hover:text-muted-foreground italic py-0.5"
+                    >
+                      {item.note ? item.note : '點擊新增筆記...'}
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

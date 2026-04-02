@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { PageShell } from '@/components/shared';
+import { Button } from '@/components/ui/button';
 import { useBacktestStore } from '@/store/backtestStore';
 import { BacktestTrade } from '@/lib/backtest/BacktestEngine';
 import { BacktestSession } from '@/lib/scanner/types';
@@ -164,6 +165,7 @@ function SortableHeader({
     <th
       className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground whitespace-nowrap"
       onClick={() => onClick(sortKey)}
+      aria-sort={active ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}
     >
       {label}
       {active && <span className="ml-1 text-blue-400">{dir === 'asc' ? '▲' : '▼'}</span>}
@@ -290,12 +292,13 @@ export default function ReportPage() {
             回測
           </Link>
           {hasData && (
-            <button
+            <Button
               onClick={() => exportCSV(filteredTrades)}
-              className="text-xs px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-foreground font-medium transition"
+              className="text-xs bg-emerald-700 hover:bg-emerald-600"
+              size="sm"
             >
               匯出 CSV
-            </button>
+            </Button>
           )}
         </div>
 
@@ -317,33 +320,29 @@ export default function ReportPage() {
               <div className="flex items-center gap-1.5 text-xs">
                 <span className="text-muted-foreground">市場：</span>
                 {(['ALL', 'TW', 'CN'] as MarketFilter[]).map(m => (
-                  <button
+                  <Button
                     key={m}
                     onClick={() => setMarketFilter(m)}
-                    className={`px-2.5 py-1 rounded font-medium transition ${
-                      marketFilter === m
-                        ? 'bg-blue-600 text-foreground'
-                        : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    }`}
+                    variant={marketFilter === m ? 'default' : 'secondary'}
+                    size="sm"
+                    className={marketFilter === m ? 'bg-blue-600 hover:bg-blue-500' : ''}
                   >
                     {m === 'ALL' ? '全部' : m === 'TW' ? '台股' : '陸股'}
-                  </button>
+                  </Button>
                 ))}
               </div>
               <div className="flex items-center gap-1.5 text-xs">
                 <span className="text-muted-foreground">分組：</span>
                 {(['none', 'month', 'score'] as GroupBy[]).map(g => (
-                  <button
+                  <Button
                     key={g}
                     onClick={() => setGroupBy(g)}
-                    className={`px-2.5 py-1 rounded font-medium transition ${
-                      groupBy === g
-                        ? 'bg-blue-600 text-foreground'
-                        : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    }`}
+                    variant={groupBy === g ? 'default' : 'secondary'}
+                    size="sm"
+                    className={groupBy === g ? 'bg-blue-600 hover:bg-blue-500' : ''}
                   >
                     {g === 'none' ? '全部' : g === 'month' ? '月份' : '六大條件分數'}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>

@@ -25,10 +25,6 @@ __pycache__/
 /.next/
 /out/
 
-# serwist service worker (build artifact)
-/public/sw.js
-/public/sw.js.map
-
 # production
 /build
 
@@ -52,3 +48,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .cache/
+
+# Capacitor native build artifacts
+/ios/App/Pods/
+/ios/DerivedData/
+/android/.gradle/
+/android/app/build/
+/android/build/
+/android/local.properties

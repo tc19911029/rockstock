@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { toast } from 'sonner';
 import Link from 'next/link';
 import { ChevronDown, Star, Briefcase } from 'lucide-react';
 import { POLLING } from '@/lib/config';
@@ -93,7 +94,6 @@ export default function BottomPanel() {
         return next;
       });
     } catch {
-      // Mark all as failed so UI shows error instead of stale "..."
       setPrices(prev => {
         const next = { ...prev };
         for (const s of uniqueSymbols) {
@@ -103,6 +103,7 @@ export default function BottomPanel() {
         }
         return next;
       });
+      toast.error('報價更新失敗，請檢查網路連線', { id: 'quote-error', duration: 4000 });
     }
   }, [uniqueSymbols.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 

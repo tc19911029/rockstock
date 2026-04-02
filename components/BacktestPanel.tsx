@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { RuleEngine, ruleEngine } from '@/lib/rules/ruleEngine';
 import { useSettingsStore } from '@/store/settingsStore';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 const MARKER_PRIORITY: Record<string, number> = { SELL: 4, BUY: 3, REDUCE: 2, ADD: 1, WATCH: 0 };
 
@@ -104,9 +106,10 @@ function TradeCard({ trade: t, index: i, fmt }: { trade: Trade; index: number; f
   return (
     <div className="bg-card rounded-lg overflow-hidden">
       {/* Summary row — always visible */}
-      <button
+      <Button
         onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-secondary/60 transition text-left"
+        variant="ghost"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-secondary/60 justify-start h-auto"
       >
         <span className="text-muted-foreground/60 text-xs w-4 shrink-0">{i + 1}</span>
         <div className="flex-1 min-w-0 text-xs font-mono">
@@ -128,7 +131,7 @@ function TradeCard({ trade: t, index: i, fmt }: { trade: Trade; index: number; f
           <span className="text-[10px] ml-1 opacity-70">({t.pnlPct?.toFixed(1)}%)</span>
         </div>
         <span className="text-muted-foreground/60 text-[10px] shrink-0">{expanded ? '▲' : '▼'}</span>
-      </button>
+      </Button>
 
       {/* Detail — expanded */}
       {expanded && (
@@ -393,29 +396,34 @@ export default function BacktestPanel() {
 
   return (
     <div className="bg-secondary/80 border border-border rounded-xl overflow-hidden">
-      <button
+      <Button
         onClick={() => setShow(v => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-foreground hover:bg-muted/50 transition"
+        variant="ghost"
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-foreground hover:bg-muted/50 h-auto"
       >
         <span>📊 自動走圖分析（回測）</span>
         <span className="text-muted-foreground text-xs">{show ? '▲ 收起' : '▼ 展開'}</span>
-      </button>
+      </Button>
 
       {show && (
         <div className="px-4 pb-1 border-b border-border flex gap-2">
           <span className="text-xs text-muted-foreground self-center">回測模式：</span>
-          <button
+          <Button
             onClick={() => setMode('composite')}
-            className={`px-3 py-1 rounded text-xs font-medium transition ${mode === 'composite' ? 'bg-blue-600 text-foreground' : 'bg-muted text-muted-foreground hover:bg-muted'}`}
+            variant={mode === 'composite' ? 'default' : 'secondary'}
+            size="sm"
+            className={mode === 'composite' ? 'bg-blue-600 hover:bg-blue-500' : ''}
           >
             朱老師複合條件
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setMode('signal')}
-            className={`px-3 py-1 rounded text-xs font-medium transition ${mode === 'signal' ? 'bg-blue-600 text-foreground' : 'bg-muted text-muted-foreground hover:bg-muted'}`}
+            variant={mode === 'signal' ? 'default' : 'secondary'}
+            size="sm"
+            className={mode === 'signal' ? 'bg-blue-600 hover:bg-blue-500' : ''}
           >
             信號驅動
-          </button>
+          </Button>
         </div>
       )}
 
@@ -426,38 +434,40 @@ export default function BacktestPanel() {
           <div className="flex flex-wrap gap-3 pt-3 items-end">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">起始日期</label>
-              <input type="date" value={startDate} min={minDate} max={endDate}
+              <Input type="date" value={startDate} min={minDate} max={endDate}
                 onChange={e => setStartDate(e.target.value)}
-                className="bg-muted border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-blue-500" />
+                className="bg-muted text-xs h-8" />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">結束日期</label>
-              <input type="date" value={endDate} min={startDate} max={maxDate}
+              <Input type="date" value={endDate} min={startDate} max={maxDate}
                 onChange={e => setEndDate(e.target.value)}
-                className="bg-muted border border-border rounded-lg px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-blue-500" />
+                className="bg-muted text-xs h-8" />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">初始資金（元）</label>
-              <input type="text" value={capitalInput}
+              <Input type="text" value={capitalInput}
                 onChange={e => setCapitalInput(e.target.value)}
                 placeholder="1000000"
-                className="bg-muted border border-border rounded-lg px-2 py-1.5 text-xs text-foreground w-32 focus:outline-none focus:border-blue-500" />
+                className="bg-muted text-xs h-8 w-32" />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">每次倉位</label>
               <div className="flex gap-1">
                 {POSITION_OPTIONS.map(opt => (
-                  <button key={opt.label} onClick={() => setPositionPct(opt.pct)}
-                    className={`px-2 py-1.5 rounded-lg text-xs font-medium transition ${positionPct === opt.pct ? 'bg-blue-600 text-foreground' : 'bg-muted hover:bg-muted text-muted-foreground'}`}>
+                  <Button key={opt.label} onClick={() => setPositionPct(opt.pct)}
+                    variant={positionPct === opt.pct ? 'default' : 'secondary'}
+                    size="sm"
+                    className={positionPct === opt.pct ? 'bg-blue-600 hover:bg-blue-500' : ''}>
                     {opt.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
-            <button onClick={runBacktest}
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-bold text-foreground transition">
+            <Button onClick={runBacktest}
+              className="bg-blue-600 hover:bg-blue-500">
               開始分析
-            </button>
+            </Button>
           </div>
 
           {/* ── Results ── */}

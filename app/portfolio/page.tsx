@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePortfolioStore, PortfolioHolding } from '@/store/portfolioStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { PageShell } from '@/components/shared';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface PriceData {
   price: number;
@@ -93,11 +95,43 @@ export default function PortfolioPage() {
 
   const totalReturn = summary.totalCost > 0 ? (summary.totalPnL / summary.totalCost) * 100 : 0;
 
+  function exportCSV() {
+    if (holdings.length === 0) return;
+    const rows = [
+      ['股票代號', '名稱', '股數', '成本價', '買入日期', '現價', '損益(元)', '損益(%)'],
+      ...holdings.map(h => {
+        const p = prices[h.symbol];
+        const currentPrice = p?.price ?? 0;
+        const pnl = currentPrice > 0 ? (currentPrice - h.costPrice) * h.shares : 0;
+        const pnlPct = h.costPrice > 0 ? ((currentPrice - h.costPrice) / h.costPrice) * 100 : 0;
+        return [
+          h.symbol,
+          h.name,
+          h.shares,
+          h.costPrice.toFixed(2),
+          h.buyDate,
+          currentPrice > 0 ? currentPrice.toFixed(2) : '',
+          currentPrice > 0 ? pnl.toFixed(0) : '',
+          currentPrice > 0 ? pnlPct.toFixed(2) + '%' : '',
+        ];
+      }),
+    ];
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `portfolio_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const portfolioHeader = (
     <div className="flex items-center gap-2 text-xs">
       <span className="font-bold text-sm whitespace-nowrap">💼 持倉</span>
-      <button onClick={() => usePortfolioStore.getState().exportJSON()}
-        className="px-2 py-1 bg-muted hover:bg-muted/80 rounded transition" title="匯出備份">匯出</button>
+      <Button variant="secondary" size="sm" onClick={() => usePortfolioStore.getState().exportJSON()}
+        title="匯出備份 JSON">匯出</Button>
+      <Button variant="secondary" size="sm" onClick={exportCSV} title="匯出 CSV（含損益，可用於報稅）">CSV</Button>
       <label className="px-2 py-1 bg-muted hover:bg-muted/80 rounded transition cursor-pointer" title="匯入備份">
         匯入
         <input type="file" accept=".json" className="hidden" onChange={e => {
@@ -112,10 +146,10 @@ export default function PortfolioPage() {
           e.target.value = '';
         }} />
       </label>
-      <button onClick={() => { cancelForm(); setShowForm(v => !v); }}
-        className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded font-bold transition text-white">
+      <Button size="sm" onClick={() => { cancelForm(); setShowForm(v => !v); }}
+        className="bg-blue-600 hover:bg-blue-500 font-bold">
         + 新增
-      </button>
+      </Button>
     </div>
   );
 
@@ -146,36 +180,35 @@ export default function PortfolioPage() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">股票代號</label>
-                <input value={form.symbol} onChange={e => setForm(f => ({ ...f, symbol: e.target.value }))}
+                <Input value={form.symbol} onChange={e => setForm(f => ({ ...f, symbol: e.target.value }))}
                   placeholder="2330 / AAPL"
                   disabled={!!editId}
-                  className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-blue-500 disabled:opacity-60" />
+                  className="bg-muted border-border focus:border-blue-500 disabled:opacity-60" />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">加入日期</label>
-                <input type="date" value={form.buyDate} onChange={e => setForm(f => ({ ...f, buyDate: e.target.value }))}
-                  className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-blue-500" />
+                <Input type="date" value={form.buyDate} onChange={e => setForm(f => ({ ...f, buyDate: e.target.value }))}
+                  className="bg-muted border-border focus:border-blue-500" />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">持股數</label>
-                <input type="number" value={form.shares} onChange={e => setForm(f => ({ ...f, shares: e.target.value }))}
+                <Input type="number" value={form.shares} onChange={e => setForm(f => ({ ...f, shares: e.target.value }))}
                   placeholder="1000"
-                  className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-blue-500" />
+                  className="bg-muted border-border focus:border-blue-500" />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">成本價（買進均價）</label>
-                <input type="number" value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
+                <Input type="number" value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
                   placeholder="150.00"
-                  className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm text-foreground focus:outline-none focus:border-blue-500" />
+                  className="bg-muted border-border focus:border-blue-500" />
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={handleAdd} disabled={formLoading || !form.symbol || !form.shares || !form.costPrice}
-                className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-lg text-sm font-bold transition">
+              <Button onClick={handleAdd} disabled={formLoading || !form.symbol || !form.shares || !form.costPrice}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 font-bold">
                 {formLoading ? '載入中...' : editId ? '儲存變更' : '確認新增'}
-              </button>
-              <button onClick={cancelForm}
-                className="px-4 py-2 bg-muted hover:bg-muted/80 rounded-lg text-sm transition">取消</button>
+              </Button>
+              <Button variant="secondary" onClick={cancelForm}>取消</Button>
             </div>
           </div>
         )}
@@ -186,10 +219,10 @@ export default function PortfolioPage() {
             <p className="text-sm font-medium text-muted-foreground">尚未新增任何持倉</p>
             <p className="text-xs text-muted-foreground/60">追蹤你的持股，即時查看損益、停損/停利提醒</p>
             <div className="flex justify-center gap-3 mt-2">
-              <button onClick={() => setShowForm(true)}
-                className="text-xs px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg transition font-medium">
+              <Button size="sm" onClick={() => setShowForm(true)}
+                className="bg-sky-600 hover:bg-sky-500 font-medium">
                 + 新增第一筆持倉
-              </button>
+              </Button>
               <Link href="/scanner"
                 className="text-xs px-4 py-2 bg-secondary hover:bg-muted text-foreground/80 rounded-lg transition border border-border">
                 去掃描選股
@@ -253,10 +286,8 @@ export default function PortfolioPage() {
                   <div className="flex gap-1 shrink-0">
                     <Link href={`/?load=${h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
                       className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold transition">走圖</Link>
-                    <button onClick={() => openEdit(h)}
-                      className="px-2 py-1 bg-muted hover:bg-muted/80 rounded text-xs text-muted-foreground hover:text-foreground/90 transition">編輯</button>
-                    <button onClick={() => remove(h.id)}
-                      className="px-2 py-1 bg-muted hover:bg-red-900/60 hover:text-red-300 rounded text-xs text-muted-foreground transition">刪除</button>
+                    <Button variant="secondary" size="sm" onClick={() => openEdit(h)}>編輯</Button>
+                    <Button variant="destructive" size="sm" onClick={() => remove(h.id)}>刪除</Button>
                   </div>
                 </div>
 

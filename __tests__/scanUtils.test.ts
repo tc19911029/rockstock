@@ -54,12 +54,12 @@ describe('calcComposite', () => {
 // ── retColor ─────────────────────────────────────────────────────────────────────
 
 describe('retColor', () => {
-  it('returns red class for positive returns (Asian convention: up = red)', () => {
-    expect(retColor(5)).toMatch(/red/);
+  it('returns bull class for positive returns (Asian convention: up = red/bull)', () => {
+    expect(retColor(5)).toMatch(/red|bull/);
   });
 
-  it('returns green class for negative returns', () => {
-    expect(retColor(-3)).toMatch(/green/);
+  it('returns bear class for negative returns', () => {
+    expect(retColor(-3)).toMatch(/green|bear/);
   });
 
   it('returns neutral class for zero or nullish', () => {

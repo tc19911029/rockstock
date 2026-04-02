@@ -130,7 +130,7 @@ export default function ScanResultCard({ result: r, actions }: { result: StockSc
         <span className={`text-xs font-bold px-2 py-1 rounded shrink-0 ${
           r.sixConditionsScore >= 5 ? 'bg-red-600/80 text-foreground' :
           r.sixConditionsScore >= 3 ? 'bg-yellow-500/80 text-black' :
-          'bg-gray-600 text-gray-200'
+          'bg-muted text-muted-foreground'
         }`}>
           {r.sixConditionsScore}/6
         </span>

@@ -7,9 +7,14 @@
 
 body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  /* iOS safe area padding for Capacitor / PWA standalone mode */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
-/* Scrollbar */
+/* Scrollbar — WebKit */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -23,6 +28,11 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: oklch(0.55 0 0 / 70%);
+}
+/* Scrollbar — Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.45 0 0 / 50%) transparent;
 }
 
 @theme inline {

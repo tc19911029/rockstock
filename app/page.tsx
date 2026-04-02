@@ -19,6 +19,7 @@ import dynamic from 'next/dynamic';
 import { useReplayStore } from '@/store/replayStore';
 import StockSelector from '@/components/StockSelector';
 import { PageShell } from '@/components/shared';
+import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import ReplayControls from '@/components/ReplayControls';
 import RuleAlerts from '@/components/RuleAlerts';
 import ProhibitionAlerts from '@/components/ProhibitionAlerts';
@@ -30,6 +31,8 @@ import TrendStateBar from '@/components/TrendStateBar';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
 import BottomPanel from '@/components/BottomPanel';
 import { useSettingsStore } from '@/store/settingsStore';
+import { toast } from 'sonner';
+import ChartToolbar from '@/components/ChartToolbar';
 
 const CandleChart = dynamic(() => import('@/components/CandleChart'), {
   ssr: false,
@@ -66,7 +69,9 @@ export default function HomePage() {
       setLoadError(null);
       if (date) pendingJumpRef.current = date;
       loadStock(sym, '1d', '2y').catch((e: Error) => {
-        setLoadError(`載入 ${sym} 失敗：${e.message || '請稍後再試'}`);
+        const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
+        setLoadError(msg);
+        toast.error(msg);
       });
       window.history.replaceState({}, '', '/');
     } else if (allCandles.length === 0) {
@@ -96,17 +101,26 @@ export default function HomePage() {
     if (e.key === 'ArrowRight') { e.preventDefault(); nextCandle(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); prevCandle(); }
     else if (e.key === ' ') { e.preventDefault(); if (isPlaying) stopPlay(); else startPlay(); }
-    // P2-6: 買賣快捷鍵
+    // P2-3: tab switching
+    else if (e.key === '1') { e.preventDefault(); setSideTab('conditions'); }
+    else if (e.key === '2') { e.preventDefault(); setSideTab('signals'); }
+    else if (e.key === '3') { e.preventDefault(); setSideTab('chip'); }
+    else if (e.key === '4') { e.preventDefault(); setSideTab('chat'); }
+    // P2-3: indicator toggle
+    else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); setShowIndicators(v => !v); }
+    // P1-5: help overlay
+    else if (e.key === '?') { e.preventDefault(); setShowHelp(h => !h); }
+    // 買賣快捷鍵
     else if (e.key === 'b' || e.key === 'B') {
       e.preventDefault();
-      useReplayStore.getState().buyPercent(100); // 全倉買入
+      useReplayStore.getState().buyPercent(100);
     } else if (e.key === 's' || e.key === 'S') {
       e.preventDefault();
-      useReplayStore.getState().sellPercent(50); // 賣出半倉
+      useReplayStore.getState().sellPercent(50);
     } else if (e.key === 'q' || e.key === 'Q') {
       e.preventDefault();
       const { metrics } = useReplayStore.getState();
-      if (metrics.shares > 0) useReplayStore.getState().sell(metrics.shares); // 全出
+      if (metrics.shares > 0) useReplayStore.getState().sell(metrics.shares);
     }
   }, [nextCandle, prevCandle, isPlaying, startPlay, stopPlay]);
 
@@ -116,12 +130,23 @@ export default function HomePage() {
   }, [handleKey]);
 
   const [hoverCandle, setHoverCandle] = useState<typeof allCandles[0] | null>(null);
-  const [sideTab, setSideTab] = useState<SideTab>('conditions');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const currentInterval = useReplayStore(s => s.currentInterval);
+  // P1-2: remember last tab per interval
+  const [sideTabPerInterval, setSideTabPerInterval] = useState<Record<string, SideTab>>({});
+  const sideTab: SideTab = sideTabPerInterval[currentInterval] ?? 'conditions';
+  const setSideTab = (tab: SideTab) => setSideTabPerInterval(prev => ({ ...prev, [currentInterval]: tab }));
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
   const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true });
   const [showBollinger, setShowBollinger] = useState(false);
   const [indicators, setIndicators] = useState({ macd: true, kd: true, volume: true, rsi: false });
+  // P0-3: hide indicator subcharts by default on mobile
+  const [showIndicators, setShowIndicators] = useState(true);
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) setShowIndicators(false);
+  }, []);
+  // P1-5: keyboard shortcut help overlay
+  const [showHelp, setShowHelp] = useState(false);
 
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
   // 預設 0.48，mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
@@ -155,14 +180,35 @@ export default function HomePage() {
     window.addEventListener('mouseup', handleUp);
   }, []);
 
+  // P3-8: Sound alert when a new signal appears during replay
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const prevSignalCountRef = useRef(0);
+  const soundEnabledRef = useRef(true);
+  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
+  useEffect(() => {
+    const prev = prevSignalCountRef.current;
+    const curr = currentSignals.length;
+    if (isPlaying && curr > prev && soundEnabledRef.current) {
+      try {
+        const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } catch { /* AudioContext not available */ }
+    }
+    prevSignalCountRef.current = curr;
+  }, [currentSignals, isPlaying]);
+
   const displayCandle = hoverCandle ?? allCandles[currentIndex];
   const prev = hoverCandle
     ? allCandles[allCandles.findIndex(c => c.date === hoverCandle.date) - 1]
     : allCandles[currentIndex - 1];
-  const chg = displayCandle && prev ? displayCandle.close - prev.close : 0;
-  const chgPct = displayCandle && prev ? (chg / prev.close) * 100 : 0;
-  const isUp = chg >= 0;
-
   const stopLossPct = useSettingsStore(s => s.stopLossPercent);
   const condScore = sixConditions?.totalScore ?? 0;
   const condAlert = condScore >= 5;
@@ -185,11 +231,63 @@ export default function HomePage() {
     { key: 'chat',       label: '問老師' },
   ];
 
+  const sidebarTabs = (
+    <div className="shrink-0 flex items-center gap-1">
+      <div role="tablist" aria-label="分析面板" className="flex flex-1 rounded-lg overflow-hidden border border-border text-xs">
+        {SIDE_TABS.map(t => (
+          <button key={t.key} role="tab" aria-selected={sideTab === t.key} aria-controls={`panel-${t.key}`}
+            onClick={() => setSideTab(t.key)}
+            className={`flex-1 py-1.5 font-medium transition-colors relative ${
+              sideTab === t.key ? 'bg-blue-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'
+            } ${t.alert && sideTab !== t.key ? 'bg-green-900/40 text-green-300' : ''}`}
+          >
+            {t.label}
+            {t.alert && sideTab !== t.key && (
+              <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const sidebarContent = sideTab === 'chat' ? (
+    <div id="panel-chat" role="tabpanel" className="flex-1 min-h-0">
+      <AnalysisChat sidebar />
+    </div>
+  ) : (
+    <div
+      id={`panel-${sideTab}`}
+      role="tabpanel"
+      className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5"
+    >
+      {sideTab === 'conditions' && (
+        <SectionBoundary section="六大條件">
+          <SixConditionsPanel />
+        </SectionBoundary>
+      )}
+      {sideTab === 'signals' && (
+        <SectionBoundary section="訊號分析">
+          <div className="space-y-2">
+            <ProhibitionAlerts />
+            <WinnerPatternAlerts />
+            <RuleAlerts />
+          </div>
+        </SectionBoundary>
+      )}
+      {sideTab === 'chip' && currentStock && (
+        <SectionBoundary section="籌碼分析">
+          <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
+        </SectionBoundary>
+      )}
+    </div>
+  );
+
   return (
     <PageShell fullViewport headerSlot={<StockSelector />}>
       <div className="flex-1 flex flex-col md:flex-row gap-2 px-3 py-2 min-h-0 overflow-hidden h-full">
 
-        {/* Left: Chart */}
+        {/* Left: Chart + BottomPanel (desktop) */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 gap-1.5">
           <div
             ref={chartContainerRef}
@@ -224,101 +322,28 @@ export default function HomePage() {
 
             {/* OHLCV bar + 指標切換列 */}
             {displayCandle && (
-              <div className="shrink-0 flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-0.5 px-2 sm:px-3 py-1 sm:py-1.5 border-b border-border text-[10px] sm:text-xs font-mono">
-                {currentStock && (
-                  <span className="text-foreground font-bold font-sans mr-1">{currentStock.name}</span>
-                )}
-                <span className={hoverCandle ? 'text-blue-400' : 'text-muted-foreground'}>{displayCandle.date}</span>
-                <span className={`text-sm font-bold ${isUp ? 'text-bull' : 'text-bear'}`}>
-                  {displayCandle.close.toFixed(2)}
-                </span>
-                <span className={`font-bold ${isUp ? 'text-bull' : 'text-bear'}`}>
-                  {isUp ? '▲' : '▼'}{Math.abs(chg).toFixed(2)} ({Math.abs(chgPct).toFixed(2)}%)
-                </span>
-                <span className="text-muted-foreground">開<span className="text-foreground ml-0.5">{displayCandle.open.toFixed(2)}</span></span>
-                <span className="text-muted-foreground">高<span className="text-bull ml-0.5">{displayCandle.high.toFixed(2)}</span></span>
-                <span className="text-muted-foreground">低<span className="text-bear ml-0.5">{displayCandle.low.toFixed(2)}</span></span>
-                <span className="text-muted-foreground">量<span className="text-foreground/80 ml-0.5">{(displayCandle.volume / 1000).toFixed(0)}K</span></span>
-                {/* 工具列：均線開關 + 指標選擇 + 訊號 */}
-                <div className="ml-auto flex items-center gap-1 shrink-0 flex-wrap">
-                  {([
-                    { key: 'ma5' as const, label: 'MA5', color: 'bg-yellow-600' },
-                    { key: 'ma10' as const, label: 'MA10', color: 'bg-pink-600' },
-                    { key: 'ma20' as const, label: 'MA20', color: 'bg-blue-600' },
-                    { key: 'ma60' as const, label: 'MA60', color: 'bg-purple-600' },
-                  ]).map(({ key, label, color }) => (
-                    <button key={key}
-                      onClick={() => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition ${
-                        maToggles[key] ? `${color}/70 text-foreground` : 'bg-secondary text-muted-foreground/60'
-                      }`}
-                      title={`顯示/隱藏 ${label}`}
-                    >{label}</button>
-                  ))}
-                  <span className="w-px h-3 bg-border mx-0.5" />
-                  <button
-                    onClick={() => setShowBollinger(v => !v)}
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition ${
-                      showBollinger ? 'bg-emerald-700/60 text-emerald-200' : 'bg-secondary text-muted-foreground/60'
-                    }`}
-                    title="布林通道 (20, 2)"
-                  >BB</button>
-                  <span className="w-px h-3 bg-border mx-0.5" />
-                  {([
-                    { key: 'macd' as const, label: 'MACD' },
-                    { key: 'kd' as const, label: 'KD' },
-                    { key: 'rsi' as const, label: 'RSI' },
-                    { key: 'volume' as const, label: '量' },
-                  ]).map(({ key, label }) => (
-                    <button key={key}
-                      onClick={() => setIndicators(p => ({ ...p, [key]: !p[key] }))}
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition ${
-                        indicators[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/60'
-                      }`}
-                    >{label}</button>
-                  ))}
-                  <span className="w-px h-3 bg-border mx-0.5" />
-                  <button
-                    onClick={() => setShowMarkers(v => !v)}
-                    className={`px-1.5 py-0.5 rounded text-[9px] font-medium transition ${
-                      showMarkers ? 'bg-blue-600/60 text-blue-200' : 'bg-secondary text-muted-foreground/60'
-                    }`}
-                    title="顯示/隱藏買賣訊號標記"
-                  >訊號</button>
-                  {showMarkers && (
-                    <select
-                      value={signalStrengthMin}
-                      onChange={e => setSignalStrengthMin(Number(e.target.value))}
-                      className="px-1 py-0.5 rounded text-[9px] font-medium bg-secondary text-foreground/80 border border-border outline-none"
-                      title="信號共振強度過濾"
-                    >
-                      <option value={1}>全部</option>
-                      <option value={2}>共振≥2</option>
-                      <option value={3}>強≥3</option>
-                    </select>
-                  )}
-                </div>
-                {metrics.shares > 0 && displayCandle && (() => {
-                  const unrealizedPct = metrics.avgCost > 0
-                    ? ((displayCandle.close - metrics.avgCost) / metrics.avgCost) * 100
-                    : 0;
-                  const pnlPos = unrealizedPct >= 0;
-                  return (
-                    <span className="ml-auto flex items-center gap-2">
-                      <span className="text-muted-foreground">
-                        均價<span className="text-yellow-400 font-bold ml-0.5">{metrics.avgCost.toFixed(2)}</span>
-                      </span>
-                      <span className={`font-bold text-xs ${pnlPos ? 'text-bull' : 'text-bear'}`}>
-                        {pnlPos ? '+' : ''}{unrealizedPct.toFixed(2)}%
-                      </span>
-                    </span>
-                  );
-                })()}
-              </div>
+              <ChartToolbar
+                candle={displayCandle}
+                prevCandle={prev}
+                isHover={!!hoverCandle}
+                stockName={currentStock?.name}
+                maToggles={maToggles}
+                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                showBollinger={showBollinger}
+                onBollingerToggle={() => setShowBollinger(v => !v)}
+                indicators={indicators}
+                onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                showMarkers={showMarkers}
+                onMarkersToggle={() => setShowMarkers(v => !v)}
+                signalStrengthMin={signalStrengthMin}
+                onSignalStrengthChange={setSignalStrengthMin}
+                avgCost={metrics.avgCost}
+                shares={metrics.shares}
+              />
             )}
 
             {/* K 線圖 */}
-            <div className="shrink-0" style={{ height: `${chartSplit * 100}%` }}>
+            <div className={showIndicators ? 'shrink-0' : 'flex-1 min-h-0'} style={showIndicators ? { height: `${chartSplit * 100}%` } : undefined}>
               <ErrorBoundary>
                 <CandleChart
                   candles={visibleCandles}
@@ -338,103 +363,128 @@ export default function HomePage() {
               </ErrorBoundary>
             </div>
 
-            {/* 拖拽分隔條 */}
-            <div
-              className="shrink-0 h-1.5 bg-secondary hover:bg-blue-500/60 cursor-row-resize flex items-center justify-center group select-none"
-              onMouseDown={startSplitDrag}
-              title="拖拽調整 K 線 / 副圖比例"
-            >
-              <div className="w-8 h-px bg-muted-foreground/40 group-hover:bg-blue-400 rounded-full transition-colors" />
+            {/* 拖拽分隔條 + 副圖展開按鈕 */}
+            <div className="shrink-0 flex items-center">
+              {showIndicators ? (
+                <div
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="拖拽調整 K 線圖與副圖比例"
+                  className="flex-1 h-1.5 bg-secondary hover:bg-blue-500/60 cursor-row-resize flex items-center justify-center group select-none"
+                  onMouseDown={startSplitDrag}
+                  title="拖拽調整 K 線 / 副圖比例"
+                >
+                  <div className="w-8 h-px bg-muted-foreground/40 group-hover:bg-blue-400 rounded-full transition-colors" />
+                </div>
+              ) : (
+                <div className="flex-1 h-px bg-border" />
+              )}
+              <button
+                onClick={() => setShowIndicators(v => !v)}
+                aria-label={showIndicators ? '收起副圖指標' : '展開副圖指標'}
+                aria-expanded={showIndicators}
+                className="shrink-0 px-2 py-0.5 text-[9px] text-muted-foreground hover:text-foreground bg-secondary/60 hover:bg-secondary rounded transition-colors"
+              >
+                {showIndicators ? '▼ 副圖' : '▲ 副圖'}
+              </button>
             </div>
 
             {/* 副圖指標 */}
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <ErrorBoundary>
-                <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} />
-              </ErrorBoundary>
-            </div>
-          </div>
-
-          {/* 趨勢狀態 + 播放控制 */}
-          <div className="shrink-0 space-y-1">
-            <div className="bg-secondary/60 rounded-lg border border-border px-2 py-1">
-              <TrendStateBar />
-            </div>
-            <ReplayControls />
-          </div>
-        </div>
-
-        {/* Right: Sidebar — 只有 3 個 tab */}
-        <div className="w-full md:w-72 shrink-0 flex flex-col min-h-0 gap-2">
-          {/* Mobile toggle */}
-          <button
-            onClick={() => setSidebarOpen(o => !o)}
-            aria-expanded={sidebarOpen}
-            aria-controls="analysis-sidebar"
-            className="md:hidden flex items-center justify-between w-full px-3 py-2 bg-secondary rounded-lg text-xs text-foreground/80 border border-border"
-          >
-            <span>分析面板</span>
-            <span className={`transition-transform ${sidebarOpen ? 'rotate-180' : ''}`}>&#9660;</span>
-          </button>
-
-          <div id="analysis-sidebar" className={`flex flex-col min-h-0 gap-2 ${sidebarOpen ? 'max-h-[60vh] md:max-h-none' : 'max-h-0 overflow-hidden md:max-h-none'} transition-all duration-300`}>
-            {/* Tab header + 舊版連結 */}
-            <div className="shrink-0 flex items-center gap-1">
-              <div role="tablist" aria-label="分析面板" className="flex flex-1 rounded-lg overflow-hidden border border-border text-xs">
-                {SIDE_TABS.map(t => (
-                  <button key={t.key} role="tab" aria-selected={sideTab === t.key} aria-controls={`panel-${t.key}`}
-                    onClick={() => setSideTab(t.key)}
-                    className={`flex-1 py-1.5 font-medium transition-colors relative ${
-                      sideTab === t.key ? 'bg-blue-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    } ${t.alert && sideTab !== t.key ? 'bg-green-900/40 text-green-300' : ''}`}
-                  >
-                    {t.label}
-                    {t.alert && sideTab !== t.key && (
-                      <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Tab content */}
-            {sideTab === 'chat' ? (
-              <div id="panel-chat" role="tabpanel" className="flex-1 min-h-0">
-                <AnalysisChat sidebar />
-              </div>
-            ) : (
-              <div
-                id={`panel-${sideTab}`}
-                role="tabpanel"
-                className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5"
-              >
-                {sideTab === 'conditions' && (
-                  <SectionBoundary section="六大條件">
-                    <SixConditionsPanel />
-                  </SectionBoundary>
-                )}
-                {sideTab === 'signals' && (
-                  <SectionBoundary section="訊號分析">
-                    <div className="space-y-2">
-                      <ProhibitionAlerts />
-                      <WinnerPatternAlerts />
-                      <RuleAlerts />
-                    </div>
-                  </SectionBoundary>
-                )}
-                {sideTab === 'chip' && currentStock && (
-                  <SectionBoundary section="籌碼分析">
-                    <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
-                  </SectionBoundary>
-                )}
+            {showIndicators && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <ErrorBoundary>
+                  <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} />
+                </ErrorBoundary>
               </div>
             )}
           </div>
 
-          {/* Bottom: 自選股 / 持倉 摺疊面板 */}
+          {/* 趨勢狀態 + 播放控制 */}
+          <div className="shrink-0 space-y-1">
+            <div className="bg-secondary/60 rounded-lg border border-border px-2 py-1 flex items-center gap-2">
+              <TrendStateBar />
+              <button
+                onClick={() => setSoundEnabled(v => !v)}
+                title={soundEnabled ? '關閉訊號音效' : '開啟訊號音效（走圖出現買賣訊號時嗶一聲）'}
+                className={`shrink-0 ml-auto text-base leading-none px-1 rounded transition-opacity ${soundEnabled ? 'opacity-80 hover:opacity-100' : 'opacity-30 hover:opacity-60'}`}
+                aria-pressed={soundEnabled}
+              >
+                {soundEnabled ? '🔔' : '🔕'}
+              </button>
+            </div>
+            <ReplayControls />
+          </div>
+
+        </div>
+
+        {/* Right: Sidebar */}
+        <div className="w-full md:w-72 shrink-0 flex flex-col min-h-0 gap-2">
+          {/* Mobile: Sheet drawer */}
+          <div className="md:hidden">
+            <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
+              <SheetTrigger className="flex items-center justify-between w-full px-3 py-2 bg-secondary rounded-lg text-xs text-foreground/80 border border-border">
+                <span>分析面板</span>
+                <span className={`transition-transform ${mobileSheetOpen ? 'rotate-180' : ''}`}>&#9660;</span>
+              </SheetTrigger>
+              <SheetContent side="bottom" className="h-[85vh] flex flex-col p-0">
+                <SheetHeader className="px-4 pt-4 pb-2 shrink-0">
+                  <SheetTitle className="text-sm">分析面板</SheetTitle>
+                </SheetHeader>
+                <div className="flex-1 flex flex-col min-h-0 px-3 pb-3 gap-2">
+                  {sidebarTabs}
+                  {sidebarContent}
+                </div>
+              </SheetContent>
+            </Sheet>
+          </div>
+
+          {/* Desktop: inline sidebar */}
+          <div id="analysis-sidebar" className="hidden md:flex flex-col min-h-0 gap-2">
+            {sidebarTabs}
+            {sidebarContent}
+          </div>
+
+          {/* 自選股 / 持倉 摺疊面板 */}
           <BottomPanel />
         </div>
       </div>
+      {/* P1-5: Keyboard shortcut help overlay */}
+      {showHelp && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl shadow-2xl p-5 w-80 max-w-[90vw]"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-foreground">鍵盤快捷鍵</h2>
+              <button onClick={() => setShowHelp(false)} aria-label="關閉" className="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+            </div>
+            <div className="space-y-1 text-xs">
+              {([
+                ['←  /  →', '前一根 / 下一根 K 棒'],
+                ['空白鍵', '播放 / 暫停'],
+                ['I', '展開 / 收起副圖指標'],
+                ['1', '切換至「條件」面板'],
+                ['2', '切換至「訊號」面板'],
+                ['3', '切換至「籌碼」面板'],
+                ['4', '切換至「問老師」面板'],
+                ['B', '買入（全倉）'],
+                ['S', '賣出（半倉）'],
+                ['Q', '全部賣出'],
+                ['?', '顯示 / 關閉本說明'],
+              ] as [string, string][]).map(([key, desc]) => (
+                <div key={key} className="flex items-center gap-3 py-1 border-b border-border/50 last:border-0">
+                  <kbd className="shrink-0 w-24 text-center px-2 py-0.5 rounded bg-secondary text-foreground/80 font-mono text-[10px]">{key}</kbd>
+                  <span className="text-muted-foreground">{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   );
 }

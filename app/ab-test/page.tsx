@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { PageShell } from '@/components/shared';
+import { Button } from '@/components/ui/button';
 import type {
   ABTestResult,
   ABTestProgressEvent,
@@ -419,13 +420,13 @@ export default function ABTestPage() {
                 <option value={10}>每 10 個交易日（雙週）</option>
               </select>
             </div>
-            <button
-              className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-sm font-medium disabled:opacity-50"
+            <Button
+              className="bg-blue-600 hover:bg-blue-500"
               onClick={startTest}
               disabled={isRunning}
             >
               {isRunning ? '測試中...' : '開始 A/B 測試'}
-            </button>
+            </Button>
           </div>
         </div>
 

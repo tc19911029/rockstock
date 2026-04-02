@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useBacktestStore, BacktestHorizon } from '@/store/backtestStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { calcComposite, chipTooltip, retColor, fmtRet, exportToCsv } from '../utils';
+import { generateBacktestPDF } from '@/lib/pdf/backtestReportGenerator';
 import { chipBadge, TradeRow, calcTradeComposite } from './TradeRow';
 import { HorizonCard } from './HorizonCard';
 import { BacktestStatsPanel } from './BacktestStatsPanel';
@@ -14,6 +15,7 @@ import { WalkForwardPanel } from './WalkForwardPanel';
 import { ABTestPanel } from './ABTestPanel';
 import { ObservationPanel } from './ObservationPanel';
 import { CapitalBacktestPanel } from './CapitalBacktestPanel';
+import { Button } from '@/components/ui/button';
 
 export function BacktestSection() {
   const {
@@ -35,6 +37,8 @@ export function BacktestSection() {
     computeWalkForward,
     setWalkForwardConfig,
     scanOnly,
+    scanMode,
+    strategy,
   } = useBacktestStore();
 
   const searchParams = useSearchParams();
@@ -109,15 +113,16 @@ export function BacktestSection() {
           { key: 'walkforward', label: 'Walk-Forward', icon: '🔁' },
           { key: 'ab-test',     label: 'A/B 比較',     icon: '⚖️' },
         ] as const).map(({ key, label, icon }) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+          <Button key={key} onClick={() => setTab(key)}
+            variant="ghost"
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 rounded-none h-auto transition-colors ${
               tab === key
                 ? 'border-sky-500 text-sky-300'
                 : 'border-transparent text-muted-foreground hover:text-foreground/80'
             }`}>
             <span>{icon}</span>
             <span>{label}</span>
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -145,14 +150,36 @@ export function BacktestSection() {
             />
           )}
 
-          <div className="flex items-center justify-end mb-2">
-            <button
+          <div className="flex items-center justify-end gap-2 mb-2">
+            <Button
               onClick={() => exportToCsv(sortedTrades, scanDate)}
               disabled={sortedTrades.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-muted disabled:opacity-40 rounded-lg text-[11px] text-foreground/80 hover:text-foreground transition-colors"
+              variant="secondary"
+              size="sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-foreground/80 hover:text-foreground"
             >
               匯出 CSV
-            </button>
+            </Button>
+            {stats && (
+              <Button
+                onClick={() => generateBacktestPDF({
+                  market,
+                  scanDate,
+                  strategy: scanMode === 'sop' ? 'V2 SOP' : `持${strategy.holdDays}日`,
+                  scanMode,
+                  resultCount: scanResults.length,
+                  stats,
+                  trades: sortedTrades,
+                  capitalMode: useCapitalMode,
+                  initialCapital: capitalConstraints.initialCapital,
+                })}
+                variant="secondary"
+                size="sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-foreground/80 hover:text-foreground"
+              >
+                匯出 PDF
+              </Button>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -238,12 +265,12 @@ export function BacktestSection() {
           <div className="overflow-x-auto">
             <div className="flex gap-1 mb-2">
               {horizonLabels.map(({ key, label }) => (
-                <button key={key} onClick={() => setHorizon(key)}
-                  className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                    activeHorizon === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'
-                  }`}>
+                <Button key={key} onClick={() => setHorizon(key)}
+                  variant={activeHorizon === key ? 'default' : 'secondary'}
+                  size="sm"
+                  className={`px-2 py-1 text-xs font-medium ${activeHorizon === key ? 'bg-sky-700 hover:bg-sky-600' : ''}`}>
                   {label}
-                </button>
+                </Button>
               ))}
             </div>
             <table className="w-full text-xs">
@@ -364,10 +391,12 @@ export function BacktestSection() {
                           className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">走圖</Link>
                         <Link href={`/analysis/${r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
                           className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/50 hover:bg-violet-900/30 mr-1">AI分析</Link>
-                        <button onClick={() => { useWatchlistStore.getState().add(r.symbol, r.name); }}
-                          className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-amber-700/50 hover:bg-amber-900/30">
+                        <Button onClick={() => { useWatchlistStore.getState().add(r.symbol, r.name); }}
+                          variant="outline"
+                          size="sm"
+                          className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 h-auto border-amber-700/50 hover:bg-amber-900/30 bg-transparent">
                           {useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   );

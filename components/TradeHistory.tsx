@@ -6,32 +6,49 @@ import { Trade } from '@/types';
 
 function EquityCurveChart({ curve }: { curve: Array<{ date: string; totalAssets: number }> }) {
   if (curve.length < 2) return null;
-  const H = 60;
-  const W = 300;
+  const H = 80;
+  const W = 400;
+  const PAD = 6;
   const min = Math.min(...curve.map(p => p.totalAssets));
   const max = Math.max(...curve.map(p => p.totalAssets));
   const range = max - min || 1;
+  const initial = curve[0].totalAssets;
+
+  const toY = (v: number) => H - PAD - ((v - min) / range) * (H - PAD * 2);
 
   const pts = curve.map((p, i) => {
     const x = (i / (curve.length - 1)) * W;
-    const y = H - ((p.totalAssets - min) / range) * (H - 8) - 4;
-    return `${x},${y}`;
+    return `${x},${toY(p.totalAssets)}`;
   }).join(' ');
 
-  const isPositive = curve[curve.length - 1].totalAssets >= curve[0].totalAssets;
-  const color = isPositive ? '#f87171' : '#4ade80'; // red = profit in TW convention, green = loss
+  const isPositive = curve[curve.length - 1].totalAssets >= initial;
+  const color = isPositive ? '#f87171' : '#4ade80';
+  const baselineY = toY(initial);
 
   const lastX = W;
-  const lastY = H - ((curve[curve.length - 1].totalAssets - min) / range) * (H - 8) - 4;
+  const lastY = toY(curve[curve.length - 1].totalAssets);
+  const finalPct = ((curve[curve.length - 1].totalAssets - initial) / initial * 100).toFixed(1);
 
   return (
     <div className="mb-3">
-      <div className="text-[10px] text-muted-foreground mb-1">資金曲線</div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-14 rounded bg-card/50">
-        {/* baseline */}
-        <line x1="0" y1={H / 2} x2={W} y2={H / 2} stroke="#334155" strokeWidth="1" strokeDasharray="3,3" />
-        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" />
-        {/* end dot */}
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-muted-foreground">資金曲線</span>
+        <span className={`text-[10px] font-mono font-bold ${isPositive ? 'text-bull' : 'text-bear'}`}>
+          {isPositive ? '+' : ''}{finalPct}%
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-20 rounded bg-card/50" preserveAspectRatio="none">
+        {/* Initial capital baseline */}
+        <line x1="0" y1={baselineY} x2={W} y2={baselineY} stroke="#334155" strokeWidth="1" strokeDasharray="4,4" />
+        {/* Fill area under curve */}
+        <polygon
+          points={`0,${baselineY} ${pts} ${W},${baselineY}`}
+          fill={color}
+          fillOpacity="0.1"
+        />
+        {/* Curve line */}
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="2" />
+        {/* End dot */}
         <circle cx={lastX} cy={lastY} r="3" fill={color} />
       </svg>
     </div>

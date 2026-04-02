@@ -147,8 +147,35 @@ export function BacktestStatsPanel({ stats, tradesCount, trades }: BacktestStats
           {stats.skippedCount > 0 && (
             <span className="text-[10px] text-muted-foreground/60">（跳過 {stats.skippedCount} 筆）</span>
           )}
+          {stats.gapUpCount > 0 && (
+            <span className="text-[10px] text-amber-400/80" title="隔日跳空高開 >5%，實際可能無法以開盤價買入，結果偏樂觀">
+              ⚠ 跳空 {stats.gapUpCount} 筆
+            </span>
+          )}
         </div>
       </div>
+
+      {/* P2-7: 按市場狀態分類勝率 */}
+      {stats.winRateByRegime && (stats.winRateByRegime.bull || stats.winRateByRegime.sideways || stats.winRateByRegime.bear) && (
+        <div className="px-5 py-2 border-t border-border/50 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px]">
+          <span className="text-muted-foreground/60 self-center">分環境勝率</span>
+          {stats.winRateByRegime.bull && (
+            <span className={`font-medium ${stats.winRateByRegime.bull.winRate >= 50 ? 'text-bull' : 'text-bear'}`}>
+              多頭 {stats.winRateByRegime.bull.winRate}% <span className="text-muted-foreground/50">({stats.winRateByRegime.bull.count})</span>
+            </span>
+          )}
+          {stats.winRateByRegime.sideways && (
+            <span className={`font-medium ${stats.winRateByRegime.sideways.winRate >= 50 ? 'text-bull' : 'text-bear'}`}>
+              盤整 {stats.winRateByRegime.sideways.winRate}% <span className="text-muted-foreground/50">({stats.winRateByRegime.sideways.count})</span>
+            </span>
+          )}
+          {stats.winRateByRegime.bear && (
+            <span className={`font-medium ${stats.winRateByRegime.bear.winRate >= 50 ? 'text-bull' : 'text-bear'}`}>
+              空頭 {stats.winRateByRegime.bear.winRate}% <span className="text-muted-foreground/50">({stats.winRateByRegime.bear.count})</span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Market comparison note */}
       {stats.avgNetReturn != null && (
@@ -156,6 +183,24 @@ export function BacktestStatsPanel({ stats, tradesCount, trades }: BacktestStats
           提醒：回測績效需與同期大盤表現對比才有意義。
         </div>
       )}
+
+      {/* Fee impact analysis */}
+      {(() => {
+        const grossTotal = +(trades.reduce((s, t) => s + t.grossReturn, 0)).toFixed(3);
+        const netTotal = stats.totalNetReturn;
+        const feeImpact = grossTotal - netTotal;
+        const feeImpactPct = grossTotal !== 0 ? (feeImpact / Math.abs(grossTotal) * 100) : 0;
+        return (
+          <div className="px-5 py-2 border-t border-border/50 flex flex-wrap items-center gap-x-5 gap-y-0.5 text-[10px]">
+            <span className="text-muted-foreground/60 uppercase tracking-wide">手續費影響</span>
+            <span className="text-muted-foreground">毛報酬合計 <span className="font-mono text-foreground/70">{grossTotal >= 0 ? '+' : ''}{grossTotal.toFixed(1)}%</span></span>
+            <span className="text-muted-foreground">淨報酬合計 <span className={`font-mono ${netTotal >= 0 ? 'text-bull' : 'text-bear'}`}>{netTotal >= 0 ? '+' : ''}{netTotal.toFixed(1)}%</span></span>
+            <span className="text-amber-400/80">交易成本吃掉 <span className="font-mono font-bold">{feeImpact.toFixed(1)}%</span>
+              {feeImpactPct > 0 && <span className="text-muted-foreground/60"> ({feeImpactPct.toFixed(0)}% of gross)</span>}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Cost model */}
       <div className="px-5 py-2 border-t border-border/50 text-[10px] text-muted-foreground/60 flex flex-wrap gap-x-4 gap-y-0.5">

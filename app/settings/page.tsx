@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { useSettingsStore } from '@/store/settingsStore';
 import { PageShell } from '@/components/shared';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 export default function SettingsPage() {
   const { notifyEmail, notifyMinScore, setNotifyEmail, setNotifyMinScore, strategy, setStrategy, resetStrategy, colorTheme, setColorTheme, stopLossPercent, setStopLossPercent } = useSettingsStore();
@@ -53,13 +56,13 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-2">
-            <input
+            <Input
               type="email"
               value={emailInput}
               onChange={e => setEmailInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSave()}
               placeholder="輸入你的 Email"
-              className="w-full bg-muted border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-blue-500 placeholder-muted-foreground"
+              className="h-10 bg-muted"
             />
           </div>
 
@@ -67,25 +70,22 @@ export default function SettingsPage() {
             <p className="text-xs text-muted-foreground">通知門檻</p>
             <div className="flex gap-2">
               {[4, 5, 6].map(n => (
-                <button key={n} onClick={() => setNotifyMinScore(n)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition ${
-                    notifyMinScore === n ? 'bg-blue-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  }`}>
+                <Button key={n} onClick={() => setNotifyMinScore(n)}
+                  variant={notifyMinScore === n ? 'default' : 'secondary'}
+                  className={`flex-1 font-bold ${notifyMinScore === n ? 'bg-blue-600 hover:bg-blue-500' : ''}`}>
                   {n}/6 分以上
-                </button>
+                </Button>
               ))}
             </div>
           </div>
 
           <div className="flex gap-2">
-            <button onClick={handleSave}
-              className="flex-1 py-2 rounded-lg text-sm font-bold transition bg-blue-600 hover:bg-blue-500 text-white">
+            <Button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-500 font-bold">
               儲存
-            </button>
-            <button onClick={handleTest} disabled={testLoading}
-              className="px-4 py-2 rounded-lg text-sm bg-muted hover:bg-muted/80 disabled:opacity-40 transition">
+            </Button>
+            <Button onClick={handleTest} disabled={testLoading} variant="secondary">
               {testLoading ? '發送中...' : '測試發送'}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -96,20 +96,20 @@ export default function SettingsPage() {
               <h2 className="text-sm font-bold text-foreground/90 mb-0.5">🎯 選股策略參數</h2>
               <p className="text-xs text-muted-foreground">調整六大條件的判斷門檻（朱老師預設值）</p>
             </div>
-            <button onClick={resetStrategy}
-              className="px-2 py-1 text-xs bg-muted hover:bg-muted/80 rounded text-muted-foreground transition">
+            <Button onClick={resetStrategy} variant="secondary" size="xs">
               重設預設
-            </button>
+            </Button>
           </div>
 
           {/* KD上限 */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-foreground/80 group relative cursor-help">KD 進場上限 <span className="text-muted-foreground/60">ⓘ</span>
-                <span className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-56 p-2 rounded bg-secondary border border-border text-[10px] text-foreground/80 shadow-lg">
+              <Tooltip>
+                <TooltipTrigger className="text-foreground/80 cursor-help">KD 進場上限 <span className="text-muted-foreground/60">ⓘ</span></TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="max-w-[14rem] text-[10px]">
                   KD 指標衡量股價超買/超賣程度。數值越低表示只在 KD 較低（未超買）時才進場，更保守。常見設定：短線 70-80、保守 60-65。
-                </span>
-              </span>
+                </TooltipContent>
+              </Tooltip>
               <span className="text-blue-400 font-mono font-bold">{strategy.kdMaxEntry}</span>
             </div>
             <input type="range" min={60} max={95} step={1}
@@ -124,11 +124,12 @@ export default function SettingsPage() {
           {/* 乖離上限 */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-foreground/80 group relative cursor-help">MA20 乖離上限 <span className="text-muted-foreground/60">ⓘ</span>
-                <span className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-56 p-2 rounded bg-secondary border border-border text-[10px] text-foreground/80 shadow-lg">
+              <Tooltip>
+                <TooltipTrigger className="text-foreground/80 cursor-help">MA20 乖離上限 <span className="text-muted-foreground/60">ⓘ</span></TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="max-w-[14rem] text-[10px]">
                   乖離率 = 股價偏離20日均線的程度。乖離越大，表示短線漲太多，回檔風險越高。設 15% 表示漲超過15%就不進場。
-                </span>
-              </span>
+                </TooltipContent>
+              </Tooltip>
               <span className="text-blue-400 font-mono font-bold">{(strategy.deviationMax * 100).toFixed(0)}%</span>
             </div>
             <input type="range" min={10} max={35} step={1}
@@ -143,11 +144,12 @@ export default function SettingsPage() {
           {/* 量比 */}
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-foreground/80 group relative cursor-help">量比門檻（倍） <span className="text-muted-foreground/60">ⓘ</span>
-                <span className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-56 p-2 rounded bg-secondary border border-border text-[10px] text-foreground/80 shadow-lg">
+              <Tooltip>
+                <TooltipTrigger className="text-foreground/80 cursor-help">量比門檻（倍） <span className="text-muted-foreground/60">ⓘ</span></TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="max-w-[14rem] text-[10px]">
                   量比 = 今日成交量 ÷ 近期平均成交量。1.5x 表示今天的量是平常的1.5倍，代表有資金關注。設越高越嚴格。
-                </span>
-              </span>
+                </TooltipContent>
+              </Tooltip>
               <span className="text-blue-400 font-mono font-bold">{strategy.volumeRatioMin.toFixed(1)}x</span>
             </div>
             <input type="range" min={10} max={30} step={1}
@@ -167,14 +169,42 @@ export default function SettingsPage() {
             </div>
             <div className="flex gap-2">
               {[3, 4, 5, 6].map(n => (
-                <button key={n} onClick={() => setStrategy({ minScore: n })}
-                  className={`flex-1 py-1.5 rounded text-xs font-bold transition ${
-                    strategy.minScore === n ? 'bg-blue-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                  }`}>
+                <Button key={n} onClick={() => setStrategy({ minScore: n })} size="sm"
+                  variant={strategy.minScore === n ? 'default' : 'secondary'}
+                  className={`flex-1 font-bold ${strategy.minScore === n ? 'bg-blue-600 hover:bg-blue-500' : ''}`}>
                   {n}分
-                </button>
+                </Button>
               ))}
             </div>
+          </div>
+
+          {/* P2-3: 大盤多空過濾器 */}
+          <div className="pt-1 border-t border-border/50 space-y-2">
+            <div className="flex items-center justify-between">
+              <Tooltip>
+                <TooltipTrigger className="text-xs text-foreground/80 cursor-help">
+                  大盤趨勢自動調分 <span className="text-muted-foreground/60">ⓘ</span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="max-w-[16rem] text-[10px]">
+                  開啟後，掃描時自動依大盤狀態提高門檻：多頭維持標準、盤整+1分、空頭要求6/6。防止大盤空頭期間全力做多（朱老師：順勢而為）。
+                </TooltipContent>
+              </Tooltip>
+              <button
+                onClick={() => setStrategy({ marketTrendFilter: !strategy.marketTrendFilter })}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${strategy.marketTrendFilter ? 'bg-blue-600' : 'bg-muted'}`}
+                role="switch"
+                aria-checked={strategy.marketTrendFilter}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${strategy.marketTrendFilter ? 'translate-x-4' : 'translate-x-1'}`} />
+              </button>
+            </div>
+            {strategy.marketTrendFilter && (
+              <div className="flex gap-2 text-[10px] text-muted-foreground pl-1">
+                <span className="text-bull">多頭 ≥{strategy.bullMinScore}分</span>
+                <span className="text-yellow-400">盤整 ≥{strategy.sidewaysMinScore}分</span>
+                <span className="text-bear">空頭 ≥{strategy.bearMinScore}分</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -186,11 +216,12 @@ export default function SettingsPage() {
           </div>
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs">
-              <span className="text-foreground/80 group relative cursor-help">停損比例 <span className="text-muted-foreground/60">ⓘ</span>
-                <span className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-56 p-2 rounded bg-secondary border border-border text-[10px] text-foreground/80 shadow-lg">
+              <Tooltip>
+                <TooltipTrigger className="text-foreground/80 cursor-help">停損比例 <span className="text-muted-foreground/60">ⓘ</span></TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="max-w-[14rem] text-[10px]">
                   成本停損 = 買入均價 × (1 - 停損%)。例如設 7% 表示虧損 7% 即建議停損。朱老師建議短線 5-7%，波段 7-10%。
-                </span>
-              </span>
+                </TooltipContent>
+              </Tooltip>
               <span className="text-red-400 font-mono font-bold">-{stopLossPercent}%</span>
             </div>
             <input type="range" min={3} max={15} step={1}
@@ -232,11 +263,12 @@ export default function SettingsPage() {
               { value: 'asia' as const, label: '紅漲綠跌', desc: '台灣/大陸慣例', up: 'bg-red-500', down: 'bg-green-500' },
               { value: 'western' as const, label: '綠漲紅跌', desc: '歐美慣例', up: 'bg-green-500', down: 'bg-red-500' },
             ]).map(t => (
-              <button key={t.value} onClick={() => setColorTheme(t.value)}
-                className={`flex-1 p-3 rounded-lg border text-left transition ${
+              <Button key={t.value} onClick={() => setColorTheme(t.value)}
+                variant="outline"
+                className={`flex-1 h-auto p-3 text-left justify-start flex-col items-start ${
                   colorTheme === t.value
                     ? 'border-sky-500 bg-sky-950/40'
-                    : 'border-border bg-secondary/40 hover:border-muted-foreground/40'
+                    : ''
                 }`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`w-3 h-3 rounded-full ${t.up}`} />
@@ -246,7 +278,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="text-sm font-medium text-foreground">{t.label}</div>
                 <div className="text-[10px] text-muted-foreground">{t.desc}</div>
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -266,15 +298,16 @@ export default function SettingsPage() {
 
         {/* 重新顯示導覽 + 風險聲明 */}
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="outline"
+            className="flex-1 text-muted-foreground hover:text-sky-300 hover:border-sky-700"
             onClick={() => {
               try { localStorage.removeItem('feature-guide-seen'); } catch {}
               window.location.href = '/';
             }}
-            className="flex-1 py-2 text-center bg-secondary border border-border rounded-lg text-sm text-muted-foreground hover:text-sky-300 hover:border-sky-700 transition"
           >
             重新顯示功能導覽
-          </button>
+          </Button>
           <Link href="/disclaimer" className="flex-1 py-2 text-center bg-secondary border border-border rounded-lg text-sm text-muted-foreground hover:text-amber-300 hover:border-amber-700 transition">
             風險聲明與條款
           </Link>
@@ -284,16 +317,17 @@ export default function SettingsPage() {
         <div className="bg-card border border-red-900/30 rounded-xl p-5 space-y-3">
           <h2 className="text-sm font-semibold text-red-400">清除本機數據</h2>
           <p className="text-[11px] text-muted-foreground">清除瀏覽器中儲存的所有設定、自選股、持倉、掃描歷史等資料。此操作不可恢復。</p>
-          <button
+          <Button
+            variant="destructive"
+            size="sm"
             onClick={() => {
               if (confirm('確定要清除所有本機數據嗎？此操作不可恢復。')) {
                 try { localStorage.clear(); window.location.href = '/'; } catch {}
               }
             }}
-            className="text-xs px-4 py-2 bg-red-900/40 hover:bg-red-800/60 text-red-300 rounded-lg border border-red-800/50 transition"
           >
             清除所有數據並重新開始
-          </button>
+          </Button>
         </div>
 
       </div>

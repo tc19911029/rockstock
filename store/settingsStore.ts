@@ -12,7 +12,7 @@ import {
 /** @deprecated Use StrategyThresholds from StrategyConfig instead */
 export type StrategyParams = Pick<
   StrategyThresholds,
-  'kdMaxEntry' | 'deviationMax' | 'volumeRatioMin' | 'upperShadowMax' | 'minScore'
+  'kdMaxEntry' | 'deviationMax' | 'volumeRatioMin' | 'upperShadowMax' | 'minScore' | 'marketTrendFilter' | 'bullMinScore' | 'sidewaysMinScore' | 'bearMinScore'
 >;
 
 export const DEFAULT_STRATEGY: StrategyParams = {
@@ -21,6 +21,10 @@ export const DEFAULT_STRATEGY: StrategyParams = {
   volumeRatioMin: 1.5,
   upperShadowMax: 0.20,
   minScore: 4,
+  marketTrendFilter: true,
+  bullMinScore: 4,
+  sidewaysMinScore: 5,
+  bearMinScore: 6,
 };
 
 /** 漲跌色彩主題：asia = 紅漲綠跌（台灣/大陸），western = 綠漲紅跌（歐美） */

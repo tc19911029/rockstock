@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
+import { toast } from 'sonner';
 
 interface ChipInfo {
   symbol: string;
@@ -169,7 +170,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
         if (j.error) { setError('查無籌碼資料'); setData(null); }
         else setData(j);
       })
-      .catch(() => setError('載入失敗'))
+      .catch(() => { setError('載入失敗'); toast.error('籌碼資料載入失敗', { id: 'chip-error', duration: 3000 }); })
       .finally(() => setLoading(false));
   }, [cleanSym, date, retryCount]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -306,7 +307,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       </div>
 
       {/* ── 3-column grid ── */}
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
         {tiles.map(t => (
           <ChipTile
             key={t.label}

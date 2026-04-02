@@ -1294,7 +1294,19 @@ export abstract class MarketScanner {
       20,   // lookback days
     );
     const keptSet = new Set(corrFilter.kept);
-    const finalResults = preCorrelation.filter(r => keptSet.has(r.symbol));
+    const postCorrelation = preCorrelation.filter(r => keptSet.has(r.symbol));
+
+    // ── P2-5: 板塊分散過濾（每個板塊最多 3 支，避免集中度風險）─────────────
+    // 已按 compositeScore 排序，取每板塊排名最高的前 3 支
+    const MAX_PER_SECTOR = 3;
+    const sectorCount = new Map<string, number>();
+    const finalResults = postCorrelation.filter(r => {
+      const sector = r.industry ?? '其他';
+      const count = sectorCount.get(sector) ?? 0;
+      if (count >= MAX_PER_SECTOR) return false;
+      sectorCount.set(sector, count + 1);
+      return true;
+    });
 
     // Clear candle cache after scan
     this._scanCandleCache.clear();

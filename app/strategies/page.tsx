@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { PageShell } from '@/components/shared';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
   BUILT_IN_STRATEGIES,
@@ -374,12 +375,12 @@ export default function StrategiesPage() {
     <PageShell headerSlot={
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-foreground">策略管理</span>
-        <span className="relative group cursor-help">
-          <span className="text-[10px] w-4 h-4 flex items-center justify-center rounded-full bg-muted text-muted-foreground">?</span>
-          <div className="absolute z-50 left-0 top-full mt-1 hidden group-hover:block w-60 p-2.5 rounded-lg bg-secondary border border-border text-[11px] text-foreground/80 shadow-lg">
+        <Tooltip>
+          <TooltipTrigger className="text-[10px] w-4 h-4 flex items-center justify-center rounded-full bg-muted text-muted-foreground cursor-help">?</TooltipTrigger>
+          <TooltipContent side="bottom" align="start" className="max-w-[15rem]">
             調整六大條件的門檻參數，或建立自訂策略版本。不同市場環境可切換不同策略。
-          </div>
-        </span>
+          </TooltipContent>
+        </Tooltip>
         <span className="text-xs text-muted-foreground">
           目前使用：<span className="text-violet-400">{allStrategies.find(s => s.id === activeStrategyId)?.name}</span>
         </span>
