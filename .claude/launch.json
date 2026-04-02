@@ -3,14 +3,14 @@
   "configurations": [
     {
       "name": "dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": ["-c", "export PATH=/usr/local/bin:$PATH && node node_modules/next/dist/bin/next dev --port $PORT"],
       "port": 3000
     },
     {
       "name": "prod",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start"],
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": ["-c", "export PATH=/usr/local/bin:$PATH && npm run start"],
       "port": 3000
     }
   ]
