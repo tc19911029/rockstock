@@ -66,11 +66,11 @@ export async function middleware(req: NextRequest) {
 
   let result;
   if (AI_ROUTES.some((r) => pathname.startsWith(r))) {
-    result = aiLimiter.check(ip);
+    result = await aiLimiter.check(ip);
   } else if (SCAN_ROUTES.some((r) => pathname.startsWith(r))) {
-    result = scanLimiter.check(ip);
+    result = await scanLimiter.check(ip);
   } else {
-    result = generalLimiter.check(ip);
+    result = await generalLimiter.check(ip);
   }
 
   if (!result.success) {
