@@ -63,6 +63,7 @@ function ConditionRow({
   detail,
   metric,
   progress,
+  changed,
   expanded,
   onToggle,
 }: {
@@ -71,6 +72,7 @@ function ConditionRow({
   detail: string;
   metric?: string;
   progress?: { value: number; target: number };
+  changed?: 'gained' | 'lost';
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -79,7 +81,9 @@ function ConditionRow({
     : <span className="text-red-400 text-sm">●</span>;
 
   return (
-    <div className="border-b border-border last:border-0">
+    <div className={`border-b border-border last:border-0 ${
+      changed === 'gained' ? 'bg-green-900/20' : changed === 'lost' ? 'bg-red-900/20' : ''
+    }`}>
       <button
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
         onClick={onToggle}
@@ -89,6 +93,8 @@ function ConditionRow({
         <span className={`text-xs font-medium w-14 shrink-0 ${label.required ? 'text-foreground' : 'text-muted-foreground italic'}`} title={label.tip}>
           {label.name}
         </span>
+        {changed === 'gained' && <span className="text-[9px] px-1 py-0 rounded bg-green-600 text-white font-bold animate-pulse">NEW</span>}
+        {changed === 'lost' && <span className="text-[9px] px-1 py-0 rounded bg-red-600 text-white font-bold">LOST</span>}
         {metric && <MetricBadge label={metric} pass={pass} />}
         <span className="flex-1" />
         <span className="text-muted-foreground/60 text-xs">{expanded ? '▲' : '▼'}</span>
@@ -110,7 +116,8 @@ function ConditionRow({
 }
 
 export default function SixConditionsPanel() {
-  const sixConditions = useReplayStore(s => s.sixConditions);
+  const sixConditions     = useReplayStore(s => s.sixConditions);
+  const prevSixConditions = useReplayStore(s => s.prevSixConditions);
   const surgeScore    = useReplayStore(s => s.surgeScore);
   const allCandles    = useReplayStore(s => s.allCandles);
   const currentIndex  = useReplayStore(s => s.currentIndex);
@@ -153,33 +160,56 @@ export default function SixConditionsPanel() {
   const macdOSC = sc.indicator.macdOSC;
   const deviation = sc.position.deviation;
 
+  // Detect condition transitions (for "just changed" indicators)
+  const prev = prevSixConditions as SixConditionsResult | null;
+  const changedKeys: Set<ConditionKey> = new Set();
+  if (prev) {
+    const keys: Array<{ key: ConditionKey; now: boolean; was: boolean }> = [
+      { key: 'trend',     now: sc.trend.pass,     was: prev.trend.pass },
+      { key: 'ma',        now: sc.ma.pass,        was: prev.ma.pass },
+      { key: 'position',  now: sc.position.pass,  was: prev.position.pass },
+      { key: 'volume',    now: sc.volume.pass,     was: prev.volume.pass },
+      { key: 'kbar',      now: sc.kbar.pass,      was: prev.kbar.pass },
+      { key: 'indicator', now: sc.indicator.pass,  was: prev.indicator.pass },
+    ];
+    for (const { key, now, was } of keys) {
+      if (now !== was) changedKeys.add(key);
+    }
+  }
+
   const rows: Array<{
     key: ConditionKey;
     pass: boolean;
     detail: string;
     metric?: string;
     progress?: { value: number; target: number };
+    changed?: 'gained' | 'lost';
   }> = [
     {
       key: 'trend', pass: sc.trend.pass, detail: sc.trend.detail,
       metric: sc.trend.state,
+      changed: changedKeys.has('trend') ? (sc.trend.pass ? 'gained' : 'lost') : undefined,
     },
     {
       key: 'ma', pass: sc.ma.pass, detail: sc.ma.detail,
+      changed: changedKeys.has('ma') ? (sc.ma.pass ? 'gained' : 'lost') : undefined,
     },
     {
       key: 'position', pass: sc.position.pass, detail: sc.position.detail,
       metric: deviation !== null && deviation !== undefined ? `乖離${(deviation * 100).toFixed(1)}%` : undefined,
+      changed: changedKeys.has('position') ? (sc.position.pass ? 'gained' : 'lost') : undefined,
     },
     {
       key: 'volume', pass: sc.volume.pass, detail: sc.volume.detail,
       metric: volRatio !== null && volRatio !== undefined ? `×${volRatio}` : undefined,
       progress: volRatio !== null && volRatio !== undefined ? { value: volRatio, target: volThreshold } : undefined,
+      changed: changedKeys.has('volume') ? (sc.volume.pass ? 'gained' : 'lost') : undefined,
     },
     {
       key: 'kbar', pass: sc.kbar.pass, detail: sc.kbar.detail,
       metric: `實體${(bodyPct * 100).toFixed(1)}%`,
       progress: { value: bodyPct, target: 0.02 },
+      changed: changedKeys.has('kbar') ? (sc.kbar.pass ? 'gained' : 'lost') : undefined,
     },
     {
       key: 'indicator', pass: sc.indicator.pass, detail: sc.indicator.detail,
@@ -187,6 +217,7 @@ export default function SixConditionsPanel() {
         macdOSC !== null && macdOSC !== undefined ? `OSC${macdOSC > 0 ? '+' : ''}${macdOSC.toFixed(2)}` : null,
         kdK !== null && kdK !== undefined ? `K${kdK.toFixed(0)}` : null,
       ].filter(Boolean).join(' ') || undefined,
+      changed: changedKeys.has('indicator') ? (sc.indicator.pass ? 'gained' : 'lost') : undefined,
     },
   ];
 
@@ -214,6 +245,7 @@ export default function SixConditionsPanel() {
               detail={row.detail}
               metric={row.metric}
               progress={row.progress}
+              changed={row.changed}
               expanded={expanded === row.key}
               onToggle={() => toggle(row.key)}
             />

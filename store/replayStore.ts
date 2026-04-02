@@ -70,6 +70,7 @@ interface ReplayStore {
   trendState: TrendState;
   trendPosition: TrendPosition;
   sixConditions: SixConditionsResult | null;
+  prevSixConditions: SixConditionsResult | null;  // 前一根K棒的六條件（用於偵測變化）
   surgeScore: SurgeScoreResult | null;
   longProhibitions: ProhibitionResult | null;
   shortProhibitions: ProhibitionResult | null;
@@ -118,6 +119,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
   trendState: '盤整' as TrendState,
   trendPosition: '盤整觀望' as TrendPosition,
   sixConditions: null,
+  prevSixConditions: null,
   surgeScore: null,
   longProhibitions: null,
   shortProhibitions: null,
@@ -185,23 +187,23 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
 
   // ── Replay controls ───────────────────────────────────────
   nextCandle: () => {
-    const { allCandles, currentIndex, account } = get();
+    const { allCandles, currentIndex, account, sixConditions } = get();
     const next = Math.min(currentIndex + 1, allCandles.length - 1);
     if (next === currentIndex) return;
-    set({ currentIndex: next, ...buildState(allCandles, next, account) });
+    set({ currentIndex: next, prevSixConditions: sixConditions, ...buildState(allCandles, next, account) });
   },
 
   prevCandle: () => {
-    const { allCandles, currentIndex, account } = get();
+    const { allCandles, currentIndex, account, sixConditions } = get();
     const prev = Math.max(currentIndex - 1, 0);
     if (prev === currentIndex) return;
-    set({ currentIndex: prev, ...buildState(allCandles, prev, account) });
+    set({ currentIndex: prev, prevSixConditions: sixConditions, ...buildState(allCandles, prev, account) });
   },
 
   jumpToIndex: (index: number) => {
-    const { allCandles, account } = get();
+    const { allCandles, account, sixConditions } = get();
     const clamped = Math.max(0, Math.min(index, allCandles.length - 1));
-    set({ currentIndex: clamped, isPlaying: false, ...buildState(allCandles, clamped, account) });
+    set({ currentIndex: clamped, isPlaying: false, prevSixConditions: sixConditions, ...buildState(allCandles, clamped, account) });
   },
 
   jumpToNextBuySignal: () => {

@@ -174,7 +174,8 @@ export type EntryType = 'nextOpen' | 'nextClose';
 export type ExitRule =
   | { type: 'holdDays';   days: number }
   | { type: 'stopLoss';   pct: number }   // 負數，e.g. -0.07 = -7%
-  | { type: 'takeProfit'; pct: number };  // 正數，e.g. 0.15 = +15%
+  | { type: 'takeProfit'; pct: number }   // 正數，e.g. 0.15 = +15%
+  | { type: 'ma5StopLoss' };              // 跌破 MA5 出場
 
 /** 策略參數 */
 export interface BacktestStrategyParams {
@@ -184,6 +185,7 @@ export interface BacktestStrategyParams {
   takeProfit:  number | null;  // 停利比例（正數，null = 不設停利）
   trailingStop: number | null; // 移動停利：從最高點回撤 N% 就出場（如 0.03 = 3%）
   trailingActivate: number | null; // 移動停利啟動門檻：漲到 N% 才開始追蹤（如 0.05 = 5%）
+  ma5StopLoss?: boolean;       // 跌破 MA5 出場（收盤 < MA5 即出場）
   costParams:  CostParams;
   slippagePct: number;         // 滑價百分比（如 0.001 = 0.1%，買入加 / 賣出減）
   /** 雙層出場機制：Tranche 1 (50%) 固定停利 + Tranche 2 (50%) 階梯追蹤 */
@@ -483,6 +485,15 @@ export function runSingleBacktest(
         exitPrice  = +takeProfitPrice!.toFixed(3);
       }
       exitDate = c.date;
+      break;
+    }
+
+    // ── MA5 停損出場（無論獲利虧損，收盤跌破 MA5 即出場） ──────────────
+    if (!isEntryDay && strategy.ma5StopLoss && c.ma5 != null && c.close < c.ma5) {
+      exitReason = 'ma5StopLoss';
+      exitPrice  = +(c.close * (1 - strategy.slippagePct)).toFixed(3);
+      exitDate   = c.date;
+      holdDays   = i + 1;
       break;
     }
 

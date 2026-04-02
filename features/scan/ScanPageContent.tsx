@@ -82,9 +82,10 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
     parts.push(`${strategy.holdDays}日`);
     parts.push(strategy.stopLoss != null ? `停損${(strategy.stopLoss * 100).toFixed(0)}%` : '不停損');
     parts.push(strategy.takeProfit != null ? `停利+${(strategy.takeProfit * 100).toFixed(0)}%` : '不停利');
+    if (strategy.ma5StopLoss) parts.push('MA5停損');
     parts.push(useCapitalMode ? '資本限制' : '無限資本');
     return parts.join(' · ');
-  }, [strategy.holdDays, strategy.stopLoss, strategy.takeProfit, useCapitalMode]);
+  }, [strategy.holdDays, strategy.stopLoss, strategy.takeProfit, strategy.ma5StopLoss, useCapitalMode]);
 
   return (
     <PageShell>
@@ -311,6 +312,18 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                     <option value="0.15">+15%</option>
                     <option value="0.20">+20%</option>
                   </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">MA5 停損</label>
+                  <Button
+                    onClick={() => setStrategy({ ma5StopLoss: !strategy.ma5StopLoss })}
+                    variant={strategy.ma5StopLoss ? 'default' : 'secondary'}
+                    className={`px-4 py-2 text-sm ${strategy.ma5StopLoss ? 'bg-violet-700/60 hover:bg-violet-600/60 border border-violet-600 text-violet-200' : ''}`}
+                    title="跌破 MA5 即出場，不論獲利或虧損"
+                  >
+                    {strategy.ma5StopLoss ? '跌破MA5出場' : '不使用'}
+                  </Button>
                 </div>
 
                 {/* Capital Mode Toggle */}

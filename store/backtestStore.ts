@@ -496,7 +496,7 @@ export const useBacktestStore = create<BacktestState>()(
             performance,
             trades,
             stats:       stats ?? undefined,
-            strategyVersion: `holdDays=${strategy.holdDays},sl=${strategy.stopLoss ?? 'off'},tp=${strategy.takeProfit ?? 'off'}`,
+            strategyVersion: `holdDays=${strategy.holdDays},sl=${strategy.stopLoss ?? 'off'},tp=${strategy.takeProfit ?? 'off'},ma5=${strategy.ma5StopLoss ? 'on' : 'off'}`,
           };
 
           set(s => ({
@@ -672,7 +672,7 @@ export const useBacktestStore = create<BacktestState>()(
             performance,
             trades,
             stats: stats ?? undefined,
-            strategyVersion: `holdDays=${strategy.holdDays},sl=${strategy.stopLoss ?? 'off'},tp=${strategy.takeProfit ?? 'off'}`,
+            strategyVersion: `holdDays=${strategy.holdDays},sl=${strategy.stopLoss ?? 'off'},tp=${strategy.takeProfit ?? 'off'},ma5=${strategy.ma5StopLoss ? 'on' : 'off'}`,
           };
 
           set(s => ({
