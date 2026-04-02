@@ -1,6 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest } from 'next/server';
+import { z } from 'zod';
 import { recordUsage } from '@/lib/ai/costTracker';
+
+const chatBodySchema = z.object({
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().min(1).max(10000),
+  })).min(1).max(50),
+  context: z.string().max(5000).optional(),
+});
 
 export const runtime = 'nodejs';
 
@@ -159,7 +168,15 @@ const SYSTEM_PROMPT = `你是一位精通朱家泓老師技術分析理論的股
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, context } = await req.json();
+    const body = await req.json();
+    const parsed = chatBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: parsed.error.issues[0]?.message ?? '輸入格式錯誤' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    const { messages, context } = parsed.data;
 
     const systemWithContext = context
       ? `${SYSTEM_PROMPT}\n\n## 當前走圖情境：\n${context}`

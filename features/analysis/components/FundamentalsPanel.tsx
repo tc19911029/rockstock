@@ -24,15 +24,17 @@ function KpiCell({ label, value, color }: { label: string; value: string; color?
 export function FundamentalsPanel({ ticker }: FundamentalsPanelProps) {
   const [data, setData] = useState<FundamentalsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const key = ticker.replace(/\.(TW|TWO)$/i, '');
     setLoading(true);
+    setError(null);
     fetch(`/api/fundamentals/${key}`)
       .then(r => r.json())
       .then(json => { if (json.ok) setData(json.data as FundamentalsData); })
-      .catch(() => {})
+      .catch((e: Error) => { setError(e.message); })
       .finally(() => setLoading(false));
   }, [ticker]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -44,6 +46,14 @@ export function FundamentalsPanel({ ticker }: FundamentalsPanelProps) {
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
           {[...Array(7)].map((_, i) => <div key={i} className="h-10 bg-secondary rounded" />)}
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card border border-border rounded-xl px-4 py-3 text-xs text-muted-foreground">
+        基本面數據載入失敗
       </div>
     );
   }

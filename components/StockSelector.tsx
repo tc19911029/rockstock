@@ -141,6 +141,7 @@ export default function StockSelector() {
             onChange={e => { setInput(e.target.value); setShowDrop(true); }}
             onFocus={() => setShowDrop(true)}
             onKeyDown={e => { if (e.key === 'Enter' && input.trim()) handleLoad(input.trim()); }}
+            aria-label="搜尋股票代號或名稱"
             placeholder="代號/名稱"
             className="w-28 bg-transparent px-2 py-1 text-xs text-foreground font-mono focus:outline-none"
           />

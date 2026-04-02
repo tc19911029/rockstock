@@ -177,11 +177,13 @@ export default function AnalysisChat({ sidebar = false }: Props) {
       <div className="border-t border-border p-2 space-y-1.5 shrink-0">
         <div className="flex gap-1.5">
           <button onClick={insertContext}
+            aria-label="附上當前K棒資訊"
             className="text-xs px-2 py-1 bg-muted text-muted-foreground rounded hover:bg-muted hover:text-foreground transition-colors whitespace-nowrap"
             title="自動插入當前K棒資訊">
             📊 附上當前資訊
           </button>
           <button onClick={() => setMessages([])}
+            aria-label="清除對話"
             className="text-xs px-2 py-1 bg-muted text-muted-foreground rounded hover:bg-red-900/60 hover:text-red-400 transition-colors">
             🗑 清除
           </button>
@@ -189,10 +191,12 @@ export default function AnalysisChat({ sidebar = false }: Props) {
         <div className="flex gap-1.5">
           <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            aria-label="輸入問題"
             placeholder="輸入問題（Enter 發送）..."
             className="flex-1 bg-card text-foreground text-xs rounded px-2 py-1.5 resize-none outline-none border border-border focus:border-blue-500 placeholder-muted-foreground min-h-[36px] max-h-20"
             rows={2} disabled={loading} />
           <button onClick={() => sendMessage(input)} disabled={!input.trim() || loading}
+            aria-label="送出訊息"
             className="px-2.5 py-1.5 bg-blue-600 text-foreground text-xs rounded hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-medium self-end">
             送出
           </button>
