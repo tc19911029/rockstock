@@ -22,10 +22,10 @@ export interface ConditionResult {
 export interface SixConditionsResult {
   trend:     ConditionResult & { state: TrendState };
   ma:        ConditionResult & { alignment: string };
-  position:  ConditionResult & { stage: TrendPosition };
-  volume:    ConditionResult & { ratio: number | null };
-  kbar:      ConditionResult & { type: string };
-  indicator: ConditionResult & { macd: boolean; kd: boolean };
+  position:  ConditionResult & { stage: TrendPosition; deviation: number | null };
+  volume:    ConditionResult & { ratio: number | null; threshold: number };
+  kbar:      ConditionResult & { type: string; bodyPct: number; closePos: number };
+  indicator: ConditionResult & { macd: boolean; kd: boolean; kdK: number | null; macdOSC: number | null };
   totalScore: number; // 0–6
   coreScore:  number; // 0–5（前5個必要條件）
   isCoreReady: boolean; // 前5個全過 = true
@@ -369,10 +369,10 @@ export function evaluateSixConditions(
   return {
     trend:     { pass: trendPass,     state: trendState, detail: trendDetail },
     ma:        { pass: bullishAlign,  alignment: maAlignment, detail: maAlignment },
-    position:  { pass: positionPass,  stage,             detail: positionDetail },
-    volume:    { pass: volumePass,    ratio: volVsPrevDay, detail: volumeDetail },
-    kbar:      { pass: kbarPass,      type: kbarType,    detail: kbarType },
-    indicator: { pass: indicatorPass, macd: macdBull, kd: kdBull || kdCross, detail: indicatorDetail },
+    position:  { pass: positionPass,  stage, deviation: ma20Dev, detail: positionDetail },
+    volume:    { pass: volumePass,    ratio: volVsPrevDay, threshold: volMin, detail: volumeDetail },
+    kbar:      { pass: kbarPass,      type: kbarType, bodyPct, closePos, detail: kbarType },
+    indicator: { pass: indicatorPass, macd: macdBull, kd: kdBull || kdCross, kdK: c.kdK ?? null, macdOSC: c.macdOSC ?? null, detail: indicatorDetail },
     totalScore,
     coreScore,
     isCoreReady,

@@ -33,16 +33,44 @@ function ScoreDots({ score, total = 6 }: { score: number; total?: number }) {
   );
 }
 
+/** Mini progress bar for quantitative conditions */
+function MiniProgress({ value, target, pass }: { value: number; target: number; pass: boolean }) {
+  const pct = Math.min(100, Math.max(0, (value / target) * 100));
+  return (
+    <div className="w-full bg-muted rounded-full h-1 overflow-hidden mt-1">
+      <div
+        className={`h-full rounded-full transition-all ${pass ? 'bg-green-500' : pct >= 70 ? 'bg-yellow-500' : 'bg-red-500/60'}`}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+/** Metric badge showing the key numeric value */
+function MetricBadge({ label, pass }: { label: string; pass: boolean }) {
+  return (
+    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+      pass ? 'bg-green-900/50 text-green-300' : 'bg-muted text-muted-foreground'
+    }`}>
+      {label}
+    </span>
+  );
+}
+
 function ConditionRow({
   label,
   pass,
   detail,
+  metric,
+  progress,
   expanded,
   onToggle,
 }: {
   label: { icon: string; name: string; tip: string; required: boolean };
   pass: boolean;
   detail: string;
+  metric?: string;
+  progress?: { value: number; target: number };
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -58,15 +86,22 @@ function ConditionRow({
       >
         {dot}
         <span className="text-muted-foreground text-xs w-4">{label.icon}</span>
-        <span className={`text-xs font-medium w-14 ${label.required ? 'text-foreground' : 'text-muted-foreground italic'}`} title={label.tip}>
+        <span className={`text-xs font-medium w-14 shrink-0 ${label.required ? 'text-foreground' : 'text-muted-foreground italic'}`} title={label.tip}>
           {label.name}
         </span>
-        <span className="text-xs text-muted-foreground flex-1 truncate" title={label.tip}>{detail}</span>
+        {metric && <MetricBadge label={metric} pass={pass} />}
+        <span className="flex-1" />
         <span className="text-muted-foreground/60 text-xs">{expanded ? '▲' : '▼'}</span>
       </button>
+      {/* Progress bar (always visible for quantitative conditions) */}
+      {progress && (
+        <div className="px-3 pb-1">
+          <MiniProgress value={progress.value} target={progress.target} pass={pass} />
+        </div>
+      )}
       {expanded && (
         <div className="px-4 pb-2 text-xs text-muted-foreground leading-relaxed bg-secondary/40 space-y-1">
-          <div>{detail}</div>
+          <div className="whitespace-normal break-words">{detail}</div>
           <div className="text-[10px] text-muted-foreground border-t border-border pt-1">{label.tip}</div>
         </div>
       )}
@@ -110,13 +145,49 @@ export default function SixConditionsPanel() {
   const toggle = (key: ConditionKey) =>
     setExpanded(prev => prev === key ? null : key);
 
-  const rows: Array<{ key: ConditionKey; pass: boolean; detail: string }> = [
-    { key: 'trend',     pass: sc.trend.pass,     detail: sc.trend.detail },
-    { key: 'ma',        pass: sc.ma.pass,        detail: sc.ma.detail },
-    { key: 'position',  pass: sc.position.pass,  detail: sc.position.detail },
-    { key: 'volume',    pass: sc.volume.pass,     detail: sc.volume.detail },
-    { key: 'kbar',      pass: sc.kbar.pass,      detail: sc.kbar.detail },
-    { key: 'indicator', pass: sc.indicator.pass,  detail: sc.indicator.detail },
+  // Build metric badges and progress bars from numeric data
+  const volRatio = sc.volume.ratio;
+  const volThreshold = sc.volume.threshold ?? 1.3;
+  const bodyPct = sc.kbar.bodyPct ?? 0;
+  const kdK = sc.indicator.kdK;
+  const macdOSC = sc.indicator.macdOSC;
+  const deviation = sc.position.deviation;
+
+  const rows: Array<{
+    key: ConditionKey;
+    pass: boolean;
+    detail: string;
+    metric?: string;
+    progress?: { value: number; target: number };
+  }> = [
+    {
+      key: 'trend', pass: sc.trend.pass, detail: sc.trend.detail,
+      metric: sc.trend.state,
+    },
+    {
+      key: 'ma', pass: sc.ma.pass, detail: sc.ma.detail,
+    },
+    {
+      key: 'position', pass: sc.position.pass, detail: sc.position.detail,
+      metric: deviation !== null && deviation !== undefined ? `乖離${(deviation * 100).toFixed(1)}%` : undefined,
+    },
+    {
+      key: 'volume', pass: sc.volume.pass, detail: sc.volume.detail,
+      metric: volRatio !== null && volRatio !== undefined ? `×${volRatio}` : undefined,
+      progress: volRatio !== null && volRatio !== undefined ? { value: volRatio, target: volThreshold } : undefined,
+    },
+    {
+      key: 'kbar', pass: sc.kbar.pass, detail: sc.kbar.detail,
+      metric: `實體${(bodyPct * 100).toFixed(1)}%`,
+      progress: { value: bodyPct, target: 0.02 },
+    },
+    {
+      key: 'indicator', pass: sc.indicator.pass, detail: sc.indicator.detail,
+      metric: [
+        macdOSC !== null && macdOSC !== undefined ? `OSC${macdOSC > 0 ? '+' : ''}${macdOSC.toFixed(2)}` : null,
+        kdK !== null && kdK !== undefined ? `K${kdK.toFixed(0)}` : null,
+      ].filter(Boolean).join(' ') || undefined,
+    },
   ];
 
   return (
@@ -141,6 +212,8 @@ export default function SixConditionsPanel() {
               label={label}
               pass={row.pass}
               detail={row.detail}
+              metric={row.metric}
+              progress={row.progress}
               expanded={expanded === row.key}
               onToggle={() => toggle(row.key)}
             />

@@ -13,6 +13,7 @@ import {
 } from '@/features/scan';
 import { PageShell } from '@/components/shared';
 import { SectionBoundary } from '@/components/ErrorBoundary';
+import { Button } from '@/components/ui/button';
 
 // ── Shared Scan Page Content ──────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
     sessions,
     setMarket, setScanDate, setStrategy,
     setCapitalConstraints, toggleCapitalMode,
-    isScanning, scanProgress, scanError,
+    isScanning, scanProgress, scanningStock, scanningCount, scanError,
     scanResults, isFetchingForward, forwardError, performance,
     trades,
     clearCurrent,
@@ -39,6 +40,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
     scanDirection, setScanDirection,
     marketTrend,
     cancelScan,
+    scanPresets, saveScanPreset, loadScanPreset, deleteScanPreset,
     cronDates, fetchCronDates,
   } = useBacktestStore();
 
@@ -62,6 +64,8 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
 
   // ── Backtest params collapsible ──
   const [showBacktestParams, setShowBacktestParams] = useState(false);
+  const [showPresetMenu, setShowPresetMenu] = useState(false);
+  const [presetName, setPresetName] = useState('');
 
   // ── One-click scan actions ──
   const isBusy = isScanning || isFetchingForward;
@@ -95,14 +99,11 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
               <label className="text-xs text-muted-foreground font-medium">市場</label>
               <div className="flex rounded-lg overflow-hidden border border-border">
                 {(['TW', 'CN'] as const).map(m => (
-                  <button key={m} onClick={() => { setMarket(m); clearCurrent(); }}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
-                      market === m
-                        ? 'bg-sky-600 text-foreground'
-                        : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    }`}>
+                  <Button key={m} onClick={() => { setMarket(m); clearCurrent(); }}
+                    variant={market === m ? 'default' : 'secondary'}
+                    className="px-4 py-2 rounded-none text-sm font-medium">
                     {m === 'TW' ? '台股' : '陸股'}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
@@ -111,18 +112,12 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">模式</label>
               <div className="flex rounded-lg overflow-hidden border border-border">
-                <button onClick={() => { setActiveMode('sop'); clearCurrent(); }}
-                  className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    activeMode === 'sop'
-                      ? 'bg-sky-600 text-foreground'
-                      : 'bg-secondary text-muted-foreground hover:bg-muted'
-                  }`}>SOP</button>
-                <button onClick={() => { setActiveMode('full'); clearCurrent(); }}
-                  className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    activeMode === 'full'
-                      ? 'bg-sky-600 text-foreground'
-                      : 'bg-secondary text-muted-foreground hover:bg-muted'
-                  }`}>完整</button>
+                <Button onClick={() => { setActiveMode('sop'); clearCurrent(); }}
+                  variant={activeMode === 'sop' ? 'default' : 'secondary'}
+                  className="px-3 py-2 rounded-none text-sm font-medium">SOP</Button>
+                <Button onClick={() => { setActiveMode('full'); clearCurrent(); }}
+                  variant={activeMode === 'full' ? 'default' : 'secondary'}
+                  className="px-3 py-2 rounded-none text-sm font-medium">完整</Button>
               </div>
             </div>
 
@@ -131,18 +126,12 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
               <div className="space-y-1.5">
                 <label className="text-xs text-muted-foreground font-medium">方向</label>
                 <div className="flex rounded-lg overflow-hidden border border-border">
-                  <button onClick={() => { setScanDirection('long'); clearCurrent(); }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      scanDirection === 'long'
-                        ? 'bg-red-600 text-foreground'
-                        : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    }`}>做多</button>
-                  <button onClick={() => { setScanDirection('short'); clearCurrent(); }}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      scanDirection === 'short'
-                        ? 'bg-green-600 text-foreground'
-                        : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    }`}>做空</button>
+                  <Button onClick={() => { setScanDirection('long'); clearCurrent(); }}
+                    variant={scanDirection === 'long' ? 'default' : 'secondary'}
+                    className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'long' ? 'bg-red-600 hover:bg-red-500' : ''}`}>做多</Button>
+                  <Button onClick={() => { setScanDirection('short'); clearCurrent(); }}
+                    variant={scanDirection === 'short' ? 'default' : 'secondary'}
+                    className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'short' ? 'bg-green-600 hover:bg-green-500' : ''}`}>做空</Button>
                 </div>
               </div>
             )}
@@ -182,20 +171,14 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
               <div className="space-y-1.5">
                 <label className="text-xs text-muted-foreground font-medium">篩選子模式</label>
                 <div className="flex rounded-lg overflow-hidden border border-border">
-                  <button onClick={() => { setScanMode('full'); clearCurrent(); }}
-                    className={`px-3 py-2 text-xs font-medium transition-colors ${
-                      scanMode === 'full'
-                        ? 'bg-sky-600 text-foreground'
-                        : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    }`}
-                  >完整 (A)</button>
-                  <button onClick={() => { setScanMode('pure'); clearCurrent(); }}
-                    className={`px-3 py-2 text-xs font-medium transition-colors ${
-                      scanMode === 'pure'
-                        ? 'bg-amber-600 text-foreground'
-                        : 'bg-secondary text-muted-foreground hover:bg-muted'
-                    }`}
-                  >純朱老師 (B)</button>
+                  <Button onClick={() => { setScanMode('full'); clearCurrent(); }}
+                    variant={scanMode === 'full' ? 'default' : 'secondary'}
+                    className="px-3 py-2 rounded-none text-xs font-medium"
+                  >完整 (A)</Button>
+                  <Button onClick={() => { setScanMode('pure'); clearCurrent(); }}
+                    variant={scanMode === 'pure' ? 'default' : 'secondary'}
+                    className={`px-3 py-2 rounded-none text-xs font-medium ${scanMode === 'pure' ? 'bg-amber-600 hover:bg-amber-500' : ''}`}
+                  >純朱老師 (B)</Button>
                 </div>
               </div>
             )}
@@ -226,11 +209,11 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
 
             {/* ── Action Button ── */}
             <div className="flex items-center gap-2 ml-auto">
-              <button
+              <Button
                 onClick={handleScan}
                 disabled={isBusy || !scanDate}
                 title="篩選符合條件的股票，並模擬買入出場計算報酬率（含手續費）"
-                className="px-5 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:bg-muted disabled:text-muted-foreground text-foreground rounded-lg text-sm font-semibold transition-colors whitespace-nowrap"
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-foreground text-sm font-semibold whitespace-nowrap"
               >
                 {isScanning || isFetchingForward ? (
                   <span className="flex items-center gap-2">
@@ -238,30 +221,60 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                     {isScanning ? `掃描中 ${Math.round(scanProgress)}%` : '計算績效…'}
                   </span>
                 ) : '掃描+回測'}
-              </button>
+              </Button>
               {isBusy && (
-                <button
+                <Button
                   onClick={cancelScan}
-                  className="px-3 py-2.5 bg-red-700 hover:bg-red-600 text-foreground rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                  variant="destructive"
+                  className="px-3 py-2.5 text-sm font-medium whitespace-nowrap"
                 >
                   取消
-                </button>
+                </Button>
               )}
             </div>
           </div>
 
+          {/* ── Scan Presets ── */}
+          <div className="border-t border-border px-5 py-2 flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground shrink-0">預設:</span>
+            {scanPresets.map(p => (
+              <span key={p.id} className="flex items-center gap-0.5 bg-secondary rounded px-2 py-1">
+                <Button onClick={() => loadScanPreset(p.id)} variant="ghost" size="sm" className="text-foreground/80 hover:text-foreground h-auto p-0">{p.name}</Button>
+                <Button onClick={() => deleteScanPreset(p.id)} variant="ghost" size="sm" className="text-muted-foreground hover:text-red-400 ml-1 h-auto p-0">✕</Button>
+              </span>
+            ))}
+            {showPresetMenu ? (
+              <span className="flex items-center gap-1">
+                <input
+                  value={presetName}
+                  onChange={e => setPresetName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && presetName.trim()) { saveScanPreset(presetName.trim()); setPresetName(''); setShowPresetMenu(false); } }}
+                  placeholder="預設名稱"
+                  className="w-24 bg-muted border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-blue-500"
+                  autoFocus
+                />
+                <Button onClick={() => { if (presetName.trim()) { saveScanPreset(presetName.trim()); setPresetName(''); setShowPresetMenu(false); } }}
+                  variant="ghost" size="sm" className="text-sky-400 hover:text-sky-300 h-auto p-0">儲存</Button>
+                <Button onClick={() => setShowPresetMenu(false)} variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground h-auto p-0">取消</Button>
+              </span>
+            ) : (
+              <Button onClick={() => setShowPresetMenu(true)} variant="ghost" size="sm" className="text-sky-400 hover:text-sky-300 h-auto p-0">+ 儲存目前</Button>
+            )}
+          </div>
+
           {/* ── Backtest Params (collapsible) ── */}
           <div className="border-t border-border">
-            <button
+            <Button
               onClick={() => setShowBacktestParams(v => !v)}
-              className="w-full px-5 py-2.5 flex items-center justify-between text-xs text-muted-foreground hover:text-foreground/80 hover:bg-secondary/50 transition-colors"
+              variant="ghost"
+              className="w-full px-5 py-2.5 flex items-center justify-between text-xs text-muted-foreground hover:text-foreground/80 hover:bg-secondary/50 h-auto rounded-none"
             >
               <span className="flex items-center gap-2">
                 <span className="font-medium">回測參數</span>
                 <span className="text-muted-foreground/60">{paramsSummary}</span>
               </span>
               <span className={`transition-transform ${showBacktestParams ? 'rotate-180' : ''}`}>▾</span>
-            </button>
+            </Button>
 
             {showBacktestParams && (
               <div className="px-5 pb-4 flex flex-wrap items-end gap-4">
@@ -303,16 +316,13 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                 {/* Capital Mode Toggle */}
                 <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">資本模式</label>
-                  <button
+                  <Button
                     onClick={toggleCapitalMode}
-                    className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
-                      useCapitalMode
-                        ? 'bg-amber-700/60 border-amber-600 text-amber-200'
-                        : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
-                    }`}
+                    variant={useCapitalMode ? 'default' : 'secondary'}
+                    className={`px-4 py-2 text-sm ${useCapitalMode ? 'bg-amber-700/60 hover:bg-amber-600/60 border border-amber-600 text-amber-200' : ''}`}
                   >
                     {useCapitalMode ? '資本限制' : '無限資本'}
-                  </button>
+                  </Button>
                 </div>
 
                 {/* Capital params (shown when capital mode is on) */}
@@ -364,10 +374,13 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
           {(isScanning || isFetchingForward) && (
             <div className="px-5 pb-4 space-y-2 border-t border-border pt-3">
               <div className="text-xs text-muted-foreground flex items-center justify-between">
-                <span>{isScanning ? `掃描歷史數據（${scanDate}）…` : '計算後續績效與回測引擎…'}</span>
-                {isScanning && <span className="text-sky-400 font-mono">{Math.round(scanProgress)}%</span>}
+                <span>{isScanning ? (scanningStock || `掃描歷史數據（${scanDate}）…`) : '計算後續績效與回測引擎…'}</span>
+                <div className="flex items-center gap-2">
+                  {isScanning && scanningCount && <span className="text-muted-foreground font-mono text-[10px]">{scanningCount}</span>}
+                  {isScanning && <span className="text-sky-400 font-mono">{Math.round(scanProgress)}%</span>}
+                </div>
               </div>
-              <div className="h-1 bg-secondary rounded-full overflow-hidden">
+              <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                 <div className="h-full bg-sky-500 rounded-full transition-all duration-500"
                   style={{ width: isScanning ? `${scanProgress}%` : '100%',
                            animation: isFetchingForward ? 'pulse 1s infinite' : 'none' }} />
@@ -495,16 +508,18 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                                     className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/50 hover:bg-violet-900/30 ml-1">
                                     AI分析
                                   </Link>
-                                  <button
+                                  <Button
                                     onClick={(e) => {
                                       useWatchlistStore.getState().add(r.symbol, r.name);
                                       const btn = e.currentTarget;
                                       btn.textContent = '✓ 已加';
                                       setTimeout(() => { btn.textContent = '+自選'; }, 1200);
                                     }}
-                                    className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-amber-700/50 hover:bg-amber-900/30">
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 h-auto border-amber-700/50 hover:bg-amber-900/30 bg-transparent">
                                     {useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
-                                  </button>
+                                  </Button>
                                 </div>
 
                                 <div className="mt-1.5 flex flex-wrap gap-1">
@@ -575,14 +590,35 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
             <div className="text-center py-16 text-muted-foreground space-y-3">
               <div className="text-5xl">📭</div>
               <div className="text-lg font-medium text-muted-foreground">本日無符合條件的個股</div>
+              {marketTrend && (
+                <div className={`inline-block px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  marketTrend === '空頭' ? 'bg-green-900/40 text-green-300' :
+                  marketTrend === '盤整' ? 'bg-yellow-900/30 text-yellow-300' :
+                  'bg-muted text-muted-foreground'
+                }`}>
+                  大盤狀態：{String(marketTrend)}
+                  {marketTrend === '空頭' && ' — 空頭市場選股困難，建議觀望或切換做空模式'}
+                  {marketTrend === '盤整' && ' — 盤整行情，嚴格條件下難找到標的'}
+                </div>
+              )}
               <div className="text-sm space-y-1">
-                <p>可能的原因：</p>
+                <p className="font-medium">可能的原因：</p>
                 <ul className="text-xs text-muted-foreground space-y-0.5">
                   <li>大盤處於空頭或盤整，門檻自動提高</li>
-                  <li>該日期市場整體量能不足</li>
+                  <li>該日期（{scanDate}）市場整體量能不足</li>
                   <li>策略條件較嚴格（可在「策略」頁面調整門檻）</li>
                 </ul>
-                <p className="text-xs text-sky-400 mt-3">建議：嘗試其他日期，或降低最低評分門檻</p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2 mt-4">
+                <button
+                  onClick={() => setScanDirection(scanDirection === 'long' ? 'short' : 'long')}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-secondary hover:bg-muted text-foreground/80 transition-colors"
+                >
+                  {scanDirection === 'long' ? '切換做空掃描' : '切換做多掃描'}
+                </button>
+                <Link href="/strategies" className="text-xs px-3 py-1.5 rounded-lg bg-sky-900/40 hover:bg-sky-800/50 text-sky-300 transition-colors">
+                  調整策略門檻
+                </Link>
               </div>
             </div>
           ) : (

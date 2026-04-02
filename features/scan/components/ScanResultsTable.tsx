@@ -8,6 +8,7 @@ import { calcComposite, chipTooltip } from '../utils';
 import { chipBadge } from './TradeRow';
 import { POLLING } from '@/lib/config';
 import { fetchInstitutionalBatch, type InstitutionalSummary } from '@/lib/datasource/useInstitutionalSummary';
+import { Button } from '@/components/ui/button';
 
 export function ScanResultsTable() {
   const {
@@ -25,6 +26,7 @@ export function ScanResultsTable() {
   const [conceptFilter, setConceptFilter] = useState<string>('all');
   const [scanSort, setScanSort] = useState<'composite' | 'score' | 'grade' | 'potential' | 'winRate' | 'price' | 'change'>('composite');
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
+  const [heatmapMode, setHeatmapMode] = useState(false);
 
   // ── 盤中即時價格更新（每 30 秒，僅台股+掃描選股模式）────────────────────
   useEffect(() => {
@@ -111,13 +113,34 @@ export function ScanResultsTable() {
     }
   });
 
+  // ── 三層分級：強烈推薦 / 值得關注 / 一般符合 ──
+  const tierOf = (r: typeof scanResults[number]) => {
+    const composite = calcComposite(r);
+    if (r.sixConditionsScore >= 5 && composite >= 65) return 'top';
+    if (r.sixConditionsScore >= 4 && composite >= 45) return 'watch';
+    return 'normal';
+  };
+
+  const topCount = sortedScanResults.filter(r => tierOf(r) === 'top').length;
+  const watchCount = sortedScanResults.filter(r => tierOf(r) === 'watch').length;
+
+  // Heatmap cell background: value 0-max → opacity 0-40% of given color
+  function heatBg(value: number, max: number, color: 'sky' | 'green' | 'orange'): string {
+    if (!heatmapMode) return '';
+    const t = Math.min(Math.max(value / max, 0), 1);
+    const opacity = Math.round(t * 45);
+    const colors = { sky: `rgba(56,189,248,${opacity / 100})`, green: `rgba(74,222,128,${opacity / 100})`, orange: `rgba(251,146,60,${opacity / 100})` };
+    return colors[color];
+  }
+
   if (!scanOnly || scanResults.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-2 text-sm flex-wrap">
         <span className="font-bold text-foreground">掃描結果</span>
         <span className="text-muted-foreground">{scanResults.length} 檔符合條件</span>
+        <span className="text-[10px] text-muted-foreground/60" title="掃描的歷史資料日期">資料日期：{scanDate}</span>
         {marketTrend && (
           <span title={`大盤趨勢：${marketTrend}｜多頭＝大盤上漲，選股勝率較高｜盤整＝方向不明，需謹慎｜空頭＝大盤下跌，風險較大`}
             className={`px-1.5 py-0.5 rounded text-[10px] font-bold cursor-help ${
@@ -126,7 +149,18 @@ export function ScanResultsTable() {
             'bg-yellow-900/50 text-yellow-300'
           }`}>{String(marketTrend)}</span>
         )}
-        <button
+        {topCount > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-900/50 text-red-300">TOP {topCount}</span>}
+        {watchCount > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-900/40 text-orange-300">關注 {watchCount}</span>}
+        <Button
+          onClick={() => setHeatmapMode(v => !v)}
+          variant="outline"
+          size="sm"
+          title="熱力圖模式：數值越高顏色越深，快速辨別強弱"
+          className={`text-[11px] px-2.5 py-1 h-auto bg-transparent ${heatmapMode ? 'border-amber-500/60 text-amber-400 bg-amber-900/20' : 'border-border text-muted-foreground hover:text-foreground'}`}
+        >
+          熱力圖
+        </Button>
+        <Button
           onClick={() => {
             const headers = ['代號','名稱','概念','評分','等級','潛力','勝率','信號次數','價格','漲跌%','趨勢','位置'];
             const rows = sortedScanResults.map(r => [
@@ -143,26 +177,32 @@ export function ScanResultsTable() {
             a.download = `scan_${scanDate}_${market}.csv`; a.click();
             setTimeout(() => URL.revokeObjectURL(url), 5000);
           }}
-          className="ml-auto text-[11px] text-sky-400 hover:text-sky-300 px-2.5 py-1 rounded border border-sky-700/50 hover:bg-sky-900/30 transition-colors"
+          variant="outline"
+          size="sm"
+          className="ml-auto text-[11px] text-sky-400 hover:text-sky-300 px-2.5 py-1 h-auto border-sky-700/50 hover:bg-sky-900/30 bg-transparent"
         >
           匯出 CSV
-        </button>
+        </Button>
       </div>
       {/* 概念篩選器 */}
       {availableConcepts.length > 1 && (
         <div className="flex flex-wrap gap-1 items-center">
           <span className="text-[10px] text-muted-foreground mr-1">篩選：</span>
-          <button onClick={() => setConceptFilter('all')}
-            className={`text-[10px] px-2 py-0.5 rounded-full transition ${conceptFilter === 'all' ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>
+          <Button onClick={() => setConceptFilter('all')}
+            variant={conceptFilter === 'all' ? 'default' : 'secondary'}
+            size="sm"
+            className={`text-[10px] px-2 py-0.5 h-auto rounded-full ${conceptFilter === 'all' ? 'bg-sky-700 hover:bg-sky-600' : ''}`}>
             全部 ({scanResults.length})
-          </button>
+          </Button>
           {availableConcepts.sort().slice(0, 20).map(c => {
             const count = scanResults.filter(r => r.industry === c).length;
             return (
-              <button key={c} onClick={() => setConceptFilter(c)}
-                className={`text-[10px] px-2 py-0.5 rounded-full transition ${conceptFilter === c ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>
+              <Button key={c} onClick={() => setConceptFilter(c)}
+                variant={conceptFilter === c ? 'default' : 'secondary'}
+                size="sm"
+                className={`text-[10px] px-2 py-0.5 h-auto rounded-full ${conceptFilter === c ? 'bg-sky-700 hover:bg-sky-600' : ''}`}>
                 {c} ({count})
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -207,7 +247,13 @@ export function ScanResultsTable() {
             {sortedScanResults.slice(0, 50).map((r) => (<Fragment key={r.symbol}>
               <tr className={`border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''}`}
                 onClick={() => setExpandedStock(expandedStock === r.symbol ? null : r.symbol)}>
-                <td className="py-1.5 px-2 font-mono font-bold text-foreground">{r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</td>
+                <td className="py-1.5 px-2 font-mono font-bold text-foreground">
+                  <div className="flex items-center gap-1">
+                    {r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}
+                    {tierOf(r) === 'top' && <span className="text-[8px] px-1 py-0 rounded bg-red-600 text-white font-bold leading-tight">TOP</span>}
+                    {tierOf(r) === 'watch' && <span className="text-[8px] px-1 py-0 rounded bg-orange-600/80 text-white font-bold leading-tight">!</span>}
+                  </div>
+                </td>
                 <td className="py-1.5 px-2">
                   <div className="text-foreground/80">{r.name}</div>
                   <div className="flex gap-0.5 mt-0.5">
@@ -224,13 +270,13 @@ export function ScanResultsTable() {
                   </div>
                 </td>
                 <td className="py-1.5 px-1 text-[10px] text-muted-foreground max-w-[60px] truncate" title={r.industry}>{r.industry ?? '—'}</td>
-                <td className="py-1.5 px-1 text-center">
+                <td className="py-1.5 px-1 text-center" style={{ background: heatBg(calcComposite(r), 100, 'sky') }}>
                   {(() => {
                     const cs = calcComposite(r);
                     return <span className={`font-bold text-[11px] ${cs >= 70 ? 'text-sky-400' : cs >= 55 ? 'text-foreground' : 'text-muted-foreground'}`}>{cs.toFixed(1)}</span>;
                   })()}
                 </td>
-                <td className="py-1.5 px-1 text-center">
+                <td className="py-1.5 px-1 text-center" style={{ background: heatBg(r.sixConditionsScore, 6, 'green') }}>
                   <span className={`font-bold ${r.sixConditionsScore >= 5 ? 'text-bull' : r.sixConditionsScore >= 4 ? 'text-orange-400' : 'text-yellow-400'}`}>
                     {r.sixConditionsScore}/6
                   </span>
@@ -245,8 +291,8 @@ export function ScanResultsTable() {
                     }`}>{r.surgeGrade}</span>
                   )}
                 </td>
-                <td className="py-1.5 px-1 text-center font-mono text-foreground/80">{r.surgeScore ?? '—'}</td>
-                <td className="py-1.5 px-1 text-center">
+                <td className="py-1.5 px-1 text-center font-mono text-foreground/80" style={{ background: heatBg(r.surgeScore ?? 0, 100, 'orange') }}>{r.surgeScore ?? '—'}</td>
+                <td className="py-1.5 px-1 text-center" style={{ background: heatBg(r.histWinRate ?? 0, 100, 'green') }}>
                   {r.histWinRate != null && (
                     <span className={`text-[10px] px-1 rounded ${r.histWinRate >= 60 ? 'bg-green-900/60 text-green-300' : r.histWinRate >= 50 ? 'bg-yellow-900/60 text-yellow-300' : 'bg-red-900/60 text-red-300'}`}
                       title={`基於過去 ${r.histSignalCount ?? '?'} 次同類信號的歷史勝率`}>
@@ -302,16 +348,18 @@ export function ScanResultsTable() {
                     className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/50 hover:bg-violet-900/30 mr-1">
                     AI分析
                   </Link>
-                  <button
+                  <Button
                     onClick={(e) => {
                       useWatchlistStore.getState().add(r.symbol, r.name);
                       const btn = e.currentTarget;
                       btn.textContent = '✓ 已加';
                       setTimeout(() => { btn.textContent = '+自選'; }, 1200);
                     }}
-                    className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 rounded border border-amber-700/50 hover:bg-amber-900/30">
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 h-auto border-amber-700/50 hover:bg-amber-900/30 bg-transparent">
                     {useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
-                  </button>
+                  </Button>
                 </td>
               </tr>
               {expandedStock === r.symbol && (
