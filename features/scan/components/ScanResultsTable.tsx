@@ -133,7 +133,17 @@ export function ScanResultsTable() {
     return colors[color];
   }
 
-  if (!scanOnly || scanResults.length === 0) return null;
+  if (!scanOnly) return null;
+
+  if (scanResults.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <p className="text-3xl mb-3">🔍</p>
+        <p className="text-sm font-medium text-muted-foreground">尚無掃描結果</p>
+        <p className="text-xs text-muted-foreground/70 mt-1">選擇市場與策略後，點擊「開始掃描」即可查看結果</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">

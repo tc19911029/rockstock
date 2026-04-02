@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun, TrendingUp,
   BarChart2, ScanSearch, Activity, FileBarChart, Settings2,
@@ -154,6 +155,7 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
       'flex flex-col bg-background text-foreground',
       fullViewport ? 'h-screen overflow-hidden' : 'min-h-screen',
     )}>
+      <NavigationProgress />
       {/* Skip to content */}
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:bg-sky-600 focus:text-white focus:rounded-lg focus:text-sm">
         跳到主要內容

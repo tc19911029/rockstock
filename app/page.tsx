@@ -275,10 +275,18 @@ export default function HomePage() {
           </div>
         </SectionBoundary>
       )}
-      {sideTab === 'chip' && currentStock && (
-        <SectionBoundary section="籌碼分析">
-          <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
-        </SectionBoundary>
+      {sideTab === 'chip' && (
+        currentStock ? (
+          <SectionBoundary section="籌碼分析">
+            <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
+          </SectionBoundary>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <p className="text-2xl mb-2">📋</p>
+            <p className="text-sm font-medium text-muted-foreground">尚未載入股票</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">請先選擇一檔股票以查看籌碼資料</p>
+          </div>
+        )
       )}
     </div>
   );

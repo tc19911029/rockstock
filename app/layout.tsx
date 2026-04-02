@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ColorThemeInit } from "@/components/ColorThemeInit";
 import { Toaster } from "sonner";
 import RegisterPWA from "@/components/RegisterPWA";
+import StoreSync from "@/components/StoreSync";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -72,6 +73,7 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           <TooltipProvider>
             <ColorThemeInit />
+            <StoreSync />
             <RiskDisclaimerModal />
             <FeatureGuideModal />
             <Toaster position="top-right" richColors closeButton theme="dark" />
