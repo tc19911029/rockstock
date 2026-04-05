@@ -9,6 +9,7 @@ __pycache__/
 /data/*.json
 /data/*.pkl
 /data/*.png
+/data/candles/
 
 # strategy-engine (separate Python experiment)
 /strategy-engine/

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120; // one chunk takes ~80s max
+export const maxDuration = 300; // 陸股 5000 檔需要更多時間
 
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
@@ -22,6 +22,8 @@ const scannerChunkSchema = z.object({
   rankBy:     z.enum(['composite', 'surge', 'smartMoney', 'sixConditions', 'histWinRate']).default('sixConditions'),
   /** 方向：long=做多, short=做空 */
   direction:  z.enum(['long', 'short']).default('long'),
+  /** 長線保護短線：多時間框架前置過濾 */
+  multiTimeframeFilter: z.boolean().default(false),
 });
 
 export async function POST(req: NextRequest) {
@@ -37,6 +39,11 @@ export async function POST(req: NextRequest) {
     strategyId: parsed.data.strategyId,
     thresholds: parsed.data.thresholds as never,
   });
+
+  // 長線保護短線：由前端開關覆蓋策略預設值
+  if (parsed.data.multiTimeframeFilter) {
+    thresholds.multiTimeframeFilter = true;
+  }
 
   if (stocks.length === 0) {
     return apiOk({ results: [] });

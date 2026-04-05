@@ -53,6 +53,7 @@ interface BacktestState {
   scanDate:            string;
   strategy:            BacktestStrategyParams;
   useCapitalMode:      boolean;
+  useMultiTimeframe:   boolean;  // 長線保護短線開關
   capitalConstraints:  CapitalConstraints;
 
   // ── 掃描階段 ──
@@ -105,6 +106,7 @@ interface BacktestState {
   setStrategy:            (s: Partial<BacktestStrategyParams>) => void;
   setCapitalConstraints:  (c: Partial<CapitalConstraints>) => void;
   toggleCapitalMode:      () => void;
+  toggleMultiTimeframe:   () => void;
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short') => void;
@@ -160,6 +162,7 @@ export const useBacktestStore = create<BacktestState>()(
       scanDate:           today(),
       strategy:           DEFAULT_STRATEGY,
       useCapitalMode:     false,
+      useMultiTimeframe:  false,
       capitalConstraints: DEFAULT_CAPITAL,
       walkForwardConfig:  { trainSize: 3, testSize: 1, stepSize: 1 },
       walkForwardResult:  null,
@@ -229,6 +232,7 @@ export const useBacktestStore = create<BacktestState>()(
       setStrategy:           (partial)  => set(s => ({ strategy: { ...s.strategy, ...partial } })),
       setCapitalConstraints: (partial)  => set(s => ({ capitalConstraints: { ...s.capitalConstraints, ...partial } })),
       toggleCapitalMode:     ()         => set(s => ({ useCapitalMode: !s.useCapitalMode })),
+      toggleMultiTimeframe:  ()         => set(s => ({ useMultiTimeframe: !s.useMultiTimeframe })),
       setWalkForwardConfig:  (partial)  => set(s => ({ walkForwardConfig: { ...s.walkForwardConfig, ...partial } })),
 
       computeWalkForward: () => {
@@ -332,7 +336,7 @@ export const useBacktestStore = create<BacktestState>()(
         scanAbortController = new AbortController();
         const signal = scanAbortController.signal;
 
-        const { market, scanDate, strategy, useCapitalMode, capitalConstraints, scanOnly } = get();
+        const { market, scanDate, strategy, useCapitalMode, useMultiTimeframe, capitalConstraints, scanOnly } = get();
 
         // ── Phase 1: Get stock list ──────────────────────────────────────────
         set({ isScanning: true, scanProgress: 5, scanningStock: '取得股票清單...', scanningCount: '', scanError: null,
@@ -375,6 +379,7 @@ export const useBacktestStore = create<BacktestState>()(
               date: scanDate,
               mode: scanMode,
               direction: scanDirection,
+              multiTimeframeFilter: useMultiTimeframe,
               ...strategyPayload,
             }),
             signal,
@@ -385,26 +390,44 @@ export const useBacktestStore = create<BacktestState>()(
           return { results: (json.results ?? []).map(sanitizeScanResult), marketTrend: json.marketTrend ?? null };
         };
 
-        set({ scanProgress: 30, scanningStock: `分析中（${stocks.length} 檔，雙線程並行）...`, scanningCount: `0/${stocks.length}` });
+        set({ scanProgress: 20, scanningStock: `分析中（${stocks.length} 檔）...`, scanningCount: `0/${stocks.length}` });
 
-        const [r1, r2] = await Promise.allSettled([scanChunk(chunk1), scanChunk(chunk2)]);
+        // 串行掃描：避免同時 2 個 chunk 打爆外部 API
+        let results1: StockScanResult[] = [];
+        let results2: StockScanResult[] = [];
+        let mt: string | null = null;
 
-        if (r1.status === 'rejected' && r2.status === 'rejected') {
-          set({ isScanning: false, scanError: `掃描失敗：${r1.reason}` });
+        try {
+          const r1 = await scanChunk(chunk1);
+          results1 = r1.results;
+          mt = r1.marketTrend;
+          set({ scanProgress: 55, scanningCount: `${chunk1.length}/${stocks.length}` });
+        } catch (e) {
+          if (e instanceof DOMException && e.name === 'AbortError') return;
+          // chunk1 失敗仍繼續 chunk2
+        }
+
+        try {
+          const r2 = await scanChunk(chunk2);
+          results2 = r2.results;
+          if (!mt) mt = r2.marketTrend;
+        } catch (e) {
+          if (e instanceof DOMException && e.name === 'AbortError') return;
+        }
+
+        if (results1.length === 0 && results2.length === 0) {
+          set({ isScanning: false, scanError: '掃描失敗：兩個分段均無結果' });
           return;
         }
 
         const combined: StockScanResult[] = [
-          ...(r1.status === 'fulfilled' ? r1.value.results : []),
-          ...(r2.status === 'fulfilled' ? r2.value.results : []),
+          ...results1,
+          ...results2,
         ].sort((a, b) =>
           b.sixConditionsScore !== a.sixConditionsScore
             ? b.sixConditionsScore - a.sixConditionsScore
             : b.changePercent - a.changePercent
         );
-
-        // 取得大盤趨勢（從第一個 chunk 的回應）
-        const mt = r1.status === 'fulfilled' ? r1.value.marketTrend : null;
         const marketTrend = mt ? (mt as unknown as TrendState) : null;
 
         set({ scanResults: combined, isScanning: false, scanProgress: 100, scanningStock: '', scanningCount: `${combined.length} 檔符合`, marketTrend });

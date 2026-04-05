@@ -7,7 +7,7 @@ interface CacheEntry<T> {
 }
 
 /** Default maximum number of entries before LRU eviction kicks in */
-const DEFAULT_MAX_SIZE = 500;
+const DEFAULT_MAX_SIZE = 2000;
 
 /**
  * 記憶體快取 — TTL + LRU 驅逐策略

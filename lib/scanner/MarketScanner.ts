@@ -7,11 +7,15 @@ import { StockScanResult, MarketConfig, TriggeredRule } from './types';
 import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
 import { evaluateHighWinRateEntry } from '@/lib/analysis/highWinRateEntry';
-import { evaluateWinnerPatterns } from '@/lib/rules/winnerPatternRules';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
-import { analyzeTrendlines } from '@/lib/analysis/trendlineAnalysis';
+import { evaluateMultiTimeframe, MultiTimeframeResult } from '@/lib/analysis/multiTimeframeFilter';
+import { getScannerCache, setScannerCache, getScannerCacheStats } from '@/lib/datasource/ScannerCache';
+import { loadLocalCandlesForDate, saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 
-const CONCURRENCY = 15; // parallel requests per chunk
+const CONCURRENCY = 8; // parallel requests per chunk (降低避免打爆外部 API)
+const BATCH_DELAY_MS = 300; // 每批次間隔 ms
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export type StockEntry = { symbol: string; name: string; industry?: string };
 
@@ -20,6 +24,46 @@ export abstract class MarketScanner {
   abstract getStockList(): Promise<StockEntry[]>;
   abstract fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]>;
   abstract getMarketTrend(asOfDate?: string): Promise<TrendState>;
+
+  /**
+   * 掃描專用 fetchCandles — 三層快取：記憶體 → 本地檔案 → API
+   * 走圖（單股即時）不經過這裡，直接用 fetchCandles()
+   */
+  protected async fetchCandlesForScan(
+    symbol: string,
+    asOfDate?: string,
+  ): Promise<CandleWithIndicators[]> {
+    const today = new Date().toISOString().split('T')[0];
+    const isHistorical = !!asOfDate && asOfDate < today;
+    const market = this.getMarketConfig().marketId as 'TW' | 'CN';
+
+    if (isHistorical) {
+      // L1: 記憶體快取
+      const memCached = getScannerCache(symbol, asOfDate);
+      if (memCached) return memCached;
+
+      // L2: 本地檔案
+      try {
+        const local = await loadLocalCandlesForDate(symbol, market, asOfDate);
+        if (local && local.length > 0) {
+          setScannerCache(symbol, asOfDate, local);
+          return local;
+        }
+      } catch { /* 本地讀取失敗，fallback 到 API */ }
+    }
+
+    // L3: 打外部 API
+    const candles = await this.fetchCandles(symbol, asOfDate);
+
+    // 回寫快取（僅歷史日期）
+    if (isHistorical && candles.length > 0) {
+      setScannerCache(symbol, asOfDate, candles);
+      // 異步存本地檔案（不阻塞掃描流程）
+      saveLocalCandles(symbol, market, candles).catch(() => {});
+    }
+
+    return candles;
+  }
 
   /**
    * 根據大盤趨勢動態計算個股最低分數門檻
@@ -35,13 +79,12 @@ export abstract class MarketScanner {
     symbol: string,
     rawName: string,
     config: MarketConfig,
-    minScore: number,
+    _minScore: number,
     thresholds: StrategyThresholds,
     asOfDate?: string,
     industry?: string,
   ): Promise<StockScanResult | null> {
     try {
-      // 陸股：用動態 API 取最新公司名（東方財富 f14 可能是舊名）
       let name = rawName;
       if (/\.(SZ|SS)$/i.test(symbol)) {
         try {
@@ -52,141 +95,67 @@ export abstract class MarketScanner {
         } catch { /* 查不到就用東方財富的名字 */ }
       }
 
-      const candles = await this.fetchCandles(symbol, asOfDate);
+      const candles = await this.fetchCandlesForScan(symbol, asOfDate);
       if (candles.length < 30) return null;
 
-      const lastIdx  = candles.length - 1;
-      const last     = candles[lastIdx];
-      const prev     = candles[lastIdx - 1];
-      const signals  = ruleEngine.evaluate(candles, lastIdx);
+      const lastIdx = candles.length - 1;
+      const last = candles[lastIdx];
+
+      // ══════════════════════════════════════════════════════════════════
+      // 第零層：長線保護短線（多時間框架前置過濾）
+      // ══════════════════════════════════════════════════════════════════
+
+      let mtfResult: MultiTimeframeResult | undefined;
+      if (thresholds.multiTimeframeFilter) {
+        mtfResult = evaluateMultiTimeframe(candles, thresholds);
+        if (!mtfResult.pass) return null;
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // 第一層：選股（純朱家泓書本體系）
+      // ══════════════════════════════════════════════════════════════════
+
+      // ── 1. 六大條件（前5個=核心門檻，第6個 KD/MACD=候補加分）──────────
       const sixConds = evaluateSixConditions(candles, lastIdx, thresholds);
-      const trend    = detectTrend(candles, lastIdx);
-      const position = detectTrendPosition(candles, lastIdx);
-
-      // ── 篩股條件（嚴格版 — 寧可錯過，不可做錯）────────────────────────────
-      // 1. 空頭趨勢：嚴禁做多
-      if (trend === '空頭') return null;
-
-      // 2. 六大條件門檻（書上規定：前5個是必要條件，第6個「指標」是輔助）
       if (!sixConds.isCoreReady) return null;
 
-      // 3. 乖離過大
-      if (last.ma20 && last.ma20 > 0) {
-        const overExtended = (last.close - last.ma20) / last.ma20 > thresholds.deviationMax;
-        if (overExtended) return null;
-      }
-      // 4. KD 超買
-      if (last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
-
-      // 5. 複合過熱檢查 — 多個過熱指標同時觸發 = 頂部信號，直接拒絕
-      {
-        let overheatCount = 0;
-        if (last.rsi14 != null && last.rsi14 > 75) overheatCount++;
-        const bar5Ago = lastIdx >= 5 ? candles[lastIdx - 5] : undefined;
-        if (bar5Ago && bar5Ago.close > 0) {
-          const roc5 = ((last.close - bar5Ago.close) / bar5Ago.close) * 100;
-          if (roc5 > 8) overheatCount++;
-        }
-        if (last.roc10 != null && last.roc10 > 15) overheatCount++;
-        if (last.ma20 && last.ma20 > 0 && (last.close - last.ma20) / last.ma20 > 0.12) overheatCount++;
-        if (last.kdK != null && last.kdK > 85) overheatCount++;
-        if (overheatCount >= 3) return null;
-      }
-
-      // 6. 成交量太低 — 過濾冷門股
-      const minVolume = config.marketId === 'CN' ? 50000 : 1000;
-      if (last.volume < minVolume) return null;
-
-      // 7. 漲停隔天不追
-      if (prev && prev.close > 0) {
-        const prevChange = (last.close - prev.close) / prev.close;
-        let limitUp = 0.095;
-        if (config.marketId === 'CN') {
-          const code = symbol.replace(/\.(SS|SZ)$/i, '');
-          if (code.startsWith('688') || code.startsWith('300')) {
-            limitUp = 0.195;
-          }
-        }
-        if (prevChange >= limitUp) return null;
-      }
-
-      // 8. 末升段不進場
-      if (position.includes('末升')) return null;
-
-      // 9. A-share mean reversion filter
-      if (config.marketId === 'CN') {
-        const rsi = last.rsi14;
-        const roc10 = last.roc10;
-        if (rsi != null && rsi > 80 && roc10 != null && roc10 > 15) return null;
-      }
-
-      // 10. 紅K必要條件 — 朱老師核心：黑K不進場
-      if (last.close <= last.open) return null;
-
-      // 10.5 短線第9條：KD值向下時不買
+      // ── 2. 短線第9條：KD值向下時不買 ─────────────────────────────────
       if (last.kdK != null && lastIdx > 0) {
         const prevKdK = candles[lastIdx - 1]?.kdK;
-        if (prevKdK != null && last.kdK < prevKdK) {
-          return null;
-        }
+        if (prevKdK != null && last.kdK < prevKdK) return null;
       }
 
-      // 10.6 短線第10條：進場紅K線上影線超過二分之一 → 不買進
+      // ── 3. 短線第10條：進場紅K線上影線超過二分之一 → 不買進 ───────────
       const dayRange = last.high - last.low;
       const entryUpperShadow = last.high - last.close;
       if (dayRange > 0 && entryUpperShadow / dayRange > 0.5) return null;
 
-      // 11. 突破前5日高點
-      const recentHighs = candles.slice(Math.max(0, lastIdx - 5), lastIdx).map(c => c.high);
-      const prev5High = Math.max(...recentHighs);
-      if (prev5High > 0 && last.close < prev5High) return null;
+      // ── 4. 10大戒律：硬性禁忌過濾（朱老師 p.54）─────────────────────
+      const prohib = checkLongProhibitions(candles, lastIdx);
+      if (prohib.prohibited) return null;
 
-      // 12. 新鮮訊號必要條件 — 當日必須觸發至少一個 BUY/ADD 訊號
-      const hasBuySignal = signals.some(s => s.type === 'BUY' || s.type === 'ADD');
-      if (!hasBuySignal) return null;
+      // ── 5. 淘汰法 R1-R11（寶典）─────────────────────────────────────
+      const elimination = evaluateElimination(candles, lastIdx);
+      if (elimination.eliminated) return null;
 
-      const changePercent = prev?.close > 0
-        ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
-        : 0;
+      // ══════════════════════════════════════════════════════════════════
+      // 第二層：排序資料收集（共振 + 高勝率進場）
+      // ══════════════════════════════════════════════════════════════════
+
+      const trend = detectTrend(candles, lastIdx);
+      const position = detectTrendPosition(candles, lastIdx);
+      const signals = ruleEngine.evaluate(candles, lastIdx);
 
       const triggeredRules: TriggeredRule[] = signals.map(s => ({
-        ruleId:     s.ruleId,
-        ruleName:   s.label,
-        signalType: s.type,
-        reason:     s.description,
+        ruleId: s.ruleId, ruleName: s.label, signalType: s.type, reason: s.description,
       }));
 
-      // ── 歷史信號勝率 ─────────────────────────────────────────────────────
-      let histWinRate: number | undefined;
-      let histSignalCount = 0;
-      let histWinCount = 0;
-      const histEnd = lastIdx - 6;
-      const histStart = Math.max(60, lastIdx - 120);
+      // ── 共振因子：BUY/ADD 訊號數量 + 跨群組共振 ─────────────────────
+      const buySignals = signals.filter(s => s.type === 'BUY' || s.type === 'ADD');
+      const uniqueGroups = new Set(buySignals.map(s => ('groupId' in s ? (s as { groupId: string }).groupId : s.ruleId.split('.')[0])));
+      const resonanceScore = buySignals.length + uniqueGroups.size;
 
-      for (let h = histStart; h < histEnd; h++) {
-        const hSix = evaluateSixConditions(candles, h, thresholds);
-        if (hSix.totalScore < minScore) continue;
-        const entryIdx = h + 1;
-        if (entryIdx >= candles.length) continue;
-        const entryPrice = candles[entryIdx].open;
-        if (!entryPrice || entryPrice <= 0) continue;
-        const exitIdx = Math.min(entryIdx + 5, candles.length - 1);
-        const exitPrice = candles[exitIdx].close;
-        histSignalCount++;
-        if (exitPrice > entryPrice) histWinCount++;
-      }
-
-      if (histSignalCount >= 8) {
-        histWinRate = Math.round((histWinCount / histSignalCount) * 100);
-      }
-
-      // ── 10大戒律：硬性禁忌過濾（朱老師p.54）────────────────────────────
-      {
-        const prohib = checkLongProhibitions(candles, lastIdx);
-        if (prohib.prohibited) return null;
-      }
-
-      // ── 高勝率進場位置 (朱老師《活用技術分析寶典》Part 12) ──────────────
+      // ── 高勝率進場位置（朱老師《活用技術分析寶典》Part 12）─────────────
       let highWinRateEntry: ReturnType<typeof evaluateHighWinRateEntry> = {
         matched: false, types: [], score: 0, details: [],
       };
@@ -194,30 +163,9 @@ export abstract class MarketScanner {
         highWinRateEntry = evaluateHighWinRateEntry(candles, lastIdx);
       } catch { /* non-critical */ }
 
-      // ── 33 種贏家圖像 (朱老師 40 年精華) ──────────────────────────────
-      let winnerPatterns: ReturnType<typeof evaluateWinnerPatterns> = {
-        bearishPatterns: [], bullishPatterns: [], compositeAdjust: 0,
-      };
-      try {
-        winnerPatterns = evaluateWinnerPatterns(candles, lastIdx);
-      } catch { /* non-critical */ }
-
-      // ── 切線分析 ──────────────────────────────────────────────────────
-      let trendline: ReturnType<typeof analyzeTrendlines> = {
-        trendlines: [], breakAboveDescending: false, breakBelowAscending: false,
-        ascendingSupport: null, descendingResistance: null, compositeAdjust: 0,
-      };
-      try {
-        trendline = analyzeTrendlines(candles, lastIdx);
-      } catch { /* non-critical */ }
-
-      // ── 淘汰法篩選 ────────────────────────────────────────────────────
-      let elimination: ReturnType<typeof evaluateElimination> = {
-        eliminated: false, reasons: [], penalty: 0,
-      };
-      try {
-        elimination = evaluateElimination(candles, lastIdx);
-      } catch { /* non-critical */ }
+      const changePercent = lastIdx > 0 && candles[lastIdx - 1]?.close > 0
+        ? +((last.close - candles[lastIdx - 1].close) / candles[lastIdx - 1].close * 100).toFixed(2)
+        : 0;
 
       return {
         symbol,
@@ -229,8 +177,6 @@ export abstract class MarketScanner {
         volume: last.volume,
         triggeredRules,
         sixConditionsScore: sixConds.totalScore,
-        histWinRate,
-        histSignalCount,
         sixConditionsBreakdown: {
           trend:     sixConds.trend.pass,
           position:  sixConds.position.pass,
@@ -242,19 +188,25 @@ export abstract class MarketScanner {
         trendState: trend,
         trendPosition: position,
         scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
-        // ── 高勝率進場位置 ────────────────────────────────────────────────
+        // ── 排序因子 ─────────────────────────────────────────────────────
+        resonanceScore,
         highWinRateTypes: highWinRateEntry.types,
         highWinRateScore: highWinRateEntry.score,
         highWinRateDetails: highWinRateEntry.details,
-        // ── 贏家圖像 ─────────────────────────────────────────────────────
-        winnerBearishPatterns: winnerPatterns.bearishPatterns.map(p => p.name),
-        winnerBullishPatterns: winnerPatterns.bullishPatterns.map(p => p.name),
-        // ── 切線 ─────────────────────────────────────────────────────────
-        trendlineBreakAbove: trendline.breakAboveDescending,
-        trendlineBreakBelow: trendline.breakBelowAscending,
-        // ── 淘汰法 ──────────────────────────────────────────────────────
+        // ── 淘汰法（資訊保留，供 UI 顯示）──────────────────────────────
         eliminationReasons: elimination.reasons,
         eliminationPenalty: elimination.penalty,
+        // ── 長線保護短線（多時間框架）──────────────────────────────────
+        ...(mtfResult ? {
+          mtfScore: mtfResult.totalScore,
+          mtfWeeklyTrend: mtfResult.weekly.trend,
+          mtfWeeklyPass: mtfResult.weekly.pass,
+          mtfWeeklyDetail: mtfResult.weekly.detail,
+          mtfMonthlyTrend: mtfResult.monthly.trend,
+          mtfMonthlyPass: mtfResult.monthly.pass,
+          mtfMonthlyDetail: mtfResult.monthly.detail,
+          mtfWeeklyNearResistance: mtfResult.weeklyNearResistance,
+        } : {}),
       };
     } catch {
       return null;
@@ -262,10 +214,9 @@ export abstract class MarketScanner {
   }
 
   /**
-   * 純朱家泓選股：只保留六大條件 SOP 核心篩選，不加任何額外分析層
-   * 用於 A/B 測試，對比完整管線 vs 純方法論的勝率差異
+   * @deprecated 已合併到 scanOne()，保留為向下相容別名
    */
-  private async scanOnePure(
+  private scanOnePure(
     symbol: string,
     rawName: string,
     config: MarketConfig,
@@ -274,73 +225,7 @@ export abstract class MarketScanner {
     asOfDate?: string,
     industry?: string,
   ): Promise<StockScanResult | null> {
-    try {
-      let name = rawName;
-      if (/\.(SZ|SS)$/i.test(symbol)) {
-        try {
-          const code = symbol.replace(/\.(SZ|SS)$/i, '');
-          const { getCNChineseName } = await import('@/lib/datasource/TWSENames');
-          const cnName = await getCNChineseName(code);
-          if (cnName) name = cnName;
-        } catch { /* fallback */ }
-      }
-
-      const candles = await this.fetchCandles(symbol, asOfDate);
-      if (candles.length < 30) return null;
-
-      const lastIdx = candles.length - 1;
-      const last    = candles[lastIdx];
-      const signals = ruleEngine.evaluate(candles, lastIdx);
-      const sixConds = evaluateSixConditions(candles, lastIdx, thresholds);
-      const trend    = detectTrend(candles, lastIdx);
-      const position = detectTrendPosition(candles, lastIdx);
-
-      // ── 純朱老師核心篩選（只有 8 條） ──
-      if (trend === '空頭') return null;
-      if (!sixConds.isCoreReady && sixConds.totalScore < minScore) return null;
-      if (last.close <= last.open) return null; // 非紅K
-      if (last.ma20 && last.ma20 > 0) {
-        if ((last.close - last.ma20) / last.ma20 > thresholds.deviationMax) return null;
-      }
-      if (last.kdK != null && last.kdK > thresholds.kdMaxEntry) return null;
-      const recentHighs = candles.slice(Math.max(0, lastIdx - 5), lastIdx).map(c => c.high);
-      const prev5High = Math.max(...recentHighs);
-      if (prev5High > 0 && last.close < prev5High) return null;
-      const hasBuySignal = signals.some(s => s.type === 'BUY' || s.type === 'ADD');
-      if (!hasBuySignal) return null;
-
-      const triggeredRules: TriggeredRule[] = signals.map(s => ({
-        ruleId: s.ruleId, ruleName: s.label, reason: s.reason, signalType: s.type,
-      }));
-
-      const changePercent = last.open > 0
-        ? +((last.close - last.open) / last.open * 100).toFixed(2)
-        : 0;
-
-      return {
-        symbol, name,
-        market: config.marketId,
-        industry,
-        price: last.close,
-        changePercent,
-        volume: last.volume,
-        triggeredRules,
-        sixConditionsScore: sixConds.totalScore,
-        sixConditionsBreakdown: {
-          trend:     sixConds.trend.pass,
-          position:  sixConds.position.pass,
-          kbar:      sixConds.kbar.pass,
-          ma:        sixConds.ma.pass,
-          volume:    sixConds.volume.pass,
-          indicator: sixConds.indicator.pass,
-        },
-        trendState: trend,
-        trendPosition: position,
-        scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
-      };
-    } catch {
-      return null;
-    }
+    return this.scanOne(symbol, rawName, config, minScore, thresholds, asOfDate, industry);
   }
 
   /**
@@ -363,14 +248,15 @@ export abstract class MarketScanner {
       chunks.push(stockList.slice(i, i + CONCURRENCY));
     }
 
-    for (const chunk of chunks) {
-      const promises = chunk.map(s =>
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const promises = chunks[ci].map(s =>
         this.scanOnePure(s.symbol, s.name, config, minScore, th, asOfDate, s.industry)
       );
       const settled = await Promise.allSettled(promises);
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);
       }
+      if (ci < chunks.length - 1) await sleep(BATCH_DELAY_MS);
     }
 
     results.sort((a, b) => b.sixConditionsScore - a.sixConditionsScore);
@@ -478,6 +364,7 @@ export abstract class MarketScanner {
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);
       }
+      if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
     results.sort((a, b) => b.sixConditionsScore - a.sixConditionsScore);
@@ -485,7 +372,7 @@ export abstract class MarketScanner {
   }
 
   /**
-   * 做空版單股掃描（Phase 3 新增）
+   * 做空版單股掃描：純朱家泓書本體系（空頭六條件 + 做空戒律）
    */
   private async scanOneShort(
     symbol: string,
@@ -506,36 +393,42 @@ export abstract class MarketScanner {
         } catch { /* fallback */ }
       }
 
-      const candles = await this.fetchCandles(symbol, asOfDate);
+      const candles = await this.fetchCandlesForScan(symbol, asOfDate);
       if (candles.length < 30) return null;
 
-      const lastIdx  = candles.length - 1;
-      const last     = candles[lastIdx];
-      const prev     = candles[lastIdx - 1];
+      const lastIdx = candles.length - 1;
+      const last = candles[lastIdx];
 
+      // ══════════════════════════════════════════════════════════════════
+      // 第一層：選股（純朱家泓書本體系 — 做空版）
+      // ══════════════════════════════════════════════════════════════════
+
+      // ── 1. 空頭六條件（前5個=核心門檻）─────────────────────────────
       const shortConds = evaluateShortSixConditions(candles, lastIdx);
       if (!shortConds.isCoreReady) return null;
 
+      // ── 2. 做空戒律 ────────────────────────────────────────────────
       const prohib = checkShortProhibitions(candles, lastIdx);
       if (prohib.prohibited) return null;
 
-      if (last.close >= last.open) return null;
+      // 書裡沒有做空淘汰法則，不加
 
-      const minVolume = config.marketId === 'CN' ? 50000 : 1000;
-      if (last.volume < minVolume) return null;
+      // ══════════════════════════════════════════════════════════════════
+      // 第二層：排序資料收集（共振 + 高勝率進場）
+      // ══════════════════════════════════════════════════════════════════
 
-      if (prev && prev.close > 0) {
-        const prevChange = (last.close - prev.close) / prev.close;
-        let limitUp = 0.095;
-        if (config.marketId === 'CN') {
-          const code = symbol.replace(/\.(SS|SZ)$/i, '');
-          if (code.startsWith('688') || code.startsWith('300')) limitUp = 0.195;
-        }
-        if (prevChange >= limitUp) return null;
-      }
+      const signals = ruleEngine.evaluate(candles, lastIdx);
+      const triggeredRules: TriggeredRule[] = signals.map(s => ({
+        ruleId: s.ruleId, ruleName: s.label, signalType: s.type, reason: s.description,
+      }));
 
-      const changePercent = prev?.close > 0
-        ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
+      // ── 共振因子：SELL/REDUCE 訊號數量 + 跨群組共振（方向反轉）────
+      const sellSignals = signals.filter(s => s.type === 'SELL' || s.type === 'REDUCE');
+      const uniqueGroups = new Set(sellSignals.map(s => ('groupId' in s ? (s as { groupId: string }).groupId : s.ruleId.split('.')[0])));
+      const resonanceScore = sellSignals.length + uniqueGroups.size;
+
+      const changePercent = lastIdx > 0 && candles[lastIdx - 1]?.close > 0
+        ? +((last.close - candles[lastIdx - 1].close) / candles[lastIdx - 1].close * 100).toFixed(2)
         : 0;
 
       return {
@@ -546,7 +439,7 @@ export abstract class MarketScanner {
         price: last.close,
         changePercent,
         volume: last.volume,
-        triggeredRules: [],
+        triggeredRules,
         sixConditionsScore: 0,
         sixConditionsBreakdown: {
           trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false,
@@ -561,7 +454,7 @@ export abstract class MarketScanner {
           indicator: shortConds.indicator.pass,
         },
         direction: 'short',
-        entryProhibitionReasons: [],
+        resonanceScore,
         trendState: '空頭',
         trendPosition: shortConds.position.stage ?? '',
         scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
@@ -598,6 +491,7 @@ export abstract class MarketScanner {
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) candidates.push(r.value);
       }
+      if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
     candidates.sort((a, b) => (b.shortSixConditionsScore ?? 0) - (a.shortSixConditionsScore ?? 0));
@@ -633,27 +527,25 @@ export abstract class MarketScanner {
           candidates.push(r.value);
         }
       }
+      if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
     return { candidates, marketTrend };
   }
 
   /**
-   * 候選股排序層 — 按六大條件分數排序
+   * 候選股排序層 — 台股回測結論：共振100% 表現最佳
+   * 排序公式：resonanceScore（共振訊號數+跨群組共振）
+   * 回測數據：1947支×244天，共振100% 10日均報+3.23% 勝率45.7%（6組最高）
    */
   rankCandidates(
     candidates: StockScanResult[],
-    rankBy: 'sixConditions' | 'histWinRate' = 'sixConditions',
+    _rankBy?: string,
   ): StockScanResult[] {
     return [...candidates].sort((a, b) => {
-      switch (rankBy) {
-        case 'histWinRate':
-          return (b.histWinRate ?? 0) - (a.histWinRate ?? 0);
-        case 'sixConditions':
-        default:
-          return b.sixConditionsScore - a.sixConditionsScore
-            || b.changePercent - a.changePercent;
-      }
+      const scoreA = (a.resonanceScore ?? 0);
+      const scoreB = (b.resonanceScore ?? 0);
+      return scoreB - scoreA || b.changePercent - a.changePercent;
     });
   }
 
@@ -662,9 +554,9 @@ export abstract class MarketScanner {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * V2 簡化版單股篩選：嚴格只用朱老師 SOP
+   * @deprecated 已合併到 scanOne()，保留為向下相容別名
    */
-  private async scanOneSOPOnly(
+  private scanOneSOPOnly(
     symbol: string,
     rawName: string,
     config: MarketConfig,
@@ -672,70 +564,7 @@ export abstract class MarketScanner {
     asOfDate?: string,
     industry?: string,
   ): Promise<StockScanResult | null> {
-    try {
-      let name = rawName;
-      if (/\.(SZ|SS)$/i.test(symbol)) {
-        try {
-          const code = symbol.replace(/\.(SZ|SS)$/i, '');
-          const { getCNChineseName } = await import('@/lib/datasource/TWSENames');
-          const cnName = await getCNChineseName(code);
-          if (cnName) name = cnName;
-        } catch { /* fallback */ }
-      }
-
-      const candles = await this.fetchCandles(symbol, asOfDate);
-      if (candles.length < 30) return null;
-
-      const lastIdx = candles.length - 1;
-      const last = candles[lastIdx];
-
-      const trend = detectTrend(candles, lastIdx);
-      if (trend === '空頭') return null;
-
-      const sixConds = evaluateSixConditions(candles, lastIdx, thresholds);
-      if (!sixConds.isCoreReady) return null;
-
-      const prohibitions = checkLongProhibitions(candles, lastIdx);
-      if (prohibitions.prohibited) return null;
-
-      const elimination = evaluateElimination(candles, lastIdx);
-      if (elimination.eliminated) return null;
-
-      const position = detectTrendPosition(candles, lastIdx);
-      const signals = ruleEngine.evaluate(candles, lastIdx);
-      const triggeredRules: TriggeredRule[] = signals.map(s => ({
-        ruleId: s.ruleId, ruleName: s.label, reason: s.reason, signalType: s.type,
-      }));
-      const changePercent = last.open > 0
-        ? +((last.close - last.open) / last.open * 100).toFixed(2)
-        : 0;
-
-      return {
-        symbol, name,
-        market: config.marketId,
-        industry,
-        price: last.close,
-        changePercent,
-        volume: last.volume,
-        triggeredRules,
-        sixConditionsScore: sixConds.totalScore,
-        sixConditionsBreakdown: {
-          trend: sixConds.trend.pass,
-          position: sixConds.position.pass,
-          kbar: sixConds.kbar.pass,
-          ma: sixConds.ma.pass,
-          volume: sixConds.volume.pass,
-          indicator: sixConds.indicator.pass,
-        },
-        trendState: trend,
-        trendPosition: position,
-        scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
-        eliminationReasons: elimination.reasons,
-        eliminationPenalty: elimination.penalty,
-      };
-    } catch {
-      return null;
-    }
+    return this.scanOne(symbol, rawName, config, 0, thresholds, asOfDate, industry);
   }
 
   /**
@@ -766,6 +595,7 @@ export abstract class MarketScanner {
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) candidates.push(r.value);
       }
+      if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
     const sorted = this.rankCandidates(candidates, rankBy);
@@ -806,6 +636,7 @@ export abstract class MarketScanner {
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);
       }
+      if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
     let maxResults = results.length;
@@ -813,9 +644,10 @@ export abstract class MarketScanner {
     if (marketTrend === '空頭') maxResults = Math.min(results.length, 3);
 
     const sortedResults = results
-      .sort((a, b) => b.sixConditionsScore - a.sixConditionsScore || b.changePercent - a.changePercent)
+      .sort((a, b) => (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent)
       .slice(0, maxResults);
 
+    console.info('[ScannerCache]', getScannerCacheStats());
     return { results: sortedResults, marketTrend };
   }
 
@@ -838,7 +670,7 @@ export abstract class MarketScanner {
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       if (Date.now() > DEADLINE) {
         const sorted = results.sort((a, b) =>
-          b.sixConditionsScore - a.sixConditionsScore || b.changePercent - a.changePercent
+          (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
         );
         return { results: sorted, partial: true, marketTrend };
       }
@@ -849,10 +681,11 @@ export abstract class MarketScanner {
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) results.push(r.value);
       }
+      if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
     const sorted = results.sort((a, b) =>
-      b.sixConditionsScore - a.sixConditionsScore || b.changePercent - a.changePercent
+      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
     );
 
     let maxResults = sorted.length;
