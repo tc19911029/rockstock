@@ -113,7 +113,7 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   multiTimeframeFilter: false,
   mtfWeeklyStrict:  true,   // 週線不通過=拒絕
   mtfMonthlyStrict: false,  // 月線不通過=只扣分
-  mtfMinScore:      2,      // 至少2/4分
+  mtfMinScore:      3,      // 至少3/4分
 };
 
 const ALL_CONDITIONS_ON: StrategyConditionToggles = {

@@ -36,10 +36,10 @@ describe('calcComposite', () => {
     expect(high).toBeGreaterThan(low);
   });
 
-  it('ignores highWinRateScore (resonance 100% per backtest)', () => {
-    const high = calcComposite(mockResult({ resonanceScore: 0, highWinRateScore: 30 }));
-    const low  = calcComposite(mockResult({ resonanceScore: 0, highWinRateScore: 0 }));
-    expect(high).toBe(low);  // 共振100%: highWinRateScore 不影響排序
+  it('includes highWinRateScore with equal weight (1:1)', () => {
+    const with_ = calcComposite(mockResult({ resonanceScore: 0, highWinRateScore: 30 }));
+    const without = calcComposite(mockResult({ resonanceScore: 0, highWinRateScore: 0 }));
+    expect(with_).toBeGreaterThan(without);
   });
 
   it('handles missing optional fields gracefully', () => {

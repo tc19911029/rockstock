@@ -30,14 +30,13 @@ export function scoreColor(s: number): string {
 // ── Composite score ───────────────────────────────────────────────────────────
 
 /**
- * Composite score — 台股回測結論：共振100%
- * 回測數據：1947支×244天，共振100% 10日均報+3.23% 勝率45.7%（6組最高）
+ * Composite score — 共振:高勝率 = 1:1
  */
 export function calcComposite(r: Pick<StockScanResult,
   'resonanceScore' | 'highWinRateScore' | 'compositeScore'
 >): number {
   if (r.compositeScore != null) return r.compositeScore;
-  return (r.resonanceScore ?? 0);
+  return (r.resonanceScore ?? 0) + (r.highWinRateScore ?? 0);
 }
 
 /** Chip tooltip text */

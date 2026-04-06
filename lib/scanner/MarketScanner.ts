@@ -611,19 +611,15 @@ export abstract class MarketScanner {
   }
 
   /**
-   * 候選股排序層 — 台股回測結論：共振100% 表現最佳
-   * 排序公式：resonanceScore（共振訊號數+跨群組共振）
-   * 回測數據：1947支×244天，共振100% 10日均報+3.23% 勝率45.7%（6組最高）
+   * 候選股排序層 — 共振:高勝率 = 1:1
    */
   rankCandidates(
     candidates: StockScanResult[],
     _rankBy?: string,
   ): StockScanResult[] {
-    return [...candidates].sort((a, b) => {
-      const scoreA = (a.resonanceScore ?? 0);
-      const scoreB = (b.resonanceScore ?? 0);
-      return scoreB - scoreA || b.changePercent - a.changePercent;
-    });
+    return [...candidates].sort((a, b) =>
+      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -677,10 +673,8 @@ export abstract class MarketScanner {
 
     const sorted = this.rankCandidates(candidates, rankBy);
 
-    const maxResults = marketTrend === '空頭' ? 3 : marketTrend === '盤整' ? 8 : sorted.length;
-
     return {
-      results: sorted.slice(0, maxResults),
+      results: sorted,
       marketTrend,
     };
   }
@@ -719,13 +713,8 @@ export abstract class MarketScanner {
       if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
-    let maxResults = results.length;
-    if (marketTrend === '盤整') maxResults = Math.min(results.length, 8);
-    if (marketTrend === '空頭') maxResults = Math.min(results.length, 3);
-
     const sortedResults = results
-      .sort((a, b) => (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent)
-      .slice(0, maxResults);
+      .sort((a, b) => (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent);
 
     console.info('[ScannerCache]', getScannerCacheStats());
     console.info('[ScanDiagnostics]', JSON.stringify(diag));
@@ -769,12 +758,8 @@ export abstract class MarketScanner {
       (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
     );
 
-    let maxResults = sorted.length;
-    if (marketTrend === '盤整') maxResults = Math.min(sorted.length, 8);
-    if (marketTrend === '空頭') maxResults = Math.min(sorted.length, 3);
-
     return {
-      results: sorted.slice(0, maxResults),
+      results: sorted,
       partial: false,
       marketTrend,
     };
