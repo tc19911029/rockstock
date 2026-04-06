@@ -23,7 +23,9 @@ function loadEnvLocal() {
 loadEnvLocal();
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  turbopack: {
+    root: __dirname,
+  },
 };
 
 export default nextConfig;
