@@ -77,7 +77,7 @@ interface ReplayStore {
 
   // ── Actions ───────────────────────────────────────────────
   initData: () => void;
-  loadStock: (symbol: string, interval?: string, period?: string) => Promise<void>;
+  loadStock: (symbol: string, interval?: string, period?: string, targetDate?: string) => Promise<void>;
   nextCandle: () => void;
   prevCandle: () => void;
   jumpToIndex: (index: number) => void;
@@ -141,7 +141,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
   },
 
   // ── Load real stock ──────────────────────────────────────
-  loadStock: async (symbol: string, interval = '1d', period?: string) => {
+  loadStock: async (symbol: string, interval = '1d', period?: string, targetDate?: string) => {
     if (symbol === 'mock') {
       get().initData();
       return;
@@ -166,7 +166,23 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       if (allCandles.length === 0) throw new Error('資料筆數為 0');
 
       precomputeMarkers(allCandles);
-      const index = calcStartIndex(allCandles);
+      let index: number;
+      if (targetDate) {
+        // Position chart at the target date (scan record date)
+        const dateIdx = allCandles.findIndex(c => c.date === targetDate);
+        if (dateIdx !== -1) {
+          index = dateIdx;
+        } else {
+          // Fallback: find the closest candle on or before targetDate
+          let closest = -1;
+          for (let i = allCandles.length - 1; i >= 0; i--) {
+            if (allCandles[i].date <= targetDate) { closest = i; break; }
+          }
+          index = closest !== -1 ? closest : calcStartIndex(allCandles);
+        }
+      } else {
+        index = calcStartIndex(allCandles);
+      }
       const account = createAccount(INITIAL_CAPITAL);
       set({
         allCandles,

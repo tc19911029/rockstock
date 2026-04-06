@@ -29,6 +29,8 @@ import AnalysisChat from '@/components/AnalysisChat';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
 import BottomPanel from '@/components/BottomPanel';
 import { ScanPanel } from '@/features/scan';
+import type { SelectedStock } from '@/features/scan';
+import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
@@ -61,15 +63,13 @@ export default function HomePage() {
 
   // Handle ?load=SYMBOL&date=YYYY-MM-DD
   const [loadError, setLoadError] = useState<string | null>(null);
-  const pendingJumpRef = useRef<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sym = params.get('load');
     const date = params.get('date');
     if (sym) {
       setLoadError(null);
-      if (date) pendingJumpRef.current = date;
-      loadStock(sym, '1d', '2y').catch((e: Error) => {
+      loadStock(sym, '1d', '2y', date ?? undefined).catch((e: Error) => {
         const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
         setLoadError(msg);
         toast.error(msg);
@@ -79,22 +79,6 @@ export default function HomePage() {
       loadStock('2330', '1d', '2y').catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Jump to date after load
-  useEffect(() => {
-    if (!pendingJumpRef.current) return;
-    const unsub = useReplayStore.subscribe((state) => {
-      const target = pendingJumpRef.current;
-      if (!target || state.allCandles.length < 30 || state.isLoadingStock) return;
-      const idx = state.allCandles.findIndex(c => c.date >= target);
-      if (idx >= 0) {
-        pendingJumpRef.current = null;
-        setTimeout(() => useReplayStore.getState().jumpToIndex(idx), 50);
-        unsub();
-      }
-    });
-    return unsub;
-  }, []);
 
   // Keyboard: ← → Space B S Q
   const handleKey = useCallback((e: KeyboardEvent) => {
@@ -151,6 +135,12 @@ export default function HomePage() {
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel
   const [scannerOpen, setScannerOpen] = useState(false);
+  const handleScanSelectStock = useCallback((stock: SelectedStock) => {
+    const scanDate = useBacktestStore.getState().scanDate;
+    loadStock(stock.symbol, '1d', '2y', scanDate || undefined).catch((e: Error) => {
+      toast.error(`載入 ${stock.name} 失敗：${e.message || '請稍後再試'}`);
+    });
+  }, [loadStock]);
 
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
   // 預設 0.65，mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
@@ -467,7 +457,7 @@ export default function HomePage() {
             <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${scannerOpen ? 'rotate-180' : ''}`} />
           </button>
           <div className={`transition-all duration-300 ${scannerOpen ? 'max-h-[40vh]' : 'max-h-0'} overflow-hidden`}>
-            <ScanPanel />
+            <ScanPanel onSelectStock={handleScanSelectStock} />
           </div>
         </div>
 

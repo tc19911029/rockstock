@@ -2,9 +2,12 @@ export { calcComposite, chipTooltip, retColor, fmtRet, scoreColor, exportToCsv }
 export { BacktestStatsPanel, EquityCurveMini } from './components/BacktestStatsPanel';
 export { ResearchAssumptions } from './components/ResearchAssumptions';
 export { SessionHistory } from './components/SessionHistory';
+export { DateNavigator } from './components/DateNavigator';
 export { WalkForwardPanel } from './components/WalkForwardPanel';
 export { HorizonCard } from './components/HorizonCard';
 export { TradeRow, trendBadge, exitBadge, chipBadge, calcTradeComposite } from './components/TradeRow';
 export { ScanResultsTable } from './components/ScanResultsTable';
+export { ScanChartPanel } from './components/ScanChartPanel';
+export type { SelectedStock } from './components/ScanChartPanel';
 export { ScanPanel } from './ScanPageContent';
 export { default as ScanPageContent } from './ScanPageContent';

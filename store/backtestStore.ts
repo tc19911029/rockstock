@@ -6,6 +6,7 @@ import {
   ScanDiagnostics, createEmptyDiagnostics, mergeDiagnostics, diagnosticsSummary,
 } from '@/lib/scanner/types';
 import { TrendState } from '@/lib/analysis/trendAnalysis';
+import { getMissingTradingDays } from '@/lib/utils/tradingDay';
 // Inline calcBacktestSummary to avoid pulling server-only ForwardAnalyzer → LocalCandleStore (fs)
 function calcBacktestSummary(
   perf: StockForwardPerformance[],
@@ -64,6 +65,18 @@ export interface CronDateEntry {
   scanTime: string;
 }
 
+/** In-memory cache entry for preloaded scan results */
+interface ScanCacheEntry {
+  scanResults: StockScanResult[];
+  performance: StockForwardPerformance[];
+  marketTrend: TrendState | null;
+}
+
+/** Build cache key for scan results */
+function scanCacheKey(market: MarketId, direction: string, mtf: boolean, date: string): string {
+  return `${market}-${direction}-${mtf ? 'mtf' : 'daily'}-${date}`;
+}
+
 // Re-export so page components can import from the store
 export type { CapitalConstraints, WalkForwardResult };
 
@@ -91,6 +104,7 @@ interface BacktestState {
   scanError:     string | null;
   scanResults:   StockScanResult[];
   marketTrend:   TrendState | null;   // 大盤趨勢（掃描時取得）
+  scanTiming:    { listMs: number; ingestMs: number; chunkMs: number; forwardMs: number; totalMs: number } | null;
 
   // ── 前瞻績效階段 ──
   isFetchingForward: boolean;
@@ -127,6 +141,9 @@ interface BacktestState {
   isFetchingCron: boolean;
   isLoadingCronSession: boolean;
 
+  // ── 快取：同日多條件版本切換 ──
+  scanCache: Map<string, ScanCacheEntry>;
+
   // ── Actions ──
   setMarket:              (m: MarketId) => void;
   setScanDate:            (d: string)   => void;
@@ -144,8 +161,9 @@ interface BacktestState {
   runAiRank:              () => Promise<void>;  // AI 排名
   loadSession:            (id: string)  => void;
   clearCurrent:           () => void;
-  fetchCronDates:         (market: MarketId) => Promise<void>;
-  loadCronSession:        (market: MarketId, date: string) => Promise<void>;
+  fetchCronDates:         (market: MarketId, direction?: 'long' | 'short') => Promise<void>;
+  loadCronSession:        (market: MarketId, date: string, opts?: { scanOnly?: boolean; direction?: 'long' | 'short' }) => Promise<void>;
+  autoLoadLatest:         () => Promise<void>;
   backfillHistory:        (market: MarketId, days?: number) => Promise<void>;
 
   // ── Backfill ──
@@ -202,6 +220,7 @@ export const useBacktestStore = create<BacktestState>()(
       scanError:    null,
       scanResults:  [],
       marketTrend:  null,
+      scanTiming:   null,
 
       isFetchingForward: false,
       forwardError:  null,
@@ -221,6 +240,7 @@ export const useBacktestStore = create<BacktestState>()(
       cronDates: [],
       isFetchingCron: false,
       isLoadingCronSession: false,
+      scanCache: new Map(),
       isBackfilling: false,
       backfillProgress: { done: 0, total: 0 },
       scanPresets: [],
@@ -259,7 +279,46 @@ export const useBacktestStore = create<BacktestState>()(
       setStrategy:           (partial)  => set(s => ({ strategy: { ...s.strategy, ...partial } })),
       setCapitalConstraints: (partial)  => set(s => ({ capitalConstraints: { ...s.capitalConstraints, ...partial } })),
       toggleCapitalMode:     ()         => set(s => ({ useCapitalMode: !s.useCapitalMode })),
-      toggleMultiTimeframe:  ()         => set(s => ({ useMultiTimeframe: !s.useMultiTimeframe })),
+      toggleMultiTimeframe: () => {
+        const { market, scanDirection, useMultiTimeframe, scanDate, scanResults, performance, marketTrend, scanCache } = get();
+        const newMtf = !useMultiTimeframe;
+
+        // Save current results to cache before switching
+        if (scanResults.length > 0) {
+          const currentKey = scanCacheKey(market, scanDirection, useMultiTimeframe, scanDate);
+          scanCache.set(currentKey, { scanResults, performance, marketTrend });
+        }
+
+        // Check if the new version is in cache
+        const newKey = scanCacheKey(market, scanDirection, newMtf, scanDate);
+        const cached = scanCache.get(newKey);
+
+        if (cached) {
+          // Instant swap from cache — no API call
+          set({
+            useMultiTimeframe: newMtf,
+            scanResults: cached.scanResults,
+            performance: cached.performance,
+            marketTrend: cached.marketTrend,
+          });
+        } else {
+          // No cache hit — toggle and trigger background load
+          set({ useMultiTimeframe: newMtf });
+          const mtfParam = newMtf ? 'mtf' : 'daily';
+          // Background fetch (non-blocking)
+          fetch(`/api/scanner/results?market=${market}&date=${scanDate}&direction=${scanDirection}&mtf=${mtfParam}`)
+            .then(r => r.json())
+            .then((json: { sessions?: Array<{ results: StockScanResult[] }> }) => {
+              const results = json.sessions?.[0]?.results ?? [];
+              if (results.length > 0 && get().useMultiTimeframe === newMtf) {
+                set({ scanResults: results, isLoadingCronSession: false });
+                // Also fetch forward performance
+                get().loadCronSession(market, scanDate, { scanOnly: true, direction: scanDirection });
+              }
+            })
+            .catch(() => { /* silent */ });
+        }
+      },
       setWalkForwardConfig:  (partial)  => set(s => ({ walkForwardConfig: { ...s.walkForwardConfig, ...partial } })),
 
       computeWalkForward: () => {
@@ -365,9 +424,13 @@ export const useBacktestStore = create<BacktestState>()(
 
         const { market, scanDate, strategy, useCapitalMode, useMultiTimeframe, capitalConstraints, scanOnly } = get();
 
+        // ── Timing ──────────────────────────────────────────────────────────
+        const t0 = globalThis.performance.now();
+        let tList = t0, tIngest = t0, tChunk = t0;
+
         // ── Phase 1: Get stock list ──────────────────────────────────────────
         set({ isScanning: true, scanProgress: 5, scanningStock: '取得股票清單...', scanningCount: '', scanError: null,
-              scanResults: [], performance: [], trades: [], stats: null });
+              scanResults: [], performance: [], trades: [], stats: null, scanTiming: null });
 
         let stocks: Array<{ symbol: string; name: string }>;
         try {
@@ -375,6 +438,7 @@ export const useBacktestStore = create<BacktestState>()(
           if (!listRes.ok) throw new Error('無法取得股票清單');
           const listJson = await listRes.json() as { stocks: Array<{ symbol: string; name: string }> };
           stocks = listJson.stocks ?? [];
+          tList = globalThis.performance.now();
         } catch (e) {
           if (e instanceof DOMException && e.name === 'AbortError') return;
           set({ isScanning: false, scanError: String(e) });
@@ -410,6 +474,7 @@ export const useBacktestStore = create<BacktestState>()(
           if (e instanceof DOMException && e.name === 'AbortError') return;
           // 覆蓋率檢查失敗不阻塞掃描，繼續進行
         }
+        tIngest = globalThis.performance.now();
 
         // 若覆蓋率嚴重不足（< 50%），提前警告
         if (coverageReport && coverageReport.coverageRate < 50) {
@@ -494,6 +559,7 @@ export const useBacktestStore = create<BacktestState>()(
             if (!mt) mt = r2.marketTrend;
             diag2 = r2.diagnostics;
           }
+          tChunk = globalThis.performance.now();
           set({ scanProgress: 88, scanningCount: `${stocks.length}/${stocks.length}` });
         } catch (e) {
           if (e instanceof DOMException && e.name === 'AbortError') return;
@@ -535,6 +601,7 @@ export const useBacktestStore = create<BacktestState>()(
         );
         const marketTrend = mt ? (mt as unknown as TrendState) : null;
 
+        const tScanDone = globalThis.performance.now();
         set({ scanResults: combined, isScanning: false, scanProgress: 100, scanningStock: '', scanningCount: `${combined.length} 檔符合`, marketTrend });
 
         if (combined.length === 0) return;
@@ -578,18 +645,41 @@ export const useBacktestStore = create<BacktestState>()(
           });
           if (!fwdRes.ok) throw new Error('無法取得後續績效資料');
           const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[]; nullCount?: number; totalRequested?: number };
-          const performance = fwdJson.performance ?? [];
+          const fwdPerf = fwdJson.performance ?? [];
 
           // ── 掃描模式：只取前瞻表現，不做回測引擎 ──
           if (scanOnly) {
-            set({ performance, isFetchingForward: false });
+            const tEnd = globalThis.performance.now();
+            set({
+              performance: fwdPerf,
+              isFetchingForward: false,
+              scanTiming: {
+                listMs:    Math.round(tList - t0),
+                ingestMs:  Math.round(tIngest - tList),
+                chunkMs:   Math.round(tChunk - tIngest),
+                forwardMs: Math.round(tEnd - tScanDone),
+                totalMs:   Math.round(tEnd - t0),
+              },
+            });
+
+            // 背景存檔：新日期會寫入紀錄，舊日期已存在則跳過不覆蓋
+            const { scanDirection: dir } = get();
+            fetch('/api/scanner/backfill', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ market, date: scanDate, direction: dir }),
+            }).then(() => {
+              // 存檔成功後更新日期列表
+              get().fetchCronDates(market, dir);
+            }).catch(() => { /* non-fatal */ });
+
             return;
           }
 
           // ── Phase 4: Run strict BacktestEngine ────────────────────────────
           // Build forward candles map: symbol → ForwardCandle[]
           const candlesMap: Record<string, ForwardCandle[]> = {};
-          for (const p of performance) {
+          for (const p of fwdPerf) {
             if (p.forwardCandles) candlesMap[p.symbol] = p.forwardCandles;
           }
 
@@ -623,14 +713,15 @@ export const useBacktestStore = create<BacktestState>()(
             scanDate,
             createdAt:   new Date().toISOString(),
             scanResults: combined,
-            performance,
+            performance: fwdPerf,
             trades,
             stats:       stats ?? undefined,
             strategyVersion: `holdDays=${strategy.holdDays},sl=${strategy.stopLoss ?? 'off'},tp=${strategy.takeProfit ?? 'off'},ma5=${strategy.ma5StopLoss ? 'on' : 'off'}`,
           };
 
+          const tEnd = globalThis.performance.now();
           set(s => ({
-            performance,
+            performance: fwdPerf,
             trades,
             stats,
             skippedByCapital,
@@ -638,6 +729,13 @@ export const useBacktestStore = create<BacktestState>()(
             capitalReturn,
             isFetchingForward: false,
             sessions: [session, ...s.sessions].slice(0, 20),
+            scanTiming: {
+              listMs:    Math.round(tList - t0),
+              ingestMs:  Math.round(tIngest - tList),
+              chunkMs:   Math.round(tChunk - tIngest),
+              forwardMs: Math.round(tEnd - tScanDone),
+              totalMs:   Math.round(tEnd - t0),
+            },
           }));
         } catch (e) {
           set({ isFetchingForward: false, forwardError: String(e) });
@@ -686,7 +784,7 @@ export const useBacktestStore = create<BacktestState>()(
             const res = await fetch('/api/scanner/backfill', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ market, date }),
+              body: JSON.stringify({ market, date, direction: get().scanDirection }),
             });
             if (res.ok) {
               const json = await res.json() as { count?: number; skipped?: boolean };
@@ -708,10 +806,13 @@ export const useBacktestStore = create<BacktestState>()(
       },
 
       // ── Cron 歷史：取得所有可用日期 ──
-      fetchCronDates: async (market) => {
+      fetchCronDates: async (market, direction) => {
+        const dir = direction ?? get().scanDirection;
+        const { useMultiTimeframe } = get();
+        const mtfParam = useMultiTimeframe ? 'mtf' : 'daily';
         set({ isFetchingCron: true });
         try {
-          const res = await fetch(`/api/scanner/results?market=${market}`);
+          const res = await fetch(`/api/scanner/results?market=${market}&direction=${dir}&mtf=${mtfParam}`);
           if (!res.ok) throw new Error('fetch failed');
           const json = await res.json() as { sessions?: Array<{ date: string; resultCount: number; scanTime: string }> };
           const entries: CronDateEntry[] = (json.sessions ?? []).map(s => ({
@@ -726,19 +827,38 @@ export const useBacktestStore = create<BacktestState>()(
         }
       },
 
-      // ── Cron 歷史：載入特定日期的掃描結果，然後跑回測 ──
-      loadCronSession: async (market, date) => {
-        const { strategy, useCapitalMode, capitalConstraints } = get();
+      // ── Cron 歷史：載入特定日期的掃描結果 ──
+      // opts.scanOnly = true → 只載入掃描結果 + 前向績效，不跑回測引擎
+      loadCronSession: async (market, date, opts) => {
+        const { strategy, useCapitalMode, capitalConstraints, scanDirection, useMultiTimeframe, scanCache } = get();
+        const direction = opts?.direction ?? scanDirection;
+        const onlyScan = opts?.scanOnly ?? false;
+        const mtfParam = useMultiTimeframe ? 'mtf' : 'daily';
+
+        // Check cache first
+        const cacheKey = scanCacheKey(market, direction, useMultiTimeframe, date);
+        const cached = scanCache.get(cacheKey);
+        if (cached && onlyScan) {
+          set({
+            market, scanDate: date, scanOnly: true,
+            scanResults: cached.scanResults,
+            performance: cached.performance,
+            marketTrend: cached.marketTrend,
+            scanError: null, forwardError: null,
+          });
+          return;
+        }
+
         set({
           isLoadingCronSession: true,
           scanResults: [], performance: [], trades: [], stats: null,
           scanError: null, forwardError: null, marketTrend: null,
-          market, scanDate: date, scanOnly: false,
+          market, scanDate: date, scanOnly: true,
         });
 
         try {
-          // Phase 1: Load scan results from server
-          const res = await fetch(`/api/scanner/results?market=${market}&date=${date}`);
+          // Phase 1: Load scan results from server (with MTF dimension)
+          const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${direction}&mtf=${mtfParam}`);
           if (!res.ok) throw new Error('無法載入歷史掃描結果');
           const json = await res.json() as { sessions?: Array<{ results: StockScanResult[] }> };
           const scanResults = json.sessions?.[0]?.results ?? [];
@@ -762,6 +882,19 @@ export const useBacktestStore = create<BacktestState>()(
           if (!fwdRes.ok) throw new Error('無法取得後續績效資料');
           const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
           const performance = fwdJson.performance ?? [];
+
+          // scanOnly mode: skip backtest engine, just show scan results + forward perf
+          if (onlyScan) {
+            // Save to cache for instant switching later
+            const { scanResults: currentResults, scanCache: cache } = get();
+            cache.set(cacheKey, { scanResults: currentResults, performance, marketTrend: null });
+            set({
+              performance,
+              isFetchingForward: false,
+              isLoadingCronSession: false,
+            });
+            return;
+          }
 
           // Phase 3: Run backtest engine
           const candlesMap: Record<string, ForwardCandle[]> = {};
@@ -815,12 +948,51 @@ export const useBacktestStore = create<BacktestState>()(
             isFetchingForward: false,
             isLoadingCronSession: false,
             sessions: [session, ...s.sessions].slice(0, 20),
-            // 已有 user session，從 cronDates 移除避免重複顯示
             cronDates: s.cronDates.filter(c => !(c.market === market && c.date === date)),
           }));
         } catch (e) {
           set({ isFetchingForward: false, isLoadingCronSession: false, forwardError: String(e) });
         }
+      },
+
+      // ── 自動載入最新掃描結果（含自動補齊缺漏交易日）──
+      autoLoadLatest: async () => {
+        const { market, scanDirection, scanResults, isScanning, isFetchingForward, isLoadingCronSession } = get();
+        // 如果已有結果或正在載入中，不重複載入
+        if (scanResults.length > 0 || isScanning || isFetchingForward || isLoadingCronSession) return;
+
+        // 先取得可用日期
+        await get().fetchCronDates(market, scanDirection);
+        const { cronDates } = get();
+
+        // 計算缺漏的交易日（最近 5 個交易日內）
+        const existingDates = new Set(cronDates.filter(c => c.market === market).map(c => c.date));
+        const missingDays = getMissingTradingDays(existingDates, 5, market);
+
+        // 自動補齊缺漏日期
+        if (missingDays.length > 0) {
+          set({ isBackfilling: true, backfillProgress: { done: 0, total: missingDays.length } });
+          for (let i = 0; i < missingDays.length; i++) {
+            try {
+              await fetch('/api/scanner/backfill', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ market, date: missingDays[i], direction: scanDirection }),
+              });
+            } catch { /* 單筆失敗不中斷 */ }
+            set({ backfillProgress: { done: i + 1, total: missingDays.length } });
+          }
+          set({ isBackfilling: false });
+          // 重新取得日期列表
+          await get().fetchCronDates(market, scanDirection);
+        }
+
+        const { cronDates: updated } = get();
+        if (updated.length === 0) return;
+
+        // 載入最新一天（scanOnly mode，不跑回測）
+        const latestDate = updated[0].date;
+        await get().loadCronSession(market, latestDate, { scanOnly: true, direction: scanDirection });
       },
     }),
     {

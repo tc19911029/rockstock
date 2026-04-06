@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, Fragment } from 'react';
-import Link from 'next/link';
 import { useBacktestStore } from '@/store/backtestStore';
+import type { SelectedStock } from './ScanChartPanel';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { POLLING } from '@/lib/config';
 import { fetchInstitutionalBatch, type InstitutionalSummary } from '@/lib/datasource/useInstitutionalSummary';
@@ -39,9 +39,13 @@ const FWD_COLS = [
   { key: 'maxLoss' as const, label: '最低' },
 ] as const;
 
-const TOTAL_COLS = 18; // 代號+名稱+概念+價格+漲跌%+趨勢+位置 + 10 fwd cols + 操作
+const TOTAL_COLS = 18; // 代號+名稱+概念+價格+當日漲跌+趨勢+位置 + 10 fwd cols + 操作
 
-export function ScanResultsTable() {
+interface ScanResultsTableProps {
+  onSelectStock?: (stock: SelectedStock) => void;
+}
+
+export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) {
   const {
     scanResults,
     scanDate,
@@ -53,6 +57,7 @@ export function ScanResultsTable() {
   } = useBacktestStore();
 
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
+  const [justAdded, setJustAdded] = useState<string | null>(null);
   const [newsCache, setNewsCache] = useState<Record<string, { sentiment: number; summary: string; hasNews: boolean; loading: boolean }>>({});
   const [instData, setInstData] = useState<Map<string, InstitutionalSummary | null>>(new Map());
   const [realtimePrices, setRealtimePrices] = useState<Map<string, { price: number; changePct: number; time: string }>>(new Map());
@@ -152,7 +157,7 @@ export function ScanResultsTable() {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <p className="text-3xl mb-3">🔍</p>
         <p className="text-sm font-medium text-muted-foreground">尚無掃描結果</p>
-        <p className="text-xs text-muted-foreground/70 mt-1">選擇市場與策略後，點擊「開始掃描」即可查看結果</p>
+        <p className="text-xs text-muted-foreground/70 mt-1">可從歷史紀錄選擇日期查看，或手動掃描</p>
       </div>
     );
   }
@@ -237,18 +242,31 @@ export function ScanResultsTable() {
 
       {/* Main table with horizontal scroll */}
       <div className="overflow-x-auto">
-        <table className="w-full text-xs" style={{ minWidth: '1100px' }}>
+        <table className="w-full text-xs" style={{ minWidth: '1300px' }}>
           <thead>
+            {/* Group header row */}
+            <tr className="text-[10px] text-muted-foreground/60 border-b border-border/30">
+              <th colSpan={8} className="text-left py-1 px-2 sticky left-0 bg-card z-10 font-normal tracking-wide">
+                掃描當日資訊
+              </th>
+              <th colSpan={10} className="text-left py-1 px-2 font-normal tracking-wide border-l border-border/30">
+                掃描後表現
+              </th>
+              <th className="py-1 px-2" />
+            </tr>
+            {/* Column header row */}
             <tr className="text-muted-foreground border-b border-border">
-              <th className="text-left py-1.5 px-2 sticky left-0 bg-background z-10 whitespace-nowrap">代號</th>
-              <th className="text-left py-1.5 px-2 sticky left-[60px] bg-background z-10 whitespace-nowrap">名稱</th>
-              <th className="text-left py-1.5 px-2 whitespace-nowrap">概念</th>
+              <th className="text-left py-1.5 px-2 sticky left-0 bg-card z-10 whitespace-nowrap" style={{ width: '72px' }}>代號</th>
+              <th className="text-left py-1.5 px-2 sticky left-[72px] bg-card z-10 whitespace-nowrap" style={{ width: '100px' }}>名稱</th>
+              <th className="text-left py-1.5 px-2 whitespace-nowrap" style={{ width: '80px' }}>概念</th>
               {([
-                { key: 'price' as const, label: '價格' },
-                { key: 'change' as const, label: '漲跌%' },
-              ]).map(({ key, label }) => (
+                { key: 'price' as const, label: '價格', w: '64px', tip: '掃描日收盤價' },
+                { key: 'change' as const, label: '當日漲跌', w: '72px', tip: '掃描日收盤價相對前一交易日收盤價的漲跌百分比' },
+              ]).map(({ key, label, w, tip }) => (
                 <th key={key}
                   className="text-right py-1.5 px-1 cursor-pointer hover:text-foreground select-none whitespace-nowrap"
+                  style={{ width: w }}
+                  title={tip}
                   onClick={() => {
                     if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
                     else { setScanSort(key); setScanSortDir('desc'); }
@@ -257,27 +275,32 @@ export function ScanResultsTable() {
                   {scanSort === key && <span className="ml-0.5 text-sky-400">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
                 </th>
               ))}
-              <th className="text-left py-1.5 px-2 whitespace-nowrap">趨勢</th>
-              <th className="text-left py-1.5 px-2 whitespace-nowrap">位置</th>
+              <th className="text-left py-1.5 px-2 whitespace-nowrap" style={{ width: '48px' }}>趨勢</th>
+              <th className="text-left py-1.5 px-2 whitespace-nowrap" style={{ width: '72px' }}>位置</th>
               {FWD_COLS.map(({ key, label }) => (
-                <th key={key} className="text-right py-1.5 px-1 whitespace-nowrap text-[10px]">{label}</th>
+                <th key={key} className="text-right py-1.5 px-1 whitespace-nowrap text-[10px] border-l border-border/20 first:border-l-0" style={{ width: '54px' }}
+                  title={key === 'maxGain' ? '觀察區間內相對掃描日收盤價的最大漲幅' :
+                         key === 'maxLoss' ? '觀察區間內相對掃描日收盤價的最大跌幅' :
+                         key === 'openReturn' ? '隔日開盤價相對掃描日收盤價的漲跌幅' :
+                         `掃描後${label}收盤價相對掃描日收盤價的漲跌幅`}
+                >{label}</th>
               ))}
-              <th className="text-center py-1.5 px-2 whitespace-nowrap">操作</th>
+              <th className="text-center py-1.5 px-2 whitespace-nowrap" style={{ width: '90px' }}>操作</th>
             </tr>
           </thead>
           <tbody>
             {sortedScanResults.slice(0, 50).map((r) => {
               const perf = perfMap.get(r.symbol);
               return (<Fragment key={r.symbol}>
-              <tr className={`border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''}`}
+              <tr className={`group border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''}`}
                 onClick={() => setExpandedStock(expandedStock === r.symbol ? null : r.symbol)}>
                 {/* 代號 — sticky */}
-                <td className="py-1.5 px-2 font-mono font-bold text-foreground sticky left-0 bg-background z-10">
+                <td className="py-1.5 px-2 font-mono text-foreground/90 sticky left-0 bg-card group-hover:bg-secondary/40 z-10 transition-colors">
                   {r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}
                 </td>
                 {/* 名稱 + six-conditions badges — sticky */}
-                <td className="py-1.5 px-2 sticky left-[60px] bg-background z-10">
-                  <div className="text-foreground/80">{r.name}</div>
+                <td className="py-1.5 px-2 sticky left-[72px] bg-card group-hover:bg-secondary/40 z-10 transition-colors">
+                  <div className="text-foreground/90">{r.name}</div>
                   <div className="flex gap-0.5 mt-0.5">
                     {[
                       { pass: r.sixConditionsBreakdown.trend, label: '趨' },
@@ -293,18 +316,18 @@ export function ScanResultsTable() {
                 </td>
                 {/* 概念 */}
                 <td className="py-1.5 px-1 text-[10px] text-muted-foreground max-w-[80px] truncate" title={r.industry}>{r.industry ?? '—'}</td>
-                {/* 價格 + 漲跌% */}
+                {/* 價格 + 當日漲跌 */}
                 {(() => {
                   const sym = r.symbol.replace(/\.(TW|TWO)$/i, '');
                   const rt = realtimePrices.get(sym);
                   const price = rt?.price ?? r.price;
                   const chgPct = rt?.changePct ?? r.changePercent;
                   return (<>
-                    <td className="py-1.5 px-2 text-right font-mono text-foreground whitespace-nowrap" title={rt ? `即時 ${rt.time}` : '掃描時價格'}>
+                    <td className="py-1.5 px-1 text-right font-mono text-foreground whitespace-nowrap" title={rt ? `即時 ${rt.time}` : '掃描時價格'}>
                       {price.toFixed(2)}
                       {rt && <span className="text-[8px] text-sky-500 ml-0.5">⚡</span>}
                     </td>
-                    <td className={`py-1.5 px-2 text-right font-mono font-bold whitespace-nowrap ${chgPct >= 0 ? 'text-bull' : 'text-bear'}`}>
+                    <td className={`py-1.5 px-1 text-right font-mono font-bold whitespace-nowrap ${chgPct >= 0 ? 'text-bull' : 'text-bear'}`}>
                       {chgPct >= 0 ? '+' : ''}{chgPct.toFixed(2)}%
                     </td>
                   </>);
@@ -317,7 +340,7 @@ export function ScanResultsTable() {
                 {FWD_COLS.map(({ key }) => {
                   const val = perf ? perf[key] : undefined;
                   return (
-                    <td key={key} className={`py-1.5 px-1 text-right font-mono text-[10px] whitespace-nowrap ${retColor(val as number | null | undefined)}`}>
+                    <td key={key} className={`py-1.5 px-1 text-right font-mono text-[10px] whitespace-nowrap border-l border-border/10 ${retColor(val as number | null | undefined)}`}>
                       {isFetchingForward && !perf ? (
                         <span className="text-muted-foreground/40">…</span>
                       ) : (
@@ -328,22 +351,25 @@ export function ScanResultsTable() {
                 })}
                 {/* 操作 */}
                 <td className="py-1.5 px-2 text-center whitespace-nowrap">
-                  <Link href={`/?load=${r.symbol}&date=${scanDate}`}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectStock?.({ symbol: r.symbol, name: r.name, market: market as 'TW' | 'CN' });
+                    }}
                     className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">
                     走圖
-                  </Link>
+                  </button>
                   <Button
                     onClick={(e) => {
                       e.stopPropagation();
                       useWatchlistStore.getState().add(r.symbol, r.name);
-                      const btn = e.currentTarget;
-                      btn.textContent = '✓ 已加';
-                      setTimeout(() => { btn.textContent = '+自選'; }, 1200);
+                      setJustAdded(r.symbol);
+                      setTimeout(() => setJustAdded(prev => prev === r.symbol ? null : prev), 1200);
                     }}
                     variant="outline"
                     size="sm"
                     className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 h-auto border-amber-700/50 hover:bg-amber-900/30 bg-transparent">
-                    {useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
+                    {justAdded === r.symbol || useWatchlistStore.getState().has(r.symbol) ? '✓ 已加' : '+自選'}
                   </Button>
                 </td>
               </tr>
@@ -396,7 +422,6 @@ export function ScanResultsTable() {
                         <div className="text-foreground/80 text-[10px] space-y-0.5">
                           <div>趨勢：{r.trendState} · {r.trendPosition}</div>
                           <div>價格：{r.price.toFixed(2)} · 漲跌：{r.changePercent >= 0 ? '+' : ''}{r.changePercent.toFixed(2)}%</div>
-                          <div>成交量：{(r.volume / 1000).toFixed(0)}K</div>
                         </div>
                       </div>
                       {/* 觸發規則 */}

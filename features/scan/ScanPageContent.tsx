@@ -1,18 +1,25 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useBacktestStore } from '@/store/backtestStore';
 import {
   SessionHistory,
   ScanResultsTable,
+  ScanChartPanel,
+  DateNavigator,
 } from '@/features/scan';
+import type { SelectedStock } from '@/features/scan';
 import { PageShell } from '@/components/shared';
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 
 // ── Compact Scan Panel (embeddable in other pages) ───────────────────────────
 
-export function ScanPanel() {
+interface ScanPanelProps {
+  onSelectStock?: (stock: SelectedStock) => void;
+}
+
+export function ScanPanel({ onSelectStock }: ScanPanelProps) {
   const {
     market, scanDate,
     useMultiTimeframe, toggleMultiTimeframe,
@@ -24,10 +31,25 @@ export function ScanPanel() {
     scanDirection, setScanDirection,
     marketTrend,
     cancelScan,
+    cronDates, fetchCronDates,
+    isLoadingCronSession,
+    autoLoadLatest,
   } = useBacktestStore();
 
   const [maxDate, setMaxDate] = useState('2099-12-31');
   useEffect(() => { setMaxDate(new Date().toISOString().split('T')[0]); }, []);
+
+  // 載入歷史日期
+  useEffect(() => { fetchCronDates(market, scanDirection); }, [market, scanDirection, fetchCronDates]);
+
+  // 自動載入最新掃描結果
+  const [autoLoaded, setAutoLoaded] = useState(false);
+  useEffect(() => {
+    if (!autoLoaded) {
+      setAutoLoaded(true);
+      autoLoadLatest();
+    }
+  }, [autoLoaded, autoLoadLatest]);
 
   const isBusy = isScanning || isFetchingForward;
 
@@ -86,10 +108,10 @@ export function ScanPanel() {
         )}
 
         {/* Scan button */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 ml-auto">
           <button onClick={handleScan} disabled={isBusy || !scanDate}
             className="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-foreground text-[11px] font-semibold rounded whitespace-nowrap">
-            {isScanning ? `掃描中 ${Math.round(scanProgress)}%` : '掃描'}
+            {isScanning ? `掃描中 ${Math.round(scanProgress)}%` : '補掃'}
           </button>
           {isBusy && (
             <button onClick={cancelScan}
@@ -99,6 +121,35 @@ export function ScanPanel() {
           )}
         </div>
       </div>
+
+      {/* Date Navigator — 歷史日期列表 */}
+      {cronDates.length > 0 && (
+        <div className="px-3 py-1.5 border-b border-border flex flex-wrap gap-1 items-center">
+          <span className="text-[10px] text-muted-foreground mr-1">紀錄：</span>
+          {cronDates.filter(c => c.market === market).slice(0, 30).map(c => {
+            const isActive = c.date === scanDate;
+            return (
+              <button
+                key={c.date}
+                onClick={() => {
+                  if (isBusy || isLoadingCronSession) return;
+                  useBacktestStore.getState().loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection });
+                }}
+                disabled={isBusy || isLoadingCronSession}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                  isActive
+                    ? 'bg-sky-700 text-sky-100 font-semibold'
+                    : 'bg-secondary/60 text-muted-foreground hover:bg-secondary hover:text-foreground'
+                } ${isBusy || isLoadingCronSession ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+                title={`${c.date}｜${c.resultCount >= 0 ? c.resultCount + ' 檔' : '點擊載入'}`}
+              >
+                {c.date.slice(5)}
+                {c.resultCount >= 0 && <span className="ml-0.5 opacity-60">({c.resultCount})</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Progress bar */}
       {(isScanning || isFetchingForward) && (
@@ -111,6 +162,14 @@ export function ScanPanel() {
             <div className="h-full bg-sky-500 rounded-full transition-all duration-500"
               style={{ width: isScanning ? `${scanProgress}%` : '100%' }} />
           </div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {isLoadingCronSession && scanResults.length === 0 && (
+        <div className="px-3 py-3 text-center text-muted-foreground">
+          <span className="inline-block w-3 h-3 border border-sky-500/30 border-t-sky-500 rounded-full animate-spin mr-1.5" />
+          <span className="text-[11px]">載入中…</span>
         </div>
       )}
 
@@ -133,7 +192,7 @@ export function ScanPanel() {
       <div className="overflow-y-auto" style={{ maxHeight: 'calc(40vh - 60px)' }}>
         <div className="px-3 py-2">
           <SectionBoundary section="掃描結果">
-            <ScanResultsTable />
+            <ScanResultsTable onSelectStock={onSelectStock} />
           </SectionBoundary>
         </div>
       </div>
@@ -156,23 +215,46 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
     setMarket, setScanDate,
     isScanning, scanProgress, scanningStock, scanningCount, scanError,
     scanResults, isFetchingForward, forwardError,
-    clearCurrent,
     setScanOnly,
     scanMode,
     scanDirection, setScanDirection,
     marketTrend,
     cancelScan,
     cronDates, fetchCronDates,
+    isLoadingCronSession,
   } = useBacktestStore();
 
+  const autoLoadLatest = useBacktestStore(s => s.autoLoadLatest);
+  const scanTiming = useBacktestStore(s => s.scanTiming);
+
   /* eslint-disable react-hooks/set-state-in-effect */
-  // 載入 cron 歷史日期
-  useEffect(() => { fetchCronDates(market); }, [market, fetchCronDates]);
+  // 載入 cron 歷史日期（market/direction/MTF 切換時重新取得）
+  useEffect(() => { fetchCronDates(market, scanDirection); }, [market, scanDirection, useMultiTimeframe, fetchCronDates]);
 
   // 用 state 避免 SSR hydration mismatch
   const [maxDate, setMaxDate] = useState('2099-12-31');
   useEffect(() => { setMaxDate(new Date().toISOString().split('T')[0]); }, []);
+
+  // 自動載入最新掃描結果（進頁時）
+  const [autoLoaded, setAutoLoaded] = useState(false);
+  useEffect(() => {
+    if (!autoLoaded) {
+      setAutoLoaded(true);
+      autoLoadLatest();
+    }
+  }, [autoLoaded, autoLoadLatest]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Auto-load when condition changes (market / direction / date / MTF) — skip initial render
+  const conditionInitRef = useRef(false);
+  useEffect(() => {
+    if (!conditionInitRef.current) { conditionInitRef.current = true; return; }
+    if (!scanDate) return;
+    useBacktestStore.getState().loadCronSession(market, scanDate, { scanOnly: true, direction: scanDirection });
+  }, [market, scanDirection, scanDate, useMultiTimeframe]);
+
+  // ── Chart selection state ──
+  const [selectedStock, setSelectedStock] = useState<SelectedStock | null>(null);
 
   // ── One-click scan actions ──
   const isBusy = isScanning || isFetchingForward;
@@ -196,7 +278,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
               <label className="text-xs text-muted-foreground font-medium">市場</label>
               <div className="flex rounded-lg overflow-hidden border border-border">
                 {(['TW', 'CN'] as const).map(m => (
-                  <Button key={m} onClick={() => { setMarket(m); clearCurrent(); }}
+                  <Button key={m} onClick={() => setMarket(m)}
                     variant={market === m ? 'default' : 'secondary'}
                     className="px-4 py-2 rounded-none text-sm font-medium">
                     {m === 'TW' ? '台股' : '陸股'}
@@ -209,10 +291,10 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">方向</label>
               <div className="flex rounded-lg overflow-hidden border border-border">
-                <Button onClick={() => { setScanDirection('long'); clearCurrent(); }}
+                <Button onClick={() => setScanDirection('long')}
                   variant={scanDirection === 'long' ? 'default' : 'secondary'}
                   className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'long' ? 'bg-red-600 hover:bg-red-500' : ''}`}>做多</Button>
-                <Button onClick={() => { setScanDirection('short'); clearCurrent(); }}
+                <Button onClick={() => setScanDirection('short')}
                   variant={scanDirection === 'short' ? 'default' : 'secondary'}
                   className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'short' ? 'bg-green-600 hover:bg-green-500' : ''}`}>做空</Button>
               </div>
@@ -222,7 +304,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">訊號日期</label>
               <input type="date" value={scanDate} max={maxDate} min="2020-01-01"
-                onChange={e => { setScanDate(e.target.value); clearCurrent(); }}
+                onChange={e => setScanDate(e.target.value)}
                 className="bg-secondary border border-border text-foreground rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-sky-500"
               />
             </div>
@@ -274,7 +356,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                     <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     {isScanning ? `掃描中 ${Math.round(scanProgress)}%` : '計算績效…'}
                   </span>
-                ) : '掃描'}
+                ) : '補掃'}
               </Button>
               {isBusy && (
                 <Button
@@ -319,58 +401,61 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
           })()}
         </div>
 
-        {/* History sidebar (standalone, when no scan results yet but cron data exists) */}
-        {scanResults.length === 0
-          && (sessions.filter(s => s.market === market).length > 0 || cronDates.length > 0) && (
-          <div className="max-w-xs">
-            <SessionHistory />
+        {/* Date Navigator — 歷史紀錄日期列表（主導航） */}
+        <DateNavigator />
+
+        {/* Loading indicator when auto-loading */}
+        {(isLoadingCronSession) && scanResults.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground space-y-2">
+            <div className="w-5 h-5 border-2 border-sky-500/30 border-t-sky-500 rounded-full animate-spin mx-auto" />
+            <div className="text-sm">載入掃描結果中…</div>
           </div>
+        )}
+
+        {/* Dev: scan timing */}
+        {process.env.NODE_ENV === 'development' && scanTiming && (
+          <div className="text-[10px] font-mono text-muted-foreground/60 px-1 flex gap-3">
+            <span>list {scanTiming.listMs}ms</span>
+            <span>ingest {scanTiming.ingestMs}ms</span>
+            <span>chunk {scanTiming.chunkMs}ms</span>
+            <span>fwd {scanTiming.forwardMs}ms</span>
+            <span className="text-sky-500/60">total {scanTiming.totalMs}ms</span>
+          </div>
+        )}
+
+        {/* Chart Panel — 走圖區域 */}
+        {scanResults.length > 0 && (
+          <ScanChartPanel selectedStock={selectedStock} scanDate={scanDate} />
         )}
 
         {/* Results */}
         {scanResults.length > 0 && (
           <div className="flex gap-4">
             <div className="flex-1 min-w-0 space-y-4 overflow-x-auto">
-
-              {/* Scan Results Table */}
               <SectionBoundary section="掃描結果">
-                <ScanResultsTable />
+                <ScanResultsTable onSelectStock={setSelectedStock} />
               </SectionBoundary>
-
             </div>
 
-            {/* Sidebar */}
+            {/* Sidebar — backfill + history */}
             <div className="w-44 shrink-0 hidden xl:block">
               <SessionHistory />
             </div>
           </div>
         )}
 
-        {/* Empty state (only when no cron history either) */}
-        {!isScanning && !isFetchingForward && scanResults.length === 0 && !scanError && cronDates.length === 0 && sessions.filter(s => s.market === market).length === 0 && (
-          scanProgress ? (
+        {/* Empty state */}
+        {!isScanning && !isFetchingForward && scanResults.length === 0 && !scanError && !isLoadingCronSession && (
+          cronDates.length > 0 ? (
+            <div className="text-center py-12 text-muted-foreground space-y-2">
+              <div className="text-3xl">👆</div>
+              <div className="text-sm font-medium">點擊上方日期查看掃描結果</div>
+            </div>
+          ) : (
             <div className="text-center py-16 text-muted-foreground space-y-3">
-              <div className="text-5xl">📭</div>
-              <div className="text-lg font-medium text-muted-foreground">本日無符合條件的個股</div>
-              {marketTrend && (
-                <div className={`inline-block px-3 py-1.5 rounded-lg text-sm font-medium ${
-                  marketTrend === '空頭' ? 'bg-green-900/40 text-green-300' :
-                  marketTrend === '盤整' ? 'bg-yellow-900/30 text-yellow-300' :
-                  'bg-muted text-muted-foreground'
-                }`}>
-                  大盤狀態：{String(marketTrend)}
-                  {marketTrend === '空頭' && ' — 空頭市場選股困難，建議觀望或切換做空模式'}
-                  {marketTrend === '盤整' && ' — 盤整行情，嚴格條件下難找到標的'}
-                </div>
-              )}
-              <div className="text-sm space-y-1">
-                <p className="font-medium">可能的原因：</p>
-                <ul className="text-xs text-muted-foreground space-y-0.5">
-                  <li>大盤處於空頭或盤整，門檻自動提高</li>
-                  <li>該日期（{scanDate}）市場整體量能不足</li>
-                  <li>策略條件較嚴格（可在「策略」頁面調整門檻）</li>
-                </ul>
-              </div>
+              <div className="text-5xl">🔬</div>
+              <div className="text-lg font-medium text-muted-foreground">尚無歷史掃描紀錄</div>
+              <div className="text-sm">請先掃描或點擊「補齊20天」建立歷史資料</div>
               <div className="flex flex-wrap justify-center gap-2 mt-4">
                 <button
                   onClick={() => setScanDirection(scanDirection === 'long' ? 'short' : 'long')}
@@ -379,13 +464,6 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                   {scanDirection === 'long' ? '切換做空掃描' : '切換做多掃描'}
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="text-center py-20 text-muted-foreground space-y-2">
-              <div className="text-5xl">🔬</div>
-              <div className="text-lg font-medium text-muted-foreground">選擇市場、日期、策略，開始回測</div>
-              <div className="text-sm">嚴謹模式：進場用隔日開盤價，成本模型台股/陸股分開計算</div>
-              <div className="text-sm">每筆交易保留完整進出場紀錄與命中原因</div>
             </div>
           )
         )}

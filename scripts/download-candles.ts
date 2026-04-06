@@ -8,6 +8,12 @@
  *   npx tsx scripts/download-candles.ts --market CN --force   (強制全部重新下載)
  */
 
+// Load env vars (tsx doesn't auto-load .env.local like Next.js does)
+import { config } from 'dotenv';
+import { existsSync } from 'fs';
+if (existsSync('.env.local')) config({ path: '.env.local' });
+config();
+
 import { TaiwanScanner } from '../lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '../lib/scanner/ChinaScanner';
 import { saveLocalCandles, batchCheckFreshness, getLocalCandleDir } from '../lib/datasource/LocalCandleStore';

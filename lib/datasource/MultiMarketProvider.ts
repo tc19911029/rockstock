@@ -1,8 +1,8 @@
 /**
  * MultiMarketProvider — 多市場路由器 + 備援 + 盤前時段保護
  *
- * 台股 (.TW/.TWO) → FinMind → fallback: TWSE/TPEx
- * 陸股 (.SS/.SZ)  → 騰訊財經 → fallback: 東方財富
+ * 台股 (.TW/.TWO) → EODHD → fallback: FinMind → TWSE/TPEx
+ * 陸股 (.SS/.SZ)  → EODHD → fallback: 騰訊財經 → 東方財富
  * 美股            → 騰訊財經 → fallback: 東方財富
  *
  * 即時覆蓋僅在「盤中」時段套用，盤前/盤後不會產生虛假的今日K棒。
@@ -19,6 +19,7 @@ import { twseHistProvider } from './TWSEHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
 import { eastMoneyHistProvider } from './EastMoneyHistProvider';
 import { tencentHistProvider } from './TencentHistProvider';
+import { eodhdHistProvider } from './EODHDHistProvider';
 import { getTWSEQuote, getTWSERealtime } from './TWSERealtime';
 import { getEastMoneyQuote, getUSStockQuote } from './EastMoneyRealtime';
 
@@ -363,6 +364,10 @@ export class MultiMarketProvider implements DataProvider {
     if (market === 'TW') {
       result = await tryProvidersWithRacing([
         {
+          name: `EODHD ${symbol}`,
+          fn: () => eodhdHistProvider.getHistoricalCandles(symbol, period, asOfDate),
+        },
+        {
           name: `FinMind ${symbol}`,
           fn: () => finmindHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
@@ -372,7 +377,7 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else if (isMinuteInterval) {
-      // 分鐘 K 線只有 EastMoney 支援，跳過 Tencent（只有日K會被錯誤聚合）
+      // 分鐘 K 線只有 EastMoney 支援
       result = await tryProvidersWithRacing([
         {
           name: `EastMoney ${symbol}`,
@@ -381,6 +386,10 @@ export class MultiMarketProvider implements DataProvider {
       ]);
     } else {
       result = await tryProvidersWithRacing([
+        {
+          name: `EODHD ${symbol}`,
+          fn: () => eodhdHistProvider.getHistoricalCandles(symbol, period, asOfDate),
+        },
         {
           name: `Tencent ${symbol}`,
           fn: () => tencentHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
@@ -444,6 +453,10 @@ export class MultiMarketProvider implements DataProvider {
     if (market === 'TW') {
       result = await tryProvidersWithRacing([
         {
+          name: `EODHD range ${symbol}`,
+          fn: () => eodhdHistProvider.getCandlesRange(symbol, startDate, endDate),
+        },
+        {
           name: `FinMind range ${symbol}`,
           fn: () => finmindHistProvider.getCandlesRange(symbol, startDate, endDate),
         },
@@ -454,6 +467,10 @@ export class MultiMarketProvider implements DataProvider {
       ]);
     } else {
       result = await tryProvidersWithRacing([
+        {
+          name: `EODHD range ${symbol}`,
+          fn: () => eodhdHistProvider.getCandlesRange(symbol, startDate, endDate),
+        },
         {
           name: `Tencent range ${symbol}`,
           fn: () => tencentHistProvider.getCandlesRange(symbol, startDate, endDate),

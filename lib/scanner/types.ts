@@ -280,10 +280,15 @@ export interface ScanSessionTopPick {
   surgeScore?: number;
 }
 
+export type ScanDirection = 'long' | 'short';
+export type MtfMode = 'daily' | 'mtf';
+
 export interface ScanSession {
   id: string;
   market: MarketId;
   date: string;
+  direction?: ScanDirection;
+  multiTimeframeEnabled?: boolean;  // true = 週月線過濾已啟用
   scanTime: string;
   resultCount: number;
   results: StockScanResult[];

@@ -3,6 +3,8 @@ import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ScanSession } from '@/lib/scanner/types';
 import { saveScanSession } from '@/lib/storage/scanStorage';
 import { apiOk, apiError } from '@/lib/api/response';
+import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
+import { isWeekday } from '@/lib/utils/tradingDay';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -17,23 +19,67 @@ export async function GET(req: NextRequest) {
   try {
     const scanner = new TaiwanScanner();
     const date = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).split(' ')[0];
+
+    if (!isWeekday(date, 'TW')) {
+      return apiOk({ skipped: true, reason: 'non-trading day (weekend)', date });
+    }
+
     const stocks = await scanner.getStockList();
+    const counts: Record<string, number> = {};
+
+    // ── Long scan (daily — no MTF filter) ──
     const { results, marketTrend } = await scanner.scanSOP(stocks, date);
-    const partial = false;
-
-    const session: ScanSession = {
-      id: `TW-${date}-${Date.now()}`,
-      market: 'TW',
-      date,
+    const longDailySession: ScanSession = {
+      id: `TW-long-daily-${date}-${Date.now()}`,
+      market: 'TW', date, direction: 'long',
+      multiTimeframeEnabled: false,
       scanTime: new Date().toISOString(),
-      resultCount: results.length,
-      results,
+      resultCount: results.length, results,
     };
+    try { await saveScanSession(longDailySession); } catch { /* non-fatal */ }
+    counts.longDaily = results.length;
 
-    // Persist result (Vercel Blob in production, filesystem in dev)
+    // ── Long scan (MTF — with weekly/monthly filter) ──
     try {
-      await saveScanSession(session);
-    } catch { /* storage failure shouldn't block notification */ }
+      const { results: mtfResults } = await scanner.scanSOP(stocks, date, { ...ZHU_V1.thresholds, multiTimeframeFilter: true });
+      const longMtfSession: ScanSession = {
+        id: `TW-long-mtf-${date}-${Date.now()}`,
+        market: 'TW', date, direction: 'long',
+        multiTimeframeEnabled: true,
+        scanTime: new Date().toISOString(),
+        resultCount: mtfResults.length, results: mtfResults,
+      };
+      await saveScanSession(longMtfSession);
+      counts.longMtf = mtfResults.length;
+    } catch { counts.longMtf = 0; }
+
+    // ── Short scan (daily) ──
+    try {
+      const { candidates: shortResults } = await scanner.scanShortCandidates(stocks, date);
+      const shortDailySession: ScanSession = {
+        id: `TW-short-daily-${date}-${Date.now()}`,
+        market: 'TW', date, direction: 'short',
+        multiTimeframeEnabled: false,
+        scanTime: new Date().toISOString(),
+        resultCount: shortResults.length, results: shortResults,
+      };
+      await saveScanSession(shortDailySession);
+      counts.shortDaily = shortResults.length;
+    } catch { counts.shortDaily = 0; }
+
+    // ── Short scan (MTF) ──
+    try {
+      const { candidates: shortMtfResults } = await scanner.scanShortCandidates(stocks, date, { ...ZHU_V1.thresholds, multiTimeframeFilter: true });
+      const shortMtfSession: ScanSession = {
+        id: `TW-short-mtf-${date}-${Date.now()}`,
+        market: 'TW', date, direction: 'short',
+        multiTimeframeEnabled: true,
+        scanTime: new Date().toISOString(),
+        resultCount: shortMtfResults.length, results: shortMtfResults,
+      };
+      await saveScanSession(shortMtfSession);
+      counts.shortMtf = shortMtfResults.length;
+    } catch { counts.shortMtf = 0; }
 
     // Send email notification if configured
     const notifyEmail = process.env.NOTIFY_EMAIL;
@@ -49,7 +95,7 @@ export async function GET(req: NextRequest) {
       } catch { /* notification failure is non-fatal */ }
     }
 
-    return apiOk({ count: results.length, date, partial, marketTrend });
+    return apiOk({ counts, date, marketTrend });
   } catch (err) {
     return apiError(String(err));
   }
