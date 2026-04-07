@@ -207,10 +207,13 @@ export const useScannerStore = create<ScannerStore>()(
           }));
 
           // ── Step 1: Fetch complete stock list ──────────────────────────────
+          // 即時掃描限制前 100 檔（按成交量排序），避免 Vercel function timeout
+          const REALTIME_SCAN_LIMIT = 100;
           const listRes = await fetch(`/api/scanner/list?market=${market}`, { signal });
           if (!listRes.ok) throw new Error('無法取得股票清單');
           const listJson = await listRes.json() as { stocks: Array<{ symbol: string; name: string }> };
-          const stocks = listJson.stocks ?? [];
+          const allStocks = listJson.stocks ?? [];
+          const stocks = allStocks.slice(0, REALTIME_SCAN_LIMIT);
           const total  = stocks.length;
 
           set(s => ({
