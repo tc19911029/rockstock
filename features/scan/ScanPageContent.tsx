@@ -7,6 +7,7 @@ import {
   ScanResultsTable,
   ScanChartPanel,
   DateNavigator,
+  DabanResultsTable,
 } from '@/features/scan';
 import type { SelectedStock } from '@/features/scan';
 import { PageShell } from '@/components/shared';
@@ -40,7 +41,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
   useEffect(() => { setMaxDate(new Date().toISOString().split('T')[0]); }, []);
 
   // 載入歷史日期
-  useEffect(() => { fetchCronDates(market, scanDirection); }, [market, scanDirection, fetchCronDates]);
+  useEffect(() => { if (scanDirection !== 'daban') fetchCronDates(market, scanDirection); }, [market, scanDirection, fetchCronDates]);
 
   // 自動載入最新掃描結果
   const [autoLoaded, setAutoLoaded] = useState(false);
@@ -79,6 +80,10 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
             className={`px-2 py-1 text-[11px] font-medium ${scanDirection === 'long' ? 'bg-red-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>多</button>
           <button onClick={() => { setScanDirection('short'); clearCurrent(); }}
             className={`px-2 py-1 text-[11px] font-medium ${scanDirection === 'short' ? 'bg-green-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>空</button>
+          {market === 'CN' && (
+            <button onClick={() => { setScanDirection('daban'); }}
+              className={`px-2 py-1 text-[11px] font-medium ${scanDirection === 'daban' ? 'bg-amber-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>打板</button>
+          )}
         </div>
 
         {/* Date */}
@@ -126,14 +131,14 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
       {cronDates.length > 0 && (
         <div className="px-3 py-1.5 border-b border-border flex flex-wrap gap-1 items-center">
           <span className="text-[10px] text-muted-foreground mr-1">紀錄：</span>
-          {cronDates.filter(c => c.market === market).slice(0, 30).map(c => {
+          {cronDates.filter(c => c.market === market).filter((c, i, arr) => arr.findIndex(x => x.date === c.date) === i).slice(0, 30).map(c => {
             const isActive = c.date === scanDate;
             return (
               <button
                 key={c.date}
                 onClick={() => {
                   if (isBusy || isLoadingCronSession) return;
-                  useBacktestStore.getState().loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection });
+                  useBacktestStore.getState().loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection === 'daban' ? 'long' : scanDirection });
                 }}
                 disabled={isBusy || isLoadingCronSession}
                 className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
@@ -191,9 +196,15 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
       {/* Results table */}
       <div className="overflow-y-auto" style={{ maxHeight: 'calc(40vh - 60px)' }}>
         <div className="px-3 py-2">
-          <SectionBoundary section="掃描結果">
-            <ScanResultsTable onSelectStock={onSelectStock} />
-          </SectionBoundary>
+          {scanDirection === 'daban' ? (
+            <SectionBoundary section="打板掃描結果">
+              <DabanResultsTable date={scanDate} />
+            </SectionBoundary>
+          ) : (
+            <SectionBoundary section="掃描結果">
+              <ScanResultsTable onSelectStock={onSelectStock} />
+            </SectionBoundary>
+          )}
         </div>
       </div>
     </div>
@@ -229,7 +240,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
 
   /* eslint-disable react-hooks/set-state-in-effect */
   // 載入 cron 歷史日期（market/direction/MTF 切換時重新取得）
-  useEffect(() => { fetchCronDates(market, scanDirection); }, [market, scanDirection, useMultiTimeframe, fetchCronDates]);
+  useEffect(() => { if (scanDirection !== 'daban') fetchCronDates(market, scanDirection); }, [market, scanDirection, useMultiTimeframe, fetchCronDates]);
 
   // 用 state 避免 SSR hydration mismatch
   const [maxDate, setMaxDate] = useState('2099-12-31');
@@ -250,7 +261,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
   useEffect(() => {
     if (!conditionInitRef.current) { conditionInitRef.current = true; return; }
     if (!scanDate) return;
-    useBacktestStore.getState().loadCronSession(market, scanDate, { scanOnly: true, direction: scanDirection });
+    useBacktestStore.getState().loadCronSession(market, scanDate, { scanOnly: true, direction: scanDirection === 'daban' ? 'long' : scanDirection });
   }, [market, scanDirection, scanDate, useMultiTimeframe]);
 
   // ── Chart selection state ──
@@ -297,6 +308,11 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
                 <Button onClick={() => setScanDirection('short')}
                   variant={scanDirection === 'short' ? 'default' : 'secondary'}
                   className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'short' ? 'bg-green-600 hover:bg-green-500' : ''}`}>做空</Button>
+                {market === 'CN' && (
+                  <Button onClick={() => setScanDirection('daban')}
+                    variant={scanDirection === 'daban' ? 'default' : 'secondary'}
+                    className={`px-3 py-2 rounded-none text-sm font-medium ${scanDirection === 'daban' ? 'bg-amber-600 hover:bg-amber-500' : ''}`}>打板</Button>
+                )}
               </div>
             </div>
 
@@ -428,8 +444,17 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
           <ScanChartPanel selectedStock={selectedStock} scanDate={scanDate} />
         )}
 
-        {/* Results */}
-        {scanResults.length > 0 && (
+        {/* Results — 打板模式 */}
+        {scanDirection === 'daban' && (
+          <div className="space-y-4">
+            <SectionBoundary section="打板掃描結果">
+              <DabanResultsTable date={scanDate} />
+            </SectionBoundary>
+          </div>
+        )}
+
+        {/* Results — 一般模式 */}
+        {scanDirection !== 'daban' && scanResults.length > 0 && (
           <div className="flex gap-4">
             <div className="flex-1 min-w-0 space-y-4 overflow-x-auto">
               <SectionBoundary section="掃描結果">

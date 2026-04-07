@@ -39,9 +39,17 @@ export abstract class MarketScanner {
   /** 即時報價 Map（code → quote），由 chunk route 在今日掃描前設置 */
   protected _realtimeQuotes: Map<string, RealtimeQuoteForScan> | null = null;
 
+  /** L3 API fallback 預算（Vercel 用，每次 API 呼叫扣 1） */
+  protected _l3Budget = 0;
+
   /** 設置全市場即時報價（今日掃描用） */
   setRealtimeQuotes(quotes: Map<string, RealtimeQuoteForScan>): void {
     this._realtimeQuotes = quotes;
+  }
+
+  /** 設置 L3 API fallback 預算上限（Vercel 環境用） */
+  setL3Budget(n: number): void {
+    this._l3Budget = n;
   }
 
   /**
@@ -124,8 +132,27 @@ export abstract class MarketScanner {
       } catch { /* 本地讀取失敗，fallback */ }
     }
 
-    // L3: 不再在掃描時打外部 API — 記錄缺失，回傳空陣列
-    // API 呼叫只在 cron 盤後下載或掃描前 ingest 補缺時發生
+    // L3: 有預算時透過 API 取得（Vercel 無本地檔案時的 fallback）
+    if (this._l3Budget > 0) {
+      this._l3Budget--;
+      try {
+        const candles = await Promise.race([
+          this.fetchCandles(symbol, asOfDate),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('L3 timeout')), 5000)),
+        ]);
+        if (candles.length >= 30) {
+          // 持久化到本地（下次不用再 API 取）
+          const raw = candles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }));
+          saveLocalCandles(symbol, market, raw).catch(() => {});
+          if (diag) diag.localCacheHits++; // 算作成功取得
+          return candles;
+        }
+      } catch {
+        // L3 timeout or API error — fallthrough to missing
+      }
+    }
+
+    // 無法取得數據 — 記錄缺失
     if (diag) {
       diag.dataMissing++;
       if (diag.missingSymbols.length < 20) {
@@ -458,6 +485,7 @@ export abstract class MarketScanner {
     thresholds: StrategyThresholds,
     asOfDate?: string,
     industry?: string,
+    diag?: ScanDiagnostics,
   ): Promise<StockScanResult | null> {
     try {
       let name = rawName;
@@ -470,8 +498,8 @@ export abstract class MarketScanner {
         } catch { /* fallback */ }
       }
 
-      const candles = await this.fetchCandlesForScan(symbol, asOfDate);
-      if (candles.length < 30) return null;
+      const candles = await this.fetchCandlesForScan(symbol, asOfDate, diag);
+      if (candles.length < 30) { if (diag) diag.tooFewCandles++; return null; }
 
       const lastIdx = candles.length - 1;
       const last = candles[lastIdx];
@@ -548,10 +576,12 @@ export abstract class MarketScanner {
     stocks: StockEntry[],
     asOfDate?: string,
     thresholds?: StrategyThresholds,
-  ): Promise<{ candidates: StockScanResult[]; marketTrend: TrendState }> {
+  ): Promise<{ candidates: StockScanResult[]; marketTrend: TrendState; diagnostics: ScanDiagnostics }> {
     const config = this.getMarketConfig();
     const th = thresholds ?? ZHU_V1.thresholds;
     const candidates: StockScanResult[] = [];
+    const diag = createEmptyDiagnostics();
+    diag.totalStocks = stocks.length;
 
     let marketTrend: TrendState = '空頭';
     try {
@@ -562,17 +592,24 @@ export abstract class MarketScanner {
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(({ symbol, name, industry }) =>
-          this.scanOneShort(symbol, name, config, th, asOfDate, industry)
+          this.scanOneShort(symbol, name, config, th, asOfDate, industry, diag)
         )
       );
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) candidates.push(r.value);
       }
+      diag.processedCount += batch.length;
       if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
+    // 計算覆蓋率
+    const usable = diag.totalStocks - diag.dataMissing;
+    diag.coverageRate = diag.totalStocks > 0 ? Math.round(usable / diag.totalStocks * 100) : 100;
+    diag.dataStatus = diag.coverageRate >= 95 ? 'complete' : diag.coverageRate >= 70 ? 'partial' : 'insufficient';
+
     candidates.sort((a, b) => (b.shortSixConditionsScore ?? 0) - (a.shortSixConditionsScore ?? 0));
-    return { candidates, marketTrend };
+    console.info('[ScanShort Diagnostics]', JSON.stringify(diag));
+    return { candidates, marketTrend, diagnostics: diag };
   }
 
   /**
@@ -636,8 +673,9 @@ export abstract class MarketScanner {
     thresholds: StrategyThresholds,
     asOfDate?: string,
     industry?: string,
+    diag?: ScanDiagnostics,
   ): Promise<StockScanResult | null> {
-    return this.scanOne(symbol, rawName, config, 0, thresholds, asOfDate, industry);
+    return this.scanOne(symbol, rawName, config, 0, thresholds, asOfDate, industry, diag);
   }
 
   /**
@@ -648,10 +686,12 @@ export abstract class MarketScanner {
     asOfDate?: string,
     thresholds?: StrategyThresholds,
     rankBy: 'sixConditions' | 'histWinRate' = 'sixConditions',
-  ): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
+  ): Promise<{ results: StockScanResult[]; marketTrend: TrendState; diagnostics: ScanDiagnostics }> {
     const config = this.getMarketConfig();
     const th = thresholds ?? ZHU_V1.thresholds;
     const candidates: StockScanResult[] = [];
+    const diag = createEmptyDiagnostics();
+    diag.totalStocks = stocks.length;
 
     let marketTrend: TrendState = '多頭';
     try {
@@ -662,20 +702,28 @@ export abstract class MarketScanner {
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(({ symbol, name, industry }) =>
-          this.scanOneSOPOnly(symbol, name, config, th, asOfDate, industry)
+          this.scanOneSOPOnly(symbol, name, config, th, asOfDate, industry, diag)
         )
       );
       for (const r of settled) {
         if (r.status === 'fulfilled' && r.value) candidates.push(r.value);
       }
+      diag.processedCount += batch.length;
       if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
     }
 
+    // 計算覆蓋率
+    const usable = diag.totalStocks - diag.dataMissing;
+    diag.coverageRate = diag.totalStocks > 0 ? Math.round(usable / diag.totalStocks * 100) : 100;
+    diag.dataStatus = diag.coverageRate >= 95 ? 'complete' : diag.coverageRate >= 70 ? 'partial' : 'insufficient';
+
     const sorted = this.rankCandidates(candidates, rankBy);
 
+    console.info('[ScanSOP Diagnostics]', JSON.stringify(diag));
     return {
       results: sorted,
       marketTrend,
+      diagnostics: diag,
     };
   }
 

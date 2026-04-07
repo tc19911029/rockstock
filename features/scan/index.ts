@@ -7,6 +7,7 @@ export { WalkForwardPanel } from './components/WalkForwardPanel';
 export { HorizonCard } from './components/HorizonCard';
 export { TradeRow, trendBadge, exitBadge, chipBadge, calcTradeComposite } from './components/TradeRow';
 export { ScanResultsTable } from './components/ScanResultsTable';
+export { DabanResultsTable } from './components/DabanResultsTable';
 export { ScanChartPanel } from './components/ScanChartPanel';
 export type { SelectedStock } from './components/ScanChartPanel';
 export { ScanPanel } from './ScanPageContent';

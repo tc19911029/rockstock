@@ -38,7 +38,7 @@ export function DateNavigator() {
           return (
             <button
               key={c.date}
-              onClick={() => !isBusy && loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection })}
+              onClick={() => !isBusy && loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection === 'daban' ? 'long' : scanDirection })}
               disabled={isBusy}
               className={`px-2 py-1 rounded text-[11px] font-mono transition-colors whitespace-nowrap ${
                 isActive

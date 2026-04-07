@@ -54,8 +54,19 @@ export async function POST(req: NextRequest) {
     const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
     const mode = parsed.data.mode;
 
-    // 今日掃描（無 asOfDate）：預取全市場即時報價
-    if (!asOfDate) {
+    // Vercel 無本地檔案：啟用 L3 API fallback（預算上限 50 次）
+    if (process.env.VERCEL) {
+      scanner.setL3Budget(50);
+    }
+
+    // 判斷是否為「今日掃描」：沒傳日期 或 傳的日期 >= 今天
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isToday = !asOfDate || asOfDate >= todayStr;
+    // 今日掃描不傳 asOfDate，讓 fetchCandlesForScan 走「今日路徑」合併即時報價
+    const effectiveDate = isToday ? undefined : asOfDate;
+
+    // 今日掃描：預取全市場即時報價
+    if (isToday) {
       try {
         let quotes: Map<string, RealtimeQuoteForScan>;
         if (market === 'TW') {
@@ -85,18 +96,17 @@ export async function POST(req: NextRequest) {
     let scanResult: { results: unknown[]; marketTrend: unknown; diagnostics?: ScanDiagnostics };
     if (mode === 'sop' && parsed.data.direction === 'short') {
       // V2 做空版：做空六條件 + 做空戒律
-      const { candidates, marketTrend: mt } = await scanner.scanShortCandidates(stocks, asOfDate, thresholds);
-      scanResult = { results: candidates, marketTrend: mt };
+      const { candidates, marketTrend: mt, diagnostics } = await scanner.scanShortCandidates(stocks, effectiveDate, thresholds);
+      scanResult = { results: candidates, marketTrend: mt, diagnostics };
     } else if (mode === 'sop') {
       // V2 做多版：六條件+戒律+淘汰法
-      scanResult = await scanner.scanSOP(stocks, asOfDate, thresholds, parsed.data.rankBy as 'sixConditions' | 'histWinRate');
-    } else if (mode === 'pure' && asOfDate) {
-      scanResult = await scanner.scanListAtDatePure(stocks, asOfDate, thresholds);
+      scanResult = await scanner.scanSOP(stocks, effectiveDate, thresholds, parsed.data.rankBy as 'sixConditions' | 'histWinRate');
+    } else if (mode === 'pure' && effectiveDate) {
+      scanResult = await scanner.scanListAtDatePure(stocks, effectiveDate, thresholds);
     } else if (mode === 'pure') {
-      const today = new Date().toISOString().split('T')[0];
-      scanResult = await scanner.scanListAtDatePure(stocks, today, thresholds);
-    } else if (asOfDate) {
-      scanResult = await scanner.scanListAtDate(stocks, asOfDate, thresholds);
+      scanResult = await scanner.scanListAtDatePure(stocks, todayStr, thresholds);
+    } else if (effectiveDate) {
+      scanResult = await scanner.scanListAtDate(stocks, effectiveDate, thresholds);
     } else {
       scanResult = await scanner.scanList(stocks, thresholds);
     }

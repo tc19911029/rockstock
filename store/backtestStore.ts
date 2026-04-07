@@ -133,8 +133,8 @@ interface BacktestState {
   scanOnly: boolean;  // true = 只掃描不回測（今天的掃描）
   /** 掃描模式：full=完整管線, pure=純朱家泓(14規則), sop=V2簡化版(六條件+戒律+淘汰法) */
   scanMode: 'full' | 'pure' | 'sop';
-  /** 掃描方向：long=做多, short=做空 */
-  scanDirection: 'long' | 'short';
+  /** 掃描方向：long=做多, short=做空, daban=打板 */
+  scanDirection: 'long' | 'short' | 'daban';
 
   // ── Cron 歷史 ──
   cronDates: CronDateEntry[];
@@ -153,7 +153,7 @@ interface BacktestState {
   toggleMultiTimeframe:   () => void;
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
-  setScanDirection:       (d: 'long' | 'short') => void;
+  setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
@@ -185,7 +185,7 @@ export interface ScanPreset {
   name: string;
   market: MarketId;
   scanMode: 'full' | 'pure' | 'sop';
-  scanDirection: 'long' | 'short';
+  scanDirection: 'long' | 'short' | 'daban';
   useCapitalMode: boolean;
   capitalConstraints: CapitalConstraints;
   strategy: BacktestStrategyParams;
@@ -793,7 +793,7 @@ export const useBacktestStore = create<BacktestState>()(
                 set(s => ({
                   cronDates: [
                     { market, date, resultCount: json.count ?? -1, scanTime: new Date().toISOString() },
-                    ...s.cronDates,
+                    ...s.cronDates.filter(c => !(c.market === market && c.date === date)),
                   ].sort((a, b) => b.date.localeCompare(a.date)),
                 }));
               }

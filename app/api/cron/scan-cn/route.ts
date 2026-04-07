@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { ScanSession } from '@/lib/scanner/types';
 import { saveScanSession } from '@/lib/storage/scanStorage';
+import { scanDabanFromCache } from '@/lib/scanner/DabanScanner';
+import { saveDabanSession } from '@/lib/storage/dabanStorage';
 import { apiOk, apiError } from '@/lib/api/response';
 import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
 import { isWeekday } from '@/lib/utils/tradingDay';
@@ -79,6 +81,13 @@ export async function GET(req: NextRequest) {
       await saveScanSession(shortMtfSession);
       counts.shortMtf = shortMtfResults.length;
     } catch { counts.shortMtf = 0; }
+
+    // ── 打板掃描 ──
+    try {
+      const dabanSession = await scanDabanFromCache(date);
+      await saveDabanSession(dabanSession);
+      counts.daban = dabanSession.resultCount;
+    } catch { counts.daban = 0; }
 
     const notifyEmail = process.env.NOTIFY_EMAIL;
     const resendKey = process.env.RESEND_API_KEY;

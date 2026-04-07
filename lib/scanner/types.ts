@@ -280,8 +280,37 @@ export interface ScanSessionTopPick {
   surgeScore?: number;
 }
 
-export type ScanDirection = 'long' | 'short';
+export type ScanDirection = 'long' | 'short' | 'daban';
 export type MtfMode = 'daily' | 'mtf';
+
+// ── 打板掃描結果 ────────────────────────────────────────────────────────────
+
+export type LimitUpType = '首板' | '二板' | '三板' | '四板+';
+
+export interface DabanScanResult {
+  symbol: string;
+  name: string;
+  closePrice: number;           // 今日收盤（漲停價）
+  prevClose: number;            // 昨日收盤
+  limitUpPct: number;           // 漲停幅度 %
+  limitUpType: LimitUpType;     // 首板/二板/三板/四板+
+  consecutiveBoards: number;    // 連板天數
+  turnover: number;             // 成交額（元）
+  volumeRatio: number;          // 量比（日量/5日均量）
+  isYiZiBan: boolean;           // 是否一字板（買不到）
+  rankScore: number;            // 排序分數
+  buyThresholdPrice: number;    // 買入門檻 = 收盤 × 1.02
+  scanDate: string;             // 掃描日期
+}
+
+export interface DabanScanSession {
+  id: string;
+  market: 'CN';
+  date: string;
+  scanTime: string;
+  resultCount: number;
+  results: DabanScanResult[];
+}
 
 export interface ScanSession {
   id: string;

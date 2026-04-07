@@ -9,25 +9,13 @@
  *   掃描時讀取     → loadLocalCandles() → computeIndicators()
  */
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import type { Candle, CandleWithIndicators } from '@/types';
 import { computeIndicators } from '@/lib/indicators';
+import { readCandleFile, writeCandleFile } from './CandleStorageAdapter';
 
-/** 本地數據根目錄 */
+/** 本地數據根目錄（getLocalCandleDir 等統計用途） */
 const DATA_ROOT = path.join(process.cwd(), 'data', 'candles');
-
-interface LocalCandleFile {
-  symbol: string;
-  lastDate: string;
-  updatedAt: string;
-  candles: Candle[];
-}
-
-function getFilePath(symbol: string, market: 'TW' | 'CN'): string {
-  return path.join(DATA_ROOT, market, `${symbol}.json`);
-}
 
 /**
  * 讀取本地 K 線檔案並計算指標
@@ -37,14 +25,12 @@ export async function loadLocalCandles(
   symbol: string,
   market: 'TW' | 'CN',
 ): Promise<CandleWithIndicators[] | null> {
-  const filePath = getFilePath(symbol, market);
   try {
-    const raw = await readFile(filePath, 'utf-8');
-    const data: LocalCandleFile = JSON.parse(raw);
-    if (!data.candles || data.candles.length === 0) return null;
+    const data = await readCandleFile(symbol, market);
+    if (!data) return null;
     return computeIndicators(data.candles);
   } catch {
-    return null; // 檔案不存在或格式錯誤
+    return null;
   }
 }
 
@@ -57,11 +43,9 @@ export async function loadLocalCandlesForDate(
   market: 'TW' | 'CN',
   asOfDate: string,
 ): Promise<CandleWithIndicators[] | null> {
-  const filePath = getFilePath(symbol, market);
   try {
-    const raw = await readFile(filePath, 'utf-8');
-    const data: LocalCandleFile = JSON.parse(raw);
-    if (!data.candles || data.candles.length === 0) return null;
+    const data = await readCandleFile(symbol, market);
+    if (!data) return null;
 
     // 本地數據最後日期必須 >= asOfDate
     if (data.lastDate < asOfDate) return null;
@@ -86,33 +70,7 @@ export async function saveLocalCandles(
   candles: Candle[],
 ): Promise<void> {
   if (candles.length === 0) return;
-
-  const dir = path.join(DATA_ROOT, market);
-  if (!existsSync(dir)) {
-    await mkdir(dir, { recursive: true });
-  }
-
-  // 只保留原始 OHLCV 欄位
-  const stripped: Candle[] = candles.map(c => ({
-    date: c.date,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-    volume: c.volume,
-  }));
-
-  const lastDate = stripped[stripped.length - 1].date;
-
-  const data: LocalCandleFile = {
-    symbol,
-    lastDate,
-    updatedAt: new Date().toISOString(),
-    candles: stripped,
-  };
-
-  const filePath = getFilePath(symbol, market);
-  await writeFile(filePath, JSON.stringify(data), 'utf-8');
+  await writeCandleFile(symbol, market, candles);
 }
 
 /**
@@ -123,10 +81,9 @@ export async function isLocalDataFresh(
   market: 'TW' | 'CN',
   asOfDate: string,
 ): Promise<boolean> {
-  const filePath = getFilePath(symbol, market);
   try {
-    const raw = await readFile(filePath, 'utf-8');
-    const data: LocalCandleFile = JSON.parse(raw);
+    const data = await readCandleFile(symbol, market);
+    if (!data) return false;
     return data.lastDate >= asOfDate;
   } catch {
     return false;
@@ -165,11 +122,9 @@ export async function loadLocalCandlesWithTolerance(
   asOfDate: string,
   toleranceDays = 5,
 ): Promise<{ candles: CandleWithIndicators[]; staleDays: number } | null> {
-  const filePath = getFilePath(symbol, market);
   try {
-    const raw = await readFile(filePath, 'utf-8');
-    const data: LocalCandleFile = JSON.parse(raw);
-    if (!data.candles || data.candles.length === 0) return null;
+    const data = await readCandleFile(symbol, market);
+    if (!data) return null;
 
     // 完全覆蓋 → staleDays = 0
     if (data.lastDate >= asOfDate) {
@@ -216,11 +171,9 @@ export async function batchCheckFreshness(
     const batch = symbols.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
       batch.map(async (symbol) => {
-        const filePath = getFilePath(symbol, market);
         try {
-          const raw = await readFile(filePath, 'utf-8');
-          const data: LocalCandleFile = JSON.parse(raw);
-          if (!data.candles || data.candles.length === 0) return { symbol, status: 'missing' as const };
+          const data = await readCandleFile(symbol, market);
+          if (!data) return { symbol, status: 'missing' as const };
 
           if (data.lastDate >= asOfDate) {
             return { symbol, status: 'fresh' as const };
@@ -243,8 +196,6 @@ export async function batchCheckFreshness(
         if (r.value.status === 'fresh') fresh.push(r.value.symbol);
         else if (r.value.status === 'stale') stale.push(r.value.symbol);
         else missing.push(r.value.symbol);
-      } else {
-        // Promise 失敗視為 missing（不應該發生，allSettled 內部 catch 了）
       }
     }
   }
