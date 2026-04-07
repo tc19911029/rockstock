@@ -207,8 +207,8 @@ export const useScannerStore = create<ScannerStore>()(
           }));
 
           // ── Step 1: Fetch complete stock list ──────────────────────────────
-          // 即時掃描限制前 100 檔（按成交量排序），避免 Vercel function timeout
-          const REALTIME_SCAN_LIMIT = 100;
+          // 即時掃描限制前 30 檔（按成交量排序），避免 Vercel function timeout
+          const REALTIME_SCAN_LIMIT = 30;
           const listRes = await fetch(`/api/scanner/list?market=${market}`, { signal });
           if (!listRes.ok) throw new Error('無法取得股票清單');
           const listJson = await listRes.json() as { stocks: Array<{ symbol: string; name: string }> };
@@ -220,10 +220,9 @@ export const useScannerStore = create<ScannerStore>()(
             [mKey]: { ...s[mKey], scanningStock: '分析股票中...', scanningTotal: total, scanningIndex: 0 },
           }));
 
-          // ── Step 2: Split into 2 parallel chunks ───────────────────────────
-          const half   = Math.ceil(total / 2);
-          const chunk1 = stocks.slice(0, half);
-          const chunk2 = stocks.slice(half);
+          // ── Step 2: Single chunk (小量不需拆分) ────────────────────────────
+          const chunk1 = stocks;
+          const chunk2: Array<{ symbol: string; name: string }> = [];
 
           // Progress: event-driven, not timer-based
           let completedChunks = 0;
