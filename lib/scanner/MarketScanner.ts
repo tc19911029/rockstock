@@ -611,14 +611,14 @@ export abstract class MarketScanner {
   }
 
   /**
-   * 候選股排序層 — 共振:高勝率 = 1:1
+   * 候選股排序層 — 高勝率優先（回測最佳：F 高勝100%，1日均報+0.92%）
    */
   rankCandidates(
     candidates: StockScanResult[],
     _rankBy?: string,
   ): StockScanResult[] {
     return [...candidates].sort((a, b) =>
-      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
+      (b.highWinRateScore ?? 0) - (a.highWinRateScore ?? 0) || (b.resonanceScore ?? 0) - (a.resonanceScore ?? 0) || b.changePercent - a.changePercent
     );
   }
 
