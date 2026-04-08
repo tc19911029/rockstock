@@ -1,7 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { DabanScanResult, DabanScanSession, StockForwardPerformance } from '@/lib/scanner/types';
+import type { SelectedStock } from './ScanChartPanel';
+
+interface RealtimePrice {
+  open: number;
+  close: number;
+  high: number;
+  low: number;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -46,9 +54,10 @@ const FWD_COLS = [
 
 interface DabanResultsTableProps {
   date: string;
+  onSelectStock?: (stock: SelectedStock) => void;
 }
 
-export function DabanResultsTable({ date }: DabanResultsTableProps) {
+export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProps) {
   const [session, setSession] = useState<DabanScanSession | null>(null);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -119,6 +128,69 @@ export function DabanResultsTable({ date }: DabanResultsTableProps) {
     }
     return map;
   }, [forwardPerf]);
+
+  // ── Real-time opening price (9:25 集合競價) ─────────────────────────────
+  const [realtimePrices, setRealtimePrices] = useState<Map<string, RealtimePrice>>(new Map());
+  const [isFetchingRealtime, setIsFetchingRealtime] = useState(false);
+  const [realtimeFetchedAt, setRealtimeFetchedAt] = useState<string | null>(null);
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchRealtimeOpenPrices = useCallback(async () => {
+    if (!session || session.results.length === 0) return;
+    const buyable = session.results.filter(r => !r.isYiZiBan);
+    if (buyable.length === 0) return;
+
+    setIsFetchingRealtime(true);
+    try {
+      const res = await fetch('/api/scanner/daban/openprices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: buyable.map(r => r.symbol) }),
+      });
+      const data = await res.json();
+      if (data.prices) {
+        const map = new Map<string, RealtimePrice>();
+        for (const [sym, p] of Object.entries(data.prices)) {
+          map.set(sym, p as RealtimePrice);
+        }
+        setRealtimePrices(map);
+        setRealtimeFetchedAt(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
+    } catch { /* silently fail */ }
+    finally { setIsFetchingRealtime(false); }
+  }, [session]);
+
+  // Auto-refresh: every 30s
+  const toggleAutoRefresh = useCallback(() => {
+    if (autoRefreshRef.current) {
+      clearInterval(autoRefreshRef.current);
+      autoRefreshRef.current = null;
+      setIsAutoRefreshing(false);
+    } else {
+      fetchRealtimeOpenPrices();
+      autoRefreshRef.current = setInterval(fetchRealtimeOpenPrices, 30_000);
+      setIsAutoRefreshing(true);
+    }
+  }, [fetchRealtimeOpenPrices]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
+    };
+  }, []);
+
+  // Reset real-time data when session changes
+  useEffect(() => {
+    setRealtimePrices(new Map());
+    setRealtimeFetchedAt(null);
+    if (autoRefreshRef.current) {
+      clearInterval(autoRefreshRef.current);
+      autoRefreshRef.current = null;
+      setIsAutoRefreshing(false);
+    }
+  }, [session?.date]);
 
   const handleRealtimeScan = useCallback(async () => {
     setScanning(true);
@@ -199,6 +271,37 @@ export function DabanResultsTable({ date }: DabanResultsTableProps) {
         </div>
       </div>
 
+      {/* Real-time opening price controls */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={fetchRealtimeOpenPrices}
+          disabled={isFetchingRealtime}
+          className="px-3 py-1.5 rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30 hover:bg-sky-500/30 text-xs font-medium disabled:opacity-50"
+        >
+          {isFetchingRealtime ? '取得中…' : '即時開盤價'}
+        </button>
+        <button
+          onClick={toggleAutoRefresh}
+          className={`px-3 py-1.5 rounded-lg text-xs border ${
+            isAutoRefreshing
+              ? 'bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/30'
+              : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'
+          }`}
+        >
+          {isAutoRefreshing ? '自動刷新中 (30s)' : '自動刷新'}
+        </button>
+        {realtimeFetchedAt && (
+          <span className="text-[10px] text-muted-foreground">
+            更新於 {realtimeFetchedAt}
+          </span>
+        )}
+        {realtimePrices.size > 0 && (
+          <span className="text-[10px] text-sky-400">
+            已取得 {realtimePrices.size} 檔即時報價
+          </span>
+        )}
+      </div>
+
       {/* Results table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -206,7 +309,7 @@ export function DabanResultsTable({ date }: DabanResultsTableProps) {
             {/* Group header row */}
             <tr className="text-[10px] text-muted-foreground/60 border-b border-border/30">
               <th colSpan={10} className="text-left py-1 px-2">掃描當日</th>
-              <th colSpan={FWD_COLS.length + 1} className="text-center py-1 px-2 border-l border-border/30">掃描後表現</th>
+              <th colSpan={FWD_COLS.length + 2} className="text-center py-1 px-2 border-l border-border/30">掃描後表現</th>
             </tr>
             <tr className="text-xs text-muted-foreground border-b border-border">
               <th className="text-left py-2 px-2 w-8">#</th>
@@ -234,6 +337,7 @@ export function DabanResultsTable({ date }: DabanResultsTableProps) {
                   {label}
                 </th>
               ))}
+              <th className="text-center py-2 px-1 whitespace-nowrap text-[10px]"></th>
             </tr>
           </thead>
           <tbody>
@@ -258,17 +362,29 @@ export function DabanResultsTable({ date }: DabanResultsTableProps) {
                     {r.buyThresholdPrice.toFixed(2)}
                   </td>
                   <td className="py-2 px-2 text-right font-mono">{r.rankScore.toFixed(1)}</td>
-                  {/* 隔日開盤價 */}
+                  {/* 隔日開盤價（即時 > 前瞻） */}
                   <td className="py-2 px-1 text-right font-mono text-[10px] whitespace-nowrap border-l border-border/10">
-                    {isFetchingForward && !perf ? (
-                      <span className="text-muted-foreground/40">…</span>
-                    ) : perf?.nextOpenPrice != null ? (
-                      <span className={perf.nextOpenPrice >= r.buyThresholdPrice ? 'text-amber-400 font-bold' : 'text-muted-foreground'}>
-                        {perf.nextOpenPrice.toFixed(2)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground/50">—</span>
-                    )}
+                    {(() => {
+                      const rt = realtimePrices.get(r.symbol);
+                      const openPrice = rt?.open ?? perf?.nextOpenPrice;
+                      const isRealtime = !!rt;
+                      if (isFetchingRealtime && !rt && !perf?.nextOpenPrice) {
+                        return <span className="text-muted-foreground/40">…</span>;
+                      }
+                      if (isFetchingForward && !perf && !rt) {
+                        return <span className="text-muted-foreground/40">…</span>;
+                      }
+                      if (openPrice != null) {
+                        const meetsThreshold = openPrice >= r.buyThresholdPrice;
+                        return (
+                          <span className={meetsThreshold ? 'text-amber-400 font-bold' : 'text-muted-foreground'}>
+                            {openPrice.toFixed(2)}
+                            {isRealtime && <span className="text-[8px] text-sky-400 ml-0.5">●</span>}
+                          </span>
+                        );
+                      }
+                      return <span className="text-muted-foreground/50">—</span>;
+                    })()}
                   </td>
                   {/* Forward performance columns */}
                   {FWD_COLS.map(({ key }) => {
@@ -283,6 +399,17 @@ export function DabanResultsTable({ date }: DabanResultsTableProps) {
                       </td>
                     );
                   })}
+                  {/* 走圖按鈕 */}
+                  <td className="py-2 px-2 text-center whitespace-nowrap">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectStock?.({ symbol: r.symbol, name: displayName(r), market: 'CN' });
+                      }}
+                      className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30">
+                      走圖
+                    </button>
+                  </td>
                 </tr>
               );
             })}

@@ -217,7 +217,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
         <div className="px-3 py-2">
           {scanDirection === 'daban' ? (
             <SectionBoundary section="打板掃描結果">
-              <DabanResultsTable date={scanDate} />
+              <DabanResultsTable date={scanDate} onSelectStock={onSelectStock} />
             </SectionBoundary>
           ) : (
             <SectionBoundary section="掃描結果">
@@ -484,7 +484,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
         {scanDirection === 'daban' && (
           <div className="space-y-4">
             <SectionBoundary section="打板掃描結果">
-              <DabanResultsTable date={scanDate} />
+              <DabanResultsTable date={scanDate} onSelectStock={setSelectedStock} />
             </SectionBoundary>
           </div>
         )}
