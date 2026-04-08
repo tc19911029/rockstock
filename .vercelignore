@@ -3,5 +3,5 @@
 .env*.local
 node_modules
 .next
-data/
-scripts/
+/data/
+/scripts/
