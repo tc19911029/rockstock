@@ -10,6 +10,7 @@
 import { computeIndicators } from '@/lib/indicators';
 import type { CandleWithIndicators } from '@/types';
 import type { DabanScanResult, DabanScanSession, LimitUpType } from './types';
+import type { EastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 
 // ── 參數 ────────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@ export function scanDaban(input: DabanScanInput): DabanScanSession {
 }
 
 /**
- * 從本地快取 JSON 載入股票資料並掃描
+ * 從本地快取 JSON 載入股票資料並掃描（回測用，大檔案）
  */
 export async function scanDabanFromCache(date: string): Promise<DabanScanSession> {
   const fs = await import('fs');
@@ -170,4 +171,151 @@ export async function scanDabanFromCache(date: string): Promise<DabanScanSession
   }
 
   return scanDaban({ stocks, date });
+}
+
+// ── 批次並行讀取 ───────────────────────────────────────────────────────────────
+
+const CONCURRENCY = 50;
+
+/**
+ * 從 per-symbol 本地快取讀取 K 線並掃描（支援近期資料）
+ *
+ * 讀取 data/candles/CN/{symbol}.json，透過 loadLocalCandlesWithTolerance
+ * 允許 5 個交易日的容忍度，適用於 cron 或盤後手動觸發。
+ */
+export async function scanDabanFromLocalCandles(date: string): Promise<DabanScanSession> {
+  const { ChinaScanner } = await import('./ChinaScanner');
+  const { loadLocalCandlesWithTolerance } = await import('@/lib/datasource/LocalCandleStore');
+
+  const scanner = new ChinaScanner();
+  const stockList = await scanner.getStockList();
+  const stocks = new Map<string, { name: string; candles: CandleWithIndicators[] }>();
+
+  let loaded = 0;
+  let skipped = 0;
+
+  for (let i = 0; i < stockList.length; i += CONCURRENCY) {
+    const batch = stockList.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (entry) => {
+        const local = await loadLocalCandlesWithTolerance(entry.symbol, 'CN', date, 5);
+        if (!local || local.candles.length < 30) return null;
+        return { symbol: entry.symbol, name: entry.name, candles: local.candles };
+      }),
+    );
+
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) {
+        stocks.set(r.value.symbol, { name: r.value.name, candles: r.value.candles });
+        loaded++;
+      } else {
+        skipped++;
+      }
+    }
+  }
+
+  console.log(`[DabanScanner] 從本地快取載入 ${loaded}/${stockList.length} 檔（跳過 ${skipped}）`);
+  return scanDaban({ stocks, date });
+}
+
+/**
+ * 即時打板掃描：合併本地 K 線 + 東方財富即時報價
+ *
+ * 盤中使用：即時報價作為今日 K 棒，合併到歷史 K 線後掃描。
+ * 盤後使用：自動降級為 scanDabanFromLocalCandles。
+ */
+export async function scanDabanRealtime(date: string): Promise<DabanScanSession> {
+  const { isMarketOpen } = await import('@/lib/datasource/marketHours');
+
+  if (!isMarketOpen('CN')) {
+    return scanDabanFromLocalCandles(date);
+  }
+
+  const { ChinaScanner } = await import('./ChinaScanner');
+  const { loadLocalCandlesWithTolerance } = await import('@/lib/datasource/LocalCandleStore');
+  const { getEastMoneyRealtime } = await import('@/lib/datasource/EastMoneyRealtime');
+
+  const scanner = new ChinaScanner();
+  const stockList = await scanner.getStockList();
+
+  // 1. 取得全市場即時報價
+  const realtimeMap = await getEastMoneyRealtime();
+
+  // 2. 批次讀取本地歷史 K 線 + 合併即時報價
+  const stocks = new Map<string, { name: string; candles: CandleWithIndicators[] }>();
+  let loaded = 0;
+
+  for (let i = 0; i < stockList.length; i += CONCURRENCY) {
+    const batch = stockList.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (entry) => {
+        const local = await loadLocalCandlesWithTolerance(entry.symbol, 'CN', date, 5);
+        if (!local || local.candles.length < 10) return null;
+
+        let candles = local.candles;
+
+        // 合併即時報價為今日 K 棒
+        const code = entry.symbol.replace(/\.(SS|SZ)$/, '');
+        const quote = realtimeMap.get(code);
+        if (quote && quote.close > 0) {
+          candles = mergeRealtimeCandle(candles, quote, date);
+        }
+
+        return { symbol: entry.symbol, name: entry.name, candles };
+      }),
+    );
+
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) {
+        stocks.set(r.value.symbol, { name: r.value.name, candles: r.value.candles });
+        loaded++;
+      }
+    }
+  }
+
+  console.log(`[DabanScanner] 即時掃描：${loaded} 檔（即時報價 ${realtimeMap.size} 檔）`);
+  return scanDaban({ stocks, date });
+}
+
+/**
+ * 將即時報價合併到歷史 K 線尾部
+ * 同 MarketScanner.fetchCandlesForScan 的合併邏輯
+ */
+function mergeRealtimeCandle(
+  candles: CandleWithIndicators[],
+  quote: EastMoneyQuote,
+  today: string,
+): CandleWithIndicators[] {
+  const last = candles[candles.length - 1];
+  const lastDate = last.date?.slice(0, 10) ?? '';
+
+  if (lastDate === today) {
+    // 今天的 K 棒已存在 → 用即時報價覆蓋
+    const updated = [...candles];
+    updated[updated.length - 1] = {
+      ...last,
+      open: quote.open || last.open,
+      high: Math.max(quote.high, last.high),
+      low: Math.min(quote.low, last.low),
+      close: quote.close,
+      volume: quote.volume || last.volume,
+    };
+    return computeIndicators(updated);
+  }
+
+  if (lastDate < today) {
+    // 今天的 K 棒不存在 → 附加新 K 棒
+    const newCandle: CandleWithIndicators = {
+      date: today,
+      open: quote.open || quote.close,
+      high: quote.high || quote.close,
+      low: quote.low || quote.close,
+      close: quote.close,
+      volume: quote.volume || 0,
+    };
+    return computeIndicators([...candles, newCandle]);
+  }
+
+  // lastDate > today → 資料比即時更新，不合併
+  return candles;
 }

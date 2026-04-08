@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { ScanSession } from '@/lib/scanner/types';
 import { saveScanSession } from '@/lib/storage/scanStorage';
-import { scanDabanFromCache } from '@/lib/scanner/DabanScanner';
+import { scanDabanFromLocalCandles } from '@/lib/scanner/DabanScanner';
 import { saveDabanSession } from '@/lib/storage/dabanStorage';
 import { apiOk, apiError } from '@/lib/api/response';
 import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
 
     // ── 打板掃描 ──
     try {
-      const dabanSession = await scanDabanFromCache(date);
+      const dabanSession = await scanDabanFromLocalCandles(date);
       await saveDabanSession(dabanSession);
       counts.daban = dabanSession.resultCount;
     } catch { counts.daban = 0; }
