@@ -19,7 +19,7 @@ async function loadCachedStockList(): Promise<StockEntry[] | null> {
     const raw = await readFile(STOCKLIST_CACHE_PATH, 'utf-8');
     const cache: StockListCache = JSON.parse(raw);
     const age = Date.now() - new Date(cache.updatedAt).getTime();
-    if (age < CACHE_MAX_AGE_MS && cache.stocks.length > 100) {
+    if (age < CACHE_MAX_AGE_MS && cache.stocks.length > 50) {
       return cache.stocks;
     }
   } catch { /* 快取不存在或格式錯誤 */ }
@@ -104,8 +104,12 @@ export async function fetchEastMoneyStockList(): Promise<StockEntry[]> {
   }
 
   // 成功取得後存到本地快取
-  if (all.length > 100) {
+  if (all.length > 50) {
     saveCachedStockList(all).catch(() => {});
+  }
+
+  if (all.length < 500) {
+    console.warn(`[eastMoneyApi] 股票清單異常偏少: ${all.length} 檔（預期 3000+），可能 API 暫時異常`);
   }
 
   return all;

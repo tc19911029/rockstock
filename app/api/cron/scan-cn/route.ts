@@ -19,7 +19,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const scanner = new ChinaScanner();
-    const date = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).split(' ')[0];
+    const { getLastTradingDay } = await import('@/lib/datasource/marketHours');
+    const date = getLastTradingDay('CN');
 
     if (!isWeekday(date, 'CN')) {
       return apiOk({ skipped: true, reason: 'non-trading day (weekend)', date });

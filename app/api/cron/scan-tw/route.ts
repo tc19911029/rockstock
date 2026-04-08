@@ -18,7 +18,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const scanner = new TaiwanScanner();
-    const date = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).split(' ')[0];
+    const { getLastTradingDay } = await import('@/lib/datasource/marketHours');
+    const date = getLastTradingDay('TW');
 
     if (!isWeekday(date, 'TW')) {
       return apiOk({ skipped: true, reason: 'non-trading day (weekend)', date });
