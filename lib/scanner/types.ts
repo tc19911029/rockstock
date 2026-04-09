@@ -320,12 +320,17 @@ export interface DabanScanSession {
   results: DabanScanResult[];
 }
 
+/** 掃描時段類型：盤中快照 vs 收盤後正式結果 */
+export type SessionType = 'intraday' | 'post_close';
+
 export interface ScanSession {
   id: string;
   market: MarketId;
   date: string;
   direction?: ScanDirection;
   multiTimeframeEnabled?: boolean;  // true = 週月線過濾已啟用
+  /** 掃描時段：intraday=盤中快照, post_close=收盤後正式結果 */
+  sessionType?: SessionType;
   scanTime: string;
   resultCount: number;
   results: StockScanResult[];

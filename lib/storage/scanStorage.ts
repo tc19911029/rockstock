@@ -1,4 +1,4 @@
-import { ScanSession, MarketId, ScanDirection, MtfMode } from '@/lib/scanner/types';
+import { ScanSession, MarketId, ScanDirection, MtfMode, SessionType } from '@/lib/scanner/types';
 import { isWeekday } from '@/lib/utils/tradingDay';
 
 // ── Storage abstraction for scan sessions ────────────────────────────────────
@@ -95,17 +95,42 @@ function sessionMtfMode(session: ScanSession): MtfMode {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/** Save a scan session (cron or manual) */
+/** Save a scan session (cron or manual)
+ *
+ * Key format (Fundamental Requirement R5):
+ *   post_close: scans/{market}/{dir}/{mtf}/{date}.json (唯一正式結果)
+ *   intraday:   scans/{market}/{dir}/{mtf}/{date}/intraday/{HHMM}.json (可多筆)
+ *
+ * post_close 會覆蓋同日同方向同模式的結果（正式唯一）
+ * intraday 帶時間戳，不會互相覆蓋
+ */
 export async function saveScanSession(session: ScanSession): Promise<void> {
   const data = JSON.stringify(session);
   const dir = session.direction ?? 'long';
   const mtf = sessionMtfMode(session);
-  const filename = `scan-${session.market}-${dir}-${mtf}-${session.date}.json`;
+  const sessionType = session.sessionType ?? 'post_close';
 
-  if (IS_VERCEL) {
-    await blobPut(`scans/${session.market}/${dir}/${mtf}/${session.date}.json`, data);
+  if (sessionType === 'intraday') {
+    // 盤中快照：帶時間戳，不覆蓋正式結果
+    const hhmm = new Date(session.scanTime).toISOString().slice(11, 16).replace(':', '');
+    const blobPath = `scans/${session.market}/${dir}/${mtf}/${session.date}/intraday/${hhmm}.json`;
+    const localName = `scan-${session.market}-${dir}-${mtf}-${session.date}-intraday-${hhmm}.json`;
+
+    if (IS_VERCEL) {
+      await blobPut(blobPath, data);
+    } else {
+      await fsPut(localName, data);
+    }
   } else {
-    await fsPut(filename, data);
+    // 收盤後正式結果：唯一，可覆蓋（同日同方向同模式只有一筆）
+    const blobPath = `scans/${session.market}/${dir}/${mtf}/${session.date}.json`;
+    const localName = `scan-${session.market}-${dir}-${mtf}-${session.date}.json`;
+
+    if (IS_VERCEL) {
+      await blobPut(blobPath, data);
+    } else {
+      await fsPut(localName, data);
+    }
   }
 }
 

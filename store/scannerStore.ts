@@ -202,34 +202,63 @@ export const useScannerStore = create<ScannerStore>()(
             // Pre-computed results unavailable, fall back to real-time scan
           }
 
+          // ── Step 1: 粗掃（全市場快照，< 3 秒） ─────────────────────────
           set(s => ({
-            [mKey]: { ...s[mKey], scanningStock: '取得股票清單中...' },
+            [mKey]: { ...s[mKey], scanningStock: '全市場粗掃中...' },
           }));
 
-          // ── Step 1: Fetch complete stock list ──────────────────────────────
-          // 即時掃描限制前 30 檔（按成交量排序），避免 Vercel function timeout
-          const REALTIME_SCAN_LIMIT = 30;
-          const listRes = await fetch(`/api/scanner/list?market=${market}`, { signal });
-          if (!listRes.ok) throw new Error('無法取得股票清單');
-          const listJson = await listRes.json() as { stocks: Array<{ symbol: string; name: string }> };
-          const allStocks = listJson.stocks ?? [];
-          const stocks = allStocks.slice(0, REALTIME_SCAN_LIMIT);
-          const total  = stocks.length;
+          const coarseRes = await fetch('/api/scanner/coarse', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ market, direction: 'long' }),
+            signal,
+          });
 
-          set(s => ({
-            [mKey]: { ...s[mKey], scanningStock: '分析股票中...', scanningTotal: total, scanningIndex: 0 },
-          }));
+          if (!coarseRes.ok) {
+            const j = await coarseRes.json().catch(() => ({}));
+            throw new Error((j as { error?: string }).error ?? '粗掃失敗');
+          }
 
-          // ── Step 2: Single chunk (小量不需拆分) ────────────────────────────
-          const chunk1 = stocks;
-          const chunk2: Array<{ symbol: string; name: string }> = [];
-
-          // Progress: event-driven, not timer-based
-          let completedChunks = 0;
-          const updateProgress = (pct: number, stockName: string, idx: number) => {
-            set(s => ({ [mKey]: { ...s[mKey], progress: pct, scanningStock: stockName, scanningIndex: idx } }));
+          interface CoarseCandidateItem { symbol: string; name: string }
+          const coarseJson = await coarseRes.json() as {
+            total?: number;
+            candidateCount?: number;
+            candidates?: CoarseCandidateItem[];
+            scanTimeMs?: number;
           };
-          updateProgress(5, names[0], 1);
+
+          const coarseCandidates = coarseJson.candidates ?? [];
+          const coarseTotal = coarseJson.total ?? 0;
+
+          set(s => ({
+            [mKey]: {
+              ...s[mKey],
+              progress: 15,
+              scanningStock: `粗掃完成：${coarseTotal} 檔中找到 ${coarseCandidates.length} 檔候選`,
+              scanningTotal: coarseCandidates.length,
+            },
+          }));
+
+          // 如果粗掃沒有候選，直接結束
+          if (coarseCandidates.length === 0) {
+            set(s => ({
+              [mKey]: {
+                ...s[mKey],
+                isScanning: false, progress: 100, scanningStock: '',
+                results: [], lastScanTime: new Date().toISOString(),
+                marketTrend: '多頭', error: `無符合粗篩條件的股票（共掃描 ${coarseTotal} 檔）`,
+              },
+            }));
+            abortControllers[market] = null;
+            return;
+          }
+
+          // ── Step 2: 精掃（候選池，讀完整 K 線跑六條件） ─────────────────
+          set(s => ({
+            [mKey]: { ...s[mKey], progress: 20, scanningStock: `精掃 ${coarseCandidates.length} 檔候選中...` },
+          }));
+
+          const stocks = coarseCandidates.map(c => ({ symbol: c.symbol, name: c.name }));
 
           const scanChunk = async (chunk: Array<{ symbol: string; name: string }>) => {
             const res = await fetch('/api/scanner/chunk', {
@@ -240,7 +269,7 @@ export const useScannerStore = create<ScannerStore>()(
             });
             if (!res.ok) {
               const j = await res.json().catch(() => ({}));
-              throw new Error((j as { error?: string }).error ?? '掃描失敗');
+              throw new Error((j as { error?: string }).error ?? '精掃失敗');
             }
             const j = await res.json() as { results?: StockScanResult[]; marketTrend?: TrendState; diagnostics?: ScanDiagnostics; dataDate?: string };
             return {
@@ -251,38 +280,23 @@ export const useScannerStore = create<ScannerStore>()(
             };
           };
 
-          // ── Step 3: Run both chunks in parallel ────────────────────────────
-          updateProgress(10, `掃描第1批 (${chunk1.length}檔)`, 0);
-          const [r1, r2] = await Promise.allSettled([
-            scanChunk(chunk1).then(r => { completedChunks++; updateProgress(completedChunks === 1 ? 50 : 88, `第${completedChunks}批完成`, total * completedChunks); return r; }),
-            scanChunk(chunk2).then(r => { completedChunks++; updateProgress(completedChunks === 1 ? 50 : 88, `第${completedChunks}批完成`, total); return r; }),
-          ]);
+          // 候選池通常 30-100 檔，可以一次送（不需拆分）
+          const fineResult = await scanChunk(stocks);
 
-          // Use market trend and dataDate from whichever chunk succeeded (should be the same)
-          const marketTrend: TrendState =
-            (r1.status === 'fulfilled' ? r1.value.marketTrend : null) ??
-            (r2.status === 'fulfilled' ? r2.value.marketTrend : null) ??
-            '多頭';
+          set(s => ({
+            [mKey]: { ...s[mKey], progress: 88, scanningStock: '精掃完成' },
+          }));
 
-          // 實際資料日期（由 API 回傳，盤前會自動降級為最後交易日）
-          const dataDate: string | undefined =
-            (r1.status === 'fulfilled' ? r1.value.dataDate : undefined) ??
-            (r2.status === 'fulfilled' ? r2.value.dataDate : undefined);
+          const marketTrend: TrendState = fineResult.marketTrend ?? '多頭';
+          const dataDate: string | undefined = fineResult.dataDate;
+          const combinedDiag = fineResult.diagnostics;
 
-          // Merge diagnostics from both chunks
-          const combinedDiag = mergeDiagnostics(
-            r1.status === 'fulfilled' ? r1.value.diagnostics : createEmptyDiagnostics(),
-            r2.status === 'fulfilled' ? r2.value.diagnostics : createEmptyDiagnostics(),
-          );
-
-          const results: StockScanResult[] = [
-            ...(r1.status === 'fulfilled' ? r1.value.results : []),
-            ...(r2.status === 'fulfilled' ? r2.value.results : []),
-          ].sort((a, b) =>
-            b.sixConditionsScore !== a.sixConditionsScore
-              ? b.sixConditionsScore - a.sixConditionsScore
-              : b.changePercent - a.changePercent
-          );
+          const results: StockScanResult[] = fineResult.results
+            .sort((a, b) =>
+              b.sixConditionsScore !== a.sixConditionsScore
+                ? b.sixConditionsScore - a.sixConditionsScore
+                : b.changePercent - a.changePercent
+            );
 
           // 結果為空時：多態區分原因
           if (results.length === 0) {

@@ -20,6 +20,8 @@ interface CandleFileData {
   lastDate: string;
   updatedAt: string;
   candles: Candle[];
+  /** 封存日期 — 收盤 cron 寫入時標記，表示此日期(含)之前的資料不可被盤中覆蓋 (Fundamental Rule R1) */
+  sealedDate?: string;
 }
 
 // ── Vercel Blob helpers ──────────────────────────────────────────────────────
@@ -117,6 +119,8 @@ export async function writeCandleFile(
     lastDate,
     updatedAt: new Date().toISOString(),
     candles: stripped,
+    // 收盤 cron 寫入時自動封存（Fundamental Rule R1）
+    sealedDate: lastDate,
   };
 
   const json = JSON.stringify(data);

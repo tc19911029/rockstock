@@ -101,6 +101,16 @@ export async function GET(req: NextRequest) {
       durationSec: parseFloat(duration),
     }).catch(err => console.warn('[download-candles] manifest save failed:', err));
 
+    // ── 生成 MA Base（供盤中粗掃即時 MA 計算用）──
+    let maBaseResult = { total: 0, succeeded: 0, failed: 0 };
+    try {
+      const { generateMABase } = await import('@/lib/datasource/MABaseGenerator');
+      maBaseResult = await generateMABase(market, lastTradingDate, stocks);
+      console.info(`[download-candles] ${market}: MA Base 已生成 (${maBaseResult.succeeded}/${maBaseResult.total})`);
+    } catch (err) {
+      console.warn('[download-candles] MA Base generation failed:', err);
+    }
+
     return apiOk({
       market,
       totalStocks: stocks.length,
@@ -108,6 +118,7 @@ export async function GET(req: NextRequest) {
       skipped,
       failed,
       durationSec: parseFloat(duration),
+      maBase: maBaseResult,
     });
   } catch (err) {
     console.error(`[download-candles] ${market}: 錯誤`, err);

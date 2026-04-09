@@ -126,6 +126,19 @@ export async function GET(req: NextRequest) {
       durationSec: parseFloat(duration),
     }).catch(err => console.warn('[download-batch] manifest save failed:', err));
 
+    // ── 最後一批完成後生成 MA Base（供盤中粗掃即時 MA 計算用）──
+    let maBaseResult = { total: 0, succeeded: 0, failed: 0 };
+    if (batch === totalBatches) {
+      try {
+        const { generateMABase } = await import('@/lib/datasource/MABaseGenerator');
+        // 用全部股票清單（不只是這一批）
+        maBaseResult = await generateMABase(market, lastTradingDate, sorted);
+        console.info(`[download-batch] ${market}: MA Base 已生成 (${maBaseResult.succeeded}/${maBaseResult.total})`);
+      } catch (err) {
+        console.warn('[download-batch] MA Base generation failed:', err);
+      }
+    }
+
     return apiOk({
       market,
       batch,
@@ -136,6 +149,7 @@ export async function GET(req: NextRequest) {
       skipped,
       failed,
       durationSec: parseFloat(duration),
+      maBase: batch === totalBatches ? maBaseResult : undefined,
     });
   } catch (err) {
     console.error(`[download-batch] ${market} batch ${batch}: 錯誤`, err);

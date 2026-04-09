@@ -62,3 +62,4 @@ next-env.d.ts
 /android/app/build/
 /android/build/
 /android/local.properties
+.env*.local
