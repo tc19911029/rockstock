@@ -20,7 +20,7 @@ export class ChinaScanner extends MarketScanner {
     // 嘗試從東方財富 API 動態取得全部 A 股清單
     try {
       const stocks = await fetchEastMoneyStockList();
-      if (stocks.length > 50) {
+      if (stocks.length > 500) {
         return stocks;
       }
     } catch {
