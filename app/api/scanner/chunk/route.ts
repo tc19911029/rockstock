@@ -139,6 +139,19 @@ export async function POST(req: NextRequest) {
     return apiOk({ results, marketTrend, mode: parsed.data.mode, diagnostics, dataDate });
   } catch (err) {
     console.error('[scanner/chunk] error:', err);
-    return apiError('掃描服務暫時無法使用');
+    const msg = err instanceof Error ? err.message : String(err);
+    const isRateLimit = msg.includes('429') || msg.includes('rate') || msg.includes('limit');
+    const isTimeout = msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('abort');
+    const isBlobError = msg.includes('Blob') || msg.includes('blob') || msg.includes('BLOB');
+    if (isRateLimit) {
+      return apiError('精掃 API 限流中。建議：等待 1-2 分鐘後重試。', 429);
+    }
+    if (isTimeout) {
+      return apiError(`精掃逾時（候選 ${stocks.length} 檔）。建議：稍後重試，系統會自動使用快取加速。`, 504);
+    }
+    if (isBlobError) {
+      return apiError('K 線資料庫暫時無法存取。建議：等待 1 分鐘後重試。');
+    }
+    return apiError(`精掃異常：${msg.slice(0, 100)}。建議：重試一次。`);
   }
 }

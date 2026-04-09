@@ -61,12 +61,21 @@ export async function POST(req: NextRequest) {
       } else if (!snapshot) {
         // 盤後且無快照：嘗試用收盤資料生成
         // 先嘗試讀取，如果沒有就直接回傳空
-        return apiError(`${market} 尚無盤中快照，請等待盤中更新`, 404);
+        // 盤後且無快照：給出具體原因和預估恢復時間
+        const nextOpen = market === 'TW' ? '明天 09:00 (台股開盤)' : '明天 09:30 (陸股開盤)';
+        return apiError(
+          `${market} 尚無盤中快照。原因：目前非開盤時段且尚未產生快照。` +
+          `建議：請切換到「歷史紀錄」查看收盤後掃描結果，或等待 ${nextOpen} 後重試。`,
+          404,
+        );
       }
     }
 
     if (!snapshot || snapshot.count === 0) {
-      return apiError(`${market} 盤中快照為空`, 404);
+      return apiError(
+        `${market} 盤中快照為空。可能原因：API 暫時無回應或市場休市。建議：稍等 2-3 分鐘後重試。`,
+        404,
+      );
     }
 
     // ── 讀取 MA Base（歷史尾端快取）──
@@ -92,6 +101,15 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error('[scanner/coarse] error:', err);
-    return apiError('粗掃服務暫時無法使用');
+    const msg = err instanceof Error ? err.message : String(err);
+    const isRateLimit = msg.includes('429') || msg.includes('rate') || msg.includes('limit');
+    const isTimeout = msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('abort');
+    if (isRateLimit) {
+      return apiError('API 請求過於頻繁（限流中）。建議：等待 1-2 分鐘後重試。', 429);
+    }
+    if (isTimeout) {
+      return apiError('即時報價 API 回應逾時。建議：等待 30 秒後重試，或切換到歷史紀錄查看。', 504);
+    }
+    return apiError(`粗掃異常：${msg.slice(0, 100)}。建議：重試一次，若持續失敗請切換到歷史紀錄。`);
   }
 }

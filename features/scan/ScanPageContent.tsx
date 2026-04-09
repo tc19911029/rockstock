@@ -200,14 +200,20 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
       {/* Error / Warning */}
       {(scanError || forwardError) && (() => {
         const msg = scanError || forwardError || '';
-        const isWarning = msg.includes('\u90e8\u5206\u8986\u84cb') || msg.includes('\u8986\u84cb\u7387');
+        const isWarning = msg.includes('\u90e8\u5206\u8986\u84cb') || msg.includes('\u8986\u84cb\u7387') || msg.includes('無符合');
+        const isInfo = msg.includes('正常現象');
+        const colorClass = isInfo
+          ? 'bg-blue-950/60 border border-blue-900 text-blue-300'
+          : isWarning
+            ? 'bg-amber-950/60 border border-amber-900 text-amber-300'
+            : 'bg-red-950/60 border border-red-900 text-red-300';
         return (
-          <div className={`mx-3 my-1.5 px-3 py-1.5 rounded text-[11px] ${
-            isWarning
-              ? 'bg-amber-950/60 border border-amber-900 text-amber-300'
-              : 'bg-red-950/60 border border-red-900 text-red-300'
-          }`}>
-            {msg}
+          <div className={`mx-3 my-1.5 px-3 py-2 rounded text-[11px] leading-relaxed ${colorClass}`}>
+            {msg.split('\n').map((line, i) => (
+              <div key={i} className={line.startsWith('建議') || line.startsWith('可能原因') ? 'mt-0.5 opacity-80' : ''}>
+                {line.startsWith('建議') ? '💡 ' : line.startsWith('可能原因') ? '❓ ' : ''}{line}
+              </div>
+            ))}
           </div>
         );
       })()}
@@ -442,12 +448,20 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
 
           {(scanError || forwardError) && (() => {
             const msg = scanError || forwardError || '';
-            const isWarn = msg.includes('\u90e8\u5206\u8986\u84cb') || msg.includes('\u8986\u84cb\u7387');
+            const isWarn = msg.includes('\u90e8\u5206\u8986\u84cb') || msg.includes('\u8986\u84cb\u7387') || msg.includes('無符合');
+            const isInfo = msg.includes('正常現象');
+            const colorCls = isInfo
+              ? 'bg-blue-950/60 border border-blue-900 text-blue-300'
+              : isWarn
+                ? 'bg-amber-950/60 border border-amber-900 text-amber-300'
+                : 'bg-red-950/60 border border-red-900 text-red-300';
             return (
-            <div className={`mx-5 mb-4 px-4 py-2.5 rounded-lg text-sm ${
-              isWarn ? 'bg-amber-950/60 border border-amber-900 text-amber-300' : 'bg-red-950/60 border border-red-900 text-red-300'
-            }`}>
-              {msg}
+            <div className={`mx-5 mb-4 px-4 py-3 rounded-lg text-sm leading-relaxed ${colorCls}`}>
+              {msg.split('\n').map((line, i) => (
+                <div key={i} className={line.startsWith('建議') || line.startsWith('可能原因') ? 'mt-1 opacity-80' : ''}>
+                  {line.startsWith('建議') ? '💡 ' : line.startsWith('可能原因') ? '❓ ' : ''}{line}
+                </div>
+              ))}
             </div>
             );
           })()}

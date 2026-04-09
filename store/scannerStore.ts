@@ -298,30 +298,46 @@ export const useScannerStore = create<ScannerStore>()(
                 : b.changePercent - a.changePercent
             );
 
-          // 結果為空時：多態區分原因
+          // 結果為空時：多態區分原因，顯示具體原因+建議
           if (results.length === 0) {
             const diagMsg = diagnosticsSummary(combinedDiag);
+            let errorMsg: string;
+
             if (combinedDiag.totalStocks === 0 || combinedDiag.processedCount === 0) {
-              // 兩個 chunk 都完全失敗（伺服器問題或 API 超時）
-              set(s => ({
-                [mKey]: { ...s[mKey], isScanning: false, progress: 100, scanningStock: '', results: [], marketTrend, error: '掃描服務暫時無法使用，請稍後再試' },
-              }));
+              // 精掃完全失敗
+              errorMsg = '精掃無法處理任何候選股票。\n'
+                + '可能原因：K 線資料庫尚未建立或 Blob 存取異常。\n'
+                + '建議：等待 2-3 分鐘後重試，或切換到「歷史紀錄」查看收盤後結果。';
             } else if (combinedDiag.dataMissing > combinedDiag.totalStocks * 0.3) {
-              // 超過 30% 股票缺資料 → 資料庫/Blob 問題
-              set(s => ({
-                [mKey]: { ...s[mKey], isScanning: false, progress: 100, scanningStock: '', results: [], marketTrend, error: `伺服器資料不足（${combinedDiag.dataMissing}/${combinedDiag.totalStocks} 檔缺資料），請等待每日排程完成` },
-              }));
+              // 大量缺資料
+              const pct = Math.round(combinedDiag.dataMissing / combinedDiag.totalStocks * 100);
+              const twCronTime = '每天 13:45';
+              const cnCronTime = '每天 15:15';
+              const cronTime = market === 'TW' ? twCronTime : cnCronTime;
+              errorMsg = `${pct}% 股票缺少 K 線資料（${combinedDiag.dataMissing}/${combinedDiag.totalStocks} 檔）。\n`
+                + `可能原因：今日收盤資料尚未下載完成。\n`
+                + `建議：系統會在${cronTime}自動下載，完成後即可正常掃描。`;
             } else if (combinedDiag.filteredOut > 0 && combinedDiag.apiFailed === 0) {
-              // 正常：全被過濾但不是 API 錯誤
-              set(s => ({
-                [mKey]: { ...s[mKey], isScanning: false, progress: 100, scanningStock: '', results: [], lastScanTime: new Date().toISOString(), marketTrend, error: `無符合條件的股票（${diagMsg}）` },
-              }));
+              // 正常：全被過濾
+              errorMsg = `今日無符合六條件的股票（已掃描 ${combinedDiag.processedCount} 檔，全部被過濾）。\n`
+                + '這是正常現象，表示目前無明確做多/做空訊號。';
+            } else if (combinedDiag.apiFailed > 0) {
+              // API 錯誤
+              errorMsg = `部分 API 請求失敗（${combinedDiag.apiFailed} 次）。\n`
+                + `可能原因：資料源暫時不穩定。\n`
+                + `建議：等待 1-2 分鐘後重試。（${diagMsg}）`;
             } else {
-              // 真正的異常
-              set(s => ({
-                [mKey]: { ...s[mKey], isScanning: false, progress: 100, scanningStock: '', results: [], marketTrend, error: `掃描異常（${diagMsg}）` },
-              }));
+              errorMsg = `掃描完成但無結果。（${diagMsg}）\n建議：重試一次或切換到歷史紀錄。`;
             }
+
+            set(s => ({
+              [mKey]: {
+                ...s[mKey], isScanning: false, progress: 100, scanningStock: '',
+                results: [], marketTrend,
+                lastScanTime: combinedDiag.filteredOut > 0 ? new Date().toISOString() : s[mKey].lastScanTime,
+                error: errorMsg,
+              },
+            }));
             return;
           }
 
@@ -392,14 +408,34 @@ export const useScannerStore = create<ScannerStore>()(
           // Don't show error if user cancelled
           if (err instanceof DOMException && err.name === 'AbortError') return;
           const msg = err instanceof Error ? err.message : '未知錯誤';
-          // Provide actionable message for common Vercel timeout / network errors
-          const isTimeout = msg.includes('Failed to fetch') || msg.includes('timeout') || msg.includes('network') || msg.includes('504') || msg.includes('502');
-          const userMsg = isTimeout
-            ? '即時掃描逾時，請從歷史紀錄選擇日期查看結果'
-            : msg;
-          set(s => ({
-            [mKey]: { ...s[mKey], isScanning: false, error: userMsg },
-          }));
+
+          // 解析 API 回傳的結構化錯誤（已包含原因+建議）
+          // 如果 msg 本身已有「建議」，直接用
+          if (msg.includes('建議')) {
+            set(s => ({ [mKey]: { ...s[mKey], isScanning: false, error: msg } }));
+          } else {
+            // 通用錯誤分類
+            const isTimeout = msg.includes('Failed to fetch') || msg.includes('timeout') || msg.includes('504') || msg.includes('502');
+            const isNetwork = msg.includes('network') || msg.includes('NetworkError') || msg.includes('ERR_');
+            const is404 = msg.includes('404') || msg.includes('尚無');
+
+            let userMsg: string;
+            if (isTimeout) {
+              userMsg = '掃描請求逾時。\n'
+                + '可能原因：網路較慢或伺服器繁忙。\n'
+                + '建議：等待 30 秒後重試，或切換到「歷史紀錄」查看收盤後結果。';
+            } else if (isNetwork) {
+              userMsg = '無法連線到掃描伺服器。\n'
+                + '可能原因：網路中斷或行動網路不穩。\n'
+                + '建議：檢查網路連線後重試。';
+            } else if (is404) {
+              userMsg = msg; // 404 通常已有具體說明
+            } else {
+              userMsg = `掃描異常：${msg.slice(0, 150)}\n建議：重試一次，若持續失敗請稍後再試。`;
+            }
+
+            set(s => ({ [mKey]: { ...s[mKey], isScanning: false, error: userMsg } }));
+          }
         } finally {
           abortControllers[market] = null;
         }
