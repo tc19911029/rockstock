@@ -233,19 +233,29 @@ function rule11_noTechnical(candles: CandleWithIndicators[], idx: number): strin
   return null;
 }
 
-const ELIMINATION_RULES = [
-  rule01_notOutOfBottom,
+/**
+ * 嚴重淘汰條件：單獨命中 1 條即淘汰
+ * 朱老師書中這些是明確的「不碰」情況，不需要其他條件配合
+ */
+const CRITICAL_ELIMINATION_RULES = [
+  rule01_notOutOfBottom,    // 尚未走出底部（結構性問題）
+  rule05_overExtended,      // 大幅上漲過高，漲超過1倍
+  rule10_threeBlacks,       // 連3天長黑K（明確出貨）
+  rule11_noTechnical,       // 技術面全面轉壞
+];
+
+/**
+ * 一般淘汰條件：需 2 條以上同時命中才淘汰
+ */
+const STANDARD_ELIMINATION_RULES = [
   rule02_resistanceBlockBreakMA5,
   rule03_unclearTrend,
   rule04_noVolume,
-  rule05_overExtended,
   rule06_resistanceLongBlack,
   rule07_indicatorDivergence,
   rule08_institutionalSelling,
   rule09_highVolNoRise,
-  rule10_threeBlacks,
   rule10b_longConsolidation,
-  rule11_noTechnical,
 ];
 
 /**
@@ -257,16 +267,24 @@ export function evaluateElimination(
   idx: number,
 ): EliminationResult {
   const reasons: string[] = [];
+  let hasCritical = false;
 
-  for (const rule of ELIMINATION_RULES) {
+  for (const rule of CRITICAL_ELIMINATION_RULES) {
+    try {
+      const reason = rule(candles, idx);
+      if (reason) { reasons.push(reason); hasCritical = true; }
+    } catch { /* skip */ }
+  }
+
+  for (const rule of STANDARD_ELIMINATION_RULES) {
     try {
       const reason = rule(candles, idx);
       if (reason) reasons.push(reason);
     } catch { /* skip */ }
   }
 
-  // 2 條以上命中 → 建議淘汰
-  const eliminated = reasons.length >= 2;
+  // 嚴重條件（R1/R5/R10/R11）1 條即淘汰；一般條件需 2 條以上
+  const eliminated = hasCritical || reasons.length >= 2;
   // 每條扣 3 分，最多扣 20
   const penalty = Math.min(reasons.length * 3, 20);
 
