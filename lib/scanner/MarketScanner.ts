@@ -708,16 +708,20 @@ export abstract class MarketScanner {
     const diag = createEmptyDiagnostics();
     diag.totalStocks = stocks.length;
 
+    let minScore = th.minScore;
     let marketTrend: TrendState = '多頭';
     try {
       marketTrend = await this.getMarketTrend(asOfDate);
+      if (th.marketTrendFilter) {
+        minScore = this.marketTrendToMinScore(marketTrend, th);
+      }
     } catch { /* fallback */ }
 
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(({ symbol, name, industry }) =>
-          this.scanOneSOPOnly(symbol, name, config, th, asOfDate, industry, diag)
+          this.scanOne(symbol, name, config, minScore, th, asOfDate, industry, diag)
         )
       );
       for (const r of settled) {
