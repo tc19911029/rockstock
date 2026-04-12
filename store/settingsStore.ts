@@ -4,7 +4,6 @@ import {
   StrategyConfig,
   StrategyThresholds,
   BUILT_IN_STRATEGIES,
-  ZHU_V1,
   ZHU_OPTIMIZED,
   clampThresholds,
 } from '@/lib/strategy/StrategyConfig';

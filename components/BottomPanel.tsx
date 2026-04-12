@@ -9,7 +9,7 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useReplayStore } from '@/store/replayStore';
-import { type MarketTab, filterByMarket, classifyMarket } from '@/lib/market/classify';
+import { type MarketTab, filterByMarket } from '@/lib/market/classify';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,7 +127,7 @@ export default function BottomPanel() {
 
   // ── Portfolio summary ──────────────────────────────────────────────────────
 
-  const summary = holdings.reduce(
+  const _summary = holdings.reduce(
     (acc, h) => {
       const p = prices[h.symbol];
       const cur = p?.price ?? 0;
@@ -142,8 +142,6 @@ export default function BottomPanel() {
     },
     { totalCost: 0, totalValue: 0, totalPnL: 0, todayPnL: 0 },
   );
-
-  const totalReturnPct = summary.totalCost > 0 ? (summary.totalPnL / summary.totalCost) * 100 : 0;
 
   const filteredHoldings = filterByMarket(holdings, marketTab);
   const filteredWatchlist = filterByMarket(watchlist, marketTab);

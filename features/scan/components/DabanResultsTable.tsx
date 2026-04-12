@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { DabanScanResult, DabanScanSession, DabanSentiment, StockForwardPerformance } from '@/lib/scanner/types';
+import type { DabanScanResult, DabanScanSession, StockForwardPerformance } from '@/lib/scanner/types';
 import type { SelectedStock } from './ScanChartPanel';
 
 interface RealtimePrice {

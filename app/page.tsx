@@ -181,7 +181,7 @@ export default function HomePage() {
   }, []);
 
   // P3-8: Sound alert when a new signal appears during replay
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, _setSoundEnabled] = useState(true);
   const prevSignalCountRef = useRef(0);
   const soundEnabledRef = useRef(true);
   useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);

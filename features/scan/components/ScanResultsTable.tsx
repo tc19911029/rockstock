@@ -5,7 +5,7 @@ import { useBacktestStore } from '@/store/backtestStore';
 import type { SelectedStock } from './ScanChartPanel';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { POLLING } from '@/lib/config';
-import { fetchInstitutionalBatch, type InstitutionalSummary } from '@/lib/datasource/useInstitutionalSummary';
+// import { fetchInstitutionalBatch } from '@/lib/datasource/useInstitutionalSummary'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { Button } from '@/components/ui/button';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 
@@ -63,7 +63,6 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [newsCache, setNewsCache] = useState<Record<string, { sentiment: number; summary: string; hasNews: boolean; loading: boolean }>>({});
-  const [instData, setInstData] = useState<Map<string, InstitutionalSummary | null>>(new Map());
   const [realtimePrices, setRealtimePrices] = useState<Map<string, { price: number; changePct: number; time: string }>>(new Map());
   const [conceptFilter, setConceptFilter] = useState<string>('all');
   const [scanSort, setScanSort] = useState<'price' | 'change'>('change');
@@ -105,13 +104,6 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     const timer = setInterval(fetchRealtime, POLLING.QUOTE_INTERVAL);
     return () => clearInterval(timer);
   }, [market, scanResults.length, scanOnly]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch FinMind institutional summaries
-  useEffect(() => {
-    if (market !== 'TW' || scanResults.length === 0) return;
-    const tickers = scanResults.map(r => r.symbol.replace(/\.(TW|TWO)$/i, ''));
-    fetchInstitutionalBatch(tickers).then(setInstData).catch(() => {});
-  }, [market, scanResults]);
 
   // Fetch news on-demand
   /* eslint-disable react-hooks/set-state-in-effect */

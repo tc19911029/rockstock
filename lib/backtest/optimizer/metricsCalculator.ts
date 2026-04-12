@@ -6,7 +6,6 @@
 
 import type {
   DailyCandidate,
-  RankedCandidate,
   StrategyMetrics,
   YearMetrics,
   WeightCombo,

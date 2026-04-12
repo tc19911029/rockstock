@@ -70,7 +70,7 @@ function ProhibitionSection({
 }
 
 function ShortConditionsSection() {
-  const { shortConditions, trendState } = useReplayStore();
+  const { shortConditions } = useReplayStore();
   const [expanded, setExpanded] = useState(false);
 
   if (!shortConditions) return null;
@@ -122,7 +122,7 @@ function ShortConditionsSection() {
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function ProhibitionAlerts() {
-  const { longProhibitions, shortProhibitions, trendState, allCandles, currentIndex } = useReplayStore();
+  const { longProhibitions, shortProhibitions, allCandles, currentIndex } = useReplayStore();
 
   if (allCandles.length === 0 || currentIndex < 5) return null;
 

@@ -30,8 +30,8 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
   const [interval, setInterval] = useState<ScanInterval>('1d');
 
   const {
-    allCandles, visibleCandles, currentSignals, chartMarkers,
-    isLoadingStock, loadStock, currentStock, jumpToIndex,
+    allCandles, currentSignals, chartMarkers,
+    isLoadingStock, loadStock, jumpToIndex,
     startPolling, stopPolling,
   } = useReplayStore();
 

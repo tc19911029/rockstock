@@ -51,7 +51,7 @@ function rawSymbol(ticker: string) {
 }
 
 export default function StockSelector() {
-  const { loadStock, isLoadingStock, currentStock, targetDate, startPolling, stopPolling, isPolling } = useReplayStore();
+  const { loadStock, isLoadingStock, currentStock, targetDate, startPolling, stopPolling } = useReplayStore();
   const [input,    setInput]    = useState('');
   const [interval, setInterval] = useState('1d');
   const [showDrop, setShowDrop] = useState(false);

@@ -18,7 +18,7 @@ import type {
   PhaseDResult,
   WalkForwardResult,
 } from './types';
-import { rankCandidates, SINGLE_FACTOR_COMBOS, GRID_COMBOS, MTF_THRESHOLDS } from './rankingEngine';
+import { SINGLE_FACTOR_COMBOS, GRID_COMBOS, MTF_THRESHOLDS } from './rankingEngine';
 import { calcTop1Metrics, calcMetricsFromReturns, avgCandidateCount } from './metricsCalculator';
 
 // ── Phase A: Single Factor Ranking Power ────────────────────────────────────────
