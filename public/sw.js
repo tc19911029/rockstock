@@ -36,11 +36,11 @@ const MEDIUM_TTL = [
   "/api/watchlist",
 ];
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", (_event) => {
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
+self.addEventListener("activate", (_event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
@@ -62,7 +62,7 @@ function isExpired(response, maxAge) {
   return Date.now() - Number(date) > maxAge;
 }
 
-async function networkFirst(request, maxAge) {
+async function networkFirst(request, _maxAge) {
   try {
     const response = await fetch(request);
     if (response.ok) {

@@ -38,8 +38,6 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
     sessionDataFreshness: _sessionDataFreshness,
   } = useBacktestStore();
 
-  const sessionDataFreshness = useBacktestStore(s => s.sessionDataFreshness);
-
   const [maxDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   // 載入歷史日期

@@ -10,7 +10,7 @@
  * 不可漏掉好股（false negative 不可接受）。
  */
 
-import type { IntradayQuote, IntradaySnapshot, MABaseSnapshot } from '@/lib/datasource/IntradayCache';
+import type { IntradaySnapshot, MABaseSnapshot } from '@/lib/datasource/IntradayCache';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 

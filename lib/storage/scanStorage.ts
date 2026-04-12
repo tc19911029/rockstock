@@ -1,4 +1,4 @@
-import { ScanSession, MarketId, ScanDirection, MtfMode, SessionType } from '@/lib/scanner/types';
+import { ScanSession, MarketId, ScanDirection, MtfMode } from '@/lib/scanner/types';
 import { isWeekday } from '@/lib/utils/tradingDay';
 
 // ── Storage abstraction for scan sessions ────────────────────────────────────

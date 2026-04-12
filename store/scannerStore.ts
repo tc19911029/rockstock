@@ -1,19 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { StockScanResult, ScanSession, MarketId, sanitizeScanResult, ScanDiagnostics, createEmptyDiagnostics, mergeDiagnostics, diagnosticsSummary } from '@/lib/scanner/types';
+import { StockScanResult, ScanSession, MarketId, sanitizeScanResult, ScanDiagnostics, createEmptyDiagnostics, diagnosticsSummary } from '@/lib/scanner/types';
 import { TrendState } from '@/lib/analysis/trendAnalysis';
 import { useSettingsStore } from './settingsStore';
-
-const TW_STOCK_NAMES = [
-  '台積電','聯發科','日月光投控','聯電','聯詠','瑞昱','矽力','華邦電','力積電','旺宏',
-  '南亞科','京元電子','創意','力成','信驊','同欣電','環球晶','中美晶','鴻海','廣達',
-  '台達電','緯穎','緯創','和碩','英業達','研華','臻鼎','光寶科','聯強','奇鋐',
-];
-const CN_STOCK_NAMES = [
-  '貴州茅台','中國平安','招商銀行','工商銀行','長江電力','農業銀行','建設銀行',
-  '中國銀行','紫金礦業','伊利股份','中國石化','恆瑞醫藥','五糧液','美的集團',
-  '比亞迪','格力電器','平安銀行','中信證券','興業銀行','海康威視',
-];
 
 const MAX_HISTORY = 10;
 
@@ -148,7 +137,6 @@ export const useScannerStore = create<ScannerStore>()(
         const signal = abortCtrl.signal;
 
         const mKey  = market === 'TW' ? 'tw' : 'cn';
-        const names = market === 'TW' ? TW_STOCK_NAMES : CN_STOCK_NAMES;
         const scanDate = market === 'TW' ? get().tw.scanDate : get().cn.scanDate;
 
         // Get active strategy for the scan
