@@ -121,6 +121,8 @@ export function sanitizeScanResult(r: StockScanResult): StockScanResult {
     sixConditionsScore: num(r.sixConditionsScore),
     histWinRate: r.histWinRate != null ? num(r.histWinRate) : undefined,
     chipScore: r.chipScore != null ? num(r.chipScore) : undefined,
+    surgeScore: r.surgeScore != null ? num(r.surgeScore) : undefined,
+    compositeScore: r.compositeScore != null ? num(r.compositeScore) : undefined,
   };
 }
 

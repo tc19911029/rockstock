@@ -214,10 +214,15 @@ export class EastMoneyHistProvider implements DataProvider {
     const cached = globalCache.get<CandleWithIndicators[]>(cacheKey);
     if (cached) return cached;
 
-    // 分鐘 K 線東方財富只保留近期數據（1m 約 5 天，5m 約 20 天，15m+ 約 2 個月）
-    // 強制使用較短的 beg 以確保有數據回傳
+    // 分鐘 K 線東方財富只保留近期數據
+    // 1m≈5天、5m≈20天、15m/30m/60m≈2個月 → 對應縮短 period
     const isMinuteKlt = klt >= 1 && klt <= 60;
-    const effectivePeriod = isMinuteKlt ? '3m' : period;
+    let effectivePeriod = period;
+    if (isMinuteKlt) {
+      if (klt === 1) effectivePeriod = '5d';          // 1分K → 5天
+      else if (klt === 5) effectivePeriod = '20d';   // 5分K → 20天
+      else effectivePeriod = '60d';                    // 15m/30m/60m → 60天
+    }
     const beg = periodToBeg(effectivePeriod);
     const end = asOfDate
       ? asOfDate.replace(/-/g, '')

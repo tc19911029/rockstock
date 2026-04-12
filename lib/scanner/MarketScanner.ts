@@ -116,13 +116,16 @@ export abstract class MarketScanner {
     }
 
     const { stale, missing } = await batchCheckFreshness(symbols, market, targetDate, 1);
-    const toUpdate = [...stale, ...missing].slice(0, budget);
+    // 動態 budget：確保一次能覆蓋所有 missing，不被固定 budget=100 卡住
+    const needed = stale.length + missing.length;
+    const effectiveBudget = Math.min(Math.max(budget, needed), 500); // 最多 500，防止一次打太多 API
+    const toUpdate = [...stale, ...missing].slice(0, effectiveBudget);
 
     if (toUpdate.length === 0) {
       return { updated: 0, failed: 0, skipped: 0 };
     }
 
-    console.info(`[ensureFreshCandles] ${market} ${targetDate}: ${stale.length} stale + ${missing.length} missing，更新前 ${toUpdate.length} 支...`);
+    console.info(`[ensureFreshCandles] ${market} ${targetDate}: ${stale.length} stale + ${missing.length} missing，更新前 ${toUpdate.length} 支 (budget=${effectiveBudget})...`);
 
     let updated = 0;
     let failed = 0;
