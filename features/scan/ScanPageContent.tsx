@@ -42,7 +42,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
 
   // 載入歷史日期
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     if (scanDirection === 'daban') {
       // 打板有獨立的日期列表 API
       fetch('/api/scanner/daban').then(r => r.json()).then(data => {
@@ -265,7 +265,7 @@ export default function ScanPageContent({ defaultMode = 'full' }: ScanPageConten
   const autoLoadLatest = useBacktestStore(s => s.autoLoadLatest);
   const scanTiming = useBacktestStore(s => s.scanTiming);
 
-  /* eslint-disable react-hooks/set-state-in-effect */
+   
   // 載入 cron 歷史日期（market/direction/MTF 切換時重新取得）
   useEffect(() => {
     if (scanDirection === 'daban') {
