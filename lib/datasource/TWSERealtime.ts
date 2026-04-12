@@ -288,7 +288,7 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
           high:  parseMisPrice(d.h) || close,
           low:   parseMisPrice(d.l) || close,
           close,
-          volume: parseInt((d.v || '0').replace(/,/g, ''), 10) * 1000, // 張 → 股
+          volume: Math.round(parseInt((d.v || '0').replace(/,/g, ''), 10) / 1000), // 股→張
           previousClose: prevClose > 0 ? prevClose : undefined,
           date: today, // 確實是今天的即時數據
         });
