@@ -364,8 +364,8 @@ export abstract class MarketScanner {
       // ── 1b. minScore 門檻（盤整/空頭市場可能要求 6/6 含指標條件）────────
       if (sixConds.totalScore < minScore) { if (diag) diag.filteredOut++; return null; }
 
-      // ── 2. 短線第9條：KD值向下時不買 ─────────────────────────────────
-      if (last.kdK != null && lastIdx > 0) {
+      // ── 2. 短線第9條：KD值向下時不買（可由 kdDecliningFilter 關閉）────
+      if (thresholds.kdDecliningFilter !== false && last.kdK != null && lastIdx > 0) {
         const prevKdK = candles[lastIdx - 1]?.kdK;
         if (prevKdK != null && last.kdK < prevKdK) { if (diag) diag.filteredOut++; return null; }
       }

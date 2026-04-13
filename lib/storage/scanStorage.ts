@@ -55,6 +55,12 @@ async function blobListPrefix(prefix: string): Promise<Array<{ pathname: string;
   return all;
 }
 
+async function blobDelete(urls: string[]): Promise<void> {
+  if (urls.length === 0) return;
+  const { del } = await import('@vercel/blob');
+  await del(urls);
+}
+
 // ── Filesystem helpers ───────────────────────────────────────────────────────
 
 async function fsPut(filename: string, data: string): Promise<void> {
@@ -104,7 +110,10 @@ function sessionMtfMode(session: ScanSession): MtfMode {
  *
  * post_close 會覆蓋同日同方向同模式的結果（正式唯一）
  * intraday 帶時間戳，不會互相覆蓋
+ * 每次儲存 post_close 後自動清理，只保留最近 KEEP_SCAN_DAYS 個交易日
  */
+const KEEP_SCAN_DAYS = 20;
+
 export async function saveScanSession(session: ScanSession): Promise<void> {
   const data = JSON.stringify(session);
   const dir = session.direction ?? 'long';
@@ -132,6 +141,60 @@ export async function saveScanSession(session: ScanSession): Promise<void> {
     } else {
       await fsPut(localName, data);
     }
+
+    // 儲存完畢後非同步清理舊檔（不阻塞回傳）
+    pruneOldScanSessions(session.market, dir as ScanDirection, mtf, KEEP_SCAN_DAYS).catch(
+      err => console.warn('[scanStorage] prune failed (non-critical):', err)
+    );
+  }
+}
+
+/**
+ * 只保留最近 keepDays 個交易日的 post_close 掃描結果，刪除更舊的。
+ * intraday 快照不處理（跟著 post_close 日期一起自然消失）。
+ */
+async function pruneOldScanSessions(
+  market: MarketId,
+  direction: ScanDirection,
+  mtfMode: MtfMode,
+  keepDays: number,
+): Promise<void> {
+  const prefix = `scans/${market}/${direction}/${mtfMode}/`;
+
+  if (IS_VERCEL) {
+    const blobs = await blobListPrefix(prefix);
+    // 只取 post_close 檔（直接在 prefix 下，形如 YYYY-MM-DD.json）
+    const postCloseBlobs = blobs.filter(b => /\d{4}-\d{2}-\d{2}\.json$/.test(b.pathname));
+    // 依日期降序，保留前 keepDays 筆，刪除其餘
+    const sorted = postCloseBlobs.sort((a, b) => b.pathname.localeCompare(a.pathname));
+    const toDelete = sorted.slice(keepDays);
+    if (toDelete.length > 0) {
+      // Vercel Blob del 接受 URL 陣列，需先取得 URL
+      // blobListPrefix 回傳的是 pathname，需組合成完整 URL
+      // 實際上 del 也可接受 pathname 陣列（v0.6+）
+      const { del } = await import('@vercel/blob');
+      await del(toDelete.map(b => b.pathname));
+      console.log(`[scanStorage] pruned ${toDelete.length} old sessions for ${market}/${direction}/${mtfMode}`);
+    }
+  } else {
+    // Local dev：清理 data/ 目錄
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    const dir = path.join(process.cwd(), 'data');
+    const prefix_local = `scan-${market}-${direction}-${mtfMode}-`;
+    try {
+      const files = await fs.readdir(dir);
+      const postCloseFiles = files
+        .filter(f => f.startsWith(prefix_local) && /\d{4}-\d{2}-\d{2}\.json$/.test(f));
+      const sorted = postCloseFiles.sort((a, b) => b.localeCompare(a));
+      const toDelete = sorted.slice(keepDays);
+      for (const f of toDelete) {
+        await fs.unlink(path.join(dir, f)).catch(() => {});
+      }
+      if (toDelete.length > 0) {
+        console.log(`[scanStorage] pruned ${toDelete.length} old local sessions for ${market}/${direction}/${mtfMode}`);
+      }
+    } catch { /* dir may not exist in test env */ }
   }
 }
 

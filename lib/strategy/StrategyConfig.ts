@@ -52,6 +52,9 @@ export interface StrategyThresholds {
   mtfWeeklyStrict: boolean;       // 週線嚴格模式：不通過=拒絕（預設 true）
   mtfMonthlyStrict: boolean;      // 月線嚴格模式：不通過=拒絕（預設 false，只扣分）
   mtfMinScore: number;            // MTF 最低通過分數 0-4（預設 2）
+
+  // 短線輔助過濾（朱老師短線操作10條規則）
+  kdDecliningFilter: boolean;     // 短線第9條：KD向下不買（預設 true）
 }
 
 import type { RuleGroupId } from '@/lib/rules/ruleRegistry';
@@ -117,6 +120,9 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   mtfWeeklyStrict:  true,   // 週線不通過=拒絕
   mtfMonthlyStrict: false,  // 月線不通過=只扣分
   mtfMinScore:      3,      // 至少3/4分
+
+  // 短線輔助過濾（預設開啟，與書本一致）
+  kdDecliningFilter: true,
 };
 
 const ALL_CONDITIONS_ON: StrategyConditionToggles = {
@@ -448,6 +454,8 @@ export const THRESHOLD_BOUNDS: Record<keyof StrategyThresholds, { min: number; m
   mtfWeeklyStrict:      { min: 0, max: 1,    label: '週線嚴格模式' },
   mtfMonthlyStrict:     { min: 0, max: 1,    label: '月線嚴格模式' },
   mtfMinScore:          { min: 0, max: 4,    label: 'MTF 最低分數' },
+  // 短線輔助過濾
+  kdDecliningFilter:    { min: 0, max: 1,    label: 'KD向下不買開關' },
 };
 
 export interface ThresholdValidationError {
