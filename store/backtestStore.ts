@@ -202,7 +202,10 @@ export interface ScanPreset {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function today(): string {
-  return new Date().toISOString().split('T')[0];
+  // Use TW timezone (UTC+8) consistently so scanDate matches what the user sees on screen
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei',
+  }).format(new Date());
 }
 
 // ── Store ──────────────────────────────────────────────────────────────────────
@@ -314,7 +317,7 @@ export const useBacktestStore = create<BacktestState>()(
           set({ useMultiTimeframe: newMtf });
           const mtfParam = newMtf ? 'mtf' : 'daily';
           // Background fetch (non-blocking)
-          fetch(`/api/scanner/results?market=${market}&date=${scanDate}&direction=${scanDirection}&mtf=${mtfParam}`)
+          fetch(`/api/scanner/results?market=${market}&date=${scanDate}&direction=${effectiveDirection(scanDirection)}&mtf=${mtfParam}`)
             .then(r => r.json())
             .then((json: { sessions?: Array<{ results: StockScanResult[] }> }) => {
               const results = json.sessions?.[0]?.results ?? [];
@@ -453,51 +456,8 @@ export const useBacktestStore = create<BacktestState>()(
           return;
         }
 
-        set({ scanProgress: 10, scanningStock: `檢查本地資料覆蓋率...`, scanningCount: `0/${stocks.length}` });
-
-        // ── Phase 1.5: 掃描前覆蓋率檢查 + 補缺 ─────────────────────────────
-        interface CoverageReport {
-          coverageRate: number;
-          dataStatus: 'complete' | 'partial' | 'insufficient';
-          missingCount: number;
-          ingest?: { downloaded: number; failed: number };
-        }
-        let coverageReport: CoverageReport | null = null;
-        try {
-          const ingestRes = await fetch('/api/scanner/ingest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              market,
-              symbols: stocks.map(s => s.symbol),
-              asOfDate: scanDate,
-            }),
-            signal,
-          });
-          if (ingestRes.ok) {
-            const ingestJson = await ingestRes.json() as { data?: CoverageReport };
-            coverageReport = ingestJson.data ?? null;
-          }
-        } catch (e) {
-          if (e instanceof DOMException && e.name === 'AbortError') return;
-          // 覆蓋率檢查失敗不阻塞掃描，繼續進行
-        }
-        tIngest = globalThis.performance.now();
-
-        // 若覆蓋率嚴重不足（< 50%），提前警告
-        if (coverageReport && coverageReport.coverageRate < 50) {
-          set({
-            isScanning: false,
-            scanError: `本地資料覆蓋率僅 ${coverageReport.coverageRate}%（缺少 ${coverageReport.missingCount} 檔），請先執行盤後資料下載`,
-          });
-          return;
-        }
-
-        const coverageSuffix = coverageReport && coverageReport.coverageRate < 95
-          ? ` (覆蓋率 ${coverageReport.coverageRate}%)`
-          : '';
-
-        set({ scanProgress: 15, scanningStock: `準備分析 ${stocks.length} 檔股票${coverageSuffix}...`, scanningCount: `0/${stocks.length}` });
+        // Skip ingest pre-check — scan uses LocalCandleStore internally, no extra round-trip needed
+        set({ scanProgress: 15, scanningStock: `分析中（${stocks.length} 檔）...`, scanningCount: `0/${stocks.length}` });
 
         // ── Phase 2: Split into 2 chunks, scan ──────────────────────────────
         const half   = Math.ceil(stocks.length / 2);
@@ -512,6 +472,12 @@ export const useBacktestStore = create<BacktestState>()(
           : { thresholds: activeStrategy.thresholds };
 
         const { scanMode, scanDirection } = get();
+        // Determine if we're scanning today or a historical date
+        const todayStr = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Taipei',
+        }).format(new Date());
+        const isHistorical = scanDate < todayStr;
+
         const scanChunk = async (chunk: typeof stocks) => {
           const res = await fetch('/api/scanner/chunk', {
             method:  'POST',
@@ -519,9 +485,10 @@ export const useBacktestStore = create<BacktestState>()(
             body:    JSON.stringify({
               market,
               stocks: chunk,
-              date: scanDate,
+              // Only pass date for historical scans; today scans use todayStr internally
+              ...(isHistorical ? { date: scanDate } : {}),
               mode: scanMode,
-              direction: scanDirection,
+              direction: effectiveDirection(scanDirection),
               multiTimeframeFilter: useMultiTimeframe,
               ...strategyPayload,
             }),
@@ -568,18 +535,12 @@ export const useBacktestStore = create<BacktestState>()(
             diag2 = r2.diagnostics;
           }
           tChunk = globalThis.performance.now();
-          set({ scanProgress: 88, scanningCount: `${stocks.length}/${stocks.length}` });
+          set({ scanProgress: 88, scanningCount: `${stocks.length} 檔候選` });
         } catch (e) {
           if (e instanceof DOMException && e.name === 'AbortError') return;
         }
 
         const combinedDiag = mergeDiagnostics(diag1, diag2);
-
-        // 補充 ingest 統計到 diagnostics
-        if (coverageReport?.ingest) {
-          combinedDiag.ingestDownloaded = coverageReport.ingest.downloaded;
-          combinedDiag.ingestFailed = coverageReport.ingest.failed;
-        }
 
         if (results1.length === 0 && results2.length === 0) {
           // 多態區分：Server Error / Data Unavailable / Partial / No Signal / Anomaly
@@ -853,6 +814,8 @@ export const useBacktestStore = create<BacktestState>()(
         const direction = opts?.direction ?? scanDirection;
         const onlyScan = opts?.scanOnly ?? false;
         const mtfParam = useMultiTimeframe ? 'mtf' : 'daily';
+        // Normalize 'daban' → 'long' for API (API only accepts 'long'|'short')
+        const apiDirection = effectiveDirection(direction);
 
         // Check cache first
         const cacheKey = scanCacheKey(market, direction, useMultiTimeframe, date);
@@ -877,7 +840,7 @@ export const useBacktestStore = create<BacktestState>()(
 
         try {
           // Phase 1: Load scan results from server (with MTF dimension)
-          const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${direction}&mtf=${mtfParam}`);
+          const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${apiDirection}&mtf=${mtfParam}`);
           if (!res.ok) throw new Error('無法載入歷史掃描結果');
           const json = await res.json() as { sessions?: Array<{ results: StockScanResult[]; dataFreshness?: { avgStaleDays: number; maxStaleDays: number; staleCount: number; totalScanned: number; coverageRate: number; dataStatus: string } }> };
           const session0 = json.sessions?.[0];

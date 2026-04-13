@@ -14,7 +14,7 @@ import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
-import { saveLocalCandles, isLocalDataFresh } from '@/lib/datasource/LocalCandleStore';
+import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';
 
 export const runtime = 'nodejs';
@@ -58,9 +58,8 @@ export async function GET(req: NextRequest) {
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(async ({ symbol }) => {
-          // 增量檢查：已有最新數據就跳過
-          const fresh = await isLocalDataFresh(symbol, market, lastTradingDate);
-          if (fresh) return -1;
+          // 移除增量檢查：每次都重新下載，確保假期後恢復的第一天能更新到落後的本地檔
+          // （原本 isLocalDataFresh 在 cron 停擺期間會錯誤地跳過落後的檔案）
 
           const candles = await scanner.fetchCandles(symbol);
           if (candles.length > 0) {

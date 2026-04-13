@@ -202,7 +202,19 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           for (let i = allCandles.length - 1; i >= 0; i--) {
             if (allCandles[i].date <= targetDate) { closest = i; break; }
           }
-          index = closest !== -1 ? closest : calcStartIndex(allCandles);
+          // 找不到時：若候選的最後一根 K 棒比 targetDate 還新，代表資料其實包含，只是沒精確 match → 接受
+          // 但若最後一根 K 棒比 targetDate 還舊超過 30 天，代表資料嚴重落後，拒絕並拋錯
+          if (closest === -1) {
+            const lastDate = allCandles[allCandles.length - 1]?.date;
+            if (lastDate && lastDate < targetDate) {
+              const daysGap = (new Date(targetDate).getTime() - new Date(lastDate).getTime()) / 86400000;
+              if (daysGap > 30) {
+                throw new Error(`K線資料僅到 ${lastDate}，落後目標日期 ${Math.round(daysGap)} 天，無法顯示 ${targetDate} 的走圖`);
+              }
+            }
+            closest = 0;
+          }
+          index = closest;
         }
       } else {
         index = calcStartIndex(allCandles);

@@ -269,7 +269,7 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
   async function fetchMisBatch(codes: string[], exchange: 'tse' | 'otc'): Promise<void> {
     try {
       const exCh = codes.map(c => `${exchange}_${c}.tw`).join('|');
-      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
+      const url = `http://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
       const res = await fetch(url, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
         signal: AbortSignal.timeout(15000),

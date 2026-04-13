@@ -35,8 +35,9 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
     startPolling, stopPolling,
   } = useReplayStore();
 
-  const prevKeyRef = useRef<string | null>(null);
+  // 用兩個獨立的 ref 追蹤，避免 symbol 改變時被 scanDate 變化覆蓋
   const prevSymbolRef = useRef<string | null>(null);
+  const prevScanDateRef = useRef<string | null>(null);
 
   // 切換股票時重置為日K
   useEffect(() => {
@@ -50,47 +51,39 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
   // Load stock when selection or scanDate changes (always daily)
   useEffect(() => {
     if (!selectedStock) return;
-    const key = `${selectedStock.symbol}__${scanDate ?? ''}`;
-    if (prevKeyRef.current === key) return;
 
-    const prevSymbol = prevKeyRef.current?.split('__')[0];
-    prevKeyRef.current = key;
+    const prevSymbol = prevSymbolRef.current;
+    const prevScanDate = prevScanDateRef.current;
 
-    if (prevSymbol === selectedStock.symbol && scanDate && allCandles.length > 0) {
-      // Same stock, different scanDate — just reposition without reloading
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    // 只有符號和日期都沒變才跳過
+    if (prevSymbol === selectedStock.symbol && prevScanDate === scanDate) return;
+
+    prevSymbolRef.current = selectedStock.symbol;
+    prevScanDateRef.current = scanDate ?? null;
+
+    // 不同股票：完整重載
+    // 同一股票、不同 scanDate：重新 load（因為股價資料會不同）
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadError(null);
+    loadStock(selectedStock.symbol, '1d', '2y', scanDate).then(() => {
       setLoadError(null);
-      const dateIdx = allCandles.findIndex(c => c.date === scanDate);
-      if (dateIdx !== -1) {
-        jumpToIndex(dateIdx);
-      } else {
-        // Find closest candle on or before scanDate
-        for (let i = allCandles.length - 1; i >= 0; i--) {
-          if (allCandles[i].date <= scanDate) { jumpToIndex(i); break; }
-        }
+      // API 可能查不到中文名（回傳 ticker），用掃描結果的名字覆蓋
+      const current = useReplayStore.getState().currentStock;
+      if (current && selectedStock.name && (!current.name || /\.(TW|TWO|SS|SZ)$/i.test(current.name))) {
+        useReplayStore.setState({
+          currentStock: { ...current, name: selectedStock.name },
+        });
       }
-    } else {
-      // Different stock or first load — full reload with targetDate
-      loadStock(selectedStock.symbol, '1d', '2y', scanDate).then(() => {
-        setLoadError(null);
-        // API 可能查不到中文名（回傳 ticker），用掃描結果的名字覆蓋
-        const current = useReplayStore.getState().currentStock;
-        if (current && selectedStock.name && (!current.name || /\.(TW|TWO|SS|SZ)$/i.test(current.name))) {
-          useReplayStore.setState({
-            currentStock: { ...current, name: selectedStock.name },
-          });
-        }
-        // 盤中 polling：scanDate 為今天或未指定時才啟動
-        const today = new Date().toISOString().split('T')[0];
-        if (!scanDate || scanDate === today) {
-          startPolling();
-        }
-      }).catch((err: unknown) => {
-        setLoadError(err instanceof Error ? err.message : String(err));
-      });
-    }
+      // 盤中 polling：scanDate 為今天或未指定時才啟動
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+      if (!scanDate || scanDate === today) {
+        startPolling();
+      }
+    }).catch((err: unknown) => {
+      setLoadError(err instanceof Error ? err.message : String(err));
+    });
     return () => { stopPolling(); };
-  }, [selectedStock, scanDate, loadStock, jumpToIndex, allCandles, startPolling, stopPolling]);
+  }, [selectedStock, scanDate, loadStock, startPolling, stopPolling]);
 
   // 根據 interval 聚合 K 棒 + 定位訊號日
   const { displayCandles, anchorDate, signalDateLabel } = useScanTimeframe(

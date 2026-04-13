@@ -38,7 +38,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
     sessionDataFreshness: _sessionDataFreshness,
   } = useBacktestStore();
 
-  const [maxDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [maxDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()));
 
   // 載入歷史日期
   useEffect(() => {
@@ -283,7 +283,7 @@ export default function ScanPageContent({ defaultMode: _defaultMode = 'full' }: 
   }, [market, scanDirection, useMultiTimeframe, fetchCronDates]);
 
   // 用 state 避免 SSR hydration mismatch
-  const [maxDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [maxDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()));
 
   // 自動載入最新掃描結果（進頁時）
   const autoLoadedRef = useRef(false);

@@ -58,7 +58,7 @@ export async function ensureCoverage(
   asOfDate: string | undefined,
   options: IngestOptions,
 ): Promise<CoverageReport> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
   const targetDate = asOfDate ?? today;
   // 歷史掃描容忍度更高（5天），今日掃描 3 天
   const tolerance = (asOfDate && asOfDate < today) ? 5 : 3;

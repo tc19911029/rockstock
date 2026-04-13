@@ -206,7 +206,7 @@ export class EastMoneyHistProvider implements DataProvider {
     if (!cnCode && !usTicker) return [];
 
     const klt = intervalToKlt(interval);
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
     const isHistorical = asOfDate && asOfDate < today;
     const ttl = isHistorical ? HISTORICAL_TTL : RECENT_TTL;
 

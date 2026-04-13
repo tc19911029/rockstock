@@ -201,9 +201,27 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
   } else {
     const { getEastMoneyRealtime } = await import('./EastMoneyRealtime');
     const emMap = await getEastMoneyRealtime();
+
+    // 嘗試讀取 MA Base 以補足 prevClose / changePercent
+    let maBaseMap: Record<string, { closes: number[] }> = {};
+    try {
+      const maBase = await readMABase(market, today);
+      if (maBase) {
+        for (const [sym, entry] of Object.entries(maBase.data)) {
+          if (entry.closes.length > 0) {
+            maBaseMap[sym] = { closes: entry.closes };
+          }
+        }
+      }
+    } catch { /* ignore - MA base 尚不存在 */ }
+
     quotes = [];
     for (const [, q] of emMap) {
-      // EastMoney 不直接提供 prevClose，用 open 近似或跳過
+      const ma = maBaseMap[q.code];
+      const prevClose = ma?.closes[ma.closes.length - 1] ?? q.close; // 沒有MA base就用close本身（等於不算漲跌）
+      const changePercent = prevClose > 0
+        ? Math.round(((q.close - prevClose) / prevClose) * 10000) / 100
+        : 0;
       quotes.push({
         symbol: q.code,
         name: q.name,
@@ -212,8 +230,8 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
         low: q.low,
         close: q.close,
         volume: q.volume,
-        prevClose: 0, // 由 MA base 檔案補充
-        changePercent: 0,
+        prevClose,
+        changePercent,
       });
     }
   }

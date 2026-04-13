@@ -85,5 +85,5 @@ export function getLastTradingDay(market: 'TW' | 'CN'): string {
     }
   }
 
-  return d.toISOString().split('T')[0];
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
 }

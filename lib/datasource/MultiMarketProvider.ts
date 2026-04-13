@@ -347,7 +347,7 @@ export class MultiMarketProvider implements DataProvider {
     asOfDate?: string,
     interval?: string,
   ): Promise<CandleWithIndicators[]> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
     const isHistorical = !!asOfDate && asOfDate < today;
 
     // 提前啟動即時報價（與歷史 K 線並行）

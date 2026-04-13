@@ -220,7 +220,7 @@ export class TaiwanScanner extends MarketScanner {
       let candles: CandleWithIndicators[] = [];
       try {
         const { loadLocalCandlesWithTolerance } = await import('@/lib/datasource/LocalCandleStore');
-        const targetDate = asOfDate || new Date().toISOString().split('T')[0];
+        const targetDate = asOfDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
         const local = await loadLocalCandlesWithTolerance('0050.TW', 'TW', targetDate, 5);
         if (local && local.candles.length >= 20) {
           candles = local.candles;

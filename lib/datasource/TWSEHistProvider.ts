@@ -208,7 +208,7 @@ export class TWSEHistProvider implements DataProvider {
     const otc = isOTC(symbol);
     const months = periodToMonths(period);
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
     const isHistorical = asOfDate && asOfDate < today;
     const ttl = isHistorical ? HISTORICAL_TTL : RECENT_TTL;
 

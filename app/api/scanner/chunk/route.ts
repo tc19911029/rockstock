@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 判斷是否為「今日掃描」：沒傳日期 或 傳的日期 >= 今天
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
     const isToday = !asOfDate || asOfDate >= todayStr;
 
     // 市場開盤檢查
@@ -87,6 +87,40 @@ export async function POST(req: NextRequest) {
       const lastDay = getLastTradingDay(market);
       effectiveDate = lastDay;
       dataDate = lastDay;
+    }
+
+    // 盤中粗篩：直接用 IntradayCache 快照過濾候選股，不走昂貴的 scanSOP
+    // 若快照存在且夠新（< 5 分鐘），用快照粗篩 → 立即回傳 → 前端再做精篩
+    // 備註：cron 每 2 分鐘寫入，5 分鐘 threshold 確保快取有效同時容忍輕微延遲
+    if (marketOpen) {
+      const { readIntradaySnapshot, isSnapshotFresh } = await import('@/lib/datasource/IntradayCache');
+      const snapshot = await readIntradaySnapshot(market, todayStr);
+      if (snapshot && isSnapshotFresh(snapshot, 300_000)) {
+        // 核心條件粗篩（只用快照即時欄位）：
+        // 1. 缺口：開盤偏離昨收 ≥ 2%（朱家泓核心條件之一）
+        // 2. 幅度：漲幅絕對值 ≥ 5%（動能強）
+        // 3. 有效報價：收盤 > 0 且成交量 > 0
+        // 注意：此粗篩不回傳完整候選物件，只回傳 symbol/name 前端再做精篩
+        const coarse = snapshot.quotes
+          .filter(q => {
+            if (q.close <= 0 || q.volume <= 0 || q.prevClose <= 0) return false;
+            const gapPct = Math.abs(q.open - q.prevClose) / q.prevClose * 100;
+            const isGap = gapPct >= 2; // 缺口 ≥ 2%
+            const isSurge = Math.abs(q.changePercent) >= 5; // 動能強
+            return isGap && isSurge;
+          })
+          .slice(0, 200)
+          .map(q => ({ symbol: q.symbol, name: q.name }));
+        if (coarse.length > 0) {
+          return apiOk({
+            results: coarse,
+            marketTrend: null,
+            mode: 'coarse',
+            diagnostics: { totalStocks: snapshot.count, processedCount: coarse.length, filteredOut: snapshot.count - coarse.length, dataMissing: 0, coverageRate: 100, dataStatus: 'complete', tooFewCandles: 0 },
+            dataDate: todayStr,
+          });
+        }
+      }
     }
 
     // 盤中掃描：預取全市場即時報價

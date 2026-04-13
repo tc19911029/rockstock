@@ -167,7 +167,7 @@ export class FinMindHistProvider implements DataProvider {
   ): Promise<CandleWithIndicators[]> {
     const code = extractCode(symbol);
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
     const isHistorical = asOfDate && asOfDate < today;
     const ttl = isHistorical ? HISTORICAL_TTL : RECENT_TTL;
 

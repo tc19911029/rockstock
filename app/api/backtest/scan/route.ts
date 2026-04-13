@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     return apiOk({ results: [] });
   }
 
-  if (date > new Date().toISOString().split('T')[0]) {
+  if (date > new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())) {
     return apiError('不能選未來日期', 400);
   }
 

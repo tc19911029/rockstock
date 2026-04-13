@@ -151,7 +151,7 @@ export const useScannerStore = create<ScannerStore>()(
 
         try {
           // ── Step 0: Try loading pre-computed cron results ─────────────────
-          const targetDate = scanDate || new Date().toISOString().split('T')[0];
+          const targetDate = scanDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
           try {
             const savedRes = await fetch(
               `/api/scanner/results?market=${market}&direction=long&date=${targetDate}`,
@@ -530,11 +530,7 @@ export const useScannerStore = create<ScannerStore>()(
         // （盤前舊 bug 會用「今天」當 date，但市場還沒開盤，實際數據是上一個交易日的）
         // 保守邏輯：只跳過週末，工作日一律視為有效（避免因時區/時間差誤刪紀錄）
         const getClientLastTradingDay = (): string => {
-          const now = new Date();
-          const dow = now.getDay(); // 0=Sun, 6=Sat
-          if (dow === 0) { now.setDate(now.getDate() - 2); }
-          else if (dow === 6) { now.setDate(now.getDate() - 1); }
-          return now.toISOString().split('T')[0];
+          return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
         };
         const lastTradeDay = getClientLastTradingDay();
         const cleanHistory = (sessions: ScanSession[]) =>

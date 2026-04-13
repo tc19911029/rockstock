@@ -31,8 +31,8 @@ export function getMonthKey(dateStr: string): string {
   return dateStr.substring(0, 7); // "2026-04"
 }
 
-/** 將一組同週期的日K聚合為單根K棒 */
-function mergeGroup(candles: Candle[]): Candle {
+/** 將一組同週期的日K聚合為單根K棒（date 用 keyFn 的回傳值，確保與 findAnchorIndex 比對一致） */
+function mergeGroup(key: string, candles: Candle[], interval: string): Candle {
   const first = candles[0];
   const last = candles[candles.length - 1];
   let high = -Infinity;
@@ -45,8 +45,10 @@ function mergeGroup(candles: Candle[]): Candle {
     volume += c.volume;
   }
 
+  // 月K時 key 為 "YYYY-MM"，需轉為 "YYYY-MM-01" 才能被 lightweight-charts 識別為有效日期
+  const dateKey = interval === '1mo' ? `${key}-01` : key;
   return {
-    date: first.date, // 用該週期第一個交易日的日期
+    date: dateKey,
     open: first.open,
     high: +high.toFixed(2),
     low: +low.toFixed(2),
@@ -82,8 +84,8 @@ export function aggregateCandles(dailyCandles: Candle[], interval?: string): Can
 
   // 聚合每組
   const result: Candle[] = [];
-  for (const group of groups.values()) {
-    result.push(mergeGroup(group));
+  for (const [key, group] of groups) {
+    result.push(mergeGroup(key, group, interval));
   }
 
   return result;

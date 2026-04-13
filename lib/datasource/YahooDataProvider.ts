@@ -233,7 +233,7 @@ export class YahooDataProvider implements DataProvider {
     timeoutMs = 20000,
   ): Promise<CandleWithIndicators[]> {
     // 判斷是否為歷史資料（可以用更長的快取）
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
     const isHistorical = asOfDate && asOfDate < today;
     const ttl = isHistorical ? HISTORICAL_TTL : RECENT_TTL;
 

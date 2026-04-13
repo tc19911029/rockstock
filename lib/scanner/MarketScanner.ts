@@ -106,7 +106,7 @@ export abstract class MarketScanner {
       } catch { /* 無 .env.local 或讀取失敗 */ }
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
     const targetDate = asOfDate ?? today;
     const market = this.getMarketConfig().marketId as 'TW' | 'CN';
 
@@ -166,7 +166,7 @@ export abstract class MarketScanner {
     asOfDate?: string,
     diag?: ScanDiagnostics,
   ): Promise<CandleFetchResult> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
     const isHistorical = !!asOfDate && asOfDate < today;
     const market = this.getMarketConfig().marketId as 'TW' | 'CN';
 
@@ -323,7 +323,7 @@ export abstract class MarketScanner {
       // 避免凍結價格：今日掃描若 K 線未更新到掃描日，略過此股
       // （ensureFreshCandles 下載失敗時的防護，不顯示過時價格）
       if (asOfDate && fetchResult.staleDays > 0 && fetchResult.lastCandleDate !== asOfDate) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
         if (asOfDate === today) {
           if (diag) diag.filteredOut++;
           return null;

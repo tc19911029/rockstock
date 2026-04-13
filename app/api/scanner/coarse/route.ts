@@ -53,11 +53,18 @@ export async function POST(req: NextRequest) {
     // ── 讀取或刷新盤中快照 ──
     let snapshot = await readIntradaySnapshot(market, targetDate);
 
+    let snapshotFresh = true;
     if (!isSnapshotFresh(snapshot, maxSnapshotAgeSec * 1000)) {
-      // 快照太舊或不存在，重新抓取
+      // 快照太舊或不存在，嘗試刷新
       // 只在盤中才刷新（盤後用已存的快照）
       if (marketOpen) {
-        snapshot = await refreshIntradaySnapshot(market);
+        try {
+          snapshot = await refreshIntradaySnapshot(market);
+        } catch {
+          // 刷新失敗：用舊的 snapshot（帶 staleness warning）
+          // 不要因為 snapshot 不夠新就阻擋整個掃描
+          snapshotFresh = false;
+        }
       } else if (!snapshot) {
         // 盤後且無快照：嘗試用收盤資料生成
         // 先嘗試讀取，如果沒有就直接回傳空
@@ -98,6 +105,7 @@ export async function POST(req: NextRequest) {
       maBaseAvailable: !!maBase,
       snapshotDate: snapshot.date,
       snapshotUpdatedAt: snapshot.updatedAt,
+      snapshotFresh,
     });
   } catch (err) {
     console.error('[scanner/coarse] error:', err);

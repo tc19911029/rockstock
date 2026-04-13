@@ -4,8 +4,11 @@ import { getTWChineseName, getCNChineseName } from '@/lib/datasource/TWSENames';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import { getFugleIntradayCandles, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
+import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { getTWSERealtimeIntraday, getTWSEQuote } from '@/lib/datasource/TWSERealtime';
+import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 
 /**
  * API Route: /api/stock?symbol=2330&interval=1d&period=2y
@@ -66,19 +69,64 @@ export async function GET(req: NextRequest) {
 
   const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
 
-  // ── 本地檔案快速路徑（日K混合模式：先讀本地秒開） ──
+  // ── 本地檔案快速路徑（先讀本地秒開 → 即時覆蓋今日 K） ──
+  // 支援日K(1d)直接使用，以及週K(1wk)/月K(1mo)本地聚合
   if (localParam === '1' && !isMinuteInterval && (isTW || isCN)) {
     try {
       const market = isTW ? 'TW' as const : 'CN' as const;
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
       // 容忍 5 個交易日差距（涵蓋週末 + 假日）
       const result = await loadLocalCandlesWithTolerance(candidates[0], market, today, 5);
       if (result && result.candles.length > 0) {
-        // local=1 路徑不做即時覆蓋 — 保持秒開
-        // 今日 K 棒由後續 Step 2（non-local API → MultiMarketProvider 內建 overlay）提供
-        const withIndicators = computeIndicators(
+        // ── 盤中即時覆蓋：若 lastDate < today，主動拉即時報價湊今日 K 棒 ──
+        const lastCandle = result.candles[result.candles.length - 1];
+        if (lastCandle && lastCandle.date < today) {
+          try {
+            if (isTW) {
+              const twCode = pureCode;
+              const realtimeMap = await getTWSERealtimeIntraday();
+              const quote = (realtimeMap.get(twCode) as { open: number; high: number; low: number; close: number; volume: number; date?: string } | undefined) ?? await getTWSEQuote(twCode);
+              if (quote && quote.close > 0) {
+                if (!quote.date || quote.date === today) {
+                  result.candles.push({
+                    date: today,
+                    open: quote.open,
+                    high: quote.high,
+                    low: quote.low,
+                    close: quote.close,
+                    volume: quote.volume,
+                  });
+                }
+              }
+            } else if (isCN) {
+              const quote = await getEastMoneyQuote(pureCode);
+              if (quote && quote.close > 0) {
+                result.candles.push({
+                  date: today,
+                  open: quote.open,
+                  high: quote.high,
+                  low: quote.low,
+                  close: quote.close,
+                  volume: quote.volume,
+                });
+              }
+            }
+          } catch {
+            // 即時報價失敗不影響主流程
+          }
+        }
+
+        let withIndicators = computeIndicators(
           result.candles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }))
         );
+
+        // 週K/月K：本地日K聚合（省去 API 請求）
+        if (interval === '1wk' || interval === '1mo') {
+          const rawDaily = result.candles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }));
+          const aggregated = aggregateCandles(rawDaily, interval);
+          withIndicators = computeIndicators(aggregated);
+        }
+
         let name = candidates[0];
         if (isTW) {
           const twName = await getTWChineseName(pureCode).catch(() => null);

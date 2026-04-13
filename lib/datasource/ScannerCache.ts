@@ -25,7 +25,7 @@ function makeKey(symbol: string, asOfDate: string): string {
 }
 
 function getTodayStr(): string {
-  return new Date().toISOString().split('T')[0];
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 }
 
 /**
