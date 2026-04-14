@@ -62,20 +62,34 @@ export async function POST(req: NextRequest) {
     const { isMarketOpen, getLastTradingDay } = await import('@/lib/datasource/marketHours');
     const marketOpen = isToday && isMarketOpen(market);
 
+    // 檢查今日 L2 快照是否有效（盤中或盤後均可使用）
+    let todayL2Snapshot: Awaited<ReturnType<typeof import('@/lib/datasource/IntradayCache')['readIntradaySnapshot']>> | null = null;
+    if (isToday && !marketOpen) {
+      const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+      const snap = await readIntradaySnapshot(market, todayStr);
+      console.log(`[scanner/chunk] 盤後 L2 快照查詢: market=${market}, date=${todayStr}, found=${!!snap}, quotes=${snap?.quotes?.length ?? 0}, updatedAt=${snap?.updatedAt ?? 'N/A'}`);
+      if (snap && snap.quotes.length > 0) {
+        todayL2Snapshot = snap;
+      }
+    }
+    const hasL2Today = !!todayL2Snapshot;
+    console.log(`[scanner/chunk] 路徑判斷: isToday=${isToday}, marketOpen=${marketOpen}, hasL2Today=${hasL2Today}, asOfDate=${asOfDate ?? 'undefined'}`);
+
     // effectiveDate 決定掃描目標日期：
     //   盤中 → undefined（今日路徑，合併即時報價）
-    //   盤前/盤後 → 最後交易日（歷史路徑，避免假的今日 K 棒）
+    //   盤後有 L2 快照 → undefined（今日路徑，從 L2 快照注入收盤報價）
+    //   盤前/深夜且無今日 L2 → 最後交易日（歷史路徑，避免假的今日 K 棒）
     //   指定歷史日期 → 用該日期
     let effectiveDate: string | undefined;
     let dataDate: string; // 回傳給前端的實際資料日期
     if (!isToday) {
       effectiveDate = asOfDate;
       dataDate = asOfDate!;
-    } else if (marketOpen) {
-      effectiveDate = undefined; // 今日路徑
+    } else if (marketOpen || hasL2Today) {
+      effectiveDate = undefined; // 今日路徑（盤中或盤後有 L2 快照）
       dataDate = todayStr;
     } else {
-      // 盤前/盤後：降級為最後交易日的歷史掃描
+      // 盤前/深夜且無今日 L2：降級為最後交易日的歷史掃描
       const lastDay = getLastTradingDay(market);
       effectiveDate = lastDay;
       dataDate = lastDay;
@@ -126,28 +140,45 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 盤中掃描：預取全市場即時報價
-    if (marketOpen) {
+    // 盤中/盤後掃描：預取全市場即時報價
+    if (marketOpen || hasL2Today) {
       try {
         let quotes: Map<string, RealtimeQuoteForScan>;
-        if (market === 'TW') {
-          // 使用 mis.twse.com.tw 即時報價（非 STOCK_DAY_ALL 收盤統計）
-          const { getTWSERealtimeIntraday } = await import('@/lib/datasource/TWSERealtime');
-          const twseMap = await getTWSERealtimeIntraday();
-          quotes = new Map();
-          for (const [code, q] of twseMap) {
-            quotes.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume, date: q.date });
+        if (marketOpen) {
+          // 盤中：直接呼叫即時 API
+          if (market === 'TW') {
+            const { getTWSERealtimeIntraday } = await import('@/lib/datasource/TWSERealtime');
+            const twseMap = await getTWSERealtimeIntraday();
+            quotes = new Map();
+            for (const [code, q] of twseMap) {
+              quotes.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume, date: q.date });
+            }
+          } else {
+            const { getEastMoneyRealtime } = await import('@/lib/datasource/EastMoneyRealtime');
+            const emMap = await getEastMoneyRealtime();
+            quotes = new Map();
+            for (const [code, q] of emMap) {
+              quotes.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+            }
           }
         } else {
-          const { getEastMoneyRealtime } = await import('@/lib/datasource/EastMoneyRealtime');
-          const emMap = await getEastMoneyRealtime();
+          // 盤後：從已讀取的 L2 快照注入收盤報價
           quotes = new Map();
-          for (const [code, q] of emMap) {
-            quotes.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+          if (todayL2Snapshot) {
+            for (const q of todayL2Snapshot.quotes) {
+              const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+              if (q.close > 0) {
+                quotes.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume, date: todayL2Snapshot.date });
+              }
+            }
+            console.log(`[scanner/chunk] 盤後掃描：從 L2 快照注入 ${quotes.size} 支報價 (${todayL2Snapshot.updatedAt})`);
           }
         }
         if (quotes.size > 0) {
           scanner.setRealtimeQuotes(quotes);
+          console.log(`[scanner/chunk] setRealtimeQuotes: ${quotes.size} stocks, first3=${[...quotes.keys()].slice(0, 3).join(',')}`);
+        } else {
+          console.warn('[scanner/chunk] quotes.size=0, setRealtimeQuotes NOT called');
         }
       } catch (err) {
         console.warn('[scanner/chunk] 即時報價預取失敗，使用本地數據:', err);

@@ -144,78 +144,119 @@ interface EastMoneyItem {
   f18: number;  // 昨收
 }
 
-// A 股市場代碼
-const CN_FS = 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23';
+// A 股市場代碼（只含主板，排除創業板 m:1+t:23 和科創板 m:0+t:80）
+const CN_FS = 'm:0+t:6,m:1+t:2';
 // 美股市場代碼（NASDAQ + NYSE + AMEX）
 const US_FS = 'm:105,m:106,m:107';
 
+/**
+ * 解析 API 回傳的單筆報價為 EastMoneyQuote
+ */
+function parseItem(item: EastMoneyItem, market: 'cn' | 'us'): EastMoneyQuote | null {
+  const code = item.f12;
+  if (!code || code === '-') return null;
+
+  const close = item.f2;
+  if (!close || close <= 0 || close === '-' as unknown as number) return null;
+
+  if (market === 'cn') {
+    if (!/^\d{6}$/.test(code)) return null;
+    // 只保留主板：600/601/603/605(滬主板), 000/001/002/003(深主板)
+    // 排除：創業板(300/301), 科創板(688), B股(200/900), 三板(4xx), 北交所(8xx)
+    if (!/^(00[0-3]|60[0135])\d{3}$/.test(code)) return null;
+
+    return {
+      code,
+      name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
+      open:   (item.f17 != null && item.f17 > 0) ? item.f17 : close,
+      high:   (item.f15 != null && item.f15 > 0) ? item.f15 : close,
+      low:    (item.f16 != null && item.f16 > 0) ? item.f16 : close,
+      close,
+      volume: (item.f5 ?? 0) * 100, // 手 → 股
+      prevClose: (item.f18 != null && item.f18 > 0) ? item.f18 : undefined,
+    };
+  }
+
+  // 美股
+  return {
+    code: code.toUpperCase(),
+    name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
+    open:   (item.f17 != null && item.f17 > 0) ? item.f17 : close,
+    high:   (item.f15 != null && item.f15 > 0) ? item.f15 : close,
+    low:    (item.f16 != null && item.f16 > 0) ? item.f16 : close,
+    close,
+    volume: item.f5 ?? 0,
+  };
+}
+
+/**
+ * 抓取單頁報價
+ */
+async function fetchPage(
+  fs: string,
+  page: number,
+  pageSize: number,
+): Promise<EastMoneyItem[]> {
+  const url = 'https://push2.eastmoney.com/api/qt/clist/get?' +
+    `pn=${page}&pz=${pageSize}&po=1&np=1&fltt=2&invt=2&fid=f6` +
+    `&fs=${fs}` +
+    '&fields=f2,f5,f12,f14,f15,f16,f17,f18';
+
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://quote.eastmoney.com/' },
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!res.ok) return [];
+  const json = await res.json();
+  return json?.data?.diff ?? [];
+}
+
 async function fetchMarketQuotes(market: 'cn' | 'us'): Promise<Map<string, EastMoneyQuote>> {
   const map = new Map<string, EastMoneyQuote>();
-  const pageSize = 5000;
-  const maxPages = market === 'us' ? 5 : 3; // 美股約 8000+ 檔，需更多頁
+  // 海外 IP（台灣/Vercel 美國）每頁上限 100 筆
+  const pageSize = 100;
   const fs = market === 'cn' ? CN_FS : US_FS;
 
-  for (let page = 1; page <= maxPages; page++) {
-    try {
-      const url = 'https://push2.eastmoney.com/api/qt/clist/get?' +
-        `pn=${page}&pz=${pageSize}&po=1&np=1&fltt=2&invt=2&fid=f6` +
-        `&fs=${fs}` +
-        '&fields=f2,f5,f12,f14,f15,f16,f17,f18';
+  // Phase 1: 第一頁取 total 計算所需頁數
+  const firstPageItems = await fetchPage(fs, 1, pageSize);
+  if (firstPageItems.length === 0) return map;
 
-      const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://quote.eastmoney.com/' },
-        signal: AbortSignal.timeout(15000),
-      });
+  for (const item of firstPageItems) {
+    const q = parseItem(item, market);
+    if (q) map.set(q.code, q);
+  }
 
-      if (!res.ok) break;
-      const json = await res.json();
-      const items: EastMoneyItem[] = json?.data?.diff ?? [];
+  // 第一頁不足 pageSize → 全部資料已拿完
+  if (firstPageItems.length < pageSize) return map;
 
-      if (items.length === 0) break;
+  // Phase 2: 並行抓取剩餘頁（10 頁一批避免被限流）
+  const BATCH_SIZE = 10;
+  const maxTotalPages = market === 'us' ? 100 : 60;
+
+  for (let batchStart = 2; batchStart <= maxTotalPages; batchStart += BATCH_SIZE) {
+    const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, maxTotalPages);
+    const pages = Array.from({ length: batchEnd - batchStart + 1 }, (_, i) => batchStart + i);
+
+    const results = await Promise.allSettled(
+      pages.map(p => fetchPage(fs, p, pageSize))
+    );
+
+    let gotEmptyPage = false;
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const items = result.value;
+      if (items.length === 0) { gotEmptyPage = true; continue; }
 
       for (const item of items) {
-        const code = item.f12;
-        if (!code || code === '-') continue;
-
-        const close = item.f2;
-        if (!close || close <= 0 || close === '-' as unknown as number) continue;
-
-        if (market === 'cn') {
-          // A 股：只保留合法的 A 股代碼前綴，排除 B 股和其他
-          if (!/^\d{6}$/.test(code)) continue;
-          // 合法 A 股前綴：600/601/603/605(滬主板), 688(科創板),
-          //   000/001/002/003(深主板), 300/301(創業板)
-          // 排除：200xxx(深B), 900xxx(滬B), 4xxxxx(三板), 8xxxxx(北交所)
-          if (!/^(00[0-3]|30[01]|60[0135]|688)\d{3}$/.test(code)) continue;
-
-          map.set(code, {
-            code,
-            name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
-            open:   (item.f17 != null && item.f17 > 0) ? item.f17 : close,
-            high:   (item.f15 != null && item.f15 > 0) ? item.f15 : close,
-            low:    (item.f16 != null && item.f16 > 0) ? item.f16 : close,
-            close,
-            volume: (item.f5 ?? 0) * 100, // 手 → 股
-            prevClose: (item.f18 != null && item.f18 > 0) ? item.f18 : undefined,
-          });
-        } else {
-          // 美股：ticker 為英文字母，東方財富美股成交量單位是股（不是手）
-          map.set(code.toUpperCase(), {
-            code: code.toUpperCase(),
-            name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
-            open:   (item.f17 != null && item.f17 > 0) ? item.f17 : close,
-            high:   (item.f15 != null && item.f15 > 0) ? item.f15 : close,
-            low:    (item.f16 != null && item.f16 > 0) ? item.f16 : close,
-            close,
-            volume: item.f5 ?? 0, // 美股直接是股
-          });
-        }
+        const q = parseItem(item, market);
+        if (q) map.set(q.code, q);
       }
 
-      if (items.length < pageSize) break;
-    } catch {
-      break;
+      if (items.length < pageSize) gotEmptyPage = true;
     }
+
+    if (gotEmptyPage) break;
   }
 
   return map;

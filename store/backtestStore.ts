@@ -169,7 +169,7 @@ interface BacktestState {
   loadSession:            (id: string)  => void;
   clearCurrent:           () => void;
   fetchCronDates:         (market: MarketId, direction?: 'long' | 'short') => Promise<void>;
-  loadCronSession:        (market: MarketId, date: string, opts?: { scanOnly?: boolean; direction?: 'long' | 'short' }) => Promise<void>;
+  loadCronSession:        (market: MarketId, date: string, opts?: { scanOnly?: boolean; direction?: 'long' | 'short'; forceRefresh?: boolean }) => Promise<void>;
   autoLoadLatest:         () => Promise<void>;
   backfillHistory:        (market: MarketId, days?: number) => Promise<void>;
 
@@ -444,6 +444,19 @@ export const useBacktestStore = create<BacktestState>()(
 
         const { market, scanDate, strategy, useCapitalMode, useMultiTimeframe, capitalConstraints, scanOnly } = get();
 
+        // ── 歷史日期禁止 LIVE 掃描 ─────────────────────────────────────────
+        // 收盤後的 L4 結果是定數，不該被前端按鈕覆蓋
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+        const isHistorical = scanDate < todayStr;
+        if (isHistorical) {
+          const dir = get().scanDirection;
+          return get().loadCronSession(market, scanDate, {
+            scanOnly: true,
+            direction: dir === 'long' || dir === 'short' ? dir : 'long',
+            forceRefresh: true,
+          });
+        }
+
         // ── Timing ──────────────────────────────────────────────────────────
         const t0 = globalThis.performance.now();
         let tList = t0, tIngest = t0, tChunk = t0;
@@ -513,11 +526,7 @@ export const useBacktestStore = create<BacktestState>()(
           : { thresholds: activeStrategy.thresholds };
 
         const { scanMode, scanDirection } = get();
-        // Determine if we're scanning today or a historical date
-        const todayStr = new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'Asia/Taipei',
-        }).format(new Date());
-        const isHistorical = scanDate < todayStr;
+        // 注意：歷史日期已在上方 return（走 loadCronSession），這裡只處理今日掃描
 
         const scanChunk = async (chunk: typeof stocks) => {
           const res = await fetch('/api/scanner/chunk', {
@@ -526,11 +535,10 @@ export const useBacktestStore = create<BacktestState>()(
             body:    JSON.stringify({
               market,
               stocks: chunk,
-              // Only pass date for historical scans; today scans use todayStr internally
-              ...(isHistorical ? { date: scanDate } : {}),
+              // 歷史日期已在上方走 loadCronSession，這裡只有今日掃描
               mode: scanMode,
               direction: effectiveDirection(scanDirection),
-              multiTimeframeFilter: useMultiTimeframe,
+              multiTimeframeFilter: false,  // MTF 統一在前端過濾，後端永遠返回完整結果
               ...strategyPayload,
             }),
             signal,
@@ -620,6 +628,16 @@ export const useBacktestStore = create<BacktestState>()(
         const tScanDone = globalThis.performance.now();
         set({ scanResults: combined, isScanning: false, scanProgress: 100, scanningStock: '', scanningCount: `${combined.length} 檔符合`, marketTrend });
 
+        // MTF ON → 前端過濾（後端已永遠返回完整結果）
+        if (useMultiTimeframe && combined.length > 0) {
+          const cacheKey = `_unfilteredResults:${scanDate}`;
+          get().scanCache.set(cacheKey, { scanResults: combined, performance: [], marketTrend });
+          const filtered = combined.filter(r =>
+            r.mtfWeeklyPass !== false && r.mtfMonthlyPass !== false,
+          );
+          set({ scanResults: filtered, scanningCount: `${filtered.length} 檔符合（MTF）` });
+        }
+
         if (combined.length === 0) return;
 
         // ── 台股：異步補充籌碼面資料 ──────────────────────────────────────
@@ -678,15 +696,26 @@ export const useBacktestStore = create<BacktestState>()(
               },
             });
 
-            // 背景存檔：將畫面上的掃描結果直接寫入 storage，永遠覆蓋同日結果
-            const { scanDirection: dir, scanResults: currentResults } = get();
+            // 背景存檔：永遠存完整結果（非 MTF 過濾版），確保 L4 數據完整
+            const { scanDirection: dir } = get();
+            // 如果有 unfiltered cache（MTF ON 時），用完整版存檔
+            const unfilteredCache = get().scanCache.get(`_unfilteredResults:${scanDate}`);
+            const saveResults = unfilteredCache?.scanResults ?? get().scanResults;
+            // 資料品質守門：若全部結果都落後（L2 注入失敗），不覆蓋 L4 好數據
+            const avgStaleDays = saveResults.length > 0
+              ? saveResults.reduce((s, r) => s + ((r as { dataFreshness?: { daysStale?: number } }).dataFreshness?.daysStale ?? 0), 0) / saveResults.length
+              : 0;
+            if (avgStaleDays >= 1) {
+              console.warn(`[runScan] 掃描結果落後 ${avgStaleDays.toFixed(1)} 天，不存入 L4 以保護已有的好數據`);
+              return;
+            }
             fetch('/api/scanner/save-session', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 market, date: scanDate, direction: effectiveDirection(dir),
-                multiTimeframeEnabled: useMultiTimeframe,
-                results: currentResults,
+                multiTimeframeEnabled: false,  // 永遠存完整版
+                results: saveResults,
                 scanTime: new Date().toISOString(),
               }),
             }).then(() => {
@@ -830,7 +859,7 @@ export const useBacktestStore = create<BacktestState>()(
       fetchCronDates: async (market, direction) => {
         const dir = direction ?? get().scanDirection;
         const { useMultiTimeframe } = get();
-        const mtfParam = useMultiTimeframe ? 'mtf' : 'daily';
+        const mtfParam = 'daily';  // 永遠載入完整結果，MTF 在前端過濾
         set({ isFetchingCron: true });
         try {
           const res = await fetch(`/api/scanner/results?market=${market}&direction=${dir}&mtf=${mtfParam}`);
@@ -854,14 +883,14 @@ export const useBacktestStore = create<BacktestState>()(
         const { strategy, useCapitalMode, capitalConstraints, scanDirection, useMultiTimeframe, scanCache } = get();
         const direction = opts?.direction ?? scanDirection;
         const onlyScan = opts?.scanOnly ?? false;
-        const mtfParam = useMultiTimeframe ? 'mtf' : 'daily';
+        const mtfParam = 'daily';  // 永遠載入完整結果，MTF 在前端過濾
         // Normalize 'daban' → 'long' for API (API only accepts 'long'|'short')
         const apiDirection = effectiveDirection(direction);
 
         // Check cache first
         const cacheKey = scanCacheKey(market, direction, useMultiTimeframe, date);
         const cached = scanCache.get(cacheKey);
-        if (cached && onlyScan) {
+        if (cached && onlyScan && !opts?.forceRefresh) {
           set({
             market, scanDate: date, scanOnly: true,
             scanResults: cached.scanResults,
@@ -878,7 +907,6 @@ export const useBacktestStore = create<BacktestState>()(
 
         set({
           isLoadingCronSession: true,
-          useMultiTimeframe: false,
           scanResults: [], performance: [], trades: [], stats: null,
           scanError: null, forwardError: null, marketTrend: null,
           market, scanDate: date, scanOnly: true,
@@ -896,7 +924,17 @@ export const useBacktestStore = create<BacktestState>()(
             return;
           }
 
-          set({ scanResults, sessionDataFreshness: session0?.dataFreshness ?? null });
+          // MTF ON → 前端過濾（API 永遠返回完整結果）
+          let displayResults = scanResults;
+          if (useMultiTimeframe) {
+            const cacheKey = `_unfilteredResults:${date}`;
+            scanCache.set(cacheKey, { scanResults, performance: [], marketTrend: null });
+            displayResults = scanResults.filter(r =>
+              r.mtfWeeklyPass !== false && r.mtfMonthlyPass !== false,
+            );
+          }
+
+          set({ scanResults: displayResults, sessionDataFreshness: session0?.dataFreshness ?? null });
 
           // Phase 2: Fetch forward performance
           set({ isFetchingForward: true });
@@ -914,11 +952,23 @@ export const useBacktestStore = create<BacktestState>()(
 
           // scanOnly mode: skip backtest engine, just show scan results + forward perf
           if (onlyScan) {
+            // MTF ON → 過濾 performance（只顯示 MTF 通過的股票）
+            let displayPerf = performance;
+            if (useMultiTimeframe) {
+              const filteredSymbols = new Set(displayResults.map(r => r.symbol));
+              displayPerf = performance.filter(p => filteredSymbols.has(p.symbol));
+              // 更新 unfiltered cache 含完整 performance
+              const unfilteredKey = `_unfilteredResults:${date}`;
+              const cached = scanCache.get(unfilteredKey);
+              if (cached) {
+                scanCache.set(unfilteredKey, { ...cached, performance, marketTrend: null });
+              }
+            }
             // Save to cache for instant switching later
             const { scanResults: currentResults, scanCache: cache } = get();
-            cache.set(cacheKey, { scanResults: currentResults, performance, marketTrend: null });
+            cache.set(cacheKey, { scanResults: currentResults, performance: displayPerf, marketTrend: null });
             set({
-              performance,
+              performance: displayPerf,
               isFetchingForward: false,
               isLoadingCronSession: false,
             });

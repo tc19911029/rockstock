@@ -40,6 +40,24 @@ export function isCNMarketOpen(): boolean {
   return timeMin >= 555 && timeMin <= 900; // 09:15 ~ 15:00
 }
 
+/**
+ * 盤後窗口：收盤後仍允許 L2 刷新 + 掃描的時段
+ * TW: 13:31–14:00 / CN: 15:01–15:30
+ * 確保收盤後能取得最終收盤數據並完成盤後掃描
+ */
+export function isPostCloseWindow(market: 'TW' | 'CN'): boolean {
+  const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+  const { hour, min, dow } = getLocalTime(tz);
+  if (dow === 0 || dow === 6) return false;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+  if (!isTradingDay(today, market)) return false;
+  const timeMin = hour * 60 + min;
+  if (market === 'TW') {
+    return timeMin > 810 && timeMin <= 870; // 13:31 ~ 14:30
+  }
+  return timeMin > 900 && timeMin <= 930; // 15:01 ~ 15:30
+}
+
 /** 根據市場代碼判斷是否開盤 */
 export function isMarketOpen(market: 'TW' | 'CN'): boolean {
   return market === 'TW' ? isTWMarketOpen() : isCNMarketOpen();

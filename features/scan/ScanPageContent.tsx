@@ -68,6 +68,35 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
     }
   }, [autoLoadLatest]);
 
+  // 盤中自動刷新掃描結果（每 5 分鐘，只在市場開盤期間）
+  useEffect(() => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    if (scanDate !== today || scanDirection === 'daban') return;
+
+    const timer = window.setInterval(() => {
+      // 只在市場開盤時間（09:00–13:30 TW / 09:15–15:00 CN）才自動刷新
+      // 收盤後的 L4 是定數，不需要每 5 分鐘重載
+      const now = new Date();
+      const twTime = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', hour: 'numeric', minute: 'numeric', hour12: false }).format(now);
+      const [h, m] = twTime.replace(/\u202f/g, ' ').split(':').map(Number);
+      const twMin = h * 60 + m;
+      const twOpen = twMin >= 540 && twMin <= 810; // 09:00–13:30
+      const cnTime = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', hour: 'numeric', minute: 'numeric', hour12: false }).format(now);
+      const [ch, cm] = cnTime.replace(/\u202f/g, ' ').split(':').map(Number);
+      const cnMin = ch * 60 + cm;
+      const cnOpen = cnMin >= 555 && cnMin <= 900; // 09:15–15:00
+      const marketOpen = market === 'TW' ? twOpen : cnOpen;
+      if (!marketOpen) return;
+      fetchCronDates(market, scanDirection);
+      useBacktestStore.getState().loadCronSession(market, today, {
+        scanOnly: true, direction: scanDirection === 'long' || scanDirection === 'short' ? scanDirection : 'long',
+        forceRefresh: true,
+      });
+    }, 5 * 60 * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [scanDate, market, scanDirection, fetchCronDates]);
+
   const isBusy = isScanning || isFetchingForward;
 
   const handleScan = useCallback(() => {

@@ -238,6 +238,18 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
     }
   }
 
+  // ── 空快照保護：API 失敗時不覆蓋既有有效數據 ──
+  if (quotes.length === 0) {
+    console.warn(`[IntradayCache] ${market} API 返回 0 筆報價，檢查現有快照...`);
+    const existing = await readIntradaySnapshot(market, today);
+    if (existing && existing.quotes.length > 0) {
+      console.warn(`[IntradayCache] 保留現有快照 (${existing.quotes.length} 筆)，不覆蓋空數據`);
+      return existing;
+    }
+    // 現有快照也是空的，寫入空快照（首次刷新的情況）
+    console.warn(`[IntradayCache] ${market} 現有快照也為空，寫入空快照`);
+  }
+
   const snapshot: IntradaySnapshot = {
     market,
     date: today,

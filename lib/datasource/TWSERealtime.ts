@@ -335,8 +335,9 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
           date: today, // 確實是今天的即時數據
         });
       }
-    } catch {
-      // 單批次失敗不影響其他批次
+    } catch (err) {
+      // 單批次失敗不影響其他批次，但記錄日誌方便排查
+      console.warn(`[TWSERealtimeIntraday] ${exchange} 批次失敗 (${codes.length} 檔):`, String(err));
     }
   }
 

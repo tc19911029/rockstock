@@ -187,7 +187,7 @@ export function BacktestSection() {
         <div className="space-y-4">
           <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2">
             {horizonLabels.map(({ key, label }) => (
-              <HorizonCard key={key} label={label} horizon={key} performance={performance} scanDate={scanDate} />
+              <HorizonCard key={key} label={label} horizon={key} performance={performance} scanDate={scanDate} market={market} />
             ))}
           </div>
 

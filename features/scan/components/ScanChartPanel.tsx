@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useReplayStore } from '@/store/replayStore';
+import { useBacktestStore } from '@/store/backtestStore';
 import type { CandleWithIndicators } from '@/types';
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import type { ScanInterval } from '@/lib/datasource/findAnchorIndex';
@@ -34,6 +35,16 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
     isLoadingStock, loadStock, jumpToIndex,
     startPolling, stopPolling, dataGaps,
   } = useReplayStore();
+
+  // 從掃描結果中找到對應股票的隔日開盤資訊
+  const performance = useBacktestStore(s => s.performance);
+  const stockPerf = selectedStock
+    ? performance.find(p => {
+        const pureSymbol = selectedStock.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        const perfSymbol = p.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        return perfSymbol === pureSymbol;
+      })
+    : null;
 
   // 用兩個獨立的 ref 追蹤，避免 symbol 改變時被 scanDate 變化覆蓋
   const prevSymbolRef = useRef<string | null>(null);
@@ -74,11 +85,8 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
           currentStock: { ...current, name: selectedStock.name },
         });
       }
-      // 盤中 polling：scanDate 為今天或未指定時才啟動
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-      if (!scanDate || scanDate === today) {
-        startPolling();
-      }
+      // 盤中 polling：不論 scanDate 為哪天，圖表都顯示到最新
+      startPolling();
     }).catch((err: unknown) => {
       setLoadError(err instanceof Error ? err.message : String(err));
     });
@@ -115,6 +123,13 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
             {selectedStock.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}
           </span>
           <span className="text-foreground/80">{selectedStock.name}</span>
+          {stockPerf?.nextOpenPrice != null && stockPerf.openReturn != null && (
+            <span className={`text-[11px] font-mono ${stockPerf.openReturn >= 0 ? 'text-red-400' : 'text-green-400'}`}
+              title="隔日開盤價相對掃描日收盤價的漲跌幅"
+            >
+              隔日開 {stockPerf.nextOpenPrice.toFixed(2)} ({stockPerf.openReturn >= 0 ? '+' : ''}{stockPerf.openReturn.toFixed(2)}%)
+            </span>
+          )}
           {isLoadingStock && (
             <span className="w-3 h-3 border border-sky-500/30 border-t-sky-500 rounded-full animate-spin" />
           )}

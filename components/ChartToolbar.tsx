@@ -82,7 +82,7 @@ export default function ChartToolbar({
       <span className="text-muted-foreground">開<span className="text-foreground ml-0.5">{candle.open.toFixed(2)}</span></span>
       <span className="text-muted-foreground">高<span className="text-bull ml-0.5">{candle.high.toFixed(2)}</span></span>
       <span className="text-muted-foreground">低<span className="text-bear ml-0.5">{candle.low.toFixed(2)}</span></span>
-      <span className="text-muted-foreground">量{isTW ? '(張)' : ''}<span className="text-foreground/80 ml-0.5">{isTW ? Math.round(candle.volume / 1000).toLocaleString() : candle.volume.toLocaleString()}</span></span>
+      <span className="text-muted-foreground">量{isTW ? '(張)' : ''}<span className="text-foreground/80 ml-0.5">{candle.volume.toLocaleString()}</span></span>
 
       {/* Toolbar: MA toggles + BB + indicators + signals */}
       <div className="ml-auto flex items-center gap-1 shrink-0 flex-wrap">

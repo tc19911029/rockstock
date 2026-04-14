@@ -21,6 +21,7 @@ function calcBacktestSummary(perf: StockForwardPerformance[], horizon: BacktestH
   };
 }
 import { retColor, fmtRet } from '../utils';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 
 /** 根據 horizon key 取得所需的最少交易日數 */
 function requiredDays(horizon: BacktestHorizon): number {
@@ -29,8 +30,8 @@ function requiredDays(horizon: BacktestHorizon): number {
   return m ? Number(m[1]) : 1;
 }
 
-/** 粗估掃描日到今天之間的交易日數（排除週末，不含假日） */
-function estimateTradingDays(scanDate: string): number {
+/** 計算掃描日到今天之間的交易日數（排除週末 + 國定假日） */
+function estimateTradingDays(scanDate: string, market: 'TW' | 'CN' = 'TW'): number {
   const start = new Date(scanDate);
   const now = new Date();
   const utc8 = new Date(now.getTime() + 8 * 3600_000);
@@ -38,20 +39,21 @@ function estimateTradingDays(scanDate: string): number {
   const d = new Date(start);
   d.setDate(d.getDate() + 1); // start from day after scan
   while (d <= utc8) {
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) count++;
+    const dateStr = d.toISOString().split('T')[0];
+    if (isTradingDay(dateStr, market)) count++;
     d.setDate(d.getDate() + 1);
   }
   return count;
 }
 
-export function HorizonCard({ label, horizon, performance, scanDate }: {
+export function HorizonCard({ label, horizon, performance, scanDate, market }: {
   label: string; horizon: BacktestHorizon; performance: StockForwardPerformance[];
   scanDate?: string;
+  market?: 'TW' | 'CN';
 }) {
   const stats = calcBacktestSummary(performance, horizon);
   if (!stats) {
-    const notYet = scanDate && estimateTradingDays(scanDate) < requiredDays(horizon);
+    const notYet = scanDate && estimateTradingDays(scanDate, market) < requiredDays(horizon);
     return (
       <div className="bg-secondary/50 rounded-lg p-2.5 flex flex-col items-center justify-center gap-1 opacity-40 min-h-[80px]">
         <div className="text-[10px] text-muted-foreground">{label}</div>

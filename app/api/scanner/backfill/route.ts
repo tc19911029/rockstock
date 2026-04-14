@@ -41,6 +41,32 @@ export async function POST(req: NextRequest) {
     const stocks = await scanner.getStockList();
     let marketTrend: unknown;
 
+    // 今日掃描：注入 L2 快照的收盤報價，讓 fetchCandlesForScan 能合併今日 K 棒（staleDays=0）
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai',
+    }).format(new Date());
+    if (date >= todayStr) {
+      try {
+        const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+        const snap = await readIntradaySnapshot(market as 'TW' | 'CN', todayStr);
+        if (snap && snap.quotes.length > 0) {
+          const quotes = new Map<string, { open: number; high: number; low: number; close: number; volume: number; date?: string }>();
+          for (const q of snap.quotes) {
+            const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+            if (q.close > 0) {
+              quotes.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume, date: snap.date });
+            }
+          }
+          if (quotes.size > 0) {
+            scanner.setRealtimeQuotes(quotes);
+            console.log(`[scanner/backfill] 注入 L2 今日報價: ${quotes.size} 支 (${snap.date})`);
+          }
+        }
+      } catch {
+        // L2 注入失敗不影響掃描，只是結果可能落後一天
+      }
+    }
+
     for (const mode of modes) {
       const mtfEnabled = mode === 'mtf';
 

@@ -207,6 +207,9 @@ export abstract class MarketScanner {
           if (this._realtimeQuotes) {
             const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
             const quote = this._realtimeQuotes.get(code);
+            if (!quote || quote.close <= 0) {
+              console.warn(`[fetchCandlesForScan] L2 miss: ${symbol} code=${code} mapSize=${this._realtimeQuotes.size} found=${!!quote} close=${quote?.close ?? 'N/A'}`);
+            }
             if (quote && quote.close > 0) {
               // 盤前防護：如果報價日期不是今天，表示市場未開盤，不建立假的今日 K 棒
               // TWSE 有 date 欄位；EastMoney 無 date 時用 OHLCV 比對判斷

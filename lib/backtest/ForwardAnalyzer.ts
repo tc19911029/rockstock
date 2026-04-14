@@ -76,6 +76,22 @@ async function analyzeOne(
     const todayStr = getMarketToday(market);
     const safeEndStr = endStr > todayStr ? todayStr : endStr;
 
+    // 若 forward window 起點已超過今天（例如今天掃描，還沒有隔日資料），直接返回空結果
+    if (startStr > safeEndStr) {
+      return {
+        symbol, name, scanDate, scanPrice,
+        openReturn: null, d1Return: null, d2Return: null, d3Return: null,
+        d4Return: null, d5Return: null, d6Return: null, d7Return: null,
+        d8Return: null, d9Return: null, d10Return: null, d20Return: null,
+        maxGain: 0, maxLoss: 0, forwardCandles: [],
+        nextOpenPrice: null,
+        d1ReturnFromOpen: null, d5ReturnFromOpen: null,
+        d6ReturnFromOpen: null, d7ReturnFromOpen: null,
+        d8ReturnFromOpen: null, d9ReturnFromOpen: null,
+        d10ReturnFromOpen: null, d20ReturnFromOpen: null,
+      };
+    }
+
     // 優先讀本地 K 線（可能不完整，下方 needSupplement 會檢查並用 API 補足）
     let candles = await loadForwardFromLocal(symbol, startStr, safeEndStr);
 
@@ -83,7 +99,7 @@ async function analyzeOne(
     // 若最後一根 K 棒日期 < safeEndStr 且距今超過 1 天，用 API 補足缺口
     const lastLocalDate = candles.length > 0 ? candles[candles.length - 1].date : '';
     const needSupplement = candles.length === 0
-      || (lastLocalDate < safeEndStr && daysBetween(lastLocalDate, safeEndStr) > 1);
+      || (lastLocalDate < safeEndStr && daysBetween(lastLocalDate, safeEndStr) >= 1);
 
     if (needSupplement) {
       const fetchStart = candles.length > 0 ? nextDay(lastLocalDate) : startStr;
@@ -102,6 +118,27 @@ async function analyzeOne(
       } else if (extra.length > 0) {
         candles = [...candles, ...extra];
         rateLimiter.reportSuccess(provider);
+      }
+    }
+
+    // 從 L2 快照補充今日 K 棒（L1 和 API 可能都還沒有今日數據）
+    const lastCandleDate = candles.length > 0 ? candles[candles.length - 1].date : '';
+    if (lastCandleDate < todayStr) {
+      try {
+        const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+        const snap = await readIntradaySnapshot(market, todayStr);
+        if (snap && snap.quotes.length > 0) {
+          const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+          const q = snap.quotes.find(sq => sq.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === code);
+          if (q && q.close > 0) {
+            candles.push({
+              date: todayStr, open: q.open, high: q.high, low: q.low,
+              close: q.close, volume: q.volume,
+            });
+          }
+        }
+      } catch {
+        // L2 讀取失敗不影響已有數據
       }
     }
 

@@ -35,12 +35,40 @@ export async function GET(req: NextRequest) {
     const date = getCurrentTradingDay(market);
     let scanCount = -1;
 
+    // L2 為空時跳過掃描，避免用過時數據產生誤導結果
+    if (snapshot.count === 0) {
+      console.warn(`[cron/update-intraday] ${market} L2 快照為空 (0 筆)，跳過本輪掃描`);
+      return apiOk({
+        market,
+        date: snapshot.date,
+        count: 0,
+        updatedAt: snapshot.updatedAt,
+        scanCount: -1,
+        scanDate: date,
+        warning: 'L2 快照為空，跳過掃描',
+      });
+    }
+
+    // ── Phase 2.5: 從 L2 快照建立即時報價 Map，讓 scanner 合併今日 K 棒 ──
+    const realtimeQuotes = new Map<string, { open: number; high: number; low: number; close: number; volume: number; date?: string }>();
+    for (const q of snapshot.quotes) {
+      const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+      if (q.close > 0) {
+        realtimeQuotes.set(code, {
+          open: q.open, high: q.high, low: q.low,
+          close: q.close, volume: q.volume,
+          date: snapshot.date,
+        });
+      }
+    }
+
     try {
       const { saveScanSession } = await import('@/lib/storage/scanStorage');
 
       if (market === 'TW') {
         const { TaiwanScanner } = await import('@/lib/scanner/TaiwanScanner');
         const scanner = new TaiwanScanner();
+        scanner.setRealtimeQuotes(realtimeQuotes);
         const stocks = await scanner.getStockList();
         const { results, sessionFreshness } = await scanner.scanSOP(stocks, date);
 
@@ -60,6 +88,7 @@ export async function GET(req: NextRequest) {
       } else {
         const { ChinaScanner } = await import('@/lib/scanner/ChinaScanner');
         const scanner = new ChinaScanner();
+        scanner.setRealtimeQuotes(realtimeQuotes);
         const stocks = await scanner.getStockList();
         const { results, sessionFreshness } = await scanner.scanSOP(stocks, date);
 

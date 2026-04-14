@@ -123,7 +123,9 @@ function getPollingInterval(interval: string): number {
     case '30m': return 120_000; // 2 分鐘
     case '60m': return 180_000; // 3 分鐘
     case '1d':  return 300_000; // 5 分鐘（日K 用即時報價 overlay）
-    default:    return 0;       // 週K/月K 不需要 polling
+    case '1wk': return 300_000; // 5 分鐘（週K 盤中也要更新）
+    case '1mo': return 300_000; // 5 分鐘（月K 盤中也要更新）
+    default:    return 0;
   }
 }
 
@@ -326,8 +328,11 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
 
     pollingTimer = setInterval(async () => {
       try {
+        // 日K/週K/月K 用本地+即時路徑（跟初始載入一致）
+        const useLocal = ['1d', '1wk', '1mo'].includes(interval);
+        const localParam = useLocal ? '&local=1' : '';
         const res = await fetch(
-          `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${period}`
+          `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${period}${localParam}`
         );
         if (!res.ok) return;
         const json = await res.json();

@@ -148,7 +148,14 @@ interface FugleQuoteResponse {
   closePrice: number;
   lastPrice: number;
   lastSize: number;
-  totalVolume: number;
+  total?: {
+    tradeValue: number;
+    tradeVolume: number;
+    tradeVolumeAtBid: number;
+    tradeVolumeAtAsk: number;
+    transaction: number;
+    time: number;
+  };
   change: number;
   changePercent: number;
   lastUpdated: string;
@@ -186,7 +193,7 @@ export async function getFugleQuote(symbol: string): Promise<FugleQuote | null> 
       high: json.highPrice ?? 0,
       low: json.lowPrice ?? 0,
       close: json.lastPrice ?? json.closePrice ?? 0,
-      volume: json.totalVolume ?? 0,
+      volume: json.total?.tradeVolume ?? 0,
       date: json.date,
     };
 

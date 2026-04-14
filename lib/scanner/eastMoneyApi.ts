@@ -52,9 +52,9 @@ export async function fetchEastMoneyStockList(): Promise<StockEntry[]> {
   const cached = await loadCachedStockList();
   if (cached) return cached;
   const all: StockEntry[] = [];
-  const pageSize = 5000;
+  const pageSize = 100; // 東方財富 API 實際每頁最多 100 筆（台灣 IP 限制）
   let page = 1;
-  const maxPages = 3; // 安全上限，滬深主板約3100檔，3頁足夠
+  const maxPages = 50; // 安全上限：3500 股 / 100 = 35 頁，多留 15 頁餘裕
 
   while (page <= maxPages) {
     const url = 'https://push2.eastmoney.com/api/qt/clist/get?' +
