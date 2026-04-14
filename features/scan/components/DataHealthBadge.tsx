@@ -105,7 +105,7 @@ export function DataHealthBadge({ market }: DataHealthProps) {
   const l2DisplayStatus = isAfterHours ? 'closed' : l2Status;
   const l2Color = statusColorMap[l2DisplayStatus];
   const l2Label = statusLabelMap[l2DisplayStatus];
-  const l2AgeText = l2?.ageSeconds != null ? formatSeconds(l2.ageSeconds) : '無';
+  const l2TimeText = l2?.updatedAt ? formatAbsoluteTime(l2.updatedAt) : '無';
 
   // L2 告警
   const l2Alert = health.l2Sources?.alertLevel ?? 'none';
@@ -126,7 +126,7 @@ export function DataHealthBadge({ market }: DataHealthProps) {
   const l4DisplayStatus = l4IsAfterHours ? 'closed' : l4Status;
   const l4Color = statusColorMap[l4DisplayStatus];
   const l4Label = statusLabelMap[l4DisplayStatus];
-  const l4AgeText = l4?.ageSeconds != null ? formatSeconds(l4.ageSeconds) : '無';
+  const l4TimeText = l4?.lastScanTime ? formatAbsoluteTime(l4.lastScanTime) : '無';
 
   const toggle = () => setExpanded(prev => !prev);
 
@@ -143,7 +143,7 @@ export function DataHealthBadge({ market }: DataHealthProps) {
       {/* L2 */}
       <button onClick={toggle}
         className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${l2Color} cursor-pointer ${showL2Alert ? 'animate-pulse' : ''}`}
-        title={`L2 快照 | ${l2?.quoteCount ?? 0} 筆 | ${l2AgeText}`}
+        title={`L2 快照 | ${l2?.quoteCount ?? 0} 筆 | ${l2TimeText}`}
       >
         L2 {l2Label}{showL2Alert ? ' !' : ''}
       </button>
@@ -159,14 +159,14 @@ export function DataHealthBadge({ market }: DataHealthProps) {
       {/* L4 */}
       <button onClick={toggle}
         className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${l4Color} cursor-pointer`}
-        title={`L4 掃描 | ${l4?.lastScanCount ?? 0} 檔 | ${l4AgeText}`}
+        title={`L4 掃描 | ${l4?.lastScanCount ?? 0} 檔 | ${l4TimeText}`}
       >
         L4 {l4Label}
       </button>
 
       {/* 展開詳情面板 */}
       {expanded && (
-        <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border rounded-md shadow-lg p-3 min-w-[240px] text-[11px] max-h-[400px] overflow-y-auto">
+        <div className="absolute top-full left-0 mt-1 z-50 bg-popover border border-border rounded-md shadow-lg p-3 min-w-[240px] text-[11px] max-h-[60vh] overflow-y-auto">
           <div className="font-semibold mb-2">{market} 數據健康報告</div>
 
           {/* L1 */}
@@ -187,7 +187,7 @@ export function DataHealthBadge({ market }: DataHealthProps) {
             <div className="font-medium text-foreground mb-1">L2 盤中快照</div>
             <div className="space-y-0.5 pl-2">
               <div>報價數量：<span className="text-foreground">{l2?.quoteCount ?? 0}</span> 筆</div>
-              <div>快照年齡：<span className="text-foreground">{l2AgeText}</span></div>
+              <div>快照時間：<span className="text-foreground">{l2TimeText}</span></div>
               <div>狀態：<span className={`font-medium ${l2DisplayStatus === 'fresh' ? 'text-green-400' : l2DisplayStatus === 'closed' ? 'text-blue-400' : l2DisplayStatus === 'stale' ? 'text-yellow-400' : 'text-red-400'}`}>
                 {l2Label}
               </span></div>
@@ -233,9 +233,8 @@ export function DataHealthBadge({ market }: DataHealthProps) {
           <div className="text-muted-foreground border-t border-border pt-2">
             <div className="font-medium text-foreground mb-1">L4 掃描結果</div>
             <div className="space-y-0.5 pl-2">
-              <div>最新掃描：<span className="text-foreground">{l4?.lastScanDate ?? '無'}</span></div>
               <div>結果數：<span className="text-foreground">{l4?.lastScanCount ?? 0}</span> 檔</div>
-              <div>掃描年齡：<span className="text-foreground">{l4AgeText}</span></div>
+              <div>掃描時間：<span className="text-foreground">{l4TimeText}</span></div>
               <div>歷史天數：<span className="text-foreground">{l4?.totalDatesAvailable ?? 0}</span>/20</div>
               <div>今日盤中：<span className={`font-medium ${l4?.todayHasIntraday ? 'text-green-400' : 'text-red-400'}`}>
                 {l4?.todayHasIntraday ? '有' : '無'}
@@ -263,4 +262,19 @@ function formatSeconds(sec: number): string {
   if (sec < 60) return `${sec} 秒前`;
   if (sec < 3600) return `${Math.floor(sec / 60)} 分鐘前`;
   return `${Math.floor(sec / 3600)} 小時前`;
+}
+
+/** ISO 時間字串 → 台灣時間 "MM-DD HH:mm" */
+function formatAbsoluteTime(isoStr: string): string {
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleString('zh-TW', {
+      timeZone: 'Asia/Taipei',
+      month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return '無';
+  }
 }

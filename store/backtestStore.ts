@@ -891,6 +891,7 @@ export const useBacktestStore = create<BacktestState>()(
         const cacheKey = scanCacheKey(market, direction, useMultiTimeframe, date);
         const cached = scanCache.get(cacheKey);
         if (cached && onlyScan && !opts?.forceRefresh) {
+          // 快取命中：先顯示 scanResults（秒開）
           set({
             market, scanDate: date, scanOnly: true,
             scanResults: cached.scanResults,
@@ -898,6 +899,38 @@ export const useBacktestStore = create<BacktestState>()(
             marketTrend: cached.marketTrend,
             scanError: null, forwardError: null,
           });
+          // 如果快取只有 scanResults 沒有 performance（預載快取），背景補填 forward
+          if (cached.scanResults.length > 0 && cached.performance.length === 0) {
+            (async () => {
+              try {
+                set({ isFetchingForward: true });
+                const forwardPayload = cached.scanResults.map(r => ({
+                  symbol: r.symbol, name: r.name, scanPrice: r.price,
+                }));
+                const fwdRes = await fetch('/api/backtest/forward', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ scanDate: date, stocks: forwardPayload }),
+                });
+                if (!fwdRes.ok) return;
+                const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
+                const performance = fwdJson.performance ?? [];
+                // 更新快取和 UI（僅當用戶還在看這個日期時）
+                if (get().scanDate === date) {
+                  let displayPerf = performance;
+                  if (useMultiTimeframe) {
+                    const filteredSymbols = new Set(cached.scanResults.filter(r =>
+                      r.mtfWeeklyPass !== false && r.mtfMonthlyPass !== false,
+                    ).map(r => r.symbol));
+                    displayPerf = performance.filter(p => filteredSymbols.has(p.symbol));
+                  }
+                  scanCache.set(cacheKey, { scanResults: cached.scanResults, performance: displayPerf, marketTrend: null });
+                  set({ performance: displayPerf, isFetchingForward: false });
+                }
+              } catch { /* forward 失敗不影響已顯示的 scanResults */ }
+              finally { set({ isFetchingForward: false }); }
+            })();
+          }
           return;
         }
 
@@ -1043,38 +1076,63 @@ export const useBacktestStore = create<BacktestState>()(
         // 打板模式由 ScanPanel useEffect 負責載入日期，不走 autoLoadLatest
         if (scanDirection === 'daban') return;
 
-        // 先取得可用日期
-        await get().fetchCronDates(market, effectiveDirection(scanDirection));
+        const dir = effectiveDirection(scanDirection);
+
+        // 1. 先取得可用日期（快速，只列檔案）
+        await get().fetchCronDates(market, dir);
         const { cronDates } = get();
 
-        // 計算缺漏的交易日（最近 5 個交易日內）
-        const existingDates = new Set(cronDates.filter(c => c.market === market).map(c => c.date));
-        const missingDays = getMissingTradingDays(existingDates, 5, market);
+        // 2. 如果已有日期 → 立即載入最新一天（不等 backfill）
+        if (cronDates.length > 0) {
+          const latestDate = cronDates[0].date;
+          await get().loadCronSession(market, latestDate, { scanOnly: true, direction: dir });
 
-        // 自動補齊缺漏日期
-        if (missingDays.length > 0) {
-          set({ isBackfilling: true, backfillProgress: { done: 0, total: missingDays.length } });
-          for (let i = 0; i < missingDays.length; i++) {
-            try {
-              await fetch('/api/scanner/backfill', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ market, date: missingDays[i], direction: effectiveDirection(scanDirection) }),
-              });
-            } catch { /* 單筆失敗不中斷 */ }
-            set({ backfillProgress: { done: i + 1, total: missingDays.length } });
+          // 3. 背景預載最近 5 天到 scanCache（不阻塞 UI）
+          const datesToPreload = cronDates
+            .filter(c => c.market === market)
+            .map(c => c.date)
+            .filter(d => d !== latestDate)
+            .slice(0, 4); // 最新一天已載入，預載接下來 4 天
+          if (datesToPreload.length > 0) {
+            // fire-and-forget: 背景預載，不 await
+            Promise.all(datesToPreload.map(async (date) => {
+              const cacheKey = scanCacheKey(market, scanDirection, get().useMultiTimeframe, date);
+              if (get().scanCache.has(cacheKey)) return; // 已快取
+              try {
+                const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${dir}&mtf=daily`);
+                if (!res.ok) return;
+                const json = await res.json() as { sessions?: Array<{ results: StockScanResult[] }> };
+                const results = json.sessions?.[0]?.results ?? [];
+                if (results.length > 0) {
+                  get().scanCache.set(cacheKey, { scanResults: results, performance: [], marketTrend: null });
+                }
+              } catch { /* 預載失敗不影響 UI */ }
+            })).catch(() => {});
           }
-          set({ isBackfilling: false });
-          // 重新取得日期列表
-          await get().fetchCronDates(market, effectiveDirection(scanDirection));
         }
 
-        const { cronDates: updated } = get();
-        if (updated.length === 0) return;
-
-        // 載入最新一天（scanOnly mode，不跑回測）
-        const latestDate = updated[0].date;
-        await get().loadCronSession(market, latestDate, { scanOnly: true, direction: effectiveDirection(scanDirection) });
+        // 4. 背景補齊缺漏日期（不阻塞 UI）
+        const existingDates = new Set(cronDates.filter(c => c.market === market).map(c => c.date));
+        const missingDays = getMissingTradingDays(existingDates, 5, market);
+        if (missingDays.length > 0) {
+          // fire-and-forget: 背景 backfill
+          (async () => {
+            set({ isBackfilling: true, backfillProgress: { done: 0, total: missingDays.length } });
+            for (let i = 0; i < missingDays.length; i++) {
+              try {
+                await fetch('/api/scanner/backfill', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ market, date: missingDays[i], direction: dir }),
+                });
+              } catch { /* 單筆失敗不中斷 */ }
+              set({ backfillProgress: { done: i + 1, total: missingDays.length } });
+            }
+            set({ isBackfilling: false });
+            // 補完後刷新日期列表
+            await get().fetchCronDates(market, dir);
+          })().catch(() => {});
+        }
       },
     }),
     {
