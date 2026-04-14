@@ -331,7 +331,7 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
       </div>
 
       {/* Results table — 單一 overflow-auto 容器，高度由父層控制 */}
-      <div className="overflow-auto">
+      <div className="overflow-x-auto" style={{ touchAction: 'pan-x pan-y' }}>
           <table className="w-full text-sm" style={{ tableLayout: 'fixed', minWidth: 1100 }}>
           <thead>
             {/* Group header row */}

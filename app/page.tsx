@@ -475,7 +475,7 @@ export default function HomePage() {
             </div>
             <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${scannerOpen ? 'rotate-180' : ''}`} />
           </button>
-          <div className={`transition-all duration-300 ${scannerOpen ? 'max-h-[40vh]' : 'max-h-0'} overflow-hidden`}>
+          <div className={`transition-all duration-300 ${scannerOpen ? 'max-h-[40vh] h-[40vh]' : 'max-h-0'} overflow-hidden flex flex-col`}>
             <ScanPanel onSelectStock={handleScanSelectStock} />
           </div>
         </div>

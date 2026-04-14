@@ -77,7 +77,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
   }, [isBusy, setScanOnly]);
 
   return (
-    <div className="text-foreground text-xs">
+    <div className="text-foreground text-xs flex flex-col h-full">
       {/* Compact action bar — single row */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border">
         {/* Market */}
@@ -220,7 +220,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
       })()}
 
       {/* Results table */}
-      <div className="overflow-y-auto" style={{ maxHeight: 'calc(55vh - 60px)' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-3 py-2">
           {scanDirection === 'daban' ? (
             <SectionBoundary section="打板掃描結果">

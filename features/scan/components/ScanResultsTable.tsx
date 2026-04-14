@@ -237,7 +237,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
       )}
 
       {/* Main table with horizontal scroll */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" style={{ touchAction: 'pan-x pan-y' }}>
         <table className="w-full text-xs" style={{ minWidth: '1300px' }}>
           <thead>
             {/* Group header row */}
