@@ -200,8 +200,29 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
       });
     }
   } else {
+    // CN: 東方財富 → 騰訊 fallback
     const { getEastMoneyRealtime } = await import('./EastMoneyRealtime');
-    const emMap = await getEastMoneyRealtime();
+    let cnMap = await getEastMoneyRealtime();
+    let cnSource = 'EastMoney';
+
+    // 東方財富返回 0 筆 → fallback 騰訊
+    if (cnMap.size === 0) {
+      console.warn(`[IntradayCache] CN EastMoney 返回 0 筆，嘗試騰訊 fallback...`);
+      try {
+        const { getTencentRealtime } = await import('./TencentRealtime');
+        const { CN_STOCKS } = await import('@/lib/scanner/cnStocks');
+        const symbols = CN_STOCKS.map(s => s.symbol);
+        cnMap = await getTencentRealtime(symbols);
+        cnSource = 'Tencent';
+        if (cnMap.size > 0) {
+          console.info(`[IntradayCache] CN 騰訊 fallback 成功: ${cnMap.size} 筆`);
+        } else {
+          console.warn(`[IntradayCache] CN 騰訊 fallback 也返回 0 筆`);
+        }
+      } catch (err) {
+        console.warn(`[IntradayCache] CN 騰訊 fallback 失敗:`, err);
+      }
+    }
 
     // 嘗試讀取 MA Base 以補足 prevClose / changePercent
     let maBaseMap: Record<string, { closes: number[] }> = {};
@@ -217,7 +238,7 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
     } catch { /* ignore - MA base 尚不存在 */ }
 
     quotes = [];
-    for (const [, q] of emMap) {
+    for (const [, q] of cnMap) {
       // 優先使用 API 的 f18 昨收 → 其次 MA Base 最後一根收盤 → 最後降級為 close（漲跌=0%）
       const ma = maBaseMap[q.code];
       const prevClose = q.prevClose ?? ma?.closes[ma.closes.length - 1] ?? q.close;
@@ -235,6 +256,10 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
         prevClose,
         changePercent,
       });
+    }
+
+    if (quotes.length > 0) {
+      console.info(`[IntradayCache] CN L2 來源: ${cnSource}, ${quotes.length} 筆`);
     }
   }
 
