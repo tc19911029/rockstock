@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { ScanSession } from '@/lib/scanner/types';
 import { saveScanSession } from '@/lib/storage/scanStorage';
-import { scanDabanFromLocalCandles } from '@/lib/scanner/DabanScanner';
+import { scanDabanWithPrefilter } from '@/lib/scanner/DabanScanner';
 import { saveDabanSession } from '@/lib/storage/dabanStorage';
 import { apiOk, apiError } from '@/lib/api/response';
 import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
     // 安全檢查：漲停股通常 20-100 支/天。如果掃出 < 5 支
     // 可能是 K 線不完整（Blob 資料過舊），不儲存以免污染歷史資料。
     try {
-      const dabanSession = await scanDabanFromLocalCandles(date);
+      const dabanSession = await scanDabanWithPrefilter(date);
       if (dabanSession.resultCount >= 5) {
         await saveDabanSession(dabanSession);
         counts.daban = dabanSession.resultCount;

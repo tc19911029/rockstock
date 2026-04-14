@@ -350,8 +350,18 @@ export async function scanDabanWithPrefilter(date: string): Promise<DabanScanSes
         if (!entry) return null;
         const local = await loadLocalCandlesWithTolerance(entry.symbol, 'CN', date, 1);
         if (!local || local.candles.length < 30) return null;
-        if (local.staleDays > 0) return 'stale';
-        return { symbol: entry.symbol, name: entry.name, candles: local.candles };
+
+        let candles = local.candles;
+        if (local.staleDays > 0) {
+          // Layer 1 尚未更新到今日 → 用 IntradayCache 快照合成今日 K棒
+          if (q.close > 0) {
+            candles = mergeRealtimeCandle(candles, q, date);
+          } else {
+            return 'stale';
+          }
+        }
+
+        return { symbol: entry.symbol, name: entry.name, candles };
       }),
     );
 
@@ -433,10 +443,11 @@ export async function scanDabanRealtime(date: string): Promise<DabanScanSession>
 /**
  * 將即時報價合併到歷史 K 線尾部
  * 同 MarketScanner.fetchCandlesForScan 的合併邏輯
+ * 接受任何包含 OHLCV 欄位的物件（EastMoneyQuote / IntradayQuote 皆可）
  */
 function mergeRealtimeCandle(
   candles: CandleWithIndicators[],
-  quote: EastMoneyQuote,
+  quote: { open: number; high: number; low: number; close: number; volume: number },
   today: string,
 ): CandleWithIndicators[] {
   const last = candles[candles.length - 1];
@@ -471,4 +482,61 @@ function mergeRealtimeCandle(
 
   // lastDate > today → 資料比即時更新，不合併
   return candles;
+}
+
+/**
+ * 9:25 AM 開盤確認：讀取前一交易日的打板掃描結果，
+ * 對照當日集合競價後的 IntradayCache 快照，標記每支候選股是否確認進場。
+ *
+ * @param scanDate  打板掃描日（前一交易日，如 "2026-04-13"）
+ * @param openDate  開盤確認日（今日，如 "2026-04-14"）
+ */
+export async function confirmDabanAtOpen(
+  scanDate: string,
+  openDate: string,
+): Promise<DabanScanSession | null> {
+  const { loadDabanSession, saveDabanSession } = await import('@/lib/storage/dabanStorage');
+  const { readIntradaySnapshot, refreshIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+
+  const session = await loadDabanSession(scanDate);
+  if (!session || session.results.length === 0) {
+    console.warn(`[DabanScanner] confirmDabanAtOpen: 找不到 ${scanDate} 的打板結果`);
+    return null;
+  }
+
+  // 讀取開盤日快照；若不存在則即時抓取
+  let snapshot = await readIntradaySnapshot('CN', openDate);
+  if (!snapshot) {
+    snapshot = await refreshIntradaySnapshot('CN');
+  }
+  if (!snapshot || snapshot.quotes.length === 0) {
+    console.warn('[DabanScanner] confirmDabanAtOpen: 無法取得開盤快照');
+    return session;
+  }
+
+  // symbol 在打板結果中帶後綴（如 "600519.SS"），snapshot 中只有純代碼（"600519"）
+  const quoteMap = new Map(snapshot.quotes.map(q => [q.symbol, q]));
+
+  const updatedResults = session.results.map(result => {
+    const code = result.symbol.replace(/\.(SS|SZ)$/, '');
+    const q = quoteMap.get(code);
+    if (!q || q.close <= 0) return result;
+    return {
+      ...result,
+      openPrice: q.close,
+      openConfirmed: q.close >= result.buyThresholdPrice,
+    };
+  });
+
+  const confirmedCount = updatedResults.filter(r => r.openConfirmed).length;
+  const updatedSession: DabanScanSession = {
+    ...session,
+    results: updatedResults,
+    openConfirmDate: openDate,
+    openConfirmTime: new Date().toISOString(),
+  };
+
+  await saveDabanSession(updatedSession);
+  console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場（${scanDate} → ${openDate}）`);
+  return updatedSession;
 }

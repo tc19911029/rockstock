@@ -77,7 +77,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
   }, [isBusy, setScanOnly]);
 
   return (
-    <div className="text-foreground text-xs flex flex-col h-full">
+    <div className="text-foreground text-xs flex flex-col min-h-0" style={{ flex: '1 1 0%' }}>
       {/* Compact action bar — single row */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border">
         {/* Market */}
@@ -142,6 +142,9 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
           )}
         </div>
       </div>
+
+      {/* Scrollable area: date nav + progress + results */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
 
       {/* Date Navigator — 歷史日期列表 */}
       {cronDates.length > 0 && (
@@ -220,7 +223,6 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
       })()}
 
       {/* Results table */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-3 py-2">
           {scanDirection === 'daban' ? (
             <SectionBoundary section="打板掃描結果">

@@ -318,6 +318,10 @@ export interface DabanScanResult {
   rankScore: number;            // 排序分數
   buyThresholdPrice: number;    // 買入門檻 = 收盤 × 1.02
   scanDate: string;             // 掃描日期
+  /** 次日集合競價結束價（9:25 AM CST） */
+  openPrice?: number;
+  /** 是否確認進場：openPrice >= buyThresholdPrice */
+  openConfirmed?: boolean;
 }
 
 export interface DabanSentiment {
@@ -336,6 +340,10 @@ export interface DabanScanSession {
   resultCount: number;
   results: DabanScanResult[];
   sentiment?: DabanSentiment;     // 市場情緒指標
+  /** 開盤確認日期（次日集合競價後更新） */
+  openConfirmDate?: string;
+  /** 開盤確認時間（ISO timestamp） */
+  openConfirmTime?: string;
 }
 
 /** 掃描時段類型：盤中快照 vs 收盤後正式結果 */
