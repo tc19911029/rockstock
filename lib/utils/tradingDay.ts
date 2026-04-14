@@ -2,6 +2,18 @@
  * 台灣證券交易所休市日曆（非週末的額外休市日）
  * 來源：https://www.twse.com.tw/zh/trading/holiday.html
  */
+const TW_HOLIDAYS_2024: string[] = [
+  '2024-01-01', // 元旦
+  '2024-02-08', '2024-02-09', // 農曆春節前
+  '2024-02-12', '2024-02-13', '2024-02-14', // 農曆春節
+  '2024-02-28', // 和平紀念日
+  '2024-04-04', '2024-04-05', // 兒童節+清明節
+  '2024-05-01', // 勞動節
+  '2024-06-10', // 端午節
+  '2024-09-17', // 中秋節
+  '2024-10-10', // 國慶日
+];
+
 const TW_HOLIDAYS_2025: string[] = [
   '2025-01-01', // 元旦
   '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', // 農曆春節
@@ -32,8 +44,18 @@ const TW_HOLIDAYS_2026: string[] = [
 
 /**
  * 中國 A 股休市日曆（非週末的額外休市日）
- * 來源：https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+ * 來源：https://www.sse.com.cn/
  */
+const CN_HOLIDAYS_2024: string[] = [
+  '2024-01-01', // 元旦
+  '2024-02-09', '2024-02-12', '2024-02-13', '2024-02-14', '2024-02-15', '2024-02-16', // 春節（2/9除夕-2/17）
+  '2024-04-04', '2024-04-05', // 清明節
+  '2024-05-01', '2024-05-02', '2024-05-03', // 勞動節
+  '2024-06-10', // 端午節
+  '2024-09-16', '2024-09-17', // 中秋節
+  '2024-10-01', '2024-10-02', '2024-10-03', '2024-10-04', '2024-10-07', // 國慶節
+];
+
 const CN_HOLIDAYS_2025: string[] = [
   '2025-01-01', // 元旦
   '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', // 春節
@@ -59,8 +81,8 @@ const CN_HOLIDAYS_2026: string[] = [
 
 type Market = 'TW' | 'CN';
 
-const TW_HOLIDAY_SET = new Set([...TW_HOLIDAYS_2025, ...TW_HOLIDAYS_2026]);
-const CN_HOLIDAY_SET = new Set([...CN_HOLIDAYS_2025, ...CN_HOLIDAYS_2026]);
+const TW_HOLIDAY_SET = new Set([...TW_HOLIDAYS_2024, ...TW_HOLIDAYS_2025, ...TW_HOLIDAYS_2026]);
+const CN_HOLIDAY_SET = new Set([...CN_HOLIDAYS_2024, ...CN_HOLIDAYS_2025, ...CN_HOLIDAYS_2026]);
 
 function getHolidaySet(market?: Market): Set<string> {
   if (market === 'CN') return CN_HOLIDAY_SET;
@@ -85,6 +107,32 @@ export function isTradingDay(dateStr: string, market?: Market): boolean {
  */
 export function isWeekday(dateStr: string, market?: Market): boolean {
   return isTradingDay(dateStr, market);
+}
+
+/**
+ * 計算兩個日期之間的交易日數量（不含起始日，含結束日）
+ * @param from 起始日期 YYYY-MM-DD
+ * @param to 結束日期 YYYY-MM-DD
+ * @param market 'TW' 或 'CN'
+ * @returns 交易日天數（若 from >= to 回傳 0）
+ */
+export function tradingDaysBetween(from: string, to: string, market?: Market): number {
+  const start = new Date(from + 'T12:00:00');
+  const end = new Date(to + 'T12:00:00');
+  if (start >= end) return 0;
+
+  let count = 0;
+  const cursor = new Date(start);
+  cursor.setDate(cursor.getDate() + 1); // 不含起始日
+
+  while (cursor <= end) {
+    const dateStr = cursor.toISOString().split('T')[0];
+    if (isTradingDay(dateStr, market)) {
+      count++;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
 }
 
 /**

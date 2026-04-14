@@ -10,6 +10,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { getTWSESingleIntraday, getTWSEQuote } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
 
 // ── 週K/月K 聚合結果快取（避免重複聚合 + computeIndicators） ──
 const aggregateCache = new Map<string, { data: unknown; expires: number }>();
@@ -141,6 +142,30 @@ export async function GET(req: NextRequest) {
               }
             } catch (err) {
               console.warn(`[stock] L2 fallback 失敗 ${symbol}:`, err instanceof Error ? err.message : err);
+            }
+          }
+
+          if (todayQuote) {
+            // L3 報價健全檢查：防止千倍誤差等數據異常傳到前端
+            const sanity = checkQuoteSanity(
+              todayQuote.close,
+              todayQuote.volume,
+              lastCandle.close,
+              lastCandle.volume,
+              market,
+            );
+            if (sanity.level === 'critical') {
+              console.error(
+                `[stock] ★ ${symbol} 報價異常 (critical): ${sanity.message} ` +
+                `即時=${todayQuote.close} vs L1=${lastCandle.close}`
+              );
+              // critical → 不使用此報價，用 L1 最後收盤價替代
+              todayQuote = null;
+            } else if (sanity.level === 'warning') {
+              console.warn(
+                `[stock] ${symbol} 報價偏差 (warning): ${sanity.message} ` +
+                `即時=${todayQuote.close} vs L1=${lastCandle.close}`
+              );
             }
           }
 

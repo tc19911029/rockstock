@@ -213,7 +213,7 @@ export async function GET(req: NextRequest) {
         const { candles, source } = await fetchWithFallback(symbol, market, scanner);
         if (candles.length >= MIN_CANDLE_COUNT) {
           // 驗證 gap 是否消除
-          const remainingGaps = detectCandleGaps(candles, 15);
+          const remainingGaps = detectCandleGaps(candles, 15, market);
           if (remainingGaps.length === 0) {
             await saveLocalCandles(symbol, market, candles);
             phase2Succeeded++;

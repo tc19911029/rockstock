@@ -12,6 +12,7 @@
 
 import { readCandleFile } from './CandleStorageAdapter';
 import { detectCandleGaps, type CandleGap } from './validateCandles';
+import { tradingDaysBetween } from '@/lib/utils/tradingDay';
 
 const IS_VERCEL = !!process.env.VERCEL;
 
@@ -50,12 +51,6 @@ export interface VerifyReport {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function calendarDaysBetween(a: string, b: string): number {
-  const da = new Date(a + 'T12:00:00');
-  const db = new Date(b + 'T12:00:00');
-  return Math.round(Math.abs(db.getTime() - da.getTime()) / (1000 * 60 * 60 * 24));
-}
 
 function classifyHealth(
   coverageRate: number,
@@ -174,13 +169,14 @@ export async function verifyDownload(
         }
 
         // Gap 偵測
-        const gaps = detectCandleGaps(data.candles, maxGapDays);
+        const gaps = detectCandleGaps(data.candles, maxGapDays, market);
         if (gaps.length > 0) {
           gapDetails.push({ symbol, gaps });
         }
 
         // lastDate 檢查
-        const behind = calendarDaysBetween(data.lastDate, targetDate);
+        // 用交易日差距，避免跨連假誤判為 stale
+        const behind = tradingDaysBetween(data.lastDate, targetDate, market);
         if (behind >= staleDays) {
           staleDetails.push({
             symbol,

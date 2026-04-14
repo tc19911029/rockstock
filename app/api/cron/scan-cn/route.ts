@@ -7,6 +7,7 @@ import { saveDabanSession } from '@/lib/storage/dabanStorage';
 import { apiOk, apiError } from '@/lib/api/response';
 import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { loadVerifyReport } from '@/lib/datasource/DownloadVerifier';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -28,6 +29,15 @@ export async function GET(req: NextRequest) {
       return apiOk({ skipped: true, reason: 'non-trading day', date });
     }
 
+    // ── L1 新鮮度前置檢查 ──
+    const verifyReport = await loadVerifyReport('CN', date);
+    if (verifyReport && verifyReport.summary.coverageRate < 0.9) {
+      console.warn(
+        `[cron/scan-cn] L1 覆蓋率不足 ${(verifyReport.summary.coverageRate * 100).toFixed(1)}%，` +
+        `掃描結果可能不完整`
+      );
+    }
+
     const stocks = await scanner.getStockList();
     const counts: Record<string, number> = {};
 
@@ -37,11 +47,12 @@ export async function GET(req: NextRequest) {
       id: `CN-long-daily-${date}-${Date.now()}`,
       market: 'CN', date, direction: 'long',
       multiTimeframeEnabled: false,
+      sessionType: 'post_close',
       scanTime: new Date().toISOString(),
       resultCount: results.length, results,
       dataFreshness: sessionFreshness,
     };
-    try { await saveScanSession(longDailySession); } catch { /* non-fatal */ }
+    try { await saveScanSession(longDailySession, { allowOverwritePostClose: true }); } catch { /* non-fatal */ }
     counts.longDaily = results.length;
 
     // ── Long scan (MTF) ──
@@ -51,11 +62,12 @@ export async function GET(req: NextRequest) {
         id: `CN-long-mtf-${date}-${Date.now()}`,
         market: 'CN', date, direction: 'long',
         multiTimeframeEnabled: true,
+        sessionType: 'post_close',
         scanTime: new Date().toISOString(),
         resultCount: mtfResults.length, results: mtfResults,
         dataFreshness: mtfFreshness,
       };
-      await saveScanSession(longMtfSession);
+      await saveScanSession(longMtfSession, { allowOverwritePostClose: true });
       counts.longMtf = mtfResults.length;
     } catch { counts.longMtf = 0; }
 
@@ -66,11 +78,12 @@ export async function GET(req: NextRequest) {
         id: `CN-short-daily-${date}-${Date.now()}`,
         market: 'CN', date, direction: 'short',
         multiTimeframeEnabled: false,
+        sessionType: 'post_close',
         scanTime: new Date().toISOString(),
         resultCount: shortResults.length, results: shortResults,
         dataFreshness: shortFreshness,
       };
-      await saveScanSession(shortDailySession);
+      await saveScanSession(shortDailySession, { allowOverwritePostClose: true });
       counts.shortDaily = shortResults.length;
     } catch { counts.shortDaily = 0; }
 
@@ -81,11 +94,12 @@ export async function GET(req: NextRequest) {
         id: `CN-short-mtf-${date}-${Date.now()}`,
         market: 'CN', date, direction: 'short',
         multiTimeframeEnabled: true,
+        sessionType: 'post_close',
         scanTime: new Date().toISOString(),
         resultCount: shortMtfResults.length, results: shortMtfResults,
         dataFreshness: shortMtfFreshness,
       };
-      await saveScanSession(shortMtfSession);
+      await saveScanSession(shortMtfSession, { allowOverwritePostClose: true });
       counts.shortMtf = shortMtfResults.length;
     } catch { counts.shortMtf = 0; }
 
@@ -116,7 +130,17 @@ export async function GET(req: NextRequest) {
       } catch { /* notification failure is non-fatal */ }
     }
 
-    return apiOk({ counts, date, marketTrend });
+    // ── 零結果告警 ──
+    const alert = counts.longDaily === 0;
+    if (alert) {
+      console.warn(`[cron/scan-cn] ★ 交易日 ${date} long-daily 掃描結果 0 筆`);
+    }
+
+    return apiOk({
+      counts, date, marketTrend,
+      ...(alert && { alert: true, warning: `交易日 ${date} long-daily 0 筆` }),
+      ...(verifyReport && { l1CoverageRate: verifyReport.summary.coverageRate }),
+    });
   } catch (err) {
     return apiError(String(err));
   }

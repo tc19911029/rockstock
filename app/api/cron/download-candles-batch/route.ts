@@ -171,12 +171,27 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── 最後一批完成後跑校驗報告 ──
+    // ── 最後一批完成後跑校驗報告（聚合所有批次統計） ──
     let verifyResult: { health: string; coverageRate: number; stocksWithGaps: number; stocksStale: number } | undefined;
     if (batch === totalBatches) {
       try {
+        // 聚合所有批次的 manifest 統計
+        const { loadDownloadManifest: loadManifest } = await import('@/lib/datasource/DownloadManifest');
+        let totalSucceeded = succeeded;
+        let totalFailed = failed;
+        let totalSkipped = skipped;
+        for (let b = 1; b < totalBatches; b++) {
+          const prev = await loadManifest(market, `${lastTradingDate}-batch${b}`);
+          if (prev) {
+            totalSucceeded += prev.succeeded;
+            totalFailed += prev.failed;
+            totalSkipped += prev.skipped;
+          }
+        }
         const allSymbols = sorted.map(s => s.symbol);
-        const report = await verifyDownload(market, lastTradingDate, allSymbols, { succeeded, failed, skipped });
+        const report = await verifyDownload(market, lastTradingDate, allSymbols, {
+          succeeded: totalSucceeded, failed: totalFailed, skipped: totalSkipped,
+        });
         verifyResult = {
           health: report.health,
           coverageRate: report.summary.coverageRate,

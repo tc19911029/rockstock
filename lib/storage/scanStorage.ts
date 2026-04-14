@@ -108,13 +108,36 @@ function sessionMtfMode(session: ScanSession): MtfMode {
  *   post_close: scans/{market}/{dir}/{mtf}/{date}.json (唯一正式結果)
  *   intraday:   scans/{market}/{dir}/{mtf}/{date}/intraday/{HHMM}.json (可多筆)
  *
- * post_close 會覆蓋同日同方向同模式的結果（正式唯一）
+ * post_close 封存後不可被非官方來源覆蓋（需傳 allowOverwritePostClose: true）
  * intraday 帶時間戳，不會互相覆蓋
  * 每次儲存 post_close 後自動清理，只保留最近 KEEP_SCAN_DAYS 個交易日
  */
 const KEEP_SCAN_DAYS = 20;
 
-export async function saveScanSession(session: ScanSession): Promise<void> {
+interface SaveScanOptions {
+  /** 只有官方 cron 才應傳 true，允許覆蓋已存在的 post_close 結果 */
+  allowOverwritePostClose?: boolean;
+}
+
+/** 檢查指定日期是否已有 post_close 結果（封存檢查） */
+async function isPostCloseSealed(
+  market: MarketId, direction: string, mtfMode: string, date: string,
+): Promise<boolean> {
+  const blobPath = `scans/${market}/${direction}/${mtfMode}/${date}.json`;
+  const localName = `scan-${market}-${direction}-${mtfMode}-${date}.json`;
+
+  if (IS_VERCEL) {
+    const raw = await blobGet(blobPath).catch(() => null);
+    return raw !== null;
+  }
+  const raw = await fsGet(localName);
+  return raw !== null;
+}
+
+export async function saveScanSession(
+  session: ScanSession,
+  opts?: SaveScanOptions,
+): Promise<void> {
   const data = JSON.stringify(session);
   const dir = session.direction ?? 'long';
   const mtf = sessionMtfMode(session);
@@ -132,7 +155,19 @@ export async function saveScanSession(session: ScanSession): Promise<void> {
       await fsPut(localName, data);
     }
   } else {
-    // 收盤後正式結果：唯一，可覆蓋（同日同方向同模式只有一筆）
+    // ── 封存保護：post_close 已存在時，非官方來源不可覆蓋 ──
+    if (!opts?.allowOverwritePostClose) {
+      const sealed = await isPostCloseSealed(session.market, dir, mtf, session.date);
+      if (sealed) {
+        console.warn(
+          `[scanStorage] ⛔ 拒絕覆蓋已封存的 post_close: ${session.market}/${dir}/${mtf}/${session.date}` +
+          ` (caller id: ${session.id}). 若為官方 cron 請傳 allowOverwritePostClose: true`,
+        );
+        return; // 不存，靜默退出
+      }
+    }
+
+    // 收盤後正式結果：唯一
     const blobPath = `scans/${session.market}/${dir}/${mtf}/${session.date}.json`;
     const localName = `scan-${session.market}-${dir}-${mtf}-${session.date}.json`;
 
@@ -141,6 +176,8 @@ export async function saveScanSession(session: ScanSession): Promise<void> {
     } else {
       await fsPut(localName, data);
     }
+
+    console.log(`[scanStorage] ✅ post_close 已儲存: ${session.market}/${dir}/${mtf}/${session.date} (${session.resultCount} 檔)`);
 
     // 儲存完畢後非同步清理舊檔（不阻塞回傳）
     pruneOldScanSessions(session.market, dir as ScanDirection, mtf, KEEP_SCAN_DAYS).catch(

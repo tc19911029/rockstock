@@ -19,7 +19,7 @@ const schema = z.object({
  * POST /api/scanner/save-session
  *
  * 純存檔端點：將前端已計算好的掃描結果直接寫入 storage。
- * 不做任何掃描邏輯，永遠覆蓋同日同方向同模式的結果。
+ * 前端手動掃描一律存為 intraday，不會覆蓋官方 post_close 結果。
  */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       date,
       direction,
       multiTimeframeEnabled,
-      sessionType: 'post_close',
+      sessionType: 'intraday',
       scanTime,
       resultCount: results.length,
       results: results as unknown as ScanSession['results'],

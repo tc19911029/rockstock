@@ -102,20 +102,51 @@ export interface CandleGap {
   toDate: string;
   /** 兩根K線間的日曆天數 */
   calendarDays: number;
+  /** 兩根K線間的交易日數（若有提供 market） */
+  tradingDays?: number;
 }
 
 /**
  * 偵測 K 線資料中的大型日期斷層。
- * 正常週末/假日間隔 ~3-4 天，超過 maxGapDays 天視為資料缺失。
+ *
+ * 當提供 market 參數時，使用交易日差距判斷（排除假日），
+ * 門檻 maxGapTradingDays（預設 5 個交易日）。
+ * 不提供 market 時，回退到日曆天（maxGapDays 預設 10 天）。
  *
  * @param candles 已排序的K線陣列
- * @param maxGapDays 允許的最大日曆天數間隔（預設 10 天，涵蓋長假）
+ * @param maxGapDays 允許的最大日曆天數間隔（預設 10 天，僅在無 market 時使用）
+ * @param market 市場（提供後改用交易日差距判斷）
+ * @param maxGapTradingDays 允許的最大交易日間隔（預設 8 天，涵蓋國慶+春節調休）
  */
 export function detectCandleGaps(
   candles: Array<{ date: string }>,
   maxGapDays = 10,
+  market?: 'TW' | 'CN',
+  maxGapTradingDays = 8,
 ): CandleGap[] {
   const gaps: CandleGap[] = [];
+
+  // 有 market → 用交易日差距（精確排除假日）
+  if (market) {
+    const { tradingDaysBetween } = require('@/lib/utils/tradingDay');
+    for (let i = 1; i < candles.length; i++) {
+      const prev = new Date(candles[i - 1].date + 'T12:00:00');
+      const curr = new Date(candles[i].date + 'T12:00:00');
+      const calendarDays = Math.round((curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24));
+      const tDays: number = tradingDaysBetween(candles[i - 1].date, candles[i].date, market);
+      if (tDays > maxGapTradingDays) {
+        gaps.push({
+          fromDate: candles[i - 1].date,
+          toDate: candles[i].date,
+          calendarDays,
+          tradingDays: tDays,
+        });
+      }
+    }
+    return gaps;
+  }
+
+  // 無 market → 回退到日曆天
   for (let i = 1; i < candles.length; i++) {
     const prev = new Date(candles[i - 1].date + 'T12:00:00');
     const curr = new Date(candles[i].date + 'T12:00:00');
