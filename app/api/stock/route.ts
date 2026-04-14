@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { getTWChineseName, getCNChineseName } from '@/lib/datasource/TWSENames';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
-import { getFugleIntradayCandles, isFugleAvailable } from '@/lib/datasource/FugleProvider';
+import { getFugleIntradayCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
@@ -98,18 +98,34 @@ export async function GET(req: NextRequest) {
               const q = await getTWSESingleIntraday(twCode) ?? await getTWSEQuote(twCode);
               if (q && q.close > 0 && (!q.date || q.date === today)) {
                 todayQuote = q;
+              } else if (q) {
+                console.warn(`[stock] 即時報價跳過 ${symbol}: close=${q.close}, date=${(q as { date?: string }).date}, today=${today}`);
               }
             } else if (isCN) {
               const q = await getEastMoneySingleQuote(pureCode);
               if (q && q.close > 0) {
                 todayQuote = q;
+              } else if (q) {
+                console.warn(`[stock] CN即時報價跳過 ${symbol}: close=${q.close}`);
               }
             }
           } catch (err) {
             console.warn(`[stock] 即時報價失敗 ${symbol}:`, err instanceof Error ? err.message : err);
           }
 
-          // fallback: 從 L2 全市場快照中找該股報價
+          // fallback 2: Fugle 即時報價（分鐘K已驗證可用，比 mis.twse 穩定）
+          if (!todayQuote && isTW && isFugleAvailable()) {
+            try {
+              const fq = await getFugleQuote(pureCode);
+              if (fq && fq.close > 0 && (!fq.date || fq.date === today)) {
+                todayQuote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
+              }
+            } catch (err) {
+              console.warn(`[stock] Fugle 報價失敗 ${symbol}:`, err instanceof Error ? err.message : err);
+            }
+          }
+
+          // fallback 3: 從 L2 全市場快照中找該股報價
           if (!todayQuote) {
             try {
               const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
@@ -117,7 +133,11 @@ export async function GET(req: NextRequest) {
                 const sq = snapshot.quotes.find(q => q.symbol === pureCode);
                 if (sq && sq.close > 0) {
                   todayQuote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
+                } else {
+                  console.warn(`[stock] L2快照找不到 ${symbol} (pureCode=${pureCode}), 快照有${snapshot.quotes.length}檔, 取樣: ${snapshot.quotes.slice(0, 3).map(q => q.symbol).join(',')}`);
                 }
+              } else {
+                console.warn(`[stock] L2快照不存在 market=${market} date=${today}`);
               }
             } catch (err) {
               console.warn(`[stock] L2 fallback 失敗 ${symbol}:`, err instanceof Error ? err.message : err);
@@ -142,7 +162,9 @@ export async function GET(req: NextRequest) {
 
         // 週K/月K：本地日K聚合（省去 API 請求）+ memory cache
         if (interval === '1wk' || interval === '1mo') {
-          const cacheKey = `${symbol}:${interval}`;
+          // cache key 包含 today close，價格變動時自動失效
+          const todayClose = result.candles[result.candles.length - 1]?.close ?? 0;
+          const cacheKey = `${symbol}:${interval}:${todayClose}`;
           const cached = aggregateCache.get(cacheKey);
           if (cached && cached.expires > Date.now()) {
             withIndicators = cached.data as typeof withIndicators;
