@@ -217,6 +217,8 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
     const close = parseMisPrice(d.z) || parseMisPrice(d.l);
     if (close <= 0) return null;
     const prevClose = parseMisPrice(d.y);
+    // 使用 mis.twse 回傳的實際日期（d.d 格式 "20260416"），避免盤後硬編碼 today 產生假 K 棒
+    const misDate = d.d ? `${d.d.slice(0, 4)}-${d.d.slice(4, 6)}-${d.d.slice(6, 8)}` : today;
     return {
       code: d.c || code,
       name: d.n?.trim() || code,
@@ -226,7 +228,7 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
       close,
       volume: parseInt((d.v || '0').replace(/,/g, ''), 10),
       previousClose: prevClose > 0 ? prevClose : undefined,
-      date: today,
+      date: misDate,
     };
   } catch {
     return null;

@@ -85,6 +85,64 @@ export async function register() {
     }
   }
 
+  // ── L1 歷史K線自動下載（收盤後跑一次） ──
+  const { saveLocalCandles } = await import('./lib/datasource/LocalCandleStore');
+  const { isTradingDay } = await import('./lib/utils/tradingDay');
+
+  // 記錄今天是否已下載，避免重複跑
+  const l1Downloaded = { TW: '', CN: '' };
+
+  async function downloadL1(market: 'TW' | 'CN') {
+    const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+
+    // 今天已下載過就跳過
+    if (l1Downloaded[market] === today) return;
+    // 非交易日跳過
+    if (!isTradingDay(today, market)) return;
+    // 必須在盤後窗口才下載（確保收盤數據已發佈）
+    if (!isPostCloseWindow(market)) return;
+
+    console.log(`[local-cron] ${market} L1 開始下載歷史K線...`);
+    const startTime = Date.now();
+    let succeeded = 0, failed = 0;
+
+    try {
+      const ScannerClass = market === 'CN'
+        ? (await import('./lib/scanner/ChinaScanner')).ChinaScanner
+        : (await import('./lib/scanner/TaiwanScanner')).TaiwanScanner;
+      const scanner = new ScannerClass();
+      const stocks = await scanner.getStockList();
+
+      // 分批下載，每批 8 支，間隔 300ms
+      for (let i = 0; i < stocks.length; i += 8) {
+        const batch = stocks.slice(i, i + 8);
+        const settled = await Promise.allSettled(
+          batch.map(async ({ symbol }) => {
+            const candles = await scanner.fetchCandles(symbol);
+            if (candles.length > 0) {
+              await saveLocalCandles(symbol, market, candles);
+            }
+            return candles.length;
+          })
+        );
+        for (const r of settled) {
+          if (r.status === 'fulfilled' && r.value > 0) succeeded++;
+          else failed++;
+        }
+        if (i + 8 < stocks.length) {
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
+      l1Downloaded[market] = today;
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`[local-cron] ${market} L1 下載完成: ${succeeded} 成功, ${failed} 失敗, ${elapsed}s`);
+    } catch (err) {
+      console.error(`[local-cron] ${market} L1 下載失敗:`, err);
+    }
+  }
+
   // TW: 每 5 分鐘
   setInterval(async () => {
     try { await refreshAndScan('TW'); }
@@ -96,4 +154,10 @@ export async function register() {
     try { await refreshAndScan('CN'); }
     catch (err) { console.error('[local-cron] CN 刷新+掃描失敗:', err); }
   }, 2 * 60 * 1000);
+
+  // L1 下載：每 10 分鐘檢查一次，盤後窗口內才實際執行（每日只跑一次）
+  setInterval(async () => {
+    try { await downloadL1('TW'); } catch (err) { console.error('[local-cron] TW L1 下載失敗:', err); }
+    try { await downloadL1('CN'); } catch (err) { console.error('[local-cron] CN L1 下載失敗:', err); }
+  }, 10 * 60 * 1000);
 }

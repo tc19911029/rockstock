@@ -11,6 +11,7 @@ import { getTWSESingleIntraday, getTWSEQuote } from '@/lib/datasource/TWSERealti
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
+import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
 // ── 週K/月K 聚合結果快取（避免重複聚合 + computeIndicators） ──
 const aggregateCache = new Map<string, { data: unknown; expires: number }>();
@@ -91,8 +92,11 @@ export async function GET(req: NextRequest) {
       }
       if (result && result.candles.length > 0) {
         // ── 盤中即時覆蓋：若 lastDate < today，主動拉即時報價湊今日 K 棒 ──
+        // 只在盤中或盤後窗口才注入，避免凌晨/盤前用昨日收盤數據產生假的今日 K 棒
+        const marketKey = isTW ? 'TW' as const : 'CN' as const;
+        const shouldInjectToday = isMarketOpen(marketKey) || isPostCloseWindow(marketKey);
         const lastCandle = result.candles[result.candles.length - 1];
-        if (lastCandle && lastCandle.date < today) {
+        if (shouldInjectToday && lastCandle && lastCandle.date < today) {
           let todayQuote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
           try {
             if (isTW) {
