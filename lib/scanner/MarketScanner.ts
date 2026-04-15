@@ -234,6 +234,7 @@ export abstract class MarketScanner {
                 last.high = Math.max(quote.high, last.high);
                 last.low = Math.min(quote.low, last.low);
                 last.volume = quote.volume || last.volume;
+                if (quote.open > 0) last.open = quote.open; // L2 開盤價優先（修正從昨日收盤繼承的 open）
               } else if (quoteIsTarget && last.date < targetDate) {
                 // Append 即時 K 棒（僅在確認報價是目標日數據時）
                 rawCandles.push({
@@ -250,7 +251,16 @@ export abstract class MarketScanner {
               const { computeIndicators } = await import('@/lib/indicators');
               const merged = computeIndicators(rawCandles);
               const mergedLast = merged[merged.length - 1];
-              return { candles: merged, staleDays: mergedLast.date === targetDate ? 0 : local.staleDays, lastCandleDate: mergedLast.date, source: 'local' };
+
+              // 如果 L2 報價有日期欄位但不是目標日，代表 L2 是昨日舊數據。
+              // 此時 mergedLast.date 仍會是昨日，標記極高 staleDays 讓 staleDays > 5 跳過檢查，
+              // 避免用昨日 K 棒假冒今日掃描結果（例如 04/14 漲停被誤判為 04/15 進場訊號）。
+              const isQuoteStaleForToday = !!(quote.date && quote.date !== targetDate);
+              const effectiveStaleDays = mergedLast.date === targetDate
+                ? 0
+                : (isQuoteStaleForToday ? local.staleDays + 999 : local.staleDays);
+
+              return { candles: merged, staleDays: effectiveStaleDays, lastCandleDate: mergedLast.date, source: 'local' };
             }
           }
 
