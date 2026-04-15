@@ -1105,12 +1105,11 @@ export const useBacktestStore = create<BacktestState>()(
 
         // 2. 如果已有日期 → 優先載入最近有結果（resultCount > 0）的一天，
         //    若全為 0 或未知則退回最新日期（不等 backfill）
-        if (cronDates.length > 0) {
-          const marketDates = cronDates.filter(c => c.market === market);
+        const marketDates = cronDates.filter(c => c.market === market);
+        if (marketDates.length > 0) {
           const bestDate =
             marketDates.find(c => c.resultCount > 0)?.date ??
-            marketDates[0]?.date ??
-            cronDates[0].date;
+            marketDates[0].date;
           const latestDate = bestDate;
           await get().loadCronSession(market, latestDate, { scanOnly: true, direction: dir });
 
@@ -1138,7 +1137,7 @@ export const useBacktestStore = create<BacktestState>()(
         }
 
         // 4. 背景補齊缺漏日期（不阻塞 UI）
-        const existingDates = new Set(cronDates.filter(c => c.market === market).map(c => c.date));
+        const existingDates = new Set(marketDates.map(c => c.date));
         const missingDays = getMissingTradingDays(existingDates, 5, market);
         if (missingDays.length > 0) {
           // fire-and-forget: 背景 backfill

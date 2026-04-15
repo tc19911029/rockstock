@@ -67,14 +67,12 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
         // Race condition 防護：若方向/市場已在 fetch 期間切換，放棄這次載入
         const cur = useBacktestStore.getState();
         if (cur.scanDirection !== capturedDir || cur.market !== capturedMarket) return;
-        const dates = cur.cronDates;
-        if (dates.length > 0) {
+        const marketDates = cur.cronDates.filter(c => c.market === capturedMarket);
+        if (marketDates.length > 0) {
           // 優先載入最近有結果的日期，避免停在 0 筆的今日
-          const marketDates = dates.filter(c => c.market === capturedMarket);
           const bestDate =
             marketDates.find(c => c.resultCount > 0)?.date ??
-            marketDates[0]?.date ??
-            dates[0].date;
+            marketDates[0].date;
           cur.loadCronSession(capturedMarket, bestDate, { scanOnly: true, direction: capturedDir as 'long' | 'short' });
         }
       });
@@ -142,13 +140,11 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
               const dir = scanDirection === 'long' || scanDirection === 'short' ? scanDirection : 'long';
               setScanDirection(dir); // 確保離開打板模式時重設方向
               await fetchCronDates(m, dir);
-              const dates = useBacktestStore.getState().cronDates;
-              if (dates.length > 0) {
-                const mDates = dates.filter(c => c.market === m);
+              const mDates = useBacktestStore.getState().cronDates.filter(c => c.market === m);
+              if (mDates.length > 0) {
                 const bestDate =
                   mDates.find(c => c.resultCount > 0)?.date ??
-                  mDates[0]?.date ??
-                  dates[0].date;
+                  mDates[0].date;
                 useBacktestStore.getState().loadCronSession(m, bestDate, { scanOnly: true, direction: dir });
               }
             }}
