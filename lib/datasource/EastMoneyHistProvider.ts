@@ -55,13 +55,14 @@ function cnSecid(code: string): string {
 
 /** period 字串 → beg 日期 (YYYYMMDD) */
 function periodToBeg(period: string): string {
-  const match = period.match(/^(\d+)(y|mo?)$/);
+  const match = period.match(/^(\d+)(d|y|mo?)$/);
   if (!match) return '20200101';
   const n = parseInt(match[1], 10);
   const unit = match[2];
   const d = new Date();
   if (unit === 'y') d.setFullYear(d.getFullYear() - n);
-  else d.setMonth(d.getMonth() - n);
+  else if (unit === 'mo' || unit === 'm') d.setMonth(d.getMonth() - n);
+  else d.setDate(d.getDate() - n); // 'd' → 天數
   return d.toISOString().split('T')[0].replace(/-/g, '');
 }
 

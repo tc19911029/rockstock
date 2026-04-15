@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { getTWChineseName, getCNChineseName } from '@/lib/datasource/TWSENames';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
-import { getFugleIntradayCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
+import { getFugleIntradayCandles, getFugleHistoricalMinuteCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
@@ -271,13 +271,21 @@ export async function GET(req: NextRequest) {
     let candles: { date: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
     let ticker = candidates[0];
 
-    // 台股分鐘 K 線：優先用 Fugle（即時、不延遲）
+    // 台股分鐘 K 線：先用 Fugle Historical（多天），失敗再用 Fugle Intraday（今日）
     if (isTW && isMinuteInterval && isFugleAvailable()) {
       try {
-        const fugleCandles = await getFugleIntradayCandles(pureCode, interval);
-        if (fugleCandles.length > 0) {
+        // 優先：歷史分鐘K（支援多天回顧，適合走圖模式）
+        const histCandles = await getFugleHistoricalMinuteCandles(pureCode, interval, p);
+        if (histCandles.length > 0) {
           ticker = candidates[0];
-          candles = fugleCandles;
+          candles = histCandles;
+        } else {
+          // Fallback：盤中即時 API（今日分鐘K，適合盤中監控）
+          const intradayCandles = await getFugleIntradayCandles(pureCode, interval);
+          if (intradayCandles.length > 0) {
+            ticker = candidates[0];
+            candles = intradayCandles;
+          }
         }
       } catch {
         // Fugle 失敗，走 MultiMarketProvider 備援

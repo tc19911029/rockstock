@@ -19,8 +19,9 @@ import { rateLimiter } from './UnifiedRateLimiter';
 import type { Candle } from '@/types';
 
 const FUGLE_BASE = 'https://api.fugle.tw/marketdata/v1.0/stock';
-const INTRADAY_TTL = 30 * 1000;  // 30 秒快取（分鐘K盤中更新頻繁）
-const QUOTE_TTL = 15 * 1000;     // 15 秒快取（即時報價）
+const INTRADAY_TTL = 30 * 1000;   // 30 秒快取（分鐘K盤中更新頻繁）
+const HISTORICAL_TTL = 5 * 60 * 1000; // 5 分鐘快取（歷史分鐘K）
+const QUOTE_TTL = 15 * 1000;      // 15 秒快取（即時報價）
 
 function getApiKey(): string | null {
   return process.env.FUGLE_API_KEY ?? null;
@@ -118,6 +119,97 @@ export async function getFugleIntradayCandles(
     return candles;
   } catch (err) {
     console.warn('[Fugle] candles error:', err);
+    return [];
+  }
+}
+
+/**
+ * 計算 period 對應的 from/to 日期（台北時間）
+ * period: '5d' | '60d' | '6mo' | '1y' | ...
+ */
+function periodToTWDateRange(period: string): { from: string; to: string } {
+  const calDays: Record<string, number> = {
+    '5d': 7, '10d': 14, '20d': 30, '60d': 90,
+    '6mo': 185, '1y': 370, '2y': 740,
+  };
+  const fmt = (d: Date) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(d);
+  const now = new Date();
+  const to = fmt(now);
+
+  // 嘗試從 calDays 查表，否則 parse n+unit
+  let days = calDays[period];
+  if (days == null) {
+    const m = period.match(/^(\d+)(d|mo?|y)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      const unit = m[2];
+      if (unit === 'y') days = n * 365;
+      else if (unit === 'mo' || unit === 'm') days = n * 30;
+      else days = n; // 'd'
+    } else {
+      days = 7;
+    }
+  }
+  const fromDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  return { from: fmt(fromDate), to };
+}
+
+/**
+ * 取得台股歷史分鐘 K 線（Fugle Historical API）
+ * 支援多天資料；intraday API 只有當日，此函式適用於回顧走圖。
+ * @param symbol 台股代碼（純數字，如 "2330"）
+ * @param interval 時間框架 "1m" | "5m" | "15m" | "30m" | "60m"
+ * @param period 資料範圍 "5d" | "60d" | "6mo" 等
+ */
+export async function getFugleHistoricalMinuteCandles(
+  symbol: string,
+  interval: string,
+  period = '5d',
+): Promise<Candle[]> {
+  const timeframe = intervalToFugleTimeframe(interval);
+  if (!timeframe) return [];
+
+  const { from, to } = periodToTWDateRange(period);
+  const cacheKey = `fugle:hist:${symbol}:${interval}:${from}`;
+  const cached = globalCache.get<Candle[]>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    await rateLimiter.acquire('fugle');
+    const url = `${FUGLE_BASE}/historical/candles/${symbol}?timeframe=${timeframe}&from=${from}&to=${to}`;
+    const res = await fetch(url, {
+      headers: fugleHeaders(),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!res.ok) {
+      rateLimiter.reportError('fugle', res.status);
+      if (res.status === 401 || res.status === 403) {
+        console.warn('[Fugle] historical API 未授權，可能需要付費方案');
+      }
+      return [];
+    }
+    rateLimiter.reportSuccess('fugle');
+
+    const json = (await res.json()) as FugleCandlesResponse;
+    const candles: Candle[] = (json.data ?? [])
+      .filter(d => d.close > 0)
+      .map(d => ({
+        date: d.date.replace('T', ' ').slice(0, 16),
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+        volume: d.volume,
+      }));
+
+    if (candles.length > 0) {
+      globalCache.set(cacheKey, candles, HISTORICAL_TTL);
+    }
+    return candles;
+  } catch (err) {
+    console.warn('[Fugle] historical candles error:', err);
     return [];
   }
 }
