@@ -76,6 +76,7 @@ async function main(): Promise<void> {
         await put(`candles/${market}/${file}`, content, {
           access: 'private' as const,
           addRandomSuffix: false,
+          allowOverwrite: true,
         });
       }),
     );
