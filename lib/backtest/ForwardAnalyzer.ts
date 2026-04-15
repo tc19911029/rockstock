@@ -102,22 +102,26 @@ async function analyzeOne(
       || (lastLocalDate < safeEndStr && daysBetween(lastLocalDate, safeEndStr) >= 1);
 
     if (needSupplement) {
-      const fetchStart = candles.length > 0 ? nextDay(lastLocalDate) : startStr;
-      const provider = market === 'TW' ? 'finmind' : 'eastmoney';
-      await rateLimiter.acquire(provider);
-      const extra = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
-      if (extra.length === 0 && candles.length === 0) {
-        // 完全沒數據時 retry 一次
-        await new Promise(r => setTimeout(r, 2000));
+      try {
+        const fetchStart = candles.length > 0 ? nextDay(lastLocalDate) : startStr;
+        const provider = market === 'TW' ? 'finmind' : 'eastmoney';
         await rateLimiter.acquire(provider);
-        const retry = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
-        if (retry.length > 0) {
-          candles = [...candles, ...retry];
+        const extra = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
+        if (extra.length === 0 && candles.length === 0) {
+          // 完全沒數據時 retry 一次
+          await new Promise(r => setTimeout(r, 2000));
+          await rateLimiter.acquire(provider);
+          const retry = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
+          if (retry.length > 0) {
+            candles = [...candles, ...retry];
+            rateLimiter.reportSuccess(provider);
+          }
+        } else if (extra.length > 0) {
+          candles = [...candles, ...extra];
           rateLimiter.reportSuccess(provider);
         }
-      } else if (extra.length > 0) {
-        candles = [...candles, ...extra];
-        rateLimiter.reportSuccess(provider);
+      } catch {
+        // API 補充失敗不影響已有的 L1 數據，繼續用本地 K 線計算
       }
     }
 
