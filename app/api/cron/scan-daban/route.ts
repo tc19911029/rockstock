@@ -1,3 +1,14 @@
+/**
+ * 打板掃描 cron
+ *
+ * GET /api/cron/scan-daban               → 盤後掃描（用 getLastTradingDay，15:55 CST）
+ * GET /api/cron/scan-daban?type=open     → 開盤掃描（用 getCurrentTradingDay，9:33 CST）
+ * GET /api/cron/scan-daban?date=YYYY-MM-DD → 手動補掃指定日期
+ *
+ * type=open 流程：
+ *   L2（集合競價報價）→ mergeRealtimeCandle 合成今日K棒 → 打板條件檢查 → L4
+ */
+
 import { NextRequest } from 'next/server';
 import { scanDabanWithPrefilter } from '@/lib/scanner/DabanScanner';
 import { saveDabanSession } from '@/lib/storage/dabanStorage';
@@ -14,9 +25,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { getLastTradingDay } = await import('@/lib/datasource/marketHours');
+    const { getLastTradingDay, getCurrentTradingDay } = await import('@/lib/datasource/marketHours');
     const dateParam = req.nextUrl.searchParams.get('date');
-    const date = dateParam ?? getLastTradingDay('CN');
+    const typeParam = req.nextUrl.searchParams.get('type'); // 'open' = 開盤掃描
+
+    // 日期解析：手動 date > type=open（今日）> 預設盤後（昨日）
+    const date = dateParam
+      ?? (typeParam === 'open' ? getCurrentTradingDay('CN') : getLastTradingDay('CN'));
 
     if (!isTradingDay(date, 'CN')) {
       return apiOk({ skipped: true, reason: 'non-trading day', date });
@@ -24,18 +39,22 @@ export async function GET(req: NextRequest) {
 
     const session = await scanDabanWithPrefilter(date);
 
-    if (session.resultCount >= 5) {
+    // 開盤掃描：只要有 1 支就存（開盤初期數據可能較少）；盤後掃描維持 >= 5 支門檻
+    const saveThreshold = typeParam === 'open' ? 1 : 5;
+
+    if (session.resultCount >= saveThreshold) {
       await saveDabanSession(session);
-      console.log(`[cron/scan-daban] ${date}: ${session.resultCount} 支漲停，已儲存`);
+      console.log(`[cron/scan-daban] ${date} (${typeParam ?? 'close'}): ${session.resultCount} 支漲停，已儲存`);
     } else {
-      console.warn(`[cron/scan-daban] ${date}: 僅 ${session.resultCount} 支，疑似資料不完整，不儲存`);
+      console.warn(`[cron/scan-daban] ${date} (${typeParam ?? 'close'}): 僅 ${session.resultCount} 支，疑似資料不完整，不儲存`);
     }
 
     return apiOk({
       date,
+      type: typeParam ?? 'close',
       resultCount: session.resultCount,
       sentiment: session.sentiment,
-      saved: session.resultCount >= 5,
+      saved: session.resultCount >= saveThreshold,
     });
   } catch (err) {
     return apiError(String(err));
