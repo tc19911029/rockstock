@@ -291,7 +291,10 @@ export const useBacktestStore = create<BacktestState>()(
             scanCache.delete(key);
           }
         }
-        set({ market });
+        // 切換市場時若在打板模式，重設為多（打板僅限 CN）
+        const { scanDirection } = get();
+        const nextDir = scanDirection === 'daban' ? 'long' : scanDirection;
+        set({ market, ...(nextDir !== scanDirection ? { scanDirection: nextDir } : {}) });
       },
       setScanDate: (scanDate) => {
         // P3C: 切換日期時清除所有 MTF unfiltered 快取（含 date-specific keys），
@@ -1100,14 +1103,19 @@ export const useBacktestStore = create<BacktestState>()(
         await get().fetchCronDates(market, dir);
         const { cronDates } = get();
 
-        // 2. 如果已有日期 → 立即載入最新一天（不等 backfill）
+        // 2. 如果已有日期 → 優先載入最近有結果（resultCount > 0）的一天，
+        //    若全為 0 或未知則退回最新日期（不等 backfill）
         if (cronDates.length > 0) {
-          const latestDate = cronDates[0].date;
+          const marketDates = cronDates.filter(c => c.market === market);
+          const bestDate =
+            marketDates.find(c => c.resultCount > 0)?.date ??
+            marketDates[0]?.date ??
+            cronDates[0].date;
+          const latestDate = bestDate;
           await get().loadCronSession(market, latestDate, { scanOnly: true, direction: dir });
 
           // 3. 背景預載最近 5 天到 scanCache（不阻塞 UI）
-          const datesToPreload = cronDates
-            .filter(c => c.market === market)
+          const datesToPreload = marketDates
             .map(c => c.date)
             .filter(d => d !== latestDate)
             .slice(0, 4); // 最新一天已載入，預載接下來 4 天

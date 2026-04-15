@@ -41,9 +41,12 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
 
   const [maxDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()));
 
-  // 載入歷史日期
+  // 載入歷史日期；市場/方向切換後自動載入最新結果
+  const conditionMountedRef = useRef(false);
   useEffect(() => {
-     
+    const isInitialMount = !conditionMountedRef.current;
+    conditionMountedRef.current = true;
+
     if (scanDirection === 'daban') {
       // 打板有獨立的日期列表 API
       fetch('/api/scanner/daban').then(r => r.json()).then(data => {
@@ -56,11 +59,24 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
         }
       }).catch(() => {});
     } else {
-      fetchCronDates(market, scanDirection);
+      fetchCronDates(market, scanDirection).then(() => {
+        // 初次掛載由 autoLoadLatest 負責，後續市場/方向切換才自動載入
+        if (isInitialMount) return;
+        const dates = useBacktestStore.getState().cronDates;
+        if (dates.length > 0) {
+          // 優先載入最近有結果的日期，避免停在 0 筆的今日
+          const marketDates = dates.filter(c => c.market === market);
+          const bestDate =
+            marketDates.find(c => c.resultCount > 0)?.date ??
+            marketDates[0]?.date ??
+            dates[0].date;
+          useBacktestStore.getState().loadCronSession(market, bestDate, { scanOnly: true, direction: scanDirection as 'long' | 'short' });
+        }
+      });
     }
   }, [market, scanDirection, fetchCronDates]);
 
-  // 自動載入最新掃描結果
+  // 自動載入最新掃描結果（只跑一次）
   const autoLoadedRef = useRef(false);
   useEffect(() => {
     if (!autoLoadedRef.current) {
@@ -119,10 +135,16 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
               clearCurrent();
               // 切換市場後重新載入新市場的日期列表 + 最新掃描結果
               const dir = scanDirection === 'long' || scanDirection === 'short' ? scanDirection : 'long';
+              setScanDirection(dir); // 確保離開打板模式時重設方向
               await fetchCronDates(m, dir);
               const dates = useBacktestStore.getState().cronDates;
               if (dates.length > 0) {
-                useBacktestStore.getState().loadCronSession(m, dates[0].date, { scanOnly: true, direction: dir });
+                const mDates = dates.filter(c => c.market === m);
+                const bestDate =
+                  mDates.find(c => c.resultCount > 0)?.date ??
+                  mDates[0]?.date ??
+                  dates[0].date;
+                useBacktestStore.getState().loadCronSession(m, bestDate, { scanOnly: true, direction: dir });
               }
             }}
               className={`px-2.5 py-1 text-[11px] font-medium ${market === m ? 'bg-blue-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>
@@ -428,7 +450,7 @@ export default function ScanPageContent({ defaultMode: _defaultMode = 'full' }: 
             </div>
 
             {/* Scan Result Badge */}
-            {scanResults.length > 0 && !isScanning && (
+            {scanResults.length > 0 && !isScanning && scanDirection !== 'daban' && (
               <div className="text-sm text-muted-foreground hidden sm:flex items-center gap-1.5">
                 <span className="text-foreground/80 font-medium">{scanDate}</span>
                 {' 選出 '}
