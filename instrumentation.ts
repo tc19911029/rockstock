@@ -85,61 +85,72 @@ export async function register() {
     }
   }
 
-  // ── L1 歷史K線自動下載（收盤後跑一次） ──
-  const { saveLocalCandles } = await import('./lib/datasource/LocalCandleStore');
-  const { isTradingDay } = await import('./lib/utils/tradingDay');
+  // ── L1 歷史K線自動下載（收盤後跑一次，用 L2 快照注入） ──
+  // 注意：不能在頂層 import LocalCandleStore（含 'path' 模組，edge runtime 不支援）
+  // 改用你的思路：盤後直接從 L2 快照注入 L1，不需要外部 API
 
-  // 記錄今天是否已下載，避免重複跑
   const l1Downloaded = { TW: '', CN: '' };
 
   async function downloadL1(market: 'TW' | 'CN') {
+    const { isTradingDay } = await import('./lib/utils/tradingDay');
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
 
-    // 今天已下載過就跳過
     if (l1Downloaded[market] === today) return;
-    // 非交易日跳過
     if (!isTradingDay(today, market)) return;
-    // 必須在盤後窗口才下載（確保收盤數據已發佈）
     if (!isPostCloseWindow(market)) return;
 
-    console.log(`[local-cron] ${market} L1 開始下載歷史K線...`);
+    console.log(`[local-cron] ${market} L1 用 L2 快照補入今日 K 棒...`);
     const startTime = Date.now();
-    let succeeded = 0, failed = 0;
 
     try {
-      const ScannerClass = market === 'CN'
-        ? (await import('./lib/scanner/ChinaScanner')).ChinaScanner
-        : (await import('./lib/scanner/TaiwanScanner')).TaiwanScanner;
-      const scanner = new ScannerClass();
-      const stocks = await scanner.getStockList();
+      // 讀 L2 快照
+      const snapshot = await refreshIntradaySnapshot(market);
+      if (snapshot.count === 0) {
+        console.warn(`[local-cron] ${market} L2 快照為空，跳過 L1 注入`);
+        return;
+      }
 
-      // 分批下載，每批 8 支，間隔 300ms
-      for (let i = 0; i < stocks.length; i += 8) {
-        const batch = stocks.slice(i, i + 8);
-        const settled = await Promise.allSettled(
-          batch.map(async ({ symbol }) => {
-            const candles = await scanner.fetchCandles(symbol);
-            if (candles.length > 0) {
-              await saveLocalCandles(symbol, market, candles);
-            }
-            return candles.length;
-          })
-        );
-        for (const r of settled) {
-          if (r.status === 'fulfilled' && r.value > 0) succeeded++;
-          else failed++;
-        }
-        if (i + 8 < stocks.length) {
-          await new Promise(r => setTimeout(r, 300));
-        }
+      // 動態 import fs（只在 nodejs runtime 執行）
+      const { readFileSync, writeFileSync, readdirSync, existsSync } = await import('fs');
+      const { join } = await import('path');
+      const dataDir = join(process.cwd(), 'data', 'candles', market);
+      if (!existsSync(dataDir)) return;
+
+      // Build quote map
+      const quoteMap = new Map<string, { open: number; high: number; low: number; close: number; volume: number }>();
+      for (const q of snapshot.quotes) {
+        if (q.close > 0) quoteMap.set(q.symbol, q);
+      }
+
+      const files = readdirSync(dataDir).filter((f: string) => f.endsWith('.json'));
+      let injected = 0;
+
+      for (const f of files) {
+        try {
+          const filePath = join(dataDir, f);
+          const data = JSON.parse(readFileSync(filePath, 'utf8'));
+          const lastCandle = data.candles?.[data.candles.length - 1];
+          if (!lastCandle || lastCandle.date >= today) continue; // 已有今日數據
+
+          const pureCode = (data.symbol || f.replace('.json', '')).replace(/\.(TW|TWO|SS|SZ)$/i, '');
+          const q = quoteMap.get(pureCode);
+          if (!q || q.close <= 0) continue;
+
+          data.candles.push({ date: today, open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+          data.lastDate = today;
+          data.updatedAt = new Date().toISOString();
+          data.sealedDate = today;
+          writeFileSync(filePath, JSON.stringify(data), 'utf8');
+          injected++;
+        } catch { /* skip individual file errors */ }
       }
 
       l1Downloaded[market] = today;
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[local-cron] ${market} L1 下載完成: ${succeeded} 成功, ${failed} 失敗, ${elapsed}s`);
+      console.log(`[local-cron] ${market} L1 注入完成: ${injected} 支, ${elapsed}s`);
     } catch (err) {
-      console.error(`[local-cron] ${market} L1 下載失敗:`, err);
+      console.error(`[local-cron] ${market} L1 注入失敗:`, err);
     }
   }
 
