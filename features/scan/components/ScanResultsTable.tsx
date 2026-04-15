@@ -59,6 +59,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     performance,
     isFetchingForward,
     useMultiTimeframe,
+    isLoadingCronSession,
   } = useBacktestStore();
 
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
@@ -148,6 +149,9 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   });
 
   if (!scanOnly) return null;
+
+  // 載入中不顯示空狀態（避免與 ScanPanel 的「載入中…」旋轉器同時出現）
+  if (scanResults.length === 0 && isLoadingCronSession) return null;
 
   if (scanResults.length === 0) {
     return (

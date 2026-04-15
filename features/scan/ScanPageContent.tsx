@@ -59,18 +59,23 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
         }
       }).catch(() => {});
     } else {
+      const capturedDir = scanDirection;
+      const capturedMarket = market;
       fetchCronDates(market, scanDirection).then(() => {
         // 初次掛載由 autoLoadLatest 負責，後續市場/方向切換才自動載入
         if (isInitialMount) return;
-        const dates = useBacktestStore.getState().cronDates;
+        // Race condition 防護：若方向/市場已在 fetch 期間切換，放棄這次載入
+        const cur = useBacktestStore.getState();
+        if (cur.scanDirection !== capturedDir || cur.market !== capturedMarket) return;
+        const dates = cur.cronDates;
         if (dates.length > 0) {
           // 優先載入最近有結果的日期，避免停在 0 筆的今日
-          const marketDates = dates.filter(c => c.market === market);
+          const marketDates = dates.filter(c => c.market === capturedMarket);
           const bestDate =
             marketDates.find(c => c.resultCount > 0)?.date ??
             marketDates[0]?.date ??
             dates[0].date;
-          useBacktestStore.getState().loadCronSession(market, bestDate, { scanOnly: true, direction: scanDirection as 'long' | 'short' });
+          cur.loadCronSession(capturedMarket, bestDate, { scanOnly: true, direction: capturedDir as 'long' | 'short' });
         }
       });
     }

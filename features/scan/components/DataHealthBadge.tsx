@@ -271,20 +271,6 @@ export function DataHealthBadge({ market }: DataHealthProps) {
   );
 }
 
-function formatAge(isoStr: string): string {
-  const diff = Date.now() - new Date(isoStr).getTime();
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  if (hours < 1) return `${Math.floor(diff / (1000 * 60))} 分鐘前`;
-  if (hours < 24) return `${hours} 小時前`;
-  return `${Math.floor(hours / 24)} 天前`;
-}
-
-function formatSeconds(sec: number): string {
-  if (sec < 60) return `${sec} 秒前`;
-  if (sec < 3600) return `${Math.floor(sec / 60)} 分鐘前`;
-  return `${Math.floor(sec / 3600)} 小時前`;
-}
-
 // ── 展開面板子元件 ──────────────────────────────────────────────────────────
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
