@@ -51,11 +51,16 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
       // 打板有獨立的日期列表 API
       fetch('/api/scanner/daban').then(r => r.json()).then(data => {
         if (data.dates) {
-          useBacktestStore.setState({
-            cronDates: data.dates.map((d: { date: string; resultCount: number }) => ({
-              market: 'CN' as const, date: d.date, resultCount: d.resultCount, scanTime: '',
-            })),
-          });
+          const dabanEntries = data.dates.map((d: { date: string; resultCount: number }) => ({
+            market: 'CN' as const, date: d.date, resultCount: d.resultCount, scanTime: '',
+          }));
+          // Merge：保留 TW 日期，只替換 CN（打板永遠是 CN）
+          useBacktestStore.setState(state => ({
+            cronDates: [
+              ...state.cronDates.filter(c => c.market !== 'CN'),
+              ...dabanEntries,
+            ],
+          }));
         }
       }).catch(() => {});
     } else {
