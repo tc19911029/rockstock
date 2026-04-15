@@ -94,7 +94,7 @@ export async function getEastMoneySingleQuote(code: string): Promise<EastMoneyQu
       high: (item.f15 != null && item.f15 > 0) ? item.f15 : item.f2,
       low: (item.f16 != null && item.f16 > 0) ? item.f16 : item.f2,
       close: item.f2,
-      volume: (item.f5 ?? 0) * 100, // 手 → 股
+      volume: item.f5 ?? 0, // 手（1手=100股=1張），統一以「張」存儲
     };
   } catch {
     return null;
@@ -172,7 +172,7 @@ function parseItem(item: EastMoneyItem, market: 'cn' | 'us'): EastMoneyQuote | n
       high:   (item.f15 != null && item.f15 > 0) ? item.f15 : close,
       low:    (item.f16 != null && item.f16 > 0) ? item.f16 : close,
       close,
-      volume: (item.f5 ?? 0) * 100, // 手 → 股
+      volume: item.f5 ?? 0, // 手（1手=100股=1張），統一以「張」存儲
       prevClose: (item.f18 != null && item.f18 > 0) ? item.f18 : undefined,
     };
   }

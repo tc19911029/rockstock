@@ -122,11 +122,14 @@ export function DataHealthBadge({ market }: DataHealthProps) {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/health/data?market=${market}`)
+    setHealth(null); // 清除舊市場資料，避免顯示上個市場的 badge
+    const controller = new AbortController();
+    fetch(`/api/health/data?market=${market}`, { signal: controller.signal })
       .then(r => r.json())
       .then(data => { if (data.ok) setHealth(data as MarketHealth); })
-      .catch(() => {})
+      .catch(err => { if (err.name !== 'AbortError') {} })
       .finally(() => setLoading(false));
+    return () => controller.abort(); // 切換市場時取消上一次的 fetch
   }, [market]);
 
   if (loading || !health) return null;

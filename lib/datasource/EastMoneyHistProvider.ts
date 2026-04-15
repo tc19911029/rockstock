@@ -81,8 +81,8 @@ function parseKlines(klines: string[], isCN: boolean): Candle[] {
 
       if (isNaN(close) || close <= 0) return null;
 
-      // A 股 volume 單位是「手」（1手=100股），轉為股
-      if (isCN) volume = volume * 100;
+      // A 股 volume 單位是「手」（1手=100股=1張），統一以「張」存儲
+      // 不做換算，直接使用 API 返回的手數
 
       return {
         date,
