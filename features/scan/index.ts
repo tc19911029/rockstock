@@ -13,3 +13,6 @@ export { DataHealthBadge } from './components/DataHealthBadge';
 export type { SelectedStock } from './components/ScanChartPanel';
 export { ScanPanel } from './ScanPageContent';
 export { default as ScanPageContent } from './ScanPageContent';
+export { ScanPanelVertical } from './ScanPanelVertical';
+export { ScanResultsCompact } from './components/ScanResultsCompact';
+export { DabanResultsCompact } from './components/DabanResultsCompact';

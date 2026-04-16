@@ -37,7 +37,16 @@ export async function GET(req: NextRequest) {
       return apiOk({ skipped: true, reason: 'non-trading day', date });
     }
 
-    const session = await scanDabanWithPrefilter(date);
+    let session = await scanDabanWithPrefilter(date);
+
+    // ── 結果品質檢查：大量 null 分數 → 全量 L1 重掃 ──
+    const nonYizi = session.results.filter(r => !r.isYiZiBan);
+    const nullCount = nonYizi.filter(r => r.rankScore == null || r.turnover == null).length;
+    if (nonYizi.length > 0 && nullCount / nonYizi.length > 0.5) {
+      console.warn(`[cron/scan-daban] ⚠️ prefilter 結果品質差（${nullCount}/${nonYizi.length} null），用全量 L1 重掃`);
+      const { scanDabanFromLocalCandles } = await import('@/lib/scanner/DabanScanner');
+      session = await scanDabanFromLocalCandles(date);
+    }
 
     // 開盤掃描：只要有 1 支就存（開盤初期數據可能較少）；盤後掃描維持 >= 5 支門檻
     const saveThreshold = typeParam === 'open' ? 1 : 5;

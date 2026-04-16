@@ -32,6 +32,14 @@ async function fsListPrefix(prefix: string): Promise<string[]> {
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export async function saveDabanSession(session: DabanScanSession): Promise<void> {
+  // ── 結果品質守門：防止壞數據覆蓋好數據 ──
+  const nonYizi = session.results.filter(r => !r.isYiZiBan);
+  const nullRankCount = nonYizi.filter(r => r.rankScore == null || r.turnover == null).length;
+  if (nonYizi.length > 0 && nullRankCount / nonYizi.length > 0.5) {
+    console.warn(`[dabanStorage] ⚠️ 拒絕儲存：${nullRankCount}/${nonYizi.length} 支 rankScore/turnover 為 null，資料品質不合格`);
+    return;
+  }
+
   const data = JSON.stringify(session);
   const filename = `daban-CN-${session.date}.json`;
 

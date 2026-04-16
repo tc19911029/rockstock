@@ -204,7 +204,6 @@ export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
         className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l1Color} cursor-pointer transition-colors hover:brightness-110`}
         title={`L1 歷史K線 | 覆蓋率 ${coverage} | ${l1TimeText}`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[health.health] ?? dotColorMap.warning}`} />
         L1 {l1Label}
       </button>
 
@@ -213,7 +212,6 @@ export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
         className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l2Color} cursor-pointer transition-colors hover:brightness-110 ${showL2Alert ? 'animate-pulse' : ''}`}
         title={`L2 快照 | ${l2?.quoteCount ?? 0} 筆 | ${l2TimeText}`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[l2DisplayStatus]}`} />
         L2 {l2Label}
       </button>
 
@@ -222,7 +220,6 @@ export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
         className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l3Color} cursor-pointer transition-colors hover:brightness-110`}
         title={`L3 即時報價 | 依賴 L2`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[l3DisplayStatus]}`} />
         L3 {l3Label}
       </button>
 
@@ -231,7 +228,6 @@ export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
         className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l4Color} cursor-pointer transition-colors hover:brightness-110`}
         title={`L4 掃描 | ${l4?.lastScanCount ?? 0} 檔 | ${l4TimeText}`}
       >
-        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[l4DisplayStatus]}`} />
         L4 {l4Label}
       </button>
 

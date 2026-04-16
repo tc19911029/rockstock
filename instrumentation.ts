@@ -154,6 +154,40 @@ export async function register() {
     }
   }
 
+  // ── 打板開盤確認（CN 9:25 CST，每日一次） ──
+  const dabanConfirmed = { date: '' };
+
+  async function maybeConfirmDabanOpen() {
+    const { isTradingDay } = await import('./lib/utils/tradingDay');
+    const nowCN = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+    const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    const hhmm = nowCN.getHours() * 100 + nowCN.getMinutes();
+
+    // 09:25–09:35 CST 視窗，交易日，每日只跑一次
+    if (hhmm < 925 || hhmm > 935) return;
+    if (dabanConfirmed.date === todayCN) return;
+    if (!isTradingDay(todayCN, 'CN')) return;
+
+    dabanConfirmed.date = todayCN; // 先標記，防重複執行
+    console.log('[local-cron] CN 打板開盤確認啟動...');
+    try {
+      const { confirmDabanAtOpen } = await import('./lib/scanner/DabanScanner');
+      const { getLastTradingDay } = await import('./lib/datasource/marketHours');
+      const scanDate = getLastTradingDay('CN');
+      if (scanDate === todayCN) {
+        console.log('[local-cron] CN 打板確認跳過（scanDate 等於今日）');
+        return;
+      }
+      // 強制刷新 L2 拿集合競價價格
+      await refreshIntradaySnapshot('CN');
+      const result = await confirmDabanAtOpen(scanDate, todayCN);
+      const confirmed = result?.results.filter(r => r.openConfirmed).length ?? 0;
+      console.log(`[local-cron] CN 打板開盤確認完成: ${confirmed}/${result?.resultCount ?? 0} 支確認進場`);
+    } catch (err) {
+      console.error('[local-cron] CN 打板開盤確認失敗:', err);
+    }
+  }
+
   // TW: 每 5 分鐘
   setInterval(async () => {
     try { await refreshAndScan('TW'); }
@@ -165,6 +199,12 @@ export async function register() {
     try { await refreshAndScan('CN'); }
     catch (err) { console.error('[local-cron] CN 刷新+掃描失敗:', err); }
   }, 2 * 60 * 1000);
+
+  // 打板開盤確認：每 1 分鐘檢查一次（只在 09:25–09:35 CST 執行）
+  setInterval(async () => {
+    try { await maybeConfirmDabanOpen(); }
+    catch (err) { console.error('[local-cron] 打板開盤確認失敗:', err); }
+  }, 60 * 1000);
 
   // L1 下載：每 10 分鐘檢查一次，盤後窗口內才實際執行（每日只跑一次）
   setInterval(async () => {
