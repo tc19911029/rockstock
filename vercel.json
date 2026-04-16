@@ -25,8 +25,20 @@
       "schedule": "0 6 * * 1-5"
     },
     {
-      "path": "/api/cron/scan-cn",
+      "path": "/api/cron/scan-cn?batch=1&totalBatches=4",
       "schedule": "45 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/scan-cn?batch=2&totalBatches=4",
+      "schedule": "51 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/scan-cn?batch=3&totalBatches=4",
+      "schedule": "57 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/scan-cn?batch=4&totalBatches=4",
+      "schedule": "3 8 * * 1-5"
     },
     {
       "path": "/api/cron/scan-daban",
@@ -34,7 +46,7 @@
     },
     {
       "path": "/api/cron/confirm-daban-open",
-      "schedule": "27 1 * * 1-5"
+      "schedule": "25 1 * * 1-5"
     },
     {
       "path": "/api/cron/scan-intraday?market=TW",

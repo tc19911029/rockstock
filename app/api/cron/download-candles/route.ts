@@ -15,8 +15,11 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { readIntradaySnapshot, IntradayQuote } from '@/lib/datasource/IntradayCache';
 import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';
 import { verifyDownload } from '@/lib/datasource/DownloadVerifier';
+import { spotCheckL1 } from '@/lib/datasource/L1SpotCheck';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -55,18 +58,51 @@ export async function GET(req: NextRequest) {
     const stocks = await scanner.getStockList();
     console.info(`[download-candles] ${market}: 開始下載 ${stocks.length} 檔 K 線（增量模式）`);
 
+    // ── Step 0: 預載 L2 快照（API 失敗時作為 fallback） ──
+    let l2Map: Map<string, IntradayQuote> | null = null;
+    let l2Injected = 0;
+    try {
+      const snap = await readIntradaySnapshot(market, lastTradingDate);
+      if (snap && snap.quotes.length > 0 && snap.date === lastTradingDate) {
+        l2Map = new Map();
+        for (const q of snap.quotes) {
+          if (q.close > 0) {
+            const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+            l2Map.set(code, q);
+          }
+        }
+        console.info(`[download-candles] ${market}: L2 快照已載入 ${l2Map.size} 支作為 fallback`);
+      }
+    } catch { /* L2 不可用，純 API 模式 */ }
+
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(async ({ symbol }) => {
           // 移除增量檢查：每次都重新下載，確保假期後恢復的第一天能更新到落後的本地檔
-          // （原本 isLocalDataFresh 在 cron 停擺期間會錯誤地跳過落後的檔案）
 
           const candles = await scanner.fetchCandles(symbol);
           if (candles.length > 0) {
             await saveLocalCandles(symbol, market, candles);
+            return candles.length;
           }
-          return candles.length;
+
+          // API 返回 0 筆 → L2 fallback：從快照補今日 K 棒
+          if (l2Map) {
+            const l2Quote = l2Map.get(symbol);
+            if (l2Quote) {
+              const existing = await readCandleFile(symbol, market);
+              if (existing && existing.lastDate < lastTradingDate) {
+                await saveLocalCandles(symbol, market, [
+                  ...existing.candles,
+                  { date: lastTradingDate, open: l2Quote.open, high: l2Quote.high, low: l2Quote.low, close: l2Quote.close, volume: l2Quote.volume },
+                ]);
+                l2Injected++;
+                return 1; // 算成功
+              }
+            }
+          }
+          return 0;
         })
       );
 
@@ -89,7 +125,7 @@ export async function GET(req: NextRequest) {
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.info(`[download-candles] ${market}: 完成 — ${succeeded} 下載, ${skipped} 跳過, ${failed} 失敗, ${duration}s`);
+    console.info(`[download-candles] ${market}: 完成 — ${succeeded} 下載, ${l2Injected} L2注入, ${skipped} 跳過, ${failed} 失敗, ${duration}s`);
 
     // 保存下載清單（供掃描前檢查覆蓋率使用）
     await saveDownloadManifest(market, lastTradingDate, {
@@ -126,15 +162,26 @@ export async function GET(req: NextRequest) {
       console.warn('[download-candles] verify failed:', err);
     }
 
+    // ── L1 抽查（Yahoo 交叉核驗） ──
+    let spotCheck: import('@/lib/datasource/L1SpotCheck').SpotCheckResult | undefined;
+    try {
+      const allSymbols = stocks.map(s => s.symbol);
+      spotCheck = await spotCheckL1(market, lastTradingDate, allSymbols);
+    } catch (err) {
+      console.warn('[download-candles] L1 抽查失敗:', err);
+    }
+
     return apiOk({
       market,
       totalStocks: stocks.length,
       succeeded,
+      l2Injected,
       skipped,
       failed,
       durationSec: parseFloat(duration),
       maBase: maBaseResult,
       verify: verifyResult,
+      spotCheck: spotCheck ? { passed: spotCheck.passed, failed: spotCheck.failed, suspicious: spotCheck.suspicious } : undefined,
     });
   } catch (err) {
     console.error(`[download-candles] ${market}: 錯誤`, err);

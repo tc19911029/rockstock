@@ -258,9 +258,10 @@ async function tryProvidersWithRacing<T>(
   }
 
   if (available.length === 1) {
+    const singleTimeout = new Promise<T[]>((resolve) => setTimeout(() => resolve([]), 30000));
     try {
-      const result = await available[0].fn();
-      recordSuccess(available[0].name);
+      const result = await Promise.race([available[0].fn(), singleTimeout]);
+      if (result.length > 0) recordSuccess(available[0].name);
       return result;
     } catch (err) {
       console.warn(`[MultiMarket] ${available[0].name} failed:`, err);
@@ -301,7 +302,15 @@ async function tryProvidersWithRacing<T>(
   );
 
   // 等所有結果（主 provider + 備援），取第一個非空
-  const allResults = await Promise.all([primaryPromise, ...fallbackPromises]);
+  // 全局超時保護：VPN/proxy 環境下 TCP 連線可能卡死，AbortSignal 在 fetch 前就被攔截
+  const allCount = 1 + fallbackPromises.length;
+  const timeoutResult = new Promise<T[][]>(r =>
+    setTimeout(() => r(Array(allCount).fill([]) as T[][]), 30000)
+  );
+  const allResults = await Promise.race([
+    Promise.all([primaryPromise, ...fallbackPromises]),
+    timeoutResult,
+  ]);
   for (const r of allResults) {
     if (r.length > 0) return r;
   }

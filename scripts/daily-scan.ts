@@ -19,10 +19,11 @@ config();
 
 import { TaiwanScanner } from '../lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '../lib/scanner/ChinaScanner';
-import { ScanSession } from '../lib/scanner/types';
-import { saveScanSession } from '../lib/storage/scanStorage';
+import { runScanPipeline } from '../lib/scanner/ScanPipeline';
 import { saveLocalCandles, batchCheckFreshness, getLocalCandleDir } from '../lib/datasource/LocalCandleStore';
-import { ZHU_V1 } from '../lib/strategy/StrategyConfig';
+import { readCandleFile } from '../lib/datasource/CandleStorageAdapter';
+import { readIntradaySnapshot } from '../lib/datasource/IntradayCache';
+import { spotCheckL1 } from '../lib/datasource/L1SpotCheck';
 import { isWeekday } from '../lib/utils/tradingDay';
 
 const CONCURRENCY = 8;
@@ -32,6 +33,62 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 function getTodayDate(market: 'TW' | 'CN'): string {
   const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
   return new Date().toLocaleString('sv-SE', { timeZone: tz }).split(' ')[0];
+}
+
+// ── Step 0: Inject L2 snapshot into L1 ─────────────────────────────────
+
+/**
+ * 收盤後 L2 快照就是今日最終 K 棒（開高低收量）。
+ * 先注入 L1，讓 downloadCandles() 把這些股票視為「已是最新」跳過 API，
+ * 大幅降低對 EastMoney/Yahoo API 的依賴，VPN/API 斷線也不影響掃描完整性。
+ */
+async function injectL2IntoL1(market: 'TW' | 'CN') {
+  const date = getTodayDate(market);
+  console.log(`\n💉 [${market}] Step 0: 從 L2 快照注入今日 K 棒到 L1...`);
+
+  const snap = await readIntradaySnapshot(market, date);
+  if (!snap || snap.quotes.length === 0) {
+    console.log(`   ⚠️  L2 快照不存在或為空（${date}），跳過注入`);
+    return;
+  }
+  if (snap.date !== date) {
+    console.log(`   ⚠️  L2 快照日期 ${snap.date} ≠ 今日 ${date}，跳過注入`);
+    return;
+  }
+
+  const quotes = snap.quotes.filter(q => q.close > 0);
+  let injected = 0;
+  let skipped = 0;
+
+  const INJECT_CONCURRENCY = 30;
+  for (let i = 0; i < quotes.length; i += INJECT_CONCURRENCY) {
+    const batch = quotes.slice(i, i + INJECT_CONCURRENCY);
+    await Promise.allSettled(
+      batch.map(async (q) => {
+        const symbol = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        const existing = await readCandleFile(symbol, market);
+        if (!existing || existing.lastDate >= date) {
+          skipped++;
+          return;
+        }
+        // 追加今日 K 棒到既有 L1 歷史序列
+        await saveLocalCandles(symbol, market, [
+          ...existing.candles,
+          { date, open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume },
+        ]);
+        injected++;
+      })
+    );
+  }
+
+  console.log(`   ✅ 注入完成: ${injected} 支已注入, ${skipped} 支跳過（已最新或無 L1）`);
+
+  // Step 0.5: 抽查注入的數據是否正確
+  if (injected > 0) {
+    console.log(`\n🔬 [${market}] Step 0.5: L1 抽查（Yahoo 交叉核驗）...`);
+    const allSymbols = quotes.map(q => q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, ''));
+    await spotCheckL1(market, date, allSymbols);
+  }
 }
 
 // ── Step 1: Download candles ────────────────────────────────────────────
@@ -85,7 +142,7 @@ async function downloadCandles(market: 'TW' | 'CN') {
   console.log(`\n   ✅ 下載完成: 成功 ${succeeded}, 失敗 ${failed}`);
 }
 
-// ── Step 2: Run scans ───────────────────────────────────────────────────
+// ── Step 2: Run scans (via ScanPipeline) ───────────────────────────────
 
 async function runScans(market: 'TW' | 'CN') {
   const date = getTodayDate(market);
@@ -97,67 +154,18 @@ async function runScans(market: 'TW' | 'CN') {
 
   console.log(`\n🔍 [${market}] 掃描 ${date}...`);
 
-  const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
-  const stocks = await scanner.getStockList();
-  const mtfThresholds = { ...ZHU_V1.thresholds, multiTimeframeFilter: true };
-
-  // ── Long daily ──
-  const { results: longDaily, marketTrend } = await scanner.scanSOP(stocks, date);
-  await saveScanSession({
-    id: `${market}-long-daily-${date}-${Date.now()}`,
-    market, date, direction: 'long',
-    multiTimeframeEnabled: false,
-    scanTime: new Date().toISOString(),
-    resultCount: longDaily.length, results: longDaily,
+  const result = await runScanPipeline({
+    market,
+    date,
+    sessionType: 'post_close',
+    directions: ['long', 'short'],
+    mtfModes: ['daily', 'mtf'],
+    force: true,
+    deadlineMs: 600_000, // 本地不受 Vercel 300s 限制
   });
 
-  // ── Long MTF ──
-  let longMtfCount = 0;
-  try {
-    const { results: longMtf } = await scanner.scanSOP(stocks, date, mtfThresholds);
-    await saveScanSession({
-      id: `${market}-long-mtf-${date}-${Date.now()}`,
-      market, date, direction: 'long',
-      multiTimeframeEnabled: true,
-      scanTime: new Date().toISOString(),
-      resultCount: longMtf.length, results: longMtf,
-    });
-    longMtfCount = longMtf.length;
-  } catch { /* non-fatal */ }
-
-  // ── Short daily ──
-  let shortDailyCount = 0;
-  try {
-    const { candidates: shortDaily } = await scanner.scanShortCandidates(stocks, date);
-    await saveScanSession({
-      id: `${market}-short-daily-${date}-${Date.now()}`,
-      market, date, direction: 'short',
-      multiTimeframeEnabled: false,
-      scanTime: new Date().toISOString(),
-      resultCount: shortDaily.length, results: shortDaily,
-    });
-    shortDailyCount = shortDaily.length;
-  } catch { /* non-fatal */ }
-
-  // ── Short MTF ──
-  let shortMtfCount = 0;
-  try {
-    const { candidates: shortMtf } = await scanner.scanShortCandidates(stocks, date, mtfThresholds);
-    await saveScanSession({
-      id: `${market}-short-mtf-${date}-${Date.now()}`,
-      market, date, direction: 'short',
-      multiTimeframeEnabled: true,
-      scanTime: new Date().toISOString(),
-      resultCount: shortMtf.length, results: shortMtf,
-    });
-    shortMtfCount = shortMtf.length;
-  } catch { /* non-fatal */ }
-
-  console.log(
-    `   ✅ trend=${marketTrend} ` +
-    `long-d=${longDaily.length} long-m=${longMtfCount} ` +
-    `short-d=${shortDailyCount} short-m=${shortMtfCount}`
-  );
+  const summary = Object.entries(result.counts).map(([k, v]) => `${k}=${v}`).join(' ');
+  console.log(`   ✅ trend=${result.marketTrend ?? '?'} ${summary}`);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -182,6 +190,7 @@ async function main() {
 
   for (const market of targetMarkets) {
     try {
+      await injectL2IntoL1(market);
       await downloadCandles(market);
       await runScans(market);
     } catch (err) {

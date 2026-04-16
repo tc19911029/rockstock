@@ -321,6 +321,8 @@ export interface DabanScanResult {
   scanDate: string;             // 掃描日期
   /** 次日集合競價結束價（9:25 AM CST） */
   openPrice?: number;
+  /** 高開幅度 % = (openPrice - prevClose) / prevClose × 100 */
+  gapUpPct?: number;
   /** 是否確認進場：openPrice >= buyThresholdPrice */
   openConfirmed?: boolean;
 }

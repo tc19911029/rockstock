@@ -313,6 +313,13 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
 
   await writeIntradaySnapshot(snapshot);
 
+  // ── L2 交叉核驗：抽樣 50 支比對備用源 ──
+  try {
+    await crossValidateL2(market, quotes, sources);
+  } catch (err) {
+    console.warn(`[IntradayCache] ${market} 交叉核驗失敗 (non-fatal):`, err);
+  }
+
   console.info(`[IntradayCache] ${market} 快照已更新: ${quotes.length} 檔 @ ${today}`);
   return snapshot;
 }
@@ -601,5 +608,120 @@ export async function readMABase(
     return base;
   } catch {
     return null;
+  }
+}
+
+// ── L2 交叉核驗 ──────────────────────────────────────────────────────────
+
+export interface CrossValidationResult {
+  sampleSize: number;
+  matched: number;
+  mismatched: number;
+  mismatchRate: number;
+  suspicious: boolean;
+  details: { symbol: string; primary: number; secondary: number; diffPct: number }[];
+}
+
+/** 最近一次交叉核驗結果 */
+const _lastCrossValidation: Record<string, CrossValidationResult> = {};
+
+export function getLastCrossValidation(market: 'TW' | 'CN'): CrossValidationResult | null {
+  return _lastCrossValidation[market] ?? null;
+}
+
+const CROSS_VALIDATE_SAMPLE = 50;
+const CROSS_VALIDATE_TOLERANCE = 0.02; // 2% 偏差容忍
+const CROSS_VALIDATE_ALERT_THRESHOLD = 0.10; // 10% 不一致率觸發告警
+
+/**
+ * 從備用源抽樣比對，驗證主源數據正確性
+ * TW: 主源 mis.twse vs 備源 OpenAPI
+ * CN: 主源東財 vs 備源騰訊
+ */
+async function crossValidateL2(
+  market: 'TW' | 'CN',
+  primaryQuotes: IntradayQuote[],
+  sources: DataSourceStatus[],
+): Promise<void> {
+  if (primaryQuotes.length < 100) return; // 數據太少不值得核驗
+
+  // 抽樣：隨機選 50 支
+  const shuffled = [...primaryQuotes].sort(() => Math.random() - 0.5);
+  const sample = shuffled.slice(0, CROSS_VALIDATE_SAMPLE);
+  const primaryMap = new Map(sample.map(q => [q.symbol, q.close]));
+
+  // 從備用源獲取相同股票的報價
+  let secondaryMap: Map<string, number>;
+  try {
+    if (market === 'TW') {
+      const { getTWSEDailyAll } = await import('./TWSERealtime');
+      const dailyMap = await getTWSEDailyAll();
+      secondaryMap = new Map();
+      for (const [, q] of dailyMap) {
+        secondaryMap.set(q.code, q.close);
+      }
+    } else {
+      const { getTencentRealtime } = await import('./TencentRealtime');
+      const symbols = sample.map(q => q.symbol);
+      const tcMap = await getTencentRealtime(symbols);
+      secondaryMap = new Map();
+      for (const [code, q] of tcMap) {
+        secondaryMap.set(code, q.close);
+      }
+    }
+  } catch {
+    // 備用源不可用，跳過核驗
+    return;
+  }
+
+  // 比對
+  let matched = 0;
+  let mismatched = 0;
+  const details: CrossValidationResult['details'] = [];
+
+  for (const [symbol, primaryClose] of primaryMap) {
+    const secondaryClose = secondaryMap.get(symbol);
+    if (!secondaryClose || secondaryClose <= 0 || primaryClose <= 0) continue;
+
+    const diffPct = Math.abs(primaryClose - secondaryClose) / primaryClose;
+    if (diffPct <= CROSS_VALIDATE_TOLERANCE) {
+      matched++;
+    } else {
+      mismatched++;
+      details.push({
+        symbol,
+        primary: primaryClose,
+        secondary: secondaryClose,
+        diffPct: Math.round(diffPct * 10000) / 100,
+      });
+    }
+  }
+
+  const total = matched + mismatched;
+  if (total === 0) return;
+
+  const mismatchRate = mismatched / total;
+  const suspicious = mismatchRate > CROSS_VALIDATE_ALERT_THRESHOLD;
+
+  const result: CrossValidationResult = {
+    sampleSize: total,
+    matched,
+    mismatched,
+    mismatchRate: Math.round(mismatchRate * 100) / 100,
+    suspicious,
+    details: details.slice(0, 10), // 最多記錄 10 筆
+  };
+
+  _lastCrossValidation[market] = result;
+
+  if (suspicious) {
+    console.error(
+      `[IntradayCache] ★ ${market} L2 交叉核驗可疑！` +
+      `${mismatched}/${total} 支偏差 > 2%（不一致率 ${(mismatchRate * 100).toFixed(1)}%）`
+    );
+  } else {
+    console.info(
+      `[IntradayCache] ${market} L2 交叉核驗通過: ${matched}/${total} 一致`
+    );
   }
 }
