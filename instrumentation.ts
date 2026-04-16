@@ -11,7 +11,7 @@ export async function register() {
   const { saveScanSession } = await import('./lib/storage/scanStorage');
 
   console.log('[local-cron] 本地開發模式，啟動 L2 快照刷新 + L4 盤中掃描');
-  console.log('[local-cron] TW: 每 5 分鐘 / CN: 每 2 分鐘（盤中+盤後窗口）');
+  console.log('[local-cron] TW: 每 5 分鐘 / CN: 每 5 分鐘（盤中+盤後窗口）');
 
   // 共用的掃描邏輯：L2 刷新後立即跑 long-daily 掃描存 L4
   async function refreshAndScan(market: 'TW' | 'CN') {
@@ -194,11 +194,11 @@ export async function register() {
     catch (err) { console.error('[local-cron] TW 刷新+掃描失敗:', err); }
   }, 5 * 60 * 1000);
 
-  // CN: 每 2 分鐘
+  // CN: 每 5 分鐘（L4 掃描 3200+ 支需 5-8 分鐘，2 分鐘刷新會浪費 API）
   setInterval(async () => {
     try { await refreshAndScan('CN'); }
     catch (err) { console.error('[local-cron] CN 刷新+掃描失敗:', err); }
-  }, 2 * 60 * 1000);
+  }, 5 * 60 * 1000);
 
   // 打板開盤確認：每 1 分鐘檢查一次（只在 09:25–09:35 CST 執行）
   setInterval(async () => {

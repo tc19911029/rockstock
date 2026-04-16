@@ -74,7 +74,7 @@
     },
     {
       "path": "/api/cron/update-intraday?market=CN",
-      "schedule": "*/2 1-7 * * 1-5"
+      "schedule": "*/5 1-7 * * 1-5"
     }
   ]
 }
