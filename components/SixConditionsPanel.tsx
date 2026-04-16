@@ -20,12 +20,12 @@ type ConditionKey = typeof CONDITION_LABELS[number]['key'];
 
 function ScoreDots({ score, total = 6 }: { score: number; total?: number }) {
   return (
-    <span className="flex gap-0.5 items-center">
+    <span className="flex gap-1 items-center">
       {Array.from({ length: total }).map((_, i) => (
         <span
           key={i}
-          className={`inline-block w-2 h-2 rounded-full ${
-            i < score ? 'bg-green-400' : 'bg-muted-foreground/60'
+          className={`inline-block w-2.5 h-2.5 rounded-full transition-colors ${
+            i < score ? 'bg-green-400 shadow-[0_0_4px_rgba(74,222,128,0.4)]' : 'bg-muted-foreground/30'
           }`}
         />
       ))}
@@ -49,8 +49,8 @@ function MiniProgress({ value, target, pass }: { value: number; target: number; 
 /** Metric badge showing the key numeric value */
 function MetricBadge({ label, pass }: { label: string; pass: boolean }) {
   return (
-    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-      pass ? 'bg-green-900/50 text-green-300' : 'bg-muted text-muted-foreground'
+    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${
+      pass ? 'bg-green-900/40 text-green-300 border border-green-800/50' : 'bg-muted text-muted-foreground border border-transparent'
     }`}>
       {label}
     </span>
@@ -85,19 +85,19 @@ function ConditionRow({
       changed === 'gained' ? 'bg-green-900/20' : changed === 'lost' ? 'bg-red-900/20' : ''
     }`}>
       <button
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-muted/40 transition-colors"
         onClick={onToggle}
       >
         {dot}
-        <span className="text-muted-foreground text-xs w-4">{label.icon}</span>
-        <span className={`text-xs font-medium w-14 shrink-0 ${label.required ? 'text-foreground' : 'text-muted-foreground italic'}`} title={label.tip}>
+        <span className="text-muted-foreground/70 text-xs w-4 font-mono">{label.icon}</span>
+        <span className={`text-sm font-medium w-16 shrink-0 ${label.required ? 'text-foreground' : 'text-muted-foreground italic'}`} title={label.tip}>
           {label.name}
         </span>
-        {changed === 'gained' && <span className="text-[9px] px-1 py-0 rounded bg-green-600 text-white font-bold animate-pulse">NEW</span>}
-        {changed === 'lost' && <span className="text-[9px] px-1 py-0 rounded bg-red-600 text-white font-bold">LOST</span>}
+        {changed === 'gained' && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-green-600 text-white font-bold animate-pulse">NEW</span>}
+        {changed === 'lost' && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-red-600 text-white font-bold">LOST</span>}
         {metric && <MetricBadge label={metric} pass={pass} />}
         <span className="flex-1" />
-        <span className="text-muted-foreground/60 text-xs">{expanded ? '▲' : '▼'}</span>
+        <span className={`text-muted-foreground/40 text-[10px] transition-transform ${expanded ? 'rotate-180' : ''}`}>▼</span>
       </button>
       {/* Progress bar (always visible for quantitative conditions) */}
       {progress && (
@@ -223,12 +223,12 @@ export default function SixConditionsPanel() {
   return (
     <div className="bg-secondary rounded-lg overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-secondary border-b border-border">
-        <span className="text-xs font-semibold text-foreground">六大進場條件 ({strategyName})</span>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-3 py-2.5 bg-secondary border-b border-border">
+        <span className="text-sm font-semibold text-foreground">六大進場條件</span>
+        <div className="flex items-center gap-2.5">
           <ScoreDots score={coreScore} total={5} />
-          {sc.indicator.pass && <span className="text-green-400 text-[10px]">+⑥</span>}
-          <span className={`text-xs font-bold ${scoreColor}`}>{score}/6</span>
+          {sc.indicator.pass && <span className="text-green-400 text-xs">+⑥</span>}
+          <span className={`text-base font-bold tabular-nums ${scoreColor}`}>{score}/6</span>
         </div>
       </div>
 
@@ -253,10 +253,10 @@ export default function SixConditionsPanel() {
       </div>
 
       {/* Summary */}
-      <div className={`px-3 py-2.5 border-t border-border ${
+      <div className={`px-3 py-3 border-t border-border ${
         isCoreReady ? 'bg-green-900/40' : coreScore >= 3 ? 'bg-yellow-900/30' : 'bg-secondary/60'
       }`}>
-        <p className={`text-xs font-bold ${
+        <p className={`text-sm font-bold ${
           isCoreReady ? 'text-green-300' : coreScore >= 3 ? 'text-yellow-300' : 'text-muted-foreground'
         }`}>
           {isCoreReady

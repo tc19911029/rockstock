@@ -6,7 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 body {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-dm-sans), var(--font-geist-sans), system-ui, sans-serif;
   /* iOS safe area padding for Capacitor / PWA standalone mode */
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
@@ -119,25 +119,25 @@ body {
   --sidebar-ring: oklch(0.55 0.2 263);
 }
 
-/* ── Dark Theme — slate-blue, optimized for financial data ── */
+/* ── Dark Theme — three-layer slate-blue, optimized for financial data ── */
 .dark {
-  --background: oklch(0.14 0.015 258);
+  --background: oklch(0.11 0.012 258);
   --foreground: oklch(0.93 0.01 250);
-  --card: oklch(0.18 0.018 258);
+  --card: oklch(0.15 0.015 258);
   --card-foreground: oklch(0.93 0.01 250);
-  --popover: oklch(0.18 0.018 258);
+  --popover: oklch(0.19 0.018 258);
   --popover-foreground: oklch(0.93 0.01 250);
   --primary: oklch(0.65 0.2 263);
-  --primary-foreground: oklch(0.14 0.015 258);
-  --secondary: oklch(0.23 0.018 258);
+  --primary-foreground: oklch(0.11 0.012 258);
+  --secondary: oklch(0.20 0.016 258);
   --secondary-foreground: oklch(0.93 0.01 250);
-  --muted: oklch(0.23 0.018 258);
-  --muted-foreground: oklch(0.62 0.02 250);
-  --accent: oklch(0.23 0.018 258);
+  --muted: oklch(0.20 0.016 258);
+  --muted-foreground: oklch(0.60 0.02 250);
+  --accent: oklch(0.20 0.016 258);
   --accent-foreground: oklch(0.93 0.01 250);
   --destructive: oklch(0.65 0.22 27);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
+  --border: oklch(1 0 0 / 7%);
+  --input: oklch(1 0 0 / 10%);
   --ring: oklch(0.65 0.2 263);
   /* Stock semantic colors — 紅漲綠跌 (Asian convention) */
   --bull: oklch(0.68 0.22 27);
@@ -149,13 +149,13 @@ body {
   --chart-3: oklch(0.78 0.18 55);
   --chart-4: oklch(0.68 0.22 27);
   --chart-5: oklch(0.72 0.15 310);
-  --sidebar: oklch(0.18 0.018 258);
+  --sidebar: oklch(0.15 0.015 258);
   --sidebar-foreground: oklch(0.93 0.01 250);
   --sidebar-primary: oklch(0.65 0.2 263);
   --sidebar-primary-foreground: oklch(0.93 0.01 250);
-  --sidebar-accent: oklch(0.23 0.018 258);
+  --sidebar-accent: oklch(0.20 0.016 258);
   --sidebar-accent-foreground: oklch(0.93 0.01 250);
-  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-border: oklch(1 0 0 / 7%);
   --sidebar-ring: oklch(0.65 0.2 263);
 }
 
@@ -182,6 +182,11 @@ body {
   --bear: oklch(0.68 0.22 27);
 }
 
+/* ── Font mono override: use JetBrains Mono when available ── */
+.font-mono {
+  font-family: var(--font-jetbrains-mono), var(--font-geist-mono), ui-monospace, monospace;
+}
+
 /* ── Stock-specific utilities ── */
 @layer utilities {
   .text-bull { color: var(--bull); }
@@ -195,9 +200,28 @@ body {
   .border-bear { border-color: var(--bear); }
   /* Number display */
   .tabular-nums { font-variant-numeric: tabular-nums; }
+  /* Frosted glass panel */
+  .glass-panel { @apply backdrop-blur-xl bg-popover/85 border border-white/[0.06] shadow-xl; }
   /* Tight card padding for dense financial tables */
   .card-dense { @apply p-3; }
+  /* Fade-in animation for content areas */
+  .animate-fade-in {
+    animation: fadeIn 0.4s ease-out;
+  }
+  .animate-slide-in-right {
+    animation: slideInRight 0.3s ease-out;
+  }
   /* Stat block */
   .stat-label { @apply text-xs text-muted-foreground uppercase tracking-wide; }
   .stat-value { @apply text-lg font-semibold tabular-nums; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
 }

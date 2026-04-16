@@ -51,19 +51,27 @@ interface MarketHealth {
 
 interface DataHealthProps {
   market: 'TW' | 'CN';
+  /** 強制向下展開且寬度對齊父容器 */
+  forceDown?: boolean;
 }
 
 // ── 共用色表 ──────────────────────────────────────────────────────────────
 
 const statusColorMap: Record<string, string> = {
-  fresh: 'bg-green-900/50 text-green-300 border-green-700',
-  closed: 'bg-blue-900/50 text-blue-300 border-blue-700',
-  stale: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
-  missing: 'bg-red-900/50 text-red-300 border-red-700',
-  good: 'bg-green-900/50 text-green-300 border-green-700',
-  warning: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
-  critical: 'bg-red-900/50 text-red-300 border-red-700',
-  no_report: 'bg-zinc-800/50 text-zinc-400 border-zinc-600',
+  fresh: 'bg-green-950/60 text-green-300 border-green-800/50',
+  closed: 'bg-blue-950/60 text-blue-300 border-blue-800/50',
+  stale: 'bg-yellow-950/60 text-yellow-300 border-yellow-800/50',
+  missing: 'bg-red-950/60 text-red-300 border-red-800/50',
+  good: 'bg-green-950/60 text-green-300 border-green-800/50',
+  warning: 'bg-yellow-950/60 text-yellow-300 border-yellow-800/50',
+  critical: 'bg-red-950/60 text-red-300 border-red-800/50',
+  no_report: 'bg-zinc-900/60 text-zinc-400 border-zinc-700/50',
+};
+
+const dotColorMap: Record<string, string> = {
+  fresh: 'bg-green-400', closed: 'bg-blue-400', stale: 'bg-yellow-400',
+  missing: 'bg-red-400', good: 'bg-green-400', warning: 'bg-yellow-400',
+  critical: 'bg-red-400', no_report: 'bg-zinc-500',
 };
 
 const statusLabelMap: Record<string, string> = {
@@ -73,7 +81,7 @@ const statusLabelMap: Record<string, string> = {
 
 // ── 元件 ──────────────────────────────────────────────────────────────────
 
-export function DataHealthBadge({ market }: DataHealthProps) {
+export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
   const [health, setHealth] = useState<MarketHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -103,6 +111,20 @@ export function DataHealthBadge({ market }: DataHealthProps) {
     const spaceBelow = window.innerHeight - rect.bottom - 8;
     const spaceAbove = rect.top - 8;
 
+    // forceDown: prefer downward expansion aligned to parent, but fall back to upward if no space
+    if (forceDown) {
+      const parentRect = containerRef.current.parentElement?.getBoundingClientRect();
+      const w = parentRect ? parentRect.width : undefined;
+      const l = parentRect ? parentRect.left : rect.left;
+      if (spaceBelow >= 120) {
+        setPanelStyle({ position: 'fixed', top: rect.bottom + 4, left: l, maxHeight: spaceBelow, width: w });
+      } else {
+        // Not enough space below — expand upward
+        setPanelStyle({ position: 'fixed', bottom: window.innerHeight - rect.top + 4, left: l, maxHeight: spaceAbove, width: w });
+      }
+      return;
+    }
+
     if (spaceBelow >= panelH) {
       // 向下展開
       setPanelStyle({ position: 'fixed', top: rect.bottom + 4, left: rect.left, maxHeight: spaceBelow });
@@ -118,7 +140,7 @@ export function DataHealthBadge({ market }: DataHealthProps) {
         setPanelStyle({ position: 'fixed', bottom: window.innerHeight - rect.top + 4, left: rect.left, maxHeight: spaceAbove });
       }
     }
-  }, [expanded]);
+  }, [expanded, forceDown]);
 
   useEffect(() => {
     setLoading(true);
@@ -179,39 +201,43 @@ export function DataHealthBadge({ market }: DataHealthProps) {
     <div ref={containerRef} className="relative inline-flex gap-1">
       {/* L1 */}
       <button onClick={toggle}
-        className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${l1Color} cursor-pointer`}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l1Color} cursor-pointer transition-colors hover:brightness-110`}
         title={`L1 歷史K線 | 覆蓋率 ${coverage} | ${l1TimeText}`}
       >
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[health.health] ?? dotColorMap.warning}`} />
         L1 {l1Label}
       </button>
 
       {/* L2 */}
       <button onClick={toggle}
-        className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${l2Color} cursor-pointer ${showL2Alert ? 'animate-pulse' : ''}`}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l2Color} cursor-pointer transition-colors hover:brightness-110 ${showL2Alert ? 'animate-pulse' : ''}`}
         title={`L2 快照 | ${l2?.quoteCount ?? 0} 筆 | ${l2TimeText}`}
       >
-        L2 {l2Label}{showL2Alert ? ' !' : ''}
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[l2DisplayStatus]}`} />
+        L2 {l2Label}
       </button>
 
       {/* L3 */}
       <button onClick={toggle}
-        className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${l3Color} cursor-pointer`}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l3Color} cursor-pointer transition-colors hover:brightness-110`}
         title={`L3 即時報價 | 依賴 L2`}
       >
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[l3DisplayStatus]}`} />
         L3 {l3Label}
       </button>
 
       {/* L4 */}
       <button onClick={toggle}
-        className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${l4Color} cursor-pointer`}
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border ${l4Color} cursor-pointer transition-colors hover:brightness-110`}
         title={`L4 掃描 | ${l4?.lastScanCount ?? 0} 檔 | ${l4TimeText}`}
       >
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColorMap[l4DisplayStatus]}`} />
         L4 {l4Label}
       </button>
 
       {/* 展開詳情面板 */}
       {expanded && (
-        <div ref={panelRef} style={panelStyle} className="z-[9999] bg-popover border border-border rounded-md shadow-lg p-3 min-w-[240px] text-[11px] overflow-y-auto">
+        <div ref={panelRef} style={panelStyle} className="z-[9999] glass-panel rounded-lg p-3 min-w-[260px] text-[11px] overflow-y-auto">
           <div className="font-semibold mb-2">{market} 數據健康報告</div>
 
           {/* L1 */}
