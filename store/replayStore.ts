@@ -282,8 +282,21 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           // 本地讀取失敗，不影響後續
         }
 
-        // 本地載入成功 → 直接完成，不等 API（避免 30s timeout 阻塞 UI）
         if (localLoaded) {
+          // 本地已秒開 → 背景靜默更新今日 K 棒（不阻塞 UI）
+          const bgSymbol = symbol;
+          const bgInterval = interval;
+          fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(json => {
+              // 只在用戶還停在同一股票+週期才套用，避免覆蓋已換的資料
+              const cur = get();
+              const curSymbol = cur.currentStock?.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+              if (curSymbol === bgSymbol && cur.currentInterval === bgInterval && json?.candles?.length > 0) {
+                applyData(json, false);
+              }
+            })
+            .catch(() => {}); // 靜默忽略
           return;
         }
 
@@ -332,9 +345,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
 
     pollingTimer = setInterval(async () => {
       try {
-        // 日K/週K/月K 用本地+即時路徑（跟初始載入一致）
-        const useLocal = ['1d', '1wk', '1mo'].includes(interval);
-        const localParam = useLocal ? '&local=1' : '';
+        // polling 一律走 API（含今日 L2 即時報價），不用 local
+        const localParam = '';
         const res = await fetch(
           `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${period}${localParam}`
         );

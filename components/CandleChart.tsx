@@ -28,10 +28,9 @@ const MA_COLORS = {
 /** Convert date string to lightweight-charts Time.
  *  Daily: 'YYYY-MM-DD' → string Time (business day)
  *  Intraday: 'YYYY-MM-DD HH:mm' → UTCTimestamp (seconds)
- *  注意：分鐘K的時間假裝是 UTC，讓 TradingView 直接顯示 CST 時間 */
+ *  注意：用 'Z' 假裝 CST 時間是 UTC，讓 TradingView X軸直接顯示正確的亞洲時間 */
 function toTime(date: string): Time {
   if (date.includes(' ')) {
-    // 用 'Z' (UTC) 而非 '+08:00'，讓 TV 顯示的 UTC 時間 = 我們的 CST 時間
     const d = new Date(date.replace(' ', 'T') + ':00Z');
     return Math.floor(d.getTime() / 1000) as unknown as Time;
   }
@@ -236,18 +235,21 @@ export default function CandleChart({
     candleRef.current.setData(candles.map(c => ({
       time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close,
     })));
+    /** 過濾 null/undefined/NaN（分鐘K MA 數據不足時會產生 NaN） */
+    const validNum = (v: number | undefined | null): v is number =>
+      v != null && Number.isFinite(v);
     const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
     for (const key of maKeys) {
       maRefs.current[key]?.setData(
-        candles.filter(c => c[key] != null).map(c => ({ time: toTime(c.date), value: c[key]! }))
+        candles.filter(c => validNum(c[key])).map(c => ({ time: toTime(c.date), value: c[key]! }))
       );
     }
     // Bollinger Bands
     bbRefs.current.upper?.setData(
-      candles.filter(c => c.bbUpper != null).map(c => ({ time: toTime(c.date), value: c.bbUpper! }))
+      candles.filter(c => validNum(c.bbUpper)).map(c => ({ time: toTime(c.date), value: c.bbUpper! }))
     );
     bbRefs.current.lower?.setData(
-      candles.filter(c => c.bbLower != null).map(c => ({ time: toTime(c.date), value: c.bbLower! }))
+      candles.filter(c => validNum(c.bbLower)).map(c => ({ time: toTime(c.date), value: c.bbLower! }))
     );
     // scrollToPosition 後稍等一個 tick 再廣播，確保 range 已更新
     const chart = chartRef.current;

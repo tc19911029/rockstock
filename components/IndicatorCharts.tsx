@@ -178,11 +178,12 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
     if (!difRef.current || !signalRef.current || !histRef.current || candles.length === 0) return;
     const { bull: macdBull, bear: macdBear } = getBullBearColors();
     // Include all bars (pad warmup with 0) so bar count matches main chart → logical range sync works
-    difRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: c.macdDIF ?? 0 })));
-    signalRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: c.macdSignal ?? 0 })));
+    const safe = (v: number | undefined | null) => Number.isFinite(v) ? v! : 0;
+    difRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: safe(c.macdDIF) })));
+    signalRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: safe(c.macdSignal) })));
     histRef.current.setData(candles.map(c => ({
-      time: toTime(c.date), value: c.macdOSC ?? 0,
-      color: (c.macdOSC ?? 0) >= 0 ? `${macdBull}99` : `${macdBear}99`,
+      time: toTime(c.date), value: safe(c.macdOSC),
+      color: safe(c.macdOSC) >= 0 ? `${macdBull}99` : `${macdBear}99`,
     })));
     const chart = chartRef.current;
     requestAnimationFrame(() => {
@@ -258,8 +259,9 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
     if (!kRef.current || !dRef.current || candles.length === 0) return;
     const { bull: kdBull, bear: kdBear } = getBullBearColors();
     // Pad warmup bars with 50 (neutral KD) so bar count matches main chart
-    kRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: c.kdK ?? 50 })));
-    dRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: c.kdD ?? 50 })));
+    const safeKD = (v: number | undefined | null) => Number.isFinite(v) ? v! : 50;
+    kRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: safeKD(c.kdK) })));
+    dRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: safeKD(c.kdD) })));
     if (kMarkRef.current) {
       const dots: SeriesMarker<Time>[] = candles
         .filter(c => c.kdK != null && (c.kdK >= 80 || c.kdK <= 20))
@@ -336,7 +338,8 @@ function RSIChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; h
   useEffect(() => {
     if (!rsiRef.current || candles.length === 0) return;
     const { bull: rsiBull, bear: rsiBear } = getBullBearColors();
-    rsiRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: c.rsi14 ?? 50 })));
+    const safeRSI = (v: number | undefined | null) => Number.isFinite(v) ? v! : 50;
+    rsiRef.current.setData(candles.map(c => ({ time: toTime(c.date), value: safeRSI(c.rsi14) })));
     if (markRef.current) {
       const dots: SeriesMarker<Time>[] = candles
         .filter(c => c.rsi14 != null && (c.rsi14 >= 70 || c.rsi14 <= 30))

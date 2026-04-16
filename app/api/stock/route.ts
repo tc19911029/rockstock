@@ -175,11 +175,16 @@ export async function GET(req: NextRequest) {
           }
 
           if (todayQuote) {
+            // OHLC 一致性修正：push2 API 有時回傳垃圾值（日期拼接、漲跌幅當價格）
+            const { open, high, low, close } = todayQuote;
+            const safeOpen  = (open > 0 && open > close * 0.5 && open < close * 1.5)  ? open  : close;
+            const safeHigh  = (high > 0 && high >= close && high < close * 1.5)        ? high  : Math.max(safeOpen, close);
+            const safeLow   = (low > 0  && low <= close && low > close * 0.5)          ? low   : Math.min(safeOpen, close);
             result.candles.push({
               date: today,
-              open: todayQuote.open,
-              high: todayQuote.high,
-              low: todayQuote.low,
+              open: safeOpen,
+              high: safeHigh,
+              low: safeLow,
               close: todayQuote.close,
               volume: todayQuote.volume,
             });
