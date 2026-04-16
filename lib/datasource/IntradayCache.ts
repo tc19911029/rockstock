@@ -292,15 +292,28 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
     _consecutiveEmptyCount[market] = 0;
   }
 
-  // ── 最終空快照保護（不管原因） ──
+  // ── 最終快照保護（空數據 + 部分數據都要擋） ──
+  const minExpected = market === 'CN' ? 1500 : 500;
+  const existing = quotes.length < minExpected
+    ? await readIntradaySnapshot(market, today)
+    : null;
+
   if (quotes.length === 0) {
-    const existing = await readIntradaySnapshot(market, today);
     if (existing && existing.quotes.length > 0) {
       console.warn(`[IntradayCache] 保留現有快照 (${existing.quotes.length} 筆)，不覆蓋空數據`);
       return existing;
     }
     console.warn(`[IntradayCache] ${market} 無現有快照且無數據，跳過寫入磁碟`);
     return { market, date: today, updatedAt: new Date().toISOString(), count: 0, quotes: [] };
+  }
+
+  // ── 部分數據保護：新數據量 < 現有快照的 30% → 保留現有 ──
+  if (existing && existing.quotes.length > 0 && quotes.length < existing.quotes.length * 0.3) {
+    console.warn(
+      `[IntradayCache] ⚠️ ${market} 新數據嚴重不足（${quotes.length} vs 現有 ${existing.quotes.length}），` +
+      `保留現有快照，不覆蓋`
+    );
+    return existing;
   }
 
   const snapshot: IntradaySnapshot = {
