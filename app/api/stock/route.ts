@@ -92,9 +92,18 @@ export async function GET(req: NextRequest) {
       }
       if (result && result.candles.length > 0) {
         // ── 盤中即時覆蓋：若 lastDate < today，主動拉即時報價湊今日 K 棒 ──
-        // 只在盤中或盤後窗口才注入，避免凌晨/盤前用昨日收盤數據產生假的今日 K 棒
+        // 盤中/盤後窗口：可用即時 API 拉；窗口外（晚上/凌晨）：只靠 L2 快照（若有今日數據也允許注入）
+        // 避免凌晨用舊 API 產生假的今日 K 棒，但 L2 有當日 snapshot 時就允許
         const marketKey = isTW ? 'TW' as const : 'CN' as const;
-        const shouldInjectToday = isMarketOpen(marketKey) || isPostCloseWindow(marketKey);
+        const inLiveWindow = isMarketOpen(marketKey) || isPostCloseWindow(marketKey);
+        let l2HasToday = false;
+        if (!inLiveWindow) {
+          try {
+            const snap = await readIntradaySnapshot(marketKey, today);
+            l2HasToday = !!snap && snap.date === today && snap.quotes.some(q => q.symbol === pureCode && q.close > 0);
+          } catch { /* ignore */ }
+        }
+        const shouldInjectToday = inLiveWindow || l2HasToday;
         const lastCandle = result.candles[result.candles.length - 1];
         if (shouldInjectToday && lastCandle && lastCandle.date < today) {
           let todayQuote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
