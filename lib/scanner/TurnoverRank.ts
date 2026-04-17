@@ -124,3 +124,61 @@ export async function readTurnoverRank(
     return null;
   }
 }
+
+/**
+ * 計算指定日期當下的成交額排名（不寫檔，回傳 Set）
+ *
+ * 用於歷史 L4 backfill — 需要模擬「當時的」前 N 大成交額。
+ * 對每支股票，取 asOfDate（含）往前最多 20 根 K 棒計算均值。
+ *
+ * @param asOfDate YYYY-MM-DD 基準日期（含）
+ */
+export async function computeTurnoverRankAsOfDate(
+  market: 'TW' | 'CN',
+  stocks: { symbol: string }[],
+  asOfDate: string,
+  topN: number = 500,
+): Promise<Set<string>> {
+  const rankings: { symbol: string; avgTurnover: number }[] = [];
+  const CONCURRENCY = 30;
+
+  for (let i = 0; i < stocks.length; i += CONCURRENCY) {
+    const batch = stocks.slice(i, i + CONCURRENCY);
+    const settled = await Promise.allSettled(
+      batch.map(async ({ symbol }) => {
+        const file = await readCandleFile(symbol, market);
+        if (!file || file.candles.length < MIN_VALID_DAYS) return null;
+
+        // 找到 asOfDate 在序列中的位置（包含該日）
+        const idx = file.candles.findIndex(c => c.date.slice(0, 10) > asOfDate);
+        // endIdx = 首個 date > asOfDate 的 index，即「切到 asOfDate 為止」
+        const endIdx = idx === -1 ? file.candles.length : idx;
+        if (endIdx < MIN_VALID_DAYS) return null;
+
+        const startIdx = Math.max(0, endIdx - AVG_WINDOW);
+        const window = file.candles.slice(startIdx, endIdx);
+
+        let sum = 0;
+        let count = 0;
+        for (const c of window) {
+          const close = c.close ?? 0;
+          const vol = c.volume ?? 0;
+          if (close > 0 && vol > 0) {
+            sum += close * vol;
+            count++;
+          }
+        }
+        if (count < MIN_VALID_DAYS) return null;
+
+        return { symbol, avgTurnover: sum / count };
+      }),
+    );
+
+    for (const r of settled) {
+      if (r.status === 'fulfilled' && r.value) rankings.push(r.value);
+    }
+  }
+
+  rankings.sort((a, b) => b.avgTurnover - a.avgTurnover);
+  return new Set(rankings.slice(0, topN).map(r => r.symbol));
+}
