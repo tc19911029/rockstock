@@ -76,6 +76,24 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
       .finally(() => setLoading(false));
   }, [date]);
 
+  // CN 開盤確認視窗（CST 9:20–9:40）內每 30 秒靜默重載 session，
+  // 讓後端 confirmDabanAtOpen 寫入的 openConfirmed / gapUpPct 自動刷出來。
+  useEffect(() => {
+    if (!date) return;
+    const tick = () => {
+      const nowCN = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+      const hhmm = nowCN.getHours() * 100 + nowCN.getMinutes();
+      if (hhmm < 920 || hhmm > 940) return; // 視窗外不動作
+      fetch(`/api/scanner/daban?date=${date}`)
+        .then(r => r.json())
+        .then(data => { if (data.session) setSession(data.session); })
+        .catch(() => {});
+    };
+    const id = setInterval(tick, 30_000);
+    tick(); // 進入頁面或換日期時先試一次（視窗外自動略過）
+    return () => clearInterval(id);
+  }, [date]);
+
   useEffect(() => {
     if (!session || session.results.length === 0) return;
     const buyable = session.results.filter(r => !r.isYiZiBan);
@@ -181,6 +199,21 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
         </div>
       )}
 
+      {/* Sort indicator（鐵律 6：靜默排序要 UI 提示） */}
+      {(() => {
+        // 舊檔案沒 sortedBy 欄位：有 openConfirmDate 就推斷為 gapUpPct，否則 turnover
+        const sortedBy = session.sortedBy ?? (session.openConfirmDate ? 'gapUpPct' : 'turnover');
+        return (
+          <div className="text-[10px] text-muted-foreground px-0.5">
+            {sortedBy === 'gapUpPct' ? (
+              <span>🔀 按 <span className="text-amber-400">高開幅度</span> 排序（開盤確認後重排）</span>
+            ) : (
+              <span>🔀 按 <span className="text-sky-400">成交額</span> 排序（收盤時）</span>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Realtime controls */}
       <div className="flex items-center gap-1.5 text-[10px]">
         <button onClick={fetchRealtimeOpenPrices} className="px-1.5 py-0.5 rounded bg-sky-700/40 text-sky-300 hover:bg-sky-700/60">
@@ -211,23 +244,44 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
 
         return (
           <div key={r.symbol} className="rounded-lg border border-border/60 px-2.5 py-2 bg-card hover:bg-secondary/40 transition-colors">
-            {/* Row 1: Symbol + Name + Board type */}
+            {/* Row 1: Symbol + Name + Board type + 進場確認燈 */}
             <div className="flex items-center gap-1.5 mb-1">
               <span className="font-mono text-[11px] text-foreground/90">{ticker}</span>
               <span className="text-[11px] text-foreground/80 truncate flex-1">{displayName(r)}</span>
+              {r.openConfirmed === true && (
+                <span className="text-[9px] px-1 py-0.5 rounded border bg-green-500/20 text-green-400 border-green-500/30" title="9:25集合競價開盤價 ≥ 買入門檻，確認進場">
+                  ✅ 進場
+                </span>
+              )}
+              {r.openConfirmed === false && (
+                <span className="text-[9px] px-1 py-0.5 rounded border bg-zinc-500/20 text-zinc-400 border-zinc-500/40" title="9:25集合競價未達買入門檻（收盤 × 1.02），不進場">
+                  ⏸ 不進
+                </span>
+              )}
               <span className={`text-[9px] px-1 py-0.5 rounded border ${boardBadge(r.limitUpType)}`}>{r.limitUpType}</span>
             </div>
 
-            {/* Row 2: Price + Change + Turnover */}
-            <div className="flex items-center gap-1.5 text-[10px] mb-1">
+            {/* Row 2: Price + Change + 門檻 + 高開幅 */}
+            <div className="flex items-center gap-1.5 text-[10px] mb-1 flex-wrap">
               <span className="font-mono text-foreground">{r.closePrice.toFixed(2)}</span>
               <span className="text-bull font-bold">+{r.limitUpPct.toFixed(1)}%</span>
+              <span className="text-muted-foreground/70">門檻 {r.buyThresholdPrice.toFixed(2)}</span>
+              {r.openPrice != null && (
+                <span className="text-muted-foreground/70">
+                  開 <span className="font-mono text-foreground/90">{r.openPrice.toFixed(2)}</span>
+                </span>
+              )}
+              {r.gapUpPct != null && (
+                <span className={r.gapUpPct >= 0 ? 'text-bull' : 'text-bear'}>
+                  高開 {r.gapUpPct >= 0 ? '+' : ''}{r.gapUpPct.toFixed(1)}%
+                </span>
+              )}
             </div>
 
-            {/* Row 3: Realtime open price */}
+            {/* Row 3: Realtime open price（手動刷新用） */}
             {rt && (
               <div className="flex items-center gap-1.5 text-[10px] mb-1 bg-sky-900/20 rounded px-1.5 py-0.5">
-                <span className="text-muted-foreground">開盤</span>
+                <span className="text-muted-foreground">即時</span>
                 <span className="font-mono text-foreground">{rt.open.toFixed(2)}</span>
                 {(() => {
                   const openChg = ((rt.open - r.closePrice) / r.closePrice * 100);

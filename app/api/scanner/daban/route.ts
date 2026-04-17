@@ -21,16 +21,9 @@ export async function GET(req: NextRequest) {
 
   try {
     if (parsed.data.date) {
-      let session = await loadDabanSession(parsed.data.date);
-      if (!session) {
-        // 找不到該日期 → 自動 fallback 到最近有資料的日期
-        const dates = await listDabanDates();
-        // dates 已按日期降序排列，找第一個 <= 請求日期的
-        const nearest = dates.find(d => d.date <= parsed.data.date!);
-        if (nearest) {
-          session = await loadDabanSession(nearest.date);
-        }
-      }
+      const session = await loadDabanSession(parsed.data.date);
+      // 明確 null：該日期無資料。不再 silent fallback 到最近日期，
+      // 否則前端「04/17 (0)」tab 點進去會看到 4/16 的清單，誤以為今日有資料。
       if (!session) return apiOk({ session: null });
       return apiOk({ session });
     }

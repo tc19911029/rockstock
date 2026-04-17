@@ -851,14 +851,17 @@ export abstract class MarketScanner {
   }
 
   /**
-   * 候選股排序層 — 加總排序（高勝率+共振合算）
+   * 候選股排序層 — 六條件總分優先（2025-2026年回測最佳，+236%）
+   * 同分時以共振分+高勝率分為次要排序
    */
   rankCandidates(
     candidates: StockScanResult[],
     _rankBy?: string,
   ): StockScanResult[] {
     return [...candidates].sort((a, b) =>
-      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
+      (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
+      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
+      b.changePercent - a.changePercent
     );
   }
 
@@ -993,7 +996,11 @@ export abstract class MarketScanner {
     }
 
     const sortedResults = results
-      .sort((a, b) => (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent);
+      .sort((a, b) =>
+        (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
+        (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
+        b.changePercent - a.changePercent
+      );
 
     console.info('[ScannerCache]', getScannerCacheStats());
     console.info('[ScanDiagnostics]', JSON.stringify(diag));
@@ -1022,7 +1029,9 @@ export abstract class MarketScanner {
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       if (Date.now() > DEADLINE) {
         const sorted = results.sort((a, b) =>
-          (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
+          (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
+          (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
+          b.changePercent - a.changePercent
         );
         return { results: sorted, partial: true, marketTrend };
       }
@@ -1037,7 +1046,9 @@ export abstract class MarketScanner {
     }
 
     const sorted = results.sort((a, b) =>
-      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) || b.changePercent - a.changePercent
+      (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
+      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
+      b.changePercent - a.changePercent
     );
 
     return {

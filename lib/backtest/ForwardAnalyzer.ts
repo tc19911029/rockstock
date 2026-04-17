@@ -33,6 +33,34 @@ function getMarketToday(market: 'TW' | 'CN'): string {
 }
 
 /**
+ * K 棒健全性檢查（鐵律 3：API sanity check）
+ * 丟掉明顯壞的 K 棒，避免上游 API bug 污染 forward 績效。
+ * 反例：EastMoney klines 盤中對 002580 回 open=17.25（實為 5 天前歷史值），導致 openReturn=-38%。
+ *
+ * @param candles       要檢查的 K 棒（已排序遞增）
+ * @param baselineClose 第一根的 prevClose 基準（通常是 scanPrice）
+ * @returns 過濾後的 K 棒
+ */
+function sanitizeCandles(candles: Candle[], baselineClose: number): Candle[] {
+  const out: Candle[] = [];
+  let prevClose = baselineClose;
+  for (const c of candles) {
+    // 1) OHLC > 0
+    if (!(c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0)) continue;
+    // 2) OHLC 關係：low ≤ open/close ≤ high
+    if (c.low > c.open || c.low > c.close || c.high < c.open || c.high < c.close) continue;
+    // 3) open vs prevClose：單日開盤跳空超過 ±15%（漲跌停 10% + 5% 緩衝）視為壞資料
+    if (prevClose > 0) {
+      const gap = Math.abs(c.open - prevClose) / prevClose;
+      if (gap > 0.15) continue;
+    }
+    out.push(c);
+    prevClose = c.close;
+  }
+  return out;
+}
+
+/**
  * 從本地 K 線檔案提取指定日期範圍的 candles
  * 本地檔案存的是完整歷史（2年+），只需要 filter 出 scanDate 之後的部分
  *
@@ -105,13 +133,17 @@ async function analyzeOne(
       try {
         const fetchStart = candles.length > 0 ? nextDay(lastLocalDate) : startStr;
         const provider = market === 'TW' ? 'finmind' : 'eastmoney';
+        // 第一根 API candle 的 prevClose 基準：已有 L1 就用最後一根 close，否則用 scanPrice
+        const baseline = candles.length > 0 ? candles[candles.length - 1].close : scanPrice;
         await rateLimiter.acquire(provider);
-        const extra = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
+        const extraRaw = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
+        const extra = sanitizeCandles(extraRaw, baseline);
         if (extra.length === 0 && candles.length === 0) {
           // 完全沒數據時 retry 一次
           await new Promise(r => setTimeout(r, 2000));
           await rateLimiter.acquire(provider);
-          const retry = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
+          const retryRaw = await fetchCandlesRange(symbol, fetchStart, safeEndStr, 8000);
+          const retry = sanitizeCandles(retryRaw, baseline);
           if (retry.length > 0) {
             candles = [...candles, ...retry];
             rateLimiter.reportSuccess(provider);
@@ -125,25 +157,33 @@ async function analyzeOne(
       }
     }
 
-    // 從 L2 快照補充今日 K 棒（L1 和 API 可能都還沒有今日數據）
-    const lastCandleDate = candles.length > 0 ? candles[candles.length - 1].date : '';
-    if (lastCandleDate < todayStr) {
-      try {
-        const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
-        const snap = await readIntradaySnapshot(market, todayStr);
-        if (snap && snap.quotes.length > 0) {
-          const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-          const q = snap.quotes.find(sq => sq.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === code);
-          if (q && q.close > 0) {
-            candles.push({
-              date: todayStr, open: q.open, high: q.high, low: q.low,
-              close: q.close, volume: q.volume,
-            });
-          }
+    // L2 今日快照優先覆蓋：API（EastMoney/FinMind）盤中對未收盤股票有時回傳錯誤 open
+    // （曾發生 002580 4/17 open 被回成 17.25 實為歷史 4/10 值，L2 正確值 29.13 反而被略過）。
+    // L2 是盤中即時快照且有 prevClose 可交叉驗證，視為今日 K 棒的權威來源。
+    try {
+      const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+      const snap = await readIntradaySnapshot(market, todayStr);
+      if (snap && snap.quotes.length > 0) {
+        const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        const q = snap.quotes.find(sq => sq.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === code);
+        if (q && q.close > 0) {
+          // 防護：L2 報價若 high/low 不合理（例如欄位錯位吃到時間戳），
+          // 用 close 代替而不是整筆丟掉，避免污染 maxGain/maxLoss 計算
+          const safeHigh = (q.high > 0 && q.high < q.close * 2 && q.high >= q.close)
+            ? q.high : Math.max(q.open, q.close);
+          const safeLow = (q.low > 0 && q.low <= q.close && q.low > q.close * 0.5)
+            ? q.low : Math.min(q.open, q.close);
+          const todayCandle = {
+            date: todayStr, open: q.open, high: safeHigh, low: safeLow,
+            close: q.close, volume: q.volume,
+          };
+          // 移除 API 可能已補的今日 K 棒（覆蓋），再 push L2 版本
+          candles = candles.filter(c => c.date !== todayStr);
+          candles.push(todayCandle);
         }
-      } catch {
-        // L2 讀取失敗不影響已有數據
       }
+    } catch {
+      // L2 讀取失敗不影響已有數據
     }
 
     // P0-4: 若 scanDate 距今不超過 3 個曆天（週五掃描、長假前），

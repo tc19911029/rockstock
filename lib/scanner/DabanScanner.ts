@@ -162,20 +162,9 @@ export function scanDaban(input: DabanScanInput): DabanScanSession {
     const avgVol5 = getAvgVolume(candles, idx, 5);
     const volumeRatio = avgVol5 > 0 ? +(vol / avgVol5).toFixed(2) : 0;
 
-    // 7. 排序分數：多因子（封板力度 + 量比 + 動能 + 成交額）
-    //    回測驗證：勝率 60%→80%，盈虧比 2.45→7.02
-    const totalRange = today.high - today.low;
-    const upperShadowRatio = totalRange > 0
-      ? (today.high - Math.max(today.open, today.close)) / totalRange
-      : 0;
-    const mom5d = idx >= 5
-      ? (today.close / candles[idx - 5].close - 1) * 100
-      : 0;
-    const sealFactor = (1 - upperShadowRatio) * 2;              // 封板力度（0~2）
-    const volFactor = Math.min(volumeRatio, 5) / 5;             // 量比（0~1）
-    const momFactor = Math.max(0, mom5d) / 20;                  // 5日動能（0~∞）
-    const toFactor = Math.log10(Math.max(turnover, 1)) / 10;    // 成交額（0~∞）
-    const rankScore = +(sealFactor + volFactor + momFactor + toFactor).toFixed(2);
+    // 7. 排序分數：純成交額（2025-2026年1年回測最佳，+449%）
+    //    多因子版本在CN 2025-2026大幅跑輸，已棄用
+    const rankScore = turnover;
 
     // 8. 買入門檻價
     const buyThresholdPrice = +(today.close * GAP_UP_FACTOR).toFixed(2);
@@ -211,6 +200,7 @@ export function scanDaban(input: DabanScanInput): DabanScanSession {
     resultCount: results.length,
     results,
     sentiment,
+    sortedBy: 'turnover',
   };
 }
 
@@ -350,6 +340,7 @@ export async function scanDabanWithPrefilter(date: string): Promise<DabanScanSes
       resultCount: 0,
       results: [],
       sentiment: { limitUpCount: 0, yesterdayLimitUpCount: 0, yesterdayAvgReturn: 0, isCold: true },
+      sortedBy: 'turnover',
     };
   }
 
@@ -566,6 +557,7 @@ export async function confirmDabanAtOpen(
     results: updatedResults,
     openConfirmDate: openDate,
     openConfirmTime: new Date().toISOString(),
+    sortedBy: 'gapUpPct',
   };
 
   await saveDabanSession(updatedSession);

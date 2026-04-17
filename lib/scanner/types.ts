@@ -347,6 +347,8 @@ export interface DabanScanSession {
   openConfirmDate?: string;
   /** 開盤確認時間（ISO timestamp） */
   openConfirmTime?: string;
+  /** 目前排序依據（鐵律 6：靜默排序要 UI 提示） */
+  sortedBy?: 'turnover' | 'gapUpPct';
 }
 
 /** 掃描時段類型：盤中快照 vs 收盤後正式結果 */

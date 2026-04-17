@@ -27,7 +27,11 @@ function toTencentCode(symbol: string): string {
 
 /**
  * 解析騰訊報價字串
- * 格式: v_sh600519="1~貴州茅台~600519~1750.00~1735.00~1740.00~15234~7623~7611~..."
+ *
+ * qt.gtimg.cn 實測欄位（2026-04-17 驗證）：
+ *   [2]=代碼, [3]=現價, [4]=昨收, [5]=開盤, [6]=成交量(手)
+ *   [30]=成交時間(YYYYMMDDHHMMSS), [31]=漲跌, [32]=漲跌幅%
+ *   [33]=最高, [34]=最低
  */
 function parseTencentLine(line: string): EastMoneyQuote | null {
   // 提取引號內的內容
@@ -35,7 +39,7 @@ function parseTencentLine(line: string): EastMoneyQuote | null {
   if (!match) return null;
 
   const parts = match[1].split('~');
-  if (parts.length < 33) return null;
+  if (parts.length < 35) return null;
 
   const code = parts[2];
   const name = parts[1];
@@ -43,8 +47,8 @@ function parseTencentLine(line: string): EastMoneyQuote | null {
   const prevClose = parseFloat(parts[4]);
   const open = parseFloat(parts[5]);
   const volume = parseFloat(parts[6]); // 手（1手=100股=1張），統一以「張」存儲
-  const high = parseFloat(parts[30] || parts[3]);
-  const low = parseFloat(parts[32] || parts[3]);
+  const high = parseFloat(parts[33]);
+  const low = parseFloat(parts[34]);
 
   if (!code || !close || close <= 0) return null;
   // 只保留主板

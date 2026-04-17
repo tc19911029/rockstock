@@ -651,9 +651,9 @@ export interface ZhuExitParams {
 
 /** 朱老師獲利方程式預設參數 */
 export const DEFAULT_ZHU_EXIT: ZhuExitParams = {
-  dynamicStopLoss:    true,
+  dynamicStopLoss:    false,
   fixedStopLossPct:   -0.05,
-  maxStopLossPct:     -0.07,
+  maxStopLossPct:     -0.05,
   profitTakeMa5Pct:   0.10,
   profitClimaxPct:    0.20,
   enableLowerHigh:    true,
