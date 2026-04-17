@@ -33,6 +33,8 @@ export interface StockScanResult {
   // ── 歷史信號績效 ──────────────────────────────────────────────────────────
   histWinRate?: number;        // 歷史20日勝率 (%)
   histSignalCount?: number;    // 歷史信號次數
+  // ── 成交額排名（20 日均 close*volume，由 ScanPipeline 在過濾時注入）──
+  turnoverRank?: number;             // 1-500，在全市場前 500 大的名次
   // ── 排序因子：共振 ─────────────────────────────────────────────────────
   resonanceScore?: number;           // BUY/ADD 訊號數 + 跨群組共振數
   // ── 排序因子：高勝率進場位置 (朱老師《活用技術分析寶典》) ─────────────────

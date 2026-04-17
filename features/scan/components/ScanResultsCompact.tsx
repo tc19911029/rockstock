@@ -136,12 +136,20 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                 </span>
               </div>
 
-              {/* Row 2: Price + Industry + Trend + Position */}
+              {/* Row 2: Price + Industry + Trend + Position + Turnover Rank */}
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{r.price.toFixed(2)}</span>
                 {r.industry && <span className="truncate max-w-[60px]">{r.industry}</span>}
                 <span>{r.trendState}</span>
                 <span className="truncate">{r.trendPosition}</span>
+                {r.turnoverRank !== undefined && (
+                  <span
+                    className="ml-auto text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
+                    title="20日均成交額排名（全市場前500內）"
+                  >
+                    量#{r.turnoverRank}
+                  </span>
+                )}
               </div>
 
               {/* Row 3: Six conditions badges */}

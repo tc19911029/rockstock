@@ -75,19 +75,28 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
   // ── Step 2: 取得股票清單（前 N 成交額過濾 + 批次切片） ──
   let stocks = await scanner.getStockList();
+  let turnoverRanks: Map<string, number> | null = null;
 
-  // 前 N 成交額過濾（回測冠軍組合：前 500 + MTF≥3 = +238%）
-  // 索引檔由 daily-scan cron 每天產生，見 lib/scanner/TurnoverRank.ts
+  // 前 N 成交額過濾 + 自動重建索引（回測冠軍組合：前 500 + MTF≥3 = +238%）
+  // 索引 stale 時自動重建（本地 fs / Vercel Blob 統一處理）
   try {
-    const { readTurnoverRank } = await import('./TurnoverRank');
-    const rank = await readTurnoverRank(market as 'TW' | 'CN');
+    const { readTurnoverRank, buildTurnoverRank } = await import('./TurnoverRank');
+    let rank = await readTurnoverRank(market as 'TW' | 'CN');
+    const needsRebuild = !rank || rank.date < date;
+    if (needsRebuild) {
+      console.info(`[ScanPipeline] ${market} 索引 stale（have=${rank?.date ?? 'none'}, want=${date}）→ 自動重建`);
+      await buildTurnoverRank(market as 'TW' | 'CN', stocks, 500);
+      rank = await readTurnoverRank(market as 'TW' | 'CN');
+    }
     if (rank) {
       const before = stocks.length;
       stocks = stocks.filter(s => rank.symbols.has(s.symbol));
+      turnoverRanks = rank.ranks;
       console.info(`[ScanPipeline] ${market} 前 ${rank.topN} 成交額過濾: ${stocks.length}/${before} (index=${rank.date})`);
     }
-  } catch {
-    // 索引檔讀取失敗（Vercel 無本地檔案等）— 不過濾，走原邏輯
+  } catch (err) {
+    console.warn(`[ScanPipeline] ${market} top500 索引讀寫失敗:`, err);
+    // 索引檔讀寫失敗 — 不過濾，走原邏輯
   }
 
   if (batch && totalBatches && totalBatches > 1) {
@@ -146,6 +155,14 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
         results = out.candidates;
         sessionFreshness = out.sessionFreshness;
         if (!marketTrend) marketTrend = String(out.marketTrend ?? '');
+      }
+
+      // 注入成交額排名（供 UI 顯示「成交量#N」標註）
+      if (turnoverRanks) {
+        for (const r of results) {
+          const rank = turnoverRanks.get(r.symbol);
+          if (rank) r.turnoverRank = rank;
+        }
       }
 
       const allowOverwrite = sessionType === 'post_close';

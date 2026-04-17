@@ -79,6 +79,7 @@ async function listPostCloseSessions(
 function applyNewStrategy(
   session: ScanSession,
   top500: Set<string>,
+  ranks: Map<string, number>,
 ): { filtered: number; resorted: number; before: number } {
   const before = session.results.length;
 
@@ -86,7 +87,13 @@ function applyNewStrategy(
   const filtered = session.results.filter(r => top500.has(r.symbol));
   const filterOut = before - filtered.length;
 
-  // 2. 新排序：score → changePercent
+  // 2. 注入成交額排名（1-500）
+  for (const r of filtered) {
+    const rank = ranks.get(r.symbol);
+    if (rank) (r as { turnoverRank?: number }).turnoverRank = rank;
+  }
+
+  // 3. 新排序：score → changePercent
   filtered.sort((a, b) =>
     (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
     b.changePercent - a.changePercent
@@ -156,7 +163,8 @@ async function main() {
     const stocks = stockCache.get(market)!;
 
     console.log(`\n📊 [${market} ${date}] 計算當日 top500...`);
-    const top500 = await computeTurnoverRankAsOfDate(market, stocks, date, 500);
+    const ranks = await computeTurnoverRankAsOfDate(market, stocks, date, 500);
+    const top500 = new Set(ranks.keys());
     console.log(`   top500 size=${top500.size}, 套用到 ${groupFiles.length} 個 session`);
 
     for (const f of groupFiles) {
@@ -164,7 +172,7 @@ async function main() {
         const raw = await fs.readFile(f.fullPath, 'utf-8');
         const session: ScanSession = JSON.parse(raw);
 
-        const { filtered, resorted, before } = applyNewStrategy(session, top500);
+        const { filtered, resorted, before } = applyNewStrategy(session, top500, ranks);
         totalFiles++;
         totalFilteredOut += filtered;
         totalAfter += resorted;

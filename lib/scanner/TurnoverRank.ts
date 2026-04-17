@@ -18,9 +18,55 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 
+const IS_VERCEL = process.env.VERCEL === '1';
 const INDEX_DIR = path.join(process.cwd(), 'data', 'turnover-rank');
 const AVG_WINDOW = 20;
 const MIN_VALID_DAYS = 5;
+
+// ── Blob/FS 統一讀寫（與 CandleStorageAdapter 同模式）────────────────────
+
+function blobKey(market: 'TW' | 'CN'): string {
+  return `turnover-rank/${market}.json`;
+}
+
+async function readIndexRaw(market: 'TW' | 'CN'): Promise<string | null> {
+  if (IS_VERCEL) {
+    try {
+      const { get } = await import('@vercel/blob');
+      const result = await get(blobKey(market), { access: 'private' });
+      if (!result || !result.stream) return null;
+      const reader = result.stream.getReader();
+      const chunks: Uint8Array[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) chunks.push(value);
+      }
+      return new TextDecoder().decode(Buffer.concat(chunks));
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return await fs.readFile(path.join(INDEX_DIR, `${market}.json`), 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+async function writeIndexRaw(market: 'TW' | 'CN', data: string): Promise<void> {
+  if (IS_VERCEL) {
+    const { put } = await import('@vercel/blob');
+    await put(blobKey(market), data, {
+      access: 'private',
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
+  } else {
+    await fs.mkdir(INDEX_DIR, { recursive: true });
+    await fs.writeFile(path.join(INDEX_DIR, `${market}.json`), data);
+  }
+}
 
 export interface TurnoverRankIndex {
   market: 'TW' | 'CN';
@@ -94,12 +140,7 @@ export async function buildTurnoverRank(
     symbols: top.map(r => r.symbol),
   };
 
-  await fs.mkdir(INDEX_DIR, { recursive: true });
-  await fs.writeFile(
-    path.join(INDEX_DIR, `${market}.json`),
-    JSON.stringify(index, null, 2),
-  );
-
+  await writeIndexRaw(market, JSON.stringify(index, null, 2));
   return index;
 }
 
@@ -110,13 +151,16 @@ export async function buildTurnoverRank(
  */
 export async function readTurnoverRank(
   market: 'TW' | 'CN',
-): Promise<{ symbols: Set<string>; date: string; topN: number } | null> {
+): Promise<{ symbols: Set<string>; ranks: Map<string, number>; date: string; topN: number } | null> {
   try {
-    const file = path.join(INDEX_DIR, `${market}.json`);
-    const raw = await fs.readFile(file, 'utf-8');
+    const raw = await readIndexRaw(market);
+    if (!raw) return null;
     const index: TurnoverRankIndex = JSON.parse(raw);
+    const ranks = new Map<string, number>();
+    index.symbols.forEach((sym, i) => ranks.set(sym, i + 1));
     return {
       symbols: new Set(index.symbols),
+      ranks,
       date: index.date,
       topN: index.topN,
     };
@@ -138,7 +182,7 @@ export async function computeTurnoverRankAsOfDate(
   stocks: { symbol: string }[],
   asOfDate: string,
   topN: number = 500,
-): Promise<Set<string>> {
+): Promise<Map<string, number>> {
   const rankings: { symbol: string; avgTurnover: number }[] = [];
   const CONCURRENCY = 30;
 
@@ -180,5 +224,7 @@ export async function computeTurnoverRankAsOfDate(
   }
 
   rankings.sort((a, b) => b.avgTurnover - a.avgTurnover);
-  return new Set(rankings.slice(0, topN).map(r => r.symbol));
+  const map = new Map<string, number>();
+  rankings.slice(0, topN).forEach((r, i) => map.set(r.symbol, i + 1));
+  return map;
 }
