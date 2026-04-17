@@ -20,6 +20,7 @@ config();
 
 import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 import { readCandleFile } from '../lib/datasource/CandleStorageAdapter';
+import { writeIntradaySnapshot, type IntradaySnapshot } from '../lib/datasource/IntradayCache';
 import { TaiwanScanner } from '../lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '../lib/scanner/ChinaScanner';
 
@@ -88,6 +89,24 @@ async function appendMarket(market: 'TW' | 'CN'): Promise<void> {
   if (quotes.size === 0) {
     console.warn('   ⚠️  0 筆報價，跳過');
     return;
+  }
+
+  // 順手寫 L2 快照（讓 UI badge 不再顯示「L2 missing」）
+  try {
+    const snapshot: IntradaySnapshot = {
+      market, date,
+      updatedAt: new Date().toISOString(),
+      quotes: Array.from(quotes.entries()).map(([code, q]) => ({
+        symbol: code, name: '',
+        open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume,
+        prevClose: q.close, changePercent: 0,
+      })),
+      count: quotes.size,
+    };
+    await writeIntradaySnapshot(snapshot);
+    console.log(`   📸 L2 快照已寫 ${quotes.size} 筆 → data/intraday-${market}-${date}.json`);
+  } catch (err) {
+    console.warn('   ⚠️  L2 快照寫入失敗:', (err as Error).message?.slice(0, 80));
   }
 
   const scanner = market === 'TW' ? new TaiwanScanner() : new ChinaScanner();
