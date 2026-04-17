@@ -68,7 +68,13 @@ async function fsPut(filename: string, data: string): Promise<void> {
   const path = await import('path');
   const dir = path.join(process.cwd(), 'data');
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, filename), data, 'utf-8');
+  const fullPath = path.join(dir, filename);
+  await fs.writeFile(fullPath, data, 'utf-8');
+  // 寫入驗證：避免「掃完了卻沒檔」靜默失敗（2026-04-17 加）
+  const stat = await fs.stat(fullPath).catch(() => null);
+  if (!stat || stat.size === 0) {
+    throw new Error(`fsPut verify failed: ${filename} (size=${stat?.size ?? 'missing'})`);
+  }
 }
 
 async function fsGet(filename: string): Promise<string | null> {
