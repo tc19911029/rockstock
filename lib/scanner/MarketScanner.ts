@@ -860,7 +860,6 @@ export abstract class MarketScanner {
   ): StockScanResult[] {
     return [...candidates].sort((a, b) =>
       (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
-      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
       b.changePercent - a.changePercent
     );
   }
@@ -998,7 +997,6 @@ export abstract class MarketScanner {
     const sortedResults = results
       .sort((a, b) =>
         (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
-        (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
         b.changePercent - a.changePercent
       );
 
@@ -1030,7 +1028,6 @@ export abstract class MarketScanner {
       if (Date.now() > DEADLINE) {
         const sorted = results.sort((a, b) =>
           (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
-          (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
           b.changePercent - a.changePercent
         );
         return { results: sorted, partial: true, marketTrend };
@@ -1047,7 +1044,6 @@ export abstract class MarketScanner {
 
     const sorted = results.sort((a, b) =>
       (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0) ||
-      (b.resonanceScore ?? 0) + (b.highWinRateScore ?? 0) - (a.resonanceScore ?? 0) - (a.highWinRateScore ?? 0) ||
       b.changePercent - a.changePercent
     );
 
