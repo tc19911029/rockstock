@@ -225,11 +225,7 @@ export default function SixConditionsPanel() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 bg-secondary border-b border-border">
         <span className="text-sm font-semibold text-foreground">六大進場條件</span>
-        <div className="flex items-center gap-2.5">
-          <ScoreDots score={coreScore} total={5} />
-          {sc.indicator.pass && <span className="text-green-400 text-xs">+⑥</span>}
-          <span className={`text-base font-bold tabular-nums ${scoreColor}`}>{score}/6</span>
-        </div>
+        <span className={`text-base font-bold tabular-nums ${scoreColor}`}>{score}/6</span>
       </div>
 
       {/* Rows */}

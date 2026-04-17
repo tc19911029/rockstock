@@ -294,10 +294,10 @@ export default function HomePage() {
 
   return (
     <PageShell fullViewport headerSlot={<StockSelector />}>
-      <div className="flex-1 flex flex-row min-h-0 overflow-hidden h-full px-3 py-2 gap-2">
+      <div className="flex-1 flex flex-col md:flex-row min-h-0 md:overflow-hidden overflow-y-auto h-full px-3 py-2 gap-2">
 
         {/* Left: Chart */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 gap-1.5">
+        <div className="w-full md:flex-1 flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
           <div
             ref={chartContainerRef}
             className={`relative flex flex-col flex-1 rounded-xl border border-border overflow-hidden bg-card transition-opacity animate-fade-in ${isLoadingStock ? 'opacity-40 pointer-events-none' : ''}`}
@@ -431,7 +431,7 @@ export default function HomePage() {
         </div>
 
         {/* Middle: Sidebar */}
-        <div className="w-64 shrink-0 flex flex-col min-h-0 gap-2">
+        <div className="w-full md:w-64 shrink-0 flex flex-col min-h-0 gap-2">
           {/* Mobile: Sheet drawer */}
           <div className="md:hidden">
             <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
@@ -466,8 +466,12 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* ── Right: Scan Panel (vertical, collapsible) ── */}
-        <div className={`shrink-0 flex flex-col min-h-0 border border-border bg-card/80 rounded-lg overflow-hidden transition-[width] duration-300 ${scannerOpen ? 'w-[600px]' : 'w-8'}`}>
+        {/* ── Right: Scan Panel (vertical on desktop, full-width stacked on mobile) ── */}
+        <div className={`shrink-0 flex flex-col min-h-0 border border-border bg-card/80 rounded-lg overflow-hidden transition-all duration-300 ${
+          scannerOpen
+            ? 'w-full md:w-[600px] min-h-[50vh] md:min-h-0'
+            : 'w-full md:w-8 h-10 md:h-auto'
+        }`}>
           {scannerOpen ? (
             <>
               {/* Panel header with close button */}
@@ -486,13 +490,13 @@ export default function HomePage() {
               </div>
             </>
           ) : (
-            /* Collapsed: vertical label with icon */
+            /* Collapsed: horizontal bar on mobile, vertical label on desktop */
             <button onClick={() => setScannerOpen(true)}
-              className="flex-1 flex flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-colors group">
+              className="flex-1 flex flex-row md:flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-colors group">
               <Search className="w-3.5 h-3.5 text-muted-foreground group-hover:text-blue-400 transition-colors" />
-              <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors" style={{ writingMode: 'vertical-rl' }}>掃描</span>
+              <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors md:[writing-mode:vertical-rl]">掃描</span>
               <kbd className="text-[8px] text-muted-foreground/40 bg-secondary/60 px-1 rounded">5</kbd>
-              <ChevronDown className="w-3 h-3 text-muted-foreground/40 -rotate-90" />
+              <ChevronDown className="w-3 h-3 text-muted-foreground/40 md:-rotate-90" />
             </button>
           )}
         </div>
