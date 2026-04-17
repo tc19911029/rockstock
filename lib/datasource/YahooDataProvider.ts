@@ -50,7 +50,7 @@ const HISTORICAL_TTL = 24 * 60 * 60 * 1000;
 const RECENT_TTL = 1 * 60 * 1000;  // 盤中 1 分鐘快取（Yahoo 本身有 15-20 分鐘延遲）
 
 /** 原始 OHLC，不套用除權息調整（用於跨日期區間比較，避免調整基準不同） */
-function parseYahooCandlesRaw(json: unknown): Candle[] {
+function parseYahooCandlesRaw(json: unknown, symbol?: string): Candle[] {
   const result = (json as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as {
     timestamp?: number[];
     indicators?: {
@@ -62,6 +62,10 @@ function parseYahooCandlesRaw(json: unknown): Candle[] {
   const timestamps: number[] = result.timestamp ?? [];
   const q = result.indicators?.quote?.[0];
   if (!q) return [];
+
+  // TW 股票 Yahoo volume 單位是「股」，系統統一用「張」（1 張 = 1000 股）
+  const isTW = !!symbol && /\.(TW|TWO)$/i.test(symbol);
+  const volDivisor = isTW ? 1000 : 1;
 
   return timestamps
     .map((ts, i) => {
@@ -75,13 +79,13 @@ function parseYahooCandlesRaw(json: unknown): Candle[] {
         high:   +h.toFixed(2),
         low:    +l.toFixed(2),
         close:  +c.toFixed(2),
-        volume: v ?? 0,
+        volume: v != null ? Math.round(v / volDivisor) : 0,
       };
     })
     .filter((c): c is Candle => c != null);
 }
 
-function parseYahooCandles(json: unknown): Candle[] {
+function parseYahooCandles(json: unknown, symbol?: string): Candle[] {
   const result = (json as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as {
     timestamp?: number[];
     indicators?: {
@@ -96,6 +100,10 @@ function parseYahooCandles(json: unknown): Candle[] {
   const adj = result.indicators?.adjclose?.[0]?.adjclose as number[] | undefined;
   if (!q) return [];
 
+  // TW 股票 Yahoo volume 單位是「股」，系統統一用「張」（1 張 = 1000 股）
+  const isTW = !!symbol && /\.(TW|TWO)$/i.test(symbol);
+  const volDivisor = isTW ? 1000 : 1;
+
   return timestamps
     .map((ts, i) => {
       const o = q.open[i]; const h = q.high[i];
@@ -107,13 +115,15 @@ function parseYahooCandles(json: unknown): Candle[] {
       // 確保均線、報酬率、量能在除權息日前後連續，不產生假跳空或量能斷層
       const adjFactor = (adj && adj[i] != null && c > 0) ? adj[i] / c : 1;
 
+      const rawVol = v ?? 0;
+      const adjustedVol = adjFactor !== 1 ? rawVol / adjFactor : rawVol;
       return {
         date:   new Date(ts * 1000).toISOString().split('T')[0],
         open:   +(o * adjFactor).toFixed(2),
         high:   +(h * adjFactor).toFixed(2),
         low:    +(l * adjFactor).toFixed(2),
         close:  +(c * adjFactor).toFixed(2),
-        volume: adjFactor !== 1 ? Math.round((v ?? 0) / adjFactor) : (v ?? 0),
+        volume: Math.round(adjustedVol / volDivisor),
       };
     })
     .filter((c): c is Candle => c != null);
@@ -253,7 +263,7 @@ export class YahooDataProvider implements DataProvider {
     const res = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`Yahoo Finance ${res.status} for ${symbol}`);
 
-    const rawCandles = parseYahooCandles(await res.json());
+    const rawCandles = parseYahooCandles(await res.json(), symbol);
     const filtered = asOfDate
       ? rawCandles.filter(c => c.date <= asOfDate)
       : rawCandles;
@@ -288,7 +298,7 @@ export class YahooDataProvider implements DataProvider {
     const res = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`Yahoo Finance ${res.status} for ${symbol}`);
 
-    const result = parseYahooCandlesRaw(await res.json());
+    const result = parseYahooCandlesRaw(await res.json(), symbol);
 
     const twoDaysAgo = new Date(Date.now() - 2 * 86400_000).toISOString().split('T')[0];
     const isRecent = endDate >= twoDaysAgo;
