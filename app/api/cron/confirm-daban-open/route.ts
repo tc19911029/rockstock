@@ -22,10 +22,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // 允許 query 覆寫（用於歷史重算）
+    const qScanDate = req.nextUrl.searchParams.get('scanDate');
+    const qOpenDate = req.nextUrl.searchParams.get('openDate');
     // 今日（開盤確認日）
-    const openDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    const openDate = qOpenDate ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
     // 上一個交易日（打板掃描日）— 9:27 盤前，getLastTradingDay 返回昨天
-    const scanDate = getLastTradingDay('CN');
+    const scanDate = qScanDate ?? getLastTradingDay('CN');
 
     if (scanDate === openDate) {
       // 防禦：若 scanDate 等於今天，表示市場已收盤，無需確認

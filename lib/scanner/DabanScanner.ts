@@ -519,26 +519,44 @@ export async function confirmDabanAtOpen(
     return null;
   }
 
-  // 讀取開盤日快照；若不存在則即時抓取
+  // 讀取開盤日快照
+  // 即時模式：openDate 是今天 → 若無快照則 refresh 抓現在的 L2
+  // 歷史重算：openDate 是過去 → 只讀歷史 L2，不能 refresh（會抓到當前盤 L2 污染）
+  const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+  const isLive = openDate >= todayCN;
   let snapshot = await readIntradaySnapshot('CN', openDate);
-  if (!snapshot) {
+  if (!snapshot && isLive) {
     snapshot = await refreshIntradaySnapshot('CN');
-  }
-  if (!snapshot || snapshot.quotes.length === 0) {
-    console.warn('[DabanScanner] confirmDabanAtOpen: 無法取得開盤快照');
-    return session;
   }
 
   // symbol 在打板結果中帶後綴（如 "600519.SS"），snapshot 中只有純代碼（"600519"）
-  const quoteMap = new Map(snapshot.quotes.map(q => [q.symbol, q]));
+  const quoteMap = snapshot ? new Map(snapshot.quotes.map(q => [q.symbol, q])) : null;
 
-  const updatedResults = session.results.map(result => {
+  // 歷史重算：L2 缺時從 L1 讀 openDate 那天的 OHLC
+  // 不能只回 session 否則舊的錯誤 openConfirmed 不會修正
+  const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
+
+  const updatedResults = await Promise.all(session.results.map(async result => {
     const code = result.symbol.replace(/\.(SS|SZ)$/, '');
-    const q = quoteMap.get(code);
-    if (!q || q.close <= 0) return result;
-    const openPrice = q.close;
-    const gapUpPct = result.prevClose > 0
-      ? Math.round(((openPrice - result.prevClose) / result.prevClose) * 10000) / 100
+    // 1. 優先 L2 snapshot 的 q.open（真正的 9:25 集合競價開盤價）
+    //    q.close 是盤中最新價，會被漲停價污染不能用
+    let openPrice = 0;
+    const q = quoteMap?.get(code);
+    if (q && q.open > 0) {
+      openPrice = q.open;
+    } else {
+      // 2. L2 無資料 → 從 L1 讀 openDate 當天的 open
+      try {
+        const l1 = await readCandleFile(result.symbol, 'CN');
+        const bar = l1?.candles.find(c => c.date === openDate);
+        if (bar && bar.open > 0) openPrice = bar.open;
+      } catch { /* ignore */ }
+    }
+    if (openPrice <= 0) return result;
+    // 高開幅度 = (openDate 開盤 - 前一交易日收盤) / 前一交易日收盤
+    // 前一交易日 = scanDate，其收盤存在 result.closePrice（非 result.prevClose，那是 scanDate-1）
+    const gapUpPct = result.closePrice > 0
+      ? Math.round(((openPrice - result.closePrice) / result.closePrice) * 10000) / 100
       : 0;
     return {
       ...result,
@@ -546,7 +564,7 @@ export async function confirmDabanAtOpen(
       gapUpPct,
       openConfirmed: openPrice >= result.buyThresholdPrice,
     };
-  });
+  }));
 
   // 按高開幅度降序排列（回測證明高開幅度是最強排序因子，勝率70%>多因子58%）
   updatedResults.sort((a, b) => (b.gapUpPct ?? -999) - (a.gapUpPct ?? -999));
