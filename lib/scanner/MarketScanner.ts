@@ -338,15 +338,18 @@ export abstract class MarketScanner {
         return null;
       }
 
-      // P3B: 放寬 stale-skip — 容忍 5 個交易日差距
-      // 原邏輯：staleDays > 0 且 lastCandleDate !== today 就跳過
-      // 問題：移除 ensureFreshCandles 後，大部分股票的 staleDays 可能 > 0（等待 cron 更新），
-      // 但 fetchCandlesForScan 已用即時報價合成今日 K 棒（此時 staleDays=0）。
-      // 若即時報價合併失敗（盤前/無報價），容忍最多 5 天差距（避免跳過太多股票）。
-      if (asOfDate && fetchResult.staleDays > 5 && fetchResult.lastCandleDate !== asOfDate) {
+      // Fail-closed：掃描目標日 = 今日時，L1 末根必須 === 今日，否則跳過
+      // 過去曾放寬到 staleDays > 5 才擋，結果 2026-04-17 因 L2 被 quarantine
+      // 導致 1928/1957 支 TW L1 末根停在 04-16，仍全部放行，跑出用 04-16 bar
+      // 冒充 04-17 結果的 L4。寧可當天結果變少，也不要偽造一天差的分析。
+      // 歷史回測（asOfDate !== today）不受影響：歷史資料本來就完整，末根匹配率應該近 100%。
+      if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
         const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
         if (asOfDate === today) {
-          if (diag) diag.filteredOut++;
+          if (diag) {
+            diag.filteredOut++;
+            diag.skippedStaleL1 = (diag.skippedStaleL1 ?? 0) + 1;
+          }
           return null;
         }
       }

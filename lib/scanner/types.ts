@@ -151,6 +151,8 @@ export interface ScanDiagnostics {
   // ── 掃描前補缺統計 ──────────────────────────────────────────────────────
   ingestDownloaded: number;   // 掃描前補缺下載的股票數
   ingestFailed: number;       // 補缺失敗的股票數
+  // ── Fail-closed 守門統計（2026-04-17 新增）──────────────────────────────
+  skippedStaleL1?: number;    // L1 末根 ≠ 掃描目標日 被跳過的股票數（fail-closed）
 }
 
 export function createEmptyDiagnostics(): ScanDiagnostics {
@@ -160,6 +162,7 @@ export function createEmptyDiagnostics(): ScanDiagnostics {
     filteredOut: 0, processedCount: 0, errorSamples: [],
     dataMissing: 0, missingSymbols: [], coverageRate: 100,
     dataStatus: 'complete', ingestDownloaded: 0, ingestFailed: 0,
+    skippedStaleL1: 0,
   };
 }
 
@@ -179,6 +182,7 @@ export function mergeDiagnostics(a: ScanDiagnostics, b: ScanDiagnostics): ScanDi
     missingSymbols:   [...a.missingSymbols, ...b.missingSymbols].slice(0, 20),
     ingestDownloaded: a.ingestDownloaded + b.ingestDownloaded,
     ingestFailed:     a.ingestFailed + b.ingestFailed,
+    skippedStaleL1:   (a.skippedStaleL1 ?? 0) + (b.skippedStaleL1 ?? 0),
     coverageRate: 100,
     dataStatus: 'complete' as ScanDiagnostics['dataStatus'],
   };
