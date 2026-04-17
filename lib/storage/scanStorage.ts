@@ -441,10 +441,66 @@ export async function listScanDates(
     }
   }
 
-  // Filter out non-trading days (weekends + holidays) that may have been backfilled incorrectly
-  return [...seen.values()]
-    .filter(e => isWeekday(e.date, e.market as 'TW' | 'CN'))
-    .sort((a, b) => b.date.localeCompare(a.date));
+  // 計 top500 filter 後的真實 count（和 loadScanSession 一致）
+  // 避免 UI badge 和面板對不上
+  let rankIdx: Awaited<ReturnType<typeof import('@/lib/scanner/TurnoverRank').readTurnoverRank>> = null;
+  try {
+    const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
+    rankIdx = await readTurnoverRank(market as 'TW' | 'CN');
+  } catch { /* 索引讀失敗 → 不套 filter，保持原 count */ }
+
+  const filtered = [...seen.values()].filter(e => isWeekday(e.date, e.market as 'TW' | 'CN'));
+
+  if (rankIdx) {
+    // 實際讀每個日期的最佳 session，算 filter 後 count
+    await Promise.all(filtered.map(async (e) => {
+      try {
+        const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', e.mtfMode ?? 'daily');
+        if (session && session.results) {
+          const realCount = session.results.filter(r => rankIdx!.ranks.has(r.symbol)).length;
+          e.resultCount = realCount;
+        }
+      } catch { /* keep original count */ }
+    }));
+  }
+
+  return filtered.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** 內部：讀 session 原始資料（不套 turnoverFilter，避免遞迴） */
+async function loadScanSessionRaw(
+  market: MarketId,
+  date: string,
+  direction: ScanDirection,
+  mtfMode: MtfMode,
+): Promise<ScanSession | null> {
+  let raw: string | null = null;
+  if (IS_VERCEL) {
+    try {
+      raw = await blobGet(`scans/${market}/${direction}/${mtfMode}/${date}.json`);
+      if (!raw && mtfMode === 'daily') raw = await blobGet(`scans/${market}/${direction}/${date}.json`);
+      if (!raw && mtfMode === 'daily' && direction === 'long') raw = await blobGet(`scans/${market}/${date}.json`);
+    } catch { /* ignore */ }
+  }
+  if (!raw) raw = await fsGet(`scan-${market}-${direction}-${mtfMode}-${date}.json`);
+  if (!raw && mtfMode === 'daily') raw = await fsGet(`scan-${market}-${direction}-${date}.json`);
+  if (!raw && mtfMode === 'daily' && direction === 'long') raw = await fsGet(`scan-${market}-${date}.json`);
+
+  if (raw) {
+    const intradayRaw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
+    if (intradayRaw) {
+      try {
+        const postClose = JSON.parse(raw) as ScanSession;
+        const intraday = JSON.parse(intradayRaw) as ScanSession;
+        const intradayNewer = !!intraday.scanTime && !!postClose.scanTime && intraday.scanTime > postClose.scanTime;
+        const postCloseEmpty = postClose.resultCount === 0;
+        if (intraday.resultCount > 0 && (intradayNewer || postCloseEmpty)) raw = intradayRaw;
+      } catch { /* use post_close */ }
+    }
+  }
+  if (!raw) raw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
+  if (!raw) return null;
+  try { return JSON.parse(raw) as ScanSession; } catch { return null; }
 }
 
 /** Load a specific scan session by market + date + direction + mtfMode */
@@ -517,27 +573,37 @@ export async function loadScanSession(
 
   try {
     const session = JSON.parse(raw) as ScanSession;
-    // 事後補 turnoverRank：session 原始寫入時若索引缺，results 的 turnoverRank 會是 null
-    // 讀取時用當前索引補一次，避免 UI 永遠顯示「成交量#—」
-    const missingRanks = session.results?.some(r => r.turnoverRank == null);
-    if (missingRanks && session.results) {
-      try {
-        const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
-        const idx = await readTurnoverRank(market as 'TW' | 'CN');
-        if (idx) {
-          for (const r of session.results) {
-            if (r.turnoverRank == null) {
-              const rank = idx.ranks.get(r.symbol);
-              if (rank) r.turnoverRank = rank;
-            }
-          }
-        }
-      } catch { /* 索引讀失敗 — 保持 null */ }
-    }
+    await applyTurnoverFilter(session, market);
     return session;
   } catch {
     return null;
   }
+}
+
+/**
+ * 給 session 套上當前 top500 索引：補 turnoverRank + 過濾不在前 500 的髒結果
+ * 原因：fail-closed 上線前，索引壞時會跑無過濾掃描產出不在前 500 的結果，
+ * 舊 intraday session 至今仍可能掛在 UI。讀取時用當前索引做兩件事：
+ *   1) 補 turnoverRank（index 有就填，沒有就 null）
+ *   2) 過濾不在 index 的結果（回測冠軍組合=前 500，違反者不應出現）
+ */
+async function applyTurnoverFilter(session: ScanSession, market: MarketId): Promise<void> {
+  if (!session.results || session.results.length === 0) return;
+  try {
+    const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
+    const idx = await readTurnoverRank(market as 'TW' | 'CN');
+    if (!idx) return;
+    const filtered = session.results.filter(r => {
+      const rank = idx.ranks.get(r.symbol);
+      if (rank != null) {
+        if (r.turnoverRank == null) r.turnoverRank = rank;
+        return true;
+      }
+      return false;
+    });
+    session.results = filtered;
+    session.resultCount = filtered.length;
+  } catch { /* 索引讀失敗 — 保持原樣 */ }
 }
 
 /**
