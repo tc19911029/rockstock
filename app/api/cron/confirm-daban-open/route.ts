@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { confirmDabanAtOpen } from '@/lib/scanner/DabanScanner';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 import { apiOk, apiError } from '@/lib/api/response';
 
 export const runtime = 'nodejs';
@@ -33,6 +34,12 @@ export async function GET(req: NextRequest) {
     if (scanDate === openDate) {
       // 防禦：若 scanDate 等於今天，表示市場已收盤，無需確認
       return apiOk({ skipped: true, reason: 'scanDate equals openDate', scanDate, openDate });
+    }
+
+    // 守門：openDate 必須是交易日，否則沒開盤資料可確認
+    // （例：週六日/假日 9:27 cron 跑，openDate=今天非交易日，會寫錯誤 0% 進場資料）
+    if (!isTradingDay(openDate, 'CN')) {
+      return apiOk({ skipped: true, reason: `openDate ${openDate} is not a CN trading day`, scanDate, openDate });
     }
 
     // 強制即時刷新 L2（確保拿到集合競價 9:25 成交價，不依賴 update-intraday 跑完）
