@@ -50,7 +50,8 @@ async function fetchCNQuotes(): Promise<Map<string, { open: number; high: number
     const raw = await getEastMoneyRealtime();
     for (const [code, q] of raw) {
       if (q.close > 0) {
-        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+        // EastMoney f5 是「手」（1 手 = 100 股）；L1 CN 統一以「股」存，× 100 轉換
+        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume * 100 });
       }
     }
     if (out.size > 500) return out;
@@ -69,7 +70,8 @@ async function fetchCNQuotes(): Promise<Map<string, { open: number; high: number
     for (const [symbol, q] of tcMap) {
       const code = symbol.replace(/\.(SS|SZ)$/i, '');
       if (q.close > 0) {
-        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+        // Tencent 成交量也是「手」，同樣 × 100 轉「股」
+        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume * 100 });
       }
     }
   } catch (err) {
@@ -81,6 +83,15 @@ async function fetchCNQuotes(): Promise<Map<string, { open: number; high: number
 
 async function appendMarket(market: 'TW' | 'CN'): Promise<void> {
   const date = getTodayDate(market);
+
+  // 非交易日守門：週末/假日跑這腳本會把「最後交易日」的盤後資料
+  // 標記為「今天」寫入 L2，走圖前端以為今天有 K 棒但其實重複了
+  const { isTradingDay } = await import('../lib/utils/tradingDay');
+  if (!isTradingDay(date, market)) {
+    console.log(`\n⏭️  [${market}] ${date} 非交易日，跳過`);
+    return;
+  }
+
   console.log(`\n📡 [${market}] 抓全市場即時報價 (${date})...`);
   const t0 = Date.now();
   const quotes = market === 'TW' ? await fetchTWQuotes() : await fetchCNQuotes();

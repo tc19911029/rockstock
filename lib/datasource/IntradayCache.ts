@@ -232,6 +232,14 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
     timeZone: market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai',
   }).format(new Date());
 
+  // 非交易日守門：週末/假日呼叫 refresh 只會拿到前一日盤後資料
+  // 若標成 today 寫入 L2，走圖會顯示假的「今日 K 棒」（實為前日重複）
+  if (!isTradingDay(today, market)) {
+    console.info(`[IntradayCache] ${market} ${today} 非交易日，不刷新 L2`);
+    const existing = await readIntradaySnapshot(market, today);
+    return existing ?? { market, date: today, updatedAt: new Date().toISOString(), count: 0, quotes: [] };
+  }
+
   const sources: DataSourceStatus[] = [];
   let quotes: IntradayQuote[];
 
