@@ -160,7 +160,12 @@ async function analyzeOne(
     // L2 今日快照優先覆蓋：API（EastMoney/FinMind）盤中對未收盤股票有時回傳錯誤 open
     // （曾發生 002580 4/17 open 被回成 17.25 實為歷史 4/10 值，L2 正確值 29.13 反而被略過）。
     // L2 是盤中即時快照且有 prevClose 可交叉驗證，視為今日 K 棒的權威來源。
+    // 守門：非交易日（週末/假日）不注入——L2 若存在是前一交易日的盤後資料被誤標
+    //      成「今天」，注入會讓前一日 K 棒被加第二次造成 d1Return=d2Return 污染
+    const { isTradingDay } = await import('@/lib/utils/tradingDay');
+    const todayIsTradingDay = isTradingDay(todayStr, market);
     try {
+      if (!todayIsTradingDay) throw new Error('skip: not a trading day');
       const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
       const snap = await readIntradaySnapshot(market, todayStr);
       if (snap && snap.quotes.length > 0) {
@@ -211,7 +216,13 @@ async function analyzeOne(
     // 嚴格過濾：
     // 1. 必須 > scanDate（排除信號日當天被 Yahoo 回傳的情況）
     // 2. 必須 <= todayStr（排除未來數據）
-    const filteredCandles = candles.filter(c => c.date > scanDate && c.date <= todayStr);
+    // 3. 同日去重（防禦：L2 注入 + API fetch 可能雙寫，造成 d1Return=d2Return 的重複污染）
+    //    後寫入的優先（假設 L2/最後 push 是更新鮮的資料）
+    const dedupMap = new Map<string, Candle>();
+    for (const c of candles) {
+      if (c.date > scanDate && c.date <= todayStr) dedupMap.set(c.date, c);
+    }
+    const filteredCandles = [...dedupMap.values()].sort((a, b) => a.date.localeCompare(b.date));
     const forwardCandles: ForwardCandle[] = filteredCandles.map((c, i) => {
       // 計算 MA5：取包含自身的最近5根收盤價平均
       let ma5: number | undefined;
