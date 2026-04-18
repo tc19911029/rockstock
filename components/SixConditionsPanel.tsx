@@ -11,7 +11,7 @@ const CONDITION_LABELS = [
   { key: 'trend',     icon: '①', name: '趨勢條件', tip: '日線波浪型態符合「頭頭高、底底高」多頭架構', required: true },
   { key: 'ma',        icon: '②', name: '均線條件', tip: 'MA10、MA20 多頭排列，均線方向向上', required: true },
   { key: 'position',  icon: '③', name: '股價位置', tip: '收盤在 MA10、MA20 之上，判斷初升/主升/末升段', required: true },
-  { key: 'volume',    icon: '④', name: '成交量',   tip: '攻擊量 ≥ 前一日 × 1.3（2倍更強）', required: true },
+  { key: 'volume',    icon: '④', name: '成交量',   tip: '攻擊量 ≥ 前一日 × 1.5（2倍更強）', required: true },
   { key: 'kbar',      icon: '⑤', name: '進場K線', tip: '價漲、量增、紅K實體棒 > 2%', required: true },
   { key: 'indicator', icon: '⑥', name: '指標參考', tip: 'MACD 綠柱縮短或紅柱延長；KD 黃金交叉向上多排', required: false },
 ] as const;
