@@ -29,7 +29,7 @@ const CONFIG = {
 
   /** 回測週期（YYYY-MM-DD） */
   period: {
-    start: '2025-04-16',
+    start: '2026-03-19',
     end:   '2026-04-17',
   },
 
@@ -151,7 +151,8 @@ const S1_MAX_HOLD        = 60;    // 最長持有天數
 // ══════════════════════════════════════════════════════════════
 
 const SIXCOND_SORT_DEFS: Record<SixcondSort, (f: SixcondFeatures) => number> = {
-  '六條件總分':   f => f.totalScore * 10 + f.changePercent,
+  // 對齊 lib/selection/applyPanelFilter.ts 排序：六條件總分 desc，同分以共振+高勝率次要
+  '六條件總分':   f => f.totalScore * 1000 + (f.resonanceScore + f.highWinRateScore) * 10 + f.changePercent / 100,
   '成交額':       f => Math.log10(Math.max(f.turnover, 1)),
   '量比':         f => Math.min(f.volumeRatio, 5) * 2 + f.changePercent / 10,
   '動能':         f => f.mom5 + f.changePercent / 10,

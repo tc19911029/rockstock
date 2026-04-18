@@ -15,6 +15,12 @@
 7. **任何修改必須先通過合約測試** — `npm run test:contracts`
 8. **不可刪除或修改 `lib/contracts/` 下的檔案**
 9. **開發順序**：資料來源 → 儲存方式 → 掃描鏈路 → 前端顯示，不可反過來
+10. **選股邏輯單一事實**：六條件、戒律、淘汰法、MTF 過濾、排序因子、門檻值必須從 `lib/selection/applyPanelFilter.ts` + `lib/strategy/StrategyConfig.ts` 讀取，**不可 hard-code 於 UI、store、回測腳本**。改動時同時更新：
+    - `lib/scanner/ScanPipeline.ts` / `MarketScanner.ts`（生產）
+    - `store/backtestStore.ts`（前端 UI 過濾）
+    - `scripts/backtest-*.ts`（回測腳本）
+    - `__tests__/contracts/scan-parity.test.ts`（交叉驗證）
+    並跑 `npm run test:contracts` 確認三方一致。
 
 ## 資料分層架構
 

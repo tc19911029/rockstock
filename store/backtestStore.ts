@@ -7,6 +7,7 @@ import {
 } from '@/lib/scanner/types';
 import { TrendState } from '@/lib/analysis/trendAnalysis';
 import { getMissingTradingDays } from '@/lib/utils/tradingDay';
+import { applyPanelFilter, PANEL_MTF_MIN_SCORE } from '@/lib/selection/applyPanelFilter';
 // Inline calcBacktestSummary to avoid pulling server-only ForwardAnalyzer → LocalCandleStore (fs)
 function calcBacktestSummary(
   perf: StockForwardPerformance[],
@@ -327,7 +328,7 @@ export const useBacktestStore = create<BacktestState>()(
           // 過濾：只保留 MTF 週線 + 月線都通過的股票
           // （scan 時已 ALWAYS 計算 mtfWeeklyPass/mtfMonthlyPass，即使 MTF flag=off）
           const filtered = scanResults.filter(r =>
-            r.mtfWeeklyPass !== false && r.mtfMonthlyPass !== false,
+            (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
           );
           const filteredSymbols = new Set(filtered.map(r => r.symbol));
           const filteredPerf = performance.filter(p => filteredSymbols.has(p.symbol));
@@ -646,7 +647,7 @@ export const useBacktestStore = create<BacktestState>()(
           const cacheKey = `_unfilteredResults:${scanDate}`;
           get().scanCache.set(cacheKey, { scanResults: combined, performance: [], marketTrend });
           const filtered = combined.filter(r =>
-            r.mtfWeeklyPass !== false && r.mtfMonthlyPass !== false,
+            (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
           );
           set({ scanResults: filtered, scanningCount: `${filtered.length} 檔符合（MTF）` });
         }
@@ -941,7 +942,7 @@ export const useBacktestStore = create<BacktestState>()(
                   let displayPerf = performance;
                   if (useMultiTimeframe) {
                     const filteredSymbols = new Set(cached.scanResults.filter(r =>
-                      r.mtfWeeklyPass !== false && r.mtfMonthlyPass !== false,
+                      (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
                     ).map(r => r.symbol));
                     displayPerf = performance.filter(p => filteredSymbols.has(p.symbol));
                   }
@@ -984,7 +985,7 @@ export const useBacktestStore = create<BacktestState>()(
             const cacheKey = `_unfilteredResults:${date}`;
             scanCache.set(cacheKey, { scanResults, performance: [], marketTrend: null });
             displayResults = scanResults.filter(r =>
-              r.mtfWeeklyPass !== false && r.mtfMonthlyPass !== false,
+              (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
             );
           }
 
