@@ -100,8 +100,11 @@ function getTodayDate(market: 'TW' | 'CN'): string {
 }
 
 async function getL2Status(market: 'TW' | 'CN'): Promise<L2Status> {
+  // 週末/假日：看最近交易日的 L2（不是今天，今天不會有檔）
   const today = getTodayDate(market);
-  const snapshot = await readIntradaySnapshot(market, today);
+  const trading = isTradingDay(today, market);
+  const lookupDate = trading ? today : getLastTradingDay(market);
+  const snapshot = await readIntradaySnapshot(market, lookupDate);
 
   // 取得最近一次嘗試刷新時間（不論成功或失敗）
   const lastCheckedAt = getLastRefreshAttempt(market);
