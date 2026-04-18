@@ -33,7 +33,7 @@ import { DataHealthBadge } from '@/features/scan/components/DataHealthBadge';
 import type { SelectedStock } from '@/features/scan';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Search, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import ChartToolbar from '@/components/ChartToolbar';
 
@@ -91,6 +91,23 @@ export default function HomePage() {
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel
   const [scannerOpen, setScannerOpen] = useState(false);
+  // 手機點「走圖」→ 全螢幕 K 線視圖
+  const [mobileChartFullscreen, setMobileChartFullscreen] = useState(false);
+  const openMobileChart = useCallback(() => {
+    setMobileChartFullscreen(true);
+    setScannerOpen(false);
+    try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
+  }, []);
+  const closeMobileChart = useCallback(() => {
+    setMobileChartFullscreen(false);
+    setScannerOpen(true);
+  }, []);
+  useEffect(() => {
+    if (!mobileChartFullscreen) return;
+    const onPop = () => setMobileChartFullscreen(false);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [mobileChartFullscreen]);
 
   // Keyboard: ← → Space B S Q
   const handleKey = useCallback((e: KeyboardEvent) => {
@@ -144,7 +161,10 @@ export default function HomePage() {
     loadStock(stock.symbol, '1d', '2y', scanDate || undefined).catch((e: Error) => {
       toast.error(`載入 ${stock.name} 失敗：${e.message || '請稍後再試'}`);
     });
-  }, [loadStock]);
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      openMobileChart();
+    }
+  }, [loadStock, openMobileChart]);
 
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
   // 預設 0.65，mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
@@ -294,10 +314,10 @@ export default function HomePage() {
 
   return (
     <PageShell fullViewport headerSlot={<StockSelector />}>
-      <div className="flex-1 flex flex-col md:flex-row min-h-0 md:overflow-hidden overflow-y-auto h-full px-3 py-2 gap-2">
+      <div className="flex-1 flex flex-col md:flex-row min-h-0 md:overflow-x-auto md:overflow-y-hidden overflow-y-auto h-full px-3 py-2 gap-2">
 
         {/* Left: Chart */}
-        <div className="w-full md:flex-1 flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
+        <div className="w-full md:flex-1 md:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
           <div
             ref={chartContainerRef}
             className={`relative flex flex-col flex-1 rounded-xl border border-border overflow-hidden bg-card transition-opacity animate-fade-in ${isLoadingStock ? 'opacity-40 pointer-events-none' : ''}`}
@@ -537,6 +557,94 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 手機走圖全螢幕視圖 */}
+      {mobileChartFullscreen && (
+        <div className="md:hidden fixed inset-0 z-[100] bg-background flex flex-col">
+          <div className="shrink-0 flex items-center gap-2 px-2 py-2 border-b border-border bg-card">
+            <button
+              onClick={closeMobileChart}
+              aria-label="返回掃描清單"
+              className="shrink-0 p-1.5 rounded hover:bg-muted text-foreground"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div className="flex-1 min-w-0">
+              <StockSelector />
+            </div>
+          </div>
+
+          {displayCandle && (
+            <div className="shrink-0">
+              <ChartToolbar
+                candle={displayCandle}
+                prevCandle={prev}
+                isHover={!!hoverCandle}
+                stockName={currentStock?.name}
+                maToggles={maToggles}
+                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                showBollinger={showBollinger}
+                onBollingerToggle={() => setShowBollinger(v => !v)}
+                indicators={indicators}
+                onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                showMarkers={showMarkers}
+                onMarkersToggle={() => setShowMarkers(v => !v)}
+                signalStrengthMin={signalStrengthMin}
+                onSignalStrengthChange={setSignalStrengthMin}
+                avgCost={metrics.avgCost}
+                shares={metrics.shares}
+                onPrev={prevCandle}
+                onNext={nextCandle}
+                onReset={resetReplay}
+                canPrev={currentIndex > 0 && !isPlaying}
+                canNext={currentIndex < allCandles.length - 1 && !isPlaying}
+                ticker={currentStock?.ticker}
+              />
+            </div>
+          )}
+
+          <div className="flex-1 min-h-0 flex flex-col">
+            {isLoadingStock ? (
+              <div className="flex-1 flex items-center justify-center">
+                <span className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin mr-2" />
+                <span className="text-sm text-muted-foreground">載入中…</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex-[3] min-h-0">
+                  <ErrorBoundary>
+                    <CandleChart
+                      candles={visibleCandles}
+                      signals={currentSignals}
+                      chartMarkers={showMarkers ? chartMarkers : []}
+                      avgCost={metrics.shares > 0 ? metrics.avgCost : undefined}
+                      stopLossPrice={stopLossPrice}
+                      onCrosshairMove={setHoverCandle}
+                      fillContainer
+                      maToggles={maToggles}
+                      showBollinger={showBollinger}
+                      highlightDate={targetDate ?? undefined}
+                    />
+                  </ErrorBoundary>
+                </div>
+                {showIndicators && (
+                  <div className="flex-[2] min-h-0 border-t border-border">
+                    <ErrorBoundary>
+                      <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} />
+                    </ErrorBoundary>
+                  </div>
+                )}
+                <button
+                  onClick={() => setShowIndicators(v => !v)}
+                  className="shrink-0 py-1 text-[10px] text-muted-foreground hover:text-foreground bg-secondary/60 border-t border-border"
+                >
+                  {showIndicators ? '▼ 收起副圖' : '▲ 展開副圖'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
