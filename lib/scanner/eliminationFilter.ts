@@ -4,9 +4,23 @@
  * 書中 Part 10 (P659-668) 定義了 11 種要避開的股票狀況。
  * 此模組在 scanner 輸出前加一層負面篩選，
  * 排除不符合朱老師方法論的高風險股票。
+ *
+ * 對照實作 vs 書本原文：
+ *   1.  沒走出底部（均線空排+股價月線下）         — ✅
+ *   2.  重壓不過跌破 MA5                         — ✅
+ *   3.  上漲一波後趨勢不明確（均線雜亂+震盪）    — ✅
+ *   4.  沒有量能（量縮）                         — ✅
+ *   5.  大幅上漲達 1 倍 AND 呈盤整趨勢           — ✅（2026-04-19 加「盤整」前置）
+ *   6.  遇壓力大量長黑                           — ✅
+ *   7.  趨勢頭頭低 AND MACD/KD 背離              — ✅（2026-04-19 加「頭頭低」前置）
+ *   8.  三大法人連續賣超                         — ⚠️ 用大量黑K代理（無法人資料）
+ *   9.  頻頻爆大量股價不漲                       — ✅
+ *   10. 看不懂的股票（長期盤整均線糾結代理）     — ⚠️ 代理實作
+ *   11. 有基本面、沒有技術面                     — ❌ 未實作（rockstock 無基本面資料源）
  */
 
 import { CandleWithIndicators } from '@/types';
+import { detectTrend } from '@/lib/analysis/trendAnalysis';
 
 export interface EliminationResult {
   eliminated: boolean;
@@ -82,17 +96,22 @@ function rule04_noVolume(candles: CandleWithIndicators[], idx: number): string |
 }
 
 /**
- * 5. 大幅上漲過高：股價已漲超過1倍
+ * 5. 大幅上漲過高 + 呈現盤整趨勢
+ *
+ * 書本 p.659 原文：「股價上漲達 1 倍以上位置，呈現盤整趨勢要立刻出場」
+ * 修正（2026-04-19）：加入「盤整」前置條件，避免誤殺上漲中的翻倍股。
  */
 function rule05_overExtended(candles: CandleWithIndicators[], idx: number): string | null {
   if (idx < 60) return null;
   const c = candles[idx];
-  // 過去60天最低價
   const low60 = Math.min(...candles.slice(Math.max(0, idx - 60), idx).map(x => x.low));
-  if (low60 > 0 && c.close > low60 * 2) {
-    return '淘汰5: 大幅上漲過高（漲幅超過1倍）';
-  }
-  return null;
+  if (low60 <= 0 || c.close <= low60 * 2) return null;
+
+  // 書本要求「呈現盤整趨勢」才淘汰；多頭上漲中即使翻倍也不觸發
+  const trend = detectTrend(candles, idx);
+  if (trend !== '盤整') return null;
+
+  return '淘汰5: 大幅上漲超過1倍且呈現盤整';
 }
 
 /**
@@ -114,22 +133,30 @@ function rule06_resistanceLongBlack(candles: CandleWithIndicators[], idx: number
 }
 
 /**
- * 7. MACD或KD指標背離
+ * 7. 趨勢頭頭低 + MACD 或 KD 指標背離
+ *
+ * 書本 p.662 原文：「趨勢呈現頭頭低的股票，且出現 MACD 或 KD 指標背離，要立刻出場」
+ * 修正（2026-04-19）：加入「頭頭低」前置條件，避免誤殺多頭上漲中短期指標稍弱的股票。
  */
 function rule07_indicatorDivergence(candles: CandleWithIndicators[], idx: number): string | null {
   if (idx < 10) return null;
+
+  // 書本要求「趨勢呈現頭頭低」才檢查指標背離
+  const trend = detectTrend(candles, idx);
+  if (trend !== '空頭') return null;
+
   const c = candles[idx];
   const prev5 = candles[idx - 5];
-  // 價格創新高但MACD OSC走低（頭頭低）
+  // MACD 背離
   if (c.macdOSC != null && prev5?.macdOSC != null) {
     if (c.high > prev5.high && c.macdOSC < prev5.macdOSC) {
-      return '淘汰7: MACD指標背離（價創新高但OSC走低）';
+      return '淘汰7: 頭頭低+MACD背離（價創新高但OSC走低）';
     }
   }
   // KD 背離
   if (c.kdK != null && prev5?.kdK != null) {
     if (c.high > prev5.high && c.kdK < prev5.kdK) {
-      return '淘汰7: KD指標背離（價創新高但K值走低）';
+      return '淘汰7: 頭頭低+KD背離（價創新高但K值走低）';
     }
   }
   return null;

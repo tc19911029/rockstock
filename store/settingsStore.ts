@@ -79,7 +79,22 @@ export const useSettingsStore = create<SettingsStore>()(
       setStopLossPercent: (pct) => set({ stopLossPercent: Math.max(1, Math.min(20, pct)) }),
       setStrategy: (params) => set(s => ({ strategy: { ...s.strategy, ...params } })),
       resetStrategy: () => set({ strategy: DEFAULT_STRATEGY }),
-      setActiveStrategy: (id) => set({ activeStrategyId: id }),
+      setActiveStrategy: (id) => {
+        set({ activeStrategyId: id });
+        // 同步寫 server，讓 cron / ScanPipeline 使用同一套策略
+        if (typeof window !== 'undefined') {
+          const { customStrategies } = get();
+          const custom = customStrategies.find(s => s.id === id);
+          const body = custom
+            ? { strategyId: null, customConfig: custom }
+            : { strategyId: id, customConfig: null };
+          fetch('/api/strategy/active', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }).catch(err => console.warn('[settingsStore] 同步 active strategy 失敗:', err));
+        }
+      },
       addCustomStrategy: (s) =>
         set(state => ({
           customStrategies: [...state.customStrategies, {

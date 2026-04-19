@@ -29,6 +29,10 @@ export interface ScanPipelineOptions {
   force?: boolean;
   /** 超時毫秒數（預設 250000） */
   deadlineMs?: number;
+  /** 顯式指定策略（歷史重跑用），不指定時從 server-side 讀 active strategy */
+  strategy?: import('@/lib/strategy/StrategyConfig').StrategyConfig;
+  /** 顯式指定歷史 turnoverRank（歷史重跑用，避免用到今天的前 500） */
+  turnoverRankOverride?: Map<string, number>;
 }
 
 export interface ScanPipelineResult {
@@ -57,11 +61,16 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
   let marketTrend: string | undefined;
   let timedOut = false;
 
-  // ── Step 1: 建立 Scanner + L2 注入 ──
+  // ── Step 1: 建立 Scanner + L2 注入 + 讀取 active strategy ──
   // 動態 import 避免 Edge runtime 解析到 fs/path
   const { saveScanSession, loadScanSession } = await import('@/lib/storage/scanStorage');
   const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
-  const { ZHU_OPTIMIZED } = await import('@/lib/strategy/StrategyConfig');
+  const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
+
+  // Server-side active strategy（UI 切策略時會同步寫入）
+  const activeStrategy = options.strategy ?? await getActiveStrategyServer();
+  const activeThresholds = activeStrategy.thresholds;
+  console.info(`[ScanPipeline] ${market} 使用策略: ${activeStrategy.id} (${activeStrategy.name})`);
 
   let scanner: TaiwanScanner | ChinaScanner;
   if (market === 'CN') {
@@ -77,11 +86,16 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
   let stocks = await scanner.getStockList();
   let turnoverRanks: Map<string, number> | null = null;
 
-  // 前 N 成交額過濾 + 自動重建索引（回測冠軍組合：前 500 + MTF≥3 = +238%）
-  // 索引 stale 時自動重建（本地 fs / Vercel Blob 統一處理）
-  // Fail-closed: 索引讀/建失敗 → abort 掃描，不回退到「無過濾全掃」
-  // 原因：無過濾會選到不在前 500 的股票，違反回測冠軍策略、turnoverRank 也會是 null
-  {
+  if (options.turnoverRankOverride) {
+    // 歷史重跑路徑：caller 已用 computeTurnoverRankAsOfDate 算好當日的前 500
+    const before = stocks.length;
+    stocks = stocks.filter(s => options.turnoverRankOverride!.has(s.symbol));
+    turnoverRanks = options.turnoverRankOverride;
+    console.info(`[ScanPipeline] ${market} 歷史 top500 override: ${stocks.length}/${before} (asOfDate=${date})`);
+  } else {
+    // 標準路徑：前 N 成交額過濾 + 自動重建索引（回測冠軍組合：前 500 + MTF≥3 = +238%）
+    // 索引 stale 時自動重建（本地 fs / Vercel Blob 統一處理）
+    // Fail-closed: 索引讀/建失敗 → abort 掃描，不回退到「無過濾全掃」
     const { readTurnoverRank, buildTurnoverRank } = await import('./TurnoverRank');
     let rank: Awaited<ReturnType<typeof readTurnoverRank>> = null;
     try {
@@ -117,7 +131,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
   // 性能優化：daily 和 mtf 結果差異只在前置 MTF 過濾（mtfScore >= mtfMinScore）。
   // 而 mtfResult always 計算（MarketScanner.scanOne），所以可以一次掃描共用兩份結果。
   // CN 3121 支從原本 4 次掃描（~380s）降為 2 次（~190s），避開 Vercel 300s 限制。
-  const mtfMinScore = ZHU_OPTIMIZED.thresholds.mtfMinScore ?? 3;
+  const mtfMinScore = activeThresholds.mtfMinScore ?? 3;
   const wantDaily = mtfModes.includes('daily');
   const wantMtf = mtfModes.includes('mtf');
 
@@ -153,12 +167,12 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
       let sessionFreshness: ScanSession['dataFreshness'];
 
       if (direction === 'long') {
-        const out = await scanner.scanSOP(stocks, date, undefined);
+        const out = await scanner.scanSOP(stocks, date, activeThresholds);
         results = out.results as import('./types').StockScanResult[];
         sessionFreshness = out.sessionFreshness;
         if (!marketTrend) marketTrend = String(out.marketTrend ?? '');
       } else {
-        const out = await scanner.scanShortCandidates(stocks, date, undefined);
+        const out = await scanner.scanShortCandidates(stocks, date, activeThresholds);
         results = out.candidates;
         sessionFreshness = out.sessionFreshness;
         if (!marketTrend) marketTrend = String(out.marketTrend ?? '');
