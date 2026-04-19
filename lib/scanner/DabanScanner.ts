@@ -759,14 +759,15 @@ export async function confirmDabanAtOpen(
     console.warn('[DabanScanner] computeFullMarketDayRank 失敗，跳過 marketDayRank 注入', e);
   }
 
-  // 排序：openConfirmed=true 優先在前，組內按成交額降序
-  // （避免使用者看到「#1 但 ⏸ 不進」的困惑——把真正可進場的拉到頂）
-  // 4/16 commit 試過按 gapUpPct 排但已 revert，原因見 project_daban_strategy_evolution_timeline.md
+  // 排序：純按當日全市場成交額排名（marketDayRank 小=成交額大在前）
+  // 一字板排最後（買不到）。不再把 openConfirmed 優先往前排
+  // —— 用戶決議 2026-04-19：直觀單一維度比「✅進場優先」好懂
   updatedResults.sort((a, b) => {
-    const ac = a.openConfirmed === true ? 1 : 0;
-    const bc = b.openConfirmed === true ? 1 : 0;
-    if (ac !== bc) return bc - ac;          // 已確認進場優先
-    return (b.turnover ?? 0) - (a.turnover ?? 0); // 同組按成交額
+    if (a.isYiZiBan !== b.isYiZiBan) return a.isYiZiBan ? 1 : -1;
+    const ar = a.marketDayRank ?? Infinity;
+    const br = b.marketDayRank ?? Infinity;
+    if (ar !== br) return ar - br;
+    return (b.turnover ?? 0) - (a.turnover ?? 0); // tie-break
   });
 
   const confirmedCount = updatedResults.filter(r => r.openConfirmed).length;
@@ -784,6 +785,6 @@ export async function confirmDabanAtOpen(
   }
 
   await saveDabanSession(updatedSession);
-  console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場，✅進場優先+成交額次排（${scanDate} → ${openDate}）`);
+  console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場，按當日全市場成交額排名排序（${scanDate} → ${openDate}）`);
   return updatedSession;
 }
