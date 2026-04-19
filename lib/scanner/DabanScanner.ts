@@ -572,8 +572,10 @@ export async function confirmDabanAtOpen(
     };
   }));
 
-  // 按高開幅度降序排列（回測證明高開幅度是最強排序因子，勝率70%>多因子58%）
-  updatedResults.sort((a, b) => (b.gapUpPct ?? -999) - (a.gapUpPct ?? -999));
+  // 維持 scan 時的成交額排序（4/16 改為高開排序的決策已 revert，
+  // 因為 Q1 backtest 樣本不夠，Q2 換 regime 後高開 ≥8% 反而 -4.16%。
+  // 詳見 memory: project_daban_strategy_evolution_timeline.md）
+  // updatedResults 保持原順序（即 scan-daban 產生的成交額降序）
 
   const confirmedCount = updatedResults.filter(r => r.openConfirmed).length;
   const updatedSession: DabanScanSession = {
@@ -581,10 +583,10 @@ export async function confirmDabanAtOpen(
     results: updatedResults,
     openConfirmDate: openDate,
     openConfirmTime: new Date().toISOString(),
-    sortedBy: 'gapUpPct',
+    sortedBy: 'turnover',
   };
 
   await saveDabanSession(updatedSession);
-  console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場，按高開幅度排序（${scanDate} → ${openDate}）`);
+  console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場，維持成交額排序（${scanDate} → ${openDate}）`);
   return updatedSession;
 }

@@ -182,11 +182,22 @@ export async function POST(req: NextRequest) {
       ? `${SYSTEM_PROMPT}\n\n## 當前走圖情境：\n${context}`
       : SYSTEM_PROMPT;
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    // 優先使用 MiniMax（Anthropic-compatible endpoint），fallback 回 Anthropic 原生
+    const minimaxKey = process.env.MINIMAX_API_KEY;
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = minimaxKey || anthropicKey;
     if (!apiKey) {
-      return new Response('❌ 伺服器未設定 ANTHROPIC_API_KEY', { status: 500 });
+      return new Response('❌ 伺服器未設定 MINIMAX_API_KEY 或 ANTHROPIC_API_KEY', { status: 500 });
     }
-    const client = new Anthropic({ apiKey });
+    const useMinimax = !!minimaxKey;
+    // MiniMax 大陸版用 api.minimax.chat（用戶 key 對應大陸版帳號）
+    // 國際版是 api.minimax.io；如未來換國際版 key，可改用環境變數 MINIMAX_BASE_URL 切換
+    const minimaxBaseURL = process.env.MINIMAX_BASE_URL ?? 'https://api.minimax.chat/anthropic';
+    const client = new Anthropic({
+      apiKey,
+      ...(useMinimax ? { baseURL: minimaxBaseURL } : {}),
+    });
+    const model = useMinimax ? 'MiniMax-M2.7' : 'claude-sonnet-4-6';
 
     const encoder = new TextEncoder();
 
@@ -194,7 +205,7 @@ export async function POST(req: NextRequest) {
       async start(controller) {
         try {
           const stream = client.messages.stream({
-            model: 'claude-sonnet-4-6',
+            model,
             max_tokens: 2048,
             system: systemWithContext,
             messages,
@@ -213,7 +224,7 @@ export async function POST(req: NextRequest) {
           const final = await stream.finalMessage();
           if (final.usage) {
             recordUsage(
-              'claude-sonnet-4-6',
+              model,
               'chat',
               final.usage.input_tokens,
               final.usage.output_tokens,
