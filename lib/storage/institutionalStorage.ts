@@ -38,7 +38,7 @@ export async function saveInstitutionalTW(
   if (IS_VERCEL) {
     const { put } = await import('@vercel/blob');
     await put(blobKey(date), data, {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: false,
       allowOverwrite: true,
     });
@@ -51,12 +51,18 @@ export async function saveInstitutionalTW(
 export async function readInstitutionalTW(date: string): Promise<InstitutionalRecord[] | null> {
   try {
     if (IS_VERCEL) {
-      const { head } = await import('@vercel/blob');
-      const meta = await head(blobKey(date));
-      if (!meta?.url) return null;
-      const res = await fetch(meta.url);
-      if (!res.ok) return null;
-      const stored = await res.json() as StoredDay;
+      const { get } = await import('@vercel/blob');
+      const result = await get(blobKey(date), { access: 'private' });
+      if (!result || !result.stream) return null;
+      const reader = result.stream.getReader();
+      const chunks: Uint8Array[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) chunks.push(value);
+      }
+      const text = new TextDecoder().decode(Buffer.concat(chunks));
+      const stored = JSON.parse(text) as StoredDay;
       return stored.records;
     } else {
       const data = await fs.readFile(localPath(date), 'utf-8');

@@ -5,6 +5,10 @@
       "schedule": "45 5 * * 1-5"
     },
     {
+      "path": "/api/cron/fetch-institutional",
+      "schedule": "45 7 * * 1-5"
+    },
+    {
       "path": "/api/cron/download-candles-batch?market=CN&batch=1&totalBatches=4",
       "schedule": "15 7 * * 1-5"
     },
