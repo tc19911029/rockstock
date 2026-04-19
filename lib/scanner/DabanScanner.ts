@@ -122,6 +122,50 @@ function computeSentiment(
   };
 }
 
+// ── 當日全市場成交額排名（2026-04-19）──────────────────────────────
+// 用途：daban scanner picks 漲停股，這些不一定在 turnover-rank top 500（20日均）。
+// 改用「該日全市場 5000 檔的成交額」算當日排名，每檔都有 N。
+// 模組級 cache 避免 backfill 重複計算同一日。
+const dayRankCache = new Map<string, { rankMap: Map<string, number>; total: number }>();
+
+async function computeFullMarketDayRank(date: string): Promise<{ rankMap: Map<string, number>; total: number }> {
+  const cached = dayRankCache.get(date);
+  if (cached) return cached;
+
+  const { ChinaScanner } = await import('./ChinaScanner');
+  const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
+  const scanner = new ChinaScanner();
+  const stockList = await scanner.getStockList();
+
+  const turnovers: { symbol: string; turnover: number }[] = [];
+  const CONC = 100;
+  for (let i = 0; i < stockList.length; i += CONC) {
+    const batch = stockList.slice(i, i + CONC);
+    const results = await Promise.allSettled(batch.map(async ({ symbol }) => {
+      try {
+        const data = await readCandleFile(symbol, 'CN');
+        if (!data) return null;
+        const c = data.candles.find(c => c.date === date);
+        if (!c) return null;
+        return { symbol, turnover: c.close * c.volume };
+      } catch { return null; }
+    }));
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value && r.value.turnover > 0) {
+        turnovers.push(r.value);
+      }
+    }
+  }
+
+  turnovers.sort((a, b) => b.turnover - a.turnover);
+  const rankMap = new Map<string, number>();
+  turnovers.forEach((t, i) => rankMap.set(t.symbol, i + 1));
+
+  const result = { rankMap, total: turnovers.length };
+  dayRankCache.set(date, result);
+  return result;
+}
+
 // ── Live monitor 相對指標（B 方案 v2，2026-04-19）────────────────────────────
 const RECENT_HEALTH_SESSIONS = 5;       // 「最近」窗口
 const BASELINE_SESSIONS = 30;           // baseline 看過去 30 天
@@ -673,7 +717,7 @@ export async function confirmDabanAtOpen(
   // 不能只回 session 否則舊的錯誤 openConfirmed 不會修正
   const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
 
-  const updatedResults = await Promise.all(session.results.map(async result => {
+  let updatedResults = await Promise.all(session.results.map(async result => {
     const code = result.symbol.replace(/\.(SS|SZ)$/, '');
     // 1. 優先 L2 snapshot 的 q.open（真正的 9:25 集合競價開盤價）
     //    q.close 是盤中最新價，會被漲停價污染不能用
@@ -702,6 +746,18 @@ export async function confirmDabanAtOpen(
       openConfirmed: openPrice >= result.buyThresholdPrice,
     };
   }));
+
+  // 注入當日全市場成交額排名（每檔都有 N 名，不論大小型）
+  try {
+    const { rankMap, total } = await computeFullMarketDayRank(scanDate);
+    updatedResults = updatedResults.map(r => ({
+      ...r,
+      marketDayRank: rankMap.get(r.symbol),
+      marketDayTotal: total,
+    }));
+  } catch (e) {
+    console.warn('[DabanScanner] computeFullMarketDayRank 失敗，跳過 marketDayRank 注入', e);
+  }
 
   // 排序：openConfirmed=true 優先在前，組內按成交額降序
   // （避免使用者看到「#1 但 ⏸ 不進」的困惑——把真正可進場的拉到頂）

@@ -296,7 +296,9 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
         const perf = perfMap.get(r.symbol);
         const rt = realtimePrices.get(r.symbol);
         const ticker = r.symbol.replace(/\.(SS|SZ)$/i, '');
-        const turnoverRank = turnoverRankMap.get(r.symbol);
+        // 優先用 session 內的當日全市場排名，fallback 用 20 日均 top 500 rank
+        const dayRank = r.marketDayRank;
+        const fallbackRank = turnoverRankMap.get(r.symbol);
 
         return (
           <div key={r.symbol} className="rounded-lg border border-border/60 px-2.5 py-2 bg-card hover:bg-secondary/40 transition-colors">
@@ -304,12 +306,19 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
             <div className="flex items-center gap-1.5 mb-1 flex-wrap">
               <span className="font-mono text-[11px] text-foreground/90">{ticker}</span>
               <span className="text-[11px] text-foreground/80 truncate flex-1">{displayName(r)}</span>
-              {turnoverRank != null && (
+              {dayRank != null ? (
+                <span
+                  className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
+                  title={`當日全市場成交額排名（共 ${r.marketDayTotal ?? '-'} 檔）`}
+                >
+                  全市場第{dayRank}名
+                </span>
+              ) : fallbackRank != null && (
                 <span
                   className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
                   title="20日均成交額排名（全市場前500內）"
                 >
-                  成交量第{turnoverRank}名
+                  20日均第{fallbackRank}名
                 </span>
               )}
               {r.openConfirmed === true && (

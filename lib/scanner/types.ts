@@ -346,6 +346,9 @@ export interface DabanScanResult {
   gapUpPct?: number;
   /** 是否確認進場：openPrice >= buyThresholdPrice */
   openConfirmed?: boolean;
+  /** 當日全市場成交額排名（1 = 第一名，越小越大）；total=當日有 K 棒的全市場股數 */
+  marketDayRank?: number;
+  marketDayTotal?: number;
 }
 
 export interface DabanSentiment {
