@@ -136,21 +136,6 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
           )}
         </div>
 
-        {/* Row 3: result count */}
-        <div className="flex items-center gap-1.5 text-[10px]">
-          {scanResults.length > 0 && !isScanning && scanDirection !== 'daban' && (
-            <span className="text-muted-foreground ml-auto">
-              <span className="text-amber-400 font-bold">{scanResults.length}</span> 檔
-              {marketTrend && (
-                <span className={`ml-1 px-1 py-0.5 rounded text-[9px] font-bold ${
-                  marketTrend === '多頭' ? 'bg-red-900/50 text-red-300' :
-                  marketTrend === '空頭' ? 'bg-green-900/50 text-green-300' :
-                  'bg-yellow-900/50 text-yellow-300'
-                }`}>{marketTrend}</span>
-              )}
-            </span>
-          )}
-        </div>
       </div>
 
       {/* ── 釘住在最上：日期歷史 + 朱老師分析（不隨下方卡片滾動） ── */}
@@ -158,7 +143,8 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
         {/* Date Navigator — vertical pill list */}
         {cronDates.some(c => c.market === market) && (
           <div className="px-2.5 py-1.5 border-b border-border/60">
-            <div className="flex flex-wrap gap-1">
+            {/* 20 天分兩排：10 欄 × 2 列。不顯示 (count) 保持窄身，hover title 仍可看數量 */}
+            <div className="grid grid-cols-10 gap-1">
               {cronDates.filter(c => c.market === market)
                 .filter((c, i, arr) => arr.findIndex(x => x.date === c.date) === i)
                 .slice(0, 20)
@@ -175,13 +161,12 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                         }
                       }}
                       disabled={isBusy || isLoadingCronSession}
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${
+                      className={`text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate ${
                         isActive ? 'bg-sky-700 text-sky-100 font-semibold' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
                       } ${isBusy || isLoadingCronSession ? 'opacity-50' : ''}`}
                       title={`${c.date}｜${c.resultCount >= 0 ? c.resultCount + ' 檔' : ''}`}
                     >
                       {c.date.slice(5)}
-                      {c.resultCount >= 0 && <span className="ml-0.5 opacity-60">({c.resultCount})</span>}
                     </button>
                   );
                 })}
