@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useBacktestStore } from '@/store/backtestStore';
 import { ScanResultsCompact } from './components/ScanResultsCompact';
 import { DabanResultsCompact } from './components/DabanResultsCompact';
+import { ScanCoachDigest } from './components/ScanCoachDigest';
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import type { SelectedStock } from './components/ScanChartPanel';
 
@@ -152,11 +153,11 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
         </div>
       </div>
 
-      {/* ── Scrollable content ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      {/* ── 釘住在最上：日期歷史 + 朱老師分析（不隨下方卡片滾動） ── */}
+      <div className="shrink-0 border-b border-border bg-card/80">
         {/* Date Navigator — vertical pill list */}
         {cronDates.some(c => c.market === market) && (
-          <div className="px-2.5 py-1.5 border-b border-border">
+          <div className="px-2.5 py-1.5 border-b border-border/60">
             <div className="flex flex-wrap gap-1">
               {cronDates.filter(c => c.market === market)
                 .filter((c, i, arr) => arr.findIndex(x => x.date === c.date) === i)
@@ -188,6 +189,22 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
           </div>
         )}
 
+        {/* 朱老師跨檔分析（只在非打板時顯示） */}
+        {scanDirection !== 'daban' && scanResults.length > 0 && (
+          <div className="px-2.5 py-1.5 max-h-[55vh] overflow-y-auto">
+            <ScanCoachDigest
+              market={market}
+              scanDate={scanDate}
+              direction={scanDirection === 'short' ? 'short' : 'long'}
+              marketTrend={String(marketTrend ?? '')}
+              results={scanResults}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ── 下方可滑動：股票卡片清單 ── */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {/* Progress bar */}
         {(isScanning || isFetchingForward) && (
           <div className="px-2.5 py-1.5 border-b border-border">
