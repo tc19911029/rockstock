@@ -17,6 +17,11 @@ export interface ProhibitionResult {
   reasons: string[]; // 觸發的戒律說明
 }
 
+export interface ProhibitionContext {
+  /** 最近 N 日三大法人淨買賣股數（由新到舊），caller pre-fetch 後傳入 */
+  institutionalHistory?: Array<{ date: string; netShares: number }>;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 做多10大戒律
 // ─────────────────────────────────────────────────────────────────────────────
@@ -32,12 +37,25 @@ export interface ProhibitionResult {
 export function checkLongProhibitions(
   candles: CandleWithIndicators[],
   index: number,
+  ctx?: ProhibitionContext,
 ): ProhibitionResult {
   const reasons: string[] = [];
 
   if (index < 5) return { prohibited: false, reasons };
 
   const last = candles[index];
+
+  // ── 戒律 8：三大法人連續賣超（書本 Part 10 p.661）──────────────────
+  // 近 3 日三大法人皆明顯淨賣超（> 5 張/日）→ 主力出貨跡象，禁入
+  // 書本沒明寫門檻，此處以 5 張（5000 股）為「有意義的賣超」，避免雜訊誤殺
+  if (ctx?.institutionalHistory && ctx.institutionalHistory.length >= 3) {
+    const MIN_MEANINGFUL_SHARES = -50_000;  // 每日淨賣 ≤ -50 張（50,000 股）才算，避免雜訊
+    const recent3 = ctx.institutionalHistory.slice(0, 3);
+    if (recent3.every(d => d.netShares < MIN_MEANINGFUL_SHARES)) {
+      const avgSell = Math.round(recent3.reduce((a, d) => a + d.netShares, 0) / 3);
+      reasons.push(`戒律8：三大法人近3日連續賣超（平均${avgSell.toLocaleString()}股/日）`);
+    }
+  }
 
   // ── 戒律2：上漲第3根以上位置，勿追高做多 ──────────────────────────────
   // 邏輯：連續3根以上收紅K（上漲）→ 已追高

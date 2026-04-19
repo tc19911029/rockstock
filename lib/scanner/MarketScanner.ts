@@ -320,6 +320,7 @@ export abstract class MarketScanner {
     asOfDate?: string,
     industry?: string,
     diag?: ScanDiagnostics,
+    institutionalMap?: Map<string, Array<{ date: string; netShares: number }>>,
   ): Promise<StockScanResult | null> {
     try {
       let name = rawName;
@@ -394,7 +395,12 @@ export abstract class MarketScanner {
       // 短線第10條（上影線>50%不買）已由六條件⑤覆蓋（upperShadowMax 預設20%），不再重複檢查
 
       // ── 3. 10大戒律：硬性禁忌過濾（朱老師 p.54）─────────────────────
-      const prohib = checkLongProhibitions(candles, lastIdx);
+      // TW 含戒律8「三大法人連續賣超」（需 institutionalMap 預先載入）
+      const instSymbol = symbol.replace(/\.(TW|TWO)$/i, '');
+      const prohibCtx = institutionalMap
+        ? { institutionalHistory: institutionalMap.get(instSymbol) }
+        : undefined;
+      const prohib = checkLongProhibitions(candles, lastIdx, prohibCtx);
       if (prohib.prohibited) { if (diag) diag.filteredOut++; return null; }
 
       // ── 5. 淘汰法 R1-R11（寶典）─────────────────────────────────────
@@ -903,11 +909,26 @@ export abstract class MarketScanner {
       }
     } catch { /* fallback */ }
 
+    // TW 掃描：pre-load 近 5 日三大法人資料（書本淘汰 #8 用）
+    let institutionalMap: Map<string, Array<{ date: string; netShares: number }>> | undefined;
+    if (config.marketId === 'TW') {
+      try {
+        const { buildInstitutionalMapTW } = await import('@/lib/storage/institutionalStorage');
+        const refDate = asOfDate ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+        institutionalMap = await buildInstitutionalMapTW(refDate, 5);
+        if (institutionalMap.size > 0) {
+          console.info(`[ScanSOP] TW 法人資料 pre-loaded: ${institutionalMap.size} 支`);
+        }
+      } catch (err) {
+        console.warn('[ScanSOP] TW 法人資料載入失敗:', err instanceof Error ? err.message : err);
+      }
+    }
+
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(({ symbol, name, industry }) =>
-          this.scanOne(symbol, name, config, minScore, th, asOfDate, industry, diag)
+          this.scanOne(symbol, name, config, minScore, th, asOfDate, industry, diag, institutionalMap)
         )
       );
       for (const r of settled) {
