@@ -11,6 +11,15 @@ __pycache__/
 /data/*.png
 /data/candles/
 /data/turnover-rank/
+/data/institutional/
+/data/manifest/
+/data/*.json.BAD-*
+
+# backtest CSV outputs (root level)
+/backtest-*.csv
+
+# logs
+/logs/
 
 # strategy-engine (separate Python experiment)
 /strategy-engine/
