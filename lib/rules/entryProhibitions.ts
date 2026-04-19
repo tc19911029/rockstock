@@ -119,8 +119,8 @@ export function checkLongProhibitions(
     }
   }
 
-  // ── 戒律7：盤整區內勿進場做多 ────────────────────────────────────────
-  // 邏輯：近10根K棒的高低點範圍 < 5%，且今日未突破此範圍
+  // ── 戒律7：盤整區內勿進場做多（書本 p.87 明寫 <15%）───────────────────
+  // 邏輯：近10根K棒的高低點範圍 < 15%，且今日未突破此範圍
   {
     const lookback = Math.min(10, index - 1);
     const segment = candles.slice(index - lookback, index); // 不含今日
@@ -129,9 +129,41 @@ export function checkLongProhibitions(
       const segLow = Math.min(...segment.map(c => c.low));
       const rangeWidth = segLow > 0 ? (segHigh - segLow) / segLow : 1;
 
-      // 盤整：區間幅度 < 5%，且今日收盤未突破此盤整高點
-      if (rangeWidth < 0.05 && last.close <= segHigh * 1.005) {
-        reasons.push('戒律7：股價在盤整區內（近10根K棒波動<5%），勿進場做多');
+      // 盤整：區間幅度 < 15%（書本 p.87），且今日收盤未突破此盤整高點
+      if (rangeWidth < 0.15 && last.close <= segHigh * 1.005) {
+        reasons.push(`戒律7：股價在盤整區內（近10根K棒波動${(rangeWidth*100).toFixed(1)}%<15%），勿進場做多`);
+      }
+    }
+  }
+
+  // ── 獨立戒律：MA20 乖離 >12% 追高警示（書本 p.568 MA 通道）──────────
+  // 書本：正乖離過大（>12-15%）表示買超，將有下跌壓力
+  // 與戒律3（三合一）不同，此條單獨成立即禁入（避免末升段末端追高）
+  {
+    const ma20 = last.ma20;
+    if (ma20 && ma20 > 0) {
+      const dev = (last.close - ma20) / ma20;
+      if (dev > 0.12) {
+        reasons.push(`MA20 乖離過大 ${(dev*100).toFixed(1)}%>12%（書本 p.568），追高有回檔壓力`);
+      }
+    }
+  }
+
+  // ── 獨立戒律：末升段暴大量黑K（書本 p.533 量價 13 條 #8(4)）──────────
+  // 書本：高檔連續急漲「暴大量」，股價只能上漲不能下跌，出現黑K下跌 → 容易急跌或反轉
+  // 觸發條件：近 3 根連續紅K 上漲 + 當日爆大量（5日均量×2）+ 黑K
+  {
+    const bodyPct = last.open > 0 ? (last.open - last.close) / last.open : 0;
+    const isBlackK = last.close < last.open;
+    const avgVol5 = last.avgVol5 ?? 0;
+    const isBlowoff = avgVol5 > 0 && last.volume >= avgVol5 * 2;
+    if (isBlackK && isBlowoff && bodyPct >= 0.01 && index >= 3) {
+      const prev3AllRed =
+        candles[index - 1].close > candles[index - 1].open &&
+        candles[index - 2].close > candles[index - 2].open &&
+        candles[index - 3].close > candles[index - 3].open;
+      if (prev3AllRed) {
+        reasons.push('末升段警示：連續3紅後爆大量長黑K（書本 p.533 #8(4)），容易急跌反轉');
       }
     }
   }
