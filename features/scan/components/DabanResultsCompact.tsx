@@ -306,14 +306,10 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
               <span className="text-[11px] text-foreground/80 truncate flex-1">{displayName(r)}</span>
               {turnoverRank != null && (
                 <span
-                  className={`text-[9px] px-1 py-0.5 rounded border ${
-                    turnoverRank <= 50 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : turnoverRank <= 200 ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
-                    : 'bg-zinc-500/20 text-zinc-400 border-zinc-500/40'
-                  }`}
-                  title={`全市場 20 日均成交額排名第 ${turnoverRank} 名（top 500）`}
+                  className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
+                  title="20日均成交額排名（全市場前500內）"
                 >
-                  💰 #{turnoverRank}
+                  成交量第{turnoverRank}名
                 </span>
               )}
               {r.openConfirmed === true && (
