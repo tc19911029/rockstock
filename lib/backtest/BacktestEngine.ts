@@ -948,9 +948,20 @@ export function runSOPBacktest(
 
     // ══════════════════════════════════════════════════════════════
     // 7. 獲利>10% + 收盤跌破MA5 → 停利（守則6）
+    //    末升段降短線：接近起漲 1 倍時（書本 Part 4 p.333）門檻降半到 5%
     //    守則15 例外：跌幅<1%，量縮，MA20向上 → 可續抱
     // ══════════════════════════════════════════════════════════════
-    if (currentReturnFromHigh >= zhuExit.profitTakeMa5Pct && ma5 !== null && c.close < ma5) {
+    let effProfitMa5Threshold = zhuExit.profitTakeMa5Pct;
+    if (absIdx >= 60) {
+      const lookback60 = forwardCandles.slice(Math.max(0, absIdx - 60), absIdx);
+      let low60 = Infinity;
+      for (const k of lookback60) if (k.low < low60) low60 = k.low;
+      if (low60 > 0 && (c.close - low60) / low60 > 0.80) {
+        // 進入末升段（距 60 日低點 >80%）→ 守 MA5 門檻降半
+        effProfitMa5Threshold = zhuExit.profitTakeMa5Pct * 0.5;
+      }
+    }
+    if (currentReturnFromHigh >= effProfitMa5Threshold && ma5 !== null && c.close < ma5) {
       // 守則 15 例外
       const dropPct = Math.abs(c.close - c.open) / c.open;
       const isVolShrink = avgVol != null && avgVol > 0 && (c.volume ?? 0) < avgVol * 0.8;
