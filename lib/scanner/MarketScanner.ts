@@ -395,10 +395,13 @@ export abstract class MarketScanner {
       // 短線第10條（上影線>50%不買）已由六條件⑤覆蓋（upperShadowMax 預設20%），不再重複檢查
 
       // ── 3. 10大戒律：硬性禁忌過濾（朱老師 p.54）─────────────────────
-      // TW 含戒律8「三大法人連續賣超」（需 institutionalMap 預先載入）
-      const instSymbol = symbol.replace(/\.(TW|TWO)$/i, '');
+      // 戒律 8「主力連續淨賣出」：TW=三大法人買賣超（單位股）、CN=主力資金（單位元）
+      const instSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
       const prohibCtx = institutionalMap
-        ? { institutionalHistory: institutionalMap.get(instSymbol) }
+        ? {
+            institutionalHistory: institutionalMap.get(instSymbol),
+            minMeaningfulOutflow: config.marketId === 'CN' ? -5_000_000 : -50_000,
+          }
         : undefined;
       const prohib = checkLongProhibitions(candles, lastIdx, prohibCtx);
       if (prohib.prohibited) { if (diag) diag.filteredOut++; return null; }
@@ -909,7 +912,9 @@ export abstract class MarketScanner {
       }
     } catch { /* fallback */ }
 
-    // TW 掃描：pre-load 近 5 日三大法人資料（書本淘汰 #8 用）
+    // pre-load 主力/法人資料（書本淘汰 #8 用）
+    //   TW: 三大法人 T86（institutionalStorage）
+    //   CN: 主力資金流（capitalFlowStorage，數值單位為元而非股數，但邏輯一致）
     let institutionalMap: Map<string, Array<{ date: string; netShares: number }>> | undefined;
     if (config.marketId === 'TW') {
       try {
@@ -921,6 +926,17 @@ export abstract class MarketScanner {
         }
       } catch (err) {
         console.warn('[ScanSOP] TW 法人資料載入失敗:', err instanceof Error ? err.message : err);
+      }
+    } else if (config.marketId === 'CN') {
+      try {
+        const { buildCapitalFlowMapCN } = await import('@/lib/storage/capitalFlowStorage');
+        const refDate = asOfDate ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+        institutionalMap = await buildCapitalFlowMapCN(refDate, 5);
+        if (institutionalMap.size > 0) {
+          console.info(`[ScanSOP] CN 主力資金流 pre-loaded: ${institutionalMap.size} 支`);
+        }
+      } catch (err) {
+        console.warn('[ScanSOP] CN 主力資金流載入失敗:', err instanceof Error ? err.message : err);
       }
     }
 

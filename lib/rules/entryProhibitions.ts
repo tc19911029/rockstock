@@ -18,8 +18,10 @@ export interface ProhibitionResult {
 }
 
 export interface ProhibitionContext {
-  /** 最近 N 日三大法人淨買賣股數（由新到舊），caller pre-fetch 後傳入 */
+  /** 最近 N 日主力淨買賣（由新到舊）— TW 單位=股、CN 單位=元 */
   institutionalHistory?: Array<{ date: string; netShares: number }>;
+  /** 「有意義的淨流出」門檻（負數）— TW 預設 -50,000 股；CN 建議 -5,000,000 元 */
+  minMeaningfulOutflow?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,15 +47,16 @@ export function checkLongProhibitions(
 
   const last = candles[index];
 
-  // ── 戒律 8：三大法人連續賣超（書本 Part 10 p.661）──────────────────
-  // 近 3 日三大法人皆明顯淨賣超（> 5 張/日）→ 主力出貨跡象，禁入
-  // 書本沒明寫門檻，此處以 5 張（5000 股）為「有意義的賣超」，避免雜訊誤殺
+  // ── 戒律 8：主力連續淨流出（書本 Part 10 p.661）──────────────────
+  // TW: 三大法人合計近 3 日皆淨賣 ≤ -50 張（50,000 股）
+  // CN: 主力資金近 3 日皆淨流出 ≤ -500 萬元
+  // 書本沒明寫門檻，此處取 noise filter 閾值避免小額流入流出誤殺
   if (ctx?.institutionalHistory && ctx.institutionalHistory.length >= 3) {
-    const MIN_MEANINGFUL_SHARES = -50_000;  // 每日淨賣 ≤ -50 張（50,000 股）才算，避免雜訊
+    const threshold = ctx.minMeaningfulOutflow ?? -50_000;  // 預設 TW 50 張
     const recent3 = ctx.institutionalHistory.slice(0, 3);
-    if (recent3.every(d => d.netShares < MIN_MEANINGFUL_SHARES)) {
+    if (recent3.every(d => d.netShares < threshold)) {
       const avgSell = Math.round(recent3.reduce((a, d) => a + d.netShares, 0) / 3);
-      reasons.push(`戒律8：三大法人近3日連續賣超（平均${avgSell.toLocaleString()}股/日）`);
+      reasons.push(`戒律8：主力近3日連續淨流出（平均${avgSell.toLocaleString()}/日）`);
     }
   }
 
