@@ -2,8 +2,11 @@ import { confirmDabanAtOpen } from '../lib/scanner/DabanScanner';
 
 async function main() {
   const pairs: [string, string][] = [
+    ['2026-04-13', '2026-04-14'],
     ['2026-04-14', '2026-04-15'],
     ['2026-04-15', '2026-04-16'],
+    ['2026-04-16', '2026-04-17'],
+    // 4/17 → 4/18 (週六非交易日，跳過)
   ];
   for (const [scanDate, openDate] of pairs) {
     console.log(`=== ${scanDate} → ${openDate} ===`);

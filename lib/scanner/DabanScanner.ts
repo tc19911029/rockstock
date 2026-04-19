@@ -572,10 +572,15 @@ export async function confirmDabanAtOpen(
     };
   }));
 
-  // 維持 scan 時的成交額排序（4/16 改為高開排序的決策已 revert，
-  // 因為 Q1 backtest 樣本不夠，Q2 換 regime 後高開 ≥8% 反而 -4.16%。
-  // 詳見 memory: project_daban_strategy_evolution_timeline.md）
-  // updatedResults 保持原順序（即 scan-daban 產生的成交額降序）
+  // 排序：openConfirmed=true 優先在前，組內按成交額降序
+  // （避免使用者看到「#1 但 ⏸ 不進」的困惑——把真正可進場的拉到頂）
+  // 4/16 commit 試過按 gapUpPct 排但已 revert，原因見 project_daban_strategy_evolution_timeline.md
+  updatedResults.sort((a, b) => {
+    const ac = a.openConfirmed === true ? 1 : 0;
+    const bc = b.openConfirmed === true ? 1 : 0;
+    if (ac !== bc) return bc - ac;          // 已確認進場優先
+    return (b.turnover ?? 0) - (a.turnover ?? 0); // 同組按成交額
+  });
 
   const confirmedCount = updatedResults.filter(r => r.openConfirmed).length;
   const updatedSession: DabanScanSession = {
@@ -587,6 +592,6 @@ export async function confirmDabanAtOpen(
   };
 
   await saveDabanSession(updatedSession);
-  console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場，維持成交額排序（${scanDate} → ${openDate}）`);
+  console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場，✅進場優先+成交額次排（${scanDate} → ${openDate}）`);
   return updatedSession;
 }
