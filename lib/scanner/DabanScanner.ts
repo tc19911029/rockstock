@@ -122,6 +122,137 @@ function computeSentiment(
   };
 }
 
+// ── Live monitor 相對指標（B 方案 v2，2026-04-19）────────────────────────────
+const RECENT_HEALTH_SESSIONS = 5;       // 「最近」窗口
+const BASELINE_SESSIONS = 30;           // baseline 看過去 30 天
+const RECENT_HEALTH_MIN_TRADES = 10;    // 最少累積 10 筆才有意義
+const DECLINE_THRESHOLD_PCT = -30;      // 近 5 日勝率比 baseline 低 30% → declining
+const RECOVER_THRESHOLD_PCT = 30;       // 高 30% → recovering
+
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+/** 算單一 session 所有 confirmed 進場 T+1 同日沖勝率 + 平均報酬 */
+async function computeSessionDayStats(
+  scanDate: string,
+  loadDabanSession: (d: string) => Promise<DabanScanSession | null>,
+  loadLocalCandles: (sym: string, m: 'TW' | 'CN') => Promise<CandleWithIndicators[] | null>,
+): Promise<{ trades: number; winRate: number; avgReturn: number } | null> {
+  const session = await loadDabanSession(scanDate);
+  if (!session) return null;
+  const confirmed = session.results.filter(r => r.openConfirmed === true);
+  if (confirmed.length === 0) return null;
+
+  let trades = 0;
+  let wins = 0;
+  let retSum = 0;
+  for (const r of confirmed) {
+    const candles = await loadLocalCandles(r.symbol, 'CN');
+    if (!candles) continue;
+    const idx = candles.findIndex(c => c.date > scanDate);
+    if (idx < 0) continue;
+    const next = candles[idx];
+    if (!next || next.open <= 0) continue;
+    const ret = (next.close - next.open) / next.open * 100;
+    trades++;
+    retSum += ret;
+    if (ret > 0) wins++;
+  }
+  if (trades === 0) return null;
+  return { trades, winRate: (wins / trades) * 100, avgReturn: retSum / trades };
+}
+
+/**
+ * Live monitor 升級版（2026-04-19）
+ *
+ * 計算近 5 天勝率 vs 過去 30 天中位數的相對偏差。
+ *
+ * - 偏差 < -30% → liveStatus='declining'，isCold=true「策略走弱」警示
+ * - 偏差 > +30% → liveStatus='recovering'
+ * - 中間 → liveStatus='normal'
+ *
+ * 關鍵：用「相對」門檻避免結構性負期望策略「永遠冰點」。
+ */
+export async function enrichSentimentWithStrategyHealth(
+  baseSentiment: DabanSentiment,
+  beforeDate: string,
+): Promise<DabanSentiment> {
+  const { listDabanDates, loadDabanSession } = await import('@/lib/storage/dabanStorage');
+  const { loadLocalCandles } = await import('@/lib/datasource/LocalCandleStore');
+
+  const allDates = await listDabanDates();
+  const past = allDates.filter(d => d.date < beforeDate).slice(0, BASELINE_SESSIONS + RECENT_HEALTH_SESSIONS);
+  if (past.length < 10) return baseSentiment; // 樣本不足
+
+  // 算每個 session 的當日勝率
+  const dailyStats: { date: string; trades: number; winRate: number; avgReturn: number }[] = [];
+  for (const { date: scanDate } of past) {
+    const s = await computeSessionDayStats(scanDate, loadDabanSession, loadLocalCandles);
+    if (s) dailyStats.push({ date: scanDate, ...s });
+  }
+  if (dailyStats.length < 10) return baseSentiment;
+
+  const recent = dailyStats.slice(0, RECENT_HEALTH_SESSIONS);
+  const baseline = dailyStats.slice(RECENT_HEALTH_SESSIONS, RECENT_HEALTH_SESSIONS + BASELINE_SESSIONS);
+  if (baseline.length < 5) return baseSentiment;
+
+  const recentTotalTrades = recent.reduce((s, d) => s + d.trades, 0);
+  const recentWeightedWR = recent.reduce((s, d) => s + d.winRate * d.trades, 0) / recentTotalTrades;
+  const recentWeightedRet = recent.reduce((s, d) => s + d.avgReturn * d.trades, 0) / recentTotalTrades;
+
+  const baselineMedianWR = median(baseline.map(d => d.winRate));
+  const baselineMedianRet = median(baseline.map(d => d.avgReturn));
+
+  const deltaPct = baselineMedianWR > 0
+    ? ((recentWeightedWR - baselineMedianWR) / baselineMedianWR) * 100
+    : 0;
+
+  let liveStatus: 'declining' | 'normal' | 'recovering' = 'normal';
+  if (recentTotalTrades >= RECENT_HEALTH_MIN_TRADES) {
+    if (deltaPct < DECLINE_THRESHOLD_PCT) liveStatus = 'declining';
+    else if (deltaPct > RECOVER_THRESHOLD_PCT) liveStatus = 'recovering';
+  }
+
+  // 只保留 computeSentiment 原始 reason 段落（漲停X家 / 昨漲停今均），
+  // 其他都當前次 enrich 殘留，丟棄
+  const baseReason = (baseSentiment.reason ?? '')
+    .split('、')
+    .filter(s => s.startsWith('漲停') || s.startsWith('昨漲停今均'))
+    .join('、');
+
+  // isCold 純由「原始 sentiment 條件」+「liveStatus」決定，不繼承前次 enrich 殘留
+  const oldSentimentCold = !!baseReason;
+  const liveCold = liveStatus === 'declining';
+  const isCold = oldSentimentCold || liveCold;
+
+  let reason: string | undefined = baseReason || undefined;
+  if (liveStatus === 'declining') {
+    const r = `策略走弱：近${recent.length}日勝率${recentWeightedWR.toFixed(0)}% < baseline ${baselineMedianWR.toFixed(0)}% (${deltaPct.toFixed(0)}%)`;
+    reason = reason ? `${reason}、${r}` : r;
+  } else if (liveStatus === 'recovering') {
+    const r = `策略回升：近${recent.length}日勝率${recentWeightedWR.toFixed(0)}% > baseline ${baselineMedianWR.toFixed(0)}% (+${deltaPct.toFixed(0)}%)`;
+    reason = reason ? `${reason}、${r}` : r;
+  }
+
+  return {
+    ...baseSentiment,
+    isCold,
+    reason,
+    recentTradeCount: recentTotalTrades,
+    recentWinRate: +recentWeightedWR.toFixed(1),
+    recentAvgReturn: +recentWeightedRet.toFixed(2),
+    recentSessions: recent.length,
+    baselineMedianWinRate: +baselineMedianWR.toFixed(1),
+    baselineMedianAvgReturn: +baselineMedianRet.toFixed(2),
+    winRateDeltaPct: +deltaPct.toFixed(1),
+    liveStatus,
+  };
+}
+
 /**
  * 掃描指定日期的漲停股（含情緒過濾）
  */
@@ -590,6 +721,11 @@ export async function confirmDabanAtOpen(
     openConfirmTime: new Date().toISOString(),
     sortedBy: 'turnover',
   };
+
+  // 開盤確認後 re-enrich 一次：openConfirmed 剛改、近期勝率可能跟著變
+  if (updatedSession.sentiment) {
+    updatedSession.sentiment = await enrichSentimentWithStrategyHealth(updatedSession.sentiment, scanDate);
+  }
 
   await saveDabanSession(updatedSession);
   console.log(`[DabanScanner] 開盤確認：${confirmedCount}/${session.resultCount} 支確認進場，✅進場優先+成交額次排（${scanDate} → ${openDate}）`);

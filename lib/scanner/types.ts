@@ -354,6 +354,24 @@ export interface DabanSentiment {
   yesterdayAvgReturn: number;     // 昨日漲停股今日平均漲跌 %
   isCold: boolean;               // 情緒冰點（不建議進場）
   reason?: string;               // 冰點原因
+  // ── 策略自身近 N 日勝率（B 方案，2026-04-19 加）──
+  /** 過去 N 個交易日 confirmed 進場累積筆數 */
+  recentTradeCount?: number;
+  /** 過去 N 個交易日 confirmed 進場勝率 %（同日沖：T+1 close > T+1 open） */
+  recentWinRate?: number;
+  /** 過去 N 個交易日 confirmed 進場平均同日沖報酬 % */
+  recentAvgReturn?: number;
+  /** 計算用了幾個 session */
+  recentSessions?: number;
+  // ── Live monitor 相對指標（2026-04-19 升級）──────────────────
+  /** 過去 30 天每日勝率的中位數（baseline，不含最近 5 天） */
+  baselineMedianWinRate?: number;
+  /** 過去 30 天每日平均報酬的中位數 */
+  baselineMedianAvgReturn?: number;
+  /** 近 5 天勝率相對 baseline 的偏差（%；負值=衰退） */
+  winRateDeltaPct?: number;
+  /** Live status: 'declining'=策略走弱、'normal'=正常、'recovering'=回升 */
+  liveStatus?: 'declining' | 'normal' | 'recovering';
 }
 
 export interface DabanScanSession {

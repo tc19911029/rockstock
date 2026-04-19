@@ -192,20 +192,51 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
 
   return (
     <div className="space-y-1.5 px-2">
-      {/* Sentiment */}
-      {session.sentiment && (
-        <div className={`rounded-lg p-2 text-[10px] ${session.sentiment.isCold ? 'bg-blue-500/10 border border-blue-500/30' : 'bg-green-500/10 border border-green-500/30'}`}>
-          <div className={`font-bold text-[11px] mb-0.5 ${session.sentiment.isCold ? 'text-blue-400' : 'text-green-400'}`}>
-            {session.sentiment.isCold ? '❄️ 情緒冰點' : '✅ 情緒正常'}
+      {/* Sentiment + Live Monitor */}
+      {session.sentiment && (() => {
+        const s = session.sentiment;
+        const live = s.liveStatus;
+        const headerColor =
+          live === 'declining' ? { bg: 'bg-red-500/10 border-red-500/30', txt: 'text-red-400', label: '⚠️ 策略走弱' }
+          : live === 'recovering' ? { bg: 'bg-emerald-500/10 border-emerald-500/30', txt: 'text-emerald-400', label: '📈 策略回升' }
+          : s.isCold ? { bg: 'bg-blue-500/10 border-blue-500/30', txt: 'text-blue-400', label: '❄️ 情緒冰點' }
+          : { bg: 'bg-green-500/10 border-green-500/30', txt: 'text-green-400', label: '✅ 正常' };
+
+        return (
+          <div className={`rounded-lg p-2 text-[10px] border ${headerColor.bg}`}>
+            <div className={`font-bold text-[11px] mb-0.5 ${headerColor.txt}`}>
+              {headerColor.label}
+            </div>
+            <div className="flex gap-2 text-muted-foreground flex-wrap">
+              <span>漲停 <span className="font-bold text-foreground">{s.limitUpCount}</span></span>
+              {s.recentTradeCount != null && s.recentTradeCount > 0 && (
+                <>
+                  <span>近{s.recentSessions}日勝率
+                    <span className={`font-bold ${(s.recentWinRate ?? 0) >= (s.baselineMedianWinRate ?? 50) ? 'text-bull' : 'text-bear'}`}>
+                      {' '}{s.recentWinRate}%
+                    </span>
+                  </span>
+                  {s.baselineMedianWinRate != null && (
+                    <span className="text-muted-foreground/70">vs baseline {s.baselineMedianWinRate}%
+                      {s.winRateDeltaPct != null && (
+                        <span className={s.winRateDeltaPct >= 0 ? 'text-bull' : 'text-bear'}>
+                          {' '}({s.winRateDeltaPct >= 0 ? '+' : ''}{s.winRateDeltaPct}%)
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  <span className="text-muted-foreground/60">({s.recentTradeCount}筆)</span>
+                </>
+              )}
+            </div>
+            {s.reason && (
+              <div className={`mt-1 text-[10px] ${headerColor.txt}`}>
+                {s.reason}
+              </div>
+            )}
           </div>
-          <div className="flex gap-2 text-muted-foreground">
-            <span>漲停 <span className="font-bold text-foreground">{session.sentiment.limitUpCount}</span></span>
-            <span>昨均 <span className={`font-bold ${session.sentiment.yesterdayAvgReturn >= 0 ? 'text-bull' : 'text-bear'}`}>
-              {session.sentiment.yesterdayAvgReturn >= 0 ? '+' : ''}{session.sentiment.yesterdayAvgReturn}%
-            </span></span>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Sort indicator（鐵律 6：靜默排序要 UI 提示） */}
       {(() => {
@@ -250,10 +281,16 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
         const rt = realtimePrices.get(r.symbol);
         const ticker = r.symbol.replace(/\.(SS|SZ)$/i, '');
 
+        // 高開幅度視覺化標籤（依用戶決策邏輯：3~5% 甜蜜區、≥8% 追高）
+        const gap = r.gapUpPct ?? null;
+        const isSweetSpot = r.openConfirmed === true && gap != null && gap >= 2 && gap < 5;
+        const isChasingHigh = r.openConfirmed === true && gap != null && gap >= 8;
+        const rowDimClass = isChasingHigh ? 'opacity-60' : '';
+
         return (
-          <div key={r.symbol} className="rounded-lg border border-border/60 px-2.5 py-2 bg-card hover:bg-secondary/40 transition-colors">
+          <div key={r.symbol} className={`rounded-lg border border-border/60 px-2.5 py-2 bg-card hover:bg-secondary/40 transition-colors ${rowDimClass}`}>
             {/* Row 1: Symbol + Name + Board type + 進場確認燈 */}
-            <div className="flex items-center gap-1.5 mb-1">
+            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
               <span className="font-mono text-[11px] text-foreground/90">{ticker}</span>
               <span className="text-[11px] text-foreground/80 truncate flex-1">{displayName(r)}</span>
               {r.openConfirmed === true && (
@@ -264,6 +301,16 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
               {r.openConfirmed === false && (
                 <span className="text-[9px] px-1 py-0.5 rounded border bg-zinc-500/20 text-zinc-400 border-zinc-500/40" title="9:25集合競價未達買入門檻（收盤 × 1.02），不進場">
                   ⏸ 不進
+                </span>
+              )}
+              {isSweetSpot && (
+                <span className="text-[9px] px-1 py-0.5 rounded border bg-amber-500/20 text-amber-300 border-amber-500/40" title="高開 2~5% 甜蜜區：離漲停還有 5~8% 空間，歷史 T+3 平均 +0.91~+3.61%">
+                  🎯 甜蜜區
+                </span>
+              )}
+              {isChasingHigh && (
+                <span className="text-[9px] px-1 py-0.5 rounded border bg-red-500/20 text-red-300 border-red-500/40" title="高開 ≥ 8% 已追高：離漲停剩 ≤ 2%，歷史 T+3 平均 -2.77%">
+                  ⚠️ 追高
                 </span>
               )}
               <span className={`text-[9px] px-1 py-0.5 rounded border ${boardBadge(r.limitUpType)}`}>{r.limitUpType}</span>

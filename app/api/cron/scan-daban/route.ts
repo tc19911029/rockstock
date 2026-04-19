@@ -10,7 +10,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { scanDabanWithPrefilter } from '@/lib/scanner/DabanScanner';
+import { scanDabanWithPrefilter, enrichSentimentWithStrategyHealth } from '@/lib/scanner/DabanScanner';
 import { saveDabanSession } from '@/lib/storage/dabanStorage';
 import { apiOk, apiError } from '@/lib/api/response';
 import { isTradingDay } from '@/lib/utils/tradingDay';
@@ -46,6 +46,11 @@ export async function GET(req: NextRequest) {
       console.warn(`[cron/scan-daban] ⚠️ prefilter 結果品質差（${nullCount}/${nonYizi.length} null），用全量 L1 重掃`);
       const { scanDabanFromLocalCandles } = await import('@/lib/scanner/DabanScanner');
       session = await scanDabanFromLocalCandles(date);
+    }
+
+    // 加上策略自身近 N 日勝率（B 方案）
+    if (session.sentiment) {
+      session.sentiment = await enrichSentimentWithStrategyHealth(session.sentiment, date);
     }
 
     // 開盤掃描：只要有 1 支就存（開盤初期數據可能較少）；盤後掃描維持 >= 5 支門檻
