@@ -3,7 +3,7 @@ import { Candle, CandleWithIndicators } from '@/types';
 import { computeIndicators } from '@/lib/indicators';
 import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
-import { getTWSEQuote } from './TWSERealtime';
+import { getTWSEQuote, type TWSEQuote } from './TWSERealtime';
 import { getEastMoneyQuote, getUSStockQuote } from './EastMoneyRealtime';
 
 /** 從 symbol 提取台股純數字代碼，非台股回傳 null */
@@ -315,3 +315,202 @@ export class YahooDataProvider implements DataProvider {
 
 /** 全域 Yahoo provider 單例 */
 export const yahooProvider = new YahooDataProvider();
+
+// ── Yahoo v7 批次 quote（盤中 L2 備援，mis.twse WAF 封時接手） ──────────────
+
+interface YahooV7QuoteRow {
+  symbol: string;
+  longName?: string;
+  shortName?: string;
+  regularMarketOpen?: number;
+  regularMarketDayHigh?: number;
+  regularMarketDayLow?: number;
+  regularMarketPrice?: number;
+  regularMarketVolume?: number;
+  regularMarketPreviousClose?: number;
+  regularMarketTime?: number;
+}
+
+/**
+ * 以 TWSE / TPEx OpenAPI 取得全市場上市上櫃代號，批次打 Yahoo Finance v7 quote。
+ * 2026-04-20 加入，作為 mis.twse 盤中 WAF 封鎖時的批次備援。
+ * 1800 支股票 ~18 批 × 100 檔 並行 6，估 3~5 秒。
+ *
+ * 回傳 Map key 為純數字代碼（e.g. "2330"），value 對齊 TWSEQuote 介面讓上層共用處理。
+ */
+export async function getYahooTWRealtime(): Promise<Map<string, TWSEQuote>> {
+  const out = new Map<string, TWSEQuote>();
+  const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+
+  // Step 1: 取代碼清單（沿用 TWSE/TPEx OpenAPI — 這兩個端點很穩定）
+  const [twseRes, tpexRes] = await Promise.allSettled([
+    fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', {
+      signal: AbortSignal.timeout(10000),
+    }),
+    fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes', {
+      signal: AbortSignal.timeout(10000),
+    }),
+  ]);
+
+  const symbols: string[] = [];
+  if (twseRes.status === 'fulfilled' && twseRes.value.ok) {
+    try {
+      const rows = await twseRes.value.json() as Array<{ Code: string }>;
+      for (const r of rows) if (/^\d{4,5}$/.test(r.Code)) symbols.push(`${r.Code}.TW`);
+    } catch { /* skip */ }
+  }
+  if (tpexRes.status === 'fulfilled' && tpexRes.value.ok) {
+    try {
+      const rows = await tpexRes.value.json() as Array<{ SecuritiesCompanyCode: string }>;
+      for (const r of rows) if (/^\d{4,5}$/.test(r.SecuritiesCompanyCode)) symbols.push(`${r.SecuritiesCompanyCode}.TWO`);
+    } catch { /* skip */ }
+  }
+
+  if (symbols.length === 0) {
+    console.warn('[YahooRealtime] 取不到代碼清單，放棄');
+    return out;
+  }
+
+  // Step 2: 批次 100 檔打 v7 quote，並行 6
+  const BATCH = 100;
+  const CONCURRENCY = 6;
+  const batches: string[][] = [];
+  for (let i = 0; i < symbols.length; i += BATCH) {
+    batches.push(symbols.slice(i, i + BATCH));
+  }
+
+  async function runBatch(batch: string[]): Promise<void> {
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${batch.join(',')}`;
+    try {
+      const res = await fetch(url, {
+        headers: YF_HEADERS,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) return;
+      const json = await res.json() as { quoteResponse?: { result?: YahooV7QuoteRow[] } };
+      const rows = json?.quoteResponse?.result ?? [];
+      for (const q of rows) {
+        if (q.regularMarketPrice == null || q.regularMarketPrice <= 0) continue;
+        const code = q.symbol.replace(/\.(TW|TWO)$/i, '');
+        // 日期守門：Yahoo quote 可能回昨日收盤；regularMarketTime 換成台北日期比對 today
+        const qDate = q.regularMarketTime
+          ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date(q.regularMarketTime * 1000))
+          : undefined;
+        out.set(code, {
+          code,
+          name: q.longName || q.shortName || code,
+          open: q.regularMarketOpen ?? 0,
+          high: q.regularMarketDayHigh ?? 0,
+          low: q.regularMarketDayLow ?? 0,
+          close: q.regularMarketPrice,
+          volume: Math.round((q.regularMarketVolume ?? 0) / 1000), // 股 → 張（對齊 TWSEQuote）
+          previousClose: q.regularMarketPreviousClose,
+          date: qDate ?? todayTW,
+        });
+      }
+    } catch (err) {
+      console.warn(`[YahooRealtime] batch fail (${batch.length} codes):`, (err as Error).message?.slice(0, 80));
+    }
+  }
+
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    const slice = batches.slice(i, i + CONCURRENCY);
+    await Promise.all(slice.map(runBatch));
+  }
+
+  return out;
+}
+
+// ── Yahoo v8 chart 單檔並行版（v7 已被關，這條仍免認證可用） ──────────────
+
+interface YahooV8ChartMeta {
+  symbol: string;
+  regularMarketPrice?: number;
+  regularMarketOpen?: number;
+  regularMarketDayHigh?: number;
+  regularMarketDayLow?: number;
+  regularMarketVolume?: number;
+  chartPreviousClose?: number;
+  regularMarketTime?: number;
+}
+
+/**
+ * 用 Yahoo v8 chart 端點（免認證）並行抓全市場盤中即時報價
+ * 2026-04-20 加入，作為 mis.twse 網頁防火牆封鎖時的主要備援。
+ * v7 quote 2024 後關閉需認證，但 v8 chart 仍公開。
+ *
+ * 單檔發一個請求 → 並行 20 → 1800 支約 90 秒完成。
+ */
+export async function getYahooTWRealtimeViaChart(): Promise<Map<string, TWSEQuote>> {
+  const out = new Map<string, TWSEQuote>();
+  const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+
+  // Step 1: 取代碼清單
+  const [twseRes, tpexRes] = await Promise.allSettled([
+    fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL', {
+      signal: AbortSignal.timeout(10000),
+    }),
+    fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes', {
+      signal: AbortSignal.timeout(10000),
+    }),
+  ]);
+  const symbols: string[] = [];
+  if (twseRes.status === 'fulfilled' && twseRes.value.ok) {
+    try {
+      const rows = await twseRes.value.json() as Array<{ Code: string }>;
+      for (const r of rows) if (/^\d{4,5}$/.test(r.Code)) symbols.push(`${r.Code}.TW`);
+    } catch { /* skip */ }
+  }
+  if (tpexRes.status === 'fulfilled' && tpexRes.value.ok) {
+    try {
+      const rows = await tpexRes.value.json() as Array<{ SecuritiesCompanyCode: string }>;
+      for (const r of rows) if (/^\d{4,5}$/.test(r.SecuritiesCompanyCode)) symbols.push(`${r.SecuritiesCompanyCode}.TWO`);
+    } catch { /* skip */ }
+  }
+  if (symbols.length === 0) {
+    console.warn('[YahooV8] 取不到代碼清單，放棄');
+    return out;
+  }
+
+  // Step 2: 並行 20 個請求，每檔打 v8 chart
+  const CONCURRENCY = 20;
+  let processed = 0;
+  async function fetchOne(sym: string): Promise<void> {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=1d`;
+      const res = await fetch(url, {
+        headers: YF_HEADERS,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return;
+      const json = await res.json() as { chart?: { result?: Array<{ meta?: YahooV8ChartMeta }> } };
+      const meta = json?.chart?.result?.[0]?.meta;
+      if (!meta || meta.regularMarketPrice == null || meta.regularMarketPrice <= 0) return;
+      const code = sym.replace(/\.(TW|TWO)$/i, '');
+      const qDate = meta.regularMarketTime
+        ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date(meta.regularMarketTime * 1000))
+        : todayTW;
+      out.set(code, {
+        code,
+        name: code, // Yahoo v8 meta 沒有 name，用代號當占位（L2 寫入時不依賴 name）
+        open: meta.regularMarketOpen ?? 0,
+        high: meta.regularMarketDayHigh ?? 0,
+        low: meta.regularMarketDayLow ?? 0,
+        close: meta.regularMarketPrice,
+        volume: Math.round((meta.regularMarketVolume ?? 0) / 1000), // 股 → 張
+        previousClose: meta.chartPreviousClose,
+        date: qDate,
+      });
+    } catch { /* skip this symbol */ }
+    processed++;
+  }
+
+  // 分批並行
+  for (let i = 0; i < symbols.length; i += CONCURRENCY) {
+    const batch = symbols.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(fetchOne));
+  }
+
+  console.info(`[YahooV8] 並行完成: ${out.size}/${symbols.length} 支`);
+  return out;
+}

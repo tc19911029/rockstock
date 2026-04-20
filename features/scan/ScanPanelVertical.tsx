@@ -5,7 +5,6 @@ import { useBacktestStore } from '@/store/backtestStore';
 import { ScanResultsCompact } from './components/ScanResultsCompact';
 import { DabanResultsCompact } from './components/DabanResultsCompact';
 import { ScanCoachDigest } from './components/ScanCoachDigest';
-import { ReentryCandidatesPanel } from './components/ReentryCandidatesPanel';
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import type { SelectedStock } from './components/ScanChartPanel';
 
@@ -28,9 +27,11 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
     cronDates, fetchCronDates,
     isLoadingCronSession,
     autoLoadLatest,
+    activeBuyMethod, setActiveBuyMethod, isLoadingBuyMethod,
   } = useBacktestStore();
 
   const [maxDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()));
+  const [coachCollapsed, setCoachCollapsed] = useState(false);
 
   // 載入歷史日期；市場/方向切換後自動載入最新結果
   const conditionMountedRef = useRef(false);
@@ -117,7 +118,29 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               長線保護短線
             </button>
           )}
+
         </div>
+
+        {/* Row 1.5: 買法選擇（只在做多時顯示） */}
+        {scanDirection === 'long' && (
+          <div className="flex items-center gap-1 flex-wrap">
+            {(['A', 'B', 'C', 'E', 'F'] as const).map(method => {
+              const labels: Record<string, string> = { A: 'A 六條件', B: 'B 突破', C: 'C V形', E: 'E 缺口', F: 'F 一字底' };
+              return (
+                <button key={method}
+                  onClick={() => setActiveBuyMethod(method)}
+                  disabled={isLoadingBuyMethod}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+                    activeBuyMethod === method
+                      ? 'bg-red-700/70 border-red-600 text-red-100'
+                      : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
+                  }`}>
+                  {labels[method]}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Row 2: Date + Scan button */}
         <div className="flex items-center gap-1.5">
@@ -177,23 +200,30 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
         {/* 朱老師跨檔分析（只在非打板時顯示） */}
         {scanDirection !== 'daban' && scanResults.length > 0 && (
-          <div className="px-2.5 py-1.5 max-h-[55vh] overflow-y-auto">
-            <ScanCoachDigest
-              market={market}
-              scanDate={scanDate}
-              direction={scanDirection === 'short' ? 'short' : 'long'}
-              marketTrend={String(marketTrend ?? '')}
-              results={scanResults}
-            />
+          <div>
+            <button
+              onClick={() => setCoachCollapsed(v => !v)}
+              className="w-full flex items-center justify-between px-2.5 py-1 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors">
+              <span className="font-medium">朱老師分析</span>
+              <span>{coachCollapsed ? '▶' : '▼'}</span>
+            </button>
+            {!coachCollapsed && (
+              <div className="px-2.5 pb-1.5 max-h-[55vh] overflow-y-auto">
+                <ScanCoachDigest
+                  market={market}
+                  scanDate={scanDate}
+                  direction={scanDirection === 'short' ? 'short' : 'long'}
+                  marketTrend={String(marketTrend ?? '')}
+                  results={scanResults}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {/* ── 下方可滑動：股票卡片清單 ── */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {/* 再進場候選（書本：回後買上漲）— 摺疊式，置於結果列表上方 */}
-        <ReentryCandidatesPanel onSelectStock={onSelectStock} />
-
         {/* Progress bar */}
         {(isScanning || isFetchingForward) && (
           <div className="px-2.5 py-1.5 border-b border-border">

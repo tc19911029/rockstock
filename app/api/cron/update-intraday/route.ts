@@ -7,8 +7,8 @@
 
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
-import { refreshIntradaySnapshot, getLastRefreshSummary } from '@/lib/datasource/IntradayCache';
-import { isMarketOpen, getCurrentTradingDay } from '@/lib/datasource/marketHours';
+import { refreshIntradaySnapshot, getLastRefreshSummary, readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { isMarketOpen, isPostCloseWindow, getCurrentTradingDay } from '@/lib/datasource/marketHours';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 
 export const runtime = 'nodejs';
@@ -23,9 +23,10 @@ export async function GET(req: NextRequest) {
 
   const market = (req.nextUrl.searchParams.get('market') ?? 'TW') as 'TW' | 'CN';
 
-  // 只在盤中更新
-  if (!isMarketOpen(market)) {
-    return apiOk({ skipped: true, reason: `${market} 非開盤時段`, market });
+  // 盤中 + 盤後窗口（TW 13:31~14:30 / CN 15:01~15:30）都跑：
+  // 收盤後還需要一輪來抓最終收盤資料 + 跑盤後掃描，對齊 instrumentation.ts 的條件
+  if (!isMarketOpen(market) && !isPostCloseWindow(market)) {
+    return apiOk({ skipped: true, reason: `${market} 非開盤時段也非盤後窗口`, market });
   }
 
   try {
@@ -38,27 +39,30 @@ export async function GET(req: NextRequest) {
 
     // L2 為空時：區分「交易日 API 失敗」vs「非交易日正常」
     if (snapshot.count === 0) {
-      const refreshSummary = getLastRefreshSummary(market);
       const tradingDayFlag = isTradingDay(date, market);
 
       if (tradingDayFlag) {
-        // ★ 交易日但 L2 為空 → 延遲 15 秒再試一次（IntradayCache 已做 10 秒重試，這是第二道）
-        console.error(
-          `[cron/update-intraday] ★ ${market} 交易日 ${date} L2 快照為空！` +
-          `嘗試 15 秒後二次重試...`
-        );
-        await new Promise(resolve => setTimeout(resolve, 15_000));
-        const retrySnapshot = await refreshIntradaySnapshot(market);
-        const retryRefreshSummary = getLastRefreshSummary(market);
+        // ★ L2 刷新失敗 → 直接用本地既存 fresh L2 跑掃描，不再發第二道重試
+        // 原本這裡 wait 15s 再呼叫 refreshIntradaySnapshot 一次，但會與 IntradayCache 內部
+        // 指數退避疊加變成重試風暴，觸發 mis.twse WAF 更嚴封鎖（2026-04-20 教訓）。
+        // 改為：IntradayCache 自己重試一次就夠；這層只做 existing L2 fallback + age 守門。
+        const existing = await readIntradaySnapshot(market, date);
+        const ageMs = existing ? Date.now() - new Date(existing.updatedAt).getTime() : Infinity;
+        const STALE_FALLBACK_MAX_AGE = 30 * 60 * 1000; // 30 分鐘
 
-        if (retrySnapshot.count > 0) {
-          console.info(`[cron/update-intraday] ${market} 二次重試成功: ${retrySnapshot.count} 筆`);
-          // 繼續往下走正常掃描流程
-          snapshot = retrySnapshot;
+        if (existing && existing.count > 0 && ageMs < STALE_FALLBACK_MAX_AGE) {
+          console.warn(
+            `[cron/update-intraday] ${market} L2 刷新失敗但本地 L2 尚 fresh ` +
+            `(${existing.count} 筆, age ${Math.round(ageMs / 1000)}s)，用既存 L2 跑掃描`
+          );
+          snapshot = existing;
+          // 繼續往下走正常掃描流程（snapshot.count > 0）
         } else {
+          const refreshSummary2 = getLastRefreshSummary(market);
           console.error(
-            `[cron/update-intraday] ★★ ${market} 二次重試仍然 0 筆！` +
-            `連續空 ${retryRefreshSummary.consecutiveEmptyCount} 次，告警等級: ${retryRefreshSummary.alertLevel}`
+            `[cron/update-intraday] ★★ ${market} L2 刷新失敗且既存 L2 無法用！` +
+            `連續空 ${refreshSummary2.consecutiveEmptyCount} 次，告警: ${refreshSummary2.alertLevel}` +
+            (existing ? ` (age=${Math.round(ageMs / 1000)}s 超過 30min)` : ' (本地無 L2)')
           );
           return apiOk({
             market,
@@ -68,14 +72,15 @@ export async function GET(req: NextRequest) {
             scanCount: -1,
             scanDate: date,
             alert: true,
-            alertLevel: retryRefreshSummary.alertLevel,
-            warning: `交易日 ${date} 所有數據源失敗，非休市！連續空 ${retryRefreshSummary.consecutiveEmptyCount} 次`,
-            dataSourceStatus: retryRefreshSummary.sources,
+            alertLevel: refreshSummary2.alertLevel,
+            warning: `交易日 ${date} 所有數據源失敗，非休市！連續空 ${refreshSummary2.consecutiveEmptyCount} 次`,
+            dataSourceStatus: refreshSummary2.sources,
           });
         }
       } else {
         // 非交易日 → 正常跳過
         console.info(`[cron/update-intraday] ${market} ${date} 非交易日，跳過掃描`);
+        const summary = getLastRefreshSummary(market);
         return apiOk({
           market,
           date: snapshot.date,
@@ -84,7 +89,7 @@ export async function GET(req: NextRequest) {
           scanCount: -1,
           scanDate: date,
           warning: `${date} 非交易日`,
-          dataSourceStatus: refreshSummary.sources,
+          dataSourceStatus: summary.sources,
         });
       }
     }

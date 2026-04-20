@@ -143,6 +143,10 @@ interface BacktestState {
   scanMode: 'full' | 'pure' | 'sop';
   /** 掃描方向：long=做多, short=做空, daban=打板 */
   scanDirection: 'long' | 'short' | 'daban';
+  /** 當前買法（並列買法架構，Phase 6，2026-04-20）— 只在 scanDirection='long' 時有意義 */
+  activeBuyMethod: 'A' | 'B' | 'C' | 'E' | 'F';
+  /** 載入買法結果的狀態 */
+  isLoadingBuyMethod: boolean;
 
   // ── Cron 歷史 ──
   cronDates: CronDateEntry[];
@@ -162,6 +166,7 @@ interface BacktestState {
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
+  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'E' | 'F') => Promise<void>;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
@@ -249,6 +254,8 @@ export const useBacktestStore = create<BacktestState>()(
       scanOnly: false,
       scanMode: 'full' as const,
       scanDirection: 'long' as const,
+      activeBuyMethod: 'A' as const,
+      isLoadingBuyMethod: false,
       cronDates: [],
       isFetchingCron: false,
       isLoadingCronSession: false,
@@ -311,6 +318,32 @@ export const useBacktestStore = create<BacktestState>()(
       setScanOnly:           (scanOnly) => set({ scanOnly }),
       setScanMode:           (scanMode) => set({ scanMode }),
       setScanDirection:      (scanDirection) => set({ scanDirection }),
+      setActiveBuyMethod:    async (activeBuyMethod) => {
+        const { market, scanDate, loadCronSession, scanDirection } = get();
+        set({ activeBuyMethod });
+        // A = 既有六條件流程，走 loadCronSession
+        if (activeBuyMethod === 'A') {
+          if (scanDirection === 'long' && scanDate) {
+            await loadCronSession(market, scanDate, { scanOnly: true, direction: 'long' });
+          }
+          return;
+        }
+        // B/C/E/F：讀獨立買法 session（standalone scanner 產生、走 mtfMode=買法代碼）
+        if (!scanDate) return;
+        set({ isLoadingBuyMethod: true, scanResults: [], performance: [], scanError: null });
+        try {
+          const res = await fetch(`/api/scanner/results?market=${market}&date=${scanDate}&direction=long&mtf=${activeBuyMethod}`);
+          const json = await res.json();
+          if (!res.ok || !json.ok) throw new Error(json.error ?? '載入失敗');
+          const session = (json.data as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
+          set({ scanResults: session?.results ?? [], isLoadingBuyMethod: false });
+        } catch (err) {
+          set({
+            isLoadingBuyMethod: false,
+            scanError: err instanceof Error ? err.message : '買法掃描失敗',
+          });
+        }
+      },
       setStrategy:           (partial)  => set(s => ({ strategy: { ...s.strategy, ...partial } })),
       setCapitalConstraints: (partial)  => set(s => ({ capitalConstraints: { ...s.capitalConstraints, ...partial } })),
       toggleCapitalMode:     ()         => set(s => ({ useCapitalMode: !s.useCapitalMode })),

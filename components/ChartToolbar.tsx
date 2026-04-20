@@ -27,6 +27,10 @@ interface ChartToolbarProps {
   onReset?: () => void;
   canPrev?: boolean;
   canNext?: boolean;
+  onPrevBuyPoint?: () => void;
+  onNextBuyPoint?: () => void;
+  canPrevBuyPoint?: boolean;
+  canNextBuyPoint?: boolean;
   /** 股票代碼，用於判斷市場（.TW/.TWO=台股，量顯示為張） */
   ticker?: string;
 }
@@ -56,6 +60,8 @@ export default function ChartToolbar({
   avgCost, shares,
   onPrev, onNext, onReset,
   canPrev = true, canNext = true,
+  onPrevBuyPoint, onNextBuyPoint,
+  canPrevBuyPoint = true, canNextBuyPoint = true,
   ticker,
 }: ChartToolbarProps) {
   const chg = prevCandle ? candle.close - prevCandle.close : 0;
@@ -158,10 +164,18 @@ export default function ChartToolbar({
         {onPrev && onNext && (
           <>
             <span className="w-px h-3.5 bg-border/60 mx-0.5" />
+            {onPrevBuyPoint && (
+              <button onClick={onPrevBuyPoint} disabled={!canPrevBuyPoint} title="上一個買點 (Shift+←)"
+                className="px-1.5 py-0.5 rounded text-[10px] font-bold transition bg-emerald-700/60 hover:bg-emerald-600 text-emerald-100 disabled:opacity-30">⏮</button>
+            )}
             <button onClick={onPrev} disabled={!canPrev} title="上一根 K 棒 (←)"
               className="px-1.5 py-0.5 rounded text-[10px] font-bold transition bg-muted hover:bg-muted/80 text-foreground/80 disabled:opacity-30">◀</button>
             <button onClick={onNext} disabled={!canNext} title="下一根 K 棒 (→)"
               className="px-1.5 py-0.5 rounded text-[10px] font-bold transition bg-muted hover:bg-muted/80 text-foreground/80 disabled:opacity-30">▶</button>
+            {onNextBuyPoint && (
+              <button onClick={onNextBuyPoint} disabled={!canNextBuyPoint} title="下一個買點 (Shift+→)"
+                className="px-1.5 py-0.5 rounded text-[10px] font-bold transition bg-emerald-700/60 hover:bg-emerald-600 text-emerald-100 disabled:opacity-30">⏭</button>
+            )}
             {onReset && (
               <button onClick={onReset} title="重置走圖（回到第一根）"
                 className="px-1.5 py-0.5 rounded text-[10px] font-medium transition bg-muted hover:bg-red-900/60 text-muted-foreground hover:text-red-300">↺</button>

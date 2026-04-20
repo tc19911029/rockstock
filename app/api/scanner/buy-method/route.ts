@@ -1,0 +1,156 @@
+/**
+ * GET /api/scanner/buy-method?market=TW&date=2026-04-17&method=F
+ *
+ * 並列買法架構的獨立掃描端點（Phase 5，2026-04-20）
+ *
+ * 支援的 method：
+ *   F — 一字底突破（detectFlatBottom）
+ *   E — 缺口進場（detectGapEntry）
+ *   B — 突破進場（detectBreakoutEntry，含 subType）
+ *   C — V 形反轉（detectVReversal）
+ *
+ * 資料來源：本地 L1 candles（data/candles/{market}/*.json）
+ * 不動既有六條件掃描流程；各買法 detector 純 K 線邏輯 TW/CN 共用。
+ */
+
+import { NextRequest } from 'next/server';
+import { z } from 'zod';
+import fs from 'fs';
+import path from 'path';
+import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { loadLocalCandlesForDate, getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
+import { detectFlatBottom } from '@/lib/analysis/highWinRateEntry';
+import { detectGapEntry } from '@/lib/analysis/gapEntry';
+import { detectBreakoutEntry } from '@/lib/analysis/breakoutEntry';
+import { detectVReversal } from '@/lib/analysis/vReversalDetector';
+import type { StockScanResult } from '@/lib/scanner/types';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+const querySchema = z.object({
+  market: z.enum(['TW', 'CN']).default('TW'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  method: z.enum(['F', 'E', 'B', 'C']),
+});
+
+type Method = z.infer<typeof querySchema>['method'];
+
+function runDetector(
+  method: Method,
+  candles: import('@/types').CandleWithIndicators[],
+  idx: number,
+): { matched: boolean; detail: string; subType?: string } {
+  switch (method) {
+    case 'F': {
+      const r = detectFlatBottom(candles, idx);
+      return r?.isFlatBottom
+        ? { matched: true, detail: r.detail }
+        : { matched: false, detail: '' };
+    }
+    case 'E': {
+      const r = detectGapEntry(candles, idx);
+      return r?.isGapEntry
+        ? { matched: true, detail: r.detail }
+        : { matched: false, detail: '' };
+    }
+    case 'B': {
+      const r = detectBreakoutEntry(candles, idx);
+      return r?.isBreakout
+        ? { matched: true, detail: r.detail, subType: r.subType }
+        : { matched: false, detail: '' };
+    }
+    case 'C': {
+      const r = detectVReversal(candles, idx);
+      return r?.isVReversal
+        ? { matched: true, detail: r.detail }
+        : { matched: false, detail: '' };
+    }
+  }
+}
+
+export async function GET(req: NextRequest): Promise<Response> {
+  const parsed = querySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams));
+  if (!parsed.success) return apiValidationError(parsed.error);
+  const { market, date, method } = parsed.data;
+
+  try {
+    const dir = getLocalCandleDir(market);
+    if (!fs.existsSync(dir)) {
+      return apiError(`本地 ${market} L1 目錄不存在`);
+    }
+
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+    const results: StockScanResult[] = [];
+
+    // 並行處理，batch 50 支
+    const BATCH = 50;
+    for (let i = 0; i < files.length; i += BATCH) {
+      const batch = files.slice(i, i + BATCH);
+      const settled = await Promise.allSettled(batch.map(async f => {
+        const symbol = f.replace('.json', '');
+        const candles = await loadLocalCandlesForDate(symbol, market, date);
+        if (!candles || candles.length < 11) return null;
+
+        const idx = candles.findIndex(c => c.date?.slice(0, 10) === date);
+        if (idx < 0) return null;
+
+        const det = runDetector(method, candles, idx);
+        if (!det.matched) return null;
+
+        const c = candles[idx];
+        const prev = candles[idx - 1];
+        const changePercent = prev && prev.close > 0 ? (c.close - prev.close) / prev.close * 100 : 0;
+
+        // 讀檔名對應的 name（從原始 JSON）
+        let name = symbol;
+        try {
+          const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'));
+          if (raw?.name) name = raw.name;
+        } catch { /* ignore */ }
+
+        const r: StockScanResult = {
+          symbol,
+          name,
+          market,
+          price: c.close,
+          changePercent,
+          volume: c.volume,
+          triggeredRules: [{
+            ruleId: `buy-method-${method.toLowerCase()}`,
+            ruleName: det.detail,
+            signalType: 'BUY',
+            reason: det.detail,
+          }],
+          sixConditionsScore: 0,
+          sixConditionsBreakdown: {
+            trend: false, position: false, kbar: false,
+            ma: false, volume: false, indicator: false,
+          },
+          trendState: '多頭',
+          trendPosition: '',
+          scanTime: new Date().toISOString(),
+          matchedMethods: [method],
+          buyMethodSubType: det.subType,
+        };
+        return r;
+      }));
+
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) results.push(r.value);
+      }
+    }
+
+    // 按漲幅排序
+    results.sort((a, b) => b.changePercent - a.changePercent);
+
+    return apiOk({
+      market, date, method,
+      resultCount: results.length,
+      results,
+    });
+  } catch (err: unknown) {
+    console.error('[scanner/buy-method] error:', err);
+    return apiError('買法掃描失敗');
+  }
+}

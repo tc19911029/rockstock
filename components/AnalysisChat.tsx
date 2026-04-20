@@ -2,11 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useReplayStore } from '@/store/replayStore';
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
+import { useAnalysisChatStore, type AnalysisChatMessage as Message } from '@/store/analysisChatStore';
 
 function MarkdownText({ text }: { text: string }) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
@@ -34,7 +30,11 @@ interface Props {
 
 export default function AnalysisChat({ sidebar = false }: Props) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  // 訊息從 zustand store 拿，tab 切走再切回來不會掉
+  const messages = useAnalysisChatStore(s => s.messages);
+  const setMessages = useAnalysisChatStore(s => s.setMessages);
+  const updateMessages = useAnalysisChatStore(s => s.updateMessages);
+  const clearMessages = useAnalysisChatStore(s => s.clear);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -125,14 +125,14 @@ export default function AnalysisChat({ sidebar = false }: Props) {
         const { done, value } = await reader.read();
         if (done) break;
         fullText += decoder.decode(value, { stream: true });
-        setMessages(prev => {
+        updateMessages(prev => {
           const copy = [...prev];
           copy[copy.length - 1] = { role: 'assistant', content: fullText };
           return copy;
         });
       }
     } catch {
-      setMessages(prev => {
+      updateMessages(prev => {
         const copy = [...prev];
         copy[copy.length - 1] = { role: 'assistant', content: '❌ 連線失敗，請確認 API 金鑰已設定' };
         return copy;

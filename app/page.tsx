@@ -14,9 +14,10 @@
  * - 趨勢狀態欄 → 整合進條件 tab
  */
 
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { useEffect, useCallback, useState, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useReplayStore } from '@/store/replayStore';
+import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
 import StockSelector from '@/components/StockSelector';
 import { PageShell } from '@/components/shared';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -24,6 +25,7 @@ import RuleAlerts from '@/components/RuleAlerts';
 import ProhibitionAlerts from '@/components/ProhibitionAlerts';
 import WinnerPatternAlerts from '@/components/WinnerPatternAlerts';
 import SixConditionsPanel from '@/components/SixConditionsPanel';
+import BuyMethodConditionsPanel from '@/components/BuyMethodConditionsPanel';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
 import AnalysisChat from '@/components/AnalysisChat';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
@@ -50,6 +52,13 @@ const IndicatorCharts = dynamic(() => import('@/components/IndicatorCharts'), { 
 
 type SideTab = 'conditions' | 'signals' | 'chip' | 'chat';
 
+/** 根據 activeBuyMethod 切換渲染：A 走六條件，其他走買法條件面板 */
+function ConditionsPanelSwitch() {
+  const method = useBacktestStore(s => s.activeBuyMethod);
+  if (method === 'A') return <SixConditionsPanel />;
+  return <BuyMethodConditionsPanel method={method} />;
+}
+
 export default function HomePage() {
   const {
     initData, visibleCandles, currentSignals, chartMarkers,
@@ -59,6 +68,19 @@ export default function HomePage() {
     signalStrengthMin, setSignalStrengthMin,
     resetReplay, targetDate,
   } = useReplayStore();
+
+  // 買點索引（對齊生產掃描規則：六條件+戒律+淘汰法）
+  const buyPointIndices = useMemo(
+    () => (allCandles.length > 60 ? findBuyPoints(allCandles) : []),
+    [allCandles]
+  );
+  const jumpToBuyPoint = useCallback((direction: 'prev' | 'next') => {
+    const finder = direction === 'prev' ? prevBuyPointIndex : nextBuyPointIndex;
+    const target = finder(buyPointIndices, currentIndex);
+    if (target != null) useReplayStore.getState().jumpToIndex(target);
+  }, [buyPointIndices, currentIndex]);
+  const canPrevBuyPoint = buyPointIndices.length > 0 && buyPointIndices[0] < currentIndex;
+  const canNextBuyPoint = buyPointIndices.length > 0 && buyPointIndices[buyPointIndices.length - 1] > currentIndex;
 
   useEffect(() => { initData(); }, [initData]);
 
@@ -112,7 +134,9 @@ export default function HomePage() {
   // Keyboard: ← → Space B S Q
   const handleKey = useCallback((e: KeyboardEvent) => {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) return;
-    if (e.key === 'ArrowRight') { e.preventDefault(); nextCandle(); }
+    if (e.key === 'ArrowRight' && e.shiftKey) { e.preventDefault(); jumpToBuyPoint('next'); }
+    else if (e.key === 'ArrowLeft' && e.shiftKey) { e.preventDefault(); jumpToBuyPoint('prev'); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); nextCandle(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); prevCandle(); }
     else if (e.key === ' ') { e.preventDefault(); if (isPlaying) stopPlay(); else startPlay(); }
     // P2-3: tab switching
@@ -137,7 +161,7 @@ export default function HomePage() {
       const { metrics } = useReplayStore.getState();
       if (metrics.shares > 0) useReplayStore.getState().sell(metrics.shares);
     }
-  }, [nextCandle, prevCandle, isPlaying, startPlay, stopPlay, setSideTab, setScannerOpen, setShowIndicators, setShowHelp]);
+  }, [nextCandle, prevCandle, isPlaying, startPlay, stopPlay, setSideTab, setScannerOpen, setShowIndicators, setShowHelp, jumpToBuyPoint]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKey);
@@ -283,8 +307,8 @@ export default function HomePage() {
       className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5"
     >
       {sideTab === 'conditions' && (
-        <SectionBoundary section="六大條件">
-          <SixConditionsPanel />
+        <SectionBoundary section="買法條件">
+          <ConditionsPanelSwitch />
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
@@ -385,6 +409,10 @@ export default function HomePage() {
                 onReset={resetReplay}
                 canPrev={currentIndex > 0 && !isPlaying}
                 canNext={currentIndex < allCandles.length - 1 && !isPlaying}
+                onPrevBuyPoint={() => jumpToBuyPoint('prev')}
+                onNextBuyPoint={() => jumpToBuyPoint('next')}
+                canPrevBuyPoint={canPrevBuyPoint && !isPlaying}
+                canNextBuyPoint={canNextBuyPoint && !isPlaying}
                 ticker={currentStock?.ticker}
               />
             )}
@@ -602,6 +630,10 @@ export default function HomePage() {
                 onReset={resetReplay}
                 canPrev={currentIndex > 0 && !isPlaying}
                 canNext={currentIndex < allCandles.length - 1 && !isPlaying}
+                onPrevBuyPoint={() => jumpToBuyPoint('prev')}
+                onNextBuyPoint={() => jumpToBuyPoint('next')}
+                canPrevBuyPoint={canPrevBuyPoint && !isPlaying}
+                canNextBuyPoint={canNextBuyPoint && !isPlaying}
                 ticker={currentStock?.ticker}
               />
             </div>

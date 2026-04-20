@@ -257,37 +257,48 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
     const tradingDay = isTradingDay(today, market);
 
     if (tradingDay) {
-      // ★ 核心修復：交易日但 API 全部返回 0 → 延遲 10 秒重試一次
+      // ★ 重試策略：連續失敗 < 2 次才重試，避免重試風暴觸發上游 WAF（mis.twse 2026-04-20 教訓）
+      const currentEmpty = _consecutiveEmptyCount[market];
       console.error(
         `[IntradayCache] ★ ${market} 交易日 ${today} 所有數據源返回 0 筆！` +
-        `連續第 ${_consecutiveEmptyCount[market] + 1} 次。` +
+        `連續第 ${currentEmpty + 1} 次。` +
         `數據源狀態: ${JSON.stringify(sources.map(s => `${s.source}:${s.success}/${s.quoteCount}`))}`
       );
 
-      // 延遲 10 秒後重試（可能是 API 暫時性故障）
-      await new Promise(resolve => setTimeout(resolve, 10_000));
+      if (currentEmpty < 2) {
+        // 第一輪失敗：指數退避（10s, 30s）
+        const backoffMs = currentEmpty === 0 ? 10_000 : 30_000;
+        console.info(`[IntradayCache] ${market} 退避 ${backoffMs / 1000}s 後重試（consecutive=${currentEmpty}）`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
 
-      const retrySources: DataSourceStatus[] = [];
-      const retryQuotes = market === 'TW'
-        ? await _fetchTWQuotes(retrySources)
-        : await _fetchCNQuotes(retrySources, today);
+        const retrySources: DataSourceStatus[] = [];
+        const retryQuotes = market === 'TW'
+          ? await _fetchTWQuotes(retrySources)
+          : await _fetchCNQuotes(retrySources, today);
 
-      // 更新數據源狀態（追加重試結果）
-      for (const s of retrySources) {
-        sources.push({ ...s, source: `${s.source}(retry)` });
-      }
-      _lastSourceStatus[market] = sources;
+        for (const s of retrySources) {
+          sources.push({ ...s, source: `${s.source}(retry)` });
+        }
+        _lastSourceStatus[market] = sources;
 
-      if (retryQuotes.length > 0) {
-        console.info(`[IntradayCache] ${market} 重試成功: ${retryQuotes.length} 筆`);
-        quotes = retryQuotes;
-        _consecutiveEmptyCount[market] = 0;
+        if (retryQuotes.length > 0) {
+          console.info(`[IntradayCache] ${market} 重試成功: ${retryQuotes.length} 筆`);
+          quotes = retryQuotes;
+          _consecutiveEmptyCount[market] = 0;
+        } else {
+          _consecutiveEmptyCount[market]++;
+          console.error(
+            `[IntradayCache] ★★ ${market} 重試仍然 0 筆！` +
+            `連續空快照 ${_consecutiveEmptyCount[market]} 次。` +
+            `這是 API 故障，不是休市！`
+          );
+        }
       } else {
+        // 連續失敗 ≥ 2 次：跳過重試，讓 existing L2 fallback 接手，避免觸發更嚴 WAF
         _consecutiveEmptyCount[market]++;
-        console.error(
-          `[IntradayCache] ★★ ${market} 重試仍然 0 筆！` +
-          `連續空快照 ${_consecutiveEmptyCount[market]} 次。` +
-          `這是 API 故障，不是休市！`
+        console.warn(
+          `[IntradayCache] ${market} 連續空 ${_consecutiveEmptyCount[market]} 次，跳過重試避免 WAF 升級，` +
+          `改由 existing L2 fallback 處理`
         );
       }
     } else {
@@ -306,22 +317,38 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
     ? await readIntradaySnapshot(market, today)
     : null;
 
+  // age 檢查：existing 快照太舊就不當作 fallback 用（避免盤中用 2 小時前的 L2 跑出假掃描結果）
+  const EXISTING_MAX_AGE_MS = 30 * 60 * 1000; // 30 分鐘
+  const existingAgeMs = existing
+    ? Date.now() - new Date(existing.updatedAt).getTime()
+    : Infinity;
+  const existingFresh = existing && existing.quotes.length > 0 && existingAgeMs < EXISTING_MAX_AGE_MS;
+
   if (quotes.length === 0) {
-    if (existing && existing.quotes.length > 0) {
-      console.warn(`[IntradayCache] 保留現有快照 (${existing.quotes.length} 筆)，不覆蓋空數據`);
-      return existing;
+    if (existingFresh) {
+      console.warn(
+        `[IntradayCache] 保留現有快照 (${existing!.quotes.length} 筆, age ${Math.round(existingAgeMs / 1000)}s)，不覆蓋空數據`
+      );
+      return existing!;
     }
-    console.warn(`[IntradayCache] ${market} 無現有快照且無數據，跳過寫入磁碟`);
+    if (existing && existing.quotes.length > 0) {
+      console.warn(
+        `[IntradayCache] 現有快照過舊（age ${Math.round(existingAgeMs / 1000)}s > 30min），` +
+        `放棄 fallback，返回空快照讓上層 alert`
+      );
+    } else {
+      console.warn(`[IntradayCache] ${market} 無現有快照且無數據，跳過寫入磁碟`);
+    }
     return { market, date: today, updatedAt: new Date().toISOString(), count: 0, quotes: [] };
   }
 
-  // ── 部分數據保護：新數據量 < 現有快照的 30% → 保留現有 ──
-  if (existing && existing.quotes.length > 0 && quotes.length < existing.quotes.length * 0.3) {
+  // ── 部分數據保護：新數據量 < 現有快照的 30% → 保留現有（要求 existing 仍 fresh）──
+  if (existingFresh && quotes.length < existing!.quotes.length * 0.3) {
     console.warn(
-      `[IntradayCache] ⚠️ ${market} 新數據嚴重不足（${quotes.length} vs 現有 ${existing.quotes.length}），` +
+      `[IntradayCache] ⚠️ ${market} 新數據嚴重不足（${quotes.length} vs 現有 ${existing!.quotes.length}, age ${Math.round(existingAgeMs / 1000)}s），` +
       `保留現有快照，不覆蓋`
     );
-    return existing;
+    return existing!;
   }
 
   const snapshot: IntradaySnapshot = {
@@ -386,11 +413,14 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
     timestamp: new Date().toISOString(),
   });
 
-  // 2. mis.twse 回傳不足 → 降級到 OpenAPI（STOCK_DAY_ALL，更穩定但稍慢）
+  // 2. mis.twse 失敗時的自動備援：Yahoo v8 已實測盤中回上一交易日無效（2026-04-20）
+  //    FinMind 免 token 也回昨日資料
+  //    盤中真即時的免費源目前只剩 mis.twse 本身和 Fugle 單檔（48/min 太慢做全市場）
+  //    → 直接降級到 OpenAPI 兜底（盤中被日期守門擋光，但保留 existing L2 機制讓已有的快照延續）
   let finalMap = twseMap;
+
   if (twseMap.size < TW_MIN_EXPECTED) {
-    const reason = twseMap.size === 0 ? '返回 0 筆' : `僅 ${twseMap.size} 筆`;
-    console.warn(`[IntradayCache] TW mis.twse ${reason}，降級到 OpenAPI STOCK_DAY_ALL...`);
+    console.warn(`[IntradayCache] TW 兩層 fallback 後仍 ${twseMap.size} 筆，降級到 OpenAPI STOCK_DAY_ALL...`);
     try {
       const { result: dailyMap, elapsedMs: dailyMs } = await timedFetch(() => getTWSEDailyAll());
       sources.push({
