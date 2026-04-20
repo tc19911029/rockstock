@@ -5,6 +5,7 @@ import { useBacktestStore } from '@/store/backtestStore';
 import { ScanResultsCompact } from './components/ScanResultsCompact';
 import { DabanResultsCompact } from './components/DabanResultsCompact';
 import { ScanCoachDigest } from './components/ScanCoachDigest';
+import { ReentryCandidatesPanel } from './components/ReentryCandidatesPanel';
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import type { SelectedStock } from './components/ScanChartPanel';
 
@@ -190,6 +191,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
       {/* ── 下方可滑動：股票卡片清單 ── */}
       <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* 再進場候選（書本：回後買上漲）— 摺疊式，置於結果列表上方 */}
+        <ReentryCandidatesPanel onSelectStock={onSelectStock} />
+
         {/* Progress bar */}
         {(isScanning || isFetchingForward) && (
           <div className="px-2.5 py-1.5 border-b border-border">

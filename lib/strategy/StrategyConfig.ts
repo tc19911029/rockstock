@@ -55,6 +55,35 @@ export interface StrategyThresholds {
 
   // 短線輔助過濾（朱老師短線操作10條規則）
   kdDecliningFilter: boolean;     // 短線第9條：KD向下不買（預設 true）
+
+  // 再進場分支（書本戰法 1/4/9：跌破均線出場後，趨勢未破即可放寬條件再進場）
+  reentry?: ReentryConfig;
+}
+
+/**
+ * 再進場分支設定（書本對齊）
+ *
+ * 朱家泓書本對「初次進場」與「出場後再進場」差別處理：
+ *   - 初次進場：必須過完整六條件 + 戒律 + 淘汰法
+ *   - 出場後再進場（戰法 1 波浪 / 戰法 4 二條均線）：
+ *     若因「跌破 MA5/MA10」短線停利出場，且趨勢沒改變（沒頭頭低、MA 還上揚），
+ *     重新站上均線即可再進場，不必重做六條件。
+ *
+ * 不啟用時（enabled=false 或欄位 undefined），行為與既有完全一致。
+ */
+export interface ReentryConfig {
+  /** 是否啟用再進場分支 */
+  enabled: boolean;
+  /** 出場原因白名單：只在這些原因觸發後開啟再進場視窗 */
+  triggerExitReasons: ReadonlyArray<'ma5StopLoss' | 'ma10StopLoss'>;
+  /** 出場後 N 根 K 棒內有效，超過則重置（避免無限期掛單） */
+  maxBarsAfterExit: number;
+  /** 是否要求趨勢仍為多頭（findPivots/detectTrend 沒出現頭頭低） */
+  requireTrendIntact: boolean;
+  /** 是否要求收盤站回 MA5 且 MA5 上揚 */
+  requireMaReclaimed: boolean;
+  /** 是否要求量能未崩塌（當日量 ≥ 5 日均量 × 0.8） */
+  requireVolumeOk: boolean;
 }
 
 import type { RuleGroupId } from '@/lib/rules/ruleRegistry';
@@ -123,6 +152,16 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
 
   // 短線輔助過濾（預設開啟，與書本一致）
   kdDecliningFilter: true,
+};
+
+/** 再進場：書本明文支援的預設設定（戰法 1/4/9） */
+const BOOK_REENTRY: ReentryConfig = {
+  enabled: true,
+  triggerExitReasons: ['ma5StopLoss', 'ma10StopLoss'],
+  maxBarsAfterExit: 10,
+  requireTrendIntact: true,
+  requireMaReclaimed: true,
+  requireVolumeOk: true,
 };
 
 const ALL_CONDITIONS_ON: StrategyConditionToggles = {
@@ -429,6 +468,7 @@ export const ZHU_PURE_BOOK: StrategyConfig = {
     marketTrendFilter:  true,
     kdDecliningFilter:  true,
     multiTimeframeFilter: false,
+    reentry: BOOK_REENTRY,   // 戰法 1 波浪：跌破 MA5 出場後再站上即可再進場
   },
   ruleGroups:  [...CORE_ZHU_GROUPS, ...BASE_GROUPS],
 };
@@ -462,6 +502,7 @@ export const ZHU_OPTIMIZED: StrategyConfig = {
     bullMinScore:   5,        // 即使大盤多頭也要 5 分
     sidewaysMinScore: 6,      // 盤整要 6/6 全過
     bearMinScore:   6,        // 空頭不進場（設 6 等於幾乎不會觸發）
+    reentry: BOOK_REENTRY,    // 戰法 1 波浪：跌破 MA5 出場後再站上即可再進場
   },
   ruleGroups:  [...ALL_ZHU_GROUPS, 'lin-sop', 'bollinger', ...BASE_GROUPS],
 };
@@ -476,8 +517,8 @@ export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
 
 // ── P0-3: 策略參數邊界驗證 ──────────────────────────────────────────────────────
 
-/** 策略閾值合理範圍定義 */
-export const THRESHOLD_BOUNDS: Record<keyof StrategyThresholds, { min: number; max: number; label: string }> = {
+/** 策略閾值合理範圍定義（reentry 為物件，不在數值邊界範疇內，故用 Partial） */
+export const THRESHOLD_BOUNDS: Partial<Record<keyof StrategyThresholds, { min: number; max: number; label: string }>> = {
   maShortPeriod:     { min: 2,    max: 30,   label: '短期均線' },
   maMidPeriod:       { min: 5,    max: 60,   label: '中期均線' },
   maLongPeriod:      { min: 10,   max: 120,  label: '長期均線' },
@@ -517,6 +558,7 @@ export function validateThresholds(
 ): ThresholdValidationError[] {
   const errors: ThresholdValidationError[] = [];
   for (const [key, bounds] of Object.entries(THRESHOLD_BOUNDS)) {
+    if (!bounds) continue;
     const field = key as keyof StrategyThresholds;
     const value = Number(thresholds[field]);
     if (isNaN(value) || value < bounds.min || value > bounds.max) {
@@ -535,10 +577,12 @@ export function clampThresholds(
 ): StrategyThresholds {
   const result = { ...thresholds };
   for (const [key, bounds] of Object.entries(THRESHOLD_BOUNDS)) {
+    if (!bounds) continue;
     const field = key as keyof StrategyThresholds;
-    const value = Number(result[field]);
-    if (typeof result[field] === 'boolean') continue;
-    (result as Record<string, number | boolean>)[field] = Math.max(bounds.min, Math.min(bounds.max, isNaN(value) ? bounds.min : value));
+    const current = result[field];
+    if (typeof current === 'boolean' || typeof current === 'object') continue;
+    const value = Number(current);
+    (result as unknown as Record<string, number>)[field] = Math.max(bounds.min, Math.min(bounds.max, isNaN(value) ? bounds.min : value));
   }
   return result;
 }
