@@ -1102,4 +1102,89 @@ export abstract class MarketScanner {
       marketTrend,
     };
   }
+
+  /**
+   * 獨立買法掃描（不過 A 六條件）
+   * 全市場依 B/C/D/E 偵測器各自篩選，與 scanSOP 完全並列
+   */
+  async scanBuyMethod(
+    method: 'B' | 'C' | 'D' | 'E',
+    stocks: StockEntry[],
+    asOfDate?: string,
+  ): Promise<StockScanResult[]> {
+    const config = this.getMarketConfig();
+    const results: StockScanResult[] = [];
+
+    for (let i = 0; i < stocks.length; i += CONCURRENCY) {
+      const batch = stocks.slice(i, i + CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
+        try {
+          const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
+          if (!fetchResult || fetchResult.candles.length < 30) return null;
+          if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
+            const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+            if (asOfDate === today) return null;
+          }
+          const candles = fetchResult.candles;
+          const lastIdx = candles.length - 1;
+          const last = candles[lastIdx];
+
+          let matched = false;
+          let detail = '';
+          let subType: string | undefined;
+
+          if (method === 'B') {
+            const { detectBreakoutEntry } = await import('@/lib/analysis/breakoutEntry');
+            const r = detectBreakoutEntry(candles, lastIdx);
+            if (r?.isBreakout) { matched = true; detail = r.detail; subType = r.subType; }
+          } else if (method === 'C') {
+            const { detectVReversal } = await import('@/lib/analysis/vReversalDetector');
+            const r = detectVReversal(candles, lastIdx);
+            if (r?.isVReversal) { matched = true; detail = r.detail; }
+          } else if (method === 'D') {
+            const { detectStrategyD } = await import('@/lib/analysis/gapEntry');
+            const r = detectStrategyD(candles, lastIdx);
+            if (r?.isGapEntry) { matched = true; detail = r.detail; }
+          } else if (method === 'E') {
+            const { detectStrategyE } = await import('@/lib/analysis/highWinRateEntry');
+            const r = detectStrategyE(candles, lastIdx);
+            if (r?.isFlatBottom) { matched = true; detail = r.detail; }
+          }
+
+          if (!matched) return null;
+
+          const prev = candles[lastIdx - 1];
+          const changePercent = prev?.close > 0
+            ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
+            : 0;
+
+          return {
+            symbol,
+            name,
+            market: config.marketId,
+            industry,
+            price: last.close,
+            changePercent,
+            volume: last.volume,
+            triggeredRules: [{ ruleId: `buy-method-${method.toLowerCase()}`, ruleName: detail, signalType: 'BUY' as const, reason: detail }],
+            matchedMethods: [method],
+            buyMethodSubType: subType,
+            sixConditionsScore: 0,
+            sixConditionsBreakdown: { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false },
+            trendState: '多頭' as const,
+            trendPosition: '',
+            scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+          } satisfies StockScanResult;
+        } catch {
+          return null;
+        }
+      }));
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) results.push(r.value);
+      }
+      if (i + CONCURRENCY < stocks.length) await sleep(BATCH_DELAY_MS);
+    }
+
+    return results.sort((a, b) => b.changePercent - a.changePercent);
+  }
 }

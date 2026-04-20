@@ -29,6 +29,8 @@ export interface ScanPipelineOptions {
   force?: boolean;
   /** 超時毫秒數（預設 250000） */
   deadlineMs?: number;
+  /** 獨立買法掃描（不過 A 六條件，全市場各自偵測） */
+  buyMethods?: ('B' | 'C' | 'D' | 'E')[];
   /** 顯式指定策略（歷史重跑用），不指定時從 server-side 讀 active strategy */
   strategy?: import('@/lib/strategy/StrategyConfig').StrategyConfig;
   /** 顯式指定歷史 turnoverRank（歷史重跑用，避免用到今天的前 500） */
@@ -119,6 +121,9 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
     turnoverRanks = rank.ranks;
     console.info(`[ScanPipeline] ${market} 前 ${rank.topN} 成交額過濾: ${stocks.length}/${before} (index=${rank.date})`);
   }
+
+  // buyMethods 需要全量股票，在批次切片前先保存
+  const allStocks = stocks;
 
   if (batch && totalBatches && totalBatches > 1) {
     const sorted = [...stocks].sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -264,6 +269,50 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
       console.error(`[ScanPipeline] ${market} ${direction} 失敗:`, err);
       if (wantDaily) counts[`${direction}-daily`] = 0;
       if (wantMtf) counts[`${direction}-mtf`] = 0;
+    }
+  }
+
+  // ── Step 5: 獨立買法掃描（B/C/D/E，不過 A 六條件） ──────────────────
+  // 批次模式下只在最後一批執行，且用全量股票（避免分批存入 session 互相覆蓋）
+  const isLastBatch = !batch || !totalBatches || batch === totalBatches;
+  if (options.buyMethods?.length && !timedOut && isLastBatch) {
+    const bmStocks = allStocks; // 全量，不受批次切片影響
+    for (const method of options.buyMethods) {
+      if (Date.now() > deadline) {
+        console.warn(`[ScanPipeline] ${market} 超時，跳過買法 ${method}`);
+        timedOut = true;
+        break;
+      }
+      try {
+        const bmResults = await scanner.scanBuyMethod(method, bmStocks, date);
+
+        if (turnoverRanks) {
+          for (const r of bmResults) {
+            const rank = turnoverRanks.get(r.symbol);
+            if (rank) r.turnoverRank = rank;
+          }
+        }
+
+        const bmSession: ScanSession = {
+          id: `${market}-long-${method}-${date}-${Date.now()}`,
+          market: market as MarketId,
+          date,
+          direction: 'long',
+          multiTimeframeEnabled: false,
+          sessionType,
+          scanTime: new Date().toISOString(),
+          resultCount: bmResults.length,
+          results: bmResults,
+          marketTrend,
+          buyMethod: method as 'B' | 'C' | 'D' | 'E',
+        };
+        await saveScanSession(bmSession, { allowOverwritePostClose: sessionType === 'post_close' });
+        counts[`long-${method}`] = bmResults.length;
+        console.info(`[ScanPipeline] ${market} 買法 ${method}: ${bmResults.length} 檔`);
+      } catch (err) {
+        console.error(`[ScanPipeline] ${market} 買法 ${method} 失敗:`, err);
+        counts[`long-${method}`] = 0;
+      }
     }
   }
 
