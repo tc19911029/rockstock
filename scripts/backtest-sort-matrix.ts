@@ -35,7 +35,7 @@ import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
 import type { CandleWithIndicators } from '@/types';
-import { BASE_THRESHOLDS, ZHU_OPTIMIZED } from '@/lib/strategy/StrategyConfig';
+import { BASE_THRESHOLDS, ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 import { ALL_SORT_FACTORS, SORT_DEFS, buildFeatures, type CandidateFeatures, type SortFactorName } from './_backtest-sort-defs';
 
 // ══════════════════════════════════════════════════════════════
@@ -175,7 +175,7 @@ function buildCandidate(
 
   // 策略 A / A_MTF：跑六條件 + 戒律 + 淘汰法
   if (strategy === 'A' || strategy === 'A_MTF') {
-    const six = evaluateSixConditions(candles, idx, ZHU_OPTIMIZED.thresholds);
+    const six = evaluateSixConditions(candles, idx, ZHU_PURE_BOOK.thresholds);
     if (!six.isCoreReady || six.totalScore < 5) return null;
     if (checkLongProhibitions(candles, idx).prohibited) return null;
     if (evaluateElimination(candles, idx).eliminated) return null;

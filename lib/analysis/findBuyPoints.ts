@@ -15,12 +15,12 @@
 import { evaluateSixConditions } from '@/lib/analysis/trendAnalysis';
 import { checkLongProhibitions } from '@/lib/rules/entryProhibitions';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
-import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
+import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 import type { CandleWithIndicators } from '@/types';
 
 /** 找出 candles 裡所有符合生產掃描規則的買點 index 陣列（升序） */
 export function findBuyPoints(candles: CandleWithIndicators[]): number[] {
-  const thresholds = ZHU_V1.thresholds;
+  const thresholds = ZHU_PURE_BOOK.thresholds;
   const out: number[] = [];
 
   for (let i = 60; i < candles.length; i++) {

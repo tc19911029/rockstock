@@ -1,4 +1,4 @@
-import { StrategyThresholds, BUILT_IN_STRATEGIES, ZHU_V1 } from './StrategyConfig';
+import { StrategyThresholds, BUILT_IN_STRATEGIES, ZHU_PURE_BOOK } from './StrategyConfig';
 
 /**
  * Server-side helper: resolve strategy thresholds from request params.
@@ -7,7 +7,7 @@ import { StrategyThresholds, BUILT_IN_STRATEGIES, ZHU_V1 } from './StrategyConfi
  * - `strategyId` (string) → resolve from built-in strategies
  * - `thresholds` (object) → use directly (for custom strategies)
  *
- * Falls back to ZHU_V1 defaults if neither is provided.
+ * Falls back to ZHU_PURE_BOOK defaults if neither is provided.
  */
 export function resolveThresholds(params: {
   strategyId?: string;
@@ -15,7 +15,7 @@ export function resolveThresholds(params: {
 }): StrategyThresholds {
   // If full thresholds object is provided, merge with defaults
   if (params.thresholds) {
-    return { ...ZHU_V1.thresholds, ...params.thresholds };
+    return { ...ZHU_PURE_BOOK.thresholds, ...params.thresholds };
   }
 
   // Resolve from built-in strategy by ID
@@ -24,5 +24,5 @@ export function resolveThresholds(params: {
     if (found) return found.thresholds;
   }
 
-  return ZHU_V1.thresholds;
+  return ZHU_PURE_BOOK.thresholds;
 }

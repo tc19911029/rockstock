@@ -13,13 +13,13 @@ import { evaluateMultiTimeframe } from '@/lib/analysis/multiTimeframeFilter';
 import { evaluateHighWinRateEntry } from '@/lib/analysis/highWinRateEntry';
 import { checkLongProhibitions } from '@/lib/rules/entryProhibitions';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
-import { ZHU_V1 } from '@/lib/strategy/StrategyConfig';
+import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 import { simulateTrade } from './tradeSimulator';
 import type { CandleWithIndicators, Candle } from '@/types';
 import type { MarketId } from '@/lib/scanner/types';
 import type { DailyCandidate } from './types';
 
-const thresholds = ZHU_V1.thresholds;
+const thresholds = ZHU_PURE_BOOK.thresholds;
 
 // ── Data Types ──────────────────────────────────────────────────────────────────
 

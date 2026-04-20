@@ -19,7 +19,7 @@ import {
 } from '@/lib/analysis/trendAnalysis';
 import { checkLongProhibitions } from '@/lib/rules/entryProhibitions';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
-import { ZHU_OPTIMIZED } from '@/lib/strategy/StrategyConfig';
+import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 
 interface PageProps {
   params: Promise<{ market: string; symbol: string; date: string }>;
@@ -59,7 +59,7 @@ export default async function DiagnosePage({ params }: PageProps) {
   }
 
   const today = candles[idx];
-  const six = evaluateSixConditions(candles, idx, ZHU_OPTIMIZED.thresholds);
+  const six = evaluateSixConditions(candles, idx, ZHU_PURE_BOOK.thresholds);
   const trend = detectTrend(candles, idx);
   const pivots = findPivots(candles, idx, 8);
   const prohibitions = checkLongProhibitions(candles, idx);
@@ -194,7 +194,7 @@ export default async function DiagnosePage({ params }: PageProps) {
       </section>
 
       <footer className="text-xs text-gray-500 pt-4 border-t">
-        策略門檻：ZHU_OPTIMIZED（量比 {ZHU_OPTIMIZED.thresholds.volumeRatioMin}x）。
+        策略門檻：ZHU_PURE_BOOK（量比 {ZHU_PURE_BOOK.thresholds.volumeRatioMin}x）。
         改動 findPivots / detectTrend 後回到此頁可立即看到結果變化。
       </footer>
     </main>

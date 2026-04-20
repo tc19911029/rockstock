@@ -23,7 +23,7 @@ export interface PanelFilterOptions {
 
 /**
  * 面板 MTF toggle 門檻 — 後端 mtfScore ≥ 3 即通過。
- * 對齊 `lib/strategy/StrategyConfig.ts` 的 `ZHU_OPTIMIZED.thresholds.mtfMinScore`。
+ * 對齊 `lib/strategy/StrategyConfig.ts` 的 `ZHU_PURE_BOOK.thresholds.mtfMinScore`。
  */
 export const PANEL_MTF_MIN_SCORE = 3;
 

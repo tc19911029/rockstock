@@ -5,7 +5,7 @@ import { checkLongProhibitions, checkShortProhibitions } from '@/lib/rules/entry
 import { evaluateShortSixConditions } from '@/lib/analysis/shortAnalysis';
 import { StockScanResult, MarketConfig, TriggeredRule, ScanDiagnostics, createEmptyDiagnostics } from './types';
 import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
-import { ZHU_OPTIMIZED } from '@/lib/strategy/StrategyConfig';
+import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 import { evaluateHighWinRateEntry } from '@/lib/analysis/highWinRateEntry';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
 import { evaluateMultiTimeframe, MultiTimeframeResult } from '@/lib/analysis/multiTimeframeFilter';
@@ -533,7 +533,7 @@ export abstract class MarketScanner {
     asOfDate?: string,
   ): Promise<{ results: StockScanResult[]; marketTrend?: TrendState }> {
     const config = this.getMarketConfig();
-    const th = thresholds ?? ZHU_OPTIMIZED.thresholds;
+    const th = thresholds ?? ZHU_PURE_BOOK.thresholds;
     const marketTrend = await this.getMarketTrend(asOfDate);
     const minScore = this.marketTrendToMinScore(marketTrend, th);
 
@@ -574,7 +574,7 @@ export abstract class MarketScanner {
       const prev    = candles[lastIdx - 1];
 
       const config = this.getMarketConfig();
-      const thresholds = ZHU_OPTIMIZED.thresholds;
+      const thresholds = ZHU_PURE_BOOK.thresholds;
       const signals  = ruleEngine.evaluate(candles, lastIdx);
       const sixConds = evaluateSixConditions(candles, lastIdx, thresholds);
       const trend    = detectTrend(candles, lastIdx);
@@ -639,7 +639,7 @@ export abstract class MarketScanner {
     thresholds?: StrategyThresholds,
   ): Promise<{ results: StockScanResult[]; marketTrend: TrendState }> {
     const config = this.getMarketConfig();
-    const th = thresholds ?? ZHU_OPTIMIZED.thresholds;
+    const th = thresholds ?? ZHU_PURE_BOOK.thresholds;
     const results: StockScanResult[] = [];
 
     let minScore = th.minScore;
@@ -788,7 +788,7 @@ export abstract class MarketScanner {
     // P1A: 移除 ensureFreshCandles（避免批次下載打爆 API 配額）
 
     const config = this.getMarketConfig();
-    const th = thresholds ?? ZHU_OPTIMIZED.thresholds;
+    const th = thresholds ?? ZHU_PURE_BOOK.thresholds;
     const candidates: StockScanResult[] = [];
     const diag = createEmptyDiagnostics();
     diag.totalStocks = stocks.length;
@@ -845,7 +845,7 @@ export abstract class MarketScanner {
     thresholds?: StrategyThresholds,
   ): Promise<{ candidates: StockScanResult[]; marketTrend: TrendState }> {
     const config = this.getMarketConfig();
-    const th = thresholds ?? ZHU_OPTIMIZED.thresholds;
+    const th = thresholds ?? ZHU_PURE_BOOK.thresholds;
     const candidates: StockScanResult[] = [];
 
     let marketTrend: TrendState = '多頭';
@@ -919,7 +919,7 @@ export abstract class MarketScanner {
     // ensureFreshCandles 保留給 cron 批次用。
 
     const config = this.getMarketConfig();
-    const th = thresholds ?? ZHU_OPTIMIZED.thresholds;
+    const th = thresholds ?? ZHU_PURE_BOOK.thresholds;
     const candidates: StockScanResult[] = [];
     const diag = createEmptyDiagnostics();
     diag.totalStocks = stocks.length;
@@ -1015,7 +1015,7 @@ export abstract class MarketScanner {
     // P1A: 移除 ensureFreshCandles（避免批次下載打爆 API 配額）
 
     const config = this.getMarketConfig();
-    const th = thresholds ?? ZHU_OPTIMIZED.thresholds;
+    const th = thresholds ?? ZHU_PURE_BOOK.thresholds;
     const results: StockScanResult[] = [];
     const DEADLINE = Date.now() + 110_000;
     const diag = createEmptyDiagnostics();
@@ -1056,7 +1056,7 @@ export abstract class MarketScanner {
 
   async scan(thresholds?: StrategyThresholds): Promise<{ results: StockScanResult[]; partial: boolean; marketTrend?: TrendState }> {
     const config = this.getMarketConfig();
-    const th = thresholds ?? ZHU_OPTIMIZED.thresholds;
+    const th = thresholds ?? ZHU_PURE_BOOK.thresholds;
     const stocks = await this.getStockList();
 
     // P1A: 移除 ensureFreshCandles（避免批次下載打爆 API 配額）

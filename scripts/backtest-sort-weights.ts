@@ -32,7 +32,7 @@ import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
 import type { CandleWithIndicators } from '@/types';
-import { BASE_THRESHOLDS, ZHU_OPTIMIZED } from '@/lib/strategy/StrategyConfig';
+import { BASE_THRESHOLDS, ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 import { SORT_DEFS, buildFeatures, type SortFactorName, type CandidateFeatures } from './_backtest-sort-defs';
 
 type Market = 'TW' | 'CN';
@@ -80,7 +80,7 @@ console.log(`  執行前請先跑 backtest-sort-matrix.ts，看 stability.md 得
 void SORT_DEFS; void buildFeatures; void evaluateSixConditions; void evaluateMultiTimeframe;
 void evaluateHighWinRateEntry; void checkLongProhibitions; void evaluateElimination;
 void detectBreakoutEntry; void detectVReversal; void detectStrategyD; void detectStrategyE;
-void ZHU_OPTIMIZED; void MTF_CFG; void SLIPPAGE_PCT; void PERIODS; void computeIndicators;
+void ZHU_PURE_BOOK; void MTF_CFG; void SLIPPAGE_PCT; void PERIODS; void computeIndicators;
 void fs; void path;
 // 未使用的局部型別（供未來擴充）
 type _Features = CandidateFeatures;

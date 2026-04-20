@@ -13,7 +13,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { listScanDates, loadScanSession } from '@/lib/storage/scanStorage';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { evaluateReentry } from '@/lib/backtest/reentryRules';
-import { ZHU_OPTIMIZED } from '@/lib/strategy/StrategyConfig';
+import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 import type { MarketId, ScanDirection, StockScanResult } from '@/lib/scanner/types';
 
 export const runtime = 'nodejs';
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!parsed.success) return apiValidationError(parsed.error);
   const { market, direction, lookbackDays } = parsed.data;
 
-  const reentryCfg = ZHU_OPTIMIZED.thresholds.reentry;
+  const reentryCfg = ZHU_PURE_BOOK.thresholds.reentry;
   if (!reentryCfg?.enabled) {
     return apiOk({ market, direction, lookbackDays, candidates: [] });
   }
