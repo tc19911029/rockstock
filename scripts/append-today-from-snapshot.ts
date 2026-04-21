@@ -50,8 +50,8 @@ async function fetchCNQuotes(): Promise<Map<string, { open: number; high: number
     const raw = await getEastMoneyRealtime();
     for (const [code, q] of raw) {
       if (q.close > 0) {
-        // EastMoney f5 是「手」（1 手 = 100 股）；L1 CN 統一以「股」存，× 100 轉換
-        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume * 100 });
+        // EastMoneyRealtime 已統一以「張」(= 手) 回傳；L1 CN 也存「張」，直接用
+        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
       }
     }
     if (out.size > 500) return out;
@@ -70,8 +70,8 @@ async function fetchCNQuotes(): Promise<Map<string, { open: number; high: number
     for (const [symbol, q] of tcMap) {
       const code = symbol.replace(/\.(SS|SZ)$/i, '');
       if (q.close > 0) {
-        // Tencent 成交量也是「手」，同樣 × 100 轉「股」
-        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume * 100 });
+        // TencentRealtime 已統一以「張」(= 手) 回傳；L1 CN 也存「張」，直接用
+        out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
       }
     }
   } catch (err) {
