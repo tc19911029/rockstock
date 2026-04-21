@@ -26,7 +26,7 @@ async function fetchFromEastMoney(): Promise<StockInfo[]> {
     const url = 'https://push2delay.eastmoney.com/api/qt/clist/get?' +
       `pn=${page}&pz=${pageSize}&po=1&np=1&fltt=2&invt=2&fid=f6` +
       '&fs=m:0+t:6,m:1+t:2' +
-      '&fields=f12,f14,f3,f100';
+      '&fields=f2,f12,f14,f3,f100'; // f2=最新價（過濾退市：'-' 或 0）
 
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh)' },
@@ -42,9 +42,15 @@ async function fetchFromEastMoney(): Promise<StockInfo[]> {
     for (const item of items) {
       const code: string = item.f12;
       const name: string = item.f14;
+      const lastPrice = item.f2; // 可能是 number 或 '-'
       if (!code || !name) continue;
-      // 過濾 ST、退市股
+      // 過濾退市：f2 最新價為 '-' 或 ≤0（無交易）→ 多半是歷史代碼還掛在 API 上
+      if (lastPrice === '-' || typeof lastPrice !== 'number' || lastPrice <= 0) continue;
+      // 過濾 ST、退市股、PT（特別轉讓/退市）、股改遺留 S*、已合併
       if (name.includes('ST') || name.includes('退')) continue;
+      if (name.startsWith('PT')) continue;
+      if (/^S[^A-Z]/.test(name)) continue; // S開頭但非 SH/SP 等英文縮寫（S蘭鋁/S山東鋁/S湘火炬）
+      if (name.includes('已合併') || name.includes('合併')) continue;
 
       // 判斷滬A (.SS) 或 深A (.SZ)
       const suffix = code.startsWith('6') ? '.SS' : '.SZ';

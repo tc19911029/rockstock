@@ -156,12 +156,12 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
               {/* Row 3: Six conditions badges */}
               <div className="flex items-center gap-1 mb-1">
                 {[
-                  { pass: r.sixConditionsBreakdown.trend, label: '趨' },
-                  { pass: r.sixConditionsBreakdown.position, label: '位' },
-                  { pass: r.sixConditionsBreakdown.kbar, label: 'K' },
-                  { pass: r.sixConditionsBreakdown.ma, label: '均' },
-                  { pass: r.sixConditionsBreakdown.volume, label: '量' },
-                  { pass: r.sixConditionsBreakdown.indicator, label: '指' },
+                  { pass: r.sixConditionsBreakdown?.trend, label: '趨' },
+                  { pass: r.sixConditionsBreakdown?.position, label: '位' },
+                  { pass: r.sixConditionsBreakdown?.kbar, label: 'K' },
+                  { pass: r.sixConditionsBreakdown?.ma, label: '均' },
+                  { pass: r.sixConditionsBreakdown?.volume, label: '量' },
+                  { pass: r.sixConditionsBreakdown?.indicator, label: '指' },
                 ].map(({ pass, label }) => (
                   <span key={label} className={`text-[8px] w-3.5 h-3.5 flex items-center justify-center rounded-sm ${pass ? 'bg-sky-800/80 text-sky-300' : 'bg-secondary/50 text-muted-foreground/60'}`}>{label}</span>
                 ))}

@@ -16,8 +16,11 @@ import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 import { detectCandleGaps } from '../lib/datasource/validateCandles';
 import { eodhdHistProvider } from '../lib/datasource/EODHDHistProvider';
 import { yahooProvider } from '../lib/datasource/YahooDataProvider';
+import { tencentHistProvider } from '../lib/datasource/TencentHistProvider';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+const withTimeout = <T>(p: Promise<T[]>, ms: number): Promise<T[]> =>
+  Promise.race([p, new Promise<T[]>(r => setTimeout(() => r([]), ms))]);
 
 const market = process.argv.includes('--cn') || process.argv.includes('--market')
   ? (process.argv[process.argv.indexOf('--market') + 1] === 'CN' ? 'CN' : 'TW')
@@ -87,13 +90,27 @@ async function main() {
     const progress = `[${i + 1}/${gapStocks.length}]`;
 
     try {
-      // 嘗試順序：FinMind（TaiwanScanner）→ EODHD → Yahoo Finance
+      // TW: FinMind → EODHD → Yahoo
+      // CN: ChinaScanner(EastMoney) → Tencent → EODHD → Yahoo
       let candles = await scanner.fetchCandles(gs.symbol).catch(() => []);
 
-      let source = 'FinMind';
-      if (candles.length < 30 && market === 'TW') {
+      let source = market === 'TW' ? 'FinMind' : 'EastMoney';
+
+      if (candles.length < 30 && market === 'CN') {
         try {
-          const eodhdCandles = await eodhdHistProvider.getHistoricalCandles(gs.symbol, '2y');
+          const tencentCandles = await withTimeout(tencentHistProvider.getHistoricalCandles(gs.symbol, '2y'), 25000);
+          if (tencentCandles.length >= 30) {
+            candles = tencentCandles;
+            source = 'Tencent';
+          }
+        } catch {
+          // Tencent failed, try EODHD
+        }
+      }
+
+      if (candles.length < 30) {
+        try {
+          const eodhdCandles = await withTimeout(eodhdHistProvider.getHistoricalCandles(gs.symbol, '2y'), 25000);
           if (eodhdCandles.length >= 30) {
             candles = eodhdCandles;
             source = 'EODHD';
@@ -103,9 +120,9 @@ async function main() {
         }
       }
 
-      if (candles.length < 30 && market === 'TW') {
+      if (candles.length < 30) {
         try {
-          const yahooCandles = await yahooProvider.getHistoricalCandles(gs.symbol, '2y');
+          const yahooCandles = await withTimeout(yahooProvider.getHistoricalCandles(gs.symbol, '2y'), 25000);
           if (yahooCandles.length >= 30) {
             candles = yahooCandles;
             source = 'Yahoo';

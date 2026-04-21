@@ -332,12 +332,14 @@ export async function listScanDates(
     // so that new-format and old-format records coexist seamlessly.
     {
       let files = await fsListPrefix(`scan-${market}-${direction}-`);
-      // Filter out new-format files (already read above)
-      files = files.filter(f => !f.includes('-daily-') && !f.includes('-mtf-'));
+      // Filter out new-format files (already read above) — also exclude B/C/D/E buy-method files
+      files = files.filter(f => !f.includes('-daily-') && !f.includes('-mtf-') &&
+        !f.includes('-B-') && !f.includes('-C-') && !f.includes('-D-') && !f.includes('-E-'));
       // Legacy fallback (no direction prefix)
       if (files.length === 0 && direction === 'long') {
         const legacyFiles = await fsListPrefix(`scan-${market}-`);
-        files = legacyFiles.filter(f => !f.includes('-long-') && !f.includes('-short-') && !f.includes('-daily-') && !f.includes('-mtf-'));
+        files = legacyFiles.filter(f => !f.includes('-long-') && !f.includes('-short-') && !f.includes('-daily-') && !f.includes('-mtf-') &&
+          !f.includes('-B-') && !f.includes('-C-') && !f.includes('-D-') && !f.includes('-E-'));
       }
       for (const file of files) {
         const match = file.match(/(\d{4}-\d{2}-\d{2})\.json$/);
@@ -455,9 +457,12 @@ export async function listScanDates(
   if (rankIdx) {
     // 實際讀每個日期的最佳 session，算 filter 後 count
     // filter 規則和 applyTurnoverFilter 一致：有 turnoverRank 保留，沒 rank 就看當前 index
+    // 注意：B/C/D/E 買法 session 不套 top500 filter（掃全市場，不限前500）
     await Promise.all(filtered.map(async (e) => {
+      const mode = e.mtfMode ?? 'daily';
+      if (mode === 'B' || mode === 'C' || mode === 'D' || mode === 'E') return; // 不套 filter
       try {
-        const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', e.mtfMode ?? 'daily');
+        const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', mode);
         if (session && session.results) {
           const realCount = session.results.filter(r =>
             r.turnoverRank != null || rankIdx!.ranks.has(r.symbol)
@@ -577,7 +582,10 @@ export async function loadScanSession(
 
   try {
     const session = JSON.parse(raw) as ScanSession;
-    await applyTurnoverFilter(session, market);
+    // turnover filter 只適用 A（daily）session；B/C/D/E 掃全市場，不限 top500
+    if (mtfMode === 'daily') {
+      await applyTurnoverFilter(session, market);
+    }
     return session;
   } catch {
     return null;
@@ -627,7 +635,11 @@ async function applyTurnoverFilter(session: ScanSession, market: MarketId): Prom
 function isFreshSession(session: ScanSession, date: string): boolean {
   if (!session.results || session.results.length === 0) return true;
   const withFreshness = session.results.filter(r => r?.dataFreshness?.lastCandleDate);
-  if (withFreshness.length === 0) return true; // 舊版無欄位 → 兼容
+  if (withFreshness.length === 0) {
+    // 舊版無 dataFreshness — 但若連 triggeredRules 也沒有，是 coarse scan 殘骸，拒絕
+    const hasRules = session.results.some(r => r?.triggeredRules !== undefined);
+    return hasRules;
+  }
   const fresh = withFreshness.filter(r => r.dataFreshness!.lastCandleDate === date);
   return fresh.length / withFreshness.length >= 0.5;
 }

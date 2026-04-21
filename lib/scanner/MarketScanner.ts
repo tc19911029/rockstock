@@ -1158,6 +1158,8 @@ export abstract class MarketScanner {
             ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
             : 0;
 
+          const mtfResult = evaluateMultiTimeframe(candles, ZHU_PURE_BOOK.thresholds);
+
           return {
             symbol,
             name,
@@ -1174,6 +1176,12 @@ export abstract class MarketScanner {
             trendState: '多頭' as const,
             trendPosition: '',
             scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+            mtfScore: mtfResult.totalScore,
+            mtfWeeklyPass: mtfResult.weekly.pass,
+            mtfWeeklyTrend: mtfResult.weekly.trend,
+            mtfWeeklyDetail: mtfResult.weekly.detail,
+            mtfMonthlyPass: mtfResult.monthly.pass,
+            mtfMonthlyDetail: mtfResult.monthly.detail,
           } satisfies StockScanResult;
         } catch {
           return null;

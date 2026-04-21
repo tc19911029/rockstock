@@ -86,6 +86,17 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
   // ── Step 2: 取得股票清單（前 N 成交額過濾 + 批次切片） ──
   let stocks = await scanner.getStockList();
+
+  // Fail-closed：TWSE/TPEx API 失敗時 getStockList() 回傳 30 支 FALLBACK_TW_STOCKS，
+  // 若不擋會把 top500 索引重建成 30 支，造成 post_close totalScanned=30, rc=0 覆蓋正確 intraday
+  const MIN_STOCK_COUNT = market === 'TW' ? 200 : 500;
+  if (stocks.length < MIN_STOCK_COUNT && !options.turnoverRankOverride) {
+    throw new Error(
+      `[ScanPipeline] ${market} getStockList 只回傳 ${stocks.length} 支（< ${MIN_STOCK_COUNT}），` +
+      `疑似 API 失敗 fallback，abort 掃描避免覆蓋正確 L4`
+    );
+  }
+
   let turnoverRanks: Map<string, number> | null = null;
 
   if (options.turnoverRankOverride) {
@@ -136,7 +147,6 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
   // 性能優化：daily 和 mtf 結果差異只在前置 MTF 過濾（mtfScore >= mtfMinScore）。
   // 而 mtfResult always 計算（MarketScanner.scanOne），所以可以一次掃描共用兩份結果。
   // CN 3121 支從原本 4 次掃描（~380s）降為 2 次（~190s），避開 Vercel 300s 限制。
-  const mtfMinScore = activeThresholds.mtfMinScore ?? 3;
   const wantDaily = mtfModes.includes('daily');
   const wantMtf = mtfModes.includes('mtf');
 
@@ -246,9 +256,9 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
         counts[`${direction}-daily`] = results.length;
       }
 
-      // ── Step 4b: 存 mtf session（從 daily 結果 filter mtfScore >= mtfMinScore）──
+      // ── Step 4b: 存 mtf session（週線前5全過才算通過，用 mtfWeeklyPass 而非舊 4 分制 mtfScore）──
       if (wantMtf) {
-        const mtfResults = results.filter(r => (r.mtfScore ?? 0) >= mtfMinScore);
+        const mtfResults = results.filter(r => r.mtfWeeklyPass === true);
         const mtfSession: ScanSession = {
           id: `${prefix}-${direction}-mtf-${date}-${batch ? `b${batch}-` : ''}${Date.now() + 1}`,
           market: market as MarketId,

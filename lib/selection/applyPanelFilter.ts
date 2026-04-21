@@ -22,12 +22,6 @@ export interface PanelFilterOptions {
 }
 
 /**
- * 面板 MTF toggle 門檻 — 後端 mtfScore ≥ 3 即通過。
- * 對齊 `lib/strategy/StrategyConfig.ts` 的 `ZHU_PURE_BOOK.thresholds.mtfMinScore`。
- */
-export const PANEL_MTF_MIN_SCORE = 3;
-
-/**
  * 對 scan session 的 results 套用面板顯示規則。
  * @param results ScanPipeline 產生、已通過六條件+戒律+淘汰法的候選
  * @param options 面板切換狀態
@@ -38,8 +32,10 @@ export function applyPanelFilter(
 ): StockScanResult[] {
   let filtered = [...results];
 
+  // MTF gate：週線前5全過（①趨勢②均線③位置④量⑤K線）才算通過
+  // 使用 mtfWeeklyPass 而非舊 4 分制 mtfScore >= 3，避免只過①②⑥+月就誤入
   if (options.useMultiTimeframe) {
-    filtered = filtered.filter(r => (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE);
+    filtered = filtered.filter(r => r.mtfWeeklyPass === true);
   }
 
   // 排序：漲幅 desc 為主鍵（2026-04-19 回測驗證：漲幅在 Top500 全期冠軍）

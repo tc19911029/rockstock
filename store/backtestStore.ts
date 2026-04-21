@@ -7,7 +7,7 @@ import {
 } from '@/lib/scanner/types';
 import { TrendState } from '@/lib/analysis/trendAnalysis';
 import { getMissingTradingDays } from '@/lib/utils/tradingDay';
-import { applyPanelFilter, PANEL_MTF_MIN_SCORE } from '@/lib/selection/applyPanelFilter';
+import { applyPanelFilter } from '@/lib/selection/applyPanelFilter';
 // Inline calcBacktestSummary to avoid pulling server-only ForwardAnalyzer → LocalCandleStore (fs)
 function calcBacktestSummary(
   perf: StockForwardPerformance[],
@@ -321,13 +321,16 @@ export const useBacktestStore = create<BacktestState>()(
       setActiveBuyMethod:    async (activeBuyMethod) => {
         const { market, scanDate, loadCronSession, scanDirection } = get();
         set({ activeBuyMethod });
-        // A = 既有六條件流程，走 loadCronSession
+        // A = 既有六條件流程，走 loadCronSession；同時刷新 daily 日期列表
         if (activeBuyMethod === 'A') {
+          get().fetchCronDates(market, 'long'); // 切回 A 時刷新為 daily session 日期
           if (scanDirection === 'long' && scanDate) {
             await loadCronSession(market, scanDate, { scanOnly: true, direction: 'long' });
           }
           return;
         }
+        // B/C/D/E：刷新對應買法的日期列表（fetchCronDates 讀 activeBuyMethod from store）
+        get().fetchCronDates(market, 'long');
         // B/C/D/E：讀獨立買法 session（standalone scanner 產生、走 mtfMode=買法代碼）
         if (!scanDate) return;
         set({ isLoadingBuyMethod: true, scanResults: [], performance: [], scanError: null });
@@ -335,7 +338,7 @@ export const useBacktestStore = create<BacktestState>()(
           const res = await fetch(`/api/scanner/results?market=${market}&date=${scanDate}&direction=long&mtf=${activeBuyMethod}`);
           const json = await res.json();
           if (!res.ok || !json.ok) throw new Error(json.error ?? '載入失敗');
-          const session = (json.data as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
+          const session = (json as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
           set({ scanResults: session?.results ?? [], isLoadingBuyMethod: false });
         } catch (err) {
           set({
@@ -360,8 +363,9 @@ export const useBacktestStore = create<BacktestState>()(
 
           // 過濾：只保留 MTF 週線 + 月線都通過的股票
           // （scan 時已 ALWAYS 計算 mtfWeeklyPass/mtfMonthlyPass，即使 MTF flag=off）
+          // null = MTF 未計算（舊 B/C/D/E session）→ 保留；false = 明確不通過 → 過濾
           const filtered = scanResults.filter(r =>
-            (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
+            r.mtfWeeklyPass == null || r.mtfWeeklyPass === true,
           );
           const filteredSymbols = new Set(filtered.map(r => r.symbol));
           const filteredPerf = performance.filter(p => filteredSymbols.has(p.symbol));
@@ -680,7 +684,7 @@ export const useBacktestStore = create<BacktestState>()(
           const cacheKey = `_unfilteredResults:${scanDate}`;
           get().scanCache.set(cacheKey, { scanResults: combined, performance: [], marketTrend });
           const filtered = combined.filter(r =>
-            (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
+            r.mtfWeeklyPass === true,
           );
           set({ scanResults: filtered, scanningCount: `${filtered.length} 檔符合（MTF）` });
         }
@@ -905,8 +909,9 @@ export const useBacktestStore = create<BacktestState>()(
       // ── Cron 歷史：取得所有可用日期 ──
       fetchCronDates: async (market, direction) => {
         const dir = direction ?? get().scanDirection;
-        const { useMultiTimeframe } = get();
-        const mtfParam = 'daily';  // 永遠載入完整結果，MTF 在前端過濾
+        const { activeBuyMethod } = get();
+        // B/C/D/E 讀對應買法 session 清單；A 讀 daily（MTF 在前端過濾）
+        const mtfParam = (activeBuyMethod && activeBuyMethod !== 'A') ? activeBuyMethod : 'daily';
         set({ isFetchingCron: true });
         try {
           const res = await fetch(`/api/scanner/results?market=${market}&direction=${dir}&mtf=${mtfParam}`);
@@ -935,9 +940,25 @@ export const useBacktestStore = create<BacktestState>()(
       // ── Cron 歷史：載入特定日期的掃描結果 ──
       // opts.scanOnly = true → 只載入掃描結果 + 前向績效，不跑回測引擎
       loadCronSession: async (market, date, opts) => {
-        const { strategy, useCapitalMode, capitalConstraints, scanDirection, useMultiTimeframe, scanCache } = get();
+        const { strategy, useCapitalMode, capitalConstraints, scanDirection, useMultiTimeframe, scanCache, activeBuyMethod } = get();
         const direction = opts?.direction ?? scanDirection;
         const onlyScan = opts?.scanOnly ?? false;
+
+        // B/C/D/E：直接載入對應買法 session，不走 A 的流程
+        if (activeBuyMethod && activeBuyMethod !== 'A') {
+          set({ isLoadingBuyMethod: true, scanResults: [], performance: [], scanError: null, market, scanDate: date });
+          try {
+            const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=long&mtf=${activeBuyMethod}`);
+            const json = await res.json();
+            if (!res.ok || !json.ok) throw new Error(json.error ?? '載入失敗');
+            const session = (json as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
+            set({ scanResults: session?.results ?? [], isLoadingBuyMethod: false });
+          } catch (err) {
+            set({ isLoadingBuyMethod: false, scanError: err instanceof Error ? err.message : '買法掃描失敗' });
+          }
+          return;
+        }
+
         const mtfParam = 'daily';  // 永遠載入完整結果，MTF 在前端過濾
         // Normalize 'daban' → 'long' for API (API only accepts 'long'|'short')
         const apiDirection = effectiveDirection(direction);
@@ -975,7 +996,7 @@ export const useBacktestStore = create<BacktestState>()(
                   let displayPerf = performance;
                   if (useMultiTimeframe) {
                     const filteredSymbols = new Set(cached.scanResults.filter(r =>
-                      (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
+                      r.mtfWeeklyPass === true,
                     ).map(r => r.symbol));
                     displayPerf = performance.filter(p => filteredSymbols.has(p.symbol));
                   }
@@ -1019,7 +1040,7 @@ export const useBacktestStore = create<BacktestState>()(
             const cacheKey = `_unfilteredResults:${date}`;
             scanCache.set(cacheKey, { scanResults, performance: [], marketTrend: sessionMarketTrend as TrendState | null });
             displayResults = scanResults.filter(r =>
-              (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE,
+              r.mtfWeeklyPass === true,
             );
           }
 
@@ -1160,7 +1181,9 @@ export const useBacktestStore = create<BacktestState>()(
           if (datesToPreload.length > 0) {
             // fire-and-forget: 背景預載，不 await
             Promise.all(datesToPreload.map(async (date) => {
-              const cacheKey = scanCacheKey(market, scanDirection, get().useMultiTimeframe, date);
+              // 預載永遠抓完整（unfiltered）結果，存在 mtf=false 的 key 下
+              // MTF=on 時 key 不同 → cache miss → loadCronSession 重抓並正確過濾
+              const cacheKey = scanCacheKey(market, scanDirection, false, date);
               if (get().scanCache.has(cacheKey)) return; // 已快取
               try {
                 const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${dir}&mtf=daily`);

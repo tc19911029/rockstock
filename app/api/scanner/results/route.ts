@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { MarketId, MtfMode } from '@/lib/scanner/types';
 import { listScanDates, loadScanSession } from '@/lib/storage/scanStorage';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
-import { PANEL_MTF_MIN_SCORE } from '@/lib/selection/applyPanelFilter';
 
 export const runtime = 'nodejs';
 
@@ -38,7 +37,7 @@ export async function GET(req: NextRequest) {
       const session = await loadScanSession(market, dateParam, direction, 'daily');
       if (!session) return apiOk({ sessions: [] });
       if (wantMtf) {
-        const filtered = session.results.filter(r => (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE);
+        const filtered = session.results.filter(r => r.mtfWeeklyPass === true);
         return apiOk({ sessions: [{ ...session, results: filtered, resultCount: filtered.length, multiTimeframeEnabled: true }] });
       }
       return apiOk({ sessions: [session] });
@@ -73,7 +72,7 @@ export async function GET(req: NextRequest) {
       if (!wantMtf) return base;
       const full = await loadScanSession(market, d.date, direction, 'daily');
       if (!full) return { ...base, resultCount: 0 };
-      const filtered = full.results.filter(r => (r.mtfScore ?? 0) >= PANEL_MTF_MIN_SCORE);
+      const filtered = full.results.filter(r => r.mtfWeeklyPass === true);
       return { ...base, resultCount: filtered.length };
     }));
 

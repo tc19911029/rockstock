@@ -225,6 +225,8 @@ export interface FugleQuote {
   close: number;
   volume: number;
   date?: string;
+  prevClose?: number;
+  changePercent?: number;
 }
 
 interface FugleQuoteResponse {
@@ -234,6 +236,8 @@ interface FugleQuoteResponse {
   market: string;
   symbol: string;
   name: string;
+  referencePrice?: number;
+  previousClose?: number;
   openPrice: number;
   highPrice: number;
   lowPrice: number;
@@ -287,6 +291,8 @@ export async function getFugleQuote(symbol: string): Promise<FugleQuote | null> 
       close: json.lastPrice ?? json.closePrice ?? 0,
       volume: json.total?.tradeVolume ?? 0,
       date: json.date,
+      prevClose: json.previousClose ?? json.referencePrice,
+      changePercent: json.changePercent,
     };
 
     if (quote.close > 0) {

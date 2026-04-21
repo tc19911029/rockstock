@@ -198,7 +198,7 @@ function buildFollowupContext(
       `${displaySymbol(r.symbol)} ${r.name}`,
       r.industry ? `[${r.industry}]` : '',
       `${r.price.toFixed(2)} (${r.changePercent >= 0 ? '+' : ''}${r.changePercent.toFixed(1)}%)`,
-      `六條件${r.sixConditionsScore}/6[趨${b.trend ? '✓' : '✗'}位${b.position ? '✓' : '✗'}K${b.kbar ? '✓' : '✗'}均${b.ma ? '✓' : '✗'}量${b.volume ? '✓' : '✗'}指${b.indicator ? '✓' : '✗'}]`,
+      b ? `六條件${r.sixConditionsScore}/6[趨${b.trend ? '✓' : '✗'}位${b.position ? '✓' : '✗'}K${b.kbar ? '✓' : '✗'}均${b.ma ? '✓' : '✗'}量${b.volume ? '✓' : '✗'}指${b.indicator ? '✓' : '✗'}]` : `六條件${r.sixConditionsScore}/6`,
       `${r.trendState}・${r.trendPosition}`,
       r.mtfScore !== undefined ? `MTF${r.mtfScore}/4` : '',
     ].filter(Boolean);

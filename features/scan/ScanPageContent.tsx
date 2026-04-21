@@ -36,6 +36,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
     cronDates, fetchCronDates,
     isLoadingCronSession,
     autoLoadLatest,
+    activeBuyMethod,
     sessionDataFreshness: _sessionDataFreshness,
   } = useBacktestStore();
 
@@ -82,7 +83,7 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
         }
       });
     }
-  }, [market, scanDirection, fetchCronDates]);
+  }, [market, scanDirection, activeBuyMethod, fetchCronDates]);
 
   // 自動載入最新掃描結果（只跑一次）
   const autoLoadedRef = useRef(false);
@@ -339,6 +340,7 @@ export default function ScanPageContent({ defaultMode: _defaultMode = 'full' }: 
 
   const autoLoadLatest = useBacktestStore(s => s.autoLoadLatest);
   const scanTiming = useBacktestStore(s => s.scanTiming);
+  const activeBuyMethod2 = useBacktestStore(s => s.activeBuyMethod);
 
    
   // 載入 cron 歷史日期（market/direction/MTF 切換時重新取得）
@@ -356,7 +358,7 @@ export default function ScanPageContent({ defaultMode: _defaultMode = 'full' }: 
     } else {
       fetchCronDates(market, scanDirection);
     }
-  }, [market, scanDirection, useMultiTimeframe, fetchCronDates]);
+  }, [market, scanDirection, useMultiTimeframe, activeBuyMethod2, fetchCronDates]);
 
   // 用 state 避免 SSR hydration mismatch
   const [maxDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()));

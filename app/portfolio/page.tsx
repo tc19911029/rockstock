@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePortfolioStore, PortfolioHolding } from '@/store/portfolioStore';
-import { useSettingsStore } from '@/store/settingsStore';
 import { PageShell } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { classifyMarket } from '@/lib/market/classify';
 
 interface PriceData {
   price: number;
@@ -19,6 +19,30 @@ interface PriceData {
 
 const EMPTY_FORM = { symbol: '', name: '', shares: '', costPrice: '', buyDate: new Date().toISOString().split('T')[0] };
 
+// 交易成本（買進+賣出），用券商 app 3661 反推驗證過
+// TW: 手續費 0.1425% × 2 + 證交稅 0.3%
+// CN: 手續費 0.03% × 2 + 印花稅 0.05%（賣出）+ 過戶費 0.001% × 2（含滬深統一）
+const FEE_RATES = {
+  TW: { buy: 0.001425, sell: 0.001425 + 0.003 },
+  CN: { buy: 0.00031, sell: 0.00031 + 0.0005 },
+} as const;
+
+function marketOf(symbol: string): 'TW' | 'CN' {
+  return classifyMarket(symbol) === 'CN' ? 'CN' : 'TW';
+}
+
+function calcNetPnL(symbol: string, shares: number, costPrice: number, currentPrice: number) {
+  if (currentPrice <= 0) return { pnl: 0, pnlPct: 0 };
+  const rates = FEE_RATES[marketOf(symbol)];
+  const costTotal = shares * costPrice;
+  const marketTotal = shares * currentPrice;
+  const buyFee = costTotal * rates.buy;
+  const sellFee = marketTotal * rates.sell;
+  const pnl = marketTotal - costTotal - buyFee - sellFee;
+  const pnlPct = costTotal > 0 ? (pnl / costTotal) * 100 : 0;
+  return { pnl, pnlPct };
+}
+
 export default function PortfolioPage() {
   const { holdings, add, remove, update } = usePortfolioStore();
   const [prices, setPrices] = useState<Record<string, PriceData>>({});
@@ -27,21 +51,43 @@ export default function PortfolioPage() {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
 
-  async function fetchPrice(symbol: string) {
-    setPrices(prev => ({ ...prev, [symbol]: { ...prev[symbol], loading: true } as PriceData }));
+  async function refreshAllPrices(list: typeof holdings) {
+    if (list.length === 0) return;
+    const symbols = list.map(h => h.symbol);
+    setPrices(prev => {
+      const next = { ...prev };
+      for (const s of symbols) next[s] = { ...next[s], loading: true } as PriceData;
+      return next;
+    });
     try {
-      const res = await fetch(`/api/watchlist/conditions?symbol=${encodeURIComponent(symbol)}&strategyId=${encodeURIComponent(useSettingsStore.getState().activeStrategyId)}`);
+      const res = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(symbols.join(','))}`);
+      if (!res.ok) throw new Error('quotes failed');
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      setPrices(prev => ({ ...prev, [symbol]: { price: json.price, changePercent: json.changePercent, loading: false } }));
+      const quotes: Array<{ symbol: string; price: number; changePercent: number }> = json.quotes ?? [];
+      setPrices(prev => {
+        const next = { ...prev };
+        for (const s of symbols) {
+          const q = quotes.find(q => q.symbol === s);
+          if (q && q.price > 0) {
+            next[s] = { price: q.price, changePercent: q.changePercent, loading: false };
+          } else {
+            next[s] = { price: 0, changePercent: 0, loading: false, error: '無報價' };
+          }
+        }
+        return next;
+      });
     } catch {
-      setPrices(prev => ({ ...prev, [symbol]: { price: 0, changePercent: 0, loading: false, error: '無法取得' } }));
+      setPrices(prev => {
+        const next = { ...prev };
+        for (const s of symbols) next[s] = { price: 0, changePercent: 0, loading: false, error: '更新失敗' };
+        return next;
+      });
     }
   }
 
   useEffect(() => {
-    holdings.forEach(h => fetchPrice(h.symbol));
-  }, [holdings]);
+    refreshAllPrices(holdings);
+  }, [holdings.map(h => h.symbol).join(',')]);
 
   function openEdit(h: PortfolioHolding) {
     setEditId(h.id);
@@ -80,20 +126,27 @@ export default function PortfolioPage() {
     }
   }
 
-  // Portfolio summary
-  const summary = holdings.reduce((acc, h) => {
-    const p = prices[h.symbol];
-    const currentPrice = p?.price ?? 0;
-    const currentValue = h.shares * currentPrice;
-    const costValue = h.shares * h.costPrice;
-    const pnl = currentPrice > 0 ? currentValue - costValue : 0;
-    acc.totalCost += costValue;
-    acc.totalValue += currentPrice > 0 ? currentValue : costValue;
-    acc.totalPnL += pnl;
-    return acc;
-  }, { totalCost: 0, totalValue: 0, totalPnL: 0 });
+  // Portfolio summary — 台股 (TWD) 與陸股 (CNY) 分開，各自扣本市場手續費+稅
+  function calcSummary(list: typeof holdings) {
+    return list.reduce((acc, h) => {
+      const p = prices[h.symbol];
+      const currentPrice = p?.price ?? 0;
+      const currentValue = h.shares * currentPrice;
+      const costValue = h.shares * h.costPrice;
+      const { pnl } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice);
+      acc.totalCost += costValue;
+      acc.totalValue += currentPrice > 0 ? currentValue : costValue;
+      acc.totalPnL += pnl;
+      return acc;
+    }, { totalCost: 0, totalValue: 0, totalPnL: 0 });
+  }
 
-  const totalReturn = summary.totalCost > 0 ? (summary.totalPnL / summary.totalCost) * 100 : 0;
+  const twHoldings = holdings.filter(h => classifyMarket(h.symbol) === 'TW');
+  const cnHoldings = holdings.filter(h => classifyMarket(h.symbol) === 'CN');
+  const twSummary = calcSummary(twHoldings);
+  const cnSummary = calcSummary(cnHoldings);
+  const twReturn = twSummary.totalCost > 0 ? (twSummary.totalPnL / twSummary.totalCost) * 100 : 0;
+  const cnReturn = cnSummary.totalCost > 0 ? (cnSummary.totalPnL / cnSummary.totalCost) * 100 : 0;
 
   function exportCSV() {
     if (holdings.length === 0) return;
@@ -102,8 +155,7 @@ export default function PortfolioPage() {
       ...holdings.map(h => {
         const p = prices[h.symbol];
         const currentPrice = p?.price ?? 0;
-        const pnl = currentPrice > 0 ? (currentPrice - h.costPrice) * h.shares : 0;
-        const pnlPct = h.costPrice > 0 ? ((currentPrice - h.costPrice) / h.costPrice) * 100 : 0;
+        const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice);
         return [
           h.symbol,
           h.name,
@@ -128,6 +180,9 @@ export default function PortfolioPage() {
 
   const portfolioHeader = (
     <div className="flex items-center gap-2 text-xs">
+      <Link href="/" className="p-1 text-muted-foreground hover:text-foreground transition-colors" title="返回主頁">
+        ←
+      </Link>
       <span className="font-bold text-sm whitespace-nowrap">💼 持倉</span>
       <Button variant="secondary" size="sm" onClick={() => usePortfolioStore.getState().exportJSON()}
         title="匯出備份 JSON">匯出</Button>
@@ -157,19 +212,18 @@ export default function PortfolioPage() {
     <PageShell headerSlot={portfolioHeader}>
       <div className="p-4 max-w-3xl mx-auto space-y-4">
 
-        {/* Summary */}
+        {/* Summary — TWD / CNY 分開顯示，損益已扣買賣手續費+交易稅 */}
         {holdings.length > 0 && (
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: '總持倉市值', value: `$${summary.totalValue.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`, color: 'text-yellow-400' },
-              { label: '總損益', value: `${summary.totalPnL >= 0 ? '+' : ''}$${Math.abs(summary.totalPnL).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}`, color: summary.totalPnL >= 0 ? 'text-bull' : 'text-bear' },
-              { label: '總報酬率', value: `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(2)}%`, color: totalReturn >= 0 ? 'text-bull' : 'text-bear' },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="bg-secondary border border-border rounded-xl p-3 text-center">
-                <p className="text-[10px] text-muted-foreground mb-1">{label}</p>
-                <p className={`text-base font-bold font-mono ${color}`}>{value}</p>
-              </div>
-            ))}
+          <div className="space-y-3">
+            {twHoldings.length > 0 && (
+              <MarketSummaryRow label="台股" currency="TWD" summary={twSummary} returnPct={twReturn} />
+            )}
+            {cnHoldings.length > 0 && (
+              <MarketSummaryRow label="陸股" currency="CNY" summary={cnSummary} returnPct={cnReturn} />
+            )}
+            <p className="text-[9px] text-muted-foreground/60 text-center">
+              損益已扣手續費+交易稅（台股 0.1425%×2 + 0.3% / 陸股 0.03%×2 + 0.05%）
+            </p>
           </div>
         )}
 
@@ -237,8 +291,7 @@ export default function PortfolioPage() {
           {holdings.map(h => {
             const p = prices[h.symbol];
             const currentPrice = p?.price ?? 0;
-            const pnl = currentPrice > 0 ? (currentPrice - h.costPrice) * h.shares : 0;
-            const pnlPct = h.costPrice > 0 ? ((currentPrice - h.costPrice) / h.costPrice) * 100 : 0;
+            const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice);
             const pnlPos = pnl >= 0;
             const ma5StopLoss = currentPrice * 0.95; // simplified
             const costStopLoss = h.costPrice * 0.93;
@@ -348,5 +401,41 @@ export default function PortfolioPage() {
         <p className="text-[10px] text-muted-foreground/60 text-center">* 僅供學習參考，停損計算為簡化版本，非投資建議</p>
       </div>
     </PageShell>
+  );
+}
+
+interface SummaryData { totalCost: number; totalValue: number; totalPnL: number }
+
+function MarketSummaryRow({ label, currency, summary, returnPct }:
+  { label: string; currency: 'TWD' | 'CNY'; summary: SummaryData; returnPct: number }) {
+  const symbol = currency === 'TWD' ? 'NT$' : '¥';
+  const pnlPos = summary.totalPnL >= 0;
+  return (
+    <div className="bg-secondary border border-border rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-bold text-foreground/80">{label}</span>
+        <span className="text-[10px] text-muted-foreground">{currency}</span>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-0.5">市值</p>
+          <p className="text-sm font-bold font-mono text-yellow-400">
+            {symbol}{summary.totalValue.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-0.5">損益</p>
+          <p className={`text-sm font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
+            {pnlPos ? '+' : ''}{symbol}{Math.abs(summary.totalPnL).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-0.5">報酬率</p>
+          <p className={`text-sm font-bold font-mono ${returnPct >= 0 ? 'text-bull' : 'text-bear'}`}>
+            {returnPct >= 0 ? '+' : ''}{returnPct.toFixed(2)}%
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }

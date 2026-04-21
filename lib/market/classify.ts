@@ -3,6 +3,10 @@ export type MarketTab = 'all' | 'TW' | 'CN';
 export function classifyMarket(symbol: string): 'TW' | 'CN' | 'other' {
   if (/\.(TW|TWO)$/i.test(symbol)) return 'TW';
   if (/\.(SS|SZ)$/i.test(symbol)) return 'CN';
+  // 無後綴時依位數猜：6位數字=陸股，4-5位數字=台股
+  const digits = symbol.replace(/\D/g, '');
+  if (/^\d{6}$/.test(digits) && digits === symbol.trim()) return 'CN';
+  if (/^\d{4,5}$/.test(digits) && digits === symbol.trim()) return 'TW';
   return 'other';
 }
 
