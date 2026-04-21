@@ -176,7 +176,11 @@ export default function HomePage() {
 
   const [hoverCandle, setHoverCandle] = useState<typeof allCandles[0] | null>(null);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
-  const [showMarkers, setShowMarkers] = useState(true);
+  const [showMarkers, setShowMarkers] = useState(false);
+  const [showPivots, setShowPivots] = useState(false);
+  const [showSupportResistance, setShowSupportResistance] = useState(false);
+  const [showAscendingTrendline, setShowAscendingTrendline] = useState(false);
+  const [showDescendingTrendline, setShowDescendingTrendline] = useState(false);
   const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
   const [showBollinger, setShowBollinger] = useState(false);
   const [indicators, setIndicators] = useState({ macd: true, kd: true, volume: true, rsi: false });
@@ -402,6 +406,14 @@ export default function HomePage() {
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
                 onSignalStrengthChange={setSignalStrengthMin}
+                showPivots={showPivots}
+                onPivotsToggle={() => setShowPivots(v => !v)}
+                showSupportResistance={showSupportResistance}
+                onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showAscendingTrendline={showAscendingTrendline}
+                onAscendingTrendlineToggle={() => setShowAscendingTrendline(v => !v)}
+                showDescendingTrendline={showDescendingTrendline}
+                onDescendingTrendlineToggle={() => setShowDescendingTrendline(v => !v)}
                 avgCost={metrics.avgCost}
                 shares={metrics.shares}
                 onPrev={prevCandle}
@@ -434,6 +446,10 @@ export default function HomePage() {
                   fillContainer
                   maToggles={maToggles}
                   showBollinger={showBollinger}
+                  showPivots={showPivots}
+                  showSupportResistance={showSupportResistance}
+                  showAscendingTrendline={showAscendingTrendline}
+                  showDescendingTrendline={showDescendingTrendline}
                   highlightDate={targetDate ?? undefined}
                 />
               </ErrorBoundary>
@@ -623,6 +639,14 @@ export default function HomePage() {
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
                 onSignalStrengthChange={setSignalStrengthMin}
+                showPivots={showPivots}
+                onPivotsToggle={() => setShowPivots(v => !v)}
+                showSupportResistance={showSupportResistance}
+                onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showAscendingTrendline={showAscendingTrendline}
+                onAscendingTrendlineToggle={() => setShowAscendingTrendline(v => !v)}
+                showDescendingTrendline={showDescendingTrendline}
+                onDescendingTrendlineToggle={() => setShowDescendingTrendline(v => !v)}
                 avgCost={metrics.avgCost}
                 shares={metrics.shares}
                 onPrev={prevCandle}
@@ -659,6 +683,10 @@ export default function HomePage() {
                       fillContainer
                       maToggles={maToggles}
                       showBollinger={showBollinger}
+                      showPivots={showPivots}
+                      showSupportResistance={showSupportResistance}
+                      showAscendingTrendline={showAscendingTrendline}
+                      showDescendingTrendline={showDescendingTrendline}
                       highlightDate={targetDate ?? undefined}
                     />
                   </ErrorBoundary>

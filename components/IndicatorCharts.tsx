@@ -35,6 +35,7 @@ function makeChart(container: HTMLElement, showTimeAxis: boolean): IChartApi {
     layout: {
       background: { type: ColorType.Solid, color: '#0f172a' },
       textColor: '#94a3b8',
+      attributionLogo: false,
     },
     grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
     rightPriceScale: { borderColor: '#334155', minimumWidth: 80, scaleMargins: { top: 0.08, bottom: 0.08 } },
@@ -386,9 +387,9 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
   const show = indicators ?? { macd: true, kd: true, volume: true, rsi: false };
   const panels = [
     show.volume && <div key="vol" className="flex-1 min-h-0 bg-card"><VolumeChart candles={candles} hoverCandle={hoverCandle} isTW={isTW} /></div>,
-    show.kd && <div key="kd" className="flex-[1.8] min-h-0 bg-card"><KDChart candles={candles} hoverCandle={hoverCandle} /></div>,
-    show.rsi && <div key="rsi" className="flex-[1.8] min-h-0 bg-card"><RSIChart candles={candles} hoverCandle={hoverCandle} /></div>,
-    show.macd && <div key="macd" className="flex-[2.2] min-h-0 bg-card"><MACDChart candles={candles} hoverCandle={hoverCandle} /></div>,
+    show.kd && <div key="kd" className="flex-1 min-h-0 bg-card"><KDChart candles={candles} hoverCandle={hoverCandle} /></div>,
+    show.rsi && <div key="rsi" className="flex-1 min-h-0 bg-card"><RSIChart candles={candles} hoverCandle={hoverCandle} /></div>,
+    show.macd && <div key="macd" className="flex-1 min-h-0 bg-card"><MACDChart candles={candles} hoverCandle={hoverCandle} /></div>,
   ].filter(Boolean);
 
   if (panels.length === 0) return <div className="h-full bg-card flex items-center justify-center text-xs text-muted-foreground/60">請開啟至少一個指標面板</div>;

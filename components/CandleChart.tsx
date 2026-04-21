@@ -16,7 +16,7 @@ import {
 import { CandleWithIndicators, RuleSignal, ChartSignalMarker } from '@/types';
 
 import { getBullBearColors } from '@/lib/chart/colors';
-import { detectTrendlineBreakout } from '@/lib/analysis/trendAnalysis';
+import { findPivots } from '@/lib/analysis/trendAnalysis';
 
 const MA_COLORS = {
   ma5:   '#facc15', // 黃
@@ -88,6 +88,14 @@ interface CandleChartProps {
   showBollinger?: boolean;
   /** 顯示書本 p.37/p.38 切線（下降切線+上升切線），預設開 */
   showTrendlines?: boolean;
+  /** 顯示上升切線（底底高），獨立 toggle；若 undefined 則跟 showTrendlines */
+  showAscendingTrendline?: boolean;
+  /** 顯示下降切線（頭頭低），獨立 toggle；若 undefined 則跟 showTrendlines */
+  showDescendingTrendline?: boolean;
+  /** 顯示 MA5 分段頭底標記（寶典 p.21-22），預設關 */
+  showPivots?: boolean;
+  /** 顯示前高壓/前低撐/大量撐壓線，預設關 */
+  showSupportResistance?: boolean;
   /** 高亮指定日期的 K 棒（黃色菱形標記） */
   highlightDate?: string;
   /** 將指定日期的 K 棒捲動至畫面中央 */
@@ -99,6 +107,10 @@ export default function CandleChart({
   maToggles = { ma5: true, ma10: true, ma20: true, ma60: true, ma240: false },
   showBollinger = false,
   showTrendlines = true,
+  showAscendingTrendline,
+  showDescendingTrendline,
+  showPivots = false,
+  showSupportResistance = false,
   highlightDate,
   centerOnDate,
 }: CandleChartProps) {
@@ -111,6 +123,7 @@ export default function CandleChart({
   const markersPlugRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const avgCostLineRef   = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
   const stopLossLineRef  = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
+  const srLineRefs       = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([]);
   // Keep latest candles accessible inside event closures without re-subscribing
   const candlesRef     = useRef<CandleWithIndicators[]>(candles);
   const timeMapRef     = useRef<Map<string | number, CandleWithIndicators>>(new Map());
@@ -139,6 +152,7 @@ export default function CandleChart({
       layout: {
         background: { type: ColorType.Solid, color: '#0f172a' },
         textColor: '#94a3b8',
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: '#1e293b' },
@@ -270,53 +284,79 @@ export default function CandleChart({
     );
 
     // ── 切線（書本 p.37/p.38）──
-    // 單一實線從 fromIndex 延伸到 lastIdx + 未來 15 個營業日
+    // 實線從 fromIndex 延伸：往前 20 + 往後 20 交易日
+    // 上升/下降線可獨立 toggle；fallback 用 showTrendlines 總開關相容舊用法
+    const showAsc = showAscendingTrendline ?? showTrendlines;
+    const showDesc = showDescendingTrendline ?? showTrendlines;
     let hasDescending = false;
     let hasAscending = false;
-    if (showTrendlines && candles.length >= 3) {
+    if ((showAsc || showDesc) && candles.length >= 3) {
       const lastIdx = candles.length - 1;
-      const info = detectTrendlineBreakout(candles, lastIdx);
-      const FUTURE_DAYS = 15;
+      // UI 規則（非書本嚴格規則）：最近兩個頭連成下降線、最近兩個底連成上升線，不管高低大小
+      // 切線只用已確認 pivot，進行中段的 provisional 不拿來畫線
+      // 書本嚴格規則（頭頭低/底底高）仍用於 detectTrendlineBreakout 的警示訊號
+      const pivots = findPivots(candles, lastIdx, 8);
+      const recentHighs = pivots.filter(p => p.type === 'high').slice(0, 2);
+      const recentLows = pivots.filter(p => p.type === 'low').slice(0, 2);
+      // 線的延伸：第二近 pivot 往前 20 天 + 最近 pivot 往後 20 天
+      const EDGE_PAD = 20;
       const lastDate = candles[lastIdx]?.date ?? '';
-      const futureDates: string[] = [];
-      if (lastDate && !lastDate.includes(' ')) {
-        // Daily: 加未來 N 個營業日（跳過週末）
+      const buildFutureDates = (count: number): string[] => {
+        const fd: string[] = [];
+        if (!lastDate || lastDate.includes(' ')) return fd;
         const d = new Date(lastDate + 'T00:00:00Z');
         let added = 0;
-        while (added < FUTURE_DAYS) {
+        while (added < count) {
           d.setUTCDate(d.getUTCDate() + 1);
           const dow = d.getUTCDay();
           if (dow === 0 || dow === 6) continue;
-          futureDates.push(d.toISOString().slice(0, 10));
+          fd.push(d.toISOString().slice(0, 10));
           added++;
         }
-      }
-      const buildLine = (fromIndex: number, fromPrice: number, slope: number) => {
+        return fd;
+      };
+      /** 從 startIdx 到 endIdx 畫線（以 anchorIndex/anchorPrice + slope 決定每點值） */
+      const buildLine = (startIdx: number, endIdx: number, anchorIndex: number, anchorPrice: number, slope: number) => {
         const pts: { time: ReturnType<typeof toTime>; value: number }[] = [];
-        for (let i = fromIndex; i <= lastIdx; i++) {
+        const safeStart = Math.max(0, startIdx);
+        // 在已存在的 K 棒範圍內畫
+        for (let i = safeStart; i <= Math.min(endIdx, lastIdx); i++) {
           if (i < 0 || i >= candles.length) continue;
-          pts.push({ time: toTime(candles[i].date), value: fromPrice + slope * (i - fromIndex) });
+          pts.push({ time: toTime(candles[i].date), value: anchorPrice + slope * (i - anchorIndex) });
         }
-        // 延伸到未來
-        futureDates.forEach((fd, k) => {
-          const futureIdx = lastIdx + 1 + k;
-          pts.push({ time: toTime(fd), value: fromPrice + slope * (futureIdx - fromIndex) });
-        });
+        // 若 endIdx 超過今天，延伸到未來
+        if (endIdx > lastIdx) {
+          const futureCount = endIdx - lastIdx;
+          const futureDates = buildFutureDates(futureCount);
+          futureDates.forEach((fd, k) => {
+            const futureIdx = lastIdx + 1 + k;
+            pts.push({ time: toTime(fd), value: anchorPrice + slope * (futureIdx - anchorIndex) });
+          });
+        }
         return pts;
       };
 
-      if (info.descending) {
-        const { fromIndex, fromPrice, toIndex, toPrice } = info.descending;
-        const slope = (toPrice - fromPrice) / (toIndex - fromIndex);
-        trendlineRefs.current.descending?.setData(buildLine(fromIndex, fromPrice, slope));
+      // 下降線：連最近兩個頭（findPivots 回傳 newest-first，highs[1]=older, highs[0]=newer）
+      // 範圍：older - 10 天 ~ newer + 10 天
+      if (showDesc && recentHighs.length === 2) {
+        const older = recentHighs[1];
+        const newer = recentHighs[0];
+        const slope = (newer.price - older.price) / (newer.index - older.index);
+        trendlineRefs.current.descending?.setData(
+          buildLine(older.index - EDGE_PAD, newer.index + EDGE_PAD, older.index, older.price, slope)
+        );
         hasDescending = true;
       } else {
         trendlineRefs.current.descending?.setData([]);
       }
-      if (info.ascending) {
-        const { fromIndex, fromPrice, toIndex, toPrice } = info.ascending;
-        const slope = (toPrice - fromPrice) / (toIndex - fromIndex);
-        trendlineRefs.current.ascending?.setData(buildLine(fromIndex, fromPrice, slope));
+      // 上升線：連最近兩個底；範圍：older - 10 天 ~ newer + 10 天
+      if (showAsc && recentLows.length === 2) {
+        const older = recentLows[1];
+        const newer = recentLows[0];
+        const slope = (newer.price - older.price) / (newer.index - older.index);
+        trendlineRefs.current.ascending?.setData(
+          buildLine(older.index - EDGE_PAD, newer.index + EDGE_PAD, older.index, older.price, slope)
+        );
         hasAscending = true;
       } else {
         trendlineRefs.current.ascending?.setData([]);
@@ -359,7 +399,7 @@ export default function CandleChart({
         if (range) broadcastRange(range as { from: number; to: number });
       });
     }
-  }, [candles, centerOnDate]);
+  }, [candles, centerOnDate, showTrendlines, showAscendingTrendline, showDescendingTrendline]);
 
   // ── MA visibility toggle ─────────────────────────────────────────────────
   useEffect(() => {
@@ -426,15 +466,88 @@ export default function CandleChart({
         text: '訊號日',
         size: 2,
       });
-      // 依時間排序，lightweight-charts 要求 markers 按時間升序
-      converted.sort((a, b) => {
-        const ta = String(a.time);
-        const tb = String(b.time);
-        return ta < tb ? -1 : ta > tb ? 1 : 0;
-      });
     }
+    // 加入頭底標記（寶典 p.21-22 MA5 分段轉折波，書本規則無振幅門檻）
+    // 只顯示已確認 pivot（不含 provisional），進行中段不算頭/底
+    if (showPivots && candles.length >= 20) {
+      const pivots = findPivots(candles, candles.length - 1, 30);
+      for (const p of pivots) {
+        const c = candles[p.index];
+        if (!c) continue;
+        converted.push({
+          time: toTime(c.date),
+          position: p.type === 'high' ? 'aboveBar' : 'belowBar',
+          shape: p.type === 'high' ? 'arrowDown' : 'arrowUp',
+          color: p.type === 'high' ? '#ec4899' : '#06b6d4',
+          text: p.type === 'high' ? '頭' : '底',
+          size: 1,
+        });
+      }
+    }
+    // lightweight-charts 要求 markers 按時間升序
+    converted.sort((a, b) => {
+      const ta = String(a.time);
+      const tb = String(b.time);
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
     markersPlugRef.current.setMarkers(converted);
-  }, [chartMarkers, highlightDate, candles]);
+  }, [chartMarkers, highlightDate, candles, showPivots]);
+
+  // ── Support/resistance price lines (前高壓 / 前低撐 / 大量撐壓) ──────────
+  useEffect(() => {
+    if (!candleRef.current) return;
+    // 清除舊線
+    for (const line of srLineRefs.current) {
+      try { candleRef.current.removePriceLine(line); } catch { /* noop */ }
+    }
+    srLineRefs.current = [];
+
+    if (!showSupportResistance || candles.length < 20) return;
+
+    const lastIdx = candles.length - 1;
+    const currClose = candles[lastIdx].close;
+
+    // 1. 前高壓 / 前低撐 — 取最近 pivots 中的極值
+    const pivots = findPivots(candles, lastIdx, 12);
+    const highs = pivots.filter(p => p.type === 'high').map(p => p.price);
+    const lows  = pivots.filter(p => p.type === 'low').map(p => p.price);
+    if (highs.length) {
+      const prevHigh = Math.max(...highs);
+      srLineRefs.current.push(candleRef.current.createPriceLine({
+        price: prevHigh, color: '#ec4899', lineWidth: 1, lineStyle: 2,
+        axisLabelVisible: true, title: '前高壓',
+      }));
+    }
+    if (lows.length) {
+      const prevLow = Math.min(...lows);
+      srLineRefs.current.push(candleRef.current.createPriceLine({
+        price: prevLow, color: '#10b981', lineWidth: 1, lineStyle: 2,
+        axisLabelVisible: true, title: '前低撐',
+      }));
+    }
+
+    // 2. 大量撐/壓 — 最近 60 根 K 棒中最大量的收盤價
+    const lookback = 60;
+    const start = Math.max(0, lastIdx - lookback + 1);
+    let maxVol = -Infinity;
+    let maxVolIdx = -1;
+    for (let i = start; i <= lastIdx; i++) {
+      if (candles[i].volume > maxVol) {
+        maxVol = candles[i].volume;
+        maxVolIdx = i;
+      }
+    }
+    if (maxVolIdx >= 0) {
+      const bigVolPrice = candles[maxVolIdx].close;
+      const isSupport = bigVolPrice <= currClose;
+      srLineRefs.current.push(candleRef.current.createPriceLine({
+        price: bigVolPrice,
+        color: isSupport ? '#10b981' : '#ec4899',
+        lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+        title: isSupport ? '大量撐' : '大量壓',
+      }));
+    }
+  }, [showSupportResistance, candles]);
 
   // MA legend: show hovered candle's values if hovering, else last candle
   const last = candles[candles.length - 1];
@@ -466,13 +579,13 @@ export default function CandleChart({
           {trendlineStatus.ascending && (
             <span className="flex items-center gap-1" style={{ color: '#ef4444' }}>
               <span className="inline-block w-4 h-[3px]" style={{ background: '#ef4444' }} />
-              上升切線（底底高）
+              上升切線（連最近兩底）
             </span>
           )}
           {trendlineStatus.descending && (
             <span className="flex items-center gap-1" style={{ color: '#10b981' }}>
               <span className="inline-block w-4 h-[3px]" style={{ background: '#10b981' }} />
-              下降切線（頭頭低）
+              下降切線（連最近兩頭）
             </span>
           )}
         </div>

@@ -20,6 +20,14 @@ interface ChartToolbarProps {
   onMarkersToggle: () => void;
   signalStrengthMin: number;
   onSignalStrengthChange: (v: number) => void;
+  showPivots?: boolean;
+  onPivotsToggle?: () => void;
+  showSupportResistance?: boolean;
+  onSupportResistanceToggle?: () => void;
+  showAscendingTrendline?: boolean;
+  onAscendingTrendlineToggle?: () => void;
+  showDescendingTrendline?: boolean;
+  onDescendingTrendlineToggle?: () => void;
   avgCost?: number;
   shares?: number;
   onPrev?: () => void;
@@ -57,6 +65,10 @@ export default function ChartToolbar({
   indicators, onIndicatorToggle,
   showMarkers, onMarkersToggle,
   signalStrengthMin, onSignalStrengthChange,
+  showPivots = false, onPivotsToggle,
+  showSupportResistance = false, onSupportResistanceToggle,
+  showAscendingTrendline = false, onAscendingTrendlineToggle,
+  showDescendingTrendline = false, onDescendingTrendlineToggle,
   avgCost, shares,
   onPrev, onNext, onReset,
   canPrev = true, canNext = true,
@@ -139,6 +151,50 @@ export default function ChartToolbar({
           >{label}</button>
         ))}
         <span className="w-px h-3.5 bg-border/60 mx-0.5" />
+        {onPivotsToggle && (
+          <button
+            onClick={onPivotsToggle}
+            aria-pressed={showPivots}
+            aria-label={`${showPivots ? '隱藏' : '顯示'}頭底標記`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showPivots ? 'bg-pink-600/60 text-pink-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="顯示/隱藏頭底標記（MA5 分段轉折波）"
+          >頭底</button>
+        )}
+        {onSupportResistanceToggle && (
+          <button
+            onClick={onSupportResistanceToggle}
+            aria-pressed={showSupportResistance}
+            aria-label={`${showSupportResistance ? '隱藏' : '顯示'}壓力支撐線`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showSupportResistance ? 'bg-amber-600/60 text-amber-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="顯示/隱藏前高壓 / 前低撐 / 大量撐壓"
+          >壓撐</button>
+        )}
+        {onAscendingTrendlineToggle && (
+          <button
+            onClick={onAscendingTrendlineToggle}
+            aria-pressed={showAscendingTrendline}
+            aria-label={`${showAscendingTrendline ? '隱藏' : '顯示'}上升趨勢線`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showAscendingTrendline ? 'bg-red-600/60 text-red-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="顯示/隱藏上升切線（連最近兩個底，兩端各延 20 天）"
+          >上升線</button>
+        )}
+        {onDescendingTrendlineToggle && (
+          <button
+            onClick={onDescendingTrendlineToggle}
+            aria-pressed={showDescendingTrendline}
+            aria-label={`${showDescendingTrendline ? '隱藏' : '顯示'}下降趨勢線`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showDescendingTrendline ? 'bg-emerald-600/60 text-emerald-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="顯示/隱藏下降切線（連最近兩個頭，兩端各延 20 天）"
+          >下降線</button>
+        )}
         <button
           onClick={onMarkersToggle}
           aria-pressed={showMarkers}

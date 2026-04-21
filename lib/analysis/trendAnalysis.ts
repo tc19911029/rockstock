@@ -46,15 +46,18 @@ interface Pivot {
 }
 
 /**
- * 朱家泓《活用技術分析寶典》p.21-22 短線轉折波畫法：
- *   1. 收盤 > MA5 = 正價區；收盤 < MA5 = 負價區
- *   2. 正價區轉負價區（跌破 MA5）：取該段正價區 + 跌破當天的 max(high) = 頭
- *   3. 負價區轉正價區（突破 MA5）：取該段負價區 + 突破當天的 min(low) = 底
- *   4. 高低點按時間連起來 = 短線轉折波
+ * 朱家泓《活用技術分析寶典》p.21-22 短線轉折波畫法（收盤 vs MA5）：
+ *   - close > MA5 = 正價區；close < MA5 = 負價區
+ *   - 正→負（跌破 MA5）：取正價區 + 跌破當天，max(high) = 頭
+ *   - 負→正（突破 MA5）：取負價區 + 突破當天，min(low) = 底
  *
- * 交界當天歸屬於「上一段的尾」，下一段從次日才開始（避免雙算）。
+ * 交界日雙重計算：既是舊段的結束候選（「連同跌破當天」），
+ * 也是新段的第一根 bar（因為它的 close 已在新段那一側）。
+ * 下一次交界時的 pivot window = [上一交界日..本次交界日]。
  *
- * @param minSwingPct 保留參數相容，目前算法不使用（交給 MA5 分段自然過濾）
+ * @param minSwingPct 保留參數相容，算法不使用（書本規則無振幅門檻）
+ * @param includeOpen true 時把「進行中段」的 running max/min 當成 provisional pivot 加在最後
+ *                    （用於即時趨勢判定；書本嚴格確認要等 MA5 反向穿越）
  */
 export function findPivots(
   candles: CandleWithIndicators[],
@@ -62,6 +65,7 @@ export function findPivots(
   maxPivots = 10,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   minSwingPct = 0.02,
+  includeOpen = false,
 ): Pivot[] {
   const lookback = Math.min(endIndex, 120);
   const start = Math.max(0, endIndex - lookback);
@@ -83,16 +87,14 @@ export function findPivots(
 
     if (curr === segType) continue;
 
-    // 狀態切換：把 [segStart..i] 當成上一段（含交界當天）取極值
+    // 狀態切換：pivot window = [segStart..i]，交界日 i 同時屬舊段尾+新段首
     if (segType === 'positive') {
-      // 正價區結束 → max(high)
       let bestPrice = -Infinity, bestIdx = segStart;
       for (let j = segStart; j <= i; j++) {
         if (candles[j].high > bestPrice) { bestPrice = candles[j].high; bestIdx = j; }
       }
       pivots.push({ index: bestIdx, price: bestPrice, type: 'high' });
     } else {
-      // 負價區結束 → min(low)
       let bestPrice = Infinity, bestIdx = segStart;
       for (let j = segStart; j <= i; j++) {
         if (candles[j].low < bestPrice) { bestPrice = candles[j].low; bestIdx = j; }
@@ -100,9 +102,27 @@ export function findPivots(
       pivots.push({ index: bestIdx, price: bestPrice, type: 'low' });
     }
 
-    // 下一段從次日開始，避免交界當天雙算
+    // 新段從交界日本身開始（雙重計算）
     segType = curr;
-    segStart = i + 1;
+    segStart = i;
+  }
+
+  // 可選：把「進行中段」的 running max/min 當成 provisional pivot
+  // 用於即時趨勢判定——雖然 MA5 還沒反向穿越確認，但該段目前最高/最低已足夠作為趨勢比較依據
+  if (includeOpen && segType !== null && segStart >= 0 && segStart <= endIndex) {
+    if (segType === 'positive') {
+      let bestPrice = -Infinity, bestIdx = segStart;
+      for (let j = segStart; j <= endIndex; j++) {
+        if (candles[j].high > bestPrice) { bestPrice = candles[j].high; bestIdx = j; }
+      }
+      pivots.push({ index: bestIdx, price: bestPrice, type: 'high' });
+    } else {
+      let bestPrice = Infinity, bestIdx = segStart;
+      for (let j = segStart; j <= endIndex; j++) {
+        if (candles[j].low < bestPrice) { bestPrice = candles[j].low; bestIdx = j; }
+      }
+      pivots.push({ index: bestIdx, price: bestPrice, type: 'low' });
+    }
   }
 
   return pivots.slice(-maxPivots).reverse();
@@ -127,7 +147,9 @@ export function detectTrend(
 ): TrendState {
   if (index < 20) return '盤整';
 
-  const pivots = findPivots(candles, index, 8);
+  // 趨勢判定用 provisional pivot：進行中段的 running max/min 也納入比較
+  // 讓即時突破新高/新低立刻反映在趨勢狀態，不用等 MA5 反向穿越確認
+  const pivots = findPivots(candles, index, 8, 0.02, true);
   const highs = pivots.filter(p => p.type === 'high').slice(0, 2);
   const lows  = pivots.filter(p => p.type === 'low').slice(0, 2);
 
