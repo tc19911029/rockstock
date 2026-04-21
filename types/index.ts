@@ -74,6 +74,12 @@ export interface RuleSignal {
   description: string;   // What happened (technical fact)
   reason: string;        // Why this matters + what to consider doing (book logic)
   ruleId: string;        // Which rule triggered this
+  /**
+   * 訊號細類，optional。未提供時由 classifySignal() 根據 type/label/ruleId 推導。
+   * 新增 detector 時建議直接填 subtype，避免誤分類。
+   * 見 lib/rules/signalClassifier.ts
+   */
+  subtype?: 'entry_strong' | 'entry_soft' | 'exit_strong' | 'exit_soft' | 'trend' | 'warn';
 }
 
 /** A single trade record */

@@ -152,7 +152,7 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   upperShadowMax: 0.20,
   volumeRatioMin: 1.3,  // 書上p.54：攻擊量 ≥ 前一日 × 1.3
   kdMaxEntry:     88,
-  deviationMax:   0.20,
+  deviationMax:   0.225,
   minScore:       4,    // 基本門檻 4 分
   marketTrendFilter: true,
   // 注意：scanOne() 中 isCoreReady 要求前5個核心條件全過（coreScore=5），

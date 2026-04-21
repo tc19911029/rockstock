@@ -2,9 +2,11 @@
 
 import { useReplayStore } from '@/store/replayStore';
 import { formatCurrency, formatReturn } from '@/lib/engines/statsEngine';
+import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
 
 export default function AccountInfo() {
-  const { metrics, account, stats } = useReplayStore();
+  const { metrics, account, stats, currentStock } = useReplayStore();
+  const market = marketFromSymbol(currentStock?.ticker ?? '');
 
   const pnlClass = (v: number) => v > 0 ? 'text-bull' : v < 0 ? 'text-bear' : 'text-foreground/80';
   const pnlSign  = (v: number) => v > 0 ? '+' : '';
@@ -45,7 +47,7 @@ export default function AccountInfo() {
           { label: '初始本金',  value: `$${formatCurrency(account.initialCapital)}` },
           { label: '現金餘額',  value: `$${formatCurrency(metrics.cash)}` },
           ...(metrics.shares > 0 ? [
-            { label: '持倉股數', value: `${metrics.shares.toLocaleString()} 股` },
+            { label: `持倉${market === 'CN' ? '手數' : '張數'}`, value: formatSharesAsLots(metrics.shares, market) },
             { label: '持倉均價', value: `$${metrics.avgCost.toFixed(2)}`, cls: 'text-yellow-400' },
             { label: '持倉市值', value: `$${formatCurrency(metrics.holdingValue)}` },
           ] : []),

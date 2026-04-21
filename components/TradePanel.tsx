@@ -3,12 +3,14 @@
 import { useState, useEffect } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { maxBuyShares } from '@/lib/engines/tradeEngine';
+import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
 
 type Mode = 'percent' | 'shares' | 'amount';
 type Confirm = { action: 'buy' | 'sell'; shares: number; price: number } | null;
 
 export default function TradePanel() {
-  const { allCandles, currentIndex, metrics, buy, sell, sixConditions } = useReplayStore();
+  const { allCandles, currentIndex, metrics, buy, sell, sixConditions, currentStock } = useReplayStore();
+  const tradeMarket = marketFromSymbol(currentStock?.ticker ?? '');
   const [input,   setInput]   = useState('');
   const [mode,    setMode]    = useState<Mode>('percent');
   const [mounted, setMounted] = useState(false);
@@ -100,7 +102,7 @@ export default function TradePanel() {
             <p className="text-xs text-muted-foreground mt-0.5">
               現金 <span className="text-foreground font-mono">${metrics.cash.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
               {metrics.shares > 0 && (
-                <span className="ml-2">· 持股 <span className="text-yellow-400 font-mono">{metrics.shares.toLocaleString()}</span> 股</span>
+                <span className="ml-2">· 持股 <span className="text-yellow-400 font-mono">{formatSharesAsLots(metrics.shares, tradeMarket)}</span></span>
               )}
             </p>
           )}

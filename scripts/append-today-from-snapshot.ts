@@ -92,6 +92,16 @@ async function appendMarket(market: 'TW' | 'CN'): Promise<void> {
     return;
   }
 
+  // 時間守門：只在「盤中」或「盤後整理窗口」才允許寫 L2+L1
+  // 原因：凌晨跑腳本時 TWSE API 會回傳昨日收盤數據，被誤標為「今天」寫入
+  //       → 產生假 K 棒讓前端以為今日已開盤
+  const { isMarketOpen, isPostCloseWindow } = await import('../lib/datasource/marketHours');
+  const inValidWindow = isMarketOpen(market) || isPostCloseWindow(market);
+  if (!inValidWindow) {
+    console.log(`\n⏭️  [${market}] ${date} 非盤中/盤後窗口（目前為早盤前或深夜），跳過避免寫入假 K 棒`);
+    return;
+  }
+
   console.log(`\n📡 [${market}] 抓全市場即時報價 (${date})...`);
   const t0 = Date.now();
   const quotes = market === 'TW' ? await fetchTWQuotes() : await fetchCNQuotes();

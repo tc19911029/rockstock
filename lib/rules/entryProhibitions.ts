@@ -122,28 +122,15 @@ export function checkLongProhibitions(
   }
 
   // ── 戒律6：回檔跌破前低，再上漲勿進場做多 ───────────────────────────
-  // 邏輯：若近20根K棒中，最近的轉折低點（波谷）低於更早的轉折低點
-  //       代表多頭結構可能轉弱，此波上漲不宜進場
-  // 注意：用 close 判斷波谷（與 findPivots 一致，朱老師用收盤價判斷頭底）
+  // 書本原意：回檔不破前低 = 維持多頭結構；跌破前低即非多頭，不進場。
+  // 用 findPivots 的已確認波谷比較最新兩個波低（無時間窗、無容差）。
   {
-    const lookback = Math.min(20, index);
-    const segment = candles.slice(index - lookback, index + 1);
+    const confirmedLows = findPivots(candles, index, 10, 0.02, false)
+      .filter(p => p.type === 'low')
+      .slice(0, 2); // findPivots 回傳新→舊順序
 
-    // 找近期兩個波谷（3點局部低點，用收盤價）
-    const troughs: number[] = [];
-    for (let i = 1; i < segment.length - 1; i++) {
-      if (segment[i].close < segment[i - 1].close && segment[i].close < segment[i + 1].close) {
-        troughs.push(segment[i].close);
-      }
-    }
-
-    // 若有至少2個波谷，且最近的波谷低於較早的波谷 → 底底低，勿做多
-    if (troughs.length >= 2) {
-      const latestTrough = troughs[troughs.length - 1];
-      const earlierTrough = troughs[troughs.length - 2];
-      if (latestTrough < earlierTrough) { // 書本原文：不破前低（0 容差）
-        reasons.push('戒律6：回檔底底低（跌破前低），再上漲勿進場做多');
-      }
+    if (confirmedLows.length >= 2 && confirmedLows[0].price < confirmedLows[1].price) {
+      reasons.push('戒律6：回檔底底低（跌破前低），多頭結構已破');
     }
   }
 

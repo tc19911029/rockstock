@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { classifyMarket } from '@/lib/market/classify';
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
+import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
 
 interface PriceData {
   price: number;
@@ -285,7 +286,7 @@ export default function PortfolioPage() {
                       <span className="text-xs text-muted-foreground truncate">{h.name}</span>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {h.shares.toLocaleString()} 股 · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
+                      {formatSharesAsLots(h.shares, marketFromSymbol(h.symbol))} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
                       · 買進 {h.buyDate}
                     </div>
                   </div>

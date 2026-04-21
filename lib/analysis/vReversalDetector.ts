@@ -43,7 +43,7 @@ export interface VReversalResult {
 const LOOKBACK_STOP_BAR = 15; // 變盤線搜尋距離（允許止跌等待多天）
 const PRE_DROP_WINDOW = 5;    // 變盤線之前的下跌段觀察窗
 const MIN_DOWN_DAYS = 3;      // 連跌天數門檻
-const MIN_DROP_PCT = 10;      // 跌幅門檻 %（段首高 → 變盤線低）
+const MIN_DROP_PCT = 8;       // 跌幅門檻 %（段首高 → 變盤線低）
 const VOLUME_MULT = 1.5;      // 今日帶量門檻
 
 /** 判斷 K 棒是否為變盤線（十字 / 紡錘 / 長下影） */

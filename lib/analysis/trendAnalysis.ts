@@ -531,6 +531,10 @@ export function evaluateSixConditions(
     const tightness = (upperToday - lowerToday) / lowerToday;
     if (tightness > 0.15) return false;
 
+    // 突破必須是今日首次：昨收仍在上頸線之下
+    const upperYesterday = upperAt(index - 1);
+    if (prev.close > upperYesterday) return false;
+
     const bodyPct = c.open > 0 ? Math.abs(c.close - c.open) / c.open : 0;
     const volRatio = prev.volume > 0 ? c.volume / prev.volume : 0;
     const isRedK = c.close > c.open;
@@ -547,8 +551,8 @@ export function evaluateSixConditions(
   if (extra.strongPullbackResume)  highWinTags.push('🎯 強勢短回續攻');
   if (extra.falseBreakRebound)     highWinTags.push('🎯 假跌破反彈');
 
-  // 書本 p.54 #3 gate：收盤在 MA10、MA20 之上（高勝率位置不當 gate）
-  const positionPass = positionAboveKeyMa;
+  // 書本 p.54 #3 gate：收盤在 MA10、MA20 之上；乖離 ≤ devMax（用戶設定 22.5%）
+  const positionPass = positionAboveKeyMa && (ma20Dev === null || ma20Dev <= devMax);
 
   // Tier B 書本警示 tag（不擋 gate，僅顯示資訊）—— 讓用戶看到書本其他訊號
   const warnings: string[] = [];
