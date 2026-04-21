@@ -1,6 +1,6 @@
-// GET /api/cron/update-intraday-bm?market=TW|CN&method=B|C|D|E
+// GET /api/cron/update-intraday-bm?market=TW|CN&method=B|C|D|E|F
 //
-// 盤中買法掃描（B/C/D/E 各自獨立 cron，錯開觸發）
+// 盤中買法掃描（B/C/D/E/F 各自獨立 cron，錯開觸發）
 //
 // 跟 update-intraday 分工：
 //   - update-intraday：每 5 分鐘刷新 L2 + 跑 A 六條件
@@ -17,7 +17,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-const VALID_METHODS = new Set(['B', 'C', 'D', 'E']);
+const VALID_METHODS = new Set(['B', 'C', 'D', 'E', 'F']);
 
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
@@ -26,10 +26,10 @@ export async function GET(req: NextRequest) {
   }
 
   const market = (req.nextUrl.searchParams.get('market') ?? 'TW') as 'TW' | 'CN';
-  const method = req.nextUrl.searchParams.get('method') as 'B' | 'C' | 'D' | 'E' | null;
+  const method = req.nextUrl.searchParams.get('method') as 'B' | 'C' | 'D' | 'E' | 'F' | null;
 
   if (!method || !VALID_METHODS.has(method)) {
-    return apiError(`method required (B|C|D|E), got: ${method}`, 400);
+    return apiError(`method required (B|C|D|E|F), got: ${method}`, 400);
   }
 
   if (!isMarketOpen(market) && !isPostCloseWindow(market)) {
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
       scanTime: new Date().toISOString(),
       resultCount: bmResults.length,
       results: bmResults,
-      buyMethod: method,
+      buyMethod: method as 'B' | 'C' | 'D' | 'E' | 'F',
     };
     await saveScanSession(session);
 

@@ -41,8 +41,8 @@ export async function register() {
   console.log('[local-cron] 本地開發模式：定期呼叫 API route 模擬 Vercel Cron');
   console.log('[local-cron] 刷新+掃描：TW / CN 每 5 分鐘；打板開盤確認：9:25–9:35 CST；L1 下載：盤後一次');
 
-  // ── 盤中：買法掃描（B/C/D/E），輪流觸發 —— 獨立於 A 六條件避免單輪超時 ──
-  async function scanBuyMethodIntraday(market: 'TW' | 'CN', method: 'B' | 'C' | 'D' | 'E') {
+  // ── 盤中：買法掃描（B/C/D/E/F），輪流觸發 —— 獨立於 A 六條件避免單輪超時 ──
+  async function scanBuyMethodIntraday(market: 'TW' | 'CN', method: 'B' | 'C' | 'D' | 'E' | 'F') {
     if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
     const data = await callRoute(
       `/api/cron/update-intraday-bm?market=${market}&method=${method}`,
@@ -74,6 +74,40 @@ export async function register() {
         const scanCount = payload?.scanCount ?? -1;
         console.log(`[local-cron] ${market} L2 刷新 ${count} 支；L4 掃描 ${scanCount} 檔`);
       }
+    }
+  }
+
+  // ── 盤後：買法 post_close 掃描（B/C/D/E/F 各自呼叫 scan-bm） ──
+  // TW：收盤後 14:10 CST（UTC+8 = 06:10 UTC），確保 L1 已下載
+  // CN：收盤後 16:10 CST（UTC+8 = 08:10 UTC），確保 L1 已下載
+  const postCloseBmDone = { TW: '', CN: '' };
+  async function scanBuyMethodPostClose(market: 'TW' | 'CN', method: 'B' | 'C' | 'D' | 'E' | 'F') {
+    const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+    const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+    const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+    const hhmm = nowLocal.getHours() * 100 + nowLocal.getMinutes();
+
+    // TW: 14:10–17:00；CN: 16:10–19:00
+    const windowStart = market === 'TW' ? 1410 : 1610;
+    const windowEnd = market === 'TW' ? 1700 : 1900;
+    if (hhmm < windowStart || hhmm > windowEnd) return;
+
+    const key = `${market}-${method}`;
+    const doneKey = `${todayLocal}-${key}`;
+    if ((postCloseBmDone as Record<string, string>)[key] === doneKey) return;
+    if (!isTradingDay(todayLocal, market)) return;
+
+    (postCloseBmDone as Record<string, string>)[key] = doneKey;
+    console.log(`[local-cron] ${market} scan-bm ${method} post_close 啟動 (${todayLocal})...`);
+    const data = await callRoute(
+      `/api/cron/scan-bm?market=${market}&method=${method}`,
+      `${market} scan-bm ${method}`,
+    ) as { data?: { resultCount?: number; skipped?: boolean; reason?: string } } | null;
+    const payload = data?.data ?? data ?? {};
+    if ((payload as { skipped?: boolean }).skipped) {
+      console.log(`[local-cron] ${market} scan-bm ${method} 跳過：${(payload as { reason?: string }).reason}`);
+    } else {
+      console.log(`[local-cron] ${market} scan-bm ${method}: ${(payload as { resultCount?: number }).resultCount ?? -1} 檔`);
     }
   }
 
@@ -116,10 +150,10 @@ export async function register() {
   setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, 5 * 60 * 1000);
   setInterval(() => { refreshAndScan('CN').catch(err => console.error('[local-cron] CN refreshAndScan:', err)); }, 5 * 60 * 1000);
 
-  // 買法 B/C/D/E 錯開：每分鐘檢查，:02→B :04→C :06→D :08→E（10 分鐘輪一圈）
+  // 買法 B/C/D/E/F 錯開：每分鐘檢查，:02→B :04→C :06→D :08→E :00→F（10 分鐘輪一圈）
   setInterval(() => {
     const rem = new Date().getMinutes() % 10;
-    const method = rem === 2 ? 'B' : rem === 4 ? 'C' : rem === 6 ? 'D' : rem === 8 ? 'E' : null;
+    const method = rem === 2 ? 'B' : rem === 4 ? 'C' : rem === 6 ? 'D' : rem === 8 ? 'E' : rem === 0 ? 'F' : null;
     if (!method) return;
     scanBuyMethodIntraday('TW', method).catch(err => console.error(`[local-cron] TW bm ${method}:`, err));
     scanBuyMethodIntraday('CN', method).catch(err => console.error(`[local-cron] CN bm ${method}:`, err));
@@ -130,4 +164,12 @@ export async function register() {
     downloadL1('TW').catch(err => console.error('[local-cron] TW downloadL1:', err));
     downloadL1('CN').catch(err => console.error('[local-cron] CN downloadL1:', err));
   }, 10 * 60 * 1000);
+
+  // 盤後買法掃描：每分鐘檢查，時間窗口內對 B/C/D/E/F 各觸發一次
+  setInterval(() => {
+    for (const method of ['B', 'C', 'D', 'E', 'F'] as const) {
+      scanBuyMethodPostClose('TW', method).catch(err => console.error(`[local-cron] TW scan-bm ${method}:`, err));
+      scanBuyMethodPostClose('CN', method).catch(err => console.error(`[local-cron] CN scan-bm ${method}:`, err));
+    }
+  }, 60 * 1000);
 }

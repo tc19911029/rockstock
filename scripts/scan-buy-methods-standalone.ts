@@ -16,7 +16,7 @@ import { readTurnoverRank } from '@/lib/scanner/TurnoverRank';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { computeIndicators } from '@/lib/indicators';
-import { detectBreakoutEntry } from '@/lib/analysis/breakoutEntry';
+import { detectBreakoutEntry, detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
 import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
@@ -25,8 +25,8 @@ import { getTWSENames } from '@/lib/datasource/TWSENames';
 import type { StockScanResult, ScanSession, MarketId } from '@/lib/scanner/types';
 import type { Candle } from '@/types';
 
-type BuyMethod = 'B' | 'C' | 'D' | 'E';
-const METHODS: BuyMethod[] = ['B', 'C', 'D', 'E'];
+type BuyMethod = 'B' | 'C' | 'D' | 'E' | 'F';
+const METHODS: BuyMethod[] = ['B', 'C', 'D', 'E', 'F'];
 
 function todayDateFor(market: MarketId): string {
   const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
@@ -81,7 +81,7 @@ async function scanMarket(market: MarketId): Promise<void> {
     } catch { /* 用 L2 名字兜底 */ }
   }
 
-  const buckets: Record<BuyMethod, StockScanResult[]> = { B: [], C: [], D: [], E: [] };
+  const buckets: Record<BuyMethod, StockScanResult[]> = { B: [], C: [], D: [], E: [], F: [] };
 
   let processed = 0;
   for (const sym of symbols) {
@@ -121,19 +121,22 @@ async function scanMarket(market: MarketId): Promise<void> {
       if (detectBreakoutEntry(candles, lastIdx)) {
         buckets.B.push({ ...base, matchedMethods: ['B'] } as StockScanResult);
       }
-      if (detectVReversal(candles, lastIdx)) {
+      if (detectConsolidationBreakout(candles, lastIdx)) {
         buckets.C.push({ ...base, matchedMethods: ['C'] } as StockScanResult);
       }
-      if (detectStrategyD(candles, lastIdx)) {
+      if (detectStrategyE(candles, lastIdx)) {
         buckets.D.push({ ...base, matchedMethods: ['D'] } as StockScanResult);
       }
-      if (detectStrategyE(candles, lastIdx)) {
+      if (detectStrategyD(candles, lastIdx)) {
         buckets.E.push({ ...base, matchedMethods: ['E'] } as StockScanResult);
+      }
+      if (detectVReversal(candles, lastIdx)) {
+        buckets.F.push({ ...base, matchedMethods: ['F'] } as StockScanResult);
       }
     } catch { /* skip */ }
   }
 
-  console.log(`[${market}] 處理 ${processed} 支；B=${buckets.B.length} C=${buckets.C.length} D=${buckets.D.length} E=${buckets.E.length}`);
+  console.log(`[${market}] 處理 ${processed} 支；B=${buckets.B.length} C=${buckets.C.length} D=${buckets.D.length} E=${buckets.E.length} F=${buckets.F.length}`);
 
   // 寫每個買法的 session
   const scanTime = new Date().toISOString();

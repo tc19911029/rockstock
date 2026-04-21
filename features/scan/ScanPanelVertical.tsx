@@ -124,8 +124,15 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
         {/* Row 1.5: 買法選擇（只在做多時顯示） */}
         {scanDirection === 'long' && (
           <div className="flex items-center gap-1 flex-wrap">
-            {(['A', 'B', 'C', 'D', 'E'] as const).map(method => {
-              const labels: Record<string, string> = { A: '六條件', B: '回後買上漲', C: 'V 型反轉', D: '缺口', E: '一字底' };
+            {(['A', 'B', 'C', 'D', 'E', 'F'] as const).map(method => {
+              const labels: Record<string, string> = {
+                A: '六條件',
+                B: '回後買上漲',
+                C: '盤整突破',
+                D: '一字底',
+                E: '缺口',
+                F: 'V型反轉',
+              };
               return (
                 <button key={method}
                   onClick={() => setActiveBuyMethod(method)}
@@ -167,11 +174,11 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
         {/* Date Navigator — vertical pill list */}
         {cronDates.some(c => c.market === market) && (
           <div className="px-2.5 py-1.5 border-b border-border/60">
-            {/* 20 天分兩排：10 欄 × 2 列。不顯示 (count) 保持窄身，hover title 仍可看數量 */}
-            <div className="grid grid-cols-10 gap-1">
+            {/* 22 天分兩排：11 欄 × 2 列。不顯示 (count) 保持窄身，hover title 仍可看數量 */}
+            <div className="grid grid-cols-11 gap-1">
               {cronDates.filter(c => c.market === market)
                 .filter((c, i, arr) => arr.findIndex(x => x.date === c.date) === i)
-                .slice(0, 20)
+                .slice(0, 22)
                 .map(c => {
                   const isActive = c.date === scanDate;
                   return (

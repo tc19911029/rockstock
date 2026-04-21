@@ -6,7 +6,7 @@ const cronSecret = envRaw.match(/^CRON_SECRET\s*=\s*"?([^"\n]+)"?/m)?.[1] ?? '';
 const base = 'http://localhost:3000/api/cron/update-intraday-bm';
 const headers = cronSecret ? { authorization: `Bearer ${cronSecret}` } : {};
 for (const market of ['TW', 'CN']) {
-  for (const method of ['B', 'C', 'D', 'E']) {
+  for (const method of ['B', 'C', 'D', 'E', 'F']) {
     const url = `${base}?market=${market}&method=${method}`;
     const start = Date.now();
     try {

@@ -1,13 +1,14 @@
 /**
- * GET /api/scanner/buy-method?market=TW&date=2026-04-17&method=D
+ * GET /api/scanner/buy-method?market=TW&date=2026-04-17&method=E
  *
- * 並列買法架構的獨立掃描端點（2026-04-20 rename 後）
+ * 並列買法架構的獨立掃描端點（2026-04-21 rename 後）
  *
  * 字母對照：
- *   B — 突破進場（detectBreakoutEntry，含 subType）
- *   C — V 形反轉（detectVReversal）
- *   D — 缺口進場（detectStrategyD，原 detectGapEntry）
- *   E — 一字底突破（detectStrategyE，原 detectFlatBottom）
+ *   B — 回後買上漲（detectBreakoutEntry，pullback_buy subType）
+ *   C — 盤整突破（detectConsolidationBreakout，consolidation_breakout subType）
+ *   D — 一字底突破（detectStrategyE）
+ *   E — 缺口進場（detectStrategyD）
+ *   F — V 形反轉（detectVReversal）
  *
  * 資料來源：本地 L1 candles（data/candles/{market}/*.json）
  * 不動既有六條件掃描流程；各買法 detector 純 K 線邏輯 TW/CN 共用。
@@ -21,7 +22,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { loadLocalCandlesForDate, getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
-import { detectBreakoutEntry } from '@/lib/analysis/breakoutEntry';
+import { detectBreakoutEntry, detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
 import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import type { StockScanResult } from '@/lib/scanner/types';
 
@@ -31,7 +32,7 @@ export const maxDuration = 60;
 const querySchema = z.object({
   market: z.enum(['TW', 'CN']).default('TW'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  method: z.enum(['B', 'C', 'D', 'E']),
+  method: z.enum(['B', 'C', 'D', 'E', 'F']),
 });
 
 type Method = z.infer<typeof querySchema>['method'];
@@ -42,25 +43,36 @@ function runDetector(
   idx: number,
 ): { matched: boolean; detail: string; subType?: string } {
   switch (method) {
-    case 'E': {
-      const r = detectStrategyE(candles, idx);
-      return r?.isFlatBottom
-        ? { matched: true, detail: r.detail }
-        : { matched: false, detail: '' };
-    }
-    case 'D': {
-      const r = detectStrategyD(candles, idx);
-      return r?.isGapEntry
-        ? { matched: true, detail: r.detail }
-        : { matched: false, detail: '' };
-    }
     case 'B': {
+      // B=回後買上漲
       const r = detectBreakoutEntry(candles, idx);
       return r?.isBreakout
         ? { matched: true, detail: r.detail, subType: r.subType }
         : { matched: false, detail: '' };
     }
     case 'C': {
+      // C=盤整突破
+      const r = detectConsolidationBreakout(candles, idx);
+      return r?.isBreakout
+        ? { matched: true, detail: r.detail, subType: r.subType }
+        : { matched: false, detail: '' };
+    }
+    case 'D': {
+      // D=一字底
+      const r = detectStrategyE(candles, idx);
+      return r?.isFlatBottom
+        ? { matched: true, detail: r.detail }
+        : { matched: false, detail: '' };
+    }
+    case 'E': {
+      // E=缺口進場
+      const r = detectStrategyD(candles, idx);
+      return r?.isGapEntry
+        ? { matched: true, detail: r.detail }
+        : { matched: false, detail: '' };
+    }
+    case 'F': {
+      // F=V形反轉
       const r = detectVReversal(candles, idx);
       return r?.isVReversal
         ? { matched: true, detail: r.detail }

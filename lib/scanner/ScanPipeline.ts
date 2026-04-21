@@ -30,7 +30,7 @@ export interface ScanPipelineOptions {
   /** 超時毫秒數（預設 250000） */
   deadlineMs?: number;
   /** 獨立買法掃描（不過 A 六條件，全市場各自偵測） */
-  buyMethods?: ('B' | 'C' | 'D' | 'E')[];
+  buyMethods?: ('B' | 'C' | 'D' | 'E' | 'F')[];
   /** 顯式指定策略（歷史重跑用），不指定時從 server-side 讀 active strategy */
   strategy?: import('@/lib/strategy/StrategyConfig').StrategyConfig;
   /** 顯式指定歷史 turnoverRank（歷史重跑用，避免用到今天的前 500） */
@@ -314,7 +314,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
           resultCount: bmResults.length,
           results: bmResults,
           marketTrend,
-          buyMethod: method as 'B' | 'C' | 'D' | 'E',
+          buyMethod: method as 'B' | 'C' | 'D' | 'E' | 'F',
         };
         await saveScanSession(bmSession, { allowOverwritePostClose: sessionType === 'post_close' });
         counts[`long-${method}`] = bmResults.length;

@@ -2,16 +2,16 @@
  * 買法偵測統一驗證腳本（Phase 1~4 共用，2026-04-20 rename 後）
  *
  * Usage:
- *   npx tsx scripts/scan-buy-method.ts <B|C|D|E> <TW|CN> <YYYY-MM-DD>
+ *   npx tsx scripts/scan-buy-method.ts <B|C|D|E|F> <TW|CN> <YYYY-MM-DD>
  *
- * 字母對照（2026-04-20 rename）：
- *   B=盤整突破/回後、C=V 形反轉、D=缺口（原 E）、E=一字底（原 F）
+ * 字母對照（2026-04-21 rename）：
+ *   B=回後買上漲、C=盤整突破、D=一字底、E=缺口、F=V形反轉
  *
  * 例：
- *   npx tsx scripts/scan-buy-method.ts D TW 2026-04-08  # 台積電 4/8 跳空
- *   npx tsx scripts/scan-buy-method.ts E TW 2026-04-17  # 一字底突破
- *   npx tsx scripts/scan-buy-method.ts B CN 2026-04-17  # 突破進場
- *   npx tsx scripts/scan-buy-method.ts C TW 2026-04-17  # V 形反轉
+ *   npx tsx scripts/scan-buy-method.ts E TW 2026-04-08  # 台積電 4/8 跳空（缺口）
+ *   npx tsx scripts/scan-buy-method.ts D TW 2026-04-17  # 一字底突破
+ *   npx tsx scripts/scan-buy-method.ts B CN 2026-04-17  # 回後買上漲
+ *   npx tsx scripts/scan-buy-method.ts F TW 2026-04-17  # V 形反轉
  */
 
 import fs from 'fs';
@@ -19,21 +19,22 @@ import path from 'path';
 import { computeIndicators } from '@/lib/indicators';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
-import { detectBreakoutEntry } from '@/lib/analysis/breakoutEntry';
+import { detectBreakoutEntry, detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
 import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import type { CandleWithIndicators } from '@/types';
 
-type Method = 'B' | 'C' | 'D' | 'E';
+type Method = 'B' | 'C' | 'D' | 'E' | 'F';
 
-const method = (process.argv[2] ?? 'E').toUpperCase() as Method;
+const method = (process.argv[2] ?? 'D').toUpperCase() as Method;
 const market = (process.argv[3] ?? 'TW').toUpperCase() as 'TW' | 'CN';
 const date   = process.argv[4] ?? '2026-04-17';
 
 const METHOD_NAMES: Record<Method, string> = {
-  B: '突破進場',
-  C: 'V 形反轉',
-  D: '缺口進場',
-  E: '一字底突破',
+  B: '回後買上漲',
+  C: '盤整突破',
+  D: '一字底突破',
+  E: '缺口進場',
+  F: 'V 形反轉',
 };
 
 interface Hit {
@@ -62,19 +63,23 @@ function loadDir(market: 'TW' | 'CN'): Array<{ symbol: string; name: string; can
 
 function runDetector(method: Method, candles: CandleWithIndicators[], idx: number): string | null {
   switch (method) {
-    case 'E': {
-      const r = detectStrategyE(candles, idx);
-      return r?.isFlatBottom ? r.detail : null;
-    }
-    case 'D': {
-      const r = detectStrategyD(candles, idx);
-      return r?.isGapEntry ? r.detail : null;
-    }
     case 'B': {
       const r = detectBreakoutEntry(candles, idx);
       return r?.isBreakout ? r.detail : null;
     }
     case 'C': {
+      const r = detectConsolidationBreakout(candles, idx);
+      return r?.isBreakout ? r.detail : null;
+    }
+    case 'D': {
+      const r = detectStrategyE(candles, idx);
+      return r?.isFlatBottom ? r.detail : null;
+    }
+    case 'E': {
+      const r = detectStrategyD(candles, idx);
+      return r?.isGapEntry ? r.detail : null;
+    }
+    case 'F': {
       const r = detectVReversal(candles, idx);
       return r?.isVReversal ? r.detail : null;
     }
@@ -82,8 +87,8 @@ function runDetector(method: Method, candles: CandleWithIndicators[], idx: numbe
 }
 
 function main() {
-  if (!(['B', 'C', 'D', 'E'] as Method[]).includes(method)) {
-    console.error('買法必須是 B/C/D/E');
+  if (!(['B', 'C', 'D', 'E', 'F'] as Method[]).includes(method)) {
+    console.error('買法必須是 B/C/D/E/F');
     process.exit(1);
   }
 

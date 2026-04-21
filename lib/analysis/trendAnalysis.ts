@@ -149,18 +149,26 @@ export function detectTrend(
 ): TrendState {
   if (index < 20) return '盤整';
 
-  // 趨勢判定用 provisional pivot：進行中段的 running max/min 也納入比較
-  // 讓即時突破新高/新低立刻反映在趨勢狀態，不用等 MA5 反向穿越確認
-  const pivots = findPivots(candles, index, 8, 0.02, true);
-  const highs = pivots.filter(p => p.type === 'high').slice(0, 2);
-  const lows  = pivots.filter(p => p.type === 'low').slice(0, 2);
+  // 頭部：只用已確認 pivot（不用 provisional）
+  //   避免今日 close 比昨日確認頭低一點就誤判「頭頭低」→ 盤整
+  //   但若今日 close 已超過最近確認頭，立即視為更高的頭（即時多頭確認）
+  const confirmedPivots = findPivots(candles, index, 8, 0.02, false);
+  const highs = confirmedPivots.filter(p => p.type === 'high').slice(0, 2);
+
+  // 底部：保留 provisional，讓跌破確認底的訊號即時反映
+  const allPivots = findPivots(candles, index, 8, 0.02, true);
+  const lows = allPivots.filter(p => p.type === 'low').slice(0, 2);
 
   // 書本要求同時看到最近兩個頭 + 最近兩個底才能判斷
   if (highs.length < 2 || lows.length < 2) return '盤整';
 
-  const higherHighs = highs[0].price > highs[1].price;
+  const c = candles[index];
+  // 今日 close 突破最近確認頭 → 立即視為頭頭高（空頭/盤整轉多頭的即時訊號）
+  const immediateNewHigh = c.close > highs[0].price;
+
+  const higherHighs = highs[0].price > highs[1].price || immediateNewHigh;
   const higherLows  = lows[0].price  > lows[1].price;
-  const lowerHighs  = highs[0].price < highs[1].price;
+  const lowerHighs  = !higherHighs && highs[0].price < highs[1].price;
   const lowerLows   = lows[0].price  < lows[1].price;
 
   if (higherHighs && higherLows) return '多頭';
@@ -498,6 +506,13 @@ export function evaluateSixConditions(
     const oldestPivotIdx = Math.min(highs[1].index, lows[1].index);
     if (index - oldestPivotIdx < 6) return false;
 
+    // 真正的盤整：pivot 結構不能同時是頭頭高+底底高（= 多頭，不是盤整）
+    const isUptrend = highs[0].price > highs[1].price && lows[0].price > lows[1].price;
+    if (isUptrend) return false;
+
+    // 上頸線不可大幅上揚（新高 ≤ 舊高 × 1.05）
+    if (highs[0].price > highs[1].price * 1.05) return false;
+
     // 頸線插值：線性通過 (idx_old, price_old) 與 (idx_new, price_new)
     const upperAt = (i: number): number => {
       const [hNew, hOld] = [highs[0], highs[1]];
@@ -525,12 +540,12 @@ export function evaluateSixConditions(
   // 高勝率 6 位置（書本 Part 12 p.749-754）其餘 4 種 — 加分 tag，不是 gate
   const extra = detectExtraHighWinPositions(candles, index);
   const highWinTags: string[] = [];
-  if (pulledBackBuy) highWinTags.push('🎯 回後買上漲');
-  if (rangeBreakout) highWinTags.push('🎯 盤整突破');
-  if (extra.doubleBottomLeg1) highWinTags.push('🎯 打底第1腳');
-  if (extra.doubleBottomLeg2) highWinTags.push('🎯 打底第2腳');
-  if (extra.maClusterBreak)   highWinTags.push('🎯 均線糾結突破');
-  if (extra.falseBreakRebound) highWinTags.push('🎯 假跌破反彈');
+  if (extra.bottomTrendConfirm)   highWinTags.push('🎯 打底趨勢確認');
+  if (pulledBackBuy)               highWinTags.push('🎯 回後買上漲');
+  if (rangeBreakout)               highWinTags.push('🎯 盤整突破');
+  if (extra.maClusterBreak)        highWinTags.push('🎯 均線糾結突破');
+  if (extra.strongPullbackResume)  highWinTags.push('🎯 強勢短回續攻');
+  if (extra.falseBreakRebound)     highWinTags.push('🎯 假跌破反彈');
 
   // 書本 p.54 #3 gate：收盤在 MA10、MA20 之上（高勝率位置不當 gate）
   const positionPass = positionAboveKeyMa;

@@ -435,6 +435,7 @@ export abstract class MarketScanner {
         : 0;
 
       // ── 並列買法標記（Phase 5 接進 cron，2026-04-20）─────────────────────
+      // 2026-04-21 rename: B=回後買上漲、C=盤整突破、D=一字底、E=缺口、F=V形反轉
       // 通過 A 六條件 isCoreReady → A 成立；其他偵測器獨立判定，疊加標記
       const matchedMethods: string[] = ['A'];
       try {
@@ -442,16 +443,20 @@ export abstract class MarketScanner {
         if (detectBreakoutEntry(candles, lastIdx)) matchedMethods.push('B');
       } catch { /* non-critical */ }
       try {
-        const { detectVReversal } = await import('@/lib/analysis/vReversalDetector');
-        if (detectVReversal(candles, lastIdx)) matchedMethods.push('C');
-      } catch { /* non-critical */ }
-      try {
-        const { detectStrategyD } = await import('@/lib/analysis/gapEntry');
-        if (detectStrategyD(candles, lastIdx)) matchedMethods.push('D');
+        const { detectConsolidationBreakout } = await import('@/lib/analysis/breakoutEntry');
+        if (detectConsolidationBreakout(candles, lastIdx)) matchedMethods.push('C');
       } catch { /* non-critical */ }
       try {
         const { detectStrategyE } = await import('@/lib/analysis/highWinRateEntry');
-        if (detectStrategyE(candles, lastIdx)) matchedMethods.push('E');
+        if (detectStrategyE(candles, lastIdx)) matchedMethods.push('D');
+      } catch { /* non-critical */ }
+      try {
+        const { detectStrategyD } = await import('@/lib/analysis/gapEntry');
+        if (detectStrategyD(candles, lastIdx)) matchedMethods.push('E');
+      } catch { /* non-critical */ }
+      try {
+        const { detectVReversal } = await import('@/lib/analysis/vReversalDetector');
+        if (detectVReversal(candles, lastIdx)) matchedMethods.push('F');
       } catch { /* non-critical */ }
 
       return {
@@ -1108,7 +1113,7 @@ export abstract class MarketScanner {
    * 全市場依 B/C/D/E 偵測器各自篩選，與 scanSOP 完全並列
    */
   async scanBuyMethod(
-    method: 'B' | 'C' | 'D' | 'E',
+    method: 'B' | 'C' | 'D' | 'E' | 'F',
     stocks: StockEntry[],
     asOfDate?: string,
   ): Promise<StockScanResult[]> {
@@ -1134,21 +1139,30 @@ export abstract class MarketScanner {
           let subType: string | undefined;
 
           if (method === 'B') {
+            // B=回後買上漲
             const { detectBreakoutEntry } = await import('@/lib/analysis/breakoutEntry');
             const r = detectBreakoutEntry(candles, lastIdx);
             if (r?.isBreakout) { matched = true; detail = r.detail; subType = r.subType; }
           } else if (method === 'C') {
-            const { detectVReversal } = await import('@/lib/analysis/vReversalDetector');
-            const r = detectVReversal(candles, lastIdx);
-            if (r?.isVReversal) { matched = true; detail = r.detail; }
+            // C=盤整突破
+            const { detectConsolidationBreakout } = await import('@/lib/analysis/breakoutEntry');
+            const r = detectConsolidationBreakout(candles, lastIdx);
+            if (r?.isBreakout) { matched = true; detail = r.detail; subType = r.subType; }
           } else if (method === 'D') {
-            const { detectStrategyD } = await import('@/lib/analysis/gapEntry');
-            const r = detectStrategyD(candles, lastIdx);
-            if (r?.isGapEntry) { matched = true; detail = r.detail; }
-          } else if (method === 'E') {
+            // D=一字底
             const { detectStrategyE } = await import('@/lib/analysis/highWinRateEntry');
             const r = detectStrategyE(candles, lastIdx);
             if (r?.isFlatBottom) { matched = true; detail = r.detail; }
+          } else if (method === 'E') {
+            // E=缺口進場
+            const { detectStrategyD } = await import('@/lib/analysis/gapEntry');
+            const r = detectStrategyD(candles, lastIdx);
+            if (r?.isGapEntry) { matched = true; detail = r.detail; }
+          } else if (method === 'F') {
+            // F=V形反轉
+            const { detectVReversal } = await import('@/lib/analysis/vReversalDetector');
+            const r = detectVReversal(candles, lastIdx);
+            if (r?.isVReversal) { matched = true; detail = r.detail; }
           }
 
           if (!matched) return null;

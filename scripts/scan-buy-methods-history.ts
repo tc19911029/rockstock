@@ -15,7 +15,7 @@ config();
 import { computeTurnoverRankAsOfDate } from '@/lib/scanner/TurnoverRank';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { computeIndicators } from '@/lib/indicators';
-import { detectBreakoutEntry } from '@/lib/analysis/breakoutEntry';
+import { detectBreakoutEntry, detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
 import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
@@ -26,8 +26,8 @@ import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import type { StockScanResult, ScanSession, MarketId } from '@/lib/scanner/types';
 
-type BuyMethod = 'B' | 'C' | 'D' | 'E';
-const METHODS: BuyMethod[] = ['B', 'C', 'D', 'E'];
+type BuyMethod = 'B' | 'C' | 'D' | 'E' | 'F';
+const METHODS: BuyMethod[] = ['B', 'C', 'D', 'E', 'F'];
 
 function listRecentTradingDays(market: MarketId, count: number): string[] {
   const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
@@ -55,7 +55,7 @@ async function scanMarketDate(
   }
   const symbols = Array.from(rank.keys());
 
-  const buckets: Record<BuyMethod, StockScanResult[]> = { B: [], C: [], D: [], E: [] };
+  const buckets: Record<BuyMethod, StockScanResult[]> = { B: [], C: [], D: [], E: [], F: [] };
 
   for (const sym of symbols) {
     try {
@@ -94,14 +94,17 @@ async function scanMarketDate(
       if (detectBreakoutEntry(candles, lastIdx)) {
         buckets.B.push({ ...base, matchedMethods: ['B'] } as StockScanResult);
       }
-      if (detectVReversal(candles, lastIdx)) {
+      if (detectConsolidationBreakout(candles, lastIdx)) {
         buckets.C.push({ ...base, matchedMethods: ['C'] } as StockScanResult);
       }
-      if (detectStrategyD(candles, lastIdx)) {
+      if (detectStrategyE(candles, lastIdx)) {
         buckets.D.push({ ...base, matchedMethods: ['D'] } as StockScanResult);
       }
-      if (detectStrategyE(candles, lastIdx)) {
+      if (detectStrategyD(candles, lastIdx)) {
         buckets.E.push({ ...base, matchedMethods: ['E'] } as StockScanResult);
+      }
+      if (detectVReversal(candles, lastIdx)) {
+        buckets.F.push({ ...base, matchedMethods: ['F'] } as StockScanResult);
       }
     } catch { /* skip */ }
   }
@@ -123,7 +126,7 @@ async function scanMarketDate(
     };
     await saveScanSession(session);
   }
-  console.log(`   ✅ ${date} B=${buckets.B.length} C=${buckets.C.length} D=${buckets.D.length} E=${buckets.E.length}`);
+  console.log(`   ✅ ${date} B=${buckets.B.length} C=${buckets.C.length} D=${buckets.D.length} E=${buckets.E.length} F=${buckets.F.length}`);
 }
 
 async function main(): Promise<void> {

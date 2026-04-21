@@ -101,7 +101,7 @@ async function fsListPrefix(prefix: string): Promise<string[]> {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Derive MTF mode from session — 買法 session (buyMethod=B/C/E/F) 優先 */
+/** Derive MTF mode from session — 買法 session (buyMethod=B/C/D/E/F) 優先 */
 function sessionMtfMode(session: ScanSession): MtfMode {
   if (session.buyMethod) return session.buyMethod;
   return session.multiTimeframeEnabled ? 'mtf' : 'daily';
@@ -119,7 +119,7 @@ function sessionMtfMode(session: ScanSession): MtfMode {
  * intraday 帶時間戳，不會互相覆蓋
  * 每次儲存 post_close 後自動清理，只保留最近 KEEP_SCAN_DAYS 個交易日
  */
-const KEEP_SCAN_DAYS = 20;
+const KEEP_SCAN_DAYS = 22;
 
 interface SaveScanOptions {
   /** 只有官方 cron 才應傳 true，允許覆蓋已存在的 post_close 結果 */
@@ -460,7 +460,7 @@ export async function listScanDates(
     // 注意：B/C/D/E 買法 session 不套 top500 filter（掃全市場，不限前500）
     await Promise.all(filtered.map(async (e) => {
       const mode = e.mtfMode ?? 'daily';
-      if (mode === 'B' || mode === 'C' || mode === 'D' || mode === 'E') return; // 不套 filter
+      if (mode === 'B' || mode === 'C' || mode === 'D' || mode === 'E' || mode === 'F') return; // 不套 filter
       try {
         const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', mode);
         if (session && session.results) {

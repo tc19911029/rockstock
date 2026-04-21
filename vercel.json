@@ -100,9 +100,21 @@
     { "path": "/api/cron/update-intraday-bm?market=TW&method=C", "schedule": "4-59/10 1-5 * * 1-5" },
     { "path": "/api/cron/update-intraday-bm?market=TW&method=D", "schedule": "6-59/10 1-5 * * 1-5" },
     { "path": "/api/cron/update-intraday-bm?market=TW&method=E", "schedule": "8-59/10 1-5 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=TW&method=F", "schedule": "0-59/10 1-5 * * 1-5" },
     { "path": "/api/cron/update-intraday-bm?market=CN&method=B", "schedule": "2-59/10 1-7 * * 1-5" },
     { "path": "/api/cron/update-intraday-bm?market=CN&method=C", "schedule": "4-59/10 1-7 * * 1-5" },
     { "path": "/api/cron/update-intraday-bm?market=CN&method=D", "schedule": "6-59/10 1-7 * * 1-5" },
-    { "path": "/api/cron/update-intraday-bm?market=CN&method=E", "schedule": "8-59/10 1-7 * * 1-5" }
+    { "path": "/api/cron/update-intraday-bm?market=CN&method=E", "schedule": "8-59/10 1-7 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=CN&method=F", "schedule": "0-59/10 1-7 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=TW&method=B", "schedule": "8 6 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=TW&method=C", "schedule": "14 6 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=TW&method=D", "schedule": "20 6 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=TW&method=E", "schedule": "26 6 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=TW&method=F", "schedule": "32 6 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=CN&method=B", "schedule": "12 8 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=CN&method=C", "schedule": "18 8 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=CN&method=D", "schedule": "24 8 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=CN&method=E", "schedule": "30 8 * * 1-5" },
+    { "path": "/api/cron/scan-bm?market=CN&method=F", "schedule": "36 8 * * 1-5" }
   ]
 }

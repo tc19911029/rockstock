@@ -1,6 +1,7 @@
 'use client';
 
 import type { Candle } from '@/types';
+import type { TrendState } from '@/lib/analysis/trendAnalysis';
 
 interface MaToggles { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma240: boolean }
 interface Indicators { macd: boolean; kd: boolean; volume: boolean; rsi: boolean }
@@ -10,6 +11,7 @@ interface ChartToolbarProps {
   prevCandle?: Candle | null;
   isHover: boolean;
   stockName?: string;
+  trend?: TrendState | null;
   maToggles: MaToggles;
   onMaToggle: (key: keyof MaToggles) => void;
   showBollinger: boolean;
@@ -59,7 +61,7 @@ const INDICATOR_CONFIGS = [
 ];
 
 export default function ChartToolbar({
-  candle, prevCandle, isHover, stockName,
+  candle, prevCandle, isHover, stockName, trend,
   maToggles, onMaToggle,
   showBollinger, onBollingerToggle,
   indicators, onIndicatorToggle,
@@ -99,6 +101,15 @@ export default function ChartToolbar({
         <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${isUp ? 'bg-bull/20 text-bull' : 'bg-bear/20 text-bear'}`}>
           {isUp ? '▲' : '▼'}{Math.abs(chg).toFixed(2)} ({Math.abs(chgPct).toFixed(2)}%)
         </span>
+        {trend && (
+          <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+            trend === '多頭' ? 'bg-emerald-900/50 text-emerald-300' :
+            trend === '空頭' ? 'bg-red-900/50 text-red-300' :
+            'bg-amber-900/30 text-amber-400'
+          }`}>
+            {trend === '多頭' ? '▲' : trend === '空頭' ? '▼' : '↔'} {trend}
+          </span>
+        )}
         <div className="flex items-center gap-x-2 text-[11px] shrink-0">
           <span className="text-muted-foreground/70">開<span className="text-foreground/90 ml-0.5 tabular-nums">{candle.open.toFixed(2)}</span></span>
           <span className="text-muted-foreground/70">高<span className="text-bull ml-0.5 tabular-nums">{candle.high.toFixed(2)}</span></span>

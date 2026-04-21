@@ -1,24 +1,24 @@
 'use client';
 
 /**
- * 買法條件面板（2026-04-20 重命名後）
+ * 買法條件面板（2026-04-21 重命名後）
  *
- * 根據當前選中買法（B/C/D/E）顯示對應的進場條件評分。
+ * 根據當前選中買法（B/C/D/E/F）顯示對應的進場條件評分。
  * A 六條件走既有 SixConditionsPanel，本元件不處理 A。
  *
- * 字母對照（2026-04-20 rename）：
- *   B=盤整突破+回後、C=V 形反轉、D=缺口（原 E）、E=一字底（原 F）
- *   F=變盤線（走圖輔助，無 detector）、G=切線（走圖輔助，無 detector）
+ * 字母對照（2026-04-21 rename）：
+ *   B=回後買上漲、C=盤整突破（新拆）、D=一字底、E=缺口、F=V形反轉
+ *   G=變盤線（走圖輔助，無 detector）、H=切線（走圖輔助，無 detector）
  */
 
 import { useReplayStore } from '@/store/replayStore';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
-import { detectBreakoutEntry } from '@/lib/analysis/breakoutEntry';
+import { detectBreakoutEntry, detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
 import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import type { CandleWithIndicators } from '@/types';
 
-type BuyMethod = 'B' | 'C' | 'D' | 'E';
+type BuyMethod = 'B' | 'C' | 'D' | 'E' | 'F';
 
 interface ConditionItem {
   icon: string;
@@ -30,9 +30,10 @@ interface ConditionItem {
 
 const METHOD_TITLE: Record<BuyMethod, string> = {
   B: '回後買上漲',
-  C: 'V 型反轉',
-  D: '缺口',
-  E: '一字底',
+  C: '盤整突破',
+  D: '一字底',
+  E: '缺口',
+  F: 'V 型反轉',
 };
 
 function evaluateMethod(
@@ -48,7 +49,80 @@ function evaluateMethod(
   const prev = candles[idx - 1];
 
   switch (method) {
-    case 'E': {
+    case 'B': {
+      // B=回後買上漲
+      const r = detectBreakoutEntry(candles, idx);
+      const bodyPct = c.open > 0 && c.close > c.open ? (c.close - c.open) / c.open * 100 : 0;
+      const volRatio = prev && prev.volume > 0 ? c.volume / prev.volume : 0;
+      const conditions: ConditionItem[] = [
+        {
+          icon: '①', name: '多頭趨勢',
+          detail: r ? '多頭（頭頭高底底高）' : '非多頭趨勢',
+          pass: !!r,
+        },
+        {
+          icon: '②', name: '曾跌破MA5 + 站回MA5',
+          detail: r ? '近20根內曾跌破MA5，今日收盤>MA5' : '未完成回後確認',
+          pass: !!r,
+        },
+        {
+          icon: '③', name: '收盤突破前K高',
+          detail: r ? `突破 ${r.breakoutPrice.toFixed(2)}` : '未突破前K高',
+          pass: !!r,
+          metric: r ? r.breakoutPrice.toFixed(2) : undefined,
+        },
+        {
+          icon: '④', name: '紅 K 實體 ≥ 2.5%',
+          detail: `實體 ${bodyPct.toFixed(2)}%`,
+          pass: bodyPct >= 2.5,
+          metric: `${bodyPct.toFixed(2)}%`,
+        },
+        {
+          icon: '⑤', name: '量比 ≥ 1.3',
+          detail: `×${volRatio.toFixed(2)}`,
+          pass: volRatio >= 1.3,
+          metric: `×${volRatio.toFixed(2)}`,
+        },
+      ];
+      return { title, conditions, allPass: !!r?.isBreakout };
+    }
+
+    case 'C': {
+      // C=盤整突破
+      const r = detectConsolidationBreakout(candles, idx);
+      const bodyPct = c.open > 0 && c.close > c.open ? (c.close - c.open) / c.open * 100 : 0;
+      const volRatio = prev && prev.volume > 0 ? c.volume / prev.volume : 0;
+      const conditions: ConditionItem[] = [
+        {
+          icon: '①', name: '前置盤整',
+          detail: r ? `盤整 ${r.preEntryDays} 天（detectTrend=盤整）` : '無盤整前置',
+          pass: !!r,
+          metric: r ? `${r.preEntryDays}天` : undefined,
+        },
+        {
+          icon: '②', name: '收盤突破上頸線',
+          detail: r ? `突破 ${r.breakoutPrice.toFixed(2)}` : '未突破上頸線',
+          pass: !!r,
+          metric: r ? r.breakoutPrice.toFixed(2) : undefined,
+        },
+        {
+          icon: '③', name: '紅 K 實體 ≥ 2.5%',
+          detail: `實體 ${bodyPct.toFixed(2)}%`,
+          pass: bodyPct >= 2.5,
+          metric: `${bodyPct.toFixed(2)}%`,
+        },
+        {
+          icon: '④', name: '量比 ≥ 1.3',
+          detail: `×${volRatio.toFixed(2)}`,
+          pass: volRatio >= 1.3,
+          metric: `×${volRatio.toFixed(2)}`,
+        },
+      ];
+      return { title, conditions, allPass: !!r?.isBreakout };
+    }
+
+    case 'D': {
+      // D=一字底
       const r = detectStrategyE(candles, idx);
       const conditions: ConditionItem[] = [
         {
@@ -76,7 +150,8 @@ function evaluateMethod(
       return { title, conditions, allPass: !!r };
     }
 
-    case 'D': {
+    case 'E': {
+      // E=缺口進場
       const r = detectStrategyD(candles, idx);
       const gapPct = prev && prev.high > 0 ? (c.open - prev.high) / prev.high * 100 : 0;
       const bodyPct = c.open > 0 && c.close > c.open ? (c.close - c.open) / c.open * 100 : 0;
@@ -104,73 +179,54 @@ function evaluateMethod(
       return { title, conditions, allPass: !!r?.isGapEntry };
     }
 
-    case 'B': {
-      const r = detectBreakoutEntry(candles, idx);
-      const subTitle = r?.subType === 'consolidation_breakout' ? '盤整突破（位置 1）'
-        : r?.subType === 'pullback_buy' ? '回後買上漲（位置 2）'
-        : undefined;
-      const bodyPct = c.open > 0 && c.close > c.open ? (c.close - c.open) / c.open * 100 : 0;
-      const volRatio = prev && prev.volume > 0 ? c.volume / prev.volume : 0;
-      const conditions: ConditionItem[] = [
-        {
-          icon: '①', name: '前置狀態',
-          detail: r ? (r.subType === 'consolidation_breakout' ? `盤整 ${r.preEntryDays} 天（幅度<15%）` : '多頭趨勢 + 曾跌破MA5 + 站回MA5') : '無盤整或回檔',
-          pass: !!r,
-        },
-        {
-          icon: '②', name: '收盤突破前高',
-          detail: r ? `突破 ${r.breakoutPrice.toFixed(2)}` : '未突破',
-          pass: !!r,
-          metric: r ? r.breakoutPrice.toFixed(2) : undefined,
-        },
-        {
-          icon: '③', name: '紅 K 實體 ≥ 2.5%',
-          detail: `實體 ${bodyPct.toFixed(2)}%`,
-          pass: bodyPct >= 2.5,
-          metric: `${bodyPct.toFixed(2)}%`,
-        },
-        {
-          icon: '④', name: '量比 ≥ 1.3',
-          detail: `×${volRatio.toFixed(2)}`,
-          pass: volRatio >= 1.3,
-          metric: `×${volRatio.toFixed(2)}`,
-        },
-      ];
-      return { title, subTitle, conditions, allPass: !!r?.isBreakout };
-    }
-
-    case 'C': {
+    case 'F': {
+      // F=V形反轉
       const r = detectVReversal(candles, idx);
       const prev5 = candles.slice(idx - 5, idx);
       const vols = prev5.map(k => k.volume).filter(v => v > 0);
       const avgVol5 = vols.length > 0 ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
       const volRatio5 = avgVol5 > 0 ? c.volume / avgVol5 : 0;
-      const segment = candles.slice(idx - 10, idx);
-      const blackK = segment.filter(k => k.close < k.open).length;
       const bodyPct = c.open > 0 && c.close > c.open ? (c.close - c.open) / c.open * 100 : 0;
+      const breakPrevHigh = !!prev && c.close > prev.high;
+
       const conditions: ConditionItem[] = [
         {
-          icon: '①', name: '前 10 根 ≥3 黑 K',
-          detail: `前段 ${blackK} 根黑 K（連跌段）`,
-          pass: blackK >= 3,
-          metric: `${blackK}/10`,
+          icon: '①', name: '連續下跌（5 根 ≥ 3 跌 + 跌幅 ≥ 10%）',
+          detail: r
+            ? `前 ${r.precedingDownDays}/5 天下跌，段跌幅 ${r.precedingDrop.toFixed(1)}%`
+            : '未偵測到符合的下跌段',
+          pass: !!r,
+          metric: r ? `${r.precedingDownDays}/5 · -${r.precedingDrop.toFixed(1)}%` : '—',
         },
         {
-          icon: '②', name: '量 ≥ 5 日均量 ×2',
-          detail: `×${volRatio5.toFixed(2)} 5日均量`,
-          pass: volRatio5 >= 2,
+          icon: '②', name: '變盤線止跌（十字/紡錘/長下影）',
+          detail: r
+            ? `${r.stopBarOffset} 根前出現 [${r.stopBarShape}]`
+            : '過去 15 根內未找到變盤線',
+          pass: !!r,
+          metric: r ? `${r.stopBarShape}·${r.stopBarOffset}根前` : '—',
+        },
+        {
+          icon: '③', name: '止跌等待（不破變盤線低）',
+          detail: r
+            ? `變盤線 low ${r.stopBarLow.toFixed(2)} 之後 ${r.stopBarOffset - 1} 天未跌破`
+            : '前提未成立（需先有變盤線）',
+          pass: !!r,
+        },
+        {
+          icon: '④', name: '今日紅 K + 帶量（× 1.5）',
+          detail: c.close > c.open
+            ? `實體 +${bodyPct.toFixed(2)}%、量 ×${volRatio5.toFixed(2)} 5日均量`
+            : '今日為黑 K',
+          pass: c.close > c.open && volRatio5 >= 1.5,
           metric: `×${volRatio5.toFixed(2)}`,
         },
         {
-          icon: '③', name: '紅 K 實體 ≥ 2%',
-          detail: `實體 ${bodyPct.toFixed(2)}%`,
-          pass: bodyPct >= 2,
-          metric: `${bodyPct.toFixed(2)}%`,
-        },
-        {
-          icon: '④', name: '收盤破前日最高',
-          detail: prev ? `收 ${c.close.toFixed(2)} vs 前高 ${prev.high.toFixed(2)}` : '無前日',
-          pass: !!prev && c.close > prev.high,
+          icon: '⑤', name: '收盤 > 前 K 高（含上影線）',
+          detail: prev
+            ? `收 ${c.close.toFixed(2)} vs 前高 ${prev.high.toFixed(2)}`
+            : '無前日資料',
+          pass: breakPrevHigh,
         },
       ];
       return { title, conditions, allPass: !!r?.isVReversal };

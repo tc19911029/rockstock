@@ -18,6 +18,7 @@ import { useEffect, useCallback, useState, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useReplayStore } from '@/store/replayStore';
 import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
+import { detectTrend } from '@/lib/analysis/trendAnalysis';
 import StockSelector from '@/components/StockSelector';
 import { PageShell } from '@/components/shared';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -81,6 +82,11 @@ export default function HomePage() {
   }, [buyPointIndices, currentIndex]);
   const canPrevBuyPoint = buyPointIndices.length > 0 && buyPointIndices[0] < currentIndex;
   const canNextBuyPoint = buyPointIndices.length > 0 && buyPointIndices[buyPointIndices.length - 1] > currentIndex;
+
+  const currentTrend = useMemo(
+    () => allCandles.length > 0 && currentIndex >= 20 ? detectTrend(allCandles, currentIndex) : null,
+    [allCandles, currentIndex],
+  );
 
   useEffect(() => { initData(); }, [initData]);
 
@@ -396,6 +402,7 @@ export default function HomePage() {
                 prevCandle={prev}
                 isHover={!!hoverCandle}
                 stockName={currentStock?.name}
+                trend={currentTrend}
                 maToggles={maToggles}
                 onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
                 showBollinger={showBollinger}
@@ -629,6 +636,7 @@ export default function HomePage() {
                 prevCandle={prev}
                 isHover={!!hoverCandle}
                 stockName={currentStock?.name}
+                trend={currentTrend}
                 maToggles={maToggles}
                 onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
                 showBollinger={showBollinger}

@@ -1,14 +1,18 @@
 /**
- * 突破進場偵測（B 買法）— 合併盤整突破 + 回後買上漲
+ * 突破進場偵測
+ *
+ * B 買法：回後買上漲（detectBreakoutEntry，pullback_buy subType）
+ * C 買法：盤整突破（detectConsolidationBreakout，consolidation_breakout subType）
  *
  * 朱家泓《做對5個實戰步驟》p.40：
- *   位置 1 盤整突破：前置盤整（<15% 區間）+ 突破上頸線 + 量 + 紅K
- *   位置 2 回後買上漲：多頭回檔不破前低 + 再突破前波高 + 量 + 紅K
+ *   位置 1 盤整突破（C）：前置盤整（<15% 區間）+ 突破上頸線 + 量 + 紅K
+ *   位置 2 回後買上漲（B）：多頭回檔不破前低 + 再突破前波高 + 量 + 紅K
  *
  * 共同扳機：大量長紅 K 突破前高
  * 差異：前置狀態（盤整 vs 多頭回檔）+ 停損位置
  *
  * Phase 3（2026-04-20 並列買法架構）
+ * 2026-04-21 拆分：B=回後買上漲、C=盤整突破，各自獨立 export
  */
 
 import type { CandleWithIndicators } from '@/types';
@@ -176,61 +180,80 @@ function detectPullback(candles: CandleWithIndicators[], idx: number): PullbackS
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 主入口
+// C 買法：盤整突破（獨立 export）
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 盤整突破偵測（C 買法）
+ *
+ * 《做對5步驟》位置 1：前置盤整（detectTrend==='盤整'）+ 大量長紅突破上頸線
+ * 只回傳 consolidation_breakout subType。
+ */
+export function detectConsolidationBreakout(
+  candles: CandleWithIndicators[],
+  idx: number,
+): BreakoutEntryResult | null {
+  if (idx < 21) return null;
+
+  const consol = detectConsolidation(candles, idx);
+  if (!consol.isConsolidation) return null;
+
+  const trig = checkCommonTrigger(candles, idx, consol.high);
+  if (!trig.pass) return null;
+
+  return {
+    isBreakout: true,
+    subType: 'consolidation_breakout',
+    breakoutPrice: consol.high,
+    bodyPct: trig.bodyPct,
+    volumeRatio: trig.volumeRatio,
+    consolidationLow: consol.low,
+    preEntryDays: consol.days,
+    detail: `盤整突破（${consol.days}天盤整 ${consol.low.toFixed(1)}~${consol.high.toFixed(1)}→突破+實體${trig.bodyPct.toFixed(2)}%+量×${trig.volumeRatio.toFixed(2)}）`,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B 買法：回後買上漲（主入口，只做 pullback_buy）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 回後買上漲偵測（B 買法）
+ *
+ * 《做對5步驟》位置 2：多頭回檔不破前低 + 曾跌破MA5 + 站回MA5 + 大量長紅突破前K高
+ * 只回傳 pullback_buy subType。
+ */
 export function detectBreakoutEntry(
   candles: CandleWithIndicators[],
   idx: number,
 ): BreakoutEntryResult | null {
   if (idx < 21) return null;
 
-  // 先試盤整突破
-  const consol = detectConsolidation(candles, idx);
-  if (consol.isConsolidation) {
-    const trig = checkCommonTrigger(candles, idx, consol.high);
-    if (trig.pass) {
-      return {
-        isBreakout: true,
-        subType: 'consolidation_breakout',
-        breakoutPrice: consol.high,
-        bodyPct: trig.bodyPct,
-        volumeRatio: trig.volumeRatio,
-        consolidationLow: consol.low,
-        preEntryDays: consol.days,
-        detail: `盤整突破（${consol.days}天盤整 ${consol.low.toFixed(1)}~${consol.high.toFixed(1)}→突破+實體${trig.bodyPct.toFixed(2)}%+量×${trig.volumeRatio.toFixed(2)}）`,
-      };
-    }
-  }
-
-  // 再試回後買上漲（書本版：曾跌破MA5 + 站回MA5 + 紅K + 量×1.3 + 突破前一根K 高點）
   const pb = detectPullback(candles, idx);
-  if (pb.isPullback) {
-    const c = candles[idx];
-    const prev = candles[idx - 1];
-    if (!prev || prev.volume <= 0 || c.open <= 0) return null;
-    // 紅K
-    if (c.close <= c.open) return null;
-    // 實體 ≥ 2.5%
-    const bodyPct = (c.close - c.open) / c.open * 100;
-    if (bodyPct < 2.5) return null;
-    // 量 ≥ 前日 × 1.3
-    const volumeRatio = c.volume / prev.volume;
-    if (volumeRatio < 1.3) return null;
-    // 今日收盤突破前一根 K 高點（書本明確扳機）
-    if (c.close <= prev.high) return null;
+  if (!pb.isPullback) return null;
 
-    return {
-      isBreakout: true,
-      subType: 'pullback_buy',
-      breakoutPrice: prev.high,
-      bodyPct,
-      volumeRatio,
-      prevSwingLow: pb.prevSwingLow,
-      preEntryDays: pb.pullbackDays,
-      detail: `回後買上漲（多頭+曾跌破MA5+站回MA5+紅K實體${bodyPct.toFixed(2)}%+量×${volumeRatio.toFixed(2)}+突破前K高${prev.high.toFixed(1)}）`,
-    };
-  }
+  const c = candles[idx];
+  const prev = candles[idx - 1];
+  if (!prev || prev.volume <= 0 || c.open <= 0) return null;
+  // 紅K
+  if (c.close <= c.open) return null;
+  // 實體 ≥ 2.5%
+  const bodyPct = (c.close - c.open) / c.open * 100;
+  if (bodyPct < 2.5) return null;
+  // 量 ≥ 前日 × 1.3
+  const volumeRatio = c.volume / prev.volume;
+  if (volumeRatio < 1.3) return null;
+  // 今日收盤突破前一根 K 高點（書本明確扳機）
+  if (c.close <= prev.high) return null;
 
-  return null;
+  return {
+    isBreakout: true,
+    subType: 'pullback_buy',
+    breakoutPrice: prev.high,
+    bodyPct,
+    volumeRatio,
+    prevSwingLow: pb.prevSwingLow,
+    preEntryDays: pb.pullbackDays,
+    detail: `回後買上漲（多頭+曾跌破MA5+站回MA5+紅K實體${bodyPct.toFixed(2)}%+量×${volumeRatio.toFixed(2)}+突破前K高${prev.high.toFixed(1)}）`,
+  };
 }

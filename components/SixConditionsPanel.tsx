@@ -7,6 +7,15 @@ import { BUILT_IN_STRATEGIES } from '@/lib/strategy/StrategyConfig';
 import { SixConditionsResult } from '@/lib/analysis/trendAnalysis';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
 
+const HIGH_WIN_POS_NUM: Record<string, string> = {
+  '🎯 打底趨勢確認': '①',
+  '🎯 回後買上漲':   '②',
+  '🎯 盤整突破':     '③',
+  '🎯 均線糾結突破': '④',
+  '🎯 強勢短回續攻': '⑤',
+  '🎯 假跌破反彈':   '⑥',
+};
+
 const CONDITION_LABELS = [
   { key: 'trend',     icon: '①', name: '趨勢條件', tip: '日線波浪型態符合「頭頭高、底底高」多頭架構', required: true },
   { key: 'ma',        icon: '②', name: '均線條件', tip: 'MA5>MA10>MA20 三線多排，MA10/20 方向向上', required: true },
@@ -90,7 +99,7 @@ function ConditionRow({
       >
         {dot}
         <span className="text-muted-foreground/70 text-xs w-4 font-mono">{label.icon}</span>
-        <span className={`text-sm font-medium w-16 shrink-0 ${label.required ? 'text-foreground' : 'text-muted-foreground italic'}`} title={label.tip}>
+        <span className="text-sm font-medium w-16 shrink-0 text-foreground" title={label.tip}>
           {label.name}
         </span>
         {changed === 'gained' && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-green-600 text-white font-bold animate-pulse">NEW</span>}
@@ -272,11 +281,14 @@ export default function SixConditionsPanel() {
         <div className="px-3 py-2 border-t border-border bg-green-900/10">
           <div className="text-[10px] font-bold text-green-400 mb-1">🎯 高勝率位置加成（{sc.highWinTags.length}/6）</div>
           <div className="flex flex-wrap gap-1">
-            {sc.highWinTags.map(tag => (
-              <span key={tag} className="text-[10px] px-2 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-800/50">
-                {tag.replace('🎯 ', '')}
-              </span>
-            ))}
+            {sc.highWinTags.map(tag => {
+              const num = HIGH_WIN_POS_NUM[tag] ?? '';
+              return (
+                <span key={tag} className="text-[10px] px-2 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-800/50">
+                  {num && <span className="text-green-500 mr-0.5">{num}</span>}{tag.replace('🎯 ', '')}
+                </span>
+              );
+            })}
           </div>
         </div>
       )}
