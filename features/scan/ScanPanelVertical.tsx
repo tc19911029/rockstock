@@ -31,7 +31,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
   } = useBacktestStore();
 
   const [maxDate] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()));
-  const [coachCollapsed, setCoachCollapsed] = useState(false);
+  const [coachCollapsed, setCoachCollapsed] = useState(true);
 
   // 載入歷史日期；市場/方向切換後自動載入最新結果
   const conditionMountedRef = useRef(false);
