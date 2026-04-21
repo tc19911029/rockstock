@@ -952,9 +952,26 @@ export const useBacktestStore = create<BacktestState>()(
             const json = await res.json();
             if (!res.ok || !json.ok) throw new Error(json.error ?? '載入失敗');
             const session = (json as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
-            set({ scanResults: session?.results ?? [], isLoadingBuyMethod: false });
+            const scanResults = session?.results ?? [];
+            set({ scanResults, isLoadingBuyMethod: false });
+
+            // 補填 forward performance（同 A 路徑）
+            if (scanResults.length > 0) {
+              set({ isFetchingForward: true });
+              const forwardPayload = scanResults.map(r => ({ symbol: r.symbol, name: r.name, scanPrice: r.price }));
+              const fwdRes = await fetch('/api/backtest/forward', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scanDate: date, stocks: forwardPayload }),
+              });
+              if (fwdRes.ok) {
+                const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
+                set({ performance: fwdJson.performance ?? [] });
+              }
+              set({ isFetchingForward: false });
+            }
           } catch (err) {
-            set({ isLoadingBuyMethod: false, scanError: err instanceof Error ? err.message : '買法掃描失敗' });
+            set({ isLoadingBuyMethod: false, isFetchingForward: false, scanError: err instanceof Error ? err.message : '買法掃描失敗' });
           }
           return;
         }
