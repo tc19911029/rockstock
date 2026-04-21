@@ -334,12 +334,12 @@ export async function listScanDates(
       let files = await fsListPrefix(`scan-${market}-${direction}-`);
       // Filter out new-format files (already read above) — also exclude B/C/D/E buy-method files
       files = files.filter(f => !f.includes('-daily-') && !f.includes('-mtf-') &&
-        !f.includes('-B-') && !f.includes('-C-') && !f.includes('-D-') && !f.includes('-E-'));
+        !f.includes('-B-') && !f.includes('-C-') && !f.includes('-D-') && !f.includes('-E-') && !f.includes('-F-'));
       // Legacy fallback (no direction prefix)
       if (files.length === 0 && direction === 'long') {
         const legacyFiles = await fsListPrefix(`scan-${market}-`);
         files = legacyFiles.filter(f => !f.includes('-long-') && !f.includes('-short-') && !f.includes('-daily-') && !f.includes('-mtf-') &&
-          !f.includes('-B-') && !f.includes('-C-') && !f.includes('-D-') && !f.includes('-E-'));
+          !f.includes('-B-') && !f.includes('-C-') && !f.includes('-D-') && !f.includes('-E-') && !f.includes('-F-'));
       }
       for (const file of files) {
         const match = file.match(/(\d{4}-\d{2}-\d{2})\.json$/);
