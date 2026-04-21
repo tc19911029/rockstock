@@ -95,6 +95,14 @@
     {
       "path": "/api/cron/update-intraday?market=CN",
       "schedule": "*/5 1-7 * * 1-5"
-    }
+    },
+    { "path": "/api/cron/update-intraday-bm?market=TW&method=B", "schedule": "2-59/10 1-5 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=TW&method=C", "schedule": "4-59/10 1-5 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=TW&method=D", "schedule": "6-59/10 1-5 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=TW&method=E", "schedule": "8-59/10 1-5 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=CN&method=B", "schedule": "2-59/10 1-7 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=CN&method=C", "schedule": "4-59/10 1-7 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=CN&method=D", "schedule": "6-59/10 1-7 * * 1-5" },
+    { "path": "/api/cron/update-intraday-bm?market=CN&method=E", "schedule": "8-59/10 1-7 * * 1-5" }
   ]
 }

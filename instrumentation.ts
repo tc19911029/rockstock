@@ -41,6 +41,21 @@ export async function register() {
   console.log('[local-cron] 本地開發模式：定期呼叫 API route 模擬 Vercel Cron');
   console.log('[local-cron] 刷新+掃描：TW / CN 每 5 分鐘；打板開盤確認：9:25–9:35 CST；L1 下載：盤後一次');
 
+  // ── 盤中：買法掃描（B/C/D/E），輪流觸發 —— 獨立於 A 六條件避免單輪超時 ──
+  async function scanBuyMethodIntraday(market: 'TW' | 'CN', method: 'B' | 'C' | 'D' | 'E') {
+    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
+    const data = await callRoute(
+      `/api/cron/update-intraday-bm?market=${market}&method=${method}`,
+      `${market} update-intraday-bm ${method}`,
+    ) as { data?: { skipped?: boolean; reason?: string; resultCount?: number } } | null;
+    const payload = data?.data ?? data ?? {};
+    if ((payload as { skipped?: boolean }).skipped) {
+      console.log(`[local-cron] ${market} 買法 ${method} 跳過：${(payload as { reason?: string }).reason}`);
+    } else {
+      console.log(`[local-cron] ${market} 買法 ${method}: ${(payload as { resultCount?: number }).resultCount ?? -1} 檔`);
+    }
+  }
+
   // ── 盤中：L2 刷新 + L4 掃描（走 update-intraday route） ──
   async function refreshAndScan(market: 'TW' | 'CN') {
     if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
@@ -101,6 +116,16 @@ export async function register() {
   // 計時器
   setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, 5 * 60 * 1000);
   setInterval(() => { refreshAndScan('CN').catch(err => console.error('[local-cron] CN refreshAndScan:', err)); }, 5 * 60 * 1000);
+
+  // 買法 B/C/D/E 錯開：每分鐘檢查，:02→B :04→C :06→D :08→E（10 分鐘輪一圈）
+  setInterval(() => {
+    const rem = new Date().getMinutes() % 10;
+    const method = rem === 2 ? 'B' : rem === 4 ? 'C' : rem === 6 ? 'D' : rem === 8 ? 'E' : null;
+    if (!method) return;
+    scanBuyMethodIntraday('TW', method).catch(err => console.error(`[local-cron] TW bm ${method}:`, err));
+    scanBuyMethodIntraday('CN', method).catch(err => console.error(`[local-cron] CN bm ${method}:`, err));
+  }, 60 * 1000);
+
   setInterval(() => { maybeConfirmDabanOpen().catch(err => console.error('[local-cron] confirm-daban-open:', err)); }, 60 * 1000);
   setInterval(() => {
     downloadL1('TW').catch(err => console.error('[local-cron] TW downloadL1:', err));

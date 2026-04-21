@@ -206,9 +206,9 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
   try {
     // 嘗試上市(tse)和上櫃(otc)兩種
     const exCh = `tse_${code}.tw|otc_${code}.tw`;
-    const url = `http://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+      headers: MIS_HEADERS,
       signal: AbortSignal.timeout(5000),
     });
     const json = await res.json();
@@ -277,6 +277,17 @@ function parseMisPrice(s: string | undefined): number {
 const MIS_BATCH_SIZE = 80;     // 每次查詢的股票數量上限（mis.twse 實測 100 可用、200 失敗）
 const MIS_CONCURRENCY = 4;     // 並行請求數（避免 rate limit）
 
+/**
+ * mis.twse 必要 headers — 缺 Referer 會被 WAF 當爬蟲回空 msgArray（2026-04-21 實測）
+ * Referer 必須是 fibest.jsp（WAF 白名單來源）
+ */
+const MIS_HEADERS: Record<string, string> = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Referer': 'https://mis.twse.com.tw/stock/fibest.jsp',
+  'Accept': 'application/json, text/javascript, */*; q=0.01',
+  'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+};
+
 async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
   const map = new Map<string, TWSEQuote>();
@@ -321,9 +332,9 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
   async function fetchMisBatch(codes: string[], exchange: 'tse' | 'otc'): Promise<void> {
     try {
       const exCh = codes.map(c => `${exchange}_${c}.tw`).join('|');
-      const url = `http://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
+      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
+        headers: MIS_HEADERS,
         signal: AbortSignal.timeout(15000),
       });
       const json = await res.json();

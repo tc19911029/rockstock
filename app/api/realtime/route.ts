@@ -2,6 +2,14 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 
+// mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
+const MIS_HEADERS: Record<string, string> = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Referer': 'https://mis.twse.com.tw/stock/fibest.jsp',
+  'Accept': 'application/json, text/javascript, */*; q=0.01',
+  'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TWSE 即時報價 API — 延遲約 5-15 秒（盤中）
 // 來源：mis.twse.com.tw（證交所官方）
@@ -58,7 +66,7 @@ export async function GET(req: NextRequest) {
   try {
     const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+      headers: MIS_HEADERS,
       signal: AbortSignal.timeout(10000),
     });
     const json = await res.json();
@@ -92,7 +100,7 @@ export async function GET(req: NextRequest) {
       const otcExCh = missing.map(c => `otc_${c.replace(/\.(TW|TWO)$/i, '')}.tw`).join('|');
       try {
         const otcRes = await fetch(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${otcExCh}&json=1&delay=0&_=${Date.now()}`, {
-          headers: { 'User-Agent': 'Mozilla/5.0' },
+          headers: MIS_HEADERS,
           signal: AbortSignal.timeout(8000),
         });
         const otcJson = await otcRes.json();
