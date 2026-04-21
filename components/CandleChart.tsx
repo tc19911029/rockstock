@@ -130,7 +130,10 @@ export default function CandleChart({
   const onCrosshairRef = useRef(onCrosshairMove);
   const onDoubleClickRef = useRef(onDoubleClick);
   const [hoverCandle, setHoverCandle] = useState<CandleWithIndicators | null>(null);
-  const [trendlineStatus, setTrendlineStatus] = useState<{ ascending: boolean; descending: boolean }>({ ascending: false, descending: false });
+  const [trendlineStatus, setTrendlineStatus] = useState<{
+    ascending: { anchorIndex: number; anchorPrice: number; slope: number } | null;
+    descending: { anchorIndex: number; anchorPrice: number; slope: number } | null;
+  }>({ ascending: null, descending: null });
 
   useEffect(() => {
     candlesRef.current = candles;
@@ -192,11 +195,11 @@ export default function CandleChart({
     // 單一實線從 fromIndex 延伸到今日+未來 15 個營業日
     trendlineRefs.current.descending = chart.addSeries(LineSeries, {
       color: '#10b981',  // 綠：下降切線（連頭頭低）
-      lineWidth: 3, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
+      lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
     });
     trendlineRefs.current.ascending = chart.addSeries(LineSeries, {
       color: '#ef4444',   // 紅：上升切線（連底底高）
-      lineWidth: 3, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
+      lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
     });
 
     chartRef.current  = chart;
@@ -288,8 +291,8 @@ export default function CandleChart({
     // 上升/下降線可獨立 toggle；fallback 用 showTrendlines 總開關相容舊用法
     const showAsc = showAscendingTrendline ?? showTrendlines;
     const showDesc = showDescendingTrendline ?? showTrendlines;
-    let hasDescending = false;
-    let hasAscending = false;
+    let descInfo: { anchorIndex: number; anchorPrice: number; slope: number } | null = null;
+    let ascInfo: { anchorIndex: number; anchorPrice: number; slope: number } | null = null;
     if ((showAsc || showDesc) && candles.length >= 3) {
       const lastIdx = candles.length - 1;
       // UI 規則（非書本嚴格規則）：最近兩個頭連成下降線、最近兩個底連成上升線，不管高低大小
@@ -345,7 +348,7 @@ export default function CandleChart({
         trendlineRefs.current.descending?.setData(
           buildLine(older.index - EDGE_PAD, newer.index + EDGE_PAD, older.index, older.price, slope)
         );
-        hasDescending = true;
+        descInfo = { anchorIndex: older.index, anchorPrice: older.price, slope };
       } else {
         trendlineRefs.current.descending?.setData([]);
       }
@@ -357,7 +360,7 @@ export default function CandleChart({
         trendlineRefs.current.ascending?.setData(
           buildLine(older.index - EDGE_PAD, newer.index + EDGE_PAD, older.index, older.price, slope)
         );
-        hasAscending = true;
+        ascInfo = { anchorIndex: older.index, anchorPrice: older.price, slope };
       } else {
         trendlineRefs.current.ascending?.setData([]);
       }
@@ -365,7 +368,7 @@ export default function CandleChart({
       trendlineRefs.current.descending?.setData([]);
       trendlineRefs.current.ascending?.setData([]);
     }
-    setTrendlineStatus({ ascending: hasAscending, descending: hasDescending });
+    setTrendlineStatus({ ascending: ascInfo, descending: descInfo });
     // scrollToPosition 後稍等一個 tick 再廣播，確保 range 已更新
     const chart = chartRef.current;
     if (chart) {
@@ -574,22 +577,31 @@ export default function CandleChart({
       </div>
 
       {/* 切線圖例 — 只在有線時顯示 */}
-      {showTrendlines && (trendlineStatus.ascending || trendlineStatus.descending) && (
-        <div className="absolute top-7 left-3 z-10 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-mono pointer-events-none">
-          {trendlineStatus.ascending && (
-            <span className="flex items-center gap-1" style={{ color: '#ef4444' }}>
-              <span className="inline-block w-4 h-[3px]" style={{ background: '#ef4444' }} />
-              上升切線（連最近兩底）
-            </span>
-          )}
-          {trendlineStatus.descending && (
-            <span className="flex items-center gap-1" style={{ color: '#10b981' }}>
-              <span className="inline-block w-4 h-[3px]" style={{ background: '#10b981' }} />
-              下降切線（連最近兩頭）
-            </span>
-          )}
-        </div>
-      )}
+      {showTrendlines && (trendlineStatus.ascending || trendlineStatus.descending) && (() => {
+        const refIdx = idxForLegend >= 0 ? idxForLegend : candles.length - 1;
+        const ascVal = trendlineStatus.ascending
+          ? trendlineStatus.ascending.anchorPrice + trendlineStatus.ascending.slope * (refIdx - trendlineStatus.ascending.anchorIndex)
+          : null;
+        const descVal = trendlineStatus.descending
+          ? trendlineStatus.descending.anchorPrice + trendlineStatus.descending.slope * (refIdx - trendlineStatus.descending.anchorIndex)
+          : null;
+        return (
+          <div className="absolute top-7 left-3 z-10 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-mono pointer-events-none">
+            {ascVal != null && (
+              <span className="flex items-center gap-1" style={{ color: '#ef4444' }}>
+                <span className="inline-block w-4 h-[3px]" style={{ background: '#ef4444' }} />
+                上升切線 {ascVal.toFixed(2)}
+              </span>
+            )}
+            {descVal != null && (
+              <span className="flex items-center gap-1" style={{ color: '#10b981' }}>
+                <span className="inline-block w-4 h-[3px]" style={{ background: '#10b981' }} />
+                下降切線 {descVal.toFixed(2)}
+              </span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Signal badge — only show highest-priority non-WATCH signal */}
       {(() => {
