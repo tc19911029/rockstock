@@ -61,6 +61,40 @@ export async function loadLocalCandlesForDate(
 }
 
 /**
+ * 取中位數（不 mutate 輸入）
+ */
+function medianOf(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/**
+ * L1 寫入邊界 sanity check — 最後一根 bar volume 相對前 20 日中位數 > 30×
+ * 即視為異常（單位錯誤、parse 錯誤、髒資料），砍掉該 bar 並回傳修剪後陣列。
+ *
+ * 背景：2026-04-21 append-today-from-snapshot × 100 bug 讓 589 檔 CN 4/20
+ * volume 放大 100 倍；此 guard 確保日後類似離譜值無法穿過寫入層。
+ */
+function guardAgainstAnomalousLastBar(symbol: string, candles: Candle[]): Candle[] {
+  if (candles.length < 21) return candles;
+  const last = candles[candles.length - 1];
+  if (last.volume <= 0) return candles;
+  const window = candles.slice(-21, -1).map(b => b.volume).filter(v => v > 0);
+  if (window.length < 5) return candles;
+  const med = medianOf(window);
+  if (med <= 0) return candles;
+  if (last.volume > med * 30) {
+    console.warn(
+      `[L1 guard] ${symbol} ${last.date} volume=${last.volume} 超過前 20 日中位數 ${med} 的 30 倍，砍掉該 bar 不寫入`
+    );
+    return candles.slice(0, -1);
+  }
+  return candles;
+}
+
+/**
  * 將原始 K 線存到本地檔案
  * candles 應為原始 OHLCV（不含指標）
  */
@@ -70,7 +104,9 @@ export async function saveLocalCandles(
   candles: Candle[],
 ): Promise<void> {
   if (candles.length === 0) return;
-  await writeCandleFile(symbol, market, candles);
+  const safe = guardAgainstAnomalousLastBar(symbol, candles);
+  if (safe.length === 0) return;
+  await writeCandleFile(symbol, market, safe);
 }
 
 /**
