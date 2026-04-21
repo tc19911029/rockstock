@@ -35,6 +35,8 @@ export interface SixConditionsResult {
   totalScore: number; // 0–6
   coreScore:  number; // 0–5（前5個必要條件）
   isCoreReady: boolean; // 前5個全過 = true
+  /** 書本高勝率 6 位置加分 tag（p.749-754 + 圖表 12-1-7）— 不是 gate，僅資訊顯示 */
+  highWinTags: string[];
 }
 
 // ── Pivot detection ───────────────────────────────────────────────────────────
@@ -467,41 +469,57 @@ export function evaluateSixConditions(
     && c.close > c.ma10 && c.close > c.ma20;
 
   // Scenario A：回後買上漲（p.37 ①）— 資訊 tag
-  // 書本：上漲一波後的回檔修正不破前低 + 收盤過 MA5 + 收盤過昨日最高點
-  // 「回檔修正」→ 用 pivot low 判斷（波浪中曾出現底），不限天數、不限均線
+  // 書本嚴格版（用戶 2026-04-21 最終確認）：
+  //   前置：當前必須是多頭趨勢（盤整/空頭下的 MA5 跨越只是雜訊，不是「回後」）
+  //   條件：昨日收盤 < MA5，今日收盤站回 MA5
+  //   「回後」= 時序緊鄰多頭回檔，不是「任何價位跨 MA5」
   const pulledBackBuy = (() => {
-    if (!c.ma5 || c.close < c.ma5) return false;                 // 收盤站 MA5
-    if (!prev || c.close <= prev.high) return false;             // 收盤過昨日最高
-    const pivots = findPivots(candles, index, 8);
-    const lastLow = pivots.find(p => p.type === 'low');
-    if (!lastLow) return false;                                  // 波浪中還沒底，沒回檔
-    return c.close > lastLow.price;                              // 今天反攻：收盤高於回檔低點
+    if (trendState !== '多頭') return false;                     // 多頭前置
+    if (!c.ma5 || c.close < c.ma5) return false;                 // 今日收盤站 MA5
+    if (!prev || prev.ma5 == null) return false;
+    if (prev.close >= prev.ma5) return false;                    // 昨日收盤必須 < MA5
+    return true;
   })();
 
-  // Scenario B：盤整突破（p.37 ②）— 資訊 tag
-  // 書本定義（朱老師）：
-  //   1. 振幅（箱頂-箱底）/箱底 ≤ 15%（Part 2 p.87）
-  //   2. 最小窗口 6 天（Part 4 p.299「狹幅盤整 5-6 天」）
-  //   3. 今日收盤突破箱頂
-  // 註：觸碰次數 + 2% 容差自創，書本未寫 → 2026-04-20 移除
+  // Scenario B：盤整突破（p.37 ② + 圖表 12-1-7 類似盤整結構）
+  // 書本嚴格版（2026-04-21 用戶授權 C 方案 + 頸線修正）：
+  //   1. 頭底頭底結構 = 至少 2 頭 + 2 底 pivots → 上下頸線
+  //   2. 最舊 pivot 到今日 ≥ 6 天（Part 4 p.299「狹幅盤整 5-6 天」）
+  //   3. 今日上下頸線 channel tightness ≤ 15%（包含 ascending triangle / descending wedge 等斜頸線）
+  //   4. 今日紅K + 實體 ≥ 2% + 量 ≥ 1.3× 前日（Part 7 p.488 攻擊量）
+  //   5. 今日收盤突破上頸線
   const rangeBreakout = (() => {
     if (!prev) return false;
-    const MIN_DAYS = 6;
+    const pivots = findPivots(candles, index, 10);
+    const highs = pivots.filter(p => p.type === 'high').slice(0, 2);
+    const lows  = pivots.filter(p => p.type === 'low').slice(0, 2);
+    if (highs.length < 2 || lows.length < 2) return false;
 
-    let rangeHigh = -Infinity, rangeLow = Infinity;
-    let windowLen = 0;
-    for (let i = index - 1; i >= 0; i--) {
-      const h = Math.max(rangeHigh, candles[i].high);
-      const l = Math.min(rangeLow,  candles[i].low);
-      if (l <= 0) break;
-      const amp = (h - l) / l;
-      if (amp > 0.15) break;
-      rangeHigh = h;
-      rangeLow  = l;
-      windowLen++;
-    }
-    if (windowLen < MIN_DAYS) return false;
-    return c.close > rangeHigh;
+    const oldestPivotIdx = Math.min(highs[1].index, lows[1].index);
+    if (index - oldestPivotIdx < 6) return false;
+
+    // 頸線插值：線性通過 (idx_old, price_old) 與 (idx_new, price_new)
+    const upperAt = (i: number): number => {
+      const [hNew, hOld] = [highs[0], highs[1]];
+      if (hNew.index === hOld.index) return hOld.price;
+      return hOld.price + (hNew.price - hOld.price) * (i - hOld.index) / (hNew.index - hOld.index);
+    };
+    const lowerAt = (i: number): number => {
+      const [lNew, lOld] = [lows[0], lows[1]];
+      if (lNew.index === lOld.index) return lOld.price;
+      return lOld.price + (lNew.price - lOld.price) * (i - lOld.index) / (lNew.index - lOld.index);
+    };
+
+    const upperToday = upperAt(index);
+    const lowerToday = lowerAt(index);
+    if (lowerToday <= 0) return false;
+    const tightness = (upperToday - lowerToday) / lowerToday;
+    if (tightness > 0.15) return false;
+
+    const bodyPct = c.open > 0 ? Math.abs(c.close - c.open) / c.open : 0;
+    const volRatio = prev.volume > 0 ? c.volume / prev.volume : 0;
+    const isRedK = c.close > c.open;
+    return isRedK && bodyPct >= 0.02 && volRatio >= 1.3 && c.close > upperToday;
   })();
 
   // 高勝率 6 位置（書本 Part 12 p.749-754）其餘 4 種 — 加分 tag，不是 gate
@@ -569,9 +587,9 @@ export function evaluateSixConditions(
     if (!positionAboveKeyMa) {
       return `❌ 收盤 ${c.close} 未同時站上 MA10 ${c.ma10.toFixed(1)} / MA20 ${c.ma20.toFixed(1)}`;
     }
-    const bonusStr = highWinTags.length > 0 ? `｜加分：${highWinTags.join(' ')}` : '';
+    // 加分 tag 搬到 SixConditionsResult.highWinTags，UI 獨立區塊渲染，不再塞到 detail
     const warnStr  = warnings.length > 0 ? `｜警示：${warnings.join(' ')}` : '';
-    return `✅ 收盤站上 MA10/MA20（${devStr}，${stage}${bonusStr}${warnStr}）`;
+    return `✅ 收盤站上 MA10/MA20（${devStr}，${stage}${warnStr}）`;
   })();
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -726,7 +744,7 @@ export function evaluateSixConditions(
       : c.kdK != null && c.kdK > kdMax
       ? `❌ KD超買(K=${c.kdK?.toFixed(0)},過高風險大)`
       : `⚠️ KD未多排(K=${c.kdK?.toFixed(0) ?? '—'},D=${c.kdD?.toFixed(0) ?? '—'})`,
-  ].join('；');
+  ].join('\n');
 
   // ─────────────────────────────────────────────────────────────────────────
   // 總分（書上順序：趨勢→均線→位置→成交量→K線→指標）
@@ -747,5 +765,6 @@ export function evaluateSixConditions(
     totalScore,
     coreScore,
     isCoreReady,
+    highWinTags,
   };
 }

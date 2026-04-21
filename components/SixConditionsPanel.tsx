@@ -106,9 +106,8 @@ function ConditionRow({
         </div>
       )}
       {expanded && (
-        <div className="px-4 pb-2 text-xs text-muted-foreground leading-relaxed bg-secondary/40 space-y-1">
-          <div className="whitespace-normal break-words">{detail}</div>
-          <div className="text-[10px] text-muted-foreground border-t border-border pt-1">{label.tip}</div>
+        <div className="px-4 pb-2 text-xs text-muted-foreground leading-relaxed bg-secondary/40">
+          <div className="whitespace-pre-line break-words">{detail}</div>
         </div>
       )}
     </div>
@@ -267,6 +266,20 @@ export default function SixConditionsPanel() {
           <p className="text-[10px] text-yellow-500 mt-0.5">第⑥指標參考為輔助條件，可後面補上</p>
         )}
       </div>
+
+      {/* 🎯 高勝率位置加成（書本 p.749-754 + 圖表 12-1-7） */}
+      {sc.highWinTags.length > 0 && (
+        <div className="px-3 py-2 border-t border-border bg-green-900/10">
+          <div className="text-[10px] font-bold text-green-400 mb-1">🎯 高勝率位置加成（{sc.highWinTags.length}/6）</div>
+          <div className="flex flex-wrap gap-1">
+            {sc.highWinTags.map(tag => (
+              <span key={tag} className="text-[10px] px-2 py-0.5 rounded bg-green-900/40 text-green-300 border border-green-800/50">
+                {tag.replace('🎯 ', '')}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Sell Signals */}
       {sellSignals.length > 0 && (
