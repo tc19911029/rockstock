@@ -7,6 +7,7 @@ import { PageShell } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { classifyMarket } from '@/lib/market/classify';
+import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 
 interface PriceData {
   price: number;
@@ -19,34 +20,6 @@ interface PriceData {
 
 const EMPTY_FORM = { symbol: '', name: '', shares: '', costPrice: '', buyDate: new Date().toISOString().split('T')[0] };
 
-// 交易成本（買進+賣出），用券商 app 3661 反推驗證過
-// TW: 手續費 0.1425% × 2 + 證交稅 0.3%
-// CN: 手續費 0.03% × 2 + 印花稅 0.05%（賣出）+ 過戶費 0.001% × 2（含滬深統一）
-const FEE_RATES = {
-  TW: { buy: 0.001425, sell: 0.001425 + 0.003 },
-  CN: { buy: 0.00031, sell: 0.00031 + 0.0005 },
-} as const;
-
-function marketOf(symbol: string): 'TW' | 'CN' {
-  return classifyMarket(symbol) === 'CN' ? 'CN' : 'TW';
-}
-
-/** 顯示成本/均價：至少 2 位、最多 4 位（陸股均價常見 4 位小數如 302.9453） */
-function formatPrice(v: number): string {
-  return v.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-}
-
-function calcNetPnL(symbol: string, shares: number, costPrice: number, currentPrice: number) {
-  if (currentPrice <= 0) return { pnl: 0, pnlPct: 0 };
-  const rates = FEE_RATES[marketOf(symbol)];
-  const costTotal = shares * costPrice;
-  const marketTotal = shares * currentPrice;
-  const buyFee = costTotal * rates.buy;
-  const sellFee = marketTotal * rates.sell;
-  const pnl = marketTotal - costTotal - buyFee - sellFee;
-  const pnlPct = costTotal > 0 ? (pnl / costTotal) * 100 : 0;
-  return { pnl, pnlPct };
-}
 
 export default function PortfolioPage() {
   const { holdings, add, remove, update } = usePortfolioStore();

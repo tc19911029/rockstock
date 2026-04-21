@@ -10,6 +10,7 @@ import { usePortfolioStore } from '@/store/portfolioStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useReplayStore } from '@/store/replayStore';
 import { type MarketTab, filterByMarket, classifyMarket } from '@/lib/market/classify';
+import { calcNetPnL } from '@/lib/portfolio/fees';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -133,9 +134,10 @@ export default function BottomPanel() {
         const costVal = h.shares * h.costPrice;
         const mktVal = cur > 0 ? h.shares * cur : costVal;
         const dailyChange = cur > 0 ? h.shares * cur * (p?.changePercent ?? 0) / 100 : 0;
+        const { pnl } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
         acc.totalCost += costVal;
         acc.totalValue += mktVal;
-        acc.totalPnL += cur > 0 ? mktVal - costVal : 0;
+        acc.totalPnL += pnl;
         acc.todayPnL += dailyChange;
         return acc;
       },
@@ -319,8 +321,7 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
           const isCN = classifyMarket(h.symbol) === 'CN';
           const lotSize = isCN ? 100 : 1000;
           const lots = h.shares / lotSize;
-          const pnl = cur > 0 ? (cur - h.costPrice) * h.shares : 0;
-          const pnlPct = h.costPrice > 0 && cur > 0 ? ((cur - h.costPrice) / h.costPrice) * 100 : 0;
+          const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
           const dailyPnL = cur > 0 ? h.shares * cur * (p?.changePercent ?? 0) / 100 : 0;
 
           return (
