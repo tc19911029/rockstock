@@ -114,7 +114,7 @@ function evaluateMethod(
       const conditions: ConditionItem[] = [
         {
           icon: '①', name: '前置狀態',
-          detail: r ? (r.subType === 'consolidation_breakout' ? `盤整 ${r.preEntryDays} 天（幅度<15%）` : '多頭趨勢站上 MA5') : '無盤整或回檔',
+          detail: r ? (r.subType === 'consolidation_breakout' ? `盤整 ${r.preEntryDays} 天（幅度<15%）` : '多頭趨勢 + 曾跌破MA5 + 站回MA5') : '無盤整或回檔',
           pass: !!r,
         },
         {
