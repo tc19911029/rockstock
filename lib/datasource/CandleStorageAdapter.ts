@@ -15,7 +15,7 @@ if (IS_VERCEL && !process.env.BLOB_READ_WRITE_TOKEN) {
   console.error('[CandleStorage] BLOB_READ_WRITE_TOKEN 未設定，K 線 Blob 讀寫將失敗');
 }
 
-interface CandleFileData {
+export interface CandleFileData {
   symbol: string;
   lastDate: string;
   updatedAt: string;
@@ -45,6 +45,9 @@ async function blobGet(pathname: string): Promise<string | null> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
+// ── L1 in-memory cache (local dev only) ────────────────────────────────────────
+import { getFromCache, updateCache, triggerPreload } from './L1CandleCache';
+
 // ── Filesystem helpers ───────────────────────────────────────────────────────
 
 import { readFile, writeFile, mkdir } from 'fs/promises';
@@ -71,6 +74,15 @@ export async function readCandleFile(
   market: 'TW' | 'CN',
 ): Promise<CandleFileData | null> {
   try {
+    // ── L1 記憶體快取（本地開發專用）────────────────────────────────────────
+    if (!IS_VERCEL) {
+      const cached = getFromCache(symbol, market);
+      if (cached) return cached;
+
+      // Cache miss：觸發背景 bulk preload（冪等，第一次 miss 才會真正 spawn）
+      triggerPreload(market);
+    }
+
     let raw: string | null = null;
 
     if (IS_VERCEL) {
@@ -93,6 +105,10 @@ export async function readCandleFile(
       if (c.date.endsWith('*')) c.date = c.date.slice(0, -1);
     }
     if (data.lastDate.endsWith('*')) data.lastDate = data.lastDate.slice(0, -1);
+
+    // 讀到後存入快取，下次直接命中
+    if (!IS_VERCEL) updateCache(symbol, market, data);
+
     return data;
   } catch {
     return null;
@@ -159,6 +175,9 @@ export async function writeCandleFile(
   } catch {
     // Vercel 部署目錄可能是只讀的，忽略
   }
+
+  // 更新 L1 記憶體快取（本地開發），讓下次掃描立即拿到新資料
+  if (!IS_VERCEL) updateCache(symbol, market, data);
 }
 
 /**

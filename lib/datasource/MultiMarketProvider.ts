@@ -401,23 +401,23 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else {
-      // 陸股/美股走圖路由：EastMoney → Tencent → EODHD → Yahoo（4 層 fallback）
+      // 陸股/美股走圖路由：Tencent → Yahoo → EODHD → EastMoney（騰訊/Sina/Yahoo 優先，EastMoney 墊底）
       result = await tryProvidersWithRacing([
-        {
-          name: `EastMoney ${symbol}`,
-          fn: () => eastMoneyHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
-        },
         {
           name: `Tencent ${symbol}`,
           fn: () => tencentHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
+        },
+        {
+          name: `Yahoo ${symbol}`,
+          fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
         },
         {
           name: `EODHD ${symbol}`,
           fn: () => eodhdHistProvider.getHistoricalCandles(symbol, period, asOfDate),
         },
         {
-          name: `Yahoo ${symbol}`,
-          fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
+          name: `EastMoney ${symbol}`,
+          fn: () => eastMoneyHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
       ]);
     }

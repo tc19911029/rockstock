@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const existing = await readCandleFile(symbol, market);
     if (!existing) return;
-    if (existing.lastDate >= date) { already++; return; }
+    if (existing.lastDate > date) { already++; return; }
     const q = quotes.get(code);
     if (!q) return;
     await saveLocalCandles(symbol, market, [

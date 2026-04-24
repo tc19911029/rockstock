@@ -82,6 +82,12 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
     const { TaiwanScanner: TS } = await import('./TaiwanScanner');
     scanner = new TS();
   }
+  // L1 記憶體快取預熱（fire-and-forget，本地開發用，Vercel 自動跳過）
+  // 首掃時：在掃描期間背景讀進記憶體（後半段掃描命中快取）
+  // 二掃起：全部命中快取，消除 disk I/O + JSON.parse（CN 省 ~16s）
+  const { triggerPreload: triggerL1 } = await import('@/lib/datasource/L1CandleCache');
+  triggerL1(market as 'TW' | 'CN');
+
   const l2Injected = await injectL2(scanner, market, date, readIntradaySnapshot);
 
   // ── Step 2: 取得股票清單（前 N 成交額過濾 + 批次切片） ──

@@ -57,7 +57,10 @@ export async function GET(req: NextRequest) {
     const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
     const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
 
-    // ── Step 2: 建立 Scanner ─────────────────────────────────────────────
+    // ── Step 2: 建立 Scanner（L1 快取 fire-and-forget 預熱）────────────────
+    const { triggerPreload: triggerL1 } = await import('@/lib/datasource/L1CandleCache');
+    triggerL1(market); // 首掃背景預熱，二掃起全命中快取
+
     let scanner: import('@/lib/scanner/TaiwanScanner').TaiwanScanner | import('@/lib/scanner/ChinaScanner').ChinaScanner;
     if (market === 'CN') {
       const { ChinaScanner } = await import('@/lib/scanner/ChinaScanner');

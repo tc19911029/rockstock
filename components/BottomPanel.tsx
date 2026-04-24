@@ -327,7 +327,7 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
           return (
             <button
               key={h.id}
-              onClick={() => useReplayStore.getState().loadStock(stripSuffix(h.symbol))}
+              onClick={() => { const s = useReplayStore.getState(); s.loadStock(stripSuffix(h.symbol)).then(() => s.startPolling()); }}
               className="w-full px-3 py-2 hover:bg-muted/60 transition-colors text-left"
             >
               {/* Row 1: Name/Code/張數 ── Price + Change% */}
@@ -413,7 +413,7 @@ function WatchlistContent({ watchlist, prices }: WatchlistContentProps) {
           return (
             <button
               key={item.symbol}
-              onClick={() => useReplayStore.getState().loadStock(stripSuffix(item.symbol))}
+              onClick={() => { const s = useReplayStore.getState(); s.loadStock(stripSuffix(item.symbol)).then(() => s.startPolling()); }}
               className="flex items-center gap-2 px-3 py-2 hover:bg-muted/60 transition-colors w-full text-left"
             >
               <div className="shrink-0 w-14">
