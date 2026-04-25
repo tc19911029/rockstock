@@ -246,6 +246,16 @@ export async function register() {
     scanPostCloseDaily('CN').catch(err => console.error('[local-cron] CN scan post_close:', err));
   }, 60 * 1000);
 
+  // Auto-repair watchdog：主下載 cron 完成後，檢查 verify 報告，
+  // 若 stocksStale > 50 或 coverage < 97% 自動觸發 retry-failed
+  // 開發本地：每 30 分鐘檢查一次（vercel 上是固定排程）
+  setInterval(() => {
+    callRoute('/api/cron/auto-repair-watchdog?market=TW', 'TW auto-repair watchdog')
+      .catch(err => console.error('[local-cron] TW watchdog:', err));
+    callRoute('/api/cron/auto-repair-watchdog?market=CN', 'CN auto-repair watchdog')
+      .catch(err => console.error('[local-cron] CN watchdog:', err));
+  }, 30 * 60 * 1000);
+
   // TDCC 大戶持股：每週四 18:30 CST 自動抓最新一週（公布時間 ~17:00）
   // 用 60s interval 偵測，命中當週四 18:30 CST 才執行；用旗標避免同一天重跑
   let lastTdccDate = '';

@@ -116,6 +116,8 @@
     { "path": "/api/cron/scan-bm?market=CN&method=D", "schedule": "24 8 * * 1-5" },
     { "path": "/api/cron/scan-bm?market=CN&method=E", "schedule": "30 8 * * 1-5" },
     { "path": "/api/cron/scan-bm?market=CN&method=F", "schedule": "36 8 * * 1-5" },
-    { "path": "/api/cron/fetch-tdcc-week", "schedule": "30 10 * * 4" }
+    { "path": "/api/cron/fetch-tdcc-week", "schedule": "30 10 * * 4" },
+    { "path": "/api/cron/auto-repair-watchdog?market=TW", "schedule": "0 6 * * 1-5" },
+    { "path": "/api/cron/auto-repair-watchdog?market=CN", "schedule": "50 7 * * 1-5" }
   ]
 }
