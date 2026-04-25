@@ -1208,6 +1208,9 @@ export abstract class MarketScanner {
             ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
             : 0;
 
+          const trendState = detectTrend(candles, lastIdx);
+          const trendPosition = detectTrendPosition(candles, lastIdx);
+
           const mtfResult = evaluateMultiTimeframe(candles, BASE_THRESHOLDS);
 
           // 跨策略命中：A 六條件 + 其他 5 個 detector
@@ -1261,8 +1264,8 @@ export abstract class MarketScanner {
             buyMethodSubType: subType,
             sixConditionsScore: 0,
             sixConditionsBreakdown: { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false },
-            trendState: '多頭' as const,
-            trendPosition: '',
+            trendState,
+            trendPosition,
             scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
             mtfScore: mtfResult.totalScore,
             mtfWeeklyPass: mtfResult.weekly.pass,

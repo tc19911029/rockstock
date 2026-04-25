@@ -242,7 +242,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      useWatchlistStore.getState().add(r.symbol, r.name);
+                      useWatchlistStore.getState().add(r.symbol, r.name, r.price);
                     }}
                     className="text-[9px] text-amber-400 hover:text-amber-300 px-1 py-0.5 rounded border border-amber-700/50 hover:bg-amber-900/30">
                     {useWatchlistStore.getState().has(r.symbol) ? '✓' : '+'}

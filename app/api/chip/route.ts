@@ -236,15 +236,17 @@ function calculateChipScore(
 }
 
 // ── 找最近有資料的交易日（最多往前找 5 天）────────────────────────────────
+import { isTradingDay } from '@/lib/utils/tradingDay';
+
+/** 從 requestedDate 往前找最近的 TW 交易日（不打外部 API） */
 async function findLatestTradingDate(requestedDate: string): Promise<string> {
   let d = new Date(requestedDate + 'T12:00:00');
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 7; i++) {
     const dateStr = d.toISOString().slice(0, 10);
-    const test = await fetchInstitutional(dateStr);
-    if (test.size > 0) return dateStr;
-    d = new Date(d.getTime() - 86400000); // go back one day
+    if (isTradingDay(dateStr, 'TW')) return dateStr;
+    d = new Date(d.getTime() - 86400000);
   }
-  return requestedDate; // fallback
+  return requestedDate;
 }
 
 const chipQuerySchema = z.object({
@@ -256,81 +258,99 @@ const chipQuerySchema = z.object({
 let cache: { date: string; data: Map<string, ChipData>; ts: number } | null = null;
 const CACHE_TTL = 10 * 60 * 1000;
 
+// ─── 新版：用 FinMind + TDCC L1 直接抓單檔資料（不再 bulk pre-fetch 全市場） ──
+
+import { fetchT86ForStock } from '@/lib/datasource/TwseT86Provider';
+import { readTdccStock, readInstStock, writeInstStock } from '@/lib/chips/ChipStorage';
+import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock } from '@/lib/datasource/FinmindChipExtras';
+
+function dateMinusDays(d: string, n: number): string {
+  const dt = new Date(d + 'T00:00:00Z');
+  dt.setUTCDate(dt.getUTCDate() - n);
+  return dt.toISOString().slice(0, 10);
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const parsed = chipQuerySchema.safeParse(Object.fromEntries(searchParams));
-  if (!parsed.success) {
-    return apiValidationError(parsed.error);
-  }
+  if (!parsed.success) return apiValidationError(parsed.error);
+
   const rawDate = parsed.data.date ?? new Date().toISOString().slice(0, 10);
-  const symbol = parsed.data.symbol ?? null;
+  const rawSymbol = parsed.data.symbol;
+  if (!rawSymbol) return apiError('symbol required', 400);
+  const code = rawSymbol.replace(/\.(TW|TWO)$/i, '');
 
-  // Use cached data if available for any recent date
-  if (cache && Date.now() - cache.ts < CACHE_TTL) {
-    if (symbol) {
-      const d = cache.data.get(symbol.replace(/\.(TW|TWO)$/i, ''));
-      if (!d) return apiError('not found', 404);
-      return apiOk(d);
-    }
-    return apiOk({ date: cache.date, count: cache.data.size, data: Array.from(cache.data.values()) });
-  }
-
-  // Find the most recent trading day with available data
   const date = await findLatestTradingDate(rawDate);
 
-  // 並行抓取所有數據源
-  const [instMap, marginMap, dtMap, ltMap] = await Promise.all([
-    fetchInstitutional(date),
-    fetchMargin(date),
-    fetchDayTrade(date),
-    fetchLargeTrader(date),
-  ]);
+  try {
+    // ── 1) 法人：先讀 L1，缺則 FinMind 補抓 ──
+    let instFile = await readInstStock(code);
+    let instOnDate = instFile?.data.find(r => r.date === date);
+    if (!instOnDate) {
+      const fetchStart = instFile?.lastDate ? dateMinusDays(instFile.lastDate, -1) : dateMinusDays(date, 30);
+      try {
+        const fetched = await fetchT86ForStock(code, fetchStart, date);
+        if (fetched.size > 0) {
+          const newRows = Array.from(fetched.entries()).map(([d, v]) => ({ date: d, ...v }));
+          await writeInstStock(code, newRows);
+          instFile = await readInstStock(code);
+          instOnDate = instFile?.data.find(r => r.date === date);
+        }
+      } catch (err) {
+        console.warn(`[/api/chip] FinMind ${code} 失敗:`, err instanceof Error ? err.message : err);
+      }
+    }
 
-  const allSymbols = new Set([...instMap.keys(), ...marginMap.keys(), ...dtMap.keys(), ...ltMap.keys()]);
-  const result = new Map<string, ChipData>();
+    // ── 2) 大戶持股 TDCC L1 + 3) 融資融券、當沖、借券（FinMind 並行） ──
+    const [tdccFile, marginInfo, dayTradeInfo, lendingInfo] = await Promise.all([
+      readTdccStock(code),
+      fetchMarginForStock(code, date),
+      fetchDayTradeForStock(code, date),
+      fetchLendingForStock(code, date),
+    ]);
+    const latestTdcc = tdccFile?.data[tdccFile.data.length - 1];
+    const prevTdcc = tdccFile?.data[tdccFile.data.length - 2];
 
-  for (const sym of allSymbols) {
-    const inst = instMap.get(sym);
-    const margin = marginMap.get(sym);
-    const dt = dtMap.get(sym);
-    const lt = ltMap.get(sym);
-    const { score, grade, signal, detail } = calculateChipScore(inst, margin, dt, lt);
+    // 沒法人也沒大戶也沒融資資料 → 真正無資料
+    if (!instOnDate && !latestTdcc && !marginInfo) {
+      return apiError('not found', 404);
+    }
 
-    result.set(sym, {
-      symbol: sym,
-      name: inst?.name,
-      foreignBuy: inst?.foreignBuy ?? 0,
-      trustBuy: inst?.trustBuy ?? 0,
-      dealerBuy: inst?.dealerBuy ?? 0,
-      totalInstitutional: inst?.totalBuy ?? 0,
-      marginBalance: margin?.marginBalance ?? 0,
-      marginNet: margin?.marginNet ?? 0,
-      shortBalance: margin?.shortBalance ?? 0,
-      shortNet: margin?.shortNet ?? 0,
-      marginUtilRate: margin?.marginUtilRate ?? 0,
-      dayTradeVolume: dt?.dayTradeVolume ?? 0,
-      dayTradeRatio: dt?.dayTradeRatio ?? 0,
-      largeTraderBuy: lt?.buy ?? 0,
-      largeTraderSell: lt?.sell ?? 0,
-      largeTraderNet: lt?.net ?? 0,
-      lendingBalance: 0,  // TODO: 借券 API
-      lendingNet: 0,
-      largeHolderPct: 0,  // TODO: TDCC 集保
-      largeHolderChange: 0,
+    const foreignBuy = instOnDate?.foreign ?? 0;
+    const trustBuy = instOnDate?.trust ?? 0;
+    const dealerBuy = instOnDate?.dealer ?? 0;
+    const totalBuy = instOnDate?.total ?? 0;
+
+    const inst = instOnDate ? { foreignBuy, trustBuy, dealerBuy, totalBuy, name: '' } : undefined;
+    const { score, grade, signal, detail } = calculateChipScore(inst, marginInfo ?? undefined, dayTradeInfo ?? undefined, undefined);
+
+    const data: ChipData = {
+      symbol: code,
+      foreignBuy, trustBuy, dealerBuy,
+      totalInstitutional: totalBuy,
+      marginBalance: marginInfo?.marginBalance ?? 0,
+      marginNet: marginInfo?.marginNet ?? 0,
+      shortBalance: marginInfo?.shortBalance ?? 0,
+      shortNet: marginInfo?.shortNet ?? 0,
+      marginUtilRate: marginInfo?.marginUtilRate ?? 0,
+      dayTradeVolume: dayTradeInfo?.dayTradeVolume ?? 0,
+      dayTradeRatio: dayTradeInfo?.dayTradeRatio ?? 0,
+      largeTraderBuy: 0, largeTraderSell: 0, largeTraderNet: 0,
+      lendingBalance: lendingInfo?.lendingBalance ?? 0,
+      lendingNet: lendingInfo?.lendingNet ?? 0,
+      largeHolderPct: latestTdcc?.holder1000Pct ?? 0,
+      largeHolderChange: latestTdcc && prevTdcc
+        ? +(latestTdcc.holder1000Pct - prevTdcc.holder1000Pct).toFixed(2)
+        : 0,
       chipScore: score,
       chipGrade: grade,
       chipSignal: signal,
       chipDetail: detail,
-    });
+    };
+
+    return apiOk(data);
+  } catch (err) {
+    console.error('[/api/chip] error:', err);
+    return apiError('籌碼資料讀取失敗');
   }
-
-  cache = { date, data: result, ts: Date.now() };
-
-  if (symbol) {
-    const d = result.get(symbol.replace(/\.(TW|TWO)$/i, ''));
-    if (!d) return apiError('not found', 404);
-    return apiOk(d);
-  }
-
-  return apiOk({ date, count: result.size, data: Array.from(result.values()) });
 }

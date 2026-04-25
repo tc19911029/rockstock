@@ -10,6 +10,7 @@ import {
 } from '@/types';
 import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 import { loadMockData } from '@/lib/data/mockData';
 import {
   createAccount,
@@ -371,9 +372,17 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           const { currentIndex, allCandles, account } = get();
           if (allCandles.length === 0) return;
 
-          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+          const ticker = currentStock?.ticker ?? symbol;
+          const isTW = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,6}$/.test(ticker);
+          const tz = isTW ? 'Asia/Taipei' : 'Asia/Shanghai';
+          const market: 'TW' | 'CN' = isTW ? 'TW' : 'CN';
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
           const lastCandle = allCandles[allCandles.length - 1];
           const updatedCandles = [...allCandles];
+
+          // 非交易日（週末/假日）quote API 會回最近一個交易日的收盤價，
+          // 不要拿這個值來偽造一根「今日 bar」造成 04-24/04-25 重複
+          const todayIsTradingDay = isTradingDay(today, market);
 
           if (lastCandle.date === today) {
             // 覆蓋今日 bar
@@ -385,8 +394,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
               close: q.close,
               volume: q.volume || lastCandle.volume,
             };
-          } else if (lastCandle.date < today) {
-            // 新增今日 bar
+          } else if (lastCandle.date < today && todayIsTradingDay) {
+            // 新增今日 bar（只在交易日才加，避免週末/假日把昨日收盤當今日 bar）
             updatedCandles.push({
               date: today,
               open: q.open || q.close,
@@ -396,7 +405,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
               volume: q.volume || 0,
             });
           } else {
-            return; // 歷史回放模式，不覆蓋
+            return; // 歷史回放模式 / 非交易日，不覆蓋不新增
           }
 
           const candles = computeIndicators(updatedCandles.map(c => ({

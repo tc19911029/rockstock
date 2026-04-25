@@ -263,10 +263,29 @@ export class YahooDataProvider implements DataProvider {
     const res = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`Yahoo Finance ${res.status} for ${symbol}`);
 
-    const rawCandles = parseYahooCandles(await res.json(), symbol);
+    const rawJson = await res.json();
+    const rawCandles = parseYahooCandles(rawJson, symbol);
     const filtered = asOfDate
       ? rawCandles.filter(c => c.date <= asOfDate)
       : rawCandles;
+
+    // Yahoo chart API 對當日未收盤的 bar 常回傳 volume=0（尤其是指數如 ^TWII）。
+    // meta.regularMarketVolume 與歷史 timestamps 同源，單位相同，可直接補上。
+    if (!isHistorical && filtered.length > 0) {
+      const meta = (rawJson as {
+        chart?: { result?: Array<{ meta?: { regularMarketVolume?: number; regularMarketTime?: number } }> }
+      })?.chart?.result?.[0]?.meta;
+      if (meta?.regularMarketVolume && meta.regularMarketVolume > 0) {
+        const isUS = !symbol.includes('.');
+        const todayStr = isUS ? getUSDateStr() : getAsiaDateStr();
+        const isTW = /\.(TW|TWO)$/i.test(symbol);
+        const volDivisor = isTW ? 1000 : 1;
+        const last = filtered[filtered.length - 1];
+        if (last.date === todayStr && last.volume === 0) {
+          last.volume = Math.round(meta.regularMarketVolume / volDivisor);
+        }
+      }
+    }
 
     // 即時報價覆蓋：用交易所 API 補上最新一根日 K（消除 Yahoo 15-20 分鐘延遲）
     if (!isHistorical && filtered.length > 0) {

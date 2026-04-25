@@ -4,7 +4,21 @@ import type { Candle } from '@/types';
 import type { TrendState } from '@/lib/analysis/trendAnalysis';
 
 interface MaToggles { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma240: boolean }
-interface Indicators { macd: boolean; kd: boolean; volume: boolean; rsi: boolean }
+interface Indicators {
+  macd: boolean; kd: boolean; volume: boolean; rsi: boolean;
+  /** 外資買賣超副圖 */
+  foreign?: boolean;
+  /** 投信買賣超副圖 */
+  trust?: boolean;
+  /** 自營商買賣超副圖 */
+  dealer?: boolean;
+  /** 散戶買賣超推算副圖 */
+  retail?: boolean;
+  /** 大戶持股 400張↑ 副圖 */
+  h400?: boolean;
+  /** 大戶持股 1000張↑ 副圖 */
+  h1000?: boolean;
+}
 
 interface ChartToolbarProps {
   candle: Candle;
@@ -60,6 +74,16 @@ const INDICATOR_CONFIGS = [
   { key: 'macd' as const, label: 'MACD' },
 ];
 
+/** 籌碼面副圖（僅 TW 有資料） */
+const CHIP_CONFIGS = [
+  { key: 'foreign' as const, label: '外資', title: '外資買賣超（含外資自營商）' },
+  { key: 'trust' as const, label: '投信', title: '投信買賣超' },
+  { key: 'dealer' as const, label: '自營', title: '自營商買賣超（自行買賣 + 避險）' },
+  { key: 'retail' as const, label: '散戶', title: '散戶買賣超（推算 = −三大法人合計）' },
+  { key: 'h400' as const, label: '大戶400', title: '大戶持股 400 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
+  { key: 'h1000' as const, label: '大戶1k', title: '大戶持股 1000 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
+];
+
 export default function ChartToolbar({
   candle, prevCandle, isHover, stockName, trend,
   maToggles, onMaToggle,
@@ -81,7 +105,8 @@ export default function ChartToolbar({
   const chg = prevCandle ? candle.close - prevCandle.close : 0;
   const chgPct = prevCandle ? (chg / prevCandle.close) * 100 : 0;
   const isUp = chg >= 0;
-  const isTW = ticker ? /\.(TW|TWO)$/i.test(ticker) : false;
+  // TW 判定：有 .TW/.TWO 後綴，或純 4-6 位數字（裸代碼 2330/3661 等）
+  const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,6}$/.test(ticker)) : false;
 
   const unrealizedPct = shares && shares > 0 && avgCost && avgCost > 0
     ? ((candle.close - avgCost) / avgCost) * 100
@@ -161,6 +186,22 @@ export default function ChartToolbar({
             }`}
           >{label}</button>
         ))}
+        {isTW && (
+          <>
+            <span className="w-px h-3.5 bg-border/60 mx-0.5" />
+            {CHIP_CONFIGS.map(({ key, label, title }) => (
+              <button key={key}
+                onClick={() => onIndicatorToggle(key)}
+                aria-pressed={!!indicators[key]}
+                aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${label} 副圖`}
+                title={title}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                  indicators[key] ? 'bg-amber-700/60 text-amber-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+                }`}
+              >{label}</button>
+            ))}
+          </>
+        )}
         <span className="w-px h-3.5 bg-border/60 mx-0.5" />
         {onPivotsToggle && (
           <button

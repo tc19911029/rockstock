@@ -42,6 +42,7 @@ export default function WatchlistPage() {
   const [tagInput, setTagInput] = useState<Record<string, string>>({});
   const [data, setData] = useState<Record<string, ConditionData>>({});
   const [addInput, setAddInput] = useState('');
+  const [addDate, setAddDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [addLoading, setAddLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -76,13 +77,53 @@ export default function WatchlistPage() {
     if (!sym) return;
     setAddLoading(true);
     try {
-      const res = await fetch(`/api/watchlist/conditions?symbol=${encodeURIComponent(sym)}&strategyId=${encodeURIComponent(useSettingsStore.getState().activeStrategyId)}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      add(json.symbol, json.name);
-      setData(prev => ({ ...prev, [json.symbol]: { ...json, loading: false } }));
+      // Fast path: resolve symbol + get current price via lightweight quotes endpoint.
+      // This avoids the heavy 1-year candle fetch that times out when providers are down.
+      const isTwDigits = /^\d+$/.test(sym);
+      const candidates = isTwDigits ? [`${sym}.TW`, `${sym}.TWO`] : [sym.toUpperCase()];
+
+      let resolvedSymbol = '';
+      let resolvedName = '';
+      let resolvedPrice = 0;
+
+      for (const candidate of candidates) {
+        try {
+          const qRes = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(candidate)}`);
+          if (!qRes.ok) continue;
+          const qJson = await qRes.json();
+          const q = (qJson.quotes ?? []).find((x: { symbol: string; price: number }) => x.price > 0);
+          if (q) {
+            resolvedSymbol = q.symbol ?? candidate;
+            resolvedName = q.name ?? '';
+            resolvedPrice = q.price;
+            break;
+          }
+        } catch { continue; }
+      }
+
+      if (!resolvedSymbol) throw new Error('找不到股票，請確認代號是否正確');
+
+      // 查詢加入日期的收盤價，用於計算加入至今漲幅
+      let addedPrice: number | undefined;
+      const today = new Date().toISOString().slice(0, 10);
+      if (addDate === today) {
+        addedPrice = resolvedPrice > 0 ? resolvedPrice : undefined;
+      } else {
+        try {
+          const pr = await fetch(`/api/watchlist/price-at?symbol=${encodeURIComponent(resolvedSymbol)}&date=${addDate}`);
+          if (pr.ok) {
+            const pd = await pr.json() as { price?: number };
+            if (pd.price && pd.price > 0) addedPrice = pd.price;
+          }
+        } catch { /* ignore */ }
+      }
+
+      add(resolvedSymbol, resolvedName || resolvedSymbol, addedPrice, addDate + 'T00:00:00.000Z');
       setAddInput('');
-      toast.success(`已加入 ${json.name || json.symbol}`);
+      toast.success(`已加入 ${resolvedName || resolvedSymbol}${addedPrice ? `（基準 ${addedPrice}）` : ''}`);
+
+      // Load full conditions in background (may fail gracefully)
+      fetchConditions(resolvedSymbol);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '找不到股票，請確認代號是否正確');
     } finally {
@@ -102,6 +143,7 @@ export default function WatchlistPage() {
 
   const watchlistHeader = (
     <div className="flex items-center gap-2 text-xs">
+      <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors shrink-0 text-lg leading-none">←</Link>
       <span className="font-bold text-sm whitespace-nowrap">⭐ 自選股</span>
       <span className="text-muted-foreground shrink-0">{items.length} 支</span>
       {lastUpdated && <span className="text-muted-foreground/60 hidden sm:block">{lastUpdated}</span>}
@@ -117,18 +159,30 @@ export default function WatchlistPage() {
       <div className="p-3 sm:p-4 max-w-4xl mx-auto space-y-3 sm:space-y-4">
 
         {/* Add stock input */}
-        <div className="flex gap-2">
-          <input
-            value={addInput}
-            onChange={e => setAddInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAdd()}
-            placeholder="輸入股票代號（如：2330、AAPL）"
-            className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-blue-500"
-          />
-          <Button onClick={handleAdd} disabled={addLoading || !addInput.trim()}
-            className="bg-blue-600 hover:bg-blue-500 font-bold">
-            {addLoading ? '載入中...' : '+ 加入'}
-          </Button>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              value={addInput}
+              onChange={e => setAddInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
+              placeholder="輸入股票代號（如：2330、603986.SS）"
+              className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-blue-500"
+            />
+            <Button onClick={handleAdd} disabled={addLoading || !addInput.trim()}
+              className="bg-blue-600 hover:bg-blue-500 font-bold shrink-0">
+              {addLoading ? '載入中...' : '+ 加入'}
+            </Button>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>加入日期（計算報酬基準）：</span>
+            <input
+              type="date"
+              value={addDate}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={e => setAddDate(e.target.value)}
+              className="bg-secondary border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-blue-500"
+            />
+          </div>
         </div>
         {items.length === 0 && (
           <div className="text-center py-20 text-muted-foreground border border-dashed border-border rounded-xl">

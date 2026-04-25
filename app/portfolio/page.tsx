@@ -93,12 +93,44 @@ export default function PortfolioPage() {
         setShowForm(false);
         return;
       }
-      const res = await fetch(`/api/watchlist/conditions?symbol=${encodeURIComponent(form.symbol)}`);
-      const json = await res.json();
-      const name = res.ok ? json.name : form.symbol;
-      const symbol = res.ok ? json.symbol : form.symbol.toUpperCase();
-      add({ symbol, name, shares: Number(form.shares), costPrice: Number(form.costPrice), buyDate: form.buyDate });
-      if (res.ok) setPrices(prev => ({ ...prev, [symbol]: { price: json.price, changePercent: json.changePercent, loading: false } }));
+      // Fast path: lightweight quotes API resolves symbol + name without 1-year candle fetch
+      // (avoids timeout when providers are down)
+      const sym = form.symbol.trim();
+      const isBareDigits = /^\d+$/.test(sym);
+      const candidates = isBareDigits ? [sym] : [sym.toUpperCase()];
+      let resolvedSymbol = sym.toUpperCase();
+      let resolvedName = sym;
+      let resolvedPrice = 0;
+      let resolvedChangePct = 0;
+
+      for (const candidate of candidates) {
+        try {
+          const qRes = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(candidate)}`);
+          if (!qRes.ok) continue;
+          const qJson = await qRes.json();
+          const q = (qJson.quotes ?? []).find((x: { price: number }) => x.price > 0);
+          if (q) {
+            // Quote endpoint preserves original input as `symbol`, but we want the resolved (with suffix) form
+            // for storage consistency — re-derive it
+            const code = candidate.replace(/\D/g, '');
+            if (/^\d{6}$/.test(code)) {
+              resolvedSymbol = `${code}.${code[0] === '6' || code[0] === '9' ? 'SS' : 'SZ'}`;
+            } else if (/^\d{4,5}$/.test(code)) {
+              // Try .TW first, retry as .TWO is handled inside quotes route — assume .TW
+              resolvedSymbol = `${code}.TW`;
+            } else {
+              resolvedSymbol = q.symbol ?? candidate;
+            }
+            resolvedName = q.name || sym;
+            resolvedPrice = q.price;
+            resolvedChangePct = q.changePercent ?? 0;
+            break;
+          }
+        } catch { continue; }
+      }
+
+      add({ symbol: resolvedSymbol, name: resolvedName, shares: Number(form.shares), costPrice: Number(form.costPrice), buyDate: form.buyDate });
+      if (resolvedPrice > 0) setPrices(prev => ({ ...prev, [resolvedSymbol]: { price: resolvedPrice, changePercent: resolvedChangePct, loading: false } }));
       setForm({ ...EMPTY_FORM, buyDate: new Date().toISOString().split('T')[0] });
       setShowForm(false);
     } finally {

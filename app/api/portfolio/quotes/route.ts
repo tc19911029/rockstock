@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 import { apiOk, apiError } from '@/lib/api/response';
 
 // mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
@@ -250,14 +252,16 @@ export async function GET(req: NextRequest) {
 
   const quotes = [...twQuotes, ...cnQuotes];
 
-  // CN L2 快照補漏（EastMoney/騰訊掛掉時）
+  // CN L2 快照補漏（EastMoney/騰訊掛掉時 + 週末/假日無 live 報價時）
   const missingCN = cnEntries.filter(
     e => !quotes.some(q => q.symbol === e.original),
   );
   if (missingCN.length > 0) {
+    // 週末/假日：用最近交易日；交易日：用今天（盤中快照可能還沒寫成今天）
+    const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    const lookupCN = isTradingDay(todayCN, 'CN') ? todayCN : getLastTradingDay('CN');
     try {
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-      const cnSnap = await readIntradaySnapshot('CN', today);
+      const cnSnap = await readIntradaySnapshot('CN', lookupCN);
       if (cnSnap) {
         for (const e of missingCN) {
           const code = e.resolved.replace(/\.(SS|SZ)$/i, '');
@@ -268,6 +272,27 @@ export async function GET(req: NextRequest) {
         }
       }
     } catch { /* CN L2 fallback failed */ }
+  }
+
+  // TW L2 快照補漏（同樣邏輯：週末/假日先補 L2）
+  const missingTW = twEntries.filter(
+    e => !quotes.some(q => q.symbol === e.original),
+  );
+  if (missingTW.length > 0) {
+    const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    const lookupTW = isTradingDay(todayTW, 'TW') ? todayTW : getLastTradingDay('TW');
+    try {
+      const twSnap = await readIntradaySnapshot('TW', lookupTW);
+      if (twSnap) {
+        for (const e of missingTW) {
+          const code = e.resolved.replace(/\.(TW|TWO)$/i, '');
+          const q = twSnap.quotes.find(qq => qq.symbol === code);
+          if (q && q.close > 0) {
+            quotes.push({ symbol: e.original, price: q.close, changePercent: q.changePercent ?? 0, name: q.name || undefined });
+          }
+        }
+      }
+    } catch { /* TW L2 fallback failed */ }
   }
 
   return apiOk(

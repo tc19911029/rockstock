@@ -49,17 +49,17 @@ export class ChinaScanner extends MarketScanner {
       try {
         const { loadLocalCandlesWithTolerance } = await import('@/lib/datasource/LocalCandleStore');
         const targetDate = asOfDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
-        const local = await loadLocalCandlesWithTolerance('000300.SS', 'CN', targetDate, 5);
+        const local = await loadLocalCandlesWithTolerance('000001.SS', 'CN', targetDate, 5);
         if (local && local.candles.length >= 20) {
           candles = local.candles;
         }
       } catch { /* local read failed, fallback to API */ }
 
-      // 歷史重掃時不打 API（000300.SS 不在 L1，打 API 只會 timeout）
+      // 歷史重掃時不打 API（000001.SS 不在 L1，打 API 只會 timeout）
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
       const isHistorical = !!asOfDate && asOfDate < today;
       if (candles.length < 20 && !isHistorical) {
-        const fetched = await dataProvider.getHistoricalCandles('000300.SS', '1y', asOfDate);
+        const fetched = await dataProvider.getHistoricalCandles('000001.SS', '1y', asOfDate);
         if (fetched.length >= 20) {
           // 存進 L1，下次直接從 cache 讀（省掉每次 13s API 呼叫）
           const { saveLocalCandles } = await import('@/lib/datasource/LocalCandleStore');
@@ -67,7 +67,7 @@ export class ChinaScanner extends MarketScanner {
             date: c.date, open: c.open, high: c.high,
             low: c.low, close: c.close, volume: c.volume,
           }));
-          saveLocalCandles('000300.SS', 'CN', raw).catch(() => {});
+          saveLocalCandles('000001.SS', 'CN', raw).catch(() => {});
         }
         candles = fetched;
       }

@@ -104,7 +104,7 @@ export default function HomePage() {
       });
       window.history.replaceState({}, '', '/');
     } else if (allCandles.length === 0) {
-      loadStock('2330', '1d', '2y').catch(() => {});
+      loadStock('^TWII', '1d', '2y').catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -189,7 +189,31 @@ export default function HomePage() {
   const [showDescendingTrendline, setShowDescendingTrendline] = useState(false);
   const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
   const [showBollinger, setShowBollinger] = useState(false);
-  const [indicators, setIndicators] = useState({ macd: true, kd: true, volume: true, rsi: false });
+  const [indicators, setIndicators] = useState({
+    macd: true, kd: true, volume: true, rsi: false,
+    foreign: false, trust: false, dealer: false, retail: false,
+    h400: false, h1000: false,
+  });
+  // ── 籌碼面資料（法人 + 大戶），僅 TW 抓取，任一籌碼副圖開啟時才 fetch ──
+  const [chips, setChips] = useState<{
+    inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
+    tdcc: Array<{ date: string; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+  } | null>(null);
+  useEffect(() => {
+    const ticker = currentStock?.ticker;
+    if (!ticker) { setChips(null); return; }
+    const anyChipOn = indicators.foreign || indicators.trust || indicators.dealer
+      || indicators.retail || indicators.h400 || indicators.h1000;
+    if (!anyChipOn) return;
+    const isTW = /\.(TW|TWO)$/i.test(ticker) || /^\d+$/.test(ticker);
+    if (!isTW) { setChips(null); return; }
+    const ctrl = new AbortController();
+    fetch(`/api/stock/chips?symbol=${encodeURIComponent(ticker)}&days=180`, { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(json => { if (json.ok) setChips({ inst: json.inst ?? [], tdcc: json.tdcc ?? [] }); })
+      .catch(err => { if (err.name !== 'AbortError') console.warn('[chips] load failed:', err); });
+    return () => ctrl.abort();
+  }, [currentStock?.ticker, indicators.foreign, indicators.trust, indicators.dealer, indicators.retail, indicators.h400, indicators.h1000]);
   const handleScanSelectStock = useCallback((stock: SelectedStock) => {
     const scanDate = useBacktestStore.getState().scanDate;
     loadStock(stock.symbol, '1d', '2y', scanDate || undefined).catch((e: Error) => {
@@ -492,7 +516,7 @@ export default function HomePage() {
             {showIndicators && (
               <div className="flex-1 min-h-0 overflow-hidden">
                 <ErrorBoundary>
-                  <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} />
+                  <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} chips={chips} />
                 </ErrorBoundary>
               </div>
             )}
@@ -702,7 +726,7 @@ export default function HomePage() {
                 {showIndicators && (
                   <div className="flex-[2] min-h-0 border-t border-border">
                     <ErrorBoundary>
-                      <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} />
+                      <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} chips={chips} />
                     </ErrorBoundary>
                   </div>
                 )}

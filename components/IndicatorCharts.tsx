@@ -374,22 +374,276 @@ function RSIChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; h
   );
 }
 
+// ── Chip series（外資/投信/自營/散戶 + 大戶持股） ────────────────────────────
+interface ChipsData {
+  inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
+  tdcc: Array<{ date: string; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+}
+type InstSeries = ChipsData; // 別名，保持原型別介面
+
+type ChipSeriesKey = 'foreign' | 'trust' | 'dealer' | 'retail';
+
+const CHIP_LABELS: Record<ChipSeriesKey, string> = {
+  foreign: '外資',
+  trust: '投信',
+  dealer: '自營商',
+  retail: '散戶',
+};
+
+const CHIP_DESCRIPTIONS: Partial<Record<ChipSeriesKey, string>> = {
+  retail: '推算 = −三大法人合計',
+};
+
+/** 從 InstSeries 取出指定 series 的數值（以張為單位） */
+function extractChipValue(row: InstSeries['inst'][number] | undefined, key: ChipSeriesKey): number {
+  if (!row) return 0;
+  switch (key) {
+    case 'foreign': return row.foreign;
+    case 'trust': return row.trust;
+    case 'dealer': return row.dealer;
+    case 'retail': return -row.total; // 散戶推算
+  }
+}
+
+function ChipChart({ seriesKey, candles, chips, hoverCandle }: {
+  seriesKey: ChipSeriesKey;
+  candles: CandleWithIndicators[];
+  chips?: InstSeries | null;
+  hoverCandle?: CandleWithIndicators | null;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const candlesRef = useRef<CandleWithIndicators[]>(candles);
+  const chipsRef = useRef<InstSeries | null | undefined>(chips);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
+  useEffect(() => { chipsRef.current = chips; }, [chips]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = makeChart(containerRef.current, false);
+    seriesRef.current = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    chartRef.current = chart;
+
+    const unsub = subscribeRangeSync((range: LogicalRange | null) => {
+      if (range) chart.timeScale().setVisibleLogicalRange(range);
+    });
+    // ── Crosshair sync from main chart：跟主圖+其他副圖共享垂直對齊線 ──
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !seriesRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const c = candlesRef.current.find(x => x.date === time);
+      if (!c) return;
+      const row = (chipsRef.current?.inst ?? []).find(r => r.date === time);
+      const v = extractChipValue(row, seriesKey);
+      chartRef.current.setCrosshairPosition(v, toTime(time), seriesRef.current);
+    });
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) chart.applyOptions({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight || 80,
+      });
+    });
+    ro.observe(containerRef.current);
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
+  }, [seriesKey]);
+
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    const { bull, bear } = getBullBearColors();
+    const map = new Map<string, InstSeries['inst'][number]>();
+    for (const r of chips?.inst ?? []) map.set(r.date, r);
+    seriesRef.current.setData(candles.map(c => {
+      const v = extractChipValue(map.get(c.date), seriesKey);
+      return { time: toTime(c.date), value: v, color: v >= 0 ? `${bull}cc` : `${bear}cc` };
+    }));
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chartRef.current) chartRef.current.timeScale().setVisibleLogicalRange(r);
+    });
+  }, [candles, chips, seriesKey]);
+
+  const last = candles[candles.length - 1];
+  const display = hoverCandle ?? last;
+  const row = display ? (chips?.inst ?? []).find(r => r.date === display.date) : null;
+  const value = row ? extractChipValue(row, seriesKey) : null;
+  const desc = CHIP_DESCRIPTIONS[seriesKey];
+
+  return (
+    <div className="relative h-full">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+        <span className="text-muted-foreground">{CHIP_LABELS[seriesKey]}買賣超(張)</span>
+        <span className={(value ?? 0) >= 0 ? 'text-bull' : 'text-bear'}>
+          {value != null ? `${value >= 0 ? '+' : ''}${value.toLocaleString()}` : '—'}
+        </span>
+        {desc && <span className="text-muted-foreground/50 text-[10px]">{desc}</span>}
+      </div>
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
+}
+
+// ── 大戶持股（TDCC 集保戶股權分散） — 折線副圖 ──────────────────────────────
+
+type HolderKey = 'h400' | 'h1000';
+const HOLDER_LABELS: Record<HolderKey, string> = {
+  h400: '大戶 400張↑',
+  h1000: '大戶 1000張↑',
+};
+const HOLDER_COLORS: Record<HolderKey, string> = {
+  h400: '#a855f7',  // 紫
+  h1000: '#ec4899', // 粉
+};
+
+function HolderChart({ holderKey, candles, chips, hoverCandle }: {
+  holderKey: HolderKey;
+  candles: CandleWithIndicators[];
+  chips?: ChipsData | null;
+  hoverCandle?: CandleWithIndicators | null;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const candlesRef = useRef<CandleWithIndicators[]>(candles);
+  const chipsRef = useRef<ChipsData | null | undefined>(chips);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
+  useEffect(() => { chipsRef.current = chips; }, [chips]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = makeChart(containerRef.current, false);
+    seriesRef.current = chart.addSeries(LineSeries, {
+      color: HOLDER_COLORS[holderKey],
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+    });
+    chartRef.current = chart;
+
+    const unsub = subscribeRangeSync((range: LogicalRange | null) => {
+      if (range) chart.timeScale().setVisibleLogicalRange(range);
+    });
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !seriesRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const row = (chipsRef.current?.tdcc ?? []).find(r => r.date <= time);
+      const v = row ? (holderKey === 'h400' ? row.holder400Pct : row.holder1000Pct) : 0;
+      chartRef.current.setCrosshairPosition(v, toTime(time), seriesRef.current);
+    });
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) chart.applyOptions({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight || 80,
+      });
+    });
+    ro.observe(containerRef.current);
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
+  }, [holderKey]);
+
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    const tdccData = chips?.tdcc ?? [];
+    if (tdccData.length === 0) { seriesRef.current.setData([]); return; }
+
+    // TDCC 是週資料，需要對齊到日 K：每根 K 棒取「最近一個」TDCC 數據（forward fill）
+    const sortedTdcc = [...tdccData].sort((a, b) => a.date.localeCompare(b.date));
+    let tdccIdx = 0;
+    let lastValue: number | null = null;
+    const data: { time: Time; value: number }[] = [];
+    for (const c of candles) {
+      // 推進 tdccIdx 到 <= c.date 的最後一個
+      while (tdccIdx < sortedTdcc.length && sortedTdcc[tdccIdx].date <= c.date) {
+        const r = sortedTdcc[tdccIdx];
+        lastValue = holderKey === 'h400' ? r.holder400Pct : r.holder1000Pct;
+        tdccIdx++;
+      }
+      if (lastValue != null) {
+        data.push({ time: toTime(c.date), value: lastValue });
+      }
+    }
+    seriesRef.current.setData(data);
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chartRef.current) chartRef.current.timeScale().setVisibleLogicalRange(r);
+    });
+  }, [candles, chips, holderKey]);
+
+  const last = candles[candles.length - 1];
+  const display = hoverCandle ?? last;
+  const tdccData = chips?.tdcc ?? [];
+  // 找日期 <= display.date 的最後一筆 TDCC（forward fill 邏輯）
+  let row: ChipsData['tdcc'][number] | null = null;
+  if (display) {
+    for (let i = tdccData.length - 1; i >= 0; i--) {
+      if (tdccData[i].date <= display.date) { row = tdccData[i]; break; }
+    }
+  }
+  const value = row ? (holderKey === 'h400' ? row.holder400Pct : row.holder1000Pct) : null;
+
+  return (
+    <div className="relative h-full">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+        <span className="text-muted-foreground">{HOLDER_LABELS[holderKey]}</span>
+        <span style={{ color: HOLDER_COLORS[holderKey] }}>
+          {value != null ? `${value.toFixed(2)}%` : '—'}
+        </span>
+        {row && <span className="text-muted-foreground/50 text-[10px]">基準 {row.date}</span>}
+        {tdccData.length === 0 && <span className="text-muted-foreground/50 text-[10px]">無資料（每週四公布）</span>}
+      </div>
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
+}
+
 // ── Combined ──────────────────────────────────────────────────────────────────
-export default function IndicatorCharts({ candles, hoverCandle, indicators, ticker }: {
+export interface IndicatorToggles {
+  macd: boolean;
+  kd: boolean;
+  volume: boolean;
+  rsi?: boolean;
+  /** 外資買賣超 — 僅 TW */
+  foreign?: boolean;
+  /** 投信買賣超 — 僅 TW */
+  trust?: boolean;
+  /** 自營商買賣超 — 僅 TW */
+  dealer?: boolean;
+  /** 散戶買賣超推算 — 僅 TW */
+  retail?: boolean;
+  /** 大戶持股 400張↑ — 僅 TW */
+  h400?: boolean;
+  /** 大戶持股 1000張↑ — 僅 TW */
+  h1000?: boolean;
+}
+
+export default function IndicatorCharts({ candles, hoverCandle, indicators, ticker, chips }: {
   candles: CandleWithIndicators[];
   hoverCandle?: CandleWithIndicators | null;
-  indicators?: { macd: boolean; kd: boolean; volume: boolean; rsi?: boolean };
+  indicators?: IndicatorToggles;
   /** 股票代碼，用於判斷市場（.TW/.TWO=台股，量顯示為張） */
   ticker?: string;
+  /** 籌碼面資料（法人/大戶），由父元件 fetch 後傳入 */
+  chips?: InstSeries | null;
 }) {
   if (candles.length === 0) return null;
-  const isTW = ticker ? /\.(TW|TWO)$/i.test(ticker) : false;
+  // TW 判定：有 .TW/.TWO 後綴，或純 4-6 位數字（裸代碼如 2330）
+  const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,6}$/.test(ticker)) : false;
   const show = indicators ?? { macd: true, kd: true, volume: true, rsi: false };
   const panels = [
     show.volume && <div key="vol" className="flex-1 min-h-0 bg-card"><VolumeChart candles={candles} hoverCandle={hoverCandle} isTW={isTW} /></div>,
     show.kd && <div key="kd" className="flex-1 min-h-0 bg-card"><KDChart candles={candles} hoverCandle={hoverCandle} /></div>,
     show.rsi && <div key="rsi" className="flex-1 min-h-0 bg-card"><RSIChart candles={candles} hoverCandle={hoverCandle} /></div>,
     show.macd && <div key="macd" className="flex-1 min-h-0 bg-card"><MACDChart candles={candles} hoverCandle={hoverCandle} /></div>,
+    show.foreign && isTW && <div key="foreign" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="foreign" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.trust && isTW && <div key="trust" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="trust" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.dealer && isTW && <div key="dealer" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="dealer" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.retail && isTW && <div key="retail" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="retail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.h400 && isTW && <div key="h400" className="flex-1 min-h-0 bg-card"><HolderChart holderKey="h400" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.h1000 && isTW && <div key="h1000" className="flex-1 min-h-0 bg-card"><HolderChart holderKey="h1000" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
   ].filter(Boolean);
 
   if (panels.length === 0) return <div className="h-full bg-card flex items-center justify-center text-xs text-muted-foreground/60">請開啟至少一個指標面板</div>;

@@ -241,10 +241,29 @@ export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
             <div className="font-medium text-foreground mb-1">L1 歷史K線</div>
             <div className="space-y-0.5 pl-2">
               <Row label="狀態"><StatusSpan status={health.health}>{l1Label}</StatusSpan></Row>
-              <Row label="覆蓋率">{coverage}</Row>
-              <Row label="Gap 股票">{health.stocksWithGaps ?? '?'} 支</Row>
-              <Row label="過期股票">{health.stocksStale ?? '?'} 支</Row>
-              <Row label="下載失敗">{health.downloadFailed ?? '?'} 支</Row>
+              <Row label="L1 覆蓋率">
+                <span className={health.coverageRate != null && health.coverageRate >= 0.99 ? 'text-green-400 font-medium' : 'text-yellow-400'}>
+                  {coverage}
+                </span>
+                <span className="text-[10px] text-muted-foreground/70 ml-1">（本地有資料的比例）</span>
+              </Row>
+              <Row label="歷史 Gap">
+                {health.stocksWithGaps ?? '?'} 支
+                <span className="text-[10px] text-muted-foreground/70 ml-1">（多為停牌/上市前）</span>
+              </Row>
+              <Row label="近 3 日落後">
+                <span className={(health.stocksStale ?? 0) > 5 ? 'text-yellow-400' : 'text-foreground'}>
+                  {health.stocksStale ?? '?'} 支
+                </span>
+              </Row>
+              <Row label="當次抓取失敗">
+                <span className="text-muted-foreground">{health.downloadFailed ?? '?'} 支</span>
+                <span className="text-[10px] text-muted-foreground/70 ml-1">
+                  {health.coverageRate != null && health.coverageRate >= 0.99
+                    ? '（不影響覆蓋率，L1 已有舊資料）'
+                    : '（含未補回的股票）'}
+                </span>
+              </Row>
               <Row label="校驗時間">{l1TimeText}</Row>
             </div>
           </div>

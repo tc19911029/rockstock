@@ -37,6 +37,11 @@ const stockQuerySchema = z.object({
   scanDate: z.string().optional(),         // 'YYYY-MM-DD' 掃描日期，若 L1 缺該日則從 L2 快照補入
 });
 
+const INDEX_NAMES: Record<string, string> = {
+  '^TWII': '台灣加權指數',
+  '^000001': '上證指數',
+};
+
 /** 解析 symbol 並加上交易所後綴 */
 function resolveSymbol(symbol: string): { ticker: string; candidates: string[]; isTW: boolean; isCN: boolean } {
   const isTW = /^\d{4,5}$/.test(symbol) || /^\d{4,5}\.(TW|TWO)$/i.test(symbol);
@@ -273,6 +278,8 @@ export async function GET(req: NextRequest) {
           const cnName = await getCNChineseName(pureCode);
           if (cnName) name = cnName;
         }
+        const indexName = INDEX_NAMES[candidates[0].toUpperCase()];
+        if (indexName) name = indexName;
         return apiOk({
           ticker: candidates[0],
           name,
@@ -346,6 +353,8 @@ export async function GET(req: NextRequest) {
       const cnName = await getCNChineseName(pureCode);
       if (cnName) name = cnName;
     }
+    const indexName = INDEX_NAMES[ticker.toUpperCase()];
+    if (indexName) name = indexName;
 
     return apiOk({ ticker, name, currency: '', interval, candles, totalBars: candles.length });
   } catch (err: unknown) {

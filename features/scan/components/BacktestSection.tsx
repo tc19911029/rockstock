@@ -318,7 +318,7 @@ export function BacktestSection() {
                       <td className="py-1.5 px-2 text-center whitespace-nowrap">
                         <Link href={`/?load=${sym}&date=${scanDate}`}
                           className="text-[10px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 mr-1">走圖</Link>
-                        <Button onClick={() => { useWatchlistStore.getState().add(r.symbol, r.name); }}
+                        <Button onClick={() => { useWatchlistStore.getState().add(r.symbol, r.name, r.price); }}
                           variant="outline"
                           size="sm"
                           className="text-[10px] text-amber-400 hover:text-amber-300 px-1.5 py-0.5 h-auto border-amber-700/50 hover:bg-amber-900/30 bg-transparent">

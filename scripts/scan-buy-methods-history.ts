@@ -19,7 +19,7 @@ import { detectBreakoutEntry, detectConsolidationBreakout } from '@/lib/analysis
 import { detectVReversal } from '@/lib/analysis/vReversalDetector';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
-import { evaluateSixConditions } from '@/lib/analysis/trendAnalysis';
+import { evaluateSixConditions, detectTrend, detectTrendPosition } from '@/lib/analysis/trendAnalysis';
 import { saveScanSession } from '@/lib/storage/scanStorage';
 import { getTWSENames } from '@/lib/datasource/TWSENames';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
@@ -56,6 +56,11 @@ async function scanMarketDate(
   }
   const symbols = Array.from(rank.keys());
 
+  const industryMap = new Map<string, string | undefined>();
+  for (const s of allStocks) {
+    industryMap.set(s.symbol, (s as { industry?: string }).industry);
+  }
+
   const buckets: Record<BuyMethod, StockScanResult[]> = { B: [], C: [], D: [], E: [], F: [] };
 
   for (const sym of symbols) {
@@ -85,16 +90,22 @@ async function scanMarketDate(
         reason: detail,
       });
 
+      const trendState = detectTrend(candles, lastIdx);
+      const trendPosition = detectTrendPosition(candles, lastIdx);
+      const turnoverRank = rank.get(sym);
+
       const base = {
         symbol: sym,
         name,
         market,
+        industry: industryMap.get(sym),
         price: last.close,
         changePercent,
         volume: last.volume,
         sixConditionsScore: 0,
-        trendState: '多頭' as const,
-        trendPosition: '' as const,
+        trendState,
+        trendPosition,
+        turnoverRank,
         scanTime: new Date().toISOString(),
       };
 

@@ -95,6 +95,25 @@ export default function BottomPanel() {
         }
         return next;
       });
+
+      // Auto-backfill: 用 quote 帶回的真實 name 寫回 store，
+      // 解決舊資料只存了代碼當 name 的問題（如 603986/603986 → 603986/兆易創新）
+      const portfolioState = usePortfolioStore.getState();
+      for (const q of quotes) {
+        if (!q.name || q.price <= 0) continue;
+        const holding = portfolioState.holdings.find(h => h.symbol === q.symbol);
+        if (!holding) continue;
+        const codeOnly = stripSuffix(holding.symbol);
+        const namePlaceholder = !holding.name || holding.name === holding.symbol || holding.name === codeOnly;
+        const marketMissing = !holding.market;
+        if (namePlaceholder || marketMissing) {
+          const market: 'TW' | 'CN' = classifyMarket(holding.symbol) === 'CN' ? 'CN' : 'TW';
+          portfolioState.update(holding.id, {
+            ...(namePlaceholder ? { name: q.name } : {}),
+            ...(marketMissing ? { market } : {}),
+          });
+        }
+      }
     } catch {
       setPrices(prev => {
         const next = { ...prev };
@@ -393,6 +412,117 @@ interface WatchlistContentProps {
   prices: Record<string, PriceInfo>;
 }
 
+function WatchlistNoteEditor({ symbol, note }: { symbol: string; note?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(note ?? '');
+  const updateNote = useWatchlistStore(s => s.updateNote);
+
+  const save = () => {
+    updateNote(symbol, val.trim());
+    setEditing(false);
+  };
+
+  return (
+    <div className="px-3 pb-1.5" onClick={e => e.stopPropagation()}>
+      {editing ? (
+        <input
+          autoFocus
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onBlur={save}
+          onKeyDown={e => {
+            if (e.key === 'Enter') save();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          className="w-full text-[9px] bg-muted/40 border border-border rounded px-1.5 py-0.5 text-foreground outline-none"
+          placeholder="加備注..."
+        />
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          className="w-full text-left text-[9px] text-muted-foreground hover:text-foreground/70 truncate"
+        >
+          {val ? val : <span className="italic opacity-50">加備注...</span>}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** 自動補取加入時收盤價（L1 本地快取，失敗靜默） */
+function useFetchAddedPrice(symbol: string, addedAt: string, hasPrice: boolean) {
+  const updateAddedPrice = useWatchlistStore(s => s.updateAddedPrice);
+  useEffect(() => {
+    if (hasPrice) return;
+    const date = addedAt.slice(0, 10);
+    fetch(`/api/watchlist/price-at?symbol=${encodeURIComponent(symbol)}&date=${date}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { price?: number } | null) => {
+        if (d?.price && d.price > 0) updateAddedPrice(symbol, d.price);
+      })
+      .catch(() => {});
+  }, [symbol, addedAt, hasPrice, updateAddedPrice]);
+}
+
+function WatchlistItemRow({ item, prices }: { item: ReturnType<typeof useWatchlistStore.getState>['items'][0]; prices: Record<string, PriceInfo> }) {
+  const p = prices[item.symbol];
+  const cur = p?.price ?? 0;
+  const isUp = (p?.changePercent ?? 0) >= 0;
+  const sinceAddedPct = item.addedPrice && cur > 0
+    ? ((cur - item.addedPrice) / item.addedPrice) * 100
+    : null;
+
+  useFetchAddedPrice(item.symbol, item.addedAt, !!item.addedPrice);
+
+  return (
+    <div className="border-b border-border last:border-b-0">
+      <button
+        onClick={() => { const s = useReplayStore.getState(); s.loadStock(stripSuffix(item.symbol)).then(() => s.startPolling()); }}
+        className="w-full px-3 pt-2 pb-1 hover:bg-muted/60 transition-colors text-left"
+      >
+        {/* Row 1: 名稱+代號 | 現價+今日% */}
+        <div className="flex items-baseline justify-between">
+          <div className="flex items-baseline gap-1.5 min-w-0">
+            <span className="text-xs font-bold text-foreground truncate">{p?.name ?? item.name}</span>
+            <span className="text-[10px] text-muted-foreground shrink-0">{stripSuffix(item.symbol)}</span>
+          </div>
+          <div className="text-right shrink-0 ml-2">
+            {p?.loading ? (
+              <span className="text-[10px] text-muted-foreground animate-pulse">...</span>
+            ) : cur > 0 ? (
+              <span className="text-[11px] font-mono font-bold text-foreground">
+                {cur.toFixed(cur >= 100 ? 0 : 2)}
+                <span className={`ml-1 text-[9px] ${isUp ? 'text-bull' : 'text-bear'}`}>
+                  {isUp ? '+' : ''}{(p?.changePercent ?? 0).toFixed(2)}%
+                </span>
+              </span>
+            ) : (
+              <span className="text-[10px] text-muted-foreground">—</span>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: 加入日期 | 加入至今漲幅 */}
+        <div className="flex items-baseline justify-between mt-0.5">
+          <span className="text-[9px] text-muted-foreground">
+            加入 {item.addedAt.slice(0, 10)}
+          </span>
+          {sinceAddedPct != null ? (
+            <span className={`text-[9px] font-mono ${sinceAddedPct >= 0 ? 'text-bull' : 'text-bear'}`}>
+              {sinceAddedPct >= 0 ? '+' : ''}{sinceAddedPct.toFixed(2)}%
+            </span>
+          ) : (
+            <span className="text-[9px] text-muted-foreground/40 animate-pulse">抓取中...</span>
+          )}
+        </div>
+      </button>
+
+      {/* Row 3: 備注（獨立，不觸發走圖） */}
+      <WatchlistNoteEditor symbol={item.symbol} note={item.note} />
+    </div>
+  );
+}
+
 function WatchlistContent({ watchlist, prices }: WatchlistContentProps) {
   if (watchlist.length === 0) {
     return (
@@ -403,44 +533,61 @@ function WatchlistContent({ watchlist, prices }: WatchlistContentProps) {
     );
   }
 
+  const twList = watchlist.filter(i => classifyMarket(i.symbol) === 'TW');
+  const cnList = watchlist.filter(i => classifyMarket(i.symbol) === 'CN');
+
+  function marketSummary(list: typeof watchlist, label: string) {
+    if (list.length === 0) return null;
+    const withReturn = list.filter(i => i.addedPrice && (prices[i.symbol]?.price ?? 0) > 0);
+    const avgPct = withReturn.length > 0
+      ? withReturn.reduce((sum, i) => {
+          const cur = prices[i.symbol]?.price ?? 0;
+          return sum + ((cur - i.addedPrice!) / i.addedPrice!) * 100;
+        }, 0) / withReturn.length
+      : null;
+
+    return (
+      <div className="grid grid-cols-3 gap-px bg-muted text-center text-[10px] border-b border-border">
+        <div className="bg-card py-1 px-1">
+          <div className="text-[9px] text-sky-400 font-bold">{label}</div>
+          <div className="text-muted-foreground">{list.length} 支</div>
+        </div>
+        <div className="bg-card py-1 px-1 col-span-2">
+          <div className="text-muted-foreground">加入平均漲幅</div>
+          {avgPct != null ? (
+            <div className={`font-mono font-bold text-xs ${avgPct >= 0 ? 'text-bull' : 'text-bear'}`}>
+              {avgPct >= 0 ? '+' : ''}{avgPct.toFixed(2)}%
+            </div>
+          ) : (
+            <div className="text-muted-foreground/40 text-[9px]">計算中...</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const hasBoth = twList.length > 0 && cnList.length > 0;
+
   return (
     <div>
-      <div className="divide-y divide-border">
-        {watchlist.map(item => {
-          const p = prices[item.symbol];
-          const isUp = (p?.changePercent ?? 0) >= 0;
+      {/* 市場匯總（有台股+陸股時各顯一行） */}
+      {hasBoth ? (
+        <>
+          {marketSummary(twList, '台股')}
+          {marketSummary(cnList, '陸股')}
+        </>
+      ) : twList.length > 0 ? (
+        marketSummary(twList, '台股')
+      ) : (
+        marketSummary(cnList, '陸股')
+      )}
 
-          return (
-            <button
-              key={item.symbol}
-              onClick={() => { const s = useReplayStore.getState(); s.loadStock(stripSuffix(item.symbol)).then(() => s.startPolling()); }}
-              className="flex items-center gap-2 px-3 py-2 hover:bg-muted/60 transition-colors w-full text-left"
-            >
-              <div className="shrink-0 w-14">
-                <div className="text-xs font-bold text-foreground leading-tight">{p?.name ?? item.name}</div>
-                <div className="text-[10px] text-muted-foreground">{stripSuffix(item.symbol)}</div>
-              </div>
-
-              {p?.loading ? (
-                <span className="text-[10px] text-muted-foreground animate-pulse">載入中...</span>
-              ) : p && p.price > 0 ? (
-                <>
-                  <div className="text-right shrink-0">
-                    <div className="text-[11px] font-mono font-bold text-foreground">{p.price.toFixed(p.price >= 100 ? 0 : 1)}</div>
-                  </div>
-                  <div className={`text-right shrink-0 w-14 text-[11px] font-mono font-bold ${isUp ? 'text-bull' : 'text-bear'}`}>
-                    {isUp ? '+' : ''}{p.changePercent.toFixed(2)}%
-                  </div>
-                </>
-              ) : (
-                <span className="text-[10px] text-muted-foreground">—</span>
-              )}
-            </button>
-          );
-        })}
+      <div>
+        {watchlist.map(item => (
+          <WatchlistItemRow key={item.symbol} item={item} prices={prices} />
+        ))}
       </div>
 
-      {/* Footer link */}
       <div className="px-3 py-1.5 text-center border-t border-border">
         <Link href="/watchlist" className="text-[10px] text-sky-400 hover:text-sky-300">
           查看完整自選股 →

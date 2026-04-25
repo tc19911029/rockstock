@@ -393,7 +393,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                   <Button
                     onClick={(e) => {
                       e.stopPropagation();
-                      useWatchlistStore.getState().add(r.symbol, r.name);
+                      useWatchlistStore.getState().add(r.symbol, r.name, r.price);
                       setJustAdded(r.symbol);
                       setTimeout(() => setJustAdded(prev => prev === r.symbol ? null : prev), 1200);
                     }}

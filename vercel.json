@@ -115,6 +115,7 @@
     { "path": "/api/cron/scan-bm?market=CN&method=C", "schedule": "18 8 * * 1-5" },
     { "path": "/api/cron/scan-bm?market=CN&method=D", "schedule": "24 8 * * 1-5" },
     { "path": "/api/cron/scan-bm?market=CN&method=E", "schedule": "30 8 * * 1-5" },
-    { "path": "/api/cron/scan-bm?market=CN&method=F", "schedule": "36 8 * * 1-5" }
+    { "path": "/api/cron/scan-bm?market=CN&method=F", "schedule": "36 8 * * 1-5" },
+    { "path": "/api/cron/fetch-tdcc-week", "schedule": "30 10 * * 4" }
   ]
 }

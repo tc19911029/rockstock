@@ -39,7 +39,7 @@ export async function register() {
   if (process.env.VERCEL || process.env.NODE_ENV === 'test') return;
 
   console.log('[local-cron] 本地開發模式：定期呼叫 API route 模擬 Vercel Cron');
-  console.log('[local-cron] L2 刷新：TW / CN 每 5 分鐘；打板開盤確認：9:25–9:35 CST；L1 下載：盤後一次');
+  console.log('[local-cron] L2：每 5 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN');
 
   // ── 盤中：買法掃描（B/C/D/E/F），輪流觸發 —— 獨立於 A 六條件避免單輪超時 ──
   async function scanBuyMethodIntraday(market: 'TW' | 'CN', method: 'B' | 'C' | 'D' | 'E' | 'F') {
@@ -56,7 +56,46 @@ export async function register() {
     }
   }
 
-  // ── 盤中：L2 刷新（update-intraday；L4 掃描由 Vercel scan-intraday 或手動觸發） ──
+  // ── 盤中：六條件掃描（scan-intraday），每 10 分鐘 ──
+  async function scanIntradayDaily(market: 'TW' | 'CN') {
+    if (!isMarketOpen(market)) return;
+    const data = await callRoute(
+      `/api/cron/scan-intraday?market=${market}`,
+      `${market} scan-intraday`,
+    ) as { data?: { resultCount?: number; skipped?: boolean; reason?: string } } | null;
+    const payload = data?.data ?? data ?? {};
+    if ((payload as { skipped?: boolean }).skipped) {
+      console.log(`[local-cron] ${market} scan-intraday 跳過：${(payload as { reason?: string }).reason}`);
+    } else {
+      console.log(`[local-cron] ${market} scan-intraday: ${(payload as { resultCount?: number }).resultCount ?? -1} 檔`);
+    }
+  }
+
+  // ── 盤後：六條件 post_close 掃描（scan-tw / scan-cn），每日一次 ──
+  // TW：14:10 CST；CN：16:10 CST（確保 L1 已下載）
+  const postCloseDailyDone = { TW: '', CN: '' };
+  async function scanPostCloseDaily(market: 'TW' | 'CN') {
+    const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+    const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
+    const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+    const hhmm = nowLocal.getHours() * 100 + nowLocal.getMinutes();
+
+    const windowStart = market === 'TW' ? 1410 : 1610;
+    const windowEnd = market === 'TW' ? 1700 : 1900;
+    if (hhmm < windowStart || hhmm > windowEnd) return;
+    if (postCloseDailyDone[market] === todayLocal) return;
+    if (!isTradingDay(todayLocal, market)) return;
+
+    postCloseDailyDone[market] = todayLocal;
+    const route = market === 'TW' ? '/api/cron/scan-tw' : '/api/cron/scan-cn';
+    console.log(`[local-cron] ${market} scan post_close 啟動 (${todayLocal})...`);
+    const data = await callRoute(route, `${market} scan post_close`) as
+      { data?: { resultCount?: number; skipped?: boolean; reason?: string } } | null;
+    const payload = data?.data ?? data ?? {};
+    console.log(`[local-cron] ${market} scan post_close: ${(payload as { resultCount?: number }).resultCount ?? -1} 檔`);
+  }
+
+  // ── 盤中：L2 刷新（update-intraday） ──
   async function refreshAndScan(market: 'TW' | 'CN') {
     if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
 
@@ -173,6 +212,11 @@ export async function register() {
   setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, 5 * 60 * 1000);
   setInterval(() => { refreshAndScan('CN').catch(err => console.error('[local-cron] CN refreshAndScan:', err)); }, 5 * 60 * 1000);
 
+  setInterval(() => {
+    scanIntradayDaily('TW').catch(err => console.error('[local-cron] TW scan-intraday:', err));
+    scanIntradayDaily('CN').catch(err => console.error('[local-cron] CN scan-intraday:', err));
+  }, 10 * 60 * 1000);
+
   // 買法 B/C/D/E/F 錯開：每分鐘檢查，:02→B :04→C :06→D :08→E :00→F（10 分鐘輪一圈）
   setInterval(() => {
     const rem = new Date().getMinutes() % 10;
@@ -197,6 +241,33 @@ export async function register() {
     for (const method of ['B', 'C', 'D', 'E', 'F'] as const) {
       scanBuyMethodPostClose('TW', method).catch(err => console.error(`[local-cron] TW scan-bm ${method}:`, err));
       scanBuyMethodPostClose('CN', method).catch(err => console.error(`[local-cron] CN scan-bm ${method}:`, err));
+    }
+    scanPostCloseDaily('TW').catch(err => console.error('[local-cron] TW scan post_close:', err));
+    scanPostCloseDaily('CN').catch(err => console.error('[local-cron] CN scan post_close:', err));
+  }, 60 * 1000);
+
+  // TDCC 大戶持股：每週四 18:30 CST 自動抓最新一週（公布時間 ~17:00）
+  // 用 60s interval 偵測，命中當週四 18:30 CST 才執行；用旗標避免同一天重跑
+  let lastTdccDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const cst = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei',
+      hour12: false,
+      weekday: 'short',
+      hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => cst.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const isThu = get('weekday') === 'Thu';
+    const hour = parseInt(get('hour'), 10);
+    const min = parseInt(get('minute'), 10);
+    if (isThu && hour === 18 && min >= 30 && min < 35 && today !== lastTdccDate) {
+      lastTdccDate = today;
+      console.log('[local-cron] TDCC 週四自動抓取觸發');
+      callRoute('/api/cron/fetch-tdcc-week', 'TDCC weekly').catch(err =>
+        console.error('[local-cron] TDCC fetch failed:', err),
+      );
     }
   }, 60 * 1000);
 }

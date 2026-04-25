@@ -46,11 +46,17 @@ function extractUSTicker(symbol: string): string | null {
   return null;
 }
 
-type Market = 'TW' | 'CN' | 'US' | null;
+function extractIndexSymbol(symbol: string): string | null {
+  if (/^\^[A-Z]+$/i.test(symbol)) return symbol.toUpperCase();
+  return null;
+}
+
+type Market = 'TW' | 'CN' | 'US' | 'INDEX' | null;
 
 function detectMarket(symbol: string): Market {
   if (extractTWCode(symbol)) return 'TW';
   if (extractCNCode(symbol)) return 'CN';
+  if (extractIndexSymbol(symbol)) return 'INDEX';
   if (extractUSTicker(symbol)) return 'US';
   return null;
 }
@@ -400,6 +406,15 @@ export class MultiMarketProvider implements DataProvider {
           fn: () => getSinaMinuteCandles(symbol, interval ?? '1m'),
         },
       ]);
+    } else if (market === 'INDEX') {
+      // 指數（^TWII 等）直接走 Yahoo Finance
+      // YahooDataProvider 已從 meta.regularMarketVolume 補今日成交量
+      result = await tryProvidersWithRacing([
+        {
+          name: `Yahoo ${symbol}`,
+          fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
+        },
+      ]);
     } else {
       // 陸股/美股走圖路由：Tencent → Yahoo → EODHD → EastMoney（騰訊/Sina/Yahoo 優先，EastMoney 墊底）
       result = await tryProvidersWithRacing([
@@ -484,6 +499,13 @@ export class MultiMarketProvider implements DataProvider {
         {
           name: `TWSE range ${symbol}`,
           fn: () => twseHistProvider.getCandlesRange(symbol, startDate, endDate),
+        },
+      ]);
+    } else if (market === 'INDEX') {
+      result = await tryProvidersWithRacing([
+        {
+          name: `Yahoo range ${symbol}`,
+          fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate),
         },
       ]);
     } else {

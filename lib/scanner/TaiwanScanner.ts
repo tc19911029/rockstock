@@ -221,7 +221,7 @@ export class TaiwanScanner extends MarketScanner {
       try {
         const { loadLocalCandlesWithTolerance } = await import('@/lib/datasource/LocalCandleStore');
         const targetDate = asOfDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-        const local = await loadLocalCandlesWithTolerance('0050.TW', 'TW', targetDate, 5);
+        const local = await loadLocalCandlesWithTolerance('^TWII', 'TW', targetDate, 5);
         if (local && local.candles.length >= 20) {
           candles = local.candles;
         }
@@ -229,7 +229,16 @@ export class TaiwanScanner extends MarketScanner {
 
       // 本地無數據時才走 API
       if (candles.length < 20) {
-        candles = await dataProvider.getHistoricalCandles('0050.TW', '1y', asOfDate);
+        const fetched = await dataProvider.getHistoricalCandles('^TWII', '1y', asOfDate);
+        if (fetched.length >= 20) {
+          const { saveLocalCandles } = await import('@/lib/datasource/LocalCandleStore');
+          const raw = fetched.map(c => ({
+            date: c.date, open: c.open, high: c.high,
+            low: c.low, close: c.close, volume: c.volume,
+          }));
+          saveLocalCandles('^TWII', 'TW', raw).catch(() => {});
+        }
+        candles = fetched;
       }
       if (candles.length < 20) return '盤整'; // 資料不足，保守預設
 
