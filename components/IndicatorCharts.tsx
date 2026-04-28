@@ -374,10 +374,12 @@ function RSIChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; h
   );
 }
 
-// ── Chip series（外資/投信/自營/散戶 + 大戶持股） ────────────────────────────
-interface ChipsData {
+// ── Chip series（外資/投信/自營/散戶 + 大戶持股 + CN 主力 + 背離訊號） ────
+export interface ChipsData {
   inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
   tdcc: Array<{ date: string; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+  cnFlow?: Array<{ date: string; mainNet: number; superLargeNet: number; largeNet: number; mediumNet: number; smallNet: number }>;
+  divergence?: { type: 'bullish' | 'bearish'; priceChangePct: number; instAccumNet: number; strength: 0 | 1 | 2 | 3; detail: string } | null;
 }
 type InstSeries = ChipsData; // 別名，保持原型別介面
 
@@ -569,6 +571,100 @@ function HolderBadge({ holderKey, chips, hoverCandle, candles }: {
   );
 }
 
+// ── CN 主力/散戶資金（EastMoney 主力資金，每日 incremental） ─────────────────
+
+type CnFlowKey = 'cnMain' | 'cnRetail';
+const CN_FLOW_LABELS: Record<CnFlowKey, string> = {
+  cnMain: '主力資金',
+  cnRetail: '散戶資金',
+};
+
+function CnFlowChart({ flowKey, candles, chips, hoverCandle }: {
+  flowKey: CnFlowKey;
+  candles: CandleWithIndicators[];
+  chips?: ChipsData | null;
+  hoverCandle?: CandleWithIndicators | null;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const candlesRef = useRef<CandleWithIndicators[]>(candles);
+  const chipsRef = useRef<ChipsData | null | undefined>(chips);
+  useEffect(() => { candlesRef.current = candles; }, [candles]);
+  useEffect(() => { chipsRef.current = chips; }, [chips]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = makeChart(containerRef.current, false);
+    seriesRef.current = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    chartRef.current = chart;
+    const unsub = subscribeRangeSync((range: LogicalRange | null) => {
+      if (range) chart.timeScale().setVisibleLogicalRange(range);
+    });
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !seriesRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const row = (chipsRef.current?.cnFlow ?? []).find(r => r.date === time);
+      if (!row) return;
+      const v = flowKey === 'cnMain' ? row.mainNet : (row.mediumNet + row.smallNet);
+      chartRef.current.setCrosshairPosition(v, toTime(time), seriesRef.current);
+    });
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) chart.applyOptions({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight || 80,
+      });
+    });
+    ro.observe(containerRef.current);
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
+  }, [flowKey]);
+
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    const { bull, bear } = getBullBearColors();
+    const map = new Map<string, { mainNet: number; mediumNet: number; smallNet: number }>();
+    for (const r of chips?.cnFlow ?? []) map.set(r.date, r);
+    seriesRef.current.setData(candles.map(c => {
+      const row = map.get(c.date);
+      const v = row
+        ? (flowKey === 'cnMain' ? row.mainNet : (row.mediumNet + row.smallNet))
+        : 0;
+      return { time: toTime(c.date), value: v, color: v >= 0 ? `${bull}cc` : `${bear}cc` };
+    }));
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chartRef.current) chartRef.current.timeScale().setVisibleLogicalRange(r);
+    });
+  }, [candles, chips, flowKey]);
+
+  const last = candles[candles.length - 1];
+  const display = hoverCandle ?? last;
+  const row = display ? (chips?.cnFlow ?? []).find(r => r.date === display.date) : null;
+  const value = row
+    ? (flowKey === 'cnMain' ? row.mainNet : (row.mediumNet + row.smallNet))
+    : null;
+  const flowCount = chips?.cnFlow?.length ?? 0;
+
+  return (
+    <div className="relative h-full">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+        <span className="text-muted-foreground">{CN_FLOW_LABELS[flowKey]}(萬元)</span>
+        <span className={(value ?? 0) >= 0 ? 'text-bull' : 'text-bear'}>
+          {value != null ? `${value >= 0 ? '+' : ''}${value.toLocaleString()}` : '—'}
+        </span>
+        {flowCount < 5 && (
+          <span className="text-muted-foreground/50 text-[10px]">資料累積中（每日 16:00 自動抓）</span>
+        )}
+      </div>
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
+}
+
 // ── Combined ──────────────────────────────────────────────────────────────────
 export interface IndicatorToggles {
   macd: boolean;
@@ -587,6 +683,10 @@ export interface IndicatorToggles {
   h400?: boolean;
   /** 大戶持股 1000張↑ — 僅 TW */
   h1000?: boolean;
+  /** CN 主力資金（超大單+大單合計）— 僅 CN */
+  cnMain?: boolean;
+  /** CN 散戶資金（中單+小單合計）— 僅 CN */
+  cnRetail?: boolean;
 }
 
 export default function IndicatorCharts({ candles, hoverCandle, indicators, ticker, chips }: {
@@ -595,12 +695,12 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
   indicators?: IndicatorToggles;
   /** 股票代碼，用於判斷市場（.TW/.TWO=台股，量顯示為張） */
   ticker?: string;
-  /** 籌碼面資料（法人/大戶），由父元件 fetch 後傳入 */
-  chips?: InstSeries | null;
+  /** 籌碼面資料（法人/大戶/CN 主力），由父元件 fetch 後傳入 */
+  chips?: ChipsData | null;
 }) {
   if (candles.length === 0) return null;
-  // TW 判定：有 .TW/.TWO 後綴，或純 4-6 位數字（裸代碼如 2330）
-  const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,6}$/.test(ticker)) : false;
+  const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
+  const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
   const show = indicators ?? { macd: true, kd: true, volume: true, rsi: false };
   const panels = [
     show.volume && <div key="vol" className="flex-1 min-h-0 bg-card"><VolumeChart candles={candles} hoverCandle={hoverCandle} isTW={isTW} /></div>,
@@ -613,12 +713,27 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
     show.retail && isTW && <div key="retail" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="retail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.h400 && isTW && <div key="h400" className="shrink-0 h-7 bg-card border-t border-border/40"><HolderBadge holderKey="h400" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.h1000 && isTW && <div key="h1000" className="shrink-0 h-7 bg-card border-t border-border/40"><HolderBadge holderKey="h1000" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.cnMain && isCN && <div key="cnMain" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnMain" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.cnRetail && isCN && <div key="cnRetail" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnRetail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
   ].filter(Boolean);
 
   if (panels.length === 0) return <div className="h-full bg-card flex items-center justify-center text-xs text-muted-foreground/60">請開啟至少一個指標面板</div>;
 
+  // 籌碼背離 banner（任一籌碼 toggle 開啟才顯示，避免分散注意力）
+  const anyChipToggle = !!(show.foreign || show.trust || show.dealer || show.retail || show.cnMain || show.cnRetail);
+  const div = anyChipToggle ? chips?.divergence : null;
+  const divBg = div?.type === 'bullish' ? 'bg-emerald-900/40 border-emerald-700/50 text-emerald-300'
+    : div?.type === 'bearish' ? 'bg-rose-900/40 border-rose-700/50 text-rose-300' : '';
+
   return (
     <div className="h-full flex flex-col divide-y divide-border overflow-hidden">
+      {div && (
+        <div className={`shrink-0 px-2 py-0.5 border-b text-[11px] font-mono flex items-center gap-2 ${divBg}`}>
+          <span className="font-bold">{div.type === 'bullish' ? '▲ 多頭背離' : '▼ 空頭背離'}</span>
+          <span className="text-foreground/70">{'★'.repeat(div.strength)}</span>
+          <span className="text-foreground/60 truncate">{div.detail}</span>
+        </div>
+      )}
       {panels}
     </div>
   );

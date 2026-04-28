@@ -50,8 +50,26 @@ export interface TdccWeekFile {
 /** 走圖 API 回傳：單一股票的籌碼時序 */
 export interface ChipSeries {
   symbol: string;
-  /** 法人日資料時序（升冪 by date） */
+  /** 法人日資料時序（升冪 by date） — TW only */
   inst: Array<{ date: string } & InstDay>;
-  /** 大戶週資料時序（升冪 by date） */
+  /** 大戶週資料時序（升冪 by date） — TW only */
   tdcc: Array<{ date: string } & TdccDay>;
+  /** CN 主力資金 daily 時序（升冪 by date） — CN only */
+  cnFlow?: Array<{ date: string } & CnFlowDay>;
+}
+
+// ── CN 籌碼面（EastMoney 主力資金）─────────────────────────────────────────
+
+/** 單一股票 ‧ 單一交易日 ‧ CN 主力資金流向（單位：萬元，正=淨流入） */
+export interface CnFlowDay {
+  /** 主力淨流入 = 超大單 + 大單 */
+  mainNet: number;
+  /** 超大單淨流入（萬元，> 100 萬手或大於 50 萬筆） */
+  superLargeNet: number;
+  /** 大單淨流入 */
+  largeNet: number;
+  /** 中單淨流入 */
+  mediumNet: number;
+  /** 小單淨流入（散戶） */
+  smallNet: number;
 }

@@ -10,11 +10,13 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import type { InstDay, TdccDay, ChipSeries } from './types';
+import type { InstDay, TdccDay, CnFlowDay, ChipSeries } from './types';
 
 const ROOT = path.join(process.cwd(), 'data', 'chips', 'TW');
 const INST_DIR = path.join(ROOT, 'inst');
 const TDCC_DIR = path.join(ROOT, 'tdcc');
+const CN_ROOT = path.join(process.cwd(), 'data', 'chips', 'CN');
+const CN_FLOW_DIR = path.join(CN_ROOT, 'flow');
 
 async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
@@ -105,17 +107,66 @@ export async function appendTdccDay(
   await fs.writeFile(path.join(TDCC_DIR, `${code}.json`), JSON.stringify(file), 'utf8');
 }
 
+// ── CN 主力資金（EastMoney FFlow，每股一檔）─────────────────────────────────
+
+interface CnFlowStockFile {
+  symbol: string;
+  market: 'CN';
+  lastDate: string;
+  updatedAt: string;
+  data: Array<{ date: string } & CnFlowDay>;
+}
+
+export async function readCnFlowStock(code: string): Promise<CnFlowStockFile | null> {
+  try {
+    const raw = await fs.readFile(path.join(CN_FLOW_DIR, `${code}.json`), 'utf8');
+    return JSON.parse(raw) as CnFlowStockFile;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeCnFlowStock(
+  code: string,
+  newRows: Array<{ date: string } & CnFlowDay>,
+): Promise<CnFlowStockFile> {
+  await fs.mkdir(CN_FLOW_DIR, { recursive: true });
+  const existing = await readCnFlowStock(code);
+  const map = new Map<string, { date: string } & CnFlowDay>();
+  for (const r of existing?.data ?? []) map.set(r.date, r);
+  for (const r of newRows) map.set(r.date, r);
+  const merged = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const file: CnFlowStockFile = {
+    symbol: code,
+    market: 'CN',
+    lastDate: merged[merged.length - 1]?.date ?? '',
+    updatedAt: new Date().toISOString(),
+    data: merged,
+  };
+  await fs.writeFile(path.join(CN_FLOW_DIR, `${code}.json`), JSON.stringify(file), 'utf8');
+  return file;
+}
+
 /**
  * 讀單檔股票的籌碼時序（升冪 by date，最近 N 天）。
- * 包含日資料（inst）+ 週資料（tdcc）。
+ * TW: 含 inst (日) + tdcc (週)
+ * CN: 含 cnFlow (日)
  */
-export async function loadChipSeries(code: string, days: number): Promise<ChipSeries> {
+export async function loadChipSeries(code: string, days: number, market: 'TW' | 'CN' = 'TW'): Promise<ChipSeries> {
+  if (market === 'CN') {
+    const flowFile = await readCnFlowStock(code);
+    return {
+      symbol: code,
+      inst: [],
+      tdcc: [],
+      cnFlow: (flowFile?.data ?? []).slice(-days),
+    };
+  }
   const [instFile, tdccFile] = await Promise.all([
     readInstStock(code),
     readTdccStock(code),
   ]);
   const inst = (instFile?.data ?? []).slice(-days);
-  // TDCC 是週資料，N 天約 N/5 週，多保留一點當緩衝
   const tdccCount = Math.ceil(days / 5) + 4;
   const tdcc = (tdccFile?.data ?? []).slice(-tdccCount);
   return { symbol: code, inst, tdcc };

@@ -26,6 +26,7 @@ export const maxDuration = 30;
 
 const STALE_THRESHOLD = 50;          // > 50 支 stale 就觸發
 const COVERAGE_THRESHOLD = 0.97;     // < 97% 覆蓋率就觸發
+const ZOMBIE_DAYS_THRESHOLD = 90;    // L1 落後 > N 天視為殭屍候選（疑似退市/合併）
 
 function getBaseUrl(req: NextRequest): string {
   const proto = req.headers.get('x-forwarded-proto') ?? 'http';
@@ -68,6 +69,18 @@ export async function GET(req: NextRequest) {
   const { stocksStale, coverageRate } = report.summary;
   const needsRepair = stocksStale > STALE_THRESHOLD || coverageRate < COVERAGE_THRESHOLD;
 
+  // ── 殭屍 L1 偵測（疑似退市/合併但 L1 沒清掉）──
+  // staleDetails 裡 daysBehind > 90 = 三個月沒更新，幾乎確定不是抓取問題
+  const zombies = (report.staleDetails ?? []).filter(s => s.daysBehind > ZOMBIE_DAYS_THRESHOLD);
+  if (zombies.length > 0) {
+    console.warn(
+      `[auto-repair-watchdog] ${market} 偵測 ${zombies.length} 支殭屍 L1（落後 > ${ZOMBIE_DAYS_THRESHOLD} 天）— ` +
+      `跑 scripts/verify-cn-stale.ts 雙源驗證後可用 prune-cn-delisted.ts 歸檔。範例: ` +
+      zombies.slice(0, 5).map(z => `${z.symbol}(${z.daysBehind}d)`).join(', ') +
+      (zombies.length > 5 ? ` ... +${zombies.length - 5}` : '')
+    );
+  }
+
   if (!needsRepair) {
     return apiOk({
       market,
@@ -75,6 +88,7 @@ export async function GET(req: NextRequest) {
       reportDate,
       stocksStale,
       coverageRate,
+      zombies: zombies.length,
     });
   }
 
@@ -102,6 +116,7 @@ export async function GET(req: NextRequest) {
     reportDate,
     stocksStale,
     coverageRate,
+    zombies: zombies.length,
     retryUrl,
   });
 }

@@ -193,27 +193,41 @@ export default function HomePage() {
     macd: true, kd: true, volume: true, rsi: false,
     foreign: false, trust: false, dealer: false, retail: false,
     h400: false, h1000: false,
+    cnMain: false, cnRetail: false,
   });
-  // ── 籌碼面資料（法人 + 大戶），僅 TW 抓取，任一籌碼副圖開啟時才 fetch ──
+  // ── 籌碼面資料（TW 法人/大戶 + CN 主力資金）：任一 toggle 開啟才 fetch ──
   const [chips, setChips] = useState<{
     inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
     tdcc: Array<{ date: string; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+    cnFlow?: Array<{ date: string; mainNet: number; superLargeNet: number; largeNet: number; mediumNet: number; smallNet: number }>;
+    divergence?: { type: 'bullish' | 'bearish'; priceChangePct: number; instAccumNet: number; strength: 0|1|2|3; detail: string } | null;
   } | null>(null);
   useEffect(() => {
     const ticker = currentStock?.ticker;
     if (!ticker) { setChips(null); return; }
-    const anyChipOn = indicators.foreign || indicators.trust || indicators.dealer
+    const anyTwChipOn = indicators.foreign || indicators.trust || indicators.dealer
       || indicators.retail || indicators.h400 || indicators.h1000;
-    if (!anyChipOn) return;
-    const isTW = /\.(TW|TWO)$/i.test(ticker) || /^\d+$/.test(ticker);
-    if (!isTW) { setChips(null); return; }
+    const anyCnChipOn = indicators.cnMain || indicators.cnRetail;
+    if (!anyTwChipOn && !anyCnChipOn) return;
+    const isTW = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
+    const isCN = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
+    if (isTW && !anyTwChipOn) return;
+    if (isCN && !anyCnChipOn) return;
+    if (!isTW && !isCN) { setChips(null); return; }
     const ctrl = new AbortController();
     fetch(`/api/stock/chips?symbol=${encodeURIComponent(ticker)}&days=180`, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(json => { if (json.ok) setChips({ inst: json.inst ?? [], tdcc: json.tdcc ?? [] }); })
+      .then(json => {
+        if (json.ok) setChips({
+          inst: json.inst ?? [],
+          tdcc: json.tdcc ?? [],
+          cnFlow: json.cnFlow ?? [],
+          divergence: json.divergence ?? null,
+        });
+      })
       .catch(err => { if (err.name !== 'AbortError') console.warn('[chips] load failed:', err); });
     return () => ctrl.abort();
-  }, [currentStock?.ticker, indicators.foreign, indicators.trust, indicators.dealer, indicators.retail, indicators.h400, indicators.h1000]);
+  }, [currentStock?.ticker, indicators.foreign, indicators.trust, indicators.dealer, indicators.retail, indicators.h400, indicators.h1000, indicators.cnMain, indicators.cnRetail]);
   const handleScanSelectStock = useCallback((stock: SelectedStock) => {
     const scanDate = useBacktestStore.getState().scanDate;
     loadStock(stock.symbol, '1d', '2y', scanDate || undefined).catch((e: Error) => {

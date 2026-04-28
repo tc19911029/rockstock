@@ -78,14 +78,25 @@ export default function BottomPanel() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Lightweight polling via /api/portfolio/quotes
-  const refreshQuotes = useCallback(async () => {
+  // Lightweight polling via /api/portfolio/quotes（穩定快路徑）
+  // 改進：AbortController 卸載時取消 + 8s timeout + 連續失敗才提示
+  const failureCountRef = useRef(0);
+  const refreshQuotes = useCallback(async (signal?: AbortSignal) => {
     if (uniqueSymbols.length === 0) return;
     try {
-      const res = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(uniqueSymbols.join(','))}`);
-      if (!res.ok) return;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      // Compose signals: respect external signal (for cleanup) + own timeout
+      if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+      const res = await fetch(
+        `/api/portfolio/quotes?symbols=${encodeURIComponent(uniqueSymbols.join(','))}`,
+        { signal: ctrl.signal },
+      );
+      clearTimeout(timer);
+      if (!res.ok) { failureCountRef.current++; return; }
       const json = await res.json();
       const quotes: Array<{ symbol: string; price: number; changePercent: number; name?: string }> = json.quotes ?? [];
+      failureCountRef.current = 0; // 成功 reset 失敗計數
       setPrices(prev => {
         const next = { ...prev };
         for (const q of quotes) {
@@ -96,8 +107,7 @@ export default function BottomPanel() {
         return next;
       });
 
-      // Auto-backfill: 用 quote 帶回的真實 name 寫回 store，
-      // 解決舊資料只存了代碼當 name 的問題（如 603986/603986 → 603986/兆易創新）
+      // Auto-backfill: 用 quote 帶回的真實 name 寫回 store
       const portfolioState = usePortfolioStore.getState();
       for (const q of quotes) {
         if (!q.name || q.price <= 0) continue;
@@ -114,17 +124,24 @@ export default function BottomPanel() {
           });
         }
       }
-    } catch {
-      setPrices(prev => {
-        const next = { ...prev };
-        for (const s of uniqueSymbols) {
-          if (!next[s] || next[s].loading) {
-            next[s] = { ...next[s], price: 0, changePercent: 0, loading: false, error: '更新失敗' };
+    } catch (err) {
+      // AbortError = 元件 unmount / 換股，不算失敗
+      if (err instanceof Error && err.name === 'AbortError') return;
+      failureCountRef.current++;
+      // 連續 3 次失敗才標 error 並 toast，避免單次 timeout 就誤報
+      if (failureCountRef.current >= 3) {
+        setPrices(prev => {
+          const next = { ...prev };
+          for (const s of uniqueSymbols) {
+            if (!next[s] || next[s].loading) {
+              next[s] = { ...next[s], price: 0, changePercent: 0, loading: false, error: '更新失敗' };
+            }
           }
-        }
-        return next;
-      });
-      toast.error('報價更新失敗，請檢查網路連線', { id: 'quote-error', duration: 4000 });
+          return next;
+        });
+        toast.error('報價連續更新失敗，請檢查網路', { id: 'quote-error', duration: 4000 });
+        failureCountRef.current = 0;
+      }
     }
   }, [uniqueSymbols.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 

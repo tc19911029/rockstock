@@ -18,6 +18,10 @@ interface Indicators {
   h400?: boolean;
   /** 大戶持股 1000張↑ 副圖 */
   h1000?: boolean;
+  /** CN 主力資金（超大單+大單） */
+  cnMain?: boolean;
+  /** CN 散戶資金（中單+小單） */
+  cnRetail?: boolean;
 }
 
 interface ChartToolbarProps {
@@ -75,13 +79,19 @@ const INDICATOR_CONFIGS = [
 ];
 
 /** 籌碼面副圖（僅 TW 有資料） */
-const CHIP_CONFIGS = [
+const CHIP_CONFIGS_TW = [
   { key: 'foreign' as const, label: '外資', title: '外資買賣超（含外資自營商）' },
   { key: 'trust' as const, label: '投信', title: '投信買賣超' },
   { key: 'dealer' as const, label: '自營', title: '自營商買賣超（自行買賣 + 避險）' },
   { key: 'retail' as const, label: '散戶', title: '散戶買賣超（推算 = −三大法人合計）' },
   { key: 'h400' as const, label: '大戶400', title: '大戶持股 400 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
   { key: 'h1000' as const, label: '大戶1k', title: '大戶持股 1000 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
+];
+
+/** CN 籌碼面副圖（EastMoney 主力資金） */
+const CHIP_CONFIGS_CN = [
+  { key: 'cnMain' as const, label: '主力', title: 'CN 主力資金（超大單+大單，淨流入萬元，每日 16:00 自動抓）' },
+  { key: 'cnRetail' as const, label: '散戶', title: 'CN 散戶資金（中單+小單，淨流入萬元）' },
 ];
 
 export default function ChartToolbar({
@@ -106,7 +116,9 @@ export default function ChartToolbar({
   const chgPct = prevCandle ? (chg / prevCandle.close) * 100 : 0;
   const isUp = chg >= 0;
   // TW 判定：有 .TW/.TWO 後綴，或純 4-6 位數字（裸代碼 2330/3661 等）
-  const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,6}$/.test(ticker)) : false;
+  // TW: .TW/.TWO 後綴或 4-5 位數字（裸代碼）；CN: .SS/.SZ 或 6 位數字
+  const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
+  const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
 
   const unrealizedPct = shares && shares > 0 && avgCost && avgCost > 0
     ? ((candle.close - avgCost) / avgCost) * 100
@@ -186,10 +198,10 @@ export default function ChartToolbar({
             }`}
           >{label}</button>
         ))}
-        {isTW && (
+        {(isTW || isCN) && (
           <>
             <span className="w-px h-3.5 bg-border/60 mx-0.5" />
-            {CHIP_CONFIGS.map(({ key, label, title }) => (
+            {(isTW ? CHIP_CONFIGS_TW : CHIP_CONFIGS_CN).map(({ key, label, title }) => (
               <button key={key}
                 onClick={() => onIndicatorToggle(key)}
                 aria-pressed={!!indicators[key]}
