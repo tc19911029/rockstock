@@ -43,12 +43,17 @@ export async function GET(req: NextRequest) {
   const startTime = Date.now();
   const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
 
-  // 取得最近交易日（增量檢查用）
+  // 取得最近交易日
   const now = new Date();
   const dow = now.getDay();
   if (dow === 0) now.setDate(now.getDate() - 2);
   else if (dow === 6) now.setDate(now.getDate() - 1);
   const lastTradingDate = now.toISOString().split('T')[0];
+
+  // L1 被視為「近期」的門檻：7 日內 → L2 injection；更舊或缺失 → 全量 API 下載
+  const recentThreshold = new Date(lastTradingDate);
+  recentThreshold.setDate(recentThreshold.getDate() - 7);
+  const recentThresholdStr = recentThreshold.toISOString().split('T')[0];
 
   let succeeded = 0;
   let failed = 0;
@@ -56,9 +61,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const stocks = await scanner.getStockList();
-    console.info(`[download-candles] ${market}: 開始下載 ${stocks.length} 檔 K 線（增量模式）`);
 
-    // ── Step 0: 預載 L2 快照（API 失敗時作為 fallback） ──
+    // ── 預載 L2 快照（主路徑） ──
     let l2Map: Map<string, IntradayQuote> | null = null;
     let l2Injected = 0;
     try {
@@ -71,36 +75,40 @@ export async function GET(req: NextRequest) {
             l2Map.set(code, q);
           }
         }
-        console.info(`[download-candles] ${market}: L2 快照已載入 ${l2Map.size} 支作為 fallback`);
+        console.info(`[download-candles] ${market}: L2 快照已載入 ${l2Map.size} 支`);
       }
-    } catch { /* L2 不可用，純 API 模式 */ }
+    } catch { /* L2 不可用，改走 API 模式 */ }
+
+    console.info(`[download-candles] ${market}: ${stocks.length} 支，L2=${l2Map?.size ?? 0}，模式=${l2Map ? 'L2主路徑+API補缺' : '純API'}`);
 
     for (let i = 0; i < stocks.length; i += CONCURRENCY) {
       const batch = stocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         batch.map(async ({ symbol }) => {
-          // 移除增量檢查：每次都重新下載，確保假期後恢復的第一天能更新到落後的本地檔
+          const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+          const existing = await readCandleFile(symbol, market);
 
+          // 已是最新，跳過
+          if (existing && existing.lastDate >= lastTradingDate) return -1;
+
+          // L1 近期存在 + L2 有今日資料 → 直接 inject，不耗 API 配額
+          if (existing && existing.lastDate >= recentThresholdStr && l2Map) {
+            const l2Quote = l2Map.get(code);
+            if (l2Quote) {
+              await saveLocalCandles(symbol, market, [
+                ...existing.candles,
+                { date: lastTradingDate, open: l2Quote.open, high: l2Quote.high, low: l2Quote.low, close: l2Quote.close, volume: l2Quote.volume },
+              ]);
+              l2Injected++;
+              return 1;
+            }
+          }
+
+          // L1 缺失、太舊、或 L2 沒有此股 → 全量 API 下載
           const candles = await scanner.fetchCandles(symbol);
           if (candles.length > 0) {
             await saveLocalCandles(symbol, market, candles);
             return candles.length;
-          }
-
-          // API 返回 0 筆 → L2 fallback：從快照補今日 K 棒
-          if (l2Map) {
-            const l2Quote = l2Map.get(symbol);
-            if (l2Quote) {
-              const existing = await readCandleFile(symbol, market);
-              if (existing && existing.lastDate < lastTradingDate) {
-                await saveLocalCandles(symbol, market, [
-                  ...existing.candles,
-                  { date: lastTradingDate, open: l2Quote.open, high: l2Quote.high, low: l2Quote.low, close: l2Quote.close, volume: l2Quote.volume },
-                ]);
-                l2Injected++;
-                return 1; // 算成功
-              }
-            }
           }
           return 0;
         })

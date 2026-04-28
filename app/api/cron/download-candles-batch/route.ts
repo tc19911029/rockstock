@@ -16,7 +16,7 @@ import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
-import { saveLocalCandles, isLocalDataFresh } from '@/lib/datasource/LocalCandleStore';
+import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readIntradaySnapshot, IntradayQuote } from '@/lib/datasource/IntradayCache';
 import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';
@@ -63,9 +63,12 @@ export async function GET(req: NextRequest) {
     const chunkSize = Math.ceil(sorted.length / totalBatches);
     const myStocks = sorted.slice((batch - 1) * chunkSize, batch * chunkSize);
 
-    console.info(`[download-batch] ${market} batch ${batch}/${totalBatches}: ${myStocks.length} 檔（全部 ${sorted.length}）`);
+    // L1 被視為「近期」的門檻：7 日內 → L2 injection；更舊或缺失 → 全量 API 下載
+    const recentThreshold = new Date(lastTradingDate);
+    recentThreshold.setDate(recentThreshold.getDate() - 7);
+    const recentThresholdStr = recentThreshold.toISOString().split('T')[0];
 
-    // ── Step 0: 預載 L2 快照（API 失敗時作為 fallback） ──
+    // ── 預載 L2 快照（主路徑） ──
     let l2Map: Map<string, IntradayQuote> | null = null;
     let l2Injected = 0;
     try {
@@ -78,38 +81,40 @@ export async function GET(req: NextRequest) {
             l2Map.set(code, q);
           }
         }
-        console.info(`[download-batch] ${market} batch ${batch}: L2 快照已載入 ${l2Map.size} 支作為 fallback`);
+        console.info(`[download-batch] ${market} batch ${batch}: L2 快照已載入 ${l2Map.size} 支`);
       }
-    } catch { /* L2 不可用，純 API 模式 */ }
+    } catch { /* L2 不可用，改走 API 模式 */ }
+
+    console.info(`[download-batch] ${market} batch ${batch}/${totalBatches}: ${myStocks.length} 檔，L2=${l2Map?.size ?? 0}`);
 
     for (let i = 0; i < myStocks.length; i += CONCURRENCY) {
       const group = myStocks.slice(i, i + CONCURRENCY);
       const settled = await Promise.allSettled(
         group.map(async ({ symbol }) => {
-          // 增量檢查：本地數據已是最新的就跳過
-          const fresh = await isLocalDataFresh(symbol, market, lastTradingDate);
-          if (fresh) return -1; // skip marker
+          const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+          const existing = await readCandleFile(symbol, market);
 
+          // 已是最新，跳過
+          if (existing && existing.lastDate >= lastTradingDate) return -1;
+
+          // L1 近期存在 + L2 有今日資料 → 直接 inject，不耗 API 配額
+          if (existing && existing.lastDate >= recentThresholdStr && l2Map) {
+            const l2Quote = l2Map.get(code);
+            if (l2Quote) {
+              await saveLocalCandles(symbol, market, [
+                ...existing.candles,
+                { date: lastTradingDate, open: l2Quote.open, high: l2Quote.high, low: l2Quote.low, close: l2Quote.close, volume: l2Quote.volume },
+              ]);
+              l2Injected++;
+              return 1;
+            }
+          }
+
+          // L1 缺失、太舊、或 L2 沒有此股 → 全量 API 下載
           const candles = await scanner.fetchCandles(symbol);
           if (candles.length > 0) {
             await saveLocalCandles(symbol, market, candles);
             return candles.length;
-          }
-
-          // API 返回 0 筆 → L2 fallback：從快照補今日 K 棒
-          if (l2Map) {
-            const l2Quote = l2Map.get(symbol);
-            if (l2Quote) {
-              const existing = await readCandleFile(symbol, market);
-              if (existing && existing.lastDate < lastTradingDate) {
-                await saveLocalCandles(symbol, market, [
-                  ...existing.candles,
-                  { date: lastTradingDate, open: l2Quote.open, high: l2Quote.high, low: l2Quote.low, close: l2Quote.close, volume: l2Quote.volume },
-                ]);
-                l2Injected++;
-                return 1; // 算成功
-              }
-            }
           }
           return 0;
         })
@@ -132,44 +137,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── 失敗重試（單次，2秒間隔，不並發）──────────────────────────────
-    if (failed > 0) {
-      const failedStocks = myStocks.filter((_, idx) => {
-        // 重新掃描失敗的股票（簡化：最後一批檢查本地資料是否已更新）
-        return true; // 簡化：全部重試一遍有失敗的就再試
-      });
-      let retrySucceeded = 0;
-      // 只重試失敗數量的股票（不重新跑全量）
-      const retryLimit = Math.min(failed, 50); // 最多重試50檔
-      let retryCount = 0;
-      for (const stock of failedStocks) {
-        if (retryCount >= retryLimit) break;
-        const fresh = await isLocalDataFresh(stock.symbol, market, lastTradingDate);
-        if (fresh) continue; // 已成功，跳過
-        retryCount++;
-        try {
-          await sleep(2000); // 2秒間隔避免限流
-          const candles = await scanner.fetchCandles(stock.symbol);
-          if (candles.length > 0) {
-            await saveLocalCandles(stock.symbol, market, candles);
-            retrySucceeded++;
-            failed--;
-            succeeded++;
-          }
-        } catch { /* retry failed, give up */ }
-      }
-      if (retrySucceeded > 0) {
-        console.info(`[download-batch] ${market} batch ${batch}: 重試成功 ${retrySucceeded} 檔`);
-      }
-    }
-
     // ── 大盤代理 ETF 下載（只在 batch 1 執行，避免重複）──────────────
     if (batch === 1) {
       const proxySymbols = market === 'TW' ? ['0050.TW'] : ['000300.SS'];
       for (const proxy of proxySymbols) {
         try {
-          const fresh = await isLocalDataFresh(proxy, market, lastTradingDate);
-          if (!fresh) {
+          const proxyExisting = await readCandleFile(proxy, market);
+          if (!proxyExisting || proxyExisting.lastDate < lastTradingDate) {
             const candles = await scanner.fetchCandles(proxy);
             if (candles.length > 0) {
               await saveLocalCandles(proxy, market, candles);
