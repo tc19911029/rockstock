@@ -36,6 +36,7 @@ const MAX_RETRY = 70;             // Phase 1 最多 70 檔
 const MAX_GAP_REPAIR = 30;        // Phase 2 最多 30 檔
 const DELAY_MS = 1500;
 const MIN_CANDLE_COUNT = 30;      // 少於 30 根 K 線視為無效
+const PER_FETCH_TIMEOUT_MS = 25_000; // 單支 fetch 最多 25s（含所有 fallback），避免拖垮整個 cron
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -114,6 +115,22 @@ async function fetchWithFallback(
   return { candles: [], source: 'none' };
 }
 
+/** 包一層整體 timeout 的 fetchWithFallback，避免單支拖垮整個 cron */
+async function fetchWithFallbackTimed(
+  symbol: string,
+  market: MarketType,
+  scanner: TaiwanScanner | ChinaScanner,
+): Promise<FetchResult> {
+  const timeoutPromise = new Promise<FetchResult>((_, reject) =>
+    setTimeout(() => reject(new Error('per-fetch timeout')), PER_FETCH_TIMEOUT_MS),
+  );
+  try {
+    return await Promise.race([fetchWithFallback(symbol, market, scanner), timeoutPromise]);
+  } catch {
+    return { candles: [], source: 'timeout' };
+  }
+}
+
 // ── 主路由 ──────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -169,7 +186,7 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const { candles, source } = await fetchWithFallback(symbol, market, scanner);
+      const { candles, source } = await fetchWithFallbackTimed(symbol, market, scanner);
       if (candles.length >= MIN_CANDLE_COUNT) {
         await saveLocalCandles(symbol, market, candles);
         phase1Succeeded++;
@@ -210,7 +227,7 @@ export async function GET(req: NextRequest) {
       }
 
       try {
-        const { candles, source } = await fetchWithFallback(symbol, market, scanner);
+        const { candles, source } = await fetchWithFallbackTimed(symbol, market, scanner);
         if (candles.length >= MIN_CANDLE_COUNT) {
           // 驗證 gap 是否消除
           const remainingGaps = detectCandleGaps(candles, 15, market);

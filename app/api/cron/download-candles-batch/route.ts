@@ -30,6 +30,8 @@ export const maxDuration = 300;
 
 const CONCURRENCY = 8;
 const BATCH_DELAY_MS = 300;
+// 280s deadline（Vercel maxDuration=300s，留 20s 給 manifest/verify 收尾）
+const SOFT_DEADLINE_MS = 280_000;
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export async function GET(req: NextRequest) {
@@ -88,8 +90,17 @@ export async function GET(req: NextRequest) {
 
     console.info(`[download-batch] ${market} batch ${batch}/${totalBatches}: ${myStocks.length} 檔，L2=${l2Map?.size ?? 0}`);
 
+    let earlyExit = false;
+    let processedCount = 0;
     for (let i = 0; i < myStocks.length; i += CONCURRENCY) {
+      // 軟 deadline：時間用完就 graceful exit，已下載部分會 commit
+      if (Date.now() - startTime > SOFT_DEADLINE_MS) {
+        console.warn(`[download-batch] ${market} batch ${batch}: 達到 soft deadline，已處理 ${processedCount}/${myStocks.length}，提前結束`);
+        earlyExit = true;
+        break;
+      }
       const group = myStocks.slice(i, i + CONCURRENCY);
+      processedCount = Math.min(i + CONCURRENCY, myStocks.length);
       const settled = await Promise.allSettled(
         group.map(async ({ symbol }) => {
           const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -164,7 +175,8 @@ export async function GET(req: NextRequest) {
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.info(`[download-batch] ${market} batch ${batch}: 完成 — ${succeeded} 下載, ${l2Injected} L2注入, ${skipped} 跳過, ${failed} 失敗, ${duration}s`);
+    const completionLabel = earlyExit ? '部分完成（soft deadline）' : '完成';
+    console.info(`[download-batch] ${market} batch ${batch}: ${completionLabel} — ${succeeded} 下載, ${l2Injected} L2注入, ${skipped} 跳過, ${failed} 失敗, ${duration}s`);
 
     // 保存批次清單
     await saveDownloadManifest(market, `${lastTradingDate}-batch${batch}`, {
@@ -177,8 +189,9 @@ export async function GET(req: NextRequest) {
     }).catch(err => console.warn('[download-batch] manifest save failed:', err));
 
     // ── 最後一批完成後生成 MA Base（供盤中粗掃即時 MA 計算用）──
+    // earlyExit 時跳過所有 finalization，避免再爆 timeout（下次 cron 補做）
     let maBaseResult = { total: 0, succeeded: 0, failed: 0 };
-    if (batch === totalBatches) {
+    if (batch === totalBatches && !earlyExit) {
       try {
         const { generateMABase } = await import('@/lib/datasource/MABaseGenerator');
         // 用全部股票清單（不只是這一批）
@@ -191,7 +204,7 @@ export async function GET(req: NextRequest) {
 
     // ── 最後一批完成後跑校驗報告（聚合所有批次統計） ──
     let verifyResult: { health: string; coverageRate: number; stocksWithGaps: number; stocksStale: number } | undefined;
-    if (batch === totalBatches) {
+    if (batch === totalBatches && !earlyExit) {
       try {
         // 聚合所有批次的 manifest 統計
         const { loadDownloadManifest: loadManifest } = await import('@/lib/datasource/DownloadManifest');
@@ -223,7 +236,7 @@ export async function GET(req: NextRequest) {
 
     // ── 最後一批完成後跑 L1 抽查（Yahoo 交叉核驗） ──
     let spotCheck: import('@/lib/datasource/L1SpotCheck').SpotCheckResult | undefined;
-    if (batch === totalBatches) {
+    if (batch === totalBatches && !earlyExit) {
       try {
         const allSymbols = sorted.map(s => s.symbol);
         spotCheck = await spotCheckL1(market, lastTradingDate, allSymbols);
@@ -237,13 +250,15 @@ export async function GET(req: NextRequest) {
       batch,
       totalBatches,
       batchStocks: myStocks.length,
+      processedCount,
+      earlyExit,
       totalStocks: sorted.length,
       succeeded,
       l2Injected,
       skipped,
       failed,
       durationSec: parseFloat(duration),
-      maBase: batch === totalBatches ? maBaseResult : undefined,
+      maBase: batch === totalBatches && !earlyExit ? maBaseResult : undefined,
       verify: verifyResult,
       spotCheck: spotCheck ? { passed: spotCheck.passed, failed: spotCheck.failed, suspicious: spotCheck.suspicious } : undefined,
     });

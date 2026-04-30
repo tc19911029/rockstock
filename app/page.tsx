@@ -112,7 +112,10 @@ export default function HomePage() {
   // P1-2: remember last tab per interval (declared before handleKey to avoid TDZ errors)
   const [sideTabPerInterval, setSideTabPerInterval] = useState<Record<string, SideTab>>({});
   const sideTab: SideTab = sideTabPerInterval[currentInterval] ?? 'conditions';
-  const setSideTab = (tab: SideTab) => setSideTabPerInterval(prev => ({ ...prev, [currentInterval]: tab }));
+  const setSideTab = useCallback(
+    (tab: SideTab) => setSideTabPerInterval(prev => ({ ...prev, [currentInterval]: tab })),
+    [currentInterval],
+  );
   // P0-3: hide indicator subcharts by default on mobile
   const [showIndicators, setShowIndicators] = useState(true);
   // P1-5: keyboard shortcut help overlay

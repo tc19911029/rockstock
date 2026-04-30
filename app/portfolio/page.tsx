@@ -65,9 +65,13 @@ export default function PortfolioPage() {
     }
   }
 
+  // 持倉 symbol 列表變動時刷新報價（用 join 出來的字串當穩定 key，避免 holdings 物件每次重建）
+  const symbolsKey = holdings.map(h => h.symbol).join(',');
   useEffect(() => {
     refreshAllPrices(holdings);
-  }, [holdings.map(h => h.symbol).join(',')]);
+    // refreshAllPrices/holdings 物件身份頻繁改變，這裡只追 symbol 字串變化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolsKey]);
 
   function openEdit(h: PortfolioHolding) {
     setEditId(h.id);

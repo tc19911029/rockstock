@@ -145,13 +145,14 @@ export default function CandleChart({
   useEffect(() => { onDoubleClickRef.current = onDoubleClick; }, [onDoubleClick]);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const node = containerRef.current;
+    if (!node) return;
 
     const chartHeight = (fillContainer
-      ? containerRef.current.clientHeight
+      ? node.clientHeight
       : height) || 400;
 
-    const chart = createChart(containerRef.current, {
+    const chart = createChart(node, {
       layout: {
         background: { type: ColorType.Solid, color: '#0f172a' },
         textColor: '#94a3b8',
@@ -164,7 +165,7 @@ export default function CandleChart({
       crosshair: { mode: 1, vertLine: { labelVisible: false } },
       rightPriceScale: { borderColor: '#334155', minimumWidth: 80 },
       timeScale: { borderColor: '#334155', timeVisible: true, rightOffset: 15 },
-      width: containerRef.current.clientWidth,
+      width: node.clientWidth,
       height: chartHeight,
     });
 
@@ -244,17 +245,16 @@ export default function CandleChart({
         onDoubleClickRef.current(_lastHoverCandle);
       }
     };
-    containerRef.current.addEventListener('dblclick', handleDblClick);
+    node.addEventListener('dblclick', handleDblClick);
 
     const ro = new ResizeObserver(() => {
-      if (!containerRef.current) return;
-      chart.applyOptions({ width: containerRef.current.clientWidth });
-      if (fillContainer) chart.applyOptions({ height: containerRef.current.clientHeight });
+      chart.applyOptions({ width: node.clientWidth });
+      if (fillContainer) chart.applyOptions({ height: node.clientHeight });
     });
-    ro.observe(containerRef.current);
+    ro.observe(node);
 
     return () => {
-      containerRef.current?.removeEventListener('dblclick', handleDblClick);
+      node.removeEventListener('dblclick', handleDblClick);
       chart.unsubscribeCrosshairMove(dblClickCrosshairHandler);
       ro.disconnect();
       chart.remove();
