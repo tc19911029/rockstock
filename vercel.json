@@ -13,20 +13,36 @@
       "schedule": "30 7 * * 1-5"
     },
     {
-      "path": "/api/cron/download-candles-batch?market=CN&batch=1&totalBatches=4",
+      "path": "/api/cron/download-candles-batch?market=CN&batch=1&totalBatches=8",
+      "schedule": "5 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/download-candles-batch?market=CN&batch=2&totalBatches=8",
+      "schedule": "10 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/download-candles-batch?market=CN&batch=3&totalBatches=8",
       "schedule": "15 7 * * 1-5"
     },
     {
-      "path": "/api/cron/download-candles-batch?market=CN&batch=2&totalBatches=4",
-      "schedule": "21 7 * * 1-5"
+      "path": "/api/cron/download-candles-batch?market=CN&batch=4&totalBatches=8",
+      "schedule": "20 7 * * 1-5"
     },
     {
-      "path": "/api/cron/download-candles-batch?market=CN&batch=3&totalBatches=4",
-      "schedule": "27 7 * * 1-5"
+      "path": "/api/cron/download-candles-batch?market=CN&batch=5&totalBatches=8",
+      "schedule": "25 7 * * 1-5"
     },
     {
-      "path": "/api/cron/download-candles-batch?market=CN&batch=4&totalBatches=4",
-      "schedule": "33 7 * * 1-5"
+      "path": "/api/cron/download-candles-batch?market=CN&batch=6&totalBatches=8",
+      "schedule": "30 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/download-candles-batch?market=CN&batch=7&totalBatches=8",
+      "schedule": "35 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/download-candles-batch?market=CN&batch=8&totalBatches=8",
+      "schedule": "40 7 * * 1-5"
     },
     {
       "path": "/api/cron/scan-tw",
@@ -34,19 +50,19 @@
     },
     {
       "path": "/api/cron/scan-cn?batch=1&totalBatches=4",
-      "schedule": "45 7 * * 1-5"
+      "schedule": "55 7 * * 1-5"
     },
     {
       "path": "/api/cron/scan-cn?batch=2&totalBatches=4",
-      "schedule": "51 7 * * 1-5"
+      "schedule": "1 8 * * 1-5"
     },
     {
       "path": "/api/cron/scan-cn?batch=3&totalBatches=4",
-      "schedule": "57 7 * * 1-5"
+      "schedule": "7 8 * * 1-5"
     },
     {
       "path": "/api/cron/scan-cn?batch=4&totalBatches=4",
-      "schedule": "3 8 * * 1-5"
+      "schedule": "13 8 * * 1-5"
     },
     {
       "path": "/api/cron/scan-daban",
