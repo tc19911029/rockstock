@@ -18,6 +18,7 @@ import { eodhdHistProvider } from './EODHDHistProvider';
 import { yahooProvider } from './YahooDataProvider';
 import { tencentHistProvider } from './TencentHistProvider';
 import { eastMoneyHistProvider } from './EastMoneyHistProvider';
+import { finmindHistProvider } from './FinMindHistProvider';
 import type { Candle } from '@/types';
 import type { VendorBatchCache } from './eodSettleBatch';
 import { lookupBulkQuote } from './eodSettleBatch';
@@ -154,11 +155,13 @@ export async function settleSymbol(
     if (bulkQ) quotes.push(bulkQ);
   }
 
-  // 2. Per-symbol providers — EODHD + Yahoo + (CN) Tencent
-  //    TWSE provider 從 chain 移除（已由 batch cache 代替）
+  // 2. Per-symbol providers — TW: FinMind + EODHD + Yahoo  | CN: 4 源
+  //    TWSE provider 走 batch cache（不在這裡）
   //    EastMoney provider for CN 也已被 batch 取代（雖然 batch 目前 stub）
+  //    FinMind 2026-05-20 補進 TW 鏈路（之前只有 EODHD + Yahoo，TPEx 小型股若 EODHD
+  //    沒回資料就只剩 Yahoo 對打 L1 → pending-multi-disagree 暴增）
   const perSymProviders = market === 'TW'
-    ? [eodhdHistProvider, yahooProvider]
+    ? [finmindHistProvider, eodhdHistProvider, yahooProvider]
     : [eastMoneyHistProvider, tencentHistProvider, eodhdHistProvider, yahooProvider];
 
   const settled = await Promise.allSettled(
