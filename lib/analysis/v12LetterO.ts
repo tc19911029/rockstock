@@ -96,7 +96,7 @@ export function detectLetterO(
 
   // 7. 找打底盤整期：往回找最近一次「空頭 → 盤整」轉換點
   let baseStartIdx = -1;
-  let baseEndIdx = idx - 1;
+  const baseEndIdx = idx - 1;
   for (let i = idx - 1; i >= Math.max(0, idx - MAX_LOOKBACK_DAYS); i--) {
     const t = detectTrend(candles, i);
     if (t === '空頭') {

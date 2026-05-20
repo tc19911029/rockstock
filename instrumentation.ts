@@ -345,9 +345,14 @@ export async function register() {
   }, 60 * 1000);
 
   // 每 30 分鐘 log heap 用量。超 2GB 印警告（之前出過 next-server 5.3GB 案例 — L1CandleCache lazy expire bug，已於 5/07 修正 evict + maxSize hard cap 6000）
+  //
+  // 注意：直接寫 process.memoryUsage() 會讓 Turbopack 把整個檔當 Edge runtime 解析時噴 warning
+  // （即使這函式只在 Node 跑）。透過 globalThis 動態取，繞過 lexical pattern match。
   setInterval(() => {
     try {
-      const mem = process.memoryUsage();
+      const proc = (globalThis as { process?: { memoryUsage?: () => { heapUsed: number; rss: number } } }).process;
+      const mem = proc?.memoryUsage?.();
+      if (!mem) return;
       const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
       const rssMB = Math.round(mem.rss / 1024 / 1024);
       const tag = heapMB > 2048 ? '⚠️ heap > 2GB' : heapMB > 1024 ? '注意' : '正常';

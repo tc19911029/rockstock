@@ -70,11 +70,16 @@ export function ChartPracticeLedger() {
 
   // 切換股票時，把手動成交欄位 reset 回「跟隨游標」
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切股 reset 表單，刻意 effect 內 reset
     setCustomDate('');
     setCustomPrice('');
   }, [tickerRaw]);
 
-  const liveSession = sessionFromStore ?? { ...FALLBACK_SESSION, symbol: code, market };
+  // 包 useMemo 避免每次 render 新建 fallback object → 下游 summary/sortedTrades useMemo 才能真緩存
+  const liveSession = useMemo(
+    () => sessionFromStore ?? { ...FALLBACK_SESSION, symbol: code, market },
+    [sessionFromStore, code, market],
+  );
 
   // 優先用 hover 在走圖上的那根 K（讓人滑回過去日期成交），無 hover 就用 replay currentIndex
   const hoverCandle = useMemo(() => {

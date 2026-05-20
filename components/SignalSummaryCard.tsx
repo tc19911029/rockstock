@@ -293,6 +293,7 @@ export default function SignalSummaryCard() {
 
   useEffect(() => {
     if (!ticker || allCandles.length < 30 || currentIndex < 25) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 條件不足時 reset signals；非 cascading render
       setV12Hits([]);
       setTopPatternHit(null);
       return;

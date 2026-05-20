@@ -51,6 +51,7 @@ export function useLockedPattern(symbol: string | null | undefined): {
 
   useEffect(() => {
     if (!symbol) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- symbol 變 null 時 reset state；React 19 新規則對「dep reset」誤判
       setLockedPattern(null);
       return;
     }

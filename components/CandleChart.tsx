@@ -683,9 +683,7 @@ export default function CandleChart({
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 切線狀態同步給 legend
     setTrendlineStatus({ ascending: ascInfo, descending: descInfo });
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 軌道線狀態同步給 legend
     setChannelStatus({ ascending: ascChInfo, descending: descChInfo });
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 盤整切線狀態同步給 legend
     setConsolidationStatus({ upper: consUpperInfo, lower: consLowerInfo });
     // scrollToPosition 後稍等一個 tick 再廣播，確保 range 已更新
     const chart = chartRef.current;
