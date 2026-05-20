@@ -19,7 +19,13 @@ if (existsSync('.env.local')) config({ path: '.env.local' });
 config();
 
 type Market = 'TW' | 'CN';
-const VIOLATION_THRESHOLD = 0.001; // 千分之一以下視為浮點精度
+const VIOLATION_THRESHOLD = 0.001; // 絕對價差千分之一（防 float 浮點誤差）
+// 2026-05-20：percentage filter 閾值 0.001 → 0.005 (0.5%)
+// 原因：vendor 對單日 OHLC 抓的時間點不一致（盤後結算 close 跟 intraday high/low
+// 不同來源），常見差 < 0.5%（如 2321.TW 5/14 close 比 low 低 5 分錢 = 0.39%）。
+// 真實 mis.twse 類 bug 都是 amplitude 接近 0 + close 大幅偏離 high/low（>1%），
+// 閾值 0.5% 仍能抓得到。0.1% 抓太緊產生 false alarm 不利於 ops。
+const VIOLATION_PCT_FILTER = 0.005;
 const ALERT_LIMIT = 100;
 
 interface MarketAudit {
@@ -58,7 +64,7 @@ function auditMarket(market: Market): MarketAudit {
         diff = (c.low - c.close) / c.low;
       }
       if (!violation) continue;
-      if (diff < 0.001) continue; // 浮點精度
+      if (diff < VIOLATION_PCT_FILTER) continue; // vendor data precision (0.5%)
       out.violations++;
       if (diff < 0.01) out.byBucket['0.1-1%']++;
       else if (diff < 0.05) out.byBucket['1-5%']++;
