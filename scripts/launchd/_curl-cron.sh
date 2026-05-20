@@ -3,6 +3,11 @@
 # 用法：./_curl-cron.sh <label> <endpoint> [endpoint2 ...]
 # 範例：./_curl-cron.sh tw-scan "/api/cron/scan-tw"
 #       ./_curl-cron.sh cn-flow "/api/cron/fetch-cn-capital-flow" "/api/cron/fetch-cn-flow"
+#
+# ⚠️ 警告（2026-05-19）：當本檔位於 ~/Desktop 下時，macOS launchd 沙箱會擋住此腳本執行
+#    （exit 127、stderr 顯示 "can't open input file"）。所有 plist 已改用 inline /usr/bin/curl
+#    繞開，不再依賴本檔。新增 plist 請鏡像 `com.rockstock.cn-daban-close.plist` 的 inline 寫法，
+#    不要走 _curl-cron.sh 路徑，除非本檔被搬離 ~/Desktop 或 /bin/zsh 取得完全取用磁碟權限。
 
 set -e
 

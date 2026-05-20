@@ -5,12 +5,6 @@
   <key>Label</key>
   <string>com.rockstock.cn-scan</string>
 
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>CRON_SECRET</key>
-    <string>CRON_SECRET</string>
-  </dict>
-
   <!--
     CN 盤後 scan：跑 daily + mtf + 13 個 v12 買法（B/C/D/E/F/J/K/L/M/N/O/P/Q）
     時間：20:00 CST（A 股盤後 15:00 + L1 download 完成 + verify 報告寫入後，CN 資料較慢）
@@ -18,9 +12,13 @@
   -->
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
-    <string>-c</string>
-    <string>/Users/tzu-chienhsu/Desktop/rockstock/scripts/launchd/_curl-cron.sh cn-scan "/api/cron/scan-cn"</string>
+    <string>/usr/bin/curl</string>
+    <string>-fsS</string>
+    <string>--max-time</string>
+    <string>600</string>
+    <string>-H</string>
+    <string>Authorization: Bearer CRON_SECRET</string>
+    <string>http://localhost:3000/api/cron/scan-cn</string>
   </array>
 
   <key>StartCalendarInterval</key>

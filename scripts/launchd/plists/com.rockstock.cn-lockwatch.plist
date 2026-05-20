@@ -5,17 +5,15 @@
   <key>Label</key>
   <string>com.rockstock.cn-lockwatch</string>
 
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>CRON_SECRET</key>
-    <string>CRON_SECRET</string>
-  </dict>
-
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
-    <string>-c</string>
-    <string>/Users/tzu-chienhsu/Desktop/rockstock/scripts/launchd/_curl-cron.sh cn-lock "/api/cron/update-lockwatch?market=CN"</string>
+    <string>/usr/bin/curl</string>
+    <string>-fsS</string>
+    <string>--max-time</string>
+    <string>600</string>
+    <string>-H</string>
+    <string>Authorization: Bearer CRON_SECRET</string>
+    <string>http://localhost:3000/api/cron/update-lockwatch?market=CN</string>
   </array>
 
   <key>StartCalendarInterval</key>

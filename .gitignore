@@ -96,3 +96,6 @@ data/step1-pool/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Claude Code session-local files (settings, worktrees)
+.claude/

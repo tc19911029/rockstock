@@ -24,12 +24,14 @@
 
 ### 第二層：launchd（補 instrumentation.ts 沒做的）
 
-只有 4 件事 instrumentation.ts 沒做，需要 launchd：
+需要 launchd 的事項：
 
 | Plist 檔 | 觸發時機（CST） | 做什麼 |
 |---|---|---|
 | `com.rockstock.tw-institutional.plist` | 平日 15:45 | TW 三大法人籌碼 |
 | `com.rockstock.cn-flow.plist` | 平日 16:15 | CN 北上資金（capital + flow） |
+| `com.rockstock.cn-daban-close.plist` | 平日 15:55 | CN 打版盤後掃描（漲停板候選） |
+| `com.rockstock.cn-daban-open.plist` | 平日 9:27 | CN 打版開盤確認（前一日候選的 9:25 集合競價） |
 | `com.rockstock.tw-lockwatch.plist` | 平日 18:50 | TW 鎖股名單刷新 |
 | `com.rockstock.cn-lockwatch.plist` | 平日 19:00 | CN 鎖股名單刷新 |
 
@@ -37,7 +39,36 @@
 - `com.rockstock.etf-fetch.plist` — ETF 持股 18:00 / 22:00 / 隔日 09:00（補晚揭露）
 - `com.rockstock.etf-track.plist` — ETF 變化追蹤每天 23:00
 
-**總共 6 個 launchd 排程。**
+**總共 8 個 launchd 排程。**
+
+## ⚠️ ~/Desktop 沙箱問題（0519 發現）
+
+macOS Sequoia/Sonoma 預設不准 launchd job 執行 `~/Desktop` 下的 shell 腳本。
+徵狀：plist 載入 OK、`launchctl start` 立刻 exit 127、stderr 顯示
+`/bin/zsh: can't open input file: /Users/.../Desktop/.../scripts/launchd/_curl-cron.sh`
+
+**繞開作法**：plist 的 `ProgramArguments` 改成 inline 呼叫 `/usr/bin/curl`，不依賴 `_curl-cron.sh`。
+
+**0519 全部修完**（12 個 plist 全部繞開沙箱，煙霧測試 exit 0 + 程式啟動驗證過）：
+
+純 curl（單 endpoint）— `<ProgramArguments>` 為 `/usr/bin/curl ...`:
+- `cn-daban-close` / `cn-daban-open`
+- `tw-institutional` / `tw-lockwatch` / `cn-lockwatch`
+- `cn-scan` / `tw-scan`
+
+`/bin/sh -c` 串 curl（雙 endpoint）：
+- `cn-flow`
+
+`/bin/sh -c "cd Desktop && npx tsx scripts/...ts"`（跑 tsx 腳本）：
+- `audit-l1-invariant`
+- `eod-settle-cn` / `eod-settle-tw`
+- `t1-fill-gaps`
+
+關鍵發現：launchd 沙箱 **擋的是「launchd 直接執行 Desktop 下的 shell 腳本」**（exit 127、can't open input file），但**不擋「launchd 執行非 Desktop 的 sh/curl/npx，然後 cd 進 Desktop 讀檔/跑 tsx」**。inline cd 模式因此能繞開。
+
+4 個 sh wrapper（`_curl-cron.sh` / `_audit-l1-invariant.sh` / `_eod-settle.sh` / `_t1-fill.sh`）都加了 DEPRECATED 警告，保留供手動執行，但 launchd 不再用。
+
+**新增 plist 一律鏡像現有 inline 寫法，不要走 sh wrapper 路徑**，除非 wrapper 搬離 `~/Desktop` 或 `/bin/zsh` 取得完全取用磁碟權限。
 
 ## 安裝
 
@@ -77,11 +108,13 @@ bash scripts/launchd/install-all.sh
 # 看哪些 launchd 已載入
 launchctl list | grep com.rockstock
 
-# 應該看到 6 個：
+# 應該看到 8 個：
+# com.rockstock.cn-daban-close   ← 0519 新增（inline curl，無沙箱問題）
+# com.rockstock.cn-daban-open    ← 0519 新增（inline curl，無沙箱問題）
 # com.rockstock.cn-flow
 # com.rockstock.cn-lockwatch
-# com.rockstock.etf-fetch       ← 你已有
-# com.rockstock.etf-track       ← 你已有
+# com.rockstock.etf-fetch        ← 你已有
+# com.rockstock.etf-track        ← 你已有
 # com.rockstock.tw-institutional
 # com.rockstock.tw-lockwatch
 
@@ -130,3 +163,4 @@ bash scripts/launchd/uninstall-all.sh
 ## 變動歷史
 
 - 2026-05-10：建立。從 vercel.json 60 cron → 11 個 launchd 計畫，後查 instrumentation.ts 發現大量重複，砍剩 4 個必要。
+- 2026-05-19：補 `cn-daban-close` / `cn-daban-open`（A 股打版策略本機 cron 缺漏 9 天，DateNavigator 切歷史日空）。同日發現 `_curl-cron.sh` 在 `~/Desktop` 下被 macOS launchd 沙箱擋，所有舊 plist 皆 exit 127 — 新增 2 個用 inline `/usr/bin/curl` 繞開。

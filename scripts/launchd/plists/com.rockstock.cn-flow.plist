@@ -5,17 +5,11 @@
   <key>Label</key>
   <string>com.rockstock.cn-flow</string>
 
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>CRON_SECRET</key>
-    <string>CRON_SECRET</string>
-  </dict>
-
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/zsh</string>
+    <string>/bin/sh</string>
     <string>-c</string>
-    <string>/Users/tzu-chienhsu/Desktop/rockstock/scripts/launchd/_curl-cron.sh cn-flow "/api/cron/fetch-cn-capital-flow" "/api/cron/fetch-cn-flow"</string>
+    <string>/usr/bin/curl -fsS --max-time 600 -H 'Authorization: Bearer CRON_SECRET' http://localhost:3000/api/cron/fetch-cn-capital-flow; /usr/bin/curl -fsS --max-time 600 -H 'Authorization: Bearer CRON_SECRET' http://localhost:3000/api/cron/fetch-cn-flow</string>
   </array>
 
   <key>StartCalendarInterval</key>

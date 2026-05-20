@@ -1,5 +1,8 @@
 #!/bin/zsh
 # T+1 fill gaps wrapper — 隔日早上跑、補昨天 settle 完仍 pending 的個案
+#
+# ⚠️ DEPRECATED（2026-05-19）：因 ~/Desktop launchd 沙箱問題，plist 已改成 inline 模式
+#    （見 com.rockstock.t1-fill-gaps.plist）。本檔保留供手動執行，但 launchd 不再用。
 # 用法：./_t1-fill.sh TW   或   ./_t1-fill.sh CN
 
 set -e
