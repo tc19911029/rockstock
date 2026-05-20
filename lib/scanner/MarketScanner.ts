@@ -467,11 +467,10 @@ export abstract class MarketScanner {
       // ── 1b. minScore 門檻（盤整/空頭市場可能要求 6/6 含指標條件）────────
       if (sixConds.totalScore < minScore) { if (diag) diag.filteredOut++; return null; }
 
-      // ── 2. 短線第9條：KD值向下時不買（可由 kdDecliningFilter 關閉）────
-      if (thresholds.kdDecliningFilter !== false && last.kdK != null && lastIdx > 0) {
-        const prevKdK = candles[lastIdx - 1]?.kdK;
-        if (prevKdK != null && last.kdK < prevKdK) { if (diag) diag.filteredOut++; return null; }
-      }
+      // ── 2. KD 向下 — 2026-05-20 改為警示不擋 ─────────────────────
+      // 原本 if (last.kdK < prevKdK) return null 已移除（用戶 2026-05-20 要求）
+      // kdDecliningFilter flag 保留以兼容外部（StrategyConfig schema），但 gate 不再生效
+      // K 值可在六條件 #6 metric 看到，UI 上用戶可自行判讀
 
       // 短線第10條（上影線>50%不買）已由六條件⑤覆蓋（upperShadowMax 預設20%），不再重複檢查
 
@@ -487,9 +486,10 @@ export abstract class MarketScanner {
       const prohib = checkLongProhibitions(candles, lastIdx, prohibCtx);
       if (prohib.prohibited) { if (diag) diag.filteredOut++; return null; }
 
-      // ── 5. 淘汰法 R1-R11（寶典）─────────────────────────────────────
+      // ── 5. 淘汰法 R1-R11（寶典）— 2026-05-20 改為警告不擋 ───────────
+      // 原本 if (elimination.eliminated) return null 已移除（用戶 2026-05-20 要求）
+      // 仍計算 reasons / penalty 寫入 result，UI 顯示警示，但不剔除個股
       const elimination = evaluateElimination(candles, lastIdx);
-      if (elimination.eliminated) { if (diag) diag.filteredOut++; return null; }
 
       // ══════════════════════════════════════════════════════════════════
       // 第二層：排序資料收集（共振 + 高勝率進場）
@@ -695,7 +695,7 @@ export abstract class MarketScanner {
     results.sort((a, b) => b.sixConditionsScore - a.sixConditionsScore);
 
     // ── 寫 Step 1 池子 cache（書本五步法 Step 1 → Step 2 銜接）──────
-    // results = 過「六條件 + 戒律 + 淘汰法」的合格股票池
+    // results = 過「六條件 + 戒律」的合格股票池（淘汰法 2026-05-20 改為警示不擋）
     // 多頭軌 8 個 detector（B/C/E/J/K/L/M/P）讀這個 cache 當候選來源
     // 反轉軌 + 戰法軌 不過 Step 1，全市場掃描（不用這個 cache）
     // 概念：今日的池子今日用，明天會重新算
@@ -1052,7 +1052,7 @@ export abstract class MarketScanner {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // V2 簡化版掃描：純朱老師 SOP（六條件+戒律+淘汰法）
+  // V2 簡化版掃描：純朱老師 SOP（六條件+戒律；淘汰法 2026-05-20 改為警示不擋）
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
@@ -1158,7 +1158,7 @@ export abstract class MarketScanner {
     }
 
     // ── 寫 Step 1 池子 cache（書本五步法 Step 1 → Step 2 銜接）──
-    // sorted 是過「六條件 + 戒律 + 淘汰法」的合格池
+    // sorted 是過「六條件 + 戒律」的合格池（淘汰法 2026-05-20 改為警示不擋）
     // 多頭軌 8 個 detector（B/C/E/J/K/L/M/P）讀這個 cache 當候選
     // 反轉軌 + 戰法軌 不過 Step 1，全市場掃（不用此 cache）
     // 概念：今日的池子今日用，明天會重新算
@@ -1315,7 +1315,7 @@ export abstract class MarketScanner {
     // 軌道分類 — 決定要不要過 Step 1 池子 + 戒律檢查（書本對應）
     // ══════════════════════════════════════════════════════════════
     // 多頭軌（B/C/E/J/K/L/M/P 8 個書本進場位置）：
-    //   → 必須先過 Step 1（六條件+戒律+淘汰法）才能進場
+    //   → 必須先過 Step 1（六條件+戒律；淘汰法警示不擋）才能進場
     //   → 從今日 Step 1 池子挑候選，不全市場掃
     // 反轉軌（D/F/N/O 抓底/反轉）：
     //   → 不過 Step 1（過了就抓不到底部反轉）

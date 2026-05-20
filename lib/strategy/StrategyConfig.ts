@@ -36,7 +36,7 @@ export interface StrategyThresholds {
   kdMaxEntry:      number;   // KD 進場上限（預設 88）
 
   // 乖離條件
-  deviationMax:    number;   // MA20 乖離上限（預設 0.15 = 15%，2026-04-22 用戶設定）
+  deviationMax:    number;   // MA20 乖離上限（預設 0.25 = 25%，2026-05-19 用戶放寬）
 
   // 進場門檻
   minScore:        number;   // 最低六大條件分數（預設 4）
@@ -54,7 +54,7 @@ export interface StrategyThresholds {
   mtfMinScore: number;            // MTF 最低通過分數 0-4（預設 2）
 
   // 短線輔助過濾（朱老師短線操作10條規則）
-  kdDecliningFilter: boolean;     // 短線第9條：KD向下不買（預設 true）
+  kdDecliningFilter: boolean;     // KD 向下警示（2026-05-20 起 flag 保留但不擋，UI 看 K 值自行判讀）
 
   // 再進場分支（書本戰法 1/4/9：跌破均線出場後，趨勢未破即可放寬條件再進場）
   reentry?: ReentryConfig;
@@ -147,15 +147,15 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   upperShadowMax: 0.20,
   volumeRatioMin: 1.3,  // 書上p.54：攻擊量 ≥ 前一日 × 1.3
   kdMaxEntry:     88,
-  deviationMax:   0.15,
+  deviationMax:   0.25,
   minScore:       4,    // 基本門檻 4 分
   marketTrendFilter: true,
   // 注意：scanOne() 中 isCoreReady 要求前5個核心條件全過（coreScore=5），
   // 因此 bullMinScore/sidewaysMinScore < 5 實際等於 5。
   // minScore = 6 才有額外效果（要求指標條件也過）。
-  bullMinScore:   5,    // 多頭：核心5條件全過
-  sidewaysMinScore: 5,  // 盤整：核心5條件全過
-  bearMinScore:   6,    // 空頭嚴格：6條件全過（含指標）
+  bullMinScore:   5,    // 多頭：核心5條件全過（#6 指標為加分項）
+  sidewaysMinScore: 5,  // 盤整：核心5條件全過（#6 指標為加分項）
+  bearMinScore:   5,    // 空頭：核心5條件全過（2026-05-20 從 6 放寬，#6 視為加分）
   // 長線保護短線（預設關閉，由 UI 開關控制）
   multiTimeframeFilter: false,
   mtfWeeklyStrict:  true,   // 週線不通過=拒絕
@@ -191,7 +191,7 @@ const ALL_CONDITIONS_ON: StrategyConditionToggles = {
  * - 量比 ≥ 前一日 × 1.3（p.54 ④）
  * - 紅 K 實體 ≥ 2%（p.54 ⑤）
  * - 六條件 1~5 為必要（5 分通過 = 進場）
- * - 空頭不做多（bearMinScore=6 實質禁入）
+ * - 空頭也可做多（bearMinScore=5，2026-05-20 放寬），靠戒律/淘汰警示判斷風險
  * - KD 向下不買（短線規則第 9 條）
  */
 export const ZHU_PURE_BOOK: StrategyConfig = {
@@ -208,12 +208,12 @@ export const ZHU_PURE_BOOK: StrategyConfig = {
     volumeRatioMin:   1.3,   // 書本 p.54 ④ 明寫
     kbarMinBodyPct:   0.02,  // 書本 p.54 ⑤ 明寫
     kdMaxEntry:       100,   // 書本沒寫 → 不限
-    deviationMax:     0.15,  // 用戶設定：乖離 >15% 篩除（2026-04-22）
+    deviationMax:     0.25,  // 用戶設定：乖離 >25% 篩除（2026-05-19 放寬，原 15%）
     upperShadowMax:   1.0,   // 書本沒寫 → 不限
     minScore:         5,
     bullMinScore:     5,     // 書本 1~5 必要
     sidewaysMinScore: 5,
-    bearMinScore:     6,     // 實質禁空頭進場
+    bearMinScore:     5,     // 2026-05-20 從 6 放寬：1~5 必過，#6 視為加分項
     marketTrendFilter:  true,
     kdDecliningFilter:  true,
     multiTimeframeFilter: false,

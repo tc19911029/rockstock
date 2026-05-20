@@ -41,7 +41,7 @@ export interface TakeProfitResult {
   reason?:
     | 'pattern-target'      // ② 達型態目標價
     | 'reach-resistance'    // ② 到達壓力區（書本特定條件 #1，2026-05-09 新增）
-    | 'high-deviation'      // ② 乖離 ≥ 15%（切 MA5，不直接停利）
+    | 'high-deviation'      // ② 乖離 ≥ 25%（切 MA5，不直接停利；2026-05-19 放寬，原 15%）
     | 'profit-target-10'    // ② 達 10% 獲利（切換進階紀律 flag）
     | 'high-vol-black-k';   // ③ 寶典 #7/#8 急漲反轉
   /** 進階紀律是否啟用（B/P MA5 切換）*/
@@ -88,7 +88,7 @@ export function checkTakeProfitTargets(inputs: TakeProfitInputs): TakeProfitResu
     }
   }
 
-  // 乖離 ≥ 15% → 切 MA5（不直接停利，議題 Step 5 ②）
+  // 乖離 ≥ 25% → 切 MA5（不直接停利，議題 Step 5 ②；2026-05-19 放寬，原 15%）
   if (todayMA20 != null && todayMA20 > 0) {
     const deviation = (todayClose - todayMA20) / todayMA20;
     if (deviation >= HIGH_DEVIATION_PCT) {

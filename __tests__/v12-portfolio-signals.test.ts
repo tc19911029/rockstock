@@ -154,12 +154,12 @@ describe('v12 Step 5 — checkTakeProfitTargets', () => {
     expect(r.reason).toBe('pattern-target');
   });
 
-  it('乖離 ≥15% → 切 MA5（不直接停利）', () => {
+  it('乖離 ≥25% → 切 MA5（不直接停利）', () => {
     const r = checkTakeProfitTargets({
       letter: 'B',
       entryPrice: 100,
       todayClose: 130,
-      todayMA20: 110,  // 乖離 = 18.18%
+      todayMA20: 100,  // 乖離 = 30%（2026-05-19 門檻放寬到 25%）
     });
     expect(r.triggered).toBe(false);
     expect(r.reason).toBe('high-deviation');
@@ -171,7 +171,7 @@ describe('v12 Step 5 — checkTakeProfitTargets', () => {
       letter: 'B',
       entryPrice: 100,
       todayClose: 110,
-      todayMA20: 105,  // 乖離 4.76% < 15%
+      todayMA20: 105,  // 乖離 4.76% < 25%
     });
     expect(r.reason).toBe('profit-target-10');
     expect(r.enhancedDisciplineEnabled).toBe(true);
