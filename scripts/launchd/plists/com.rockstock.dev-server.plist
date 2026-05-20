@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.dev-server</string>
+
+  <!--
+    Rockstock Next.js dev server — 給 14 個 launchd cron 用的 localhost:3000 後端。
+
+    為什麼要 launchd 管：手動 npm run dev 在 Terminal 開著的話，關 Terminal /
+    Claude Code / 重開機後 dev server 就死，14 個 launchd cron 全部 401。
+    用 launchd 管才能 7×24 + 自動重啟 (KeepAlive=true)。
+
+    使用方式：
+      bootstrap：  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rockstock.dev-server.plist
+      停掉：       launchctl bootout gui/$(id -u)/com.rockstock.dev-server
+      看 log：    tail -f /tmp/rockstock-dev-server.log
+
+    如果想用 Claude Preview 管 dev server (preview_start)，先 bootout 這個。
+  -->
+
+  <!--
+    用 npm run dev (而非直接 exec node ...)：
+    npm 內部會額外 propagate 一些 env vars 給 spawn 的 child process，
+    Turbopack 的 PostCSS pool worker 用 Rust std::process::Command spawn node
+    時必須能找到 node binary，npm prefix 可以幫忙 resolve。
+    （直接 exec node 走 launchd 環境會踩 "No such file or directory" pool process）
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd $HOME/Desktop/rockstock &amp;&amp; exec npm run dev</string>
+  </array>
+
+  <!--
+    PATH 必須在 EnvironmentVariables 設絕對路徑（launchd 不展開 $HOME，
+    且 Turbopack 內部 Rust spawn node pooled process 用的是 launchd 給的 env，
+    不繼承 zsh -lc 內 export 的 PATH，會 "No such file or directory" 報 500）。
+    這條 plist 是本機特有設定（user=tc），所以 hardcode /Users/tc 可以接受。
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_OPTIONS</key>
+    <string>--dns-result-order=ipv4first</string>
+    <key>PATH</key>
+    <string>/Users/tc/.local/node-22/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/tc</string>
+    <key>USER</key>
+    <string>tc</string>
+    <key>TMPDIR</key>
+    <string>/tmp</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+  </dict>
+
+  <!-- 載入時立刻啟動（含重開機/登入後） -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- 進程崩潰/被殺後自動重啟 -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- 限制重啟頻率避免 crash loop（崩潰後最少等 30 秒再 spawn） -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <!-- 互動性進程，給較高 priority -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-dev-server.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-dev-server.err.log</string>
+</dict>
+</plist>
