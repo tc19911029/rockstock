@@ -43,6 +43,8 @@ interface QuoteLike {
 const ZERO_TOLERANCE = 0.01;          // |changePercent| < 1% 視為「沒動」
 const LIMIT_DETECT_RATIO = 1.095;     // high > prev*1.095 視為觸漲停
 const FLOOR_DETECT_RATIO = 0.905;     // low  < prev*0.905 視為觸跌停
+const FAKE_ZERO_MAX_AMPLITUDE = 0.02; // 真正 fake-zero 是「H≈L 一字板」(amplitude < 2%)；
+                                       // 大波動 day 收回平盤不算 (例 2026-05-20 7709：開漲停殺到 -3.5% 收平)
 
 export function checkLimitUpConsistency(quotes: QuoteLike[]): ConsistencyResult {
   const samples: ConsistencySample[] = [];
@@ -57,6 +59,14 @@ export function checkLimitUpConsistency(quotes: QuoteLike[]): ConsistencyResult 
     const hitLimitUp = q.high >= q.prevClose * LIMIT_DETECT_RATIO;
     const hitLimitDown = q.low <= q.prevClose * FLOOR_DETECT_RATIO;
     if (!hitLimitUp && !hitLimitDown) continue;
+
+    // 排除「合法波動 day 收回平盤」的 false positive：
+    //   mis.twse fake-zero bug 是「一字板 H=L=漲停 + C 被抓成 prevClose」，
+    //   特徵是 OHLC 內部矛盾（C < L 或 C > H）或 amplitude 接近 0。
+    //   如果 close 落在 [L, H] 區間內且 amplitude 夠大 → 是真有交易、合法 close=prevClose
+    const closeInRange = q.close >= q.low && q.close <= q.high;
+    const amplitude = (q.high - q.low) / q.prevClose;
+    if (closeInRange && amplitude > FAKE_ZERO_MAX_AMPLITUDE) continue;
 
     samples.push({
       symbol: q.symbol,
