@@ -20,24 +20,17 @@ done
 
 echo ""
 echo "==> 卸載舊版（若已存在則先停掉）"
+UID_NUM=$(id -u)
 for plist in "$TARGET"/com.rockstock.*.plist; do
   label=$(basename "$plist" .plist)
-  # 跳過 etf-fetch 和 etf-track（這兩個已在跑，不要動）
-  if [ "$label" = "com.rockstock.etf-fetch" ] || [ "$label" = "com.rockstock.etf-track" ]; then
-    continue
-  fi
-  launchctl unload "$plist" 2>/dev/null || true
+  launchctl bootout "gui/${UID_NUM}/${label}" 2>/dev/null || true
 done
 
 echo ""
-echo "==> 載入新版"
+echo "==> 載入新版（用 bootstrap，modern API）"
 for plist in "$TARGET"/com.rockstock.*.plist; do
   label=$(basename "$plist" .plist)
-  if [ "$label" = "com.rockstock.etf-fetch" ] || [ "$label" = "com.rockstock.etf-track" ]; then
-    echo "  - $label (已在跑，跳過)"
-    continue
-  fi
-  launchctl load "$plist"
+  launchctl bootstrap "gui/${UID_NUM}" "$plist"
   echo "  - $label ✓"
 done
 
