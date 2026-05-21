@@ -70,6 +70,12 @@ export const SYSTEM_TRACK_LETTERS = ['Q'] as const;
  * 非書本買法，純機械式排名（成交額 + MA20 乖離率）。
  * 不過六條件、不過戒律、不過淘汰法、不過 Step 0 大盤過濾。
  *   R = 乖離率（成交額前500 → MA20 乖離 long 最負 / short 最正 top10）
+ *
+ * ⏸ **2026-05-22 暫停評估**（主審計第三類最高風險：完全自創、跳過所有過濾）：
+ *   - vercel.json 的 TW/CN mechanical cron 已移除，不再每日自動掃描
+ *   - 字母 / types / strategy / scanner method 全保留，回測腳本 + 手動觸發仍可用
+ *   - 將來決定保留時：把 vercel.json 兩條 cron 加回即可（schedule 17/27 6/8 * * 1-5）
+ *   - 將來決定移除時：清空此陣列、刪 ZHU_DEVIATION_EXTREME、刪 scanDeviationExtreme、刪 UI tab
  */
 export const MECHANICAL_TRACK_LETTERS = ['R'] as const;
 
