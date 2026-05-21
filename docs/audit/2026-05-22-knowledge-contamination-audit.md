@@ -38,7 +38,7 @@
 | B/C/D/E/F/J/K/L/M/N/O/P 字母策略 | ⚠️ **大致對齊書本，但 docs 未追上 code** |
 | Q 三均線戰法（MA3/10/24） | ✅ **已對齊書本** — 2026-05-22 二次審計確認《抓住線圖股民變股神》p.262 原文：三均線 = MA3/10/24，進場 / 出場 / 停損條件全部命中（PDF p37「第三大金剛 MA5/10/20/60」是不同戰法，不衝突） |
 | R 乖離率機械軌 | ❌ **完全自創** — 無任何書本依據（2026-05-21 用戶要求新增） |
-| Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區） | 📭 **線上課程依據**，未經書本筆記固化 |
+| Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區） | ✅ **2026-05-22 完成課程筆記固化**：[ch1](zhu_online_course_ch1.md) / [ch2](zhu_online_course_ch2.md) / [ch3](zhu_online_course_ch3.md) 三份 rockstock 筆記指向 `~/Desktop/朱家泓課程/筆記/CH{1,2,3}-*` 完整逐字稿；每項 Tier 1 對應到具體 code 行 |
 | 停損 7% / 停利 10% | ✅ 書本明確 |
 | 乖離率上限 | ✅ **已修復**（2026-05-22 回滾為書本 15%；v12 cron 零影響、SIXCOND 勝率 +8.5pp，commit `995c3a9`，見 [A/B 回測報告](./2026-05-22-high-deviation-pct-rollback-backtest.md)） |
 | 淘汰法執行方式 | ✅ **已修復**（2026-05-22 回滾為 hard gate，對齊書本「立即出場」；TW 池子縮小 12.3%、CN 縮小 5.1%，見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md)） |
@@ -53,7 +53,7 @@
 | 2 | ~~淘汰法改警示不擋~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | **2026-05-22 回滾為 hard gate**。實測 TW 池子 -12.3%、CN -5.1%，影響可控。詳見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md) |
 | 3 | ~~R 軌（乖離率排名）~~ → ⏸ **已暫停自動掃描** | ❌ 完全自創 → 暫停 | [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | **2026-05-22 移除 vercel.json TW/CN mechanical cron**，code 保留以利回測；恢復 = 加回 2 條 cron（commit `d422cb0`） |
 | 4 | ~~chipDivergence.ts 整支無書本~~ → ✅ **已修復** | ❌ 完全自創 → 已對齊書本 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | **2026-05-22 重寫**：移除「價跌+法人累積 500 張」自創邏輯，改為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條）；5% 門檻 cross-link entryProhibitions.ts:23 同一書本量化值。僅走圖 banner 顯示，不入選股 |
-| 5 | **Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區）** | 📭 線上課依據 → ⚠️ **code 已標明來源，等用戶補課程筆記** | [applyPanelFilter.ts:51](../../lib/selection/applyPanelFilter.ts#L51), [MarketScanner.ts:1404](../../lib/scanner/MarketScanner.ts#L1404), [trendAnalysis.ts:498](../../lib/analysis/trendAnalysis.ts#L498) | 2026-05-22 審計：code 註解已明確標「朱老師 CH3 / CH2-1 線上課程」；commit 669f273 引用的 98/99-*.md 差異報告佚失。**blocked**：等使用者錄製或抄寫 CH1-3 逐字稿到 docs/zhu_online_course_ch{1,2,3}.md。功能運作正常（D/F 加持只是品質標記、排序第三鍵只在罕見三鍵同分時觸發） |
+| 5 | ~~Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區）~~ → ✅ **已完成** | 📭 線上課依據 → ✅ 已固化 | [applyPanelFilter.ts:51](../../lib/selection/applyPanelFilter.ts#L51), [MarketScanner.ts:1404](../../lib/scanner/MarketScanner.ts#L1404), [trendAnalysis.ts:498](../../lib/analysis/trendAnalysis.ts#L498) | **2026-05-22 完成**：[docs/zhu_online_course_ch{1,2,3}.md](../zhu_online_course_ch3.md) 三份筆記建立，指向 `~/Desktop/朱家泓課程/筆記/` 完整逐字稿，每項 Tier 1 對應到具體 code 行（MA20 斜率→CH3-3、弱中透強→CH2-2/2-9、接近壓力區→CH3-6/CH2-9）|
 
 ### 建議首要行動（按急迫性）
 
@@ -61,7 +61,7 @@
 2. ~~立即決定：淘汰法「警示不擋」要保留還是回到書本「立即出場」？~~ → **2026-05-22 完成**：回滾為 hard gate；TW 池子縮小 12.3%、CN 縮小 5.1%，仍剩 161/230 檔可選，無 pool 飢餓風險（commit `e44b7fc`）。
 3. ~~暫停評估：R 軌（機械乖離率排名）~~ → **2026-05-22 完成**：移除 vercel.json TW/CN mechanical cron，code 保留以利回測，重啟 = 加回 2 條 cron（commit `d422cb0`）。
 4. ~~資料補齊：Q 三均線戰法書本頁碼確認~~ → **2026-05-22 完成**：經查《抓住線圖股民變股神》p.262 原文，Q 戰法 MA3/10/24 與進場/出場/停損條件全部對齊書本。
-5. **文件補齊**：更新 STRATEGY_BOOK_REFERENCE.md 涵蓋 2026-04-21 後加入的 17+ 個 commit 改動。
+5. ~~文件補齊：更新 STRATEGY_BOOK_REFERENCE.md~~ → **2026-05-22 完成**：STRATEGY_BOOK_REFERENCE.md 大幅補齊（commit `ad44b03`，+711/-195 行）+ 線上課 CH1-3 筆記固化（[docs/zhu_online_course_ch{1,2,3}.md](../zhu_online_course_ch3.md)）。
 
 ---
 
@@ -412,7 +412,7 @@
 | ~~HIGH_DEVIATION_PCT = 25%~~ → ✅ **已回滾 15% 2026-05-22** | 偏離書本 15% → 對齊書本 |
 | ~~KD 向下不擋~~ → ✅ **已恢復 hard gate 2026-05-22** | 偏離書本短線規則 #9 → 對齊書本 |
 | **N padding（×1.20 / ×0.97）** | 偏離書本「真突破 ×3%」 |
-| **Tier 1 三項（MA20 斜率 / 弱中透強 / 接近壓力區）** | 線上課程依據未經書本固化 |
+| ~~Tier 1 三項（MA20 斜率 / 弱中透強 / 接近壓力區）~~ → ✅ **已固化 2026-05-22** | 線上課筆記固化於 [docs/zhu_online_course_ch{1,2,3}.md](../zhu_online_course_ch3.md) |
 | ~~chipDivergence.ts~~ → ✅ **已重寫對齊書本 2026-05-22** | 改為「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條） |
 
 ### ✅ 維持使用（書本對齊度高、無爭議）
@@ -439,9 +439,9 @@
 
 ### 第四類（資料補齊）
 - ~~T5: 確認 Q 戰法三均線（MA3/10/24 vs MA5/10/20/60）~~ → **已完成（2026-05-22）**，書本 p.262 對齊
-- T6: 整理線上課 CH1（朱老師：趨勢）筆記
-- T7: 整理線上課 CH2（林穎：K 線）筆記
-- T8: 整理線上課 CH3（朱老師：均線）筆記
+- ~~T6: 整理線上課 CH1（朱老師：趨勢）筆記~~ → **2026-05-22 完成**：[docs/zhu_online_course_ch1.md](../zhu_online_course_ch1.md)
+- ~~T7: 整理線上課 CH2（林穎：K 線）筆記~~ → **2026-05-22 完成**：[docs/zhu_online_course_ch2.md](../zhu_online_course_ch2.md)
+- ~~T8: 整理線上課 CH3（朱老師：均線）筆記~~ → **2026-05-22 完成**：[docs/zhu_online_course_ch3.md](../zhu_online_course_ch3.md)
 
 ### 第五類（回滾評估）
 - ~~T9: 評估 HIGH_DEVIATION_PCT 從 25% 回到 15% 的影響（含全字母回測）~~ → **已完成（2026-05-22）**，A/B 回測寫入 [2026-05-22-high-deviation-pct-rollback-backtest.md](./2026-05-22-high-deviation-pct-rollback-backtest.md)
