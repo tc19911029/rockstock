@@ -39,7 +39,7 @@
 | Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區） | 📭 **線上課程依據**，未經書本筆記固化 |
 | 停損 7% / 停利 10% | ✅ 書本明確 |
 | 乖離率上限 | 🔄 **已偏離**（書本 15% → 2026-05-19 手動放寬到 25%） |
-| 淘汰法執行方式 | 🔄 **已偏離**（書本「立即出場」→ 2026-05-20 改為「警示不擋」） |
+| 淘汰法執行方式 | ✅ **已修復**（2026-05-22 回滾為 hard gate，對齊書本「立即出場」；TW 池子縮小 12.3%、CN 縮小 5.1%，見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md)） |
 | 籌碼背離 `chipDivergence.ts` | ❌ **整支檔案無書本標記** |
 | 文件追上度（docs/STRATEGY_BOOK_REFERENCE.md） | ⚠️ **嚴重 stale**：2026-04-21 後 17+ 個策略 commit 未進文件 |
 
@@ -48,16 +48,16 @@
 | # | 規則 | 污染類型 | 位置 | 影響 |
 |---|------|---------|------|------|
 | 1 | **HIGH_DEVIATION_PCT = 0.25**（書本原 15%） | 🔄 偏離書本 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | 影響戒律 3、做空戒律 3、Step 5 ② 切 MA5、ZHU-PURE-BOOK 策略 devMax — 全部偏離書本 |
-| 2 | **淘汰法改警示不擋** | 🔄 偏離書本 | [MarketScanner.ts:490-493](../../lib/scanner/MarketScanner.ts#L490) | 書本明寫「淘汰即出場」，2026-05-20 改為警示，使弱勢標的仍可進場 |
-| 3 | **R 軌（乖離率排名）** | ❌ 完全自創 | [StrategyConfig.ts:485-509](../../lib/strategy/StrategyConfig.ts#L485), [MarketScanner.ts](../../lib/scanner/MarketScanner.ts), [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | 完全跳過六條件/戒律/淘汰/Step 0/MTF；無書本依據，純機械排名 |
+| 2 | ~~淘汰法改警示不擋~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | **2026-05-22 回滾為 hard gate**。實測 TW 池子 -12.3%、CN -5.1%，影響可控。詳見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md) |
+| 3 | ~~R 軌（乖離率排名）~~ → ⏸ **已暫停自動掃描** | ❌ 完全自創 → 暫停 | [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | **2026-05-22 移除 vercel.json TW/CN mechanical cron**，code 保留以利回測；恢復 = 加回 2 條 cron（commit `d422cb0`） |
 | 4 | **chipDivergence.ts 整支無書本** | ❌ 完全自創 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | 5% 漲跌 + 法人累積 500 張的門檻完全無註解，書本無對應 |
 | 5 | **Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區）** | 📭 線上課依據 | [applyPanelFilter.ts](../../lib/selection/applyPanelFilter.ts), [MarketScanner.ts:1400](../../lib/scanner/MarketScanner.ts#L1400), [trendAnalysis.ts:498](../../lib/analysis/trendAnalysis.ts#L498) | 朱老師 CH3 / 林穎 CH2 線上課，無書本頁碼；commit 669f273 混用「書本/線上課程」字眼 |
 
 ### 建議首要行動（按急迫性）
 
-1. **立即決定**：HIGH_DEVIATION_PCT 是要保留 25% 還是回到書本 15%？這影響至少 4 處 code path。
-2. **立即決定**：淘汰法「警示不擋」要保留還是回到書本「立即出場」？2026-05-20 才改的，可能尚未經實戰驗證。
-3. **暫停評估**：R 軌（機械乖離率排名）建議先 disable 直到確認是否要納入正式軌道。
+1. ~~立即決定：HIGH_DEVIATION_PCT 25% / 15%？~~ → **2026-05-22 完成**：回滾到 15% 對齊書本 p.568（commit `995c3a9`）；連動戒律 3 / 做空戒律 3 / Step 5 ② 切 MA5 / BASE_THRESHOLDS / ZHU_PURE_BOOK / B/P 進階紀律 override。
+2. ~~立即決定：淘汰法「警示不擋」要保留還是回到書本「立即出場」？~~ → **2026-05-22 完成**：回滾為 hard gate；TW 池子縮小 12.3%、CN 縮小 5.1%，仍剩 161/230 檔可選，無 pool 飢餓風險（commit `e44b7fc`）。
+3. ~~暫停評估：R 軌（機械乖離率排名）~~ → **2026-05-22 完成**：移除 vercel.json TW/CN mechanical cron，code 保留以利回測，重啟 = 加回 2 條 cron（commit `d422cb0`）。
 4. ~~資料補齊：Q 三均線戰法書本頁碼確認~~ → **2026-05-22 完成**：經查《抓住線圖股民變股神》p.262 原文，Q 戰法 MA3/10/24 與進場/出場/停損條件全部對齊書本。
 5. **文件補齊**：更新 STRATEGY_BOOK_REFERENCE.md 涵蓋 2026-04-21 後加入的 17+ 個 commit 改動。
 
@@ -251,7 +251,7 @@
 | rule_id | 規則 | code | 書本原文 | 現況 | commit |
 |---------|------|------|----------|------|--------|
 | **HIGH_DEVIATION_PCT** | MA20 乖離上限 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | 書本 p.568 = 15% | **25%** | 496309e（2026-05-20） |
-| **R-warn-not-block** | 淘汰法執行方式 | [MarketScanner.ts:490-493](../../lib/scanner/MarketScanner.ts#L490) | 書本「立即出場」 | **警示不擋** | 496309e（2026-05-20） |
+| ~~R-warn-not-block~~ → ✅ 已修復 | 淘汰法執行方式 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | 書本「立即出場」 | **2026-05-22 回滾為 hard gate** | 496309e（2026-05-20）→ 已回滾 |
 | **KD-declining-warn** | KD 向下不買 gate | [v12Conditions.ts:71-72](../../lib/analysis/v12Conditions.ts#L71) | 書本短線規則 #9 | **flag 保留但不擋** | 496309e（2026-05-20） |
 | **Phase-C-ratio-098** | LockWatch Phase C 過濾 close 接近頸線 | [features/lockwatch/](../../features/lockwatch/) | 原 ×0.95 / 70% | **×0.98 / 80%** | e813eee（2026-05-11） |
 | **Q-no-prohibitions** | Q 戰法軌移除戒律 reject | [scanner/...](../../lib/scanner/) | 書本 Q 戰法未明寫「不適用戒律」 | **跳過戒律** | 2698969（2026-05-11） |
@@ -277,12 +277,17 @@
   - 對比 5/19 前後勝率 / hit rate / avgMaxGain
 - 風險：選股池會明顯縮小（特別是漲幅 > 15% 的標的會被踢）
 
-**🔄 回滾 2：淘汰法回到「立即出場」**
+**✅ 回滾 2：淘汰法回到「立即出場」— 2026-05-22 完成**
 
-- 改動檔案：[lib/scanner/MarketScanner.ts:490-493](../../lib/scanner/MarketScanner.ts#L490)（恢復 `if (eliminated) return null`）
-- 連動影響：選股池進一步縮小
-- 重跑回測：全字母回測
-- 風險：可能去掉一些書本「淘汰」但實戰可投資的標的
+- 改動檔案：[lib/scanner/MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494)（已加回 `if (elimination.eliminated) return null`）
+- 同步更新：[candidateCollector.ts:137](../../lib/backtest/optimizer/candidateCollector.ts#L137) 本來就是 hard gate，生產與回測現已對齊
+- 實測影響（60 交易日 anchor 2026-05-21）：
+  - TW: 池子 181.2 → 161.0 檔/日（縮小 **12.3%**，範圍 5.0%–28.6%）
+  - CN: 池子 240.5 → 230.3 檔/日（縮小 **5.1%**，範圍 0.8%–25.7%）
+  - 規則熱點：TW 以 R4（量縮）為主、CN 以 R2（重壓不過破MA5）為主
+- 詳細報告：[2026-05-22-elimination-hard-gate-impact.md](./2026-05-22-elimination-hard-gate-impact.md)
+- 風險：可控。多頭軌 8 字母仍有 161/230 檔可選，無 pool 飢餓
+- 量測工具：[scripts/measure-elimination-impact.ts](../../scripts/measure-elimination-impact.ts)（日後 regression check 可重用）
 
 **🔄 回滾 3：KD 向下不買 gate 恢復**
 
@@ -399,15 +404,15 @@
 
 | 規則 | 原因 | 影響 |
 |------|------|------|
-| **R 軌乖離率機械排名** | 完全自創、跳過所有過濾 | 影響 R 字母選股結果 |
-| **淘汰法「警示不擋」** | 偏離書本「立即出場」 | 影響全字母選股池大小 |
+| ~~R 軌乖離率機械排名~~ → ⏸ **已暫停 2026-05-22** | 完全自創、跳過所有過濾 → cron 移除 | code 保留，回測可用；恢復 = 加回 cron |
+| ~~淘汰法「警示不擋」~~ → ✅ **已修復 2026-05-22** | 偏離書本「立即出場」→ 回滾為 hard gate | 實測 TW -12.3%、CN -5.1%，影響可控 |
 
 ### ⏸ 建議觀察（保留但需後續驗證）
 
 | 規則 | 原因 |
 |------|------|
-| **HIGH_DEVIATION_PCT = 25%** | 偏離書本 15%，需確認回測是否優於書本版 |
-| **KD 向下不擋** | 偏離書本短線規則 #9 |
+| ~~HIGH_DEVIATION_PCT = 25%~~ → ✅ **已回滾 15% 2026-05-22** | 偏離書本 15% → 對齊書本 |
+| ~~KD 向下不擋~~ → ✅ **已恢復 hard gate 2026-05-22** | 偏離書本短線規則 #9 → 對齊書本 |
 | **N padding（×1.20 / ×0.97）** | 偏離書本「真突破 ×3%」 |
 | **Tier 1 三項（MA20 斜率 / 弱中透強 / 接近壓力區）** | 線上課程依據未經書本固化 |
 | **chipDivergence.ts** | 整支檔案無書本標記 |
@@ -416,7 +421,7 @@
 
 - 六條件 ①-⑥
 - 十大戒律（除戒律 3 乖離 25% 偏離外）
-- 淘汰法 R1/R2/R4/R5/R6/R7/R9 條件（執行方式偏離見上）
+- 淘汰法 R1/R2/R4/R5/R6/R7/R9 條件 + 執行方式（2026-05-22 起對齊書本「立即出場」hard gate）
 - 高勝率 6 位置加分
 - B/C/D/E/F/J/K/L/M/N/O/P 字母核心邏輯
 - 停損 7% / 停利 10% 框架
@@ -429,7 +434,7 @@
 以下任務會以 `spawn_task` 開獨立背景 session 跟進（不影響本對話）：
 
 ### 第三類（自創規則確認）
-- T1: 確認 R 軌（乖離率排名）是否要保留或暫停
+- ~~T1: 確認 R 軌（乖離率排名）是否要保留或暫停~~ → **2026-05-22 完成**，已暫停自動掃描
 - T2: 確認 `chipDivergence.ts` 來源（書本？自創？AI 補？）
 - T3: 確認 N padding（×1.20 突破過頭、×0.97 接近目標）是否要保留
 - T4: 確認排序主鍵 changePercent desc 是否要明文標為「回測驅動非書本」
@@ -442,7 +447,7 @@
 
 ### 第五類（回滾評估）
 - T9: 評估 HIGH_DEVIATION_PCT 從 25% 回到 15% 的影響（含全字母回測）
-- T10: 評估淘汰法回到「立即出場」的影響
+- ~~T10: 評估淘汰法回到「立即出場」的影響~~ → **已完成（2026-05-22）**，回滾完成、影響量測寫入 [2026-05-22-elimination-hard-gate-impact.md](./2026-05-22-elimination-hard-gate-impact.md)
 - T11: 評估 KD 向下不擋 → 恢復 gate 的影響
 - T12: 評估 Q 軌恢復戒律 reject 的影響（書本 p.262 未明寫 Q 不適用戒律，回滾可能更安全）
 
