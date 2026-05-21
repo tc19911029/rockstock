@@ -104,6 +104,9 @@ const _consecutiveEmptyCount: Record<string, number> = { TW: 0, CN: 0 };
 /** 每個市場最近一次嘗試刷新的時間（不論成功或失敗） */
 const _lastRefreshAttempt: Record<string, string> = {};
 
+/** 每個市場最近一次「成功」刷新的時間（有真的拿到 ≥1 筆 quote 才算） */
+const _lastRefreshSuccess: Record<string, string> = {};
+
 /** 取得指定市場最近一次刷新的數據源狀態 */
 export function getDataSourceStatus(market: 'TW' | 'CN'): DataSourceStatus[] {
   return _lastSourceStatus[market] ?? [];
@@ -117,6 +120,43 @@ export function getConsecutiveEmptyCount(market: 'TW' | 'CN'): number {
 /** 取得指定市場最近一次嘗試刷新的時間（區分「cron 沒跑」vs「API 掛了用快取」） */
 export function getLastRefreshAttempt(market: 'TW' | 'CN'): string | null {
   return _lastRefreshAttempt[market] ?? null;
+}
+
+/** 取得指定市場最近一次「成功」刷新的時間 */
+export function getLastRefreshSuccess(market: 'TW' | 'CN'): string | null {
+  return _lastRefreshSuccess[market] ?? null;
+}
+
+/**
+ * L2 polling watchdog：盤中時若上次成功刷新距今 > thresholdMin 分鐘 → 視為異常。
+ *
+ * 2026-05-21 加。背景：新 Mac 5/20 12:10 L2 polling 突然停（dev server 重啟），
+ * 之後 80 分鐘沒人發現，收盤 append-from-snapshot 拿到 stale L2 → L1 5/20 ~180 檔錯。
+ *
+ * 回傳：
+ *   { stale: true, lastSuccessAt, staleMin } — 盤中且 > 10 分鐘沒成功
+ *   { stale: false, ... } — 一切正常或非盤中
+ */
+export function checkL2PollingHealth(
+  market: 'TW' | 'CN',
+  thresholdMin = 10,
+): { stale: boolean; lastSuccessAt: string | null; staleMin: number; isMarketOpen: boolean } {
+  // 動態 import 避免循環依賴
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isMarketOpen } = require('./marketHours') as typeof import('./marketHours');
+  const open = isMarketOpen(market);
+  const lastSuccess = _lastRefreshSuccess[market];
+  if (!lastSuccess) {
+    return { stale: open, lastSuccessAt: null, staleMin: Infinity, isMarketOpen: open };
+  }
+  const staleMs = Date.now() - new Date(lastSuccess).getTime();
+  const staleMin = staleMs / 60_000;
+  return {
+    stale: open && staleMin > thresholdMin,
+    lastSuccessAt: lastSuccess,
+    staleMin: Math.round(staleMin * 10) / 10,
+    isMarketOpen: open,
+  };
 }
 
 /** 計時工具 */
@@ -367,8 +407,9 @@ async function _refreshIntradaySnapshotImpl(market: 'TW' | 'CN'): Promise<Intrad
       _consecutiveEmptyCount[market] = 0;
     }
   } else {
-    // 有數據 → 重置連續空計數
+    // 有數據 → 重置連續空計數 + 記錄成功時間（watchdog 用）
     _consecutiveEmptyCount[market] = 0;
+    _lastRefreshSuccess[market] = new Date().toISOString();
   }
 
   // ── 最終快照保護（空數據 + 部分數據都要擋） ──

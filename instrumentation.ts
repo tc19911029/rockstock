@@ -105,7 +105,9 @@ export async function register() {
     console.log(`[local-cron] ${market} scan post_close: ${(payload as { resultCount?: number }).resultCount ?? -1} 檔`);
   }
 
-  // ── 盤中：L2 刷新（update-intraday） ──
+  // ── 盤中：L2 刷新（update-intraday） + watchdog ──
+  // 2026-05-21 加 watchdog：每輪刷新後 check L2 距上次成功 > 10 分鐘就 console.error
+  // 背景：新 Mac 5/20 12:10 L2 polling 突然停 80 分鐘沒人發現 → L1 ~180 檔錯
   async function refreshAndScan(market: 'TW' | 'CN') {
     if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
 
@@ -119,6 +121,32 @@ export async function register() {
     } else {
       console.log(`[local-cron] ${market} L2 刷新 ${(payload as { count?: number }).count ?? -1} 支`);
     }
+
+    // Watchdog：盤中時 check L2 距上次成功 > 10 分鐘 → 異常
+    try {
+      const { checkL2PollingHealth } = await import('@/lib/datasource/IntradayCache');
+      const health = checkL2PollingHealth(market, 10);
+      if (health.stale) {
+        console.error(
+          `[L2-watchdog] ★ ${market} L2 polling 異常：盤中但上次成功刷新已 ${health.staleMin} 分鐘前 ` +
+          `(lastSuccess=${health.lastSuccessAt})`,
+        );
+        // 額外 fire webhook alert（如有設定）
+        const webhook = process.env.HEALTH_ALERT_WEBHOOK_URL;
+        if (webhook) {
+          fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: `🚨 ${market} L2 polling stale: 上次成功 ${health.staleMin} 分鐘前`,
+              level: 'critical',
+              market,
+              staleMin: health.staleMin,
+            }),
+          }).catch(() => {});
+        }
+      }
+    } catch { /* watchdog 失敗不影響主流程 */ }
   }
 
   // ── 盤後：買法 post_close 掃描（scan-bm-batch 3 track）──
@@ -199,15 +227,21 @@ export async function register() {
     await callRoute(`/api/cron/download-candles?market=${market}`, `${market} download-candles ${phase}`);
   }
 
-  // ── 盤後：L2 快照補 L1（收盤後 30 分鐘，TW≥14:00 / CN≥15:30，每日一次） ──
+  // ── 盤後：L2 快照補 L1（收盤後 45 分鐘，TW≥14:15 / CN≥15:45，每日一次） ──
   // 比 download-candles 快（5 秒完成全市場），用於補 download-candles 遺漏的個股
+  //
+  // 2026-05-21：原本 14:00 / 15:30 觸發太早。L2 polling 每 5 分鐘一輪，14:00 那一刻
+  // append 用到的 in-memory L2 可能是 13:55 的 stale 快照（還沒抓到 13:30 集合競價最終價）。
+  // 結果 ~610 檔 L1 close 被寫成 stale 中間 tick，特別是 .TWO 上櫃股 (8358 金居 5/15+5/19+5/20
+  // 即此 bug)。修法：(1) 觸發時間 → 14:15 / 15:45 (再給 L2 三輪 polling 抓收盤集合競價)；
+  // (2) 觸發前強制 call 一次 refreshIntradaySnapshot，確保用最新 L2 而非 in-memory stale。
   const l1SnapshotDone = { TW: '', CN: '' };
   async function appendL1FromSnapshot(market: 'TW' | 'CN') {
     if (isMarketOpen(market)) return;
     const lastTrading = getLastTradingDay(market);
     if (l1SnapshotDone[market] === lastTrading) return;
 
-    // 30 分鐘緩衝：TW 收盤 13:30 → 等到 14:00；CN 收盤 15:00 → 等到 15:30
+    // 45 分鐘緩衝：TW 收盤 13:30 → 等到 14:15；CN 收盤 15:00 → 等到 15:45
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const now = new Date();
     const hhmm = parseInt(
@@ -215,16 +249,45 @@ export async function register() {
         .format(now).replace(':', ''),
       10,
     );
-    const triggerMin = market === 'TW' ? 1400 : 1530; // 14:00 CST / 15:30 CST
+    const triggerMin = market === 'TW' ? 1415 : 1545; // 14:15 CST / 15:45 CST
     if (hhmm < triggerMin) return;
 
+    // 先標記 flag 避免重入，但實際 await refresh 失敗時 reset 讓下一輪重試
     l1SnapshotDone[market] = lastTrading;
+
+    // 觸發前強制 refresh 一次 L2，保證下游 append-from-snapshot 拿到最新 L2 而非 stale。
+    try {
+      const { refreshIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+      console.log(`[local-cron] ${market} append-from-snapshot 前強制 L2 refresh...`);
+      const snap = await refreshIntradaySnapshot(market);
+      console.log(`[local-cron] ${market} 強制 L2 refresh 完成: ${snap.count} 筆`);
+    } catch (err) {
+      console.warn(`[local-cron] ${market} 強制 L2 refresh 失敗 (繼續 append):`, err);
+      // 不 reset flag — refresh 失敗時 append-from-snapshot 內部會 fallback 打 TWSE realtime
+    }
+
     console.log(`[local-cron] ${market} append-from-snapshot 觸發 (lastTrading=${lastTrading})...`);
     const json = await callRoute(
       `/api/cron/append-from-snapshot?market=${market}`,
       `${market} append-from-snapshot`,
     ) as { appended?: number; already?: number } | null;
     console.log(`[local-cron] ${market} append-from-snapshot 完成: appended=${(json as { appended?: number })?.appended ?? '?'}`);
+
+    // append 完成後 15 分鐘跑 L1↔L2 一致性 audit（給 download-candles 也跑完）
+    // 2026-05-21 加。這個跟 append 同個 daily flag 走，append 跑完才會走到這。
+    setTimeout(() => {
+      callRoute(`/api/cron/audit-l1-l2-consistency?market=${market}`, `${market} L1↔L2 audit`)
+        .then(r => {
+          const d = (r as { data?: unknown } | null)?.data ?? r ?? {};
+          const { diff1pct, diff5pct, ohlcInconsistent, total, alertFired } = d as { diff1pct?: number; diff5pct?: number; ohlcInconsistent?: number; total?: number; alertFired?: boolean };
+          console.log(
+            `[local-cron] ${market} L1↔L2 audit: ` +
+            `diff>1%=${diff1pct ?? '?'}/${total ?? '?'}, diff>5%=${diff5pct ?? '?'}, OHLC 不自洽=${ohlcInconsistent ?? '?'}` +
+            (alertFired ? ' 🚨 ALERT' : ''),
+          );
+        })
+        .catch(err => console.error(`[local-cron] ${market} L1↔L2 audit 失敗:`, err));
+    }, 15 * 60 * 1000);
   }
 
   // ── 打板開盤確認（CN 9:25–9:35 CST，每日一次） ──

@@ -174,15 +174,89 @@ export async function writeCandleFile(
 // 否則 abort（避免讀失敗 fallback 直接寫入 1 根把 L1 截斷）。
 const SINGLE_CANDLE_INCREMENT_THRESHOLD = 1;
 
+/**
+ * OHLC 自洽守門：對 incoming 每根 bar 確保 low ≤ {open, close} ≤ high。
+ *
+ * 來源情境：
+ *   1. mis.twse z='-' 時 fallback bid/ask 中價（resolveMisClose 已 clip 但其他路徑可能漏）
+ *   2. Yahoo 調整後 open vs raw H/L (2072.TW 110 筆歷史)
+ *   3. 任何 vendor parse 錯亂
+ *
+ * 策略：
+ *   - 小幅破範圍 (≤ 1%)：clip 回 [low, high]（資料其他部分還可用）
+ *   - 大幅破 (> 1%)：log warn 並 drop 該 bar（vendor 完全亂值）
+ *
+ * 註：volume cliff / spike + limit-up close 守門仍在 LocalCandleStore（針對「最後一根」）
+ * 此處只做純 OHLC 自洽（針對「全部 incoming bar」）。
+ *
+ * 2026-05-21 加。
+ */
+function sanitizeOHLC(symbol: string, market: 'TW' | 'CN', incoming: Candle[]): Candle[] {
+  const out: Candle[] = [];
+  for (const c of incoming) {
+    const { open, high, low, close, volume, date } = c;
+    if (high <= 0 || low <= 0 || open <= 0 || close <= 0 || low > high) {
+      out.push(c); // 不合理但不是 OHLC 自洽範疇（vendor 缺資料），留給其他 guard 處理
+      continue;
+    }
+    const fixed = { ...c };
+    let clipped = false;
+    let dropped = false;
+
+    // close 在 [low, high] 範圍外？
+    if (close > high) {
+      const breachPct = (close - high) / high;
+      if (breachPct <= 0.01) { fixed.close = high; clipped = true; }
+      else { dropped = true; }
+    } else if (close < low) {
+      const breachPct = (low - close) / low;
+      if (breachPct <= 0.01) { fixed.close = low; clipped = true; }
+      else { dropped = true; }
+    }
+    // open 在 [low, high] 範圍外？(2072.TW Yahoo adjusted 殘留典型 case)
+    if (!dropped) {
+      const o = fixed.open;
+      if (o > high) {
+        const breachPct = (o - high) / high;
+        if (breachPct <= 0.01) { fixed.open = high; clipped = true; }
+        else { dropped = true; }
+      } else if (o < low) {
+        const breachPct = (low - o) / low;
+        if (breachPct <= 0.01) { fixed.open = low; clipped = true; }
+        else { dropped = true; }
+      }
+    }
+
+    if (dropped) {
+      console.warn(
+        `[sanitizeOHLC] ${market}:${symbol} ${date} 大幅破 OHLC 範圍 (O=${open} H=${high} L=${low} C=${close} V=${volume}) — drop 該 bar`,
+      );
+      continue;
+    }
+    if (clipped) {
+      console.warn(
+        `[sanitizeOHLC] ${market}:${symbol} ${date} OHLC 微幅破範圍已 clip (O=${open}→${fixed.open} C=${close}→${fixed.close})`,
+      );
+    }
+    out.push(fixed);
+  }
+  return out;
+}
+
 async function _writeCandleFileImpl(
   symbol: string,
   market: 'TW' | 'CN',
   candles: Candle[],
 ): Promise<void> {
-  const incoming: Candle[] = candles.map(c => ({
+  const rawIncoming: Candle[] = candles.map(c => ({
     date: c.date, open: c.open, high: c.high,
     low: c.low, close: c.close, volume: c.volume,
   }));
+  const incoming = sanitizeOHLC(symbol, market, rawIncoming);
+  if (incoming.length === 0) {
+    console.warn(`[writeCandleFile] ${market}:${symbol} 所有 incoming bar 都被 sanitize 砍掉，skip 寫入`);
+    return;
+  }
 
   // 讀既有 → merge
   const existing = await readCandleFile(symbol, market);

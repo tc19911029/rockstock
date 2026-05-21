@@ -313,9 +313,13 @@ export function parseMisBestPrice(s: string | undefined): number {
  *   1. d.z 最新成交價（盤中正常路徑）
  *   2. 鎖漲停：d.h >= d.u（漲停價）且 best ask 掃空 → d.u
  *   3. 鎖跌停：d.l <= d.w（跌停價）且 best bid 掃空 → d.w
- *   4. best bid / best ask 中價
- *   5. 退而求其次 best bid 或 best ask
+ *   4. best bid / best ask 中價（**clip 到 [low, high] 確保不破 OHLC**）
+ *   5. 退而求其次 best bid 或 best ask（同樣 clip）
  *   6. 最後用 d.h（保守選最高，不選 d.l 否則鎖漲停會誤判）
+ *
+ * 2026-05-21：原先 4/5 不 clip，bid/ask 中價 (例 12.225 = (12.20+12.25)/2) 直接寫進
+ * close，但今日 d.h/d.l 都只到 12.20（沒撮合到 12.25），close 12.225 > high 12.20
+ * 破 OHLC 自洽。全市場 44 檔被污染 (1233, 1240, 1742, 2740, 4419 等)。改加 clip。
  */
 export function resolveMisClose(d: Record<string, string | undefined>): number {
   const z = parseMisPrice(d.z);
@@ -334,9 +338,16 @@ export function resolveMisClose(d: Record<string, string | undefined>): number {
   if (lowerLimit > 0 && low > 0 && low <= lowerLimit && bestBid <= 0) {
     return lowerLimit;
   }
-  if (bestBid > 0 && bestAsk > 0) return (bestBid + bestAsk) / 2;
-  if (bestBid > 0) return bestBid;
-  if (bestAsk > 0) return bestAsk;
+  // bid/ask 中價或單邊 fallback — 必須 clip 到當日 [low, high]
+  const clipToRange = (v: number): number => {
+    if (v <= 0 || high <= 0 || low <= 0) return v;
+    if (v > high) return high;
+    if (v < low) return low;
+    return v;
+  };
+  if (bestBid > 0 && bestAsk > 0) return clipToRange((bestBid + bestAsk) / 2);
+  if (bestBid > 0) return clipToRange(bestBid);
+  if (bestAsk > 0) return clipToRange(bestAsk);
   return high > 0 ? high : 0;
 }
 

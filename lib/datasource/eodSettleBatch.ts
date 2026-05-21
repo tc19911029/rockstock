@@ -37,10 +37,47 @@ export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, Bu
   } catch { return new Map(); }
 }
 
-/** TPEx 上櫃（OpenAPI 只回最新日，歷史日拿不到 → empty）*/
+/** TPEx 上櫃 OpenAPI 全市場 OHLCV — 只回最新日（歷史日要靠 per-symbol 補）
+ *
+ * 2026-05-21：原 stub 直接 return new Map() 讓上櫃股 EOD settle 完全沒 TPEx 權威源，
+ * 三源剩 FinMind+EODHD+Yahoo 對打，stale L1 帶歪就 settled-single-source 寫死。
+ * 修補：對「今天」走 TPEx OpenAPI（一次拉 1000+ 檔），對「歷史日」仍 return empty。
+ */
 export async function fetchTPExBulkForDate(date: string): Promise<Map<string, BulkRow>> {
-  // TPEx OpenAPI 只回最新日，歷史日拉不到，留空（EODHD/Yahoo 補）
-  return new Map();
+  const map = new Map<string, BulkRow>();
+  try {
+    // 判斷是否為「今天」(taipei)
+    const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    if (date !== todayTW) {
+      // 歷史日不支援；留空讓 per-symbol vendor 接手
+      return map;
+    }
+    const url = 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes';
+    const { data } = await fetchJsonWithCurlFallback<Array<{
+      Date?: string; SecuritiesCompanyCode?: string;
+      Open?: string; High?: string; Low?: string; Close?: string;
+      TradingShares?: string;
+    }>>(url, { timeoutMs: 15_000 });
+    if (!Array.isArray(data)) return map;
+    const num = (s: string | undefined) => {
+      if (!s) return 0;
+      const n = parseFloat(String(s).replace(/,/g, ''));
+      return isNaN(n) ? 0 : n;
+    };
+    for (const row of data) {
+      const code = row.SecuritiesCompanyCode?.trim();
+      if (!code || !/^\d{4,6}[A-Z]?$/.test(code)) continue;
+      const open = num(row.Open), high = num(row.High), low = num(row.Low), close = num(row.Close);
+      // TradingShares 是「股」，/1000 變張
+      const volume = Math.round(num(row.TradingShares) / 1000);
+      if (close > 0 && open > 0 && high > 0 && low > 0) {
+        map.set(code, { open, high, low, close, volume });
+      }
+    }
+    return map;
+  } catch {
+    return map;
+  }
 }
 
 // ── CN bulk fetchers ─────────────────────────────────────────────────────────

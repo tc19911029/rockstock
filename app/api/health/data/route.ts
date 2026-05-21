@@ -92,6 +92,8 @@ interface MarketHealth {
   l4: L4Status;
   /** L2 quote 一致性檢查（鎖漲停股 close 是否被誤寫成昨收） */
   limitUpConsistency: LimitUpConsistencyStatus;
+  /** L1↔L2 一致性檢查（2026-05-21 加，8358 案發現問題） */
+  l1l2Consistency: L1L2ConsistencyStatus;
   /** 完整報告（可選，?detail=1 時返回） */
   report?: VerifyReport;
 }
@@ -103,6 +105,21 @@ interface LimitUpConsistencyStatus {
   samples: ConsistencySample[];
   /** alert 等級 */
   level: 'ok' | 'warning' | 'critical';
+}
+
+interface L1L2ConsistencyStatus {
+  /** 最近一個交易日 L1 vs L2 close 偏差 >1% 的檔數 */
+  diff1pct: number;
+  /** 偏差 >5% 的檔數 */
+  diff5pct: number;
+  /** OHLC 不自洽（close 在 [low, high] 範圍外）的檔數 */
+  ohlcInconsistent: number;
+  /** 檢查總檔數 */
+  total: number;
+  /** alert 等級 */
+  level: 'ok' | 'warning' | 'critical';
+  /** 樣本（最多 10 檔，偏差最大） */
+  samples: Array<{ symbol: string; l1: number; l2: number; pct: number }>;
 }
 
 function getTodayDate(market: 'TW' | 'CN'): string {
@@ -255,6 +272,58 @@ async function getLimitUpConsistency(market: 'TW' | 'CN'): Promise<LimitUpConsis
   };
 }
 
+async function getL1L2Consistency(market: 'TW' | 'CN'): Promise<L1L2ConsistencyStatus> {
+  // 用最近交易日 L1 vs 同日 L2 close 比對。樣本最多 200 檔取個股輪詢
+  const lastTrading = getLastTradingDay(market);
+  const snapshot = await readIntradaySnapshot(market, lastTrading);
+  if (!snapshot || snapshot.quotes.length === 0) {
+    return { diff1pct: 0, diff5pct: 0, ohlcInconsistent: 0, total: 0, level: 'ok', samples: [] };
+  }
+  const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
+  const l2Map = new Map(snapshot.quotes.map(q => [q.symbol, q]));
+
+  // 為避免 health 端 latency 飆，採樣 200 檔（按 turnover 排，TPEx + TSE 都有）
+  const samplePool = [...l2Map.entries()]
+    .map(([code, q]) => ({ code, q, turnover: q.close * q.volume }))
+    .sort((a, b) => b.turnover - a.turnover)
+    .slice(0, 200);
+
+  let diff1pct = 0;
+  let diff5pct = 0;
+  let ohlcInconsistent = 0;
+  let total = 0;
+  const samples: L1L2ConsistencyStatus['samples'] = [];
+
+  await Promise.allSettled(samplePool.map(async ({ code, q }) => {
+    // 嘗試 .TW 和 .TWO 後綴（TW 個股都有後綴）
+    const suffix = market === 'TW' ? (q.volume > 0 && (await readCandleFile(`${code}.TWO`, market)) ? '.TWO' : '.TW') : (code.startsWith('6') ? '.SS' : '.SZ');
+    const existing = await readCandleFile(`${code}${suffix}`, market);
+    if (!existing) return;
+    const todayCandle = existing.candles.find(c => c.date === lastTrading);
+    if (!todayCandle || todayCandle.close <= 0) return;
+    total++;
+    if (todayCandle.close > todayCandle.high || todayCandle.close < todayCandle.low
+        || todayCandle.open > todayCandle.high || todayCandle.open < todayCandle.low) {
+      ohlcInconsistent++;
+    }
+    if (q.close <= 0) return;
+    const pct = Math.abs(todayCandle.close - q.close) / Math.max(todayCandle.close, q.close);
+    if (pct > 0.05) diff5pct++;
+    if (pct > 0.01) {
+      diff1pct++;
+      if (samples.length < 10) samples.push({ symbol: `${code}${suffix}`, l1: todayCandle.close, l2: q.close, pct: Math.round(pct * 10000) / 100 });
+    }
+  }));
+
+  samples.sort((a, b) => b.pct - a.pct);
+  const level: L1L2ConsistencyStatus['level'] =
+    (diff5pct > 5 || ohlcInconsistent > 5) ? 'critical'
+    : (diff1pct > 10 || ohlcInconsistent > 0) ? 'warning'
+    : 'ok';
+
+  return { diff1pct, diff5pct, ohlcInconsistent, total, level, samples };
+}
+
 async function getMarketHealth(
   market: 'TW' | 'CN',
   includeDetail: boolean,
@@ -265,9 +334,10 @@ async function getMarketHealth(
   const l2Promise = getL2Status(market);
   const l4Promise = getL4Status(market);
   const consistencyPromise = getLimitUpConsistency(market);
+  const l1l2Promise = getL1L2Consistency(market);
 
   // 嘗試讀取最近 7 天的報告（可能假日/週末沒報告 — 週一要能回看到上週五）
-  let l1Result: Omit<MarketHealth, 'l2' | 'l2Sources' | 'l4' | 'limitUpConsistency'> | null = null;
+  let l1Result: Omit<MarketHealth, 'l2' | 'l2Sources' | 'l4' | 'limitUpConsistency' | 'l1l2Consistency'> | null = null;
   for (let daysBack = 0; daysBack < 7; daysBack++) {
     const d = new Date(lastTrading + 'T12:00:00');
     d.setDate(d.getDate() - daysBack);
@@ -290,7 +360,7 @@ async function getMarketHealth(
     }
   }
 
-  const [l2, l4, limitUpConsistency] = await Promise.all([l2Promise, l4Promise, consistencyPromise]);
+  const [l2, l4, limitUpConsistency, l1l2Consistency] = await Promise.all([l2Promise, l4Promise, consistencyPromise, l1l2Promise]);
 
   // L2 數據源狀態
   const today = getTodayDate(market);
@@ -308,7 +378,7 @@ async function getMarketHealth(
   };
 
   if (l1Result) {
-    return { ...l1Result, l2, l2Sources, l4, limitUpConsistency };
+    return { ...l1Result, l2, l2Sources, l4, limitUpConsistency, l1l2Consistency };
   }
 
   return {
@@ -324,6 +394,7 @@ async function getMarketHealth(
     l2Sources,
     l4,
     limitUpConsistency,
+    l1l2Consistency,
   };
 }
 
