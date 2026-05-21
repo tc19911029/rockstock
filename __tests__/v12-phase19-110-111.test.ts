@@ -147,12 +147,12 @@ describe('v12 Phase 1.10 — checkTakeProfitTargets', () => {
     expect(result.reason).toBe('pattern-target');
   });
 
-  it('乖離 ≥ 25% → 不直接停利，建議切 MA5', () => {
+  it('乖離 ≥ 15% → 不直接停利，建議切 MA5', () => {
     const result = checkTakeProfitTargets({
       letter: 'B',
       entryPrice: 100,
       todayClose: 130,
-      todayMA20: 100,  // 乖離 = (130-100)/100 = 30%（2026-05-19 門檻放寬到 25%）
+      todayMA20: 110,  // 乖離 = (130-110)/110 = 18.2%
     });
     expect(result.triggered).toBe(false);
     expect(result.reason).toBe('high-deviation');

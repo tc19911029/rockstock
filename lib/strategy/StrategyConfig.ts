@@ -36,7 +36,7 @@ export interface StrategyThresholds {
   kdMaxEntry:      number;   // KD 進場上限（預設 88）
 
   // 乖離條件
-  deviationMax:    number;   // MA20 乖離上限（預設 0.25 = 25%，2026-05-19 用戶放寬）
+  deviationMax:    number;   // MA20 乖離上限（預設 0.15 = 15%，書本 p.568）
 
   // 進場門檻
   minScore:        number;   // 最低六大條件分數（預設 4）
@@ -150,7 +150,7 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   upperShadowMax: 0.20,
   volumeRatioMin: 1.3,  // 書上p.54：攻擊量 ≥ 前一日 × 1.3
   kdMaxEntry:     88,
-  deviationMax:   0.25,
+  deviationMax:   0.15,
   minScore:       4,    // 基本門檻 4 分
   marketTrendFilter:  false, // 2026-05-21 關閉：5/5/5 三狀態同分，regime 降級無效果，純粹省一次 ^TWII 載入+detectTrend
   // 注意：scanOne() 中 isCoreReady 要求前5個核心條件全過（coreScore=5），
@@ -211,7 +211,7 @@ export const ZHU_PURE_BOOK: StrategyConfig = {
     volumeRatioMin:   1.3,   // 書本 p.54 ④ 明寫
     kbarMinBodyPct:   0.02,  // 書本 p.54 ⑤ 明寫
     kdMaxEntry:       100,   // 書本沒寫 → 不限
-    deviationMax:     0.25,  // 用戶設定：乖離 >25% 篩除（2026-05-19 放寬，原 15%）
+    deviationMax:     0.15,  // 書本 p.568：乖離 >15% 篩除
     upperShadowMax:   1.0,   // 書本沒寫 → 不限
     minScore:         5,
     bullMinScore:     5,     // 書本 1~5 必要

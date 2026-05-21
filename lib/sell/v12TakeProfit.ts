@@ -88,7 +88,7 @@ export function checkTakeProfitTargets(inputs: TakeProfitInputs): TakeProfitResu
     }
   }
 
-  // 乖離 ≥ 25% → 切 MA5（不直接停利，議題 Step 5 ②；2026-05-19 放寬，原 15%）
+  // 乖離 ≥ 15% → 切 MA5（不直接停利，議題 Step 5 ②；書本 p.568）
   if (todayMA20 != null && todayMA20 > 0) {
     const deviation = (todayClose - todayMA20) / todayMA20;
     if (deviation >= HIGH_DEVIATION_PCT) {

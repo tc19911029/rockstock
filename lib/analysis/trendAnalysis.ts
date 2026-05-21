@@ -555,7 +555,7 @@ export function evaluateSixConditions(
   params?: Partial<StrategyThresholds>,
 ): SixConditionsResult {
   const kdMax     = params?.kdMaxEntry      ?? 88;   // 與 BASE_THRESHOLDS 一致
-  const devMax    = params?.deviationMax    ?? 0.25; // 與 BASE_THRESHOLDS 一致（25%，2026-05-19 用戶放寬，原 15%）
+  const devMax    = params?.deviationMax    ?? 0.15; // 與 BASE_THRESHOLDS 一致（15%，書本 p.568）
   const volMin    = params?.volumeRatioMin  ?? BOOK_VOL_RATIO_MIN;  // 書上p.54：前一日×1.3
   // upperShadowMax 已棄用：書本定義「長上影線 = 上影 > 實體」，不用比例門檻
 

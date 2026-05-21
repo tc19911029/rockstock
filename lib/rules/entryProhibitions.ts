@@ -111,7 +111,7 @@ export function checkLongProhibitions(
     // KD 高檔：K > 80（市場通用超買門檻）
     const kdHigh = kd != null && kd > KD_OVERBOUGHT;
 
-    // 乖離過大：距 MA20 > 25%（2026-05-19 用戶放寬，原 15%）
+    // 乖離過大：距 MA20 > 15%（書本 p.568）
     const deviationLarge = deviation > HIGH_DEVIATION_PCT;
 
     if (volumeDivergence && kdHigh && deviationLarge) {
@@ -243,7 +243,7 @@ export function checkShortProhibitions(
     // KD低檔：K值 < 20
     const kdLow = kd != null && kd < KD_OVERSOLD;
 
-    // 乖離過大（做空）：距MA20 < -25%（跌太多，與做多側 HIGH_DEVIATION_PCT 對稱；2026-05-19 放寬）
+    // 乖離過大（做空）：距MA20 < -15%（書本對稱，跌太多）
     const deviationLarge = deviation < -HIGH_DEVIATION_PCT;
 
     if (volumeDivergence && kdLow && deviationLarge) {

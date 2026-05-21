@@ -138,8 +138,8 @@ export const STOP_LOSS_PRICE_MULT = 1 - STOP_LOSS_RULE_PCT;
 export const PROFIT_TARGET_RULE_PCT = 0.10;
 /** 停利價係數：1 + PROFIT_TARGET_RULE_PCT = 1.10（給 UI 直接乘） */
 export const PROFIT_TARGET_PRICE_MULT = 1 + PROFIT_TARGET_RULE_PCT;
-/** 高乖離門檻（書本 p.568 原文 ≥ 15% 改用 MA5；2026-05-19 用戶放寬到 25%，偏離書本） */
-export const HIGH_DEVIATION_PCT = 0.25;
+/** 高乖離切 MA5：書本 p.568「乖離 ≥ 15% 改用 MA5 跟隨」（2026-05-22 從 25% 回滾到書本值） */
+export const HIGH_DEVIATION_PCT = 0.15;
 /** 獲利分級：高檔（書本「獲利 ≥ 20% 屬高檔」）*/
 export const PROFIT_HIGH_TIER_PCT = 0.20;
 
