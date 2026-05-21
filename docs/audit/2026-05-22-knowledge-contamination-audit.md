@@ -47,7 +47,7 @@
 
 | # | 規則 | 污染類型 | 位置 | 影響 |
 |---|------|---------|------|------|
-| 1 | **HIGH_DEVIATION_PCT = 0.25**（書本原 15%） | 🔄 偏離書本 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | 影響戒律 3、做空戒律 3、Step 5 ② 切 MA5、ZHU-PURE-BOOK 策略 devMax — 全部偏離書本 |
+| 1 | ~~HIGH_DEVIATION_PCT = 0.25~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | **2026-05-22 回滾到 0.15 對齊書本 p.568**。v12 cron 生產線零影響；SIXCOND 冠軍勝率 +8.5pp、報酬 −30% 但風險可控。詳見 [A/B 回測報告](./2026-05-22-high-deviation-pct-rollback-backtest.md)（commit `995c3a9`） |
 | 2 | ~~淘汰法改警示不擋~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | **2026-05-22 回滾為 hard gate**。實測 TW 池子 -12.3%、CN -5.1%，影響可控。詳見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md) |
 | 3 | ~~R 軌（乖離率排名）~~ → ⏸ **已暫停自動掃描** | ❌ 完全自創 → 暫停 | [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | **2026-05-22 移除 vercel.json TW/CN mechanical cron**，code 保留以利回測；恢復 = 加回 2 條 cron（commit `d422cb0`） |
 | 4 | **chipDivergence.ts 整支無書本** | ❌ 完全自創 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | 5% 漲跌 + 法人累積 500 張的門檻完全無註解，書本無對應 |
@@ -85,7 +85,7 @@
 |------|------|------|
 | 戒 1 未突破月線 | 併入六條件 ③ | ✅ |
 | 戒 2 連 3 紅K | [entryProhibitions.ts:79](../../lib/rules/entryProhibitions.ts#L79) | ✅ |
-| 戒 3 量價背離 + KD 高 + 乖離（3 項合一） | [entryProhibitions.ts:96](../../lib/rules/entryProhibitions.ts#L96) | ✅（**乖離 25% 偏離書本，見第五類**） |
+| 戒 3 量價背離 + KD 高 + 乖離（3 項合一） | [entryProhibitions.ts:96](../../lib/rules/entryProhibitions.ts#L96) | ✅（2026-05-22 乖離回滾到書本 15%，commit `995c3a9`） |
 | 戒 4 週線壓力 | [entryProhibitions.ts:122](../../lib/rules/entryProhibitions.ts#L122) | ✅（3% 距離為實作具體化，第二類） |
 | 戒 5 未站月線 | 併入六條件 ③ | ✅（已 dedupe） |
 | 戒 6 底底低 | [entryProhibitions.ts:132](../../lib/rules/entryProhibitions.ts#L132) | ✅ |
@@ -250,32 +250,28 @@
 
 | rule_id | 規則 | code | 書本原文 | 現況 | commit |
 |---------|------|------|----------|------|--------|
-| **HIGH_DEVIATION_PCT** | MA20 乖離上限 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | 書本 p.568 = 15% | **25%** | 496309e（2026-05-20） |
+| ~~HIGH_DEVIATION_PCT~~ → ✅ 已修復 | MA20 乖離上限 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | 書本 p.568 = 15% | **2026-05-22 回滾為 15%** | 496309e（2026-05-20）→ 已回滾 |
 | ~~R-warn-not-block~~ → ✅ 已修復 | 淘汰法執行方式 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | 書本「立即出場」 | **2026-05-22 回滾為 hard gate** | 496309e（2026-05-20）→ 已回滾 |
 | **KD-declining-warn** | KD 向下不買 gate | [v12Conditions.ts:71-72](../../lib/analysis/v12Conditions.ts#L71) | 書本短線規則 #9 | **flag 保留但不擋** | 496309e（2026-05-20） |
 | **Phase-C-ratio-098** | LockWatch Phase C 過濾 close 接近頸線 | [features/lockwatch/](../../features/lockwatch/) | 原 ×0.95 / 70% | **×0.98 / 80%** | e813eee（2026-05-11） |
 | **Q-no-prohibitions** | Q 戰法軌移除戒律 reject | [scanner/...](../../lib/scanner/) | 書本 Q 戰法未明寫「不適用戒律」 | **跳過戒律** | 2698969（2026-05-11） |
 | **N-padding-12-097** | N 突破過頭 / 接近目標 padding | [v12LetterN.ts:225-235](../../lib/analysis/v12LetterN.ts#L225) | 書本「真突破 ×3%」 | **新增 padding** | 21d659e（2026-05-11） |
-| **PROHIB-3 deviation 25** | 戒律 3 乖離門檻 | [entryProhibitions.ts:96](../../lib/rules/entryProhibitions.ts#L96) | 書本只說「乖離過大」，原 docs 標 22.5% | **與 HIGH_DEVIATION_PCT 連動到 25%** | 496309e（隱含影響） |
-| **ZHU-PURE-BOOK devMax** | A 策略 devMax | [StrategyConfig.ts:200](../../lib/strategy/StrategyConfig.ts#L200) | 「ZHU_PURE_BOOK」應 100% 書本，原 15% | **25%** | 496309e |
+| ~~PROHIB-3 deviation 25~~ → ✅ 已修復 | 戒律 3 乖離門檻 | [entryProhibitions.ts:96](../../lib/rules/entryProhibitions.ts#L96) | 書本只說「乖離過大」 | **2026-05-22 與 HIGH_DEVIATION_PCT 連動回 15%** | 995c3a9 |
+| ~~ZHU-PURE-BOOK devMax~~ → ✅ 已修復 | A 策略 devMax | [StrategyConfig.ts:214](../../lib/strategy/StrategyConfig.ts#L214) | 「ZHU_PURE_BOOK」應 100% 書本，原 15% | **2026-05-22 回到 15%** | 995c3a9 |
 
 #### 各偏離點的回滾方案
 
-**🔄 回滾 1：HIGH_DEVIATION_PCT 從 0.25 回到 0.15**
+**✅ 回滾 1：HIGH_DEVIATION_PCT 從 0.25 回到 0.15**（2026-05-22 完成，commit `995c3a9`）
 
-- 改動檔案：[lib/analysis/bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142)
+- 改動檔案：[lib/analysis/bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) + 連動 7 處 + 2 個測試
   ```ts
   export const HIGH_DEVIATION_PCT = 0.15;  // 書本 p.568 原文
   ```
-- 連動影響：
-  - 戒律 3「量價背離+KD高+乖離」門檻收緊
-  - 做空戒律 3 鏡像門檻收緊
-  - Step 5 ② 切 MA5 提前觸發
-  - StrategyConfig 內所有 `devMax: 25%` 改回 `devMax: 15%`（ZHU-PURE-BOOK 與 BASE-thresholds）
-- 重跑回測：
-  - `npm run backtest:scan-buy-method` 全字母全軌
-  - 對比 5/19 前後勝率 / hit rate / avgMaxGain
-- 風險：選股池會明顯縮小（特別是漲幅 > 15% 的標的會被踢）
+- 連動影響（已實作）：戒律 3 / 做空戒律 3 / Step 5 ② 切 MA5 / BASE_THRESHOLDS / ZHU_PURE_BOOK / `evaluateSixConditions` devMax 預設 / B/P 進階紀律 override
+- A/B 回測（4.5 個月、TW、54 組合）：詳見 [rollback-backtest](./2026-05-22-high-deviation-pct-rollback-backtest.md)
+  - v12 cron 生產線：**零影響**（v12StockEvaluator 不走 SIXCOND）
+  - SIXCOND 冠軍：報酬 +155% → +108%（−30%）、勝率 44% → **53%**（+8.5pp）、回撤 25% → 33%
+  - 結論：書本對齊 + 勝率上升，不建議改回 25%
 
 **✅ 回滾 2：淘汰法回到「立即出場」— 2026-05-22 完成**
 
@@ -446,7 +442,7 @@
 - T8: 整理線上課 CH3（朱老師：均線）筆記
 
 ### 第五類（回滾評估）
-- T9: 評估 HIGH_DEVIATION_PCT 從 25% 回到 15% 的影響（含全字母回測）
+- ~~T9: 評估 HIGH_DEVIATION_PCT 從 25% 回到 15% 的影響（含全字母回測）~~ → **已完成（2026-05-22）**，A/B 回測寫入 [2026-05-22-high-deviation-pct-rollback-backtest.md](./2026-05-22-high-deviation-pct-rollback-backtest.md)
 - ~~T10: 評估淘汰法回到「立即出場」的影響~~ → **已完成（2026-05-22）**，回滾完成、影響量測寫入 [2026-05-22-elimination-hard-gate-impact.md](./2026-05-22-elimination-hard-gate-impact.md)
 - T11: 評估 KD 向下不擋 → 恢復 gate 的影響
 - T12: 評估 Q 軌恢復戒律 reject 的影響（書本 p.262 未明寫 Q 不適用戒律，回滾可能更安全）
