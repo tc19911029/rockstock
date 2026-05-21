@@ -1,4 +1,18 @@
 /**
+ * ⚠️ DEPRECATED（2026-05-22）：此腳本跑退役的 SIXCOND scanner（evaluateSixConditions +
+ * ZHU_PURE_BOOK），**不代表生產線 v12 cron 績效**。v12 cron（B/C/D/E/F/J/K/L/M/N/O/P/Q）
+ * 走 lib/scanner/v12StockEvaluator.ts，完全不走 SIXCOND code path。
+ *
+ * 此腳本適用情境：
+ *   - 對 A 策略歷史變更（如 deviationMax）做 SIXCOND 層回測對照
+ *   - 因子組合探索（sortBy / topN / MTF 矩陣）
+ *
+ * **不適用**做生產線決策依據。生產線基準請用 scripts/backtest-v12-comprehensive.ts。
+ *
+ * 參考：2026-05-22 HIGH_DEVIATION_PCT 回滾 28 月 A/B 顯示 SIXCOND 績效降 63%，
+ * 但 v12 comprehensive 同期 6042 events 零變化（docs/audit/2026-05-22-high-deviation-pct-rollback-backtest.md）。
+ *
+ * ── 原 doc ───────────────────────────────────────────────────────────
  * 全因子組合批量回測
  *
  * 自動跑所有 SIXCOND 因子組合，最後輸出排行榜。
