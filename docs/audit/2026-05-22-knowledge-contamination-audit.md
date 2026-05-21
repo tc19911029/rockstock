@@ -47,7 +47,7 @@
 | 乖離率上限 | ✅ **已修復**（2026-05-22 回滾為書本 15%；v12 cron 零影響、SIXCOND 勝率 +8.5pp，commit `995c3a9`，見 [A/B 回測報告](./2026-05-22-high-deviation-pct-rollback-backtest.md)） |
 | 淘汰法執行方式 | ✅ **已修復**（2026-05-22 回滾為 hard gate，對齊書本「立即出場」；TW 池子縮小 12.3%、CN 縮小 5.1%，見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md)） |
 | 籌碼背離 `chipDivergence.ts` | ✅ **2026-05-22 已重寫**：原「價跌+法人累積 ≥500 張」自創邏輯改為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條），5% 門檻與 [entryProhibitions.ts:23](../../lib/rules/entryProhibitions.ts#L23) 連動 |
-| 文件追上度（docs/STRATEGY_BOOK_REFERENCE.md） | ⚠️ **嚴重 stale**：2026-04-21 後 17+ 個策略 commit 未進文件 |
+| 文件追上度（docs/STRATEGY_BOOK_REFERENCE.md） | ✅ **2026-05-22 全面補齊**（commit `ad44b03`）：v12 字母軌道、Phase C、B 改動、Tier 1、R 軌、結構失效、v12 Phase 全部納入 |
 
 ### TOP 5 最危險的污染點
 
@@ -317,11 +317,13 @@
 
 ---
 
-## 文件 Stale 缺口
+## 文件 Stale 缺口 → ✅ **2026-05-22 已補齊（commit `ad44b03`）**
 
-**核心污染**：[docs/STRATEGY_BOOK_REFERENCE.md](../STRATEGY_BOOK_REFERENCE.md) 最後改動 2026-04-21，但 lib/ 在這之後有大量策略改動完全沒進文件。
+**原問題**：[docs/STRATEGY_BOOK_REFERENCE.md](../STRATEGY_BOOK_REFERENCE.md) 最後改動 2026-04-21，但 lib/ 在這之後有大量策略改動完全沒進文件。
 
-### Stale 改動清單（2026-04-21 後對 lib/ 的策略性 commit）
+**處置**：commit `ad44b03` 「STRATEGY_BOOK_REFERENCE 全面補齊」（+711/-195 行）已涵蓋以下 23 個 commit 全部內容：v12 字母軌道架構、Q 戰法 OCR、Phase C 過濾、B 改動、Tier 1 三項對齊、R 軌、結構失效真跌破門檻、v12 Phase 0.2-1.11、LockWatch 儲存層/API/UI、五步法對齊。
+
+### Stale 改動清單（2026-04-21 後對 lib/ 的策略性 commit）— **歷史記錄保留**
 
 | commit | 日期 | 改動 | 文件狀態 |
 |--------|------|------|---------|
@@ -349,9 +351,9 @@
 | b33fa2f | 2026-05-21 | **乖離率(R)策略 + 機械軌** | ❌ |
 | 669f273 | 2026-05-21 | **Tier 1 三項書本對齊** | ❌ |
 
-**總計**：**至少 23 個策略性 commit** 改動了 lib/ 但完全沒進 STRATEGY_BOOK_REFERENCE.md。文件當前狀態相當於描述「2026-04-20 時的 rockstock」，與現在的 code 差距已經有一個月+ 的偏移。
+**總計**：**至少 23 個策略性 commit** 改動了 lib/ 但完全沒進 STRATEGY_BOOK_REFERENCE.md（**截至 2026-05-22 凌晨**）。
 
-**建議行動**：本報告完成後，spawn 獨立 task 補齊 STRATEGY_BOOK_REFERENCE.md，至少把上述 23 個 commit 的對應條目補完。
+**處置（2026-05-22）**：commit `ad44b03` 已將上述 23 個 commit 的內容全部納入 STRATEGY_BOOK_REFERENCE.md。spot-check 確認：Q 戰法 MA3/10/24 ✅ / Phase C ×0.98 ✅ / B af190d0 站回 MA5 ✅ / Tier 1 三項 ✅ / R 軌專章 ✅ / 結構失效 0.97/1.03 ✅ / v12 階段 1-2 ✅。
 
 ---
 
@@ -451,7 +453,7 @@
 - ~~T12: 評估 Q 軌恢復戒律 reject 的影響~~ → **2026-05-22 完成（誤判結案）**：commit `2698969` 已查證書本 p.261-265 沒提 Q 過戒律，移除是書本對齊修正，**不回滾**
 
 ### 文件 Stale
-- T13: 更新 `docs/STRATEGY_BOOK_REFERENCE.md` 補齊 2026-04-21 後的 23 個 commit 對應條目
+- ~~T13: 更新 `docs/STRATEGY_BOOK_REFERENCE.md` 補齊 2026-04-21 後的 23 個 commit 對應條目~~ → **2026-05-22 完成**：commit `ad44b03`（+711/-195 行）已全面補齊，spot-check 7 項目全通過
 
 ---
 
