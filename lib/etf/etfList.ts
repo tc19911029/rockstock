@@ -1,5 +1,5 @@
 /**
- * 主動式 ETF 靜態清單（TWSE 上市的 20 檔 A 後綴股票型主動 ETF，截至 2026-05）
+ * 主動式 ETF 靜態清單（TWSE 上市的 21 檔 A 後綴股票型主動 ETF，截至 2026-05）
  *
  * 來源：TWSE OpenAPI STOCK_DAY_ALL 過濾「主動」開頭名稱，扣除 D 後綴收益型 3 檔。
  *
@@ -15,6 +15,7 @@ import type { ETFListItem } from './types';
 export const ACTIVE_ETF_LIST: ETFListItem[] = [
   { etfCode: '00400A', etfName: '主動國泰動能高息',  market: 'TW', inceptionDate: null, inceptionPrice: null, issuer: '國泰投信' },
   { etfCode: '00401A', etfName: '主動摩根台灣鑫收',  market: 'TW', inceptionDate: null, inceptionPrice: null, issuer: '摩根投信' },
+  { etfCode: '00403A', etfName: '主動統一台股升級50', market: 'TW', inceptionDate: '2026-05-12', inceptionPrice: 10, issuer: '統一投信' },
   { etfCode: '00980A', etfName: '主動野村臺灣優選',  market: 'TW', inceptionDate: null, inceptionPrice: null, issuer: '野村投信' },
   { etfCode: '00981A', etfName: '主動統一台股增長',  market: 'TW', inceptionDate: null, inceptionPrice: null, issuer: '統一投信' },
   { etfCode: '00982A', etfName: '主動群益台灣強棒',  market: 'TW', inceptionDate: null, inceptionPrice: null, issuer: '群益投信' },
