@@ -93,10 +93,13 @@ import type { RuleGroupId } from '@/lib/rules/ruleRegistry';
  *
  * - 'trend'（預設）：趨勢跟隨體系，套用朱老師 10 大戒律
  * - 'kline-pattern'：K 線型態買法（V 形/缺口/一字底/突破），書本 Part 3 定位，不套戒律
+ * - 'mechanical-rank'（2026-05-21 新增）：純機械式排名（如乖離率 R），
+ *   跳過六條件、戒律、淘汰法、Step 0 大盤過濾。完全不依賴 detector，
+ *   依數值欄位（成交額、乖離率等）排序取前 N。
  *
  * 未指定時視為 'trend'，維持舊行為。
  */
-export type StrategyType = 'trend' | 'kline-pattern';
+export type StrategyType = 'trend' | 'kline-pattern' | 'mechanical-rank';
 
 export interface StrategyConfig {
   id:          string;     // 唯一識別碼，e.g. 'zhu-v1'
@@ -149,7 +152,7 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   kdMaxEntry:     88,
   deviationMax:   0.25,
   minScore:       4,    // 基本門檻 4 分
-  marketTrendFilter: true,
+  marketTrendFilter:  false, // 2026-05-21 關閉：5/5/5 三狀態同分，regime 降級無效果，純粹省一次 ^TWII 載入+detectTrend
   // 注意：scanOne() 中 isCoreReady 要求前5個核心條件全過（coreScore=5），
   // 因此 bullMinScore/sidewaysMinScore < 5 實際等於 5。
   // minScore = 6 才有額外效果（要求指標條件也過）。
@@ -214,7 +217,7 @@ export const ZHU_PURE_BOOK: StrategyConfig = {
     bullMinScore:     5,     // 書本 1~5 必要
     sidewaysMinScore: 5,
     bearMinScore:     5,     // 2026-05-20 從 6 放寬：1~5 必過，#6 視為加分項
-    marketTrendFilter:  true,
+    marketTrendFilter:  false, // 2026-05-21 關閉：5/5/5 三狀態同分，regime 降級無效果，純粹省一次 ^TWII 載入+detectTrend
     kdDecliningFilter:  true,
     multiTimeframeFilter: false,
     reentry: BOOK_REENTRY,   // 戰法 1 波浪：跌破 MA5 出場後再站上即可再進場
@@ -467,6 +470,44 @@ export const ZHU_KLINE_HSP_BREAKOUT: StrategyConfig = {
   },
 };
 
+/**
+ * R 乖離率（機械軌，2026-05-21 新增）
+ *
+ * 用戶需求：不過六條件、純機械式逆勢均值回歸
+ *   粗篩：成交額前 500（L2 當日 close × volume）
+ *   做多：MA20 乖離率最負 top 10（升序）
+ *   做空：MA20 乖離率最正 top 10（降序）
+ *
+ * strategyType='mechanical-rank' 觸發跳過：六條件、戒律、淘汰法、Step 0 大盤過濾、MTF、KD向下警示。
+ * conditions 全 false、minScore=0 是兜底，但實際上 ScanPipeline 走 R 分支不會評分。
+ * 底層走 MarketScanner.scanDeviationExtreme()，不走 scanBuyMethod。
+ */
+export const ZHU_DEVIATION_EXTREME: StrategyConfig = {
+  id:          'zhu-deviation-extreme',
+  name:        '乖離率（R）',
+  description: '成交額前500中 MA20 乖離率排名（long: 負最多 top10, short: 正最多 top10），不過六條件',
+  version:     '1.0.0',
+  author:      '機械式排名',
+  createdAt:   '2026-05-21T00:00:00.000Z',
+  isBuiltIn:   true,
+  strategyType: 'mechanical-rank',
+  buyMethod:    'R',
+  conditions: {
+    trend: false, position: false, kbar: false,
+    ma: false, volume: false, indicator: false,
+  },
+  thresholds:  {
+    ...BASE_THRESHOLDS,
+    minScore:           0,
+    bullMinScore:       0,
+    sidewaysMinScore:   0,
+    bearMinScore:       0,
+    marketTrendFilter:  false,  // 不過 Step 0
+    multiTimeframeFilter: false,
+    kdDecliningFilter:  false,
+  },
+};
+
 export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
   ZHU_PURE_BOOK,              // 純書本版（A = long-daily 六條件的 thresholds）
   ZHU_FLAT_BOTTOM,            // D：一字底突破（2026-04-21 rename from E）
@@ -477,6 +518,7 @@ export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
   ZHU_ABC_BREAKOUT,           // G：ABC 突破（2026-05-04 新增，寶典 Part 11-1 位置 6）
   ZHU_BLACK_K_BREAKOUT,       // H：突破大量黑 K（2026-05-04 新增，寶典 Part 11-1 位置 8）
   ZHU_KLINE_HSP_BREAKOUT,     // I：K 線橫盤突破（2026-05-04 新增，寶典 Part 11-1 位置 3）
+  ZHU_DEVIATION_EXTREME,      // R：乖離率（2026-05-21 新增，機械軌純排名）
 ];
 
 // ── P0-3: 策略參數邊界驗證 ──────────────────────────────────────────────────────

@@ -97,6 +97,19 @@ describe('v12 合約測試 — 字母系統（13 個 v12 + Q 戰法軌）', () =
   });
 });
 
+// R 機械軌（2026-05-21 新增）— 不算 V12Letter 書本字母，但是 LETTER_NAMES 一員
+describe('R 機械軌字母 — 名稱與軌道分類鎖定', () => {
+  it('R 在 LETTER_NAMES 為「乖離率」', () => {
+    // 動態 require 避免循環依賴 v12Signals
+    const { LETTER_NAMES, trackOf, requiresStep1Pool, MECHANICAL_TRACK_LETTERS } =
+      jest.requireActual<typeof import('../lib/scanner/buyMethodTracks')>('../lib/scanner/buyMethodTracks');
+    expect(LETTER_NAMES.R).toBe('乖離率');
+    expect(trackOf('R')).toBe('mechanical');
+    expect(requiresStep1Pool('R')).toBe(false);
+    expect(MECHANICAL_TRACK_LETTERS).toEqual(['R']);
+  });
+});
+
 // ── Step 3 停損方法對應鎖定 ──────────────────────────────────────────────
 
 describe('v12 合約測試 — Step 3 停損方法對應（議題 S3-1）', () => {

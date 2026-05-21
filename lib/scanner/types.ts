@@ -114,6 +114,10 @@ export interface StockScanResult {
   surgeFlags?: string[];         // 潛力標記
   surgeComponents?: Record<string, { score: number; detail: string }>;
   compositeScore?: number;       // 綜合評分
+  // ── 機械軌欄位（2026-05-21 R 策略 乖離率）─────────────────────────────────
+  /** MA20 乖離率 = (close - MA20) / MA20（R 策略寫入；其他策略可能 undefined）*/
+  ma20Deviation?: number;
+
   // ── 數據新鮮度 ────────────────────────────────────────────────────────────
   /** 掃描時使用的 K 線數據新鮮度 */
   dataFreshness?: {
@@ -462,7 +466,9 @@ export type MtfMode =
   // v11 字母（含 v12 釋出的 G/H/I — 歷史 record 仍存在）
   | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I'
   // v12 新增字母（議題 33/65/93）
-  | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
+  | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q'
+  // 機械軌（2026-05-21 新增）
+  | 'R';
 
 // ── 打板掃描結果 ────────────────────────────────────────────────────────────
 
@@ -553,11 +559,12 @@ export interface ScanSession {
    * - 多頭軌：B 回後買上漲 / P 高檔拉回 / C 盤整突破 / E 缺口 / J ABC / K K線橫盤 / L 過大量黑K高 / M 突破軌道線
    * - 轉折軌：D 一字底 / F V反轉 / N 型態確認 / O 打底完成
    * - 戰法軌：Q 三條均線（MA3+10+24，獨立互斥）
+   * - 機械軌：R 乖離率（成交額前500 + MA20 乖離率，long/short 各取 top10，2026-05-21 新增）
    * - G/H/I：v12 釋出，僅保留歷史 scan record
    *
    * 未填 = A 六條件
    */
-  buyMethod?: 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
+  buyMethod?: 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
   /** Schema 版本（議題 83）；未填視為 v11 */
   schemaVersion?: 'v11' | 'v12';
   /** 掃描時段：intraday=盤中快照, post_close=收盤後正式結果 */

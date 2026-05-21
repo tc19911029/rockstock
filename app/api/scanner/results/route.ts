@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 const querySchema = z.object({
   market: z.enum(['TW', 'CN']).default('TW'),
   direction: z.enum(['long', 'short']).default('long'),
-  mtf: z.enum(['daily', 'mtf', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']).optional(),
+  mtf: z.enum(['daily', 'mtf', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R']).optional(),
   date: z.string().optional(),
 });
 

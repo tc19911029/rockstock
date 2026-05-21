@@ -17,6 +17,7 @@ import {
   REVERSAL_TRACK_LETTERS,
   REVERSAL_TRACK_SET,
   SYSTEM_TRACK_SET,
+  MECHANICAL_TRACK_SET,
   LETTER_NAMES,
 } from '@/lib/scanner/buyMethodTracks';
 
@@ -209,13 +210,15 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
             O: { name: LETTER_NAMES.O, track: '轉折軌', ma: 'MA20' },
             P: { name: LETTER_NAMES.P, track: '多頭軌', ma: 'MA5' },
             Q: { name: LETTER_NAMES.Q, track: '戰法軌', ma: 'MA10' },
+            R: { name: LETTER_NAMES.R, track: '機械軌', ma: 'MA20' },
           };
-          type M = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
+          type M = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
           const renderBtn = (method: M, color: string) => {
             const m = META[method];
             const isBullish = BULLISH_TRACK_SET.has(method);
             const isReversal = REVERSAL_TRACK_SET.has(method);
             const isSystem = SYSTEM_TRACK_SET.has(method);
+            const isMechanical = MECHANICAL_TRACK_SET.has(method);
             const tooltip = method === 'A'
               ? `A · ${m.name}（書本五步法 Step 1 預選池：六條件 + 戒律 + 淘汰法）。多頭軌字母 B/C/E/J/K/L/M/P 都從這個池子挑進場時機。`
               : isBullish
@@ -224,7 +227,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                   ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚠ 全市場掃 — 不過 Step 1（書本：抓底/反轉就不能先過六條件，過了就抓不到底）`
                   : isSystem
                     ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚠ 全市場掃 — 自含 SOP（過戒律但不過 Step 1）`
-                    : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
+                    : isMechanical
+                      ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚙ 純機械式排名 — 不過六條件、不過戒律、不過 Step 0 大盤過濾\n做多：成交額前500中乖離率最負 top10 / 做空：成交額前500中乖離率最正 top10`
+                      : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
             return (
               <button key={method}
                 onClick={() => setActiveBuyMethod(method)}
@@ -282,20 +287,45 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 </div>
               </div>
 
-              {/* 戰法軌（朱老師三均線）*/}
+              {/* 朱老師戰法 row：Q 三條均線（戰法軌）+ R 乖離率（機械軌）並排（2026-05-21）*/}
               <div className="space-y-0.5">
                 <div className="text-[9px] text-muted-foreground/70 px-0.5"
-                  title="戰法軌（Q）自含 SOP（MA24 趨勢判定）+ 過戒律，但不過 Step 1；結果可能不在 A 池子裡">
+                  title="戰法軌 Q（朱老師三均線，自含 SOP + 過戒律）；機械軌 R（純排名 = 成交額前500 + MA20 乖離率）。兩者都不過 Step 1 池子。">
                   <span className="font-bold text-purple-300/80">朱老師戰法</span>
-                  <span className="ml-1.5">⚠ 三條均線戰法（書本《抓住線圖》p.262）· 自含 SOP + 過戒律</span>
+                  <span className="ml-1.5">⚠ 三條均線戰法（《抓住線圖》p.262） + ⚙ 乖離率（純排名，不過六條件）</span>
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
                   {renderBtn('Q', 'bg-purple-700/70 border-purple-600 text-purple-100')}
+                  {renderBtn('R', 'bg-cyan-700/70 border-cyan-600 text-cyan-100')}
                 </div>
               </div>
             </div>
           );
         })()}
+
+        {/* 機械軌 R（做空方向獨立區塊，與 long 共用同一 R 字母但載入 short session）*/}
+        {scanDirection === 'short' && (
+          <div className="space-y-0.5">
+            <div className="text-[9px] text-muted-foreground/70 px-0.5"
+              title="機械軌（R）做空：成交額前500中 MA20 乖離率最正 top10。不過六條件、不過 Step 0。">
+              <span className="font-bold text-cyan-300/80">朱老師戰法（做空）</span>
+              <span className="ml-1.5">⚙ 乖離率（做空）· 成交額前500 + MA20 乖離率正最多 top10</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => setActiveBuyMethod('R')}
+                disabled={isLoadingBuyMethod}
+                className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+                  activeBuyMethod === 'R'
+                    ? 'bg-cyan-700/70 border-cyan-600 text-cyan-100'
+                    : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
+                }`}
+                title={`R · ${LETTER_NAMES.R} · 機械軌 · 守 MA20\n⚙ 不過六條件、不過 Step 0 大盤過濾\n做空：成交額前500中乖離率最正 top10`}>
+                {LETTER_NAMES.R}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 進度提示（cron 已自動跑掃描 + 22 天日期列已可切歷史，原手動掃描按鈕拿掉）*/}
         {isBusy && (

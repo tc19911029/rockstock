@@ -145,7 +145,7 @@ interface BacktestState {
   /** 掃描方向：long=做多, short=做空, daban=打板 */
   scanDirection: 'long' | 'short' | 'daban';
   /** 當前買法（並列買法架構，Phase 6，2026-04-20）— 只在 scanDirection='long' 時有意義 */
-  activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
+  activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
   /** 載入買法結果的狀態 */
   isLoadingBuyMethod: boolean;
 
@@ -167,7 +167,7 @@ interface BacktestState {
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
-  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q') => Promise<void>;
+  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R') => Promise<void>;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
@@ -318,7 +318,20 @@ export const useBacktestStore = create<BacktestState>()(
       },
       setScanOnly:           (scanOnly) => set({ scanOnly }),
       setScanMode:           (scanMode) => set({ scanMode }),
-      setScanDirection:      (scanDirection) => set({ scanDirection }),
+      setScanDirection:      (scanDirection) => {
+        const prevDirection = get().scanDirection;
+        set({ scanDirection });
+        // R 機械軌：long ↔ short 切換時，自動重載對應 session（long/short 是兩份不同 session）
+        const { activeBuyMethod, market, scanDate, loadCronSession } = get();
+        if (
+          activeBuyMethod === 'R' &&
+          scanDate &&
+          prevDirection !== scanDirection &&
+          (scanDirection === 'long' || scanDirection === 'short')
+        ) {
+          void loadCronSession(market, scanDate, { scanOnly: true, direction: scanDirection });
+        }
+      },
       setActiveBuyMethod:    async (activeBuyMethod) => {
         const { market, scanDate, loadCronSession, scanDirection } = get();
         set({ activeBuyMethod });
@@ -331,7 +344,12 @@ export const useBacktestStore = create<BacktestState>()(
           return;
         }
         // B/C/D/E：刷新對應買法的日期列表，再載入最新一天資料
-        await get().fetchCronDates(market, 'long');
+        // R 機械軌特殊：用 scanDirection 載入（long 或 short 都有對應 session）；daban 一律 fallback long
+        const fetchDirection: 'long' | 'short' =
+          activeBuyMethod === 'R' && (scanDirection === 'long' || scanDirection === 'short')
+            ? scanDirection
+            : 'long';
+        await get().fetchCronDates(market, fetchDirection);
         // 若已有 scanDate 直接用，否則從 cronDates 選最新有結果的日期
         const targetDate = scanDate ?? (() => {
           const dates = get().cronDates.filter(c => c.market === market);
@@ -339,7 +357,7 @@ export const useBacktestStore = create<BacktestState>()(
         })();
         if (!targetDate) return;
         // 委託 loadCronSession（會補填 forward performance）
-        await loadCronSession(market, targetDate, { scanOnly: true, direction: 'long' });
+        await loadCronSession(market, targetDate, { scanOnly: true, direction: fetchDirection });
       },
       setStrategy:           (partial)  => set(s => ({ strategy: { ...s.strategy, ...partial } })),
       setCapitalConstraints: (partial)  => set(s => ({ capitalConstraints: { ...s.capitalConstraints, ...partial } })),
@@ -947,7 +965,10 @@ export const useBacktestStore = create<BacktestState>()(
         if (activeBuyMethod && activeBuyMethod !== 'A') {
           set({ isLoadingBuyMethod: true, scanResults: [], performance: [], scanError: null, market, scanDate: date });
           try {
-            const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=long&mtf=${activeBuyMethod}`);
+            // R 機械軌特殊：用實際 scanDirection（long/short）載入對應 session；
+            // 其他字母（B-Q）固定走 long
+            const fetchDir = activeBuyMethod === 'R' ? direction : 'long';
+            const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${fetchDir}&mtf=${activeBuyMethod}`);
             const json = await res.json();
             if (!res.ok || !json.ok) throw new Error(json.error ?? '載入失敗');
             const session = (json as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
@@ -955,6 +976,7 @@ export const useBacktestStore = create<BacktestState>()(
             // - 多頭軌（B/C/E/J/K/L/M/P）：必須過 Step 1（六條件+戒律+淘汰法）→ 要 matchedMethods 含 'A'
             // - 反轉軌（D/F/N/O）：書本「抓底/反轉」設計就是不過 Step 1 全市場掃 → 不過濾 A
             // - 戰法軌（Q）：自含 MA24 趨勢判定，不過 Step 1 → 不過濾 A
+            // - 機械軌（R）：純排名，不過 Step 1 → 不過濾 A（REVERSAL_OR_SYSTEM_SET 在 buyMethodTracks 已含 R）
             // 之前的 bug：所有 method 都加 A filter，導致 N/F/O/D/Q session 內反轉軌訊號被擋（如 3026 跌菱形 80% 沒過 A 但 N matched 應顯示）
             const requireA = !REVERSAL_OR_SYSTEM_SET.has(activeBuyMethod);
             const scanResults = (session?.results ?? []).filter(r =>
@@ -963,6 +985,12 @@ export const useBacktestStore = create<BacktestState>()(
             set({ scanResults, isLoadingBuyMethod: false });
 
             // 補填 forward performance（同 A 路徑）
+            // 2026-05-21：永遠打 POST。
+            // 原本想用「session 內嵌 forward 就跳過 POST」省時間，但 session 是
+            // cron 寫入當天的 forward 快照，舊 session 可能只有 d1/d2 而 d3/d4 仍 null
+            // （寫入時還是未來）。Skip 邏輯只看 d1 != null → 誤判 d3/d4 已 fresh → UI
+            // 永遠顯示「—」。Server-side cache + L2 inject 提前讓 POST 已 50-100ms
+            // 級，沒必要 skip。
             if (scanResults.length > 0) {
               set({ isFetchingForward: true });
               const forwardPayload = scanResults.map(r => ({ symbol: r.symbol, name: r.name, scanPrice: r.price }));
@@ -1003,6 +1031,7 @@ export const useBacktestStore = create<BacktestState>()(
           if (cached.scanResults.length > 0 && cached.performance.length === 0) {
             (async () => {
               try {
+                // 2026-05-21：永遠打 POST（移除 skip-if-has-forward）
                 set({ isFetchingForward: true });
                 const forwardPayload = cached.scanResults.map(r => ({
                   symbol: r.symbol, name: r.name, scanPrice: r.price,
@@ -1108,6 +1137,9 @@ export const useBacktestStore = create<BacktestState>()(
           });
 
           // Phase 2: Fetch forward performance
+          // 2026-05-21：永遠打 POST（移除舊 skip-if-has-forward 邏輯）
+          // 原因見 buyMethod 分支同名註解 — session 內嵌 forward 是寫入當天快照，
+          // 之後新增的 d3/d4/... 不會更新，client skip 會卡在 stale。
           set({ isFetchingForward: true });
           const forwardPayload = scanResults.map(r => ({
             symbol: r.symbol, name: r.name, scanPrice: r.price,

@@ -1,10 +1,12 @@
 /**
- * GET /api/cron/scan-bm-batch?market=TW|CN&track=bullish|reversal|system
+ * GET /api/cron/scan-bm-batch?market=TW|CN&track=bullish|reversal|system|mechanical
  *
- * 把原本 14 個 scan-bm cron 合併成 4 個（A 預選池 + 3 個軌道 batch）：
+ * 把原本 14 個 scan-bm cron 合併成 4 個（A 預選池 + 4 個軌道 batch）：
  *   - track=bullish: B/C/E/J/K/L/M/P 8 個多頭軌（讀 Step 1 池子，要等 A 跑完）
  *   - track=reversal: D/F/N/O 4 個反轉軌（全市場掃，不過 Step 1）
  *   - track=system: Q 戰法軌（全市場 + 戒律檢查）
+ *   - track=mechanical: R 乖離率（成交額前500 + MA20 乖離率，long+short 各取 top10，
+ *     2026-05-21 新增；不過六條件、不過戒律、不過 Step 0）
  *
  * 設計優勢：
  *   - 同一 batch 內 8 個 method 共用同一份 stockList / L2 / TurnoverRank / marketTrend
@@ -31,15 +33,17 @@ import {
   BULLISH_TRACK_LETTERS,
   REVERSAL_TRACK_LETTERS,
   SYSTEM_TRACK_LETTERS,
+  MECHANICAL_TRACK_LETTERS,
 } from '@/lib/scanner/buyMethodTracks';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const TRACKS = {
-  bullish: BULLISH_TRACK_LETTERS,    // 多頭軌（書本 8 種進場位置）
-  reversal: REVERSAL_TRACK_LETTERS,  // 反轉軌（抓底/V 反轉）
-  system: SYSTEM_TRACK_LETTERS,      // 戰法軌（朱老師三均線）
+  bullish: BULLISH_TRACK_LETTERS,        // 多頭軌（書本 8 種進場位置）
+  reversal: REVERSAL_TRACK_LETTERS,      // 反轉軌（抓底/V 反轉）
+  system: SYSTEM_TRACK_LETTERS,          // 戰法軌（朱老師三均線）
+  mechanical: MECHANICAL_TRACK_LETTERS,  // 機械軌（R 乖離率，純排名）
 } as const;
 type TrackName = keyof typeof TRACKS;
 
@@ -141,6 +145,43 @@ export async function GET(req: NextRequest) {
     const summary: Record<string, { count: number; lockWatch: number }> = {};
     type LockWatchMethod = 'F' | 'N';
     for (const method of methods) {
+      // ── R 機械軌：long+short 各跑一次，純排名 ──
+      if (method === 'R') {
+        let totalCount = 0;
+        for (const direction of ['long', 'short'] as const) {
+          const rResults = await scanner.scanDeviationExtreme(stocks, date, direction, 10);
+          if (turnoverRanks) {
+            for (const r of rResults) {
+              const rank = turnoverRanks.get(r.symbol);
+              if (rank) r.turnoverRank = rank;
+            }
+          }
+          // 2026-05-21：注入 forward perf（d1~d20 / open / maxGain / maxLoss），
+          // 讓 client 切歷史日期直接讀內嵌欄位、不必重打 /api/backtest/forward。
+          const { injectForwardPerf } = await import('@/lib/backtest/injectForwardPerf');
+          await injectForwardPerf(rResults, date, `scan-bm-batch:R-${direction}`);
+          await saveScanSession({
+            id: `${market}-${direction}-R-${date}-${Date.now()}`,
+            market: market as import('@/lib/scanner/types').MarketId,
+            date,
+            direction,
+            multiTimeframeEnabled: false,
+            sessionType: 'post_close' as const,
+            scanTime: new Date().toISOString(),
+            resultCount: rResults.length,
+            results: rResults,
+            marketTrend,
+            buyMethod: 'R',
+            schemaVersion: 'v12' as 'v11' | 'v12',
+            step1Filter: 'bypassed',
+          }, { allowOverwritePostClose: true });
+          totalCount += rResults.length;
+          summary[`R-${direction}`] = { count: rResults.length, lockWatch: 0 };
+        }
+        console.info(`[scan-bm-batch] ${market} R 機械軌完成: long+short=${totalCount} 筆`);
+        continue;
+      }
+
       const m = method as 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
       const bmResults = await scanner.scanBuyMethod(m, stocks, date);
 
@@ -158,6 +199,11 @@ export async function GET(req: NextRequest) {
       }
       // Phase C：lockWatchOnly entries（matched=false 但帶 lockWatchPayload）過濾掉，不污染 ScanSession 顯示池
       const sessionResults = bmResults.filter(r => (r.matchedMethods?.length ?? 0) > 0);
+      // 2026-05-21：所有 letter 寫 session 前注入 forward perf（與 ScanPipeline 對齊）。
+      // 原本 scan-bm-batch 沒接，導致 Q/B/C/D/E/F/J/K/L/M/N/O/P session 都缺 forward 欄位，
+      // 前端每次切日期都重打 /api/backtest/forward POST，40-80 秒。
+      const { injectForwardPerf } = await import('@/lib/backtest/injectForwardPerf');
+      await injectForwardPerf(sessionResults, date, `scan-bm-batch:${m}`);
       await saveScanSession({
         id: `${market}-long-${m}-${date}-${Date.now()}`,
         market: market as import('@/lib/scanner/types').MarketId,

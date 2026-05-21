@@ -58,6 +58,16 @@ type SideTab = 'conditions' | 'signals' | 'chip' | 'chat';
 function ConditionsPanelSwitch() {
   const method = useBacktestStore(s => s.activeBuyMethod);
   if (method === 'A') return <SixConditionsPanel />;
+  // R 機械軌純排名，無 detector 條件可顯示 — 簡單說明即可
+  if (method === 'R') {
+    return (
+      <div className="p-3 text-[11px] text-muted-foreground space-y-1">
+        <div className="font-semibold text-cyan-300/80">機械軌（R · 乖離率）</div>
+        <div>純排名策略，不過六條件、不過戒律、不過 Step 0 大盤過濾。</div>
+        <div>做多取成交額前 500 中 MA20 乖離率最負 top 10；做空取最正 top 10。</div>
+      </div>
+    );
+  }
   const v12Method = method === 'G' ? 'J' : method === 'H' ? 'L' : method === 'I' ? 'K' : method;
   return <BuyMethodConditionsPanel method={v12Method} />;
 }

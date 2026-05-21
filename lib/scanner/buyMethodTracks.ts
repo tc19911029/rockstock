@@ -64,8 +64,23 @@ export const REVERSAL_TRACK_LETTERS = ['D', 'F', 'N', 'O'] as const;
 /** 戰法軌字母（朱家泓網路課程「三條均線戰法 MA3+10+24」）*/
 export const SYSTEM_TRACK_LETTERS = ['Q'] as const;
 
+/**
+ * 機械軌字母（2026-05-21 新增）
+ *
+ * 非書本買法，純機械式排名（成交額 + MA20 乖離率）。
+ * 不過六條件、不過戒律、不過淘汰法、不過 Step 0 大盤過濾。
+ *   R = 乖離率（成交額前500 → MA20 乖離 long 最負 / short 最正 top10）
+ */
+export const MECHANICAL_TRACK_LETTERS = ['R'] as const;
+
 /** 全部買法字母（A = 六條件池子本身，不算 Step 2 軌道）*/
-export const ALL_BUY_METHOD_LETTERS = ['A', ...BULLISH_TRACK_LETTERS, ...REVERSAL_TRACK_LETTERS, ...SYSTEM_TRACK_LETTERS] as const;
+export const ALL_BUY_METHOD_LETTERS = [
+  'A',
+  ...BULLISH_TRACK_LETTERS,
+  ...REVERSAL_TRACK_LETTERS,
+  ...SYSTEM_TRACK_LETTERS,
+  ...MECHANICAL_TRACK_LETTERS,
+] as const;
 
 /** Set 形式 — 給 has() 快速查詢 */
 export const BULLISH_TRACK_SET: ReadonlySet<string> = new Set(BULLISH_TRACK_LETTERS);
@@ -79,23 +94,35 @@ export const BULLISH_TRACK_SET_WITH_V11: ReadonlySet<string> = new Set([
 ]);
 export const REVERSAL_TRACK_SET: ReadonlySet<string> = new Set(REVERSAL_TRACK_LETTERS);
 export const SYSTEM_TRACK_SET: ReadonlySet<string> = new Set(SYSTEM_TRACK_LETTERS);
+export const MECHANICAL_TRACK_SET: ReadonlySet<string> = new Set(MECHANICAL_TRACK_LETTERS);
 
-/** 反轉軌 ∪ 戰法軌（不過 Step 1 的字母集合）*/
-export const REVERSAL_OR_SYSTEM_SET: ReadonlySet<string> = new Set([
+/**
+ * 不過 Step 1 池子的字母集合（反轉軌 ∪ 戰法軌 ∪ 機械軌）
+ *
+ * 2026-05-21 加入機械軌 R。原名 REVERSAL_OR_SYSTEM_SET 保留為 alias，
+ * 供舊代碼引用；新代碼用 NON_STEP1_SET。
+ */
+export const NON_STEP1_SET: ReadonlySet<string> = new Set([
   ...REVERSAL_TRACK_LETTERS,
   ...SYSTEM_TRACK_LETTERS,
+  ...MECHANICAL_TRACK_LETTERS,
 ]);
+
+/** @deprecated 用 NON_STEP1_SET（2026-05-21 加入機械軌後更名）*/
+export const REVERSAL_OR_SYSTEM_SET: ReadonlySet<string> = NON_STEP1_SET;
 
 export type BullishLetter = typeof BULLISH_TRACK_LETTERS[number];
 export type ReversalLetter = typeof REVERSAL_TRACK_LETTERS[number];
 export type SystemLetter = typeof SYSTEM_TRACK_LETTERS[number];
+export type MechanicalLetter = typeof MECHANICAL_TRACK_LETTERS[number];
 
 /** 判斷某字母屬於哪個軌道 */
-export function trackOf(letter: string): 'pool' | 'bullish' | 'reversal' | 'system' | 'unknown' {
+export function trackOf(letter: string): 'pool' | 'bullish' | 'reversal' | 'system' | 'mechanical' | 'unknown' {
   if (letter === 'A') return 'pool';
   if (BULLISH_TRACK_SET.has(letter)) return 'bullish';
   if (REVERSAL_TRACK_SET.has(letter)) return 'reversal';
   if (SYSTEM_TRACK_SET.has(letter)) return 'system';
+  if (MECHANICAL_TRACK_SET.has(letter)) return 'mechanical';
   return 'unknown';
 }
 
@@ -132,6 +159,8 @@ export const LETTER_NAMES: Readonly<Record<string, string>> = {
   O: '打底完成',           // 寶典 Part 11-1 位置 1（反轉解讀）
   // ── 戰法軌 ──
   Q: '三條均線戰法',       // 朱家泓網路課程 MA3+10+24
+  // ── 機械軌（2026-05-21 新增）──
+  R: '乖離率',             // 成交額前500 + MA20 乖離率（long: 負最多 / short: 正最多）
   // 注意：v11 G/H/I 字母不在 LETTER_NAMES 中。讀舊資料時應先 normalizeLetter() 轉成 v12。
 };
 

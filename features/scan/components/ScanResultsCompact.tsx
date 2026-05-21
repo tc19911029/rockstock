@@ -311,11 +311,32 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                       O: 'bg-blue-800/80 text-blue-300',
                       P: 'bg-pink-800/80 text-pink-300',
                       Q: 'bg-violet-800/80 text-violet-300',
+                      R: 'bg-cyan-800/80 text-cyan-200',
                     };
                     // 字母→名稱讀 lib/scanner/buyMethodTracks.ts 單一事實來源
                     const methodNames = LETTER_NAMES;
                     const color = methodColors[activeBuyMethod] ?? 'bg-sky-800/80 text-sky-300';
                     const others = dedupeCrossBadges(r.matchedMethods ?? [], activeBuyMethod);
+                    // R 機械軌：用乖離率取代條件 badge（沒有 triggeredRule）
+                    if (activeBuyMethod === 'R') {
+                      const dev = r.ma20Deviation;
+                      const devPct = dev != null ? (dev * 100).toFixed(2) : '—';
+                      const devColor = dev == null
+                        ? 'text-muted-foreground'
+                        : dev >= 0 ? 'text-bear' : 'text-bull';
+                      return (
+                        <>
+                          <span className={`text-[8px] px-1.5 h-3.5 flex items-center rounded-sm ${color}`}
+                            title="機械軌（成交額前500 + MA20 乖離率）">
+                            {methodNames.R}
+                          </span>
+                          <span className={`text-[10px] font-mono font-bold ml-1 ${devColor}`}
+                            title="MA20 乖離率 = (close - MA20) / MA20">
+                            乖離 {dev != null && dev >= 0 ? '+' : ''}{devPct}%
+                          </span>
+                        </>
+                      );
+                    }
                     return (
                       <>
                         <span className={`text-[8px] px-1.5 h-3.5 flex items-center rounded-sm max-w-[160px] truncate ${color}`}
@@ -352,6 +373,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                       O: 'bg-blue-800/80 text-blue-300',
                       P: 'bg-pink-800/80 text-pink-300',
                       Q: 'bg-violet-800/80 text-violet-300',
+                      R: 'bg-cyan-800/80 text-cyan-200',
                     };
                     // 字母→名稱讀 lib/scanner/buyMethodTracks.ts 單一事實來源
                     const methodNames = LETTER_NAMES;

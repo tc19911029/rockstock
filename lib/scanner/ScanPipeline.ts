@@ -29,8 +29,9 @@ export interface ScanPipelineOptions {
   force?: boolean;
   /** 超時毫秒數（預設 250000） */
   deadlineMs?: number;
-  /** 獨立買法掃描（不過 A 六條件，全市場各自偵測） */
-  buyMethods?: ('B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q')[];
+  /** 獨立買法掃描（不過 A 六條件，全市場各自偵測）
+   *  R = 機械軌乖離率（2026-05-21），long+short 各跑一次 */
+  buyMethods?: ('B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R')[];
   /** 顯式指定策略（歷史重跑用），不指定時從 server-side 讀 active strategy */
   strategy?: import('@/lib/strategy/StrategyConfig').StrategyConfig;
   /** 顯式指定歷史 turnoverRank（歷史重跑用，避免用到今天的前 500） */
@@ -310,6 +311,47 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
         timedOut = true;
         break;
       }
+
+      // ── R 機械軌：不過 Step 1、不過六條件，long+short 各跑一次 ──
+      if (method === 'R') {
+        try {
+          for (const direction of ['long', 'short'] as const) {
+            const rResults = await scanner.scanDeviationExtreme(bmStocks, date, direction, 10);
+            if (turnoverRanks) {
+              for (const r of rResults) {
+                const rank = turnoverRanks.get(r.symbol);
+                if (rank) r.turnoverRank = rank;
+              }
+            }
+            // 2026-05-21：跟其他 letter 一樣注入 forward perf
+            const { injectForwardPerf } = await import('@/lib/backtest/injectForwardPerf');
+            await injectForwardPerf(rResults, date, `ScanPipeline:R-${direction}`);
+            const rSession: ScanSession = {
+              id: `${market}-${direction}-R-${date}-${Date.now()}`,
+              market: market as MarketId,
+              date,
+              direction,
+              multiTimeframeEnabled: false,
+              sessionType,
+              scanTime: new Date().toISOString(),
+              resultCount: rResults.length,
+              results: rResults,
+              marketTrend,
+              buyMethod: 'R',
+              step1Filter: 'bypassed',
+            };
+            await saveScanSession(rSession, { allowOverwritePostClose: sessionType === 'post_close' });
+            counts[`${direction}-R`] = rResults.length;
+            console.info(`[ScanPipeline] ${market} 買法 R(${direction}): ${rResults.length} 檔`);
+          }
+        } catch (err) {
+          console.error(`[ScanPipeline] ${market} 買法 R 失敗:`, err);
+          counts['long-R'] = 0;
+          counts['short-R'] = 0;
+        }
+        continue;
+      }
+
       try {
         const bmResults = await scanner.scanBuyMethod(method, bmStocks, date);
 
@@ -322,34 +364,9 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
         // 2026-05-08：buyMethod 結果也注入 forward perf（原本只 daily/mtf 有）
         // → 用戶看 B/C/D/E/F/G/H/I tab 時 d1Return/d5Return/maxGain 不再全 null
-        if (bmResults.length > 0) {
-          try {
-            const { analyzeForwardBatch } = await import('@/lib/backtest/ForwardAnalyzer');
-            const fwdInput = bmResults.map(r => ({ symbol: r.symbol, name: r.name, scanPrice: r.price }));
-            const { results: fwdPerf } = await analyzeForwardBatch(fwdInput, date);
-            const fwdMap = new Map(fwdPerf.map(p => [p.symbol, p]));
-            for (const r of bmResults) {
-              const p = fwdMap.get(r.symbol);
-              if (!p) continue;
-              r.openReturn = p.openReturn;
-              r.d1Return = p.d1Return; r.d2Return = p.d2Return; r.d3Return = p.d3Return;
-              r.d4Return = p.d4Return; r.d5Return = p.d5Return; r.d6Return = p.d6Return;
-              r.d7Return = p.d7Return; r.d8Return = p.d8Return; r.d9Return = p.d9Return;
-              r.d10Return = p.d10Return; r.d20Return = p.d20Return;
-              r.maxGain = p.maxGain; r.maxLoss = p.maxLoss;
-              r.nextOpenPrice = p.nextOpenPrice;
-              r.d1ReturnFromOpen = p.d1ReturnFromOpen;
-              r.d5ReturnFromOpen = p.d5ReturnFromOpen;
-              r.d6ReturnFromOpen = p.d6ReturnFromOpen;
-              r.d7ReturnFromOpen = p.d7ReturnFromOpen;
-              r.d8ReturnFromOpen = p.d8ReturnFromOpen;
-              r.d9ReturnFromOpen = p.d9ReturnFromOpen;
-              r.d10ReturnFromOpen = p.d10ReturnFromOpen;
-            }
-          } catch (err) {
-            console.warn(`[ScanPipeline] ${market} 買法 ${method} forward 注入失敗（non-fatal）:`, err);
-          }
-        }
+        // 2026-05-21：抽出 helper 與 scan-bm-batch / R 分支共用
+        const { injectForwardPerf } = await import('@/lib/backtest/injectForwardPerf');
+        await injectForwardPerf(bmResults, date, `ScanPipeline:${method}`);
 
         const step1Filter = deriveStep1FilterState(method, poolExists);
         if (step1Filter === 'missing') {

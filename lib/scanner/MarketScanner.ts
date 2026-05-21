@@ -1680,4 +1680,101 @@ export abstract class MarketScanner {
 
     return results.sort((a, b) => b.changePercent - a.changePercent);
   }
+
+  /**
+   * R 乖離率掃描（機械軌，2026-05-21 新增）
+   *
+   * 用戶需求：不過六條件、純機械式逆勢均值回歸
+   *   - 粗篩：成交額前 500（沿用 prefilterByL2 的 close × volume top N）
+   *   - 做多：MA20 乖離率最負 topN（升序）— 抓「跌深」
+   *   - 做空：MA20 乖離率最正 topN（降序）— 抓「漲多」
+   *
+   * 不過 Step 0 大盤過濾、不過 Step 1 池子、不過六條件、不過戒律、不套淘汰法。
+   * 不寫 lockwatch / provisional / cross-strategy badge — 純排名結果。
+   *
+   * @param stocks    輸入候選清單（呼叫端通常傳 getStockList 結果）
+   * @param asOfDate  目標日期（undefined = 今日）
+   * @param direction 'long' = 乖離負最多取前 N；'short' = 乖離正最多取前 N
+   * @param topN      取前幾名，預設 10
+   */
+  async scanDeviationExtreme(
+    stocks: StockEntry[],
+    asOfDate: string | undefined,
+    direction: 'long' | 'short',
+    topN = 10,
+  ): Promise<StockScanResult[]> {
+    const config = this.getMarketConfig();
+    const { maDeviation } = await import('@/lib/rules/ruleUtils');
+
+    // 粗掃：L2 健康時取成交額 top 500（TW）/ 800（CN）
+    const candidates = this.prefilterByL2(stocks, `scanDevExt-${direction}`);
+
+    type Scored = {
+      result: StockScanResult;
+      dev: number;
+    };
+    const scored: Scored[] = [];
+
+    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+      const batch = candidates.slice(i, i + CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
+        const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
+        if (!fetchResult || fetchResult.candles.length < 20) return null;
+        if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+          if (asOfDate === today) return null;
+        }
+        const candles = fetchResult.candles;
+        const lastIdx = candles.length - 1;
+        const last = candles[lastIdx];
+        const dev = maDeviation(last, 'ma20');
+        if (dev == null) return null;
+
+        const prev = candles[lastIdx - 1];
+        const changePercent = prev?.close > 0
+          ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
+          : 0;
+        const trendState = detectTrend(candles, lastIdx);
+        const trendPosition = detectTrendPosition(candles, lastIdx);
+
+        const result: StockScanResult = {
+          symbol,
+          name,
+          market: config.marketId,
+          industry,
+          price: last.close,
+          changePercent,
+          volume: last.volume,
+          triggeredRules: [],
+          matchedMethods: ['R'],
+          sixConditionsScore: 0,
+          sixConditionsBreakdown: {
+            trend: false, position: false, kbar: false,
+            ma: false, volume: false, indicator: false,
+          },
+          trendState,
+          trendPosition,
+          scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+          direction,
+          ma20Deviation: dev,
+          dataFreshness: {
+            lastCandleDate: fetchResult.lastCandleDate,
+            daysStale: fetchResult.staleDays,
+            source: fetchResult.source,
+          },
+        };
+        return { result, dev };
+      }));
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) scored.push(r.value);
+      }
+      if (i + CONCURRENCY < candidates.length) await sleep(BATCH_DELAY_MS);
+    }
+
+    scored.sort((a, b) =>
+      direction === 'long' ? a.dev - b.dev : b.dev - a.dev,
+    );
+
+    return scored.slice(0, topN).map(s => s.result);
+  }
 }
