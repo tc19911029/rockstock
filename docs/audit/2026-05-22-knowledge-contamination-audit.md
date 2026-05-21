@@ -29,7 +29,9 @@
   - 第四類 📭 資料不足：約 13 條（6%）
   - 第五類 🔄 已偏離書本：約 15 條（7%）
 
-> 2026-05-22 多次修訂後：chipDivergence-* 5 條從第三類移入第一類（重寫對齊書本「量價背離」）
+> 2026-05-22 多次修訂後：
+> - chipDivergence-* 5 條從第三類移入第一類（重寫對齊書本「量價背離」）
+> - 第五類 15 條全部結案：HIGH_DEVIATION_PCT / PROHIB-3 / ZHU-PURE-BOOK devMax / R-warn-not-block / KD-SIXCOND 共 5 條已回滾（commit `995c3a9` + `e44b7fc`）；Phase-C-ratio-098 / Q-no-prohibitions / N-padding-12-097 / KD-v12 共 4 條經查證為**誤判**（書本對齊或 production bug fix，非污染）；其餘為連動條目
 
 ### 整體健康度
 
@@ -215,7 +217,7 @@
 
 1. 🔴 **R 軌乖離率排名（2026-05-21 新增）**：建議暫停評估。code 已存在但無書本依據，且跳過所有過濾，風險最高。
 2. ~~chipDivergence.ts 整支~~ → ✅ **2026-05-22 完成**：重寫為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條），檔頭加完整來源註解，5% 門檻與 entryProhibitions.ts:23 連動。
-3. 🟡 **N padding（突破過頭、接近目標）**：commit message 標明是「過濾過頭已達標紀錄」實務需求，但與書本「真突破 ×3%」概念衝突，建議確認用戶意圖。
+3. ~~🟡 N padding（突破過頭、接近目標）~~ → ❌ **2026-05-22 確認誤判**：commit `21d659e` 修的是 production bug（002788 鷺燕醫藥鎖定價 10.12 早被 +40% 超越）；書本「真突破 ×3%」針對進場 trigger，與 LockWatch 過濾過時訊號是不同情境，**不衝突、保留**。
 4. 🟡 **超長線升級 30%**：書本只說「達高檔」，30% 是 code 自選。可接受但需文件化。
 5. 🟢 **D 一字底 8% / 60% / 120 天**：docs 附錄 C 已標「完全自創」，繼續使用無問題，但回測時應特別關注這些參數的敏感性。
 
@@ -256,10 +258,10 @@
 |---------|------|------|----------|------|--------|
 | ~~HIGH_DEVIATION_PCT~~ → ✅ 已修復 | MA20 乖離上限 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | 書本 p.568 = 15% | **2026-05-22 回滾為 15%** | 496309e（2026-05-20）→ 已回滾 |
 | ~~R-warn-not-block~~ → ✅ 已修復 | 淘汰法執行方式 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | 書本「立即出場」 | **2026-05-22 回滾為 hard gate** | 496309e（2026-05-20）→ 已回滾 |
-| **KD-declining-warn** | KD 向下不買 gate | [v12Conditions.ts:71-72](../../lib/analysis/v12Conditions.ts#L71) | 書本短線規則 #9 | **flag 保留但不擋** | 496309e（2026-05-20） |
-| **Phase-C-ratio-098** | LockWatch Phase C 過濾 close 接近頸線 | [features/lockwatch/](../../features/lockwatch/) | 原 ×0.95 / 70% | **×0.98 / 80%** | e813eee（2026-05-11） |
-| **Q-no-prohibitions** | Q 戰法軌移除戒律 reject | [scanner/...](../../lib/scanner/) | 書本 Q 戰法未明寫「不適用戒律」 | **跳過戒律** | 2698969（2026-05-11） |
-| **N-padding-12-097** | N 突破過頭 / 接近目標 padding | [v12LetterN.ts:225-235](../../lib/analysis/v12LetterN.ts#L225) | 書本「真突破 ×3%」 | **新增 padding** | 21d659e（2026-05-11） |
+| ~~KD-declining-warn~~ → ✅ SIXCOND 已恢復；v12 為刻意設計 | KD 向下不買 gate | [MarketScanner.ts:474](../../lib/scanner/MarketScanner.ts#L474) hard / [v12Conditions.ts:71](../../lib/analysis/v12Conditions.ts#L71) warning | 書本短線規則 #9 | **SIXCOND 2026-05-22 回滾 hard gate（e44b7fc）；v12 cron 由各字母 detector 自帶 KD 邏輯，main path 維持 warning** | 496309e → 已分流 |
+| ~~Phase-C-ratio-098~~ → ❌ **誤判** | LockWatch Phase C close 接近頸線 | [features/lockwatch/](../../features/lockwatch/) | 書本未量化（三重底/頭肩底/圓弧底 高勝率型態） | **×0.98 / 80%（commit e813eee 自述「對齊書本意圖」收緊精選）** | e813eee（2026-05-11）非污染 |
+| ~~Q-no-prohibitions~~ → ❌ **誤判** | Q 戰法軌移除戒律 reject | [scanner/...](../../lib/scanner/) | 書本《抓住線圖》p.261-265 完全未提「Q 也要過戒律」 | **移除自創過度限制（commit 2698969 用戶查書本確認）** | 2698969（2026-05-11）非污染 |
+| ~~N-padding-12-097~~ → ❌ **誤判** | N 突破過頭 / 接近目標 padding | [v12LetterN.ts:225-235](../../lib/analysis/v12LetterN.ts#L225) | 書本「真突破 ×3%」為進場 trigger，非 LockWatch 過時訊號過濾 | **過濾 production bug（commit 21d659e 修 002788 鷺燕醫藥鎖定價 10.12 早被 +40% 超越）** | 21d659e（2026-05-11）非污染 |
 | ~~PROHIB-3 deviation 25~~ → ✅ 已修復 | 戒律 3 乖離門檻 | [entryProhibitions.ts:96](../../lib/rules/entryProhibitions.ts#L96) | 書本只說「乖離過大」 | **2026-05-22 與 HIGH_DEVIATION_PCT 連動回 15%** | 995c3a9 |
 | ~~ZHU-PURE-BOOK devMax~~ → ✅ 已修復 | A 策略 devMax | [StrategyConfig.ts:214](../../lib/strategy/StrategyConfig.ts#L214) | 「ZHU_PURE_BOOK」應 100% 書本，原 15% | **2026-05-22 回到 15%** | 995c3a9 |
 
@@ -289,34 +291,29 @@
 - 風險：可控。多頭軌 8 字母仍有 161/230 檔可選，無 pool 飢餓
 - 量測工具：[scripts/measure-elimination-impact.ts](../../scripts/measure-elimination-impact.ts)（日後 regression check 可重用）
 
-**🔄 回滾 3：KD 向下不買 gate 恢復**
+**✅ 回滾 3：KD 向下不買 gate — 2026-05-22 完成（分流結案）**
 
-- 改動檔案：[lib/analysis/v12Conditions.ts:71-72](../../lib/analysis/v12Conditions.ts#L71)
-- 影響：KD 死叉或 K 下降時不可進場
-- 風險：可能錯失強勢回檔買點
+- SIXCOND path：[lib/scanner/MarketScanner.ts:474](../../lib/scanner/MarketScanner.ts#L474) 已恢復 hard gate（commit `e44b7fc`）
+- v12 cron path：[lib/analysis/v12Conditions.ts:71](../../lib/analysis/v12Conditions.ts#L71) 維持 warning（**設計分流，非污染**）— v12 各字母 detector 已內建各自 KD 條件，將 KD 提升為共用 hard gate 會與字母邏輯重複觸發。
 
-**🔄 回滾 4：LockWatch Phase C 收緊參數回到 ×0.95 / 70%**
+**❌ 回滾 4：Phase C ×0.98/80% — 2026-05-22 確認誤判，不回滾**
 
-- 改動檔案：[features/lockwatch/](../../features/lockwatch/)（具體位置待查）
-- 影響：鎖股觀察清單範圍變寬
-- 風險低（LockWatch 是輔助觀察，不影響選股）
+- commit `e813eee` 自述：「書本意圖：『即將突破』應該是少量精選... 0.98 + 80% 對齊書本三重底/頭肩底/圓弧底/楔形這幾個高勝率型態」
+- 這是**收緊以符合書本意圖**，不是放寬偏離；分類錯誤
+- 處置：保留 ×0.98 / 80% 不動
 
-**🔄 回滾 5：Q 戰法恢復戒律 reject**
+**❌ 回滾 5：Q 戰法戒律 skip — 2026-05-22 確認誤判，不回滾**
 
-- 改動檔案：對應 Q 軌過濾邏輯
-- 影響：Q 戰法觸發頻率下降
-- 連動：書本本意未明確「Q 不適用戒律」，回滾可能更安全
+- commit `2698969` 起源於用戶質疑「書上有說 Q 要過戒律嗎」
+- 查證《抓住線圖》第 4 篇第 8 章 p.261-265 三均線戰法原文：書本完全沒提 Q 要過戒律
+- 原本「保守加上戒律」反而是自創反推邏輯，違反「書本→朱家泓網路→標自創」原則
+- 處置：保留 Q 跳過戒律不動
 
-**🔄 回滾 6：N padding（×1.20 / ×0.97）移除**
+**❌ 回滾 6：N padding ×1.20/×0.97 — 2026-05-22 確認誤判，不回滾**
 
-- 改動檔案：[lib/analysis/v12LetterN.ts:225-235](../../lib/analysis/v12LetterN.ts#L225)
-- 影響：N 字母信號更頻繁
-- 評估：commit message 標「過濾過頭已達標紀錄」是實務需求，移除前需確認
-
-**建議行動**：
-- 🔴 立即決定第五類每一項是要保留「使用者放寬版」還是回滾到「書本原文」
-- 🟡 回滾前先在 `__tests__/contracts/scan-parity.test.ts` 加 baseline，方便比對影響
-- 🟢 不要一次回滾全部，按急迫度逐項處理
+- commit `21d659e` 修的是 production bug：002788 鷺燕醫藥鎖定價 10.12（很久以前的下降楔形高點），最近 60 天 close 區間 13.02-19.44，早被 +40% 超越
+- 書本「真突破 ×3%」針對**進場 trigger**，與 LockWatch 過濾**過時訊號**是不同情境
+- 處置：保留 padding filter 不動
 
 ---
 
@@ -413,7 +410,9 @@
 |------|------|
 | ~~HIGH_DEVIATION_PCT = 25%~~ → ✅ **已回滾 15% 2026-05-22** | 偏離書本 15% → 對齊書本 |
 | ~~KD 向下不擋~~ → ✅ **已恢復 hard gate 2026-05-22** | 偏離書本短線規則 #9 → 對齊書本 |
-| **N padding（×1.20 / ×0.97）** | 偏離書本「真突破 ×3%」 |
+| ~~N padding（×1.20 / ×0.97）~~ → ❌ **誤判 2026-05-22** | 修 production bug（過時鎖定價）；書本「真突破 ×3%」是進場 trigger，與 LockWatch 過濾過時訊號不同情境 |
+| ~~Phase C ×0.98 / 80%~~ → ❌ **誤判 2026-05-22** | commit e813eee 自述「對齊書本意圖」收緊精選，本就是書本對齊修正 |
+| ~~Q 戰法跳過戒律~~ → ❌ **誤判 2026-05-22** | 書本 p.261-265 完全未提 Q 過戒律，移除自創過度限制反而對齊書本 |
 | ~~Tier 1 三項（MA20 斜率 / 弱中透強 / 接近壓力區）~~ → ✅ **已固化 2026-05-22** | 線上課筆記固化於 [docs/zhu_online_course_ch{1,2,3}.md](../zhu_online_course_ch3.md) |
 | ~~chipDivergence.ts~~ → ✅ **已重寫對齊書本 2026-05-22** | 改為「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條） |
 
@@ -436,7 +435,7 @@
 ### 第三類（自創規則確認）
 - ~~T1: 確認 R 軌（乖離率排名）是否要保留或暫停~~ → **2026-05-22 完成**，用戶決議保留 production
 - ~~T2: 確認 `chipDivergence.ts` 來源（書本？自創？AI 補？）~~ → **2026-05-22 完成**，重寫為書本「量價背離」，5% 與 entryProhibitions.ts:23 連動
-- T3: 確認 N padding（×1.20 突破過頭、×0.97 接近目標）是否要保留
+- ~~T3: 確認 N padding（×1.20 突破過頭、×0.97 接近目標）是否要保留~~ → **2026-05-22 完成**：commit `21d659e` 是 production bug fix（鷺燕醫藥 002788 過時鎖定價），保留
 - T4: 確認排序主鍵 changePercent desc 是否要明文標為「回測驅動非書本」
 
 ### 第四類（資料補齊）
@@ -448,8 +447,8 @@
 ### 第五類（回滾評估）
 - ~~T9: 評估 HIGH_DEVIATION_PCT 從 25% 回到 15% 的影響（含全字母回測）~~ → **已完成（2026-05-22）**，A/B 回測寫入 [2026-05-22-high-deviation-pct-rollback-backtest.md](./2026-05-22-high-deviation-pct-rollback-backtest.md)
 - ~~T10: 評估淘汰法回到「立即出場」的影響~~ → **已完成（2026-05-22）**，回滾完成、影響量測寫入 [2026-05-22-elimination-hard-gate-impact.md](./2026-05-22-elimination-hard-gate-impact.md)
-- T11: 評估 KD 向下不擋 → 恢復 gate 的影響
-- T12: 評估 Q 軌恢復戒律 reject 的影響（書本 p.262 未明寫 Q 不適用戒律，回滾可能更安全）
+- ~~T11: 評估 KD 向下不擋 → 恢復 gate 的影響~~ → **2026-05-22 完成（分流結案）**：SIXCOND path `MarketScanner.ts:474` 已恢復 hard gate（commit `e44b7fc`）；v12 cron 維持 warning（字母 detector 自帶 KD 邏輯，設計分流非污染）
+- ~~T12: 評估 Q 軌恢復戒律 reject 的影響~~ → **2026-05-22 完成（誤判結案）**：commit `2698969` 已查證書本 p.261-265 沒提 Q 過戒律，移除是書本對齊修正，**不回滾**
 
 ### 文件 Stale
 - T13: 更新 `docs/STRATEGY_BOOK_REFERENCE.md` 補齊 2026-04-21 後的 23 個 commit 對應條目
