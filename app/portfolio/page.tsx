@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePortfolioStore, PortfolioHolding } from '@/store/portfolioStore';
 import { PageShell } from '@/components/shared';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { classifyMarket } from '@/lib/market/classify';
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
+import { POLLING } from '@/lib/config';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
 function todayCST(): string {
@@ -129,6 +130,24 @@ export default function PortfolioPage() {
   useEffect(() => {
     refreshAllPrices(holdings);
     // refreshAllPrices/holdings 物件身份頻繁改變，這裡只追 symbol 字串變化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolsKey]);
+
+  // 30s 自動刷新報價（2026-05-21 修：原本只在 symbolsKey 變動時抓一次，
+  // 用戶開著 /portfolio 看盤時價格凍結；現在跟 BottomPanel 一樣 30s polling）
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (holdings.length === 0) return;
+    pollRef.current = setInterval(() => {
+      refreshAllPrices(usePortfolioStore.getState().holdings);
+    }, POLLING.QUOTE_INTERVAL);
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+    // 用 symbolsKey 觸發重新建立 interval，避免 list 變動時舊 interval 抓到 stale snapshot
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbolsKey]);
 

@@ -66,7 +66,7 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
   const [turnoverRankMap, setTurnoverRankMap] = useState<Map<string, number>>(new Map());
-  const [dabanSort, setDabanSort] = useState<'turnover' | 'change' | 'boards' | 'price'>('turnover');
+  const [dabanSort, setDabanSort] = useState<'turnover' | 'change' | 'boards' | 'price' | 'confirmed'>('turnover');
   const [dabanSortDir, setDabanSortDir] = useState<'asc' | 'desc'>('desc');
 
   // 載入全市場 20 日均成交額排名（top 500）
@@ -219,6 +219,11 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
         return dir * (((b.consecutiveBoards ?? 0) - (a.consecutiveBoards ?? 0)) * 1e12
                       + ((b.turnover ?? 0) - (a.turnover ?? 0)));
       case 'price':    return dir * ((b.closePrice ?? 0) - (a.closePrice ?? 0));
+      case 'confirmed': {
+        const rank = (v: boolean | undefined) => (v === true ? 2 : v === false ? 1 : 0);
+        const primary = rank(b.openConfirmed) - rank(a.openConfirmed);
+        return dir * (primary * 1e12 + ((b.turnover ?? 0) - (a.turnover ?? 0)));
+      }
       default:         return 0;
     }
   });
@@ -279,6 +284,7 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
           { key: 'change'   as const, label: '漲幅',   tip: '當日漲跌幅 %（同分用連板數當 tie-breaker）' },
           { key: 'boards'   as const, label: '連板',   tip: '連續漲停天數（首板/二板/三板/四板+；同連板用成交額排）' },
           { key: 'price'    as const, label: '股價',   tip: '當前股價高低' },
+          { key: 'confirmed' as const, label: '可進場', tip: '✅ 進場（9:25集合競價 ≥ 門檻）→ ⏸ 不進 → 未知；同組內按成交額排' },
         ]).map(({ key, label, tip }) => (
           <button key={key}
             onClick={() => {

@@ -5,6 +5,7 @@ import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { apiOk, apiError } from '@/lib/api/response';
+import { resolveMisClose, parseMisPrice } from '@/lib/datasource/TWSERealtime';
 
 // mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
 const MIS_HEADERS: Record<string, string> = {
@@ -57,9 +58,12 @@ async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
     const found = new Set<string>();
     for (const d of json?.msgArray ?? []) {
       const sym = (d.c as string) || '';
-      const price = parsePrice(d.z);
-      const prevClose = parsePrice(d.y);
-      const actualPrice = price > 0 ? price : parsePrice(d.l) || prevClose;
+      const prevClose = parseMisPrice(d.y);
+      // 2026-05-21：原本 z='-'（無 tick）時 fallback 用 d.l（當日最低），但 d.l 是當日
+      // 最低成交價，可能早盤就跑出來、現在已過時。改用 resolveMisClose() 與走圖
+      // /api/stock 共用同一邏輯（z → 漲跌停判定 → best bid/ask 中價 → fallback），
+      // 避免「持倉面板顯示 4850 / 走圖面板顯示 4932.5」兩邊不一致。
+      const actualPrice = resolveMisClose(d as Record<string, string | undefined>) || prevClose;
 
       // mis 對不存在的 channel（例如 6187 上櫃但被送 tse_）會回 d.c="" + 全 0 的空殼，
       // 直接跳過避免產生 ".TW" / ".TWO" 空殼結果
@@ -93,9 +97,8 @@ async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
         const otcJson = await otcRes.json();
         for (const d of otcJson?.msgArray ?? []) {
           const sym = (d.c as string) || '';
-          const price = parsePrice(d.z);
-          const prevClose = parsePrice(d.y);
-          const actualPrice = price > 0 ? price : parsePrice(d.l) || prevClose;
+          const prevClose = parseMisPrice(d.y);
+          const actualPrice = resolveMisClose(d as Record<string, string | undefined>) || prevClose;
           if (!sym || actualPrice <= 0) continue;
           const changePct = prevClose > 0
             ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2)

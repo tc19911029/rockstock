@@ -140,12 +140,22 @@ export async function getCNChineseName(code: string, suffix?: 'SS' | 'SZ'): Prom
 }
 
 const NAMES_CACHE_KEY = 'twse:names:all';
+const OTC_SET_CACHE_KEY = 'twse:otc-codes';
 const NAMES_TTL       = 24 * 60 * 60 * 1000; // 24 hours
 
 type NameMap = Record<string, string>; // code → Chinese name
 
-async function buildNameMap(): Promise<NameMap> {
+interface BuildResult {
+  map: NameMap;
+  otcCodes: Set<string>;
+}
+
+async function buildNameMap(): Promise<BuildResult> {
   const map: NameMap = {};
+  // 2026-05-21：同時建立上櫃 OTC code 集合，給 TWSEHistProvider.isOTC 用
+  // 原本 isOTC 用「.TWO suffix 或 5 位數」啟發式，3236 是 4 位數的上櫃股就誤判為 TSE，
+  // 結果歷史 candle 走 Yahoo adjusted close（除息調整），昨收偏離 1 元，漲跌幅算錯。
+  const otcCodes = new Set<string>();
 
   // 三個來源並行抓取
   // 2026-05-14：ISIN 也走 curl fallback — Cloudflare 連 ISIN 的 Node fetch 都會
@@ -191,6 +201,8 @@ async function buildNameMap(): Promise<NameMap> {
             map[s.SecuritiesCompanyCode] = s.CompanyName;
             tpexAdded++;
           }
+          // 一定要 mark 為 OTC（不管 map 是否已存在 — TWSE STOCK_DAY_ALL 可能誤收上櫃股當日成交資料）
+          otcCodes.add(s.SecuritiesCompanyCode);
         }
       }
     } else {
@@ -218,14 +230,16 @@ async function buildNameMap(): Promise<NameMap> {
         /bgcolor=#FAFAD2>([1-9]\d{3,4})　([^<]+?)<\/td><td bgcolor=#FAFAD2>([A-Z]{2}\w{10})<\/td>/g,
       )) {
         map[code] ??= name.trim();
+        // ISIN strMode=4 是「上櫃」清單，整批 mark 為 OTC
+        otcCodes.add(code);
       }
     } catch {
       // big5 decode 失敗（罕見）— listed map 仍含 TWSE 部分
     }
   }
 
-  console.info(`[TWSENames] buildNameMap done — TWSE=${twseAdded} TPEx=${tpexAdded} ISIN${isinUsed ? '=used' : '=skip'} total=${Object.keys(map).length}`);
-  return map;
+  console.info(`[TWSENames] buildNameMap done — TWSE=${twseAdded} TPEx=${tpexAdded} ISIN${isinUsed ? '=used' : '=skip'} total=${Object.keys(map).length} otc=${otcCodes.size}`);
+  return { map, otcCodes };
 }
 
 /**
@@ -236,30 +250,63 @@ async function buildNameMap(): Promise<NameMap> {
 // Inflight singleflight：多個並行 caller 共享同一個 buildNameMap promise，
 // 避免每次都重新打 TWSE/TPEx openapi（5/11 dev 端實測：page 載入瞬間並行 7+ 次
 // getTWChineseName 各觸發自己的 buildNameMap → 上游 timeout 互相干擾）
-let buildInflight: Promise<NameMap> | null = null;
+let buildInflight: Promise<BuildResult> | null = null;
+
+/** 共用 inflight builder — 拿 map 與 otcCodes 同時 cache */
+async function ensureBuilt(): Promise<BuildResult> {
+  const cachedMap = globalCache.get<NameMap>(NAMES_CACHE_KEY);
+  const cachedOtc = globalCache.get<Set<string>>(OTC_SET_CACHE_KEY);
+  if (cachedMap && cachedOtc) {
+    return { map: cachedMap, otcCodes: cachedOtc };
+  }
+  if (!buildInflight) {
+    buildInflight = buildNameMap()
+      .then((built) => {
+        if (Object.keys(built.map).length > 0) {
+          globalCache.set(NAMES_CACHE_KEY, built.map, NAMES_TTL);
+          globalCache.set(OTC_SET_CACHE_KEY, built.otcCodes, NAMES_TTL);
+        }
+        return built;
+      })
+      .finally(() => {
+        buildInflight = null;
+      });
+  }
+  return buildInflight;
+}
 
 export async function getTWChineseName(code: string): Promise<string | null> {
-  let map = globalCache.get<NameMap>(NAMES_CACHE_KEY);
-
-  if (!map) {
-    if (!buildInflight) {
-      buildInflight = buildNameMap()
-        .then((built) => {
-          if (Object.keys(built).length > 0) {
-            globalCache.set(NAMES_CACHE_KEY, built, NAMES_TTL);
-          }
-          return built;
-        })
-        .finally(() => {
-          buildInflight = null;
-        });
-    }
-    try {
-      map = await buildInflight;
-    } catch {
-      return null;
-    }
+  try {
+    const { map } = await ensureBuilt();
+    return map[code] ?? null;
+  } catch {
+    return null;
   }
+}
 
-  return map[code] ?? null;
+/**
+ * 判斷台股代號是否為「上櫃股」(TPEx OTC)，用於 isOTC 偵測（2026-05-21 加）
+ *
+ * 原本 TWSEHistProvider.isOTC 用「.TWO suffix 或 code 長度 5 位」啟發式，
+ * 但 3236 千如 等 4 位數的上櫃股就被誤判為 TSE，TWSE endpoint 沒資料→ fallback 到
+ * Yahoo 取得 adjusted close（除息後減 1 元）→ 昨收偏離真實 raw close，漲跌幅算錯。
+ *
+ * 改用 TWSENames 從 TPEx openapi / ISIN strMode=4 抓的權威 OTC 列表。
+ *
+ * @param code  純數字代號（不帶 .TW/.TWO），例如 '3236'
+ * @returns     true=上櫃；false=非上櫃（上市/找不到）；資料還沒 build 完時 throw（caller 自行決定 fallback）
+ */
+export async function isOTCStock(code: string): Promise<boolean> {
+  const { otcCodes } = await ensureBuilt();
+  return otcCodes.has(code);
+}
+
+/**
+ * 同步檢查 OTC（cache 有時用，cache 沒時回 undefined 讓 caller fallback）
+ * 對於關鍵路徑用 isOTCStock() async 版；單機 hot-path 或啟動初期可用 sync 版避免 await chain
+ */
+export function isOTCStockSync(code: string): boolean | undefined {
+  const otc = globalCache.get<Set<string>>(OTC_SET_CACHE_KEY);
+  if (!otc) return undefined;
+  return otc.has(code);
 }

@@ -43,10 +43,32 @@ function periodToMonths(period: string): number {
   return n + 1;
 }
 
-/** 判斷是否為上櫃股（5 位數字 or .TWO） */
-function isOTC(symbol: string): boolean {
+/**
+ * 判斷是否為上櫃股
+ *
+ * 優先級：
+ *   1. .TWO suffix → 一定是上櫃
+ *   2. TWSENames 權威 OTC code 列表（TPEx openapi 或 ISIN strMode=4）— 2026-05-21 加
+ *   3. fallback：5 位數字啟發式（舊邏輯，cache 未 ready 時保底）
+ *
+ * 2026-05-21：原本只用啟發式（4 位 TSE / 5 位 OTC），但 3236 千如 是 4 位數的
+ * 上櫃股，誤判為 TSE → TWSE endpoint 沒資料 → 走 Yahoo adjusted close（除息後減
+ * 1 元）→ 昨收偏離真實值，漲跌幅算錯（看到 12.41% 超過漲停 10%）。
+ */
+async function isOTC(symbol: string): Promise<boolean> {
+  if (/\.TWO$/i.test(symbol)) return true;
   const code = symbol.replace(/\.(TW|TWO)$/i, '');
-  return /\.TWO$/i.test(symbol) || code.length === 5;
+  // 試 cache（同步、不需 await）
+  const { isOTCStockSync, isOTCStock } = await import('./TWSENames');
+  const sync = isOTCStockSync(code);
+  if (sync !== undefined) return sync;
+  // cache 沒 ready：async 建並等
+  try {
+    return await isOTCStock(code);
+  } catch {
+    // 上游 API 全掛 → fallback 啟發式（5 位數）
+    return code.length === 5;
+  }
 }
 
 /** 提取純數字代碼 */
@@ -314,7 +336,7 @@ export class TWSEHistProvider implements DataProvider {
     interval?: string,
   ): Promise<CandleWithIndicators[]> {
     const code = extractCode(symbol);
-    const otc = isOTC(symbol);
+    const otc = await isOTC(symbol);
     const months = periodToMonths(period);
 
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
@@ -348,7 +370,7 @@ export class TWSEHistProvider implements DataProvider {
     if (cached) return cached;
 
     const code = extractCode(symbol);
-    const otc = isOTC(symbol);
+    const otc = await isOTC(symbol);
 
     // 計算需要抓幾個月
     const start = new Date(startDate);

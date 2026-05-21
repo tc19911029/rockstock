@@ -78,7 +78,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#0f172a" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded-lg focus:text-sm">
           跳至主要內容
         </a>
