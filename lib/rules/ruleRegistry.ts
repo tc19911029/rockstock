@@ -116,7 +116,7 @@ export class RuleRegistry {
 import { ZHU_RULES } from './zhuRules';
 // 朱家泓 K 線戰法（《抓住K線》+ 《抓住線圖》）
 import {
-  smartKLineBuy, smartKLineSell, candleMergeSignal,
+  smartKLineBuy, smartKLineSell, candleMergeSignal, topExhaustionWarning,
   lowLongRedAttack, lowHammerAttack, lowCrossAttack, lowEngulfAttack, lowThreeRedAttack,
   highShootingStar, highCrossSell, highEngulfSell, highEveningStar,
 } from './smartKLineRules';
@@ -172,7 +172,7 @@ function createDefaultRegistry(): RuleRegistry {
     author: '朱家泓',
     description: '《抓住K線》智慧K線 + K線組合(15種) + K線交易法 + 底/頭反轉型態 + 2根/3根K線轉折',
     rules: [
-      smartKLineBuy, smartKLineSell, candleMergeSignal,
+      smartKLineBuy, smartKLineSell, candleMergeSignal, topExhaustionWarning,
       lowLongRedAttack, lowHammerAttack, lowCrossAttack, lowEngulfAttack, lowThreeRedAttack,
       highShootingStar, highCrossSell, highEngulfSell, highEveningStar,
       ...KLINE_COMBO_RULES,

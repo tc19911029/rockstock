@@ -48,22 +48,37 @@ export function applyPanelFilter(
  *
  * 主鍵：漲幅 desc（2026-04-19 回測驗證：漲幅在 Top500 全期冠軍）
  * 次鍵：六條件總分 desc
+ * 第三鍵：MA20 斜率 desc — 朱老師 CH3「均線三大力量」角度量化（2026-05-21 線上課程）
+ *   只在雙方都是「多頭」時才生效，避免初轉多股票因 MA20 還沒翻揚被誤排
  *
  * 改這個比較器等於改 UI 顯示 top N + 回測 top N + UI 排序，三方同步動。
  */
 export function panelSortCompare(a: StockScanResult, b: StockScanResult): number {
   const d1 = (b.changePercent ?? 0) - (a.changePercent ?? 0);
   if (d1 !== 0) return d1;
-  return (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0);
+  const d2 = (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0);
+  if (d2 !== 0) return d2;
+  // 第三鍵僅在雙方都多頭時觸發
+  if (a.trendState === '多頭' && b.trendState === '多頭') {
+    return (b.ma20Slope ?? 0) - (a.ma20Slope ?? 0);
+  }
+  return 0;
 }
 
 /**
  * 面板排序 key — 數值型 key 給 backtest-run 的 sortFn 用（越大越優先）。
- * 與 panelSortCompare 等價：changePercent 為主，六條件總分為次。
- * 用 changePercent + sixCon/1000 把次鍵壓到尾數，不會影響主鍵排名。
+ * 與 panelSortCompare 等價：changePercent 為主，六條件總分為次，多頭時 ma20Slope 為第三。
+ * 用 changePercent + sixCon/1000 + ma20Slope/1_000_000 把次鍵/第三鍵壓到尾數，不影響主鍵。
  */
-export function panelSortKey(r: Pick<StockScanResult, 'changePercent' | 'sixConditionsScore'>): number {
-  return (r.changePercent ?? 0) + (r.sixConditionsScore ?? 0) / 1000;
+export function panelSortKey(
+  r: Pick<StockScanResult, 'changePercent' | 'sixConditionsScore'> &
+     Partial<Pick<StockScanResult, 'trendState' | 'ma20Slope'>>,
+): number {
+  const base = (r.changePercent ?? 0) + (r.sixConditionsScore ?? 0) / 1000;
+  if (r.trendState === '多頭') {
+    return base + (r.ma20Slope ?? 0) / 1_000_000;
+  }
+  return base;
 }
 
 /**

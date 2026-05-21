@@ -10,6 +10,7 @@ import {
   hasLongUpperShadow, hasLongLowerShadow, isDoji,
   isInsideBar, mergedCandleDirection, trendSlope,
   isLowPosition, isHighPosition, bodySize,
+  isWeakInStrengthAtTop,
 } from './ruleUtils';
 
 // ── 戰法1：智慧K線戰法 ──────────────────────────────────────────────────────
@@ -67,6 +68,35 @@ export const smartKLineSell: TradingRule = {
         '做多出場：收盤確認股價跌破前一日最低點，出場。',
         '做空進場：收盤跌破前一日最低點時，也可做空。',
         '停損（做空）：以進場當日K線最高點為停損點。',
+      ].join('\n'),
+      ruleId: this.id,
+    };
+  },
+};
+
+/**
+ * 高檔強中透弱警示（朱老師 CH2-1 K 線基本概念）
+ * 高檔出現「黑 K 但收盤 > 昨日收盤」= 空方已在當日盤中偷偷出貨
+ * 不是必然轉空，是「該漲不漲」的早期警訊；多單應提高警覺、設好停利
+ */
+export const topExhaustionWarning: TradingRule = {
+  id: 'top-exhaustion-warning',
+  name: '高檔強中透弱警示',
+  description: '高檔位置出現黑 K 但相對昨日收盤仍漲 — 空方偷出貨徵兆',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 1) return null;
+    if (!isWeakInStrengthAtTop(candles, index)) return null;
+    const c = candles[index];
+    const prev = candles[index - 1];
+    return {
+      type: 'WATCH',
+      label: '高檔強中透弱',
+      description: `高檔黑K收盤 ${c.close.toFixed(2)} 仍漲 (前日 ${prev.close.toFixed(2)})，空方偷出貨警訊`,
+      reason: [
+        '【朱家泓《技術分析全攻略》CH2-1 K 線基本概念】',
+        '強中透弱：當日收盤 > 昨日收盤（漲），但收一根黑 K（開高走低）。',
+        '高檔意義：股價已漲多，今天還能漲但盤中已開始下殺 = 空方偷出貨。',
+        '操作：多單提高警覺，明天若開低、收盤跌破 5 均，立刻停利出場。',
       ].join('\n'),
       ruleId: this.id,
     };

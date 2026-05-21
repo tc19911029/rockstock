@@ -252,6 +252,20 @@ export function trendSlope(candles: CandleWithIndicators[], index: number, lookb
   return priceChange / (lookback * atr);
 }
 
+/**
+ * MA20 斜率（% change over lookback bars）
+ * 朱老師「均線三大力量」與「葛蘭碧法則」的角度量化 — 越大代表多頭力道越強
+ * 回傳例：0.03 = MA20 在過去 lookback 根 K 上揚 3%
+ * 預設 lookback=5 對應週級觀察（一週 5 個交易日）
+ */
+export function ma20Slope(candles: CandleWithIndicators[], index: number, lookback = 5): number | null {
+  if (index < lookback) return null;
+  const cur = candles[index].ma20;
+  const past = candles[index - lookback].ma20;
+  if (cur == null || past == null || past === 0) return null;
+  return (cur - past) / past;
+}
+
 /** 子母線偵測：當前 K 線的高低完全在前一根之內 */
 export function isInsideBar(c: CandleWithIndicators, prev: CandleWithIndicators): boolean {
   return c.high <= prev.high && c.low >= prev.low;
@@ -269,6 +283,48 @@ export function mergedCandleDirection(
   if (mergedClose > mergedOpen && mergedBody / mergedRange > 0.3) return 'bullish';
   if (mergedClose < mergedOpen && mergedBody / mergedRange > 0.3) return 'bearish';
   return 'neutral';
+}
+
+/**
+ * 弱中透強（純形態）：當天收紅 K（close > open），但收盤 < 昨日收盤（相對昨日是跌）
+ * 朱老師 CH2-1：低檔出現此型態 = 止跌徵兆（多方在當日盤中已開始出手）
+ */
+export function isStrongInWeakness(c: CandleWithIndicators, prev: CandleWithIndicators): boolean {
+  return c.close > c.open && c.close < prev.close;
+}
+
+/**
+ * 強中透弱（純形態）：當天收黑 K（close < open），但收盤 > 昨日收盤（相對昨日是漲）
+ * 朱老師 CH2-1：高檔出現此型態 = 止漲警訊（空方在當日盤中已偷偷出貨）
+ */
+export function isWeakInStrength(c: CandleWithIndicators, prev: CandleWithIndicators): boolean {
+  return c.close < c.open && c.close > prev.close;
+}
+
+/**
+ * 低檔弱中透強（位置條件版）：純形態 + isLowPosition()
+ * 用於 D/F 反轉軌進場細條件
+ */
+export function isStrongInWeaknessAtBottom(
+  candles: CandleWithIndicators[], index: number,
+): boolean {
+  if (index < 1) return false;
+  const c = candles[index];
+  const prev = candles[index - 1];
+  return isStrongInWeakness(c, prev) && isLowPosition(c);
+}
+
+/**
+ * 高檔強中透弱（位置條件版）：純形態 + isHighPosition()
+ * 用於高檔出場 / 警示訊號
+ */
+export function isWeakInStrengthAtTop(
+  candles: CandleWithIndicators[], index: number,
+): boolean {
+  if (index < 1) return false;
+  const c = candles[index];
+  const prev = candles[index - 1];
+  return isWeakInStrength(c, prev) && isHighPosition(c, candles, index);
 }
 
 /** 判斷是否在低檔（收盤低於 MA20 的 -10% 或低於 MA60） */

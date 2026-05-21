@@ -1,5 +1,6 @@
 import { CandleWithIndicators } from '@/types';
 import { ruleEngine } from '@/lib/rules/ruleEngine';
+import { ma20Slope, isStrongInWeaknessAtBottom } from '@/lib/rules/ruleUtils';
 import { evaluateSixConditions, detectTrend, detectTrendPosition, TrendState } from '@/lib/analysis/trendAnalysis';
 import { checkLongProhibitions, checkShortProhibitions } from '@/lib/rules/entryProhibitions';
 import { evaluateShortSixConditions } from '@/lib/analysis/shortAnalysis';
@@ -609,6 +610,7 @@ export abstract class MarketScanner {
         highWinRateTypes: highWinRateEntry.types,
         highWinRateScore: highWinRateEntry.score,
         highWinRateDetails: highWinRateEntry.details,
+        ma20Slope: ma20Slope(candles, lastIdx) ?? undefined,
         // ── 淘汰法（資訊保留，供 UI 顯示）──────────────────────────────
         eliminationReasons: elimination.reasons,
         eliminationPenalty: elimination.penalty,
@@ -769,6 +771,7 @@ export abstract class MarketScanner {
         trendState: trend,
         trendPosition: position,
         scanTime: new Date().toISOString(),
+        ma20Slope: ma20Slope(candles, lastIdx) ?? undefined,
       };
     } catch {
       return null;
@@ -931,6 +934,7 @@ export abstract class MarketScanner {
         trendState: '空頭',
         trendPosition: shortConds.position.stage ?? '',
         scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+        ma20Slope: ma20Slope(candles, lastIdx) ?? undefined,
         // ── 數據新鮮度 ──────────────────────────────────────────────────
         dataFreshness: {
           lastCandleDate: fetchResult.lastCandleDate,
@@ -1393,6 +1397,13 @@ export abstract class MarketScanner {
             if (r?.isFlatBottom) {
               matched = true;
               detail = r.detail;
+              // 弱中透強加持（朱老師 CH2-1）：近 5 根 K 內若出現「低檔紅 K 但跌」= 多方早盤出手
+              for (let i = Math.max(1, lastIdx - 4); i <= lastIdx; i++) {
+                if (isStrongInWeaknessAtBottom(candles, i)) {
+                  detail += ' +弱中透強加持';
+                  break;
+                }
+              }
               // v12 議題 75：D 型態訊號 provisional 三天驗證
               const { createProvisional } = await import('@/lib/scanner/provisionalManager');
               provisional = createProvisional({
@@ -1412,6 +1423,13 @@ export abstract class MarketScanner {
             if (r?.isVReversal) {
               matched = true;
               detail = r.detail;
+              // 弱中透強加持（朱老師 CH2-1）：近 5 根 K 內若出現「低檔紅 K 但跌」= 多方早盤出手
+              for (let i = Math.max(1, lastIdx - 4); i <= lastIdx; i++) {
+                if (isStrongInWeaknessAtBottom(candles, i)) {
+                  detail += ' +弱中透強加持';
+                  break;
+                }
+              }
               // v12 議題 23：F 反彈起點 close 鎖定為 LockWatch triggerPrice，
               // vBottom = 變盤線 low（實際 V 底，結構失效判定用）
               lockWatchPayload = { triggerPrice: last.close, vBottom: r.stopBarLow };
@@ -1653,6 +1671,7 @@ export abstract class MarketScanner {
             trendState,
             trendPosition,
             scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+            ma20Slope: ma20Slope(candles, lastIdx) ?? undefined,
             mtfScore: mtfResult.totalScore,
             mtfWeeklyPass: mtfResult.weekly.pass,
             mtfWeeklyTrend: mtfResult.weekly.trend,
@@ -1757,6 +1776,7 @@ export abstract class MarketScanner {
           scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
           direction,
           ma20Deviation: dev,
+          ma20Slope: ma20Slope(candles, lastIdx) ?? undefined,
           dataFreshness: {
             lastCandleDate: fetchResult.lastCandleDate,
             daysStale: fetchResult.staleDays,

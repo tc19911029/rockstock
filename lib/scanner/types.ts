@@ -44,6 +44,9 @@ export interface StockScanResult {
   highWinRateTypes?: string[];       // 匹配的高勝率位置類型
   highWinRateScore?: number;         // 高勝率加分 0-30
   highWinRateDetails?: string[];     // 匹配說明
+  // ── 排序因子：MA20 斜率（朱老師「均線三大力量」角度量化，2026-05-21 線上課程 CH3）──
+  // 預設 lookback=5（一週），單位是 % change；越大代表多頭力道越強。目前僅觀察用，未接 panelSortCompare
+  ma20Slope?: number;                // e.g. 0.03 = 過去 5 個交易日 MA20 上揚 3%
   // ── 33 種贏家圖像 ──────────────────────────────────────────────────────
   winnerBearishPatterns?: string[];   // 多轉空圖像名稱
   winnerBullishPatterns?: string[];   // 空轉多圖像名稱

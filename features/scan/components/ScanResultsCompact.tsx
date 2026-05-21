@@ -10,6 +10,7 @@ import type { LockWatchRecord } from '@/lib/scanner/lockWatchTypes';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { buildAllStrategyReasons, type StrategyReasonRow } from './strategyReasons';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
+import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,9 +153,8 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     const dir = scanSortDir === 'desc' ? 1 : -1;
     switch (scanSort) {
       case 'price':      return dir * ((b.price ?? 0) - (a.price ?? 0));
-      case 'change':     // 對齊 lib/selection/applyPanelFilter.ts panelSortKey：漲幅 × 1000 + 六條件 tie-breaker
-        return dir * ((((b.changePercent ?? 0) - (a.changePercent ?? 0)) * 1000)
-                      + ((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0)));
+      case 'change':     // 對齊 panelSortCompare（漲幅/六條件/ma20Slope 三層）— 單一事實來源 rule 10
+        return dir * panelSortCompare(a, b);
       case 'sixCond':    return dir * (((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0)) * 100
                                        + ((b.changePercent ?? 0) - (a.changePercent ?? 0)) / 100);
       case 'turnover':   // rank 1 = 最大成交額；desc → 小 rank 在前

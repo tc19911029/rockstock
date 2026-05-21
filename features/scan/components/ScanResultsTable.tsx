@@ -9,6 +9,7 @@ import { POLLING } from '@/lib/config';
 import { Button } from '@/components/ui/button';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { MTF_SCORE_STRONG, MTF_SCORE_OK } from '@/lib/analysis/bookThresholds';
+import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -147,17 +148,14 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     const dir = scanSortDir === 'desc' ? 1 : -1;
     switch (scanSort) {
       case 'price':      return dir * ((b.price ?? 0) - (a.price ?? 0));
-      case 'change':     // 對齊 lib/selection/applyPanelFilter.ts panelSortKey：漲幅 × 1000 + 六條件 tie-breaker
-        return dir * ((((b.changePercent ?? 0) - (a.changePercent ?? 0)) * 1000)
-                      + ((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0)));
+      case 'change':     // 對齊 panelSortCompare（漲幅/六條件/ma20Slope 三層）— 單一事實來源 rule 10
+      case 'panel':      // 同上
+        return dir * panelSortCompare(a, b);
       case 'sixCond':    return dir * (((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0)) * 100
                                        + ((b.changePercent ?? 0) - (a.changePercent ?? 0)) / 100);
       case 'turnover':   // 對齊產線 ScanPipeline 的 turnoverRank：rank 1 = 最大成交額
         // desc = 大成交額（rank 小）優先 → a.rank - b.rank 為負時 a 在前
         return dir * ((a.turnoverRank ?? 999_999) - (b.turnoverRank ?? 999_999));
-      case 'panel':      // 對齊 lib/selection/applyPanelFilter.ts panelSortKey：漲幅主鍵 + 六條件次鍵
-        return dir * ((((b.changePercent ?? 0) - (a.changePercent ?? 0)) * 1000)
-                      + ((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0)));
       default:           return 0;
     }
   });

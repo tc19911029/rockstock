@@ -1,5 +1,6 @@
 import { CandleWithIndicators } from '@/types';
 import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
+import { findSwingHigh, findSwingLow } from '@/lib/rules/ruleUtils';
 import { BOOK_VOL_RATIO_MIN, MA20_WARN_DEVIATION_PCT } from './bookThresholds';
 import { detectExtraHighWinPositions, detectPullbackBuy, detectRangeBreakout } from './highWinPositions';
 import { detectVolumePriceDivergence, detectHighPeakVolume, detectChokingVolume } from './volumePatterns';
@@ -14,8 +15,10 @@ export type TrendState = '多頭' | '空頭' | '盤整';
 
 export type TrendPosition =
   | '多頭上升段'
+  | '接近壓力區'          // 多頭中，收盤 ≤ 3% 於近期 swing high（2026-05-21 林穎 CH2 + 朱老師 CH3）
   | '末升段(高檔)'
   | '空頭下跌段'
+  | '接近支撐區'          // 空頭中，收盤 ≤ 3% 於近期 swing low
   | '末跌段(低檔)'
   | '盤整觀望'
   // ── 相容舊欄位（歷史 L4 掃描檔會出現）──
@@ -491,6 +494,10 @@ export function detectTrendPosition(
 
   const pivots = findPivots(candles, index, 10);
 
+  // 接近壓力 / 支撐閾值：3%（書本經驗值；可根據回測微調）
+  const NEAR_SR_PCT = 0.03;
+  const c = candles[index];
+
   if (trend === '多頭') {
     const consecSurge     = hasConsecLongRed(candles, index, 3);
     const blowoffReversal = hasBlowoffBlackReversal(candles, index);
@@ -502,6 +509,12 @@ export function detectTrendPosition(
       consecSurge, blowoffReversal, blowoffNoRise, volPriceDiv, biasOverExt,
     ].filter(Boolean).length;
     if (endSignals >= 2) return '末升段(高檔)';
+
+    // 接近壓力區：未達末升段，但收盤已逼近近 60 根 swing high
+    const swingHi = findSwingHigh(candles, index, 60);
+    if (swingHi != null && swingHi > 0 && c.close >= swingHi * (1 - NEAR_SR_PCT)) {
+      return '接近壓力區';
+    }
     return '多頭上升段';
   } else {
     // 空頭：對稱判末跌 vs 一般下跌
@@ -512,6 +525,12 @@ export function detectTrendPosition(
       else break;
     }
     if (lowerLowCount >= 5) return '末跌段(低檔)';
+
+    // 接近支撐區：未達末跌，但收盤已逼近近 60 根 swing low
+    const swingLo = findSwingLow(candles, index, 60);
+    if (swingLo != null && swingLo > 0 && c.close <= swingLo * (1 + NEAR_SR_PCT)) {
+      return '接近支撐區';
+    }
     return '空頭下跌段';
   }
 }
