@@ -21,11 +21,13 @@
 
 - **規則總數**：約 220 條（涵蓋六條件、戒律、淘汰法、字母策略、停損停利、排序因子、顯示色階、門檻常數）
 - **五類分佈**：
-  - 第一類 ✅ 書本明確：約 132 條（60%）
+  - 第一類 ✅ 書本明確：約 137 條（62%）
   - 第二類 ⚠️ 來源模糊：約 25 條（11%）
-  - 第三類 ❌ 自創/AI 補：約 35 條（16%）
+  - 第三類 ❌ 自創/AI 補：約 30 條（14%）
   - 第四類 📭 資料不足：約 13 條（6%）
   - 第五類 🔄 已偏離書本：約 15 條（7%）
+
+> 2026-05-22 多次修訂後：chipDivergence-* 5 條從第三類移入第一類（重寫對齊書本「量價背離」）
 
 ### 整體健康度
 
@@ -38,9 +40,9 @@
 | R 乖離率機械軌 | ❌ **完全自創** — 無任何書本依據（2026-05-21 用戶要求新增） |
 | Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區） | 📭 **線上課程依據**，未經書本筆記固化 |
 | 停損 7% / 停利 10% | ✅ 書本明確 |
-| 乖離率上限 | 🔄 **已偏離**（書本 15% → 2026-05-19 手動放寬到 25%） |
+| 乖離率上限 | ✅ **已修復**（2026-05-22 回滾為書本 15%；v12 cron 零影響、SIXCOND 勝率 +8.5pp，commit `995c3a9`，見 [A/B 回測報告](./2026-05-22-high-deviation-pct-rollback-backtest.md)） |
 | 淘汰法執行方式 | ✅ **已修復**（2026-05-22 回滾為 hard gate，對齊書本「立即出場」；TW 池子縮小 12.3%、CN 縮小 5.1%，見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md)） |
-| 籌碼背離 `chipDivergence.ts` | ❌ **整支檔案無書本標記** |
+| 籌碼背離 `chipDivergence.ts` | ✅ **2026-05-22 已重寫**：原「價跌+法人累積 ≥500 張」自創邏輯改為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條），5% 門檻與 [entryProhibitions.ts:23](../../lib/rules/entryProhibitions.ts#L23) 連動 |
 | 文件追上度（docs/STRATEGY_BOOK_REFERENCE.md） | ⚠️ **嚴重 stale**：2026-04-21 後 17+ 個策略 commit 未進文件 |
 
 ### TOP 5 最危險的污染點
@@ -50,7 +52,7 @@
 | 1 | ~~HIGH_DEVIATION_PCT = 0.25~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | **2026-05-22 回滾到 0.15 對齊書本 p.568**。v12 cron 生產線零影響；SIXCOND 冠軍勝率 +8.5pp、報酬 −30% 但風險可控。詳見 [A/B 回測報告](./2026-05-22-high-deviation-pct-rollback-backtest.md)（commit `995c3a9`） |
 | 2 | ~~淘汰法改警示不擋~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | **2026-05-22 回滾為 hard gate**。實測 TW 池子 -12.3%、CN -5.1%，影響可控。詳見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md) |
 | 3 | ~~R 軌（乖離率排名）~~ → ⏸ **已暫停自動掃描** | ❌ 完全自創 → 暫停 | [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | **2026-05-22 移除 vercel.json TW/CN mechanical cron**，code 保留以利回測；恢復 = 加回 2 條 cron（commit `d422cb0`） |
-| 4 | **chipDivergence.ts 整支無書本** | ❌ 完全自創 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | 5% 漲跌 + 法人累積 500 張的門檻完全無註解，書本無對應 |
+| 4 | ~~chipDivergence.ts 整支無書本~~ → ✅ **已修復** | ❌ 完全自創 → 已對齊書本 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | **2026-05-22 重寫**：移除「價跌+法人累積 500 張」自創邏輯，改為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條）；5% 門檻 cross-link entryProhibitions.ts:23 同一書本量化值。僅走圖 banner 顯示，不入選股 |
 | 5 | **Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區）** | 📭 線上課依據 | [applyPanelFilter.ts](../../lib/selection/applyPanelFilter.ts), [MarketScanner.ts:1400](../../lib/scanner/MarketScanner.ts#L1400), [trendAnalysis.ts:498](../../lib/analysis/trendAnalysis.ts#L498) | 朱老師 CH3 / 林穎 CH2 線上課，無書本頁碼；commit 669f273 混用「書本/線上課程」字眼 |
 
 ### 建議首要行動（按急迫性）
@@ -67,7 +69,7 @@
 
 ### 第一類 ✅ 書本明確（可繼續使用）
 
-這些規則 code 註解明確標頁碼，與書本/docs 對照一致。**約 130 條**，逐條列舉沒有意義，按主題歸納：
+這些規則 code 註解明確標頁碼，與書本/docs 對照一致。**約 137 條**，逐條列舉沒有意義，按主題歸納：
 
 #### 1.1 六條件（A 策略核心）— 全部對齊寶典 p.54
 | 規則 | code | 書本 |
@@ -96,9 +98,9 @@
 | ~~戒 11 上升切線~~ | — | ✅ 已移除（2026-04-20） |
 
 #### 1.3 淘汰法 R1-R11 — 對齊寶典 Part 10 p.659-662
-- ✅ R1/R2/R5/R6/R7/R9 完整實作
+- ✅ R1/R2/R4/R5/R6/R7/R9 完整實作
 - ✅ R3/R8/R10/R11 已移除（書本概念過寬或基本面超出範圍）
-- 🔄 **執行方式偏離**：2026-05-20 改為「警示不擋」（見第五類）
+- ✅ **執行方式對齊書本**：2026-05-22 回滾為 hard gate「命中即出場」（commit `e44b7fc`）
 
 #### 1.4 高勝率 6 位置（A 策略加分）— 全部對齊寶典 Part 12 p.749-755
 - pos 1 多頭打底 → 寶典 p.749 ✅
@@ -200,7 +202,7 @@
 | **SORT-primary-changePct** | 排序主鍵 = changePercent desc | [applyPanelFilter.ts:57](../../lib/selection/applyPanelFilter.ts#L57) | 書本未指定排序主鍵 | 2026-04-19 回測驅動，非書本 |
 | **SELL-tp-reach-resist-2pct** | 停利「接近壓力 ±2%」 | [v12TakeProfit.ts:80](../../lib/sell/v12TakeProfit.ts#L80) | 書本「接近壓力」未量化 | 自創 padding |
 | **A-six-cond-4-fresh** | 攻擊量「新鮮信號」過濾（前 2 日不可連續大量上漲） | [trendAnalysis.ts:755](../../lib/analysis/trendAnalysis.ts#L755) | 書本未提「新鮮性」概念 | 自創 |
-| **chipDivergence-***（5 條） | 多頭/空頭背離：價±3% + 法人累積 ≥500 張 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | **整支檔案無書本標記** | **⚠️ 待確認來源** |
+| ~~chipDivergence-***~~ → ✅ 已對齊書本 | 改為「量價背離」（價±5% + 縮量） | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | 2026-05-22 重寫：寶典 p.57 戒律 3 + 5 步驟量價 13 條 | 5% 與 entryProhibitions.ts:23 連動 |
 | **Display-thresholds**（13 條） | AI 信心、勝率色階、籌碼分級、KD 80/20、當沖比、9:25 集合競價、複合評分權重 | [bookThresholds.ts:160-212](../../lib/analysis/bookThresholds.ts#L160) | 顯示用，書本無 | 已標明，無風險 |
 | **CHANNEL-min-gap-5** | 軌道線最少間隔 5 天 | [bookThresholds.ts:79](../../lib/analysis/bookThresholds.ts#L79) | 書本未量化 | 無註解 |
 | **PIPELINE-min-stock** | TW 200 / CN 500 最少股數 abort | [ScanPipeline.ts:99](../../lib/scanner/ScanPipeline.ts#L99) | 防 API fallback 污染，非策略 | 工程性，無風險 |
@@ -210,7 +212,7 @@
 **建議行動**（按急迫性）：
 
 1. 🔴 **R 軌乖離率排名（2026-05-21 新增）**：建議暫停評估。code 已存在但無書本依據，且跳過所有過濾，風險最高。
-2. 🔴 **chipDivergence.ts 整支**：請確認是否引用任何書本/朱老師教學，若否，建議在檔頭加 `SOURCE: SELF-DERIVED` 註解（這次 task 不動 code）。
+2. ~~chipDivergence.ts 整支~~ → ✅ **2026-05-22 完成**：重寫為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條），檔頭加完整來源註解，5% 門檻與 entryProhibitions.ts:23 連動。
 3. 🟡 **N padding（突破過頭、接近目標）**：commit message 標明是「過濾過頭已達標紀錄」實務需求，但與書本「真突破 ×3%」概念衝突，建議確認用戶意圖。
 4. 🟡 **超長線升級 30%**：書本只說「達高檔」，30% 是 code 自選。可接受但需文件化。
 5. 🟢 **D 一字底 8% / 60% / 120 天**：docs 附錄 C 已標「完全自創」，繼續使用無問題，但回測時應特別關注這些參數的敏感性。
@@ -411,12 +413,12 @@
 | ~~KD 向下不擋~~ → ✅ **已恢復 hard gate 2026-05-22** | 偏離書本短線規則 #9 → 對齊書本 |
 | **N padding（×1.20 / ×0.97）** | 偏離書本「真突破 ×3%」 |
 | **Tier 1 三項（MA20 斜率 / 弱中透強 / 接近壓力區）** | 線上課程依據未經書本固化 |
-| **chipDivergence.ts** | 整支檔案無書本標記 |
+| ~~chipDivergence.ts~~ → ✅ **已重寫對齊書本 2026-05-22** | 改為「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條） |
 
 ### ✅ 維持使用（書本對齊度高、無爭議）
 
 - 六條件 ①-⑥
-- 十大戒律（除戒律 3 乖離 25% 偏離外）
+- 十大戒律（戒律 3 乖離 2026-05-22 回滾為書本 15%）
 - 淘汰法 R1/R2/R4/R5/R6/R7/R9 條件 + 執行方式（2026-05-22 起對齊書本「立即出場」hard gate）
 - 高勝率 6 位置加分
 - B/C/D/E/F/J/K/L/M/N/O/P 字母核心邏輯
@@ -431,7 +433,7 @@
 
 ### 第三類（自創規則確認）
 - ~~T1: 確認 R 軌（乖離率排名）是否要保留或暫停~~ → **2026-05-22 完成**，已暫停自動掃描
-- T2: 確認 `chipDivergence.ts` 來源（書本？自創？AI 補？）
+- ~~T2: 確認 `chipDivergence.ts` 來源（書本？自創？AI 補？）~~ → **2026-05-22 完成**，重寫為書本「量價背離」，5% 與 entryProhibitions.ts:23 連動
 - T3: 確認 N padding（×1.20 突破過頭、×0.97 接近目標）是否要保留
 - T4: 確認排序主鍵 changePercent desc 是否要明文標為「回測驅動非書本」
 
