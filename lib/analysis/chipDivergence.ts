@@ -1,109 +1,98 @@
 /**
- * 籌碼背離訊號偵測
+ * 量價背離訊號偵測 — 走圖頂部 banner 顯示用
  *
- * 偵測股價與籌碼的背離：
- *   - 多頭背離：價跌 + 法人累積買超 → 隱性吸籌
- *   - 空頭背離：價漲 + 法人累積賣超 → 隱性出貨
+ * 來源（書本對齊）：
+ *   - 朱家泓《活用技術分析寶典》p.57 戒律 3「量價背離 + KD 高檔 + 乖離過大」之背離部分
+ *   - 《做對 5 個實戰步驟》量價 13 條：「沒有量能：上漲行進中量縮或量價背離」
+ *   - docs/STRATEGY_BOOK_REFERENCE.md:102「量價背離（近 3 日漲>5% + 縮量）」
+ *   - docs/TECHNICAL_ANALYSIS_5STEPS.md:1166 末端反轉「大量不漲或下跌或量價背離」
  *
- * 用 N 日（預設 5 日）區間判斷：
- *   1. 區間收盤價變化 = (today.close − N天前.close) / N天前.close
- *   2. 區間法人累積淨買 = 過去 N 天 sum(foreign + trust)
- *   3. 兩者方向相反 + 絕對值都夠大 → 出訊號
+ * 定義（書本標準）：
+ *   - 空頭背離（頂部警示，動能衰竭）：近 3 日價漲 > 5% + 今日量 < 昨日量
+ *   - 多頭背離（底部訊號，賣壓衰竭）：近 3 日價跌 > 5% + 今日量 < 昨日量
+ *
+ * 本檔只在 /api/stock/chips 走圖頂部 banner 顯示，**不**進入選股流程；
+ * 選股的「量價背離」判定在 lib/rules/entryProhibitions.ts 戒律 3，共用同一書本門檻。
+ *
+ * ⚠️ 自創量化部分：5% 漲跌幅門檻（書本只說「量價背離」未量化），
+ *    與 entryProhibitions.ts:23 VOL_PRICE_DIVERGENCE_GAIN_PCT 保持一致。
  */
 
 export interface ChipDivergenceResult {
-  /** 訊號類型：bullish=多頭背離（價跌法人買），bearish=空頭背離（價漲法人賣） */
+  /** 訊號類型：bullish=多頭背離（價跌量縮，賣壓衰竭），bearish=空頭背離（價漲量縮，動能衰竭） */
   type: 'bullish' | 'bearish' | null;
   /** N 日收盤價變化 % */
   priceChangePct: number;
-  /** N 日法人累積買賣超（張） */
-  instAccumNet: number;
+  /** 今日量 vs 昨日量變化 %（負值=縮量） */
+  volumeChangePct: number;
   /** 訊號強度 0-3 */
   strength: 0 | 1 | 2 | 3;
   /** 人類可讀說明 */
   detail: string;
 }
 
-interface PriceCandle {
+interface PriceVolCandle {
   date: string;
   close: number;
-}
-
-interface InstFlow {
-  date: string;
-  foreign: number;
-  trust: number;
+  volume: number;
 }
 
 /**
- * 偵測單支股票的籌碼背離。
+ * 偵測單支股票的量價背離（朱家泓書本定義）。
  *
- * @param candles 升冪 by date 的 K 線
- * @param insts   升冪 by date 的法人資料
- * @param windowDays 觀察區間（預設 5 日）
- * @param minPriceMove 最小價格變化門檻 %（預設 3%）
- * @param minInstAccum 最小法人累積門檻（張，預設 500）
+ * @param candles 升冪 by date 的 K 線（需 close + volume）
+ * @param windowDays 觀察區間（書本標準 3 日）
+ * @param minPriceMove 最小價格變化門檻 %（書本未量化，沿用 entryProhibitions.ts 5%）
  */
 export function detectChipDivergence(
-  candles: PriceCandle[],
-  insts: InstFlow[],
-  windowDays = 5,
-  minPriceMove = 3,
-  minInstAccum = 500,
+  candles: PriceVolCandle[],
+  windowDays = 3,
+  minPriceMove = 5,
 ): ChipDivergenceResult {
   const empty: ChipDivergenceResult = {
-    type: null, priceChangePct: 0, instAccumNet: 0, strength: 0, detail: '',
+    type: null, priceChangePct: 0, volumeChangePct: 0, strength: 0, detail: '',
   };
   if (candles.length < windowDays + 1) return empty;
 
   const last = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
   const ref = candles[candles.length - 1 - windowDays];
-  if (!last || !ref || ref.close <= 0) return empty;
+  if (!last || !prev || !ref || ref.close <= 0 || prev.volume <= 0) return empty;
 
   const priceChangePct = +(((last.close - ref.close) / ref.close) * 100).toFixed(2);
-
-  // 取窗口內的法人資料 sum
-  const startDate = ref.date;
-  const endDate = last.date;
-  let instAccumNet = 0;
-  for (const i of insts) {
-    if (i.date >= startDate && i.date <= endDate) {
-      instAccumNet += (i.foreign ?? 0) + (i.trust ?? 0);
-    }
-  }
+  const volumeChangePct = +(((last.volume - prev.volume) / prev.volume) * 100).toFixed(2);
 
   const priceUp = priceChangePct >= minPriceMove;
   const priceDown = priceChangePct <= -minPriceMove;
-  const instBuy = instAccumNet >= minInstAccum;
-  const instSell = instAccumNet <= -minInstAccum;
+  const volumeShrink = volumeChangePct < 0; // 今日量 < 昨日量
 
-  // 多頭背離：價跌 + 法人買超
-  if (priceDown && instBuy) {
+  // 空頭背離：價漲 + 量縮（動能衰竭，頂部警示）
+  if (priceUp && volumeShrink) {
     const strength = Math.min(3,
-      Math.floor(Math.abs(priceChangePct) / 5) + Math.floor(instAccumNet / 2000),
-    ) as 0 | 1 | 2 | 3;
-    return {
-      type: 'bullish',
-      priceChangePct,
-      instAccumNet,
-      strength,
-      detail: `${windowDays}日內價跌 ${Math.abs(priceChangePct).toFixed(1)}% 但法人累積買超 ${instAccumNet.toLocaleString('zh-TW')} 張（隱性吸籌）`,
-    };
-  }
-
-  // 空頭背離：價漲 + 法人賣超
-  if (priceUp && instSell) {
-    const strength = Math.min(3,
-      Math.floor(priceChangePct / 5) + Math.floor(Math.abs(instAccumNet) / 2000),
+      Math.floor(priceChangePct / 5) + Math.floor(Math.abs(volumeChangePct) / 20),
     ) as 0 | 1 | 2 | 3;
     return {
       type: 'bearish',
       priceChangePct,
-      instAccumNet,
+      volumeChangePct,
       strength,
-      detail: `${windowDays}日內價漲 ${priceChangePct.toFixed(1)}% 但法人累積賣超 ${Math.abs(instAccumNet).toLocaleString('zh-TW')} 張（隱性出貨）`,
+      detail: `${windowDays}日漲 ${priceChangePct.toFixed(1)}% 但今日量縮 ${Math.abs(volumeChangePct).toFixed(0)}%（動能衰竭）`,
     };
   }
 
-  return { ...empty, priceChangePct, instAccumNet };
+  // 多頭背離：價跌 + 量縮（賣壓衰竭，底部訊號）
+  if (priceDown && volumeShrink) {
+    const strength = Math.min(3,
+      Math.floor(Math.abs(priceChangePct) / 5) + Math.floor(Math.abs(volumeChangePct) / 20),
+    ) as 0 | 1 | 2 | 3;
+    return {
+      type: 'bullish',
+      priceChangePct,
+      volumeChangePct,
+      strength,
+      detail: `${windowDays}日跌 ${Math.abs(priceChangePct).toFixed(1)}% 但今日量縮 ${Math.abs(volumeChangePct).toFixed(0)}%（賣壓衰竭）`,
+    };
+  }
+
+  return { ...empty, priceChangePct, volumeChangePct };
 }
