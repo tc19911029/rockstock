@@ -47,6 +47,8 @@ function collectTargets(): Map<string, { market: 'TW' | 'CN'; dates: Set<string>
     '/tmp/l1-audit/a_violations_v2_trusted.json',
     '/tmp/l1-audit/victims_5_20.json',
     '/tmp/l1-audit/b_violations.json',
+    '/tmp/l1-audit/victims_untrusted_l2.json',  // 2026-05-21 加：L2 untrusted 日 (TW 4/22, 4/29, 5/7 / CN 大量) 的 Yahoo cross-check victims
+    '/tmp/l1-audit/victims_full_yahoo.json',     // 2026-05-21 加：全市場 L1 vs Yahoo cross-check 出來的 657 件，主要修補 Yahoo adjclose 污染的 4 月初歷史
   ];
   const targets = new Map<string, { market: 'TW' | 'CN'; dates: Set<string> }>();
   for (const f of sources) {

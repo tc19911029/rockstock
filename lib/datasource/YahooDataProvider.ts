@@ -91,48 +91,15 @@ function parseYahooCandlesRaw(json: unknown, symbol?: string): Candle[] {
     .filter((c): c is Candle => c != null);
 }
 
+/**
+ * @deprecated 2026-05-21 全面棄用。Yahoo adjclose / close ratio 套上歷史 OHLC 會把
+ * 真實成交價改成「除息回頭調整後的假價格」，跟券商給的圖、TWSE 官方 csv、朱家泓書本
+ * 選股法依賴的真實 K 棒型態不一致。3,344 檔 / 699K 根 bar 被這 path 污染過。
+ * 改用 parseYahooCandlesRaw + events=split 維持 raw OHLC。
+ * 函式保留只是怕外部直接呼叫的測試壞掉，內部已切到 raw。
+ */
 function parseYahooCandles(json: unknown, symbol?: string): Candle[] {
-  const result = (json as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as {
-    timestamp?: number[];
-    indicators?: {
-      quote?:    { open: number[]; high: number[]; low: number[]; close: number[]; volume: number[] }[];
-      adjclose?: { adjclose: number[] }[];
-    };
-  } | undefined;
-  if (!result) return [];
-
-  const timestamps: number[] = result.timestamp ?? [];
-  const q   = result.indicators?.quote?.[0];
-  const adj = result.indicators?.adjclose?.[0]?.adjclose as number[] | undefined;
-  if (!q) return [];
-
-  // TW 股票 Yahoo volume 單位是「股」，系統統一用「張」（1 張 = 1000 股）
-  const isTW = !!symbol && /\.(TW|TWO)$/i.test(symbol);
-  const volDivisor = isTW ? 1000 : 1;
-
-  return timestamps
-    .map((ts, i) => {
-      const o = q.open[i]; const h = q.high[i];
-      const l = q.low[i];  const c = q.close[i];
-      const v = q.volume[i];
-      if (o == null || h == null || l == null || c == null || isNaN(o)) return null;
-
-      // 除權息調整：用 adjclose / close 比例同步調整所有 OHLC 和成交量
-      // 確保均線、報酬率、量能在除權息日前後連續，不產生假跳空或量能斷層
-      const adjFactor = (adj && adj[i] != null && c > 0) ? adj[i] / c : 1;
-
-      const rawVol = v ?? 0;
-      const adjustedVol = adjFactor !== 1 ? rawVol / adjFactor : rawVol;
-      return {
-        date:   new Date(ts * 1000).toISOString().split('T')[0],
-        open:   +(o * adjFactor).toFixed(2),
-        high:   +(h * adjFactor).toFixed(2),
-        low:    +(l * adjFactor).toFixed(2),
-        close:  +(c * adjFactor).toFixed(2),
-        volume: Math.round(adjustedVol / volDivisor),
-      };
-    })
-    .filter((c): c is Candle => c != null);
+  return parseYahooCandlesRaw(json, symbol);
 }
 
 /**
@@ -257,13 +224,16 @@ export class YahooDataProvider implements DataProvider {
     const cached = globalCache.get<CandleWithIndicators[]>(cacheKey);
     if (cached) return cached;
 
+    // 2026-05-21：events=split only（拿掉 div）— 否則 Yahoo adjclose 會把歷史 OHLC 改成
+    // 「除息回頭調整後的假價格」，污染 L1 真實 K 棒。getCandlesRange 早已用 split-only，
+    // 這個 getHistoricalCandles 一路用 div,split 才是 3,344 檔 / 699K 根 bar 被污染的根因。
     let url: string;
     if (asOfDate) {
       const endUnix   = Math.floor(new Date(asOfDate).getTime() / 1000) + 2 * 86400;
       const startUnix = endUnix - 400 * 86400;
-      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${startUnix}&period2=${endUnix}&includePrePost=false&events=div,split`;
+      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${startUnix}&period2=${endUnix}&includePrePost=false&events=split`;
     } else {
-      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${period}&includePrePost=false&events=div,split`;
+      url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${period}&includePrePost=false&events=split`;
     }
 
     const res = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
