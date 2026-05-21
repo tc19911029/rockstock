@@ -53,7 +53,7 @@
 | 2 | ~~淘汰法改警示不擋~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | **2026-05-22 回滾為 hard gate**。實測 TW 池子 -12.3%、CN -5.1%，影響可控。詳見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md) |
 | 3 | ~~R 軌（乖離率排名）~~ → ⏸ **已暫停自動掃描** | ❌ 完全自創 → 暫停 | [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | **2026-05-22 移除 vercel.json TW/CN mechanical cron**，code 保留以利回測；恢復 = 加回 2 條 cron（commit `d422cb0`） |
 | 4 | ~~chipDivergence.ts 整支無書本~~ → ✅ **已修復** | ❌ 完全自創 → 已對齊書本 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | **2026-05-22 重寫**：移除「價跌+法人累積 500 張」自創邏輯，改為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條）；5% 門檻 cross-link entryProhibitions.ts:23 同一書本量化值。僅走圖 banner 顯示，不入選股 |
-| 5 | **Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區）** | 📭 線上課依據 | [applyPanelFilter.ts](../../lib/selection/applyPanelFilter.ts), [MarketScanner.ts:1400](../../lib/scanner/MarketScanner.ts#L1400), [trendAnalysis.ts:498](../../lib/analysis/trendAnalysis.ts#L498) | 朱老師 CH3 / 林穎 CH2 線上課，無書本頁碼；commit 669f273 混用「書本/線上課程」字眼 |
+| 5 | **Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區）** | 📭 線上課依據 → ⚠️ **code 已標明來源，等用戶補課程筆記** | [applyPanelFilter.ts:51](../../lib/selection/applyPanelFilter.ts#L51), [MarketScanner.ts:1404](../../lib/scanner/MarketScanner.ts#L1404), [trendAnalysis.ts:498](../../lib/analysis/trendAnalysis.ts#L498) | 2026-05-22 審計：code 註解已明確標「朱老師 CH3 / CH2-1 線上課程」；commit 669f273 引用的 98/99-*.md 差異報告佚失。**blocked**：等使用者錄製或抄寫 CH1-3 逐字稿到 docs/zhu_online_course_ch{1,2,3}.md。功能運作正常（D/F 加持只是品質標記、排序第三鍵只在罕見三鍵同分時觸發） |
 
 ### 建議首要行動（按急迫性）
 
