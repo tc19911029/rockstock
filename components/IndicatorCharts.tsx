@@ -383,7 +383,7 @@ export interface ChipsData {
   inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
   tdcc: Array<{ date: string; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
   cnFlow?: Array<{ date: string; mainNet: number; superLargeNet: number; largeNet: number; mediumNet: number; smallNet: number }>;
-  divergence?: { type: 'bullish' | 'bearish'; priceChangePct: number; instAccumNet: number; strength: 0 | 1 | 2 | 3; detail: string } | null;
+  divergence?: { type: 'bullish' | 'bearish'; priceChangePct: number; volumeChangePct: number; strength: 0 | 1 | 2 | 3; detail: string } | null;
 }
 type InstSeries = ChipsData; // 別名，保持原型別介面
 

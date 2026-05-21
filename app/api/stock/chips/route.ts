@@ -103,14 +103,15 @@ export async function GET(req: NextRequest) {
     }
     const series = await loadChipSeries(code, days, 'TW');
 
-    // 籌碼背離偵測（TW 才有）
+    // 量價背離偵測（朱家泓書本定義：3 日漲跌>5% + 縮量）
     let divergence = null;
     try {
       const candleFile = await readCandleFile(`${code}.TW`, 'TW') ?? await readCandleFile(`${code}.TWO`, 'TW');
       if (candleFile?.candles) {
-        const recentCandles = candleFile.candles.slice(-30).map(c => ({ date: c.date, close: c.close }));
-        const recentInst = series.inst.slice(-30);
-        const div = detectChipDivergence(recentCandles, recentInst, 5, 3, 500);
+        const recentCandles = candleFile.candles.slice(-30).map(c => ({
+          date: c.date, close: c.close, volume: c.volume,
+        }));
+        const div = detectChipDivergence(recentCandles);
         if (div.type) divergence = div;
       }
     } catch { /* divergence 失敗不影響主流程 */ }
