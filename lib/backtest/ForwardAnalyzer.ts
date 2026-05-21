@@ -122,10 +122,50 @@ async function analyzeOne(
       };
     }
 
-    // 優先讀本地 K 線（可能不完整，下方 needSupplement 會檢查並用 API 補足）
+    // 優先讀本地 K 線（可能不完整，下方先用 L2 補今日，再判定是否需要打 API）
     let candles = await loadForwardFromLocal(symbol, startStr, safeEndStr);
 
-    // 檢查本地數據是否涵蓋到最新交易日
+    // 2026-05-21：L2 inject 提前到 needSupplement 判定之前 ──
+    //
+    // 為什麼：
+    // - 盤中/盤後 L1 候線通常還沒落定今日 K（5/21 dev：L1 lastDate=5/20）
+    // - 原本 needSupplement 看 lastLocalDate < safeEndStr → 11 檔股票全打 FinMind API
+    //   → 8-token rate limit → 每次 forward POST 卡 10-80 秒
+    // - 但 L2 quote snapshot 通常已有今日 quote（cron 5 分鐘抓一次）→ 毫秒級
+    // - 先試 L2 inject，多數情境填上今日 K 後 needSupplement = false，跳過 API
+    //
+    // 原本「L2 inject 在 needSupplement 之後」的設計理由：用 L2 覆蓋 API 回傳的錯誤 open。
+    // 我們現在改成 inject 提前 + 標記跳過 API。「覆蓋 API 錯誤 open」的場景仍可 work
+    // 因為若 L2 inject 成功，needSupplement = false 就不會去打 API。
+    const { isTradingDay } = await import('@/lib/utils/tradingDay');
+    const todayIsTradingDay = isTradingDay(todayStr, market);
+    const l1HasToday = candles.some(c => c.date === todayStr);
+    if (todayIsTradingDay && !l1HasToday && todayStr <= safeEndStr) {
+      try {
+        const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+        const snap = await readIntradaySnapshot(market, todayStr);
+        if (snap && snap.quotes.length > 0) {
+          const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+          const q = snap.quotes.find(sq => sq.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === code);
+          if (q && q.close > 0) {
+            // OHLC 防護
+            const safeHigh = (q.high > 0 && q.high < q.close * 2 && q.high >= q.close)
+              ? q.high : Math.max(q.open, q.close);
+            const safeLow = (q.low > 0 && q.low <= q.close && q.low > q.close * 0.5)
+              ? q.low : Math.min(q.open, q.close);
+            candles.push({
+              date: todayStr, open: q.open, high: safeHigh, low: safeLow,
+              close: q.close, volume: q.volume,
+            });
+            candles.sort((a, b) => a.date.localeCompare(b.date));
+          }
+        }
+      } catch {
+        // L2 讀取失敗不影響已有數據
+      }
+    }
+
+    // 檢查本地（含 L2 inject 後）數據是否涵蓋到最新交易日
     // 若最後一根 K 棒日期 < safeEndStr 且距今超過 1 天，用 API 補足缺口
     const lastLocalDate = candles.length > 0 ? candles[candles.length - 1].date : '';
     const needSupplement = candles.length === 0
@@ -159,44 +199,6 @@ async function analyzeOne(
       } catch {
         // API 補充失敗不影響已有的 L1 數據，繼續用本地 K 線計算
       }
-    }
-
-    // L2 今日快照優先覆蓋：API（EastMoney/FinMind）盤中對未收盤股票有時回傳錯誤 open
-    // （曾發生 002580 4/17 open 被回成 17.25 實為歷史 4/10 值，L2 正確值 29.13 反而被略過）。
-    // L2 是盤中即時快照且有 prevClose 可交叉驗證，視為今日 K 棒的權威來源。
-    // 守門：非交易日（週末/假日）不注入——L2 若存在是前一交易日的盤後資料被誤標
-    //      成「今天」，注入會讓前一日 K 棒被加第二次造成 d1Return=d2Return 污染
-    const { isTradingDay } = await import('@/lib/utils/tradingDay');
-    const todayIsTradingDay = isTradingDay(todayStr, market);
-    // L1 已有今日收盤 K 棒時跳過 L2 注入：L2 是盤中快照，收盤後已過時
-    // （曾發生 L2 11:42 AM 快照蓋掉 L1 正確收盤，導致 d2Return 算錯）
-    const l1HasToday = candles.some(c => c.date === todayStr);
-    try {
-      if (!todayIsTradingDay) throw new Error('skip: not a trading day');
-      if (l1HasToday) throw new Error('skip: L1 already has today close');
-      const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
-      const snap = await readIntradaySnapshot(market, todayStr);
-      if (snap && snap.quotes.length > 0) {
-        const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-        const q = snap.quotes.find(sq => sq.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === code);
-        if (q && q.close > 0) {
-          // 防護：L2 報價若 high/low 不合理（例如欄位錯位吃到時間戳），
-          // 用 close 代替而不是整筆丟掉，避免污染 maxGain/maxLoss 計算
-          const safeHigh = (q.high > 0 && q.high < q.close * 2 && q.high >= q.close)
-            ? q.high : Math.max(q.open, q.close);
-          const safeLow = (q.low > 0 && q.low <= q.close && q.low > q.close * 0.5)
-            ? q.low : Math.min(q.open, q.close);
-          const todayCandle = {
-            date: todayStr, open: q.open, high: safeHigh, low: safeLow,
-            close: q.close, volume: q.volume,
-          };
-          // 移除 API 可能已補的今日 K 棒（覆蓋），再 push L2 版本
-          candles = candles.filter(c => c.date !== todayStr);
-          candles.push(todayCandle);
-        }
-      }
-    } catch {
-      // L2 讀取失敗不影響已有數據
     }
 
     // P0-4: 若 scanDate 距今不超過 3 個曆天（週五掃描、長假前），
