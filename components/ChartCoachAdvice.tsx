@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * 走圖頁單支股票朱老師分析 — 對應掃描頁 ScanCoachDigest 的走圖版。
+ * 走圖頁單支股票朱老師分析 — schemaVersion=2（8 面向 + 5 燈號 + ABCDE 等級）
  *
  * 取 replayStore 當前 K 棒/訊號/趨勢，送 /api/coach/chart-digest 換結構化建議。
- * 回覆格式：overview / verdict / verdictReason / reasoning[] / caveat
+ * 回覆格式：grade / gradeReason / lights / reasoning[8] / overview / verdict / verdictReason / caveat
  *
  * 持久化：localStorage key = market:symbol:date，切換股票或日期不會互污染。
+ * v1 舊 cache 在 mount 時自動清除（一次性遷移）。
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -14,18 +15,18 @@ import { useReplayStore } from '@/store/replayStore';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import { classifySignal } from '@/lib/rules/signalClassifier';
 import type { CandleWithIndicators } from '@/types';
+import type {
+  DigestResponse,
+  Grade,
+  Light,
+  ReasoningItem,
+  ReasoningSection,
+  ZhuLights,
+} from '@/lib/ai/zhuTypes';
 
-const HISTORY_STORAGE_KEY = 'chart-coach-digest-v1';
+const HISTORY_STORAGE_KEY_V1 = 'chart-coach-digest-v1';   // 舊版，mount 時清掉
+const HISTORY_STORAGE_KEY = 'chart-coach-digest-v2';
 const HISTORY_MAX_ENTRIES = 40;
-
-interface DigestResponse {
-  overview: string;
-  verdict: string;
-  verdictReason: string;
-  reasoning: string[];
-  caveat?: string;
-  cached?: boolean;
-}
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -42,6 +43,13 @@ type HistoryMap = Record<string, HistoryEntry>;
 
 function storageKey(market: string, symbol: string, date: string): string {
   return `${market}:${symbol}:${date}`;
+}
+
+/** narrow v1 舊資料 → 只接 schemaVersion=2 */
+function isValidV2(d: unknown): d is DigestResponse {
+  if (!d || typeof d !== 'object') return false;
+  const v = d as { schemaVersion?: number; reasoning?: unknown; lights?: unknown; grade?: unknown };
+  return v.schemaVersion === 2 && Array.isArray(v.reasoning) && !!v.lights && !!v.grade;
 }
 
 function loadHistory(): HistoryMap {
@@ -75,7 +83,9 @@ function saveHistoryEntry(key: string, entry: HistoryEntry): void {
 }
 
 function loadHistoryEntry(key: string): HistoryEntry | null {
-  return loadHistory()[key] ?? null;
+  const hit = loadHistory()[key];
+  if (!hit || !isValidV2(hit.digest)) return null;
+  return hit;
 }
 
 function formatSavedAt(iso: string): string {
@@ -102,7 +112,7 @@ function displaySymbol(s: string): string {
   return s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 }
 
-/** verdict -> 配色 */
+/** verdict -> 配色（單行 chip） */
 function verdictStyle(v: string): { bg: string; text: string; border: string } {
   const s = v || '觀望';
   if (s.includes('進場') || s.includes('續抱')) {
@@ -112,6 +122,60 @@ function verdictStyle(v: string): { bg: string; text: string; border: string } {
     return { bg: 'bg-green-900/30', text: 'text-green-200', border: 'border-green-500/50' };
   }
   return { bg: 'bg-yellow-900/30', text: 'text-yellow-200', border: 'border-yellow-500/50' };
+}
+
+/** ABCDE → 徽章配色（台股紅漲：A 紅、E 灰） */
+function gradeStyle(g: Grade): { bg: string; border: string; text: string } {
+  switch (g) {
+    case 'A': return { bg: 'bg-red-500/80',     border: 'border-red-400',     text: 'text-white' };
+    case 'B': return { bg: 'bg-orange-500/70',  border: 'border-orange-400',  text: 'text-white' };
+    case 'C': return { bg: 'bg-yellow-500/70',  border: 'border-yellow-400',  text: 'text-yellow-50' };
+    case 'D': return { bg: 'bg-zinc-500/70',    border: 'border-zinc-400',    text: 'text-white' };
+    case 'E': return { bg: 'bg-zinc-700/80',    border: 'border-zinc-500',    text: 'text-zinc-200' };
+  }
+}
+
+/** light → emoji + 顏色 class */
+function lightDot(l: Light): { emoji: string; cls: string } {
+  switch (l) {
+    case 'green':  return { emoji: '●', cls: 'text-emerald-400' };
+    case 'yellow': return { emoji: '●', cls: 'text-amber-400' };
+    case 'red':    return { emoji: '●', cls: 'text-red-400' };
+    case 'gray':   return { emoji: '—', cls: 'text-zinc-500' };
+  }
+}
+
+const LIGHT_LABELS: Array<{ key: keyof ZhuLights; label: string }> = [
+  { key: 'technical',   label: '技術' },
+  { key: 'chip',        label: '籌碼' },
+  { key: 'fundamental', label: '基本面' },
+  { key: 'theme',       label: '題材' },
+  { key: 'valuation',   label: '估值' },
+];
+
+const SECTION_LABELS: Record<ReasoningSection, string> = {
+  trend:       '趨勢/位置',
+  kbar:        'K 棒型態',
+  visual:      '視覺觀察',
+  chip:        '籌碼面',
+  fundamental: '基本面',
+  news:        '新聞/題材',
+  macro:       '大盤/總體',
+  action:      '操作建議',
+};
+
+const SECTION_ORDER: ReasoningSection[] = [
+  'trend', 'kbar', 'visual', 'chip', 'fundamental', 'news', 'macro', 'action',
+];
+
+/** 預設展開前 3 段（趨勢/K棒/視覺），其餘折疊 */
+const DEFAULT_OPEN: ReasoningSection[] = ['trend', 'kbar', 'visual'];
+
+function orderedReasoning(items: ReasoningItem[]): ReasoningItem[] {
+  // 按固定順序排，朱老師若打亂順序也能 normalize
+  const byKey = new Map<ReasoningSection, ReasoningItem>();
+  for (const r of items) byKey.set(r.section, r);
+  return SECTION_ORDER.map(s => byKey.get(s)).filter((x): x is ReasoningItem => !!x);
 }
 
 function buildFollowupContext(
@@ -124,12 +188,18 @@ function buildFollowupContext(
   const lines: string[] = [];
   lines.push(`[走圖頁單股分析 · ${displaySymbol(symbol)} ${name} · ${date}]`);
   lines.push('');
-  lines.push('## 剛才的分析：');
+  lines.push('## 朱老師剛才的評等：');
+  lines.push(`等級：${digest.grade}（${digest.gradeReason}）`);
+  lines.push(`5 燈號：技術=${digest.lights.technical} 籌碼=${digest.lights.chip} 基本面=${digest.lights.fundamental} 題材=${digest.lights.theme} 估值=${digest.lights.valuation}`);
   if (digest.overview) lines.push(`總評：${digest.overview}`);
   lines.push(`結論：${digest.verdict} — ${digest.verdictReason}`);
   if (digest.reasoning.length > 0) {
-    lines.push('分析要點：');
-    for (const r of digest.reasoning) lines.push(`  · ${r}`);
+    lines.push('');
+    lines.push('## 8 段分析：');
+    for (const r of orderedReasoning(digest.reasoning)) {
+      const tag = r.overridden ? ' [朱老師覆寫]' : '';
+      lines.push(`【${SECTION_LABELS[r.section]}】${tag} ${r.text}`);
+    }
   }
   if (digest.caveat) lines.push(`⚠️ ${digest.caveat}`);
   lines.push('');
@@ -179,6 +249,12 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
   const aborted = useRef(false);
 
   const persistKey = (symbol && date) ? storageKey(market, bareSymbol, date) : '';
+
+  // v1 → v2 一次性遷移：mount 時清掉舊 key
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { window.localStorage.removeItem(HISTORY_STORAGE_KEY_V1); } catch { /* ignore */ }
+  }, []);
 
   // 切股票/切日期：重設 state + 嘗試載入歷史
   useEffect(() => {
@@ -302,7 +378,8 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
       const body = await res.json();
       if (aborted.current) return;
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-      setData(body as DigestResponse);
+      if (!isValidV2(body)) throw new Error('朱老師回了舊版 schema，請再試一次（自動會強制重打）');
+      setData(body);
       setChat([]);
       setChatError(null);
     } catch (err) {
@@ -395,11 +472,14 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
   if (!data) return null;
 
   const vs = verdictStyle(data.verdict);
+  const gs = gradeStyle(data.grade);
+  const reasoning = orderedReasoning(data.reasoning);
 
   return (
     <div className="w-full mb-3 rounded-lg border border-purple-500/40 bg-gradient-to-br from-purple-500/10 via-card to-indigo-500/5 p-3 space-y-2 text-[11px]">
-      <div className="flex items-center justify-between">
-        <div className="font-semibold text-purple-200 flex items-center gap-1.5 min-w-0">
+      {/* 頂條 + ABCDE 徽章 */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-semibold text-purple-200 flex items-center gap-1.5 min-w-0 flex-1">
           <span className="shrink-0">💬 朱老師的話</span>
           {savedAt && (
             <span className="text-[9px] text-muted-foreground font-normal truncate">
@@ -410,48 +490,99 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
             <span className="text-[9px] text-muted-foreground font-normal shrink-0">（cache）</span>
           )}
         </div>
-        <button
-          onClick={() => ask({ forceRefresh: true })}
-          className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted shrink-0"
-          title="重新分析（略過 server cache，強制重打朱老師）"
-        >🔄</button>
+        <div className="flex items-start gap-2 shrink-0">
+          <div className="flex flex-col items-end gap-0.5">
+            <div
+              className={`w-14 h-14 rounded-md border-2 flex items-center justify-center text-2xl font-black leading-none ${gs.bg} ${gs.border} ${gs.text}`}
+              title={`等級 ${data.grade}：${data.gradeReason}`}
+            >
+              {data.grade}
+            </div>
+            <div className="text-[9px] text-muted-foreground max-w-[120px] text-right leading-tight">
+              {data.gradeReason}
+            </div>
+          </div>
+          <button
+            onClick={() => ask({ forceRefresh: true })}
+            className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted shrink-0"
+            title="重新分析（略過 server cache，強制重打朱老師）"
+          >🔄</button>
+        </div>
       </div>
 
-      {/* Verdict — 結論優先 */}
-      <div className={`rounded border px-2.5 py-1.5 ${vs.bg} ${vs.border}`}>
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-semibold ${vs.text}`}>結論</span>
-          <span className={`text-sm font-bold ${vs.text}`}>{data.verdict}</span>
-        </div>
-        {data.verdictReason && (
-          <div className={`text-[11px] leading-snug mt-0.5 ${vs.text}`}>{data.verdictReason}</div>
+      {/* 5 燈號橫向 chip 列 */}
+      <div className="flex flex-wrap gap-1.5">
+        {LIGHT_LABELS.map(({ key, label }) => {
+          const dot = lightDot(data.lights[key]);
+          const matchSection = reasoning.find(r => r.light != null && (
+            (key === 'technical' && (r.section === 'trend' || r.section === 'kbar' || r.section === 'visual')) ||
+            (key === 'chip' && r.section === 'chip') ||
+            (key === 'fundamental' && r.section === 'fundamental') ||
+            (key === 'theme' && r.section === 'news') ||
+            (key === 'valuation' && r.section === 'fundamental')
+          ));
+          return (
+            <div
+              key={key}
+              className="px-2 py-0.5 rounded border border-border bg-secondary/40 flex items-center gap-1 text-[10px]"
+              title={matchSection ? matchSection.text : label}
+            >
+              <span className={dot.cls}>{dot.emoji}</span>
+              <span className="text-foreground">{label}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* overview + verdict 單行 chip */}
+      <div className="flex items-start gap-2 flex-wrap">
+        {data.overview && (
+          <div className="text-foreground font-semibold leading-relaxed flex-1 min-w-0">
+            {data.overview}
+          </div>
         )}
       </div>
+      <div className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-[10px] ${vs.bg} ${vs.border} ${vs.text}`}>
+        <span className="font-semibold">結論：</span>
+        <span className="font-bold">{data.verdict}</span>
+        {data.verdictReason && <span className="opacity-90">— {data.verdictReason}</span>}
+      </div>
 
-      {/* defaultCollapsed=true 時，verdict 下方 reasoning + 對話框可摺疊 */}
+      {/* defaultCollapsed=true 時：reasoning + 對話框可摺疊 */}
       {defaultCollapsed && (
         <button
           type="button"
           onClick={() => setCollapsed(v => !v)}
           className="w-full flex items-center justify-between text-[10px] text-muted-foreground hover:text-foreground py-0.5"
         >
-          <span>{collapsed ? '展開分析要點與追問' : '收起分析要點'}</span>
+          <span>{collapsed ? '展開 8 段分析與追問' : '收起 8 段分析'}</span>
           <span>{collapsed ? '▼' : '▲'}</span>
         </button>
       )}
 
-      {!collapsed && data.overview && (
-        <div className="text-foreground leading-relaxed">{data.overview}</div>
-      )}
-
-      {!collapsed && data.reasoning.length > 0 && (
-        <div className="space-y-0.5 pl-1">
-          {data.reasoning.map((r, i) => (
-            <div key={i} className="text-muted-foreground leading-snug flex items-start gap-1.5">
-              <span className="text-purple-400 shrink-0">•</span>
-              <span>{r}</span>
-            </div>
-          ))}
+      {/* 8 段 reasoning 折疊區 */}
+      {!collapsed && reasoning.length > 0 && (
+        <div className="space-y-1">
+          {reasoning.map((r) => {
+            const dot = r.light ? lightDot(r.light) : null;
+            const open = DEFAULT_OPEN.includes(r.section);
+            return (
+              <details key={r.section} open={open} className="group rounded border border-border bg-secondary/30">
+                <summary className="cursor-pointer px-2 py-1 text-[10px] flex items-center gap-1.5 select-none">
+                  {dot && <span className={`${dot.cls} shrink-0`}>{dot.emoji}</span>}
+                  <span className="font-semibold text-foreground">{SECTION_LABELS[r.section]}</span>
+                  {r.overridden && (
+                    <span className="ml-1 text-[9px] px-1 py-0 rounded bg-purple-500/30 text-purple-100 border border-purple-400/50">
+                      朱老師覆寫
+                    </span>
+                  )}
+                </summary>
+                <div className="px-2 pb-1.5 pt-0 text-[11px] text-muted-foreground leading-relaxed">
+                  {r.text}
+                </div>
+              </details>
+            );
+          })}
         </div>
       )}
 

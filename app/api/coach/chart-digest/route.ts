@@ -20,6 +20,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { triggerZhuKeystroke } from '@/lib/ai/zhuAutoTrigger';
 import { prefetchZhuChart } from '@/lib/ai/zhuPrefetch';
+import type { DigestResponse } from '@/lib/ai/zhuTypes';
 
 export const runtime = 'nodejs';
 
@@ -96,20 +97,20 @@ const reqSchema = z.object({
 
 type DigestInput = z.infer<typeof reqSchema>;
 
-type DigestResponse = {
-  overview: string;
-  verdict: string;         // 進場 / 出場 / 持股 / 觀望
-  verdictReason: string;
-  reasoning: string[];     // 3-5 點書本角度分析
-  caveat?: string;
-};
-
 const cache = new Map<string, { value: DigestResponse; expires: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
+/** v2 後綴：schema v1 → v2 升級時自動失效舊 cache */
 function cacheKey(input: DigestInput): string {
   const sigSig = input.signals.map(s => `${s.subtype}:${s.label}`).join('|');
-  return `${input.market}:${input.symbol}:${input.date}:${input.hasPosition ? 'P' : 'F'}:${sigSig}`;
+  return `${input.market}:${input.symbol}:${input.date}:${input.hasPosition ? 'P' : 'F'}:${sigSig}:v2`;
+}
+
+/** narrow 舊 v1 cache：若沒 schemaVersion 或非 2 → 視為失效，重打 */
+function isValidV2(value: unknown): value is DigestResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as { schemaVersion?: number; reasoning?: unknown; lights?: unknown; grade?: unknown };
+  return v.schemaVersion === 2 && Array.isArray(v.reasoning) && !!v.lights && !!v.grade;
 }
 
 // ── 檔案橋接路徑 ─────────────────────────────────────────────────────────
@@ -134,11 +135,16 @@ async function pollAnswer(requestTimestamp: string, timeoutMs: number): Promise<
     if (await fileExists(ANSWER_FILE)) {
       try {
         const raw = await readFile(ANSWER_FILE, 'utf-8');
-        const parsed = JSON.parse(raw) as DigestResponse & { timestamp?: string };
+        const parsed = JSON.parse(raw) as { timestamp?: string };
         // 用 Date.parse() 正確比較（避免 "Z" vs "+08:00" 字串比較失準）
         if (parsed.timestamp) {
           const answerMs = Date.parse(parsed.timestamp);
           if (Number.isFinite(answerMs) && answerMs >= requestMs) {
+            if (!isValidV2(parsed)) {
+              // 朱老師寫了舊 v1 schema —— 不接受，繼續等
+              await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+              continue;
+            }
             return parsed;
           }
         }
@@ -171,12 +177,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Server-side prefetch — 把朱老師會用到的籌碼/ETF/同業先撈起來
-    // 平行打 5 條請求 + ETF 檔案 grep，總時間 ~5s 內
+    // Server-side prefetch — 把朱老師會用到的籌碼/ETF/同業/基本面/大盤/新聞先撈起來
+    // 平行打 8 條請求 + ETF 檔案 grep + 純規則算 suggestedLights/Grade，總時間 ~5s 內
     const prefetch = await prefetchZhuChart({
       market: input.market,
       symbol: input.symbol,
       date: input.date,
+      technical: {
+        sixCond: input.sixCond,
+        trendState: input.trend,
+        closePrice: input.ohlcv.close,
+        ma20: input.ma.ma20 ?? null,
+        ma60: input.ma.ma60 ?? null,
+        longProhibitionsCount: input.prohibitions.length,
+      },
     });
 
     // 寫問題給「朱老師專用」Claude Code session 讀
