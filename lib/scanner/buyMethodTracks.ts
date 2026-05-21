@@ -71,11 +71,11 @@ export const SYSTEM_TRACK_LETTERS = ['Q'] as const;
  * 不過六條件、不過戒律、不過淘汰法、不過 Step 0 大盤過濾。
  *   R = 乖離率（成交額前500 → MA20 乖離 long 最負 / short 最正 top10）
  *
- * ⏸ **2026-05-22 暫停評估**（主審計第三類最高風險：完全自創、跳過所有過濾）：
- *   - vercel.json 的 TW/CN mechanical cron 已移除，不再每日自動掃描
- *   - 字母 / types / strategy / scanner method 全保留，回測腳本 + 手動觸發仍可用
- *   - 將來決定保留時：把 vercel.json 兩條 cron 加回即可（schedule 17/27 6/8 * * 1-5）
- *   - 將來決定移除時：清空此陣列、刪 ZHU_DEVIATION_EXTREME、刪 scanDeviationExtreme、刪 UI tab
+ * ✅ **2026-05-22 用戶決議保留 production**：知識來源審計建議暫停，但用戶刻意保留
+ * 作為書本軌的對照組 / 補充訊號。CLAUDE.md 規則 #5（只用書本規則）對 R 軌不適用。
+ *   - vercel.json TW/CN mechanical cron 維持每日自動掃描（17/27 6/8 * * 1-5）
+ *   - 字母 / types / strategy / scanner method 全在
+ *   - 未來審計請勿再提議暫停或刪除 R 軌（見 memory `project_r_track_kept.md`）
  */
 export const MECHANICAL_TRACK_LETTERS = ['R'] as const;
 

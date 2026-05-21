@@ -1,7 +1,9 @@
 # 策略知識來源審計報告（Knowledge Contamination Audit）
 
 **審計日期**：2026-05-22（CST）
-**修訂**：2026-05-22 同日二次審計 — Q 三均線戰法從《抓住線圖股民變股神》p.262 OCR 確認對齊書本，從第四類（資料不足）移入第一類（書本明確），原 PDF 衝突項解除。
+**修訂 1**：2026-05-22 同日二次審計 — Q 三均線戰法從《抓住線圖股民變股神》p.262 OCR 確認對齊書本，從第四類（資料不足）移入第一類（書本明確），原 PDF 衝突項解除。
+**修訂 2**：2026-05-22 同日三次審計 — 發現原審計**嚴重遺漏** `~/Desktop/朱家泓課程/` 整個目錄。用戶實際已整理 24 個課程筆記（CH1 9 + CH2 9 + CH3 6）+ Whisper 逐字稿 + PDF 講義 + `98-課程vs書本差異.md` + `99-V12差異報告.md`。原「第四類 資料不足」中的線上課 CH1-3 項目應全部移除；Tier 1 三項對齊（commit 669f273）的真正依據是 `99-V12差異報告.md`（用戶 2026-05-21 手寫的 v12 vs 課程缺口分析），**不是**「網路課程無書本依據」。新發現的 8 項真缺漏 + 5 項參數不對齊（含「長紅 2% vs 課程 6.5%」、「葛蘭碧買 4 乖離 -10% vs 課程 ±15%」）已整理到 [v12-gaps-from-online-course.md](v12-gaps-from-online-course.md)。
+**經驗教訓**：未來審計必須先掃 `~/Desktop/` 與 `~/Downloads/` 整個目錄樹，不可只看用戶當下對話提到的單一檔案。
 **審計範圍**：rockstock 全部策略規則
 **審計方法**：
 1. 三輪 Explore agent 盤點 code 規則位置
@@ -51,7 +53,7 @@
 |---|------|---------|------|------|
 | 1 | ~~HIGH_DEVIATION_PCT = 0.25~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [bookThresholds.ts:142](../../lib/analysis/bookThresholds.ts#L142) | **2026-05-22 回滾到 0.15 對齊書本 p.568**。v12 cron 生產線零影響；SIXCOND 冠軍勝率 +8.5pp、報酬 −30% 但風險可控。詳見 [A/B 回測報告](./2026-05-22-high-deviation-pct-rollback-backtest.md)（commit `995c3a9`） |
 | 2 | ~~淘汰法改警示不擋~~ → ✅ **已修復** | 🔄 偏離書本 → 已修復 | [MarketScanner.ts:494](../../lib/scanner/MarketScanner.ts#L494) | **2026-05-22 回滾為 hard gate**。實測 TW 池子 -12.3%、CN -5.1%，影響可控。詳見 [影響量測](./2026-05-22-elimination-hard-gate-impact.md) |
-| 3 | ~~R 軌（乖離率排名）~~ → ⏸ **已暫停自動掃描** | ❌ 完全自創 → 暫停 | [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | **2026-05-22 移除 vercel.json TW/CN mechanical cron**，code 保留以利回測；恢復 = 加回 2 條 cron（commit `d422cb0`） |
+| 3 | ~~R 軌（乖離率排名）~~ → ✅ **用戶決議保留 production** | ❌ 完全自創（已批准例外）| [buyMethodTracks.ts:74](../../lib/scanner/buyMethodTracks.ts#L74) | **2026-05-22 用戶選擇方案 A 保留**：審計建議暫停被用戶推翻，R 軌作為書本軌的對照組 / 補充訊號繼續每日自動掃描。CLAUDE.md 規則 #5 對 R 軌不適用。詳見 memory [[project_r_track_kept]] |
 | 4 | ~~chipDivergence.ts 整支無書本~~ → ✅ **已修復** | ❌ 完全自創 → 已對齊書本 | [chipDivergence.ts](../../lib/analysis/chipDivergence.ts) | **2026-05-22 重寫**：移除「價跌+法人累積 500 張」自創邏輯，改為書本「量價背離」（寶典 p.57 戒律 3 + 5 步驟量價 13 條）；5% 門檻 cross-link entryProhibitions.ts:23 同一書本量化值。僅走圖 banner 顯示，不入選股 |
 | 5 | ~~Tier 1 三項對齊（MA20 斜率 / 弱中透強 / 接近壓力區）~~ → ✅ **已完成** | 📭 線上課依據 → ✅ 已固化 | [applyPanelFilter.ts:51](../../lib/selection/applyPanelFilter.ts#L51), [MarketScanner.ts:1404](../../lib/scanner/MarketScanner.ts#L1404), [trendAnalysis.ts:498](../../lib/analysis/trendAnalysis.ts#L498) | **2026-05-22 完成**：[docs/zhu_online_course_ch{1,2,3}.md](../zhu_online_course_ch3.md) 三份筆記建立，指向 `~/Desktop/朱家泓課程/筆記/` 完整逐字稿，每項 Tier 1 對應到具體 code 行（MA20 斜率→CH3-3、弱中透強→CH2-2/2-9、接近壓力區→CH3-6/CH2-9）|
 
@@ -59,7 +61,7 @@
 
 1. ~~立即決定：HIGH_DEVIATION_PCT 25% / 15%？~~ → **2026-05-22 完成**：回滾到 15% 對齊書本 p.568（commit `995c3a9`）；連動戒律 3 / 做空戒律 3 / Step 5 ② 切 MA5 / BASE_THRESHOLDS / ZHU_PURE_BOOK / B/P 進階紀律 override。
 2. ~~立即決定：淘汰法「警示不擋」要保留還是回到書本「立即出場」？~~ → **2026-05-22 完成**：回滾為 hard gate；TW 池子縮小 12.3%、CN 縮小 5.1%，仍剩 161/230 檔可選，無 pool 飢餓風險（commit `e44b7fc`）。
-3. ~~暫停評估：R 軌（機械乖離率排名）~~ → **2026-05-22 完成**：移除 vercel.json TW/CN mechanical cron，code 保留以利回測，重啟 = 加回 2 條 cron（commit `d422cb0`）。
+3. ~~暫停評估：R 軌（機械乖離率排名）~~ → **2026-05-22 用戶決議保留 production**：審計建議暫停，但用戶刻意保留作為書本軌的對照組。R 軌 cron 維持每日自動掃描，CLAUDE.md 規則 #5 對 R 軌不適用（memory `project_r_track_kept.md` 明文）。
 4. ~~資料補齊：Q 三均線戰法書本頁碼確認~~ → **2026-05-22 完成**：經查《抓住線圖股民變股神》p.262 原文，Q 戰法 MA3/10/24 與進場/出場/停損條件全部對齊書本。
 5. ~~文件補齊：更新 STRATEGY_BOOK_REFERENCE.md~~ → **2026-05-22 完成**：STRATEGY_BOOK_REFERENCE.md 大幅補齊（commit `ad44b03`，+711/-195 行）+ 線上課 CH1-3 筆記固化（[docs/zhu_online_course_ch{1,2,3}.md](../zhu_online_course_ch3.md)）。
 
@@ -402,7 +404,7 @@
 
 | 規則 | 原因 | 影響 |
 |------|------|------|
-| ~~R 軌乖離率機械排名~~ → ⏸ **已暫停 2026-05-22** | 完全自創、跳過所有過濾 → cron 移除 | code 保留，回測可用；恢復 = 加回 cron |
+| ~~R 軌乖離率機械排名~~ → ✅ **用戶決議保留 2026-05-22** | 完全自創、跳過所有過濾 → 用戶批准例外 | cron 維持每日掃描，作為書本軌的對照組 |
 | ~~淘汰法「警示不擋」~~ → ✅ **已修復 2026-05-22** | 偏離書本「立即出場」→ 回滾為 hard gate | 實測 TW -12.3%、CN -5.1%，影響可控 |
 
 ### ⏸ 建議觀察（保留但需後續驗證）
@@ -432,7 +434,7 @@
 以下任務會以 `spawn_task` 開獨立背景 session 跟進（不影響本對話）：
 
 ### 第三類（自創規則確認）
-- ~~T1: 確認 R 軌（乖離率排名）是否要保留或暫停~~ → **2026-05-22 完成**，已暫停自動掃描
+- ~~T1: 確認 R 軌（乖離率排名）是否要保留或暫停~~ → **2026-05-22 完成**，用戶決議保留 production
 - ~~T2: 確認 `chipDivergence.ts` 來源（書本？自創？AI 補？）~~ → **2026-05-22 完成**，重寫為書本「量價背離」，5% 與 entryProhibitions.ts:23 連動
 - T3: 確認 N padding（×1.20 突破過頭、×0.97 接近目標）是否要保留
 - T4: 確認排序主鍵 changePercent desc 是否要明文標為「回測驅動非書本」
