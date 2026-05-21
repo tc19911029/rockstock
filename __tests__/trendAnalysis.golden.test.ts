@@ -44,6 +44,14 @@ const CASES: GoldenCase[] = [
     expectedTrend: '多頭',
     note: '實際掃描已選入，作為正向 baseline',
   },
+  {
+    symbol: '6770.TW',
+    file: 'TW/6770.TW.json',
+    date: '2026-05-21',
+    expectedTrend: '盤整',
+    pivots: '底 5/04 @51.6 → 頭 5/08 @66.5 → 底 5/13 @59.0 → 頭 5/15 @67.0 → 5/20 low 56.6 已破 5/13 前低 → 5/21 收 59.1 站回',
+    note: '用戶 2026-05-21 指出：5/20 low 56.6 已破 5/13 pivot low 59，雖 5/21 close 59.1 站回，結構已破不該再判多頭（須新的更高 pivot low + high 才恢復）',
+  },
 ];
 
 describe('findPivots golden cases', () => {

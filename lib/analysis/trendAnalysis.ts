@@ -169,6 +169,66 @@ export function findPivots(
   return filtered.slice(-maxPivots).reverse();
 }
 
+// ── Structural-break pivot resolution（趨勢結構即時判定用）─────────────────────
+
+/**
+ * 把「已確認 pivot」+「開放段已破前 pivot 的延伸」合併成趨勢判定用的 pivot 列表。
+ *
+ * 為什麼需要這個 helper（用戶 2026-05-21 6770 力積電案例）：
+ *   原 findPivots(includeOpen=false) 嚴格只回 MA5 反向穿越確認的 pivot。問題是
+ *   open segment 內如果運行 low/high 已穿越前一同型 pivot，**該段最終 pivot 必定**
+ *   ≥/≤ 此極值，結構破壞已成事實（未來只會更極端、不可能變沒破）—— 此時不該等
+ *   MA5 反向穿越才承認。例：6770 5/13 確認低 59 → 5/20 open seg 內 low 56.6 已破，
+ *   5/21 close 59.1 雖在 59 之上但結構已破，不該再判多頭。
+ *
+ * 為什麼不直接改 findPivots：其他 40+ 消費者（C 買法盤整突破、N/M/P 各 detector 等）
+ *   依賴 findPivots 回「嚴格已確認」pivot 做型態結構驗證，混入 provisional 會破壞它們
+ *   （例：C 買法把今日突破點誤當新 pivot high，盤整判定崩潰）。
+ *
+ * 為什麼不直接用 includeOpen=true：那會把所有開放段運行極值都加入（連未破前 pivot 的
+ *   亦加），會造成 603626 假象（運行低 23.23 > 確認低 22.9 卻被插入，把真實底底低
+ *   蓋成底底高）。
+ *
+ * 正解：只在「open seg running 極值已超越前一同型確認 pivot」時，把該極值當成 pivot
+ *   延伸加入。同時避免 603626 假象 + 抓到 6770 結構性破壞。
+ */
+function resolveStructuralPivots(
+  candles: CandleWithIndicators[],
+  index: number,
+): Pivot[] {
+  const confirmed = findPivots(candles, index, 8, false);
+  if (confirmed.length === 0) return confirmed;
+
+  // 找最近確認 pivot（不分型別）的 index 後一根開始，掃 open seg running min/max
+  const latestPivotIdx = Math.max(...confirmed.map(p => p.index));
+  if (latestPivotIdx >= index) return confirmed;
+
+  let openLow = Infinity, openLowIdx = -1;
+  let openHigh = -Infinity, openHighIdx = -1;
+  for (let i = latestPivotIdx + 1; i <= index; i++) {
+    const k = candles[i];
+    if (!k) continue;
+    if (k.low  < openLow)  { openLow  = k.low;  openLowIdx  = i; }
+    if (k.high > openHigh) { openHigh = k.high; openHighIdx = i; }
+  }
+
+  const extended: Pivot[] = [];
+  // 最近確認 pivot low；若 open seg running low 已破即延伸
+  const latestLow  = confirmed.find(p => p.type === 'low');
+  if (latestLow && openLowIdx >= 0 && openLow < latestLow.price) {
+    extended.push({ index: openLowIdx, price: openLow, type: 'low' });
+  }
+  // 最近確認 pivot high；若 open seg running high 已過即延伸
+  const latestHigh = confirmed.find(p => p.type === 'high');
+  if (latestHigh && openHighIdx >= 0 && openHigh > latestHigh.price) {
+    extended.push({ index: openHighIdx, price: openHigh, type: 'high' });
+  }
+
+  if (extended.length === 0) return confirmed;
+  // confirmed 是 newest-first；延伸 pivot 比所有 confirmed 還新 → 放最前面
+  return [...extended.sort((a, b) => b.index - a.index), ...confirmed];
+}
+
 // ── Trend detection ───────────────────────────────────────────────────────────
 
 /**
@@ -192,19 +252,19 @@ export function detectTrend(
 ): TrendState {
   if (index < 20) return '盤整';
 
-  // 頭部 & 底部：都只用已確認 pivot（不用 provisional）
-  //   provisional 的「開放段 running min/max」在段內若尚未突破/跌破前一確認 pivot，
-  //   會偽造出「底底高」或「頭頭低」假象（例如 603626 今日 low 23.23 > 確認底 22.9
-  //   會把真正的確認底底低 22.9 < 23.47 蓋掉，誤判為盤整）。
-  const confirmedPivots = findPivots(candles, index, 8, false);
-  const highs = confirmedPivots.filter(p => p.type === 'high').slice(0, 2);
-  const lows  = confirmedPivots.filter(p => p.type === 'low').slice(0, 2);
+  // 用 resolveStructuralPivots：已確認 pivot + open seg 已破前 pivot 的延伸。
+  //   - 避免 603626 假象（open seg 未破前 pivot 不會誤插）
+  //   - 抓到 6770 結構性破壞（open seg 已破前 pivot 視為 pivot 已成立）
+  //   詳見 resolveStructuralPivots 註解。
+  const structuralPivots = resolveStructuralPivots(candles, index);
+  const highs = structuralPivots.filter(p => p.type === 'high').slice(0, 2);
+  const lows  = structuralPivots.filter(p => p.type === 'low').slice(0, 2);
 
   // 書本要求同時看到最近兩個頭 + 最近兩個底才能判斷
   if (highs.length < 2 || lows.length < 2) return '盤整';
 
   const c = candles[index];
-  // 即時覆蓋：今日 close 已突破/跌破最近確認 pivot 時，立即更新結構判定
+  // 即時覆蓋：今日 close 已突破/跌破最近 pivot 時，立即更新結構判定
   //   immediateNewHigh：空頭/盤整轉多頭的即時確認
   //   immediateNewLow ：多頭/盤整轉空頭的即時確認
   const immediateNewHigh = c.close > highs[0].price;
