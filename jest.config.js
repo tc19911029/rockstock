@@ -13,5 +13,8 @@ const config = {
   },
   // 2026-05-08：每個 test 跑前 clear all mocks（避免跨 file mock state leak）
   clearMocks: true,
+  // 74 個輕量 test file 在單 worker 跑比多 worker 快（IPC overhead > 並行收益）
+  // 同時解決 "worker process has failed to exit gracefully" 警告
+  maxWorkers: 1,
 };
 module.exports = config;

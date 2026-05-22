@@ -14,13 +14,12 @@
  *   - 大盤趨勢 /api/scanner/market-trend?market=...&date=...
  *   - RSS 新聞聚合 /api/news/<symbol>
  *
- * 再用純規則算 suggestedLights / suggestedGrade，朱老師預設沿用、衝突時可覆寫。
+ * v3：拔掉 suggestedLights/suggestedGrade — 朱老師改用 WebSearch 主動取數，
+ *      把 prefetch 拿到的數字 + WebSearch 撈到的數字寫進 answer.dataPoints（≥ 30 筆）。
  */
 
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { computeChartLights, computeGrade } from './zhuLights';
-import type { ChartLightsInput, Grade, ZhuLights } from './zhuTypes';
 
 const SELF_BASE = process.env.NEXT_INTERNAL_BASE_URL ?? 'http://127.0.0.1:3000';
 const FETCH_TIMEOUT_MS = 4_000;
@@ -73,10 +72,6 @@ export interface ZhuPrefetchData {
   fundamentals?: ZhuFundamentalsLite | null;
   marketTrend?: ZhuMarketTrendLite | null;
   news?: ZhuNewsLite | null;
-  /** 純規則算出的 5 燈號建議（朱老師預設沿用、可覆寫） */
-  suggestedLights?: ZhuLights;
-  /** 純規則算出的 ABCDE 等級建議 */
-  suggestedGrade?: Grade;
   fetchErrors?: string[];             // 哪些 prefetch 失敗，讓朱老師知道要 fallback
 }
 
@@ -201,87 +196,13 @@ async function fetchNews(market: 'TW' | 'CN', symbol: string): Promise<ZhuNewsLi
   };
 }
 
-// ── 從 prefetch 結果推導 lights 用的衍生欄位 ───────────────────────────────
-
-interface InstSummary {
-  consecutiveForeignBuy: number;
-  consecutiveForeignSell: number;
-}
-
-function summarizeInstitutional(inst: unknown): InstSummary {
-  if (!Array.isArray(inst)) return { consecutiveForeignBuy: 0, consecutiveForeignSell: 0 };
-  let buy = 0, sell = 0;
-  for (const row of inst) {
-    const r = row as { foreignNet?: number };
-    if (typeof r.foreignNet !== 'number') break;
-    if (r.foreignNet > 0) { buy++; if (sell > 0) break; }
-    else if (r.foreignNet < 0) { sell++; if (buy > 0) break; }
-    else break;
-  }
-  return { consecutiveForeignBuy: buy, consecutiveForeignSell: sell };
-}
-
-function extractChipScore(chip: unknown): number | undefined {
-  if (!chip || typeof chip !== 'object') return undefined;
-  const c = chip as { chipScore?: number; score?: number; chipSignal?: string; chipGrade?: string };
-  // 顯式「無資料」狀態 → 視為缺資料，不要把 chipScore=0 誤判成低分
-  // /api/chip 對小型股/上櫃/資料源未涵蓋時回 chipSignal='無資料'、chipGrade='—'、chipScore=0
-  if (c.chipSignal === '無資料' || c.chipGrade === '—') return undefined;
-  return c.chipScore ?? c.score;
-}
-
-function extractMarginUtilRate(chip: unknown): number | undefined {
-  if (!chip || typeof chip !== 'object') return undefined;
-  const c = chip as { marginUtilRate?: number };
-  return c.marginUtilRate;
-}
-
-interface SectorPeerSummary {
-  sameIndustryCount: number;
-  selfRank: number | null;
-}
-
-function summarizeSectorPeers(sectorPeers: unknown, symbol: string): SectorPeerSummary | null {
-  if (!sectorPeers || typeof sectorPeers !== 'object') return null;
-  const sessions = (sectorPeers as { sessions?: Array<{ results?: Array<{ symbol?: string; industry?: string; sixConditionsScore?: number }> }> }).sessions;
-  const results = sessions?.[0]?.results;
-  if (!Array.isArray(results) || results.length === 0) return null;
-
-  // 找這檔的 industry
-  const me = results.find(r => r.symbol === symbol);
-  if (!me?.industry) return null;
-  const myIndustry = me.industry;
-
-  // 同產業 sixCond 排序（降序）
-  const peers = results
-    .filter(r => r.industry === myIndustry)
-    .sort((a, b) => (b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0));
-
-  // 取同產業 top10
-  const top10 = peers.slice(0, 10);
-  const selfIdx = top10.findIndex(r => r.symbol === symbol);
-  return {
-    sameIndustryCount: top10.length,
-    selfRank: selfIdx >= 0 ? selfIdx + 1 : null,
-  };
-}
-
 /** 平行打所有 prefetch，個別失敗不影響其他 */
 export async function prefetchZhuChart(opts: {
   market: 'TW' | 'CN';
   symbol: string;
   date: string;
-  /** 走圖頁送過來的個股技術數字（用來算 technical/chip lights） */
-  technical?: {
-    sixCond?: number;
-    trendState?: '多頭' | '空頭' | '盤整' | string;
-    closePrice?: number;
-    ma20?: number | null;
-    ma60?: number | null;
-    longProhibitionsCount?: number;
-  };
 }): Promise<ZhuPrefetchData> {
-  const { market, symbol, date, technical } = opts;
+  const { market, symbol, date } = opts;
   const errors: string[] = [];
 
   const [inst, chip, lockwatch, etfHoldings, sectorPeers, fundamentals, marketTrend, news] = await Promise.all([
@@ -295,34 +216,6 @@ export async function prefetchZhuChart(opts: {
     fetchNews(market, symbol).catch(e => { errors.push(`news: ${e instanceof Error ? e.message : e}`); return null; }),
   ]);
 
-  // 算 suggestedLights / suggestedGrade
-  const instSummary = summarizeInstitutional(inst);
-  const sectorSummary = summarizeSectorPeers(sectorPeers, symbol);
-  const lightsInput: ChartLightsInput = {
-    sixCond: technical?.sixCond,
-    trendState: technical?.trendState,
-    closePrice: technical?.closePrice,
-    ma20: technical?.ma20,
-    ma60: technical?.ma60,
-    longProhibitionsCount: technical?.longProhibitionsCount,
-    chipScore: extractChipScore(chip),
-    consecutiveForeignBuy: instSummary.consecutiveForeignBuy,
-    consecutiveForeignSell: instSummary.consecutiveForeignSell,
-    marginUtilRate: extractMarginUtilRate(chip),
-    fundamentals: fundamentals ? {
-      eps: fundamentals.eps,
-      epsYoY: fundamentals.epsYoY,
-      revenueMoM: fundamentals.revenueMoM,
-      revenueYoY: fundamentals.revenueYoY,
-      per: fundamentals.per,
-      pbr: fundamentals.pbr,
-      dividendYield: fundamentals.dividendYield,
-    } : null,
-    sectorPeers: sectorSummary,
-  };
-  const suggestedLights = computeChartLights(lightsInput);
-  const suggestedGrade = computeGrade(suggestedLights);
-
   return {
     institutional: inst,
     chip,
@@ -332,8 +225,6 @@ export async function prefetchZhuChart(opts: {
     fundamentals,
     marketTrend,
     news,
-    suggestedLights,
-    suggestedGrade,
     fetchErrors: errors.length ? errors : undefined,
   };
 }

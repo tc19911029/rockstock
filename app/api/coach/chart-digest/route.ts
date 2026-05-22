@@ -100,17 +100,17 @@ type DigestInput = z.infer<typeof reqSchema>;
 const cache = new Map<string, { value: DigestResponse; expires: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
-/** v2 後綴：schema v1 → v2 升級時自動失效舊 cache */
+/** v3 後綴：schema v2 → v3 升級時自動失效舊 cache */
 function cacheKey(input: DigestInput): string {
   const sigSig = input.signals.map(s => `${s.subtype}:${s.label}`).join('|');
-  return `${input.market}:${input.symbol}:${input.date}:${input.hasPosition ? 'P' : 'F'}:${sigSig}:v2`;
+  return `${input.market}:${input.symbol}:${input.date}:${input.hasPosition ? 'P' : 'F'}:${sigSig}:v3`;
 }
 
-/** narrow 舊 v1 cache：若沒 schemaVersion 或非 2 → 視為失效，重打 */
-function isValidV2(value: unknown): value is DigestResponse {
+/** narrow v2 或更舊 cache：必須是 v3 才接受（reasoning 8 段、dataPoints array） */
+function isValidV3(value: unknown): value is DigestResponse {
   if (!value || typeof value !== 'object') return false;
-  const v = value as { schemaVersion?: number; reasoning?: unknown; lights?: unknown; grade?: unknown };
-  return v.schemaVersion === 2 && Array.isArray(v.reasoning) && !!v.lights && !!v.grade;
+  const v = value as { schemaVersion?: number; reasoning?: unknown; dataPoints?: unknown };
+  return v.schemaVersion === 3 && Array.isArray(v.reasoning) && Array.isArray(v.dataPoints);
 }
 
 // ── 檔案橋接路徑 ─────────────────────────────────────────────────────────
@@ -140,8 +140,8 @@ async function pollAnswer(requestTimestamp: string, timeoutMs: number): Promise<
         if (parsed.timestamp) {
           const answerMs = Date.parse(parsed.timestamp);
           if (Number.isFinite(answerMs) && answerMs >= requestMs) {
-            if (!isValidV2(parsed)) {
-              // 朱老師寫了舊 v1 schema —— 不接受，繼續等
+            if (!isValidV3(parsed)) {
+              // 朱老師寫了舊 v1/v2 schema —— 不接受，繼續等
               await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
               continue;
             }
@@ -178,19 +178,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Server-side prefetch — 把朱老師會用到的籌碼/ETF/同業/基本面/大盤/新聞先撈起來
-    // 平行打 8 條請求 + ETF 檔案 grep + 純規則算 suggestedLights/Grade，總時間 ~5s 內
+    // 平行打 8 條請求 + ETF 檔案 grep，總時間 ~5s 內
+    // v3 不再算 suggestedLights/Grade（拔 ABCDE）— prefetch 只給朱老師當素材
     const prefetch = await prefetchZhuChart({
       market: input.market,
       symbol: input.symbol,
       date: input.date,
-      technical: {
-        sixCond: input.sixCond,
-        trendState: input.trend,
-        closePrice: input.ohlcv.close,
-        ma20: input.ma.ma20 ?? null,
-        ma60: input.ma.ma60 ?? null,
-        longProhibitionsCount: input.prohibitions.length,
-      },
     });
 
     // 寫問題給「朱老師專用」Claude Code session 讀

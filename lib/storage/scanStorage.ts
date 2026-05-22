@@ -35,6 +35,40 @@ const BUY_METHOD_FILE_TOKENS = BUY_METHOD_LETTERS.map((l) => `-${l}-`);
 const isBuyMethodFile = (filename: string): boolean =>
   BUY_METHOD_FILE_TOKENS.some((token) => filename.includes(token));
 
+// ── loadScanSession in-memory cache ──────────────────────────────────────────
+//
+// 為什麼：盤中點日期會卡 30 秒以上的根因是 loadScanSession 內 loadLatestIntradayRaw
+// 會把 scans/{market}/{dir}/{mtf}/{date}/intraday/ 目錄裡每個 snapshot 依序讀過一遍
+// 來找最新 fresh 版（盤中 5 分一張 → 下午時段累積 50-100 張），且前端切日期一次會打
+// 6 個並行請求（daily + enrich M/N/O/P/Q）→ 6 × N 個 blob/fs read 沒共享。
+//
+// Strategy：
+// - Key = market|direction|mtfMode|date
+// - TTL = 60 秒（夠吸收 burst click，且短於 intraday cron 5 分間隔不會 serve 過舊）
+// - Inflight singleflight：6 個並行請求共享同一 promise
+// - 寫入時（saveScanSession）invalidate 對應 key
+// - 命中時 structuredClone 避免 caller mutation 污染 cache 物件
+const SCAN_SESSION_CACHE_TTL_MS = 60_000;
+const SCAN_SESSION_CACHE_MAX = 500;
+interface ScanSessionCacheEntry {
+  session: ScanSession | null;
+  expiresAt: number;
+}
+const SCAN_SESSION_CACHE = new Map<string, ScanSessionCacheEntry>();
+const SCAN_SESSION_INFLIGHT = new Map<string, Promise<ScanSession | null>>();
+
+function scanSessionCacheKey(
+  market: MarketId, direction: ScanDirection, mtfMode: MtfMode, date: string,
+): string {
+  return `${market}|${direction}|${mtfMode}|${date}`;
+}
+
+function invalidateScanSessionCache(
+  market: MarketId, direction: ScanDirection, mtfMode: MtfMode, date: string,
+): void {
+  SCAN_SESSION_CACHE.delete(scanSessionCacheKey(market, direction, mtfMode, date));
+}
+
 // ── Vercel Blob helpers ──────────────────────────────────────────────────────
 
 async function blobPut(pathname: string, data: string): Promise<void> {
@@ -181,6 +215,7 @@ export async function saveScanSession(
     } else {
       await fsPut(localName, data);
     }
+    invalidateScanSessionCache(session.market, dir as ScanDirection, mtf, session.date);
   } else {
     // ── 封存保護：post_close 已存在時，非官方來源不可覆蓋 ──
     if (!opts?.allowOverwritePostClose) {
@@ -203,6 +238,7 @@ export async function saveScanSession(
     } else {
       await fsPut(localName, data);
     }
+    invalidateScanSessionCache(session.market, dir as ScanDirection, mtf, session.date);
 
     console.log(`[scanStorage] ✅ post_close 已儲存: ${session.market}/${dir}/${mtf}/${session.date} (${session.resultCount} 檔)`);
 
@@ -535,12 +571,58 @@ async function loadScanSessionRaw(
   try { return JSON.parse(raw) as ScanSession; } catch { return null; }
 }
 
-/** Load a specific scan session by market + date + direction + mtfMode */
+/** Load a specific scan session by market + date + direction + mtfMode
+ *
+ * 帶 60 秒 in-memory cache + inflight singleflight（見 SCAN_SESSION_CACHE 註解）
+ * — 6 個並行 enrich request + 用戶連點切日期都共享同一筆 IO。
+ */
 export async function loadScanSession(
   market: MarketId,
   date: string,
   direction: ScanDirection = 'long',
   mtfMode: MtfMode = 'daily',
+): Promise<ScanSession | null> {
+  const cacheKey = scanSessionCacheKey(market, direction, mtfMode, date);
+
+  // 1) Cache hit → deep clone 後回（避免下游 mutation 污染 cache）
+  const cached = SCAN_SESSION_CACHE.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.session === null ? null : structuredClone(cached.session);
+  }
+  if (cached) SCAN_SESSION_CACHE.delete(cacheKey); // 過期清掉
+
+  // 2) Inflight → 共享同一筆 IO
+  const inflight = SCAN_SESSION_INFLIGHT.get(cacheKey);
+  if (inflight) {
+    const result = await inflight;
+    return result === null ? null : structuredClone(result);
+  }
+
+  // 3) Cold call
+  const promise = loadScanSessionUncached(market, date, direction, mtfMode);
+  SCAN_SESSION_INFLIGHT.set(cacheKey, promise);
+  try {
+    const result = await promise;
+    // 寫 cache（含 null 結果，避免重複 miss）
+    if (SCAN_SESSION_CACHE.size >= SCAN_SESSION_CACHE_MAX) {
+      const firstKey = SCAN_SESSION_CACHE.keys().next().value;
+      if (firstKey !== undefined) SCAN_SESSION_CACHE.delete(firstKey);
+    }
+    SCAN_SESSION_CACHE.set(cacheKey, {
+      session: result,
+      expiresAt: Date.now() + SCAN_SESSION_CACHE_TTL_MS,
+    });
+    return result === null ? null : structuredClone(result);
+  } finally {
+    SCAN_SESSION_INFLIGHT.delete(cacheKey);
+  }
+}
+
+async function loadScanSessionUncached(
+  market: MarketId,
+  date: string,
+  direction: ScanDirection,
+  mtfMode: MtfMode,
 ): Promise<ScanSession | null> {
   let raw: string | null = null;
 

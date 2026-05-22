@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { MTF_SCORE_STRONG, MTF_SCORE_OK } from '@/lib/analysis/bookThresholds';
 import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
-import { buildGradeMap, gradeChipStyle } from '@/lib/ai/zhuScanGrade';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -86,8 +85,6 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     return map;
   }, [performance]);
 
-  // 算每檔 ABCDE — pure compute，掃描既有欄位即可，不打 API
-  const gradeMap = useMemo(() => buildGradeMap(scanResults), [scanResults]);
 
   // ── Realtime prices (盤中即時價格更新) ──
   useEffect(() => {
@@ -345,18 +342,6 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                 <td className="py-1.5 px-2 sticky left-[72px] bg-card group-hover:bg-secondary/40 z-10 transition-colors">
                   <div className="text-foreground/90 flex items-center gap-1">
                     {r.name}
-                    {(() => {
-                      const g = gradeMap.get(r.symbol);
-                      if (!g) return null;
-                      return (
-                        <span
-                          className={`text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded border ${gradeChipStyle(g)}`}
-                          title={`朱老師評等：${g} 級（依六條件/趨勢/籌碼/同業共振機械計算；基本面/估值需走圖深度問才有）`}
-                        >
-                          {g}
-                        </span>
-                      );
-                    })()}
                     {r.dataFreshness && r.dataFreshness.daysStale > 0 && (
                       <span className="text-[8px] px-1 py-0.5 rounded bg-amber-900/60 text-amber-400 whitespace-nowrap" title={`K線最後日期: ${r.dataFreshness.lastCandleDate}`}>
                         落後{r.dataFreshness.daysStale}天

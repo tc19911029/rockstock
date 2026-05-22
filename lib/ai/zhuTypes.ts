@@ -1,113 +1,82 @@
 /**
- * 問朱老師 v2 schema — 8 大面向 + 5 燈號 + ABCDE 等級
+ * 問朱老師 v3 schema — 8 段細緻分析 + 30+ 筆 dataPoints
  *
- * 取代 chart-digest 舊版 `{ verdict, reasoning[7] }` 結構。
- * 用 schemaVersion=2 narrow 前端切新 UI；舊 cache 自動失效。
+ * v3 設計重點：
+ *   - **拔掉 v2 的量化打分**（ABCDE grade、5 燈號 lights）— 用戶要的是質性深度分析，不是機械評等
+ *   - **強化「主動取數」** — 朱老師要按 8 大面向逐條 WebSearch 把實際數字撈出來
+ *   - **dataPoints array** 讓用戶看到朱老師到底找到了多少數字（目標 30+ 筆）
+ *   - reasoning 維持 8 段（trend / kbar / visual / chip / fundamental / news / macro / action），
+ *     但每段強制引用 ≥ 2 個具體數字
  *
- * 5 燈號（lights）對應 5 大可量化面向，由 prefetch 用純規則機械算出 suggestedLights，
- * 朱老師可在 reasoning 段尾用 `（覆寫：原因）` 翻案。剩 3 個面向（消息、產業、治理）
- * 融入 news / theme reasoning，由朱老師描述性判斷。
- *
- * 同一份 ZhuLights/Grade 也餵掃描列表（每檔候選 row 算 ABCDE 標籤）。
+ * 舊 v2 的 Light/Grade/ZhuLights/ChartLightsInput/ScanLightsInput 已全拔。
  */
 
-export type Light = 'green' | 'yellow' | 'red' | 'gray';
-export type Grade = 'A' | 'B' | 'C' | 'D' | 'E';
-
-export interface ZhuLights {
-  technical: Light;
-  chip: Light;
-  fundamental: Light;
-  theme: Light;
-  valuation: Light;
-}
-
 /**
- * 8 段 reasoning section 對應書本邏輯
+ * 8 段 reasoning section 對應書本邏輯 + 8 大面向
  *
- *   trend       頭頭高/低、起/中/末升段（→ technical light）
- *   kbar        母子線、孕育線、十字、缺口（→ technical light）
- *   visual      screenshot 看到的影線比例、頸線、量價對齊（→ technical light）
- *   chip        三大法人 + 融資融券 + 大戶 + 借券（→ chip light）
- *   fundamental EPS YoY / 營收 / 毛利率 / PER / PBR / 殖利率（→ fundamental light）
- *   news        法說 + 新聞 + 產業題材 + sectorPeers 共振（→ theme light）
- *   macro       大盤 + 美股/美債/匯率（純背景，不對應 light）
- *   action      停損、目標、覆寫說明（不對應 light）
+ *   trend       頭頭高/低、起/中/末升段
+ *   kbar        母子線、孕育線、十字、缺口、MA 排列、量價
+ *   visual      screenshot 看到的影線比例、頸線、量價對齊（純圖看出來的）
+ *   chip        三大法人 + 融資融券 + 大戶 + 借券
+ *   fundamental EPS YoY / 營收 / 毛利率 / ROE / 負債比
+ *   news        法說 + 新聞 + 產業題材 + sectorPeers 共振 + 券商目標價
+ *   macro       大盤 + 美股/美債/匯率/利率
+ *   action      停損、目標、操作建議
  */
 export type ReasoningSection =
   | 'trend' | 'kbar' | 'visual' | 'chip'
   | 'fundamental' | 'news' | 'macro' | 'action';
 
+/**
+ * dataPoints 的 8 種分類 — 對應 8 大面向，前端按此分組顯示
+ */
+export type DataCategory =
+  | 'technical' | 'chip' | 'fundamental' | 'news'
+  | 'macro' | 'valuation' | 'governance' | 'industry';
+
+/**
+ * 朱老師找到的單筆數值
+ *
+ * 範例：
+ *   { category: 'chip', label: '外資 5 日累計買賣超', value: '+12,400 張',
+ *     source: 'prefetch.institutional', asOf: '2026-05-21' }
+ *   { category: 'macro', label: '美國 10 年期殖利率', value: '4.32%',
+ *     source: 'WebSearch: investing.com 5/21', asOf: '2026-05-21' }
+ *   { category: 'governance', label: '董監質押比', value: 'WebSearch 無結果',
+ *     source: 'WebSearch 無結果' }
+ */
+export interface DataPoint {
+  category: DataCategory;
+  label: string;
+  /** 保留單位的字串，例：「+12,400 張」「PER 18.5」「4.32%」 */
+  value: string;
+  /** 'prefetch.X' / 'WebSearch: <site> <date>' / 'WebSearch 無結果' */
+  source: string;
+  /** ISO date 或日期描述：「2026-05-21」「2026Q1」「近 1 週」 */
+  asOf?: string;
+}
+
 export interface ReasoningItem {
   section: ReasoningSection;
-  /** 若朱老師覆寫了 suggestedLights[對應面向]，這裡放覆寫後的 light 並設 overridden=true */
-  light?: Light;
+  /** 強制要件：≥ 2 個具體數字，每個數字後括號標時間/來源 */
   text: string;
-  /** true = 朱老師根據書本判斷推翻 prefetch suggestedLights/Grade */
-  overridden?: boolean;
 }
 
 export interface DigestResponse {
-  /** schema 版本號，前端用來 narrow 新舊版 */
-  schemaVersion: 2;
-  /** A/B/C/D/E 等級（朱老師可覆寫 suggestedGrade） */
-  grade: Grade;
-  /** 一句話說明為何打這個 grade（30 字內） */
-  gradeReason: string;
-  /** 5 燈號最終結果（朱老師可覆寫 suggestedLights） */
-  lights: ZhuLights;
-  /** 固定 8 段，順序：trend → kbar → visual → chip → fundamental → news → macro → action */
-  reasoning: ReasoningItem[];
+  /** schema 版本號，前端用來 narrow 新舊版（v3 = 拔 ABCDE 後的版本） */
+  schemaVersion: 3;
   /** 一句話總結（30 字內） */
   overview: string;
   /** 快速結論：進場 / 持股 / 觀望 / 減碼 / 出場 */
   verdict: string;
   /** 一句話說為什麼下這個 verdict（30 字內） */
   verdictReason: string;
-  /** 風險提醒（選擇性；技術/籌碼/基本面三者不同向時必填） */
+  /** 風險提醒（選擇性） */
   caveat?: string;
+  /** 固定 8 段，順序：trend → kbar → visual → chip → fundamental → news → macro → action */
+  reasoning: ReasoningItem[];
+  /** 朱老師找到的所有具體數值，目標 30+ 筆（contract 門檻 10 筆） */
+  dataPoints: DataPoint[];
   /** server cache 命中標記 */
   cached?: boolean;
-}
-
-/** computeChartLights 輸入：chart 模式有 fundamentals/news/marketTrend prefetch */
-export interface ChartLightsInput {
-  sixCond?: number;                  // 0-6
-  trendState?: '多頭' | '空頭' | '盤整' | string;
-  closePrice?: number;
-  ma20?: number | null;
-  ma60?: number | null;
-  longProhibitionsCount?: number;
-  // 籌碼
-  chipScore?: number;                // 0-100，from /api/chip
-  consecutiveForeignBuy?: number;    // 連買天數
-  consecutiveForeignSell?: number;   // 連賣天數
-  marginUtilRate?: number;           // 融資使用率 %
-  // 基本面（可能 null：資料缺）
-  fundamentals?: {
-    eps: number | null;
-    epsYoY: number | null;
-    revenueMoM: number | null;
-    revenueYoY: number | null;
-    per: number | null;
-    pbr: number | null;
-    dividendYield: number | null;
-  } | null;
-  // 題材：同產業共振檢查
-  sectorPeers?: {
-    sameIndustryCount: number;       // 同產業在 top10 的檔數
-    selfRank: number | null;         // 自己在同產業內排第幾
-  } | null;
-}
-
-/** computeScanLights 輸入：scan 列表只有候選 row 既有欄位（不打 API） */
-export interface ScanLightsInput {
-  sixCond: number;                       // 0-6
-  trendState?: '多頭' | '空頭' | '盤整' | string;
-  longProhibitionsCount?: number;
-  chipScore?: number;
-  consecutiveForeignBuy?: number;
-  // sectorPeers 從 candidates 整批計算後注入
-  sameIndustryCount?: number;
-  selfRankInIndustry?: number | null;
 }

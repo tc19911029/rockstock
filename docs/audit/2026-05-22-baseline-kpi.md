@@ -290,6 +290,37 @@
 
 ---
 
+## 12.5 Paper Portfolio Cron 部署 SOP（任務 #7 完成）
+
+**新增檔案**：
+- [lib/paper/paperTradeSimulator.ts](../../lib/paper/paperTradeSimulator.ts)：simulate 核心（TW_PROD_CONFIG = sweep winning combo）
+- [app/api/cron/paper-portfolio-tick/route.ts](../../app/api/cron/paper-portfolio-tick/route.ts)：每日 cron handler
+- [scripts/launchd/plists/com.rockstock.paper-portfolio-tick.plist](../../scripts/launchd/plists/com.rockstock.paper-portfolio-tick.plist)：本地 launchd 排程
+
+**輸出檔**：
+- `data/paper-portfolio/equity-curve-TW.json`：最新累計快照（每次覆蓋）
+- `data/paper-portfolio/history/TW-{date}.json`：每日歷史快照（追加）
+
+**首次跑驗證**（2026-05-22 01:53 CST，curl localhost）：
+- 22 sessions / 9 picks / 77.8% 勝率 / +4.54% 平均 / +43.63% 總報酬 ✅
+- 跟 sweep top-1 組合一致（signals=1/top=50/hold=5）
+
+### 部署方式
+
+**本地 launchd（推薦）**：
+```bash
+bash scripts/launchd/install-all.sh   # 把所有 com.rockstock.*.plist 重新 bootstrap
+launchctl list | grep paper-portfolio  # 確認 paper-portfolio-tick 已 load
+tail -f /tmp/rockstock-paper-portfolio-tick.log
+```
+
+排程：週一至週五 15:30 CST 自動觸發 `curl localhost:3000/api/cron/paper-portfolio-tick`。
+**前提**：dev server 必須在跑（用 `com.rockstock.dev-server.plist` 排程或手動 `npm run dev`）。
+
+**Vercel production**：⚠️ **不能直接 deploy**。Vercel serverless 環境 fs 唯讀（除 `/tmp`），cron route 內 `fs.writeFileSync(data/paper-portfolio/...)` 會 fail。需追加 Vercel Blob 適配（見任務 #9）。本地 launchd 就夠用。
+
+---
+
 ## 13. CN 市場 audit（緊急）
 
 掃描顯示 CN 27 組全部 ❌，勝率 11-30%、平均報酬接近 0。**v12 detector 在 CN 不適用**，需獨立 audit。
@@ -301,6 +332,82 @@
 4. CN forward candles 資料缺漏（candleCache 在 CN 上 hit rate 可能較低）
 
 **建議：暫停 CN paper trading + 實盤**，待單獨 audit 後決定。
+
+---
+
+## 13.4 大盤過濾驗證（任務 #10 完成，含 backfill 全範圍 581 天）
+
+**修補**：[lib/paper/paperTradeSimulator.ts](../../lib/paper/paperTradeSimulator.ts) `getMarketTrendAt()` — 前一日大盤指數（TW: 0050.TW、CN: 000300.SS）需 `close > MA20 且 MA5 > MA10` 才算多頭日。SimConfig `skipNonBullishDays: true` 預設啟用。
+
+**TW 全範圍跑（2024-01-02 ~ 2026-05-22，581 個交易日，含 backfill #5）**：
+
+| 指標 | 22 天樣本（baseline 第 11 節） | 581 天全範圍 | 差異 |
+|---|---:|---:|---|
+| 大盤過濾 skip 天數 | 0 / 22 | **235 / 581 (40%)** | 大盤過濾真的有作用 |
+| 進場筆數 | 9 | **117** | 樣本量 × 13 |
+| 勝率 | **77.8%** | **32.5%** | ↓ 45.3 pp |
+| 平均單筆 | +4.54% | +0.44% | ↓ 4.10 pp |
+| 總報酬 | +43.63% | +31.5% | 年化 ~13% |
+
+### 🚨 重大結論：22 天 77.8% 勝率確認是 selection bias
+
+**baseline 第 11 節已警告「9 筆 77.8% 的 95% 信賴區間是 [40%, 96%]」**。581 天大樣本驗證：真實勝率 32.5%，落在預期下緣。
+
+### 修正版「能不能賺錢」答案
+
+| | 22 天 | 581 天（真值估計） |
+|---|---|---|
+| 勝率 | 77.8%（假象） | **32.5%** — 不過 Phase 1 KPI 門檻（≥52%） |
+| 平均單筆 | +4.54% | **+0.44%** — 不過 Phase 1 KPI 門檻（≥2%） |
+| 累計報酬 | +43.63% | **+31.5%** — 年化 ~13% |
+| 跟 0050 比 | n/a | 同期 0050 約 +35-45% — **跑輸大盤** |
+
+**目前的 v12 + sweep winning combo + 大盤過濾，年化 ~13%，跑輸 0050 ETF。** 不建議實盤。
+
+### CN 部分（任務 #8 後續驗證）
+
+大盤過濾在 CN 22 天樣本上 **skip 0 / 22 天**（CSI300 一直在多頭區）。意味著：
+1. CN 5/13 系統性大跌**是單日突發**，前一日大盤狀態正常 → 大盤過濾擋不住單日突發跌盤
+2. CN 21.6% 勝率不是大盤過濾能解決的問題，根因可能真的在 v12 detector 對 A 股 K 線型態不適配
+3. 需要更深的 CN audit（建任務 #11）：實際看 v12 detector 命中模式 + 漲跌停影響
+
+### 後續方向（不要急著結論「rockstock 不行」）
+
+1. **不要實盤**：32.5% 勝率 + 0.44% 平均，比存款好但跑輸大盤 ETF
+2. **參數空間還沒掃完**：581 天樣本能讓 sweep 真正有意義 → 跑 581 天的 sweep（任務 #12）
+3. **大盤過濾還太簡單**：只擋 MA20+MA5/10，沒擋「多日下跌趨勢」「ATR 異常」 → 任務 #13 進階過濾
+4. **CN 需要單獨 audit**：先擋 paper trading 跟實盤，等 v12 detector 對 CN 校準後再說
+
+---
+
+## 13.5 CN audit 結論（任務 #8 完成）
+
+**真正根因不是「CN detector 不適用」**，是 `paperTradeSimulator.selectTier1()` 缺大盤趨勢過濾：
+- 51 筆 CN 樣本：勝率 21.6%、76.5% 觸發 -7% 停損
+- 但最差 10 筆**集中 5 筆同一天（2026-05-13）爆雷**，是大盤系統性大跌
+- 最好 10 筆**集中在 4/27-4/28 反彈段**（跟 TW 群聯+漢磊同期）
+
+→ 補救：[任務 #10](#) 加大盤過濾。修完重跑 sweep 對比 before/after，再決定 CN 是否真的不適用。
+
+完整報告：[docs/audit/2026-05-22-cn-paper-trade-audit.md](2026-05-22-cn-paper-trade-audit.md)
+
+---
+
+## 13.6 Phase 4 reconcile 骨架（任務 #4 完成）
+
+**新增**：[scripts/reconcile-live-vs-paper.ts](../../scripts/reconcile-live-vs-paper.ts)
+
+**功能**：每月跑「實盤 vs Paper vs Backtest 三方對帳」，自動算：
+- 平均滑價、滑價標準差
+- 實盤勝率 vs paper 勝率
+- 平均單筆損益差（live - paper）
+- Phase 4 KPI 自動判定（勝率比 ≥ 0.8、滑價 ≤ 0.3%、損益差 std ≤ 1%）
+
+**啟動前提**（依賴）：
+1. paper trading（任務 #7）跑滿 1 個月、月勝率達 baseline-kpi.md 第 11 節「TW 暫定設定」門檻
+2. 用戶開券商帳戶，每筆實盤手動記錄成 `data/live-trades/{date}.json`（schema 見 script 檔頭）
+
+**輸出**：`docs/audit/live-reconcile-{from}-{to}.md` + `data/live-reconcile/monthly-*.json`
 
 ---
 

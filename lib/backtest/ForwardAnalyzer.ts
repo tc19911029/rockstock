@@ -104,7 +104,7 @@ async function analyzeOne(
     // 今天的日期（用市場時區，防止取到未來數據）
     const market = detectMarket(symbol);
     const todayStr = getMarketToday(market);
-    const safeEndStr = endStr > todayStr ? todayStr : endStr;
+    let safeEndStr = endStr > todayStr ? todayStr : endStr;
 
     // 若 forward window 起點已超過今天（例如今天掃描，還沒有隔日資料），直接返回空結果
     if (startStr > safeEndStr) {
@@ -137,9 +137,10 @@ async function analyzeOne(
     // 原本「L2 inject 在 needSupplement 之後」的設計理由：用 L2 覆蓋 API 回傳的錯誤 open。
     // 我們現在改成 inject 提前 + 標記跳過 API。「覆蓋 API 錯誤 open」的場景仍可 work
     // 因為若 L2 inject 成功，needSupplement = false 就不會去打 API。
-    const { isTradingDay } = await import('@/lib/utils/tradingDay');
+    const { isTradingDay, tradingDaysBetween } = await import('@/lib/utils/tradingDay');
     const todayIsTradingDay = isTradingDay(todayStr, market);
     const l1HasToday = candles.some(c => c.date === todayStr);
+    let l2InjectedToday = false;
     if (todayIsTradingDay && !l1HasToday && todayStr <= safeEndStr) {
       try {
         const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
@@ -158,10 +159,24 @@ async function analyzeOne(
               close: q.close, volume: q.volume,
             });
             candles.sort((a, b) => a.date.localeCompare(b.date));
+            l2InjectedToday = true;
           }
         }
       } catch {
         // L2 讀取失敗不影響已有數據
+      }
+    }
+
+    // 2026-05-22 fix：盤中今日 L2 snapshot 還沒寫（cron 沒跑 / 沒抓到該檔）→ 原本
+    // needSupplement 會對每檔股票打 FinMind 補今日 K，15 檔 × 8-token rate limit = 60+ 秒
+    // （用戶實測 R session 10 檔 04-23 forward 取 42 秒、5/20 取 81 秒）。
+    // 對策：唯一缺的就是「今天」時，截到 L1 最後日期跳過 API；今日盤中 K 反正不完整，
+    // 收盤後 L1 cron 補齊隔日後，再次 forward 自然會把今日納入。
+    // 連假後多日缺口（gap > 1 trading day）保留原 API 補充行為。
+    if (todayIsTradingDay && !l2InjectedToday && candles.length > 0) {
+      const lastL1Date = candles[candles.length - 1].date;
+      if (lastL1Date < safeEndStr && tradingDaysBetween(lastL1Date, safeEndStr, market) <= 1) {
+        safeEndStr = lastL1Date;
       }
     }
 

@@ -11,7 +11,6 @@ import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { buildAllStrategyReasons, type StrategyReasonRow } from './strategyReasons';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
 import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
-import { buildGradeMap, gradeChipStyle } from '@/lib/ai/zhuScanGrade';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,8 +143,6 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     return map;
   }, [performance]);
 
-  // 朱老師 scan 評等 — 從掃描既有欄位算 ABCDE，不打 API
-  const gradeMap = useMemo(() => buildGradeMap(scanResults), [scanResults]);
 
   const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
 
@@ -261,18 +258,6 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
               {/* Row 1: Symbol + Name + Change% + Actions */}
               <div className="flex items-center gap-1.5 mb-1">
                 <span className="font-mono text-[11px] text-foreground/90 shrink-0">{ticker}</span>
-                {(() => {
-                  const g = gradeMap.get(r.symbol);
-                  if (!g) return null;
-                  return (
-                    <span
-                      className={`text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded border shrink-0 ${gradeChipStyle(g)}`}
-                      title={`朱老師評等：${g} 級（依六條件/趨勢/籌碼/同業共振機械計算；基本面/估值需走圖深度問才有）`}
-                    >
-                      {g}
-                    </span>
-                  );
-                })()}
                 <span className="text-[11px] text-foreground/80 truncate flex-1">{r.name}</span>
                 {hasProhibition && (
                   <span

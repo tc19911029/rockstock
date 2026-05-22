@@ -17,7 +17,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { simulate, DEFAULT_SIM_CONFIG, type SimConfig, type SimResult } from './paper-trade-simulator';
+import { simulate, DEFAULT_SIM_CONFIG, type SimConfig, type SimResult } from '@/lib/paper/paperTradeSimulator';
 
 const GRID = {
   holdDays:        [5, 10, 20],
