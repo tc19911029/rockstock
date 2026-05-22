@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-cleanup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>export PATH="$HOME/.local/node-22/bin:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; cd /Users/tc/Desktop/rockstock &amp;&amp; /Users/tc/.local/node-22/bin/npx tsx scripts/cleanup-old-data.ts</string>
+  </array>
+
+  <!--
+    排程：每日 02:00 CST 跑一次（深夜、不卡 cron/分析）。
+    保留 7 天：transcripts / videos / scan-logs / analysis 全部 > 7 天的刪除。
+    sources / health / index 不動（會在腳本內同步清掉 stale 條目）。
+  -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-cleanup.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-cleanup.err.log</string>
+</dict>
+</plist>

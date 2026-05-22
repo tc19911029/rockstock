@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-prepare-analysis</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>D=$(TZ=Asia/Taipei date +%F); /usr/bin/curl -fsS --max-time 110 -H "Authorization: Bearer CRON_SECRET" -X POST "http://localhost:3000/api/cron/youtube-prepare-analysis?date=$D"</string>
+  </array>
+
+  <!--
+    排程：每小時 14:50-23:50 CST + 00:00 跑一次（共 11 次/day）。
+    每輪在 transcript +30 min 啟動，給 transcript 充裕時間（含 Whisper）。
+    00:00 那輪確保「跨日邊界前」question.json 是當日最終版。
+    純檔案 I/O，<30s，不耗 token。
+  -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-prepare-analysis.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-prepare-analysis.err.log</string>
+</dict>
+</plist>

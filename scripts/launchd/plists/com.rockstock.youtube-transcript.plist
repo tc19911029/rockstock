@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-transcript</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <!-- yt-dlp 在 ~/.local/bin；export PATH 給 curl 觸發的 API 用不到，但維持與 youtube-scan plist 一致 -->
+    <string>export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; D=$(TZ=Asia/Taipei date +%F); /usr/bin/curl -fsS --max-time 1800 -H "Authorization: Bearer CRON_SECRET" -X POST "http://localhost:3000/api/cron/youtube-transcript?use_whisper=1&date=$D"</string>
+  </array>
+
+  <!--
+    排程：每小時 14:20-23:20 CST 跑一次（共 10 次/day）。
+    每輪在 scan +20 min 啟動，給 scan 4 min + buffer 16 min。
+    use_whisper=1 → 無人工字幕的影片走 Whisper（已加 mutex 防 OOM）。
+  -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>20</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-transcript.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-transcript.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,203 @@
+/**
+ * yt-dlp subprocess wrapper。
+ *
+ * 為什麼用 spawn 而非 exec：
+ *   --flat-playlist 輸出 NDJSON（每行一支影片）。流式逐行 parse 比一次性 collect 安全；
+ *   單行壞掉不影響整批。
+ *
+ * 為什麼 runner 可注入：
+ *   contract test 餵 NDJSON fixture 不用真的呼叫 yt-dlp binary，免網路依賴。
+ *
+ * 為什麼不用 retry：
+ *   yt-dlp 對 429/網路錯誤已有內建退避；caller 端再 retry 容易爆 quota。
+ *   非 0 exit 直接寫進 scan_log.error，下次 cron tick 自然重來。
+ */
+
+import { spawn, type ChildProcess } from 'node:child_process';
+import { homedir } from 'node:os';
+
+export interface YtdlpVideo {
+  id: string;
+  title: string;
+  url: string;
+  duration?: number | null;
+  upload_date?: string;       // YYYYMMDD
+  timestamp?: number;          // unix seconds
+  view_count?: number | null;
+  live_status?: string | null; // is_live / was_live / not_live / post_live / is_upcoming
+  channel_id?: string;
+}
+
+/** spawn 注入點 — runner(cmd, args) → { stdout, stderr, on('exit'), kill() } */
+type Runner = (cmd: string, args: string[]) => ChildProcess;
+
+const DEFAULT_BIN = process.env.YTDLP_BIN || 'yt-dlp';
+const DEFAULT_TIMEOUT_MS = 90_000;
+
+export interface FetchOptions {
+  limit?: number;
+  runner?: Runner;
+  timeoutMs?: number;
+  bin?: string;
+}
+
+export interface FetchResult {
+  videos: YtdlpVideo[];
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+}
+
+/**
+ * 呼叫 yt-dlp 抓某個 channel/playlist 最近 N 支影片。
+ * 不 throw — 把錯誤訊息回傳給 caller 寫進 scan log。
+ */
+export async function fetchRecentVideos(
+  sourceUrl: string,
+  opts: FetchOptions = {},
+): Promise<FetchResult> {
+  const limit = opts.limit ?? 20;
+  const runner = opts.runner ?? spawn;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const bin = opts.bin ?? DEFAULT_BIN;
+
+  // 移除 --flat-playlist：flat 模式為了快會 strip 掉 duration/live_status，
+  // 導致 classifyVideoType 多半 fall through 到 'unknown'。實測 (2026-05-22)
+  // 完整模式 ~1.1s/支，6 × 20 = ~135s 仍遠在 300s maxDuration 內，值得換準確度。
+  //
+  // --skip-download：新版 yt-dlp (2026.03.17+) 預設會做 format selection；如果沒可用 format
+  // 會 ERROR。我們只要 metadata 不要實際下載，明確 --skip-download。
+  // 移掉 player_client=web 強制設定：新版 yt-dlp 自動挑可用 client（android_vr/mediaconnect 等）；
+  // 強制 web 在 2026.03.17 會走到沒可用 format 的死路。
+  const args = [
+    '--dump-json',
+    '--skip-download',
+    '--playlist-end', String(limit),
+    '--no-warnings',
+    '--ignore-config',
+    sourceUrl,
+  ];
+
+  // Dev server 由 launchd 啟動時 PATH 不含 ~/.local/bin（yt-dlp 通常裝在那）。
+  // 在 spawn 時擴充 PATH 而不改變 dev-server plist 設定。
+  const extraPaths = [`${homedir()}/.local/bin`, '/opt/homebrew/bin', '/usr/local/bin'];
+  const currentPath = process.env.PATH || '';
+  const augmentedPath = [...extraPaths, currentPath].filter(Boolean).join(':');
+
+  return new Promise<FetchResult>((resolve) => {
+    let child: ChildProcess;
+    try {
+      // runner=spawn 用標準 env；測試注入的 runner 不關心 env，所以用 type assertion 走 spawn 的 third arg
+      child = runner === spawn
+        ? (spawn(bin, args, { env: { ...process.env, PATH: augmentedPath } }) as ChildProcess)
+        : runner(bin, args);
+    } catch (err) {
+      resolve({
+        videos: [],
+        stderr: `spawn failed: ${(err as Error).message}`,
+        exitCode: null,
+        timedOut: false,
+      });
+      return;
+    }
+
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    const videos: YtdlpVideo[] = [];
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* ignore */ }
+      }, 2_000);
+    }, timeoutMs);
+
+    child.stdout?.setEncoding('utf-8');
+    child.stdout?.on('data', (chunk: string) => {
+      stdoutBuf += chunk;
+      let nl;
+      while ((nl = stdoutBuf.indexOf('\n')) !== -1) {
+        const line = stdoutBuf.slice(0, nl).trim();
+        stdoutBuf = stdoutBuf.slice(nl + 1);
+        if (!line) continue;
+        const v = parseLine(line);
+        if (v) videos.push(v);
+      }
+    });
+
+    child.stderr?.setEncoding('utf-8');
+    child.stderr?.on('data', (chunk: string) => {
+      stderrBuf += chunk;
+      // 防 stderr 爆量：保留尾端 8KB 就夠 debug
+      if (stderrBuf.length > 8192) stderrBuf = stderrBuf.slice(-8192);
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      // 沖掉 stdoutBuf 剩餘行
+      const tail = stdoutBuf.trim();
+      if (tail) {
+        const v = parseLine(tail);
+        if (v) videos.push(v);
+      }
+      resolve({
+        videos,
+        stderr: stderrBuf + `\nspawn error: ${err.message}`,
+        exitCode: null,
+        timedOut,
+      });
+    });
+
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      const tail = stdoutBuf.trim();
+      if (tail) {
+        const v = parseLine(tail);
+        if (v) videos.push(v);
+      }
+      resolve({ videos, stderr: stderrBuf, exitCode: code, timedOut });
+    });
+  });
+}
+
+function parseLine(line: string): YtdlpVideo | null {
+  try {
+    const obj = JSON.parse(line) as Record<string, unknown>;
+    if (typeof obj.id !== 'string' || typeof obj.title !== 'string') return null;
+    // 移除 --flat-playlist 後 obj.url 變成 googlevideo 串流網址（會過期，不能存）。
+    // 統一用 webpage_url（永久 watch URL），缺則從 id 組裝。
+    const url = typeof obj.webpage_url === 'string'
+      ? obj.webpage_url
+      : `https://www.youtube.com/watch?v=${obj.id}`;
+    return {
+      id: obj.id,
+      title: obj.title,
+      url,
+      duration: typeof obj.duration === 'number' ? obj.duration : null,
+      upload_date: typeof obj.upload_date === 'string' ? obj.upload_date : undefined,
+      timestamp: typeof obj.timestamp === 'number' ? obj.timestamp : undefined,
+      view_count: typeof obj.view_count === 'number' ? obj.view_count : null,
+      live_status: typeof obj.live_status === 'string' ? obj.live_status : null,
+      channel_id: typeof obj.channel_id === 'string' ? obj.channel_id : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** yt-dlp upload_date 是 YYYYMMDD（無時區）。轉成 Asia/Taipei 當日 09:00 ISO 當近似值。 */
+export function uploadDateToIso(uploadDate: string | undefined, timestamp: number | undefined): string | null {
+  if (timestamp && Number.isFinite(timestamp)) {
+    return new Date(timestamp * 1000).toISOString();
+  }
+  if (uploadDate && /^\d{8}$/.test(uploadDate)) {
+    const y = uploadDate.slice(0, 4);
+    const m = uploadDate.slice(4, 6);
+    const d = uploadDate.slice(6, 8);
+    // 用 UTC 中午當近似（避免時區邊界推來推去；後面比較 72h 容忍 12h 誤差）
+    return `${y}-${m}-${d}T12:00:00.000Z`;
+  }
+  return null;
+}
