@@ -14,7 +14,8 @@
 
   <!--
     排程：每日 02:00 CST 跑一次（深夜、不卡 cron/分析）。
-    保留 7 天：transcripts / videos / scan-logs / analysis 全部 > 7 天的刪除。
+    保留 30 天：transcripts / videos / scan-logs / analysis 全部 > 30 天的刪除。
+    （30 天因為跨日趨勢頁支援到 range=30d）
     sources / health / index 不動（會在腳本內同步清掉 stale 條目）。
   -->
   <key>StartCalendarInterval</key>

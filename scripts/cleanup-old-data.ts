@@ -1,5 +1,6 @@
 /**
- * Retention cleanup — 保留最近 7 天的 youtube 資料，其餘刪掉。
+ * Retention cleanup — 保留最近 30 天的 youtube 資料，其餘刪掉。
+ * （30 天是因為跨日趨勢頁支援到 range=30d）
  *
  * 範圍：
  *   data/youtube/videos/{date}.json
@@ -12,8 +13,8 @@
  *       （這些是 rolling 狀態檔，腳本同步清掉裡面對應 entries）
  *
  * Usage:
- *   npx tsx scripts/cleanup-old-data.ts           保留 7 天
- *   npx tsx scripts/cleanup-old-data.ts --days 14 改 retention 天數
+ *   npx tsx scripts/cleanup-old-data.ts           保留 30 天
+ *   npx tsx scripts/cleanup-old-data.ts --days 60 改 retention 天數
  *   npx tsx scripts/cleanup-old-data.ts --dry-run
  */
 import { promises as fs } from 'node:fs';
@@ -22,7 +23,7 @@ import path from 'node:path';
 const ROOT = path.join(process.cwd(), 'data', 'youtube');
 const DRY = process.argv.includes('--dry-run');
 const daysArg = process.argv.indexOf('--days');
-const RETAIN_DAYS = daysArg > 0 ? Number(process.argv[daysArg + 1]) : 7;
+const RETAIN_DAYS = daysArg > 0 ? Number(process.argv[daysArg + 1]) : 30;
 
 function ymdTaipei(d: Date): string {
   const t = new Date(d.getTime() + 8 * 3600_000);
