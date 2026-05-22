@@ -13,6 +13,8 @@ const TTL = {
   INSTITUTIONAL:  24 * 60 * 60 * 1000,  // 24h
   FUNDAMENTALS:   24 * 60 * 60 * 1000,  // 24h
   MARGIN:         24 * 60 * 60 * 1000,  // 24h
+  STOCK_INFO:     7 * 24 * 60 * 60 * 1000,   // 7d — industry rarely changes
+  GOVERNANCE:     7 * 24 * 60 * 60 * 1000,   // 7d — board / insider data updates weekly
 } as const;
 
 // ── In-memory cache ────────────────────────────────────────────────────────────
@@ -34,23 +36,48 @@ function cacheSet<T>(key: string, data: T, ttl: number): void {
 
 // ── FinMind API fetch ──────────────────────────────────────────────────────────
 
-async function finmindFetch<T>(dataset: string, params: Record<string, string>): Promise<T[]> {
-  const url = new URL(FINMIND_BASE);
-  url.searchParams.set('dataset', dataset);
-  for (const [k, v] of Object.entries(params)) {
-    url.searchParams.set(k, v);
-  }
-  if (FINMIND_TOKEN) {
-    url.searchParams.set('token', FINMIND_TOKEN);
-  }
+/**
+ * 標記：偵測到 token 無效後，整個 process 切回免費層（不再帶 token）
+ * 避免每次 request 都先失敗再 retry，浪費一個 round trip。
+ */
+let tokenDisabled = false;
 
-  const res = await fetch(url.toString(), {
-    signal: AbortSignal.timeout(15000),
-    headers: { 'Accept': 'application/json' },
-  });
+async function finmindFetch<T>(dataset: string, params: Record<string, string>): Promise<T[]> {
+  const useToken: boolean = Boolean(FINMIND_TOKEN) && !tokenDisabled;
+
+  const buildUrl = (withToken: boolean): URL => {
+    const u = new URL(FINMIND_BASE);
+    u.searchParams.set('dataset', dataset);
+    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    if (withToken) u.searchParams.set('token', FINMIND_TOKEN);
+    return u;
+  };
+
+  const doFetch = async (withToken: boolean): Promise<Response> => {
+    return fetch(buildUrl(withToken).toString(), {
+      signal: AbortSignal.timeout(15000),
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store',
+    });
+  };
+
+  let res = await doFetch(useToken);
+
+  // 偵測 token 過期/無效 → 永久 disable token，retry 一次（FinMind 免費層仍 work）
+  if (!res.ok && useToken && (res.status === 400 || res.status === 401 || res.status === 403)) {
+    const body = await res.text().catch(() => '');
+    if (/token/i.test(body)) {
+      console.warn(`[FinMind] token rejected (${res.status}), falling back to free tier for the rest of this process`);
+      tokenDisabled = true;
+      res = await doFetch(false);
+    } else {
+      throw new Error(`FinMind ${res.status} ${res.statusText} body=${body.slice(0, 200)}`);
+    }
+  }
 
   if (!res.ok) {
-    throw new Error(`FinMind API error: ${res.status} ${res.statusText}`);
+    const body = await res.text().catch(() => '');
+    throw new Error(`FinMind ${res.status} ${res.statusText} body=${body.slice(0, 200)}`);
   }
 
   const json = await res.json() as { status: number; data: T[] };
@@ -98,13 +125,21 @@ export interface RevenueRow {
   revenue_year: number;
 }
 
+/**
+ * FinMind TaiwanStockFinancialStatements 實際回傳格式（2026-05-22 修）
+ *
+ * 不是「一筆 row 一個季度 + 多個 metric 欄位」，
+ * 而是「一筆 row 一個 metric value」 — type 是 metric 名（EPS/GrossProfit/Revenue 等），
+ * value 是該 metric 該季的金額/比率。
+ *
+ * 範例：{ date: '2026-03-31', stock_id: '2330', type: 'EPS', value: 22.08, origin_name: '基本每股盈餘' }
+ */
 export interface FinancialRow {
   date: string;
   stock_id: string;
-  EPS: number | null;
-  EPS_year: number | null;
-  Gross_Profit_Margin: number | null;
-  Net_Income_Margin: number | null;
+  type: string;          // 'EPS' / 'GrossProfit' / 'Revenue' / 'IncomeAfterTaxes' 等
+  value: number;
+  origin_name?: string;
 }
 
 export interface PERatioRow {
@@ -286,10 +321,39 @@ export async function getFundamentals(stockId: string): Promise<FundamentalsData
   const peData  = peRows.status === 'fulfilled' ? peRows.value : [];
   const revData = revenues.status === 'fulfilled' ? revenues.value : [];
 
-  // Latest financials
-  finData.sort((a, b) => b.date.localeCompare(a.date));
-  const latestFin = finData[0];
-  const prevFin   = finData.find(r => r.date < (latestFin?.date ?? ''));
+  // 2026-05-22 修：FinMind 實際回的是 key-value rows（type/value），
+  // 不是「一筆 row 多欄位」。要先 group by date，再從中找 type='EPS'/'GrossProfit'/'IncomeAfterTaxes' 等。
+  const finByDate = new Map<string, Map<string, number>>();
+  for (const r of finData) {
+    if (!r.date || !r.type || typeof r.value !== 'number') continue;
+    if (!finByDate.has(r.date)) finByDate.set(r.date, new Map());
+    finByDate.get(r.date)!.set(r.type, r.value);
+  }
+  const finDates = [...finByDate.keys()].sort((a, b) => b.localeCompare(a));
+  const latestDate = finDates[0];
+  const prevDate   = finDates[1];
+
+  // 提取 metric helper
+  const getMetric = (date: string | undefined, key: string): number | null => {
+    if (!date) return null;
+    const v = finByDate.get(date)?.get(key);
+    return typeof v === 'number' ? v : null;
+  };
+
+  const latestEPS         = getMetric(latestDate, 'EPS');
+  const prevEPS           = getMetric(prevDate, 'EPS');
+  const latestRevenue     = getMetric(latestDate, 'Revenue');
+  const latestGrossProfit = getMetric(latestDate, 'GrossProfit');
+  const latestNetIncome   = getMetric(latestDate, 'IncomeAfterTaxes');
+
+  // 毛利率 = GrossProfit / Revenue × 100
+  const grossMargin = latestRevenue && latestGrossProfit
+    ? (latestGrossProfit / latestRevenue) * 100
+    : null;
+  // 淨利率 = IncomeAfterTaxes / Revenue × 100
+  const netMargin = latestRevenue && latestNetIncome
+    ? (latestNetIncome / latestRevenue) * 100
+    : null;
 
   // Latest P/E
   peData.sort((a, b) => b.date.localeCompare(a.date));
@@ -309,17 +373,17 @@ export async function getFundamentals(stockId: string): Promise<FundamentalsData
     }
   }
 
-  // EPS YoY
+  // EPS YoY（用最新季 vs 上一季 — FinMind 提供季資料，不是年資料）
   let epsYoY: number | null = null;
-  if (latestFin?.EPS != null && prevFin?.EPS != null && prevFin.EPS !== 0) {
-    epsYoY = ((latestFin.EPS - prevFin.EPS) / Math.abs(prevFin.EPS)) * 100;
+  if (latestEPS != null && prevEPS != null && prevEPS !== 0) {
+    epsYoY = ((latestEPS - prevEPS) / Math.abs(prevEPS)) * 100;
   }
 
   const result: FundamentalsData = {
-    eps: latestFin?.EPS ?? null,
+    eps: latestEPS,
     epsYoY,
-    grossMargin: latestFin?.Gross_Profit_Margin ?? null,
-    netMargin: latestFin?.Net_Income_Margin ?? null,
+    grossMargin,
+    netMargin,
     per: latestPE?.PER ?? null,
     pbr: latestPE?.PBR ?? null,
     dividendYield: latestPE?.dividend_yield ?? null,
@@ -330,6 +394,128 @@ export async function getFundamentals(stockId: string): Promise<FundamentalsData
 
   cacheSet(cacheKey, result, TTL.FUNDAMENTALS);
   return result;
+}
+
+// ── Stock info (industry) ─────────────────────────────────────────────────────
+
+export interface StockInfoRow {
+  industry_category: string;
+  stock_id: string;
+  stock_name: string;
+  type: string;  // twse / tpex
+  date: string;
+}
+
+export interface StockInfoData {
+  stock_id: string;
+  stock_name: string;
+  industry_category: string;
+  market_type: string;
+}
+
+export async function getStockInfo(stockId: string): Promise<StockInfoData | null> {
+  const cacheKey = `stockinfo:${stockId}`;
+  const cached = cacheGet<StockInfoData>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const rows = await finmindFetch<StockInfoRow>('TaiwanStockInfo', {
+      data_id: stockId,
+    });
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    const result: StockInfoData = {
+      stock_id: r.stock_id,
+      stock_name: r.stock_name,
+      industry_category: r.industry_category,
+      market_type: r.type,
+    };
+    cacheSet(cacheKey, result, TTL.STOCK_INFO);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+// ── Governance（外資持股比率 — 公開可得） ─────────────────────────────────────
+//
+// FinMind 免費層級無「大戶持股分級」與「內部人交易」。
+// 替代品：TaiwanStockShareholding 提供「外資持股比率」每日更新，
+// 看 4 週變化即可作為長期資金面信號。
+
+export interface ShareholdingRow {
+  date: string;
+  stock_id: string;
+  stock_name: string;
+  ForeignInvestmentRemainingShares: number;
+  ForeignInvestmentShares: number;
+  ForeignInvestmentRemainRatio: number;       // 外資餘額比率（可投資餘額 / 總股本）
+  ForeignInvestmentSharesRatio: number;       // 外資持股比率（外資已持有 / 總股本）
+  ForeignInvestmentUpperLimitRatio: number;
+  ChineseInvestmentUpperLimitRatio: number;
+  NumberOfSharesIssued: number;
+  RecentlyDeclareDate: string;
+  note: string;
+}
+
+export interface GovernanceData {
+  /** 外資持股比率（%） */
+  foreign_ownership_pct: number | null;
+  /** 外資持股 4 週前比率（%） */
+  foreign_ownership_pct_4w_ago: number | null;
+  /** 外資持股 4 週變化（pp）— 正=外資加碼長期 */
+  foreign_ownership_delta_4w: number | null;
+  /** 外資餘額比率（可投資餘額 / 總股本）（%） */
+  foreign_remaining_ratio: number | null;
+  /** 資料截止日 */
+  data_date: string | null;
+}
+
+export async function getGovernance(stockId: string): Promise<GovernanceData | null> {
+  const cacheKey = `governance:${stockId}`;
+  const cached = cacheGet<GovernanceData>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(start.getDate() - 40);   // ~ 5 週往前
+
+    const rows = await finmindFetch<ShareholdingRow>('TaiwanStockShareholding', {
+      data_id: stockId,
+      start_date: start.toISOString().split('T')[0],
+    });
+    if (rows.length === 0) return null;
+
+    rows.sort((a, b) => a.date.localeCompare(b.date));
+    const latest = rows[rows.length - 1];
+    // 找距離 latest 4 週前最接近的那一筆
+    const latestMs = new Date(latest.date).getTime();
+    const target = latestMs - 28 * 86400_000;
+    let baseline = rows[0];
+    let bestGap = Math.abs(new Date(rows[0].date).getTime() - target);
+    for (const r of rows) {
+      const gap = Math.abs(new Date(r.date).getTime() - target);
+      if (gap < bestGap) { bestGap = gap; baseline = r; }
+    }
+
+    const delta =
+      latest.ForeignInvestmentSharesRatio != null && baseline.ForeignInvestmentSharesRatio != null
+        ? Number((latest.ForeignInvestmentSharesRatio - baseline.ForeignInvestmentSharesRatio).toFixed(2))
+        : null;
+
+    const result: GovernanceData = {
+      foreign_ownership_pct: latest.ForeignInvestmentSharesRatio ?? null,
+      foreign_ownership_pct_4w_ago: baseline?.ForeignInvestmentSharesRatio ?? null,
+      foreign_ownership_delta_4w: delta,
+      foreign_remaining_ratio: latest.ForeignInvestmentRemainRatio ?? null,
+      data_date: latest.date,
+    };
+    cacheSet(cacheKey, result, TTL.GOVERNANCE);
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 /**
