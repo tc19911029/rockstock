@@ -23,6 +23,8 @@ function loadEnvLocal() {
 loadEnvLocal();
 
 const nextConfig: NextConfig = {
+  // Preview server 可與 launchd 的 dev server 並存（launchd 用 .next/ 上 3000；preview 用 .next-preview/ 上 3100）
+  ...(process.env.NEXT_PREVIEW === '1' ? { distDir: '.next-preview' } : {}),
   turbopack: {
     root: __dirname,
   },

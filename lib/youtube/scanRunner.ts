@@ -17,11 +17,13 @@
 import {
   classifyVideoType,
   decideShouldAnalyze,
+  effectiveProgramDate,
   parseProgramDate,
   todayYmdTaipei,
   ymdTaipei,
   videoConfidenceScore,
 } from './classify';
+import { resolveAnalystsForVideo } from './analystParser';
 import {
   loadVideoIndex,
   mergeVideosForDate,
@@ -64,9 +66,32 @@ export interface ScanOneResult {
   allVideos: YouTubeVideo[];
 }
 
+/**
+ * 防呆：所有 source 必須是合法 playlist URL（`youtube.com/playlist?list=PL...`）。
+ * channel URL（`/@xxx/videos`）會把整個頻道的影片都抓進來 — 包括我們不想要的
+ * 短切、精華片段、業配等。歷史上 sources.json 曾經被改成 channel URL 導致誤抓
+ * （例：錢線百分百的 part 1-10 短片不在 playlist 內但會跟著 channel 一起出現）。
+ * scan 前先擋掉，不對的直接 throw，scan log 會記 error 給前端紅燈。
+ */
+function assertPlaylistUrl(source: YouTubeSource): void {
+  if (source.kind === 'playlist') {
+    if (!/^https:\/\/www\.youtube\.com\/playlist\?list=PL[A-Za-z0-9_-]+/.test(source.url)) {
+      throw new Error(
+        `source "${source.source_id}" kind=playlist but URL is not a playlist URL: ${source.url}`,
+      );
+    }
+  } else if (source.kind === 'channel') {
+    // 目前 13 來源全是 playlist。kind=channel 暫不支援（會誤抓非 playlist 範圍影片）。
+    throw new Error(
+      `source "${source.source_id}" kind=channel is no longer supported; convert to a playlist URL`,
+    );
+  }
+}
+
 /** 主要 orchestration：對單一來源跑一次 scan，回傳 log + videos。 */
 export async function scanOneSource(opts: ScanOneOptions): Promise<ScanOneResult> {
   const { source, now } = opts;
+  assertPlaylistUrl(source);
   const limit = source.first_scan_done ? REGULAR_SCAN_LIMIT : FIRST_SCAN_LIMIT;
   const scanDate = todayYmdTaipei(now);
   const startedAt = now.toISOString();
@@ -96,6 +121,7 @@ export async function scanOneSource(opts: ScanOneOptions): Promise<ScanOneResult
       video_confidence_score: 0,
       discovered_at,
       last_seen_at: startedAt,
+      analysts: resolveAnalystsForVideo(raw.title, source.default_analysts, source.display_name),
       raw: {
         live_status: raw.live_status ?? undefined,
         view_count: raw.view_count ?? undefined,
@@ -170,27 +196,30 @@ export async function scanOneSource(opts: ScanOneOptions): Promise<ScanOneResult
   };
 
   if (!opts.dryRun) {
-    // 寫入 videos 按 published_at 日期分檔（避免跨日污染）
-    // 沒 published_at 的歸到 scanDate file
-    const byPubDate = new Map<string, YouTubeVideo[]>();
+    // 寫入 videos 按「節目日期」分檔（program_date 優先，沒有的退回 published_at；
+    // 兩者都沒才用 scanDate）。標題裡的日期是真實節目日 — 晚間節目常常隔天 00:xx
+    // 才 upload 完，published_at 會掉到隔天，按 published_at 分檔會錯位。
+    const fileDateOf = (v: YouTubeVideo): string =>
+      effectiveProgramDate(v) ?? scanDate;
+
+    const byFileDate = new Map<string, YouTubeVideo[]>();
     for (const v of transformed) {
-      const pubDate = v.published_at ? ymdTaipei(new Date(v.published_at)) : scanDate;
-      const arr = byPubDate.get(pubDate) ?? [];
+      const fileDate = fileDateOf(v);
+      const arr = byFileDate.get(fileDate) ?? [];
       arr.push(v);
-      byPubDate.set(pubDate, arr);
+      byFileDate.set(fileDate, arr);
     }
-    for (const [pubDate, vids] of byPubDate.entries()) {
-      await mergeVideosForDate(pubDate, vids);
+    for (const [fileDate, vids] of byFileDate.entries()) {
+      await mergeVideosForDate(fileDate, vids);
     }
 
-    // 更新 video-index：key=video_id，value 的 date 用該 video 的 pubDate（不是 scanDate）
+    // 更新 video-index：key=video_id，value 的 date 用該 video 的 fileDate
     const updatedIndex: VideoIndex = {
       byId: { ...videoIndex.byId },
       updated_at: new Date().toISOString(),
     };
     for (const v of newVideos) {
-      const pubDate = v.published_at ? ymdTaipei(new Date(v.published_at)) : scanDate;
-      updatedIndex.byId[v.video_id] = { date: pubDate, source_id: source.source_id };
+      updatedIndex.byId[v.video_id] = { date: fileDateOf(v), source_id: source.source_id };
     }
     await saveVideoIndex(updatedIndex);
 

@@ -41,6 +41,15 @@ export interface YouTubeSource {
   first_scan_done: boolean;
   active: boolean;
   created_at: string;           // ISO
+  /**
+   * 該節目的固定分析師（主持人 / 招牌人）。
+   *   - 一人秀 (蔡萬得 / 涂敏峰 / 藍登耀 / 許毓玲 / 陳威良)：["蔡萬得"]
+   *   - 主持 + 固定夥伴 (兆華艾綸說)：["李兆華", "艾綸"]
+   *   - 來賓輪替 (理財達人秀 / 57同學會 / 錢線百分百 / 金臨天下 / 股民開講)：
+   *     列主持人就好，來賓從標題解析
+   * 標題解析器 parseAnalysts() 會合併 default + 標題抓到的。
+   */
+  default_analysts?: string[];
 }
 
 export interface YouTubeVideo {
@@ -57,6 +66,13 @@ export interface YouTubeVideo {
   video_confidence_score: number;     // 0-100, deterministic in MVP 1
   discovered_at: string;        // ISO; first scan that saw it
   last_seen_at: string;         // ISO; most recent scan that re-saw it
+  /**
+   * 該集影片的分析師列表（主持人 + 來賓）。從標題解析；
+   * 沒解析到就用該 source 的 default_analysts（固定一人主持的節目）。
+   * 例：理財達人秀 5/20 part1 → ["李兆華", "朱家泓"]；蔡萬得每日解盤 → ["蔡萬得"]。
+   * 用於 stock mention 歸屬：mention 不是「節目說的」，是「分析師說的」。
+   */
+  analysts: string[];
   raw: {
     live_status?: string;       // is_live / was_live / not_live / post_live / ...
     view_count?: number;

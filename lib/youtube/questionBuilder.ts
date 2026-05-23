@@ -28,6 +28,14 @@ export interface QuestionVideo {
   duration_sec: number | null;
   published_at: string | null;
   program_date: string | null;
+  /**
+   * 這集的分析師名單（主持人 + 來賓，從標題解析）。
+   * 例：["李兆華", "朱家泓"] for 理財達人秀 5/20 part1。
+   * 解析失敗或單一主持的節目會退回 source_display_name 或 ["(未知)"]。
+   * /youtube-analysis skill 提取 stock mention 時必須帶上這個欄位，
+   * 這樣才能標清「這檔是哪位分析師說的」。
+   */
+  analysts: string[];
   video_confidence_score: number;
   transcript_quality_score: number;
   transcript_lang: string | null;
@@ -154,6 +162,7 @@ export function buildQuestion(input: BuildQuestionInput): QuestionPayload {
       duration_sec: v.duration_sec,
       published_at: v.published_at,
       program_date: v.program_date,
+      analysts: v.analysts && v.analysts.length > 0 ? v.analysts : ['(未知)'],
       video_confidence_score: v.video_confidence_score,
       transcript_quality_score: t.quality_score,
       transcript_lang: t.lang,

@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { PageShell } from '@/components/shared';
+import { PageShell, PageHeader, BackButton } from '@/components/shared';
 import type {
   AgentRunMeta, AgentPhaseState,
   BearThesis, BullThesis,
@@ -267,15 +267,26 @@ export default function AgentsListPage() {
     };
   }, [data]);
 
+  const agentsPageHeader = (
+    <PageHeader
+      title="🤖 多代理決策中心"
+      backButton
+      subtitle={
+        <span className="hidden md:inline font-mono">
+          {date} · {counts.total} 檔 · P1 {counts.phase1Done}/{counts.total}
+        </span>
+      }
+    />
+  );
+
   return (
-    <PageShell>
-      <div className="bg-slate-950 text-slate-200 min-h-full">
-        {/* ───────── HEADER ───────── */}
-        <header className="border-b border-cyan-700/30 bg-slate-900/60 sticky top-12 z-10">
+    <PageShell headerSlot={agentsPageHeader}>
+      <div className="min-h-full">
+        {/* ───────── CONTROL BAR ───────── */}
+        <header className="border-b border-border bg-card sticky top-12 z-10">
           <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="text-cyan-400 font-bold text-lg tracking-wider">▣ 多代理決策中心</div>
-              <span className="text-slate-500 text-xs font-mono">
+              <span className="text-muted-foreground text-xs font-mono">
                 {date} · 共 {counts.total} 檔 ·
                 第一 {counts.phase1Done}/{counts.total} ·
                 第二 {counts.phase2Done}/{counts.total} ·
@@ -286,23 +297,23 @@ export default function AgentsListPage() {
             <div className="flex items-center gap-2 text-sm flex-wrap">
               <input
                 type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 font-mono text-xs"
+                className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono text-xs"
               />
-              <label className="text-slate-400 text-xs flex items-center gap-1">
+              <label className="text-muted-foreground text-xs flex items-center gap-1">
                 前
                 <input
                   type="number" value={top} min={1} max={50}
                   onChange={(e) => setTop(Math.max(1, Math.min(50, Number(e.target.value) || 10)))}
-                  className="bg-slate-800 border border-slate-700 rounded px-2 py-1 w-14 font-mono text-xs"
+                  className="bg-secondary border border-border rounded px-2 py-1 w-14 font-mono text-xs"
                 />
                 檔
               </label>
-              <label className="text-slate-400 text-xs flex items-center gap-1">
+              <label className="text-muted-foreground text-xs flex items-center gap-1">
                 ≥
                 <select
                   value={minSourceCount}
                   onChange={(e) => setMinSourceCount(Number(e.target.value))}
-                  className="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-xs"
+                  className="bg-secondary border border-border rounded px-1.5 py-1 text-xs"
                   title="只 prepare 多源命中達此值以上的候選"
                 >
                   <option value={1}>1 源</option>
@@ -313,17 +324,17 @@ export default function AgentsListPage() {
               </label>
               <button
                 onClick={runBatchPrepare} disabled={busy || loading}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50"
+                className="bg-sky-500 hover:bg-sky-400 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50"
               >
                 {busy ? '處理中…' : '⚡ 批次準備'}
               </button>
               <button
                 onClick={fetchList} disabled={loading}
-                className="border border-slate-700 hover:bg-slate-800 px-3 py-1 rounded text-xs transition disabled:opacity-50"
+                className="border border-border hover:bg-secondary px-3 py-1 rounded text-xs transition disabled:opacity-50"
               >
                 ⟲ 重整
               </button>
-              <Link href={`/agents/pool?date=${date}`} className="text-cyan-400 hover:text-cyan-300 text-xs">← 候選池</Link>
+              <Link href={`/agents/pool?date=${date}`} className="text-sky-500 hover:text-sky-400 text-xs">候選池 →</Link>
             </div>
           </div>
         </header>
@@ -379,10 +390,10 @@ export default function AgentsListPage() {
         {(banner || error) && (
           <div className="max-w-[1600px] mx-auto px-6 pt-4 space-y-2">
             {banner && (
-              <div className="border border-cyan-500/40 bg-cyan-900/20 text-cyan-200 rounded p-3 text-sm">{banner}</div>
+              <div className="border border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300 rounded p-3 text-sm">{banner}</div>
             )}
             {error && (
-              <div className="border border-rose-500/40 bg-rose-900/20 text-rose-200 rounded p-3 text-sm whitespace-pre-wrap">{error}</div>
+              <div className="border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 rounded p-3 text-sm whitespace-pre-wrap">{error}</div>
             )}
           </div>
         )}
@@ -445,14 +456,14 @@ export default function AgentsListPage() {
 
           {/* 中：個股列表 */}
           <main className="col-span-12 lg:col-span-5 space-y-3">
-            <div className="text-xs font-semibold tracking-wider text-cyan-400">▸ 個股列表 · 點卡片看完整分析 →</div>
+            <div className="text-xs font-semibold tracking-wider text-sky-500">▸ 個股列表 · 點卡片看完整分析 →</div>
 
-            {loading && !data && <p className="text-slate-500 text-sm">載入中…</p>}
+            {loading && !data && <p className="text-muted-foreground text-sm">載入中…</p>}
 
             {data && data.runs.length === 0 && !error && (
-              <div className="border-2 border-dashed border-slate-700 rounded-lg p-8 text-sm text-slate-400 text-center space-y-2">
-                <p className="text-slate-300 font-medium">此日尚無任何 Multi-Agent run</p>
-                <p>點上方「批次準備」對前 {top} 檔候選寫 question.json，然後在 Claude Code 對話執行 <code className="bg-slate-800 text-cyan-300 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code></p>
+              <div className="border-2 border-dashed border-border rounded-lg p-8 text-sm text-muted-foreground text-center space-y-2">
+                <p className="text-foreground font-medium">此日尚無任何 Multi-Agent run</p>
+                <p>點上方「批次準備」對前 {top} 檔候選寫 question.json，然後在 Claude Code 對話執行 <code className="bg-secondary text-sky-500 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code></p>
               </div>
             )}
 
@@ -468,12 +479,12 @@ export default function AgentsListPage() {
           {/* 右：選取個股完整分析 */}
           <aside className="col-span-12 lg:col-span-4 space-y-3">
             {!selectedSymbol && (
-              <div className="border-2 border-dashed border-slate-700 rounded-lg p-8 text-sm text-slate-500 text-center">
+              <div className="border-2 border-dashed border-border rounded-lg p-8 text-sm text-muted-foreground text-center">
                 點左側個股卡片以查看完整分析
               </div>
             )}
             {selectedSymbol && detailLoading && !detail && (
-              <div className="border border-slate-700 rounded-lg p-6 text-sm text-slate-400 text-center">載入分析中…</div>
+              <div className="border border-border rounded-lg p-6 text-sm text-muted-foreground text-center">載入分析中…</div>
             )}
             {selectedSymbol && detail && (
               <DetailColumn detail={detail} date={date} />
@@ -482,15 +493,15 @@ export default function AgentsListPage() {
         </div>
 
         {/* ───────── 底部即時指標 ───────── */}
-        <footer className="border-t border-cyan-700/30 bg-slate-900/60">
-          <div className="max-w-[1600px] mx-auto px-6 py-2 flex items-center justify-between text-xs font-mono text-slate-500 flex-wrap gap-2">
+        <footer className="border-t border-border bg-card">
+          <div className="max-w-[1600px] mx-auto px-6 py-2 flex items-center justify-between text-xs font-mono text-muted-foreground flex-wrap gap-2">
             <div className="flex gap-4 flex-wrap">
-              <span><span className="text-cyan-400">流程進度：</span>{maxStageCompleted(counts)} / 4 階段</span>
-              <span><span className="text-cyan-400">個股完成：</span>P1 {counts.phase1Done} · P2 {counts.phase2Done} · P3 {counts.phase3Done} · P4 {counts.phase4Done} / {counts.total} 檔</span>
-              <span><span className="text-cyan-400">已產報告：</span>{counts.phase1Done * 4 + counts.phase2Done + counts.phase3Done * 2 + counts.phase4Done} 份</span>
-              <span><span className="text-cyan-400">LLM 呼叫：</span>0 次（透過檔案橋接 + /multi-agent-decide）</span>
+              <span><span className="text-sky-500">流程進度：</span>{maxStageCompleted(counts)} / 4 階段</span>
+              <span><span className="text-sky-500">個股完成：</span>P1 {counts.phase1Done} · P2 {counts.phase2Done} · P3 {counts.phase3Done} · P4 {counts.phase4Done} / {counts.total} 檔</span>
+              <span><span className="text-sky-500">已產報告：</span>{counts.phase1Done * 4 + counts.phase2Done + counts.phase3Done * 2 + counts.phase4Done} 份</span>
+              <span><span className="text-sky-500">LLM 呼叫：</span>0 次（透過檔案橋接 + /multi-agent-decide）</span>
             </div>
-            <div>最後更新：<span className="text-slate-300">{date}</span></div>
+            <div>最後更新：<span className="text-foreground">{date}</span></div>
           </div>
         </footer>
       </div>

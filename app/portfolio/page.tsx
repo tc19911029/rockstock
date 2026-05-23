@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePortfolioStore, PortfolioHolding } from '@/store/portfolioStore';
-import { PageShell } from '@/components/shared';
+import { usePortfolioStore, PortfolioHolding, syncAllHoldingsToServer } from '@/store/portfolioStore';
+import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { classifyMarket } from '@/lib/market/classify';
@@ -343,33 +343,44 @@ export default function PortfolioPage() {
   }
 
   const portfolioHeader = (
-    <div className="flex items-center gap-2 text-xs">
-      <Link href="/" className="p-1 text-muted-foreground hover:text-foreground transition-colors" title="返回主頁">
-        ←
-      </Link>
-      <span className="font-bold text-sm whitespace-nowrap">💼 持倉</span>
-      <Button variant="secondary" size="sm" onClick={() => usePortfolioStore.getState().exportJSON()}
-        title="匯出備份 JSON">匯出</Button>
-      <Button variant="secondary" size="sm" onClick={exportCSV} title="匯出 CSV（含損益，可用於報稅）">CSV</Button>
-      <label className="px-2 py-1 bg-muted hover:bg-muted/80 rounded transition cursor-pointer" title="匯入備份">
-        匯入
-        <input type="file" accept=".json" className="hidden" onChange={e => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            const ok = usePortfolioStore.getState().importJSON(reader.result as string);
-            if (!ok) alert('匯入失敗：檔案格式不正確');
-          };
-          reader.readAsText(file);
-          e.target.value = '';
-        }} />
-      </label>
-      <Button size="sm" onClick={() => { cancelForm(); setShowForm(v => !v); }}
-        className="bg-blue-600 hover:bg-blue-500 font-bold">
-        + 新增
-      </Button>
-    </div>
+    <PageHeader
+      title="💼 持倉"
+      backButton
+      actions={
+        <>
+          <Button variant="secondary" size="sm" onClick={() => usePortfolioStore.getState().exportJSON()}
+            title="匯出備份 JSON">匯出</Button>
+          <Button variant="secondary" size="sm" onClick={exportCSV} title="匯出 CSV（含損益，可用於報稅）">CSV</Button>
+          <label className="px-2 py-1 bg-muted hover:bg-muted/80 rounded transition cursor-pointer text-xs" title="匯入備份">
+            匯入
+            <input type="file" accept=".json" className="hidden" onChange={e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => {
+                const ok = usePortfolioStore.getState().importJSON(reader.result as string);
+                if (!ok) alert('匯入失敗：檔案格式不正確');
+              };
+              reader.readAsText(file);
+              e.target.value = '';
+            }} />
+          </label>
+          <Button variant="secondary" size="sm"
+            title="把 UI 持股整批同步到 server holdings.json（讓 portfolio-review / close-trade / 月報能看到）"
+            onClick={async () => {
+              const r = await syncAllHoldingsToServer();
+              if (r.skipped) return;
+              alert(`同步完成：成功 ${r.inserted} 檔 / 失敗 ${r.rejected} 檔 / 共 ${r.total} 檔`);
+            }}>
+            同步↑
+          </Button>
+          <Button size="sm" onClick={() => { cancelForm(); setShowForm(v => !v); }}
+            className="bg-blue-600 hover:bg-blue-500 font-bold">
+            + 新增
+          </Button>
+        </>
+      }
+    />
   );
 
   return (

@@ -122,26 +122,42 @@ export function renderMarkdownReport(a: DailyAnalysis): string {
     }
   }
 
-  // ── 跨節目共識 mention 詳情 (high_consensus only) ──────────────
-  if (a.high_consensus_stocks.length > 0) {
-    lines.push('## 跨節目共識 mention 細節（按股票分組）');
+  // ── 跨節目共識 mention 詳情（含 weak_signal 整合，顯示「每個節目+分析師說了什麼」） ──
+  const allMentionsForDetail = [...a.high_consensus_stocks, ...a.weak_signal_stocks];
+  if (allMentionsForDetail.length > 0) {
+    lines.push('## 各股完整跨節目分析師發言（依股票分組）');
     lines.push('');
     const groupedByCode = new Map<string, AnalyzedStockMention[]>();
-    for (const m of a.high_consensus_stocks) {
+    for (const m of allMentionsForDetail) {
       if (!m.matched) continue;
       const code = m.matched.code;
       if (!groupedByCode.has(code)) groupedByCode.set(code, []);
       groupedByCode.get(code)!.push(m);
     }
+    // 按 mention 次數降冪排序
     const sortedCodes = Array.from(groupedByCode.entries())
       .sort((a, b) => b[1].length - a[1].length);
     for (const [code, ms] of sortedCodes) {
+      // 單一節目單一 mention 的不展開（避免報告過長），≥2 才展開
+      if (ms.length < 2) continue;
       const name = ms[0].matched?.name ?? '';
-      lines.push(`### ${code} ${name} (${ms.length} 個節目)`);
+      const sourceCount = new Set(ms.map(m => m.source_id)).size;
+      lines.push(`### ${code} ${name} — ${sourceCount} 個節目、${ms.length} 條提及`);
       lines.push('');
-      for (const m of ms) {
-        lines.push(`- **${sourceLabel(m.source_id)}** [${m.sentiment}] — ${m.context}`);
-        lines.push(`  - 理由：${m.reason}`);
+      // 同股 mentions 依 sentiment 排序（多空優先）
+      const sortedMs = [...ms].sort((a, b) => {
+        const order: Record<string, number> = { bullish: 1, bearish: 2, risk_warning: 3, watchlist: 4, neutral: 5, mentioned_only: 6 };
+        return (order[a.sentiment] ?? 9) - (order[b.sentiment] ?? 9);
+      });
+      for (const m of sortedMs) {
+        const analystLabel = m.analysts && m.analysts.length > 0
+          ? `（${m.analysts.join(' / ')}）`
+          : '';
+        lines.push(`- **${sourceLabel(m.source_id)}**${analystLabel} [${m.sentiment}]`);
+        lines.push(`  - 原話：${m.context}`);
+        if (m.reason && m.reason !== m.context) {
+          lines.push(`  - 理由：${m.reason}`);
+        }
       }
       lines.push('');
     }

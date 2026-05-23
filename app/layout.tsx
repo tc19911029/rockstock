@@ -71,12 +71,20 @@ export default function RootLayout({
   return (
     <html
       lang="zh-TW"
-      className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${dmSans.variable} h-full antialiased`}
+      className={`dark ${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${dmSans.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
         <meta name="theme-color" content="#0f172a" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
+        {/*
+          Theme 初始值在 <html className="dark"> 直接寫死（與 ThemeProvider 的
+          defaultTheme="dark" 一致）。選 light 的使用者在 cold reload 後會看到
+          很短的暗→亮閃爍 — ThemeProvider 的 useEffect 讀 localStorage 後立即
+          切回 light。為了避免閃爍而 inject FOUC `<script>` 會觸發 React 19 的
+          script-in-component 警告（連 next-themes 的 suppressHydrationWarning
+          都壓不掉），這個取捨值得。
+        */}
       </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded-lg focus:text-sm">

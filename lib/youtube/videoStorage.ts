@@ -154,6 +154,15 @@ export async function mergeVideosForDate(
     const prev = map.get(v.video_id);
     if (prev) {
       // 保留 discovered_at（首次發現），更新 last_seen_at 與其他可能改變的欄位
+      //
+      // ⚠️ should_analyze / skip_reason 特別處理：
+      // 多日 backfill 時，scan with targetDate=X 會把標題不是 X 的影片標成
+      // wrong_date 寫進它們各自的 fileDate 檔。但這些檔可能已經被另一次
+      // targetDate=fileDate 的 scan 正確標成 should_analyze=true。
+      // 不要讓 wrong_date 覆寫已存在的 true（true is sticky）。
+      const stickyShould = prev.should_analyze && !v.should_analyze && v.skip_reason === 'wrong_date'
+        ? { should_analyze: prev.should_analyze, skip_reason: prev.skip_reason }
+        : { should_analyze: v.should_analyze, skip_reason: v.skip_reason };
       map.set(v.video_id, {
         ...prev,
         last_seen_at: v.last_seen_at,
@@ -162,10 +171,10 @@ export async function mergeVideosForDate(
         duration_sec: v.duration_sec,
         published_at: v.published_at ?? prev.published_at,
         video_type: v.video_type,
-        should_analyze: v.should_analyze,
-        skip_reason: v.skip_reason,
+        ...stickyShould,
         video_confidence_score: v.video_confidence_score,
         program_date: v.program_date ?? prev.program_date,
+        analysts: v.analysts && v.analysts.length > 0 ? v.analysts : (prev.analysts ?? ['(未知)']),
         raw: { ...prev.raw, ...v.raw },
       });
     } else {

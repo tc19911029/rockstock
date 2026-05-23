@@ -22,6 +22,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['蔡萬得'],
   },
   {
     source_id: 'ebc-moneyshow',
@@ -33,6 +34,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V1,
+    default_analysts: ['李兆華'],
   },
   {
     source_id: 'zhaohua-ailun',
@@ -44,6 +46,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['李兆華', '艾綸'],
   },
   {
     source_id: '57-stock-class',
@@ -55,6 +58,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V1,
+    default_analysts: ['鄭明娟'],
   },
   {
     source_id: 'tu-min-feng',
@@ -66,6 +70,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['涂敏峰'],
   },
   {
     source_id: 'lan-deng-yao',
@@ -77,6 +82,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['藍登耀'],
   },
   {
     source_id: 'xu-yu-ling',
@@ -88,6 +94,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['許毓玲'],
   },
   {
     source_id: 'chen-wei-liang',
@@ -99,6 +106,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['陳威良'],
   },
   {
     source_id: 'ustvmoney100',
@@ -110,6 +118,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V1,
+    default_analysts: [],
   },
   {
     source_id: 'ailun-live',
@@ -121,6 +130,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['劉育綸', '艾綸'],
   },
   {
     source_id: 'winning-key',
@@ -132,6 +142,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['楚河'],
   },
   {
     source_id: 'jinlin-tianxia',
@@ -143,6 +154,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: ['王志郁'],
   },
   {
     source_id: 'gumin-kaijiang',
@@ -154,6 +166,7 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     first_scan_done: false,
     active: true,
     created_at: CREATED_V2,
+    default_analysts: [],
   },
 ];
 

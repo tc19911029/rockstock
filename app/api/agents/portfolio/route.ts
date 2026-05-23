@@ -17,6 +17,7 @@ import {
   loadHoldings,
   upsertHolding,
 } from '@/lib/agents/portfolio/storage';
+import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +35,8 @@ const upsertSchema = z.object({
   target2: z.coerce.number().positive().optional(),
   notes: z.string().optional(),
   status: z.enum(['open', 'closed']).default('open'),
+  /** 跳過 entryPrice 合理性驗證（極少數合理 case 如多筆平均成本）*/
+  forcePrice: z.coerce.boolean().optional().default(false),
 });
 
 const closeSchema = z.object({
@@ -72,7 +75,23 @@ export async function POST(req: NextRequest) {
   }
   const parsed = upsertSchema.safeParse(body);
   if (!parsed.success) return apiValidationError(parsed.error);
-  const holding = await upsertHolding(parsed.data);
+
+  const { forcePrice, ...holdingData } = parsed.data;
+
+  // entryPrice 合理性檢查（除非 forcePrice=true 顯式略過）
+  if (!forcePrice) {
+    const check = await validateEntryPrice(
+      holdingData.symbol,
+      holdingData.market,
+      holdingData.entryDate,
+      holdingData.entryPrice,
+    );
+    if (!check.ok) {
+      return apiError(check.reason ?? 'entryPrice validation failed', 422);
+    }
+  }
+
+  const holding = await upsertHolding(holdingData);
   return apiOk({ holding });
 }
 

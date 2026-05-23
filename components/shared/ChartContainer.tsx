@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useCallback } from 'react';
 import { createChart, type IChartApi, type DeepPartial, type ChartOptions, ColorType } from 'lightweight-charts';
-import { useTheme } from 'next-themes';
+import { useTheme } from '@/components/ThemeProvider';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 

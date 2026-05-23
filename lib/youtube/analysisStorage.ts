@@ -31,21 +31,31 @@ export interface AnalyzedStockMention {
   llm_confidence: number;       // Claude 的自評信心（提取本身有沒有正確）
   combined_confidence: number;  // llm_confidence × matched.confidence
   sentiment: StockSentiment;
-  context: string;              // 主持人原話片段
-  reason: string;               // 主持人給的看多/看空理由
+  context: string;              // 原話片段
+  reason: string;               // 看多/看空理由
   source_id: string;            // 來自哪個 channel
   video_id: string;             // 來自哪支影片
+  /**
+   * 講這檔股票的分析師（主持人 + 來賓）。從 video.analysts 帶下來。
+   * 理財達人秀類節目有來賓輪替，這欄讓「哪檔股票是誰說的」可被追蹤。
+   * 例：["李兆華", "朱家泓"] / ["蔡萬得"] / ["錢線百分百"]（無明確分析師時的 fallback）。
+   */
+  analysts?: string[];
 }
 
 /** MVP 5: 每檔股票的多因子評分 + A/B/C/D 分級 */
 export type StockRating = 'A' | 'B' | 'C' | 'D';
 
 export interface FactorScores {
-  /** 0-100，權重 25 — K線/均線/趨勢/量價 */
+  /** 0-100，權重 25 — K線/均線/趨勢/量價（YouTube 節目「對技術面的看法」評分，非 Signal 層真實 K 棒指標） */
   technical: number;
-  /** 0-100，權重 18 — 法人/融資融券/大戶/主力 */
-  chip: number;
-  /** 0-100，權重 15 — EPS/營收/毛利率/ROE */
+  /**
+   * 0-100，權重 18 — 節目「對籌碼面的看法」評分。
+   * ⚠ 與 Signal 層 `chipScore`（L4 真實籌碼資料計分）**不同**，
+   *   這是 YouTube 主持人觀點 + 多節目共識的綜合分。
+   */
+  chip_narrative: number;
+  /** 0-100，權重 15 — EPS/營收/毛利率/ROE（節目觀點） */
   fundamental: number;
   /** 0-100，權重 12 — 公司公告/新聞/題材延續性 */
   news: number;
@@ -59,6 +69,9 @@ export interface FactorScores {
   valuation: number;
   /** 0-100，權重 2 — 外資長期持股趨勢 / 內部人交易 */
   governance: number;
+
+  /** @deprecated use `chip_narrative`. Kept for backwards-compat with old analysis files. */
+  chip?: number;
 }
 
 export interface StockScoring {
@@ -114,15 +127,17 @@ export interface DailyAnalysis {
  *   industry 10, macro 5, valuation 3, governance 2
  */
 export const FACTOR_WEIGHTS = {
-  technical: 25, chip: 18, fundamental: 15,
+  technical: 25, chip_narrative: 18, fundamental: 15,
   news: 12, mention_heat: 10, industry: 10,
   macro: 5, valuation: 3, governance: 2,
 } as const;
 
 export function computeCompositeScore(s: FactorScores): number {
+  // fallback `s.chip` 為了向後相容舊 analysis 檔案（pre-rename）
+  const chipNarrative = s.chip_narrative ?? s.chip ?? 0;
   const weighted =
     s.technical * FACTOR_WEIGHTS.technical +
-    s.chip * FACTOR_WEIGHTS.chip +
+    chipNarrative * FACTOR_WEIGHTS.chip_narrative +
     s.fundamental * FACTOR_WEIGHTS.fundamental +
     s.news * FACTOR_WEIGHTS.news +
     s.mention_heat * FACTOR_WEIGHTS.mention_heat +
@@ -154,6 +169,8 @@ export interface DailyStockMention {
     context: string;
     reason: string;
     combined_confidence: number;
+    /** 這集講這檔股票的分析師（從 video.analysts 帶下來） */
+    analysts?: string[];
   }>;
   mention_count: number;
   bullish_count: number;
@@ -279,6 +296,7 @@ export function deriveStockMentions(a: DailyAnalysis): DailyStockMentions {
       context: m.context,
       reason: m.reason,
       combined_confidence: m.combined_confidence,
+      analysts: m.analysts,
     });
     agg.mention_count += 1;
     if (m.sentiment === 'bullish') agg.bullish_count += 1;

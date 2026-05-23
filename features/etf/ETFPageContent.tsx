@@ -1,9 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useETFStore, type ETFTab } from '@/store/etfStore';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { PageShell } from '@/components/shared';
+import { PageShell, PageHeader } from '@/components/shared';
 import { ETFPerformanceTab } from './components/ETFPerformanceTab';
 import { ETFChangesTab } from './components/ETFChangesTab';
 import { ETFConsensusTab } from './components/ETFConsensusTab';
@@ -19,14 +18,7 @@ const TABS: Array<{ value: ETFTab; label: string }> = [
 export function ETFPageContent() {
   const { activeTab, setActiveTab } = useETFStore();
 
-  const header = (
-    <div className="flex items-center gap-2 text-xs min-w-0">
-      <Link href="/" className="p-1 text-muted-foreground hover:text-foreground transition-colors shrink-0">
-        ←
-      </Link>
-      <span className="font-bold text-sm whitespace-nowrap shrink-0">📈 ETF追蹤</span>
-    </div>
-  );
+  const header = <PageHeader title="📈 ETF 追蹤" backButton />;
 
   return (
     <PageShell headerSlot={header}>

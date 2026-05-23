@@ -101,11 +101,12 @@ describe('parseProgramDate', () => {
 
 describe('decideShouldAnalyze invariant', () => {
   const now = new Date('2026-05-22T12:00:00Z');
-  const base: Pick<YouTubeVideo, 'video_id' | 'video_type' | 'duration_sec' | 'published_at' | 'raw'> = {
+  const base: Pick<YouTubeVideo, 'video_id' | 'video_type' | 'duration_sec' | 'published_at' | 'program_date' | 'raw'> = {
     video_id: 'vid01234567',
     video_type: 'full_program',
     duration_sec: 1800,
     published_at: '2026-05-22T10:00:00Z',  // 2h ago
+    program_date: null,                     // 無標題日 → 退回 published_at
     raw: {},
   };
 
@@ -290,5 +291,26 @@ describe('fetchRecentVideos (NDJSON parsing)', () => {
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('ERROR: Sign in');
     expect(r.videos).toHaveLength(0);
+  });
+});
+
+// ── Source URL invariant (2026-05-23) ────────────────────────────────────────
+// 確保 sources.json 裡所有 source 都是 playlist URL（不是 channel URL）。
+// 歷史上 channel URL 會誤抓非 playlist 範圍影片（如 part 1-10 短切），
+// scanRunner.assertPlaylistUrl() 會在 scan 前擋掉，這裡額外做 static check。
+
+describe('sources.json playlist-URL invariant', () => {
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+
+  it('all sources are playlist URLs (no channel URLs)', () => {
+    const sourcesPath = path.join(process.cwd(), 'data/youtube/sources.json');
+    if (!fs.existsSync(sourcesPath)) return; // skip if not seeded
+    const sources = JSON.parse(fs.readFileSync(sourcesPath, 'utf-8'));
+    const playlistRe = /^https:\/\/www\.youtube\.com\/playlist\?list=PL[A-Za-z0-9_-]+/;
+    for (const s of sources) {
+      expect(s.kind).toBe('playlist');
+      expect(s.url).toMatch(playlistRe);
+    }
   });
 });

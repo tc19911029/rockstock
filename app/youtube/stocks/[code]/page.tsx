@@ -7,9 +7,11 @@
  */
 
 import { useEffect, useState, use } from 'react';
-import { PageShell } from '@/components/shared';
+import Link from 'next/link';
+import { PageShell, PageHeader } from '@/components/shared';
 import { YoutubeHeader } from '@/components/youtube/YoutubeHeader';
 import type { StockRating } from '@/lib/youtube/analysisStorage';
+import { Brain } from 'lucide-react';
 
 type Range = '7d' | '14d' | '30d' | '90d';
 
@@ -87,27 +89,46 @@ export default function StockHistoryPage({
   const dates = Array.from(entriesByDate.keys()).sort().reverse();
 
   return (
-    <PageShell>
-      <div className="p-4 max-w-5xl mx-auto space-y-6">
-        <YoutubeHeader
-          title={`${code} ${history?.stock_name ?? ''}`}
+    <PageShell
+      headerSlot={
+        <PageHeader
+          title={`📺 ${code} ${history?.stock_name ?? ''}`}
+          backButton="/youtube/trends"
           subtitle={
             data && data.history
-              ? `最近 ${data.range_days} 天被提到 ${data.history.entries.length} 次，跨 ${dates.length} 天 · 聚合 ${data.analyses_loaded} 份 analysis`
+              ? `最近 ${data.range_days} 天被提到 ${data.history.entries.length} 次 · 跨 ${dates.length} 天 · 聚合 ${data.analyses_loaded} 份報告`
               : '載入中…'
           }
-          rightExtra={
+          actions={
             <a
               href={`https://tw.stock.yahoo.com/quote/${code}.TW`}
               target="_blank"
               rel="noreferrer"
-              className="text-muted-foreground hover:text-foreground"
-              title="Yahoo 股市"
+              className="text-xs text-sky-400 hover:text-sky-300 transition-colors"
+              title="到 Yahoo 股市看"
             >
-              {code}.TW ↗
+              股價 ↗
             </a>
           }
         />
+      }
+    >
+      <div className="max-w-5xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6">
+        <YoutubeHeader />
+
+        {/* Stage 6：相關頁面 — 切到統一股票詳細頁看走圖 + Agent 分析 */}
+        <div className="rounded-lg border border-border/60 bg-card/40 px-4 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
+          <span className="text-muted-foreground">
+            這頁只看「YouTube 視角的時間軸」。要看 K 線 + 4 面向 Agent 分析（技術 / 消息 / 籌碼 / 基本）請開
+          </span>
+          <Link
+            href={`/agents/${code}.TW`}
+            className="text-sky-400 hover:underline inline-flex items-center gap-1"
+          >
+            <Brain className="w-3 h-3" />
+            {code} 統一股票詳細頁 →
+          </Link>
+        </div>
 
         {/* Range 切換 */}
         <div className="flex items-center gap-2 text-sm">

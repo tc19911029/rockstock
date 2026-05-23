@@ -94,6 +94,11 @@ export interface StockScanResult {
   aiConfidence?: 'high' | 'medium' | 'low';
   aiReason?: string;
   // ── 籌碼面 ────────────────────────────────────────────────────────────────
+  /**
+   * 籌碼面綜合評分 0-100（Signal 層，由 `/api/chip` 從 L4 真實籌碼資料計算）。
+   * ⚠ 與 YouTube `FactorScores.chip_narrative` **不同**——後者是節目主持人
+   *   對籌碼面的「觀點/敘事」評分，由 Claude 從逐字稿語意提取，不是真實資料。
+   */
   chipScore?: number;            // 0–100 籌碼面評分
   chipGrade?: string;            // S/A/B/C/D
   chipSignal?: string;           // 主力進場/法人偏多/散戶追高/主力出貨/中性

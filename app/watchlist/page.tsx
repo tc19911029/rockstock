@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
-import { PageShell, EmptyState } from '@/components/shared';
+import { PageShell, PageHeader, EmptyState } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { formatPrice, formatPercent, formatDate, formatTime, bullBearClass } from '@/lib/format';
 
@@ -154,16 +154,23 @@ export default function WatchlistPage() {
   });
 
   const watchlistHeader = (
-    <div className="flex items-center gap-2 text-xs">
-      <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors shrink-0 text-lg leading-none">←</Link>
-      <span className="font-bold text-sm whitespace-nowrap">⭐ 自選股</span>
-      <span className="text-muted-foreground shrink-0">{hasMounted ? items.length : 0} 支</span>
-      {lastUpdated && <span className="text-muted-foreground/60 hidden sm:block">{lastUpdated}</span>}
-      <Button onClick={refreshAll} disabled={isRefreshing} variant="secondary" size="sm"
-        className="flex items-center gap-1">
-        <span className={isRefreshing ? 'animate-spin' : ''}>↻</span><span className="hidden sm:inline">{isRefreshing ? '刷新中' : '刷新'}</span>
-      </Button>
-    </div>
+    <PageHeader
+      title="⭐ 自選股"
+      backButton
+      subtitle={
+        <>
+          <span>{hasMounted ? items.length : 0} 支</span>
+          {lastUpdated && <span className="text-muted-foreground/60 hidden sm:inline ml-2">{lastUpdated}</span>}
+        </>
+      }
+      actions={
+        <Button onClick={refreshAll} disabled={isRefreshing} variant="secondary" size="sm"
+          className="flex items-center gap-1">
+          <span className={isRefreshing ? 'animate-spin' : ''}>↻</span>
+          <span className="hidden sm:inline">{isRefreshing ? '刷新中' : '刷新'}</span>
+        </Button>
+      }
+    />
   );
 
   return (

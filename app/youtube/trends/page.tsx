@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { PageShell } from '@/components/shared';
+import { PageShell, PageHeader } from '@/components/shared';
 import { YoutubeHeader } from '@/components/youtube/YoutubeHeader';
 import type { StockRating } from '@/lib/youtube/analysisStorage';
 
@@ -70,22 +70,22 @@ export default function TrendsPage() {
   const stocks = data?.stocks ?? [];
 
   return (
-    <PageShell>
-      <div className="p-4 max-w-7xl mx-auto space-y-6">
-        <YoutubeHeader
-          title="YouTube 跨日趨勢"
+    <PageShell
+      headerSlot={
+        <PageHeader
+          title="📺 跨日趨勢"
+          backButton="/youtube"
           subtitle={
-            <>
-              最近 {data?.range_days ?? range} 天，聚合 {data?.analyses_loaded ?? 0} 份 analysis ·
-              共 {data?.total_stocks ?? 0} 檔被提到
-            </>
-          }
-          rightExtra={
-            <span className="text-muted-foreground">
-              {refreshedAt ? `更新於 ${refreshedAt.toLocaleTimeString('zh-TW', { hour12: false })}` : ''}
+            <span>
+              最近 {data?.range_days ?? range} 天 · 聚合 {data?.analyses_loaded ?? 0} 份報告 · 共 {data?.total_stocks ?? 0} 檔被提到
+              {refreshedAt && <span className="ml-2 text-muted-foreground/60 hidden sm:inline">更新於 {refreshedAt.toLocaleTimeString('zh-TW', { hour12: false })}</span>}
             </span>
           }
         />
+      }
+    >
+      <div className="max-w-7xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6">
+        <YoutubeHeader />
 
         {/* Range 切換 */}
         <div className="flex items-center gap-2 text-sm">

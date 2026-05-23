@@ -3,16 +3,16 @@
 /**
  * /agents/backtest?from=&to=
  *
- * Backtest 表現頁：
+ * 回測表現頁：
  *   - 區間查詢：from / to → summary
- *   - 顯示 buy/watch/skip 平均 d1/d5/d20 報酬 + 勝率
- *   - 各 Agent verdict → 平均收益 / 勝率（用於判斷哪個 Agent 命中最高）
+ *   - 顯示 買/觀察/略過 平均 1日/5日/20日報酬 + 勝率
+ *   - 各代理判定 → 平均收益 / 勝率（用於判斷哪個代理命中最高）
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { PageShell } from '@/components/shared';
+import { PageShell, PageHeader } from '@/components/shared';
+import { Button } from '@/components/ui/button';
 import type { BacktestSummary } from '@/lib/agents/backtest/types';
 
 interface SummaryResp {
@@ -24,6 +24,26 @@ interface SummaryResp {
   datesIncluded: string[];
   summary: BacktestSummary | null;
 }
+
+const ACTION_LABEL: Record<'buy' | 'watch' | 'skip', string> = {
+  buy: '買',
+  watch: '觀察',
+  skip: '略過',
+};
+
+const VERDICT_LABEL: Record<string, string> = {
+  pass: '通過',
+  watch: '觀察',
+  fail: '不通過',
+};
+
+const AGENT_LABEL: Record<string, string> = {
+  technical: '技術',
+  news: '消息',
+  chip: '籌碼',
+  fundamental: '基本面',
+  risk: '風控',
+};
 
 function fmtPct(v: number | null): string {
   if (v == null) return '—';
@@ -64,7 +84,7 @@ export default function BacktestPage() {
       if (!res.ok) setError(`HTTP ${res.status}`);
       else setData(json);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'fetch failed');
+      setError(err instanceof Error ? err.message : '讀取失敗');
     } finally {
       setLoading(false);
     }
@@ -81,11 +101,11 @@ export default function BacktestPage() {
       const json = await res.json() as { ok?: boolean; error?: string; total?: number; computedThrough?: string; byAction?: Record<string, number> };
       if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
       else {
-        setBanner(`✅ 已 build ${to}: ${json.total} 筆 (through ${json.computedThrough ?? 'no data'})`);
+        setBanner(`✅ 已建立 ${to}：${json.total} 筆（計算至 ${json.computedThrough ?? '無資料'}）`);
         await fetchSummary();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'build failed');
+      setError(err instanceof Error ? err.message : '建立失敗');
     } finally {
       setBusy(false);
     }
@@ -93,101 +113,112 @@ export default function BacktestPage() {
 
   const summary = data?.summary;
 
+  const headerActions = (
+    <>
+      <Button onClick={buildBacktest} disabled={busy} variant="secondary" size="sm" title="對 to 日期跑前向分析算 1-20 日報酬">
+        {busy ? '建立中…' : '建立'}
+      </Button>
+      <Button onClick={fetchSummary} disabled={loading} variant="ghost" size="sm">
+        重整
+      </Button>
+    </>
+  );
+
   return (
-    <PageShell>
-      <div className="space-y-4 p-4 max-w-6xl mx-auto">
-        <header className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold">Backtest 回測</h1>
-            <p className="text-sm text-gray-500">
-              {summary ? `${summary.totalDecisions} 筆決策 · ${data?.datesIncluded.length ?? 0} 天區間` : '尚無資料'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <label className="text-sm flex items-center gap-1">
-              from
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-            </label>
-            <label className="text-sm flex items-center gap-1">
-              to
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-            </label>
-            <button
-              onClick={buildBacktest}
-              disabled={busy}
-              className="border rounded px-3 py-1 text-sm bg-blue-50 hover:bg-blue-100 disabled:opacity-50"
-              title="對 to 日期跑 ForwardAnalyzer 算 d1-d20"
-            >
-              {busy ? 'Building…' : 'Build (to 日期)'}
-            </button>
-            <button
-              onClick={fetchSummary}
-              disabled={loading}
-              className="border rounded px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
-            >
-              重整
-            </button>
-            <Link href={`/agents`} className="text-sm text-blue-600 hover:underline">
-              ← 回主頁
-            </Link>
-          </div>
-        </header>
+    <PageShell
+      headerSlot={
+        <PageHeader
+          title="📊 回測"
+          backButton="/agents"
+          subtitle={summary ? `${summary.totalDecisions} 筆 · ${data?.datesIncluded.length ?? 0} 天` : '尚無資料'}
+          actions={headerActions}
+        />
+      }
+    >
+      <div className="max-w-6xl mx-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
+
+        {/* 日期區間 */}
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <label className="flex items-center gap-1 text-muted-foreground">
+            從
+            <input
+              type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+              className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono focus:outline-none focus:border-sky-500"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-muted-foreground">
+            到
+            <input
+              type="date" value={to} onChange={(e) => setTo(e.target.value)}
+              className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono focus:outline-none focus:border-sky-500"
+            />
+          </label>
+        </div>
 
         {banner && (
-          <div className="border border-blue-300 bg-blue-50 text-blue-900 rounded p-3 text-sm">
+          <div className="border border-sky-500/40 bg-sky-500/10 text-sky-300 rounded-lg p-3 text-sm">
             {banner}
           </div>
         )}
         {error && (
-          <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm">
+          <div className="border border-red-700/50 bg-red-900/30 text-red-300 rounded-lg p-3 text-sm">
             {error}
           </div>
         )}
 
         {!summary && !loading && (
-          <div className="border border-dashed border-gray-300 rounded p-6 text-sm text-gray-500 text-center space-y-2">
-            <p>此區間尚無 backtest 資料。</p>
-            <p>對某日跑 Multi-Agent decision 後（P4 完整 4 phase），到此頁按「Build (to 日期)」算 d1-d20。</p>
+          <div className="border-2 border-dashed border-border rounded-lg p-6 text-sm text-muted-foreground text-center space-y-2">
+            <p>此區間尚無回測資料。</p>
+            <p>對某日跑完多代理四階段決策後，到此頁按「建立」算 1-20 日報酬。</p>
           </div>
         )}
 
         {summary && summary.totalDecisions === 0 && (
-          <div className="border border-yellow-300 bg-yellow-50 text-yellow-800 rounded p-3 text-sm">
-            區間內無 backtest entries — 確認 data/agents/runs/{'{date}'}/{'{symbol}'}/decision.json 是否存在。
+          <div className="border border-yellow-500/30 bg-yellow-500/10 text-yellow-300 rounded-lg p-3 text-sm">
+            區間內無回測資料 — 確認{' '}
+            <code className="bg-secondary text-sky-400 px-1.5 py-0.5 rounded font-mono text-xs">data/agents/runs/{'{date}'}/{'{symbol}'}/decision.json</code>
+            {' '}是否存在。
           </div>
         )}
 
         {summary && summary.totalDecisions > 0 && (
           <>
-            {/* Final Action 統計 */}
-            <section className="space-y-2">
-              <h2 className="font-semibold text-sm">Final Action 績效</h2>
+            {/* 最終決策統計 */}
+            <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+              <h2 className="text-xs font-semibold tracking-wider text-foreground">▸ 最終決策績效</h2>
               <div className="overflow-x-auto">
-                <table className="min-w-full text-sm border">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="border px-3 py-2 text-left">Action</th>
-                      <th className="border px-3 py-2 text-center">樣本</th>
-                      <th className="border px-3 py-2 text-center">avg d1</th>
-                      <th className="border px-3 py-2 text-center">avg d5</th>
-                      <th className="border px-3 py-2 text-center">avg d20</th>
-                      <th className="border px-3 py-2 text-center">勝率 d5</th>
-                      <th className="border px-3 py-2 text-center">勝率 d20</th>
+                <table className="w-full text-xs">
+                  <thead className="text-muted-foreground border-b border-border">
+                    <tr className="text-center">
+                      <th className="py-2 px-2">動作</th>
+                      <th className="py-2 px-2">樣本</th>
+                      <th className="py-2 px-2">1日均報酬</th>
+                      <th className="py-2 px-2">5日均報酬</th>
+                      <th className="py-2 px-2">20日均報酬</th>
+                      <th className="py-2 px-2">5日勝率</th>
+                      <th className="py-2 px-2">20日勝率</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(['buy', 'watch', 'skip'] as const).map(action => {
                       const s = summary.byAction[action];
-                      const cls = action === 'buy' ? 'bg-green-50' : action === 'skip' ? 'bg-red-50' : 'bg-yellow-50';
+                      const cls =
+                        action === 'buy'  ? 'bg-emerald-900/30'
+                        : action === 'skip' ? 'bg-rose-900/30'
+                        : 'bg-amber-900/30';
+                      const accentText =
+                        action === 'buy'  ? 'text-emerald-300'
+                        : action === 'skip' ? 'text-rose-300'
+                        : 'text-amber-300';
                       return (
-                        <tr key={action} className={cls}>
-                          <td className="border px-3 py-2 font-semibold">{action.toUpperCase()}</td>
-                          <td className="border px-3 py-2 text-center font-mono">{s.sampleSize}</td>
-                          <td className="border px-3 py-2 text-center font-mono">{fmtPct(s.avgD1Return)}</td>
-                          <td className="border px-3 py-2 text-center font-mono">{fmtPct(s.avgD5Return)}</td>
-                          <td className="border px-3 py-2 text-center font-mono">{fmtPct(s.avgD20Return)}</td>
-                          <td className="border px-3 py-2 text-center font-mono">{fmtRate(s.winRateD5)}</td>
-                          <td className="border px-3 py-2 text-center font-mono">{fmtRate(s.winRateD20)}</td>
+                        <tr key={action} className={`border-b border-border/40 hover:bg-muted/30 text-center ${cls}`}>
+                          <td className={`py-2 px-2 font-semibold ${accentText}`}>{ACTION_LABEL[action]}</td>
+                          <td className="py-2 px-2 font-mono">{s.sampleSize}</td>
+                          <td className="py-2 px-2 font-mono">{fmtPct(s.avgD1Return)}</td>
+                          <td className="py-2 px-2 font-mono">{fmtPct(s.avgD5Return)}</td>
+                          <td className="py-2 px-2 font-mono">{fmtPct(s.avgD20Return)}</td>
+                          <td className="py-2 px-2 font-mono">{fmtRate(s.winRateD5)}</td>
+                          <td className="py-2 px-2 font-mono">{fmtRate(s.winRateD20)}</td>
                         </tr>
                       );
                     })}
@@ -196,65 +227,73 @@ export default function BacktestPage() {
               </div>
             </section>
 
-            {/* 各 Agent verdict 命中率（§0 — 每個 agent 各自統計，不混合）*/}
-            <section className="space-y-2">
-              <h2 className="font-semibold text-sm">各 Agent verdict 命中率（§0 — 各自獨立統計）</h2>
+            {/* 各代理判定命中率（§0 — 每個代理各自統計，不混合）*/}
+            <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+              <h2 className="text-xs font-semibold tracking-wider text-foreground">
+                ▸ 各代理判定命中率 <span className="text-muted-foreground font-normal">（§0 — 各自獨立統計）</span>
+              </h2>
               <div className="space-y-3">
                 {summary.agentAccuracy.map(a => (
-                  <div key={a.agent} className="border rounded p-3">
-                    <h3 className="font-medium text-sm mb-2 capitalize">{a.agent} Agent</h3>
-                    <table className="min-w-full text-xs border">
-                      <thead className="bg-gray-100">
-                        <tr>
-                          <th className="border px-2 py-1 text-left">Verdict</th>
-                          <th className="border px-2 py-1 text-center">樣本</th>
-                          <th className="border px-2 py-1 text-center">avg d1</th>
-                          <th className="border px-2 py-1 text-center">avg d5</th>
-                          <th className="border px-2 py-1 text-center">avg d20</th>
-                          <th className="border px-2 py-1 text-center">勝率 d5</th>
-                          <th className="border px-2 py-1 text-center">勝率 d20</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(a.byVerdict).map(([verdict, s]) => (
-                          <tr key={verdict}>
-                            <td className="border px-2 py-1 font-mono">{verdict}</td>
-                            <td className="border px-2 py-1 text-center font-mono">{s.sampleSize}</td>
-                            <td className="border px-2 py-1 text-center font-mono">{fmtPct(s.avgD1Return)}</td>
-                            <td className="border px-2 py-1 text-center font-mono">{fmtPct(s.avgD5Return)}</td>
-                            <td className="border px-2 py-1 text-center font-mono">{fmtPct(s.avgD20Return)}</td>
-                            <td className="border px-2 py-1 text-center font-mono">{fmtRate(s.winRateD5)}</td>
-                            <td className="border px-2 py-1 text-center font-mono">{fmtRate(s.winRateD20)}</td>
+                  <div key={a.agent} className="bg-muted/40 border border-border/60 rounded-lg p-3">
+                    <h3 className="text-xs font-semibold text-foreground mb-2">
+                      {AGENT_LABEL[a.agent] ?? a.agent} 代理
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="text-muted-foreground border-b border-border">
+                          <tr className="text-center">
+                            <th className="py-1.5 px-2">判定</th>
+                            <th className="py-1.5 px-2">樣本</th>
+                            <th className="py-1.5 px-2">1日均</th>
+                            <th className="py-1.5 px-2">5日均</th>
+                            <th className="py-1.5 px-2">20日均</th>
+                            <th className="py-1.5 px-2">5日勝率</th>
+                            <th className="py-1.5 px-2">20日勝率</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {Object.entries(a.byVerdict).map(([verdict, s]) => (
+                            <tr key={verdict} className="border-b border-border/40 hover:bg-muted/30 last:border-0 text-center">
+                              <td className="py-1.5 px-2">{VERDICT_LABEL[verdict] ?? verdict}</td>
+                              <td className="py-1.5 px-2 font-mono">{s.sampleSize}</td>
+                              <td className="py-1.5 px-2 font-mono">{fmtPct(s.avgD1Return)}</td>
+                              <td className="py-1.5 px-2 font-mono">{fmtPct(s.avgD5Return)}</td>
+                              <td className="py-1.5 px-2 font-mono">{fmtPct(s.avgD20Return)}</td>
+                              <td className="py-1.5 px-2 font-mono">{fmtRate(s.winRateD5)}</td>
+                              <td className="py-1.5 px-2 font-mono">{fmtRate(s.winRateD20)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 ))}
               </div>
             </section>
 
             {/* 區間內納入的日期 */}
-            <details className="border rounded p-3 text-xs">
-              <summary className="font-medium cursor-pointer">
+            <details className="bg-card border border-border rounded-xl p-4 text-xs">
+              <summary className="cursor-pointer text-foreground font-medium select-none">
                 納入的日期（{data?.datesIncluded.length}）
               </summary>
-              <div className="mt-2 flex gap-1 flex-wrap">
-                {data?.datesIncluded.map(d => <span key={d} className="font-mono bg-gray-100 px-2 py-0.5 rounded">{d}</span>)}
+              <div className="mt-3 flex gap-1 flex-wrap">
+                {data?.datesIncluded.map(d => (
+                  <span key={d} className="font-mono bg-secondary border border-border/60 text-foreground/80 px-2 py-0.5 rounded">{d}</span>
+                ))}
               </div>
             </details>
           </>
         )}
 
         {/* 使用流程 */}
-        <div className="border border-dashed border-gray-300 rounded p-3 text-xs text-gray-500 space-y-1">
-          <p className="font-medium text-gray-700">使用流程</p>
+        <div className="border-2 border-dashed border-border rounded-lg p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-foreground">使用流程</p>
           <ol className="list-decimal ml-5 space-y-0.5">
-            <li>跑 Multi-Agent 對某日做決策（pool → prepare-batch → /multi-agent-decide 完成 4 phase）</li>
-            <li>等 T+1 ~ T+20 個交易日資料累積</li>
-            <li>到此頁按「Build」對該日跑 ForwardAnalyzer 算 d1-d20 收益</li>
-            <li>看 buy/watch/skip 平均收益是否符合預期</li>
-            <li>看哪個 Agent 的 verdict 對 d5 收益最敏感 → 之後可調整權重（P6）</li>
+            <li>跑多代理對某日做決策（候選池 → 批次準備 → 對話執行多代理決策完成 4 階段）</li>
+            <li>等 1 ~ 20 個交易日資料累積</li>
+            <li>到此頁按「建立」對該日跑前向分析算 1-20 日收益</li>
+            <li>看 買/觀察/略過 平均收益是否符合預期</li>
+            <li>看哪個代理的判定對 5 日收益最敏感 → 之後可調整權重</li>
           </ol>
         </div>
       </div>

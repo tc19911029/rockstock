@@ -144,8 +144,10 @@ export interface DecideContext {
   alreadyAnalyzed: Set<string>;     // video_id 集合
   /**
    * 嚴格同日過濾的目標日期 (YYYY-MM-DD, Asia/Taipei)。
-   * 提供 → published_at 必須落在該日 Asia/Taipei 才允許 should_analyze=true，
-   *        否則回 skip_reason='wrong_date'。
+   * 提供 → 影片的「節目日期」必須是該日才允許 should_analyze=true。
+   *        節目日期 = program_date（由標題解析） ?? ymdTaipei(published_at)
+   *        — 標題日期優先，因為晚間節目常常在隔天 00:xx 才 upload 完，
+   *          published_at 會落在隔天，但標題仍寫前一天，這是真實的節目日。
    * 不提供 → 走舊的 72h 窗（向下相容）。
    */
   targetDate?: string;
@@ -156,7 +158,7 @@ export interface DecideContext {
  * 順序敏感：先處理「已分析過」與「規則性排除」，再處理時效。
  */
 export function decideShouldAnalyze(
-  video: Pick<YouTubeVideo, 'video_id' | 'video_type' | 'duration_sec' | 'published_at' | 'raw'>,
+  video: Pick<YouTubeVideo, 'video_id' | 'video_type' | 'duration_sec' | 'published_at' | 'program_date' | 'raw'>,
   ctx: DecideContext,
 ): { should: boolean; reason: SkipReason | null } {
   if (ctx.alreadyAnalyzed.has(video.video_id)) {
@@ -173,21 +175,41 @@ export function decideShouldAnalyze(
   if (video.duration_sec != null && video.duration_sec < TOO_SHORT_SKIP_THRESHOLD_SEC) {
     return { should: false, reason: 'too_short' };
   }
-  // 時效檢查：targetDate 模式 → 嚴格同日；否則走 72h 窗
-  if (video.published_at) {
-    if (ctx.targetDate) {
-      const videoDate = ymdTaipei(new Date(video.published_at));
-      if (videoDate !== ctx.targetDate) {
-        return { should: false, reason: 'wrong_date' };
-      }
-    } else {
-      const ageMs = ctx.now.getTime() - new Date(video.published_at).getTime();
-      if (ageMs > 72 * 3600_000) {
-        return { should: false, reason: 'too_old' };
-      }
+  // 時效檢查：
+  //   - effective date = program_date (標題日期) ?? ymdTaipei(published_at)
+  //   - targetDate 模式 → effective date 必須 === targetDate
+  //   - 沒 targetDate → effective date 必須在 72h 窗內
+  const effectiveDate = effectiveProgramDate(video);
+  if (ctx.targetDate) {
+    if (!effectiveDate) {
+      // 無從判斷日期 — 不分析（保守處理）
+      return { should: false, reason: 'wrong_date' };
+    }
+    if (effectiveDate !== ctx.targetDate) {
+      return { should: false, reason: 'wrong_date' };
+    }
+  } else if (video.published_at) {
+    const ageMs = ctx.now.getTime() - new Date(video.published_at).getTime();
+    if (ageMs > 72 * 3600_000) {
+      return { should: false, reason: 'too_old' };
     }
   }
   return { should: true, reason: null };
+}
+
+/**
+ * 影片的「實際節目日期」(Asia/Taipei YYYY-MM-DD)。
+ *   優先用 program_date（標題解析）— 因為晚間節目常常隔天 00:xx 才 upload 完，
+ *   published_at 會掉到隔天，但標題仍寫前一天，標題才是真實的節目日。
+ *   標題沒日期才用 published_at。
+ *   兩者都沒就 null（無從判斷）。
+ */
+export function effectiveProgramDate(
+  video: Pick<YouTubeVideo, 'program_date' | 'published_at'>,
+): string | null {
+  if (video.program_date) return video.program_date;
+  if (video.published_at) return ymdTaipei(new Date(video.published_at));
+  return null;
 }
 
 /** ISO 時間轉成 Asia/Taipei 的 YYYY-MM-DD */

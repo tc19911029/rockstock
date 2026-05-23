@@ -3,16 +3,16 @@
 /**
  * /agents/memory?kind=technical|news|chip|fundamental|risk|debate|decision|conflicts|weekly
  *
- * Memory / Reflect 報告檢視頁
+ * 記憶 / 反思報告檢視頁
  *
- * §0 紅線：memory 是純報告，**不影響系統行為**。
- * 此頁只負責顯示，使用者親手讀並決定是否要手動調整 source。
+ * §0 紅線：記憶是純報告，**不影響系統行為**。
+ * 此頁只負責顯示，使用者親手讀並決定是否要手動調整來源。
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { PageShell } from '@/components/shared';
+import { PageShell, PageHeader } from '@/components/shared';
+import { Button } from '@/components/ui/button';
 import type { MemoryFileMeta, MemoryKind } from '@/lib/agents/memory/types';
 
 interface ListResp {
@@ -31,14 +31,14 @@ interface SingleResp {
 }
 
 const KIND_LABEL: Record<MemoryKind, string> = {
-  technical:   '技術面 Agent',
-  news:        '消息面 Agent',
-  chip:        '籌碼面 Agent',
-  fundamental: '基本面 Agent',
-  risk:        '風控 Agent',
-  debate:      'Bull vs Bear 辯論',
-  decision:    'Decision Agent paths',
-  conflicts:   '跨 Agent 衝突 case',
+  technical:   '技術面代理',
+  news:        '消息面代理',
+  chip:        '籌碼面代理',
+  fundamental: '基本面代理',
+  risk:        '風控代理',
+  debate:      '多空辯論',
+  conflicts:   '跨代理衝突案例',
+  decision:    '決策代理路徑',
   weekly:      '週報',
 };
 
@@ -74,7 +74,7 @@ export default function MemoryPage() {
       const json = await res.json() as ListResp;
       setFiles(json.files ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'list failed');
+      setError(err instanceof Error ? err.message : '讀取列表失敗');
     } finally {
       setLoading(false);
     }
@@ -91,7 +91,7 @@ export default function MemoryPage() {
       if (!res.ok) setError(`HTTP ${res.status}`);
       else setContent(json.content);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'fetch failed');
+      setError(err instanceof Error ? err.message : '讀取失敗');
     } finally {
       setLoading(false);
     }
@@ -116,13 +116,13 @@ export default function MemoryPage() {
       if (!res.ok) setError(json.error ?? `HTTP ${res.status}`);
       else {
         setBanner(
-          `✅ Reflect question 已 prepare：${json.decisionsCount} 筆決策 / ${json.conflictCount} 衝突 case / ${json.backtestDatesIncluded} 天 backtest。` +
-          ` 請在 Claude Code 對話執行 /agents-reflect 產出 markdown 報告。`,
+          `✅ 反思題目已準備：${json.decisionsCount} 筆決策 / ${json.conflictCount} 衝突案例 / ${json.backtestDatesIncluded} 天回測。` +
+          ` 請到對話視窗執行反思指令產出報告。`,
         );
         await fetchList();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'reflect failed');
+      setError(err instanceof Error ? err.message : '準備失敗');
     } finally {
       setBusy(false);
     }
@@ -132,106 +132,121 @@ export default function MemoryPage() {
   const nonWeekly = files.filter(f => f.kind !== 'weekly');
   const weekly = files.filter(f => f.kind === 'weekly');
 
+  const headerActions = (
+    <Button onClick={triggerReflect} disabled={busy} variant="secondary" size="sm">
+      {busy ? '準備中…' : '準備反思'}
+    </Button>
+  );
+
   return (
-    <PageShell>
-      <div className="space-y-4 p-4 max-w-6xl mx-auto">
-        <header className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold">Memory / Reflect 報告</h1>
-            <p className="text-sm text-gray-500">
-              純報告 · <span className="text-red-700 font-medium">不影響系統行為</span>（§0 紅線）
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <label className="text-sm flex items-center gap-1">
-              from
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-            </label>
-            <label className="text-sm flex items-center gap-1">
-              to
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-            </label>
-            <button
-              onClick={triggerReflect}
-              disabled={busy}
-              className="border rounded px-3 py-1 text-sm bg-blue-50 hover:bg-blue-100 disabled:opacity-50"
-            >
-              {busy ? 'Preparing…' : 'Prepare Reflect'}
-            </button>
-            <Link href="/agents" className="text-sm text-blue-600 hover:underline">← 回主頁</Link>
-          </div>
-        </header>
+    <PageShell
+      headerSlot={
+        <PageHeader
+          title="🧠 記憶 / 反思報告"
+          backButton="/agents"
+          subtitle={<span className="text-red-400">純報告 · 不影響系統行為（§0 紅線）</span>}
+          actions={headerActions}
+        />
+      }
+    >
+      <div className="max-w-6xl mx-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
+
+        {/* 日期區間 */}
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <label className="flex items-center gap-1 text-muted-foreground">
+            從
+            <input
+              type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+              className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono focus:outline-none focus:border-sky-500"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-muted-foreground">
+            到
+            <input
+              type="date" value={to} onChange={(e) => setTo(e.target.value)}
+              className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono focus:outline-none focus:border-sky-500"
+            />
+          </label>
+        </div>
 
         {banner && (
-          <div className="border border-blue-300 bg-blue-50 text-blue-900 rounded p-3 text-sm">
+          <div className="border border-sky-500/40 bg-sky-500/10 text-sky-300 rounded-lg p-3 text-sm">
             {banner}
           </div>
         )}
         {error && (
-          <div className="border border-red-300 bg-red-50 text-red-800 rounded p-3 text-sm">
+          <div className="border border-red-700/50 bg-red-900/30 text-red-300 rounded-lg p-3 text-sm">
             {error}
           </div>
         )}
 
-        {/* 警示 */}
-        <div className="border-l-4 border-red-400 bg-red-50 p-3 text-xs text-red-900 rounded-r">
-          <strong>§0 紅線提醒：</strong>memory 是純文字觀察報告，**不會被** 任何 prepare/skill 讀取。
-          如果報告顯示某 agent 命中率偏低，請<strong>使用者親手</strong>修改 source（如 lib/agents/agents/*.ts），
-          <strong>不要</strong>讓 reflect skill 自動修改 agent 邏輯。
+        {/* §0 紅線警示 */}
+        <div className="border-l-4 border-red-500 bg-red-900/20 text-red-300 rounded-r-lg p-3 text-xs">
+          <strong>§0 紅線提醒：</strong>記憶是純文字觀察報告，<strong>不會被</strong>任何整理流程或對話指令讀取。
+          如果報告顯示某代理命中率偏低，請<strong>使用者親手</strong>修改原始碼，
+          <strong>不要</strong>讓反思流程自動改代理邏輯。
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 sm:gap-4">
           {/* 左：分頁列表 */}
-          <aside className="space-y-1 md:col-span-1">
-            <h2 className="text-sm font-semibold mb-1">Agent 報告</h2>
-            {nonWeekly.map(f => (
-              <button
-                key={f.kind}
-                onClick={() => { setActiveKind(f.kind); setActiveWeek(null); }}
-                className={`w-full text-left px-3 py-2 rounded border text-sm ${
-                  activeKind === f.kind && !activeWeek
-                    ? 'bg-blue-100 border-blue-400 text-blue-900'
-                    : f.exists
-                      ? 'bg-white hover:bg-gray-50'
-                      : 'bg-gray-50 text-gray-400'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span>{KIND_LABEL[f.kind]}</span>
-                  <span className="text-xs">{f.exists ? '✓' : '—'}</span>
-                </div>
-                {f.exists && f.updatedAt && (
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {new Date(f.updatedAt).toLocaleDateString('zh-TW')}
-                  </div>
-                )}
-              </button>
-            ))}
+          <aside className="md:col-span-1 space-y-2">
+            <h2 className="text-xs font-semibold tracking-wider text-foreground">▸ 代理報告</h2>
+            <div className="space-y-1">
+              {nonWeekly.map(f => {
+                const active = activeKind === f.kind && !activeWeek;
+                return (
+                  <button
+                    key={f.kind}
+                    onClick={() => { setActiveKind(f.kind); setActiveWeek(null); }}
+                    className={`w-full text-left px-3 py-2 rounded-lg border text-xs transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-sky-500/15 border-sky-500/50 text-sky-300'
+                        : f.exists
+                          ? 'bg-secondary border-border hover:bg-muted text-foreground'
+                          : 'bg-muted/30 border-border/60 text-muted-foreground/60'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{KIND_LABEL[f.kind]}</span>
+                      <span className="text-[10px] font-mono">{f.exists ? '✓' : '—'}</span>
+                    </div>
+                    {f.exists && f.updatedAt && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                        {new Date(f.updatedAt).toLocaleDateString('zh-TW')}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
             {weekly.length > 0 && (
               <>
-                <h2 className="text-sm font-semibold mt-3 mb-1">週報</h2>
-                {weekly.map(f => {
-                  const week = f.path.match(/week=(\d{4}-W\d{2})/)?.[1] ?? null;
-                  return (
-                    <button
-                      key={f.path}
-                      onClick={() => { setActiveKind('weekly'); setActiveWeek(week); }}
-                      className={`w-full text-left px-3 py-2 rounded border text-sm ${
-                        activeKind === 'weekly' && activeWeek === week
-                          ? 'bg-blue-100 border-blue-400 text-blue-900'
-                          : 'bg-white hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="font-mono text-sm">{week ?? f.kind}</div>
-                      {f.updatedAt && (
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          {new Date(f.updatedAt).toLocaleDateString('zh-TW')}
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
+                <h2 className="text-xs font-semibold tracking-wider text-foreground mt-4">▸ 週報</h2>
+                <div className="space-y-1">
+                  {weekly.map(f => {
+                    const week = f.path.match(/week=(\d{4}-W\d{2})/)?.[1] ?? null;
+                    const active = activeKind === 'weekly' && activeWeek === week;
+                    return (
+                      <button
+                        key={f.path}
+                        onClick={() => { setActiveKind('weekly'); setActiveWeek(week); }}
+                        className={`w-full text-left px-3 py-2 rounded-lg border text-xs transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-sky-500/15 border-sky-500/50 text-sky-300'
+                            : 'bg-secondary border-border hover:bg-muted text-foreground'
+                        }`}
+                      >
+                        <div className="font-mono">{week ?? f.kind}</div>
+                        {f.updatedAt && (
+                          <div className="text-[10px] text-muted-foreground mt-0.5 font-mono">
+                            {new Date(f.updatedAt).toLocaleDateString('zh-TW')}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </>
             )}
           </aside>
@@ -239,37 +254,43 @@ export default function MemoryPage() {
           {/* 右：內容 */}
           <main className="md:col-span-3">
             {!activeKind && (
-              <div className="border border-dashed border-gray-300 rounded p-6 text-sm text-gray-500 text-center">
-                點左側選擇要查看的 memory 報告
+              <div className="border-2 border-dashed border-border rounded-lg p-6 text-sm text-muted-foreground text-center">
+                點左側選擇要查看的報告
               </div>
             )}
 
-            {activeKind && loading && <p className="text-gray-500">載入中…</p>}
+            {activeKind && loading && (
+              <div className="border border-border rounded-xl bg-card p-6 text-sm text-muted-foreground text-center animate-pulse">
+                載入中…
+              </div>
+            )}
 
             {activeKind && !loading && !content && (
-              <div className="border border-yellow-300 bg-yellow-50 text-yellow-900 rounded p-4 text-sm">
-                此 memory 檔尚未生成。請按上方「Prepare Reflect」+ Claude Code 對話執行 <code className="bg-yellow-100 px-1 rounded">/agents-reflect</code>。
+              <div className="border border-yellow-500/30 bg-yellow-500/10 text-yellow-300 rounded-lg p-4 text-sm">
+                此報告尚未生成。請按上方「準備反思」，然後到對話視窗執行反思指令。
               </div>
             )}
 
             {activeKind && content && (
-              <article className="border rounded p-6 bg-white prose prose-sm max-w-none">
-                <pre className="whitespace-pre-wrap font-mono text-xs bg-gray-50 p-3 rounded">{content}</pre>
+              <article className="bg-card border border-border rounded-xl p-4 sm:p-6">
+                <pre className="whitespace-pre-wrap font-mono text-xs text-foreground/90 bg-muted/40 border border-border/60 rounded-lg p-3 sm:p-4 overflow-x-auto">
+                  {content}
+                </pre>
               </article>
             )}
           </main>
         </div>
 
         {/* 使用流程 */}
-        <div className="border border-dashed border-gray-300 rounded p-3 text-xs text-gray-500 space-y-1">
-          <p className="font-medium text-gray-700">使用流程（每週執行一次即可）</p>
+        <div className="border-2 border-dashed border-border rounded-lg p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-foreground">使用流程（每週執行一次即可）</p>
           <ol className="list-decimal ml-5 space-y-0.5">
-            <li>選 from / to 區間（建議 1-4 週）</li>
-            <li>點「Prepare Reflect」→ 整理 backtest + 衝突 case 寫 /tmp question</li>
-            <li>在 Claude Code 對話執行 <code className="bg-gray-100 px-1 rounded">/agents-reflect</code></li>
-            <li>skill 寫 9 份 markdown 到 data/agents/memory/</li>
-            <li>回此頁點左側 agent 名稱看報告</li>
-            <li>若覺得某 agent 規則需調整，<strong>手動</strong>修改 source（不會自動 fix）</li>
+            <li>選 從 / 到 區間（建議 1-4 週）</li>
+            <li>點「準備反思」→ 整理回測與衝突案例寫到暫存區</li>
+            <li>到對話視窗執行反思指令</li>
+            <li>產生 9 份報告寫到資料夾</li>
+            <li>回此頁點左側代理名稱看報告</li>
+            <li>若覺得某代理規則需調整，<strong className="text-foreground">手動</strong>改原始碼（不會自動修改）</li>
           </ol>
         </div>
       </div>

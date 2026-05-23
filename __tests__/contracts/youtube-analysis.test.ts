@@ -163,12 +163,12 @@ describe('deriveStockMentions', () => {
 
 describe('computeCompositeScore + ratingFromScore', () => {
   const all100: FactorScores = {
-    technical: 100, chip: 100, fundamental: 100,
+    technical: 100, chip_narrative: 100, fundamental: 100,
     news: 100, mention_heat: 100,
     industry: 100, macro: 100, valuation: 100, governance: 100,
   };
   const all0: FactorScores = {
-    technical: 0, chip: 0, fundamental: 0,
+    technical: 0, chip_narrative: 0, fundamental: 0,
     news: 0, mention_heat: 0,
     industry: 0, macro: 0, valuation: 0, governance: 0,
   };
@@ -187,7 +187,7 @@ describe('computeCompositeScore + ratingFromScore', () => {
   });
 
   it('weights respected: chip=100 others=0 should be 18', () => {
-    const s: FactorScores = { ...all0, chip: 100 };
+    const s: FactorScores = { ...all0, chip_narrative: 100 };
     expect(computeCompositeScore(s)).toBeCloseTo(18, 1);
   });
 
@@ -225,7 +225,7 @@ describe('computeCompositeScore + ratingFromScore', () => {
   it('mixed realistic scoring: 台積電-like with high tech/chip/fund/industry/valuation', () => {
     const tsmc: FactorScores = {
       technical: 80,    // 多頭趨勢 + above MA20
-      chip: 70,         // 法人持續加碼
+      chip_narrative: 70,  // 節目籌碼觀點 = 法人持續加碼
       fundamental: 90,  // EPS 高、毛利率好
       news: 60,         // 中性
       mention_heat: 85, // 5 個節目都提到
@@ -243,7 +243,7 @@ describe('computeCompositeScore + ratingFromScore', () => {
   it('mixed realistic scoring: D-rated overheated stock', () => {
     const hot: FactorScores = {
       technical: 30,    // 漲多回檔
-      chip: 40,
+      chip_narrative: 40,
       fundamental: 50,
       news: 30,
       mention_heat: 80,  // 節目很熱
@@ -274,6 +274,7 @@ describe('buildQuestion', () => {
       skip_reason: shouldAnalyze ? null : 'shorts',
       video_confidence_score: 80,
       discovered_at: '2026-05-22T10:00:00Z', last_seen_at: '2026-05-22T10:00:00Z',
+      analysts: ['(測試分析師)'],
       raw: {},
     };
   }

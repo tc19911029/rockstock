@@ -86,7 +86,7 @@ Layer 4: 掃描結果層（複合主鍵，intraday vs post_close）
   1. `com.rockstock.youtube-scan` → `yt-dlp --dump-json --skip-download --playlist-end 30`
   2. `com.rockstock.youtube-transcript?use_whisper=1` → 先抓 yt-dlp 人工字幕，無字幕來源 fallback Whisper 音轉文字
   3. `com.rockstock.youtube-prepare-analysis` → 寫 question payload 到 /tmp（**不打 LLM**）
-- **嚴格同日過濾**（2026-05-22 加）：所有 cron route 接受 `?date=YYYY-MM-DD`，published_at 必須落在該日 Asia/Taipei 才 should_analyze=true，否則 `skip_reason='wrong_date'`。不帶 `?date=` → fallback 72h 窗（向下相容）。Backfill 用法：`?date=2026-05-21&force=1`
+- **嚴格同日過濾**（2026-05-22 加 / 2026-05-23 改用標題日為主）：所有 cron route 接受 `?date=YYYY-MM-DD`。比對的是「節目日期」= `program_date`（標題解析）優先，沒有的退回 `ymdTaipei(published_at)`。必須 === targetDate 才 should_analyze=true，否則 `skip_reason='wrong_date'`。**為什麼用標題日不是 published_at**：晚間節目常常在隔天 00:xx 才 upload 完，published_at 會掉到隔天，但標題仍寫前一天 — 標題才是真實節目日。videos/{date}.json 也按同一個 program_date 規則分檔。不帶 `?date=` → fallback 72h 窗（向下相容）。Backfill 用法：`?date=2026-05-21&force=1`
 - **Whisper 配置**（faster-whisper + medium model）：
   - 安裝：`python3 -m pip install --user faster-whisper`（首次 1.5GB model 下載到 `~/.cache/huggingface`）
   - 速度：M-series CPU 約 2x realtime（25min 影片 ~12min 處理）
@@ -118,6 +118,28 @@ Layer 4: 掃描結果層（複合主鍵，intraday vs post_close）
 - **API**：`/api/youtube/{health,sources,videos,stocks}`、`/api/youtube/transcripts/[video_id]`、`/api/youtube/analysis/[date]`
 - **環境變數**：`CRON_SECRET` (cron route auth)；可選 `FINMIND_API_TOKEN`；**不需要 `ANTHROPIC_API_KEY`**
 
+## 頁面職責定位（重構後）
+
+各頁面職責一句話講清楚，不互相侵蝕；同一檔股票可從多個入口進到對應視角：
+
+| 頁面 | 職責 | 主要入口 |
+|---|---|---|
+| **`/`** | 即時看盤工作台 — K 線 + 分析面板 + 掃描；`/?load={symbol}` 快速載圖 | 各頁股票連結 |
+| **`/watchlist`** | 自選股清單與條件監控 | header nav |
+| **`/portfolio`** | 持倉管理（記帳工具，本機 zustand store） | header nav |
+| **`/etf`** | ETF 持股追蹤與揭露監控 | header nav |
+| **`/youtube`** | 純內容分析 — 跨節目共識 + 提及股票 + 個股時間軸（**不含資料抓取狀態**） | header nav |
+| **`/youtube/replay`** | YouTube 視角走圖（左 K 線 + 右節目卡片） | `/youtube` 連結 |
+| **`/youtube/trends`** | 跨日 7/14/30 天提及排行 | `/youtube` 連結 |
+| **`/agents/pool`** | 多源候選股票池（4 source attribution + §0 隔離 + 高共識 chip） | header nav |
+| **`/agents`** | 4-phase 流程展示（分析師 → 風控 → 多空 → 決策） | header nav |
+| **`/agents/[symbol]`** | 統一股票詳細頁（走圖 + 4 source / 4 verdict + 多空 + YouTube 提及紀錄） | Pool / agents / 股票連結 |
+| **`/health`** | 所有資料源健康總覽（tab：行情 / YouTube / 技術 / Agent / 系統任務） | header nav |
+
+**走圖元件**：`components/shared/StockChartView.tsx`（layout 容器）統一給首頁、scan、replay、`/agents/[symbol]` 用；各頁餵不同 `sidebarSlot`。`CandleChart` + `IndicatorCharts` 是底層 primitive，**不直接被頁面 import**（除測試外）。
+
+**資料邏輯不可混淆**：UI 整合不代表 source 混合。YouTube 是 YouTube source、跨節目共識是 YouTube 的 boost（`YouTubeSourceAttribution.inHighConsensus`）、技術仍是技術 — §0 隔離由 `VISIBLE_SOURCE_BY_AGENT` + `sliceSourcesForAgent`（[lib/agents/candidates/types.ts](lib/agents/candidates/types.ts)）強制保證。
+
 ## 健康監控（0513 ABCDE E）
 
 - **資料健康狀態頁**：`/health`（L1 覆蓋率 / L2 fresh / L4 scan / limit-up consistency 紅綠燈）
@@ -130,12 +152,14 @@ Layer 4: 掃描結果層（複合主鍵，intraday vs post_close）
 ## 測試金字塔
 
 ```
-762 unit tests (Jest)        — detector / SOP / store
- 17 contract tests           — scan-parity / cross-source
+~485 unit tests (Jest)       — detector / SOP / store
+  ~7 contract tests          — scan-parity / cross-source / youtube-consensus
  16 e2e tests (Playwright)   — chart locked / lockwatch flow / hydration
 ─────────────────────────────
-795 total, tsc clean, 全綠
+~500 total, tsc clean, 全綠
 ```
+
+> 數量會跟隨開發增減；以 `npm test` 與 `npm run test:contracts` 的實際輸出為準。
 
 - `npm test`：跑全部 Jest 單元 + 合約測試
 - `npm run test:contracts`：只跑合約（最快）

@@ -6,8 +6,9 @@ import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun,
   Star, Briefcase, Menu, TrendingUp,
+  PlaySquare, Brain, Activity, Settings, FileText, Layers,
 } from 'lucide-react';
-import { useTheme } from 'next-themes';
+import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
 import {
   Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle,
@@ -33,8 +34,13 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
   const { theme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const isActive = (href: string) =>
-    href === '/' ? pathname === '/' : pathname.startsWith(href.split('?')[0]);
+  const isActive = (href: string) => {
+    if (href === '/') return pathname === '/';
+    const base = href.split('?')[0];
+    // /agents 不要在子路徑 /agents/pool 上亮（避免父子同時 active）
+    if (base === '/agents' && pathname.startsWith('/agents/pool')) return false;
+    return pathname.startsWith(base);
+  };
 
   return (
     <div className={cn(
@@ -61,11 +67,36 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
 
           {/* Secondary Nav — desktop icon-only + settings dropdown */}
           <nav aria-label="輔助導覽" className="hidden md:flex items-center gap-0.5">
-            {/* Watchlist & Portfolio direct links */}
+            {/* Primary tools */}
             {([
               { href: '/watchlist', label: '自選股',   icon: Star },
               { href: '/portfolio', label: '持倉',     icon: Briefcase },
               { href: '/etf',       label: 'ETF追蹤', icon: TrendingUp },
+            ] as const).map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                title={label}
+                className={cn(
+                  'p-2 rounded-md transition-colors',
+                  isActive(href)
+                    ? 'text-sky-400 bg-sky-500/10'
+                    : 'text-muted-foreground hover:text-foreground/80 hover:bg-secondary',
+                )}
+              >
+                <Icon className="w-4 h-4" />
+              </Link>
+            ))}
+
+            {/* Divider */}
+            <span className="w-px h-5 bg-border mx-1" />
+
+            {/* Analysis tools */}
+            {([
+              { href: '/youtube',      label: 'YouTube 節目分析', icon: PlaySquare },
+              { href: '/agents/pool',  label: '候選股票池',       icon: Layers },
+              { href: '/agents',       label: '多代理決策中心',   icon: Brain },
+              { href: '/health',       label: '資料健康',         icon: Activity },
             ] as const).map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
@@ -112,27 +143,55 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
                     選單
                   </SheetTitle>
                 </SheetHeader>
-                <nav aria-label="行動版導覽" className="flex flex-col gap-1 mt-4 px-2">
-                  {/* Mobile: flat list of sub-pages */}
-                  {[
-                    { href: '/watchlist',            label: '自選股',    icon: Star },
-                    { href: '/portfolio',            label: '持倉',      icon: Briefcase },
-                    { href: '/etf',                  label: 'ETF追蹤',  icon: TrendingUp },
-                  ].map(({ href, label, icon: Icon }) => (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={() => setMobileOpen(false)}
-                      className={cn(
-                        'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                        isActive(href)
-                          ? 'bg-sky-500/15 text-sky-400'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-secondary',
-                      )}
-                    >
-                      <Icon className="w-4 h-4" />
-                      {label}
-                    </Link>
+                <nav aria-label="行動版導覽" className="flex flex-col gap-4 mt-4 px-2">
+                  {/* Mobile: grouped nav */}
+                  {([
+                    {
+                      title: '主要工具',
+                      items: [
+                        { href: '/watchlist', label: '⭐ 自選股',   icon: Star },
+                        { href: '/portfolio', label: '💼 持倉',     icon: Briefcase },
+                        { href: '/etf',       label: '📈 ETF 追蹤', icon: TrendingUp },
+                      ],
+                    },
+                    {
+                      title: '分析',
+                      items: [
+                        { href: '/youtube',     label: '📺 YouTube 節目分析', icon: PlaySquare },
+                        { href: '/agents/pool', label: '🗂️ 候選股票池',       icon: Layers },
+                        { href: '/agents',      label: '🤖 多代理決策中心',   icon: Brain },
+                      ],
+                    },
+                    {
+                      title: '系統',
+                      items: [
+                        { href: '/health',     label: '💚 資料健康',   icon: Activity },
+                        { href: '/settings',   label: '⚙️ 設定',       icon: Settings },
+                        { href: '/disclaimer', label: '📄 免責聲明',   icon: FileText },
+                      ],
+                    },
+                  ] as const).map((group) => (
+                    <div key={group.title} className="flex flex-col gap-1">
+                      <div className="px-3 text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">
+                        {group.title}
+                      </div>
+                      {group.items.map(({ href, label, icon: Icon }) => (
+                        <Link
+                          key={href}
+                          href={href}
+                          onClick={() => setMobileOpen(false)}
+                          className={cn(
+                            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                            isActive(href)
+                              ? 'bg-sky-500/15 text-sky-400'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-secondary',
+                          )}
+                        >
+                          <Icon className="w-4 h-4" />
+                          {label}
+                        </Link>
+                      ))}
+                    </div>
                   ))}
                 </nav>
               </SheetContent>

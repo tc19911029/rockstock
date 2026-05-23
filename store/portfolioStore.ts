@@ -2,6 +2,13 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Candle } from '../types';
 import type { MarketId } from '../lib/scanner/types';
+import {
+  mapStoreToServerHolding,
+  toUpsertApiBody,
+  mapStoreHoldingsToImportRows,
+  shouldSyncToServer,
+  type StorePortfolioHolding,
+} from '../lib/portfolio/storeToHoldingsMapping';
 
 export interface PortfolioHolding {
   id: string;
@@ -138,6 +145,114 @@ interface PortfolioStore {
   importJSON: (json: string, mode?: 'merge' | 'replace') => boolean;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 0.4: server sync helpers（fire-and-forget；browser-only）
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 把單筆 UI holding 同步到 server holdings.json
+ *
+ * Fire-and-forget — 失敗不擋 UI 動作。SSR 環境（無 window）跳過。
+ * 失敗時印 console.warn 但不 throw。
+ *
+ * **TW-only**：2026-05-23 用戶決議「不要管陸股」(memory project_cn_excluded_from_path)，
+ * 陸股不 fire upsert（避免污染 holdings.json）。
+ */
+async function syncHoldingToServer(h: StorePortfolioHolding): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (!shouldSyncToServer(h)) {
+    console.debug('[portfolioStore] sync skip (CN excluded):', h.symbol);
+    return;
+  }
+  try {
+    const mapped = mapStoreToServerHolding(h);
+    if (!mapped.ok || !mapped.payload) {
+      console.warn('[portfolioStore] sync skip:', h.symbol, mapped.reason);
+      return;
+    }
+    const body = toUpsertApiBody(mapped.payload);
+    const resp = await fetch('/api/agents/portfolio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      console.warn('[portfolioStore] sync upsert fail:', resp.status, h.symbol, text);
+    }
+  } catch (e) {
+    console.warn('[portfolioStore] sync upsert error:', h.symbol, e);
+  }
+}
+
+/**
+ * 從 server holdings.json 刪除一檔（hard delete）
+ *
+ * Fire-and-forget；對應 UI remove() 動作。
+ */
+async function unsyncHoldingFromServer(symbol: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const resp = await fetch(
+      `/api/agents/portfolio?symbol=${encodeURIComponent(symbol)}&hard=1`,
+      { method: 'DELETE' },
+    );
+    if (!resp.ok && resp.status !== 404) {
+      const text = await resp.text().catch(() => '');
+      console.warn('[portfolioStore] unsync fail:', resp.status, symbol, text);
+    }
+  } catch (e) {
+    console.warn('[portfolioStore] unsync error:', symbol, e);
+  }
+}
+
+/**
+ * 賣出時呼叫 server close-trade API（trades.json append + holdings.json 移除）
+ *
+ * Fire-and-forget；UI 端的 Zustand sell() 仍維持原 realizedTrades 紀錄（兩套並存）。
+ *
+ * exitReason 由 reason 字串推導 enum；推不出來走 'manual'。
+ */
+function inferExitReason(reason?: string): string {
+  if (!reason) return 'manual';
+  const r = reason.toLowerCase();
+  if (r.includes('停損') || r.includes('stop')) return 'stop_loss';
+  if (r.includes('停利') || r.includes('target') || r.includes('profit') || r.includes('減碼')) return 'target_hit';
+  if (r.includes('紀律') || r.includes('戒律') || r.includes('discipline')) return 'discipline_break';
+  if (r.includes('風控') || r.includes('risk')) return 'risk_red';
+  if (r.includes('換股') || r.includes('swap')) return 'swap';
+  if (r.includes('天數') || r.includes('max') || r.includes('hold')) return 'hold_days_max';
+  return 'manual';
+}
+
+async function syncCloseTradeToServer(args: {
+  symbol: string;
+  sellPrice: number;
+  sellDate: string;
+  reason?: string;
+}): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const resp = await fetch('/api/portfolio/close-trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        symbol: args.symbol,
+        exitPrice: args.sellPrice,
+        exitDate: args.sellDate,
+        exitReason: inferExitReason(args.reason),
+        exitNote: args.reason,
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      console.warn('[portfolioStore] close-trade fail:', resp.status, args.symbol, text);
+    }
+  } catch (e) {
+    console.warn('[portfolioStore] close-trade error:', args.symbol, e);
+  }
+}
+
 export const usePortfolioStore = create<PortfolioStore>()(
   persist(
     (set) => ({
@@ -145,14 +260,33 @@ export const usePortfolioStore = create<PortfolioStore>()(
       realizedTrades: [],
       cashBalance: { TW: 1_000_000, CN: 1_000_000 },
       cashReservePct: 0,
-      add: (h) => set(s => ({
-        holdings: [...s.holdings, { ...h, id: Date.now().toString() }],
-      })),
-      remove: (id) => set(s => ({ holdings: s.holdings.filter(h => h.id !== id) })),
-      update: (id, partial) => set(s => ({
-        holdings: s.holdings.map(h => h.id === id ? { ...h, ...partial } : h),
-      })),
-      sell: (id, sellPrice, sellDate, reason) => set(s => {
+      add: (h) => {
+        const id = Date.now().toString();
+        const newH: PortfolioHolding = { ...h, id };
+        set(s => ({ holdings: [...s.holdings, newH] }));
+        void syncHoldingToServer(newH);  // Phase 0.4: fire-and-forget
+      },
+      remove: (id) => {
+        const target = usePortfolioStore.getState().holdings.find(h => h.id === id);
+        set(s => ({ holdings: s.holdings.filter(h => h.id !== id) }));
+        if (target) void unsyncHoldingFromServer(target.symbol);  // Phase 0.4
+      },
+      update: (id, partial) => {
+        set(s => ({
+          holdings: s.holdings.map(h => h.id === id ? { ...h, ...partial } : h),
+        }));
+        const updated = usePortfolioStore.getState().holdings.find(h => h.id === id);
+        if (updated) void syncHoldingToServer(updated);  // Phase 0.4
+      },
+      sell: (id, sellPrice, sellDate, reason) => {
+        const before = usePortfolioStore.getState().holdings.find(x => x.id === id);
+        if (before) {
+          // Phase 0.4: fire-and-forget close-trade（trades.json + 移除 holdings.json）
+          void syncCloseTradeToServer({
+            symbol: before.symbol, sellPrice, sellDate, reason,
+          });
+        }
+        return set(s => {
         const h = s.holdings.find(x => x.id === id);
         if (!h) return s;
         const market: MarketId = (h.market ?? 'TW') as MarketId;
@@ -196,7 +330,8 @@ export const usePortfolioStore = create<PortfolioStore>()(
           // cashBalance 加實收（已扣賣出手續費+稅，未扣買進手續費因買進當時應已扣）
           cashBalance: { ...s.cashBalance, [market]: s.cashBalance[market] + netProceeds },
         };
-      }),
+        });
+      },
       removeRealized: (id) => set(s => ({
         realizedTrades: s.realizedTrades.filter(t => t.id !== id),
       })),
@@ -276,3 +411,63 @@ export const usePortfolioStore = create<PortfolioStore>()(
     },
   ),
 );
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 0.4: 整批同步 helper（獨立 export，避免 Zustand store interface 含 async
+// method 破壞型別推導 — TS 對 Zustand persist + async return 的組合推導不穩）
+// ════════════════════════════════════════════════════════════════════════════
+
+export interface SyncAllResult {
+  inserted: number;
+  rejected: number;
+  total: number;
+  skipped?: boolean;
+}
+
+/**
+ * 把 Zustand 內的所有 holdings 整批同步到 server holdings.json
+ *
+ * 用法（UI 按鈕）：
+ *   const result = await syncAllHoldingsToServer();
+ *   toast(`已同步 ${result.inserted} 檔（${result.rejected} 檔失敗）`);
+ */
+export async function syncAllHoldingsToServer(): Promise<SyncAllResult> {
+  if (typeof window === 'undefined') {
+    return { inserted: 0, rejected: 0, total: 0, skipped: true };
+  }
+  const { holdings } = usePortfolioStore.getState();
+  const { rows, rejections } = mapStoreHoldingsToImportRows(holdings);
+  if (rejections.length > 0) {
+    console.warn('[portfolioStore] syncAll 部分 rejected:', rejections);
+  }
+  if (rows.length === 0) {
+    return { inserted: 0, rejected: rejections.length, total: holdings.length };
+  }
+  try {
+    const resp = await fetch('/api/portfolio/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows, forcePrice: true }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      console.warn('[portfolioStore] syncAll fail:', resp.status, text);
+      return { inserted: 0, rejected: holdings.length, total: holdings.length };
+    }
+    const json = await resp.json() as {
+      ok?: boolean;
+      data?: { inserted?: number; rejected?: number; total?: number };
+      inserted?: number; rejected?: number; total?: number;
+    };
+    // apiOk wraps response in { ok, data }; raw may be { inserted, rejected, total }
+    const data = json.data ?? json;
+    return {
+      inserted: data.inserted ?? 0,
+      rejected: (data.rejected ?? 0) + rejections.length,
+      total: holdings.length,
+    };
+  } catch (e) {
+    console.warn('[portfolioStore] syncAll error:', e);
+    return { inserted: 0, rejected: holdings.length, total: holdings.length };
+  }
+}

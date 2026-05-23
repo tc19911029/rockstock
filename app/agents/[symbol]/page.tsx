@@ -18,7 +18,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { PageShell } from '@/components/shared';
+import { PageShell, PageHeader, BackButton } from '@/components/shared';
+import { AgentChartSection } from './_components/AgentChartSection';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -407,46 +408,53 @@ export default function AgentDetailPage() {
     return [data.technical, data.news, data.chip, data.fundamental].filter(Boolean).length;
   }, [data]);
 
+  const symbolPageHeader = (
+    <PageHeader
+      title={data?.candidate?.name ?? `（${symbol}）`}
+      backButton={`/agents?date=${date}`}
+      subtitle={
+        <span className="font-mono">
+          {symbol}{data?.meta?.market ? ` · ${data.meta.market}` : ''} · {phaseLabel} · {completedCount}/4
+        </span>
+      }
+    />
+  );
+
   return (
-    <PageShell>
-      <div className="bg-slate-950 text-slate-200 min-h-full">
-        {/* ───────── HEADER ───────── */}
-        <header className="border-b border-cyan-700/30 bg-slate-900/60 sticky top-12 z-10">
+    <PageShell headerSlot={symbolPageHeader}>
+      <div className="min-h-full">
+        {/* ───────── CONTROL BAR ───────── */}
+        <header className="border-b border-border bg-card sticky top-12 z-10">
           <div className="max-w-[1200px] mx-auto px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h1 className="text-2xl font-bold tracking-tight flex items-baseline gap-2 flex-wrap">
-                <span className="text-cyan-300">
-                  {data?.candidate?.name ?? <span className="text-slate-500">（未知名稱）</span>}
+                <span className="text-sky-500">
+                  {data?.candidate?.name ?? <span className="text-muted-foreground">（未知名稱）</span>}
                 </span>
-                <span className="text-base font-mono font-normal text-slate-400">{symbol}</span>
+                <span className="text-base font-mono font-normal text-muted-foreground">{symbol}</span>
                 {data?.meta?.market && (
-                  <span className="text-xs font-normal text-slate-500 uppercase">{data.meta.market}</span>
+                  <span className="text-xs font-normal text-muted-foreground uppercase">{data.meta.market}</span>
                 )}
               </h1>
-              <p className="text-sm text-slate-500 mt-0.5">
+              <p className="text-sm text-muted-foreground mt-0.5">
                 多代理分析 · {phaseLabel} · {completedCount}/4 個分析師完成
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <Link
-                href={`/agents?date=${date}`}
-                className="text-cyan-400 hover:text-cyan-300 text-xs"
-              >
-                ← 回列表
-              </Link>
+              <BackButton href={`/agents?date=${date}`} label="回列表" variant="with-label" />
               <input
                 type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 font-mono text-xs"
+                className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono text-xs"
               />
               <button
                 onClick={prepareAgent} disabled={loading}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50"
+                className="bg-sky-500 hover:bg-sky-400 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50"
               >
                 {completedCount > 0 ? '重新準備' : '開始準備'}
               </button>
               <button
                 onClick={fetchData} disabled={loading}
-                className="border border-slate-700 hover:bg-slate-800 px-3 py-1 rounded text-xs transition disabled:opacity-50"
+                className="border border-border hover:bg-secondary px-3 py-1 rounded text-xs transition disabled:opacity-50"
               >
                 ⟲ 重整
               </button>
@@ -457,23 +465,26 @@ export default function AgentDetailPage() {
         {/* ───────── BODY ───────── */}
         <div className="max-w-[1200px] mx-auto px-6 py-4 space-y-4">
           {error && (
-            <div className="border border-rose-500/40 bg-rose-900/20 text-rose-200 rounded p-3 text-sm whitespace-pre-wrap">
+            <div className="border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 rounded p-3 text-sm whitespace-pre-wrap">
               {error}
             </div>
           )}
 
-          {loading && !data && <p className="text-slate-500">載入中…</p>}
+          {loading && !data && <p className="text-muted-foreground">載入中…</p>}
 
           {data && completedCount === 0 && !error && (
-            <div className="border border-amber-500/40 bg-amber-900/20 text-amber-100 rounded-lg p-4 text-sm space-y-2">
+            <div className="border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200 rounded-lg p-4 text-sm space-y-2">
               <p className="font-medium">尚未產生任何分析師結果。</p>
               <ol className="list-decimal ml-5 space-y-1">
                 <li>點上方「開始準備」（會 POST /api/agents/prepare 寫 4 個 question.json）</li>
-                <li>在 Claude Code 對話中執行 <code className="bg-amber-900/40 text-amber-200 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code></li>
+                <li>在 Claude Code 對話中執行 <code className="bg-amber-500/20 text-amber-700 dark:text-amber-200 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code></li>
                 <li>slash command 寫完 4 個 answer 後回此頁按「重整」</li>
               </ol>
             </div>
           )}
+
+          {/* Stage 5：內嵌走圖（與首頁、/youtube/replay 同一套 StockChartView） */}
+          <AgentChartSection symbol={symbol} scanDate={date} />
 
           {/* 為何進入候選池 */}
           {data?.candidate && <CandidateSourcesBlock candidate={data.candidate} />}

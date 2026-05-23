@@ -20,7 +20,7 @@ import { useReplayStore } from '@/store/replayStore';
 import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
 import StockSelector from '@/components/StockSelector';
-import { PageShell, EmptyState } from '@/components/shared';
+import { PageShell, EmptyState, BackButton, StockChartView } from '@/components/shared';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import SignalSummaryCard from '@/components/SignalSummaryCard';
 import { useV12HistoricalMarkers } from '@/lib/hooks/useV12HistoricalMarkers';
@@ -34,12 +34,16 @@ import BottomPanel from '@/components/BottomPanel';
 import { ScanPanelVertical } from '@/features/scan';
 import { DataHealthBadge } from '@/features/scan/components/DataHealthBadge';
 import type { SelectedStock } from '@/features/scan';
+import { YoutubeStocksPanel } from '@/components/youtube/YoutubeStocksPanel';
+import { CandidatesPoolPanel } from '@/components/CandidatesPoolPanel';
+import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { ChevronDown, Search, ArrowLeft } from 'lucide-react';
+import { ChevronDown, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import ChartToolbar from '@/components/ChartToolbar';
 
+// Mobile fullscreen 仍直接使用 CandleChart / IndicatorCharts（StockChartView 抽出範圍只到 desktop 主視窗）
 const CandleChart = dynamic(() => import('@/components/CandleChart'), {
   ssr: false,
   loading: () => (
@@ -130,6 +134,15 @@ export default function HomePage() {
     // 接受 ?load=2330.TW 或 ?symbol=2330.TW 兩種寫法（symbol 是更直覺的別名）
     const sym = params.get('load') ?? params.get('symbol');
     const date = params.get('date');
+    // ?tab=youtube / pool / agent / scan 直達指定 tab
+    const urlTab = params.get('tab');
+    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'pool' || urlTab === 'agent') {
+      setRightTab(urlTab);
+    }
+    // YouTube tab 接受 ?date=YYYY-MM-DD 預設選日
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setYoutubeDate(date);
+    }
     if (sym) {
       loadStock(sym, '1d', '2y', date ?? undefined).catch((e: Error) => {
         const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
@@ -139,6 +152,14 @@ export default function HomePage() {
       window.history.replaceState({}, '', '/');
     } else if (allCandles.length === 0) {
       loadStock(getMarketIndex(market).symbol, '1d', '2y').catch(() => {});
+    }
+    // 清掉 ?tab= 與 ?date=（已被 state 吸收）
+    if (urlTab || date) {
+      const clean = new URLSearchParams(window.location.search);
+      clean.delete('tab');
+      if (!sym) clean.delete('date'); // sym 已用 replaceState 清整個 query，這裡只在沒 sym 時清 date
+      const qs = clean.toString();
+      window.history.replaceState({}, '', qs ? `/?${qs}` : '/');
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -166,6 +187,43 @@ export default function HomePage() {
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel — v12 預設展開讓用戶一進來就看到新功能（14 字母 tabs/Step 0 banner/LockWatch panel/警示徽章）
   const [scannerOpen, setScannerOpen] = useState(true);
+  // Stage 7-10：右側 panel tab — 策略掃描 / YouTube 提及 / 候選池 / Multi-Agent
+  type RightTab = 'scan' | 'youtube' | 'pool' | 'agent';
+  const [rightTab, setRightTab] = useState<RightTab>('scan');
+  // YouTube tab 用的日期（預設今天 CST）
+  const [youtubeDate, setYoutubeDate] = useState(() => {
+    const tpe = new Date(Date.now() + 8 * 3600_000);
+    return tpe.toISOString().slice(0, 10);
+  });
+  const [youtubeSelectedCode, setYoutubeSelectedCode] = useState<string | null>(null);
+  // YouTube tab 內點股票 → loadStock + 跳左側 K 線（mobile inline 切全螢幕，避免 hoisting）
+  const handleYoutubeSelectStock = useCallback((code: string) => {
+    setYoutubeSelectedCode(code);
+    // YouTube source 都是 TW 股，補 .TW suffix
+    const symbol = /\.(TW|TWO|SS|SZ)$/i.test(code) ? code : `${code}.TW`;
+    loadStock(symbol, '1d', '2y', youtubeDate).catch((e: Error) => {
+      toast.error(`載入 ${code} 失敗：${e.message || '請稍後再試'}`);
+    });
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileChartFullscreen(true);
+      setScannerOpen(false);
+      try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
+    }
+  }, [loadStock, youtubeDate]);
+
+  // Pool tab / Multi-Agent tab 點股票 → loadStock（symbol 已是 2330.TW 格式，不必補 suffix）
+  const handlePoolSelectStock = useCallback((symbol: string) => {
+    loadStock(symbol, '1d', '2y').catch((e: Error) => {
+      toast.error(`載入 ${symbol} 失敗：${e.message || '請稍後再試'}`);
+    });
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setMobileChartFullscreen(true);
+      setScannerOpen(false);
+      try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
+    }
+  }, [loadStock]);
+  // Multi-Agent tab 共用 Pool 的 callback（symbol 格式相同）
+  const handleAgentSelectStock = handlePoolSelectStock;
   // 手機點「走圖」→ 全螢幕 K 線視圖
   const [mobileChartFullscreen, setMobileChartFullscreen] = useState(false);
   const openMobileChart = useCallback(() => {
@@ -303,35 +361,9 @@ export default function HomePage() {
     if (saved && parseFloat(saved) >= 0.5) setChartSplit(parseFloat(saved));
     else localStorage.removeItem('chartSplit');
   }, []);
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-  const splitDraggingRef = useRef(false);
-
-  const startSplitDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    splitDraggingRef.current = true;
-    let latestSplit: number | null = null;
-
-    const handleMove = (me: MouseEvent) => {
-      if (!splitDraggingRef.current || !chartContainerRef.current) return;
-      const rect = chartContainerRef.current.getBoundingClientRect();
-      const newSplit = Math.min(Math.max((me.clientY - rect.top) / rect.height, 0.2), 0.85);
-      setChartSplit(newSplit);
-      latestSplit = newSplit;
-      // 不在每次 mousemove 寫 localStorage（拖一下就 100+ 次同步寫會卡 UI），
-      // 改在 mouseup 一次性 commit
-    };
-
-    const handleUp = () => {
-      splitDraggingRef.current = false;
-      if (latestSplit !== null) {
-        try { localStorage.setItem('chartSplit', String(latestSplit)); } catch {}
-      }
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
+  // chartSplit 持久化：mouseup 才寫，避免每次拖動 100+ 次寫盤
+  const handleChartSplitCommit = useCallback((split: number) => {
+    try { localStorage.setItem('chartSplit', String(split)); } catch {}
   }, []);
 
   // P3-8: Sound alert when a new signal appears during replay
@@ -448,11 +480,9 @@ export default function HomePage() {
 
         {/* Left: Chart */}
         <div className="w-full md:flex-1 md:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
-          <div
-            ref={chartContainerRef}
-            className={`relative flex flex-col flex-1 rounded-xl border border-border overflow-hidden bg-card transition-opacity animate-fade-in ${isLoadingStock ? 'opacity-40 pointer-events-none' : ''}`}
-          >
-            {isLoadingStock && (
+          <StockChartView
+            isLoading={isLoadingStock}
+            loadingOverlay={
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card/90">
                 <div className="w-3/4 max-w-md space-y-2 mb-4">
                   {/* Skeleton chart lines */}
@@ -468,31 +498,31 @@ export default function HomePage() {
                   <p className="text-sm text-muted-foreground">載入資料中...</p>
                 </div>
               </div>
-            )}
-
-            {loadError && (
-              <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-red-900/30 border-b border-red-700/50 text-xs">
-                <span className="text-red-400">{loadError}</span>
-                <button onClick={() => { setLoadError(null); loadStock('2330', '1d', '2y'); }}
-                  className="text-sky-400 hover:text-sky-300 underline">重試</button>
-              </div>
-            )}
-
-            {dataGaps.length > 0 && currentInterval === '1d' && (
-              <div className="shrink-0 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between">
-                <span>
-                  資料斷層：{dataGaps.map((g: { fromDate: string; toDate: string; calendarDays: number }) => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天）`).join('、')}
-                </span>
-                <button
-                  onClick={() => { if (!currentStock) return; loadStock(currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, ''), '1d', '2y').catch(() => {}); }}
-                  className="text-yellow-300 hover:text-yellow-200 underline ml-2 whitespace-nowrap">
-                  重新下載
-                </button>
-              </div>
-            )}
-
-            {/* OHLCV bar + 指標切換列 */}
-            {displayCandle && (
+            }
+            topAlertSlot={
+              <>
+                {loadError && (
+                  <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-red-900/30 border-b border-red-700/50 text-xs">
+                    <span className="text-red-400">{loadError}</span>
+                    <button onClick={() => { setLoadError(null); loadStock('2330', '1d', '2y'); }}
+                      className="text-sky-400 hover:text-sky-300 underline">重試</button>
+                  </div>
+                )}
+                {dataGaps.length > 0 && currentInterval === '1d' && (
+                  <div className="shrink-0 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between">
+                    <span>
+                      資料斷層：{dataGaps.map((g: { fromDate: string; toDate: string; calendarDays: number }) => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天）`).join('、')}
+                    </span>
+                    <button
+                      onClick={() => { if (!currentStock) return; loadStock(currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, ''), '1d', '2y').catch(() => {}); }}
+                      className="text-yellow-300 hover:text-yellow-200 underline ml-2 whitespace-nowrap">
+                      重新下載
+                    </button>
+                  </div>
+                )}
+              </>
+            }
+            toolbarSlot={displayCandle && (
               <ChartToolbar
                 candle={displayCandle}
                 prevCandle={prev}
@@ -541,81 +571,45 @@ export default function HomePage() {
                 ticker={currentStock?.ticker}
               />
             )}
-
-            {/* Chart area: toolbar 高度可變，這層 flex-1 確保主圖 height: 65% 是「chart 區」而不是「整個 panel」的 65%，
-                避免 toolbar wrap 多行時主圖+分隔條把副圖擠成 0 高度（在窄寬度下成交量/KD/MACD 都會消失） */}
-            <div className="flex-1 flex flex-col min-h-0">
-
-            {/* K 線圖 */}
-            <div className={showIndicators ? 'shrink-0' : 'flex-1 min-h-0'} style={showIndicators ? { height: `${chartSplit * 100}%` } : undefined}>
-              <ErrorBoundary>
-                <CandleChart
-                  candles={visibleCandles}
-                  signals={currentSignals}
-                  chartMarkers={showMarkers ? mergedMarkers : []}
-                  avgCost={metrics.shares > 0 ? metrics.avgCost : undefined}
-                  stopLossPrice={stopLossPrice}
-                  onCrosshairMove={setHoverCandle}
-                  onDoubleClick={(candle) => {
-                    const idx = allCandles.findIndex(c => c.date === candle.date);
-                    if (idx >= 0) useReplayStore.getState().jumpToIndex(idx);
-                  }}
-                  fillContainer
-                  maToggles={maToggles}
-                  showBollinger={showBollinger}
-                  showPivots={showPivots}
-                  showSupportResistance={showSupportResistance}
-                  showAscendingTrendline={showAscendingTrendline}
-                  showDescendingTrendline={showDescendingTrendline}
-                  showAscendingChannel={showAscendingChannel}
-                  showDescendingChannel={showDescendingChannel}
-                  showConsolidationLines={showConsolidationLines}
-                  showNeckline={showNeckline}
-                  showPattern={showPattern}
-                  highlightDate={targetDate ?? undefined}
-                  lockedPattern={lockedPattern}
-                />
-              </ErrorBoundary>
-            </div>
-
-            {/* 拖拽分隔條 + 副圖展開按鈕 */}
-            <div className="shrink-0 flex items-center">
-              {showIndicators ? (
-                <div
-                  role="separator"
-                  aria-orientation="horizontal"
-                  aria-label="拖拽調整 K 線圖與副圖比例"
-                  className="flex-1 h-4 bg-border/60 hover:bg-blue-500/40 cursor-row-resize flex items-center justify-center group select-none"
-                  onMouseDown={startSplitDrag}
-                  title="拖拽調整 K 線 / 副圖比例（上下拖動）"
-                >
-                  <div className="w-12 h-1 bg-muted-foreground/50 group-hover:bg-blue-400 rounded-full transition-colors" />
-                </div>
-              ) : (
-                <div className="flex-1 h-px bg-border" />
-              )}
-              <button
-                onClick={() => setShowIndicators(v => !v)}
-                aria-label={showIndicators ? '收起副圖指標' : '展開副圖指標'}
-                aria-expanded={showIndicators}
-                className="shrink-0 px-2 py-0.5 text-[9px] text-muted-foreground hover:text-foreground bg-secondary/60 hover:bg-secondary rounded transition-colors"
-              >
-                {showIndicators ? '▼ 副圖' : '▲ 副圖'}
-              </button>
-            </div>
-
-            {/* 副圖指標 */}
-            {showIndicators && (
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <ErrorBoundary>
-                  <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} chips={chips} chipsLoading={chipsLoading} />
-                </ErrorBoundary>
-              </div>
-            )}
-            </div>
-          </div>
-
-
+            chartProps={{
+              candles: visibleCandles,
+              signals: currentSignals,
+              chartMarkers: showMarkers ? mergedMarkers : [],
+              avgCost: metrics.shares > 0 ? metrics.avgCost : undefined,
+              stopLossPrice,
+              onCrosshairMove: setHoverCandle,
+              onDoubleClick: (candle) => {
+                const idx = allCandles.findIndex(c => c.date === candle.date);
+                if (idx >= 0) useReplayStore.getState().jumpToIndex(idx);
+              },
+              maToggles,
+              showBollinger,
+              showPivots,
+              showSupportResistance,
+              showAscendingTrendline,
+              showDescendingTrendline,
+              showAscendingChannel,
+              showDescendingChannel,
+              showConsolidationLines,
+              showNeckline,
+              showPattern,
+              highlightDate: targetDate ?? undefined,
+              lockedPattern,
+            }}
+            indicatorProps={{
+              candles: visibleCandles,
+              hoverCandle,
+              indicators,
+              ticker: currentStock?.ticker,
+              chips,
+              chipsLoading,
+            }}
+            showIndicators={showIndicators}
+            onToggleIndicators={() => setShowIndicators(v => !v)}
+            chartSplit={chartSplit}
+            onChartSplitChange={setChartSplit}
+            onChartSplitCommit={handleChartSplitCommit}
+          />
         </div>
 
         {/* Middle: Sidebar */}
@@ -654,7 +648,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* ── Right: Scan Panel (vertical on desktop, full-width stacked on mobile) ── */}
+        {/* ── Right: 多源候選 panel（tab：策略掃描 / YouTube 提及） ── */}
         <div className={`shrink-0 flex flex-col min-h-0 border border-border bg-card/80 rounded-lg overflow-hidden transition-all duration-300 ${
           scannerOpen
             ? 'w-full md:w-[600px] min-h-[50vh] md:min-h-0'
@@ -662,19 +656,87 @@ export default function HomePage() {
         }`}>
           {scannerOpen ? (
             <>
-              {/* Panel header: 掃描標題 + close button */}
-              <div className="shrink-0 flex items-center justify-between px-2 py-1.5 border-b border-border bg-secondary/30">
-                <div className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-foreground">
+              {/* Panel header：tab 切換 + close button */}
+              <div className="shrink-0 flex items-stretch border-b border-border bg-secondary/30">
+                <button
+                  type="button"
+                  onClick={() => setRightTab('scan')}
+                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'scan'
+                      ? 'text-foreground border-b-2 border-sky-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
                   <Search className="w-3 h-3" />
-                  <span>掃描</span>
-                </div>
+                  <span>策略掃描</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightTab('youtube')}
+                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'youtube'
+                      ? 'text-foreground border-b-2 border-purple-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="YouTube 節目提及股票"
+                >
+                  <span>📺</span>
+                  <span>YouTube 提及</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightTab('pool')}
+                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'pool'
+                      ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="多源候選股票池"
+                >
+                  <span>🗂</span>
+                  <span>候選池</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightTab('agent')}
+                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'agent'
+                      ? 'text-foreground border-b-2 border-amber-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="Multi-Agent 已完成決策"
+                >
+                  <span>🤖</span>
+                  <span>Multi-Agent</span>
+                </button>
+                <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)}
-                  className="text-muted-foreground hover:text-foreground p-0.5 rounded hover:bg-muted transition-colors">
+                  className="px-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  title="收起面板"
+                >
                   <ChevronDown className="w-3.5 h-3.5 rotate-90" />
                 </button>
               </div>
+
+              {/* Tab content */}
               <div className="animate-fade-in flex-1 min-h-0">
-                <ScanPanelVertical onSelectStock={handleScanSelectStock} />
+                {rightTab === 'scan' && (
+                  <ScanPanelVertical onSelectStock={handleScanSelectStock} />
+                )}
+                {rightTab === 'youtube' && (
+                  <YoutubeStocksPanel
+                    date={youtubeDate}
+                    onDateChange={setYoutubeDate}
+                    onSelectStock={handleYoutubeSelectStock}
+                    selectedCode={youtubeSelectedCode}
+                  />
+                )}
+                {rightTab === 'pool' && (
+                  <CandidatesPoolPanel onSelectStock={handlePoolSelectStock} />
+                )}
+                {rightTab === 'agent' && (
+                  <MultiAgentTopPanel onSelectStock={handleAgentSelectStock} />
+                )}
               </div>
             </>
           ) : (
@@ -734,13 +796,11 @@ export default function HomePage() {
       {mobileChartFullscreen && (
         <div className="md:hidden fixed inset-0 z-[100] bg-background flex flex-col">
           <div className="shrink-0 flex items-center gap-2 px-2 py-2 border-b border-border bg-card">
-            <button
+            <BackButton
               onClick={closeMobileChart}
-              aria-label="返回掃描清單"
+              label="返回掃描清單"
               className="shrink-0 p-1.5 rounded hover:bg-muted text-foreground"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
+            />
             <div className="flex-1 min-w-0">
               <StockSelector />
             </div>
