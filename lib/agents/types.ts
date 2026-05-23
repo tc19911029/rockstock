@@ -310,6 +310,17 @@ export interface NewsYouTubeMention {
   videoIds: string[];
   /** 主持人原話片段（前 N 則）*/
   contexts: string[];
+  /**
+   * 已讀的 analysis 日期清單（T-1 + T 聯集窗口）。
+   * 例：date='2026-05-22' → ['2026-05-21', '2026-05-22']。
+   * 解決「T-1 盤後節目隔天才反映」case — Agent 須讀 T-1 才能看見 published_at < T 09:00 CST 的提及。
+   */
+  windowDates?: string[];
+  /**
+   * 影片 published_at 必須落在此 ISO 區間內的 mention 才會計入。
+   * 預設 = [T-1 01:00 UTC, T 16:00 UTC]（= T-1 09:00 CST 到 T+1 00:00 CST）。
+   */
+  publishedAtWindow?: { startUtc: string; endUtc: string };
 }
 
 /** /api/news/{symbol} 取 RSS 後的精簡彙整 */
