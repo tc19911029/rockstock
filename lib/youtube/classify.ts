@@ -92,9 +92,14 @@ export function parseProgramDate(title: string, now: Date): string | null {
     }
   }
 
-  // 3) 短格式月/日：5/22 或 5-22 或 05.22 — 需避開時間（00:22）與年份（2026）
-  //    用 negative lookbehind/lookahead 排除前後是冒號或多餘數字
-  m = title.match(/(?<![:0-9])(\d{1,2})[./\-](\d{1,2})(?![:0-9])/);
+  // 3) 短格式月/日：5/22 或 5-22 或 05.22 — 需避開時間（00:22）、年份（2026）
+  //    與數量單位（1.2兆、1.5%、1.29元、4.2K 點）— 後者最容易誤判
+  //
+  // negative lookbehind: 不能前接冒號 / 數字 (排時間和混在大數字中)
+  // negative lookahead:  不能後接冒號 / 數字 / 中文數量單位 / 英文單位
+  //
+  // 例：「1.2兆交易量」「1.5%」「1.29元」「4.2K 點」「3.5億」必須跳過
+  m = title.match(/(?<![:0-9])(\d{1,2})[./\-](\d{1,2})(?![:0-9兆億萬千百元塊圓%倍KkMmBb])/);
   if (m) {
     const a = Number(m[1]);
     const b = Number(m[2]);

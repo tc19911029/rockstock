@@ -174,8 +174,8 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
       {data && (
         <>
           {/* L1 歷史K */}
-          <Section title="L1 歷史日K">
-            <Row label="健康度" value={data.health} bold />
+          <Section title="歷史日K（每日盤後封存）">
+            <Row label="健康度" value={zhStatus(data.health)} bold />
             <Row label="覆蓋率" value={fmtPct(data.coverageRate)} />
             <Row label="近 3 日落後" value={`${data.stocksStale ?? '?'} 支`}
               warn={(data.stocksStale ?? 0) > 50} />
@@ -184,8 +184,8 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
           </Section>
 
           {/* L2 盤中快照 */}
-          <Section title="L2 盤中快照">
-            <Row label="狀態" value={data.l2.status} bold />
+          <Section title="盤中快照（全市場即時報價）">
+            <Row label="狀態" value={zhStatus(data.l2.status)} bold />
             <Row label="筆數" value={`${data.l2.quoteCount ?? 0} 筆`} />
             <Row label="更新時間" value={fmtTime(data.l2.updatedAt)} muted />
             {data.l2Sources?.alertLevel && data.l2Sources.alertLevel !== 'none' && (
@@ -194,8 +194,8 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
           </Section>
 
           {/* L4 掃描 */}
-          <Section title="L4 掃描結果">
-            <Row label="狀態" value={data.l4?.status ?? '—'} bold />
+          <Section title="掃描結果（盤後策略掃描）">
+            <Row label="狀態" value={zhStatus(data.l4?.status ?? '—')} bold />
             <Row label="最近掃描" value={`${data.l4?.lastScanDate ?? '—'} (${data.l4?.lastScanCount ?? 0} 檔)`} />
             <Row label="今日盤中" value={data.l4?.todayHasIntraday ? '有' : '無'}
               warn={data.l4 != null && !data.l4.todayHasIntraday} />
@@ -204,6 +204,21 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
       )}
     </div>
   );
+}
+
+/** 健康/快照狀態英文 → 中文 */
+function zhStatus(s: string): string {
+  const map: Record<string, string> = {
+    good: '正常',
+    ok: '正常',
+    fresh: '最新',
+    stale: '過期',
+    warning: '警告',
+    error: '錯誤',
+    none: '無',
+    unknown: '未知',
+  };
+  return map[s?.toLowerCase()] ?? s;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

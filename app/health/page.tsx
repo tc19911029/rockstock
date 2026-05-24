@@ -16,6 +16,7 @@ import { PageShell } from '@/components/shared';
 import { MarketDataTab } from './tabs/MarketDataTab';
 import { YoutubeTab } from './tabs/YoutubeTab';
 import { PlaceholderTab } from './tabs/PlaceholderTab';
+import { SystemTab } from './tabs/SystemTab';
 
 type TabKey = 'market' | 'youtube' | 'technical' | 'agent' | 'system';
 
@@ -23,7 +24,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: string }> = [
   { key: 'market',    label: '行情資料',     icon: '📈' },
   { key: 'youtube',   label: 'YouTube 節目', icon: '📺' },
   { key: 'technical', label: '技術策略',     icon: '⚙️' },
-  { key: 'agent',     label: 'Agent 分析',   icon: '🤖' },
+  { key: 'agent',     label: '多代理分析',   icon: '🤖' },
   { key: 'system',    label: '系統任務',     icon: '🛠️' },
 ];
 
@@ -105,39 +106,28 @@ export default function HealthPage() {
           {tab === 'technical' && (
             <PlaceholderTab
               title="技術策略資料"
-              description="顯示各策略今日掃描狀態 / 落後檔數 / Step 0 大盤過濾結果。"
+              description="顯示各買法今日掃描狀態、落後檔數、大盤過濾結果。"
               comingSoon={[
-                '14 個買法字母（B/C/D/E/F/J/K/L/M/N/O/P/Q/R）的今日掃描狀態',
-                '每個字母的命中支數 + 落後 cron',
-                '三軌（bullish / reversal / system）的批次跑步狀態',
-                'limit-up consistency 紅綠燈',
+                '14 種買法（回後買上漲、盤整突破、缺口…）的今日掃描狀態',
+                '每種買法的命中支數 + 落後排程',
+                '三軌（多頭軌／反轉軌／戰法軌）的批次掃描狀態',
+                '漲跌停一致性紅綠燈',
               ]}
             />
           )}
           {tab === 'agent' && (
             <PlaceholderTab
-              title="Agent 分析資料"
-              description="顯示今日 Candidates Pool 規模 / 4 source 跑成功狀態 / Multi-Agent decisions 數。"
+              title="多代理分析資料"
+              description="顯示今日候選池規模、4 個面向（技術／消息／籌碼／基本面）擷取成功狀態、多代理決策已完成數。"
               comingSoon={[
-                'Candidates Pool 4 個 source 是否成功（technical / youtube / chip / fundamental）',
-                '今日 pool 規模（總候選 / 4 源 / 3 源 / 2 源 / 1 源 分布）',
-                'Multi-Agent decisions 已完成數 / 待跑數',
-                'Portfolio mini-agent review 今日完成度',
+                '候選池 4 個面向是否成功擷取（技術／消息／籌碼／基本面）',
+                '今日候選池規模（總候選 / 四面向共識 / 三面向 / 兩面向 / 單面向 分布）',
+                '多代理決策已完成數 / 待跑數',
+                '持倉迷你代理 review 今日完成度',
               ]}
             />
           )}
-          {tab === 'system' && (
-            <PlaceholderTab
-              title="系統任務"
-              description="顯示 launchd 與 Vercel cron 排程狀態、最後執行時間、失敗次數。"
-              comingSoon={[
-                'YouTube cron（scan / transcript / prepare-analysis）launchd 狀態',
-                'Vercel cron 今日跑成功 / 失敗清單',
-                'L1 invariant audit 每日跑況',
-                '健康快照寫入紀錄',
-              ]}
-            />
-          )}
+          {tab === 'system' && <SystemTab />}
         </div>
       </div>
     </PageShell>

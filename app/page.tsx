@@ -690,7 +690,7 @@ export default function HomePage() {
                 >
                   <span aria-hidden="true">📺</span>
                   <span className="hidden md:inline">YouTube 提及</span>
-                  <span className="md:hidden">YT</span>
+                  <span className="md:hidden">節目</span>
                 </button>
                 <button
                   type="button"
@@ -717,11 +717,11 @@ export default function HomePage() {
                       ? 'text-foreground border-b-2 border-amber-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
-                  title="Multi-Agent 已完成決策"
+                  title="多代理已完成決策"
                 >
                   <span aria-hidden="true">🤖</span>
-                  <span className="hidden md:inline">Multi-Agent</span>
-                  <span className="md:hidden">Agent</span>
+                  <span className="hidden md:inline">多代理</span>
+                  <span className="md:hidden">代理</span>
                 </button>
                 <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)}

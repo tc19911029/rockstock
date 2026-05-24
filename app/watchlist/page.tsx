@@ -160,7 +160,7 @@ export default function WatchlistPage() {
       subtitle={
         <>
           <span>{hasMounted ? items.length : 0} 支</span>
-          {lastUpdated && <span className="text-muted-foreground/60 hidden sm:inline ml-2">{lastUpdated}</span>}
+          {lastUpdated && <span className="text-muted-foreground/60 hidden sm:inline ml-2" title="最後更新時間">最後更新 {lastUpdated}</span>}
         </>
       }
       actions={
@@ -193,12 +193,13 @@ export default function WatchlistPage() {
             </Button>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>加入日期（計算報酬基準）：</span>
+            <span title="這個日期會當作「加入價」基準，用來算之後的漲跌幅。可選任意過去日期。">加入日期（計算報酬基準）：</span>
             <input
               type="date"
               value={addDate}
               max={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())}
               onChange={e => setAddDate(e.target.value)}
+              title="預設今天；想用之前的買入價算報酬可改任意過去日期"
               className="bg-secondary border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-blue-500"
             />
           </div>

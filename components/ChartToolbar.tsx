@@ -94,8 +94,8 @@ const CHIP_CONFIGS_TW = [
   { key: 'trust' as const, label: '投信', title: '投信買賣超' },
   { key: 'dealer' as const, label: '自營', title: '自營商買賣超（自行買賣 + 避險）' },
   { key: 'retail' as const, label: '散戶', title: '散戶買賣超（推算 = −三大法人合計）' },
-  { key: 'h400' as const, label: '大戶400', title: '大戶持股 400 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
-  { key: 'h1000' as const, label: '大戶1k', title: '大戶持股 1000 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
+  { key: 'h400' as const, label: '大戶400張', title: '大戶持股 400 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
+  { key: 'h1000' as const, label: '大戶1000張', title: '大戶持股 1000 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
 ];
 
 /** CN 籌碼面副圖（EastMoney 主力資金） */

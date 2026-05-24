@@ -77,9 +77,9 @@ async function handle(req: NextRequest) {
     expected_cadence: s.expected_cadence,
   }));
 
-  // 3) master + prelookup (對所有影片標題裡的代號/常見股票名做預先 lookup)
+  // 3) master + prelookup (對所有影片標題裡的代號/股票名做預先 lookup)
   const master = await loadStockMaster();
-  const prelookupNames = collectPrelookupCandidates(videos);
+  const prelookupNames = collectPrelookupCandidates(videos, master);
   const prelookups = prelookupNames.map(q => {
     const m = lookupStock(q, master);
     return {
@@ -154,29 +154,60 @@ function ymdTaipei(d: Date): string {
   return `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-/** 從影片標題抽出常見股票稱呼字串，供 prelookup */
-function collectPrelookupCandidates(videos: import('@/lib/youtube/types').YouTubeVideo[]): string[] {
+/**
+ * 從影片標題抽出股票代號 + 股票名稱，供 prelookup。
+ *
+ * 兩階段：
+ *   1) 4-6 位數代號 (過濾 1900-2099 年份噪音)
+ *   2) 用 master 全集做 substring scan — 抽出標題裡所有命中的 spot 股名
+ *      （取代舊版只認 ~20 個 hard-coded keyword 的做法，避免漏掉
+ *       台表科/同欣電/大量/尖點/鉅橡 這種沒列入的常見股）
+ *
+ * Spot 股過濾：code 長度 = 4 且不在 003-099xx 權證/選擇權範圍。
+ * 名稱長度 ≥ 2 字（避免 1 字假命中）。
+ */
+function collectPrelookupCandidates(
+  videos: import('@/lib/youtube/types').YouTubeVideo[],
+  master: import('@/lib/youtube/stockMaster').StockMasterFile,
+): string[] {
+  // 過濾出 spot 股 (4-char code，非權證) + 名稱 ≥ 2 字
+  const spotNames = master.entries
+    .filter(e => /^[1-9]\d{3}$/.test(e.code) && e.name.length >= 2)
+    .map(e => e.name);
+
   const candidates = new Set<string>();
   const codeRe = /\b(\d{4,6})\b/g;
   for (const v of videos) {
     if (!v.should_analyze) continue;
-    // 4-6 位數代號（過濾 1900-2099 年份噪音、19xx-20xx 日期前綴）
+    const title = v.title;
+
+    // 1) 數字代號（過濾年份）
     let m: RegExpExecArray | null;
-    while ((m = codeRe.exec(v.title)) !== null) {
+    while ((m = codeRe.exec(title)) !== null) {
       const n = Number(m[1]);
-      // 年份範圍跳過
       if (m[1].length === 4 && n >= 1900 && n <= 2099) continue;
       candidates.add(m[1]);
     }
-    // 常見公司名 — 用幾個高頻關鍵字粗略命中
-    const keywords = [
-      '台積電', '聯發科', '世芯', '創意', '智原', '雙鴻', '奇鋐', '台光電',
-      '金像電', '鴻海', '緯穎', '台達電', '中信金', '國泰金', '富邦金', '兆豐金',
-      '長榮', '陽明', '大立光', '南亞科', '聯電', '國巨',
-    ];
-    for (const k of keywords) {
-      if (v.title.includes(k)) candidates.add(k);
+
+    // 2) substring scan — 標題含這支股名就收進候選
+    // 先抓所有命中，再做 "longer match wins" 去重：例如標題含「大立光」會同時 hit
+    // 「大立」(4716) + 「大立光」(3008) — 只留長的，避免 false-positive bundle
+    const hitsForThisTitle: string[] = [];
+    for (const name of spotNames) {
+      if (title.includes(name)) hitsForThisTitle.push(name);
     }
+    hitsForThisTitle.sort((a, b) => b.length - a.length);
+    const keptForThisTitle: string[] = [];
+    for (const name of hitsForThisTitle) {
+      // 若已選的 keptName 含這個 name 作 substring 且兩者在 title 中位置相同 → skip
+      const dominated = keptForThisTitle.some(longer =>
+        longer.includes(name) && title.indexOf(longer) <= title.indexOf(name)
+                              && title.indexOf(longer) + longer.length >= title.indexOf(name) + name.length,
+      );
+      if (!dominated) keptForThisTitle.push(name);
+    }
+    for (const name of keptForThisTitle) candidates.add(name);
   }
-  return Array.from(candidates).slice(0, 50);
+  // 上限提到 60 — 一支標題塞 6 檔股名很常見，舊上限 50 可能不夠
+  return Array.from(candidates).slice(0, 60);
 }

@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { PageShell, PageHeader, BackButton } from '@/components/shared';
+import { DatePicker } from '@/components/ui/DatePicker';
 import { AgentChartSection } from './_components/AgentChartSection';
 import type {
   AgentRunMeta,
@@ -203,15 +204,25 @@ const SIGNAL_ZH: Record<string, string> = {
   eps_growth: 'EPS 成長',
   bullish: '看多',
   bearish: '看空',
-  mixed: '中性',
+  mixed: '多空混雜',
+  mentioned_only: '僅提及',
   positive: '正向',
   negative: '負向',
-  neutral: '中性',
+  neutral: '中立',
 };
 
 /** 取中文欄位名（找不到就回原字串）*/
 function zhLabel(en: string): string {
   return FIELD_LABEL_ZH[en] ?? en;
+}
+
+/** market code → 中文（TW → 台股、CN → 陸股，其餘原樣）*/
+function marketLabel(m: string): string {
+  const M = m.toUpperCase();
+  if (M === 'TW') return '台股';
+  if (M === 'CN') return '陸股';
+  if (M === 'TWO') return '台股櫃';
+  return m;
 }
 
 /** 翻譯訊號代碼陣列（找不到的回原字串）*/
@@ -347,15 +358,30 @@ function todayYmd(): string {
   return tpe.toISOString().slice(0, 10);
 }
 
+/** 最近一個工作日（不含今天）— 週末/週一早上打開時，今天通常還沒有資料 */
+function lastBusinessDay(): string {
+  const tpe = new Date(Date.now() + 8 * 3600_000);
+  tpe.setUTCDate(tpe.getUTCDate() - 1);
+  while (tpe.getUTCDay() === 0 || tpe.getUTCDay() === 6) {
+    tpe.setUTCDate(tpe.getUTCDate() - 1);
+  }
+  return tpe.toISOString().slice(0, 10);
+}
+
 export default function AgentDetailPage() {
   const { symbol } = useParams<{ symbol: string }>();
   const searchParams = useSearchParams();
-  const initialDate = searchParams.get('date') ?? todayYmd();
+  // 預設用「最近工作日」而非今天 — 週末/早上打開時，今天通常沒有 scan 資料
+  // URL ?date= 仍可 override
+  const initialDate = searchParams.get('date') ?? lastBusinessDay();
 
   const [date, setDate] = useState(initialDate);
   const [data, setData] = useState<DecisionPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Fallback name 來源 — 當 decisions API 沒有 candidate.name 時，用 /api/stock 拿真實名稱
+  // 防止 header 顯示「（未知名稱）」這種讓 user 困惑的字
+  const [fallbackName, setFallbackName] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -378,6 +404,18 @@ export default function AgentDetailPage() {
   }, [symbol, date]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // 如果 decisions API 沒回 candidate.name，直接從 /api/stock 拿真實名稱
+  useEffect(() => {
+    if (data?.candidate?.name) return;  // 已有名稱
+    if (fallbackName) return;            // 已抓過
+    let cancelled = false;
+    fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&interval=1d&period=1mo`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j?.name) setFallbackName(j.name); })
+      .catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+  }, [symbol, data?.candidate?.name, fallbackName]);
 
   const prepareAgent = useCallback(async () => {
     setLoading(true);
@@ -410,11 +448,11 @@ export default function AgentDetailPage() {
 
   const symbolPageHeader = (
     <PageHeader
-      title={data?.candidate?.name ?? `（${symbol}）`}
+      title={data?.candidate?.name ?? fallbackName ?? symbol}
       backButton={`/agents?date=${date}`}
       subtitle={
         <span className="font-mono">
-          {symbol}{data?.meta?.market ? ` · ${data.meta.market}` : ''} · {phaseLabel} · {completedCount}/4
+          {symbol}{data?.meta?.market && !symbol.toUpperCase().endsWith(`.${data.meta.market}`) ? ` · ${marketLabel(data.meta.market)}` : ''} · {phaseLabel} · {completedCount}/4
         </span>
       }
     />
@@ -429,11 +467,11 @@ export default function AgentDetailPage() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight flex items-baseline gap-2 flex-wrap">
                 <span className="text-sky-500">
-                  {data?.candidate?.name ?? <span className="text-muted-foreground">（未知名稱）</span>}
+                  {data?.candidate?.name ?? fallbackName ?? <span className="text-muted-foreground">…</span>}
                 </span>
                 <span className="text-base font-mono font-normal text-muted-foreground">{symbol}</span>
-                {data?.meta?.market && (
-                  <span className="text-xs font-normal text-muted-foreground uppercase">{data.meta.market}</span>
+                {data?.meta?.market && !symbol.toUpperCase().endsWith(`.${data.meta.market}`) && (
+                  <span className="text-xs font-normal text-muted-foreground">{marketLabel(data.meta.market)}</span>
                 )}
               </h1>
               <p className="text-sm text-muted-foreground mt-0.5">
@@ -442,15 +480,12 @@ export default function AgentDetailPage() {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <BackButton href={`/agents?date=${date}`} label="回列表" variant="with-label" />
-              <input
-                type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono text-xs"
-              />
+              <DatePicker value={date} onChange={setDate} size="md" />
               <button
                 onClick={prepareAgent} disabled={loading}
                 className="bg-sky-500 hover:bg-sky-400 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50"
               >
-                {completedCount > 0 ? '重新準備' : '開始準備'}
+                {completedCount > 0 ? '⚡ 重新準備' : '⚡ 開始準備'}
               </button>
               <button
                 onClick={fetchData} disabled={loading}
@@ -474,11 +509,11 @@ export default function AgentDetailPage() {
 
           {data && completedCount === 0 && !error && (
             <div className="border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200 rounded-lg p-4 text-sm space-y-2">
-              <p className="font-medium">尚未產生任何分析師結果。</p>
+              <p className="font-medium">這檔股票還沒跑過分析。</p>
               <ol className="list-decimal ml-5 space-y-1">
-                <li>點上方「開始準備」（會 POST /api/agents/prepare 寫 4 個 question.json）</li>
-                <li>在 Claude Code 對話中執行 <code className="bg-amber-500/20 text-amber-700 dark:text-amber-200 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code></li>
-                <li>slash command 寫完 4 個 answer 後回此頁按「重整」</li>
+                <li>點上方「開始準備」會幫這檔股票準備 4 個分析提示（技術／消息／籌碼／基本面各一）</li>
+                <li>在 Claude Code 對話中輸入 <code className="bg-amber-500/20 text-amber-700 dark:text-amber-200 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code> 才會實際跑分析</li>
+                <li>對話跑完 4 個面向後回此頁按「⟲ 重整」即可看到結果</li>
               </ol>
             </div>
           )}

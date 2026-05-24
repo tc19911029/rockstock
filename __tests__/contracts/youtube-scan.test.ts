@@ -95,6 +95,20 @@ describe('parseProgramDate', () => {
     // 現在 = 5 月，標題寫 12 月 → 視為去年 12 月
     expect(parseProgramDate('12月25日 聖誕特輯', now)).toBe('2025-12-25');
   });
+
+  // 防止過去發生過的誤判：數量單位（兆 / 元 / % / K 點）被當成日期
+  // bug 2026-05-24: 1.2兆 → 1/2, 1.29元 → 1/29, 1.5% → 1/5
+  // 限制：unit 必須緊貼數字（無空白）。「3.5 億」這種含空白的算邊緣 case 不保證 reject
+  it.each([
+    '台股突破 1.2兆交易量',
+    '1.5兆新天量 外資買超',
+    '聯電 Q1 賺 1.29元 創高',
+    '15.5%報酬率',
+    '4.2K 點挑戰歷史新高',
+    '上漲 3.5億美元',
+  ])('rejects quantity-with-unit not a date: %s', (title) => {
+    expect(parseProgramDate(title, now)).toBeNull();
+  });
 });
 
 // ── decideShouldAnalyze invariant ────────────────────────────────────────────

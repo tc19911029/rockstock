@@ -57,6 +57,30 @@ export async function GET() {
     }
   }
 
+  // ── 內部 API 自我檢測（防止 dev server 5xx 但 cron 仍 silent fail）──
+  // 2026-05-24 發現 port 3000 dev-server 早就在 /api/stock 噴 500，沒人發現直到 bundle
+  // 全 fail。這個 self-ping 至少讓 /health 頁面紅燈。
+  const SELF_PING_TARGETS = [
+    { name: 'internal /api/stock', url: 'http://localhost:3000/api/stock?symbol=2330&interval=1d&period=1mo' },
+    { name: 'internal /api/youtube/audit', url: 'http://localhost:3000/api/youtube/audit' },
+  ];
+  await Promise.all(SELF_PING_TARGETS.map(async t => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const r = await fetch(t.url, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (r.ok) {
+        checks.push({ name: t.name, status: 'ok', detail: `HTTP ${r.status}` });
+      } else {
+        checks.push({ name: t.name, status: 'fail', detail: `HTTP ${r.status}` });
+      }
+    } catch (e) {
+      const msg = (e as Error).name === 'AbortError' ? 'timeout' : (e as Error).message.slice(0, 80);
+      checks.push({ name: t.name, status: 'fail', detail: msg });
+    }
+  }));
+
   // ── 綜合狀態 ──
   const hasFail = checks.some(c => c.status === 'fail');
   const hasWarn = checks.some(c => c.status === 'warn');

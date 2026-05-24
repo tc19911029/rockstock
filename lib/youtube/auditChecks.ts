@@ -77,11 +77,15 @@ export async function runAudit(): Promise<AuditReport> {
       if (v.should_analyze && v.skip_reason) {
         ruleViolations.push(`${fileDate}/${v.video_id} both should=true and skip_reason set`);
       }
-      // Cross-date pollution check
+      // Cross-date pollution check — 只有當 file_date 既不等於 program_date 也不等於 ymdTaipei(published_at) 時才算真正污染。
+      // 合法情況：晚間節目 21:00 上傳但隔天 00:30 才 publish → file by program_date（標題日）不等於 publish_at 是正確的。
       if (v.published_at) {
         const pubYmd = ymdTaipei(new Date(v.published_at));
-        if (pubYmd !== fileDate) {
-          crossDateLeaks.push(`${v.video_id}: in ${fileDate}.json but published ${pubYmd}`);
+        const programDate = v.program_date ?? null;
+        const matchesProgramDate = programDate === fileDate;
+        const matchesPubDate = pubYmd === fileDate;
+        if (!matchesProgramDate && !matchesPubDate) {
+          crossDateLeaks.push(`${v.video_id}: in ${fileDate}.json but program_date=${programDate ?? 'null'} pub=${pubYmd}`);
         }
       }
     }

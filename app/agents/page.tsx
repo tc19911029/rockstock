@@ -16,7 +16,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { PageShell, PageHeader, BackButton } from '@/components/shared';
+import { PageShell, PageHeader } from '@/components/shared';
+import { DatePicker } from '@/components/ui/DatePicker';
+import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import type {
   AgentRunMeta, AgentPhaseState,
   BearThesis, BullThesis,
@@ -106,11 +108,6 @@ const FUNDAMENTAL_SECTION_LABELS: Record<FundamentalSection, string> = {
   revenue: '月營收 / YoY', profit: '獲利能力', valuation: '估值', industry: '產業',
 };
 
-function todayYmd(): string {
-  const tpe = new Date(Date.now() + 8 * 3600_000);
-  return tpe.toISOString().slice(0, 10);
-}
-
 /**
  * FIX-3：第一階段完成定義 — 4 個 analyst answer 都寫好（AND 邏輯）
  *
@@ -161,9 +158,13 @@ function maxStageCompleted(counts: { phase1Done: number; phase2Done: number; pha
 // Page
 // ────────────────────────────────────────────────────────────────────────────
 
+const HELP_DISMISSED_KEY = 'multi-agent-help-dismissed-v1';
+
 export default function AgentsListPage() {
   const searchParams = useSearchParams();
-  const initialDate = searchParams.get('date') ?? todayYmd();
+  // 預設用「最近工作日」而非今天 — 週末/早上打開時，今天通常沒有 scan 資料
+  // URL ?date= 仍可 override
+  const initialDate = searchParams.get('date') ?? lastBusinessDayYmd();
   const [date, setDate] = useState(initialDate);
   const [top, setTop] = useState(10);
   const [minSourceCount, setMinSourceCount] = useState(1);
@@ -175,6 +176,20 @@ export default function AgentsListPage() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailPayload | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // 使用說明預設展開，使用者按收起後寫 localStorage 記住
+  const [helpOpen, setHelpOpen] = useState(true);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem(HELP_DISMISSED_KEY) === '1') setHelpOpen(false);
+  }, []);
+  const dismissHelp = useCallback(() => {
+    setHelpOpen(false);
+    if (typeof window !== 'undefined') window.localStorage.setItem(HELP_DISMISSED_KEY, '1');
+  }, []);
+  const reopenHelp = useCallback(() => {
+    setHelpOpen(true);
+    if (typeof window !== 'undefined') window.localStorage.removeItem(HELP_DISMISSED_KEY);
+  }, []);
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -230,7 +245,7 @@ export default function AgentsListPage() {
       } else {
         const ok = json.prepared?.length ?? 0;
         const fail = json.failed?.length ?? 0;
-        setBanner(`✅ 已準備 ${ok} 檔${fail > 0 ? `（${fail} 檔失敗）` : ''}。請在 Claude Code 對話中執行 /multi-agent-decide`);
+        setBanner(`✅ 已準備 ${ok} 檔分析提示${fail > 0 ? `（${fail} 檔失敗）` : ''}。請在 Claude Code 對話中輸入 /multi-agent-decide 才會實際跑分析。`);
         await fetchList();
       }
     } catch (err) {
@@ -295,11 +310,7 @@ export default function AgentsListPage() {
               </span>
             </div>
             <div className="flex items-center gap-2 text-sm flex-wrap">
-              <input
-                type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="bg-secondary border border-border rounded px-2 py-1 text-foreground font-mono text-xs"
-              />
-              <label className="text-muted-foreground text-xs flex items-center gap-1">
+              <label className="text-muted-foreground text-xs flex items-center gap-1" title="候選池按面向命中數排序，這裡選最強的前 N 個訊號跑分析">
                 前
                 <input
                   type="number" value={top} min={1} max={50}
@@ -314,19 +325,20 @@ export default function AgentsListPage() {
                   value={minSourceCount}
                   onChange={(e) => setMinSourceCount(Number(e.target.value))}
                   className="bg-secondary border border-border rounded px-1.5 py-1 text-xs"
-                  title="只 prepare 多源命中達此值以上的候選"
+                  title="只對至少這幾個面向同時看好的候選跑分析"
                 >
-                  <option value={1}>1 源</option>
-                  <option value={2}>2 源</option>
-                  <option value={3}>3 源</option>
-                  <option value={4}>4 源</option>
+                  <option value={1}>1 個面向</option>
+                  <option value={2}>2 個面向</option>
+                  <option value={3}>3 個面向</option>
+                  <option value={4}>4 個面向</option>
                 </select>
               </label>
               <button
                 onClick={runBatchPrepare} disabled={busy || loading}
                 className="bg-sky-500 hover:bg-sky-400 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50"
+                title="對前 N 檔候選產生分析提示檔（在 Claude Code 對話輸入 /multi-agent-decide 才實際跑）"
               >
-                {busy ? '處理中…' : '⚡ 批次準備'}
+                {busy ? '處理中…' : '⚡ 批次準備（產生分析提示）'}
               </button>
               <button
                 onClick={fetchList} disabled={loading}
@@ -334,10 +346,56 @@ export default function AgentsListPage() {
               >
                 ⟲ 重整
               </button>
+              {!helpOpen && (
+                <button
+                  onClick={reopenHelp}
+                  className="border border-border hover:bg-secondary px-3 py-1 rounded text-xs transition"
+                  title="重新展開使用說明"
+                >
+                  📘 說明
+                </button>
+              )}
               <Link href={`/agents/pool?date=${date}`} className="text-sky-500 hover:text-sky-400 text-xs">候選池 →</Link>
             </div>
           </div>
+          {/* Date pill grid（仿策略掃描）— 獨佔一行 */}
+          <div className="max-w-[1600px] mx-auto px-6 pb-3">
+            <DatePicker value={date} onChange={setDate} size="md" />
+          </div>
         </header>
+
+        {/* ───────── 使用說明（預設展開、可收起；收起後 control bar 出現「📘 說明」按鈕重新打開）───────── */}
+        {helpOpen && (
+          <div className="max-w-[1600px] mx-auto px-6 pt-4">
+            <div className="border border-sky-700/40 bg-sky-950/30 rounded-lg p-4 text-sm">
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="font-semibold text-sky-300">📘 多代理決策中心怎麼用？</div>
+                <button
+                  onClick={dismissHelp}
+                  className="text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-0.5"
+                  title="不再顯示（之後可從控制列「📘 說明」按鈕重新打開）"
+                >
+                  收起
+                </button>
+              </div>
+              <ol className="list-decimal ml-5 space-y-1.5 text-slate-300 text-xs leading-relaxed">
+                <li><span className="text-foreground font-medium">這頁做什麼：</span>對「今日候選池」裡的股票，跑 4 階段獨立分析，最後產出 進場 / 觀察 / 跳過 建議。</li>
+                <li><span className="text-foreground font-medium">分析哪些股票：</span>選上方日期，系統會撈該日候選池前 N 檔（預設 10 檔）。</li>
+                <li><span className="text-foreground font-medium">根據什麼資料：</span>技術指標 + YouTube 節目共識 + 籌碼面 + 基本面，四個面向各自獨立分析（§0 隔離原則）。</li>
+                <li><span className="text-foreground font-medium">「前 N 檔」是什麼：</span>候選池按多面向命中數排序，前 N 檔即最強的 N 個訊號。</li>
+                <li><span className="text-foreground font-medium">按下「⚡ 批次準備」會：</span>產生 N 個分析提示檔，接著在 Claude Code 對話輸入 <code className="bg-secondary text-sky-300 px-1 rounded">/multi-agent-decide</code> 才會實際跑分析。</li>
+                <li><span className="text-foreground font-medium">結果在哪看：</span>跑完後，下方列表會列出每檔的 最終建議 / 多空比 / 部位建議 / 四面向判定，點卡片進入個股完整詳情。</li>
+                <li><span className="text-foreground font-medium">跟其他頁的關係：</span>
+                  <ul className="list-disc ml-5 mt-0.5 text-slate-400">
+                    <li><Link href="/agents/pool" className="text-sky-400 hover:underline">候選池</Link> = 多代理的「輸入」（先有候選才能跑）</li>
+                    <li>掃描策略 / YouTube 提及 / 籌碼 / 基本面 = 候選池的「來源」</li>
+                    <li>個股詳情頁 = 多代理的「輸出」（包含四面向理由）</li>
+                  </ul>
+                </li>
+              </ol>
+            </div>
+          </div>
+        )}
 
         {/* ───────── PIPELINE BAR ───────── */}
         <div className="max-w-[1600px] mx-auto px-6 pt-4">
@@ -456,14 +514,14 @@ export default function AgentsListPage() {
 
           {/* 中：個股列表 */}
           <main className="col-span-12 lg:col-span-5 space-y-3">
-            <div className="text-xs font-semibold tracking-wider text-sky-500">▸ 個股列表 · 點卡片看完整分析 →</div>
+            <div className="text-xs font-semibold tracking-wider text-sky-500">📌 個股列表 · 點卡片看完整分析 →</div>
 
             {loading && !data && <p className="text-muted-foreground text-sm">載入中…</p>}
 
             {data && data.runs.length === 0 && !error && (
               <div className="border-2 border-dashed border-border rounded-lg p-8 text-sm text-muted-foreground text-center space-y-2">
-                <p className="text-foreground font-medium">此日尚無任何 Multi-Agent run</p>
-                <p>點上方「批次準備」對前 {top} 檔候選寫 question.json，然後在 Claude Code 對話執行 <code className="bg-secondary text-sky-500 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code></p>
+                <p className="text-foreground font-medium">此日尚未跑任何多代理分析</p>
+                <p>點上方「⚡ 批次準備」對前 {top} 檔候選產生分析提示，接著在 Claude Code 對話輸入 <code className="bg-secondary text-sky-500 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code> 才會實際跑。</p>
               </div>
             )}
 
@@ -499,7 +557,7 @@ export default function AgentsListPage() {
               <span><span className="text-sky-500">流程進度：</span>{maxStageCompleted(counts)} / 4 階段</span>
               <span><span className="text-sky-500">個股完成：</span>P1 {counts.phase1Done} · P2 {counts.phase2Done} · P3 {counts.phase3Done} · P4 {counts.phase4Done} / {counts.total} 檔</span>
               <span><span className="text-sky-500">已產報告：</span>{counts.phase1Done * 4 + counts.phase2Done + counts.phase3Done * 2 + counts.phase4Done} 份</span>
-              <span><span className="text-sky-500">LLM 呼叫：</span>0 次（透過檔案橋接 + /multi-agent-decide）</span>
+              <span><span className="text-sky-500">LLM 呼叫：</span>0 次（檔案橋接 /multi-agent-decide）</span>
             </div>
             <div>最後更新：<span className="text-foreground">{date}</span></div>
           </div>
@@ -516,7 +574,7 @@ export default function AgentsListPage() {
 function Panel({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={`border border-cyan-700/40 bg-slate-900 rounded-lg p-4 ${className}`}>
-      <div className="text-xs font-semibold tracking-wider text-cyan-400 mb-3">▸ {title}</div>
+      <div className="text-xs font-semibold tracking-wider text-cyan-400 mb-3">📌 {title}</div>
       {children}
     </div>
   );
@@ -630,7 +688,7 @@ function StockCard({ run, active, onClick }: { run: RunListItem; active: boolean
             <span className="font-bold text-slate-300">{run.name ?? '（無名稱）'}</span>
             <span className="font-mono text-xs text-slate-500 ml-2">{run.symbol}</span>
           </div>
-          <span className="text-xs text-slate-500">⏳ 等待執行 /multi-agent-decide</span>
+          <span className="text-xs text-slate-500">⏳ 等待對話內 /multi-agent-decide</span>
         </div>
       </div>
     );

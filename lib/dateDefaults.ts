@@ -30,3 +30,23 @@ export function lastBusinessDayYmd(): string {
   }
   return tpe.toISOString().slice(0, 10);
 }
+
+/** YYYY-MM-DD ± N 天 → YYYY-MM-DD（不管星期，純日期算術）*/
+export function shiftDateYmd(ymd: string, deltaDays: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** YYYY-MM-DD → "5/22 (四)" 中文週幾標籤 */
+export function fmtDateLabelTw(ymd: string): string {
+  try {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const week = ['日', '一', '二', '三', '四', '五', '六'][dt.getUTCDay()];
+    return `${m}/${d} (${week})`;
+  } catch {
+    return ymd;
+  }
+}

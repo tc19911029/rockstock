@@ -10,9 +10,10 @@
  * 排序：API 已預先按 action(buy→watch→skip) → verdict → symbol 排好，這裡直接展示。
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
+import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 
 type Verdict = 'pass' | 'watch' | 'fail';
 type FinalAction = 'buy' | 'watch' | 'skip';
@@ -81,6 +82,8 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
   const [data, setData] = useState<DecisionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
+  const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -90,6 +93,13 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as DecisionsResponse;
       setData(json);
+      // 漸進式記錄 — DatePicker dim 沒分析過的日期
+      if ((json.runs?.length ?? 0) > 0) {
+        setPopulatedDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
+        setEmptyDates(prev => { if (!prev.has(date)) return prev; const n = new Set(prev); n.delete(date); return n; });
+      } else {
+        setEmptyDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
+      }
     } catch (err) {
       setData(null);
       setError(err instanceof Error ? err.message : 'fetch failed');
@@ -97,6 +107,13 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
       setLoading(false);
     }
   }, [date]);
+
+  const datePickerMeta = useMemo<Record<string, DateMeta>>(() => {
+    const m: Record<string, DateMeta> = {};
+    emptyDates.forEach(d => { m[d] = { dim: true }; });
+    populatedDates.forEach(d => { m[d] = { note: '有多代理分析' }; });
+    return m;
+  }, [emptyDates, populatedDates]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -121,14 +138,12 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
 
   return (
     <div className="flex flex-col h-full">
+      {/* Date pill grid（仿策略掃描）*/}
+      <div className="shrink-0 px-2 py-1.5 border-b border-border bg-card/40">
+        <DatePicker value={date} onChange={setDate} size="sm" meta={datePickerMeta} />
+      </div>
       {/* Filter bar */}
       <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-secondary/20 text-xs">
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="bg-card border border-border rounded px-1.5 py-0.5 text-foreground font-mono text-[11px]"
-        />
         <div className="flex gap-0.5">
           {(['all', 'buy', 'completed'] as const).map(f => (
             <button
@@ -149,10 +164,29 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
         <Link
           href={`/agents?date=${date}`}
           className="text-sky-400 hover:underline text-[11px]"
-          title="開啟完整 Multi-Agent 視窗"
+          title="開啟完整多代理分析"
         >
-          完整 →
+          完整頁 →
         </Link>
+      </div>
+      {/* 一行小說明 — 讓使用者快速理解這 tab 的功能與欄位 */}
+      <div className="shrink-0 px-2 py-1 text-[10px] text-muted-foreground border-b border-border/40 bg-card/20 leading-relaxed space-y-0.5">
+        <div>
+          對候選池跑 4 階段獨立分析後的結果。<span className="text-sky-400">建議</span>=最終決策、<span className="text-sky-400">多/空</span>=多空分數比、<span className="text-sky-400">部位</span>=建議資金 %。
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-sky-400">面向 </span>
+          <span className="text-foreground/80">(左→右)</span>
+          <span className="px-1 py-0.5 rounded bg-blue-700/40 text-blue-200 border border-blue-500/50 text-[9px]">技</span>
+          <span className="px-1 py-0.5 rounded bg-purple-700/40 text-purple-200 border border-purple-500/50 text-[9px]">消</span>
+          <span className="px-1 py-0.5 rounded bg-orange-700/40 text-orange-200 border border-orange-500/50 text-[9px]">籌</span>
+          <span className="px-1 py-0.5 rounded bg-teal-700/40 text-teal-200 border border-teal-500/50 text-[9px]">基</span>
+          <span>·</span>
+          <span className="text-foreground/80">顏色：</span>
+          <span className="inline-flex items-center gap-0.5"><span className="w-2 h-2 rounded-full bg-green-500" />通過</span>
+          <span className="inline-flex items-center gap-0.5"><span className="w-2 h-2 rounded-full bg-yellow-500" />觀察</span>
+          <span className="inline-flex items-center gap-0.5"><span className="w-2 h-2 rounded-full bg-red-500" />不通過</span>
+        </div>
       </div>
 
       {/* Content */}
@@ -163,7 +197,7 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
 
         {error && (
           <div className="px-3 py-6 text-center text-xs text-rose-300 space-y-2">
-            <div>載入 Multi-Agent 失敗：{error}</div>
+            <div>載入多代理分析失敗：{error}</div>
             <button
               type="button"
               onClick={fetchData}
@@ -176,12 +210,12 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
 
         {data && stats.total === 0 && !error && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground space-y-2">
-            <div>此日尚未跑 Multi-Agent 分析</div>
+            <div>此日尚未跑多代理分析</div>
             <Link
               href={`/agents?date=${date}`}
               className="text-sky-400 hover:underline"
             >
-              到 /agents 觸發 prepare-batch →
+              到多代理頁批次準備 →
             </Link>
           </div>
         )}
@@ -197,10 +231,10 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
             <thead className="sticky top-0 bg-card z-10 text-muted-foreground border-b border-border">
               <tr>
                 <th className="px-2 py-1.5 text-left font-medium">股票</th>
-                <th className="px-1 py-1.5 text-center font-medium" title="最終 action">建議</th>
-                <th className="px-1 py-1.5 text-center font-medium" title="多空比">多/空</th>
-                <th className="px-1 py-1.5 text-center font-medium" title="部位建議 %">部位</th>
-                <th className="px-1 py-1.5 text-left font-medium" title="4 面向 verdict">面向</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="最終建議：進場 / 觀察 / 跳過">建議</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="多方分數 / 空方分數">多/空</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="建議部位大小（占資金 %）">部位</th>
+                <th className="px-1 py-1.5 text-left font-medium" title="四面向獨立判定：技術 / 消息 / 籌碼 / 基本面">面向</th>
               </tr>
             </thead>
             <tbody>
@@ -240,8 +274,8 @@ function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (s
       title={run.decision?.overview ?? `Phase ${phaseProgress}/4 — 尚未完成決策`}
     >
       <td className="px-2 py-1.5">
-        <div className="font-mono tabular-nums text-foreground">{pureSymbol}</div>
-        <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">{run.name ?? '—'}</div>
+        <div className="text-foreground font-medium truncate max-w-[110px]">{run.name ?? '—'}</div>
+        <div className="font-mono tabular-nums text-[10px] text-muted-foreground">{pureSymbol}</div>
       </td>
       <td className="px-1 py-1.5 text-center">
         {cfg ? (

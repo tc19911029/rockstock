@@ -174,3 +174,37 @@ export const LETTER_NAMES: Readonly<Record<string, string>> = {
 export function nameOf(letter: string): string {
   return LETTER_NAMES[letter] ?? letter;
 }
+
+/**
+ * 多字母轉中文短描述列表：['B','E'] → '回後買上漲 / 缺口'
+ *
+ * 給 UI reasons / chip 用，第一眼看中文；要看字母請 hover or 用 letterWithCode。
+ * v11 字母（G/H/I）會先 normalize 到 v12 後再對照。
+ *
+ * 過濾掉非字母值（如 timeframe label 'daily' / 'weekly'）— tracks 陣列有時混入這類雜訊。
+ * 若全被過濾掉，回空字串（呼叫端要處理 fallback 顯示）。
+ */
+export function formatLetters(letters: readonly string[]): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of letters) {
+    const n = normalizeLetter(raw);
+    const zh = LETTER_NAMES[n];
+    if (!zh) continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(zh);
+  }
+  return out.join(' / ');
+}
+
+/**
+ * 字母 chip 展開：'B' → '回後買上漲 B'
+ *
+ * 中文主視覺 + 字母小字輔助。給 UI 兩段顯示用（中文大字 + 字母 mono 小字）。
+ */
+export function letterWithCode(letter: string): string {
+  const n = normalizeLetter(letter);
+  const zh = LETTER_NAMES[n];
+  return zh ? `${zh} ${n}` : letter;
+}

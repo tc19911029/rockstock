@@ -11,9 +11,11 @@
  *   - 卡片清單（YoutubeStockCard）
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { YoutubeStockCard } from './YoutubeStockCard';
+import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
+import { fmtDateLabelTw } from '@/lib/dateDefaults';
 import type { PerformanceResponse, PerformanceItem, ConsensusSummary } from '@/app/api/youtube/performance/route';
 
 interface Props {
@@ -26,18 +28,14 @@ interface Props {
 type SortKey = 'mention' | 'rating' | 'd5Return' | 'd20Return';
 type FilterKey = 'all' | 'A' | 'B+';
 
-function shiftDate(date: string, deltaDays: number): string {
-  const d = new Date(date + 'T00:00:00');
-  d.setDate(d.getDate() + deltaDays);
-  return d.toISOString().slice(0, 10);
-}
-
 const RATING_ORDER: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
 
 export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selectedCode }: Props) {
   const [data, setData] = useState<PerformanceResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
+  const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
   // 預設按評級排（A>B>C>D>未評），同級再按提及次數 tie-break — 對齊 deriveStockMentions 的順序
   const [sortBy, setSortBy] = useState<SortKey>('rating');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -55,11 +53,25 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
         if (cancelled) return;
         if (json.error) { setError(json.error); setData(null); return; }
         setData(json);
+        // 漸進式記錄該日是否有提及資料
+        if ((json.items?.length ?? 0) > 0) {
+          setPopulatedDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
+          setEmptyDates(prev => { if (!prev.has(date)) return prev; const n = new Set(prev); n.delete(date); return n; });
+        } else {
+          setEmptyDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
+        }
       })
       .catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [date]);
+
+  const datePickerMeta = useMemo<Record<string, DateMeta>>(() => {
+    const m: Record<string, DateMeta> = {};
+    emptyDates.forEach(d => { m[d] = { dim: true }; });
+    populatedDates.forEach(d => { m[d] = { note: '有 YouTube 提及' }; });
+    return m;
+  }, [emptyDates, populatedDates]);
 
   const ratingDist = useMemo(() => {
     const counts = { A: 0, B: 0, C: 0, D: 0, none: 0 };
@@ -114,61 +126,19 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
     return arr;
   }, [filtered, sortBy, sortDir]);
 
-  const goPrev = useCallback(() => onDateChange?.(shiftDate(date, -1)), [date, onDateChange]);
-  const goNext = useCallback(() => onDateChange?.(shiftDate(date, +1)), [date, onDateChange]);
-
-  // 仿主頁 ScanPanelVertical 日期條：最近 22 天，點任一日直接切換
-  const recentDates = useMemo(() => {
-    const today = new Date();
-    const arr: string[] = [];
-    for (let i = 0; i < 22; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      arr.push(d.toISOString().slice(0, 10));
-    }
-    return arr;
-  }, []);
-
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* ── Date header：當日標籤 + 仿主頁日期條（grid 11×2，點任一日切換）─── */}
+      {/* ── Date header：pill grid（仿策略掃描）+ 當日標籤 ─── */}
       <div className="shrink-0 px-2 py-1.5 border-b border-border bg-secondary/30 text-xs space-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={goPrev}
-            className="px-1 py-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            aria-label="前一日"
-            title="前一日"
-          >‹</button>
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <span className="font-semibold text-foreground tabular-nums">{date}</span>
-          <button
-            onClick={goNext}
-            className="px-1 py-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-            aria-label="後一日"
-            title="後一日"
-          >›</button>
-          <span className="text-muted-foreground text-[10px] ml-1">YouTube 提及股票</span>
-          {loading && <span className="text-sky-400 text-[10px] animate-pulse ml-auto">載入中…</span>}
+          <span className="text-foreground/80">{fmtDateLabelTw(date)}</span>
+          <span>· YouTube 提及股票</span>
+          {loading && <span className="text-sky-400 animate-pulse ml-auto">載入中…</span>}
         </div>
-        <div className="grid grid-cols-11 gap-1">
-          {recentDates.map(d => {
-            const isActive = d === date;
-            return (
-              <button
-                key={d}
-                onClick={() => onDateChange?.(d)}
-                className={`text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate ${
-                  isActive
-                    ? 'bg-sky-700 text-sky-100 font-semibold'
-                    : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
-                }`}
-                title={d}
-              >
-                {d.slice(5)}
-              </button>
-            );
-          })}
-        </div>
+        {onDateChange && (
+          <DatePicker value={date} onChange={onDateChange} size="sm" meta={datePickerMeta} />
+        )}
       </div>
 
       {/* ── 跨節目共識（仿主頁朱老師分析折疊樣式）─────────────────── */}
@@ -317,10 +287,10 @@ function ConsensusSection({
         {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
         <span>📊 {date} 跨節目共識</span>
         {consensus.is_placeholder && (
-          <span className="text-[9px] text-yellow-400 font-normal">[placeholder]</span>
+          <span className="text-[9px] text-yellow-400 font-normal" title="尚未跑真實分析，這是手動填的範例資料">示範資料</span>
         )}
         <span className="ml-auto text-[10px] font-normal text-muted-foreground">
-          {fmtTime(consensus.generated_at)} 寫入
+          更新於 {fmtTime(consensus.generated_at)}
         </span>
       </button>
       {open && (

@@ -366,7 +366,7 @@ export default function PortfolioPage() {
             }} />
           </label>
           <Button variant="secondary" size="sm"
-            title="把 UI 持股整批同步到 server holdings.json（讓 portfolio-review / close-trade / 月報能看到）"
+            title="把目前 UI 持股清單同步給後台，讓持倉 review / 平倉 / 月報能看到"
             onClick={async () => {
               const r = await syncAllHoldingsToServer();
               if (r.skipped) return;

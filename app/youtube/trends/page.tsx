@@ -7,7 +7,7 @@
  * 點 row 跳到 /youtube/stocks/{code}。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { PageShell, PageHeader } from '@/components/shared';
 import { YoutubeHeader } from '@/components/youtube/YoutubeHeader';
@@ -41,11 +41,15 @@ interface TrendsResponse {
   message?: string;
 }
 
+type RatingFilter = 'all' | 'A' | 'B+' | 'unrated';
+
 export default function TrendsPage() {
   const [range, setRange] = useState<Range>('7d');
   const [data, setData] = useState<TrendsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const [query, setQuery] = useState('');
+  const [ratingFilter, setRatingFilter] = useState<RatingFilter>('all');
 
   const fetchData = async () => {
     try {
@@ -68,6 +72,16 @@ export default function TrendsPage() {
   }, [range]);
 
   const stocks = data?.stocks ?? [];
+  const filteredStocks = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return stocks.filter(s => {
+      if (ratingFilter === 'A' && s.latest_rating !== 'A') return false;
+      if (ratingFilter === 'B+' && s.latest_rating !== 'A' && s.latest_rating !== 'B') return false;
+      if (ratingFilter === 'unrated' && s.latest_rating !== null) return false;
+      if (q && !s.stock_code.toLowerCase().includes(q) && !s.stock_name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [stocks, query, ratingFilter]);
 
   return (
     <PageShell
@@ -87,9 +101,9 @@ export default function TrendsPage() {
       <div className="max-w-7xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6">
         <YoutubeHeader />
 
-        {/* Range 切換 */}
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">區間：</span>
+        {/* Range + 評級 + 搜尋 */}
+        <div className="flex items-center gap-3 text-sm flex-wrap">
+          <span className="text-muted-foreground shrink-0">區間：</span>
           {(['7d', '14d', '30d'] as Range[]).map(r => (
             <button
               key={r}
@@ -104,6 +118,35 @@ export default function TrendsPage() {
               {r === '7d' ? '近 7 天' : r === '14d' ? '近 14 天' : '近 30 天'}
             </button>
           ))}
+
+          <span className="text-muted-foreground shrink-0 ml-2">評級：</span>
+          {([
+            { key: 'all' as const, label: '全部' },
+            { key: 'A' as const, label: '只看 A' },
+            { key: 'B+' as const, label: 'B+ 以上' },
+            { key: 'unrated' as const, label: '未評' },
+          ]).map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setRatingFilter(key)}
+              className={`px-2.5 py-1 rounded border text-xs ${
+                ratingFilter === key
+                  ? 'bg-blue-900/40 border-blue-600 text-blue-200'
+                  : 'border-border text-muted-foreground hover:bg-muted/30'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+
+          <input
+            type="search"
+            placeholder="搜尋代號或名稱…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="ml-auto px-3 py-1 rounded border border-border bg-card text-xs w-48 focus:outline-none focus:border-blue-600"
+          />
         </div>
 
         {loading && !data && (
@@ -120,31 +163,50 @@ export default function TrendsPage() {
 
         {/* 股票排行表 */}
         {stocks.length > 0 && (
-          <div className="rounded-lg border border-border bg-card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-xs text-muted-foreground border-b border-border bg-muted/20">
-                <tr>
-                  <th className="text-left py-2 pl-3 pr-2 whitespace-nowrap">代號</th>
-                  <th className="text-left py-2 pr-2 whitespace-nowrap">名稱</th>
-                  <th className="text-center py-2 pr-2">評級</th>
-                  <th className="text-right py-2 pr-2">最新分</th>
-                  <th className="text-right py-2 pr-2">均分</th>
-                  <th className="text-right py-2 pr-2" title="該期間被提到的總次數">提及</th>
-                  <th className="text-right py-2 pr-2" title="該期間有 mention 的天數">天數</th>
-                  <th className="text-right py-2 pr-2" title="提到該股的不同節目數">節目</th>
-                  <th className="text-right py-2 pr-2">多</th>
-                  <th className="text-right py-2 pr-2">空</th>
-                  <th className="text-left py-2 pr-2">傾向</th>
-                  <th className="text-left py-2 pr-3 whitespace-nowrap">最近</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stocks.map(s => (
-                  <TrendRow key={s.stock_code} s={s} range={range} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="text-xs text-muted-foreground">
+              顯示 {filteredStocks.length} / {stocks.length} 檔
+              {(query || ratingFilter !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => { setQuery(''); setRatingFilter('all'); }}
+                  className="ml-2 text-blue-400 hover:underline"
+                >
+                  清除篩選
+                </button>
+              )}
+            </div>
+            <div className="rounded-lg border border-border bg-card overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-muted-foreground border-b border-border bg-muted/20">
+                  <tr>
+                    <th className="text-left py-2 pl-3 pr-2 whitespace-nowrap">代號</th>
+                    <th className="text-left py-2 pr-2 whitespace-nowrap">名稱</th>
+                    <th className="text-center py-2 pr-2">評級</th>
+                    <th className="text-right py-2 pr-2">最新分</th>
+                    <th className="text-right py-2 pr-2">均分</th>
+                    <th className="text-right py-2 pr-2" title="該期間被提到的總次數">提及</th>
+                    <th className="text-right py-2 pr-2" title="該期間有 mention 的天數">天數</th>
+                    <th className="text-right py-2 pr-2" title="提到該股的不同節目數">節目</th>
+                    <th className="text-right py-2 pr-2">多</th>
+                    <th className="text-right py-2 pr-2">空</th>
+                    <th className="text-left py-2 pr-2">傾向</th>
+                    <th className="text-left py-2 pr-3 whitespace-nowrap">最近</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredStocks.map(s => (
+                    <TrendRow key={s.stock_code} s={s} range={range} />
+                  ))}
+                </tbody>
+              </table>
+              {filteredStocks.length === 0 && (
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  沒有符合篩選的股票
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     </PageShell>

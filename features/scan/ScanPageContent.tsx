@@ -13,6 +13,7 @@ import type { SelectedStock } from '@/features/scan';
 import { PageShell } from '@/components/shared';
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
+import { DatePicker } from '@/components/ui/DatePicker';
 import { DataHealthBadge } from '@/features/scan/components/DataHealthBadge';
 
 // ── Compact Scan Panel (embeddable in other pages) ───────────────────────────
@@ -172,10 +173,11 @@ export function ScanPanel({ onSelectStock }: ScanPanelProps) {
           )}
         </div>
 
-        {/* Date */}
-        <input type="date" value={scanDate} max={maxDate} min="2020-01-01"
-          onChange={e => { setScanDate(e.target.value); clearCurrent(); }}
-          className="bg-secondary border border-border text-foreground rounded px-2 py-1 text-[11px] focus:outline-none focus:border-sky-500"
+        {/* Date — pill grid 同首頁右側「策略掃描」tab */}
+        <DatePicker
+          value={scanDate}
+          onChange={(d) => { setScanDate(d); clearCurrent(); }}
+          size="md"
         />
 
         {/* 長線保護 — 打板模式不適用 */}
