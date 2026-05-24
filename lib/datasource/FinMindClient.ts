@@ -519,6 +519,41 @@ export async function getGovernance(stockId: string): Promise<GovernanceData | n
 }
 
 /**
+ * 取得個股最新「已發行股數」（NumberOfSharesIssued）— 用於把投信淨買張數換算成持股 %。
+ *
+ * 資料源：TaiwanStockShareholding 每日揭露，rockstock 既有用其外資持股比率欄位；
+ * 此 helper 改抽 NumberOfSharesIssued 欄位（股數，不是張數）。
+ * 股本變動低頻 — cache TTL 用 fundamentals 等級（24h）。
+ */
+export async function getSharesIssued(stockId: string): Promise<number | null> {
+  const cacheKey = `sharesIssued:${stockId}`;
+  const cached = cacheGet<number>(cacheKey);
+  if (cached !== null && cached !== undefined) return cached;
+
+  try {
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(start.getDate() - 14);
+
+    const rows = await finmindFetch<ShareholdingRow>('TaiwanStockShareholding', {
+      data_id: stockId,
+      start_date: start.toISOString().split('T')[0],
+    });
+    if (rows.length === 0) return null;
+
+    rows.sort((a, b) => a.date.localeCompare(b.date));
+    const latest = rows[rows.length - 1];
+    const shares = latest.NumberOfSharesIssued;
+    if (!shares || shares <= 0) return null;
+
+    cacheSet(cacheKey, shares, TTL.FUNDAMENTALS);
+    return shares;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 取得最近 N 天的三大法人合計摘要（for scan results table）
  */
 export async function getInstitutionalSummary(stockId: string, days = 5): Promise<{

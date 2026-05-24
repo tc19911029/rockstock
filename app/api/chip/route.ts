@@ -35,6 +35,16 @@ export interface ChipData {
   // 集保大戶
   largeHolderPct: number;   // 千張以上大戶持股比例 %
   largeHolderChange: number;// 大戶持股變化 %（vs 上週）
+  // 投信動向（陳威良 3比8 proxy；用最近窗口累計淨買 ÷ 已發行股數，動向 pp，不是絕對持股 %）
+  sharesIssued: number;                     // 已發行股數（股，from FinMind）；0 = 缺資料
+  trustNetBuy30d: number;                   // 30 天累計投信淨買（張）
+  trustNetBuy60d: number;
+  trustNetBuy90d: number;
+  trustHoldingChange30d: number | null;     // 30 天投信持股變化（百分點）；null = 缺 sharesIssued
+  trustHoldingChange60d: number | null;
+  trustHoldingChange90d: number | null;
+  trustDataCoverageDays: number;            // inst raw 實際涵蓋天數（max 90）；UI 用來判斷 60/90 天值是否可信
+  trustMomentumStage: TrustMomentumStage;   // 動向分區
   // 評分
   chipScore: number;
   chipGrade: string;
@@ -142,6 +152,48 @@ const chipQuerySchema = z.object({
 import { fetchT86ForStock } from '@/lib/datasource/TwseT86Provider';
 import { readTdccStock, readInstStock, writeInstStock } from '@/lib/chips/ChipStorage';
 import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock } from '@/lib/datasource/FinmindChipExtras';
+import { getSharesIssued } from '@/lib/datasource/FinMindClient';
+
+// ── 投信動向（陳威良 3比8 法則的 proxy）────────────────────────────────────
+// FinMind 免費層無「絕對投信持股 %」資料源；先用「最近 30/60/90 天投信淨買 ÷ 已發行股數」
+// 當動向 proxy。UI 必須明確標示「動向（pp）」不是「絕對持股 %」，避免誤導為陳威良講的 3%/8%/15%。
+//
+// 後續若加 Goodinfo 爬蟲拿到絕對值，這個 proxy 仍保留為「最近增持速度」指標。
+export type TrustMomentumStage =
+  | 'unknown'        // 缺資料
+  | 'cooling'        // < 0 pp (賣超)
+  | 'building'       // 0 ~ 0.5 pp（試水溫）
+  | 'accelerating'   // 0.5 ~ 1.5 pp（積極加碼，3 比 8 起飛區）
+  | 'peak';          // ≥ 1.5 pp（爆量加碼）
+
+function classifyTrustMomentum(change30d: number | null): TrustMomentumStage {
+  if (change30d === null) return 'unknown';
+  if (change30d < 0) return 'cooling';
+  if (change30d < 0.5) return 'building';
+  if (change30d < 1.5) return 'accelerating';
+  return 'peak';
+}
+
+interface InstDailyRow { date: string; foreign: number; trust: number; dealer: number; total: number }
+
+/**
+ * 從 inst raw 累計指定窗口的投信淨買張數。
+ * @param rows  升冪排序的歷史 daily rows
+ * @param asOfDate 截止日（含）
+ * @param windowDays 倒推幾天
+ */
+function sumTrustNetBuy(rows: InstDailyRow[], asOfDate: string, windowDays: number): number {
+  const cutoff = dateMinusDays(asOfDate, windowDays);
+  return rows
+    .filter(r => r.date > cutoff && r.date <= asOfDate)
+    .reduce((s, r) => s + (r.trust ?? 0), 0);
+}
+
+/** 把張數換成佔已發行股數的百分點。1 張 = 1000 股。 */
+function netBuyToPp(netBuyShares: number, sharesIssued: number | null): number | null {
+  if (!sharesIssued || sharesIssued <= 0) return null;
+  return Number(((netBuyShares * 1000 / sharesIssued) * 100).toFixed(3));
+}
 
 function dateMinusDays(d: string, n: number): string {
   const dt = new Date(d + 'T00:00:00Z');
@@ -181,13 +233,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── 2) 大戶持股 TDCC L1 + 3) 融資融券、當沖、借券（FinMind 並行）──
-    // 用 allSettled：任何單一資料源失敗不應打掉整個籌碼面板（書本實務以外資+融資為主，借券缺值可接受）
+    // ── 2) 大戶持股 TDCC L1 + 3) 融資融券、當沖、借券、4) 已發行股數（FinMind 並行）──
+    // 用 allSettled：任何單一資料源失敗不應打掉整個籌碼面板（書本實務以外資+融資為主，借券/股本缺值可接受）
     const settled = await Promise.allSettled([
       readTdccStock(code),
       fetchMarginForStock(code, date),
       fetchDayTradeForStock(code, date),
       fetchLendingForStock(code, date),
+      getSharesIssued(code),
     ]);
     const pickFulfilled = <T,>(idx: number): T | null => {
       const r = settled[idx];
@@ -197,8 +250,24 @@ export async function GET(req: NextRequest) {
     const marginInfo = pickFulfilled<Awaited<ReturnType<typeof fetchMarginForStock>>>(1);
     const dayTradeInfo = pickFulfilled<Awaited<ReturnType<typeof fetchDayTradeForStock>>>(2);
     const lendingInfo = pickFulfilled<Awaited<ReturnType<typeof fetchLendingForStock>>>(3);
+    const sharesIssued = pickFulfilled<number>(4);
     const latestTdcc = tdccFile?.data[tdccFile.data.length - 1];
     const prevTdcc = tdccFile?.data[tdccFile.data.length - 2];
+
+    // 投信動向（30/60/90 天累計淨買換算 pp）
+    const instRows = instFile?.data ?? [];
+    const trustNetBuy30d = sumTrustNetBuy(instRows, date, 30);
+    const trustNetBuy60d = sumTrustNetBuy(instRows, date, 60);
+    const trustNetBuy90d = sumTrustNetBuy(instRows, date, 90);
+    const trustHoldingChange30d = netBuyToPp(trustNetBuy30d, sharesIssued);
+    const trustHoldingChange60d = netBuyToPp(trustNetBuy60d, sharesIssued);
+    const trustHoldingChange90d = netBuyToPp(trustNetBuy90d, sharesIssued);
+    const trustMomentumStage = classifyTrustMomentum(trustHoldingChange30d);
+    // 算實際資料涵蓋天數：(date - oldest row) 內的最大值，cap 90
+    const oldestInst = instRows[0]?.date;
+    const trustDataCoverageDays = oldestInst
+      ? Math.min(90, Math.max(0, Math.floor((new Date(date).getTime() - new Date(oldestInst).getTime()) / 86400000)))
+      : 0;
 
     // 沒法人也沒大戶也沒融資資料 → 真正無資料
     if (!instOnDate && !latestTdcc && !marginInfo) {
@@ -231,6 +300,15 @@ export async function GET(req: NextRequest) {
       largeHolderChange: latestTdcc && prevTdcc
         ? +(latestTdcc.holder1000Pct - prevTdcc.holder1000Pct).toFixed(2)
         : 0,
+      sharesIssued: sharesIssued ?? 0,
+      trustNetBuy30d,
+      trustNetBuy60d,
+      trustNetBuy90d,
+      trustHoldingChange30d,
+      trustHoldingChange60d,
+      trustHoldingChange90d,
+      trustDataCoverageDays,
+      trustMomentumStage,
       chipScore: score,
       chipGrade: grade,
       chipSignal: signal,
