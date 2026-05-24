@@ -43,7 +43,7 @@ export async function GET(
         message: 'no analyses found in this range',
       });
     }
-    const history = buildStockHistory(analyses, code);
+    const history = await buildStockHistory(analyses, code);
     if (!history) {
       return apiOk({
         ...meta, stock_code: code, history: null,

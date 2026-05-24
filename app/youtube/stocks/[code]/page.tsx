@@ -18,6 +18,8 @@ type Range = '7d' | '14d' | '30d' | '90d';
 interface HistoryEntry {
   date: string;
   source_id: string;
+  /** 節目顯示名（自 sourceRegistry 帶下來）*/
+  display_name?: string;
   video_id: string;
   sentiment: 'bullish' | 'bearish' | 'neutral' | 'watchlist' | 'risk_warning' | 'mentioned_only';
   context: string;
@@ -25,6 +27,8 @@ interface HistoryEntry {
   combined_confidence: number;
   rating: StockRating | null;
   composite_score: number | null;
+  /** 分析師名單（自 mention.analysts 帶下來，可能不存在於舊資料）*/
+  analysts?: string[];
 }
 
 interface StockHistoryData {
@@ -193,12 +197,29 @@ export default function StockHistoryPage({
                 <div className="divide-y divide-border/40">
                   {entriesByDate.get(date)!.map((e, idx) => {
                     const sent = SENTIMENT_LABEL[e.sentiment];
+                    const sourceName = e.display_name || e.source_id;
+                    // 過濾掉與節目同名的 analyst（如「股市易點靈（許毓玲）」內已含「許毓玲」）
+                    const realAnalysts = (e.analysts ?? []).filter(
+                      a => a !== sourceName && a !== '(未知)' && !a.includes('主持群') && !sourceName.includes(a),
+                    );
+                    // 理由是 context 的子集就不重複顯示
+                    const reasonRedundant =
+                      !e.reason ||
+                      e.reason === e.context ||
+                      (e.context && e.context.startsWith(e.reason)) ||
+                      (e.context && e.context.includes(e.reason));
                     return (
                       <div key={idx} className="p-4 text-xs space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`font-semibold ${sent.cls}`}>{sent.text}</span>
                           <span className="text-muted-foreground">·</span>
-                          <span className="text-muted-foreground">{e.source_id}</span>
+                          <span className="text-foreground font-medium">{sourceName}</span>
+                          {realAnalysts.length > 0 && (
+                            <>
+                              <span className="text-muted-foreground">·</span>
+                              <span className="text-amber-400">【{realAnalysts.join('/')}】</span>
+                            </>
+                          )}
                           <span className="text-muted-foreground">·</span>
                           <a
                             href={`https://www.youtube.com/watch?v=${e.video_id}`}
@@ -206,7 +227,7 @@ export default function StockHistoryPage({
                             rel="noreferrer"
                             className="text-blue-400 hover:underline"
                           >
-                            {e.video_id} ↗
+                            看影片 ↗
                           </a>
                           <span className="text-muted-foreground">·</span>
                           <span className="text-muted-foreground tabular-nums">信心 {e.combined_confidence.toFixed(2)}</span>
@@ -218,12 +239,16 @@ export default function StockHistoryPage({
                             </>
                           )}
                         </div>
-                        <div className="text-foreground">
-                          <span className="text-muted-foreground">原話：</span>{e.context || '—'}
-                        </div>
-                        <div className="text-foreground">
-                          <span className="text-muted-foreground">理由：</span>{e.reason || '—'}
-                        </div>
+                        {e.context && (
+                          <div className="text-foreground/90 leading-relaxed">
+                            「{e.context}」
+                          </div>
+                        )}
+                        {!reasonRedundant && (
+                          <div className="text-foreground/70 leading-relaxed">
+                            <span className="text-muted-foreground">摘要：</span>{e.reason}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

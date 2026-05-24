@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
+import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 
 interface PoolResponse {
   ok: boolean;
@@ -36,6 +37,10 @@ interface Props {
   onSelectStock?: (symbol: string) => void;
   /** 預設 date（首頁 today；可由 URL 控制）*/
   defaultDate?: string;
+  /** 目前選中股票（match candidate.symbol）— 用於 row highlight */
+  selectedSymbol?: string | null;
+  /** 日期變動時通知 parent（用於 3 tab date sync）*/
+  onDateChange?: (date: string) => void;
 }
 
 const SOURCE_LABEL: Record<SourceName, string> = {
@@ -52,13 +57,12 @@ const SOURCE_COLOR: Record<SourceName, string> = {
   fundamental: 'bg-teal-700/40 text-teal-300 border-teal-500/50',
 };
 
-function todayYmd(): string {
-  const tpe = new Date(Date.now() + 8 * 3600_000);
-  return tpe.toISOString().slice(0, 10);
-}
-
-export function CandidatesPoolPanel({ onSelectStock, defaultDate }: Props) {
-  const [date, setDate] = useState(defaultDate ?? todayYmd());
+export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol, onDateChange }: Props) {
+  const [date, setDateLocal] = useState(defaultDate ?? lastBusinessDayYmd());
+  const setDate = useCallback((d: string) => {
+    setDateLocal(d);
+    onDateChange?.(d);
+  }, [onDateChange]);
   const [minSourceCount, setMinSourceCount] = useState(1);
   const [data, setData] = useState<PoolResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -150,7 +154,12 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate }: Props) {
             </thead>
             <tbody>
               {data.candidates.map((c) => (
-                <PoolRow key={c.symbol} candidate={c} onSelect={onSelectStock} />
+                <PoolRow
+                  key={c.symbol}
+                  candidate={c}
+                  onSelect={onSelectStock}
+                  selected={selectedSymbol === c.symbol}
+                />
               ))}
             </tbody>
           </table>
@@ -160,7 +169,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate }: Props) {
   );
 }
 
-function PoolRow({ candidate, onSelect }: { candidate: Candidate; onSelect?: (symbol: string) => void }) {
+function PoolRow({ candidate, onSelect, selected }: { candidate: Candidate; onSelect?: (symbol: string) => void; selected?: boolean }) {
   const pureSymbol = candidate.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const reasons: string[] = [];
   const t = candidate.sources.technical;
@@ -174,7 +183,9 @@ function PoolRow({ candidate, onSelect }: { candidate: Candidate; onSelect?: (sy
 
   return (
     <tr
-      className="border-b border-border/40 hover:bg-muted/40 cursor-pointer transition-colors"
+      className={`border-b border-border/40 hover:bg-muted/40 cursor-pointer transition-colors ${
+        selected ? 'bg-sky-500/15 ring-1 ring-inset ring-sky-500/40' : ''
+      }`}
       onClick={() => onSelect?.(candidate.symbol)}
     >
       <td className="px-2 py-1.5">

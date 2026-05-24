@@ -12,6 +12,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 
 type Verdict = 'pass' | 'watch' | 'fail';
 type FinalAction = 'buy' | 'watch' | 'skip';
@@ -52,11 +53,10 @@ interface DecisionsResponse {
 interface Props {
   onSelectStock?: (symbol: string) => void;
   defaultDate?: string;
-}
-
-function todayYmd(): string {
-  const tpe = new Date(Date.now() + 8 * 3600_000);
-  return tpe.toISOString().slice(0, 10);
+  /** 目前選中股票（match run.symbol）— 用於 row highlight */
+  selectedSymbol?: string | null;
+  /** 日期變動時通知 parent（用於 3 tab date sync）*/
+  onDateChange?: (date: string) => void;
 }
 
 const ACTION_STYLE: Record<FinalAction, { bg: string; text: string; label: string }> = {
@@ -71,8 +71,12 @@ const VERDICT_DOT: Record<Verdict, string> = {
   fail:  'bg-red-500',
 };
 
-export function MultiAgentTopPanel({ onSelectStock, defaultDate }: Props) {
-  const [date, setDate] = useState(defaultDate ?? todayYmd());
+export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol, onDateChange }: Props) {
+  const [date, setDateLocal] = useState(defaultDate ?? lastBusinessDayYmd());
+  const setDate = useCallback((d: string) => {
+    setDateLocal(d);
+    onDateChange?.(d);
+  }, [onDateChange]);
   const [filter, setFilter] = useState<'all' | 'buy' | 'completed'>('all');
   const [data, setData] = useState<DecisionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -184,7 +188,12 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate }: Props) {
             </thead>
             <tbody>
               {runs.map((r) => (
-                <AgentRow key={r.symbol} run={r} onSelect={onSelectStock} />
+                <AgentRow
+                  key={r.symbol}
+                  run={r}
+                  onSelect={onSelectStock}
+                  selected={selectedSymbol === r.symbol}
+                />
               ))}
             </tbody>
           </table>
@@ -194,7 +203,7 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate }: Props) {
   );
 }
 
-function AgentRow({ run, onSelect }: { run: RunListItem; onSelect?: (symbol: string) => void }) {
+function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (symbol: string) => void; selected?: boolean }) {
   const pureSymbol = run.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const action = run.decision?.action;
   const cfg = action ? ACTION_STYLE[action] : null;
@@ -207,7 +216,9 @@ function AgentRow({ run, onSelect }: { run: RunListItem; onSelect?: (symbol: str
 
   return (
     <tr
-      className="border-b border-border/40 hover:bg-muted/40 cursor-pointer transition-colors"
+      className={`border-b border-border/40 hover:bg-muted/40 cursor-pointer transition-colors ${
+        selected ? 'bg-sky-500/15 ring-1 ring-inset ring-sky-500/40' : ''
+      }`}
       onClick={() => onSelect?.(run.symbol)}
     >
       <td className="px-2 py-1.5">

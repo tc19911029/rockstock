@@ -76,13 +76,16 @@ const FWD_COLS = [
 export function YoutubeStockCard({ item, selected, onSelect }: Props) {
   const [expanded, setExpanded] = useState(false);
 
-  const bestReason = (() => {
-    const sorted = [...item.sources].sort((a, b) => {
-      // sentiment priority: bullish > bearish > others, then by best_confidence proxy via order
-      return 0;
-    });
-    return sorted.find(s => s.reason && s.reason.length > 0)?.reason ?? '';
-  })();
+  // 先排序：bullish/bearish 強訊號優先 > neutral/watchlist；
+  // 找有實質 reason 的第一條當卡片摘要
+  const sortedSources = [...item.sources].sort((a, b) => {
+    const order: Record<string, number> = { bullish: 1, bearish: 2, risk_warning: 3, watchlist: 4, neutral: 5, mentioned_only: 6 };
+    return (order[a.sentiment] ?? 9) - (order[b.sentiment] ?? 9);
+  });
+  // 卡片預覽用 context 或 reason，選較長的更有資訊量
+  const bestSrc = sortedSources.find(s => (s.context && s.context.length > 0) || (s.reason && s.reason.length > 0));
+  const bestReason = bestSrc ? (bestSrc.context || bestSrc.reason || '') : '';
+  const bestAnalysts = bestSrc?.analysts ?? [];
 
   const sentimentLabel = (() => {
     if (item.bullish_count > item.bearish_count) return { text: `看多 ${item.bullish_count}/${item.mention_count}`, cls: 'text-bull' };
@@ -90,8 +93,19 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
     return { text: `提及 ${item.mention_count}`, cls: 'text-muted-foreground' };
   })();
 
-  const sourceChips = item.sources.slice(0, 3);
-  const overflowCount = Math.max(0, item.sources.length - 3);
+  // 同節目跨集（如錢線上中下）只顯示 1 個 chip — dedupe by display_name
+  const uniqueSourcesByName = (() => {
+    const seen = new Set<string>();
+    const out: typeof item.sources = [];
+    for (const s of item.sources) {
+      if (seen.has(s.display_name)) continue;
+      seen.add(s.display_name);
+      out.push(s);
+    }
+    return out;
+  })();
+  const sourceChips = uniqueSourcesByName.slice(0, 3);
+  const overflowCount = Math.max(0, uniqueSourcesByName.length - 3);
   const allSourcesTitle = item.sources.map(s => `· ${s.display_name}（${s.video_title}）`).join('\n');
 
   const perf = item.performance;
@@ -125,9 +139,11 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
         <span className={`text-[10px] font-bold shrink-0 ${sentimentLabel.cls}`}>{sentimentLabel.text}</span>
       </div>
 
-      {/* Row 2: 節目來源 chips */}
+      {/* Row 2: 節目來源 chips（去重後算節目數）*/}
       <div className="flex items-center gap-1 mb-1 text-[10px]" title={allSourcesTitle}>
-        <span className="text-muted-foreground/80 shrink-0">📺 {item.sources.length}</span>
+        <span className="text-muted-foreground/80 shrink-0" title={`${uniqueSourcesByName.length} 個節目 / 共 ${item.sources.length} 條提及`}>
+          📺 {uniqueSourcesByName.length}
+        </span>
         {sourceChips.map((src, i) => (
           <span
             key={`${src.video_id}-${i}`}
@@ -154,6 +170,9 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
       {/* Row 3: best reason — 兩行內可見，超過 hover 看全文 or 點「詳細」展開所有節目 */}
       {bestReason && (
         <div className="text-[10px] text-foreground/70 mb-1 line-clamp-2 leading-snug" title={bestReason}>
+          {bestAnalysts.length > 0 && (
+            <span className="text-amber-400 mr-1">【{bestAnalysts.join('/')}】</span>
+          )}
           「{bestReason}」
         </div>
       )}
@@ -173,31 +192,59 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
         })}
       </div>
 
-      {/* Expanded: 每個節目細節 */}
+      {/* Expanded: 每個節目細節（依情緒排序，多 → 空 → 觀察 → 風險 → 中性） */}
       {expanded && (
-        <div className="mt-2 pt-2 border-t border-border/40 space-y-1.5 text-[10px]">
-          {item.sources.map((src, idx) => {
+        <div className="mt-2 pt-2 border-t border-border/40 space-y-2 text-[10px]">
+          <div className="text-[9px] text-muted-foreground">
+            全部 {item.sources.length} 條提及 · 依情緒排序（多→空→觀察→風險→中性）
+          </div>
+          {sortedSources.map((src, idx) => {
             const sentLabel = SENTIMENT_LABEL[src.sentiment] ?? SENTIMENT_LABEL.mentioned_only;
+            // 顯示分析師條件：有 analysts 且至少有一位不是節目 display_name (排除 fallback)
+            // 也過濾掉 display_name 內已含的 analyst 名（如「股市易點靈（許毓玲）」內已有「許毓玲」）
+            const realAnalysts = (src.analysts || []).filter(
+              a => a !== src.display_name
+                && a !== '(未知)'
+                && !a.includes('主持群')
+                && !src.display_name.includes(a)
+            );
+            // 隱藏理由條件：reason 是 context 的 prefix 或 substring
+            const reasonRedundant =
+              !src.reason ||
+              src.reason === src.context ||
+              (src.context && src.context.startsWith(src.reason)) ||
+              (src.context && src.context.includes(src.reason));
             return (
-              <div key={`${src.video_id}-${idx}`} className="border-l-2 border-border/60 pl-2">
+              <div key={`${src.video_id}-${idx}`} className="border-l-2 border-border/60 pl-2 py-0.5">
                 <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                   <span className={`font-bold ${sentLabel.cls}`}>{sentLabel.text}</span>
                   <span className="text-muted-foreground">·</span>
-                  <span className="text-foreground/80">{src.display_name}</span>
+                  <span className="text-foreground font-medium">{src.display_name}</span>
+                  {realAnalysts.length > 0 && (
+                    <>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="text-amber-400">{realAnalysts.join('/')}</span>
+                    </>
+                  )}
                   <a
                     href={src.video_url}
                     target="_blank"
                     rel="noreferrer"
                     onClick={e => e.stopPropagation()}
-                    className="text-sky-400 hover:underline ml-auto truncate max-w-[180px]"
+                    className="text-sky-400 hover:underline ml-auto truncate max-w-[120px]"
                     title={src.video_title}
                   >
-                    {src.video_title} ↗
+                    看影片 ↗
                   </a>
                 </div>
-                {src.reason && (
-                  <div className="text-foreground/70">
-                    <span className="text-muted-foreground">理由：</span>{src.reason}
+                {src.context && (
+                  <div className="text-foreground/80 leading-relaxed">
+                    「{src.context}」
+                  </div>
+                )}
+                {!reasonRedundant && (
+                  <div className="text-foreground/60 leading-relaxed mt-0.5">
+                    <span className="text-muted-foreground">摘要：</span>{src.reason}
                   </div>
                 )}
               </div>

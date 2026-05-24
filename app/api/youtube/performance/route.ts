@@ -34,6 +34,10 @@ export interface PerformanceItemSource {
   video_url: string;
   sentiment: StockSentiment;
   reason: string;
+  /** 該集影片講這檔股票的分析師（從 video.analysts 或 mention.analysts 帶下來）*/
+  analysts: string[];
+  /** 主持人原話片段 — 一般比 reason 完整 */
+  context: string;
 }
 
 export interface PerformanceItem {
@@ -124,6 +128,8 @@ export async function GET(req: NextRequest) {
             video_url: vid?.url ?? `https://www.youtube.com/watch?v=${mi.video_id}`,
             sentiment: mi.sentiment,
             reason: mi.reason,
+            analysts: mi.analysts || vid?.analysts || [],
+            context: mi.context || mi.reason || '',
           };
         });
 

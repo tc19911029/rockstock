@@ -37,6 +37,7 @@ import type { SelectedStock } from '@/features/scan';
 import { YoutubeStocksPanel } from '@/components/youtube/YoutubeStocksPanel';
 import { CandidatesPoolPanel } from '@/components/CandidatesPoolPanel';
 import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
+import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { ChevronDown, Search } from 'lucide-react';
@@ -139,9 +140,9 @@ export default function HomePage() {
     if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'pool' || urlTab === 'agent') {
       setRightTab(urlTab);
     }
-    // YouTube tab 接受 ?date=YYYY-MM-DD 預設選日
+    // ?date=YYYY-MM-DD 同步到 3 個 tab 共用 date
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      setYoutubeDate(date);
+      setTabDate(date);
     }
     if (sym) {
       loadStock(sym, '1d', '2y', date ?? undefined).catch((e: Error) => {
@@ -190,18 +191,18 @@ export default function HomePage() {
   // Stage 7-10：右側 panel tab — 策略掃描 / YouTube 提及 / 候選池 / Multi-Agent
   type RightTab = 'scan' | 'youtube' | 'pool' | 'agent';
   const [rightTab, setRightTab] = useState<RightTab>('scan');
-  // YouTube tab 用的日期（預設今天 CST）
-  const [youtubeDate, setYoutubeDate] = useState(() => {
-    const tpe = new Date(Date.now() + 8 * 3600_000);
-    return tpe.toISOString().slice(0, 10);
-  });
+  // Stage 16：3 tab 共用 date state（YouTube / Pool / Multi-Agent 都看同一天）
+  // 預設「最近工作日」，因為 today 的資料通常還沒跑完
+  // （user 仍可手動切日期；URL ?date= 也會 override）
+  const [tabDate, setTabDate] = useState(lastBusinessDayYmd);
   const [youtubeSelectedCode, setYoutubeSelectedCode] = useState<string | null>(null);
   // YouTube tab 內點股票 → loadStock + 跳左側 K 線（mobile inline 切全螢幕，避免 hoisting）
   const handleYoutubeSelectStock = useCallback((code: string) => {
     setYoutubeSelectedCode(code);
+    setLoadError(null);
     // YouTube source 都是 TW 股，補 .TW suffix
     const symbol = /\.(TW|TWO|SS|SZ)$/i.test(code) ? code : `${code}.TW`;
-    loadStock(symbol, '1d', '2y', youtubeDate).catch((e: Error) => {
+    loadStock(symbol, '1d', '2y', tabDate).catch((e: Error) => {
       toast.error(`載入 ${code} 失敗：${e.message || '請稍後再試'}`);
     });
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -209,10 +210,11 @@ export default function HomePage() {
       setScannerOpen(false);
       try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
     }
-  }, [loadStock, youtubeDate]);
+  }, [loadStock, tabDate]);
 
   // Pool tab / Multi-Agent tab 點股票 → loadStock（symbol 已是 2330.TW 格式，不必補 suffix）
   const handlePoolSelectStock = useCallback((symbol: string) => {
+    setLoadError(null);
     loadStock(symbol, '1d', '2y').catch((e: Error) => {
       toast.error(`載入 ${symbol} 失敗：${e.message || '請稍後再試'}`);
     });
@@ -343,6 +345,7 @@ export default function HomePage() {
   }, [ticker]);
   const handleScanSelectStock = useCallback((stock: SelectedStock) => {
     const scanDate = useBacktestStore.getState().scanDate;
+    setLoadError(null);
     loadStock(stock.symbol, '1d', '2y', scanDate || undefined).catch((e: Error) => {
       toast.error(`載入 ${stock.name} 失敗：${e.message || '請稍後再試'}`);
     });
@@ -656,24 +659,26 @@ export default function HomePage() {
         }`}>
           {scannerOpen ? (
             <>
-              {/* Panel header：tab 切換 + close button */}
-              <div className="shrink-0 flex items-stretch border-b border-border bg-secondary/30">
+              {/* Panel header：tab 切換 + close button（mobile 用 icon + 短名，desktop 用完整名）*/}
+              <div className="shrink-0 flex items-stretch border-b border-border bg-secondary/30 whitespace-nowrap">
                 <button
                   type="button"
                   onClick={() => setRightTab('scan')}
-                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'scan'
                       ? 'text-foreground border-b-2 border-sky-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
+                  title="朱老師策略掃描"
                 >
                   <Search className="w-3 h-3" />
-                  <span>策略掃描</span>
+                  <span className="hidden md:inline">策略掃描</span>
+                  <span className="md:hidden">掃描</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setRightTab('youtube')}
-                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'youtube'
                       ? 'text-foreground border-b-2 border-purple-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -681,12 +686,13 @@ export default function HomePage() {
                   title="YouTube 節目提及股票"
                 >
                   <span>📺</span>
-                  <span>YouTube 提及</span>
+                  <span className="hidden md:inline">YouTube 提及</span>
+                  <span className="md:hidden">YT</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setRightTab('pool')}
-                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'pool'
                       ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -699,7 +705,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => setRightTab('agent')}
-                  className={`flex items-center gap-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'agent'
                       ? 'text-foreground border-b-2 border-amber-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -707,7 +713,8 @@ export default function HomePage() {
                   title="Multi-Agent 已完成決策"
                 >
                   <span>🤖</span>
-                  <span>Multi-Agent</span>
+                  <span className="hidden md:inline">Multi-Agent</span>
+                  <span className="md:hidden">Agent</span>
                 </button>
                 <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)}
@@ -725,17 +732,27 @@ export default function HomePage() {
                 )}
                 {rightTab === 'youtube' && (
                   <YoutubeStocksPanel
-                    date={youtubeDate}
-                    onDateChange={setYoutubeDate}
+                    date={tabDate}
+                    onDateChange={setTabDate}
                     onSelectStock={handleYoutubeSelectStock}
                     selectedCode={youtubeSelectedCode}
                   />
                 )}
                 {rightTab === 'pool' && (
-                  <CandidatesPoolPanel onSelectStock={handlePoolSelectStock} />
+                  <CandidatesPoolPanel
+                    onSelectStock={handlePoolSelectStock}
+                    selectedSymbol={currentStock?.ticker}
+                    defaultDate={tabDate}
+                    onDateChange={setTabDate}
+                  />
                 )}
                 {rightTab === 'agent' && (
-                  <MultiAgentTopPanel onSelectStock={handleAgentSelectStock} />
+                  <MultiAgentTopPanel
+                    onSelectStock={handleAgentSelectStock}
+                    selectedSymbol={currentStock?.ticker}
+                    defaultDate={tabDate}
+                    onDateChange={setTabDate}
+                  />
                 )}
               </div>
             </>
