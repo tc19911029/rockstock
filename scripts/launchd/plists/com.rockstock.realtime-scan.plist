@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.realtime-scan</string>
+
+  <!--
+    即時分鐘 K 爆量警示掃描（/realtime + ntfy）
+    每 30 秒 curl /api/cron/realtime-scan；route 內部判斷盤中時段 + 守門，盤外直接 return skip。
+
+    OPTIONAL FALLBACK — instrumentation.ts 內已加 setInterval 30s 觸發同一條 route。
+    一般情況不必 load 這個 plist；若你關掉 DISABLE_LOCAL_CRON=1 或 dev-server 暫時無法跑 instrumentation
+    才需要：
+      launchctl bootstrap gui/$(id -u) ~/Desktop/rockstock/scripts/launchd/plists/com.rockstock.realtime-scan.plist
+
+    同時 load 兩邊會 double-trigger（debounce 還是會擋下，但會多打 vendor）。
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/curl</string>
+    <string>-fsS</string>
+    <string>--max-time</string>
+    <string>50</string>
+    <string>-H</string>
+    <string>Authorization: Bearer CRON_SECRET</string>
+    <string>http://localhost:3000/api/cron/realtime-scan</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>30</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-realtime-scan.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-realtime-scan.err.log</string>
+</dict>
+</plist>

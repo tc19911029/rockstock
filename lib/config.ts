@@ -100,3 +100,34 @@ export const DISPLAY = {
   /** 最大 K 線顯示數量（防止記憶體洩漏） */
   MAX_CANDLES: 2000,
 } as const;
+
+// ── 即時分鐘 K 警示 ───────────────────────────────────────────────────────
+// 警告：書本「爆量長黑=出貨」「末升段三條件」原文皆為日 K。本模組把規則套到分鐘 K
+// 是分時類推、未經回測。所有觸發訊號帶 caveat: 'minute-inference' 標記，UI / 推播
+// 三處露出 caveat banner。詳見 lib/realtime/blowoffDetector.ts 註解。
+export const REALTIME_RULES = {
+  /** 爆量倍數：vol > MA20(分鐘 vol) × N */
+  VOLUME_MULTIPLIER: 2.0,
+  /** 長 K 實體占全長最小比例 */
+  BODY_RATIO_MIN: 0.6,
+  /** 末升段乖離率門檻 close vs MA20(close) */
+  TERMINAL_RALLY_DEVIATION: 0.15,
+  /** 末升段需要連幾根長紅 */
+  TERMINAL_RALLY_STREAK: 3,
+  /** 長紅突破檢視前 N 根 high */
+  BULLISH_BREAKOUT_LOOKBACK: 5,
+  /** 同 symbol+rule debounce（毫秒） */
+  DEBOUNCE_MS: 30 * 60 * 1000,
+  /** MA20 樣本不足跳過 detector */
+  MIN_BARS_FOR_DETECT: 20,
+  /** 監控池硬上限（防 scan 失控塞太多） */
+  POOL_HARD_CAP: 80,
+  /** 當日 scan 候選 TTL */
+  SCAN_CANDIDATE_TTL_MS: 30 * 60 * 1000,
+  /** ring buffer 容量（1m K 一日約 270 根） */
+  RING_BUFFER_CAPACITY: 270,
+  /** disk flush 間隔（毫秒） */
+  FLUSH_INTERVAL_MS: 60 * 1000,
+  /** scan 觸發週期（毫秒，launchd plist 對齊） */
+  SCAN_INTERVAL_MS: 30 * 1000,
+} as const;

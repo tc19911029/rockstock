@@ -359,6 +359,15 @@ export async function register() {
     scanPostCloseDaily('CN').catch(err => console.error('[local-cron] CN scan post_close:', err));
   }, 60 * 1000);
 
+  // ── 即時分鐘 K 爆量警示 (/realtime + ntfy)：每 30 秒 ──
+  // route 內部判斷盤中時段 + 守門，盤外直接 return skip。
+  // 第一次被呼叫時 lazy 跑 restoreFromDisk + startFlushLoop。
+  setInterval(() => {
+    callRoute('/api/cron/realtime-scan', 'realtime-scan').catch(err =>
+      console.error('[local-cron] realtime-scan:', err),
+    );
+  }, 30 * 1000);
+
   // Auto-repair watchdog：主下載 cron 完成後，檢查 verify 報告，
   // 若 stocksStale > 50 或 coverage < 97% 自動觸發 retry-failed
   // 開發本地：每 30 分鐘檢查一次（vercel 上是固定排程）
