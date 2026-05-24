@@ -70,6 +70,17 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
     return counts;
   }, [data]);
 
+  // 基準日太新（連 d1 都沒有），所有 N 日漲跌都 null — 解釋為什麼欄位都是 "—"
+  // 注意：status=stale 也可能有部分資料（如 d1-d4 有、d5 沒有），不算「沒資料」
+  const allEmptyForward = useMemo(() => {
+    const items = data?.items ?? [];
+    if (items.length === 0) return false;
+    return items.every(it => {
+      const p = it.performance;
+      return p.openReturn == null && p.d1Return == null && p.d3Return == null && p.d5Return == null;
+    });
+  }, [data]);
+
   const filtered = useMemo(() => {
     const items = data?.items ?? [];
     if (filter === 'all') return items;
@@ -160,13 +171,21 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
         </div>
       </div>
 
-      {/* ── 今日跨節目共識（仿主頁朱老師分析折疊樣式）─────────────────── */}
+      {/* ── 跨節目共識（仿主頁朱老師分析折疊樣式）─────────────────── */}
       {data?.consensus && (
         <ConsensusSection
           consensus={data.consensus}
+          date={date}
           open={consensusOpen}
           onToggle={() => setConsensusOpen(v => !v)}
         />
+      )}
+
+      {/* 基準日太新提示 — forward returns 全 null 才顯示 */}
+      {allEmptyForward && (
+        <div className="shrink-0 px-2 py-1 text-[10px] text-amber-400 bg-amber-950/30 border-b border-amber-900/40">
+          ⚠ 基準日（{date}）後尚無交易日 K 線，N 日漲跌欄全為 — 。切到較早日期可看實際走勢。
+        </div>
       )}
 
       {/* ── Stats + Filters ──────────────────────────────────────────── */}
@@ -279,10 +298,12 @@ function fmtTime(iso: string): string {
 
 function ConsensusSection({
   consensus,
+  date,
   open,
   onToggle,
 }: {
   consensus: ConsensusSummary;
+  date: string;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -294,7 +315,7 @@ function ConsensusSection({
         aria-expanded={open}
       >
         {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-        <span>📊 今日跨節目共識</span>
+        <span>📊 {date} 跨節目共識</span>
         {consensus.is_placeholder && (
           <span className="text-[9px] text-yellow-400 font-normal">[placeholder]</span>
         )}

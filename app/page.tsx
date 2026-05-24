@@ -661,9 +661,11 @@ export default function HomePage() {
           {scannerOpen ? (
             <>
               {/* Panel header：tab 切換 + close button（mobile 用 icon + 短名，desktop 用完整名）*/}
-              <div className="shrink-0 flex items-stretch border-b border-border bg-secondary/30 whitespace-nowrap">
+              <div role="tablist" aria-label="右側資料來源" className="shrink-0 flex items-stretch border-b border-border bg-secondary/30 whitespace-nowrap">
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'scan'}
                   onClick={() => setRightTab('scan')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'scan'
@@ -678,6 +680,8 @@ export default function HomePage() {
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'youtube'}
                   onClick={() => setRightTab('youtube')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'youtube'
@@ -686,12 +690,14 @@ export default function HomePage() {
                   }`}
                   title="YouTube 節目提及股票"
                 >
-                  <span>📺</span>
+                  <span aria-hidden="true">📺</span>
                   <span className="hidden md:inline">YouTube 提及</span>
                   <span className="md:hidden">YT</span>
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'pool'}
                   onClick={() => setRightTab('pool')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'pool'
@@ -700,11 +706,13 @@ export default function HomePage() {
                   }`}
                   title="多源候選股票池"
                 >
-                  <span>🗂</span>
+                  <span aria-hidden="true">🗂</span>
                   <span>候選池</span>
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'agent'}
                   onClick={() => setRightTab('agent')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
                     rightTab === 'agent'
@@ -713,7 +721,7 @@ export default function HomePage() {
                   }`}
                   title="Multi-Agent 已完成決策"
                 >
-                  <span>🤖</span>
+                  <span aria-hidden="true">🤖</span>
                   <span className="hidden md:inline">Multi-Agent</span>
                   <span className="md:hidden">Agent</span>
                 </button>
