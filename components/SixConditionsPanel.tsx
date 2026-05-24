@@ -267,14 +267,14 @@ export default function SixConditionsPanel() {
         }`}>
           {isCoreReady
             ? sc.indicator.pass
-              ? '✅ 六條件全過 — 可考慮進場'
-              : '✅ 核心5條件充分 — 指標待確認'
+              ? '✅ 核心5條件全過 + 指標確認 = 6/6 — 可考慮進場'
+              : '✅ 核心5條件全過（指標未確認）— 主結構已成立、可進場'
             : coreScore >= CORE_SCORE_MIN
-            ? `⏳ 核心條件 ${coreScore}/5 — 觀察後續`
-            : `🚫 核心條件不足 ${coreScore}/5 — 建議觀望`}
+            ? `⏳ 核心 ${coreScore}/5 已過、其餘觀察後續`
+            : `🚫 核心 ${coreScore}/5 — 不足 5 條、建議觀望（書本：核心 5 條必過）`}
         </p>
         {isCoreReady && !sc.indicator.pass && (
-          <p className="text-[10px] text-yellow-500 mt-0.5">第⑥指標參考為輔助條件，可後面補上</p>
+          <p className="text-[10px] text-yellow-500 mt-0.5">📖 朱書邏輯：核心 5 條（趨/位/K/均/量）必過，第⑥指標為「加分項」、可後補</p>
         )}
       </div>
 

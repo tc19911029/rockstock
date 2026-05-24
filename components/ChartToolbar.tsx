@@ -275,7 +275,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showPivots ? 'bg-pink-600/60 text-pink-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏頭底標記（MA5 分段轉折波）"
+            title="找買賣轉折點（高低點）— 朱書「波段轉折」就是這條"
           >頭底</button>
         )}
         {onSupportResistanceToggle && (
@@ -286,7 +286,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showSupportResistance ? 'bg-amber-600/60 text-amber-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏前高壓 / 前低撐 / 大量撐壓"
+            title="找壓力與支撐線（突破壓力買、跌破支撐賣）"
           >壓撐</button>
         )}
         {onNecklineToggle && (
@@ -297,7 +297,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showNeckline ? 'bg-cyan-600/60 text-cyan-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏 形態頸線（實線）+ 目標價（虛線）+ 結構失效價（虛線）"
+            title="型態頸線 + 預估目標價 + 結構失效價（破了就無效）"
           >頸線</button>
         )}
         {onPatternToggle && (
@@ -308,7 +308,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showPattern ? 'bg-fuchsia-600/60 text-fuchsia-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏 形態 ABCDE 關鍵點與連線（系統判斷依據）"
+            title="型態關鍵點（紫色圈圈是系統判斷型態的依據點）"
           >形態</button>
         )}
         {onAscendingTrendlineToggle && (
@@ -319,7 +319,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showAscendingTrendline ? 'bg-red-600/60 text-red-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏上升切線（連最近兩個底，兩端各延 20 天）｜書本：上升切線=上升趨勢線"
+            title="上升趨勢線（連最近兩個底）— 跌破代表上升趨勢結束"
           >上升切線</button>
         )}
         {onDescendingTrendlineToggle && (
@@ -330,7 +330,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showDescendingTrendline ? 'bg-emerald-600/60 text-emerald-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏下降切線（連最近兩個頭，兩端各延 20 天）｜書本：下降切線=下降趨勢線"
+            title="下降趨勢線（連最近兩個頭）— 突破代表下降趨勢結束"
           >下降切線</button>
         )}
         {onAscendingChannelToggle && (
@@ -341,7 +341,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showAscendingChannel ? 'bg-red-600/40 text-red-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏上升軌道線（與上升切線平行，穿過兩底之間最高點）｜書本：抓住飆股 p.205-208"
+            title="上升軌道線（平行上升切線、預估壓力位置）｜書本《抓住飆股》p.205"
           >上升軌道</button>
         )}
         {onDescendingChannelToggle && (
@@ -352,7 +352,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showDescendingChannel ? 'bg-emerald-600/40 text-emerald-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏下跌軌道線（與下降切線平行，穿過兩頭之間最低點）｜書本：抓住飆股 p.205-208"
+            title="下跌軌道線（平行下降切線、預估支撐位置）｜書本《抓住飆股》p.205"
           >下跌軌道</button>
         )}
         {onConsolidationLinesToggle && (
@@ -363,7 +363,7 @@ export default function ChartToolbar({
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showConsolidationLines ? 'bg-amber-600/60 text-amber-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="顯示/隱藏盤整切線（上頸線+下頸線同時畫，連最近 2 個 swing high/low）｜書本：抓住飆股 p.205-208；寶典 Part 5 切線篇 p.352-369"
+            title="盤整箱型上下緣（突破上緣買、跌破下緣賣）｜書本《活用技術分析寶典》p.352"
           >盤整切線</button>
         )}
         <button
@@ -373,7 +373,7 @@ export default function ChartToolbar({
           className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
             showMarkers ? 'bg-blue-600/60 text-blue-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
           }`}
-          title="顯示/隱藏買賣訊號標記"
+          title="買賣訊號標記（M/N/O/P/Q/F 等買法觸發點）"
         >訊號</button>
         {showMarkers && (
           <select
