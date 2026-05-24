@@ -22,6 +22,7 @@ import { detectTrend } from '@/lib/analysis/trendAnalysis';
 import StockSelector from '@/components/StockSelector';
 import { PageShell, EmptyState, BackButton, StockChartView } from '@/components/shared';
 import { DecisionPanel } from '@/components/decision/DecisionPanel';
+import { TodayBriefing } from '@/components/today/TodayBriefing';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import SignalSummaryCard from '@/components/SignalSummaryCard';
 import { useV12HistoricalMarkers } from '@/lib/hooks/useV12HistoricalMarkers';
@@ -818,7 +819,10 @@ export default function HomePage() {
 
         </div>{/* end 3-col flex */}
 
-        {/* 深度決策面板（A1：走圖區下方垂直展開） */}
+        {/* 今日簡報 — 永遠顯示（不限選股） */}
+        <TodayBriefing market={market} />
+
+        {/* 深度決策面板（A1：走圖區下方垂直展開）— 選了個股才顯示 */}
         {showDecisionPanel && currentStock && (
           <DecisionPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />
         )}

@@ -230,9 +230,23 @@ interface MinimalHolding {
   shares: number;
   stopLoss?: number;
 }
+type AlertRule = 'blowoff-bearish' | 'blowoff-bullish' | 'terminal-rally' | 'ma5-breakdown';
+const RULE_LABEL: Record<AlertRule, string> = {
+  'blowoff-bearish': '爆量長黑',
+  'blowoff-bullish': '爆量長紅',
+  'terminal-rally':  '末升段',
+  'ma5-breakdown':   'MA5 跌破',
+};
+interface MinimalAlert {
+  rule: AlertRule;
+  firedAt: number;
+  tfMin: 1 | 5;
+}
+
 function HoldingBadge({ symbol }: { symbol: string }) {
   const [holding, setHolding] = useState<MinimalHolding | null>(null);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [latestAlert, setLatestAlert] = useState<MinimalAlert | null>(null);
 
   useEffect(() => {
     if (!symbol) return;
@@ -241,13 +255,17 @@ function HoldingBadge({ symbol }: { symbol: string }) {
     Promise.all([
       fetch('/api/agents/portfolio?status=open').then(r => r.ok ? r.json() : null).catch(() => null),
       fetch(`/api/stock/quote?symbol=${encodeURIComponent(raw)}`).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([p, q]) => {
+      // 多 fetch 一次 today alerts、取本檔的最近一條
+      fetch('/api/realtime/alerts/today').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([p, q, a]) => {
       if (cancelled) return;
       const list: MinimalHolding[] = p?.holdings ?? [];
-      // symbol 比對：portfolio 帶 .TW，比對時兩邊都 strip suffix 才不漏
       const h = list.find(it => it.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === raw);
       setHolding(h ?? null);
       setCurrentPrice(typeof q?.close === 'number' && q.close > 0 ? q.close : null);
+      const bySymbol: Record<string, MinimalAlert> = a?.bySymbol ?? {};
+      // a.bySymbol 帶 suffix key（'3661.TW'），直接 lookup
+      setLatestAlert(bySymbol[symbol] ?? null);
     });
     return () => { cancelled = true; };
   }, [symbol]);
@@ -304,8 +322,26 @@ function HoldingBadge({ symbol }: { symbol: string }) {
           )}
         </div>
       )}
+      {latestAlert && (
+        <div className="mt-1 flex items-center gap-2 text-[10px]">
+          <span
+            className="px-1.5 py-0.5 rounded bg-rose-900/40 text-rose-200 font-mono border border-rose-700/50"
+            title={`${RULE_LABEL[latestAlert.rule]}（${latestAlert.tfMin} 分K 偵測）— 點主走圖切 5m 看 marker 詳情。\n警示是分時類推、非書本日 K 規則，盤中假突破不算。`}
+          >
+            ⚠ {formatHhmm(latestAlert.firedAt)} {RULE_LABEL[latestAlert.rule]}
+          </span>
+          <span className="text-slate-500">本檔最近 5 分K 警示</span>
+        </div>
+      )}
     </div>
   );
+}
+
+function formatHhmm(epochMs: number): string {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+  return fmt.format(new Date(epochMs));
 }
 
 function KV({ k, v, cls }: { k: string; v: string; cls?: string }) {
