@@ -230,7 +230,9 @@ export function TodayBriefing({ market = 'TW' }: Props) {
   }, [decisions, reviews, alerts, growth]);
 
   const buyRuns = decisions.filter(d => d.decision?.action === 'buy');
-  const watchRuns = decisions.filter(d => d.decision?.action === 'watch').slice(0, 5);
+  const watchRuns = decisions.filter(d => d.decision?.action === 'watch');
+  // ① 今日觀察 優先順序：buy > watch (multi-agent 深度) > pool 高分股 (源頭少但廣)
+  const observeRuns = buyRuns.length > 0 ? buyRuns : watchRuns;
 
   // 規則式 holding action（review 沒當天時 fallback）
   const holdingActions = useMemo(() => holdings.map(h => {
@@ -290,31 +292,51 @@ export function TodayBriefing({ market = 'TW' }: Props) {
         {/* 4 sub-cards：候選/持股/觀察/YouTube */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
           <SubCard
-            title={buyRuns.length > 0 ? '① 多代理進場' : '① 今日觀察（候選池高分）'}
-            count={buyRuns.length > 0 ? buyRuns.length : pool.length}
-            tone={buyRuns.length > 0 ? 'success' : pool.length > 0 ? 'info' : 'muted'}
-            href={buyRuns.length > 0 ? `/?tab=agent` : `/?tab=pool&date=${today}`}
-            hint={buyRuns.length === 0 ? '多代理未跑、用候選池替代' : undefined}
+            title={
+              buyRuns.length > 0 ? '① 多代理進場'
+              : watchRuns.length > 0 ? '① 今日觀察（多代理）'
+              : '① 今日觀察（候選池）'
+            }
+            count={buyRuns.length > 0 ? buyRuns.length : watchRuns.length > 0 ? watchRuns.length : pool.length}
+            tone={buyRuns.length > 0 ? 'success' : (watchRuns.length > 0 || pool.length > 0) ? 'info' : 'muted'}
+            href={buyRuns.length > 0 || watchRuns.length > 0 ? `/?tab=agent` : `/?tab=pool&date=${today}`}
+            hint={
+              buyRuns.length === 0 && watchRuns.length === 0 ? '多代理未跑、用候選池替代'
+              : buyRuns.length === 0 ? '多代理判定全觀察（無進場）'
+              : undefined
+            }
           >
-            {buyRuns.length === 0 && pool.length === 0 ? (
+            {observeRuns.length === 0 && pool.length === 0 ? (
               <Empty>多代理 0 檔、候選池無 ≥3 共識股</Empty>
-            ) : buyRuns.length > 0 ? (
+            ) : observeRuns.length > 0 ? (
               <div className="space-y-1.5">
-                {buyRuns.slice(0, 4).map(r => (
-                  <Link key={r.symbol} href={`/?load=${encodeURIComponent(r.symbol)}&date=${today}&tab=decision`}
-                    className="block text-xs hover:bg-emerald-900/30 rounded px-1.5 py-1 transition">
-                    <span className="font-medium text-emerald-300">{r.name ?? r.symbol}</span>
-                    <span className="text-slate-400 ml-1.5">{r.decision?.sizeHint}%</span>
-                    {totalCapital && r.decision && r.decision.sizeHint > 0 && (
-                      <span className="text-cyan-400 text-[10px] ml-1">
-                        ≈ {formatNT(totalCapital * r.decision.sizeHint / 100)}
-                      </span>
-                    )}
-                  </Link>
-                ))}
+                {observeRuns.slice(0, 4).map(r => {
+                  const isBuy = r.decision?.action === 'buy';
+                  return (
+                    <Link key={r.symbol} href={`/?load=${encodeURIComponent(r.symbol)}&date=${today}&tab=decision`}
+                      className={`block text-xs hover:bg-slate-800 rounded px-1.5 py-1 transition ${isBuy ? 'hover:bg-emerald-900/30' : ''}`}>
+                      <span className={`font-medium ${isBuy ? 'text-emerald-300' : 'text-amber-200'}`}>{r.name ?? r.symbol}</span>
+                      {isBuy && (
+                        <>
+                          <span className="text-slate-400 ml-1.5">{r.decision?.sizeHint}%</span>
+                          {totalCapital && r.decision && r.decision.sizeHint > 0 && (
+                            <span className="text-cyan-400 text-[10px] ml-1">
+                              ≈ {formatNT(totalCapital * r.decision.sizeHint / 100)}
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {!isBuy && r.decision && (
+                        <span className="text-slate-500 text-[10px] ml-1.5 font-mono">
+                          多{r.decision.bullScore}/空{r.decision.bearScore}
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
               </div>
             ) : (
-              // fallback：candidates pool 高分股
+              // 最末 fallback：candidates pool 高分股
               <div className="space-y-1.5">
                 {pool.slice(0, 4).map(c => (
                   <Link key={c.symbol} href={`/?load=${encodeURIComponent(c.symbol)}&date=${today}&tab=decision`}
