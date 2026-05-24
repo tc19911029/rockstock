@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { decisionPathZh } from '@/lib/i18n/decisionPathLabel';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -161,7 +162,7 @@ export function DecisionPanel({ symbol, date }: Props) {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xl">{cfg.emoji}</span>
                 <span className="font-bold text-base">最終決策：{cfg.label}</span>
-                <span className="text-xs opacity-80">（{data.decision.decisionPath}）</span>
+                <span className="text-xs opacity-80" title={`規則代碼：${data.decision.decisionPath}`}>（{decisionPathZh(data.decision.decisionPath)}）</span>
               </div>
               <p className="text-xs opacity-90">{data.decision.overview}</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs border-t border-current/20 pt-2">
