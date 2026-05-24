@@ -21,6 +21,7 @@ import {
   type AlertForSuggestion,
   type ReviewAction,
 } from '@/lib/today/composeOperationSuggestion';
+import { computeHoldingAction, type HoldingActionRule } from '@/lib/today/computeHoldingAction';
 
 type Trend = '多頭' | '空頭' | '盤整';
 
@@ -68,6 +69,7 @@ interface GrowthState {
   gapPct: number;
   status: 'green' | 'yellow' | 'red';
   currentCapital: number;
+  currentMonthTarget?: number;
 }
 
 const RULE_LABEL: Record<AlertItem['rule'], string> = {
@@ -87,6 +89,14 @@ const REVIEW_LABEL: Record<ReviewAction, { zh: string; cls: string }> = {
   no_add:       { zh: '不加碼', cls: 'text-slate-400 border-slate-700/50 bg-slate-900/50' },
 };
 
+// 規則式 fallback action (computeHoldingAction 回的) → label
+const RULE_ACTION_LABEL: Record<HoldingActionRule, { zh: string; cls: string }> = {
+  stop_loss:    { zh: '⚠ 停損', cls: 'text-rose-300 border-rose-700/50 bg-rose-950/30' },
+  take_profit:  { zh: '🎯 停利', cls: 'text-emerald-300 border-emerald-700/50 bg-emerald-950/30' },
+  hold_observe: { zh: '續抱', cls: 'text-slate-300 border-slate-700/50 bg-slate-900/50' },
+  no_data:      { zh: '—', cls: 'text-slate-500 border-slate-800 bg-slate-900/30' },
+};
+
 interface Props {
   market?: 'TW' | 'CN';
 }
@@ -98,7 +108,8 @@ export function TodayBriefing({ market = 'TW' }: Props) {
   const [loading, setLoading] = useState(true);
   const [trend, setTrend] = useState<Trend | null>(null);
   const [decisions, setDecisions] = useState<DecisionItem[]>([]);
-  const [holdings, setHoldings] = useState<{ symbol: string; name: string; entryPrice: number; shares: number }[]>([]);
+  const [holdings, setHoldings] = useState<{ symbol: string; name: string; entryPrice: number; shares: number; stopLoss?: number }[]>([]);
+  const [holdingPrices, setHoldingPrices] = useState<Record<string, number>>({});
   const [reviews, setReviews] = useState<PortfolioReviewItem[]>([]);
   const [pool, setPool] = useState<PoolCandidate[]>([]);
   const [growth, setGrowth] = useState<GrowthState | null>(null);
@@ -130,10 +141,21 @@ export function TodayBriefing({ market = 'TW' }: Props) {
       const dec = pick<{ runs?: DecisionItem[] }>(decisionsRes);
       setDecisions(dec?.runs ?? []);
 
-      const hold = pick<{ holdings?: { symbol: string; name: string; market: string; status: string; entryPrice: number; shares: number }[] }>(holdingsRes);
-      setHoldings((hold?.holdings ?? [])
+      const hold = pick<{ holdings?: { symbol: string; name: string; market: string; status: string; entryPrice: number; shares: number; stopLoss?: number }[] }>(holdingsRes);
+      const myHoldings = (hold?.holdings ?? [])
         .filter(h => h.market === market && h.status === 'open')
-        .map(h => ({ symbol: h.symbol, name: h.name, entryPrice: h.entryPrice, shares: h.shares })));
+        .map(h => ({ symbol: h.symbol, name: h.name, entryPrice: h.entryPrice, shares: h.shares, stopLoss: h.stopLoss }));
+      setHoldings(myHoldings);
+      // 持股最新報價 — review 沒當天時用 currentPrice 規則式判斷 action
+      if (myHoldings.length > 0) {
+        const prices = await Promise.all(myHoldings.map(async (h) => {
+          const raw = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+          const r = await fetch(`/api/stock/quote?symbol=${encodeURIComponent(raw)}`)
+            .then(rr => rr.ok ? rr.json() : null).catch(() => null);
+          return [h.symbol, typeof r?.close === 'number' ? r.close : 0] as const;
+        }));
+        if (!canceled) setHoldingPrices(Object.fromEntries(prices.filter(([, p]) => p > 0)));
+      }
 
       const rev = pick<{ ok?: boolean; review?: { reviews: PortfolioReviewItem[] } }>(reviewRes);
       setReviews(rev?.review?.reviews ?? []);
@@ -141,8 +163,13 @@ export function TodayBriefing({ market = 'TW' }: Props) {
       const p = pick<{ candidates?: PoolCandidate[] }>(poolRes);
       setPool(p?.candidates ?? []);
 
-      const g = pick<{ progress?: { gapPct: number; status: 'green' | 'yellow' | 'red'; currentCapital: number } }>(growthRes);
-      setGrowth(g?.progress ? { gapPct: g.progress.gapPct, status: g.progress.status, currentCapital: g.progress.currentCapital } : null);
+      const g = pick<{ progress?: { gapPct: number; status: 'green' | 'yellow' | 'red'; currentCapital: number; currentMonthTarget?: number } }>(growthRes);
+      setGrowth(g?.progress ? {
+        gapPct: g.progress.gapPct,
+        status: g.progress.status,
+        currentCapital: g.progress.currentCapital,
+        currentMonthTarget: g.progress.currentMonthTarget,
+      } : null);
 
       const yt = pick<{ analysis?: { high_consensus_stocks?: Array<{ matched?: { code: string; name: string }; combined_confidence: number }>; stock_scoring?: Array<{ stock_code: string; rating: string }> } }>(ytRes);
       const ana = yt?.analysis;
@@ -204,6 +231,19 @@ export function TodayBriefing({ market = 'TW' }: Props) {
 
   const buyRuns = decisions.filter(d => d.decision?.action === 'buy');
   const watchRuns = decisions.filter(d => d.decision?.action === 'watch').slice(0, 5);
+
+  // 規則式 holding action（review 沒當天時 fallback）
+  const holdingActions = useMemo(() => holdings.map(h => {
+    const reviewMatch = reviews.find(r => r.symbol === h.symbol);
+    if (reviewMatch?.action) {
+      return { symbol: h.symbol, name: h.name, action: reviewMatch.action as HoldingActionRule | ReviewAction, source: 'review' as const, hint: reviewMatch.reasoning?.slice(0, 30) ?? '' };
+    }
+    const close = holdingPrices[h.symbol] ?? null;
+    const result = computeHoldingAction({ entryPrice: h.entryPrice, currentPrice: close, stopLoss: h.stopLoss });
+    return { symbol: h.symbol, name: h.name, action: result.action, source: 'rule' as const, hint: result.hint, returnPct: result.returnPct };
+  }), [holdings, reviews, holdingPrices]);
+
+  const holdingAlertsCount = holdingActions.filter(a => a.action === 'stop_loss' || a.action === 'reduce' || a.action === 'take_profit').length;
   const reviewAlertsCount = reviews.filter(r => r.action === 'stop_loss' || r.action === 'reduce' || r.action === 'take_profit').length;
 
   return (
@@ -237,18 +277,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
           </HeroCard>
 
           <HeroCard label="月底目標進度">
-            {growth ? (
-              <>
-                <div className={`text-xl font-bold ${
-                  growth.status === 'green' ? 'text-emerald-300' :
-                  growth.status === 'yellow' ? 'text-amber-300' :
-                  'text-rose-300'
-                }`}>
-                  {growth.gapPct >= 0 ? '+' : ''}{(growth.gapPct * 100).toFixed(1)}%
-                </div>
-                <div className="text-xs text-slate-400 font-mono">{formatNT(growth.currentCapital)}</div>
-              </>
-            ) : <span className="text-slate-500 text-sm">未設定</span>}
+            {growth ? <GrowthGapDetail growth={growth} /> : <span className="text-slate-500 text-sm">未設定</span>}
           </HeroCard>
         </div>
 
@@ -261,14 +290,15 @@ export function TodayBriefing({ market = 'TW' }: Props) {
         {/* 4 sub-cards：候選/持股/觀察/YouTube */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
           <SubCard
-            title="① 進場候選"
-            count={buyRuns.length}
-            tone={buyRuns.length > 0 ? 'success' : 'muted'}
-            href={`/?tab=agent`}
+            title={buyRuns.length > 0 ? '① 多代理進場' : '① 今日觀察（候選池高分）'}
+            count={buyRuns.length > 0 ? buyRuns.length : pool.length}
+            tone={buyRuns.length > 0 ? 'success' : pool.length > 0 ? 'info' : 'muted'}
+            href={buyRuns.length > 0 ? `/?tab=agent` : `/?tab=pool&date=${today}`}
+            hint={buyRuns.length === 0 ? '多代理未跑、用候選池替代' : undefined}
           >
-            {buyRuns.length === 0 ? (
-              <Empty>多代理判定 0 檔進場</Empty>
-            ) : (
+            {buyRuns.length === 0 && pool.length === 0 ? (
+              <Empty>多代理 0 檔、候選池無 ≥3 共識股</Empty>
+            ) : buyRuns.length > 0 ? (
               <div className="space-y-1.5">
                 {buyRuns.slice(0, 4).map(r => (
                   <Link key={r.symbol} href={`/?load=${encodeURIComponent(r.symbol)}&date=${today}&tab=decision`}
@@ -283,32 +313,46 @@ export function TodayBriefing({ market = 'TW' }: Props) {
                   </Link>
                 ))}
               </div>
+            ) : (
+              // fallback：candidates pool 高分股
+              <div className="space-y-1.5">
+                {pool.slice(0, 4).map(c => (
+                  <Link key={c.symbol} href={`/?load=${encodeURIComponent(c.symbol)}&date=${today}&tab=decision`}
+                    className="flex items-center justify-between gap-1.5 hover:bg-slate-800 rounded px-1.5 py-1 transition text-xs">
+                    <span className="text-amber-200 truncate">{c.name}</span>
+                    <span className="text-amber-400 font-mono text-[10px]">{c.sourceCount} 面</span>
+                  </Link>
+                ))}
+              </div>
             )}
           </SubCard>
 
           <SubCard
             title="② 持股動作"
             count={holdings.length}
-            tone={reviewAlertsCount > 0 ? 'danger' : 'info'}
+            tone={holdingAlertsCount > 0 ? 'danger' : 'info'}
             href={`/portfolio`}
+            hint={reviews.length === 0 ? '規則式（review 未跑）' : undefined}
           >
             {holdings.length === 0 ? (
               <Empty>無持股</Empty>
             ) : (
               <div className="space-y-1.5">
-                {holdings.slice(0, 4).map(h => {
-                  const review = reviews.find(r => r.symbol === h.symbol);
-                  const action = review?.action;
-                  const cfg = action ? REVIEW_LABEL[action] : null;
+                {holdingActions.slice(0, 4).map(a => {
+                  // review 來源用 REVIEW_LABEL（含 reduce/take_profit/stop_loss/add/hold_strong/hold_observe/no_add）
+                  // rule 來源用 RULE_ACTION_LABEL（stop_loss/take_profit/hold_observe/no_data）
+                  const cfg = a.source === 'review'
+                    ? REVIEW_LABEL[a.action as ReviewAction] ?? RULE_ACTION_LABEL.hold_observe
+                    : RULE_ACTION_LABEL[a.action as HoldingActionRule] ?? RULE_ACTION_LABEL.no_data;
                   return (
-                    <Link key={h.symbol} href={`/?load=${encodeURIComponent(h.symbol)}&tab=decision`}
-                      className="flex items-center justify-between gap-1.5 hover:bg-slate-800 rounded px-1.5 py-1 transition text-xs">
-                      <span className="text-slate-200 truncate">{h.name}</span>
-                      {cfg ? (
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] border ${cfg.cls}`}>{cfg.zh}</span>
-                      ) : (
-                        <span className="text-slate-500 text-[10px]">—</span>
-                      )}
+                    <Link key={a.symbol} href={`/?load=${encodeURIComponent(a.symbol)}&tab=decision`}
+                      className="flex items-center justify-between gap-1.5 hover:bg-slate-800 rounded px-1.5 py-1 transition text-xs"
+                      title={a.hint}>
+                      <span className="text-slate-200 truncate flex items-center gap-1">
+                        {a.name}
+                        {a.source === 'rule' && <span className="text-[9px] text-slate-500" title="無 review 資料、用 stopLoss 距離規則式判斷">⚙</span>}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] border ${cfg.cls}`}>{cfg.zh}</span>
                     </Link>
                   );
                 })}
@@ -428,30 +472,88 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-[11px] text-slate-500 italic">{children}</p>;
 }
 
+function GrowthGapDetail({ growth }: { growth: GrowthState }) {
+  const toneCls = growth.status === 'green' ? 'text-emerald-300'
+    : growth.status === 'yellow' ? 'text-amber-300'
+    : 'text-rose-300';
+  // 月底還剩幾天 + 還差多少
+  const now = new Date();
+  const tpe = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+  const lastDay = new Date(tpe.getFullYear(), tpe.getMonth() + 1, 0).getDate();
+  const daysLeft = lastDay - tpe.getDate();
+  const gap = growth.currentMonthTarget != null
+    ? growth.currentMonthTarget - growth.currentCapital
+    : null;
+  const requiredDailyPct = gap != null && gap > 0 && daysLeft > 0 && growth.currentCapital > 0
+    ? ((Math.pow((growth.currentCapital + gap) / growth.currentCapital, 1 / daysLeft) - 1) * 100)
+    : null;
+  return (
+    <>
+      <div className={`text-xl font-bold ${toneCls}`}>
+        {growth.gapPct >= 0 ? '+' : ''}{(growth.gapPct * 100).toFixed(1)}%
+      </div>
+      <div className="text-[10px] text-slate-400 font-mono leading-tight">
+        現 {formatNT(growth.currentCapital)}
+        {growth.currentMonthTarget && (
+          <span className="text-slate-500"> / 目標 {formatNT(growth.currentMonthTarget)}</span>
+        )}
+      </div>
+      {gap != null && gap > 0 && (
+        <div className="text-[10px] text-rose-400/80 leading-tight mt-0.5">
+          還差 {formatNT(gap)}
+          {daysLeft > 0 && ` · 剩 ${daysLeft} 天`}
+          {requiredDailyPct != null && ` · 需日均 +${requiredDailyPct.toFixed(2)}%`}
+        </div>
+      )}
+      {gap != null && gap <= 0 && (
+        <div className="text-[10px] text-emerald-400/80 leading-tight mt-0.5">
+          ✓ 已達標、超前 {formatNT(Math.abs(gap))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function TradeWindowDisplay() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(t);
   }, []);
-  // 台北時間 HH:MM
-  const fmt = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false,
+  // 台北時間 HH:MM + 星期
+  const tpe = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',
   });
-  const [h, m] = fmt.format(now).split(':').map(Number);
+  const parts = tpe.formatToParts(now);
+  const h = Number(parts.find(p => p.type === 'hour')?.value ?? '0');
+  const m = Number(parts.find(p => p.type === 'minute')?.value ?? '0');
+  const weekday = parts.find(p => p.type === 'weekday')?.value ?? '';
   const mins = h * 60 + m;
   const tradeStart = 13 * 60 + 20;
   const tradeEnd = 13 * 60 + 25;
+  const marketClose = 13 * 60 + 30;
+
+  // 9:00 之前 / 13:20 之前 / 13:20-13:25 / 13:30 後 / 假日
+  const isWeekend = weekday === 'Sat' || weekday === 'Sun';
+  if (isWeekend) {
+    return (
+      <>
+        <div className="text-xl font-bold text-slate-500 font-mono">週末休市</div>
+        <div className="text-[10px] text-slate-500">下個交易日 09:00 開盤</div>
+      </>
+    );
+  }
   if (mins < tradeStart) {
     const diff = tradeStart - mins;
     const hh = Math.floor(diff / 60);
     const mm = diff % 60;
+    const today_or_tomorrow = mins < 9 * 60 ? '今日' : (mins > marketClose ? '明日' : '今日');
     return (
       <>
         <div className="text-xl font-bold text-slate-300 font-mono">
           {hh > 0 ? `${hh}h ` : ''}{mm}m
         </div>
-        <div className="text-[10px] text-slate-500">距 13:20</div>
+        <div className="text-[10px] text-slate-500">距 {today_or_tomorrow} 13:20</div>
       </>
     );
   }
@@ -463,10 +565,22 @@ function TradeWindowDisplay() {
       </>
     );
   }
+  if (mins <= marketClose) {
+    return (
+      <>
+        <div className="text-xl font-bold text-amber-300 font-mono">收盤前 {marketClose - mins}m</div>
+        <div className="text-[10px] text-amber-400">13:30 收盤</div>
+      </>
+    );
+  }
+  // 已收盤 — 距明日 13:20
+  const tomorrowMins = (24 * 60 - mins) + tradeStart;
+  const hh = Math.floor(tomorrowMins / 60);
+  const mm = tomorrowMins % 60;
   return (
     <>
-      <div className="text-xl font-bold text-slate-500 font-mono">已收盤</div>
-      <div className="text-[10px] text-slate-500">明日再戰</div>
+      <div className="text-xl font-bold text-slate-300 font-mono">{hh}h {mm}m</div>
+      <div className="text-[10px] text-slate-500">距明日 13:20</div>
     </>
   );
 }

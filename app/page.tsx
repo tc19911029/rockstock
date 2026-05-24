@@ -16,6 +16,7 @@
 
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
+import { useSearchParams } from 'next/navigation';
 import { useReplayStore } from '@/store/replayStore';
 import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
@@ -138,48 +139,41 @@ export default function HomePage() {
     [],
   );
 
-  // Handle ?load=SYMBOL&date=YYYY-MM-DD
-  // 同步預設載入大盤指數 — hydrate 前 market='TW' 會先 load ^TWII；
-  // 若 persisted market='CN'，hydrate 完成後 market-change effect 會自動 reload 000001.SS（有短暫閃爍但保證載入）
+  // Handle ?load=SYMBOL&date=YYYY-MM-DD&tab=...&tf=...
+  // 用 useSearchParams 監聽 URL 變化（Link 點擊 / router.replace 都會 trigger）
+  // 用 lastLoadedRef 防止重複 load 同一檔（避免 hydration race + market-change race）
   const [loadError, setLoadError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const lastLoadedRef = useRef<string>('');
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    // 接受 ?load=2330.TW 或 ?symbol=2330.TW 兩種寫法（symbol 是更直覺的別名）
-    const sym = params.get('load') ?? params.get('symbol');
-    const date = params.get('date');
-    // ?tab=youtube / pool / agent / scan 直達指定 tab
-    const urlTab = params.get('tab');
+    const sym = searchParams.get('load') ?? searchParams.get('symbol');
+    const date = searchParams.get('date');
+    const urlTab = searchParams.get('tab');
+    const tfParam = searchParams.get('tf');
     if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'pool' || urlTab === 'agent') {
       setRightTab(urlTab);
     }
-    // ?date=YYYY-MM-DD 同步到 3 個 tab 共用 date
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       setTabDate(date);
     }
-    // ?tf=5m / 1m / 1d / 1wk / 1mo… 切換走圖週期
-    const tfParam = params.get('tf');
     const validTfs = ['1m', '5m', '15m', '30m', '60m', '1d', '1wk', '1mo'];
     const tf = tfParam && validTfs.includes(tfParam) ? tfParam : '1d';
     if (sym) {
+      // dedup：同 sym+tf+date 不重 load（避免 searchParams 變化但內容相同）
+      const key = `${sym}|${tf}|${date ?? ''}`;
+      if (lastLoadedRef.current === key) return;
+      lastLoadedRef.current = key;
       loadStock(sym, tf, undefined, date ?? undefined).catch((e: Error) => {
         const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
         setLoadError(msg);
         toast.error(msg);
       });
-      window.history.replaceState({}, '', '/');
-    } else if (allCandles.length === 0) {
+    } else if (lastLoadedRef.current === '') {
+      // 首次 mount 沒帶 ?load → 載大盤指數（覆蓋 initData 的 DEMO 範例）
+      lastLoadedRef.current = `_market_${market}`;
       loadStock(getMarketIndex(market).symbol, '1d', '2y').catch(() => {});
     }
-    // 清掉 ?tab= / ?date= / ?tf=（已被 state 或 loadStock 吸收）
-    if (urlTab || date || tfParam) {
-      const clean = new URLSearchParams(window.location.search);
-      clean.delete('tab');
-      clean.delete('tf');
-      if (!sym) clean.delete('date'); // sym 已用 replaceState 清整個 query，這裡只在沒 sym 時清 date
-      const qs = clean.toString();
-      window.history.replaceState({}, '', qs ? `/?${qs}` : '/');
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams, loadStock, getMarketIndex, market]);
 
   // 切換市場時自動切到該市場大盤指數
   // 用 ref 鎖住「上一次的 market」，hydration 把 market 從 'TW' 改成 'CN' 也會 trigger（這正是我們想要的）
