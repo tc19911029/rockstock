@@ -440,18 +440,38 @@ function WeightPopover({
           </div>
         );
       })}
-      <div className="flex items-center justify-between text-[10px] border-t border-border pt-2">
+      <div className="flex items-center justify-between text-[10px] border-t border-border pt-2 gap-1.5 flex-wrap">
         <span className={normalized ? 'text-emerald-300' : 'text-amber-300'}>
           總和：{(sum * 100).toFixed(0)}%
           {!normalized && '（建議 = 100%）'}
         </span>
-        <button
-          onClick={onReset}
-          className="px-2 py-0.5 rounded text-[10px] bg-secondary hover:bg-muted text-muted-foreground"
-          title={`恢復預設：技 ${defaults.technical * 100}% / 消 ${defaults.youtube * 100}% / 籌 ${defaults.chip * 100}% / 基 ${defaults.fundamental * 100}%`}
-        >
-          恢復預設
-        </button>
+        <div className="flex items-center gap-1">
+          {!normalized && sum > 0 && (
+            <button
+              onClick={() => {
+                // 等比 normalize 到 100% — 不變方向、只改絕對數值
+                const factor = 1.0 / sum;
+                onChange({
+                  technical:   weights.technical * factor,
+                  youtube:     weights.youtube * factor,
+                  chip:        weights.chip * factor,
+                  fundamental: weights.fundamental * factor,
+                });
+              }}
+              className="px-2 py-0.5 rounded text-[10px] bg-violet-600 hover:bg-violet-500 text-white font-bold"
+              title={`現在 4 個權重比例不變、等比放大到總和=100%（${(sum * 100).toFixed(0)}% → 100%）`}
+            >
+              ⚡ 一鍵 100%
+            </button>
+          )}
+          <button
+            onClick={onReset}
+            className="px-2 py-0.5 rounded text-[10px] bg-secondary hover:bg-muted text-muted-foreground"
+            title={`恢復預設：技 ${defaults.technical * 100}% / 消 ${defaults.youtube * 100}% / 籌 ${defaults.chip * 100}% / 基 ${defaults.fundamental * 100}%`}
+          >
+            恢復預設
+          </button>
+        </div>
       </div>
     </div>
   );
