@@ -3,7 +3,8 @@
 /**
  * DecisionPanel — 首頁走圖區下方深度決策摘要
  *
- * 顯示 4 面向 verdict + 進出場 + 5分K mini + 投信動向 + 連結到完整決策視圖。
+ * 顯示 4 面向 verdict + 進出場 + 投信動向 + 連結到完整決策視圖。
+ * 5 分 K / 1 分 K 直接用主走圖 toolbar 切換 timeframe（同一張圖）。
  * 資料來源：/api/agents/decisions/{symbol}?date=
  *
  * §0 隔離：4 verdict 並列展示（不混合加權），由 FinalDecision.verdictsByAgent 直接拿
@@ -21,11 +22,6 @@ import type {
   ChipAnswer,
   FundamentalAnswer,
 } from '@/lib/agents/types';
-import type { CandleWithIndicators } from '@/types';
-import { computeIndicators } from '@/lib/indicators';
-import { useBlowoffMarkers } from '@/lib/hooks/useBlowoffMarkers';
-
-const CandleChart = dynamic(() => import('@/components/CandleChart'), { ssr: false });
 
 const TrustMomentumPanel = dynamic(
   () => import('@/app/agents/[symbol]/_components/TrustMomentumPanel').then(m => m.TrustMomentumPanel),
@@ -125,7 +121,6 @@ export function DecisionPanel({ symbol, date }: Props) {
             ⏳ 尚未跑 multi-agent 4 phase 決策（缺 verdict / 進出場 / 多空辯論）。
             執行 <code className="mx-1 px-1.5 py-0.5 bg-slate-800 rounded text-cyan-300">/multi-agent-decide {symbol}</code> 取得完整建議。
           </div>
-          <MiniFiveMinChart symbol={symbol} />
           <TrustMomentumPanel symbol={symbol} date={date} />
         </div>
       </section>
@@ -188,9 +183,6 @@ export function DecisionPanel({ symbol, date }: Props) {
             </div>
           );
         })()}
-
-        {/* 5 分 K mini chart — 看主力動向 + 爆量警示，獨立於主走圖 timeframe */}
-        <MiniFiveMinChart symbol={symbol} />
 
         {/* 投信動向（reuse 已存在元件） */}
         <TrustMomentumPanel symbol={symbol} date={date} />
@@ -325,87 +317,3 @@ function KV({ k, v, cls }: { k: string; v: string; cls?: string }) {
   );
 }
 
-// 5 分 K mini chart — 獨立 fetch、獨立 timeframe、永遠顯示最近 60 根 + blowoff markers
-function MiniFiveMinChart({ symbol }: { symbol: string }) {
-  const [bars, setBars] = useState<CandleWithIndicators[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!symbol) return;
-    const raw = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-    setLoading(true);
-    setError(null);
-    fetch(`/api/stock?symbol=${encodeURIComponent(raw)}&interval=5m&period=60d`)
-      .then(r => r.json())
-      .then(j => {
-        if (!j.candles?.length) {
-          setError('無 5 分K 資料（指數或新上市）');
-          setBars([]);
-          return;
-        }
-        const enriched = computeIndicators(j.candles);
-        // 只取最後 60 根（4-5 小時範圍，盤中即時最有意義）
-        setBars(enriched.slice(-60));
-      })
-      .catch(() => setError('5 分K 載入失敗'))
-      .finally(() => setLoading(false));
-  }, [symbol]);
-
-  // 用既有 hook 算 blowoff markers（不需 mock holding，盤中看出貨警示）
-  const markers = useBlowoffMarkers(bars, symbol, '5m', false);
-
-  if (error) {
-    return (
-      <div className="border border-slate-700/40 rounded p-2 bg-slate-900/30 text-xs text-slate-500">
-        5 分 K：{error}
-      </div>
-    );
-  }
-  if (loading && bars.length === 0) {
-    return (
-      <div className="border border-slate-700/40 rounded p-2 bg-slate-900/30 text-xs text-slate-500 animate-pulse">
-        5 分 K 載入中…
-      </div>
-    );
-  }
-  if (bars.length === 0) return null;
-
-  const last = bars[bars.length - 1];
-  const blowoffCount = markers.length;
-
-  return (
-    <div className="border border-slate-700/40 rounded bg-slate-900/30 overflow-hidden">
-      <div className="flex items-center justify-between px-2 py-1 bg-slate-900/60 border-b border-slate-700/50">
-        <div className="text-xs font-bold text-cyan-300">
-          📊 5 分 K（最近 60 根）
-        </div>
-        <div className="text-xs text-slate-400 font-mono">
-          {last.date} · {last.close.toFixed(2)}
-          {blowoffCount > 0 && (
-            <span className="ml-2 text-rose-300" title="hover K 棒上的標記看詳情">
-              ⚠ {blowoffCount} 個爆量警示
-            </span>
-          )}
-        </div>
-      </div>
-      <CandleChart
-        candles={bars}
-        signals={[]}
-        chartMarkers={markers}
-        height={140}
-        maToggles={{ ma5: true, ma10: true, ma20: false, ma60: false, ma240: false }}
-        showBollinger={false}
-        showTrendlines={false}
-        showPivots={false}
-        showSupportResistance={false}
-      />
-      {/* caveat — blowoffDetector signals 帶 caveat:'minute-inference' */}
-      <div className="px-2 py-1 text-[10px] italic text-amber-400/80 bg-amber-950/20 border-t border-slate-700/40">
-        ⚠ 分鐘 K 爆量警示是「日 K 規則的分時類推」、未經回測，
-        書本原文（爆量長黑/末升段）皆為日 K。盤中假突破不算，
-        要看收盤前 5-10 分鐘確認。
-      </div>
-    </div>
-  );
-}
