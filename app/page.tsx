@@ -511,9 +511,11 @@ export default function HomePage() {
   const showDecisionPanel = !!currentStock && !/^\^|^000001\.SS$/.test(currentStock.ticker);
 
   return (
-    <PageShell fullViewport={!showDecisionPanel} headerSlot={<StockSelector />}>
-      <div className={`flex-1 flex flex-col ${showDecisionPanel ? '' : 'min-h-0'} px-3 py-2 gap-3`}>
-        <div className={`flex flex-col md:flex-row gap-2 ${showDecisionPanel ? 'md:h-[calc(100vh-90px)] md:overflow-hidden' : 'flex-1 min-h-0 md:overflow-x-auto md:overflow-y-hidden overflow-y-auto h-full'}`}>
+    // fullViewport=false 永遠允許整頁 vertical scroll（避免 ^TWII 時整頁鎖死無法捲動）
+    // chart 區用 md:h-[calc(100vh-90px)] 限制 desktop 高度，下方 DecisionPanel 仍可 scroll 到
+    <PageShell fullViewport={false} headerSlot={<StockSelector />}>
+      <div className="flex-1 flex flex-col px-3 py-2 gap-3">
+        <div className="flex flex-col md:flex-row gap-2 md:h-[calc(100vh-90px)] md:overflow-hidden">
 
         {/* Left: Chart */}
         <div className="w-full md:flex-1 md:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
