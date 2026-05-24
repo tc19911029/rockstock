@@ -6,7 +6,7 @@ import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun,
   Star, Briefcase, Menu, TrendingUp,
-  PlaySquare, Brain, Activity, Settings, FileText, Layers, Sunrise, Calculator, LineChart, Radio,
+  PlaySquare, Brain, Activity, Settings, FileText, Layers, Sunrise, Calculator, LineChart, Radio, BookOpen, ShieldAlert,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
@@ -71,9 +71,11 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
             {([
               { href: '/today',     label: '今日決策',  icon: Sunrise },
               { href: '/growth',    label: '進度',     icon: LineChart },
+              { href: '/risk',      label: '風險面板',  icon: ShieldAlert },
               { href: '/sizer',     label: '部位試算',  icon: Calculator },
               { href: '/watchlist', label: '自選股',   icon: Star },
               { href: '/portfolio', label: '持倉',     icon: Briefcase },
+              { href: '/journal',   label: '交易日誌',  icon: BookOpen },
               { href: '/realtime',  label: '實盤警示',  icon: Radio },
               { href: '/etf',       label: 'ETF追蹤', icon: TrendingUp },
             ] as const).map(({ href, label, icon: Icon }) => (

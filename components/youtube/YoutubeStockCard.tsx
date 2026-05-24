@@ -88,9 +88,11 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
   const bestAnalysts = bestSrc?.analysts ?? [];
 
   const sentimentLabel = (() => {
-    if (item.bullish_count > item.bearish_count) return { text: `看多 ${item.bullish_count}/${item.mention_count}`, cls: 'text-bull' };
-    if (item.bearish_count > item.bullish_count) return { text: `看空 ${item.bearish_count}/${item.mention_count}`, cls: 'text-bear' };
-    return { text: `提及 ${item.mention_count}`, cls: 'text-muted-foreground' };
+    const total = item.mention_count;
+    const tooltip = `${total} 次提及（同一節目跨集算多次）｜多: ${item.bullish_count} / 空: ${item.bearish_count} / 中立: ${total - item.bullish_count - item.bearish_count}`;
+    if (item.bullish_count > item.bearish_count) return { text: `看多 ${item.bullish_count}/${total}`, cls: 'text-bull', title: tooltip };
+    if (item.bearish_count > item.bullish_count) return { text: `看空 ${item.bearish_count}/${total}`, cls: 'text-bear', title: tooltip };
+    return { text: `提及 ${total}`, cls: 'text-muted-foreground', title: tooltip };
   })();
 
   // 同節目跨集（如錢線上中下）只顯示 1 個 chip — dedupe by display_name
@@ -136,7 +138,7 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
             {item.rating}
           </span>
         )}
-        <span className={`text-[10px] font-bold shrink-0 ${sentimentLabel.cls}`}>{sentimentLabel.text}</span>
+        <span title={sentimentLabel.title} className={`text-[10px] font-bold shrink-0 cursor-help ${sentimentLabel.cls}`}>{sentimentLabel.text}</span>
       </div>
 
       {/* Row 2: 節目來源 chips（去重後算節目數）*/}

@@ -149,12 +149,37 @@ export function MarketDataTab() {
         <div className="font-medium mb-1">看到紅燈/黃燈怎麼辦？</div>
         <ul className="list-disc list-inside space-y-0.5 pl-2">
           <li>小問題（落後 1-50 支）：等下一輪 cron 自動修復</li>
-          <li>大問題（覆蓋率 &lt; 90%）：手動跑 <code className="text-foreground">npx tsx scripts/audit-l1-integrity.ts TW 7</code></li>
-          <li>K 棒缺日：跑 <code className="text-foreground">npx tsx scripts/insert-missing-day.ts TW 2026-MM-DD</code></li>
+          <li className="flex items-center gap-1.5 flex-wrap">
+            大問題（覆蓋率 &lt; 90%）：
+            <CopyCode cmd="npx tsx scripts/audit-l1-integrity.ts TW 7" />
+          </li>
+          <li className="flex items-center gap-1.5 flex-wrap">
+            K 棒缺日：
+            <CopyCode cmd="npx tsx scripts/insert-missing-day.ts TW 2026-MM-DD" />
+          </li>
           <li>歷史快照：<code className="text-foreground">data/health-snapshot/health-YYYY-MM-DD.json</code> 看當天狀態</li>
         </ul>
       </div>
     </div>
+  );
+}
+
+function CopyCode({ cmd }: { cmd: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="inline-flex items-center gap-1 group">
+      <code className="text-foreground select-all">{cmd}</code>
+      <button
+        type="button"
+        onClick={async () => {
+          try { await navigator.clipboard.writeText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+        }}
+        className="opacity-50 hover:opacity-100 text-[10px] px-1 rounded hover:bg-secondary"
+        title="複製"
+      >
+        {copied ? '✓' : '📋'}
+      </button>
+    </span>
   );
 }
 

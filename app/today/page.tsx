@@ -36,7 +36,16 @@ interface Holding {
   stopLoss?: number; status: string;
 }
 
-interface GrowthDisplay { currentCapital: number; targetCapital: number; startCapital: number }
+interface GrowthDisplay { currentCapital: number; targetCapital: number; startCapital: number; gapPct: number; currentMonthTarget: number; status: string }
+
+interface YoutubeStockMini { code: string; name: string; rating?: string; mention_count: number; sentiment: string }
+interface YoutubeSummary {
+  market_view: string;
+  bullish_consensus: string[];
+  bearish_consensus: string[];
+  high_consensus_stocks: number;
+  top_stocks: YoutubeStockMini[];
+}
 
 export default function TodayPage() {
   const today = useMemo(() => lastBusinessDayYmd(), []);
@@ -47,6 +56,7 @@ export default function TodayPage() {
   const [holdingPrices, setHoldingPrices] = useState<Record<string, number>>({});
   const [pool, setPool] = useState<PoolCandidate[]>([]);
   const [growth, setGrowth] = useState<GrowthDisplay | null>(null);
+  const [youtube, setYoutube] = useState<YoutubeSummary | null>(null);
   const [loading, setLoading] = useState(true);
   // 資料新鮮度（4 source 是否有 today 資料）
   const [freshness, setFreshness] = useState<{ trend: boolean; pool: boolean; agents: boolean; youtube: boolean }>({
@@ -86,7 +96,40 @@ export default function TodayPage() {
         currentCapital: gp.currentCapital,
         startCapital: gpath.startCapital,
         targetCapital: gpath.targetCapital,
+        gapPct: gp.gapPct,
+        currentMonthTarget: gp.currentMonthTarget,
+        status: gp.status,
       } : null);
+
+      // YouTube 摘要：market_view 1 句 + consensus chip + top 5 mention 股
+      // API 回 { ok, analysis: { ... } }，分析資料在 .analysis 下
+      const ana = youtubeRes?.analysis;
+      if (ana) {
+        const high = (ana.high_consensus_stocks ?? []) as Array<{ matched?: { code: string; name: string }; sentiment: string; combined_confidence: number }>;
+        const scoring = (ana.stock_scoring ?? []) as Array<{ stock_code: string; rating: string; composite_score: number }>;
+        const ratingByCode = new Map(scoring.map(s => [s.stock_code, s.rating]));
+        const byCode = new Map<string, YoutubeStockMini>();
+        for (const m of high) {
+          if (!m.matched || m.combined_confidence < 0.6) continue;
+          const code = m.matched.code;
+          const existing = byCode.get(code);
+          if (existing) existing.mention_count += 1;
+          else byCode.set(code, {
+            code, name: m.matched.name,
+            rating: ratingByCode.get(code),
+            mention_count: 1,
+            sentiment: m.sentiment,
+          });
+        }
+        const top = Array.from(byCode.values()).sort((a, b) => b.mention_count - a.mention_count).slice(0, 6);
+        setYoutube({
+          market_view: (ana.market_view ?? '').slice(0, 200),
+          bullish_consensus: (ana.bullish_consensus ?? []).slice(0, 3),
+          bearish_consensus: (ana.bearish_consensus ?? []).slice(0, 2),
+          high_consensus_stocks: high.length,
+          top_stocks: top,
+        });
+      }
 
       // 資料新鮮度：每個 source 是不是有 today 的資料
       setFreshness({
@@ -280,6 +323,68 @@ export default function TodayPage() {
           )}
         </Section>
 
+        {/* ─── YouTube 共識 inline ─── */}
+        {youtube && (
+          <Section title="④ YouTube 跨節目共識" emoji="📺" tone="info" count={youtube.high_consensus_stocks}>
+            <p className="text-xs text-foreground/80 leading-relaxed mb-2">{youtube.market_view}</p>
+            {youtube.bullish_consensus.length > 0 && (
+              <div className="text-xs space-y-0.5 mb-1">
+                <span className="text-emerald-400">看多：</span>
+                {youtube.bullish_consensus.map((b, i) => (
+                  <div key={i} className="ml-3 text-foreground/70">· {b}</div>
+                ))}
+              </div>
+            )}
+            {youtube.bearish_consensus.length > 0 && (
+              <div className="text-xs space-y-0.5 mb-2">
+                <span className="text-red-400">看空 / 風險：</span>
+                {youtube.bearish_consensus.map((b, i) => (
+                  <div key={i} className="ml-3 text-foreground/70">· {b}</div>
+                ))}
+              </div>
+            )}
+            {youtube.top_stocks.length > 0 && (
+              <div className="flex gap-1.5 flex-wrap pt-1 border-t border-border/40">
+                <span className="text-[10px] text-muted-foreground self-center">高共識股：</span>
+                {youtube.top_stocks.map(s => (
+                  <Link key={s.code} href={`/agents/${s.code}.TW?date=${today}`}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-purple-900/30 border border-purple-700/40 text-purple-200 hover:bg-purple-900/50">
+                    {s.rating && <span className="font-bold">{s.rating}</span>}
+                    <span>{s.name}</span>
+                    <span className="text-purple-400/70">×{s.mention_count}</span>
+                  </Link>
+                ))}
+                <Link href={`/youtube?date=${today}`} className="text-[10px] text-sky-400 hover:underline self-center ml-1">完整 →</Link>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {/* ─── 本週 growth gap ─── */}
+        {growth && (
+          <Section title="⑤ 本月 growth gap" emoji="📈" tone={growth.status === 'red' ? 'danger' : growth.status === 'yellow' ? 'warn' : 'success'}>
+            <div className="text-xs grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <div className="text-muted-foreground text-[10px]">本月應到</div>
+                <div className="font-mono font-bold">{formatNT(growth.currentMonthTarget)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-[10px]">當前</div>
+                <div className="font-mono font-bold">{formatNT(growth.currentCapital)}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-[10px]">差距</div>
+                <div className={`font-mono font-bold ${growth.gapPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {growth.gapPct >= 0 ? '+' : ''}{(growth.gapPct * 100).toFixed(1)}%
+                </div>
+              </div>
+              <div>
+                <Link href="/growth" className="text-sky-400 hover:underline">看完整軌跡 →</Link>
+              </div>
+            </div>
+          </Section>
+        )}
+
         {/* ─── Export ─── */}
         <section className="pt-2 border-t border-border">
           <button
@@ -299,6 +404,8 @@ export default function TodayPage() {
           <Link href="/portfolio" className="text-sky-400 hover:underline">💼 持倉細節</Link>
           <Link href="/growth" className="text-sky-400 hover:underline">📈 進度</Link>
           <Link href="/sizer" className="text-sky-400 hover:underline">📐 部位試算</Link>
+          <Link href="/risk" className="text-sky-400 hover:underline">🛡 風險面板</Link>
+          <Link href="/journal" className="text-sky-400 hover:underline">📓 交易日誌</Link>
           <Link href={`/youtube?date=${today}`} className="text-sky-400 hover:underline">📺 YouTube 共識</Link>
           <Link href="/health" className="text-sky-400 hover:underline">📊 資料健康</Link>
         </nav>
