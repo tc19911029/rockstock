@@ -15,7 +15,7 @@
  *   - 不提供「建立 Pool」按鈕（首頁是看結果，要建請去 /agents/pool）
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
 import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
@@ -76,13 +76,25 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
   const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
 
+  // AbortController + 15s timeout 防卡載入中（user 快速切日期或 server hang）
+  const abortRef = useRef<AbortController | null>(null);
   const fetchPool = useCallback(async () => {
+    // 取消上一筆 in-flight fetch
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const timeoutId = setTimeout(() => ac.abort(), 15_000);
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/pool?date=${date}&minSourceCount=${minSourceCount}&limit=100`);
+      const res = await fetch(
+        `/api/agents/pool?date=${date}&minSourceCount=${minSourceCount}&limit=100`,
+        { signal: ac.signal },
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as PoolResponse;
+      if (ac.signal.aborted) return;  // 被新 fetch 取代，don't update state
       setData(json);
       // 漸進式記錄該日是否有資料 — DatePicker 用來 dim 空日 pill
       if (json.exists) {
@@ -92,10 +104,12 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
         setEmptyDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
       }
     } catch (err) {
+      if (ac.signal.aborted) return;  // 取消的不算錯，不更新 state（避免 race）
       setData(null);
       setError(err instanceof Error ? err.message : 'fetch failed');
     } finally {
-      setLoading(false);
+      clearTimeout(timeoutId);
+      if (!ac.signal.aborted) setLoading(false);
     }
   }, [date, minSourceCount]);
 

@@ -10,7 +10,7 @@
  * 排序：API 已預先按 action(buy→watch→skip) → verdict → symbol 排好，這裡直接展示。
  */
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
@@ -85,13 +85,21 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
   const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
   const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
 
+  // AbortController + 15s timeout 防卡載入中（user 快速切日期或 server hang）
+  const abortRef = useRef<AbortController | null>(null);
   const fetchData = useCallback(async () => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const timeoutId = setTimeout(() => ac.abort(), 15_000);
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/decisions?date=${date}`);
+      const res = await fetch(`/api/agents/decisions?date=${date}`, { signal: ac.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as DecisionsResponse;
+      if (ac.signal.aborted) return;
       setData(json);
       // 漸進式記錄 — DatePicker dim 沒分析過的日期
       if ((json.runs?.length ?? 0) > 0) {
@@ -101,10 +109,12 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
         setEmptyDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
       }
     } catch (err) {
+      if (ac.signal.aborted) return;
       setData(null);
       setError(err instanceof Error ? err.message : 'fetch failed');
     } finally {
-      setLoading(false);
+      clearTimeout(timeoutId);
+      if (!ac.signal.aborted) setLoading(false);
     }
   }, [date]);
 
