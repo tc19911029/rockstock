@@ -116,17 +116,25 @@ function WindowsTable({ data }: { data: ChipApiData }) {
           </tr>
         </thead>
         <tbody>
-          {windows.map((w) => (
-            <tr key={w.label} className="border-t border-slate-800">
-              <td className="px-2 py-1.5 text-slate-300">{w.label}</td>
-              <td className={`px-2 py-1.5 text-right font-mono ${!w.available ? 'text-slate-600' : w.netBuy > 0 ? 'text-emerald-300' : w.netBuy < 0 ? 'text-rose-300' : 'text-slate-400'}`}>
-                {w.available ? w.netBuy.toLocaleString() : '—'}
-              </td>
-              <td className={`px-2 py-1.5 text-right font-mono ${!w.available ? 'text-slate-600' : (w.change ?? 0) > 0 ? 'text-emerald-300' : (w.change ?? 0) < 0 ? 'text-rose-300' : 'text-slate-400'}`}>
-                {w.available && w.change !== null ? `${w.change >= 0 ? '+' : ''}${w.change.toFixed(3)}` : '—'}
-              </td>
-            </tr>
-          ))}
+          {windows.map((w) => {
+            // API 對部分 symbol（指數、新股、無 inst 資料）可能未回 trustNetBuyXd / trustHoldingChangeXd
+            // 欄位，wrap 成 hasNetBuy / hasChange 避免 .toLocaleString / .toFixed 對 undefined crash
+            const hasNetBuy = typeof w.netBuy === 'number';
+            const hasChange = typeof w.change === 'number';
+            const showNetBuy = w.available && hasNetBuy;
+            const showChange = w.available && hasChange;
+            return (
+              <tr key={w.label} className="border-t border-slate-800">
+                <td className="px-2 py-1.5 text-slate-300">{w.label}</td>
+                <td className={`px-2 py-1.5 text-right font-mono ${!showNetBuy ? 'text-slate-600' : (w.netBuy ?? 0) > 0 ? 'text-emerald-300' : (w.netBuy ?? 0) < 0 ? 'text-rose-300' : 'text-slate-400'}`}>
+                  {showNetBuy ? (w.netBuy as number).toLocaleString() : '—'}
+                </td>
+                <td className={`px-2 py-1.5 text-right font-mono ${!showChange ? 'text-slate-600' : (w.change ?? 0) > 0 ? 'text-emerald-300' : (w.change ?? 0) < 0 ? 'text-rose-300' : 'text-slate-400'}`}>
+                  {showChange ? `${(w.change as number) >= 0 ? '+' : ''}${(w.change as number).toFixed(3)}` : '—'}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {cover < 75 && (
