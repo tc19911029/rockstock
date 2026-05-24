@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-status-check</string>
+
+  <!--
+    每小時 14-23 CST 跑 status check，印到 /tmp/rockstock-youtube-status.log。
+    `tail -f /tmp/rockstock-youtube-status.log` 即可持續觀察。
+    時間設 :40 是因為前面有 :00 scan + :20 transcript + :30 prepare-analysis 要先跑完。
+    Script 直接寫進 plist（launchd 對 Desktop 路徑的 sandbox 限制）。
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-c</string>
+    <string>D=$(TZ=Asia/Taipei date +%F); HH=$(TZ=Asia/Taipei date +%H:%M); TS="[$D $HH]"; LOG=/tmp/rockstock-youtube-status.log; ROOT=$HOME/Desktop/rockstock; VF=$ROOT/data/youtube/videos/$D.json; AF=$ROOT/data/youtube/analysis/$D.json; if [ ! -f "$VF" ]; then echo "$TS 今日 $D：尚無影片檔" &gt;&gt; "$LOG"; exit 0; fi; STATS=$(/usr/bin/python3 -c "import json,os; vids=json.load(open('$VF')); total=len(vids); az=[v for v in vids if v.get('should_analyze')]; tdir='$ROOT/data/youtube/transcripts/$D'; tids=set();
+[tids.add(f.replace('.json','')) for f in os.listdir(tdir)] if os.path.isdir(tdir) else None; have=sum(1 for v in az if v['video_id'] in tids); print(f'{total} {len(az)} {have}')"); TOTAL=$(echo $STATS | awk '{print $1}'); ANALYZABLE=$(echo $STATS | awk '{print $2}'); TRANSCRIPTS=$(echo $STATS | awk '{print $3}'); if [ -f "$AF" ]; then AS="✅ 已寫"; else AS="⏳ 尚未寫"; fi; ACTION=""; if [ "$ANALYZABLE" -gt "$TRANSCRIPTS" ]; then PENDING=$((ANALYZABLE - TRANSCRIPTS)); ACTION=" → 觸發 transcript fetch（$PENDING 支待抓）"; /usr/bin/curl -fsS --max-time 280 -H "Authorization: Bearer CRON_SECRET" -X POST "http://localhost:3000/api/cron/youtube-transcript?date=$D&amp;use_whisper=1" &gt; /dev/null 2&gt;&amp;1; sleep 2; fi; echo "$TS 今日 $D：影片 $TOTAL 支 / analyzable $ANALYZABLE 支 / transcript $TRANSCRIPTS 支 / analysis $AS$ACTION" &gt;&gt; "$LOG"</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>40</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-status.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-status.err.log</string>
+</dict>
+</plist>

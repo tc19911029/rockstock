@@ -53,10 +53,11 @@ async function handle(req: NextRequest) {
     seenIds.add(v.video_id);
     merged.push(v);
   }
-  // filter by published_at falling in target date (Asia/Taipei)
+  // filter by effective program date (program_date if set, else published_at)
+  // — 跟 classify.ts/effectiveProgramDate 對齊；手動覆寫 program_date 也吃得到
   const videos = merged.filter(v => {
-    if (!v.published_at) return false;
-    return ymdTaipei(new Date(v.published_at)) === date;
+    const eff = v.program_date ?? (v.published_at ? ymdTaipei(new Date(v.published_at)) : null);
+    return eff === date;
   });
   const transcriptIndex = await loadTranscriptIndex();
   const transcripts = new Map<string, TranscriptRecord>();

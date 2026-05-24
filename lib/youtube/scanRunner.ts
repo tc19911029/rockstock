@@ -75,15 +75,19 @@ export interface ScanOneResult {
  */
 function assertPlaylistUrl(source: YouTubeSource): void {
   if (source.kind === 'playlist') {
-    if (!/^https:\/\/www\.youtube\.com\/playlist\?list=PL[A-Za-z0-9_-]+/.test(source.url)) {
+    // 接受 PL (人工 playlist) 或 UU (channel uploads — 自動把所有影片放一起)
+    // 不接受 LL (liked, user only) / FL (deprecated) / RD (auto radio)
+    if (!/^https:\/\/www\.youtube\.com\/playlist\?list=(PL|UU)[A-Za-z0-9_-]+/.test(source.url)) {
       throw new Error(
-        `source "${source.source_id}" kind=playlist but URL is not a playlist URL: ${source.url}`,
+        `source "${source.source_id}" kind=playlist but URL is not a PL/UU playlist URL: ${source.url}`,
       );
     }
   } else if (source.kind === 'channel') {
-    // 目前 13 來源全是 playlist。kind=channel 暫不支援（會誤抓非 playlist 範圍影片）。
+    // kind=channel 仍不支援（會帶 /@xxx/videos 等 URL，yt-dlp 行為不一致）。
+    // 想抓整頻道？用 uploads playlist：UU + channel_id_without_UC_prefix
     throw new Error(
-      `source "${source.source_id}" kind=channel is no longer supported; convert to a playlist URL`,
+      `source "${source.source_id}" kind=channel not supported; use uploads playlist URL ` +
+      `(https://www.youtube.com/playlist?list=UU{channel_id})`,
     );
   }
 }

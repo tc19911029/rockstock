@@ -168,6 +168,31 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     created_at: CREATED_V2,
     default_analysts: [],
   },
+  {
+    source_id: 'lei-laoban-podcast',
+    display_name: '雷老闆週末 Podcast',
+    kind: 'playlist',
+    url: 'https://www.youtube.com/playlist?list=PLP2IvX27mr6Z4zVWx_QwF5NbfzDf-4QE7',
+    expected_cadence: 'irregular',  // 週末節目，不是每天
+    market_type: 'TW_STOCK',
+    first_scan_done: false,
+    active: true,
+    created_at: '2026-05-24T13:50:00.000Z',
+    default_analysts: ['雷老闆'],
+  },
+  {
+    source_id: 'gooaye',
+    display_name: '股癌 Gooaye',
+    kind: 'playlist',
+    // YouTube channel uploads playlist：UU + channel_id 去掉 UC 前綴
+    url: 'https://www.youtube.com/playlist?list=UU23rnlQU_qE3cec9x709peA',
+    expected_cadence: 'irregular',  // user 說「不是固定的」
+    market_type: 'TW_STOCK',
+    first_scan_done: false,
+    active: true,
+    created_at: '2026-05-24T16:20:00.000Z',
+    default_analysts: ['謝孟恭'],  // 股癌主持人
+  },
 ];
 
 export function defaultSources(): YouTubeSource[] {
