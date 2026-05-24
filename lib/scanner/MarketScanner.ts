@@ -1801,4 +1801,5 @@ export abstract class MarketScanner {
 
     return scored.slice(0, topN).map(s => s.result);
   }
+
 }

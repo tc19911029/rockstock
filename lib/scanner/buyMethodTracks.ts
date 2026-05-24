@@ -76,6 +76,13 @@ export const SYSTEM_TRACK_LETTERS = ['Q'] as const;
  *   - vercel.json TW/CN mechanical cron 維持每日自動掃描（17/27 6/8 * * 1-5）
  *   - 字母 / types / strategy / scanner method 全在
  *   - 未來審計請勿再提議暫停或刪除 R 軌（見 memory `project_r_track_kept.md`）
+ *
+ * **2026-05-25 移除 S 軌（大戶累積）**：
+ *   - v1「大戶買 + 橫盤」 3 年 backtest mean alpha −4.11%（反指標）
+ *   - v2「大戶買 + 股價同步漲」 alpha −1.50%（改善但仍負）
+ *   - 朱書 0/33 章節提及集保大戶分級；陳威良觀點解釋「外資大買漲不動 = 暗有人賣」
+ *   - 結論：TDCC 大戶持股 % 這個資料源沒 predictive power、不論 Gate 怎麼調都救不了
+ *   - 改走「投信 3-8-15 動能軌」（陳威良原話）— 另起 project
  */
 export const MECHANICAL_TRACK_LETTERS = ['R'] as const;
 
@@ -165,7 +172,7 @@ export const LETTER_NAMES: Readonly<Record<string, string>> = {
   O: '打底完成',           // 寶典 Part 11-1 位置 1（反轉解讀）
   // ── 戰法軌 ──
   Q: '三條均線戰法',       // 朱家泓網路課程 MA3+10+24
-  // ── 機械軌（2026-05-21 新增）──
+  // ── 機械軌（2026-05-21 新增；S 大戶累積已於 2026-05-25 移除，backtest 無 alpha）──
   R: '乖離率',             // 成交額前500 + MA20 乖離率（long: 負最多 / short: 正最多）
   // 注意：v11 G/H/I 字母不在 LETTER_NAMES 中。讀舊資料時應先 normalizeLetter() 轉成 v12。
 };
