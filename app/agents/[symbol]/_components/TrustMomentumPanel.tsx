@@ -148,7 +148,8 @@ function WindowsTable({ data }: { data: ChipApiData }) {
 
 function Reference({ data }: { data: ChipApiData }) {
   const ppMonth = data.trustHoldingChange30d;
-  if (ppMonth === null) return null;
+  // null（API 標明無 sharesIssued）或 undefined（API schema 沒這欄）都不顯示
+  if (typeof ppMonth !== 'number' || !isFinite(ppMonth)) return null;
   // 簡單推算：以當前 30 天速度推進，幾個月會到 3% / 8% / 15%？
   // 只顯示 +ve 速度的推算
   if (ppMonth <= 0) return null;
