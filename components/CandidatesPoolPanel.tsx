@@ -15,10 +15,13 @@
  *   - 不提供「建立 Pool」按鈕（首頁是看結果，要建請去 /agents/pool）
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
-import { lastBusinessDayYmd } from '@/lib/dateDefaults';
+import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
+import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
+import { formatLetters } from '@/lib/scanner/buyMethodTracks';
+import { signalOf } from '@/lib/i18n/fundamentalLabels';
 
 interface PoolResponse {
   ok: boolean;
@@ -66,7 +69,12 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   const [minSourceCount, setMinSourceCount] = useState(1);
   const [data, setData] = useState<PoolResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
+  // 已知無資料的日期 — 漸進式 dim DatePicker pill
+  const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
+  const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
 
   const fetchPool = useCallback(async () => {
     setLoading(true);
@@ -76,6 +84,13 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as PoolResponse;
       setData(json);
+      // 漸進式記錄該日是否有資料 — DatePicker 用來 dim 空日 pill
+      if (json.exists) {
+        setPopulatedDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
+        setEmptyDates(prev => { if (!prev.has(date)) return prev; const n = new Set(prev); n.delete(date); return n; });
+      } else {
+        setEmptyDates(prev => prev.has(date) ? prev : new Set(prev).add(date));
+      }
     } catch (err) {
       setData(null);
       setError(err instanceof Error ? err.message : 'fetch failed');
@@ -84,41 +99,70 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     }
   }, [date, minSourceCount]);
 
+  const datePickerMeta = useMemo<Record<string, DateMeta>>(() => {
+    const m: Record<string, DateMeta> = {};
+    emptyDates.forEach(d => { m[d] = { dim: true }; });
+    populatedDates.forEach(d => { m[d] = { note: '有候選池' }; });
+    return m;
+  }, [emptyDates, populatedDates]);
+
   useEffect(() => { fetchPool(); }, [fetchPool]);
+
+  const buildPool = useCallback(async () => {
+    setBusy(true);
+    setBanner(null);
+    setError(null);
+    try {
+      const res = await fetch(`/api/agents/pool/build?date=${date}`, { method: 'POST' });
+      const json = await res.json() as { ok?: boolean; error?: string; total?: number; elapsedMs?: number };
+      if (!res.ok) {
+        setError(json.error ?? `HTTP ${res.status}`);
+      } else {
+        setBanner(`✅ 已建立 ${json.total} 檔候選 (${json.elapsedMs}ms)`);
+        await fetchPool();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'build failed');
+    } finally {
+      setBusy(false);
+    }
+  }, [date, fetchPool]);
 
   return (
     <div className="flex flex-col h-full">
+      {/* Date pill grid（仿策略掃描）*/}
+      <div className="shrink-0 px-2 py-1.5 border-b border-border bg-card/40">
+        <DatePicker value={date} onChange={setDate} size="sm" meta={datePickerMeta} />
+      </div>
       {/* Filter bar */}
       <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-secondary/20 text-xs">
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="bg-card border border-border rounded px-1.5 py-0.5 text-foreground font-mono text-[11px]"
-        />
         <label className="text-muted-foreground flex items-center gap-1">
           ≥
           <select
             value={minSourceCount}
             onChange={(e) => setMinSourceCount(Number(e.target.value))}
             className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px]"
+            title="只看至少這幾個面向同時看好的股票"
           >
-            <option value={1}>1 源</option>
-            <option value={2}>2 源</option>
-            <option value={3}>3 源</option>
-            <option value={4}>4 源</option>
+            <option value={1}>1 個面向</option>
+            <option value={2}>2 個面向</option>
+            <option value={3}>3 個面向</option>
+            <option value={4}>4 個面向</option>
           </select>
         </label>
         <div className="flex-1" />
-        <span className="text-muted-foreground tabular-nums">
-          {data?.exists ? `${data.returned}/${data.total}` : '—'}
+        <span
+          className="text-muted-foreground tabular-nums"
+          title={data?.exists ? `顯示 ${data.returned} 檔／全部 ${data.total} 檔（受「≥ N 個面向」與每頁上限影響）` : '此日尚未建立候選池'}
+        >
+          {data?.exists ? `顯示 ${data.returned}／全部 ${data.total}` : '—'}
         </span>
         <Link
           href={`/agents/pool?date=${date}`}
           className="text-sky-400 hover:underline text-[11px]"
-          title="開啟完整 Pool 頁"
+          title="開啟完整候選池頁"
         >
-          完整 →
+          完整頁 →
         </Link>
       </div>
 
@@ -141,21 +185,37 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           </div>
         )}
 
+        {banner && (
+          <div className="mx-2 mt-2 border border-sky-500/40 bg-sky-500/10 text-sky-300 rounded p-2 text-[10px] leading-relaxed">
+            {banner}
+          </div>
+        )}
+
         {data && !data.exists && !error && (
-          <div className="px-3 py-6 text-center text-xs text-muted-foreground space-y-2">
-            <div>此日尚無 Candidates Pool</div>
-            <Link
-              href={`/agents/pool?date=${date}`}
-              className="text-sky-400 hover:underline"
-            >
-              到 /agents/pool 建立 →
-            </Link>
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground space-y-3">
+            <div>此日尚未建立候選池</div>
+            <div className="flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={buildPool}
+                disabled={busy}
+                className="bg-sky-500 hover:bg-sky-400 text-white px-3 py-1.5 rounded text-xs font-medium transition disabled:opacity-50"
+              >
+                {busy ? '建立中…' : '⚡ 建立候選池'}
+              </button>
+              <Link
+                href={`/agents/pool?date=${date}`}
+                className="text-sky-400 hover:underline text-[10px]"
+              >
+                或開啟完整候選池頁 →
+              </Link>
+            </div>
           </div>
         )}
 
         {data?.exists && (data.candidates?.length ?? 0) === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-            ≥{minSourceCount} 源無候選。試試 ≥1 源。
+            ≥{minSourceCount} 個面向無候選。試試 ≥1 個面向。
           </div>
         )}
 
@@ -164,7 +224,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
             <thead className="sticky top-0 bg-card z-10 text-muted-foreground border-b border-border">
               <tr>
                 <th className="px-2 py-1.5 text-left font-medium">股票</th>
-                <th className="px-1 py-1.5 text-center font-medium" title="多源命中數">源</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="幾個面向同時看好">面向</th>
                 <th className="px-1 py-1.5 text-left font-medium">命中</th>
                 <th className="px-2 py-1.5 text-left font-medium">理由</th>
               </tr>
@@ -190,13 +250,13 @@ function PoolRow({ candidate, onSelect, selected }: { candidate: Candidate; onSe
   const pureSymbol = candidate.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const reasons: string[] = [];
   const t = candidate.sources.technical;
-  if (t) reasons.push(`技${t.tracks.length > 0 ? ' ' + t.tracks.join('/') : ''} ${t.sixConditionsScore}/6`);
+  if (t) reasons.push(`技 ${t.tracks.length > 0 ? formatLetters(t.tracks) + '｜' : ''}六條件 ${t.sixConditionsScore}/6`);
   const y = candidate.sources.youtube;
-  if (y) reasons.push(`消 ${y.mentionCount}節${y.inHighConsensus ? '★高共識' : ''}`);
+  if (y) reasons.push(`消 ${y.mentionCount} 節目${y.inHighConsensus ? '｜★高共識' : ''}`);
   const ch = candidate.sources.chip;
-  if (ch && ch.signals.length > 0) reasons.push(`籌 ${ch.signals[0]}`);
+  if (ch && ch.signals.length > 0) reasons.push(`籌 ${signalOf(ch.signals[0])}`);
   const f = candidate.sources.fundamental;
-  if (f && f.signals.length > 0) reasons.push(`基 ${f.signals[0]}`);
+  if (f && f.signals.length > 0) reasons.push(`基 ${signalOf(f.signals[0])}`);
 
   return (
     <tr
@@ -207,8 +267,8 @@ function PoolRow({ candidate, onSelect, selected }: { candidate: Candidate; onSe
       title={reasons.length > 0 ? reasons.join('\n') : `${candidate.name}（${candidate.industry ?? '—'}）`}
     >
       <td className="px-2 py-1.5">
-        <div className="font-mono tabular-nums text-foreground">{pureSymbol}</div>
-        <div className="text-[10px] text-muted-foreground truncate max-w-[100px]">{candidate.name}</div>
+        <div className="text-foreground font-medium truncate max-w-[110px]">{candidate.name}</div>
+        <div className="font-mono tabular-nums text-[10px] text-muted-foreground">{pureSymbol}</div>
       </td>
       <td className="px-1 py-1.5 text-center font-mono font-semibold text-foreground">
         {candidate.sourceCount}
