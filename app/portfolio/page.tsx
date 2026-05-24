@@ -398,24 +398,34 @@ export default function PortfolioPage() {
         {/* Server vs Local 持倉數不一致提示 */}
         {serverCount != null && serverCount !== holdings.length && (
           <div className="rounded-lg border border-amber-700/50 bg-amber-900/15 p-3 text-xs text-amber-200 leading-relaxed">
-            <div className="font-semibold text-amber-300 mb-1">⚠ 本機 ↔ Server 持倉不一致</div>
-            <p>
-              本頁（localStorage）：<span className="font-mono">{holdings.length}</span> 檔 ·
-              {' '}Server JSON（給 portfolio-review / 月報 / /today 讀的）：<span className="font-mono">{serverCount}</span> 檔
-            </p>
-            <p className="text-amber-300/70 mt-1">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+              <div className="font-semibold text-amber-300">⚠ 持倉資料兩邊不一致（本機 {holdings.length} 檔 / 伺服器 {serverCount} 檔）</div>
+              {holdings.length > serverCount && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!confirm(`要把本機 ${holdings.length} 檔持倉推到伺服器 holdings.json？\n\n影響：portfolio-review、月報、TodayBriefing 都會看到這些持倉。`)) return;
+                    try {
+                      const r = await syncAllHoldingsToServer();
+                      if (r.skipped) return;
+                      alert(`同步完成：成功 ${r.inserted} / 略過 ${r.rejected} / 共 ${r.total} 檔`);
+                      window.location.reload();
+                    } catch (e) {
+                      alert('同步失敗、請看 console：' + (e instanceof Error ? e.message : String(e)));
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold"
+                  title="一鍵把本機持倉推到伺服器，給 portfolio-review skill / 月報 / TodayBriefing 讀"
+                >
+                  ⚡ 一鍵同步
+                </button>
+              )}
+            </div>
+            <p className="text-amber-300/70 text-[11px]">
+              <strong>什麼意思</strong>：你在這頁編輯的持倉存在瀏覽器（localStorage），但分析用的 server（holdings.json）跟它分開。
               {holdings.length > serverCount
-                ? '本機比 server 多 → 點右上「→ 同步到 server」推上去'
-                : (
-                  <>
-                    本機比 server 少 → server 已有資料，開{' '}
-                    <Link href="/agents/portfolio" className="underline text-sky-400">/agents/portfolio</Link>
-                    {' '}查看完整 server holdings
-                  </>
-                )}
-            </p>
-            <p className="text-amber-300/70 mt-1">
-              （兩套不通是已知 friction —— UI 走 zustand+localStorage，server 走 holdings.json）
+                ? ' → 本機比較新、點上方「⚡ 一鍵同步」推上去就好。'
+                : ' → server 多於本機，可能是 server 有手動加的、本機沒匯入。'}
             </p>
           </div>
         )}

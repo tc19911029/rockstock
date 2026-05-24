@@ -262,8 +262,8 @@ export function TodayBriefing({ market = 'TW' }: Props) {
       </div>
 
       <div className="p-3 space-y-3">
-        {/* Hero row：3 個 metric */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        {/* Hero row：3 個 metric（手機 2 欄、桌面 3 欄）*/}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
           <HeroCard label="今日大盤">
             {trend ? (
               <div className={`text-xl font-bold ${

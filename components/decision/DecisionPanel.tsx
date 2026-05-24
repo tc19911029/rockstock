@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { decisionPathZh } from '@/lib/i18n/decisionPathLabel';
+import { replaceAgentTerms } from '@/lib/i18n/agentTermsLabel';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -177,7 +178,7 @@ export function DecisionPanel({ symbol, date }: Props) {
                 <div className="border-t border-current/20 pt-2">
                   <div className="text-xs font-semibold mb-1 text-amber-300">⚠️ 4 代理意見衝突</div>
                   <ul className="text-xs list-disc ml-5 space-y-0.5 opacity-90">
-                    {data.decision.conflicts.map((c, i) => <li key={i}>{c}</li>)}
+                    {data.decision.conflicts.map((c, i) => <li key={i}>{replaceAgentTerms(c)}</li>)}
                   </ul>
                 </div>
               )}

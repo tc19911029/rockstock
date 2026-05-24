@@ -187,7 +187,7 @@ export default function RealtimePage() {
           <div className="flex-1 min-w-0 bg-card border-r border-border">
             {candles.length === 0 ? (
               <div className="w-full h-full flex items-center justify-center text-sm text-muted-foreground">
-                {symbol ? '無分鐘 K 資料（盤外 / 等待 backfill）' : '請選擇一檔標的'}
+                {symbol ? <NoBarsHint /> : '請選擇一檔標的'}
               </div>
             ) : (
               <div className="w-full h-full">
@@ -252,4 +252,56 @@ function groupPool(pool: PoolItem[]): { holding: PoolItem[]; scan: PoolItem[] } 
     holding: pool.filter(p => p.isHolding),
     scan: pool.filter(p => !p.isHolding),
   };
+}
+
+// 友善的「無分鐘 K 資料」提示 — 判斷台北時間目前是否盤中
+function NoBarsHint() {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',
+  });
+  const parts = fmt.formatToParts(new Date());
+  const h = Number(parts.find(p => p.type === 'hour')?.value ?? '0');
+  const m = Number(parts.find(p => p.type === 'minute')?.value ?? '0');
+  const wd = parts.find(p => p.type === 'weekday')?.value ?? '';
+  const mins = h * 60 + m;
+  const marketOpen = 9 * 60;
+  const marketClose = 13 * 60 + 30;
+  const isWeekend = wd === 'Sat' || wd === 'Sun';
+
+  if (isWeekend) {
+    return (
+      <div className="text-center space-y-1">
+        <div>📅 週末休市</div>
+        <div className="text-xs text-muted-foreground/60">下個交易日 09:00 開盤後盤中分鐘 K 才會載入</div>
+      </div>
+    );
+  }
+  if (mins < marketOpen) {
+    const minsToOpen = marketOpen - mins;
+    const hh = Math.floor(minsToOpen / 60);
+    const mm = minsToOpen % 60;
+    return (
+      <div className="text-center space-y-1">
+        <div>🌅 尚未開盤</div>
+        <div className="text-xs text-muted-foreground/60">
+          距 09:00 開盤 {hh > 0 ? `${hh}h ` : ''}{mm}m
+        </div>
+      </div>
+    );
+  }
+  if (mins > marketClose) {
+    return (
+      <div className="text-center space-y-1">
+        <div>🌙 已收盤</div>
+        <div className="text-xs text-muted-foreground/60">明日 09:00 開盤後盤中分鐘 K 才會載入</div>
+      </div>
+    );
+  }
+  // 盤中但無資料 — backfill 中
+  return (
+    <div className="text-center space-y-1">
+      <div>⏳ 載入中</div>
+      <div className="text-xs text-muted-foreground/60">盤中即時資料 backfill 中、稍候幾秒</div>
+    </div>
+  );
 }
