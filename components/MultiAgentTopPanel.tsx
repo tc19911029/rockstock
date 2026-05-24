@@ -80,15 +80,19 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
   const [filter, setFilter] = useState<'all' | 'buy' | 'completed'>('all');
   const [data, setData] = useState<DecisionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/agents/decisions?date=${date}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as DecisionsResponse;
       setData(json);
-    } catch {
+    } catch (err) {
       setData(null);
+      setError(err instanceof Error ? err.message : 'fetch failed');
     } finally {
       setLoading(false);
     }
@@ -153,11 +157,24 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
 
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {loading && !data && (
+        {loading && !data && !error && (
           <div className="text-center py-12 text-muted-foreground text-xs">載入中…</div>
         )}
 
-        {data && stats.total === 0 && (
+        {error && (
+          <div className="px-3 py-6 text-center text-xs text-rose-300 space-y-2">
+            <div>載入 Multi-Agent 失敗：{error}</div>
+            <button
+              type="button"
+              onClick={fetchData}
+              className="text-sky-400 hover:underline"
+            >
+              重試 ↻
+            </button>
+          </div>
+        )}
+
+        {data && stats.total === 0 && !error && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground space-y-2">
             <div>此日尚未跑 Multi-Agent 分析</div>
             <Link
