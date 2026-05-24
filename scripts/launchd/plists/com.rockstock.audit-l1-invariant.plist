@@ -8,7 +8,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin</string>
+    <string>/Users/tc/.local/node-22/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 
   <key>ProgramArguments</key>

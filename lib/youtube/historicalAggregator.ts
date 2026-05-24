@@ -9,6 +9,7 @@
  */
 
 import { loadDailyAnalysis, type DailyAnalysis, type AnalyzedStockMention, type StockRating } from './analysisStorage';
+import { loadSources } from './videoStorage';
 
 export interface RangeDays {
   range_days: number;          // 7 / 30
@@ -46,6 +47,8 @@ export interface StockTrendRow {
 export interface StockHistoryEntry {
   date: string;
   source_id: string;
+  /** 節目顯示名（如「錢線百分百」），sourceRegistry 查不到時退回 source_id */
+  display_name: string;
   video_id: string;
   sentiment: AnalyzedStockMention['sentiment'];
   context: string;
@@ -54,6 +57,8 @@ export interface StockHistoryEntry {
   /** 該日的 scoring（若有） */
   rating: StockRating | null;
   composite_score: number | null;
+  /** 講這檔股票的分析師（從 mention.analysts 帶下來） */
+  analysts: string[];
 }
 
 export interface StockHistory {
@@ -192,10 +197,13 @@ export function aggregateStockTrends(analyses: DailyAnalysis[]): StockTrendRow[]
 
 // ── 個股歷史 ─────────────────────────────────────────────────────
 
-export function buildStockHistory(
+export async function buildStockHistory(
   analyses: DailyAnalysis[],
   stockCode: string,
-): StockHistory | null {
+): Promise<StockHistory | null> {
+  const sources = await loadSources();
+  const displayNameById = new Map(sources.map(s => [s.source_id, s.display_name]));
+
   let stockName = '';
   const entries: StockHistoryEntry[] = [];
   const timeline: Array<{ date: string; rating: StockRating; composite_score: number }> = [];
@@ -214,6 +222,7 @@ export function buildStockHistory(
       entries.push({
         date: a.date,
         source_id: m.source_id,
+        display_name: displayNameById.get(m.source_id) ?? m.source_id,
         video_id: m.video_id,
         sentiment: m.sentiment,
         context: m.context,
@@ -221,6 +230,7 @@ export function buildStockHistory(
         combined_confidence: m.combined_confidence,
         rating: scoring?.rating ?? null,
         composite_score: scoring?.composite_score ?? null,
+        analysts: m.analysts ?? [],
       });
     }
   }

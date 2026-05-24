@@ -126,15 +126,16 @@ export default function TrendsPage() {
                 <tr>
                   <th className="text-left py-2 pl-3 pr-2 whitespace-nowrap">代號</th>
                   <th className="text-left py-2 pr-2 whitespace-nowrap">名稱</th>
-                  <th className="text-center py-2 pr-2">最新評級</th>
-                  <th className="text-right py-2 pr-2">最新總分</th>
-                  <th className="text-right py-2 pr-2">期間均分</th>
-                  <th className="text-right py-2 pr-2">提到次數</th>
-                  <th className="text-right py-2 pr-2">被提天數</th>
-                  <th className="text-right py-2 pr-2">節目數</th>
-                  <th className="text-right py-2 pr-2">看多</th>
-                  <th className="text-right py-2 pr-2">看空</th>
-                  <th className="text-left py-2 pr-3">傾向</th>
+                  <th className="text-center py-2 pr-2">評級</th>
+                  <th className="text-right py-2 pr-2">最新分</th>
+                  <th className="text-right py-2 pr-2">均分</th>
+                  <th className="text-right py-2 pr-2" title="該期間被提到的總次數">提及</th>
+                  <th className="text-right py-2 pr-2" title="該期間有 mention 的天數">天數</th>
+                  <th className="text-right py-2 pr-2" title="提到該股的不同節目數">節目</th>
+                  <th className="text-right py-2 pr-2">多</th>
+                  <th className="text-right py-2 pr-2">空</th>
+                  <th className="text-left py-2 pr-2">傾向</th>
+                  <th className="text-left py-2 pr-3 whitespace-nowrap">最近</th>
                 </tr>
               </thead>
               <tbody>
@@ -161,17 +162,20 @@ function TrendRow({ s, range }: { s: StockTrendRow; range: Range }) {
     : s.sentiment === 'bearish' ? '看空'
     : s.sentiment === 'mixed' ? '分歧'
     : '中性';
+  const latestDate = s.dates[0]; // dates 已是 newest first
+  const href = `/youtube/stocks/${s.stock_code}?range=${range}`;
   return (
     <tr className="border-b border-border/40 hover:bg-muted/30">
       <td className="py-2 pl-3 pr-2 tabular-nums">
-        <Link
-          href={`/youtube/stocks/${s.stock_code}?range=${range}`}
-          className="text-blue-400 hover:underline"
-        >
+        <Link href={href} className="text-blue-400 hover:underline">
           {s.stock_code}
         </Link>
       </td>
-      <td className="py-2 pr-2 font-medium">{s.stock_name}</td>
+      <td className="py-2 pr-2 font-medium">
+        <Link href={href} className="hover:text-blue-400 hover:underline">
+          {s.stock_name}
+        </Link>
+      </td>
       <td className="py-2 pr-2 text-center">
         {s.latest_rating ? <RatingBadge rating={s.latest_rating} /> : <span className="text-muted-foreground">—</span>}
       </td>
@@ -184,9 +188,16 @@ function TrendRow({ s, range }: { s: StockTrendRow; range: Range }) {
       <td className="py-2 pr-2 text-right tabular-nums">{s.total_mentions}</td>
       <td className="py-2 pr-2 text-right tabular-nums">{s.days_mentioned}</td>
       <td className="py-2 pr-2 text-right tabular-nums">{s.source_diversity}</td>
-      <td className="py-2 pr-2 text-right tabular-nums text-green-400">{s.bullish_count || ''}</td>
-      <td className="py-2 pr-2 text-right tabular-nums text-red-400">{s.bearish_count || ''}</td>
-      <td className={`py-2 pr-3 ${sentimentCls}`}>{sentimentLabel}</td>
+      <td className="py-2 pr-2 text-right tabular-nums text-green-400">
+        {s.bullish_count > 0 ? s.bullish_count : <span className="text-muted-foreground/40">·</span>}
+      </td>
+      <td className="py-2 pr-2 text-right tabular-nums text-red-400">
+        {s.bearish_count > 0 ? s.bearish_count : <span className="text-muted-foreground/40">·</span>}
+      </td>
+      <td className={`py-2 pr-2 ${sentimentCls}`}>{sentimentLabel}</td>
+      <td className="py-2 pr-3 text-muted-foreground tabular-nums whitespace-nowrap" title={s.dates.join(', ')}>
+        {latestDate ? latestDate.slice(5) : '—'}
+      </td>
     </tr>
   );
 }
