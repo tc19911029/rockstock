@@ -107,7 +107,11 @@ async function analyzeOne(
     let safeEndStr = endStr > todayStr ? todayStr : endStr;
 
     // 若 forward window 起點已超過今天（例如今天掃描，還沒有隔日資料），直接返回空結果
-    if (startStr > safeEndStr) {
+    // 2026-05-24 fix（Stage 27）：也涵蓋「forward window 內全是週末/假日」case
+    // 例：scanDate=5/22 週五 + today=5/24 週日 → forward 起 5/23 到 5/24，全週末 →
+    // L1 沒資料 → needSupplement=true → 11 檔串行 fetch FinMind = 25 秒空等
+    const { tradingDaysBetween: tdb } = await import('@/lib/utils/tradingDay');
+    if (startStr > safeEndStr || tdb(scanDate, safeEndStr, detectMarket(symbol)) === 0) {
       return {
         symbol, name, scanDate, scanPrice,
         openReturn: null, d1Return: null, d2Return: null, d3Return: null,
