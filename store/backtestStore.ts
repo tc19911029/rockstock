@@ -1140,18 +1140,30 @@ export const useBacktestStore = create<BacktestState>()(
           // 2026-05-21：永遠打 POST（移除舊 skip-if-has-forward 邏輯）
           // 原因見 buyMethod 分支同名註解 — session 內嵌 forward 是寫入當天快照，
           // 之後新增的 d3/d4/... 不會更新，client skip 會卡在 stale。
+          //
+          // 2026-05-24 fix（Stage 26）：forward POST 失敗（race / abort / server 偶發）
+          // 不該 throw 把整個 loadCronSession 帶倒（破壞已載入的 scanResults），
+          // 改成 graceful：set forwardError + performance=[]，scanResults 仍可看。
           set({ isFetchingForward: true });
           const forwardPayload = scanResults.map(r => ({
             symbol: r.symbol, name: r.name, scanPrice: r.price,
           }));
-          const fwdRes = await fetch('/api/backtest/forward', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ scanDate: date, stocks: forwardPayload }),
-          });
-          if (!fwdRes.ok) throw new Error('無法取得後續績效資料');
-          const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
-          const performance = fwdJson.performance ?? [];
+          let performance: StockForwardPerformance[] = [];
+          try {
+            const fwdRes = await fetch('/api/backtest/forward', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ scanDate: date, stocks: forwardPayload }),
+            });
+            if (fwdRes.ok) {
+              const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
+              performance = fwdJson.performance ?? [];
+            } else {
+              set({ forwardError: `後續績效載入失敗 (HTTP ${fwdRes.status})` });
+            }
+          } catch (err) {
+            set({ forwardError: err instanceof Error ? err.message : '後續績效載入失敗' });
+          }
 
           // scanOnly mode: skip backtest engine, just show scan results + forward perf
           if (onlyScan) {
