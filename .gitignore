@@ -45,6 +45,7 @@ __pycache__/
 
 # next.js
 /.next/
+/.next-preview/
 /out/
 
 # production

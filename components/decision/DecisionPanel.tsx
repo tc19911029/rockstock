@@ -120,6 +120,7 @@ export function DecisionPanel({ symbol, date }: Props) {
       <section className="border border-slate-700/50 rounded-lg overflow-hidden">
         {header}
         <div className="p-3 space-y-3 bg-slate-900/40">
+          <HoldingBadge symbol={symbol} />
           <div className="text-xs text-slate-400 border border-slate-700/40 rounded p-2 bg-slate-900/40">
             ⏳ 尚未跑 multi-agent 4 phase 決策（缺 verdict / 進出場 / 多空辯論）。
             執行 <code className="mx-1 px-1.5 py-0.5 bg-slate-800 rounded text-cyan-300">/multi-agent-decide {symbol}</code> 取得完整建議。
@@ -145,6 +146,9 @@ export function DecisionPanel({ symbol, date }: Props) {
       {header}
 
       <div className="p-3 space-y-3 bg-slate-900/40">
+
+        {/* 持有狀態 badge（若在 portfolio open holdings 內）*/}
+        <HoldingBadge symbol={symbol} />
 
         {/* 4 面向 verdict 卡 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -226,6 +230,92 @@ function VerdictMini({ title, answer }: { title: string; answer: { verdict: Verd
   );
 }
 
+// 持有狀態 badge — 查 /api/agents/portfolio?status=open + /api/stock/quote 算 pnl
+interface MinimalHolding {
+  symbol: string;
+  entryDate: string;
+  entryPrice: number;
+  shares: number;
+  stopLoss?: number;
+}
+function HoldingBadge({ symbol }: { symbol: string }) {
+  const [holding, setHolding] = useState<MinimalHolding | null>(null);
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    const raw = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    Promise.all([
+      fetch('/api/agents/portfolio?status=open').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/stock/quote?symbol=${encodeURIComponent(raw)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([p, q]) => {
+      if (cancelled) return;
+      const list: MinimalHolding[] = p?.holdings ?? [];
+      // symbol 比對：portfolio 帶 .TW，比對時兩邊都 strip suffix 才不漏
+      const h = list.find(it => it.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === raw);
+      setHolding(h ?? null);
+      setCurrentPrice(typeof q?.close === 'number' && q.close > 0 ? q.close : null);
+    });
+    return () => { cancelled = true; };
+  }, [symbol]);
+
+  if (!holding) return null;
+
+  const pnlPct = currentPrice && holding.entryPrice > 0
+    ? ((currentPrice - holding.entryPrice) / holding.entryPrice) * 100
+    : null;
+  const daysHeld = Math.max(0, Math.floor(
+    (Date.now() - new Date(holding.entryDate + 'T00:00:00').getTime()) / 86400000,
+  ));
+  const stopLossDistPct = currentPrice && holding.stopLoss
+    ? ((currentPrice - holding.stopLoss) / currentPrice) * 100
+    : null;
+  const stopLossBreached = stopLossDistPct !== null && stopLossDistPct < 0;
+
+  const pnlCls = pnlPct === null ? 'text-slate-400'
+    : pnlPct >= 0 ? 'text-emerald-300' : 'text-rose-300';
+
+  return (
+    <div className="border border-emerald-700/50 bg-emerald-950/30 rounded p-2 text-xs">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-emerald-300 font-bold">✅ 已持有</span>
+        <span className="text-slate-200 font-mono">
+          {holding.shares.toLocaleString()} 股
+        </span>
+        <span className="text-slate-400">·</span>
+        <span className="text-slate-300">
+          進場 <span className="font-mono">{holding.entryPrice.toFixed(2)}</span> @ {holding.entryDate}
+          <span className="text-slate-500 ml-1">({daysHeld} 天)</span>
+        </span>
+        <span className="text-slate-400">·</span>
+        <span className={`font-bold font-mono ${pnlCls}`}>
+          未實現 {pnlPct === null ? '—' : `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`}
+        </span>
+        {currentPrice !== null && (
+          <span className="text-slate-500 text-[10px] font-mono">
+            (現價 {currentPrice.toFixed(2)})
+          </span>
+        )}
+      </div>
+      {holding.stopLoss !== undefined && (
+        <div className="mt-1 flex items-center gap-2 text-[10px]">
+          <span className="text-rose-300/80">
+            停損 <span className="font-mono">{holding.stopLoss.toFixed(2)}</span>
+          </span>
+          {stopLossDistPct !== null && (
+            <span className={stopLossBreached ? 'text-rose-300 font-bold' : 'text-slate-400'}>
+              {stopLossBreached
+                ? `⚠ 已跌破停損 ${Math.abs(stopLossDistPct).toFixed(2)}%`
+                : `距停損 -${stopLossDistPct.toFixed(2)}%`}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function KV({ k, v, cls }: { k: string; v: string; cls?: string }) {
   return (
     <div>
@@ -293,7 +383,9 @@ function MiniFiveMinChart({ symbol }: { symbol: string }) {
         <div className="text-xs text-slate-400 font-mono">
           {last.date} · {last.close.toFixed(2)}
           {blowoffCount > 0 && (
-            <span className="ml-2 text-rose-300">⚠ {blowoffCount} 個爆量警示</span>
+            <span className="ml-2 text-rose-300" title="hover K 棒上的標記看詳情">
+              ⚠ {blowoffCount} 個爆量警示
+            </span>
           )}
         </div>
       </div>
@@ -301,13 +393,19 @@ function MiniFiveMinChart({ symbol }: { symbol: string }) {
         candles={bars}
         signals={[]}
         chartMarkers={markers}
-        height={200}
+        height={140}
         maToggles={{ ma5: true, ma10: true, ma20: false, ma60: false, ma240: false }}
         showBollinger={false}
         showTrendlines={false}
         showPivots={false}
         showSupportResistance={false}
       />
+      {/* caveat — blowoffDetector signals 帶 caveat:'minute-inference' */}
+      <div className="px-2 py-1 text-[10px] italic text-amber-400/80 bg-amber-950/20 border-t border-slate-700/40">
+        ⚠ 分鐘 K 爆量警示是「日 K 規則的分時類推」、未經回測，
+        書本原文（爆量長黑/末升段）皆為日 K。盤中假突破不算，
+        要看收盤前 5-10 分鐘確認。
+      </div>
     </div>
   );
 }
