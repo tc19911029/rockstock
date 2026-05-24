@@ -187,6 +187,7 @@ function PoolRow({ candidate, onSelect, selected }: { candidate: Candidate; onSe
         selected ? 'bg-sky-500/15 ring-1 ring-inset ring-sky-500/40' : ''
       }`}
       onClick={() => onSelect?.(candidate.symbol)}
+      title={reasons.length > 0 ? reasons.join('\n') : `${candidate.name}（${candidate.industry ?? '—'}）`}
     >
       <td className="px-2 py-1.5">
         <div className="font-mono tabular-nums text-foreground">{pureSymbol}</div>

@@ -220,6 +220,7 @@ function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (s
         selected ? 'bg-sky-500/15 ring-1 ring-inset ring-sky-500/40' : ''
       }`}
       onClick={() => onSelect?.(run.symbol)}
+      title={run.decision?.overview ?? `Phase ${phaseProgress}/4 — 尚未完成決策`}
     >
       <td className="px-2 py-1.5">
         <div className="font-mono tabular-nums text-foreground">{pureSymbol}</div>

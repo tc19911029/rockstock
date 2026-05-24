@@ -213,9 +213,10 @@ export default function HomePage() {
   }, [loadStock, tabDate]);
 
   // Pool tab / Multi-Agent tab 點股票 → loadStock（symbol 已是 2330.TW 格式，不必補 suffix）
+  // 帶 tabDate 讓 K 線停在當天，user 看的是「該日的條件分析」而非總是最新
   const handlePoolSelectStock = useCallback((symbol: string) => {
     setLoadError(null);
-    loadStock(symbol, '1d', '2y').catch((e: Error) => {
+    loadStock(symbol, '1d', '2y', tabDate).catch((e: Error) => {
       toast.error(`載入 ${symbol} 失敗：${e.message || '請稍後再試'}`);
     });
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -223,7 +224,7 @@ export default function HomePage() {
       setScannerOpen(false);
       try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
     }
-  }, [loadStock]);
+  }, [loadStock, tabDate]);
   // Multi-Agent tab 共用 Pool 的 callback（symbol 格式相同）
   const handleAgentSelectStock = handlePoolSelectStock;
   // 手機點「走圖」→ 全螢幕 K 線視圖
