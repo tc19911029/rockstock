@@ -173,10 +173,23 @@ async function analyzeOne(
     // 對策：唯一缺的就是「今天」時，截到 L1 最後日期跳過 API；今日盤中 K 反正不完整，
     // 收盤後 L1 cron 補齊隔日後，再次 forward 自然會把今日納入。
     // 連假後多日缺口（gap > 1 trading day）保留原 API 補充行為。
-    if (todayIsTradingDay && !l2InjectedToday && candles.length > 0) {
+    // 2026-05-24 fix（Stage 25）：兩段 cap 解 user 切歷史日卡 61 秒問題
+    //
+    // 場景：5/24 週六 user 切 5/20 看 forward d1..d20，safeEndStr=6/19（forward window 末）。
+    // lastL1Date=5/22，tradingDaysBetween ≥ 20 → 原 c2d15de 條件不滿足 → 11 檔 × FinMind = 61 秒空等
+    // （未來資料 API 也沒）。
+    //
+    // 修：
+    // (1) cap safeEndStr ≤ today（未來資料不該打 API）
+    // (2) 若 cap 後 lastL1Date 到 safeEndStr 沒任何 trading day → 進一步 cap = lastL1Date
+    // 保留連假/週末過後 lastL1Date 仍落後 today 多日（有可補 trading day）→ 仍走 API 補足
+    if (candles.length > 0) {
       const lastL1Date = candles[candles.length - 1].date;
-      if (lastL1Date < safeEndStr && tradingDaysBetween(lastL1Date, safeEndStr, market) <= 1) {
-        safeEndStr = lastL1Date;
+      if (lastL1Date < safeEndStr) {
+        if (safeEndStr > todayStr) safeEndStr = todayStr;
+        if (tradingDaysBetween(lastL1Date, safeEndStr, market) === 0) {
+          safeEndStr = lastL1Date;
+        }
       }
     }
 
