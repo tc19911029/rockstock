@@ -195,10 +195,8 @@ export default function HomePage() {
   // 預設「最近工作日」，因為 today 的資料通常還沒跑完
   // （user 仍可手動切日期；URL ?date= 也會 override）
   const [tabDate, setTabDate] = useState(lastBusinessDayYmd);
-  const [youtubeSelectedCode, setYoutubeSelectedCode] = useState<string | null>(null);
   // YouTube tab 內點股票 → loadStock + 跳左側 K 線（mobile inline 切全螢幕，避免 hoisting）
   const handleYoutubeSelectStock = useCallback((code: string) => {
-    setYoutubeSelectedCode(code);
     setLoadError(null);
     // YouTube source 都是 TW 股，補 .TW suffix
     const symbol = /\.(TW|TWO|SS|SZ)$/i.test(code) ? code : `${code}.TW`;
@@ -744,7 +742,8 @@ export default function HomePage() {
                     date={tabDate}
                     onDateChange={setTabDate}
                     onSelectStock={handleYoutubeSelectStock}
-                    selectedCode={youtubeSelectedCode}
+                    // 統一以「現在看的股票」為準，4 個 tab 之間 highlight 同步
+                    selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
                 )}
                 {rightTab === 'pool' && (
