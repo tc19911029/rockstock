@@ -21,6 +21,7 @@ import Link from 'next/link';
 import { PageShell, PageHeader, BackButton } from '@/components/shared';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { AgentChartSection } from './_components/AgentChartSection';
+import { TrustMomentumPanel } from './_components/TrustMomentumPanel';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -40,6 +41,7 @@ import type {
   TechnicalSection,
 } from '@/lib/agents/types';
 import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
+import { useTotalCapital, formatNT } from '@/lib/portfolio/useTotalCapital';
 
 type Verdict = 'pass' | 'watch' | 'fail';
 
@@ -543,6 +545,7 @@ export default function AgentDetailPage() {
           {data?.technical && <TechnicalDetail answer={data.technical} />}
           {data?.news && <NewsDetail answer={data.news} />}
           {data?.chip && <ChipDetail answer={data.chip} />}
+          <TrustMomentumPanel symbol={symbol} date={date} />
           {data?.fundamental && <FundamentalDetail answer={data.fundamental} />}
           {data?.risk && <RiskDetail answer={data.risk} />}
           {data?.bull && data?.bear && <DebateDetail bull={data.bull} bear={data.bear} />}
@@ -714,6 +717,10 @@ const ACTION_CFG: Record<FinalDecision['action'], { label: string; cls: string; 
 function FinalDecisionPanel({ decision }: { decision: FinalDecision }) {
   const cfg = ACTION_CFG[decision.action];
   const v = decision.verdictsByAgent;
+  const totalCapital = useTotalCapital();
+  // 註：decision.sizeHint 跨資料源已標準化為「百分比值」（如 0.5 = 0.5%），不是 0-1 decimal
+  const sizePct = decision.sizeHint;
+  const sizeAmount = totalCapital && sizePct > 0 ? formatNT(totalCapital * (sizePct / 100)) : null;
   return (
     <section className={`border-2 rounded-lg p-4 space-y-3 ${cfg.cls}`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -726,7 +733,14 @@ function FinalDecisionPanel({ decision }: { decision: FinalDecision }) {
         </div>
         <div className="text-right text-xs text-slate-400 font-mono">
           <div>命中規則：<span className="text-slate-200">{decision.decisionPath}</span></div>
-          <div>建議部位：<span className="text-slate-200">{(decision.sizeHint * 100).toFixed(0)}%</span></div>
+          <div>建議部位：<span className="text-slate-200">{sizePct}%</span>
+            {sizeAmount && <span className="text-cyan-300 ml-1.5">（≈ {sizeAmount}）</span>}
+          </div>
+          {sizePct > 0 && totalCapital == null && (
+            <div className="text-[10px] text-slate-500 mt-0.5">
+              設定 portfolio 總資產後顯示 NT$
+            </div>
+          )}
         </div>
       </div>
 

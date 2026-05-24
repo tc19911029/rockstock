@@ -63,6 +63,13 @@ function fmtTime(iso: string | null): string {
   } catch { return '—'; }
 }
 
+/** 今天（CST）是否為週末。國定假日暫不判斷（需 holiday calendar）。 */
+function isWeekendOrHoliday(): boolean {
+  const cst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+  const dow = cst.getDay();
+  return dow === 0 || dow === 6;
+}
+
 export function MarketDataTab() {
   const [tw, setTw] = useState<MarketHealthLite | null>(null);
   const [cn, setCn] = useState<MarketHealthLite | null>(null);
@@ -175,12 +182,17 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
         <>
           {/* L1 歷史K */}
           <Section title="歷史日K（每日盤後封存）">
-            <Row label="健康度" value={zhStatus(data.health)} bold />
-            <Row label="覆蓋率" value={fmtPct(data.coverageRate)} />
+            <Row label="健康度" value={zhStatus(data.health)} bold
+              hint="健康度 = 覆蓋率 + 近 3 日落後支數綜合判定；歷史 gap（容忍範圍內缺日）不會把健康度拉到非正常" />
+            <Row label="覆蓋率" value={fmtPct(data.coverageRate)}
+              hint="今日有 K 線資料的股票數 / 應有的股票數" />
             <Row label="近 3 日落後" value={`${data.stocksStale ?? '?'} 支`}
-              warn={(data.stocksStale ?? 0) > 50} />
-            <Row label="歷史 gap" value={`${data.stocksWithGaps ?? '?'} 支`} />
-            <Row label="校驗時間" value={fmtTime(data.reportDate ? `${data.reportDate}T00:00:00Z` : null)} muted />
+              warn={(data.stocksStale ?? 0) > 50}
+              hint="近 3 日該收盤但未封存的股票數；> 50 觸發黃燈，> 100 觸發紅燈並 webhook" />
+            <Row label="歷史 gap" value={`${data.stocksWithGaps ?? '?'} 支`}
+              hint="歷史 K 線中間出現缺日（例如停牌、缺資料）的股票數；在容忍範圍內不影響「健康度」，但建議跑 audit-l1-integrity 確認" />
+            <Row label="校驗時間" value={fmtTime(data.reportDate ? `${data.reportDate}T00:00:00Z` : null)} muted
+              hint="最近一次 L1 audit cron 跑完的時間；audit 默認 09:00 CST 跑一次，會落後於盤後封存約 1 天" />
           </Section>
 
           {/* L2 盤中快照 */}
@@ -197,8 +209,9 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
           <Section title="掃描結果（盤後策略掃描）">
             <Row label="狀態" value={zhStatus(data.l4?.status ?? '—')} bold />
             <Row label="最近掃描" value={`${data.l4?.lastScanDate ?? '—'} (${data.l4?.lastScanCount ?? 0} 檔)`} />
-            <Row label="今日盤中" value={data.l4?.todayHasIntraday ? '有' : '無'}
-              warn={data.l4 != null && !data.l4.todayHasIntraday} />
+            <Row label="今日盤中" value={data.l4?.todayHasIntraday ? '有' : (isWeekendOrHoliday() ? '— 非交易日' : '無')}
+              warn={data.l4 != null && !data.l4.todayHasIntraday && !isWeekendOrHoliday()}
+              hint="今日盤中時段（09:00-13:30 CST）是否有產生 intraday 掃描；週末/國定假日為非交易日，顯示「—」屬正常" />
           </Section>
         </>
       )}
@@ -230,13 +243,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, value, bold, muted, warn }: {
-  label: string; value: string; bold?: boolean; muted?: boolean; warn?: boolean;
+function Row({ label, value, bold, muted, warn, hint }: {
+  label: string; value: string; bold?: boolean; muted?: boolean; warn?: boolean; hint?: string;
 }) {
   const cls = warn ? 'text-yellow-400' : muted ? 'text-muted-foreground' : 'text-foreground';
   return (
     <div className="flex justify-between">
-      <span className="text-muted-foreground">{label}</span>
+      <span className={`text-muted-foreground ${hint ? 'cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-4' : ''}`} title={hint}>{label}</span>
       <span className={`${cls} ${bold ? 'font-medium' : ''}`}>{value}</span>
     </div>
   );

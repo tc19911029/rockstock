@@ -41,6 +41,14 @@ const EMPTY_FORM = {
 export default function PortfolioPage() {
   const { holdings, add, remove, update } = usePortfolioStore();
   const [prices, setPrices] = useState<Record<string, PriceData>>({});
+  // server holdings.json 上的持倉數（給 sync 提示用，不是 source of truth）
+  const [serverCount, setServerCount] = useState<number | null>(null);
+  useEffect(() => {
+    fetch('/api/agents/portfolio?status=open')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setServerCount(j?.holdings?.length ?? 0))
+      .catch(() => setServerCount(null));
+  }, []);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formLoading, setFormLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -366,13 +374,13 @@ export default function PortfolioPage() {
             }} />
           </label>
           <Button variant="secondary" size="sm"
-            title="把目前 UI 持股清單同步給後台，讓持倉 review / 平倉 / 月報能看到"
+            title="把 UI 持股（瀏覽器 localStorage）同步到 server holdings.json，讓 portfolio-review skill / 月報 / /today 頁能看到"
             onClick={async () => {
               const r = await syncAllHoldingsToServer();
               if (r.skipped) return;
-              alert(`同步完成：成功 ${r.inserted} 檔 / 失敗 ${r.rejected} 檔 / 共 ${r.total} 檔`);
+              alert(`同步到 server：成功 ${r.inserted} / 失敗 ${r.rejected} / 共 ${r.total} 檔\n\n之後 portfolio-review、月報、/today 都會看到這些持倉`);
             }}>
-            同步↑
+            → 同步到 server
           </Button>
           <Button size="sm" onClick={() => { cancelForm(); setShowForm(v => !v); }}
             className="bg-blue-600 hover:bg-blue-500 font-bold">
@@ -386,6 +394,31 @@ export default function PortfolioPage() {
   return (
     <PageShell headerSlot={portfolioHeader}>
       <div className="p-4 max-w-3xl mx-auto space-y-4">
+
+        {/* Server vs Local 持倉數不一致提示 */}
+        {serverCount != null && serverCount !== holdings.length && (
+          <div className="rounded-lg border border-amber-700/50 bg-amber-900/15 p-3 text-xs text-amber-200 leading-relaxed">
+            <div className="font-semibold text-amber-300 mb-1">⚠ 本機 ↔ Server 持倉不一致</div>
+            <p>
+              本頁（localStorage）：<span className="font-mono">{holdings.length}</span> 檔 ·
+              {' '}Server JSON（給 portfolio-review / 月報 / /today 讀的）：<span className="font-mono">{serverCount}</span> 檔
+            </p>
+            <p className="text-amber-300/70 mt-1">
+              {holdings.length > serverCount
+                ? '本機比 server 多 → 點右上「→ 同步到 server」推上去'
+                : (
+                  <>
+                    本機比 server 少 → server 已有資料，開{' '}
+                    <Link href="/agents/portfolio" className="underline text-sky-400">/agents/portfolio</Link>
+                    {' '}查看完整 server holdings
+                  </>
+                )}
+            </p>
+            <p className="text-amber-300/70 mt-1">
+              （兩套不通是已知 friction —— UI 走 zustand+localStorage，server 走 holdings.json）
+            </p>
+          </div>
+        )}
 
         {/* Summary — TWD / CNY 分開顯示，損益已扣買賣手續費+交易稅 */}
         {holdings.length > 0 && (

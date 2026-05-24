@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { TrustStageBadge } from './_components/TrustStageBadge';
 import { useSearchParams } from 'next/navigation';
 import { PageShell, PageHeader } from '@/components/shared';
 import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
@@ -75,6 +76,17 @@ export default function CandidatesPoolPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  // server-side open holdings symbols（用來在 pool 列表標記「已持有」）
+  const [heldSymbols, setHeldSymbols] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    fetch('/api/agents/portfolio?status=open')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        const syms = (j?.holdings ?? []).map((h: { symbol: string }) => h.symbol);
+        setHeldSymbols(new Set(syms));
+      })
+      .catch(() => setHeldSymbols(new Set()));
+  }, []);
 
   const fetchPool = useCallback(async () => {
     setLoading(true);
@@ -303,15 +315,50 @@ export default function CandidatesPoolPage() {
                         <th className="px-2 py-2 text-left font-medium">產業</th>
                         <th className="px-2 py-2 text-center font-medium" title="幾個面向同時看好">面向</th>
                         <th className="px-2 py-2 text-left font-medium">命中面向</th>
+                        <th className="px-2 py-2 text-center font-medium" title="陳威良 3比8 動向 proxy（最近 30 天投信淨買 ÷ 已發行股數）">投信動向</th>
                         <th className="px-2 py-2 text-left font-medium">進入理由摘要</th>
                         <th className="px-2 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {data.candidates?.map((c) => (
-                        <tr key={c.symbol} className="border-b border-slate-800 align-top hover:bg-slate-800/40 transition-colors">
+                        <tr key={c.symbol} className={`border-b border-slate-800 align-top hover:bg-slate-800/40 transition-colors ${heldSymbols.has(c.symbol) ? 'bg-sky-900/15' : ''}`}>
                           <td className="px-2 py-2">
-                            <div className="text-slate-200 font-medium">{c.name}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-slate-200 font-medium">{c.name}</span>
+                              {heldSymbols.has(c.symbol) && (
+                                <span
+                                  title="已持有（server holdings.json open）"
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded border bg-sky-900/40 border-sky-500/50 text-sky-300 text-[10px] font-semibold"
+                                >
+                                  💼 已持有
+                                </span>
+                              )}
+                              {c.sources.technical?.prohibitionHit && (
+                                <span
+                                  title="技術面：戒律觸發（禁止做多）。點「分析 →」看書本戒律細項"
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded border bg-red-900/40 border-red-500/50 text-red-300 text-[10px] font-semibold"
+                                >
+                                  🚫 戒律
+                                </span>
+                              )}
+                              {c.sources.technical?.eliminationHit && (
+                                <span
+                                  title="技術面：淘汰法觸發（不應進場）。點「分析 →」看淘汰原因"
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded border bg-orange-900/40 border-orange-500/50 text-orange-300 text-[10px] font-semibold"
+                                >
+                                  ⛔ 淘汰
+                                </span>
+                              )}
+                              {!c.sources.technical && (
+                                <span
+                                  title="本檔僅由消息/籌碼/基本面入池，未經技術面戒律檢核。可能仍觸發書本戒律 — 點「分析 →」會在個股頁顯示完整技術判定"
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded border bg-slate-800/60 border-slate-600/50 text-slate-400 text-[10px]"
+                                >
+                                  ⚠ 技術未檢
+                                </span>
+                              )}
+                            </div>
                             <div className="font-mono text-xs text-slate-500">{c.symbol}</div>
                           </td>
                           <td className="px-2 py-2 text-xs text-slate-400">{c.industry ?? '—'}</td>
@@ -319,7 +366,7 @@ export default function CandidatesPoolPage() {
                             <span className="font-mono font-semibold text-slate-200">{c.sourceCount}</span>
                           </td>
                           <td className="px-2 py-2">
-                            <div className="flex gap-1 flex-wrap">
+                            <div className="flex gap-1 flex-wrap items-center">
                               {(Object.keys(c.sources) as SourceName[]).map((s) => {
                                 // YouTube 高共識（≥2 節目同向）：chip 加 ★ + 亮邊
                                 // §0 隔離：consensus 是 YouTube source 的 boost，不是新 source
@@ -342,6 +389,9 @@ export default function CandidatesPoolPage() {
                                 );
                               })}
                             </div>
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            <TrustStageBadge symbol={c.symbol} date={date} />
                           </td>
                           <td className="px-2 py-2 text-xs text-slate-300">
                             <ReasonsSummary candidate={c} />

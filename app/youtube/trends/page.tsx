@@ -239,7 +239,27 @@ function TrendRow({ s, range }: { s: StockTrendRow; range: Range }) {
         </Link>
       </td>
       <td className="py-2 pr-2 text-center">
-        {s.latest_rating ? <RatingBadge rating={s.latest_rating} /> : <span className="text-muted-foreground">—</span>}
+        {s.latest_rating ? (
+          <span className="inline-flex items-center gap-1">
+            <RatingBadge rating={s.latest_rating} />
+            {(() => {
+              const sc = s.latest_composite_score;
+              if (sc == null) return null;
+              const expected = sc >= 75 ? 'A' : sc >= 60 ? 'B' : sc >= 45 ? 'C' : 'D';
+              if (expected !== s.latest_rating) {
+                return (
+                  <span
+                    title={`分數 ${sc.toFixed(1)} 對應 ${expected} 評，但實際為 ${s.latest_rating}。原因：節目共識含 bearish/risk_warning → 評級被風險旗標下調`}
+                    className="text-[9px] text-amber-400/80 cursor-help"
+                  >
+                    ⚠
+                  </span>
+                );
+              }
+              return null;
+            })()}
+          </span>
+        ) : <span className="text-muted-foreground">—</span>}
       </td>
       <td className="py-2 pr-2 text-right tabular-nums text-muted-foreground">
         {s.latest_composite_score != null ? s.latest_composite_score.toFixed(1) : '—'}

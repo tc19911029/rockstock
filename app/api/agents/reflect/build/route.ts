@@ -15,6 +15,7 @@ import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiValidationError } from '@/lib/api/response';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
+import { agentsListChildDirs } from '@/lib/agents/persistStorage';
 import { listBacktestDates, loadBacktest } from '@/lib/agents/backtest/storage';
 import { aggregateBacktestSummary } from '@/lib/agents/backtest/summary';
 import { getMemoryPath } from '@/lib/agents/memory/storage';
@@ -48,14 +49,8 @@ export async function POST(req: NextRequest) {
   // 2. 每日 decision 索引
   const decisions: ReflectQuestion['decisions'] = await Promise.all(
     inRange.map(async (date) => {
-      const runsDir = path.join(process.cwd(), 'data', 'agents', 'runs', date);
-      let symbols: string[] = [];
-      try {
-        const ents = await fs.readdir(runsDir, { withFileTypes: true });
-        symbols = ents.filter(e => e.isDirectory()).map(e => e.name);
-      } catch {
-        /* no runs */
-      }
+      // dual-storage 列舉 runs/{date}/ 下的 symbol 目錄（Vercel Blob 用 prefix list 推導）
+      const symbols = await agentsListChildDirs(`agents/runs/${date}`);
       const report = reports.find(r => r.date === date);
       const dist = {
         buy:   report?.entries.filter(e => e.action === 'buy').length ?? 0,

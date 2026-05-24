@@ -154,12 +154,14 @@ export default function ChartToolbar({
           {isUp ? '▲' : '▼'}{Math.abs(chg).toFixed(2)} ({Math.abs(chgPct).toFixed(2)}%)
         </span>
         {trend && (
-          <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-            trend === '多頭' ? 'bg-emerald-900/50 text-emerald-300' :
-            trend === '空頭' ? 'bg-red-900/50 text-red-300' :
-            'bg-amber-900/30 text-amber-400'
-          }`}>
-            {trend === '多頭' ? '▲' : trend === '空頭' ? '▼' : '↔'} {trend}
+          <span
+            title={`趨勢：${trend}（朱書定義，看均線排列與底底高/底底低，非當日漲跌）｜多頭＝可選股做多｜盤整＝謹慎、優先觀望｜空頭＝禁止做多`}
+            className={`text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 cursor-help ${
+              trend === '多頭' ? 'bg-emerald-900/50 text-emerald-300' :
+              trend === '空頭' ? 'bg-red-900/50 text-red-300' :
+              'bg-amber-900/30 text-amber-400'
+            }`}>
+            趨勢：{trend === '多頭' ? '▲' : trend === '空頭' ? '▼' : '↔'} {trend}
           </span>
         )}
         <div className="flex items-center gap-x-2 text-[11px] shrink-0">

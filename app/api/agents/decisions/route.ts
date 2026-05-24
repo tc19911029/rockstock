@@ -13,11 +13,10 @@
  */
 
 import { NextRequest } from 'next/server';
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiValidationError } from '@/lib/api/response';
 import { readPhaseState } from '@/lib/agents/orchestrator';
+import { agentsGet, agentsListChildDirs } from '@/lib/agents/persistStorage';
 import { loadStockMaster, lookupStock } from '@/lib/youtube/stockMaster';
 import type {
   AgentRunMeta,
@@ -82,31 +81,15 @@ interface RunListItem {
   } | null;
 }
 
-async function readJsonIfExists<T>(file: string): Promise<T | null> {
-  try {
-    const raw = await fs.readFile(file, 'utf-8');
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date } = parsed.data;
 
-  const baseDir = path.join(process.cwd(), 'data', 'agents', 'runs', date);
-
-  let symbols: string[] = [];
-  try {
-    const entries = await fs.readdir(baseDir, { withFileTypes: true });
-    symbols = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      // 過濾路徑安全（同 orchestrator）
-      .filter((n) => /^[A-Za-z0-9._-]+$/.test(n));
-  } catch {
+  // dual-storage 列舉子目錄（Vercel Blob 用 prefix list 推導、FS 讀目錄）
+  const all = await agentsListChildDirs(`agents/runs/${date}`);
+  const symbols = all.filter((n) => /^[A-Za-z0-9._-]+$/.test(n));
+  if (symbols.length === 0) {
     return apiOk({ date, runs: [], count: 0 });
   }
 
@@ -120,17 +103,17 @@ export async function GET(req: NextRequest) {
 
   const runs: RunListItem[] = await Promise.all(
     symbols.map(async (symbol): Promise<RunListItem> => {
-      const runDir = path.join(baseDir, symbol);
+      const k = (f: string) => `agents/runs/${date}/${symbol}/${f}`;
       const [meta, technical, news, chip, fundamental, risk, bull, bear, decision, phase] = await Promise.all([
-        readJsonIfExists<AgentRunMeta>(path.join(runDir, '_meta.json')),
-        readJsonIfExists<TechnicalAnswer>(path.join(runDir, 'technical.json')),
-        readJsonIfExists<NewsAnswer>(path.join(runDir, 'news.json')),
-        readJsonIfExists<ChipAnswer>(path.join(runDir, 'chip.json')),
-        readJsonIfExists<FundamentalAnswer>(path.join(runDir, 'fundamental.json')),
-        readJsonIfExists<RiskAnswer>(path.join(runDir, 'risk.json')),
-        readJsonIfExists<unknown>(path.join(runDir, 'bull.json')),
-        readJsonIfExists<unknown>(path.join(runDir, 'bear.json')),
-        readJsonIfExists<FinalDecision>(path.join(runDir, 'decision.json')),
+        agentsGet<AgentRunMeta>(k('_meta.json')),
+        agentsGet<TechnicalAnswer>(k('technical.json')),
+        agentsGet<NewsAnswer>(k('news.json')),
+        agentsGet<ChipAnswer>(k('chip.json')),
+        agentsGet<FundamentalAnswer>(k('fundamental.json')),
+        agentsGet<RiskAnswer>(k('risk.json')),
+        agentsGet<unknown>(k('bull.json')),
+        agentsGet<unknown>(k('bear.json')),
+        agentsGet<FinalDecision>(k('decision.json')),
         readPhaseState(date, symbol),
       ]);
       // Phase 4 完成（有 decision）才算 fully completed

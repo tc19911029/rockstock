@@ -20,7 +20,7 @@ interface ETFStore {
 }
 
 export const useETFStore = create<ETFStore>((set) => ({
-  activeTab: 'performance',
+  activeTab: 'changes',
   selectedEtfCode: null,
   performancePeriod: 'ytd',
   trackingShowOpen: true,

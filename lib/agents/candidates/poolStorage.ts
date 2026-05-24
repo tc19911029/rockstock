@@ -1,34 +1,35 @@
 /**
- * Pool storage — 寫/讀 data/agents/pool/{market}/{date}.json
+ * Pool storage — 寫/讀 agents/pool/{market}/{date}.json
  *
- * 採同 scanStorage 風格：本地 FS + Vercel Blob dual-storage（dev 只用 FS）
+ * 採同 scanStorage / youtube analysisStorage pattern：
+ *   Vercel：寫 Vercel Blob
+ *   Local：寫 data/agents/pool/{market}/{date}.json
+ *
+ * 2026-05-25：原本只寫本地 FS，導致 Vercel cron 跑了也 cold start 消失。
+ *             改透過 lib/agents/persistStorage 統一 dual-storage。
  */
 
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
-import { atomicFsPut } from '@/lib/storage/atomicFsPut';
+import { agentsPut, agentsGet } from '@/lib/agents/persistStorage';
 import type { CandidatesPool } from './types';
 import type { MarketId } from '@/lib/scanner/types';
 
+function poolKey(market: MarketId, date: string): string {
+  return `agents/pool/${market}/${date}.json`;
+}
+
+/** legacy 給已存在的 caller（顯示路徑用），回 FS 上的絕對位置 */
 function getPoolPath(market: MarketId, date: string): string {
   return path.join(process.cwd(), 'data', 'agents', 'pool', market, `${date}.json`);
 }
 
 export async function savePool(pool: CandidatesPool): Promise<string> {
-  const file = getPoolPath(pool.market, pool.date);
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await atomicFsPut(file, JSON.stringify(pool, null, 2));
-  return file;
+  await agentsPut(poolKey(pool.market, pool.date), pool);
+  return getPoolPath(pool.market, pool.date);
 }
 
 export async function loadPool(
   market: MarketId, date: string,
 ): Promise<CandidatesPool | null> {
-  const file = getPoolPath(market, date);
-  try {
-    const raw = await fs.readFile(file, 'utf-8');
-    return JSON.parse(raw) as CandidatesPool;
-  } catch {
-    return null;
-  }
+  return await agentsGet<CandidatesPool>(poolKey(market, date));
 }

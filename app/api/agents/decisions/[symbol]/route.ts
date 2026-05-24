@@ -10,11 +10,10 @@
  */
 
 import { NextRequest } from 'next/server';
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { readPhaseState } from '@/lib/agents/orchestrator';
+import { agentsGet } from '@/lib/agents/persistStorage';
 import { loadPool } from '@/lib/agents/candidates/poolStorage';
 import type {
   AgentRunMeta,
@@ -55,15 +54,6 @@ interface DecisionResponse {
   decision: FinalDecision | null;
 }
 
-async function readJsonIfExists<T>(file: string): Promise<T | null> {
-  try {
-    const raw = await fs.readFile(file, 'utf-8');
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ symbol: string }> },
@@ -77,19 +67,18 @@ export async function GET(
   if (!qParse.success) return apiValidationError(qParse.error);
   const { date } = qParse.data;
 
-  const runDir = path.join(process.cwd(), 'data', 'agents', 'runs', date, symbol);
-
+  const k = (f: string) => `agents/runs/${date}/${symbol}/${f}`;
   const [meta, phase, technical, news, chip, fundamental, risk, bull, bear, decision] = await Promise.all([
-    readJsonIfExists<AgentRunMeta>(path.join(runDir, '_meta.json')),
+    agentsGet<AgentRunMeta>(k('_meta.json')),
     readPhaseState(date, symbol),
-    readJsonIfExists<TechnicalAnswer>(path.join(runDir, 'technical.json')),
-    readJsonIfExists<NewsAnswer>(path.join(runDir, 'news.json')),
-    readJsonIfExists<ChipAnswer>(path.join(runDir, 'chip.json')),
-    readJsonIfExists<FundamentalAnswer>(path.join(runDir, 'fundamental.json')),
-    readJsonIfExists<RiskAnswer>(path.join(runDir, 'risk.json')),
-    readJsonIfExists<BullThesis>(path.join(runDir, 'bull.json')),
-    readJsonIfExists<BearThesis>(path.join(runDir, 'bear.json')),
-    readJsonIfExists<FinalDecision>(path.join(runDir, 'decision.json')),
+    agentsGet<TechnicalAnswer>(k('technical.json')),
+    agentsGet<NewsAnswer>(k('news.json')),
+    agentsGet<ChipAnswer>(k('chip.json')),
+    agentsGet<FundamentalAnswer>(k('fundamental.json')),
+    agentsGet<RiskAnswer>(k('risk.json')),
+    agentsGet<BullThesis>(k('bull.json')),
+    agentsGet<BearThesis>(k('bear.json')),
+    agentsGet<FinalDecision>(k('decision.json')),
   ]);
 
   // 從 Pool 撈該檔的 source attribution（meta 中拿 market）

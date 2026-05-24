@@ -11,11 +11,10 @@
  */
 
 import { NextRequest } from 'next/server';
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { loadScanSession } from '@/lib/storage/scanStorage';
+import { agentsGet } from '@/lib/agents/persistStorage';
 import { buildRiskQuestion } from '@/lib/agents/agents/riskAgent';
 import { buildDebateQuestion } from '@/lib/agents/agents/debateBuilder';
 import { buildDecisionQuestion } from '@/lib/agents/agents/decisionBuilder';
@@ -42,11 +41,9 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date, symbol, phase } = parsed.data;
 
-  // 從 _meta.json 取 market + runId
-  const runDir = path.join(process.cwd(), 'data', 'agents', 'runs', date, symbol);
-  const metaRaw = await fs.readFile(path.join(runDir, '_meta.json'), 'utf-8').catch(() => null);
-  if (!metaRaw) return apiError(`run meta not found for ${date}/${symbol}`, 404);
-  const meta = JSON.parse(metaRaw) as AgentRunMeta;
+  // 從 _meta.json 取 market + runId（dual-storage：Vercel Blob or local FS）
+  const meta = await agentsGet<AgentRunMeta>(`agents/runs/${date}/${symbol}/_meta.json`);
+  if (!meta) return apiError(`run meta not found for ${date}/${symbol}`, 404);
   const market = meta.market as MarketId;
   const runId = meta.runId;
 

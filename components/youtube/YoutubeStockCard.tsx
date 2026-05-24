@@ -177,20 +177,42 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
         </div>
       )}
 
-      {/* Row 4: N 日漲跌 6 欄 */}
-      <div className="flex items-center gap-0.5" title={perfStatusHint}>
-        {FWD_COLS.map(({ key, label }) => {
-          const val = perf[key];
+      {/* Row 4: N 日漲跌 6 欄 — 全空時 collapse 成單一 hint chip */}
+      {(() => {
+        const allEmpty = FWD_COLS.every(({ key }) => perf[key] == null);
+        if (allEmpty) {
           return (
-            <div key={key} className="flex-1 text-center">
-              <div className="text-[8px] text-muted-foreground/60">{label}</div>
-              <div className={`text-[9px] font-mono ${retColor(val)}`}>
-                {fmtRet(val)}
-              </div>
+            <div
+              title={perfStatusHint}
+              className="text-[9px] text-muted-foreground/70 italic flex items-center gap-1 py-0.5"
+            >
+              <span>📅</span>
+              <span>
+                {perf.status === 'no_data'
+                  ? '無 K 線資料'
+                  : perf.status === 'stale'
+                    ? '尚無交易日 K 線（等下個交易日結算）'
+                    : 'N 日漲跌待結算'}
+              </span>
             </div>
           );
-        })}
-      </div>
+        }
+        return (
+          <div className="flex items-center gap-0.5" title={perfStatusHint}>
+            {FWD_COLS.map(({ key, label }) => {
+              const val = perf[key];
+              return (
+                <div key={key} className="flex-1 text-center">
+                  <div className="text-[8px] text-muted-foreground/60">{label}</div>
+                  <div className={`text-[9px] font-mono ${retColor(val)}`}>
+                    {fmtRet(val)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Expanded: 每個節目細節（依情緒排序，多 → 空 → 觀察 → 風險 → 中性） */}
       {expanded && (

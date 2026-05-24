@@ -24,6 +24,7 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
+import { agentsPut, agentsPutRaw, agentsGet, agentsGetRaw } from '@/lib/agents/persistStorage';
 import {
   AGENT_SCHEMA_VERSION,
   AgentId,
@@ -79,6 +80,11 @@ async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
 }
 
+/** Blob/FS key 給 persist 區檔案用（agents/runs/{date}/{symbol}/{filename}）*/
+function runKey(date: string, symbol: string, filename: string): string {
+  return `agents/runs/${date}/${symbol}/${filename}`;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // runId 產生
 // ────────────────────────────────────────────────────────────────────────────
@@ -103,30 +109,25 @@ export function makeRunId(date: string, symbol: string, scanTime?: string): stri
 export async function writePhaseState(
   date: string, symbol: string, state: AgentPhaseState,
 ): Promise<void> {
-  const { tmpDir, persistDir } = getRunPaths(date, symbol);
+  const { tmpDir } = getRunPaths(date, symbol);
   const data = JSON.stringify(state, null, 2);
+  // /tmp 永遠寫本地 FS（skill 讀取用、per-pod ephemeral OK）
   await ensureDir(tmpDir);
-  await ensureDir(persistDir);
-  await Promise.all([
-    atomicFsPut(path.join(tmpDir, '_phase.json'), data),
-    atomicFsPut(path.join(persistDir, '_phase.json'), data),
-  ]);
+  await atomicFsPut(path.join(tmpDir, '_phase.json'), data);
+  // persist 走 dual-storage（Vercel Blob or local FS）
+  await agentsPutRaw(runKey(date, symbol, '_phase.json'), data);
 }
 
 export async function readPhaseState(
   date: string, symbol: string,
 ): Promise<AgentPhaseState | null> {
-  const { tmpDir, persistDir } = getRunPaths(date, symbol);
-  // 優先讀 /tmp（最新進行中的 state）
-  for (const dir of [tmpDir, persistDir]) {
-    try {
-      const raw = await fs.readFile(path.join(dir, '_phase.json'), 'utf-8');
-      return JSON.parse(raw) as AgentPhaseState;
-    } catch {
-      /* try next */
-    }
-  }
-  return null;
+  const { tmpDir } = getRunPaths(date, symbol);
+  // 優先讀 /tmp（最新進行中的 state，per-pod ephemeral but newest）
+  try {
+    const raw = await fs.readFile(path.join(tmpDir, '_phase.json'), 'utf-8');
+    return JSON.parse(raw) as AgentPhaseState;
+  } catch { /* fallback to persist */ }
+  return await agentsGet<AgentPhaseState>(runKey(date, symbol, '_phase.json'));
 }
 
 export function makeInitialPhaseState(args: {
@@ -166,18 +167,14 @@ export async function writeQuestion(
 export async function readAnswer<T>(
   date: string, symbol: string, agent: AgentId,
 ): Promise<T | null> {
-  const { tmpDir, persistDir } = getRunPaths(date, symbol);
-  // 先看 persist 區（已完成），再看 tmp（進行中）
-  for (const dir of [persistDir, tmpDir]) {
-    try {
-      const candidate = path.join(dir, dir === persistDir ? `${agent}.json` : `${agent}-answer.json`);
-      const raw = await fs.readFile(candidate, 'utf-8');
-      return JSON.parse(raw) as T;
-    } catch {
-      /* try next */
-    }
-  }
-  return null;
+  // 先看 persist 區（已完成，dual-storage），再看 tmp（進行中）
+  const persisted = await agentsGet<T>(runKey(date, symbol, `${agent}.json`));
+  if (persisted) return persisted;
+  const { tmpDir } = getRunPaths(date, symbol);
+  try {
+    const raw = await fs.readFile(path.join(tmpDir, `${agent}-answer.json`), 'utf-8');
+    return JSON.parse(raw) as T;
+  } catch { return null; }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -265,12 +262,12 @@ export async function persistAgentAnswer(args: {
 }): Promise<{ persistedAt: string; persistedPath: string }> {
   const { date, symbol, agent } = args;
   const { tmpDir, persistDir } = getRunPaths(date, symbol);
-  await ensureDir(persistDir);
 
   const src = path.join(tmpDir, `${agent}-answer.json`);
-  const dst = path.join(persistDir, `${agent}.json`);
   const raw = await fs.readFile(src, 'utf-8');
-  await atomicFsPut(dst, raw);
+  // dual-storage write
+  await agentsPutRaw(runKey(date, symbol, `${agent}.json`), raw);
+  const dst = path.join(persistDir, `${agent}.json`);  // legacy path for return
 
   const persistedAt = new Date().toISOString();
 
@@ -289,10 +286,8 @@ export async function persistAgentAnswer(args: {
 /** Run 完成後寫 _meta.json，並（可選）清 tmp */
 export async function writeRunMeta(meta: AgentRunMeta): Promise<string> {
   const { persistDir } = getRunPaths(meta.date, meta.symbol);
-  await ensureDir(persistDir);
-  const file = path.join(persistDir, '_meta.json');
-  await atomicFsPut(file, JSON.stringify(meta, null, 2));
-  return file;
+  await agentsPut(runKey(meta.date, meta.symbol, '_meta.json'), meta);
+  return path.join(persistDir, '_meta.json');  // legacy return path
 }
 
 /** 清理 tmp 區（整個 symbol 目錄）— 整個 run 完成後可呼叫 */

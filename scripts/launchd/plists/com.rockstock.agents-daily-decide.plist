@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.agents-daily-decide</string>
+
+  <!--
+    Agents 每日盤後決策準備：一次跑「pool/build + prepare-batch」
+    時間：19:30 CST（18:30 tw-scan 完成後）
+    流程：
+      1. 4 source extractor 跑（technical/youtube/chip/fundamental）→ pool/{TW}/{date}.json
+      2. prepare-batch top 10 → data/agents/runs/{date}/{symbol}/{technical,news,chip,fundamental}.json
+    依賴：tw-scan (18:30) 必須先完成
+    用後續：使用者開 Claude Code 對話跑 /multi-agent-decide 才會真的填 answer
+    Backtest 啟示 (2026-05-24)：5/19/20/21 三天 pool 缺、trader 開盲盒
+                                  這個 plist 解決那 gap
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/curl</string>
+    <string>-fsS</string>
+    <string>--max-time</string>
+    <string>900</string>
+    <string>-H</string>
+    <string>Authorization: Bearer CRON_SECRET</string>
+    <string>http://localhost:3000/api/cron/agents-daily-decide?market=TW&amp;top=10</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-agents-daily-decide.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-agents-daily-decide.err.log</string>
+</dict>
+</plist>

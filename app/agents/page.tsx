@@ -30,6 +30,8 @@ import type {
   TechnicalAnswer, TechnicalReasoningItem, TechnicalSection,
 } from '@/lib/agents/types';
 import type { Candidate } from '@/lib/agents/candidates/types';
+import { useTotalCapital, formatNT } from '@/lib/portfolio/useTotalCapital';
+import { zhSource } from '@/lib/agents/fieldLabels';
 
 type Verdict = 'pass' | 'watch' | 'fail';
 
@@ -516,6 +518,26 @@ export default function AgentsListPage() {
           <main className="col-span-12 lg:col-span-5 space-y-3">
             <div className="text-xs font-semibold tracking-wider text-sky-500">📌 個股列表 · 點卡片看完整分析 →</div>
 
+            {/* 0 進場 banner — 解釋為什麼今天沒有「✓ 進場」（避免使用者以為系統壞了）*/}
+            {counts.phase4Done > 0 && counts.finalAction.buy === 0 && (
+              <div className="border border-amber-700/50 bg-amber-900/20 rounded-lg p-3 text-xs text-amber-200/90 leading-relaxed space-y-1.5">
+                <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+                  <span>⚠️ 今日 0 檔「進場」</span>
+                  <span className="text-amber-400/70">·</span>
+                  <span>觀察 {counts.finalAction.watch} 檔 / 不進場 {counts.finalAction.skip} 檔</span>
+                </div>
+                <p>
+                  系統檢視 {counts.total} 檔候選後沒挑出可進場標的。常見原因：
+                  (1) 大盤盤整/空頭，戒律 7/8 觸發；
+                  (2) 已上漲多波、位置 ≥ 90%；
+                  (3) 週線/月線多周期不過。
+                </p>
+                <p className="text-amber-300/80">
+                  建議：今日不動作或減倉觀望。要更積極可降閾值看「觀察」第一名的卡片細節再決定。
+                </p>
+              </div>
+            )}
+
             {loading && !data && <p className="text-muted-foreground text-sm">載入中…</p>}
 
             {data && data.runs.length === 0 && !error && (
@@ -763,6 +785,10 @@ function DetailColumn({ detail, date }: { detail: DetailPayload; date: string })
   const { candidate, symbol, technical, news, chip, fundamental, bull, bear, decision } = detail;
   const completedCount = [technical, news, chip, fundamental].filter(Boolean).length;
   const phaseLabel = decision ? '✅ 全部階段完成' : completedCount === 4 ? '第一階段完成 · 後三階段尚未跑' : `${completedCount}/4 個分析師完成`;
+  const totalCapital = useTotalCapital();
+  const sizeAmount = decision && totalCapital && decision.sizeHint > 0
+    ? formatNT(totalCapital * (decision.sizeHint / 100))
+    : null;
 
   // 從 technical.dataPoints 撈價格 / 漲幅 / 成交量（answer 寫入時就在這）
   const price          = findDp(technical?.dataPoints, 'price');
@@ -803,9 +829,19 @@ function DetailColumn({ detail, date }: { detail: DetailPayload; date: string })
         <div className={`border rounded p-2 mt-1 ${decision ? 'border-cyan-500 bg-cyan-900/30' : 'bg-slate-800/40 border-slate-700 opacity-40'}`}>
           <div className="text-xs text-slate-300 text-center">
             {decision
-              ? `${decision.action.toUpperCase()} · 部位 ${decision.sizeHint}%`
+              ? (
+                  <>
+                    {decision.action.toUpperCase()} · 部位 {decision.sizeHint}%
+                    {sizeAmount && <span className="text-cyan-300 font-mono ml-1.5">（≈ {sizeAmount}）</span>}
+                  </>
+                )
               : '⏳ 最終決策 · 第四階段尚未跑'}
           </div>
+          {decision && decision.sizeHint > 0 && totalCapital == null && (
+            <div className="text-[10px] text-slate-500 text-center mt-1">
+              設定 <a href="/portfolio" className="underline hover:text-slate-300">portfolio 總資產</a> 後此處會顯示 NT$ 金額
+            </div>
+          )}
         </div>
       </Panel>
 
@@ -920,8 +956,11 @@ function AgentReasoningPanel({
                 <summary className="cursor-pointer text-cyan-400 hover:text-cyan-300 select-none">
                   {labelOf(r)}
                   {codes.length > 0 && (
-                    <span className="font-mono text-[10px] text-slate-500 ml-1">
-                      [{codes.slice(0, 3).join(', ')}{codes.length > 3 ? '…' : ''}]
+                    <span
+                      title={codes.join(', ')}
+                      className="font-mono text-[10px] text-slate-500 ml-1"
+                    >
+                      [{codes.slice(0, 3).map(zhSource).join(', ')}{codes.length > 3 ? '…' : ''}]
                     </span>
                   )}
                 </summary>
