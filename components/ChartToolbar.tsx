@@ -30,6 +30,10 @@ interface ChartToolbarProps {
   isHover: boolean;
   stockName?: string;
   trend?: TrendState | null;
+  /** 當前 timeframe（'1m'|'5m'|'15m'|'30m'|'60m'|'1d'|'1wk'|'1mo'） */
+  currentInterval?: string;
+  /** 切換 timeframe（呼叫端通常 reload 走圖） */
+  onIntervalChange?: (interval: string) => void;
   maToggles: MaToggles;
   onMaToggle: (key: keyof MaToggles) => void;
   showBollinger: boolean;
@@ -81,6 +85,17 @@ const MA_CONFIGS = [
   { key: 'ma240' as const, label: 'MA240' },
 ];
 
+const INTERVAL_CONFIGS: Array<{ key: string; label: string; title: string }> = [
+  { key: '1m',  label: '1分', title: '1 分 K（盤中即時，看主力動向）' },
+  { key: '5m',  label: '5分', title: '5 分 K（看買賣點、爆量長黑/末升段拉高出貨）' },
+  { key: '15m', label: '15分', title: '15 分 K' },
+  { key: '30m', label: '30分', title: '30 分 K' },
+  { key: '60m', label: '60分', title: '60 分 K（1 小時 K）' },
+  { key: '1d',  label: '日', title: '日 K（朱書主戰場：選股、進出場、紀律）' },
+  { key: '1wk', label: '週', title: '週 K（多周期共振 MTF 過濾）' },
+  { key: '1mo', label: '月', title: '月 K（中長線多空趨勢）' },
+];
+
 const INDICATOR_CONFIGS = [
   { key: 'volume' as const, label: '量' },
   { key: 'kd' as const, label: 'KD' },
@@ -106,6 +121,7 @@ const CHIP_CONFIGS_CN = [
 
 export default function ChartToolbar({
   candle, prevCandle, isHover, stockName, trend,
+  currentInterval, onIntervalChange,
   maToggles, onMaToggle,
   showBollinger, onBollingerToggle,
   indicators, onIndicatorToggle,
@@ -182,8 +198,27 @@ export default function ChartToolbar({
         )}
       </div>
 
-      {/* Row 2: Controls — MA toggles, BB, indicators, signals, nav */}
+      {/* Row 2: Controls — timeframe pills, MA toggles, BB, indicators, signals, nav */}
       <div className="flex flex-wrap items-center gap-1 px-3 py-1 bg-secondary/30">
+        {onIntervalChange && (
+          <>
+            {INTERVAL_CONFIGS.map(({ key, label, title }) => (
+              <button
+                key={key}
+                onClick={() => onIntervalChange(key)}
+                aria-pressed={currentInterval === key}
+                aria-label={`切換到 ${title}`}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                  currentInterval === key
+                    ? 'bg-violet-700/70 text-violet-100 ring-1 ring-violet-400/40'
+                    : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+                }`}
+                title={title}
+              >{label}</button>
+            ))}
+            <span className="w-px h-3.5 bg-border/60 mx-0.5" />
+          </>
+        )}
         {MA_CONFIGS.map(({ key, label }) => (
           <button key={key}
             onClick={() => onMaToggle(key)}

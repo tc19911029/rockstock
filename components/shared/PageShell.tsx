@@ -6,7 +6,7 @@ import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun,
   Star, Briefcase, Menu, TrendingUp,
-  PlaySquare, Brain, Activity, Settings, FileText, Layers, Sunrise, Calculator, LineChart, Radio, BookOpen, ShieldAlert,
+  Activity, Settings, FileText, Sunrise, Calculator, LineChart, Radio, BookOpen, ShieldAlert,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
@@ -97,11 +97,8 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
             {/* Divider */}
             <span className="w-px h-5 bg-border mx-1" />
 
-            {/* Analysis tools */}
+            {/* Analysis tools — YouTube/候選池/多代理 已整合進首頁 tab，從 nav 拿掉避免重複 */}
             {([
-              { href: '/youtube',      label: 'YouTube 節目分析', icon: PlaySquare },
-              { href: '/agents/pool',  label: '候選股票池',       icon: Layers },
-              { href: '/agents',       label: '多代理決策中心',   icon: Brain },
               { href: '/health',       label: '資料健康',         icon: Activity },
             ] as const).map(({ href, label, icon: Icon }) => (
               <Link
@@ -161,14 +158,7 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
                         { href: '/etf',       label: '📈 ETF 追蹤', icon: TrendingUp },
                       ],
                     },
-                    {
-                      title: '分析',
-                      items: [
-                        { href: '/youtube',     label: '📺 YouTube 節目分析', icon: PlaySquare },
-                        { href: '/agents/pool', label: '🗂️ 候選股票池',       icon: Layers },
-                        { href: '/agents',      label: '🤖 多代理決策中心',   icon: Brain },
-                      ],
-                    },
+                    // 分析項目（YouTube/候選池/多代理）已整合進首頁右側 tab，從 settings menu 拿掉
                     {
                       title: '系統',
                       items: [

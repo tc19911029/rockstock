@@ -21,9 +21,11 @@ import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analy
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
 import StockSelector from '@/components/StockSelector';
 import { PageShell, EmptyState, BackButton, StockChartView } from '@/components/shared';
+import { DecisionPanel } from '@/components/decision/DecisionPanel';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import SignalSummaryCard from '@/components/SignalSummaryCard';
 import { useV12HistoricalMarkers } from '@/lib/hooks/useV12HistoricalMarkers';
+import { useBlowoffMarkers } from '@/lib/hooks/useBlowoffMarkers';
 import { useLockedPattern } from '@/lib/hooks/useLockedPattern';
 import SixConditionsPanel from '@/components/SixConditionsPanel';
 import BuyMethodConditionsPanel from '@/components/BuyMethodConditionsPanel';
@@ -82,13 +84,22 @@ export default function HomePage() {
     initData, visibleCandles, currentSignals, chartMarkers,
     isLoadingStock, allCandles, currentIndex, dataGaps,
     nextCandle, prevCandle, isPlaying, startPlay, stopPlay, metrics,
-    loadStock, currentStock, sixConditions, longProhibitions,
+    loadStock, currentStock, currentInterval, sixConditions, longProhibitions,
     signalStrengthMin, setSignalStrengthMin,
     resetReplay, targetDate,
   } = useReplayStore();
 
   // v12 歷史 markers（M/N/O/P/Q/F）— 在現有 chartMarkers 之上疊加
   const v12Markers = useV12HistoricalMarkers(allCandles, currentStock?.ticker ?? '', true);
+  // 分鐘級 K 才會跑 blowoff 偵測（爆量長黑/長紅/末升段/MA5 跌破）
+  const blowoffMarkers = useBlowoffMarkers(
+    allCandles,
+    currentStock?.ticker,
+    currentInterval,
+    metrics.shares > 0,
+  );
+  // chartMarkers + v12Markers 由「訊號」toggle 控制；blowoff 在分鐘 K 永遠顯示
+  // 因為爆量長黑/末升段是即時警示，不能藏在 toggle 後面（朱書精神：見高就警覺）
   const mergedMarkers = useMemo(
     () => [...chartMarkers, ...v12Markers],
     [chartMarkers, v12Markers],
@@ -144,8 +155,12 @@ export default function HomePage() {
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       setTabDate(date);
     }
+    // ?tf=5m / 1m / 1d / 1wk / 1mo… 切換走圖週期
+    const tfParam = params.get('tf');
+    const validTfs = ['1m', '5m', '15m', '30m', '60m', '1d', '1wk', '1mo'];
+    const tf = tfParam && validTfs.includes(tfParam) ? tfParam : '1d';
     if (sym) {
-      loadStock(sym, '1d', '2y', date ?? undefined).catch((e: Error) => {
+      loadStock(sym, tf, undefined, date ?? undefined).catch((e: Error) => {
         const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
         setLoadError(msg);
         toast.error(msg);
@@ -154,10 +169,11 @@ export default function HomePage() {
     } else if (allCandles.length === 0) {
       loadStock(getMarketIndex(market).symbol, '1d', '2y').catch(() => {});
     }
-    // 清掉 ?tab= 與 ?date=（已被 state 吸收）
-    if (urlTab || date) {
+    // 清掉 ?tab= / ?date= / ?tf=（已被 state 或 loadStock 吸收）
+    if (urlTab || date || tfParam) {
       const clean = new URLSearchParams(window.location.search);
       clean.delete('tab');
+      clean.delete('tf');
       if (!sym) clean.delete('date'); // sym 已用 replaceState 清整個 query，這裡只在沒 sym 時清 date
       const qs = clean.toString();
       window.history.replaceState({}, '', qs ? `/?${qs}` : '/');
@@ -174,7 +190,6 @@ export default function HomePage() {
     loadStock(symbol, '1d', '2y').catch(() => {});
   }, [market, loadStock, getMarketIndex]);
 
-  const currentInterval = useReplayStore(s => s.currentInterval);
   // P1-2: remember last tab per interval (declared before handleKey to avoid TDZ errors)
   const [sideTabPerInterval, setSideTabPerInterval] = useState<Record<string, SideTab>>({});
   const sideTab: SideTab = sideTabPerInterval[currentInterval] ?? 'conditions';
@@ -353,6 +368,22 @@ export default function HomePage() {
     }
   }, [loadStock, openMobileChart]);
 
+  // 切換走圖週期（1m/5m/.../1d/1wk/1mo）— ChartToolbar timeframe pills 點擊
+  // 重抓會自動 stop/start polling（loadStock 內部會處理），呼叫端不必處理
+  const handleIntervalChange = useCallback((newInterval: string) => {
+    if (!currentStock) return;
+    if (newInterval === currentInterval) return;
+    // 去 suffix（store loadStock 內部會自動處理 suffix）
+    const symbol = currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    setLoadError(null);
+    useReplayStore.getState().stopPolling();
+    loadStock(symbol, newInterval, undefined, targetDate ?? undefined)
+      .then(() => useReplayStore.getState().startPolling())
+      .catch((e: Error) => {
+        toast.error(`切換 ${newInterval} 失敗：${e.message || '請稍後再試'}`);
+      });
+  }, [currentStock, currentInterval, targetDate, loadStock]);
+
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
   // 預設 0.65，mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
   const [chartSplit, setChartSplit] = useState(0.65);
@@ -476,9 +507,13 @@ export default function HomePage() {
     </div>
   );
 
+  // 是否顯示深度決策面板：有選股且非大盤指數
+  const showDecisionPanel = !!currentStock && !/^\^|^000001\.SS$/.test(currentStock.ticker);
+
   return (
-    <PageShell fullViewport headerSlot={<StockSelector />}>
-      <div className="flex-1 flex flex-col md:flex-row min-h-0 md:overflow-x-auto md:overflow-y-hidden overflow-y-auto h-full px-3 py-2 gap-2">
+    <PageShell fullViewport={!showDecisionPanel} headerSlot={<StockSelector />}>
+      <div className={`flex-1 flex flex-col ${showDecisionPanel ? '' : 'min-h-0'} px-3 py-2 gap-3`}>
+        <div className={`flex flex-col md:flex-row gap-2 ${showDecisionPanel ? 'md:h-[calc(100vh-90px)] md:overflow-hidden' : 'flex-1 min-h-0 md:overflow-x-auto md:overflow-y-hidden overflow-y-auto h-full'}`}>
 
         {/* Left: Chart */}
         <div className="w-full md:flex-1 md:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
@@ -531,6 +566,8 @@ export default function HomePage() {
                 isHover={!!hoverCandle}
                 stockName={currentStock?.name}
                 trend={currentTrend}
+                currentInterval={currentInterval}
+                onIntervalChange={handleIntervalChange}
                 maToggles={maToggles}
                 onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
                 showBollinger={showBollinger}
@@ -576,7 +613,7 @@ export default function HomePage() {
             chartProps={{
               candles: visibleCandles,
               signals: currentSignals,
-              chartMarkers: showMarkers ? mergedMarkers : [],
+              chartMarkers: [...(showMarkers ? mergedMarkers : []), ...blowoffMarkers],
               avgCost: metrics.shares > 0 ? metrics.avgCost : undefined,
               stopLossPrice,
               onCrosshairMove: setHoverCandle,
@@ -777,6 +814,13 @@ export default function HomePage() {
           )}
         </div>
 
+        </div>{/* end 3-col flex */}
+
+        {/* 深度決策面板（A1：走圖區下方垂直展開） */}
+        {showDecisionPanel && currentStock && (
+          <DecisionPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />
+        )}
+
       </div>
       {/* P1-5: Keyboard shortcut help overlay */}
       {showHelp && (
@@ -839,6 +883,8 @@ export default function HomePage() {
                 isHover={!!hoverCandle}
                 stockName={currentStock?.name}
                 trend={currentTrend}
+                currentInterval={currentInterval}
+                onIntervalChange={handleIntervalChange}
                 maToggles={maToggles}
                 onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
                 showBollinger={showBollinger}

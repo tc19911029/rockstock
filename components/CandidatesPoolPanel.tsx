@@ -18,6 +18,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
+import {
+  POOL_WEIGHTS,
+  POOL_MIN_SOURCE_COUNT_DEFAULT,
+  computeFacetScores,
+} from '@/lib/agents/candidates/poolWeights';
 import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { formatLetters } from '@/lib/scanner/buyMethodTracks';
@@ -66,7 +71,31 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     setDateLocal(d);
     onDateChange?.(d);
   }, [onDateChange]);
-  const [minSourceCount, setMinSourceCount] = useState(1);
+  const [minSourceCount, setMinSourceCount] = useState(POOL_MIN_SOURCE_COUNT_DEFAULT);
+  // 權重 popover 開關 + 自訂權重（存 localStorage，只覆蓋 client display 排序）
+  const [showWeights, setShowWeights] = useState(false);
+  const [customWeights, setCustomWeights] = useState<typeof POOL_WEIGHTS>(() => {
+    if (typeof window === 'undefined') return POOL_WEIGHTS;
+    try {
+      const raw = localStorage.getItem('poolCustomWeights');
+      if (!raw) return POOL_WEIGHTS;
+      const parsed = JSON.parse(raw);
+      // 防呆：keys 對齊
+      if (
+        typeof parsed?.technical === 'number' && typeof parsed?.youtube === 'number' &&
+        typeof parsed?.chip === 'number' && typeof parsed?.fundamental === 'number'
+      ) return parsed;
+    } catch { /* ignore */ }
+    return POOL_WEIGHTS;
+  });
+  const persistWeights = useCallback((w: typeof POOL_WEIGHTS) => {
+    setCustomWeights(w);
+    try { localStorage.setItem('poolCustomWeights', JSON.stringify(w)); } catch { /* ignore */ }
+  }, []);
+  const resetWeights = useCallback(() => {
+    setCustomWeights(POOL_WEIGHTS);
+    try { localStorage.removeItem('poolCustomWeights'); } catch { /* ignore */ }
+  }, []);
   const [data, setData] = useState<PoolResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -89,7 +118,8 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     setError(null);
     try {
       const res = await fetch(
-        `/api/agents/pool?date=${date}&minSourceCount=${minSourceCount}&limit=100`,
+        // B3：先 ≥N 共識過濾，再用 totalScore 加權排序（POOL_WEIGHTS single source of truth）
+        `/api/agents/pool?date=${date}&minSourceCount=${minSourceCount}&limit=100&sort=weighted`,
         { signal: ac.signal },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -120,6 +150,22 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     return m;
   }, [emptyDates, populatedDates]);
 
+  // B3 第二層：用 customWeights 算 totalScore + 排序（client display）
+  // server 已用 POOL_WEIGHTS default 排序，沒改 weights 時不會雙排，加 score 顯示即可
+  const sortedCandidates = useMemo(() => {
+    if (!data?.candidates) return [];
+    return data.candidates.map(c => {
+      const base = computeFacetScores(c);
+      const customTotal = Math.round(
+        base.technical * customWeights.technical +
+        base.news * customWeights.youtube +
+        base.chip * customWeights.chip +
+        base.fundamental * customWeights.fundamental,
+      );
+      return { ...c, scores: { ...base, total: customTotal } };
+    }).sort((a, b) => b.scores.total - a.scores.total);
+  }, [data?.candidates, customWeights]);
+
   useEffect(() => { fetchPool(); }, [fetchPool]);
 
   const buildPool = useCallback(async () => {
@@ -149,7 +195,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
         <DatePicker value={date} onChange={setDate} size="sm" meta={datePickerMeta} />
       </div>
       {/* Filter bar */}
-      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-secondary/20 text-xs">
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-secondary/20 text-xs relative">
         <label className="text-muted-foreground flex items-center gap-1">
           ≥
           <select
@@ -164,6 +210,23 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
             <option value={4}>4 個面向</option>
           </select>
         </label>
+        <button
+          type="button"
+          onClick={() => setShowWeights(v => !v)}
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-700/40 text-violet-200 hover:bg-violet-600/60"
+          title="調整 4 面向加權（影響排序，存本機）"
+        >
+          權重 ⚙
+        </button>
+        {showWeights && (
+          <WeightPopover
+            weights={customWeights}
+            defaults={POOL_WEIGHTS}
+            onChange={persistWeights}
+            onReset={resetWeights}
+            onClose={() => setShowWeights(false)}
+          />
+        )}
         <div className="flex-1" />
         <span
           className="text-muted-foreground tabular-nums"
@@ -239,15 +302,17 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
               <tr>
                 <th className="px-2 py-1.5 text-left font-medium">股票</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="幾個面向同時看好">面向</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="4 面向加權總分（受權重 popover 設定影響）">總分</th>
                 <th className="px-1 py-1.5 text-left font-medium">命中</th>
                 <th className="px-2 py-1.5 text-left font-medium">理由</th>
               </tr>
             </thead>
             <tbody>
-              {data.candidates.map((c) => (
+              {sortedCandidates.map((c) => (
                 <PoolRow
                   key={c.symbol}
                   candidate={c}
+                  totalScore={c.scores.total}
                   onSelect={onSelectStock}
                   selected={selectedSymbol === c.symbol}
                 />
@@ -260,7 +325,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   );
 }
 
-function PoolRow({ candidate, onSelect, selected }: { candidate: Candidate; onSelect?: (symbol: string) => void; selected?: boolean }) {
+function PoolRow({ candidate, totalScore, onSelect, selected }: { candidate: Candidate; totalScore?: number; onSelect?: (symbol: string) => void; selected?: boolean }) {
   const pureSymbol = candidate.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const reasons: string[] = [];
   const t = candidate.sources.technical;
@@ -286,6 +351,15 @@ function PoolRow({ candidate, onSelect, selected }: { candidate: Candidate; onSe
       </td>
       <td className="px-1 py-1.5 text-center font-mono font-semibold text-foreground">
         {candidate.sourceCount}
+      </td>
+      <td className="px-1 py-1.5 text-center font-mono font-semibold">
+        {totalScore != null ? (
+          <span className={
+            totalScore >= 70 ? 'text-emerald-300'
+            : totalScore >= 50 ? 'text-amber-300'
+            : 'text-rose-300'
+          }>{totalScore}</span>
+        ) : <span className="text-muted-foreground">—</span>}
       </td>
       <td className="px-1 py-1.5">
         <div className="flex gap-0.5 flex-wrap">
@@ -316,5 +390,69 @@ function PoolRow({ candidate, onSelect, selected }: { candidate: Candidate; onSe
         </div>
       </td>
     </tr>
+  );
+}
+
+// 4 面向權重 popover — user 可即時調整、存 localStorage、影響 client display 排序
+function WeightPopover({
+  weights, defaults, onChange, onReset, onClose,
+}: {
+  weights: typeof POOL_WEIGHTS;
+  defaults: typeof POOL_WEIGHTS;
+  onChange: (w: typeof POOL_WEIGHTS) => void;
+  onReset: () => void;
+  onClose: () => void;
+}) {
+  const sum = weights.technical + weights.youtube + weights.chip + weights.fundamental;
+  const normalized = Math.abs(sum - 1.0) < 0.01;
+  const setOne = (k: keyof typeof POOL_WEIGHTS, v: number) => {
+    onChange({ ...weights, [k]: v });
+  };
+  return (
+    <div
+      className="absolute top-full left-0 mt-1 z-50 w-72 bg-card border border-border rounded-lg shadow-xl p-3 space-y-2"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-foreground">4 面向加權（client 排序）</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label="關閉">✕</button>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        調整後即時重排候選列表。權重存本機 localStorage、不會覆蓋伺服器排序。
+      </p>
+      {(['technical', 'youtube', 'chip', 'fundamental'] as const).map((k) => {
+        const label = k === 'technical' ? '技術' : k === 'youtube' ? '消息' : k === 'chip' ? '籌碼' : '基本';
+        return (
+          <div key={k} className="flex items-center gap-2 text-xs">
+            <span className="w-10 text-muted-foreground">{label}</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round(weights[k] * 100)}
+              onChange={(e) => setOne(k, Number(e.target.value) / 100)}
+              className="flex-1 accent-violet-500"
+            />
+            <span className="w-12 text-right font-mono tabular-nums">
+              {(weights[k] * 100).toFixed(0)}%
+            </span>
+          </div>
+        );
+      })}
+      <div className="flex items-center justify-between text-[10px] border-t border-border pt-2">
+        <span className={normalized ? 'text-emerald-300' : 'text-amber-300'}>
+          總和：{(sum * 100).toFixed(0)}%
+          {!normalized && '（建議 = 100%）'}
+        </span>
+        <button
+          onClick={onReset}
+          className="px-2 py-0.5 rounded text-[10px] bg-secondary hover:bg-muted text-muted-foreground"
+          title={`恢復預設：技 ${defaults.technical * 100}% / 消 ${defaults.youtube * 100}% / 籌 ${defaults.chip * 100}% / 基 ${defaults.fundamental * 100}%`}
+        >
+          恢復預設
+        </button>
+      </div>
+    </div>
   );
 }

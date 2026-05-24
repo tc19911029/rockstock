@@ -2,8 +2,6 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useReplayStore } from '@/store/replayStore';
-import { IntervalSwitcher } from '@/features/scan/components/IntervalSwitcher';
-import { type ScanInterval, DEFAULT_PERIODS } from '@/lib/datasource/findAnchorIndex';
 
 const DEFAULT_QUICK_STOCKS = [
   { symbol: 'mock',  name: '📊 範例資料（離線）' },
@@ -38,10 +36,8 @@ function rawSymbol(ticker: string) {
 }
 
 export default function StockSelector() {
-  const { loadStock, isLoadingStock, currentStock, targetDate, startPolling, stopPolling } = useReplayStore();
+  const { loadStock, isLoadingStock, currentStock, currentInterval, startPolling, stopPolling } = useReplayStore();
   const [input,    setInput]    = useState('');
-  // 不用 setInterval 命名，避免 mask global window.setInterval
-  const [chartInterval, setChartInterval] = useState<ScanInterval>('1d');
   const [showDrop, setShowDrop] = useState(false);
   const [error,    setError]    = useState('');
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -60,25 +56,18 @@ export default function StockSelector() {
     return () => { stopPolling(); };
   }, [stopPolling]);
 
-  const handleLoad = useCallback(async (symbol: string, iv: ScanInterval = chartInterval, keepTarget = false) => {
+  // 載入股票（保留當前 interval — 預設由 ChartToolbar timeframe pills 控制）
+  const handleLoad = useCallback(async (symbol: string) => {
     setError('');
     setShowDrop(false);
-    stopPolling(); // 切換股票/週期前先停止
-    const pd = DEFAULT_PERIODS[iv];
+    stopPolling();
     try {
-      const td = keepTarget ? targetDate ?? undefined : undefined;
-      await loadStock(symbol, iv, pd, td);
-      startPolling(); // 載入成功後啟動 polling（內部判斷是否盤中）
+      await loadStock(symbol, currentInterval ?? '1d');
+      startPolling();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '載入失敗');
     }
-  }, [chartInterval, targetDate, loadStock, startPolling, stopPolling]);
-
-  // Auto-reload when interval changes — 保留訊號日定位
-  const handleIntervalChange = (newIv: ScanInterval) => {
-    setChartInterval(newIv);
-    if (currentStock) handleLoad(rawSymbol(currentStock.ticker), newIv, true);
-  };
+  }, [currentInterval, loadStock, startPolling, stopPolling]);
 
   // Close dropdown on outside click
   const closeOnOutside = (e: React.MouseEvent) => {
@@ -130,10 +119,7 @@ export default function StockSelector() {
           ? <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 border-2 border-foreground border-t-transparent rounded-full animate-spin" />載入</span>
           : '載入'}
       </button>
-      <span className="text-muted-foreground/60 text-xs shrink-0">|</span>
-
-      {/* Interval buttons — auto-reload on click */}
-      <IntervalSwitcher value={chartInterval} onChange={handleIntervalChange} />
+      {/* timeframe pills 已移至 ChartToolbar（緊鄰走圖區） */}
 
       {error && <span className="text-xs text-red-400 truncate">{error}</span>}
     </div>
