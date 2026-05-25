@@ -32,9 +32,17 @@ export interface ChipData {
   // 借券
   lendingBalance: number;   // 借券餘額
   lendingNet: number;       // 借券增減
-  // 集保大戶
-  largeHolderPct: number;   // 千張以上大戶持股比例 %
-  largeHolderChange: number;// 大戶持股變化 %（vs 上週）
+  // 集保大戶（依書本實務：股價 >50 看 400 張、千金股看 100 張）
+  largeHolderPct: number;        // 千張以上大戶持股比例 %（向下相容欄位）
+  largeHolderChange: number;     // 千張大戶持股變化 %（vs 上週）
+  holder100Pct: number;          // 100 張↑ 比例（千金股大戶門檻）
+  holder200Pct: number;          // 200 張↑ 比例（高價股大戶門檻）
+  holder400Pct: number;          // 400 張↑ 比例（中價股大戶門檻、業界主流）
+  holder400To600Pct: number;     // 400-600 張比例（各級明細）
+  holder600To800Pct: number;     // 600-800 張比例
+  holder800To1000Pct: number;    // 800-1000 張比例
+  /** 主力卡位訊號：400/600/800/1000 四級都有持股（業界：籌碼結構最完整）*/
+  structureBuilding: boolean;
   // 投信動向（陳威良 3比8 proxy；用最近窗口累計淨買 ÷ 已發行股數，動向 pp，不是絕對持股 %）
   sharesIssued: number;                     // 已發行股數（股，from FinMind）；0 = 缺資料
   trustNetBuy30d: number;                   // 30 天累計投信淨買（張）
@@ -58,6 +66,7 @@ function calculateChipScore(
   margin: { marginBalance: number; marginNet: number; shortBalance: number; shortNet: number; marginUtilRate: number } | undefined,
   dt: { dayTradeVolume: number; dayTradeRatio: number } | undefined,
   lt: { buy: number; sell: number; net: number } | undefined,
+  holder: { structureBuilding: boolean; holder1000Change: number } | undefined,
 ): { score: number; grade: string; signal: string; detail: string } {
   // 2026-05-11 fix: 全部 input 都缺或全空殼（小型股/上櫃股常無資料）→ 回傳「無資料」避免誤導性 50/B/中性
   const hasAnyInst = inst && (inst.foreignBuy !== 0 || inst.trustBuy !== 0 || inst.dealerBuy !== 0 || inst.totalBuy !== 0);
@@ -112,6 +121,21 @@ function calculateChipScore(
   if (dt) {
     if (dt.dayTradeRatio > 40) { score -= 5; details.push(`當沖比${dt.dayTradeRatio}%過高`); }
     else if (dt.dayTradeRatio > 25) { score -= 2; }
+  }
+
+  // ── 集保大戶結構（業界：400/600/800/1000 四級全到位 = 主力卡位最強訊號）──
+  if (holder) {
+    if (holder.structureBuilding) {
+      score += 15;
+      details.push('主力卡位（400/600/800/1000 四級全到位）');
+    }
+    if (holder.holder1000Change >= 0.5) {
+      score += 5;
+      details.push(`千張大戶持股 +${holder.holder1000Change.toFixed(2)}%`);
+    } else if (holder.holder1000Change <= -1) {
+      score -= 8;
+      details.push(`千張大戶持股 ${holder.holder1000Change.toFixed(2)}% 出脫`);
+    }
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
@@ -285,8 +309,27 @@ export async function GET(req: NextRequest) {
     const dealerBuy = instOnDate?.dealer ?? 0;
     const totalBuy = instOnDate?.total ?? 0;
 
+    // 集保大戶各級摘要 + 主力卡位訊號
+    const clampPct = (v: number | undefined): number =>
+      Math.min(100, Math.max(0, v ?? 0));
+    const h400To600 = clampPct(latestTdcc?.holder400To600Pct);
+    const h600To800 = clampPct(latestTdcc?.holder600To800Pct);
+    const h800To1000 = clampPct(latestTdcc?.holder800To1000Pct);
+    const h1000 = clampPct(latestTdcc?.holder1000Pct);
+    const structureBuilding =
+      h400To600 > 0 && h600To800 > 0 && h800To1000 > 0 && h1000 > 0;
+    const holder1000Change = latestTdcc && prevTdcc
+      ? +(clampPct(latestTdcc.holder1000Pct) - clampPct(prevTdcc.holder1000Pct)).toFixed(2)
+      : 0;
+
     const inst = instOnDate ? { foreignBuy, trustBuy, dealerBuy, totalBuy, name: '' } : undefined;
-    const { score, grade, signal, detail } = calculateChipScore(inst, marginInfo ?? undefined, dayTradeInfo ?? undefined, undefined);
+    const { score, grade, signal, detail } = calculateChipScore(
+      inst,
+      marginInfo ?? undefined,
+      dayTradeInfo ?? undefined,
+      undefined,
+      latestTdcc ? { structureBuilding, holder1000Change } : undefined,
+    );
 
     const data: ChipData = {
       symbol: code,
@@ -304,10 +347,15 @@ export async function GET(req: NextRequest) {
       lendingNet: lendingInfo?.lendingNet ?? 0,
       // ETF (如 0050) TDCC 原始資料持股分級比例異常高（>100%），可能因發行單位/集保
       // 統計口徑不同；clamp 到 0-100 避免 UI 顯示 5313% 等誤導值。
-      largeHolderPct: Math.min(100, Math.max(0, latestTdcc?.holder1000Pct ?? 0)),
-      largeHolderChange: latestTdcc && prevTdcc
-        ? +(Math.min(100, latestTdcc.holder1000Pct) - Math.min(100, prevTdcc.holder1000Pct)).toFixed(2)
-        : 0,
+      largeHolderPct: h1000,
+      largeHolderChange: holder1000Change,
+      holder100Pct: clampPct(latestTdcc?.holder100Pct),
+      holder200Pct: clampPct(latestTdcc?.holder200Pct),
+      holder400Pct: clampPct(latestTdcc?.holder400Pct),
+      holder400To600Pct: h400To600,
+      holder600To800Pct: h600To800,
+      holder800To1000Pct: h800To1000,
+      structureBuilding,
       sharesIssued: sharesIssued ?? 0,
       trustNetBuy30d,
       trustNetBuy60d,

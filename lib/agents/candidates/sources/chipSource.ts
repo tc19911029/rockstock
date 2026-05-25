@@ -32,18 +32,44 @@ const CHIP_SCORE_MIN     = 50;
 const FOREIGN_BUY_MIN    = 1_000_000;
 const TRUST_BUY_MIN      = 500_000;
 const TOTAL_INST_BUY_MIN = 3_000_000;
+/** 對應 tier 大戶持股佔比門檻（≥ 此值代表「籌碼集中」訊號）*/
+const HOLDER_TIER_CONCENTRATED_MIN = 40;
 
 interface ChipApiResponse {
   chipScore?: number | null;
   foreignBuy?: number | null;
   trustBuy?: number | null;
   dealerBuy?: number | null;
+  // 集保大戶各 tier（用於股價分層判斷）
+  holder100Pct?: number | null;
+  holder200Pct?: number | null;
+  holder400Pct?: number | null;
+  largeHolderPct?: number | null;        // 1000 張↑
+  largeHolderChange?: number | null;     // 1000 張↑ 週變化
+  structureBuilding?: boolean | null;    // 400/600/800/1000 四級全到位
 }
 
 async function fetchChip(symbol: string): Promise<ChipApiResponse | null> {
   const raw = await fetchJSON(internalUrl(`/api/chip?symbol=${encodeURIComponent(symbol)}`));
   if (!raw || typeof raw !== 'object') return null;
   return raw as ChipApiResponse;
+}
+
+/**
+ * 依股價選大戶 tier（業界 + 朱書實務）：
+ *   - 千金股（≥ 1000）→ 100 張↑
+ *   - 高價股（200-1000）→ 200 張↑
+ *   - 中價股（50-200）→ 400 張↑（業界主流）
+ *   - 平價股（< 50）→ 1000 張↑
+ */
+function pickHolderTier(price: number): {
+  key: 'holder100Pct' | 'holder200Pct' | 'holder400Pct' | 'largeHolderPct';
+  label: string;
+} {
+  if (price >= 1000) return { key: 'holder100Pct', label: '100 張↑' };
+  if (price >= 200)  return { key: 'holder200Pct', label: '200 張↑' };
+  if (price >= 50)   return { key: 'holder400Pct', label: '400 張↑' };
+  return { key: 'largeHolderPct', label: '1000 張↑' };
 }
 
 export const chipSource: SourceExtractor = {
@@ -83,6 +109,20 @@ export const chipSource: SourceExtractor = {
         if (totalInst >= TOTAL_INST_BUY_MIN) {
           signals.push('total_inst_strong');
           reasons.push(`三大法人合計買超 ${formatMoney(totalInst)} 元`);
+        }
+
+        // ── 集保大戶結構（新版：股價分層 + 主力卡位）───────────────────────
+        // 1. 主力卡位（400/600/800/1000 四級全到位）= 最強籌碼結構訊號
+        if (chip.structureBuilding) {
+          signals.push('chip_structure_building');
+          reasons.push('主力卡位（400/600/800/1000 四級全到位）');
+        }
+        // 2. 對應 tier 大戶持股集中（千金股看 100 張、平價看 1000 張）
+        const tier = pickHolderTier(row.price ?? 0);
+        const tierPct = chip[tier.key] ?? 0;
+        if (tierPct >= HOLDER_TIER_CONCENTRATED_MIN) {
+          signals.push('chip_tier_concentrated');
+          reasons.push(`${tier.label}大戶持股 ${tierPct.toFixed(1)}%（股價 ${row.price ?? 0} 元）`);
         }
 
         if (signals.length === 0) continue;

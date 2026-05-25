@@ -51,9 +51,12 @@ export function parseTdccCsv(csv: string): TdccLatestWeek {
   const lines = csv.split(/\r?\n/);
   if (lines.length < 2) throw new Error('TDCC CSV 為空');
 
-  // 累積 per-stock 各級比例
-  // brackets[code] = { 12: pct, 13: pct, 14: pct, 15: pct, holderCount?: 合計人數 }
-  const acc = new Map<string, { p12?: number; p13?: number; p14?: number; p15?: number; holders?: number }>();
+  // 累積 per-stock 各級比例（level 10-15 + 合計）
+  // 10: 100-200 張，11: 200-400 張，12: 400-600 張，13: 600-800 張，14: 800-1000 張，15: 1000 張↑
+  const acc = new Map<string, {
+    p10?: number; p11?: number; p12?: number; p13?: number; p14?: number; p15?: number;
+    holders?: number;
+  }>();
   let headerDate = '';
 
   for (let i = 1; i < lines.length; i++) {
@@ -75,7 +78,9 @@ export function parseTdccCsv(csv: string): TdccLatestWeek {
     }
 
     const cur = acc.get(code) ?? {};
-    if (level === 12) cur.p12 = pct;
+    if (level === 10) cur.p10 = pct;
+    else if (level === 11) cur.p11 = pct;
+    else if (level === 12) cur.p12 = pct;
     else if (level === 13) cur.p13 = pct;
     else if (level === 14) cur.p14 = pct;
     else if (level === 15) cur.p15 = pct;
@@ -86,12 +91,25 @@ export function parseTdccCsv(csv: string): TdccLatestWeek {
   // 組裝最終資料
   const data = new Map<string, TdccDay>();
   for (const [code, v] of acc) {
-    const h400 = (v.p12 ?? 0) + (v.p13 ?? 0) + (v.p14 ?? 0) + (v.p15 ?? 0);
-    const h1000 = v.p15 ?? 0;
-    if (h400 === 0 && h1000 === 0 && !v.holders) continue; // 無資料的股票跳過
+    const p10 = v.p10 ?? 0;
+    const p11 = v.p11 ?? 0;
+    const p12 = v.p12 ?? 0;
+    const p13 = v.p13 ?? 0;
+    const p14 = v.p14 ?? 0;
+    const p15 = v.p15 ?? 0;
+    const h100 = p10 + p11 + p12 + p13 + p14 + p15;
+    const h200 = p11 + p12 + p13 + p14 + p15;
+    const h400 = p12 + p13 + p14 + p15;
+    const h1000 = p15;
+    if (h100 === 0 && !v.holders) continue; // 無資料的股票跳過
     data.set(code, {
+      holder100Pct: +h100.toFixed(2),
+      holder200Pct: +h200.toFixed(2),
       holder400Pct: +h400.toFixed(2),
       holder1000Pct: +h1000.toFixed(2),
+      holder400To600Pct: +p12.toFixed(2),
+      holder600To800Pct: +p13.toFixed(2),
+      holder800To1000Pct: +p14.toFixed(2),
       holderCount: v.holders,
     });
   }

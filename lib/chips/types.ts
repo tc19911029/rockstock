@@ -31,10 +31,20 @@ export interface InstDayFile {
 
 /** 單一股票 ‧ 單一資料日 ‧ 大戶持股分散（TDCC 集保） */
 export interface TdccDay {
-  /** 大戶持股 400 張↑ 比例（%） */
+  /** 100 張↑ 比例（%） = level 10-15 加總；千金股大戶門檻 */
+  holder100Pct?: number;
+  /** 200 張↑ 比例（%） = level 11-15 加總；高價股大戶門檻 */
+  holder200Pct?: number;
+  /** 400 張↑ 比例（%） = level 12-15 加總；中價股大戶門檻（業界主流）*/
   holder400Pct: number;
-  /** 大戶持股 1000 張↑ 比例（%） */
+  /** 1000 張↑ 比例（%） = level 15；平價股大戶門檻 */
   holder1000Pct: number;
+  /** 400-600 張比例（%） = level 12；用於三層同步分析 */
+  holder400To600Pct?: number;
+  /** 600-800 張比例（%） = level 13 */
+  holder600To800Pct?: number;
+  /** 800-1000 張比例（%） = level 14 */
+  holder800To1000Pct?: number;
   /** 總股東戶數 */
   holderCount?: number;
 }
