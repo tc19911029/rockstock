@@ -302,9 +302,11 @@ export async function GET(req: NextRequest) {
       largeTraderBuy: 0, largeTraderSell: 0, largeTraderNet: 0,
       lendingBalance: lendingInfo?.lendingBalance ?? 0,
       lendingNet: lendingInfo?.lendingNet ?? 0,
-      largeHolderPct: latestTdcc?.holder1000Pct ?? 0,
+      // ETF (如 0050) TDCC 原始資料持股分級比例異常高（>100%），可能因發行單位/集保
+      // 統計口徑不同；clamp 到 0-100 避免 UI 顯示 5313% 等誤導值。
+      largeHolderPct: Math.min(100, Math.max(0, latestTdcc?.holder1000Pct ?? 0)),
       largeHolderChange: latestTdcc && prevTdcc
-        ? +(latestTdcc.holder1000Pct - prevTdcc.holder1000Pct).toFixed(2)
+        ? +(Math.min(100, latestTdcc.holder1000Pct) - Math.min(100, prevTdcc.holder1000Pct)).toFixed(2)
         : 0,
       sharesIssued: sharesIssued ?? 0,
       trustNetBuy30d,

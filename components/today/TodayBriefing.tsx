@@ -538,9 +538,14 @@ function GrowthGapDetail({ growth }: { growth: GrowthState }) {
           {requiredDailyPct != null && ` · 需日均 +${requiredDailyPct.toFixed(2)}%`}
         </div>
       )}
-      {gap != null && gap <= 0 && (
+      {gap != null && gap < 0 && (
         <div className="text-[10px] text-emerald-400/80 leading-tight mt-0.5">
           ✓ 已達標、超前 {formatNT(Math.abs(gap))}
+        </div>
+      )}
+      {gap === 0 && (
+        <div className="text-[10px] text-slate-400/80 leading-tight mt-0.5">
+          本月為起始月（無成長目標）
         </div>
       )}
     </>
