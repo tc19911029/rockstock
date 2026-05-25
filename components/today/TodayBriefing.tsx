@@ -283,6 +283,9 @@ export function TodayBriefing({ market = 'TW' }: Props) {
           </HeroCard>
         </div>
 
+        {/* 風險警示 mini box（取代 /risk 入口）*/}
+        <RiskWarningBox holdings={holdings} holdingPrices={holdingPrices} totalCapital={totalCapital ?? null} />
+
         {/* 操作建議一句話 */}
         <div className="border border-amber-700/40 bg-amber-950/20 rounded p-3">
           <div className="text-xs font-bold text-amber-300 mb-1">💡 今日操作建議</div>
@@ -621,4 +624,81 @@ function hhmm(epochMs: number): string {
     timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false,
   });
   return fmt.format(new Date(epochMs));
+}
+
+/**
+ * 風險警示 mini box — 取代獨立 /risk 頁的入口功能
+ * 顯示：單檔最大集中度 / 累計風險敞口 / 朱書建議比較
+ * 規則參考 app/risk/page.tsx
+ */
+function RiskWarningBox({
+  holdings, holdingPrices, totalCapital,
+}: {
+  holdings: { symbol: string; name: string; entryPrice: number; shares: number; stopLoss?: number }[];
+  holdingPrices: Record<string, number>;
+  totalCapital: number | null;
+}) {
+  // 沒持股 / 無資產資料 → 不顯示
+  if (holdings.length === 0 || !totalCapital || totalCapital <= 0) return null;
+
+  // 計算集中度（市值）+ 累計風險敞口（每檔 (close - stopLoss) × shares）
+  let maxConcentrationPct = 0;
+  let maxConcentrationName = '';
+  let totalRiskAmount = 0;
+
+  for (const h of holdings) {
+    const close = holdingPrices[h.symbol];
+    if (!close) continue;
+    const marketValue = close * h.shares;
+    const concentrationPct = (marketValue / totalCapital) * 100;
+    if (concentrationPct > maxConcentrationPct) {
+      maxConcentrationPct = concentrationPct;
+      maxConcentrationName = h.name;
+    }
+    // risk = (close - stopLoss) × shares — 即跌到停損會虧多少
+    if (h.stopLoss && h.stopLoss > 0 && close > h.stopLoss) {
+      totalRiskAmount += (close - h.stopLoss) * h.shares;
+    }
+  }
+  const totalRiskPct = (totalRiskAmount / totalCapital) * 100;
+
+  // 警示等級
+  const concentrationDanger = maxConcentrationPct > 50;
+  const concentrationWarn = maxConcentrationPct > 30 && !concentrationDanger;
+  const riskDanger = totalRiskPct > 6;   // 朱書建議單筆 1-2%、累計 ≤6%
+  const riskWarn = totalRiskPct > 3 && !riskDanger;
+
+  const anyAlert = concentrationDanger || concentrationWarn || riskDanger || riskWarn;
+  if (!anyAlert) return null;  // 都正常時不顯示、不浪費版面
+
+  const boxCls = (concentrationDanger || riskDanger)
+    ? 'border-rose-700/60 bg-rose-950/20'
+    : 'border-amber-700/50 bg-amber-950/20';
+
+  return (
+    <div className={`border rounded p-2.5 text-xs space-y-1 ${boxCls}`}>
+      <div className="font-bold text-rose-300 flex items-center gap-1.5">
+        <span>⚠</span>
+        <span>風險警示（朱書建議單檔 ≤ 50%、累計風險 ≤ 6% 總資金）</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 text-[11px]">
+        <div>
+          單檔最大：<span className="font-mono">{maxConcentrationName}</span>
+          <span className={`ml-1 font-bold ${concentrationDanger ? 'text-rose-300' : concentrationWarn ? 'text-amber-300' : 'text-slate-300'}`}>
+            {maxConcentrationPct.toFixed(1)}%
+          </span>
+          {concentrationDanger && <span className="text-rose-400 ml-1">⚠ 過度集中</span>}
+          {concentrationWarn && <span className="text-amber-400 ml-1">注意</span>}
+        </div>
+        <div>
+          累計風險：
+          <span className={`ml-1 font-bold ${riskDanger ? 'text-rose-300' : riskWarn ? 'text-amber-300' : 'text-slate-300'}`}>
+            {totalRiskPct.toFixed(2)}% 總資金
+          </span>
+          {riskDanger && <span className="text-rose-400 ml-1">🚨 超過書本 6% 上限</span>}
+          {riskWarn && <span className="text-amber-400 ml-1">接近上限</span>}
+        </div>
+      </div>
+    </div>
+  );
 }

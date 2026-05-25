@@ -5,8 +5,8 @@ import { usePathname } from 'next/navigation';
 import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun,
-  Star, Briefcase, Menu, TrendingUp,
-  Activity, Settings, FileText, Sunrise, Calculator, LineChart, Radio, BookOpen, ShieldAlert,
+  Briefcase, Menu,
+  Activity, Settings, FileText,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
@@ -65,41 +65,14 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Secondary Nav — desktop icon-only + settings dropdown */}
+          {/* Secondary Nav — desktop icon-only
+              整合進首頁原則：所有「日常看股」功能在首頁 TodayBriefing + DecisionPanel
+              nav 只留「編輯持倉」和「系統健康」兩個必要管理入口
+              其餘舊頁路由保留、可手打 URL (today/growth/risk/sizer/watchlist/journal/realtime/etf) */}
           <nav aria-label="輔助導覽" className="hidden md:flex items-center gap-0.5">
-            {/* Primary tools */}
             {([
-              { href: '/today',     label: '今日決策',  icon: Sunrise },
-              { href: '/growth',    label: '進度',     icon: LineChart },
-              { href: '/risk',      label: '風險面板',  icon: ShieldAlert },
-              { href: '/sizer',     label: '部位試算',  icon: Calculator },
-              { href: '/watchlist', label: '自選股',   icon: Star },
               { href: '/portfolio', label: '持倉',     icon: Briefcase },
-              { href: '/journal',   label: '交易日誌',  icon: BookOpen },
-              { href: '/realtime',  label: '實盤警示',  icon: Radio },
-              { href: '/etf',       label: 'ETF追蹤', icon: TrendingUp },
-            ] as const).map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                title={label}
-                className={cn(
-                  'p-2 rounded-md transition-colors',
-                  isActive(href)
-                    ? 'text-sky-400 bg-sky-500/10'
-                    : 'text-muted-foreground hover:text-foreground/80 hover:bg-secondary',
-                )}
-              >
-                <Icon className="w-4 h-4" />
-              </Link>
-            ))}
-
-            {/* Divider */}
-            <span className="w-px h-5 bg-border mx-1" />
-
-            {/* Analysis tools — YouTube/候選池/多代理 已整合進首頁 tab，從 nav 拿掉避免重複 */}
-            {([
-              { href: '/health',       label: '資料健康',         icon: Activity },
+              { href: '/health',    label: '系統健康',  icon: Activity },
             ] as const).map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
@@ -147,22 +120,13 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
                   </SheetTitle>
                 </SheetHeader>
                 <nav aria-label="行動版導覽" className="flex flex-col gap-4 mt-4 px-2">
-                  {/* Mobile: grouped nav */}
+                  {/* Mobile: 跟桌面同步、只留必要管理入口（其餘已整合進首頁）*/}
                   {([
                     {
-                      title: '主要工具',
+                      title: '管理',
                       items: [
-                        { href: '/watchlist', label: '⭐ 自選股',   icon: Star },
-                        { href: '/portfolio', label: '💼 持倉',     icon: Briefcase },
-                        { href: '/realtime',  label: '📡 實盤警示', icon: Radio },
-                        { href: '/etf',       label: '📈 ETF 追蹤', icon: TrendingUp },
-                      ],
-                    },
-                    // 分析項目（YouTube/候選池/多代理）已整合進首頁右側 tab，從 settings menu 拿掉
-                    {
-                      title: '系統',
-                      items: [
-                        { href: '/health',     label: '💚 資料健康',   icon: Activity },
+                        { href: '/portfolio',  label: '💼 編輯持倉',  icon: Briefcase },
+                        { href: '/health',     label: '💚 系統健康',  icon: Activity },
                         { href: '/settings',   label: '⚙️ 設定',       icon: Settings },
                         { href: '/disclaimer', label: '📄 免責聲明',   icon: FileText },
                       ],

@@ -15,6 +15,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { decisionPathZh } from '@/lib/i18n/decisionPathLabel';
 import { replaceAgentTerms } from '@/lib/i18n/agentTermsLabel';
+import { computeFacetVerdicts, type FacetVerdictsResult } from '@/lib/decision/computeFacetVerdicts';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -112,16 +113,17 @@ export function DecisionPanel({ symbol, date }: Props) {
 
   if (!open) return <section className="border border-slate-700/50 rounded-lg overflow-hidden">{header}</section>;
 
-  // API 回 ok=false 或無 multi-agent 結果 — 5 分K + 投信動向仍顯示（不依賴 multi-agent）
+  // API 回 ok=false 或無 multi-agent 結果 — 改顯示「📊 規則式推估」4 verdict + 投信動向
   if (data && !data.ok) {
     return (
       <section className="border border-slate-700/50 rounded-lg overflow-hidden">
         {header}
         <div className="p-3 space-y-3 bg-slate-900/40">
           <HoldingBadge symbol={symbol} />
-          <div className="text-xs text-slate-400 border border-slate-700/40 rounded p-2 bg-slate-900/40">
-            ⏳ 尚未跑 multi-agent 4 phase 決策（缺 verdict / 進出場 / 多空辯論）。
-            執行 <code className="mx-1 px-1.5 py-0.5 bg-slate-800 rounded text-cyan-300">/multi-agent-decide {symbol}</code> 取得完整建議。
+          <FallbackFacetVerdicts symbol={symbol} date={date} />
+          <div className="text-[11px] text-slate-500 border border-slate-700/30 rounded p-2 bg-slate-900/30 leading-relaxed">
+            💡 以上 4 面向是<strong className="text-amber-300/90"> 規則推估</strong>（六條件 / YouTube 共識 / 籌碼分數 / EPS+營收 YoY）。
+            想看完整多空辯論 + 進出場參數，執行 <code className="mx-1 px-1.5 py-0.5 bg-slate-800 rounded text-cyan-300">/multi-agent-decide {symbol}</code>。
           </div>
           <TrustMomentumPanel symbol={symbol} date={date} />
         </div>
@@ -351,6 +353,87 @@ function KV({ k, v, cls }: { k: string; v: string; cls?: string }) {
     <div>
       <div className="opacity-70 text-[10px]">{k}</div>
       <div className={`font-mono ${cls ?? ''}`}>{v}</div>
+    </div>
+  );
+}
+
+// 規則式 4 verdict fallback — multi-agent 未跑時、從 pool/chip/fund API 推算
+function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string }) {
+  const [verdicts, setVerdicts] = useState<FacetVerdictsResult | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!symbol) return;
+    const raw = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const market = /\.(SS|SZ)$/i.test(symbol) ? 'CN' : 'TW';
+    const useDate = date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    setLoading(true);
+    let cancelled = false;
+    Promise.allSettled([
+      fetch(`/api/agents/pool?market=${market}&date=${useDate}&minSourceCount=1&limit=500`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/chip?symbol=${encodeURIComponent(symbol)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/fundamentals/${encodeURIComponent(raw)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([poolR, chipR, fundR]) => {
+      if (cancelled) return;
+      const pool = poolR.status === 'fulfilled' ? poolR.value : null;
+      const chip = chipR.status === 'fulfilled' ? chipR.value : null;
+      const fund = fundR.status === 'fulfilled' ? fundR.value : null;
+      const candidate = pool?.candidates?.find((c: { symbol: string }) =>
+        c.symbol === symbol || c.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === raw,
+      );
+      const result = computeFacetVerdicts({
+        sixConditionsScore: candidate?.sources?.technical?.sixConditionsScore,
+        prohibitionHit: candidate?.sources?.technical?.prohibitionHit,
+        youtubeMentionCount: candidate?.strengthSignals?.youtubeMentionCount,
+        youtubeInHighConsensus: candidate?.sources?.youtube?.inHighConsensus,
+        chipScore: chip?.chipScore ?? candidate?.strengthSignals?.chipScore,
+        epsYoY: fund?.epsYoY ?? candidate?.sources?.fundamental?.epsYoY,
+        revenueYoY: fund?.revenueYoY ?? candidate?.sources?.fundamental?.revenueYoY,
+      });
+      setVerdicts(result);
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [symbol, date]);
+
+  if (loading && !verdicts) {
+    return (
+      <div className="text-xs text-slate-500 animate-pulse text-center py-3">
+        📊 規則推估 4 面向 verdict 載入中…
+      </div>
+    );
+  }
+  if (!verdicts) return null;
+
+  // 規則推估卡用「半透明 + 虛線」風格、跟 multi-agent 跑過的鮮明卡視覺區隔
+  const cards: Array<{ title: string; subtitle: string; v: keyof Omit<FacetVerdictsResult, 'hints'>; hint: string }> = [
+    { title: '技術', subtitle: '含朱書 6 條件', v: 'technical', hint: verdicts.hints.technical },
+    { title: '消息', subtitle: '含 YouTube 共識', v: 'news', hint: verdicts.hints.news },
+    { title: '籌碼', subtitle: '外資/投信/大戶', v: 'chip', hint: verdicts.hints.chip },
+    { title: '基本', subtitle: 'EPS/營收/PE', v: 'fundamental', hint: verdicts.hints.fundamental },
+  ];
+
+  return (
+    <div>
+      <div className="text-[11px] text-amber-300/90 mb-1.5 font-semibold">
+        📊 規則推估 4 面向（多代理未跑、以下用既有資料推算）
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {cards.map(c => {
+          const cfg = VERDICT_CFG[verdicts[c.v]];
+          return (
+            <div key={c.v} className={`border border-dashed rounded p-2 ${cfg.cls} opacity-90`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs opacity-80">
+                  {c.title}
+                  <span className="text-[9px] opacity-60 ml-1">{c.subtitle}</span>
+                </span>
+                <span className="text-xs font-bold">{cfg.label}</span>
+              </div>
+              <div className="text-[11px] opacity-90 leading-snug">{c.hint}</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
