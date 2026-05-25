@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { getTWChineseName, getCNChineseName } from '@/lib/datasource/TWSENames';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
-import { getFugleIntradayCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
+import { getFugleIntradayCandles, getFugleHistoricalMinuteCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
@@ -322,13 +322,23 @@ export async function GET(req: NextRequest) {
     let candles: { date: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
     let ticker = candidates[0];
 
-    // 台股分鐘 K 線：Fugle intraday（今日盤中資料）
+    // 台股分鐘 K 線：Fugle historical（多日歷史）+ intraday（今日盤中）合併
+    // historical 提供 7+ 天 5m K，intraday 提供 30 秒延遲的今日最新 bar
     if (isTW && isMinuteInterval && isFugleAvailable()) {
       try {
-        const intradayCandles = await getFugleIntradayCandles(pureCode, interval);
-        if (intradayCandles.length > 0) {
+        const [historicalRaw, intradayCandles] = await Promise.all([
+          getFugleHistoricalMinuteCandles(pureCode, interval, period).catch(() => []),
+          getFugleIntradayCandles(pureCode, interval).catch(() => []),
+        ]);
+        // historical 是新→舊（descending），reverse 成 ascending
+        const historical = [...historicalRaw].reverse();
+        // 取台北今日字串、historical 過濾掉今日（避免和 intraday 重複，intraday 是即時的）
+        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+        const historicalPrior = historical.filter(c => c.date.slice(0, 10) < todayStr);
+        const merged = [...historicalPrior, ...intradayCandles];
+        if (merged.length > 0) {
           ticker = candidates[0];
-          candles = intradayCandles;
+          candles = merged;
         }
       } catch {
         // Fugle 例外，繼續往下
