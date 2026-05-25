@@ -122,7 +122,13 @@ export function DecisionPanel({ symbol, date }: Props) {
   if (!open) return <section className="border border-slate-700/50 rounded-lg overflow-hidden">{header}</section>;
 
   // API 回 ok=false 或無 multi-agent 結果 — 改顯示「📊 規則式推估」4 verdict + 投信動向
-  if (data && !data.ok) {
+  // API 行為：即使 multi-agent 沒跑、API 也回 ok=true 但所有欄位 null。
+  //   - data.ok=false → 真的失敗
+  //   - data.ok=true 且 4 個 verdict + decision 全 null → multi-agent 未跑（要 fallback）
+  // 兩者都走 FallbackFacetVerdicts 顯示規則推估，避免顯示 4 個「⏳ 未跑」空白卡。
+  const allVerdictsNull = data && data.ok
+    && !data.technical && !data.news && !data.chip && !data.fundamental && !data.decision;
+  if ((data && !data.ok) || allVerdictsNull) {
     return (
       <section className="border border-slate-700/50 rounded-lg overflow-hidden">
         {header}
