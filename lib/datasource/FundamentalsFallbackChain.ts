@@ -133,7 +133,9 @@ async function tryTWSE(stockId: string): Promise<{
       fields?: string[];
       data?: Array<Array<string | number>>;
     };
-    if (json.stat !== 'OK' || !Array.isArray(json.data) || json.data.length === 0) {
+    // TWSE 即使 stat 為 warning（例如「查詢日期超過可查詢區間」），data 仍會回最近可用歷史
+    // 只有 data 真正空才視為失敗
+    if (!Array.isArray(json.data) || json.data.length === 0) {
       throw new Error(`TWSE stat=${json.stat}, rows=${json.data?.length ?? 0}`);
     }
     // 取最新一筆 [日期, 殖利率%, 股利年度, 本益比, 股價淨值比, 財報年/季]

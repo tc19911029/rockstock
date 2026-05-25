@@ -392,7 +392,15 @@ export async function getFundamentals(stockId: string): Promise<FundamentalsData
     revenueYoY,
   };
 
-  cacheSet(cacheKey, result, TTL.FUNDAMENTALS);
+  // 只在拿到任一可用欄位時才 cache — 避免 FinMind 限流/未授權時 cache 卡 stale 空白
+  const hasUseful =
+    result.eps != null ||
+    result.per != null ||
+    result.pbr != null ||
+    result.revenueLatest != null;
+  if (hasUseful) {
+    cacheSet(cacheKey, result, TTL.FUNDAMENTALS);
+  }
   return result;
 }
 
