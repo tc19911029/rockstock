@@ -26,6 +26,14 @@ interface ChipInfo {
   lendingNet: number;
   largeHolderPct: number;
   largeHolderChange: number;
+  // 集保大戶分層（2026-05-25 加：依股價分層 — 千金股看 100 張、平價看 1000 張）
+  holder100Pct?: number;
+  holder200Pct?: number;
+  holder400Pct?: number;
+  holder400To600Pct?: number;
+  holder600To800Pct?: number;
+  holder800To1000Pct?: number;
+  structureBuilding?: boolean;
   chipScore: number;
   chipGrade: string;
   chipSignal: string;
@@ -321,6 +329,45 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           />
         ))}
       </div>
+
+      {/* ── 集保大戶分層（依股價選 tier；千金股看 100 張、平價看 1000 張）── */}
+      {(data.holder100Pct != null || data.holder400Pct != null) && (
+        <div className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground font-medium">集保大戶分層</span>
+            {data.structureBuilding && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 border border-red-700/50">
+                ✨ 主力卡位
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-1 text-[9px] font-mono">
+            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">100張↑</div>
+              <div className="text-foreground/90 font-bold">{data.holder100Pct?.toFixed(1) ?? '—'}%</div>
+            </div>
+            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">200張↑</div>
+              <div className="text-foreground/90 font-bold">{data.holder200Pct?.toFixed(1) ?? '—'}%</div>
+            </div>
+            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">400張↑</div>
+              <div className="text-foreground/90 font-bold">{data.holder400Pct?.toFixed(1) ?? '—'}%</div>
+            </div>
+            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">1000張↑</div>
+              <div className="text-foreground/90 font-bold">{data.largeHolderPct.toFixed(1)}%</div>
+            </div>
+          </div>
+          {data.structureBuilding && (
+            <div className="grid grid-cols-3 gap-1 text-[8px] font-mono text-muted-foreground/80">
+              <div className="text-center">400-600: {data.holder400To600Pct?.toFixed(2)}%</div>
+              <div className="text-center">600-800: {data.holder600To800Pct?.toFixed(2)}%</div>
+              <div className="text-center">800-1000: {data.holder800To1000Pct?.toFixed(2)}%</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Summary ── */}
       {data.chipDetail && data.chipDetail !== '中性' && (

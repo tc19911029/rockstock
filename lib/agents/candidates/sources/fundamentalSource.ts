@@ -143,12 +143,20 @@ function computeBookScore(f: FundamentalsLite): {
 
   // ── 估值面 ────────────────────────────────────────────
   // PER ≤ 0 = 公司虧損或資料異常（EPS≤0 算不出 PER），不視為「便宜」
+  //
+  // 強成長股 PER 警戒放寬（業界實務：高成長股本來 PER 就高、市場 priced in 成長）
+  // 判定：EPS YoY > 30% 或 月營收 YoY > 30% → 「偏高」門檻從 50 → 80
+  // 但「地雷」門檻仍是 PER > 100（已在 fundamentalSource extract 直接淘汰）
+  const strongGrowth =
+    (f.epsYoY != null && f.epsYoY > 30) ||
+    (f.revenueYoY != null && f.revenueYoY > 30);
+  const expensiveThreshold = strongGrowth ? 80 : 50;
   if (f.per != null && f.per > 0) {
-    if (f.per <= 10)        { score += 20; signals.push('per_cheap'); reasons.push(`PER ${f.per} 便宜`); }
-    else if (f.per <= 20)   { score += 10; reasons.push(`PER ${f.per} 合理偏低`); }
-    else if (f.per <= 30)   { /* 0 */ reasons.push(`PER ${f.per} 合理`); }
-    else if (f.per <= 50)   { score -= 5; reasons.push(`PER ${f.per} 偏高`); }
-    else                    { score -= 15; signals.push('per_expensive'); reasons.push(`PER ${f.per} 昂貴`); }
+    if (f.per <= 10)                       { score += 20; signals.push('per_cheap'); reasons.push(`PER ${f.per} 便宜`); }
+    else if (f.per <= 20)                  { score += 10; reasons.push(`PER ${f.per} 合理偏低`); }
+    else if (f.per <= 30)                  { /* 0 */ reasons.push(`PER ${f.per} 合理`); }
+    else if (f.per <= expensiveThreshold)  { score -= 5; reasons.push(`PER ${f.per} 偏高${strongGrowth ? '（強成長放寬）' : ''}`); }
+    else                                   { score -= 15; signals.push('per_expensive'); reasons.push(`PER ${f.per} 昂貴`); }
   }
   // PBR ≤ 0 同樣是資料異常，不視為「破淨」
   if (f.pbr != null && f.pbr > 0) {
