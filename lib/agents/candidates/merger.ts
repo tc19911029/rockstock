@@ -127,12 +127,17 @@ function computeStrengthSignals(c: Candidate): Candidate['strengthSignals'] {
 }
 
 /**
- * 把 fundamental signals 換成 0-100 概略分數（同 sourceCount 內排序用）
+ * 讀 attribution.fundamentalScore（書本 7 維打分，2026-05-25 重寫）
  *
- * 不影響 verdict — 只供排序，verdict 由 Fundamental Agent 寫
+ * 舊版這裡硬算 revenueYoY + epsYoY + grossMargin，但無法反映書本「排除地雷」精神。
+ * 新版打分邏輯統一在 fundamentalSource.computeBookScore 內。
  */
 function computeFundamentalScore(fund: Candidate['sources']['fundamental']): number {
   if (!fund) return 0;
+  // 向下相容：attribution.fundamentalScore 存在則直接用，沒有 fallback 到舊算法
+  if (typeof (fund as { fundamentalScore?: number }).fundamentalScore === 'number') {
+    return (fund as { fundamentalScore: number }).fundamentalScore;
+  }
   let s = 0;
   if (fund.revenueYoY != null && fund.revenueYoY > 0) s += Math.min(40, fund.revenueYoY);
   if (fund.epsYoY != null && fund.epsYoY > 0)         s += Math.min(30, fund.epsYoY);

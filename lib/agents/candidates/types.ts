@@ -54,7 +54,7 @@ export interface ChipSourceAttribution {
   reasons: string[];
 }
 
-/** Fundamental Source 帶來的進入理由 */
+/** Fundamental Source 帶來的進入理由（書本 9 維打分）*/
 export interface FundamentalSourceAttribution {
   /** 月營收 YoY % */
   revenueYoY: number | null;
@@ -62,7 +62,19 @@ export interface FundamentalSourceAttribution {
   epsYoY: number | null;
   /** 毛利率 % */
   grossMargin: number | null;
-  /** 觸發的條件 ID（如 'revenue_yoy_high', 'eps_beats'）*/
+  /** 淨利率 % */
+  netMargin: number | null;
+  /** 本益比（PER）*/
+  per: number | null;
+  /** 股價淨值比（PBR）*/
+  pbr: number | null;
+  /** 殖利率 % */
+  dividendYield: number | null;
+  /** 最新基本每股盈餘（元）*/
+  eps: number | null;
+  /** 書本 7 維打分 0-100（merger.fundamentalScore 直接讀這個欄位）*/
+  fundamentalScore: number;
+  /** 觸發的條件 ID（如 'value_undervalued', 'growth_strong', 'landmine'）*/
   signals: string[];
   reasons: string[];
 }

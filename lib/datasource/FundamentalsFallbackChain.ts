@@ -7,15 +7,17 @@
  *   1. FinMind（getFundamentals）— 完整資料：EPS / EPS YoY / 毛利率 / 月營收 / PER / PBR / 殖利率
  *   2. TWSE BWIBBU 公開 API — 只有估值面：PER / PBR / 殖利率（無 EPS / 營收）
  *   3. TPEx 同名 API（上櫃股）
- *   4. 全 null（最後保底）
+ *   4. TWSE OpenAPI t187ap14_L / t187ap05_L 補位 — EPS / 月營收 YoY / 淨利率
+ *   5. 全 null（最後保底）
  *
  * 每源 timeout 5 秒，失敗就立刻換下一個。
  * 每次回傳會標明哪源命中（給 debug + 監控用）。
  */
 
 import { getFundamentals, FundamentalsData } from './FinMindClient';
+import { getQuarterlyAny, getMonthlyAny } from './TwseOpenApiProvider';
 
-export type FundamentalsSource = 'finmind' | 'twse' | 'tpex' | 'none';
+export type FundamentalsSource = 'finmind' | 'twse' | 'tpex' | 'twse_openapi' | 'none';
 
 export interface FundamentalsWithSource extends FundamentalsData {
   /** 哪個源命中 */
@@ -41,6 +43,7 @@ export async function getFundamentalsWithFallback(
   const bare = stockId.replace(/\.(TW|TWO)$/i, '');
 
   // ── 1. FinMind（主源）──
+  // contract：FinMind 成功 → 不換源、不打外網（含 OpenAPI 補位）
   const finmindRes = await tryFinMind(bare);
   attempts.push(finmindRes.attempt);
   if (finmindRes.ok && hasUsefulData(finmindRes.data!)) {
@@ -51,14 +54,14 @@ export async function getFundamentalsWithFallback(
     };
   }
 
-  // ── 2. TWSE BWIBBU（PER / PBR / 殖利率）──
+  // ── 2. TWSE BWIBBU（PER / PBR / 殖利率）+ TWSE OpenAPI 補 EPS / 月營收 YoY ──
   const twseRes = await tryTWSE(bare);
   attempts.push(twseRes.attempt);
   if (twseRes.ok && hasUsefulData(twseRes.data!)) {
-    // 合併 FinMind 的部分資料（如果有的話）+ TWSE PER/PBR
     const merged = mergeFundamentals(finmindRes.data, twseRes.data!);
+    const openApi = await tryTwseOpenApi(bare);
     return {
-      ...merged,
+      ...mergeFundamentals(merged, openApi),
       sourceUsed: 'twse',
       sourceAttempts: attempts,
     };
@@ -69,18 +72,54 @@ export async function getFundamentalsWithFallback(
   attempts.push(tpexRes.attempt);
   if (tpexRes.ok && hasUsefulData(tpexRes.data!)) {
     const merged = mergeFundamentals(finmindRes.data, tpexRes.data!);
+    // 嘗試從 TWSE OpenAPI 再補 EPS / 月營收 YoY / 淨利率
+    const openApiData = await tryTwseOpenApi(bare);
     return {
-      ...merged,
+      ...mergeFundamentals(merged, openApiData),
       sourceUsed: 'tpex',
       sourceAttempts: attempts,
     };
   }
 
-  // ── 4. 最後保底：返回最完整可得（可能全 null）──
+  // ── 4. TWSE OpenAPI（補 EPS / 月營收 YoY / 淨利率，純 JSON 免處理）──
+  const openApiData = await tryTwseOpenApi(bare);
+  attempts.push({
+    source: 'twse_openapi',
+    ok: hasUsefulData(openApiData),
+    latencyMs: 0,
+  });
+  if (hasUsefulData(openApiData)) {
+    return {
+      ...mergeFundamentals(finmindRes.data, openApiData),
+      sourceUsed: 'twse_openapi',
+      sourceAttempts: attempts,
+    };
+  }
+
+  // ── 5. 最後保底：返回最完整可得（可能全 null）──
   return {
     ...(finmindRes.data ?? emptyFundamentals()),
     sourceUsed: 'none',
     sourceAttempts: attempts,
+  };
+}
+
+/**
+ * TWSE OpenAPI 補位：抓 t187ap14_L 季財報 + t187ap05_L 月營收，
+ * 自動處理上市/上櫃（TPEx mopsfin_*_O）
+ */
+async function tryTwseOpenApi(stockId: string): Promise<FundamentalsData> {
+  const [q, m] = await Promise.all([
+    getQuarterlyAny(stockId),
+    getMonthlyAny(stockId),
+  ]);
+  return {
+    ...emptyFundamentals(),
+    eps: q?.eps ?? null,
+    netMargin: q?.netMargin ?? null,
+    revenueLatest: m?.revenue ?? null,
+    revenueYoY: m?.revenueYoY ?? null,
+    revenueMoM: m?.revenueMoM ?? null,
   };
 }
 
