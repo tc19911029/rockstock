@@ -16,13 +16,25 @@ import { listRecentAlerts, type AlertRecord } from '@/lib/realtime/alertDispatch
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const alerts = await listRecentAlerts(50);
+  const alerts = await listRecentAlerts(200);
   // listRecentAlerts 內部已按時間反序（newest first）讀今日 jsonl
   const sorted = [...alerts].sort((a, b) => b.firedAt - a.firedAt);
 
+  // 去重 by symbol+rule 取最新（dispatch 端的 debounceMap 在 server 重啟時會清空，
+  // 每次重啟後同一個 rule 會再寫一筆 → jsonl 累積成多筆。前端只關心「最新一筆」，
+  // 重複的歷史就過濾掉）
+  const seen = new Set<string>();
+  const dedupedAlerts: AlertRecord[] = [];
+  for (const a of sorted) {
+    const key = `${a.symbol}|${a.rule}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dedupedAlerts.push(a);
+  }
+
   // group by symbol 取最新
   const bySymbol: Record<string, AlertRecord> = {};
-  for (const alert of sorted) {
+  for (const alert of dedupedAlerts) {
     if (!bySymbol[alert.symbol]) {
       bySymbol[alert.symbol] = alert;
     }
@@ -32,8 +44,8 @@ export async function GET() {
 
   return apiOk({
     date: today,
-    count: sorted.length,
-    alerts: sorted,
+    count: dedupedAlerts.length,
+    alerts: dedupedAlerts,
     bySymbol,
   });
 }
