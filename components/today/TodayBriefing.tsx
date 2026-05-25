@@ -327,7 +327,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
                 {observeRuns.slice(0, 4).map(r => {
                   const isBuy = r.decision?.action === 'buy';
                   return (
-                    <Link key={r.symbol} href={`/?load=${encodeURIComponent(r.symbol)}&date=${today}&tab=decision`}
+                    <Link key={r.symbol} href={`/?load=${encodeURIComponent(r.symbol)}&date=${today}&tab=agent`}
                       className={`block text-xs hover:bg-slate-800 rounded px-1.5 py-1 transition ${isBuy ? 'hover:bg-emerald-900/30' : ''}`}>
                       <span className={`font-medium ${isBuy ? 'text-emerald-300' : 'text-amber-200'}`}>{r.name ?? r.symbol}</span>
                       {isBuy && (
@@ -353,7 +353,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
               // 最末 fallback：candidates pool 高分股
               <div className="space-y-1.5">
                 {pool.slice(0, 4).map(c => (
-                  <Link key={c.symbol} href={`/?load=${encodeURIComponent(c.symbol)}&date=${today}&tab=decision`}
+                  <Link key={c.symbol} href={`/?load=${encodeURIComponent(c.symbol)}&date=${today}&tab=pool`}
                     className="flex items-center justify-between gap-1.5 hover:bg-slate-800 rounded px-1.5 py-1 transition text-xs">
                     <span className="text-amber-200 truncate">{c.name}</span>
                     <span className="text-amber-400 font-mono text-[10px]">{c.sourceCount} 面</span>
@@ -381,7 +381,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
                     ? REVIEW_LABEL[a.action as ReviewAction] ?? RULE_ACTION_LABEL.hold_observe
                     : RULE_ACTION_LABEL[a.action as HoldingActionRule] ?? RULE_ACTION_LABEL.no_data;
                   return (
-                    <Link key={a.symbol} href={`/?load=${encodeURIComponent(a.symbol)}&tab=decision`}
+                    <Link key={a.symbol} href={`/?load=${encodeURIComponent(a.symbol)}&tab=agent`}
                       className="flex items-center justify-between gap-1.5 hover:bg-slate-800 rounded px-1.5 py-1 transition text-xs"
                       title={a.hint}>
                       <span className="text-slate-200 truncate flex items-center gap-1">
@@ -408,7 +408,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
             ) : (
               <div className="space-y-1.5">
                 {pool.slice(0, 4).map(c => (
-                  <Link key={c.symbol} href={`/?load=${encodeURIComponent(c.symbol)}&tab=decision`}
+                  <Link key={c.symbol} href={`/?load=${encodeURIComponent(c.symbol)}&tab=pool`}
                     className="flex items-center justify-between gap-1.5 hover:bg-slate-800 rounded px-1.5 py-1 transition text-xs">
                     <span className="text-amber-200 truncate">{c.name}</span>
                     <span className="text-amber-400 font-mono text-[10px]">{c.sourceCount} 面</span>
@@ -430,7 +430,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
             ) : (
               <div className="space-y-1.5">
                 {youtube.slice(0, 4).map(y => (
-                  <Link key={y.code} href={`/?load=${encodeURIComponent(y.code)}.TW&tab=decision`}
+                  <Link key={y.code} href={`/?load=${encodeURIComponent(y.code)}.TW&tab=youtube`}
                     className="flex items-center justify-between gap-1.5 hover:bg-slate-800 rounded px-1.5 py-1 transition text-xs">
                     <span className="text-purple-200 truncate">{y.name}</span>
                     <div className="flex items-center gap-1 text-[10px]">
