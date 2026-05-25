@@ -72,7 +72,14 @@ export function DecisionPanel({ symbol, date }: Props) {
 
   useEffect(() => {
     if (!symbol) return;
-    const url = `/api/agents/decisions/${encodeURIComponent(symbol)}${date ? `?date=${encodeURIComponent(date)}` : ''}`;
+    // DEMO / 大盤指數不打 API：DEMO 是 store 預設 placeholder（用戶還沒載股）；
+    // 大盤指數本來就不會跑多代理。避免每次首頁載入就送一堆 404/400。
+    if (symbol === 'DEMO' || /^\^|^000001\.SS$/.test(symbol)) return;
+    // /api/agents/decisions/[symbol] 要求 date param（zod 不接受 undefined）
+    // 沒帶 date 時用台北今日，避免每次載入跳 400 + console 噪音
+    const effectiveDate = date
+      ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    const url = `/api/agents/decisions/${encodeURIComponent(symbol)}?date=${encodeURIComponent(effectiveDate)}`;
     setLoading(true);
     fetch(url)
       .then(r => r.json())
@@ -255,6 +262,8 @@ function HoldingBadge({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     if (!symbol) return;
+    // DEMO 不打 chip/quote API（store 預設 placeholder，避免 404 spam）
+    if (symbol === 'DEMO' || /^\^|^000001\.SS$/.test(symbol)) return;
     let cancelled = false;
     const raw = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     Promise.all([
@@ -366,6 +375,7 @@ function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string
 
   useEffect(() => {
     if (!symbol) return;
+    if (symbol === 'DEMO' || /^\^|^000001\.SS$/.test(symbol)) return;
     const raw = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const market = /\.(SS|SZ)$/i.test(symbol) ? 'CN' : 'TW';
     const useDate = date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
