@@ -19,13 +19,14 @@ import type {
   YouTubeVideo,
 } from '@/lib/youtube/types';
 
-type LightLevel = 'green' | 'yellow' | 'red';
+type LightLevel = 'green' | 'yellow' | 'red' | 'gray';
+type FetchStatus = 'fetched' | 'no_new' | 'failed' | 'pending' | 'stale';
 type TranscriptStatus = 'available' | 'low_quality' | 'unavailable' | 'failed' | 'pending';
 
 interface HealthResponse {
   ok: boolean;
   snapshot: YouTubeHealthSnapshot | null;
-  lights?: Array<{ source_id: string; light: LightLevel }>;
+  lights?: Array<{ source_id: string; light: LightLevel; status: FetchStatus; statusLabel: string }>;
   overall?: LightLevel;
   message?: string;
 }
@@ -125,29 +126,36 @@ export function YoutubeTab() {
       bg: 'bg-green-950/60 border-green-700',
       text: 'text-green-300',
       emoji: '✓',
-      label: '抓取正常',
-      tip: '所有來源近期都有掃到影片，無錯誤。',
+      label: '已抓到當日新節目',
+      tip: '至少一個來源今天有抓到並寫入新節目影片(analyzable > 0)。',
     },
     yellow: {
       bg: 'bg-yellow-950/60 border-yellow-700',
       text: 'text-yellow-300',
       emoji: '!',
-      label: '部分來源異常',
-      tip: '有來源今日未抓到影片或連續空檔，可能漏抓 — 請看下方卡片。',
+      label: '部分來源連續空日警告',
+      tip: 'IRREGULAR 來源連續多日無新節目,可能漏抓 — 請看下方卡片。',
     },
     red: {
       bg: 'bg-red-950/60 border-red-700',
       text: 'text-red-300',
       emoji: '✗',
       label: '需要處理',
-      tip: '至少一個來源掃描失敗或長期空檔，可能 yt-dlp 失效或頻道改名。',
+      tip: 'DAILY 來源連續 4 日無新節目 或 抓取失敗 — 可能 yt-dlp 失效或頻道改名。',
+    },
+    gray: {
+      bg: 'bg-slate-800/60 border-slate-600',
+      text: 'text-slate-400',
+      emoji: '—',
+      label: '今日尚未有新節目',
+      tip: '掃了 playlist 但今日沒新節目(IRREGULAR 節目常見)或排程還沒跑。屬於正常,非錯誤。',
     },
   };
   const cfg = lightConfig[overall];
 
   const lightMap = useMemo(() => {
-    const m = new Map<string, LightLevel>();
-    health?.lights?.forEach(l => m.set(l.source_id, l.light));
+    const m = new Map<string, { light: LightLevel; status: FetchStatus; statusLabel: string }>();
+    health?.lights?.forEach(l => m.set(l.source_id, { light: l.light, status: l.status, statusLabel: l.statusLabel }));
     return m;
   }, [health]);
 
@@ -194,13 +202,18 @@ export function YoutubeTab() {
       {/* 來源卡（archived 來源不顯示） */}
       {health?.snapshot && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {health.snapshot.sources.filter(s => s.active !== false).map(s => (
-            <SourceCard
-              key={s.source_id}
-              health={s}
-              light={lightMap.get(s.source_id) ?? 'yellow'}
-            />
-          ))}
+          {health.snapshot.sources.filter(s => s.active !== false).map(s => {
+            const info = lightMap.get(s.source_id);
+            return (
+              <SourceCard
+                key={s.source_id}
+                health={s}
+                light={info?.light ?? 'gray'}
+                fetchStatus={info?.status ?? 'pending'}
+                fetchStatusLabel={info?.statusLabel ?? '○ 尚未掃描'}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -276,11 +289,24 @@ export function YoutubeTab() {
   );
 }
 
-function SourceCard({ health, light }: { health: YouTubeSourceHealth; light: LightLevel }) {
+function SourceCard({ health, light, fetchStatus, fetchStatusLabel }: {
+  health: YouTubeSourceHealth;
+  light: LightLevel;
+  fetchStatus: FetchStatus;
+  fetchStatusLabel: string;
+}) {
   const dotCls: Record<LightLevel, string> = {
     green: 'bg-green-500',
     yellow: 'bg-yellow-500',
     red: 'bg-red-500',
+    gray: 'bg-slate-500',
+  };
+  const statusTextCls: Record<FetchStatus, string> = {
+    fetched: 'text-green-300',
+    no_new:  'text-slate-400',
+    failed:  'text-red-300',
+    pending: 'text-slate-400',
+    stale:   'text-yellow-300',
   };
 
   return (
@@ -295,10 +321,25 @@ function SourceCard({ health, light }: { health: YouTubeSourceHealth; light: Lig
         </span>
       </div>
 
+      {/* 抓取狀態 — 5 級明確區分:已抓到 / 無新 / 失敗 / 未跑 / 連續空日 */}
+      <div
+        className={`text-xs font-medium ${statusTextCls[fetchStatus]}`}
+        title="2026-05-25 修:狀態以「實際當日 program_date 新節目」為準,playlist 撈到歷史影片不算「抓到」"
+      >
+        {fetchStatusLabel}
+        {fetchStatus === 'fetched' && health.today.analyzable > 0 && (
+          <span className="text-muted-foreground"> · {health.today.analyzable} 支</span>
+        )}
+      </div>
+
       <div className="text-xs space-y-0.5">
         <KV label="最後掃描" value={fmtTime(health.last_scan_at)} />
-        <KV label="最後成功" value={fmtTime(health.last_success_at)} />
-        <KV label="最後抓到影片" value={fmtTime(health.last_video_discovered_at)} />
+        <KV label="最後成功(scan run)" value={fmtTime(health.last_success_at)} />
+        {/* 2026-05-25 修:狀態=no_new 時 stale snapshot 的 last_video_discovered_at 會跟狀態矛盾,藏起來避免誤導 */}
+        <KV
+          label="最後抓到新節目"
+          value={fetchStatus === 'no_new' ? '—' : fmtTime(health.last_video_discovered_at)}
+        />
         <KV
           label="連續空日"
           value={`${health.consecutive_empty_days} 日`}
@@ -314,9 +355,23 @@ function SourceCard({ health, light }: { health: YouTubeSourceHealth; light: Lig
       </div>
 
       <div className="flex items-center gap-2 text-xs border-t border-border pt-2">
-        <Stat label="掃描" value={health.today.scanned} />
-        <Stat label="可分析" value={health.today.analyzable} accent />
-        <Stat label="跳過" value={health.today.skipped} muted />
+        <Stat
+          label="playlist"
+          value={health.today.scanned}
+          tooltip="yt-dlp 從該節目 playlist 抓到的影片總數(含歷史)。playlist 一次最多抓 30 個,其中大部分通常是舊節目。"
+        />
+        <Stat
+          label="今日新節目"
+          value={health.today.analyzable}
+          accent
+          tooltip={`program_date(標題日期)===今日 且通過所有過濾(非 shorts/preview/ad/直播中/太短)的影片數。\n\n例:可分析=0 ≠ 系統漏抓,通常是該節目今天還沒發新影片,或新影片標題沒寫日期且 published_at 是隔日(常見於晚間節目隔天 00:xx 才上架)。`}
+        />
+        <Stat
+          label="非當日"
+          value={health.today.skipped}
+          muted
+          tooltip="非今日節目(歷史)/ shorts / preview / ad / 直播進行中 / 太短。屬正常,不代表抓取失敗。"
+        />
       </div>
     </div>
   );
@@ -331,12 +386,12 @@ function KV({ label, value, warn }: { label: string; value: string; warn?: boole
   );
 }
 
-function Stat({ label, value, accent, muted }: {
-  label: string; value: number; accent?: boolean; muted?: boolean;
+function Stat({ label, value, accent, muted, tooltip }: {
+  label: string; value: number; accent?: boolean; muted?: boolean; tooltip?: string;
 }) {
   const cls = accent ? 'text-foreground font-semibold' : muted ? 'text-muted-foreground' : 'text-foreground';
   return (
-    <div className="flex-1 text-center">
+    <div className="flex-1 text-center" title={tooltip}>
       <div className={`text-base tabular-nums ${cls}`}>{value}</div>
       <div className="text-[10px] text-muted-foreground">{label}</div>
     </div>
@@ -386,6 +441,11 @@ function DataHealthPanel() {
 
   if (!data) {
     return <div className="text-xs text-muted-foreground border-t border-border pt-3">資料健康檢查中…</div>;
+  }
+
+  // /api/youtube/audit 可能回 { ok: false, error } 沒 summary;guard 一下避免炸
+  if (!data.summary || !data.stats) {
+    return <div className="text-xs text-muted-foreground border-t border-border pt-3">資料健康檢查 API 失敗 — 看 console 看 /api/youtube/audit 回什麼</div>;
   }
 
   const totalIssues = data.summary.high + data.summary.med + data.summary.low + data.summary.info;

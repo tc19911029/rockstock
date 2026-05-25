@@ -209,8 +209,11 @@ async function buildHealthSnapshot(
       const log = (recentLogs.get(d) ?? []).find(l => l.source_id === source.source_id);
       if (!log) continue;
       if (lastScanAt == null) lastScanAt = log.finished_at ?? log.started_at;
+      // last_success_at:scan run 完成且無錯誤 — 注意「scan 成功」≠「有抓到新節目」
       if (lastSuccessAt == null && log.error == null) lastSuccessAt = log.finished_at ?? log.started_at;
-      if (lastVideoDiscoveredAt == null && log.scanned_count > 0) {
+      // 2026-05-25 修:last_video_discovered_at 改用 analyzable_count(實際當日 program_date 新節目)
+      // 之前用 scanned_count > 0(playlist 撈到任何影片即算)會讓 user 誤以為「有抓到」但下方影片列表卻沒有
+      if (lastVideoDiscoveredAt == null && log.analyzable_count > 0) {
         lastVideoDiscoveredAt = log.finished_at ?? log.started_at;
       }
       if (lastScanAt && lastSuccessAt && lastVideoDiscoveredAt) break;
