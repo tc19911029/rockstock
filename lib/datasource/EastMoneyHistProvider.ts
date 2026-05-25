@@ -24,7 +24,8 @@ import { rateLimiter } from './UnifiedRateLimiter';
 // ── 快取 TTL ──────────────────────────────────────────────────────────────────
 
 const HISTORICAL_TTL = 24 * 60 * 60 * 1000; // 24h
-const RECENT_TTL = 5 * 60 * 1000;           // 5min（歷史K線每天才變一次，即時報價有獨立快取）
+const RECENT_TTL = 5 * 60 * 1000;           // 5min（日 K 用，每天才變一次）
+const INTRADAY_TTL = 10 * 1000;             // 10s（分鐘 K — polling 60s 期間至少能拉到 1 次新資料）
 
 // ── 美股市場代碼快取（ticker → 105/106/107） ─────────────────────────────────
 
@@ -220,7 +221,9 @@ export class EastMoneyHistProvider implements DataProvider {
     const klt = intervalToKlt(interval);
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
     const isHistorical = asOfDate && asOfDate < today;
-    const ttl = isHistorical ? HISTORICAL_TTL : RECENT_TTL;
+    const isMinuteInterval = !!interval && ['1m', '5m', '15m', '30m', '60m'].includes(interval);
+    // 分鐘 K 走短 TTL（10s）才能跟 polling 60s 對得上；日/週/月 K 保留長 TTL（5min）
+    const ttl = isHistorical ? HISTORICAL_TTL : (isMinuteInterval ? INTRADAY_TTL : RECENT_TTL);
 
     const cacheKey = `em:hist:${symbol}:${period}:${klt}:${asOfDate ?? 'live'}`;
     const cached = globalCache.get<CandleWithIndicators[]>(cacheKey);

@@ -19,9 +19,9 @@ import { rateLimiter } from './UnifiedRateLimiter';
 import type { Candle } from '@/types';
 
 const FUGLE_BASE = 'https://api.fugle.tw/marketdata/v1.0/stock';
-const INTRADAY_TTL = 30 * 1000;   // 30 秒快取（分鐘K盤中更新頻繁）
-const HISTORICAL_TTL = 5 * 60 * 1000; // 5 分鐘快取（歷史分鐘K）
-const QUOTE_TTL = 15 * 1000;      // 15 秒快取（即時報價）
+const INTRADAY_TTL = 10 * 1000;   // 10 秒快取（5m polling 60s 期間至少能拉到 1 次新資料）
+const HISTORICAL_TTL = 5 * 60 * 1000; // 5 分鐘快取（歷史分鐘K — 過去日不會變）
+const QUOTE_TTL = 5 * 1000;       // 5 秒快取（即時報價）
 
 function getApiKey(): string | null {
   return process.env.FUGLE_API_KEY ?? null;

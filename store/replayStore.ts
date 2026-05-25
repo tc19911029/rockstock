@@ -122,14 +122,14 @@ let _loadStockToken = 0;
 /** 根據 interval 決定 polling 頻率 (ms) */
 function getPollingInterval(interval: string): number {
   switch (interval) {
-    case '1m':  return 30_000;  // 30 秒
-    case '5m':  return 60_000;  // 1 分鐘
-    case '15m': return 90_000;  // 1.5 分鐘
-    case '30m': return 120_000; // 2 分鐘
-    case '60m': return 180_000; // 3 分鐘
-    case '1d':  return 60_000;  // 1 分鐘（日K 即時報價 overlay，對齊分K 更新節奏）
-    case '1wk': return 60_000;  // 1 分鐘（週K 聚合自日K）
-    case '1mo': return 60_000;  // 1 分鐘（月K 聚合自日K）
+    case '1m':  return 15_000;  // 15 秒（接近手機 app 跳動感）
+    case '5m':  return 30_000;  // 30 秒
+    case '15m': return 45_000;  // 45 秒
+    case '30m': return 60_000;  // 1 分鐘
+    case '60m': return 90_000;  // 1.5 分鐘
+    case '1d':  return 30_000;  // 30 秒（日K 即時報價 overlay，對齊分K 更新節奏）
+    case '1wk': return 30_000;  // 30 秒（週K 聚合自日K）
+    case '1mo': return 30_000;  // 30 秒（月K 聚合自日K）
     default:    return 0;
   }
 }
