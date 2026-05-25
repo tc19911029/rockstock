@@ -232,6 +232,12 @@ export async function GET(req: NextRequest) {
         console.warn(`[/api/chip] FinMind ${code} 失敗:`, err instanceof Error ? err.message : err);
       }
     }
+    // 盤中 / 早上 T86 還沒揭露當日資料 → fallback 到歷史最新一筆，
+    // 避免籌碼面板整片顯示「中立 0 張、chipScore=0」誤導用戶。
+    // T86 通常 17:00-18:30 才揭露，盤中查詢必然抓不到當日數據。
+    if (!instOnDate && instFile?.data && instFile.data.length > 0) {
+      instOnDate = instFile.data[instFile.data.length - 1];
+    }
 
     // ── 2) 大戶持股 TDCC L1 + 3) 融資融券、當沖、借券、4) 已發行股數（FinMind 並行）──
     // 用 allSettled：任何單一資料源失敗不應打掉整個籌碼面板（書本實務以外資+融資為主，借券/股本缺值可接受）
