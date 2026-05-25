@@ -17,6 +17,7 @@ import { decisionPathZh } from '@/lib/i18n/decisionPathLabel';
 import { replaceAgentTerms } from '@/lib/i18n/agentTermsLabel';
 import { computeFacetVerdicts, type FacetVerdictsResult } from '@/lib/decision/computeFacetVerdicts';
 import { summarizeFacetVerdicts, type FacetSummary } from '@/lib/decision/summarizeFacetVerdicts';
+import { dedupedFetch } from '@/lib/utils/dedupedFetch';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -273,10 +274,10 @@ function HoldingBadge({ symbol }: { symbol: string }) {
     let cancelled = false;
     const raw = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     Promise.all([
-      fetch('/api/agents/portfolio?status=open').then(r => r.ok ? r.json() : null).catch(() => null),
+      dedupedFetch('/api/agents/portfolio?status=open').then(r => r.ok ? r.json() : null).catch(() => null),
       fetch(`/api/stock/quote?symbol=${encodeURIComponent(raw)}`).then(r => r.ok ? r.json() : null).catch(() => null),
       // 多 fetch 一次 today alerts、取本檔的最近一條
-      fetch('/api/realtime/alerts/today').then(r => r.ok ? r.json() : null).catch(() => null),
+      dedupedFetch('/api/realtime/alerts/today').then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([p, q, a]) => {
       if (cancelled) return;
       const list: MinimalHolding[] = p?.holdings ?? [];
@@ -388,9 +389,9 @@ function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string
     setLoading(true);
     let cancelled = false;
     Promise.allSettled([
-      fetch(`/api/agents/pool?market=${market}&date=${useDate}&minSourceCount=1&limit=500`).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/chip?symbol=${encodeURIComponent(symbol)}`).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/fundamentals/${encodeURIComponent(raw)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      dedupedFetch(`/api/agents/pool?market=${market}&date=${useDate}&minSourceCount=1&limit=500`).then(r => r.ok ? r.json() : null).catch(() => null),
+      dedupedFetch(`/api/chip?symbol=${encodeURIComponent(symbol)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      dedupedFetch(`/api/fundamentals/${encodeURIComponent(raw)}`).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([poolR, chipR, fundR]) => {
       if (cancelled) return;
       const pool = poolR.status === 'fulfilled' ? poolR.value : null;

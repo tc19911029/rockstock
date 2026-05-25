@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
+import { dedupedFetch } from '@/lib/utils/dedupedFetch';
 import { useTotalCapital, formatNT } from '@/lib/portfolio/useTotalCapital';
 import {
   composeOperationSuggestion,
@@ -122,15 +123,17 @@ export function TodayBriefing({ market = 'TW' }: Props) {
     let canceled = false;
     setLoading(true);
     (async () => {
+      // 用 dedupedFetch：DecisionPanel / portfolio page / risk page 也會 fetch portfolio + alerts，
+      // 短時間共用 in-flight 避免重複打 server
       const [trendRes, decisionsRes, holdingsRes, reviewRes, poolRes, growthRes, ytRes, alertsRes] = await Promise.allSettled([
         fetch(`/api/scanner/market-trend?market=${market}&date=${today}`).then(r => r.ok ? r.json() : null),
         fetch(`/api/agents/decisions?date=${today}`).then(r => r.ok ? r.json() : null),
-        fetch(`/api/agents/portfolio?status=open`).then(r => r.ok ? r.json() : null),
+        dedupedFetch(`/api/agents/portfolio?status=open`).then(r => r.ok ? r.json() : null),
         fetch(`/api/agents/portfolio/review?date=${today}`).then(r => r.ok ? r.json() : null),
-        fetch(`/api/agents/pool?market=${market}&date=${today}&minSourceCount=3&limit=10&sort=weighted`).then(r => r.ok ? r.json() : null),
+        dedupedFetch(`/api/agents/pool?market=${market}&date=${today}&minSourceCount=3&limit=10&sort=weighted`).then(r => r.ok ? r.json() : null),
         fetch(`/api/portfolio/growth-status`).then(r => r.ok ? r.json() : null),
         fetch(`/api/youtube/analysis/${today}`).then(r => r.ok ? r.json() : null),
-        fetch(`/api/realtime/alerts/today`).then(r => r.ok ? r.json() : null),
+        dedupedFetch(`/api/realtime/alerts/today`).then(r => r.ok ? r.json() : null),
       ]);
       if (canceled) return;
 
