@@ -207,14 +207,20 @@ export function TodayBriefing({ market = 'TW' }: Props) {
         overview: d.decision.overview,
       } : null,
     }));
-    const rev: PortfolioReviewForSuggestion[] = reviews.map(r => ({
-      symbol: r.symbol,
-      name: r.name,
-      action: r.action,
-      returnPct: r.returnPct,
-      currentPrice: r.currentPrice,
-      keyPriceLevels: r.keyPriceLevels,
-    }));
+    // review 是「跑分析當下」的持倉快照；持倉這幾天可能已賣出（如 3037 欣興從持倉移除）
+    // 但 review 檔案還留著 → 操作建議若不過濾會顯示「持股注意：欣興建議停損」誤導用戶
+    // 過濾：只保留 symbol 仍在 holdings 內的 review
+    const holdingSet = new Set(holdings.map(h => h.symbol));
+    const rev: PortfolioReviewForSuggestion[] = reviews
+      .filter(r => holdingSet.has(r.symbol))
+      .map(r => ({
+        symbol: r.symbol,
+        name: r.name,
+        action: r.action,
+        returnPct: r.returnPct,
+        currentPrice: r.currentPrice,
+        keyPriceLevels: r.keyPriceLevels,
+      }));
     const al: AlertForSuggestion[] = alerts.map(a => ({
       symbol: a.symbol,
       rule: a.rule,
@@ -227,7 +233,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
       alertsToday: al,
       growthGap: growth ? { gapPct: growth.gapPct, status: growth.status } : null,
     });
-  }, [decisions, reviews, alerts, growth]);
+  }, [decisions, reviews, alerts, growth, holdings]);
 
   const buyRuns = decisions.filter(d => d.decision?.action === 'buy');
   const watchRuns = decisions.filter(d => d.decision?.action === 'watch');
@@ -246,7 +252,9 @@ export function TodayBriefing({ market = 'TW' }: Props) {
   }), [holdings, reviews, holdingPrices]);
 
   const holdingAlertsCount = holdingActions.filter(a => a.action === 'stop_loss' || a.action === 'reduce' || a.action === 'take_profit').length;
-  const reviewAlertsCount = reviews.filter(r => r.action === 'stop_loss' || r.action === 'reduce' || r.action === 'take_profit').length;
+  // 同樣只算還在持倉中的 review action（避免已賣股票還在計數）
+  const holdingSetForAlerts = new Set(holdings.map(h => h.symbol));
+  const reviewAlertsCount = reviews.filter(r => holdingSetForAlerts.has(r.symbol) && (r.action === 'stop_loss' || r.action === 'reduce' || r.action === 'take_profit')).length;
 
   return (
     <section id="today-briefing" className="border border-slate-700/50 rounded-lg bg-slate-900/40 overflow-hidden">
