@@ -119,7 +119,14 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/agents/decisions?date=${date}`, { signal: ac.signal });
+      // 2026-05-26 加 transient retry:429 / 503 / 504 在 dev server cron 重壓時偶發,
+      // 等 1.5s 再試 1 次,避免 user 看到 raw "HTTP 429"。
+      let res = await fetch(`/api/agents/decisions?date=${date}`, { signal: ac.signal });
+      if ((res.status === 429 || res.status === 503 || res.status === 504) && !ac.signal.aborted) {
+        await new Promise(r => setTimeout(r, 1500));
+        if (ac.signal.aborted) return;
+        res = await fetch(`/api/agents/decisions?date=${date}`, { signal: ac.signal });
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as DecisionsResponse;
       if (ac.signal.aborted) return;
