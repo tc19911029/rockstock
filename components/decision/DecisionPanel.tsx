@@ -16,6 +16,7 @@ import dynamic from 'next/dynamic';
 import { decisionPathZh } from '@/lib/i18n/decisionPathLabel';
 import { replaceAgentTerms } from '@/lib/i18n/agentTermsLabel';
 import { computeFacetVerdicts, type FacetVerdictsResult } from '@/lib/decision/computeFacetVerdicts';
+import { summarizeFacetVerdicts, type FacetSummary } from '@/lib/decision/summarizeFacetVerdicts';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -360,6 +361,7 @@ function KV({ k, v, cls }: { k: string; v: string; cls?: string }) {
 // 規則式 4 verdict fallback — multi-agent 未跑時、從 pool/chip/fund API 推算
 function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string }) {
   const [verdicts, setVerdicts] = useState<FacetVerdictsResult | null>(null);
+  const [summary, setSummary] = useState<FacetSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -381,16 +383,23 @@ function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string
       const candidate = pool?.candidates?.find((c: { symbol: string }) =>
         c.symbol === symbol || c.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === raw,
       );
-      const result = computeFacetVerdicts({
+      // fundamentals API 回 { ok, data: {...}, sourceUsed } — epsYoY 在 .data 內
+      const fundData = fund?.data ?? null;
+      // chip API 回 top-level chipScore（0 也算有資料、不是 null）
+      const chipScoreFromApi = chip?.ok && typeof chip?.chipScore === 'number' ? chip.chipScore : null;
+      const prohibitionHit = candidate?.sources?.technical?.prohibitionHit;
+      const input = {
         sixConditionsScore: candidate?.sources?.technical?.sixConditionsScore,
-        prohibitionHit: candidate?.sources?.technical?.prohibitionHit,
+        prohibitionHit,
         youtubeMentionCount: candidate?.strengthSignals?.youtubeMentionCount,
         youtubeInHighConsensus: candidate?.sources?.youtube?.inHighConsensus,
-        chipScore: chip?.chipScore ?? candidate?.strengthSignals?.chipScore,
-        epsYoY: fund?.epsYoY ?? candidate?.sources?.fundamental?.epsYoY,
-        revenueYoY: fund?.revenueYoY ?? candidate?.sources?.fundamental?.revenueYoY,
-      });
+        chipScore: chipScoreFromApi ?? candidate?.strengthSignals?.chipScore ?? null,
+        epsYoY: fundData?.epsYoY ?? candidate?.sources?.fundamental?.epsYoY,
+        revenueYoY: fundData?.revenueYoY ?? candidate?.sources?.fundamental?.revenueYoY,
+      };
+      const result = computeFacetVerdicts(input);
       setVerdicts(result);
+      setSummary(summarizeFacetVerdicts({ ...result, prohibitionHit }));
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [symbol, date]);
@@ -412,11 +421,27 @@ function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string
     { title: '基本', subtitle: 'EPS/營收/PE', v: 'fundamental', hint: verdicts.hints.fundamental },
   ];
 
+  // 整體一句話結論的顏色
+  const summaryCls = summary?.level === 'green'
+    ? 'border-emerald-700/60 bg-emerald-950/30 text-emerald-200'
+    : summary?.level === 'yellow'
+    ? 'border-amber-700/60 bg-amber-950/30 text-amber-200'
+    : 'border-rose-700/60 bg-rose-950/30 text-rose-200';
+
   return (
-    <div>
-      <div className="text-[11px] text-amber-300/90 mb-1.5 font-semibold">
+    <div className="space-y-2">
+      <div className="text-[11px] text-amber-300/90 font-semibold">
         📊 規則推估 4 面向（多代理未跑、以下用既有資料推算）
       </div>
+      {/* 一句話人話結論 */}
+      {summary && (
+        <div className={`border rounded p-2.5 ${summaryCls}`}>
+          <div className="text-xs font-bold leading-relaxed">{summary.conclusion}</div>
+          <div className="text-[10px] opacity-70 mt-0.5 font-mono">
+            通過 {summary.counts.pass} / 觀察 {summary.counts.watch} / 不過 {summary.counts.fail}
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {cards.map(c => {
           const cfg = VERDICT_CFG[verdicts[c.v]];
