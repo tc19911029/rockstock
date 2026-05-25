@@ -9,10 +9,14 @@
  * 為什麼不刪：保留外部 bookmark / 內部連結相容性。
  */
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-export default function YoutubeReplayRedirect() {
+export default function YoutubeReplayRedirectPage() {
+  return <Suspense fallback={null}><YoutubeReplayRedirect /></Suspense>;
+}
+
+function YoutubeReplayRedirect() {
   const searchParams = useSearchParams();
 
   useEffect(() => {

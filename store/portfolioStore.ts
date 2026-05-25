@@ -418,9 +418,15 @@ export const usePortfolioStore = create<PortfolioStore>()(
 // ════════════════════════════════════════════════════════════════════════════
 
 export interface SyncAllResult {
+  /** server 寫入成功的 row 數(只算台股,陸股不入 server)*/
   inserted: number;
+  /** server 拒絕的 row 數(資料格式錯 / entryPrice 不合理 等)*/
   rejected: number;
+  /** 本機被略過、不送 server 的 row 數(主要是陸股 TW-only)*/
+  cnSkipped: number;
+  /** holdings 總數(本機)*/
   total: number;
+  /** 是否在 SSR 環境跳過(無 localStorage)*/
   skipped?: boolean;
 }
 
@@ -433,15 +439,19 @@ export interface SyncAllResult {
  */
 export async function syncAllHoldingsToServer(): Promise<SyncAllResult> {
   if (typeof window === 'undefined') {
-    return { inserted: 0, rejected: 0, total: 0, skipped: true };
+    return { inserted: 0, rejected: 0, cnSkipped: 0, total: 0, skipped: true };
   }
   const { holdings } = usePortfolioStore.getState();
-  const { rows, rejections } = mapStoreHoldingsToImportRows(holdings);
+  const { rows, rejections, skipped } = mapStoreHoldingsToImportRows(holdings);
+  const cnSkipped = skipped.length;
   if (rejections.length > 0) {
     console.warn('[portfolioStore] syncAll 部分 rejected:', rejections);
   }
+  if (cnSkipped > 0) {
+    console.info('[portfolioStore] syncAll 陸股略過(TW-only):', skipped.map(s => s.symbol));
+  }
   if (rows.length === 0) {
-    return { inserted: 0, rejected: rejections.length, total: holdings.length };
+    return { inserted: 0, rejected: rejections.length, cnSkipped, total: holdings.length };
   }
   try {
     const resp = await fetch('/api/portfolio/import', {
@@ -452,7 +462,7 @@ export async function syncAllHoldingsToServer(): Promise<SyncAllResult> {
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
       console.warn('[portfolioStore] syncAll fail:', resp.status, text);
-      return { inserted: 0, rejected: holdings.length, total: holdings.length };
+      return { inserted: 0, rejected: holdings.length - cnSkipped, cnSkipped, total: holdings.length };
     }
     const json = await resp.json() as {
       ok?: boolean;
@@ -464,10 +474,11 @@ export async function syncAllHoldingsToServer(): Promise<SyncAllResult> {
     return {
       inserted: data.inserted ?? 0,
       rejected: (data.rejected ?? 0) + rejections.length,
+      cnSkipped,
       total: holdings.length,
     };
   } catch (e) {
     console.warn('[portfolioStore] syncAll error:', e);
-    return { inserted: 0, rejected: holdings.length, total: holdings.length };
+    return { inserted: 0, rejected: holdings.length - cnSkipped, cnSkipped, total: holdings.length };
   }
 }

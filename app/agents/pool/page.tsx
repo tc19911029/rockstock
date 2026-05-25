@@ -9,10 +9,14 @@
  * 原始功能完整版仍可從 git history 拉回（commit 之前的 git log -- app/agents/pool/page.tsx）。
  */
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function AgentsPoolRedirect() {
+export default function AgentsPoolRedirectPage() {
+  return <Suspense fallback={null}><AgentsPoolRedirect /></Suspense>;
+}
+
+function AgentsPoolRedirect() {
   const router = useRouter();
   const sp = useSearchParams();
 

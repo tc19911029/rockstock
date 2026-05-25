@@ -75,10 +75,10 @@ export async function upsertJournalEntry(
   const now = new Date().toISOString();
   const existing = file.entries[tradeId];
   const next: JournalEntry = {
-    schemaVersion: JOURNAL_SCHEMA_VERSION,
-    tradeId,
     ...(existing ?? {}),
     ...patch,
+    schemaVersion: JOURNAL_SCHEMA_VERSION,
+    tradeId,
     updatedAt: now,
   };
   file.entries[tradeId] = next;

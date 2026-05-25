@@ -10,7 +10,7 @@
  *   - 出場/刪除
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
@@ -49,7 +49,11 @@ const ACTION_CFG: Record<PortfolioAction, { label: string; cls: string; emoji: s
   no_add:       { label: '不建議加碼', cls: 'bg-muted/60 text-muted-foreground border-border',           emoji: '🚫' },
 };
 
-export default function PortfolioPage() {
+export default function PortfolioPageWrapper() {
+  return <Suspense fallback={<div className="p-6 text-muted-foreground">載入中…</div>}><PortfolioPage /></Suspense>;
+}
+
+function PortfolioPage() {
   const searchParams = useSearchParams();
   const initialDate = searchParams.get('date') ?? todayYmd();
   const [date, setDate] = useState(initialDate);

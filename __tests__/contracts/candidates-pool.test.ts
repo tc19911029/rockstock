@@ -31,7 +31,10 @@ const chipAttr = (score: number): ChipSourceAttribution => ({
   chipScore: score, signals: ['foreign_strong_buy'], reasons: [],
 });
 const fundAttr = (yoy: number): FundamentalSourceAttribution => ({
-  revenueYoY: yoy, epsYoY: null, grossMargin: 30, signals: ['revenue_yoy_high'], reasons: [],
+  revenueYoY: yoy, epsYoY: null, grossMargin: 30,
+  netMargin: null, per: null, pbr: null, dividendYield: null, eps: null,
+  fundamentalScore: Math.min(100, Math.max(0, Math.round(yoy))),
+  signals: ['revenue_yoy_high'], reasons: [],
 });
 
 function makeSourceResult(source: 'technical' | 'youtube' | 'chip' | 'fundamental', items: Array<{ symbol: string; attribution: unknown }>): SourceResult {

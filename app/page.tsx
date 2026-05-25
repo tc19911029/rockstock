@@ -14,8 +14,8 @@
  * - 趨勢狀態欄 → 整合進條件 tab
  */
 
-import { useEffect, useCallback, useState, useRef, useMemo } from 'react';
-import dynamic from 'next/dynamic';
+import { Suspense, useEffect, useCallback, useState, useRef, useMemo } from 'react';
+import nextDynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useReplayStore } from '@/store/replayStore';
 import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
@@ -49,7 +49,7 @@ import { toast } from 'sonner';
 import ChartToolbar from '@/components/ChartToolbar';
 
 // Mobile fullscreen 仍直接使用 CandleChart / IndicatorCharts（StockChartView 抽出範圍只到 desktop 主視窗）
-const CandleChart = dynamic(() => import('@/components/CandleChart'), {
+const CandleChart = nextDynamic(() => import('@/components/CandleChart'), {
   ssr: false,
   loading: () => (
     <div className="w-full bg-card flex items-center justify-center" style={{ height: 460 }}>
@@ -58,7 +58,7 @@ const CandleChart = dynamic(() => import('@/components/CandleChart'), {
   ),
 });
 
-const IndicatorCharts = dynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
+const IndicatorCharts = nextDynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
 
 type SideTab = 'conditions' | 'signals' | 'chip' | 'chat';
 
@@ -81,7 +81,13 @@ function ConditionsPanelSwitch() {
   return <BuyMethodConditionsPanel method={v12Method} />;
 }
 
-export default function HomePage() {
+// Next 16 client component + useSearchParams 需 Suspense 包(否則 build 失敗)
+// dev mode 可能出現 hydration mismatch(Recoverable Error),不擋使用 — Next 16 quirk
+export default function HomePageWrapper() {
+  return <Suspense fallback={null}><HomePage /></Suspense>;
+}
+
+function HomePage() {
   const {
     initData, visibleCandles, currentSignals, chartMarkers,
     isLoadingStock, allCandles, currentIndex, dataGaps,

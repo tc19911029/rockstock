@@ -10,10 +10,14 @@
  * 跨日趨勢與個股歷史仍保留 /youtube/trends 與 /youtube/stocks/[code]，可由首頁連到。
  */
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-export default function YoutubeRedirect() {
+export default function YoutubeRedirectPage() {
+  return <Suspense fallback={null}><YoutubeRedirect /></Suspense>;
+}
+
+function YoutubeRedirect() {
   const searchParams = useSearchParams();
 
   useEffect(() => {

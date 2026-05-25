@@ -9,7 +9,7 @@
  *   - 各代理判定 → 平均收益 / 勝率（用於判斷哪個代理命中最高）
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
@@ -65,7 +65,11 @@ function defaultTo(): string {
   return d.toISOString().slice(0, 10);
 }
 
-export default function BacktestPage() {
+export default function BacktestPageWrapper() {
+  return <Suspense fallback={<div className="p-6 text-muted-foreground">載入中…</div>}><BacktestPage /></Suspense>;
+}
+
+function BacktestPage() {
   const searchParams = useSearchParams();
   const [from, setFrom] = useState(searchParams.get('from') ?? defaultFrom());
   const [to, setTo] = useState(searchParams.get('to') ?? defaultTo());

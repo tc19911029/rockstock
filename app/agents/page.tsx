@@ -7,10 +7,14 @@
  * 保留路由為了向下相容：舊 deep link 自動轉到首頁對應 tab。
  */
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function AgentsRedirect() {
+export default function AgentsRedirectPage() {
+  return <Suspense fallback={null}><AgentsRedirect /></Suspense>;
+}
+
+function AgentsRedirect() {
   const router = useRouter();
   const sp = useSearchParams();
 

@@ -9,7 +9,7 @@
  * 此頁只負責顯示，使用者親手讀並決定是否要手動調整來源。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,10 @@ function thirtyDaysAgo(): string {
 }
 
 export default function MemoryPage() {
+  return <Suspense fallback={<div className="p-6 text-muted-foreground">載入中…</div>}><MemoryPageInner /></Suspense>;
+}
+
+function MemoryPageInner() {
   const searchParams = useSearchParams();
   const initialKind = (searchParams.get('kind') as MemoryKind | null) ?? null;
   const initialWeek = searchParams.get('week') ?? null;

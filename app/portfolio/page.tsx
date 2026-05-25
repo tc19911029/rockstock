@@ -374,11 +374,12 @@ export default function PortfolioPage() {
             }} />
           </label>
           <Button variant="secondary" size="sm"
-            title="把 UI 持股（瀏覽器 localStorage）同步到 server holdings.json，讓 portfolio-review skill / 月報 / /today 頁能看到"
+            title="把 UI 持股（瀏覽器 localStorage）同步到 server holdings.json,讓 portfolio-review skill / 月報 / /today 頁能看到。陸股因業務邏輯 TW-only 不入 server"
             onClick={async () => {
               const r = await syncAllHoldingsToServer();
               if (r.skipped) return;
-              alert(`同步到 server：成功 ${r.inserted} / 失敗 ${r.rejected} / 共 ${r.total} 檔\n\n之後 portfolio-review、月報、/today 都會看到這些持倉`);
+              const cnNote = r.cnSkipped > 0 ? `\n(其中 ${r.cnSkipped} 檔陸股 TW-only 不入 server,屬正常)` : '';
+              alert(`同步到 server:成功 ${r.inserted} / 失敗 ${r.rejected} / 陸股略過 ${r.cnSkipped} / 共 ${r.total} 檔${cnNote}\n\n之後 portfolio-review、月報、/today 都會看到這些持倉`);
             }}>
             → 同步到 server
           </Button>
@@ -395,37 +396,44 @@ export default function PortfolioPage() {
     <PageShell headerSlot={portfolioHeader}>
       <div className="p-4 max-w-3xl mx-auto space-y-4">
 
-        {/* Server vs Local 持倉數不一致提示 */}
-        {serverCount != null && serverCount !== holdings.length && (
+        {/* Server vs Local 持倉數不一致提示
+         *  2026-05-25 修:比對只看 TW(陸股 TW-only 不入 server,屬正常),避免永遠紅
+         */}
+        {serverCount != null && serverCount !== twHoldings.length && (
           <div className="rounded-lg border border-amber-700/50 bg-amber-900/15 p-3 text-xs text-amber-200 leading-relaxed">
             <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-              <div className="font-semibold text-amber-300">⚠ 持倉資料兩邊不一致（本機 {holdings.length} 檔 / 伺服器 {serverCount} 檔）</div>
-              {holdings.length > serverCount && (
+              <div className="font-semibold text-amber-300">
+                ⚠ 持倉資料兩邊不一致(本機台股 {twHoldings.length} 檔 / 伺服器 {serverCount} 檔
+                {cnHoldings.length > 0 ? `;另有陸股 ${cnHoldings.length} 檔不計入比對` : ''})
+              </div>
+              {twHoldings.length > serverCount && (
                 <button
                   type="button"
                   onClick={async () => {
-                    if (!confirm(`要把本機 ${holdings.length} 檔持倉推到伺服器 holdings.json？\n\n影響：portfolio-review、月報、TodayBriefing 都會看到這些持倉。`)) return;
+                    if (!confirm(`要把本機 ${twHoldings.length} 檔台股持倉推到伺服器 holdings.json?\n\n陸股 ${cnHoldings.length} 檔不入 server(TW-only 業務邏輯,memory 2026-05-23 決議)。\n\n影響:portfolio-review、月報、TodayBriefing 都會看到這些持倉。`)) return;
                     try {
                       const r = await syncAllHoldingsToServer();
                       if (r.skipped) return;
-                      alert(`同步完成：成功 ${r.inserted} / 略過 ${r.rejected} / 共 ${r.total} 檔`);
+                      const cnNote = r.cnSkipped > 0 ? ` / 陸股略過 ${r.cnSkipped}` : '';
+                      alert(`同步完成:成功 ${r.inserted} / 失敗 ${r.rejected}${cnNote} / 共 ${r.total} 檔`);
                       window.location.reload();
                     } catch (e) {
-                      alert('同步失敗、請看 console：' + (e instanceof Error ? e.message : String(e)));
+                      alert('同步失敗、請看 console:' + (e instanceof Error ? e.message : String(e)));
                     }
                   }}
                   className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold"
-                  title="一鍵把本機持倉推到伺服器，給 portfolio-review skill / 月報 / TodayBriefing 讀"
+                  title="一鍵把本機台股持倉推到伺服器,給 portfolio-review skill / 月報 / TodayBriefing 讀(陸股不入)"
                 >
                   ⚡ 一鍵同步
                 </button>
               )}
             </div>
             <p className="text-amber-300/70 text-[11px]">
-              <strong>什麼意思</strong>：你在這頁編輯的持倉存在瀏覽器（localStorage），但分析用的 server（holdings.json）跟它分開。
-              {holdings.length > serverCount
+              <strong>什麼意思</strong>:你在這頁編輯的持倉存在瀏覽器(localStorage),但分析用的 server(holdings.json)跟它分開。
+              {twHoldings.length > serverCount
                 ? ' → 本機比較新、點上方「⚡ 一鍵同步」推上去就好。'
-                : ' → server 多於本機，可能是 server 有手動加的、本機沒匯入。'}
+                : ' → server 多於本機,可能是 server 有手動加的、本機沒匯入。'}
+              {cnHoldings.length > 0 && ' (陸股因業務邏輯 TW-only 不入 server,屬正常)'}
             </p>
           </div>
         )}
