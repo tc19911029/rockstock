@@ -310,6 +310,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
               }
             })
             .catch(() => {}); // 靜默忽略
+          get().startPolling();
           return;
         }
 
@@ -330,6 +331,10 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
 
         if (!applyData(json, true)) throw new Error('資料筆數為 0');
       }
+      // 自動刷新：URL 載入 / 切股 / 切時框 都會走進這裡 → 統一啟動 polling
+      // 不同 interval 走不同頻率（分 K 30s-3min，日/週/月 K 由 getPollingInterval 決定）
+      // 歷史回放（targetDate < today）由 startPolling 內部 guard 自動跳過
+      get().startPolling();
     } catch (err) {
       set({ isLoadingStock: false });
       throw err;
