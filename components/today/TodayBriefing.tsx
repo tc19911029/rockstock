@@ -115,6 +115,8 @@ export function TodayBriefing({ market = 'TW' }: Props) {
   const [growth, setGrowth] = useState<GrowthState | null>(null);
   const [youtube, setYoutube] = useState<YoutubeTopStock[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  // alerts 顯示時 slice(0, 5) 截斷；header 顯示總數（誠實，避免「5 條」誤導以為只有 5）
+  const [alertTotalCount, setAlertTotalCount] = useState<number>(0);
 
   useEffect(() => {
     let canceled = false;
@@ -187,8 +189,9 @@ export function TodayBriefing({ market = 'TW' }: Props) {
         setYoutube(Array.from(byCode.values()).sort((a, b) => b.mention_count - a.mention_count).slice(0, 6));
       }
 
-      const a = pick<{ alerts?: AlertItem[] }>(alertsRes);
-      setAlerts((a?.alerts ?? []).slice(0, 5));
+      const a = pick<{ alerts?: AlertItem[]; count?: number }>(alertsRes);
+      setAlerts(a?.alerts ?? []);
+      setAlertTotalCount(a?.count ?? a?.alerts?.length ?? 0);
 
       setLoading(false);
     })();
@@ -444,7 +447,11 @@ export function TodayBriefing({ market = 'TW' }: Props) {
         {/* 盤中警示時間軸 */}
         {alerts.length > 0 && (
           <div className="border border-rose-700/40 bg-rose-950/15 rounded p-2">
-            <div className="text-xs font-bold text-rose-300 mb-1.5">⚠ 今日盤中警示（{alerts.length} 條）</div>
+            <div className="text-xs font-bold text-rose-300 mb-1.5">
+              ⚠ 今日盤中警示（{alertTotalCount > alerts.slice(0, watchRuns.length > 0 ? 3 : 5).length
+                ? `${alerts.slice(0, watchRuns.length > 0 ? 3 : 5).length}/${alertTotalCount}`
+                : alertTotalCount} 條）
+            </div>
             <ul className="space-y-1">
               {alerts.slice(0, watchRuns.length > 0 ? 3 : 5).map((a, i) => (
                 <li key={`${a.symbol}-${a.firedAt}-${i}`} className="flex items-center gap-2 text-xs">
