@@ -28,16 +28,36 @@ import type {
   RiskAnswer,
   TechnicalAnswer,
 } from '@/lib/agents/types';
+import type {
+  AgentScoreBlock,
+  ScoreConfidence,
+  ScoreLight,
+  StockGrade,
+  SuitableFor,
+} from '@/lib/agents/scoringTypes';
 
 type Verdict = 'pass' | 'watch' | 'fail';
-interface VerdictSummary { verdict: Verdict; overview: string }
+interface VerdictSummary {
+  verdict: Verdict;
+  overview: string;
+  /** v1 評分系統 — 若 answer 有 scoreBlock 才有值 */
+  score?: number;
+  light?: ScoreLight;
+  confidence?: ScoreConfidence;
+}
 
-function summarise<T extends { verdict?: Verdict; overview?: string } | null>(
+function summarise<T extends { verdict?: Verdict; overview?: string; scoreBlock?: AgentScoreBlock } | null>(
   ans: T,
 ): VerdictSummary | null {
   if (!ans || typeof ans !== 'object') return null;
   if (!ans.verdict || !ans.overview) return null;
-  return { verdict: ans.verdict, overview: ans.overview };
+  const out: VerdictSummary = { verdict: ans.verdict, overview: ans.overview };
+  if (ans.scoreBlock) {
+    out.score = ans.scoreBlock.score;
+    out.light = ans.scoreBlock.light;
+    out.confidence = ans.scoreBlock.confidence;
+  }
+  return out;
 }
 
 export const runtime = 'nodejs';
@@ -78,6 +98,11 @@ interface RunListItem {
     bullScore: number;
     bearScore: number;
     sizeHint: number;
+    /** v1 評分系統 — 若有 gradeBlock 才有值 */
+    totalScore?: number;
+    grade?: StockGrade;
+    suitableFor?: SuitableFor;
+    gradeReason?: string;
   } | null;
 }
 
@@ -148,6 +173,12 @@ export async function GET(req: NextRequest) {
           bullScore: decision.bullScore,
           bearScore: decision.bearScore,
           sizeHint: decision.sizeHint,
+          ...(decision.gradeBlock ? {
+            totalScore: decision.gradeBlock.totalScore,
+            grade: decision.gradeBlock.grade,
+            suitableFor: decision.gradeBlock.suitableFor,
+            gradeReason: decision.gradeBlock.gradeReason,
+          } : {}),
         } : null,
       };
     }),

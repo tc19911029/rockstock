@@ -47,6 +47,16 @@ import {
   TechnicalQuestion,
 } from '@/lib/agents/types';
 import type { MarketId } from '@/lib/scanner/types';
+import {
+  buildAgentScoreBlock,
+  assignGrade,
+} from '@/lib/agents/scoring';
+import type {
+  AgentScoreBlock,
+  GradeInput,
+  ScoredAgentId,
+  SignalValue,
+} from '@/lib/agents/scoringTypes';
 
 // ────────────────────────────────────────────────────────────────────────────
 // 路徑 helper
@@ -253,6 +263,11 @@ export async function readFinalDecision(date: string, symbol: string): Promise<F
 /**
  * 把單一 agent 的 answer 從 tmp 區複製到持久化區，並更新 phase state
  *
+ * 2026-05-25 v1 評分系統升級：persist 前自動 enrich
+ *   - 4 大 analyst（technical/chip/fundamental/news）：若 answer.scoreBlock.signals 存在
+ *     → 程式重算 scoreBlock 覆蓋（LLM 不能自定 score / light / confidence）
+ *   - Decision：讀 4 個 analyst.scoreBlock + risk.verdict 算 gradeBlock 覆蓋
+ *
  * 不刪 tmp 檔（讓 skill 後續 phase 還能讀）— 整個 run 完成才清 tmp（由 cleanupRun 處理）
  */
 export async function persistAgentAnswer(args: {
@@ -264,7 +279,13 @@ export async function persistAgentAnswer(args: {
   const { tmpDir, persistDir } = getRunPaths(date, symbol);
 
   const src = path.join(tmpDir, `${agent}-answer.json`);
-  const raw = await fs.readFile(src, 'utf-8');
+  const rawOriginal = await fs.readFile(src, 'utf-8');
+  const enriched = await enrichAnswerForPersist({ date, symbol, agent, raw: rawOriginal });
+  const raw = enriched ?? rawOriginal;
+  // enriched 才回寫 tmp（給 phase 3/4 讀到 score）
+  if (enriched && enriched !== rawOriginal) {
+    await atomicFsPut(src, enriched);
+  }
   // dual-storage write
   await agentsPutRaw(runKey(date, symbol, `${agent}.json`), raw);
   const dst = path.join(persistDir, `${agent}.json`);  // legacy path for return
@@ -281,6 +302,93 @@ export async function persistAgentAnswer(args: {
   }
 
   return { persistedAt, persistedPath: dst };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 評分 enrich helper（v1 — 2026-05-25）
+//
+// 設計：LLM 在 answer 內附 scoreBlock.signals 的 raw 數據；persist 前程式重算
+//      score / light / confidence 覆蓋寫回。Decision 算 gradeBlock。
+//
+// 向下相容：LLM 若沒附 scoreBlock.signals → 不 enrich，保留原 answer
+// ────────────────────────────────────────────────────────────────────────────
+
+const SCORED_AGENTS: ReadonlyArray<ScoredAgentId> = ['technical', 'chip', 'fundamental', 'news'];
+
+async function enrichAnswerForPersist(args: {
+  date: string;
+  symbol: string;
+  agent: AgentId;
+  raw: string;
+}): Promise<string | null> {
+  const { date, symbol, agent, raw } = args;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;  // raw 不是合法 JSON，保留原樣讓既有錯誤處理接手
+  }
+
+  // 4 大 analyst 的評分 enrich
+  if ((SCORED_AGENTS as ReadonlyArray<string>).includes(agent)) {
+    const scoredAgent = agent as ScoredAgentId;
+    const existing = parsed.scoreBlock as { signals?: Record<string, SignalValue> } | undefined;
+    if (existing && existing.signals && typeof existing.signals === 'object') {
+      const fresh = buildAgentScoreBlock(scoredAgent, existing.signals);
+      parsed.scoreBlock = fresh;
+      return JSON.stringify(parsed, null, 2);
+    }
+    return null;  // LLM 沒附 signals — 保留原 answer
+  }
+
+  // Decision 的 gradeBlock + scoresByAgent enrich
+  if (agent === 'decision') {
+    const [tech, chip, fund, news, risk] = await Promise.all([
+      readAnswer<TechnicalAnswer>(date, symbol, 'technical'),
+      readAnswer<ChipAnswer>(date, symbol, 'chip'),
+      readAnswer<FundamentalAnswer>(date, symbol, 'fundamental'),
+      readAnswer<NewsAnswer>(date, symbol, 'news'),
+      readAnswer<RiskAnswer>(date, symbol, 'risk'),
+    ]);
+    const gradeInput: GradeInput = {
+      technical: tech?.scoreBlock ?? null,
+      chip: chip?.scoreBlock ?? null,
+      fundamental: fund?.scoreBlock ?? null,
+      news: news?.scoreBlock ?? null,
+      riskVerdict: risk?.verdict ?? null,
+    };
+    // 至少 2 面有 scoreBlock 才算 gradeBlock — 單面分數高被誤判 A 級不合理
+    // 0-1 面 → 跳過 enrich(舊資料相容 / 未升級資料)
+    const validBlocks = [gradeInput.technical, gradeInput.chip, gradeInput.fundamental, gradeInput.news]
+      .filter(Boolean).length;
+    if (validBlocks < 2) {
+      return null;
+    }
+    const gradeBlock = assignGrade(gradeInput);
+    parsed.gradeBlock = gradeBlock;
+    parsed.scoresByAgent = buildScoresByAgent(gradeInput);
+    return JSON.stringify(parsed, null, 2);
+  }
+
+  return null;
+}
+
+function buildScoresByAgent(input: GradeInput): Partial<Record<ScoredAgentId, {
+  score: number; light: string; confidence: string;
+}>> {
+  const out: Partial<Record<ScoredAgentId, { score: number; light: string; confidence: string }>> = {};
+  const pairs: Array<[ScoredAgentId, AgentScoreBlock | null]> = [
+    ['technical', input.technical],
+    ['chip', input.chip],
+    ['fundamental', input.fundamental],
+    ['news', input.news],
+  ];
+  for (const [id, block] of pairs) {
+    if (block) {
+      out[id] = { score: block.score, light: block.light, confidence: block.confidence };
+    }
+  }
+  return out;
 }
 
 /** Run 完成後寫 _meta.json，並（可選）清 tmp */

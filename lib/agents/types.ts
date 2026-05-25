@@ -10,6 +10,11 @@
 
 import type { StockScanResult, MarketId } from '@/lib/scanner/types';
 import type { CandidateSources } from '@/lib/agents/candidates/types';
+import type {
+  AgentScoreBlock,
+  GradeBlock,
+  ScoredAgentId,
+} from '@/lib/agents/scoringTypes';
 
 // ────────────────────────────────────────────────────────────────────────────
 // 共用基礎
@@ -138,6 +143,15 @@ export interface TechnicalAnswer {
    * 加：戒律觸發狀態 + 淘汰法觸發狀態（任一條都要列）
    */
   bookCitations: BookCitation[];
+
+  /**
+   * 評分區塊（v1 新加，optional 向下相容）
+   *
+   * - LLM 在 answer 內附 raw signals（signals 欄位）
+   * - orchestrator.persistAgentAnswer 算 score/light/confidence 覆蓋
+   * - 舊 answer 無此欄位仍合法
+   */
+  scoreBlock?: AgentScoreBlock;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -386,6 +400,9 @@ export interface NewsAnswer {
 
   /** 是否進入彙整池（combined_confidence ≥ 0.6 才入）*/
   mentioned: boolean;
+
+  /** 評分區塊（v1 新加，optional 向下相容）— 由 orchestrator 算分覆蓋 */
+  scoreBlock?: AgentScoreBlock;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -474,6 +491,10 @@ export interface ChipAnswer {
 
   /** ≥ 8 筆 category:'chip'，禁止其他 category（隔離原則）*/
   dataPoints: DataPoint[];
+
+  /** 評分區塊（v1 新加，optional 向下相容）— 由 orchestrator 算分覆蓋
+   *  包含 ETF 共識、投信動向、大戶分層等子訊號（plan §3.3 合進此 panel）*/
+  scoreBlock?: AgentScoreBlock;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -552,6 +573,9 @@ export interface FundamentalAnswer {
   /** dataPoints：≥ 6 category:'fundamental' + ≥ 2 category:'valuation'，可加 industry
    *  禁止其他 category（隔離原則）*/
   dataPoints: DataPoint[];
+
+  /** 評分區塊（v1 新加，optional 向下相容）— 由 orchestrator 算分覆蓋 */
+  scoreBlock?: AgentScoreBlock;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -807,6 +831,26 @@ export interface FinalDecision {
   /** 一句話 summary */
   overview: string;
   verdictReason: string;
+
+  /**
+   * 總結評分區塊（v1 新加，optional 向下相容）
+   *
+   * 由程式從 4 個 analyst.scoreBlock + risk.verdict 算出（lib/agents/scoring.assignGrade）
+   * LLM 不能改 grade — orchestrator persist 前強制覆蓋
+   */
+  gradeBlock?: GradeBlock;
+
+  /** 4 面向分數快取（給 UI / API list 直接讀，不用再 join 4 個檔）*/
+  scoresByAgent?: Partial<Record<ScoredAgentId, { score: number; light: string; confidence: string }>>;
+
+  /** 主要利多（由 LLM 從 4 個 analyst keyFactors 摘錄）*/
+  keyBullPoints?: string[];
+
+  /** 主要風險（由 LLM 從 4 個 analyst risks + Risk Agent 摘錄）*/
+  keyRiskPoints?: string[];
+
+  /** 若 grade=C「觀察名單」，下一個要確認的條件（由 LLM 根據最弱面寫）*/
+  nextConditionToWatch?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

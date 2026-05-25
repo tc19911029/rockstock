@@ -15,13 +15,16 @@
  *   - DebateDetail：Bull vs Bear 並排對照（若 P4 跑完）
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { PageShell, PageHeader, BackButton } from '@/components/shared';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { AgentChartSection } from './_components/AgentChartSection';
 import { TrustMomentumPanel } from './_components/TrustMomentumPanel';
+import { StockGradeSummary } from '@/components/agents/StockGradeSummary';
+import { AgentScorePanel } from '@/components/agents/AgentScorePanel';
+import { NeedsRescoreBanner } from '@/components/agents/NeedsRescoreBanner';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -370,7 +373,11 @@ function lastBusinessDay(): string {
   return tpe.toISOString().slice(0, 10);
 }
 
-export default function AgentDetailPage() {
+export default function AgentDetailPageWrapper() {
+  return <Suspense fallback={<div className="p-6 text-muted-foreground">載入中…</div>}><AgentDetailPage /></Suspense>;
+}
+
+function AgentDetailPage() {
   const { symbol } = useParams<{ symbol: string }>();
   const searchParams = useSearchParams();
   // 預設用「最近工作日」而非今天 — 週末/早上打開時，今天通常沒有 scan 資料
@@ -526,26 +533,70 @@ export default function AgentDetailPage() {
           {/* 為何進入候選池 */}
           {data?.candidate && <CandidateSourcesBlock candidate={data.candidate} />}
 
-          {/* 四面向並列 verdict（§0 隔離） */}
-          {data && completedCount > 0 && (
-            <Panel title="四面向並列觀點" subtitle="§0 隔離原則：各代理獨立 verdict，不混合加權">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
-                <VerdictCard title="技術面" answer={data.technical} />
-                <VerdictCard title="消息面" answer={data.news} />
-                <VerdictCard title="籌碼面" answer={data.chip} />
-                <VerdictCard title="基本面" answer={data.fundamental} />
-              </div>
-            </Panel>
-          )}
+          {/* v1 評分系統:有 gradeBlock → Summary;沒有 → NeedsRescoreBanner + 既有 verdict 並列 fallback */}
+          {data?.decision?.gradeBlock ? (
+            <StockGradeSummary
+              decision={data.decision}
+              symbol={symbol}
+              name={data.candidate?.name}
+              date={date}
+            />
+          ) : data && completedCount > 0 ? (
+            <>
+              <NeedsRescoreBanner date={date} symbol={symbol} />
+              <Panel title="四面向並列觀點" subtitle="§0 隔離原則:各代理獨立 verdict、不混合加權">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                  <VerdictCard title="技術面" answer={data.technical} />
+                  <VerdictCard title="消息面" answer={data.news} />
+                  <VerdictCard title="籌碼面" answer={data.chip} />
+                  <VerdictCard title="基本面" answer={data.fundamental} />
+                </div>
+              </Panel>
+            </>
+          ) : null}
 
-          {/* 最終決策（最重要結論，置頂顯示） */}
+          {/* 最終決策(操作參數:action / 進場 / 停損 / 目標)*/}
           {data?.decision && <FinalDecisionPanel decision={data.decision} />}
 
-          {/* 各代理詳細論述 */}
+          {/* 4 大面評分卡(分數導向)— Chip 內嵌投信動向 sub-section */}
+          {data?.technical && (
+            <AgentScorePanel
+              agentId="technical"
+              title="技術面 Agent"
+              subtitle="朱家泓六條件 + 戒律 + 淘汰法 + 林穎 MTF"
+              answer={data.technical}
+            />
+          )}
+          {data?.news && (
+            <AgentScorePanel
+              agentId="news"
+              title="消息題材面 Agent"
+              subtitle="YouTube 跨節目共識 + 新聞情緒 + 產業題材"
+              answer={data.news}
+            />
+          )}
+          {data?.chip && (
+            <AgentScorePanel
+              agentId="chip"
+              title="籌碼資金面 Agent"
+              subtitle="三大法人 + 投信 3比8 + ETF 共識 + 大戶分層 + 融資借券"
+              answer={data.chip}
+              extraSlot={<TrustMomentumPanel symbol={symbol} date={date} />}
+            />
+          )}
+          {data?.fundamental && (
+            <AgentScorePanel
+              agentId="fundamental"
+              title="基本估值面 Agent"
+              subtitle="月營收 / EPS / 毛利率 / ROE / PER 歷史比較"
+              answer={data.fundamental}
+            />
+          )}
+
+          {/* 各代理詳細推理(reasoning + dataPoints + bookCitations,展開深度視角)*/}
           {data?.technical && <TechnicalDetail answer={data.technical} />}
           {data?.news && <NewsDetail answer={data.news} />}
           {data?.chip && <ChipDetail answer={data.chip} />}
-          <TrustMomentumPanel symbol={symbol} date={date} />
           {data?.fundamental && <FundamentalDetail answer={data.fundamental} />}
           {data?.risk && <RiskDetail answer={data.risk} />}
           {data?.bull && data?.bear && <DebateDetail bull={data.bull} bear={data.bear} />}

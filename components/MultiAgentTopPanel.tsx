@@ -14,9 +14,19 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
+import { GradeBadge, UnscoredBadge } from '@/components/agents/ScoreLightBadge';
+import type { ScoreLight, StockGrade, SuitableFor } from '@/lib/agents/scoringTypes';
 
 type Verdict = 'pass' | 'watch' | 'fail';
 type FinalAction = 'buy' | 'watch' | 'skip';
+
+interface AgentVerdictSummary {
+  verdict: Verdict;
+  overview: string;
+  score?: number;
+  light?: ScoreLight;
+  confidence?: 'high' | 'medium' | 'low';
+}
 
 interface RunListItem {
   symbol: string;
@@ -29,10 +39,10 @@ interface RunListItem {
     phase4Done: boolean;
   };
   verdicts: {
-    technical:   { verdict: Verdict; overview: string } | null;
-    news:        { verdict: Verdict; overview: string } | null;
-    chip:        { verdict: Verdict; overview: string } | null;
-    fundamental: { verdict: Verdict; overview: string } | null;
+    technical:   AgentVerdictSummary | null;
+    news:        AgentVerdictSummary | null;
+    chip:        AgentVerdictSummary | null;
+    fundamental: AgentVerdictSummary | null;
   };
   risk: { verdict: 'green' | 'yellow' | 'red'; overview: string } | null;
   decision: {
@@ -41,6 +51,10 @@ interface RunListItem {
     bullScore: number;
     bearScore: number;
     sizeHint: number;
+    totalScore?: number;
+    grade?: StockGrade;
+    suitableFor?: SuitableFor;
+    gradeReason?: string;
   } | null;
 }
 
@@ -70,6 +84,15 @@ const VERDICT_DOT: Record<Verdict, string> = {
   pass:  'bg-green-500',
   watch: 'bg-yellow-500',
   fail:  'bg-red-500',
+};
+
+/** 燈號 → 顯示色塊(用在 4 面 mini 分數)*/
+const LIGHT_DOT: Record<ScoreLight, string> = {
+  green:        'bg-green-500',
+  yellow_green: 'bg-lime-500',
+  yellow:       'bg-yellow-500',
+  orange_red:   'bg-orange-500',
+  red:          'bg-red-500',
 };
 
 export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol, onDateChange }: Props) {
@@ -182,20 +205,20 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
       {/* 一行小說明 — 讓使用者快速理解這 tab 的功能與欄位 */}
       <div className="shrink-0 px-2 py-1 text-[10px] text-muted-foreground border-b border-border/40 bg-card/20 leading-relaxed space-y-0.5">
         <div>
-          對候選池跑 4 階段獨立分析後的結果。<span className="text-sky-400">建議</span>=最終決策、<span className="text-sky-400">多/空</span>=多空分數比、<span className="text-sky-400">部位</span>=建議資金 %。
+          對候選池跑 4 階段獨立分析後的結果。<span className="text-sky-400">等級</span>=綜合 A-E、<span className="text-sky-400">總分</span>=0-100、<span className="text-sky-400">面向</span>=4 大面分數燈號。
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-sky-400">面向 </span>
-          <span className="text-foreground/80">(左→右)</span>
-          <span className="px-1 py-0.5 rounded bg-blue-700/40 text-blue-200 border border-blue-500/50 text-[9px]">技</span>
-          <span className="px-1 py-0.5 rounded bg-purple-700/40 text-purple-200 border border-purple-500/50 text-[9px]">消</span>
-          <span className="px-1 py-0.5 rounded bg-orange-700/40 text-orange-200 border border-orange-500/50 text-[9px]">籌</span>
-          <span className="px-1 py-0.5 rounded bg-teal-700/40 text-teal-200 border border-teal-500/50 text-[9px]">基</span>
+          <span className="text-sky-400">等級</span>
+          <span className="px-1 py-0.5 rounded bg-emerald-700/40 text-emerald-200 border border-emerald-500/50 text-[9px]">A</span>
+          <span className="px-1 py-0.5 rounded bg-sky-700/40 text-sky-200 border border-sky-500/50 text-[9px]">B</span>
+          <span className="px-1 py-0.5 rounded bg-yellow-700/40 text-yellow-200 border border-yellow-500/50 text-[9px]">C</span>
+          <span className="px-1 py-0.5 rounded bg-orange-700/40 text-orange-200 border border-orange-500/50 text-[9px]">D</span>
+          <span className="px-1 py-0.5 rounded bg-red-700/40 text-red-200 border border-red-500/50 text-[9px]">E</span>
           <span>·</span>
-          <span className="text-foreground/80">顏色：</span>
-          <span className="inline-flex items-center gap-0.5"><span className="w-2 h-2 rounded-full bg-green-500" />通過</span>
-          <span className="inline-flex items-center gap-0.5"><span className="w-2 h-2 rounded-full bg-yellow-500" />觀察</span>
-          <span className="inline-flex items-center gap-0.5"><span className="w-2 h-2 rounded-full bg-red-500" />不通過</span>
+          <span className="text-foreground/80">面向(左→右):技/籌/基/消</span>
+          <span>·</span>
+          <span className="text-foreground/80">舊資料無評分顯示</span>
+          <span className="px-1 py-0.5 rounded bg-amber-700/30 text-amber-200 border border-amber-500/40 text-[9px]">⟳ 需重跑</span>
         </div>
       </div>
 
@@ -241,10 +264,11 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
             <thead className="sticky top-0 bg-card z-10 text-muted-foreground border-b border-border">
               <tr>
                 <th className="px-2 py-1.5 text-left font-medium">股票</th>
-                <th className="px-1 py-1.5 text-center font-medium" title="最終建議：進場 / 觀察 / 跳過">建議</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="A-E 綜合等級(規則 + 分數,LLM 不能改)">等級</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="最終建議:進場 / 觀察 / 跳過(decisionPath 規則式)">建議</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="多方分數 / 空方分數">多/空</th>
-                <th className="px-1 py-1.5 text-center font-medium" title="建議部位大小（占資金 %）">部位</th>
-                <th className="px-1 py-1.5 text-left font-medium" title="四面向獨立判定：技術 / 消息 / 籌碼 / 基本面">面向</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="建議部位大小(占資金 %)">部位</th>
+                <th className="px-1 py-1.5 text-left font-medium" title="4 大面向 0-100 分(技術 / 籌碼 / 基本 / 消息)">面向</th>
               </tr>
             </thead>
             <tbody>
@@ -274,6 +298,8 @@ function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (s
     run.phaseStatus.phase3Done,
     run.phaseStatus.phase4Done,
   ].filter(Boolean).length;
+  const hasGrade = run.decision?.grade != null && run.decision?.totalScore != null;
+  const isOldData = !!run.decision && !hasGrade;
 
   return (
     <tr
@@ -281,11 +307,25 @@ function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (s
         selected ? 'bg-sky-500/15 ring-1 ring-inset ring-sky-500/40' : ''
       }`}
       onClick={() => onSelect?.(run.symbol)}
-      title={run.decision?.overview ?? `Phase ${phaseProgress}/4 — 尚未完成決策`}
+      title={run.decision?.gradeReason ?? run.decision?.overview ?? `Phase ${phaseProgress}/4 — 尚未完成決策`}
     >
       <td className="px-2 py-1.5">
         <div className="text-foreground font-medium truncate max-w-[110px]">{run.name ?? '—'}</div>
         <div className="font-mono tabular-nums text-[10px] text-muted-foreground">{pureSymbol}</div>
+      </td>
+      <td className="px-1 py-1.5 text-center">
+        {hasGrade ? (
+          <GradeBadge grade={run.decision!.grade!} totalScore={run.decision!.totalScore!} size="sm" />
+        ) : isOldData ? (
+          <span
+            className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded border text-[9px] bg-amber-700/30 text-amber-200 border-amber-500/40"
+            title="此 decision 為舊版,需重跑 /multi-agent-decide 才有評分"
+          >
+            ⟳
+          </span>
+        ) : (
+          <UnscoredBadge size="sm" />
+        )}
       </td>
       <td className="px-1 py-1.5 text-center">
         {cfg ? (
@@ -309,15 +349,18 @@ function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (s
         {run.decision ? `${Math.round(run.decision.sizeHint * 100)}%` : '—'}
       </td>
       <td className="px-1 py-1.5">
-        <div className="flex gap-0.5" title="技術 / 消息 / 籌碼 / 基本">
-          {(['technical', 'news', 'chip', 'fundamental'] as const).map(k => {
-            const v = run.verdicts[k]?.verdict;
+        <div className="flex gap-0.5" title="技 / 籌 / 基 / 消(分數顏色;舊資料用 verdict 色)">
+          {(['technical', 'chip', 'fundamental', 'news'] as const).map(k => {
+            const a = run.verdicts[k];
+            // 優先用 score light(新評分);沒有 fallback verdict 三色
+            const cls = a?.light
+              ? LIGHT_DOT[a.light]
+              : a?.verdict ? VERDICT_DOT[a.verdict] : 'bg-muted';
+            const tip = a?.score != null
+              ? `${k}: ${a.score} 分 (${a.confidence ?? '—'})`
+              : a?.verdict ? `${k}: ${a.verdict}` : `${k}: 未完成`;
             return (
-              <span
-                key={k}
-                className={`w-2 h-2 rounded-full ${v ? VERDICT_DOT[v] : 'bg-muted'}`}
-                title={v ? `${k}: ${v}` : `${k}: 未完成`}
-              />
+              <span key={k} className={`w-2 h-2 rounded-full ${cls}`} title={tip} />
             );
           })}
         </div>
