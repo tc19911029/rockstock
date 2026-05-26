@@ -12,6 +12,7 @@
 
 import { useState } from 'react';
 import type { PerformanceItem } from '@/app/api/youtube/performance/route';
+import { EntryStateBadge } from '@/components/EntryStateBadge';
 
 interface Props {
   item: PerformanceItem;
@@ -138,6 +139,7 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
             {item.rating}
           </span>
         )}
+        {item.entryGate && <EntryStateBadge gate={item.entryGate} size="xs" />}
         <span title={sentimentLabel.title} className={`text-[10px] font-bold shrink-0 cursor-help ${sentimentLabel.cls}`}>{sentimentLabel.text}</span>
       </div>
 

@@ -21,6 +21,9 @@ import { deriveStockMentions, loadDailyAnalysis } from '@/lib/youtube/analysisSt
 import { loadSources, loadVideosForDate } from '@/lib/youtube/videoStorage';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { computeNDayReturns, type NDayReturns } from '@/lib/youtube/performance';
+import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
+import { computeEntryState, type EntryGateResult } from '@/lib/agents/entryGate';
+import { detectMarketRegime, thresholdsForRegime, type RegimeDetectResult } from '@/lib/agents/marketRegime';
 import type { StockSentiment, StockRating } from '@/lib/youtube/analysisStorage';
 
 export const runtime = 'nodejs';
@@ -52,6 +55,8 @@ export interface PerformanceItem {
   best_confidence: number;
   sources: PerformanceItemSource[];
   performance: NDayReturns;
+  /** as-of analysis date 的進場時機 gate（書本規則：連 2 漲停 / 月線乖離 / 末升段 → no_chase）*/
+  entryGate?: EntryGateResult;
 }
 
 export interface ConsensusSummary {
@@ -72,6 +77,8 @@ export interface PerformanceResponse {
   baseDate: string;
   items: PerformanceItem[];
   consensus?: ConsensusSummary;
+  /** 大盤 regime — 強多頭時 entryGate 閾值放寬 */
+  marketRegime?: RegimeDetectResult;
   message?: string;
 }
 
@@ -94,17 +101,29 @@ export async function GET(req: NextRequest) {
     }
 
     const mentions = deriveStockMentions(analysis);
-    const [sources, videos] = await Promise.all([
+    const [sources, videos, indexCandles] = await Promise.all([
       loadSources(),
       loadVideosForDate(date),
+      loadLocalCandles('^TWII', 'TW'),
     ]);
+    const indexAsOf = indexCandles ? indexCandles.filter(c => c.date <= date) : null;
+    const marketRegime = detectMarketRegime(indexAsOf);
+    const gateThresholds = thresholdsForRegime(marketRegime.regime);
     const sourceById = new Map(sources.map(s => [s.source_id, s]));
     const videoById = new Map(videos.map(v => [v.video_id, v]));
 
     const items: PerformanceItem[] = await Promise.all(
       mentions.stocks.map(async (m) => {
-        // K 線檔案命名為 `{code}.TW.json`，要帶後綴
-        const candles = await loadLocalCandles(`${m.stock_code}.TW`, 'TW');
+        // K 線檔案命名為 `{code}.TW.json`，要帶後綴；上櫃股 fallback .TWO
+        let candles = await loadLocalCandles(`${m.stock_code}.TW`, 'TW');
+        let symbolForInject = `${m.stock_code}.TW`;
+        if (!candles || candles.length === 0) {
+          candles = await loadLocalCandles(`${m.stock_code}.TWO`, 'TW');
+          symbolForInject = `${m.stock_code}.TWO`;
+        }
+        // 盤中今日 L1 cron 還沒寫今日封存 K → 從 L2 snapshot inject,
+        // 跟 ForwardAnalyzer / 候選池 / 多代理走的 forward API 同一管線,確保即時可看漲幅
+        candles = await injectL2TodayIfNeeded(candles, symbolForInject, 'TW', date);
         const perf = candles
           ? computeNDayReturns(candles, date)
           : {
@@ -116,6 +135,12 @@ export async function GET(req: NextRequest) {
               d20Return: null,
               maxGain: null, maxLoss: null,
             };
+
+        // entry_state 評估「as-of analysis date 收盤後能不能進場」— 切到 date，套用大盤 regime 對應的閾值
+        const asOf = candles ? candles.filter(c => c.date <= date) : [];
+        const entryGate = asOf.length >= 2 && asOf[asOf.length - 1].date === date
+          ? computeEntryState({ symbol: m.stock_code, candles: asOf, thresholds: gateThresholds })
+          : undefined;
 
         const sourcesArr: PerformanceItemSource[] = m.mentioned_in.map(mi => {
           const src = sourceById.get(mi.source_id);
@@ -145,6 +170,7 @@ export async function GET(req: NextRequest) {
           best_confidence: m.best_confidence,
           sources: sourcesArr,
           performance: perf,
+          entryGate,
         };
       }),
     );
@@ -162,7 +188,7 @@ export async function GET(req: NextRequest) {
       },
     };
 
-    return apiOk<PerformanceResponse>({ date, baseDate: date, items, consensus });
+    return apiOk<PerformanceResponse>({ date, baseDate: date, items, consensus, marketRegime });
   } catch (err) {
     return apiError(`performance failed: ${(err as Error).message}`, 500);
   }

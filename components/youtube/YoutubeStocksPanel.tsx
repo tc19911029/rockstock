@@ -17,6 +17,7 @@ import { YoutubeStockCard } from './YoutubeStockCard';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { fmtDateLabelTw } from '@/lib/dateDefaults';
 import type { PerformanceResponse, PerformanceItem, ConsensusSummary } from '@/app/api/youtube/performance/route';
+import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 
 interface Props {
   date: string;                                // 'YYYY-MM-DD'
@@ -40,8 +41,8 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
   const [sortBy, setSortBy] = useState<SortKey>('rating');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [filter, setFilter] = useState<FilterKey>('all');
-  // 跨節目共識面板（仿主頁朱老師分析的折疊樣式）— 預設展開，因為這是 mockup 主要 value-add
-  const [consensusOpen, setConsensusOpen] = useState(true);
+  // 跨節目共識面板（仿主頁朱老師分析的折疊樣式）— 預設收起,需要時自行展開
+  const [consensusOpen, setConsensusOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +135,7 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
           <span className="font-semibold text-foreground tabular-nums">{date}</span>
           <span className="text-foreground/80">{fmtDateLabelTw(date)}</span>
           <span>· YouTube 提及股票</span>
+          {data?.marketRegime && <MarketRegimeFlag regime={data.marketRegime} size="xs" />}
           {loading && <span className="text-sky-400 animate-pulse ml-auto">載入中…</span>}
         </div>
         {onDateChange && (

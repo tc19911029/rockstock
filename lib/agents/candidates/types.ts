@@ -8,6 +8,7 @@
  */
 
 import type { MarketId } from '@/lib/scanner/types';
+import type { EntryGateResult } from '@/lib/agents/entryGate';
 
 export const POOL_SCHEMA_VERSION = 1 as const;
 
@@ -97,6 +98,19 @@ export interface Candidate {
   name: string;
   market: MarketId;
   industry?: string;
+
+  /**
+   * 訊號日收盤價（pool date 當日 L1 close）— 給後續漲跌幅 forward perf 用
+   * server 端 read 時補上；舊 pool JSON 內可能不存在，client 拿到 undefined 就略過 forward
+   */
+  lastClose?: number;
+
+  /**
+   * 進場時機 gate — Pool API runtime 計算（不持久化到 pool JSON）
+   * 規則：連 2 漲停 / 月線乖離>15% / 季線乖離>25% / 末升段三條件 → no_chase；
+   * 回測 MA5 不破 → can_enter；其他 → watch
+   */
+  entryGate?: EntryGateResult;
 
   /** 進入 pool 的所有來源（至少有一個）*/
   sources: CandidateSources;

@@ -15,9 +15,10 @@
  *   - 不提供「建立 Pool」按鈕（首頁是看結果，要建請去 /agents/pool）
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
+import type { StockForwardPerformance } from '@/lib/scanner/types';
 import {
   POOL_WEIGHTS,
   POOL_MIN_SOURCE_COUNT_DEFAULT,
@@ -27,6 +28,10 @@ import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { formatLetters } from '@/lib/scanner/buyMethodTracks';
 import { signalOf } from '@/lib/i18n/fundamentalLabels';
+import { ForwardPerfRow } from '@/features/scan/components/ForwardPerfRow';
+import { EntryStateBadge } from '@/components/EntryStateBadge';
+import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
+import type { RegimeDetectResult } from '@/lib/agents/marketRegime';
 
 interface PoolResponse {
   ok: boolean;
@@ -37,7 +42,16 @@ interface PoolResponse {
   total?: number;
   returned?: number;
   candidates?: Candidate[];
+  marketRegime?: RegimeDetectResult;
   error?: string;
+}
+
+interface BacktestStateStat { n: number; winRate: number; avgReturn: number; avgMaxDD: number; rdRatio: number; }
+interface BacktestSummary {
+  generatedAt?: string;
+  range?: { from: string; to: string; days: number };
+  sampleCount?: number;
+  byState?: { can_enter?: BacktestStateStat; watch?: BacktestStateStat; no_chase?: BacktestStateStat };
 }
 
 interface Props {
@@ -101,9 +115,26 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  // forward perf — 跟策略掃描走同 endpoint(POST /api/backtest/forward,有 10min cache)
+  const [forwardMap, setForwardMap] = useState<Map<string, StockForwardPerformance>>(new Map());
+  const [isFetchingForward, setIsFetchingForward] = useState(false);
+  const forwardAbortRef = useRef<AbortController | null>(null);
   // 已知無資料的日期 — 漸進式 dim DatePicker pill
   const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
   const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
+
+  // backtest 歷史勝率 — 全局 stat，跟日期無關，fetch 一次就好
+  const [backtest, setBacktest] = useState<BacktestSummary | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/agents/backtest-summary')
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((j: { ok?: boolean } & BacktestSummary) => {
+        if (!cancelled && j.ok !== false) setBacktest(j);
+      })
+      .catch(() => { /* backtest 不是 critical，失敗就不顯示 */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // AbortController + 15s timeout 防卡載入中（user 快速切日期或 server hang）
   const abortRef = useRef<AbortController | null>(null);
@@ -166,7 +197,61 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     }).sort((a, b) => b.scores.total - a.scores.total);
   }, [data?.candidates, customWeights]);
 
+  // ⚡ 今日強進場 top 5 — entry_state 不是 no_chase + sourceCount ≥ 2 + score ≥ 50 + 大盤 ≠ bear
+  // 排序：can_enter 優先於 watch，內部按 score
+  const topPicks = useMemo(() => {
+    if (!data?.marketRegime || data.marketRegime.regime === 'bear') return [];
+    const eligible = sortedCandidates.filter(c =>
+      c.entryGate &&
+      c.entryGate.state !== 'no_chase' &&
+      c.sourceCount >= 2 &&
+      c.scores.total >= 50,
+    );
+    const stateOrder: Record<string, number> = { can_enter: 0, watch: 1, no_chase: 2 };
+    return [...eligible].sort((a, b) => {
+      const sa = stateOrder[a.entryGate!.state] ?? 9;
+      const sb = stateOrder[b.entryGate!.state] ?? 9;
+      if (sa !== sb) return sa - sb;
+      return b.scores.total - a.scores.total;
+    }).slice(0, 5);
+  }, [sortedCandidates, data?.marketRegime]);
+
   useEffect(() => { fetchPool(); }, [fetchPool]);
+
+  // 拿到 candidates 後 POST forward,渲染後續漲跌幅 row
+  // — 對齊策略掃描 UX:卡片先 render,forward 數字 lazy 填上(loading 期間顯示「…」)
+  useEffect(() => {
+    if (!data?.candidates || data.candidates.length === 0) {
+      setForwardMap(new Map());
+      return;
+    }
+    const stocks = data.candidates
+      .filter((c): c is Candidate & { lastClose: number } => typeof c.lastClose === 'number')
+      .map(c => ({ symbol: c.symbol, name: c.name, scanPrice: c.lastClose }));
+    if (stocks.length === 0) {
+      setForwardMap(new Map());
+      return;
+    }
+    forwardAbortRef.current?.abort();
+    const ac = new AbortController();
+    forwardAbortRef.current = ac;
+    setIsFetchingForward(true);
+    fetch('/api/backtest/forward', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scanDate: date, stocks }),
+      signal: ac.signal,
+    })
+      .then(r => r.ok ? r.json() as Promise<{ performance?: StockForwardPerformance[] }> : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => {
+        if (ac.signal.aborted) return;
+        const map = new Map<string, StockForwardPerformance>();
+        for (const p of j.performance ?? []) map.set(p.symbol, p);
+        setForwardMap(map);
+      })
+      .catch(() => { /* abort / network fail — 留空就好,UI 顯示 — */ })
+      .finally(() => { if (!ac.signal.aborted) setIsFetchingForward(false); });
+  }, [data, date]);
 
   const buildPool = useCallback(async () => {
     setBusy(true);
@@ -228,19 +313,13 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           />
         )}
         <div className="flex-1" />
+        {data?.marketRegime && <MarketRegimeFlag regime={data.marketRegime} size="xs" />}
         <span
           className="text-muted-foreground tabular-nums"
           title={data?.exists ? `顯示 ${data.returned} 檔／全部 ${data.total} 檔（受「≥ N 個面向」與每頁上限影響）` : '此日尚未建立候選池'}
         >
           {data?.exists ? `顯示 ${data.returned}／全部 ${data.total}` : '—'}
         </span>
-        <Link
-          href={`/agents/pool?date=${date}`}
-          className="text-sky-400 hover:underline text-[11px]"
-          title="開啟完整候選池頁"
-        >
-          完整頁 →
-        </Link>
       </div>
 
       {/* Content */}
@@ -296,6 +375,91 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           </div>
         )}
 
+        {data?.exists && topPicks.length > 0 && (
+          <div className="border-b border-amber-700/30 bg-gradient-to-b from-amber-950/30 to-transparent">
+            <div className="px-2 py-1.5 flex items-center gap-2 border-b border-amber-700/20 flex-wrap">
+              <span className="text-xs font-bold text-amber-200">⚡ 今日強進場 top {topPicks.length}</span>
+              <span className="text-[10px] text-amber-200/70">
+                (排除「不可追」+ ≥2 面向 + 總分 ≥50)
+              </span>
+              <div className="flex-1" />
+              {backtest?.byState && (
+                <span
+                  className="text-[10px] text-amber-200/90 cursor-help"
+                  title={`過去 ${backtest.range?.days ?? '?'} 天 scan (${backtest.range?.from} → ${backtest.range?.to}), 共 ${backtest.sampleCount} 筆 5-day forward 樣本。\n勝率 = forward 5 日為正報酬比例。R/DD = 平均報酬 ÷ 平均最大回撤。`}
+                >
+                  📈 過去 {backtest.range?.days ?? '?'} 天歷史勝率：
+                  <span className="text-emerald-300 font-mono ml-1">✓{((backtest.byState.can_enter?.winRate ?? 0) * 100).toFixed(0)}%</span>
+                  <span className="text-slate-300 font-mono ml-1">·{((backtest.byState.watch?.winRate ?? 0) * 100).toFixed(0)}%</span>
+                  <span className="text-rose-300 font-mono ml-1">✕{((backtest.byState.no_chase?.winRate ?? 0) * 100).toFixed(0)}%</span>
+                </span>
+              )}
+              <span className="text-[10px] text-muted-foreground">點任一檔 → 載走圖</span>
+            </div>
+            <div className="divide-y divide-amber-900/20">
+              {topPicks.map((c, idx) => {
+                const pure = c.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+                const gate = c.entryGate!;
+                const stat = backtest?.byState?.[gate.state];
+                const winRateLabel = stat
+                  ? `${(stat.winRate * 100).toFixed(0)}% (n=${stat.n})`
+                  : null;
+                return (
+                  <button
+                    key={c.symbol}
+                    type="button"
+                    onClick={() => onSelectStock?.(c.symbol)}
+                    className="w-full px-2 py-1.5 flex items-center gap-2 hover:bg-amber-950/30 transition-colors text-left"
+                    title={stat
+                      ? `${c.name}\n\n過去 ${backtest!.range?.days ?? '?'} 天歷史「${gate.state === 'can_enter' ? '可進' : gate.state === 'watch' ? '觀望' : '不可追'}」訊號：\n  • 勝率 ${(stat.winRate * 100).toFixed(1)}% (n=${stat.n})\n  • 平均 5 日 R: ${stat.avgReturn >= 0 ? '+' : ''}${(stat.avgReturn * 100).toFixed(1)}%\n  • 平均 maxDD: ${(stat.avgMaxDD * 100).toFixed(1)}%\n  • R/DD ratio: ${stat.rdRatio.toFixed(2)}`
+                      : undefined}
+                  >
+                    <span className="font-mono text-[10px] w-5 text-amber-300/80">#{idx + 1}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground tabular-nums">{pure}</span>
+                    <span className="text-xs font-medium text-foreground truncate max-w-[100px]">{c.name}</span>
+                    <EntryStateBadge gate={gate} size="xs" />
+                    <span
+                      className={`text-[10px] px-1 rounded border ${
+                        c.scores.total >= 70 ? 'bg-emerald-900/40 text-emerald-200 border-emerald-700'
+                        : 'bg-amber-900/40 text-amber-200 border-amber-700'
+                      }`}
+                      title="4 面向加權總分"
+                    >
+                      {c.scores.total}
+                    </span>
+                    <div className="flex gap-0.5 flex-wrap">
+                      {(Object.keys(c.sources) as SourceName[]).map(s => (
+                        <span
+                          key={s}
+                          className={`inline-flex items-center px-1 rounded border text-[9px] ${SOURCE_COLOR[s]}`}
+                        >
+                          {SOURCE_LABEL[s]}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex-1" />
+                    {winRateLabel && (
+                      <span
+                        className={`text-[9px] font-mono ${
+                          gate.state === 'can_enter' ? 'text-emerald-300'
+                          : gate.state === 'watch' ? 'text-slate-300'
+                          : 'text-rose-300'
+                        }`}
+                        title="同 entry_state 歷史勝率"
+                      >
+                        歷史 {winRateLabel}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-muted-foreground truncate max-w-[120px]" title={gate.reasons.join('｜')}>
+                      {gate.reasons[0]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {data?.exists && data.candidates && data.candidates.length > 0 && (
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-card z-10 text-muted-foreground border-b border-border">
@@ -303,6 +467,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                 <th className="px-2 py-1.5 text-left font-medium">股票</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="幾個面向同時看好">面向</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="4 面向加權總分（受權重 popover 設定影響）">總分</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="進場時機（書本規則：連 2 漲停 / 月線乖離>15% / 末升段 → 不可追；回測 MA5 不破 → 可進；其他觀望）">時機</th>
                 <th className="px-1 py-1.5 text-left font-medium">命中</th>
                 <th className="px-2 py-1.5 text-left font-medium">理由</th>
               </tr>
@@ -313,6 +478,8 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                   key={c.symbol}
                   candidate={c}
                   totalScore={c.scores.total}
+                  performance={forwardMap.get(c.symbol)}
+                  isFetchingForward={isFetchingForward}
                   onSelect={onSelectStock}
                   selected={selectedSymbol === c.symbol}
                 />
@@ -325,7 +492,21 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   );
 }
 
-function PoolRow({ candidate, totalScore, onSelect, selected }: { candidate: Candidate; totalScore?: number; onSelect?: (symbol: string) => void; selected?: boolean }) {
+function PoolRow({
+  candidate,
+  totalScore,
+  performance,
+  isFetchingForward,
+  onSelect,
+  selected,
+}: {
+  candidate: Candidate;
+  totalScore?: number;
+  performance?: StockForwardPerformance;
+  isFetchingForward?: boolean;
+  onSelect?: (symbol: string) => void;
+  selected?: boolean;
+}) {
   const pureSymbol = candidate.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const reasons: string[] = [];
   const t = candidate.sources.technical;
@@ -337,59 +518,77 @@ function PoolRow({ candidate, totalScore, onSelect, selected }: { candidate: Can
   const f = candidate.sources.fundamental;
   if (f && f.signals.length > 0) reasons.push(`基 ${signalOf(f.signals[0])}`);
 
+  const hoverClass = `hover:bg-muted/40 cursor-pointer transition-colors ${
+    selected ? 'bg-sky-500/15' : ''
+  }`;
+
   return (
-    <tr
-      className={`border-b border-border/40 hover:bg-muted/40 cursor-pointer transition-colors ${
-        selected ? 'bg-sky-500/15 ring-1 ring-inset ring-sky-500/40' : ''
-      }`}
-      onClick={() => onSelect?.(candidate.symbol)}
-      title={reasons.length > 0 ? reasons.join('\n') : `${candidate.name}（${candidate.industry ?? '—'}）`}
-    >
-      <td className="px-2 py-1.5">
-        <div className="text-foreground font-medium truncate max-w-[110px]">{candidate.name}</div>
-        <div className="font-mono tabular-nums text-[10px] text-muted-foreground">{pureSymbol}</div>
-      </td>
-      <td className="px-1 py-1.5 text-center font-mono font-semibold text-foreground">
-        {candidate.sourceCount}
-      </td>
-      <td className="px-1 py-1.5 text-center font-mono font-semibold">
-        {totalScore != null ? (
-          <span className={
-            totalScore >= 70 ? 'text-emerald-300'
-            : totalScore >= 50 ? 'text-amber-300'
-            : 'text-rose-300'
-          }>{totalScore}</span>
-        ) : <span className="text-muted-foreground">—</span>}
-      </td>
-      <td className="px-1 py-1.5">
-        <div className="flex gap-0.5 flex-wrap">
-          {(Object.keys(candidate.sources) as SourceName[]).map((s) => {
-            const youtubeHighConsensus = s === 'youtube' && candidate.sources.youtube?.inHighConsensus === true;
-            return (
-              <span
-                key={s}
-                title={youtubeHighConsensus
-                  ? `高共識：${candidate.sources.youtube?.mentionCount} 節目同向`
-                  : undefined}
-                className={`inline-flex items-center px-1 py-0.5 rounded border text-[10px] ${
-                  youtubeHighConsensus
-                    ? 'bg-purple-500/50 text-purple-100 border-purple-300 font-semibold'
-                    : SOURCE_COLOR[s]
-                }`}
-              >
-                {youtubeHighConsensus && <span className="mr-0.5">★</span>}
-                {SOURCE_LABEL[s]}
-              </span>
-            );
-          })}
-        </div>
-      </td>
-      <td className="px-2 py-1.5 text-[10px] text-muted-foreground">
-        <div className="space-y-0.5">
-          {reasons.map((r, i) => <div key={i}>{r}</div>)}
-        </div>
-      </td>
-    </tr>
+    <Fragment>
+      <tr
+        className={hoverClass}
+        onClick={() => onSelect?.(candidate.symbol)}
+        title={reasons.length > 0 ? reasons.join('\n') : `${candidate.name}（${candidate.industry ?? '—'}）`}
+      >
+        <td className="px-2 pt-1.5 pb-0.5">
+          <div className="text-foreground font-medium truncate max-w-[110px]">{candidate.name}</div>
+          <div className="font-mono tabular-nums text-[10px] text-muted-foreground">{pureSymbol}</div>
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center font-mono font-semibold text-foreground">
+          {candidate.sourceCount}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center font-mono font-semibold">
+          {totalScore != null ? (
+            <span className={
+              totalScore >= 70 ? 'text-emerald-300'
+              : totalScore >= 50 ? 'text-amber-300'
+              : 'text-rose-300'
+            }>{totalScore}</span>
+          ) : <span className="text-muted-foreground">—</span>}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center">
+          {candidate.entryGate
+            ? <EntryStateBadge gate={candidate.entryGate} size="xs" />
+            : <span className="text-muted-foreground text-[10px]">—</span>}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5">
+          <div className="flex gap-0.5 flex-wrap">
+            {(Object.keys(candidate.sources) as SourceName[]).map((s) => {
+              const youtubeHighConsensus = s === 'youtube' && candidate.sources.youtube?.inHighConsensus === true;
+              return (
+                <span
+                  key={s}
+                  title={youtubeHighConsensus
+                    ? `高共識：${candidate.sources.youtube?.mentionCount} 節目同向`
+                    : undefined}
+                  className={`inline-flex items-center px-1 py-0.5 rounded border text-[10px] ${
+                    youtubeHighConsensus
+                      ? 'bg-purple-500/50 text-purple-100 border-purple-300 font-semibold'
+                      : SOURCE_COLOR[s]
+                  }`}
+                >
+                  {youtubeHighConsensus && <span className="mr-0.5">★</span>}
+                  {SOURCE_LABEL[s]}
+                </span>
+              );
+            })}
+          </div>
+        </td>
+        <td className="px-2 pt-1.5 pb-0.5 text-[10px] text-muted-foreground">
+          <div className="space-y-0.5">
+            {reasons.map((r, i) => <div key={i}>{r}</div>)}
+          </div>
+        </td>
+      </tr>
+      {/* 後續漲跌幅 — 對齊策略掃描卡片 row 4 */}
+      <tr
+        className={`border-b border-border/40 ${hoverClass}`}
+        onClick={() => onSelect?.(candidate.symbol)}
+      >
+        <td colSpan={6} className="px-2 pb-1.5 pt-0">
+          <ForwardPerfRow performance={performance} isFetching={isFetchingForward} />
+        </td>
+      </tr>
+    </Fragment>
   );
 }
 

@@ -23,6 +23,9 @@ import {
   POOL_MIN_SOURCE_COUNT_DEFAULT,
   POOL_WEIGHTS,
 } from '@/lib/agents/candidates/poolWeights';
+import { loadLocalCandlesForDate } from '@/lib/datasource/LocalCandleStore';
+import { computeEntryState } from '@/lib/agents/entryGate';
+import { detectMarketRegime, thresholdsForRegime } from '@/lib/agents/marketRegime';
 import type { MarketId } from '@/lib/scanner/types';
 
 export const runtime = 'nodejs';
@@ -59,6 +62,46 @@ export async function GET(req: NextRequest) {
 
   const sliced = withScores.slice(0, limit);
 
+  // 大盤 regime 用 ^TWII（TW Market 才有意義；CN 暫保留 normal threshold）
+  let regime: ReturnType<typeof detectMarketRegime> = {
+    regime: 'normal', reasons: ['未取得大盤資料'],
+    metrics: { closeVsMa20: null, closeVsMa60: null, fiveDayReturn: null, ma20VsMa60: null },
+  };
+  if (market === 'TW') {
+    try {
+      const indexCandles = await loadLocalCandlesForDate('^TWII', 'TW', date);
+      regime = detectMarketRegime(indexCandles);
+    } catch { /* keep normal default */ }
+  }
+  const gateThresholds = thresholdsForRegime(regime.regime);
+
+  // 補上 lastClose（訊號日收盤）+ entry_state（書本進場時機 gate）
+  // — pool JSON 沒存這欄，read 時從 L1 K 線拿並 runtime 算 entry_state（每天 candle 變動）
+  const slicedWithLastClose = await Promise.all(
+    sliced.map(async (c) => {
+      let enriched = c;
+      try {
+        const candles = await loadLocalCandlesForDate(c.symbol, c.market as 'TW' | 'CN', date);
+        if (!candles || candles.length === 0) return enriched;
+        const last = candles[candles.length - 1];
+        if (!last || last.date !== date) return enriched;
+        if (enriched.lastClose == null) enriched = { ...enriched, lastClose: last.close };
+        const gate = computeEntryState({ symbol: c.symbol, candles, thresholds: gateThresholds });
+        enriched = {
+          ...enriched,
+          entryGate: {
+            state: gate.state,
+            reasons: gate.reasons,
+            metrics: gate.metrics,
+          },
+        };
+        return enriched;
+      } catch {
+        return enriched;
+      }
+    }),
+  );
+
   return apiOk({
     date,
     market,
@@ -66,16 +109,17 @@ export async function GET(req: NextRequest) {
     generatedAt: pool.generatedAt,
     sourceStatus: pool.sourceStatus,
     total: pool.candidates.length,
-    returned: sliced.length,
+    returned: slicedWithLastClose.length,
     minSourceCount,
     sort,
     weights: POOL_WEIGHTS,
+    marketRegime: regime,
     distribution: {
       sourceCount4: pool.candidates.filter(c => c.sourceCount === 4).length,
       sourceCount3: pool.candidates.filter(c => c.sourceCount === 3).length,
       sourceCount2: pool.candidates.filter(c => c.sourceCount === 2).length,
       sourceCount1: pool.candidates.filter(c => c.sourceCount === 1).length,
     },
-    candidates: sliced,
+    candidates: slicedWithLastClose,
   });
 }

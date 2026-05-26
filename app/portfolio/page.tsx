@@ -10,6 +10,7 @@ import { classifyMarket } from '@/lib/market/classify';
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
 import { POLLING } from '@/lib/config';
+import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDailyActionPanel';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
 function todayCST(): string {
@@ -437,6 +438,9 @@ export default function PortfolioPage() {
             </p>
           </div>
         )}
+
+        {/* 📋 今日操作建議（書本訊號 daily action）— 讀 server holdings.json (本機 zustand 可能不同步) */}
+        <PortfolioDailyActionPanel />
 
         {/* Summary — TWD / CNY 分開顯示，損益已扣買賣手續費+交易稅 */}
         {holdings.length > 0 && (
