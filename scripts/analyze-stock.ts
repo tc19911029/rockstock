@@ -226,8 +226,9 @@ async function main(): Promise<void> {
   const dateIdx = args.indexOf('--date');
   const date = dateIdx >= 0 ? args[dateIdx + 1] : todayTaipei();
 
+  const name = loadStockName(symbol);
   console.log(`\n========================================`);
-  console.log(`6770 力積電 一鍵分析 → symbol=${symbol} date=${date}`);
+  console.log(`${symbol} ${name} 一鍵分析 → date=${date}`);
   console.log(`========================================\n`);
 
   // ── 1. L1 重讀 (C2)
@@ -376,7 +377,6 @@ async function main(): Promise<void> {
   console.log(`  resultCount=${sv.resultCount} marketTrend=${sv.marketTrend} ${symbol} inPool=${sv.inPool ? '✓' : '✗ (掃描器擋下)'}`);
 
   // ── 10. YouTube transcripts (F1) + 自動 sentiment
-  const name = loadStockName(symbol);
   console.log(`\n【消息面 — YouTube 多 transcript 過去 7 天】(name="${name}")`);
   const mentions = grepYouTubeMentions(symbol, name, 7);
   console.log(`  找到 ${mentions.length} 支 transcript 提到`);
