@@ -39,6 +39,23 @@ export async function GET(req: NextRequest) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 
   let quote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
+  let quoteDate: string = today;  // 預設 today（live quote 路徑）；L1 fallback 會改成真實 last.date
+
+  // ── INDEX 優先走 L2 snapshot（mis.twse 抓的 ^TWII / 000001.SS 真實當日 quote）──
+  // 個股不能進這條（pureCode='000001' 會撞到深圳平安銀行 SZ），但 INDEX 在 snapshot
+  // 內 symbol 帶 '^' / '.SS' 前後綴，不會與個股相撞。
+  // 修這條的原因：原本 INDEX 直接走最下面「L1 末根」fallback，回的是「昨天的 K + 強制 today 的 date」，
+  // polling 端拿到後會用 Math.max(high)/Math.min(low) 把已經正確的今日 bar 蓋成「昨天 OHLCV + 今日 high」
+  // 詭異混合（chg 變 0%）。L2 snapshot 內已有 INDEX 即時 quote，優先用它。
+  if (isIndex && market) {
+    try {
+      const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
+      const sq = snapshot?.quotes.find(q => q.symbol === symbol);  // INDEX 用完整 symbol 比對（^TWII / 000001.SS）
+      if (sq && sq.close > 0) {
+        quote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
+      }
+    } catch { /* fallthrough */ }
+  }
 
   // ── TW ──
   if (isTW) {
@@ -83,8 +100,9 @@ export async function GET(req: NextRequest) {
     } catch { /* fallthrough */ }
   }
 
-  // ── INDEX fallback：讀 L1 末根（指數沒進 L2 snapshot，至少給最後一個交易日的值）
+  // ── INDEX fallback：讀 L1 末根（L2 snapshot 沒抓到，給最後一個交易日的值墊著）
   // 2026-05-07：原本指數走 quote API 永遠 404 → 走圖 polling 失敗，盤中不更新。
+  // 2026-05-26：回傳真實 last.date 而不是強制 today，讓 polling 端能比對「這是舊資料」拒絕覆寫。
   if (!quote && (isTwIndex || isCnIndex)) {
     try {
       const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
@@ -92,11 +110,12 @@ export async function GET(req: NextRequest) {
       const last = f?.candles[f.candles.length - 1];
       if (last && last.close > 0) {
         quote = { open: last.open, high: last.high, low: last.low, close: last.close, volume: last.volume };
+        quoteDate = last.date;
       }
     } catch { /* fallthrough */ }
   }
 
   if (!quote) return apiError(`無法取得 ${symbol} 報價`, 404);
 
-  return apiOk({ symbol, date: today, ...quote });
+  return apiOk({ symbol, date: quoteDate, ...quote });
 }

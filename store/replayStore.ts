@@ -410,6 +410,11 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           // 不要拿這個值來偽造一根「今日 bar」造成 04-24/04-25 重複
           const todayIsTradingDay = isTradingDay(today, market);
 
+          // quote.date 比 lastCandle.date 早 → 是舊資料（如 INDEX L1 fallback 回昨天的 K）
+          // 必須拒絕，否則會把 /api/stock?local=1 注入好的今日 bar 蓋成「昨天 OHLCV + 今日 high」混合。
+          if (q.date && q.date < lastCandle.date) {
+            return;
+          }
           if (lastCandle.date === today) {
             // 覆蓋今日 bar
             updatedCandles[updatedCandles.length - 1] = {
