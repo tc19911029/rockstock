@@ -321,7 +321,10 @@ describe('sources.json playlist-URL invariant', () => {
     const sourcesPath = path.join(process.cwd(), 'data/youtube/sources.json');
     if (!fs.existsSync(sourcesPath)) return; // skip if not seeded
     const sources = JSON.parse(fs.readFileSync(sourcesPath, 'utf-8'));
-    const playlistRe = /^https:\/\/www\.youtube\.com\/playlist\?list=PL[A-Za-z0-9_-]+/;
+    // Accept both PL (user-created playlist) and UU (channel uploads playlist) —
+    // 兩者都是合法 playlist ID，yt-dlp / playlist API 都能正常抓；
+    // 「股癌 Gooaye」用 UU 開頭 (uploads playlist) 是 normal usage，不是 channel URL.
+    const playlistRe = /^https:\/\/www\.youtube\.com\/playlist\?list=(PL|UU)[A-Za-z0-9_-]+/;
     for (const s of sources) {
       expect(s.kind).toBe('playlist');
       expect(s.url).toMatch(playlistRe);
