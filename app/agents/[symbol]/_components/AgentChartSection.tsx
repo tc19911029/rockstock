@@ -84,6 +84,7 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
     foreign: false, trust: false, dealer: false, retail: false,
     h400: false, h1000: false,
     cnMain: false, cnRetail: false,
+    mainForce: false, season: false,
   });
   const [showIndicators, setShowIndicators] = useState(true);
   const [chartSplit, setChartSplit] = useState(0.65);

@@ -184,6 +184,17 @@ interface CandleChartProps {
     achievementRate?: number;
     kind: 'bottom' | 'top';
   } | null;
+  /**
+   * 雙B戰法主圖疊加（三色資金，陸股自創）— 像 MA/BB 一樣疊在 K 線主圖上。
+   * 傳 null（或 undefined）= 不畫；4 條價格線 + 黃紅雙線金叉死叉/突破跌破買賣點。
+   */
+  shuangB?: {
+    zhineng: { time: string; value: number }[];
+    zb4: { time: string; value: number }[];
+    zb5: { time: string; value: number }[];
+    duokong: { time: string; value: number }[];
+    markers: { time: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown'; color: string; text: string }[];
+  } | null;
 }
 
 export default function CandleChart({
@@ -203,6 +214,7 @@ export default function CandleChart({
   highlightDate,
   centerOnDate,
   lockedPattern,
+  shuangB = null,
 }: CandleChartProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
@@ -221,6 +233,8 @@ export default function CandleChart({
   const targetRef         = useRef<ISeriesApi<'Line'> | null>(null);
   const stopRef           = useRef<ISeriesApi<'Line'> | null>(null);
   const patternConnectorRef = useRef<ISeriesApi<'Line'> | null>(null);
+  // 雙B戰法主圖疊加（三色資金）：智能交易線/ZB4/ZB5/多空線
+  const shuangBRefs       = useRef<{ zhineng?: ISeriesApi<'Line'>; zb4?: ISeriesApi<'Line'>; zb5?: ISeriesApi<'Line'>; duokong?: ISeriesApi<'Line'> }>({});
   // Keep latest candles accessible inside event closures without re-subscribing
   const candlesRef     = useRef<CandleWithIndicators[]>(candles);
   const timeMapRef     = useRef<Map<string | number, CandleWithIndicators>>(new Map());
@@ -412,6 +426,20 @@ export default function CandleChart({
       lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
     });
 
+    // ── 雙B戰法主圖疊加（三色資金）：智能交易線(青粗)/ZB4(黃)/ZB5(紅)/多空線(黃點線) ──
+    shuangBRefs.current.zhineng = chart.addSeries(LineSeries, {
+      color: '#22D3EE', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+    });
+    shuangBRefs.current.zb4 = chart.addSeries(LineSeries, {
+      color: '#FFD000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+    });
+    shuangBRefs.current.zb5 = chart.addSeries(LineSeries, {
+      color: '#FF433D', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+    });
+    shuangBRefs.current.duokong = chart.addSeries(LineSeries, {
+      color: '#FFD000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2,
+    });
+
     chartRef.current  = chart;
     candleRef.current = candleSeries;
     maRefs.current    = newMARef;
@@ -479,9 +507,15 @@ export default function CandleChart({
   useEffect(() => {
     if (!candleRef.current || candles.length === 0) return;
 
-    candleRef.current.setData(candles.map(c => ({
-      time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close,
-    })));
+    // 訊號日那根 K 棒整根塗黃（取代舊的黃點 + 「訊號日」文字標記）
+    const hlDate = highlightDate ? highlightDate.replace(/\*$/, '') : null;
+    candleRef.current.setData(candles.map(c => {
+      const base = { time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close };
+      if (hlDate && c.date.replace(/\*$/, '') === hlDate) {
+        return { ...base, color: '#facc15', borderColor: '#facc15', wickColor: '#facc15' };
+      }
+      return base;
+    }));
     /** 過濾 null/undefined/NaN（分鐘K MA 數據不足時會產生 NaN） */
     const validNum = (v: number | undefined | null): v is number =>
       v != null && Number.isFinite(v);
@@ -718,7 +752,18 @@ export default function CandleChart({
         if (range) broadcastRange(range as { from: number; to: number });
       });
     }
-  }, [candles, centerOnDate, showTrendlines, showAscendingTrendline, showDescendingTrendline, showAscendingChannel, showDescendingChannel, showConsolidationLines]);
+  }, [candles, centerOnDate, highlightDate, showTrendlines, showAscendingTrendline, showDescendingTrendline, showAscendingChannel, showDescendingChannel, showConsolidationLines]);
+
+  // ── 雙B戰法主圖疊加：set/clear 四條線（markers 併入下方 markers effect）──
+  useEffect(() => {
+    const r = shuangBRefs.current;
+    const toLine = (pts?: { time: string; value: number }[]) =>
+      (pts ?? []).map(p => ({ time: toTime(p.time), value: p.value }));
+    r.zhineng?.setData(shuangB ? toLine(shuangB.zhineng) : []);
+    r.zb4?.setData(shuangB ? toLine(shuangB.zb4) : []);
+    r.zb5?.setData(shuangB ? toLine(shuangB.zb5) : []);
+    r.duokong?.setData(shuangB ? toLine(shuangB.duokong) : []);
+  }, [shuangB]);
 
   // ── MA visibility toggle ─────────────────────────────────────────────────
   useEffect(() => {
@@ -775,17 +820,7 @@ export default function CandleChart({
       const cfg = markerCfg[m.type];
       return { time: toTime(m.date), position: cfg.position, shape: cfg.shape, color: cfg.color, text: m.label, size: 1 };
     });
-    // 加入訊號日高亮標記
-    if (highlightDate && candles.some(c => c.date === highlightDate)) {
-      converted.push({
-        time: toTime(highlightDate),
-        position: 'belowBar',
-        shape: 'circle',
-        color: '#facc15',
-        text: '訊號日',
-        size: 2,
-      });
-    }
+    // 訊號日改為整根 K 棒塗黃（見上方 candle setData），不再用黃點 + 文字標記
     // 加入頭底標記（寶典 p.21-22 MA5 分段轉折波，書本規則無振幅門檻）
     // 只顯示已確認 pivot（不含 provisional），進行中段不算頭/底
     if (showPivots && candles.length >= 20) {
@@ -820,6 +855,15 @@ export default function CandleChart({
         });
       }
     }
+    // 雙B戰法買賣點（黃紅雙線金叉/死叉 + 突破/跌破智能交易線）
+    if (shuangB) {
+      for (const m of shuangB.markers) {
+        converted.push({
+          time: toTime(m.time), position: m.position, shape: m.shape,
+          color: m.color, text: m.text, size: 1,
+        });
+      }
+    }
     // lightweight-charts 要求 markers 按時間升序
     converted.sort((a, b) => {
       const ta = String(a.time);
@@ -827,7 +871,7 @@ export default function CandleChart({
       return ta < tb ? -1 : ta > tb ? 1 : 0;
     });
     markersPlugRef.current.setMarkers(converted);
-  }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern]);
+  }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern, shuangB]);
 
   // ── Support/resistance price lines (前高壓 / 前低撐 / 大量撐壓) ──────────
   useEffect(() => {

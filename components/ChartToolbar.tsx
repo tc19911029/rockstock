@@ -2,6 +2,7 @@
 
 import type { Candle } from '@/types';
 import type { TrendState } from '@/lib/analysis/trendAnalysis';
+import { MarketTrendBadge } from './MarketTrendBadge';
 
 interface MaToggles { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma240: boolean }
 interface Indicators {
@@ -22,6 +23,10 @@ interface Indicators {
   cnMain?: boolean;
   /** CN 散戶資金（中單+小單） */
   cnRetail?: boolean;
+  /** 三色資金「主力狀態F」副圖 — 僅 CN */
+  mainForce?: boolean;
+  /** 三色資金「捕撈季節」副圖 — 僅 CN */
+  season?: boolean;
 }
 
 interface ChartToolbarProps {
@@ -38,6 +43,9 @@ interface ChartToolbarProps {
   onMaToggle: (key: keyof MaToggles) => void;
   showBollinger: boolean;
   onBollingerToggle: () => void;
+  /** 雙B戰法主圖疊加（陸股自創；像 BB 一樣疊在 K 線主圖上）*/
+  showShuangB?: boolean;
+  onShuangBToggle?: () => void;
   indicators: Indicators;
   onIndicatorToggle: (key: keyof Indicators) => void;
   showMarkers: boolean;
@@ -75,6 +83,9 @@ interface ChartToolbarProps {
   canNextBuyPoint?: boolean;
   /** 股票代碼，用於判斷市場（.TW/.TWO=台股，量顯示為張） */
   ticker?: string;
+  /** 大盤趨勢徽章 — 顯示在個股「趨勢」旁邊 */
+  market?: 'TW' | 'CN';
+  scanDate?: string | null;
 }
 
 const MA_CONFIGS = [
@@ -124,6 +135,7 @@ export default function ChartToolbar({
   currentInterval, onIntervalChange,
   maToggles, onMaToggle,
   showBollinger, onBollingerToggle,
+  showShuangB = false, onShuangBToggle,
   indicators, onIndicatorToggle,
   showMarkers, onMarkersToggle,
   signalStrengthMin, onSignalStrengthChange,
@@ -142,6 +154,7 @@ export default function ChartToolbar({
   onPrevBuyPoint, onNextBuyPoint,
   canPrevBuyPoint = true, canNextBuyPoint = true,
   ticker,
+  market, scanDate,
 }: ChartToolbarProps) {
   const chg = prevCandle ? candle.close - prevCandle.close : 0;
   const chgPct = prevCandle ? (chg / prevCandle.close) * 100 : 0;
@@ -180,6 +193,7 @@ export default function ChartToolbar({
             趨勢：{trend === '多頭' ? '▲' : trend === '空頭' ? '▼' : '↔'} {trend}
           </span>
         )}
+        {market && <MarketTrendBadge market={market} scanDate={scanDate ?? null} />}
         <div className="flex items-center gap-x-2 text-[11px] shrink-0">
           <span className="text-muted-foreground/70">開<span className="text-foreground/90 ml-0.5 tabular-nums">{candle.open.toFixed(2)}</span></span>
           <span className="text-muted-foreground/70">高<span className="text-bull ml-0.5 tabular-nums">{candle.high.toFixed(2)}</span></span>
@@ -240,6 +254,17 @@ export default function ChartToolbar({
           }`}
           title="布林通道 (20, 2)"
         >BB</button>
+        {isCN && onShuangBToggle && (
+          <button
+            onClick={onShuangBToggle}
+            aria-pressed={showShuangB}
+            aria-label={`${showShuangB ? '隱藏' : '顯示'}雙B戰法`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showShuangB ? 'bg-fuchsia-700/60 text-fuchsia-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="雙B戰法（三色資金）— 智能交易線/ZB4/ZB5/多空線 + 黃紅雙線金叉死叉買賣點，疊在 K 線主圖上"
+          >雙B</button>
+        )}
         {INDICATOR_CONFIGS.map(({ key, label }) => (
           <button key={key}
             onClick={() => onIndicatorToggle(key)}
@@ -249,6 +274,19 @@ export default function ChartToolbar({
               indicators[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
           >{label}</button>
+        ))}
+        {isCN && (['mainForce', 'season'] as const).map(key => (
+          <button key={key}
+            onClick={() => onIndicatorToggle(key)}
+            aria-pressed={!!indicators[key]}
+            aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${key === 'mainForce' ? '主力狀態' : '捕撈季節'} 副圖`}
+            title={key === 'mainForce'
+              ? '主力狀態F（三色資金）副圖：中線主力/控盤/短線游資/超跌五色柱'
+              : '捕撈季節（三色資金）副圖：XYS 動能柱 + 快慢線 + 金叉死叉'}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              indicators[key] ? 'bg-fuchsia-700/60 text-fuchsia-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+          >{key === 'mainForce' ? '主力狀態' : '捕撈季節'}</button>
         ))}
         {(isTW || isCN) && (
           <>

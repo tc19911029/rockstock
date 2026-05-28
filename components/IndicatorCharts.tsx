@@ -17,6 +17,7 @@ import {
 } from 'lightweight-charts';
 import { CandleWithIndicators } from '@/types';
 import { subscribeRangeSync, getLastRange, LogicalRange, subscribeCrosshairSync } from './CandleChart';
+import type { ZhuliSeries, XysTiers, LinePoint, BarPoint, ChartMarker } from '@/lib/cn-sanse/indicators';
 
 /** Convert date string to lightweight-charts Time.
  *  Daily: 'YYYY-MM-DD' → string Time (business day)
@@ -680,6 +681,167 @@ function CnFlowChart({ flowKey, candles, chips, hoverCandle }: {
   );
 }
 
+// ── 三色資金副圖（主力狀態F / 捕撈季節）— 資料來自 /api/cn-sanse/chart ─────────
+// 對齊主圖：以 candle 日期為基準 map（缺值補 0），確保 bar 數與主圖一致 → logical range 同步可用
+
+export interface SanSeXysData {
+  xys0: BarPoint[];
+  xys1: LinePoint[];
+  xys2: LinePoint[];
+  subMarkers: ChartMarker[];
+  xysTiers: XysTiers | null;
+}
+
+/** 把 {date→value} 系列對齊到 candle 序列（缺值補 0）*/
+function alignToCandles(candles: CandleWithIndicators[], pts: { time: string; value: number }[] | undefined): { time: Time; value: number }[] {
+  const m = new Map((pts ?? []).map(p => [p.time, p.value]));
+  return candles.map(c => ({ time: toTime(c.date), value: m.get(c.date) ?? 0 }));
+}
+
+function setLastRange(chart: IChartApi | null) {
+  requestAnimationFrame(() => { const r = getLastRange(); if (r && chart) chart.timeScale().setVisibleLogicalRange(r); });
+}
+
+// ── 主力狀態F：中線主力(紅)/控盤(黃)/短線游資(紫)/短線超跌(藍)/中線超跌(綠) 五色柱 ──
+function MainForceChart({ candles, zhuli, hoverCandle }: { candles: CandleWithIndicators[]; zhuli: ZhuliSeries; hoverCandle?: CandleWithIndicators | null }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Histogram' | 'Line'>[]>([]);
+  // crosshair 同步用：主序列 + date→value map（跟主圖共享垂直虛線）
+  const primaryRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const valMapRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = makeChart(containerRef.current, false);
+    chartRef.current = chart;
+    const unsub = subscribeRangeSync((range: LogicalRange | null) => { if (range) chart.timeScale().setVisibleLogicalRange(range); });
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !primaryRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      chartRef.current.setCrosshairPosition(valMapRef.current.get(time) ?? 0, toTime(time), primaryRef.current);
+    });
+    const ro = new ResizeObserver(() => { if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight || 80 }); });
+    ro.observe(containerRef.current);
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); chartRef.current = null; seriesRef.current = []; };
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || candles.length === 0) return;
+    // 清掉上一輪 series（避免換股/replay 時疊加）
+    for (const s of seriesRef.current) { try { chart.removeSeries(s); } catch { /* noop */ } }
+    seriesRef.current = [];
+    const bars: [LinePoint[], string][] = [
+      [zhuli.midStrength, '#FF433D'], [zhuli.midControl, '#FFD000'],
+      [zhuli.shortAttack, '#8000FF'], [zhuli.shortOversold, '#3B82F6'], [zhuli.midOversold, '#16C784'],
+    ];
+    for (const [pts, color] of bars) {
+      const s = chart.addSeries(HistogramSeries, { color, base: 0, priceLineVisible: false, lastValueVisible: false });
+      s.setData(alignToCandles(candles, pts).map(p => ({ ...p, value: p.value > 0 ? p.value : 0 })));
+      seriesRef.current.push(s);
+    }
+    let lastLine: ISeriesApi<'Line'> | null = null;
+    for (const [pts, color] of [[zhuli.midStrength, '#FF433D'], [zhuli.midControl, '#FFD000']] as [LinePoint[], string][]) {
+      const s = chart.addSeries(LineSeries, { color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      s.setData(alignToCandles(candles, pts));
+      seriesRef.current.push(s);
+      lastLine = s;
+    }
+    primaryRef.current = lastLine;
+    // key 用 candle 原始日期字串（crosshair 同步傳的是 candle.date，非轉換後的 Time）
+    valMapRef.current = new Map(zhuli.midControl.map((p) => [p.time, p.value]));
+    setLastRange(chart);
+  }, [candles, zhuli]);
+
+  const valAt = (pts: LinePoint[], date?: string) => { const v = pts.find(p => p.time === date)?.value; return v != null ? v.toFixed(2) : '—'; };
+  const d = (hoverCandle ?? candles[candles.length - 1])?.date;
+  return (
+    <div className="relative h-full">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+        <span className="text-muted-foreground">主力狀態F</span>
+        <span className="text-fuchsia-400">短攻 {valAt(zhuli.shortAttack, d)}</span>
+        <span style={{ color: '#FF433D' }}>中強 {valAt(zhuli.midStrength, d)}</span>
+        <span className="text-amber-300">中控 {valAt(zhuli.midControl, d)}</span>
+        <span className="text-blue-400">短超跌 {valAt(zhuli.shortOversold, d)}</span>
+      </div>
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
+}
+
+// ── 捕撈季節：XYS 動能柱（紫/綠）+ 4 級量能彩柱 + 快慢線 + 金叉死叉 ──
+function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicators[]; xys: SanSeXysData; hoverCandle?: CandleWithIndicators | null }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Histogram' | 'Line'>[]>([]);
+  const primaryRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const valMapRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = makeChart(containerRef.current, false);
+    chartRef.current = chart;
+    const unsub = subscribeRangeSync((range: LogicalRange | null) => { if (range) chart.timeScale().setVisibleLogicalRange(range); });
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !primaryRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      chartRef.current.setCrosshairPosition(valMapRef.current.get(time) ?? 0, toTime(time), primaryRef.current);
+    });
+    const ro = new ResizeObserver(() => { if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight || 80 }); });
+    ro.observe(containerRef.current);
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); chartRef.current = null; seriesRef.current = []; };
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || candles.length === 0) return;
+    for (const s of seriesRef.current) { try { chart.removeSeries(s); } catch { /* noop */ } }
+    seriesRef.current = [];
+    // 動能柱（紫>0 / 綠<0）；對齊 candle，缺值補 0
+    const xys0Map = new Map(xys.xys0.map(b => [b.time, b]));
+    const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false, base: 0 });
+    hist.setData(candles.map(c => {
+      const b = xys0Map.get(c.date);
+      return { time: toTime(c.date), value: b?.value ?? 0, color: b?.color ?? '#475569' };
+    }));
+    seriesRef.current.push(hist);
+    primaryRef.current = hist;
+    valMapRef.current = new Map(xys.xys0.map((b) => [b.time, b.value]));
+    // 4 級量能彩柱（稀疏，只在符合的日期出現）
+    const tierBar = (pts: LinePoint[] | undefined, color: string) => {
+      if (!pts?.length) return;
+      const s = chart.addSeries(HistogramSeries, { color, base: 0, priceLineVisible: false, lastValueVisible: false });
+      s.setData(pts.map(p => ({ time: toTime(p.time), value: p.value })));
+      seriesRef.current.push(s);
+    };
+    if (xys.xysTiers) {
+      tierBar(xys.xysTiers.green, '#16C784'); tierBar(xys.xysTiers.yellow, '#FFD000');
+      tierBar(xys.xysTiers.cyan, '#22D3EE'); tierBar(xys.xysTiers.blue, '#1D4ED8');
+    }
+    const fast = chart.addSeries(LineSeries, { color: '#3B82F6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    fast.setData(alignToCandles(candles, xys.xys1));
+    seriesRef.current.push(fast);
+    const slow = chart.addSeries(LineSeries, { color: '#4080FF', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    slow.setData(alignToCandles(candles, xys.xys2));
+    seriesRef.current.push(slow);
+    createSeriesMarkers(slow, xys.subMarkers.map(m => ({ time: toTime(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text })));
+    setLastRange(chart);
+  }, [candles, xys]);
+
+  const d = (hoverCandle ?? candles[candles.length - 1])?.date;
+  const xys0v = xys.xys0.find(b => b.time === d)?.value;
+  return (
+    <div className="relative h-full">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+        <span className="text-muted-foreground">捕撈季節</span>
+        <span className={(xys0v ?? 0) >= 0 ? 'text-fuchsia-400' : 'text-emerald-400'}>動能 {xys0v != null ? xys0v.toFixed(2) : '—'}</span>
+      </div>
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
+}
+
 // ── Combined ──────────────────────────────────────────────────────────────────
 export interface IndicatorToggles {
   macd: boolean;
@@ -702,9 +864,13 @@ export interface IndicatorToggles {
   cnMain?: boolean;
   /** CN 散戶資金（中單+小單合計）— 僅 CN */
   cnRetail?: boolean;
+  /** 三色資金「主力狀態F」副圖 — 僅 CN */
+  mainForce?: boolean;
+  /** 三色資金「捕撈季節」副圖 — 僅 CN */
+  season?: boolean;
 }
 
-export default function IndicatorCharts({ candles, hoverCandle, indicators, ticker, chips, chipsLoading }: {
+export default function IndicatorCharts({ candles, hoverCandle, indicators, ticker, chips, chipsLoading, sanseZhuli, sanseXys }: {
   candles: CandleWithIndicators[];
   hoverCandle?: CandleWithIndicators | null;
   indicators?: IndicatorToggles;
@@ -714,6 +880,10 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
   chips?: ChipsData | null;
   /** 籌碼 fetch 進行中（顯示載入提示） */
   chipsLoading?: boolean;
+  /** 三色資金「主力狀態F」副圖資料（僅 CN，開關開才傳） */
+  sanseZhuli?: ZhuliSeries | null;
+  /** 三色資金「捕撈季節」副圖資料（僅 CN，開關開才傳） */
+  sanseXys?: SanSeXysData | null;
 }) {
   if (candles.length === 0) return null;
   const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
@@ -732,6 +902,8 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
     show.h1000 && isTW && <div key="h1000" className="shrink-0 h-7 bg-card border-t border-border/40"><HolderBadge holderKey="h1000" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnMain && isCN && <div key="cnMain" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnMain" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnRetail && isCN && <div key="cnRetail" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnRetail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.mainForce && isCN && sanseZhuli && <div key="mainForce" className="flex-1 min-h-0 bg-card"><MainForceChart candles={candles} zhuli={sanseZhuli} hoverCandle={hoverCandle} /></div>,
+    show.season && isCN && sanseXys && <div key="season" className="flex-1 min-h-0 bg-card"><SeasonChart candles={candles} xys={sanseXys} hoverCandle={hoverCandle} /></div>,
   ].filter(Boolean);
 
   if (panels.length === 0) return <div className="h-full bg-card flex items-center justify-center text-xs text-muted-foreground/60">請開啟至少一個指標面板</div>;

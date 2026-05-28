@@ -6,8 +6,8 @@ import { useReplayStore } from '@/store/replayStore';
 import { ScanResultsCompact } from './components/ScanResultsCompact';
 import { DabanResultsCompact } from './components/DabanResultsCompact';
 import { ScanCoachDigest } from './components/ScanCoachDigest';
-import { MarketTrendBanner } from './components/MarketTrendBanner';
 import { LockWatchPanel } from './components/LockWatchPanel';
+import { SanSeScanCompact } from './components/SanSeScanCompact';
 // 2026-05-11 ReentryCandidatesPanel 移除：用戶反饋無實質用途（跟 B 回後買上漲重疊高、書本對齊度低）。檔案保留供日後重做
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import type { SelectedStock } from './components/ScanChartPanel';
@@ -49,6 +49,13 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
   const [coachCollapsed, setCoachCollapsed] = useState(true);
 
+  // 三色資金（陸股自創）— 放在「朱老師戰法」排的 Q/R 旁邊，選一個 level 就切到該策略結果
+  // null = 走書本買法（A-R 字母）；非 null = 顯示三色資金該 level 命中清單
+  const [cnSanSeLevel, setCnSanSeLevel] = useState<'strict' | 'medium' | 'loose' | null>(null);
+  const cnSanSe = market === 'CN' && cnSanSeLevel !== null;
+  // 走圖目前選中的代號 → 三色資金清單高亮
+  const selectedTicker = useReplayStore(s => s.currentStock?.ticker ?? null);
+
   // 載入歷史日期；市場/方向切換後自動載入最新結果
   const conditionMountedRef = useRef(false);
   useEffect(() => {
@@ -85,18 +92,10 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
   return (
     <div className="flex flex-col min-h-0 h-full text-foreground text-xs">
-      {/* ── 頂端：大盤 banner（最高優先資訊；點擊載入大盤指數走圖）── */}
-      {scanDirection !== 'daban' && (
-        <MarketTrendBanner
-          market={market}
-          marketTrend={marketTrend ?? null}
-          scanDate={scanDate ?? null}
-          onSelectStock={onSelectStock}
-        />
-      )}
+      {/* 大盤 banner 已移到走圖面板頂端（app/page.tsx 的 topAlertSlot） */}
 
       {/* ── 日期導航：點哪天看哪天的結果（取代上方 date picker）── */}
-      {cronDates.some(c => c.market === market) && (
+      {!cnSanSe && cronDates.some(c => c.market === market) && (
         <div className="shrink-0 px-2.5 py-1.5 border-b border-border bg-card/40">
           <div className="grid grid-cols-11 gap-1">
             {cronDates.filter(c => c.market === market)
@@ -232,10 +231,10 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                       : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
             return (
               <button key={method}
-                onClick={() => setActiveBuyMethod(method)}
+                onClick={() => { setCnSanSeLevel(null); setActiveBuyMethod(method); }}
                 disabled={isLoadingBuyMethod}
                 className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
-                  activeBuyMethod === method
+                  activeBuyMethod === method && !cnSanSe
                     ? color
                     : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                 }`}
@@ -297,6 +296,23 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 <div className="flex items-center gap-1 flex-wrap">
                   {renderBtn('Q', 'bg-purple-700/70 border-purple-600 text-purple-100')}
                   {renderBtn('R', 'bg-cyan-700/70 border-cyan-600 text-cyan-100')}
+                  {/* 三色資金（陸股自創）— 嚴格/中等/寬鬆 三檔並排在乖離率旁邊 */}
+                  {market === 'CN' && ([
+                    ['strict', '三色(嚴格)', '三色資金共振：短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位'],
+                    ['medium', '三色(中等)', '更新版：短攻/中強/中控 三分數都 > 0'],
+                    ['loose', '三色(寬鬆)', '游資資金翻正：短線動能今天剛由負轉正'],
+                  ] as const).map(([lv, label, tip]) => (
+                    <button key={lv}
+                      onClick={() => setCnSanSeLevel(lv)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                        cnSanSeLevel === lv
+                          ? 'bg-fuchsia-700/70 border-fuchsia-600 text-fuchsia-100'
+                          : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
+                      }`}
+                      title={`${label} · 陸股自創策略\n${tip}`}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -340,6 +356,10 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
       </div>
 
+      {cnSanSe ? (
+        <SanSeScanCompact level={cnSanSeLevel ?? 'medium'} onSelectStock={onSelectStock} selectedSymbol={selectedTicker} />
+      ) : (
+      <>
       {/* ── 鎖股觀察（4 區塊之後，結果列表之前）── */}
       <div className="shrink-0 border-b border-border bg-card/40">
         {scanDirection !== 'daban' && <LockWatchPanel market={market} onSelectStock={onSelectStock} />}
@@ -426,6 +446,8 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
