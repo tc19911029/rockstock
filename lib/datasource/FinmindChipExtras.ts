@@ -130,3 +130,37 @@ export async function fetchLendingForStock(code: string, date: string): Promise<
     lendingNet: toLots(todayShortSales - todayReturns),
   };
 }
+
+/** 多日借券歷史 — 用於計算「連 N 增」「5 週累計變化」等趨勢 */
+export interface LendingHistoryRow {
+  date: string;
+  lendingBalance: number;
+  lendingNet: number;
+}
+export async function fetchLendingHistoryForStock(
+  code: string,
+  endDate: string,
+  days = 60,
+): Promise<LendingHistoryRow[]> {
+  // fmGet 是單日 endpoint；多日要直接打 FinMind 寬時間範圍
+  const { finmindFetch } = await import('./FinMindClient');
+  const startDate = new Date(endDate + 'T00:00:00Z');
+  startDate.setUTCDate(startDate.getUTCDate() - days * 2);
+  const start = startDate.toISOString().slice(0, 10);
+  try {
+    const rows = await finmindFetch<FmShortSaleRow>('TaiwanDailyShortSaleBalances', {
+      data_id: code,
+      start_date: start,
+      end_date: endDate,
+    });
+    return rows
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(r => ({
+        date: r.date,
+        lendingBalance: toLots(r.SBLShortSalesCurrentDayBalance ?? 0),
+        lendingNet: toLots((r.SBLShortSalesShortSales ?? 0) - (r.SBLShortSalesReturns ?? 0)),
+      }));
+  } catch {
+    return [];
+  }
+}

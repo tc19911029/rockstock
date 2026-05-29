@@ -39,17 +39,42 @@ const EMPTY_FORM = {
 };
 
 
+interface AnalysisSummary {
+  symbol: string;
+  decisionVerdict: string | null;
+  valuationConclusion: 'undervalued' | 'fair' | 'overvalued' | null;
+  fundamentalVerdict: 'pass' | 'watch' | 'fail' | null;
+  hasAnalysis: boolean;
+}
+
 export default function PortfolioPage() {
   const { holdings, add, remove, update } = usePortfolioStore();
   const [prices, setPrices] = useState<Record<string, PriceData>>({});
   // server holdings.json 上的持倉數（給 sync 提示用，不是 source of truth）
   const [serverCount, setServerCount] = useState<number | null>(null);
+  const [analysisSummaries, setAnalysisSummaries] = useState<Record<string, AnalysisSummary>>({});
   useEffect(() => {
     fetch('/api/agents/portfolio?status=open')
       .then(r => r.ok ? r.json() : null)
       .then(j => setServerCount(j?.holdings?.length ?? 0))
       .catch(() => setServerCount(null));
   }, []);
+  // 載入每檔持股的分析摘要
+  const symbolListForSummary = holdings.map(h => h.symbol).join(',');
+  useEffect(() => {
+    if (!symbolListForSummary) return;
+    const date = todayCST();
+    fetch(`/api/agents/portfolio/holding-summary?date=${date}&symbols=${encodeURIComponent(symbolListForSummary)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        const list = j?.data?.summaries ?? j?.summaries ?? [];
+        if (!Array.isArray(list)) return;
+        const map: Record<string, AnalysisSummary> = {};
+        for (const s of list) map[s.symbol] = s;
+        setAnalysisSummaries(map);
+      })
+      .catch(() => { /* silent */ });
+  }, [symbolListForSummary]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formLoading, setFormLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -581,6 +606,14 @@ export default function PortfolioPage() {
           </div>
         )}
 
+        {/* Holdings list 頂部工具列 — 批量觸發 agent 分析 */}
+        {holdings.length > 0 && (
+          <div className="flex items-center justify-between gap-2 px-1">
+            <span className="text-xs text-muted-foreground">持股 {holdings.length} 檔</span>
+            <BatchAnalyzeButton holdings={holdings} />
+          </div>
+        )}
+
         {/* Holdings list */}
         <div className="space-y-2">
           {holdings.map(h => {
@@ -634,6 +667,7 @@ export default function PortfolioPage() {
                   <div className="flex gap-1 shrink-0">
                     <Link href={`/?load=${h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}`}
                       className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold transition">走圖</Link>
+                    <AnalyzeHoldingButton symbol={h.symbol} summary={analysisSummaries[h.symbol]} />
                     <Button variant="secondary" size="sm" onClick={() => openEdit(h)}>編輯</Button>
                     <Button variant="destructive" size="sm" onClick={() => remove(h.id)}>刪除</Button>
                   </div>
@@ -700,6 +734,149 @@ export default function PortfolioPage() {
 }
 
 interface SummaryData { totalCost: number; totalValue: number; totalPnL: number }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 分析按鈕 — 單檔 / 批量
+// 點按鈕呼叫 /api/agents/portfolio/prepare-holding 寫 question.json，
+// 然後跳到 /agents/[symbol] 給用戶看（用戶要在 Claude Code 對話內跑 /multi-agent-decide）
+// ────────────────────────────────────────────────────────────────────────────
+
+function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: AnalysisSummary }) {
+  const [loading, setLoading] = useState(false);
+  const hasAnalysis = summary?.hasAnalysis;
+  // /agents/[symbol] 接受 bare 代號（3661 而非 3661.TW）
+  const bareSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+
+  // 直接跳轉（如果已有分析，免再 prepare）
+  const onClick = async () => {
+    if (loading) return;
+    const date = todayCST();
+
+    if (hasAnalysis) {
+      window.location.href = `/agents/${encodeURIComponent(bareSymbol)}?date=${date}`;
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/agents/portfolio/prepare-holding?symbol=${encodeURIComponent(symbol)}&date=${date}`,
+        { method: 'POST' },
+      );
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        alert(`分析準備失敗：${json.error ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      window.location.href = `/agents/${encodeURIComponent(bareSymbol)}?date=${date}`;
+    } catch (e) {
+      alert(`分析準備失敗：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 已有分析 → 顯示摘要 chip + 跳轉
+  if (hasAnalysis) {
+    return (
+      <div className="flex items-center gap-1">
+        {summary?.valuationConclusion && (
+          <span className={
+            'px-1.5 py-0.5 rounded text-[10px] font-semibold ' +
+            (summary.valuationConclusion === 'undervalued' ? 'bg-emerald-900/60 text-emerald-300' :
+             summary.valuationConclusion === 'overvalued' ? 'bg-rose-900/60 text-rose-300' :
+             'bg-slate-700 text-slate-200')
+          }>
+            {summary.valuationConclusion === 'undervalued' ? '低估' :
+             summary.valuationConclusion === 'overvalued' ? '高估' : '合理'}
+          </span>
+        )}
+        {summary?.fundamentalVerdict && (
+          <span className={
+            'px-1.5 py-0.5 rounded text-[10px] font-semibold ' +
+            (summary.fundamentalVerdict === 'pass' ? 'bg-emerald-900/60 text-emerald-300' :
+             summary.fundamentalVerdict === 'fail' ? 'bg-rose-900/60 text-rose-300' :
+             'bg-amber-900/60 text-amber-300')
+          }>
+            基{summary.fundamentalVerdict === 'pass' ? '優' : summary.fundamentalVerdict === 'fail' ? '弱' : '觀'}
+          </span>
+        )}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onClick}
+          title="查看完整分析"
+        >
+          📊 詳情
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={onClick}
+      disabled={loading}
+      title="跑 multi-agent 分析（4-phase + 估值）"
+    >
+      {loading ? '...' : '📊 分析'}
+    </Button>
+  );
+}
+
+function BatchAnalyzeButton({ holdings }: { holdings: Array<{ symbol: string }> }) {
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+
+  const onClick = async () => {
+    if (loading) return;
+    if (!confirm(
+      `準備對 ${holdings.length} 檔持股都寫 question.json（不會自動跑分析）。\n\n` +
+      `完成後請在 Claude Code 對話內輸入：\n  /multi-agent-decide\n\n` +
+      `（或對單檔輸入 /multi-agent-decide {symbol}）`,
+    )) return;
+
+    setLoading(true);
+    setProgress('準備中…');
+    try {
+      const date = todayCST();
+      const res = await fetch(
+        `/api/agents/portfolio/prepare-holding?date=${date}&all=1`,
+        { method: 'POST' },
+      );
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        alert(`批量準備失敗：${json.error ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      const ok = json.okCount ?? 0;
+      const total = json.totalHoldings ?? 0;
+      setProgress(`✓ ${ok}/${total} 檔`);
+      alert(
+        `批量準備完成：${ok}/${total} 檔。\n\n` +
+        `下一步：在 Claude Code 對話內輸入 /multi-agent-decide 觸發分析。\n` +
+        `跑完後回各持股按「📊 分析」進入 /agents/[symbol] 查看結果。`,
+      );
+    } catch (e) {
+      alert(`批量準備失敗：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading || holdings.length === 0}
+      className="px-3 py-1.5 rounded text-xs font-bold bg-amber-700 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+      title="對所有持股批量寫 question.json，再去對話跑 /multi-agent-decide"
+    >
+      {loading ? (progress ?? '準備中…') : '📊 批量準備分析'}
+    </button>
+  );
+}
 
 function MarketSummaryRow({ label, currency, summary, returnPct }:
   { label: string; currency: 'TWD' | 'CNY'; summary: SummaryData; returnPct: number }) {

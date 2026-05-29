@@ -41,6 +41,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
     isLoadingCronSession,
     autoLoadLatest,
     activeBuyMethod, setActiveBuyMethod, isLoadingBuyMethod,
+    sanseLevel, setSanseLevel,
     // setScanOnly 暫保留 destructure（以後可能會加回手動掃描）
   } = useBacktestStore();
   void setScanOnly;
@@ -49,9 +50,11 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
   const [coachCollapsed, setCoachCollapsed] = useState(true);
 
-  // 三色資金（陸股自創）— 放在「朱老師戰法」排的 Q/R 旁邊，選一個 level 就切到該策略結果
-  // null = 走書本買法（A-R 字母）；非 null = 顯示三色資金該 level 命中清單
-  const [cnSanSeLevel, setCnSanSeLevel] = useState<'strict' | 'medium' | 'loose' | null>(null);
+  // 三色資金（陸股自創）— 放在「朱老師戰法」排的 Q/R 旁邊，選一個 level 就切到該策略結果。
+  // null = 走書本買法（A-R 字母）；非 null = 顯示三色資金該 level 命中清單。
+  // level 提升到 backtestStore（單一事實來源），讓中間「條件/訊號」面板也能跟著三色/書本切換。
+  const cnSanSeLevel = sanseLevel;
+  const setCnSanSeLevel = setSanseLevel;
   const cnSanSe = market === 'CN' && cnSanSeLevel !== null;
   // 走圖目前選中的代號 → 三色資金清單高亮
   const selectedTicker = useReplayStore(s => s.currentStock?.ticker ?? null);
@@ -93,39 +96,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
   return (
     <div className="flex flex-col min-h-0 h-full text-foreground text-xs">
       {/* 大盤 banner 已移到走圖面板頂端（app/page.tsx 的 topAlertSlot） */}
-
-      {/* ── 日期導航：點哪天看哪天的結果（取代上方 date picker）── */}
-      {!cnSanSe && cronDates.some(c => c.market === market) && (
-        <div className="shrink-0 px-2.5 py-1.5 border-b border-border bg-card/40">
-          <div className="grid grid-cols-11 gap-1">
-            {cronDates.filter(c => c.market === market)
-              .filter((c, i, arr) => arr.findIndex(x => x.date === c.date) === i)
-              .slice(0, 22)
-              .map(c => {
-                const isActive = c.date === scanDate;
-                return (
-                  <button key={c.date}
-                    onClick={() => {
-                      if (isBusy || isLoadingCronSession) return;
-                      if (scanDirection === 'daban') {
-                        useBacktestStore.setState({ scanDate: c.date });
-                      } else {
-                        useBacktestStore.getState().loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection });
-                      }
-                    }}
-                    disabled={isBusy || isLoadingCronSession}
-                    className={`text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate ${
-                      isActive ? 'bg-sky-700 text-sky-100 font-semibold' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
-                    } ${isBusy || isLoadingCronSession ? 'opacity-50' : ''}`}
-                    title={`${c.date}｜${c.resultCount >= 0 ? c.resultCount + ' 檔' : ''}`}
-                  >
-                    {c.date.slice(5)}
-                  </button>
-                );
-              })}
-          </div>
-        </div>
-      )}
+      {/* 日期導航已下移到結果列表上方（對齊三色資金版型，見下方「股票卡片清單」前） */}
 
       {/* ── Toolbar: vertical stacked ── */}
       <div className="shrink-0 px-2.5 py-2 border-b border-border space-y-1.5">
@@ -389,6 +360,39 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
           </div>
         )}
       </div>
+
+      {/* ── 日期導航：點哪天看哪天的結果（移到結果列表上方，對齊三色資金版型）── */}
+      {cronDates.some(c => c.market === market) && (
+        <div className="shrink-0 px-2.5 py-1.5 border-b border-border bg-card/40">
+          <div className="grid grid-cols-11 gap-1">
+            {cronDates.filter(c => c.market === market)
+              .filter((c, i, arr) => arr.findIndex(x => x.date === c.date) === i)
+              .slice(0, 22)
+              .map(c => {
+                const isActive = c.date === scanDate;
+                return (
+                  <button key={c.date}
+                    onClick={() => {
+                      if (isBusy || isLoadingCronSession) return;
+                      if (scanDirection === 'daban') {
+                        useBacktestStore.setState({ scanDate: c.date });
+                      } else {
+                        useBacktestStore.getState().loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection });
+                      }
+                    }}
+                    disabled={isBusy || isLoadingCronSession}
+                    className={`text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate ${
+                      isActive ? 'bg-sky-700 text-sky-100 font-semibold' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
+                    } ${isBusy || isLoadingCronSession ? 'opacity-50' : ''}`}
+                    title={`${c.date}｜${c.resultCount >= 0 ? c.resultCount + ' 檔' : ''}`}
+                  >
+                    {c.date.slice(5)}
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
       {/* ── 下方可滑動：股票卡片清單 ── */}
       <div className="flex-1 min-h-0 overflow-y-auto">

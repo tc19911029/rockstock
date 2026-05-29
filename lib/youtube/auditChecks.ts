@@ -141,8 +141,13 @@ export async function runAudit(): Promise<AuditReport> {
   const tIdx = (await readJson<{ byId: Record<string, unknown> }>(path.join(ROOT, 'transcript-index.json')))?.byId ?? {};
   const transcriptFiles = new Set<string>();
   const transcriptDirs = await listDir(path.join(ROOT, 'transcripts'));
+  // Only walk YYYY-MM-DD top-level dirs; skip `manual/` and other non-date folders
+  // (they have nested subdirectories that would be miscounted as video_ids)
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   for (const d of transcriptDirs) {
+    if (!DATE_RE.test(d)) continue;
     for (const f of await listDir(path.join(ROOT, 'transcripts', d))) {
+      if (!f.endsWith('.json')) continue;
       transcriptFiles.add(f.replace('.json', ''));
     }
   }

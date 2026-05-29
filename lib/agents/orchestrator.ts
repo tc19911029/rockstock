@@ -226,6 +226,15 @@ export async function readFundamentalAnswer(date: string, symbol: string): Promi
   return readAnswer<FundamentalAnswer>(date, symbol, 'fundamental');
 }
 
+/** 讀 fundamental-question.json（tmp 區）— 給 UI 顯示估值分析輸入用 */
+export async function readFundamentalQuestion(date: string, symbol: string): Promise<FundamentalQuestion | null> {
+  const { tmpDir } = getRunPaths(date, symbol);
+  try {
+    const raw = await fs.readFile(path.join(tmpDir, 'fundamental-question.json'), 'utf-8');
+    return JSON.parse(raw) as FundamentalQuestion;
+  } catch { return null; }
+}
+
 // ── P4：Risk / Bull / Bear / Decision ────────────────────────────────────────
 
 export async function writeRiskQuestion(question: RiskQuestion): Promise<string> {

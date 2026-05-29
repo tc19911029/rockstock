@@ -1,0 +1,113 @@
+/**
+ * TPEX 上櫃借券/融券公開資料（免費、無 quota）
+ *
+ * Source: POST https://www.tpex.org.tw/www/zh-tw/margin/sbl
+ *   body: date=YYYY/MM/DD&response=json&type=Daily
+ *   信用額度總量管制餘額表（上櫃）— 全市場單日一次回
+ *
+ * 欄位（tables[0].fields，與 TWSE TWT93U 同結構）：
+ *   [股票代號, 股票名稱,
+ *    融券前日餘額, 融券賣出, 融券買進, 融券現券, 融券當日餘額, 融券限額,
+ *    借券前日餘額, 借券當日賣出, 借券當日還券, 借券當日調整數額, 借券當日餘額, 借券次一限額, 備註]
+ *
+ * 單位「股」→ ÷1000 換「張」。回傳與 TwseSblProvider 同 shape，方便共用。
+ */
+
+import type { TwseSblRow } from './TwseSblProvider';
+
+const TPEX_SBL_URL = 'https://www.tpex.org.tw/www/zh-tw/margin/sbl';
+
+const CACHE = new Map<string, { rows: TwseSblRow[]; expiresAt: number }>();
+const CACHE_TTL = 6 * 60 * 60_000;
+
+interface TpexResp {
+  stat?: string;
+  tables?: Array<{ data?: Array<Array<string>> }>;
+}
+
+function isoToRocSlash(iso: string): string {
+  // TPEX 接受 "2026/05/27"（西元）也可，實測西元格式正常
+  return iso.replace(/-/g, '/');
+}
+
+async function fetchTpexSblAll(dateIso: string): Promise<TwseSblRow[]> {
+  const cacheKey = `tpex:sbl:${dateIso}`;
+  const cached = CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.rows;
+
+  try {
+    const res = await fetch(TPEX_SBL_URL, {
+      method: 'POST',
+      signal: AbortSignal.timeout(15_000),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json',
+      },
+      body: `date=${isoToRocSlash(dateIso)}&response=json&type=Daily`,
+    });
+    if (!res.ok) return [];
+    const json: TpexResp = await res.json();
+    const table = json.tables?.[0];
+    if (!table?.data) return [];
+
+    const toLots = (s: string): number => {
+      const n = parseInt(String(s).replace(/[,]/g, ''), 10);
+      return Number.isFinite(n) ? Math.round(n / 1000) : 0;
+    };
+
+    const result: TwseSblRow[] = table.data.map(row => {
+      const shortPrev = toLots(row[2]);
+      const shortSalesT = toLots(row[3]);
+      const shortCoverT = toLots(row[4]);
+      const shortBalance = toLots(row[6]);
+      const lendingPrev = toLots(row[8]);
+      const lendingSalesT = toLots(row[9]);
+      const lendingReturnsT = toLots(row[10]);
+      const lendingAdjT = toLots(row[11]);
+      const lendingBalance = toLots(row[12]);
+      return {
+        date: dateIso,
+        stockId: row[0],
+        shortBalance,
+        shortNet: shortBalance - shortPrev,
+        shortSales: shortSalesT,
+        shortCovering: shortCoverT,
+        lendingBalance,
+        lendingNet: lendingBalance - lendingPrev,
+        lendingShortSales: lendingSalesT,
+        lendingReturns: lendingReturnsT,
+        lendingAdjustments: lendingAdjT,
+      };
+    });
+
+    CACHE.set(cacheKey, { rows: result, expiresAt: Date.now() + CACHE_TTL });
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchTpexSblForStock(stockId: string, dateIso: string): Promise<TwseSblRow | null> {
+  const all = await fetchTpexSblAll(dateIso);
+  return all.find(r => r.stockId === stockId) ?? null;
+}
+
+export async function fetchTpexSblHistory(
+  stockId: string,
+  endDateIso: string,
+  days = 30,
+): Promise<TwseSblRow[]> {
+  const result: TwseSblRow[] = [];
+  const end = new Date(endDateIso + 'T00:00:00Z');
+  for (let i = 0; i < days; i++) {
+    const d = new Date(end.getTime() - i * 86400_000);
+    const dow = d.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    const dateIso = d.toISOString().slice(0, 10);
+    const all = await fetchTpexSblAll(dateIso);
+    const row = all.find(r => r.stockId === stockId);
+    if (row) result.push(row);
+  }
+  return result.reverse();
+}

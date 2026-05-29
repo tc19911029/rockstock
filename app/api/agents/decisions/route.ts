@@ -18,6 +18,7 @@ import { apiOk, apiValidationError } from '@/lib/api/response';
 import { readPhaseState } from '@/lib/agents/orchestrator';
 import { agentsGet, agentsListChildDirs } from '@/lib/agents/persistStorage';
 import { loadStockMaster, lookupStock } from '@/lib/youtube/stockMaster';
+import { loadLocalCandlesForDate } from '@/lib/datasource/LocalCandleStore';
 import type {
   AgentRunMeta,
   ChipAnswer,
@@ -70,6 +71,11 @@ interface RunListItem {
   symbol: string;
   /** 從 stockMaster lookup 得來的中文簡稱（找不到時 null）*/
   name: string | null;
+  /**
+   * 訊號日收盤價（L1 K 線同日 close）— 給前端 forward perf 用
+   * 從 L1 補上；舊資料或假日抓不到時為 undefined
+   */
+  lastClose?: number;
   /** 整體狀態：pending = 還沒到 Phase 4 / completed = decision.json 存在 */
   status: 'pending' | 'completed';
   /** P1+P2：每階段獨立狀態（解決 list 與 dashboard completed 定義不一致）*/
@@ -183,6 +189,20 @@ export async function GET(req: NextRequest) {
       };
     }),
   );
+
+  // 補 lastClose（給前端 forward perf 用）— 從 L1 K 線抓同日 close，平行 IO
+  await Promise.all(runs.map(async (r) => {
+    try {
+      const market = (r.market === 'CN' ? 'CN' : 'TW') as 'TW' | 'CN';
+      const candles = await loadLocalCandlesForDate(r.symbol, market, date);
+      if (!candles || candles.length === 0) return;
+      const last = candles[candles.length - 1];
+      if (!last || last.date !== date) return;
+      r.lastClose = last.close;
+    } catch {
+      // L1 miss / 假日 — 略過,client 端 forward POST 自然 filter 掉
+    }
+  }));
 
   // 已完成排前面；同 status 內依 decision action (buy→watch→skip) 再 technical verdict 再 symbol 排
   const actionRank: Record<string, number> = { buy: 0, watch: 1, skip: 2 };

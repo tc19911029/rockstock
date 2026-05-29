@@ -97,8 +97,8 @@ export function computeSanSeChart(candles: Candle[], indexClose?: number[], extr
   const L = candles.map((c) => c.low);
   const C = candles.map((c) => c.close);
   const n = candles.length;
-  const RECENT = n - 15; // 只在最近 15 根標文字，舊箭頭只留顏色（避免標籤糊成一團）
-  const mtext = (i: number, txt: string) => (i >= RECENT ? txt : '');
+  // 只在「該訊號最近一次」標文字，其餘只留彩色箭頭 → 訊號密集時標籤不互疊
+  const lastTrue = (arr: boolean[]): number => { for (let k = n - 1; k >= 0; k--) if (arr[k]) return k; return -1; };
 
   // ── 雙B戰法主圖 ──────────────────────────────────────────────
   const ZB = candles.map((c) => (c.close + c.high + c.open + c.low) / 4);
@@ -118,14 +118,17 @@ export function computeSanSeChart(candles: Candle[], indexClose?: number[], extr
   const breakUp = CROSS(C, zhineng);    // 突破智能交易線
   const breakDn = CROSS(zhineng, C);    // 跌破智能交易線
 
+  const lastBuy = lastTrue(buy);
+  const lastSell = lastTrue(sell);
+  const lastBreakUp = lastTrue(breakUp);
+  const lastBreakDn = lastTrue(breakDn);
   const mainMarkers: ChartMarker[] = [];
   for (let i = 0; i < n; i++) {
-    // B/S = 黃紅雙線金叉/死叉（紅 B 買、綠 S 賣，與 App 一致）；標在每根（不只最近）
-    if (buy[i]) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: 'B' });
-    if (sell[i]) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN, text: 'S' });
-    // 突破/跌破智能交易線（另一組訊號）
-    if (breakUp[i]) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: YELLOW, text: mtext(i, '突破') });
-    if (breakDn[i]) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: BLUE, text: mtext(i, '跌破') });
+    // B/S = 黃紅雙線金叉/死叉（紅 B 買、綠 S 賣）；突破/跌破 = 智能交易線。各只在最近一次標字，其餘留箭頭。
+    if (buy[i]) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: i === lastBuy ? 'B' : '' });
+    if (sell[i]) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN, text: i === lastSell ? 'S' : '' });
+    if (breakUp[i]) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: YELLOW, text: i === lastBreakUp ? '突破' : '' });
+    if (breakDn[i]) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: BLUE, text: i === lastBreakDn ? '跌破' : '' });
   }
 
   // K線變色（涨停洋紅 / 大漲黃；其餘走 A 股紅漲綠跌預設）
@@ -155,15 +158,23 @@ export function computeSanSeChart(candles: Candle[], indexClose?: number[], extr
 
   const goldCross = CROSS(XYS1, XYS2);
   const deadCross = CROSS(XYS2, XYS1);
+  // 只標各「區位」最近一次（多頭區金叉/空頭區金叉/多頭區死叉/空頭區死叉各最多一個字），其餘留箭頭
+  const lastWhere = (pred: (k: number) => boolean): number => { for (let k = n - 1; k >= 0; k--) if (pred(k)) return k; return -1; };
+  const lGoldBull = lastWhere((k) => !!goldCross[k] && XYS1[k] >= 0);
+  const lGoldBear = lastWhere((k) => !!goldCross[k] && XYS1[k] < 0);
+  const lDeadBull = lastWhere((k) => !!deadCross[k] && XYS1[k] > 0);
+  const lDeadBear = lastWhere((k) => !!deadCross[k] && XYS1[k] <= 0);
   const subMarkers: ChartMarker[] = [];
   for (let i = 0; i < n; i++) {
     if (goldCross[i]) {
-      const zone = XYS1[i] < 0 ? '空頭區金叉' : '多頭區金叉';
-      subMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: mtext(i, zone) });
+      const bull = XYS1[i] >= 0;
+      const labeled = bull ? i === lGoldBull : i === lGoldBear;
+      subMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: labeled ? (bull ? '多頭區金叉' : '空頭區金叉') : '' });
     }
     if (deadCross[i]) {
-      const zone = XYS1[i] > 0 ? '多頭區死叉' : '空頭區死叉';
-      subMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN, text: mtext(i, zone) });
+      const bull = XYS1[i] > 0;
+      const labeled = bull ? i === lDeadBull : i === lDeadBear;
+      subMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN, text: labeled ? (bull ? '多頭區死叉' : '空頭區死叉') : '' });
     }
   }
 

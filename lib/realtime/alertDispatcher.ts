@@ -1,22 +1,29 @@
 /**
  * alertDispatcher — 規則訊號 → debounce → ntfy + jsonl log
  *
- * - debounce key = `${date}:${symbol}:${rule}`，30 分鐘內同 key 不重複推
+ * Dedup 策略（2026-05-25 改）：
+ *   key = `${date}:${symbol}:${rule}:${barTs}`，同一根 bar 同 rule 一輩子只 fire 一次
+ *   （取代原本 30 分鐘 time-window debounce — 用 time window 在「停滯收盤前最後一根 bar
+ *    永遠成立」這種情境下會被 dev HMR reset map 後反覆推；換成 barTs key 後即使 in-memory
+ *    map 被清，disk-backed lazy-load 從今日 jsonl 重建，永不重複）。
+ *
  * - 推 ntfy（NTFY_ENABLED + NTFY_TOPIC_URL 設定才會真發）
  * - append data/realtime/alerts/{date}.jsonl 一行一 record（即使 ntfy 失敗也寫）
  *
- * 跨日：debounce key 含 date，自然失效；jsonl 用 today date 寫入新檔
+ * 跨日：firedKeys 含 date prefix，自然失效；跨日第一次 dispatch 會偵測日期變化重建 set。
  */
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { REALTIME_RULES } from '@/lib/config';
 import { sendNtfy } from '@/lib/notify/ntfy';
 import type { Signal, RuleId } from './blowoffDetector';
 
 // ── module state ────────────────────────────────────────────────────────
 
-const debounceMap: Map<string, number> = new Map();
+/** Dedup Set：key = `${date}:${symbol}:${rule}:${barTs}` */
+const firedKeys: Set<string> = new Set();
+/** firedKeys 對應的日期 — 跨日重建 */
+let firedKeysLoadedForDate: string | null = null;
 
 export interface AlertRecord {
   /** Wall-clock ms 觸發時間 */
@@ -49,16 +56,18 @@ export async function dispatch(
   const result: DispatchResult = { fired: 0, debounced: 0, notifyOk: 0, notifyFail: 0 };
   const records: AlertRecord[] = [];
   const now = Date.now();
+  // 今日 dedup set lazy load（survive HMR / cold start）
+  const todayTW = dateKeyOf('TW', now);
+  await ensureFiredKeysLoaded(todayTW);
 
   for (const sig of signals) {
     const dateKey = dateKeyOf(sig.market, now);
-    const key = `${dateKey}:${sig.symbol}:${sig.rule}`;
-    const last = debounceMap.get(key);
-    if (last && now - last < REALTIME_RULES.DEBOUNCE_MS) {
+    const key = `${dateKey}:${sig.symbol}:${sig.rule}:${sig.ts}`;
+    if (firedKeys.has(key)) {
       result.debounced++;
       continue;
     }
-    debounceMap.set(key, now);
+    firedKeys.add(key);
     result.fired++;
 
     const { title, message, tags, priority } = formatPayload(sig);
@@ -178,12 +187,37 @@ function dateKeyOf(market: 'TW' | 'CN', ms: number): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(ms));
 }
 
+/**
+ * 第一次（或跨日後第一次）dispatch 時把今日 jsonl 內已 fire 的 records 載回 firedKeys，
+ * 避免 dev HMR / serverless cold start 後 in-memory map 被清重新推一遍。
+ * 同 date 內只 IO 一次。
+ */
+async function ensureFiredKeysLoaded(today: string): Promise<void> {
+  if (firedKeysLoadedForDate === today) return;
+  // 跨日：清舊 set 後再載
+  firedKeys.clear();
+  firedKeysLoadedForDate = today;
+  try {
+    const p = path.join(process.cwd(), 'data', 'realtime', 'alerts', `${today}.jsonl`);
+    const raw = await fs.readFile(p, 'utf-8');
+    for (const line of raw.split('\n')) {
+      if (!line) continue;
+      try {
+        const r = JSON.parse(line) as AlertRecord;
+        const date = dateKeyOf(r.market, r.firedAt);
+        firedKeys.add(`${date}:${r.symbol}:${r.rule}:${r.barTs}`);
+      } catch { /* skip 壞行 */ }
+    }
+  } catch { /* file 不存在 — 今日尚無 alert */ }
+}
+
 // ── test-only ────────────────────────────────────────────────────────────
 
 export function _resetDebounceForTest(): void {
-  debounceMap.clear();
+  firedKeys.clear();
+  firedKeysLoadedForDate = null;
 }
 
 export function _peekDebounceSize(): number {
-  return debounceMap.size;
+  return firedKeys.size;
 }

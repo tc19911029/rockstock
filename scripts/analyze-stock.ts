@@ -47,6 +47,19 @@ function loadStockName(symbol: string): string {
   return d.entries.find(e => e.code === symbol)?.name ?? symbol;
 }
 
+type Market = 'TW' | 'CN';
+
+// 從 symbol 推斷市場:純 4 位數字 = TW;6 位或含 .SS/.SZ = CN
+function detectMarket(symbol: string): { market: Market; pureCode: string; suffix: string } {
+  if (/^\d{6}$|\.(SS|SZ)$/i.test(symbol)) {
+    const pureCode = symbol.replace(/\.(SS|SZ)$/i, '');
+    // 6 開頭 = 上交所 .SS、其他 = 深交所 .SZ(粗略)
+    const suffix = pureCode.startsWith('6') ? 'SS' : 'SZ';
+    return { market: 'CN', pureCode, suffix };
+  }
+  return { market: 'TW', pureCode: symbol.replace(/\.TW$/, ''), suffix: 'TW' };
+}
+
 // 粗略 sentiment:keyword count(正/負/中性詞彙)
 const BULLISH_WORDS = ['漲停', '亮燈', '買超', '便宜', '加碼', '強', '買進', '進場', '創新高', '突破'];
 const BEARISH_WORDS = ['弱', '差', '賣', '批評', '降評', '套', '冷漠', '跌停', '殺', '泡沫', '崩'];
@@ -65,15 +78,21 @@ const sma = (arr: number[], end: number, n: number): number | null =>
 // ─────────────────────────────────────────────────────────────
 
 interface L1File { lastDate: string; candles: Candle[]; }
-function readL1(symbol: string): L1File {
-  const p = path.join(REPO, `data/candles/TW/${symbol}.TW.json`);
-  if (!fs.existsSync(p)) throw new Error(`L1 not found: ${p}`);
-  return JSON.parse(fs.readFileSync(p, 'utf-8'));
+function readL1(pureCode: string, market: Market, suffix: string): { l1: L1File; actualSuffix: string } {
+  // TW 先試 .TW,找不到 fallback .TWO(上櫃);CN 用傳入 suffix
+  const candidates = market === 'TW' ? ['TW', 'TWO'] : [suffix];
+  for (const s of candidates) {
+    const p = path.join(REPO, `data/candles/${market}/${pureCode}.${s}.json`);
+    if (fs.existsSync(p)) {
+      return { l1: JSON.parse(fs.readFileSync(p, 'utf-8')), actualSuffix: s };
+    }
+  }
+  throw new Error(`L1 not found: tried ${candidates.map(s => `${pureCode}.${s}.json`).join(', ')} under data/candles/${market}/`);
 }
 
 interface L2Today { cumVol: number; high: number; low: number; close: number; firstOpen: number; barCount: number; }
-function readL2(symbol: string, date: string): L2Today | null {
-  const p = path.join(REPO, `data/realtime/${date}/${symbol}.TW.json`);
+function readL2(pureCode: string, date: string, suffix: string): L2Today | null {
+  const p = path.join(REPO, `data/realtime/${date}/${pureCode}.${suffix}.json`);
   if (!fs.existsSync(p)) return null;
   const d = JSON.parse(fs.readFileSync(p, 'utf-8'));
   const bars = d.bars as Array<{ open: number; high: number; low: number; close: number; volume: number }>;
@@ -116,16 +135,24 @@ interface FundamentalsResp {
   };
 }
 
-async function fetchScannerVerdict(date: string, symbol: string): Promise<{ inPool: boolean; resultCount: number; marketTrend: string; sessionFile?: string }> {
+async function fetchScannerVerdict(date: string, pureCode: string, market: Market): Promise<{ inPool: boolean; resultCount: number; marketTrend: string; sessionFile?: string }> {
   const files = fs.readdirSync(path.join(REPO, 'data'))
-    .filter(f => f.startsWith(`scan-TW-long-daily-${date}-`))
+    .filter(f => f.startsWith(`scan-${market}-long-daily-${date}-`))
     .map(f => ({ name: f, mtime: fs.statSync(path.join(REPO, 'data', f)).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime);
   if (!files.length) return { inPool: false, resultCount: 0, marketTrend: 'unknown' };
   const latest = files[0].name;
   const d = JSON.parse(fs.readFileSync(path.join(REPO, 'data', latest), 'utf-8'));
-  const inPool = d.results?.some((r: { symbol: string }) => r.symbol.startsWith(symbol)) ?? false;
+  const inPool = d.results?.some((r: { symbol: string }) => r.symbol.startsWith(pureCode)) ?? false;
   return { inPool, resultCount: d.resultCount ?? d.results?.length ?? 0, marketTrend: d.marketTrend ?? '?', sessionFile: latest };
+}
+
+// CN 籌碼:直接讀 flow file(無 API)
+interface CnFlowDay { date: string; mainNet: number; superLargeNet: number; largeNet: number; mediumNet: number; smallNet: number; }
+function readCnFlow(pureCode: string): { lastDate: string; data: CnFlowDay[] } | null {
+  const p = path.join(REPO, `data/chips/CN/flow/${pureCode}.json`);
+  if (!fs.existsSync(p)) return null;
+  return JSON.parse(fs.readFileSync(p, 'utf-8'));
 }
 
 // E1: 穿透 FinMind 全 type 自算本業營業利益
@@ -226,13 +253,15 @@ async function main(): Promise<void> {
   const dateIdx = args.indexOf('--date');
   const date = dateIdx >= 0 ? args[dateIdx + 1] : todayTaipei();
 
-  const name = loadStockName(symbol);
+  let { market, pureCode, suffix } = detectMarket(symbol);
+  const name = market === 'TW' ? loadStockName(pureCode) : pureCode;  // CN 無 stock-master
   console.log(`\n========================================`);
-  console.log(`${symbol} ${name} 一鍵分析 → date=${date}`);
+  console.log(`${pureCode} ${name} [${market}] 一鍵分析 → date=${date}`);
   console.log(`========================================\n`);
 
   // ── 1. L1 重讀 (C2)
-  const l1 = readL1(symbol);
+  const { l1, actualSuffix } = readL1(pureCode, market, suffix);
+  suffix = actualSuffix;  // 用實際找到的後綴(TW 可能 fallback 成 TWO)
   const candles = l1.candles;
   const N = candles.length;
   const last = N - 1;
@@ -296,7 +325,7 @@ async function main(): Promise<void> {
   console.log(`    reasons: ${gate.reasons.join(' / ')}`);
 
   // ── 6. L2 today (C1: 即時)
-  const l2 = readL2(symbol, date);
+  const l2 = readL2(pureCode, date, suffix);
   console.log(`\n【L2 today=${date}】`);
   if (l2) {
     console.log(`  bars=${l2.barCount} cumVol=${l2.cumVol} 張 / O ${l2.firstOpen} H ${l2.high} L ${l2.low} C ${l2.close}`);
@@ -307,9 +336,27 @@ async function main(): Promise<void> {
     console.log(`  (無 L2 資料,可能非交易日或當日尚未生成)`);
   }
 
-  // ── 7. Chip API (D1)
-  console.log(`\n【籌碼面 /api/chip】`);
-  const chip = await tryFetchJSON<ChipResp>(`${LOCAL_API}/api/chip?symbol=${symbol}&market=TW`);
+  // ── 7. Chip (D1) — TW 走 /api/chip,CN 直接讀 flow file
+  let chip: ChipResp | null = null;
+  if (market === 'TW') {
+    console.log(`\n【籌碼面 /api/chip】`);
+    chip = await tryFetchJSON<ChipResp>(`${LOCAL_API}/api/chip?symbol=${pureCode}&market=TW`);
+  } else {
+    console.log(`\n【籌碼面 — CN flow data(無 chip API)】`);
+    const flow = readCnFlow(pureCode);
+    if (flow && flow.data.length) {
+      const recent = flow.data.slice(-5);
+      console.log(`  近 5 日主力資金流(單位:股)`);
+      for (const f of recent) {
+        const tag = f.mainNet > 0 ? '🟢' : '🔴';
+        console.log(`    ${tag} ${f.date}  主力 ${(f.mainNet/10000).toFixed(0)}萬  超大單 ${(f.superLargeNet/10000).toFixed(0)}萬  大單 ${(f.largeNet/10000).toFixed(0)}萬  中單 ${(f.mediumNet/10000).toFixed(0)}萬  小單 ${(f.smallNet/10000).toFixed(0)}萬`);
+      }
+      const latest = flow.data[flow.data.length - 1];
+      console.log(`  最新主力動向: ${latest.mainNet > 0 ? '進場 ✓' : '出場 ✗'}(mainNet=${latest.mainNet}股)`);
+    } else {
+      console.log(`  ⚠️ 無 CN flow 資料 (data/chips/CN/flow/${pureCode}.json 不存在)`);
+    }
+  }
   if (chip) {
     console.log(`  chipScore: ${chip.chipScore} (${chip.chipGrade} 級) — ${chip.chipSignal}`);
     console.log(`  ${chip.chipDetail}`);
@@ -323,9 +370,13 @@ async function main(): Promise<void> {
     console.log(`  ⚠️ /api/chip 無回應,dev server 可能未啟動`);
   }
 
-  // ── 8. Fundamentals API + FinMind 全 type 穿透 (D1 + E1)
-  console.log(`\n【基本面 /api/fundamentals/${symbol} + FinMind 穿透】`);
-  const fundBase = await tryFetchJSON<FundamentalsResp>(`${LOCAL_API}/api/fundamentals/${symbol}`);
+  // ── 8. Fundamentals API + FinMind 全 type 穿透 (D1 + E1) — 僅 TW
+  console.log(`\n【基本面】`);
+  if (market === 'CN') {
+    console.log(`  ⚠️ rockstock 未整合陸股基本面源(FinMind 僅台股)`);
+    console.log(`  → 手動查雪球 https://xueqiu.com/S/SH${pureCode} 或東方財富 https://emweb.securities.eastmoney.com/PC_HSF10/CompanySurvey/Index?type=web&code=SH${pureCode}`);
+  }
+  const fundBase = market === 'TW' ? await tryFetchJSON<FundamentalsResp>(`${LOCAL_API}/api/fundamentals/${pureCode}`) : null;
   if (fundBase?.ok && fundBase.data) {
     const f = fundBase.data;
     console.log(`  EPS=${f.eps} / 月營收=${f.revenueLatest ? (f.revenueLatest / 1_000_000).toFixed(0) : '?'}M`);
@@ -341,8 +392,8 @@ async function main(): Promise<void> {
       console.log(`  PER 評級: ${perBucket} (門檻 ${perThreshold},strongGrowth=${strongGrowth})`);
     }
   }
-  // E1: FinMind 全 type 穿透,自算本業營業利益
-  const token = loadFinmindToken();
+  // E1: FinMind 全 type 穿透,自算本業營業利益(僅 TW)
+  const token = market === 'TW' ? loadFinmindToken() : '';
   if (token) {
     const finRaw = await fetchFinmindFinancials(token, symbol, date);
     const quarters = Object.keys(finRaw).sort();
@@ -361,7 +412,7 @@ async function main(): Promise<void> {
       }
     }
     // 月營收 13 個月
-    const revSeries = await fetchRevenueSeries(token, symbol, date);
+    const revSeries = await fetchRevenueSeries(token, pureCode, date);
     console.log(`\n  【月營收近 6 個月】`);
     for (const r of revSeries.slice(-6)) {
       console.log(`    ${r.date}  ${r.rev.toFixed(0)}M  MoM=${r.mom != null ? (r.mom > 0 ? '+' : '') + r.mom.toFixed(2) + '%' : 'n/a'}  YoY=${r.yoy != null ? (r.yoy > 0 ? '+' : '') + r.yoy.toFixed(2) + '%' : 'n/a'}`);
@@ -371,14 +422,18 @@ async function main(): Promise<void> {
   }
 
   // ── 9. Scanner verdict (D2)
-  console.log(`\n【Scanner 5/26 daily session】`);
-  const sv = await fetchScannerVerdict(date, symbol);
+  console.log(`\n【Scanner ${date} daily session (${market})】`);
+  const sv = await fetchScannerVerdict(date, pureCode, market);
   console.log(`  session: ${sv.sessionFile ?? '(none)'}`);
-  console.log(`  resultCount=${sv.resultCount} marketTrend=${sv.marketTrend} ${symbol} inPool=${sv.inPool ? '✓' : '✗ (掃描器擋下)'}`);
+  console.log(`  resultCount=${sv.resultCount} marketTrend=${sv.marketTrend} ${pureCode} inPool=${sv.inPool ? '✓' : '✗ (掃描器擋下)'}`);
 
-  // ── 10. YouTube transcripts (F1) + 自動 sentiment
+  // ── 10. YouTube transcripts (F1) — 僅 TW(台股節目不討論陸股)
+  if (market === 'CN') {
+    console.log(`\n【消息面 — 跳過】CN 不適用台股 YouTube transcripts`);
+    console.log(`  → 手動查新浪財經 / 東方財富 / 雪球評論`);
+  }
   console.log(`\n【消息面 — YouTube 多 transcript 過去 7 天】(name="${name}")`);
-  const mentions = grepYouTubeMentions(symbol, name, 7);
+  const mentions = market === 'TW' ? grepYouTubeMentions(pureCode, name, 7) : [];
   console.log(`  找到 ${mentions.length} 支 transcript 提到`);
   let totalBullish = 0, totalBearish = 0;
   for (const m of mentions.slice(0, 10)) {
@@ -392,6 +447,26 @@ async function main(): Promise<void> {
   }
   const newsNet = totalBullish - totalBearish;
   console.log(`\n  消息面 sentiment 合計: 正面詞 ${totalBullish} / 負面詞 ${totalBearish} / net=${newsNet}`);
+
+  // ── 10b. 軋空壓力分析（lib/squeeze）─────────────────────────
+  console.log(`\n【軋空壓力分析 lib/squeeze】`);
+  try {
+    const { analyzeSqueeze } = await import('@/lib/squeeze/analyzeSqueeze');
+    const sq = await analyzeSqueeze(symbol, date);
+    const c = sq.shortCosts.combined;
+    console.log(`  資料完整度: margin=${sq.dataCompleteness.marginDays}d / sbl=${sq.dataCompleteness.sblDays}d / price=${sq.dataCompleteness.priceDays}d`);
+    console.log(`  收盤 ${sq.close.toFixed(2)} / 融券餘額 ${sq.shortBalance.toLocaleString()} 張 (Δ5d ${sq.shortBalanceChange5d >= 0 ? '+' : ''}${sq.shortBalanceChange5d}) / 借券 ${sq.lendingBalance.toLocaleString()} 張 (Δ5d ${sq.lendingBalanceChange5d >= 0 ? '+' : ''}${sq.lendingBalanceChange5d})`);
+    const fmt = (v: number | null) => v === null ? '—' : v.toFixed(2);
+    console.log(`  綜合空方成本: 5d=${fmt(c.d5)} / 10d=${fmt(c.d10)} / 20d=${fmt(c.d20)} / 60d=${fmt(c.d60)}`);
+    console.log(`  融券成本:     5d=${fmt(sq.shortCosts.margin.d5)} / 10d=${fmt(sq.shortCosts.margin.d10)} / 20d=${fmt(sq.shortCosts.margin.d20)} / 60d=${fmt(sq.shortCosts.margin.d60)}`);
+    console.log(`  借券成本:     5d=${fmt(sq.shortCosts.sbl.d5)} / 10d=${fmt(sq.shortCosts.sbl.d10)} / 20d=${fmt(sq.shortCosts.sbl.d20)} / 60d=${fmt(sq.shortCosts.sbl.d60)}`);
+    console.log(`  追繳壓力價: ${fmt(sq.marginCallPrice)} (距當前 ${sq.distanceToMarginCallPct !== null ? (sq.distanceToMarginCallPct >= 0 ? '+' : '') + sq.distanceToMarginCallPct.toFixed(1) + '%' : '—'})`);
+    console.log(`  分數 ${sq.score.total}/100 (${sq.score.levelLabel}) — 空累${sq.score.shortAccumulation} 不破底${sq.score.priceFloorRising} 站上成本${sq.score.aboveShortCost} 回補壓力${sq.score.marginCallPressure} 量價突破${sq.score.breakoutVolume}`);
+    console.log(`  解讀:`);
+    for (const line of sq.interpretation.split('\n')) console.log(`    ${line}`);
+  } catch (err) {
+    console.log(`  ⚠️ 軋空分析失敗: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // ── 11. 4 verdict 整合
   console.log(`\n═══════════════════════════════════════`);
@@ -408,7 +483,7 @@ async function main(): Promise<void> {
   let fundVerdict: 'pass' | 'watch' | 'fail' = 'watch';
   let fundReason = '';
   if (token) {
-    const finRaw = await fetchFinmindFinancials(token, symbol, date);
+    const finRaw = await fetchFinmindFinancials(token, pureCode, date);
     const quarters = Object.keys(finRaw).sort();
     const latestQ = quarters[quarters.length - 1];
     if (latestQ) {
@@ -427,6 +502,8 @@ async function main(): Promise<void> {
         fundReason = `revYoY ${revYoY.toFixed(1)}%,本業 ${real.gpMinusOpEx != null ? (real.gpMinusOpEx / 1e8).toFixed(1) + ' 億' : 'n/a'}`;
       }
     }
+  } else if (market === 'CN') {
+    fundReason = '(陸股未整合源,手動查雪球/東方財富)';
   } else {
     fundReason = '(無 FinMind token,無法穿透)';
   }

@@ -234,4 +234,20 @@ describe('alertDispatcher — debounce', () => {
     ], { logToDisk: false });
     expect(r.fired).toBe(2);
   });
+
+  test('同 symbol+rule 不同 barTs 不會互相 debounce（新 bar 應 fire）', async () => {
+    const base = {
+      rule: 'blowoff-bearish' as const,
+      symbol: '3661.TW', market: 'TW' as const, tfMin: 1 as const,
+      meta: {
+        open: 100, high: 101, low: 94, close: 95, volume: 1000,
+        volumeMultiplier: 2.3, pctChange: -5, bodyRatio: 0.7, ma20Deviation: 0,
+      },
+      caveat: 'minute-inference' as const, isHolding: false,
+    };
+    const r1 = await dispatch([{ ...base, ts: tsAt(10, 0) }], { logToDisk: false });
+    const r2 = await dispatch([{ ...base, ts: tsAt(10, 5) }], { logToDisk: false });
+    expect(r1.fired).toBe(1);
+    expect(r2.fired).toBe(1); // 不同 bar — 應該 fire
+  });
 });

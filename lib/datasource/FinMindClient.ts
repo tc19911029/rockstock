@@ -42,7 +42,7 @@ function cacheSet<T>(key: string, data: T, ttl: number): void {
  */
 let tokenDisabled = false;
 
-async function finmindFetch<T>(dataset: string, params: Record<string, string>): Promise<T[]> {
+export async function finmindFetch<T>(dataset: string, params: Record<string, string>): Promise<T[]> {
   const useToken: boolean = Boolean(FINMIND_TOKEN) && !tokenDisabled;
 
   const buildUrl = (withToken: boolean): URL => {
@@ -179,6 +179,15 @@ export interface FundamentalsData {
   revenueLatest: number | null;
   revenueMoM: number | null;  // month-over-month %
   revenueYoY: number | null;  // year-over-year %
+  /** 期別 metadata（optional，給 UI 顯示「26Q1」「2026 年 4 月」）*/
+  periods?: {
+    /** 財報期 YYYY-MM-DD（e.g. 2026-03-31 = 26Q1）*/
+    financialReportDate?: string | null;
+    /** 月營收的月份 YYYY-MM-DD（e.g. 2026-04-01 = 2026 年 4 月）*/
+    revenueMonth?: string | null;
+    /** PER/PBR/殖利率的交易日 YYYY-MM-DD（即時市價，每日更新）*/
+    valuationDate?: string | null;
+  };
 }
 
 // ── Public API functions ───────────────────────────────────────────────────────
@@ -390,6 +399,11 @@ export async function getFundamentals(stockId: string): Promise<FundamentalsData
     revenueLatest,
     revenueMoM,
     revenueYoY,
+    periods: {
+      financialReportDate: latestDate ?? null,
+      revenueMonth: revData[0]?.date ?? null,
+      valuationDate: latestPE?.date ?? null,
+    },
   };
 
   // 只在拿到任一可用欄位時才 cache — 避免 FinMind 限流/未授權時 cache 卡 stale 空白
@@ -556,6 +570,119 @@ export async function getSharesIssued(stockId: string): Promise<number | null> {
 
     cacheSet(cacheKey, shares, TTL.FUNDAMENTALS);
     return shares;
+  } catch {
+    return null;
+  }
+}
+
+// ── Quarterly history（近 N 季逐季 EPS / 營收 / 淨利率） ────────────────────────
+
+export interface QuarterlyHistoryRow {
+  quarter: string;          // YYYY-MM-DD（季底）
+  revenue: number | null;
+  grossProfit: number | null;
+  netIncome: number | null;
+  eps: number | null;
+  netMargin: number | null;
+  grossMargin: number | null;
+}
+
+/**
+ * 取得近 N 季逐季財報（for TTM PE 計算 + 三情境推估）。
+ * 由近到遠排序（quarters[0] 是最新一季）。
+ */
+export async function getQuarterlyHistory(
+  stockId: string,
+  quarters = 8,
+): Promise<QuarterlyHistoryRow[]> {
+  const cacheKey = `quarterlyHistory:${stockId}:${quarters}`;
+  const cached = cacheGet<QuarterlyHistoryRow[]>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const startDate = new Date();
+    startDate.setFullYear(startDate.getFullYear() - 3);
+    const start = startDate.toISOString().split('T')[0];
+
+    const rows = await finmindFetch<FinancialRow>('TaiwanStockFinancialStatements', {
+      data_id: stockId,
+      start_date: start,
+    });
+
+    const byDate = new Map<string, Map<string, number>>();
+    for (const r of rows) {
+      if (!r.date || !r.type || typeof r.value !== 'number') continue;
+      if (!byDate.has(r.date)) byDate.set(r.date, new Map());
+      byDate.get(r.date)!.set(r.type, r.value);
+    }
+
+    const dates = [...byDate.keys()].sort((a, b) => b.localeCompare(a)).slice(0, quarters);
+
+    const result: QuarterlyHistoryRow[] = dates.map((date) => {
+      const m = byDate.get(date)!;
+      const revenue = m.get('Revenue') ?? null;
+      const grossProfit = m.get('GrossProfit') ?? null;
+      const netIncome = m.get('IncomeAfterTaxes') ?? null;
+      const eps = m.get('EPS') ?? null;
+      const netMargin = revenue && netIncome ? netIncome / revenue : null;
+      const grossMargin = revenue && grossProfit ? grossProfit / revenue : null;
+      return { quarter: date, revenue, grossProfit, netIncome, eps, netMargin, grossMargin };
+    });
+
+    if (result.length > 0) cacheSet(cacheKey, result, TTL.FUNDAMENTALS);
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+// ── Balance sheet（股東權益、每股淨值） ─────────────────────────────────────────
+
+export interface BalanceSheetData {
+  date: string;
+  equity: number | null;             // 股東權益總計
+  bookValuePerShare: number | null;  // 每股淨值
+}
+
+/**
+ * 取得最新一季資產負債表精要（for PB 計算與景氣循環股估值）。
+ * FinMind TaiwanStockBalanceSheet 也是 type/value 結構。
+ */
+export async function getBalanceSheet(stockId: string): Promise<BalanceSheetData | null> {
+  const cacheKey = `balanceSheet:${stockId}`;
+  const cached = cacheGet<BalanceSheetData>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const startDate = new Date();
+    startDate.setFullYear(startDate.getFullYear() - 1);
+    const start = startDate.toISOString().split('T')[0];
+
+    const rows = await finmindFetch<FinancialRow>('TaiwanStockBalanceSheet', {
+      data_id: stockId,
+      start_date: start,
+    });
+
+    const byDate = new Map<string, Map<string, number>>();
+    for (const r of rows) {
+      if (!r.date || !r.type || typeof r.value !== 'number') continue;
+      if (!byDate.has(r.date)) byDate.set(r.date, new Map());
+      byDate.get(r.date)!.set(r.type, r.value);
+    }
+
+    const latestDate = [...byDate.keys()].sort((a, b) => b.localeCompare(a))[0];
+    if (!latestDate) return null;
+
+    const m = byDate.get(latestDate)!;
+    const equity = m.get('Equity') ?? m.get('TotalEquity') ?? null;
+    const shares = await getSharesIssued(stockId);
+    // equity 與 shares 都以「元 / 股」為原始單位（FinMind 仟元注釋的欄位另有 ThousandUnit；
+    // TaiwanStockBalanceSheet 對 type='Equity' 的 value 已是元，shares 是股數，直接除即為元/股）
+    const bookValuePerShare = equity && shares && shares > 0 ? equity / shares : null;
+
+    const result: BalanceSheetData = { date: latestDate, equity, bookValuePerShare };
+    cacheSet(cacheKey, result, TTL.FUNDAMENTALS);
+    return result;
   } catch {
     return null;
   }

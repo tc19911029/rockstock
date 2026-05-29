@@ -3,7 +3,8 @@ import path from 'node:path';
 import { apiOk, apiError } from '@/lib/api/response';
 import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { computeSanSeChart } from '@/lib/cn-sanse/indicators';
-import { fetchDayExtras } from '@/lib/cn-sanse/eastmoneyExtras';
+import { evalConditions } from '@/lib/cn-sanse/conditions';
+import { fetchDayExtras } from '@/lib/cn-sanse/cnDayExtras';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import type { Candle } from '@/types';
 
@@ -21,19 +22,26 @@ async function lookupStock(symbol: string): Promise<{ name: string; industry: st
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ symbol: string }> },
 ) {
   const { symbol } = await params;
   if (!/^\d{6}\.(SS|SZ)$/i.test(symbol)) return apiError('代號格式錯誤', 400);
 
+  // asOf：走圖步進時截斷到該日，讓標記/條件/訊號跟著步進的位置重算（不給=最新全段）
+  const asOf = new URL(req.url).searchParams.get('asOf');
+
   try {
     const dir = getLocalCandleDir('CN');
     const raw = await fs.readFile(path.join(dir, `${symbol}.json`), 'utf8');
-    const candles = JSON.parse(raw)?.candles as Candle[] | undefined;
-    if (!Array.isArray(candles) || candles.length < 60) {
+    const allCandles = JSON.parse(raw)?.candles as Candle[] | undefined;
+    if (!Array.isArray(allCandles) || allCandles.length < 60) {
       return apiError('本地K線不足', 404);
     }
+    const candles = asOf ? allCandles.filter((c) => c.date <= asOf) : allCandles;
+    if (candles.length < 60) return apiError('本地K線不足（截斷後）', 404);
+    // 真的被截 = 步進歷史 → 略過即時報價/換手率（避免每步打 EastMoney 拖慢）；最新全段才抓即時
+    const isHistorical = !!asOf && candles.length < allCandles.length;
 
     // 大盤指數（上證 000001.SS）→ 按日期對齊個股 K（主力狀態F 的中線強勢需要）
     let indexClose: number[] | undefined;
@@ -45,9 +53,11 @@ export async function GET(
       indexClose = candles.map((c) => { const v = idxMap.get(c.date); if (v != null) last = v; return last; });
     } catch { /* 無指數 → 主力狀態F 不計算 */ }
 
-    // 成交額/成交量/換手率（捕撈季節量能彩柱）+ 即時報價列 — 現抓現用，平行打
+    // 成交額/成交量/換手率（捕撈季節量能彩柱）+ 即時報價列 — 最新全段才抓；步進歷史只算本地
     let extras;
-    const [m, quote] = await Promise.all([fetchDayExtras(symbol), fetchQuote(symbol)]);
+    const [m, quote] = isHistorical
+      ? [new Map<string, { amount: number; vol: number; turnover: number }>(), null]
+      : await Promise.all([fetchDayExtras(symbol), fetchQuote(symbol)]);
     if (m.size) {
       extras = {
         amount: candles.map((c) => m.get(c.date)?.amount ?? NaN),
@@ -75,6 +85,8 @@ export async function GET(
       changePct: prev?.close ? +(((last.close - prev.close) / prev.close) * 100).toFixed(2) : 0,
       quote, // 即時報價列（量比/換手/市盈/總額/總值…）；非交易時段為 null
       scores: chart.scores,
+      conditions: evalConditions(candles, indexClose), // 三色條件報告（給中間條件面板）
+
       chart: {
         candles: tail(chart.candles),
         zhineng: tail(chart.zhineng),

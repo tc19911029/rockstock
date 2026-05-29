@@ -25,6 +25,19 @@ export type RuleId =
   | 'terminal-rally'
   | 'ma5-breakdown';
 
+// Per-bar dedup：key = `${symbol}:${rule}:${tfMin}`，value = barTs(最後一次 fire 的 bar)
+// 同一根 bar 永不重 fire；dispatcher 那層另有 disk-backed 防 HMR / cold start
+const lastFiredBarTs: Map<string, number> = new Map();
+
+function makeFiredKey(symbol: string, rule: RuleId, tfMin: 1 | 5): string {
+  return `${symbol}:${rule}:${tfMin}`;
+}
+
+/** test-only：清空 per-bar 記憶 */
+export function _resetDetectorMemoryForTest(): void {
+  lastFiredBarTs.clear();
+}
+
 export interface DetectorContext {
   symbol: string;
   market: 'TW' | 'CN';
@@ -100,10 +113,15 @@ export function detect(
   const isBlowoff = volMult >= REALTIME_RULES.VOLUME_MULTIPLIER
     && bodyRatio >= REALTIME_RULES.BODY_RATIO_MIN;
 
+  // Per-bar dedup：對同一根 bar (last.ts) 的同一個 rule+tfMin，永不重 fire。
+  // 規則：先把所有 candidate signal 算出來，再 filter 掉已 fire 過 last.ts 的；
+  //       fire 完更新 lastFiredBarTs。
+  const candidates: Array<{ rule: RuleId; sig: Signal }> = [];
+
   // Rule 1: blowoff-bearish — 爆量長黑
   // 書本原文：日 K「爆大量收長黑 → 出貨見高訊號」(分時推論)
   if (isBlowoff && last.close < last.open) {
-    signals.push(makeSignal('blowoff-bearish', ctx, last, tfMin, baseMeta));
+    candidates.push({ rule: 'blowoff-bearish', sig: makeSignal('blowoff-bearish', ctx, last, tfMin, baseMeta) });
   }
 
   // Rule 2: blowoff-bullish — 爆量長紅 + 突破前 N 根 high
@@ -114,7 +132,7 @@ export function detect(
       (m, b) => Math.max(m, b.high), 0,
     );
     if (prevHigh > 0 && last.close > prevHigh) {
-      signals.push(makeSignal('blowoff-bullish', ctx, last, tfMin, baseMeta));
+      candidates.push({ rule: 'blowoff-bullish', sig: makeSignal('blowoff-bullish', ctx, last, tfMin, baseMeta) });
     }
   }
 
@@ -131,7 +149,7 @@ export function detect(
     const lastIsBlowoff = volMult >= REALTIME_RULES.VOLUME_MULTIPLIER;
     const deviationOver = ma20Deviation > REALTIME_RULES.TERMINAL_RALLY_DEVIATION;
     if (allLongRed && lastIsBlowoff && deviationOver) {
-      signals.push(makeSignal('terminal-rally', ctx, last, tfMin, baseMeta));
+      candidates.push({ rule: 'terminal-rally', sig: makeSignal('terminal-rally', ctx, last, tfMin, baseMeta) });
     }
   }
 
@@ -140,8 +158,15 @@ export function detect(
   if (tfMin === 5 && ctx.isHolding) {
     const ma5 = sma(bars.slice(-5).map(b => b.close));
     if (ma5 > 0 && last.close < ma5) {
-      signals.push(makeSignal('ma5-breakdown', ctx, last, tfMin, baseMeta));
+      candidates.push({ rule: 'ma5-breakdown', sig: makeSignal('ma5-breakdown', ctx, last, tfMin, baseMeta) });
     }
+  }
+
+  for (const { rule, sig } of candidates) {
+    const key = makeFiredKey(ctx.symbol, rule, tfMin);
+    if (lastFiredBarTs.get(key) === last.ts) continue; // 同一根 bar 已 fire 過
+    lastFiredBarTs.set(key, last.ts);
+    signals.push(sig);
   }
 
   return signals;

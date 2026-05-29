@@ -149,13 +149,17 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
           📺 {uniqueSourcesByName.length}
         </span>
         {sourceChips.map((src, i) => (
-          <span
+          <a
             key={`${src.video_id}-${i}`}
-            className="text-[9px] px-1 h-3.5 flex items-center rounded-sm bg-secondary/60 text-foreground/70 truncate max-w-[80px]"
-            title={`${src.display_name}\n影片：${src.video_title}\n情緒：${src.sentiment}\n理由：${src.reason || '—'}`}
+            href={src.video_url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            className="text-[9px] px-1 h-3.5 flex items-center rounded-sm bg-secondary/60 text-foreground/70 hover:bg-sky-900/50 hover:text-sky-300 truncate max-w-[80px]"
+            title={`${src.display_name}\n影片：${src.video_title}\n情緒：${src.sentiment}\n理由：${src.reason || '—'}\n（點擊開啟 YouTube）`}
           >
             {shortName(src.display_name)}
-          </span>
+          </a>
         ))}
         {overflowCount > 0 && (
           <span className="text-[9px] px-1 h-3.5 flex items-center rounded-sm bg-secondary/40 text-muted-foreground">
@@ -245,7 +249,16 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
                 <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                   <span className={`font-bold ${sentLabel.cls}`}>{sentLabel.text}</span>
                   <span className="text-muted-foreground">·</span>
-                  <span className="text-foreground font-medium">{src.display_name}</span>
+                  <a
+                    href={src.video_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    className="text-foreground font-medium hover:text-sky-300 hover:underline"
+                    title={`${src.video_title}\n（點擊開啟 YouTube）`}
+                  >
+                    {src.display_name}
+                  </a>
                   {realAnalysts.length > 0 && (
                     <>
                       <span className="text-muted-foreground">·</span>

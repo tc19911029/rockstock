@@ -1,0 +1,73 @@
+'use client';
+
+// 三色條件面板 — 主力/雙B/捕撈三組的買進✓/賣出警示清單。
+// 主頁中間「條件」tab（陸股）與 /cn-sanse 共用同一份 ConditionReport 渲染。
+
+import { cn } from '@/lib/utils';
+import { STAGE_LABEL, STAGE_ICON, type ConditionReport, type GroupReport, type ResLevel } from '@/lib/cn-sanse/conditions';
+
+const RES_BADGE: Record<ResLevel, { label: string; cls: string }> = {
+  strong: { label: '強共振', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
+  medium: { label: '中共振', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+  weak: { label: '弱共振', cls: 'bg-secondary text-muted-foreground border-border' },
+};
+
+function CondList({ title, g, color }: { title: string; g: GroupReport; color: string }) {
+  return (
+    <div className="rounded-md border border-border p-2">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className={cn('text-[11px] font-medium', color)}>{title}</span>
+        {g.buyHit && <span className="text-[9px] px-1 rounded bg-rose-500/15 text-rose-300">買進</span>}
+        {g.sellHit && <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-300">賣出</span>}
+      </div>
+      <div className="flex flex-wrap gap-1 text-[10px]">
+        {g.buy.map((c) => (
+          <span key={c.id} className={cn('px-1 py-0.5 rounded border', c.met ? (c.kind === 'signal' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' : 'bg-sky-500/10 text-sky-300 border-sky-500/30') : 'text-muted-foreground/35 border-border')}>
+            {c.met ? '✓' : '○'}{c.label}
+          </span>
+        ))}
+        {g.sell.filter((c) => c.met).map((c) => (
+          <span key={c.id} className="px-1 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30">⚠️{c.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function SanSeConditionsPanel({ report }: { report: ConditionReport | null }) {
+  if (!report) {
+    return <div className="p-3 text-[11px] text-muted-foreground">載入三色條件…（或此檔資料不足）</div>;
+  }
+  const r = report;
+  return (
+    <div className="p-2.5 space-y-2">
+      <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+        <span className="font-semibold text-fuchsia-300">🎨 三色條件</span>
+        {r.level && <span className={cn('px-1.5 py-0.5 rounded border font-medium', RES_BADGE[r.level].cls)}>{RES_BADGE[r.level].label} {r.groupBuyCount}/3</span>}
+        {r.mainStage && <span className="px-1.5 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[r.mainStage]}{STAGE_ICON[r.mainStage]}</span>}
+        {r.conflict && <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}
+        {!r.selected && <span className="text-muted-foreground">未達任一組買點</span>}
+      </div>
+
+      <CondList title="🟦 雙B戰法" g={r.doubleB} color="text-rose-300" />
+      <CondList title="🟪 主力狀態" g={r.mainforce} color="text-fuchsia-400" />
+      <CondList title="🟩 捕撈季節" g={r.catch} color="text-emerald-400" />
+
+      <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+        <Score label="短線上攻" v={r.scores.shortAttack} c="text-fuchsia-400" />
+        <Score label="中線強勢" v={r.scores.midStrength} c="text-rose-300" />
+        <Score label="中線控盤" v={r.scores.midControl} c="text-amber-300" />
+        <Score label="控盤程度" v={r.scores.kongPan} c="text-sky-300" />
+      </div>
+    </div>
+  );
+}
+
+function Score({ label, v, c }: { label: string; v: number; c: string }) {
+  return (
+    <div className="rounded-md border border-border px-2 py-1 text-center">
+      <div className="text-muted-foreground text-[9px]">{label}</div>
+      <div className={cn('font-bold tabular-nums text-sm', c)}>{Number.isFinite(v) ? v.toFixed(2) : '—'}</div>
+    </div>
+  );
+}

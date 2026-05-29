@@ -274,25 +274,33 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       return true;
     };
 
+    /** 冷啟動 / dev 編譯期 / 上游瞬斷時，API 偶爾暫回 0 筆或 5xx → 退避重試（最多 3 次）才放棄。
+     *  回傳含 candles 的 json，或 null（重試後仍無資料）。延遲只在失敗時發生。 */
+    const fetchCandlesRetry = async (
+      url: string, tries = 3,
+    ): Promise<{ ticker: string; name: string; candles: unknown[] } | null> => {
+      for (let i = 0; i < tries; i++) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            const json = await res.json();
+            if (Array.isArray(json?.candles) && json.candles.length > 0) return json;
+          }
+        } catch { /* 重試 */ }
+        if (i < tries - 1) await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+      }
+      return null;
+    };
+
     try {
       // ── 日K 混合模式：先讀本地秒開 → 背景 API 更新 ──
       if (!isMinuteInterval) {
-        // Step 1: 嘗試本地檔案（瞬間回應）
-        let localLoaded = false;
-        try {
-          const scanDateParam = targetDate ? `&scanDate=${encodeURIComponent(targetDate)}` : '';
-          const localRes = await fetch(
-            `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1${scanDateParam}`
-          );
-          if (localRes.ok) {
-            const localJson = await localRes.json();
-            if (localJson.candles?.length > 0) {
-              localLoaded = applyData(localJson, true); // 本地載入成功立即清除 loading
-            }
-          }
-        } catch {
-          // 本地讀取失敗，不影響後續
-        }
+        // Step 1: 嘗試本地檔案（瞬間回應；冷啟動/編譯期暫回 0 會自動退避重試）
+        const scanDateParam = targetDate ? `&scanDate=${encodeURIComponent(targetDate)}` : '';
+        const localJson = await fetchCandlesRetry(
+          `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1${scanDateParam}`
+        );
+        const localLoaded = localJson ? applyData(localJson, true) : false;
 
         if (localLoaded) {
           // 本地已秒開 → 背景靜默更新今日 K 棒（不阻塞 UI）
@@ -314,22 +322,17 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           return;
         }
 
-        // 本地無資料 → 走 API 路徑
-        const apiRes = await fetch(
+        // 本地無資料 → 走 API 路徑（同樣退避重試，吸收冷啟動/編譯期瞬斷）
+        const apiJson = await fetchCandlesRetry(
           `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}`
         );
-        const apiJson = await apiRes.json();
-        if (!apiRes.ok) throw new Error(apiJson.error ?? '載入失敗');
-        if (!applyData(apiJson, true)) throw new Error('資料筆數為 0');
+        if (!apiJson || !applyData(apiJson, true)) throw new Error('資料筆數為 0');
       } else {
-        // ── 分鐘K：直接 API（本地沒有分鐘K數據） ──
-        const res = await fetch(
+        // ── 分鐘K：直接 API（本地沒有分鐘K數據；同樣退避重試） ──
+        const json = await fetchCandlesRetry(
           `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}`
         );
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? '載入失敗');
-
-        if (!applyData(json, true)) throw new Error('資料筆數為 0');
+        if (!json || !applyData(json, true)) throw new Error('資料筆數為 0');
       }
       // 自動刷新：URL 載入 / 切股 / 切時框 都會走進這裡 → 統一啟動 polling
       // 不同 interval 走不同頻率（分 K 30s-3min，日/週/月 K 由 getPollingInterval 決定）

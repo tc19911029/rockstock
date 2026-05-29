@@ -10,9 +10,11 @@
  * 排序：API 已預先按 action(buy→watch→skip) → verdict → symbol 排好，這裡直接展示。
  */
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
+import { ForwardPerfRow } from '@/features/scan/components/ForwardPerfRow';
+import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { GradeBadge, UnscoredBadge } from '@/components/agents/ScoreLightBadge';
 import type { ScoreLight, StockGrade, SuitableFor } from '@/lib/agents/scoringTypes';
@@ -31,6 +33,8 @@ interface AgentVerdictSummary {
 interface RunListItem {
   symbol: string;
   name: string | null;
+  /** 訊號日收盤價,server 從 L1 補上,給前端 forward perf 用 */
+  lastClose?: number;
   status: 'pending' | 'completed';
   phaseStatus: {
     phase1Done: boolean;
@@ -102,11 +106,17 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
     onDateChange?.(d);
   }, [onDateChange]);
   const [filter, setFilter] = useState<'all' | 'buy' | 'completed'>('all');
+  type SortKey = 'default' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
+  const [sortBy, setSortBy] = useState<SortKey>('default');
   const [data, setData] = useState<DecisionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
   const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
+  // forward perf — 跟候選池/策略掃描共用 POST /api/backtest/forward
+  const [forwardMap, setForwardMap] = useState<Map<string, StockForwardPerformance>>(new Map());
+  const [isFetchingForward, setIsFetchingForward] = useState(false);
+  const forwardAbortRef = useRef<AbortController | null>(null);
 
   // AbortController + 15s timeout 防卡載入中（user 快速切日期或 server hang）
   const abortRef = useRef<AbortController | null>(null);
@@ -157,12 +167,61 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // 拿到 runs 後 POST forward — 顯示每檔訊號日後的漲跌幅(對齊候選池/策略掃描)
+  useEffect(() => {
+    if (!data?.runs || data.runs.length === 0) {
+      setForwardMap(new Map());
+      return;
+    }
+    const stocks = data.runs
+      .filter((r): r is RunListItem & { lastClose: number } => typeof r.lastClose === 'number')
+      .map(r => ({ symbol: r.symbol, name: r.name ?? r.symbol, scanPrice: r.lastClose }));
+    if (stocks.length === 0) {
+      setForwardMap(new Map());
+      return;
+    }
+    forwardAbortRef.current?.abort();
+    const ac = new AbortController();
+    forwardAbortRef.current = ac;
+    setIsFetchingForward(true);
+    fetch('/api/backtest/forward', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scanDate: date, stocks }),
+      signal: ac.signal,
+    })
+      .then(r => r.ok ? r.json() as Promise<{ performance?: StockForwardPerformance[] }> : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(j => {
+        if (ac.signal.aborted) return;
+        const map = new Map<string, StockForwardPerformance>();
+        for (const p of j.performance ?? []) map.set(p.symbol, p);
+        setForwardMap(map);
+      })
+      .catch(() => { /* abort / network fail — 留空,UI 顯示 — */ })
+      .finally(() => { if (!ac.signal.aborted) setIsFetchingForward(false); });
+  }, [data, date]);
+
   // 過濾邏輯（API 已預排）
   const runs = (data?.runs ?? []).filter(r => {
     if (filter === 'buy') return r.decision?.action === 'buy';
     if (filter === 'completed') return r.status === 'completed';
     return true;
   });
+
+  // 漲跌幅排序（缺值排最後）；default 維持 API 預排
+  const sortedRuns = useMemo(() => {
+    if (sortBy === 'default') return runs;
+    return [...runs].sort((a, b) => {
+      const va = forwardMap.get(a.symbol)?.[sortBy];
+      const vb = forwardMap.get(b.symbol)?.[sortBy];
+      const aNull = va == null;
+      const bNull = vb == null;
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      return (vb as number) - (va as number);
+    });
+  }, [runs, sortBy, forwardMap]);
 
   const stats = (data?.runs ?? []).reduce(
     (acc, r) => {
@@ -200,14 +259,24 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
             </button>
           ))}
         </div>
+        <label className="ml-2 text-muted-foreground flex items-center gap-1 text-[10px]" title="依漲跌幅排序（缺值排最後）">
+          排序
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            className="bg-card border border-border rounded px-1.5 py-0.5 text-[10px]"
+          >
+            <option value="default">預設</option>
+            <option value="openReturn">漲跌·隔開</option>
+            <option value="d1Return">漲跌·1日</option>
+            <option value="d5Return">漲跌·5日</option>
+            <option value="d10Return">漲跌·10日</option>
+            <option value="d20Return">漲跌·20日</option>
+            <option value="maxGain">漲跌·最高</option>
+            <option value="maxLoss">漲跌·最低</option>
+          </select>
+        </label>
         <div className="flex-1" />
-        <Link
-          href={`/agents?date=${date}`}
-          className="text-sky-400 hover:underline text-[11px]"
-          title="開啟完整多代理分析"
-        >
-          完整頁 →
-        </Link>
       </div>
       {/* 一行小說明 — 讓使用者快速理解這 tab 的功能與欄位 */}
       <div className="shrink-0 px-2 py-1 text-[10px] text-muted-foreground border-b border-border/40 bg-card/20 leading-relaxed space-y-0.5">
@@ -279,10 +348,12 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => (
+              {sortedRuns.map((r) => (
                 <AgentRow
                   key={r.symbol}
                   run={r}
+                  performance={forwardMap.get(r.symbol)}
+                  isFetchingForward={isFetchingForward}
                   onSelect={onSelectStock}
                   selected={selectedSymbol === r.symbol}
                 />
@@ -295,7 +366,19 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
   );
 }
 
-function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (symbol: string) => void; selected?: boolean }) {
+function AgentRow({
+  run,
+  performance,
+  isFetchingForward,
+  onSelect,
+  selected,
+}: {
+  run: RunListItem;
+  performance?: StockForwardPerformance;
+  isFetchingForward?: boolean;
+  onSelect?: (symbol: string) => void;
+  selected?: boolean;
+}) {
   const pureSymbol = run.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const action = run.decision?.action;
   const cfg = action ? ACTION_STYLE[action] : null;
@@ -308,70 +391,82 @@ function AgentRow({ run, onSelect, selected }: { run: RunListItem; onSelect?: (s
   const hasGrade = run.decision?.grade != null && run.decision?.totalScore != null;
   const isOldData = !!run.decision && !hasGrade;
 
+  const hoverClass = `hover:bg-muted/40 cursor-pointer transition-colors ${
+    selected ? 'bg-sky-500/15' : ''
+  }`;
+
   return (
-    <tr
-      className={`border-b border-border/40 hover:bg-muted/40 cursor-pointer transition-colors ${
-        selected ? 'bg-sky-500/15 ring-1 ring-inset ring-sky-500/40' : ''
-      }`}
-      onClick={() => onSelect?.(run.symbol)}
-      title={run.decision?.gradeReason ?? run.decision?.overview ?? `Phase ${phaseProgress}/4 — 尚未完成決策`}
-    >
-      <td className="px-2 py-1.5">
-        <div className="text-foreground font-medium truncate max-w-[110px]">{run.name ?? '—'}</div>
-        <div className="font-mono tabular-nums text-[10px] text-muted-foreground">{pureSymbol}</div>
-      </td>
-      <td className="px-1 py-1.5 text-center">
-        {hasGrade ? (
-          <GradeBadge grade={run.decision!.grade!} totalScore={run.decision!.totalScore!} size="sm" />
-        ) : isOldData ? (
-          <span
-            className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded border text-[9px] bg-amber-700/30 text-amber-200 border-amber-500/40"
-            title="此 decision 為舊版,需重跑 /multi-agent-decide 才有評分"
-          >
-            ⟳
-          </span>
-        ) : (
-          <UnscoredBadge size="sm" />
-        )}
-      </td>
-      <td className="px-1 py-1.5 text-center">
-        {cfg ? (
-          <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] ${cfg.bg} ${cfg.text}`}>
-            {cfg.label}
-          </span>
-        ) : (
-          <span className="text-[10px] text-muted-foreground">P{phaseProgress}/4</span>
-        )}
-      </td>
-      <td className="px-1 py-1.5 text-center text-[10px]">
-        {run.decision ? (
-          <span className="font-mono tabular-nums">
-            <span className="text-green-400">{run.decision.bullScore}</span>
-            <span className="text-muted-foreground">/</span>
-            <span className="text-red-400">{run.decision.bearScore}</span>
-          </span>
-        ) : '—'}
-      </td>
-      <td className="px-1 py-1.5 text-center text-[10px] font-mono tabular-nums">
-        {run.decision ? `${Math.round(run.decision.sizeHint * 100)}%` : '—'}
-      </td>
-      <td className="px-1 py-1.5">
-        <div className="flex gap-0.5" title="技 / 籌 / 基 / 消(分數顏色;舊資料用 verdict 色)">
-          {(['technical', 'chip', 'fundamental', 'news'] as const).map(k => {
-            const a = run.verdicts[k];
-            // 優先用 score light(新評分);沒有 fallback verdict 三色
-            const cls = a?.light
-              ? LIGHT_DOT[a.light]
-              : a?.verdict ? VERDICT_DOT[a.verdict] : 'bg-muted';
-            const tip = a?.score != null
-              ? `${k}: ${a.score} 分 (${a.confidence ?? '—'})`
-              : a?.verdict ? `${k}: ${a.verdict}` : `${k}: 未完成`;
-            return (
-              <span key={k} className={`w-2 h-2 rounded-full ${cls}`} title={tip} />
-            );
-          })}
-        </div>
-      </td>
-    </tr>
+    <Fragment>
+      <tr
+        className={hoverClass}
+        onClick={() => onSelect?.(run.symbol)}
+        title={run.decision?.gradeReason ?? run.decision?.overview ?? `Phase ${phaseProgress}/4 — 尚未完成決策`}
+      >
+        <td className="px-2 pt-1.5 pb-0.5">
+          <div className="text-foreground font-medium truncate max-w-[110px]">{run.name ?? '—'}</div>
+          <div className="font-mono tabular-nums text-[10px] text-muted-foreground">{pureSymbol}</div>
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center">
+          {hasGrade ? (
+            <GradeBadge grade={run.decision!.grade!} totalScore={run.decision!.totalScore!} size="sm" />
+          ) : isOldData ? (
+            <span
+              className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded border text-[9px] bg-amber-700/30 text-amber-200 border-amber-500/40"
+              title="此 decision 為舊版,需重跑 /multi-agent-decide 才有評分"
+            >
+              ⟳
+            </span>
+          ) : (
+            <UnscoredBadge size="sm" />
+          )}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center">
+          {cfg ? (
+            <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] ${cfg.bg} ${cfg.text}`}>
+              {cfg.label}
+            </span>
+          ) : (
+            <span className="text-[10px] text-muted-foreground">P{phaseProgress}/4</span>
+          )}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center text-[10px]">
+          {run.decision ? (
+            <span className="font-mono tabular-nums">
+              <span className="text-green-400">{run.decision.bullScore}</span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-red-400">{run.decision.bearScore}</span>
+            </span>
+          ) : '—'}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center text-[10px] font-mono tabular-nums">
+          {run.decision ? `${Math.round(run.decision.sizeHint * 100)}%` : '—'}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5">
+          <div className="flex gap-0.5" title="技 / 籌 / 基 / 消(分數顏色;舊資料用 verdict 色)">
+            {(['technical', 'chip', 'fundamental', 'news'] as const).map(k => {
+              const a = run.verdicts[k];
+              const cls = a?.light
+                ? LIGHT_DOT[a.light]
+                : a?.verdict ? VERDICT_DOT[a.verdict] : 'bg-muted';
+              const tip = a?.score != null
+                ? `${k}: ${a.score} 分 (${a.confidence ?? '—'})`
+                : a?.verdict ? `${k}: ${a.verdict}` : `${k}: 未完成`;
+              return (
+                <span key={k} className={`w-2 h-2 rounded-full ${cls}`} title={tip} />
+              );
+            })}
+          </div>
+        </td>
+      </tr>
+      {/* 後續漲跌幅 — 對齊策略掃描 / 候選池 row 4 */}
+      <tr
+        className={`border-b border-border/40 ${hoverClass}`}
+        onClick={() => onSelect?.(run.symbol)}
+      >
+        <td colSpan={6} className="px-2 pb-1.5 pt-0">
+          <ForwardPerfRow performance={performance} isFetching={isFetchingForward} />
+        </td>
+      </tr>
+    </Fragment>
   );
 }

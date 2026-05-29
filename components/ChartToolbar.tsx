@@ -170,8 +170,8 @@ export default function ChartToolbar({
 
   return (
     <div className="shrink-0 border-b border-border">
-      {/* Row 1: Stock info — name, date, price, change, OHLCV */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-1.5 font-mono">
+      {/* Row 1: Stock info — name, date, price, change, OHLCV（不換行，開高低量永遠同一排）*/}
+      <div className="flex flex-nowrap items-center gap-x-1.5 px-3 py-1.5 font-mono min-w-0 overflow-x-auto">
         {stockName && (
           <span className="text-sm text-foreground font-bold font-sans shrink-0">{stockName}</span>
         )}

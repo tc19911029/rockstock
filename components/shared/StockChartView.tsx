@@ -148,7 +148,7 @@ export function StockChartView({
         {/* K 線主圖 */}
         <div
           className={showIndicators ? 'shrink-0' : 'flex-1 min-h-0'}
-          style={showIndicators ? { height: `${chartSplit * 100}%` } : undefined}
+          style={showIndicators ? { height: `${+(chartSplit * 100).toFixed(2)}%` } : undefined}
         >
           <ErrorBoundary>
             <CandleChart {...chartProps} fillContainer />

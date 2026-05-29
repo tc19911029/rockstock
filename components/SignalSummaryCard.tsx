@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { usePortfolioStore } from '@/store/portfolioStore';
+import { useBacktestStore } from '@/store/backtestStore';
 import { classifySignal, SignalSubtype } from '@/lib/rules/signalClassifier';
 import { calcKLineStopLoss } from '@/lib/sell/v12StopLoss';
 import { getOperationMA } from '@/lib/sell/v12Operation';
@@ -278,6 +279,8 @@ export default function SignalSummaryCard() {
     longProhibitions, winnerPatterns,
   } = useReplayStore();
   const { holdings } = usePortfolioStore();
+  // 掃描面板選的策略 — 讓訊號卡的操作 SOP（操作均線/停損停利框架）跟著換
+  const activeBuyMethod = useBacktestStore(s => s.activeBuyMethod);
 
   const candle = allCandles[currentIndex];
   const ticker = currentStock?.ticker ?? '';
@@ -366,12 +369,22 @@ export default function SignalSummaryCard() {
     criticalProhibitions,
   );
 
-  // 主訊號字母（V12 進場字母優先順序 Q > N > M > P > O；無命中時用持倉觸發字母）
+  // 主訊號字母 — 優先用掃描面板「選的策略」（讓訊號跟著策略換）：
+  //   activeBuyMethod 是進場字母（B-Q，v11 G/H/I 轉 v12 J/L/K）→ 套它的 SOP（操作均線/停損停利框架）
+  //   A（六條件預選池）/ R（機械軌）非單一進場 SOP → 回退 V12 偵測 / 持倉觸發字母
+  const ENTRY_LETTERS = new Set(['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']);
+  const normalizedActive = ({ G: 'J', H: 'L', I: 'K' } as Record<string, string>)[activeBuyMethod] ?? activeBuyMethod;
+  const strategyLetter: V12Letter | null = ENTRY_LETTERS.has(normalizedActive) ? (normalizedActive as V12Letter) : null;
   const PRIORITY: EntryLetter[] = ['Q', 'N', 'M', 'P', 'O'];
   const primaryV12 = PRIORITY.map(l => v12Hits.find(h => h.letter === l)).find(Boolean);
-  const primaryLetter: V12Letter = primaryV12?.letter
+  const primaryLetter: V12Letter = strategyLetter
+    ?? primaryV12?.letter
     ?? (heldPosition?.triggerSignal as V12Letter | undefined)
     ?? 'B';
+  // 策略視角顯示名（A/R 不是單一進場字母，特別標示）
+  const strategyName = activeBuyMethod === 'A' ? '六條件（預選池）'
+    : activeBuyMethod === 'R' ? '機械軌（乖離率）'
+    : sopFor(primaryLetter).name;
   // 0513 ABCDE C1：用 letterSOP 取代 getOperationMA 散落定義；對 'short' mode 兩者必須等價
   // (cross-source consistency test 在 __tests__/letterSOP.test.ts 強制驗)
   const operatingMA = sopFor(primaryLetter).operatingMA;
@@ -427,6 +440,20 @@ export default function SignalSummaryCard() {
         <div className={`w-1 shrink-0 ${STRENGTH_BAR[verdict.level]}`} />
         <div className="flex-1 p-3 space-y-3">
 
+          {/* ── 0. 策略視角（跟著右側掃描面板選的策略換）──────────────── */}
+          <div
+            className="flex items-center gap-2 text-[11px]"
+            title={`此訊號卡套用「${strategyName}」的操作 SOP（操作均線 ${operatingMA ?? '—'}）。在右側掃描面板換策略即同步切換。`}
+          >
+            <span className="px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-200 font-semibold shrink-0">策略</span>
+            <span className="text-foreground/85 font-medium truncate">{strategyName}</span>
+            {operatingMA && (
+              <span className="ml-auto shrink-0 text-muted-foreground/80">
+                操作均線 <span className="font-mono text-foreground/80">{operatingMA}</span>
+              </span>
+            )}
+          </div>
+
           {/* 字體系統（3 級）：
                 Heading: text-base font-bold（一句話結論「該出場」「可進場」）
                 Body:    text-xs（一般文字 / 數字 / 描述）
@@ -465,6 +492,7 @@ export default function SignalSummaryCard() {
               )}
             </div>
           </div>
+
 
           {/* ── 2. 一句話結論（Heading 級） ───────────────────────────── */}
           <div>

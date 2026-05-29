@@ -5,6 +5,13 @@ import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { toast } from 'sonner';
 import { DAY_TRADE_RATIO_HIGH, DAY_TRADE_RATIO_WARN } from '@/lib/analysis/bookThresholds';
 
+interface TrendInfo {
+  direction: 'up' | 'down' | 'flat';
+  consecutiveCount: number;
+  reversal: boolean;
+  label: string;
+}
+
 interface ChipInfo {
   symbol: string;
   name?: string;
@@ -26,7 +33,6 @@ interface ChipInfo {
   lendingNet: number;
   largeHolderPct: number;
   largeHolderChange: number;
-  // 集保大戶分層（2026-05-25 加：依股價分層 — 千金股看 100 張、平價看 1000 張）
   holder100Pct?: number;
   holder200Pct?: number;
   holder400Pct?: number;
@@ -38,6 +44,25 @@ interface ChipInfo {
   chipGrade: string;
   chipSignal: string;
   chipDetail: string;
+  // v2 — 9 區塊 + 趨勢
+  composite?: number;
+  trends?: {
+    foreign?: TrendInfo;
+    trust?: TrendInfo;
+    dealer?: TrendInfo;
+    institutional?: TrendInfo;
+    margin?: TrendInfo;
+    lending?: TrendInfo;
+    composite?: TrendInfo;
+    holderLarge?: TrendInfo;
+  };
+  holder5wChange?: { largePct: number; retailPct: number };
+  holder5mChange?: { largePct: number };
+  // v3 主力券商分點
+  brokerNetBuy?: number;
+  brokerConcentration?: number;
+  topBuyers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
+  topSellers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
 }
 
 // ── Signal label + color ────────────────────────────────────────────────────
@@ -94,6 +119,7 @@ function ChipTile({
   unit = '張',
   range,
   isPct = false,
+  trend,
 }: {
   label: string;
   value: number | null;
@@ -101,6 +127,7 @@ function ChipTile({
   unit?: string;
   range: number;
   isPct?: boolean;
+  trend?: TrendInfo;
 }) {
   const noData = value == null;
   const valColor = noData
@@ -141,6 +168,16 @@ function ChipTile({
           <span className="text-[8px] text-muted-foreground/60 ml-0.5">{unit}</span>
         )}
       </div>
+      {/* Trend label */}
+      {trend && trend.direction !== 'flat' && (
+        <span className={`text-[9px] font-bold leading-none ${
+          trend.direction === 'up'
+            ? (trend.reversal ? 'text-bull' : 'text-bull-light')
+            : (trend.reversal ? 'text-bear' : 'text-bear-light')
+        }`}>
+          {trend.label}
+        </span>
+      )}
       {/* Gauge */}
       {!noData && <GaugeBar value={value} range={range} />}
     </div>
@@ -210,84 +247,51 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
     <div className="text-xs text-muted-foreground/60 py-6 text-center">無資料</div>
   );
 
-  // ── Tile definitions ──────────────────────────────────────────────────────
-  const tiles = [
-    {
-      label: '外資',
-      value: data.foreignBuy,
-      signal: getSignal(data.foreignBuy, 5000, 500),
-      range: 20000,
-    },
-    {
-      label: '投信',
-      value: data.trustBuy,
-      signal: getSignal(data.trustBuy, 500, 50),
-      range: 2000,
-    },
-    {
-      label: '自營',
-      value: data.dealerBuy,
-      signal: getSignal(data.dealerBuy, 1000, 100),
-      range: 3000,
-    },
-    {
-      label: '法人',
-      value: data.totalInstitutional,
-      signal: getSignal(data.totalInstitutional, 8000, 800),
-      range: 25000,
-    },
-    {
-      label: '融資',
-      value: data.marginNet,
-      signal: getSignal(data.marginNet, 2000, 200),
-      range: 8000,
-    },
-    {
-      label: '融券',
-      value: data.shortNet,
-      signal: getSignal(data.shortNet, 500, 50),
-      range: 2000,
-    },
-    {
-      // 主力 = 三大法人合計（外資 + 投信 + 自營）
-      label: '主力',
-      value: data.totalInstitutional,
-      signal: getSignal(data.totalInstitutional, 8000, 800),
-      range: 25000,
-    },
-    {
-      label: '券賣',
-      value: data.lendingNet !== 0 ? data.lendingNet : null,
-      signal: getSignal(data.lendingNet, 5000, 500),
-      range: 20000,
-    },
-    {
-      label: '借券',
-      value: data.lendingBalance !== 0 ? -data.lendingBalance : null,
-      signal: getSignal(-data.lendingBalance, 10000, 1000),
-      range: 50000,
-    },
-    {
-      label: '董監',
-      value: null as number | null,
-      signal: { label: '—', cls: 'text-muted-foreground/60' },
-      range: 1,
-      isPct: true,
-    },
-    {
-      label: '大戶',
-      value: data.largeHolderChange !== 0 ? data.largeHolderChange : null,
-      signal: getPctSignal(data.largeHolderChange),
-      range: 5,
-      isPct: true,
-    },
-    {
-      label: '散戶',
-      value: data.largeHolderChange !== 0 ? -data.largeHolderChange : null,
-      signal: getPctSignal(-data.largeHolderChange),
-      range: 5,
-      isPct: true,
-    },
+  // ── Tile definitions — 對齊籌碼K線 app 9 區塊 ─────────────────────────────
+  const tiles: Array<{
+    label: string;
+    value: number | null;
+    signal: { label: string; cls: string };
+    range: number;
+    isPct?: boolean;
+    trend?: TrendInfo;
+  }> = [
+    { label: '外資', value: data.foreignBuy, signal: getSignal(data.foreignBuy, 5000, 500),
+      range: 20000, trend: data.trends?.foreign },
+    { label: '投信', value: data.trustBuy, signal: getSignal(data.trustBuy, 500, 50),
+      range: 2000, trend: data.trends?.trust },
+    { label: '自營', value: data.dealerBuy, signal: getSignal(data.dealerBuy, 1000, 100),
+      range: 3000, trend: data.trends?.dealer },
+    { label: '法人', value: data.totalInstitutional, signal: getSignal(data.totalInstitutional, 8000, 800),
+      range: 25000, trend: data.trends?.institutional },
+    { label: '融資', value: data.marginNet, signal: getSignal(data.marginNet, 2000, 200),
+      range: 8000, trend: data.trends?.margin },
+    { label: '融券', value: data.shortNet, signal: getSignal(data.shortNet, 500, 50),
+      range: 2000 },
+    // 主力 = v3 用 Yahoo 主力券商分點（前 15 大買 − 前 15 大賣）對齊籌碼K線「主力 -102」
+    { label: '主力',
+      value: data.brokerNetBuy ?? data.composite ?? data.totalInstitutional,
+      signal: getSignal(data.brokerNetBuy ?? data.composite ?? data.totalInstitutional, 500, 50),
+      range: 500,
+      trend: data.trends?.composite },
+    // 券賣（借券放空當日淨成交，flow）
+    { label: '券賣', value: data.lendingNet !== 0 ? data.lendingNet : null,
+      signal: getSignal(data.lendingNet, 500, 50), range: 2000,
+      trend: data.trends?.lending },
+    // 借券餘額（累積借出股票總量，stock；張）— flow vs stock 分開
+    { label: '借券餘額', value: data.lendingBalance > 0 ? data.lendingBalance : null,
+      signal: { label: '張', cls: 'text-muted-foreground' },
+      range: 100000 },
+    // 大戶 5 週累計變化（取代舊「當週變化」）
+    { label: '大戶 5 週',
+      value: data.holder5wChange?.largePct ?? null,
+      signal: getPctSignal(data.holder5wChange?.largePct ?? 0),
+      range: 5, isPct: true,
+      trend: data.trends?.holderLarge },
+    { label: '散戶 5 週',
+      value: data.holder5wChange?.retailPct ?? null,
+      signal: getPctSignal(data.holder5wChange?.retailPct ?? 0),
+      range: 5, isPct: true },
   ];
 
   const gradeCls = GRADE_CLS[data.chipGrade] ?? GRADE_CLS['D'];
@@ -326,9 +330,53 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
             signal={t.signal}
             range={t.range}
             isPct={t.isPct}
+            trend={t.trend}
           />
         ))}
       </div>
+
+      {/* ── 主力券商分點（v3 Yahoo scraper）── */}
+      {data.brokerNetBuy != null && data.topBuyers && data.topSellers && (
+        <details className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30">
+          <summary className="cursor-pointer select-none flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground font-medium">主力券商前 15 大</span>
+            <span className="flex items-center gap-2">
+              <span className={`text-[10px] font-mono ${data.brokerNetBuy >= 0 ? 'text-bull' : 'text-bear'}`}>
+                {data.brokerNetBuy >= 0 ? '+' : ''}{data.brokerNetBuy.toLocaleString()} 張
+              </span>
+              {data.brokerConcentration != null && (
+                <span className={`text-[10px] font-mono ${data.brokerConcentration >= 0 ? 'text-bull' : 'text-bear'}`}>
+                  集中 {data.brokerConcentration >= 0 ? '+' : ''}{data.brokerConcentration.toFixed(2)}%
+                </span>
+              )}
+            </span>
+          </summary>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <div>
+              <div className="text-[9px] text-bull font-medium mb-1">前 15 大買進</div>
+              <div className="space-y-0.5">
+                {data.topBuyers.slice(0, 8).map(b => (
+                  <div key={`b${b.rank}`} className="flex justify-between text-[10px]">
+                    <span className="text-foreground/80 truncate" title={b.name}>{b.rank}. {b.name}</span>
+                    <span className="text-bull font-mono shrink-0">+{b.netVolK}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-bear font-medium mb-1">前 15 大賣出</div>
+              <div className="space-y-0.5">
+                {data.topSellers.slice(0, 8).map(s => (
+                  <div key={`s${s.rank}`} className="flex justify-between text-[10px]">
+                    <span className="text-foreground/80 truncate" title={s.name}>{s.rank}. {s.name}</span>
+                    <span className="text-bear font-mono shrink-0">{s.netVolK}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </details>
+      )}
 
       {/* ── 集保大戶分層（依股價選 tier；千金股看 100 張、平價看 1000 張）── */}
       {(data.holder100Pct != null || data.holder400Pct != null) && (

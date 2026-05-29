@@ -10,7 +10,6 @@ import { usePortfolioStore } from '@/store/portfolioStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useReplayStore } from '@/store/replayStore';
 import { type MarketTab, filterByMarket, classifyMarket } from '@/lib/market/classify';
-import { HoldingV12Signals } from '@/components/HoldingV12Signals';
 import { ChartPracticeLedger } from '@/components/ChartPracticeLedger';
 import { calcNetPnL } from '@/lib/portfolio/fees';
 import { formatPercent, bullBearClass } from '@/lib/format';
@@ -42,7 +41,12 @@ function formatMoney(n: number) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function BottomPanel() {
+interface BottomPanelProps {
+  /** 點任一筆持倉時觸發 — 用於把上面的 sideTab 切到「訊號」 */
+  onSelectHolding?: () => void;
+}
+
+export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>('portfolio');
   const [prices, setPrices] = useState<Record<string, PriceInfo>>({});
@@ -269,6 +273,7 @@ export default function BottomPanel() {
               cnSummary={cnSummary}
               twReturnPct={twReturnPct}
               cnReturnPct={cnReturnPct}
+              onSelectHolding={onSelectHolding}
             />
           ) : (
             <WatchlistContent watchlist={filteredWatchlist} prices={prices} />
@@ -293,6 +298,7 @@ interface PortfolioContentProps {
   cnSummary: SummaryData;
   twReturnPct: number;
   cnReturnPct: number;
+  onSelectHolding?: () => void;
 }
 
 function SummaryRow({ label, summary, returnPct, currency }: { label?: string; summary: SummaryData; returnPct: number; currency: string }) {
@@ -323,7 +329,7 @@ function SummaryRow({ label, summary, returnPct, currency }: { label?: string; s
   );
 }
 
-function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab, twSummary, cnSummary, twReturnPct, cnReturnPct }: PortfolioContentProps) {
+function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab, twSummary, cnSummary, twReturnPct, cnReturnPct, onSelectHolding }: PortfolioContentProps) {
   if (holdings.length === 0) {
     return (
       <div>
@@ -369,7 +375,11 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
           return (
             <div key={h.id}>
             <button
-              onClick={() => { const s = useReplayStore.getState(); s.loadStock(stripSuffix(h.symbol)).then(() => s.startPolling()); }}
+              onClick={() => {
+                const s = useReplayStore.getState();
+                s.loadStock(stripSuffix(h.symbol)).then(() => s.startPolling());
+                onSelectHolding?.();
+              }}
               className="w-full px-3 py-2 hover:bg-muted/60 transition-colors text-left"
             >
               {/* Row 1: Name/Code/張數 ── Price + Change% */}
@@ -414,23 +424,6 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
                 </span>
               </div>
             </button>
-            {/* v12 Step 3-5 訊號 */}
-            <HoldingV12Signals
-              holdingId={h.id}
-              symbol={h.symbol}
-              market={(classifyMarket(h.symbol) === 'CN' ? 'CN' : 'TW') as 'TW' | 'CN'}
-              entryPrice={h.costPrice}
-              buyDate={h.buyDate}
-              triggerSignal={h.triggerSignal}
-              operationMode={h.operationMode}
-              enhancedDisciplineEnabled={h.enhancedDisciplineEnabled}
-              endPhaseTriggered={h.endPhaseTriggered}
-              recentHigh={h.recentHigh}
-              consolidationLow={h.consolidationLow}
-              vBottom={h.vBottom}
-              patternTargetPrice={h.entryPattern?.targetPrice}
-              patternStopPrice={h.entryPattern?.stopPrice}
-            />
             </div>
           );
         })}

@@ -31,6 +31,9 @@ import { useBlowoffMarkers } from '@/lib/hooks/useBlowoffMarkers';
 import { useLockedPattern } from '@/lib/hooks/useLockedPattern';
 import SixConditionsPanel from '@/components/SixConditionsPanel';
 import BuyMethodConditionsPanel from '@/components/BuyMethodConditionsPanel';
+import { SanSeConditionsPanel } from '@/components/cn-sanse/SanSeConditionsPanel';
+import { SanSeSignalsPanel } from '@/components/cn-sanse/SanSeSignalsPanel';
+import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
@@ -337,6 +340,11 @@ function HomePage() {
   const ticker = currentStock?.ticker ?? '';
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
   const isCnTicker = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
+  // 中間「條件/訊號」面板跟著掃描面板選的策略換：
+  //   三色 level（CN 自創策略）被選中 → 顯示三色面板；否則 → 書本買法面板（含陸股）。
+  // sanseLevel 為單一事實來源（store），由掃描面板「三色(嚴格/中等/寬鬆)」按鈕設定、選任何書本買法時自動清空。
+  const sanseLevel = useBacktestStore(s => s.sanseLevel);
+  const showSanseView = isCnTicker && sanseLevel != null;
   const wantChips = (isTwTicker && anyTwChipOn) || (isCnTicker && anyCnChipOn);
   // 把 fetch trigger 編成單一 string key，dep 比較穩定
   const chipFetchKey = wantChips ? ticker : '';
@@ -372,19 +380,28 @@ function HomePage() {
     if (!ticker) setChips(null);
   }, [ticker]);
 
-  // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖）──────────────────────
-  // 陸股 + 任一三色開關開啟才抓；複用 /cn-sanse 同一支 chart API（含雙B線/markers + zhuli + xys）
-  const wantSanSe = isCnTicker && (showShuangB || indicators.mainForce || indicators.season);
-  const sanseFetchKey = wantSanSe ? ticker : '';
+  // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
+  // 陸股一律抓（複用 /cn-sanse 同一支 chart API）：圖層由各 toggle 控制，但條件報告給中間「條件」tab 用，故 CN 永遠抓。
+  // 走圖步進：日K 時帶 asOf=當前可見最後一根日期 → 標記/條件/訊號跟著步進的位置重算（練習器核心）。
+  const sanseAsOf = isCnTicker && currentInterval === '1d' && visibleCandles.length
+    ? visibleCandles[visibleCandles.length - 1].date
+    : '';
+  const sanseFetchKey = isCnTicker ? `${ticker}@${sanseAsOf}` : '';
   const [sanse, setSanse] = useState<SanSeChartPayload | null>(null);
+  const [sanseConditions, setSanseConditions] = useState<ConditionReport | null>(null);
   useEffect(() => {
-    if (!sanseFetchKey) { setSanse(null); return; }
+    if (!isCnTicker || !ticker) { setSanse(null); setSanseConditions(null); return; }
     const ctrl = new AbortController();
-    fetch(`/api/cn-sanse/chart/${encodeURIComponent(sanseFetchKey)}`, { signal: ctrl.signal })
+    const url = `/api/cn-sanse/chart/${encodeURIComponent(ticker)}${sanseAsOf ? `?asOf=${sanseAsOf}` : ''}`;
+    fetch(url, { signal: ctrl.signal })
       .then(r => r.json())
-      .then(j => { if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload); })
+      .then(j => {
+        if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload);
+        if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
+      })
       .catch(err => { if (err.name !== 'AbortError') console.warn('[sanse] load failed:', err); });
     return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sanseFetchKey]);
 
   const handleScanSelectStock = useCallback((stock: SelectedStock) => {
@@ -419,18 +436,19 @@ function HomePage() {
   }, [currentStock, currentInterval, targetDate, loadStock]);
 
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
-  // 預設 0.65，mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
-  const [chartSplit, setChartSplit] = useState(0.65);
+  // 預設 0.55（主圖 55% / 副圖 45%，副圖整區較高）；mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
+  // key 升 v2：舊的 'chartSplit'（多為 0.65）忽略，讓新預設生效；之後拖曳會寫進 v2
+  const [chartSplit, setChartSplit] = useState(0.55);
   useEffect(() => {
-    const saved = localStorage.getItem('chartSplit');
-    // 如果舊值太小（< 0.5），清掉用新預設
+    const saved = localStorage.getItem('chartSplit-v2');
+    // 接受拖曳範圍內的值（0.2~0.85）；太極端才回新預設
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (saved && parseFloat(saved) >= 0.5) setChartSplit(parseFloat(saved));
-    else localStorage.removeItem('chartSplit');
+    if (saved && parseFloat(saved) >= 0.2 && parseFloat(saved) <= 0.85) setChartSplit(parseFloat(saved));
+    else localStorage.removeItem('chartSplit-v2');
   }, []);
   // chartSplit 持久化：mouseup 才寫，避免每次拖動 100+ 次寫盤
   const handleChartSplitCommit = useCallback((split: number) => {
-    try { localStorage.setItem('chartSplit', String(split)); } catch {}
+    try { localStorage.setItem('chartSplit-v2', String(split)); } catch {}
   }, []);
 
   // P3-8: Sound alert when a new signal appears during replay
@@ -506,12 +524,12 @@ function HomePage() {
     >
       {sideTab === 'conditions' && (
         <SectionBoundary section="買法條件">
-          <ConditionsPanelSwitch />
+          {showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch />}
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
         <SectionBoundary section="訊號分析">
-          <SignalSummaryCard />
+          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} /> : <SignalSummaryCard />}
         </SectionBoundary>
       )}
       {sideTab === 'chip' && (
@@ -562,10 +580,10 @@ function HomePage() {
 
   return (
     // fullViewport=false 永遠允許整頁 vertical scroll（避免 ^TWII 時整頁鎖死無法捲動）
-    // chart 區用 md:h-[calc(100vh-90px)] 限制 desktop 高度，下方 DecisionPanel 仍可 scroll 到
+    // chart 區填滿到視窗底（header 49px + py-2 8px = 57px 上方位移 → 扣 58px 讓排底貼齊視窗底、今日簡報退到摺疊線下）
     <PageShell fullViewport={false} headerSlot={<StockSelector />}>
       <div className="flex-1 flex flex-col px-3 py-2 gap-3">
-        <div className="flex flex-col md:flex-row gap-2 md:h-[calc(100vh-90px)] md:overflow-hidden">
+        <div className="flex flex-col md:flex-row gap-2 md:h-[calc(100vh-58px)] md:overflow-hidden">
 
         {/* Left: Chart */}
         <div className="w-full md:flex-1 md:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">

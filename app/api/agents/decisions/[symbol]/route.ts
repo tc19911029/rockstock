@@ -12,7 +12,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
-import { readPhaseState } from '@/lib/agents/orchestrator';
+import { readPhaseState, readFundamentalQuestion } from '@/lib/agents/orchestrator';
 import { agentsGet } from '@/lib/agents/persistStorage';
 import { loadPool } from '@/lib/agents/candidates/poolStorage';
 import type {
@@ -22,6 +22,7 @@ import type {
   ChipAnswer,
   FinalDecision,
   FundamentalAnswer,
+  FundamentalQuestion,
   NewsAnswer,
   RiskAnswer,
   TechnicalAnswer,
@@ -48,6 +49,8 @@ interface DecisionResponse {
   news: NewsAnswer | null;
   chip: ChipAnswer | null;
   fundamental: FundamentalAnswer | null;
+  /** Tmp 區的 question — 用於 UI 顯示估值分析輸入（quarterlyHistory / monthlyHistory / shares ...） */
+  fundamentalQuestion: FundamentalQuestion | null;
   risk: RiskAnswer | null;
   bull: BullThesis | null;
   bear: BearThesis | null;
@@ -68,13 +71,14 @@ export async function GET(
   const { date } = qParse.data;
 
   const k = (f: string) => `agents/runs/${date}/${symbol}/${f}`;
-  const [meta, phase, technical, news, chip, fundamental, risk, bull, bear, decision] = await Promise.all([
+  const [meta, phase, technical, news, chip, fundamental, fundamentalQuestion, risk, bull, bear, decision] = await Promise.all([
     agentsGet<AgentRunMeta>(k('_meta.json')),
     readPhaseState(date, symbol),
     agentsGet<TechnicalAnswer>(k('technical.json')),
     agentsGet<NewsAnswer>(k('news.json')),
     agentsGet<ChipAnswer>(k('chip.json')),
     agentsGet<FundamentalAnswer>(k('fundamental.json')),
+    readFundamentalQuestion(date, symbol),
     agentsGet<RiskAnswer>(k('risk.json')),
     agentsGet<BullThesis>(k('bull.json')),
     agentsGet<BearThesis>(k('bear.json')),
@@ -99,6 +103,7 @@ export async function GET(
     news,
     chip,
     fundamental,
+    fundamentalQuestion,
     risk,
     bull,
     bear,
