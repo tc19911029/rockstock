@@ -43,12 +43,40 @@ export async function GET(
     // 真的被截 = 步進歷史 → 略過即時報價/換手率（避免每步打 EastMoney 拖慢）；最新全段才抓即時
     const isHistorical = !!asOf && candles.length < allCandles.length;
 
+    // 盤中注入：非步進歷史 + 封存最後一根 < 今日 + L2 有今日 → append 今日 bar（個股 + 上證指數），
+    // 讓主力狀態F / 捕撈季節副圖延伸到今日（否則盤中今日那根沒三色數據）。對齊 scanSanSe 盤中模式。
+    let injectedTodayDate: string | undefined;
+    let todayIndexClose: number | undefined;
+    if (!isHistorical) {
+      try {
+        const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+        const { isTradingDay } = await import('@/lib/utils/tradingDay');
+        const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+        const lastBar = candles[candles.length - 1];
+        if (lastBar && lastBar.date < todayCN && isTradingDay(todayCN, 'CN')) {
+          const snap = await readIntradaySnapshot('CN', todayCN);
+          if (snap && snap.date === todayCN) {
+            const pureCode = symbol.replace(/\.(SS|SZ)$/i, '');
+            const sq = snap.quotes.find((q) => q.symbol === pureCode); // 個股裸碼
+            if (sq && sq.close > 0) {
+              candles.push({ date: todayCN, open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume });
+              injectedTodayDate = todayCN;
+            }
+            // 指數今日 close：完整 symbol 比對（避免 000001 撞深市平安銀行 000001.SZ）
+            const iq = snap.quotes.find((q) => q.symbol === '000001.SS');
+            if (iq && iq.close > 0) todayIndexClose = iq.close;
+          }
+        }
+      } catch { /* 注入失敗不致命，退回封存 */ }
+    }
+
     // 大盤指數（上證 000001.SS）→ 按日期對齊個股 K（主力狀態F 的中線強勢需要）
     let indexClose: number[] | undefined;
     try {
       const idxRaw = await fs.readFile(path.join(dir, '000001.SS.json'), 'utf8');
       const idx = JSON.parse(idxRaw)?.candles as Candle[];
       const idxMap = new Map(idx.map((c) => [c.date, c.close]));
+      if (injectedTodayDate && todayIndexClose != null) idxMap.set(injectedTodayDate, todayIndexClose);
       let last = NaN;
       indexClose = candles.map((c) => { const v = idxMap.get(c.date); if (v != null) last = v; return last; });
     } catch { /* 無指數 → 主力狀態F 不計算 */ }
