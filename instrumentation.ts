@@ -66,6 +66,30 @@ export async function register() {
     }
   }
 
+  // ── 盤中：三色資金即時掃描（CN 自創策略），每 10 分鐘 ──
+  // 把 L2 快照合成今日進行中日K 重算三色，寫 intraday 快照（不碰盤後封存）。
+  let sanseIntradayInFlight = false;
+  async function scanIntradaySanSe() {
+    if (!isMarketOpen('CN') && !isPostCloseWindow('CN')) return;
+    if (sanseIntradayInFlight) { console.log('[local-cron] CN 三色盤中：上一輪未完成，跳過'); return; }
+    sanseIntradayInFlight = true;
+    try {
+    const data = await callRoute(
+      '/api/cron/update-intraday-cn-sanse',
+      'CN update-intraday-cn-sanse',
+    ) as { data?: { skipped?: boolean; reason?: string; counts?: Record<string, number>; evaluated?: number } } | null;
+    const payload = data?.data ?? data ?? {};
+    if ((payload as { skipped?: boolean }).skipped) {
+      console.log(`[local-cron] CN 三色盤中跳過：${(payload as { reason?: string }).reason}`);
+    } else {
+      const c = (payload as { counts?: Record<string, number> }).counts ?? {};
+      console.log(`[local-cron] CN 三色盤中: strict=${c.strict ?? '?'} medium=${c.medium ?? '?'} loose=${c.loose ?? '?'}（評估 ${(payload as { evaluated?: number }).evaluated ?? '?'} 檔）`);
+    }
+    } finally {
+      sanseIntradayInFlight = false;
+    }
+  }
+
   // ── 盤中：六條件掃描（scan-intraday），每 10 分鐘 ──
   async function scanIntradayDaily(market: 'TW' | 'CN') {
     if (!isMarketOpen(market)) return;
@@ -328,6 +352,10 @@ export async function register() {
   setInterval(() => {
     const now = new Date();
     const min = now.getMinutes();
+    // :09 → 三色資金盤中（CN 自創策略，獨立於買法軌）
+    if (min % 10 === 9) {
+      scanIntradaySanSe().catch(err => console.error('[local-cron] CN 三色盤中:', err));
+    }
     let track: 'bullish' | 'reversal' | 'system' | null = null;
     if (min % 10 === 2) track = 'bullish';
     else if (min % 10 === 5) track = 'reversal';

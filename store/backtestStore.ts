@@ -146,6 +146,10 @@ interface BacktestState {
   scanDirection: 'long' | 'short' | 'daban';
   /** 當前買法（並列買法架構，Phase 6，2026-04-20）— 只在 scanDirection='long' 時有意義 */
   activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
+  /** 三色資金 level（陸股自創策略）— null = 走書本買法（activeBuyMethod）；非 null = 三色該 level 視角。
+   *  單一事實來源：ScanPanelVertical（掃描清單）+ app/page.tsx（中間「條件/訊號」面板）共用，
+   *  讓「點哪個策略 → 中間面板換成對應條件/訊號」一致。不持久化（reload 回 null）。 */
+  sanseLevel: 'strict' | 'medium' | 'loose' | null;
   /** 載入買法結果的狀態 */
   isLoadingBuyMethod: boolean;
 
@@ -168,6 +172,7 @@ interface BacktestState {
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
   setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R') => Promise<void>;
+  setSanseLevel:          (lv: 'strict' | 'medium' | 'loose' | null) => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
@@ -256,6 +261,7 @@ export const useBacktestStore = create<BacktestState>()(
       scanMode: 'full' as const,
       scanDirection: 'long' as const,
       activeBuyMethod: 'A' as const,
+      sanseLevel: null,
       isLoadingBuyMethod: false,
       cronDates: [],
       isFetchingCron: false,
@@ -318,6 +324,7 @@ export const useBacktestStore = create<BacktestState>()(
       },
       setScanOnly:           (scanOnly) => set({ scanOnly }),
       setScanMode:           (scanMode) => set({ scanMode }),
+      setSanseLevel:         (sanseLevel) => set({ sanseLevel }),
       setScanDirection:      (scanDirection) => {
         const prevDirection = get().scanDirection;
         set({ scanDirection });
@@ -334,7 +341,8 @@ export const useBacktestStore = create<BacktestState>()(
       },
       setActiveBuyMethod:    async (activeBuyMethod) => {
         const { market, scanDate, loadCronSession, scanDirection } = get();
-        set({ activeBuyMethod });
+        // 選任何書本買法 → 退出三色視角（中間面板「條件/訊號」改顯示該買法）
+        set({ activeBuyMethod, sanseLevel: null });
         // A = 既有六條件流程，走 loadCronSession；同時刷新 daily 日期列表
         if (activeBuyMethod === 'A') {
           get().fetchCronDates(market, 'long'); // 切回 A 時刷新為 daily session 日期

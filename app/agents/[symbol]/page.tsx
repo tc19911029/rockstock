@@ -22,6 +22,8 @@ import { PageShell, PageHeader, BackButton } from '@/components/shared';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { AgentChartSection } from './_components/AgentChartSection';
 import { TrustMomentumPanel } from './_components/TrustMomentumPanel';
+import { SqueezeDetail } from './_components/SqueezeDetail';
+import { ValuationDetail } from './_components/ValuationDetail';
 import { StockGradeSummary } from '@/components/agents/StockGradeSummary';
 import { AgentScorePanel } from '@/components/agents/AgentScorePanel';
 import { NeedsRescoreBanner } from '@/components/agents/NeedsRescoreBanner';
@@ -36,6 +38,7 @@ import type {
   DataPoint,
   FinalDecision,
   FundamentalAnswer,
+  FundamentalQuestion,
   FundamentalSection,
   NewsAnswer,
   NewsSection,
@@ -59,6 +62,7 @@ interface DecisionPayload {
   news: NewsAnswer | null;
   chip: ChipAnswer | null;
   fundamental: FundamentalAnswer | null;
+  fundamentalQuestion: FundamentalQuestion | null;
   risk: RiskAnswer | null;
   bull: BullThesis | null;
   bear: BearThesis | null;
@@ -598,6 +602,10 @@ function AgentDetailPage() {
           {data?.news && <NewsDetail answer={data.news} />}
           {data?.chip && <ChipDetail answer={data.chip} />}
           {data?.fundamental && <FundamentalDetail answer={data.fundamental} />}
+          {(data?.fundamental || data?.fundamentalQuestion?.groundTruth.valuationInputs) && (
+            <ValuationDetail answer={data?.fundamental ?? null} question={data?.fundamentalQuestion ?? null} />
+          )}
+          <SqueezeDetail symbol={symbol} date={date} />
           {data?.risk && <RiskDetail answer={data.risk} />}
           {data?.bull && data?.bear && <DebateDetail bull={data.bull} bear={data.bear} />}
         </div>

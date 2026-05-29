@@ -58,6 +58,24 @@ export const youtubeSource: SourceExtractor = {
       addMentions(analysis.high_consensus_stocks);
       addMentions(analysis.weak_signal_stocks);
 
+      // 從 stocklist 拿 TWSE vs TPEx 分類（authoritative source）
+      // 不要用 4-digit 硬寫 .TW — 上櫃股寫成 .TW 會建 ghost 檔，被 retry-failed cron 每天重抓變污染源
+      const tpexCodeSet = new Set<string>();
+      const twseCodeSet = new Set<string>();
+      if (market === 'TW') {
+        try {
+          const { TaiwanScanner } = await import('@/lib/scanner/TaiwanScanner');
+          const stocks = await new TaiwanScanner().getStockList();
+          for (const s of stocks) {
+            const c = s.symbol.replace(/\.(TW|TWO)$/, '');
+            if (s.symbol.endsWith('.TWO')) tpexCodeSet.add(c);
+            else if (s.symbol.endsWith('.TW')) twseCodeSet.add(c);
+          }
+        } catch (err) {
+          console.warn('[youtubeSource] stocklist load failed, suffix fallback to .TW:', err);
+        }
+      }
+
       const candidates: SourceCandidate[] = [];
 
       for (const [code, mentions] of grouped) {
@@ -86,9 +104,17 @@ export const youtubeSource: SourceExtractor = {
           reasons.push(`節目：${[...shows].slice(0, 3).join('、')}${shows.size > 3 ? '...' : ''}`);
         }
 
-        // 用台股代號補 .TW（同 L4 symbol 格式以利合併）
+        // 用台股代號補 suffix（同 L4 symbol 格式以利合併）
+        // TPEx 上櫃股必須用 .TWO，否則會建 ghost .TW 檔（見上方 stocklist 載入區註解）
         const isFourDigits = /^\d{4,6}$/.test(code);
-        const symbol = isFourDigits && market === 'TW' ? `${code}.TW` : code;
+        let symbol: string;
+        if (isFourDigits && market === 'TW') {
+          if (tpexCodeSet.has(code)) symbol = `${code}.TWO`;
+          else if (twseCodeSet.has(code)) symbol = `${code}.TW`;
+          else symbol = `${code}.TW`; // 未知 code（stocklist 載入失敗或新股），預設上市
+        } else {
+          symbol = code;
+        }
 
         const attribution: YouTubeSourceAttribution = {
           mentionCount: mentions.length,

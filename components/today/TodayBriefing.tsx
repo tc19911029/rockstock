@@ -563,11 +563,20 @@ function GrowthGapDetail({ growth }: { growth: GrowthState }) {
 }
 
 function TradeWindowDisplay() {
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
+    setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(t);
   }, []);
+  if (!now) {
+    return (
+      <>
+        <div className="text-xl font-bold text-slate-500 font-mono">--</div>
+        <div className="text-[10px] text-slate-500">載入中</div>
+      </>
+    );
+  }
   // 台北時間 HH:MM + 星期
   const tpe = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',

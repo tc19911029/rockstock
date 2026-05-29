@@ -203,8 +203,16 @@ export async function scanOneSource(opts: ScanOneOptions): Promise<ScanOneResult
     // 寫入 videos 按「節目日期」分檔（program_date 優先，沒有的退回 published_at；
     // 兩者都沒才用 scanDate）。標題裡的日期是真實節目日 — 晚間節目常常隔天 00:xx
     // 才 upload 完，published_at 會掉到隔天，按 published_at 分檔會錯位。
-    const fileDateOf = (v: YouTubeVideo): string =>
-      effectiveProgramDate(v) ?? scanDate;
+    // live_replay 的 published_at 在 replay 定型後會被 yt-dlp 改成「replay 完成時間」，
+    // 這個時間經常掉到隔天凌晨（例如 21:09 live 開始 → 隔天 05:04 才 was_live 化），
+    // 會讓影片從原本的 fileDate 漂到隔天。對於已知影片 + live_status=was_live，
+    // 直接沿用 video-index 內第一次入帳的 fileDate，不重算。
+    const fileDateOf = (v: YouTubeVideo): string => {
+      const known = videoIndex.byId[v.video_id];
+      const isWasLive = v.raw?.live_status === 'was_live';
+      if (known && isWasLive) return known.date;
+      return effectiveProgramDate(v) ?? scanDate;
+    };
 
     const byFileDate = new Map<string, YouTubeVideo[]>();
     for (const v of transformed) {

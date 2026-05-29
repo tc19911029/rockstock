@@ -26,7 +26,7 @@ interface Props {
   selectedCode?: string | null;
 }
 
-type SortKey = 'mention' | 'rating' | 'd5Return' | 'd20Return';
+type SortKey = 'mention' | 'rating' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
 type FilterKey = 'all' | 'A' | 'B+';
 
 const RATING_ORDER: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
@@ -116,10 +116,22 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
         case 'rating':
           if (ar !== br) return dir * (br - ar);
           return dir * (b.mention_count - a.mention_count);
+        case 'openReturn':
+        case 'd1Return':
         case 'd5Return':
-          return dir * ((b.performance.d5Return ?? -Infinity) - (a.performance.d5Return ?? -Infinity));
+        case 'd10Return':
         case 'd20Return':
-          return dir * ((b.performance.d20Return ?? -Infinity) - (a.performance.d20Return ?? -Infinity));
+        case 'maxGain':
+        case 'maxLoss': {
+          const va = (a.performance as unknown as Record<string, number | null | undefined>)[sortBy];
+          const vb = (b.performance as unknown as Record<string, number | null | undefined>)[sortBy];
+          const aNull = va == null;
+          const bNull = vb == null;
+          if (aNull && bNull) return 0;
+          if (aNull) return 1;
+          if (bNull) return -1;
+          return dir * ((vb as number) - (va as number));
+        }
         default:
           return 0;
       }
@@ -188,8 +200,13 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
           {([
             { key: 'mention' as const, label: '提及' },
             { key: 'rating' as const, label: '評級' },
-            { key: 'd5Return' as const, label: '5日' },
-            { key: 'd20Return' as const, label: '20日' },
+            { key: 'openReturn' as const, label: '漲跌·隔開' },
+            { key: 'd1Return' as const, label: '漲跌·1日' },
+            { key: 'd5Return' as const, label: '漲跌·5日' },
+            { key: 'd10Return' as const, label: '漲跌·10日' },
+            { key: 'd20Return' as const, label: '漲跌·20日' },
+            { key: 'maxGain' as const, label: '漲跌·最高' },
+            { key: 'maxLoss' as const, label: '漲跌·最低' },
           ]).map(({ key, label }) => (
             <button
               key={key}

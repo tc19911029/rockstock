@@ -536,6 +536,72 @@ export interface FundamentalGroundTruth {
   } | null;
   /** 從 candidateRow.industry 或 FinMind TaiwanStockInfo */
   industry: string | null;
+  /** ── v2 估值分析輸入（向下相容，optional）─────────────────────────
+   *  由 fundamentalAgent prefetch 補齊，skill 用來算三情境 + GDR 稀釋。
+   *  台股有 monthlyRevenueHistory；陸股 monthlyRevenueHistory 為空陣列。 */
+  valuationInputs?: {
+    /** 'TW' | 'CN' — 估值流程依市場分支（陸股不抓月營收，用季度情境） */
+    market: 'TW' | 'CN';
+    /** 當天最新股價（FinMind quote / TWSE / EastMoney） */
+    currentPrice: number | null;
+    /** 近 8 季逐季財報 — 由近到遠 */
+    quarterlyHistory: Array<{
+      quarter: string;
+      revenue: number | null;
+      grossProfit: number | null;
+      netIncome: number | null;
+      /** 扣非淨利（陸股 = 扣除非經常性損益後）；台股近似 = 稅後淨利 - 業外損益 */
+      nonRecurringNetIncome?: number | null;
+      eps: number | null;
+      netMargin: number | null;
+      grossMargin: number | null;
+    }>;
+    /** 近 12 月營收 — 由近到遠（陸股空陣列） */
+    monthlyRevenueHistory: Array<{
+      month: string;
+      revenue: number;
+      mom: number | null;
+      yoy: number | null;
+    }>;
+    /** 流通在外股數 / 總股本 */
+    sharesOutstanding: number | null;
+    /** 每股淨值 / 每股淨資產 */
+    bookValuePerShare: number | null;
+    /** 程式預先算好的 TTM */
+    ttmEps: number | null;
+    ttmPe: number | null;
+    /** 動態 PE = 股價 /（最新季 EPS × 4）— 兩市場通用，陸股 App 顯示「市盈率（動）」 */
+    dynamicPe: number | null;
+    /** 靜態 PE = 股價 / 去年全年 EPS — 陸股 App 顯示「市盈率（靜）」 */
+    staticPe: number | null;
+    /** 去年全年 EPS（quarters[4..7] 加總） */
+    lastYearTotalEps: number | null;
+    /** 從 data/dilution/{symbol}.json 讀的 GDR/增資/CB 公告（陸股目前空陣列） */
+    dilutionEvents: Array<{
+      type: 'gdr' | 'rights_issue' | 'convertible_bond' | 'employee_option' | 'private_placement';
+      newShares: number;
+      expectedDate?: string;
+      priceIfKnown?: number;
+      sourceUrl?: string;
+      announcedAt?: string;
+      description?: string;
+    }>;
+    /** 程式由 industry 推得的估值模板（7 大類 + other） */
+    industryTemplate:
+      | 'high_growth_asic'
+      | 'cyclical'
+      | 'distributor'
+      | 'stable_mature'
+      | 'advanced_material'
+      | 'consumer_pharma_leader'
+      | 'hype_extreme_growth'
+      | 'other';
+    industryTemplateLabel: string;
+    /** 程式預設合理 PE 區間（skill 可依法說會/法人 override） */
+    reasonablePeRange: { pessimistic: number; base: number; optimistic: number };
+    /** 每個資料欄位的來源 URL（同 youtube evidence 規則） */
+    sourceUrls: Record<string, string>;
+  };
   fetchErrors: string[];
 }
 
@@ -576,6 +642,113 @@ export interface FundamentalAnswer {
 
   /** 評分區塊（v1 新加，optional 向下相容）— 由 orchestrator 算分覆蓋 */
   scoreBlock?: AgentScoreBlock;
+
+  /** ── v2 估值分析段（向下相容，optional）──────────────────────────────
+   *  由 skill 在分析時上網查法說會/法人預估後填寫；
+   *  ttmPe 由程式預算後 echo 回來，scenarios 由 skill 推算。 */
+  valuation?: {
+    ttmPe: number;
+    /** skill 推估的當月 EPS（用月營收 × 上一季淨利率 / 股數） */
+    monthlyEpsEstimate?: {
+      month: string;
+      monthlyRevenue: number;
+      netMarginUsed: number;
+      estimatedNetIncome: number;
+      estimatedEps: number;
+      note: string;
+    };
+    scenarios: {
+      pessimistic: ScenarioOutput;
+      base: ScenarioOutput;
+      optimistic: ScenarioOutput;
+    };
+    dilution: {
+      originalShares: number;
+      newShares: number;
+      ratio: number;
+      pessimisticDilutedEps: number;
+      baseDilutedEps: number;
+      optimisticDilutedEps: number;
+      pessimisticDilutedPrice: number;
+      baseDilutedPrice: number;
+      optimisticDilutedPrice: number;
+      events: Array<{ type: string; newShares: number; sourceUrl?: string; description?: string }>;
+    } | null;
+    riskFlags: Array<
+      | 'one_time_gain'
+      | 'pb_overheated'
+      | 'cyclical_peak'
+      | 'forward_pe_misleading'
+      | 'dilution_pending'
+      | 'margin_declining_while_revenue_growing'
+      | 'monthly_revenue_pending'
+      | 'aggressive_scenario_assumption'
+      | 'foreign_currency_sensitive'
+      | 'customer_concentration'
+    >;
+    conclusion: 'undervalued' | 'fair' | 'overvalued';
+    reasoning: string;
+  };
+}
+
+/** 三情境之一的輸出（skill 填寫） */
+export interface ScenarioOutput {
+  /** Q2-Q4 各季營收假設（億 / 與 quarterlyHistory 同單位） */
+  q2Revenue: number;
+  q3Revenue: number;
+  q4Revenue: number;
+  /** 各季淨利率假設（0-1 小數，例 0.34 = 34%） */
+  q2NetMargin: number;
+  q3NetMargin: number;
+  q4NetMargin: number;
+  /** 各季預估 EPS */
+  q2Eps: number;
+  q3Eps: number;
+  q4Eps: number;
+  fullYearEps: number;
+  forwardPe: number;
+  fairPe: number;
+  fairPrice: number;
+  upside: number;
+  /** 假設來源（法說會展望 / 法人預估 / 月營收外推 等）必須附 URL */
+  assumptionEvidence: Array<{ field: string; sourceUrl: string; rawQuote: string }>;
+
+  /** ── v3 推估依據透明化（向下相容 optional） ─────────────────────
+   *  以下欄位 skill 必須在 ScenarioOutput 內填寫，否則 UI 標「依據不明」。
+   */
+  /** 信心等級 — low: 純假設、medium: 有部分依據、high: 法說會明確展望 */
+  confidenceLevel?: 'low' | 'medium' | 'high';
+  /** 營收假設依據（自然語言）— 多行：方法 A 月營收外推 + 方法 B EPS 反推 + 方法 C 法說會語意 */
+  revenueBasis?: string;
+  /** 淨利率假設依據（自然語言）— 必須引用 Q1 淨利率為基準 */
+  netMarginBasis?: string;
+  /** 後續可驗證的月營收目標（用 5/6/7/8/9 月實際營收 vs 預期對照） */
+  validationTriggers?: {
+    may?: number;        // 5 月營收目標（億）
+    june?: number;       // 6 月
+    july?: number;       // 7 月
+    aug?: number;        // 8 月
+    sept?: number;       // 9 月
+    q3MonthlyAvg?: number;  // Q3 月均營收目標
+    q4MonthlyAvg?: number;  // Q4 月均營收目標
+    description?: string;   // 「7/8/9 月平均月營收需達 35 億，中性情境成立」這類說明
+  };
+  /** 程式自動偵測的過度樂觀 flag（不要由 skill 填，由程式套用 detectOverlyOptimistic） */
+  overlyOptimisticFlags?: Array<
+    | 'q3_revenue_jump_over_50pct_vs_q2'
+    | 'q4_revenue_jump_over_20pct_vs_q3'
+    | 'q2_margin_above_q1_by_3pp'
+    | 'q3_margin_above_q1_by_3pp'
+    | 'q4_margin_above_q1_by_3pp'
+    | 'fullyear_eps_above_consensus_upper_by_15pct'
+  >;
+  /** 反推模式：是否由「目標全年 EPS」反推營收 */
+  reverseEngineeredFrom?: {
+    targetFullYearEps: number;
+    h2NetMarginUsed: number;
+    h2RequiredRevenue: number;
+    note: string;
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────

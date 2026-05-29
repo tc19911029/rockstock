@@ -265,6 +265,7 @@ function mergeFundamentals(
     revenueLatest:  primary.revenueLatest ?? fallback.revenueLatest,
     revenueMoM:     primary.revenueMoM    ?? fallback.revenueMoM,
     revenueYoY:     primary.revenueYoY    ?? fallback.revenueYoY,
+    periods:        primary.periods       ?? fallback.periods,
   };
 }
 

@@ -11,13 +11,9 @@ import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { buildAllStrategyReasons, type StrategyReasonRow } from './strategyReasons';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
 import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
+import { ForwardPerfRow } from './ForwardPerfRow';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtRet(val: number | null | undefined): string {
-  if (val == null) return '—';
-  return `${val >= 0 ? '+' : ''}${val.toFixed(1)}%`;
-}
 
 // v11 字母（G/H/I）跟 v12（J/K/L）是 alias，cross-strategy 顯示時去重
 const V11_ALIAS_OF_V12: Record<string, string> = { G: 'J', H: 'L', I: 'K' };
@@ -57,30 +53,6 @@ function cleanMainBadgeName(ruleName: string): string {
     .trim();
 }
 
-function retColor(val: number | null | undefined): string {
-  if (val == null) return 'text-muted-foreground/50';
-  if (val > 0) return 'text-bull';
-  if (val < 0) return 'text-bear';
-  return 'text-muted-foreground';
-}
-
-const COMPACT_FWD = [
-  { key: 'openReturn' as const, label: '隔日開' },
-  { key: 'd1Return' as const, label: '1日' },
-  { key: 'd2Return' as const, label: '2日' },
-  { key: 'd3Return' as const, label: '3日' },
-  { key: 'd4Return' as const, label: '4日' },
-  { key: 'd5Return' as const, label: '5日' },
-  { key: 'd6Return' as const, label: '6日' },
-  { key: 'd7Return' as const, label: '7日' },
-  { key: 'd8Return' as const, label: '8日' },
-  { key: 'd9Return' as const, label: '9日' },
-  { key: 'd10Return' as const, label: '10日' },
-  { key: 'd20Return' as const, label: '20日' },
-  { key: 'maxGain' as const, label: '最高' },
-  { key: 'maxLoss' as const, label: '最低' },
-] as const;
-
 interface ScanResultsCompactProps {
   onSelectStock?: (stock: SelectedStock) => void;
 }
@@ -96,7 +68,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   const [conceptFilter, setConceptFilter] = useState<string>('all');
   // 排序選項：成交額排名為預設（依 0512 v12 全期間綜合回測，A 級組合多靠此排序勝出）
   // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
-  const [scanSort, setScanSort] = useState<'turnover' | 'change' | 'sixCond' | 'price'>('turnover');
+  const [scanSort, setScanSort] = useState<'turnover' | 'change' | 'sixCond' | 'price' | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss'>('turnover');
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
 
   // 即時 raw trend（跟 banner 同源）— saved session 的 marketTrend 是舊邏輯（含降級）
@@ -150,8 +122,23 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     ? scanResults
     : scanResults.filter(r => r.industry === conceptFilter);
 
+  const FWD_KEY: Record<string, keyof StockForwardPerformance> = {
+    fwdOpen: 'openReturn', fwdD1: 'd1Return', fwdD5: 'd5Return',
+    fwdD20: 'd20Return', fwdMaxGain: 'maxGain', fwdMaxLoss: 'maxLoss',
+  };
   const sorted = [...filtered].sort((a, b) => {
     const dir = scanSortDir === 'desc' ? 1 : -1;
+    if (scanSort in FWD_KEY) {
+      const k = FWD_KEY[scanSort];
+      const va = perfMap.get(a.symbol)?.[k];
+      const vb = perfMap.get(b.symbol)?.[k];
+      const aNull = va == null;
+      const bNull = vb == null;
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      return dir * ((vb as number) - (va as number));
+    }
     switch (scanSort) {
       case 'price':      return dir * ((b.price ?? 0) - (a.price ?? 0));
       case 'change':     // 對齊 panelSortCompare（漲幅/六條件/ma20Slope 三層）— 單一事實來源 rule 10
@@ -203,6 +190,12 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
           { key: 'change'   as const, label: '漲幅',   tip: '當日漲跌幅 %（同分用六條件當 tie-breaker，對齊面板預設排序）' },
           { key: 'sixCond'  as const, label: '六條件', tip: '朱家泓五步法六條件總分（次鍵：漲幅）' },
           { key: 'price'    as const, label: '股價',   tip: '當前股價高低' },
+          { key: 'fwdOpen'    as const, label: '漲跌·隔開', tip: '掃出後隔日開盤漲跌幅（缺值排最後）' },
+          { key: 'fwdD1'      as const, label: '漲跌·1日',  tip: '掃出後 1 日漲跌幅' },
+          { key: 'fwdD5'      as const, label: '漲跌·5日',  tip: '掃出後 5 日漲跌幅' },
+          { key: 'fwdD20'     as const, label: '漲跌·20日', tip: '掃出後 20 日漲跌幅' },
+          { key: 'fwdMaxGain' as const, label: '漲跌·最高', tip: '掃出後 20 日內最大累計漲幅' },
+          { key: 'fwdMaxLoss' as const, label: '漲跌·最低', tip: '掃出後 20 日內最大累計跌幅' },
         ]).map(({ key, label, tip }) => (
           <button key={key}
             onClick={() => {
@@ -588,19 +581,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
               </div>
 
               {/* Row 4: Compact forward performance */}
-              <div className="flex items-center gap-0.5">
-                {COMPACT_FWD.map(({ key, label }) => {
-                  const val = perf ? perf[key] : undefined;
-                  return (
-                    <div key={key} className="flex-1 text-center">
-                      <div className="text-[8px] text-muted-foreground/60">{label}</div>
-                      <div className={`text-[9px] font-mono ${retColor(val as number | null | undefined)}`}>
-                        {isFetchingForward && !perf ? '…' : fmtRet(val as number | null | undefined)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <ForwardPerfRow performance={perf} isFetching={isFetchingForward} />
             </div>
 
             {/* Expanded details */}

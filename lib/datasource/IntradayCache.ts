@@ -671,9 +671,15 @@ async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote | null>
   }
 }
 
-async function fetchCNIndexQuote(todayCN: string): Promise<IntradayQuote | null> {
+// 抓陸股指數即時報價（上證 / 深證成指）。三色 RS 基準：滬市股用上證、深市股用深證成指。
+async function fetchCNIndexQuote(
+  todayCN: string,
+  tencentCode = 'sh000001',
+  symbol = '000001.SS',
+  defName = '上證指數',
+): Promise<IntradayQuote | null> {
   try {
-    const url = 'https://qt.gtimg.cn/q=sh000001';
+    const url = `https://qt.gtimg.cn/q=${tencentCode}`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(5000),
@@ -699,14 +705,14 @@ async function fetchCNIndexQuote(todayCN: string): Promise<IntradayQuote | null>
       const ts = parts[30];
       const tsDate = `${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)}`;
       if (tsDate !== todayCN) {
-        console.warn(`[IntradayCache] 000001.SS tencent 回 ${tsDate} ≠ today ${todayCN}，丟棄`);
+        console.warn(`[IntradayCache] ${symbol} tencent 回 ${tsDate} ≠ today ${todayCN}，丟棄`);
         return null;
       }
     }
     const changePercent = prevClose > 0 ? Math.round(((close - prevClose) / prevClose) * 10000) / 100 : 0;
     return {
-      symbol: '000001.SS',
-      name: name || '上證指數',
+      symbol,
+      name: name || defName,
       open,
       high,
       low,
@@ -716,7 +722,7 @@ async function fetchCNIndexQuote(todayCN: string): Promise<IntradayQuote | null>
       changePercent,
     };
   } catch (err) {
-    console.warn('[IntradayCache] 000001.SS fetch 失敗:', err instanceof Error ? err.message : err);
+    console.warn(`[IntradayCache] ${symbol} fetch 失敗:`, err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -876,9 +882,12 @@ async function _fetchCNQuotes(
     console.info(`[IntradayCache] CN L2 來源: ${src}, ${quotes.length} 筆`);
   }
 
-  // 大盤指數 000001.SS — 跟 ^TWII 同理併入 L2 snapshot；symbol 帶 .SS 避免與深市 000001 撞 key
-  const cnIndex = await fetchCNIndexQuote(today);
-  if (cnIndex) quotes.push(cnIndex);
+  // 大盤指數併入 L2 snapshot：上證(000001.SS)=滬市 RS 基準、深證成指(399001.SZ)=深市 RS 基準。
+  // symbol 帶 .SS/.SZ 後綴避免與個股撞 key（000001.SZ 平安銀行 / 399001 等）。
+  const cnIndexSH = await fetchCNIndexQuote(today, 'sh000001', '000001.SS', '上證指數');
+  if (cnIndexSH) quotes.push(cnIndexSH);
+  const cnIndexSZ = await fetchCNIndexQuote(today, 'sz399001', '399001.SZ', '深證成指');
+  if (cnIndexSZ) quotes.push(cnIndexSZ);
 
   return quotes;
 }

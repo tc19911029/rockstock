@@ -58,96 +58,203 @@ export interface ChipData {
   chipGrade: string;
   chipSignal: string;
   chipDetail: string;       // 詳細說明
+
+  // v2 對齊籌碼K線 9 區塊：主力綜合 + 趨勢
+  /** 主力綜合（當日，張）= 外資 + 投信 + 自營 + 大戶 ─ 融資增加 */
+  composite?: number;
+  /** 主力集中度（%）— 5 週主力綜合 / 該股流通量 */
+  compositeConcentration?: number;
+  /** 各維度趨勢標記（連 N 賣 / N 增轉減 等）*/
+  trends?: {
+    foreign?: TrendInfo;
+    trust?: TrendInfo;
+    dealer?: TrendInfo;
+    institutional?: TrendInfo;   // 三法人合計
+    margin?: TrendInfo;
+    lending?: TrendInfo;
+    composite?: TrendInfo;
+    holderLarge?: TrendInfo;     // 大戶 weekly delta 連續方向
+  };
+  /** 5 週累計變化（%）*/
+  holder5wChange?: {
+    largePct: number;       // 大戶（>400 張）5 週變化 %
+    retailPct: number;      // 散戶 5 週變化 %
+  };
+  /** 5 月累計變化（%）*/
+  holder5mChange?: {
+    largePct: number;
+  };
+
+  // v3 主力券商分點（Yahoo broker scraper）— 對齊籌碼K線「主力」精確口徑
+  /** 主力券商：前 15 大買 − 前 15 大賣（張）*/
+  brokerNetBuy?: number;
+  /** 主力集中度（%，正值；方向看 brokerNetBuy 符號）*/
+  brokerConcentration?: number;
+  /** 前 15 大買進券商 */
+  topBuyers?: BrokerRankRow[];
+  /** 前 15 大賣出券商 */
+  topSellers?: BrokerRankRow[];
 }
 
-// ── 計算籌碼面綜合評分 ───────────────────────────────────────────────────────
-function calculateChipScore(
-  inst: { foreignBuy: number; trustBuy: number; dealerBuy: number; totalBuy: number } | undefined,
-  margin: { marginBalance: number; marginNet: number; shortBalance: number; shortNet: number; marginUtilRate: number } | undefined,
-  dt: { dayTradeVolume: number; dayTradeRatio: number } | undefined,
-  lt: { buy: number; sell: number; net: number } | undefined,
-  holder: { structureBuilding: boolean; holder1000Change: number } | undefined,
-): { score: number; grade: string; signal: string; detail: string } {
-  // 2026-05-11 fix: 全部 input 都缺或全空殼（小型股/上櫃股常無資料）→ 回傳「無資料」避免誤導性 50/B/中性
-  const hasAnyInst = inst && (inst.foreignBuy !== 0 || inst.trustBuy !== 0 || inst.dealerBuy !== 0 || inst.totalBuy !== 0);
-  const hasAnyMargin = margin && (margin.marginBalance !== 0 || margin.marginNet !== 0 || margin.shortBalance !== 0 || margin.shortNet !== 0);
-  const hasAnyDt = dt && (dt.dayTradeVolume !== 0 || dt.dayTradeRatio !== 0);
-  const hasAnyLt = lt && (lt.buy !== 0 || lt.sell !== 0 || lt.net !== 0);
-  if (!hasAnyInst && !hasAnyMargin && !hasAnyDt && !hasAnyLt) {
+// ── 計算籌碼面綜合評分 v2 ────────────────────────────────────────────────────
+// 對齊籌碼K線 app 9 區塊：外資/投信/自營/三法人/融資/融券/主力綜合/借券/大戶散戶 5 週
+// 加入「連 N 賣」「N 增轉減」趨勢加權；拆掉舊版「主力卡位 +15」死板加分
+import type { TrendInfo } from '@/lib/chips/trends';
+interface ScoreInputs {
+  inst?: { foreignBuy: number; trustBuy: number; dealerBuy: number; totalBuy: number };
+  margin?: { marginNet: number; shortNet: number; marginUtilRate: number };
+  dt?: { dayTradeRatio: number };
+  lending?: { lendingBalance: number; lendingNet: number };
+  holder5w?: { largeChangePct: number; retailChangePct: number };   // 5 週累計變化 %
+  trends?: {
+    foreign?: TrendInfo; trust?: TrendInfo; dealer?: TrendInfo;
+    institutional?: TrendInfo; margin?: TrendInfo; lending?: TrendInfo;
+    composite?: TrendInfo;
+  };
+  composite?: number;  // 主力綜合（當日合併張數）
+}
+
+function calculateChipScore(input: ScoreInputs): { score: number; grade: string; signal: string; detail: string } {
+  const { inst, margin, dt, lending, holder5w, trends, composite } = input;
+
+  const hasAnyData = inst || margin || lending || holder5w || composite != null;
+  if (!hasAnyData) {
     return { score: 0, grade: '—', signal: '無資料', detail: '無籌碼資料（小型股/上櫃股 / 資料源未涵蓋）' };
   }
 
   let score = 50;
   const details: string[] = [];
 
-  // ── 法人面（單位：張）──
-  if (inst) {
-    // 外資：買超 > 500張 有意義，> 5000張 很大
-    if (inst.foreignBuy > 0) {
-      const pts = Math.min(20, inst.foreignBuy / 5000);
-      score += pts;
-      if (inst.foreignBuy >= 1000) details.push(`外資買超${inst.foreignBuy.toLocaleString()}張`);
-    } else if (inst.foreignBuy < 0) {
-      score += Math.max(-15, inst.foreignBuy / 5000);
-      if (inst.foreignBuy <= -1000) details.push(`外資賣超${Math.abs(inst.foreignBuy).toLocaleString()}張`);
+  // 趨勢加權 helper — 連 N 同向就 ±N（最多 ±5）；reversal +/- 1
+  const trendAdj = (t?: TrendInfo, signCoef = 1): number => {
+    if (!t || t.direction === 'flat') return 0;
+    const dirSign = t.direction === 'up' ? 1 : -1;
+    let pts = Math.min(5, t.consecutiveCount) * dirSign * signCoef;
+    if (t.reversal) pts += dirSign * signCoef * 1.5;  // 反轉訊號額外加成
+    return pts;
+  };
+
+  // ── 1) 外資（單位：張）──
+  if (inst?.foreignBuy) {
+    const v = inst.foreignBuy;
+    score += Math.max(-15, Math.min(15, v / 5000 * 15));
+    if (Math.abs(v) >= 1000) details.push(`外資${v > 0 ? '買超' : '賣超'}${Math.abs(v).toLocaleString()}張`);
+  }
+  score += trendAdj(trends?.foreign);
+
+  // ── 2) 投信 ──
+  if (inst?.trustBuy) {
+    const v = inst.trustBuy;
+    score += Math.max(-12, Math.min(12, v / 500 * 12));
+    if (Math.abs(v) >= 100) details.push(`投信${v > 0 ? '買' : '賣'}${Math.abs(v).toLocaleString()}張`);
+  }
+  score += trendAdj(trends?.trust);
+
+  // ── 3) 自營 ──（權重小，最多 ±5）
+  if (inst?.dealerBuy) {
+    const v = inst.dealerBuy;
+    score += Math.max(-5, Math.min(5, v / 1000 * 5));
+  }
+  score += trendAdj(trends?.dealer, 0.5);
+
+  // ── 4) 三法人合計趨勢 — 連續方向最重要 ──
+  if (inst?.totalBuy) {
+    if (inst.foreignBuy > 0 && inst.trustBuy > 0 && inst.dealerBuy > 0) { score += 8; details.push('三法人同買'); }
+    if (inst.foreignBuy < 0 && inst.trustBuy < 0 && inst.dealerBuy < 0) { score -= 8; details.push('三法人同賣'); }
+  }
+  if (trends?.institutional) {
+    const adj = trendAdj(trends.institutional, 1.5);
+    score += adj;
+    if (trends.institutional.consecutiveCount >= 4) {
+      details.push(`三法人${trends.institutional.label}`);
     }
-    // 投信：買超 > 100張 就有意義（投信量較小但精準）
-    if (inst.trustBuy > 0) {
-      score += Math.min(15, inst.trustBuy / 500);
-      if (inst.trustBuy >= 100) details.push(`投信買超${inst.trustBuy.toLocaleString()}張`);
-    } else if (inst.trustBuy < 0) {
-      score += Math.max(-10, inst.trustBuy / 500);
-      if (inst.trustBuy <= -100) details.push(`投信賣超${Math.abs(inst.trustBuy).toLocaleString()}張`);
-    }
-    if (inst.foreignBuy > 0 && inst.trustBuy > 0 && inst.dealerBuy > 0) { score += 10; details.push('三法人同步買超'); }
-    if (inst.foreignBuy < 0 && inst.trustBuy < 0 && inst.dealerBuy < 0) { score -= 10; details.push('三法人同步賣超'); }
   }
 
-  // ── 融資融券面 ──
-  if (margin) {
-    if (margin.marginNet < -200) { score += Math.min(5, Math.abs(margin.marginNet) / 500); details.push(`融資減${Math.abs(margin.marginNet).toLocaleString()}張`); }
-    if (margin.marginNet > 500) { score -= Math.min(10, margin.marginNet / 500); details.push(`融資增${margin.marginNet.toLocaleString()}張`); }
-    if (margin.shortNet > 0 && inst && inst.totalBuy > 0) { score += 3; details.push('軋空機會'); }
-    if (margin.marginUtilRate > 60) { score -= 3; details.push(`融資使用率${margin.marginUtilRate}%偏高`); }
-  }
-
-  // ── 大額交易人（單位：張）──
-  if (lt) {
-    if (lt.net > 0) { score += Math.min(8, lt.net / 5000); if (lt.net >= 500) details.push(`大戶買超${lt.net.toLocaleString()}張`); }
-    if (lt.net < -500) { score -= 5; details.push(`大戶賣超${Math.abs(lt.net).toLocaleString()}張`); }
-  }
-
-  // ── 當沖面 ──
-  if (dt) {
-    if (dt.dayTradeRatio > 40) { score -= 5; details.push(`當沖比${dt.dayTradeRatio}%過高`); }
-    else if (dt.dayTradeRatio > 25) { score -= 2; }
-  }
-
-  // ── 集保大戶結構（業界：400/600/800/1000 四級全到位 = 主力卡位最強訊號）──
-  if (holder) {
-    if (holder.structureBuilding) {
-      score += 15;
-      details.push('主力卡位（400/600/800/1000 四級全到位）');
+  // ── 5) 融資（散戶面，反向解讀：增 = 看空、減 = 看多）──
+  if (margin?.marginNet) {
+    if (margin.marginNet > 200) {
+      const penalty = Math.min(8, margin.marginNet / 500 * 5);
+      score -= penalty;
+      details.push(`融資增${margin.marginNet.toLocaleString()}張`);
+    } else if (margin.marginNet < -200) {
+      score += Math.min(4, Math.abs(margin.marginNet) / 500 * 3);
     }
-    if (holder.holder1000Change >= 0.5) {
-      score += 5;
-      details.push(`千張大戶持股 +${holder.holder1000Change.toFixed(2)}%`);
-    } else if (holder.holder1000Change <= -1) {
-      score -= 8;
-      details.push(`千張大戶持股 ${holder.holder1000Change.toFixed(2)}% 出脫`);
+  }
+  // 融資連 N 增 = 散戶追高 = 扣分（反向 trendAdj）
+  score += trendAdj(trends?.margin, -1);
+
+  if (margin?.marginUtilRate && margin.marginUtilRate > 60) {
+    score -= 3;
+    details.push(`融資使用率 ${margin.marginUtilRate.toFixed(1)}%`);
+  }
+
+  // ── 6) 融券 + 軋空機會 ──
+  if (margin?.shortNet && inst?.totalBuy && margin.shortNet > 0 && inst.totalBuy > 0) {
+    score += 2;
+    details.push('軋空訊號');
+  }
+
+  // ── 7) 主力綜合（核心指標）──
+  // composite = 外資+投信+自營 (合計) + 大戶 net - 融資增加
+  // 籌碼K線「主力」連 5 賣 / -4.00% 主力集中度是強烈空頭訊號
+  if (composite != null) {
+    score += Math.max(-15, Math.min(15, composite / 3000 * 15));
+    if (Math.abs(composite) >= 500) details.push(`主力${composite > 0 ? '買' : '賣'}${Math.abs(composite).toLocaleString()}張`);
+  }
+  if (trends?.composite) {
+    const adj = trendAdj(trends.composite, 2);  // 主力趨勢權重最大
+    score += adj;
+    if (trends.composite.consecutiveCount >= 4) {
+      details.push(`主力${trends.composite.label}`);
     }
+  }
+
+  // ── 8) 借券（放空籌碼）──
+  if (lending?.lendingNet) {
+    const v = lending.lendingNet;
+    if (v > 50) {
+      const penalty = Math.min(10, v / 100 * 5);
+      score -= penalty;
+      details.push(`借券增${v.toLocaleString()}張`);
+    } else if (v < -50) {
+      // 借券回補 = 看空力道減弱
+      score += Math.min(3, Math.abs(v) / 100 * 2);
+    }
+  }
+  // 借券連續增 = 持續放空，重扣
+  score += trendAdj(trends?.lending, -1.5);
+
+  // ── 9) 大戶散戶 5 週變化（取代舊「主力卡位 +15」死板加分）──
+  if (holder5w) {
+    if (holder5w.largeChangePct > 0.3) {
+      score += Math.min(8, holder5w.largeChangePct * 10);
+      details.push(`大戶 5 週 +${holder5w.largeChangePct.toFixed(2)}%`);
+    } else if (holder5w.largeChangePct < -0.3) {
+      score += Math.max(-10, holder5w.largeChangePct * 12);  // 大戶減持扣比較重
+      details.push(`大戶 5 週 ${holder5w.largeChangePct.toFixed(2)}%`);
+    }
+  }
+
+  // ── 當沖比過高 ──
+  if (dt?.dayTradeRatio && dt.dayTradeRatio > 40) {
+    score -= 3;
+    details.push(`當沖比 ${dt.dayTradeRatio.toFixed(1)}%`);
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const grade = score >= 80 ? 'S' : score >= 65 ? 'A' : score >= 50 ? 'B' : score >= 35 ? 'C' : 'D';
 
   let signal = '中性';
+  const compositeDown = trends?.composite?.direction === 'down' && trends.composite.consecutiveCount >= 3;
+  const lendingUp = trends?.lending?.direction === 'up' && trends.lending.consecutiveCount >= 3;
+  const instDown = trends?.institutional?.direction === 'down' && trends.institutional.consecutiveCount >= 4;
+
   if (score >= 75 && inst && inst.foreignBuy > 0 && inst.trustBuy > 0) signal = '主力進場';
   else if (score >= 65 && inst && inst.totalBuy > 0) signal = '法人偏多';
-  else if (score >= 55 && lt && lt.net > 0) signal = '大戶加碼';
-  else if (score <= 25 && inst && inst.totalBuy < 0) signal = '主力出貨';
-  else if (score <= 35 && margin && margin.marginNet > 500) signal = '散戶追高';
+  else if (score <= 30 && (compositeDown || (instDown && lendingUp))) signal = '主力出貨';
+  else if (score <= 35 && lendingUp) signal = '空方積極';
   else if (score <= 40 && inst && inst.foreignBuy < 0 && inst.trustBuy < 0) signal = '法人偏空';
+  else if (score <= 45 && compositeDown) signal = '主力撤退';
 
   return { score, grade, signal, detail: details.join('；') || '中性' };
 }
@@ -175,8 +282,14 @@ const chipQuerySchema = z.object({
 
 import { fetchT86ForStock } from '@/lib/datasource/TwseT86Provider';
 import { readTdccStock, readInstStock, writeInstStock } from '@/lib/chips/ChipStorage';
-import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock } from '@/lib/datasource/FinmindChipExtras';
+import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock, fetchLendingHistoryForStock } from '@/lib/datasource/FinmindChipExtras';
 import { getSharesIssued } from '@/lib/datasource/FinMindClient';
+import { detectTrend, rollingChange } from '@/lib/chips/trends';
+import { fetchYahooBrokerTrades, type BrokerRankRow } from '@/lib/datasource/YahooBrokerScraper';
+import { fetchTwseSblForStock, fetchTwseSblHistory } from '@/lib/datasource/TwseSblProvider';
+import { fetchTpexSblForStock, fetchTpexSblHistory } from '@/lib/datasource/TpexSblProvider';
+import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
+import { fetchTpexMarginForStock } from '@/lib/datasource/TpexMarginProvider';
 
 // ── 投信動向（陳威良 3比8 法則的 proxy）────────────────────────────────────
 // FinMind 免費層無「絕對投信持股 %」資料源；先用「最近 30/60/90 天投信淨買 ÷ 已發行股數」
@@ -231,7 +344,17 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
 
   // 用 Asia/Taipei TZ；UTC 在 CST 凌晨會回傳前一天，籌碼資料對不上
-  const rawDate = parsed.data.date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+  // FinMind 融資/借券通常盤後 17:00 才揭露；當日盤中或剛開盤抓 → 沒資料
+  // 預設改用「最近一個揭露完成的交易日」：若現在台北時間 < 17:00 或 > 0:00 還沒過完今日，就退到昨日
+  const now = new Date();
+  const taipeiHour = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit' }).format(now), 10);
+  const taipeiToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+  const defaultDate = (() => {
+    if (taipeiHour >= 17) return taipeiToday;  // 17:00 後當日已揭露
+    const y = new Date(now.getTime() - 86400_000);
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(y);
+  })();
+  const rawDate = parsed.data.date ?? defaultDate;
   const rawSymbol = parsed.data.symbol;
   if (!rawSymbol) return apiError('symbol required', 400);
   const code = rawSymbol.replace(/\.(TW|TWO)$/i, '');
@@ -265,12 +388,26 @@ export async function GET(req: NextRequest) {
 
     // ── 2) 大戶持股 TDCC L1 + 3) 融資融券、當沖、借券、4) 已發行股數（FinMind 並行）──
     // 用 allSettled：任何單一資料源失敗不應打掉整個籌碼面板（書本實務以外資+融資為主，借券/股本缺值可接受）
+    // 融資融券：TWSE（上市）→ TPEX（上櫃）→ FinMind 最後 fallback；全部免費無 quota
+    const marginPromise = (async () => {
+      const tw = await fetchTwseMarginForStock(code, date).catch(() => null);
+      if (tw) return { marginBalance: tw.marginBalance, marginNet: tw.marginNet, shortBalance: tw.shortBalance, shortNet: tw.shortNet, marginUtilRate: tw.marginUtilRate };
+      const tpex = await fetchTpexMarginForStock(code, date).catch(() => null);
+      if (tpex) return { marginBalance: tpex.marginBalance, marginNet: tpex.marginNet, shortBalance: tpex.shortBalance, shortNet: tpex.shortNet, marginUtilRate: tpex.marginUtilRate };
+      return fetchMarginForStock(code, date);
+    })();
+
     const settled = await Promise.allSettled([
       readTdccStock(code),
-      fetchMarginForStock(code, date),
+      marginPromise,
       fetchDayTradeForStock(code, date),
-      fetchLendingForStock(code, date),
+      // v3: SBL — TWSE（上市）→ TPEX（上櫃）fallback；全免費無 quota
+      fetchTwseSblForStock(code, date).then(r => r ?? fetchTpexSblForStock(code, date)).catch(() => null),
       getSharesIssued(code),
+      // 30 天歷史做趨勢；TWSE 沒有就試 TPEX
+      fetchTwseSblHistory(code, date, 30).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 30)).catch(() => []),
+      // v3: 主力券商分點（Yahoo 籌碼頁；對齊籌碼K線「主力 -102」）
+      fetchYahooBrokerTrades(code),
     ]);
     const pickFulfilled = <T,>(idx: number): T | null => {
       const r = settled[idx];
@@ -279,10 +416,78 @@ export async function GET(req: NextRequest) {
     const tdccFile = pickFulfilled<Awaited<ReturnType<typeof readTdccStock>>>(0);
     const marginInfo = pickFulfilled<Awaited<ReturnType<typeof fetchMarginForStock>>>(1);
     const dayTradeInfo = pickFulfilled<Awaited<ReturnType<typeof fetchDayTradeForStock>>>(2);
-    const lendingInfo = pickFulfilled<Awaited<ReturnType<typeof fetchLendingForStock>>>(3);
+    const sblToday = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblForStock>>>(3);
     const sharesIssued = pickFulfilled<number>(4);
+    const sblHistory = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblHistory>>>(5) ?? [];
+    const brokerTrades = pickFulfilled<Awaited<ReturnType<typeof fetchYahooBrokerTrades>>>(6);
+    // 把 sblToday 轉成 lendingInfo shape 給後面 code 用（向下相容）
+    const lendingInfo = sblToday ? {
+      lendingBalance: sblToday.lendingBalance,
+      lendingNet: sblToday.lendingNet,
+    } : null;
+    const lendingHistory = sblHistory.map(r => ({
+      date: r.date,
+      lendingBalance: r.lendingBalance,
+      lendingNet: r.lendingNet,
+    }));
     const latestTdcc = tdccFile?.data[tdccFile.data.length - 1];
     const prevTdcc = tdccFile?.data[tdccFile.data.length - 2];
+
+    const clampPct = (v: number | undefined): number =>
+      Math.min(100, Math.max(0, v ?? 0));
+
+    // ── v2: 趨勢偵測（取最近 N 個交易日的 inst row）──
+    const recentInstRows = (instFile?.data ?? []).slice(-15);  // 取最近 15 個交易日
+    const trendForeign = detectTrend(recentInstRows.map(r => r.foreign), 'buy_sell');
+    const trendTrust = detectTrend(recentInstRows.map(r => r.trust), 'buy_sell');
+    const trendDealer = detectTrend(recentInstRows.map(r => r.dealer), 'buy_sell');
+    const trendInst = detectTrend(recentInstRows.map(r => r.total), 'buy_sell');
+    // 融資趨勢從 fetchMarginForStock 只有單日，先標 flat（之後可再補 history）
+    const trendMargin: TrendInfo | undefined = undefined;
+    // 借券趨勢
+    const lendingRows = lendingHistory.slice(-15);
+    const trendLending = detectTrend(lendingRows.map(r => r.lendingNet), 'inc_dec');
+
+    // ── 主力綜合（當日，張）對齊籌碼 K 線「主力」口徑
+    // v3: 優先用 Yahoo 籌碼分點 (totalDifferenceVolK)，無資料時 fallback 用三法人+融資/借券合成
+    const marginNetToday = marginInfo?.marginNet ?? 0;
+    const lendingNetToday = lendingInfo?.lendingNet ?? 0;
+    const computeComposite = (row: { foreign: number; trust: number; dealer: number }, mNet: number, lNet: number): number => {
+      return row.foreign + row.trust + row.dealer - lNet * 0.7 - mNet * 0.5;
+    };
+    const compositeSeries = recentInstRows.map(r => computeComposite(r, 0, 0));
+    const compositeToday = brokerTrades?.totalDifferenceVolK != null
+      ? brokerTrades.totalDifferenceVolK
+      : instOnDate ? computeComposite(instOnDate, marginNetToday, lendingNetToday) : 0;
+    // trendComposite 仍用三法人 series（broker scraper 只有當日 snapshot 沒歷史）
+    const trendComposite = detectTrend(compositeSeries, 'buy_sell');
+
+    // ── 大戶 5 週變化 — 籌碼 K 線定義：最新一筆 TDCC snapshot 與上一筆的差
+    //    （TDCC 每週四公布，所以「5 週」實際上是「最近 1 個週度 delta」）
+    //    連續方向偵測：對 weekly delta 序列跑 detectTrend
+    let holder5wChange: { largePct: number; retailPct: number } | undefined;
+    let holder5mChange: { largePct: number } | undefined;
+    let trendHolderLarge: TrendInfo | undefined;
+    if (tdccFile?.data && tdccFile.data.length >= 2) {
+      const rows = tdccFile.data;
+      const latestLarge = clampPct(rows[rows.length - 1].holder400Pct);
+      const prevLarge = clampPct(rows[rows.length - 2].holder400Pct);
+      const wkDelta = latestLarge - prevLarge;
+      holder5wChange = { largePct: wkDelta, retailPct: -wkDelta };
+
+      // 5 月變化 = 最近 ~21 筆 weekly snapshot 之前的值 vs 現在；TDCC weekly 約每 7 天一筆
+      if (rows.length >= 21) {
+        const baseIdx = Math.max(0, rows.length - 21);
+        holder5mChange = { largePct: latestLarge - clampPct(rows[baseIdx].holder400Pct) };
+      }
+
+      // 對 weekly delta series 偵測連 N 增 / N 減
+      const deltas: number[] = [];
+      for (let i = 1; i < rows.length; i++) {
+        deltas.push(clampPct(rows[i].holder400Pct) - clampPct(rows[i - 1].holder400Pct));
+      }
+      trendHolderLarge = detectTrend(deltas.slice(-10), 'inc_dec');
+    }
 
     // 投信動向（30/60/90 天累計淨買換算 pp）
     const instRows = instFile?.data ?? [];
@@ -310,8 +515,6 @@ export async function GET(req: NextRequest) {
     const totalBuy = instOnDate?.total ?? 0;
 
     // 集保大戶各級摘要 + 主力卡位訊號
-    const clampPct = (v: number | undefined): number =>
-      Math.min(100, Math.max(0, v ?? 0));
     const h400To600 = clampPct(latestTdcc?.holder400To600Pct);
     const h600To800 = clampPct(latestTdcc?.holder600To800Pct);
     const h800To1000 = clampPct(latestTdcc?.holder800To1000Pct);
@@ -323,13 +526,30 @@ export async function GET(req: NextRequest) {
       : 0;
 
     const inst = instOnDate ? { foreignBuy, trustBuy, dealerBuy, totalBuy, name: '' } : undefined;
-    const { score, grade, signal, detail } = calculateChipScore(
-      inst,
-      marginInfo ?? undefined,
-      dayTradeInfo ?? undefined,
-      undefined,
-      latestTdcc ? { structureBuilding, holder1000Change } : undefined,
-    );
+    const { score, grade, signal, detail } = calculateChipScore({
+      inst: inst ? { foreignBuy, trustBuy, dealerBuy, totalBuy } : undefined,
+      margin: marginInfo ? {
+        marginNet: marginInfo.marginNet,
+        shortNet: marginInfo.shortNet,
+        marginUtilRate: marginInfo.marginUtilRate,
+      } : undefined,
+      dt: dayTradeInfo ?? undefined,
+      lending: lendingInfo ?? undefined,
+      holder5w: holder5wChange ? {
+        largeChangePct: holder5wChange.largePct,
+        retailChangePct: holder5wChange.retailPct,
+      } : undefined,
+      composite: compositeToday,
+      trends: {
+        foreign: trendForeign,
+        trust: trendTrust,
+        dealer: trendDealer,
+        institutional: trendInst,
+        margin: trendMargin,
+        lending: trendLending,
+        composite: trendComposite,
+      },
+    });
 
     const data: ChipData = {
       symbol: code,
@@ -369,6 +589,27 @@ export async function GET(req: NextRequest) {
       chipGrade: grade,
       chipSignal: signal,
       chipDetail: detail,
+      // v2 — 9 區塊 + 趨勢
+      composite: compositeToday,
+      trends: {
+        foreign: trendForeign,
+        trust: trendTrust,
+        dealer: trendDealer,
+        institutional: trendInst,
+        margin: trendMargin,
+        lending: trendLending,
+        composite: trendComposite,
+        holderLarge: trendHolderLarge,
+      },
+      holder5wChange,
+      holder5mChange,
+      // v3 主力券商分點
+      brokerNetBuy: brokerTrades?.totalDifferenceVolK,
+      brokerConcentration: brokerTrades
+        ? (brokerTrades.concentration * 100 * (brokerTrades.totalDifferenceVolK >= 0 ? 1 : -1))
+        : undefined,
+      topBuyers: brokerTrades?.buyerRankList,
+      topSellers: brokerTrades?.sellerRankList,
     };
 
     return apiOk(data);

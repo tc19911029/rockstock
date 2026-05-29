@@ -77,6 +77,14 @@
       "schedule": "13 8 * * 1-5"
     },
     {
+      "path": "/api/cron/scan-fundamental-revaluation?market=TW",
+      "schedule": "30 11 * * 1-5"
+    },
+    {
+      "path": "/api/cron/scan-fundamental-revaluation?market=CN",
+      "schedule": "0 10 * * 1-5"
+    },
+    {
       "path": "/api/cron/scan-daban",
       "schedule": "55 7 * * 1-5"
     },

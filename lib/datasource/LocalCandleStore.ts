@@ -149,6 +149,30 @@ function guardAgainstLimitOverwrite(symbol: string, market: 'TW' | 'CN', candles
 const _writeLocks = new Map<string, Promise<void>>();
 
 /**
+ * Ghost .TW guard：阻止對 TPEx 上櫃股寫入 .TW 檔。
+ *
+ * 背景：2026-05-26 抓到 20 對 ghost 檔（如 8358.TW + 8358.TWO 並存）。
+ *   - download-candles cron 用 stocklist iterate（只給 .TWO），不會更新到 ghost .TW
+ *   - verify-download 掃整個目錄，把 ghost .TW 列進 stale list
+ *   - retry-failed cron 每天 14:45 用 stale list 重抓 → Yahoo .TW 對 TPEx 股回 stale data → 持續寫錯
+ *
+ * 判定：若同 code 的 .TWO 檔已存在 = 該 code 確定是 TPEx（台股 code 上市/上櫃不共用）
+ * → 拒寫 .TW，從源頭阻擋 ghost 重生。
+ */
+async function ghostSuffixGuard(symbol: string, market: 'TW' | 'CN'): Promise<void> {
+  if (market !== 'TW' || !symbol.endsWith('.TW')) return;
+  const code = symbol.slice(0, -3);
+  const { readCandleFile } = await import('./CandleStorageAdapter');
+  const twoData = await readCandleFile(`${code}.TWO`, market);
+  if (twoData) {
+    throw new Error(
+      `[L1 guard] ghost write blocked: ${symbol} — ${code}.TWO already exists (TPEx 上櫃股). ` +
+      `用 ${code}.TWO 寫入；寫 .TW 會建 ghost 檔，被 retry-failed cron 每天 14:45 重抓變污染源。`
+    );
+  }
+}
+
+/**
  * 將原始 K 線存到本地檔案
  * candles 應為原始 OHLCV（不含指標）
  */
@@ -158,6 +182,7 @@ export async function saveLocalCandles(
   candles: Candle[],
 ): Promise<void> {
   if (candles.length === 0) return;
+  await ghostSuffixGuard(symbol, market);
   const key = `${market}:${symbol}`;
   const prev = _writeLocks.get(key) ?? Promise.resolve();
   // work：caller 看到的 promise，會 throw（讓 caller 知道寫失敗）

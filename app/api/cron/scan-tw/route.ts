@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
       sessionType: 'post_close',
       directions: ['long', 'short'],
       mtfModes: ['daily', 'mtf'],
-      buyMethods: ['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'],
+      buyMethods: ['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'],
       force: true,
     });
 

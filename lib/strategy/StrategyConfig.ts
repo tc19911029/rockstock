@@ -99,7 +99,7 @@ import type { RuleGroupId } from '@/lib/rules/ruleRegistry';
  *
  * 未指定時視為 'trend'，維持舊行為。
  */
-export type StrategyType = 'trend' | 'kline-pattern' | 'mechanical-rank';
+export type StrategyType = 'trend' | 'kline-pattern' | 'mechanical-rank' | 'fundamental-revaluation';
 
 export interface StrategyConfig {
   id:          string;     // 唯一識別碼，e.g. 'zhu-v1'
@@ -508,6 +508,82 @@ export const ZHU_DEVIATION_EXTREME: StrategyConfig = {
   },
 };
 
+/**
+ * V 基本面補漲（台股版，2026-05-27 新增）
+ *
+ * 不是技術面策略 — 用真實基本面資料找 EPS 即將上修但股價未反映的補漲股。
+ *
+ * 台股核心邏輯：
+ *   最新月營收 YoY/MoM 強 → 推估下一季 EPS → 算 Forward PE → 對比產業合理 PE
+ *   → 找出中性情境仍有低估空間（低估 ≥ 20%）的股票
+ *
+ * strategyType='fundamental-revaluation' 觸發跳過：六條件、戒律、淘汰法、Step 0 大盤過濾、
+ * MTF、KD 向下警示。完全不走 detector — 走 lib/strategy/fundamentalRevaluation/twPipeline.ts。
+ *
+ * CLAUDE.md 規則 #5（只用書本規則）對 V 軌不適用，比照 R 軌處理（[[project_r_track_kept]]）。
+ */
+export const TW_FUNDAMENTAL_REVALUATION: StrategyConfig = {
+  id:          'tw-fundamental-revaluation',
+  name:        '台股基本面補漲（V）',
+  description: '月營收 YoY/MoM 強 → 推估 Forward EPS → Forward PE vs 產業合理 PE → 低估補漲候選',
+  version:     '1.0.0',
+  author:      '基本面補漲',
+  createdAt:   '2026-05-27T00:00:00.000Z',
+  isBuiltIn:   true,
+  strategyType: 'fundamental-revaluation',
+  buyMethod:    'V',
+  conditions: {
+    trend: false, position: false, kbar: false,
+    ma: false, volume: false, indicator: false,
+  },
+  thresholds:  {
+    ...BASE_THRESHOLDS,
+    minScore:           0,
+    bullMinScore:       0,
+    sidewaysMinScore:   0,
+    bearMinScore:       0,
+    marketTrendFilter:  false,
+    multiTimeframeFilter: false,
+    kdDecliningFilter:  false,
+  },
+};
+
+/**
+ * V 基本面補漲（陸股版，2026-05-27 新增）
+ *
+ * 陸股核心邏輯（與台股不同）：
+ *   最新季報 → 扣非淨利確認本業改善 → 推估全年 EPS → 算 Forward PE → 對比產業合理 PE
+ *   → 排除「非經常損益/政府補助/公允價值變動」撐起來的假 EPS
+ *
+ * 同樣 strategyType='fundamental-revaluation'，但走 cnPipeline.ts，使用 EastMoneyFundamentals
+ * + EastMoneyFinancialDetail（季報詳情爬蟲）。
+ */
+export const CN_FUNDAMENTAL_REVALUATION: StrategyConfig = {
+  id:          'cn-fundamental-revaluation',
+  name:        '陸股基本面補漲（V）',
+  description: '季報 + 扣非淨利確認本業轉強 → Forward PE vs 產業合理 PE → 排除非經常性收益假象',
+  version:     '1.0.0',
+  author:      '基本面補漲',
+  createdAt:   '2026-05-27T00:00:00.000Z',
+  isBuiltIn:   true,
+  strategyType: 'fundamental-revaluation',
+  buyMethod:    'V',
+  conditions: {
+    trend: false, position: false, kbar: false,
+    ma: false, volume: false, indicator: false,
+  },
+  thresholds:  {
+    ...BASE_THRESHOLDS,
+    minScore:           0,
+    bullMinScore:       0,
+    sidewaysMinScore:   0,
+    bearMinScore:       0,
+    marketTrendFilter:  false,
+    multiTimeframeFilter: false,
+    kdDecliningFilter:  false,
+  },
+};
+
 export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
   ZHU_PURE_BOOK,              // 純書本版（A = long-daily 六條件的 thresholds）
   ZHU_FLAT_BOTTOM,            // D：一字底突破（2026-04-21 rename from E）
@@ -519,6 +595,8 @@ export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
   ZHU_BLACK_K_BREAKOUT,       // H：突破大量黑 K（2026-05-04 新增，寶典 Part 11-1 位置 8）
   ZHU_KLINE_HSP_BREAKOUT,     // I：K 線橫盤突破（2026-05-04 新增，寶典 Part 11-1 位置 3）
   ZHU_DEVIATION_EXTREME,      // R：乖離率（2026-05-21 新增，機械軌純排名）
+  TW_FUNDAMENTAL_REVALUATION, // V：台股基本面補漲（2026-05-27 新增，基本面軌）
+  CN_FUNDAMENTAL_REVALUATION, // V：陸股基本面補漲（2026-05-27 新增，基本面軌）
 ];
 
 // ── P0-3: 策略參數邊界驗證 ──────────────────────────────────────────────────────

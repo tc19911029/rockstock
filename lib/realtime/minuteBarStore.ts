@@ -88,16 +88,21 @@ export function ensureSymbol(symbol: string, market: 'TW' | 'CN'): void {
  * bar.volume 用 (current - lastSeen) delta 算這分鐘的增量。
  * 第一次 tick 時 lastSeen=0，delta=cumulativeVolume → 開盤第一根 bar 會吃整段
  * 集合競價 + 前面所有累積（這是已知行為，blowoffDetector 內部會排除第一根 bar）。
+ *
+ * 交易時段 guard：盤外（含 CN 午休）的 tick 直接 drop，避免 stale quote 開出
+ * V=0 OHLC 全=收盤價的假 bar 污染 buffer（5m aggregate 後會誤觸 ma5-breakdown）。
  */
 export function pushTick(
   symbol: string,
   market: 'TW' | 'CN',
   snap: MinuteBarQuoteSnapshot,
 ): void {
+  const tickMs = snap.ts ?? Date.now();
+  if (!isInTradingSession(market, tickMs)) return;
   maybeRollover();
   ensureSymbol(symbol, market);
   const entry = buffers.get(symbol)!;
-  const ts = floorMinute(snap.ts ?? Date.now());
+  const ts = floorMinute(tickMs);
   const delta = Math.max(0, snap.cumulativeVolume - entry.lastSeenCumVol);
   entry.lastSeenCumVol = snap.cumulativeVolume;
 
@@ -419,6 +424,29 @@ function maybeRollover(): void {
     buffers.clear();
     currentDateKey = today;
   }
+}
+
+/**
+ * 是否在連續競價時段內（含 CN 午休排除）
+ *   TW: 09:00–13:30
+ *   CN: 09:15–11:30 + 13:00–15:00
+ * 用市場時區的 hour*100+min 比對；週末 / 假日 一律 false（不引入 isTradingDay
+ * 依賴是因為這層只負責「不接 stale tick」，假日 cron 本來就會被外層 isMarketOpen 擋住）。
+ */
+export function isInTradingSession(market: 'TW' | 'CN', ms: number): boolean {
+  const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: 'numeric', minute: 'numeric', weekday: 'short', hour12: false,
+  }).formatToParts(new Date(ms));
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+  const wd = get('weekday');
+  if (wd === 'Sat' || wd === 'Sun') return false;
+  const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+  if (market === 'TW') {
+    return hhmm >= 900 && hhmm <= 1330;
+  }
+  // CN：09:15–11:30 上午 + 13:00–15:00 下午
+  return (hhmm >= 915 && hhmm <= 1130) || (hhmm >= 1300 && hhmm <= 1500);
 }
 
 // ── test-only ────────────────────────────────────────────────────────────

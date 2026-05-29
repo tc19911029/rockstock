@@ -18,6 +18,10 @@ export interface SelectedStock {
   symbol: string;   // e.g. "2330.TW"
   name: string;
   market: 'TW' | 'CN';
+  /** 掃描日（三色資金等帶自己的固化日，讓走圖停在該日而非最新）；不給則用 backtestStore.scanDate */
+  date?: string;
+  /** 點選後主圖預設要切到的 SanSe Tab（CN 三色資金結果用） */
+  chartTab?: 'shuangb' | 'mainforce' | 'season';
 }
 
 interface ScanChartPanelProps {

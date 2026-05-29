@@ -37,12 +37,14 @@ async function main() {
 
   const missing: string[] = [];
   for (const code of codes) {
-    const file = path.join(CANDLE_DIR, `${code}.TW.json`);
-    try {
-      await fs.access(file);
-    } catch {
-      missing.push(code);
+    const twFile = path.join(CANDLE_DIR, `${code}.TW.json`);
+    const twoFile = path.join(CANDLE_DIR, `${code}.TWO.json`);
+    let exists = false;
+    try { await fs.access(twFile); exists = true; } catch { /* check .TWO next */ }
+    if (!exists) {
+      try { await fs.access(twoFile); exists = true; } catch { /* truly missing */ }
     }
+    if (!exists) missing.push(code);
   }
   console.log(`Missing K-line files: ${missing.length}\n  ${missing.join(', ')}`);
 
@@ -63,12 +65,14 @@ async function main() {
         failCount++;
         continue;
       }
-      // 儲存格式 = { symbol, candles: [...] }
+      // 儲存格式 = { symbol, candles: [...] }；symbol/檔名跟著實際成功的 suffix
+      // 寫入錯的 suffix 會造成 ghost 檔（download-candles cron 用 stocklist 不會更新到，
+      // 但 retry-failed cron 又會每天從 stale list 抓 → 永遠不死的污染源）
       const stripped = candles.map(c => ({
         date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
       }));
-      const payload = { symbol: `${code}.TW`, candles: stripped, source: symbolUsed, fetched_at: new Date().toISOString() };
-      await fs.writeFile(path.join(CANDLE_DIR, `${code}.TW.json`), JSON.stringify(payload));
+      const payload = { symbol: symbolUsed, candles: stripped, source: symbolUsed, fetched_at: new Date().toISOString() };
+      await fs.writeFile(path.join(CANDLE_DIR, `${symbolUsed}.json`), JSON.stringify(payload));
       console.log(`✓ (${stripped.length} candles via ${symbolUsed})`);
       okCount++;
       // 禮貌一下別打爆 Yahoo

@@ -86,6 +86,24 @@ export const SYSTEM_TRACK_LETTERS = ['Q'] as const;
  */
 export const MECHANICAL_TRACK_LETTERS = ['R'] as const;
 
+/**
+ * 基本面軌字母（2026-05-27 新增）
+ *
+ * 不是技術面、不是 K 線型態 — 用真實基本面資料找 EPS 即將上修、股價未反映的補漲股。
+ *   V = Revaluation（基本面補漲）
+ *
+ * 兩個子策略：
+ *   TW_Fundamental_Revaluation — 用「月營收 YoY/MoM」提前推估 Forward EPS
+ *   CN_Fundamental_Revaluation — 用「季報 + 扣非淨利」確認本業轉強
+ *
+ * strategyType='fundamental-revaluation' 觸發跳過：六條件、戒律、淘汰法、Step 0 大盤過濾、
+ * MTF、KD 向下警示。完全不走 detector — 走 lib/strategy/fundamentalRevaluation/twPipeline.ts
+ * 或 cnPipeline.ts。
+ *
+ * CLAUDE.md 規則 #5（只用書本規則）對 V 軌不適用，比照 R 軌處理（[[project_r_track_kept]]）。
+ */
+export const FUNDAMENTAL_TRACK_LETTERS = ['V'] as const;
+
 /** 全部買法字母（A = 六條件池子本身，不算 Step 2 軌道）*/
 export const ALL_BUY_METHOD_LETTERS = [
   'A',
@@ -93,6 +111,7 @@ export const ALL_BUY_METHOD_LETTERS = [
   ...REVERSAL_TRACK_LETTERS,
   ...SYSTEM_TRACK_LETTERS,
   ...MECHANICAL_TRACK_LETTERS,
+  ...FUNDAMENTAL_TRACK_LETTERS,
 ] as const;
 
 /** Set 形式 — 給 has() 快速查詢 */
@@ -108,6 +127,7 @@ export const BULLISH_TRACK_SET_WITH_V11: ReadonlySet<string> = new Set([
 export const REVERSAL_TRACK_SET: ReadonlySet<string> = new Set(REVERSAL_TRACK_LETTERS);
 export const SYSTEM_TRACK_SET: ReadonlySet<string> = new Set(SYSTEM_TRACK_LETTERS);
 export const MECHANICAL_TRACK_SET: ReadonlySet<string> = new Set(MECHANICAL_TRACK_LETTERS);
+export const FUNDAMENTAL_TRACK_SET: ReadonlySet<string> = new Set(FUNDAMENTAL_TRACK_LETTERS);
 
 /**
  * 不過 Step 1 池子的字母集合（反轉軌 ∪ 戰法軌 ∪ 機械軌）
@@ -119,6 +139,7 @@ export const NON_STEP1_SET: ReadonlySet<string> = new Set([
   ...REVERSAL_TRACK_LETTERS,
   ...SYSTEM_TRACK_LETTERS,
   ...MECHANICAL_TRACK_LETTERS,
+  ...FUNDAMENTAL_TRACK_LETTERS,
 ]);
 
 /** @deprecated 用 NON_STEP1_SET（2026-05-21 加入機械軌後更名）*/
@@ -128,14 +149,16 @@ export type BullishLetter = typeof BULLISH_TRACK_LETTERS[number];
 export type ReversalLetter = typeof REVERSAL_TRACK_LETTERS[number];
 export type SystemLetter = typeof SYSTEM_TRACK_LETTERS[number];
 export type MechanicalLetter = typeof MECHANICAL_TRACK_LETTERS[number];
+export type FundamentalLetter = typeof FUNDAMENTAL_TRACK_LETTERS[number];
 
 /** 判斷某字母屬於哪個軌道 */
-export function trackOf(letter: string): 'pool' | 'bullish' | 'reversal' | 'system' | 'mechanical' | 'unknown' {
+export function trackOf(letter: string): 'pool' | 'bullish' | 'reversal' | 'system' | 'mechanical' | 'fundamental' | 'unknown' {
   if (letter === 'A') return 'pool';
   if (BULLISH_TRACK_SET.has(letter)) return 'bullish';
   if (REVERSAL_TRACK_SET.has(letter)) return 'reversal';
   if (SYSTEM_TRACK_SET.has(letter)) return 'system';
   if (MECHANICAL_TRACK_SET.has(letter)) return 'mechanical';
+  if (FUNDAMENTAL_TRACK_SET.has(letter)) return 'fundamental';
   return 'unknown';
 }
 
@@ -174,6 +197,8 @@ export const LETTER_NAMES: Readonly<Record<string, string>> = {
   Q: '三條均線戰法',       // 朱家泓網路課程 MA3+10+24
   // ── 機械軌（2026-05-21 新增；S 大戶累積已於 2026-05-25 移除，backtest 無 alpha）──
   R: '乖離率',             // 成交額前500 + MA20 乖離率（long: 負最多 / short: 正最多）
+  // ── 基本面軌（2026-05-27 新增）──
+  V: '基本面補漲',         // TW: 月營收推 Forward EPS；CN: 季報 + 扣非淨利
   // 注意：v11 G/H/I 字母不在 LETTER_NAMES 中。讀舊資料時應先 normalizeLetter() 轉成 v12。
 };
 

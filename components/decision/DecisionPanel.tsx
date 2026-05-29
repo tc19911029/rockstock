@@ -10,7 +10,7 @@
  * §0 隔離：4 verdict 並列展示（不混合加權），由 FinalDecision.verdictsByAgent 直接拿
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { decisionPathZh } from '@/lib/i18n/decisionPathLabel';
@@ -70,6 +70,8 @@ export function DecisionPanel({ symbol, date }: Props) {
   const [data, setData] = useState<DecisionPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
+  const [chipExpanded, setChipExpanded] = useState(false);
+  const toggleChip = () => setChipExpanded(o => !o);
 
   useEffect(() => {
     if (!symbol) return;
@@ -135,12 +137,17 @@ export function DecisionPanel({ symbol, date }: Props) {
         {header}
         <div className="p-3 space-y-3 bg-slate-900/40">
           <HoldingBadge symbol={symbol} />
-          <FallbackFacetVerdicts symbol={symbol} date={date} />
+          <FallbackFacetVerdicts
+            symbol={symbol}
+            date={date}
+            chipExpanded={chipExpanded}
+            onToggleChip={toggleChip}
+          />
+          {chipExpanded && <TrustMomentumPanel symbol={symbol} date={date} />}
           <div className="text-[11px] text-slate-500 border border-slate-700/30 rounded p-2 bg-slate-900/30 leading-relaxed">
             💡 以上 4 面向是<strong className="text-amber-300/90"> 規則推估</strong>（六條件 / YouTube 共識 / 籌碼分數 / EPS+營收 YoY）。
             想看完整多空辯論 + 進出場參數，執行 <code className="mx-1 px-1.5 py-0.5 bg-slate-800 rounded text-cyan-300">/multi-agent-decide {symbol}</code>。
           </div>
-          <TrustMomentumPanel symbol={symbol} date={date} />
         </div>
       </section>
     );
@@ -164,13 +171,20 @@ export function DecisionPanel({ symbol, date }: Props) {
         {/* 持有狀態 badge（若在 portfolio open holdings 內）*/}
         <HoldingBadge symbol={symbol} />
 
-        {/* 4 面向 verdict 卡 */}
+        {/* 4 面向 verdict 卡 — 籌碼可展開看投信動向細項 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <VerdictMini title="技術" answer={data.technical} />
           <VerdictMini title="消息" answer={data.news} />
-          <VerdictMini title="籌碼" answer={data.chip} />
+          <VerdictMini
+            title="籌碼"
+            answer={data.chip}
+            expandable
+            expanded={chipExpanded}
+            onToggle={toggleChip}
+          />
           <VerdictMini title="基本" answer={data.fundamental} />
         </div>
+        {chipExpanded && <TrustMomentumPanel symbol={symbol} date={date} />}
 
         {/* 最終決策 + 進出場 */}
         {data.decision && (() => {
@@ -203,9 +217,6 @@ export function DecisionPanel({ symbol, date }: Props) {
           );
         })()}
 
-        {/* 投信動向（reuse 已存在元件） */}
-        <TrustMomentumPanel symbol={symbol} date={date} />
-
         {/* 提示：未跑完整 4 phase 時 */}
         {!data.decision && (
           <div className="text-xs text-slate-400 border border-slate-700/40 rounded p-2 bg-slate-900/40">
@@ -220,21 +231,58 @@ export function DecisionPanel({ symbol, date }: Props) {
 
 // ── inline 子元件 ────────────────────────────────────────────────────────────
 
-function VerdictMini({ title, answer }: { title: string; answer: { verdict: Verdict; overview: string } | null }) {
+function VerdictMini({
+  title,
+  answer,
+  expandable,
+  expanded,
+  onToggle,
+}: {
+  title: string;
+  answer: { verdict: Verdict; overview: string } | null;
+  expandable?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+}) {
+  const interactiveProps = expandable
+    ? {
+        role: 'button' as const,
+        tabIndex: 0,
+        'aria-expanded': !!expanded,
+        onClick: onToggle,
+        onKeyDown: (e: KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle?.();
+          }
+        },
+      }
+    : {};
+  const interactiveCls = expandable ? 'cursor-pointer hover:brightness-110 transition' : '';
+  const caret = expandable ? (
+    <span className="text-[10px] opacity-70" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+  ) : null;
+
   if (!answer) {
     return (
-      <div className="border border-slate-700/50 rounded p-2 bg-slate-900/30">
-        <div className="text-xs text-slate-500 mb-1">{title}</div>
+      <div className={`border border-slate-700/50 rounded p-2 bg-slate-900/30 ${interactiveCls}`} {...interactiveProps}>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-xs text-slate-500">{title}</span>
+          {caret}
+        </div>
         <div className="text-xs text-slate-500">⏳ 未跑</div>
       </div>
     );
   }
   const cfg = VERDICT_CFG[answer.verdict];
   return (
-    <div className={`border rounded p-2 ${cfg.cls}`}>
+    <div className={`border rounded p-2 ${cfg.cls} ${interactiveCls}`} {...interactiveProps}>
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs opacity-80">{title}</span>
-        <span className="text-xs font-bold">{cfg.label}</span>
+        <span className="flex items-center gap-1">
+          <span className="text-xs font-bold">{cfg.label}</span>
+          {caret}
+        </span>
       </div>
       <div className="text-xs opacity-90 line-clamp-2">{answer.overview}</div>
     </div>
@@ -375,7 +423,17 @@ function KV({ k, v, cls }: { k: string; v: string; cls?: string }) {
 }
 
 // 規則式 4 verdict fallback — multi-agent 未跑時、從 pool/chip/fund API 推算
-function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string }) {
+function FallbackFacetVerdicts({
+  symbol,
+  date,
+  chipExpanded,
+  onToggleChip,
+}: {
+  symbol: string;
+  date?: string;
+  chipExpanded: boolean;
+  onToggleChip: () => void;
+}) {
   const [verdicts, setVerdicts] = useState<FacetVerdictsResult | null>(null);
   const [summary, setSummary] = useState<FacetSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -462,14 +520,41 @@ function FallbackFacetVerdicts({ symbol, date }: { symbol: string; date?: string
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {cards.map(c => {
           const cfg = VERDICT_CFG[verdicts[c.v]];
+          const isChip = c.v === 'chip';
+          const interactiveProps = isChip
+            ? {
+                role: 'button' as const,
+                tabIndex: 0,
+                'aria-expanded': chipExpanded,
+                onClick: onToggleChip,
+                onKeyDown: (e: KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onToggleChip();
+                  }
+                },
+              }
+            : {};
+          const interactiveCls = isChip ? 'cursor-pointer hover:brightness-110 transition' : '';
           return (
-            <div key={c.v} className={`border border-dashed rounded p-2 ${cfg.cls} opacity-90`}>
+            <div
+              key={c.v}
+              className={`border border-dashed rounded p-2 ${cfg.cls} opacity-90 ${interactiveCls}`}
+              {...interactiveProps}
+            >
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs opacity-80">
                   {c.title}
                   <span className="text-[9px] opacity-60 ml-1">{c.subtitle}</span>
                 </span>
-                <span className="text-xs font-bold">{cfg.label}</span>
+                <span className="flex items-center gap-1">
+                  <span className="text-xs font-bold">{cfg.label}</span>
+                  {isChip && (
+                    <span className="text-[10px] opacity-70" aria-hidden="true">
+                      {chipExpanded ? '▾' : '▸'}
+                    </span>
+                  )}
+                </span>
               </div>
               <div className="text-[11px] opacity-90 leading-snug">{c.hint}</div>
             </div>

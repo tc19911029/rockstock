@@ -131,8 +131,14 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Detect ──
+  // 收盤後不對該 market 的 symbol 跑 detector — 否則停滯 bar 會反覆觸發 ma5-breakdown
+  // 給持股推 ntfy。整個 cron 只要 TW || CN 任一在盤中就會繼續跑，但 detect 必須按 symbol
+  // 所屬 market 個別 gate。
   const allSignals: Signal[] = [];
   for (const item of pool) {
+    const isMarketLive = item.market === 'TW' ? twOpen : cnOpen;
+    if (!isMarketLive) continue;
+
     const bars1m = getBars(item.symbol);
     if (bars1m.length < REALTIME_RULES.MIN_BARS_FOR_DETECT) continue;
 

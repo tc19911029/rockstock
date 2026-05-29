@@ -169,7 +169,15 @@ export async function mergeVideosForDate(
         // 標題/時長/狀態可能 yt-dlp 補回更精確的數值，覆蓋之
         title: v.title,
         duration_sec: v.duration_sec,
-        published_at: v.published_at ?? prev.published_at,
+        // live_replay 的 published_at 在 replay 定型後會被 yt-dlp 改成「replay 完成時間」，
+        // 對 was_live 影片保留最早的 published_at（避免漂到隔天）。
+        published_at: (() => {
+          const isWasLive = prev.raw?.live_status === 'was_live' || v.raw?.live_status === 'was_live';
+          if (isWasLive && prev.published_at && v.published_at) {
+            return prev.published_at < v.published_at ? prev.published_at : v.published_at;
+          }
+          return v.published_at ?? prev.published_at;
+        })(),
         video_type: v.video_type,
         ...stickyShould,
         video_confidence_score: v.video_confidence_score,

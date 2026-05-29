@@ -86,6 +86,9 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     onDateChange?.(d);
   }, [onDateChange]);
   const [minSourceCount, setMinSourceCount] = useState(POOL_MIN_SOURCE_COUNT_DEFAULT);
+  // 排序維度：總分（預設）或漲跌幅（forward perf 各日 / 區間最高最低）
+  type SortKey = 'total' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
+  const [sortBy, setSortBy] = useState<SortKey>('total');
   // 權重 popover 開關 + 自訂權重（存 localStorage，只覆蓋 client display 排序）
   const [showWeights, setShowWeights] = useState(false);
   const [customWeights, setCustomWeights] = useState<typeof POOL_WEIGHTS>(() => {
@@ -185,7 +188,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   // server 已用 POOL_WEIGHTS default 排序，沒改 weights 時不會雙排，加 score 顯示即可
   const sortedCandidates = useMemo(() => {
     if (!data?.candidates) return [];
-    return data.candidates.map(c => {
+    const withScores = data.candidates.map(c => {
       const base = computeFacetScores(c);
       const customTotal = Math.round(
         base.technical * customWeights.technical +
@@ -194,8 +197,23 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
         base.fundamental * customWeights.fundamental,
       );
       return { ...c, scores: { ...base, total: customTotal } };
-    }).sort((a, b) => b.scores.total - a.scores.total);
-  }, [data?.candidates, customWeights]);
+    });
+    if (sortBy === 'total') {
+      return withScores.sort((a, b) => b.scores.total - a.scores.total);
+    }
+    // 漲跌幅排序：以 forwardMap 內對應欄位降序；缺值排最後，同值 fallback 用 total
+    return withScores.sort((a, b) => {
+      const va = forwardMap.get(a.symbol)?.[sortBy];
+      const vb = forwardMap.get(b.symbol)?.[sortBy];
+      const aNull = va == null;
+      const bNull = vb == null;
+      if (aNull && bNull) return b.scores.total - a.scores.total;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      if (vb !== va) return (vb as number) - (va as number);
+      return b.scores.total - a.scores.total;
+    });
+  }, [data?.candidates, customWeights, sortBy, forwardMap]);
 
   // ⚡ 今日強進場 top 5 — entry_state 不是 no_chase + sourceCount ≥ 2 + score ≥ 50 + 大盤 ≠ bear
   // 排序：can_enter 優先於 watch，內部按 score
@@ -293,6 +311,23 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
             <option value={2}>2 個面向</option>
             <option value={3}>3 個面向</option>
             <option value={4}>4 個面向</option>
+          </select>
+        </label>
+        <label className="text-muted-foreground flex items-center gap-1" title="切換排序維度">
+          排序
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px]"
+          >
+            <option value="total">總分</option>
+            <option value="openReturn">漲跌幅·隔日開</option>
+            <option value="d1Return">漲跌幅·1日</option>
+            <option value="d5Return">漲跌幅·5日</option>
+            <option value="d10Return">漲跌幅·10日</option>
+            <option value="d20Return">漲跌幅·20日</option>
+            <option value="maxGain">漲跌幅·最高</option>
+            <option value="maxLoss">漲跌幅·最低</option>
           </select>
         </label>
         <button

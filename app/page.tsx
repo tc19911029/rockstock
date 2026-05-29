@@ -31,15 +31,20 @@ import { useBlowoffMarkers } from '@/lib/hooks/useBlowoffMarkers';
 import { useLockedPattern } from '@/lib/hooks/useLockedPattern';
 import SixConditionsPanel from '@/components/SixConditionsPanel';
 import BuyMethodConditionsPanel from '@/components/BuyMethodConditionsPanel';
+import { SanSeConditionsPanel } from '@/components/cn-sanse/SanSeConditionsPanel';
+import { SanSeSignalsPanel } from '@/components/cn-sanse/SanSeSignalsPanel';
+import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
-import AnalysisChat from '@/components/AnalysisChat';
+import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
 import BottomPanel from '@/components/BottomPanel';
 import { ScanPanelVertical } from '@/features/scan';
 import { DataHealthBadge } from '@/features/scan/components/DataHealthBadge';
 import type { SelectedStock } from '@/features/scan';
+import type { SanSeChartPayload } from '@/components/cn-sanse/SanSeChart';
 import { YoutubeStocksPanel } from '@/components/youtube/YoutubeStocksPanel';
 import { CandidatesPoolPanel } from '@/components/CandidatesPoolPanel';
+import { FundamentalRevaluationPanel } from '@/components/FundamentalRevaluationPanel';
 import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { useBacktestStore } from '@/store/backtestStore';
@@ -60,7 +65,7 @@ const CandleChart = nextDynamic(() => import('@/components/CandleChart'), {
 
 const IndicatorCharts = nextDynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
 
-type SideTab = 'conditions' | 'signals' | 'chip' | 'chat';
+type SideTab = 'conditions' | 'signals' | 'chip' | 'fundamental';
 
 /** 根據 activeBuyMethod 切換渲染：A 走六條件，其他走買法條件面板。
  *  v11 G/H/I 自動轉 v12 J/L/K（用戶 0512 決議只留 v12） */
@@ -92,7 +97,7 @@ function HomePage() {
     initData, visibleCandles, currentSignals, chartMarkers,
     isLoadingStock, allCandles, currentIndex, dataGaps,
     nextCandle, prevCandle, isPlaying, startPlay, stopPlay, metrics,
-    loadStock, currentStock, currentInterval, sixConditions, longProhibitions,
+    loadStock, currentStock, currentInterval,
     signalStrengthMin, setSignalStrengthMin,
     resetReplay, targetDate,
   } = useReplayStore();
@@ -138,6 +143,7 @@ function HomePage() {
 
   // 大盤指數預設：TW→加權指數 ^TWII，CN→上證指數 000001.SS
   const market = useBacktestStore(s => s.market);
+  const scanDate = useBacktestStore(s => s.scanDate);
   const getMarketIndex = useCallback(
     (m: 'TW' | 'CN'): { symbol: string; name: string } => m === 'TW'
       ? { symbol: '^TWII', name: '加權指數' }
@@ -156,8 +162,15 @@ function HomePage() {
     const date = searchParams.get('date');
     const urlTab = searchParams.get('tab');
     const tfParam = searchParams.get('tf');
-    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'pool' || urlTab === 'agent') {
+    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'fundamental' || urlTab === 'pool' || urlTab === 'agent') {
       setRightTab(urlTab);
+      // 套用後立刻把 ?tab= 從 URL 拿掉 — inbound link 進來會切 tab,但 reload 不會再套用,維持 default scan
+      // 保留其他 query param(?load / ?date / ?tf)
+      const sp = new URLSearchParams(window.location.search);
+      sp.delete('tab');
+      const qs = sp.toString();
+      const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+      window.history.replaceState(null, '', newUrl);
     }
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       setTabDate(date);
@@ -169,11 +182,13 @@ function HomePage() {
       const key = `${sym}|${tf}|${date ?? ''}`;
       if (lastLoadedRef.current === key) return;
       lastLoadedRef.current = key;
-      loadStock(sym, tf, undefined, date ?? undefined).catch((e: Error) => {
-        const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
-        setLoadError(msg);
-        toast.error(msg);
-      });
+      loadStock(sym, tf, undefined, date ?? undefined)
+        .then(() => setLoadError(null)) // 成功載入 → 清掉先前冷啟動 race 的失敗 banner
+        .catch((e: Error) => {
+          const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
+          setLoadError(msg);
+          toast.error(msg);
+        });
     } else if (lastLoadedRef.current === '') {
       // 首次 mount 沒帶 ?load → 載大盤指數（覆蓋 initData 的 DEMO 範例）
       lastLoadedRef.current = `_market_${market}`;
@@ -200,12 +215,14 @@ function HomePage() {
   );
   // 副圖（成交量/KD/MACD/籌碼）預設展開：成交量是書本核心訊息（量1.5×/過大量黑K），不該被視窗寬度藏起來
   const [showIndicators, setShowIndicators] = useState(true);
+  // 三色資金圖層（陸股）：雙B戰法疊主圖（像 BB）；主力狀態/捕撈季節是副圖（像 MACD/KD）
+  const [showShuangB, setShowShuangB] = useState(false);
   // P1-5: keyboard shortcut help overlay
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel — v12 預設展開讓用戶一進來就看到新功能（14 字母 tabs/Step 0 banner/LockWatch panel/警示徽章）
   const [scannerOpen, setScannerOpen] = useState(true);
   // Stage 7-10：右側 panel tab — 策略掃描 / YouTube 提及 / 候選池 / Multi-Agent
-  type RightTab = 'scan' | 'youtube' | 'pool' | 'agent';
+  type RightTab = 'scan' | 'youtube' | 'fundamental' | 'pool' | 'agent';
   const [rightTab, setRightTab] = useState<RightTab>('scan');
   // Stage 16：3 tab 共用 date state（YouTube / Pool / Multi-Agent 都看同一天）
   // 預設「最近工作日」，因為 today 的資料通常還沒跑完
@@ -271,7 +288,7 @@ function HomePage() {
     else if (e.key === '1') { e.preventDefault(); setSideTab('conditions'); }
     else if (e.key === '2') { e.preventDefault(); setSideTab('signals'); }
     else if (e.key === '3') { e.preventDefault(); setSideTab('chip'); }
-    else if (e.key === '4') { e.preventDefault(); setSideTab('chat'); }
+    else if (e.key === '4') { e.preventDefault(); setSideTab('fundamental'); }
     else if (e.key === '5') { e.preventDefault(); setScannerOpen(true); }
     // P2-3: indicator toggle
     else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); setShowIndicators(v => !v); }
@@ -315,6 +332,7 @@ function HomePage() {
     foreign: false, trust: false, dealer: false, retail: false,
     h400: false, h1000: false,
     cnMain: false, cnRetail: false,
+    mainForce: false, season: false, // 三色資金副圖（陸股）：主力狀態F / 捕撈季節
   });
   // ── 籌碼面資料（TW 法人/大戶 + CN 主力資金） ────────────────────────────────
   // 優化：用 ticker + 「是否需要籌碼」字串 key 當依賴；同一 key 不會 refetch
@@ -324,6 +342,11 @@ function HomePage() {
   const ticker = currentStock?.ticker ?? '';
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
   const isCnTicker = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
+  // 中間「條件/訊號」面板跟著掃描面板選的策略換：
+  //   三色 level（CN 自創策略）被選中 → 顯示三色面板；否則 → 書本買法面板（含陸股）。
+  // sanseLevel 為單一事實來源（store），由掃描面板「三色(嚴格/中等/寬鬆)」按鈕設定、選任何書本買法時自動清空。
+  const sanseLevel = useBacktestStore(s => s.sanseLevel);
+  const showSanseView = isCnTicker && sanseLevel != null;
   const wantChips = (isTwTicker && anyTwChipOn) || (isCnTicker && anyCnChipOn);
   // 把 fetch trigger 編成單一 string key，dep 比較穩定
   const chipFetchKey = wantChips ? ticker : '';
@@ -358,10 +381,39 @@ function HomePage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 切股時清舊 chips
     if (!ticker) setChips(null);
   }, [ticker]);
+
+  // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
+  // 陸股一律抓（複用 /cn-sanse 同一支 chart API）：圖層由各 toggle 控制，但條件報告給中間「條件」tab 用，故 CN 永遠抓。
+  // 走圖步進：日K 時帶 asOf=當前可見最後一根日期 → 標記/條件/訊號跟著步進的位置重算（練習器核心）。
+  const sanseAsOf = isCnTicker && currentInterval === '1d' && visibleCandles.length
+    ? visibleCandles[visibleCandles.length - 1].date
+    : '';
+  const sanseFetchKey = isCnTicker ? `${ticker}@${sanseAsOf}` : '';
+  const [sanse, setSanse] = useState<SanSeChartPayload | null>(null);
+  const [sanseConditions, setSanseConditions] = useState<ConditionReport | null>(null);
+  useEffect(() => {
+    if (!isCnTicker || !ticker) { setSanse(null); setSanseConditions(null); return; }
+    const ctrl = new AbortController();
+    const url = `/api/cn-sanse/chart/${encodeURIComponent(ticker)}${sanseAsOf ? `?asOf=${sanseAsOf}` : ''}`;
+    fetch(url, { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(j => {
+        if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload);
+        if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
+      })
+      .catch(err => { if (err.name !== 'AbortError') console.warn('[sanse] load failed:', err); });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sanseFetchKey]);
+
   const handleScanSelectStock = useCallback((stock: SelectedStock) => {
-    const scanDate = useBacktestStore.getState().scanDate;
+    // 優先用該股自帶的掃描日（三色資金帶 cn-sanse 固化日），否則回退書本掃描日 → K 線停在掃描日而非最新
+    const fallbackDate = useBacktestStore.getState().scanDate;
+    const date = stock.date ?? fallbackDate ?? undefined;
     setLoadError(null);
-    loadStock(stock.symbol, '1d', '2y', scanDate || undefined).catch((e: Error) => {
+    // 點三色資金結果 → 自動打開雙B疊加（主圖直接看到雙B線與買賣點）；走圖仍是原本主圖
+    if (stock.chartTab === 'shuangb') setShowShuangB(true);
+    loadStock(stock.symbol, '1d', '2y', date).catch((e: Error) => {
       toast.error(`載入 ${stock.name} 失敗：${e.message || '請稍後再試'}`);
     });
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -386,18 +438,19 @@ function HomePage() {
   }, [currentStock, currentInterval, targetDate, loadStock]);
 
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
-  // 預設 0.65，mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
-  const [chartSplit, setChartSplit] = useState(0.65);
+  // 預設 0.55（主圖 55% / 副圖 45%，副圖整區較高）；mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
+  // key 升 v2：舊的 'chartSplit'（多為 0.65）忽略，讓新預設生效；之後拖曳會寫進 v2
+  const [chartSplit, setChartSplit] = useState(0.55);
   useEffect(() => {
-    const saved = localStorage.getItem('chartSplit');
-    // 如果舊值太小（< 0.5），清掉用新預設
+    const saved = localStorage.getItem('chartSplit-v2');
+    // 接受拖曳範圍內的值（0.2~0.85）；太極端才回新預設
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (saved && parseFloat(saved) >= 0.5) setChartSplit(parseFloat(saved));
-    else localStorage.removeItem('chartSplit');
+    if (saved && parseFloat(saved) >= 0.2 && parseFloat(saved) <= 0.85) setChartSplit(parseFloat(saved));
+    else localStorage.removeItem('chartSplit-v2');
   }, []);
   // chartSplit 持久化：mouseup 才寫，避免每次拖動 100+ 次寫盤
   const handleChartSplitCommit = useCallback((split: number) => {
-    try { localStorage.setItem('chartSplit', String(split)); } catch {}
+    try { localStorage.setItem('chartSplit-v2', String(split)); } catch {}
   }, []);
 
   // P3-8: Sound alert when a new signal appears during replay
@@ -430,9 +483,6 @@ function HomePage() {
     ? allCandles[allCandles.findIndex(c => c.date === hoverCandle.date) - 1]
     : allCandles[currentIndex - 1];
   const stopLossPct = useSettingsStore(s => s.stopLossPercent);
-  const condScore = sixConditions?.totalScore ?? 0;
-  const condAlert = condScore >= 5;
-  const prohibAlert = longProhibitions?.prohibited === true;
 
   // Stop-loss line
   const currentCandle = allCandles[currentIndex];
@@ -444,11 +494,11 @@ function HomePage() {
 
   const currentDate = allCandles[currentIndex]?.date;
 
-  const SIDE_TABS: Array<{ key: SideTab; label: string; alert?: boolean }> = [
-    { key: 'conditions', label: '條件', alert: condAlert },
-    { key: 'signals',    label: '訊號', alert: prohibAlert },
-    { key: 'chip',       label: '籌碼' },
-    { key: 'chat',       label: '問老師' },
+  const SIDE_TABS: Array<{ key: SideTab; label: string }> = [
+    { key: 'conditions',  label: '條件' },
+    { key: 'signals',     label: '訊號' },
+    { key: 'chip',        label: '籌碼' },
+    { key: 'fundamental', label: '基本面' },
   ];
 
   const sidebarTabs = (
@@ -457,25 +507,18 @@ function HomePage() {
         {SIDE_TABS.map(t => (
           <button key={t.key} role="tab" aria-selected={sideTab === t.key} aria-controls={`panel-${t.key}`}
             onClick={() => setSideTab(t.key)}
-            className={`flex-1 py-2 font-medium transition-all relative ${
+            className={`flex-1 py-2 font-medium transition-all ${
               sideTab === t.key ? 'bg-blue-600 text-foreground shadow-[0_0_8px_rgba(37,99,235,0.3)]' : 'bg-secondary/60 text-muted-foreground hover:bg-muted hover:text-foreground/80'
-            } ${t.alert && sideTab !== t.key ? 'bg-green-900/40 text-green-300' : ''}`}
+            }`}
           >
             {t.label}
-            {t.alert && sideTab !== t.key && (
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            )}
           </button>
         ))}
       </div>
     </div>
   );
 
-  const sidebarContent = sideTab === 'chat' ? (
-    <div id="panel-chat" role="tabpanel" className="flex-1 min-h-0">
-      <AnalysisChat sidebar />
-    </div>
-  ) : (
+  const sidebarContent = (
     <div
       id={`panel-${sideTab}`}
       role="tabpanel"
@@ -483,12 +526,12 @@ function HomePage() {
     >
       {sideTab === 'conditions' && (
         <SectionBoundary section="買法條件">
-          <ConditionsPanelSwitch />
+          {showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch />}
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
         <SectionBoundary section="訊號分析">
-          <SignalSummaryCard />
+          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} /> : <SignalSummaryCard />}
         </SectionBoundary>
       )}
       {sideTab === 'chip' && (
@@ -505,18 +548,44 @@ function HomePage() {
           />
         )
       )}
+      {sideTab === 'fundamental' && (
+        currentStock ? (
+          <SectionBoundary section="基本面分析">
+            <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />
+          </SectionBoundary>
+        ) : (
+          <EmptyState
+            variant="compact"
+            icon="📊"
+            title="尚未載入股票"
+            description="請先選擇一檔股票以查看基本面分析"
+          />
+        )
+      )}
     </div>
   );
 
   // 是否顯示深度決策面板：有選股且非大盤指數
   const showDecisionPanel = !!currentStock && !/^\^|^000001\.SS$/.test(currentStock.ticker);
 
+  // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股 + 抓到資料才畫
+  const shuangBOverlay = showShuangB && isCnTicker && sanse ? {
+    zhineng: sanse.zhineng, zb4: sanse.zb4, zb5: sanse.zb5, duokong: sanse.duokong,
+    markers: sanse.mainMarkers,
+  } : null;
+  // 副圖（主力狀態F / 捕撈季節）資料 — 對齊主圖 candle 由 IndicatorCharts 自行 map
+  const sanseZhuli = isCnTicker && indicators.mainForce ? sanse?.zhuli ?? null : null;
+  const sanseXys = isCnTicker && indicators.season && sanse ? {
+    xys0: sanse.xys0, xys1: sanse.xys1, xys2: sanse.xys2,
+    subMarkers: sanse.subMarkers, xysTiers: sanse.xysTiers ?? null,
+  } : null;
+
   return (
     // fullViewport=false 永遠允許整頁 vertical scroll（避免 ^TWII 時整頁鎖死無法捲動）
-    // chart 區用 md:h-[calc(100vh-90px)] 限制 desktop 高度，下方 DecisionPanel 仍可 scroll 到
+    // chart 區填滿到視窗底（header 49px + py-2 8px = 57px 上方位移 → 扣 58px 讓排底貼齊視窗底、今日簡報退到摺疊線下）
     <PageShell fullViewport={false} headerSlot={<StockSelector />}>
       <div className="flex-1 flex flex-col px-3 py-2 gap-3">
-        <div className="flex flex-col md:flex-row gap-2 md:h-[calc(100vh-90px)] md:overflow-hidden">
+        <div className="flex flex-col md:flex-row gap-2 md:h-[calc(100vh-58px)] md:overflow-hidden">
 
         {/* Left: Chart */}
         <div className="w-full md:flex-1 md:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
@@ -577,6 +646,8 @@ function HomePage() {
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                showShuangB={showShuangB}
+                onShuangBToggle={() => setShowShuangB(v => !v)}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -611,6 +682,8 @@ function HomePage() {
                 canPrevBuyPoint={canPrevBuyPoint && !isPlaying}
                 canNextBuyPoint={canNextBuyPoint && !isPlaying}
                 ticker={currentStock?.ticker}
+                market={market}
+                scanDate={scanDate ?? null}
               />
             )}
             chartProps={{
@@ -637,6 +710,7 @@ function HomePage() {
               showPattern,
               highlightDate: targetDate ?? undefined,
               lockedPattern,
+              shuangB: shuangBOverlay,
             }}
             indicatorProps={{
               candles: visibleCandles,
@@ -645,6 +719,8 @@ function HomePage() {
               ticker: currentStock?.ticker,
               chips,
               chipsLoading,
+              sanseZhuli,
+              sanseXys,
             }}
             showIndicators={showIndicators}
             onToggleIndicators={() => setShowIndicators(v => !v)}
@@ -682,7 +758,7 @@ function HomePage() {
           </div>
 
           {/* 自選股 / 持倉 摺疊面板 */}
-          <BottomPanel />
+          <BottomPanel onSelectHolding={() => setSideTab('signals')} />
 
           {/* 數據健康度 L1-L4 */}
           <div className="shrink-0 px-2 py-1.5">
@@ -735,6 +811,22 @@ function HomePage() {
                 <button
                   type="button"
                   role="tab"
+                  aria-selected={rightTab === 'fundamental'}
+                  onClick={() => setRightTab('fundamental')}
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'fundamental'
+                      ? 'text-foreground border-b-2 border-orange-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="基本面補漲 Top 20"
+                >
+                  <span aria-hidden="true">📊</span>
+                  <span className="hidden md:inline">基本面補漲</span>
+                  <span className="md:hidden">補漲</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
                   aria-selected={rightTab === 'pool'}
                   onClick={() => setRightTab('pool')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
@@ -783,6 +875,14 @@ function HomePage() {
                     onDateChange={setTabDate}
                     onSelectStock={handleYoutubeSelectStock}
                     // 統一以「現在看的股票」為準，4 個 tab 之間 highlight 同步
+                    selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
+                  />
+                )}
+                {rightTab === 'fundamental' && (
+                  <FundamentalRevaluationPanel
+                    date={tabDate}
+                    onDateChange={setTabDate}
+                    onSelectStock={handleYoutubeSelectStock}
                     selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
                 )}
@@ -850,7 +950,7 @@ function HomePage() {
                 ['1', '切換至「條件」面板'],
                 ['2', '切換至「訊號」面板'],
                 ['3', '切換至「籌碼」面板'],
-                ['4', '切換至「問老師」面板'],
+                ['4', '切換至「基本面」面板'],
                 ['5', '展開 / 收起掃描面板'],
                 ['B', '買入（全倉）'],
                 ['S', '賣出（半倉）'],
@@ -897,6 +997,8 @@ function HomePage() {
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                showShuangB={showShuangB}
+                onShuangBToggle={() => setShowShuangB(v => !v)}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -931,6 +1033,8 @@ function HomePage() {
                 canPrevBuyPoint={canPrevBuyPoint && !isPlaying}
                 canNextBuyPoint={canNextBuyPoint && !isPlaying}
                 ticker={currentStock?.ticker}
+                market={market}
+                scanDate={scanDate ?? null}
               />
             </div>
           )}
@@ -966,13 +1070,14 @@ function HomePage() {
                       showPattern={showPattern}
                       highlightDate={targetDate ?? undefined}
                       lockedPattern={lockedPattern}
+                      shuangB={shuangBOverlay}
                     />
                   </ErrorBoundary>
                 </div>
                 {showIndicators && (
                   <div className="flex-[2] min-h-0 border-t border-border">
                     <ErrorBoundary>
-                      <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} chips={chips} chipsLoading={chipsLoading} />
+                      <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} chips={chips} chipsLoading={chipsLoading} sanseZhuli={sanseZhuli} sanseXys={sanseXys} />
                     </ErrorBoundary>
                   </div>
                 )}
