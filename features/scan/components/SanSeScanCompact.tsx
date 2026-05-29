@@ -14,17 +14,42 @@ import { ForwardPerfRow } from './ForwardPerfRow';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
+import { STAGE_LABEL, STAGE_ICON, type ConditionReport } from '@/lib/cn-sanse/conditions';
+import { isCNMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
 type Level = 'strict' | 'medium' | 'loose';
+
+/** 陸股盤中即時掃描活躍時段 = 開盤(9:15–15:00) 或盤後窗(15:01–15:30)。與 /cn-sanse 整頁同一判斷。 */
+function isCNIntradayActive(): boolean {
+  return isCNMarketOpen() || isPostCloseWindow('CN');
+}
 
 interface Hit {
   symbol: string; name: string; industry: string; price: number; changePct: number;
   shortAttack: number; midStrength: number; midControl: number; kongPan: number;
   shortOversold?: number; // 短線超跌（舊固化資料可能沒有此欄 → undefined）
 }
+interface RecordRow { symbol: string; report: ConditionReport }
 interface ScanResp {
   ok: boolean; lastDate: string; evaluated: number; staleSkipped?: number;
-  counts: Record<Level, number>; results: Record<Level, Hit[]>; cached?: boolean; error?: string;
+  counts: Record<Level, number>; results: Record<Level, Hit[]>;
+  records?: RecordRow[]; sessionType?: 'post_close' | 'intraday'; cached?: boolean; error?: string;
+}
+
+/** 三組條件 chip（主力階段 / 雙B買 / 捕撈買 + 共振數 + 賣出警示）*/
+function CondChips({ rep }: { rep?: ConditionReport }) {
+  if (!rep) return null;
+  const bBuy = rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
+  const cBuy = rep.catch.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
+  return (
+    <div className="flex flex-wrap items-center gap-1 mb-1 text-[9px]">
+      {rep.level && <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground border border-border">共振 {rep.groupBuyCount}/3</span>}
+      {rep.doubleB.buyHit && <span className="px-1 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">雙B {bBuy.join('/')}</span>}
+      {rep.mainforce.buyHit && rep.mainStage && <span className="px-1 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[rep.mainStage]}{STAGE_ICON[rep.mainStage]}</span>}
+      {rep.catch.buyHit && <span className="px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">捕撈 {cBuy.join('/')}</span>}
+      {rep.sellWarnings.length > 0 && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">⚠️{rep.sellWarnings.join('、')}</span>}
+    </div>
+  );
 }
 interface DateEntry { date: string; counts: Record<Level, number>; scannedAt: string }
 
@@ -70,6 +95,7 @@ interface Props {
 export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: controlledLevel }: Props) {
   const [data, setData] = useState<ScanResp | null>(null);
   const [dates, setDates] = useState<DateEntry[]>([]);
+  const [session, setSession] = useState<'post_close' | 'intraday'>('post_close');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [internalLevel, setInternalLevel] = useState<Level>('medium');
@@ -80,17 +106,27 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   const [sortKey, setSortKey] = useState<SortKey>('shortAttack');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const loadDate = useCallback(async (date?: string) => {
+  // session='intraday' → 讀盤中即時快照（latest live，忽略 date）；否則讀盤後封存。
+  const loadDate = useCallback(async (date?: string, sessionArg?: 'post_close' | 'intraday') => {
+    const sess = sessionArg ?? session;
     setLoading(true); setErr(null);
     try {
-      const r = await fetch(`/api/cn-sanse/scan${date ? `?date=${date}` : ''}`);
+      const url = sess === 'intraday'
+        ? '/api/cn-sanse/scan?session=intraday'
+        : `/api/cn-sanse/scan${date ? `?date=${date}` : ''}`;
+      const r = await fetch(url);
       const j: ScanResp = await r.json();
-      if (!j.ok) throw new Error(j.error || '讀取失敗');
+      if (!j.ok) throw new Error(j.error || (sess === 'intraday' ? '尚無盤中即時快照' : '讀取失敗'));
       setData(j);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '讀取失敗');
     } finally { setLoading(false); }
-  }, []);
+  }, [session]);
+
+  const switchSession = useCallback((s: 'post_close' | 'intraday') => {
+    setSession(s);
+    loadDate(undefined, s);
+  }, [loadDate]);
 
   const loadDates = useCallback(async () => {
     try {
@@ -113,7 +149,19 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     } finally { setLoading(false); }
   }, [loadDates]);
 
-  useEffect(() => { loadDates(); loadDate(); }, [loadDates, loadDate]);
+  // 進場：盤中活躍時段預設即時，否則盤後（在 effect 內判斷避免 SSR/CSR hydration 不一致）
+  useEffect(() => {
+    loadDates();
+    const initial = isCNIntradayActive() ? 'intraday' : 'post_close';
+    setSession(initial);
+    loadDate(undefined, initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    if (session === 'intraday') loadDate(undefined, 'intraday'); // 重抓即時快照
+    else rescan();                                               // 盤後即時重掃並固化
+  }, [session, loadDate, rescan]);
 
   // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）
   useEffect(() => {
@@ -148,6 +196,12 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     loose: new Set((data?.results.loose ?? []).map((h) => h.symbol)),
   }), [data]);
 
+  // symbol → 三色條件報告（雙B/主力/捕撈）
+  const reportMap = useMemo(
+    () => new Map((data?.records ?? []).map((r) => [r.symbol, r.report])),
+    [data],
+  );
+
   const hits = useMemo(() => {
     const rows = [...(data?.results[level] ?? [])];
     const dir = sortDir === 'desc' ? 1 : -1;
@@ -172,21 +226,38 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   return (
     <div className="flex flex-col min-h-0 h-full text-foreground text-xs">
       {/* 標題列 + 重掃 */}
-      <div className="shrink-0 flex items-center justify-between px-2.5 py-1.5 border-b border-border bg-card/40">
+      <div className="shrink-0 flex items-center justify-between gap-1 px-2.5 py-1.5 border-b border-border bg-card/40">
         <div className="flex items-baseline gap-1.5 min-w-0">
-          <span className="font-semibold text-fuchsia-300">🎨 三色資金</span>
+          <span className="font-semibold text-fuchsia-300 shrink-0">🎨 三色資金</span>
           <span className="text-[10px] text-muted-foreground truncate">
-            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${data.cached ? '' : ' · 即時'}` : '陸股 A 股自創策略'}
+            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${session === 'intraday' ? ' · 盤中跳動' : ''}` : '陸股 A 股自創策略'}
           </span>
         </div>
-        <button
-          onClick={rescan}
-          disabled={loading}
-          title="即時重新掃描並固化當日"
-          className="shrink-0 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-        >
-          <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          {/* 盤後 / 盤中 切換 */}
+          <div className="flex rounded border border-border overflow-hidden text-[9px]">
+            <button
+              onClick={() => switchSession('post_close')}
+              disabled={loading}
+              className={cn('px-1.5 py-0.5', session === 'post_close' ? 'bg-sky-600 text-sky-50' : 'text-muted-foreground hover:bg-secondary')}
+              title="盤後封存（收盤定調，訊號穩定）"
+            >盤後</button>
+            <button
+              onClick={() => switchSession('intraday')}
+              disabled={loading}
+              className={cn('px-1.5 py-0.5', session === 'intraday' ? 'bg-rose-600 text-rose-50' : 'text-muted-foreground hover:bg-secondary')}
+              title="盤中即時：當下報價合成未收日K 重算；量能半根、訊號會跳動，收盤前才定調"
+            >盤中</button>
+          </div>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            title={session === 'intraday' ? '重抓盤中即時快照' : '即時重新掃描並固化當日'}
+            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+          >
+            <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+          </button>
+        </div>
       </div>
 
       {/* 日期 chip 列 */}
@@ -198,7 +269,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               return (
                 <button
                   key={d.date}
-                  onClick={() => { if (!loading) loadDate(d.date); }}
+                  onClick={() => { if (!loading) { setSession('post_close'); loadDate(d.date, 'post_close'); } }}
                   disabled={loading}
                   className={cn(
                     'text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate',
@@ -297,6 +368,9 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 <span className="text-amber-300" title="中線控盤">中控 {fmt(h.midControl)}</span>
                 <span className="text-blue-400" title="短線超跌">超短跌 {fmt(h.shortOversold)}</span>
               </div>
+
+              {/* Row 2.5: 三色條件（主力階段 / 雙B買 / 捕撈買 + 賣出警示）*/}
+              <CondChips rep={reportMap.get(h.symbol)} />
 
               {/* Row 3: 命中策略徽章 + 動作按鈕 */}
               <div className="flex items-center gap-1 mb-1">

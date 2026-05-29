@@ -12,6 +12,9 @@ import { ForwardPerfRow } from '@/features/scan/components/ForwardPerfRow';
 import type { LatestSignals } from '@/lib/cn-sanse/indicators';
 import type { SanSeQuote } from '@/lib/cn-sanse/cnQuote';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
+import { STAGE_LABEL, STAGE_ICON, type ConditionReport, type ResLevel } from '@/lib/cn-sanse/conditions';
+import { rerankRecords, RANK_HORIZONS, type HKey, type BucketStat } from '@/lib/cn-sanse/rankingScore';
+import { isCNMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
 type Level = 'strict' | 'medium' | 'loose';
 
@@ -19,22 +22,16 @@ interface Hit {
   symbol: string; name: string; industry: string; price: number; changePct: number;
   shortAttack: number; midStrength: number; midControl: number; kongPan: number;
 }
-type ResonanceLevel = 'strong' | 'medium' | 'weak' | 'observe';
 interface RecordRow {
   symbol: string; name: string; industry: string; price: number; changePct: number;
-  strategies: Level[];
-  doubleBBuy: boolean; doubleBBuyW3: boolean; doubleBBuyW5: boolean; doubleBSell: boolean;
-  catchBuy: boolean; catchBuyW3: boolean; catchBuyW5: boolean; catchSell: boolean;
-  shortAttack: number; midStrength: number; midControl: number; kongPan: number;
-  allThreeUp: boolean; zhuliWeak: boolean;
-  resonanceCount: number; resonanceLevel: ResonanceLevel; indicatorBuys: number;
-  conflict: boolean; conflictReason: string; note: string;
+  report: ConditionReport;
 }
 interface ResonanceCounts { strong: number; medium: number; weak: number; observe: number; conflict: number }
 interface ScanResp {
   ok: boolean; lastDate: string; evaluated: number; staleSkipped?: number;
   counts: Record<Level, number>; results: Record<Level, Hit[]>;
   records?: RecordRow[]; resonanceCounts?: ResonanceCounts;
+  sessionType?: 'post_close' | 'intraday'; archivedDate?: string;
   cached?: boolean; error?: string;
 }
 interface DateEntry { date: string; counts: Record<Level, number>; scannedAt: string }
@@ -45,42 +42,34 @@ interface DetailResp {
   chart: SanSeChartPayload & { latest: LatestSignals }; error?: string;
 }
 
-const LEVELS: { key: Level; label: string; desc: string }[] = [
-  { key: 'strict', label: '嚴格', desc: '三色資金共振 — 短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位' },
-  { key: 'medium', label: '中等', desc: '更新版 — 短攻 / 中強 / 中控 三個分數都 > 0' },
-  { key: 'loose', label: '寬鬆', desc: '游資資金翻正 — 短線動能今天剛由負轉正' },
-];
-
 type FilterKey = 'strong' | 'doubleB' | 'catch' | 'both' | 'hideConflict';
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'strong', label: '只看強共振' },
-  { key: 'doubleB', label: '策略+雙B' },
-  { key: 'catch', label: '策略+捕撈' },
+  { key: 'doubleB', label: '主力+雙B' },
+  { key: 'catch', label: '主力+捕撈' },
   { key: 'both', label: '雙指標同時' },
   { key: 'hideConflict', label: '隱藏衝突' },
 ];
 function passFilters(r: RecordRow, f: Set<FilterKey>): boolean {
-  if (f.has('strong') && r.resonanceLevel !== 'strong') return false;
-  if (f.has('doubleB') && !r.doubleBBuy) return false;
-  if (f.has('catch') && !r.catchBuy) return false;
-  if (f.has('both') && !(r.doubleBBuy && r.catchBuy)) return false;
-  if (f.has('hideConflict') && r.conflict) return false;
+  const rep = r.report;
+  if (f.has('strong') && rep.level !== 'strong') return false;
+  if (f.has('doubleB') && !(rep.mainforce.buyHit && rep.doubleB.buyHit)) return false;
+  if (f.has('catch') && !(rep.mainforce.buyHit && rep.catch.buyHit)) return false;
+  if (f.has('both') && !(rep.doubleB.buyHit && rep.catch.buyHit)) return false;
+  if (f.has('hideConflict') && rep.conflict) return false;
   return true;
 }
-const RES_BADGE: Record<ResonanceLevel, { label: string; cls: string }> = {
+const RES_BADGE: Record<ResLevel, { label: string; cls: string }> = {
   strong: { label: '強共振', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
   medium: { label: '中共振', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
   weak: { label: '弱共振', cls: 'bg-secondary text-muted-foreground border-border' },
-  observe: { label: '觀察', cls: 'bg-sky-500/15 text-sky-300 border-sky-500/40' },
 };
-const STRAT_LABEL: Record<Level, string> = { strict: '嚴格', medium: '中等', loose: '寬鬆' };
 
 const BT_COLS = [
   ['openReturn', '隔日開'], ['d1Return', '1日'], ['d3Return', '3日'], ['d5Return', '5日'],
   ['d10Return', '10日'], ['d20Return', '20日'], ['maxGain', '最高'], ['maxLoss', '最低'],
 ] as const;
-interface BtBucket { key: string; label: string; group: string; n: number; avg: Record<string, number | null>; win: Record<string, number | null> }
-interface BacktestResp { ok: boolean; buckets: BtBucket[]; days: number; samples: number; computedAt: string; cached?: boolean; error?: string }
+interface BacktestResp { ok: boolean; buckets: BucketStat[]; days: number; samples: number; computedAt: string; cached?: boolean; source?: string; error?: string }
 const btColor = (v: number | null) => (v == null ? 'text-muted-foreground/40' : v > 0 ? 'text-rose-400' : v < 0 ? 'text-emerald-400' : 'text-muted-foreground');
 const btFmt = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
 
@@ -91,6 +80,12 @@ const fmtYi = (v: number | undefined) => {
   const yi = v / 1e8;
   return `${yi >= 1000 ? yi.toFixed(0) : yi.toFixed(1)}億`;
 };
+
+/** 陸股盤中即時掃描「活躍時段」= 開盤(9:15–15:00) 或盤後窗(15:01–15:30)。
+ *  直接用後端 marketHours 單一事實來源（含假日判斷），與 cron gate 完全對齊。 */
+function isCNIntradayActive(): boolean {
+  return isCNMarketOpen() || isPostCloseWindow('CN');
+}
 
 /** 代號正規化：6→.SS；其餘→.SZ */
 function toSymbol(input: string): string | null {
@@ -104,9 +99,9 @@ function toSymbol(input: string): string | null {
 export default function CnSanSePage() {
   const [data, setData] = useState<ScanResp | null>(null);
   const [dates, setDates] = useState<DateEntry[]>([]);
+  const [session, setSession] = useState<'post_close' | 'intraday'>('post_close');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [level, setLevel] = useState<Level>('medium');
   const [sym, setSym] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailResp | null>(null);
   const [chartLoading, setChartLoading] = useState(false);
@@ -120,19 +115,33 @@ export default function CnSanSePage() {
   const [showBacktest, setShowBacktest] = useState(false);
   const [bt, setBt] = useState<BacktestResp | null>(null);
   const [btLoading, setBtLoading] = useState(false);
+  // 預設「期望漲幅·3日」：walk-forward 驗證顯示第一檔短線報酬/勝率優於舊「共振強度」排序
+  const [rankMode, setRankMode] = useState<'resonance' | 'gain'>('gain');
+  const [rankHz, setRankHz] = useState<HKey>('d3Return');
 
-  // 載入某日固化結果（無 date → 最新一日）
-  const loadDate = useCallback(async (date?: string) => {
+  // 載入掃描結果。session='intraday' → 讀盤中即時快照（latest live，忽略 date）；
+  // 否則讀盤後封存（無 date → 最新一日）。sessionArg 顯式傳入以免吃到 state 非同步延遲。
+  const loadDate = useCallback(async (date?: string, sessionArg?: 'post_close' | 'intraday') => {
+    const sess = sessionArg ?? session;
     setLoading(true); setErr(null);
     try {
-      const r = await fetch(`/api/cn-sanse/scan${date ? `?date=${date}` : ''}`);
+      const url = sess === 'intraday'
+        ? '/api/cn-sanse/scan?session=intraday'
+        : `/api/cn-sanse/scan${date ? `?date=${date}` : ''}`;
+      const r = await fetch(url);
       const j: ScanResp = await r.json();
-      if (!j.ok) throw new Error(j.error || '讀取失敗');
+      if (!j.ok) throw new Error(j.error || (sess === 'intraday' ? '尚無盤中即時快照（等盤中掃描跑一輪）' : '讀取失敗'));
       setData(j);
     } catch (e) {
       setErr(e instanceof Error ? e.message : '讀取失敗');
     } finally { setLoading(false); }
-  }, []);
+  }, [session]);
+
+  // 切換盤後 / 盤中
+  const switchSession = useCallback((s: 'post_close' | 'intraday') => {
+    setSession(s);
+    loadDate(undefined, s);
+  }, [loadDate]);
 
   const loadDates = useCallback(async () => {
     try {
@@ -156,7 +165,21 @@ export default function CnSanSePage() {
     } finally { setLoading(false); }
   }, [loadDates]);
 
-  useEffect(() => { loadDates(); loadDate(); }, [loadDates, loadDate]);
+  // 進頁：盤中時段預設讀即時快照，否則讀盤後封存（在 effect 內判斷以避免 SSR/CSR hydration 不一致）
+  useEffect(() => {
+    loadDates();
+    const initial = isCNIntradayActive() ? 'intraday' : 'post_close';
+    setSession(initial);
+    loadDate(undefined, initial);
+    // 只在掛載時跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 重新整理：盤中模式重抓即時快照；盤後模式即時重掃並固化當日
+  const onRefresh = useCallback(() => {
+    if (session === 'intraday') loadDate(undefined, 'intraday');
+    else rescan();
+  }, [session, loadDate, rescan]);
 
   // 選股/搜尋 → 載入該檔走圖 + 指標 + 即時報價
   useEffect(() => {
@@ -177,16 +200,22 @@ export default function CnSanSePage() {
 
   // 當前可見清單（共振紀錄驅動；無 records 時退回舊 results）
   const allRecords: RecordRow[] = data?.records ?? [];
-  const poolRows = allRecords.filter((r) => r.strategies.includes(level));
-  const observeRows = allRecords.filter((r) => r.strategies.length === 0);
-  const baseRows = pane === 'pool' ? poolRows : observeRows;
+  const poolRows = allRecords.filter((r) => r.report.mainforce.buyHit);
+  const observeRows = allRecords.filter((r) => !r.report.mainforce.buyHit);
+  // 策略池排序：共振強度（舊·scan 預設）或 期望漲幅（回測重排，第一檔=歷史最會漲的條件）
+  const rankedPool = rankMode === 'gain' && bt?.buckets?.length
+    ? rerankRecords(poolRows, bt.buckets, rankHz)
+    : poolRows;
+  const baseRows = pane === 'pool' ? rankedPool : observeRows;
   const visibleRows = baseRows.filter((r) => passFilters(r, filters)).slice(0, 80);
 
   // 掃描結果 → 取未來漲跌幅（複用主頁 /api/backtest/forward，支援 .SS/.SZ）
   useEffect(() => {
+    let poolForPerf = (data?.records ?? []).filter((r) => r.report.mainforce.buyHit);
+    if (rankMode === 'gain' && bt?.buckets?.length) poolForPerf = rerankRecords(poolForPerf, bt.buckets, rankHz);
     const rows = (pane === 'pool'
-      ? (data?.records ?? []).filter((r) => r.strategies.includes(level))
-      : (data?.records ?? []).filter((r) => r.strategies.length === 0)
+      ? poolForPerf
+      : (data?.records ?? []).filter((r) => !r.report.mainforce.buyHit)
     ).slice(0, 80);
     if (!data || rows.length === 0) { setPerf({}); return; }
     let alive = true;
@@ -209,7 +238,7 @@ export default function CnSanSePage() {
       .catch(() => { /* 漲跌幅取不到不致命 */ })
       .finally(() => { if (alive) setPerfLoading(false); });
     return () => { alive = false; };
-  }, [data, level, pane]);
+  }, [data, pane, rankMode, rankHz, bt]);
 
   const toggleFilter = (k: FilterKey) => setFilters((prev) => {
     const next = new Set(prev);
@@ -217,8 +246,7 @@ export default function CnSanSePage() {
     return next;
   });
 
-  const openBacktest = useCallback(async (force = false) => {
-    setShowBacktest(true);
+  const ensureBt = useCallback(async (force = false) => {
     if (bt && !force) return;
     setBtLoading(true);
     try {
@@ -228,14 +256,25 @@ export default function CnSanSePage() {
     } finally { setBtLoading(false); }
   }, [bt]);
 
+  const openBacktest = useCallback(async (force = false) => {
+    setShowBacktest(true);
+    await ensureBt(force);
+  }, [ensureBt]);
+
+  // 預設用期望漲幅排序 → 一進頁就把回測桶統計載入，讓策略池立刻依期望漲幅重排
+  useEffect(() => { void ensureBt(); }, [ensureBt]);
+
   const submitSearch = () => {
     const s = toSymbol(query);
     if (!s) { setChartErr('代號格式不對（請輸入 6 位數，如 603986 或 000001）'); setSym(null); return; }
     setSym(s);
   };
 
-  // 走圖永遠載最新資料；只有「該股 K 線比選定掃描日還舊」（停牌/退市）才算落後
-  const stale = detail && data && detail.lastDate < data.lastDate;
+  // 走圖永遠載最新資料；只有「該股 K 線比選定掃描日還舊」（停牌/退市）才算落後。
+  // 盤中模式 data.lastDate=今日，但走圖只到封存（昨日）是正常的 → 比對 archivedDate 而非 lastDate，
+  // 否則每檔都會誤報「資料僅到昨日」。
+  const staleRef = (data?.sessionType === 'intraday' ? data?.archivedDate : data?.lastDate) ?? data?.lastDate;
+  const stale = detail && staleRef && detail.lastDate < staleRef;
   const rc = data?.resonanceCounts;
 
   return (
@@ -244,12 +283,29 @@ export default function CnSanSePage() {
       headerSlot={
         <PageHeader
           title="🎨 三色資金選股"
-          subtitle={data ? `陸股 · ${data.lastDate} · 掃 ${data.evaluated} 檔${data.staleSkipped ? ` · 剔除落後 ${data.staleSkipped}` : ''}${data.cached ? '' : ' · 即時'}` : '陸股 A 股'}
+          subtitle={data
+            ? `陸股 · ${data.lastDate} · ${session === 'intraday' ? '盤中即時（量能未收，訊號會跳動）' : '盤後定調'} · 掃 ${data.evaluated} 檔${data.staleSkipped ? ` · 剔除落後 ${data.staleSkipped}` : ''}`
+            : '陸股 A 股'}
           backButton
           actions={
             <div className="flex items-center gap-1">
+              {/* 盤後 / 盤中 切換 */}
+              <div className="flex rounded-md border border-border overflow-hidden text-xs mr-1">
+                <button
+                  onClick={() => switchSession('post_close')}
+                  disabled={loading}
+                  className={cn('px-2 py-1', session === 'post_close' ? 'bg-sky-600 text-sky-50 font-semibold' : 'text-muted-foreground hover:bg-secondary')}
+                  title="盤後封存版（讀完整收盤日K，訊號穩定）"
+                >盤後定調</button>
+                <button
+                  onClick={() => switchSession('intraday')}
+                  disabled={loading}
+                  className={cn('px-2 py-1', session === 'intraday' ? 'bg-rose-600 text-rose-50 font-semibold' : 'text-muted-foreground hover:bg-secondary')}
+                  title="盤中即時：把當下報價合成未收的那根日K 重算；量能半根、訊號會整天跳動，收盤前才定調"
+                >盤中即時</button>
+              </div>
               <Button variant="ghost" size="sm" onClick={() => openBacktest()} className="h-8 text-xs" title="各共振組合的歷史漲跌幅比較">📊 回測</Button>
-              <Button variant="ghost" size="icon" onClick={rescan} disabled={loading} title="即時重新掃描並固化當日" className="w-8 h-8">
+              <Button variant="ghost" size="icon" onClick={onRefresh} disabled={loading} title={session === 'intraday' ? '重抓盤中即時快照' : '即時重新掃描並固化當日'} className="w-8 h-8">
                 <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
               </Button>
             </div>
@@ -269,7 +325,7 @@ export default function CnSanSePage() {
                   return (
                     <button
                       key={d.date}
-                      onClick={() => { if (!loading) loadDate(d.date); }}
+                      onClick={() => { if (!loading) { setSession('post_close'); loadDate(d.date, 'post_close'); } }}
                       disabled={loading}
                       className={cn(
                         'text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate',
@@ -314,27 +370,6 @@ export default function CnSanSePage() {
             >觀察區<span className="ml-1 opacity-70">{rc?.observe ?? observeRows.length}</span></button>
           </div>
 
-          {/* 嚴格度切換（僅策略池）*/}
-          {pane === 'pool' && (
-            <div className="shrink-0 p-2 border-b border-border">
-              <div className="flex gap-1">
-                {LEVELS.map((l) => (
-                  <button
-                    key={l.key}
-                    onClick={() => setLevel(l.key)}
-                    className={cn(
-                      'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors border',
-                      level === l.key ? 'bg-sky-500/15 text-sky-400 border-sky-500/40' : 'text-muted-foreground border-transparent hover:bg-secondary',
-                    )}
-                  >
-                    {l.label}<span className="ml-1 opacity-70">{data?.counts[l.key] ?? '–'}</span>
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{LEVELS.find((l) => l.key === level)?.desc}</p>
-            </div>
-          )}
-
           {/* 共振篩選 chip */}
           <div className="shrink-0 px-2 py-1.5 border-b border-border flex flex-wrap gap-1">
             {FILTERS.map((f) => (
@@ -353,6 +388,40 @@ export default function CnSanSePage() {
               <span className="ml-auto text-[10px] text-muted-foreground self-center">強{rc.strong}·中{rc.medium}·弱{rc.weak}·衝突{rc.conflict}</span>
             )}
           </div>
+
+          {/* 排序切換（策略池）：共振強度（舊）/ 期望漲幅（回測重排，第一檔=歷史最會漲的條件）*/}
+          {pane === 'pool' && (
+            <div className="shrink-0 px-2 py-1.5 border-b border-border flex items-center gap-1 text-[10px] flex-wrap">
+              <span className="text-muted-foreground">排序</span>
+              <button
+                onClick={() => setRankMode('resonance')}
+                className={cn('px-1.5 py-0.5 rounded border', rankMode === 'resonance' ? 'bg-sky-500/15 text-sky-300 border-sky-500/40' : 'text-muted-foreground border-border hover:bg-secondary')}
+              >共振強度</button>
+              <button
+                onClick={() => { setRankMode('gain'); ensureBt(); }}
+                className={cn('px-1.5 py-0.5 rounded border', rankMode === 'gain' ? 'bg-rose-500/15 text-rose-300 border-rose-500/40' : 'text-muted-foreground border-border hover:bg-secondary')}
+                title="用回測：把歷史上該條件組合最會漲的排到第一"
+              >期望漲幅</button>
+              {rankMode === 'gain' && (
+                <div className="flex gap-0.5 ml-1">
+                  {RANK_HORIZONS.map((h) => (
+                    <button
+                      key={h.key}
+                      onClick={() => setRankHz(h.key)}
+                      className={cn('px-1 py-0.5 rounded border', rankHz === h.key ? 'bg-rose-500/15 text-rose-300 border-rose-500/40' : 'text-muted-foreground border-border hover:bg-secondary')}
+                    >{h.label}</button>
+                  ))}
+                </div>
+              )}
+              {rankMode === 'gain' && (
+                btLoading
+                  ? <span className="ml-auto text-muted-foreground">回測載入中…</span>
+                  : bt?.buckets?.length
+                    ? <span className="ml-auto text-muted-foreground" title={bt.source === 'deep' ? '全期深度回測' : '即時 30 天回測'}>依 {bt.days} 天回測 · 第一檔=期望漲幅最高</span>
+                    : <span className="ml-auto text-amber-400/80">無回測資料</span>
+              )}
+            </div>
+          )}
 
           {/* 結果表（共振卡片：策略來源 + 指標買點 + 共振等級 + 漲跌幅）*/}
           <div className="flex-1 overflow-auto">
@@ -544,12 +613,21 @@ function QuoteGrid({ detail }: { detail: DetailResp }) {
   );
 }
 
+const metSignals = (g: ConditionReport['doubleB']) => g.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
+const hasState = (g: ConditionReport['doubleB'], id: string) => g.buy.some((c) => c.id === id && c.met);
+
+function GroupChip({ on, label, detail, cls }: { on: boolean; label: string; detail?: string; cls: string }) {
+  if (!on) return <span className="px-1 py-0.5 rounded border border-border text-muted-foreground/40">{label} –</span>;
+  return <span className={cn('px-1 py-0.5 rounded border', cls)}>{label}{detail ? ` ${detail}` : ''}</span>;
+}
+
 function RecordCard({ r, perf, perfLoading, active, onClick }: {
   r: RecordRow; perf?: StockForwardPerformance; perfLoading: boolean; active: boolean; onClick: () => void;
 }) {
-  const badge = RES_BADGE[r.resonanceLevel];
-  const w3 = [r.doubleBBuyW3 && '雙B', r.catchBuyW3 && '捕撈'].filter(Boolean).join('/');
-  const w5 = [r.doubleBBuyW5 && '雙B', r.catchBuyW5 && '捕撈'].filter(Boolean).join('/');
+  const rep = r.report;
+  const badge = rep.level ? RES_BADGE[rep.level] : null;
+  const s = rep.scores;
+  const stageTxt = rep.mainStage ? `${STAGE_LABEL[rep.mainStage]}${STAGE_ICON[rep.mainStage]}` : undefined;
   return (
     <div onClick={onClick} className={cn('px-2 py-1.5 border-b border-border/40 cursor-pointer hover:bg-secondary/60', active && 'bg-sky-500/10')}>
       <div className="flex items-center gap-2 text-xs">
@@ -560,23 +638,26 @@ function RecordCard({ r, perf, perfLoading, active, onClick }: {
           {r.changePct > 0 ? '+' : ''}{fmt(r.changePct)}%
         </span>
       </div>
+      {/* 三組共振：主力階段 / 雙B / 捕撈 */}
       <div className="flex items-center flex-wrap gap-1 mt-1 text-[10px]">
-        <span className={cn('px-1.5 py-0.5 rounded border font-medium', badge.cls)}>{badge.label} {r.resonanceCount}</span>
-        {r.strategies.map((s) => <span key={s} className="px-1 py-0.5 rounded border border-border text-muted-foreground">{STRAT_LABEL[s]}</span>)}
-        {r.doubleBBuy && <span className="px-1 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">雙B買</span>}
-        {r.catchBuy && <span className="px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">捕撈買</span>}
-        {(r.doubleBSell || r.catchSell) && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">⚠️{r.doubleBSell ? '雙B賣' : '捕撈賣'}</span>}
-        {r.conflict && <span className="px-1 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40" title={r.conflictReason}>訊號衝突</span>}
-        {r.allThreeUp && <span className="px-1 py-0.5 rounded bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/30" title="主力狀態三色齊揚">三色齊揚</span>}
+        {badge && <span className={cn('px-1.5 py-0.5 rounded border font-medium', badge.cls)}>{badge.label} {rep.groupBuyCount}/3</span>}
+        <GroupChip on={rep.doubleB.buyHit} label="雙B" detail={metSignals(rep.doubleB).join('/')} cls="bg-rose-500/15 text-rose-300 border-rose-500/30" />
+        <GroupChip on={rep.mainforce.buyHit} label="主力" detail={stageTxt} cls="bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30" />
+        <GroupChip on={rep.catch.buyHit} label="捕撈" detail={metSignals(rep.catch).join('/')} cls="bg-emerald-500/15 text-emerald-300 border-emerald-500/30" />
+        {rep.conflict && <span className="px-1 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}
       </div>
+      {/* 賣出提示 */}
+      {rep.sellWarnings.length > 0 && (
+        <div className="text-[10px] text-amber-400/90 mt-0.5">⚠️ {rep.sellWarnings.join('、')}</div>
+      )}
+      {/* 主力強度 + 位階 */}
       <div className="flex items-center gap-2 text-[10px] mt-0.5 text-muted-foreground">
-        <span title="短線上攻" className="text-fuchsia-400">短攻{fmt(r.shortAttack)}</span>
-        <span title="中線強勢" className={r.zhuliWeak ? 'text-emerald-400' : 'text-rose-300'}>中強{fmt(r.midStrength)}</span>
-        <span title="中線控盤" className="text-amber-300">中控{fmt(r.midControl)}</span>
-        {w3 && <span className="ml-auto text-sky-300/80">近3日 {w3}買</span>}
-        {!w3 && w5 && <span className="ml-auto text-sky-300/50">近5日 {w5}買</span>}
+        <span title="短線上攻" className="text-fuchsia-400">短攻{fmt(s.shortAttack)}</span>
+        <span title="中線強勢" className={s.midStrength < 0 ? 'text-emerald-400' : 'text-rose-300'}>中強{fmt(s.midStrength)}</span>
+        <span title="中線控盤" className="text-amber-300">中控{fmt(s.midControl)}</span>
+        {hasState(rep.doubleB, 'b_above') && <span className="text-sky-300/70">站上多空線</span>}
+        {hasState(rep.catch, 'c_above') && <span className="text-sky-300/70">動能多頭區</span>}
       </div>
-      <div className="text-[9px] text-muted-foreground/70 mt-0.5 leading-snug">{r.note}</div>
       <div className="mt-1"><ForwardPerfRow performance={perf} isFetching={perfLoading} /></div>
     </div>
   );
@@ -591,42 +672,50 @@ function Score({ label, v, c }: { label: string; v: number; c: string }) {
   );
 }
 
+function CondList({ title, g, color }: { title: string; g: ConditionReport['doubleB']; color: string }) {
+  return (
+    <div className="rounded-md border border-border p-2">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className={cn('text-[11px] font-medium', color)}>{title}</span>
+        {g.buyHit && <span className="text-[9px] px-1 rounded bg-rose-500/15 text-rose-300">買進</span>}
+        {g.sellHit && <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-300">賣出</span>}
+      </div>
+      <div className="flex flex-wrap gap-1 text-[10px]">
+        {g.buy.map((c) => (
+          <span key={c.id} className={cn('px-1 py-0.5 rounded border', c.met ? (c.kind === 'signal' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' : 'bg-sky-500/10 text-sky-300 border-sky-500/30') : 'text-muted-foreground/35 border-border')}>
+            {c.met ? '✓' : '○'}{c.label}
+          </span>
+        ))}
+        {g.sell.filter((c) => c.met).map((c) => (
+          <span key={c.id} className="px-1 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30">⚠️{c.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SignalPanel({ detail, data, symbol }: { detail: DetailResp; data: ScanResp | null; symbol: string }) {
-  const inList = (lv: Level) => !!data?.results[lv]?.some((h) => h.symbol === symbol);
   const rec = data?.records?.find((r) => r.symbol === symbol);
+  const rep = rec?.report;
   return (
     <div className="p-3 space-y-3">
-      {/* 選股命中 */}
-      <div>
-        <div className="text-muted-foreground text-[10px] mb-1">選股命中</div>
-        <div className="flex gap-1">
-          {LEVELS.map((l) => (
-            <span
-              key={l.key}
-              className={cn(
-                'px-2 py-0.5 rounded text-[11px] border',
-                inList(l.key) ? 'bg-sky-500/15 text-sky-400 border-sky-500/40' : 'text-muted-foreground/40 border-border',
-              )}
-            >
-              {l.label}{inList(l.key) ? ' ✓' : ''}
-            </span>
-          ))}
+      {/* 共振總結 */}
+      {rep ? (
+        <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+          {rep.level && <span className={cn('px-1.5 py-0.5 rounded border font-medium', RES_BADGE[rep.level].cls)}>{RES_BADGE[rep.level].label} {rep.groupBuyCount}/3</span>}
+          {rep.mainStage && <span className="px-1.5 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[rep.mainStage]}{STAGE_ICON[rep.mainStage]}</span>}
+          {rep.conflict && <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}
         </div>
-      </div>
+      ) : (
+        <div className="text-[11px] text-muted-foreground">此檔在所選掃描日未達任一組買點（或無固化資料）。</div>
+      )}
 
-      {/* 共振判斷（此檔在所選掃描日的記錄）*/}
-      {rec && (
-        <div className="rounded-md border border-border p-2 space-y-1.5">
-          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-            <span className={cn('px-1.5 py-0.5 rounded border font-medium', RES_BADGE[rec.resonanceLevel].cls)}>
-              {RES_BADGE[rec.resonanceLevel].label} · 共振 {rec.resonanceCount}
-            </span>
-            {rec.doubleBBuy && <span className="px-1 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">雙B買</span>}
-            {rec.catchBuy && <span className="px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">捕撈買</span>}
-            {(rec.doubleBSell || rec.catchSell) && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">{rec.doubleBSell ? '雙B賣' : '捕撈賣'}</span>}
-            {rec.conflict && <span className="px-1 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}
-          </div>
-          <div className="text-[10px] text-muted-foreground leading-snug">{rec.note}</div>
+      {/* 三組條件清單 */}
+      {rep && (
+        <div className="space-y-1.5">
+          <CondList title="🟦 雙B戰法" g={rep.doubleB} color="text-rose-300" />
+          <CondList title="🟪 主力狀態" g={rep.mainforce} color="text-fuchsia-400" />
+          <CondList title="🟩 捕撈季節" g={rep.catch} color="text-emerald-400" />
         </div>
       )}
 
