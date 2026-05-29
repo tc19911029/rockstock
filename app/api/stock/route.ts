@@ -98,6 +98,11 @@ export async function GET(req: NextRequest) {
   const { symbol, interval, period, local: localParam, scanDate } = parsed.data;
   const { candidates, isTW, isCN } = resolveSymbol(symbol);
   const pureCode = symbol.replace(/\.(SZ|SS|TW|TWO)$/i, '');
+  // CN 指數（000001.SS 上證 / 000300.SS 滬深300）：pureCode='000001'/'000300' 會撞到深市
+  // 平安銀行(000001.SZ) 等同碼個股 → L2 快照比對必須用完整 symbol，且不可走 EastMoney 個股報價
+  // （它對指數會誤回平安銀行的價，~10.83）。對齊 /api/stock/quote 的指數處理。
+  const isCnIndex = symbol === '000001.SS' || symbol === '000300.SS';
+  const l2LookupSymbol = isCnIndex ? symbol : pureCode;
 
   const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
 
@@ -124,7 +129,7 @@ export async function GET(req: NextRequest) {
         if (!inLiveWindow) {
           try {
             const snap = await readIntradaySnapshot(marketKey, today);
-            l2HasToday = !!snap && snap.date === today && snap.quotes.some(q => q.symbol === pureCode && q.close > 0);
+            l2HasToday = !!snap && snap.date === today && snap.quotes.some(q => q.symbol === l2LookupSymbol && q.close > 0);
           } catch { /* ignore */ }
         }
         const shouldInjectToday = inLiveWindow || l2HasToday;
@@ -144,7 +149,8 @@ export async function GET(req: NextRequest) {
               } else if (q) {
                 console.warn(`[stock] 即時報價跳過 ${symbol}: close=${q.close}, date=${(q as { date?: string }).date}, today=${today}`);
               }
-            } else if (isCN) {
+            } else if (isCN && !isCnIndex) {
+              // 指數不走 EastMoney 個股報價（會誤回平安銀行）→ 落到下方 L2 fallback 取指數即時值
               const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
               const q = await getEastMoneySingleQuote(pureCode, cnSuffix);
               if (q && q.close > 0) {
@@ -174,7 +180,7 @@ export async function GET(req: NextRequest) {
             try {
               const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
               if (snapshot) {
-                const sq = snapshot.quotes.find(q => q.symbol === pureCode);
+                const sq = snapshot.quotes.find(q => q.symbol === l2LookupSymbol);
                 if (sq && sq.close > 0) {
                   todayQuote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
                 } else {
@@ -243,7 +249,7 @@ export async function GET(req: NextRequest) {
             try {
               const scanSnapshot = await readIntradaySnapshot(market as 'TW' | 'CN', scanDate);
               if (scanSnapshot) {
-                const sq = scanSnapshot.quotes.find(q => q.symbol === pureCode);
+                const sq = scanSnapshot.quotes.find(q => q.symbol === l2LookupSymbol);
                 if (sq && sq.close > 0) {
                   // 插入 scanDate K 棒（按日期順序）
                   const scanCandle = {
