@@ -57,81 +57,91 @@ interface ABCStructure {
 }
 
 /**
- * 在 [idx-MAX_LOOKBACK, idx-1] 區間內搜尋 ABC 修正結構：
+ * 在 [idx-MAX_LOOKBACK, idx] 區間內搜尋**所有**結構合格的 ABC 修正結構：
  *   多頭頂（legA high）→ 第一波修正底（legA low）→ 反彈高（legB high）→ 修正最低（legC low）
  *
  * 用 findPivots 找轉折點，要求 legAHigh > legBHigh（**頭頭低**），legALow > legCLow（**底底低**）
  * 即修正期間呈現短期空頭結構（書本 Part 11-1 第 6 條原文「形成空頭」）。
+ *
+ * 為什麼回傳「所有候選」而非貪婪取最近：最近的下跌段未必是 ABC 的 C 段——
+ * 可能只是突破前的小回檔（8147 案例：最近低 04-15 不成 ABC，但更早的 03-31 才是真 C 底）；
+ * 反過來 600487 案例最近低 05-28 才是真 C 底。因此列舉每個低點 pivot 當 C 底候選，
+ * 由 detectABCBreakout 取第一個「結構合格 + 今日收盤突破其下降切線」者。
  */
-function findABCStructure(
+function findABCStructures(
   candles: CandleWithIndicators[],
   idx: number,
-): ABCStructure | null {
-  if (idx < MIN_LOOKBACK) return null;
+): ABCStructure[] {
+  if (idx < MIN_LOOKBACK) return [];
 
-  const pivots = findPivots(candles, idx - 1, MAX_PIVOTS);
-  if (pivots.length < 4) return null;
+  // 用 idx（含今日）而非 idx-1：ABC 突破當天的「今日紅 K」正是把 C 段下跌反轉、
+  // 收上 MA5 的那根 — 它讓 [legC..今日] 這段下跌段「收尾」，C 底才會被 findPivots
+  // 認定為「已確認 pivot」。若只看到 idx-1，C 段仍是進行中段、其低點不會回傳，
+  // 會誤把「再前一個低」當 C 底，整串腳位往回退一格 → 頭頭高被打槍。
+  // （今日這根突破 K 自己開啟的新段是 open segment，includeOpen=false 不會吐回，
+  //   故不會被誤當 pivot high；非反轉日時 findPivots(idx) === findPivots(idx-1)。）
+  const pivots = findPivots(candles, idx, MAX_PIVOTS);
+  if (pivots.length < 4) return [];
 
   // pivots 由近至遠（findPivots 慣例：index 由大到小）
-  // 我們需要從近期往前找：legCLow（最近的低）→ legBHigh → legALow → legAHigh
   const recent = pivots.filter(p => idx - p.index <= MAX_LOOKBACK);
-  if (recent.length < 4) return null;
+  if (recent.length < 4) return [];
 
-  // 期望順序（從最近到最遠）：low(C) → high(B) → low(A) → high(A)
-  // 找最近一個低點
-  const legC = recent.find(p => p.type === 'low');
-  if (!legC) return null;
+  const out: ABCStructure[] = [];
 
-  // 從 legC 往前找 high(B)
-  const legB = recent.find(p => p.type === 'high' && p.index < legC.index);
-  if (!legB) return null;
+  // 列舉每個低點 pivot 當 C 底（由近至遠），各自往前組 B峰 / A底 / A峰
+  for (const legC of recent) {
+    if (legC.type !== 'low') continue;
 
-  // 從 legB 往前找 low(A)
-  const legA = recent.find(p => p.type === 'low' && p.index < legB.index);
-  if (!legA) return null;
+    // 從 legC 往前找 high(B) → low(A) → high(A)
+    const legB = recent.find(p => p.type === 'high' && p.index < legC.index);
+    if (!legB) continue;
+    const legA = recent.find(p => p.type === 'low' && p.index < legB.index);
+    if (!legA) continue;
+    const legAHigh = recent.find(p => p.type === 'high' && p.index < legA.index);
+    if (!legAHigh) continue;
 
-  // 從 legA 往前找 high(A)
-  const legAHigh = recent.find(p => p.type === 'high' && p.index < legA.index);
-  if (!legAHigh) return null;
+    // 結構檢查：頭頭低（legAHigh > legBHigh）+ 底底低（legALow > legCLow）
+    if (legAHigh.price <= legB.price) continue;
+    if (legA.price <= legC.price) continue;
 
-  // 結構檢查：頭頭低（legAHigh > legBHigh）+ 底底低（legALow > legCLow）
-  if (legAHigh.price <= legB.price) return null;
-  if (legA.price <= legC.price) return null;
+    // 修正深度檢查：legAHigh → legCLow 跌幅 ≥ MIN_CORRECTION_DROP_PCT
+    const correctionDropPct = ((legAHigh.price - legC.price) / legAHigh.price) * 100;
+    if (correctionDropPct < MIN_CORRECTION_DROP_PCT) continue;
 
-  // 修正深度檢查：legAHigh → legCLow 跌幅 ≥ MIN_CORRECTION_DROP_PCT
-  const correctionDropPct = ((legAHigh.price - legC.price) / legAHigh.price) * 100;
-  if (correctionDropPct < MIN_CORRECTION_DROP_PCT) return null;
+    // 修正天數檢查：legAHigh → legCLow 至少跨 MIN_CORRECTION_SPAN_DAYS 天
+    const correctionSpanDays = legC.index - legAHigh.index;
+    if (correctionSpanDays < MIN_CORRECTION_SPAN_DAYS) continue;
 
-  // 修正天數檢查：legAHigh → legCLow 至少跨 MIN_CORRECTION_SPAN_DAYS 天
-  const correctionSpanDays = legC.index - legAHigh.index;
-  if (correctionSpanDays < MIN_CORRECTION_SPAN_DAYS) return null;
-
-  // 多頭波幅檢查：legAHigh 相對更早的低點 ≥ MIN_PRIOR_RUN_PCT
-  const earlierLow = recent.find(p => p.type === 'low' && p.index < legAHigh.index);
-  if (earlierLow) {
-    const runPct = ((legAHigh.price - earlierLow.price) / earlierLow.price) * 100;
-    if (runPct < MIN_PRIOR_RUN_PCT) return null;
-  } else {
-    // 沒有更早的低點 → 用區間最低近似
-    const startIdx = Math.max(0, idx - MAX_LOOKBACK);
-    let minLow = candles[startIdx].low;
-    for (let i = startIdx; i < legAHigh.index; i++) {
-      if (candles[i].low < minLow) minLow = candles[i].low;
+    // 多頭波幅檢查：legAHigh 相對更早的低點 ≥ MIN_PRIOR_RUN_PCT
+    const earlierLow = recent.find(p => p.type === 'low' && p.index < legAHigh.index);
+    if (earlierLow) {
+      const runPct = ((legAHigh.price - earlierLow.price) / earlierLow.price) * 100;
+      if (runPct < MIN_PRIOR_RUN_PCT) continue;
+    } else {
+      // 沒有更早的低點 → 用區間最低近似
+      const startIdx = Math.max(0, idx - MAX_LOOKBACK);
+      let minLow = candles[startIdx].low;
+      for (let i = startIdx; i < legAHigh.index; i++) {
+        if (candles[i].low < minLow) minLow = candles[i].low;
+      }
+      const runPct = ((legAHigh.price - minLow) / minLow) * 100;
+      if (runPct < MIN_PRIOR_RUN_PCT) continue;
     }
-    const runPct = ((legAHigh.price - minLow) / minLow) * 100;
-    if (runPct < MIN_PRIOR_RUN_PCT) return null;
+
+    out.push({
+      legAHigh: legAHigh.price,
+      legAHighIdx: legAHigh.index,
+      legALow: legA.price,
+      legALowIdx: legA.index,
+      legBHigh: legB.price,
+      legBHighIdx: legB.index,
+      legCLow: legC.price,
+      legCLowIdx: legC.index,
+    });
   }
 
-  return {
-    legAHigh: legAHigh.price,
-    legAHighIdx: legAHigh.index,
-    legALow: legA.price,
-    legALowIdx: legA.index,
-    legBHigh: legB.price,
-    legBHighIdx: legB.index,
-    legCLow: legC.price,
-    legCLowIdx: legC.index,
-  };
+  return out;
 }
 
 /**
@@ -158,49 +168,47 @@ export function detectABCBreakout(
   const prev = candles[idx - 1];
   if (!c || !prev || prev.volume <= 0 || c.open <= 0) return null;
 
-  // 0. 多頭背景（書本 Part 11-1 p.697「多頭一波後 ABC 修正再攻」）
-  // 2026-05-10 修：原檢查「今日 detectTrend = 多頭」太嚴。ABC 修正末段+突破當日
-  //   通常是 LH+LL（短空）或盤整，detectTrend 幾乎不會是多頭。書本本意是「**修正之前**
-  //   是多頭」，不是「修正完成當日仍多頭」。改檢查 legAHigh 之前的 detectTrend。
-  // 1. 找 ABC 修正結構
-  const abc = findABCStructure(candles, idx);
-  if (!abc) return null;
-  // 0'. ABC 修正之前（legAHigh 處）必須是多頭
-  if (detectTrend(candles, abc.legAHighIdx) !== '多頭') return null;
-
+  // 與結構無關的今日 K 線條件，先擋（便宜的拒絕）：
   // 2. 紅 K
   if (c.close <= c.open) return null;
-
   // 3. 紅 K 實體 ≥ 2%
   const bodyPct = ((c.close - c.open) / c.open) * 100;
   if (bodyPct < BOOK_BODY_PCT_MIN) return null;
-
   // 4. 量比 ≥ 1.3
   const volumeRatio = c.volume / prev.volume;
   if (volumeRatio < BOOK_VOL_RATIO_MIN) return null;
-
-  // 5. 收盤突破下降切線在今日的延伸值
-  const trendlineValue = trendlineAtIndex(abc, idx);
-  if (c.close <= trendlineValue) return null;
-
   // 6. 收盤站上 MA20（書本明寫「股價在月線上時做多」）
   if (c.ma20 == null || c.close <= c.ma20) return null;
 
-  const preEntryDays = idx - abc.legAHighIdx;
+  // 1. 列舉所有結構合格的 ABC，取第一個（由近至遠）同時滿足：
+  //    0'. ABC 修正之前（legAHigh 處）為多頭（書本 Part 11-1 p.697「多頭一波後 ABC 修正再攻」）
+  //        — 2026-05-10 修：不檢查「今日仍多頭」（突破當日通常是短空/盤整），只看修正之前。
+  //    5. 今日收盤突破該結構的下降切線（legAHigh→legBHigh 連線）在今日的延伸值
+  const structures = findABCStructures(candles, idx);
+  for (const abc of structures) {
+    if (detectTrend(candles, abc.legAHighIdx) !== '多頭') continue;
 
-  return {
-    isABCBreakout: true,
-    trendlineValue,
-    bodyPct,
-    volumeRatio,
-    legAHigh: abc.legAHigh,
-    legALow: abc.legALow,
-    legBHigh: abc.legBHigh,
-    legCLow: abc.legCLow,
-    preEntryDays,
-    detail:
-      `ABC 突破（A峰 ${abc.legAHigh.toFixed(1)}→A底 ${abc.legALow.toFixed(1)}→` +
-      `B峰 ${abc.legBHigh.toFixed(1)}→C底 ${abc.legCLow.toFixed(1)}，` +
-      `修正 ${preEntryDays} 天，今日突破下降切線 ${trendlineValue.toFixed(1)}＋實體 ${bodyPct.toFixed(2)}%＋量×${volumeRatio.toFixed(2)}＋站上 MA20）`,
-  };
+    const trendlineValue = trendlineAtIndex(abc, idx);
+    if (c.close <= trendlineValue) continue;
+
+    const preEntryDays = idx - abc.legAHighIdx;
+
+    return {
+      isABCBreakout: true,
+      trendlineValue,
+      bodyPct,
+      volumeRatio,
+      legAHigh: abc.legAHigh,
+      legALow: abc.legALow,
+      legBHigh: abc.legBHigh,
+      legCLow: abc.legCLow,
+      preEntryDays,
+      detail:
+        `ABC 突破（A峰 ${abc.legAHigh.toFixed(1)}→A底 ${abc.legALow.toFixed(1)}→` +
+        `B峰 ${abc.legBHigh.toFixed(1)}→C底 ${abc.legCLow.toFixed(1)}，` +
+        `修正 ${preEntryDays} 天，今日突破下降切線 ${trendlineValue.toFixed(1)}＋實體 ${bodyPct.toFixed(2)}%＋量×${volumeRatio.toFixed(2)}＋站上 MA20）`,
+    };
+  }
+
+  return null;
 }

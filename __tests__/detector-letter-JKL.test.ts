@@ -14,6 +14,7 @@ import { detectKlineConsolidationBreakout } from '../lib/analysis/klineConsolida
 import { detectBlackKBreakout } from '../lib/analysis/blackKBreakoutEntry';
 import { computeIndicators } from '../lib/indicators';
 import jFix from './fixtures/candles/8147TWO-J-abc-breakout-2026-04-17.json';
+import jFix2 from './fixtures/candles/600487SS-J-abc-breakout-2026-05-29.json';
 import kFix from './fixtures/candles/3583-K-kline-consolidation-2026-05-11.json';
 import lFix from './fixtures/candles/4927-L-blackK-breakout-2026-05-05.json';
 
@@ -28,6 +29,22 @@ describe('detectABCBreakout (J) — 真實 fixture', () => {
     expect(result.volumeRatio).toBeGreaterThanOrEqual(jFix.expected.volumeRatioMin);
     expect(result.legAHigh).toBeGreaterThanOrEqual(jFix.expected.legAHighMin);
     expect(result.legAHigh).toBeLessThanOrEqual(jFix.expected.legAHighMax);
+  });
+
+  // 回歸（2026-05-30）：C 底落在「突破當天才反轉的下跌段」案例。
+  // findABCStructures 必須用 findPivots(idx) 含今日，且列舉候選 C 底，否則：
+  //   (a) 只看 idx-1 → C 段未收尾、C 底不是 pivot → 腳位退一格成頭頭高被打槍
+  //   (b) 貪婪取最近低 → 可能誤抓突破前小回檔（8147 案例）。兩者都要過。
+  it(`${jFix2.symbol} @ ${jFix2.triggerDate} → ABC 突破（C 底=最近下跌段）`, () => {
+    const candles = computeIndicators(jFix2.candles);
+    const result = detectABCBreakout(candles, candles.length - 1);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.isABCBreakout).toBe(true);
+    expect(result.bodyPct).toBeGreaterThanOrEqual(jFix2.expected.bodyPctMin);
+    expect(result.volumeRatio).toBeGreaterThanOrEqual(jFix2.expected.volumeRatioMin);
+    expect(result.legAHigh).toBeGreaterThanOrEqual(jFix2.expected.legAHighMin);
+    expect(result.legAHigh).toBeLessThanOrEqual(jFix2.expected.legAHighMax);
   });
 });
 
