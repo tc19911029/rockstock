@@ -62,12 +62,18 @@ function profileOf(r: ResonanceRecord) {
     c = rep.catch.buy.some((x) => x.id === 'c_gold_bull' && x.met) ? 'bull'
       : rep.catch.buy.some((x) => x.id === 'c_gold_bear' && x.met) ? 'bear' : 'none';
   }
+  const cVol = rep.catch.buy.some((x) => x.id === 'c_gold_vol' && x.met);    // 量價強勢(金叉+爆量)
+  const mThree = rep.mainforce.buy.some((x) => x.id === 'm_three' && x.met); // 三色齊(紅+紫+黃)
+  const bothB = rep.doubleB.buy.some((x) => x.id === 'b_break' && x.met)
+    && rep.doubleB.buy.some((x) => x.id === 'b_gold' && x.met);              // 突破+金叉
   return {
     stage: rep.mainStage ?? 'observe', b, c,
     up: r.changePct >= 9.5, conflict: rep.conflict,
     lvl: rep.level ?? 'none', gbc: rep.groupBuyCount,
     above: rep.doubleB.buy.some((x) => x.id === 'b_above' && x.met),   // 站上多空線
     xabove: rep.catch.buy.some((x) => x.id === 'c_above' && x.met),    // 動能0軸上
+    cVol, mThree, bothB,                                              // 量柱 / 三色齊 / 雙B突破+金叉
+    allin: bothB && mThree && hasC && cVol,                           // 全都有超級組合
   };
 }
 

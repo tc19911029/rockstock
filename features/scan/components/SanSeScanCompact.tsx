@@ -53,6 +53,37 @@ function CondChips({ rep }: { rep?: ConditionReport }) {
 }
 interface DateEntry { date: string; counts: Record<Level, number>; scannedAt: string }
 
+// 三色買進訊號篩選：分 3 組、每組照書本順序排。點哪個 chip 就要該訊號亮（多個 = AND）。
+type FilterGroup = 'doubleB' | 'mainforce' | 'catch';
+const FILTER_GROUPS: { group: FilterGroup; title: string; activeCls: string; conds: { id: string; label: string }[] }[] = [
+  { group: 'doubleB', title: '🟦雙B', activeCls: 'bg-rose-500/15 text-rose-300 border-rose-500/40', conds: [
+    { id: 'b_break', label: '突破交易線' },
+    { id: 'b_gold', label: '黃紅金叉' },
+    { id: 'b_resonance', label: '雙B共振' },
+  ] },
+  { group: 'mainforce', title: '🟪主力', activeCls: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40', conds: [
+    { id: 'm_short', label: '做短線(紅+紫)' },
+    { id: 'm_mid', label: '做中線(紅+黃)' },
+    { id: 'm_three', label: '三色戰法' },
+  ] },
+  { group: 'catch', title: '🟩捕撈', activeCls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40', conds: [
+    { id: 'c_gold_bear', label: '空頭區金叉' },
+    { id: 'c_gold_bull', label: '多頭區金叉' },
+    { id: 'c_gold_vol', label: '量價強勢' },
+  ] },
+];
+function passFilters(report: ConditionReport | undefined, active: Set<string>): boolean {
+  if (active.size === 0) return true;
+  if (!report) return false;
+  if (active.has('hideConflict') && report.conflict) return false;
+  for (const { group, conds } of FILTER_GROUPS) {
+    for (const c of conds) {
+      if (active.has(c.id) && !report[group].buy.some((x) => x.id === c.id && x.met)) return false;
+    }
+  }
+  return true;
+}
+
 const LEVELS: { key: Level; label: string; desc: string }[] = [
   { key: 'strict', label: '嚴格', desc: '三色資金共振 — 短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位' },
   { key: 'medium', label: '中等', desc: '更新版 — 短攻 / 中強 / 中控 三個分數都 > 0' },
@@ -105,6 +136,13 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 排序：預設短攻高→低（與後端排序一致）；點同鍵切換高低
   const [sortKey, setSortKey] = useState<SortKey>('shortAttack');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // 三色買進訊號篩選（cond id 集合；含 'hideConflict'）
+  const [filters, setFilters] = useState<Set<string>>(new Set());
+  const toggleFilter = (k: string) => setFilters((prev) => {
+    const next = new Set(prev);
+    next.has(k) ? next.delete(k) : next.add(k);
+    return next;
+  });
 
   // session='intraday' → 讀盤中即時快照（latest live，忽略 date）；否則讀盤後封存。
   const loadDate = useCallback(async (date?: string, sessionArg?: 'post_close' | 'intraday') => {
@@ -203,7 +241,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   );
 
   const hits = useMemo(() => {
-    const rows = [...(data?.results[level] ?? [])];
+    const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
     const dir = sortDir === 'desc' ? 1 : -1;
     const fwdField = FWD_FIELD[sortKey];
     rows.sort((a, b) => {
@@ -220,7 +258,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
       return dir * ((b[key] ?? 0) - (a[key] ?? 0));
     });
     return rows.slice(0, 50);
-  }, [data, level, sortKey, sortDir, perf]);
+  }, [data, level, sortKey, sortDir, perf, filters, reportMap]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   return (
@@ -327,6 +365,38 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
             {label}{sortKey === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
           </button>
         ))}
+      </div>
+
+      {/* 三色買進訊號篩選：分 3 組、每組照書本順序；多個 chip = AND（同時滿足）*/}
+      <div className="shrink-0 px-2 py-1.5 border-b border-border space-y-1">
+        {FILTER_GROUPS.map(({ group, title, activeCls, conds }) => (
+          <div key={group} className="flex items-center gap-1 flex-wrap">
+            <span className="text-[9px] text-muted-foreground w-9 shrink-0">{title}</span>
+            {conds.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => toggleFilter(c.id)}
+                className={cn(
+                  'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+                  filters.has(c.id) ? activeCls : 'text-muted-foreground border-border hover:bg-secondary',
+                )}
+              >{c.label}</button>
+            ))}
+          </div>
+        ))}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[9px] text-muted-foreground w-9 shrink-0">其他</span>
+          <button
+            onClick={() => toggleFilter('hideConflict')}
+            className={cn(
+              'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+              filters.has('hideConflict') ? 'bg-amber-500/15 text-amber-300 border-amber-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}
+          >隱藏衝突</button>
+          {filters.size > 0 && (
+            <button onClick={() => setFilters(new Set())} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
+          )}
+        </div>
       </div>
 
       {/* 結果清單（卡片排版對齊書本買法 ScanResultsCompact）*/}

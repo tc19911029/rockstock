@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useReplayStore } from '@/store/replayStore';
+import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 
 const DEFAULT_QUICK_STOCKS = [
   { symbol: 'mock',  name: '📊 範例資料（離線）' },
@@ -37,6 +38,8 @@ function rawSymbol(ticker: string) {
 
 export default function StockSelector() {
   const { loadStock, isLoadingStock, currentStock, currentInterval, startPolling, stopPolling } = useReplayStore();
+  const recentItems  = useSearchHistoryStore(s => s.items);
+  const clearHistory = useSearchHistoryStore(s => s.clear);
   const [input,    setInput]    = useState('');
   const [showDrop, setShowDrop] = useState(false);
   const [error,    setError]    = useState('');
@@ -78,6 +81,9 @@ export default function StockSelector() {
     ? DEFAULT_QUICK_STOCKS.filter(s => s.symbol.toUpperCase().includes(input.toUpperCase()) || s.name.includes(input))
     : DEFAULT_QUICK_STOCKS;
 
+  // 輸入框空白時，下拉最上方顯示最近搜尋
+  const showRecents = input.length === 0 && recentItems.length > 0;
+
   return (
     <div className="flex items-center gap-1.5 min-w-0 flex-1" onClick={closeOnOutside}>
       {/* Search input + dropdown */}
@@ -97,12 +103,38 @@ export default function StockSelector() {
             <span className="text-[10px] text-muted-foreground pr-2 truncate max-w-[80px]">{currentStock.name}</span>
           )}
         </div>
-        {showDrop && filtered.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-muted border border-border rounded shadow-xl z-50 max-h-52 overflow-y-auto">
+        {showDrop && (filtered.length > 0 || showRecents) && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-muted border border-border rounded shadow-xl z-50 max-h-72 overflow-y-auto">
+            {showRecents && (
+              <>
+                <div className="flex items-center justify-between px-2 py-1 sticky top-0 bg-muted border-b border-border">
+                  <span className="text-[10px] font-bold text-muted-foreground tracking-wide">最近搜尋</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); clearHistory(); }}
+                    className="text-[10px] text-muted-foreground hover:text-red-400 transition"
+                  >清除</button>
+                </div>
+                {recentItems.map(s => (
+                  <button key={`recent-${s.symbol}`}
+                    onClick={() => { setInput(s.symbol); handleLoad(s.symbol); }}
+                    className="w-full text-left px-2 py-1.5 text-xs flex gap-2 items-center min-w-0 hover:bg-background/40"
+                  >
+                    <span className="text-muted-foreground shrink-0">🕘</span>
+                    <span className="font-mono text-yellow-400 w-12 shrink-0">{s.symbol}</span>
+                    <span className="text-foreground/80 truncate">{s.name}</span>
+                  </button>
+                ))}
+                {filtered.length > 0 && (
+                  <div className="px-2 py-1 bg-muted border-b border-t border-border">
+                    <span className="text-[10px] font-bold text-muted-foreground tracking-wide">常用</span>
+                  </div>
+                )}
+              </>
+            )}
             {filtered.map(s => (
               <button key={s.symbol}
                 onClick={() => { setInput(s.symbol === 'mock' ? '' : s.symbol); handleLoad(s.symbol); }}
-                className="w-full text-left px-2 py-1.5 text-xs flex gap-2 items-center min-w-0 hover:bg-muted"
+                className="w-full text-left px-2 py-1.5 text-xs flex gap-2 items-center min-w-0 hover:bg-background/40"
               >
                 <span className="font-mono text-yellow-400 w-10 shrink-0">{s.symbol === 'mock' ? '---' : s.symbol}</span>
                 <span className="text-foreground/80 truncate">{s.name}</span>

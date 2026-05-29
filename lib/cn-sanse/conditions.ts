@@ -122,11 +122,17 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
   const deadX = CROSS(XYS2, XYS1)[i]; // 快慢動能線死叉
   const xysAbove0 = isNum(XYS1[i]) && XYS1[i] > 0; // 0軸上＝安全做多區
   const xysBelow0 = isNum(XYS1[i]) && XYS1[i] < 0; // 0軸下＝風險區
+  // 量價強勢 proxy：金叉當日爆量（今日量 > 5日均量 1.5 倍）。走圖的換手率 4 級色柱全市場掃描抓不到，
+  // 用掃描有的 candle volume 近似「金叉配爆量＝量價齊揚」。非走圖色柱本尊，數值會有出入。
+  const V = candles.map((c) => c.volume);
+  const volMa5 = MA(V, 5);
+  const volSurge = isNum(volMa5[i]) && volMa5[i] > 0 && V[i] > volMa5[i] * 1.5;
   const catchG = mkGroup(
     [
       sig('c_gold', '動能金叉', !!goldX),
       st('c_gold_bull', '多頭區金叉(趨勢延續)', !!goldX && xysAbove0),
       st('c_gold_bear', '空頭區金叉(底部反彈)', !!goldX && xysBelow0),
+      st('c_gold_vol', '量價強勢(金叉+爆量)', !!goldX && volSurge),
       st('c_above', '安全做多區(0軸上)', xysAbove0),
     ],
     [

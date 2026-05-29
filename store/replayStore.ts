@@ -12,6 +12,7 @@ import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { loadMockData } from '@/lib/data/mockData';
+import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 import {
   createAccount,
   executeBuy,
@@ -271,6 +272,13 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         ...(showLoading ? { isLoadingStock: false } : {}),
         ...buildState(allCandles, index, account),
       });
+      // 記錄到「最近搜尋」：不論從搜尋框、掃描清單、候選池或 URL 進來都留紀錄；
+      // 排除指數（^TWII / ^IXIC / 000001.SS 等），代號去掉市場後綴讓清單乾淨
+      const isIndex = /^\^|^000001\.SS$/.test(json.ticker);
+      if (!isIndex) {
+        const cleanSymbol = json.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        useSearchHistoryStore.getState().record(cleanSymbol, json.name);
+      }
       return true;
     };
 

@@ -68,6 +68,9 @@ export const BUCKET_DEFS: { key: string; label: string; group: string }[] = [
   { key: 'b_breakonly', label: '純突破交易線', group: '雙B訊號型' },
   { key: 'c_bull', label: '多頭區金叉', group: '捕撈型' },
   { key: 'c_bear', label: '空頭區金叉(底反)', group: '捕撈型' },
+  { key: 'c_vol', label: '量價強勢(金叉+爆量)', group: '捕撈型' },
+  { key: 'm_three', label: '主力三色齊(紅+紫+黃)', group: '主力三色' },
+  { key: 'allin', label: '全都有(雙B突破+金叉·三色·捕撈金叉+量柱)', group: '超級組合' },
   { key: 'limitup', label: '掃描日漲停(追停)', group: '掃描日漲停' },
   { key: 'notlimitup', label: '掃描日未漲停', group: '掃描日漲停' },
   { key: 'noconflict', label: '無衝突', group: '衝突' },
@@ -100,10 +103,18 @@ export function bucketsForRecord(r: RankRecord): string[] {
     else if (gold) keys.push('b_goldonly');
     else if (brk) keys.push('b_breakonly');
   }
+  const cVol = rep.catch.buy.some((c) => c.id === 'c_gold_vol' && c.met); // 量價強勢(金叉+爆量)
   if (hasC) {
     if (rep.catch.buy.some((c) => c.id === 'c_gold_bull' && c.met)) keys.push('c_bull');
     else if (rep.catch.buy.some((c) => c.id === 'c_gold_bear' && c.met)) keys.push('c_bear');
+    if (cVol) keys.push('c_vol');
   }
+  const mThree = rep.mainforce.buy.some((c) => c.id === 'm_three' && c.met); // 三色齊(紅+紫+黃)
+  if (mThree) keys.push('m_three');
+  // 全都有超級組合：雙B 突破+金叉 + 主力三色齊 + 捕撈金叉 + 量柱
+  const bothB = rep.doubleB.buy.some((c) => c.id === 'b_break' && c.met)
+    && rep.doubleB.buy.some((c) => c.id === 'b_gold' && c.met);
+  if (bothB && mThree && hasC && cVol) keys.push('allin');
   keys.push(r.changePct >= 9.5 ? 'limitup' : 'notlimitup');
   keys.push(rep.conflict ? 'conflict' : 'noconflict');
   return keys;

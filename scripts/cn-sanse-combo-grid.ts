@@ -18,6 +18,7 @@ import path from 'path';
 interface Sample {
   date: string; pool: boolean; stage: string; b: string; c: string;
   up: boolean; conflict: boolean; lvl: string; gbc: number;
+  cVol?: boolean; mThree?: boolean; bothB?: boolean; allin?: boolean; // 量柱 / 三色齊 / 突破+金叉 / 全都有
   d3: number | null; d5: number | null; d10: number | null; mg: number | null; ml: number | null;
 }
 type HK = 'd3' | 'd5' | 'd10';
@@ -87,6 +88,38 @@ async function main() {
   const baseAllRows = poolAll;
   const bA3 = stat(baseAllRows, 'd3'), bA5 = stat(baseAllRows, 'd5'), bA10 = stat(baseAllRows, 'd10');
   L.push(`| _全部(不擇時)_ | ${bA3.n} | ${fp(bA3.avg)} | ${bA3.win}% | ${fp(bA5.avg)} | ${bA5.win}% | ${fp(bA10.avg)} | ${bA10.win}% |`);
+  L.push('');
+
+  // ── (1b) 「全都有」超級組合：雙B突破+金叉 · 三色齊 · 捕撈金叉 · 量柱 ──────────────
+  const allinRows = poolAll.filter((s) => s.allin);
+  L.push('## (1b) 「全都有」超級組合（雙B突破+金叉 · 三色齊紅紫黃 · 捕撈金叉 · 量柱）');
+  L.push('');
+  if (allinRows.length === 0) {
+    L.push('⚠️ 全期 0 筆完全符合 — 條件太嚴，幾乎不同時出現（這本身就是答案：別等「全都有」）。');
+  } else {
+    const a3 = stat(allinRows, 'd3'), a5 = stat(allinRows, 'd5'), a10 = stat(allinRows, 'd10');
+    const mg = allinRows.map((r) => r.mg).filter((x): x is number => x != null);
+    const mgAvg = mg.length ? +(mg.reduce((a, b) => a + b, 0) / mg.length).toFixed(2) : null;
+    L.push(`全期 **${allinRows.length} 筆**（佔池 ${(allinRows.length / poolAll.length * 100).toFixed(1)}%）｜3日 ${fp(a3.avg)}%(勝${a3.win}%)｜5日 ${fp(a5.avg)}%(勝${a5.win}%)｜10日 ${fp(a10.avg)}%(勝${a10.win}%)｜窗內最高 ${fp(mgAvg)}%`);
+    L.push('');
+    L.push('| 切片 | 樣本 | 3日 | 勝率 | 5日 | 勝率 | 10日 | 勝率 |');
+    L.push('|---|--:|--:|--:|--:|--:|--:|--:|');
+    for (const reg of ['bull', 'chop', 'bear'] as Regime[]) {
+      const rows = allinRows.filter((s) => regimeOf.get(s.date) === reg);
+      if (!rows.length) { L.push(`| 大盤${REG_L[reg]} | 0 | — | — | — | — | — | — |`); continue; }
+      const s3 = stat(rows, 'd3'), s5 = stat(rows, 'd5'), s10 = stat(rows, 'd10');
+      L.push(`| 大盤${REG_L[reg]} | ${s3.n} | ${fp(s3.avg)} | ${s3.win ?? '—'}% | ${fp(s5.avg)} | ${s5.win ?? '—'}% | ${fp(s10.avg)} | ${s10.win ?? '—'}% |`);
+    }
+    // 訓練/測試（全日，allin 太少不再分 regime）
+    const ad = [...new Set(allinRows.map((s) => s.date))].sort();
+    const acut = ad[Math.floor(ad.length * split)];
+    const tr = allinRows.filter((s) => s.date < acut), te = allinRows.filter((s) => s.date >= acut);
+    const t5 = stat(tr, 'd5'), e5 = stat(te, 'd5');
+    L.push(`| _訓練段_ | ${t5.n} | ${fp(stat(tr, 'd3').avg)} | ${stat(tr, 'd3').win ?? '—'}% | ${fp(t5.avg)} | ${t5.win ?? '—'}% | ${fp(stat(tr, 'd10').avg)} | ${stat(tr, 'd10').win ?? '—'}% |`);
+    L.push(`| _測試段_ | ${e5.n} | ${fp(stat(te, 'd3').avg)} | ${stat(te, 'd3').win ?? '—'}% | ${fp(e5.avg)} | ${e5.win ?? '—'}% | ${fp(stat(te, 'd10').avg)} | ${stat(te, 'd10').win ?? '—'}% |`);
+    L.push('');
+    L.push('> 樣本少(全都有很罕見)→ 數字僅供參考、勿過度解讀。對照池基準看它有沒有明顯加分。');
+  }
   L.push('');
 
   // ── (2) 指定 regime 內的組合網格 + 訓練/測試 ─────────────────────────────────
