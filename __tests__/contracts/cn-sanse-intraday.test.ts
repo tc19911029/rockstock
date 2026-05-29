@@ -71,7 +71,7 @@ describe('cn-sanse 盤中即時掃描合約', () => {
       ['600002', BAR],
       ['600003', BAR], // 缺口股也給報價 — 若無防護會被貼成今日而誤評估
     ]);
-    const result = await scanSanSe({ intraday: { date: D, quotes, indexBar: BAR } });
+    const result = await scanSanSe({ intraday: { date: D, quotes, indexBars: new Map([['000001.SS', BAR]]) } });
 
     expect(result.sessionType).toBe('intraday');
     expect(result.lastDate).toBe(D);          // 合成今日為最後一根

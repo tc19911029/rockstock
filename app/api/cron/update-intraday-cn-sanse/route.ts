@@ -25,7 +25,8 @@ import type { IntradayBar } from '@/lib/cn-sanse/scan';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const INDEX_SYMBOL = '000001.SS';
+const INDEX_SYMBOL = '000001.SS';     // 上證（滬市 RS 基準）
+const INDEX_SYMBOL_SZ = '399001.SZ';  // 深證成指（深市 RS 基準）
 
 export async function GET(req: NextRequest) {
   const denied = checkCronAuth(req);
@@ -59,24 +60,25 @@ export async function GET(req: NextRequest) {
       return apiOk({ skipped: true, reason: `L2 快照日 ${snap.date} ≠ 交易日 ${date}（等刷新）`, date, snapDate: snap.date });
     }
 
-    // 個股報價 → Map<純6位代碼, bar>；指數 000001.SS 另外抽出（避免與深市 000001 撞 key）
+    // 個股報價 → Map<純6位代碼, bar>；指數 000001.SS / 399001.SZ 另外抽出（避免與個股撞 key）
     const quotes = new Map<string, IntradayBar>();
-    let indexBar: IntradayBar | null = null;
+    const indexBars = new Map<string, IntradayBar>();
     for (const q of snap.quotes) {
       const bar = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
-      if (q.symbol === INDEX_SYMBOL) {
-        if (q.close > 0) indexBar = bar; // 指數不過下面的個股 close<=0 過濾，獨立判斷
+      if (q.symbol === INDEX_SYMBOL || q.symbol === INDEX_SYMBOL_SZ) {
+        if (q.close > 0) indexBars.set(q.symbol, bar); // 指數不過下面的個股 close<=0 過濾
         continue;
       }
       if (q.close <= 0) continue; // 個股停牌 / 無報價
       quotes.set(q.symbol.split('.')[0], bar);
     }
 
-    if (!indexBar) {
-      return apiOk({ skipped: true, reason: `L2 快照缺大盤指數 ${INDEX_SYMBOL}（RS 基準無法算）`, date });
+    if (!indexBars.has(INDEX_SYMBOL)) {
+      return apiOk({ skipped: true, reason: `L2 快照缺上證 ${INDEX_SYMBOL}（RS 基準無法算）`, date });
     }
+    // 深證成指缺 → scanSanSe 內深市股 RS 自動 fallback 上證（不中斷）
 
-    const result = await scanSanSe({ intraday: { date: snap.date, quotes, indexBar } });
+    const result = await scanSanSe({ intraday: { date: snap.date, quotes, indexBars } });
     await saveSanSeIntraday(result);
 
     return apiOk({

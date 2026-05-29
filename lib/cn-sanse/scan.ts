@@ -8,7 +8,9 @@ import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { computeSanSe, evalLatest, type SanSeLevel } from './selectors';
 import { evalConditions, type ConditionReport } from './conditions';
 
-const INDEX_SYMBOL = '000001.SS'; // 上證綜指，作為相對強弱基準
+// 相對強弱(RS)基準 = 個股所屬市場指數（對齊 TDX INDEXC）：滬市(.SS)→上證綜指、深市(.SZ)→深證成指。
+const INDEX_SYMBOL = '000001.SS';     // 上證綜指（滬市 + 行情日曆來源）
+const INDEX_SYMBOL_SZ = '399001.SZ';  // 深證成指（深市 RS 基準；缺檔時 fallback 上證）
 const MIN_BARS = 250;
 
 export interface SanSeHit {
@@ -63,9 +65,9 @@ export interface IntradayBar { open: number; high: number; low: number; close: n
  * 量能不完整 → 訊號整天會跳動，越接近收盤越接近真值。
  */
 export interface SanSeIntradayInput {
-  date: string;                          // 今日交易日 YYYY-MM-DD（snapshot.date）
-  quotes: Map<string, IntradayBar>;      // key = 純 6 位代碼（不含 .SS/.SZ）
-  indexBar: IntradayBar;                 // 今日上證指數即時 OHLCV（RS 基準）
+  date: string;                            // 今日交易日 YYYY-MM-DD（snapshot.date）
+  quotes: Map<string, IntradayBar>;        // key = 純 6 位代碼（不含 .SS/.SZ）
+  indexBars: Map<string, IntradayBar>;     // 今日指數即時 OHLCV，key = '000001.SS' / '399001.SZ'（RS 基準）
 }
 
 /** 把今日即時報價合成一根日K append 到封存序列尾端（已有今日就取代；封存比今日新則不動）。 */
@@ -122,14 +124,24 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
     return true;
   });
 
-  // 大盤指數 → date→close map（asOf 時截斷到該日；盤中時 append 今日即時指數）
+  // 大盤指數 → date→close map（asOf 時截斷到該日；盤中時 append 今日即時指數）。
+  // 上證(滬市基準 + 行情日曆) + 深證成指(深市基準)；深證缺檔時 fallback 上證。
   let idxCandles = truncate(await readCandles(dir, INDEX_SYMBOL));
   if (!idxCandles || idxCandles.length === 0) throw new Error(`找不到大盤指數 ${INDEX_SYMBOL} 的本地K線`);
+  let idxCandlesSZ = truncate(await readCandles(dir, INDEX_SYMBOL_SZ));
   // 盤中：append 前先記下「封存前一交易日」= 指數封存最後一根。個股只有封存對齊到這天才貼今日，
   // 否則（停牌復牌 / 下載漏昨日）封存有缺口，貼今日會算出跨缺口的失真 MA/SUM → 用此 base 把它擋掉。
   const archivedLast = idxCandles[idxCandles.length - 1]?.date ?? '';
-  if (intraday) idxCandles = appendTodayBar(idxCandles, intraday.date, intraday.indexBar);
-  const idxMap = new Map<string, number>(idxCandles.map((c) => [c.date, c.close]));
+  if (intraday) {
+    const shBar = intraday.indexBars.get(INDEX_SYMBOL);
+    if (shBar) idxCandles = appendTodayBar(idxCandles, intraday.date, shBar);
+    const szBar = intraday.indexBars.get(INDEX_SYMBOL_SZ);
+    if (idxCandlesSZ && idxCandlesSZ.length > 0 && szBar) idxCandlesSZ = appendTodayBar(idxCandlesSZ, intraday.date, szBar);
+  }
+  const idxMapSH = new Map<string, number>(idxCandles.map((c) => [c.date, c.close]));
+  const idxMapSZ = (idxCandlesSZ && idxCandlesSZ.length > 0)
+    ? new Map<string, number>(idxCandlesSZ.map((c) => [c.date, c.close]))
+    : idxMapSH; // 深證成指缺檔 → 退回上證（維持舊行為，不中斷）
   const lastDate = idxCandles[idxCandles.length - 1]?.date ?? '';
 
   const results: Record<SanSeLevel, SanSeHit[]> = { strict: [], medium: [], loose: [] };
@@ -156,10 +168,11 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
       if (candles[candles.length - 1].date !== lastDate) { staleSkipped++; return; }
       evaluated++;
 
-      // 對齊指數收盤（前向填補；開頭缺口留 NaN，MA/SUM 已具 NaN 韌性）
+      // 對齊「個股所屬市場指數」收盤（深市.SZ→深證成指、滬市.SS→上證；前向填補，開頭缺口留 NaN）
+      const homeIdx = s.symbol.endsWith('.SZ') ? idxMapSZ : idxMapSH;
       let last = NaN;
       const indexClose = candles.map((c) => {
-        const v = idxMap.get(c.date);
+        const v = homeIdx.get(c.date);
         if (v != null) last = v;
         return last;
       });

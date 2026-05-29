@@ -182,11 +182,13 @@ function HomePage() {
       const key = `${sym}|${tf}|${date ?? ''}`;
       if (lastLoadedRef.current === key) return;
       lastLoadedRef.current = key;
-      loadStock(sym, tf, undefined, date ?? undefined).catch((e: Error) => {
-        const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
-        setLoadError(msg);
-        toast.error(msg);
-      });
+      loadStock(sym, tf, undefined, date ?? undefined)
+        .then(() => setLoadError(null)) // 成功載入 → 清掉先前冷啟動 race 的失敗 banner
+        .catch((e: Error) => {
+          const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
+          setLoadError(msg);
+          toast.error(msg);
+        });
     } else if (lastLoadedRef.current === '') {
       // 首次 mount 沒帶 ?load → 載大盤指數（覆蓋 initData 的 DEMO 範例）
       lastLoadedRef.current = `_market_${market}`;

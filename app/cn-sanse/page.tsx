@@ -73,6 +73,15 @@ interface BacktestResp { ok: boolean; buckets: BucketStat[]; days: number; sampl
 const btColor = (v: number | null) => (v == null ? 'text-muted-foreground/40' : v > 0 ? 'text-rose-400' : v < 0 ? 'text-emerald-400' : 'text-muted-foreground');
 const btFmt = (v: number | null) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
 
+// 大盤 regime 燈號（紅綠燈語意：綠=可買、黃=收手、紅=觀望）。回測：只在多頭日買第一檔 5日 +0.32% vs 盤整/空頭 −0.5%。
+type MarketRegime = 'bull' | 'chop' | 'bear';
+interface RegimeResp { ok: boolean; regime: MarketRegime; asOf: string; close: number; ma20: number | null; ma60: number | null; error?: string }
+const REGIME_UI: Record<MarketRegime, { dot: string; label: string; hint: string; cls: string }> = {
+  bull: { dot: '🟢', label: '大盤多頭', hint: '可積極買第一檔', cls: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' },
+  chop: { dot: '🟡', label: '大盤盤整', hint: '第一檔短線偏弱 · 建議收手或只做極短', cls: 'bg-amber-500/10 text-amber-300 border-amber-500/30' },
+  bear: { dot: '🔴', label: '大盤空頭', hint: '三色短線無優勢 · 建議觀望', cls: 'bg-rose-500/10 text-rose-300 border-rose-500/30' },
+};
+
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 /** 元 → 億，<1000 億顯 1 位小數、≥1000 億取整（對齊 App） */
 const fmtYi = (v: number | undefined) => {
@@ -118,6 +127,7 @@ export default function CnSanSePage() {
   // 預設「期望漲幅·3日」：walk-forward 驗證顯示第一檔短線報酬/勝率優於舊「共振強度」排序
   const [rankMode, setRankMode] = useState<'resonance' | 'gain'>('gain');
   const [rankHz, setRankHz] = useState<HKey>('d3Return');
+  const [regime, setRegime] = useState<RegimeResp | null>(null);
 
   // 載入掃描結果。session='intraday' → 讀盤中即時快照（latest live，忽略 date）；
   // 否則讀盤後封存（無 date → 最新一日）。sessionArg 顯式傳入以免吃到 state 非同步延遲。
@@ -197,6 +207,17 @@ export default function CnSanSePage() {
       .finally(() => { if (alive) setChartLoading(false); });
     return () => { alive = false; };
   }, [sym]);
+
+  // 大盤 regime 燈號：跟著資料日期走（盤後=該日 as-of；盤中=最新）
+  useEffect(() => {
+    if (!data?.lastDate) { setRegime(null); return; }
+    let alive = true;
+    fetch(`/api/cn-sanse/regime?date=${data.lastDate}`)
+      .then((r) => r.json())
+      .then((j: RegimeResp) => { if (alive && j.ok) setRegime(j); })
+      .catch(() => { /* 燈號取不到不致命 */ });
+    return () => { alive = false; };
+  }, [data?.lastDate]);
 
   // 當前可見清單（共振紀錄驅動；無 records 時退回舊 results）
   const allRecords: RecordRow[] = data?.records ?? [];
@@ -316,6 +337,8 @@ export default function CnSanSePage() {
       <div className="h-full flex flex-row-reverse">
         {/* ── 右：掃描面板（日期 chip + 搜尋 + 選股器 + 結果表 + 漲跌幅）── */}
         <div className="w-[38%] min-w-[380px] border-l border-border flex flex-col overflow-hidden">
+          {/* 大盤 regime 燈號（擇時閘門：多頭才積極買第一檔）*/}
+          {regime && <RegimeBanner r={regime} />}
           {/* 日期 chip 列（對齊主頁）*/}
           {dates.length > 0 && (
             <div className="shrink-0 px-2 py-1.5 border-b border-border bg-card/40">
@@ -609,6 +632,20 @@ function QuoteGrid({ detail }: { detail: DetailResp }) {
       <Cell k="最低" v={fmt(q.low)} c={sign(q.low - q.prevClose)} />
       <Cell k="市盈動" v={fmt(q.peTTM)} />
       <Cell k="振幅" v={`${fmt(q.amplitude)}%`} />
+    </div>
+  );
+}
+
+/** 大盤 regime 燈號條：綠=多頭可買 / 黃=盤整收手 / 紅=空頭觀望（上證 收盤 vs MA20/MA60）*/
+function RegimeBanner({ r }: { r: RegimeResp }) {
+  const u = REGIME_UI[r.regime];
+  return (
+    <div className={cn('shrink-0 px-2 py-1 border-b flex items-center gap-2 text-[11px]', u.cls)}>
+      <span className="font-semibold whitespace-nowrap">{u.dot} {u.label}</span>
+      <span className="opacity-90 truncate">· {u.hint}</span>
+      <span className="ml-auto tabular-nums opacity-70 whitespace-nowrap">
+        上證 {r.close}{r.ma20 != null ? ` · MA20 ${r.ma20}` : ''}{r.ma60 != null ? ` · MA60 ${r.ma60}` : ''}
+      </span>
     </div>
   );
 }
