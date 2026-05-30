@@ -34,8 +34,27 @@ export interface ABCBreakoutResult {
   legALow: number;            // 修正第一段低點
   legBHigh: number;           // 反彈頂點（兩高點連線之一）
   legCLow: number;            // 修正最低點
+  // 各腳位的 candle index（走圖可視化 marker 用 idx→date 定位）
+  legAHighIdx: number;
+  legALowIdx: number;
+  legBHighIdx: number;
+  legCLowIdx: number;
   preEntryDays: number;       // 修正持續天數
   detail: string;
+}
+
+/**
+ * 走圖可視化用結構：偵測器「實際選用」的 ABC 四腳（含 index）+ 切線值。
+ * 純讀、不影響任何選股邏輯。見 getABCDisplayStructure。
+ */
+export interface ABCDisplayStructure {
+  legAHighIdx: number; legAHigh: number;
+  legALowIdx: number;  legALow: number;
+  legBHighIdx: number; legBHigh: number;
+  legCLowIdx: number;  legCLow: number;
+  trendlineValue: number;   // 下降切線在 idx 的延伸值
+  brokeTrendline: boolean;  // 今日收盤是否突破切線
+  isFullBreakout: boolean;  // detectABCBreakout 是否完全命中（5/5）
 }
 
 const MIN_LOOKBACK = 30;
@@ -202,6 +221,10 @@ export function detectABCBreakout(
       legALow: abc.legALow,
       legBHigh: abc.legBHigh,
       legCLow: abc.legCLow,
+      legAHighIdx: abc.legAHighIdx,
+      legALowIdx: abc.legALowIdx,
+      legBHighIdx: abc.legBHighIdx,
+      legCLowIdx: abc.legCLowIdx,
       preEntryDays,
       detail:
         `ABC 突破（A峰 ${abc.legAHigh.toFixed(1)}→A底 ${abc.legALow.toFixed(1)}→` +
@@ -211,4 +234,53 @@ export function detectABCBreakout(
   }
 
   return null;
+}
+
+/**
+ * 走圖可視化用：回傳偵測器「實際會用」的 ABC 四腳（含 index），給走圖畫 A/B/C marker + 切線。
+ *
+ * 動機（2026-05-30）：走圖上那條綠色「下降切線」是通用線（連最近兩波峰），與 ABC 偵測器無關；
+ *   兩者口徑曾不一致而沒人發現（600487 案例）。此函式讓走圖能畫出「偵測器自己選的腳位與切線」，
+ *   偵測器若再抓錯腳位，marker 會明顯畫錯位置 → 肉眼即可驗證，不再靠運氣。
+ *
+ * - 命中（5/5）→ 回傳 detectABCBreakout 實際選的那組，與判斷完全一致（isFullBreakout=true）
+ * - 未命中但有結構合格候選 → 回傳第一個（最近）候選，方便看「為什麼沒中」
+ *   （例：腳位畫對了但今日收盤沒突破切線 → brokeTrendline=false）
+ *
+ * 純讀、不影響任何選股邏輯。
+ */
+export function getABCDisplayStructure(
+  candles: CandleWithIndicators[],
+  idx: number,
+): ABCDisplayStructure | null {
+  if (idx < MIN_LOOKBACK) return null;
+  const c = candles[idx];
+  if (!c) return null;
+
+  const full = detectABCBreakout(candles, idx);
+  if (full) {
+    return {
+      legAHighIdx: full.legAHighIdx, legAHigh: full.legAHigh,
+      legALowIdx: full.legALowIdx, legALow: full.legALow,
+      legBHighIdx: full.legBHighIdx, legBHigh: full.legBHigh,
+      legCLowIdx: full.legCLowIdx, legCLow: full.legCLow,
+      trendlineValue: full.trendlineValue,
+      brokeTrendline: true,
+      isFullBreakout: true,
+    };
+  }
+
+  const candidates = findABCStructures(candles, idx);
+  if (candidates.length === 0) return null;
+  const abc = candidates[0];
+  const trendlineValue = trendlineAtIndex(abc, idx);
+  return {
+    legAHighIdx: abc.legAHighIdx, legAHigh: abc.legAHigh,
+    legALowIdx: abc.legALowIdx, legALow: abc.legALow,
+    legBHighIdx: abc.legBHighIdx, legBHigh: abc.legBHigh,
+    legCLowIdx: abc.legCLowIdx, legCLow: abc.legCLow,
+    trendlineValue,
+    brokeTrendline: c.close > trendlineValue,
+    isFullBreakout: false,
+  };
 }

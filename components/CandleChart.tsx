@@ -195,6 +195,16 @@ interface CandleChartProps {
     duokong: { time: string; value: number }[];
     markers: { time: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown'; color: string; text: string }[];
   } | null;
+  /**
+   * ABC 突破偵測器選用的腳位疊加（除錯/驗證用，2026-05-30）— 把 detectABCBreakout 實際選的
+   * A峰/A底/B峰/C底 marker + 它自己的下降切線畫到走圖。與通用綠色下降切線是兩回事：這條是
+   * 「偵測器判斷依據」本身，腳位若抓錯會明顯畫錯位置 → 肉眼即可驗證。傳 null = 不畫。
+   */
+  abcOverlay?: {
+    markers: { time: string; label: string; position: 'aboveBar' | 'belowBar' }[];
+    trendline: { time: string; value: number }[];
+    broke: boolean;   // 今日收盤是否突破切線（決定切線顏色）
+  } | null;
 }
 
 export default function CandleChart({
@@ -215,6 +225,7 @@ export default function CandleChart({
   centerOnDate,
   lockedPattern,
   shuangB = null,
+  abcOverlay = null,
 }: CandleChartProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
@@ -235,6 +246,8 @@ export default function CandleChart({
   const patternConnectorRef = useRef<ISeriesApi<'Line'> | null>(null);
   // 雙B戰法主圖疊加（三色資金）：智能交易線/ZB4/ZB5/多空線
   const shuangBRefs       = useRef<{ zhineng?: ISeriesApi<'Line'>; zb4?: ISeriesApi<'Line'>; zb5?: ISeriesApi<'Line'>; duokong?: ISeriesApi<'Line'> }>({});
+  // ABC 偵測器腳位切線（除錯/驗證疊加）
+  const abcTrendlineRef   = useRef<ISeriesApi<'Line'> | null>(null);
   // Keep latest candles accessible inside event closures without re-subscribing
   const candlesRef     = useRef<CandleWithIndicators[]>(candles);
   const timeMapRef     = useRef<Map<string | number, CandleWithIndicators>>(new Map());
@@ -438,6 +451,12 @@ export default function CandleChart({
     });
     shuangBRefs.current.duokong = chart.addSeries(LineSeries, {
       color: '#FFD000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2,
+    });
+
+    // ── ABC 偵測器腳位切線（除錯/驗證）：amber 粗線，與通用綠色下降切線區分 ──
+    abcTrendlineRef.current = chart.addSeries(LineSeries, {
+      color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
+      title: 'ABC切線',
     });
 
     chartRef.current  = chart;
@@ -765,6 +784,19 @@ export default function CandleChart({
     r.duokong?.setData(shuangB ? toLine(shuangB.duokong) : []);
   }, [shuangB]);
 
+  // ── ABC 偵測器腳位切線：set/clear（markers 併入下方 markers effect）──
+  useEffect(() => {
+    const ref = abcTrendlineRef.current;
+    if (!ref) return;
+    if (abcOverlay && abcOverlay.trendline.length >= 2) {
+      // 突破=amber 實線（命中）、未突破=灰色（候選但沒過）
+      ref.applyOptions({ color: abcOverlay.broke ? '#f59e0b' : '#94a3b8' });
+      ref.setData(abcOverlay.trendline.map(p => ({ time: toTime(p.time), value: p.value })));
+    } else {
+      ref.setData([]);
+    }
+  }, [abcOverlay]);
+
   // ── MA visibility toggle ─────────────────────────────────────────────────
   useEffect(() => {
     const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
@@ -864,6 +896,15 @@ export default function CandleChart({
         });
       }
     }
+    // ABC 偵測器腳位 marker（A峰/A底/B峰/C底）— amber 圓點，標籤即偵測器選的腳
+    if (abcOverlay) {
+      for (const m of abcOverlay.markers) {
+        converted.push({
+          time: toTime(m.time), position: m.position, shape: 'circle',
+          color: '#f59e0b', text: m.label, size: 2,
+        });
+      }
+    }
     // lightweight-charts 要求 markers 按時間升序
     converted.sort((a, b) => {
       const ta = String(a.time);
@@ -871,7 +912,7 @@ export default function CandleChart({
       return ta < tb ? -1 : ta > tb ? 1 : 0;
     });
     markersPlugRef.current.setMarkers(converted);
-  }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern, shuangB]);
+  }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern, shuangB, abcOverlay]);
 
   // ── Support/resistance price lines (前高壓 / 前低撐 / 大量撐壓) ──────────
   useEffect(() => {

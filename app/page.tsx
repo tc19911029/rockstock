@@ -47,6 +47,7 @@ import { CandidatesPoolPanel } from '@/components/CandidatesPoolPanel';
 import { FundamentalRevaluationPanel } from '@/components/FundamentalRevaluationPanel';
 import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
+import { getABCDisplayStructure } from '@/lib/analysis/abcBreakoutEntry';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { ChevronDown, Search } from 'lucide-react';
@@ -383,23 +384,28 @@ function HomePage() {
   }, [ticker]);
 
   // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
-  // 陸股一律抓（複用 /cn-sanse 同一支 chart API）：圖層由各 toggle 控制，但條件報告給中間「條件」tab 用，故 CN 永遠抓。
+  // 陸股走 /cn-sanse、台股走 /tw-sanse（同一份 SanSeChartPayload 形狀）：圖層由各 toggle 控制。
+  // 台股是純視覺疊圖，不進選股流程；中間「條件」tab（showSanseView）仍只給陸股，故台股不寫 conditions。
   // 走圖步進：日K 時帶 asOf=當前可見最後一根日期 → 標記/條件/訊號跟著步進的位置重算（練習器核心）。
-  const sanseAsOf = isCnTicker && currentInterval === '1d' && visibleCandles.length
+  const sanseEnabled = isCnTicker || isTwTicker;
+  const sanseAsOf = sanseEnabled && currentInterval === '1d' && visibleCandles.length
     ? visibleCandles[visibleCandles.length - 1].date
     : '';
-  const sanseFetchKey = isCnTicker ? `${ticker}@${sanseAsOf}` : '';
+  const sanseFetchKey = sanseEnabled ? `${ticker}@${sanseAsOf}` : '';
   const [sanse, setSanse] = useState<SanSeChartPayload | null>(null);
   const [sanseConditions, setSanseConditions] = useState<ConditionReport | null>(null);
   useEffect(() => {
-    if (!isCnTicker || !ticker) { setSanse(null); setSanseConditions(null); return; }
+    if (!sanseEnabled || !ticker) { setSanse(null); setSanseConditions(null); return; }
     const ctrl = new AbortController();
-    const url = `/api/cn-sanse/chart/${encodeURIComponent(ticker)}${sanseAsOf ? `?asOf=${sanseAsOf}` : ''}`;
+    const base = isCnTicker ? '/api/cn-sanse/chart' : '/api/tw-sanse/chart';
+    const url = `${base}/${encodeURIComponent(ticker)}${sanseAsOf ? `?asOf=${sanseAsOf}` : ''}`;
     fetch(url, { signal: ctrl.signal })
       .then(r => r.json())
       .then(j => {
         if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload);
-        if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
+        // 條件報告只給陸股的中間面板用；台股不驅動選股條件 tab
+        if (isCnTicker && j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
+        else if (!isCnTicker) setSanseConditions(null);
       })
       .catch(err => { if (err.name !== 'AbortError') console.warn('[sanse] load failed:', err); });
     return () => ctrl.abort();
@@ -568,17 +574,52 @@ function HomePage() {
   // 是否顯示深度決策面板：有選股且非大盤指數
   const showDecisionPanel = !!currentStock && !/^\^|^000001\.SS$/.test(currentStock.ticker);
 
-  // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股 + 抓到資料才畫
-  const shuangBOverlay = showShuangB && isCnTicker && sanse ? {
+  // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫
+  const shuangBOverlay = showShuangB && sanseEnabled && sanse ? {
     zhineng: sanse.zhineng, zb4: sanse.zb4, zb5: sanse.zb5, duokong: sanse.duokong,
     markers: sanse.mainMarkers,
   } : null;
   // 副圖（主力狀態F / 捕撈季節）資料 — 對齊主圖 candle 由 IndicatorCharts 自行 map
-  const sanseZhuli = isCnTicker && indicators.mainForce ? sanse?.zhuli ?? null : null;
-  const sanseXys = isCnTicker && indicators.season && sanse ? {
+  // 台股無換手率 → xysTiers 為 undefined（4 級彩柱不畫），金叉/動能柱照常
+  const sanseZhuli = sanseEnabled && indicators.mainForce ? sanse?.zhuli ?? null : null;
+  const sanseXys = sanseEnabled && indicators.season && sanse ? {
     xys0: sanse.xys0, xys1: sanse.xys1, xys2: sanse.xys2,
     subMarkers: sanse.subMarkers, xysTiers: sanse.xysTiers ?? null,
   } : null;
+
+  // ABC 偵測器腳位疊加（除錯/驗證）— 選「ABC 突破」買法(J，舊代號 G)且非三色視圖時，
+  // 把 detectABCBreakout 實際選的 A/B/C 腳 + 它的下降切線畫到走圖（用走圖游標 currentIndex 對齊面板）。
+  const activeBuyMethod = useBacktestStore(s => s.activeBuyMethod);
+  const abcOverlay = useMemo(() => {
+    const isAbcMethod = activeBuyMethod === 'J' || activeBuyMethod === 'G';
+    if (showSanseView || !isAbcMethod) return null;
+    if (!allCandles.length || currentIndex < 0) return null;
+    const disp = getABCDisplayStructure(allCandles, currentIndex);
+    if (!disp) return null;
+    const dateAt = (i: number) => allCandles[i]?.date;
+    const mk = (i: number, label: string, position: 'aboveBar' | 'belowBar') => {
+      const time = dateAt(i);
+      return time ? { time, label, position } : null;
+    };
+    const markers = [
+      mk(disp.legAHighIdx, 'A峰', 'aboveBar'),
+      mk(disp.legALowIdx, 'A底', 'belowBar'),
+      mk(disp.legBHighIdx, 'B峰', 'aboveBar'),
+      mk(disp.legCLowIdx, 'C底', 'belowBar'),
+    ].filter((m): m is { time: string; label: string; position: 'aboveBar' | 'belowBar' } => m != null);
+    const aTime = dateAt(disp.legAHighIdx);
+    const todayTime = dateAt(currentIndex);
+    if (!aTime || !todayTime) return null;
+    // 切線 2 點（A峰 → 今日延伸值）即 A峰→B峰 連線外推，B峰共線故 2 點足夠
+    return {
+      markers,
+      trendline: [
+        { time: aTime, value: disp.legAHigh },
+        { time: todayTime, value: disp.trendlineValue },
+      ],
+      broke: disp.brokeTrendline,
+    };
+  }, [showSanseView, activeBuyMethod, allCandles, currentIndex]);
 
   return (
     // fullViewport=false 永遠允許整頁 vertical scroll（避免 ^TWII 時整頁鎖死無法捲動）
@@ -711,6 +752,7 @@ function HomePage() {
               highlightDate: targetDate ?? undefined,
               lockedPattern,
               shuangB: shuangBOverlay,
+              abcOverlay,
             }}
             indicatorProps={{
               candles: visibleCandles,
@@ -1071,6 +1113,7 @@ function HomePage() {
                       highlightDate={targetDate ?? undefined}
                       lockedPattern={lockedPattern}
                       shuangB={shuangBOverlay}
+                      abcOverlay={abcOverlay}
                     />
                   </ErrorBoundary>
                 </div>
