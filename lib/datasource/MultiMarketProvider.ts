@@ -22,6 +22,7 @@ import { twseHistProvider } from './TWSEHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
 import { eastMoneyHistProvider, getSinaMinuteCandles } from './EastMoneyHistProvider';
 import { tencentHistProvider } from './TencentHistProvider';
+import { baiduHistProvider } from './BaiduHistProvider';
 import { eodhdHistProvider } from './EODHDHistProvider';
 import { yahooProvider } from './YahooDataProvider';
 import { getTWSEQuote, getTWSERealtimeIntraday } from './TWSERealtime';
@@ -428,11 +429,15 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else {
-      // 陸股/美股走圖路由：Tencent → Yahoo → EODHD → EastMoney（騰訊/Sina/Yahoo 優先，EastMoney 墊底）
+      // 陸股/美股走圖路由：Tencent → 百度(CN,不封IP) → Yahoo → EODHD → EastMoney（EastMoney 墊底）
       result = await tryProvidersWithRacing([
         {
           name: `Tencent ${symbol}`,
           fn: () => tencentHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
+        },
+        {
+          name: `Baidu ${symbol}`,
+          fn: () => baiduHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
         {
           name: `Yahoo ${symbol}`,
