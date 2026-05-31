@@ -48,6 +48,8 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
   // PB：優先用 EastMoney 權威值（已修正欄位漂移），無則 price/每股淨值 自算
   const pb = val?.pbRatio ?? (price != null && latest?.bps ? price / latest.bps : null);
   const pe = val?.dynamicPe ?? null; // 本益比（動）＝年化最新季
+  // 淨利年減幅 >50% → 提示使用者核對原始公告（數值本身已跨源驗證，非錯誤）
+  const extremeDrop = fin.some((q) => q.netProfitYoY != null && q.netProfitYoY < -50);
 
   return (
     <div className="flex flex-col gap-3 p-2.5 text-xs overflow-auto">
@@ -72,6 +74,11 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
           <span className="font-semibold text-fuchsia-300">逐季財報</span>
           <span className="text-[10px] text-muted-foreground">营收/净利/ROE/毛利（YoY=年增率）</span>
         </div>
+        {extremeDrop && (
+          <div className="mb-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-300">
+            ⚠ 部分期間淨利年減 &gt;50%；數值已與東財/同花順/新浪核對一致，建議再查原始財報公告確認。
+          </div>
+        )}
         {fin.length ? (
           <div className="overflow-x-auto">
             <table className="w-full text-[10px]">
