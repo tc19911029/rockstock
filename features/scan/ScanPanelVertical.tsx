@@ -50,12 +50,12 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
   const [coachCollapsed, setCoachCollapsed] = useState(true);
 
-  // 三色資金（陸股自創）— 放在「朱老師戰法」排的 Q/R 旁邊，選一個 level 就切到該策略結果。
+  // 三色資金（自創策略，台股+陸股）— 放在「朱老師戰法」排的 Q/R 旁邊，選一個 level 就切到該策略結果。
   // null = 走書本買法（A-R 字母）；非 null = 顯示三色資金該 level 命中清單。
   // level 提升到 backtestStore（單一事實來源），讓中間「條件/訊號」面板也能跟著三色/書本切換。
   const cnSanSeLevel = sanseLevel;
   const setCnSanSeLevel = setSanseLevel;
-  const cnSanSe = market === 'CN' && cnSanSeLevel !== null;
+  const sanSeMode = cnSanSeLevel !== null;
   // 走圖目前選中的代號 → 三色資金清單高亮
   const selectedTicker = useReplayStore(s => s.currentStock?.ticker ?? null);
 
@@ -205,7 +205,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 onClick={() => { setCnSanSeLevel(null); setActiveBuyMethod(method); }}
                 disabled={isLoadingBuyMethod}
                 className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
-                  activeBuyMethod === method && !cnSanSe
+                  activeBuyMethod === method && !sanSeMode
                     ? color
                     : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                 }`}
@@ -267,8 +267,8 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 <div className="flex items-center gap-1 flex-wrap">
                   {renderBtn('Q', 'bg-purple-700/70 border-purple-600 text-purple-100')}
                   {renderBtn('R', 'bg-cyan-700/70 border-cyan-600 text-cyan-100')}
-                  {/* 三色資金（陸股自創）— 嚴格/中等/寬鬆 三檔並排在乖離率旁邊 */}
-                  {market === 'CN' && ([
+                  {/* 三色資金（自創策略，台股+陸股）— 嚴格/中等/寬鬆 三檔並排在乖離率旁邊 */}
+                  {([
                     ['strict', '三色(嚴格)', '三色資金共振：短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位'],
                     ['medium', '三色(中等)', '更新版：短攻/中強/中控 三分數都 > 0'],
                     ['loose', '三色(寬鬆)', '游資資金翻正：短線動能今天剛由負轉正'],
@@ -280,7 +280,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                           ? 'bg-fuchsia-700/70 border-fuchsia-600 text-fuchsia-100'
                           : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                       }`}
-                      title={`${label} · 陸股自創策略\n${tip}`}>
+                      title={`${label} · ${market === 'TW' ? '台股' : '陸股'}自創策略\n${tip}`}>
                       {label}
                     </button>
                   ))}
@@ -327,8 +327,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
       </div>
 
-      {cnSanSe ? (
-        <SanSeScanCompact level={cnSanSeLevel ?? 'medium'} onSelectStock={onSelectStock} selectedSymbol={selectedTicker} />
+      {sanSeMode && scanDirection === 'long' ? (
+        // 三色僅做多；切到 空/打板 時退回書本買法清單（level 仍保留，切回「多」會自動恢復三色）
+        <SanSeScanCompact market={market} level={cnSanSeLevel ?? 'medium'} onSelectStock={onSelectStock} selectedSymbol={selectedTicker} />
       ) : (
       <>
       {/* ── 鎖股觀察（4 區塊之後，結果列表之前）── */}

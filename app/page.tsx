@@ -343,11 +343,14 @@ function HomePage() {
   const ticker = currentStock?.ticker ?? '';
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
   const isCnTicker = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
+  // 三色資金（雙B/主力/捕撈）台股+陸股皆可；^TWII 加權指數比照陸股 000001.SS 也可（指數三色為退化值但版面一致）
+  const sanseEnabled = isCnTicker || isTwTicker || ticker === '^TWII';
   // 中間「條件/訊號」面板跟著掃描面板選的策略換：
   //   三色 level（CN 自創策略）被選中 → 顯示三色面板；否則 → 書本買法面板（含陸股）。
   // sanseLevel 為單一事實來源（store），由掃描面板「三色(嚴格/中等/寬鬆)」按鈕設定、選任何書本買法時自動清空。
   const sanseLevel = useBacktestStore(s => s.sanseLevel);
-  const showSanseView = isCnTicker && sanseLevel != null;
+  // 三色模式（台股+陸股）：選了 level 且當前股票屬三色可用市場 → 中間條件/訊號改顯示 SanSe 面板
+  const showSanseView = sanseEnabled && sanseLevel != null;
   const wantChips = (isTwTicker && anyTwChipOn) || (isCnTicker && anyCnChipOn);
   // 把 fetch trigger 編成單一 string key，dep 比較穩定
   const chipFetchKey = wantChips ? ticker : '';
@@ -385,9 +388,8 @@ function HomePage() {
 
   // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
   // 陸股走 /cn-sanse、台股走 /tw-sanse（同一份 SanSeChartPayload 形狀）：圖層由各 toggle 控制。
-  // 台股是純視覺疊圖，不進選股流程；中間「條件」tab（showSanseView）仍只給陸股，故台股不寫 conditions。
+  // conditions 兩市場都寫（三色模式時中間條件/訊號 tab 用，由 showSanseView 控制）。
   // 走圖步進：日K 時帶 asOf=當前可見最後一根日期 → 標記/條件/訊號跟著步進的位置重算（練習器核心）。
-  const sanseEnabled = isCnTicker || isTwTicker;
   const sanseAsOf = sanseEnabled && currentInterval === '1d' && visibleCandles.length
     ? visibleCandles[visibleCandles.length - 1].date
     : '';
@@ -403,9 +405,9 @@ function HomePage() {
       .then(r => r.json())
       .then(j => {
         if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload);
-        // 條件報告只給陸股的中間面板用；台股不驅動選股條件 tab
-        if (isCnTicker && j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
-        else if (!isCnTicker) setSanseConditions(null);
+        // 條件報告兩市場都寫（三色模式時中間條件/訊號 tab 用）
+        if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
+        else setSanseConditions(null);
       })
       .catch(err => { if (err.name !== 'AbortError') console.warn('[sanse] load failed:', err); });
     return () => ctrl.abort();
@@ -413,6 +415,10 @@ function HomePage() {
   }, [sanseFetchKey]);
 
   const handleScanSelectStock = useCallback((stock: SelectedStock) => {
+    // 點卡片時同步掃描面板市場（避免 market=CN 卻點到 TW 卡片 → 面板/下一次三色 fetch 仍停在 CN）
+    if (stock.market && useBacktestStore.getState().market !== stock.market) {
+      useBacktestStore.getState().setMarket(stock.market);
+    }
     // 優先用該股自帶的掃描日（三色資金帶 cn-sanse 固化日），否則回退書本掃描日 → K 線停在掃描日而非最新
     const fallbackDate = useBacktestStore.getState().scanDate;
     const date = stock.date ?? fallbackDate ?? undefined;

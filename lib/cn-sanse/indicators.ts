@@ -90,7 +90,20 @@ function lp(dates: string[], arr: number[]): LinePoint[] {
   return out;
 }
 
-export function computeSanSeChart(candles: Candle[], indexClose?: number[], extras?: DayExtrasArr): SanSeChartData {
+/** 捕撈季節 4 級彩柱的換手率門檻 [green, yellow, cyan, blue]。預設為陸股原碼值；
+ *  台股周轉率水位結構性偏低，由 scripts/calibrate-tw-season-tiers.ts 百分位對齊重算後覆寫。 */
+export type TierThresholds = [number, number, number, number];
+export const CN_TIER_THRESHOLDS: TierThresholds = [6.1, 3.8, 2.1, 1.8];
+/** 台股周轉率門檻 — 百分位對齊陸股分佈算出（scripts/calibrate-tw-season-tiers.ts，
+ *  2026-05-31：陸股中位數4.95% vs 台股1.55%，台股結構性偏低，直接套陸股門檻彩柱幾乎不亮）。 */
+export const TW_TIER_THRESHOLDS: TierThresholds = [2.25, 1.08, 0.66, 0.6];
+
+export function computeSanSeChart(
+  candles: Candle[],
+  indexClose?: number[],
+  extras?: DayExtrasArr,
+  tierThr: TierThresholds = CN_TIER_THRESHOLDS,
+): SanSeChartData {
   const dates = candles.map((c) => c.date);
   const O = candles.map((c) => c.open);
   const H = candles.map((c) => c.high);
@@ -192,7 +205,7 @@ export function computeSanSeChart(candles: Candle[], indexClose?: number[], extr
       for (let k = 0; k < n; k++) if (baseOK(k) && X11[k] > thr) out.push({ time: dates[k], value: h });
       return out;
     };
-    xysTiers = { green: tier(6.1, 2), yellow: tier(3.8, 1.5), cyan: tier(2.1, 1), blue: tier(1.8, 0.5) };
+    xysTiers = { green: tier(tierThr[0], 2), yellow: tier(tierThr[1], 1.5), cyan: tier(tierThr[2], 1), blue: tier(tierThr[3], 0.5) };
   }
 
   // ── 最後一根的訊號彙整（給教學側欄） ─────────────────────────

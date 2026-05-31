@@ -822,7 +822,7 @@ function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicat
     const fast = chart.addSeries(LineSeries, { color: '#3B82F6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     fast.setData(alignToCandles(candles, xys.xys1));
     seriesRef.current.push(fast);
-    const slow = chart.addSeries(LineSeries, { color: '#4080FF', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    const slow = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     slow.setData(alignToCandles(candles, xys.xys2));
     seriesRef.current.push(slow);
     createSeriesMarkers(slow, xys.subMarkers.map(m => ({ time: toTime(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text })));
@@ -838,8 +838,8 @@ function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicat
         <span className="text-muted-foreground">捕撈季節</span>
         <span className={(xys0v ?? 0) >= 0 ? 'text-fuchsia-400' : 'text-emerald-400'}>XYS0 {at(xys.xys0)}</span>
         <span className="text-muted-foreground/60">ZZX 0.00</span>
-        <span className="text-blue-400">XYS1 {at(xys.xys1)}</span>
-        <span style={{ color: '#4080FF' }}>XYS2 {at(xys.xys2)}</span>
+        <span style={{ color: '#3B82F6' }}>XYS1 {at(xys.xys1)}</span>
+        <span style={{ color: '#F59E0B' }}>XYS2 {at(xys.xys2)}</span>
       </div>
       <div ref={containerRef} className="w-full h-full" />
     </div>
@@ -906,8 +906,8 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
     show.h1000 && isTW && <div key="h1000" className="shrink-0 h-7 bg-card border-t border-border/40"><HolderBadge holderKey="h1000" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnMain && isCN && <div key="cnMain" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnMain" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnRetail && isCN && <div key="cnRetail" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnRetail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
-    show.mainForce && isCN && sanseZhuli && <div key="mainForce" className="flex-1 min-h-0 bg-card"><MainForceChart candles={candles} zhuli={sanseZhuli} hoverCandle={hoverCandle} /></div>,
-    show.season && isCN && sanseXys && <div key="season" className="flex-[1.7] min-h-0 bg-card"><SeasonChart candles={candles} xys={sanseXys} hoverCandle={hoverCandle} /></div>,
+    show.mainForce && (isCN || isTW) && sanseZhuli && <div key="mainForce" className="flex-1 min-h-0 bg-card"><MainForceChart candles={candles} zhuli={sanseZhuli} hoverCandle={hoverCandle} /></div>,
+    show.season && (isCN || isTW) && sanseXys && <div key="season" className="flex-[1.7] min-h-0 bg-card"><SeasonChart candles={candles} xys={sanseXys} hoverCandle={hoverCandle} /></div>,
   ].filter(Boolean);
 
   if (panels.length === 0) return <div className="h-full bg-card flex items-center justify-center text-xs text-muted-foreground/60">請開啟至少一個指標面板</div>;

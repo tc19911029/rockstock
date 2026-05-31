@@ -183,8 +183,9 @@ const SINGLE_CANDLE_INCREMENT_THRESHOLD = 1;
  *   3. 任何 vendor parse 錯亂
  *
  * 策略：
- *   - 小幅破範圍 (≤ 1%)：clip 回 [low, high]（資料其他部分還可用）
- *   - 大幅破 (> 1%)：log warn 並 drop 該 bar（vendor 完全亂值）
+ *   - open 出界：一律 clip 回 [low, high]（多為 TWSE 競價/除權息參考價，非亂值；H/L/C 仍真實）
+ *   - close 小幅破 (≤ 1%)：clip 回 [low, high]
+ *   - close 大幅破 (> 1%)：log warn 並 drop 該 bar（close 是關鍵價，大破多為 vendor 亂值）
  *
  * 註：volume cliff / spike + limit-up close 守門仍在 LocalCandleStore（針對「最後一根」）
  * 此處只做純 OHLC 自洽（針對「全部 incoming bar」）。
@@ -195,13 +196,15 @@ function sanitizeOHLC(symbol: string, market: 'TW' | 'CN', incoming: Candle[]): 
   const out: Candle[] = [];
   for (const c of incoming) {
     const { open, high, low, close, volume, date } = c;
-    if (high <= 0 || low <= 0 || open <= 0 || close <= 0 || low > high) {
-      out.push(c); // 不合理但不是 OHLC 自洽範疇（vendor 缺資料），留給其他 guard 處理
+    if (high <= 0 || low <= 0 || close <= 0 || low > high) {
+      out.push(c); // H/L/C 缺值 → 非 OHLC 自洽範疇（vendor 缺資料），留給其他 guard 處理
       continue;
     }
     const fixed = { ...c };
     let clipped = false;
     let dropped = false;
+    // open ≤ 0（沒抓到開盤價，常見於上市首日/資料缺口）→ 用 close 填（在 [low,high] 內）
+    if (fixed.open <= 0) { fixed.open = close; clipped = true; }
 
     // close 在 [low, high] 範圍外？
     if (close > high) {
@@ -213,18 +216,13 @@ function sanitizeOHLC(symbol: string, market: 'TW' | 'CN', incoming: Candle[]): 
       if (breachPct <= 0.01) { fixed.close = low; clipped = true; }
       else { dropped = true; }
     }
-    // open 在 [low, high] 範圍外？(2072.TW Yahoo adjusted 殘留典型 case)
+    // open 在 [low, high] 範圍外 → 一律 clip 到範圍內（不 drop）。
+    // 理由：H/L/C 已驗證自洽（low≤high、close 已處理），open 出界幾乎都是 TWSE 開盤集合競價/
+    // 除權息參考價（創新板等高波動股常見，如 6908 宏碁遊戲-創 有 17% 交易日 open 出界、FinMind/
+    // Yahoo 等官方源頭都同值），非 vendor 亂值 → clip 保留該根真實 H/L/C/V，不可整根 drop。
     if (!dropped) {
-      const o = fixed.open;
-      if (o > high) {
-        const breachPct = (o - high) / high;
-        if (breachPct <= 0.01) { fixed.open = high; clipped = true; }
-        else { dropped = true; }
-      } else if (o < low) {
-        const breachPct = (low - o) / low;
-        if (breachPct <= 0.01) { fixed.open = low; clipped = true; }
-        else { dropped = true; }
-      }
+      if (fixed.open > high) { fixed.open = high; clipped = true; }
+      else if (fixed.open < low) { fixed.open = low; clipped = true; }
     }
 
     if (dropped) {

@@ -9,6 +9,7 @@
  * 規則：
  *   close > high (差 > 0.1%) → 違反
  *   close < low (差 > 0.1%) → 違反
+ *   open > high / open < low (差 > 0.1%) → 違反（2026-05-31 加；寫入層已 clip，殘留代表繞過）
  *   違反 > 100 筆 → exit 1（給 cron 看）
  */
 import { config } from 'dotenv';
@@ -33,7 +34,7 @@ interface MarketAudit {
   totalCandles: number;
   violations: number;
   byBucket: { '0.1-1%': number; '1-5%': number; '>5%': number };
-  samples: Array<{ symbol: string; date: string; type: 'close>high' | 'close<low'; diffPct: number }>;
+  samples: Array<{ symbol: string; date: string; type: 'close>high' | 'close<low' | 'open>high' | 'open<low'; diffPct: number }>;
 }
 
 function auditMarket(market: Market): MarketAudit {
@@ -54,7 +55,7 @@ function auditMarket(market: Market): MarketAudit {
     const sym = f.replace('.json', '');
     for (const c of candles) {
       out.totalCandles++;
-      let violation: 'close>high' | 'close<low' | null = null;
+      let violation: 'close>high' | 'close<low' | 'open>high' | 'open<low' | null = null;
       let diff = 0;
       if (c.close > c.high + VIOLATION_THRESHOLD) {
         violation = 'close>high';
@@ -62,6 +63,14 @@ function auditMarket(market: Market): MarketAudit {
       } else if (c.close < c.low - VIOLATION_THRESHOLD) {
         violation = 'close<low';
         diff = (c.low - c.close) / c.low;
+      } else if (c.open > c.high + VIOLATION_THRESHOLD) {
+        // open 出界（2026-05-31 加）：寫入層 sanitizeOHLC 已對 open 一律 clip，
+        // 正常不該再出現；若出現代表有路徑繞過寫入層或舊壞檔殘留。
+        violation = 'open>high';
+        diff = (c.open - c.high) / c.high;
+      } else if (c.open < c.low - VIOLATION_THRESHOLD) {
+        violation = 'open<low';
+        diff = (c.low - c.open) / c.low;
       }
       if (!violation) continue;
       if (diff < VIOLATION_PCT_FILTER) continue; // vendor data precision (0.5%)

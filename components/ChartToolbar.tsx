@@ -23,9 +23,9 @@ interface Indicators {
   cnMain?: boolean;
   /** CN 散戶資金（中單+小單） */
   cnRetail?: boolean;
-  /** 三色資金「主力狀態F」副圖 — 僅 CN */
+  /** 三色資金「主力狀態F」副圖 — CN + TW（台股走 /api/tw-sanse） */
   mainForce?: boolean;
-  /** 三色資金「捕撈季節」副圖 — 僅 CN */
+  /** 三色資金「捕撈季節」副圖 — CN + TW（台股無換手率，不畫 4 級彩柱） */
   season?: boolean;
 }
 
@@ -254,7 +254,7 @@ export default function ChartToolbar({
           }`}
           title="布林通道 (20, 2)"
         >BB</button>
-        {isCN && onShuangBToggle && (
+        {(isCN || isTW) && onShuangBToggle && (
           <button
             onClick={onShuangBToggle}
             aria-pressed={showShuangB}
@@ -275,7 +275,7 @@ export default function ChartToolbar({
             }`}
           >{label}</button>
         ))}
-        {isCN && (['mainForce', 'season'] as const).map(key => (
+        {(isCN || isTW) && (['mainForce', 'season'] as const).map(key => (
           <button key={key}
             onClick={() => onIndicatorToggle(key)}
             aria-pressed={!!indicators[key]}

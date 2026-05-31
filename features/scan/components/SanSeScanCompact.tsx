@@ -7,7 +7,7 @@
 // 三策略（嚴格/中等/寬鬆）各自獨立：點哪個 pill 只顯示該 level 命中清單，互不混合。
 // 多策略徽章：同一股若同時命中多個 level，卡片標示「嚴/中/寬」高亮。
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { RefreshCw } from 'lucide-react';
 import { ForwardPerfRow } from './ForwardPerfRow';
@@ -121,9 +121,12 @@ interface Props {
   selectedSymbol?: string | null;
   /** 由外部（工具列「三色(嚴格/中等/寬鬆)」按鈕）控制的 level；給定時隱藏內建 pill 列 */
   level?: Level;
+  /** 市場：CN（預設，走 /api/cn-sanse）或 TW（走 /api/tw-sanse，無盤中即時）*/
+  market?: 'TW' | 'CN';
 }
 
-export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: controlledLevel }: Props) {
+export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: controlledLevel, market = 'CN' }: Props) {
+  const apiBase = market === 'TW' ? '/api/tw-sanse' : '/api/cn-sanse';
   const [data, setData] = useState<ScanResp | null>(null);
   const [dates, setDates] = useState<DateEntry[]>([]);
   const [session, setSession] = useState<'post_close' | 'intraday'>('post_close');
@@ -144,22 +147,28 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     return next;
   });
 
+  // 切市場（apiBase 變）時，舊市場的 in-flight fetch 後到不可覆蓋新市場資料 → 用 ref 守門。
+  const liveBaseRef = useRef(apiBase);
+
   // session='intraday' → 讀盤中即時快照（latest live，忽略 date）；否則讀盤後封存。
   const loadDate = useCallback(async (date?: string, sessionArg?: 'post_close' | 'intraday') => {
     const sess = sessionArg ?? session;
+    const myBase = apiBase;
     setLoading(true); setErr(null);
     try {
       const url = sess === 'intraday'
-        ? '/api/cn-sanse/scan?session=intraday'
-        : `/api/cn-sanse/scan${date ? `?date=${date}` : ''}`;
+        ? `${apiBase}/scan?session=intraday`
+        : `${apiBase}/scan${date ? `?date=${date}` : ''}`;
       const r = await fetch(url);
       const j: ScanResp = await r.json();
+      if (liveBaseRef.current !== myBase) return; // 已切到別的市場 → 丟棄這次結果
       if (!j.ok) throw new Error(j.error || (sess === 'intraday' ? '尚無盤中即時快照' : '讀取失敗'));
       setData(j);
     } catch (e) {
+      if (liveBaseRef.current !== myBase) return;
       setErr(e instanceof Error ? e.message : '讀取失敗');
-    } finally { setLoading(false); }
-  }, [session]);
+    } finally { if (liveBaseRef.current === myBase) setLoading(false); }
+  }, [session, apiBase]);
 
   const switchSession = useCallback((s: 'post_close' | 'intraday') => {
     setSession(s);
@@ -167,34 +176,41 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   }, [loadDate]);
 
   const loadDates = useCallback(async () => {
+    const myBase = apiBase;
     try {
-      const r = await fetch('/api/cn-sanse/scan/dates');
+      const r = await fetch(`${apiBase}/scan/dates`);
       const j = await r.json();
-      if (j.ok) setDates(j.dates ?? []);
+      if (liveBaseRef.current === myBase && j.ok) setDates(j.dates ?? []);
     } catch { /* 日期列載不到不致命 */ }
-  }, []);
+  }, [apiBase]);
 
   const rescan = useCallback(async () => {
+    const myBase = apiBase;
     setLoading(true); setErr(null);
     try {
-      const r = await fetch('/api/cn-sanse/scan?force=1');
+      const r = await fetch(`${apiBase}/scan?force=1`);
       const j: ScanResp = await r.json();
+      if (liveBaseRef.current !== myBase) return;
       if (!j.ok) throw new Error(j.error || '掃描失敗');
       setData(j);
       loadDates();
     } catch (e) {
+      if (liveBaseRef.current !== myBase) return;
       setErr(e instanceof Error ? e.message : '掃描失敗');
-    } finally { setLoading(false); }
-  }, [loadDates]);
+    } finally { if (liveBaseRef.current === myBase) setLoading(false); }
+  }, [loadDates, apiBase]);
 
   // 進場：盤中活躍時段預設即時，否則盤後（在 effect 內判斷避免 SSR/CSR hydration 不一致）
   useEffect(() => {
+    liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
+    setData(null); setDates([]); setPerf({}); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
-    const initial = isCNIntradayActive() ? 'intraday' : 'post_close';
+    // 台股 v1 無盤中即時三色 → 一律盤後；陸股依時段決定
+    const initial = market === 'CN' && isCNIntradayActive() ? 'intraday' : 'post_close';
     setSession(initial);
     loadDate(undefined, initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [apiBase]);
 
   const onRefresh = useCallback(() => {
     if (session === 'intraday') loadDate(undefined, 'intraday'); // 重抓即時快照
@@ -268,25 +284,27 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="font-semibold text-fuchsia-300 shrink-0">🎨 三色資金</span>
           <span className="text-[10px] text-muted-foreground truncate">
-            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${session === 'intraday' ? ' · 盤中跳動' : ''}` : '陸股 A 股自創策略'}
+            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {/* 盤後 / 盤中 切換 */}
-          <div className="flex rounded border border-border overflow-hidden text-[9px]">
-            <button
-              onClick={() => switchSession('post_close')}
-              disabled={loading}
-              className={cn('px-1.5 py-0.5', session === 'post_close' ? 'bg-sky-600 text-sky-50' : 'text-muted-foreground hover:bg-secondary')}
-              title="盤後封存（收盤定調，訊號穩定）"
-            >盤後</button>
-            <button
-              onClick={() => switchSession('intraday')}
-              disabled={loading}
-              className={cn('px-1.5 py-0.5', session === 'intraday' ? 'bg-rose-600 text-rose-50' : 'text-muted-foreground hover:bg-secondary')}
-              title="盤中即時：當下報價合成未收日K 重算；量能半根、訊號會跳動，收盤前才定調"
-            >盤中</button>
-          </div>
+          {/* 盤後 / 盤中 切換（台股 v1 無盤中三色，僅陸股顯示） */}
+          {market === 'CN' && (
+            <div className="flex rounded border border-border overflow-hidden text-[9px]">
+              <button
+                onClick={() => switchSession('post_close')}
+                disabled={loading}
+                className={cn('px-1.5 py-0.5', session === 'post_close' ? 'bg-sky-600 text-sky-50' : 'text-muted-foreground hover:bg-secondary')}
+                title="盤後封存（收盤定調，訊號穩定）"
+              >盤後</button>
+              <button
+                onClick={() => switchSession('intraday')}
+                disabled={loading}
+                className={cn('px-1.5 py-0.5', session === 'intraday' ? 'bg-rose-600 text-rose-50' : 'text-muted-foreground hover:bg-secondary')}
+                title="盤中即時：當下報價合成未收日K 重算；量能半根、訊號會跳動，收盤前才定調"
+              >盤中</button>
+            </div>
+          )}
           <button
             onClick={onRefresh}
             disabled={loading}
@@ -405,14 +423,14 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         {loading && !data && <div className="p-4 text-sm text-muted-foreground">載入中…</div>}
         {data && hits.length === 0 && !loading && <div className="p-4 text-sm text-muted-foreground">此策略該日無命中。</div>}
         {hits.map((h) => {
-          const ticker = h.symbol.replace(/\.(SS|SZ)$/i, '');
+          const ticker = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const isSel = pureSelected && ticker === pureSelected;
           const inWatch = useWatchlistStore.getState().has(h.symbol);
           return (
             <div
               key={h.symbol}
               onClick={() => onSelectStock?.({
-                symbol: h.symbol, name: h.name, market: 'CN',
+                symbol: h.symbol, name: h.name, market,
                 date: data!.lastDate, chartTab: 'shuangb',
               })}
               className={cn(
@@ -461,7 +479,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onSelectStock?.({ symbol: h.symbol, name: h.name, market: 'CN', date: data!.lastDate, chartTab: 'shuangb' });
+                      onSelectStock?.({ symbol: h.symbol, name: h.name, market, date: data!.lastDate, chartTab: 'shuangb' });
                     }}
                     className="text-[9px] text-sky-400 hover:text-sky-300 px-1 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30">
                     走圖
