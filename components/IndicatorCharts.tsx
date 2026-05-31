@@ -764,6 +764,7 @@ function MainForceChart({ candles, zhuli, hoverCandle }: { candles: CandleWithIn
         <span style={{ color: '#FF433D' }}>中強 {valAt(zhuli.midStrength, d)}</span>
         <span className="text-amber-300">中控 {valAt(zhuli.midControl, d)}</span>
         <span className="text-blue-400">短超跌 {valAt(zhuli.shortOversold, d)}</span>
+        <span style={{ color: '#16C784' }}>中超跌 {valAt(zhuli.midOversold, d)}</span>
       </div>
       <div ref={containerRef} className="w-full h-full" />
     </div>
