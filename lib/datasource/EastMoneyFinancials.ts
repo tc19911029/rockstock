@@ -49,17 +49,36 @@ export async function fetchCnFinancials(code: string, limit = 12): Promise<Finan
     reportName: 'RPT_LICO_FN_CPD', columns: COLUMNS, filterField: 'SECURITY_CODE', code,
     sortColumns: 'REPORTDATE', pageSize: limit, cacheKey: `emFin:${code}:${limit}`, ttlMs: 6 * 60 * 60 * 1000,
   });
-  return rows.map((r) => ({
-    reportDate: ymd(r.REPORTDATE),
-    noticeDate: r.NOTICE_DATE ? ymd(r.NOTICE_DATE) : null,
-    revenue: num(r.TOTAL_OPERATE_INCOME),
-    revenueYoY: num(r.YSTZ),
-    netProfit: num(r.PARENT_NETPROFIT),
-    netProfitYoY: num(r.SJLTZ),
-    roe: num(r.WEIGHTAVG_ROE),
-    eps: num(r.BASIC_EPS),
-    bps: num(r.BPS),
-    grossMargin: num(r.XSMLL),
-    opCashPerShare: num(r.MGJYXJJE),
+  if (rows.length > 0) {
+    return rows.map((r) => ({
+      reportDate: ymd(r.REPORTDATE),
+      noticeDate: r.NOTICE_DATE ? ymd(r.NOTICE_DATE) : null,
+      revenue: num(r.TOTAL_OPERATE_INCOME),
+      revenueYoY: num(r.YSTZ),
+      netProfit: num(r.PARENT_NETPROFIT),
+      netProfitYoY: num(r.SJLTZ),
+      roe: num(r.WEIGHTAVG_ROE),
+      eps: num(r.BASIC_EPS),
+      bps: num(r.BPS),
+      grossMargin: num(r.XSMLL),
+      opCashPerShare: num(r.MGJYXJJE),
+    }));
+  }
+  // EastMoney 空（限流/維護）→ fallback 到 AkShare 新浪財務指標（真正的第二供應商）。
+  // 新浪指標無絕對营收/净利，但 roe/eps/bps/margins/YoY 都有 → 降級可用。
+  const { runAkshareBridge } = await import('./akshareBridge');
+  const sina = await runAkshareBridge('financials', code);
+  return sina.slice(0, limit).map((r) => ({
+    reportDate: String(r.reportDate ?? '').slice(0, 10),
+    noticeDate: null,
+    revenue: null,
+    revenueYoY: num(r.revenueYoY),
+    netProfit: null,
+    netProfitYoY: num(r.netProfitYoY),
+    roe: num(r.roe),
+    eps: num(r.eps),
+    bps: num(r.bps),
+    grossMargin: num(r.grossMargin),
+    opCashPerShare: num(r.opCashPerShare),
   }));
 }
