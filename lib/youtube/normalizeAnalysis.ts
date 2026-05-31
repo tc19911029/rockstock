@@ -47,6 +47,7 @@ const WHISPER_HOMONYMS: Record<string, string[]> = {
   '6173': ['信昌'],            // 信昌電（"信昌店" 等亂碼以 prefix 命中）
   '6175': ['利敦'],            // 立敦
   '6515': ['影威'],            // 穎崴
+  '5483': ['中美金'],          // 中美晶（晶→金，同段「環球金/細金圓」一致）
 };
 
 const CN_DIGITS: Record<string, string> = {
