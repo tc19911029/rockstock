@@ -41,11 +41,13 @@ const STAGE_LABEL: Record<TrustMomentumStage, { zh: string; tone: string; desc: 
 };
 
 export function TrustMomentumPanel({ symbol, date }: { symbol: string; date?: string }) {
+  const isCN = /\.(SS|SZ)$/i.test(symbol) || /^\d{6}$/.test(symbol);
   const [data, setData] = useState<ChipApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isCN) { setLoading(false); return; } // 投信動能為台股專屬概念，陸股不抓（避免 /api/chip 404）
     const url = `/api/chip?symbol=${encodeURIComponent(symbol)}${date ? `&date=${date}` : ''}`;
     setLoading(true);
     setError(null);
@@ -57,7 +59,9 @@ export function TrustMomentumPanel({ symbol, date }: { symbol: string; date?: st
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [symbol, date]);
+  }, [symbol, date, isCN]);
+
+  if (isCN) return null; // 投信動向追蹤為台股專屬，陸股不顯示此面板
 
   return (
     <section className="border border-emerald-700/40 bg-slate-900 rounded-lg p-4 space-y-3">

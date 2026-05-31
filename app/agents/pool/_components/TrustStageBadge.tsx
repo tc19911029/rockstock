@@ -28,6 +28,8 @@ export function TrustStageBadge({ symbol, date }: { symbol: string; date: string
   const [chip, setChip] = useState<ChipSlim | null | undefined>(undefined);
 
   useEffect(() => {
+    // 投信動能為台股專有概念；陸股代號跳過（避免打 /api/chip 回 404）
+    if (/\.(SS|SZ)$/i.test(symbol) || /^\d{6}$/.test(symbol)) { setChip(null); return; }
     fetch(`/api/chip?symbol=${encodeURIComponent(symbol)}&date=${date}`)
       .then((r) => r.json())
       .then((r) => {

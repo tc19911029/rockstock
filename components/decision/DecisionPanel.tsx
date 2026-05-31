@@ -443,13 +443,17 @@ function FallbackFacetVerdicts({
     if (symbol === 'DEMO' || /^\^|^000001\.SS$/.test(symbol)) return;
     const raw = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const market = /\.(SS|SZ)$/i.test(symbol) ? 'CN' : 'TW';
+    const isCN = market === 'CN';
     const useDate = date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
     setLoading(true);
     let cancelled = false;
+    // 陸股走 CN 專屬端點（股东户数/龙虎榜、逐季财报），台股走原 TW 端點（避免對陸股打 /api/chip 回 404）
+    const chipUrl = isCN ? `/api/cn/chips/${encodeURIComponent(raw)}` : `/api/chip?symbol=${encodeURIComponent(symbol)}`;
+    const fundUrl = isCN ? `/api/cn/financials/${encodeURIComponent(raw)}` : `/api/fundamentals/${encodeURIComponent(raw)}`;
     Promise.allSettled([
       dedupedFetch(`/api/agents/pool?market=${market}&date=${useDate}&minSourceCount=1&limit=500`).then(r => r.ok ? r.json() : null).catch(() => null),
-      dedupedFetch(`/api/chip?symbol=${encodeURIComponent(symbol)}`).then(r => r.ok ? r.json() : null).catch(() => null),
-      dedupedFetch(`/api/fundamentals/${encodeURIComponent(raw)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      dedupedFetch(chipUrl).then(r => r.ok ? r.json() : null).catch(() => null),
+      dedupedFetch(fundUrl).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([poolR, chipR, fundR]) => {
       if (cancelled) return;
       const pool = poolR.status === 'fulfilled' ? poolR.value : null;
@@ -458,19 +462,39 @@ function FallbackFacetVerdicts({
       const candidate = pool?.candidates?.find((c: { symbol: string }) =>
         c.symbol === symbol || c.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === raw,
       );
-      // fundamentals API 回 { ok, data: {...}, sourceUsed } — epsYoY 在 .data 內
-      const fundData = fund?.data ?? null;
-      // chip API 回 top-level chipScore（0 也算有資料、不是 null）
-      const chipScoreFromApi = chip?.ok && typeof chip?.chipScore === 'number' ? chip.chipScore : null;
       const prohibitionHit = candidate?.sources?.technical?.prohibitionHit;
+      // chip / 基本面 依市場解析不同 shape
+      let chipScoreFromApi: number | null;
+      let epsYoY: number | null | undefined;
+      let revenueYoY: number | null | undefined;
+      if (isCN) {
+        // 陸股籌碼：股东户数集中度（户数减少 ratio<0 = 籌碼集中 = 偏多）+ 龙虎榜净额微调
+        const sh = chip?.shareholders?.[0];
+        if (sh && typeof sh.holderNumRatio === 'number') {
+          let sc = 50 - sh.holderNumRatio * 3;
+          const lhb = chip?.dragontiger?.[0];
+          if (lhb && typeof lhb.netAmt === 'number') sc += lhb.netAmt > 0 ? 5 : -5;
+          chipScoreFromApi = Math.round(Math.max(0, Math.min(100, sc)));
+        } else chipScoreFromApi = null;
+        // 陸股基本面：最新一季逐季财报 YoY（净利同比≈EPS YoY、营收同比）
+        const f0 = fund?.financials?.[0];
+        epsYoY = f0?.netProfitYoY ?? null;
+        revenueYoY = f0?.revenueYoY ?? null;
+      } else {
+        // 台股：fundamentals API 回 { ok, data:{...} }；chip API 回 top-level chipScore（0 也算有資料）
+        const fundData = fund?.data ?? null;
+        chipScoreFromApi = chip?.ok && typeof chip?.chipScore === 'number' ? chip.chipScore : null;
+        epsYoY = fundData?.epsYoY ?? candidate?.sources?.fundamental?.epsYoY;
+        revenueYoY = fundData?.revenueYoY ?? candidate?.sources?.fundamental?.revenueYoY;
+      }
       const input = {
         sixConditionsScore: candidate?.sources?.technical?.sixConditionsScore,
         prohibitionHit,
         youtubeMentionCount: candidate?.strengthSignals?.youtubeMentionCount,
         youtubeInHighConsensus: candidate?.sources?.youtube?.inHighConsensus,
         chipScore: chipScoreFromApi ?? candidate?.strengthSignals?.chipScore ?? null,
-        epsYoY: fundData?.epsYoY ?? candidate?.sources?.fundamental?.epsYoY,
-        revenueYoY: fundData?.revenueYoY ?? candidate?.sources?.fundamental?.revenueYoY,
+        epsYoY,
+        revenueYoY,
       };
       const result = computeFacetVerdicts(input);
       setVerdicts(result);
@@ -489,11 +513,13 @@ function FallbackFacetVerdicts({
   if (!verdicts) return null;
 
   // 規則推估卡用「半透明 + 虛線」風格、跟 multi-agent 跑過的鮮明卡視覺區隔
+  // 籌碼/基本面 副標依市場切換（陸股用股东户数/龙虎榜、营收/净利）
+  const isCNStock = /\.(SS|SZ)$/i.test(symbol);
   const cards: Array<{ title: string; subtitle: string; v: keyof Omit<FacetVerdictsResult, 'hints'>; hint: string }> = [
     { title: '技術', subtitle: '含朱書 6 條件', v: 'technical', hint: verdicts.hints.technical },
     { title: '消息', subtitle: '含 YouTube 共識', v: 'news', hint: verdicts.hints.news },
-    { title: '籌碼', subtitle: '外資/投信/大戶', v: 'chip', hint: verdicts.hints.chip },
-    { title: '基本', subtitle: 'EPS/營收/PE', v: 'fundamental', hint: verdicts.hints.fundamental },
+    { title: '籌碼', subtitle: isCNStock ? '股东户数/龙虎榜' : '外資/投信/大戶', v: 'chip', hint: verdicts.hints.chip },
+    { title: '基本', subtitle: isCNStock ? '营收/净利/ROE' : 'EPS/營收/PE', v: 'fundamental', hint: verdicts.hints.fundamental },
   ];
 
   // 整體一句話結論的顏色
