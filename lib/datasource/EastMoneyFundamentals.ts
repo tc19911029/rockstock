@@ -1,35 +1,35 @@
 /**
  * EastMoneyFundamentals.ts — 東方財富陸股估值欄位
  *
- * 從東方財富 push2 個股詳情 API 取得估值欄位：
- *   - 收益（一）= 最新一季 EPS
- *   - 市盈率（動）/（靜）/（TTM）
- *   - 每股淨資產 / 市淨率
- *   - 總股本 / 流通股本
+ * 從東方財富 push2 個股詳情 API 取得估值欄位（最新價 / 估值 / 每股數據），
+ * 並用逐季財報（RPT_LICO_FN_CPD 累計歸母淨利）+ 總市值「自算」靜態 / TTM 本益比。
  *
  * Endpoint：
  *   https://push2.eastmoney.com/api/qt/stock/get?secid={market}.{code}&fields=...
+ *   （push2 會 302 轉 push2delay.eastmoney.com；Node fetch 預設跟轉址。）
  *
- * 主要欄位（東方財富代碼）：
- *   f43  = 最新價
+ * 現行欄位代碼（2026-05 對茅台/五粮液/平安/比亞迪四檔交叉驗證）：
+ *   f43  = 最新價（×100）
+ *   f55  = 每股收益 EPS（最新一季，原值）
  *   f57  = 代碼
  *   f58  = 名稱
- *   f84  = 總股本（單位：股）
- *   f85  = 流通股本（單位：股）
- *   f105 = 淨利潤
- *   f106 = 淨資產
- *   f108 = 市淨率 PB
- *   f112 = 每股收益 EPS（最新一季）
- *   f113 = 每股淨資產
- *   f114 = 市盈率（動）
- *   f115 = 市盈率（靜）
- *   f161 = 市盈率（TTM）
+ *   f84  = 總股本（股）
+ *   f85  = 流通股本（股）
+ *   f92  = 每股淨資產（原值）
+ *   f105 = 歸母淨利（本期累計，元）
+ *   f116 = 總市值（元）
+ *   f117 = 流通市值（元）
+ *   f162 = 市盈率（動，×100）＝ 年化最新季
+ *   f167 = 市淨率 PB（×100）
+ *   f173 = 加權 ROE %（最新一季，原值）
  *
- * 注意：實際欄位代碼可能因 EastMoney 改版而變動；本 provider 用 fields= 列舉，
- *       缺失欄位回 null（不拋）。
+ * ⚠️ 已棄用的漂移死碼：f108/f112/f114/f115（回 0）、f161（市盈率欄已漂成亂數，茅台回 330、五粮液回 2434）、
+ *    f163/f164（茅台/平安對得上靜/TTM，但五粮液對不上 → 不可信）。
+ *    靜態 / TTM 本益比一律改「自算」：總市值 ÷ 年度（或滾動四季）歸母淨利。
  */
 
 import { globalCache } from './MemoryCache';
+import { fetchCnFinancials } from './EastMoneyFinancials';
 
 const FUNDAMENTALS_TTL = 30 * 60 * 1000; // 30 分鐘
 
@@ -37,16 +37,19 @@ export interface EastMoneyFundamentals {
   code: string;
   name: string | null;
   price: number | null;
-  latestQuarterEps: number | null;   // 收益（一）
+  latestQuarterEps: number | null;   // 收益（一）＝最新一季 EPS
   bookValuePerShare: number | null;  // 每股淨資產
-  pbRatio: number | null;            // 市淨率
-  dynamicPe: number | null;          // 市盈率（動）
-  staticPe: number | null;           // 市盈率（靜）
-  ttmPe: number | null;              // 市盈率（TTM）
+  pbRatio: number | null;            // 市淨率 PB
+  dynamicPe: number | null;          // 市盈率（動）＝年化最新季
+  staticPe: number | null;           // 市盈率（靜）＝總市值 ÷ 上年度全年歸母淨利（自算）
+  ttmPe: number | null;              // 市盈率（TTM）＝總市值 ÷ 滾動四季歸母淨利（自算）
+  roe: number | null;                // 加權 ROE %（最新一季）
   totalShares: number | null;        // 總股本（股）
   floatShares: number | null;        // 流通股本（股）
-  netIncome: number | null;          // 淨利潤
-  equity: number | null;             // 淨資產
+  totalMarketCap: number | null;     // 總市值（元）
+  floatMarketCap: number | null;     // 流通市值（元）
+  netIncome: number | null;          // 歸母淨利（本期累計，元）
+  equity: number | null;             // 淨資產（元，由每股淨資產×總股本推算）
   sourceUrl: string;
   fetchedAt: string;
 }
@@ -65,6 +68,56 @@ function detectSecid(stockId: string): string | null {
 }
 
 /**
+ * 用逐季財報（累計歸母淨利，元）+ 總市值「自算」靜態 / TTM 本益比。
+ *
+ *   靜態 PE = 總市值 ÷ 最近一個完整年度（12-31）的全年歸母淨利
+ *   TTM PE  = 總市值 ÷ 滾動四季歸母淨利
+ *             ＝ 上一完整年度全年 − 去年同期累計 + 最近一期累計
+ *
+ * 財報抓不到或缺淨利 → 回 null（不拋）。
+ */
+async function computeStaticTtmPe(
+  bareCode: string,
+  totalMarketCap: number | null,
+): Promise<{ staticPe: number | null; ttmPe: number | null }> {
+  if (totalMarketCap == null || totalMarketCap <= 0) return { staticPe: null, ttmPe: null };
+
+  let fins;
+  try {
+    fins = await fetchCnFinancials(bareCode, 8);
+  } catch {
+    return { staticPe: null, ttmPe: null };
+  }
+  // netProfit 是累計 YTD（元）；fetchCnFinancials 已排序新→舊。
+  const withNet = fins.filter((f) => f.netProfit != null && /^\d{4}-\d{2}-\d{2}$/.test(f.reportDate));
+  if (withNet.length === 0) return { staticPe: null, ttmPe: null };
+
+  // 最近一個完整年度（12-31）的全年歸母淨利 → 靜態 PE
+  const lastAnnual = withNet.find((f) => f.reportDate.endsWith('-12-31'));
+  const staticPe =
+    lastAnnual && lastAnnual.netProfit != null && lastAnnual.netProfit > 0
+      ? totalMarketCap / lastAnnual.netProfit
+      : null;
+
+  // TTM 歸母淨利（滾動四季）
+  const latest = withNet[0];
+  let ttmNet: number | null = null;
+  if (latest.reportDate.endsWith('-12-31')) {
+    ttmNet = latest.netProfit; // 年報本身即 TTM
+  } else if (lastAnnual && lastAnnual.netProfit != null && latest.netProfit != null) {
+    const yr = parseInt(latest.reportDate.slice(0, 4), 10);
+    const mmdd = latest.reportDate.slice(4); // 例 '-03-31'
+    const prevSame = withNet.find((f) => f.reportDate === `${yr - 1}${mmdd}`);
+    if (prevSame && prevSame.netProfit != null) {
+      ttmNet = lastAnnual.netProfit - prevSame.netProfit + latest.netProfit;
+    }
+  }
+  const ttmPe = ttmNet != null && ttmNet > 0 ? totalMarketCap / ttmNet : null;
+
+  return { staticPe, ttmPe };
+}
+
+/**
  * 取得陸股估值欄位。
  * 失敗回 null，由 caller 寫 fetchErrors。
  */
@@ -75,22 +128,22 @@ export async function getEastMoneyFundamentals(stockId: string): Promise<EastMon
 
   const secid = detectSecid(stockId);
   if (!secid) return null;
+  const bare = stockId.replace(/\.(SS|SZ)$/i, '');
 
   const fields = [
-    'f43',  // 最新價
+    'f43',  // 最新價（×100）
+    'f55',  // 每股收益 EPS（最新一季）
     'f57',  // 代碼
     'f58',  // 名稱
     'f84',  // 總股本
     'f85',  // 流通股本
-    'f105', // 淨利潤
-    'f106', // 淨資產
-    'f108', // 市淨率
-    'f112', // 每股收益
-    'f113', // 每股淨資產
-    'f114', // 市盈率動
-    'f115', // 市盈率靜
-    'f161', // 市盈率 TTM（部分版本）
-    'f167', // 市淨率（備用）
+    'f92',  // 每股淨資產
+    'f105', // 歸母淨利（本期累計）
+    'f116', // 總市值
+    'f117', // 流通市值
+    'f162', // 市盈率（動，×100）
+    'f167', // 市淨率（×100）
+    'f173', // 加權 ROE %
   ].join(',');
 
   const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=${fields}&_=${Date.now()}`;
@@ -98,7 +151,11 @@ export async function getEastMoneyFundamentals(stockId: string): Promise<EastMon
   try {
     const r = await fetch(url, {
       signal: AbortSignal.timeout(8000),
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0',
+        Referer: 'https://quote.eastmoney.com/',
+      },
       cache: 'no-store',
     });
     if (!r.ok) return null;
@@ -112,18 +169,20 @@ export async function getEastMoneyFundamentals(stockId: string): Promise<EastMon
       return v / divisor;
     };
 
-    // 東方財富 PE/PB 通常乘 100，price 通常乘 100
     const price = num('f43', 100);
-    const eps = num('f112', 10000);       // 每股收益單位通常是 「分」乘以 10000 → 變成元
-    const dyn = num('f114', 100);
-    const stat = num('f115', 100);
-    const ttm = num('f161', 100);
-    const pb = num('f108', 100) ?? num('f167', 100);
-    const bvps = num('f113', 10000);
-
-    // 股本單位通常是「股」直接傳
+    const eps = num('f55');                 // 每股收益原值（元）
+    const dyn = num('f162', 100);           // 市盈率（動）
+    const pb = num('f167', 100);            // 市淨率
+    const bvps = num('f92');                // 每股淨資產原值
+    const roe = num('f173');                // ROE %
     const totalShares = num('f84');
     const floatShares = num('f85');
+    const totalMarketCap = num('f116');
+    const floatMarketCap = num('f117');
+    const netIncome = num('f105');
+
+    // 靜態 / TTM PE 自算（push2 的 PE 欄已漂，不可信）
+    const { staticPe, ttmPe } = await computeStaticTtmPe(bare, totalMarketCap);
 
     const result: EastMoneyFundamentals = {
       code: typeof d['f57'] === 'string' ? d['f57'] as string : stockId,
@@ -133,13 +192,16 @@ export async function getEastMoneyFundamentals(stockId: string): Promise<EastMon
       bookValuePerShare: bvps,
       pbRatio: pb,
       dynamicPe: dyn,
-      staticPe: stat,
-      ttmPe: ttm,
+      staticPe,
+      ttmPe,
+      roe,
       totalShares,
       floatShares,
-      netIncome: num('f105'),
-      equity: num('f106'),
-      sourceUrl: `https://quote.eastmoney.com/${secid.startsWith('1') ? 'sh' : 'sz'}${stockId.replace(/\.(SS|SZ)$/i, '')}.html`,
+      totalMarketCap,
+      floatMarketCap,
+      netIncome,
+      equity: bvps != null && totalShares != null ? bvps * totalShares : null,
+      sourceUrl: `https://quote.eastmoney.com/${secid.startsWith('1') ? 'sh' : 'sz'}${bare}.html`,
       fetchedAt: new Date().toISOString(),
     };
 

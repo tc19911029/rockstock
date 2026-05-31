@@ -11,7 +11,10 @@ interface Fin {
   netProfit: number | null; netProfitYoY: number | null; roe: number | null;
   eps: number | null; bps: number | null; grossMargin: number | null;
 }
-interface Val { name: string | null; price: number | null }
+interface Val {
+  name: string | null; price: number | null;
+  dynamicPe?: number | null; ttmPe?: number | null; pbRatio?: number | null;
+}
 interface Resp { ok?: boolean; error?: string; financials?: Fin[]; valuation?: Val | null }
 
 const yi = (n: number | null) => (n == null ? '—' : `${(n / 1e8).toFixed(1)}億`);
@@ -42,7 +45,9 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
   const val = data?.valuation ?? null;
   const latest = fin[0];
   const price = val?.price ?? null;
-  const pb = price != null && latest?.bps ? price / latest.bps : null; // 自算 PB
+  // PB：優先用 EastMoney 權威值（已修正欄位漂移），無則 price/每股淨值 自算
+  const pb = val?.pbRatio ?? (price != null && latest?.bps ? price / latest.bps : null);
+  const pe = val?.dynamicPe ?? null; // 本益比（動）＝年化最新季
 
   return (
     <div className="flex flex-col gap-3 p-2.5 text-xs overflow-auto">
@@ -53,6 +58,7 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
           {price != null && <span className="font-mono text-base font-bold">{price}</span>}
         </div>
         <div className="flex gap-4 mt-1 text-[11px]">
+          {pe != null && <span className="text-muted-foreground">本益比<span className="text-[9px]">動</span> <span className="font-mono text-foreground">{f2(pe)}</span></span>}
           <span className="text-muted-foreground">PB <span className="font-mono text-foreground">{f2(pb)}</span></span>
           {latest?.roe != null && <span className="text-muted-foreground">ROE <span className="font-mono text-foreground">{f2(latest.roe)}%</span></span>}
           {latest?.eps != null && <span className="text-muted-foreground">EPS <span className="font-mono text-foreground">{f2(latest.eps)}</span></span>}
@@ -99,7 +105,7 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
       </section>
 
       <div className="text-[9px] text-muted-foreground/60 mt-1">
-        資料源：EastMoney（财报）→ 新浪AkShare fallback · PB=股價/每股淨值自算
+        資料源：EastMoney（财报+估值）→ 新浪AkShare fallback · 本益比(動)=年化最新季
       </div>
     </div>
   );
