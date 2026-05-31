@@ -36,6 +36,8 @@ import { SanSeSignalsPanel } from '@/components/cn-sanse/SanSeSignalsPanel';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
+import CnChipPanel from '@/components/cn/CnChipPanel';
+import CnFundamentalPanel from '@/components/cn/CnFundamentalPanel';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
 import BottomPanel from '@/components/BottomPanel';
 import { ScanPanelVertical } from '@/features/scan';
@@ -549,7 +551,9 @@ function HomePage() {
       {sideTab === 'chip' && (
         currentStock ? (
           <SectionBoundary section="籌碼分析">
-            <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
+            {isCnTicker
+              ? <CnChipPanel symbol={currentStock.ticker} />
+              : <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />}
           </SectionBoundary>
         ) : (
           <EmptyState
@@ -563,7 +567,9 @@ function HomePage() {
       {sideTab === 'fundamental' && (
         currentStock ? (
           <SectionBoundary section="基本面分析">
-            <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />
+            {isCnTicker
+              ? <CnFundamentalPanel symbol={currentStock.ticker} />
+              : <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />}
           </SectionBoundary>
         ) : (
           <EmptyState
