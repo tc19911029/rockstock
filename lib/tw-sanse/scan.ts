@@ -21,6 +21,7 @@ import { evalConditions } from '@/lib/cn-sanse/conditions';
 import type {
   SanSeHit, ResonanceRecord, ResonanceCounts, SanSeScanResult,
 } from '@/lib/cn-sanse/scan';
+import { SANSE_TURNOVER_TOP_N, topTurnoverRanks } from '@/lib/cn-sanse/scan';
 
 const INDEX_SYMBOL = '^TWII';   // 加權指數（RS 基準 + 行情日曆）
 const MIN_BARS = 250;
@@ -84,7 +85,7 @@ async function loadTwUniverse(dir: string): Promise<StockEntry[]> {
  * 台股三色全市場掃描。
  * @param opts.asOfDate 給定則把所有 K 線截斷到 ≤ 該日重算（回測逐日用）；不給用最新交易日。
  */
-export async function scanTwSanSe(opts?: { asOfDate?: string }): Promise<SanSeScanResult> {
+export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number }): Promise<SanSeScanResult> {
   const dir = getLocalCandleDir('TW');
   const asOf = opts?.asOfDate;
   const truncate = (cs: Candle[] | null): Candle[] | null =>
@@ -105,7 +106,7 @@ export async function scanTwSanSe(opts?: { asOfDate?: string }): Promise<SanSeSc
 
   const results: Record<SanSeLevel, SanSeHit[]> = { strict: [], medium: [], loose: [] };
   const records: ResonanceRecord[] = [];
-  let evaluated = 0;
+  const freshTurnovers: { symbol: string; turnover: number }[] = [];
   let staleSkipped = 0;
 
   const BATCH = 100;
@@ -118,7 +119,9 @@ export async function scanTwSanSe(opts?: { asOfDate?: string }): Promise<SanSeSc
       if (!candles || candles.length < MIN_BARS) return;
       // 新鮮度：最後一根必須是掃描日（asOf 或最新），否則停牌/下市殭屍股，不選
       if (candles[candles.length - 1].date !== lastDate) { staleSkipped++; return; }
-      evaluated++;
+      // 成交額粗篩用：掃描日那根 close×volume；實際 top-N 篩在迴圈後。
+      const lastBar = candles[candles.length - 1];
+      freshTurnovers.push({ symbol: s.symbol, turnover: (lastBar.close ?? 0) * (lastBar.volume ?? 0) });
 
       // 對齊加權指數收盤（前向填補，開頭缺口留 NaN）
       let last = NaN;
@@ -152,17 +155,31 @@ export async function scanTwSanSe(opts?: { asOfDate?: string }): Promise<SanSeSc
     });
   }
 
+  // 成交額粗篩：只保留 fresh universe 內「掃描日成交額」前 N 檔（對齊書本買法 prefilterByL2 的 TOP_N）。
+  const topN = opts?.topN ?? SANSE_TURNOVER_TOP_N.TW;
+  const ranks = topTurnoverRanks(freshTurnovers, topN);
+  const evaluated = ranks.size;
+  const turnoverFiltered = freshTurnovers.length - ranks.size;
+  (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) => {
+    results[lv] = results[lv]
+      .filter((h) => ranks.has(h.symbol))
+      .map((h) => ({ ...h, turnoverRank: ranks.get(h.symbol) }));
+  });
+  const keptRecords = records
+    .filter((r) => ranks.has(r.symbol))
+    .map((r) => ({ ...r, turnoverRank: ranks.get(r.symbol) }));
+
   (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) =>
     results[lv].sort((a, b) => b.shortAttack - a.shortAttack),
   );
-  records.sort((a, b) => b.report.groupBuyCount - a.report.groupBuyCount || b.report.scores.shortAttack - a.report.scores.shortAttack);
+  keptRecords.sort((a, b) => b.report.groupBuyCount - a.report.groupBuyCount || b.report.scores.shortAttack - a.report.scores.shortAttack);
 
   const resonanceCounts: ResonanceCounts = {
-    strong: records.filter((r) => r.report.level === 'strong').length,
-    medium: records.filter((r) => r.report.level === 'medium').length,
-    weak: records.filter((r) => r.report.level === 'weak').length,
-    observe: records.filter((r) => !r.report.mainforce.buyHit).length,
-    conflict: records.filter((r) => r.report.conflict).length,
+    strong: keptRecords.filter((r) => r.report.level === 'strong').length,
+    medium: keptRecords.filter((r) => r.report.level === 'medium').length,
+    weak: keptRecords.filter((r) => r.report.level === 'weak').length,
+    observe: keptRecords.filter((r) => !r.report.mainforce.buyHit).length,
+    conflict: keptRecords.filter((r) => r.report.conflict).length,
   };
 
   return {
@@ -170,9 +187,11 @@ export async function scanTwSanSe(opts?: { asOfDate?: string }): Promise<SanSeSc
     scannedAt: new Date().toISOString(),
     evaluated,
     staleSkipped,
+    turnoverFiltered,
+    turnoverCap: topN,
     counts: { strict: results.strict.length, medium: results.medium.length, loose: results.loose.length },
     results,
-    records,
+    records: keptRecords,
     resonanceCounts,
     sessionType: 'post_close',
     archivedDate: lastDate,

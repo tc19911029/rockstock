@@ -28,12 +28,15 @@ interface Hit {
   symbol: string; name: string; industry: string; price: number; changePct: number;
   shortAttack: number; midStrength: number; midControl: number; kongPan: number;
   shortOversold?: number; // 短線超跌（舊固化資料可能沒有此欄 → undefined）
+  turnoverRank?: number;  // 當日成交額名次（1=最大；舊固化資料無此欄）
 }
 interface RecordRow { symbol: string; report: ConditionReport }
 interface ScanResp {
   ok: boolean; lastDate: string; evaluated: number; staleSkipped?: number;
   counts: Record<Level, number>; results: Record<Level, Hit[]>;
   records?: RecordRow[]; sessionType?: 'post_close' | 'intraday'; cached?: boolean; error?: string;
+  turnoverCap?: number;       // 成交額粗篩上限（TW 500 / CN 800）
+  turnoverFiltered?: number;  // 被粗篩剔除的冷門薄量股檔數
 }
 
 /** 三組條件 chip（主力階段 / 雙B買 / 捕撈買 + 共振數 + 賣出警示）*/
@@ -92,7 +95,7 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 
-type SortKey = 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price'
+type SortKey = 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price' | 'turnoverRank'
   | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
 
 const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
@@ -102,6 +105,7 @@ const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
   { key: 'shortOversold', label: '超短跌', tip: '短線超跌（跌破 MA20 後的超跌幅度）' },
   { key: 'changePct', label: '漲幅', tip: '掃描當日漲跌幅 %' },
   { key: 'price', label: '股價', tip: '當前股價' },
+  { key: 'turnoverRank', label: '成交量', tip: '當日成交額排名（1=最大；缺值排最後）' },
   { key: 'fwdOpen', label: '漲跌·隔開', tip: '掃出後隔日開盤漲跌幅（缺值排最後）' },
   { key: 'fwdD1', label: '漲跌·1日', tip: '掃出後 1 日漲跌幅' },
   { key: 'fwdD5', label: '漲跌·5日', tip: '掃出後 5 日漲跌幅' },
@@ -270,6 +274,14 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         if (vb == null) return -1;
         return dir * ((vb as number) - (va as number));
       }
+      if (sortKey === 'turnoverRank') {
+        // 名次小 = 成交額大；缺名次（舊固化資料）永遠排最後（不受 asc/desc 影響）
+        const ra = a.turnoverRank; const rb = b.turnoverRank;
+        if (ra == null && rb == null) return 0;
+        if (ra == null) return 1;
+        if (rb == null) return -1;
+        return dir * (ra - rb);
+      }
       const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
       return dir * ((b[key] ?? 0) - (a[key] ?? 0));
     });
@@ -284,7 +296,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="font-semibold text-fuchsia-300 shrink-0">🎨 三色資金</span>
           <span className="text-[10px] text-muted-foreground truncate">
-            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
+            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${data.turnoverCap ? `（成交額前 ${data.turnoverCap}）` : ''}${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -447,14 +459,22 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 </span>
               </div>
 
-              {/* Row 2: 股價 + 產業 + 三色分數 */}
-              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
+              {/* Row 2: 股價 + 產業 + 三色分數 + 成交量名次（對齊書本買法）*/}
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{fmt(h.price)}</span>
                 {h.industry && <span className="truncate max-w-[60px]">{h.industry}</span>}
                 <span className="text-fuchsia-400" title="短線上攻">短攻 {fmt(h.shortAttack)}</span>
                 <span className="text-rose-300" title="中線強勢">中強 {fmt(h.midStrength)}</span>
                 <span className="text-amber-300" title="中線控盤">中控 {fmt(h.midControl)}</span>
                 <span className="text-blue-400" title="短線超跌">超短跌 {fmt(h.shortOversold)}</span>
+                {h.turnoverRank !== undefined && (
+                  <span
+                    className="ml-auto text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
+                    title={`當日成交額排名（全市場前 ${data?.turnoverCap ?? ''} 內）`}
+                  >
+                    成交量第{h.turnoverRank}名
+                  </span>
+                )}
               </div>
 
               {/* Row 2.5: 三色條件（主力階段 / 雙B買 / 捕撈買 + 賣出警示）*/}

@@ -13,6 +13,30 @@ const INDEX_SYMBOL = '000001.SS';     // 上證綜指（滬市 + 行情日曆來
 const INDEX_SYMBOL_SZ = '399001.SZ';  // 深證成指（深市 RS 基準；缺檔時 fallback 上證）
 const MIN_BARS = 250;
 
+/**
+ * 三色 universe 成交額粗篩上限。對齊書本買法 MarketScanner.prefilterByL2 的 TOP_N：
+ * 把每日「新鮮且歷史足夠」的個股按掃描日那根 close×volume（成交額）排序，只保留前 N 檔，
+ * 剔除冷門/薄量股、聚焦主流大量股。TW 500 / CN 800（與買法同一套數字、同一套精神）。
+ * 三色雖是自創因子，但此粗篩純屬「流動性聚焦」、不涉及書本選股規則 → 不違反鐵則 #5。
+ */
+export const SANSE_TURNOVER_TOP_N: Record<'TW' | 'CN', number> = { TW: 500, CN: 800 };
+
+/**
+ * 取成交額（close×volume）前 topN：回傳 symbol → 名次（1-based，1 = 當日成交額最大）。
+ * 不足 topN 則全收（不誤殺）。回 Map 而非 Set，讓掃描清單能像書本買法顯示「成交量第N名」。
+ */
+export function topTurnoverRanks(
+  items: { symbol: string; turnover: number }[],
+  topN: number,
+): Map<string, number> {
+  const ranks = new Map<string, number>();
+  [...items]
+    .sort((a, b) => b.turnover - a.turnover)
+    .slice(0, topN)
+    .forEach((it, i) => ranks.set(it.symbol, i + 1));
+  return ranks;
+}
+
 export interface SanSeHit {
   symbol: string;
   name: string;
@@ -24,6 +48,8 @@ export interface SanSeHit {
   midControl: number;
   kongPan: number;
   shortOversold: number;
+  /** 當日成交額名次（1 = 成交額最大；對齊書本買法的 turnoverRank。舊固化資料無此欄 → undefined）。 */
+  turnoverRank?: number;
 }
 
 /** 共振紀錄：≥1 組買點的股票，帶完整三色條件報告（給前端 + 回測） */
@@ -34,6 +60,8 @@ export interface ResonanceRecord {
   price: number;      // 掃描當日收盤
   changePct: number;
   report: ConditionReport;
+  /** 當日成交額名次（1 = 成交額最大；舊固化資料無此欄 → undefined）。 */
+  turnoverRank?: number;
 }
 
 export interface ResonanceCounts {
@@ -45,6 +73,10 @@ export interface SanSeScanResult {
   scannedAt: string;
   evaluated: number;
   staleSkipped: number;
+  /** 成交額粗篩剔除的檔數（新鮮但落在 top-N 之外的冷門薄量股）。 */
+  turnoverFiltered?: number;
+  /** 成交額粗篩上限（top-N，TW 500 / CN 800）。 */
+  turnoverCap?: number;
   counts: Record<SanSeLevel, number>;
   results: Record<SanSeLevel, SanSeHit[]>;
   records: ResonanceRecord[];       // 共振紀錄（入選∪指標買點）
@@ -106,7 +138,7 @@ async function readCandles(dir: string, symbol: string): Promise<Candle[] | null
  *                      （盤中模式）。與 asOfDate 互斥。沒有即時報價的個股 last 仍停在前一交易日
  *                      → 被既有新鮮度檢查當殭屍股跳過（正確：無即時資料不選）。
  */
-export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntradayInput }): Promise<SanSeScanResult> {
+export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntradayInput; topN?: number }): Promise<SanSeScanResult> {
   const root = process.cwd();
   const dir = getLocalCandleDir('CN');
   const intraday = opts?.intraday;
@@ -146,7 +178,7 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
 
   const results: Record<SanSeLevel, SanSeHit[]> = { strict: [], medium: [], loose: [] };
   const records: ResonanceRecord[] = [];
-  let evaluated = 0;
+  const freshTurnovers: { symbol: string; turnover: number }[] = [];
   let staleSkipped = 0;
 
   const BATCH = 100;
@@ -166,7 +198,9 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
       if (!candles || candles.length < MIN_BARS) return;
       // 資料新鮮度：最後一根必須是該掃描日（asOf 或最新），否則是停牌/退市殭屍股，不納入選股
       if (candles[candles.length - 1].date !== lastDate) { staleSkipped++; return; }
-      evaluated++;
+      // 成交額粗篩用：掃描日那根 close×volume（盤中=今日半根、盤後=整日）；實際 top-N 篩在迴圈後。
+      const lastBar = candles[candles.length - 1];
+      freshTurnovers.push({ symbol: s.symbol, turnover: (lastBar.close ?? 0) * (lastBar.volume ?? 0) });
 
       // 對齊「個股所屬市場指數」收盤（深市.SZ→深證成指、滬市.SS→上證；前向填補，開頭缺口留 NaN）
       const homeIdx = s.symbol.endsWith('.SZ') ? idxMapSZ : idxMapSH;
@@ -213,19 +247,34 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
     });
   }
 
+  // 成交額粗篩：只保留 fresh universe 內「掃描日成交額」前 N 檔（對齊書本買法 prefilterByL2 的 TOP_N）。
+  // 三色全市場掃 → 取 top-N 剔除冷門薄量股；不足 N 檔則全收。evaluated 即入圍 universe 數。
+  const topN = opts?.topN ?? SANSE_TURNOVER_TOP_N.CN;
+  const ranks = topTurnoverRanks(freshTurnovers, topN);
+  const evaluated = ranks.size;
+  const turnoverFiltered = freshTurnovers.length - ranks.size;
+  (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) => {
+    results[lv] = results[lv]
+      .filter((h) => ranks.has(h.symbol))
+      .map((h) => ({ ...h, turnoverRank: ranks.get(h.symbol) }));
+  });
+  const keptRecords = records
+    .filter((r) => ranks.has(r.symbol))
+    .map((r) => ({ ...r, turnoverRank: ranks.get(r.symbol) }));
+
   // 排序：短线上攻強者在前
   (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) =>
     results[lv].sort((a, b) => b.shortAttack - a.shortAttack),
   );
   // 共振紀錄排序：共振組數高→短線上攻強
-  records.sort((a, b) => b.report.groupBuyCount - a.report.groupBuyCount || b.report.scores.shortAttack - a.report.scores.shortAttack);
+  keptRecords.sort((a, b) => b.report.groupBuyCount - a.report.groupBuyCount || b.report.scores.shortAttack - a.report.scores.shortAttack);
 
   const resonanceCounts: ResonanceCounts = {
-    strong: records.filter((r) => r.report.level === 'strong').length,
-    medium: records.filter((r) => r.report.level === 'medium').length,
-    weak: records.filter((r) => r.report.level === 'weak').length,
-    observe: records.filter((r) => !r.report.mainforce.buyHit).length, // 純指標、主力未入選
-    conflict: records.filter((r) => r.report.conflict).length,
+    strong: keptRecords.filter((r) => r.report.level === 'strong').length,
+    medium: keptRecords.filter((r) => r.report.level === 'medium').length,
+    weak: keptRecords.filter((r) => r.report.level === 'weak').length,
+    observe: keptRecords.filter((r) => !r.report.mainforce.buyHit).length, // 純指標、主力未入選
+    conflict: keptRecords.filter((r) => r.report.conflict).length,
   };
 
   return {
@@ -233,9 +282,11 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
     scannedAt: new Date().toISOString(),
     evaluated,
     staleSkipped,
+    turnoverFiltered,
+    turnoverCap: topN,
     counts: { strict: results.strict.length, medium: results.medium.length, loose: results.loose.length },
     results,
-    records,
+    records: keptRecords,
     resonanceCounts,
     sessionType: intraday ? 'intraday' : 'post_close',
     archivedDate: archivedLast,
