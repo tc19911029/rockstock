@@ -46,6 +46,7 @@ const WHISPER_HOMONYMS: Record<string, string[]> = {
   '2472': ['立龍電'],          // 立隆電
   '6173': ['信昌'],            // 信昌電（"信昌店" 等亂碼以 prefix 命中）
   '6175': ['利敦'],            // 立敦
+  '6515': ['影威'],            // 穎崴
 };
 
 const CN_DIGITS: Record<string, string> = {
