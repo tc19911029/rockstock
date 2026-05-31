@@ -142,6 +142,35 @@ describe('ForwardAnalyzer — 連假缺口補足', () => {
     expect(mockFetchRange).not.toHaveBeenCalled();
   });
 
+  test('週一盤前、本地停在上週五：近期掃描日不為「今日(無收盤資料)」空打 API（regression）', async () => {
+    // 場景重現「又沒有漲跌幅」：週一 08:00 盤前，本地 L1 還停在上週五 05-29。
+    // 舊碼 safeEndStr 壓到今日 06-01 → needSupplement 對每檔打 FinMind 補週末+今日缺口
+    //（無資料）→ 50 檔批次超時 → UI 漲跌幅全空。
+    // 修正後：補抓上限取 getLastTradingDay = 05-29 → 不打 API，直接用本地算 d1~d3。
+    jest.setSystemTime(new Date('2026-06-01T00:00:00Z')); // 週一 08:00 CST（盤前）
+    const localUntilFri = [
+      makeCandle('2026-05-22', 100),
+      makeCandle('2026-05-26', 102),
+      makeCandle('2026-05-27', 104),
+      makeCandle('2026-05-28', 106),
+      makeCandle('2026-05-29', 108),
+    ];
+    mockLocalCandles.mockResolvedValue(localUntilFri);
+    mockFetchRange.mockResolvedValue([]); // 即使誤打也無資料
+
+    const { results } = await analyzeForwardBatch(
+      [{ symbol: '2330.TW', name: '台積電', scanPrice: 102 }],
+      '2026-05-26',
+    );
+
+    expect(results).toHaveLength(1);
+    // 用本地 05-27 / 05-28 / 05-29 算出 d1 / d2 / d3（有漲跌幅）
+    expect(results[0].d1Return).not.toBeNull();
+    expect(results[0].d3Return).not.toBeNull();
+    // 關鍵不變量：不為了「今日(盤前無收盤 K)」去打 FinMind 補抓 → 否則整批超時空白
+    expect(mockFetchRange).not.toHaveBeenCalled();
+  });
+
   test('掃描日距今 ≤3 天且無數據，回傳待定結構而非 null', async () => {
     // 設定今天為 04-08，掃描日 04-07 = 距今 1 天
     mockLocalCandles.mockResolvedValue([]);

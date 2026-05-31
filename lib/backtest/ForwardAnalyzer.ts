@@ -1,6 +1,7 @@
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import { rateLimiter } from '@/lib/datasource/UnifiedRateLimiter';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { StockForwardPerformance, ForwardCandle } from '@/lib/scanner/types';
 import type { Candle } from '@/types';
 
@@ -191,6 +192,12 @@ async function analyzeOne(
       const lastL1Date = candles[candles.length - 1].date;
       if (lastL1Date < safeEndStr) {
         if (safeEndStr > todayStr) safeEndStr = todayStr;
+        // 補抓上限壓到「最後一個已收盤交易日」。今日盤前/盤中還沒有收盤 K：
+        // 上方 L2 inject 已負責今日盤中那根；連 L2 都沒有就等盤後 L1 cron 補，
+        // 不該在此為了「今日」去打 FinMind。否則週一盤前本地停在週五，50 檔全去
+        // 補週末+今日缺口（無資料）→ 整批 forward POST 超時 → UI 漲跌幅全空（「又沒有漲跌幅」）。
+        const lastClosed = getLastTradingDay(market);
+        if (safeEndStr > lastClosed) safeEndStr = lastClosed;
         if (tradingDaysBetween(lastL1Date, safeEndStr, market) === 0) {
           safeEndStr = lastL1Date;
         }
