@@ -7,6 +7,8 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
+import type { MarketId } from '@/lib/scanner/types';
+import { classifyMarket } from '@/lib/market/classify';
 import {
   PORTFOLIO_SCHEMA_VERSION,
   PortfolioFile,
@@ -16,6 +18,19 @@ import {
 
 const PORTFOLIO_DIR = path.join(process.cwd(), 'data', 'agents', 'portfolio');
 const HOLDINGS_FILE = path.join(PORTFOLIO_DIR, 'holdings.json');
+
+/**
+ * 陸股持倉與台股**完全分檔**（用戶 2026-05-29 決議「陸股跟台股要分開記」）。
+ *
+ * 鐵則：陸股檔放 data/portfolio/holdings-cn.json，**不**放 data/agents/portfolio/，
+ * 確保 listOpenHoldings()（TW-only：sizer / growthPath / 月報 讀）永遠只看台股檔。
+ */
+const CN_HOLDINGS_FILE = path.join(process.cwd(), 'data', 'portfolio', 'holdings-cn.json');
+
+/** 依市場挑持倉檔（CN → holdings-cn.json；其餘 → holdings.json）*/
+function holdingsFileFor(market: MarketId): string {
+  return market === 'CN' ? CN_HOLDINGS_FILE : HOLDINGS_FILE;
+}
 
 function reviewFilePath(date: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -28,9 +43,9 @@ function reviewFilePath(date: string): string {
 // Holdings
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function loadHoldings(): Promise<PortfolioFile> {
+export async function loadHoldings(market: MarketId = 'TW'): Promise<PortfolioFile> {
   try {
-    const raw = await fs.readFile(HOLDINGS_FILE, 'utf-8');
+    const raw = await fs.readFile(holdingsFileFor(market), 'utf-8');
     return JSON.parse(raw) as PortfolioFile;
   } catch {
     return {
@@ -41,18 +56,27 @@ export async function loadHoldings(): Promise<PortfolioFile> {
   }
 }
 
-export async function saveHoldings(file: PortfolioFile): Promise<void> {
-  await fs.mkdir(PORTFOLIO_DIR, { recursive: true });
+export async function saveHoldings(file: PortfolioFile, market: MarketId = 'TW'): Promise<void> {
+  const target = holdingsFileFor(market);
+  await fs.mkdir(path.dirname(target), { recursive: true });
   file.updatedAt = new Date().toISOString();
-  await atomicFsPut(HOLDINGS_FILE, JSON.stringify(file, null, 2));
+  await atomicFsPut(target, JSON.stringify(file, null, 2));
+}
+
+/** 讀台股+陸股全部持倉（合併，給 UI hydration 用）*/
+export async function loadAllHoldings(): Promise<PortfolioHolding[]> {
+  const [tw, cn] = await Promise.all([loadHoldings('TW'), loadHoldings('CN')]);
+  return [...tw.holdings, ...cn.holdings];
 }
 
 /**
  * 新增/更新持股（by symbol）
  * 同 symbol 已存在 → 更新；否則新增
+ * market 由 holding.market 決定要寫哪個檔（CN → holdings-cn.json）
  */
 export async function upsertHolding(holding: Omit<PortfolioHolding, 'createdAt' | 'updatedAt' | 'schemaVersion'>): Promise<PortfolioHolding> {
-  const file = await loadHoldings();
+  const market = holding.market;
+  const file = await loadHoldings(market);
   const now = new Date().toISOString();
   const existingIdx = file.holdings.findIndex(h => h.symbol === holding.symbol && h.status === 'open');
   let result: PortfolioHolding;
@@ -73,8 +97,13 @@ export async function upsertHolding(holding: Omit<PortfolioHolding, 'createdAt' 
     };
     file.holdings.push(result);
   }
-  await saveHoldings(file);
+  await saveHoldings(file, market);
   return result;
+}
+
+/** symbol 後綴推市場（.SS/.SZ → CN；其餘 → TW）*/
+function marketOfSymbol(symbol: string): MarketId {
+  return classifyMarket(symbol) === 'CN' ? 'CN' : 'TW';
 }
 
 /** 關閉持股（標 closed + 記錄出場資訊）*/
@@ -82,7 +111,8 @@ export async function closeHolding(
   symbol: string,
   args: { closedPrice: number; closeReason: string; closedAt?: string },
 ): Promise<PortfolioHolding | null> {
-  const file = await loadHoldings();
+  const market = marketOfSymbol(symbol);
+  const file = await loadHoldings(market);
   const idx = file.holdings.findIndex(h => h.symbol === symbol && h.status === 'open');
   if (idx < 0) return null;
   const h = file.holdings[idx];
@@ -91,17 +121,18 @@ export async function closeHolding(
   h.closedPrice = args.closedPrice;
   h.closeReason = args.closeReason;
   h.updatedAt = new Date().toISOString();
-  await saveHoldings(file);
+  await saveHoldings(file, market);
   return h;
 }
 
 /** 刪除持股（硬刪，不留 audit trail — 慎用）*/
 export async function deleteHolding(symbol: string): Promise<boolean> {
-  const file = await loadHoldings();
+  const market = marketOfSymbol(symbol);
+  const file = await loadHoldings(market);
   const before = file.holdings.length;
   file.holdings = file.holdings.filter(h => h.symbol !== symbol);
   if (file.holdings.length === before) return false;
-  await saveHoldings(file);
+  await saveHoldings(file, market);
   return true;
 }
 

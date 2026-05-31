@@ -14,7 +14,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import {
   closeHolding,
   deleteHolding,
-  loadHoldings,
+  loadAllHoldings,
   upsertHolding,
 } from '@/lib/agents/portfolio/storage';
 import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
@@ -34,6 +34,8 @@ const upsertSchema = z.object({
   target1: z.coerce.number().positive().optional(),
   target2: z.coerce.number().positive().optional(),
   notes: z.string().optional(),
+  /** UI-only 富欄位 passthrough（entryKbar / triggerPrice / operationMode 等）*/
+  ui: z.record(z.string(), z.unknown()).optional(),
   status: z.enum(['open', 'closed']).default('open'),
   /** 跳過 entryPrice 合理性驗證（極少數合理 case 如多筆平均成本）*/
   forcePrice: z.coerce.boolean().optional().default(false),
@@ -55,14 +57,18 @@ const deleteSchema = z.object({
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const status = url.searchParams.get('status');
-  const file = await loadHoldings();
+  const market = url.searchParams.get('market'); // 可選：TW | CN（不帶 = 台股+陸股合併）
+  let holdings = await loadAllHoldings();
+  if (market === 'TW' || market === 'CN') {
+    holdings = holdings.filter(h => h.market === market);
+  }
   const filtered = status
-    ? file.holdings.filter(h => h.status === status)
-    : file.holdings;
+    ? holdings.filter(h => h.status === status)
+    : holdings;
   return apiOk({
     holdings: filtered,
     count: filtered.length,
-    totalCount: file.holdings.length,
+    totalCount: holdings.length,
   });
 }
 

@@ -5,7 +5,7 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useScannerStore } from '@/store/scannerStore';
-import { usePortfolioStore } from '@/store/portfolioStore';
+import { usePortfolioStore, hydrateHoldingsFromServer } from '@/store/portfolioStore';
 import { useAnalysisChatStore } from '@/store/analysisChatStore';
 
 const PERSIST_KEYS = new Set([
@@ -22,6 +22,11 @@ const PERSIST_KEYS = new Set([
  * stores when another browser tab makes a change. Renders nothing.
  */
 export default function StoreSync() {
+  // 2026-05-29：持倉改 server 唯一真相 — 啟動時從 server 持倉檔（台股+陸股）灌入 store
+  useEffect(() => {
+    void hydrateHoldingsFromServer();
+  }, []);
+
   useEffect(() => {
     function onStorage(e: StorageEvent) {
       if (!e.key || !PERSIST_KEYS.has(e.key)) return;

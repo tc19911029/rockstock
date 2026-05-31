@@ -43,6 +43,16 @@ export interface PortfolioHolding {
   /** 自訂備註 */
   notes?: string;
 
+  /**
+   * UI-only 富欄位 passthrough（v12 進場體驗：entryKbar / triggerPrice /
+   * operationMode / entryPattern / recentHigh / consolidationLow / vBottom 等）。
+   *
+   * 為什麼是 opaque blob：server 端 mini-agent / 月報 / close-trade 只讀核心欄位，
+   * 但前端 /portfolio 走圖停損停利邏輯需要這些欄位。把它們原樣帶著走，
+   * server 不解讀、UI hydration 時再展開回 store。reports 一律忽略此欄位。
+   */
+  ui?: Record<string, unknown>;
+
   /** 部位狀態 */
   status: 'open' | 'closed';
   /** 出場資訊（status=closed 時填）*/

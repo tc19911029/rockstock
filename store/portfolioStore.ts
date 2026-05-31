@@ -3,10 +3,9 @@ import { persist } from 'zustand/middleware';
 import type { Candle } from '../types';
 import type { MarketId } from '../lib/scanner/types';
 import {
-  mapStoreToServerHolding,
-  toUpsertApiBody,
   mapStoreHoldingsToImportRows,
-  shouldSyncToServer,
+  toFullUpsertApiBody,
+  mapServerToStoreHolding,
   type StorePortfolioHolding,
 } from '../lib/portfolio/storeToHoldingsMapping';
 
@@ -150,27 +149,23 @@ interface PortfolioStore {
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * 把單筆 UI holding 同步到 server holdings.json
+ * 把單筆 UI holding 全保真同步到 server 持倉檔（2026-05-29：server 為唯一真相）
  *
  * Fire-and-forget — 失敗不擋 UI 動作。SSR 環境（無 window）跳過。
- * 失敗時印 console.warn 但不 throw。
  *
- * **TW-only**：2026-05-23 用戶決議「不要管陸股」(memory project_cn_excluded_from_path)，
- * 陸股不 fire upsert（避免污染 holdings.json）。
+ * 與舊版差異：
+ *   - **保留 UI 富欄位**（entryPattern / triggerPrice / operationMode 等 → ui blob）
+ *   - **台股+陸股都寫**（依 market 路由：CN → holdings-cn.json、TW → holdings.json）
+ *     ← 持倉這條線解除 TW-only；其他 TW-only 業務邏輯（sizer/growthPath/月報）不受影響
  */
 async function syncHoldingToServer(h: StorePortfolioHolding): Promise<void> {
   if (typeof window === 'undefined') return;
-  if (!shouldSyncToServer(h)) {
-    console.debug('[portfolioStore] sync skip (CN excluded):', h.symbol);
-    return;
-  }
   try {
-    const mapped = mapStoreToServerHolding(h);
-    if (!mapped.ok || !mapped.payload) {
-      console.warn('[portfolioStore] sync skip:', h.symbol, mapped.reason);
+    const body = toFullUpsertApiBody(h as StorePortfolioHolding & Record<string, unknown>);
+    if (!body) {
+      console.warn('[portfolioStore] sync skip (映射失敗):', h.symbol);
       return;
     }
-    const body = toUpsertApiBody(mapped.payload);
     const resp = await fetch('/api/agents/portfolio', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -182,6 +177,34 @@ async function syncHoldingToServer(h: StorePortfolioHolding): Promise<void> {
     }
   } catch (e) {
     console.warn('[portfolioStore] sync upsert error:', h.symbol, e);
+  }
+}
+
+/**
+ * 從 server 持倉檔（台股+陸股）灌入 store（2026-05-29：server 為唯一真相）
+ *
+ * App 啟動時呼叫一次；之後 UI 動作 optimistic 改本地 + fire-and-forget 寫回 server。
+ * 失敗保留現有 holdings（不清空），避免暫時性網路問題清掉畫面。
+ */
+export async function hydrateHoldingsFromServer(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    const resp = await fetch('/api/agents/portfolio?status=open', { cache: 'no-store' });
+    if (!resp.ok) {
+      console.warn('[portfolioStore] hydrate fail:', resp.status);
+      return false;
+    }
+    const json = await resp.json() as { data?: { holdings?: unknown[] }; holdings?: unknown[] };
+    const rows = json.data?.holdings ?? json.holdings ?? [];
+    if (!Array.isArray(rows)) return false;
+    const holdings = rows
+      .map(r => mapServerToStoreHolding(r as Record<string, unknown>))
+      .filter(Boolean) as unknown as PortfolioHolding[];
+    usePortfolioStore.setState({ holdings });
+    return true;
+  } catch (e) {
+    console.warn('[portfolioStore] hydrate error:', e);
+    return false;
   }
 }
 
@@ -380,6 +403,14 @@ export const usePortfolioStore = create<PortfolioStore>()(
     {
       name: 'portfolio-v1',
       version: 3,
+      // 2026-05-29：holdings 改由 server 持倉檔當唯一真相，**不再**持久化到 localStorage
+      //（啟動時 hydrateHoldingsFromServer 灌入）。realizedTrades / cashBalance /
+      // cashReservePct 目前 UI 無顯示但仍留本機（避免行為改變）。
+      partialize: (state) => ({
+        realizedTrades: state.realizedTrades,
+        cashBalance: state.cashBalance,
+        cashReservePct: state.cashReservePct,
+      }),
       migrate: (persisted: unknown, fromVersion: number) => {
         const state = (persisted ?? {}) as Record<string, unknown>;
         // v0/v1 → v2：cashBalance 從單一數字改成 { TW, CN }
@@ -407,6 +438,13 @@ export const usePortfolioStore = create<PortfolioStore>()(
           }));
         }
         return state as Partial<PortfolioStore>;
+      },
+      // 2026-05-29：holdings 改 server 唯一真相 — 即使 localStorage 殘留舊 holdings
+      // 也一律丟棄，只認啟動時 hydrateHoldingsFromServer 灌入的，避免重載瞬間閃舊資料。
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Record<string, unknown>;
+        const { holdings: _ignored, ...rest } = p;
+        return { ...current, ...rest } as PortfolioStore;
       },
     },
   ),
