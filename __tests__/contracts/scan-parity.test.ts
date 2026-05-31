@@ -63,6 +63,46 @@ describe('Scan panel parity contracts (R10)', () => {
     });
   });
 
+  // 2026-05-31 補：合成樣本鎖死 MTF gate 語意，不依賴 data/ 檔是否存在。
+  // 這是 backtest-run.ts / backtest-all.ts 兩大 runner 內聯 gate
+  // （`candidates.filter(c => c.mtfWeeklyPass === true)`）必須鏡像的「單一事實」。
+  // 若哪天有人把 applyPanelFilter 改回 mtfScore>=3，這組會立刻紅燈（鐵律 #10）。
+  describe('MTF gate 語意（合成樣本，正例必留 / null+false 必剔）', () => {
+    const mkMtf = (sym: string, weekly: boolean | null): StockScanResult => ({
+      symbol: sym, name: sym, market: 'TW', industry: '',
+      price: 100, changePercent: 1, volume: 0,
+      triggeredRules: [], sixConditionsScore: 5,
+      sixConditionsBreakdown: {
+        trend: true, position: true, kbar: true, ma: true, volume: true, indicator: true,
+      },
+      trendState: '多頭', trendPosition: '',
+      scanTime: '2026-05-31T00:00:00.000Z',
+      highWinRateScore: 0, highWinRateTypes: [], highWinRateDetails: [],
+      mtfWeeklyPass: weekly,
+    } as unknown as StockScanResult);
+
+    const mixed = [mkMtf('PASS1', true), mkMtf('FAIL', false), mkMtf('NULLV', null), mkMtf('PASS2', true)];
+
+    test('MTF on：只留 mtfWeeklyPass === true（null 與 false 都剔除）', () => {
+      const filtered = applyPanelFilter(mixed, { useMultiTimeframe: true });
+      expect(filtered.map(r => r.symbol).sort()).toEqual(['PASS1', 'PASS2']);
+    });
+
+    test('MTF off：全保留（gate 不作用）', () => {
+      const filtered = applyPanelFilter(mixed, { useMultiTimeframe: false });
+      expect(filtered).toHaveLength(4);
+    });
+
+    test('canonical 述詞 === backtest runner 內聯 gate（兩處 filter 同語意）', () => {
+      // backtest-run.ts:332 / backtest-all.ts:330 用的就是這個 predicate
+      const runnerGate = (c: StockScanResult) =>
+        (c as { mtfWeeklyPass?: boolean | null }).mtfWeeklyPass === true;
+      const viaPanel = applyPanelFilter(mixed, { useMultiTimeframe: true }).map(r => r.symbol).sort();
+      const viaRunner = mixed.filter(runnerGate).map(r => r.symbol).sort();
+      expect(viaRunner).toEqual(viaPanel);
+    });
+  });
+
   describe.each(SAMPLES)('對樣本 %s', fileName => {
     const session = loadSession(fileName);
     const testOrSkip = session ? test : test.skip;

@@ -16,9 +16,10 @@ import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
 import { aggregateCandles } from './aggregateCandles';
 import { rateLimiter } from './UnifiedRateLimiter';
+import { getFinMindToken } from '@/lib/env';
 
 const FINMIND_BASE = 'https://api.finmindtrade.com/api/v4/data';
-const FINMIND_TOKEN = process.env.FINMIND_API_TOKEN ?? '';
+const FINMIND_TOKEN = getFinMindToken() ?? '';
 
 const HISTORICAL_TTL = 24 * 60 * 60 * 1000;
 const RECENT_TTL = 5 * 60 * 1000;

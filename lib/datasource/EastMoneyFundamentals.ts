@@ -10,7 +10,7 @@
  *
  * 現行欄位代碼（2026-05 對茅台/五粮液/平安/比亞迪四檔交叉驗證）：
  *   f43  = 最新價（×100）
- *   f55  = 每股收益 EPS（最新一季，原值）
+ *   f55  = 每股收益 EPS（最新一季，原值）— 已改用財報自算單季 EPS 為主、f55 僅備援（見下）
  *   f57  = 代碼
  *   f58  = 名稱
  *   f84  = 總股本（股）
@@ -26,6 +26,11 @@
  * ⚠️ 已棄用的漂移死碼：f108/f112/f114/f115（回 0）、f161（市盈率欄已漂成亂數，茅台回 330、五粮液回 2434）、
  *    f163/f164（茅台/平安對得上靜/TTM，但五粮液對不上 → 不可信）。
  *    靜態 / TTM 本益比一律改「自算」：總市值 ÷ 年度（或滾動四季）歸母淨利。
+ *
+ * 2026-05-31：latestQuarterEps 也改「自算」單季 EPS = 單季歸母淨利 ÷ 總股本，
+ *    與自算 PE 同源（市值÷淨利 ≡ 價格÷(淨利/股本)）。push2 f55 在被限流時會回 degraded
+ *    stub（實測連打多檔全回 18.6），自算可避開；財報抓不到才回退 f55。display-only，
+ *    不進選股/評分（那走財報 RPT_LICO netProfitYoY）。
  */
 
 import { globalCache } from './MemoryCache';
@@ -79,18 +84,19 @@ function detectSecid(stockId: string): string | null {
 async function computeStaticTtmPe(
   bareCode: string,
   totalMarketCap: number | null,
-): Promise<{ staticPe: number | null; ttmPe: number | null }> {
-  if (totalMarketCap == null || totalMarketCap <= 0) return { staticPe: null, ttmPe: null };
+  totalShares: number | null,
+): Promise<{ staticPe: number | null; ttmPe: number | null; latestQuarterEps: number | null }> {
+  if (totalMarketCap == null || totalMarketCap <= 0) return { staticPe: null, ttmPe: null, latestQuarterEps: null };
 
   let fins;
   try {
     fins = await fetchCnFinancials(bareCode, 8);
   } catch {
-    return { staticPe: null, ttmPe: null };
+    return { staticPe: null, ttmPe: null, latestQuarterEps: null };
   }
   // netProfit 是累計 YTD（元）；fetchCnFinancials 已排序新→舊。
   const withNet = fins.filter((f) => f.netProfit != null && /^\d{4}-\d{2}-\d{2}$/.test(f.reportDate));
-  if (withNet.length === 0) return { staticPe: null, ttmPe: null };
+  if (withNet.length === 0) return { staticPe: null, ttmPe: null, latestQuarterEps: null };
 
   // 最近一個完整年度（12-31）的全年歸母淨利 → 靜態 PE
   const lastAnnual = withNet.find((f) => f.reportDate.endsWith('-12-31'));
@@ -114,7 +120,24 @@ async function computeStaticTtmPe(
   }
   const ttmPe = ttmNet != null && ttmNet > 0 ? totalMarketCap / ttmNet : null;
 
-  return { staticPe, ttmPe };
+  // 自算單季 EPS = 單季歸母淨利 ÷ 總股本
+  // 單季淨利 = 最近一期累計 − 同年上一期累計（Q1 累計本身即單季）。
+  // 取不到上一期（剛上市/缺報）→ 用累計值近似（至少不會是 push2 degraded stub）。
+  let latestQuarterEps: number | null = null;
+  if (totalShares != null && totalShares > 0 && latest.netProfit != null) {
+    const mm = latest.reportDate.slice(5, 7); // '03'|'06'|'09'|'12'
+    let quarterNet: number | null = latest.netProfit; // Q1 或無前期 → 累計即單季
+    if (mm !== '03') {
+      // 找同年「上一個報告期」的累計值（06←03、09←06、12←09）
+      const yr = latest.reportDate.slice(0, 4);
+      const prevMmdd = mm === '06' ? '-03-31' : mm === '09' ? '-06-30' : '-09-30';
+      const prevCum = withNet.find((f) => f.reportDate === `${yr}${prevMmdd}`);
+      if (prevCum && prevCum.netProfit != null) quarterNet = latest.netProfit - prevCum.netProfit;
+    }
+    if (quarterNet != null) latestQuarterEps = +(quarterNet / totalShares).toFixed(4);
+  }
+
+  return { staticPe, ttmPe, latestQuarterEps };
 }
 
 /**
@@ -181,14 +204,17 @@ export async function getEastMoneyFundamentals(stockId: string): Promise<EastMon
     const floatMarketCap = num('f117');
     const netIncome = num('f105');
 
-    // 靜態 / TTM PE 自算（push2 的 PE 欄已漂，不可信）
-    const { staticPe, ttmPe } = await computeStaticTtmPe(bare, totalMarketCap);
+    // 靜態 / TTM PE + 單季 EPS 自算（push2 的 PE/EPS 欄會漂/被限流回 stub，不可信）
+    const { staticPe, ttmPe, latestQuarterEps: computedEps } =
+      await computeStaticTtmPe(bare, totalMarketCap, totalShares);
+    // 自算優先；財報抓不到（computedEps=null）才回退 push2 f55
+    const latestQuarterEps = computedEps ?? eps;
 
     const result: EastMoneyFundamentals = {
       code: typeof d['f57'] === 'string' ? d['f57'] as string : stockId,
       name: typeof d['f58'] === 'string' ? d['f58'] as string : null,
       price,
-      latestQuarterEps: eps,
+      latestQuarterEps,
       bookValuePerShare: bvps,
       pbRatio: pb,
       dynamicPe: dyn,

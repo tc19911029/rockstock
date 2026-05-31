@@ -34,6 +34,15 @@ export function applyPanelFilter(
 
   // MTF gate：週線前5全過（①趨勢②均線③位置④量⑤K線）才算通過
   // 使用 mtfWeeklyPass 而非舊 4 分制 mtfScore >= 3，避免只過①②⑥+月就誤入
+  //
+  // 嚴格 `=== true`：null（未計算 MTF）在此一律排除。本函式假設輸入的 results
+  // 都來自「scan 時已 ALWAYS 計算 mtfWeeklyPass」的新 session。
+  // 注意 store/backtestStore.ts 的 client-side toggle 用的是寬容版
+  // （`mtfWeeklyPass == null || === true`），那是為了相容「舊 B/C/D/E session
+  // 未算 MTF」的歷史資料 → null 當保留。兩者語意差異是刻意的，不是不一致：
+  //   - 本函式（oracle / 回測 pick）：嚴格，null 不該出現
+  //   - backtestStore（UI 即時 toggle）：寬容，避免舊 session 被整批清空
+  // 改動任一處前先讀 CLAUDE.md 第 10 條 + 對方註解。
   if (options.useMultiTimeframe) {
     filtered = filtered.filter(r => r.mtfWeeklyPass === true);
   }

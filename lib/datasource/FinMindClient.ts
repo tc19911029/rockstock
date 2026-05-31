@@ -6,8 +6,10 @@
  * Docs: https://finmindtrade.com/analysis/#/data/api
  */
 
+import { getFinMindToken } from '@/lib/env';
+
 const FINMIND_BASE = 'https://api.finmindtrade.com/api/v4/data';
-const FINMIND_TOKEN = process.env.FINMIND_API_TOKEN ?? '';  // optional paid token
+const FINMIND_TOKEN = getFinMindToken() ?? '';  // optional paid token
 
 const TTL = {
   INSTITUTIONAL:  24 * 60 * 60 * 1000,  // 24h

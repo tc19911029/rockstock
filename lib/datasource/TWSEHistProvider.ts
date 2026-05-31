@@ -12,6 +12,7 @@ import { computeIndicators } from '@/lib/indicators';
 import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
 import { aggregateCandles } from './aggregateCandles';
+import { getFinMindToken } from '@/lib/env';
 
 // ── 快取 TTL ──────────────────────────────────────────────────────────────────
 
@@ -170,7 +171,7 @@ async function fetchTPExMonth(code: string, dateStr: string): Promise<Candle[]> 
 // ── FinMind fallback（TPEx Cloudflare 403 / TWSE rate-limit 時用） ───────────
 // FinMind dataset=TaiwanStockPrice 上市/上櫃通用，stock_id 不帶後綴
 // Trading_Volume 單位是「股」，除以 1000 轉張
-const FINMIND_TOKEN = process.env.FINMIND_API_TOKEN ?? '';
+const FINMIND_TOKEN = getFinMindToken() ?? '';
 
 interface FinMindPriceRow {
   date: string;

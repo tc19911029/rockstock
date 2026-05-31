@@ -384,6 +384,9 @@ export const useBacktestStore = create<BacktestState>()(
           // 過濾：只保留 MTF 週線 + 月線都通過的股票
           // （scan 時已 ALWAYS 計算 mtfWeeklyPass/mtfMonthlyPass，即使 MTF flag=off）
           // null = MTF 未計算（舊 B/C/D/E session）→ 保留；false = 明確不通過 → 過濾
+          // 寬容 `== null || === true` 是刻意的：UI 即時 toggle 不可把舊 session 整批清空。
+          // lib/selection/applyPanelFilter.ts 的 oracle 版用嚴格 `=== true`（null 不該出現），
+          // 兩處語意差異是設計而非 bug，改任一處前先看對方註解 + CLAUDE.md #10。
           const filtered = scanResults.filter(r =>
             r.mtfWeeklyPass == null || r.mtfWeeklyPass === true,
           );

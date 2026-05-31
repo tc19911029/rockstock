@@ -144,16 +144,27 @@ async function fetchTencentKlines(
     rateLimiter.reportSuccess('tencent');
 
     const json = (await res.json()) as TencentResponse;
-    if (json.code !== 0 || !json.data) return [];
+    if (json.code !== 0 || !json.data) {
+      // API 回非 0 code（限流/無此標的/格式變更）→ 記錄，別讓 caller 把「API 錯」誤當「無資料」
+      rateLimiter.reportError('tencent', 200, `code=${json.code}`);
+      console.warn(`[Tencent] ${code} API code=${json.code}（非0）→ 回空，視為失敗非無資料`);
+      return [];
+    }
 
     // 資料在 json.data[code].qfqday 或 json.data[code].day
     // key 可能是 code 本身，也可能需要遍歷 data 找到第一個有效 entry
     const stockData = json.data[code] ?? Object.values(json.data)[0];
-    if (!stockData) return [];
+    if (!stockData) {
+      console.warn(`[Tencent] ${code} 回應無 stockData → 回空`);
+      return [];
+    }
 
     const entries = stockData.qfqday ?? stockData.day ?? [];
     return parseEntries(entries as TencentKlineEntry[], isCN);
-  } catch {
+  } catch (err) {
+    // 網路/解析錯誤：必須留痕（否則盤中走圖看不到更新時無從判斷是 API 掛還是真停牌）
+    rateLimiter.reportError('tencent', 0, String(err));
+    console.warn(`[Tencent] ${code} fetch/parse 失敗 → 回空（視為失敗非無資料）:`, err);
     return [];
   }
 }

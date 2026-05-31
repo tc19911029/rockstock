@@ -319,7 +319,7 @@ async function _writeCandleFileImpl(
     lastDate,
     updatedAt: new Date().toISOString(),
     candles: stripped,
-    // 收盤 cron 寫入時自動封存（Fundamental Rule R1）
+    // advisory metadata（目前無讀取者；R1 由呼叫端紀律保證，見檔頭註解）
     sealedDate: lastDate,
   };
 
