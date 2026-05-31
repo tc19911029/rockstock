@@ -1076,6 +1076,28 @@ export default function CandleChart({
     return 'pending';
   }, [activePattern, candles]);
 
+  // 雙B 線（智能交易線/黃線/紅線/多空線）在 hover（或最新）K 棒的數值 —
+  // 比照 MA 圖例：疊圖開啟時把線值標出來，游標移動時跟著變。
+  const shuangBMaps = useMemo(() => {
+    if (!shuangB) return null;
+    const m = (pts: { time: string; value: number }[]) =>
+      new Map(pts.map(p => [String(p.time).replace(/\*$/, ''), p.value] as const));
+    return { zhineng: m(shuangB.zhineng), zb4: m(shuangB.zb4), zb5: m(shuangB.zb5), duokong: m(shuangB.duokong) };
+  }, [shuangB]);
+  const shuangBLegend = (() => {
+    if (!shuangBMaps || !displayForLegend) return null;
+    const d = displayForLegend.date.replace(/\*$/, '');
+    const pd = prevForLegend?.date?.replace(/\*$/, '');
+    const at = (map: Map<string, number>) => {
+      const v = map.get(d);
+      if (v == null) return null;
+      const pv = pd != null ? map.get(pd) : undefined;
+      return { v, arrow: pv != null ? (v >= pv ? ' ↑' : ' ↓') : '' };
+    };
+    const z = at(shuangBMaps.zhineng), y = at(shuangBMaps.zb4), r = at(shuangBMaps.zb5), dk = at(shuangBMaps.duokong);
+    return (z || y || r || dk) ? { z, y, r, dk } : null;
+  })();
+
   const statusLabel: Record<PatternStatus, { text: string; cls: string }> = {
     pending: { text: '待突破',  cls: 'bg-amber-900/80 text-amber-100 border-amber-700' },
     success: { text: '已突破',  cls: 'bg-emerald-900/80 text-emerald-100 border-emerald-700' },
@@ -1108,6 +1130,16 @@ export default function CandleChart({
             }`}>{bestSignal.label}</span>
           )}
         </div>
+
+        {/* Row 1.5: 雙B 線數值（智能交易線/黃線/紅線/多空線）— 疊圖開啟才顯示，對齊 hover/最新 K 棒 */}
+        {shuangBLegend && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-mono">
+            {shuangBLegend.z && <span style={{ color: '#22D3EE' }}>智能線 {shuangBLegend.z.v.toFixed(2)}{shuangBLegend.z.arrow}</span>}
+            {shuangBLegend.y && <span style={{ color: '#FFD000' }}>黃線 {shuangBLegend.y.v.toFixed(2)}{shuangBLegend.y.arrow}</span>}
+            {shuangBLegend.r && <span style={{ color: '#FF433D' }}>紅線 {shuangBLegend.r.v.toFixed(2)}{shuangBLegend.r.arrow}</span>}
+            {shuangBLegend.dk && <span style={{ color: '#FFD000' }} className="opacity-70">多空線 {shuangBLegend.dk.v.toFixed(2)}{shuangBLegend.dk.arrow}</span>}
+          </div>
+        )}
 
         {/* Row 2: 形態 chip + 頸/標/失（一排，存在才顯示；信號 badge 在右上獨立）*/}
         {hasInfoRow && (
