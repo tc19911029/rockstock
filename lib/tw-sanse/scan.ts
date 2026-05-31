@@ -16,6 +16,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Candle } from '@/types';
 import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
+import { getTWConcept, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { computeSanSe, evalLatest, type SanSeLevel } from '@/lib/cn-sanse/selectors';
 import { evalConditions } from '@/lib/cn-sanse/conditions';
 import type {
@@ -67,7 +68,7 @@ async function readCandles(dir: string, symbol: string): Promise<Candle[] | null
 
 /** 從本地 TW 候選清單建股票池（掃 candle 目錄全覆蓋 + stock-master 補名 + 排除存託憑證 DR）。 */
 async function loadTwUniverse(dir: string): Promise<StockEntry[]> {
-  const [files, nameMap] = await Promise.all([fs.readdir(dir), loadNameMap()]);
+  const [files, nameMap, industryMap] = await Promise.all([fs.readdir(dir), loadNameMap(), fetchTWIndustryMap()]);
   const out: StockEntry[] = [];
   for (const f of files) {
     if (!isCommonStock(f)) continue;
@@ -76,7 +77,10 @@ async function loadTwUniverse(dir: string): Promise<StockEntry[]> {
     const name = nameMap.get(code) ?? symbol;
     // 排除存託憑證（外國企業 TDR，名稱含「DR」，非台股普通股；如 9103 美德醫DR）
     if (/DR$/.test(name) || name.includes('-DR')) continue;
-    out.push({ symbol, name, industry: '' });
+    // 產業題材：題材對照優先（蘋果供應鏈/AI伺服器/記憶體…），沒命中退回 TWSE 產業別（金融保險/航運…）。
+    // 與書本掃描同一份來源（conceptMap）；fetchTWIndustryMap 網路失敗只少了產業別 fallback，不中斷掃描。
+    const industry = getTWConcept(code, industryMap.get(code)) ?? '';
+    out.push({ symbol, name, industry });
   }
   return out;
 }

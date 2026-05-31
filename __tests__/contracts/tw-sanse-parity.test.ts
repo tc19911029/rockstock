@@ -77,6 +77,12 @@ jest.mock('@/lib/datasource/LocalCandleStore', () => ({
   getLocalCandleDir: () => '/fake/candles/TW',
 }));
 
+// 不打網路：stub TWSE/TPEx 產業 fetch（保留真實 getTWConcept 題材對照），合約測試維持 hermetic。
+jest.mock('@/lib/scanner/conceptMap', () => ({
+  ...jest.requireActual('@/lib/scanner/conceptMap'),
+  fetchTWIndustryMap: jest.fn().mockResolvedValue(new Map([['2330', '半導體'], ['6654', '其他電子']])),
+}));
+
 jest.mock('fs/promises', () => ({
   readFile: jest.fn(async (p: string) => {
     const s = String(p);
