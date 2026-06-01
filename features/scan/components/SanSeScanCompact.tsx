@@ -129,6 +129,43 @@ function buyScore(rep?: ConditionReport): number {
   return s;
 }
 
+/** 共用排序比較器（畫面清單 + 漲幅抓取目標共用，確保顯示的股票就是有抓漲幅的股票）。 */
+function rowComparator(
+  sortKey: SortKey,
+  dir: number,
+  perf: Record<string, StockForwardPerformance>,
+  reportMap: Map<string, ConditionReport>,
+) {
+  const fwdField = FWD_FIELD[sortKey];
+  return (a: Hit, b: Hit): number => {
+    if (fwdField) {
+      const va = perf[a.symbol]?.[fwdField];
+      const vb = perf[b.symbol]?.[fwdField];
+      if (va == null && vb == null) return 0;       // 缺值永遠排最後（不受 asc/desc 影響）
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return dir * ((vb as number) - (va as number));
+    }
+    if (sortKey === 'turnoverRank') {
+      const ra = a.turnoverRank; const rb = b.turnoverRank;
+      if (ra == null && rb == null) return 0;
+      if (ra == null) return 1;
+      if (rb == null) return -1;
+      return dir * (ra - rb);
+    }
+    if (sortKey === 'combo') {
+      const ra = buyScore(reportMap.get(a.symbol)); const rb = buyScore(reportMap.get(b.symbol));
+      if (ra < 0 && rb < 0) return 0;
+      if (ra < 0) return 1;
+      if (rb < 0) return -1;
+      if (ra === rb) return 0;
+      return dir * (rb - ra);
+    }
+    const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
+    return dir * ((b[key] ?? 0) - (a[key] ?? 0));
+  };
+}
+
 const LEVELS: { key: Level; label: string; desc: string }[] = [
   { key: 'strict', label: '嚴格', desc: '三色資金共振 — 短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位' },
   { key: 'medium', label: '中等', desc: '更新版 — 短攻 / 中強 / 中控 三個分數都 > 0' },
@@ -264,32 +301,6 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     else rescan();                                               // 盤後即時重掃並固化
   }, [session, loadDate, rescan]);
 
-  // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）
-  useEffect(() => {
-    const hits = data?.results[level] ?? [];
-    if (!data || hits.length === 0) { setPerf({}); return; }
-    let alive = true;
-    setPerfLoading(true);
-    fetch('/api/backtest/forward', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        scanDate: data.lastDate,
-        stocks: hits.slice(0, 50).map((h) => ({ symbol: h.symbol, name: h.name, scanPrice: h.price })),
-      }),
-    })
-      .then((r) => r.json())
-      .then((j: { performance?: StockForwardPerformance[] }) => {
-        if (!alive) return;
-        const m: Record<string, StockForwardPerformance> = {};
-        for (const p of j.performance ?? []) m[p.symbol] = p;
-        setPerf(m);
-      })
-      .catch(() => { /* 績效取不到不致命 */ })
-      .finally(() => { if (alive) setPerfLoading(false); });
-    return () => { alive = false; };
-  }, [data, level]);
-
   // 各 level 命中代號集合 → 用來算「多策略徽章」
   const levelSets = useMemo(() => ({
     strict: new Set((data?.results.strict ?? []).map((h) => h.symbol)),
@@ -303,40 +314,45 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     [data],
   );
 
+  // 漲幅要抓「畫面實際會顯示的那 50 檔」(濾鏡+排序後)，否則改排序/濾鏡後顯示的股票沒抓到漲幅 → 空白。
+  // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
+  const fetchTargets = useMemo(() => {
+    const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
+    const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
+    rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap));
+    return rows.slice(0, 50);
+  }, [data, level, sortKey, sortDir, filters, reportMap]);
+  const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
+
+  // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
+  useEffect(() => {
+    if (!data || fetchTargets.length === 0) { setPerf({}); return; }
+    let alive = true;
+    setPerfLoading(true);
+    fetch('/api/backtest/forward', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        scanDate: data.lastDate,
+        stocks: fetchTargets.map((h) => ({ symbol: h.symbol, name: h.name, scanPrice: h.price })),
+      }),
+    })
+      .then((r) => r.json())
+      .then((j: { performance?: StockForwardPerformance[] }) => {
+        if (!alive) return;
+        const m: Record<string, StockForwardPerformance> = {};
+        for (const p of j.performance ?? []) m[p.symbol] = p;
+        setPerf(m);
+      })
+      .catch(() => { /* 績效取不到不致命 */ })
+      .finally(() => { if (alive) setPerfLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.lastDate, fetchKey]);
+
   const hits = useMemo(() => {
     const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
-    const dir = sortDir === 'desc' ? 1 : -1;
-    const fwdField = FWD_FIELD[sortKey];
-    rows.sort((a, b) => {
-      if (fwdField) {
-        const va = perf[a.symbol]?.[fwdField];
-        const vb = perf[b.symbol]?.[fwdField];
-        // 缺值永遠排最後（不受 asc/desc 影響）
-        if (va == null && vb == null) return 0;
-        if (va == null) return 1;
-        if (vb == null) return -1;
-        return dir * ((vb as number) - (va as number));
-      }
-      if (sortKey === 'turnoverRank') {
-        // 名次小 = 成交額大；缺名次（舊固化資料）永遠排最後（不受 asc/desc 影響）
-        const ra = a.turnoverRank; const rb = b.turnoverRank;
-        if (ra == null && rb == null) return 0;
-        if (ra == null) return 1;
-        if (rb == null) return -1;
-        return dir * (ra - rb);
-      }
-      if (sortKey === 'combo') {
-        // 最應該買進排序：評級→共振組數→賣訊降級→底部反彈→短攻細排；缺 combo（舊固化）排最後
-        const ra = buyScore(reportMap.get(a.symbol)); const rb = buyScore(reportMap.get(b.symbol));
-        if (ra < 0 && rb < 0) return 0;
-        if (ra < 0) return 1;
-        if (rb < 0) return -1;
-        if (ra === rb) return 0;
-        return dir * (rb - ra);
-      }
-      const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
-      return dir * ((b[key] ?? 0) - (a[key] ?? 0));
-    });
+    rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap));
     return rows.slice(0, 50);
   }, [data, level, sortKey, sortDir, perf, filters, reportMap]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
