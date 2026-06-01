@@ -14,7 +14,7 @@ import { ForwardPerfRow } from './ForwardPerfRow';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
-import { STAGE_LABEL, STAGE_ICON, type ConditionReport } from '@/lib/cn-sanse/conditions';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
 type Level = 'strict' | 'medium' | 'loose';
@@ -39,13 +39,28 @@ interface ScanResp {
   turnoverFiltered?: number;  // 被粗篩剔除的冷門薄量股檔數
 }
 
-/** 三組條件 chip（主力階段 / 雙B買 / 捕撈買 + 共振數 + 賣出警示）*/
+/** 使用順序評級 badge 配色（回測推導；強→弱）。*/
+const COMBO_BADGE: Record<ComboGrade, string> = {
+  top: 'bg-gradient-to-r from-rose-500/25 to-fuchsia-500/25 text-fuchsia-100 border-fuchsia-400/50',
+  prime: 'bg-rose-500/20 text-rose-200 border-rose-400/40',
+  mid: 'bg-amber-500/20 text-amber-200 border-amber-400/40',
+  watch: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
+};
+
+/** 三組條件 chip（使用順序評級 + 主力階段 / 雙B買 / 捕撈買 + 共振數 + 賣出警示）*/
 function CondChips({ rep }: { rep?: ConditionReport }) {
   if (!rep) return null;
   const bBuy = rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
   const cBuy = rep.catch.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
   return (
     <div className="flex flex-wrap items-center gap-1 mb-1 text-[9px]">
+      {rep.combo && (
+        <span
+          className={cn('px-1 py-0.5 rounded border font-medium', COMBO_BADGE[rep.combo.grade])}
+          title="使用順序評級（回測推導：紅當前提 → 捕撈/雙B金叉觸發 → 三色全共振；無紅＝低勝率）"
+        >{COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}</span>
+      )}
       {rep.level && <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground border border-border">共振 {rep.groupBuyCount}/3</span>}
       {rep.doubleB.buyHit && <span className="px-1 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">雙B {bBuy.join('/')}</span>}
       {rep.mainforce.buyHit && rep.mainStage && <span className="px-1 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[rep.mainStage]}{STAGE_ICON[rep.mainStage]}</span>}
@@ -75,10 +90,19 @@ const FILTER_GROUPS: { group: FilterGroup; title: string; activeCls: string; con
     { id: 'c_gold_vol', label: '量價強勢' },
   ] },
 ];
+// 使用順序評級篩選（回測推導；衍生自 report.combo）。
+const COMBO_FILTERS: { id: string; label: string; tip: string }[] = [
+  { id: 'cf_redGate', label: '紅當前提', tip: '只看紅色(中線機構)在場的＝勝出順序的前提（過濾掉純紫/純指標的低勝率組）' },
+  { id: 'cf_prime', label: '主進場', tip: '只看「紅當前提＋觸發」與「三色全共振」（評級 prime/top）' },
+  { id: 'cf_bottom', label: '底部反彈', tip: '只看捕撈 0 軸下空頭區金叉（底部反彈，回測勝率較高）' },
+];
 function passFilters(report: ConditionReport | undefined, active: Set<string>): boolean {
   if (active.size === 0) return true;
   if (!report) return false;
   if (active.has('hideConflict') && report.conflict) return false;
+  if (active.has('cf_redGate') && !report.combo?.redGate) return false;
+  if (active.has('cf_prime') && !(report.combo?.grade === 'top' || report.combo?.grade === 'prime')) return false;
+  if (active.has('cf_bottom') && !report.combo?.bottomReversal) return false;
   for (const { group, conds } of FILTER_GROUPS) {
     for (const c of conds) {
       if (active.has(c.id) && !report[group].buy.some((x) => x.id === c.id && x.met)) return false;
@@ -95,10 +119,11 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 
-type SortKey = 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price' | 'turnoverRank'
+type SortKey = 'combo' | 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price' | 'turnoverRank'
   | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
 
 const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
+  { key: 'combo', label: '順序', tip: '使用順序評級（回測推導：三色全共振>紅當前提+觸發>紅+黃中線>紅待觸發>無紅）' },
   { key: 'shortAttack', label: '短攻', tip: '短線上攻（游資資金）分數' },
   { key: 'midStrength', label: '中強', tip: '中線強勢（主力資金）分數' },
   { key: 'midControl', label: '中控', tip: '中線控盤（主力控盤）分數' },
@@ -282,6 +307,14 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         if (rb == null) return -1;
         return dir * (ra - rb);
       }
+      if (sortKey === 'combo') {
+        // 使用順序評級 rank 高→低；缺值（舊固化無 combo 欄）排最後
+        const ra = reportMap.get(a.symbol)?.combo?.rank; const rb = reportMap.get(b.symbol)?.combo?.rank;
+        if (ra == null && rb == null) return 0;
+        if (ra == null) return 1;
+        if (rb == null) return -1;
+        return dir * (rb - ra);
+      }
       const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
       return dir * ((b[key] ?? 0) - (a[key] ?? 0));
     });
@@ -412,6 +445,20 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
             ))}
           </div>
         ))}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[9px] text-muted-foreground w-9 shrink-0" title="使用順序評級（回測推導 data/sanse-combo-playbook.md）">🔢順序</span>
+          {COMBO_FILTERS.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => toggleFilter(c.id)}
+              title={c.tip}
+              className={cn(
+                'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+                filters.has(c.id) ? 'bg-rose-500/15 text-rose-200 border-rose-400/40' : 'text-muted-foreground border-border hover:bg-secondary',
+              )}
+            >{c.label}</button>
+          ))}
+        </div>
         <div className="flex items-center gap-1 flex-wrap">
           <span className="text-[9px] text-muted-foreground w-9 shrink-0">其他</span>
           <button

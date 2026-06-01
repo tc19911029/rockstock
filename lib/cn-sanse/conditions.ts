@@ -24,6 +24,26 @@ export interface Cond { id: string; label: string; met: boolean; kind: 'signal' 
 export interface GroupReport { buy: Cond[]; sell: Cond[]; buyHit: boolean; sellHit: boolean }
 export type ResLevel = 'strong' | 'medium' | 'weak';
 
+/**
+ * 使用順序評級 — 回測推導（data/sanse-combo-playbook.md，scripts/research-sanse-combo.ts）。
+ * 結論：① 紅色(中線機構)在場當「前提」(紫色單獨當前提是最弱的) → ② 捕撈/雙B 金叉「觸發」進場
+ * (0軸下底部反彈金叉勝率較高) → ③ 三色全共振(紅+紫+黃)最強。純衍生自三色分數 + 三組觸發，不另算指標。
+ */
+export type ComboGrade = 'top' | 'prime' | 'mid' | 'watch' | 'weak';
+export interface ComboGuide {
+  grade: ComboGrade;
+  rank: number;            // top=5 … weak=1（排序用，高＝勝出順序在前）
+  label: string;
+  redGate: boolean;        // 紅(中線機構)在場＝勝出順序的前提
+  trigger: boolean;        // 捕撈金叉 或 雙B金叉/突破＝進場觸發
+  bottomReversal: boolean; // 捕撈 0 軸下空頭區金叉（底部反彈，回測勝率較高）
+  midline: boolean;        // 紅＋黃＝做中線骨架
+}
+export const COMBO_LABEL: Record<ComboGrade, string> = {
+  top: '三色全共振⭐', prime: '紅當前提+觸發', mid: '紅+黃中線', watch: '紅待觸發', weak: '無紅·低勝率',
+};
+export const COMBO_RANK: Record<ComboGrade, number> = { top: 5, prime: 4, mid: 3, watch: 2, weak: 1 };
+
 export interface ConditionReport {
   doubleB: GroupReport;
   mainforce: GroupReport;
@@ -35,6 +55,7 @@ export interface ConditionReport {
   conflict: boolean;              // 有買進同時有賣出
   sellWarnings: string[];         // 命中的賣出條件 label
   scores: { shortAttack: number; midStrength: number; midControl: number; kongPan: number };
+  combo?: ComboGuide;             // 使用順序評級（衍生；舊固化紀錄可能無此欄 → optional）
 }
 
 // ZB4 線性加權（與 indicators.ts 同）
@@ -206,9 +227,25 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
     .flatMap((g) => g.sell.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label));
   const conflict = selected && sellWarnings.length > 0;
 
+  // ── 使用順序評級（衍生自上面三色 redOn/purpleOn/yellowOn + 雙B/捕撈觸發；回測推導）──
+  const comboTrigger = doubleB.buyHit || catchG.buyHit;            // 捕撈金叉 或 雙B金叉/突破
+  const comboBottom = catchG.buy.some((c) => c.id === 'c_gold_bear' && c.met); // 捕撈0軸下底部反彈金叉
+  const comboMid = redOn && yellowOn;
+  let comboGrade: ComboGrade;
+  if (redOn && purpleOn && yellowOn && comboTrigger) comboGrade = 'top';   // 三色全共振＋觸發
+  else if (redOn && comboTrigger) comboGrade = 'prime';                    // 紅當前提＋觸發（主進場）
+  else if (redOn && yellowOn) comboGrade = 'mid';                          // 紅＋黃中線骨架（待觸發/續抱）
+  else if (redOn) comboGrade = 'watch';                                    // 紅在場，等金叉觸發
+  else comboGrade = 'weak';                                                // 無紅（純紫/純指標）＝低勝率警示
+  const combo: ComboGuide = {
+    grade: comboGrade, rank: COMBO_RANK[comboGrade], label: COMBO_LABEL[comboGrade],
+    redGate: redOn, trigger: comboTrigger, bottomReversal: comboBottom, midline: comboMid,
+  };
+
   return {
     doubleB, mainforce, catch: catchG,
     mainStage, groupBuyCount, level, selected, conflict, sellWarnings,
     scores: { shortAttack: sa, midStrength: ms, midControl: mc, kongPan: kp },
+    combo,
   };
 }

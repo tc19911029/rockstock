@@ -12,7 +12,7 @@
  */
 import type { Candle } from '@/types';
 import { computeSanSe } from '@/lib/cn-sanse/selectors';
-import { evalConditions } from '@/lib/cn-sanse/conditions';
+import { evalConditions, COMBO_RANK } from '@/lib/cn-sanse/conditions';
 import { CN_TIER_THRESHOLDS, TW_TIER_THRESHOLDS } from '@/lib/cn-sanse/indicators';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -42,6 +42,24 @@ describe('tw-sanse 純不變量', () => {
     const withSeries = evalConditions(candles, index, series);   // 掃描路徑（scanTwSanSe 傳 series）
     const recomputed = evalConditions(candles, index);           // 走圖路徑（chart route 不傳 series）
     expect(recomputed).toEqual(withSeries);
+  });
+
+  test('使用順序評級 combo 衍生欄位自洽（紅當前提/觸發/中線/rank↔grade；掃描走圖同步由上面 toEqual 保證）', () => {
+    const candles = genCandles(D_1, 300);
+    const index = genCandles(D_1, 300).map((c) => c.close);
+    const r = evalConditions(candles, index);
+    const combo = r.combo!;
+    expect(combo).toBeDefined();
+    expect(combo.redGate).toBe(r.scores.midStrength > 0);          // 前提＝紅(中線機構)在場
+    expect(combo.trigger).toBe(r.doubleB.buyHit || r.catch.buyHit); // 觸發＝雙B或捕撈買進命中
+    expect(combo.midline).toBe(r.scores.midStrength > 0 && r.scores.midControl > 0); // 中線骨架＝紅＋黃
+    expect(combo.rank).toBe(COMBO_RANK[combo.grade]);              // rank 必對應 grade
+    expect(combo.grade === 'weak').toBe(!combo.redGate);          // 無紅 ⟺ weak（低勝率警示）
+    if (combo.grade === 'top') {                                   // 三色全共振必三色亮＋觸發
+      expect(combo.redGate && combo.trigger).toBe(true);
+      expect(r.scores.shortAttack > 0 && r.scores.midControl > 0).toBe(true);
+    }
+    if (combo.grade === 'prime') expect(combo.redGate && combo.trigger).toBe(true);
   });
 
   test('台股捕撈季節 4 級門檻全部低於陸股（台股周轉率結構性偏低）', () => {

@@ -4,12 +4,28 @@
 // 主頁中間「條件」tab（陸股）與 /cn-sanse 共用同一份 ConditionReport 渲染。
 
 import { cn } from '@/lib/utils';
-import { STAGE_LABEL, STAGE_ICON, type ConditionReport, type GroupReport, type ResLevel } from '@/lib/cn-sanse/conditions';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, type ConditionReport, type GroupReport, type ResLevel, type ComboGrade } from '@/lib/cn-sanse/conditions';
 
 const RES_BADGE: Record<ResLevel, { label: string; cls: string }> = {
   strong: { label: '強共振', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
   medium: { label: '中共振', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
   weak: { label: '弱共振', cls: 'bg-secondary text-muted-foreground border-border' },
+};
+
+/** 使用順序評級 badge 配色（回測推導；強→弱）。*/
+const COMBO_BADGE: Record<ComboGrade, string> = {
+  top: 'bg-gradient-to-r from-rose-500/25 to-fuchsia-500/25 text-fuchsia-100 border-fuchsia-400/50',
+  prime: 'bg-rose-500/20 text-rose-200 border-rose-400/40',
+  mid: 'bg-amber-500/20 text-amber-200 border-amber-400/40',
+  watch: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
+};
+const COMBO_HINT: Record<ComboGrade, string> = {
+  top: '三色全到齊＋金叉觸發＝最高把握（回測台股 d5 +1.70%，但稀有）',
+  prime: '紅色(機構)在場＋捕撈/雙B金叉觸發＝主進場（回測勝出組）',
+  mid: '紅＋黃＝做中線骨架，等金叉觸發或續抱',
+  watch: '紅色在場但還沒觸發，等捕撈/雙B金叉',
+  weak: '紅色(機構)未在場——純紫/純指標進場回測勝率最低，謹慎',
 };
 
 function CondList({ title, g, color }: { title: string; g: GroupReport; color: string }) {
@@ -43,11 +59,13 @@ export function SanSeConditionsPanel({ report }: { report: ConditionReport | nul
     <div className="p-2.5 space-y-2">
       <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
         <span className="font-semibold text-fuchsia-300">🎨 三色條件</span>
+        {r.combo && <span className={cn('px-1.5 py-0.5 rounded border font-medium', COMBO_BADGE[r.combo.grade])} title="使用順序評級（回測推導：紅當前提 → 捕撈/雙B金叉觸發 → 三色全共振）">{COMBO_LABEL[r.combo.grade]}{r.combo.bottomReversal ? '·底部反彈' : ''}</span>}
         {r.level && <span className={cn('px-1.5 py-0.5 rounded border font-medium', RES_BADGE[r.level].cls)}>{RES_BADGE[r.level].label} {r.groupBuyCount}/3</span>}
         {r.mainStage && <span className="px-1.5 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[r.mainStage]}{STAGE_ICON[r.mainStage]}</span>}
         {r.conflict && <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}
         {!r.selected && <span className="text-muted-foreground">未達任一組買點</span>}
       </div>
+      {r.combo && <p className="text-[10px] leading-snug text-muted-foreground -mt-1">{COMBO_HINT[r.combo.grade]}</p>}
 
       <CondList title="🟦 雙B戰法" g={r.doubleB} color="text-rose-300" />
       <CondList title="🟪 主力狀態" g={r.mainforce} color="text-fuchsia-400" />
