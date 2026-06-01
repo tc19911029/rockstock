@@ -115,9 +115,13 @@ export async function GET(req: NextRequest) {
       // 容忍 5 個交易日差距（涵蓋週末 + 假日）
       // 遍歷所有候選（如 2330.TW → 2330.TWO），避免只試第一個就 fallthrough 到 API
       let result: Awaited<ReturnType<typeof loadLocalCandlesWithTolerance>> = null;
+      // 記住「實際載到資料」的那個候選 —— 上櫃股(.TWO)用裸碼進來時 candidates[0] 是 .TW，
+      // 但資料在 .TWO；回傳 ticker 必須是真正命中的候選，否則 currentStock.ticker 標錯後綴，
+      // 下游(三色 overlay /chart/{ticker}、籌碼/基本面面板)會用錯後綴打 API 而失敗。
+      let loadedTicker = candidates[0];
       for (const candidate of candidates) {
         result = await loadLocalCandlesWithTolerance(candidate, market, today, 5);
-        if (result && result.candles.length > 0) break;
+        if (result && result.candles.length > 0) { loadedTicker = candidate; break; }
       }
       if (result && result.candles.length > 0) {
         // ── 盤中即時覆蓋：若 lastDate < today，主動拉即時報價湊今日 K 棒 ──
@@ -308,7 +312,7 @@ export async function GET(req: NextRequest) {
         const indexName = INDEX_NAMES[candidates[0].toUpperCase()];
         if (indexName) name = indexName;
         return apiOk({
-          ticker: candidates[0],
+          ticker: loadedTicker,
           name,
           currency: '',
           interval,
