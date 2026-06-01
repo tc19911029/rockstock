@@ -14,7 +14,7 @@ import { ForwardPerfRow } from './ForwardPerfRow';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
-import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
 type Level = 'strict' | 'medium' | 'loose';
@@ -92,6 +92,7 @@ const FILTER_GROUPS: { group: FilterGroup; title: string; activeCls: string; con
 ];
 // 使用順序評級篩選（回測推導；衍生自 report.combo）。
 const COMBO_FILTERS: { id: string; label: string; tip: string }[] = [
+  { id: 'cf_top', label: '最稀有⭐', tip: '只看三色全共振（紅+紫+黃全亮＋金叉觸發）——回測最強且最稀有的一級，如 3450 聯鈞' },
   { id: 'cf_redGate', label: '紅當前提', tip: '只看紅色(中線機構)在場的＝勝出順序的前提（過濾掉純紫/純指標的低勝率組）' },
   { id: 'cf_prime', label: '主進場', tip: '只看「紅當前提＋觸發」與「三色全共振」（評級 prime/top）' },
   { id: 'cf_bottom', label: '底部反彈', tip: '只看捕撈 0 軸下空頭區金叉（底部反彈，回測勝率較高）' },
@@ -100,6 +101,7 @@ function passFilters(report: ConditionReport | undefined, active: Set<string>): 
   if (active.size === 0) return true;
   if (!report) return false;
   if (active.has('hideConflict') && report.conflict) return false;
+  if (active.has('cf_top') && report.combo?.grade !== 'top') return false;
   if (active.has('cf_redGate') && !report.combo?.redGate) return false;
   if (active.has('cf_prime') && !(report.combo?.grade === 'top' || report.combo?.grade === 'prime')) return false;
   if (active.has('cf_bottom') && !report.combo?.bottomReversal) return false;
@@ -109,6 +111,22 @@ function passFilters(report: ConditionReport | undefined, active: Set<string>): 
     }
   }
   return true;
+}
+
+/**
+ * 最應該買進排序分數（回測推導的使用順序）：
+ * 評級 grade 為主軸（top>prime>mid>watch>weak，每級差 100），同級再比共振組數(×10)、
+ * 有賣出警示降一點、捕撈底部反彈加一點、最後用短攻做不跨級的細排。缺 combo（舊固化）回 -1 排最後。
+ */
+function buyScore(rep?: ConditionReport): number {
+  const c = rep?.combo;
+  if (!c) return -1;
+  let s = c.rank * 100 + (rep!.groupBuyCount ?? 0) * 10;
+  if (rep!.conflict) s -= 5;
+  if (c.bottomReversal) s += 1;
+  const sa = rep!.scores?.shortAttack ?? 0;
+  s += Math.min(Math.max(sa, 0), 99) / 100;
+  return s;
 }
 
 const LEVELS: { key: Level; label: string; desc: string }[] = [
@@ -123,7 +141,7 @@ type SortKey = 'combo' | 'shortAttack' | 'midStrength' | 'midControl' | 'shortOv
   | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
 
 const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
-  { key: 'combo', label: '順序', tip: '使用順序評級（回測推導：三色全共振>紅當前提+觸發>紅+黃中線>紅待觸發>無紅）' },
+  { key: 'combo', label: '應買', tip: '最應該買進排序（回測推導）：三色全共振>紅當前提+觸發>紅+黃中線>紅待觸發>無紅；同級再比共振組數/短攻，有賣出警示降級' },
   { key: 'shortAttack', label: '短攻', tip: '短線上攻（游資資金）分數' },
   { key: 'midStrength', label: '中強', tip: '中線強勢（主力資金）分數' },
   { key: 'midControl', label: '中控', tip: '中線控盤（主力控盤）分數' },
@@ -165,8 +183,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   const level = controlledLevel ?? internalLevel;
   const [perf, setPerf] = useState<Record<string, StockForwardPerformance>>({});
   const [perfLoading, setPerfLoading] = useState(false);
-  // 排序：預設短攻高→低（與後端排序一致）；點同鍵切換高低
-  const [sortKey, setSortKey] = useState<SortKey>('shortAttack');
+  // 排序：預設「應買」(使用順序評級綜合分)高→低，最該買進的在最前；點同鍵切換高低
+  const [sortKey, setSortKey] = useState<SortKey>('combo');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   // 三色買進訊號篩選（cond id 集合；含 'hideConflict'）
   const [filters, setFilters] = useState<Set<string>>(new Set());
@@ -308,11 +326,12 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         return dir * (ra - rb);
       }
       if (sortKey === 'combo') {
-        // 使用順序評級 rank 高→低；缺值（舊固化無 combo 欄）排最後
-        const ra = reportMap.get(a.symbol)?.combo?.rank; const rb = reportMap.get(b.symbol)?.combo?.rank;
-        if (ra == null && rb == null) return 0;
-        if (ra == null) return 1;
-        if (rb == null) return -1;
+        // 最應該買進排序：評級→共振組數→賣訊降級→底部反彈→短攻細排；缺 combo（舊固化）排最後
+        const ra = buyScore(reportMap.get(a.symbol)); const rb = buyScore(reportMap.get(b.symbol));
+        if (ra < 0 && rb < 0) return 0;
+        if (ra < 0) return 1;
+        if (rb < 0) return -1;
+        if (ra === rb) return 0;
         return dir * (rb - ra);
       }
       const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
@@ -483,6 +502,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           const ticker = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const isSel = pureSelected && ticker === pureSelected;
           const inWatch = useWatchlistStore.getState().has(h.symbol);
+          const rep = reportMap.get(h.symbol);
           return (
             <div
               key={h.symbol}
@@ -522,8 +542,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 )}
               </div>
 
-              {/* Row 2.5: 三色條件（主力階段 / 雙B買 / 捕撈買 + 賣出警示）*/}
-              <CondChips rep={reportMap.get(h.symbol)} />
+              {/* Row 2.5: 三色條件（使用順序評級 + 主力階段 / 雙B買 / 捕撈買 + 賣出警示）*/}
+              <CondChips rep={rep} />
+              {rep?.combo && (
+                <p className="text-[9px] leading-snug text-muted-foreground/80 mb-1" title="使用順序判讀（回測推導）">→ {COMBO_HINT[rep.combo.grade]}</p>
+              )}
 
               {/* Row 3: 命中策略徽章 + 動作按鈕 */}
               <div className="flex items-center gap-1 mb-1">

@@ -4,7 +4,7 @@
 // 主頁中間「條件」tab（陸股）與 /cn-sanse 共用同一份 ConditionReport 渲染。
 
 import { cn } from '@/lib/utils';
-import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, type ConditionReport, type GroupReport, type ResLevel, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type GroupReport, type ResLevel, type ComboGrade } from '@/lib/cn-sanse/conditions';
 
 const RES_BADGE: Record<ResLevel, { label: string; cls: string }> = {
   strong: { label: '強共振', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
@@ -19,13 +19,6 @@ const COMBO_BADGE: Record<ComboGrade, string> = {
   mid: 'bg-amber-500/20 text-amber-200 border-amber-400/40',
   watch: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
   weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
-};
-const COMBO_HINT: Record<ComboGrade, string> = {
-  top: '三色全到齊＋金叉觸發＝最高把握（回測台股 d5 +1.70%，但稀有）',
-  prime: '紅色(機構)在場＋捕撈/雙B金叉觸發＝主進場（回測勝出組）',
-  mid: '紅＋黃＝做中線骨架，等金叉觸發或續抱',
-  watch: '紅色在場但還沒觸發，等捕撈/雙B金叉',
-  weak: '紅色(機構)未在場——純紫/純指標進場回測勝率最低，謹慎',
 };
 
 function CondList({ title, g, color }: { title: string; g: GroupReport; color: string }) {

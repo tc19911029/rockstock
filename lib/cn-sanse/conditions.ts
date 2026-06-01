@@ -43,6 +43,14 @@ export const COMBO_LABEL: Record<ComboGrade, string> = {
   top: '三色全共振⭐', prime: '紅當前提+觸發', mid: '紅+黃中線', watch: '紅待觸發', weak: '無紅·低勝率',
 };
 export const COMBO_RANK: Record<ComboGrade, number> = { top: 5, prime: 4, mid: 3, watch: 2, weak: 1 };
+/** 每級的一句判讀（給訊號面板/掃描清單/條件面板共用，回測推導）。 */
+export const COMBO_HINT: Record<ComboGrade, string> = {
+  top: '三色全到齊＋金叉＝最高把握，可重倉（回測最強但稀有）',
+  prime: '紅(機構)在場＋金叉觸發＝主進場（回測勝出組）',
+  mid: '紅＋黃中線骨架，無金叉觸發→等捕撈/雙B金叉或續抱',
+  watch: '紅在場、尚無觸發→等捕撈/雙B金叉再進',
+  weak: '紅(機構)未在場→純紫/單指標進場回測最弱，謹慎',
+};
 
 export interface ConditionReport {
   doubleB: GroupReport;
