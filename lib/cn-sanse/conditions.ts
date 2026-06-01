@@ -27,7 +27,7 @@ export type ResLevel = 'strong' | 'medium' | 'weak';
 /**
  * 使用順序評級 — 回測推導（data/sanse-combo-playbook.md，scripts/research-sanse-combo.ts）。
  * 結論：① 紅色(中線機構)在場當「前提」(紫色單獨當前提是最弱的) → ② 捕撈/雙B 金叉「觸發」進場
- * (0軸下底部反彈金叉勝率較高) → ③ 紅紫黃全亮(三色全到齊)最強。純衍生自三色分數 + 三組觸發，不另算指標。
+ * (0軸下底部反彈金叉勝率較高) → ③ 雙B＋主力＋捕撈 三組齊發(共振3/3)最強。純衍生自三色分數 + 三組 buyHit，不另算指標。
  */
 export type ComboGrade = 'top' | 'prime' | 'mid' | 'watch' | 'weak';
 export interface ComboGuide {
@@ -40,12 +40,12 @@ export interface ComboGuide {
   midline: boolean;        // 紅＋黃＝做中線骨架
 }
 export const COMBO_LABEL: Record<ComboGrade, string> = {
-  top: '紅紫黃全亮⭐', prime: '紅當前提+觸發', mid: '紅+黃中線', watch: '紅待觸發', weak: '無紅·低勝率',
+  top: '三組齊發⭐', prime: '紅當前提+觸發', mid: '紅+黃中線', watch: '紅待觸發', weak: '無紅·低勝率',
 };
 export const COMBO_RANK: Record<ComboGrade, number> = { top: 5, prime: 4, mid: 3, watch: 2, weak: 1 };
 /** 每級的一句判讀（給訊號面板/掃描清單/條件面板共用，回測推導）。 */
 export const COMBO_HINT: Record<ComboGrade, string> = {
-  top: '三色全到齊＋金叉＝最高把握，可重倉（回測最強但稀有）',
+  top: '雙B＋主力＋捕撈 三組同時出買訊號（共振3/3）＝最高把握（回測最強但稀有）',
   prime: '紅(機構)在場＋金叉觸發＝主進場（回測勝出組）',
   mid: '紅＋黃中線骨架，無金叉觸發→等捕撈/雙B金叉或續抱',
   watch: '紅在場、尚無觸發→等捕撈/雙B金叉再進',
@@ -240,7 +240,7 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
   const comboBottom = catchG.buy.some((c) => c.id === 'c_gold_bear' && c.met); // 捕撈0軸下底部反彈金叉
   const comboMid = redOn && yellowOn;
   let comboGrade: ComboGrade;
-  if (redOn && purpleOn && yellowOn && comboTrigger) comboGrade = 'top';   // 紅紫黃全亮＋觸發
+  if (groupBuyCount === 3) comboGrade = 'top';                            // 雙B＋主力＋捕撈 三組齊發＝真共振3/3＝回測最強(M5)
   else if (redOn && comboTrigger) comboGrade = 'prime';                    // 紅當前提＋觸發（主進場）
   else if (redOn && yellowOn) comboGrade = 'mid';                          // 紅＋黃中線骨架（待觸發/續抱）
   else if (redOn) comboGrade = 'watch';                                    // 紅在場，等金叉觸發

@@ -54,12 +54,9 @@ describe('tw-sanse 純不變量', () => {
     expect(combo.trigger).toBe(r.doubleB.buyHit || r.catch.buyHit); // 觸發＝雙B或捕撈買進命中
     expect(combo.midline).toBe(r.scores.midStrength > 0 && r.scores.midControl > 0); // 中線骨架＝紅＋黃
     expect(combo.rank).toBe(COMBO_RANK[combo.grade]);              // rank 必對應 grade
-    expect(combo.grade === 'weak').toBe(!combo.redGate);          // 無紅 ⟺ weak（低勝率警示）
-    if (combo.grade === 'top') {                                   // 三色全共振必三色亮＋觸發
-      expect(combo.redGate && combo.trigger).toBe(true);
-      expect(r.scores.shortAttack > 0 && r.scores.midControl > 0).toBe(true);
-    }
-    if (combo.grade === 'prime') expect(combo.redGate && combo.trigger).toBe(true);
+    expect(combo.grade === 'top').toBe(r.groupBuyCount === 3);     // 最強 ⟺ 三組齊發(雙B+主力+捕撈=共振3/3)
+    expect(combo.grade === 'weak').toBe(r.groupBuyCount !== 3 && !combo.redGate); // 弱 ⟺ 非3/3 且無紅
+    if (combo.grade === 'prime') expect(combo.redGate && combo.trigger).toBe(true); // 主進場 ⟹ 紅在場＋觸發
   });
 
   test('台股捕撈季節 4 級門檻全部低於陸股（台股周轉率結構性偏低）', () => {

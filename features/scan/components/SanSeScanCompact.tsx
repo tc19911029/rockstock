@@ -58,7 +58,7 @@ function CondChips({ rep }: { rep?: ConditionReport }) {
       {rep.combo && (
         <span
           className={cn('px-1 py-0.5 rounded border font-medium', COMBO_BADGE[rep.combo.grade])}
-          title="使用順序評級（回測推導：紅當前提 → 捕撈/雙B金叉觸發 → 紅紫黃全亮；無紅＝低勝率）"
+          title="使用順序評級（回測推導：紅當前提 → 捕撈/雙B金叉觸發 → 三組齊發(共振3/3)最強；無紅＝低勝率）"
         >{COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}</span>
       )}
       {rep.level && <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground border border-border">共振 {rep.groupBuyCount}/3</span>}
@@ -92,9 +92,9 @@ const FILTER_GROUPS: { group: FilterGroup; title: string; activeCls: string; con
 ];
 // 使用順序評級篩選（回測推導；衍生自 report.combo）。
 const COMBO_FILTERS: { id: string; label: string; tip: string }[] = [
-  { id: 'cf_top', label: '最稀有⭐', tip: '只看紅紫黃全亮＋金叉觸發——回測最強且最稀有的一級，如 3450 聯鈞' },
+  { id: 'cf_top', label: '最稀有⭐', tip: '只看三組齊發（雙B＋主力＋捕撈 三組都出買訊號＝共振3/3）——回測最強且最稀有的一級' },
   { id: 'cf_redGate', label: '紅當前提', tip: '只看紅色(中線機構)在場的＝勝出順序的前提（過濾掉純紫/純指標的低勝率組）' },
-  { id: 'cf_prime', label: '主進場', tip: '只看「紅當前提＋觸發」與「紅紫黃全亮」（評級 prime/top）' },
+  { id: 'cf_prime', label: '主進場', tip: '只看「紅當前提＋觸發」與「三組齊發」（評級 prime/top）' },
   { id: 'cf_bottom', label: '底部反彈', tip: '只看捕撈 0 軸下空頭區金叉（底部反彈，回測勝率較高）' },
 ];
 function passFilters(report: ConditionReport | undefined, active: Set<string>): boolean {
@@ -178,7 +178,7 @@ type SortKey = 'combo' | 'shortAttack' | 'midStrength' | 'midControl' | 'shortOv
   | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
 
 const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
-  { key: 'combo', label: '應買', tip: '最應該買進排序（回測推導）：紅紫黃全亮>紅當前提+觸發>紅+黃中線>紅待觸發>無紅；同級再比共振組數/短攻，有賣出警示降級' },
+  { key: 'combo', label: '應買', tip: '最應該買進排序（回測推導）：三組齊發(3/3)>紅當前提+觸發>紅+黃中線>紅待觸發>無紅；同級再比共振組數/短攻，有賣出警示降級' },
   { key: 'shortAttack', label: '短攻', tip: '短線上攻（游資資金）分數' },
   { key: 'midStrength', label: '中強', tip: '中線強勢（主力資金）分數' },
   { key: 'midControl', label: '中控', tip: '中線控盤（主力控盤）分數' },

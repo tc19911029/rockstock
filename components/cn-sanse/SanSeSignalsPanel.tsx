@@ -92,7 +92,7 @@ export function SanSeSignalsPanel({ report }: { report: ConditionReport | null }
         {r.combo && <div className="text-foreground/90"><span className="text-foreground font-medium">操作：</span>{comboAction(r)}</div>}
         <div>
           <span className="text-foreground font-medium">通則：</span>
-          紅(機構)在場才當前提（紫色當門票回測最弱）→ 捕撈/雙B金叉觸發進場（0軸下底部反彈金叉也可）→ 三色齊揚最強；出場守紅翻負/雙B死叉。書本進場：上漲日 13:20 看盤、13:25 掛市價。
+          紅(機構)在場才當前提（紫色當門票回測最弱）→ 捕撈/雙B金叉觸發進場（0軸下底部反彈金叉也可）→ 三組齊發(雙B＋主力＋捕撈都出＝共振3/3)最強；出場守紅翻負/雙B死叉。書本進場：上漲日 13:20 看盤、13:25 掛市價。
         </div>
       </div>
     </div>
