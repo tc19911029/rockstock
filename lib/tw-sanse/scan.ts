@@ -20,9 +20,9 @@ import { getTWConcept, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { computeSanSe, evalLatest, type SanSeLevel } from '@/lib/cn-sanse/selectors';
 import { evalConditions } from '@/lib/cn-sanse/conditions';
 import type {
-  SanSeHit, ResonanceRecord, ResonanceCounts, SanSeScanResult,
+  SanSeHit, ResonanceRecord, ResonanceCounts, SanSeScanResult, SanSeIntradayInput,
 } from '@/lib/cn-sanse/scan';
-import { SANSE_TURNOVER_TOP_N, topTurnoverRanks } from '@/lib/cn-sanse/scan';
+import { SANSE_TURNOVER_TOP_N, topTurnoverRanks, appendTodayBar } from '@/lib/cn-sanse/scan';
 
 const INDEX_SYMBOL = '^TWII';   // 加權指數（RS 基準 + 行情日曆）
 const MIN_BARS = 250;
@@ -88,10 +88,13 @@ async function loadTwUniverse(dir: string): Promise<StockEntry[]> {
 /**
  * 台股三色全市場掃描。
  * @param opts.asOfDate 給定則把所有 K 線截斷到 ≤ 該日重算（回測逐日用）；不給用最新交易日。
+ * @param opts.intraday 給定則把 L2 即時報價合成「今日未收的那根日K」append 重算（盤中模式）。與 asOfDate 互斥。
+ *                      沒有即時報價的個股 last 仍停在前一交易日 → 被新鮮度檢查當殭屍股跳過（正確：無即時資料不選）。
  */
-export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number }): Promise<SanSeScanResult> {
+export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; intraday?: SanSeIntradayInput }): Promise<SanSeScanResult> {
   const dir = getLocalCandleDir('TW');
-  const asOf = opts?.asOfDate;
+  const intraday = opts?.intraday;
+  const asOf = intraday ? undefined : opts?.asOfDate;
   const truncate = (cs: Candle[] | null): Candle[] | null =>
     cs && asOf ? cs.filter((c) => c.date <= asOf) : cs;
 
@@ -102,9 +105,15 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number }): 
     return true;
   });
 
-  // 加權指數 → date→close map（行情日曆 + RS 基準）
-  const idxCandles = truncate(await readCandles(dir, INDEX_SYMBOL));
+  // 加權指數 → date→close map（行情日曆 + RS 基準）。盤中：把今日即時指數 append 成進行中那根。
+  let idxCandles = truncate(await readCandles(dir, INDEX_SYMBOL));
   if (!idxCandles || idxCandles.length === 0) throw new Error(`找不到大盤指數 ${INDEX_SYMBOL} 的本地K線`);
+  // 盤中 append 前先記「封存前一交易日」= 指數封存最後一根；個股只有封存對齊到這天才貼今日（缺口防護）。
+  const archivedLast = idxCandles[idxCandles.length - 1]?.date ?? '';
+  if (intraday) {
+    const idxBar = intraday.indexBars.get(INDEX_SYMBOL);
+    if (idxBar) idxCandles = appendTodayBar(idxCandles, intraday.date, idxBar);
+  }
   const idxMap = new Map<string, number>(idxCandles.map((c) => [c.date, c.close]));
   const lastDate = idxCandles[idxCandles.length - 1]?.date ?? '';
 
@@ -119,7 +128,13 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number }): 
     const loaded = await Promise.all(batch.map((s) => readCandles(dir, s.symbol)));
 
     batch.forEach((s, k) => {
-      const candles = truncate(loaded[k]);
+      let candles = truncate(loaded[k]);
+      // 盤中：把今日即時報價貼成進行中那根日K。只有「封存最後一根 === 前一交易日」才貼，
+      // 避免停牌復牌 / 漏抓昨日的缺口序列被貼成今日卻通過新鮮度檢查（指標跨缺口失真）。
+      if (candles && intraday && candles[candles.length - 1]?.date === archivedLast) {
+        const bar = intraday.quotes.get(s.symbol.split('.')[0]);
+        if (bar) candles = appendTodayBar(candles, intraday.date, bar);
+      }
       if (!candles || candles.length < MIN_BARS) return;
       // 新鮮度：最後一根必須是掃描日（asOf 或最新），否則停牌/下市殭屍股，不選
       if (candles[candles.length - 1].date !== lastDate) { staleSkipped++; return; }
@@ -197,7 +212,7 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number }): 
     results,
     records: keptRecords,
     resonanceCounts,
-    sessionType: 'post_close',
-    archivedDate: lastDate,
+    sessionType: intraday ? 'intraday' : 'post_close',
+    archivedDate: archivedLast,
   };
 }

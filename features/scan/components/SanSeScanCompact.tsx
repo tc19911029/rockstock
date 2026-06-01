@@ -15,13 +15,13 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { STAGE_LABEL, STAGE_ICON, type ConditionReport } from '@/lib/cn-sanse/conditions';
-import { isCNMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
 type Level = 'strict' | 'medium' | 'loose';
 
-/** 陸股盤中即時掃描活躍時段 = 開盤(9:15–15:00) 或盤後窗(15:01–15:30)。與 /cn-sanse 整頁同一判斷。 */
-function isCNIntradayActive(): boolean {
-  return isCNMarketOpen() || isPostCloseWindow('CN');
+/** 三色盤中即時掃描活躍時段 = 該市場開盤 或 盤後窗口。TW + CN 共用同一判斷。 */
+function isIntradayActive(market: 'TW' | 'CN'): boolean {
+  return isMarketOpen(market) || isPostCloseWindow(market);
 }
 
 interface Hit {
@@ -209,8 +209,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
     setData(null); setDates([]); setPerf({}); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
-    // 台股 v1 無盤中即時三色 → 一律盤後；陸股依時段決定
-    const initial = market === 'CN' && isCNIntradayActive() ? 'intraday' : 'post_close';
+    // TW + CN 皆依該市場時段決定：盤中/盤後窗口 → 即時，否則盤後封存
+    const initial = isIntradayActive(market) ? 'intraday' : 'post_close';
     setSession(initial);
     loadDate(undefined, initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -300,23 +300,21 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {/* 盤後 / 盤中 切換（台股 v1 無盤中三色，僅陸股顯示） */}
-          {market === 'CN' && (
-            <div className="flex rounded border border-border overflow-hidden text-[9px]">
-              <button
-                onClick={() => switchSession('post_close')}
-                disabled={loading}
-                className={cn('px-1.5 py-0.5', session === 'post_close' ? 'bg-sky-600 text-sky-50' : 'text-muted-foreground hover:bg-secondary')}
-                title="盤後封存（收盤定調，訊號穩定）"
-              >盤後</button>
-              <button
-                onClick={() => switchSession('intraday')}
-                disabled={loading}
-                className={cn('px-1.5 py-0.5', session === 'intraday' ? 'bg-rose-600 text-rose-50' : 'text-muted-foreground hover:bg-secondary')}
-                title="盤中即時：當下報價合成未收日K 重算；量能半根、訊號會跳動，收盤前才定調"
-              >盤中</button>
-            </div>
-          )}
+          {/* 盤後 / 盤中 切換（TW + CN 皆有） */}
+          <div className="flex rounded border border-border overflow-hidden text-[9px]">
+            <button
+              onClick={() => switchSession('post_close')}
+              disabled={loading}
+              className={cn('px-1.5 py-0.5', session === 'post_close' ? 'bg-sky-600 text-sky-50' : 'text-muted-foreground hover:bg-secondary')}
+              title="盤後封存（收盤定調，訊號穩定）"
+            >盤後</button>
+            <button
+              onClick={() => switchSession('intraday')}
+              disabled={loading}
+              className={cn('px-1.5 py-0.5', session === 'intraday' ? 'bg-rose-600 text-rose-50' : 'text-muted-foreground hover:bg-secondary')}
+              title="盤中即時：當下報價合成未收日K 重算；量能半根、訊號會跳動，收盤前才定調"
+            >盤中</button>
+          </div>
           <button
             onClick={onRefresh}
             disabled={loading}

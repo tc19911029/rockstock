@@ -103,7 +103,7 @@ export interface SanSeIntradayInput {
 }
 
 /** 把今日即時報價合成一根日K append 到封存序列尾端（已有今日就取代；封存比今日新則不動）。 */
-function appendTodayBar(cs: Candle[], date: string, bar: IntradayBar): Candle[] {
+export function appendTodayBar(cs: Candle[], date: string, bar: IntradayBar): Candle[] {
   const today: Candle = { date, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume };
   const last = cs[cs.length - 1];
   if (!last || last.date < date) return [...cs, today];

@@ -11,6 +11,8 @@ import type { SanSeScanResult } from '@/lib/cn-sanse/scan';
 const IS_VERCEL = !!process.env.VERCEL;
 const KEEP_DAYS = 30;
 const SUBDIR = 'tw-sanse-scan';
+const SUBDIR_INTRADAY = 'tw-sanse-scan-intraday';
+const INTRADAY_KEEP_DAYS = 7; // 盤中快照無回看價值（隔日被盤後封存取代），保留天數比封存短
 
 export interface SanSeDateEntry {
   date: string;
@@ -145,6 +147,86 @@ async function pruneOld(): Promise<void> {
     const { promises: fs } = await import('fs');
     const path = await import('path');
     const dir = path.join(process.cwd(), 'data', SUBDIR);
+    await Promise.all(stale.map((d) => fs.unlink(path.join(dir, `${d}.json`)).catch(() => {})));
+  }
+}
+
+// ── 盤中即時快照（分檔，不碰盤後封存）─────────────────────────────────────────
+// 與 CN（lib/cn-sanse/scanStorage）對齊：盤中寫 tw-sanse-scan-intraday/{date}.json，
+// 盤後寫 tw-sanse-scan/{date}.json，互不覆蓋。
+
+async function fsIntradayDir(): Promise<string> {
+  const { promises: fs } = await import('fs');
+  const path = await import('path');
+  const dir = path.join(process.cwd(), 'data', SUBDIR_INTRADAY);
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+async function intradayDates(): Promise<string[]> {
+  if (IS_VERCEL) {
+    const { list: blobList } = await import('@vercel/blob');
+    const out: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await blobList({ prefix: `${SUBDIR_INTRADAY}/`, limit: 100, cursor });
+      for (const b of result.blobs) { const m = b.pathname.match(/(\d{4}-\d{2}-\d{2})\.json$/); if (m) out.push(m[1]); }
+      cursor = result.hasMore ? result.cursor : undefined;
+    } while (cursor);
+    return out;
+  }
+  const { promises: fs } = await import('fs');
+  const files = await fs.readdir(await fsIntradayDir()).catch(() => [] as string[]);
+  return files.filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).map((f) => f.replace('.json', ''));
+}
+
+/** 寫盤中即時掃描快照（同日覆寫，latest live wins）。刻意分檔，不影響盤後封存。 */
+export async function saveTwSanSeIntraday(result: SanSeScanResult): Promise<void> {
+  const data = JSON.stringify(result);
+  if (IS_VERCEL) {
+    await blobPut(`${SUBDIR_INTRADAY}/${result.lastDate}.json`, data);
+  } else {
+    const path = await import('path');
+    const { atomicFsPut } = await import('@/lib/storage/atomicFsPut');
+    await atomicFsPut(path.join(await fsIntradayDir(), `${result.lastDate}.json`), data);
+  }
+  pruneIntraday().catch(() => {});
+}
+
+/** 讀某日盤中即時快照；無則 null。 */
+export async function loadTwSanSeIntraday(date: string): Promise<SanSeScanResult | null> {
+  let raw: string | null;
+  if (IS_VERCEL) {
+    raw = await blobGet(`${SUBDIR_INTRADAY}/${date}.json`);
+  } else {
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    raw = await fs.readFile(path.join(process.cwd(), 'data', SUBDIR_INTRADAY, `${date}.json`), 'utf-8').catch(() => null);
+  }
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as SanSeScanResult;
+  } catch {
+    return null;
+  }
+}
+
+/** 取最新一個盤中快照日期；無則 null。 */
+export async function latestTwSanSeIntradayDate(): Promise<string | null> {
+  const dates = (await intradayDates()).sort((a, b) => b.localeCompare(a));
+  return dates[0] ?? null;
+}
+
+async function pruneIntraday(): Promise<void> {
+  const stale = (await intradayDates()).sort((a, b) => b.localeCompare(a)).slice(INTRADAY_KEEP_DAYS);
+  if (!stale.length) return;
+  if (IS_VERCEL) {
+    const { del } = await import('@vercel/blob');
+    await Promise.all(stale.map((d) => del(`${SUBDIR_INTRADAY}/${d}.json`).catch(() => {})));
+  } else {
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    const dir = path.join(process.cwd(), 'data', SUBDIR_INTRADAY);
     await Promise.all(stale.map((d) => fs.unlink(path.join(dir, `${d}.json`)).catch(() => {})));
   }
 }

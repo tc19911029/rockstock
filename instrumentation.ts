@@ -66,27 +66,28 @@ export async function register() {
     }
   }
 
-  // ── 盤中：三色資金即時掃描（CN 自創策略），每 10 分鐘 ──
-  // 把 L2 快照合成今日進行中日K 重算三色，寫 intraday 快照（不碰盤後封存）。
-  let sanseIntradayInFlight = false;
-  async function scanIntradaySanSe() {
-    if (!isMarketOpen('CN') && !isPostCloseWindow('CN')) return;
-    if (sanseIntradayInFlight) { console.log('[local-cron] CN 三色盤中：上一輪未完成，跳過'); return; }
-    sanseIntradayInFlight = true;
+  // ── 盤中：三色資金即時掃描（TW + CN 自創策略），每 10 分鐘 ──
+  // 把該市場 L2 快照合成今日進行中日K 重算三色，寫 intraday 快照（不碰盤後封存）。
+  const sanseIntradayInFlight = { TW: false, CN: false };
+  async function scanIntradaySanSe(market: 'TW' | 'CN') {
+    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
+    if (sanseIntradayInFlight[market]) { console.log(`[local-cron] ${market} 三色盤中：上一輪未完成，跳過`); return; }
+    sanseIntradayInFlight[market] = true;
     try {
+    const route = market === 'CN' ? '/api/cron/update-intraday-cn-sanse' : '/api/cron/update-intraday-tw-sanse';
     const data = await callRoute(
-      '/api/cron/update-intraday-cn-sanse',
-      'CN update-intraday-cn-sanse',
+      route,
+      `${market} update-intraday-${market === 'CN' ? 'cn' : 'tw'}-sanse`,
     ) as { data?: { skipped?: boolean; reason?: string; counts?: Record<string, number>; evaluated?: number } } | null;
     const payload = data?.data ?? data ?? {};
     if ((payload as { skipped?: boolean }).skipped) {
-      console.log(`[local-cron] CN 三色盤中跳過：${(payload as { reason?: string }).reason}`);
+      console.log(`[local-cron] ${market} 三色盤中跳過：${(payload as { reason?: string }).reason}`);
     } else {
       const c = (payload as { counts?: Record<string, number> }).counts ?? {};
-      console.log(`[local-cron] CN 三色盤中: strict=${c.strict ?? '?'} medium=${c.medium ?? '?'} loose=${c.loose ?? '?'}（評估 ${(payload as { evaluated?: number }).evaluated ?? '?'} 檔）`);
+      console.log(`[local-cron] ${market} 三色盤中: strict=${c.strict ?? '?'} medium=${c.medium ?? '?'} loose=${c.loose ?? '?'}（評估 ${(payload as { evaluated?: number }).evaluated ?? '?'} 檔）`);
     }
     } finally {
-      sanseIntradayInFlight = false;
+      sanseIntradayInFlight[market] = false;
     }
   }
 
@@ -352,9 +353,10 @@ export async function register() {
   setInterval(() => {
     const now = new Date();
     const min = now.getMinutes();
-    // :09 → 三色資金盤中（CN 自創策略，獨立於買法軌）
+    // :09 → 三色資金盤中（TW + CN 自創策略，獨立於買法軌）
     if (min % 10 === 9) {
-      scanIntradaySanSe().catch(err => console.error('[local-cron] CN 三色盤中:', err));
+      scanIntradaySanSe('TW').catch(err => console.error('[local-cron] TW 三色盤中:', err));
+      scanIntradaySanSe('CN').catch(err => console.error('[local-cron] CN 三色盤中:', err));
     }
     let track: 'bullish' | 'reversal' | 'system' | null = null;
     if (min % 10 === 2) track = 'bullish';
