@@ -48,7 +48,7 @@ export function SanSeSignalsPanel({ report }: { report: ConditionReport | null }
   const flags: string[] = [];
   if (r.doubleB.buy.some((c) => c.id === 'b_above' && c.met)) flags.push('站上多空線(多頭格局)');
   if (r.catch.buy.some((c) => c.id === 'c_above' && c.met)) flags.push('安全做多區(0軸上)');
-  if (r.mainforce.buy.some((c) => c.id === 'm_three' && c.met)) flags.push('三色戰法齊揚');
+  if (r.mainforce.buy.some((c) => c.id === 'm_three' && c.met)) flags.push('紅紫黃三色都亮');
   if (r.doubleB.sell.some((c) => c.id === 'b_below' && c.met)) flags.push('⚠️ 跌破多空線(轉空)');
   if (r.mainforce.sell.some((c) => c.id === 'm_blue' && c.met)) flags.push('⚠️ 散戶主導');
 

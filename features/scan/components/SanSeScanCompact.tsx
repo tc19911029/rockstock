@@ -48,23 +48,23 @@ const COMBO_BADGE: Record<ComboGrade, string> = {
   weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
 };
 
-/** 三組條件 chip（使用順序評級 + 主力階段 / 雙B買 / 捕撈買 + 共振數 + 賣出警示）*/
+/** 精簡 chip：使用順序評級 + 共振N/3 + 賣出警示。觸發明細(雙B/主力/捕撈)＋判讀收進 badge hover。*/
 function CondChips({ rep }: { rep?: ConditionReport }) {
   if (!rep) return null;
-  const bBuy = rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
-  const cBuy = rep.catch.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
+  const trigs = [
+    ...rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => '雙B ' + c.label),
+    ...(rep.mainforce.buyHit && rep.mainStage ? ['主力' + STAGE_LABEL[rep.mainStage] + STAGE_ICON[rep.mainStage]] : []),
+    ...rep.catch.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => '捕撈 ' + c.label),
+  ].join('、');
+  const comboTitle = rep.combo ? `${COMBO_HINT[rep.combo.grade]}${trigs ? `\n觸發：${trigs}` : ''}` : '';
   return (
     <div className="flex flex-wrap items-center gap-1 mb-1 text-[9px]">
       {rep.combo && (
-        <span
-          className={cn('px-1 py-0.5 rounded border font-medium', COMBO_BADGE[rep.combo.grade])}
-          title="使用順序評級（回測推導：紅當前提 → 捕撈/雙B金叉觸發 → 三組齊發(共振3/3)最強；無紅＝低勝率）"
-        >{COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}</span>
+        <span className={cn('px-1 py-0.5 rounded border font-medium', COMBO_BADGE[rep.combo.grade])} title={comboTitle}>
+          {COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}
+        </span>
       )}
-      {rep.level && <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground border border-border">共振 {rep.groupBuyCount}/3</span>}
-      {rep.doubleB.buyHit && <span className="px-1 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">雙B {bBuy.join('/')}</span>}
-      {rep.mainforce.buyHit && rep.mainStage && <span className="px-1 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[rep.mainStage]}{STAGE_ICON[rep.mainStage]}</span>}
-      {rep.catch.buyHit && <span className="px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">捕撈 {cBuy.join('/')}</span>}
+      {rep.level && <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground border border-border" title="三組策略(雙B/主力/捕撈)中了幾組">共振 {rep.groupBuyCount}/3</span>}
       {rep.sellWarnings.length > 0 && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">⚠️{rep.sellWarnings.join('、')}</span>}
     </div>
   );
@@ -519,9 +519,15 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           const isSel = pureSelected && ticker === pureSelected;
           const inWatch = useWatchlistStore.getState().has(h.symbol);
           const rep = reportMap.get(h.symbol);
+          // 精簡：原始分數 + 命中嚴/中/寬 收進卡片 hover（不佔版面）
+          const lvHit = (['strict', 'medium', 'loose'] as Level[])
+            .filter((lv) => levelSets[lv].has(h.symbol)).map((lv) => LEVELS.find((l) => l.key === lv)?.label).join('/');
+          const detailTitle = `短攻 ${fmt(h.shortAttack)}｜中強 ${fmt(h.midStrength)}｜中控 ${fmt(h.midControl)}｜超短跌 ${fmt(h.shortOversold)}`
+            + (lvHit ? `\n命中策略：${lvHit}` : '');
           return (
             <div
               key={h.symbol}
+              title={detailTitle}
               onClick={() => onSelectStock?.({
                 symbol: h.symbol, name: h.name, market,
                 date: data!.lastDate, chartTab: 'shuangb',
@@ -540,14 +546,10 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 </span>
               </div>
 
-              {/* Row 2: 股價 + 產業 + 三色分數 + 成交量名次（對齊書本買法）*/}
+              {/* Row 2: 股價 + 產業 + 成交量名次（三色分數收進卡片 hover）*/}
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{fmt(h.price)}</span>
-                {h.industry && <span className="truncate max-w-[60px]">{h.industry}</span>}
-                <span className="text-fuchsia-400" title="短線上攻">短攻 {fmt(h.shortAttack)}</span>
-                <span className="text-rose-300" title="中線強勢">中強 {fmt(h.midStrength)}</span>
-                <span className="text-amber-300" title="中線控盤">中控 {fmt(h.midControl)}</span>
-                <span className="text-blue-400" title="短線超跌">超短跌 {fmt(h.shortOversold)}</span>
+                {h.industry && <span className="truncate max-w-[80px]">{h.industry}</span>}
                 {h.turnoverRank !== undefined && (
                   <span
                     className="ml-auto text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
@@ -558,27 +560,14 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 )}
               </div>
 
-              {/* Row 2.5: 三色條件（使用順序評級 + 主力階段 / 雙B買 / 捕撈買 + 賣出警示）*/}
+              {/* Row 2.5: 使用順序評級 + 共振 + 賣出警示（觸發/階段收進 badge hover）；判讀句只在選中卡顯示 */}
               <CondChips rep={rep} />
-              {rep?.combo && (
-                <p className="text-[9px] leading-snug text-muted-foreground/80 mb-1" title="使用順序判讀（回測推導）">→ {COMBO_HINT[rep.combo.grade]}</p>
+              {isSel && rep?.combo && (
+                <p className="text-[9px] leading-snug text-muted-foreground/90 mb-1">→ {COMBO_HINT[rep.combo.grade]}</p>
               )}
 
-              {/* Row 3: 命中策略徽章 + 動作按鈕 */}
+              {/* Row 3: 動作按鈕（命中嚴/中/寬 收進卡片 hover）*/}
               <div className="flex items-center gap-1 mb-1">
-                {(['strict', 'medium', 'loose'] as Level[]).map((lv) => {
-                  const hit = levelSets[lv].has(h.symbol);
-                  return (
-                    <span key={lv}
-                      title={`${LEVELS.find((l) => l.key === lv)?.label}${hit ? ' 命中' : ' 未命中'}`}
-                      className={cn(
-                        'text-[8px] px-1 h-3.5 flex items-center rounded-sm font-bold',
-                        hit ? 'bg-fuchsia-800/80 text-fuchsia-200' : 'bg-secondary/50 text-muted-foreground/40',
-                      )}>
-                      {LEVELS.find((l) => l.key === lv)?.label}
-                    </span>
-                  );
-                })}
                 <div className="ml-auto flex items-center gap-1">
                   <button
                     onClick={(e) => {
