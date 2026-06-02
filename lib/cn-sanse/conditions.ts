@@ -264,12 +264,19 @@ export type TradeVerdict = 'buy' | 'sell' | 'conflict' | 'wait' | 'skip';
  * 讓使用者看一眼就知道動作，不必自己拼湊各指標。衍生自 combo 評級 + 賣出警示。
  */
 export function tradeVerdict(r: ConditionReport): { tone: TradeVerdict; reason: string } {
-  const hasSell = r.sellWarnings.length > 0;
   const g = r.combo?.grade;
   const buyable = g === 'top' || g === 'prime';                 // 紅在場 ＋ 金叉觸發
-  if (buyable && hasSell) return { tone: 'conflict', reason: `有買也有賣（${r.sellWarnings.join('、')}）→ 謹慎、別追` };
-  if (hasSell) return { tone: 'sell', reason: `出現賣出訊號（${r.sellWarnings.join('、')}）` };
-  if (buyable) return { tone: 'buy', reason: g === 'top' ? '三組齊發(共振3/3)＝最高把握' : '紅(機構)在場 ＋ 金叉觸發' };
-  if (g === 'mid' || g === 'watch') return { tone: 'wait', reason: '紅(機構)在場、今天還沒金叉觸發 → 等' };
-  return { tone: 'skip', reason: '沒有紅(機構)、回測勝率最低' };
+  // 出場「事件」＝ 雙B死叉/跌破智能線/捕撈死叉（不含 m_weak 紅<0 這種「持續狀態」，否則沒在漲的股都會被標該賣）
+  const exitConds = [...r.doubleB.sell, ...r.catch.sell].filter((c) => c.kind === 'signal' && c.met);
+  const exitEvent = exitConds.length > 0;
+  const exitLabels = exitConds.map((c) => c.label).join('、');
+  if (buyable) {
+    if (exitEvent) return { tone: 'conflict', reason: `有買也有賣（${exitLabels}）→ 謹慎、別追` };
+    return { tone: 'buy', reason: g === 'top' ? '三組齊發(共振3/3)＝最高把握' : '紅(機構)在場 ＋ 金叉觸發' };
+  }
+  if (r.combo?.redGate) {                                        // 紅在場但今天不是買進設定（紅+黃中線 / 紅待觸發）
+    if (exitEvent) return { tone: 'sell', reason: `出現賣出訊號（${exitLabels}）` };
+    return { tone: 'wait', reason: '紅(機構)在場、今天還沒金叉觸發 → 等' };
+  }
+  return { tone: 'skip', reason: '沒有紅(機構)、回測勝率最低 → 不建議' };       // 無紅（含紅<0/機構撤）一律不建議
 }
