@@ -46,11 +46,35 @@ export async function register() {
   console.log('[local-cron] 本地開發模式：定期呼叫 API route 模擬 Vercel Cron');
   console.log('[local-cron] L2：每 5 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5');
 
+  // ── 開機補抓緩衝 + 錯開（2026-06-02 修：重啟補抓風暴餓死 /api/stock）────────
+  // 病根：setInterval 的去重旗標（postCloseDailyDone / l1Downloaded / postCloseBmDone…）
+  // 是 in-memory，kickstart 重啟後全部歸零 → 重啟若落在盤中/盤後窗口，下一輪 tick 就把
+  // 「今天其實已做過的重活」（全量 CN 下載 3127 檔 + TW/CN 盤後掃描 + 盤中掃描）同時重跑，
+  // 一起搶 rate-limiter 桶與 event loop → /api/stock（走圖主資料）被餓死、走圖載不出來。
+  // 修法：重活在開機後一段緩衝內跳過、且彼此用 offset 錯開，讓重啟瞬間 server 先能服務
+  // 請求，之後回到「正常 staggered 排程」（= 事故前運作正常的狀態）。輕量工作（L2 刷新、
+  // realtime-scan）不擋。可用 LOCAL_CRON_BOOT_GRACE_MS 調整基準緩衝。
+  const bootAt = Date.now();
+  const BOOT_GRACE_MS = Number(process.env.LOCAL_CRON_BOOT_GRACE_MS) || 90_000;
+  function bootCoolingDown(label: string, extraOffsetMs = 0): boolean {
+    const elapsed = Date.now() - bootAt;
+    const threshold = BOOT_GRACE_MS + extraOffsetMs;
+    if (elapsed < threshold) {
+      console.log(
+        `[local-cron] ${label} 開機緩衝中跳過 (${Math.round(elapsed / 1000)}s/${Math.round(threshold / 1000)}s) ` +
+        `— 避免重啟瞬間補抓風暴餓死 /api/stock`,
+      );
+      return true;
+    }
+    return false;
+  }
+
   // ── 盤中：買法掃描批次（3 track 取代 16 字母）─────────────────────────
   // 0513 ABCDE E：scan-bm-batch 之後再批 intraday — 把 16 字母獨立 cron 改成
   // 3 track 一 cron。同 track 內字母共用 stockList / L2 / TurnoverRank /
   // marketTrend，比舊版省 ~5 倍前置時間。
   async function scanIntradayBatchTrack(market: 'TW' | 'CN', track: 'bullish' | 'reversal' | 'system') {
+    if (bootCoolingDown(`${market} bm-batch ${track}`, 30_000)) return;
     if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
     const data = await callRoute(
       `/api/cron/update-intraday-bm-batch?market=${market}&track=${track}`,
@@ -70,6 +94,7 @@ export async function register() {
   // 把該市場 L2 快照合成今日進行中日K 重算三色，寫 intraday 快照（不碰盤後封存）。
   const sanseIntradayInFlight = { TW: false, CN: false };
   async function scanIntradaySanSe(market: 'TW' | 'CN') {
+    if (bootCoolingDown(`${market} 三色盤中`, 15_000)) return;
     if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
     if (sanseIntradayInFlight[market]) { console.log(`[local-cron] ${market} 三色盤中：上一輪未完成，跳過`); return; }
     sanseIntradayInFlight[market] = true;
@@ -93,6 +118,7 @@ export async function register() {
 
   // ── 盤中：六條件掃描（scan-intraday），每 10 分鐘 ──
   async function scanIntradayDaily(market: 'TW' | 'CN') {
+    if (bootCoolingDown(`${market} scan-intraday`, 0)) return;
     if (!isMarketOpen(market)) return;
     const data = await callRoute(
       `/api/cron/scan-intraday?market=${market}`,
@@ -110,6 +136,7 @@ export async function register() {
   // TW：14:10 CST；CN：16:10 CST（確保 L1 已下載）
   const postCloseDailyDone = { TW: '', CN: '' };
   async function scanPostCloseDaily(market: 'TW' | 'CN') {
+    if (bootCoolingDown(`${market} scan post_close`, 75_000)) return;
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
     const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -182,6 +209,7 @@ export async function register() {
   type Track = 'bullish' | 'reversal' | 'system';
   const postCloseBmDone = { TW: '', CN: '' };
   async function scanPostCloseBatch(market: 'TW' | 'CN', track: Track) {
+    if (bootCoolingDown(`${market} scan-bm-batch ${track}`, 60_000)) return;
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
     const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -241,6 +269,8 @@ export async function register() {
     return 'rest';
   }
   async function downloadL1(market: 'TW' | 'CN') {
+    // 最重（全量下載 3127 檔）→ 開機後最晚才放行，給前面較輕的工作先做完
+    if (bootCoolingDown(`${market} download-candles`, 90_000)) return;
     if (isMarketOpen(market)) return; // 盤中不下（收盤價還沒定）
     const lastTrading = getLastTradingDay(market);
     const phase = l1DownloadPhase(market);
@@ -262,6 +292,7 @@ export async function register() {
   // (2) 觸發前強制 call 一次 refreshIntradaySnapshot，確保用最新 L2 而非 in-memory stale。
   const l1SnapshotDone = { TW: '', CN: '' };
   async function appendL1FromSnapshot(market: 'TW' | 'CN') {
+    if (bootCoolingDown(`${market} append-from-snapshot`, 45_000)) return;
     if (isMarketOpen(market)) return;
     const lastTrading = getLastTradingDay(market);
     if (l1SnapshotDone[market] === lastTrading) return;

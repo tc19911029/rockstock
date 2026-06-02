@@ -78,7 +78,7 @@ function periodToBeg(period: string): string {
 }
 
 /** 解析東方財富 klines CSV 為 Candle[] */
-function parseKlines(klines: string[], _isCN: boolean): Candle[] {
+function parseKlines(klines: string[], isCN: boolean): Candle[] {
   return klines
     .map((line) => {
       const f = line.split(',');
@@ -89,12 +89,15 @@ function parseKlines(klines: string[], _isCN: boolean): Candle[] {
       const close = parseFloat(f[2]); // 注意：close 在 [2]
       const high = parseFloat(f[3]);  // high 在 [3]
       const low = parseFloat(f[4]);
-      const volume = parseInt(f[5], 10) || 0;
+      const rawVolume = parseInt(f[5], 10) || 0;
 
       if (isNaN(close) || close <= 0) return null;
 
-      // A 股 volume 單位是「手」（1手=100股=1張），統一以「張」存儲
-      // 不做換算，直接使用 API 返回的手數
+      // A 股 EastMoney 回傳的 volume 單位是「手」（1手=100股）。但 repo / L1 store 基準是「股」
+      // （TencentHistProvider 與 BaiduHistProvider 皆回股、本地 CN store 亦為股）→ CN 必須 ×100
+      // 轉股對齊；否則 eodSettle.normalizeVolume（CN 不換算、假設已是股）與多支 backfill 腳本會把
+      // 「手」當「股」寫進 L1，造成 100× 單位斷層污染 midControl（見 cn-sanse 量單位 memory）。
+      const volume = isCN ? rawVolume * 100 : rawVolume;
 
       return {
         date,
@@ -143,10 +146,19 @@ async function fetchEMKlines(
     `&klt=${klt}&fqt=${fqt}` +
     `&beg=${beg}&end=${end}`;
 
-  const res = await fetch(url, {
-    headers: EM_HEADERS,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: EM_HEADERS,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    // 網路層失敗（socket closed / 逾時 abort / DNS）也要回報退避（status=0）。
+    // 否則限流器只在 HTTP 狀態碼錯誤才退避，連續 fetch throw 時誤以為一切正常、持續全速
+    // 硬打失敗中的 EastMoney → 拖滿連線層、餓死同 process 的 /api/stock（2026-06-02 事故）。
+    rateLimiter.reportError('eastmoney', 0, err instanceof Error ? err.message : 'fetch failed');
+    throw err;
+  }
 
   if (!res.ok) {
     rateLimiter.reportError('eastmoney', res.status, `HTTP ${res.status}`);
