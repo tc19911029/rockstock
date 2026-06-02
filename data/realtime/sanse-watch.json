@@ -1,0 +1,12 @@
+{
+  "_comment": "三色買賣手機通知監看清單（/api/cron/sanse-notify 讀取）。加減股票直接改這裡，不必動程式。symbol 帶後綴 .TW/.TWO/.SS/.SZ；name 為顯示用（TW chart route 不回名稱）。",
+  "symbols": [
+    { "symbol": "3661.TW", "name": "世芯-KY" },
+    { "symbol": "2408.TW", "name": "南亞科" },
+    { "symbol": "3006.TW", "name": "晶豪科" },
+    { "symbol": "6770.TW", "name": "力積電" },
+    { "symbol": "2330.TW", "name": "台積電" },
+    { "symbol": "600487.SS", "name": "亨通光電" },
+    { "symbol": "603986.SS", "name": "兆易創新" }
+  ]
+}

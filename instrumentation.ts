@@ -44,7 +44,7 @@ export async function register() {
   }
 
   console.log('[local-cron] 本地開發模式：定期呼叫 API route 模擬 Vercel Cron');
-  console.log('[local-cron] L2：每 5 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5');
+  console.log('[local-cron] L2：每 5 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5 | 三色推播：每 2 分鐘');
 
   // ── 開機補抓緩衝 + 錯開（2026-06-02 修：重啟補抓風暴餓死 /api/stock）────────
   // 病根：setInterval 的去重旗標（postCloseDailyDone / l1Downloaded / postCloseBmDone…）
@@ -428,6 +428,15 @@ export async function register() {
       console.error('[local-cron] realtime-scan:', err),
     );
   }, 30 * 1000);
+
+  // ── 三色資金買賣推播 (/api/cron/sanse-notify → ntfy)：每 120 秒 ──
+  // 取代舊爆量手機推播：盯 data/realtime/sanse-watch.json 固定清單，三色翻成
+  // 該買/該賣就推一次（route 內自帶開盤 gate + 當日去重，盤外是廉價 no-op）。
+  setInterval(() => {
+    callRoute('/api/cron/sanse-notify', 'sanse-notify').catch(err =>
+      console.error('[local-cron] sanse-notify:', err),
+    );
+  }, 120 * 1000);
 
   // Auto-repair watchdog：主下載 cron 完成後，檢查 verify 報告，
   // 若 stocksStale > 50 或 coverage < 97% 自動觸發 retry-failed
