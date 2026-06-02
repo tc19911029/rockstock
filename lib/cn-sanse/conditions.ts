@@ -257,3 +257,19 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
     combo,
   };
 }
+
+export type TradeVerdict = 'buy' | 'sell' | 'conflict' | 'wait' | 'skip';
+/**
+ * 一眼結論：該買 / 該賣 / 衝突 / 觀望 / 不建議。給訊號面板＋條件面板共用，
+ * 讓使用者看一眼就知道動作，不必自己拼湊各指標。衍生自 combo 評級 + 賣出警示。
+ */
+export function tradeVerdict(r: ConditionReport): { tone: TradeVerdict; reason: string } {
+  const hasSell = r.sellWarnings.length > 0;
+  const g = r.combo?.grade;
+  const buyable = g === 'top' || g === 'prime';                 // 紅在場 ＋ 金叉觸發
+  if (buyable && hasSell) return { tone: 'conflict', reason: `有買也有賣（${r.sellWarnings.join('、')}）→ 謹慎、別追` };
+  if (hasSell) return { tone: 'sell', reason: `出現賣出訊號（${r.sellWarnings.join('、')}）` };
+  if (buyable) return { tone: 'buy', reason: g === 'top' ? '三組齊發(共振3/3)＝最高把握' : '紅(機構)在場 ＋ 金叉觸發' };
+  if (g === 'mid' || g === 'watch') return { tone: 'wait', reason: '紅(機構)在場、今天還沒金叉觸發 → 等' };
+  return { tone: 'skip', reason: '沒有紅(機構)、回測勝率最低' };
+}

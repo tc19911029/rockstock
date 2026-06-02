@@ -4,7 +4,7 @@
 // 與「條件」面板（全部 ✓/○ 清單）區別：這裡只列 kind='signal' 且 met 的訊號 = 當下可操作的點。
 
 import { cn } from '@/lib/utils';
-import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type GroupReport, type CondGroup, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, tradeVerdict, type ConditionReport, type GroupReport, type CondGroup, type TradeVerdict } from '@/lib/cn-sanse/conditions';
 
 const GROUPS: { key: CondGroup; label: string }[] = [
   { key: 'doubleB', label: '🟦 雙B' },
@@ -12,13 +12,13 @@ const GROUPS: { key: CondGroup; label: string }[] = [
   { key: 'catch', label: '🟩 捕撈' },
 ];
 
-/** 使用順序評級 badge 配色（回測推導；強→弱）。*/
-const COMBO_BADGE: Record<ComboGrade, string> = {
-  top: 'bg-gradient-to-r from-rose-500/25 to-fuchsia-500/25 text-fuchsia-100 border-fuchsia-400/50',
-  prime: 'bg-rose-500/20 text-rose-200 border-rose-400/40',
-  mid: 'bg-amber-500/20 text-amber-200 border-amber-400/40',
-  watch: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
+/** 一眼結論盒配色 + 大標。*/
+const VERDICT_STYLE: Record<TradeVerdict, { head: string; cls: string }> = {
+  buy:      { head: '🟢 可買進',   cls: 'bg-rose-500/15 text-rose-200 border-rose-400/50' },
+  sell:     { head: '🔻 該賣 / 減碼', cls: 'bg-emerald-500/15 text-emerald-200 border-emerald-400/50' },
+  conflict: { head: '⚠️ 訊號衝突',  cls: 'bg-amber-500/15 text-amber-200 border-amber-400/50' },
+  wait:     { head: '🟡 觀望 · 等金叉', cls: 'bg-sky-500/15 text-sky-200 border-sky-400/40' },
+  skip:     { head: '⚪ 不建議',    cls: 'bg-zinc-600/25 text-zinc-300 border-zinc-600/50' },
 };
 
 /** 依本檔當下三色狀態給一句具體操作建議（回測推導的使用順序）。 */
@@ -51,6 +51,7 @@ export function SanSeSignalsPanel({ report }: { report: ConditionReport | null }
   if (r.mainforce.buy.some((c) => c.id === 'm_three' && c.met)) flags.push('紅紫黃三色都亮');
   if (r.doubleB.sell.some((c) => c.id === 'b_below' && c.met)) flags.push('⚠️ 跌破多空線(轉空)');
   if (r.mainforce.sell.some((c) => c.id === 'm_blue' && c.met)) flags.push('⚠️ 散戶主導');
+  const v = tradeVerdict(r);
 
   return (
     <div className="p-2.5 space-y-2 text-xs">
@@ -61,12 +62,12 @@ export function SanSeSignalsPanel({ report }: { report: ConditionReport | null }
         {r.conflict && <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}
       </div>
 
-      {r.combo && (
-        <div className={cn('rounded-md border p-2', COMBO_BADGE[r.combo.grade])}>
-          <div className="text-[11px] font-semibold mb-0.5">使用順序：{COMBO_LABEL[r.combo.grade]}{r.combo.bottomReversal ? '·底部反彈' : ''}</div>
-          <div className="text-[10px] leading-snug opacity-90">{COMBO_HINT[r.combo.grade]}</div>
-        </div>
-      )}
+      {/* 一眼結論：該買 / 該賣 / 觀望 */}
+      <div className={cn('rounded-md border p-2', VERDICT_STYLE[v.tone].cls)}>
+        <div className="text-[15px] font-bold leading-none">{VERDICT_STYLE[v.tone].head}</div>
+        <div className="text-[11px] mt-1 leading-snug">{v.reason}</div>
+        {r.combo && <div className="text-[10px] mt-1.5 opacity-75">評級：{COMBO_LABEL[r.combo.grade]}{r.combo.bottomReversal ? '·底部反彈' : ''}｜{COMBO_HINT[r.combo.grade]}</div>}
+      </div>
 
       <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-2">
         <div className="text-rose-400 font-medium mb-1">🔺 今日買進訊號</div>
