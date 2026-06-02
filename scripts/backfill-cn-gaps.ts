@@ -16,15 +16,22 @@ import { tencentHistProvider } from '@/lib/datasource/TencentHistProvider';
 import { eastMoneyHistProvider } from '@/lib/datasource/EastMoneyHistProvider';
 import { writeCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
 
 const CONCURRENCY = 4;
 const DELAY_MS = 600;
 const MIN_CANDLES = 5;  // 補抓只需有近期幾根，不需 30 根門檻
 
-// 自動推最近 N 個 CN 交易日（catch-up 用，免 hardcode；機器睡過頭時補回）
+// 鐵則 #1：catch-up 只補「已收盤封存」的交易日，今日進行中那根交給 eod-settle，
+// 不可寫進 L1。getLastTradingDay 盤前/盤中回上一個已收盤日，盤後才回今天 →
+// 機器睡過 08:30、launchd 盤中補跑時，cutoff 仍是昨日，今日半根不會污染 L1。
+const SEAL_CUTOFF = getLastTradingDay('CN');
+
+// 自動推最近 N 個 CN 交易日（catch-up 用，免 hardcode；機器睡過頭時補回）。
+// 從 SEAL_CUTOFF（最後已收盤日）起算，不含今日進行中那根。
 function recentCnTradingDays(n: number): string[] {
   const out: string[] = [];
-  const cur = new Date(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()) + 'T12:00:00');
+  const cur = new Date(SEAL_CUTOFF + 'T12:00:00');
   while (out.length < n) {
     const ds = cur.toISOString().split('T')[0];
     if (isTradingDay(ds, 'CN')) out.push(ds);
@@ -77,6 +84,9 @@ async function main() {
           } catch { /* fallthrough */ }
         }
         if (!candles) { noNewData++; return; }
+        // 鐵則 #1 硬守門：剔除 > 最後已收盤日的盤中半根（provider 盤中會回今日進行中那根）。
+        candles = candles.filter((c) => c.date <= SEAL_CUTOFF);
+        if (candles.length < MIN_CANDLES) { noNewData++; return; }
         const newDates = new Set(candles.map(c => c.date));
         const stillMissing = targetDates.filter(d => !newDates.has(d));
         if (stillMissing.length === targetDates.length) {

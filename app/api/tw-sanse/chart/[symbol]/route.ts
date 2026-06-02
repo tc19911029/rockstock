@@ -29,6 +29,15 @@ async function loadTwCandles(symbol: string): Promise<{ key: string; candles: Ca
     const data = await readCandleFile(key, 'TW');
     if (data?.candles && data.candles.length >= 60) return { key, candles: data.candles };
   }
+  // 不在掃描宇宙（無本地/blob K 線）→ 用與 /api/stock 同款 pipeline 線上抓，讓任何台股都能看三色
+  // （單檔 walk-the-chart，非全市場掃描；dataProvider 會順手快取進 L1，下次走本地）
+  for (const key of candidates) {
+    try {
+      const { dataProvider } = await import('@/lib/datasource/MultiMarketProvider');
+      const fetched = await dataProvider.getHistoricalCandles(key, '3y', undefined, '1d');
+      if (Array.isArray(fetched) && fetched.length >= 60) return { key, candles: fetched };
+    } catch { /* 試下一個 suffix */ }
+  }
   return null;
 }
 
@@ -50,12 +59,47 @@ export async function GET(
     const allCandles = loaded.candles;
     const candles = asOf ? allCandles.filter((c) => c.date <= asOf) : allCandles;
     if (candles.length < 60) return apiError('本地K線不足（截斷後）', 404);
+    // asOf 指向「今天以前」= 走圖步進歷史 → 凍結在該根、不注入今日盤中半根。
+    // 不可用 candles.length < allCandles.length 判定：當 asOf 正好等於最新封存日時沒有 bar 被截掉，
+    // 會誤判成「非歷史」而注入今日盤中半根，使訊號面板比畫面上的 K 線/掃描卡多算一根 →
+    // 昨日的單根金叉(CROSS)失效、共振組數崩掉(3/3→1/3)、面板與掃描卡互相打架。
+    const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    const isHistorical = !!asOf && asOf < todayTW;
+
+    // 盤中注入：非步進歷史 + 封存最後一根 < 今日 + L2 有今日 → append 今日 bar（個股 + ^TWII），
+    // 讓雙B / 主力狀態F / 捕撈季節彩柱延伸到今日（否則盤中今日那根沒三色數據，線停在前一封存日）。
+    // 對齊 cn-sanse/chart 與 scanTwSanSe 盤中模式。extras 由 fetchTwDayExtras 從 candles 自算 →
+    // 今日 bar 一旦 push 進去，amount/vol/turnover 今日值自動含入（不需另抓即時換手率）。
+    let injectedTodayDate: string | undefined;
+    let todayIndexClose: number | undefined;
+    if (!isHistorical) {
+      try {
+        const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+        const { isTradingDay } = await import('@/lib/utils/tradingDay');
+        const lastBar = candles[candles.length - 1];
+        if (lastBar && lastBar.date < todayTW && isTradingDay(todayTW, 'TW')) {
+          const snap = await readIntradaySnapshot('TW', todayTW);
+          if (snap && snap.date === todayTW) {
+            const pureCode = loaded.key.replace(/\.(TW|TWO)$/i, '');
+            const sq = snap.quotes.find((q) => q.symbol.split('.')[0] === pureCode);
+            if (sq && sq.close > 0) {
+              candles.push({ date: todayTW, open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume });
+              injectedTodayDate = todayTW;
+            }
+            // 指數今日 close：^TWII 完整比對（split 後唯一，不與個股裸碼撞）
+            const iq = snap.quotes.find((q) => q.symbol === '^TWII');
+            if (iq && iq.close > 0) todayIndexClose = iq.close;
+          }
+        }
+      } catch { /* 注入失敗不致命，退回封存 */ }
+    }
 
     // 大盤指數 ^TWII → 按日期對齊個股 K（主力狀態F 中線強勢需要）；前向填補缺漏日
     let indexClose: number[] | undefined;
     const idxData = await readCandleFile('^TWII', 'TW');
     if (idxData?.candles?.length) {
       const idxMap = new Map(idxData.candles.map((c) => [c.date, c.close]));
+      if (injectedTodayDate && todayIndexClose != null) idxMap.set(injectedTodayDate, todayIndexClose);
       let last = NaN;
       indexClose = candles.map((c) => { const v = idxMap.get(c.date); if (v != null) last = v; return last; });
     }

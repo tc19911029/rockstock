@@ -33,15 +33,29 @@ export async function GET(
 
   try {
     const dir = getLocalCandleDir('CN');
-    const raw = await fs.readFile(path.join(dir, `${symbol}.json`), 'utf8');
-    const allCandles = JSON.parse(raw)?.candles as Candle[] | undefined;
+    let allCandles: Candle[] | undefined;
+    try {
+      allCandles = JSON.parse(await fs.readFile(path.join(dir, `${symbol}.json`), 'utf8'))?.candles as Candle[] | undefined;
+    } catch { /* 本地缺檔（不在掃描宇宙）→ 下面 on-demand 抓 */ }
+    // 不在掃描宇宙（無本地 L1，如 301205）→ 用與 /api/stock 同款 pipeline 線上抓，讓任何股票都能看三色
+    // （單檔 walk-the-chart，非全市場掃描，不違反鐵則 #3；dataProvider 會順手快取進 L1，下次就走本地）
+    if (!Array.isArray(allCandles) || allCandles.length < 60) {
+      try {
+        const { dataProvider } = await import('@/lib/datasource/MultiMarketProvider');
+        const fetched = await dataProvider.getHistoricalCandles(symbol, '3y', undefined, '1d');
+        if (Array.isArray(fetched) && fetched.length >= 60) allCandles = fetched;
+      } catch { /* 線上抓也失敗 → 下面回 404 */ }
+    }
     if (!Array.isArray(allCandles) || allCandles.length < 60) {
       return apiError('本地K線不足', 404);
     }
     const candles = asOf ? allCandles.filter((c) => c.date <= asOf) : allCandles;
     if (candles.length < 60) return apiError('本地K線不足（截斷後）', 404);
-    // 真的被截 = 步進歷史 → 略過即時報價/換手率（避免每步打 EastMoney 拖慢）；最新全段才抓即時
-    const isHistorical = !!asOf && candles.length < allCandles.length;
+    // asOf 指向「今天以前」= 步進歷史 → 凍結在該根、略過即時報價/換手率、不注入今日盤中半根。
+    // 不可用 candles.length < allCandles.length 判定：asOf 正好等於最新封存日時沒 bar 被截 →
+    // 誤判成「非歷史」而注入今日盤中半根，使訊號面板比畫面 K 線多算一根、共振組數崩掉、與掃描卡打架。
+    const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    const isHistorical = !!asOf && asOf < todayCN;
 
     // 盤中注入：非步進歷史 + 封存最後一根 < 今日 + L2 有今日 → append 今日 bar（個股 + 上證指數），
     // 讓主力狀態F / 捕撈季節副圖延伸到今日（否則盤中今日那根沒三色數據）。對齊 scanSanSe 盤中模式。
@@ -51,7 +65,6 @@ export async function GET(
       try {
         const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
         const { isTradingDay } = await import('@/lib/utils/tradingDay');
-        const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
         const lastBar = candles[candles.length - 1];
         if (lastBar && lastBar.date < todayCN && isTradingDay(todayCN, 'CN')) {
           const snap = await readIntradaySnapshot('CN', todayCN);

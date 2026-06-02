@@ -29,6 +29,14 @@ interface Indicators {
   season?: boolean;
 }
 
+/**
+ * 指標套組（一鍵切換 tab）：
+ * - technical 技術面：MA5/10/20/60 ＋ 量 ＋ KD ＋ MACD ＋ 頭底（朱書標準看盤）
+ * - sanse 三色資金：雙B ＋ 主力狀態 ＋ 捕撈季節（自創資金指標；雙B 疊主圖、其餘副圖）
+ * 只管「核心指標家族」；不動籌碼面（法人/大戶/CN主力）、訊號 markers、切線/形態 overlay。
+ */
+export type ChartIndicatorPreset = 'technical' | 'sanse';
+
 interface ChartToolbarProps {
   candle: Candle;
   prevCandle?: Candle | null;
@@ -48,6 +56,8 @@ interface ChartToolbarProps {
   onShuangBToggle?: () => void;
   indicators: Indicators;
   onIndicatorToggle: (key: keyof Indicators) => void;
+  /** 一鍵切換指標套組（技術面 / 三色資金）；不提供則不顯示套組 tab */
+  onApplyPreset?: (preset: ChartIndicatorPreset) => void;
   showMarkers: boolean;
   onMarkersToggle: () => void;
   signalStrengthMin: number;
@@ -130,6 +140,26 @@ const CHIP_CONFIGS_CN = [
   { key: 'cnRetail' as const, label: '散戶', title: 'CN 散戶資金（中單+小單，淨流入萬元）' },
 ];
 
+/** 由當前 toggle 狀態反推目前套在哪個套組（兩者皆不符＝自訂混搭，回 null 不高亮） */
+function activeChartPreset(
+  ma: MaToggles, showBollinger: boolean, showShuangB: boolean,
+  ind: Indicators, showPivots: boolean,
+): ChartIndicatorPreset | null {
+  if (
+    ma.ma5 && ma.ma10 && ma.ma20 && ma.ma60 && !ma.ma240 &&
+    !showBollinger && !showShuangB &&
+    ind.volume && ind.kd && !ind.rsi && ind.macd &&
+    !ind.mainForce && !ind.season && showPivots
+  ) return 'technical';
+  if (
+    !ma.ma5 && !ma.ma10 && !ma.ma20 && !ma.ma60 && !ma.ma240 &&
+    !showBollinger && showShuangB &&
+    !ind.volume && !ind.kd && !ind.rsi && !ind.macd &&
+    ind.mainForce && ind.season && !showPivots
+  ) return 'sanse';
+  return null;
+}
+
 export default function ChartToolbar({
   candle, prevCandle, isHover, stockName, trend,
   currentInterval, onIntervalChange,
@@ -137,6 +167,7 @@ export default function ChartToolbar({
   showBollinger, onBollingerToggle,
   showShuangB = false, onShuangBToggle,
   indicators, onIndicatorToggle,
+  onApplyPreset,
   showMarkers, onMarkersToggle,
   signalStrengthMin, onSignalStrengthChange,
   showPivots = false, onPivotsToggle,
@@ -163,6 +194,8 @@ export default function ChartToolbar({
   // TW: .TW/.TWO 後綴或 4-5 位數字（裸代碼）；CN: .SS/.SZ 或 6 位數字
   const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
   const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
+  // 指標套組 tab 目前選中誰（從 toggle 反推；僅在三色可用市場 TW/CN 才顯示）
+  const activePreset = activeChartPreset(maToggles, showBollinger, showShuangB, indicators, showPivots);
 
   const unrealizedPct = shares && shares > 0 && avgCost && avgCost > 0
     ? ((candle.close - avgCost) / avgCost) * 100
@@ -214,6 +247,37 @@ export default function ChartToolbar({
 
       {/* Row 2: Controls — timeframe pills, MA toggles, BB, indicators, signals, nav */}
       <div className="flex flex-wrap items-center gap-1 px-3 py-1 bg-secondary/30">
+        {onApplyPreset && (isCN || isTW) && (
+          <>
+            <div
+              role="group"
+              aria-label="指標套組一鍵切換"
+              className="flex items-center rounded-md ring-1 ring-border/70 overflow-hidden shrink-0"
+            >
+              <button
+                onClick={() => onApplyPreset('technical')}
+                aria-pressed={activePreset === 'technical'}
+                className={`px-2 py-0.5 text-[10px] font-bold transition ${
+                  activePreset === 'technical'
+                    ? 'bg-sky-600 text-white'
+                    : 'bg-secondary text-muted-foreground/60 hover:text-muted-foreground'
+                }`}
+                title="技術面套組：MA5/10/20/60 ＋ 量 ＋ KD ＋ MACD ＋ 頭底（朱書標準看盤）"
+              >技術</button>
+              <button
+                onClick={() => onApplyPreset('sanse')}
+                aria-pressed={activePreset === 'sanse'}
+                className={`px-2 py-0.5 text-[10px] font-bold border-l border-border/70 transition ${
+                  activePreset === 'sanse'
+                    ? 'bg-fuchsia-600 text-white'
+                    : 'bg-secondary text-muted-foreground/60 hover:text-muted-foreground'
+                }`}
+                title="三色資金套組：雙B ＋ 主力狀態 ＋ 捕撈季節（自創資金指標）"
+              >三色</button>
+            </div>
+            <span className="w-px h-3.5 bg-border/60 mx-0.5" />
+          </>
+        )}
         {onIntervalChange && (
           <>
             {INTERVAL_CONFIGS.map(({ key, label, title }) => (

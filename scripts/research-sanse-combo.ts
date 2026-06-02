@@ -164,6 +164,14 @@ function entryHits(g: Sig, i: number, K: number): string[] {
   if (m5 && g.volSurge[i]) hits.push('M5_vol');
   if (m5 && g.aboveMa60[i]) hits.push('M5_ma60');
 
+  // YOURS：使用者描述的「滿配」組合（三色全亮 + 雙B金叉&突破同日 + 捕撈空頭區金叉），逐步放寬看樣本與軌跡
+  const threeColors = g.red[i] && g.purple[i] && g.yellow[i];   // 紅+紫+黃 三色全亮
+  const dualB = g.bGold[i] && g.bBreak[i];                       // 雙箭頭共振（金叉+突破同日）
+  if (threeColors && dualB && g.cGold[i] && g.xBelow0[i]) hits.push('YOURS_exact');         // 完全照你寫的
+  if (threeColors && dualB && g.cGold[i]) hits.push('YOURS_noZone');                        // 放寬：捕撈金叉不限0軸
+  if (threeColors && (g.bGold[i] || g.bBreak[i]) && g.cGold[i] && g.xBelow0[i]) hits.push('YOURS_anyB'); // 放寬：雙B擇一+空頭區
+  if (threeColors && (g.bGold[i] || g.bBreak[i]) && g.cGold[i]) hits.push('YOURS_loose');   // 放寬：三色全亮+任一觸發
+
   return hits;
 }
 
@@ -292,6 +300,7 @@ const MODEL_ORDER = [
   'M3', 'M3b', 'M3_strict',
   'M4_pure', 'M4',
   'M5', 'M5_vol', 'M5_ma60',
+  'YOURS_exact', 'YOURS_noZone', 'YOURS_anyB', 'YOURS_loose',
 ];
 const LABELS: Record<string, string> = {
   ALL: '全體可進場K棒（基準）',
@@ -304,6 +313,8 @@ const LABELS: Record<string, string> = {
   M3: 'M3 紫啟動K根內＋觸發【你的假設】', M3b: 'M3b 紫亮著＋當日觸發', M3_strict: 'M3嚴 啟動早於觸發＋觸發',
   M4_pure: 'M4純 紅＋黃同亮', M4: 'M4 紅＋黃＋觸發（中線）',
   M5: 'M5 三組全共振', M5_vol: 'M5量 全共振＋爆量', M5_ma60: 'M5線 全共振＋站60日線',
+  YOURS_exact: '【你的滿配】三色全亮＋雙箭頭共振＋捕撈空頭區金叉', YOURS_noZone: '【你·放寬1】三色全亮＋雙箭頭共振＋捕撈金叉(不限0軸)',
+  YOURS_anyB: '【你·放寬2】三色全亮＋雙B擇一＋捕撈空頭區金叉', YOURS_loose: '【你·放寬3】三色全亮＋雙B擇一＋捕撈金叉',
 };
 
 interface Acc { d3: number[]; d5: number[]; d10: number[]; d20: number[]; mg: number[]; ml: number[]; }

@@ -54,7 +54,7 @@ import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { ChevronDown, Search } from 'lucide-react';
 import { toast } from 'sonner';
-import ChartToolbar from '@/components/ChartToolbar';
+import ChartToolbar, { type ChartIndicatorPreset } from '@/components/ChartToolbar';
 
 // Mobile fullscreen 仍直接使用 CandleChart / IndicatorCharts（StockChartView 抽出範圍只到 desktop 主視窗）
 const CandleChart = nextDynamic(() => import('@/components/CandleChart'), {
@@ -337,6 +337,23 @@ function HomePage() {
     cnMain: false, cnRetail: false,
     mainForce: false, season: false, // 三色資金副圖（陸股）：主力狀態F / 捕撈季節
   });
+  // 指標套組一鍵切換（ChartToolbar tab）：技術面（MA+量+KD+MACD+頭底）⇄ 三色資金（雙B+主力狀態+捕撈季節）
+  // 只動核心指標家族；籌碼面（法人/大戶/CN主力）與訊號 markers 保留不變
+  const applyChartPreset = useCallback((preset: ChartIndicatorPreset) => {
+    if (preset === 'technical') {
+      setMaToggles({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
+      setShowBollinger(false);
+      setShowShuangB(false);
+      setIndicators(p => ({ ...p, volume: true, kd: true, rsi: false, macd: true, mainForce: false, season: false }));
+      setShowPivots(true);
+    } else {
+      setMaToggles({ ma5: false, ma10: false, ma20: false, ma60: false, ma240: false });
+      setShowBollinger(false);
+      setShowShuangB(true);
+      setIndicators(p => ({ ...p, volume: false, kd: false, rsi: false, macd: false, mainForce: true, season: true }));
+      setShowPivots(false);
+    }
+  }, []);
   // ── 籌碼面資料（TW 法人/大戶 + CN 主力資金） ────────────────────────────────
   // 優化：用 ticker + 「是否需要籌碼」字串 key 當依賴；同一 key 不會 refetch
   const anyTwChipOn = indicators.foreign || indicators.trust || indicators.dealer
@@ -392,10 +409,15 @@ function HomePage() {
   // 陸股走 /cn-sanse、台股走 /tw-sanse（同一份 SanSeChartPayload 形狀）：圖層由各 toggle 控制。
   // conditions 兩市場都寫（三色模式時中間條件/訊號 tab 用，由 showSanseView 控制）。
   // 走圖步進：日K 時帶 asOf=當前可見最後一根日期 → 標記/條件/訊號跟著步進的位置重算（練習器核心）。
-  const sanseAsOf = sanseEnabled && currentInterval === '1d' && visibleCandles.length
-    ? visibleCandles[visibleCandles.length - 1].date
-    : '';
-  const sanseFetchKey = sanseEnabled ? `${ticker}@${sanseAsOf}` : '';
+  const sanseLastBar = sanseEnabled && currentInterval === '1d' && visibleCandles.length
+    ? visibleCandles[visibleCandles.length - 1]
+    : null;
+  const sanseAsOf = sanseLastBar ? sanseLastBar.date : '';
+  // 盤中即時更新：主圖每 ~60s 輪詢會就地更新「今日那根」的 close（日期不變）。把 close 折進 fetchKey，
+  // 今日價一動就連帶重抓三色（後端 tw-/cn-sanse/chart 讀最新 L2 快照重算雙B/主力狀態/捕撈季節）；
+  // 否則 key 只看 ticker@date、盤中永遠不變 → 三色凍在載入當下。收盤後主圖停輪詢→close 不再變→自動停抓；
+  // 歷史步進時 asOf 本來就會變，不受影響。
+  const sanseFetchKey = sanseEnabled ? `${ticker}@${sanseAsOf}@${sanseLastBar?.close ?? ''}` : '';
   const [sanse, setSanse] = useState<SanSeChartPayload | null>(null);
   const [sanseConditions, setSanseConditions] = useState<ConditionReport | null>(null);
   useEffect(() => {
@@ -407,6 +429,9 @@ function HomePage() {
       .then(r => r.json())
       .then(j => {
         if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload);
+        // 失敗/無 chart 要清掉，否則上一檔的三色疊圖會殘留、畫在新股票 K 線上
+        // （如 301205 不在掃描宇宙、無本地 L1 → cn-sanse/chart 404 → 智能/黃/紅/多空線停在前一檔 ~4000）
+        else setSanse(null);
         // 條件報告兩市場都寫（三色模式時中間條件/訊號 tab 用）
         if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
         else setSanseConditions(null);
@@ -440,6 +465,13 @@ function HomePage() {
   const handleIntervalChange = useCallback((newInterval: string) => {
     if (!currentStock) return;
     if (newInterval === currentInterval) return;
+    // 三色指標只有日線版本（主力狀態要 ~507 根日K、捕撈季節要日換手率），套在分鐘線上會壞：
+    // 副圖空白 + 主圖被日線 sanse overlay 帶歪到舊窗格。切到分鐘線且目前在三色套組 →
+    // 自動回退技術套組（MA/量/KD/MACD），確保分鐘線指標正常顯示。
+    const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(newInterval);
+    if (isIntraday && (indicators.mainForce || indicators.season || showShuangB)) {
+      applyChartPreset('technical');
+    }
     // 去 suffix（store loadStock 內部會自動處理 suffix）
     const symbol = currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     setLoadError(null);
@@ -449,7 +481,17 @@ function HomePage() {
       .catch((e: Error) => {
         toast.error(`切換 ${newInterval} 失敗：${e.message || '請稍後再試'}`);
       });
-  }, [currentStock, currentInterval, targetDate, loadStock]);
+  }, [currentStock, currentInterval, targetDate, loadStock, indicators, showShuangB, applyChartPreset]);
+
+  // 三色指標（主力狀態/捕撈季節/雙B）只有日線版本 → 只要落到「分鐘線 + 三色指標開著」就回退技術，
+  // 確保分鐘線一定有指標可看（量/KD/MACD），不會出現「請開啟至少一個指標面板」的空副圖。
+  // 涵蓋所有入口：切換到分鐘線、載入時就在分鐘線、在分鐘線「手動點三色 / 開三色副圖」。
+  useEffect(() => {
+    const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(currentInterval);
+    if (isIntraday && (indicators.mainForce || indicators.season || showShuangB)) {
+      applyChartPreset('technical');
+    }
+  }, [currentInterval, indicators.mainForce, indicators.season, showShuangB, applyChartPreset]);
 
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
   // 預設 0.55（主圖 55% / 副圖 45%，副圖整區較高）；mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
@@ -586,15 +628,17 @@ function HomePage() {
   // 是否顯示深度決策面板：有選股且非大盤指數
   const showDecisionPanel = !!currentStock && !/^\^|^000001\.SS$/.test(currentStock.ticker);
 
-  // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫
-  const shuangBOverlay = showShuangB && sanseEnabled && sanse ? {
+  // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫。
+  // 三色 overlay/副圖只有日線版本 → 加 currentInterval==='1d' 閘，分鐘線一律不渲染
+  //（否則日線 sanse 資料疊到分鐘線會把主圖帶歪、副圖空白錯位）。
+  const shuangBOverlay = showShuangB && sanseEnabled && sanse && currentInterval === '1d' ? {
     zhineng: sanse.zhineng, zb4: sanse.zb4, zb5: sanse.zb5, duokong: sanse.duokong,
     markers: sanse.mainMarkers,
   } : null;
   // 副圖（主力狀態F / 捕撈季節）資料 — 對齊主圖 candle 由 IndicatorCharts 自行 map
   // 台股無換手率 → xysTiers 為 undefined（4 級彩柱不畫），金叉/動能柱照常
-  const sanseZhuli = sanseEnabled && indicators.mainForce ? sanse?.zhuli ?? null : null;
-  const sanseXys = sanseEnabled && indicators.season && sanse ? {
+  const sanseZhuli = sanseEnabled && indicators.mainForce && currentInterval === '1d' ? sanse?.zhuli ?? null : null;
+  const sanseXys = sanseEnabled && indicators.season && sanse && currentInterval === '1d' ? {
     xys0: sanse.xys0, xys1: sanse.xys1, xys2: sanse.xys2,
     subMarkers: sanse.subMarkers, xysTiers: sanse.xysTiers ?? null,
   } : null;
@@ -699,6 +743,7 @@ function HomePage() {
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                onApplyPreset={applyChartPreset}
                 showShuangB={showShuangB}
                 onShuangBToggle={() => setShowShuangB(v => !v)}
                 showMarkers={showMarkers}
@@ -1051,6 +1096,7 @@ function HomePage() {
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                onApplyPreset={applyChartPreset}
                 showShuangB={showShuangB}
                 onShuangBToggle={() => setShowShuangB(v => !v)}
                 showMarkers={showMarkers}
