@@ -64,7 +64,6 @@ function CondChips({ rep }: { rep?: ConditionReport }) {
           {COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}
         </span>
       )}
-      {rep.level && <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground border border-border" title="三組策略(雙B/主力/捕撈)中了幾組">共振 {rep.groupBuyCount}/3</span>}
       {rep.sellWarnings.length > 0 && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">⚠️{rep.sellWarnings.join('、')}</span>}
     </div>
   );
@@ -523,6 +522,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           const lvHit = (['strict', 'medium', 'loose'] as Level[])
             .filter((lv) => levelSets[lv].has(h.symbol)).map((lv) => LEVELS.find((l) => l.key === lv)?.label).join('/');
           const detailTitle = `短攻 ${fmt(h.shortAttack)}｜中強 ${fmt(h.midStrength)}｜中控 ${fmt(h.midControl)}｜超短跌 ${fmt(h.shortOversold)}`
+            + (rep ? `\n共振 ${rep.groupBuyCount}/3（雙B/主力/捕撈 中幾組）` : '')
             + (lvHit ? `\n命中策略：${lvHit}` : '');
           return (
             <div
