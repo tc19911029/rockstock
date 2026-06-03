@@ -484,8 +484,9 @@ function HomePage() {
     if (isIntraday && (indicators.mainForce || indicators.season || showShuangB)) {
       applyChartPreset('technical');
     }
-    // 去 suffix（store loadStock 內部會自動處理 suffix）
-    const symbol = currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    // 用完整 ticker（含後綴）重載：指數 000001.SS 去後綴會撞同碼個股 000001(平安銀行)。
+    // currentStock.ticker 本就是 loadStock 當初成功載入的代號，原樣帶回必然同解析。
+    const symbol = currentStock.ticker;
     setLoadError(null);
     useReplayStore.getState().stopPolling();
     loadStock(symbol, newInterval, undefined, targetDate ?? undefined)
@@ -623,7 +624,7 @@ function HomePage() {
           <SectionBoundary section="基本面分析">
             {isCnTicker
               ? <CnFundamentalPanel symbol={currentStock.ticker} />
-              : <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />}
+              : <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} />}
           </SectionBoundary>
         ) : (
           <EmptyState

@@ -106,6 +106,12 @@ export async function GET(req: NextRequest) {
 
   const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
 
+  // 陸股指數無可靠分鐘 K 資料源：000001.SS/000300.SS 去後綴後的裸碼會撞同碼個股
+  // （000001→平安銀行）→ 任何分鐘 provider 都會回錯股的 K。寧可回 404 也不顯示錯資料。
+  if (isCnIndex && isMinuteInterval) {
+    return apiError(`陸股指數 ${symbol} 暫無分鐘 K 資料`, 404);
+  }
+
   // ── 本地檔案快速路徑（先讀本地秒開 → 即時覆蓋今日 K） ──
   // 支援日K(1d)直接使用，以及週K(1wk)/月K(1mo)本地聚合
   if (localParam === '1' && !isMinuteInterval && (isTW || isCN)) {

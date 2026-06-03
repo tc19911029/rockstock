@@ -370,6 +370,9 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
 
     set({ isPolling: true });
     const symbol = currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    // 指數(000001.SS)裸碼後會撞個股(000001=平安銀行)→日K 報價/今日 bar 注入一律用完整代號
+    // （/api/stock/quote 是 suffix-aware：000001.SS→4083、000001→10.99；個股帶不帶後綴結果相同）
+    const quoteSymbol = currentStock.ticker;
     const interval = currentInterval;
     const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
     const defaultPeriod: Record<string, string> = {
@@ -383,7 +386,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         if (isMinuteInterval) {
           // 分K：重抓完整分鐘資料（Fugle intraday）
           const res = await fetch(
-            `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${period}`
+            `/api/stock?symbol=${encodeURIComponent(quoteSymbol)}&interval=${interval}&period=${period}`
           );
           if (!res.ok) return;
           const json = await res.json();
@@ -396,7 +399,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           set({ allCandles: candles, currentIndex: newIndex, ...buildState(candles, newIndex, account) });
         } else {
           // 日K/週K/月K：只更新今日最後一根 bar，避免重讀 2 年 L1 觸發 bulk preload
-          const res = await fetch(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`);
+          const res = await fetch(`/api/stock/quote?symbol=${encodeURIComponent(quoteSymbol)}`);
           if (!res.ok) return;
           const q = await res.json();
           if (!q.close || q.close <= 0) return;
