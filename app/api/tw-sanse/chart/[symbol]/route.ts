@@ -26,8 +26,12 @@ async function loadTwCandles(symbol: string): Promise<{ key: string; candles: Ca
     ? [symbol]
     : [`${symbol}.TW`, `${symbol}.TWO`];
   for (const key of candidates) {
-    const data = await readCandleFile(key, 'TW');
-    if (data?.candles && data.candles.length >= 60) return { key, candles: data.candles };
+    // try/catch：盤中個股 L1 檔可能正被 eod-settle/repair cron 寫到一半 → JSON parse 失敗。
+    // 不可讓它炸掉整條 route（會 404 → 前端三色面板整片空白）；跳過試下一個 suffix / 線上抓。
+    try {
+      const data = await readCandleFile(key, 'TW');
+      if (data?.candles && data.candles.length >= 60) return { key, candles: data.candles };
+    } catch { /* 檔案讀取/解析失敗 → 試下一個候選 */ }
   }
   // 不在掃描宇宙（無本地/blob K 線）→ 用與 /api/stock 同款 pipeline 線上抓，讓任何台股都能看三色
   // （單檔 walk-the-chart，非全市場掃描；dataProvider 會順手快取進 L1，下次走本地）
@@ -94,19 +98,28 @@ export async function GET(
       } catch { /* 注入失敗不致命，退回封存 */ }
     }
 
-    // 大盤指數 ^TWII → 按日期對齊個股 K（主力狀態F 中線強勢需要）；前向填補缺漏日
+    // 大盤指數 ^TWII → 按日期對齊個股 K（主力狀態F 中線強勢需要）；前向填補缺漏日。
+    // try/catch：^TWII 檔可能正被 cron 寫/壞 → 讀失敗時 indexClose 留 undefined，
+    // 主力狀態F 中線強勢退化但圖/條件照常算，不可讓它 404 整條 route。
     let indexClose: number[] | undefined;
-    const idxData = await readCandleFile('^TWII', 'TW');
-    if (idxData?.candles?.length) {
-      const idxMap = new Map(idxData.candles.map((c) => [c.date, c.close]));
-      if (injectedTodayDate && todayIndexClose != null) idxMap.set(injectedTodayDate, todayIndexClose);
-      let last = NaN;
-      indexClose = candles.map((c) => { const v = idxMap.get(c.date); if (v != null) last = v; return last; });
-    }
+    try {
+      const idxData = await readCandleFile('^TWII', 'TW');
+      if (idxData?.candles?.length) {
+        const idxMap = new Map(idxData.candles.map((c) => [c.date, c.close]));
+        if (injectedTodayDate && todayIndexClose != null) idxMap.set(injectedTodayDate, todayIndexClose);
+        let last = NaN;
+        indexClose = candles.map((c) => { const v = idxMap.get(c.date); if (v != null) last = v; return last; });
+      }
+    } catch { /* ^TWII 讀取失敗 → 退化為無大盤對齊 */ }
 
     // 捕撈季節 4 級彩柱：台股周轉率（成交量張×1000÷發行股數）+ 台股校準門檻。
     // 抓不到發行股數（FinMind miss）→ extras=undefined → 只少彩柱，箭頭/動能柱照常。
-    const extras = await fetchTwDayExtras(loaded.key, candles);
+    // 4s 超時：彩柱是可選視覺、conditions/圖根本不需要它。開盤 FinMind 限流時 getSharesIssued 可卡到 15s，
+    // 不可讓它擋住整個三色回應（連帶 conditions 一起慢）→ 超時就退回 undefined（無彩柱），圖/訊號照常秒出。
+    const extras = await Promise.race([
+      fetchTwDayExtras(loaded.key, candles).catch(() => undefined),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
+    ]);
 
     // 指標用全段算後再截最近 250 根（夠畫圖且輕量）
     const chart = computeSanSeChart(candles, indexClose, extras, TW_TIER_THRESHOLDS);

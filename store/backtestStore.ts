@@ -1356,6 +1356,7 @@ export const useBacktestStore = create<BacktestState>()(
       partialize: (s) => ({
         market: s.market, scanDate: s.scanDate,
         strategy: s.strategy,
+        sanseLevel: s.sanseLevel,  // 持久化三色模式：重整後不用再重點嚴格/中等/寬鬆
         // Compact sessions: keep only last 5, strip heavy forwardCandles
         sessions: s.sessions.slice(0, 5).map(sess => ({
           ...sess,
