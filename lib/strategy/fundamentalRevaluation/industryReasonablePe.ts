@@ -120,18 +120,22 @@ const CN_INDUSTRY_KEYWORDS: Array<{ template: IndustryTemplate; patterns: RegExp
 export function detectIndustryTemplateFor(
   market: 'TW' | 'CN',
   industryCategory: string | null | undefined,
+  symbol?: string | null,
 ): IndustryTemplate {
-  if (!industryCategory) return 'other';
   if (market === 'CN') {
-    for (const entry of CN_INDUSTRY_KEYWORDS) {
-      if (entry.patterns.some((p) => p.test(industryCategory))) {
-        return entry.template;
+    // 註：CN 仍走 keyword（/半導體/ /存儲/ → high_growth_asic）。CN 半導體細分白名單尚未建，
+    //     若 CN 出現同款灌爆需另建 CN 版 SEMI_SYMBOL_TEMPLATE。
+    if (industryCategory) {
+      for (const entry of CN_INDUSTRY_KEYWORDS) {
+        if (entry.patterns.some((p) => p.test(industryCategory))) {
+          return entry.template;
+        }
       }
     }
-    // CN 但沒命中 CN keywords → 試一次 TW keywords（產業名稱有重疊如「電子零組件」）
-    return detectTwTemplate(industryCategory);
+    // CN 但沒命中 CN keywords → 試一次 TW 邏輯（symbol 覆寫 + 產業名稱重疊如「電子零組件」）
+    return detectTwTemplate(industryCategory, symbol);
   }
-  return detectTwTemplate(industryCategory);
+  return detectTwTemplate(industryCategory, symbol);
 }
 
 /** 直接拿 peRange（語義 alias，保留 valuation/industryTemplate 既有 API） */

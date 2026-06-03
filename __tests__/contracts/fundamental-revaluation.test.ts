@@ -371,12 +371,28 @@ describe('防呆 (13) TW/CN 分開排名', () => {
   });
 
   it('industryReasonablePe.detectIndustryTemplateFor 兩個市場參數獨立', () => {
-    const twTpl = detectIndustryTemplateFor('TW', '半導體業');
-    const cnTpl = detectIndustryTemplateFor('CN', '半導體');
-    // 兩個 keyword set 不同：TW 半導體業 → high_growth_asic（命中 /半導體業/）
-    //                       CN 半導體   → high_growth_asic（命中 CN /半導體/）
-    expect(twTpl).toBe('high_growth_asic');
-    expect(cnTpl).toBe('high_growth_asic');
+    // CN 仍走 keyword：'半導體' → high_growth_asic
+    expect(detectIndustryTemplateFor('CN', '半導體')).toBe('high_growth_asic');
+  });
+
+  it('TW 半導體業不再 blanket PE50：未列白名單 → other（2026-06-03 修）', () => {
+    // TWSE 對所有半導體股都只回「半導體業」，過去 /半導體業/ blanket → high_growth_asic(PE50)
+    // 把 DRAM/封測/成熟代工的合理價灌爆（威剛 +1111%）。現移除 blanket，無 symbol → 'other'。
+    expect(detectIndustryTemplateFor('TW', '半導體業')).toBe('other');
+  });
+
+  it('TW 半導體細分白名單：symbol 覆寫分流 DRAM/代工/封測 vs 高成長', () => {
+    // 真高成長（晶圓代工龍頭 / IC 設計 / ASIC）→ high_growth_asic(PE40/50/60)
+    expect(detectIndustryTemplateFor('TW', '半導體業', '2330')).toBe('high_growth_asic'); // 台積電
+    expect(detectIndustryTemplateFor('TW', '半導體業', '2454')).toBe('high_growth_asic'); // 聯發科
+    // DRAM/記憶體 → cyclical(PE5-9)
+    expect(detectIndustryTemplateFor('TW', '半導體業', '2408')).toBe('cyclical'); // 南亞科
+    expect(detectIndustryTemplateFor('TW', '半導體業', '3260')).toBe('cyclical'); // 威剛
+    // 成熟代工 / 封測 → stable_mature(PE15-25)
+    expect(detectIndustryTemplateFor('TW', '半導體業', '2303')).toBe('stable_mature'); // 聯電
+    expect(detectIndustryTemplateFor('TW', '半導體業', '3711')).toBe('stable_mature'); // 日月光投控
+    // 帶 .TW 後綴也要正確剝碼
+    expect(detectIndustryTemplateFor('TW', '半導體業', '3260.TW')).toBe('cyclical');
   });
 });
 

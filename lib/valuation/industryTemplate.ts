@@ -36,7 +36,10 @@ const INDUSTRY_KEYWORDS: Array<{ template: IndustryTemplate; patterns: RegExp[] 
       /設計服務/,
       /IC設計/,
       /asic/i,
-      /半導體業/,
+      // ⚠️ 不再放 /半導體業/ blanket：TWSE/FinMind 對所有半導體股都只回「半導體業」，
+      // 底下不分 DRAM/成熟代工/封測/IC設計，一律 → PE 50 會把循環/成熟股的合理價灌爆
+      // （威剛合理價 5596 vs 現價 462、+1111%、還被拱成補漲第 1）。半導體細分改走
+      // SEMI_SYMBOL_TEMPLATE symbol 級白名單；未列入者落回 'other'(中性 PE)。
     ],
   },
   {
@@ -98,7 +101,58 @@ const INDUSTRY_KEYWORDS: Array<{ template: IndustryTemplate; patterns: RegExp[] 
   },
 ];
 
-export function detectIndustryTemplate(industryCategory: string | null | undefined): IndustryTemplate {
+/**
+ * 半導體細分白名單（symbol 級覆寫，2026-06-03）
+ *
+ * TWSE industry_category 對所有半導體股一律回「半導體業」，無法分 DRAM/代工/封測/IC設計。
+ * 過去 /半導體業/ → high_growth_asic(PE 40/50/60) 把記憶體模組(威剛)、DRAM(南亞科)、成熟代工
+ * (聯電)、封測/測試(日月光/京元/頎邦) 全灌成 PE 50 → 合理價爆炸、補漲排名污染。
+ *
+ * 改用精準白名單分流：只有真·高成長（晶圓代工龍頭 / IC 設計 / ASIC / 矽智財 IP）走
+ * high_growth_asic；DRAM/記憶體 → cyclical(PE 5-9，併看 PB)；成熟代工/封測/測試 →
+ * stable_mature(PE 15-25)。未列入的半導體股落回 'other'(中性 PE 12/18/25)，不再預設高成長。
+ * 代號均比對 stock-master.json 確認。要加新股先查代號再加。
+ */
+export const SEMI_SYMBOL_TEMPLATE: Record<string, IndustryTemplate> = {
+  // 真·高成長：晶圓代工龍頭 / IC 設計 / ASIC / IP
+  '2330': 'high_growth_asic', // 台積電
+  '2454': 'high_growth_asic', // 聯發科
+  '3661': 'high_growth_asic', // 世芯-KY (ASIC)
+  '3443': 'high_growth_asic', // 創意 (ASIC)
+  '6643': 'high_growth_asic', // M31 (矽智財 IP)
+  '3529': 'high_growth_asic', // 力旺 (矽智財 IP)
+  '3035': 'high_growth_asic', // 智原 (ASIC/IP)
+  '6533': 'high_growth_asic', // 晶心科 (CPU IP)
+  '4966': 'high_growth_asic', // 譜瑞-KY (高速傳輸 IC)
+  '5274': 'high_growth_asic', // 信驊 (BMC IC)
+  // DRAM / 記憶體 / 模組 → 景氣循環
+  '2408': 'cyclical', // 南亞科 (DRAM)
+  '3260': 'cyclical', // 威剛 (DRAM 模組)
+  '2344': 'cyclical', // 華邦電 (DRAM/NOR)
+  '8299': 'cyclical', // 群聯 (NAND 控制/模組)
+  '2337': 'cyclical', // 旺宏 (NOR/NAND)
+  '4967': 'cyclical', // 十銓 (記憶體模組)
+  // 成熟代工 / 封測 / 測試 → 穩定成熟
+  '2303': 'stable_mature', // 聯電 (成熟代工)
+  '3711': 'stable_mature', // 日月光投控 (封測)
+  '2449': 'stable_mature', // 京元電子 (測試)
+  '6147': 'stable_mature', // 頎邦 (封測)
+  '3105': 'stable_mature', // 穩懋 (GaAs 代工)
+  '6239': 'stable_mature', // 力成 (封測)
+  '8150': 'stable_mature', // 南茂 (封測)
+  '2329': 'stable_mature', // 華泰 (封測)
+};
+
+export function detectIndustryTemplate(
+  industryCategory: string | null | undefined,
+  symbol?: string | null,
+): IndustryTemplate {
+  // symbol 級覆寫優先（半導體細分白名單）
+  if (symbol) {
+    const bare = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const override = SEMI_SYMBOL_TEMPLATE[bare];
+    if (override) return override;
+  }
   if (!industryCategory) return 'other';
   for (const entry of INDUSTRY_KEYWORDS) {
     if (entry.patterns.some((p) => p.test(industryCategory))) {
