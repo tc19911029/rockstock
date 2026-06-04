@@ -357,7 +357,7 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
         <SummaryRow
           summary={summary}
           returnPct={totalReturnPct}
-          currency={marketTab === 'CN' ? 'CNY' : 'TWD'}
+          currency={(marketTab === 'all' && hasCN && !hasTW) || marketTab === 'CN' ? 'CNY' : 'TWD'}
         />
       )}
 
