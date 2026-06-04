@@ -27,6 +27,7 @@ import { ValuationDetail } from './_components/ValuationDetail';
 import { StockGradeSummary } from '@/components/agents/StockGradeSummary';
 import { AgentScorePanel } from '@/components/agents/AgentScorePanel';
 import { NeedsRescoreBanner } from '@/components/agents/NeedsRescoreBanner';
+import { StockMentionTimeline } from '@/components/youtube/StockMentionTimeline';
 import type {
   AgentRunMeta,
   AgentPhaseState,
@@ -600,6 +601,11 @@ function AgentDetailPage() {
           {/* 各代理詳細推理(reasoning + dataPoints + bookCitations,展開深度視角)*/}
           {data?.technical && <TechnicalDetail answer={data.technical} />}
           {data?.news && <NewsDetail answer={data.news} />}
+          {/* YouTube 逐筆提及時間軸（重用 history API + 共用 timeline 元件，§0：純消息面視角）*/}
+          <div className="border border-slate-700 rounded p-3 bg-slate-800/30 space-y-2">
+            <h3 className="text-sm font-semibold text-cyan-300">YouTube 提及紀錄（近 30 天）</h3>
+            <StockMentionTimeline code={symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')} range="30d" />
+          </div>
           {data?.chip && <ChipDetail answer={data.chip} />}
           {data?.fundamental && <FundamentalDetail answer={data.fundamental} />}
           {(data?.fundamental || data?.fundamentalQuestion?.groundTruth.valuationInputs) && (

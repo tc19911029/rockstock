@@ -12,6 +12,11 @@ import { buildAllStrategyReasons, type StrategyReasonRow } from './strategyReaso
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
 import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
 import { ForwardPerfRow } from './ForwardPerfRow';
+import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
+import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
+
+// 去市場後綴拿裸代號（YouTube 提及 map 以裸代號為 key）
+const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,10 +71,15 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
 
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
   const [conceptFilter, setConceptFilter] = useState<string>('all');
+  // 只看「近 7 天有被 YouTube 節目提及」的股票（display-layer 篩選，不改掃描資料流）
+  const [ytRecentOnly, setYtRecentOnly] = useState(false);
   // 排序選項：成交額排名為預設（依 0512 v12 全期間綜合回測，A 級組合多靠此排序勝出）
   // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
-  const [scanSort, setScanSort] = useState<'turnover' | 'change' | 'sixCond' | 'price' | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss'>('turnover');
+  const [scanSort, setScanSort] = useState<'turnover' | 'change' | 'sixCond' | 'price' | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss' | 'youtubeMentions'>('turnover');
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
+
+  // YouTube 提及 map（截至掃描當日）— 純展示 join，不進掃描/選股邏輯
+  const { map: ytMap } = useYouTubeMentionMap(scanDate ?? undefined);
 
   // 即時 raw trend（跟 banner 同源）— saved session 的 marketTrend 是舊邏輯（含降級）
   // 不可用，會跟 banner 顯示不一致（「banner 多頭、結果欄盤整」這種）
@@ -118,9 +128,9 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
 
   const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
 
-  const filtered = conceptFilter === 'all'
-    ? scanResults
-    : scanResults.filter(r => r.industry === conceptFilter);
+  const filtered = scanResults
+    .filter(r => conceptFilter === 'all' || r.industry === conceptFilter)
+    .filter(r => !ytRecentOnly || (ytMap.get(bareCode(r.symbol))?.count7d ?? 0) > 0);
 
   const FWD_KEY: Record<string, keyof StockForwardPerformance> = {
     fwdOpen: 'openReturn', fwdD1: 'd1Return', fwdD5: 'd5Return',
@@ -147,6 +157,11 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                                        + ((b.changePercent ?? 0) - (a.changePercent ?? 0)) / 100);
       case 'turnover':   // rank 1 = 最大成交額；desc → 小 rank 在前
         return dir * ((a.turnoverRank ?? 999_999) - (b.turnoverRank ?? 999_999));
+      case 'youtubeMentions': {  // 近 30 天 YouTube 提及次數（未提及 = -1 排最後）
+        const va = ytMap.get(bareCode(a.symbol))?.count30d ?? -1;
+        const vb = ytMap.get(bareCode(b.symbol))?.count30d ?? -1;
+        return dir * (vb - va);
+      }
       default:           return 0;
     }
   });
@@ -196,6 +211,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
           { key: 'fwdD20'     as const, label: '漲跌·20日', tip: '掃出後 20 日漲跌幅' },
           { key: 'fwdMaxGain' as const, label: '漲跌·最高', tip: '掃出後 20 日內最大累計漲幅' },
           { key: 'fwdMaxLoss' as const, label: '漲跌·最低', tip: '掃出後 20 日內最大累計跌幅' },
+          { key: 'youtubeMentions' as const, label: 'YouTube 提及', tip: '依近 30 天 YouTube 節目提及次數排序（未提及排最後）' },
         ]).map(({ key, label, tip }) => (
           <button key={key}
             onClick={() => {
@@ -207,6 +223,17 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
             {label}{scanSort === key && <span className="ml-0.5">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
           </button>
         ))}
+      </div>
+
+      {/* YouTube 提及篩選 */}
+      <div className="flex flex-wrap gap-1 items-center">
+        <button
+          onClick={() => setYtRecentOnly(v => !v)}
+          title="只顯示近 7 天有被 YouTube 理財節目提及的股票"
+          className={`text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${ytRecentOnly ? 'bg-purple-700 text-foreground' : 'bg-secondary text-muted-foreground'}`}
+        >
+          近7天提及{ytRecentOnly ? ' ✓' : ''}
+        </button>
       </div>
 
       {/* Concept filter pills */}
@@ -230,6 +257,9 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
         const perf = perfMap.get(r.symbol);
         const isExpanded = expandedStock === r.symbol;
         const ticker = r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        // YouTube 提及（純展示，不影響掃描/排序資料）
+        const ytSummary = ytMap.get(ticker);
+        const ytResonance = resonanceTags(ytSummary);
         // 戒律觸發 row 灰化（書本：detector 訊號可看，但戒律是硬性禁忌不該追）
         const prohibitionsCount = r.longProhibitionsReasons?.length ?? 0;
         const hasProhibition = prohibitionsCount > 0;
@@ -271,13 +301,26 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                 {r.industry && <span className="truncate max-w-[60px]">{r.industry}</span>}
                 <span>{r.trendState}</span>
                 <span className="truncate">{r.trendPosition}</span>
-                {r.turnoverRank !== undefined && (
-                  <span
-                    className="ml-auto text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
-                    title="20日均成交額排名（全市場前500內）"
-                  >
-                    成交量第{r.turnoverRank}名
-                  </span>
+                {(ytSummary || r.turnoverRank !== undefined) && (
+                  <div className="ml-auto flex items-center gap-1 shrink-0">
+                    {ytResonance[0] && (
+                      <span
+                        title={ytResonance[0].title}
+                        className={`text-[8px] px-1 h-3.5 flex items-center rounded-sm border ${ytResonance[0].cls}`}
+                      >
+                        {ytResonance[0].label}
+                      </span>
+                    )}
+                    {ytSummary && <YouTubeMentionBadge summary={ytSummary} bareCode={ticker} size="xs" />}
+                    {r.turnoverRank !== undefined && (
+                      <span
+                        className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded"
+                        title="20日均成交額排名（全市場前500內）"
+                      >
+                        成交量第{r.turnoverRank}名
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
