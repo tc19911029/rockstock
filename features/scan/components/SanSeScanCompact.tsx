@@ -14,10 +14,13 @@ import { ForwardPerfRow } from './ForwardPerfRow';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
-import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, isReversalBuy, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
+import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 
-type Level = 'strict' | 'medium' | 'loose';
+type ScanLevel = 'strict' | 'medium' | 'loose';       // 後端 results 的三個 level
+type Level = ScanLevel | 'reversal';                   // UI 多一個「底反」= 從 records 衍生（非後端 level）
 
 /** 三色盤中即時掃描活躍時段 = 該市場開盤 或 盤後窗口。TW + CN 共用同一判斷。 */
 function isIntradayActive(market: 'TW' | 'CN'): boolean {
@@ -30,10 +33,13 @@ interface Hit {
   shortOversold?: number; // 短線超跌（舊固化資料可能沒有此欄 → undefined）
   turnoverRank?: number;  // 當日成交額名次（1=最大；舊固化資料無此欄）
 }
-interface RecordRow { symbol: string; report: ConditionReport }
+interface RecordRow {
+  symbol: string; name?: string; industry?: string; price?: number; changePct?: number; turnoverRank?: number;
+  report: ConditionReport;
+}
 interface ScanResp {
   ok: boolean; lastDate: string; evaluated: number; staleSkipped?: number;
-  counts: Record<Level, number>; results: Record<Level, Hit[]>;
+  counts: Record<ScanLevel, number>; results: Record<ScanLevel, Hit[]>;
   records?: RecordRow[]; sessionType?: 'post_close' | 'intraday'; cached?: boolean; error?: string;
   turnoverCap?: number;       // 成交額粗篩上限（TW 500 / CN 800）
   turnoverFiltered?: number;  // 被粗篩剔除的冷門薄量股檔數
@@ -68,7 +74,7 @@ function CondChips({ rep }: { rep?: ConditionReport }) {
     </div>
   );
 }
-interface DateEntry { date: string; counts: Record<Level, number>; scannedAt: string }
+interface DateEntry { date: string; counts: Record<ScanLevel, number>; scannedAt: string }
 
 // 三色買進訊號篩選：分 3 組、每組照書本順序排。點哪個 chip 就要該訊號亮（多個 = AND）。
 type FilterGroup = 'doubleB' | 'mainforce' | 'catch';
@@ -169,6 +175,7 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
   { key: 'strict', label: '嚴格', desc: '三色資金共振 — 短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位' },
   { key: 'medium', label: '中等', desc: '更新版 — 短攻 / 中強 / 中控 三個分數都 > 0' },
   { key: 'loose', label: '寬鬆', desc: '游資資金翻正 — 短線動能今天剛由負轉正' },
+  { key: 'reversal', label: '底反', desc: '底反該買 — 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握' },
 ];
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
@@ -229,6 +236,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     next.has(k) ? next.delete(k) : next.add(k);
     return next;
   });
+  // 近 7 天有 YouTube 提及（只台股；display-layer 篩選，切市場時重置）
+  const [ytRecentOnly, setYtRecentOnly] = useState(false);
 
   // 切市場（apiBase 變）時，舊市場的 in-flight fetch 後到不可覆蓋新市場資料 → 用 ref 守門。
   const liveBaseRef = useRef(apiBase);
@@ -286,7 +295,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 進場：盤中活躍時段預設即時，否則盤後（在 effect 內判斷避免 SSR/CSR hydration 不一致）
   useEffect(() => {
     liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
-    setData(null); setDates([]); setPerf({}); // 清掉前一市場殘留，避免短暫顯示錯市場
+    setData(null); setDates([]); setPerf({}); setYtRecentOnly(false); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
     // TW + CN 皆依該市場時段決定：盤中/盤後窗口 → 即時，否則盤後封存
     const initial = isIntradayActive(market) ? 'intraday' : 'post_close';
@@ -313,14 +322,42 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     [data],
   );
 
+  // 「底反」非後端 level — 從 records 衍生：grade top/prime ＋ 捕撈0軸下空頭區金叉 ＋ 無出場（isReversalBuy）。
+  // 完整涵蓋底反該買（不受嚴/中/寬主力閘限制），舊固化資料只要有 combo 就能算 → 免重跑 backfill。
+  const reversalRows = useMemo<Hit[]>(() =>
+    (data?.records ?? [])
+      .filter((r) => isReversalBuy(r.report))
+      .map((r) => ({
+        symbol: r.symbol, name: r.name ?? r.symbol, industry: r.industry ?? '',
+        price: r.price ?? 0, changePct: r.changePct ?? 0,
+        shortAttack: r.report.scores.shortAttack, midStrength: r.report.scores.midStrength,
+        midControl: r.report.scores.midControl, kongPan: r.report.scores.kongPan,
+        turnoverRank: r.turnoverRank,
+      })),
+    [data],
+  );
+  /** 當前 level 的來源清單：底反走 records 衍生，其餘走後端 results[level]。 */
+  const levelRows = useMemo<Hit[]>(
+    () => (level === 'reversal' ? reversalRows : (data?.results[level] ?? [])),
+    [data, level, reversalRows],
+  );
+  const countFor = (k: Level): number | undefined => (k === 'reversal' ? reversalRows.length : data?.counts[k]);
+
+  // YouTube 提及（純展示 join）— 只台股有對應；陸股代號不重疊，傳 undefined 不發請求
+  const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? data?.lastDate : undefined);
+  const bare = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  // 「近 7 天有 YouTube 提及」篩選謂詞（display-layer；ytRecentOnly 關閉時全過）
+  const passYt = (h: Hit) => !ytRecentOnly || (ytMap.get(bare(h.symbol))?.count7d ?? 0) > 0;
+
   // 漲幅要抓「畫面實際會顯示的那 50 檔」(濾鏡+排序後)，否則改排序/濾鏡後顯示的股票沒抓到漲幅 → 空白。
   // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
   const fetchTargets = useMemo(() => {
-    const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
+    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
     const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
     rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap));
     return rows.slice(0, 50);
-  }, [data, level, sortKey, sortDir, filters, reportMap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levelRows, sortKey, sortDir, filters, reportMap, ytMap, ytRecentOnly]);
   const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
 
   // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
@@ -350,10 +387,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   }, [data?.lastDate, fetchKey]);
 
   const hits = useMemo(() => {
-    const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
+    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
     rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap));
     return rows.slice(0, 50);
-  }, [data, level, sortKey, sortDir, perf, filters, reportMap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levelRows, sortKey, sortDir, perf, filters, reportMap, ytMap, ytRecentOnly]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   return (
@@ -432,13 +470,13 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                   level === l.key ? 'bg-sky-500/15 text-sky-400 border-sky-500/40' : 'text-muted-foreground border-transparent hover:bg-secondary',
                 )}
               >
-                {l.label}<span className="ml-1 opacity-70">{data?.counts[l.key] ?? '–'}</span>
+                {l.label}<span className="ml-1 opacity-70">{countFor(l.key) ?? '–'}</span>
               </button>
             ))}
           </div>
         )}
         <p className={cn('text-[11px] leading-snug text-muted-foreground', !controlledLevel && 'mt-1.5')}>
-          {controlledLevel && <span className="font-semibold text-fuchsia-300 mr-1">{LEVELS.find((l) => l.key === level)?.label}（{data?.counts[level] ?? '–'}）·</span>}
+          {controlledLevel && <span className="font-semibold text-fuchsia-300 mr-1">{LEVELS.find((l) => l.key === level)?.label}（{countFor(level) ?? '–'}）·</span>}
           {LEVELS.find((l) => l.key === level)?.desc}
         </p>
       </div>
@@ -502,8 +540,18 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               filters.has('hideConflict') ? 'bg-amber-500/15 text-amber-300 border-amber-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
             )}
           >隱藏衝突</button>
-          {filters.size > 0 && (
-            <button onClick={() => setFilters(new Set())} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
+          {market === 'TW' && (
+            <button
+              onClick={() => setYtRecentOnly((v) => !v)}
+              title="只看近 7 天有被 YouTube 理財節目提到的股票"
+              className={cn(
+                'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+                ytRecentOnly ? 'bg-purple-500/20 text-purple-200 border-purple-400/40' : 'text-muted-foreground border-border hover:bg-secondary',
+              )}
+            >近7天提及</button>
+          )}
+          {(filters.size > 0 || ytRecentOnly) && (
+            <button onClick={() => { setFilters(new Set()); setYtRecentOnly(false); }} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
           )}
         </div>
       </div>
@@ -517,9 +565,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           const ticker = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const isSel = pureSelected && ticker === pureSelected;
           const inWatch = useWatchlistStore.getState().has(h.symbol);
+          const ytSummary = ytMap.get(ticker);
+          const ytResonance = resonanceTags(ytSummary);
           const rep = reportMap.get(h.symbol);
           // 精簡：原始分數 + 命中嚴/中/寬 收進卡片 hover（不佔版面）
-          const lvHit = (['strict', 'medium', 'loose'] as Level[])
+          const lvHit = (['strict', 'medium', 'loose'] as ScanLevel[])
             .filter((lv) => levelSets[lv].has(h.symbol)).map((lv) => LEVELS.find((l) => l.key === lv)?.label).join('/');
           const detailTitle = `短攻 ${fmt(h.shortAttack)}｜中強 ${fmt(h.midStrength)}｜中控 ${fmt(h.midControl)}｜超短跌 ${fmt(h.shortOversold)}`
             + (rep ? `\n共振 ${rep.groupBuyCount}/3（雙B/主力/捕撈 中幾組）` : '')
@@ -537,26 +587,41 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 isSel ? 'bg-secondary/60 border-fuchsia-700/50' : 'bg-card border-border/60 hover:bg-secondary/40',
               )}
             >
-              {/* Row 1: 代號 + 名稱 + 漲跌% */}
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="font-mono text-[11px] text-foreground/90 shrink-0">{ticker}</span>
-                <span className="text-[11px] text-foreground/80 truncate flex-1">{h.name}</span>
+              {/* Row 1: 名稱 + 代號 + 漲跌%（名稱在前、股號在後；名稱不截斷，過長自動換行確保看到完整名稱）*/}
+              <div className="flex items-baseline gap-1.5 mb-1">
+                <div className="flex items-baseline gap-1.5 flex-wrap flex-1 min-w-0">
+                  <span className="text-[11px] font-medium text-foreground/90 leading-tight break-words">{h.name}</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">{ticker}</span>
+                </div>
                 <span className={cn('font-mono text-[11px] font-bold shrink-0', h.changePct >= 0 ? 'text-bull' : 'text-bear')}>
                   {h.changePct >= 0 ? '+' : ''}{fmt(h.changePct)}%
                 </span>
               </div>
 
-              {/* Row 2: 股價 + 產業 + 成交量名次（三色分數收進卡片 hover）*/}
+              {/* Row 2: 股價 + 產業 + YouTube 提及 + 成交量名次（三色分數收進卡片 hover）*/}
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{fmt(h.price)}</span>
                 {h.industry && <span className="truncate max-w-[80px]">{h.industry}</span>}
-                {h.turnoverRank !== undefined && (
-                  <span
-                    className="ml-auto text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
-                    title={`當日成交額排名（全市場前 ${data?.turnoverCap ?? ''} 內）`}
-                  >
-                    成交量第{h.turnoverRank}名
-                  </span>
+                {(ytSummary || h.turnoverRank !== undefined) && (
+                  <div className="ml-auto flex items-center gap-1 shrink-0">
+                    {ytResonance[0] && (
+                      <span
+                        title={ytResonance[0].title}
+                        className={`text-[8px] px-1 h-3.5 flex items-center rounded-sm border ${ytResonance[0].cls}`}
+                      >
+                        {ytResonance[0].label}
+                      </span>
+                    )}
+                    {ytSummary && <YouTubeMentionBadge summary={ytSummary} bareCode={ticker} size="xs" />}
+                    {h.turnoverRank !== undefined && (
+                      <span
+                        className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded"
+                        title={`當日成交額排名（全市場前 ${data?.turnoverCap ?? ''} 內）`}
+                      >
+                        成交量第{h.turnoverRank}名
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
