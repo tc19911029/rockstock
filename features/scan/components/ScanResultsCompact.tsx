@@ -79,7 +79,8 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
 
   // YouTube 提及 map（截至掃描當日）— 純展示 join，不進掃描/選股邏輯
-  const { map: ytMap } = useYouTubeMentionMap(scanDate ?? undefined);
+  // 只台股有對應；陸股代號不重疊，傳 undefined 不發請求（與三色掃描一致）
+  const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? (scanDate ?? undefined) : undefined);
 
   // 即時 raw trend（跟 banner 同源）— saved session 的 marketTrend 是舊邏輯（含降級）
   // 不可用，會跟 banner 顯示不一致（「banner 多頭、結果欄盤整」這種）
