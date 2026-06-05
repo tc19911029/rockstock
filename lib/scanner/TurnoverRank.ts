@@ -17,6 +17,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { TW_UNIVERSE_MIN_PRICE } from '@/lib/analysis/bookThresholds';
 
 const IS_VERCEL = process.env.VERCEL === '1';
 const INDEX_DIR = path.join(process.cwd(), 'data', 'turnover-rank');
@@ -105,6 +106,11 @@ export async function buildTurnoverRank(
 
         // 取最近 AVG_WINDOW 根
         const recent = file.candles.slice(-AVG_WINDOW);
+
+        // 去除 < 5 元仙股（書本 CH5-2「特別報價」；TW only，CN 價階不同）
+        const lastClose = recent[recent.length - 1]?.close ?? 0;
+        if (market === 'TW' && lastClose > 0 && lastClose < TW_UNIVERSE_MIN_PRICE) return null;
+
         let sum = 0;
         let count = 0;
         for (const c of recent) {
@@ -202,6 +208,10 @@ export async function computeTurnoverRankAsOfDate(
 
         const startIdx = Math.max(0, endIdx - AVG_WINDOW);
         const window = file.candles.slice(startIdx, endIdx);
+
+        // 去除 < 5 元仙股（與 live buildTurnoverRank 同步；用 as-of 收盤保 point-in-time）
+        const asOfClose = window[window.length - 1]?.close ?? 0;
+        if (market === 'TW' && asOfClose > 0 && asOfClose < TW_UNIVERSE_MIN_PRICE) return null;
 
         let sum = 0;
         let count = 0;
