@@ -21,6 +21,21 @@ export const BOOK_BODY_PCT_MIN = 2.0;
 /** 攻擊量最低倍數 vs 前一日（寶典 p.54 ④）— 大量長紅 K 的「大量」定義 */
 export const BOOK_VOL_RATIO_MIN = 1.3;
 
+// ── K 棒三級制（朱家泓課程 CH2-4/2-5：小棒 / 中棒 / 最大棒）─────────────────
+// 實體比例 fraction，與 ruleUtils.bodyPct 同單位（0.065 = 6.5%）。
+// 平行於既有 isLongRed/isMedLong（≥2%）與 isSmallCandle（<1.5%），純新增、先不接 gate。
+
+/** 最大棒實體下限（漲停級長紅，課程「最大棒」≥ 6.5%）*/
+export const MAX_CANDLE_BODY_PCT = 0.065;
+/** 中棒實體下限（三級制中棒 3.5%–6.5%）*/
+export const MEDIUM_CANDLE_BODY_MIN = 0.035;
+
+// ── 主掃宇宙最低股價（朱家泓 5 步驟 CH5-2 特別報價「去除股價 < 5 元」）──────────
+// 僅 TW；CN 價階不同，暫不套用。供 lib/scanner/TurnoverRank.ts 主掃宇宙過濾。
+
+/** TW 主掃宇宙最低股價（元）— 排除 < 5 元仙股 */
+export const TW_UNIVERSE_MIN_PRICE = 5;
+
 // ── F：V 形反轉（寶典 Part 12 祕笈圖 #1 + 抓住K線 第 7 篇）──────────────────
 
 /** 連跌天數門檻：5 根中至少 3 根下跌 */

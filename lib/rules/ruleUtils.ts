@@ -1,4 +1,5 @@
 import { CandleWithIndicators } from '@/types';
+import { MAX_CANDLE_BODY_PCT, MEDIUM_CANDLE_BODY_MIN } from '@/lib/analysis/bookThresholds';
 
 /** K棒實體大小（絕對值，百分比） */
 export function bodyPct(c: CandleWithIndicators): number {
@@ -110,6 +111,31 @@ export function isMedLongRed(c: CandleWithIndicators): boolean {
 /** 是否為中長黑K（實體 >= 2%；2026-05-04 從 2.5% 對齊寶典 2024） */
 export function isMedLongBlack(c: CandleWithIndicators): boolean {
   return c.close < c.open && bodyPct(c) >= 0.02;
+}
+
+// ─── 朱家泓課程 K 棒三級制（CH2-4/2-5：小棒 / 中棒 / 最大棒）───────────────
+// 平行於 isLongRed/isMedLong（≥2%）與 isSmallCandle（<1.5%），純新增、不接 gate。
+
+/** 最大棒紅K（漲停級長紅，實體 ≥ 6.5%）— 課程 CH2-4/2-5「最大棒」 */
+export function isMaxBullishCandle(c: CandleWithIndicators): boolean {
+  return c.close > c.open && bodyPct(c) >= MAX_CANDLE_BODY_PCT;
+}
+
+/** 最大棒黑K（實體 ≥ 6.5%）*/
+export function isMaxBearishCandle(c: CandleWithIndicators): boolean {
+  return c.close < c.open && bodyPct(c) >= MAX_CANDLE_BODY_PCT;
+}
+
+/** 中紅棒（實體 3.5%–6.5%）— 三級制中棒 */
+export function isMediumRed(c: CandleWithIndicators): boolean {
+  const b = bodyPct(c);
+  return c.close > c.open && b >= MEDIUM_CANDLE_BODY_MIN && b < MAX_CANDLE_BODY_PCT;
+}
+
+/** 中黑棒（實體 3.5%–6.5%）*/
+export function isMediumBlack(c: CandleWithIndicators): boolean {
+  const b = bodyPct(c);
+  return c.close < c.open && b >= MEDIUM_CANDLE_BODY_MIN && b < MAX_CANDLE_BODY_PCT;
 }
 
 /** 向上跳空缺口：curr.low > prev.high */
