@@ -1,5 +1,6 @@
 import { TradingRule, RuleSignal } from '@/types';
 import { maDeviation } from './ruleUtils';
+import { HIGH_DEVIATION_PCT } from '@/lib/analysis/bookThresholds';
 
 // ═══════════════════════════════════════════════════════════════
 //  葛蘭碧八大法則 (Granville's 8 Rules)
@@ -163,14 +164,14 @@ export const granvilleBuy3: TradingRule = {
 export const granvilleBuy4: TradingRule = {
   id: 'granville-buy-4',
   name: '葛蘭碧④：急跌遠離均線反彈',
-  description: '價格急跌遠離MA20（乖離率超過-10%），短線反彈買入',
+  description: '價格急跌遠離MA20（乖離率超過-15%），短線反彈買入',
   evaluate(candles, index): RuleSignal | null {
     if (index < 1) return null;
     const c = candles[index];
     if (c.ma20 == null) return null;
 
     const dev = maDeviation(c, 'ma20');
-    if (dev == null || dev >= -0.10) return null; // 乖離率 < -10%
+    if (dev == null || dev >= -HIGH_DEVIATION_PCT) return null; // 乖離率 < -15%（書本 ±15% 對稱）
 
     // 需有止跌跡象（當日收紅或下影線 > 實體）
     const isRedCandle = c.close > c.open;
@@ -321,7 +322,7 @@ export const granvilleSell8: TradingRule = {
     if (c.ma20 == null) return null;
 
     const dev = maDeviation(c, 'ma20');
-    if (dev == null || dev <= 0.15) return null; // 乖離率 > +15%
+    if (dev == null || dev <= HIGH_DEVIATION_PCT) return null; // 乖離率 > +15%（書本 ±15% 對稱）
 
     // 需有滯漲跡象（當日收黑或長上影線）
     const isBlackCandle = c.close < c.open;
