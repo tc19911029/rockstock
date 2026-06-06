@@ -19,9 +19,16 @@
 | **DF7** | ✅ 已修 | `trendAnalysis.ts`：註解 MA20 乖離 20%→15%（與 code 一致） |
 | **DU1** | ✅ 已修 | `app/page.tsx`：切市場 effect 加守衛 —「當前圖是個股」則保留不覆蓋（使用者選「保留個股圖」） |
 | **DU2** | ✅ 已修 | `FundamentalSidebarPanel.tsx`：走圖回放時加警示「基本面/估值為最新資料、非走圖日」（用 `currentIndex<last` 判回放，避免週末誤判；使用者選「加標籤註明最新日」） |
-| **DU3** | ✅ 已修 | `agents/[symbol]/page.tsx`：instructions 加註「多代理只評估當日掃描候選股」設定預期 |
+| **DU3** | ✅ 已修（完整 gate） | `agents/[symbol]/page.tsx`：非候選股（`data.candidate==null`）→ **disable「開始準備」按鈕** + 顯示「不在候選池、無法分析」明確訊息（含候選池/首頁連結）取代邀請式教學；候選股維持原教學。 |
 
-**驗證**：`tsc --noEmit` 乾淨；`npm test` 120 套件 / 1651 passed / 0 fail（DF + DU 兩批修完後重跑）。
+**驗證**：`tsc --noEmit` 乾淨；`npm test` 120 套件 / 1651 passed / 0 fail。
+
+### 延伸深測（DU 修完後，續戳未測功能）— 皆正常、無新 bug
+搜尋/`?load`、掃描市場·日期·結果·asOf、forward 報酬、基本面 tab、**週線聚合**、
+**ETF 持股異動/共識買榜**、**設定漲跌色彩切換(+還原)**、**持倉新增 form(開+取消)**、
+**自選股增刪(+還原)**、**多代理開始準備**、**候選池 tab（多源 §0 attribution）**、
+**三色 chart mode（疊圖+副圖切換）** — 全部互動正常。未戳：持倉編輯/刪除/匯入匯出、
+L1-L4 收盤鈕（避開寫入）、部分 timeframe、v12/strategies/diagnose 互動（僅渲染確認）。
 
 ---
 

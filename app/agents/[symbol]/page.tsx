@@ -496,8 +496,10 @@ function AgentDetailPage() {
               <BackButton href={`/agents?date=${date}`} label="回列表" variant="with-label" />
               <DatePicker value={date} onChange={setDate} size="md" />
               <button
-                onClick={prepareAgent} disabled={loading}
-                className="bg-sky-500 hover:bg-sky-400 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50"
+                onClick={prepareAgent}
+                disabled={loading || (!data?.candidate && completedCount === 0)}
+                title={!data?.candidate && completedCount === 0 ? '此股票不在當日掃描候選池，無法跑多代理分析' : undefined}
+                className="bg-sky-500 hover:bg-sky-400 text-white px-3 py-1 rounded text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {completedCount > 0 ? '⚡ 重新準備' : '⚡ 開始準備'}
               </button>
@@ -521,14 +523,24 @@ function AgentDetailPage() {
 
           {loading && !data && <p className="text-muted-foreground">載入中…</p>}
 
-          {data && completedCount === 0 && !error && (
+          {data && completedCount === 0 && !error && data.candidate && (
             <div className="border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200 rounded-lg p-4 text-sm space-y-2">
               <p className="font-medium">這檔股票還沒跑過分析。</p>
               <ol className="list-decimal ml-5 space-y-1">
-                <li>點上方「開始準備」會幫這檔股票準備 4 個分析提示（技術／消息／籌碼／基本面各一）。<span className="text-amber-700/80 dark:text-amber-300/70">※ 多代理只評估「當日掃描候選股」；非候選股會回報「不在候選池」而無法準備。</span></li>
+                <li>點上方「開始準備」會幫這檔股票準備 4 個分析提示（技術／消息／籌碼／基本面各一）</li>
                 <li>在 Claude Code 對話中輸入 <code className="bg-amber-500/20 text-amber-700 dark:text-amber-200 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code> 才會實際跑分析</li>
                 <li>對話跑完 4 個面向後回此頁按「⟲ 重整」即可看到結果</li>
               </ol>
+            </div>
+          )}
+
+          {/* DU3 完整 gate：非候選股 — 無法跑多代理，用明確說明取代邀請式教學 */}
+          {data && completedCount === 0 && !error && !data.candidate && (
+            <div className="border border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded-lg p-4 text-sm space-y-1">
+              <p className="font-medium">此股票不在「當日掃描候選池」，無法跑多代理分析。</p>
+              <p className="text-xs text-muted-foreground">
+                多代理只評估掃描器當日選出的候選股。此頁仍可看走圖 + 4 面向資料；要分析請從 <Link href="/agents/pool" className="text-sky-400 underline">候選池</Link> 進入候選股，或先在 <Link href="/" className="text-sky-400 underline">首頁</Link> 掃描挑出候選。
+              </p>
             </div>
           )}
 
