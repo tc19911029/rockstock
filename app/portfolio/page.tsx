@@ -11,6 +11,7 @@ import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
 import { POLLING } from '@/lib/config';
 import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDailyActionPanel';
+import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
 function todayCST(): string {
@@ -408,6 +409,12 @@ export default function PortfolioPage() {
             store 啟動時從 server 灌入，UI 動作 optimistic 寫回 server，
             不再有「本機 vs server」分裂，舊的同步提示與一鍵同步按鈕已移除。 */}
 
+        {/* 👤 持倉檔案切換（多人：我的 / 朋友的…）— 切換即重載對應持倉 */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0">持倉檔案</span>
+          <PortfolioProfileSwitcher />
+        </div>
+
         {/* 📋 今日操作建議（書本訊號 daily action）— 讀 server holdings.json */}
         <PortfolioDailyActionPanel />
 
@@ -613,7 +620,7 @@ export default function PortfolioPage() {
                       className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold transition">走圖</Link>
                     <AnalyzeHoldingButton symbol={h.symbol} summary={analysisSummaries[h.symbol]} />
                     <Button variant="secondary" size="sm" onClick={() => openEdit(h)}>編輯</Button>
-                    <Button variant="destructive" size="sm" onClick={() => remove(h.id)}>刪除</Button>
+                    <Button variant="destructive" size="sm" onClick={() => { if (window.confirm(`刪除「${h.name ?? h.symbol}」這筆持股？\n\n會永久移除、不留交易紀錄、無法復原。\n（若要平倉並記錄交易，請改用賣出流程）`)) remove(h.id); }}>刪除</Button>
                   </div>
                 </div>
 
@@ -622,8 +629,8 @@ export default function PortfolioPage() {
                   const alerts: Array<{ level: 'danger' | 'warning' | 'profit'; text: string }> = [];
 
                   // 止損警報（含具體建議動作）
-                  if (pnlPct <= -7) alerts.push({ level: 'danger', text: `虧損 ${pnlPct.toFixed(1)}% — 已達止損線！建議：開盤以市價單全數賣出，嚴守紀律不凹單` });
-                  else if (pnlPct <= -5) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 接近止損，建議：設定停損單在成本價×0.93，或明日開盤觀察若跌破立即出場` });
+                  if (pnlPct <= -7) alerts.push({ level: 'danger', text: `虧損 ${pnlPct.toFixed(1)}% — 已達止損線！建議：13:20 確認跌破、13:25 掛市價單全數賣出，嚴守紀律不凹單（書本時點，非開盤）` });
+                  else if (pnlPct <= -5) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 接近止損，建議：明日 13:20 觀察，若收盤前確認跌破成本價×0.93 即 13:25 掛市價出場` });
                   else if (pnlPct <= -3) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 留意：觀察是否跌破 MA5 或支撐位` });
 
                   // 止盈提醒（含具體建議動作）

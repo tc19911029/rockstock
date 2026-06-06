@@ -327,8 +327,11 @@ function HoldingCard({
     }
   };
 
-  const currentPrice = review?.currentPrice ?? holding.entryPrice;
-  const returnPct = ((currentPrice - holding.entryPrice) / holding.entryPrice) * 100;
+  // UX2 修正：未檢視前不要用進場價假裝現價（否則顯示誤導的 0.00% 損益）。
+  const reviewedPrice = review?.currentPrice ?? null;
+  const hasPrice = reviewedPrice != null;
+  const currentPrice = reviewedPrice;
+  const returnPct = hasPrice ? ((reviewedPrice - holding.entryPrice) / holding.entryPrice) * 100 : null;
   const actionCfg = review ? ACTION_CFG[review.action] : null;
 
   return (
@@ -358,12 +361,12 @@ function HoldingCard({
         </div>
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">現價</div>
-          <div className="font-mono text-foreground">{currentPrice ?? '—'}</div>
+          <div className="font-mono text-foreground">{hasPrice ? currentPrice : <span className="text-muted-foreground/50 text-xs">— 待檢視</span>}</div>
         </div>
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">損益</div>
-          <div className={`font-mono font-semibold ${returnPct > 0 ? 'text-rose-400' : returnPct < 0 ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-            {returnPct > 0 ? '+' : ''}{returnPct.toFixed(2)}%
+          <div className={`font-mono font-semibold ${returnPct == null ? 'text-muted-foreground/50' : returnPct > 0 ? 'text-rose-400' : returnPct < 0 ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+            {returnPct == null ? '—' : `${returnPct > 0 ? '+' : ''}${returnPct.toFixed(2)}%`}
           </div>
         </div>
         <div>

@@ -7,6 +7,7 @@ import {
   Moon, Sun,
   Briefcase, Menu,
   Activity, Settings, FileText,
+  Star, TrendingUp, Newspaper, Radio, Calculator, ShieldAlert, BookOpen, Target,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
@@ -105,27 +106,45 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
             </Button>
           </nav>
 
-          {/* Mobile Menu */}
-          <div className="md:hidden">
+          {/* 完整選單（桌面 + 行動都顯示）— UX1：所有頁收進可發現的選單，不再只能手打 URL */}
+          <div>
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
               <SheetTrigger
-                render={<Button variant="ghost" size="icon" aria-label="開啟選單" className="text-muted-foreground w-8 h-8" />}
+                render={<Button variant="ghost" size="icon" aria-label="開啟選單" title="全部頁面" className="text-muted-foreground hover:text-foreground/80 w-8 h-8" />}
               >
                 <Menu className="w-5 h-5" />
               </SheetTrigger>
-              <SheetContent side="right" className="w-64 bg-background border-border">
+              <SheetContent side="right" className="w-64 bg-background border-border overflow-y-auto">
                 <SheetHeader>
                   <SheetTitle className="text-sky-400">
-                    選單
+                    全部頁面
                   </SheetTitle>
                 </SheetHeader>
-                <nav aria-label="行動版導覽" className="flex flex-col gap-4 mt-4 px-2">
-                  {/* Mobile: 跟桌面同步、只留必要管理入口（其餘已整合進首頁）*/}
+                <nav aria-label="全站導覽" className="flex flex-col gap-4 mt-4 px-2">
                   {([
                     {
-                      title: '管理',
+                      title: '看股 / 追蹤',
                       items: [
-                        { href: '/portfolio',  label: '💼 編輯持倉',  icon: Briefcase },
+                        { href: '/',          label: '🏠 首頁工作台',   icon: Activity },
+                        { href: '/watchlist', label: '⭐ 自選股',       icon: Star },
+                        { href: '/etf',       label: '📈 ETF 追蹤',     icon: TrendingUp },
+                        { href: '/youtube',   label: '📺 YouTube 提及', icon: Newspaper },
+                        { href: '/realtime',  label: '📡 分時監控',     icon: Radio },
+                      ],
+                    },
+                    {
+                      title: '持倉 / 決策',
+                      items: [
+                        { href: '/portfolio', label: '💼 持倉',     icon: Briefcase },
+                        { href: '/sizer',     label: '🧮 部位試算', icon: Calculator },
+                        { href: '/risk',      label: '🛡 風險面板',  icon: ShieldAlert },
+                        { href: '/journal',   label: '📓 交易日誌', icon: BookOpen },
+                        { href: '/growth',    label: '🎯 成長路徑', icon: Target },
+                      ],
+                    },
+                    {
+                      title: '系統',
+                      items: [
                         { href: '/health',     label: '💚 系統健康',  icon: Activity },
                         { href: '/settings',   label: '⚙️ 設定',       icon: Settings },
                         { href: '/disclaimer', label: '📄 免責聲明',   icon: FileText },
