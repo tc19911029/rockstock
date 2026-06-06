@@ -25,13 +25,23 @@ interface PageProps {
   params: Promise<{ market: string; symbol: string; date: string }>;
 }
 
+/** 裸碼補市場 suffix（L1 store key 帶 suffix）。已帶 suffix 原樣回傳。 */
+function toStorageSymbol(symbol: string, market: 'TW' | 'CN'): string {
+  if (/\.(TW|TWO|SS|SZ)$/i.test(symbol)) return symbol;
+  if (market === 'TW') return `${symbol}.TW`;
+  // CN：6xxxxx / 9xxxxx → 上海(.SS)；0/2/3xxxxx → 深圳(.SZ)
+  return /^[69]/.test(symbol) ? `${symbol}.SS` : `${symbol}.SZ`;
+}
+
 export default async function DiagnosePage({ params }: PageProps) {
   const { market: marketRaw, symbol: symbolRaw, date } = await params;
   const market = marketRaw.toUpperCase() as 'TW' | 'CN';
-  const symbol = decodeURIComponent(symbolRaw);
 
   if (market !== 'TW' && market !== 'CN') notFound();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
+
+  // L1 store key 帶市場 suffix（2330.TW / 600487.SS）；UI 各處都用裸碼 → 這裡補回 suffix
+  const symbol = toStorageSymbol(decodeURIComponent(symbolRaw), market);
 
   const candles = await loadLocalCandlesForDate(symbol, market, date);
   if (!candles) {

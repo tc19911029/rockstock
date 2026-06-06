@@ -136,6 +136,8 @@ Layer 4: 掃描結果層（複合主鍵，intraday vs post_close）
 | **`/agents/[symbol]`** | 統一股票詳細頁（走圖 + 4 source / 4 verdict + 多空 + YouTube 提及紀錄） | Pool / agents / 股票連結 |
 | **`/health`** | 所有資料源健康總覽（tab：行情 / YouTube / 技術 / Agent / 系統任務） | header nav |
 
+> **註（2026-06-06 校正）**：`/youtube`、`/youtube/replay`、`/youtube/trends`、`/agents`、`/agents/pool`、`/today` 現均為 **client-side redirect → 首頁對應 tab**（Stage 7 合併進首頁右側 panel）；上表描述的是「該 tab 的職責」，URL 保留僅為 bookmark 相容。真正獨立頁：`/agents/[symbol]`、`/youtube/stocks/[code]`、`/diagnose/[market]/[symbol]/[date]` 等。`/cn-sanse`、`/tw-sanse` 已移除（→ 404，無內部連結指向），三色功能整併進首頁 tab + 走圖疊圖。
+
 **走圖元件**：`components/shared/StockChartView.tsx`（layout 容器）統一給首頁、scan、replay、`/agents/[symbol]` 用；各頁餵不同 `sidebarSlot`。`CandleChart` + `IndicatorCharts` 是底層 primitive，**不直接被頁面 import**（除測試外）。
 
 **資料邏輯不可混淆**：UI 整合不代表 source 混合。YouTube 是 YouTube source、跨節目共識是 YouTube 的 boost（`YouTubeSourceAttribution.inHighConsensus`）、技術仍是技術 — §0 隔離由 `VISIBLE_SOURCE_BY_AGENT` + `sliceSourcesForAgent`（[lib/agents/candidates/types.ts](lib/agents/candidates/types.ts)）強制保證。

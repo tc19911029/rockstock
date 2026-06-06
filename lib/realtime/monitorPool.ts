@@ -71,20 +71,24 @@ interface RawHolding {
 }
 
 async function readHoldings(): Promise<Array<{ symbol: string; market: 'TW' | 'CN' }>> {
+  const result: Array<{ symbol: string; market: 'TW' | 'CN' }> = [];
+  // TW：data/agents/portfolio/holdings.json（業務邏輯 legacy 路徑）
+  await pushHoldings(path.join(process.cwd(), 'data', 'agents', 'portfolio', 'holdings.json'), result);
+  // CN：data/portfolio/holdings-cn.json（鐵則：陸股持倉不放 agents/portfolio）。
+  //     F5 修正：原本沒讀 CN 持倉 → realtime 漏盯現持陸股、只能靠 stale 的 extra-symbols.json。
+  await pushHoldings(path.join(process.cwd(), 'data', 'portfolio', 'holdings-cn.json'), result);
+  return result;
+}
+
+async function pushHoldings(p: string, out: Array<{ symbol: string; market: 'TW' | 'CN' }>): Promise<void> {
   try {
-    const p = path.join(process.cwd(), 'data', 'agents', 'portfolio', 'holdings.json');
     const raw = await fs.readFile(p, 'utf-8');
     const parsed = JSON.parse(raw) as { holdings?: RawHolding[] };
-    const result: Array<{ symbol: string; market: 'TW' | 'CN' }> = [];
     for (const h of parsed.holdings ?? []) {
       if (!h.symbol || h.status === 'closed') continue;
-      const market = h.market ?? inferMarketFromSymbol(h.symbol);
-      result.push({ symbol: h.symbol, market });
+      out.push({ symbol: h.symbol, market: h.market ?? inferMarketFromSymbol(h.symbol) });
     }
-    return result;
-  } catch {
-    return [];
-  }
+  } catch { /* 檔案不存在 / parse 失敗 → skip */ }
 }
 
 interface RawExtraSymbol {

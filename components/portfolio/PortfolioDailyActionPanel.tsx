@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { DailyActionResponse, DailyActionItem } from '@/app/api/portfolio/daily-action/route';
 import type { HoldingAction } from '@/lib/agents/holdingsActionEngine';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
+import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 
 const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   stop_loss:   'bg-red-900/60 text-red-100 border-red-500',
@@ -31,12 +32,13 @@ export function PortfolioDailyActionPanel() {
   const [data, setData] = useState<DailyActionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const activeProfileId = usePortfolioProfileStore(s => s.activeProfileId);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/portfolio/daily-action');
+      const res = await fetch(`/api/portfolio/daily-action?profile=${encodeURIComponent(activeProfileId)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error ?? 'unknown error');
@@ -46,7 +48,7 @@ export function PortfolioDailyActionPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeProfileId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -125,8 +127,8 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
         <span className="text-[11px] font-mono">
           today <span className="text-foreground font-bold">{item.todayClose?.toFixed(2) ?? '—'}</span>
         </span>
-        <span className={`text-[11px] font-mono font-bold ${isProfit ? 'text-emerald-300' : 'text-rose-300'}`}>
-          {fmtPct(item.profitPct)}
+        <span className={`text-[11px] font-mono font-bold ${isProfit ? 'text-emerald-300' : 'text-rose-300'}`} title="總報酬（買進至今未實現），非今日漲跌幅">
+          總 {fmtPct(item.profitPct)}
         </span>
         <span className={`text-[10px] font-mono ${isProfit ? 'text-emerald-400/70' : 'text-rose-400/70'}`}>
           {fmtCurrency(item.unrealizedAmount)}
