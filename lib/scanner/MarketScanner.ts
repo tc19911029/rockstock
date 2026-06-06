@@ -866,6 +866,20 @@ export abstract class MarketScanner {
 
       const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate, diag);
       if (fetchResult.candles.length < 30) { if (diag) diag.tooFewCandles++; return null; }
+
+      // DF4 修正：對齊多方 scanOne 的 fail-closed 守衛 —— 掃描目標日=今日時 L1 末根必須===今日，
+      // 否則跳過，避免用昨日 bar 冒充今日結果寫進 L4（空方原本缺這道、post_close/intraday 會污染）。
+      if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+        if (asOfDate === today) {
+          if (diag) {
+            diag.filteredOut++;
+            diag.skippedStaleL1 = (diag.skippedStaleL1 ?? 0) + 1;
+          }
+          return null;
+        }
+      }
+
       const candles = fetchResult.candles;
 
       const lastIdx = candles.length - 1;

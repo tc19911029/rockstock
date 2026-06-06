@@ -93,8 +93,15 @@ async function fsListDates(): Promise<string[]> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** 固化一日掃描結果（覆寫同日）。 */
+/** 固化一日掃描結果（覆寫同日）。
+ *  DF8 防呆（對齊 TW saveTwSanSeScan）：evaluated===0 = 整個市場都 stale（多半是 000001.SS
+ *  指數落後一天、個股已更新卻對不上 lastDate）→ 不存檔，避免空掃覆蓋掉前一次有效結果（鐵律 #1）。
+ *  原本只有 cron 路徑有 degenerateScanReason 守衛，互動 ?force=1 路徑沒有 → 這裡補上儲存層底線。 */
 export async function saveSanSeScan(result: SanSeScanResult): Promise<void> {
+  if (result.evaluated === 0) {
+    console.warn(`[cn-sanse] ${result.lastDate} evaluated=0（疑似 000001.SS 落後），跳過存檔`);
+    return;
+  }
   const data = JSON.stringify(result);
   if (IS_VERCEL) await blobPut(`${SUBDIR}/${result.lastDate}.json`, data);
   else await fsPut(result.lastDate, data);

@@ -147,10 +147,11 @@ function computeFundamentalScore(fund: Candidate['sources']['fundamental']): num
 
 function weightedStrength(c: Candidate): number {
   const s = c.strengthSignals;
-  // 各維度權重相同，每維歸一化到 0-100
+  // DF5：normalize 與 poolWeights.computeFacetScores 對齊（後者才是 UI/合約的 ranking 單一事實；
+  // 本函數只在 sort=sourceCount 當 tie-break、UI 從不請求）。對齊避免兩套分歧。
   return (
-    Math.min(100, s.technicalTracksCount * 10) +  // 10 tracks → 滿分
-    Math.min(100, s.youtubeMentionCount * 20) +    // 5 節目 → 滿分
+    Math.min(100, s.technicalTracksCount * 50) +  // ≥2 軌 → 滿分
+    Math.min(100, s.youtubeMentionCount * 25) +    // ≥4 節目 → 滿分
     s.chipScore +
     s.fundamentalScore
   );

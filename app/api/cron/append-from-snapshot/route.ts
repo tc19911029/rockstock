@@ -9,7 +9,7 @@ import { isPostCloseWindow, isMarketOpen, getLastTradingDay } from '@/lib/dataso
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { suspectsLimitOverwrite } from '@/lib/datasource/limitMoveGuard';
+import { suspectsLimitOverwrite, suspectsGrossJump } from '@/lib/datasource/limitMoveGuard';
 import { checkCronAuth } from '@/lib/api/cronAuth';
 
 export const runtime = 'nodejs';
@@ -108,16 +108,18 @@ export async function GET(req: NextRequest) {
     const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const existing = await readCandleFile(symbol, market);
     if (!existing) return;
-    if (existing.lastDate > date) { already++; return; }
+    // DF3 修正：>= 確保 L1 已封今日 bar 時不被 L2 snapshot 蓋（個股 already 邏輯；
+    // same-day 覆寫只允許指數，見下方指數分支）。原 `> date` 只擋未來日、形同沒擋。
+    if (existing.lastDate >= date) { already++; return; }
     const q = quotes.get(code);
     if (!q) return;
 
     // Limit-up close-overwrite guard（lib/datasource/limitMoveGuard.ts）：
     // 漲跌停股 close 在收盤集合競價，盤中 snapshot tick 可能不是真正收盤。
     const prev = existing.candles[existing.candles.length - 1];
-    if (suspectsLimitOverwrite(prev?.close, q, market, code)) {
+    if (suspectsLimitOverwrite(prev?.close, q, market, code) || suspectsGrossJump(prev?.close, q)) {
       console.warn(
-        `[append-from-snapshot] ${symbol} ${date} 漲跌停 close 異常 ` +
+        `[append-from-snapshot] ${symbol} ${date} close 異常(漲跌停/單日>50%偏離=疑撞庫壞抓) ` +
         `(prev=${prev.close} h=${q.high} l=${q.low} c=${q.close})，skip 寫入避免 L1 污染`
       );
       skippedLimitUp++;

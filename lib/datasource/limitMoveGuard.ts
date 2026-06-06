@@ -15,6 +15,8 @@
  *   if (suspectsLimitOverwrite(prevClose, q, market, code)) skip;
  */
 
+import { getLimitMovePct } from '@/lib/utils/limitRules';
+
 export interface QuoteOHLC {
   open: number;
   high: number;
@@ -25,9 +27,10 @@ export interface QuoteOHLC {
 export type Market = 'TW' | 'CN';
 
 export function limitPctFor(market: Market, code: string): number {
-  // CN 創業板（300xxx, 301xxx）/ 科創板（688xxx） = ±20%
-  if (market === 'CN' && (/^30[01]/.test(code) || /^688/.test(code))) return 0.198;
-  return 0.098;
+  // DF2 修正：板別判定走單一事實 getLimitMovePct（lib/utils/limitRules.ts），
+  // 含全 30xxxx 創業板 + 68[89] 科創（原本 /^30[01]/ + /^688/ 漏了 689 科創與 302-309 創業板）。
+  // 0.198 / 0.098 是偵測用 margin（略小於名目 ±20% / ±10%），刻意保留。
+  return getLimitMovePct(market, code) >= 0.2 ? 0.198 : 0.098;
 }
 
 /**
@@ -50,4 +53,15 @@ export function suspectsLimitOverwrite(
   const hitLimitDown = q.low <= prevClose * (1 - limitPct) * 1.001;
   return (hitLimitUp && q.close < q.high * 0.97)
       || (hitLimitDown && q.close > q.low * 1.03);
+}
+
+/**
+ * 粗粒度防呆：單日 close 偏離前收 > 50% = 不可能的真實單日變動（漲跌停最多 ±20%，
+ * 即使疊加除權息也到不了 50%）。多半是「同碼撞庫」（例：000001.SS 上證指數值寫進
+ * 000001.SZ 平安銀行）、壞抓、或單位錯。L2 注入命中時應 skip、改走權威 API（API 走
+ * suffix-aware provider，不會撞庫；停牌復牌型大跳空也由 API 拿到正確值）。
+ */
+export function suspectsGrossJump(prevClose: number | null | undefined, q: QuoteOHLC): boolean {
+  if (!prevClose || prevClose <= 0 || !(q.close > 0)) return false;
+  return Math.abs(q.close / prevClose - 1) > 0.5;
 }
