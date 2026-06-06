@@ -38,6 +38,7 @@ import ChipDetailPanel from '@/components/ChipDetailPanel';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
 import CnChipPanel from '@/components/cn/CnChipPanel';
 import CnFundamentalPanel from '@/components/cn/CnFundamentalPanel';
+import { FundamentalScoreSummary } from '@/components/analysis/FundamentalScoreSummary';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
 import BottomPanel from '@/components/BottomPanel';
 import { ScanPanelVertical } from '@/features/scan';
@@ -205,9 +206,15 @@ function HomePage() {
   useEffect(() => {
     if (lastMarketRef.current === market) return;
     lastMarketRef.current = market;
+    // DU1：只有「當前走圖是大盤指數（或尚未載入）」時才跟著切到新市場指數；
+    // 使用者已載入個股則保留個股圖、不覆蓋（切掃描市場 ≠ 丟失走圖）。
+    // hydration 初始 chart 仍是指數，故 TW→CN 照常切到 000001.SS。
+    const INDEX_TICKERS = new Set(['^TWII', '000001.SS', '000300.SS']);
+    const cur = currentStock?.ticker ?? '';
+    if (cur && !INDEX_TICKERS.has(cur)) return;
     const { symbol } = getMarketIndex(market);
     loadStock(symbol, '1d', '2y').catch(() => {});
-  }, [market, loadStock, getMarketIndex]);
+  }, [market, loadStock, getMarketIndex, currentStock]);
 
   // P1-2: remember last tab per interval (declared before handleKey to avoid TDZ errors)
   const [sideTabPerInterval, setSideTabPerInterval] = useState<Record<string, SideTab>>({});
@@ -624,7 +631,12 @@ function HomePage() {
           <SectionBoundary section="基本面分析">
             {isCnTicker
               ? <CnFundamentalPanel symbol={currentStock.ticker} />
-              : <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} />}
+              : (
+                <>
+                  <FundamentalScoreSummary symbol={currentStock.ticker} currentPrice={allCandles[currentIndex]?.close} />
+                  <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} isHistorical={currentIndex < allCandles.length - 1} />
+                </>
+              )}
           </SectionBoundary>
         ) : (
           <EmptyState

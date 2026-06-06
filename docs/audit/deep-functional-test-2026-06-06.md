@@ -17,9 +17,11 @@
 | **DF5** | ✅ 已修 | `merger.ts`：`weightedStrength` normalize 對齊 `computeFacetScores`（*50/*25） |
 | **DF6** | ✅ 已修 | `v12StockEvaluator.ts`：`LONG_TREND_LETTERS` 改從 `BULLISH_TRACK_LETTERS` 派生（PIVOT_GATE 保留精選子集） |
 | **DF7** | ✅ 已修 | `trendAnalysis.ts`：註解 MA20 乖離 20%→15%（與 code 一致） |
-| **DU1/DU2** | ⏸ 留 | UI 市場耦合 / 走圖基本面 asOf — 屬設計取捨（⚪ 待確認），未動，等你決定 |
+| **DU1** | ✅ 已修 | `app/page.tsx`：切市場 effect 加守衛 —「當前圖是個股」則保留不覆蓋（使用者選「保留個股圖」） |
+| **DU2** | ✅ 已修 | `FundamentalSidebarPanel.tsx`：走圖回放時加警示「基本面/估值為最新資料、非走圖日」（用 `currentIndex<last` 判回放，避免週末誤判；使用者選「加標籤註明最新日」） |
+| **DU3** | ✅ 已修 | `agents/[symbol]/page.tsx`：instructions 加註「多代理只評估當日掃描候選股」設定預期 |
 
-**驗證**：`tsc --noEmit` 乾淨；`npm test` 120 套件 / 1651 passed / 0 fail。
+**驗證**：`tsc --noEmit` 乾淨；`npm test` 120 套件 / 1651 passed / 0 fail（DF + DU 兩批修完後重跑）。
 
 ---
 
@@ -40,6 +42,7 @@
 | **DF6** | [C] | v12 評估器 track 硬編 | 🔵 | `lib/scanner/v12StockEvaluator.ts:104,106` `LONG_TREND_LETTERS`/`PIVOT_GATE_LETTERS` 用本地 literal 而非從 `buyMethodTracks.ts` 派生（同檔卻有正確 import `REVERSAL_TRACK_LETTERS`）。目前值相符，但加新字母不會自動流過來。僅 backtest/backfill 腳本用、不影響 production 選股 | Agent4 |
 | **DF7** | [C] doc | trendAnalysis 註解過時 | 🔵 | `lib/analysis/trendAnalysis.ts:399` `isBiasOverExtended` 註解寫「MA5>15% OR MA20>20%」但 code 兩者都 `0.15`（符合 2026-04-22 設定，code 才對、prose 錯）。僅 display（feed trendPosition label、非選股 gate） | Agent4 |
 | **DU2** | [U] | 首頁 基本面 tab @ 走圖 | ⚪ | 歷史走圖 asOf 2026-05-20 時，中間「基本面」tab 仍顯示「估值 **2026-06-05**」（PER 90.44 用當前價算），不跟隨 asOf 日 → 走圖回放把歷史價配當前估值、可能誤導。與第一輪估值卡 stale 同類。也可能刻意（基本面難 rewind） | 互測：華容 chart=05-20、基本面估值=06-05 |
+| **DU3** | [U] | `/agents/[symbol]` 非候選股 | 🔵 | 對「非掃描候選」股（如 `/agents/2330`）仍顯示「⚡開始準備」按鈕 + 三步驟教學，點下去才報錯「symbol 2330 not in L4 session…Agent 只能評估掃描器選出的候選」。應對非候選 gate 掉按鈕／先提示，而非邀請一個必失敗的動作。錯誤本身優雅顯示、非崩潰（屬設計：多代理只評估候選池） | 互測：點 /agents/2330 開始準備 → 紅色 banner |
 
 ---
 

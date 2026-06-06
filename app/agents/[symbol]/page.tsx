@@ -525,7 +525,7 @@ function AgentDetailPage() {
             <div className="border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200 rounded-lg p-4 text-sm space-y-2">
               <p className="font-medium">這檔股票還沒跑過分析。</p>
               <ol className="list-decimal ml-5 space-y-1">
-                <li>點上方「開始準備」會幫這檔股票準備 4 個分析提示（技術／消息／籌碼／基本面各一）</li>
+                <li>點上方「開始準備」會幫這檔股票準備 4 個分析提示（技術／消息／籌碼／基本面各一）。<span className="text-amber-700/80 dark:text-amber-300/70">※ 多代理只評估「當日掃描候選股」；非候選股會回報「不在候選池」而無法準備。</span></li>
                 <li>在 Claude Code 對話中輸入 <code className="bg-amber-500/20 text-amber-700 dark:text-amber-200 px-1.5 py-0.5 rounded font-mono text-xs">/multi-agent-decide</code> 才會實際跑分析</li>
                 <li>對話跑完 4 個面向後回此頁按「⟲ 重整」即可看到結果</li>
               </ol>

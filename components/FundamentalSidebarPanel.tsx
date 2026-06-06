@@ -366,6 +366,8 @@ interface Props {
   date?: string;
   /** 即時價（= 走圖 header 顯示價）。用來把估值卡的距現價/Forward PE/TTM PE 從估值基準價重算成即時。 */
   currentPrice?: number;
+  /** DU2：走圖回放中（步退至歷史日）。true 時加警示，提醒基本面/估值為最新資料、非走圖日。 */
+  isHistorical?: boolean;
 }
 
 interface ValuationOnly {
@@ -375,7 +377,7 @@ interface ValuationOnly {
   scenarios?: NonNullable<FundamentalAnswer['valuation']>['scenarios'];
 }
 
-export function FundamentalSidebarPanel({ symbol, date, currentPrice }: Props) {
+export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistorical }: Props) {
   const [data, setData] = useState<FundamentalAnswer | null>(null);
   const [rawData, setRawData] = useState<RawFundamentals | null>(null);
   const [standaloneValuation, setStandaloneValuation] = useState<ValuationOnly | null>(null);
@@ -431,9 +433,21 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice }: Props) {
 
   const cleanSymbolEarly = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
+  // DU2：走圖回放中提醒「基本面/估值為最新資料、不隨走圖回溯」（避免歷史價配當前 PER 被誤讀）。
+  // 觸發涵蓋兩種歷史情境：(1) 手動步退回放（isHistorical=currentIndex<last）；
+  // (2) asOf 載入舊掃描結果（走圖日 date 早於基本面資料日 → 資料比走圖新）。
+  // 比「資料日」而非 today，避免週末/非交易日把最新日誤判成歷史。
+  const dataFreshDate = data?.date ?? rawData?.periods?.valuationDate ?? null;
+  const showWalkNote = isHistorical || (!!date && !!dataFreshDate && date < dataFreshDate);
+  const historicalNote = showWalkNote ? (
+    <div className="px-2.5 py-1.5 rounded border border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-700 dark:text-amber-200/90 leading-snug">
+      ⚠ 走圖回放中{date ? `（${date}）` : ''}：以下基本面 / 估值為<b>最新資料</b>，非走圖當日（財報與估值不隨走圖回溯）。
+    </div>
+  ) : null;
+
   // Tier 2 fallback: 只有原始財務數字，無 AI 深度分析
   if (!data && rawData) {
-    return <RawFundamentalsView raw={rawData} symbol={cleanSymbolEarly} standaloneValuation={standaloneValuation} currentPrice={currentPrice} />;
+    return <div className="space-y-2">{historicalNote}<RawFundamentalsView raw={rawData} symbol={cleanSymbolEarly} standaloneValuation={standaloneValuation} currentPrice={currentPrice} /></div>;
   }
 
   if (!data) {
@@ -452,6 +466,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice }: Props) {
 
   return (
     <div className="space-y-2 text-xs">
+      {historicalNote}
       {/* Verdict + overview */}
       <div className={`px-2.5 py-1.5 rounded border ${style.bg}`}>
         <div className="flex items-center justify-between mb-0.5">
