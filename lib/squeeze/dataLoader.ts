@@ -219,15 +219,19 @@ export async function getPriceSeries(code: string, startDate: string, endDate: s
 
   return inRange.map(c => {
     const tn = turnoverMap.get(c.date) ?? 0;
-    // FinMind Trading_Volume 為「股」、本地 c.volume 亦為「股」；Trading_money 為「元」。
-    // 經實測（6770 等），若 tn/volume 得到的「每股價」與 close 偏離 >5×，視為單位異常，fallback 用 (H+L+C)/3。
-    let vwap = (c.high + c.low + c.close) / 3;
+    // VWAP（成交均價）本質上必落在當日 [low, high] 內 —— 每筆成交價都在區間內，加權平均亦然。
+    // 台股 turnover/volume 常有「股 vs 張」單位混雜（如 2330 深歷史 splice），raw 會失真
+    // （曾使 2330「融資成本」算出 3038 > 歷史最高價 2425）。
+    // 故 raw 與 raw/1000 兩個候選只有「落在當日價格區間內」才採用；否則退回 typical price
+    // (H+L+C)/3 —— 它必在 bar 內，保證成本不會超出真實成交範圍。
+    const typical = (c.high + c.low + c.close) / 3;
+    const lo = Math.min(c.low, c.close) * 0.95;
+    const hi = Math.max(c.high, c.close) * 1.05;
+    let vwap = typical;
     if (tn > 0 && c.volume > 0) {
       const raw = tn / c.volume;
-      if (Math.abs(raw - c.close) / Math.max(c.close, 1) <= 5) {
-        vwap = raw;
-      } else if (Math.abs(raw / 1000 - c.close) / Math.max(c.close, 1) <= 5) {
-        vwap = raw / 1000;  // Trading_Volume 實際是張的情況
+      for (const cand of [raw, raw / 1000]) {
+        if (cand >= lo && cand <= hi) { vwap = cand; break; }
       }
     }
     return {
