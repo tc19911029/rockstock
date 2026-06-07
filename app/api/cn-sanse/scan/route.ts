@@ -4,6 +4,7 @@ import { loadSanSeScan, saveSanSeScan, latestSanSeDate, loadSanSeIntraday } from
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 全市場掃 ~800 候選；無固化結果時即時重算，避免 Vercel 預設逾時（對齊 tw-sanse/scan）
 
 // 讀固化結果為主；?force=1 即時重掃並固化當日；?date= 指定回看某日；
 // ?session=intraday 讀盤中即時快照（盤後 20:05 封存版不受影響）。
