@@ -24,6 +24,34 @@ export interface Cond { id: string; label: string; met: boolean; kind: 'signal' 
 export interface GroupReport { buy: Cond[]; sell: Cond[]; buyHit: boolean; sellHit: boolean }
 export type ResLevel = 'strong' | 'medium' | 'weak';
 
+/**
+ * 使用順序評級 — 回測推導（data/sanse-combo-playbook.md，scripts/research-sanse-combo.ts）。
+ * 結論：① 紅色(中線機構)在場當「前提」(紫色單獨當前提是最弱的) → ② 捕撈/雙B 金叉「觸發」進場
+ * (0軸下底部反彈金叉勝率較高) → ③ 雙B＋主力＋捕撈 三組齊發(共振3/3)最強。純衍生自三色分數 + 三組 buyHit，不另算指標。
+ */
+export type ComboGrade = 'top' | 'prime' | 'mid' | 'watch' | 'weak';
+export interface ComboGuide {
+  grade: ComboGrade;
+  rank: number;            // top=5 … weak=1（排序用，高＝勝出順序在前）
+  label: string;
+  redGate: boolean;        // 紅(中線機構)在場＝勝出順序的前提
+  trigger: boolean;        // 捕撈金叉 或 雙B金叉/突破＝進場觸發
+  bottomReversal: boolean; // 捕撈 0 軸下空頭區金叉（底部反彈，回測勝率較高）
+  midline: boolean;        // 紅＋黃＝做中線骨架
+}
+export const COMBO_LABEL: Record<ComboGrade, string> = {
+  top: '三組齊發⭐', prime: '紅當前提+觸發', mid: '紅+黃中線', watch: '紅待觸發', weak: '無紅·低勝率',
+};
+export const COMBO_RANK: Record<ComboGrade, number> = { top: 5, prime: 4, mid: 3, watch: 2, weak: 1 };
+/** 每級的一句判讀（給訊號面板/掃描清單/條件面板共用，回測推導）。 */
+export const COMBO_HINT: Record<ComboGrade, string> = {
+  top: '雙B＋主力＋捕撈 三組同時出買訊號（共振3/3）＝最高把握（回測最強但稀有）',
+  prime: '紅(機構)在場＋金叉觸發＝主進場（回測勝出組）',
+  mid: '紅＋黃中線骨架，無金叉觸發→等捕撈/雙B金叉或續抱',
+  watch: '紅在場、尚無觸發→等捕撈/雙B金叉再進',
+  weak: '紅(機構)未在場→純紫/單指標進場回測最弱，謹慎',
+};
+
 export interface ConditionReport {
   doubleB: GroupReport;
   mainforce: GroupReport;
@@ -35,6 +63,7 @@ export interface ConditionReport {
   conflict: boolean;              // 有買進同時有賣出
   sellWarnings: string[];         // 命中的賣出條件 label
   scores: { shortAttack: number; midStrength: number; midControl: number; kongPan: number };
+  combo?: ComboGuide;             // 使用順序評級（衍生；舊固化紀錄可能無此欄 → optional）
 }
 
 // ZB4 線性加權（與 indicators.ts 同）
@@ -206,9 +235,48 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
     .flatMap((g) => g.sell.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label));
   const conflict = selected && sellWarnings.length > 0;
 
+  // ── 使用順序評級（衍生自上面三色 redOn/purpleOn/yellowOn + 雙B/捕撈觸發；回測推導）──
+  const comboTrigger = doubleB.buyHit || catchG.buyHit;            // 捕撈金叉 或 雙B金叉/突破
+  const comboBottom = catchG.buy.some((c) => c.id === 'c_gold_bear' && c.met); // 捕撈0軸下底部反彈金叉
+  const comboMid = redOn && yellowOn;
+  let comboGrade: ComboGrade;
+  if (groupBuyCount === 3) comboGrade = 'top';                            // 雙B＋主力＋捕撈 三組齊發＝真共振3/3＝回測最強(M5)
+  else if (redOn && comboTrigger) comboGrade = 'prime';                    // 紅當前提＋觸發（主進場）
+  else if (redOn && yellowOn) comboGrade = 'mid';                          // 紅＋黃中線骨架（待觸發/續抱）
+  else if (redOn) comboGrade = 'watch';                                    // 紅在場，等金叉觸發
+  else comboGrade = 'weak';                                                // 無紅（純紫/純指標）＝低勝率警示
+  const combo: ComboGuide = {
+    grade: comboGrade, rank: COMBO_RANK[comboGrade], label: COMBO_LABEL[comboGrade],
+    redGate: redOn, trigger: comboTrigger, bottomReversal: comboBottom, midline: comboMid,
+  };
+
   return {
     doubleB, mainforce, catch: catchG,
     mainStage, groupBuyCount, level, selected, conflict, sellWarnings,
     scores: { shortAttack: sa, midStrength: ms, midControl: mc, kongPan: kp },
+    combo,
   };
+}
+
+export type TradeVerdict = 'buy' | 'sell' | 'conflict' | 'wait' | 'skip';
+/**
+ * 一眼結論：該買 / 該賣 / 衝突 / 觀望 / 不建議。給訊號面板＋條件面板共用，
+ * 讓使用者看一眼就知道動作，不必自己拼湊各指標。衍生自 combo 評級 + 賣出警示。
+ */
+export function tradeVerdict(r: ConditionReport): { tone: TradeVerdict; reason: string } {
+  const g = r.combo?.grade;
+  const buyable = g === 'top' || g === 'prime';                 // 紅在場 ＋ 金叉觸發
+  // 出場「事件」＝ 雙B死叉/跌破智能線/捕撈死叉（不含 m_weak 紅<0 這種「持續狀態」，否則沒在漲的股都會被標該賣）
+  const exitConds = [...r.doubleB.sell, ...r.catch.sell].filter((c) => c.kind === 'signal' && c.met);
+  const exitEvent = exitConds.length > 0;
+  const exitLabels = exitConds.map((c) => c.label).join('、');
+  if (buyable) {
+    if (exitEvent) return { tone: 'conflict', reason: `有買也有賣（${exitLabels}）→ 謹慎、別追` };
+    return { tone: 'buy', reason: g === 'top' ? '三組齊發(共振3/3)＝最高把握' : '紅(機構)在場 ＋ 金叉觸發' };
+  }
+  if (r.combo?.redGate) {                                        // 紅在場但今天不是買進設定（紅+黃中線 / 紅待觸發）
+    if (exitEvent) return { tone: 'sell', reason: `出現賣出訊號（${exitLabels}）` };
+    return { tone: 'wait', reason: '紅(機構)在場、今天還沒金叉觸發 → 等' };
+  }
+  return { tone: 'skip', reason: '沒有紅(機構)、回測勝率最低 → 不建議' };       // 無紅（含紅<0/機構撤）一律不建議
 }
