@@ -15,7 +15,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { suspectsLimitOverwrite } from '@/lib/datasource/limitMoveGuard';
+import { suspectsLimitOverwrite, suspectsGrossJump } from '@/lib/datasource/limitMoveGuard';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readIntradaySnapshot, IntradayQuote } from '@/lib/datasource/IntradayCache';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
@@ -248,6 +248,9 @@ export async function GET(req: NextRequest) {
       if (snap && snap.quotes.length > 0 && snap.date === lastTradingDate) {
         l2Map = new Map();
         for (const q of snap.quotes) {
+          // 跳過指數(snapshot 內帶 .SS/.SZ/^ 後綴；個股是裸碼)：否則去後綴後 000001.SS(上證指數)
+          // 會撞 000001(平安銀行) key、把指數值蓋進個股 → L1 污染(2026-06-02 實例)
+          if (/\.(SS|SZ)$/i.test(q.symbol) || q.symbol.startsWith('^')) continue;
           if (q.close > 0) {
             const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
             l2Map.set(code, q);
@@ -273,8 +276,13 @@ export async function GET(req: NextRequest) {
           const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const existing = await readCandleFile(symbol, market);
 
-          // 已是最新，跳過
-          if (existing && existing.lastDate >= lastTradingDate) return -1;
+          // 已是最新就跳過 —— 但若有官方 bulk(MI_INDEX/TPEx)資料，仍要用它覆蓋今日 bar：
+          // 先前可能是 intraday/L2 partial 量先寫入(成交量偏少)，集合競價後的官方收盤才準。
+          // （這是「同日內官方蓋掉盤中」，非「盤中蓋封存歷史」，不違反鐵則 #1。）
+          const hasAuthoritative =
+            (symbol.endsWith('.TW') && !!twseMap?.has(code)) ||
+            (symbol.endsWith('.TWO') && !!tpexMap?.has(code));
+          if (existing && existing.lastDate >= lastTradingDate && !hasAuthoritative) return -1;
 
           // ── 優先路徑 1：TWSE 官方日收盤（只對上市 .TW 股票）──
           // 用集合競價後的官方 OHLCV，不受盤中快照時序影響
@@ -302,9 +310,10 @@ export async function GET(req: NextRequest) {
             const l2Quote = l2Map.get(code);
             if (l2Quote) {
               const prevBar = existing.candles[existing.candles.length - 1];
-              if (suspectsLimitOverwrite(prevBar?.close, l2Quote, market, code)) {
+              if (suspectsLimitOverwrite(prevBar?.close, l2Quote, market, code)
+                  || suspectsGrossJump(prevBar?.close, l2Quote)) {
                 console.warn(
-                  `[download-candles] ${symbol} ${lastTradingDate} L2 漲跌停 close 異常，` +
+                  `[download-candles] ${symbol} ${lastTradingDate} L2 close 異常(漲跌停/單日>50%偏離=疑撞庫壞抓)，` +
                   `跳過 L2 注入改走完整 API (prev=${prevBar.close} h=${l2Quote.high} c=${l2Quote.close})`
                 );
               } else {
