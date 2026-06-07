@@ -212,27 +212,28 @@ export async function getPriceSeries(code: string, startDate: string, endDate: s
   }
   const inRange = (local?.candles ?? []).filter(c => c.date >= startDate && c.date <= endDate);
 
-  // 2. 嘗試 FinMind 補 Trading_money
+  // 2. 抓 FinMind TaiwanStockPrice（成交金額 + 成交量，同源）
   const fm = await fmRange<FmPriceRow>('TaiwanStockPrice', code, startDate, endDate);
-  const turnoverMap = new Map<string, number>();
-  for (const r of fm) turnoverMap.set(r.date, r.Trading_money ?? 0);
+  const fmMap = new Map<string, { money: number; vol: number }>();
+  for (const r of fm) fmMap.set(r.date, { money: r.Trading_money ?? 0, vol: r.Trading_Volume ?? 0 });
 
   return inRange.map(c => {
-    const tn = turnoverMap.get(c.date) ?? 0;
+    const fmd = fmMap.get(c.date);
+    const tn = fmd?.money ?? 0;
     // VWAP（成交均價）本質上必落在當日 [low, high] 內 —— 每筆成交價都在區間內，加權平均亦然。
-    // 台股 turnover/volume 常有「股 vs 張」單位混雜（如 2330 深歷史 splice），raw 會失真
-    // （曾使 2330「融資成本」算出 3038 > 歷史最高價 2425）。
-    // 故 raw 與 raw/1000 兩個候選只有「落在當日價格區間內」才採用；否則退回 typical price
-    // (H+L+C)/3 —— 它必在 bar 內，保證成本不會超出真實成交範圍。
+    // 本地 K 線「成交量」對部分股（如 2330）會 undercount 真實量（已對 FinMind 證實），
+    // 所以「FinMind金額 ÷ 本地量」會失真（曾使 2330 融資成本算出 3038 > 歷史最高 2425）。
+    // 採用順序：①FinMind 自家「金額÷量」(同源、最準) ②FinMind金額÷本地量(±1000) ③typical (H+L+C)/3。
+    // 每個候選都必須落在當日價格區間內才採用；否則退到必在 bar 內的 typical price。
     const typical = (c.high + c.low + c.close) / 3;
     const lo = Math.min(c.low, c.close) * 0.95;
     const hi = Math.max(c.high, c.close) * 1.05;
+    const cands: number[] = [];
+    if (fmd && fmd.money > 0 && fmd.vol > 0) cands.push(fmd.money / fmd.vol);
+    if (tn > 0 && c.volume > 0) cands.push(tn / c.volume, tn / c.volume / 1000);
     let vwap = typical;
-    if (tn > 0 && c.volume > 0) {
-      const raw = tn / c.volume;
-      for (const cand of [raw, raw / 1000]) {
-        if (cand >= lo && cand <= hi) { vwap = cand; break; }
-      }
+    for (const cand of cands) {
+      if (cand >= lo && cand <= hi) { vwap = cand; break; }
     }
     return {
       date: c.date,
