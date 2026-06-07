@@ -7,46 +7,63 @@
 // 三策略（嚴格/中等/寬鬆）各自獨立：點哪個 pill 只顯示該 level 命中清單，互不混合。
 // 多策略徽章：同一股若同時命中多個 level，卡片標示「嚴/中/寬」高亮。
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { RefreshCw } from 'lucide-react';
 import { ForwardPerfRow } from './ForwardPerfRow';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
-import { STAGE_LABEL, STAGE_ICON, type ConditionReport } from '@/lib/cn-sanse/conditions';
-import { isCNMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
 type Level = 'strict' | 'medium' | 'loose';
 
-/** 陸股盤中即時掃描活躍時段 = 開盤(9:15–15:00) 或盤後窗(15:01–15:30)。與 /cn-sanse 整頁同一判斷。 */
-function isCNIntradayActive(): boolean {
-  return isCNMarketOpen() || isPostCloseWindow('CN');
+/** 三色盤中即時掃描活躍時段 = 該市場開盤 或 盤後窗口。TW + CN 共用同一判斷。 */
+function isIntradayActive(market: 'TW' | 'CN'): boolean {
+  return isMarketOpen(market) || isPostCloseWindow(market);
 }
 
 interface Hit {
   symbol: string; name: string; industry: string; price: number; changePct: number;
   shortAttack: number; midStrength: number; midControl: number; kongPan: number;
   shortOversold?: number; // 短線超跌（舊固化資料可能沒有此欄 → undefined）
+  turnoverRank?: number;  // 當日成交額名次（1=最大；舊固化資料無此欄）
 }
 interface RecordRow { symbol: string; report: ConditionReport }
 interface ScanResp {
   ok: boolean; lastDate: string; evaluated: number; staleSkipped?: number;
   counts: Record<Level, number>; results: Record<Level, Hit[]>;
   records?: RecordRow[]; sessionType?: 'post_close' | 'intraday'; cached?: boolean; error?: string;
+  turnoverCap?: number;       // 成交額粗篩上限（TW 500 / CN 800）
+  turnoverFiltered?: number;  // 被粗篩剔除的冷門薄量股檔數
 }
 
-/** 三組條件 chip（主力階段 / 雙B買 / 捕撈買 + 共振數 + 賣出警示）*/
+/** 使用順序評級 badge 配色（回測推導；強→弱）。*/
+const COMBO_BADGE: Record<ComboGrade, string> = {
+  top: 'bg-gradient-to-r from-rose-500/25 to-fuchsia-500/25 text-fuchsia-100 border-fuchsia-400/50',
+  prime: 'bg-rose-500/20 text-rose-200 border-rose-400/40',
+  mid: 'bg-amber-500/20 text-amber-200 border-amber-400/40',
+  watch: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
+};
+
+/** 精簡 chip：使用順序評級 + 共振N/3 + 賣出警示。觸發明細(雙B/主力/捕撈)＋判讀收進 badge hover。*/
 function CondChips({ rep }: { rep?: ConditionReport }) {
   if (!rep) return null;
-  const bBuy = rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
-  const cBuy = rep.catch.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => c.label);
+  const trigs = [
+    ...rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => '雙B ' + c.label),
+    ...(rep.mainforce.buyHit && rep.mainStage ? ['主力' + STAGE_LABEL[rep.mainStage] + STAGE_ICON[rep.mainStage]] : []),
+    ...rep.catch.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => '捕撈 ' + c.label),
+  ].join('、');
+  const comboTitle = rep.combo ? `${COMBO_HINT[rep.combo.grade]}${trigs ? `\n觸發：${trigs}` : ''}` : '';
   return (
     <div className="flex flex-wrap items-center gap-1 mb-1 text-[9px]">
-      {rep.level && <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground border border-border">共振 {rep.groupBuyCount}/3</span>}
-      {rep.doubleB.buyHit && <span className="px-1 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">雙B {bBuy.join('/')}</span>}
-      {rep.mainforce.buyHit && rep.mainStage && <span className="px-1 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[rep.mainStage]}{STAGE_ICON[rep.mainStage]}</span>}
-      {rep.catch.buyHit && <span className="px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">捕撈 {cBuy.join('/')}</span>}
+      {rep.combo && (
+        <span className={cn('px-1 py-0.5 rounded border font-medium', COMBO_BADGE[rep.combo.grade])} title={comboTitle}>
+          {COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}
+        </span>
+      )}
       {rep.sellWarnings.length > 0 && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">⚠️{rep.sellWarnings.join('、')}</span>}
     </div>
   );
@@ -72,16 +89,80 @@ const FILTER_GROUPS: { group: FilterGroup; title: string; activeCls: string; con
     { id: 'c_gold_vol', label: '量價強勢' },
   ] },
 ];
+// 使用順序評級篩選（回測推導；衍生自 report.combo）。
+const COMBO_FILTERS: { id: string; label: string; tip: string }[] = [
+  { id: 'cf_top', label: '最稀有⭐', tip: '只看三組齊發（雙B＋主力＋捕撈 三組都出＝共振3/3）：台股短線期望值最高但很稀有(一天個位數)；平時看「主進場」級就夠、機會多，陸股牛市那段 3/3 反而輸大盤' },
+  { id: 'cf_redGate', label: '紅當前提', tip: '只看紅色(中線機構)在場的＝勝出順序的前提（過濾掉純紫/純指標的低勝率組）' },
+  { id: 'cf_prime', label: '主進場', tip: '只看「紅當前提＋觸發」與「三組齊發」（評級 prime/top）' },
+  { id: 'cf_bottom', label: '底部反彈', tip: '只看捕撈 0 軸下空頭區金叉（底部反彈，回測勝率較高）' },
+];
 function passFilters(report: ConditionReport | undefined, active: Set<string>): boolean {
   if (active.size === 0) return true;
   if (!report) return false;
   if (active.has('hideConflict') && report.conflict) return false;
+  if (active.has('cf_top') && report.combo?.grade !== 'top') return false;
+  if (active.has('cf_redGate') && !report.combo?.redGate) return false;
+  if (active.has('cf_prime') && !(report.combo?.grade === 'top' || report.combo?.grade === 'prime')) return false;
+  if (active.has('cf_bottom') && !report.combo?.bottomReversal) return false;
   for (const { group, conds } of FILTER_GROUPS) {
     for (const c of conds) {
       if (active.has(c.id) && !report[group].buy.some((x) => x.id === c.id && x.met)) return false;
     }
   }
   return true;
+}
+
+/**
+ * 最應該買進排序分數（回測推導的使用順序）：
+ * 評級 grade 為主軸（top>prime>mid>watch>weak，每級差 100），同級再比共振組數(×10)、
+ * 有賣出警示降一點、捕撈底部反彈加一點、最後用短攻做不跨級的細排。缺 combo（舊固化）回 -1 排最後。
+ */
+function buyScore(rep?: ConditionReport): number {
+  const c = rep?.combo;
+  if (!c) return -1;
+  let s = c.rank * 100 + (rep!.groupBuyCount ?? 0) * 10;
+  if (rep!.conflict) s -= 5;
+  if (c.bottomReversal) s += 1;
+  const sa = rep!.scores?.shortAttack ?? 0;
+  s += Math.min(Math.max(sa, 0), 99) / 100;
+  return s;
+}
+
+/** 共用排序比較器（畫面清單 + 漲幅抓取目標共用，確保顯示的股票就是有抓漲幅的股票）。 */
+function rowComparator(
+  sortKey: SortKey,
+  dir: number,
+  perf: Record<string, StockForwardPerformance>,
+  reportMap: Map<string, ConditionReport>,
+) {
+  const fwdField = FWD_FIELD[sortKey];
+  return (a: Hit, b: Hit): number => {
+    if (fwdField) {
+      const va = perf[a.symbol]?.[fwdField];
+      const vb = perf[b.symbol]?.[fwdField];
+      if (va == null && vb == null) return 0;       // 缺值永遠排最後（不受 asc/desc 影響）
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return dir * ((vb as number) - (va as number));
+    }
+    if (sortKey === 'turnoverRank') {
+      const ra = a.turnoverRank; const rb = b.turnoverRank;
+      if (ra == null && rb == null) return 0;
+      if (ra == null) return 1;
+      if (rb == null) return -1;
+      return dir * (ra - rb);
+    }
+    if (sortKey === 'combo') {
+      const ra = buyScore(reportMap.get(a.symbol)); const rb = buyScore(reportMap.get(b.symbol));
+      if (ra < 0 && rb < 0) return 0;
+      if (ra < 0) return 1;
+      if (rb < 0) return -1;
+      if (ra === rb) return 0;
+      return dir * (rb - ra);
+    }
+    const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
+    return dir * ((b[key] ?? 0) - (a[key] ?? 0));
+  };
 }
 
 const LEVELS: { key: Level; label: string; desc: string }[] = [
@@ -92,16 +173,18 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 
-type SortKey = 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price'
+type SortKey = 'combo' | 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price' | 'turnoverRank'
   | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
 
 const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
+  { key: 'combo', label: '應買', tip: '最應該買進排序（回測推導）：三組齊發(3/3)>紅當前提+觸發>紅+黃中線>紅待觸發>無紅；同級再比共振組數/短攻，有賣出警示降級。⚠️三組齊發台股短線期望值最高但很稀有(一天個位數)，平時看「紅當前提+觸發」那級就夠用、機會多；陸股牛市那段 3/3 反而輸大盤' },
   { key: 'shortAttack', label: '短攻', tip: '短線上攻（游資資金）分數' },
   { key: 'midStrength', label: '中強', tip: '中線強勢（主力資金）分數' },
   { key: 'midControl', label: '中控', tip: '中線控盤（主力控盤）分數' },
   { key: 'shortOversold', label: '超短跌', tip: '短線超跌（跌破 MA20 後的超跌幅度）' },
   { key: 'changePct', label: '漲幅', tip: '掃描當日漲跌幅 %' },
   { key: 'price', label: '股價', tip: '當前股價' },
+  { key: 'turnoverRank', label: '成交量', tip: '當日成交額排名（1=最大；缺值排最後）' },
   { key: 'fwdOpen', label: '漲跌·隔開', tip: '掃出後隔日開盤漲跌幅（缺值排最後）' },
   { key: 'fwdD1', label: '漲跌·1日', tip: '掃出後 1 日漲跌幅' },
   { key: 'fwdD5', label: '漲跌·5日', tip: '掃出後 5 日漲跌幅' },
@@ -121,9 +204,12 @@ interface Props {
   selectedSymbol?: string | null;
   /** 由外部（工具列「三色(嚴格/中等/寬鬆)」按鈕）控制的 level；給定時隱藏內建 pill 列 */
   level?: Level;
+  /** 市場：CN（預設，走 /api/cn-sanse）或 TW（走 /api/tw-sanse，無盤中即時）*/
+  market?: 'TW' | 'CN';
 }
 
-export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: controlledLevel }: Props) {
+export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: controlledLevel, market = 'CN' }: Props) {
+  const apiBase = market === 'TW' ? '/api/tw-sanse' : '/api/cn-sanse';
   const [data, setData] = useState<ScanResp | null>(null);
   const [dates, setDates] = useState<DateEntry[]>([]);
   const [session, setSession] = useState<'post_close' | 'intraday'>('post_close');
@@ -133,8 +219,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   const level = controlledLevel ?? internalLevel;
   const [perf, setPerf] = useState<Record<string, StockForwardPerformance>>({});
   const [perfLoading, setPerfLoading] = useState(false);
-  // 排序：預設短攻高→低（與後端排序一致）；點同鍵切換高低
-  const [sortKey, setSortKey] = useState<SortKey>('shortAttack');
+  // 排序：預設「應買」(使用順序評級綜合分)高→低，最該買進的在最前；點同鍵切換高低
+  const [sortKey, setSortKey] = useState<SortKey>('combo');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   // 三色買進訊號篩選（cond id 集合；含 'hideConflict'）
   const [filters, setFilters] = useState<Set<string>>(new Set());
@@ -144,22 +230,28 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     return next;
   });
 
+  // 切市場（apiBase 變）時，舊市場的 in-flight fetch 後到不可覆蓋新市場資料 → 用 ref 守門。
+  const liveBaseRef = useRef(apiBase);
+
   // session='intraday' → 讀盤中即時快照（latest live，忽略 date）；否則讀盤後封存。
   const loadDate = useCallback(async (date?: string, sessionArg?: 'post_close' | 'intraday') => {
     const sess = sessionArg ?? session;
+    const myBase = apiBase;
     setLoading(true); setErr(null);
     try {
       const url = sess === 'intraday'
-        ? '/api/cn-sanse/scan?session=intraday'
-        : `/api/cn-sanse/scan${date ? `?date=${date}` : ''}`;
+        ? `${apiBase}/scan?session=intraday`
+        : `${apiBase}/scan${date ? `?date=${date}` : ''}`;
       const r = await fetch(url);
       const j: ScanResp = await r.json();
+      if (liveBaseRef.current !== myBase) return; // 已切到別的市場 → 丟棄這次結果
       if (!j.ok) throw new Error(j.error || (sess === 'intraday' ? '尚無盤中即時快照' : '讀取失敗'));
       setData(j);
     } catch (e) {
+      if (liveBaseRef.current !== myBase) return;
       setErr(e instanceof Error ? e.message : '讀取失敗');
-    } finally { setLoading(false); }
-  }, [session]);
+    } finally { if (liveBaseRef.current === myBase) setLoading(false); }
+  }, [session, apiBase]);
 
   const switchSession = useCallback((s: 'post_close' | 'intraday') => {
     setSession(s);
@@ -167,65 +259,46 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   }, [loadDate]);
 
   const loadDates = useCallback(async () => {
+    const myBase = apiBase;
     try {
-      const r = await fetch('/api/cn-sanse/scan/dates');
+      const r = await fetch(`${apiBase}/scan/dates`);
       const j = await r.json();
-      if (j.ok) setDates(j.dates ?? []);
+      if (liveBaseRef.current === myBase && j.ok) setDates(j.dates ?? []);
     } catch { /* 日期列載不到不致命 */ }
-  }, []);
+  }, [apiBase]);
 
   const rescan = useCallback(async () => {
+    const myBase = apiBase;
     setLoading(true); setErr(null);
     try {
-      const r = await fetch('/api/cn-sanse/scan?force=1');
+      const r = await fetch(`${apiBase}/scan?force=1`);
       const j: ScanResp = await r.json();
+      if (liveBaseRef.current !== myBase) return;
       if (!j.ok) throw new Error(j.error || '掃描失敗');
       setData(j);
       loadDates();
     } catch (e) {
+      if (liveBaseRef.current !== myBase) return;
       setErr(e instanceof Error ? e.message : '掃描失敗');
-    } finally { setLoading(false); }
-  }, [loadDates]);
+    } finally { if (liveBaseRef.current === myBase) setLoading(false); }
+  }, [loadDates, apiBase]);
 
   // 進場：盤中活躍時段預設即時，否則盤後（在 effect 內判斷避免 SSR/CSR hydration 不一致）
   useEffect(() => {
+    liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
+    setData(null); setDates([]); setPerf({}); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
-    const initial = isCNIntradayActive() ? 'intraday' : 'post_close';
+    // TW + CN 皆依該市場時段決定：盤中/盤後窗口 → 即時，否則盤後封存
+    const initial = isIntradayActive(market) ? 'intraday' : 'post_close';
     setSession(initial);
     loadDate(undefined, initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [apiBase]);
 
   const onRefresh = useCallback(() => {
     if (session === 'intraday') loadDate(undefined, 'intraday'); // 重抓即時快照
     else rescan();                                               // 盤後即時重掃並固化
   }, [session, loadDate, rescan]);
-
-  // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）
-  useEffect(() => {
-    const hits = data?.results[level] ?? [];
-    if (!data || hits.length === 0) { setPerf({}); return; }
-    let alive = true;
-    setPerfLoading(true);
-    fetch('/api/backtest/forward', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        scanDate: data.lastDate,
-        stocks: hits.slice(0, 50).map((h) => ({ symbol: h.symbol, name: h.name, scanPrice: h.price })),
-      }),
-    })
-      .then((r) => r.json())
-      .then((j: { performance?: StockForwardPerformance[] }) => {
-        if (!alive) return;
-        const m: Record<string, StockForwardPerformance> = {};
-        for (const p of j.performance ?? []) m[p.symbol] = p;
-        setPerf(m);
-      })
-      .catch(() => { /* 績效取不到不致命 */ })
-      .finally(() => { if (alive) setPerfLoading(false); });
-    return () => { alive = false; };
-  }, [data, level]);
 
   // 各 level 命中代號集合 → 用來算「多策略徽章」
   const levelSets = useMemo(() => ({
@@ -240,23 +313,45 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     [data],
   );
 
+  // 漲幅要抓「畫面實際會顯示的那 50 檔」(濾鏡+排序後)，否則改排序/濾鏡後顯示的股票沒抓到漲幅 → 空白。
+  // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
+  const fetchTargets = useMemo(() => {
+    const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
+    const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
+    rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap));
+    return rows.slice(0, 50);
+  }, [data, level, sortKey, sortDir, filters, reportMap]);
+  const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
+
+  // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
+  useEffect(() => {
+    if (!data || fetchTargets.length === 0) { setPerf({}); return; }
+    let alive = true;
+    setPerfLoading(true);
+    fetch('/api/backtest/forward', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        scanDate: data.lastDate,
+        stocks: fetchTargets.map((h) => ({ symbol: h.symbol, name: h.name, scanPrice: h.price })),
+      }),
+    })
+      .then((r) => r.json())
+      .then((j: { performance?: StockForwardPerformance[] }) => {
+        if (!alive) return;
+        const m: Record<string, StockForwardPerformance> = {};
+        for (const p of j.performance ?? []) m[p.symbol] = p;
+        setPerf(m);
+      })
+      .catch(() => { /* 績效取不到不致命 */ })
+      .finally(() => { if (alive) setPerfLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.lastDate, fetchKey]);
+
   const hits = useMemo(() => {
     const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
-    const dir = sortDir === 'desc' ? 1 : -1;
-    const fwdField = FWD_FIELD[sortKey];
-    rows.sort((a, b) => {
-      if (fwdField) {
-        const va = perf[a.symbol]?.[fwdField];
-        const vb = perf[b.symbol]?.[fwdField];
-        // 缺值永遠排最後（不受 asc/desc 影響）
-        if (va == null && vb == null) return 0;
-        if (va == null) return 1;
-        if (vb == null) return -1;
-        return dir * ((vb as number) - (va as number));
-      }
-      const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
-      return dir * ((b[key] ?? 0) - (a[key] ?? 0));
-    });
+    rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap));
     return rows.slice(0, 50);
   }, [data, level, sortKey, sortDir, perf, filters, reportMap]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -268,11 +363,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="font-semibold text-fuchsia-300 shrink-0">🎨 三色資金</span>
           <span className="text-[10px] text-muted-foreground truncate">
-            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${session === 'intraday' ? ' · 盤中跳動' : ''}` : '陸股 A 股自創策略'}
+            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${data.turnoverCap ? `（成交額前 ${data.turnoverCap}）` : ''}${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {/* 盤後 / 盤中 切換 */}
+          {/* 盤後 / 盤中 切換（TW + CN 皆有） */}
           <div className="flex rounded border border-border overflow-hidden text-[9px]">
             <button
               onClick={() => switchSession('post_close')}
@@ -385,6 +480,20 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           </div>
         ))}
         <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[9px] text-muted-foreground w-9 shrink-0" title="使用順序評級（回測推導 data/sanse-combo-playbook.md）">🔢順序</span>
+          {COMBO_FILTERS.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => toggleFilter(c.id)}
+              title={c.tip}
+              className={cn(
+                'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+                filters.has(c.id) ? 'bg-rose-500/15 text-rose-200 border-rose-400/40' : 'text-muted-foreground border-border hover:bg-secondary',
+              )}
+            >{c.label}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
           <span className="text-[9px] text-muted-foreground w-9 shrink-0">其他</span>
           <button
             onClick={() => toggleFilter('hideConflict')}
@@ -405,14 +514,22 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         {loading && !data && <div className="p-4 text-sm text-muted-foreground">載入中…</div>}
         {data && hits.length === 0 && !loading && <div className="p-4 text-sm text-muted-foreground">此策略該日無命中。</div>}
         {hits.map((h) => {
-          const ticker = h.symbol.replace(/\.(SS|SZ)$/i, '');
+          const ticker = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const isSel = pureSelected && ticker === pureSelected;
           const inWatch = useWatchlistStore.getState().has(h.symbol);
+          const rep = reportMap.get(h.symbol);
+          // 精簡：原始分數 + 命中嚴/中/寬 收進卡片 hover（不佔版面）
+          const lvHit = (['strict', 'medium', 'loose'] as Level[])
+            .filter((lv) => levelSets[lv].has(h.symbol)).map((lv) => LEVELS.find((l) => l.key === lv)?.label).join('/');
+          const detailTitle = `短攻 ${fmt(h.shortAttack)}｜中強 ${fmt(h.midStrength)}｜中控 ${fmt(h.midControl)}｜超短跌 ${fmt(h.shortOversold)}`
+            + (rep ? `\n共振 ${rep.groupBuyCount}/3（雙B/主力/捕撈 中幾組）` : '')
+            + (lvHit ? `\n命中策略：${lvHit}` : '');
           return (
             <div
               key={h.symbol}
+              title={detailTitle}
               onClick={() => onSelectStock?.({
-                symbol: h.symbol, name: h.name, market: 'CN',
+                symbol: h.symbol, name: h.name, market,
                 date: data!.lastDate, chartTab: 'shuangb',
               })}
               className={cn(
@@ -429,39 +546,33 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 </span>
               </div>
 
-              {/* Row 2: 股價 + 產業 + 三色分數 */}
-              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
+              {/* Row 2: 股價 + 產業 + 成交量名次（三色分數收進卡片 hover）*/}
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{fmt(h.price)}</span>
-                {h.industry && <span className="truncate max-w-[60px]">{h.industry}</span>}
-                <span className="text-fuchsia-400" title="短線上攻">短攻 {fmt(h.shortAttack)}</span>
-                <span className="text-rose-300" title="中線強勢">中強 {fmt(h.midStrength)}</span>
-                <span className="text-amber-300" title="中線控盤">中控 {fmt(h.midControl)}</span>
-                <span className="text-blue-400" title="短線超跌">超短跌 {fmt(h.shortOversold)}</span>
+                {h.industry && <span className="truncate max-w-[80px]">{h.industry}</span>}
+                {h.turnoverRank !== undefined && (
+                  <span
+                    className="ml-auto text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
+                    title={`當日成交額排名（全市場前 ${data?.turnoverCap ?? ''} 內）`}
+                  >
+                    成交量第{h.turnoverRank}名
+                  </span>
+                )}
               </div>
 
-              {/* Row 2.5: 三色條件（主力階段 / 雙B買 / 捕撈買 + 賣出警示）*/}
-              <CondChips rep={reportMap.get(h.symbol)} />
+              {/* Row 2.5: 使用順序評級 + 共振 + 賣出警示（觸發/階段收進 badge hover）；判讀句只在選中卡顯示 */}
+              <CondChips rep={rep} />
+              {isSel && rep?.combo && (
+                <p className="text-[9px] leading-snug text-muted-foreground/90 mb-1">→ {COMBO_HINT[rep.combo.grade]}</p>
+              )}
 
-              {/* Row 3: 命中策略徽章 + 動作按鈕 */}
+              {/* Row 3: 動作按鈕（命中嚴/中/寬 收進卡片 hover）*/}
               <div className="flex items-center gap-1 mb-1">
-                {(['strict', 'medium', 'loose'] as Level[]).map((lv) => {
-                  const hit = levelSets[lv].has(h.symbol);
-                  return (
-                    <span key={lv}
-                      title={`${LEVELS.find((l) => l.key === lv)?.label}${hit ? ' 命中' : ' 未命中'}`}
-                      className={cn(
-                        'text-[8px] px-1 h-3.5 flex items-center rounded-sm font-bold',
-                        hit ? 'bg-fuchsia-800/80 text-fuchsia-200' : 'bg-secondary/50 text-muted-foreground/40',
-                      )}>
-                      {LEVELS.find((l) => l.key === lv)?.label}
-                    </span>
-                  );
-                })}
                 <div className="ml-auto flex items-center gap-1">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onSelectStock?.({ symbol: h.symbol, name: h.name, market: 'CN', date: data!.lastDate, chartTab: 'shuangb' });
+                      onSelectStock?.({ symbol: h.symbol, name: h.name, market, date: data!.lastDate, chartTab: 'shuangb' });
                     }}
                     className="text-[9px] text-sky-400 hover:text-sky-300 px-1 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30">
                     走圖
