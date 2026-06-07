@@ -1,20 +1,20 @@
 // ============================================================
-// 台股【上市】L1 成交量歷史校正 —— 用 TWSE MI_INDEX 官方日收盤（權威源、免費、bulk）
+// 台股 L1 成交量歷史校正 —— 用官方日收盤 bulk 源（免費、curl、不像 FinMind 會 IP ban）
+//   上市 .TW  → TWSE MI_INDEX（table[8] 成交股數 row[2]）
+//   上櫃 .TWO → TPEx「上櫃每日收盤行情」歷史端點（afterTrading/otc?date=，成交股數欄）
 //
-// 為什麼用 MI_INDEX 而非 FinMind：MI_INDEX 一次回「某日全上市股票」官方 OHLCV
-//   （成交股數 row[2]），是 candle pipeline 自己認定的「唯一正確來源」；curl 可取、
-//   不像 FinMind 逐檔會 IP ban。實測 2330 6/05：MI_INDEX 43,404 張 = FinMind，本地 32,568(錯)。
+// 兩者都是「一次回某日全市場官方 OHLCV」、可查歷史，是 candle pipeline 認定的正確來源。
+//   實測 2330 6/05：MI_INDEX 43,404 張 = FinMind，本地 32,568(錯)；6104(上櫃) TPEx 亦可取。
 //
-// 修法：逐「交易日」重抓 MI_INDEX → 對每檔 .TW 個股，把本地 volume 改成官方值
-//   （成交股數 ÷1000 → 張）。只改「相對誤差 > 8% 且 絕對差 ≥ 50 張」的 bar；OHLC 不動。
-//   每日回應快取到 data/tmp/mi-cache/<date>.json → dry-run 抓過，--apply 直接重用不重抓。
-//   ⚠️ 上櫃 .TWO 無歷史 bulk 源(TPEx OpenAPI 只給最新日)，本腳本不處理；之後用 FinMind 逐檔補。
+// 修法：逐「交易日」重抓官方源 → 把本地 volume 改成官方值（成交股數 ÷1000 → 張）。
+//   只改「相對誤差 > 8% 且 絕對差 ≥ 50 張」的 bar；OHLC 不動。
+//   每日回應快取到 data/tmp/{mi,tpex}-cache/<date>.json → dry-run 抓過，--apply 重用不重抓。
 //
 // 安全：dry-run 預設；--apply 才備份(TW-backup-volmi-<ts>/)+覆寫+清 L1 cache。
 //
-//   npx tsx scripts/repair-tw-volume-mi-index.ts                 # dry-run 近 520 交易日
+//   npx tsx scripts/repair-tw-volume-mi-index.ts                 # dry-run 近 520 交易日(上市+上櫃)
 //   npx tsx scripts/repair-tw-volume-mi-index.ts --apply         # 校正
-//   npx tsx scripts/repair-tw-volume-mi-index.ts --days=520 2330 # 限窗/單檔(仍逐日抓全市場)
+//   npx tsx scripts/repair-tw-volume-mi-index.ts --days=520 6104 # 限窗/單檔(仍逐日抓全市場)
 // ============================================================
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -31,6 +31,7 @@ const MIN_ABS = 50;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 const DIR = path.join(process.cwd(), 'data/candles/TW');
 const MICACHE = path.join(process.cwd(), 'data/tmp/mi-cache');
+const TPCACHE = path.join(process.cwd(), 'data/tmp/tpex-cache');
 const STAMP = new Date().toISOString().replace(/[:.]/g, '-');
 const BACKUP = path.join(process.cwd(), 'data/candles', `TW-backup-volmi-${STAMP}`);
 
@@ -68,6 +69,38 @@ async function miIndexDay(ymd: string): Promise<Map<string, number> | null> {
   return null;
 }
 
+/** 抓某日 TPEx 上櫃每日收盤 → code→張（成交股數÷1000）；disk cache（dry 抓 apply 重用） */
+async function tpexDay(ymdDash: string): Promise<Map<string, number> | null> {
+  const cacheFile = path.join(TPCACHE, `${ymdDash}.json`);
+  try {
+    const cached = JSON.parse(await fs.readFile(cacheFile, 'utf8')) as Record<string, number>;
+    return new Map(Object.entries(cached));
+  } catch { /* miss → fetch */ }
+
+  const url = `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${ymdDash.replace(/-/g, '/')}&type=EW&response=json`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { stdout } = await pexec('curl', ['-s', '--max-time', '30', '-A', UA, url], { maxBuffer: 64 * 1024 * 1024 });
+      const j = JSON.parse(stdout) as { tables?: Array<{ fields?: string[]; data?: string[][] }> };
+      const t = j.tables?.[0];
+      if (!t?.data?.length || !t.fields) return null;            // 非交易日/無資料
+      const volIdx = t.fields.findIndex((f) => f.trim() === '成交股數');
+      if (volIdx < 0) return null;
+      const m = new Map<string, number>();
+      for (const row of t.data) {
+        const code = String(row[0] ?? '').trim();
+        if (!/^\d{4,}[A-Z]?$/.test(code)) continue;
+        const lots = Math.round(parseNum(row[volIdx]) / 1000);
+        if (lots > 0) m.set(code, lots);
+      }
+      await fs.mkdir(TPCACHE, { recursive: true });
+      await fs.writeFile(cacheFile, JSON.stringify(Object.fromEntries(m)));
+      return m;
+    } catch { await sleep(1500); }
+  }
+  return null;
+}
+
 (async () => {
   // 1) 交易日清單：取流動性高、歷史完整的 2330 candle 日期當基準
   let ref: { candles: Candle[] };
@@ -82,21 +115,26 @@ async function miIndexDay(ymd: string): Promise<Map<string, number> | null> {
   let fetched = 0, dayFail = 0;
   for (let i = 0; i < tradingDates.length; i++) {
     const d = tradingDates[i];
-    const m = await miIndexDay(d.replace(/-/g, ''));
-    if (m) { dayMaps.set(d, m); fetched++; } else dayFail++;
-    if ((i + 1) % 40 === 0) console.error(`…MI_INDEX 抓取 ${i + 1}/${tradingDates.length}（失敗 ${dayFail}）`);
+    const [mi, tp] = await Promise.all([miIndexDay(d.replace(/-/g, '')), tpexDay(d)]);
+    if (mi || tp) {
+      const merged = new Map<string, number>();      // 上市+上櫃 代號不衝突
+      if (mi) for (const [k, v] of mi) merged.set(k, v);
+      if (tp) for (const [k, v] of tp) merged.set(k, v);
+      dayMaps.set(d, merged); fetched++;
+    } else dayFail++;
+    if ((i + 1) % 40 === 0) console.error(`…官方源抓取 ${i + 1}/${tradingDates.length}（失敗 ${dayFail}）`);
     await sleep(120);
   }
-  console.log(`MI_INDEX 取得 ${fetched} 日、失敗 ${dayFail} 日\n`);
+  console.log(`官方源(MI_INDEX上市 + TPEx上櫃)取得 ${fetched} 日、失敗 ${dayFail} 日\n`);
 
   // 3) 逐 .TW 檔套用校正
-  let files = (await fs.readdir(DIR)).filter((f) => /^[0-9][0-9A-Z]{3,6}\.TW\.json$/.test(f));
+  let files = (await fs.readdir(DIR)).filter((f) => /^[0-9][0-9A-Z]{3,6}\.(TW|TWO)\.json$/.test(f));
   if (ONLY) files = files.filter((f) => f.startsWith(`${ONLY}.`));
 
   const results: { sym: string; changed: number; sample: string[] }[] = [];
   let totalChanged = 0, filesChanged = 0;
   for (const f of files) {
-    const sym = f.replace('.json', ''); const code = sym.replace(/\.TW$/, '');
+    const sym = f.replace('.json', ''); const code = sym.replace(/\.(TW|TWO)$/, '');
     let j: { candles: Candle[] };
     try { j = JSON.parse(await fs.readFile(path.join(DIR, f), 'utf8')); } catch { continue; }
     if (!Array.isArray(j.candles)) continue;
@@ -127,8 +165,8 @@ async function miIndexDay(ymd: string): Promise<Map<string, number> | null> {
   }
 
   results.sort((a, b) => b.changed - a.changed);
-  console.log(`=== TWSE MI_INDEX 上市成交量校正${APPLY ? '（已備份+覆寫+清 cache）' : '（dry-run）'} ===`);
-  console.log(`掃描 ${files.length} 檔上市；需校正 ${filesChanged} 檔 / ${totalChanged} 根 bar\n`);
+  console.log(`=== 官方源成交量校正(上市 MI_INDEX + 上櫃 TPEx)${APPLY ? '（已備份+覆寫+清 cache）' : '（dry-run）'} ===`);
+  console.log(`掃描 ${files.length} 檔(上市+上櫃)；需校正 ${filesChanged} 檔 / ${totalChanged} 根 bar\n`);
   console.log('symbol        改根數   範例(舊→新)');
   for (const r of results.slice(0, 40)) console.log(`  ${r.sym.padEnd(12)} ${String(r.changed).padStart(5)}  ${r.sample.join('  ')}`);
   if (results.length > 40) console.log(`  …(其餘 ${results.length - 40} 檔略)`);
