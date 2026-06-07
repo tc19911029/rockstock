@@ -7,7 +7,7 @@
  *   2. archivedDate / sessionType 正確標記（前端判走圖是否真落後用）。
  *   3. 正常股（封存對齊昨日）盤中有報價 → 合成今日 bar 後納入評估。
  *
- * 不碰真實磁碟：mock 掉 LocalCandleStore 與 fs/promises，全用記憶體 fixture。
+ * 不碰真實磁碟：mock 掉 CN_STOCKS / CandleStorageAdapter / TurnoverRank，全用記憶體 fixture。
  */
 import type { Candle } from '@/types';
 
@@ -37,26 +37,28 @@ const CANDLE_MAP: Record<string, Candle[]> = {
   '600003.SS': genCandles(D_2, 259),          // 缺口股：封存只到前天（漏抓昨日 / 停牌復牌）
 };
 
-const STOCKLIST = {
-  stocks: [
-    { symbol: '600001.SS', name: '測試一', industry: 'X' },
-    { symbol: '600002.SS', name: '測試二', industry: 'X' },
-    { symbol: '600003.SS', name: '缺口股', industry: 'X' },
+// universe 改用已進 git 的 CN_STOCKS（取代本地 cn_stocklist.json）
+jest.mock('@/lib/scanner/cnStocks', () => ({
+  CN_STOCKS: [
+    { symbol: '600001.SS', name: '測試一' },
+    { symbol: '600002.SS', name: '測試二' },
+    { symbol: '600003.SS', name: '缺口股' },
   ],
-};
-
-jest.mock('@/lib/datasource/LocalCandleStore', () => ({
-  getLocalCandleDir: () => '/fake/candles/CN',
 }));
 
-jest.mock('fs/promises', () => ({
-  readFile: jest.fn(async (p: string) => {
-    const s = String(p);
-    if (s.includes('cn_stocklist')) return JSON.stringify(STOCKLIST);
-    const base = s.split('/').pop()!.replace('.json', '');
-    if (CANDLE_MAP[base]) return JSON.stringify({ candles: CANDLE_MAP[base] });
-    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+// K 線改走 Blob-aware adapter（不再 raw fs）；以記憶體 fixture 餵 readCandleFile。
+jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
+  readCandleFile: jest.fn(async (symbol: string) => {
+    const c = CANDLE_MAP[symbol];
+    return c ? { candles: c } : null;
   }),
+}));
+
+// 成交額粗掃帽索引在測試環境不存在 → readTurnoverRank 回 null → 不收斂、評估全部 fixture
+// （degrade to full，對齊書本 prefilterByL2 降級行為），讓缺口防護/新鮮度不變量照樣被驗。
+jest.mock('@/lib/scanner/TurnoverRank', () => ({
+  readTurnoverRank: jest.fn(async () => null),
+  computeTurnoverRankAsOfDate: jest.fn(async () => new Map()),
 }));
 
 // scanSanSe 必須在 mock 宣告之後 require（ts-jest commonjs）
