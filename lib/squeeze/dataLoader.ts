@@ -75,6 +75,8 @@ async function readCache<T extends { date: string }>(dir: string, code: string):
 }
 
 async function writeCache<T extends { date: string }>(dir: string, code: string, newRows: T[]): Promise<void> {
+  // Vercel 唯讀 FS：跳過本地 cache 寫回（資料仍由 live FinMind 抓，只是少了本地快取）
+  if (process.env.VERCEL) return;
   await fs.mkdir(dir, { recursive: true });
   const existing = await readCache<T>(dir, code);
   const map = new Map<string, T>();
@@ -189,25 +191,15 @@ interface FmPriceRow {
   close: number;
 }
 
-interface LocalCandleFile {
-  lastDate: string;
-  candles: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>;
-}
-
 /**
- * 讀本地 L1 K 棒 + 從 FinMind 補 Trading_money 算 VWAP；
+ * 讀 L1 K 棒 + 從 FinMind 補 Trading_money 算 VWAP；
  * FinMind 失敗則 fallback 用 (H+L+C)/3。
  */
 export async function getPriceSeries(code: string, startDate: string, endDate: string): Promise<PriceDay[]> {
-  // 1. 讀 local candles
-  const localPath = path.join(process.cwd(), 'data', 'candles', 'TW', `${code}.TW.json`);
-  let local: LocalCandleFile | null = null;
-  try {
-    local = JSON.parse(await fs.readFile(localPath, 'utf8')) as LocalCandleFile;
-  } catch {
-    local = null;
-  }
-  const inRange = (local?.candles ?? []).filter(c => c.date >= startDate && c.date <= endDate);
+  // 1. 讀 L1 K 棒：走 Blob-aware adapter（本地讀 data/candles/TW，Vercel 讀 Blob），不再 raw fs
+  const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
+  const file = await readCandleFile(`${code}.TW`, 'TW');
+  const inRange = (file?.candles ?? []).filter(c => c.date >= startDate && c.date <= endDate);
 
   // 2. 嘗試 FinMind 補 Trading_money
   const fm = await fmRange<FmPriceRow>('TaiwanStockPrice', code, startDate, endDate);

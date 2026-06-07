@@ -8,8 +8,6 @@
  *   5. 規則式產文字解讀
  */
 
-import path from 'path';
-import { promises as fs } from 'fs';
 import type { SqueezeAnalysis } from './types';
 import { getMarginSeries, getSblSeries, getPriceSeries } from './dataLoader';
 import { computeShortCosts } from './costEstimator';
@@ -28,9 +26,10 @@ function ymdDaysAgo(end: string, days: number): string {
 
 async function loadStockName(symbol: string): Promise<string> {
   try {
-    const p = path.join(process.cwd(), 'data', 'youtube', 'stock-master.json');
-    const d = JSON.parse(await fs.readFile(p, 'utf8')) as { entries: Array<{ code: string; name: string }> };
-    return d.entries.find(e => e.code === symbol)?.name ?? symbol;
+    // Blob-aware：本地讀檔、Vercel 讀 Blob（stock-master 已 dual-store 於 youtube/ prefix）
+    const { loadStockMaster } = await import('@/lib/youtube/stockMaster');
+    const master = await loadStockMaster();
+    return master.entries.find(e => e.code === symbol)?.name ?? symbol;
   } catch {
     return symbol;
   }
