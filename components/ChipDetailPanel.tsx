@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { toast } from 'sonner';
 import { DAY_TRADE_RATIO_HIGH, DAY_TRADE_RATIO_WARN } from '@/lib/analysis/bookThresholds';
+import type { CostBasisSummary } from '@/lib/chipcost/types';
 
 interface TrendInfo {
   direction: 'up' | 'down' | 'flat';
@@ -33,6 +34,8 @@ interface ChipInfo {
   lendingNet: number;
   largeHolderPct: number;
   largeHolderChange: number;
+  // v4 成本／壓力價摘要（外資/投信/自營/主力/融資/融券/券賣 成本 + 嘎空價 + 斷頭價）
+  costBasis?: CostBasisSummary;
   holder100Pct?: number;
   holder200Pct?: number;
   holder400Pct?: number;
@@ -184,6 +187,21 @@ function ChipTile({
   );
 }
 
+// ── 成本／壓力價摘要 ──────────────────────────────────────────────────────────
+const COST_CELLS = [
+  { key: 'foreignCost', label: '外資' },
+  { key: 'trustCost', label: '投信' },
+  { key: 'dealerCost', label: '自營' },
+  { key: 'brokerCost', label: '主力' },
+  { key: 'marginCost', label: '融資' },
+  { key: 'shortCost', label: '融券' },
+  { key: 'sblCost', label: '券賣' },
+] as const;
+
+function costNum(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : v.toFixed(1);
+}
+
 // ── Grade badge ─────────────────────────────────────────────────────────────
 const GRADE_CLS: Record<string, string> = {
   S: 'text-bull border-red-600',
@@ -320,6 +338,13 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
         </span>
       </div>
 
+      {/* ── 籌碼面一句結論（提到評分下方更醒目）── */}
+      {data.chipDetail && data.chipDetail !== '中性' && (
+        <div className="text-[11px] text-foreground/85 bg-secondary/40 rounded px-2.5 py-1.5 border border-border/30 leading-relaxed">
+          {data.chipDetail}
+        </div>
+      )}
+
       {/* ── 3-column grid ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
         {tiles.map(t => (
@@ -417,13 +442,6 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
         </div>
       )}
 
-      {/* ── Summary ── */}
-      {data.chipDetail && data.chipDetail !== '中性' && (
-        <div className="text-[9px] text-muted-foreground bg-secondary/40 rounded px-2 py-1.5 border border-border/30 leading-relaxed">
-          {data.chipDetail}
-        </div>
-      )}
-
       {/* ── Margin detail ── */}
       <div className="grid grid-cols-2 gap-1.5 text-[9px] text-muted-foreground">
         <div className="bg-secondary/40 rounded px-2 py-1 border border-border/30">
@@ -443,6 +461,50 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           </span>
         </div>
       </div>
+
+      {/* ── 成本／壓力價摘要（估算；外資/投信/自營/主力/融資/融券/券賣 + 嘎空價 + 斷頭價）── */}
+      {data.costBasis && (
+        <details className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30">
+          <summary className="cursor-pointer select-none flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground font-medium">💰 成本／壓力價（估算）</span>
+            {data.costBasis.marginLiquidationPrice != null && (
+              <span className="text-[10px] font-mono text-rose-300">
+                斷頭 {data.costBasis.marginLiquidationPrice.toFixed(1)}
+                {data.costBasis.distanceToLiquidationPct != null && (
+                  <span className="text-muted-foreground ml-1">
+                    ({data.costBasis.distanceToLiquidationPct < 0 ? '已破' : '距'}{Math.abs(data.costBasis.distanceToLiquidationPct).toFixed(1)}%)
+                  </span>
+                )}
+              </span>
+            )}
+          </summary>
+          <div className="grid grid-cols-4 gap-1 mt-2 text-[9px] font-mono">
+            {COST_CELLS.map(c => {
+              const brokerNone = c.key === 'brokerCost' && data.costBasis!.brokerCostMethod === 'none';
+              const brokerComposite = c.key === 'brokerCost' && data.costBasis!.brokerCostMethod === 'composite';
+              return (
+                <div key={c.key} className="bg-secondary/60 rounded px-1 py-1 text-center">
+                  <div className="text-muted-foreground/70 text-[8px]">{c.label}{brokerComposite && '*'}</div>
+                  <div className="text-foreground/90 font-bold">
+                    {brokerNone ? <span className="text-amber-400 text-[8px]">累積中</span> : costNum(data.costBasis![c.key])}
+                  </div>
+                </div>
+              );
+            })}
+            <div className="bg-rose-950/20 border border-rose-500/30 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">斷頭130%</div>
+              <div className="text-rose-200 font-bold">{costNum(data.costBasis.marginLiquidationPrice)}</div>
+            </div>
+            <div className="bg-fuchsia-950/20 border border-fuchsia-500/30 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">嘎空價</div>
+              <div className="text-fuchsia-200 font-bold">{costNum(data.costBasis.squeezePrice)}</div>
+            </div>
+          </div>
+          <div className="mt-1 text-[8px] text-muted-foreground/70 leading-relaxed">
+            成本皆為估算（淨增張數×當日均價加權）。融資維持率券商看「整戶」非個股，斷頭價僅供參考。{data.costBasis.brokerCostMethod === 'composite' && '＊主力=綜合估算（分點歷史累積中）。'}完整版見個股頁。
+          </div>
+        </details>
+      )}
     </div>
   );
 }

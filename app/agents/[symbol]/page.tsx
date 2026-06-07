@@ -23,6 +23,7 @@ import { DatePicker } from '@/components/ui/DatePicker';
 import { AgentChartSection } from './_components/AgentChartSection';
 import { TrustMomentumPanel } from './_components/TrustMomentumPanel';
 import { SqueezeDetail } from './_components/SqueezeDetail';
+import { CostBasisPanel } from './_components/CostBasisPanel';
 import { ValuationDetail } from './_components/ValuationDetail';
 import { StockGradeSummary } from '@/components/agents/StockGradeSummary';
 import { AgentScorePanel } from '@/components/agents/AgentScorePanel';
@@ -624,6 +625,7 @@ function AgentDetailPage() {
             <ValuationDetail answer={data?.fundamental ?? null} question={data?.fundamentalQuestion ?? null} />
           )}
           <SqueezeDetail symbol={symbol} date={date} />
+          <CostBasisPanel symbol={symbol} date={date} />
           {data?.risk && <RiskDetail answer={data.risk} />}
           {data?.bull && data?.bear && <DebateDetail bull={data.bull} bear={data.bear} />}
         </div>

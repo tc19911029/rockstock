@@ -94,6 +94,10 @@ export interface ChipData {
   topBuyers?: BrokerRankRow[];
   /** 前 15 大賣出券商 */
   topSellers?: BrokerRankRow[];
+
+  // v4 成本／壓力價精簡摘要（外資/投信/自營/主力/融資/融券/券賣 成本 + 嘎空價 + 斷頭價）
+  // 純顯示，不進 chipScore；完整版走 /api/cost-basis
+  costBasis?: CostBasisSummary;
 }
 
 // ── 計算籌碼面綜合評分 v2 ────────────────────────────────────────────────────
@@ -290,6 +294,8 @@ import { fetchTwseSblForStock, fetchTwseSblHistory } from '@/lib/datasource/Twse
 import { fetchTpexSblForStock, fetchTpexSblHistory } from '@/lib/datasource/TpexSblProvider';
 import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
 import { fetchTpexMarginForStock } from '@/lib/datasource/TpexMarginProvider';
+import { getCostBasisBundle, toCostBasisSummary } from '@/lib/chipcost/aggregate';
+import type { CostBasisSummary } from '@/lib/chipcost/types';
 
 // ── 投信動向（陳威良 3比8 法則的 proxy）────────────────────────────────────
 // FinMind 免費層無「絕對投信持股 %」資料源；先用「最近 30/60/90 天投信淨買 ÷ 已發行股數」
@@ -611,6 +617,14 @@ export async function GET(req: NextRequest) {
       topBuyers: brokerTrades?.buyerRankList,
       topSellers: brokerTrades?.sellerRankList,
     };
+
+    // v4 成本／壓力價摘要（best-effort；失敗不影響籌碼面板主體）
+    try {
+      const bundle = await getCostBasisBundle(rawSymbol, date);
+      data.costBasis = toCostBasisSummary(bundle);
+    } catch (err) {
+      console.warn('[/api/chip] costBasis 計算失敗:', err instanceof Error ? err.message : err);
+    }
 
     return apiOk(data);
   } catch (err) {

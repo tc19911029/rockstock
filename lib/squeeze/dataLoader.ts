@@ -199,13 +199,16 @@ interface LocalCandleFile {
  * FinMind 失敗則 fallback 用 (H+L+C)/3。
  */
 export async function getPriceSeries(code: string, startDate: string, endDate: string): Promise<PriceDay[]> {
-  // 1. 讀 local candles
-  const localPath = path.join(process.cwd(), 'data', 'candles', 'TW', `${code}.TW.json`);
+  // 1. 讀 local candles — 先試 .TW（上市），再試 .TWO（上櫃）
   let local: LocalCandleFile | null = null;
-  try {
-    local = JSON.parse(await fs.readFile(localPath, 'utf8')) as LocalCandleFile;
-  } catch {
-    local = null;
+  for (const suffix of ['TW', 'TWO'] as const) {
+    try {
+      const p = path.join(process.cwd(), 'data', 'candles', 'TW', `${code}.${suffix}.json`);
+      local = JSON.parse(await fs.readFile(p, 'utf8')) as LocalCandleFile;
+      break;
+    } catch {
+      local = null;
+    }
   }
   const inRange = (local?.candles ?? []).filter(c => c.date >= startDate && c.date <= endDate);
 

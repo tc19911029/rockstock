@@ -13,9 +13,17 @@
 
 import type { MarginDay, SblDay, PriceDay, ShortCostBuckets } from './types';
 
-interface Lot { date: string; lots: number }
+export interface Lot { date: string; lots: number }
 
-export function weightedShortCost(lots: Lot[], priceByDate: Map<string, number>): number | null {
+/**
+ * 加權平均成本（共用 primitive）：
+ *
+ *   cost = Σ(每日新增張數 × 當日VWAP) / Σ每日新增張數
+ *
+ * 只計正值日（「新建立」批次）；淨減少日不納入分母。無有效批次回 null。
+ * 融資 / 融券 / 借券 / 法人 / 主力 全部共用這一份數學（單一事實來源）。
+ */
+export function weightedCost(lots: Lot[], priceByDate: Map<string, number>): number | null {
   let num = 0;
   let den = 0;
   for (const l of lots) {
@@ -28,6 +36,9 @@ export function weightedShortCost(lots: Lot[], priceByDate: Map<string, number>)
   if (den === 0) return null;
   return +(num / den).toFixed(2);
 }
+
+/** @deprecated 改用 weightedCost；保留別名供既有 squeeze 測試與呼叫端維持綠燈 */
+export const weightedShortCost = weightedCost;
 
 function takeLastNTradingDays<T extends { date: string }>(rows: T[], n: number): T[] {
   return rows.slice(-n);
@@ -52,10 +63,10 @@ export function computeShortCosts(
     const mWin = takeLastNTradingDays(margin, n).map(r => ({ date: r.date, lots: r.shortNet }));
     const sWin = takeLastNTradingDays(sbl, n).map(r => ({ date: r.date, lots: r.lendingNet }));
     const key = `d${n}` as 'd5' | 'd10' | 'd20' | 'd60';
-    out.margin[key]   = weightedShortCost(mWin, priceMap);
-    out.sbl[key]      = weightedShortCost(sWin, priceMap);
+    out.margin[key]   = weightedCost(mWin, priceMap);
+    out.sbl[key]      = weightedCost(sWin, priceMap);
     // 綜合 = 兩個 lot 流合併
-    out.combined[key] = weightedShortCost([...mWin, ...sWin], priceMap);
+    out.combined[key] = weightedCost([...mWin, ...sWin], priceMap);
   }
 
   return out;

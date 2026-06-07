@@ -49,6 +49,14 @@ export interface TdccDay {
   holderCount?: number;
 }
 
+/** 單一股票 ‧ 單一交易日 ‧ 主力券商分點（Yahoo broker-trading top-15 聚合，單位：張） */
+export interface BrokerDay {
+  /** 前 15 大買超 − 前 15 大賣超（張，正=主力淨買）= totalDifferenceVolK */
+  netDifference: number;
+  /** 主力集中度（%，正值；方向看 netDifference 符號） */
+  concentration: number;
+}
+
 /** 一週全市場 TDCC 資料（週四晚公布上週五持股） */
 export interface TdccWeekFile {
   date: string;            // 資料基準日（週五），'YYYY-MM-DD'
