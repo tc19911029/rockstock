@@ -13,6 +13,32 @@ import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 
+// ── Route segment config（2026-06-08 冷啟動止血）─────────────────────────────
+// 走圖主資料路由：用 fs/Blob → 必須 Node runtime；force-dynamic 確保永遠讀即時資料、
+// 不被靜態快取；maxDuration 給冷啟動上限保護，避免慢冷啟動被 gateway 砍成 504。
+// 用 120（非 60）：現行 production 無 maxDuration 時冷啟動實測 ~65s 才回 200（方案上限 ≥64s），
+// 設 60 反而會把「慢但成功」變成 504 regression；120 是安全屋簷、又在 Pro/Fluid 上限內。
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
+
+// ── best-effort 外部呼叫總時間預算：逾時/失敗回 fallback，永不 reject ──────────
+// 用於「今日 K 棒注入」這種 nice-to-have 的即時報價鏈。冷啟動時 TWSE/EastMoney/Fugle/L2
+// 連線全冷會逐段累加卡死整個 /api/stock（曾見 ~65s 冷啟動）→ 逾時就放棄今日那根、直接
+// 回封存日K（圖照樣秒開，最多少今天那根即時 bar）。
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; resolve(fallback); }
+    }, ms);
+    p.then(
+      (v) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } },
+      () => { if (!settled) { settled = true; clearTimeout(timer); resolve(fallback); } },
+    );
+  });
+}
+
 // ── 週K/月K 聚合結果快取（避免重複聚合 + computeIndicators） ──
 const aggregateCache = new Map<string, { data: unknown; expires: number }>();
 const AGGREGATE_CACHE_TTL = 5 * 60 * 1000; // 5 分鐘
@@ -140,10 +166,18 @@ export async function GET(req: NextRequest) {
         const lastIsToday = !!lastCandle && lastCandle.date === today;
         if (shouldInjectToday && lastCandle && (lastCandle.date < today || lastIsToday)) {
           let todayQuote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
+          // 冷啟動止血（2026-06-08）：今日即時報價整條外部 fallback 鏈設總時間預算，
+          // 逾時放棄今日 bar、直接回封存日K（圖秒開）。避免冷啟動連線全冷時逐段累加卡死。
+          const INJECT_BUDGET_MS = Number(process.env.STOCK_INJECT_BUDGET_MS) || 3500;
+          const injectDeadline = Date.now() + INJECT_BUDGET_MS;
           try {
             if (isTW) {
               const twCode = pureCode;
-              const q = await getTWSESingleIntraday(twCode) ?? await getTWSEQuote(twCode);
+              const q = await withTimeout(
+                (async () => (await getTWSESingleIntraday(twCode)) ?? (await getTWSEQuote(twCode)))(),
+                INJECT_BUDGET_MS,
+                null,
+              );
               if (q && q.close > 0 && (!q.date || q.date === today)) {
                 todayQuote = q;
               } else if (q) {
@@ -152,7 +186,7 @@ export async function GET(req: NextRequest) {
             } else if (isCN && !isCnIndex) {
               // 指數不走 EastMoney 個股報價（會誤回平安銀行）→ 落到下方 L2 fallback 取指數即時值
               const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-              const q = await getEastMoneySingleQuote(pureCode, cnSuffix);
+              const q = await withTimeout(getEastMoneySingleQuote(pureCode, cnSuffix), INJECT_BUDGET_MS, null);
               if (q && q.close > 0) {
                 todayQuote = q;
               } else if (q) {
@@ -164,9 +198,9 @@ export async function GET(req: NextRequest) {
           }
 
           // fallback 2: Fugle 即時報價（分鐘K已驗證可用，比 mis.twse 穩定）
-          if (!todayQuote && isTW && isFugleAvailable()) {
+          if (!todayQuote && isTW && isFugleAvailable() && Date.now() < injectDeadline) {
             try {
-              const fq = await getFugleQuote(pureCode);
+              const fq = await withTimeout(getFugleQuote(pureCode), Math.max(500, injectDeadline - Date.now()), null);
               if (fq && fq.close > 0 && (!fq.date || fq.date === today)) {
                 todayQuote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
               }
@@ -176,9 +210,9 @@ export async function GET(req: NextRequest) {
           }
 
           // fallback 3: 從 L2 全市場快照中找該股報價
-          if (!todayQuote) {
+          if (!todayQuote && Date.now() < injectDeadline) {
             try {
-              const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
+              const snapshot = await withTimeout(readIntradaySnapshot(market as 'TW' | 'CN', today), Math.max(500, injectDeadline - Date.now()), null);
               if (snapshot) {
                 const sq = snapshot.quotes.find(q => q.symbol === l2LookupSymbol);
                 if (sq && sq.close > 0) {
