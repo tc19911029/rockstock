@@ -23,6 +23,7 @@ import { promises as fs } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { ytdlpProxyArgs } from './ytdlp';
 
 const DEFAULT_YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 const DEFAULT_PYTHON = process.env.PYTHON_BIN || 'python3';
@@ -162,6 +163,7 @@ async function transcribeViaWhisperUnsafe(opts: WhisperOptions): Promise<Whisper
       '-x', '--audio-format', 'm4a',
       '--audio-quality', '5',         // 0-10, 5 是中間值，足夠 ASR
       '--no-warnings', '--ignore-config',
+      ...ytdlpProxyArgs(),
       '-o', audioPath,
       opts.videoUrl,
     ];

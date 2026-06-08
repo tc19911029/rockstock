@@ -34,6 +34,22 @@ type Runner = (cmd: string, args: string[]) => ChildProcess;
 const DEFAULT_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 const DEFAULT_TIMEOUT_MS = 90_000;
 
+/**
+ * 強制 yt-dlp 直連，不走 proxy。
+ *
+ * 為什麼：yt-dlp（Python）在 macOS 會直接讀「系統網路 proxy 設定」，連 env 都繞不掉。
+ * 本機 ClashX Pro 把系統 proxy 設成 127.0.0.1:7890，一旦 ClashX 關掉 / 重啟，所有
+ * yt-dlp 抓取就卡死在連不到的 proxy → 整批 timeout，health 頁狂噴
+ * `HTTPSConnection(host='127.0.0.1', port=7890): Failed to establish a new connection`。
+ * 台灣直連 YouTube 不需要任何 proxy，所以一律 `--proxy ''`（空字串＝直連），
+ * 讓抓取完全不受 Clash 開關影響。
+ *
+ * 逃生口：真的需要走 proxy（例如人在 YouTube 被擋的地區）才設 `YTDLP_PROXY` env 覆寫。
+ */
+export function ytdlpProxyArgs(): string[] {
+  return ['--proxy', process.env.YTDLP_PROXY ?? ''];
+}
+
 export interface FetchOptions {
   limit?: number;
   runner?: Runner;
@@ -75,6 +91,7 @@ export async function fetchRecentVideos(
     '--playlist-end', String(limit),
     '--no-warnings',
     '--ignore-config',
+    ...ytdlpProxyArgs(),
     sourceUrl,
   ];
 
