@@ -18,6 +18,7 @@ import type {
   YouTubeSourceHealth,
   YouTubeVideo,
 } from '@/lib/youtube/types';
+import { YoutubeProgramStocks } from '@/components/youtube/YoutubeProgramStocks';
 
 type LightLevel = 'green' | 'yellow' | 'red' | 'gray';
 type FetchStatus = 'fetched' | 'no_new' | 'failed' | 'pending' | 'stale';
@@ -216,6 +217,9 @@ export function YoutubeTab() {
           })}
         </div>
       )}
+
+      {/* 各節目談了哪些股票（以節目為主軸，反轉 /api/youtube/performance）*/}
+      <YoutubeProgramStocks date={date} />
 
       {/* 影片表 */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
