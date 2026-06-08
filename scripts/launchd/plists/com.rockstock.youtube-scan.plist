@@ -9,15 +9,19 @@
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <!-- yt-dlp 在 ~/.local/bin，但 launchd PATH 不含；明確 export 一次 -->
-    <string>export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; D=$(TZ=Asia/Taipei date +%F); /usr/bin/curl -fsS --max-time 280 -H "Authorization: Bearer CRON_SECRET" -X POST "http://localhost:3000/api/cron/youtube-scan?date=$D"</string>
+    <!-- yt-dlp 在 ~/.local/bin，但 launchd PATH 不含；明確 export 一次。
+         分 4 批串接跑：~17 來源 full-metadata 全掃 ~850s 會超過 curl 280s 與 route
+         maxDuration=300；用 batch/of=4 參數每批 ~4-5 來源 ~200s 內完成。順序執行(不並發)
+         才不會競寫共享 video-index、videos、scan-logs 等 JSON。 -->
+    <string>export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; D=$(TZ=Asia/Taipei date +%F); for i in 0 1 2 3; do /usr/bin/curl -fsS --max-time 280 -H "Authorization: Bearer CRON_SECRET" -X POST "http://localhost:3000/api/cron/youtube-scan?date=$D&amp;force=1&amp;batch=$i&amp;of=4"; done</string>
   </array>
 
   <!--
-    排程：每小時 14:00-23:00 CST 跑一次（共 10 次/day）。
-    任何新影片在 1 小時內抓到 → transcript → prepare-analysis；
-    多數小時 no-op（沒新影片 scan 抓 0 new、transcript 跳過 already-done）。
-    早班節目（蔡萬得 04:00、金臨天下 05:00、達人秀早班 07:30）在 14:00 首輪抓到。
+    排程：每小時 14:00-01:00 CST 跑一次(共 12 次/day,2026-05-25 加 00/01 兩場 + force=1)。
+    任何新影片在 1 小時內抓到 → transcript → prepare-analysis;
+    URL 加 force=1 確保每小時都重新 scan,不被 source cache 跳過(memory: 之前漏抓晚上影片 root cause)。
+    晚場節目(理財達人秀 21:00、錢線百分百下集 23:30、股市同學會 18:46)現在會被 cover。
+    早班節目(蔡萬得 04:00、金臨天下 05:00、達人秀早班 07:30)在 14:00 首輪抓到。
   -->
   <key>StartCalendarInterval</key>
   <array>
@@ -31,6 +35,8 @@
     <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
     <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>0</integer></dict>
     <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>1</integer><key>Minute</key><integer>0</integer></dict>
   </array>
 
   <key>StandardOutPath</key>

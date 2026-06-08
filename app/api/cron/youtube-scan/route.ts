@@ -73,6 +73,24 @@ async function handle(req: NextRequest) {
     }
   }
 
+  // 軌道分批：?batch=i&of=n 把 active 來源切成 n 批、只掃第 i 批（i ∈ [0,n)）。
+  // 為什麼：~17 來源 full-metadata 全掃 ~850s，遠超 curl --max-time 280 與本 route
+  // maxDuration=300。用穩定取模切片（i % of），每批 ~4-5 來源 ~200s 內跑完。
+  // plist 串接 0..n-1 批（順序執行、不並發 → 不會競寫共享的 video-index / videos /
+  // scan-logs JSON）。health 重算在下方仍 loadSources() 讀全部來源，切片不影響聚合。
+  const batchParam = url.searchParams.get('batch');
+  const ofParam = url.searchParams.get('of');
+  if (batchParam != null || ofParam != null) {
+    const of = Number(ofParam);
+    const batch = Number(batchParam);
+    if (!Number.isInteger(of) || of < 1 || !Number.isInteger(batch) || batch < 0 || batch >= of) {
+      return apiError('batch/of invalid: need integers with 0 <= batch < of and of >= 1', 400);
+    }
+    const activeIds = sources.filter(s => s.active).map(s => s.source_id);
+    const pick = new Set(activeIds.filter((_, i) => i % of === batch));
+    sources = sources.filter(s => pick.has(s.source_id));
+  }
+
   // 拿前一天的 log 算 consecutive_empty_days 起算值
   const recentLogs = await loadRecentScanLogs(scanDate, 14);
   const prevEmptyMap = computePrevEmptyDays(scanDate, recentLogs);
