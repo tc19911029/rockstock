@@ -7,11 +7,14 @@
 //   - 主力組用「階段」表達強度：點火🔥(紫剛翻正) → 發展📈(三色齊揚) → 滿分⭐(三色強+控盤+牛熊線+剛啟動)。
 //   - 賣出條件 signal 命中 → 進 sellWarnings（高亮警示，不剔除）。
 //
-// 公式與 indicators.ts（畫圖）一致，否則表格條件會跟走圖對不上。掃描與走圖都從這裡讀。
+// 雙B / XYS 公式共用 ./dualB（與走圖同源），分數共用 computeSanSe；皆吃 p: SanSeParams。
+// 不帶 p ⇒ 預設 PRODUCTION_PARAMS ⇒ 與重構前 byte-identical（sanse-params-frozen 釘死）。
 // ============================================================
 
-import { REF, MA, EMA, HHV, CROSS, BARSLAST, gt, sub, div, mul, add, isNum } from './tdx';
+import { MA, BARSLAST, gt, isNum } from './tdx';
 import { computeSanSe, evalLatest, type SanSeSeries } from './selectors';
+import { computeDualB, computeXys, computeCatchVolSurge } from './dualB';
+import { PRODUCTION_PARAMS, type SanSeParams } from './params';
 import type { Candle } from '@/types';
 
 export type CondGroup = 'doubleB' | 'mainforce' | 'catch';
@@ -66,13 +69,6 @@ export interface ConditionReport {
   combo?: ComboGuide;             // 使用順序評級（衍生；舊固化紀錄可能無此欄 → optional）
 }
 
-// ZB4 線性加權（與 indicators.ts 同）
-const ZB4_WEIGHTS = (() => {
-  const w = new Array(21).fill(0);
-  for (let lag = 0; lag <= 18; lag++) w[lag] = 20 - lag;
-  w[20] = 1;
-  return w;
-})();
 const r2 = (x: number): number => (isNum(x) ? Math.round(x * 100) / 100 : 0);
 const sig = (id: string, label: string, met: boolean): Cond => ({ id, label, met, kind: 'signal' });
 const st = (id: string, label: string, met: boolean): Cond => ({ id, label, met, kind: 'state' });
@@ -85,47 +81,41 @@ function mkGroup(buy: Cond[], sell: Cond[]): GroupReport {
   };
 }
 
-export function evalConditions(candles: Candle[], indexClose?: number[], series?: SanSeSeries): ConditionReport {
+export function evalConditions(
+  candles: Candle[],
+  indexClose?: number[],
+  series?: SanSeSeries,
+  limitPct: number = 0.10,
+  p: SanSeParams = PRODUCTION_PARAMS,
+): ConditionReport {
   const n = candles.length;
   const i = n - 1;
-  const O = candles.map((c) => c.open);
   const H = candles.map((c) => c.high);
-  const L = candles.map((c) => c.low);
   const C = candles.map((c) => c.close);
 
-  // ── 🟦 雙B戰法 ──
-  const ZB = candles.map((c) => (c.close + c.high + c.open + c.low) / 4);
-  const zhineng = mul(HHV(ZB, 13), 0.95);
-  const ZB3 = candles.map((c) => (3 * c.close + c.open + c.low + c.high) / 6);
-  const zb4 = new Array(n).fill(NaN);
-  for (let k = 20; k < n; k++) {
-    let s = 0;
-    for (let lag = 0; lag <= 20; lag++) s += ZB4_WEIGHTS[lag] * ZB3[k - lag];
-    zb4[k] = s / 210;
-  }
-  const zb5 = MA(zb4, 6);
-  const ma60 = MA(C, 60); // 60日多空線
-  const goldArr = CROSS(zb4, zb5);   // 黃紅金叉
-  const breakArr = CROSS(C, zhineng); // 突破智能交易線
-  const deadArr = CROSS(zb5, zb4);   // 黃紅死叉
-  const breakDnArr = CROSS(zhineng, C); // 跌破智能交易線
+  // ── 🟦 雙B戰法（共用 ./dualB）──
+  const db = computeDualB(candles, p);
+  const { zb4, zb5, ma60 } = db;
   // 兩套箭頭雙重共振（同根）：買=均線金叉 且 交易線突破同日；賣=死叉 且 跌破同日（書本：雙重共振提高勝率）
-  const dualBuyResonance = !!(goldArr[i] && breakArr[i]);
-  const dualSellResonance = !!(deadArr[i] && breakDnArr[i]);
+  const dualBuyResonance = !!(db.goldCross[i] && db.breakUp[i]);
+  const dualSellResonance = !!(db.deadCross[i] && db.breakDn[i]);
   const aboveMa60 = isNum(ma60[i]) && C[i] > ma60[i];
   const belowMa60 = isNum(ma60[i]) && C[i] < ma60[i];
   // 黃紅雙線向上（雙線都上彎＝持有）
   const dualUp = i > 0 && isNum(zb4[i]) && isNum(zb4[i - 1]) && isNum(zb5[i]) && isNum(zb5[i - 1]) && zb4[i] > zb4[i - 1] && zb5[i] > zb5[i - 1];
-  // K線變色（漲停洋紅 / 大漲黃 / 大跌長黑）— 與 indicators.ts 配色一致；創業板/科創已在 universe 排除，主板漲停=10%
+  // K線變色（漲停洋紅 / 大漲黃 / 大跌長黑）— 與 indicators.ts 配色一致。
+  // 漲停門檻＝幅度 −0.5%（主板 10%→9.5%、創業板/科創 20%→19.5%）；掃描宇宙排除創業板/科創，
+  // 走圖可看任何股 → limitPct 由 caller 依代號傳入（getLimitMovePct），預設 10%（主板/台股）。
   const prevC = i > 0 ? C[i - 1] : NaN;
   const chg = isNum(prevC) && prevC > 0 ? (C[i] - prevC) / prevC : NaN;
-  const limitUp = isNum(chg) && chg > 0.095 && C[i] === H[i];
-  const bigUp = isNum(chg) && chg > 0.07 && chg <= 0.095;
+  const limitThr = limitPct - 0.005;
+  const limitUp = isNum(chg) && chg > limitThr && C[i] === H[i];
+  const bigUp = isNum(chg) && chg > 0.07 && chg <= limitThr;
   const bigDown = isNum(chg) && chg < -0.07;
   const doubleB = mkGroup(
     [
-      sig('b_gold', '黃紅金叉', !!goldArr[i]),
-      sig('b_break', '突破智能交易線', !!breakArr[i]),
+      sig('b_gold', '黃紅金叉', !!db.goldCross[i]),
+      sig('b_break', '突破智能交易線', !!db.breakUp[i]),
       sig('b_resonance', '雙箭頭共振(金叉+突破同日)', dualBuyResonance),
       st('b_dualup', '黃紅雙線向上', dualUp),
       st('b_above', '站上多空線', aboveMa60),
@@ -133,29 +123,24 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
       st('b_bigup', '大漲', bigUp),
     ],
     [
-      sig('b_dead', '黃紅死叉', !!deadArr[i]),
-      sig('b_breakdn', '跌破智能交易線', !!breakDnArr[i]),
+      sig('b_dead', '黃紅死叉', !!db.deadCross[i]),
+      sig('b_breakdn', '跌破智能交易線', !!db.breakDn[i]),
       sig('b_sresonance', '雙箭頭共振(死叉+跌破同日)', dualSellResonance),
       st('b_below', '跌破多空線', belowMa60),
       st('b_bigdown', '大跌長黑', bigDown),
     ],
   );
 
-  // ── 🟩 捕撈季節（XYS 動能）──
-  const X1 = div(add(add(mul(C, 2), H), L), 3);
-  const X4 = EMA(EMA(EMA(X1, 3), 3), 3);
-  const XYS0 = mul(div(sub(X4, REF(X4, 1)), REF(X4, 1)), 100);
-  const XYS1 = XYS0;
-  const XYS2 = MA(XYS0, 2);
-  const goldX = CROSS(XYS1, XYS2)[i]; // 快慢動能線金叉
-  const deadX = CROSS(XYS2, XYS1)[i]; // 快慢動能線死叉
+  // ── 🟩 捕撈季節（XYS 動能，共用 ./dualB）──
+  const xys = computeXys(candles, p);
+  const XYS1 = xys.xys1;
+  const goldX = xys.goldCross[i]; // 快慢動能線金叉
+  const deadX = xys.deadCross[i]; // 快慢動能線死叉
   const xysAbove0 = isNum(XYS1[i]) && XYS1[i] > 0; // 0軸上＝安全做多區
   const xysBelow0 = isNum(XYS1[i]) && XYS1[i] < 0; // 0軸下＝風險區
   // 量價強勢 proxy：金叉當日爆量（今日量 > 5日均量 1.5 倍）。走圖的換手率 4 級色柱全市場掃描抓不到，
   // 用掃描有的 candle volume 近似「金叉配爆量＝量價齊揚」。非走圖色柱本尊，數值會有出入。
-  const V = candles.map((c) => c.volume);
-  const volMa5 = MA(V, 5);
-  const volSurge = isNum(volMa5[i]) && volMa5[i] > 0 && V[i] > volMa5[i] * 1.5;
+  const volSurge = computeCatchVolSurge(candles, p)[i];
   const catchG = mkGroup(
     [
       sig('c_gold', '動能金叉', !!goldX),
@@ -173,7 +158,7 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
   );
 
   // ── 🟪 主力狀態F（三色資金分數 + 階段）──
-  const s = series ?? (indexClose ? computeSanSe(candles, indexClose) : undefined);
+  const s = series ?? (indexClose ? computeSanSe(candles, indexClose, NaN, p) : undefined);
   const sa = s ? r2(s.shortAttack[i]) : 0;
   const ms = s ? r2(s.midStrength[i]) : 0;
   const mc = s ? r2(s.midControl[i]) : 0;
@@ -259,11 +244,25 @@ export function evalConditions(candles: Candle[], indexClose?: number[], series?
 }
 
 export type TradeVerdict = 'buy' | 'sell' | 'conflict' | 'wait' | 'skip';
+
 /**
- * 一眼結論：該買 / 該賣 / 衝突 / 觀望 / 不建議。給訊號面板＋條件面板共用，
- * 讓使用者看一眼就知道動作，不必自己拼湊各指標。衍生自 combo 評級 + 賣出警示。
+ * 底反該買 = 該買(combo grade top/prime) 且 捕撈 0 軸下空頭區金叉(底部反彈) 且 無出場事件。
+ * 回測推導（scripts/optimize-sanse-grade.ts，train 挑/OOS 驗）：這是兩市場 OOS 唯一守得住的「收緊」——
+ * 台股把該買集 d5 勝率 lift 從 +7pp 拉到 +15pp（bull+14/chop+16）、陸股從 −2pp 拉到 +1pp（bear +9pp）。
+ * 純衍生自既有 combo.bottomReversal，不另算指標、不進選股集合（只升「該買裡的最高把握」優先）。
  */
-export function tradeVerdict(r: ConditionReport): { tone: TradeVerdict; reason: string } {
+export function isReversalBuy(r: ConditionReport): boolean {
+  const g = r.combo?.grade;
+  if ((g !== 'top' && g !== 'prime') || !r.combo?.bottomReversal) return false;
+  return ![...r.doubleB.sell, ...r.catch.sell].some((c) => c.kind === 'signal' && c.met);
+}
+
+/**
+ * 一眼結論：該買 / 該賣 / 衝突 / 觀望 / 不建議。給訊號面板＋條件面板＋通知共用，
+ * 讓使用者看一眼就知道動作，不必自己拼湊各指標。衍生自 combo 評級 + 賣出警示。
+ * reversal=true ⇒ 該買裡的最高把握「底反該買」（見 isReversalBuy）。
+ */
+export function tradeVerdict(r: ConditionReport): { tone: TradeVerdict; reason: string; reversal: boolean } {
   const g = r.combo?.grade;
   const buyable = g === 'top' || g === 'prime';                 // 紅在場 ＋ 金叉觸發
   // 出場「事件」＝ 雙B死叉/跌破智能線/捕撈死叉（不含 m_weak 紅<0 這種「持續狀態」，否則沒在漲的股都會被標該賣）
@@ -271,12 +270,19 @@ export function tradeVerdict(r: ConditionReport): { tone: TradeVerdict; reason: 
   const exitEvent = exitConds.length > 0;
   const exitLabels = exitConds.map((c) => c.label).join('、');
   if (buyable) {
-    if (exitEvent) return { tone: 'conflict', reason: `有買也有賣（${exitLabels}）→ 謹慎、別追` };
-    return { tone: 'buy', reason: g === 'top' ? '三組齊發(共振3/3)＝最高把握' : '紅(機構)在場 ＋ 金叉觸發' };
+    if (exitEvent) return { tone: 'conflict', reason: `有買也有賣（${exitLabels}）→ 謹慎、別追`, reversal: false };
+    const reversal = isReversalBuy(r);
+    return {
+      tone: 'buy',
+      reason: reversal
+        ? `${g === 'top' ? '三組齊發' : '紅(機構)在場'} ＋ 捕撈0軸下底部反彈金叉（回測兩市場 OOS 最高把握）`
+        : (g === 'top' ? '三組齊發(共振3/3)＝最高把握' : '紅(機構)在場 ＋ 金叉觸發'),
+      reversal,
+    };
   }
   if (r.combo?.redGate) {                                        // 紅在場但今天不是買進設定（紅+黃中線 / 紅待觸發）
-    if (exitEvent) return { tone: 'sell', reason: `出現賣出訊號（${exitLabels}）` };
-    return { tone: 'wait', reason: '紅(機構)在場、今天還沒金叉觸發 → 等' };
+    if (exitEvent) return { tone: 'sell', reason: `出現賣出訊號（${exitLabels}）`, reversal: false };
+    return { tone: 'wait', reason: '紅(機構)在場、今天還沒金叉觸發 → 等', reversal: false };
   }
-  return { tone: 'skip', reason: '沒有紅(機構)、回測勝率最低 → 不建議' };       // 無紅（含紅<0/機構撤）一律不建議
+  return { tone: 'skip', reason: '沒有紅(機構)、回測勝率最低 → 不建議', reversal: false };       // 無紅（含紅<0/機構撤）一律不建議
 }

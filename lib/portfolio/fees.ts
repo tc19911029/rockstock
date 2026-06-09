@@ -1,4 +1,4 @@
-import { classifyMarket } from '@/lib/market/classify';
+import { classifyMarket, isFundSymbol } from '@/lib/market/classify';
 
 // 交易成本（買進+賣出），用券商 app 3661 反推驗證過
 // TW: 手續費 0.1425% × 2 + 證交稅 0.3%
@@ -15,6 +15,13 @@ export function marketOf(symbol: string): 'TW' | 'CN' {
 /** 淨損益：含買賣手續費+交易稅扣除，與券商 app 顯示口徑一致 */
 export function calcNetPnL(symbol: string, shares: number, costPrice: number, currentPrice: number) {
   if (currentPrice <= 0) return { pnl: 0, pnlPct: 0 };
+  // 場外基金（C 類持有滿期免贖回費）以「單位淨值 × 份額」計未實現損益、不扣股票交易稅費，
+  // 與銀行／券商 App 顯示的「持倉收益（未實現、毛額）」口徑一致。
+  if (isFundSymbol(symbol)) {
+    const costTotal = shares * costPrice;
+    const pnl = shares * currentPrice - costTotal;
+    return { pnl, pnlPct: costTotal > 0 ? (pnl / costTotal) * 100 : 0 };
+  }
   const rates = FEE_RATES[marketOf(symbol)];
   const costTotal = shares * costPrice;
   const marketTotal = shares * currentPrice;

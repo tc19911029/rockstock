@@ -272,6 +272,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                     ['strict', '三色(嚴格)', '三色資金共振：短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位'],
                     ['medium', '三色(中等)', '更新版：短攻/中強/中控 三分數都 > 0'],
                     ['loose', '三色(寬鬆)', '游資資金翻正：短線動能今天剛由負轉正'],
+                    ['reversal', '🔥三色(底反)', '底反該買 = 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握（台股該買勝率 +7→+15pp、陸股空頭段 +9pp）'],
                   ] as const).map(([lv, label, tip]) => (
                     <button key={lv}
                       onClick={() => setCnSanSeLevel(lv)}

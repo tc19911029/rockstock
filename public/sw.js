@@ -1,5 +1,5 @@
 // RockStock Service Worker — runtime caching only
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const RUNTIME_CACHE = `rockstock-runtime-${CACHE_VERSION}`;
 
 // Cache duration by category (milliseconds)
@@ -40,7 +40,7 @@ self.addEventListener("install", (_event) => {
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (_event) => {
+self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(

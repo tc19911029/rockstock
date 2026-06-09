@@ -43,6 +43,15 @@ interface ChipInfo {
   holder600To800Pct?: number;
   holder800To1000Pct?: number;
   structureBuilding?: boolean;
+  holderTierChange?: {
+    h100: number | null; h200: number | null; h400: number | null; h1000: number | null;
+    h400To600: number | null; h600To800: number | null; h800To1000: number | null;
+  };
+  holderTierTrend?: {
+    h100?: TrendInfo; h200?: TrendInfo; h400?: TrendInfo; h1000?: TrendInfo;
+  };
+  tdccDate?: string;
+  tdccPrevDate?: string;
   chipScore: number;
   chipGrade: string;
   chipSignal: string;
@@ -83,6 +92,32 @@ function getPctSignal(v: number) {
   if (v <= -1)  return { label: '大減', cls: 'text-bear' };
   if (v <= -0.2) return { label: '小賣', cls: 'text-bear-light' };
   return { label: '中立', cls: 'text-yellow-400' };
+}
+
+// ── 集保大戶分層：tier「跟前一週比」週變化（▲/▼ delta，台股慣例增=紅/減=綠）+ 連續週趨勢（連 N 增/減）──
+function TierChange({ delta, trend }: { delta?: number | null; trend?: TrendInfo }) {
+  return (
+    <div className="leading-tight">
+      {delta == null ? (
+        <div className="text-[7px] text-muted-foreground/40">—</div>
+      ) : Math.abs(delta) < 0.005 ? (
+        <div className="text-[7px] text-yellow-400/70">±0</div>
+      ) : (
+        <div className={`text-[7px] font-mono ${delta > 0 ? 'text-bull' : 'text-bear'}`}>
+          {delta > 0 ? '▲+' : '▼'}{delta.toFixed(2)}
+        </div>
+      )}
+      {trend && trend.direction !== 'flat' && trend.label && (
+        <div className={`text-[7px] leading-tight ${
+          trend.direction === 'up'
+            ? (trend.reversal ? 'text-bull' : 'text-bull-light')
+            : (trend.reversal ? 'text-bear' : 'text-bear-light')
+        }`}>
+          {trend.label}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Gauge bar ───────────────────────────────────────────────────────────────
@@ -407,7 +442,12 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       {(data.holder100Pct != null || data.holder400Pct != null) && (
         <div className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30 space-y-1">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground font-medium">集保大戶分層</span>
+            <span className="text-[10px] text-muted-foreground font-medium">
+              集保大戶分層
+              {data.tdccPrevDate && (
+                <span className="text-[8px] text-muted-foreground/60 ml-1">資料 {data.tdccDate?.slice(5)}｜週變化 vs {data.tdccPrevDate.slice(5)}</span>
+              )}
+            </span>
             {data.structureBuilding && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 border border-red-700/50">
                 ✨ 主力卡位
@@ -418,25 +458,38 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
             <div className="bg-secondary/60 rounded px-1 py-1 text-center">
               <div className="text-muted-foreground/70 text-[8px]">100張↑</div>
               <div className="text-foreground/90 font-bold">{data.holder100Pct?.toFixed(1) ?? '—'}%</div>
+              <TierChange delta={data.holderTierChange?.h100} trend={data.holderTierTrend?.h100} />
             </div>
             <div className="bg-secondary/60 rounded px-1 py-1 text-center">
               <div className="text-muted-foreground/70 text-[8px]">200張↑</div>
               <div className="text-foreground/90 font-bold">{data.holder200Pct?.toFixed(1) ?? '—'}%</div>
+              <TierChange delta={data.holderTierChange?.h200} trend={data.holderTierTrend?.h200} />
             </div>
             <div className="bg-secondary/60 rounded px-1 py-1 text-center">
               <div className="text-muted-foreground/70 text-[8px]">400張↑</div>
               <div className="text-foreground/90 font-bold">{data.holder400Pct?.toFixed(1) ?? '—'}%</div>
+              <TierChange delta={data.holderTierChange?.h400} trend={data.holderTierTrend?.h400} />
             </div>
             <div className="bg-secondary/60 rounded px-1 py-1 text-center">
               <div className="text-muted-foreground/70 text-[8px]">1000張↑</div>
               <div className="text-foreground/90 font-bold">{data.largeHolderPct.toFixed(1)}%</div>
+              <TierChange delta={data.holderTierChange?.h1000} trend={data.holderTierTrend?.h1000} />
             </div>
           </div>
           {data.structureBuilding && (
             <div className="grid grid-cols-3 gap-1 text-[8px] font-mono text-muted-foreground/80">
-              <div className="text-center">400-600: {data.holder400To600Pct?.toFixed(2)}%</div>
-              <div className="text-center">600-800: {data.holder600To800Pct?.toFixed(2)}%</div>
-              <div className="text-center">800-1000: {data.holder800To1000Pct?.toFixed(2)}%</div>
+              <div className="text-center">
+                <div>400-600: {data.holder400To600Pct?.toFixed(2)}%</div>
+                <TierChange delta={data.holderTierChange?.h400To600} />
+              </div>
+              <div className="text-center">
+                <div>600-800: {data.holder600To800Pct?.toFixed(2)}%</div>
+                <TierChange delta={data.holderTierChange?.h600To800} />
+              </div>
+              <div className="text-center">
+                <div>800-1000: {data.holder800To1000Pct?.toFixed(2)}%</div>
+                <TierChange delta={data.holderTierChange?.h800To1000} />
+              </div>
             </div>
           )}
         </div>

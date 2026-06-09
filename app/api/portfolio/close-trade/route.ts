@@ -23,6 +23,7 @@ import {
   type TradeExitReason,
 } from '@/lib/portfolio/tradeRecorder';
 import { loadHoldings, saveHoldings } from '@/lib/agents/portfolio/storage';
+import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { classifyMarket } from '@/lib/market/classify';
 
 export const runtime = 'nodejs';
@@ -51,10 +52,11 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
   const input = parsed.data;
   const exitDate = input.exitDate ?? todayCstDate();
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
 
   // 1. 找 holding（依 symbol 後綴推市場，CN → holdings-cn.json）
   const market = classifyMarket(input.symbol) === 'CN' ? 'CN' : 'TW';
-  const file = await loadHoldings(market);
+  const file = await loadHoldings(market, profileId);
   const idx = file.holdings.findIndex(h => h.symbol === input.symbol && h.status === 'open');
   if (idx < 0) return apiError(`open holding ${input.symbol} 不存在`, 404);
   const holding = file.holdings[idx];
@@ -79,7 +81,7 @@ export async function POST(req: NextRequest) {
       exitReason: input.exitReason as TradeExitReason,
       exitNote: input.exitNote,
       notes: input.notes,
-    });
+    }, profileId);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return apiError(`appendTrade 失敗：${msg}`, 422);
@@ -87,7 +89,7 @@ export async function POST(req: NextRequest) {
 
   // 3. 從 holdings 移除
   file.holdings.splice(idx, 1);
-  await saveHoldings(file, market);
+  await saveHoldings(file, market, profileId);
 
   return apiOk({ trade });
 }

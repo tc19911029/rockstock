@@ -6,7 +6,7 @@ import * as path from 'path';
 import type { Candle } from '@/types';
 import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { computeSanSe, evalLatest, type SanSeLevel } from './selectors';
-import { evalConditions, type ConditionReport } from './conditions';
+import { evalConditions, isReversalBuy, type ConditionReport } from './conditions';
 
 // 相對強弱(RS)基準 = 個股所屬市場指數（對齊 TDX INDEXC）：滬市(.SS)→上證綜指、深市(.SZ)→深證成指。
 const INDEX_SYMBOL = '000001.SS';     // 上證綜指（滬市 + 行情日曆來源）
@@ -266,8 +266,11 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
   (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) =>
     results[lv].sort((a, b) => b.shortAttack - a.shortAttack),
   );
-  // 共振紀錄排序：共振組數高→短線上攻強
-  keptRecords.sort((a, b) => b.report.groupBuyCount - a.report.groupBuyCount || b.report.scores.shortAttack - a.report.scores.shortAttack);
+  // 共振紀錄排序：底反該買(回測兩市場最高把握)最前 → 共振組數高 → 短線上攻強
+  keptRecords.sort((a, b) =>
+    (isReversalBuy(b.report) ? 1 : 0) - (isReversalBuy(a.report) ? 1 : 0) ||
+    b.report.groupBuyCount - a.report.groupBuyCount ||
+    b.report.scores.shortAttack - a.report.scores.shortAttack);
 
   const resonanceCounts: ResonanceCounts = {
     strong: keptRecords.filter((r) => r.report.level === 'strong').length,

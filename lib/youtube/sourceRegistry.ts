@@ -1,5 +1,5 @@
 /**
- * YouTube source registry — 13 個追蹤的理財節目來源（2026-05-22 v2 改版）。
+ * YouTube source registry — 17 個追蹤的理財節目來源（2026-05-22 v2 改版）。
  *
  * 設計：seed-or-load
  *   - 首次呼叫 loadSources() 時若 sources.json 不存在 → 寫入 DEFAULT_SOURCES 並回傳
@@ -192,6 +192,30 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     active: true,
     created_at: '2026-05-24T16:20:00.000Z',
     default_analysts: ['謝孟恭'],  // 股癌主持人
+  },
+  {
+    source_id: 'jinrong-manhadun',
+    display_name: '金融曼哈頓（阮蕙慈）',
+    kind: 'playlist',
+    url: 'https://www.youtube.com/playlist?list=PLSg6_lakxpXFGQYu1eZWw5GMk030Rv3rb',
+    expected_cadence: 'daily',  // 非凡電視每日台股節目
+    market_type: 'TW_STOCK',
+    first_scan_done: false,
+    active: true,
+    created_at: '2026-06-04T09:15:58.000Z',
+    default_analysts: ['阮蕙慈'],  // 大華國際投顧
+  },
+  {
+    source_id: 'gushi-quanfangwei',
+    display_name: '股市全芳位（李蜀芳）',
+    kind: 'playlist',
+    url: 'https://www.youtube.com/playlist?list=PLSg6_lakxpXEC7U3BgUX3TIAnQbdmbgYG',
+    expected_cadence: 'daily',  // 非凡電視每日台股節目
+    market_type: 'TW_STOCK',
+    first_scan_done: false,
+    active: true,
+    created_at: '2026-06-04T09:15:58.000Z',
+    default_analysts: ['李蜀芳'],  // 永誠國際投顧
   },
 ];
 

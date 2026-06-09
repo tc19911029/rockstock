@@ -25,6 +25,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import { calcNetPnL } from '@/lib/portfolio/fees';
+import { profileDir, DEFAULT_PROFILE_ID } from '@/lib/portfolio/profiles';
 import type { MarketId } from '@/lib/scanner/types';
 
 export const TRADES_SCHEMA_VERSION = 1 as const;
@@ -89,9 +90,20 @@ const TRADES_DIR = path.join(process.cwd(), 'data', 'agents', 'portfolio');
 const TRADES_FILE = path.join(TRADES_DIR, 'trades.json');
 const CLOSED_MONTHLY_DIR = path.join(TRADES_DIR, 'closed');
 
-export async function loadTrades(): Promise<TradesFile> {
+/** trades.json 路徑（預設 'me' = legacy；其他 profile = data/portfolios/{id}/trades.json）*/
+function tradesFileFor(profileId: string): string {
+  const dir = profileDir(profileId);
+  return dir ? path.join(dir, 'trades.json') : TRADES_FILE;
+}
+/** 月度分檔目錄（預設 'me' = legacy；其他 profile = data/portfolios/{id}/closed）*/
+function closedDirFor(profileId: string): string {
+  const dir = profileDir(profileId);
+  return dir ? path.join(dir, 'closed') : CLOSED_MONTHLY_DIR;
+}
+
+export async function loadTrades(profileId: string = DEFAULT_PROFILE_ID): Promise<TradesFile> {
   try {
-    const raw = await fs.readFile(TRADES_FILE, 'utf-8');
+    const raw = await fs.readFile(tradesFileFor(profileId), 'utf-8');
     return JSON.parse(raw) as TradesFile;
   } catch {
     return {
@@ -102,16 +114,18 @@ export async function loadTrades(): Promise<TradesFile> {
   }
 }
 
-async function saveTrades(file: TradesFile): Promise<void> {
-  await fs.mkdir(TRADES_DIR, { recursive: true });
+async function saveTrades(file: TradesFile, profileId: string = DEFAULT_PROFILE_ID): Promise<void> {
+  const target = tradesFileFor(profileId);
+  await fs.mkdir(path.dirname(target), { recursive: true });
   file.updatedAt = new Date().toISOString();
-  await atomicFsPut(TRADES_FILE, JSON.stringify(file, null, 2));
+  await atomicFsPut(target, JSON.stringify(file, null, 2));
 }
 
-async function appendMonthlyArchive(trade: ClosedTrade): Promise<void> {
+async function appendMonthlyArchive(trade: ClosedTrade, profileId: string = DEFAULT_PROFILE_ID): Promise<void> {
   const ym = trade.exitDate.slice(0, 7); // YYYY-MM
-  await fs.mkdir(CLOSED_MONTHLY_DIR, { recursive: true });
-  const file = path.join(CLOSED_MONTHLY_DIR, `${ym}.json`);
+  const closedDir = closedDirFor(profileId);
+  await fs.mkdir(closedDir, { recursive: true });
+  const file = path.join(closedDir, `${ym}.json`);
   let existing: TradesFile;
   try {
     const raw = await fs.readFile(file, 'utf-8');
@@ -190,8 +204,8 @@ export function buildClosedTrade(input: CloseTradeInput, now = new Date()): Clos
   };
 }
 
-/** Append 一筆 trade 到 trades.json + 月度分檔 */
-export async function appendTrade(input: CloseTradeInput): Promise<ClosedTrade> {
+/** Append 一筆 trade 到 trades.json + 月度分檔（profileId 決定寫哪組持倉檔案）*/
+export async function appendTrade(input: CloseTradeInput, profileId: string = DEFAULT_PROFILE_ID): Promise<ClosedTrade> {
   // 基本不變式
   if (input.entryDate > input.exitDate) {
     throw new Error(`exitDate (${input.exitDate}) 不可早於 entryDate (${input.entryDate})`);
@@ -206,13 +220,13 @@ export async function appendTrade(input: CloseTradeInput): Promise<ClosedTrade> 
   const trade = buildClosedTrade(input);
 
   // dedup：相同 tradeId 不可重複（append-only 不蓋寫）
-  const file = await loadTrades();
+  const file = await loadTrades(profileId);
   if (file.trades.some(t => t.tradeId === trade.tradeId)) {
     throw new Error(`tradeId ${trade.tradeId} 已存在；append-only 不可重複寫入`);
   }
   file.trades.push(trade);
-  await saveTrades(file);
-  await appendMonthlyArchive(trade);
+  await saveTrades(file, profileId);
+  await appendMonthlyArchive(trade, profileId);
   return trade;
 }
 

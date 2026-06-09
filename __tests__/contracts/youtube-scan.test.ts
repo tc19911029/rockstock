@@ -3,7 +3,7 @@
  *
  * 守門員：
  *   - classifyVideoType 對六種 fixture 都分對
- *   - parseProgramDate 對 8 種 title 變體正確/拒絕
+ *   - parseProgramDate 對多種 title 變體正確/拒絕（含緊湊 8 位 YYYYMMDD、MM/DD/YYYY）
  *   - decideShouldAnalyze invariant: should=false ⇒ skip_reason ≠ null
  *   - dedup: 同一份 NDJSON 跑兩次，第二次 0 new
  *   - scanRunner 收到失敗 stderr 時，scan log 的 error 欄位 non-null
@@ -75,6 +75,10 @@ describe('parseProgramDate', () => {
     ['5月22日 林漢偉分析', '2026-05-22'],
     ['5月22號 收盤', '2026-05-22'],
     ['04月10日 春季特輯', '2026-04-10'],
+    // 緊湊 8 位 YYYYMMDD（非凡電視標題慣例：金融曼哈頓 / 股市全芳位）
+    ['20260522金融曼哈頓 #阮蕙慈 #大華國際投顧', '2026-05-22'],
+    // MM/DD/YYYY 英文（非凡同節目偶爾改英文標題）
+    ['05/22/2026 Financial Manhattan #RuanHuici', '2026-05-22'],
   ])('parses %s → %s', (title, expected) => {
     expect(parseProgramDate(title, now)).toBe(expected);
   });

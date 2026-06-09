@@ -8,6 +8,7 @@ import {
   mapServerToStoreHolding,
   type StorePortfolioHolding,
 } from '../lib/portfolio/storeToHoldingsMapping';
+import { getActiveProfileId } from './portfolioProfileStore';
 
 export interface PortfolioHolding {
   id: string;
@@ -166,7 +167,7 @@ async function syncHoldingToServer(h: StorePortfolioHolding): Promise<void> {
       console.warn('[portfolioStore] sync skip (映射失敗):', h.symbol);
       return;
     }
-    const resp = await fetch('/api/agents/portfolio', {
+    const resp = await fetch(`/api/agents/portfolio?profile=${encodeURIComponent(getActiveProfileId())}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -189,7 +190,7 @@ async function syncHoldingToServer(h: StorePortfolioHolding): Promise<void> {
 export async function hydrateHoldingsFromServer(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   try {
-    const resp = await fetch('/api/agents/portfolio?status=open', { cache: 'no-store' });
+    const resp = await fetch(`/api/agents/portfolio?status=open&profile=${encodeURIComponent(getActiveProfileId())}`, { cache: 'no-store' });
     if (!resp.ok) {
       console.warn('[portfolioStore] hydrate fail:', resp.status);
       return false;
@@ -217,7 +218,7 @@ async function unsyncHoldingFromServer(symbol: string): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
     const resp = await fetch(
-      `/api/agents/portfolio?symbol=${encodeURIComponent(symbol)}&hard=1`,
+      `/api/agents/portfolio?symbol=${encodeURIComponent(symbol)}&hard=1&profile=${encodeURIComponent(getActiveProfileId())}`,
       { method: 'DELETE' },
     );
     if (!resp.ok && resp.status !== 404) {
@@ -256,7 +257,7 @@ async function syncCloseTradeToServer(args: {
 }): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    const resp = await fetch('/api/portfolio/close-trade', {
+    const resp = await fetch(`/api/portfolio/close-trade?profile=${encodeURIComponent(getActiveProfileId())}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -492,7 +493,7 @@ export async function syncAllHoldingsToServer(): Promise<SyncAllResult> {
     return { inserted: 0, rejected: rejections.length, cnSkipped, total: holdings.length };
   }
   try {
-    const resp = await fetch('/api/portfolio/import', {
+    const resp = await fetch(`/api/portfolio/import?profile=${encodeURIComponent(getActiveProfileId())}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rows, forcePrice: true }),

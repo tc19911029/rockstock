@@ -41,6 +41,7 @@ interface SanseAlertRecord {
   name: string;
   market: 'TW' | 'CN';
   tone: 'buy' | 'sell';
+  reversal?: boolean;         // 底反該買（該買裡的最高把握，回測兩市場 OOS 最強）
   reason: string;
   comboLabel?: string;
   buyLabels?: string[];
@@ -110,6 +111,8 @@ function buildPayload(rec: SanseAlertRecord): NtfyPayload {
     if (rec.comboLabel) parts.push(rec.comboLabel);
     if (rec.buyLabels && rec.buyLabels.length) parts.push(rec.buyLabels.join('、'));
     parts.push(close);
+    // 底反該買 = 回測兩市場 OOS 最高把握 → 最高優先 + 🔥 標題
+    if (rec.reversal) return { title: `🔥 ${rec.name} ${code} 底反該買`, message: parts.join('｜'), tags: ['fire'], priority: 5 };
     return { title: `🟢 ${rec.name} ${code} 該買`, message: parts.join('｜'), tags: ['green_circle'], priority: 4 };
   }
   return { title: `🔻 ${rec.name} ${code} 該賣`, message: [rec.reason, close].join('｜'), tags: ['red_circle', 'warning'], priority: 5 };
@@ -121,6 +124,7 @@ interface EvalResult {
   market: 'TW' | 'CN';
   skip?: string;
   tone?: ReturnType<typeof tradeVerdict>['tone'];
+  reversal?: boolean;
   reason?: string;
   price?: number;
   changePct?: number;
@@ -163,10 +167,11 @@ export async function GET(req: NextRequest) {
         if (!json.ok || !json.conditions) return { ...base0, skip: 'no-conditions' };
 
         const cr = json.conditions;
-        const { tone, reason } = tradeVerdict(cr);
+        const { tone, reason, reversal } = tradeVerdict(cr);
         return {
           ...base0,
           tone,
+          reversal,
           reason,
           price: json.price ?? 0,
           changePct: json.changePct ?? 0,
@@ -200,7 +205,8 @@ export async function GET(req: NextRequest) {
 
     if (e.tone !== 'buy' && e.tone !== 'sell') continue;
 
-    const key = `${date}:${e.symbol}:${e.tone}`;
+    // 底反該買用獨立 dedup 後綴 → 即使先前已推過普通「該買」，升級成底反時仍會再推一次最高把握
+    const key = `${date}:${e.symbol}:${e.tone}${e.reversal ? ':rev' : ''}`;
     if (!dry && firedKeys.has(key)) { d.deduped = true; continue; }
 
     const rec: SanseAlertRecord = {
@@ -210,6 +216,7 @@ export async function GET(req: NextRequest) {
       name: e.name,
       market: e.market,
       tone: e.tone,
+      reversal: e.reversal,
       reason: e.reason ?? '',
       comboLabel: e.comboLabel,
       buyLabels: e.buyLabels,

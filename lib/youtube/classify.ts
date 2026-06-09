@@ -81,6 +81,16 @@ export function parseProgramDate(title: string, now: Date): string | null {
     if (isValidYmd(y, mo, d)) return toYmd(y, mo, d);
   }
 
+  // 1b) 緊湊 8 位 YYYYMMDD（非凡電視標題慣例）：20260604金融曼哈頓 / 20260603股市全芳位
+  //     前後不可接數字或冒號 — 避免咬進更長數字串（10 位 timestamp）或時間（12:34）。
+  m = title.match(/(?<![0-9:])(20\d{2})(\d{2})(\d{2})(?![0-9:])/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (isValidYmd(y, mo, d)) return toYmd(y, mo, d);
+  }
+
   // 2) 中文：5月22日 / 5月22號
   m = title.match(/(\d{1,2})月(\d{1,2})[日號]/);
   if (m) {

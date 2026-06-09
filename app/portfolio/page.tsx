@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { classifyMarket } from '@/lib/market/classify';
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
-import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
+import { formatHoldingQty } from '@/lib/utils/shareUnits';
 import { POLLING } from '@/lib/config';
 import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDailyActionPanel';
 import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
@@ -582,11 +582,11 @@ export default function PortfolioPage() {
                 <div className="flex items-center gap-3 px-4 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-foreground">{h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</span>
-                      <span className="text-xs text-muted-foreground truncate" title={p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}>{p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</span>
+                      <span className="font-bold text-foreground">{h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}</span>
+                      <span className="text-xs text-muted-foreground truncate" title={p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}>{p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}</span>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {formatSharesAsLots(h.shares, marketFromSymbol(h.symbol))} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
+                      {formatHoldingQty(h.shares, h.symbol)} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
                       · 買進 {h.buyDate}
                     </div>
                   </div>

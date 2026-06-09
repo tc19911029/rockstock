@@ -2,15 +2,20 @@
 // 三色資金 — 圖表指標計算（雙B戰法主圖 + 游資資金副圖）
 // 全部 price-only，忠實重現通達信原始碼。
 //
-// 略過項目：游資資金副圖的「4 級量能彩柱」需要 AMOUNT(成交額) 且 VOL 單位不明，
-//          本地只存 OHLCV，硬湊會標錯色 → 不畫。其餘 100% 重現。
+// 雙B / XYS / 捕撈彩柱 的數學已抽到 ./dualB（參數化單一來源），這支只做「走圖呈現」
+// （上色、箭頭標記、五色線、教學側欄）。computeSanSeChart 維持原簽名、用預設參數 ⇒ 走圖輸出不變。
 // ============================================================
 
-import { REF, MA, EMA, HHV, CROSS, sub, div, mul, add, gt, BARSLAST, isNum } from './tdx';
+import { MA, gt, BARSLAST, isNum } from './tdx';
 import { computeSanSe } from './selectors';
+import { computeDualB, computeXys, computeTiers, type LinePoint, type DayExtrasArr, type XysTiers } from './dualB';
+import { PRODUCTION_PARAMS, cloneParams, CN_TIER_THRESHOLDS, type TierThresholds } from './params';
 import type { Candle } from '@/types';
 
-export interface LinePoint { time: string; value: number }
+// 型別 / 門檻常數的單一來源已移到 ./dualB 與 ./params；此處 re-export 維持既有 import 路徑相容。
+export type { LinePoint, DayExtrasArr, XysTiers } from './dualB';
+export { CN_TIER_THRESHOLDS, TW_TIER_THRESHOLDS, type TierThresholds } from './params';
+
 export interface BarPoint { time: string; value: number; color: string }
 export interface ChartMarker {
   time: string;
@@ -18,6 +23,7 @@ export interface ChartMarker {
   shape: 'arrowUp' | 'arrowDown';
   color: string;
   text: string;
+  size?: number; // lightweight-charts marker 大小倍率（預設 1）；放大讓金叉/死叉箭頭更醒目
 }
 export interface CandlePoint {
   time: string; open: number; high: number; low: number; close: number;
@@ -41,16 +47,6 @@ export interface SanSeChartData {
   latest: LatestSignals;
 }
 
-/** 捕撈季節量能 4 級彩柱：綠>6.1 / 黃>3.8 / 青>2.1 / 藍>1.8（換手率 X_11，且 X_10>5 且動能>0） */
-export interface XysTiers {
-  green: LinePoint[];
-  yellow: LinePoint[];
-  cyan: LinePoint[];
-  blue: LinePoint[];
-}
-
-export interface DayExtrasArr { amount: number[]; vol: number[]; turnover: number[] }
-
 /** 主力狀態F 五色線：紅中線主力 / 黃控盤 / 紫短線游資 / 藍短線超跌 / 綠中線超跌 */
 export interface ZhuliSeries {
   midStrength: LinePoint[];   // 中線強勢（紅）
@@ -71,18 +67,11 @@ export interface LatestSignals {
 
 const PURPLE = '#8000FF';
 const GREEN = '#00CE00';
+const GREEN_SELL = '#39FF6A'; // 死叉箭頭專用亮綠：比動能<0 綠柱(GREEN)更亮，疊在綠柱/暗背景上才看得清
 const MAGENTA = '#FF2EC4';
 const YELLOW = '#FFD000';
 const RED = '#FF433D';
 const BLUE = '#3B82F6';
-
-// 線性加權 ZB4：權重 lag0=20,1=19,...,18=2, lag19=0(原碼跳過), lag20=1，總和 210
-const ZB4_WEIGHTS = (() => {
-  const w = new Array(21).fill(0);
-  for (let lag = 0; lag <= 18; lag++) w[lag] = 20 - lag;
-  w[20] = 1;
-  return w; // sum = 210
-})();
 
 function lp(dates: string[], arr: number[]): LinePoint[] {
   const out: LinePoint[] = [];
@@ -90,46 +79,26 @@ function lp(dates: string[], arr: number[]): LinePoint[] {
   return out;
 }
 
-/** 捕撈季節 4 級彩柱的換手率門檻 [green, yellow, cyan, blue]。預設為陸股原碼值；
- *  台股周轉率水位結構性偏低，由 scripts/calibrate-tw-season-tiers.ts 百分位對齊重算後覆寫。 */
-export type TierThresholds = [number, number, number, number];
-export const CN_TIER_THRESHOLDS: TierThresholds = [6.1, 3.8, 2.1, 1.8];
-/** 台股周轉率門檻 — 百分位對齊陸股分佈算出（scripts/calibrate-tw-season-tiers.ts，
- *  2026-05-31：陸股中位數4.95% vs 台股1.55%，台股結構性偏低，直接套陸股門檻彩柱幾乎不亮）。 */
-export const TW_TIER_THRESHOLDS: TierThresholds = [2.25, 1.08, 0.66, 0.6];
-
 export function computeSanSeChart(
   candles: Candle[],
   indexClose?: number[],
   extras?: DayExtrasArr,
   tierThr: TierThresholds = CN_TIER_THRESHOLDS,
+  limitPct: number = 0.10, // 漲跌停幅度（主板/台股 10%、創業板/科創 20%）→ 決定 K 線漲停/大漲上色門檻
 ): SanSeChartData {
   const dates = candles.map((c) => c.date);
-  const O = candles.map((c) => c.open);
-  const H = candles.map((c) => c.high);
-  const L = candles.map((c) => c.low);
   const C = candles.map((c) => c.close);
   const n = candles.length;
   // 只在「該訊號最近一次」標文字，其餘只留彩色箭頭 → 訊號密集時標籤不互疊
   const lastTrue = (arr: boolean[]): number => { for (let k = n - 1; k >= 0; k--) if (arr[k]) return k; return -1; };
 
-  // ── 雙B戰法主圖 ──────────────────────────────────────────────
-  const ZB = candles.map((c) => (c.close + c.high + c.open + c.low) / 4);
-  const zhineng = mul(HHV(ZB, 13), 0.95);
-  const ZB3 = candles.map((c) => (3 * c.close + c.open + c.low + c.high) / 6);
-  const zb4 = new Array(n).fill(NaN);
-  for (let i = 20; i < n; i++) {
-    let s = 0;
-    for (let lag = 0; lag <= 20; lag++) s += ZB4_WEIGHTS[lag] * ZB3[i - lag];
-    zb4[i] = s / 210;
-  }
-  const zb5 = MA(zb4, 6);
-  const duokong = MA(C, 60);
-
-  const buy = CROSS(zb4, zb5);          // 黃紅雙線金叉
-  const sell = CROSS(zb5, zb4);         // 黃紅雙線死叉
-  const breakUp = CROSS(C, zhineng);    // 突破智能交易線
-  const breakDn = CROSS(zhineng, C);    // 跌破智能交易線
+  // ── 雙B戰法主圖（共用 ./dualB）──────────────────────────────────
+  const db = computeDualB(candles);
+  const { zb4, zb5, zhineng, ma60: duokong } = db;
+  const buy = db.goldCross;          // 黃紅雙線金叉
+  const sell = db.deadCross;         // 黃紅雙線死叉
+  const breakUp = db.breakUp;        // 突破智能交易線
+  const breakDn = db.breakDn;        // 跌破智能交易線
 
   const lastBuy = lastTrue(buy);
   const lastSell = lastTrue(sell);
@@ -145,23 +114,24 @@ export function computeSanSeChart(
   }
 
   // K線變色（涨停洋紅 / 大漲黃；其餘走 A 股紅漲綠跌預設）
+  // 漲停門檻＝幅度 −0.5%（主板 10%→9.5%、創業板/科創 20%→19.5%）；大漲＝7% 到漲停之間。
+  const limitThr = limitPct - 0.005;
   const candlesOut: CandlePoint[] = candles.map((c, i) => {
     const pt: CandlePoint = { time: dates[i], open: c.open, high: c.high, low: c.low, close: c.close };
     const prev = i > 0 ? C[i - 1] : NaN;
     if (isNum(prev) && prev > 0) {
       const chg = (c.close - prev) / prev;
-      if (chg > 0.095 && c.close === c.high) { pt.color = MAGENTA; pt.borderColor = MAGENTA; pt.wickColor = MAGENTA; }
-      else if (chg > 0.07 && chg < 0.095) { pt.color = YELLOW; pt.borderColor = YELLOW; pt.wickColor = YELLOW; }
+      if (chg > limitThr && c.close === c.high) { pt.color = MAGENTA; pt.borderColor = MAGENTA; pt.wickColor = MAGENTA; }
+      else if (chg > 0.07 && chg < limitThr) { pt.color = YELLOW; pt.borderColor = YELLOW; pt.wickColor = YELLOW; }
     }
     return pt;
   });
 
-  // ── 游資資金副圖：XYS 動能 ───────────────────────────────────
-  const X1 = div(add(add(mul(C, 2), H), L), 3);
-  const X4 = EMA(EMA(EMA(X1, 3), 3), 3);
-  const XYS0 = mul(div(sub(X4, REF(X4, 1)), REF(X4, 1)), 100);
-  const XYS1 = XYS0;
-  const XYS2 = MA(XYS0, 2);
+  // ── 游資資金副圖：XYS 動能（共用 ./dualB）─────────────────────
+  const xys = computeXys(candles);
+  const XYS0 = xys.xys0;
+  const XYS1 = xys.xys1;
+  const XYS2 = xys.xys2;
 
   const xys0: BarPoint[] = [];
   for (let i = 0; i < n; i++) {
@@ -169,8 +139,8 @@ export function computeSanSeChart(
     xys0.push({ time: dates[i], value: +XYS0[i].toFixed(3), color: XYS0[i] >= 0 ? PURPLE : GREEN });
   }
 
-  const goldCross = CROSS(XYS1, XYS2);
-  const deadCross = CROSS(XYS2, XYS1);
+  const goldCross = xys.goldCross;
+  const deadCross = xys.deadCross;
   // 只標各「區位」最近一次（多頭區金叉/空頭區金叉/多頭區死叉/空頭區死叉各最多一個字），其餘留箭頭
   const lastWhere = (pred: (k: number) => boolean): number => { for (let k = n - 1; k >= 0; k--) if (pred(k)) return k; return -1; };
   const lGoldBull = lastWhere((k) => !!goldCross[k] && XYS1[k] >= 0);
@@ -182,30 +152,21 @@ export function computeSanSeChart(
     if (goldCross[i]) {
       const bull = XYS1[i] >= 0;
       const labeled = bull ? i === lGoldBull : i === lGoldBear;
-      subMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: labeled ? (bull ? '多頭區金叉' : '空頭區金叉') : '' });
+      subMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: labeled ? (bull ? '多頭區金叉' : '空頭區金叉') : '', size: 2 });
     }
     if (deadCross[i]) {
       const bull = XYS1[i] > 0;
       const labeled = bull ? i === lDeadBull : i === lDeadBear;
-      subMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN, text: labeled ? (bull ? '多頭區死叉' : '空頭區死叉') : '' });
+      subMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN_SELL, text: labeled ? (bull ? '多頭區死叉' : '空頭區死叉') : '', size: 2 });
     }
   }
 
-  // ── 捕撈季節底部 4 級量能彩柱（需成交額/換手率）─────────────
+  // ── 捕撈季節底部 4 級量能彩柱（需成交額/換手率；共用 ./dualB，門檻逐市場由 tierThr 帶入）─
   let xysTiers: XysTiers | undefined;
   if (extras) {
-    const X8 = EMA(extras.amount, 13);
-    const X7 = EMA(extras.vol, 13);
-    const X9 = div(div(X8, X7), 100);              // EMA(額)/EMA(量)/100 ≈ 平滑成本
-    const X10 = mul(div(sub(C, X9), X9), 100);     // 偏離成本 %
-    const X11 = EMA(extras.turnover, 13);          // 換手率 EMA
-    const baseOK = (k: number) => isNum(X10[k]) && isNum(X11[k]) && X10[k] > 5 && XYS1[k] > 0;
-    const tier = (thr: number, h: number): LinePoint[] => {
-      const out: LinePoint[] = [];
-      for (let k = 0; k < n; k++) if (baseOK(k) && X11[k] > thr) out.push({ time: dates[k], value: h });
-      return out;
-    };
-    xysTiers = { green: tier(tierThr[0], 2), yellow: tier(tierThr[1], 1.5), cyan: tier(tierThr[2], 1), blue: tier(tierThr[3], 0.5) };
+    const pTier = cloneParams(PRODUCTION_PARAMS);
+    pTier.tier.thresholds = tierThr;
+    xysTiers = computeTiers(candles, extras, xys, pTier);
   }
 
   // ── 最後一根的訊號彙整（給教學側欄） ─────────────────────────

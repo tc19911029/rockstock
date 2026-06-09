@@ -27,8 +27,30 @@ async function readSnapshotQuotes(market: 'TW' | 'CN', date: string): Promise<Ma
     const path = await import('node:path');
     const file = path.join(process.cwd(), 'data', `intraday-${market}-${date}.json`);
     const raw = await fs.readFile(file, 'utf-8');
-    const json = JSON.parse(raw) as { quotes?: Array<{ symbol: string; open: number; high: number; low: number; close: number; volume: number }> };
-    for (const q of json.quotes ?? []) {
+    const json = JSON.parse(raw) as { updatedAt?: string; quotes?: Array<{ symbol: string; open: number; high: number; low: number; close: number; volume: number }> };
+    const quotes = json.quotes ?? [];
+
+    // ── stale/盤前快照守衛（2026-06-08 事故根因）─────────────────────────────────
+    // 事故：盤中 L2 刷新壞掉、快照凍在 09:27 盤前集合競價（每檔只有單一價 → O=H=L=C 平棒）。
+    // 盤後 append-from-snapshot 照樣讀它、把平棒當收盤封進 L1，污染全市場 ~2292 檔（雙B 誤判跌破等）。
+    // 封 L1 是不可逆的歷史寫入（鐵則 #1），故這裡兩道守衛，命中就回空 Map → 呼叫端 fallback 即時 API：
+    //   (1) updatedAt 太舊：盤後封存必須讀「剛刷新」的快照；> 20 分鐘視為沒刷新成功。
+    //   (2) 全市場「單點平棒」(O=H=L=C) 佔比 > 50%：盤前集合競價的指紋，絕非真實收盤分布。
+    const ageMs = json.updatedAt ? Date.now() - new Date(json.updatedAt).getTime() : Infinity;
+    if (ageMs > 20 * 60_000) {
+      console.warn(`[append-from-snapshot] ${market} L2 快照過舊 (age ${Math.round(ageMs / 60000)}min)，拒用避免封 stale → fallback 即時 API`);
+      return out;
+    }
+    let flat = 0, valid = 0;
+    for (const q of quotes) {
+      if (q.close > 0) { valid++; if (q.open === q.high && q.high === q.low && q.low === q.close) flat++; }
+    }
+    if (valid > 0 && flat / valid > 0.5) {
+      console.warn(`[append-from-snapshot] ${market} L2 快照 ${flat}/${valid} 是單點平棒(疑盤前集合競價/未刷新)，拒用避免封 stale → fallback 即時 API`);
+      return out;
+    }
+
+    for (const q of quotes) {
       if (q.close > 0 && q.open > 0) {
         out.set(q.symbol, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
       }

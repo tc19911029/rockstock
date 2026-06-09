@@ -11,6 +11,7 @@ import {
 import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { isFundSymbol } from '@/lib/market/classify';
 import { loadMockData } from '@/lib/data/mockData';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 import {
@@ -356,6 +357,10 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
   startPolling: () => {
     const { currentStock, currentInterval, targetDate } = get();
     if (!currentStock || currentStock.ticker === 'DEMO') return;
+
+    // 場外基金：單位淨值一天才定盤一次，盤中沒有即時報價可 poll（且 /api/stock/quote
+    // 是股票端點，對 .OF 無資料）→ 直接不啟動 polling。
+    if (isFundSymbol(currentStock.ticker)) return;
 
     // 歷史 scan 模式不要 poll：targetDate 是過去日，盤中報價跟它無關，
     // 而 polling 每 30s 重抓+全量 precomputeMarkers 很貴，純浪費

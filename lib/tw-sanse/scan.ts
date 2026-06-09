@@ -18,7 +18,7 @@ import type { Candle } from '@/types';
 import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { getTWConcept, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { computeSanSe, evalLatest, type SanSeLevel } from '@/lib/cn-sanse/selectors';
-import { evalConditions } from '@/lib/cn-sanse/conditions';
+import { evalConditions, isReversalBuy } from '@/lib/cn-sanse/conditions';
 import type {
   SanSeHit, ResonanceRecord, ResonanceCounts, SanSeScanResult, SanSeIntradayInput,
 } from '@/lib/cn-sanse/scan';
@@ -191,7 +191,10 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
   (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) =>
     results[lv].sort((a, b) => b.shortAttack - a.shortAttack),
   );
-  keptRecords.sort((a, b) => b.report.groupBuyCount - a.report.groupBuyCount || b.report.scores.shortAttack - a.report.scores.shortAttack);
+  keptRecords.sort((a, b) =>
+    (isReversalBuy(b.report) ? 1 : 0) - (isReversalBuy(a.report) ? 1 : 0) ||
+    b.report.groupBuyCount - a.report.groupBuyCount ||
+    b.report.scores.shortAttack - a.report.scores.shortAttack);
 
   const resonanceCounts: ResonanceCounts = {
     strong: keptRecords.filter((r) => r.report.level === 'strong').length,

@@ -9,9 +9,11 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useReplayStore } from '@/store/replayStore';
-import { type MarketTab, filterByMarket, classifyMarket } from '@/lib/market/classify';
+import { type MarketTab, filterByMarket, classifyMarket, isFundSymbol } from '@/lib/market/classify';
 import { ChartPracticeLedger } from '@/components/ChartPracticeLedger';
+import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
 import { calcNetPnL } from '@/lib/portfolio/fees';
+import { formatHoldingQty } from '@/lib/utils/shareUnits';
 import { formatPercent, bullBearClass } from '@/lib/format';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -29,7 +31,7 @@ type PanelTab = 'watchlist' | 'portfolio';
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function stripSuffix(symbol: string) {
-  return symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  return symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '');
 }
 
 function formatMoney(n: number) {
@@ -88,21 +90,27 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
   // Lightweight polling via /api/portfolio/quotes（穩定快路徑）
   // 改進：AbortController 卸載時取消 + 8s timeout + 連續失敗才提示
   const failureCountRef = useRef(0);
-  const refreshQuotes = useCallback(async (signal?: AbortSignal) => {
+  // 報價「拆批抓」，避免自選股拖垮持倉：
+  // /api/portfolio/quotes 對無法解析的標的（指數 ^TWII、美股、已下市…）會把所有
+  // fallback 來源都跑一輪才放棄，單一「冷」標的就要 3-4 秒。舊版把持倉＋自選股併成
+  // 「一個」請求，自選股一多（實測 ~15 檔無法解析就 >8s）整批撞 8s 逾時 → 全部 abort
+  // → 連持倉都一起空白，且 AbortError 被靜默吞掉（畫面無任何提示，reload 也救不回）。
+  // 解法：持倉自成一批（少、必可解析、秒回），自選股再分小批；各批獨立逾時＋平行抓，
+  // 哪批慢只拖到它自己，持倉永遠先亮；任一批失敗都「保留上一輪報價」不清空。
+  const refreshQuotes = useCallback(async () => {
     if (uniqueSymbols.length === 0) return;
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8000);
-      // Compose signals: respect external signal (for cleanup) + own timeout
-      if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
-      const res = await fetch(
-        `/api/portfolio/quotes?symbols=${encodeURIComponent(uniqueSymbols.join(','))}`,
-        { signal: ctrl.signal },
-      );
-      clearTimeout(timer);
-      if (!res.ok) { failureCountRef.current++; return; }
-      const json = await res.json();
-      const quotes: Array<{ symbol: string; price: number; changePercent: number; name?: string }> = json.quotes ?? [];
+
+    const holdingSyms = [...new Set(usePortfolioStore.getState().holdings.map(h => h.symbol))];
+    const holdingSet = new Set(holdingSyms);
+    const watchSyms = uniqueSymbols.filter(s => !holdingSet.has(s));
+
+    const groups: string[][] = [];
+    if (holdingSyms.length) groups.push(holdingSyms);                      // 持倉：獨立一批，優先保證
+    for (let i = 0; i < watchSyms.length; i += 6) groups.push(watchSyms.slice(i, i + 6)); // 自選股：小批
+
+    // 一批報價回來就「立刻」併入畫面：持倉那批最快、先亮，不必等慢批（自選股冷標的）跑完
+    const applyQuotes = (quotes: Array<{ symbol: string; price: number; changePercent: number; name?: string }>) => {
+      if (quotes.length === 0) return;
       failureCountRef.current = 0; // 成功 reset 失敗計數
       setPrices(prev => {
         const next = { ...prev };
@@ -113,7 +121,6 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         }
         return next;
       });
-
       // Auto-backfill: 用 quote 帶回的真實 name 寫回 store
       const portfolioState = usePortfolioStore.getState();
       for (const q of quotes) {
@@ -131,21 +138,33 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
           });
         }
       }
-    } catch (err) {
-      // AbortError = 元件 unmount / 換股，不算失敗
-      if (err instanceof Error && err.name === 'AbortError') return;
+    };
+
+    const fetchGroup = async (syms: string[]): Promise<number> => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const res = await fetch(
+          `/api/portfolio/quotes?symbols=${encodeURIComponent(syms.join(','))}`,
+          { signal: ctrl.signal },
+        );
+        if (!res.ok) return 0;
+        const json = await res.json();
+        const quotes = (json.quotes ?? []) as Array<{ symbol: string; price: number; changePercent: number; name?: string }>;
+        applyQuotes(quotes); // 一回來就上畫面
+        return quotes.length;
+      } catch {
+        return 0; // 逾時/abort：放棄這批，不影響其他批，也不清空畫面上已有報價
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const counts = await Promise.all(groups.map(fetchGroup));
+    if (counts.reduce((a, b) => a + b, 0) === 0) {
+      // 完全沒拿到（含全部逾時）才算失敗；連續 3 次才提示，且不清掉畫面上已有報價
       failureCountRef.current++;
-      // 連續 3 次失敗才標 error 並 toast，避免單次 timeout 就誤報
       if (failureCountRef.current >= 3) {
-        setPrices(prev => {
-          const next = { ...prev };
-          for (const s of uniqueSymbols) {
-            if (!next[s] || next[s].loading) {
-              next[s] = { ...next[s], price: 0, changePercent: 0, loading: false, error: '更新失敗' };
-            }
-          }
-          return next;
-        });
         toast.error('報價連續更新失敗，請檢查網路', { id: 'quote-error', duration: 4000 });
         failureCountRef.current = 0;
       }
@@ -219,8 +238,9 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Collapsible content */}
-      <div className={`transition-all duration-300 ${open ? 'max-h-[320px]' : 'max-h-0'} overflow-hidden`}>
+      {/* Collapsible content — max-h 須容納「chrome（tab/誰的/市場 ~90px）＋ 內捲區 270px」，
+          否則最後一筆持倉會被外層 overflow-hidden 裁掉、撞到下方 L1-L4 健康度條 */}
+      <div className={`transition-all duration-300 ${open ? 'max-h-[400px]' : 'max-h-0'} overflow-hidden`}>
         {/* Tab switcher */}
         <div className="flex border-b border-border text-[11px]">
           {([
@@ -238,6 +258,14 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
             </button>
           ))}
         </div>
+
+        {/* Profile switcher — 只在持倉 tab 顯示「誰的持倉」*/}
+        {tab === 'portfolio' && (
+          <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border">
+            <span className="text-[10px] text-muted-foreground shrink-0">誰的</span>
+            <PortfolioProfileSwitcher size="sm" />
+          </div>
+        )}
 
         {/* Market filter */}
         <div className="flex gap-1 px-2 py-1.5 border-b border-border">
@@ -366,9 +394,6 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
         {holdings.map(h => {
           const p = prices[h.symbol];
           const cur = p?.price ?? 0;
-          const isCN = classifyMarket(h.symbol) === 'CN';
-          const lotSize = isCN ? 100 : 1000;
-          const lots = h.shares / lotSize;
           const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
           const dailyPnL = cur > 0 ? h.shares * cur * (p?.changePercent ?? 0) / 100 : 0;
 
@@ -377,7 +402,7 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
             <button
               onClick={() => {
                 const s = useReplayStore.getState();
-                s.loadStock(stripSuffix(h.symbol)).then(() => s.startPolling());
+                s.loadStock(isFundSymbol(h.symbol) ? h.symbol : stripSuffix(h.symbol)).then(() => s.startPolling());
                 onSelectHolding?.();
               }}
               className="w-full px-3 py-2 hover:bg-muted/60 transition-colors text-left"
@@ -387,7 +412,7 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
                 <div className="flex items-baseline gap-1.5 min-w-0">
                   <span className="text-xs font-bold text-foreground truncate">{p?.name || h.name || stripSuffix(h.symbol)}</span>
                   <span className="text-[10px] text-muted-foreground shrink-0">{stripSuffix(h.symbol)}</span>
-                  <span className="text-[9px] text-muted-foreground/60 shrink-0">{lots % 1 === 0 ? lots : lots.toFixed(1)}張</span>
+                  <span className="text-[9px] text-muted-foreground/60 shrink-0">{formatHoldingQty(h.shares, h.symbol)}</span>
                 </div>
                 <div className="text-right shrink-0 ml-2">
                   {p?.loading ? (

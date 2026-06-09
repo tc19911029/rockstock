@@ -300,6 +300,33 @@ export function isSnapshotFresh(snapshot: IntradaySnapshot | null, maxAgeMs = 12
   return age < maxAgeMs;
 }
 
+/** 扁平根門檻：> 90% 的有效報價都是 O=H=L=C 且量=0 即視為退化。正常盤中 < 1%（停牌/整日鎖漲停少數檔），
+ *  盤前集合競價 / 刷新凍結會衝到 ~100% → 門檻有極大餘裕，不會誤擋正常快照。 */
+export const FLAT_DEGENERATE_FRACTION = 0.9;
+
+/**
+ * 快照「退化」偵測：盤前集合競價、或盤中刷新失敗凍結時，所有報價會塌成「扁平根」
+ * （O=H=L=C、量=0）—— 只有最後撮合價、沒有真實盤中高低量。把這種快照當「今日那根」餵進三色，
+ * 捕撈動能 X1=(2C+H+L)/3 在 H=L=C 時被墊高，會憑空生出假金叉/死叉 → 假底反（2026-06-09 實例：
+ * 早盤 DNS 斷線害 L2 凍在 09:17 盤前，3064 檔全扁平，盤中三色誤標 37 檔底反，走圖卻無金叉）。
+ *
+ * 盤中三色 cron 偵測到就跳過，不用壞快照算訊號、也不覆蓋上一份好的盤中結果。
+ * 純看「報價內容」而非 updatedAt：凍結快照的 date 仍是今日、會通過 isSnapshotFresh 以外的日期檢查，
+ * 唯有「扁平根占比」能抓出它沒有真實 OHLC。
+ * @returns 退化原因字串（cron 用來回報並跳過）；正常則 null。
+ */
+export function degenerateSnapshotReason(snapshot: IntradaySnapshot | null): string | null {
+  if (!snapshot) return 'snapshot 不存在';
+  const live = snapshot.quotes.filter((q) => q.close > 0);
+  if (live.length === 0) return 'snapshot 無有效報價（全停牌/空）';
+  const flat = live.filter((q) => q.open === q.high && q.high === q.low && q.low === q.close && !q.volume).length;
+  const flatFrac = flat / live.length;
+  if (flatFrac > FLAT_DEGENERATE_FRACTION) {
+    return `flat-dominated ${(flatFrac * 100).toFixed(1)}%（O=H=L=C、量=0 的盤前/凍結快照，無真實盤中 OHLC）`;
+  }
+  return null;
+}
+
 // ── Fetch & Build ───────────────────────────────────────────────────────────
 
 /**
@@ -631,7 +658,7 @@ const MIS_HEADERS_INDEX = {
   Referer: 'https://mis.twse.com.tw/stock/',
 };
 
-async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote | null> {
+export async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote | null> {
   try {
     const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0&_=${Date.now()}`;
     const res = await fetch(url, { headers: MIS_HEADERS_INDEX, signal: AbortSignal.timeout(5000) });

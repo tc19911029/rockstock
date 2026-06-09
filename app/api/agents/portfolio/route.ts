@@ -17,6 +17,7 @@ import {
   loadAllHoldings,
   upsertHolding,
 } from '@/lib/agents/portfolio/storage';
+import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
 
 export const runtime = 'nodejs';
@@ -58,7 +59,8 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const status = url.searchParams.get('status');
   const market = url.searchParams.get('market'); // 可選：TW | CN（不帶 = 台股+陸股合併）
-  let holdings = await loadAllHoldings();
+  const profileId = resolveProfileId(url.searchParams.get('profile'));
+  let holdings = await loadAllHoldings(profileId);
   if (market === 'TW' || market === 'CN') {
     holdings = holdings.filter(h => h.market === market);
   }
@@ -82,6 +84,7 @@ export async function POST(req: NextRequest) {
   const parsed = upsertSchema.safeParse(body);
   if (!parsed.success) return apiValidationError(parsed.error);
 
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
   const { forcePrice, ...holdingData } = parsed.data;
 
   // entryPrice 合理性檢查（除非 forcePrice=true 顯式略過）
@@ -97,23 +100,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const holding = await upsertHolding(holdingData);
+  const holding = await upsertHolding(holdingData, profileId);
   return apiOk({ holding });
 }
 
 export async function DELETE(req: NextRequest) {
   const parsed = deleteSchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
   const { symbol, hard, closedPrice, closeReason } = parsed.data;
   if (hard === '1') {
-    const ok = await deleteHolding(symbol);
+    const ok = await deleteHolding(symbol, profileId);
     if (!ok) return apiError(`holding ${symbol} not found`, 404);
     return apiOk({ deleted: true, mode: 'hard' });
   }
   if (closedPrice == null || !closeReason) {
     return apiError('close 模式需 closedPrice 與 closeReason；或加 ?hard=1 硬刪', 400);
   }
-  const holding = await closeHolding(symbol, { closedPrice, closeReason });
+  const holding = await closeHolding(symbol, { closedPrice, closeReason }, profileId);
   if (!holding) return apiError(`open holding ${symbol} not found`, 404);
   return apiOk({ holding, mode: 'close' });
 }

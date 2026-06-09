@@ -17,7 +17,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { suspectsLimitOverwrite } from '@/lib/datasource/limitMoveGuard';
+import { suspectsLimitOverwrite, suspectsGrossJump } from '@/lib/datasource/limitMoveGuard';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readIntradaySnapshot, IntradayQuote } from '@/lib/datasource/IntradayCache';
 import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';
@@ -80,6 +80,9 @@ export async function GET(req: NextRequest) {
       if (snap && snap.quotes.length > 0 && snap.date === lastTradingDate) {
         l2Map = new Map();
         for (const q of snap.quotes) {
+          // 跳過指數(snapshot 內帶 .SS/.SZ/^ 後綴；個股是裸碼)：否則去後綴後 000001.SS(上證指數)
+          // 會撞 000001(平安銀行) key，且指數在 snapshot 排最後 → 指數值蓋進個股、寫進 L1（2026-06-02 實例）
+          if (/\.(SS|SZ)$/i.test(q.symbol) || q.symbol.startsWith('^')) continue;
           if (q.close > 0) {
             const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
             l2Map.set(code, q);
@@ -121,9 +124,10 @@ export async function GET(req: NextRequest) {
               const l2Quote = l2Map.get(code);
               if (l2Quote) {
                 const prevBar = existing.candles[existing.candles.length - 1];
-                if (suspectsLimitOverwrite(prevBar?.close, l2Quote, market, code)) {
+                if (suspectsLimitOverwrite(prevBar?.close, l2Quote, market, code)
+                    || suspectsGrossJump(prevBar?.close, l2Quote)) {
                   console.warn(
-                    `[download-batch] ${symbol} ${lastTradingDate} L2 漲跌停 close 異常，` +
+                    `[download-batch] ${symbol} ${lastTradingDate} L2 close 異常(漲跌停/單日>50%偏離=疑撞庫壞抓)，` +
                     `跳過 L2 注入改走完整 API (prev=${prevBar.close} h=${l2Quote.high} c=${l2Quote.close})`
                   );
                 } else {

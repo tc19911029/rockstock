@@ -535,26 +535,25 @@ export async function register() {
     }
   }, 60 * 1000);
 
-  // TDCC 大戶持股：每週四 18:30 CST 自動抓最新一週（公布時間 ~17:00）
-  // 用 60s interval 偵測，命中當週四 18:30 CST 才執行；用旗標避免同一天重跑
+  // TDCC 大戶持股：每天傍晚 18:00 CST 後自動檢查、抓最新一週
+  // 為什麼每天而非固定週四：TDCC 的「週五分散表」是週末才公布，固定週四永遠慢一週（2026-06-07 踩過）；
+  // 改每天檢查 → 哪天公布隔天傍晚就抓到、機器睡過頭也會在下次傍晚補抓；route 對已有基準日會自動 skip（便宜）。
+  // 用 60s interval 偵測，hour >= 18 命中傍晚後第一個 tick；旗標避免同一天重跑、機器晚開（>18:00）也能即時補跑
   let lastTdccDate = '';
   setInterval(() => {
     const now = new Date();
     const cst = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Taipei',
       hour12: false,
-      weekday: 'short',
-      hour: '2-digit', minute: '2-digit',
+      hour: '2-digit',
     }).formatToParts(now);
     const get = (t: string) => cst.find(p => p.type === t)?.value ?? '';
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
-    const isThu = get('weekday') === 'Thu';
     const hour = parseInt(get('hour'), 10);
-    const min = parseInt(get('minute'), 10);
-    if (isThu && hour === 18 && min >= 30 && min < 35 && today !== lastTdccDate) {
+    if (hour >= 18 && today !== lastTdccDate) {
       lastTdccDate = today;
-      console.log('[local-cron] TDCC 週四自動抓取觸發');
-      callRoute('/api/cron/fetch-tdcc-week', 'TDCC weekly').catch(err =>
+      console.log('[local-cron] TDCC 每日自動抓取觸發');
+      callRoute('/api/cron/fetch-tdcc-week', 'TDCC daily').catch(err =>
         console.error('[local-cron] TDCC fetch failed:', err),
       );
     }

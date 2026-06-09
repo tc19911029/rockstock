@@ -29,13 +29,25 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true); setErr(null);
-    fetch(`/api/cn/financials/${code}`)
-      .then((r) => r.json())
-      .then((j: Resp) => { if (!alive) return; if (j.error) setErr(j.error); else setData(j); })
-      .catch(() => { if (alive) setErr('讀取失敗'); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    // 估值頭（價/本益比/PB）來自 EastMoney；冷啟動（server 剛重啟、首抓未暖）常回 valuation=null →
+    // 逐季財報照常顯示、但估值整片空白，且早期只 fetch 一次 → 空到使用者手動重整才補回。
+    // 故 valuation 為 null 時背景重試（最多 2 次）補回估值頭，財報已先行顯示不被阻塞。
+    const load = (attempt: number) => {
+      fetch(`/api/cn/financials/${code}`)
+        .then((r) => r.json())
+        .then((j: Resp) => {
+          if (!alive) return;
+          if (j.error) { setErr(j.error); return; }
+          setData(j);
+          if (!j.valuation && attempt < 2) timer = setTimeout(() => load(attempt + 1), 1800);
+        })
+        .catch(() => { if (alive) setErr('讀取失敗'); })
+        .finally(() => { if (alive) setLoading(false); });
+    };
+    load(0);
+    return () => { alive = false; if (timer) clearTimeout(timer); };
   }, [code]);
 
   if (loading) return <div className="p-4 text-sm text-muted-foreground">載入陸股基本面中…</div>;

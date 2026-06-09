@@ -1,0 +1,281 @@
+{
+  "sanse": {
+    "last": {
+      "sa": 0,
+      "ms": -0.815335,
+      "mc": 2.272997,
+      "kp": 151.008957,
+      "so": 0.937759
+    },
+    "mid": {
+      "sa": 5.084342,
+      "ms": 0.688868,
+      "mc": 0,
+      "kp": 120.555434,
+      "so": 0
+    },
+    "counts": {
+      "strict": 0,
+      "medium": 7,
+      "loose": 9
+    }
+  },
+  "report": {
+    "doubleB": {
+      "buy": [
+        {
+          "id": "b_gold",
+          "label": "黃紅金叉",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "b_break",
+          "label": "突破智能交易線",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "b_resonance",
+          "label": "雙箭頭共振(金叉+突破同日)",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "b_dualup",
+          "label": "黃紅雙線向上",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "b_above",
+          "label": "站上多空線",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "b_limitup",
+          "label": "漲停",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "b_bigup",
+          "label": "大漲",
+          "met": false,
+          "kind": "state"
+        }
+      ],
+      "sell": [
+        {
+          "id": "b_dead",
+          "label": "黃紅死叉",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "b_breakdn",
+          "label": "跌破智能交易線",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "b_sresonance",
+          "label": "雙箭頭共振(死叉+跌破同日)",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "b_below",
+          "label": "跌破多空線",
+          "met": true,
+          "kind": "state"
+        },
+        {
+          "id": "b_bigdown",
+          "label": "大跌長黑",
+          "met": false,
+          "kind": "state"
+        }
+      ],
+      "buyHit": false,
+      "sellHit": false
+    },
+    "mainforce": {
+      "buy": [
+        {
+          "id": "m_stage",
+          "label": "主力資金啟動",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "m_red",
+          "label": "中線主力(紅·機構)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "m_purple",
+          "label": "短線游資(紫)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "m_yellow",
+          "label": "主力控盤(黃)",
+          "met": true,
+          "kind": "state"
+        },
+        {
+          "id": "m_short",
+          "label": "做短線(紅+紫)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "m_mid",
+          "label": "做中線(紅+黃)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "m_three",
+          "label": "三色戰法(紅+紫+黃·最強)",
+          "met": false,
+          "kind": "state"
+        }
+      ],
+      "sell": [
+        {
+          "id": "m_weak",
+          "label": "中線主力轉弱(紅<0·機構撤)",
+          "met": true,
+          "kind": "signal"
+        },
+        {
+          "id": "m_blue",
+          "label": "散戶資金(藍·散戶主導易跌橫盤)",
+          "met": true,
+          "kind": "state"
+        },
+        {
+          "id": "m_loose",
+          "label": "主力鬆手(控盤=0)",
+          "met": false,
+          "kind": "state"
+        }
+      ],
+      "buyHit": false,
+      "sellHit": true
+    },
+    "catch": {
+      "buy": [
+        {
+          "id": "c_gold",
+          "label": "動能金叉",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "c_gold_bull",
+          "label": "多頭區金叉(趨勢延續)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "c_gold_bear",
+          "label": "空頭區金叉(底部反彈)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "c_gold_vol",
+          "label": "量價強勢(金叉+爆量)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "c_above",
+          "label": "安全做多區(0軸上)",
+          "met": false,
+          "kind": "state"
+        }
+      ],
+      "sell": [
+        {
+          "id": "c_dead",
+          "label": "動能死叉",
+          "met": false,
+          "kind": "signal"
+        },
+        {
+          "id": "c_dead_bull",
+          "label": "多頭區死叉(短期見頂)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "c_dead_bear",
+          "label": "空頭區死叉(下跌加速)",
+          "met": false,
+          "kind": "state"
+        },
+        {
+          "id": "c_below",
+          "label": "風險區(0軸下)",
+          "met": true,
+          "kind": "state"
+        }
+      ],
+      "buyHit": false,
+      "sellHit": false
+    },
+    "mainStage": null,
+    "groupBuyCount": 0,
+    "level": null,
+    "selected": false,
+    "conflict": false,
+    "sellWarnings": [
+      "中線主力轉弱(紅<0·機構撤)"
+    ],
+    "scores": {
+      "shortAttack": 0,
+      "midStrength": -0.82,
+      "midControl": 2.27,
+      "kongPan": 151.01
+    },
+    "combo": {
+      "grade": "weak",
+      "rank": 1,
+      "label": "無紅·低勝率",
+      "redGate": false,
+      "trigger": false,
+      "bottomReversal": false,
+      "midline": false
+    }
+  },
+  "chart": {
+    "zb4": 95.472,
+    "zb5": 96.551,
+    "zhineng": 93.35,
+    "duokong": 90.704,
+    "xys0": -1.136,
+    "xys1": -1.136,
+    "xys2": -1.074,
+    "midZb4": 80.287,
+    "midXys1": 1.552,
+    "scores": {
+      "shortAttack": 0,
+      "midStrength": -0.82,
+      "midControl": 2.27,
+      "kongPan": 151.01
+    },
+    "tiers": {
+      "green": 12,
+      "yellow": 78,
+      "cyan": 78,
+      "blue": 78
+    }
+  }
+}

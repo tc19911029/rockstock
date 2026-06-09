@@ -241,6 +241,48 @@ function sanitizeOHLC(symbol: string, market: 'TW' | 'CN', incoming: Candle[]): 
   return out;
 }
 
+/**
+ * dupPrevDayGuard（2026-06-02 加）— 擋「整根複製前一交易日」的封存 bug。
+ *
+ * 背景：盤後封存 / 盤中注入時，少數檔的來源回傳「停在前一交易日」的舊資料，被原封
+ * 寫成新日期 bar（O/H/L/C 連 volume 都一字不差，只有 date 不同）。因為連續兩日收盤
+ * 常很接近（6190 0513：92 vs 真實 91.6 差 0.43%），close-only 稽核 / sanitizeOHLC
+ * 都抓不到。此守衛在寫入前就擋掉，讓壞 bar 根本進不了 L1。
+ *
+ * 只擋「新增一個比現有最後一根更新的日期、卻整根複製它」這個已證實的向量：
+ *   c.date > existing.last.date（純新增）+ O/H/L/C/volume 與 existing.last 全等
+ *   + volume > 0（V0 是個股停牌平盤帶過，屬正常）
+ *   + high > low 且振幅 (high-low)/low >= 1%（濾掉薄量單一價股連兩日 byte 相同的
+ *     真實巧合——全市場 951 件清一色 V1~6 的 H==L 單價日）。
+ * 同日覆寫（盤中更新今日那根）、全量重灌的內部根不在此守，交由
+ * scripts/audit-l1-invariant.ts（每日偵測）+ scripts/repair-dup-bars.ts（修補）當後盾。
+ */
+function dupPrevDayGuard(
+  symbol: string,
+  market: 'TW' | 'CN',
+  incoming: Candle[],
+  existing: { candles: Candle[] } | null,
+): Candle[] {
+  if (!existing || existing.candles.length === 0) return incoming;
+  const last = existing.candles[existing.candles.length - 1];
+  return incoming.filter(c => {
+    if (c.date <= last.date) return true; // 只看「比現有最後一根更新的日期」
+    const range = c.low > 0 ? (c.high - c.low) / c.low : 0;
+    const isCopy =
+      c.open === last.open && c.high === last.high && c.low === last.low &&
+      c.close === last.close && c.volume === last.volume &&
+      c.volume > 0 && c.high > c.low && range >= 0.01;
+    if (isCopy) {
+      console.warn(
+        `[dupPrevDayGuard] ${market}:${symbol} ${c.date} 整根複製前一交易日 ${last.date}` +
+        `（O${c.open} H${c.high} L${c.low} C${c.close} V${c.volume}）— 疑似來源停在前日舊資料，拒寫該根`,
+      );
+      return false;
+    }
+    return true;
+  });
+}
+
 async function _writeCandleFileImpl(
   symbol: string,
   market: 'TW' | 'CN',
@@ -258,6 +300,14 @@ async function _writeCandleFileImpl(
 
   // 讀既有 → merge
   const existing = await readCandleFile(symbol, market);
+
+  // 整根複製前一交易日守衛（2026-06-02）：擋掉「新增日期卻整根複製現有最後一根」的壞 bar
+  const guarded = dupPrevDayGuard(symbol, market, incoming, existing);
+  if (guarded.length === 0) {
+    console.warn(`[writeCandleFile] ${market}:${symbol} 所有 incoming bar 都被 dupPrevDayGuard 擋下，skip 寫入`);
+    return;
+  }
+
   let stripped: Candle[];
   if (existing && existing.candles.length > 0) {
     // 指數 V=0 防呆（2026-05-13）：Yahoo 對 ^TWII / 000001.SS 等指數的當日 volume
@@ -267,7 +317,7 @@ async function _writeCandleFileImpl(
     const isIndex = symbol.startsWith('^') || symbol === '000001.SS' || symbol === '000300.SS';
     const map = new Map<string, Candle>();
     for (const c of existing.candles) map.set(c.date, c);
-    for (const c of incoming) {
+    for (const c of guarded) {
       const prev = map.get(c.date);
       if (isIndex && prev && c.volume === 0 && prev.volume > 0) {
         map.set(c.date, { ...c, volume: prev.volume });
@@ -281,13 +331,13 @@ async function _writeCandleFileImpl(
     // 安全規則（2026-05-09）：若 incoming 是「單根增量」（fast-path L2/TWSE 注入）且 existing 讀不到，
     // 視為高機率讀失敗（race / cache miss / IO 錯誤）→ abort，避免把好好的 L1 截斷成 1 根。
     // 完整下載（candles.length > 1）的情境可信度高，允許覆寫（新股初始化 / 全量重灌）。
-    if (incoming.length <= SINGLE_CANDLE_INCREMENT_THRESHOLD) {
+    if (guarded.length <= SINGLE_CANDLE_INCREMENT_THRESHOLD) {
       console.warn(
         `[writeCandleFile] ${market}:${symbol} skipped: existing read failed and incoming is single-candle increment (避免 L1 被截斷成 1 根的安全機制)`,
       );
       return;
     }
-    stripped = incoming.sort((a, b) => a.date.localeCompare(b.date));
+    stripped = guarded.sort((a, b) => a.date.localeCompare(b.date));
   }
 
   // Gap guard：寫入前偵測合併後結果的 gap（交易日 > 8）

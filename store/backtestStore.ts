@@ -149,7 +149,7 @@ interface BacktestState {
   /** 三色資金 level（陸股自創策略）— null = 走書本買法（activeBuyMethod）；非 null = 三色該 level 視角。
    *  單一事實來源：ScanPanelVertical（掃描清單）+ app/page.tsx（中間「條件/訊號」面板）共用，
    *  讓「點哪個策略 → 中間面板換成對應條件/訊號」一致。不持久化（reload 回 null）。 */
-  sanseLevel: 'strict' | 'medium' | 'loose' | null;
+  sanseLevel: 'strict' | 'medium' | 'loose' | 'reversal' | null;
   /** 載入買法結果的狀態 */
   isLoadingBuyMethod: boolean;
 
@@ -172,7 +172,7 @@ interface BacktestState {
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
   setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R') => Promise<void>;
-  setSanseLevel:          (lv: 'strict' | 'medium' | 'loose' | null) => void;
+  setSanseLevel:          (lv: 'strict' | 'medium' | 'loose' | 'reversal' | null) => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）

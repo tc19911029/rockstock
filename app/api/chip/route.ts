@@ -43,6 +43,18 @@ export interface ChipData {
   holder800To1000Pct: number;    // 800-1000 張比例
   /** 主力卡位訊號：400/600/800/1000 四級都有持股（業界：籌碼結構最完整）*/
   structureBuilding: boolean;
+  /** 各 tier 週變化（pp，最新一週 vs 前一週）；null = 兩週缺欄位無法比較 */
+  holderTierChange?: {
+    h100: number | null; h200: number | null; h400: number | null; h1000: number | null;
+    h400To600: number | null; h600To800: number | null; h800To1000: number | null;
+  };
+  /** 主 tier 連續週趨勢（連 N 增/減）— 對 weekly delta 序列跑 detectTrend */
+  holderTierTrend?: {
+    h100?: TrendInfo; h200?: TrendInfo; h400?: TrendInfo; h1000?: TrendInfo;
+  };
+  /** TDCC 最新基準日 / 前一週基準日（UI 顯示「週變化 vs MM/DD」）*/
+  tdccDate?: string;
+  tdccPrevDate?: string;
   // 投信動向（陳威良 3比8 proxy；用最近窗口累計淨買 ÷ 已發行股數，動向 pp，不是絕對持股 %）
   sharesIssued: number;                     // 已發行股數（股，from FinMind）；0 = 缺資料
   trustNetBuy30d: number;                   // 30 天累計投信淨買（張）
@@ -286,6 +298,7 @@ const chipQuerySchema = z.object({
 
 import { fetchT86ForStock } from '@/lib/datasource/TwseT86Provider';
 import { readTdccStock, readInstStock, writeInstStock } from '@/lib/chips/ChipStorage';
+import type { TdccDay } from '@/lib/chips/types';
 import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock, fetchLendingHistoryForStock } from '@/lib/datasource/FinmindChipExtras';
 import { getSharesIssued } from '@/lib/datasource/FinMindClient';
 import { detectTrend, rollingChange } from '@/lib/chips/trends';
@@ -531,6 +544,38 @@ export async function GET(req: NextRequest) {
       ? +(clampPct(latestTdcc.holder1000Pct) - clampPct(prevTdcc.holder1000Pct)).toFixed(2)
       : 0;
 
+    // ── 各 tier「跟前一週比」週變化（pp）+ 連續週趨勢（連 N 增/減）──
+    //    防呆：holder100/200 與三個細分桶是 2026-05-22 後才有的選填欄位；
+    //    舊週缺值會被 clampPct→0 算成「假性暴增」，所以一律要「兩週都有原始值」才比。
+    const tierWoW = (cur?: number, prev?: number): number | null =>
+      (cur != null && prev != null) ? +(clampPct(cur) - clampPct(prev)).toFixed(2) : null;
+    const holderTierChange = latestTdcc ? {
+      h100:       tierWoW(latestTdcc.holder100Pct,       prevTdcc?.holder100Pct),
+      h200:       tierWoW(latestTdcc.holder200Pct,       prevTdcc?.holder200Pct),
+      h400:       tierWoW(latestTdcc.holder400Pct,       prevTdcc?.holder400Pct),
+      h1000:      tierWoW(latestTdcc.holder1000Pct,      prevTdcc?.holder1000Pct),
+      h400To600:  tierWoW(latestTdcc.holder400To600Pct,  prevTdcc?.holder400To600Pct),
+      h600To800:  tierWoW(latestTdcc.holder600To800Pct,  prevTdcc?.holder600To800Pct),
+      h800To1000: tierWoW(latestTdcc.holder800To1000Pct, prevTdcc?.holder800To1000Pct),
+    } : undefined;
+
+    // 連續週趨勢：只用「該欄位有值」的週來組 weekly delta 序列（跳過缺欄位週，避免初次出現算成假跳階）
+    const tierDeltaSeries = (pick: (d: TdccDay) => number | undefined): number[] => {
+      const vals: number[] = [];
+      for (const r of (tdccFile?.data ?? [])) { const v = pick(r); if (v != null) vals.push(clampPct(v)); }
+      const ds: number[] = [];
+      for (let i = 1; i < vals.length; i++) ds.push(vals[i] - vals[i - 1]);
+      return ds.slice(-10);
+    };
+    const tierTrend = (pick: (d: TdccDay) => number | undefined): TrendInfo | undefined =>
+      (tdccFile?.data?.length ?? 0) >= 2 ? detectTrend(tierDeltaSeries(pick), 'inc_dec') : undefined;
+    const holderTierTrend = latestTdcc ? {
+      h100:  tierTrend(d => d.holder100Pct),
+      h200:  tierTrend(d => d.holder200Pct),
+      h400:  tierTrend(d => d.holder400Pct),
+      h1000: tierTrend(d => d.holder1000Pct),
+    } : undefined;
+
     const inst = instOnDate ? { foreignBuy, trustBuy, dealerBuy, totalBuy, name: '' } : undefined;
     const { score, grade, signal, detail } = calculateChipScore({
       inst: inst ? { foreignBuy, trustBuy, dealerBuy, totalBuy } : undefined,
@@ -582,6 +627,10 @@ export async function GET(req: NextRequest) {
       holder600To800Pct: h600To800,
       holder800To1000Pct: h800To1000,
       structureBuilding,
+      holderTierChange,
+      holderTierTrend,
+      tdccDate: latestTdcc?.date,
+      tdccPrevDate: prevTdcc?.date,
       sharesIssued: sharesIssued ?? 0,
       trustNetBuy30d,
       trustNetBuy60d,

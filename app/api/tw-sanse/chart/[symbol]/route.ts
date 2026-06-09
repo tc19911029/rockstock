@@ -60,8 +60,21 @@ export async function GET(
   try {
     const loaded = await loadTwCandles(raw);
     if (!loaded) return apiError('本地K線不足', 404);
-    const allCandles = loaded.candles;
-    const candles = asOf ? allCandles.filter((c) => c.date <= asOf) : allCandles;
+    let allCandles = loaded.candles;
+    let candles = asOf ? allCandles.filter((c) => c.date <= asOf) : allCandles;
+    // 深度走圖：asOf 早於本地 L1 最早一根 → 截斷後 < 60。部分台股本地 L1 偏淺（如 6415 只到 2024、1264 到 2021-04），
+    // 退過它就報「本地K線不足截斷後」。補抓 'max'（provider 可回到 2020-01）再 filter，讓深度回放不報錯。
+    // 常見路徑（最新圖 / 近端回放 / 深 L1 股）candles 不會 < 60、不進這支、無額外延遲。
+    if (asOf && candles.length < 60) {
+      try {
+        const { dataProvider } = await import('@/lib/datasource/MultiMarketProvider');
+        const deeper = await dataProvider.getHistoricalCandles(loaded.key, 'max', undefined, '1d');
+        if (Array.isArray(deeper) && deeper.length > allCandles.length) {
+          allCandles = deeper;
+          candles = deeper.filter((c) => c.date <= asOf);
+        }
+      } catch { /* 抓不到就維持原樣 → 下面回 404 */ }
+    }
     if (candles.length < 60) return apiError('本地K線不足（截斷後）', 404);
     // asOf 指向「今天以前」= 走圖步進歷史 → 凍結在該根、不注入今日盤中半根。
     // 不可用 candles.length < allCandles.length 判定：當 asOf 正好等於最新封存日時沒有 bar 被截掉，

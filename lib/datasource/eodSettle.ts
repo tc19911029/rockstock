@@ -19,6 +19,7 @@ import { yahooProvider } from './YahooDataProvider';
 import { tencentHistProvider } from './TencentHistProvider';
 import { eastMoneyHistProvider } from './EastMoneyHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
+import { isValidTwTick, snapTwTick, isTwEtf } from './twTick';
 import type { Candle } from '@/types';
 import type { VendorBatchCache } from './eodSettleBatch';
 import { lookupBulkQuote } from './eodSettleBatch';
@@ -102,36 +103,57 @@ async function fetchOne(
   }
 }
 
-/** 從多 vendor 結果決定 settled 值 */
-function reconcile(quotes: VendorQuote[]): { settled?: VendorQuote; status: SettleStatus; disagreements?: string[] } {
+type ReconcileResult = { settled?: VendorQuote; status: SettleStatus; disagreements?: string[]; warning?: string };
+
+/**
+ * TW 檔位守衛：封存前若收盤非合法檔位（FinMind 被 402 熔斷缺席時，只剩 Yahoo/EODHD 的中間價，
+ * 如 100-500 區間出現 158.75）→ snap 到最近合法檔位 + 標警，保證 L1 永不寫入次檔位偽價。
+ * CN 檔位規則不同，不套用。詳見 [[twTick]] / docs。
+ */
+function finalizeTwTick(q: VendorQuote, status: SettleStatus, market: Market, isEtf: boolean): ReconcileResult {
+  if (market === 'TW' && q.close > 0 && !isValidTwTick(q.close, isEtf)) {
+    const snapped: VendorQuote = {
+      ...q,
+      open: isValidTwTick(q.open, isEtf) ? q.open : snapTwTick(q.open, isEtf),
+      high: isValidTwTick(q.high, isEtf) ? q.high : snapTwTick(q.high, isEtf),
+      low: isValidTwTick(q.low, isEtf) ? q.low : snapTwTick(q.low, isEtf),
+      close: snapTwTick(q.close, isEtf),
+    };
+    return { settled: snapped, status, warning: `次檔位收盤 ${q.close}(vendor=${q.vendor}) → snap ${snapped.close}` };
+  }
+  return { settled: q, status };
+}
+
+/** 從多 vendor 結果決定 settled 值。isEtf：TW ETF/ETN（00 開頭）套較細檔位表（見 [[twTick]]）。 */
+export function reconcile(quotes: VendorQuote[], market: Market, isEtf = false): ReconcileResult {
   if (quotes.length === 0) return { status: 'pending-no-vendor-data' };
   if (quotes.length === 1) {
-    return { settled: quotes[0], status: 'settled-single-source' };
+    return finalizeTwTick(quotes[0], 'settled-single-source', market, isEtf);
   }
 
   // 找一組「至少 2 vendor close 一致」的 vendors
   for (let i = 0; i < quotes.length; i++) {
     for (let j = i + 1; j < quotes.length; j++) {
       if (isClose(quotes[i].close, quotes[j].close)) {
-        // 找到一致對。從 i, j 中選 vendor 優先序高的（前者）作為 settled
-        // 但 volume 取「最大值」(因為某些 vendor 給 0 或部分日資料)
-        const base = quotes[i];
-        const allVolumes = quotes.filter(q => isClose(q.close, base.close)).map(q => q.volume);
-        const maxVol = Math.max(...allVolumes, 0);
-        return {
-          settled: { ...base, volume: maxVol > 0 ? maxVol : base.volume },
-          status: 'settled-multi-source',
-        };
+        // 一致群：與 quotes[i] 收盤一致的所有 vendor（已按原優先序）。
+        const agreeing = quotes.filter(q => isClose(q.close, quotes[i].close));
+        // TW 優先挑「檔位合法」的收盤：合法 159 勝過中間價 158.75，即使兩者在 0.5% 容差內被視為一致；
+        // 一致群內無合法者才退回最高優先序，並由 finalizeTwTick snap。volume 取一致群最大值。
+        const base = (market === 'TW' ? agreeing.find(q => isValidTwTick(q.close, isEtf)) : undefined) ?? agreeing[0];
+        const maxVol = Math.max(...agreeing.map(q => q.volume), 0);
+        return finalizeTwTick(
+          { ...base, volume: maxVol > 0 ? maxVol : base.volume },
+          'settled-multi-source',
+          market,
+          isEtf,
+        );
       }
     }
   }
 
   // 多 vendor 但無一致對
   const disagreements = quotes.map(q => `${q.vendor}=${q.close.toFixed(2)}`);
-  return {
-    status: 'pending-multi-disagree',
-    disagreements,
-  };
+  return { status: 'pending-multi-disagree', disagreements };
 }
 
 /**
@@ -176,7 +198,11 @@ export async function settleSymbol(
     quotes.push({ ...existing, vendor: 'L1-existing' });
   }
 
-  const { settled: settledQuote, status, disagreements } = reconcile(quotes);
+  const { settled: settledQuote, status, disagreements, warning: tickWarning } = reconcile(quotes, market, isTwEtf(symbol));
+  const warnings = [
+    tickWarning,
+    status === 'settled-single-source' ? '只有 1 vendor 回，未經多源驗證' : null,
+  ].filter(Boolean);
   return {
     symbol,
     market,
@@ -186,7 +212,7 @@ export async function settleSymbol(
     settled: settledQuote,
     existing,
     disagreements,
-    warning: status === 'settled-single-source' ? '只有 1 vendor 回，未經多源驗證' : undefined,
+    warning: warnings.length ? warnings.join('；') : undefined,
   };
 }
 

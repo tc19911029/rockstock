@@ -5,6 +5,8 @@
 // 非交易時段或抓不到 → 回 null，前端退回本地 K 的開高低收。
 // ============================================================
 
+import type { Candle } from '@/types';
+
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
 
 export interface SanSeQuote {
@@ -78,4 +80,34 @@ export async function fetchQuote(symbol: string): Promise<SanSeQuote | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * 用即時報價組「今日」K 棒，並把量對齊歷史 K 線單位。
+ *
+ * 非掃描宇宙的創業板/科創股不在 L1 也不在 L2 快照 → 歷史只到昨日封存。盤中/盤後用此 helper
+ * 從即時報價補今日那根，讓走圖（主圖 K + 三色）延伸到今日。
+ *
+ * 量單位：repo 歷史基準是「股」（Tencent/Baidu/EastMoney provider 與 L1 store 皆股），但
+ * quote.volumeLots 是「手」→ 用歷史近窗中位數量級比對校正（>30× 才縮放），避免最後一根造成
+ * 單位斷層污染 midControl。報價無效（盤前 open=0 等）→ 回 null，呼叫端退回封存。
+ *
+ * @param quote    fetchQuote() 的結果
+ * @param histTail 歷史最近數根（判斷量單位量級用；傳近 20 根即可）
+ * @param todayDate 今日日期字串（YYYY-MM-DD，呼叫端依市場時區算）
+ */
+export function buildTodayBarFromQuote(
+  quote: SanSeQuote | null,
+  histTail: Candle[],
+  todayDate: string,
+): Candle | null {
+  if (!quote || !(quote.price > 0) || !(quote.open > 0) || !(quote.high > 0) || !(quote.low > 0)) return null;
+  let vol = quote.volumeLots;
+  const recent = histTail.map((c) => c.volume).filter((v) => v > 0).sort((a, b) => a - b);
+  if (recent.length >= 5 && vol > 0) {
+    const med = recent[Math.floor(recent.length / 2)];
+    if (med / vol > 30) vol *= 100;      // 歷史是「股」、報價是「手」→ ×100 對齊
+    else if (vol / med > 30) vol /= 100; // 反向保險
+  }
+  return { date: todayDate, open: quote.open, high: quote.high, low: quote.low, close: quote.price, volume: vol };
 }

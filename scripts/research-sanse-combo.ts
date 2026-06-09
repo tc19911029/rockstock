@@ -23,7 +23,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { computeSanSe } from '@/lib/cn-sanse/selectors';
-import { REF, MA, EMA, HHV, CROSS, add, sub, mul, div, isNum } from '@/lib/cn-sanse/tdx';
+import { computeDualB, computeXys, computeCatchVolSurge } from '@/lib/cn-sanse/dualB';
+import { MA, isNum } from '@/lib/cn-sanse/tdx';
 import type { Candle } from '@/types';
 
 type Market = 'TW' | 'CN';
@@ -33,9 +34,6 @@ const MAX_HOLD = 32;          // 出場最長持有（找不到賣訊就窗末�
 const ENTRY_MIN_IDX = 480;    // 黃(midControl) 吃 SUM(vol,480)，需 ~480 根才有效 → 所有模型同一起點才公平
 const MIN_BARS = ENTRY_MIN_IDX + FWD_WINDOW + 8; // ~520：個股至少要這麼長才進場
 const LIMIT_GAP = 0.095;      // 隔日開相對訊號日收 ≥9.5% 視為追停買不到（TW/CN 主板都 10% 限幅）
-
-// ZB4 線性加權：lag0=20,1=19,...,18=2, lag19=0(原碼跳過), lag20=1，總和 210（同 indicators.ts）
-const ZB4_W = (() => { const w = new Array(21).fill(0); for (let l = 0; l <= 18; l++) w[l] = 20 - l; w[20] = 1; return w; })();
 
 // ── 逐日訊號（全部與 candle index 對齊） ─────────────────────────
 interface Sig {
@@ -59,7 +57,6 @@ function computeSignals(candles: Candle[], indexClose: number[]): Sig {
   const H = candles.map((c) => c.high);
   const L = candles.map((c) => c.low);
   const C = candles.map((c) => c.close);
-  const V = candles.map((c) => c.volume);
   const dates = candles.map((c) => c.date);
 
   // 三色：直接用選股引擎的逐日分數（紫=shortAttack>0、紅=midStrength>0、黃=midControl>0）
@@ -72,32 +69,19 @@ function computeSignals(candles: Candle[], indexClose: number[]): Sig {
   const full = s.strict;      // 三色共振（滿分）
   const mainBuy = ignite.map((g, i) => g || develop[i] || full[i]); // = mainforce.buyHit 逐日版
 
-  // 雙B戰法（重現 indicators.ts:117–132）
-  const ZB = candles.map((c) => (c.close + c.high + c.open + c.low) / 4);
-  const zhineng = mul(HHV(ZB, 13), 0.95);
-  const ZB3 = candles.map((c) => (3 * c.close + c.open + c.low + c.high) / 6);
-  const zb4 = new Array(n).fill(NaN);
-  for (let i = 20; i < n; i++) { let q = 0; for (let l = 0; l <= 20; l++) q += ZB4_W[l] * ZB3[i - l]; zb4[i] = q / 210; }
-  const zb5 = MA(zb4, 6);
-  const bGold = CROSS(zb4, zb5);
-  const bDead = CROSS(zb5, zb4);
-  const bBreak = CROSS(C, zhineng);
-  const bBreakDn = CROSS(zhineng, C);
-  const ma60 = MA(C, 60);
+  // 雙B戰法（共用 ./dualB，與走圖/選股同源）
+  const db = computeDualB(candles);
+  const bGold = db.goldCross, bDead = db.deadCross, bBreak = db.breakUp, bBreakDn = db.breakDn;
+  const ma60 = db.ma60;
   const aboveMa60 = C.map((c, i) => isNum(ma60[i]) && c > ma60[i]);
 
-  // 捕撈季節（重現 indicators.ts:160–173）
-  const X1 = div(add(add(mul(C, 2), H), L), 3);
-  const X4 = EMA(EMA(EMA(X1, 3), 3), 3);
-  const XYS0 = mul(div(sub(X4, REF(X4, 1)), REF(X4, 1)), 100);
-  const XYS1 = XYS0;
-  const XYS2 = MA(XYS0, 2);
-  const cGold = CROSS(XYS1, XYS2);
-  const cDead = CROSS(XYS2, XYS1);
+  // 捕撈季節（共用 ./dualB）
+  const xys = computeXys(candles);
+  const XYS1 = xys.xys1;
+  const cGold = xys.goldCross, cDead = xys.deadCross;
   const xAbove0 = XYS1.map((x) => isNum(x) && x > 0);
   const xBelow0 = XYS1.map((x) => isNum(x) && x < 0);
-  const vMa5 = MA(V, 5);
-  const volSurge = V.map((v, i) => isNum(vMa5[i]) && vMa5[i] > 0 && v > vMa5[i] * 1.5);
+  const volSurge = computeCatchVolSurge(candles);
 
   // 出場輔助：MA5/MA10 跌破（書本短/中線停利）、紅翻負（中線主力轉弱）
   const ma5 = MA(C, 5);

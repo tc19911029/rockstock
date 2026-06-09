@@ -50,7 +50,12 @@ export async function POST(
       return apiError('buildValuationInputsTW 回傳 undefined');
     }
     if (!valuationInputs.currentPrice || !valuationInputs.ttmEps) {
-      return apiError(`資料不足（currentPrice=${valuationInputs.currentPrice}, ttmEps=${valuationInputs.ttmEps}）— FinMind 可能尚未開放或股票代號錯誤`);
+      const cp = valuationInputs.currentPrice;
+      // 有現價但缺 TTM EPS：最常見是 FinMind 季財報請求被限流（402 額度用罄），不是代號錯誤。
+      const reason = cp && !valuationInputs.ttmEps
+        ? 'FinMind 季財報請求可能被限流（402 額度用罄）或近 4 季財報尚未齊全 — 請稍後重試'
+        : 'FinMind 可能尚未開放或股票代號錯誤';
+      return apiError(`資料不足（currentPrice=${cp}, ttmEps=${valuationInputs.ttmEps}）— ${reason}`);
     }
 
     const outputPath = `data/valuation/${date}/${bareSymbol}.json`;

@@ -15,6 +15,7 @@
 import { NextRequest } from 'next/server';
 import { apiError, apiOk } from '@/lib/api/response';
 import { listOpenHoldings } from '@/lib/agents/portfolio/storage';
+import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
 import { evaluateHolding, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
@@ -52,10 +53,11 @@ export interface DailyActionResponse {
   items: DailyActionItem[];
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const today = todayYmdTaipei(new Date());
-    const holdings = await listOpenHoldings();
+    const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
+    const holdings = await listOpenHoldings(profileId);
     const twHoldings = holdings.filter(h => h.market === 'TW');
 
     // 大盤 regime

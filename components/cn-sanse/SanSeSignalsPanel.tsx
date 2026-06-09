@@ -62,9 +62,9 @@ export function SanSeSignalsPanel({ report }: { report: ConditionReport | null }
         {r.conflict && <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}
       </div>
 
-      {/* 一眼結論：該買 / 該賣 / 觀望 */}
-      <div className={cn('rounded-md border p-2', VERDICT_STYLE[v.tone].cls)}>
-        <div className="text-[15px] font-bold leading-none">{VERDICT_STYLE[v.tone].head}</div>
+      {/* 一眼結論：底反該買(最高把握) / 該買 / 該賣 / 觀望 */}
+      <div className={cn('rounded-md border p-2', v.reversal ? 'bg-rose-600/25 text-rose-100 border-rose-400/70 ring-1 ring-rose-400/50' : VERDICT_STYLE[v.tone].cls)}>
+        <div className="text-[15px] font-bold leading-none">{v.reversal ? '🔥 底反該買 · 最高把握' : VERDICT_STYLE[v.tone].head}</div>
         <div className="text-[11px] mt-1 leading-snug">{v.reason}</div>
         {r.combo && <div className="text-[10px] mt-1.5 opacity-75">評級：{COMBO_LABEL[r.combo.grade]}{r.combo.bottomReversal ? '·底部反彈' : ''}｜{COMBO_HINT[r.combo.grade]}</div>}
       </div>

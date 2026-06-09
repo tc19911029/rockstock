@@ -9,6 +9,8 @@
 //   換手率 = vol(手)×100 ÷ 流通股 ×100，用實測對齊騰訊即時換手率（誤差 < 0.01%）
 // ============================================================
 
+import type { Candle } from '@/types';
+
 export interface DayExtras { amount: number; vol: number; turnover: number }
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
@@ -47,21 +49,28 @@ async function fetchFloatShares(tc: string): Promise<number> {
   }
 }
 
-/** 回傳 date → { amount(元), vol(手), turnover(%) } */
-export async function fetchDayExtras(symbol: string): Promise<Map<string, DayExtras>> {
+/**
+ * 回傳 date → { amount(元), vol(手), turnover(%) }。
+ * 騰訊 fqkline 只回最近 ~640 根（約 2.6 年）→ 走圖深度回放會超出窗口。
+ * 傳入 localCandles（本地 L1 全段，最早可達 ~5 年）時，用「校準後的本地 volume」補騰訊窗口之外的更舊日期，
+ * 讓深度回放也有彩柱（見 extendWithLocal）。
+ */
+export async function fetchDayExtras(symbol: string, localCandles?: Candle[]): Promise<Map<string, DayExtras>> {
   const map = new Map<string, DayExtras>();
   const tc = toTencentCode(symbol);
   if (!tc) return map;
 
+  let floatShares = NaN;
   try {
-    const [klineRes, floatShares] = await Promise.all([
-      fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,500,qfq`, {
+    const [klineRes, fs] = await Promise.all([
+      fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,1000,qfq`, {
         headers: { 'User-Agent': UA, Referer: 'https://gu.qq.com/' },
         signal: AbortSignal.timeout(12000),
       }),
       fetchFloatShares(tc),
     ]);
-    if (!klineRes.ok) return map;
+    floatShares = fs;
+    if (!klineRes.ok) return extendWithLocal(map, localCandles, floatShares);
     const json = (await klineRes.json()) as { data?: Record<string, { qfqday?: string[][]; day?: string[][] }> };
     const rows = json.data?.[tc]?.qfqday ?? json.data?.[tc]?.day ?? [];
     for (const r of rows) {
@@ -75,7 +84,56 @@ export async function fetchDayExtras(symbol: string): Promise<Map<string, DayExt
       map.set(date, { amount, vol: volLots, turnover });
     }
   } catch {
-    /* 抓不到就回空 map，副圖少那排彩柱、其餘照常 */
+    /* 抓不到就回空 map（或只剩本地延伸），副圖少那排彩柱、其餘照常 */
+  }
+  return extendWithLocal(map, localCandles, floatShares);
+}
+
+/**
+ * 用本地 L1 volume 補騰訊 640 根窗口「之外」的更舊日期，讓走圖深度回放（>2.6 年）也有彩柱。
+ * 自我校準：本地 volume 單位可能是「股」(=騰訊手×100) 或被污染成其他尺度 → 用重疊區的
+ * 中位數比例 k = median(騰訊手 / 本地volume) 把本地 volume 換算成「騰訊手」等價；中位數對少數壞日(單位污染) robust。
+ * 需 ≥30 個重疊點才敢外推；校準不出來就維持原樣（只少深度彩柱、不亂畫）。
+ */
+function extendWithLocal(
+  map: Map<string, DayExtras>,
+  localCandles: Candle[] | undefined,
+  floatShares: number,
+): Map<string, DayExtras> {
+  if (!localCandles?.length || !(floatShares > 0) || map.size === 0) return map;
+  let tencentEarliest = '9999-99-99';
+  for (const d of map.keys()) if (d < tencentEarliest) tencentEarliest = d;
+  const ratios: number[] = [];
+  for (const c of localCandles) {
+    const t = map.get(c.date);
+    if (t && Number.isFinite(t.vol) && Number.isFinite(c.volume) && c.volume > 0) ratios.push(t.vol / c.volume);
+  }
+  if (ratios.length < 30) return map;
+  ratios.sort((a, b) => a - b);
+  const k = ratios[Math.floor(ratios.length / 2)]; // 中位數：本地volume → 騰訊手
+  if (!(k > 0) || !Number.isFinite(k)) return map;
+  for (const c of localCandles) {
+    if (c.date < tencentEarliest && !map.has(c.date) && Number.isFinite(c.volume) && c.volume > 0) {
+      const volLots = c.volume * k;
+      const amount = Number.isFinite(c.close) ? c.close * volLots * 100 : NaN;
+      const turnover = (volLots * 10000) / floatShares;
+      map.set(c.date, { amount, vol: volLots, turnover });
+    }
   }
   return map;
+}
+
+// ── 走圖回放用 per-symbol 快取 ───────────────────────────────────────────────
+// turnover 歷史對「過去日期」不變、只有今日那筆會盤中變動。快取讓走圖步進歷史時不必每步重打騰訊
+// （否則每步最多卡 4s）。10 分鐘 TTL：盤中今日換手率最多落後 10 分鐘，但彩柱是 4 級粗分桶、10 分鐘內極少改變分級，
+// 與 server 其他 turnover 快取策略一致。只快取「成功（非空）」結果，避免把暫時性抓取失敗鎖住整個 TTL。
+const _dayExtrasTtlMs = 10 * 60 * 1000;
+const _dayExtrasCache = new Map<string, { data: Map<string, DayExtras>; ts: number }>();
+
+export async function fetchDayExtrasCached(symbol: string, localCandles?: Candle[]): Promise<Map<string, DayExtras>> {
+  const hit = _dayExtrasCache.get(symbol);
+  if (hit && Date.now() - hit.ts < _dayExtrasTtlMs) return hit.data;
+  const data = await fetchDayExtras(symbol, localCandles);
+  if (data.size > 0) _dayExtrasCache.set(symbol, { data, ts: Date.now() });
+  return data;
 }

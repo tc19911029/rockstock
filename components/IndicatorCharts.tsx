@@ -826,7 +826,7 @@ function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicat
     const slow = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     slow.setData(alignToCandles(candles, xys.xys2));
     seriesRef.current.push(slow);
-    createSeriesMarkers(slow, xys.subMarkers.map(m => ({ time: toTime(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text })));
+    createSeriesMarkers(slow, xys.subMarkers.map(m => ({ time: toTime(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text, size: m.size })));
     setLastRange(chart);
   }, [candles, xys]);
 
