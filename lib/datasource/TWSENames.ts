@@ -238,6 +238,31 @@ async function buildNameMap(): Promise<BuildResult> {
     }
   }
 
+  // 2026-06-09：本地 stock-master.json 補全（離線保底）。
+  // 上櫃名稱原本只靠 TPEx OpenAPI / ISIN，但 TPEx 對「Node spawn 的 curl」會 bot 擋
+  // （見 curlFetch.ts 的 0514 註解）— prod server 首次建 map 那刻一被擋，就整片上櫃沒中文名
+  // 並快取 24h（2026-06-09 實際踩到：3357 等 ~890 檔上櫃全顯示代號）。改用 youtube cron 維護的
+  // 本地 23K code↔name（含 1009 檔 TPEx，純讀檔免網路）補網路沒蓋到的，並把 TPEx-market 代號
+  // 補進 otcCodes，讓 isOTC 路由不再受 TPEx 抓取成敗影響。網路有抓到的名稱優先（此處只 fill gap）。
+  try {
+    const smPath = path.join(process.cwd(), 'data', 'youtube', 'stock-master.json');
+    const sm = JSON.parse(fs.readFileSync(smPath, 'utf-8')) as {
+      entries?: { code: string; name: string; market?: string }[];
+    };
+    let nameFilled = 0;
+    let otcFilled = 0;
+    for (const e of sm.entries ?? []) {
+      if (!e.code || !e.name) continue;
+      if (map[e.code] == null) { map[e.code] = e.name; nameFilled++; }
+      if (e.market === 'TPEx' && !otcCodes.has(e.code)) { otcCodes.add(e.code); otcFilled++; }
+    }
+    if (nameFilled || otcFilled) {
+      console.info(`[TWSENames] stock-master 補全 — names+${nameFilled} otc+${otcFilled}`);
+    }
+  } catch (err) {
+    console.warn('[TWSENames] stock-master 補全略過:', err instanceof Error ? err.message : err);
+  }
+
   console.info(`[TWSENames] buildNameMap done — TWSE=${twseAdded} TPEx=${tpexAdded} ISIN${isinUsed ? '=used' : '=skip'} total=${Object.keys(map).length} otc=${otcCodes.size}`);
   return { map, otcCodes };
 }

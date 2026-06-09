@@ -37,28 +37,38 @@ export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, Bu
   } catch { return new Map(); }
 }
 
-/** TPEx 上櫃 OpenAPI 全市場 OHLCV — 只回最新日（歷史日要靠 per-symbol 補）
+/** 民國日期 "1150609" → 西元 "2026-06-09"（feed 的 Date 欄位格式） */
+function rocDateToAd(roc: string | undefined): string | null {
+  if (!roc) return null;
+  const s = roc.trim();
+  if (!/^\d{7}$/.test(s)) return null;
+  const y = parseInt(s.slice(0, 3), 10) + 1911;
+  return `${y}-${s.slice(3, 5)}-${s.slice(5, 7)}`;
+}
+
+/** TPEx 上櫃 OpenAPI 全市場 OHLCV — 一次拉 1000+ 檔（上櫃官方權威源）
  *
- * 2026-05-21：原 stub 直接 return new Map() 讓上櫃股 EOD settle 完全沒 TPEx 權威源，
- * 三源剩 FinMind+EODHD+Yahoo 對打，stale L1 帶歪就 settled-single-source 寫死。
- * 修補：對「今天」走 TPEx OpenAPI（一次拉 1000+ 檔），對「歷史日」仍 return empty。
+ * 2026-05-21：原 stub return new Map() 讓上櫃 EOD settle 完全沒 TPEx 權威源。
+ * 2026-06-09 修真正的 bug：原本用 `date !== todayTW(日曆今天)` 當 gate，但盤後封存
+ * 常在隔天 00:xx 才跑（封昨日），那時 todayTW 已滾到今天 → date(昨)≠todayTW → 整個
+ * TPEx 被擋掉回空 → 上櫃只剩 FinMind 當唯一錨，FinMind 一 402 就退 Yahoo 中間價 →
+ * 次檔位守衛擋下 → 卡關/污染（124 檔卡 06-05 + 28 根中間價假收盤的根因）。
+ * 改用 feed 自己帶的交易日（Date 欄，民國 yyyMMdd）比對：feed 日 === 要封的 date 才採用，
+ * 否則留空讓 per-symbol vendor 接手（歷史日 feed 沒有 → 自動退讓，行為正確）。
  */
 export async function fetchTPExBulkForDate(date: string): Promise<Map<string, BulkRow>> {
   const map = new Map<string, BulkRow>();
   try {
-    // 判斷是否為「今天」(taipei)
-    const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-    if (date !== todayTW) {
-      // 歷史日不支援；留空讓 per-symbol vendor 接手
-      return map;
-    }
     const url = 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes';
     const { data } = await fetchJsonWithCurlFallback<Array<{
       Date?: string; SecuritiesCompanyCode?: string;
       Open?: string; High?: string; Low?: string; Close?: string;
       TradingShares?: string;
     }>>(url, { timeoutMs: 15_000 });
-    if (!Array.isArray(data)) return map;
+    if (!Array.isArray(data) || data.length === 0) return map;
+    // feed 帶自己的交易日；只在 feed 日 === 要封的 date 時採用（避免盤中跑、或拿錯日資料）
+    const feedDate = rocDateToAd(data.find(r => r.Date)?.Date);
+    if (!feedDate || feedDate !== date) return map;
     const num = (s: string | undefined) => {
       if (!s) return 0;
       const n = parseFloat(String(s).replace(/,/g, ''));
