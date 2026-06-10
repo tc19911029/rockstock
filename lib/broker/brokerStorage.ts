@@ -19,18 +19,24 @@ const FS_ROOT = path.join(process.cwd(), 'data', 'broker');
 
 /** 券商 registry 預設值（檔名 hint → 顯示名 + 預設幣別）。 */
 export const DEFAULT_BROKERS: BrokerRegistryEntry[] = [
-  { key: 'gs', display: 'Goldman Sachs', aliases: ['gs', 'goldman', 'goldman sachs'], default_currency: 'TWD' },
-  { key: 'ms', display: 'Morgan Stanley', aliases: ['ms', 'morgan', 'morgan stanley'], default_currency: 'TWD' },
-  { key: 'citi', display: 'Citi', aliases: ['citi', 'citigroup', 'citibank'], default_currency: 'TWD' },
-  { key: 'ubs', display: 'UBS', aliases: ['ubs'], default_currency: 'TWD' },
-  { key: 'daiwa', display: 'Daiwa', aliases: ['daiwa', 'daiwa-cathay', 'dwa'], default_currency: 'TWD' },
-  { key: 'jpm', display: 'J.P. Morgan', aliases: ['jpm', 'jpmorgan', 'jp morgan'], default_currency: 'TWD' },
-  { key: 'bofa', display: 'BofA', aliases: ['bofa', 'baml', 'merrill'], default_currency: 'TWD' },
-  { key: 'nomura', display: 'Nomura', aliases: ['nomura'], default_currency: 'TWD' },
-  { key: 'macquarie', display: 'Macquarie', aliases: ['macquarie', 'mq'], default_currency: 'TWD' },
-  { key: 'cls', display: 'CLSA', aliases: ['cls', 'clsa'], default_currency: 'TWD' },
-  { key: 'jefferies', display: 'Jefferies', aliases: ['jefferies', 'jef'], default_currency: 'TWD' },
-  { key: 'hsbc', display: 'HSBC', aliases: ['hsbc'], default_currency: 'TWD' },
+  { key: 'gs', display: '高盛', aliases: ['gs', 'goldman', 'goldman sachs'], default_currency: 'TWD' },
+  { key: 'ms', display: '大摩', aliases: ['ms', 'morgan', 'morgan stanley'], default_currency: 'TWD' },
+  { key: 'citi', display: '花旗', aliases: ['citi', 'citigroup', 'citibank'], default_currency: 'TWD' },
+  { key: 'ubs', display: '瑞銀', aliases: ['ubs'], default_currency: 'TWD' },
+  { key: 'daiwa', display: '大和', aliases: ['daiwa', 'daiwa-cathay', 'dwa'], default_currency: 'TWD' },
+  { key: 'jpm', display: '小摩', aliases: ['jpm', 'jpmorgan', 'jp morgan'], default_currency: 'TWD' },
+  { key: 'bofa', display: '美銀', aliases: ['bofa', 'baml', 'merrill'], default_currency: 'TWD' },
+  { key: 'nomura', display: '野村', aliases: ['nomura'], default_currency: 'TWD' },
+  { key: 'macquarie', display: '麥格理', aliases: ['macquarie', 'mq'], default_currency: 'TWD' },
+  { key: 'cls', display: '里昂', aliases: ['cls', 'clsa'], default_currency: 'TWD' },
+  { key: 'jefferies', display: '傑富瑞', aliases: ['jefferies', 'jef'], default_currency: 'TWD' },
+  { key: 'hsbc', display: '滙豐', aliases: ['hsbc'], default_currency: 'TWD' },
+  // 本土券商
+  { key: 'kgi', display: '凱基', aliases: ['kgi', '凱基', '凱基投顧'], default_currency: 'TWD' },
+  { key: 'fubon', display: '富邦', aliases: ['fubon', '富邦', '富邦投顧'], default_currency: 'TWD' },
+  { key: 'ctbc', display: '中信', aliases: ['ctbc', '中信', '中信投顧'], default_currency: 'TWD' },
+  { key: 'sinopac', display: '永豐', aliases: ['sinopac', '永豐', '永豐投顧'], default_currency: 'TWD' },
+  { key: 'masterlink', display: '元富', aliases: ['masterlink', '元富', '元富投顧'], default_currency: 'TWD' },
 ];
 
 // ── blob/fs helper（照 analysisStorage.ts）─────────────────────────────────────

@@ -117,6 +117,10 @@ export interface BrokerRegistryEntry {
 export function normalizeRating(raw: string): BrokerRatingNormalized {
   const s = (raw || '').toLowerCase().trim();
   if (!s) return 'other';
+  // 中文券商評等（富邦/凱基/中信等本土券商）
+  if (/減少持股|賣出|減碼|劣於大盤|區間偏空/.test(s)) return 'sell';
+  if (/增加持股|買進|加碼|強力買進|逢低買進|優於大盤|區間偏多|看好/.test(s)) return 'buy';
+  if (/中立|區間操作|區間整理|同步大盤|持有/.test(s)) return 'neutral';
   if (/(^|[^a-z])(overweight|ow)([^a-z]|$)/.test(s)) return 'overweight';
   if (/(^|[^a-z])(underweight|uw)([^a-z]|$)/.test(s)) return 'underweight';
   if (/(equal[\s-]?weight|equalwt|(^|[^a-z])ew([^a-z]|$)|market[\s-]?perform|in[\s-]?line|neutral)/.test(s)) return 'neutral';

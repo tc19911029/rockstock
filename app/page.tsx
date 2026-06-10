@@ -46,6 +46,7 @@ import { DataHealthBadge } from '@/features/scan/components/DataHealthBadge';
 import type { SelectedStock } from '@/features/scan';
 import type { SanSeChartPayload } from '@/components/cn-sanse/SanSeChart';
 import { YoutubeStocksPanel } from '@/components/youtube/YoutubeStocksPanel';
+import { BrokerReportsPanel } from '@/components/broker/BrokerReportsPanel';
 import { CandidatesPoolPanel } from '@/components/CandidatesPoolPanel';
 import { FundamentalRevaluationPanel } from '@/components/FundamentalRevaluationPanel';
 import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
@@ -166,7 +167,7 @@ function HomePage() {
     const date = searchParams.get('date');
     const urlTab = searchParams.get('tab');
     const tfParam = searchParams.get('tf');
-    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'fundamental' || urlTab === 'pool' || urlTab === 'agent') {
+    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'fundamental' || urlTab === 'pool' || urlTab === 'agent' || urlTab === 'broker') {
       setRightTab(urlTab);
       // 套用後立刻把 ?tab= 從 URL 拿掉 — inbound link 進來會切 tab,但 reload 不會再套用,維持 default scan
       // 保留其他 query param(?load / ?date / ?tf)
@@ -232,7 +233,7 @@ function HomePage() {
   // Scanner bottom panel — v12 預設展開讓用戶一進來就看到新功能（14 字母 tabs/Step 0 banner/LockWatch panel/警示徽章）
   const [scannerOpen, setScannerOpen] = useState(true);
   // Stage 7-10：右側 panel tab — 策略掃描 / YouTube 提及 / 候選池 / Multi-Agent
-  type RightTab = 'scan' | 'youtube' | 'fundamental' | 'pool' | 'agent';
+  type RightTab = 'scan' | 'youtube' | 'fundamental' | 'pool' | 'agent' | 'broker';
   const [rightTab, setRightTab] = useState<RightTab>('scan');
   // Stage 16：3 tab 共用 date state（YouTube / Pool / Multi-Agent 都看同一天）
   // 預設「最近工作日」，因為 today 的資料通常還沒跑完
@@ -979,6 +980,22 @@ function HomePage() {
                   <span className="hidden md:inline">多代理</span>
                   <span className="md:hidden">代理</span>
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'broker'}
+                  onClick={() => setRightTab('broker')}
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'broker'
+                      ? 'text-foreground border-b-2 border-rose-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="法人報告：報告後漲跌幅 + 目標價達成度"
+                >
+                  <span aria-hidden="true">🏦</span>
+                  <span className="hidden md:inline">法人報告</span>
+                  <span className="md:hidden">法人</span>
+                </button>
                 <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)}
                   className="px-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -1024,6 +1041,14 @@ function HomePage() {
                     selectedSymbol={currentStock?.ticker}
                     defaultDate={tabDate}
                     onDateChange={setTabDate}
+                  />
+                )}
+                {rightTab === 'broker' && (
+                  <BrokerReportsPanel
+                    date={tabDate}
+                    onDateChange={setTabDate}
+                    onSelectStock={handleYoutubeSelectStock}
+                    selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
                 )}
               </div>
