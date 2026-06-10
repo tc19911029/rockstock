@@ -37,7 +37,14 @@ async function callRoute(path: string, label: string): Promise<unknown> {
 export async function register() {
   // 只在本地開發啟動定時器（Vercel 有自己的 cron）
   if (process.env.VERCEL || process.env.NODE_ENV === 'test') return;
-  // 手動關閉開關：DISABLE_LOCAL_CRON=1 npm run dev → dev server 不跑 cron
+  // 只有 production（npm run start，:3000 正牌 prod server）才註冊 local-cron。
+  // dev server（next dev，Claude Preview :3100）一律略過 —— 它的 cron 會打 localhost:3000
+  // 與 prod 重複觸發（同一份 L2 刷新/三色掃描跑兩次，盤中多吃一份 /api/stock）。
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[local-cron] 非 production（dev server），略過本地 cron 模擬，避免與 prod 重複觸發');
+    return;
+  }
+  // 手動關閉開關：DISABLE_LOCAL_CRON=1（prod 維護模式：launchctl setenv 後 kickstart）→ 連 prod 也不跑 cron
   if (process.env.DISABLE_LOCAL_CRON === '1') {
     console.log('[local-cron] DISABLE_LOCAL_CRON=1 已停用本地 cron 模擬');
     return;
