@@ -23,8 +23,10 @@ type TabKey = 'market' | 'youtube' | 'technical' | 'agent' | 'system';
 const TABS: Array<{ key: TabKey; label: string; icon: string }> = [
   { key: 'market',    label: '行情資料',     icon: '📈' },
   { key: 'youtube',   label: 'YouTube 節目', icon: '📺' },
-  { key: 'technical', label: '技術策略',     icon: '⚙️' },
-  { key: 'agent',     label: '多代理分析',   icon: '🤖' },
+  // 技術策略 / 多代理分析 tab 尚未實作（只有施工中佔位），先隱藏避免使用者撞到空頁；
+  // 下方 render 區塊與 PlaceholderTab 暫留，待實作後再把這兩行加回 TABS。
+  // { key: 'technical', label: '技術策略',     icon: '⚙️' },
+  // { key: 'agent',     label: '多代理分析',   icon: '🤖' },
   { key: 'system',    label: '系統任務',     icon: '🛠️' },
 ];
 

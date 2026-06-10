@@ -392,11 +392,12 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
     setRawData(null);
     setStandaloneValuation(null);
     const bareSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    if (symbol.startsWith('^')) { setLoading(false); return; }  // 指數無基本面/估值，短路不打 decisions API（否則回「symbol 格式不合法」）
 
     // Tier 1: Multi-Agent 完整分析（API 規定 date 必填，預設今天台北日）
     const effectiveDate = date ?? new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
     const decisionUrl = `/api/agents/decisions/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`;
-    fetch(decisionUrl)
+    fetch(decisionUrl, { signal: AbortSignal.timeout(8000) })
       .then(r => r.json())
       .then(async (j: DecisionPayload) => {
         if (cancelled) return;
@@ -410,8 +411,8 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
         }
         // Tier 2: 標準 fallback — 抓原始財務數字 + standalone 估值（可能存在）
         const [rawRes, valRes] = await Promise.all([
-          fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`).catch(() => null),
-          fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`).catch(() => null),
+          fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
+          fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
         ]);
         if (cancelled) return;
         try {
@@ -428,6 +429,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
     return () => { cancelled = true; };
   }, [symbol, date]);
 
+  if (symbol.startsWith('^')) return <div className="p-3 text-xs text-muted-foreground py-6 text-center">指數無基本面 / 估值資料</div>;
   if (loading) return <div className="p-3 text-xs text-muted-foreground animate-pulse">載入基本面分析…</div>;
   if (error) return <div className="p-3 text-xs text-rose-400">載入失敗：{error}</div>;
 

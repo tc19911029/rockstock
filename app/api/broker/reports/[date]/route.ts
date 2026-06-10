@@ -22,7 +22,7 @@ export async function GET(
   try {
     const day = await loadDailyReports(date);
     if (!day) {
-      return apiOk({ date, reports: [], message: 'no broker reports for this date — drop PDFs and run /broker-analysis' });
+      return apiOk({ date, reports: [], message: '此日無券商報告' });
     }
     return apiOk(day);
   } catch (err) {

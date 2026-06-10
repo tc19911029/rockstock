@@ -13,7 +13,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
-import type { StockLookupResult } from './stockMaster';
+import { loadStockMaster } from './stockMaster';
+import type { StockLookupResult, StockMasterFile } from './stockMaster';
+import { validateAnalysisNames } from './validateAnalysisNames';
 
 const IS_VERCEL = !!process.env.VERCEL;
 const BLOB_PREFIX = 'youtube';
@@ -264,6 +266,16 @@ export async function loadDailyAnalysis(date: string): Promise<DailyAnalysis | n
 }
 
 export async function saveDailyAnalysis(analysis: DailyAnalysis): Promise<void> {
+  // 寫入前驗證 code/name 對應 stock-master（防寫錯名持久化進 git，如 4958「臻鼎」應為「臻鼎-KY」）。
+  // master 載入失敗（離線/限流）→ 略過驗證照常寫；只有「確定不符」才擋下並拋錯，與合約測試共用同一份規則。
+  let master: StockMasterFile | null = null;
+  try { master = await loadStockMaster(); } catch { master = null; }
+  if (master) {
+    const errs = validateAnalysisNames(analysis, master);
+    if (errs.length > 0) {
+      throw new Error(`analysis 名稱與 stock-master 不符（${errs.length} 筆，請修正代號/名稱後再存）：${errs.slice(0, 5).join('; ')}`);
+    }
+  }
   await putJson(analysisKey(analysis.date), analysis);
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { getTWChineseName, getCNChineseName } from '@/lib/datasource/TWSENames';
+import { twNameWithTimeout, cnNameWithTimeout } from '@/lib/datasource/nameWithTimeout';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import { getFugleIntradayCandles, getFugleHistoricalMinuteCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
@@ -41,6 +41,20 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
       () => { if (!settled) { settled = true; clearTimeout(timer); resolve(fallback); } },
     );
   });
+}
+
+// ── 中文名稱查詢（local 與 API 兩條路徑共用唯一一份，防 timeout 包覆 drift）──────────
+// 名稱是 nice-to-have：buildNameMap 冷啟動要打 TWSE/TPEx/ISIN 三源、CN 走 EastMoney/騰訊，
+// fake-IP DNS 下 Node fetch 會卡數十秒。設 3s 預算，逾時就回 null（呼叫端用代號當名稱），
+// 圖照樣秒出、name-map 之後在背景建好、下次就有名。曾因兩條路徑各自包覆、只改一條而 regress。
+async function resolveChineseName(opts: { isTW: boolean; isCN: boolean; pureCode: string; symbol: string }): Promise<string | null> {
+  const { isTW, isCN, pureCode, symbol } = opts;
+  if (isTW) return await twNameWithTimeout(pureCode);
+  if (isCN) {
+    const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
+    return await cnNameWithTimeout(pureCode, cnSuffix);
+  }
+  return null;
 }
 
 // ── 場外基金(.OF) K 線：讀 data/funds/{symbol}.json（淨值歷史，與股票 L1 隔離）──────────
@@ -399,14 +413,8 @@ export async function GET(req: NextRequest) {
         }
 
         let name = candidates[0];
-        if (isTW) {
-          const twName = await getTWChineseName(pureCode).catch(() => null);
-          if (twName) name = twName;
-        } else if (isCN) {
-          const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-          const cnName = await getCNChineseName(pureCode, cnSuffix);
-          if (cnName) name = cnName;
-        }
+        const localName = await resolveChineseName({ isTW, isCN, pureCode, symbol });
+        if (localName) name = localName;
         const indexName = INDEX_NAMES[candidates[0].toUpperCase()];
         if (indexName) name = indexName;
         return apiOk({
@@ -455,9 +463,18 @@ export async function GET(req: NextRequest) {
 
     // MultiMarketProvider 多源備援（日K 主要路徑，或 CN/US 分鐘 K 的備援）
     if (candles.length === 0) {
+      // 外部抓取設共用時間預算（C-2）：外部來源卡死時（如本機 DNS 把外網解到假 IP、Node fetch 直連卡死）
+      // 不讓整條 request 卡 70s；逾時當作落空，往下走 L1 退路 / 404。
+      const HIST_BUDGET_MS = Number(process.env.STOCK_HIST_BUDGET_MS) || 9000;
+      const histDeadline = Date.now() + HIST_BUDGET_MS;
       for (const candidate of candidates) {
         try {
-          const result = await dataProvider.getHistoricalCandles(candidate, period, undefined, interval);
+          const remaining = Math.max(500, histDeadline - Date.now());
+          const result = await withTimeout(
+            dataProvider.getHistoricalCandles(candidate, period, undefined, interval),
+            remaining,
+            [],
+          );
           if (result.length > 0) {
             ticker = candidate;
             candles = result.map(c => ({
@@ -474,6 +491,24 @@ export async function GET(req: NextRequest) {
           continue;
         }
       }
+    }
+
+    // C-2 退路：外部來源全逾時/落空時，TW/CN 日K 退回本地 L1 封存（至少有圖、不卡死也不 404）
+    if (candles.length === 0 && !isMinuteInterval && (isTW || isCN)) {
+      try {
+        const market = isTW ? 'TW' as const : 'CN' as const;
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+        for (const candidate of candidates) {
+          const local = await loadLocalCandlesWithTolerance(candidate, market, today, 5);
+          if (local && local.candles.length > 0) {
+            ticker = candidate;
+            candles = local.candles.map(c => ({
+              date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
+            }));
+            break;
+          }
+        }
+      } catch { /* 退路失敗就往下 404 */ }
     }
 
     if (candles.length === 0) {
@@ -504,16 +539,10 @@ export async function GET(req: NextRequest) {
       } catch { /* 注入失敗不致命，退回封存 */ }
     }
 
-    // 中文名稱查詢
+    // 中文名稱查詢 — 走共用 resolveChineseName（3s 預算、local/API 兩路徑同一份，防 drift）
     let name = ticker;
-    if (isTW) {
-      const twName = await getTWChineseName(pureCode).catch(() => null);
-      if (twName) name = twName;
-    } else if (isCN) {
-      const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-      const cnName = await getCNChineseName(pureCode, cnSuffix);
-      if (cnName) name = cnName;
-    }
+    const resolvedName = await resolveChineseName({ isTW, isCN, pureCode, symbol });
+    if (resolvedName) name = resolvedName;
     const indexName = INDEX_NAMES[ticker.toUpperCase()];
     if (indexName) name = indexName;
 

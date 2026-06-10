@@ -21,7 +21,6 @@ import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 import {
   POOL_WEIGHTS,
-  POOL_MIN_SOURCE_COUNT_DEFAULT,
   computeFacetScores,
 } from '@/lib/agents/candidates/poolWeights';
 import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
@@ -92,7 +91,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   }, [onDateChange]);
   // YouTube 提及 map（截至候選池當日）— 純展示 join，不進選股分數/排序
   const { map: ytMap } = useYouTubeMentionMap(date);
-  const [minSourceCount, setMinSourceCount] = useState(POOL_MIN_SOURCE_COUNT_DEFAULT);
+  const [minSourceCount, setMinSourceCount] = useState(1);  // 預設 ≥1 面向：一開就看得到候選（共享常數仍 = 3、見合約測試，故不動它）
   // 排序維度：總分（預設）或漲跌幅（forward perf 各日 / 區間最高最低）或 YouTube 提及數
   type SortKey = 'total' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss' | 'youtubeMentions';
   const [sortBy, setSortBy] = useState<SortKey>('total');

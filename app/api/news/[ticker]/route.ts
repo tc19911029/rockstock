@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { aggregateNews } from '@/lib/news/aggregator';
 import { analyzeNewsSentiment } from '@/lib/news/sentiment';
-import { getTWChineseName } from '@/lib/datasource/TWSENames';
+import { twNameWithTimeout } from '@/lib/datasource/nameWithTimeout';
 import { apiOk, apiError } from '@/lib/api/response';
 
 export async function GET(
@@ -17,7 +17,7 @@ export async function GET(
   // Optional company name from query, or auto-lookup from TWSE name table
   let companyName = request.nextUrl.searchParams.get('name') ?? undefined;
   if (!companyName) {
-    companyName = (await getTWChineseName(ticker)) ?? undefined;
+    companyName = (await twNameWithTimeout(ticker)) ?? undefined;
   }
 
   try {

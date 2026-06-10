@@ -5,7 +5,7 @@ import { evaluateSixConditions, detectTrend, detectTrendPosition } from '@/lib/a
 import { RuleEngine, ruleEngine } from '@/lib/rules/ruleEngine';
 import { resolveThresholds } from '@/lib/strategy/resolveThresholds';
 import { BUILT_IN_STRATEGIES } from '@/lib/strategy/StrategyConfig';
-import { getTWChineseName, getCNChineseName } from '@/lib/datasource/TWSENames';
+import { twNameWithTimeout, cnNameWithTimeout } from '@/lib/datasource/nameWithTimeout';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import type { CandleWithIndicators } from '@/types';
 
@@ -157,7 +157,7 @@ export async function GET(req: NextRequest) {
     // 嘗試取得中文名稱
     const code = symbol.replace(/\D/g, '');
     const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-    const cnName = await getCNChineseName(code, cnSuffix) ?? await getTWChineseName(code);
+    const cnName = await cnNameWithTimeout(code, cnSuffix) ?? await twNameWithTimeout(code);
     const displayName = cnName ?? data.name;
 
     return apiOk({

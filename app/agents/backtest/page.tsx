@@ -229,6 +229,13 @@ function BacktestPage() {
                   </tbody>
                 </table>
               </div>
+              {(['buy', 'watch', 'skip'] as const).every(a =>
+                summary.byAction[a].avgD5Return == null && summary.byAction[a].avgD20Return == null
+              ) && (
+                <p className="text-[11px] text-muted-foreground">
+                  報酬／勝率欄為「—」通常是區間內樣本太近：forward 報酬要等掃描日之後幾個交易日才算得出（如 20 日報酬需 20 個交易日後）。把上方「從」日期往前拉到約一個月前，即可看到已實現報酬的樣本。
+                </p>
+              )}
             </section>
 
             {/* 各代理判定命中率（§0 — 每個代理各自統計，不混合）*/}

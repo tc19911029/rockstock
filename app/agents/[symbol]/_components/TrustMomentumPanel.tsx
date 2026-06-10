@@ -51,7 +51,7 @@ export function TrustMomentumPanel({ symbol, date }: { symbol: string; date?: st
     const url = `/api/chip?symbol=${encodeURIComponent(symbol)}${date ? `&date=${date}` : ''}`;
     setLoading(true);
     setError(null);
-    fetch(url)
+    fetch(url, { signal: AbortSignal.timeout(8000) })
       .then((r) => r.json())
       .then((r) => {
         if (r.ok === false) throw new Error(r.error ?? '籌碼資料讀取失敗');

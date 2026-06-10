@@ -195,6 +195,7 @@ export async function register() {
               market,
               staleMin: health.staleMin,
             }),
+            signal: AbortSignal.timeout(5000),
           }).catch(() => {});
         }
       }

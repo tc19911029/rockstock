@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 import type { CostBasisBundle, CostBucket } from '@/lib/chipcost/types';
 
 export function CostBasisPanel({ symbol, date }: { symbol: string; date: string }) {
@@ -18,10 +19,11 @@ export function CostBasisPanel({ symbol, date }: { symbol: string; date: string 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isIndexSymbol(symbol)) { setLoading(false); return; }  // 指數無成本資料
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/cost-basis?symbol=${encodeURIComponent(symbol)}&date=${date}`)
+    fetch(`/api/cost-basis?symbol=${encodeURIComponent(symbol)}&date=${date}`, { signal: AbortSignal.timeout(8000) })
       .then(r => r.json())
       .then((j: { ok?: boolean; costBasis?: CostBasisBundle; error?: string }) => {
         if (cancelled) return;
@@ -33,6 +35,7 @@ export function CostBasisPanel({ symbol, date }: { symbol: string; date: string 
     return () => { cancelled = true; };
   }, [symbol, date]);
 
+  if (isIndexSymbol(symbol)) return <Panel><div className="text-sm text-muted-foreground">指數無成本資料</div></Panel>;
   if (loading) return <Panel><div className="text-sm text-muted-foreground">成本分析載入中…</div></Panel>;
   if (error || !data) return <Panel><div className="text-sm text-red-400">成本分析：{error ?? '無資料'}</div></Panel>;
 

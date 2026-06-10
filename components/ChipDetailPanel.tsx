@@ -254,10 +254,12 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
   const [retryCount, setRetryCount] = useState(0);
 
   const cleanSym = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const isIndex = symbol.startsWith('^');  // ^TWII/^TWOII 等指數沒有籌碼資料
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!cleanSym) return;
+    if (isIndex) { setLoading(false); setData(null); setError(null); return; }  // 指數短路，不打 chip API（否則卡載入）
     setLoading(true);
     setError(null);
 
@@ -272,9 +274,12 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       })
       .catch(() => { setError('載入失敗'); toast.error('籌碼資料載入失敗', { id: 'chip-error', duration: 3000 }); })
       .finally(() => setLoading(false));
-  }, [cleanSym, date, retryCount]);
+  }, [cleanSym, isIndex, date, retryCount]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  if (isIndex) return (
+    <div className="text-xs text-muted-foreground/60 py-6 text-center">指數無籌碼資料</div>
+  );
   if (loading) return (
     <div className="space-y-3 p-3">
       <div className="flex items-center gap-2">

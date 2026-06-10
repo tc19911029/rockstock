@@ -62,17 +62,23 @@ export default function RiskDashboardPage() {
           status: gp.status,
         });
       }
-      // 撈每檔最新收盤
-      const priceMap: Record<string, number> = {};
-      await Promise.all(hold.map(async h => {
-        const r = await fetch(`/api/stock?symbol=${encodeURIComponent(h.symbol)}&period=1mo`)
-          .then(r => r.ok ? r.json() : null).catch(() => null);
-        const candles = r?.candles as Array<{ close: number }> | undefined;
-        if (candles?.length) priceMap[h.symbol] = candles[candles.length - 1].close;
-      }));
-      if (!canceled) {
-        setPrices(priceMap);
-        setLoading(false);
+      // 先解除 loading：畫面先用成本價墊著 render，報價回來再補，
+      // 避免整頁卡死等報價（D-1：原本逐檔 await /api/stock 歷史鏈，DNS 異常時卡 70s）
+      setLoading(false);
+      // 撈每檔最新報價 — 走輕量 quotes 端點（同 /portfolio，有逾時與負快取、上限約 10s），
+      // 不走會在 DNS 異常時卡 70s 的 /api/stock?period=1mo 歷史 K 線鏈
+      if (hold.length > 0) {
+        const symbols = hold.map(h => h.symbol);
+        fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(symbols.join(','))}`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(json => {
+            if (canceled || !json) return;
+            const quotes = (json.quotes ?? []) as Array<{ symbol: string; price: number }>;
+            const priceMap: Record<string, number> = {};
+            for (const q of quotes) if (q.price > 0) priceMap[q.symbol] = q.price;
+            setPrices(priceMap);
+          })
+          .catch(() => {});
       }
     })();
     return () => { canceled = true; };
@@ -82,7 +88,7 @@ export default function RiskDashboardPage() {
     if (holdings.length === 0 || !totalCapital) return null;
 
     const rows = holdings.map(h => {
-      const close = prices[h.symbol] ?? 0;
+      const close = prices[h.symbol] ?? h.entryPrice;  // 報價未到先用成本價墊（不顯示 -100%）
       const cost = h.entryPrice * h.shares;
       const marketValue = close * h.shares;
       const concentrationPct = (marketValue / totalCapital) * 100;

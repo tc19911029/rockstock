@@ -254,9 +254,9 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
         {!loading && !error && (data?.items.length ?? 0) === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <p className="text-2xl mb-2">📺</p>
-            <p className="text-xs text-muted-foreground mb-1">{data?.message ?? '此日無 YouTube 提及紀錄'}</p>
+            <p className="text-xs text-muted-foreground mb-1">此日無 YouTube 提及紀錄</p>
             <p className="text-[10px] text-muted-foreground/70">
-              請用上方箭頭切換日期，或執行 /youtube-analysis 產生資料
+              請用上方日期切換到有資料的日期（當日分析通常於晚間產生）
             </p>
           </div>
         )}

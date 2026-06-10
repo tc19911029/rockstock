@@ -31,7 +31,7 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
   useEffect(() => {
     let alive = true;
     setLoading(true); setErr(null);
-    fetch(`/api/cn/chips/${code}`)
+    fetch(`/api/cn/chips/${code}`, { signal: AbortSignal.timeout(8000) })
       .then((r) => r.json())
       .then((j: Resp) => { if (!alive) return; if (j.error) setErr(j.error); else setData(j); })
       .catch(() => { if (alive) setErr('讀取失敗'); })

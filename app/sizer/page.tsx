@@ -45,8 +45,8 @@ export default function SizerPage() {
 
   const [symbol, setSymbol] = useState('2330.TW');
   const [name, setName] = useState('台積電');
-  const [entryPrice, setEntryPrice] = useState('1100');
-  const [stopLoss, setStopLoss] = useState('1020');
+  const [entryPrice, setEntryPrice] = useState('');  // 不帶寫死範例價（避免顯示與現價差很遠的過時數字）
+  const [stopLoss, setStopLoss] = useState('');
   const [letter, setLetter] = useState<string>('');
   const [industry, setIndustry] = useState('');
   const [capitalInput, setCapitalInput] = useState('');

@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { analyzeSqueeze } from '@/lib/squeeze/analyzeSqueeze';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!parsed.success) return apiValidationError(parsed.error);
 
   const { symbol, date } = parsed.data;
+  if (isIndexSymbol(symbol)) return apiError('指數無軋空分析', 400);
   const asOfDate = date ?? todayTaipei();
 
   try {

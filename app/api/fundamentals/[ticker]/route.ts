@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getMonthlyRevenue } from '@/lib/datasource/FinMindClient';
 import { getFundamentalsWithFallback } from '@/lib/datasource/FundamentalsFallbackChain';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 
 const querySchema = z.object({
   mode: z.enum(['full', 'revenue']).default('full'),
@@ -16,6 +17,7 @@ export async function GET(
   { params }: { params: Promise<{ ticker: string }> },
 ) {
   const { ticker } = await params;
+  if (isIndexSymbol(ticker)) return apiError('指數無基本面資料', 400);
   const stockId = ticker.replace(/\.(TW|TWO)$/i, '');
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadLocalCandlesForDate } from '@/lib/datasource/LocalCandleStore';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 
 /**
  * GET /api/watchlist/price-at?symbol=603986.SS&date=2026-04-01
@@ -12,6 +13,9 @@ export async function GET(req: NextRequest) {
 
   if (!symbol || !date) {
     return NextResponse.json({ error: 'symbol 和 date 為必填' }, { status: 400 });
+  }
+  if (isIndexSymbol(symbol)) {
+    return NextResponse.json({ error: '指數不支援此查詢' }, { status: 400 });
   }
 
   const market: 'TW' | 'CN' = /\.(SS|SZ)$/i.test(symbol) ? 'CN' : 'TW';

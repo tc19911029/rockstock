@@ -610,7 +610,7 @@ export default function PortfolioPage() {
                   {/* P&L */}
                   {currentPrice > 0 && (
                     <div className={`text-right shrink-0 text-xs font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
-                      <div>{pnlPos ? '+' : ''}${Math.abs(pnl).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}</div>
+                      <div>{pnlPos ? '+' : '-'}${Math.abs(pnl).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}</div>
                       <div>{pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%</div>
                     </div>
                   )}
@@ -849,7 +849,7 @@ function MarketSummaryRow({ label, currency, summary, returnPct }:
         <div>
           <p className="text-[10px] text-muted-foreground mb-0.5">損益</p>
           <p className={`text-sm font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
-            {pnlPos ? '+' : ''}{symbol}{Math.abs(summary.totalPnL).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
+            {pnlPos ? '+' : '-'}{symbol}{Math.abs(summary.totalPnL).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
           </p>
         </div>
         <div>
