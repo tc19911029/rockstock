@@ -15,6 +15,7 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, isReversalBuy, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { NAMED_STRATEGIES, matchedStrategies, getStrategy } from '@/lib/cn-sanse/namedStrategies';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
@@ -43,6 +44,17 @@ interface ScanResp {
   records?: RecordRow[]; sessionType?: 'post_close' | 'intraday'; cached?: boolean; error?: string;
   turnoverCap?: number;       // 成交額粗篩上限（TW 500 / CN 800）
   turnoverFiltered?: number;  // 被粗篩剔除的冷門薄量股檔數
+}
+
+/** records 列 → 畫面 Hit（底反/具名策略衍生清單共用，避免欄位漂移）。 */
+function recToHit(r: RecordRow): Hit {
+  return {
+    symbol: r.symbol, name: r.name ?? r.symbol, industry: r.industry ?? '',
+    price: r.price ?? 0, changePct: r.changePct ?? 0,
+    shortAttack: r.report.scores.shortAttack, midStrength: r.report.scores.midStrength,
+    midControl: r.report.scores.midControl, kongPan: r.report.scores.kongPan,
+    turnoverRank: r.turnoverRank,
+  };
 }
 
 /** 使用順序評級 badge 配色（回測推導；強→弱）。*/
@@ -106,6 +118,9 @@ function passFilters(report: ConditionReport | undefined, active: Set<string>): 
   if (active.size === 0) return true;
   if (!report) return false;
   if (active.has('hideConflict') && report.conflict) return false;
+  // 趨勢＝相對多空線（季線 MA60）的位置：空頭=跌破、多頭=站上（與「0軸下空頭區金叉」的動能不同層次）
+  if (active.has('trend_bear') && !report.doubleB.sell.some((c) => c.id === 'b_below' && c.met)) return false;
+  if (active.has('trend_bull') && !report.doubleB.buy.some((c) => c.id === 'b_above' && c.met)) return false;
   if (active.has('cf_top') && report.combo?.grade !== 'top') return false;
   if (active.has('cf_redGate') && !report.combo?.redGate) return false;
   if (active.has('cf_prime') && !(report.combo?.grade === 'top' || report.combo?.grade === 'prime')) return false;
@@ -236,6 +251,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     next.has(k) ? next.delete(k) : next.add(k);
     return next;
   });
+  // 具名三色策略（單選）：選了就用 records 衍生、全市場命中（不受嚴/中/寬 level 限制），依「應買」排序。
+  const [strategy, setStrategy] = useState<string | null>(null);
   // 近 7 天有 YouTube 提及（只台股；display-layer 篩選，切市場時重置）
   const [ytRecentOnly, setYtRecentOnly] = useState(false);
 
@@ -292,15 +309,43 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     } finally { if (liveBaseRef.current === myBase) setLoading(false); }
   }, [loadDates, apiBase]);
 
-  // 進場：盤中活躍時段預設即時，否則盤後（在 effect 內判斷避免 SSR/CSR hydration 不一致）
+  // 收盤後決策：今天盤後已固化 → 顯示盤後；今天盤後還沒生（lastDate 落後今天盤中，例如指數 16:39
+  // 才封、盤後掃描要等 16:45）但今天盤中快照在 → 顯示今天的盤中、不退回昨天的盤後。
+  // 等今天盤後一固化（lastDate 追平今天盤中）下次載入/重整自動切回盤後。
+  const loadAfterClose = useCallback(async () => {
+    const myBase = apiBase;
+    setLoading(true); setErr(null);
+    try {
+      const [pcR, idR] = await Promise.all([
+        fetch(`${apiBase}/scan`).then((r) => r.json()).catch(() => null),
+        fetch(`${apiBase}/scan?session=intraday`).then((r) => r.json()).catch(() => null),
+      ]);
+      if (liveBaseRef.current !== myBase) return;
+      const pc = pcR as ScanResp | null;
+      const id = idR as ScanResp | null;
+      // 今天盤中比盤後新（= 今天盤後還沒固化）→ 顯示今天盤中；否則盤後封存
+      const preferIntraday = !!(id?.ok && (!pc?.ok || id.lastDate > pc.lastDate));
+      if (preferIntraday && id) { setSession('intraday'); setData(id); }
+      else if (pc?.ok) { setSession('post_close'); setData(pc); }
+      else throw new Error(pc?.error || id?.error || '讀取失敗');
+    } catch (e) {
+      if (liveBaseRef.current !== myBase) return;
+      setErr(e instanceof Error ? e.message : '讀取失敗');
+    } finally { if (liveBaseRef.current === myBase) setLoading(false); }
+  }, [apiBase]);
+
+  // 進場：盤中活躍時段預設即時，否則交給 loadAfterClose（在 effect 內判斷避免 SSR/CSR hydration 不一致）
   useEffect(() => {
     liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
     setData(null); setDates([]); setPerf({}); setYtRecentOnly(false); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
-    // TW + CN 皆依該市場時段決定：盤中/盤後窗口 → 即時，否則盤後封存
-    const initial = isIntradayActive(market) ? 'intraday' : 'post_close';
-    setSession(initial);
-    loadDate(undefined, initial);
+    // 盤中/盤後窗口 → 即時；收盤後 → loadAfterClose（今天盤後沒生就顯示今天盤中，不退回昨天）
+    if (isIntradayActive(market)) {
+      setSession('intraday');
+      loadDate(undefined, 'intraday');
+    } else {
+      loadAfterClose();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase]);
 
@@ -325,15 +370,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 「底反」非後端 level — 從 records 衍生：grade top/prime ＋ 捕撈0軸下空頭區金叉 ＋ 無出場（isReversalBuy）。
   // 完整涵蓋底反該買（不受嚴/中/寬主力閘限制），舊固化資料只要有 combo 就能算 → 免重跑 backfill。
   const reversalRows = useMemo<Hit[]>(() =>
-    (data?.records ?? [])
-      .filter((r) => isReversalBuy(r.report))
-      .map((r) => ({
-        symbol: r.symbol, name: r.name ?? r.symbol, industry: r.industry ?? '',
-        price: r.price ?? 0, changePct: r.changePct ?? 0,
-        shortAttack: r.report.scores.shortAttack, midStrength: r.report.scores.midStrength,
-        midControl: r.report.scores.midControl, kongPan: r.report.scores.kongPan,
-        turnoverRank: r.turnoverRank,
-      })),
+    (data?.records ?? []).filter((r) => isReversalBuy(r.report)).map(recToHit),
     [data],
   );
   /** 當前 level 的來源清單：底反走 records 衍生，其餘走後端 results[level]。 */
@@ -342,6 +379,14 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     [data, level, reversalRows],
   );
   const countFor = (k: Level): number | undefined => (k === 'reversal' ? reversalRows.length : data?.counts[k]);
+
+  // 具名策略命中（從 records 衍生，全市場、不受 level 限制）；選了策略就覆蓋 level 清單。
+  const strategyRows = useMemo<Hit[]>(() => {
+    const s = getStrategy(strategy);
+    if (!s) return [];
+    return (data?.records ?? []).filter((r) => s.match(r.report)).map(recToHit);
+  }, [data, strategy]);
+  const effectiveRows = strategy ? strategyRows : levelRows;
 
   // YouTube 提及（純展示 join）— 只台股有對應；陸股代號不重疊，傳 undefined 不發請求
   const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? data?.lastDate : undefined);
@@ -352,12 +397,12 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 漲幅要抓「畫面實際會顯示的那 50 檔」(濾鏡+排序後)，否則改排序/濾鏡後顯示的股票沒抓到漲幅 → 空白。
   // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
   const fetchTargets = useMemo(() => {
-    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
+    const rows = effectiveRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
     const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
     rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap));
     return rows.slice(0, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levelRows, sortKey, sortDir, filters, reportMap, ytMap, ytRecentOnly]);
+  }, [effectiveRows, sortKey, sortDir, filters, reportMap, ytMap, ytRecentOnly]);
   const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
 
   // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
@@ -387,11 +432,12 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   }, [data?.lastDate, fetchKey]);
 
   const hits = useMemo(() => {
-    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
+    const rows = effectiveRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
     rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap));
     return rows.slice(0, 50);
+    // (deps 用 effectiveRows：選具名策略時覆蓋 level 清單)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levelRows, sortKey, sortDir, perf, filters, reportMap, ytMap, ytRecentOnly]);
+  }, [effectiveRows, sortKey, sortDir, perf, filters, reportMap, ytMap, ytRecentOnly]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   return (
@@ -464,7 +510,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
             {LEVELS.map((l) => (
               <button
                 key={l.key}
-                onClick={() => setInternalLevel(l.key)}
+                onClick={() => { setInternalLevel(l.key); setStrategy(null); }}
                 className={cn(
                   'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors border',
                   level === l.key ? 'bg-sky-500/15 text-sky-400 border-sky-500/40' : 'text-muted-foreground border-transparent hover:bg-secondary',
@@ -498,6 +544,28 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
             {label}{sortKey === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
           </button>
         ))}
+      </div>
+
+      {/* 🎯 具名三色策略（單選）：選一個就只看該策略全市場命中、依「應買」排序，不受嚴/中/寬限制 */}
+      <div className="shrink-0 px-2 py-1.5 border-b border-border flex flex-wrap gap-1 items-center">
+        <span className="text-[9px] text-muted-foreground/70 mr-0.5" title="把回測驗證過的型態做成可選策略；選了就只看該策略的全市場命中、依『應買』排序">🎯策略</span>
+        {NAMED_STRATEGIES.map((s) => (
+          <button key={s.id}
+            onClick={() => {
+              setStrategy((cur) => (cur === s.id ? null : s.id));
+              setSortKey('combo'); setSortDir('desc');
+            }}
+            title={s.tip}
+            className={cn(
+              'text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap border transition-colors',
+              strategy === s.id ? 'bg-fuchsia-600/30 text-fuchsia-100 border-fuchsia-400/50' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}>
+            {s.label}
+          </button>
+        ))}
+        {strategy && (
+          <span className="text-[9px] text-fuchsia-300/80 ml-0.5">{strategyRows.length} 檔·全市場</span>
+        )}
       </div>
 
       {/* 三色買進訊號篩選：分 3 組、每組照書本順序；多個 chip = AND（同時滿足）*/}
@@ -540,6 +608,22 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               filters.has('hideConflict') ? 'bg-amber-500/15 text-amber-300 border-amber-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
             )}
           >隱藏衝突</button>
+          <button
+            onClick={() => toggleFilter('trend_bull')}
+            title="只看站上多空線（季線 MA60）的股票 — 大趨勢仍多頭、屬多頭中的回檔底反；跌破多空線的會被濾掉"
+            className={cn(
+              'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+              filters.has('trend_bull') ? 'bg-rose-500/15 text-rose-300 border-rose-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}
+          >多頭趨勢</button>
+          <button
+            onClick={() => toggleFilter('trend_bear')}
+            title="只看跌破多空線（季線 MA60）的股票 — 大趨勢仍空頭、屬空頭中的底部反彈；站上多空線的回檔買點會被濾掉"
+            className={cn(
+              'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+              filters.has('trend_bear') ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}
+          >空頭趨勢</button>
           {market === 'TW' && (
             <button
               onClick={() => setYtRecentOnly((v) => !v)}
@@ -550,8 +634,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               )}
             >近7天提及</button>
           )}
-          {(filters.size > 0 || ytRecentOnly) && (
-            <button onClick={() => { setFilters(new Set()); setYtRecentOnly(false); }} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
+          {(filters.size > 0 || ytRecentOnly || strategy) && (
+            <button onClick={() => { setFilters(new Set()); setYtRecentOnly(false); setStrategy(null); }} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
           )}
         </div>
       </div>
@@ -571,8 +655,10 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           // 精簡：原始分數 + 命中嚴/中/寬 收進卡片 hover（不佔版面）
           const lvHit = (['strict', 'medium', 'loose'] as ScanLevel[])
             .filter((lv) => levelSets[lv].has(h.symbol)).map((lv) => LEVELS.find((l) => l.key === lv)?.label).join('/');
+          const stratHit = matchedStrategies(rep).map((s) => s.label).join('、');
           const detailTitle = `短攻 ${fmt(h.shortAttack)}｜中強 ${fmt(h.midStrength)}｜中控 ${fmt(h.midControl)}｜超短跌 ${fmt(h.shortOversold)}`
             + (rep ? `\n共振 ${rep.groupBuyCount}/3（雙B/主力/捕撈 中幾組）` : '')
+            + (stratHit ? `\n命中型態：${stratHit}` : '')
             + (lvHit ? `\n命中策略：${lvHit}` : '');
           return (
             <div
