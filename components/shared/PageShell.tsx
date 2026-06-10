@@ -130,6 +130,7 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
                         { href: '/etf',       label: '📈 ETF 追蹤',     icon: TrendingUp },
                         { href: '/youtube',   label: '📺 YouTube 提及', icon: Newspaper },
                         { href: '/realtime',  label: '📡 分時監控',     icon: Radio },
+                        { href: '/backtest/leaderboard', label: '📊 策略排行榜', icon: TrendingUp },
                       ],
                     },
                     {
