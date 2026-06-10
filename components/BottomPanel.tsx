@@ -41,6 +41,21 @@ function formatMoney(n: number) {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
 }
 
+/**
+ * 今日損益 = 股數 × (現價 − 昨收)。
+ * PriceInfo 只有漲跌幅沒有昨收，故用 昨收 = 現價 / (1 + 漲幅%) 反推。
+ * 基數必須是「昨收」不是「現價」—— 用現價當基數會把今日損益放大 (1 + 漲幅) 倍
+ * （上漲日系統性高估、下跌日系統性高估虧損）。
+ * 注意：當日盤中加碼的股數，券商以買進價計當日損益、此處仍用昨收，
+ * 故加碼當天仍會偏離券商；T+1 後自動一致（屬持倉快照模型先天限制，非此公式問題）。
+ */
+function dayPnL(shares: number, cur: number, changePercent: number): number {
+  if (cur <= 0) return 0;
+  const prevClose = cur / (1 + changePercent / 100);
+  if (!(prevClose > 0)) return 0;
+  return shares * (cur - prevClose);
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 interface BottomPanelProps {
@@ -195,7 +210,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         const cur = p?.price ?? 0;
         const costVal = h.shares * h.costPrice;
         const mktVal = cur > 0 ? h.shares * cur : costVal;
-        const dailyChange = cur > 0 ? h.shares * cur * (p?.changePercent ?? 0) / 100 : 0;
+        const dailyChange = dayPnL(h.shares, cur, p?.changePercent ?? 0);
         const { pnl } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
         acc.totalCost += costVal;
         acc.totalValue += mktVal;
@@ -395,7 +410,7 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
           const p = prices[h.symbol];
           const cur = p?.price ?? 0;
           const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
-          const dailyPnL = cur > 0 ? h.shares * cur * (p?.changePercent ?? 0) / 100 : 0;
+          const dailyPnL = dayPnL(h.shares, cur, p?.changePercent ?? 0);
 
           return (
             <div key={h.id}>
