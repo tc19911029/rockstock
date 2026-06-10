@@ -319,6 +319,32 @@ const SPECS: ReportSpec[] = [
       { raw: '印能科技', code: '7734', rating_raw: '', target: null, prev: null, covered: false,
         thesis: '封裝設備供應鏈。' },
     ] },
+
+  // ===== 中信投顧 投資早報研究摘要 2026-06-10 =====
+  { report_id: 'ctbc-6613-20260610', broker: 'ctbc', broker_display: '中信', report_date: '2026-06-10',
+    title: '朋億 — 買進（1Q26 谷底、2H26 增速）', source_pdf: '617778941570056555_610台股晨報.pdf',
+    primary: '6613', parse_mode: 'text', stocks: [
+      { raw: '朋億', code: '6613', rating_raw: '買進', target: 400, prev: 265, covered: true,
+        thesis: '1Q26 為全年谷底、2H26 增速更上層樓；毛利率上修；目標價 400（2027 EPS×17 倍）。' },
+    ] },
+  { report_id: 'ctbc-6415-20260610', broker: 'ctbc', broker_display: '中信', report_date: '2026-06-10',
+    title: '矽力-KY — 增加持股（資料中心成長快）', source_pdf: '617778941570056555_610台股晨報.pdf',
+    primary: '6415', parse_mode: 'text', stocks: [
+      { raw: '矽力-KY', code: '6415', rating_raw: '增加持股', target: 610, prev: 550, covered: true,
+        thesis: '資料中心營收成長快速、1Q26 伺服器營收遠優於預期；高毛利產品比重提升；目標價上調至 610。' },
+    ] },
+  { report_id: 'ctbc-4137-20260610', broker: 'ctbc', broker_display: '中信', report_date: '2026-06-10',
+    title: '麗豐-KY — 中立（殖利率防禦）', source_pdf: '617778941570056555_610台股晨報.pdf',
+    primary: '4137', parse_mode: 'text', stocks: [
+      { raw: '麗豐-KY', code: '4137', rating_raw: '中立', target: 110, prev: 102, covered: true,
+        thesis: '殖利率 9% 具下檔防禦，惟成長動能待觀察；4~5 月營收低於預期。' },
+    ] },
+  { report_id: 'ctbc-5388-20260610', broker: 'ctbc', broker_display: '中信', report_date: '2026-06-10',
+    title: '中磊 — 調升買進（訂單價量齊揚）', source_pdf: '617778941570056555_610台股晨報.pdf',
+    primary: '5388', parse_mode: 'text', stocks: [
+      { raw: '中磊', code: '5388', rating_raw: '買進', target: 110, prev: 90, covered: true, action: 'upgrade',
+        thesis: '訂單價量齊揚、全年營收挑戰新高、淡季不淡；調升至買進，目標價 110。' },
+    ] },
 ];
 
 async function main() {

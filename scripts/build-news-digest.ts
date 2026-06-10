@@ -41,6 +41,11 @@ const MENTIONS: Spec[] = [
     headlines: ['AI 訂單看到 2027 年、預估 Q2 營收創高'] },
   { code: '3711', name: '日月光投控', sentiment: 'bullish',
     headlines: ['營收寫最旺 5 月、年增 28.6%、先進封測躍進'] },
+  // 中信投顧早報「重點新聞」
+  { code: '3376', name: '新日興', sentiment: 'bullish',
+    headlines: ['折疊機加持、拚 H2 回溫', '衝刺折疊機業務'] },
+  { code: '6788', name: '華景電', sentiment: 'bullish',
+    headlines: ['5 月營收 2.69 億、年增 24.96%（MoneyDJ）'] },
 ];
 
 function ratingZh(r: string): string {
