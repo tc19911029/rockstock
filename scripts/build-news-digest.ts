@@ -12,12 +12,13 @@ import path from 'node:path';
 import { saveNewsDigest, type NewsDigest, type NewsMention, type NewsSentiment } from '@/lib/broker/newsDigest';
 import { loadStockMaster } from '@/lib/youtube/stockMaster';
 
-const DATE = process.argv[2] || '2026-06-10';
+const DATE = process.argv[2] || '2026-06-12';
 
 interface Spec { code: string; name: string; headlines: string[]; sentiment: NewsSentiment; }
 
-// 2026-06-10 晨報整理（科技組為主；持股/法人報告相關優先）
-const MENTIONS: Spec[] = [
+// 各日晨報整理（科技組為主；持股/法人報告相關優先）— 由人工逐日新增
+const MENTIONS_BY_DATE: Record<string, Spec[]> = {
+  '2026-06-10': [
   { code: '3008', name: '大立光', sentiment: 'bullish',
     headlines: ['CPO 9月前架設第一條光纖陣列自動化試產線（林恩平）', '客戶新機遞延、Q4 更旺', '外資（花旗）目標價喊到 5,325 元'] },
   { code: '6409', name: '旭隼', sentiment: 'bearish',
@@ -46,13 +47,47 @@ const MENTIONS: Spec[] = [
     headlines: ['折疊機加持、拚 H2 回溫', '衝刺折疊機業務'] },
   { code: '6788', name: '華景電', sentiment: 'bullish',
     headlines: ['5 月營收 2.69 億、年增 24.96%（MoneyDJ）'] },
-];
+  ],
+
+  '2026-06-12': [
+    // 法人報告池內
+    { code: '3008', name: '大立光', sentiment: 'bearish',
+      headlines: ['漲多慘遭摩通(小摩)降評', '大摩：CPO 長期仍看好'] },
+    { code: '2345', name: '智邦', sentiment: 'bullish',
+      headlines: ['加速國內外產能布局', '審慎樂觀 2026 下半年、市場需求優於預期', '卡位 NVIDIA、博通 CPO 生態系（驗證階段拚轉出貨）'] },
+    { code: '5388', name: '中磊', sentiment: 'bullish',
+      headlines: ['前 5 月營收年增 55% 創新高、看旺 2026 全年', '全年營運成長可期'] },
+    { code: '2454', name: '聯發科', sentiment: 'bullish',
+      headlines: ['Google TPU 訂單大搬風、與 Marvell/博通三分天下', '5 月營收年增近 5%、ASIC 放量前各應用支撐'] },
+    { code: '3711', name: '日月光投控', sentiment: 'bullish',
+      headlines: ['Marvell、NVIDIA 訂單在握、封測迎結構性成長', '富比士：張虔生兄弟登台灣首富'] },
+    { code: '2330', name: '台積電', sentiment: 'neutral',
+      headlines: ['第 22 次一日填息、7/9 發股利', '捲入美國專利侵權訴訟、經濟部闢謠'] },
+    { code: '2327', name: '國巨', sentiment: 'neutral',
+      headlines: ['今接棒除息'] },
+    // 新聞熱、法人報告未收錄（觀察候選）
+    { code: '2377', name: '微星', sentiment: 'bullish',
+      headlines: ['CPU 缺貨逐步改善、AI 伺服器/AI PC 扮新成長動能', '攻 AI 伺服器報捷；記憶體供貨能見度僅一個月'] },
+    { code: '3532', name: '台勝科', sentiment: 'bullish',
+      headlines: ['H2 獲利唱旺、喊漲價獲利看增'] },
+    { code: '3211', name: '順達', sentiment: 'bullish',
+      headlines: ['BBU 產能帶動、H2 展望樂觀', '「明年一定比今年好」'] },
+    { code: '2404', name: '漢唐', sentiment: 'bullish',
+      headlines: ['在手訂單達 1,939 億、創高'] },
+  ],
+};
+
+const MENTIONS: Spec[] = MENTIONS_BY_DATE[DATE] ?? [];
 
 function ratingZh(r: string): string {
   return ({ buy: '買進', overweight: '加碼', neutral: '中立', hold: '持有', underweight: '減碼', sell: '賣出' } as Record<string, string>)[r] || '提及';
 }
 
 async function main() {
+  if (!MENTIONS.length) {
+    console.error(`MENTIONS_BY_DATE 沒有 ${DATE} 的整理，先把當日晨報個股填進去再跑。已有日期：${Object.keys(MENTIONS_BY_DATE).join(', ')}`);
+    process.exit(1);
+  }
   const master = await loadStockMaster();
   const byCode = new Map(master.entries.map(e => [e.code, e]));
 
