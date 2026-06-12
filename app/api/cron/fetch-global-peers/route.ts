@@ -13,16 +13,19 @@ import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { checkCronAuth } from '@/lib/api/cronAuth';
 import { getAllOverseasTickers } from '@/lib/scanner/peerMap';
-import { fetchOverseasDailyCandles } from '@/lib/overseas/fetchPeerCandles';
+import { fetchOverseasDailyCandles, YahooRateLimitError } from '@/lib/overseas/fetchPeerCandles';
 import { dropUnsettledTodayBar } from '@/lib/overseas/peerReturns';
 import { writeOverseasCandles } from '@/lib/overseas/peerCandleStorage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const FETCH_GAP_MS = 300;
-/** 撞到 Yahoo 429/403 限流時的加長間隔（實測 2026-06-12：直連 403、密集打代理出口會 429） */
-const RATE_LIMIT_BACKOFF_MS = 3000;
+// 2026-06-12 v2：原 300ms 間隔 + 3s 退避實測會把 Yahoo 打進 IP 級 429（連代理出口同鎖）。
+// 改：1.5s 基礎間隔 + 抖動；撞限流先長退避 60s 重試同一檔一次；再撞 → 提早收工
+// （剩餘標 skipped，寧可隔日 cron 補也不要延長封鎖）。寫入 merge-by-date，partial 無害。
+const FETCH_GAP_MS = 1500;
+const FETCH_GAP_JITTER_MS = 700;
+const RATE_LIMIT_BACKOFF_MS = 60_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -54,29 +57,62 @@ export async function GET(req: NextRequest) {
   }
 
   const results: TickerResult[] = [];
-  let gapMs = FETCH_GAP_MS;
+  let rateLimitedAbort = false;
+  let backoffUsed = false;
+
+  const fetchOne = async (ticker: string): Promise<void> => {
+    const raw = await fetchOverseasDailyCandles(ticker);
+    const settled = dropUnsettledTodayBar(ticker, raw);
+    if (settled.length === 0) {
+      results.push({ ticker, ok: false, error: 'no settled candles' });
+      return;
+    }
+    const { added, lastDate, total } = await writeOverseasCandles(ticker, settled);
+    results.push({
+      ticker, ok: true, bars: total, lastDate, added,
+      droppedUnsettled: raw.length - settled.length,
+    });
+  };
+
   for (let i = 0; i < tickers.length; i++) {
     const ticker = tickers[i];
     try {
-      const raw = await fetchOverseasDailyCandles(ticker);
-      const settled = dropUnsettledTodayBar(ticker, raw);
-      if (settled.length === 0) {
-        results.push({ ticker, ok: false, error: 'no settled candles' });
-      } else {
-        const { added, lastDate, total } = await writeOverseasCandles(ticker, settled);
-        results.push({
-          ticker, ok: true, bars: total, lastDate, added,
-          droppedUnsettled: raw.length - settled.length,
-        });
-      }
-      gapMs = FETCH_GAP_MS;
+      await fetchOne(ticker);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      results.push({ ticker, ok: false, error: msg });
-      // 撞限流 → 後續放慢，讓剩餘 ticker 還有機會成功
-      if (/\b(429|403)\b/.test(msg)) gapMs = RATE_LIMIT_BACKOFF_MS;
+      if (err instanceof YahooRateLimitError && !backoffUsed) {
+        // 第一次撞限流：長退避後重試同一檔一次
+        backoffUsed = true;
+        console.warn(`[fetch-global-peers] ${ticker} 撞限流，退避 ${RATE_LIMIT_BACKOFF_MS / 1000}s 後重試`);
+        await sleep(RATE_LIMIT_BACKOFF_MS);
+        try {
+          await fetchOne(ticker);
+        } catch (retryErr) {
+          const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          results.push({ ticker, ok: false, error: msg });
+          if (retryErr instanceof YahooRateLimitError) {
+            // 退避後仍限流 → 提早收工，剩餘標 skipped（隔日 cron 自然補）
+            rateLimitedAbort = true;
+            for (const rest of tickers.slice(i + 1)) {
+              results.push({ ticker: rest, ok: false, error: 'skipped (rate-limited abort)' });
+            }
+            break;
+          }
+        }
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push({ ticker, ok: false, error: msg });
+        if (err instanceof YahooRateLimitError) {
+          rateLimitedAbort = true;
+          for (const rest of tickers.slice(i + 1)) {
+            results.push({ ticker: rest, ok: false, error: 'skipped (rate-limited abort)' });
+          }
+          break;
+        }
+      }
     }
-    if (i < tickers.length - 1) await sleep(gapMs);
+    if (i < tickers.length - 1) {
+      await sleep(FETCH_GAP_MS + Math.floor(Math.random() * FETCH_GAP_JITTER_MS));
+    }
   }
 
   const okCount = results.filter((r) => r.ok).length;
@@ -84,6 +120,7 @@ export async function GET(req: NextRequest) {
     total: tickers.length,
     okCount,
     failCount: tickers.length - okCount,
+    ...(rateLimitedAbort ? { rateLimitedAbort: true } : {}),
     results,
   });
 }
