@@ -1,20 +1,27 @@
 /**
  * 抓單一海外 ticker 日K（海外同業對照用）
  *
- * 2026-06-12 v2（429 風暴後重寫）：
- * 主路徑：Node fetch + Yahoo session cookie（fc.yahoo.com A3，30 分鐘 cache）+
- *         完整瀏覽器 headers，host 輪替 query2 → query1（兩 host 限流池不完全同步）。
- * 備援：curlFetch（同組 headers，自帶本機代理 fallback）。
- * 設計原則：被限流時「少打」— 一檔最多 3 個請求；429/403 拋 YahooRateLimitError
- * 讓 cron route 拉長退避或提早收工，避免越打越鎖（2026-06-12 實測：密集測試
- * 觸發 IP 級 429，直連與代理出口同鎖，cookie 也救不了，只能等冷卻）。
+ * 2026-06-12 v3（雙源 + 熔斷）：
+ * 源 1 Yahoo：Node fetch + session cookie（fc.yahoo.com A3，30 分鐘 cache）+
+ *   完整瀏覽器 headers，host 輪替 query2 → query1，curl 備援（自帶本機代理 fallback）。
+ *   覆蓋全部市場（美/日/韓/指數），但會 IP 級 429（2026-06-12 實測：直連與代理
+ *   出口同鎖、cookie 救不了）→ 模組級熔斷器：撞 429/403 後 10 分鐘內不再打 Yahoo。
+ * 源 2 騰訊 usfqkline：只覆蓋美股個股（.OQ/.N）+ TSM ADR + ^IXIC（us.IXIC），
+ *   無日韓無 ^SOX；本機連騰訊穩定（陸股管線同源）。qfq 前復權與 Yahoo split-only
+ *   在除息日附近有微小差異 — 本管線只算 d1-d60 報酬方向，可接受。
+ * 順序：Yahoo（沒熔斷時）→ 騰訊（支援的 ticker）→ 全敗才拋錯；
+ *   yahoo-only ticker（日韓/^SOX）在熔斷期間直接拋 YahooRateLimitError（零請求）。
  *
- * 量單位：海外股不做張/股換算，存 Yahoo 原始值（股）。
+ * 為何不用 stooq / EODHD：stooq 本機直連與代理都不通（2026-06-12 實測）；
+ * EODHD token 401 失效（連 2330.TW 都不過，帳號層問題 — 見當日回報）。
+ *
+ * 量單位：海外股不做張/股換算，存來源原始值（股）。
  * 半根防護由 caller（cron route）用 dropUnsettledTodayBar 處理。
  */
 
 import type { Candle } from '@/types';
 import { fetchJsonWithCurlFallback } from '@/lib/datasource/curlFetch';
+import { isUSTicker } from '@/lib/utils/symbols';
 
 /** 自然日 lookback：涵蓋 d60（60 交易日 ≈ 90 自然日）+ 首抓緩衝 */
 const LOOKBACK_DAYS = 400;
@@ -114,13 +121,22 @@ function chartUrl(host: 'query2' | 'query1', ticker: string): string {
   );
 }
 
-export async function fetchOverseasDailyCandles(ticker: string): Promise<Candle[]> {
+// ── Yahoo 熔斷器（模組級）──────────────────────────────────────────────────
+// 撞 429/403 後 10 分鐘內整個 process 不再打 Yahoo — 同一輪 cron 34 檔最多只會
+// 對 Yahoo 發 1-2 個請求，避免越打越鎖。
+let yahooBlockedUntil = 0;
+const YAHOO_BREAKER_MS = 10 * 60_000;
+
+function yahooBlocked(): boolean {
+  return Date.now() < yahooBlockedUntil;
+}
+
+async function fetchFromYahoo(ticker: string, errors: string[]): Promise<Candle[] | null> {
   const cookie = await getYahooCookie();
   const headers = browserHeaders(cookie);
-  const errors: string[] = [];
   let rateLimited = false;
 
-  // ── 1) Node fetch，host 輪替 ────────────────────────────────────────────
+  // 1) Node fetch，host 輪替
   for (const host of ['query2', 'query1'] as const) {
     try {
       const res = await fetch(chartUrl(host, ticker), {
@@ -129,23 +145,22 @@ export async function fetchOverseasDailyCandles(ticker: string): Promise<Candle[
       });
       if (res.status === 429 || res.status === 403) {
         rateLimited = true;
-        errors.push(`${host} HTTP ${res.status}`);
-        continue;
+        errors.push(`yahoo:${host} HTTP ${res.status}`);
+        break; // 同 IP 另一 host 大概率同鎖，不多打
       }
       if (!res.ok) {
-        errors.push(`${host} HTTP ${res.status}`);
+        errors.push(`yahoo:${host} HTTP ${res.status}`);
         continue;
       }
       const candles = parseChartJson(await res.json() as YahooChartJson);
       if (candles.length > 0) return candles;
-      errors.push(`${host} empty result`);
+      errors.push(`yahoo:${host} empty result`);
     } catch (err) {
-      errors.push(`${host} ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(`yahoo:${host} ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  // ── 2) curl 備援（自帶本機代理 fallback；同組瀏覽器 headers）────────────
-  // 已知限流（兩 host 都 429）時跳過 — 代理出口大概率同鎖，多打只會延長封鎖
+  // 2) curl 備援（自帶本機代理 fallback；已知限流時跳過 — 代理出口大概率同鎖）
   if (!rateLimited) {
     try {
       const { data } = await fetchJsonWithCurlFallback<YahooChartJson>(
@@ -154,14 +169,121 @@ export async function fetchOverseasDailyCandles(ticker: string): Promise<Candle[
       );
       const candles = parseChartJson(data);
       if (candles.length > 0) return candles;
-      errors.push('curl empty result');
+      errors.push('yahoo:curl empty result');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (/429|403/.test(msg)) rateLimited = true;
-      errors.push(`curl ${msg}`);
+      errors.push(`yahoo:curl ${msg}`);
     }
   }
 
-  if (rateLimited) throw new YahooRateLimitError(ticker, errors.join('; '));
+  if (rateLimited) {
+    yahooBlockedUntil = Date.now() + YAHOO_BREAKER_MS;
+    console.warn(`[fetchPeerCandles] Yahoo 限流，熔斷 ${YAHOO_BREAKER_MS / 60_000} 分鐘`);
+  }
+  return null;
+}
+
+// ── 騰訊備源（美股個股 + TSM ADR + ^IXIC）────────────────────────────────────
+
+/** Yahoo ticker → 騰訊 usfqkline 候選代碼；不支援（日韓/^SOX）回空陣列 */
+function tencentCandidates(ticker: string): string[] {
+  if (ticker === '^IXIC') return ['us.IXIC'];
+  if (ticker.startsWith('^')) return []; // ^SOX 騰訊無此指數（2026-06-12 實測 us.SOX 空）
+  if (isUSTicker(ticker)) {
+    // 交易所後綴未知 → NASDAQ(.OQ) 先試、NYSE(.N) 備援
+    return [`us${ticker}.OQ`, `us${ticker}.N`];
+  }
+  return []; // .T / .KS 騰訊不覆蓋
+}
+
+interface TencentKlineJson {
+  code?: number;
+  data?: Record<string, { qfqday?: string[][]; day?: string[][] }>;
+}
+
+/** 騰訊列格式：[date, open, close, high, low, volume?, ...]（注意 close 在 high/low 前）*/
+function parseTencentRows(rows: string[][]): Candle[] {
+  const out: Candle[] = [];
+  for (const row of rows) {
+    if (!row || row.length < 5) continue;
+    const [date, o, c, h, l, v] = row;
+    const open = parseFloat(o); const close = parseFloat(c);
+    const high = parseFloat(h); const low = parseFloat(l);
+    if (!Number.isFinite(open) || !Number.isFinite(close) || !Number.isFinite(high) || !Number.isFinite(low)) continue;
+    out.push({
+      date,
+      open: +open.toFixed(2),
+      high: +high.toFixed(2),
+      low: +low.toFixed(2),
+      close: +close.toFixed(2),
+      volume: v != null && Number.isFinite(parseFloat(v)) ? Math.round(parseFloat(v)) : 0,
+    });
+  }
+  return out;
+}
+
+async function fetchFromTencent(ticker: string, errors: string[]): Promise<Candle[] | null> {
+  // end 給未來 +2 天：end == 「今天且美股盤中」時騰訊只回今日 1 根半成品
+  // （2026-06-12 實測 usTSM.N 盤中 end=當日 → 1 根、end=隔日 → 完整歷史）
+  const end = new Date(Date.now() + 2 * 86_400_000).toISOString().split('T')[0];
+  const start = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000).toISOString().split('T')[0];
+  // 新鮮度門檻：最後一根離今天 >14 天 = 殭屍掛牌（ticker 被重用的舊上市，
+  // 如 usDELL.OQ 殘到 2013、usCOHR.OQ 殘到 2023）→ 換下一個候選
+  const staleFloor = new Date(Date.now() - 14 * 86_400_000).toISOString().split('T')[0];
+
+  for (const code of tencentCandidates(ticker)) {
+    const url =
+      `https://web.ifzq.gtimg.cn/appstock/app/usfqkline/get?param=${encodeURIComponent(code)},day,${start},${end},320,qfq`;
+    try {
+      const { data: json } = await fetchJsonWithCurlFallback<TencentKlineJson>(url, { timeoutMs: 15_000 });
+      const entry = json?.data?.[code];
+      const rows = entry?.qfqday ?? entry?.day ?? [];
+      const candles = parseTencentRows(rows);
+      if (candles.length === 0) {
+        errors.push(`tencent:${code} empty`);
+        continue;
+      }
+      const lastDate = candles[candles.length - 1].date;
+      if (lastDate < staleFloor) {
+        errors.push(`tencent:${code} stale (last=${lastDate}, 殭屍掛牌?)`);
+        continue;
+      }
+      if (candles.length < 5) {
+        errors.push(`tencent:${code} too few bars (${candles.length})`);
+        continue;
+      }
+      return candles;
+    } catch (err) {
+      errors.push(`tencent:${code} ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return null;
+}
+
+// ── 主入口 ───────────────────────────────────────────────────────────────────
+
+export async function fetchOverseasDailyCandles(ticker: string): Promise<Candle[]> {
+  const errors: string[] = [];
+  const hasTencent = tencentCandidates(ticker).length > 0;
+
+  // 源 1：Yahoo（熔斷期間跳過，零請求）
+  if (!yahooBlocked()) {
+    const candles = await fetchFromYahoo(ticker, errors);
+    if (candles) return candles;
+  } else {
+    errors.push('yahoo skipped (circuit breaker)');
+  }
+
+  // 源 2：騰訊（支援的 ticker）
+  if (hasTencent) {
+    const candles = await fetchFromTencent(ticker, errors);
+    if (candles) return candles;
+  }
+
+  // 全敗：yahoo-only ticker 在限流期間給 route 可辨識的訊號
+  if (yahooBlocked() && !hasTencent) {
+    throw new YahooRateLimitError(ticker, errors.join('; '));
+  }
   throw new Error(`fetch ${ticker} failed: ${errors.join('; ')}`);
 }

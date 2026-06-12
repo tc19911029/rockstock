@@ -20,12 +20,12 @@ import { writeOverseasCandles } from '@/lib/overseas/peerCandleStorage';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-// 2026-06-12 v2：原 300ms 間隔 + 3s 退避實測會把 Yahoo 打進 IP 級 429（連代理出口同鎖）。
-// 改：1.5s 基礎間隔 + 抖動；撞限流先長退避 60s 重試同一檔一次；再撞 → 提早收工
-// （剩餘標 skipped，寧可隔日 cron 補也不要延長封鎖）。寫入 merge-by-date，partial 無害。
+// 2026-06-12 v3：原 300ms 間隔實測把 Yahoo 打進 IP 級 429（連代理出口同鎖）。
+// 改：1.5s 基礎間隔 + 抖動；Yahoo 限流防護下放到 fetchPeerCandles 的模組級熔斷器
+// （整輪最多對 Yahoo 發 1-2 請求），美股/^IXIC 走騰訊備源照常落地，
+// 日韓/^SOX（yahoo-only）失敗記錄後隔日 cron 自然補。寫入 merge-by-date，partial 無害。
 const FETCH_GAP_MS = 1500;
 const FETCH_GAP_JITTER_MS = 700;
-const RATE_LIMIT_BACKOFF_MS = 60_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -57,58 +57,26 @@ export async function GET(req: NextRequest) {
   }
 
   const results: TickerResult[] = [];
-  let rateLimitedAbort = false;
-  let backoffUsed = false;
-
-  const fetchOne = async (ticker: string): Promise<void> => {
-    const raw = await fetchOverseasDailyCandles(ticker);
-    const settled = dropUnsettledTodayBar(ticker, raw);
-    if (settled.length === 0) {
-      results.push({ ticker, ok: false, error: 'no settled candles' });
-      return;
-    }
-    const { added, lastDate, total } = await writeOverseasCandles(ticker, settled);
-    results.push({
-      ticker, ok: true, bars: total, lastDate, added,
-      droppedUnsettled: raw.length - settled.length,
-    });
-  };
+  let yahooRateLimited = false;
 
   for (let i = 0; i < tickers.length; i++) {
     const ticker = tickers[i];
     try {
-      await fetchOne(ticker);
-    } catch (err) {
-      if (err instanceof YahooRateLimitError && !backoffUsed) {
-        // 第一次撞限流：長退避後重試同一檔一次
-        backoffUsed = true;
-        console.warn(`[fetch-global-peers] ${ticker} 撞限流，退避 ${RATE_LIMIT_BACKOFF_MS / 1000}s 後重試`);
-        await sleep(RATE_LIMIT_BACKOFF_MS);
-        try {
-          await fetchOne(ticker);
-        } catch (retryErr) {
-          const msg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          results.push({ ticker, ok: false, error: msg });
-          if (retryErr instanceof YahooRateLimitError) {
-            // 退避後仍限流 → 提早收工，剩餘標 skipped（隔日 cron 自然補）
-            rateLimitedAbort = true;
-            for (const rest of tickers.slice(i + 1)) {
-              results.push({ ticker: rest, ok: false, error: 'skipped (rate-limited abort)' });
-            }
-            break;
-          }
-        }
+      const raw = await fetchOverseasDailyCandles(ticker);
+      const settled = dropUnsettledTodayBar(ticker, raw);
+      if (settled.length === 0) {
+        results.push({ ticker, ok: false, error: 'no settled candles' });
       } else {
-        const msg = err instanceof Error ? err.message : String(err);
-        results.push({ ticker, ok: false, error: msg });
-        if (err instanceof YahooRateLimitError) {
-          rateLimitedAbort = true;
-          for (const rest of tickers.slice(i + 1)) {
-            results.push({ ticker: rest, ok: false, error: 'skipped (rate-limited abort)' });
-          }
-          break;
-        }
+        const { added, lastDate, total } = await writeOverseasCandles(ticker, settled);
+        results.push({
+          ticker, ok: true, bars: total, lastDate, added,
+          droppedUnsettled: raw.length - settled.length,
+        });
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      results.push({ ticker, ok: false, error: msg });
+      if (err instanceof YahooRateLimitError) yahooRateLimited = true;
     }
     if (i < tickers.length - 1) {
       await sleep(FETCH_GAP_MS + Math.floor(Math.random() * FETCH_GAP_JITTER_MS));
@@ -120,7 +88,7 @@ export async function GET(req: NextRequest) {
     total: tickers.length,
     okCount,
     failCount: tickers.length - okCount,
-    ...(rateLimitedAbort ? { rateLimitedAbort: true } : {}),
+    ...(yahooRateLimited ? { yahooRateLimited: true } : {}),
     results,
   });
 }
