@@ -21,7 +21,6 @@ import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
-import { eodhdHistProvider } from '@/lib/datasource/EODHDHistProvider';
 import { twseHistProvider } from '@/lib/datasource/TWSEHistProvider';
 import { tencentHistProvider } from '@/lib/datasource/TencentHistProvider';
 import { yahooProvider } from '@/lib/datasource/YahooDataProvider';
@@ -53,8 +52,9 @@ interface FetchResult {
 /**
  * 嘗試多個 API 來源下載 K 線，第一個成功就返回
  *
- * TW: Scanner(FinMind) → EODHD → TWSE → Yahoo
- * CN: Scanner(EastMoney) → Tencent → EODHD
+ * TW: Scanner(FinMind) → TWSE → Yahoo
+ * CN: Scanner(EastMoney) → Tencent → Yahoo
+ * （2026-06-13：EODHD 不續訂移除；CN 第三層改 Yahoo）
  */
 async function fetchWithFallback(
   symbol: string,
@@ -72,15 +72,7 @@ async function fetchWithFallback(
   }
 
   if (market === 'TW') {
-    // 第二層：EODHD
-    try {
-      const candles = await eodhdHistProvider.getHistoricalCandles(symbol, '2y');
-      if (candles.length >= MIN_CANDLE_COUNT) {
-        return { candles, source: 'EODHD' };
-      }
-    } catch { /* continue */ }
-
-    // 第三層：TWSE
+    // 第二層：TWSE
     try {
       const candles = await twseHistProvider.getHistoricalCandles(symbol, '2y');
       if (candles.length >= MIN_CANDLE_COUNT) {
@@ -88,7 +80,7 @@ async function fetchWithFallback(
       }
     } catch { /* continue */ }
 
-    // 第四層：Yahoo
+    // 第三層：Yahoo
     try {
       const candles = await yahooProvider.getHistoricalCandles(symbol, '2y');
       if (candles.length >= MIN_CANDLE_COUNT) {
@@ -104,11 +96,11 @@ async function fetchWithFallback(
       }
     } catch { /* continue */ }
 
-    // CN 第三層：EODHD
+    // CN 第三層：Yahoo（.SS/.SZ Yahoo 可抓）
     try {
-      const candles = await eodhdHistProvider.getHistoricalCandles(symbol, '2y');
+      const candles = await yahooProvider.getHistoricalCandles(symbol, '2y');
       if (candles.length >= MIN_CANDLE_COUNT) {
-        return { candles, source: 'EODHD' };
+        return { candles, source: 'Yahoo' };
       }
     } catch { /* continue */ }
   }

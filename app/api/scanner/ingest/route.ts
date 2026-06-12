@@ -16,7 +16,6 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { ensureCoverage } from '@/lib/datasource/MarketDataIngestor';
-import { eodhdHistProvider } from '@/lib/datasource/EODHDHistProvider';
 
 export const runtime = 'nodejs';
 export const maxDuration = 180; // 3 分鐘（補缺可能需要時間）
@@ -39,19 +38,10 @@ export async function POST(req: NextRequest) {
 
     const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
 
-    // Ingest 補缺優先用 EODHD（付費，配額大），失敗時 fallback 到 scanner 預設路徑
-    const fetchWithEODHDFirst = async (symbol: string, date?: string) => {
-      try {
-        const candles = await eodhdHistProvider.getHistoricalCandles(symbol, '2y', date);
-        if (candles.length >= 30) return candles;
-      } catch {
-        // EODHD 失敗，fallback 到 scanner（FinMind/EastMoney 等）
-      }
-      return scanner.fetchCandles(symbol, date);
-    };
-
+    // 2026-06-13：EODHD 不續訂 — 補缺直接走 scanner 預設鏈
+    // （TW: FinMind→TWSE→Yahoo / CN: EastMoney→Tencent→Yahoo，MultiMarketProvider 單一事實）
     const report = await ensureCoverage(symbols, market, asOfDate, {
-      fetchCandles: fetchWithEODHDFirst,
+      fetchCandles: (symbol: string, date?: string) => scanner.fetchCandles(symbol, date),
       maxIngestCount: 300,
       timeoutMs: 150_000, // 2.5 分鐘上限
     });

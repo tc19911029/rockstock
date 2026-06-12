@@ -23,7 +23,6 @@ import { finmindHistProvider } from './FinMindHistProvider';
 import { eastMoneyHistProvider, getSinaMinuteCandles } from './EastMoneyHistProvider';
 import { tencentHistProvider } from './TencentHistProvider';
 import { baiduHistProvider } from './BaiduHistProvider';
-import { eodhdHistProvider } from './EODHDHistProvider';
 import { yahooProvider } from './YahooDataProvider';
 import { getTWSEQuote, getTWSERealtimeIntraday } from './TWSERealtime';
 import { getEastMoneyQuote, getUSStockQuote } from './EastMoneyRealtime';
@@ -388,15 +387,13 @@ export class MultiMarketProvider implements DataProvider {
     const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval ?? '');
 
     if (market === 'TW') {
-      // 走圖路由：FinMind → EODHD → TWSE → Yahoo（4 層 fallback）
+      // 走圖路由：FinMind → TWSE → Yahoo（3 層 fallback）
+      // 2026-06-13：EODHD 不續訂（token 401 失效）從鏈中移除 — 原本就夾在中間，
+      // 前後皆有活源，移除只是省一次死呼叫
       result = await tryProvidersWithRacing([
         {
           name: `FinMind ${symbol}`,
           fn: () => finmindHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
-        },
-        {
-          name: `EODHD ${symbol}`,
-          fn: () => eodhdHistProvider.getHistoricalCandles(symbol, period, asOfDate),
         },
         {
           name: `TWSE ${symbol}`,
@@ -429,7 +426,8 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else {
-      // 陸股/美股走圖路由：Tencent → 百度(CN,不封IP) → Yahoo → EODHD → EastMoney（EastMoney 墊底）
+      // 陸股/美股走圖路由：Tencent → 百度(CN,不封IP) → Yahoo → EastMoney（EastMoney 墊底）
+      // 2026-06-13：EODHD 不續訂移除（同上）
       result = await tryProvidersWithRacing([
         {
           name: `Tencent ${symbol}`,
@@ -442,10 +440,6 @@ export class MultiMarketProvider implements DataProvider {
         {
           name: `Yahoo ${symbol}`,
           fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
-        },
-        {
-          name: `EODHD ${symbol}`,
-          fn: () => eodhdHistProvider.getHistoricalCandles(symbol, period, asOfDate),
         },
         {
           name: `EastMoney ${symbol}`,
@@ -504,18 +498,19 @@ export class MultiMarketProvider implements DataProvider {
     let result: Candle[];
 
     if (market === 'TW') {
+      // 2026-06-13：EODHD 不續訂移除
       result = await tryProvidersWithRacing([
         {
           name: `FinMind range ${symbol}`,
           fn: () => finmindHistProvider.getCandlesRange(symbol, startDate, endDate),
         },
         {
-          name: `EODHD range ${symbol}`,
-          fn: () => eodhdHistProvider.getCandlesRange(symbol, startDate, endDate),
-        },
-        {
           name: `TWSE range ${symbol}`,
           fn: () => twseHistProvider.getCandlesRange(symbol, startDate, endDate),
+        },
+        {
+          name: `Yahoo range ${symbol}`,
+          fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate),
         },
       ]);
     } else if (market === 'INDEX') {
@@ -526,6 +521,7 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else {
+      // 2026-06-13：EODHD 不續訂移除，第三層改 Yahoo（.SS/.SZ Yahoo 可抓）
       result = await tryProvidersWithRacing([
         {
           name: `EastMoney range ${symbol}`,
@@ -536,8 +532,8 @@ export class MultiMarketProvider implements DataProvider {
           fn: () => tencentHistProvider.getCandlesRange(symbol, startDate, endDate),
         },
         {
-          name: `EODHD range ${symbol}`,
-          fn: () => eodhdHistProvider.getCandlesRange(symbol, startDate, endDate),
+          name: `Yahoo range ${symbol}`,
+          fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate),
         },
       ]);
     }

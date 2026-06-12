@@ -73,7 +73,7 @@
 
 | 場景 | TW Provider | CN Provider |
 |------|------------|------------|
-| 收盤後日K (Layer 1) | EODHD(主)→FinMind(備) | EODHD(主)→EastMoney(備) |
+| 收盤後日K (Layer 1) | TWSE/TPEx 官方 bulk(主)→FinMind→Yahoo | EastMoney(主)→Tencent→Yahoo |
 | 盤中全市場快照 (Layer 2) | TWSE mis 批量 | EastMoney push2 批量 |
 | 走圖分鐘K (Layer 3) | Fugle | EastMoney klt |
 | 歷史掃描 | 本地/Blob（零 API） | 本地/Blob（零 API） |
@@ -92,6 +92,9 @@
 
 ### 硬性規則
 
+- （2026-06-13 註：EODHD 不續訂，已從所有鏈路移除 — 上表為現行路由。歷史鏈
+  TW: FinMind→TWSE→Yahoo、CN: Tencent→Baidu→Yahoo→EastMoney，單一事實在
+  MultiMarketProvider.ts）
 - 收盤後全市場日K更新、盤中全市場粗掃、個股高頻走圖，必須分為不同資料鏈路
 - 各任務需有獨立節流、重試、快取與優先級策略
 - 系統需自行控制 API 使用量，避免超過供應商限制
