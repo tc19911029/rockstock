@@ -61,12 +61,9 @@ async function fetchTwseSblAll(date: string): Promise<TwseSblRow[]> {
 
   const url = `${TWSE_URL}?date=${date}&response=json`;
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-    });
-    if (!res.ok) return [];
-    const json: TwseResp = await res.json();
+    // TWSE 直連間歇性 connect timeout / TLS reset（2026-06-12 B2 實測）→ curl-first helper
+    const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+    const { data: json } = await fetchJsonWithCurlFallback<TwseResp>(url);
     if (json.stat !== 'OK' || !Array.isArray(json.data)) return [];
 
     // 日期格式 "YYYYMMDD" → "YYYY-MM-DD"
@@ -122,6 +119,11 @@ export async function fetchTwseSblForStock(
   const dateCompact = dateIso.replace(/-/g, '');
   const all = await fetchTwseSblAll(dateCompact);
   return all.find(r => r.stockId === stockId) ?? null;
+}
+
+/** 全市場單日 bulk（/api/cron/fetch-chip-extras 每日持久化用；2026-06-12 B2）*/
+export async function fetchTwseSblBulk(dateIso: string): Promise<TwseSblRow[]> {
+  return fetchTwseSblAll(dateIso.replace(/-/g, ''));
 }
 
 /**

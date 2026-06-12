@@ -75,6 +75,13 @@ interface ChipInfo {
   brokerConcentration?: number;
   topBuyers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
   topSellers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
+  // v5 三大法人衍生欄位（連買天數 / 占量 / 同步買）
+  foreignConsecBuyDays?: number;
+  trustConsecBuyDays?: number;
+  foreignNetToVolumePct?: number | null;
+  trustNetToVolumePct?: number | null;
+  instSyncBuy?: boolean;
+  instSyncBuyDays?: number;
 }
 
 // ── Signal label + color ────────────────────────────────────────────────────
@@ -219,6 +226,22 @@ function ChipTile({
       {/* Gauge */}
       {!noData && <GaugeBar value={value} range={range} />}
     </div>
+  );
+}
+
+// ── 法人連買 / 占量（v5 衍生欄位）────────────────────────────────────────────
+function InstConsecLeg({ label, days, pct }: { label: string; days: number; pct?: number | null }) {
+  return (
+    <span className="whitespace-nowrap">
+      {label}連買{' '}
+      <span className={`font-mono font-bold ${days > 0 ? 'text-bull' : 'text-muted-foreground/70'}`}>{days}</span>
+      {' '}日
+      {pct != null && (
+        <span className={`font-mono ${pct > 0 ? 'text-bull-light' : pct < 0 ? 'text-bear-light' : 'text-muted-foreground/70'}`}>
+          （占量 {pct > 0 ? '+' : ''}{pct.toFixed(1)}%）
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -399,6 +422,20 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           />
         ))}
       </div>
+
+      {/* ── 法人連買 / 占量（v5 衍生欄位；純顯示不進評分）── */}
+      {data.foreignConsecBuyDays != null && data.trustConsecBuyDays != null && (
+        <div className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+          <InstConsecLeg label="外資" days={data.foreignConsecBuyDays} pct={data.foreignNetToVolumePct} />
+          <span className="text-muted-foreground/40">／</span>
+          <InstConsecLeg label="投信" days={data.trustConsecBuyDays} pct={data.trustNetToVolumePct} />
+          {data.instSyncBuy && (
+            <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 border border-red-700/50">
+              外資+投信同步買 {data.instSyncBuyDays} 日
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── 主力券商分點（v3 Yahoo scraper）── */}
       {data.brokerNetBuy != null && data.topBuyers && data.topSellers && (

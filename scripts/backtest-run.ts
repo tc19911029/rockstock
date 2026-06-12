@@ -18,6 +18,7 @@ import { evaluateElimination }        from '@/lib/scanner/eliminationFilter';
 import type { CandleWithIndicators }  from '@/types';
 import { BASE_THRESHOLDS, ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 import { panelSortKey } from '@/lib/selection/applyPanelFilter';
+import { isDisposedOnSync } from '@/lib/market/attentionList';
 
 // ══════════════════════════════════════════════════════════════
 // ★ 在這裡修改回測設定 ★
@@ -325,6 +326,10 @@ function buildSixcondCandidate(
 
   // mtfMin > 0 啟用 MTF 過濾時，要求週線前 5 全過（與 applyPanelFilter 一致）
   if (mtfMin > 0 && !mtfWeeklyPass) return null;
+
+  // 處置股硬排除（鐵則 #10 對齊 applyPanelFilter.isDisposalVetoed；
+  // 官方名單自 2026-06-12 起收集，更早歷史日期查無紀錄 = no-op）
+  if (isDisposedOnSync(symbol, c.date)) return null;
 
   const f: SixcondFeatures = {
     symbol, name, idx, candles, entryPrice,

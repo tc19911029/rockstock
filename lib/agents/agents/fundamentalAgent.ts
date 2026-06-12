@@ -21,6 +21,7 @@ import {
   FundamentalGroundTruth,
   FundamentalQuestion,
 } from '@/lib/agents/types';
+import { FUNDAMENTAL_JUDGMENT_RULES } from '@/lib/agents/judgmentRules';
 import type { MarketId } from '@/lib/scanner/types';
 import type { Candidate } from '@/lib/agents/candidates/types';
 import { sliceSourcesForAgent } from '@/lib/agents/candidates/types';
@@ -96,6 +97,7 @@ export async function buildFundamentalQuestion(
     symbol,
     market,
     groundTruth,
+    judgmentRulesRef: FUNDAMENTAL_JUDGMENT_RULES,
   };
   if (candidate) {
     question.entryContext = {

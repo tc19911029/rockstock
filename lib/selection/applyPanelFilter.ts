@@ -22,6 +22,18 @@ export interface PanelFilterOptions {
 }
 
 /**
+ * 處置股硬排除（2026-06-12 B1）— 三方共用的唯一判定。
+ *
+ * 處置期間改人工管制分盤撮合（約 5 分鐘一次）+ 大額委託預收款券，
+ * 屬交易制度層「不可交易性」（同漲停買不到），不是選股因子（不違鐵則 #5）。
+ * 旗標由 saveScanSession 寫入 L4 時按官方名單蓋章（lib/market/attentionList.ts）；
+ * 歷史 session 無此欄位（undefined）→ 不剔除。注意股（attentionNotice）只警示不排除。
+ */
+export function isDisposalVetoed(r: Pick<StockScanResult, 'disposalVeto'>): boolean {
+  return r.disposalVeto === true;
+}
+
+/**
  * 對 scan session 的 results 套用面板顯示規則。
  * @param results ScanPipeline 產生、已通過六條件+戒律+淘汰法的候選
  * @param options 面板切換狀態
@@ -31,6 +43,9 @@ export function applyPanelFilter(
   options: PanelFilterOptions,
 ): StockScanResult[] {
   let filtered = [...results];
+
+  // 處置股硬排除：不分 MTF on/off 一律剔除（見 isDisposalVetoed 註解）
+  filtered = filtered.filter(r => !isDisposalVetoed(r));
 
   // MTF gate：週線前5全過（①趨勢②均線③位置④量⑤K線）才算通過
   // 使用 mtfWeeklyPass 而非舊 4 分制 mtfScore >= 3，避免只過①②⑥+月就誤入

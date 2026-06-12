@@ -10,12 +10,14 @@
  *   - 觸發任一淘汰法 (eliminationReasons 非空)
  *   - 觸發戒律 8（空頭紅 K 反彈）
  *   - 即將發生重大事件（除權息 T-3 內、法說會 T-1 內）
+ *   - 處置股（attentionFlags.disposal=true — 分盤交易，制度層不可交易；2026-06-12 B1）
  *
  * 黃燈規則（softWarning → verdict='yellow'）：
  *   - trendPosition='接近壓力區'
  *   - mtfWeeklyPass=false 但日線多頭
  *   - 融資過熱（marginUtilRate > 25%）
  *   - 漲多回檔風險（changePercent > 7% 且接近壓力）
+ *   - 注意股（attentionFlags.notice=true — 近 5 日公布注意，警示不排除）
  */
 
 import { fetchJSON, internalUrl } from './_fetchHelper';
@@ -52,6 +54,26 @@ export async function buildRiskQuestion(args: BuildRiskQuestionArgs): Promise<Ri
 
   const marketRegime = extractTrend(marketTrendRaw);
 
+  // 處置股/注意股官方名單即時查（TW 限定；名單檔不存在 → null）
+  let attentionFlags: RiskGroundTruth['attentionFlags'] = null;
+  if (market === 'TW') {
+    try {
+      const { getActiveDisposalSet, getRecentNoticeSet, bareCode, readLatestAttentionList } =
+        await import('@/lib/market/attentionList');
+      const hasList = (await readLatestAttentionList()) !== null;
+      if (hasList) {
+        const [disposalSet, noticeSet] = await Promise.all([
+          getActiveDisposalSet(date),
+          getRecentNoticeSet(date),
+        ]);
+        const code = bareCode(symbol);
+        attentionFlags = { disposal: disposalSet.has(code), notice: noticeSet.has(code) };
+      }
+    } catch (e) {
+      fetchErrors.push(`attention-list: ${e}`);
+    }
+  }
+
   const groundTruth: RiskGroundTruth = {
     symbol,
     candidateRow,
@@ -62,6 +84,7 @@ export async function buildRiskQuestion(args: BuildRiskQuestionArgs): Promise<Ri
       fundamental: fundamental ? { verdict: fundamental.verdict, overview: fundamental.overview } : null,
     },
     marketRegime,
+    attentionFlags,
     fetchErrors,
   };
 

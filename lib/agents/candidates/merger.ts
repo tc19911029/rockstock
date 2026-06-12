@@ -48,11 +48,12 @@ export function mergeCandidates(args: MergeArgs): CandidatesPool {
     }
   }
 
-  // 計算 sourceCount + strengthSignals
+  // 計算 sourceCount + strengthSignals（+ comboBadges 純顯示徽章，不參與排序）
   const candidates: Candidate[] = [];
   for (const c of merged.values()) {
     c.sourceCount = countSources(c);
     c.strengthSignals = computeStrengthSignals(c);
+    c.comboBadges = computeComboBadges(c);
     candidates.push(c);
   }
 
@@ -110,6 +111,22 @@ function countSources(c: Candidate): number {
   return Object.keys(c.sources).filter((k) =>
     c.sources[k as SourceName] !== undefined,
   ).length;
+}
+
+/**
+ * 組合徽章（2026-06-12 A3）— 純顯示，不參與 countSources / strengthSignals / 排序。
+ * 「pool 不加組合 bonus」決議不變：徽章標示組合事實，分數一分不加。
+ */
+export function computeComboBadges(c: Candidate): string[] {
+  const badges: string[] = [];
+  const chipSignals = c.sources.chip?.signals ?? [];
+  const foreignBuy = chipSignals.includes('foreign_strong_buy');
+  const trustBuy = chipSignals.includes('trust_buy');
+  if (foreignBuy && trustBuy) {
+    badges.push(c.sources.technical ? 'sync_buy_with_tech' : 'inst_sync_buy');
+  }
+  if (c.sourceCount === 4) badges.push('full_house');
+  return badges;
 }
 
 function computeStrengthSignals(c: Candidate): Candidate['strengthSignals'] {

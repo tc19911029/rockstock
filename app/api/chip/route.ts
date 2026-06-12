@@ -110,6 +110,20 @@ export interface ChipData {
   // v4 成本／壓力價精簡摘要（外資/投信/自營/主力/融資/融券/券賣 成本 + 嘎空價 + 斷頭價）
   // 純顯示，不進 chipScore；完整版走 /api/cost-basis
   costBasis?: CostBasisSummary;
+
+  // v5 三大法人衍生欄位（純衍生計算，零新資料源；純顯示不進 chipScore / 選股 gate）
+  /** 外資連續買超天數（從最新交易日往回數，淨買 > 0 算連續；最新日賣超 → 0） */
+  foreignConsecBuyDays: number;
+  /** 投信連續買超天數（同上） */
+  trustConsecBuyDays: number;
+  /** 最新日外資買賣超(張) ÷ 當日成交量(張) × 100（1 位小數；成交量缺或 0 → null） */
+  foreignNetToVolumePct: number | null;
+  /** 最新日投信買賣超(張) ÷ 當日成交量(張) × 100（同上） */
+  trustNetToVolumePct: number | null;
+  /** 外資 + 投信最新日同步買超（兩者淨買 > 0） */
+  instSyncBuy: boolean;
+  /** 外資 + 投信「同日同步買超」連續天數 */
+  instSyncBuyDays: number;
 }
 
 // ── 計算籌碼面綜合評分 v2 ────────────────────────────────────────────────────
@@ -309,6 +323,19 @@ import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
 import { fetchTpexMarginForStock } from '@/lib/datasource/TpexMarginProvider';
 import { getCostBasisBundle, toCostBasisSummary } from '@/lib/chipcost/aggregate';
 import type { CostBasisSummary } from '@/lib/chipcost/types';
+import { computeInstDerived } from '@/lib/chips/instDerived';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+
+/** 讀本地 L1 日K，取指定日的成交量（張）；上市 .TW → 上櫃 .TWO fallback；缺 → null */
+async function loadVolumeLotsOnDate(code: string, date: string): Promise<number | null> {
+  for (const suffix of ['TW', 'TWO'] as const) {
+    const file = await readCandleFile(`${code}.${suffix}`, 'TW').catch(() => null);
+    if (!file) continue;
+    const bar = file.candles.find(c => c.date === date);
+    return bar?.volume ?? null;   // 檔案存在但該日無 bar → null（不再試另一後綴）
+  }
+  return null;
+}
 
 // ── 投信動向（陳威良 3比8 法則的 proxy）────────────────────────────────────
 // FinMind 免費層無「絕對投信持股 %」資料源；先用「最近 30/60/90 天投信淨買 ÷ 已發行股數」
@@ -427,6 +454,8 @@ export async function GET(req: NextRequest) {
       fetchTwseSblHistory(code, date, 30).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 30)).catch(() => []),
       // v3: 主力券商分點（Yahoo 籌碼頁；對齊籌碼K線「主力 -102」）
       fetchYahooBrokerTrades(code),
+      // v5: 法人最新資料日的當日成交量（張，本地 L1；衍生欄位占量計算用）
+      instOnDate ? loadVolumeLotsOnDate(code, instOnDate.date) : Promise.resolve(null),
     ]);
     const pickFulfilled = <T,>(idx: number): T | null => {
       const r = settled[idx];
@@ -439,6 +468,7 @@ export async function GET(req: NextRequest) {
     const sharesIssued = pickFulfilled<number>(4);
     const sblHistory = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblHistory>>>(5) ?? [];
     const brokerTrades = pickFulfilled<Awaited<ReturnType<typeof fetchYahooBrokerTrades>>>(6);
+    const latestVolumeLots = pickFulfilled<number | null>(7);
     // 把 sblToday 轉成 lendingInfo shape 給後面 code 用（向下相容）
     const lendingInfo = sblToday ? {
       lendingBalance: sblToday.lendingBalance,
@@ -517,6 +547,15 @@ export async function GET(req: NextRequest) {
     const trustHoldingChange60d = netBuyToPp(trustNetBuy60d, sharesIssued);
     const trustHoldingChange90d = netBuyToPp(trustNetBuy90d, sharesIssued);
     const trustMomentumStage = classifyTrustMomentum(trustHoldingChange30d);
+
+    // ── v5: 三大法人衍生欄位（連買天數 / 占量 / 同步買）──
+    // 錨定在「實際回傳的法人資料日」（instOnDate 可能是盤中 fallback 的最新歷史日），
+    // 序列只取錨定日（含）以前，確保連買天數與 foreignBuy 顯示值同一基準。
+    const anchorInstDate = instOnDate?.date;
+    const instDerived = computeInstDerived(
+      anchorInstDate ? instRows.filter(r => r.date <= anchorInstDate) : [],
+      latestVolumeLots,
+    );
     // 算實際資料涵蓋天數：(date - oldest row) 內的最大值，cap 90
     const oldestInst = instRows[0]?.date;
     const trustDataCoverageDays = oldestInst
@@ -665,6 +704,8 @@ export async function GET(req: NextRequest) {
         : undefined,
       topBuyers: brokerTrades?.buyerRankList,
       topSellers: brokerTrades?.sellerRankList,
+      // v5 三大法人衍生欄位（純顯示）
+      ...instDerived,
     };
 
     // v4 成本／壓力價摘要（best-effort；失敗不影響籌碼面板主體）

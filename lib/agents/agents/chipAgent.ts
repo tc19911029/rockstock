@@ -17,6 +17,7 @@ import {
   ChipGroundTruth,
   ChipQuestion,
 } from '@/lib/agents/types';
+import { CHIP_JUDGMENT_RULES } from '@/lib/agents/judgmentRules';
 import type { MarketId } from '@/lib/scanner/types';
 import type { Candidate } from '@/lib/agents/candidates/types';
 import { sliceSourcesForAgent } from '@/lib/agents/candidates/types';
@@ -60,6 +61,7 @@ export async function buildChipQuestion(args: BuildChipQuestionArgs): Promise<Ch
     symbol,
     market,
     groundTruth,
+    judgmentRulesRef: CHIP_JUDGMENT_RULES,
   };
   if (candidate) {
     question.entryContext = {

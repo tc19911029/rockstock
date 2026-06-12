@@ -41,6 +41,14 @@ export async function POST(req: NextRequest) {
 
   const pool = mergeCandidates({ market: market as MarketId, date, results });
 
+  // specScore 顯示層附掛（A3）：失敗不可擋 pool 落地，且不影響排序（合約守）
+  try {
+    const { enrichSpecScores } = await import('@/lib/spec-score/enrich');
+    await enrichSpecScores(pool);
+  } catch (err) {
+    console.warn('[pool/build] enrichSpecScores failed (non-critical):', err);
+  }
+
   const file = await savePool(pool);
 
   const elapsedMs = Date.now() - startedAt;

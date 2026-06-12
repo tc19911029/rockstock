@@ -198,6 +198,19 @@ export async function saveScanSession(
   session: ScanSession,
   opts?: SaveScanOptions,
 ): Promise<void> {
+  // ── 處置股/注意股蓋章（2026-06-12 B1）──
+  // 所有掃描路徑（六條件/買法軌/R 軌/盤中）的 L4 寫入都經過這裡，蓋章只做一處。
+  // 只標記不剔除（L4 保留完整紀錄）；硬排除在 applyPanelFilter.isDisposalVetoed。
+  // 名單沒抓過 / 讀檔失敗 = no-op，絕不可擋掃描寫入。
+  if (session.market === 'TW' && session.results?.length) {
+    try {
+      const { stampAttentionFlags } = await import('@/lib/market/attentionList');
+      await stampAttentionFlags(session.results, session.date);
+    } catch (err) {
+      console.warn('[scanStorage] stampAttentionFlags failed (non-critical):', err);
+    }
+  }
+
   const data = JSON.stringify(session);
   const dir = session.direction ?? 'long';
   const mtf = sessionMtfMode(session);

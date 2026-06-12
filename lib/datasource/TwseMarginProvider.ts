@@ -55,12 +55,9 @@ async function fetchTwseMarginAll(date: string): Promise<TwseMarginRow[]> {
 
   const url = `${TWSE_URL}?date=${date}&selectType=ALL&response=json`;
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-    });
-    if (!res.ok) return [];
-    const json: TwseResp = await res.json();
+    // TWSE 直連間歇性 connect timeout / TLS reset（2026-06-12 B2 實測）→ curl-first helper
+    const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+    const { data: json } = await fetchJsonWithCurlFallback<TwseResp>(url);
     if (json.stat !== 'OK' || !Array.isArray(json.tables)) return [];
 
     // tables[0] 是市場彙總，tables[1] 才是個股
@@ -102,4 +99,9 @@ export async function fetchTwseMarginForStock(stockId: string, dateIso: string):
   const dateCompact = dateIso.replace(/-/g, '');
   const all = await fetchTwseMarginAll(dateCompact);
   return all.find(r => r.stockId === stockId) ?? null;
+}
+
+/** 全市場單日 bulk（/api/cron/fetch-chip-extras 每日持久化用；2026-06-12 B2）*/
+export async function fetchTwseMarginBulk(dateIso: string): Promise<TwseMarginRow[]> {
+  return fetchTwseMarginAll(dateIso.replace(/-/g, ''));
 }

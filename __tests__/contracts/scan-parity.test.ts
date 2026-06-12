@@ -9,7 +9,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { applyPanelFilter } from '@/lib/selection/applyPanelFilter';
+import { applyPanelFilter, isDisposalVetoed } from '@/lib/selection/applyPanelFilter';
 import type { StockScanResult } from '@/lib/scanner/types';
 
 interface Session {
@@ -100,6 +100,55 @@ describe('Scan panel parity contracts (R10)', () => {
       const viaPanel = applyPanelFilter(mixed, { useMultiTimeframe: true }).map(r => r.symbol).sort();
       const viaRunner = mixed.filter(runnerGate).map(r => r.symbol).sort();
       expect(viaRunner).toEqual(viaPanel);
+    });
+  });
+
+  // 2026-06-12 B1：處置股硬排除（合成樣本鎖死語意）。
+  // 旗標由 saveScanSession 按官方名單蓋章（lib/market/attentionList.ts），
+  // applyPanelFilter / backtestStore 三個結果落地點 / backtest-run·all 的
+  // isDisposedOnSync 都必須鏡像「disposalVeto === true 一律剔除」。
+  // 注意股（attentionNotice）只警示不排除 — 也在此鎖死。
+  describe('處置股 veto gate（disposalVeto 必剔 / attentionNotice 必留）', () => {
+    const mkVeto = (sym: string, flags: { disposalVeto?: boolean; attentionNotice?: boolean }): StockScanResult => ({
+      symbol: sym, name: sym, market: 'TW', industry: '',
+      price: 100, changePercent: 1, volume: 0,
+      triggeredRules: [], sixConditionsScore: 5,
+      sixConditionsBreakdown: {
+        trend: true, position: true, kbar: true, ma: true, volume: true, indicator: true,
+      },
+      trendState: '多頭', trendPosition: '',
+      scanTime: '2026-06-12T00:00:00.000Z',
+      highWinRateScore: 0, highWinRateTypes: [], highWinRateDetails: [],
+      mtfWeeklyPass: true,
+      ...flags,
+    } as unknown as StockScanResult);
+
+    const mixed = [
+      mkVeto('GOOD', {}),
+      mkVeto('DISPO', { disposalVeto: true }),
+      mkVeto('NOTICE', { attentionNotice: true }),
+      mkVeto('LEGACY', { disposalVeto: undefined }), // 歷史 session 無此欄位
+    ];
+
+    test('disposalVeto=true 一律剔除（MTF off）', () => {
+      const filtered = applyPanelFilter(mixed, { useMultiTimeframe: false });
+      expect(filtered.map(r => r.symbol).sort()).toEqual(['GOOD', 'LEGACY', 'NOTICE']);
+    });
+
+    test('disposalVeto=true 一律剔除（MTF on，veto 不受 toggle 影響）', () => {
+      const filtered = applyPanelFilter(mixed, { useMultiTimeframe: true });
+      expect(filtered.map(r => r.symbol).sort()).toEqual(['GOOD', 'LEGACY', 'NOTICE']);
+    });
+
+    test('isDisposalVetoed 述詞 === applyPanelFilter 剔除集（單一事實）', () => {
+      const viaPanel = applyPanelFilter(mixed, { useMultiTimeframe: false }).map(r => r.symbol).sort();
+      const viaPredicate = mixed.filter(r => !isDisposalVetoed(r)).map(r => r.symbol).sort();
+      expect(viaPredicate).toEqual(viaPanel);
+    });
+
+    test('attentionNotice 只警示不排除', () => {
+      const filtered = applyPanelFilter([mkVeto('N1', { attentionNotice: true })], { useMultiTimeframe: false });
+      expect(filtered).toHaveLength(1);
     });
   });
 

@@ -9,6 +9,7 @@
 
 import type { MarketId } from '@/lib/scanner/types';
 import type { EntryGateResult } from '@/lib/agents/entryGate';
+import type { SpecScoreResult } from '@/lib/spec-score/compute';
 
 export const POOL_SCHEMA_VERSION = 1 as const;
 
@@ -128,6 +129,20 @@ export interface Candidate {
     chipScore: number;              // 0-100
     fundamentalScore: number;       // 由 source 自己給的綜合分
   };
+
+  /**
+   * specScore（2026-06-12 A3 — 規格書 4 套類型權重的【顯示層】總分）
+   * pool build 時由 lib/spec-score/enrich 附掛；不參與預設排序（仍是 computeFacetScores.total）、
+   * 不參與任何 gate（鐵則 #5）。合約測試 spec-score-isolation 守。
+   */
+  specScore?: SpecScoreResult;
+
+  /**
+   * 組合徽章（2026-06-12 A3 — 純顯示零分數影響）
+   * 例：'inst_sync_buy'（外資+投信籌碼訊號同現）、'sync_buy_with_tech'（同步買 + 技術在場）。
+   * 「不加組合 bonus」決議不變 — 徽章只標示不加分；要進排序先過回測（計畫 Phase 6）。
+   */
+  comboBadges?: string[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────

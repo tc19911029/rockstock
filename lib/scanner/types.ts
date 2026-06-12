@@ -58,6 +58,11 @@ export interface StockScanResult {
   eliminationPenalty?: number;        // 淘汰扣分
   // ── 戒律（書本進場禁忌；反轉軌訊號不會被 reject 但會記錄 count 供 UI 警示）──
   longProhibitionsReasons?: string[]; // 觸發的戒律 reason 字串
+  // ── 處置股/注意股（官方名單，saveScanSession 寫入時蓋章；2026-06-12 B1）──
+  // 處置 = 交易制度層硬排除（分盤交易），applyPanelFilter.isDisposalVetoed 統一剔除；
+  // 注意 = 近 5 日公布注意，僅警示不排除。單一事實：lib/market/attentionList.ts
+  disposalVeto?: boolean;
+  attentionNotice?: boolean;
   // ── 做空方向 ──────────────────────────────────────────────────────────────
   direction?: 'long' | 'short';              // 做多/做空方向
   shortSixConditionsScore?: number;          // 0–6

@@ -23,6 +23,7 @@ import {
   POOL_WEIGHTS,
   computeFacetScores,
 } from '@/lib/agents/candidates/poolWeights';
+import { SPEC_STOCK_TYPE_LABEL, SPEC_DIM_LABEL, COMBO_BADGE_LABEL } from '@/lib/spec-score/weights';
 import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { formatLetters } from '@/lib/scanner/buyMethodTracks';
@@ -544,6 +545,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                 <th className="px-2 py-1.5 text-left font-medium">股票</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="幾個面向同時看好">面向</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="4 面向加權總分（受權重 popover 設定影響）">總分</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="規格書 4 套類型權重總分（顯示層參考，不影響排序；hover 看維度明細與覆蓋率）">規格</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="進場時機（書本規則：連 2 漲停 / 月線乖離>15% / 末升段 → 不可追；回測 MA5 不破 → 可進；其他觀望）">時機</th>
                 <th className="px-1 py-1.5 text-left font-medium">命中</th>
                 <th className="px-2 py-1.5 text-left font-medium">理由</th>
@@ -630,6 +632,26 @@ function PoolRow({
             }>{totalScore}</span>
           ) : <span className="text-muted-foreground">—</span>}
         </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center font-mono">
+          {candidate.specScore?.total != null ? (
+            <span
+              className={
+                candidate.specScore.total >= 70 ? 'text-violet-300'
+                : candidate.specScore.total >= 50 ? 'text-violet-400/80'
+                : 'text-muted-foreground'
+              }
+              title={[
+                `規格分 ${candidate.specScore.total}（${SPEC_STOCK_TYPE_LABEL[candidate.specScore.stockType]}權重·覆蓋 ${Math.round(candidate.specScore.coverage * 100)}%）`,
+                ...candidate.specScore.dims
+                  .filter(d => d.score != null)
+                  .map(d => `  ${SPEC_DIM_LABEL[d.dim] ?? d.dim} ${d.score}（w${d.weight}）${d.note ? `· ${d.note}` : ''}`),
+              ].join('\n')}
+            >
+              {candidate.specScore.total}
+              {candidate.specScore.coverage < 0.6 && <span className="text-[9px] text-muted-foreground">*</span>}
+            </span>
+          ) : <span className="text-muted-foreground">—</span>}
+        </td>
         <td className="px-1 pt-1.5 pb-0.5 text-center">
           {candidate.entryGate
             ? <EntryStateBadge gate={candidate.entryGate} size="xs" />
@@ -657,6 +679,15 @@ function PoolRow({
               );
             })}
             {ytSummary && <YouTubeMentionBadge summary={ytSummary} bareCode={pureSymbol} size="xs" />}
+            {candidate.comboBadges?.map(b => (
+              <span
+                key={b}
+                title="組合徽章：純標示不加分（「不加組合 bonus」決議）"
+                className="inline-flex items-center px-1 py-0.5 rounded border text-[9px] bg-rose-900/40 text-rose-200 border-rose-700"
+              >
+                {COMBO_BADGE_LABEL[b] ?? b}
+              </span>
+            ))}
           </div>
         </td>
         <td className="px-2 pt-1.5 pb-0.5 text-[10px] text-muted-foreground">
@@ -677,7 +708,7 @@ function PoolRow({
         className={`border-b border-border/40 ${hoverClass}`}
         onClick={() => onSelect?.(candidate.symbol)}
       >
-        <td colSpan={6} className="px-2 pb-1.5 pt-0">
+        <td colSpan={7} className="px-2 pb-1.5 pt-0">
           <ForwardPerfRow performance={performance} isFetching={isFetchingForward} />
         </td>
       </tr>
