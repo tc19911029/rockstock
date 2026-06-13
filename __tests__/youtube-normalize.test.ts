@@ -119,3 +119,78 @@ describe('normalizeAnalysis — grounding（只報告不刪）', () => {
     expect(report.ungrounded).toHaveLength(0);
   });
 });
+
+describe('normalizeAnalysis — keyframe 欄位正規化（2026-06-13）', () => {
+  it('screenshot_ref 絕對路徑 → data/ 相對', () => {
+    const a = analysis({
+      high_consensus_stocks: [mention({
+        raw_query: '光頡',
+        matched: { code: '3624', name: '光頡', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' },
+        screenshot_ref: '/Users/tc/Desktop/rockstock/data/youtube/keyframes/2026-06-12/abc/f000560.webp',
+      })],
+    });
+    const { analysis: out, report } = normalizeAnalysis(a, master, {});
+    expect(out.high_consensus_stocks[0].screenshot_ref).toBe('data/youtube/keyframes/2026-06-12/abc/f000560.webp');
+    expect(report.fieldFixes.some(f => f.includes('screenshot_ref'))).toBe(true);
+  });
+
+  it('screenshot_ref 無 keyframes 片段 → 移除', () => {
+    const a = analysis({
+      weak_signal_stocks: [mention({ raw_query: '凱美', matched: { code: '2375', name: '凱美', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' }, screenshot_ref: '/tmp/random.png' })],
+    });
+    const { analysis: out } = normalizeAnalysis(a, master, {});
+    expect(out.weak_signal_stocks[0].screenshot_ref).toBeUndefined();
+  });
+
+  it('recommendation_type 漂移枚舉（等突破→觀察、突破買進→明確買進）', () => {
+    const a = analysis({
+      high_consensus_stocks: [
+        mention({ raw_query: '光頡', matched: { code: '3624', name: '光頡', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' }, recommendation_type: '等突破' as never }),
+        mention({ raw_query: '凱美', matched: { code: '2375', name: '凱美', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' }, recommendation_type: '突破買進' as never }),
+      ],
+    });
+    const { analysis: out } = normalizeAnalysis(a, master, {});
+    expect(out.high_consensus_stocks[0].recommendation_type).toBe('觀察');
+    expect(out.high_consensus_stocks[1].recommendation_type).toBe('明確買進');
+  });
+
+  it('未知 recommendation_type → fallback 觀察；合法值不動', () => {
+    const a = analysis({
+      weak_signal_stocks: [
+        mention({ raw_query: '光頡', matched: { code: '3624', name: '光頡', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' }, recommendation_type: '亂寫的' as never }),
+        mention({ raw_query: '凱美', matched: { code: '2375', name: '凱美', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' }, recommendation_type: '看多' }),
+      ],
+    });
+    const { analysis: out, report } = normalizeAnalysis(a, master, {});
+    expect(out.weak_signal_stocks[0].recommendation_type).toBe('觀察');
+    expect(out.weak_signal_stocks[1].recommendation_type).toBe('看多'); // 合法不動
+    expect(report.fieldFixes.filter(f => f.includes('recommendation_type'))).toHaveLength(1);
+  });
+
+  it('source_type 漂移（簡報→slide）、價位非正數 → 移除', () => {
+    const a = analysis({
+      high_consensus_stocks: [mention({
+        raw_query: '光頡',
+        matched: { code: '3624', name: '光頡', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' },
+        source_type: '簡報' as never, target_price: 0, mentioned_price: -5 as never,
+      })],
+    });
+    const { analysis: out } = normalizeAnalysis(a, master, {});
+    expect(out.high_consensus_stocks[0].source_type).toBe('slide');
+    expect(out.high_consensus_stocks[0].target_price).toBeUndefined();
+    expect(out.high_consensus_stocks[0].mentioned_price).toBeUndefined();
+  });
+
+  it('合法欄位完全不動、不誤報 fieldFix', () => {
+    const a = analysis({
+      high_consensus_stocks: [mention({
+        raw_query: '光頡',
+        matched: { code: '3624', name: '光頡', market: 'TWSE', confidence: 0.95, match_via: 'exact_name' },
+        source_type: 'speech+slide', recommendation_type: '明確買進',
+        screenshot_ref: 'data/youtube/keyframes/2026-06-12/abc/f001.webp', target_price: 120,
+      })],
+    });
+    const { report } = normalizeAnalysis(a, master, {});
+    expect(report.fieldFixes).toHaveLength(0);
+  });
+});

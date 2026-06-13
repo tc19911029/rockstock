@@ -16,6 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { loadStockMaster } from '@/lib/youtube/stockMaster';
 import { normalizeAnalysis } from '@/lib/youtube/normalizeAnalysis';
+import { validateAnalysisNames } from '@/lib/youtube/validateAnalysisNames';
 import type { DailyAnalysis } from '@/lib/youtube/analysisStorage';
 
 const date = process.argv[2];
@@ -81,7 +82,10 @@ async function main() {
     console.log(`   ${g.where} ${g.code} ${g.name}：標的 ${g.claimedVideo} ✗，實際出現於 [${g.foundIn.join(',')}]（命中「${g.matchedForm}」）`);
   }
 
-  console.log(`\n[3] 全逐字稿查無（待人工複查，勿直接刪——可能 Whisper 亂碼）：${report.ungrounded.length} 筆`);
+  console.log(`\n[3] keyframe 欄位修正（screenshot_ref/reco/source/數值）：${report.fieldFixes.length} 筆`);
+  for (const f of report.fieldFixes) console.log(`   ${f}`);
+
+  console.log(`\n[4] 全逐字稿查無（待人工複查，勿直接刪——可能 Whisper 亂碼）：${report.ungrounded.length} 筆`);
   for (const g of report.ungrounded) {
     console.log(`   ${g.where} ${g.code} ${g.name} @${g.claimedVideo}`);
   }
@@ -91,12 +95,34 @@ async function main() {
     return;
   }
 
-  if (report.codeFixes.length > 0) {
+  const totalFixes = report.codeFixes.length + report.fieldFixes.length;
+  if (totalFixes > 0) {
     fs.writeFileSync(analysisPath, JSON.stringify(fixed, null, 2) + '\n');
-    console.log(`\n✅ 已寫回 ${analysisPath}（修正 ${report.codeFixes.length} 筆代號）`);
+    console.log(`\n✅ 已寫回 ${analysisPath}（代號 ${report.codeFixes.length} + 欄位 ${report.fieldFixes.length}）`);
   } else {
-    console.log('\n✅ 代號全部正確，無需寫回。');
+    console.log('\n✅ 無需修正。');
   }
+
+  // ── 最終自查（大聲 fail）：正規化後若仍有合約違規 = 無法機械修，必須人工介入 ──
+  // 與合約測試同一份規則：validateAnalysisNames（名稱）+ keyframe 欄位枚舉/路徑/數值。
+  const residual: string[] = [];
+  for (const v of validateAnalysisNames(fixed, master)) residual.push(`name: ${v}`);
+  const VALID_RECO = new Set(['明確買進', '看多', '觀察', '等回檔', '小心追高', '偏空', '只介紹']);
+  const VALID_SOURCE = new Set(['speech', 'slide', 'speech+slide']);
+  for (const [label, arr] of [['high_consensus', fixed.high_consensus_stocks ?? []], ['weak_signal', fixed.weak_signal_stocks ?? []]] as const) {
+    for (const m of arr) {
+      if (m.recommendation_type !== undefined && !VALID_RECO.has(m.recommendation_type)) residual.push(`${label} ${m.raw_query}: reco=${m.recommendation_type}`);
+      if (m.source_type !== undefined && !VALID_SOURCE.has(m.source_type)) residual.push(`${label} ${m.raw_query}: source=${m.source_type}`);
+      if (m.screenshot_ref !== undefined && !/^data\/youtube\/keyframes\//.test(m.screenshot_ref)) residual.push(`${label} ${m.raw_query}: screenshot_ref=${m.screenshot_ref}`);
+    }
+  }
+
+  if (residual.length > 0) {
+    console.error(`\n❌ 正規化後仍有 ${residual.length} 筆無法自動修（需人工介入）：`);
+    for (const r of residual) console.error(`   ${r}`);
+    process.exit(2);
+  }
+  console.log('\n✅ 最終自查通過，合約規則全部滿足。');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

@@ -17,8 +17,81 @@
  *     **絕不自動刪除或搬移**(2026-05-30 凱美誤刪教訓：name-grep 查無常是 Whisper 亂碼，不是幻覺)。
  */
 
-import type { DailyAnalysis, AnalyzedStockMention, StockScoring } from './analysisStorage';
+import type {
+  DailyAnalysis, AnalyzedStockMention, StockScoring,
+  RecommendationType, MentionSourceType,
+} from './analysisStorage';
 import { lookupStock, type StockMasterFile } from './stockMaster';
+
+// ── keyframe 欄位枚舉（2026-06-12 新欄；合約 youtube-analysis-keyframe-fields 把關）────
+const VALID_RECO = new Set<string>(['明確買進', '看多', '觀察', '等回檔', '小心追高', '偏空', '只介紹']);
+const VALID_SOURCE = new Set<string>(['speech', 'slide', 'speech+slide']);
+
+/** 常見 LLM 漂移 → 合法 recommendation_type；查無對應 fallback '觀察'（最中性的「有在看不表態」） */
+const RECO_ALIASES: Record<string, RecommendationType> = {
+  等突破: '觀察', 突破買進: '明確買進', 突破: '明確買進', 買進: '明確買進', 加碼: '明確買進',
+  強烈看多: '看多', 強力看多: '看多', 偏多: '看多', 看好: '看多',
+  拉回買進: '等回檔', 拉回找買點: '等回檔', 等拉回: '等回檔', 逢低買進: '等回檔', 逢低布局: '等回檔', 回測買進: '等回檔',
+  追高小心: '小心追高', 避免追高: '小心追高', 高檔小心: '小心追高',
+  看空: '偏空', 賣出: '偏空', 偏空操作: '偏空', 出場: '偏空',
+  中性: '只介紹', 持平: '只介紹', 介紹: '只介紹', 中立: '只介紹',
+};
+
+const SOURCE_ALIASES: Record<string, MentionSourceType> = {
+  語音: 'speech', 口述: 'speech', 口播: 'speech',
+  簡報: 'slide', 投影片: 'slide', 字卡: 'slide', 畫面: 'slide', 截圖: 'slide',
+  '口述+簡報': 'speech+slide', 兩者: 'speech+slide',
+};
+
+/** 修一筆 mention 的 keyframe 欄位（mutate）。回傳修正描述清單。 */
+function normalizeMentionFields(m: AnalyzedStockMention, where: string): string[] {
+  const fixes: string[] = [];
+
+  // screenshot_ref 絕對路徑 → data/youtube/keyframes/... 相對；無從還原則移除
+  if (m.screenshot_ref !== undefined && !/^data\/youtube\/keyframes\//.test(m.screenshot_ref)) {
+    const i = m.screenshot_ref.indexOf('data/youtube/keyframes/');
+    if (i >= 0) {
+      const rel = m.screenshot_ref.slice(i);
+      fixes.push(`${where} "${m.raw_query}": screenshot_ref 絕對路徑 → ${rel}`);
+      m.screenshot_ref = rel;
+    } else {
+      fixes.push(`${where} "${m.raw_query}": screenshot_ref 無從還原（${m.screenshot_ref}）→ 移除`);
+      delete m.screenshot_ref;
+    }
+  }
+
+  // recommendation_type 枚舉
+  if (m.recommendation_type !== undefined && !VALID_RECO.has(m.recommendation_type)) {
+    const mapped = RECO_ALIASES[m.recommendation_type] ?? '觀察';
+    fixes.push(`${where} "${m.raw_query}": recommendation_type "${m.recommendation_type}" → ${mapped}`);
+    m.recommendation_type = mapped;
+  }
+
+  // source_type 枚舉
+  if (m.source_type !== undefined && !VALID_SOURCE.has(m.source_type)) {
+    const mapped = SOURCE_ALIASES[m.source_type];
+    if (mapped) {
+      fixes.push(`${where} "${m.raw_query}": source_type "${m.source_type}" → ${mapped}`);
+      m.source_type = mapped;
+    } else {
+      fixes.push(`${where} "${m.raw_query}": source_type "${m.source_type}" 無對應 → 移除（降回 speech 預設）`);
+      delete m.source_type;
+    }
+  }
+
+  // 數值欄非正數 → 移除（不可憑空編造）；mention_time 允許 0
+  for (const key of ['mention_time', 'mentioned_price', 'target_price', 'stop_loss'] as const) {
+    const v = m[key];
+    if (v === undefined) continue;
+    const ok = Number.isFinite(v) && (key === 'mention_time' ? v >= 0 : v > 0);
+    if (!ok) {
+      fixes.push(`${where} "${m.raw_query}": ${key}=${v} 非法 → 移除`);
+      delete m[key];
+    }
+  }
+
+  return fixes;
+}
 
 /** 已確認的 Whisper 同音 (code → 逐字稿可能出現的亂碼形)。只給 grounding 用，不灌進 lookupStock
  *  的 ALIAS_MAP(避免「鑑定/盟力/超風」等通用詞污染代號查詢)。新發現補這裡。 */
@@ -78,6 +151,7 @@ export interface GroundingFlag {
 
 export interface NormalizeReport {
   codeFixes: CodeFix[];      // 代號被改的(含改成 null)
+  fieldFixes: string[];      // keyframe 欄位自動修正(screenshot_ref/reco/source/數值)
   ungrounded: GroundingFlag[];   // 全逐字稿查無 → 待人工複查(可能幻覺，但也可能 Whisper 亂碼)
   videoMismatches: GroundingFlag[]; // 證據在別支、非標的影片 → 歸屬可能錯
 }
@@ -141,7 +215,7 @@ export function normalizeAnalysis(
   master: StockMasterFile,
   transcriptsByVideo: Record<string, string>,
 ): { analysis: DailyAnalysis; report: NormalizeReport } {
-  const report: NormalizeReport = { codeFixes: [], ungrounded: [], videoMismatches: [] };
+  const report: NormalizeReport = { codeFixes: [], fieldFixes: [], ungrounded: [], videoMismatches: [] };
 
   const mentionArrays: Array<[string, AnalyzedStockMention[]]> = [
     ['high_consensus_stocks', analysis.high_consensus_stocks ?? []],
@@ -153,6 +227,9 @@ export function normalizeAnalysis(
       const where = `${label}[${i}]`;
       const fix = reResolveMention(m, master, where);
       if (fix) report.codeFixes.push(fix);
+
+      // keyframe 欄位正規化（screenshot_ref/reco/source/數值）
+      report.fieldFixes.push(...normalizeMentionFields(m, where));
 
       // grounding（只對有 code 的）
       if (m.matched) {
