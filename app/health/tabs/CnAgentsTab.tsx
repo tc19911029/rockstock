@@ -14,12 +14,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { useWatchlistStore } from '@/store/watchlistStore';
+import { RedFlagChips } from '@/components/RedFlagChips';
 import type { EmotionStage, SeatType, StockPosition } from '@/lib/cn-agents/types';
+import type { RedFlag } from '@/lib/redflags/types';
 
 // ── /day 回傳形狀 ───────────────────────────────────────────────────────────
 interface Perf { d1: number | null; d2: number | null; d3: number | null; d4: number | null; d5: number | null; d10: number | null; d20: number | null; mfe: number | null; mae: number | null; success: boolean | null }
 interface CandInfo { changePct: number | null; close: number | null; industry: string | null; consecBoards: number | null; turnoverCny: number | null; isOneWord: boolean }
-interface Candidate { code: string; symbol: string; name: string; board: string; rank: number; totalScore: number; tier: 'A' | 'B' | 'C'; mode: string; themeId: string | null; position: StockPosition | null; reasons: string[]; perf: Perf | null; info: CandInfo | null }
+interface Candidate { code: string; symbol: string; name: string; board: string; rank: number; totalScore: number; tier: 'A' | 'B' | 'C'; mode: string; themeId: string | null; position: StockPosition | null; reasons: string[]; perf: Perf | null; info: CandInfo | null; redFlags?: RedFlag[] }
 interface Theme { id: string; name: string; stage: string; strength: number; policy_link: { event: string; level: string; direction: string } | null; leader_symbol: string | null; member_symbols: string[]; logic_summary: string }
 interface Board { code: string; name: string; pct: number; mainNetCny: number | null; limitUpCount: number | null; leaderName: string | null }
 interface LhbSeat { name: string; type: SeatType; netAmt: number | null }
@@ -199,6 +201,23 @@ export function CnAgentsTab() {
         <Info>候選池=漲停∪炸板∪龍虎榜淨買∪主力流入top50∪人氣top50，去重後打分排序（硬分+Claude語意分+情緒階段校準）。績效=隔日開盤進場、d1=進場日收盤；成功=第5日收盤&gt;+3%；最近的日子（隔日K未封）顯示「—」。</Info>
       </section>
 
+      {/* 避開名單（退市 veto + 紅旗避雷 shouldAvoid） */}
+      {d.avoidList.length > 0 && (
+        <section className="rounded-lg border border-red-900/50 bg-red-950/15 p-4">
+          <h2 className="text-sm font-semibold mb-2 text-red-300">避開名單（{d.avoidList.length}）</h2>
+          <ul className="space-y-1">
+            {d.avoidList.map((a) => (
+              <li key={a.symbol} className="flex items-baseline gap-2 text-[11px]">
+                <a href={chartHref(a.symbol, d.date)} className="font-mono text-sky-400 hover:underline shrink-0">{a.symbol}</a>
+                <span className="text-foreground/80 shrink-0 min-w-[64px]">{a.name}</span>
+                <span className="text-red-300/90">{a.reason}</span>
+              </li>
+            ))}
+          </ul>
+          <Info>退市/ST 由系統名稱否決；其餘「紅旗｜…」來自買進前避雷檢查（業績爆雷/主力出貨/質押還債等≥1 紅或≥3 黃）。只警示，不影響候選分數。</Info>
+        </section>
+      )}
+
       {/* ④ 主線 / 板塊強弱 */}
       {d.boards && (
         <section className="rounded-lg border border-border bg-card p-4">
@@ -361,52 +380,47 @@ function CandidateList({ candidates, date, themes }: { candidates: Candidate[]; 
           ))}
         </div>
       )}
-      {/* 卡片清單 */}
-      {shown.map((c) => (
-        <CandidateCard key={c.code} c={c} date={date} themeName={c.themeId ? themeName.get(c.themeId) ?? null : null} />
-      ))}
+      {/* 卡片清單（緊湊，一畫面多看幾檔） */}
+      <div className="space-y-1">
+        {shown.map((c) => (
+          <CandidateCard key={c.code} c={c} date={date} themeName={c.themeId ? themeName.get(c.themeId) ?? null : null} />
+        ))}
+      </div>
     </div>
   );
 }
 
-/** 選股卡（仿台股掃描卡）：headline 漲幅 + 股價/產業 + 徽章 + 走圖/加自選 + 常駐報酬橫條 */
+/** 選股卡（緊湊版）：2 行表頭（名稱/徽章/漲幅 ＋ 股價/產業/分數/按鈕）+ 1 排報酬橫條 */
 function CandidateCard({ c, date, themeName }: { c: Candidate; date: string | null; themeName: string | null }) {
   const [open, setOpen] = useState(false);
   const inWatch = useWatchlistStore((s) => s.has(c.symbol));
   const info = c.info;
   const aTier = c.tier === 'A';
   return (
-    <div className={`rounded-lg border px-3 py-2 ${aTier ? 'border-emerald-600/60 bg-emerald-950/15' : 'bg-card border-border/60'}`}>
-      {/* 第一行：名稱 + 代號 ⋯ 當日漲幅（headline） */}
-      <div className="flex items-baseline gap-2">
-        <a href={chartHref(c.symbol, date)} className="flex items-baseline gap-1.5 min-w-0 hover:underline">
-          <span className="text-sm font-semibold text-foreground/90 truncate">{c.name}</span>
-          <span className="font-mono text-[11px] text-muted-foreground shrink-0">{c.code}</span>
+    <div className={`rounded-md border px-2.5 py-1 ${aTier ? 'border-emerald-600/60 bg-emerald-950/15' : 'bg-card border-border/60'}`}>
+      {/* 第一行：分層 + 名稱 + 代號 + 模式/連板/題材 ⋯ 當日漲幅 */}
+      <div className="flex items-center gap-1.5">
+        <span className={`text-[9px] px-1 rounded-sm font-bold border shrink-0 ${TIER_CLS[c.tier] ?? ''}`}>{c.tier}</span>
+        <a href={chartHref(c.symbol, date)} className="flex items-baseline gap-1 min-w-0 hover:underline">
+          <span className="text-[13px] font-semibold text-foreground/90 truncate">{c.name}</span>
+          <span className="font-mono text-[10px] text-muted-foreground shrink-0">{c.code}</span>
         </a>
-        <span className={`ml-auto font-mono text-sm font-bold shrink-0 ${pctColor(info?.changePct)}`}>
+        <span className="text-[9px] px-1 rounded-sm bg-indigo-950/50 text-indigo-300 border border-indigo-800/40 shrink-0">{MODE_LABEL[c.mode] ?? c.mode}</span>
+        {info?.consecBoards != null && info.consecBoards >= 1 && (
+          <span className="text-[9px] px-1 rounded-sm bg-red-950/40 text-red-300 border border-red-800/40 shrink-0">{info.consecBoards}板{info.isOneWord ? '·一字' : ''}</span>
+        )}
+        {themeName && <span className="text-[9px] px-1 rounded-sm bg-purple-950/40 text-purple-300 border border-purple-800/40 shrink-0 truncate max-w-[72px]">{themeName}</span>}
+        <span className={`ml-auto font-mono text-[13px] font-bold shrink-0 ${pctColor(info?.changePct)}`}>
           {info?.changePct != null ? fmtPct(info.changePct, 2) : '—'}
         </span>
       </div>
-      {/* 第二行：股價 + 產業 + 板別 ⋯ 徽章（分層/連板/題材） */}
-      <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground flex-wrap">
+      {/* 第二行：股價 · 產業 · 板別 · 分數 · 成功旗標 ⋯ 走圖 / 加自選 / 展開 */}
+      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground">
         {info?.close != null && <span className="font-mono text-foreground/70">{info.close.toFixed(2)}</span>}
-        {info?.industry && <span>{info.industry}</span>}
+        {info?.industry && <span className="truncate max-w-[84px]">{info.industry}</span>}
         <span>{BOARD_CN[c.board] ?? c.board}</span>
-        <div className="ml-auto flex items-center gap-1">
-          <span className={`px-1 rounded-sm font-bold border ${TIER_CLS[c.tier] ?? ''}`}>{c.tier}</span>
-          {info?.consecBoards != null && info.consecBoards >= 1 && (
-            <span className="px-1 rounded-sm bg-red-950/40 text-red-300 border border-red-800/40">{info.consecBoards}板{info.isOneWord ? '·一字' : ''}</span>
-          )}
-          {themeName && <span className="px-1 rounded-sm bg-purple-950/40 text-purple-300 border border-purple-800/40">{themeName}</span>}
-        </div>
-      </div>
-      {/* 第三行：模式/分數 ⋯ 走圖 / 加自選 / 展開 */}
-      <div className="flex items-center gap-1.5 mt-1">
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-950/50 text-indigo-300 border border-indigo-800/40">
-          {MODE_LABEL[c.mode] ?? c.mode}{c.position ? ` · ${POSITION_CN[c.position]}` : ''}
-        </span>
-        <span className="text-[10px] text-muted-foreground">{c.totalScore} 分</span>
-        {c.perf?.success != null && <span className="text-xs">{c.perf.success ? '🟢' : '🔴'}</span>}
+        <span>· {c.totalScore}分</span>
+        {c.perf?.success != null && <span>{c.perf.success ? '🟢' : '🔴'}</span>}
         <div className="ml-auto flex items-center gap-1">
           <a href={chartHref(c.symbol, date)} className="text-[9px] text-sky-400 hover:text-sky-300 px-1.5 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30">走圖</a>
           <button onClick={() => useWatchlistStore.getState().add(c.symbol, c.name)}
@@ -416,11 +430,15 @@ function CandidateCard({ c, date, themeName }: { c: Candidate; date: string | nu
           )}
         </div>
       </div>
-      {/* 第四行：常駐報酬橫條 */}
-      <div className="mt-1.5"><PerfStrip perf={c.perf} /></div>
+      {/* 紅旗避雷（基本面/籌碼/治理；只標示不剔除） */}
+      {c.redFlags && c.redFlags.length > 0 && (
+        <div className="mt-1"><RedFlagChips flags={c.redFlags} /></div>
+      )}
+      {/* 第三行：常駐報酬橫條（slim） */}
+      <div className="mt-1"><PerfStrip perf={c.perf} /></div>
       {/* 展開：完整理由 */}
       {open && c.reasons.length > 0 && (
-        <ul className="mt-2 pt-2 border-t border-border/40 text-[10px] text-muted-foreground list-disc list-inside space-y-0.5">
+        <ul className="mt-1.5 pt-1.5 border-t border-border/40 text-[10px] text-muted-foreground list-disc list-inside space-y-0.5">
           {c.reasons.map((r, i) => <li key={i}>{r}</li>)}
         </ul>
       )}
@@ -428,16 +446,16 @@ function CandidateCard({ c, date, themeName }: { c: Candidate; date: string | nu
   );
 }
 
-/** 常駐報酬橫條（仿台股掃描卡 ForwardPerfRow：每欄上標籤下數字、紅漲綠跌；缺值「—」） */
+/** 常駐報酬橫條（slim：每欄上標籤下數字、紅漲綠跌；缺值「—」） */
 function PerfStrip({ perf }: { perf: Perf | null }) {
   return (
     <div className="flex items-stretch rounded overflow-hidden bg-secondary/20">
       {PERF_CELLS.map(({ key, label }) => {
         const v = perf ? perf[key] : null;
         return (
-          <div key={key} className="flex-1 text-center py-1 border-l border-border/20 first:border-l-0">
-            <div className="text-[8px] text-muted-foreground/60 leading-none">{label}</div>
-            <div className={`text-[10px] font-mono mt-0.5 leading-none ${pctColor(v)}`}>{fmtPct(v)}</div>
+          <div key={key} className="flex-1 text-center py-0.5 border-l border-border/20 first:border-l-0">
+            <div className="text-[7px] text-muted-foreground/60 leading-tight">{label}</div>
+            <div className={`text-[9px] font-mono leading-tight ${pctColor(v)}`}>{fmtPct(v)}</div>
           </div>
         );
       })}
