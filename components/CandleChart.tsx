@@ -526,15 +526,10 @@ export default function CandleChart({
   useEffect(() => {
     if (!candleRef.current || candles.length === 0) return;
 
-    // 訊號日那根 K 棒整根塗黃（取代舊的黃點 + 「訊號日」文字標記）
-    const hlDate = highlightDate ? highlightDate.replace(/\*$/, '') : null;
-    candleRef.current.setData(candles.map(c => {
-      const base = { time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close };
-      if (hlDate && c.date.replace(/\*$/, '') === hlDate) {
-        return { ...base, color: '#facc15', borderColor: '#facc15', wickColor: '#facc15' };
-      }
-      return base;
-    }));
+    // 進場/訊號日那根 K 棒維持原本紅綠顏色；改在 K 棒下方加黃圓點標記（見下方 markers effect）
+    candleRef.current.setData(candles.map(c => ({
+      time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close,
+    })));
     /** 過濾 null/undefined/NaN（分鐘K MA 數據不足時會產生 NaN） */
     const validNum = (v: number | undefined | null): v is number =>
       v != null && Number.isFinite(v);
@@ -902,6 +897,17 @@ export default function CandleChart({
         converted.push({
           time: toTime(m.time), position: m.position, shape: 'circle',
           color: '#f59e0b', text: m.label, size: 2,
+        });
+      }
+    }
+    // 進場/訊號日 — K 棒下方黃圓點（取代整根塗黃）
+    const hlMark = highlightDate ? highlightDate.replace(/\*$/, '') : null;
+    if (hlMark) {
+      const bar = candles.find(c => c.date.replace(/\*$/, '') === hlMark);
+      if (bar) {
+        converted.push({
+          time: toTime(bar.date), position: 'belowBar', shape: 'circle',
+          color: '#facc15', text: '', size: 2,
         });
       }
     }
