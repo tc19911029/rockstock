@@ -6,6 +6,10 @@
  *       對照「發文後」股價的變化（T+1 / T+5 / T+10 / T+20 交易日報酬，
  *       以及發文後 20 交易日內的最大漲幅 / 最大回檔），看「發完文後股價怎麼走」。
  *
+ *       進階：每篇帶「發文情緒」(看多/看空/中性)，彙總會「依情緒分組」算發文後報酬，
+ *       並算「情緒分數 ↔ 發文後報酬」的相關係數，回答『她的情緒對股價的影響』。
+ *       情緒優先吃 input 的 sentiment 欄位；沒給才用標題關鍵字啟發式推估（弱訊號，標 ?）。
+ *
  * 為什麼分兩段（發文清單 ←→ 股價）：
  *   CMoney forum 有反爬蟲（雲端環境直接 fetch 會 403）。所以：
  *     - 股價：走 repo 既有 dataProvider（TWSE/FinMind/Yahoo fallback 鏈，免 key、穩定）
@@ -20,7 +24,8 @@
  *        [
  *          { "id": "177745454",
  *            "title": "人間四月芳菲盡 山寺桃花始盛開 做頭明顯或打底完成意會？",
- *            "postedAt": "2026-03-27T09:12:00+08:00" },
+ *            "postedAt": "2026-03-27T09:12:00+08:00",
+ *            "sentiment": "bullish" },   // 選填：bullish/bearish/neutral 或 +1/-1/0；省略則用標題推估
  *          ...
  *        ]
  *      postedAt 可以是 ISO 字串或 epoch 毫秒；本腳本會自動辨識 CMoney 常見欄位名
@@ -57,11 +62,16 @@ const MAX_EXCURSION_WINDOW = 20; // 計算最大漲幅/回檔的窗口（交易�
 const OUT_DIR = 'data/reports';
 
 // ── 型別 ─────────────────────────────────────────────────────────────────────
+type Sentiment = 'bullish' | 'bearish' | 'neutral';
+
 interface Post {
   id: string;
   title: string;
   postedAt: string; // ISO，已正規化為 +08:00
   url: string;
+  sentiment: Sentiment; // 發文情緒：看多/看空/中性
+  sentimentScore: number; // 啟發式分數（>0 偏多，<0 偏空）
+  sentimentSource: 'input' | 'heuristic'; // 來源：input 欄位 or 標題關鍵字推估
 }
 
 interface Row {
@@ -121,6 +131,40 @@ function normalizePostedAt(v: unknown): string | null {
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
+// ── 情緒判定 ─────────────────────────────────────────────────────────────────
+// 優先吃 input 的情緒欄位；沒給才用標題關鍵字啟發式推估（標題訊號弱，僅供分組參考）。
+const BULLISH_KW = [
+  '看多', '多方', '上漲', '噴', '突破', '起漲', '創高', '新高', '上看', '目標',
+  '信仰', '加碼', '進場', '守住', '撐', '低點', '打底', '落底', '觸底', '谷底',
+  '消散', '利多', '看好', '回升', '反彈', '軋空', '心中無股價', '王', '無庸置疑',
+  '❤', '💪', '🚀', '強',
+];
+const BEARISH_KW = [
+  '看空', '空方', '下跌', '崩', '套牢', '套', '賣壓', '出貨', '風險', '停損',
+  '走弱', '做頭', '高檔', '過熱', '利空', '看壞', '小心', '警訊', '崩跌', '修正',
+  '回檔', '觀望', '賣', '😓',
+];
+
+/** 把外部情緒字串/數字正規化成 Sentiment */
+function parseSentimentField(v: unknown): { s: Sentiment; score: number } | null {
+  if (v == null) return null;
+  if (typeof v === 'number') return { s: v > 0 ? 'bullish' : v < 0 ? 'bearish' : 'neutral', score: v };
+  const t = String(v).trim().toLowerCase();
+  if (!t) return null;
+  if (/^(bull|bullish|多|看多|偏多|positive|pos|\+)/.test(t)) return { s: 'bullish', score: 1 };
+  if (/^(bear|bearish|空|看空|偏空|negative|neg|-)/.test(t)) return { s: 'bearish', score: -1 };
+  if (/^(neutral|中性|觀望|0)/.test(t)) return { s: 'neutral', score: 0 };
+  return null;
+}
+
+/** 標題關鍵字啟發式情緒（弱訊號） */
+function classifyTitle(title: string): { s: Sentiment; score: number } {
+  let score = 0;
+  for (const kw of BULLISH_KW) if (title.includes(kw)) score += 1;
+  for (const kw of BEARISH_KW) if (title.includes(kw)) score -= 1;
+  return { s: score > 0 ? 'bullish' : score < 0 ? 'bearish' : 'neutral', score };
+}
+
 // ── 讀發文清單：--input（容錯解析 CMoney 各種欄位名）─────────────────────────
 async function loadPostsFromInput(file: string): Promise<Post[]> {
   const raw = await fs.readFile(path.resolve(file), 'utf-8');
@@ -142,11 +186,17 @@ async function loadPostsFromInput(file: string): Promise<Post[]> {
       it.postedAt ?? it.createTime ?? it.createTimeText ?? it.publishTime ?? it.CreateTime ?? it.date ?? it.time,
     );
     if (!id || !postedAt) continue;
+
+    const fromField = parseSentimentField(it.sentiment ?? it.stance ?? it.mood ?? it.bias);
+    const cls = fromField ?? classifyTitle(title);
     posts.push({
       id,
       title: title || '(無標題)',
       postedAt,
       url: it.url ?? `https://www.cmoney.tw/forum/article/${id}`,
+      sentiment: cls.s,
+      sentimentScore: cls.score,
+      sentimentSource: fromField ? 'input' : 'heuristic',
     });
   }
   if (posts.length === 0) {
@@ -286,6 +336,9 @@ function toCsv(rows: Row[]): string {
     'post_date',
     'base_trading_day',
     'title',
+    'sentiment',
+    'sentiment_score',
+    'sentiment_source',
     'url',
     'prev_close',
     'base_close',
@@ -299,6 +352,9 @@ function toCsv(rows: Row[]): string {
       r.postDate,
       r.baseDate,
       `"${r.post.title.replace(/"/g, '""')}"`,
+      r.post.sentiment,
+      r.post.sentimentScore,
+      r.post.sentimentSource,
       r.post.url,
       r.prevClose ?? '',
       r.baseClose,
@@ -311,13 +367,16 @@ function toCsv(rows: Row[]): string {
   return [head.join(','), ...lines].join('\n');
 }
 
+const SENT_LABEL: Record<Sentiment, string> = { bullish: '多', bearish: '空', neutral: '中' };
+
 function toMarkdown(rows: Row[]): string {
-  const head = `| 發文日 | 對齊交易日 | 標題 | 發文前收 | 發文日收 | ${HORIZONS.map((h) => `T+${h}`).join(' | ')} | 20日最大漲 | 20日最大回 |`;
+  const head = `| 發文日 | 對齊交易日 | 情緒 | 標題 | 發文日收 | ${HORIZONS.map((h) => `T+${h}`).join(' | ')} | 20日最大漲 | 20日最大回 |`;
   const sep = `|---|---|---|---|---|${HORIZONS.map(() => '---').join('|')}|---|---|`;
   const body = rows
     .map((r) => {
-      const title = r.post.title.length > 22 ? r.post.title.slice(0, 22) + '…' : r.post.title;
-      return `| ${r.postDate} | ${r.baseDate} | ${title} | ${r.prevClose ?? '—'} | ${r.baseClose} | ${HORIZONS.map(
+      const title = r.post.title.length > 20 ? r.post.title.slice(0, 20) + '…' : r.post.title;
+      const sent = `${SENT_LABEL[r.post.sentiment]}${r.post.sentimentSource === 'heuristic' ? '?' : ''}`;
+      return `| ${r.postDate} | ${r.baseDate} | ${sent} | ${title} | ${r.baseClose} | ${HORIZONS.map(
         (h) => fmt(r.forward[h], '%'),
       ).join(' | ')} | ${fmt(r.maxGainPct, '%')} | ${fmt(r.maxDrawPct, '%')} |`;
     })
@@ -325,16 +384,62 @@ function toMarkdown(rows: Row[]): string {
   return [head, sep, body].join('\n');
 }
 
-function summarize(rows: Row[]): string {
-  const lines: string[] = ['', '── 彙總（發文後表現）──'];
-  for (const h of HORIZONS) {
-    const vals = rows.map((r) => r.forward[h]).filter((v): v is number => v != null);
-    if (!vals.length) continue;
-    const avg = +(vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2);
-    const win = +((vals.filter((v) => v > 0).length / vals.length) * 100).toFixed(1);
-    const med = [...vals].sort((a, b) => a - b)[Math.floor(vals.length / 2)];
-    lines.push(`T+${h}：樣本 ${vals.length}　平均 ${fmt(avg, '%')}　中位 ${fmt(med, '%')}　上漲率 ${win}%`);
+function statLine(label: string, vals: number[]): string {
+  if (!vals.length) return `${label}：無樣本`;
+  const avg = +(vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(2);
+  const med = [...vals].sort((a, b) => a - b)[Math.floor(vals.length / 2)];
+  const win = +((vals.filter((v) => v > 0).length / vals.length) * 100).toFixed(1);
+  return `${label}：樣本 ${vals.length}　平均 ${fmt(avg, '%')}　中位 ${fmt(med, '%')}　上漲率 ${win}%`;
+}
+
+/** Pearson 相關係數 */
+function pearson(xs: number[], ys: number[]): number | null {
+  const n = xs.length;
+  if (n < 3) return null;
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - mx) * (ys[i] - my);
+    dx += (xs[i] - mx) ** 2;
+    dy += (ys[i] - my) ** 2;
   }
+  const den = Math.sqrt(dx * dy);
+  return den === 0 ? null : +(num / den).toFixed(3);
+}
+
+function summarize(rows: Row[]): string {
+  const lines: string[] = ['', '── 彙總①：發文後整體表現 ──'];
+  for (const h of HORIZONS) {
+    lines.push(statLine(`T+${h}`, rows.map((r) => r.forward[h]).filter((v): v is number => v != null)));
+  }
+
+  // ②：依「發文情緒」分組看後續報酬（核心：情緒 → 股價影響）
+  lines.push('', '── 彙總②：發文情緒 × 發文後報酬 ──');
+  const groups: Sentiment[] = ['bullish', 'bearish', 'neutral'];
+  for (const g of groups) {
+    const grp = rows.filter((r) => r.post.sentiment === g);
+    if (!grp.length) continue;
+    const heu = grp.filter((r) => r.post.sentimentSource === 'heuristic').length;
+    lines.push(`【${SENT_LABEL[g]}】共 ${grp.length} 篇${heu ? `（其中 ${heu} 篇情緒為標題推估，信心較低）` : ''}`);
+    for (const h of HORIZONS) {
+      lines.push('  ' + statLine(`T+${h}`, grp.map((r) => r.forward[h]).filter((v): v is number => v != null)));
+    }
+  }
+
+  // ③：情緒分數 ↔ 發文後報酬 的相關性
+  lines.push('', '── 彙總③：情緒分數 ↔ 發文後報酬 相關性（Pearson r）──');
+  for (const h of HORIZONS) {
+    const pairs = rows
+      .map((r) => ({ x: r.post.sentimentScore, y: r.forward[h] }))
+      .filter((p): p is { x: number; y: number } => p.y != null);
+    const r = pearson(pairs.map((p) => p.x), pairs.map((p) => p.y));
+    lines.push(`T+${h}：r = ${r == null ? '—(樣本不足)' : r}　(n=${pairs.length})`);
+  }
+  lines.push(
+    'r>0：情緒越偏多、發文後越漲（她有領先訊號）；r<0：越偏多反而越跌（情緒常見頂/反指標）；r≈0：無明顯關聯。',
+    '註：情緒標 ? 者為標題關鍵字推估，弱訊號；要準請在 input 補 sentiment 欄位（bullish/bearish/neutral 或 +1/-1）。',
+  );
   return lines.join('\n');
 }
 
