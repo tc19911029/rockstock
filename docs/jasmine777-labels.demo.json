@@ -1,0 +1,31 @@
+{
+  "_note": [
+    "jasmine777 發文情緒標註 — DEMO(示範用)。",
+    "重要：以下 sentiment 是『依標題 + 網路搜尋摘要』推估，未讀 CMoney 全文(環境抓不到內文)。請讀完內文後覆蓋校正。",
+    "postedAt 仍為約略日期(同 sample)。正式分析請用瀏覽器 XHR dump 的真清單。",
+    "用法：npx tsx scripts/jasmine777-correlation.ts --input docs/jasmine777-labels.demo.json",
+    "sentiment_basis 欄記錄我判斷的依據，方便你核對；它不影響腳本(腳本只讀 sentiment)。"
+  ],
+  "articles": [
+    { "id": "179294135", "postedAt": "2026-05-30T10:00:00+08:00", "title": "世芯（新私募案）與發行(GDR)案已獲股東會通過及董事會決議",
+      "sentiment": "neutral", "summary": "轉述私募+GDR案通過的公司決議，偏事實陳述", "sentiment_basis": "公司行動公告，無明確方向性看法→中性(待讀內文，可能她解讀為利多)" },
+    { "id": "179085845", "postedAt": "2026-05-22T10:00:00+08:00", "title": "王就是王 無庸置疑 公平正義 不是不會來 只是偶爾遲到",
+      "sentiment": "bullish", "summary": "強烈信心喊話、看好龍頭地位", "sentiment_basis": "標題+情緒詞明確偏多" },
+    { "id": "178804726", "postedAt": "2026-05-10T10:00:00+08:00", "title": "煉金術捲軸作用於人心",
+      "sentiment": "bullish", "summary": "提國際法人、大客戶訂單、產品線優化", "sentiment_basis": "搜尋摘要顯示談利多基本面" },
+    { "id": "178565423", "postedAt": "2026-05-02T10:00:00+08:00", "title": "世芯的陰霾 終將消散 請中長期股東們 開始 心中無股價",
+      "sentiment": "bullish", "summary": "勸中長線股東續抱、看壞勢消散", "sentiment_basis": "明確中長多" },
+    { "id": "177745454", "postedAt": "2026-03-27T10:00:00+08:00", "title": "人間四月芳菲盡 山寺桃花始盛開 做頭明顯或打底完成意會？",
+      "sentiment": "neutral", "summary": "提問式：做頭 or 打底完成，提 3000 關卡/低點2970", "sentiment_basis": "多空夾雜、以提問呈現→中性" },
+    { "id": "177615443", "postedAt": "2026-03-23T10:00:00+08:00", "title": "大摩從3/6世芯法說後 突然變啞巴 然後前天終於出來了",
+      "sentiment": "bullish", "summary": "談大摩報告終於出爐、喊目標約3500", "sentiment_basis": "搜尋摘要偏多(目標價、低點論)" },
+    { "id": "177280363", "postedAt": "2026-03-18T10:00:00+08:00", "title": "針對世芯3/6法說中揭示：2026營收與毛利之變化？",
+      "sentiment": "bullish", "summary": "解讀法說對2026營收/毛利的指引(偏正面)", "sentiment_basis": "她為多方、解讀法說利多向；待讀內文確認" },
+    { "id": "177279269", "postedAt": "2026-03-18T10:00:00+08:00", "title": "不欲琭琭如玉 寧可珞珞如石",
+      "sentiment": "neutral", "summary": "引老子、偏心境/哲理抒發", "sentiment_basis": "抒情無明確方向→中性" },
+    { "id": "176702333", "postedAt": "2026-03-10T10:00:00+08:00", "title": "世芯近期那些傳聞也敢亂傳 大概以為大家都沒聽創意法說重播",
+      "sentiment": "bullish", "summary": "反駁市場傳聞/FUD、為公司辯護", "sentiment_basis": "駁空方傳聞→偏多" },
+    { "id": "166159269", "postedAt": "2024-11-06T10:00:00+08:00", "title": "今天 心情較輕鬆 再來講個笑話(2024舊文，日期待核對)",
+      "sentiment": "neutral", "summary": "輕鬆閒聊", "sentiment_basis": "無方向性→中性(且日期未核對)" }
+  ]
+}
