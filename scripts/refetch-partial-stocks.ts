@@ -12,7 +12,7 @@ import { isTradingDay } from '../lib/utils/tradingDay';
 import { twseHistProvider } from '../lib/datasource/TWSEHistProvider';
 import { ChinaScanner } from '../lib/scanner/ChinaScanner';
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+const REPO_ROOT = '/Users/tc/Desktop/rockstock';
 
 interface Candle { date: string; open: number; high: number; low: number; close: number; volume?: number; }
 

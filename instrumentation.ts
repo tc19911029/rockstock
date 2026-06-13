@@ -438,11 +438,21 @@ export async function register() {
   }, 30 * 1000);
 
   // ── 三色資金買賣推播 (/api/cron/sanse-notify → ntfy)：每 120 秒 ──
-  // 取代舊爆量手機推播：盯 data/realtime/sanse-watch.json 固定清單，三色翻成
-  // 該買/該賣就推一次（route 內自帶開盤 gate + 當日去重，盤外是廉價 no-op）。
+  // 取代舊爆量手機推播：盯「所有持倉人 open 持倉聯集」（2026-06-12 改，持倉派生，
+  // 不再用手寫清單），三色翻成該買/該賣就推一次（route 內自帶開盤 gate + 當日去重，
+  // 盤外是廉價 no-op）。
   setInterval(() => {
     callRoute('/api/cron/sanse-notify', 'sanse-notify').catch(err =>
       console.error('[local-cron] sanse-notify:', err),
+    );
+  }, 120 * 1000);
+
+  // ── 持倉動作推播 (/api/cron/portfolio-notify → ntfy)：每 120 秒（2026-06-12 A1）──
+  // 停損/全出/減半觸發即推手機 + 13:18-13:30 執行窗再提醒「13:25 掛市價」。
+  // route 內自帶交易日/時段 gate + 當日去重，盤外是廉價 no-op。
+  setInterval(() => {
+    callRoute('/api/cron/portfolio-notify', 'portfolio-notify').catch(err =>
+      console.error('[local-cron] portfolio-notify:', err),
     );
   }, 120 * 1000);
 
@@ -563,6 +573,87 @@ export async function register() {
       console.log('[local-cron] TDCC 每日自動抓取觸發');
       callRoute('/api/cron/fetch-tdcc-week', 'TDCC daily').catch(err =>
         console.error('[local-cron] TDCC fetch failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 海外同業日K：每天 06:35 CST 後抓一次（美股已收盤、日韓抓前日；2026-06-12 B4 補掛 —
+  // 當天部署時漏了這條排程）。route 內建限流退避 + 提早收工，partial 隔日自然補。
+  let lastGlobalPeersDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 635 && today !== lastGlobalPeersDate) {
+      lastGlobalPeersDate = today;
+      console.log('[local-cron] global-peers 海外日K抓取觸發');
+      callRoute('/api/cron/fetch-global-peers', 'global-peers daily').catch(err =>
+        console.error('[local-cron] global-peers fetch failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 板塊（題材）強弱排名：每天 17:10 CST 後算一次（TW L1 14:30 eod-settle 已封；2026-06-12 A2）
+  // 讀 themeMap 成分股 L1 → data/sectors/TW/{date}.json，/sectors 頁與 /api/themes/ranking 消費。
+  let lastSectorDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 1710 && today !== lastSectorDate) {
+      lastSectorDate = today;
+      console.log('[local-cron] sector-strength 板塊排名觸發');
+      callRoute('/api/cron/compute-sector-strength', 'sector-strength daily').catch(err =>
+        console.error('[local-cron] sector-strength failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 融資券/借券/當沖全市場持久化：每天 21:40 CST 後抓一次（借券 TWT93U ~21:00 後完整；2026-06-12 B2）
+  // 寫 data/chips/TW/{margin,sbl,daytrade}/，給「融資暴增/借券暴增/當沖過高」時間序判斷與回測用。
+  let lastChipExtrasDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 2140 && today !== lastChipExtrasDate) {
+      lastChipExtrasDate = today;
+      console.log('[local-cron] chip-extras 持久化觸發');
+      callRoute('/api/cron/fetch-chip-extras', 'chip-extras daily').catch(err =>
+        console.error('[local-cron] chip-extras fetch failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 處置股/注意股官方名單：每天 17:35 CST 後抓一次（公布在收盤後；2026-06-12 B1）
+  // 寫 data/market/TW/attention/，saveScanSession 蓋 disposalVeto / applyPanelFilter 硬排除。
+  // ≥ 比對 + 當日旗標：機器晚開也會在當天第一個 tick 補抓。
+  let lastAttentionDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 1735 && today !== lastAttentionDate) {
+      lastAttentionDate = today;
+      console.log('[local-cron] 處置股/注意股名單抓取觸發');
+      callRoute('/api/cron/fetch-attention-list', 'attention-list daily').catch(err =>
+        console.error('[local-cron] attention-list fetch failed:', err),
       );
     }
   }, 60 * 1000);

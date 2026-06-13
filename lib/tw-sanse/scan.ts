@@ -22,7 +22,7 @@ import { evalConditions, isReversalBuy } from '@/lib/cn-sanse/conditions';
 import type {
   SanSeHit, ResonanceRecord, ResonanceCounts, SanSeScanResult, SanSeIntradayInput,
 } from '@/lib/cn-sanse/scan';
-import { SANSE_TURNOVER_TOP_N, topTurnoverRanks, appendTodayBar } from '@/lib/cn-sanse/scan';
+import { SANSE_TURNOVER_TOP_N, topTurnoverRanks, appendTodayBar, computeZhuSix } from '@/lib/cn-sanse/scan';
 
 const INDEX_SYMBOL = '^TWII';   // 加權指數（RS 基準 + 行情日曆）
 const MIN_BARS = 250;
@@ -169,7 +169,10 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
 
       const report = evalConditions(candles, indexClose, series);
       if (report.selected) {
-        records.push({ symbol: s.symbol, name: s.name, industry: s.industry ?? '', price: lastClose, changePct, report });
+        records.push({
+          symbol: s.symbol, name: s.name, industry: s.industry ?? '', price: lastClose, changePct, report,
+          zhuSix: computeZhuSix(candles), // 六條件確認欄（只對入選紀錄算；台股交集回測有效）
+        });
       }
     });
   }

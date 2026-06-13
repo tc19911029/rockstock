@@ -26,8 +26,8 @@ import { checkLimitUpConsistency, type ConsistencySample } from '@/lib/datasourc
 export const runtime = 'nodejs';
 
 interface L2Status {
-  /** fresh / stale / missing */
-  status: 'fresh' | 'stale' | 'missing';
+  /** fresh / stale / missing / pre-market（開盤前 fallback 顯示前一交易日快照） */
+  status: 'fresh' | 'stale' | 'missing' | 'pre-market';
   /** 快照中的報價數量 */
   quoteCount: number | null;
   /** 快照年齡（秒） */
@@ -142,6 +142,29 @@ async function getL2Status(market: 'TW' | 'CN'): Promise<L2Status> {
     : null;
 
   if (!snapshot || snapshot.count === 0) {
+    // 2026-06-12（QA 提案 #5）：交易日開盤前（TW <09:00 / CN <09:30 當地時間）
+    // 今日快照本來就不存在 — fallback 顯示前一交易日快照 + 'pre-market'，
+    // 避免每天凌晨/早晨 /health 都亮「missing」誤導。
+    if (trading) {
+      const hm = new Intl.DateTimeFormat('en-GB', {
+        timeZone: market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(new Date());
+      const openHm = market === 'TW' ? '09:00' : '09:30';
+      if (hm < openHm) {
+        const prevSnap = await readIntradaySnapshot(market, getLastTradingDay(market));
+        if (prevSnap && prevSnap.count > 0) {
+          return {
+            status: 'pre-market',
+            quoteCount: prevSnap.count,
+            ageSeconds: Math.round((Date.now() - new Date(prevSnap.updatedAt).getTime()) / 1000),
+            updatedAt: prevSnap.updatedAt,
+            lastCheckedAt,
+            lastCheckedAgeSeconds,
+          };
+        }
+      }
+    }
     return { status: 'missing', quoteCount: null, ageSeconds: null, updatedAt: null, lastCheckedAt, lastCheckedAgeSeconds };
   }
 

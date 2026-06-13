@@ -21,15 +21,25 @@ import type { Candle } from '@/types';
 const APPLY = process.argv.includes('--apply');
 const DIR = path.join(process.cwd(), 'data/candles/CN');
 
-/** 接合偵測：回傳該股的接合日清單（空=乾淨）。 */
-function detectSplices(cs: Candle[]): string[] {
+/** 接合偵測：回傳該股的接合日清單（空=乾淨）。
+ *  2026-06-12 收緊：門檻改市場別 — 主板漲跌停 ±10% → >11% 即不可能真實成交；
+ *  創業板(300/301)/科創(688/689) ±20% → >21%。舊版固定 18% 漏掉 10.5%-18% 的
+ *  主板除權跳階（實案：603203 除權日 -16% 三週沒人發現）。
+ *  持續性檢查同步調整為「+2 日後仍偏離 > 門檻×0.8」。 */
+function spliceThresholdOf(sym: string): number {
+  const code = sym.replace(/\.(SS|SZ)$/, '');
+  const isGrowth = /^(30[01]|68[89])/.test(code);
+  return isGrowth ? 0.21 : 0.11;
+}
+function detectSplices(cs: Candle[], sym: string): string[] {
+  const th = spliceThresholdOf(sym);
   const out: string[] = [];
   for (let i = 1; i < cs.length; i++) {
     const p = cs[i - 1].close, c = cs[i].close;
     if (!(p > 0 && c > 0)) continue;
-    if (Math.abs(c / p - 1) <= 0.18) continue;
-    const after = cs[i + 2] ? cs[i + 2].close : c; // 持續性：+2 日後仍偏離前值 >15% = 接合（非當日波動回復）
-    if (Math.abs(after / p - 1) > 0.15) out.push(String(cs[i].date).replace('*', ''));
+    if (Math.abs(c / p - 1) <= th) continue;
+    const after = cs[i + 2] ? cs[i + 2].close : c; // 持續性：+2 日後仍偏離前值 = 接合（非當日波動回復）
+    if (Math.abs(after / p - 1) > th * 0.8) out.push(String(cs[i].date).replace('*', ''));
   }
   return out;
 }
@@ -41,8 +51,9 @@ async function main() {
     let cs: Candle[];
     try { cs = JSON.parse(await fs.readFile(path.join(DIR, f), 'utf8')).candles; } catch { continue; }
     if (!Array.isArray(cs)) continue;
-    const dates = detectSplices(cs);
-    if (dates.length) affected.push({ sym: f.replace('.json', ''), dates });
+    const sym = f.replace('.json', '');
+    const dates = detectSplices(cs, sym);
+    if (dates.length) affected.push({ sym, dates });
   }
   console.log(`偵測到未還權接合：${affected.length} 檔 / ${affected.reduce((s, a) => s + a.dates.length, 0)} 接合點`);
   if (!affected.length) return;
@@ -59,7 +70,7 @@ async function main() {
   await fs.mkdir(backupDir, { recursive: true });
 
   let ok = 0, fail = 0, still = 0;
-  const CONC = 4;
+  const CONC = 2; // 2026-06-12 降速：434×5y 併發 4 觸發騰訊 WAF
   for (let i = 0; i < affected.length; i += CONC) {
     const batch = affected.slice(i, i + CONC);
     await Promise.all(batch.map(async ({ sym }) => {
@@ -75,7 +86,10 @@ async function main() {
         await saveLocalCandles(sym, 'CN', qfq.map((c) => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })));
         // 重驗
         const after = JSON.parse(await fs.readFile(path.join(DIR, `${sym}.json`), 'utf8')).candles as Candle[];
-        if (detectSplices(after).length) { still++; console.warn(`  ⚠ ${sym}: 仍有接合（qfq 也對不齊？）`); }
+        // still>0 多為良性：qfq 序列「除權日撞漲停」報酬 11-13% 與復牌/新股無漲跌幅日是
+        // 數學正確的真實事件（known-anomalies: cn-qfq-exdate-limit-move，2026-06-12 驗證
+        // 350 檔殘留全屬此類）。refetch 冪等 — still 高不代表修復失敗。
+        if (detectSplices(after, sym).length) { still++; }
         ok++;
       } catch (e) { fail++; console.warn(`  ✗ ${sym}: ${e instanceof Error ? e.message : e}`); }
     }));

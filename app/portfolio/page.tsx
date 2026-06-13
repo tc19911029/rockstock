@@ -11,6 +11,7 @@ import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatHoldingQty } from '@/lib/utils/shareUnits';
 import { POLLING } from '@/lib/config';
 import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDailyActionPanel';
+import { DisciplineShadowCard } from '@/components/portfolio/DisciplineShadowCard';
 import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
@@ -417,6 +418,9 @@ export default function PortfolioPage() {
 
         {/* 📋 今日操作建議（書本訊號 daily action）— 讀 server holdings.json */}
         <PortfolioDailyActionPanel />
+
+        {/* 📐 紀律影子帳本（A2 2026-06-12）— 書本規則嚴格執行版 vs 實際抱單的差額 */}
+        <DisciplineShadowCard />
 
         {/* Summary — TWD / CNY 分開顯示，損益已扣買賣手續費+交易稅 */}
         {holdings.length > 0 && (

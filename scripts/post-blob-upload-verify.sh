@@ -2,7 +2,7 @@
 # 等 upload-local-to-blob 完成後，自動驗證 Vercel Blob + commit
 log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a /tmp/post-upload.log; }
 
-cd /Users/tzu-chienhsu/Desktop/rockstock
+cd /Users/tc/Desktop/rockstock
 
 log "⏳ 等待 upload-local-to-blob 完成..."
 while true; do

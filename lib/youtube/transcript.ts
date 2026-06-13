@@ -77,7 +77,7 @@ export async function fetchTranscript(opts: FetchTranscriptOptions): Promise<Tra
       '--convert-subs', 'vtt',
       '--no-warnings',
       '--ignore-config',
-      ...ytdlpProxyArgs(),
+      ...(await ytdlpProxyArgs()),
       '-o', path.join(work, '%(id)s.%(ext)s'),
       opts.videoUrl,
     ];

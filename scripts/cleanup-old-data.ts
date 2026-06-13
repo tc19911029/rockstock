@@ -94,6 +94,20 @@ async function main() {
     console.log(`  rm stock-mentions/${f}`);
   }
 
+  // ── 5.5 keyframes-raw/{date}/（原始 jpg，10 天獨立保留窗；OCR 失敗 force 重跑用）──
+  //     注意：keyframes/（webp + metadata）與 recommendations/（老師績效事件）刻意「不」清 —
+  //     截圖是 mention 的永久證據、事件檔要活過 D+60 追蹤期。
+  const RAW_FRAME_RETAIN_DAYS = 10;
+  const rawCutoff = new Date();
+  rawCutoff.setDate(rawCutoff.getDate() - RAW_FRAME_RETAIN_DAYS);
+  const rawCutoffYmd = ymdTaipei(rawCutoff);
+  for (const dir of await listDir(path.join(ROOT, 'keyframes-raw'))) {
+    if (dir >= rawCutoffYmd) continue;
+    const dirPath = path.join(ROOT, 'keyframes-raw', dir);
+    if (!DRY) await fs.rm(dirPath, { recursive: true, force: true });
+    console.log(`  rm keyframes-raw/${dir}/`);
+  }
+
   // ── 6. 同步 video-index / transcript-index ──
   const vIdxPath = path.join(ROOT, 'video-index.json');
   const vIdx = JSON.parse(await fs.readFile(vIdxPath, 'utf-8')) as { byId: Record<string, unknown>; updated_at: string };

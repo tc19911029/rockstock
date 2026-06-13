@@ -42,11 +42,13 @@ export interface HoldingActionResult {
   };
 }
 
-const PROFIT_SHORT_RULE = 0.10;
-const PROFIT_MID_RULE = 0.10;
-const PROFIT_LONG_RULE = 0.20;
+// export（2026-06-12）：shadowLedger 紀律影子帳本重放同一套書本出場規則，
+// 常數必須單一事實 — 改門檻這裡改，影子帳本自動跟上。
+export const PROFIT_SHORT_RULE = 0.10;
+export const PROFIT_MID_RULE = 0.10;
+export const PROFIT_LONG_RULE = 0.20;
 
-function sma(closes: number[], end: number, n: number): number | null {
+export function sma(closes: number[], end: number, n: number): number | null {
   if (end < n - 1 || n <= 0) return null;
   let s = 0;
   for (let i = end - n + 1; i <= end; i++) s += closes[i];

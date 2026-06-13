@@ -14,14 +14,15 @@ import { ForwardPerfRow } from './ForwardPerfRow';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
-import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, isReversalBuy, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
-import { NAMED_STRATEGIES, matchedStrategies, getStrategy } from '@/lib/cn-sanse/namedStrategies';
+import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { matchedStrategies, getStrategy, type SanSeScanLevel } from '@/lib/cn-sanse/namedStrategies';
+import { buyScore } from '@/lib/cn-sanse/buyScore';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 
 type ScanLevel = 'strict' | 'medium' | 'loose';       // 後端 results 的三個 level
-type Level = ScanLevel | 'reversal';                   // UI 多一個「底反」= 從 records 衍生（非後端 level）
+type Level = SanSeScanLevel;                            // 嚴/中/寬 + 具名策略 id（底反/全共振/紅+黃+觸發/紅+雙B…）；策略 = 從 records 衍生
 
 /** 三色盤中即時掃描活躍時段 = 該市場開盤 或 盤後窗口。TW + CN 共用同一判斷。 */
 function isIntradayActive(market: 'TW' | 'CN'): boolean {
@@ -37,6 +38,8 @@ interface Hit {
 interface RecordRow {
   symbol: string; name?: string; industry?: string; price?: number; changePct?: number; turnoverRank?: number;
   report: ConditionReport;
+  /** 朱六條件確認（core=前5核心全過；台股交集回測有效、陸股僅參考；舊固化無此欄）。 */
+  zhuSix?: { core: boolean; total: number };
 }
 interface ScanResp {
   ok: boolean; lastDate: string; evaluated: number; staleSkipped?: number;
@@ -66,8 +69,8 @@ const COMBO_BADGE: Record<ComboGrade, string> = {
   weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
 };
 
-/** 精簡 chip：使用順序評級 + 共振N/3 + 賣出警示。觸發明細(雙B/主力/捕撈)＋判讀收進 badge hover。*/
-function CondChips({ rep }: { rep?: ConditionReport }) {
+/** 精簡 chip：使用順序評級 + 六條件確認 + 共振N/3 + 賣出警示。觸發明細(雙B/主力/捕撈)＋判讀收進 badge hover。*/
+function CondChips({ rep, zhu, market }: { rep?: ConditionReport; zhu?: { core: boolean; total: number }; market?: 'TW' | 'CN' }) {
   if (!rep) return null;
   const trigs = [
     ...rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => '雙B ' + c.label),
@@ -80,6 +83,14 @@ function CondChips({ rep }: { rep?: ConditionReport }) {
       {rep.combo && (
         <span className={cn('px-1 py-0.5 rounded border font-medium', COMBO_BADGE[rep.combo.grade])} title={comboTitle}>
           {COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}
+        </span>
+      )}
+      {zhu?.core && (
+        <span
+          className="px-1 py-0.5 rounded border bg-sky-500/15 text-sky-200 border-sky-400/40 font-medium"
+          title={`朱六條件確認：核心5條全過（總分 ${zhu.total}/6）。${market === 'CN' ? '⚠️ 陸股交集回測無效，僅供參考' : '台股回測：六條件∩三色 5日 +0.31% 優於兩者單獨'}`}
+        >
+          六✓{zhu.total}
         </span>
       )}
       {rep.sellWarnings.length > 0 && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">⚠️{rep.sellWarnings.join('、')}</span>}
@@ -138,16 +149,7 @@ function passFilters(report: ConditionReport | undefined, active: Set<string>): 
  * 評級 grade 為主軸（top>prime>mid>watch>weak，每級差 100），同級再比共振組數(×10)、
  * 有賣出警示降一點、捕撈底部反彈加一點、最後用短攻做不跨級的細排。缺 combo（舊固化）回 -1 排最後。
  */
-function buyScore(rep?: ConditionReport): number {
-  const c = rep?.combo;
-  if (!c) return -1;
-  let s = c.rank * 100 + (rep!.groupBuyCount ?? 0) * 10;
-  if (rep!.conflict) s -= 5;
-  if (c.bottomReversal) s += 1;
-  const sa = rep!.scores?.shortAttack ?? 0;
-  s += Math.min(Math.max(sa, 0), 99) / 100;
-  return s;
-}
+// buyScore 抽至 lib/cn-sanse/buyScore.ts（2026-06-12 單一事實 — 今日最優先卡/paper-trade 共用）
 
 /** 共用排序比較器（畫面清單 + 漲幅抓取目標共用，確保顯示的股票就是有抓漲幅的股票）。 */
 function rowComparator(
@@ -191,6 +193,11 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
   { key: 'medium', label: '中等', desc: '更新版 — 短攻 / 中強 / 中控 三個分數都 > 0' },
   { key: 'loose', label: '寬鬆', desc: '游資資金翻正 — 短線動能今天剛由負轉正' },
   { key: 'reversal', label: '底反', desc: '底反該買 — 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握' },
+  // 具名策略（從 records 衍生、全市場命中；由工具列「三色(全共振⭐)…」按鈕經 level 驅動）
+  { key: 'resonance', label: '全共振⭐', desc: '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同日（三組齊發，回測漲幅最大但稀有）' },
+  { key: 'red_yellow_trigger', label: '紅+黃+觸發', desc: '🔴紅 ＋ 🟡黃 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）' },
+  { key: 'red_dualb_gold', label: '紅+雙B金叉', desc: '🔴紅在場 ＋ 黃線穿紅線（只認金叉、較乾淨）' },
+  { key: 'red_dualb_any', label: '紅+雙B金叉/突破', desc: '🔴紅在場 ＋（黃紅金叉 或 收盤突破智能交易線）' },
 ];
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
@@ -251,8 +258,6 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     next.has(k) ? next.delete(k) : next.add(k);
     return next;
   });
-  // 具名三色策略（單選）：選了就用 records 衍生、全市場命中（不受嚴/中/寬 level 限制），依「應買」排序。
-  const [strategy, setStrategy] = useState<string | null>(null);
   // 近 7 天有 YouTube 提及（只台股；display-layer 篩選，切市場時重置）
   const [ytRecentOnly, setYtRecentOnly] = useState(false);
 
@@ -366,27 +371,30 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     () => new Map((data?.records ?? []).map((r) => [r.symbol, r.report])),
     [data],
   );
-
-  // 「底反」非後端 level — 從 records 衍生：grade top/prime ＋ 捕撈0軸下空頭區金叉 ＋ 無出場（isReversalBuy）。
-  // 完整涵蓋底反該買（不受嚴/中/寬主力閘限制），舊固化資料只要有 combo 就能算 → 免重跑 backfill。
-  const reversalRows = useMemo<Hit[]>(() =>
-    (data?.records ?? []).filter((r) => isReversalBuy(r.report)).map(recToHit),
+  // symbol → 朱六條件確認（舊固化無此欄 → 不在 map；篩選時視為不過）
+  const zhuMap = useMemo(
+    () => new Map((data?.records ?? []).filter((r) => r.zhuSix).map((r) => [r.symbol, r.zhuSix!])),
     [data],
   );
-  /** 當前 level 的來源清單：底反走 records 衍生，其餘走後端 results[level]。 */
-  const levelRows = useMemo<Hit[]>(
-    () => (level === 'reversal' ? reversalRows : (data?.results[level] ?? [])),
-    [data, level, reversalRows],
-  );
-  const countFor = (k: Level): number | undefined => (k === 'reversal' ? reversalRows.length : data?.counts[k]);
+  // 「∩六條件」篩選謂詞（display-layer；未開啟時全過）
+  const passZhu = (h: Hit) => !filters.has('zhu_core') || zhuMap.get(h.symbol)?.core === true;
 
-  // 具名策略命中（從 records 衍生，全市場、不受 level 限制）；選了策略就覆蓋 level 清單。
-  const strategyRows = useMemo<Hit[]>(() => {
-    const s = getStrategy(strategy);
-    if (!s) return [];
-    return (data?.records ?? []).filter((r) => s.match(r.report)).map(recToHit);
-  }, [data, strategy]);
-  const effectiveRows = strategy ? strategyRows : levelRows;
+  /**
+   * 當前 level 的來源清單：
+   *  - 具名策略（底反/全共振/紅+黃+觸發/紅+雙B…）→ 從 records 衍生、全市場命中（不受嚴/中/寬主力閘限制，
+   *    舊固化資料只要有 combo 就能算 → 免重跑 backfill）。
+   *  - 嚴/中/寬 → 走後端 results[level]。
+   */
+  const levelRows = useMemo<Hit[]>(() => {
+    const s = getStrategy(level);
+    if (s) return (data?.records ?? []).filter((r) => s.match(r.report)).map(recToHit);
+    return data?.results[level as ScanLevel] ?? [];
+  }, [data, level]);
+  const countFor = (k: Level): number | undefined => {
+    const s = getStrategy(k);
+    if (s) return (data?.records ?? []).filter((r) => s.match(r.report)).length;
+    return data?.counts[k as ScanLevel];
+  };
 
   // YouTube 提及（純展示 join）— 只台股有對應；陸股代號不重疊，傳 undefined 不發請求
   const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? data?.lastDate : undefined);
@@ -397,12 +405,12 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 漲幅要抓「畫面實際會顯示的那 50 檔」(濾鏡+排序後)，否則改排序/濾鏡後顯示的股票沒抓到漲幅 → 空白。
   // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
   const fetchTargets = useMemo(() => {
-    const rows = effectiveRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
+    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
     const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
     rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap));
     return rows.slice(0, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveRows, sortKey, sortDir, filters, reportMap, ytMap, ytRecentOnly]);
+  }, [levelRows, sortKey, sortDir, filters, reportMap, zhuMap, ytMap, ytRecentOnly]);
   const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
 
   // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
@@ -432,12 +440,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   }, [data?.lastDate, fetchKey]);
 
   const hits = useMemo(() => {
-    const rows = effectiveRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h));
+    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
     rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap));
     return rows.slice(0, 50);
-    // (deps 用 effectiveRows：選具名策略時覆蓋 level 清單)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveRows, sortKey, sortDir, perf, filters, reportMap, ytMap, ytRecentOnly]);
+  }, [levelRows, sortKey, sortDir, perf, filters, reportMap, zhuMap, ytMap, ytRecentOnly]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   return (
@@ -447,7 +454,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="font-semibold text-fuchsia-300 shrink-0">🎨 三色資金</span>
           <span className="text-[10px] text-muted-foreground truncate">
-            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${data.turnoverCap ? `（成交額前 ${data.turnoverCap}）` : ''}${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
+            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${data.turnoverCap ? (data.turnoverCap >= 10000 ? '（全市場）' : `（成交額前 ${data.turnoverCap}）`) : ''}${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -510,7 +517,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
             {LEVELS.map((l) => (
               <button
                 key={l.key}
-                onClick={() => { setInternalLevel(l.key); setStrategy(null); }}
+                onClick={() => setInternalLevel(l.key)}
                 className={cn(
                   'flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-colors border',
                   level === l.key ? 'bg-sky-500/15 text-sky-400 border-sky-500/40' : 'text-muted-foreground border-transparent hover:bg-secondary',
@@ -544,28 +551,6 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
             {label}{sortKey === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
           </button>
         ))}
-      </div>
-
-      {/* 🎯 具名三色策略（單選）：選一個就只看該策略全市場命中、依「應買」排序，不受嚴/中/寬限制 */}
-      <div className="shrink-0 px-2 py-1.5 border-b border-border flex flex-wrap gap-1 items-center">
-        <span className="text-[9px] text-muted-foreground/70 mr-0.5" title="把回測驗證過的型態做成可選策略；選了就只看該策略的全市場命中、依『應買』排序">🎯策略</span>
-        {NAMED_STRATEGIES.map((s) => (
-          <button key={s.id}
-            onClick={() => {
-              setStrategy((cur) => (cur === s.id ? null : s.id));
-              setSortKey('combo'); setSortDir('desc');
-            }}
-            title={s.tip}
-            className={cn(
-              'text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap border transition-colors',
-              strategy === s.id ? 'bg-fuchsia-600/30 text-fuchsia-100 border-fuchsia-400/50' : 'text-muted-foreground border-border hover:bg-secondary',
-            )}>
-            {s.label}
-          </button>
-        ))}
-        {strategy && (
-          <span className="text-[9px] text-fuchsia-300/80 ml-0.5">{strategyRows.length} 檔·全市場</span>
-        )}
       </div>
 
       {/* 三色買進訊號篩選：分 3 組、每組照書本順序；多個 chip = AND（同時滿足）*/}
@@ -624,6 +609,14 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               filters.has('trend_bear') ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
             )}
           >空頭趨勢</button>
+          <button
+            onClick={() => toggleFilter('zhu_core')}
+            title={`只看「朱六條件核心5條全過」的股票（交集確認）。${market === 'CN' ? '⚠️ 陸股交集回測無效，僅供參考' : '台股回測：六條件∩三色紅+觸發 5日 +0.31%，優於兩者單獨'}`}
+            className={cn(
+              'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+              filters.has('zhu_core') ? 'bg-sky-500/15 text-sky-200 border-sky-400/40' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}
+          >∩六條件</button>
           {market === 'TW' && (
             <button
               onClick={() => setYtRecentOnly((v) => !v)}
@@ -634,8 +627,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               )}
             >近7天提及</button>
           )}
-          {(filters.size > 0 || ytRecentOnly || strategy) && (
-            <button onClick={() => { setFilters(new Set()); setYtRecentOnly(false); setStrategy(null); }} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
+          {(filters.size > 0 || ytRecentOnly) && (
+            <button onClick={() => { setFilters(new Set()); setYtRecentOnly(false); }} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
           )}
         </div>
       </div>
@@ -702,7 +695,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                     {h.turnoverRank !== undefined && (
                       <span
                         className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded"
-                        title={`當日成交額排名（全市場前 ${data?.turnoverCap ?? ''} 內）`}
+                        title={data?.turnoverCap && data.turnoverCap < 10000 ? `當日成交額排名（全市場前 ${data.turnoverCap} 內）` : '當日成交額排名（全市場）'}
                       >
                         成交量第{h.turnoverRank}名
                       </span>
@@ -711,8 +704,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 )}
               </div>
 
-              {/* Row 2.5: 使用順序評級 + 共振 + 賣出警示（觸發/階段收進 badge hover）；判讀句只在選中卡顯示 */}
-              <CondChips rep={rep} />
+              {/* Row 2.5: 使用順序評級 + 六條件確認 + 賣出警示（觸發/階段收進 badge hover）；判讀句只在選中卡顯示 */}
+              <CondChips rep={rep} zhu={zhuMap.get(h.symbol)} market={market} />
               {isSel && rep?.combo && (
                 <p className="text-[9px] leading-snug text-muted-foreground/90 mb-1">→ {COMBO_HINT[rep.combo.grade]}</p>
               )}

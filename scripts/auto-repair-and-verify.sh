@@ -3,7 +3,7 @@
 
 TARGET_DATE="2026-04-13"
 VERCEL_URL="https://rockstock-pv90u666w-tc19911029-5086s-projects.vercel.app"
-PROJECT_DIR="/Users/tzu-chienhsu/Desktop/rockstock"
+PROJECT_DIR="/Users/tc/Desktop/rockstock"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 

@@ -30,12 +30,17 @@ export async function GET(req: NextRequest) {
       });
     }
     const rows = doc.rows.filter((r) => r.market === market);
+    // 各市場視窗不同（台股/陸股交易日曆不同）→ 回該市場真實視窗，沒有才退回合併視窗。
+    const pm = doc.perMarketWindow?.[market];
+    const window = pm
+      ? { ...pm, label: doc.window.label, forwardTd: doc.window.forwardTd }
+      : doc.window;
     return apiOk({
       market,
       exists: true,
       generatedAt: doc.generatedAt,
       entryBaseline: doc.entryBaseline,
-      window: doc.window,
+      window,
       horizons: doc.horizons,
       meta: doc.meta,
       rows,

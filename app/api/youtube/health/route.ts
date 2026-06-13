@@ -76,6 +76,45 @@ export const FETCH_STATUS_LABEL: Record<FetchStatus, string> = {
   stale:   '⚠ 連續空日警告',
 };
 
+/** 關鍵幀管線狀態（請求時從 keyframe-index 聚合；不寫 health.json 避免雙寫競態） */
+export interface KeyframeHealthRow {
+  source_id: string;
+  enabled: boolean;
+  analyzable: number;
+  done: number;
+  failed: number;
+  frames_kept: number;
+}
+
+async function buildKeyframeHealth(date: string): Promise<KeyframeHealthRow[]> {
+  const [{ loadKeyframeIndex }, { loadSources, loadVideosForDate }] = await Promise.all([
+    import('@/lib/youtube/keyframeStorage'),
+    import('@/lib/youtube/videoStorage'),
+  ]);
+  const [index, sources, videos] = await Promise.all([
+    loadKeyframeIndex(), loadSources(), loadVideosForDate(date),
+  ]);
+  const rows: KeyframeHealthRow[] = [];
+  for (const s of sources.filter(x => x.active && x.keyframe_enabled)) {
+    const vids = videos.filter(v => v.source_id === s.source_id && v.should_analyze);
+    let done = 0, failed = 0, frames = 0;
+    for (const v of vids) {
+      const e = index.byId[v.video_id];
+      if (!e) continue;
+      if (e.status === 'ok' || e.status === 'skipped_too_long') done += 1;
+      else failed += 1;
+      frames += e.frames_kept;
+    }
+    rows.push({
+      source_id: s.source_id,
+      enabled: true,
+      analyzable: vids.length,
+      done, failed, frames_kept: frames,
+    });
+  }
+  return rows;
+}
+
 export async function GET() {
   try {
     const snapshot = await loadHealth();
@@ -99,7 +138,14 @@ export async function GET() {
       : lights.some(l => l.light === 'yellow') ? 'yellow'
       : lights.some(l => l.light === 'green') ? 'green' : 'gray';
 
-    return apiOk({ snapshot, lights, overall });
+    // 關鍵幀狀態（只列 keyframe_enabled 來源；失敗不阻擋主 health 回應）
+    let keyframes: KeyframeHealthRow[] = [];
+    try {
+      const { todayYmdTaipei } = await import('@/lib/youtube/classify');
+      keyframes = await buildKeyframeHealth(todayYmdTaipei(new Date()));
+    } catch { /* 略過 */ }
+
+    return apiOk({ snapshot, lights, overall, keyframes });
   } catch (err) {
     return apiError(`loadHealth failed: ${(err as Error).message}`, 500);
   }

@@ -262,6 +262,12 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       }
 
       const account = createAccount(INITIAL_CAPITAL);
+      // 名稱查詢逾時時 API 會回空名（server 冷啟動 nameMap 還沒建好）：
+      // 同一檔已有名字就別被空值洗掉（背景更新晚到帶空名的情況）；換股票時不沿用舊名
+      const prevStock = get().currentStock;
+      const keptName = json.name
+        || (prevStock?.ticker === json.ticker ? prevStock.name : '')
+        || '';
       set({
         allCandles,
         currentIndex: index,
@@ -269,7 +275,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         targetDate: targetDate ?? null,
         account,
         dataGaps: gaps,
-        currentStock: { ticker: json.ticker, name: json.name },
+        currentStock: { ticker: json.ticker, name: keptName },
         ...(showLoading ? { isLoadingStock: false } : {}),
         ...buildState(allCandles, index, account),
       });
@@ -278,7 +284,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       const isIndex = /^\^|^000001\.SS$/.test(json.ticker);
       if (!isIndex) {
         const cleanSymbol = json.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-        useSearchHistoryStore.getState().record(cleanSymbol, json.name);
+        useSearchHistoryStore.getState().record(cleanSymbol, keptName);
       }
       return true;
     };
@@ -429,6 +435,14 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           // 不要拿這個值來偽造一根「今日 bar」造成 04-24/04-25 重複
           const todayIsTradingDay = isTradingDay(today, market);
 
+          // 2026-06-12（QA 提案 #9）：交易日 00:00～開盤前，quote 端點回的是昨收殘值，
+          // 會偽造一根 O=H=L=C、漲跌 0.00 的扁平「今日」bar（凌晨看盤誤導、三色 asOf 連坐）
+          // → 開盤前（TW <09:00 / CN <09:30 當地時間）不新增今日 bar；已存在的今日 bar 照常覆蓋。
+          const hm = new Intl.DateTimeFormat('en-GB', {
+            timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
+          }).format(new Date());
+          const marketOpened = hm >= (isTW ? '09:00' : '09:30');
+
           // quote.date 比 lastCandle.date 早 → 是舊資料（如 INDEX L1 fallback 回昨天的 K）
           // 必須拒絕，否則會把 /api/stock?local=1 注入好的今日 bar 蓋成「昨天 OHLCV + 今日 high」混合。
           if (q.date && q.date < lastCandle.date) {
@@ -444,8 +458,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
               close: q.close,
               volume: q.volume || lastCandle.volume,
             };
-          } else if (lastCandle.date < today && todayIsTradingDay) {
-            // 新增今日 bar（只在交易日才加，避免週末/假日把昨日收盤當今日 bar）
+          } else if (lastCandle.date < today && todayIsTradingDay && marketOpened) {
+            // 新增今日 bar（只在交易日且已開盤才加，避免週末/假日/凌晨把昨收殘值當今日 bar）
             updatedCandles.push({
               date: today,
               open: q.open || q.close,

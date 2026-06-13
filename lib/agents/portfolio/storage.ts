@@ -9,7 +9,7 @@ import { promises as fs } from 'node:fs';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import type { MarketId } from '@/lib/scanner/types';
 import { classifyMarket } from '@/lib/market/classify';
-import { profileDir, DEFAULT_PROFILE_ID } from '@/lib/portfolio/profiles';
+import { profileDir, DEFAULT_PROFILE_ID, loadProfiles } from '@/lib/portfolio/profiles';
 import {
   PORTFOLIO_SCHEMA_VERSION,
   PortfolioFile,
@@ -76,6 +76,27 @@ export async function saveHoldings(file: PortfolioFile, market: MarketId = 'TW',
 export async function loadAllHoldings(profileId: string = DEFAULT_PROFILE_ID): Promise<PortfolioHolding[]> {
   const [tw, cn] = await Promise.all([loadHoldings('TW', profileId), loadHoldings('CN', profileId)]);
   return [...tw.holdings, ...cn.holdings];
+}
+
+/**
+ * 所有持倉人（profiles）open 持倉的聯集（TW+CN，排除場外基金 .OF — 無盤中 K 線）。
+ * 給通知/預熱類 cron 當監看清單：只盯持倉，持倉增減自動跟上，不再維護手寫清單
+ * （2026-06-12 取代 data/realtime/sanse-watch.json）。
+ */
+export async function listAllProfilesOpenStockHoldings(): Promise<Array<{ symbol: string; name: string }>> {
+  const { profiles } = await loadProfiles();
+  const lists = await Promise.all(
+    profiles.map(p => loadAllHoldings(p.id).catch(() => [] as PortfolioHolding[])),
+  );
+  const bySymbol = new Map<string, { symbol: string; name: string }>();
+  for (const holdings of lists) {
+    for (const h of holdings) {
+      if (h.status !== 'open') continue;
+      if (/\.OF$/i.test(h.symbol)) continue;
+      if (!bySymbol.has(h.symbol)) bySymbol.set(h.symbol, { symbol: h.symbol, name: h.name });
+    }
+  }
+  return [...bySymbol.values()];
 }
 
 /**

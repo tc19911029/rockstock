@@ -49,7 +49,8 @@ interface Violation {
   daysGap: number;    // 與前一根間隔多少日（>1 = 缺 K 棒）
 }
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+// 2026-06-12：原本寫死舊 Mac 家目錄 /Users/tc → 新機 EACCES，改 cwd
+const REPO_ROOT = process.cwd();
 const CANDLES_ROOT = path.join(REPO_ROOT, 'data', 'candles');
 
 // 微小容忍：浮點誤差 + 上市公司公告除權除息近似 → 0.005 (0.5%)

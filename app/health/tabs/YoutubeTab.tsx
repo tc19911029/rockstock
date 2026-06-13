@@ -19,6 +19,7 @@ import type {
   YouTubeVideo,
 } from '@/lib/youtube/types';
 import { YoutubeProgramStocks } from '@/components/youtube/YoutubeProgramStocks';
+import { VideoSourceBreakdown } from '@/components/youtube/VideoSourceBreakdown';
 
 type LightLevel = 'green' | 'yellow' | 'red' | 'gray';
 type FetchStatus = 'fetched' | 'no_new' | 'failed' | 'pending' | 'stale';
@@ -30,6 +31,11 @@ interface HealthResponse {
   lights?: Array<{ source_id: string; light: LightLevel; status: FetchStatus; statusLabel: string }>;
   overall?: LightLevel;
   message?: string;
+  /** 關鍵幀管線狀態（只列 keyframe_enabled 來源；今日） */
+  keyframes?: Array<{
+    source_id: string; enabled: boolean;
+    analyzable: number; done: number; failed: number; frames_kept: number;
+  }>;
 }
 
 interface VideoWithTranscript extends YouTubeVideo {
@@ -218,8 +224,45 @@ export function YoutubeTab() {
         </div>
       )}
 
+      {/* 關鍵幀管線狀態（簡報截圖 OCR；只列 keyframe_enabled 來源，今日） */}
+      {health?.keyframes && health.keyframes.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-3 space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold">🖼 簡報關鍵幀（今日）</h2>
+            <span className="text-[11px] text-muted-foreground">
+              影片下載 → 場景偵測 → OCR 初篩；OCR 文字進每晚分析 payload
+            </span>
+          </div>
+          <div className="flex gap-3 flex-wrap text-[11px]">
+            {health.keyframes.map(k => {
+              const sourceName = health.snapshot?.sources.find(s => s.source_id === k.source_id)?.display_name ?? k.source_id;
+              return (
+                <span key={k.source_id} className="whitespace-nowrap">
+                  <span className="text-foreground/80">{sourceName}</span>{' '}
+                  <span className={k.failed > 0 ? 'text-red-400' : k.done >= k.analyzable && k.analyzable > 0 ? 'text-green-400' : 'text-muted-foreground'}>
+                    {k.done}/{k.analyzable}
+                  </span>
+                  {k.frames_kept > 0 && <span className="text-sky-400 ml-1">{k.frames_kept} 幀</span>}
+                  {k.failed > 0 && <span className="text-red-400 ml-1">⚠{k.failed}</span>}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 語音 vs 畫面 — 各影片抓到哪些股票（凸顯關鍵幀 OCR 的獨家貢獻）*/}
+      <VideoSourceBreakdown date={date} />
+
       {/* 各節目談了哪些股票（以節目為主軸，反轉 /api/youtube/performance）*/}
       <YoutubeProgramStocks date={date} />
+
+      {/* 跨日老師績效 → 獨立頁（30/60/90 天勝率/平均報酬/超額排行） */}
+      <div className="flex justify-end">
+        <a href="/youtube/teachers" className="text-xs text-sky-400 hover:underline">
+          🎓 老師推薦績效排行榜（誰講的準）→
+        </a>
+      </div>
 
       {/* 影片表 */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">

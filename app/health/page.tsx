@@ -11,18 +11,21 @@
  * URL `?tab=youtube` 持久化 tab 選擇。
  */
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { PageShell } from '@/components/shared';
 import { MarketDataTab } from './tabs/MarketDataTab';
 import { YoutubeTab } from './tabs/YoutubeTab';
+import { CnAgentsTab } from './tabs/CnAgentsTab';
 import { PlaceholderTab } from './tabs/PlaceholderTab';
 import { SystemTab } from './tabs/SystemTab';
 
-type TabKey = 'market' | 'youtube' | 'technical' | 'agent' | 'system';
+type TabKey = 'market' | 'youtube' | 'cn-agents' | 'technical' | 'agent' | 'system';
 
 const TABS: Array<{ key: TabKey; label: string; icon: string }> = [
   { key: 'market',    label: '行情資料',     icon: '📈' },
   { key: 'youtube',   label: 'YouTube 節目', icon: '📺' },
+  { key: 'cn-agents', label: '陸股情緒',     icon: '🌡️' },
   // 技術策略 / 多代理分析 tab 尚未實作（只有施工中佔位），先隱藏避免使用者撞到空頁；
   // 下方 render 區塊與 PlaceholderTab 暫留，待實作後再把這兩行加回 TABS。
   // { key: 'technical', label: '技術策略',     icon: '⚙️' },
@@ -84,20 +87,30 @@ export default function HealthPage() {
         {/* Tab nav */}
         <div role="tablist" aria-label="資料健康分頁" className="flex flex-wrap gap-1 border-b border-border">
           {TABS.map(t => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-3 py-2 text-sm rounded-t-md transition-colors border-b-2 -mb-px ${
-                tab === t.key
-                  ? 'border-sky-500 text-sky-400 bg-sky-500/10'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/40'
-              }`}
-            >
-              <span className="mr-1.5">{t.icon}</span>
-              {t.label}
-            </button>
+            <Fragment key={t.key}>
+              {t.key === 'cn-agents' && (
+                <Link
+                  href="/daily-pick"
+                  className="px-3 py-2 text-sm rounded-t-md transition-colors border-b-2 -mb-px border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+                >
+                  <span className="mr-1.5">🎯</span>
+                  每日選股
+                </Link>
+              )}
+              <button
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
+                className={`px-3 py-2 text-sm rounded-t-md transition-colors border-b-2 -mb-px ${
+                  tab === t.key
+                    ? 'border-sky-500 text-sky-400 bg-sky-500/10'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/40'
+                }`}
+              >
+                <span className="mr-1.5">{t.icon}</span>
+                {t.label}
+              </button>
+            </Fragment>
           ))}
         </div>
 
@@ -105,6 +118,7 @@ export default function HealthPage() {
         <div className="pt-2">
           {tab === 'market' && <MarketDataTab />}
           {tab === 'youtube' && <YoutubeTab />}
+          {tab === 'cn-agents' && <CnAgentsTab />}
           {tab === 'technical' && (
             <PlaceholderTab
               title="技術策略資料"

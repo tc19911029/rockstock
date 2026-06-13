@@ -13,7 +13,7 @@
  *   非 0 exit 直接寫進 scan_log.error，下次 cron tick 自然重來。
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 
 export interface YtdlpVideo {
@@ -35,19 +35,45 @@ const DEFAULT_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 const DEFAULT_TIMEOUT_MS = 90_000;
 
 /**
- * 強制 yt-dlp 直連，不走 proxy。
+ * yt-dlp proxy 決策 — 執行期探測，不再寫死。
  *
- * 為什麼：yt-dlp（Python）在 macOS 會直接讀「系統網路 proxy 設定」，連 env 都繞不掉。
- * 本機 ClashX Pro 把系統 proxy 設成 127.0.0.1:7890，一旦 ClashX 關掉 / 重啟，所有
- * yt-dlp 抓取就卡死在連不到的 proxy → 整批 timeout，health 頁狂噴
- * `HTTPSConnection(host='127.0.0.1', port=7890): Failed to establish a new connection`。
- * 台灣直連 YouTube 不需要任何 proxy，所以一律 `--proxy ''`（空字串＝直連），
- * 讓抓取完全不受 Clash 開關影響。
- *
- * 逃生口：真的需要走 proxy（例如人在 YouTube 被擋的地區）才設 `YTDLP_PROXY` env 覆寫。
+ * 歷史上兩種互斥的故障模式都發生過：
+ *   A. 2026-06-08（ClashX 時代）：系統 proxy 指向已關掉的 127.0.0.1:7890 →
+ *      yt-dlp 讀系統 proxy 卡死 → 當時解法是強制 `--proxy ''` 直連。
+ *   B. 2026-06-09 / 06-11（Verge 時代）：Verge TUN 沒開時 yt-dlp「直連」反而
+ *      整批 timeout（curl 直連通、Python 不通），但本機 proxy 127.0.0.1:7897 是活的
+ *      → 06-11 全來源 90s timeout、整天節目漏抓的根因。
+ * 寫死任何一邊都會在另一個模式翻車，所以改成探測：
+ *   1. `YTDLP_PROXY` env 顯式覆寫 → 直接用（逃生口，含設成 '' 強制直連）。
+ *   2. 用 curl 經本機代理（7897 Verge / 7890 ClashX）打 youtube generate_204，
+ *      4s 內通 → 走該 proxy（本機代理活著時永遠安全）。
+ *   3. 都不通 → `--proxy ''` 直連（= 模式 A 的原行為）。
+ * 結果 cache 10 分鐘，避免每支影片都探測一次。
  */
-export function ytdlpProxyArgs(): string[] {
-  return ['--proxy', process.env.YTDLP_PROXY ?? ''];
+let proxyProbeCache: { args: string[]; at: number } | null = null;
+const PROXY_PROBE_TTL_MS = 10 * 60_000;
+const LOCAL_PROXY_CANDIDATES = ['http://127.0.0.1:7897', 'http://127.0.0.1:7890'];
+
+function probeProxy(proxy: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(
+      'curl',
+      ['-s', '-o', '/dev/null', '-w', '%{http_code}', '-m', '4', '-x', proxy, 'https://www.youtube.com/generate_204'],
+      { timeout: 6_000 },
+      (err, stdout) => resolve(!err && /^(20[04])$/.test(String(stdout).trim())),
+    );
+  });
+}
+
+export async function ytdlpProxyArgs(): Promise<string[]> {
+  if (process.env.YTDLP_PROXY !== undefined) return ['--proxy', process.env.YTDLP_PROXY];
+  if (proxyProbeCache && Date.now() - proxyProbeCache.at < PROXY_PROBE_TTL_MS) return proxyProbeCache.args;
+  let args = ['--proxy', ''];
+  for (const p of LOCAL_PROXY_CANDIDATES) {
+    if (await probeProxy(p)) { args = ['--proxy', p]; break; }
+  }
+  proxyProbeCache = { args, at: Date.now() };
+  return args;
 }
 
 export interface FetchOptions {
@@ -91,7 +117,7 @@ export async function fetchRecentVideos(
     '--playlist-end', String(limit),
     '--no-warnings',
     '--ignore-config',
-    ...ytdlpProxyArgs(),
+    ...(await ytdlpProxyArgs()),
     sourceUrl,
   ];
 

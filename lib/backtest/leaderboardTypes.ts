@@ -72,14 +72,16 @@ export interface LeaderboardRow {
 
 export interface LeaderboardDoc {
   generatedAt: string;                 // ISO（前端顯示請 +8h 轉 CST）
-  entryBaseline: 'next-open';          // 買入基準恆為隔日開盤
+  entryBaseline: 'next-open' | 'next-close(≈13:25)'; // 買入基準：隔日開盤（生產）或隔日收盤（B1 13:25 對齊變體）
   window: {
-    start: string;                     // 第一個掃描日
-    end: string;                       // 最後一個掃描日（已扣除 forwardTd）
+    start: string;                     // 跨市場合併視窗起（= 各市場 min start）
+    end: string;                       // 跨市場合併視窗迄（= 各市場 max end）
     tradingDays: number;
     label: string;                     // 例 '2y'
     forwardTd: number;                 // 為確保 forward 全在本地 K 而排除的尾端交易日數
   };
+  /** 各市場真實視窗（台股/陸股交易日曆不同、起訖與天數不同）。前端依市場顯示這個。 */
+  perMarketWindow?: Partial<Record<Market, { start: string; end: string; tradingDays: number }>>;
   horizons: Horizon[];
   rows: LeaderboardRow[];              // 扁平；前端 client-side 過濾/排序
   meta: {

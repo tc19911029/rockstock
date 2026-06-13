@@ -7,6 +7,9 @@ import type { Candle } from '@/types';
 import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { computeSanSe, evalLatest, type SanSeLevel } from './selectors';
 import { evalConditions, isReversalBuy, type ConditionReport } from './conditions';
+import { computeIndicators } from '@/lib/indicators';
+import { evaluateSixConditions } from '@/lib/analysis/trendAnalysis';
+import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
 
 // 相對強弱(RS)基準 = 個股所屬市場指數（對齊 TDX INDEXC）：滬市(.SS)→上證綜指、深市(.SZ)→深證成指。
 const INDEX_SYMBOL = '000001.SS';     // 上證綜指（滬市 + 行情日曆來源）
@@ -18,6 +21,7 @@ const MIN_BARS = 250;
  * 把每日「新鮮且歷史足夠」的個股按掃描日那根 close×volume（成交額）排序，只保留前 N 檔，
  * 剔除冷門/薄量股、聚焦主流大量股。TW 500 / CN 800（與買法同一套數字、同一套精神）。
  * 三色雖是自創因子，但此粗篩純屬「流動性聚焦」、不涉及書本選股規則 → 不違反鐵則 #5。
+ * （2026-06-11 曾短暫誤改 10000 全市場，同日依使用者澄清改回；zhuSix 六條件確認欄保留。）
  */
 export const SANSE_TURNOVER_TOP_N: Record<'TW' | 'CN', number> = { TW: 500, CN: 800 };
 
@@ -62,6 +66,19 @@ export interface ResonanceRecord {
   report: ConditionReport;
   /** 當日成交額名次（1 = 成交額最大；舊固化資料無此欄 → undefined）。 */
   turnoverRank?: number;
+  /**
+   * 朱老師六條件確認（書本 evaluateSixConditions 對掃描日重算）：core = 前5核心條件全過、
+   * total = 0-6 總分。交集回測 2026-06-11：台股「六條件∩三色紅+觸發」d5 +0.31% 優於兩者單獨；
+   * 陸股交集無效、僅供參考。舊固化無此欄 → undefined（前端防禦）。
+   */
+  zhuSix?: { core: boolean; total: number };
+}
+
+/** 對掃描日那根算六條件確認欄（純衍生顯示欄；不進三色選股 gate，吃 ZHU_PURE_BOOK 純書本門檻）。 */
+export function computeZhuSix(candles: Candle[]): { core: boolean; total: number } {
+  const ci = computeIndicators(candles);
+  const six = evaluateSixConditions(ci, ci.length - 1, ZHU_PURE_BOOK.thresholds);
+  return { core: six.isCoreReady, total: six.totalScore };
 }
 
 export interface ResonanceCounts {
@@ -242,6 +259,7 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
         records.push({
           symbol: s.symbol, name: s.name, industry: s.industry ?? '',
           price: lastClose, changePct, report,
+          zhuSix: computeZhuSix(candles), // 只對入選紀錄算（~數百檔），不對全市場算
         });
       }
     });

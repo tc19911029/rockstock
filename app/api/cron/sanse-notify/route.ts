@@ -1,7 +1,8 @@
 /**
  * sanse-notify — 三色（雙B / 主力狀態 / 捕撈季節）買賣結論 → 手機推播
  *
- * 取代舊的「盤中分時爆量」ntfy 通知。只盯固定監看清單（data/realtime/sanse-watch.json），
+ * 取代舊的「盤中分時爆量」ntfy 通知。監看清單＝所有持倉人（profiles）目前 open 持倉
+ * 的聯集（2026-06-12 改，取代手寫 data/realtime/sanse-watch.json；持倉增減自動跟上），
  * 盤中即時評估，三色一翻成「該買🟢 / 該賣🔻」就推一次。
  *
  * 設計（守住鐵則 #3 不逐檔掃、#4 走圖獨立）：
@@ -29,6 +30,7 @@ import { checkCronAuth } from '@/lib/api/cronAuth';
 import { sendNtfy, type NtfyPayload } from '@/lib/notify/ntfy';
 import { tradeVerdict, type ConditionReport } from '@/lib/cn-sanse/conditions';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { listAllProfilesOpenStockHoldings } from '@/lib/agents/portfolio/storage';
 
 export const runtime = 'nodejs';
 
@@ -90,9 +92,7 @@ async function appendJsonl(date: string, records: SanseAlertRecord[]): Promise<v
 
 async function loadWatch(): Promise<WatchItem[]> {
   try {
-    const raw = await fs.readFile(path.join(process.cwd(), 'data', 'realtime', 'sanse-watch.json'), 'utf-8');
-    const j = JSON.parse(raw) as { symbols?: WatchItem[] };
-    return Array.isArray(j.symbols) ? j.symbols.filter((s) => s && typeof s.symbol === 'string') : [];
+    return await listAllProfilesOpenStockHoldings();
   } catch {
     return [];
   }

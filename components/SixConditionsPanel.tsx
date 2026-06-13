@@ -5,6 +5,8 @@ import { useReplayStore } from '@/store/replayStore';
 import { SixConditionsResult } from '@/lib/analysis/trendAnalysis';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
 import { EmptyState } from '@/components/shared';
+import { HeavinessBadgeFor } from '@/components/shared/HeavinessBadge';
+import { classifyMarket } from '@/lib/market/classify';
 import ProhibitionsBlock from './ProhibitionsBlock';
 import { CORE_SCORE_MIN, BOOK_VOL_RATIO_MIN, BOOK_BODY_PCT_MIN } from '@/lib/analysis/bookThresholds';
 
@@ -129,6 +131,8 @@ export default function SixConditionsPanel() {
   const prevSixConditions = useReplayStore(s => s.prevSixConditions);
   const allCandles    = useReplayStore(s => s.allCandles);
   const currentIndex  = useReplayStore(s => s.currentIndex);
+  const ticker        = useReplayStore(s => s.currentStock?.ticker);
+  const market        = classifyMarket(ticker ?? '');
   const [expanded, setExpanded] = useState<ConditionKey | null>(null);
 
   // detectSellSignals 跑 15+ 條規則，沒 memo 會在每個 expand/click 重算
@@ -310,6 +314,7 @@ export default function SixConditionsPanel() {
                 'bg-yellow-900/30 text-yellow-400'
               }`}>
                 <span className="font-bold shrink-0">{sig.label}</span>
+                <HeavinessBadgeFor market={market} signalId={sig.type} className="shrink-0" />
                 <span className="text-[9px] opacity-80">{sig.detail}</span>
               </div>
             ))}

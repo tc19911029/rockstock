@@ -255,6 +255,8 @@ function zhStatus(s: string): string {
     error: '錯誤',
     none: '無',
     unknown: '未知',
+    missing: '無快照',
+    'pre-market': '盤前（前一交易日）',
   };
   return map[s?.toLowerCase()] ?? s;
 }

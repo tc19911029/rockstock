@@ -12,6 +12,7 @@
  */
 import type { ETFHolding, ETFListItem, ETFSnapshot } from './types';
 import { getTWChineseName } from '@/lib/datasource/TWSENames';
+import { fetchJsonWithCurlFallback, fetchBufferWithCurlFallback } from '@/lib/datasource/curlFetch';
 
 /**
  * 對 TW 股票代號（4-6 純數字）用本地 nameMap 蓋過資料源 name。
@@ -96,17 +97,19 @@ async function fetchFromCMoney(
   try {
     const paramStr = `AssignID=${etfCode};MTPeriod=0;DTMode=0;DTRange=1;DTOrder=1;MajorTable=M722;`;
     const url = `https://www.cmoney.tw/MobileService/ashx/GetDtnoData.ashx?action=getdtnodata&DtNo=${CMONEY_DTNO}&ParamStr=${encodeURIComponent(paramStr)}&FilterNo=0`;
-    const res = await fetch(url, {
+    // 2026-06-12：CMoney 對 Node fetch 直接 ECONNRESET（TLS 指紋擋，同 TPEx Cloudflare），
+    // curl 帶瀏覽器 UA 可過 → 改走 curl fallback。06-11 整晚揭露抓不到（no source available）即此因。
+    const { data: json } = await fetchJsonWithCurlFallback<CMoneyResponse>(url, {
+      timeoutMs: 20_000,
       headers: {
         'User-Agent': CMONEY_UA,
         'Referer': `https://www.cmoney.tw/etf/tw/${etfCode}/fundholding`,
       },
-      signal: AbortSignal.timeout(20_000),
     });
-    if (!res.ok) return null;
-    const json: CMoneyResponse = await res.json();
     return parseCMoneyHoldings(json.Data ?? []);
-  } catch {
+  } catch (e) {
+    // 2026-06-12：原本靜默吞錯 → 整晚 no source available 查不到原因，改記 log
+    console.warn(`[etf/holdingsSource] CMoney ${etfCode} 抓取失敗: ${(e as Error).message}`);
     return null;
   }
 }
@@ -156,14 +159,15 @@ const MONEYDJ_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
 async function fetchFromMoneyDJ(etfCode: string): Promise<ETFHolding[] | null> {
   try {
     const url = `https://www.moneydj.com/ETF/X/Basic/Basic0007B.xdjhtm?etfid=${etfCode}.TW`;
-    const res = await fetch(url, {
+    // 2026-06-12：MoneyDJ 同樣擋 Node fetch（fetch failed）→ curl fallback（HTML 走 buffer 版）
+    const { buffer } = await fetchBufferWithCurlFallback(url, {
+      timeoutMs: 20_000,
       headers: { 'User-Agent': MONEYDJ_UA, 'Accept-Language': 'zh-TW,zh;q=0.9' },
-      signal: AbortSignal.timeout(20_000),
     });
-    if (!res.ok) return null;
-    const html = await res.text();
+    const html = new TextDecoder('utf-8').decode(buffer);
     return parseMoneyDJHoldings(html);
-  } catch {
+  } catch (e) {
+    console.warn(`[etf/holdingsSource] MoneyDJ ${etfCode} 抓取失敗: ${(e as Error).message}`);
     return null;
   }
 }

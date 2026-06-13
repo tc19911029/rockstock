@@ -33,6 +33,7 @@ import SixConditionsPanel from '@/components/SixConditionsPanel';
 import BuyMethodConditionsPanel from '@/components/BuyMethodConditionsPanel';
 import { SanSeConditionsPanel } from '@/components/cn-sanse/SanSeConditionsPanel';
 import { SanSeSignalsPanel } from '@/components/cn-sanse/SanSeSignalsPanel';
+import { SellHeavinessReference } from '@/components/shared/SellHeavinessReference';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
@@ -608,7 +609,7 @@ function HomePage() {
       )}
       {sideTab === 'signals' && (
         <SectionBoundary section="訊號分析">
-          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} /> : <SignalSummaryCard />}
+          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} /> : <SignalSummaryCard />}
         </SectionBoundary>
       )}
       {sideTab === 'chip' && (
@@ -617,6 +618,7 @@ function HomePage() {
             {isCnTicker
               ? <CnChipPanel symbol={currentStock.ticker} />
               : <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />}
+            <SellHeavinessReference market={isCnTicker ? 'CN' : 'TW'} className="mt-2" />
           </SectionBoundary>
         ) : (
           <EmptyState
@@ -638,6 +640,7 @@ function HomePage() {
                   <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} isHistorical={currentIndex < allCandles.length - 1} />
                 </>
               )}
+            <SellHeavinessReference market={isCnTicker ? 'CN' : 'TW'} className="mt-2" />
           </SectionBoundary>
         ) : (
           <EmptyState

@@ -8,7 +8,7 @@
 
 set -e
 
-cd /Users/tzu-chienhsu/Desktop/rockstock
+cd /Users/tc/Desktop/rockstock
 DATE=$(/bin/date +%Y-%m-%d)
 LOG="/tmp/rockstock-audit-l1-invariant.log"
 

@@ -11,7 +11,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+const REPO_ROOT = '/Users/tc/Desktop/rockstock';
 const CANDLES_ROOT = path.join(REPO_ROOT, 'data', 'candles');
 
 interface PollutionEntry {
@@ -35,7 +35,7 @@ async function main() {
   const dryRun = !args.includes('--apply');
   const reportPath = args.includes('--report')
     ? args[args.indexOf('--report') + 1]
-    : `/Users/tzu-chienhsu/Desktop/rockstock/data/reports/l1-zero-volume-spike-${new Date().toISOString().slice(0, 10)}.json`;
+    : `/Users/tc/Desktop/rockstock/data/reports/l1-zero-volume-spike-${new Date().toISOString().slice(0, 10)}.json`;
 
   const raw = await fs.readFile(reportPath, 'utf-8');
   const report = JSON.parse(raw) as Report;

@@ -145,6 +145,38 @@ const NAMES_TTL       = 24 * 60 * 60 * 1000; // 24 hours
 
 type NameMap = Record<string, string>; // code → Chinese name
 
+// ── 本地 stock-master.json（youtube cron 維護，~23K 筆 code↔name 含 TPEx）────────
+// 兩個用途：(1) buildNameMap 網路源被擋時補全 (2) 冷啟動 fast path —— buildNameMap
+// 打 TWSE/TPEx/ISIN 最長 30s，但 request 熱路徑名稱預算只有 3s（nameWithTimeout），
+// 重啟後第一批 /api/stock 永遠拿不到名字 → 先用本地檔即回，完整 map 背景建好後接手。
+interface StockMasterEntry { code: string; name: string; market?: string }
+
+let _stockMasterEntries: StockMasterEntry[] | null | undefined;
+function loadStockMasterEntries(): StockMasterEntry[] | null {
+  if (_stockMasterEntries !== undefined) return _stockMasterEntries;
+  try {
+    const smPath = path.join(process.cwd(), 'data', 'youtube', 'stock-master.json');
+    const sm = JSON.parse(fs.readFileSync(smPath, 'utf-8')) as { entries?: StockMasterEntry[] };
+    _stockMasterEntries = sm.entries?.length ? sm.entries : null;
+  } catch {
+    _stockMasterEntries = null;
+  }
+  return _stockMasterEntries;
+}
+
+let _localNameMap: NameMap | null | undefined;
+function getLocalNameMap(): NameMap | null {
+  if (_localNameMap !== undefined) return _localNameMap;
+  const entries = loadStockMasterEntries();
+  if (!entries) { _localNameMap = null; return null; }
+  const m: NameMap = {};
+  for (const e of entries) {
+    if (e.code && e.name && m[e.code] == null) m[e.code] = e.name;
+  }
+  _localNameMap = m;
+  return m;
+}
+
 interface BuildResult {
   map: NameMap;
   otcCodes: Set<string>;
@@ -244,14 +276,11 @@ async function buildNameMap(): Promise<BuildResult> {
   // 並快取 24h（2026-06-09 實際踩到：3357 等 ~890 檔上櫃全顯示代號）。改用 youtube cron 維護的
   // 本地 23K code↔name（含 1009 檔 TPEx，純讀檔免網路）補網路沒蓋到的，並把 TPEx-market 代號
   // 補進 otcCodes，讓 isOTC 路由不再受 TPEx 抓取成敗影響。網路有抓到的名稱優先（此處只 fill gap）。
-  try {
-    const smPath = path.join(process.cwd(), 'data', 'youtube', 'stock-master.json');
-    const sm = JSON.parse(fs.readFileSync(smPath, 'utf-8')) as {
-      entries?: { code: string; name: string; market?: string }[];
-    };
+  const smEntries = loadStockMasterEntries();
+  if (smEntries) {
     let nameFilled = 0;
     let otcFilled = 0;
-    for (const e of sm.entries ?? []) {
+    for (const e of smEntries) {
       if (!e.code || !e.name) continue;
       if (map[e.code] == null) { map[e.code] = e.name; nameFilled++; }
       if (e.market === 'TPEx' && !otcCodes.has(e.code)) { otcCodes.add(e.code); otcFilled++; }
@@ -259,8 +288,8 @@ async function buildNameMap(): Promise<BuildResult> {
     if (nameFilled || otcFilled) {
       console.info(`[TWSENames] stock-master 補全 — names+${nameFilled} otc+${otcFilled}`);
     }
-  } catch (err) {
-    console.warn('[TWSENames] stock-master 補全略過:', err instanceof Error ? err.message : err);
+  } else {
+    console.warn('[TWSENames] stock-master 補全略過: 本地檔不存在或無 entries');
   }
 
   console.info(`[TWSENames] buildNameMap done — TWSE=${twseAdded} TPEx=${tpexAdded} ISIN${isinUsed ? '=used' : '=skip'} total=${Object.keys(map).length} otc=${otcCodes.size}`);
@@ -302,7 +331,17 @@ async function ensureBuilt(): Promise<BuildResult> {
 
 export async function getTWChineseName(code: string): Promise<string | null> {
   try {
-    const { map } = await ensureBuilt();
+    // cache 已建好 → 直接查（網路建構的名稱最新，且已含 stock-master gap-fill）
+    const cachedMap = globalCache.get<NameMap>(NAMES_CACHE_KEY);
+    if (cachedMap) return cachedMap[code] ?? null;
+    // 2026-06-11 冷啟動 fast path：buildNameMap 打 TWSE/TPEx/ISIN 最長 30s，但熱路徑
+    // 名稱預算只有 3s（nameWithTimeout）→ 重啟後第一批走圖左上角只剩代號沒中文名。
+    // 先踢背景 build，立刻用本地 stock-master.json 回名字；本地也查無才等完整 build。
+    const inflight = ensureBuilt();
+    inflight.catch(() => {}); // fast path 提前 return 時避免 unhandled rejection
+    const local = getLocalNameMap();
+    if (local?.[code]) return local[code];
+    const { map } = await inflight;
     return map[code] ?? null;
   } catch {
     return null;

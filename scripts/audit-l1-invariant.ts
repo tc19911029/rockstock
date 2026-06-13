@@ -142,7 +142,8 @@ function auditMarket(market: Market): MarketAudit {
     }
 
     // ── 次檔位收盤偵測（TW only，只查最新一根已封存 bar = 驗最近一次 settle 品質）──
-    if (market === 'TW' && sealed.length > 0) {
+    // 指數（^TWII 等）沒有股票檔位規則，排除（2026-06-12：^TWII 43149.46 誤報）
+    if (market === 'TW' && sealed.length > 0 && !sym.startsWith('^')) {
       const latest = sealed[sealed.length - 1];
       const etf = isTwEtf(sym);
       if (latest.close > 0 && !isValidTwTick(latest.close, etf)) {

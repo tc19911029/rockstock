@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-analysis-morning-check</string>
+
+  <!--
+    早上守門：昨晚 23:55 nightly 分析若失敗（如 2026-06-13 凌晨 claude OAuth 403 暫時失效），
+    08:30 CST 檢查昨日 analysis 檔，缺檔自動補跑（headless claude，走訂閱 Keychain）。
+    腳本在 ~/.local/bin（非 iCloud 路徑）。需 HOME/USER/LOGNAME 給 Keychain 認證；
+    絕不可設 ANTHROPIC_API_KEY（會改走 API 付費）。
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/tc/.local/bin/rockstock-analysis-morning-check.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/tc</string>
+    <key>USER</key><string>tc</string>
+    <key>LOGNAME</key><string>tc</string>
+    <key>PATH</key><string>/Users/tc/.local/node-22/bin:/Users/tc/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-analysis-morning-check.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-analysis-morning-check.err.log</string>
+</dict>
+</plist>

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, tradeVerdict, type ConditionReport, type GroupReport, type CondGroup, type TradeVerdict } from '@/lib/cn-sanse/conditions';
 import { HeavinessBadge, HeavinessBadgeFor } from '@/components/shared/HeavinessBadge';
 import { lookupSellHeaviness, SELL_HEAVINESS_WINDOW } from '@/lib/analysis/sellHeavinessTable';
+import { SanSeSopCard } from './SanSeSopCard';
 
 const GROUPS: { key: CondGroup; label: string }[] = [
   { key: 'doubleB', label: '🟦 雙B' },
@@ -130,6 +131,8 @@ export function SanSeSignalsPanel({ report, market }: { report: ConditionReport 
           紅(機構)在場才當前提（紫色當門票回測最弱）→ 捕撈/雙B金叉觸發進場（0軸下底部反彈金叉也可）→ 三組齊發(共振3/3)最強但很稀有，平時看「紅當前提+觸發」即可；出場守紅翻負/雙B死叉。書本進場：上漲日 13:20 看盤、13:25 掛市價。
         </div>
       </div>
+
+      <SanSeSopCard market={market} />
     </div>
   );
 }

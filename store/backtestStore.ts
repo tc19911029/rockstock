@@ -6,7 +6,9 @@ import {
   ScanDiagnostics, createEmptyDiagnostics, mergeDiagnostics, diagnosticsSummary,
 } from '@/lib/scanner/types';
 import { TrendState } from '@/lib/analysis/trendAnalysis';
+import { isDisposalVetoed } from '@/lib/selection/applyPanelFilter';
 import { getMissingTradingDays } from '@/lib/utils/tradingDay';
+import type { SanSeScanLevel } from '@/lib/cn-sanse/namedStrategies';
 // Inline calcBacktestSummary to avoid pulling server-only ForwardAnalyzer → LocalCandleStore (fs)
 function calcBacktestSummary(
   perf: StockForwardPerformance[],
@@ -149,7 +151,7 @@ interface BacktestState {
   /** 三色資金 level（陸股自創策略）— null = 走書本買法（activeBuyMethod）；非 null = 三色該 level 視角。
    *  單一事實來源：ScanPanelVertical（掃描清單）+ app/page.tsx（中間「條件/訊號」面板）共用，
    *  讓「點哪個策略 → 中間面板換成對應條件/訊號」一致。不持久化（reload 回 null）。 */
-  sanseLevel: 'strict' | 'medium' | 'loose' | 'reversal' | null;
+  sanseLevel: SanSeScanLevel | null;
   /** 載入買法結果的狀態 */
   isLoadingBuyMethod: boolean;
 
@@ -172,7 +174,7 @@ interface BacktestState {
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
   setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R') => Promise<void>;
-  setSanseLevel:          (lv: 'strict' | 'medium' | 'loose' | 'reversal' | null) => void;
+  setSanseLevel:          (lv: SanSeScanLevel | null) => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
@@ -694,10 +696,12 @@ export const useBacktestStore = create<BacktestState>()(
           return;
         }
 
+        // 處置股硬排除（鐵則 #10：與 applyPanelFilter 同一判定）。
+        // 在進 store / scanCache 之前就剔除，MTF toggle 還原不會復活被 veto 的列。
         const combined: StockScanResult[] = [
           ...results1,
           ...results2,
-        ].sort((a, b) =>
+        ].filter(r => !isDisposalVetoed(r)).sort((a, b) =>
           b.sixConditionsScore !== a.sixConditionsScore
             ? b.sixConditionsScore - a.sixConditionsScore
             : b.changePercent - a.changePercent
@@ -991,7 +995,7 @@ export const useBacktestStore = create<BacktestState>()(
             // 之前的 bug：所有 method 都加 A filter，導致 N/F/O/D/Q session 內反轉軌訊號被擋（如 3026 跌菱形 80% 沒過 A 但 N matched 應顯示）
             const requireA = !REVERSAL_OR_SYSTEM_SET.has(activeBuyMethod);
             const scanResults = (session?.results ?? []).filter(r =>
-              !requireA || r.matchedMethods?.includes('A'),
+              !isDisposalVetoed(r) && (!requireA || r.matchedMethods?.includes('A')),
             );
             set({ scanResults, isLoadingBuyMethod: false });
 
@@ -1091,7 +1095,8 @@ export const useBacktestStore = create<BacktestState>()(
           if (!res.ok) throw new Error('無法載入歷史掃描結果');
           const json = await res.json() as { sessions?: Array<{ results: StockScanResult[]; marketTrend?: string; dataFreshness?: { avgStaleDays: number; maxStaleDays: number; staleCount: number; totalScanned: number; coverageRate: number; dataStatus: string } }> };
           const session0 = json.sessions?.[0];
-          let scanResults = session0?.results ?? [];
+          // 處置股硬排除：進 store / scanCache 之前剔除（同 applyPanelFilter，鐵則 #10）
+          let scanResults = (session0?.results ?? []).filter(r => !isDisposalVetoed(r));
           if (scanResults.length === 0) {
             set({ isLoadingCronSession: false });
             return;

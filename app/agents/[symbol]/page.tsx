@@ -21,6 +21,8 @@ import Link from 'next/link';
 import { PageShell, PageHeader, BackButton } from '@/components/shared';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { AgentChartSection } from './_components/AgentChartSection';
+import { SellHeavinessReference } from '@/components/shared/SellHeavinessReference';
+import { classifyMarket } from '@/lib/market/classify';
 import { TrustMomentumPanel } from './_components/TrustMomentumPanel';
 import { SqueezeDetail } from './_components/SqueezeDetail';
 import { CostBasisPanel } from './_components/CostBasisPanel';
@@ -619,7 +621,7 @@ function AgentDetailPage() {
             <h3 className="text-sm font-semibold text-cyan-300">YouTube 提及紀錄（近 30 天）</h3>
             <StockMentionTimeline code={symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')} range="30d" />
           </div>
-          {data?.chip && <ChipDetail answer={data.chip} />}
+          {data?.chip && <ChipDetail answer={data.chip} market={classifyMarket(symbol)} />}
           {data?.fundamental && <FundamentalDetail answer={data.fundamental} />}
           {(data?.fundamental || data?.fundamentalQuestion?.groundTruth.valuationInputs) && (
             <ValuationDetail answer={data?.fundamental ?? null} question={data?.fundamentalQuestion ?? null} />
@@ -1133,7 +1135,7 @@ function NewsDetail({ answer }: { answer: NewsAnswer }) {
   );
 }
 
-function ChipDetail({ answer }: { answer: ChipAnswer }) {
+function ChipDetail({ answer, market }: { answer: ChipAnswer; market?: 'TW' | 'CN' | 'other' }) {
   return (
     <Panel title={`籌碼面 · ${answer.reasoning.length} 段論述`}>
       <div className="flex items-center gap-3 flex-wrap -mt-1 mb-2">
@@ -1146,6 +1148,7 @@ function ChipDetail({ answer }: { answer: ChipAnswer }) {
       />
       <DataPointTable points={answer.dataPoints} title="籌碼面數據" />
       {answer.caveat && <CaveatNote text={answer.caveat} />}
+      <SellHeavinessReference market={market} className="mt-2" />
     </Panel>
   );
 }

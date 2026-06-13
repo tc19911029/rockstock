@@ -8,6 +8,7 @@ import { DabanResultsCompact } from './components/DabanResultsCompact';
 import { ScanCoachDigest } from './components/ScanCoachDigest';
 import { LockWatchPanel } from './components/LockWatchPanel';
 import { SanSeScanCompact } from './components/SanSeScanCompact';
+import { TodayTopPriorityCard } from './components/TodayTopPriorityCard';
 // 2026-05-11 ReentryCandidatesPanel 移除：用戶反饋無實質用途（跟 B 回後買上漲重疊高、書本對齊度低）。檔案保留供日後重做
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import type { SelectedStock } from './components/ScanChartPanel';
@@ -273,6 +274,11 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                     ['medium', '三色(中等)', '更新版：短攻/中強/中控 三分數都 > 0'],
                     ['loose', '三色(寬鬆)', '游資資金翻正：短線動能今天剛由負轉正'],
                     ['reversal', '🔥三色(底反)', '底反該買 = 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握（台股該買勝率 +7→+15pp、陸股空頭段 +9pp）'],
+                    // 具名型態策略（從 records 衍生、掃全市場命中；判定 = lib/cn-sanse/namedStrategies）
+                    ['resonance', '三色(全共振⭐)', '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同日（三組齊發）。回測漲幅最大但稀有；台股最強、陸股牛市那段被稀釋'],
+                    ['red_yellow_trigger', '三色(紅+黃+觸發)', '🔴紅(機構) ＋ 🟡黃(控盤) 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）。大樣本、最實用的中線進場'],
+                    ['red_dualb_gold', '三色(紅+雙B金叉)', '🔴紅(機構)在場 ＋ 主圖黃線穿紅線（雙B黃紅金叉、只認金叉、較乾淨）'],
+                    ['red_dualb_any', '三色(紅+雙B金叉/突破)', '🔴紅(機構)在場 ＋（黃紅金叉 或 收盤突破智能交易線）'],
                   ] as const).map(([lv, label, tip]) => (
                     <button key={lv}
                       onClick={() => setCnSanSeLevel(lv)}
@@ -327,6 +333,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
         )}
 
       </div>
+
+      {/* 🎯 今日最優先（C1 2026-06-12）— 回測最強策略×排序的今日 top1-3，降低決策摩擦 */}
+      {scanDirection === 'long' && <TodayTopPriorityCard market={market} />}
 
       {sanSeMode && scanDirection === 'long' ? (
         // 三色僅做多；切到 空/打板 時退回書本買法清單（level 仍保留，切回「多」會自動恢復三色）

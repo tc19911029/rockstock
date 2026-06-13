@@ -44,8 +44,8 @@ export function SamplePicksPanel({ row }: { row: LeaderboardRow }) {
                       {p.symbol}
                     </Link>
                   </td>
-                  <td className="pr-3 whitespace-nowrap">{p.name}</td>
-                  <td className="text-right pr-3 font-mono">{p.entryOpen}</td>
+                  <td className="pr-3 whitespace-nowrap">{p.name && p.name !== p.symbol ? p.name : '—'}</td>
+                  <td className="text-right pr-3 font-mono">{p.entryOpen.toFixed(2)}</td>
                   <td className={`text-right pr-3 font-mono ${bullBearClass(p.d1)}`}>{fmt(p.d1)}</td>
                   <td className={`text-right pr-3 font-mono ${bullBearClass(p.d3)}`}>{fmt(p.d3)}</td>
                   <td className={`text-right font-mono ${bullBearClass(p.d5)}`}>{fmt(p.d5)}</td>

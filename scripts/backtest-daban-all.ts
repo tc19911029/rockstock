@@ -11,7 +11,7 @@
  *   E4 S1（固定止損-5% + 曾漲超10%後跌破MA5）
  *
  * Usage:
- *   cd /Users/tzu-chienhsu/Desktop/rockstock
+ *   cd /Users/tc/Desktop/rockstock
  *   NODE_OPTIONS="--max-old-space-size=8192" npx tsx scripts/backtest-daban-all.ts
  *
  *   只跑台股：MARKET=TW NODE_OPTIONS=... npx tsx scripts/backtest-daban-all.ts

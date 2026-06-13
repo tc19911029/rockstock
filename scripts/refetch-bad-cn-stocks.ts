@@ -10,7 +10,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { ChinaScanner } from '../lib/scanner/ChinaScanner';
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+const REPO_ROOT = '/Users/tc/Desktop/rockstock';
 const TARGETS = ['600118.SS', '600152.SS', '001203.SZ'];
 
 interface Candle { date: string; open: number; high: number; low: number; close: number; volume?: number; }

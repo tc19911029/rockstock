@@ -36,6 +36,7 @@ import {
   type RawPick, type RowMeta, type PickMetrics,
 } from '@/lib/backtest/unifiedLeaderboard';
 import type { LeaderboardDoc, LeaderboardRow, Market, Track } from '@/lib/backtest/leaderboardTypes';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const WINDOW_DAYS = parseInt(process.env.BACKTEST_WINDOW_DAYS ?? '480', 10) || 480;
@@ -45,7 +46,13 @@ const MIN_PICKS = parseInt(process.env.MIN_PICKS ?? '20', 10) || 20;
 const R_TOP_N = parseInt(process.env.R_TOP_N ?? '10', 10) || 10;
 const MARKET_FILTER = (process.env.MARKET ?? 'both').toUpperCase(); // TW | CN | BOTH
 const ENGINE_FILTER = (process.env.ENGINE ?? 'both').toLowerCase();  // buymethod | sanse | both
-const TURNOVER_TOP_N: Record<Market, number> = { TW: 500, CN: 800 };
+// 可選：把視窗 pin 到固定日期區間（重現用），不給則用 index 行事曆末段。
+const PIN_START = process.env.BACKTEST_START || '';
+const PIN_END = process.env.BACKTEST_END || '';
+// 買法候選宇宙：對齊 production lib/scanner/TurnoverRank.ts —— 20 日均成交額 top-500（兩市場同）。
+// （舊版用單日 close×volume top-800/CN，比 production 寬，會高估反轉字母 D/F/N/O 觸發次數。）
+const TURNOVER_AVG_WINDOW = 20;
+const TURNOVER_TOP_N: Record<Market, number> = { TW: 500, CN: 500 };
 const INDEX_SYMBOL: Record<Market, string> = { TW: '^TWII', CN: '000001.SS' };
 
 const BUY_LETTERS = ALL_BUY_METHOD_LETTERS.filter((l) => l !== 'A' && l !== 'V'); // B..R (14)
@@ -59,7 +66,11 @@ const ROOT = path.join(process.cwd(), 'data');
 const CANDLE_ROOT = path.join(ROOT, 'candles');
 const OUT_JSON_DIR = path.join(ROOT, 'backtest');
 const OUT_MD_DIR = path.join(ROOT, 'backtest-output');
-const SUFFIX = LABEL ? `-${LABEL}` : '';
+// 2026-06-12（B1）：ENTRY_MODE=next_close 用「隔日收盤」近似朱書 13:25 市價單；
+// 預設 next_open 維持原行為。next_close 輸出走獨立檔名，不覆蓋 UI 在讀的生產 JSON。
+const ENTRY_MODE = (process.env.ENTRY_MODE ?? 'next_open') as 'next_open' | 'next_close';
+const ENTRY_SUFFIX = ENTRY_MODE === 'next_close' ? '-c1325' : '';
+const SUFFIX = (LABEL ? `-${LABEL}` : '') + ENTRY_SUFFIX;
 
 // ── In-memory store ────────────────────────────────────────────────────────────
 interface SymStore {
@@ -69,10 +80,8 @@ interface SymStore {
   dateToIdx: Map<string, number>;
 }
 
-// 指數代號排除。注意 000001.SZ 是「平安银行」(個股) 不是指數，不可排除；
-// CN 指數是 000001.SS(上證)、000300.SS(滬深300)、399001.SZ(深證成指)。
-const isIndexSym = (s: string) =>
-  s.startsWith('^') || s === '000001.SS' || s === '000300.SS' || s === '399001.SZ';
+// 指數代號排除走 canonical isIndexSymbol（lib/utils/symbols.ts 單一事實，含創業板指 399006.SZ 等）。
+// 注意 000001.SZ 是「平安银行」(個股) 不是指數 → isIndexSymbol 已正確不排除。
 
 function loadMarketStore(market: Market): Map<string, SymStore> {
   const dir = path.join(CANDLE_ROOT, market);
@@ -83,7 +92,7 @@ function loadMarketStore(market: Market): Map<string, SymStore> {
   let n = 0;
   for (const f of files) {
     const symbol = f.replace('.json', '');
-    if (isIndexSym(symbol)) continue;
+    if (isIndexSymbol(symbol)) continue;
     try {
       const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'));
       const rawCandles = Array.isArray(raw) ? raw : raw.candles ?? [];
@@ -126,14 +135,21 @@ function resolveIdx(s: SymStore, date: string): number | null {
   return ans >= 0 ? ans : null;
 }
 
-/** 當日成交額 top-N（close×volume），回傳「進掃描的 StockEntry[] + 名次 Map」。 */
+/** 候選宇宙：對齊 production lib/scanner/TurnoverRank.ts —— 取掃描日(含)往前 20 根的
+ *  「平均成交額(close×volume)」top-N。不是單日，避免高估反轉字母觸發次數。 */
 function turnoverTopN(store: Map<string, SymStore>, date: string, topN: number) {
   const list: { symbol: string; name: string; turnover: number }[] = [];
   for (const s of store.values()) {
-    const idx = s.dateToIdx.get(date);
+    const idx = resolveIdx(s, date);
     if (idx == null) continue;
-    const bar = s.c[idx];
-    if (bar.close > 0 && bar.volume > 0) list.push({ symbol: s.symbol, name: s.name, turnover: bar.close * bar.volume });
+    const start = Math.max(0, idx - TURNOVER_AVG_WINDOW + 1);
+    let sum = 0, n = 0;
+    for (let i = start; i <= idx; i++) {
+      const b = s.c[i];
+      if (b.close > 0 && b.volume > 0) { sum += b.close * b.volume; n++; }
+    }
+    if (n === 0) continue;
+    list.push({ symbol: s.symbol, name: s.name, turnover: sum / n });
   }
   list.sort((a, b) => b.turnover - a.turnover);
   const capped = list.slice(0, topN);
@@ -161,7 +177,7 @@ function getMetrics(store: Map<string, SymStore>, symbol: string, date: string, 
   let res: MetricResult = null;
   if (s) {
     const idx = resolveIdx(s, date);
-    if (idx != null) res = metricsFromLocalCandles(s.c, idx);
+    if (idx != null) res = metricsFromLocalCandles(s.c, idx, ENTRY_MODE);
   }
   cache.set(symbol, res);
   return res;
@@ -361,8 +377,11 @@ async function runMarket(market: Market, allRows: LeaderboardRow[]): Promise<{ s
   const store = loadMarketStore(market);
   const allDays = loadIndexDays(market);
   const usable = allDays.length > FORWARD_TD ? allDays.slice(0, -FORWARD_TD) : allDays;
-  const windowDays = usable.slice(-WINDOW_DAYS);
-  console.log(`  視窗 ${windowDays[0]} ~ ${windowDays[windowDays.length - 1]}（${windowDays.length} 交易日；排除尾端 ${FORWARD_TD}）`);
+  // 視窗：預設取 index 行事曆末段 WINDOW_DAYS 天；BACKTEST_START/END 給定則 pin 到固定區間（重現用）。
+  const windowDays = (PIN_START || PIN_END)
+    ? usable.filter((d) => (!PIN_START || d >= PIN_START) && (!PIN_END || d <= PIN_END))
+    : usable.slice(-WINDOW_DAYS);
+  console.log(`  視窗 ${windowDays[0]} ~ ${windowDays[windowDays.length - 1]}（${windowDays.length} 交易日；排除尾端 ${FORWARD_TD}${PIN_START || PIN_END ? '；已 pin' : ''}）`);
 
   const acc = new Map<string, Acc>();
   const doBuy = ENGINE_FILTER === 'both' || ENGINE_FILTER === 'buymethod';
@@ -382,20 +401,28 @@ async function runMarket(market: Market, allRows: LeaderboardRow[]): Promise<{ s
     : null;
 
   const t0 = Date.now();
+  let buyFails = 0, sanseFails = 0;
   for (let di = 0; di < windowDays.length; di++) {
     const date = windowDays[di];
     const metricCache = new Map<string, MetricResult>();
-    try {
-      if (doBuy && scanner) {
+    // 兩引擎各自獨立 try/catch：買法掛了不可連帶吞掉同日三色（反之亦然）。
+    if (doBuy && scanner) {
+      try {
         warmScannerCache(store, date);   // 預熱：scanPure + 字母全記憶體命中
         await runBuyMethodDay(scanner, market, date, store, acc, metricCache);
+      } catch (e) {
+        buyFails++;
+        console.error(`  [${market} ${date}] 買法 ✗ ${e instanceof Error ? e.message : e}`);
       }
-      if (doSanse && sanseScan) {
+    }
+    if (doSanse && sanseScan) {
+      try {
         const scan = await sanseScan({ asOfDate: date }) as unknown as SanSeScanLike;
         await runSanseDay(scan, market, date, store, acc, metricCache);
+      } catch (e) {
+        sanseFails++;
+        console.error(`  [${market} ${date}] 三色 ✗ ${e instanceof Error ? e.message : e}`);
       }
-    } catch (e) {
-      console.error(`  [${market} ${date}] ✗ ${e instanceof Error ? e.message : e}`);
     }
     if ((di + 1) % 10 === 0 || di === windowDays.length - 1) {
       const el = (Date.now() - t0) / 1000;
@@ -408,30 +435,40 @@ async function runMarket(market: Market, allRows: LeaderboardRow[]): Promise<{ s
 
   // 收成列
   for (const a of acc.values()) allRows.push(buildRow(a.meta, a.picks));
+  if (buyFails || sanseFails) console.log(`  ⚠ ${market} 失敗天數：買法 ${buyFails}、三色 ${sanseFails}（已分別計、未互相連坐）`);
   return { start: windowDays[0], end: windowDays[windowDays.length - 1], days: windowDays.length };
 }
 
-function writeDoc(allRows: LeaderboardRow[], window: { start: string; end: string; days: number }): { jsonPath: string; mdPath: string } {
+function writeDoc(
+  allRows: LeaderboardRow[],
+  window: { start: string; end: string; days: number },
+  perMarketWindow: LeaderboardDoc['perMarketWindow'],
+): { jsonPath: string; mdPath: string } {
   const doc: LeaderboardDoc = {
     generatedAt: new Date().toISOString(),
-    entryBaseline: 'next-open',
+    entryBaseline: ENTRY_MODE === 'next_close' ? 'next-close(≈13:25)' : 'next-open',
     window: { start: window.start, end: window.end, tradingDays: window.days, label: LABEL, forwardTd: FORWARD_TD },
+    perMarketWindow,
     horizons: ['d1', 'd3', 'd5'],
     rows: allRows,
     meta: {
-      survivorshipNote: '本地 K 只含現存代號，下市/ST/退市股不在內，結論偏樂觀（存活偏差）。',
+      survivorshipNote: '本地 K 只含現存代號，下市/ST/退市股不在內 → 存活偏差、結論偏樂觀（視窗內停止交易者極少，但歷史下市股完全缺席）。',
       minPicks: MIN_PICKS,
       turnoverTopN: TURNOVER_TOP_N,
       notes: [
-        '買入基準=隔日開盤；漲停鎖死買不到的樣本剔除。',
+        ENTRY_MODE === 'next_close'
+          ? '買入基準=隔日收盤（≈朱書 13:25 市價單，日K 最貼近近似；dN 從進場日往後數）；漲停尾盤鎖死買不到 / 跳空>25%(污染) / 停牌扁平根 剔除。'
+          : '買入基準=隔日開盤；漲停鎖死買不到 / 隔夜跳空>25%(污染) / 停牌扁平根 的樣本剔除。',
+        '候選宇宙=20 日均成交額 top-500（對齊 production TurnoverRank，兩市場同）。',
         '買法字母走 lib/scanner 正規路徑（scanPure/scanBuyMethod/scanDeviationExtreme）。',
         '三色強度檔位=results[strict/medium/loose]；組合桶=bucketsForRecord。',
+        '「天數」= 該策略×排序有出 pick 的掃描日數，當頻率參考即可。',
       ],
     },
   };
   fs.mkdirSync(OUT_JSON_DIR, { recursive: true });
   fs.mkdirSync(OUT_MD_DIR, { recursive: true });
-  const jsonPath = path.join(OUT_JSON_DIR, 'strategy-leaderboard.json');
+  const jsonPath = path.join(OUT_JSON_DIR, `strategy-leaderboard${ENTRY_SUFFIX}.json`);
   fs.writeFileSync(jsonPath, JSON.stringify(doc));
   const today = new Date().toISOString().slice(0, 10);
   const mdPath = path.join(OUT_MD_DIR, `unified-leaderboard${SUFFIX}-${today}.md`);
@@ -450,15 +487,17 @@ async function main(): Promise<void> {
   const markets: Market[] = MARKET_FILTER === 'TW' ? ['TW'] : MARKET_FILTER === 'CN' ? ['CN'] : ['TW', 'CN'];
   const allRows: LeaderboardRow[] = [];
   const window = { start: '', end: '', days: 0 };
+  const perMarketWindow: LeaderboardDoc['perMarketWindow'] = {};
   for (const mkt of markets) {
     const w = await runMarket(mkt, allRows);
+    perMarketWindow![mkt] = { start: w.start, end: w.end, tradingDays: w.days };
     // TW 先跑、收完列後 store 隨函式作用域釋放，再跑 CN（壓峰值記憶體）
     if (!window.start) { window.start = w.start; window.end = w.end; window.days = w.days; }
     else { if (w.start < window.start) window.start = w.start; if (w.end > window.end) window.end = w.end; window.days = Math.max(window.days, w.days); }
     const g = (global as { gc?: () => void }).gc;
     if (g) g();
     // 每個市場跑完就落地一次（多小時跑程的崩潰保險）
-    const { jsonPath, mdPath } = writeDoc(allRows, window);
+    const { jsonPath, mdPath } = writeDoc(allRows, window, perMarketWindow);
     console.log(`  ✓ ${mkt} 完成並落地：${path.relative(process.cwd(), jsonPath)}（累計 ${allRows.length} 列）`);
     console.log(`    ${path.relative(process.cwd(), mdPath)}`);
   }

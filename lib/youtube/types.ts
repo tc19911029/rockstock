@@ -50,6 +50,12 @@ export interface YouTubeSource {
    * 標題解析器 parseAnalysts() 會合併 default + 標題抓到的。
    */
   default_analysts?: string[];
+  /**
+   * 是否啟用關鍵幀抽取（影片下載 + 場景偵測 + OCR）。
+   * 只開簡報重的來源（PPT 股票清單/目標價多）控制下載流量；
+   * data-driven：改 sources.json 即生效，prod 免 rebuild。
+   */
+  keyframe_enabled?: boolean;
 }
 
 export interface YouTubeVideo {

@@ -13,7 +13,15 @@ import { homedir } from 'node:os';
 const SCRIPT = path.join(process.cwd(), 'scripts', 'akshare_bridge.py');
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export type AkshareType = 'financials';
+export type AkshareType =
+  | 'financials'
+  // ── cn-agents 漲停池系列（2026-06-12 加；--code 傳 YYYYMMDD 日期） ──
+  | 'zt_pool'          // 漲停池 ak.stock_zt_pool_em
+  | 'zb_pool'          // 炸板池 ak.stock_zt_pool_zbgc_em
+  | 'dt_pool'          // 跌停池 ak.stock_zt_pool_dtgc_em
+  | 'yzt_pool'         // 昨日漲停池 ak.stock_zt_pool_previous_em
+  | 'market_activity' // 漲跌家數 ak.stock_market_activity_legu（--code 傳 'now' 忽略）
+  | 'news_em';         // 東財 7x24 財經快訊 ak.stock_info_global_em（--code 傳 'now' 忽略）
 
 /** 跑 akshare bridge，回 data 陣列（失敗回 []）。 */
 export async function runAkshareBridge(type: AkshareType, code: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Record<string, unknown>[]> {

@@ -16,7 +16,7 @@ import { tencentHistProvider } from '../lib/datasource/TencentHistProvider';
 import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 
 const LATEST_VALID_DATE = '2026-04-17'; // CN 上一交易日（4/20 盤中尚未收盤）
-const L1_DIR = '/Users/tzu-chienhsu/Desktop/rockstock/data/candles/CN';
+const L1_DIR = '/Users/tc/Desktop/rockstock/data/candles/CN';
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 function findStaleSymbols(): string[] {

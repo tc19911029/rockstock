@@ -22,9 +22,9 @@ export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, Bu
   try {
     const { data } = await fetchJsonWithCurlFallback<{ stat: string; tables: Array<{ data: string[][] }> }>(url, { timeoutMs: 30_000 });
     const map = new Map<string, BulkRow>();
-    if (data.stat !== 'OK') return map;
+    if (data.stat !== 'OK') { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} stat=${data.stat}（資料未發布或日期錯）→ bulk 空`); return map; }
     const table = data.tables?.[8];
-    if (!table?.data?.length) return map;
+    if (!table?.data?.length) { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} tables[8] 空 → bulk 空`); return map; }
     const num = (s: string) => { const n = parseFloat((s ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
     for (const row of table.data) {
       const code = row[0]?.trim();
@@ -34,7 +34,10 @@ export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, Bu
       if (close > 0 && open > 0) map.set(code, { open, high, low, close, volume });
     }
     return map;
-  } catch { return new Map(); }
+  } catch (e) {
+    console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} 抓取失敗: ${(e as Error).message} → bulk 空`);
+    return new Map();
+  }
 }
 
 /** 民國日期 "1150609" → 西元 "2026-06-09"（feed 的 Date 欄位格式） */
@@ -65,10 +68,10 @@ export async function fetchTPExBulkForDate(date: string): Promise<Map<string, Bu
       Open?: string; High?: string; Low?: string; Close?: string;
       TradingShares?: string;
     }>>(url, { timeoutMs: 15_000 });
-    if (!Array.isArray(data) || data.length === 0) return map;
+    if (!Array.isArray(data) || data.length === 0) { console.warn(`[eodSettleBatch] TPEx quotes ${date} 回空陣列 → bulk 空`); return map; }
     // feed 帶自己的交易日；只在 feed 日 === 要封的 date 時採用（避免盤中跑、或拿錯日資料）
     const feedDate = rocDateToAd(data.find(r => r.Date)?.Date);
-    if (!feedDate || feedDate !== date) return map;
+    if (!feedDate || feedDate !== date) { console.warn(`[eodSettleBatch] TPEx quotes feed 日=${feedDate} ≠ 要封 ${date}（資料未更新）→ bulk 空`); return map; }
     const num = (s: string | undefined) => {
       if (!s) return 0;
       const n = parseFloat(String(s).replace(/,/g, ''));
@@ -85,7 +88,8 @@ export async function fetchTPExBulkForDate(date: string): Promise<Map<string, Bu
       }
     }
     return map;
-  } catch {
+  } catch (e) {
+    console.warn(`[eodSettleBatch] TPEx quotes ${date} 抓取失敗: ${(e as Error).message} → bulk 空`);
     return map;
   }
 }

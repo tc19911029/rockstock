@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { ColumnDef } from '@tanstack/react-table';
 import { PageShell, PageHeader, DataTable, EmptyState } from '@/components/shared';
+import { PaperTrackCard } from '@/components/backtest/PaperTrackCard';
 import { bullBearClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { LeaderboardRow, Horizon, Market } from '@/lib/backtest/leaderboardTypes';
@@ -45,6 +46,7 @@ function LeaderboardInner() {
 
   const [resp, setResp] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
   // 從 URL 同步初始市場
   useEffect(() => {
@@ -60,9 +62,13 @@ function LeaderboardInner() {
     setLoading(true);
     setExpandedId(null);
     fetch(`/api/backtest/leaderboard?market=${market}`)
-      .then((r) => r.json() as Promise<ApiResponse>)
-      .then((json) => { if (!aborted) setResp(json); })
-      .catch(() => { if (!aborted) setResp(null); })
+      .then((r) => r.json())
+      .then((json) => {
+        if (aborted) return;
+        if (json && json.ok) { setResp(json as ApiResponse); setErrMsg(null); }
+        else { setResp(null); setErrMsg((json && json.error) || '排行榜載入失敗'); }
+      })
+      .catch(() => { if (!aborted) { setResp(null); setErrMsg('排行榜載入失敗（網路或伺服器錯誤）'); } })
       .finally(() => { if (!aborted) setLoading(false); });
     return () => { aborted = true; };
   }, [market]);
@@ -198,6 +204,9 @@ function LeaderboardInner() {
       }
     >
       <div className="space-y-4 p-4">
+        {/* 🧪 若照系統做 — paper-trade live 追蹤（B2 2026-06-12） */}
+        <PaperTrackCard />
+
         {/* 控制列 */}
         <div className="flex flex-wrap gap-3 items-center">
           <div className="inline-flex rounded-md border border-border overflow-hidden">
@@ -274,7 +283,9 @@ function LeaderboardInner() {
         </p>
 
         {/* 表格 / 空狀態 */}
-        {!loading && !hasData ? (
+        {!loading && errMsg ? (
+          <EmptyState icon="⚠️" title="載入失敗" description={errMsg} />
+        ) : !loading && !hasData ? (
           <EmptyState
             icon="📊"
             title="策略排行榜尚未產生"

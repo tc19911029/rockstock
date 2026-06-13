@@ -25,6 +25,13 @@ export type StockSentiment =
   | 'bullish' | 'bearish' | 'neutral' | 'watchlist'
   | 'risk_warning' | 'mentioned_only';
 
+/** mention 的證據來源（keyframe 管線 2026-06-12 加；舊分析無此欄 = 'speech' 視之） */
+export type MentionSourceType = 'speech' | 'slide' | 'speech+slide';
+
+/** 推薦強度分級（節目語境用詞；老師績效追蹤的 cohort 依據，見 recoEvents.ts） */
+export type RecommendationType =
+  | '明確買進' | '看多' | '觀察' | '等回檔' | '小心追高' | '偏空' | '只介紹';
+
 /** Claude 分析後寫回的單筆股票 mention（已通過 stockMaster 對照） */
 export interface AnalyzedStockMention {
   /** raw_query 是 Claude 從逐字稿認出的原文（名稱/代號） */
@@ -43,6 +50,22 @@ export interface AnalyzedStockMention {
    * 例：["李兆華", "朱家泓"] / ["蔡萬得"] / ["錢線百分百"]（無明確分析師時的 fallback）。
    */
   analysts?: string[];
+
+  // ── keyframe 管線新欄（2026-06-12；全部 optional，舊 analysis 檔向下相容）──
+  /** 證據來源：純口述 / 純簡報截圖 / 兩者皆有。新分析必填；舊檔缺 = 'speech' */
+  source_type?: MentionSourceType;
+  /** 影片內提及秒數（slide 取 keyframe ts；speech 取 cue start；皆有取較早者） */
+  mention_time?: number;
+  /** 佐證截圖 repo 相對路徑（data/youtube/keyframes/...），無則省略 */
+  screenshot_ref?: string;
+  /** 推薦強度分級；舊檔缺 → recoEvents 由 sentiment fallback 映射 */
+  recommendation_type?: RecommendationType;
+  /** 提及當下講的價位（簡報/口述；無則省略） */
+  mentioned_price?: number;
+  /** 目標價（簡報/口述明確給的才填，不可推算） */
+  target_price?: number;
+  /** 停損價（同上） */
+  stop_loss?: number;
 }
 
 /** MVP 5: 每檔股票的多因子評分 + A/B/C/D 分級 */
@@ -173,6 +196,13 @@ export interface DailyStockMention {
     combined_confidence: number;
     /** 這集講這檔股票的分析師（從 video.analysts 帶下來） */
     analysts?: string[];
+    /** keyframe 管線新欄（optional 透傳） */
+    source_type?: MentionSourceType;
+    mention_time?: number;
+    screenshot_ref?: string;
+    recommendation_type?: RecommendationType;
+    target_price?: number;
+    stop_loss?: number;
   }>;
   mention_count: number;
   bullish_count: number;
@@ -240,12 +270,14 @@ async function fsGet(key: string): Promise<string | null> {
   }
 }
 
-async function putJson<T>(key: string, value: T): Promise<void> {
+/** dual-storage put（Vercel→Blob / 本地→FS）。export 給 recoStorage 等同 prefix 模組重用。 */
+export async function putJson<T>(key: string, value: T): Promise<void> {
   const data = JSON.stringify(value, null, 2);
   if (IS_VERCEL) await blobPut(key, data); else await fsPut(key, data);
 }
 
-async function getJson<T>(key: string): Promise<T | null> {
+/** dual-storage get。export 給 recoStorage 等同 prefix 模組重用。 */
+export async function getJson<T>(key: string): Promise<T | null> {
   const raw = IS_VERCEL ? await blobGet(key) : await fsGet(key);
   if (!raw) return null;
   try { return JSON.parse(raw) as T; }
@@ -309,6 +341,12 @@ export function deriveStockMentions(a: DailyAnalysis): DailyStockMentions {
       reason: m.reason,
       combined_confidence: m.combined_confidence,
       analysts: m.analysts,
+      source_type: m.source_type,
+      mention_time: m.mention_time,
+      screenshot_ref: m.screenshot_ref,
+      recommendation_type: m.recommendation_type,
+      target_price: m.target_price,
+      stop_loss: m.stop_loss,
     });
     agg.mention_count += 1;
     if (m.sentiment === 'bullish') agg.bullish_count += 1;

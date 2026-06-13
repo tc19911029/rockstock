@@ -21,6 +21,7 @@ import { loadTranscript, loadTranscriptIndex } from '@/lib/youtube/transcriptSto
 import { loadStockMaster, lookupStock } from '@/lib/youtube/stockMaster';
 import { loadMacro, loadStockBundles } from '@/lib/youtube/stockDataLoader';
 import type { TranscriptRecord } from '@/lib/youtube/transcriptStorage';
+import { loadKeyframeIndex, loadKeyframeRecord, type KeyframeRecord } from '@/lib/youtube/keyframeStorage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -107,10 +108,25 @@ async function handle(req: NextRequest) {
     console.error('[youtube-prepare-analysis] enrichment failed', err);
   }
 
+  // 4.5) 關鍵幀（只有 keyframe_enabled 來源有；status=ok 才進 payload）
+  const keyframes = new Map<string, KeyframeRecord>();
+  try {
+    const kfIndex = await loadKeyframeIndex();
+    for (const v of videos) {
+      if (!v.should_analyze) continue;
+      const entry = kfIndex.byId[v.video_id];
+      if (!entry || entry.status !== 'ok' || entry.frames_kept === 0) continue;
+      const rec = await loadKeyframeRecord(entry.date, v.video_id);
+      if (rec && rec.status === 'ok') keyframes.set(v.video_id, rec);
+    }
+  } catch (err) {
+    console.error('[youtube-prepare-analysis] keyframe load failed（略過，純逐字稿分析）', err);
+  }
+
   // 5) build payload
   const payload = buildQuestion({
     date, videos, transcripts, sources, master, prelookups,
-    stockDataBundles, macro,
+    stockDataBundles, macro, keyframes,
   });
 
   // 6) write to /tmp
@@ -136,6 +152,10 @@ async function handle(req: NextRequest) {
       prelookup_entries: payload.prelookup.length,
       stock_data_bundles: payload.stock_data_bundles.length,
       macro_regime: payload.macro?.data?.market_regime ?? 'none',
+      keyframe_videos: keyframes.size,
+      keyframe_frames_in_payload: payload.videos.reduce((n, v) => n + (v.keyframes?.length ?? 0), 0),
+      keyframe_images: payload.videos.reduce(
+        (n, v) => n + (v.keyframes?.filter(k => k.image_path != null).length ?? 0), 0),
     },
   });
 }

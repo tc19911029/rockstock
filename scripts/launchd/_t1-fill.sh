@@ -18,6 +18,6 @@ YESTERDAY=$(/bin/date -v-1d +%Y-%m-%d)
 LOG="/tmp/rockstock-t1-fill-${MARKET}.log"
 
 echo "[$(date '+%F %T')] [t1-fill-${MARKET}] start yesterday=${YESTERDAY}" >> "$LOG"
-cd /Users/tzu-chienhsu/Desktop/rockstock
+cd /Users/tc/Desktop/rockstock
 /usr/local/bin/npx tsx scripts/t1-fill-gaps.ts --market "$MARKET" --date "$YESTERDAY" --apply --concurrency 4 >> "$LOG" 2>&1
 echo "[$(date '+%F %T')] [t1-fill-${MARKET}] done exit=$?" >> "$LOG"

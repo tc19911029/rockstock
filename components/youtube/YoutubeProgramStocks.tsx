@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { PerformanceResponse, PerformanceItem } from '@/app/api/youtube/performance/route';
 import type { StockSentiment, StockRating } from '@/lib/youtube/analysisStorage';
+import { cleanTeacherNames } from '@/lib/youtube/teacherName';
 import { SENTIMENT_LABEL, sentimentRank } from './sentimentLabels';
 
 interface Props {
@@ -43,21 +44,8 @@ interface ProgramStock {
   episodeCount: number;
 }
 
-/**
- * 清理分析師顯示名 + 過濾 fallback。
- * 例：「高獻榮(金臨天下)」→「高獻榮」、「智霖(錢線百分百)」→「智霖」；
- * 丟掉等於節目名 / (未知) / 主持群 的 fallback（代表 LLM 沒指名具體老師）。
- */
-function teachersFor(analysts: string[] | undefined, displayName: string): string[] {
-  const out: string[] = [];
-  for (const raw of analysts ?? []) {
-    const a = raw.replace(/[（(][^（()）]*[）)]/g, '').trim();
-    if (!a || a === '(未知)' || a.includes('主持群')) continue;
-    if (a === displayName || displayName.includes(a)) continue;
-    if (!out.includes(a)) out.push(a);
-  }
-  return out;
-}
+// 分析師顯示名清洗已抽出至 lib/youtube/teacherName.ts（與推薦事件抽取共用同一套規則）
+const teachersFor = cleanTeacherNames;
 
 interface ProgramGroup {
   source_id: string;

@@ -156,3 +156,25 @@ export function allThemeCodes(): string[] {
   }
   return [...set];
 }
+
+/** code → 所屬題材名（一檔可屬多題材，如 3081 在 CPO/矽光子/光通訊） */
+const CODE_TO_THEMES: Record<string, string[]> = (() => {
+  const m: Record<string, string[]> = {};
+  for (const [theme, stocks] of Object.entries(THEME_MAP)) {
+    for (const s of stocks) (m[s.code] ??= []).push(theme);
+  }
+  return m;
+})();
+
+export function themesOf(code: string): string[] {
+  return CODE_TO_THEMES[code] ?? [];
+}
+
+/** 同題材其他成分股（去重、排除自己）— 相對族群報酬的基準群 */
+export function peersOf(code: string): string[] {
+  const peers = new Set<string>();
+  for (const t of themesOf(code)) {
+    for (const s of THEME_MAP[t]) if (s.code !== code) peers.add(s.code);
+  }
+  return [...peers];
+}

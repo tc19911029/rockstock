@@ -6,13 +6,14 @@
  * 這支函式被「寫入時」(saveDailyAnalysis 寫進 git 前擋下) 與「合約測試」共用同一份規則，
  * 讓「事前防止」與「事後偵測」永遠一致、不會 drift。
  *
- * 容忍：master 的命名標記差異（除權息 *、-KY 破折號、空白）用 norm() 抹平。
+ * 容忍：master 的命名標記差異（除權息 *、-KY 破折號、空白）用 norm() 抹平；
+ * 並折疊繁體異體字 臺→台（台積電/臺積電、台慶科/臺慶科 等，台股名稱兩種寫法通用）。
  */
 import type { DailyAnalysis } from './analysisStorage';
 import type { StockMasterFile } from './stockMaster';
 
 export function norm(s: string): string {
-  return s.replace(/[\*\-\s]/g, '');
+  return s.replace(/[\*\-\s]/g, '').replace(/臺/g, '台');
 }
 
 // 已知 master 短名 vs 常見全名差異（必須是「同一支股票、只是顯示名不同」，不可放成兩支股票的代號）

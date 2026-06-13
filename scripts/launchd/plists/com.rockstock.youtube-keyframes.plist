@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-keyframes</string>
+
+  <!--
+    關鍵幀抽取 — 每小時 :40（scan :00 → transcript :20 → keyframes :40），14:00-01:40 CST。
+    只跑 sources.json 內 keyframe_enabled=true 的來源（理財達人秀/57同學會/錢線/金臨天下）。
+    route 有 sticky skip（index 已有就跳）+ 40 分鐘 wall-clock 預算，重疊 tick 安全。
+    每支影片 ~3 分鐘（下載 ≤720p 視訊流 → ffmpeg 場景偵測 → Vision OCR → WebP）。
+    curl 走系統 binary;CRON_SECRET 為字面字串（對齊 youtube-transcript plist 慣例）。
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/curl</string>
+    <string>-fsS</string>
+    <string>--max-time</string>
+    <string>3000</string>
+    <string>-X</string>
+    <string>POST</string>
+    <string>-H</string>
+    <string>Authorization: Bearer CRON_SECRET</string>
+    <string>http://localhost:3000/api/cron/youtube-keyframes</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Hour</key><integer>1</integer><key>Minute</key><integer>40</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-keyframes.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-keyframes.err.log</string>
+</dict>
+</plist>

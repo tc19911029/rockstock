@@ -2,8 +2,10 @@
 // 策略排行榜 — 純函式核心（無 IO）
 //
 //  - metricsFromLocalCandles: 由本地 K「隔日開盤」進場，算 d1/d3/d5/d10/d20 收盤報酬
-//    + 窗內最高/最低。逐字對齊 lib/cn-sanse/forwardMetrics.ts 的 metricsFromOpen，
-//    但直接讀記憶體裡的 candles（零 IO、零 API），讓 2 年回測不打外部源。
+//    + 窗內最高/最低。d1/d3/d5/d10/d20 收盤口徑與計價（toFixed）對齊 production
+//    lib/cn-sanse/forwardMetrics.ts 的 metricsFromOpen；maxGain/maxLoss 取進場後前 20 根
+//    （production 取 45 曆日 ~22-32 根，略寬，但這兩個欄位目前未進排行榜聚合）。
+//    直接讀記憶體裡的 candles（零 IO、零 API），讓 2 年回測不打外部源。
 //  - selStats / buildHorizonBlock / buildRow: 把每日 picks 彙整成排行榜列。
 //  - buildMarkdown: 人類可讀報告。
 //
@@ -44,8 +46,10 @@ export interface RawPick {
   m: PickMetrics;
 }
 
-const round2 = (x: number): number => Math.round(x * 100) / 100;
-const round1 = (x: number): number => Math.round(x * 10) / 10;
+// 用 toFixed（half-away-from-zero）對齊 production lib/cn-sanse/forwardMetrics.ts 的計價，
+// 避免負報酬半分邊界 ±0.01 漂移。
+const round2 = (x: number): number => +x.toFixed(2);
+const round1 = (x: number): number => +x.toFixed(1);
 
 /**
  * 由 t0Idx（掃描日那根）的「下一根開盤」進場，算各 horizon 收盤報酬 + 窗內最高/最低。
@@ -54,22 +58,35 @@ const round1 = (x: number): number => Math.round(x * 10) / 10;
  * 對齊 metricsFromOpen：base = 隔日開盤；dN = (close[t0+N] − base)/base×100。
  * 漲停鎖死偵測同 ForwardAnalyzer：隔日 open===high 且 (high−low)/low < 0.5% → 買不到。
  */
+export type EntryMode = 'next_open' | 'next_close';
+
 export function metricsFromLocalCandles(
   candles: RawCandle[],
   t0Idx: number,
+  entryMode: EntryMode = 'next_open',
 ): { entryOpen: number; m: PickMetrics } | null {
   const entryIdx = t0Idx + 1;
   if (entryIdx >= candles.length) return null;          // 沒有隔日 K
   const entry = candles[entryIdx];
-  const base = entry.open;
+  // 2026-06-12（B1 進場點對齊）：朱書 SOP 是「隔日 13:20 看、13:25 掛市價」，
+  // 日 K 無分時 → 用「隔日收盤」當 13:25 市價單的最貼近近似（差 5 分鐘）。
+  // next_open（預設）保持原行為 byte-identical；next_close 的 dN 改從進場日往後數
+  //（d1 = 進場隔日收盤 vs 進場收盤），否則 d1 恆 0。
+  const base = entryMode === 'next_close' ? entry.close : entry.open;
   if (!(base > 0)) return null;
-  // 漲停鎖死 → 隔日開盤買不到
-  if (entry.open === entry.high && entry.low > 0 && (entry.high - entry.low) / entry.low < 0.005) {
+  // 停牌守衛：零量扁平根（O=H=L=C 且量 0）= 停牌假根，買不到
+  if (entry.volume === 0 && entry.open === entry.close && entry.high === entry.low) return null;
+  // 污染守衛：進場價相對掃描日收盤跳 >25%（隔夜不可能）= 撞庫/壞 bar（如 000001 指數值），剔除
+  const scanClose = candles[t0Idx]?.close;
+  if (scanClose > 0 && Math.abs(base / scanClose - 1) > 0.25) return null;
+  // 漲停鎖死 → 買不到（open 版：開盤即鎖；close 版：鎖死到尾盤 close===high 同樣買不到）
+  const lockRef = entryMode === 'next_close' ? entry.close : entry.open;
+  if (lockRef === entry.high && entry.low > 0 && (entry.high - entry.low) / entry.low < 0.005) {
     return null;
   }
 
   const closeRet = (offset: number): number | null => {
-    const i = t0Idx + offset;
+    const i = (entryMode === 'next_close' ? entryIdx : t0Idx) + offset;
     if (i >= candles.length) return null;
     return round2((candles[i].close - base) / base * 100);
   };
@@ -97,7 +114,7 @@ export function metricsFromLocalCandles(
     if (lo < ml) ml = lo;
   }
   if (saw) { m.maxGain = round2(mg); m.maxLoss = round2(ml); }
-  return { entryOpen: base, m };
+  return { entryOpen: round2(base), m };
 }
 
 /** 一組報酬值 → 統計（過濾 null）。 */

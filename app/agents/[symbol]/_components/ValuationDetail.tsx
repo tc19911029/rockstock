@@ -15,6 +15,8 @@
  */
 
 import type { FundamentalAnswer, FundamentalQuestion, ScenarioOutput } from '@/lib/agents/types';
+import { SellHeavinessReference } from '@/components/shared/SellHeavinessReference';
+import { classifyMarket } from '@/lib/market/classify';
 
 interface Props {
   answer: FundamentalAnswer | null;
@@ -62,6 +64,8 @@ export function ValuationDetail({ answer, question }: Props) {
           ※ 估值分析資料已備齊，但尚未跑 multi-agent-decide。對話內輸入 /multi-agent-decide {symbol} 即可生成三情境分析。
         </p>
       )}
+      {/* 賣訊輕重速查（出場訊號該不該立刻動作；2 年回測，與首頁三色面板同源）— 元件自帶、隨引用自動出現 */}
+      <SellHeavinessReference market={classifyMarket(symbol)} />
     </section>
   );
 }

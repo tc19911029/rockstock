@@ -163,7 +163,7 @@ async function transcribeViaWhisperUnsafe(opts: WhisperOptions): Promise<Whisper
       '-x', '--audio-format', 'm4a',
       '--audio-quality', '5',         // 0-10, 5 是中間值，足夠 ASR
       '--no-warnings', '--ignore-config',
-      ...ytdlpProxyArgs(),
+      ...(await ytdlpProxyArgs()),
       '-o', audioPath,
       opts.videoUrl,
     ];
