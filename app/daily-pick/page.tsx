@@ -12,17 +12,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-interface Row {
-  code: string; name: string; industry: string; changePct: number;
-  level: string | null; comboLabel: string; comboRank: number;
-  sixCore: boolean; sixTotal: number; theme: string | null;
-  entryState: 'can_enter' | 'watch' | 'no_chase'; entryReason: string;
-  deviationMa20: number | null; price: number;
-}
-interface Outcome {
-  entryOpen: number; exitClose: number; ret: number; holdDays: number;
-  exitReason: 'stop' | 'time' | 'holding'; maxGain: number; maxLoss: number;
-}
 interface Fwd {
   openReturn?: number | null; d1Return?: number | null; d2Return?: number | null;
   d3Return?: number | null; d4Return?: number | null; d5Return?: number | null;
@@ -30,7 +19,18 @@ interface Fwd {
   d9Return?: number | null; d10Return?: number | null; d20Return?: number | null;
   maxGain?: number | null; maxLoss?: number | null;
 }
-interface Focus extends Row { stop: number; stopPct: number; outcome: Outcome | null; fwd: Fwd | null }
+interface Row {
+  code: string; name: string; industry: string; changePct: number;
+  level: string | null; comboLabel: string; comboRank: number;
+  sixCore: boolean; sixTotal: number; theme: string | null;
+  entryState: 'can_enter' | 'watch' | 'no_chase'; entryReason: string;
+  deviationMa20: number | null; price: number; fwd: Fwd | null;
+}
+interface Outcome {
+  entryOpen: number; exitClose: number; ret: number; holdDays: number;
+  exitReason: 'stop' | 'time' | 'holding'; maxGain: number; maxLoss: number;
+}
+interface Focus extends Row { stop: number; stopPct: number; outcome: Outcome | null }
 interface Result {
   date: string; exists: boolean;
   scan: { evaluated: number; strong: number; strict: number } | null;
@@ -123,12 +123,12 @@ export default function DailyPickPage() {
             </div>
 
             {/* ★ Focus top3 — 可執行清單 */}
-            <h2 className="text-base font-semibold mb-2">🎯 今日 top3（依漲幅）</h2>
-            {data.focus.length === 0 && <div className="text-slate-500 text-sm mb-6">今日無三色強候選（過 veto 後）。</div>}
-            <div className="space-y-3 mb-8">
+            <h2 className="text-base font-semibold mb-1.5">🎯 今日 top3（依漲幅）</h2>
+            {data.focus.length === 0 && <div className="text-slate-500 text-sm mb-4">今日無三色強候選（過 veto 後）。</div>}
+            <div className="space-y-2 mb-5">
               {data.focus.map((x, i) => (
-                <div key={x.code} className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
-                  <div className="flex items-baseline gap-2 flex-wrap">
+                <div key={x.code} className="bg-slate-900/60 border border-slate-800 rounded-lg p-2">
+                  <div className="flex items-center gap-2 flex-wrap leading-tight">
                     <span className="text-slate-500 text-sm">#{i + 1}</span>
                     <Link href={`/?load=${x.code}&date=${data.date}`} className="font-semibold hover:text-sky-400">
                       {x.code} {x.name}
@@ -141,17 +141,12 @@ export default function DailyPickPage() {
                     </span>
                     {x.theme && <span className="text-[10px] text-sky-300/80">{x.theme}</span>}
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 mt-2 text-xs">
-                    <div><span className="text-slate-500">收盤</span> {x.price}</div>
-                    <div><span className="text-slate-500">進場</span> 明日13:25市價</div>
-                    <div>
-                      <span className="text-slate-500">停損</span>{' '}
-                      <span className="text-rose-300">{x.stop}（{x.stopPct}%）</span>
-                    </div>
-                    <div><span className="text-slate-500">持有</span> ~20日</div>
-                  </div>
-                  <div className="text-[10px] text-slate-600 mt-1">
-                    六條件 {x.sixCore ? '核心✓' : ''}{x.sixTotal}/6 · 跌破停損收盤就砍、大量長黑先出
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs leading-tight">
+                    <span><span className="text-slate-500">收盤</span> {x.price}</span>
+                    <span><span className="text-slate-500">進場</span> 明日13:25市價</span>
+                    <span><span className="text-slate-500">停損</span> <span className="text-rose-300">{x.stop}（{x.stopPct}%）</span></span>
+                    <span><span className="text-slate-500">持有</span> ~20日</span>
+                    <span className="text-slate-600">六條件 {x.sixCore ? '核心✓' : ''}{x.sixTotal}/6</span>
                   </div>
                   {x.fwd && <FwdRow f={x.fwd} />}
                   {x.outcome && <Outcome o={x.outcome} />}
@@ -201,16 +196,16 @@ const FWD_COLS: Array<{ k: keyof Fwd; label: string }> = [
   { k: 'd9Return', label: '9日' }, { k: 'd10Return', label: '10日' }, { k: 'd20Return', label: '20日' },
   { k: 'maxGain', label: '最高' }, { k: 'maxLoss', label: '最低' },
 ];
-function FwdRow({ f }: { f: Fwd }) {
+function FwdRow({ f, compact }: { f: Fwd; compact?: boolean }) {
   return (
-    <div className="mt-2 pt-2 border-t border-slate-800 flex gap-0.5">
+    <div className={`flex gap-0.5 ${compact ? 'mt-0.5' : 'mt-1.5 pt-1.5 border-t border-slate-800'}`}>
       {FWD_COLS.map(({ k, label }) => {
         const v = f[k];
-        const cls = v == null ? 'text-slate-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-slate-400';
+        const cls = v == null ? 'text-slate-700' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-slate-400';
         return (
-          <div key={k} className="flex-1 text-center">
-            <div className="text-[9px] text-slate-600">{label}</div>
-            <div className={`text-[10px] font-mono ${cls}`}>{v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`}</div>
+          <div key={k} className="flex-1 text-center leading-none">
+            <div className="text-[8px] text-slate-600">{label}</div>
+            <div className={`text-[9px] font-mono ${cls}`}>{v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`}</div>
           </div>
         );
       })}
@@ -234,25 +229,22 @@ function Outcome({ o }: { o: Outcome }) {
 function Tier({ title, rows, max = 999, date }: { title: string; rows: Row[]; max?: number; date: string }) {
   if (!rows?.length) return null;
   return (
-    <div className="mb-5">
-      <h3 className="text-sm font-semibold mb-1 text-slate-400">{title}（{rows.length}）</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <tbody>
-            {rows.slice(0, max).map(x => (
-              <tr key={x.code} className="border-b border-slate-800/50">
-                <td className="py-1 pr-2">
-                  <Link href={`/?load=${x.code}&date=${date}`} className="hover:text-sky-400">{x.code} {x.name}</Link>
-                </td>
-                <td className="py-1 px-2 text-slate-500">{x.industry.slice(0, 6)}</td>
-                <td className="py-1 px-2 text-right"><Chg v={x.changePct} /></td>
-                <td className="py-1 px-2 text-slate-400">{x.comboLabel}</td>
-                <td className="py-1 px-2 text-slate-500">六{x.sixCore ? '✓' : ''}{x.sixTotal}/6</td>
-                <td className="py-1 pl-2 text-sky-300/70">{x.theme ?? ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="mb-3">
+      <h3 className="text-sm font-semibold mb-0.5 text-slate-400">{title}（{rows.length}）</h3>
+      <div className="divide-y divide-slate-800/50">
+        {rows.slice(0, max).map(x => (
+          <div key={x.code} className="py-0.5">
+            <div className="flex items-center gap-2 text-xs leading-tight">
+              <Link href={`/?load=${x.code}&date=${date}`} className="hover:text-sky-400 w-28 truncate">{x.code} {x.name}</Link>
+              <span className="text-slate-600 w-12 truncate">{x.industry.slice(0, 4)}</span>
+              <span className="w-12 text-right"><Chg v={x.changePct} /></span>
+              <span className="text-slate-500 w-20 truncate">{x.comboLabel}</span>
+              <span className="text-slate-600 w-12">六{x.sixCore ? '✓' : ''}{x.sixTotal}</span>
+              <span className="text-sky-300/60 truncate flex-1">{x.theme ?? ''}</span>
+            </div>
+            {x.fwd && <FwdRow f={x.fwd} compact />}
+          </div>
+        ))}
       </div>
     </div>
   );

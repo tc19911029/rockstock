@@ -42,6 +42,8 @@ export interface DailyPickRow {
   price: number;
   signalLow: number | null;
   shortAttack: number;
+  /** 1/2/.../10/20 日 + 最高/最低 前瞻報酬（相對掃描日收盤）；最新日 = null */
+  fwd: StockForwardPerformance | null;
 }
 
 /** 事後模擬：站在掃描日當下定好進場/停損，往後走的真實結果（看過去歷史時才有） */
@@ -61,8 +63,6 @@ export interface FocusPick extends DailyPickRow {
   stopPct: number;
   /** 事後結果（只有「掃描日之後已有 K 棒」時才算得出；最新交易日 = null）*/
   outcome: PickOutcome | null;
-  /** 1/2/.../10/20 日 + 最高/最低 前瞻報酬（相對掃描日收盤；同掃描卡那排）*/
-  fwd: StockForwardPerformance | null;
 }
 
 export interface DailyPickResult {
@@ -91,28 +91,52 @@ export function computeStop(price: number, signalLow: number | null): { stop: nu
 
 const HOLD_DAYS = 20;
 
+type Candles = NonNullable<Awaited<ReturnType<typeof readCandleFile>>>['candles'];
+
+/** 1/2/.../10/20 日 + 最高/最低 前瞻報酬（相對掃描日收盤）。掃描日是最新一根 → null。 */
+function computeFwd(cs: Candles, scanDate: string, scanClose: number, symbol: string, name: string): StockForwardPerformance | null {
+  if (!cs?.length) return null;
+  const si = cs.findIndex(c => c.date === scanDate);
+  if (si < 0 || si + 1 >= cs.length) return null; // 找不到掃描日 / 還沒有隔日 K
+  const base = scanClose > 0 ? scanClose : cs[si].close;
+  if (!(base > 0)) return null;
+  const entryOpen = cs[si + 1].open;
+  const ret = (n: number): number | null =>
+    si + n < cs.length ? +(((cs[si + n].close - base) / base) * 100).toFixed(1) : null;
+  let mg = 0, ml = 0;
+  for (let n = 1; n <= HOLD_DAYS && si + n < cs.length; n++) {
+    mg = Math.max(mg, ((cs[si + n].high - base) / base) * 100);
+    ml = Math.min(ml, ((cs[si + n].low - base) / base) * 100);
+  }
+  return {
+    symbol, name, scanDate, scanPrice: base,
+    nextOpenPrice: +entryOpen.toFixed(2),
+    openReturn: +(((entryOpen - base) / base) * 100).toFixed(1),
+    d1Return: ret(1), d2Return: ret(2), d3Return: ret(3), d4Return: ret(4), d5Return: ret(5),
+    d6Return: ret(6), d7Return: ret(7), d8Return: ret(8), d9Return: ret(9), d10Return: ret(10),
+    d20Return: ret(20),
+    maxGain: +mg.toFixed(1), maxLoss: +ml.toFixed(1),
+  };
+}
+
 /**
  * 事後模擬一檔 focus pick：站在 scanDate 收盤定好停損，隔日開盤進場，
- * 跌破停損收盤就出 / 最多持有 20 日 → 真實結果。與 backtest-sop.ts 同規則。
- * 同時算「1/2/.../10/20 日 + 最高/最低」前瞻報酬（相對掃描日收盤，同掃描卡那排）。
- * scanDate 是最新交易日（沒有隔日 K）→ 回 { outcome: null, fwd: null }。
+ * 跌破停損收盤就出 / 最多持有 20 日 → 真實已實現結果。與 backtest-sop.ts 同規則。
+ * scanDate 是最新交易日（沒有隔日 K）→ null。
  */
-async function simulatePick(
-  symbol: string, name: string, scanDate: string, scanClose: number, stop: number,
-): Promise<{ outcome: PickOutcome | null; fwd: StockForwardPerformance | null }> {
+async function simulatePick(symbol: string, scanDate: string, stop: number): Promise<PickOutcome | null> {
   const code = symbol.split('.')[0];
   const file = (await readCandleFile(symbol, 'TW'))
     ?? (await readCandleFile(`${code}.TWO`, 'TW'))
     ?? (await readCandleFile(`${code}.TW`, 'TW'));
   const cs = file?.candles;
-  if (!cs?.length) return { outcome: null, fwd: null };
+  if (!cs?.length) return null;
   const si = cs.findIndex(c => c.date === scanDate);
-  if (si < 0 || si + 1 >= cs.length) return { outcome: null, fwd: null }; // 找不到掃描日 / 還沒有隔日 K
+  if (si < 0 || si + 1 >= cs.length) return null;
   const e = si + 1;
   const entryOpen = cs[e].open;
-  if (!(entryOpen > 0)) return { outcome: null, fwd: null };
+  if (!(entryOpen > 0)) return null;
 
-  // ── 出場模擬（停損 / 20 日，相對進場開盤）──
   let exitIdx = e, exitReason: PickOutcome['exitReason'] = 'holding';
   let mgEntry = 0, mlEntry = 0;
   for (let d = 0; d < HOLD_DAYS && e + d < cs.length; d++) {
@@ -124,7 +148,7 @@ async function simulatePick(
     if (d === HOLD_DAYS - 1) exitReason = 'time';
   }
   const exitClose = cs[exitIdx].close;
-  const outcome: PickOutcome = {
+  return {
     entryOpen: +entryOpen.toFixed(2),
     exitClose: +exitClose.toFixed(2),
     ret: +(((exitClose - entryOpen) / entryOpen) * 100).toFixed(2),
@@ -133,26 +157,6 @@ async function simulatePick(
     maxGain: +mgEntry.toFixed(1),
     maxLoss: +mlEntry.toFixed(1),
   };
-
-  // ── 1/2/.../10/20 日 + 最高/最低（相對掃描日收盤，同掃描卡那排）──
-  const base = scanClose > 0 ? scanClose : cs[si].close;
-  const ret = (n: number): number | null =>
-    si + n < cs.length && base > 0 ? +(((cs[si + n].close - base) / base) * 100).toFixed(1) : null;
-  let mg = 0, ml = 0;
-  for (let n = 1; n <= HOLD_DAYS && si + n < cs.length; n++) {
-    mg = Math.max(mg, ((cs[si + n].high - base) / base) * 100);
-    ml = Math.min(ml, ((cs[si + n].low - base) / base) * 100);
-  }
-  const fwd: StockForwardPerformance = {
-    symbol, name, scanDate, scanPrice: base,
-    nextOpenPrice: +entryOpen.toFixed(2),
-    openReturn: base > 0 ? +(((entryOpen - base) / base) * 100).toFixed(1) : null,
-    d1Return: ret(1), d2Return: ret(2), d3Return: ret(3), d4Return: ret(4), d5Return: ret(5),
-    d6Return: ret(6), d7Return: ret(7), d8Return: ret(8), d9Return: ret(9), d10Return: ret(10),
-    d20Return: ret(20),
-    maxGain: +mg.toFixed(1), maxLoss: +ml.toFixed(1),
-  };
-  return { outcome, fwd };
 }
 
 export async function buildDailyPick(date: string): Promise<DailyPickResult> {
@@ -189,6 +193,7 @@ export async function buildDailyPick(date: string): Promise<DailyPickResult> {
     let entryReason = '';
     let deviationMa20: number | null = null;
     let signalLow: number | null = null;
+    let fwd: StockForwardPerformance | null = null;
     const file = (await readCandleFile(r.symbol, 'TW'))
       ?? (await readCandleFile(`${code}.TWO`, 'TW'))
       ?? (await readCandleFile(`${code}.TW`, 'TW'));
@@ -199,6 +204,8 @@ export async function buildDailyPick(date: string): Promise<DailyPickResult> {
       deviationMa20 = res.metrics.deviationMa20;
       const bar = file.candles.find(c => c.date === date) ?? file.candles[file.candles.length - 1];
       signalLow = bar?.low ?? null;
+      // 用已載入的 K 線算前瞻報酬（不重覆讀檔）
+      fwd = computeFwd(file.candles, date, r.price, r.symbol, r.name);
     }
 
     rows.push({
@@ -210,6 +217,7 @@ export async function buildDailyPick(date: string): Promise<DailyPickResult> {
       entryState, entryReason, deviationMa20,
       vetoed: disposal.has(code),
       price: r.price, signalLow, shortAttack: r.report?.scores?.shortAttack ?? 0,
+      fwd,
     });
   }
 
@@ -221,8 +229,8 @@ export async function buildDailyPick(date: string): Promise<DailyPickResult> {
   const focusBase = [...strongLive].sort((a, b) => b.changePct - a.changePct).slice(0, 3);
   const focus: FocusPick[] = await Promise.all(focusBase.map(async x => {
     const { stop, stopPct } = computeStop(x.price, x.signalLow);
-    const { outcome, fwd } = await simulatePick(`${x.code}.TW`, x.name, date, x.price, stop);
-    return { ...x, stop, stopPct, outcome, fwd };
+    const outcome = await simulatePick(`${x.code}.TW`, date, stop);
+    return { ...x, stop, stopPct, outcome };
   }));
 
   // 分層清單（一般模式用）— 排序：漲幅 desc（與 focus 一致，evidence-based）
