@@ -38,6 +38,9 @@
  *   # 只算某段期間
  *   npx tsx scripts/jasmine777-correlation.ts --input posts.json --from 2026-01-01
  *
+ *   # 用本地日K檔(離線；網路被擋時)。檔案為 [{date,open,high,low,close,volume}] JSON
+ *   npx tsx scripts/jasmine777-correlation.ts --input posts.json --prices candles.json
+ *
  *   # 嘗試 live 抓（多半要 cookie；失敗會明確告訴你改用 --input）
  *   CMONEY_COOKIE='...' npx tsx scripts/jasmine777-correlation.ts --live
  *
@@ -93,7 +96,7 @@ interface Row {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 function parseArgs(argv: string[]) {
-  const a: { input?: string; from?: string; to?: string; live?: boolean; emitLabels?: string } = {};
+  const a: { input?: string; from?: string; to?: string; live?: boolean; emitLabels?: string; prices?: string } = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--input') a.input = argv[++i];
@@ -101,6 +104,7 @@ function parseArgs(argv: string[]) {
     else if (k === '--to') a.to = argv[++i];
     else if (k === '--live') a.live = true;
     else if (k === '--emit-labels') a.emitLabels = argv[++i] ?? 'docs/jasmine777-labels.todo.json';
+    else if (k === '--prices') a.prices = argv[++i]; // 本地日K檔(JSON: [{date,open,high,low,close,volume}])，跳過網路 provider
   }
   return a;
 }
@@ -522,9 +526,21 @@ async function main() {
   const dates = posts.map((p) => ymdTaipei(p.postedAt)).sort();
   const start = shiftDate(dates[0], -7);
   const end = shiftDate(dates[dates.length - 1], 45);
-  console.log(`抓 ${SYMBOL} 日K：${start} ~ ${end} …`);
-  const candles = await dataProvider.getCandlesRange(SYMBOL, start, end);
-  console.log(`取得 ${candles.length} 根日K`);
+  let candles: Candle[];
+  if (args.prices) {
+    // 本地日K檔模式（離線；網路被擋時用）
+    const raw = JSON.parse(await fs.readFile(path.resolve(args.prices), 'utf-8'));
+    candles = (Array.isArray(raw) ? raw : raw.candles ?? []).map((c: any) => ({
+      date: String(c.date).slice(0, 10),
+      open: +c.open, high: +c.high, low: +c.low, close: +c.close, volume: +(c.volume ?? 0),
+    }));
+    const cov = candles.length ? `${candles[0].date} ~ ${candles[candles.length - 1].date}` : '空';
+    console.log(`本地日K：${args.prices}（${candles.length} 根，${cov}）`);
+  } else {
+    console.log(`抓 ${SYMBOL} 日K：${start} ~ ${end} …`);
+    candles = await dataProvider.getCandlesRange(SYMBOL, start, end);
+    console.log(`取得 ${candles.length} 根日K`);
+  }
   if (candles.length < 2) {
     console.error('日K 不足，無法對照。檢查 dataProvider / 網路 / FINMIND_API_TOKEN。');
     process.exit(1);
