@@ -148,6 +148,26 @@ describe('extractRecoEvents', () => {
     expect(r.events[0].teacher_kind).toBe('person');
   });
 
+  it('節目名把老師名包在括號裡（「股市全芳位（李蜀芳）」）→ 保留李蜀芳，不可誤殺成 program_fallback', () => {
+    const display = new Map([['src-a', '股市全芳位（李蜀芳）']]);
+    const r = extractRecoEvents(
+      analysis([mention({ analysts: ['李蜀芳'] })]),
+      { displayNameBySource: display },
+    );
+    expect(r.events[0].teacher).toBe('李蜀芳');
+    expect(r.events[0].teacher_kind).toBe('person');
+  });
+
+  it('analysts 就是頻道裸名（去括號後相等）→ program_fallback', () => {
+    const display = new Map([['src-a', '決勝關鍵（每日台股解盤）']]);
+    const r = extractRecoEvents(
+      analysis([mention({ analysts: ['決勝關鍵（每日台股解盤）'] })]),
+      { displayNameBySource: display },
+    );
+    expect(r.events[0].teacher_kind).toBe('program_fallback');
+    expect(r.events[0].teacher).toBe('節目:src-a');
+  });
+
   it('TPEx → .TWO 後綴', () => {
     const r = extractRecoEvents(analysis([
       mention({ matched: { code: '8069', name: '元太', market: 'TPEx', confidence: 1.0, match_via: 'exact_code' }, code: '8069' }),
