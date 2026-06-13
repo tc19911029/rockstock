@@ -1,13 +1,12 @@
 'use client';
 
 /**
- * /daily-pick — 每日選股漏斗頁面（2026-06-13）
+ * /daily-pick — 每日選股漏斗頁面（2026-06-13 改版：統一對齊表格）
  *
- * 把 daily-pick 終端腳本搬上瀏覽器：最上面是「今日 top3 可執行清單」（依漲幅排序、
- * 帶進場/停損/持有），下面是板塊熱度 + 分層候選 + 被 veto 清單。
+ * 最上面「今日 top3 可執行清單」（依漲幅、帶進場/停損/持有/事後結果），
+ * 下面分三層候選（低乖離/時機中性/末升段）。全部共用同一套欄位、同一條對齊線，
+ * 每區只印一次前瞻報酬欄頭（隔日開/1~10日/20日/最高/最低），不再每檔重複標籤。
  * 資料 = /api/daily-pick（lib/dailyPick/buildDailyPick 單一事實）。
- *
- * 全頁帶回測誠實警語：edge 集中 top1、勝率~4成靠大贏家、紀律>選股（backtest-rank-edge）。
  */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -43,15 +42,105 @@ const STAGE_CLS: Record<string, string> = {
   剛啟動: 'text-emerald-400', 主升段: 'text-red-400', 高潮噴出: 'text-orange-400',
   震盪換手: 'text-yellow-400', 退潮: 'text-slate-400', 補跌: 'text-green-400', 盤整: 'text-slate-500',
 };
-const ENTRY_TAG: Record<string, { label: string; cls: string }> = {
-  can_enter: { label: '低乖離·穩', cls: 'bg-emerald-900/50 text-emerald-300' },
-  watch: { label: '時機中性', cls: 'bg-slate-700/50 text-slate-300' },
-  no_chase: { label: '末升段·高動能高波動', cls: 'bg-orange-900/50 text-orange-300' },
-};
+
+const FWD_COLS: Array<{ k: keyof Fwd; label: string }> = [
+  { k: 'openReturn', label: '隔開' }, { k: 'd1Return', label: '1' }, { k: 'd2Return', label: '2' },
+  { k: 'd3Return', label: '3' }, { k: 'd4Return', label: '4' }, { k: 'd5Return', label: '5' },
+  { k: 'd6Return', label: '6' }, { k: 'd7Return', label: '7' }, { k: 'd8Return', label: '8' },
+  { k: 'd9Return', label: '9' }, { k: 'd10Return', label: '10' }, { k: 'd20Return', label: '20' },
+  { k: 'maxGain', label: '最高' }, { k: 'maxLoss', label: '最低' },
+];
+// 身份欄(代號名稱+訊號) + 14 個前瞻報酬欄，所有列共用 → 數字永遠對齊在同一條線
+const GRID: React.CSSProperties = { gridTemplateColumns: 'minmax(150px, 1.6fr) repeat(14, minmax(0, 1fr))' };
 
 function Chg({ v }: { v: number }) {
   const cls = v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-slate-400';
-  return <span className={cls}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
+  return <span className={`tabular-nums ${cls}`}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
+}
+
+function retCls(v: number | null | undefined): string {
+  return v == null ? 'text-slate-700' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-slate-500';
+}
+
+/** 欄頭：每區印一次 */
+function FwdHead() {
+  return (
+    <div className="grid items-end gap-x-0.5 px-2 pb-1 border-b border-slate-700/70 text-[9px] text-slate-500" style={GRID}>
+      <div>股票 · 訊號</div>
+      {FWD_COLS.map(c => <div key={c.k} className="text-right tabular-nums">{c.label}</div>)}
+    </div>
+  );
+}
+
+/** 一檔：身份 + 14 個對齊數字；focus 多一條進場/停損/事後 */
+function StockRow({ x, date, rank, focus }: { x: Row | Focus; date: string; rank?: number; focus?: boolean }) {
+  const f = x as Focus;
+  return (
+    <div className="px-2 py-1 hover:bg-slate-900/40">
+      <div className="grid items-center gap-x-0.5" style={GRID}>
+        <div className="min-w-0 pr-2">
+          <div className="flex items-baseline gap-1.5 leading-tight">
+            {rank != null && <span className="text-slate-600 text-[10px]">#{rank}</span>}
+            <Link href={`/?load=${x.code}&date=${date}`} className="text-[13px] font-medium truncate hover:text-sky-400">
+              {x.code} {x.name}
+            </Link>
+            <Chg v={x.changePct} />
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 leading-tight">
+            <span className="truncate">{x.comboLabel}</span>
+            <span className="text-slate-600 shrink-0">六{x.sixCore ? '✓' : ''}{x.sixTotal}</span>
+            {x.theme && <span className="text-sky-300/50 truncate">{x.theme}</span>}
+          </div>
+        </div>
+        {FWD_COLS.map(c => {
+          const v = x.fwd?.[c.k];
+          return (
+            <div key={c.k} className={`text-right text-[10px] font-mono tabular-nums ${retCls(v)}`}>
+              {v == null ? '·' : `${v > 0 ? '+' : ''}${v.toFixed(1)}`}
+            </div>
+          );
+        })}
+      </div>
+      {focus && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 pl-1 text-[10px] text-slate-500 leading-tight">
+          <span>進場 <span className="text-slate-300">明日13:25市價</span></span>
+          <span>停損 <span className="text-rose-300">{f.stop}（{f.stopPct}%）</span></span>
+          <span>持有 ~20日</span>
+          {f.outcome && (
+            <span className="text-slate-600">
+              · 事後（{f.outcome.entryOpen} 進）{' '}
+              <span className={retCls(f.outcome.ret)}>實現 {f.outcome.ret > 0 ? '+' : ''}{f.outcome.ret}%</span>{' '}
+              {f.outcome.exitReason === 'stop' ? '🛑停損' : f.outcome.exitReason === 'time' ? '⏱滿20日' : '持有中'}
+              （持{f.outcome.holdDays}日）
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section(
+  { dot, title, sub, rows, date, max = 999, focus }:
+  { dot: string; title: string; sub?: string; rows: Row[] | Focus[]; date: string; max?: number; focus?: boolean },
+) {
+  if (!rows?.length) return null;
+  return (
+    <div className="mb-5">
+      <h3 className="text-sm font-semibold text-slate-200">
+        {dot} {title} <span className="text-slate-600 font-normal">（{rows.length}）</span>
+      </h3>
+      {sub && <p className="text-[11px] text-slate-500 mt-0.5 mb-1.5">{sub}</p>}
+      <div className="rounded-lg border border-slate-800 bg-slate-900/40 overflow-hidden">
+        <FwdHead />
+        <div className="divide-y divide-slate-800/50">
+          {rows.slice(0, max).map((x, i) => (
+            <StockRow key={x.code} x={x} date={date} rank={focus ? i + 1 : undefined} focus={focus} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function DailyPickPage() {
@@ -75,17 +164,17 @@ export default function DailyPickPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <div className="flex items-baseline justify-between mb-1">
           <h1 className="text-xl font-bold">每日選股漏斗</h1>
           <Link href="/" className="text-sm text-sky-400 hover:underline">← 回看盤台</Link>
         </div>
-        <p className="text-xs text-slate-500 mb-1">
+        <p className="text-xs text-slate-500 mb-2">
           三色強訊號 → 過處置veto → 依當日漲幅排序取 top3 · 帶進場/停損/持有
           {data?.date && <span className="ml-2 text-slate-600">資料日 {data.date}</span>}
         </p>
 
-        {/* 日期選擇器（回看過去 ~30 天當時選了哪 3 檔 + 後來漲跌） */}
+        {/* 日期選擇器 */}
         {dates.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-3">
             <button onClick={() => setSel(null)}
@@ -116,48 +205,22 @@ export default function DailyPickPage() {
 
         {data?.exists && (
           <>
-            {/* 掃描摘要 */}
-            <div className="text-xs text-slate-500 mb-4">
+            <div className="text-xs text-slate-500 mb-1">
               三色掃描 {data.scan?.evaluated} 檔 → 強共振 {data.scan?.strong} / 嚴格級 {data.scan?.strict}
               · 處置中 {data.disposalCount} 檔已剔除
             </div>
+            <p className="text-[10px] text-slate-600 mb-4">
+              數字＝相對掃描日收盤的前瞻報酬(%)，<span className="text-red-400">紅漲</span>／<span className="text-green-400">綠跌</span>／· 尚無資料。
+            </p>
 
-            {/* ★ Focus top3 — 可執行清單 */}
-            <h2 className="text-base font-semibold mb-1.5">🎯 今日 top3（依漲幅）</h2>
-            {data.focus.length === 0 && <div className="text-slate-500 text-sm mb-4">今日無三色強候選（過 veto 後）。</div>}
-            <div className="space-y-2 mb-5">
-              {data.focus.map((x, i) => (
-                <div key={x.code} className="bg-slate-900/60 border border-slate-800 rounded-lg p-2">
-                  <div className="flex items-center gap-2 flex-wrap leading-tight">
-                    <span className="text-slate-500 text-sm">#{i + 1}</span>
-                    <Link href={`/?load=${x.code}&date=${data.date}`} className="font-semibold hover:text-sky-400">
-                      {x.code} {x.name}
-                    </Link>
-                    <span className="text-xs text-slate-500">{x.industry}</span>
-                    <Chg v={x.changePct} />
-                    <span className="text-xs text-slate-400">{x.comboLabel}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${ENTRY_TAG[x.entryState].cls}`}>
-                      {ENTRY_TAG[x.entryState].label}
-                    </span>
-                    {x.theme && <span className="text-[10px] text-sky-300/80">{x.theme}</span>}
-                  </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs leading-tight">
-                    <span><span className="text-slate-500">收盤</span> {x.price}</span>
-                    <span><span className="text-slate-500">進場</span> 明日13:25市價</span>
-                    <span><span className="text-slate-500">停損</span> <span className="text-rose-300">{x.stop}（{x.stopPct}%）</span></span>
-                    <span><span className="text-slate-500">持有</span> ~20日</span>
-                    <span className="text-slate-600">六條件 {x.sixCore ? '核心✓' : ''}{x.sixTotal}/6</span>
-                  </div>
-                  {x.fwd && <FwdRow f={x.fwd} />}
-                  {x.outcome && <Outcome o={x.outcome} />}
-                </div>
-              ))}
-            </div>
+            {/* top3 可執行 */}
+            <Section dot="🎯" title="今日 top3（依漲幅）" rows={data.focus} date={data.date} focus
+              sub={data.focus.length === 0 ? '今日無三色強候選（過 veto 後）。' : undefined} />
 
             {/* 板塊熱度 */}
             {data.hotThemes.length > 0 && (
-              <div className="mb-6">
-                <h3 className="text-sm font-semibold mb-1 text-slate-400">資金最強板塊（5日）</h3>
+              <div className="mb-5">
+                <h3 className="text-sm font-semibold mb-1.5 text-slate-300">資金最強板塊（5日）</h3>
                 <div className="flex flex-wrap gap-2 text-xs">
                   {data.hotThemes.map(t => (
                     <span key={t.theme} className="bg-slate-900/60 border border-slate-800 rounded px-2 py-1">
@@ -169,10 +232,13 @@ export default function DailyPickPage() {
               </div>
             )}
 
-            {/* 分層候選 */}
-            <Tier title="🟢 低乖離·時機乾淨（穩但回測報酬偏弱）" rows={data.canEnter} date={data.date} />
-            <Tier title="🟡 時機中性" rows={data.watch} max={12} date={data.date} />
-            <Tier title="🔴 末升段·高動能（回測報酬最高但波動最大，非不可買）" rows={data.noChase} max={10} date={data.date} />
+            {/* 三層候選 */}
+            <Section dot="🟢" title="低乖離·時機乾淨" rows={data.canEnter} date={data.date}
+              sub="貼著均線、乖離小，進場最穩 — 但回測報酬偏弱。" />
+            <Section dot="🟡" title="時機中性" rows={data.watch} date={data.date} max={12}
+              sub="乖離中等，可等回檔或突破再進。" />
+            <Section dot="🔴" title="末升段·高動能" rows={data.noChase} date={data.date} max={10}
+              sub="離月線>15%、或剛連3長紅暴量（衝太高），追高風險大 — 但回測報酬其實最高、波動也最大，非「不可買」。" />
 
             {data.vetoedStrong.length > 0 && (
               <div className="mt-6">
@@ -184,67 +250,6 @@ export default function DailyPickPage() {
             )}
           </>
         )}
-      </div>
-    </div>
-  );
-}
-
-const FWD_COLS: Array<{ k: keyof Fwd; label: string }> = [
-  { k: 'openReturn', label: '隔日開' }, { k: 'd1Return', label: '1日' }, { k: 'd2Return', label: '2日' },
-  { k: 'd3Return', label: '3日' }, { k: 'd4Return', label: '4日' }, { k: 'd5Return', label: '5日' },
-  { k: 'd6Return', label: '6日' }, { k: 'd7Return', label: '7日' }, { k: 'd8Return', label: '8日' },
-  { k: 'd9Return', label: '9日' }, { k: 'd10Return', label: '10日' }, { k: 'd20Return', label: '20日' },
-  { k: 'maxGain', label: '最高' }, { k: 'maxLoss', label: '最低' },
-];
-function FwdRow({ f, compact }: { f: Fwd; compact?: boolean }) {
-  return (
-    <div className={`flex gap-0.5 ${compact ? 'mt-0.5' : 'mt-1.5 pt-1.5 border-t border-slate-800'}`}>
-      {FWD_COLS.map(({ k, label }) => {
-        const v = f[k];
-        const cls = v == null ? 'text-slate-700' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-slate-400';
-        return (
-          <div key={k} className="flex-1 text-center leading-none">
-            <div className="text-[8px] text-slate-600">{label}</div>
-            <div className={`text-[9px] font-mono ${cls}`}>{v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function Outcome({ o }: { o: Outcome }) {
-  const cls = o.ret > 0 ? 'text-red-400' : o.ret < 0 ? 'text-green-400' : 'text-slate-400';
-  const reason = o.exitReason === 'stop' ? '🛑停損出' : o.exitReason === 'time' ? '⏱滿20日' : '持有中';
-  return (
-    <div className="mt-2 pt-2 border-t border-slate-800 text-[11px] flex flex-wrap gap-x-3 gap-y-0.5">
-      <span className="text-slate-500">事後結果（隔日開盤 {o.entryOpen} 進）：</span>
-      <span className={cls}>實現 {o.ret > 0 ? '+' : ''}{o.ret}%</span>
-      <span className="text-slate-400">{reason}（持 {o.holdDays} 日）</span>
-      <span className="text-slate-500">途中最高 +{o.maxGain}% / 最低 {o.maxLoss}%</span>
-    </div>
-  );
-}
-
-function Tier({ title, rows, max = 999, date }: { title: string; rows: Row[]; max?: number; date: string }) {
-  if (!rows?.length) return null;
-  return (
-    <div className="mb-3">
-      <h3 className="text-sm font-semibold mb-0.5 text-slate-400">{title}（{rows.length}）</h3>
-      <div className="divide-y divide-slate-800/50">
-        {rows.slice(0, max).map(x => (
-          <div key={x.code} className="py-0.5">
-            <div className="flex items-center gap-2 text-xs leading-tight">
-              <Link href={`/?load=${x.code}&date=${date}`} className="hover:text-sky-400 w-28 truncate">{x.code} {x.name}</Link>
-              <span className="text-slate-600 w-12 truncate">{x.industry.slice(0, 4)}</span>
-              <span className="w-12 text-right"><Chg v={x.changePct} /></span>
-              <span className="text-slate-500 w-20 truncate">{x.comboLabel}</span>
-              <span className="text-slate-600 w-12">六{x.sixCore ? '✓' : ''}{x.sixTotal}</span>
-              <span className="text-sky-300/60 truncate flex-1">{x.theme ?? ''}</span>
-            </div>
-            {x.fwd && <FwdRow f={x.fwd} compact />}
-          </div>
-        ))}
       </div>
     </div>
   );
