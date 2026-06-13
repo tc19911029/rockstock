@@ -19,6 +19,7 @@ import {
   SourceResult,
 } from './types';
 import type { MarketId } from '@/lib/scanner/types';
+import { computeRedFlags } from '@/lib/redflags/compute';
 
 export interface MergeArgs {
   market: MarketId;
@@ -54,6 +55,8 @@ export function mergeCandidates(args: MergeArgs): CandidatesPool {
     c.sourceCount = countSources(c);
     c.strengthSignals = computeStrengthSignals(c);
     c.comboBadges = computeComboBadges(c);
+    const flags = computeCandidateRedFlags(c);
+    if (flags.length > 0) c.redFlags = flags;
     candidates.push(c);
   }
 
@@ -127,6 +130,20 @@ export function computeComboBadges(c: Candidate): string[] {
   }
   if (c.sourceCount === 4) badges.push('full_house');
   return badges;
+}
+
+/**
+ * 買進前紅旗（2026-06-13）— 純顯示零分數影響（同 comboBadges）。
+ * TW pool 階段先用 candidate 已有的 fundamental attribution（epsYoY/per）算
+ * 業績爆雷 / 獲利衰退 / 本益比虛高；籌碼/治理類旗待接 TW 資料源後在 build 端補。
+ */
+export function computeCandidateRedFlags(c: Candidate) {
+  const f = c.sources.fundamental;
+  if (!f) return [];
+  return computeRedFlags({
+    epsYoYPct: f.epsYoY ?? null,
+    per: f.per ?? null,
+  });
 }
 
 function computeStrengthSignals(c: Candidate): Candidate['strengthSignals'] {

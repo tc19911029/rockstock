@@ -34,6 +34,7 @@ import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 import type { RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { useYouTubeMentionMap, type YouTubeMentionSummary } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
+import { RedFlagChips } from '@/components/RedFlagChips';
 
 interface PoolResponse {
   ok: boolean;
@@ -688,6 +689,7 @@ function PoolRow({
                 {COMBO_BADGE_LABEL[b] ?? b}
               </span>
             ))}
+            <RedFlagChips flags={candidate.redFlags} />
           </div>
         </td>
         <td className="px-2 pt-1.5 pb-0.5 text-[10px] text-muted-foreground">

@@ -10,6 +10,7 @@
 import type { MarketId } from '@/lib/scanner/types';
 import type { EntryGateResult } from '@/lib/agents/entryGate';
 import type { SpecScoreResult } from '@/lib/spec-score/compute';
+import type { RedFlag } from '@/lib/redflags/types';
 
 export const POOL_SCHEMA_VERSION = 1 as const;
 
@@ -143,6 +144,14 @@ export interface Candidate {
    * 「不加組合 bonus」決議不變 — 徽章只標示不加分；要進排序先過回測（計畫 Phase 6）。
    */
   comboBadges?: string[];
+
+  /**
+   * 買進前紅旗（基本面/籌碼/治理避雷檢查；2026-06-13）— 純顯示，
+   * 不參與 countSources / strengthSignals / 排序 / gate（同 comboBadges 哲學、守鐵則 #5）。
+   * 目前 TW pool 由 merger 從 fundamental attribution（epsYoY/per）即時算出業績/估值類旗；
+   * 籌碼/治理類（主力出貨/質押/異常波動）待接 TW 資料源。
+   */
+  redFlags?: RedFlag[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
