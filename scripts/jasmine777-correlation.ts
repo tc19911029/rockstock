@@ -41,6 +41,11 @@
  *   # 嘗試 live 抓（多半要 cookie；失敗會明確告訴你改用 --input）
  *   CMONEY_COOKIE='...' npx tsx scripts/jasmine777-correlation.ts --live
  *
+ *   # 進階情緒分析：先產「待標情緒工作表」→ 讀完內文逐篇標 sentiment → 再跑分析
+ *   npx tsx scripts/jasmine777-correlation.ts --input posts.json --emit-labels labels.json
+ *   #   (填好 labels.json 的 sentiment 後)
+ *   npx tsx scripts/jasmine777-correlation.ts --input labels.json
+ *
  * 輸出：
  *   data/reports/jasmine777-3661-correlation.csv
  *   data/reports/jasmine777-3661-correlation.json
@@ -88,13 +93,14 @@ interface Row {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 function parseArgs(argv: string[]) {
-  const a: { input?: string; from?: string; to?: string; live?: boolean } = {};
+  const a: { input?: string; from?: string; to?: string; live?: boolean; emitLabels?: string } = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--input') a.input = argv[++i];
     else if (k === '--from') a.from = argv[++i];
     else if (k === '--to') a.to = argv[++i];
     else if (k === '--live') a.live = true;
+    else if (k === '--emit-labels') a.emitLabels = argv[++i] ?? 'docs/jasmine777-labels.todo.json';
   }
   return a;
 }
@@ -443,6 +449,32 @@ function summarize(rows: Row[]): string {
   return lines.join('\n');
 }
 
+// ── 情緒標註工作表（給人/對話裡的 Claude 讀完內文回填）─────────────────────
+async function writeLabelingWorksheet(posts: Post[], outPath: string): Promise<void> {
+  const worksheet = {
+    _labeling_guide: [
+      '這是 jasmine777 發文的「情緒標註工作表」。請逐篇打開 url 讀完內文，在 sentiment 填：',
+      '  bullish=看多 / bearish=看空 / neutral=中性陳述或多空夾雜。也可用數字 +1 / -1 / 0。',
+      '判定原則(看內文不是只看標題)：對股價/後市的方向性看法為準；純消息整理、抒情、回酸民→neutral。',
+      '可順手補 summary(一句話重點) 與 key_points(條列)，分析時更好回顧；非必填。',
+      '填完存檔後，這個檔本身就是合法 --input：npx tsx scripts/jasmine777-correlation.ts --input ' + outPath,
+      'sentiment 留空的篇數，跑分析時會自動退回標題關鍵字推估(標?，信心較低)。',
+    ],
+    articles: posts.map((p) => ({
+      id: p.id,
+      postedAt: p.postedAt,
+      url: p.url,
+      title: p.title,
+      sentiment: '', // ← 讀完內文填 bullish/bearish/neutral
+      sentiment_suggested: p.sentiment, // 標題啟發式建議(僅參考)
+      summary: '',
+      key_points: [] as string[],
+    })),
+  };
+  await fs.mkdir(path.dirname(path.resolve(outPath)), { recursive: true });
+  await fs.writeFile(path.resolve(outPath), JSON.stringify(worksheet, null, 2), 'utf-8');
+}
+
 // ── 主流程 ───────────────────────────────────────────────────────────────────
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -472,6 +504,17 @@ async function main() {
   if (!posts.length) {
     console.error('過濾後沒有發文。');
     process.exit(1);
+    return;
+  }
+
+  // 1.5) 只產情緒標註工作表就收工（不抓價）
+  if (args.emitLabels) {
+    await writeLabelingWorksheet(posts, args.emitLabels);
+    console.log(
+      `已輸出情緒標註工作表 (${posts.length} 篇)：${args.emitLabels}\n` +
+        `→ 逐篇讀完內文把 sentiment 填上(bullish/bearish/neutral)，存檔後：\n` +
+        `   npx tsx scripts/jasmine777-correlation.ts --input ${args.emitLabels}\n`,
+    );
     return;
   }
 
