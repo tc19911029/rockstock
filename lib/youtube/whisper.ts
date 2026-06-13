@@ -24,6 +24,7 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { ytdlpProxyArgs } from './ytdlp';
+import { beginTranscription, endTranscription } from './transcriptionLock';
 
 const DEFAULT_YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 const DEFAULT_PYTHON = process.env.PYTHON_BIN || 'python3';
@@ -144,9 +145,13 @@ async function acquireWhisperLock(): Promise<() => void> {
  */
 export async function transcribeViaWhisper(opts: WhisperOptions): Promise<WhisperResult> {
   const release = await acquireWhisperLock();
+  // 轉錄期間標記 active → instrumentation.ts 的記憶體重活 cron 讓路，避免 jetsam 砍 Whisper
+  // 子程序（見 transcriptionLock.ts root-cause）。標在 mutex 內，整段下載+轉錄都算 active。
+  beginTranscription();
   try {
     return await transcribeViaWhisperUnsafe(opts);
   } finally {
+    endTranscription();
     release();
   }
 }

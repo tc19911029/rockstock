@@ -8,6 +8,8 @@
 
 import { isMarketOpen, isPostCloseWindow, getLastTradingDay } from '@/lib/datasource/marketHours';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+// ⚠️ 只 import 純狀態模組（無 fs/path）— 維持本檔 Edge-safe 邊界（見檔頭鐵律 4）。
+import { isTranscriptionActive } from '@/lib/youtube/transcriptionLock';
 
 function localUrl(path: string): string {
   const port = process.env.PORT || '3000';
@@ -32,6 +34,20 @@ async function callRoute(path: string, label: string): Promise<unknown> {
     console.error(`[local-cron] ${label} fetch failed:`, err);
     return null;
   }
+}
+
+// Whisper 轉錄期間，記憶體重活 cron 讓路：跳過「本輪」（不設 done 旗標 → 下一輪 60s 後再來，
+// 不會掉今天的工作）。根因：whisper 子程序與重活同時跑會被 jetsam 砍（見 transcriptionLock.ts）。
+// ⚠️ 守衛必須放在各工作「設 done 旗標之前」，所以在每個 interval/函式最前面呼叫，不能塞進 callRoute。
+let lastDeferLogAt = 0;
+function deferForWhisper(label: string): boolean {
+  if (!isTranscriptionActive()) return false;
+  const now = Date.now();
+  if (now - lastDeferLogAt > 60_000) {  // 每分鐘最多印一次，避免洗版
+    console.log(`[local-cron] ${label} 本輪跳過：Whisper 轉錄進行中，記憶體重活讓路（下輪重試）`);
+    lastDeferLogAt = now;
+  }
+  return true;
 }
 
 export async function register() {
@@ -143,6 +159,7 @@ export async function register() {
   // TW：14:10 CST；CN：16:10 CST（確保 L1 已下載）
   const postCloseDailyDone = { TW: '', CN: '' };
   async function scanPostCloseDaily(market: 'TW' | 'CN') {
+    if (deferForWhisper(`${market} scan post_close`)) return;
     if (bootCoolingDown(`${market} scan post_close`, 75_000)) return;
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
@@ -217,6 +234,7 @@ export async function register() {
   type Track = 'bullish' | 'reversal' | 'system';
   const postCloseBmDone = { TW: '', CN: '' };
   async function scanPostCloseBatch(market: 'TW' | 'CN', track: Track) {
+    if (deferForWhisper(`${market} scan-bm-batch ${track}`)) return;
     if (bootCoolingDown(`${market} scan-bm-batch ${track}`, 60_000)) return;
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
@@ -278,6 +296,7 @@ export async function register() {
   }
   async function downloadL1(market: 'TW' | 'CN') {
     // 最重（全量下載 3127 檔）→ 開機後最晚才放行，給前面較輕的工作先做完
+    if (deferForWhisper(`${market} download-candles`)) return;
     if (bootCoolingDown(`${market} download-candles`, 90_000)) return;
     if (isMarketOpen(market)) return; // 盤中不下（收盤價還沒定）
     const lastTrading = getLastTradingDay(market);
@@ -300,6 +319,7 @@ export async function register() {
   // (2) 觸發前強制 call 一次 refreshIntradaySnapshot，確保用最新 L2 而非 in-memory stale。
   const l1SnapshotDone = { TW: '', CN: '' };
   async function appendL1FromSnapshot(market: 'TW' | 'CN') {
+    if (deferForWhisper(`${market} append-from-snapshot`)) return;
     if (bootCoolingDown(`${market} append-from-snapshot`, 45_000)) return;
     if (isMarketOpen(market)) return;
     const lastTrading = getLastTradingDay(market);
@@ -471,6 +491,7 @@ export async function register() {
   let lastEtfFetchDate = '';
   let lastEtfTrackDate = '';
   setInterval(() => {
+    if (deferForWhisper('ETF')) return;
     const now = new Date();
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Taipei',
@@ -527,6 +548,7 @@ export async function register() {
   // UI /health 頁讀此快照顯示紅綠燈。一天各市場 1 次去重。
   let lastDailyHealthDate = '';
   setInterval(() => {
+    if (deferForWhisper('daily-health-snapshot')) return;
     const now = new Date();
     const tw = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
@@ -569,6 +591,7 @@ export async function register() {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
     const hour = parseInt(get('hour'), 10);
     if (hour >= 18 && today !== lastTdccDate) {
+      if (deferForWhisper('TDCC daily')) return;
       lastTdccDate = today;
       console.log('[local-cron] TDCC 每日自動抓取觸發');
       callRoute('/api/cron/fetch-tdcc-week', 'TDCC daily').catch(err =>
@@ -589,6 +612,7 @@ export async function register() {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
     const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
     if (hhmm >= 635 && today !== lastGlobalPeersDate) {
+      if (deferForWhisper('global-peers daily')) return;
       lastGlobalPeersDate = today;
       console.log('[local-cron] global-peers 海外日K抓取觸發');
       callRoute('/api/cron/fetch-global-peers', 'global-peers daily').catch(err =>
@@ -609,6 +633,7 @@ export async function register() {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
     const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
     if (hhmm >= 1710 && today !== lastSectorDate) {
+      if (deferForWhisper('sector-strength daily')) return;
       lastSectorDate = today;
       console.log('[local-cron] sector-strength 板塊排名觸發');
       callRoute('/api/cron/compute-sector-strength', 'sector-strength daily').catch(err =>
@@ -629,6 +654,7 @@ export async function register() {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
     const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
     if (hhmm >= 2140 && today !== lastChipExtrasDate) {
+      if (deferForWhisper('chip-extras daily')) return;
       lastChipExtrasDate = today;
       console.log('[local-cron] chip-extras 持久化觸發');
       callRoute('/api/cron/fetch-chip-extras', 'chip-extras daily').catch(err =>
@@ -650,6 +676,7 @@ export async function register() {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
     const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
     if (hhmm >= 1735 && today !== lastAttentionDate) {
+      if (deferForWhisper('attention-list daily')) return;
       lastAttentionDate = today;
       console.log('[local-cron] 處置股/注意股名單抓取觸發');
       callRoute('/api/cron/fetch-attention-list', 'attention-list daily').catch(err =>
