@@ -50,19 +50,34 @@ async function fetchTWSEBulkClose(dateStr: string): Promise<Map<string, BulkOHLC
   );
   if (source === 'curl') console.info('[download-candles] TWSE MI_INDEX 經 curl fallback 成功');
   if (data.stat !== 'OK') throw new Error(`TWSE MI_INDEX stat=${data.stat}`);
-  const table = data.tables?.[8];
-  if (!table?.data?.length) throw new Error('TWSE MI_INDEX table 8 missing or empty');
 
-  const parseNum = (s: string) => { const n = parseFloat(s.replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+  // 2026-06-13：TWSE 改過 MI_INDEX 表格結構（成交筆數/成交金額對調、表格數量會變），
+  // 原本寫死 tables[8] + 欄位位置 row[5..8] 在改版日會「整批錯位」（代號對到別檔的價），
+  // 而且因為注入與稽核用同一份壞 map → 交叉稽核還會誤判「全部一致」。
+  // 改成「靠欄位名稱定位」：先找出含『證券代號』+『收盤價』的那張表，再用 fields 索引取欄位。
+  const tables = data.tables ?? [];
+  const idxOf = (fields: string[], ...names: string[]) =>
+    fields.findIndex(f => { const t = f.replace(/\s/g, ''); return names.some(n => t === n); });
+  const stockTable = tables.find(t =>
+    Array.isArray(t.fields) && idxOf(t.fields, '證券代號') >= 0 && idxOf(t.fields, '收盤價') >= 0
+    && Array.isArray(t.data) && t.data.length > 100);
+  if (!stockTable) throw new Error('TWSE MI_INDEX 找不到「每日收盤行情」股票表（結構可能再次改版）');
+  const F = stockTable.fields;
+  const cCode = idxOf(F, '證券代號'), cOpen = idxOf(F, '開盤價'), cHigh = idxOf(F, '最高價'),
+        cLow = idxOf(F, '最低價'), cClose = idxOf(F, '收盤價'), cVol = idxOf(F, '成交股數');
+  if ([cCode, cOpen, cHigh, cLow, cClose, cVol].some(i => i < 0))
+    throw new Error(`TWSE MI_INDEX 欄位缺失 fields=${JSON.stringify(F)}`);
+
+  const parseNum = (s: string) => { const n = parseFloat(String(s).replace(/,/g, '')); return isNaN(n) ? 0 : n; };
   const map = new Map<string, BulkOHLCV>();
-  for (const row of table.data) {
-    const code = row[0]?.trim();
+  for (const row of stockTable.data) {
+    const code = row[cCode]?.trim();
     if (!code || !/^\d{4,}[A-Z]?$/.test(code)) continue; // 只要 4~5 位數字（含 ETF 如 00400A）
-    const open  = parseNum(row[5]);
-    const high  = parseNum(row[6]);
-    const low   = parseNum(row[7]);
-    const close = parseNum(row[8]);
-    const volume = Math.round(parseNum(row[2]) / 1000); // 股 → 張
+    const open  = parseNum(row[cOpen]);
+    const high  = parseNum(row[cHigh]);
+    const low   = parseNum(row[cLow]);
+    const close = parseNum(row[cClose]);
+    const volume = Math.round(parseNum(row[cVol]) / 1000); // 股 → 張
     if (close > 0 && open > 0) map.set(code, { open, high, low, close, volume });
   }
   return map;
@@ -286,12 +301,18 @@ export async function GET(req: NextRequest) {
 
           // ── 優先路徑 1：TWSE 官方日收盤（只對上市 .TW 股票）──
           // 用集合競價後的官方 OHLCV，不受盤中快照時序影響
+          // 防呆：官方 bulk 若因來源改版錯位寫出「不可能跳動」(>50% 偏離前收)，跳過改走完整 API
+          const prevClose = existing?.candles?.[existing.candles.length - 1]?.close;
           if (symbol.endsWith('.TW') && twseMap) {
             const ohlcv = twseMap.get(code);
             if (ohlcv) {
-              await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }]);
-              twseInjected++;
-              return 1;
+              if (suspectsGrossJump(prevClose, ohlcv)) {
+                console.warn(`[download-candles] ${symbol} ${lastTradingDate} TWSE bulk 異常跳動(prev=${prevClose}→${ohlcv.close})，跳過官方注入改走 API`);
+              } else {
+                await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }]);
+                twseInjected++;
+                return 1;
+              }
             }
           }
 
@@ -299,9 +320,13 @@ export async function GET(req: NextRequest) {
           if (symbol.endsWith('.TWO') && tpexMap) {
             const ohlcv = tpexMap.get(code);
             if (ohlcv) {
-              await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }]);
-              tpexInjected++;
-              return 1;
+              if (suspectsGrossJump(prevClose, ohlcv)) {
+                console.warn(`[download-candles] ${symbol} ${lastTradingDate} TPEx bulk 異常跳動(prev=${prevClose}→${ohlcv.close})，跳過官方注入改走 API`);
+              } else {
+                await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }]);
+                tpexInjected++;
+                return 1;
+              }
             }
           }
 
@@ -439,6 +464,10 @@ export async function GET(req: NextRequest) {
         if (!lastBar) continue;
         checked++;
 
+        // 防呆：官方值若相對「前一日封存收盤」跳動 >50%（來源錯位），不可拿來覆寫 L1
+        const prevBar = l1Data.candles[l1Data.candles.length - 2];
+        if (suspectsGrossJump(prevBar?.close, official)) continue;
+
         const diffAbs = Math.abs(lastBar.close - official.close);
         const diffPct = diffAbs / official.close;
         if (diffAbs > 1 || diffPct > 0.005) {
@@ -477,6 +506,10 @@ export async function GET(req: NextRequest) {
         const lastBar = l1Data.candles[l1Data.candles.length - 1];
         if (!lastBar) continue;
         checked++;
+
+        // 防呆：官方值若相對「前一日封存收盤」跳動 >50%（來源錯位），不可拿來覆寫 L1
+        const prevBar = l1Data.candles[l1Data.candles.length - 2];
+        if (suspectsGrossJump(prevBar?.close, official)) continue;
 
         const diffAbs = Math.abs(lastBar.close - official.close);
         const diffPct = diffAbs / official.close;
