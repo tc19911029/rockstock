@@ -29,6 +29,7 @@ import type { ResonanceRecord, SanSeScanResult } from '@/lib/cn-sanse/scan';
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
+const focusMode = args.includes('--focus');   // 精簡：只吐 top1-3 + 持有/停損（回測依據版）
 const dateArg = args.find(a => /^\d{4}-\d{2}-\d{2}$/.test(a));
 const date = dateArg ?? getLastTradingDay('TW');
 
@@ -52,6 +53,9 @@ interface FunnelRow {
   entryReason: string;
   deviationMa20: number | null;
   vetoed: boolean;
+  price: number;              // 掃描日收盤（進場參考）
+  signalLow: number | null;   // 掃描日(訊號紅K)最低 → 停損參考
+  shortAttack: number;        // 三色短攻強度（回測驗證的排序鍵之一）
 }
 
 async function main(): Promise<void> {
@@ -87,10 +91,11 @@ async function main(): Promise<void> {
     const combo = r.report?.combo;
     const z = r.zhuSix;
 
-    // 進場時機（末升段）— 讀 L1 算 computeEntryState
+    // 進場時機（末升段）— 讀 L1 算 computeEntryState；順便取訊號日(紅K)最低做停損
     let entryState: EntryState = 'watch';
     let entryReason = '';
     let deviationMa20: number | null = null;
+    let signalLow: number | null = null;
     const file = (await readCandleFile(r.symbol, 'TW'))
       ?? (await readCandleFile(`${code}.TWO`, 'TW'))
       ?? (await readCandleFile(`${code}.TW`, 'TW'));
@@ -99,6 +104,8 @@ async function main(): Promise<void> {
       entryState = res.state;
       entryReason = res.reasons[0] ?? '';
       deviationMa20 = res.metrics.deviationMa20;
+      const bar = file.candles.find(c => c.date === date) ?? file.candles[file.candles.length - 1];
+      signalLow = bar?.low ?? null;
     }
 
     rows.push({
@@ -109,6 +116,7 @@ async function main(): Promise<void> {
       theme: hotByCode.get(code) ?? null,
       entryState, entryReason, deviationMa20,
       vetoed: disposal.has(code),
+      price: r.price, signalLow, shortAttack: r.report?.scores?.shortAttack ?? 0,
     });
   }
 
@@ -132,6 +140,34 @@ async function main(): Promise<void> {
 
   if (asJson) {
     console.log(JSON.stringify({ date, hotThemes, canEnter, watch, noChase, vetoedStrong }, null, 2));
+    return;
+  }
+
+  // ── 精簡模式（--focus）：回測依據版，只吐可執行的 1-3 檔 ──
+  // backtest-rank-edge 證實：三色訊號池「依漲幅排序取 top1」d5 排序alpha +0.80%、
+  // d20 +2.44%（六條件當排序鍵無效 +0.03%）。edge 集中在 top1、快速衰減，故只取 3 檔。
+  // 勝率 42% < 基準 → 靠大贏家右尾，紀律(抱~20天讓贏家跑、跌破停損砍)決定生死。
+  if (focusMode) {
+    const byChg = [...strongLive].sort((a, b) => b.changePct - a.changePct).slice(0, 3);
+    console.log(`\n════ daily-pick 精簡（${date}）｜依漲幅取 top3（回測 top1 排序alpha +0.8% d5 / +2.4% d20）════`);
+    if (!byChg.length) { console.log('  今日無三色強候選（過 veto 後）。'); return; }
+    byChg.forEach((x, i) => {
+      // 停損：守訊號紅K最低，夾在 3%~7% 區間（書本 5-7%；一字漲停 low=收盤會算出 0% → 下限 3% 兜底）
+      const floor7 = x.price * 0.93;  // 風險上限 7%
+      const ceil3 = x.price * 0.97;   // 最小停損空間 3%
+      const raw = x.signalLow ?? floor7;
+      const stop = Math.max(floor7, Math.min(raw, ceil3));
+      const stopPct = ((stop - x.price) / x.price) * 100;
+      const tag = x.entryState === 'no_chase' ? '⚡末升段·高動能高波動' : x.entryState === 'can_enter' ? '低乖離·穩' : '時機中性';
+      const th = x.theme ? `｜${x.theme}` : '';
+      console.log(`\n  #${i + 1} ${x.code} ${x.name}（${x.industry.slice(0, 6)}）　漲 ${x.changePct >= 0 ? '+' : ''}${x.changePct.toFixed(1)}%　${x.comboLabel}${th}`);
+      console.log(`     收盤 ${x.price}　${tag}　六條件 ${x.sixCore ? '核心✓' : ''}${x.sixTotal}/6`);
+      console.log(`     進場：明日 13:25 掛市價（≈ 今收 ${x.price}）`);
+      console.log(`     停損：${stop.toFixed(2)}（守訊號紅K低/-7%，距現 ${stopPct.toFixed(1)}%）— 跌破收盤就砍`);
+      console.log(`     持有：~20 交易日讓動能走完；中途跌破停損或大量長黑先出`);
+    });
+    console.log(`\n  ⚠️ 勝率約 4 成、靠大贏家：3 檔分批、嚴守停損，賠的小賺的大才有那 +0.8% edge。`);
+    console.log(`  ⚠️ edge 集中 top1，取超過 3 檔等於沒排序；扣交易成本後淨 edge 薄，紀律 > 選股。`);
     return;
   }
 
