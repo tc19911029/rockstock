@@ -156,14 +156,18 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`\n🟢 可進場（三色強 + 過veto + 時機 can_enter）：${canEnter.length} 檔`);
+  // ⚠️ 2026-06-13 回測修正（backtest-daily-pick）：在六條件∩三色 context 下，
+  // 末升段(no_chase)股前瞻報酬反而最高(d5 +1.65% vs can_enter −0.63%)、動能持續，
+  // 只是波動最大。所以下面不再把 can_enter 當「最該買」、no_chase 當「避開」——
+  // 改成中性陳述（低乖離=穩但弱 / 末升段=強但險），由你按風險偏好挑。
+  console.log(`\n🟢 低乖離·時機乾淨（can_enter，波動小但回測報酬偏弱）：${canEnter.length} 檔`);
   if (canEnter.length) canEnter.forEach(x => console.log(fmt(x)));
-  else console.log('  （無）—— 強候選的時機都還沒到，今天沒有乾淨的當下買點');
+  else console.log('  （無）');
 
-  console.log(`\n🟡 觀察（三色強但時機未到，等回測不破/翻 can_enter）：${watch.length} 檔`);
+  console.log(`\n🟡 觀察（三色強·時機中性）：${watch.length} 檔`);
   watch.slice(0, 10).forEach(x => console.log(fmt(x)));
 
-  console.log(`\n🔴 已漲多·不可追（末升段，看不追）：${noChase.length} 檔`);
+  console.log(`\n🔴 末升段·高動能（no_chase，回測前瞻報酬最高但波動/回檔最大 — 強勢續強，非「不可買」）：${noChase.length} 檔`);
   noChase.slice(0, 8).forEach(x => console.log(`${fmt(x)}　← ${x.entryReason}`));
 
   if (vetoedStrong.length) {
