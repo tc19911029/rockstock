@@ -123,7 +123,7 @@ export default function DailyPickPage() {
                 <div key={x.code} className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="text-slate-500 text-sm">#{i + 1}</span>
-                    <Link href={`/?load=${x.code}`} className="font-semibold hover:text-sky-400">
+                    <Link href={`/?load=${x.code}&date=${data.date}`} className="font-semibold hover:text-sky-400">
                       {x.code} {x.name}
                     </Link>
                     <span className="text-xs text-slate-500">{x.industry}</span>
@@ -167,9 +167,9 @@ export default function DailyPickPage() {
             )}
 
             {/* 分層候選 */}
-            <Tier title="🟢 低乖離·時機乾淨（穩但回測報酬偏弱）" rows={data.canEnter} />
-            <Tier title="🟡 時機中性" rows={data.watch} max={12} />
-            <Tier title="🔴 末升段·高動能（回測報酬最高但波動最大，非不可買）" rows={data.noChase} max={10} />
+            <Tier title="🟢 低乖離·時機乾淨（穩但回測報酬偏弱）" rows={data.canEnter} date={data.date} />
+            <Tier title="🟡 時機中性" rows={data.watch} max={12} date={data.date} />
+            <Tier title="🔴 末升段·高動能（回測報酬最高但波動最大，非不可買）" rows={data.noChase} max={10} date={data.date} />
 
             {data.vetoedStrong.length > 0 && (
               <div className="mt-6">
@@ -199,7 +199,7 @@ function Outcome({ o }: { o: Outcome }) {
   );
 }
 
-function Tier({ title, rows, max = 999 }: { title: string; rows: Row[]; max?: number }) {
+function Tier({ title, rows, max = 999, date }: { title: string; rows: Row[]; max?: number; date: string }) {
   if (!rows?.length) return null;
   return (
     <div className="mb-5">
@@ -210,7 +210,7 @@ function Tier({ title, rows, max = 999 }: { title: string; rows: Row[]; max?: nu
             {rows.slice(0, max).map(x => (
               <tr key={x.code} className="border-b border-slate-800/50">
                 <td className="py-1 pr-2">
-                  <Link href={`/?load=${x.code}`} className="hover:text-sky-400">{x.code} {x.name}</Link>
+                  <Link href={`/?load=${x.code}&date=${date}`} className="hover:text-sky-400">{x.code} {x.name}</Link>
                 </td>
                 <td className="py-1 px-2 text-slate-500">{x.industry.slice(0, 6)}</td>
                 <td className="py-1 px-2 text-right"><Chg v={x.changePct} /></td>
