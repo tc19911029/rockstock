@@ -65,7 +65,7 @@ const SYMBOL = '3661.TW';
 const STOCK_NAME = '世芯-KY';
 const USER_ID = '14459827';
 const USER_NAME = 'jasmine777';
-const HORIZONS = [1, 5, 10, 20]; // forward 交易日
+const HORIZONS = [1, 2, 3, 4, 5, 10, 20]; // forward 交易日
 const MAX_EXCURSION_WINDOW = 20; // 計算最大漲幅/回檔的窗口（交易日）
 const OUT_DIR = 'data/reports';
 
