@@ -23,7 +23,14 @@ interface Outcome {
   entryOpen: number; exitClose: number; ret: number; holdDays: number;
   exitReason: 'stop' | 'time' | 'holding'; maxGain: number; maxLoss: number;
 }
-interface Focus extends Row { stop: number; stopPct: number; outcome: Outcome | null }
+interface Fwd {
+  openReturn?: number | null; d1Return?: number | null; d2Return?: number | null;
+  d3Return?: number | null; d4Return?: number | null; d5Return?: number | null;
+  d6Return?: number | null; d7Return?: number | null; d8Return?: number | null;
+  d9Return?: number | null; d10Return?: number | null; d20Return?: number | null;
+  maxGain?: number | null; maxLoss?: number | null;
+}
+interface Focus extends Row { stop: number; stopPct: number; outcome: Outcome | null; fwd: Fwd | null }
 interface Result {
   date: string; exists: boolean;
   scan: { evaluated: number; strong: number; strict: number } | null;
@@ -146,6 +153,7 @@ export default function DailyPickPage() {
                   <div className="text-[10px] text-slate-600 mt-1">
                     六條件 {x.sixCore ? '核心✓' : ''}{x.sixTotal}/6 · 跌破停損收盤就砍、大量長黑先出
                   </div>
+                  {x.fwd && <FwdRow f={x.fwd} />}
                   {x.outcome && <Outcome o={x.outcome} />}
                 </div>
               ))}
@@ -182,6 +190,30 @@ export default function DailyPickPage() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+const FWD_COLS: Array<{ k: keyof Fwd; label: string }> = [
+  { k: 'openReturn', label: '隔日開' }, { k: 'd1Return', label: '1日' }, { k: 'd2Return', label: '2日' },
+  { k: 'd3Return', label: '3日' }, { k: 'd4Return', label: '4日' }, { k: 'd5Return', label: '5日' },
+  { k: 'd6Return', label: '6日' }, { k: 'd7Return', label: '7日' }, { k: 'd8Return', label: '8日' },
+  { k: 'd9Return', label: '9日' }, { k: 'd10Return', label: '10日' }, { k: 'd20Return', label: '20日' },
+  { k: 'maxGain', label: '最高' }, { k: 'maxLoss', label: '最低' },
+];
+function FwdRow({ f }: { f: Fwd }) {
+  return (
+    <div className="mt-2 pt-2 border-t border-slate-800 flex gap-0.5">
+      {FWD_COLS.map(({ k, label }) => {
+        const v = f[k];
+        const cls = v == null ? 'text-slate-600' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-slate-400';
+        return (
+          <div key={k} className="flex-1 text-center">
+            <div className="text-[9px] text-slate-600">{label}</div>
+            <div className={`text-[10px] font-mono ${cls}`}>{v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
