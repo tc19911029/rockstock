@@ -19,7 +19,11 @@ interface Row {
   entryState: 'can_enter' | 'watch' | 'no_chase'; entryReason: string;
   deviationMa20: number | null; price: number;
 }
-interface Focus extends Row { stop: number; stopPct: number }
+interface Outcome {
+  entryOpen: number; exitClose: number; ret: number; holdDays: number;
+  exitReason: 'stop' | 'time' | 'holding'; maxGain: number; maxLoss: number;
+}
+interface Focus extends Row { stop: number; stopPct: number; outcome: Outcome | null }
 interface Result {
   date: string; exists: boolean;
   scan: { evaluated: number; strong: number; strict: number } | null;
@@ -46,13 +50,21 @@ function Chg({ v }: { v: number }) {
 export default function DailyPickPage() {
   const [data, setData] = useState<Result | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [dates, setDates] = useState<string[]>([]);
+  const [sel, setSel] = useState<string | null>(null);  // null = 最新
 
   useEffect(() => {
-    fetch('/api/daily-pick')
+    fetch('/api/daily-pick/dates').then(r => r.json())
+      .then(j => setDates((j.data ?? j).dates ?? [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setData(null); setErr(null);
+    fetch(`/api/daily-pick${sel ? `?date=${sel}` : ''}`)
       .then(r => r.json())
       .then(j => { if (j.ok === false) throw new Error(j.error ?? '載入失敗'); setData((j.data ?? j) as Result); })
       .catch(e => setErr(e instanceof Error ? e.message : String(e)));
-  }, []);
+  }, [sel]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-6">
@@ -65,6 +77,22 @@ export default function DailyPickPage() {
           三色強訊號 → 過處置veto → 依當日漲幅排序取 top3 · 帶進場/停損/持有
           {data?.date && <span className="ml-2 text-slate-600">資料日 {data.date}</span>}
         </p>
+
+        {/* 日期選擇器（回看過去 ~30 天當時選了哪 3 檔 + 後來漲跌） */}
+        {dates.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-3">
+            <button onClick={() => setSel(null)}
+              className={`text-[11px] px-2 py-0.5 rounded border ${sel === null ? 'bg-sky-900/60 border-sky-600 text-sky-200' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}>
+              最新
+            </button>
+            {dates.map(d => (
+              <button key={d} onClick={() => setSel(d)}
+                className={`text-[11px] px-2 py-0.5 rounded border ${sel === d ? 'bg-sky-900/60 border-sky-600 text-sky-200' : 'border-slate-700 text-slate-400 hover:text-slate-200'}`}>
+                {d.slice(5)}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 回測誠實警語 */}
         <div className="text-[11px] text-amber-300/80 bg-amber-950/30 border border-amber-900/40 rounded px-3 py-2 mb-4">
@@ -118,6 +146,7 @@ export default function DailyPickPage() {
                   <div className="text-[10px] text-slate-600 mt-1">
                     六條件 {x.sixCore ? '核心✓' : ''}{x.sixTotal}/6 · 跌破停損收盤就砍、大量長黑先出
                   </div>
+                  {x.outcome && <Outcome o={x.outcome} />}
                 </div>
               ))}
             </div>
@@ -153,6 +182,19 @@ export default function DailyPickPage() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function Outcome({ o }: { o: Outcome }) {
+  const cls = o.ret > 0 ? 'text-red-400' : o.ret < 0 ? 'text-green-400' : 'text-slate-400';
+  const reason = o.exitReason === 'stop' ? '🛑停損出' : o.exitReason === 'time' ? '⏱滿20日' : '持有中';
+  return (
+    <div className="mt-2 pt-2 border-t border-slate-800 text-[11px] flex flex-wrap gap-x-3 gap-y-0.5">
+      <span className="text-slate-500">事後結果（隔日開盤 {o.entryOpen} 進）：</span>
+      <span className={cls}>實現 {o.ret > 0 ? '+' : ''}{o.ret}%</span>
+      <span className="text-slate-400">{reason}（持 {o.holdDays} 日）</span>
+      <span className="text-slate-500">途中最高 +{o.maxGain}% / 最低 {o.maxLoss}%</span>
     </div>
   );
 }

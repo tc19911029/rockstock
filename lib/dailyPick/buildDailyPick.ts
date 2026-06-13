@@ -43,10 +43,23 @@ export interface DailyPickRow {
   shortAttack: number;
 }
 
+/** 事後模擬：站在掃描日當下定好進場/停損，往後走的真實結果（看過去歷史時才有） */
+export interface PickOutcome {
+  entryOpen: number;       // 隔日開盤進場價
+  exitClose: number;       // 出場收盤
+  ret: number;             // 已實現報酬 %（扣費前）
+  holdDays: number;
+  exitReason: 'stop' | 'time' | 'holding';  // holding = 還沒滿 20 天、用最新收盤暫估
+  maxGain: number;         // 持有期最高 %
+  maxLoss: number;         // 持有期最低 %
+}
+
 export interface FocusPick extends DailyPickRow {
   /** 建議停損價（守訊號紅K低，夾 3-7%）*/
   stop: number;
   stopPct: number;
+  /** 事後結果（只有「掃描日之後已有 K 棒」時才算得出；最新交易日 = null）*/
+  outcome: PickOutcome | null;
 }
 
 export interface DailyPickResult {
@@ -71,6 +84,48 @@ export function computeStop(price: number, signalLow: number | null): { stop: nu
   const raw = signalLow ?? floor7;
   const stop = Math.max(floor7, Math.min(raw, ceil3));
   return { stop: +stop.toFixed(2), stopPct: +(((stop - price) / price) * 100).toFixed(1) };
+}
+
+const HOLD_DAYS = 20;
+
+/**
+ * 事後模擬一檔 focus pick：站在 scanDate 收盤定好停損，隔日開盤進場，
+ * 跌破停損收盤就出 / 最多持有 20 日 → 真實結果。與 backtest-sop.ts 同規則。
+ * scanDate 是最新交易日（沒有隔日 K）→ 回 null。
+ */
+async function simulatePick(symbol: string, scanDate: string, stop: number): Promise<PickOutcome | null> {
+  const code = symbol.split('.')[0];
+  const file = (await readCandleFile(symbol, 'TW'))
+    ?? (await readCandleFile(`${code}.TWO`, 'TW'))
+    ?? (await readCandleFile(`${code}.TW`, 'TW'));
+  const cs = file?.candles;
+  if (!cs?.length) return null;
+  const si = cs.findIndex(c => c.date === scanDate);
+  if (si < 0 || si + 1 >= cs.length) return null; // 找不到掃描日 / 還沒有隔日 K
+  const e = si + 1;
+  const entryOpen = cs[e].open;
+  if (!(entryOpen > 0)) return null;
+
+  let exitIdx = e, exitReason: PickOutcome['exitReason'] = 'holding';
+  let maxGain = 0, maxLoss = 0;
+  for (let d = 0; d < HOLD_DAYS && e + d < cs.length; d++) {
+    const bar = cs[e + d];
+    maxGain = Math.max(maxGain, ((bar.high - entryOpen) / entryOpen) * 100);
+    maxLoss = Math.min(maxLoss, ((bar.low - entryOpen) / entryOpen) * 100);
+    exitIdx = e + d;
+    if (bar.close < stop) { exitReason = 'stop'; break; }
+    if (d === HOLD_DAYS - 1) exitReason = 'time';
+  }
+  const exitClose = cs[exitIdx].close;
+  return {
+    entryOpen: +entryOpen.toFixed(2),
+    exitClose: +exitClose.toFixed(2),
+    ret: +(((exitClose - entryOpen) / entryOpen) * 100).toFixed(2),
+    holdDays: exitIdx - e + 1,
+    exitReason,
+    maxGain: +maxGain.toFixed(1),
+    maxLoss: +maxLoss.toFixed(1),
+  };
 }
 
 export async function buildDailyPick(date: string): Promise<DailyPickResult> {
@@ -135,11 +190,13 @@ export async function buildDailyPick(date: string): Promise<DailyPickResult> {
   const strongLive = strong.filter(x => !x.vetoed);
   const vetoedStrong = strong.filter(x => x.vetoed);
 
-  // focus：依當日漲幅取 top3（backtest-rank-edge 驗證的排序鍵）
-  const focus: FocusPick[] = [...strongLive]
-    .sort((a, b) => b.changePct - a.changePct)
-    .slice(0, 3)
-    .map(x => ({ ...x, ...computeStop(x.price, x.signalLow) }));
+  // focus：依當日漲幅取 top3（backtest-rank-edge 驗證的排序鍵）+ 事後模擬結果
+  const focusBase = [...strongLive].sort((a, b) => b.changePct - a.changePct).slice(0, 3);
+  const focus: FocusPick[] = await Promise.all(focusBase.map(async x => {
+    const { stop, stopPct } = computeStop(x.price, x.signalLow);
+    const outcome = await simulatePick(`${x.code}.TW`, date, stop);
+    return { ...x, stop, stopPct, outcome };
+  }));
 
   // 分層清單（一般模式用）— 排序：漲幅 desc（與 focus 一致，evidence-based）
   const byChg = (a: DailyPickRow, b: DailyPickRow) => b.changePct - a.changePct;
