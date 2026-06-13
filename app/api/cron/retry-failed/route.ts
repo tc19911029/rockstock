@@ -22,6 +22,7 @@ import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { twseHistProvider } from '@/lib/datasource/TWSEHistProvider';
+import { fugleDailyProvider } from '@/lib/datasource/FugleProvider';
 import { tencentHistProvider } from '@/lib/datasource/TencentHistProvider';
 import { yahooProvider } from '@/lib/datasource/YahooDataProvider';
 import type { Candle } from '@/types';
@@ -52,9 +53,9 @@ interface FetchResult {
 /**
  * 嘗試多個 API 來源下載 K 線，第一個成功就返回
  *
- * TW: Scanner(FinMind) → TWSE → Yahoo
+ * TW: Scanner(FinMind) → Fugle → TWSE → Yahoo
  * CN: Scanner(EastMoney) → Tencent → Yahoo
- * （2026-06-13：EODHD 不續訂移除；CN 第三層改 Yahoo）
+ * （2026-06-13：EODHD 不續訂移除；TW 第二層補 Fugle、CN 第三層改 Yahoo）
  */
 async function fetchWithFallback(
   symbol: string,
@@ -72,7 +73,15 @@ async function fetchWithFallback(
   }
 
   if (market === 'TW') {
-    // 第二層：TWSE
+    // 第二層：Fugle 日K（官方 API、上市+上櫃、免費層 60 次/分）
+    try {
+      const candles = await fugleDailyProvider.getHistoricalCandles(symbol, '2y');
+      if (candles.length >= MIN_CANDLE_COUNT) {
+        return { candles, source: 'Fugle' };
+      }
+    } catch { /* continue */ }
+
+    // 第三層：TWSE
     try {
       const candles = await twseHistProvider.getHistoricalCandles(symbol, '2y');
       if (candles.length >= MIN_CANDLE_COUNT) {
@@ -80,7 +89,7 @@ async function fetchWithFallback(
       }
     } catch { /* continue */ }
 
-    // 第三層：Yahoo
+    // 第四層：Yahoo
     try {
       const candles = await yahooProvider.getHistoricalCandles(symbol, '2y');
       if (candles.length >= MIN_CANDLE_COUNT) {

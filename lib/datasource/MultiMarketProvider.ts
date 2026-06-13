@@ -20,6 +20,7 @@ import type { Candle, CandleWithIndicators } from '@/types';
 import { DataProvider } from './DataProvider';
 import { twseHistProvider } from './TWSEHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
+import { fugleDailyProvider } from './FugleProvider';
 import { eastMoneyHistProvider, getSinaMinuteCandles } from './EastMoneyHistProvider';
 import { tencentHistProvider } from './TencentHistProvider';
 import { baiduHistProvider } from './BaiduHistProvider';
@@ -387,13 +388,17 @@ export class MultiMarketProvider implements DataProvider {
     const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval ?? '');
 
     if (market === 'TW') {
-      // 走圖路由：FinMind → TWSE → Yahoo（3 層 fallback）
-      // 2026-06-13：EODHD 不續訂（token 401 失效）從鏈中移除 — 原本就夾在中間，
-      // 前後皆有活源，移除只是省一次死呼叫
+      // 走圖路由：FinMind → Fugle → TWSE → Yahoo（4 層 fallback）
+      // 2026-06-13：EODHD 不續訂移除；補 Fugle 日K（官方 API、上市+上櫃、
+      // 免費層 60 次/分、FinMind 402 熔斷時的快速第二層 — TWSE 逐月較慢墊後）
       result = await tryProvidersWithRacing([
         {
           name: `FinMind ${symbol}`,
           fn: () => finmindHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
+        },
+        {
+          name: `Fugle ${symbol}`,
+          fn: () => fugleDailyProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
         {
           name: `TWSE ${symbol}`,
@@ -498,11 +503,15 @@ export class MultiMarketProvider implements DataProvider {
     let result: Candle[];
 
     if (market === 'TW') {
-      // 2026-06-13：EODHD 不續訂移除
+      // 2026-06-13：EODHD 不續訂移除，補 Fugle 日K 第二層
       result = await tryProvidersWithRacing([
         {
           name: `FinMind range ${symbol}`,
           fn: () => finmindHistProvider.getCandlesRange(symbol, startDate, endDate),
+        },
+        {
+          name: `Fugle range ${symbol}`,
+          fn: () => fugleDailyProvider.getCandlesRange(symbol, startDate, endDate),
         },
         {
           name: `TWSE range ${symbol}`,

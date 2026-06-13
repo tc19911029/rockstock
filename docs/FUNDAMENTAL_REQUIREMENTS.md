@@ -93,8 +93,9 @@
 ### 硬性規則
 
 - （2026-06-13 註：EODHD 不續訂，已從所有鏈路移除 — 上表為現行路由。歷史鏈
-  TW: FinMind→TWSE→Yahoo、CN: Tencent→Baidu→Yahoo→EastMoney，單一事實在
-  MultiMarketProvider.ts）
+  TW: FinMind→Fugle→TWSE→Yahoo、CN: Tencent→Baidu→Yahoo→EastMoney，單一事實在
+  MultiMarketProvider.ts；Fugle 日K = 官方 API 上市+上櫃、免費層 60 次/分、
+  單次範圍 <1 年自動分窗）
 - 收盤後全市場日K更新、盤中全市場粗掃、個股高頻走圖，必須分為不同資料鏈路
 - 各任務需有獨立節流、重試、快取與優先級策略
 - 系統需自行控制 API 使用量，避免超過供應商限制

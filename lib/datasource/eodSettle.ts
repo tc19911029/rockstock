@@ -18,6 +18,7 @@ import { yahooProvider } from './YahooDataProvider';
 import { tencentHistProvider } from './TencentHistProvider';
 import { eastMoneyHistProvider } from './EastMoneyHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
+import { fugleDailyProvider } from './FugleProvider';
 import { isValidTwTick, snapTwTick, isTwEtf } from './twTick';
 import type { Candle } from '@/types';
 import type { VendorBatchCache } from './eodSettleBatch';
@@ -194,13 +195,14 @@ export async function settleSymbol(
   //    2026-06-12（QA 提案 #3 額度預算）：已有官方 bulk 錨（TWSE/TPEx）時跳過 FinMind —
   //    bulk + Yahoo/EODHD 即可多源驗證，省下每輪 ~2000 次配額呼叫，把額度留給
   //    bulk 失敗的 degraded 日與其他 cron。bulk 缺席時 FinMind 照舊參與。
-  // 2026-06-13：EODHD 不續訂（token 401）從錨點移除。TW bulk 在場時 = 官方 bulk +
-  // Yahoo + L1-existing 三票（.TWO 另有 twTick 次檔位鐵證守衛）；bulk 缺席照舊 FinMind 補錨。
+  // 2026-06-13：EODHD 不續訂（token 401）從錨點移除，補 Fugle（官方 API、上市+上櫃）
+  // 頂替它的「第三獨立廠商」角色。TW bulk 在場 = 官方 bulk + Fugle + Yahoo + L1-existing
+  // 四票（.TWO 另有 twTick 次檔位鐵證守衛）；bulk 缺席照舊 FinMind 補錨。
   const hasBulkAnchor = quotes.length > 0;
   const perSymProviders = market === 'TW'
     ? (hasBulkAnchor
-      ? [yahooProvider]
-      : [finmindHistProvider, yahooProvider])
+      ? [fugleDailyProvider, yahooProvider]
+      : [finmindHistProvider, fugleDailyProvider, yahooProvider])
     : [eastMoneyHistProvider, tencentHistProvider, yahooProvider];
 
   const settled = await Promise.allSettled(
