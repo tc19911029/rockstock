@@ -67,6 +67,15 @@ const TIER_CLS: Record<string, string> = {
   C: 'text-zinc-400 border-zinc-600 bg-zinc-900/40',
 };
 const THEME_STAGE_CN: Record<string, string> = { fermenting: '發酵', main_rise: '主升', divergence: '分歧', ebb: '退潮' };
+// 題材階段徽章配色：發酵=綠(早期)、主升=紅(最熱)、分歧=琥珀(高位警戒)、退潮=灰
+const themeStageCls = (stage: string): string => ({
+  fermenting: 'bg-emerald-500/15 text-emerald-400',
+  main_rise: 'bg-red-500/15 text-red-400',
+  divergence: 'bg-amber-500/15 text-amber-400',
+  ebb: 'bg-muted text-muted-foreground',
+}[stage] ?? 'bg-secondary text-muted-foreground');
+// 強度條配色：高=紅熱、中=琥珀、低=灰
+const strengthBarCls = (s: number): string => (s >= 70 ? 'bg-red-500' : s >= 40 ? 'bg-amber-500' : 'bg-muted-foreground/40');
 const POSITION_CN: Record<string, string> = { leader: '龍頭', core: '中軍', follower: '跟風', misc: '雜毛' };
 const BOARD_CN: Record<string, string> = { 'SH-main': '滬主板', 'SZ-main': '深主板', ChiNext: '創業板', STAR: '科創板', BJ: '北交所' };
 const SEAT_TYPE_STYLE: Record<SeatType, { label: string; cls: string }> = {
@@ -127,7 +136,7 @@ export function CnAgentsTab() {
   if (loading && !data) return <div className="text-center py-12 text-muted-foreground">載入中…</div>;
   if (error && !data) return <div className="rounded border border-red-700 bg-red-950/40 p-6 text-sm text-red-300">讀取錯誤：{error}</div>;
   if (!data || !data.date) {
-    return <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground">尚無資料，先跑 <code className="text-foreground">/api/cron/cn-agents-eod</code></div>;
+    return <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-8 text-center text-muted-foreground">尚無資料，先跑 <code className="text-foreground">/api/cron/cn-agents-eod</code></div>;
   }
 
   const d = data;
@@ -136,7 +145,7 @@ export function CnAgentsTab() {
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* 日期切換 */}
-      <div className="rounded-lg border border-border bg-card p-3">
+      <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-3">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold">陸股情緒決策歷史</h2>
           <span className="text-[10px] text-muted-foreground">選交易日回溯當天的選股與事後績效{loading ? ' · 載入中…' : ''}</span>
@@ -169,23 +178,48 @@ export function CnAgentsTab() {
         </div>
       )}
 
-      {/* 最熱題材（為什麼熱） */}
-      <section className="rounded-lg border border-border bg-card p-4">
-        <h2 className="text-sm font-semibold mb-2">今日最熱題材（為什麼熱）</h2>
+      {/* 最熱題材（為什麼熱）— 豐富卡片格：強度條 + 階段徽章 + 龍頭/政策 chip */}
+      <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
+        <h2 className="font-heading text-base font-medium mb-2.5">今日最熱題材<span className="text-xs font-normal text-muted-foreground ml-1.5">為什麼熱 · 共 {d.themes.length} 個</span></h2>
         {d.themes.length === 0 ? (
           <div className="text-xs text-muted-foreground">這天沒有題材語意（需 /cn-agents-analysis 跑過；歷史日多半空）。可看下方板塊漲幅看資金流向。</div>
         ) : (
-          <div className="space-y-2">
-            {d.themes.map((t) => (
-              <div key={t.id} className="text-xs border-b border-border/40 pb-2 last:border-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-sm">{t.name}</span>
-                  <span className="px-1.5 py-px rounded border border-border text-[10px]">{THEME_STAGE_CN[t.stage] ?? t.stage}</span>
-                  <span className="text-muted-foreground">強度 {t.strength}</span>
-                  {t.policy_link && <span className="px-1.5 py-px rounded border border-amber-700/50 bg-amber-950/30 text-amber-300 text-[10px]">政策：{t.policy_link.event.slice(0, 16)}</span>}
-                  {t.leader_symbol && <span className="text-muted-foreground">龍頭 {t.leader_symbol}</span>}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+            {d.themes.map((t, i) => (
+              <div key={t.id} className="rounded-lg ring-1 ring-foreground/10 bg-secondary/25 p-3 flex flex-col gap-2 hover:ring-sky-500/40 transition-shadow">
+                {/* 標題列：名次 + 題材名 + 階段徽章 */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0">#{i + 1}</span>
+                  <span className="font-heading font-medium text-sm truncate flex-1">{t.name}</span>
+                  <span className={`px-1.5 py-px rounded text-[10px] font-medium shrink-0 ${themeStageCls(t.stage)}`}>
+                    {THEME_STAGE_CN[t.stage] ?? t.stage}
+                  </span>
                 </div>
-                {t.logic_summary && <div className="text-muted-foreground mt-0.5">{t.logic_summary}</div>}
+                {/* 強度條 */}
+                <div>
+                  <div className="flex justify-between text-[10px] text-muted-foreground leading-tight mb-0.5">
+                    <span>強度</span><span className="font-mono tabular-nums text-foreground/80">{t.strength}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className={`h-full rounded-full ${strengthBarCls(t.strength)}`} style={{ width: `${Math.min(100, Math.max(0, t.strength))}%` }} />
+                  </div>
+                </div>
+                {/* chips：龍頭 / 政策 */}
+                {(t.leader_symbol || t.policy_link) && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {t.leader_symbol && (
+                      <span className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300 text-[10px] font-mono">龍頭 {t.leader_symbol}</span>
+                    )}
+                    {t.policy_link && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 text-[10px]" title={t.policy_link.event}>
+                        政策 {t.policy_link.event.slice(0, 12)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {t.logic_summary && (
+                  <p className="text-[11px] text-muted-foreground leading-snug line-clamp-3">{t.logic_summary}</p>
+                )}
               </div>
             ))}
           </div>
@@ -194,9 +228,9 @@ export function CnAgentsTab() {
       </section>
 
       {/* ②③ 今日選股清單（掃描面板式：排序 pill + 模式篩選 + 每張卡附報酬橫條） */}
-      <section className="rounded-lg border border-border bg-card p-4">
-        <h2 className="text-sm font-semibold mb-1">今日選股（{d.candidates.length} 檔候選，A 類最值得看）</h2>
-        <div className="text-[10px] text-muted-foreground mb-2">每張卡：當日漲幅（右上）＋ 模式/連板/題材徽章 ＋ 底部一排推薦後 1~20 日漲跌；🟢=第5日收盤&gt;+3%。綠框=A 類。點 ▼ 看理由。</div>
+      <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
+        <h2 className="text-sm font-semibold mb-1">今日選股（{d.candidates.length} 檔候選）</h2>
+        <div className="text-[10px] text-muted-foreground mb-2">⚠ 回測證實這套分數是「反指標」：分數最高（追漲停）的事後系統性跌、分數最低（最不熱）的反而較會漲。所以預設「應買」排序＝<b>分數低在前</b>（也只是打平、靠少數中獎、非買賣建議）。每張卡：當日漲幅（右上）＋ 模式/連板/題材徽章 ＋ 底部一排推薦後 1~20 日漲跌；🟢=第5日收盤&gt;+3%。點 ▼ 看理由。</div>
         <CandidateList candidates={d.candidates} date={d.date} themes={d.themes} />
         <Info>候選池=漲停∪炸板∪龍虎榜淨買∪主力流入top50∪人氣top50，去重後打分排序（硬分+Claude語意分+情緒階段校準）。績效=隔日開盤進場、d1=進場日收盤；成功=第5日收盤&gt;+3%；最近的日子（隔日K未封）顯示「—」。</Info>
       </section>
@@ -220,7 +254,7 @@ export function CnAgentsTab() {
 
       {/* ④ 主線 / 板塊強弱 */}
       {d.boards && (
-        <section className="rounded-lg border border-border bg-card p-4">
+        <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
           <h2 className="text-sm font-semibold mb-2">板塊強弱（資金往哪流）</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <BoardTable title="行業漲幅 Top10" entries={d.boards.industries} />
@@ -231,7 +265,7 @@ export function CnAgentsTab() {
       )}
 
       {/* ⑤ 今日龍虎榜（淨買超排序） */}
-      <section className="rounded-lg border border-border bg-card p-4 overflow-x-auto">
+      <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 overflow-x-auto">
         <h2 className="text-sm font-semibold mb-1">今日龍虎榜（淨買超排序）</h2>
         <div className="text-[10px] text-muted-foreground mb-2">淨買超大的在前、賣超落底。🔴=回測上會跌（拉薩在買/跌多上榜/淨賣超）。</div>
         {d.lhb.stocks.length === 0 ? (
@@ -274,7 +308,7 @@ export function CnAgentsTab() {
 
       {/* ⑥ 連板梯隊 */}
       {d.ladder.length > 0 && (
-        <section className="rounded-lg border border-border bg-card p-4">
+        <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
           <h2 className="text-sm font-semibold mb-2">連板梯隊（高度 Top，全市場非 ST）</h2>
           <div className="flex flex-wrap gap-1.5">
             {d.ladder.map((l) => (
@@ -298,11 +332,12 @@ export function CnAgentsTab() {
 
 // ── 子元件 ───────────────────────────────────────────────────────────────────
 
-// 選股清單排序鍵（對齊策略掃描面板的「排序」pill 列；三色專屬的短攻/中強/中控/超短跌
-// 與漲跌·隔開不適用陸股，改用陸股有的：分數/漲幅/股價/成交量/連板 + 推薦後各日漲跌）
-type SortKey = 'score' | 'change' | 'price' | 'turnover' | 'boards' | 'd1' | 'd5' | 'd20' | 'mfe' | 'mae';
+// 選股清單排序鍵。預設「應買」= 回測證實 totalScore 是反指標 → 挑「分數最低（最不熱）」的在前。
+// 三色專屬的短攻/中強/中控/超短跌與漲跌·隔開不適用陸股，改用陸股有的欄位。
+type SortKey = 'buy' | 'score' | 'change' | 'price' | 'turnover' | 'boards' | 'd1' | 'd5' | 'd20' | 'mfe' | 'mae';
 const SORT_PILLS: Array<{ key: SortKey; label: string; tip: string }> = [
-  { key: 'score', label: '分數', tip: '系統綜合分（硬分+語意分+情緒階段校準），高的排前面' },
+  { key: 'buy', label: '應買', tip: '預設。回測證實這套分數是「反指標」— 分數最高(最熱/追漲停)的事後系統性跌、分數最低(最不熱)的反而較會漲。所以應買挑分數最低的在前。⚠ 也只是「打平+靠少數中獎」、不保證、非買賣建議。' },
+  { key: 'score', label: '分數', tip: '系統原始綜合分（高在前）。⚠ 回測上分數越高事後跌越凶（最高5檔 d20 超額中位約 −9%）→ 比較適合當「該避開」清單看。' },
   { key: 'change', label: '漲幅', tip: '當日漲跌幅 %（大的排前面）' },
   { key: 'price', label: '股價', tip: '當日收盤價' },
   { key: 'turnover', label: '成交量', tip: '當日成交額（大的排前面）' },
@@ -314,8 +349,17 @@ const SORT_PILLS: Array<{ key: SortKey; label: string; tip: string }> = [
   { key: 'mae', label: '漲跌·最低', tip: '推薦後區間最大累計跌幅' },
 ];
 
+// 「應買排序值」= 純顯示排序（不動 totalScore/tier/事件）。回測（train/test + 稽核 + scripts/research-cn-ls-fix.ts）
+// 證實 totalScore 是反指標：高分(追漲停)事後系統性跌。四變體裡「分數低在前」是 out-of-sample 唯一勉強
+// 打平的（d20 超額中位 test +0.9%/勝52%），其餘（高分在前/反向漲停結構子分/移除子分）都仍負。
+// 故應買 = 分數低排前面。改此排序前先重跑 research-cn-ls-fix.ts 複驗。純排序、不改分數/分層/事件。
+function buyRank(c: Candidate): number {
+  return -c.totalScore;
+}
+
 function sortVal(c: Candidate, key: SortKey): number | null {
   switch (key) {
+    case 'buy': return buyRank(c);
     case 'score': return c.totalScore;
     case 'change': return c.info?.changePct ?? null;
     case 'price': return c.info?.close ?? null;
@@ -327,7 +371,7 @@ function sortVal(c: Candidate, key: SortKey): number | null {
 
 /** 選股清單：排序 pill + 模式篩選 chip + 卡片（仿台股策略掃描卡） */
 function CandidateList({ candidates, date, themes }: { candidates: Candidate[]; date: string | null; themes: Theme[] }) {
-  const [sort, setSort] = useState<SortKey>('score');
+  const [sort, setSort] = useState<SortKey>('buy');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
   const [modeFilter, setModeFilter] = useState<string>('all');
 
@@ -395,9 +439,8 @@ function CandidateCard({ c, date, themeName }: { c: Candidate; date: string | nu
   const [open, setOpen] = useState(false);
   const inWatch = useWatchlistStore((s) => s.has(c.symbol));
   const info = c.info;
-  const aTier = c.tier === 'A';
   return (
-    <div className={`rounded-md border px-2.5 py-1 ${aTier ? 'border-emerald-600/60 bg-emerald-950/15' : 'bg-card border-border/60'}`}>
+    <div className="rounded-md border px-2.5 py-1 bg-card border-border/60">
       {/* 第一行：分層 + 名稱 + 代號 + 模式/連板/題材 ⋯ 當日漲幅 */}
       <div className="flex items-center gap-1.5">
         <span className={`text-[9px] px-1 rounded-sm font-bold border shrink-0 ${TIER_CLS[c.tier] ?? ''}`}>{c.tier}</span>
@@ -490,7 +533,7 @@ function EmotionSparkline({ series }: { series: Array<{ date: string; emotionSco
   const ys = (v: number) => H - pad - (v / 100) * (H - 2 * pad);
   const path = series.map((p, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${ys(p.emotionScore).toFixed(1)}`).join(' ');
   return (
-    <section className="rounded-lg border border-border bg-card p-4">
+    <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
       <h2 className="text-sm font-semibold mb-2">近 {series.length} 日情緒分</h2>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="近 30 日情緒分趨勢">
         {[25, 50, 75].map((y) => <line key={y} x1={pad} x2={W - pad} y1={ys(y)} y2={ys(y)} stroke="currentColor" className="text-border" strokeWidth={0.5} strokeDasharray="3 3" />)}
@@ -517,7 +560,7 @@ function StageWinTable() {
   const shown = (rows ?? []).filter((r) => r.filled > 0);
   if (shown.length === 0) return null;
   return (
-    <section className="rounded-lg border border-border bg-card p-4 overflow-x-auto">
+    <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 overflow-x-auto">
       <h2 className="text-sm font-semibold mb-1">策略 × 情緒階段勝率（歷史回測）</h2>
       <div className="text-[10px] text-muted-foreground mb-2">過去在每個情緒階段推薦的股，事後各天「上漲比例」+ 平均漲幅 + 成功率（5日&gt;+3%）。{meta ? `共 ${meta.totalEvents} 筆事件` : ''}</div>
       <table className="w-full text-xs min-w-[640px]">

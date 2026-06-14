@@ -14,6 +14,7 @@ import {
   loadChipSeries, readInstStock, writeInstStock,
   readCnFlowStock, writeCnFlowStock,
 } from '@/lib/chips/ChipStorage';
+import { readBrokerStock } from '@/lib/chips/BrokerStorage';
 import { fetchT86ForStock } from '@/lib/datasource/TwseT86Provider';
 import { fetchCnMainFlow } from '@/lib/datasource/EastMoneyChips';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
@@ -103,6 +104,12 @@ export async function GET(req: NextRequest) {
     }
     const series = await loadChipSeries(code, days, 'TW');
 
+    // 主力分點（前15大券商淨買賣超，給 W 大戶偷買面板算 5日/20日集中度）
+    const brokerFile = await readBrokerStock(code);
+    const broker = (brokerFile?.data ?? [])
+      .slice(-days)
+      .map(d => ({ date: d.date, netDifference: d.netDifference }));
+
     // 量價背離偵測（朱家泓書本定義：3 日漲跌>5% + 縮量）
     let divergence = null;
     try {
@@ -116,7 +123,7 @@ export async function GET(req: NextRequest) {
       }
     } catch { /* divergence 失敗不影響主流程 */ }
 
-    return apiOk({ ...series, divergence });
+    return apiOk({ ...series, broker, divergence });
   } catch (err) {
     console.error('[chips] error:', err);
     return apiError('籌碼資料讀取失敗');

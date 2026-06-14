@@ -31,6 +31,25 @@ function perf(r: RecoReturns | null) {
   };
 }
 
+// CN 代號→{名稱,產業}（補既有事件的裸代號：主力流入/人氣股在 hardScore 沒拿到名/產業 → 顯示代號）。
+// cn_stocklist.json 是 { updatedAt, stocks:[{symbol,name,industry}] }（舊版裸陣列也吃）。模組層快取一次。
+let _cnMeta: Map<string, { name: string; industry: string | null }> | null = null;
+async function loadCnStockMeta(): Promise<Map<string, { name: string; industry: string | null }>> {
+  if (_cnMeta) return _cnMeta;
+  try {
+    const path = await import('path');
+    const { promises: fs } = await import('fs');
+    const parsed = JSON.parse(await fs.readFile(path.join(process.cwd(), 'data', 'cn_stocklist.json'), 'utf-8')) as
+      | Array<{ symbol: string; name: string; industry?: string | null }>
+      | { stocks: Array<{ symbol: string; name: string; industry?: string | null }> };
+    const arr = Array.isArray(parsed) ? parsed : (parsed.stocks ?? []);
+    _cnMeta = new Map(arr.map((r) => [r.symbol.split('.')[0], { name: r.name, industry: r.industry ?? null }]));
+  } catch {
+    _cnMeta = new Map();
+  }
+  return _cnMeta;
+}
+
 export async function GET(req: NextRequest) {
   try {
     // 可選日期 = 所有有寬度資料的交易日（492 天）。daily.json 只有近期 compose 過的日子有，
@@ -95,7 +114,7 @@ export async function GET(req: NextRequest) {
         verdict: sig.verdict, warnings: sig.warnings,
         buySeats: s.seats.buy.slice(0, 5).map((t) => ({ name: t.label ?? t.deptName, type: t.type, netAmt: t.netAmt })),
         sellSeats: s.seats.sell.slice(0, 5).map((t) => ({ name: t.label ?? t.deptName, type: t.type, netAmt: t.netAmt })),
-        perf: perf(returns.get(s.code) ?? null),
+        perf: perf(returns.get(s.code)?.returns ?? null),
       }));
 
     // 候選股盤面資訊（當日漲幅/股價/產業/連板/成交額）— DailyCandidate 本身沒有，
@@ -106,8 +125,29 @@ export async function GET(req: NextRequest) {
     for (const e of pool?.limitDown ?? []) if (!infoByCode.has(e.symbol)) infoByCode.set(e.symbol, { changePct: e.pct, close: e.close, industry: e.industry, consecBoards: null, turnoverCny: null, isOneWord: false });
     for (const s of lhb?.stocks ?? []) if (!infoByCode.has(s.code)) infoByCode.set(s.code, { changePct: s.changeRate, close: s.close, industry: null, consecBoards: null, turnoverCny: s.accumAmount, isOneWord: false });
 
-    // 候選股附報酬 + 盤面資訊
-    const candidates = baseCandidates.map((c) => ({ ...c, perf: perf(returns.get(c.code) ?? null), info: infoByCode.get(c.code) ?? null }));
+    // 候選股附報酬 + 盤面資訊 + 補中文名/產業（裸代號從 stocklist 查回；漲幅/收盤從 pool 缺則用 K 線當日報價補）
+    const cnMeta = await loadCnStockMeta();
+    const candidates = baseCandidates.map((c) => {
+      const meta = cnMeta.get(c.code);
+      const poolInfo = infoByCode.get(c.code) ?? null;
+      const q = returns.get(c.code)?.quote ?? null;
+      // pool（漲停/炸板/龍虎榜）權威優先；缺的用 K 線當日報價 / stocklist 補（主力流入/波段股就靠這個）
+      const info = {
+        changePct: poolInfo?.changePct ?? q?.changePct ?? null,
+        close: poolInfo?.close ?? q?.close ?? null,
+        industry: poolInfo?.industry ?? meta?.industry ?? null,
+        consecBoards: poolInfo?.consecBoards ?? null,
+        turnoverCny: poolInfo?.turnoverCny ?? null,
+        isOneWord: poolInfo?.isOneWord ?? false,
+      };
+      const hasInfo = info.changePct != null || info.close != null || info.industry != null || info.consecBoards != null;
+      return {
+        ...c,
+        name: c.name && c.name !== c.code ? c.name : (meta?.name || c.name),
+        perf: perf(returns.get(c.code)?.returns ?? null),
+        info: hasInfo ? info : null,
+      };
+    });
 
     // action/avoid：daily 有就用；歷史日合成（tier A 前 5 當 action、無 avoid 名單）
     const actionList = daily?.actionList ?? candidates.filter((c) => c.tier === 'A').slice(0, 5)

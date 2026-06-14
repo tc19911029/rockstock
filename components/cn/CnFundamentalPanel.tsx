@@ -66,7 +66,7 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
   return (
     <div className="flex flex-col gap-3 p-2.5 text-xs overflow-auto">
       {/* 估值頭 */}
-      <section className="rounded-lg border border-border bg-card px-2.5 py-2">
+      <section className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2">
         <div className="flex items-baseline gap-2">
           <span className="font-semibold text-fuchsia-300">{val?.name ?? code}</span>
           {price != null && <span className="font-mono text-base font-bold">{price}</span>}

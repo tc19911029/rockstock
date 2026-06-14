@@ -404,7 +404,7 @@ export default function PortfolioPage() {
 
   return (
     <PageShell headerSlot={portfolioHeader}>
-      <div className="p-4 max-w-3xl mx-auto space-y-4">
+      <div className="p-4 space-y-4">
 
         {/* 2026-05-29：持倉已改 server 唯一真相（holdings.json / holdings-cn.json）。
             store 啟動時從 server 灌入，UI 動作 optimistic 寫回 server，
@@ -740,7 +740,7 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
             'px-1.5 py-0.5 rounded text-[10px] font-semibold ' +
             (summary.valuationConclusion === 'undervalued' ? 'bg-emerald-900/60 text-emerald-300' :
              summary.valuationConclusion === 'overvalued' ? 'bg-rose-900/60 text-rose-300' :
-             'bg-slate-700 text-slate-200')
+             'bg-secondary text-foreground')
           }>
             {summary.valuationConclusion === 'undervalued' ? '低估' :
              summary.valuationConclusion === 'overvalued' ? '高估' : '合理'}

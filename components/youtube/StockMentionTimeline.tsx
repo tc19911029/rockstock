@@ -104,7 +104,7 @@ export function StockMentionTimelineView({
   return (
     <div className="space-y-4">
       {showRatingTimeline && history.rating_timeline.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-2">
           <h3 className="text-sm font-semibold">評級演變</h3>
           <div className="flex flex-wrap gap-2 items-center">
             {history.rating_timeline.map((t, i) => (
@@ -122,7 +122,7 @@ export function StockMentionTimelineView({
       {timelineHeading && <h2 className="text-sm font-semibold">{timelineHeading}</h2>}
 
       {dates.map(date => (
-        <div key={date} className="rounded-lg border border-border bg-card">
+        <div key={date} className="rounded-xl ring-1 ring-foreground/10 bg-card">
           <div className="px-4 py-2 border-b border-border bg-muted/20 flex items-baseline justify-between">
             <span className="text-sm font-semibold tabular-nums">{date}</span>
             <span className="text-xs text-muted-foreground">
@@ -131,7 +131,8 @@ export function StockMentionTimelineView({
           </div>
           <div className="divide-y divide-border/40">
             {entriesByDate.get(date)!.map((e, idx) => {
-              const sent = SENTIMENT_LABEL[e.sentiment];
+              // 防呆：資料若帶未知/缺漏 sentiment（非 enum 值），給安全 fallback 不讓整頁崩
+              const sent = SENTIMENT_LABEL[e.sentiment] ?? { text: e.sentiment || '—', cls: 'text-muted-foreground' };
               const sourceName = e.display_name || e.source_id;
               // 過濾掉與節目同名的 analyst（如「股市易點靈（許毓玲）」內已含「許毓玲」）
               const realAnalysts = (e.analysts ?? []).filter(
@@ -230,14 +231,14 @@ export function StockMentionTimeline({
 
   if (loading && !data) {
     return (
-      <div className="rounded-lg border border-border bg-card p-4 text-center text-sm text-muted-foreground">
+      <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 text-center text-sm text-muted-foreground">
         載入 YouTube 提及紀錄…
       </div>
     );
   }
   if (!data?.history) {
     return (
-      <div className="rounded-lg border border-border bg-card p-4 text-center text-sm text-muted-foreground">
+      <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 text-center text-sm text-muted-foreground">
         近 {data?.range_days ?? 30} 天沒有此股票的 YouTube 提及紀錄
       </div>
     );

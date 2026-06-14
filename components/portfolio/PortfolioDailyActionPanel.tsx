@@ -54,7 +54,7 @@ export function PortfolioDailyActionPanel() {
 
   if (loading && !data) {
     return (
-      <div className="rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground">
+      <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-3 text-xs text-muted-foreground">
         持倉 daily action 載入中…
       </div>
     );
@@ -76,7 +76,7 @@ export function PortfolioDailyActionPanel() {
   );
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gradient-to-r from-sky-900/30 to-transparent border-b border-border">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-foreground">📋 今日操作建議</span>

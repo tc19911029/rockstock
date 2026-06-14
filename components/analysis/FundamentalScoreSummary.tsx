@@ -66,13 +66,13 @@ export function FundamentalScoreSummary({ symbol, currentPrice }: { symbol: stri
     <div className="rounded-lg border border-cyan-700/40 bg-cyan-900/10 px-2.5 py-2 space-y-1.5 mb-2">
       <div className="text-[11px] font-semibold text-cyan-300">基本面 ＋ 估值評分</div>
       <div className="grid grid-cols-2 gap-1.5">
-        <div className="flex items-center justify-between rounded border border-border/50 bg-card/40 px-2 py-1">
+        <div className="flex items-center justify-between rounded ring-1 ring-foreground/10 bg-card/40 px-2 py-1">
           <span className="text-[10px] text-muted-foreground">基本面</span>
           {fund.score != null
             ? <ScoreLightBadge score={fund.score} light={fund.light} size="sm" />
             : <span className="text-[10px] text-muted-foreground">—</span>}
         </div>
-        <div className="flex items-center justify-between rounded border border-border/50 bg-card/40 px-2 py-1">
+        <div className="flex items-center justify-between rounded ring-1 ring-foreground/10 bg-card/40 px-2 py-1">
           <span className="text-[10px] text-muted-foreground">估值{val2.label ? `·${val2.label}` : ''}</span>
           {val2.score != null
             ? <ScoreLightBadge score={val2.score} light={val2.light} size="sm" />

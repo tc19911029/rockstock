@@ -153,7 +153,7 @@ function MemoryPageInner() {
         />
       }
     >
-      <div className="max-w-6xl mx-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
+      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
 
         {/* 日期區間 */}
         <div className="flex items-center gap-2 flex-wrap text-xs">
@@ -264,7 +264,7 @@ function MemoryPageInner() {
             )}
 
             {activeKind && loading && (
-              <div className="border border-border rounded-xl bg-card p-6 text-sm text-muted-foreground text-center animate-pulse">
+              <div className="ring-1 ring-foreground/10 rounded-xl bg-card p-6 text-sm text-muted-foreground text-center animate-pulse">
                 載入中…
               </div>
             )}
@@ -276,7 +276,7 @@ function MemoryPageInner() {
             )}
 
             {activeKind && content && (
-              <article className="bg-card border border-border rounded-xl p-4 sm:p-6">
+              <article className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 sm:p-6">
                 <pre className="whitespace-pre-wrap font-mono text-xs text-foreground/90 bg-muted/40 border border-border/60 rounded-lg p-3 sm:p-4 overflow-x-auto">
                   {content}
                 </pre>

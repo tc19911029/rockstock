@@ -153,7 +153,7 @@ export default function RiskDashboardPage() {
 
   return (
     <PageShell headerSlot={header}>
-      <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
+      <div className="px-4 py-4 space-y-4">
 
         {loading && <p className="text-sm text-muted-foreground text-center py-8">載入中…</p>}
 
@@ -199,7 +199,7 @@ export default function RiskDashboardPage() {
             </section>
 
             {/* 集中度警示 */}
-            <section className="rounded-lg border border-border bg-card p-4 space-y-2">
+            <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-2">
               <h2 className="text-sm font-semibold flex items-center gap-1.5">🎯 集中度分析</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 <div>
@@ -251,7 +251,7 @@ export default function RiskDashboardPage() {
             </section>
 
             {/* 風險預算 vs 朱書建議 */}
-            <section className="rounded-lg border border-border bg-card p-4 space-y-2">
+            <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-2">
               <h2 className="text-sm font-semibold">💰 風險預算 vs 書本建議</h2>
               <div className="text-xs space-y-1 text-foreground/80">
                 <p>朱書建議單筆風險 1-2% 總資金（書本《活用技術分析寶典》p.488）</p>
@@ -269,7 +269,7 @@ export default function RiskDashboardPage() {
             </section>
 
             {/* 每檔細節 */}
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
               <h2 className="text-sm font-semibold mb-2">📋 每檔細節</h2>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">

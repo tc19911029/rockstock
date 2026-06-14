@@ -72,7 +72,7 @@ export function PortfolioProfileSwitcher({ size = 'md' }: { size?: 'sm' | 'md' }
       {/* click-outside backdrop */}
       <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
       <div
-        className="fixed z-[61] min-w-[13rem] rounded-lg border border-border bg-card shadow-xl py-1"
+        className="fixed z-[61] min-w-[13rem] rounded-xl ring-1 ring-foreground/10 bg-card shadow-xl py-1"
         style={{ left: pos.left, top: pos.top, bottom: pos.bottom }}
       >
         <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">持倉檔案</div>

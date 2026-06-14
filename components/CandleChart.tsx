@@ -205,6 +205,14 @@ interface CandleChartProps {
     trendline: { time: string; value: number }[];
     broke: boolean;   // 今日收盤是否突破切線（決定切線顏色）
   } | null;
+  /**
+   * 大戶持股趨勢線（TDCC 千張大戶持股%）— 淡淡一條疊在主圖上，用自己的隱形價格軸（holderPct），
+   * 不壓壞 K 線價格刻度。純「格局強弱」參考、不發訊號（回測證實沒有預測力，2026-06-14）。
+   * 傳 null = 不畫。值已 forward-fill 對齊到 K 棒日期。
+   */
+  holderLine?: { time: string; value: number }[] | null;
+  /** 大戶持股線的級距標籤（依股價自動挑：千張/400張/百張大戶），預設「千張大戶」 */
+  holderLineLabel?: string;
 }
 
 export default function CandleChart({
@@ -226,6 +234,8 @@ export default function CandleChart({
   lockedPattern,
   shuangB = null,
   abcOverlay = null,
+  holderLine = null,
+  holderLineLabel = '千張大戶',
 }: CandleChartProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
@@ -248,6 +258,8 @@ export default function CandleChart({
   const shuangBRefs       = useRef<{ zhineng?: ISeriesApi<'Line'>; zb4?: ISeriesApi<'Line'>; zb5?: ISeriesApi<'Line'>; duokong?: ISeriesApi<'Line'> }>({});
   // ABC 偵測器腳位切線（除錯/驗證疊加）
   const abcTrendlineRef   = useRef<ISeriesApi<'Line'> | null>(null);
+  // 大戶持股趨勢線（千張大戶%，自己的隱形價格軸）
+  const holderLineRef     = useRef<ISeriesApi<'Line'> | null>(null);
   // Keep latest candles accessible inside event closures without re-subscribing
   const candlesRef     = useRef<CandleWithIndicators[]>(candles);
   const timeMapRef     = useRef<Map<string | number, CandleWithIndicators>>(new Map());
@@ -458,6 +470,13 @@ export default function CandleChart({
       color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
       title: 'ABC切線',
     });
+
+    // ── 大戶持股趨勢線（千張大戶%）：淡粉細線，掛自己的隱形軸 holderPct，不動 K 線價格刻度 ──
+    holderLineRef.current = chart.addSeries(LineSeries, {
+      color: 'rgba(236, 72, 153, 0.5)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+      priceScaleId: 'holderPct',
+    });
+    chart.priceScale('holderPct').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.08 } });
 
     chartRef.current  = chart;
     candleRef.current = candleSeries;
@@ -778,6 +797,13 @@ export default function CandleChart({
     r.zb5?.setData(shuangB ? toLine(shuangB.zb5) : []);
     r.duokong?.setData(shuangB ? toLine(shuangB.duokong) : []);
   }, [shuangB]);
+
+  // ── 大戶持股趨勢線：set/clear（值已對齊 K 棒日期）──
+  useEffect(() => {
+    holderLineRef.current?.setData(
+      holderLine ? holderLine.map(p => ({ time: toTime(p.time), value: p.value })) : []
+    );
+  }, [holderLine]);
 
   // ── ABC 偵測器腳位切線：set/clear（markers 併入下方 markers effect）──
   useEffect(() => {
@@ -1104,6 +1130,18 @@ export default function CandleChart({
     return (z || y || r || dk) ? { z, y, r, dk } : null;
   })();
 
+  // 大戶持股趨勢線在 hover（或最新）K 棒的數值
+  const holderLegend = (() => {
+    if (!holderLine || !displayForLegend) return null;
+    const map = new Map(holderLine.map(p => [String(p.time).replace(/\*$/, ''), p.value] as const));
+    const d = displayForLegend.date.replace(/\*$/, '');
+    const v = map.get(d);
+    if (v == null) return null;
+    const pd = prevForLegend?.date?.replace(/\*$/, '');
+    const pv = pd != null ? map.get(pd) : undefined;
+    return { v, arrow: pv != null ? (v >= pv ? ' ↑' : v < pv ? ' ↓' : '') : '' };
+  })();
+
   const statusLabel: Record<PatternStatus, { text: string; cls: string }> = {
     pending: { text: '待突破',  cls: 'bg-amber-900/80 text-amber-100 border-amber-700' },
     success: { text: '已突破',  cls: 'bg-emerald-900/80 text-emerald-100 border-emerald-700' },
@@ -1144,6 +1182,13 @@ export default function CandleChart({
             {shuangBLegend.y && <span style={{ color: '#FFD000' }}>黃線 {shuangBLegend.y.v.toFixed(2)}{shuangBLegend.y.arrow}</span>}
             {shuangBLegend.r && <span style={{ color: '#FF433D' }}>紅線 {shuangBLegend.r.v.toFixed(2)}{shuangBLegend.r.arrow}</span>}
             {shuangBLegend.dk && <span style={{ color: '#FFD000' }} className="opacity-70">多空線 {shuangBLegend.dk.v.toFixed(2)}{shuangBLegend.dk.arrow}</span>}
+          </div>
+        )}
+
+        {/* Row 1.6: 大戶持股趨勢線數值（千張大戶%）— 開啟才顯示，對齊 hover/最新 K 棒 */}
+        {holderLegend && (
+          <div className="flex items-center text-xs font-mono">
+            <span style={{ color: '#ec4899' }} className="opacity-80">{holderLineLabel} {holderLegend.v.toFixed(1)}%{holderLegend.arrow}</span>
           </div>
         )}
 

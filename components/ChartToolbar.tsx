@@ -54,6 +54,9 @@ interface ChartToolbarProps {
   /** 雙B戰法主圖疊加（陸股自創；像 BB 一樣疊在 K 線主圖上）*/
   showShuangB?: boolean;
   onShuangBToggle?: () => void;
+  /** 大戶持股趨勢線（千張大戶%）疊主圖 — 僅 TW；純格局參考、不發訊號 */
+  showHolderLine?: boolean;
+  onHolderLineToggle?: () => void;
   indicators: Indicators;
   onIndicatorToggle: (key: keyof Indicators) => void;
   /** 一鍵切換指標套組（技術面 / 三色資金）；不提供則不顯示套組 tab */
@@ -166,6 +169,7 @@ export default function ChartToolbar({
   maToggles, onMaToggle,
   showBollinger, onBollingerToggle,
   showShuangB = false, onShuangBToggle,
+  showHolderLine = false, onHolderLineToggle,
   indicators, onIndicatorToggle,
   onApplyPreset,
   showMarkers, onMarkersToggle,
@@ -328,6 +332,17 @@ export default function ChartToolbar({
             }`}
             title="雙B戰法（三色資金）— 智能交易線/ZB4/ZB5/多空線 + 黃紅雙線金叉死叉買賣點，疊在 K 線主圖上"
           >雙B</button>
+        )}
+        {isTW && onHolderLineToggle && (
+          <button
+            onClick={onHolderLineToggle}
+            aria-pressed={showHolderLine}
+            aria-label={`${showHolderLine ? '隱藏' : '顯示'}千張大戶持股趨勢線`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showHolderLine ? 'bg-pink-700/60 text-pink-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="千張大戶持股趨勢線（集保）— 淡淡一條疊主圖看格局強弱；純參考、不發訊號（回測無預測力）"
+          >大戶</button>
         )}
         {INDICATOR_CONFIGS.map(({ key, label }) => (
           <button key={key}

@@ -539,7 +539,7 @@ function AgentDetailPage() {
 
           {/* DU3 完整 gate：非候選股 — 無法跑多代理，用明確說明取代邀請式教學 */}
           {data && completedCount === 0 && !error && !data.candidate && (
-            <div className="border border-slate-500/40 bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded-lg p-4 text-sm space-y-1">
+            <div className="border border-border/40 bg-muted/10 text-muted-foreground/60 dark:text-foreground/80 rounded-lg p-4 text-sm space-y-1">
               <p className="font-medium">此股票不在「當日掃描候選池」，無法跑多代理分析。</p>
               <p className="text-xs text-muted-foreground">
                 多代理只評估掃描器當日選出的候選股。此頁仍可看走圖 + 4 面向資料；要分析請從 <Link href="/agents/pool" className="text-sky-400 underline">候選池</Link> 進入候選股，或先在 <Link href="/" className="text-sky-400 underline">首頁</Link> 掃描挑出候選。
@@ -617,7 +617,7 @@ function AgentDetailPage() {
           {data?.technical && <TechnicalDetail answer={data.technical} />}
           {data?.news && <NewsDetail answer={data.news} />}
           {/* YouTube 逐筆提及時間軸（重用 history API + 共用 timeline 元件，§0：純消息面視角）*/}
-          <div className="border border-slate-700 rounded p-3 bg-slate-800/30 space-y-2">
+          <div className="border border-border rounded p-3 bg-secondary/30 space-y-2">
             <h3 className="text-sm font-semibold text-cyan-300">YouTube 提及紀錄（近 30 天）</h3>
             <StockMentionTimeline code={symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')} range="30d" />
           </div>
@@ -658,10 +658,10 @@ function Panel({
     cyan: 'text-cyan-400', emerald: 'text-emerald-400', rose: 'text-rose-400', amber: 'text-amber-400',
   };
   return (
-    <section className={`border bg-slate-900 rounded-lg p-4 space-y-3 ${accentCls[accent]}`}>
+    <section className={`border bg-card rounded-xl p-4 space-y-3 ${accentCls[accent]}`}>
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className={`text-xs font-semibold tracking-wider ${titleCls[accent]}`}>▸ {title}</h2>
-        {subtitle && <span className="text-[10px] text-slate-500 italic">{subtitle}</span>}
+        {subtitle && <span className="text-[10px] text-muted-foreground/70 italic">{subtitle}</span>}
       </div>
       {children}
     </section>
@@ -692,7 +692,7 @@ function CandidateSourcesBlock({ candidate }: { candidate: Candidate }) {
             <p>命中 <span className="font-mono">{candidate.sources.technical.tracks.length}</span> 條軌：<span className="font-mono">{candidate.sources.technical.tracks.join(' / ')}</span></p>
             <p>命中買法：<span className="font-mono">{candidate.sources.technical.matchedMethods.join(' / ')}</span></p>
             <p>六條件分數：<span className="font-mono">{candidate.sources.technical.sixConditionsScore} / 6</span></p>
-            {candidate.sources.technical.reasons.map((r, i) => <p key={i} className="text-slate-400">· {zhText(r)}</p>)}
+            {candidate.sources.technical.reasons.map((r, i) => <p key={i} className="text-muted-foreground">· {zhText(r)}</p>)}
           </SourceCard>
         )}
         {candidate.sources.youtube && (
@@ -707,7 +707,7 @@ function CandidateSourcesBlock({ candidate }: { candidate: Candidate }) {
           <SourceCard tone="orange" title="籌碼面進入理由">
             <p>籌碼分數：<span className="font-mono">{candidate.sources.chip.chipScore ?? '—'}</span></p>
             <p>命中訊號：{zhSignals(candidate.sources.chip.signals)}</p>
-            {candidate.sources.chip.reasons.map((r, i) => <p key={i} className="text-slate-400">· {zhText(r)}</p>)}
+            {candidate.sources.chip.reasons.map((r, i) => <p key={i} className="text-muted-foreground">· {zhText(r)}</p>)}
           </SourceCard>
         )}
         {candidate.sources.fundamental && (
@@ -725,7 +725,7 @@ function CandidateSourcesBlock({ candidate }: { candidate: Candidate }) {
              candidate.sources.fundamental.epsYoY == null &&
              candidate.sources.fundamental.grossMargin == null &&
              candidate.sources.fundamental.reasons.length > 0
-              ? candidate.sources.fundamental.reasons.map((r, i) => <p key={i} className="text-slate-300">· {r}</p>)
+              ? candidate.sources.fundamental.reasons.map((r, i) => <p key={i} className="text-foreground/80">· {r}</p>)
               : null}
             <p>命中訊號：{zhSignals(candidate.sources.fundamental.signals)}</p>
           </SourceCard>
@@ -750,7 +750,7 @@ function SourceCard({
   return (
     <div className={`border rounded p-2.5 space-y-0.5 ${cls[tone]}`}>
       <div className={`font-medium text-sm ${titleCls[tone]}`}>{title}</div>
-      <div className="text-slate-300 space-y-0.5">{children}</div>
+      <div className="text-foreground/80 space-y-0.5">{children}</div>
     </div>
   );
 }
@@ -767,20 +767,20 @@ function VerdictCard({
 }) {
   if (!answer) {
     return (
-      <div className="border border-slate-700 rounded p-3 bg-slate-800/40">
-        <div className="text-xs text-slate-400 mb-1">{title}</div>
-        <div className="text-xs text-slate-500">⏳ 等待執行 /multi-agent-decide</div>
+      <div className="border border-border rounded p-3 bg-secondary/40">
+        <div className="text-xs text-muted-foreground mb-1">{title}</div>
+        <div className="text-xs text-muted-foreground/70">⏳ 等待執行 /multi-agent-decide</div>
       </div>
     );
   }
   return (
-    <div className="border border-cyan-700/40 rounded p-3 bg-slate-900 space-y-1.5">
+    <div className="border border-cyan-700/40 rounded p-3 bg-card space-y-1.5">
       <div className="flex items-center justify-between gap-1">
-        <span className="text-xs text-slate-400">{title}</span>
+        <span className="text-xs text-muted-foreground">{title}</span>
         <VerdictBadge verdict={answer.verdict} size="sm" />
       </div>
-      <div className="text-sm text-slate-200">{zhText(answer.overview)}</div>
-      <div className="text-xs text-slate-400">{zhText(answer.verdictReason)}</div>
+      <div className="text-sm text-foreground">{zhText(answer.overview)}</div>
+      <div className="text-xs text-muted-foreground">{zhText(answer.verdictReason)}</div>
     </div>
   );
 }
@@ -808,24 +808,24 @@ function FinalDecisionPanel({ decision }: { decision: FinalDecision }) {
         <div className="flex items-center gap-3">
           <span className="text-3xl">{cfg.emoji}</span>
           <div>
-            <h2 className="text-xl font-bold text-slate-100">最終決策：{cfg.label}</h2>
-            <p className="text-sm text-slate-300">{decision.overview}</p>
+            <h2 className="text-xl font-bold text-foreground">最終決策：{cfg.label}</h2>
+            <p className="text-sm text-foreground/80">{decision.overview}</p>
           </div>
         </div>
-        <div className="text-right text-xs text-slate-400 font-mono">
-          <div>命中規則：<span className="text-slate-200">{decision.decisionPath}</span></div>
-          <div>建議部位：<span className="text-slate-200">{sizePct}%</span>
+        <div className="text-right text-xs text-muted-foreground font-mono">
+          <div>命中規則：<span className="text-foreground">{decision.decisionPath}</span></div>
+          <div>建議部位：<span className="text-foreground">{sizePct}%</span>
             {sizeAmount && <span className="text-cyan-300 ml-1.5">（≈ {sizeAmount}）</span>}
           </div>
           {sizePct > 0 && totalCapital == null && (
-            <div className="text-[10px] text-slate-500 mt-0.5">
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">
               設定 portfolio 總資產後顯示 NT$
             </div>
           )}
         </div>
       </div>
 
-      <p className="text-sm text-slate-300">{decision.verdictReason}</p>
+      <p className="text-sm text-foreground/80">{decision.verdictReason}</p>
 
       {/* 4+1 個面向 verdict 並列 */}
       <div className="grid grid-cols-5 gap-2 text-xs">
@@ -837,10 +837,10 @@ function FinalDecisionPanel({ decision }: { decision: FinalDecision }) {
       </div>
 
       {/* 多空強度 + 進出場參數 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm border-t border-slate-700/50 pt-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm border-t border-border/50 pt-3">
         <div>
-          <div className="text-xs text-slate-400">多空辯論</div>
-          <div className="font-mono text-slate-200">
+          <div className="text-xs text-muted-foreground">多空辯論</div>
+          <div className="font-mono text-foreground">
             多 <span className="text-emerald-400">{decision.bullScore}</span>
             <span className="mx-1">vs</span>
             空 <span className="text-rose-400">{decision.bearScore}</span>
@@ -848,19 +848,19 @@ function FinalDecisionPanel({ decision }: { decision: FinalDecision }) {
         </div>
         {decision.entryPrice != null && (
           <div>
-            <div className="text-xs text-slate-400">進場價</div>
-            <div className="font-mono text-slate-200">{decision.entryPrice}</div>
+            <div className="text-xs text-muted-foreground">進場價</div>
+            <div className="font-mono text-foreground">{decision.entryPrice}</div>
           </div>
         )}
         {decision.stopLoss != null && (
           <div>
-            <div className="text-xs text-slate-400">停損</div>
+            <div className="text-xs text-muted-foreground">停損</div>
             <div className="font-mono text-rose-300">{decision.stopLoss}</div>
           </div>
         )}
         {(decision.target1 != null || decision.target2 != null) && (
           <div>
-            <div className="text-xs text-slate-400">目標</div>
+            <div className="text-xs text-muted-foreground">目標</div>
             <div className="font-mono text-emerald-300">
               {decision.target1 ?? '—'}
               {decision.target2 != null && ` / ${decision.target2}`}
@@ -871,9 +871,9 @@ function FinalDecisionPanel({ decision }: { decision: FinalDecision }) {
 
       {/* 衝突 — 強制顯示 */}
       {decision.conflicts.length > 0 && (
-        <div className="border-t border-slate-700/50 pt-3">
+        <div className="border-t border-border/50 pt-3">
           <div className="text-xs font-semibold mb-1 text-amber-300">⚠️ 各代理意見衝突（§0 — 明示不隱藏）</div>
-          <ul className="text-xs list-disc ml-5 space-y-0.5 text-slate-300">
+          <ul className="text-xs list-disc ml-5 space-y-0.5 text-foreground/80">
             {decision.conflicts.map((c, i) => <li key={i}>{c}</li>)}
           </ul>
         </div>
@@ -894,7 +894,7 @@ function VerdictMini({ label, v }: { label: string; v: 'pass' | 'watch' | 'fail'
     pass:  'bg-emerald-900/40 text-emerald-300 border border-emerald-700/50',
     watch: 'bg-amber-900/40 text-amber-300 border border-amber-700/50',
     fail:  'bg-rose-900/40 text-rose-300 border border-rose-700/50',
-  }[v] : 'bg-slate-800 text-slate-500 border border-slate-700';
+  }[v] : 'bg-secondary text-muted-foreground/70 border border-border';
   return (
     <div className={`rounded p-1.5 text-center ${cfg}`}>
       <div className="text-xs opacity-80">{label}</div>
@@ -908,7 +908,7 @@ function RiskMini({ v }: { v: 'green' | 'yellow' | 'red' | null }) {
     green:  'bg-emerald-900/40 text-emerald-300 border border-emerald-700/50',
     yellow: 'bg-amber-900/40 text-amber-300 border border-amber-700/50',
     red:    'bg-rose-900/40 text-rose-300 border border-rose-700/50',
-  }[v] : 'bg-slate-800 text-slate-500 border border-slate-700';
+  }[v] : 'bg-secondary text-muted-foreground/70 border border-border';
   return (
     <div className={`rounded p-1.5 text-center ${cfg}`}>
       <div className="text-xs opacity-80">風控</div>
@@ -935,9 +935,9 @@ function RiskDetail({ answer }: { answer: RiskAnswer }) {
           {vc.label}
         </span>
       </div>
-      <div className="border border-slate-700 rounded p-3 bg-slate-800/40">
-        <p className="font-medium text-slate-100">{zhText(answer.overview)}</p>
-        <p className="text-sm text-slate-300 mt-1">{zhText(answer.verdictReason)}</p>
+      <div className="border border-border rounded p-3 bg-secondary/40">
+        <p className="font-medium text-foreground">{zhText(answer.overview)}</p>
+        <p className="text-sm text-foreground/80 mt-1">{zhText(answer.verdictReason)}</p>
       </div>
 
       {answer.hardBlockers.length > 0 && (
@@ -945,11 +945,11 @@ function RiskDetail({ answer }: { answer: RiskAnswer }) {
           <h3 className="font-semibold text-sm text-rose-300">🚫 Hard Blockers（必擋）</h3>
           <ul className="space-y-1">
             {answer.hardBlockers.map((b, i) => (
-              <li key={i} className="text-sm flex items-start gap-2 text-slate-300">
+              <li key={i} className="text-sm flex items-start gap-2 text-foreground/80">
                 <span className="text-rose-400">●</span>
-                {b.ruleId && <span className="font-mono text-xs text-slate-500">{b.ruleId}</span>}
+                {b.ruleId && <span className="font-mono text-xs text-muted-foreground/70">{b.ruleId}</span>}
                 <span className="flex-1">{b.label}</span>
-                <span className="text-xs text-slate-400">[{b.severity}]</span>
+                <span className="text-xs text-muted-foreground">[{b.severity}]</span>
               </li>
             ))}
           </ul>
@@ -961,10 +961,10 @@ function RiskDetail({ answer }: { answer: RiskAnswer }) {
           <h3 className="font-semibold text-sm text-amber-300">⚠️ Soft Warnings</h3>
           <ul className="space-y-1">
             {answer.softWarnings.map((w, i) => (
-              <li key={i} className="text-sm flex items-start gap-2 text-slate-300">
+              <li key={i} className="text-sm flex items-start gap-2 text-foreground/80">
                 <span className="text-amber-400">●</span>
                 <span className="flex-1">{w.label}</span>
-                <span className="text-xs text-slate-400">[{w.impact}]</span>
+                <span className="text-xs text-muted-foreground">[{w.impact}]</span>
               </li>
             ))}
           </ul>
@@ -976,9 +976,9 @@ function RiskDetail({ answer }: { answer: RiskAnswer }) {
           <h3 className="font-semibold text-sm text-cyan-300">📅 即將發生事件</h3>
           <ul className="space-y-1">
             {answer.events.map((e, i) => (
-              <li key={i} className="text-sm text-slate-300">
-                <span className="font-mono text-xs text-slate-400">{e.date}</span>
-                <span className="ml-2 font-medium text-slate-200">{e.type}</span>
+              <li key={i} className="text-sm text-foreground/80">
+                <span className="font-mono text-xs text-muted-foreground">{e.date}</span>
+                <span className="ml-2 font-medium text-foreground">{e.type}</span>
                 <span className="ml-2">{e.description}</span>
               </li>
             ))}
@@ -987,7 +987,7 @@ function RiskDetail({ answer }: { answer: RiskAnswer }) {
       )}
 
       {answer.suggestedStopLoss != null && (
-        <p className="text-sm text-slate-300">
+        <p className="text-sm text-foreground/80">
           建議停損價：<span className="font-mono font-semibold text-rose-300">{answer.suggestedStopLoss}</span>
         </p>
       )}
@@ -1006,7 +1006,7 @@ function DebateDetail({ bull, bear }: { bull: BullThesis; bear: BearThesis }) {
   }));
   return (
     <Panel title="多空辯論">
-      <div className="text-sm font-mono -mt-1 mb-2 text-slate-300">
+      <div className="text-sm font-mono -mt-1 mb-2 text-foreground/80">
         多 <span className="text-emerald-400">{bull.totalStrength}</span>
         <span className="mx-1">vs</span>
         空 <span className="text-rose-400">{bear.totalStrength}</span>
@@ -1015,26 +1015,26 @@ function DebateDetail({ bull, bear }: { bull: BullThesis; bear: BearThesis }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm mb-3">
         <div className="border border-emerald-700/50 rounded p-3 bg-emerald-900/20">
           <h3 className="font-semibold text-emerald-300 mb-2">🐂 多方</h3>
-          <p className="text-xs text-slate-300">{bull.overview}</p>
+          <p className="text-xs text-foreground/80">{bull.overview}</p>
         </div>
         <div className="border border-rose-700/50 rounded p-3 bg-rose-900/20">
           <h3 className="font-semibold text-rose-300 mb-2">🐻 空方</h3>
-          <p className="text-xs text-slate-300">{bear.overview}</p>
+          <p className="text-xs text-foreground/80">{bear.overview}</p>
         </div>
       </div>
 
-      <h3 className="text-sm font-medium text-slate-300 mb-2">逐條辯論</h3>
+      <h3 className="text-sm font-medium text-foreground/80 mb-2">逐條辯論</h3>
       <div className="space-y-2">
         {pairs.map((p, i) => (
-          <div key={i} className="grid grid-cols-1 md:grid-cols-2 gap-0 border border-slate-700 rounded overflow-hidden">
-            <div className="p-3 bg-emerald-900/15 border-r border-slate-700">
+          <div key={i} className="grid grid-cols-1 md:grid-cols-2 gap-0 border border-border rounded overflow-hidden">
+            <div className="p-3 bg-emerald-900/15 border-r border-border">
               <div className="text-xs text-emerald-400 mb-1">
                 多方 #{i + 1} · 強度 {p.bullClaim.strength}/5
               </div>
-              <p className="text-sm text-slate-200">{p.bullClaim.claim}</p>
+              <p className="text-sm text-foreground">{p.bullClaim.claim}</p>
               <EvidenceList refs={p.bullClaim.evidence} />
               {p.bullClaim.weaknessAcknowledged && (
-                <p className="text-xs text-slate-400 mt-1 italic">
+                <p className="text-xs text-muted-foreground mt-1 italic">
                   自認弱點：{p.bullClaim.weaknessAcknowledged}
                 </p>
               )}
@@ -1045,16 +1045,16 @@ function DebateDetail({ bull, bear }: { bull: BullThesis; bear: BearThesis }) {
                   <div className="text-xs text-rose-400 mb-1">
                     空方反駁 · 強度 {p.bearRebuttal.strength}/5
                   </div>
-                  <p className="text-sm text-slate-200">{p.bearRebuttal.counter}</p>
+                  <p className="text-sm text-foreground">{p.bearRebuttal.counter}</p>
                   <EvidenceList refs={p.bearRebuttal.evidence} />
                   {p.bearRebuttal.partialValidity && (
-                    <p className="text-xs text-slate-400 mt-1 italic">
+                    <p className="text-xs text-muted-foreground mt-1 italic">
                       部分承認：{p.bearRebuttal.partialValidity}
                     </p>
                   )}
                 </>
               ) : (
-                <div className="text-xs text-slate-500 italic">（空方未反駁）</div>
+                <div className="text-xs text-muted-foreground/70 italic">（空方未反駁）</div>
               )}
             </div>
           </div>
@@ -1064,7 +1064,7 @@ function DebateDetail({ bull, bear }: { bull: BullThesis; bear: BearThesis }) {
       {bear.additionalConcerns.length > 0 && (
         <div className="border border-rose-700/50 rounded p-3 bg-rose-900/20 mt-3">
           <h3 className="text-sm font-medium text-rose-300">🐻 空方額外擔憂</h3>
-          <ul className="mt-1 space-y-1 text-sm text-slate-300">
+          <ul className="mt-1 space-y-1 text-sm text-foreground/80">
             {bear.additionalConcerns.map((c, i) => (
               <li key={i}>
                 <span className="font-medium text-rose-400">[{c.strength}/5]</span> {c.concern}
@@ -1080,10 +1080,10 @@ function DebateDetail({ bull, bear }: { bull: BullThesis; bear: BearThesis }) {
 
 function EvidenceList({ refs }: { refs: BullThesis['bullThesis'][0]['evidence'] }) {
   if (refs.length === 0) {
-    return <div className="text-xs text-slate-500 italic mt-1">（無 dataPoint 依據）</div>;
+    return <div className="text-xs text-muted-foreground/70 italic mt-1">（無 dataPoint 依據）</div>;
   }
   return (
-    <ul className="text-xs text-slate-400 mt-1 space-y-0.5">
+    <ul className="text-xs text-muted-foreground mt-1 space-y-0.5">
       {refs.map((r, i) => (
         <li key={i}>
           📎 <span className="font-mono text-cyan-400">{r.agent}.dp[{r.dataPointIndex}]</span>: {r.label}
@@ -1102,7 +1102,7 @@ function TechnicalDetail({ answer }: { answer: TechnicalAnswer }) {
     <Panel title={`技術面 · ${answer.reasoning.length} 段論述`}>
       <div className="flex items-center gap-3 flex-wrap -mt-1 mb-2">
         <VerdictBadge verdict={answer.verdict} />
-        {answer.overview && <span className="text-sm text-slate-300 italic">{zhText(answer.overview)}</span>}
+        {answer.overview && <span className="text-sm text-foreground/80 italic">{zhText(answer.overview)}</span>}
       </div>
       <ReasoningGroup
         sections={answer.reasoning}
@@ -1120,10 +1120,10 @@ function NewsDetail({ answer }: { answer: NewsAnswer }) {
     <Panel title={`消息面 · ${answer.reasoning.length} 段論述`}>
       <div className="flex items-center gap-3 flex-wrap -mt-1 mb-2">
         <VerdictBadge verdict={answer.verdict} />
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-muted-foreground">
           {answer.mentioned ? '🔥 進入彙整（combined_confidence ≥ 0.6）' : '— 未進入彙整'}
         </span>
-        {answer.overview && <span className="text-sm text-slate-300 italic">{zhText(answer.overview)}</span>}
+        {answer.overview && <span className="text-sm text-foreground/80 italic">{zhText(answer.overview)}</span>}
       </div>
       <ReasoningGroup
         sections={answer.reasoning}
@@ -1140,7 +1140,7 @@ function ChipDetail({ answer, market }: { answer: ChipAnswer; market?: 'TW' | 'C
     <Panel title={`籌碼面 · ${answer.reasoning.length} 段論述`}>
       <div className="flex items-center gap-3 flex-wrap -mt-1 mb-2">
         <VerdictBadge verdict={answer.verdict} />
-        {answer.overview && <span className="text-sm text-slate-300 italic">{zhText(answer.overview)}</span>}
+        {answer.overview && <span className="text-sm text-foreground/80 italic">{zhText(answer.overview)}</span>}
       </div>
       <ReasoningGroup
         sections={answer.reasoning}
@@ -1158,7 +1158,7 @@ function FundamentalDetail({ answer }: { answer: FundamentalAnswer }) {
     <Panel title={`基本面 · ${answer.reasoning.length} 段論述`}>
       <div className="flex items-center gap-3 flex-wrap -mt-1 mb-2">
         <VerdictBadge verdict={answer.verdict} />
-        {answer.overview && <span className="text-sm text-slate-300 italic">{zhText(answer.overview)}</span>}
+        {answer.overview && <span className="text-sm text-foreground/80 italic">{zhText(answer.overview)}</span>}
       </div>
       <ReasoningGroup
         sections={answer.reasoning}
@@ -1203,14 +1203,14 @@ function ReasoningGroup({
             : ref,
         );
         return (
-          <details key={r.section} className="border border-slate-700 rounded p-3 bg-slate-800/30" {...(i === 0 ? { open: true } : {})}>
+          <details key={r.section} className="border border-border rounded p-3 bg-secondary/30" {...(i === 0 ? { open: true } : {})}>
             <summary className="font-medium cursor-pointer flex items-center justify-between gap-2 text-sm text-cyan-300 hover:text-cyan-200 select-none">
               <span>{labelMap[r.section] ?? r.section}</span>
-              <span className="text-[10px] text-slate-500 text-right max-w-[60%] truncate" title={refsZh.join(' / ')}>
+              <span className="text-[10px] text-muted-foreground/70 text-right max-w-[60%] truncate" title={refsZh.join(' / ')}>
                 {refsZh.length > 0 ? `依據 ${refsZh.length} 條` : ''}
               </span>
             </summary>
-            <p className="mt-2 text-sm whitespace-pre-wrap leading-relaxed text-slate-300">{zhText(r.text)}</p>
+            <p className="mt-2 text-sm whitespace-pre-wrap leading-relaxed text-foreground/80">{zhText(r.text)}</p>
           </details>
         );
       })}
@@ -1227,13 +1227,13 @@ const CATEGORY_ZH: Record<string, string> = {
 function DataPointTable({ points, title }: { points: DataPoint[]; title: string }) {
   return (
     <details className="space-y-1">
-      <summary className="text-sm font-medium text-slate-300 cursor-pointer hover:text-slate-100 select-none">
+      <summary className="text-sm font-medium text-foreground/80 cursor-pointer hover:text-foreground select-none">
         {title}（{points.length} 筆）
       </summary>
       <div className="overflow-x-auto mt-2">
         <table className="min-w-full text-sm">
           <thead>
-            <tr className="bg-slate-800/60 text-slate-400 text-xs uppercase tracking-wider">
+            <tr className="bg-secondary/60 text-muted-foreground text-xs uppercase tracking-wider">
               <th className="px-2 py-1.5 text-left font-medium">類別</th>
               <th className="px-2 py-1.5 text-left font-medium">欄位</th>
               <th className="px-2 py-1.5 text-left font-medium">值</th>
@@ -1241,14 +1241,14 @@ function DataPointTable({ points, title }: { points: DataPoint[]; title: string 
               <th className="px-2 py-1.5 text-left font-medium">日期</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-border">
             {points.map((p, i) => (
-              <tr key={i} className="hover:bg-slate-800/40">
-                <td className="px-2 py-1 text-xs text-slate-500">{CATEGORY_ZH[p.category] ?? p.category}</td>
-                <td className="px-2 py-1 text-slate-300">{zhLabel(p.label)}</td>
-                <td className="px-2 py-1 font-mono text-xs text-slate-100">{p.value}</td>
-                <td className="px-2 py-1 text-xs text-slate-400">{zhSource(p.source)}</td>
-                <td className="px-2 py-1 text-xs text-slate-400">{p.asOf ?? '—'}</td>
+              <tr key={i} className="hover:bg-secondary/40">
+                <td className="px-2 py-1 text-xs text-muted-foreground/70">{CATEGORY_ZH[p.category] ?? p.category}</td>
+                <td className="px-2 py-1 text-foreground/80">{zhLabel(p.label)}</td>
+                <td className="px-2 py-1 font-mono text-xs text-foreground">{p.value}</td>
+                <td className="px-2 py-1 text-xs text-muted-foreground">{zhSource(p.source)}</td>
+                <td className="px-2 py-1 text-xs text-muted-foreground">{p.asOf ?? '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -1267,7 +1267,7 @@ function BookCitationTable({ cites }: { cites: BookCitation[] }) {
   };
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-medium text-slate-300">書本規則引用（{cites.length} 條）</h3>
+      <h3 className="text-sm font-medium text-foreground/80">書本規則引用（{cites.length} 條）</h3>
       <CitationGroup title="六大條件" cites={groups.six} />
       <CitationGroup title="十大戒律" cites={groups.prohibition} />
       <CitationGroup title="淘汰法 R1-R11" cites={groups.elimination} />
@@ -1279,9 +1279,9 @@ function BookCitationTable({ cites }: { cites: BookCitation[] }) {
 function CitationGroup({ title, cites }: { title: string; cites: BookCitation[] }) {
   if (cites.length === 0) return null;
   return (
-    <details className="border border-slate-700 rounded p-2 bg-slate-800/30" open>
-      <summary className="font-medium cursor-pointer text-sm text-slate-300 hover:text-slate-100 select-none">
-        {title} <span className="text-xs text-slate-500">({cites.length})</span>
+    <details className="border border-border rounded p-2 bg-secondary/30" open>
+      <summary className="font-medium cursor-pointer text-sm text-foreground/80 hover:text-foreground select-none">
+        {title} <span className="text-xs text-muted-foreground/70">({cites.length})</span>
       </summary>
       <ul className="mt-2 space-y-1">
         {cites.map((c) => (
@@ -1289,9 +1289,9 @@ function CitationGroup({ title, cites }: { title: string; cites: BookCitation[] 
             <span className={c.pass ? 'text-emerald-400' : 'text-rose-400'}>
               {c.pass ? '✓' : '✗'}
             </span>
-            <span className="font-mono text-xs text-slate-500 w-12">{c.ruleId}</span>
-            <span className="flex-1 text-slate-300">{c.label}</span>
-            <span className="text-xs text-slate-400">{zhCitationValue(c.value)}</span>
+            <span className="font-mono text-xs text-muted-foreground/70 w-12">{c.ruleId}</span>
+            <span className="flex-1 text-foreground/80">{c.label}</span>
+            <span className="text-xs text-muted-foreground">{zhCitationValue(c.value)}</span>
           </li>
         ))}
       </ul>

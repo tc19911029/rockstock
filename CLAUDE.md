@@ -89,6 +89,34 @@ Layer 4: 掃描結果層（複合主鍵，intraday vs post_close）
 
 > 加新字母 / 改 track 分流必須同步更新 buyMethodTracks.ts + scan-parity 合約測試。
 
+## 誠實 edge 紀律（2026-06-14，不可覆寫）
+
+2 年回測 + 49-agent 對抗驗證的結論：**全部 41 個宣稱策略，扣交易成本/大盤beta/存活偏差/
+過擬合後，幾乎沒有一個有穩定淨 alpha**（最好的家族 d5 淨超額也僅 +0.3~1.2%、勝率多 <50%、
+且是寬鬆基準）。工具真正價值＝**控制虧損 + 避雷（反指標）+ 紀律執行**，不是「選到飆股贏大盤」。
+
+- **停止「每天蓋新策略」**。蓋越多 = 多重檢定假發現越多（352 組合挑最佳本身就是過擬合）。
+  新排序因子/訊號組合上線前，**必須先過 `scripts/compute-honest-edge.ts` 的誠實 edge
+  且 train/test 一致**（同 [[cn_agents_crosstable_findings]] 慣例），否則只進「研究區」不進主視圖。
+- **誠實 edge 單一事實 = `lib/strategy/edgeRating.ts`**（讀 `data/backtest/honest-edge-ranking.json`）。
+  全站凡顯示策略「有沒有用」一律走它，**不可再把 raw 報酬當 alpha**（raw 含大盤 beta）。
+  分級 keep/thin/info/avoid；主視圖預設只露 keep+thin，其餘收進研究區（可一鍵還原）。
+- **反指標/避雷最可信**：高 hard_score、CN 打板熱階段、法人報告看多（broker_bullish）事後系統性偏弱
+  → 當「別碰」清單（`lib/avoidance/antiSignals.ts`）。但**價量型避雷（長上影/爆量長黑）回測反向、
+  不可當硬排除**（[[avoidance_layer_price_signals_reverse]]）。
+- **改 edgeRating 門檻或重跑回測**：先 `npx tsx scripts/compute-honest-edge.ts`（近似快版）；
+  精算版需擴充 unifiedLeaderboard 加逐日對齊指數超額後重跑（~3.6h）。
+
+## 新頁版面 checklist（2026-06-14，合約測試守）
+
+新增任何 `app/**/page.tsx`（非 redirect stub）一律：
+1. 用 `<PageShell headerSlot={<PageHeader title subtitle backButton />}>` 當外框（統一 header/nav）。
+2. **禁止寫死 `bg-slate/zinc/gray-NNN`、裸 `min-h-screen`**（會破壞日/夜主題切換，原 /sectors 病根）；
+   一律用主題變數 `bg-background`/`bg-card`/`border-border`/`text-muted-foreground`，漲跌色用 `bullBearClass`（紅漲綠跌）。
+3. 表格用 `components/shared/DataTable`、數字卡用 `StatsCard`，不要每頁手刻。
+4. 合約測試 `__tests__/contracts/page-layout-consistency.test.ts` 會擋：沒套 PageShell 或寫死底色 → 紅。
+   既有待修舊頁在該檔 `ALLOWLIST`（diagnose/disclaimer/etf），**只能減不能增**；修好一個就移除一個。
+
 ## 溝通慣例
 
 - **時區永遠是台灣 (CST, UTC+8)**。對話、log、cron 排程討論一律用 CST，不寫 UTC。

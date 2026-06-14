@@ -77,7 +77,7 @@ export function SystemTab() {
       )}
 
       {data && (
-        <div className="rounded-lg border border-border bg-card divide-y divide-border/40">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card divide-y divide-border/40">
           {data.checks.map((c, i) => (
             <div key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
               <span className={`w-2 h-2 rounded-full ${STATUS_DOT[c.status]}`} />

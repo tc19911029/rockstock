@@ -29,7 +29,7 @@ export function RiskDisclaimerModal() {
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="bg-card border border-border rounded-xl p-6 max-w-lg mx-4 shadow-2xl">
+      <div className="bg-card ring-1 ring-foreground/10 rounded-xl p-6 max-w-lg mx-4 shadow-2xl">
         <h2 className="text-lg font-bold text-amber-400 flex items-center gap-2 mb-4">
           <span>⚠️</span> 風險提示與免責聲明
         </h2>
@@ -96,7 +96,7 @@ export function FeatureGuideModal() {
 
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-card border border-border rounded-xl p-6 max-w-2xl mx-4 shadow-2xl">
+      <div className="bg-card ring-1 ring-foreground/10 rounded-xl p-6 max-w-2xl mx-4 shadow-2xl">
         <h2 className="text-lg font-bold text-sky-400 flex items-center gap-2 mb-1">
           歡迎使用 K線走圖練習器
         </h2>

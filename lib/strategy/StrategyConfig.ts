@@ -584,6 +584,114 @@ export const CN_FUNDAMENTAL_REVALUATION: StrategyConfig = {
   },
 };
 
+/**
+ * W 大戶偷買（2026-06-13 新增）
+ *
+ * 自創策略 — 徐黎芳「籌碼集中度」法：近5日股價在跌 + 三大法人逆勢買超集中度高。
+ * 訊號單一事實 = lib/smartmoney（已半年回測：跌+集中度>8% → 隔日開盤買持有5日，
+ * 贏大盤 +4.4% / 勝 83%）。底層走 MarketScanner.scanSmartMoneyDip()。
+ *
+ * strategyType='mechanical-rank'（沿用 R）：跳過六條件、戒律、淘汰法、Step 0、MTF、KD。
+ * conditions 全 false、minScore=0 為兜底。CLAUDE.md 規則 #5 對 W 軌不適用，比照 R/V。
+ */
+export const ZHU_SMART_MONEY_DIP: StrategyConfig = {
+  id:          'zhu-smart-money-dip',
+  name:        '大戶偷買（W）',
+  description: '成交額前500中，近5日在跌 + 三大法人逆勢買超集中度高（依集中度排序），不過六條件',
+  version:     '1.0.0',
+  author:      '籌碼集中度',
+  createdAt:   '2026-06-13T00:00:00.000Z',
+  isBuiltIn:   true,
+  strategyType: 'mechanical-rank',
+  buyMethod:    'W',
+  conditions: {
+    trend: false, position: false, kbar: false,
+    ma: false, volume: false, indicator: false,
+  },
+  thresholds:  {
+    ...BASE_THRESHOLDS,
+    minScore:           0,
+    bullMinScore:       0,
+    sidewaysMinScore:   0,
+    bearMinScore:       0,
+    marketTrendFilter:  false,
+    multiTimeframeFilter: false,
+    kdDecliningFilter:  false,
+  },
+};
+
+/**
+ * X 法人接刀（2026-06-14 新增）
+ *
+ * 自創策略 — grid 大搜索唯一兩年(train+test)都正的買方向：股價在跌/長黑 + 法人逆勢買，
+ * 剔除大戶持股水位超高。訊號單一事實 = lib/instdip，掃描層另剔除大戶超高（cross-sectional）。
+ * 底層走 MarketScanner.scanInstDip()。實證：test 選股漲64%/平均+10.4%(大盤+6.7%)，
+ * 但贏大盤 <50% → 傾斜而非明牌，靠賠小賺大。
+ *
+ * strategyType='mechanical-rank'：跳過六條件/戒律/淘汰法/Step 0/MTF/KD。比照 R/V/W。
+ */
+export const ZHU_INST_DIP: StrategyConfig = {
+  id:          'zhu-inst-dip',
+  name:        '法人接刀（X）',
+  description: '成交額前500中，股價在跌/長黑 + 法人逆勢買超，剔除大戶持股水位超高（依法人買超排序），不過六條件',
+  version:     '1.0.0',
+  author:      '法人接刀',
+  createdAt:   '2026-06-14T00:00:00.000Z',
+  isBuiltIn:   true,
+  strategyType: 'mechanical-rank',
+  buyMethod:    'X',
+  conditions: {
+    trend: false, position: false, kbar: false,
+    ma: false, volume: false, indicator: false,
+  },
+  thresholds:  {
+    ...BASE_THRESHOLDS,
+    minScore:           0,
+    bullMinScore:       0,
+    sidewaysMinScore:   0,
+    bearMinScore:       0,
+    marketTrendFilter:  false,
+    multiTimeframeFilter: false,
+    kdDecliningFilter:  false,
+  },
+};
+
+/**
+ * Y 法人偷買(原)（2026-06-14 新增）
+ *
+ * 使用者要的「最初版」三條件同時成立：①股價在跌 ②5日籌碼集中度(主力分點)>0 且在爬
+ * ③法人(三大法人合計)連買≥2天。訊號單一事實 = lib/inststeal。與 W/X 並排對照。
+ * ⚠️ 誠實：回測扣成本後超額≈0、贏大盤<50%、train負test正（不穩）→ 觀察用非明牌
+ * （[[inststeal_original_observation_tool]]）。
+ *
+ * strategyType='mechanical-rank'：跳過六條件/戒律/淘汰法/Step 0/MTF/KD。比照 R/V/W/X。
+ */
+export const ZHU_INST_STEAL: StrategyConfig = {
+  id:          'zhu-inst-steal',
+  name:        '法人偷買(原)（Y）',
+  description: '股價在跌 + 5日籌碼集中度在增加 + 法人連續買（三條件同時成立），不過六條件、觀察用',
+  version:     '1.0.0',
+  author:      '法人偷買(原)',
+  createdAt:   '2026-06-14T00:00:00.000Z',
+  isBuiltIn:   true,
+  strategyType: 'mechanical-rank',
+  buyMethod:    'Y',
+  conditions: {
+    trend: false, position: false, kbar: false,
+    ma: false, volume: false, indicator: false,
+  },
+  thresholds:  {
+    ...BASE_THRESHOLDS,
+    minScore:           0,
+    bullMinScore:       0,
+    sidewaysMinScore:   0,
+    bearMinScore:       0,
+    marketTrendFilter:  false,
+    multiTimeframeFilter: false,
+    kdDecliningFilter:  false,
+  },
+};
+
 export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
   ZHU_PURE_BOOK,              // 純書本版（A = long-daily 六條件的 thresholds）
   ZHU_FLAT_BOTTOM,            // D：一字底突破（2026-04-21 rename from E）
@@ -597,6 +705,9 @@ export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
   ZHU_DEVIATION_EXTREME,      // R：乖離率（2026-05-21 新增，機械軌純排名）
   TW_FUNDAMENTAL_REVALUATION, // V：台股基本面補漲（2026-05-27 新增，基本面軌）
   CN_FUNDAMENTAL_REVALUATION, // V：陸股基本面補漲（2026-05-27 新增，基本面軌）
+  ZHU_SMART_MONEY_DIP,        // W：大戶偷買（2026-06-13 新增，籌碼集中度軌）
+  ZHU_INST_DIP,               // X：法人接刀（2026-06-14 新增，grid 唯一兩年都正買方向）
+  ZHU_INST_STEAL,             // Y：法人偷買(原)（2026-06-14 新增，最初版三條件 AND，觀察用）
 ];
 
 // ── P0-3: 策略參數邊界驗證 ──────────────────────────────────────────────────────

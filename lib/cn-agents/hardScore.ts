@@ -143,9 +143,14 @@ export async function buildHardScoreEvents(date: string): Promise<CnRecoEventsFi
   try {
     const path = await import('path');
     const { promises: fs } = await import('fs');
-    const raw = JSON.parse(
+    // cn_stocklist.json 2026-06-08 起改成 { updatedAt, stocks: [...] } 信封；舊版是裸陣列。
+    // 兩種都吃，否則 raw.map 會丟錯被 catch 吞掉 → 名稱/產業全失（主力流入/人氣股退成裸代號）。
+    const parsed = JSON.parse(
       await fs.readFile(path.join(process.cwd(), 'data', 'cn_stocklist.json'), 'utf-8'),
-    ) as Array<{ symbol: string; name: string; industry?: string | null }>;
+    ) as
+      | Array<{ symbol: string; name: string; industry?: string | null }>
+      | { stocks: Array<{ symbol: string; name: string; industry?: string | null }> };
+    const raw = Array.isArray(parsed) ? parsed : (parsed.stocks ?? []);
     stocklistIndustry = new Map(raw.map((r) => [r.symbol.split('.')[0], r.industry ?? '']));
     stocklistName = new Map(raw.map((r) => [r.symbol.split('.')[0], r.name]));
   } catch { /* 清單缺 → industry/name fallback 不可用，候選仍可組 */ }

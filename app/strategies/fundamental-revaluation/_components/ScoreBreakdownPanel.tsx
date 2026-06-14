@@ -12,7 +12,7 @@ interface Props {
 
 function DimRow({ dim }: { dim: DimensionScore }) {
   return (
-    <div className="border border-border rounded-lg p-3 bg-card/50">
+    <div className="ring-1 ring-foreground/10 rounded-xl p-3 bg-card/50">
       <div className="flex items-baseline justify-between mb-2">
         <h4 className="text-sm font-medium">{dim.label}</h4>
         <span className="text-base font-bold tabular-nums">
@@ -77,7 +77,7 @@ export function ScoreBreakdownPanel({ result }: Props) {
         <DimRow dim={breakdown.risk} />
       </div>
 
-      <div className="border border-border rounded-lg p-3 bg-card/50">
+      <div className="ring-1 ring-foreground/10 rounded-xl p-3 bg-card/50">
         <h4 className="text-sm font-medium mb-2">三情境合理價</h4>
         <div className="grid grid-cols-3 gap-2 text-xs">
           {(['pessimistic', 'base', 'optimistic'] as const).map((k) => {
@@ -109,7 +109,7 @@ export function ScoreBreakdownPanel({ result }: Props) {
       </div>
 
       {result.bullPoints.length > 0 && (
-        <div className="border border-border rounded-lg p-3 bg-card/50">
+        <div className="ring-1 ring-foreground/10 rounded-xl p-3 bg-card/50">
           <h4 className="text-sm font-medium text-emerald-600 dark:text-emerald-400 mb-1.5">主要看多</h4>
           <ul className="space-y-0.5 text-xs text-muted-foreground">
             {result.bullPoints.map((p, i) => (
@@ -119,7 +119,7 @@ export function ScoreBreakdownPanel({ result }: Props) {
         </div>
       )}
       {result.riskPoints.length > 0 && (
-        <div className="border border-border rounded-lg p-3 bg-card/50">
+        <div className="ring-1 ring-foreground/10 rounded-xl p-3 bg-card/50">
           <h4 className="text-sm font-medium text-rose-600 dark:text-rose-400 mb-1.5">主要風險</h4>
           <ul className="space-y-0.5 text-xs text-muted-foreground">
             {result.riskPoints.map((p, i) => (
@@ -129,7 +129,7 @@ export function ScoreBreakdownPanel({ result }: Props) {
         </div>
       )}
       {result.validationConditions.length > 0 && (
-        <div className="border border-border rounded-lg p-3 bg-card/50">
+        <div className="ring-1 ring-foreground/10 rounded-xl p-3 bg-card/50">
           <h4 className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-1.5">後續驗證條件</h4>
           <ul className="space-y-0.5 text-xs text-muted-foreground">
             {result.validationConditions.map((p, i) => (

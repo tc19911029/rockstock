@@ -53,10 +53,11 @@ export function VideoSourceBreakdown({ date }: Props) {
   }, [date]);
 
   if (loading && !data) return null;
-  if (!data || data.videos.length === 0) return null;
+  // 防呆：API 可能回 {ok:false} 或無 videos 欄（該日無資料/錯誤）→ 不讓整頁崩
+  if (!data || !Array.isArray(data.videos) || data.videos.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-semibold">🎙 語音 vs 🖼 畫面 — 各抓到哪些股票</h2>

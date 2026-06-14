@@ -434,7 +434,7 @@ export default function SignalSummaryCard() {
     : null;
 
   return (
-    <div className="bg-card border border-border/60 rounded-lg overflow-hidden">
+    <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-hidden">
       <div className="flex">
         {/* 左邊強度色條 */}
         <div className={`w-1 shrink-0 ${STRENGTH_BAR[verdict.level]}`} />

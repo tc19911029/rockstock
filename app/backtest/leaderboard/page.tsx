@@ -8,9 +8,29 @@ import { PaperTrackCard } from '@/components/backtest/PaperTrackCard';
 import { bullBearClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { LeaderboardRow, Horizon, Market } from '@/lib/backtest/leaderboardTypes';
+import { GRADE_META, type EdgeGrade } from '@/lib/strategy/edgeRating';
+import { AntiSignalGuide } from '@/components/avoidance/AntiSignalGuide';
 import { SamplePicksPanel } from './_components/SamplePicksPanel';
 
 type EngineFilter = 'all' | 'buymethod' | 'sanse';
+
+interface RowEdge {
+  grade: EdgeGrade;
+  familyGrade: EdgeGrade;
+  netEdgeD5: number;
+  excessD5: number;
+  note: string;
+}
+
+interface HonestEdgeMeta {
+  disclaimer: string;
+  generatedAt: string;
+  method: string;
+  indexAvgD5: number | null;
+  costRoundTripPct: number | null;
+  familyKeepCount: number;
+  caveats: string[];
+}
 
 interface ApiResponse {
   ok: boolean;
@@ -20,7 +40,16 @@ interface ApiResponse {
   window?: { start: string; end: string; tradingDays: number; label: string; forwardTd: number };
   meta?: { minPicks: number };
   rows: LeaderboardRow[];
+  edgeByRowId?: Record<string, RowEdge>;
+  honestEdge?: HonestEdgeMeta | null;
 }
+
+const toneClass: Record<'good' | 'neutral' | 'warn' | 'bad', string> = {
+  good: 'bg-green-500/15 text-green-400 border-green-500/30',
+  neutral: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  warn: 'bg-muted text-muted-foreground border-border',
+  bad: 'bg-red-500/15 text-red-400 border-red-500/30',
+};
 
 const HORIZONS: Horizon[] = ['d1', 'd3', 'd5'];
 const fmtPct = (v: number): string => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
@@ -42,6 +71,7 @@ function LeaderboardInner() {
   const [engineFilter, setEngineFilter] = useState<EngineFilter>('all');
   const [horizon, setHorizon] = useState<Horizon>('d1');
   const [minDays, setMinDays] = useState<number>(20);
+  const [onlyEdge, setOnlyEdge] = useState<boolean>(true); // A2：預設只看精華(keep/thin)，其餘收進研究區
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [resp, setResp] = useState<ApiResponse | null>(null);
@@ -83,16 +113,26 @@ function LeaderboardInner() {
 
   const rows = useMemo<LeaderboardRow[]>(() => {
     const all = resp?.rows ?? [];
+    const edge = resp?.edgeByRowId ?? {};
+    const hasEdgeData = Object.keys(edge).length > 0;
     return all
       .filter((r) => (engineFilter === 'all' ? true : r.engine === engineFilter))
       .filter((r) => r.days >= minDays)
+      // A2：只看精華 = 扣成本後沒輸大盤的（keep/thin）；其餘收進「研究區」（關閉 onlyEdge 才顯示）
+      .filter((r) => {
+        if (!onlyEdge || !hasEdgeData) return true;
+        const g = edge[r.id]?.grade;
+        return g === 'keep' || g === 'thin';
+      })
       .sort((a, b) => b.byHorizon[horizon].top1.avgPct - a.byHorizon[horizon].top1.avgPct);
-  }, [resp, engineFilter, minDays, horizon]);
+  }, [resp, engineFilter, minDays, horizon, onlyEdge]);
 
   const expandedRow = useMemo(
     () => rows.find((r) => r.id === expandedId) ?? null,
     [rows, expandedId],
   );
+
+  const edgeMap = resp?.edgeByRowId ?? {};
 
   const columns = useMemo<ColumnDef<LeaderboardRow, unknown>[]>(() => {
     const numCell = (getValue: () => unknown) => {
@@ -143,6 +183,25 @@ function LeaderboardInner() {
         enableSorting: false,
       },
       {
+        id: 'netEdge',
+        accessorFn: (r) => edgeMap[r.id]?.netEdgeD5 ?? -99,
+        header: () => <span title="扣交易成本後、比大盤的 d5 淨超額（寬鬆近似）">誠實淨edge</span>,
+        cell: ({ row }) => {
+          const e = edgeMap[row.original.id];
+          if (!e) return <span className="text-muted-foreground/50 text-xs">—</span>;
+          const meta = GRADE_META[e.grade];
+          return (
+            <span
+              className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-mono tabular-nums', toneClass[meta.tone])}
+              title={e.note}
+            >
+              {meta.emoji} {e.netEdgeD5 >= 0 ? '+' : ''}{e.netEdgeD5.toFixed(2)}%
+            </span>
+          );
+        },
+        sortingFn: 'basic',
+      },
+      {
         id: 'days',
         accessorFn: (r) => r.days,
         header: '天數',
@@ -179,9 +238,10 @@ function LeaderboardInner() {
         sortingFn: 'basic',
       },
     ];
-  }, [horizon]);
+  }, [horizon, edgeMap]);
 
   const hasData = resp?.exists && (resp.rows?.length ?? 0) > 0;
+  const honest = resp?.honestEdge ?? null;
 
   return (
     <PageShell
@@ -204,6 +264,23 @@ function LeaderboardInner() {
       }
     >
       <div className="space-y-4 p-4">
+        {/* 誠實說明橫幅（A1）— 不灌假希望，先把真相講清楚 */}
+        {honest && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+            <div className="font-semibold text-amber-300 mb-1">⚠️ 先看這個：誠實說明</div>
+            <p className="text-foreground/90 leading-relaxed">{honest.disclaimer}</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              「誠實淨edge」欄 = 扣手續費後比大盤的 d5 淨超額。
+              大盤同期 d5 平均 {honest.indexAvgD5 != null ? `+${honest.indexAvgD5}%` : '—'}、
+              來回成本 {honest.costRoundTripPct != null ? `${honest.costRoundTripPct.toFixed(2)}%` : '—'}。
+              {GRADE_META.keep.emoji}精華候選僅 {honest.familyKeepCount} 個家族（仍需長期驗證、非保證賺錢）。
+            </p>
+          </div>
+        )}
+
+        {/* 反指標教學卡（A3）— 比「該買」可靠的「別碰」清單 */}
+        <AntiSignalGuide market={market} />
+
         {/* 🧪 若照系統做 — paper-trade live 追蹤（B2 2026-06-12） */}
         <PaperTrackCard />
 
@@ -274,6 +351,22 @@ function LeaderboardInner() {
               </button>
             ))}
           </div>
+
+          {/* A2：只看精華 vs 全部(含研究區) */}
+          {honest && (
+            <button
+              onClick={() => setOnlyEdge((v) => !v)}
+              className={cn(
+                'px-3 py-1.5 text-sm rounded-md border transition-colors',
+                onlyEdge
+                  ? 'bg-green-500/15 text-green-400 border-green-500/30 font-medium'
+                  : 'bg-card hover:bg-secondary border-border text-muted-foreground',
+              )}
+              title="只看扣成本後沒輸大盤的（精華）；關閉則顯示全部，含沒 edge 的研究區策略"
+            >
+              {onlyEdge ? '🟢 只看精華' : '顯示全部(含研究區)'}
+            </button>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground">

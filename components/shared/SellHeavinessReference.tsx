@@ -49,7 +49,7 @@ export function SellHeavinessReference({
 }: { market: 'TW' | 'CN' | 'other' | undefined; className?: string; showBook?: boolean }) {
   if (market !== 'TW' && market !== 'CN') return null;
   return (
-    <div className={cn('rounded-md border border-border/60 bg-card/40 p-2 space-y-1.5', className)}>
+    <div className={cn('rounded-md ring-1 ring-foreground/10 bg-card/40 p-2 space-y-1.5', className)}>
       <div className="text-[10px] text-muted-foreground leading-snug">
         🔻 賣訊輕重（{market === 'TW' ? '台股' : '陸股'}·{SELL_HEAVINESS_WINDOW.label}回測）— 數字＝訊號後相對同儕的 alpha，<span className="text-foreground/80">越負越重</span>；🔴重 🟠中 🟡輕 ↩️落後(反指) ◦弱(不顯著)。
       </div>

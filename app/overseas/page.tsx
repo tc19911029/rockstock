@@ -151,7 +151,7 @@ export default function OverseasPeersPage() {
         />
       }
     >
-      <div className="p-3 space-y-4 max-w-6xl mx-auto">
+      <div className="p-3 space-y-4 ">
         {/* 定位聲明 */}
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
           📌 顯示層參考，不入選股 — 海外領先股動能用於判讀台股題材是「落後補漲」還是「自己短炒」；

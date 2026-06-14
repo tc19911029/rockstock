@@ -47,6 +47,23 @@ export interface StockScanResult {
   // ── 排序因子：MA20 斜率（朱老師「均線三大力量」角度量化，2026-05-21 線上課程 CH3）──
   // 預設 lookback=5（一週），單位是 % change；越大代表多頭力道越強。目前僅觀察用，未接 panelSortCompare
   ma20Slope?: number;                // e.g. 0.03 = 過去 5 個交易日 MA20 上揚 3%
+  // ── 大戶偷買軌（W，2026-06-14 refined）：主力分點集中度由負轉正 + 濾隔日沖 + 不爆量 ──
+  smartMoneyConc?: number;           // 主力分點 20 日集中度%（排序主鍵；= conc20）
+  smartMoneyConc5?: number;          // 主力分點 5 日集中度%（< 8 才非隔日沖假象）
+  smartMoneyConcPrev?: number;       // 5 日前的 20 日集中度%（≤ 0 = 由負轉正）
+  smartMoneyVolRatio?: number;       // 量比（今日量 ÷ 20日均量；< 1.8 = 不爆量）
+  smartMoneyDrop?: number;           // 近 5 日股價漲跌%（顯示用，不再是進場 gate）
+  // ── 法人接刀軌（X，2026-06-14）：在跌/長黑 + 法人逆勢買，剔除大戶持股超高 ──
+  instDipDrop?: number;              // 近 5 日股價漲跌%（負=在跌）
+  instDipTodayChg?: number;          // 今日漲跌%（收/開−1，負=長黑）
+  instDipInstK?: number;             // 法人 5 日淨買超(張，排序主鍵)
+  instDipHolderLvl?: number;         // 大戶持股水位%（依股價挑級距；高=流通量少風險）
+  // ── 法人偷買(原)軌（Y，2026-06-14）：跌 + 5日籌碼集中度在增加 + 法人連買 ──
+  instStealDrop?: number;            // 近 5 日股價漲跌%（負=在跌）
+  instStealConc5?: number;           // 主力分點 5 日集中度%（> 0 且在爬）
+  instStealConc5Prev?: number;       // concRiseBack 日前的 5 日集中度%（看「在增加」）
+  instStealInstK?: number;           // 三大法人 5 日淨買超(張)
+  instStealConsec?: number;          // 三大法人合計連續買超天數（排序主鍵）
   // ── 33 種贏家圖像 ──────────────────────────────────────────────────────
   winnerBearishPatterns?: string[];   // 多轉空圖像名稱
   winnerBullishPatterns?: string[];   // 空轉多圖像名稱
@@ -482,7 +499,9 @@ export type MtfMode =
   // v12 新增字母（議題 33/65/93）
   | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q'
   // 機械軌（2026-05-21 R 新增；S 大戶累積已於 2026-05-25 移除）
-  | 'R';
+  | 'R'
+  // 基本面軌 V / 大戶偷買軌 W（2026-06-13）/ 法人接刀軌 X / 法人偷買(原)軌 Y（2026-06-14）
+  | 'V' | 'W' | 'X' | 'Y';
 
 // ── 打板掃描結果 ────────────────────────────────────────────────────────────
 

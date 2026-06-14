@@ -331,7 +331,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           <select
             value={minSourceCount}
             onChange={(e) => setMinSourceCount(Number(e.target.value))}
-            className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px]"
+            className="bg-card ring-1 ring-foreground/10 rounded px-1.5 py-0.5 text-[11px]"
             title="只看至少這幾個面向同時看好的股票"
           >
             <option value={1}>1 個面向</option>
@@ -345,7 +345,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px]"
+            className="bg-card ring-1 ring-foreground/10 rounded px-1.5 py-0.5 text-[11px]"
           >
             <option value="total">總分</option>
             <option value="openReturn">漲跌幅·隔日開</option>
@@ -735,7 +735,7 @@ function WeightPopover({
   };
   return (
     <div
-      className="absolute top-full left-0 mt-1 z-50 w-72 bg-card border border-border rounded-lg shadow-xl p-3 space-y-2"
+      className="absolute top-full left-0 mt-1 z-50 w-72 bg-card ring-1 ring-foreground/10 rounded-xl shadow-xl p-3 space-y-2"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between">

@@ -19,6 +19,9 @@ import {
   REVERSAL_TRACK_SET,
   SYSTEM_TRACK_SET,
   MECHANICAL_TRACK_SET,
+  SMARTMONEY_TRACK_SET,
+  INSTDIP_TRACK_SET,
+  INSTSTEAL_TRACK_SET,
   LETTER_NAMES,
 } from '@/lib/scanner/buyMethodTracks';
 
@@ -182,14 +185,20 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
             P: { name: LETTER_NAMES.P, track: '多頭軌', ma: 'MA5' },
             Q: { name: LETTER_NAMES.Q, track: '戰法軌', ma: 'MA10' },
             R: { name: LETTER_NAMES.R, track: '機械軌', ma: 'MA20' },
+            W: { name: LETTER_NAMES.W, track: '大戶軌', ma: '—' },
+            X: { name: LETTER_NAMES.X, track: '接刀軌', ma: '—' },
+            Y: { name: LETTER_NAMES.Y, track: '偷買軌(原)', ma: '—' },
           };
-          type M = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
+          type M = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
           const renderBtn = (method: M, color: string) => {
             const m = META[method];
             const isBullish = BULLISH_TRACK_SET.has(method);
             const isReversal = REVERSAL_TRACK_SET.has(method);
             const isSystem = SYSTEM_TRACK_SET.has(method);
             const isMechanical = MECHANICAL_TRACK_SET.has(method);
+            const isSmartMoney = SMARTMONEY_TRACK_SET.has(method);
+            const isInstDip = INSTDIP_TRACK_SET.has(method);
+            const isInstSteal = INSTSTEAL_TRACK_SET.has(method);
             const tooltip = method === 'A'
               ? `A · ${m.name}（書本五步法 Step 1 預選池：六條件 + 戒律 + 淘汰法）。多頭軌字母 B/C/E/J/K/L/M/P 都從這個池子挑進場時機。`
               : isBullish
@@ -200,7 +209,13 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                     ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚠ 全市場掃 — 自含 SOP（過戒律但不過 Step 1）`
                     : isMechanical
                       ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚙ 純機械式排名 — 不過六條件、不過戒律、不過 Step 0 大盤過濾\n做多：成交額前500中乖離率最負 top10 / 做空：成交額前500中乖離率最正 top10`
-                      : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
+                      : isSmartMoney
+                        ? `${method} · ${m.name}（籌碼集中度軌）\n🕵️ 成交額前500中：近5日股價在跌 + 三大法人逆勢買超集中度高，依集中度排序\n不過六條件、不過戒律、不過 Step 0（徐黎芳籌碼集中度法，已半年回測）`
+                        : isInstDip
+                          ? `${method} · ${m.name}（接刀軌，2026-06-14）\n🔪 成交額前500中：股價在跌/長黑 + 法人逆勢買，剔除大戶持股超高，依法人買超排序\n不過六條件/戒律/Step 0。grid 唯一兩年都正買方向（但贏大盤<50%，靠賠小賺大）`
+                          : isInstSteal
+                            ? `${method} · ${m.name}（最初版三條件，2026-06-14）\n🕵️ 股價在跌 + 5日籌碼集中度在增加 + 法人連續買，三個同時成立\n不過六條件/戒律/Step 0。⚠️ 回測扣成本後超額≈0、贏大盤<50%（train負test正、不穩）→ 觀察用非明牌`
+                            : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
             return (
               <button key={method}
                 onClick={() => { setCnSanSeLevel(null); setActiveBuyMethod(method); }}
@@ -268,6 +283,12 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 <div className="flex items-center gap-1 flex-wrap">
                   {renderBtn('Q', 'bg-purple-700/70 border-purple-600 text-purple-100')}
                   {renderBtn('R', 'bg-cyan-700/70 border-cyan-600 text-cyan-100')}
+                  {/* 大戶偷買（W，籌碼集中度軌，2026-06-13）— 擺在乖離率右邊 */}
+                  {renderBtn('W', 'bg-emerald-700/70 border-emerald-600 text-emerald-100')}
+                  {/* 法人接刀（X，2026-06-14）— grid 唯一兩年都正買方向，擺在 W 右邊 */}
+                  {renderBtn('X', 'bg-teal-700/70 border-teal-600 text-teal-100')}
+                  {/* 法人偷買(原)（Y，2026-06-14）— 最初版三條件 AND，擺在 X 右邊 */}
+                  {renderBtn('Y', 'bg-amber-700/70 border-amber-600 text-amber-100')}
                   {/* 三色資金（自創策略，台股+陸股）— 嚴格/中等/寬鬆 三檔並排在乖離率旁邊 */}
                   {([
                     ['strict', '三色(嚴格)', '三色資金共振：短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位'],

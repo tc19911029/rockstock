@@ -125,7 +125,7 @@ export default function SizerPage() {
         </div>
 
         {/* Form */}
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Field label="股票代號" value={symbol} onChange={setSymbol} placeholder="2330.TW" />
             <Field label="名稱" value={name} onChange={setName} />

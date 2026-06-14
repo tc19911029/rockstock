@@ -194,7 +194,7 @@ export default function WatchlistPage() {
 
   return (
     <PageShell headerSlot={watchlistHeader}>
-      <div className="p-3 sm:p-4 max-w-4xl mx-auto space-y-3 sm:space-y-4">
+      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
 
         {/* Add stock input */}
         <div className="space-y-2">

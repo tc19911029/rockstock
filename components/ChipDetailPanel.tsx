@@ -544,7 +544,15 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           <span className="float-right text-muted-foreground font-mono">{data.marginBalance.toLocaleString()}張</span>
           <div className="clear-both" />
           <span>使用率</span>
-          <span className="float-right text-muted-foreground font-mono">{data.marginUtilRate}%</span>
+          <span className="float-right font-mono">
+            <span className="text-muted-foreground">{data.marginUtilRate}%</span>
+            {typeof data.marginNet === 'number' && data.marginNet !== 0 && (
+              <span className={`ml-1 ${data.marginNet > 0 ? 'text-bull' : 'text-bear'}`}
+                title={`融資餘額較前一日${data.marginNet > 0 ? '增加' : '減少'} ${Math.abs(data.marginNet).toLocaleString()} 張`}>
+                {data.marginNet > 0 ? '▲增' : '▼減'}
+              </span>
+            )}
+          </span>
         </div>
         <div className="bg-secondary/40 rounded px-2 py-1 border border-border/30">
           <span>融券餘額</span>

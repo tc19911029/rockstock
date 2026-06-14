@@ -75,7 +75,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   const [ytRecentOnly, setYtRecentOnly] = useState(false);
   // 排序選項：成交額排名為預設（依 0512 v12 全期間綜合回測，A 級組合多靠此排序勝出）
   // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
-  const [scanSort, setScanSort] = useState<'turnover' | 'change' | 'sixCond' | 'price' | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss' | 'youtubeMentions'>('turnover');
+  const [scanSort, setScanSort] = useState<'turnover' | 'change' | 'sixCond' | 'price' | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss' | 'youtubeMentions' | 'hotTheme'>('turnover');
   const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
 
   // YouTube 提及 map（截至掃描當日）— 純展示 join，不進掃描/選股邏輯
@@ -127,6 +127,22 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   }, [performance]);
 
 
+  // 今日熱點：每個產業/題材的「熱度分」= 上榜檔數(廣度)×100 + 平均漲幅(強度)。
+  // 來源純掃描結果（industry + changePercent），TW/CN 都適用、不需外部資料。
+  // hotTheme 排序時個股 = 所屬產業熱度（同產業內再按個股漲幅）。
+  const industryHot = useMemo(() => {
+    const agg = new Map<string, { n: number; sumChg: number }>();
+    for (const r of scanResults) {
+      const ind = r.industry; if (!ind) continue;
+      const a = agg.get(ind) ?? { n: 0, sumChg: 0 };
+      a.n += 1; a.sumChg += (r.changePercent ?? 0);
+      agg.set(ind, a);
+    }
+    const score = new Map<string, number>();
+    for (const [ind, a] of agg) score.set(ind, a.n * 100 + (a.n ? a.sumChg / a.n : 0));
+    return score;
+  }, [scanResults]);
+
   const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
 
   const filtered = scanResults
@@ -162,6 +178,12 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
         const va = ytMap.get(bareCode(a.symbol))?.count30d ?? -1;
         const vb = ytMap.get(bareCode(b.symbol))?.count30d ?? -1;
         return dir * (vb - va);
+      }
+      case 'hotTheme': {  // 今日熱點：個股按所屬產業熱度排，同產業內再按個股漲幅
+        const va = industryHot.get(a.industry ?? '') ?? -1;
+        const vb = industryHot.get(b.industry ?? '') ?? -1;
+        if (va !== vb) return dir * (vb - va);
+        return dir * ((b.changePercent ?? 0) - (a.changePercent ?? 0));
       }
       default:           return 0;
     }
@@ -202,6 +224,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
       <div className="flex flex-wrap gap-1 items-center">
         <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
         {([
+          { key: 'hotTheme' as const, label: '今日熱點', tip: '按「當天最熱題材/產業」排：哪個產業今天最多檔上榜＋平均漲最兇＝最熱；個股按所屬產業熱度排（同產業內再按漲幅）。⚠ 最熱=追高，回測上反而偏跌 → 這是「看熱點在哪」的觀察工具，不是買進排名。' },
           { key: 'turnover' as const, label: '成交額', tip: '當日成交金額大的排前面（回測 A 級組合多靠此排序勝出）' },
           { key: 'change'   as const, label: '漲幅',   tip: '當日漲跌幅 %（同分用六條件當 tie-breaker，對齊面板預設排序）' },
           { key: 'sixCond'  as const, label: '六條件', tip: '朱家泓五步法六條件總分（次鍵：漲幅）' },
@@ -350,6 +373,9 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                       P: 'bg-pink-800/80 text-pink-300',
                       Q: 'bg-violet-800/80 text-violet-300',
                       R: 'bg-cyan-800/80 text-cyan-200',
+                      W: 'bg-emerald-800/80 text-emerald-200',
+                      X: 'bg-teal-800/80 text-teal-200',
+                      Y: 'bg-amber-800/80 text-amber-200',
                     };
                     // 字母→名稱讀 lib/scanner/buyMethodTracks.ts 單一事實來源
                     const methodNames = LETTER_NAMES;
@@ -372,6 +398,91 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                             title="MA20 乖離率 = (close - MA20) / MA20">
                             乖離 {dev != null && dev >= 0 ? '+' : ''}{devPct}%
                           </span>
+                        </>
+                      );
+                    }
+                    // W 大戶偷買軌（refined）：主力分點 20 日集中度由負轉正 + 5 日濾隔日沖
+                    if (activeBuyMethod === 'W') {
+                      const conc20 = r.smartMoneyConc;
+                      const conc5 = r.smartMoneyConc5;
+                      return (
+                        <>
+                          <span className={`text-[8px] px-1.5 h-3.5 flex items-center rounded-sm ${color}`}
+                            title="大戶偷買（主力分點20日集中度由負轉正 + 5日<8濾隔日沖 + 不爆量）">
+                            {methodNames.W}
+                          </span>
+                          {conc20 != null && (
+                            <span className="text-[10px] font-mono font-bold ml-1 text-emerald-400"
+                              title="主力分點 20 日集中度（剛由負轉正，落在 1~5%）">
+                              20日+{conc20.toFixed(1)}%
+                            </span>
+                          )}
+                          {conc5 != null && (
+                            <span className="text-[10px] font-mono font-bold ml-1 text-muted-foreground"
+                              title="主力分點 5 日集中度（< 8 才非隔日沖假象）">
+                              5日{conc5.toFixed(1)}%
+                            </span>
+                          )}
+                        </>
+                      );
+                    }
+                    // X 法人接刀軌：在跌/長黑 + 法人逆勢買（顯示法人買超 + 跌幅）
+                    if (activeBuyMethod === 'X') {
+                      const instK = r.instDipInstK;
+                      const drop = r.instDipDrop;
+                      return (
+                        <>
+                          <span className={`text-[8px] px-1.5 h-3.5 flex items-center rounded-sm ${color}`}
+                            title="法人接刀（成交額前500 + 在跌/長黑 + 法人逆勢買，剔除大戶持股超高）">
+                            {methodNames.X}
+                          </span>
+                          {drop != null && (() => {
+                            const tc = r.instDipTodayChg;
+                            const black = tc != null && tc < -3 && drop >= -3;   // 靠今日長黑入選（非在跌）
+                            const val = black ? (tc as number) : drop;
+                            return (
+                              <span className={`text-[10px] font-mono font-bold ml-1 ${val >= 0 ? 'text-bull' : 'text-bear'}`}
+                                title="進場理由：近5日在跌(負%) 或 今日長黑(收/開<-3%)入選">
+                                {black ? '長黑' : '近5日'}{val >= 0 ? '+' : ''}{val.toFixed(1)}%
+                              </span>
+                            );
+                          })()}
+                          {instK != null && (
+                            <span className="text-[10px] font-mono font-bold ml-1 text-emerald-400" title="法人 5 日淨買超(張)，逆勢承接">
+                              法人+{instK.toLocaleString()}張
+                            </span>
+                          )}
+                        </>
+                      );
+                    }
+                    // Y 法人偷買(原)軌：跌 + 5日集中度在增加 + 法人連買（顯示集中度爬升 + 連買天數）
+                    if (activeBuyMethod === 'Y') {
+                      const conc5 = r.instStealConc5;
+                      const conc5prev = r.instStealConc5Prev;
+                      const consec = r.instStealConsec;
+                      const drop = r.instStealDrop;
+                      return (
+                        <>
+                          <span className={`text-[8px] px-1.5 h-3.5 flex items-center rounded-sm ${color}`}
+                            title="法人偷買(原)：股價在跌 + 5日籌碼集中度在增加 + 法人連買（觀察用，回測無穩定超額）">
+                            {methodNames.Y}
+                          </span>
+                          {drop != null && (
+                            <span className={`text-[10px] font-mono font-bold ml-1 ${drop >= 0 ? 'text-bull' : 'text-bear'}`} title="近5日漲跌%（負=在跌）">
+                              近5日{drop >= 0 ? '+' : ''}{drop.toFixed(1)}%
+                            </span>
+                          )}
+                          {conc5 != null && (
+                            <span className="text-[10px] font-mono font-bold ml-1 text-emerald-400"
+                              title="主力分點5日集中度（在爬：負→正/變大）">
+                              集中{conc5prev != null ? `${conc5prev.toFixed(1)}→` : ''}{conc5.toFixed(1)}%
+                            </span>
+                          )}
+                          {consec != null && consec > 0 && (
+                            <span className="text-[10px] font-mono font-bold ml-1 text-muted-foreground" title="三大法人合計連續買超天數">
+                              法人連買{consec}天
+                            </span>
+                          )}
                         </>
                       );
                     }
@@ -412,6 +523,9 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                       P: 'bg-pink-800/80 text-pink-300',
                       Q: 'bg-violet-800/80 text-violet-300',
                       R: 'bg-cyan-800/80 text-cyan-200',
+                      W: 'bg-emerald-800/80 text-emerald-200',
+                      X: 'bg-teal-800/80 text-teal-200',
+                      Y: 'bg-amber-800/80 text-amber-200',
                     };
                     // 字母→名稱讀 lib/scanner/buyMethodTracks.ts 單一事實來源
                     const methodNames = LETTER_NAMES;

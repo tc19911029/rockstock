@@ -139,7 +139,7 @@ function BacktestPage() {
         />
       }
     >
-      <div className="max-w-6xl mx-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
+      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
 
         {/* 日期區間 */}
         <div className="flex items-center gap-2 flex-wrap text-xs">
@@ -188,7 +188,7 @@ function BacktestPage() {
         {summary && summary.totalDecisions > 0 && (
           <>
             {/* 最終決策統計 */}
-            <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <section className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 space-y-3">
               <h2 className="text-xs font-semibold tracking-wider text-foreground">▸ 最終決策績效</h2>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -239,7 +239,7 @@ function BacktestPage() {
             </section>
 
             {/* 各代理判定命中率（§0 — 每個代理各自統計，不混合）*/}
-            <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <section className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 space-y-3">
               <h2 className="text-xs font-semibold tracking-wider text-foreground">
                 ▸ 各代理判定命中率 <span className="text-muted-foreground font-normal">（§0 — 各自獨立統計）</span>
               </h2>
@@ -283,7 +283,7 @@ function BacktestPage() {
             </section>
 
             {/* 區間內納入的日期 */}
-            <details className="bg-card border border-border rounded-xl p-4 text-xs">
+            <details className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 text-xs">
               <summary className="cursor-pointer text-foreground font-medium select-none">
                 納入的日期（{data?.datesIncluded.length}）
               </summary>

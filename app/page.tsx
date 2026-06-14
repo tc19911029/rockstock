@@ -20,6 +20,10 @@ import { useSearchParams } from 'next/navigation';
 import { useReplayStore } from '@/store/replayStore';
 import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
+import { evaluateLatest as smEvaluateLatest, evaluateAt as smEvaluateAt } from '@/lib/smartmoney/signal';
+import { evaluateAt as instEvaluateAt } from '@/lib/instdip/signal';
+import { evaluateAt as stealEvaluateAt } from '@/lib/inststeal/signal';
+import { computeChipAvoidSignals } from '@/lib/avoidance/chipAvoidSignals';
 import StockSelector from '@/components/StockSelector';
 import { PageShell, EmptyState, BackButton, StockChartView } from '@/components/shared';
 import { DecisionPanel } from '@/components/decision/DecisionPanel';
@@ -73,9 +77,168 @@ const IndicatorCharts = nextDynamic(() => import('@/components/IndicatorCharts')
 
 type SideTab = 'conditions' | 'signals' | 'chip' | 'fundamental';
 
+/** 隨走圖游標跑的當天籌碼面板（5日/20日主力分點集中度 + 量比 + 外資/投信/自營/法人/主力買賣超）*/
+export type ChipScrubData = {
+  date: string;
+  conc5: number | null;
+  conc20: number | null;
+  volRatio: number | null;
+  foreign: number | null;
+  trust: number | null;
+  dealer: number | null;
+  total: number | null;
+  brokerNet: number | null;
+} | null;
+
+function ChipScrubPanel({ data }: { data: ChipScrubData }) {
+  if (!data) return null;
+  // 台股紅漲綠跌：買超(正)紅、賣超(負)綠
+  const col = (v: number | null) => v == null ? 'text-muted-foreground/50' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-muted-foreground';
+  const lots = (v: number | null) => v == null ? '—' : `${v > 0 ? '+' : ''}${Math.round(v).toLocaleString()}張`;
+  const pct = (v: number | null) => v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
+  const volTag = data.volRatio == null ? '' : data.volRatio >= 2 ? ' 爆量' : data.volRatio < 0.7 ? ' 量縮' : '';
+  return (
+    <div className="p-2.5 mb-1.5 rounded-lg bg-secondary/30 border border-border/40 text-[11px] space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-sky-300/80">籌碼（{data.date}）</span>
+        <span className="text-muted-foreground/60 text-[10px]">隨走圖游標</span>
+      </div>
+      <div className="flex justify-between font-mono">
+        <span>主力分點集中度</span>
+        <span>
+          <span className={col(data.conc5)}>5日 {pct(data.conc5)}</span>
+          <span className="mx-1 text-border">·</span>
+          <span className={col(data.conc20)}>20日 {pct(data.conc20)}</span>
+        </span>
+      </div>
+      <div className="flex justify-between font-mono">
+        <span>量比（今量÷近5日均量）</span>
+        <span className={data.volRatio != null && data.volRatio >= 2 ? 'text-yellow-400' : 'text-foreground/80'}>
+          {data.volRatio == null ? '—' : `${data.volRatio.toFixed(2)}倍${volTag}`}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-x-2 font-mono pt-0.5 border-t border-border/30">
+        <span>外資 <span className={col(data.foreign)}>{lots(data.foreign)}</span></span>
+        <span>投信 <span className={col(data.trust)}>{lots(data.trust)}</span></span>
+        <span>自營 <span className={col(data.dealer)}>{lots(data.dealer)}</span></span>
+      </div>
+      <div className="flex justify-between font-mono">
+        <span>法人合計 <span className={col(data.total)}>{lots(data.total)}</span></span>
+        <span>主力分點 <span className={col(data.brokerNet)}>{lots(data.brokerNet)}</span></span>
+      </div>
+    </div>
+  );
+}
+
+/** 像六條件那種「每條件一列、●綠紅燈 + 數值」的檢查清單（隨走圖游標跑）*/
+export type CondRow = { icon: string; name: string; value: string; pass: boolean; tip?: string };
+export type CondList = { date: string; rows: CondRow[]; passCount: number; total: number; hit: boolean } | null;
+
+function CondChecklist({ data, hitText, missText }: { data: CondList; hitText: string; missText: string }) {
+  if (!data) return <div className="px-3 py-2 text-[11px] text-muted-foreground/60">此日無足夠籌碼資料</div>;
+  return (
+    <div>
+      <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+        <span className="text-muted-foreground/70">當天（{data.date}）</span>
+        <span className={data.hit ? 'text-green-400 font-bold' : 'text-muted-foreground'}>{data.passCount}/{data.total}</span>
+      </div>
+      <div className="border-t border-border/40">
+        {data.rows.map(r => (
+          <div key={r.icon} className="flex items-center gap-2 px-3 py-1.5 border-b border-border/30 last:border-0 text-[11px]">
+            <span className={r.pass ? 'text-green-400' : 'text-red-400'}>●</span>
+            <span className="text-muted-foreground/70 w-3 font-mono">{r.icon}</span>
+            <span className="font-medium text-foreground/90" title={r.tip}>{r.name}</span>
+            <span className="flex-1" />
+            <span className={`font-mono px-1.5 py-0.5 rounded ${r.pass ? 'bg-green-900/40 text-green-300' : 'bg-muted text-muted-foreground'}`}>{r.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className={`px-3 py-1.5 text-[11px] ${data.hit ? 'text-green-400' : 'text-muted-foreground/70'}`}>
+        {data.hit ? hitText : missText}
+      </div>
+    </div>
+  );
+}
+
+// ── CMoney 風格逐日籌碼資料表（純顯示，把策略條件背後的原始數列攤開，跟走圖游標連動高亮）──
+// 台股紅漲綠跌：買超(正)紅、賣超(負)綠。
+const upDownCls = (v: number | null | undefined) =>
+  v == null ? 'text-muted-foreground/40' : v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-muted-foreground';
+const signedLots = (v: number | null | undefined) =>
+  v == null ? '—' : `${v > 0 ? '+' : ''}${Math.round(v).toLocaleString()}`;
+const pctSigned = (v: number | null | undefined, dp = 1) =>
+  v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(dp)}%`;
+
+type ChipCell = { text: string; cls?: string };
+type WHistRow = { date: string; brokerNet: number | null; conc5: number | null; conc20: number | null; price: number };
+type XInstRow = { date: string; foreign: number; trust: number; dealer: number; total: number; price: number | null };
+type XHolderRow = { date: string; level: number; change: number | null; price: number | null };
+
+function ChipDataTable<T extends { date: string }>({
+  title, hint, cols, rows, highlightDate, warnRow,
+}: {
+  title: string;
+  hint?: string;
+  cols: { label: string; cell: (r: T) => ChipCell }[];
+  rows: T[];
+  highlightDate?: string;
+  warnRow?: (r: T) => boolean;
+}) {
+  const hiRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => { hiRef.current?.scrollIntoView({ block: 'nearest' }); }, [highlightDate]);
+  if (!rows.length) return null;
+  return (
+    <div className="px-2 pt-1 pb-2">
+      <div className="flex items-baseline justify-between mb-1 px-1">
+        <span className="text-[11px] font-semibold text-foreground/80">{title}</span>
+        {hint && <span className="text-[9px] text-muted-foreground/60">{hint}</span>}
+      </div>
+      <div className="max-h-60 overflow-auto rounded-md border border-border/40">
+        <table className="w-full text-[10px] font-mono border-collapse">
+          <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur">
+            <tr className="text-muted-foreground/70">
+              {cols.map((c, i) => (
+                <th key={i} className={`px-1.5 py-1 font-medium whitespace-nowrap ${i === 0 ? 'text-left' : 'text-right'}`}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const hi = highlightDate != null && r.date === highlightDate;
+              const warn = warnRow?.(r);
+              return (
+                <tr key={r.date} ref={hi ? hiRef : undefined}
+                  className={`border-t border-border/20 ${hi ? 'bg-primary/15' : warn ? 'bg-red-500/10' : ''}`}>
+                  {cols.map((c, i) => {
+                    const cell = c.cell(r);
+                    return (
+                      <td key={i} className={`px-1.5 py-1 whitespace-nowrap ${i === 0 ? 'text-left text-muted-foreground/80' : `text-right ${cell.cls ?? 'text-foreground/85'}`}`}>
+                        {cell.text}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 /** 根據 activeBuyMethod 切換渲染：A 走六條件，其他走買法條件面板。
  *  v11 G/H/I 自動轉 v12 J/L/K（用戶 0512 決議只留 v12） */
-function ConditionsPanelSwitch() {
+type WLive = {
+  broker: { conc20: number; conc5: number; conc20prev: number; volRatio: number; isHit: boolean } | null;
+  holder: { label: string; pct: number; change: number | null } | null;
+} | null;
+function ConditionsPanelSwitch({ wLive, wConds, xConds, yConds, wTable, xInst, xHolder }: {
+  wLive?: WLive; wConds?: CondList; xConds?: CondList; yConds?: CondList;
+  wTable?: WHistRow[];
+  xInst?: { rows: XInstRow[]; sum5: { foreign: number; trust: number; dealer: number; total: number } | null };
+  xHolder?: { rows: XHolderRow[]; tierLabel: string; th: number };
+}) {
   const method = useBacktestStore(s => s.activeBuyMethod);
   if (method === 'A') return <SixConditionsPanel />;
   // R 機械軌純排名，無 detector 條件可顯示 — 簡單說明即可
@@ -85,6 +248,140 @@ function ConditionsPanelSwitch() {
         <div className="font-semibold text-cyan-300/80">機械軌（R · 乖離率）</div>
         <div>純排名策略，不過六條件、不過戒律、不過 Step 0 大盤過濾。</div>
         <div>做多取成交額前 500 中 MA20 乖離率最負 top 10；做空取最正 top 10。</div>
+      </div>
+    );
+  }
+  // W 大戶偷買軌純籌碼（refined），無 detector 條件可顯示 — 說明 + 看盤要追蹤的指標
+  if (method === 'W') {
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        <div className="px-3 pt-2 pb-1 space-y-0.5">
+          <div className="font-semibold text-emerald-300/80">大戶偷買（W · 主力分點集中度）</div>
+          <div>主力分點（前15大券商）剛開始默默吃貨，4 道濾網全過才入選。隨走圖看當天：</div>
+        </div>
+        <CondChecklist data={wConds ?? null}
+          hitText="✅ 四道全過 — 這天符合大戶偷買" missText="○ 未全過（這天非進場日）" />
+        {wTable && wTable.length > 0 && (
+          <ChipDataTable<WHistRow>
+            title="主力分點集中度（逐日）"
+            hint="紅買綠賣 · 走圖列高亮"
+            rows={wTable}
+            highlightDate={wConds?.date}
+            cols={[
+              { label: '日期', cell: r => ({ text: r.date.slice(5) }) },
+              { label: '買賣超', cell: r => ({ text: signedLots(r.brokerNet), cls: upDownCls(r.brokerNet) }) },
+              { label: '集中5日', cell: r => ({ text: pctSigned(r.conc5), cls: upDownCls(r.conc5) }) },
+              { label: '集中20日', cell: r => ({ text: pctSigned(r.conc20), cls: upDownCls(r.conc20) }) },
+              { label: '股價', cell: r => ({ text: r.price.toFixed(2) }) },
+            ]}
+          />
+        )}
+        <div className="px-3 py-1.5 text-amber-400/70 border-t border-border/40">
+          ⚠️ 回測無穩定贏大盤的本事（refined 比粗版好但 &lt;50%）— 當參考、不是明牌。
+        </div>
+      </div>
+    );
+  }
+  // X 法人接刀軌（2026-06-14）：grid 唯一兩年都正的買方向。
+  if (method === 'X') {
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        <div className="px-3 pt-2 pb-1 space-y-0.5">
+          <div className="font-semibold text-teal-300/80">法人接刀（X）</div>
+          <div>股價在跌/長黑、法人逆勢買、避開大戶持股超高。隨走圖看當天 3 道：</div>
+        </div>
+        <CondChecklist data={xConds ?? null}
+          hitText="✅ 三道全過 — 這天符合法人接刀" missText="○ 未全過（這天非進場日）" />
+        {xInst && xInst.rows.length > 0 && (
+          <>
+            {xInst.sum5 && (
+              <div className="px-3 pt-1.5 pb-0.5 text-[10px] flex flex-wrap gap-x-2 gap-y-0.5">
+                <span className="font-semibold text-foreground/70">近5日法人</span>
+                <span>外資 <span className={upDownCls(xInst.sum5.foreign)}>{signedLots(xInst.sum5.foreign)}</span></span>
+                <span>投信 <span className={upDownCls(xInst.sum5.trust)}>{signedLots(xInst.sum5.trust)}</span></span>
+                <span>合計 <span className={upDownCls(xInst.sum5.total)}>{signedLots(xInst.sum5.total)}</span></span>
+              </div>
+            )}
+            <ChipDataTable<XInstRow>
+              title="三大法人（逐日，張）"
+              hint="紅買綠賣 · 走圖列高亮"
+              rows={xInst.rows}
+              highlightDate={xConds?.date}
+              cols={[
+                { label: '日期', cell: r => ({ text: r.date.slice(5) }) },
+                { label: '外資', cell: r => ({ text: signedLots(r.foreign), cls: upDownCls(r.foreign) }) },
+                { label: '投信', cell: r => ({ text: signedLots(r.trust), cls: upDownCls(r.trust) }) },
+                { label: '自營', cell: r => ({ text: signedLots(r.dealer), cls: upDownCls(r.dealer) }) },
+                { label: '合計', cell: r => ({ text: signedLots(r.total), cls: upDownCls(r.total) }) },
+                { label: '股價', cell: r => ({ text: r.price != null ? r.price.toFixed(2) : '—' }) },
+              ]}
+            />
+          </>
+        )}
+        {xHolder && xHolder.rows.length > 0 && (
+          <ChipDataTable<XHolderRow>
+            title={`集保大戶 · ${xHolder.tierLabel}（逐週）`}
+            hint={`>${xHolder.th}% 算超高→避（紅底）`}
+            rows={xHolder.rows}
+            warnRow={r => r.level > xHolder.th}
+            cols={[
+              { label: '日期', cell: r => ({ text: r.date.slice(5) }) },
+              { label: '大戶持股', cell: r => ({ text: `${r.level.toFixed(2)}%` }) },
+              { label: '週變動', cell: r => ({ text: pctSigned(r.change, 2), cls: upDownCls(r.change) }) },
+              { label: '股價', cell: r => ({ text: r.price != null ? r.price.toFixed(0) : '—' }) },
+            ]}
+          />
+        )}
+        <div className="px-3 py-1.5 space-y-0.5 border-t border-border/40">
+          <div className="text-emerald-400/90">📈 回測：買進後約1個月 64% 會漲、平均 +10.4%（多頭那年）。</div>
+          <div className="text-amber-400/70">⚠️ 弱市那年只 +2%、約36% 會賠。部位別重、停損守好。</div>
+        </div>
+      </div>
+    );
+  }
+  // Y 法人偷買(原)軌：跌 + 5日籌碼集中度在增加 + 法人連買，三個同時成立（單一事實 lib/inststeal）
+  if (method === 'Y') {
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        <div className="px-3 pt-2 pb-1 space-y-0.5">
+          <div className="font-semibold text-amber-300/80">法人偷買(原)（Y）</div>
+          <div>股價在跌、籌碼5日集中度慢慢在爬、法人連續買 — 三個同時成立。隨走圖看當天 3 道：</div>
+        </div>
+        <CondChecklist data={yConds ?? null}
+          hitText="✅ 三道全過 — 這天符合法人偷買(原)" missText="○ 未全過（這天非進場日）" />
+        {wTable && wTable.length > 0 && (
+          <ChipDataTable<WHistRow>
+            title="主力分點集中度（逐日）"
+            hint="紅買綠賣 · 看 5日是否在爬 · 走圖列高亮"
+            rows={wTable}
+            highlightDate={yConds?.date}
+            cols={[
+              { label: '日期', cell: r => ({ text: r.date.slice(5) }) },
+              { label: '買賣超', cell: r => ({ text: signedLots(r.brokerNet), cls: upDownCls(r.brokerNet) }) },
+              { label: '集中5日', cell: r => ({ text: pctSigned(r.conc5), cls: upDownCls(r.conc5) }) },
+              { label: '集中20日', cell: r => ({ text: pctSigned(r.conc20), cls: upDownCls(r.conc20) }) },
+              { label: '股價', cell: r => ({ text: r.price.toFixed(2) }) },
+            ]}
+          />
+        )}
+        {xInst && xInst.rows.length > 0 && (
+          <ChipDataTable<XInstRow>
+            title="三大法人（逐日，張）"
+            hint="紅買綠賣 · 看是否連買 · 走圖列高亮"
+            rows={xInst.rows}
+            highlightDate={yConds?.date}
+            cols={[
+              { label: '日期', cell: r => ({ text: r.date.slice(5) }) },
+              { label: '外資', cell: r => ({ text: signedLots(r.foreign), cls: upDownCls(r.foreign) }) },
+              { label: '投信', cell: r => ({ text: signedLots(r.trust), cls: upDownCls(r.trust) }) },
+              { label: '合計', cell: r => ({ text: signedLots(r.total), cls: upDownCls(r.total) }) },
+              { label: '股價', cell: r => ({ text: r.price != null ? r.price.toFixed(2) : '—' }) },
+            ]}
+          />
+        )}
+        <div className="px-3 py-1.5 text-amber-400/70 border-t border-border/40">
+          ⚠️ 回測（2024-06 起約2年）扣成本後超額≈0、贏大盤42.7%（&lt;一半）、訓練期還是負的 — 觀察用、非明牌，進場守停損。
+        </div>
       </div>
     );
   }
@@ -229,6 +526,7 @@ function HomePage() {
   const [showIndicators, setShowIndicators] = useState(true);
   // 三色資金圖層（陸股）：雙B戰法疊主圖（像 BB）；主力狀態/捕撈季節是副圖（像 MACD/KD）
   const [showShuangB, setShowShuangB] = useState(false);
+  const [showHolderLine, setShowHolderLine] = useState(false);
   // P1-5: keyboard shortcut help overlay
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel — v12 預設展開讓用戶一進來就看到新功能（14 字母 tabs/Step 0 banner/LockWatch panel/警示徽章）
@@ -365,8 +663,9 @@ function HomePage() {
   }, []);
   // ── 籌碼面資料（TW 法人/大戶 + CN 主力資金） ────────────────────────────────
   // 優化：用 ticker + 「是否需要籌碼」字串 key 當依賴；同一 key 不會 refetch
+  // 大戶持股趨勢線（showHolderLine）也需要 tdcc 資料 → 一併納入觸發條件。
   const anyTwChipOn = indicators.foreign || indicators.trust || indicators.dealer
-    || indicators.retail || indicators.h400 || indicators.h1000;
+    || indicators.retail || indicators.h400 || indicators.h1000 || showHolderLine;
   const anyCnChipOn = indicators.cnMain || indicators.cnRetail;
   const ticker = currentStock?.ticker ?? '';
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
@@ -379,12 +678,14 @@ function HomePage() {
   const sanseLevel = useBacktestStore(s => s.sanseLevel);
   // 三色模式（台股+陸股）：選了 level 且當前股票屬三色可用市場 → 中間條件/訊號改顯示 SanSe 面板
   const showSanseView = sanseEnabled && sanseLevel != null;
-  const wantChips = (isTwTicker && anyTwChipOn) || (isCnTicker && anyCnChipOn);
+  // 載入台股個股一律抓籌碼 → 讓「買進前避雷檢查」恆常跑（賠少第一線）。^TWII 指數不算 isTwTicker 不受影響。
+  const wantChips = (isTwTicker && (anyTwChipOn || !!currentStock)) || (isCnTicker && anyCnChipOn);
   // 把 fetch trigger 編成單一 string key，dep 比較穩定
   const chipFetchKey = wantChips ? ticker : '';
   const [chips, setChips] = useState<{
     inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
-    tdcc: Array<{ date: string; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+    tdcc: Array<{ date: string; holder100Pct?: number; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+    broker?: Array<{ date: string; netDifference: number }>;
     cnFlow?: Array<{ date: string; mainNet: number; superLargeNet: number; largeNet: number; mediumNet: number; smallNet: number }>;
     divergence?: { type: 'bullish' | 'bearish'; priceChangePct: number; volumeChangePct: number; strength: 0|1|2|3; detail: string } | null;
   } | null>(null);
@@ -394,12 +695,13 @@ function HomePage() {
     const ctrl = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 載入 flag，搭配下方 finally 清除
     setChipsLoading(true);
-    fetch(`/api/stock/chips?symbol=${encodeURIComponent(chipFetchKey)}&days=180`, { signal: ctrl.signal })
+    fetch(`/api/stock/chips?symbol=${encodeURIComponent(chipFetchKey)}&days=500`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(json => {
         if (json.ok) setChips({
           inst: json.inst ?? [],
           tdcc: json.tdcc ?? [],
+          broker: json.broker ?? [],
           cnFlow: json.cnFlow ?? [],
           divergence: json.divergence ?? null,
         });
@@ -596,6 +898,211 @@ function HomePage() {
     </div>
   );
 
+  // 選中的買法（abcOverlay / wLive / holderTier 共用）
+  const activeBuyMethod = useBacktestStore(s => s.activeBuyMethod);
+
+  // 大戶持股趨勢線級距 — 依股價自動挑：高價股(世芯3661)看千張無意義（1000張=幾十億），改看低級距。
+  // 便宜股<50→千張、50~250→400張、≥250→百張（capital 約當 ~數千萬大戶）。
+  const holderTier = useMemo(() => {
+    const px = visibleCandles.length ? visibleCandles[visibleCandles.length - 1].close : 0;
+    if (px >= 250) return { key: 'holder100Pct' as const, label: '百張大戶' };
+    if (px >= 50) return { key: 'holder400Pct' as const, label: '400張大戶' };
+    return { key: 'holder1000Pct' as const, label: '千張大戶' };
+  }, [visibleCandles]);
+
+  // W 大戶偷買面板「當下這檔」即時數字：主力分點 5日/20日集中度（委派 lib/smartmoney 單一事實）
+  // ＋大戶持股（依股價挑的級距）週變化。只在選 W 軌 + 台股時算。
+  const wLive = useMemo(() => {
+    if (activeBuyMethod !== 'W' || market !== 'TW' || visibleCandles.length === 0) return null;
+    let broker: { conc20: number; conc5: number; conc20prev: number; volRatio: number; isHit: boolean } | null = null;
+    const bk = chips?.broker ?? [];
+    if (bk.length) {
+      const m = new Map(bk.map(d => [d.date, d.netDifference]));
+      const ev = smEvaluateLatest(visibleCandles.map(c => ({ date: c.date, close: c.close, volume: c.volume })), m);
+      if (ev) broker = { conc20: ev.conc20, conc5: ev.conc5, conc20prev: ev.conc20prev, volRatio: ev.volRatio, isHit: ev.isHit };
+    }
+    let holder: { label: string; pct: number; change: number | null } | null = null;
+    const rows = (chips?.tdcc ?? []).filter(r => typeof r[holderTier.key] === 'number')
+      .slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (rows.length) {
+      const cur = rows[rows.length - 1][holderTier.key]!;
+      const prev = rows.length > 1 ? rows[rows.length - 2][holderTier.key]! : null;
+      holder = { label: holderTier.label, pct: cur, change: prev != null ? cur - prev : null };
+    }
+    return { broker, holder };
+  }, [activeBuyMethod, market, chips?.broker, chips?.tdcc, visibleCandles, holderTier]);
+
+  // 買進前避雷檢查（賠少第一線）— 台股個股恆常跑，用已載入的籌碼資料即時算 3 個 grid 驗證的紅旗。
+  const chipAvoid = useMemo(() => {
+    if (market !== 'TW' || !chips || visibleCandles.length < 21) return null;
+    const brokerByDate = new Map((chips.broker ?? []).map(d => [d.date, d.netDifference]));
+    const instByDate = new Map((chips.inst ?? []).map(d => [d.date, d.total]));
+    if (brokerByDate.size === 0 && instByDate.size === 0 && (chips.tdcc ?? []).length === 0) return null;
+    const price = visibleCandles[visibleCandles.length - 1].close;
+    const { flags } = computeChipAvoidSignals({
+      price,
+      candles: visibleCandles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
+      holderRows: chips.tdcc ?? [],
+      brokerByDate, instByDate,
+    });
+    return flags.length ? flags : null;
+  }, [market, chips, visibleCandles]);
+
+  // 隨走圖游標（currentIndex）跑的當天籌碼 — 比照六條件面板（讀 currentIndex）。
+  const chipScrub = useMemo<ChipScrubData>(() => {
+    if (market !== 'TW' || !chips || !allCandles.length) return null;
+    const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
+    const date = allCandles[idx].date;
+    const brokerByDate = new Map((chips.broker ?? []).map(d => [d.date, d.netDifference]));
+    const instByDate = new Map((chips.inst ?? []).map(d => [d.date, d]));
+    if (brokerByDate.size === 0 && instByDate.size === 0) return null;
+    const conc = (w: number): number | null => {
+      let net = 0, vol = 0;
+      for (let k = idx - w + 1; k <= idx; k++) {
+        if (k < 0) return null;
+        const d = allCandles[k].date;
+        if (!brokerByDate.has(d)) return null;
+        net += brokerByDate.get(d)!; vol += allCandles[k].volume || 0;
+      }
+      return vol > 0 ? (net / vol) * 100 : null;
+    };
+    let priorVol = 0, cnt = 0;
+    for (let k = idx - 5; k <= idx - 1; k++) { if (k >= 0) { priorVol += allCandles[k].volume || 0; cnt++; } }
+    const volRatio = cnt > 0 && priorVol > 0 ? (allCandles[idx].volume || 0) / (priorVol / cnt) : null;
+    const inst = instByDate.get(date) ?? null;
+    return {
+      date,
+      conc5: conc(5), conc20: conc(20), volRatio,
+      foreign: inst?.foreign ?? null, trust: inst?.trust ?? null, dealer: inst?.dealer ?? null, total: inst?.total ?? null,
+      brokerNet: brokerByDate.get(date) ?? null,
+    };
+  }, [market, chips, currentIndex, allCandles]);
+
+  // W 大戶偷買 4 道濾網（隨走圖游標）— 委派 lib/smartmoney 單一事實
+  const wConds = useMemo<CondList>(() => {
+    if (market !== 'TW' || !chips?.broker?.length || !allCandles.length) return null;
+    const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
+    const brokerByDate = new Map(chips.broker.map(d => [d.date, d.netDifference]));
+    const ev = smEvaluateAt(allCandles, brokerByDate, idx);
+    if (!ev) return null;
+    const c1 = ev.conc20 > 0 && ev.conc20prev <= 0, c2 = ev.conc20 >= 1 && ev.conc20 <= 5, c3 = ev.conc5 < 8, c4 = ev.volRatio < 1.8;
+    const rows: CondRow[] = [
+      { icon: '①', name: '20日由負轉正', value: `${ev.conc20prev.toFixed(1)}→${ev.conc20.toFixed(1)}%`, pass: c1, tip: '主力分點20日集中度從≤0翻正＝剛開始吃貨' },
+      { icon: '②', name: '落在1~5%', value: `${ev.conc20.toFixed(1)}%`, pass: c2, tip: '太高＝已吃完' },
+      { icon: '③', name: '5日濾隔日沖', value: `${ev.conc5.toFixed(1)}%`, pass: c3, tip: '5日<8%才非隔日沖假象' },
+      { icon: '④', name: '不爆量', value: `${ev.volRatio.toFixed(2)}x`, pass: c4, tip: '量比<1.8' },
+    ];
+    return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 4, hit: ev.isHit };
+  }, [market, chips?.broker, currentIndex, allCandles]);
+
+  // X 法人接刀 3 道（隨走圖游標）— 委派 lib/instdip + 大戶超高避雷
+  const xConds = useMemo<CondList>(() => {
+    if (market !== 'TW' || !chips?.inst?.length || !allCandles.length) return null;
+    const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
+    const instByDate = new Map(chips.inst.map(d => [d.date, d.total]));
+    const ev = instEvaluateAt(allCandles, instByDate, idx);
+    if (!ev) return null;
+    const price = allCandles[idx].close, date = allCandles[idx].date;
+    const tdcc = (chips.tdcc ?? []).filter(r => r.date <= date).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const last = tdcc[tdcc.length - 1];
+    let hl: number | null = null, th = 80, tierName = '千張';
+    if (price >= 250) { hl = last?.holder100Pct ?? null; th = 88; tierName = '百張'; }
+    else if (price >= 50) { hl = last?.holder400Pct ?? null; th = 86; tierName = '400張'; }
+    else { hl = last?.holder1000Pct ?? null; }
+    const tooHigh = hl != null && hl > th;
+    const c1 = ev.isWeak, c2 = ev.instBuy, c3 = !tooHigh;
+    const rows: CondRow[] = [
+      { icon: '①', name: '在跌/長黑',
+        value: ev.todayChg < -3 && !(ev.drop5 < -3)
+          ? `長黑${ev.todayChg.toFixed(1)}%`                              // 靠「今日長黑」入選 → 顯示收/開跌幅
+          : `近5日${ev.drop5 >= 0 ? '+' : ''}${ev.drop5.toFixed(1)}%`,   // 否則顯示近5日漲跌（按正負，不再寫死「跌」）
+        pass: c1, tip: '近5日跌>3%（在跌）或 今日收<開>3%（長黑）＝買恐慌' },
+      { icon: '②', name: '法人逆勢買', value: `${ev.inst5K > 0 ? '+' : ''}${ev.inst5K.toLocaleString()}張`, pass: c2, tip: '法人5日淨買超>0＝聰明錢接刀' },
+      { icon: '③', name: '非大戶超高', value: hl != null ? `${tierName}${hl.toFixed(0)}%` : '—', pass: c3, tip: '大戶持股太高＝流通量少陷阱' },
+    ];
+    return { date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit && c3 };
+  }, [market, chips?.inst, chips?.tdcc, currentIndex, allCandles]);
+
+  // Y 法人偷買(原) 3 道（隨走圖游標）— 委派 lib/inststeal 單一事實：跌 + 5日集中度在爬 + 法人連買
+  const yConds = useMemo<CondList>(() => {
+    if (market !== 'TW' || !chips?.broker?.length || !chips?.inst?.length || !allCandles.length) return null;
+    const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
+    const brokerByDate = new Map(chips.broker.map(d => [d.date, d.netDifference]));
+    const instByDate = new Map(chips.inst.map(d => [d.date, d.total]));
+    const ev = stealEvaluateAt(allCandles, brokerByDate, instByDate, idx);
+    if (!ev) return null;
+    const rows: CondRow[] = [
+      { icon: '①', name: '股價在跌', value: `近5日${ev.drop5 >= 0 ? '+' : ''}${ev.drop5.toFixed(1)}%`, pass: ev.isDropping, tip: '近5日在回檔（跌幅夠）才是「偷買」場景' },
+      { icon: '②', name: '集中度在爬', value: `${ev.conc5prev.toFixed(1)}→${ev.conc5.toFixed(1)}%`, pass: ev.isConcRising, tip: '5日主力分點集中度>0、比5日前高、且不爆量＝慢慢集中' },
+      { icon: '③', name: '法人連買', value: `${ev.instConsecDays}天 ${ev.instSumK > 0 ? '+' : ''}${ev.instSumK.toLocaleString()}張`, pass: ev.isInstBuying, tip: '三大法人合計連買≥2天且近5日淨買超>0' },
+    ];
+    return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit };
+  }, [market, chips?.broker, chips?.inst, currentIndex, allCandles]);
+
+  // W 主力分點集中度逐日表（CMoney 主力進出/集中度 風格）— 近 120 個交易日，newest-first
+  const wTable = useMemo<WHistRow[]>(() => {
+    if (market !== 'TW' || !chips?.broker?.length || allCandles.length < 21) return [];
+    const brokerByDate = new Map(chips.broker.map(d => [d.date, d.netDifference]));
+    const conc = (end: number, w: number): number | null => {
+      let net = 0, vol = 0;
+      for (let k = end - w + 1; k <= end; k++) {
+        if (k < 0) return null;
+        const d = allCandles[k].date;
+        if (!brokerByDate.has(d)) return null;
+        net += brokerByDate.get(d)!; vol += allCandles[k].volume || 0;
+      }
+      return vol > 0 ? (net / vol) * 100 : null;
+    };
+    const start = Math.max(19, allCandles.length - 120);
+    const rows: WHistRow[] = [];
+    for (let i = start; i < allCandles.length; i++) {
+      const d = allCandles[i].date;
+      rows.push({
+        date: d,
+        brokerNet: brokerByDate.has(d) ? brokerByDate.get(d)! : null,
+        conc5: conc(i, 5), conc20: conc(i, 20), price: allCandles[i].close,
+      });
+    }
+    return rows.reverse();
+  }, [market, chips?.broker, allCandles]);
+
+  // X 三大法人逐日表 + 近5日合計（CMoney 三大法人/進出 風格）
+  const xInst = useMemo<{ rows: XInstRow[]; sum5: { foreign: number; trust: number; dealer: number; total: number } | null }>(() => {
+    if (market !== 'TW' || !chips?.inst?.length || !allCandles.length) return { rows: [], sum5: null };
+    const priceByDate = new Map(allCandles.map(c => [c.date, c.close]));
+    const sorted = chips.inst.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const rows: XInstRow[] = sorted.slice(-120).map(d => ({
+      date: d.date, foreign: d.foreign, trust: d.trust, dealer: d.dealer, total: d.total,
+      price: priceByDate.get(d.date) ?? null,
+    })).reverse();
+    const last5 = sorted.slice(-5);
+    const sum5 = last5.length ? last5.reduce((a, d) => ({
+      foreign: a.foreign + d.foreign, trust: a.trust + d.trust, dealer: a.dealer + d.dealer, total: a.total + d.total,
+    }), { foreign: 0, trust: 0, dealer: 0, total: 0 }) : null;
+    return { rows, sum5 };
+  }, [market, chips?.inst, allCandles]);
+
+  // X 集保大戶逐週表（CMoney 集保大戶/持股比 風格）— tier 跟條件③一致（依股價挑級距）
+  const xHolder = useMemo<{ rows: XHolderRow[]; tierLabel: string; th: number }>(() => {
+    if (market !== 'TW' || !(chips?.tdcc?.length) || !allCandles.length) return { rows: [], tierLabel: '', th: 0 };
+    const px = allCandles[allCandles.length - 1].close;
+    const tier = px >= 250 ? { key: 'holder100Pct' as const, label: '百張大戶', th: 88 }
+      : px >= 50 ? { key: 'holder400Pct' as const, label: '400張大戶', th: 86 }
+        : { key: 'holder1000Pct' as const, label: '千張大戶', th: 80 };
+    const priceOn = (d: string): number | null => {
+      for (let i = allCandles.length - 1; i >= 0; i--) if (allCandles[i].date <= d) return allCandles[i].close;
+      return null;
+    };
+    const sorted = (chips.tdcc ?? []).filter(r => typeof r[tier.key] === 'number')
+      .slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const rows: XHolderRow[] = sorted.map((r, i) => {
+      const lvl = r[tier.key] as number;
+      const prev = i > 0 ? (sorted[i - 1][tier.key] as number) : null;
+      return { date: r.date, level: lvl, change: prev != null ? +(lvl - prev).toFixed(2) : null, price: priceOn(r.date) };
+    });
+    return { rows: rows.slice(-16).reverse(), tierLabel: tier.label, th: tier.th };
+  }, [market, chips?.tdcc, allCandles]);
+
   const sidebarContent = (
     <div
       id={`panel-${sideTab}`}
@@ -604,7 +1111,8 @@ function HomePage() {
     >
       {sideTab === 'conditions' && (
         <SectionBoundary section="買法條件">
-          {showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch />}
+          <ChipScrubPanel data={chipScrub} />
+          {showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch wLive={wLive} wConds={wConds} xConds={xConds} yConds={yConds} wTable={wTable} xInst={xInst} xHolder={xHolder} />}
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
@@ -674,7 +1182,6 @@ function HomePage() {
 
   // ABC 偵測器腳位疊加（除錯/驗證）— 選「ABC 突破」買法(J，舊代號 G)且非三色視圖時，
   // 把 detectABCBreakout 實際選的 A/B/C 腳 + 它的下降切線畫到走圖（用走圖游標 currentIndex 對齊面板）。
-  const activeBuyMethod = useBacktestStore(s => s.activeBuyMethod);
   const abcOverlay = useMemo(() => {
     const isAbcMethod = activeBuyMethod === 'J' || activeBuyMethod === 'G';
     if (showSanseView || !isAbcMethod) return null;
@@ -706,6 +1213,25 @@ function HomePage() {
     };
   }, [showSanseView, activeBuyMethod, allCandles, currentIndex]);
 
+  // 大戶持股趨勢線 — 只有開關開 + 台股 + 日線才畫。集保是週資料，forward-fill 到每根 K 棒（時間軸對齊），
+  // 用 useMemo 穩定 reference 免得每次 hover 重設線。純「格局強弱」參考、不發訊號。
+  const holderLineOverlay = useMemo(() => {
+    if (!showHolderLine || market !== 'TW' || currentInterval !== '1d') return null;
+    const key = holderTier.key;
+    const rows = (chips?.tdcc ?? [])
+      .filter(r => typeof r[key] === 'number')
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (rows.length === 0 || visibleCandles.length === 0) return null;
+    const out: { time: string; value: number }[] = [];
+    let j = 0;
+    for (const c of visibleCandles) {
+      while (j + 1 < rows.length && rows[j + 1].date <= c.date) j++;
+      if (rows[j].date <= c.date) out.push({ time: c.date, value: rows[j][key]! });
+    }
+    return out.length ? out : null;
+  }, [showHolderLine, market, currentInterval, chips?.tdcc, visibleCandles, holderTier]);
+
   return (
     // fullViewport=false 永遠允許整頁 vertical scroll（避免 ^TWII 時整頁鎖死無法捲動）
     // chart 區填滿到視窗底（header 49px + py-2 8px = 57px 上方位移 → 扣 58px 讓排底貼齊視窗底、今日簡報退到摺疊線下）
@@ -736,6 +1262,19 @@ function HomePage() {
             }
             topAlertSlot={
               <>
+                {chipAvoid && currentInterval === '1d' && (
+                  <div className="shrink-0 px-3 py-1.5 bg-red-900/25 border-b border-red-700/50 text-[11px]">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-red-300">🚩 買進前避雷</span>
+                      {chipAvoid.map(f => (
+                        <span key={f.key} className="px-1.5 py-0.5 rounded bg-red-800/50 text-red-200 font-medium" title={f.detail}>
+                          {f.label}
+                        </span>
+                      ))}
+                      <span className="text-muted-foreground/70">— 只示警不擋，回測這幾個事後系統性偏弱</span>
+                    </div>
+                  </div>
+                )}
                 {loadError && (
                   <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-red-900/30 border-b border-red-700/50 text-xs">
                     <span className="text-red-400">{loadError}</span>
@@ -775,6 +1314,8 @@ function HomePage() {
                 onApplyPreset={applyChartPreset}
                 showShuangB={showShuangB}
                 onShuangBToggle={() => setShowShuangB(v => !v)}
+                showHolderLine={showHolderLine}
+                onHolderLineToggle={() => setShowHolderLine(v => !v)}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -839,6 +1380,8 @@ function HomePage() {
               lockedPattern,
               shuangB: shuangBOverlay,
               abcOverlay,
+              holderLine: holderLineOverlay,
+              holderLineLabel: holderTier.label,
             }}
             indicatorProps={{
               candles: visibleCandles,
@@ -895,7 +1438,7 @@ function HomePage() {
         </div>
 
         {/* ── Right: 多源候選 panel（tab：策略掃描 / YouTube 提及） ── */}
-        <div className={`shrink-0 flex flex-col min-h-0 border border-border bg-card/80 rounded-lg overflow-hidden transition-all duration-300 ${
+        <div className={`shrink-0 flex flex-col min-h-0 ring-1 ring-foreground/10 bg-card/80 rounded-xl overflow-hidden transition-all duration-300 ${
           scannerOpen
             ? 'w-full md:w-[600px] min-h-[50vh] md:min-h-0'
             : 'w-full md:w-8 h-10 md:h-auto'
@@ -1087,7 +1630,7 @@ function HomePage() {
           onClick={() => setShowHelp(false)}
         >
           <div
-            className="bg-card border border-border rounded-xl shadow-2xl p-5 w-80 max-w-[90vw]"
+            className="bg-card ring-1 ring-foreground/10 rounded-xl shadow-2xl p-5 w-80 max-w-[90vw]"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
@@ -1152,6 +1695,8 @@ function HomePage() {
                 onApplyPreset={applyChartPreset}
                 showShuangB={showShuangB}
                 onShuangBToggle={() => setShowShuangB(v => !v)}
+                showHolderLine={showHolderLine}
+                onHolderLineToggle={() => setShowHolderLine(v => !v)}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -1225,6 +1770,8 @@ function HomePage() {
                       lockedPattern={lockedPattern}
                       shuangB={shuangBOverlay}
                       abcOverlay={abcOverlay}
+                      holderLine={holderLineOverlay}
+                      holderLineLabel={holderTier.label}
                     />
                   </ErrorBoundary>
                 </div>

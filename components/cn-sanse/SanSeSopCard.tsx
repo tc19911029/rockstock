@@ -11,7 +11,7 @@ export function SanSeSopCard({ market, className }: { market?: 'TW' | 'CN' | 'ot
   if (market !== 'TW' && market !== 'CN') return null;
   const ref = SOP_REFERENCE[market];
   return (
-    <details className={cn('rounded-md border border-border/60 bg-card/40 group', className)}>
+    <details className={cn('rounded-md ring-1 ring-foreground/10 bg-card/40 group', className)}>
       <summary className="cursor-pointer select-none list-none p-2 text-[11px] font-medium text-foreground/90 flex items-center gap-1">
         <span className="text-[9px] text-muted-foreground transition-transform group-open:rotate-90">▶</span>
         📖 買賣 SOP 速查（{market === 'TW' ? '台股' : '陸股'}·{SOP_AS_OF}回測）

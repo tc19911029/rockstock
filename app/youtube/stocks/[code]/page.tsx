@@ -84,7 +84,7 @@ export default function StockHistoryPage({
         <YoutubeHeader />
 
         {/* Stage 6：相關頁面 — 切到統一股票詳細頁看走圖 + Agent 分析 */}
-        <div className="rounded-lg border border-border/60 bg-card/40 px-4 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card/40 px-4 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
           <span className="text-muted-foreground">
             這頁只看「YouTube 視角的時間軸」。要看 K 線 + 4 面向 Agent 分析（技術 / 消息 / 籌碼 / 基本）請開
           </span>
@@ -117,13 +117,13 @@ export default function StockHistoryPage({
         </div>
 
         {loading && !data && (
-          <div className="rounded border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+          <div className="rounded ring-1 ring-foreground/10 bg-card p-6 text-center text-sm text-muted-foreground">
             載入中…
           </div>
         )}
 
         {data && !data.history && (
-          <div className="rounded border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+          <div className="rounded ring-1 ring-foreground/10 bg-card p-6 text-center text-sm text-muted-foreground">
             {data.message ?? '這個區間內沒有此股票的 mention 紀錄'}
           </div>
         )}

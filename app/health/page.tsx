@@ -76,7 +76,7 @@ export default function HealthPage() {
 
   return (
     <PageShell>
-      <div className="max-w-6xl mx-auto p-4 space-y-4">
+      <div className="p-4 space-y-4">
         <div className="flex items-baseline justify-between">
           <h1 className="text-2xl font-bold">資料健康狀態</h1>
           <div className="text-xs text-muted-foreground">
@@ -95,6 +95,15 @@ export default function HealthPage() {
                 >
                   <span className="mr-1.5">🎯</span>
                   每日選股
+                </Link>
+              )}
+              {t.key === 'cn-agents' && (
+                <Link
+                  href="/smartmoney"
+                  className="px-3 py-2 text-sm rounded-t-md transition-colors border-b-2 -mb-px border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+                >
+                  <span className="mr-1.5">🕵️</span>
+                  大戶偷買
                 </Link>
               )}
               <button

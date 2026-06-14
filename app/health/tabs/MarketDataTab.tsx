@@ -192,7 +192,7 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`w-3 h-3 rounded-full ${cfg[light].dot}`} />

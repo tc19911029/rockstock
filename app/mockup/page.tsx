@@ -86,7 +86,7 @@ export default function MockupPage() {
             <Card>
               <CardLabel
                 tag="主面板"
-                code="bg-card border border-border rounded-xl p-4"
+                code="bg-card ring-1 ring-foreground/10 rounded-xl p-4"
               />
               <div className="text-xs font-semibold tracking-wider text-foreground mb-3">▸ Section heading</div>
               <div className="text-xs text-muted-foreground leading-relaxed">
@@ -142,7 +142,7 @@ export default function MockupPage() {
             </Card>
 
             {/* Empty state */}
-            <div className="bg-card border border-border rounded-xl p-4 flex flex-col">
+            <div className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 flex flex-col">
               <CardLabel
                 tag="空狀態"
                 code="border-2 border-dashed border-border"
@@ -329,7 +329,7 @@ function Section({ title, caption, children }: { title: string; caption?: string
 }
 
 function Card({ children }: { children: React.ReactNode }) {
-  return <div className="bg-card border border-border rounded-xl p-4">{children}</div>;
+  return <div className="bg-card ring-1 ring-foreground/10 rounded-xl p-4">{children}</div>;
 }
 
 function Divider() {
@@ -481,7 +481,7 @@ function AfterBacktest() {
         ✅ 已 build 2026-05-23: 32 筆
       </div>
 
-      <section className="bg-card border border-border rounded-xl p-4">
+      <section className="bg-card ring-1 ring-foreground/10 rounded-xl p-4">
         <h2 className="text-xs font-semibold tracking-wider text-foreground mb-3">▸ Final Action 績效</h2>
         <table className="w-full text-xs">
           <thead className="text-muted-foreground border-b border-border">

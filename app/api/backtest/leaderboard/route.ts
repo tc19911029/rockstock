@@ -8,8 +8,22 @@
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { loadLeaderboard } from '@/lib/backtest/leaderboardStorage';
+import {
+  buildEdgeIndex, rowRating, familyRating,
+  HONEST_EDGE_DISCLAIMER, type EdgeGrade,
+} from '@/lib/strategy/edgeRating';
+import { loadHonestEdge } from '@/lib/strategy/edgeRatingStorage';
 
 export const runtime = 'nodejs';
+
+/** 緊湊的每列誠實 edge（route 回給前端、避免再傳整份 doc）。 */
+interface RowEdge {
+  grade: EdgeGrade;
+  familyGrade: EdgeGrade;
+  netEdgeD5: number;   // 扣成本後 d5 淨超額（top1）
+  excessD5: number;    // 比大盤超額（未扣成本）
+  note: string;
+}
 
 export async function GET(req: NextRequest) {
   const marketParam = (req.nextUrl.searchParams.get('market') ?? 'TW').toUpperCase();
@@ -35,6 +49,37 @@ export async function GET(req: NextRequest) {
     const window = pm
       ? { ...pm, label: doc.window.label, forwardTd: doc.window.forwardTd }
       : doc.window;
+
+    // 誠實 edge 疊加（A1）：每列附「扣成本後比大盤」的淨 edge + 評級；查不到不阻斷。
+    const edgeDoc = await loadHonestEdge();
+    const edgeIdx = edgeDoc ? buildEdgeIndex(edgeDoc) : null;
+    const edgeByRowId: Record<string, RowEdge> = {};
+    if (edgeIdx) {
+      for (const r of rows) {
+        const er = rowRating(edgeIdx, r.id);
+        if (!er) continue;
+        const fam = familyRating(edgeIdx, market, r.strategyId);
+        edgeByRowId[r.id] = {
+          grade: er.grade,
+          familyGrade: fam?.grade ?? er.grade,
+          netEdgeD5: er.netEdge.top1D5,
+          excessD5: er.excess.top1D5,
+          note: er.honestNote,
+        };
+      }
+    }
+    const honestEdge = edgeDoc
+      ? {
+          disclaimer: HONEST_EDGE_DISCLAIMER,
+          generatedAt: edgeDoc.generatedAt,
+          method: edgeDoc.method,
+          indexAvgD5: edgeDoc.indexAvgForwardPct?.[market]?.d5 ?? null,
+          costRoundTripPct: edgeDoc.costRoundTripPct?.[market] ?? null,
+          familyKeepCount: edgeDoc.familyCounts?.keep ?? 0,
+          caveats: edgeDoc.caveats ?? [],
+        }
+      : null;
+
     return apiOk({
       market,
       exists: true,
@@ -44,6 +89,8 @@ export async function GET(req: NextRequest) {
       horizons: doc.horizons,
       meta: doc.meta,
       rows,
+      edgeByRowId,
+      honestEdge,
     });
   } catch (err) {
     return apiError(String(err));

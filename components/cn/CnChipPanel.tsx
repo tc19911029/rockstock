@@ -58,7 +58,7 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
         </div>
         {latest ? (
           <>
-            <div className="rounded-lg border border-border bg-card px-2.5 py-2 flex items-center gap-3">
+            <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2 flex items-center gap-3">
               <div>
                 <div className="text-[10px] text-muted-foreground">{latest.endDate} 股东户数</div>
                 <div className="font-mono text-base font-bold">{numfmt(latest.holderNum)} 户</div>
@@ -100,7 +100,7 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
             {lhb.map((d) => {
               const buy = (d.netAmt ?? 0) >= 0;
               return (
-                <div key={d.tradeDate} className="rounded-lg border border-border/60 bg-card px-2.5 py-1.5">
+                <div key={d.tradeDate} className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-1.5">
                   <div className="flex items-center gap-1.5">
                     <span className="font-mono text-[11px]">{d.tradeDate}</span>
                     <span className={cn('font-mono text-[11px] font-bold', (d.changeRate ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>

@@ -150,7 +150,7 @@ export function YoutubeProgramStocks({ date }: Props) {
   const totalStocks = useMemo(() => programs.reduce((n, p) => n + p.stocks.length, 0), [programs]);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-semibold">📊 各節目談了哪些股票</h2>

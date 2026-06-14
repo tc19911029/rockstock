@@ -39,7 +39,7 @@ export function YoutubeHeader({ date, onDateChange, showExportButton }: YoutubeH
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         {/* Tabs */}
-        <nav className="flex items-center gap-1 rounded-lg border border-border bg-card overflow-hidden">
+        <nav className="flex items-center gap-1 rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
           {TABS.map(t => (
             <Link
               key={t.href}

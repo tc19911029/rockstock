@@ -9,7 +9,7 @@ const fmt = (v: number | null): string => (v == null ? '—' : `${v >= 0 ? '+' :
 /** 展開列：列出該策略×排序「最近的排序第 1 名 pick」+ 實際 d1/d3/d5（隔日開盤進場）。 */
 export function SamplePicksPanel({ row }: { row: LeaderboardRow }) {
   return (
-    <div className="border border-border rounded-lg bg-card/30 p-3">
+    <div className="ring-1 ring-foreground/10 rounded-xl bg-card/30 p-3">
       <div className="text-sm font-medium mb-2 flex flex-wrap items-baseline gap-2">
         <span>{row.strategyLabel} × {row.sortLabel}</span>
         <span className="text-xs text-muted-foreground">

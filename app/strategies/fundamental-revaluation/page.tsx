@@ -147,7 +147,7 @@ function FundamentalRevaluationInner() {
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="bg-card border border-border rounded-md px-2 py-1 text-sm"
+            className="bg-card ring-1 ring-foreground/10 rounded-md px-2 py-1 text-sm"
           />
           {deep && (
             <span className="text-xs px-2 py-1 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
@@ -205,7 +205,7 @@ function FundamentalRevaluationInner() {
         {/* 主視圖 */}
         {isMainList ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="border border-border rounded-lg bg-card/30 p-3">
+            <div className="ring-1 ring-foreground/10 rounded-xl bg-card/30 p-3">
               <TopList
                 rows={rows}
                 selectedSymbol={selectedSymbol}
@@ -213,7 +213,7 @@ function FundamentalRevaluationInner() {
                 market={market}
               />
             </div>
-            <div className="border border-border rounded-lg bg-card/30 p-3">
+            <div className="ring-1 ring-foreground/10 rounded-xl bg-card/30 p-3">
               {selected ? (
                 <ScoreBreakdownPanel result={selected} />
               ) : (
@@ -224,7 +224,7 @@ function FundamentalRevaluationInner() {
             </div>
           </div>
         ) : (
-          <div className="border border-border rounded-lg bg-card/30 p-3">
+          <div className="ring-1 ring-foreground/10 rounded-xl bg-card/30 p-3">
             {exclusionRows.length === 0 ? (
               <div className="text-sm text-muted-foreground p-4 text-center">無此類別</div>
             ) : (
@@ -243,7 +243,7 @@ function FundamentalRevaluationInner() {
 
         {/* 策略說明 */}
         {session && (
-          <div className="border border-border rounded-lg bg-card/30 p-3 text-xs text-muted-foreground space-y-1">
+          <div className="ring-1 ring-foreground/10 rounded-xl bg-card/30 p-3 text-xs text-muted-foreground space-y-1">
             <div className="font-medium text-foreground">策略：{session.strategyVersion}</div>
             <div>
               台股版用「月營收 YoY/MoM」提前推估 Forward EPS；陸股版用「季報 + 扣非淨利」確認本業轉強。

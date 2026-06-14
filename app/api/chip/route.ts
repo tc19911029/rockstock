@@ -317,6 +317,7 @@ import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock, fetch
 import { getSharesIssued } from '@/lib/datasource/FinMindClient';
 import { detectTrend, rollingChange } from '@/lib/chips/trends';
 import { fetchYahooBrokerTrades, type BrokerRankRow } from '@/lib/datasource/YahooBrokerScraper';
+import { readBrokerStock } from '@/lib/chips/BrokerStorage';
 import { fetchTwseSblForStock, fetchTwseSblHistory } from '@/lib/datasource/TwseSblProvider';
 import { fetchTpexSblForStock, fetchTpexSblHistory } from '@/lib/datasource/TpexSblProvider';
 import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
@@ -469,6 +470,9 @@ export async function GET(req: NextRequest) {
     const sblHistory = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblHistory>>>(5) ?? [];
     const brokerTrades = pickFulfilled<Awaited<ReturnType<typeof fetchYahooBrokerTrades>>>(6);
     const latestVolumeLots = pickFulfilled<number | null>(7);
+    // 主力券商分點「歷史」：Yahoo 只給當日，走圖看過去要讀回填的 BrokerStorage（FinMind Sponsor 灌的正版集中度）
+    const brokerHist = await readBrokerStock(code).catch(() => null);
+    const brokerStored = brokerHist?.data.find(d => d.date === date) ?? null;
     // 把 sblToday 轉成 lendingInfo shape 給後面 code 用（向下相容）
     const lendingInfo = sblToday ? {
       lendingBalance: sblToday.lendingBalance,
@@ -697,11 +701,13 @@ export async function GET(req: NextRequest) {
       },
       holder5wChange,
       holder5mChange,
-      // v3 主力券商分點
-      brokerNetBuy: brokerTrades?.totalDifferenceVolK,
-      brokerConcentration: brokerTrades
-        ? (brokerTrades.concentration * 100 * (brokerTrades.totalDifferenceVolK >= 0 ? 1 : -1))
-        : undefined,
+      // v3 主力券商分點 — 優先讀回填的歷史(走圖看過去)，無則退 Yahoo 當日
+      brokerNetBuy: brokerStored?.netDifference ?? brokerTrades?.totalDifferenceVolK,
+      brokerConcentration: brokerStored
+        ? brokerStored.concentration
+        : brokerTrades
+          ? (brokerTrades.concentration * 100 * (brokerTrades.totalDifferenceVolK >= 0 ? 1 : -1))
+          : undefined,
       topBuyers: brokerTrades?.buyerRankList,
       topSellers: brokerTrades?.sellerRankList,
       // v5 三大法人衍生欄位（純顯示）

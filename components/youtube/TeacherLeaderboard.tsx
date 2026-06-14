@@ -395,7 +395,7 @@ export function TeacherLeaderboard() {
               title="老師排行榜"
               subtitle={`誰推得準。預設按「一週漲幅」排，點色塊上方標題可換天排序。樣本 ≥ ${minScored} 進正式榜。`}
             />
-            <div className="rounded-xl border border-border bg-card overflow-x-auto">
+            <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead className="text-muted-foreground">
                   <tr className="border-b border-border">
@@ -676,7 +676,7 @@ function ProgramSection({ programs, minScored, cols, fullSpan, sortByHz, sortKey
   return (
     <section className="space-y-2.5">
       <SectionTitle icon="tv" title="節目排行榜" subtitle="同節目多位老師同日同股已去重；含未指名老師的事件。" />
-      <div className="rounded-xl border border-border bg-card overflow-x-auto">
+      <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-x-auto">
         <table className="w-full text-xs border-collapse">
           <thead className="text-muted-foreground">
             <tr className="border-b border-border">
@@ -736,7 +736,7 @@ function StockCardGrid({ rows, horizons, title, subtitle, icon, countOf }: {
           const count = countOf === 'teacher' ? s.teacherCount : s.programCount;
           const names = countOf === 'teacher' ? s.teachers : s.programs;
           return (
-            <div key={s.stock_code} className="rounded-xl border border-border bg-card p-3 space-y-2">
+            <div key={s.stock_code} className="rounded-xl ring-1 ring-foreground/10 bg-card p-3 space-y-2">
               <div className="flex items-baseline justify-between gap-2">
                 <a href={`/?load=${s.stock_code}`} className="text-sm font-semibold text-sky-300 hover:underline whitespace-nowrap">
                   {s.stock_code} {s.stock_name}
@@ -764,7 +764,7 @@ function ExtremesSection({ gainers, losers, horizons }: {
   if (g.length === 0 && l.length === 0) return null;
 
   const List = ({ items, dir }: { items: ExtremeEvent[]; dir: 'gain' | 'loss' }) => (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
       <div className={cn('px-3 py-2 text-xs font-semibold border-b border-border', dir === 'gain' ? 'text-bull' : 'text-bear')}>
         {dir === 'gain' ? '▲ 漲最多' : '▼ 跌最多'}
       </div>

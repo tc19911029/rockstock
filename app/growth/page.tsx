@@ -123,7 +123,7 @@ export default function GrowthPage() {
               <span>{totalPct.toFixed(1)}%</span>
               <span>目標 {formatNT(path.targetCapital)}</span>
             </div>
-            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-full h-3 bg-secondary rounded-full overflow-hidden">
               <div className="h-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all"
                 style={{ width: `${totalPct}%` }} />
             </div>
@@ -161,13 +161,13 @@ export default function GrowthPage() {
         </section>
 
         {/* 軌跡 SVG */}
-        <section className="rounded-lg border border-border bg-card p-4">
+        <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
           <h2 className="text-sm font-semibold text-foreground mb-3">📊 月份軌跡</h2>
           <MilestoneChart milestones={path.milestones} currentCapital={progress.currentCapital} currentMonth={progress.currentMonth} />
         </section>
 
         {/* 里程碑表 */}
-        <section className="rounded-lg border border-border bg-card p-4 overflow-x-auto">
+        <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 overflow-x-auto">
           <h2 className="text-sm font-semibold text-foreground mb-3">📋 月份里程碑</h2>
           <table className="min-w-full text-sm">
             <thead>
@@ -236,7 +236,7 @@ export default function GrowthPage() {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-3">
       <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{title}</div>
       {children}
     </div>

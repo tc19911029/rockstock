@@ -58,16 +58,27 @@ export async function GET(req: NextRequest) {
     const today = todayYmdTaipei(new Date());
     const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
     const holdings = await listOpenHoldings(profileId);
-    const twHoldings = holdings.filter(h => h.market === 'TW');
+    // 2026-06-14：擴成台股+陸股皆出停損檢查（賠少 P0③ CN 補齊）。evaluateHolding 市場無關。
+    const activeHoldings = holdings.filter(h => h.market === 'TW' || h.market === 'CN');
 
-    // 大盤 regime
-    let indexCandles = await loadLocalCandles('^TWII', 'TW');
-    indexCandles = await injectL2TodayIfNeeded(indexCandles, '^TWII', 'TW', today);
-    const marketRegime = detectMarketRegime(indexCandles);
-    const thresholds = thresholdsForRegime(marketRegime.regime);
+    // 各市場大盤 regime（TW=^TWII / CN=上證000001.SS）— 快取，缺資料退中性多頭門檻
+    const regimeCache: Record<string, { regime: RegimeDetectResult; thresholds: ReturnType<typeof thresholdsForRegime> }> = {};
+    async function regimeFor(mkt: 'TW' | 'CN') {
+      if (regimeCache[mkt]) return regimeCache[mkt];
+      const idx = mkt === 'CN' ? '000001.SS' : '^TWII';
+      let ic = await loadLocalCandles(idx, mkt);
+      ic = await injectL2TodayIfNeeded(ic, idx, mkt, today);
+      const regime = detectMarketRegime(ic);
+      regimeCache[mkt] = { regime, thresholds: thresholdsForRegime(regime.regime) };
+      return regimeCache[mkt];
+    }
+    // 回應的單一 marketRegime 維持 ^TWII（向下相容；各持倉內部用自己市場的 regime）
+    const marketRegime = (await regimeFor('TW')).regime;
 
     const items: DailyActionItem[] = await Promise.all(
-      twHoldings.map(async (h: PortfolioHolding): Promise<DailyActionItem> => {
+      activeHoldings.map(async (h: PortfolioHolding): Promise<DailyActionItem> => {
+        const mkt = (h.market === 'CN' ? 'CN' : 'TW') as 'TW' | 'CN';
+        const { thresholds } = await regimeFor(mkt);
         const stopLoss = h.stopLoss ?? h.entryPrice * 0.93;
         const base: Omit<DailyActionItem, 'todayClose' | 'asOfDate' | 'unrealizedAmount' | 'action' | 'label' | 'signals' | 'profitPct' | 'suggestedStop' | 'metrics'> = {
           symbol: h.symbol,
@@ -79,12 +90,12 @@ export async function GET(req: NextRequest) {
           shares: h.shares,
         };
 
-        let candles = await loadLocalCandles(h.symbol, 'TW');
-        if (!candles || candles.length === 0) {
+        let candles = await loadLocalCandles(h.symbol, mkt);
+        if ((!candles || candles.length === 0) && mkt === 'TW') {
           const otc = h.symbol.replace(/\.TW$/, '.TWO');
           candles = await loadLocalCandles(otc, 'TW');
         }
-        candles = await injectL2TodayIfNeeded(candles, h.symbol, 'TW', today);
+        candles = await injectL2TodayIfNeeded(candles, h.symbol, mkt, today);
         if (!candles || candles.length === 0) {
           return {
             ...base,

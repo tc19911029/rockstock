@@ -264,7 +264,7 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-card border border-border rounded px-1.5 py-0.5 text-[10px]"
+            className="bg-card ring-1 ring-foreground/10 rounded px-1.5 py-0.5 text-[10px]"
           >
             <option value="default">預設</option>
             <option value="openReturn">漲跌·隔開</option>

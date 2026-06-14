@@ -42,14 +42,14 @@ function ValuationScenarios({
   const liveTtmPe = live && ttmEps ? live / ttmEps : ttmPe;
 
   return (
-    <details className="border border-border/60 rounded bg-card/40 overflow-hidden" open>
+    <details className="ring-1 ring-foreground/10 rounded bg-card/40 overflow-hidden" open>
       <summary className="px-2.5 py-1.5 bg-secondary/40 text-[11px] font-semibold text-cyan-300 cursor-pointer hover:text-cyan-200 select-none border-b border-border/40">
         估值情境（預估 EPS / 預估 PE / 合理股價）
       </summary>
       <div className="px-2.5 py-2 space-y-2">
         {/* 月化 EPS 推算（如果有）*/}
         {monthlyEpsEstimate && (
-          <div className="rounded border border-border/50 bg-card/60 p-2">
+          <div className="rounded ring-1 ring-foreground/10 bg-card/60 p-2">
             <div className="text-[10px] text-muted-foreground mb-1">
               {monthlyEpsEstimate.month} 月化 EPS 推算
             </div>
@@ -175,7 +175,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice }:
   return (
     <div className="space-y-2 text-xs">
       {sections.map(sec => (
-        <div key={sec.title} className="border border-border/60 rounded bg-card/40 overflow-hidden">
+        <div key={sec.title} className="ring-1 ring-foreground/10 rounded bg-card/40 overflow-hidden">
           <div className="px-2.5 py-1.5 bg-secondary/40 text-[11px] font-semibold text-cyan-300 border-b border-border/40">
             {sec.title}
           </div>
@@ -486,7 +486,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
         {data.reasoning.map((r, i) => (
           <details
             key={r.section}
-            className="border border-border/60 rounded bg-card/40"
+            className="ring-1 ring-foreground/10 rounded bg-card/40"
             {...(i === 0 ? { open: true } : {})}
           >
             <summary className="px-2 py-1.5 cursor-pointer text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 select-none">
@@ -508,7 +508,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
 
       {/* dataPoints summary */}
       {data.dataPoints && data.dataPoints.length > 0 && (
-        <details className="border border-border/60 rounded bg-card/40">
+        <details className="ring-1 ring-foreground/10 rounded bg-card/40">
           <summary className="px-2 py-1.5 cursor-pointer text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 select-none">
             數據點（{data.dataPoints.length} 筆）
           </summary>

@@ -61,8 +61,8 @@ export function TimeMachinePanel({ asOf, topK, selectBy }: Props) {
     return () => { cancelled = true; };
   }, [asOf, topK, selectBy]);
 
-  if (loading && !data) return <div className="rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground">回到 {asOf} 模擬跟單中…</div>;
-  if (error) return <div className="rounded-lg border border-red-700/40 bg-card p-4 text-sm text-red-400">無法回測：{error}</div>;
+  if (loading && !data) return <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-6 text-center text-sm text-muted-foreground">回到 {asOf} 模擬跟單中…</div>;
+  if (error) return <div className="rounded-xl border border-red-700/40 bg-card p-4 text-sm text-red-400">無法回測：{error}</div>;
   if (!data) return null;
 
   const f = data.follow, b = data.benchmarkAll;

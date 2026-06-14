@@ -147,7 +147,7 @@ interface BacktestState {
   /** 掃描方向：long=做多, short=做空, daban=打板 */
   scanDirection: 'long' | 'short' | 'daban';
   /** 當前買法（並列買法架構，Phase 6，2026-04-20）— 只在 scanDirection='long' 時有意義 */
-  activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
+  activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
   /** 三色資金 level（陸股自創策略）— null = 走書本買法（activeBuyMethod）；非 null = 三色該 level 視角。
    *  單一事實來源：ScanPanelVertical（掃描清單）+ app/page.tsx（中間「條件/訊號」面板）共用，
    *  讓「點哪個策略 → 中間面板換成對應條件/訊號」一致。不持久化（reload 回 null）。 */
@@ -173,7 +173,7 @@ interface BacktestState {
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
-  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R') => Promise<void>;
+  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y') => Promise<void>;
   setSanseLevel:          (lv: SanSeScanLevel | null) => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;

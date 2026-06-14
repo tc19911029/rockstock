@@ -17,6 +17,7 @@ import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
 import { matchedStrategies, getStrategy, type SanSeScanLevel } from '@/lib/cn-sanse/namedStrategies';
 import { buyScore } from '@/lib/cn-sanse/buyScore';
+import type { ThemeRef } from '@/lib/theme-sanse/types';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
@@ -151,15 +152,33 @@ function passFilters(report: ConditionReport | undefined, active: Set<string>): 
  */
 // buyScore 抽至 lib/cn-sanse/buyScore.ts（2026-06-12 單一事實 — 今日最優先卡/paper-trade 共用）
 
+const stripSuffix = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+/** 該股所屬「最熱題材」的名次（1=最熱）；不在任何排名題材 → Infinity（排最後）。 */
+function bestHeatRank(themeHeatMap: Map<string, ThemeRef[]>, symbol: string): number {
+  const refs = themeHeatMap.get(stripSuffix(symbol)); // 已按 heatRank 升冪
+  return refs && refs.length > 0 ? refs[0].heatRank : Infinity;
+}
+
 /** 共用排序比較器（畫面清單 + 漲幅抓取目標共用，確保顯示的股票就是有抓漲幅的股票）。 */
 function rowComparator(
   sortKey: SortKey,
   dir: number,
   perf: Record<string, StockForwardPerformance>,
   reportMap: Map<string, ConditionReport>,
+  themeHeatMap: Map<string, ThemeRef[]> = new Map(),
 ) {
   const fwdField = FWD_FIELD[sortKey];
   return (a: Hit, b: Hit): number => {
+    if (sortKey === 'themeHeatRank') {
+      // 三色票按「所屬最熱題材名次」排序（低名次=更熱→排前）；無題材排最後。
+      const ra = bestHeatRank(themeHeatMap, a.symbol);
+      const rb = bestHeatRank(themeHeatMap, b.symbol);
+      if (ra === Infinity && rb === Infinity) return 0;
+      if (ra === Infinity) return 1;
+      if (rb === Infinity) return -1;
+      if (ra === rb) return 0;
+      return dir * (ra - rb);
+    }
     if (fwdField) {
       const va = perf[a.symbol]?.[fwdField];
       const vb = perf[b.symbol]?.[fwdField];
@@ -203,6 +222,7 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 
 type SortKey = 'combo' | 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price' | 'turnoverRank'
+  | 'themeHeatRank'
   | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
 
 const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
@@ -214,6 +234,7 @@ const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
   { key: 'changePct', label: '漲幅', tip: '掃描當日漲跌幅 %' },
   { key: 'price', label: '股價', tip: '當前股價' },
   { key: 'turnoverRank', label: '成交量', tip: '當日成交額排名（1=最大；缺值排最後）' },
+  { key: 'themeHeatRank', label: '🔥今日熱點', tip: '三色選出的票，按「所屬最熱題材的熱度名次」排序（最熱題材裡的票排最前；不在熱門題材的排最後）。回測：台股有效（最熱題材那段 D5 平均漲幅約是後段 2 倍）；陸股回測未支持、僅供參考。' },
   { key: 'fwdOpen', label: '漲跌·隔開', tip: '掃出後隔日開盤漲跌幅（缺值排最後）' },
   { key: 'fwdD1', label: '漲跌·1日', tip: '掃出後 1 日漲跌幅' },
   { key: 'fwdD5', label: '漲跌·5日', tip: '掃出後 5 日漲跌幅' },
@@ -251,6 +272,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 排序：預設「應買」(使用順序評級綜合分)高→低，最該買進的在最前；點同鍵切換高低
   const [sortKey, setSortKey] = useState<SortKey>('combo');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // 裸碼 → 所屬熱門題材 refs（「🔥今日熱點」排序 + 卡片題材標籤用）；只在 lastDate 變時抓一次
+  const [themeHeatMap, setThemeHeatMap] = useState<Map<string, ThemeRef[]>>(new Map());
   // 三色買進訊號篩選（cond id 集合；含 'hideConflict'）
   const [filters, setFilters] = useState<Set<string>>(new Set());
   const toggleFilter = (k: string) => setFilters((prev) => {
@@ -342,7 +365,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 進場：盤中活躍時段預設即時，否則交給 loadAfterClose（在 effect 內判斷避免 SSR/CSR hydration 不一致）
   useEffect(() => {
     liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
-    setData(null); setDates([]); setPerf({}); setYtRecentOnly(false); // 清掉前一市場殘留，避免短暫顯示錯市場
+    setData(null); setDates([]); setPerf({}); setYtRecentOnly(false); setThemeHeatMap(new Map()); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
     // 盤中/盤後窗口 → 即時；收盤後 → loadAfterClose（今天盤後沒生就顯示今天盤中，不退回昨天）
     if (isIntradayActive(market)) {
@@ -407,10 +430,10 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   const fetchTargets = useMemo(() => {
     const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
     const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
-    rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap));
+    rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap, themeHeatMap));
     return rows.slice(0, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levelRows, sortKey, sortDir, filters, reportMap, zhuMap, ytMap, ytRecentOnly]);
+  }, [levelRows, sortKey, sortDir, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
   const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
 
   // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
@@ -439,12 +462,29 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.lastDate, fetchKey]);
 
+  // 題材熱度（「🔥今日熱點」排序 + 卡片標籤）— 只在封存日變時抓一次（非每次盤中輪詢）
+  useEffect(() => {
+    const d = data?.lastDate;
+    if (!d) { setThemeHeatMap(new Map()); return; }
+    let alive = true;
+    const myBase = apiBase;
+    fetch(`/api/theme-sanse/hot?market=${market}&date=${d}`)
+      .then((r) => r.json())
+      .then((j: { ok?: boolean; byCode?: Record<string, ThemeRef[]> }) => {
+        if (!alive || liveBaseRef.current !== myBase) return; // 切市場後到的舊回應丟棄
+        setThemeHeatMap(j.ok && j.byCode ? new Map(Object.entries(j.byCode)) : new Map());
+      })
+      .catch(() => { /* 熱度取不到不致命 — 排序退回無題材 */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.lastDate, market]);
+
   const hits = useMemo(() => {
     const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
-    rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap));
+    rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap, themeHeatMap));
     return rows.slice(0, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levelRows, sortKey, sortDir, perf, filters, reportMap, zhuMap, ytMap, ytRecentOnly]);
+  }, [levelRows, sortKey, sortDir, perf, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   return (
@@ -551,6 +591,13 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
             {label}{sortKey === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
           </button>
         ))}
+        {sortKey === 'themeHeatRank' && (
+          <span className="basis-full text-[9px] leading-snug mt-0.5 text-amber-400/90">
+            {market === 'TW'
+              ? '🔥 三色票按今日最熱題材排序。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+              : '⚠ 陸股回測顯示這樣排「反而把較差的排前面」（最熱題材那段報酬最差）— 不建議用此排序選股，僅供觀察。'}
+          </span>
+        )}
       </div>
 
       {/* 三色買進訊號篩選：分 3 組、每組照書本順序；多個 chip = AND（同時滿足）*/}
@@ -681,6 +728,20 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{fmt(h.price)}</span>
                 {h.industry && <span className="truncate max-w-[80px]">{h.industry}</span>}
+                {(() => {
+                  const refs = themeHeatMap.get(bare(h.symbol));
+                  if (!refs || refs.length === 0) return null;
+                  const best = refs[0];
+                  return (
+                    <span
+                      className="text-amber-400/90 truncate max-w-[120px]"
+                      title={refs.map((r) => `${r.themeName} #${r.heatRank}`).join('、')}
+                    >
+                      🔥{best.themeName} #{best.heatRank}
+                      {refs.length > 1 && <span className="text-muted-foreground"> +{refs.length - 1}</span>}
+                    </span>
+                  );
+                })()}
                 {(ytSummary || h.turnoverRank !== undefined) && (
                   <div className="ml-auto flex items-center gap-1 shrink-0">
                     {ytResonance[0] && (

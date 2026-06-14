@@ -190,21 +190,48 @@ export async function loadEventsWithReturns(days: number): Promise<CnRecoEventWi
   return out;
 }
 
+/** 該日「當日報價」：收盤 + 當日漲跌幅（vs 前一交易日收盤）。從 K 線即時算。 */
+export interface DateQuote {
+  close: number;
+  changePct: number | null;
+}
+
+/** 每日視圖每檔回傳：前瞻報酬 + 當日報價（兩者共用同一份 K 線，只載一次） */
+export interface DateRow {
+  returns: RecoReturns | null;
+  quote: DateQuote | null;
+}
+
+/** 從 K 線取「date 當天（或之前最近一根）」的收盤 + 當日漲跌幅 */
+function dateQuote(candles: BaselineCandle[] | null, date: string): DateQuote | null {
+  if (!candles || candles.length === 0) return null;
+  let idx = -1;
+  for (let i = candles.length - 1; i >= 0; i--) {
+    if (candles[i].date === date) { idx = i; break; }   // 當日精確命中
+    if (candles[i].date < date) { idx = i; break; }      // 否則退最近一根（停牌/非交易日）
+  }
+  if (idx < 0) return null;
+  const close = candles[idx].close;
+  const prev = idx > 0 ? candles[idx - 1].close : null;
+  const changePct = prev && prev > 0 ? +(((close - prev) / prev) * 100).toFixed(2) : null;
+  return { close, changePct };
+}
+
 /**
- * 算「某一天」一批股票的前瞻報酬（隔日開盤進場 → d1..d20 + 最高/回撤 + 超額 vs 上證）。
- * 給每日視圖端點用：候選股 + 龍虎榜股都走這個（不論在不在 events 檔，直接從 symbol 算）。
+ * 算「某一天」一批股票的前瞻報酬 + 當日報價（隔日開盤進場 → d1..d20 + 最高/回撤 + 超額 vs 上證；
+ * 外加當日收盤/漲跌幅）。給每日視圖端點用：候選股 + 龍虎榜股都走這個（不論在不在 events 檔）。
  * 一天 ~50–150 檔，逐檔載 K 線 memoize，秒級。報酬不持久化、即時算。
- * @returns Map<code, RecoReturns | null>（baseline 非 filled → null）
+ * @returns Map<code, DateRow>（baseline 非 filled → returns=null；K 線缺 → quote=null）
  */
 export async function loadDateReturns(
   date: string,
   items: Array<{ code: string; symbol: string; board: CnBoardKind }>,
-): Promise<Map<string, RecoReturns | null>> {
+): Promise<Map<string, DateRow>> {
   const now = new Date().toISOString();
   const todayYmd8 = ymd8(now.slice(0, 10));
   const index = await loadShIndexCandles();
   const candleMemo = new Map<string, BaselineCandle[] | null>();
-  const out = new Map<string, RecoReturns | null>();
+  const out = new Map<string, DateRow>();
 
   for (const it of items) {
     if (out.has(it.code)) continue;
@@ -214,7 +241,8 @@ export async function loadDateReturns(
       candleMemo.set(it.symbol, candles);
     }
     const baseline = settleBaseline(date, candles, now);
-    out.set(it.code, baseline.status === 'filled' ? computeEventReturns({ baseline }, candles, index) : null);
+    const returns = baseline.status === 'filled' ? computeEventReturns({ baseline }, candles, index) : null;
+    out.set(it.code, { returns, quote: dateQuote(candles, date) });
   }
   return out;
 }

@@ -31,7 +31,7 @@ export interface ScanDateEntry {
 // 用於 listScanDates 的 legacy filter — 漏列任一字母會讓 daily 模式 date list
 // 把 buy-method post_close 誤列為 daily entry（議題：0421 -F- bug 同類）
 // R = 乖離率（機械軌, 2026-05-21）；V = 基本面補漲（基本面軌, 2026-05-27）
-const BUY_METHOD_LETTERS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'V'] as const;
+const BUY_METHOD_LETTERS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'V', 'W', 'X', 'Y'] as const;
 const BUY_METHOD_FILE_TOKENS = BUY_METHOD_LETTERS.map((l) => `-${l}-`);
 const isBuyMethodFile = (filename: string): boolean =>
   BUY_METHOD_FILE_TOKENS.some((token) => filename.includes(token));
