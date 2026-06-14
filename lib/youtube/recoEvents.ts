@@ -91,6 +91,16 @@ export function extractRecoEvents(
 
   const allMentions = [...analysis.high_consensus_stocks, ...analysis.weak_signal_stocks];
 
+  // 全部節目的 display_name + 去括號裸名 → 清洗時擋「節目名漏進 analysts」（含跨節目誤掛）。
+  const programNames = opts.displayNameBySource
+    ? new Set(
+        [...opts.displayNameBySource.values()].flatMap(dn => [
+          dn,
+          dn.replace(/[（(][^（()）]*[）)]/g, '').trim(),
+        ]),
+      )
+    : undefined;
+
   for (const m of allMentions) {
     if (!m.matched) { unmatched += 1; continue; }
     if (m.combined_confidence < minConf) { lowConfidence += 1; continue; }
@@ -99,7 +109,7 @@ export function extractRecoEvents(
     const rawAnalysts = (m.analysts && m.analysts.length > 0)
       ? m.analysts
       : opts.analystsByVideo?.get(m.video_id) ?? [];
-    const persons = cleanTeacherNames(rawAnalysts, displayName);
+    const persons = cleanTeacherNames(rawAnalysts, displayName, programNames);
 
     const { type, source: typeSource } = resolveRecommendationType(m);
     const ref: RecoEventVideoRef = {

@@ -17,7 +17,9 @@ import { YoutubeStockCard } from './YoutubeStockCard';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { fmtDateLabelTw } from '@/lib/dateDefaults';
 import type { PerformanceResponse, PerformanceItem, ConsensusSummary } from '@/app/api/youtube/performance/route';
+import type { TeacherLeaderboardResponse } from '@/lib/youtube/recoTypes';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
+import type { AccuracyHint } from './YoutubeStockCard';
 
 interface Props {
   date: string;                                // 'YYYY-MM-DD'
@@ -26,10 +28,15 @@ interface Props {
   selectedCode?: string | null;
 }
 
-type SortKey = 'mention' | 'rating' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
+type SortKey = 'mention' | 'rating' | 'accuracy' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
 type FilterKey = 'all' | 'A' | 'B+';
 
 const RATING_ORDER: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
+
+// 「準度」= 提及這檔的老師/節目的歷史 D5 勝率（贏過大盤幅度放 tooltip）。
+// 樣本太小會出現「2 天 94% 勝率」的假象 → 設門檻，未達者不列入準度。
+const ACC_MIN_SCORED = 20;
+type WinStat = { win: number; scored: number; excess: number | null; label: string };
 
 export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selectedCode }: Props) {
   const [data, setData] = useState<PerformanceResponse | null>(null);
@@ -43,6 +50,8 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
   const [filter, setFilter] = useState<FilterKey>('all');
   // 跨節目共識面板（仿主頁朱老師分析的折疊樣式）— 預設收起,需要時自行展開
   const [consensusOpen, setConsensusOpen] = useState(false);
+  // 老師/節目歷史準度（teacher-leaderboard，與日期無關、整窗滾動）— 背景載入不擋股票清單
+  const [leaderboard, setLeaderboard] = useState<TeacherLeaderboardResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +75,66 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [date]);
+
+  // 準度資料只抓一次（整窗滾動、與當前 date 無關）。
+  // ⚠ 首頁 mount 會同時噴幾十個 API → 容易撞限流 429；一次性 fetch 失敗就永久空白，
+  //    所以遇到 429 / 網路錯誤要退避重試（仿 sanse 面板「暫時性失敗不重抓→永久卡」教訓）。
+  useEffect(() => {
+    let cancelled = false;
+    const delays = [400, 900, 1600, 2600];
+    const attempt = async (i: number): Promise<void> => {
+      if (cancelled) return;
+      try {
+        const r = await fetch('/api/youtube/teacher-leaderboard?days=90');
+        if (r.status === 429) throw new Error('429');
+        const json: TeacherLeaderboardResponse & { ok?: boolean } = await r.json();
+        if (!cancelled && json?.ok) { setLeaderboard(json); return; }
+        throw new Error('not ok');
+      } catch {
+        if (cancelled || i >= delays.length) return;   // 準度是加值排序，最終失敗不影響主清單
+        setTimeout(() => { void attempt(i + 1); }, delays[i]);
+      }
+    };
+    void attempt(0);
+    return () => { cancelled = true; };
+  }, []);
+
+  // 老師名 / 節目 source_id → D5 勝率
+  const winMaps = useMemo(() => {
+    const teacherWin = new Map<string, WinStat>();
+    const programWin = new Map<string, WinStat>();
+    for (const t of leaderboard?.teachers ?? []) {
+      const d5 = t.byHorizon?.d5;
+      if (d5) teacherWin.set(t.teacher, { win: d5.winRatePct, scored: t.scored_events, excess: d5.excessAvgPct, label: t.teacher });
+    }
+    for (const p of leaderboard?.programs ?? []) {
+      const d5 = p.byHorizon?.d5;
+      if (d5) programWin.set(p.source_id, { win: d5.winRatePct, scored: p.scored_events, excess: d5.excessAvgPct, label: p.display_name });
+    }
+    return { teacherWin, programWin };
+  }, [leaderboard]);
+
+  // 每檔的準度 = 提及它的老師/節目中，歷史 D5 勝率最高的那個（樣本須 ≥ 門檻）
+  const accByCode = useMemo(() => {
+    const { teacherWin, programWin } = winMaps;
+    const out = new Map<string, AccuracyHint>();
+    for (const it of data?.items ?? []) {
+      let best: AccuracyHint | null = null;
+      const consider = (s: WinStat | undefined, kind: AccuracyHint['kind']) => {
+        if (!s || s.scored < ACC_MIN_SCORED) return;
+        if (!best || s.win > best.winRate) best = { winRate: s.win, scored: s.scored, excess: s.excess, label: s.label, kind };
+      };
+      for (const src of it.sources) {
+        consider(programWin.get(src.source_id), 'program');
+        for (const a of src.analysts ?? []) {
+          const name = a.replace(/[（(][^（()）]*[）)]/g, '').trim();
+          consider(teacherWin.get(name), 'teacher');
+        }
+      }
+      if (best) out.set(it.stock_code, best);
+    }
+    return out;
+  }, [data, winMaps]);
 
   const datePickerMeta = useMemo<Record<string, DateMeta>>(() => {
     const m: Record<string, DateMeta> = {};
@@ -116,6 +185,16 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
         case 'rating':
           if (ar !== br) return dir * (br - ar);
           return dir * (b.mention_count - a.mention_count);
+        case 'accuracy': {
+          // 主鍵：最準來源的 D5 勝率；無準度資料的排最後；同分用樣本數 tie-break
+          const aa = accByCode.get(a.stock_code);
+          const ba = accByCode.get(b.stock_code);
+          if (!aa && !ba) return dir * (b.mention_count - a.mention_count);
+          if (!aa) return 1;
+          if (!ba) return -1;
+          if (ba.winRate !== aa.winRate) return dir * (ba.winRate - aa.winRate);
+          return dir * (ba.scored - aa.scored);
+        }
         case 'openReturn':
         case 'd1Return':
         case 'd5Return':
@@ -137,7 +216,7 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
       }
     });
     return arr;
-  }, [filtered, sortBy, sortDir]);
+  }, [filtered, sortBy, sortDir, accByCode]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -200,6 +279,7 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
           {([
             { key: 'mention' as const, label: '提及' },
             { key: 'rating' as const, label: '評級' },
+            { key: 'accuracy' as const, label: '🎯 準度' },
             { key: 'openReturn' as const, label: '漲跌·隔開' },
             { key: 'd1Return' as const, label: '漲跌·1日' },
             { key: 'd5Return' as const, label: '漲跌·5日' },
@@ -264,6 +344,7 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
           <YoutubeStockCard
             key={item.stock_code}
             item={item}
+            accuracy={accByCode.get(item.stock_code)}
             selected={selectedCode === item.stock_code}
             onSelect={onSelectStock}
           />
