@@ -98,7 +98,7 @@ function BrokerConcTable({ broker, candles, cursorDate }: { broker: BrokerPt[]; 
   if (!rows.length) return null;
   return (
     <div className="px-2 pt-1 pb-2">
-      <div className="text-center text-[11px] font-semibold text-foreground/80 mb-0.5">主力分點集中度（逐日）</div>
+      <div className="px-1 text-[11px] font-semibold text-foreground/80 mb-0.5">主力分點集中度</div>
       <div className="flex items-center justify-center gap-3 mb-1 text-[9px] text-muted-foreground/70">
         <span className="flex items-center gap-1">集中度一 <PeriodSelect value={periodA} onChange={setPeriodA} options={CONC_PERIODS} /></span>
         <span className="flex items-center gap-1">集中度二 <PeriodSelect value={periodB} onChange={setPeriodB} options={CONC_PERIODS} /></span>
@@ -155,9 +155,8 @@ function InstTable({ inst, cursorDate }: { inst: InstPt[]; cursorDate: string | 
   if (!rows.length) return null;
   return (
     <div className="px-2 pt-1 pb-2">
-      <div className="flex items-baseline justify-between mb-1 px-1">
-        <span className="text-[11px] font-semibold text-foreground/80">三大法人（逐日，張）</span>
-        <span className="text-[9px] text-muted-foreground/60">紅買綠賣 · 走圖列高亮</span>
+      <div className="mb-1 px-1">
+        <span className="text-[11px] font-semibold text-foreground/80">三大法人</span>
       </div>
       <div className={wrapCls}>
         <table className={tblCls}>
@@ -264,11 +263,10 @@ function HolderDistTable({ tdcc, cursorDate }: { tdcc: TdccPt[]; cursorDate: str
 
   return (
     <div className="px-2 pt-1 pb-2">
-      <div className="flex items-baseline justify-between mb-1 px-1">
+      <div className="mb-1 px-1">
         <span className="text-[11px] font-semibold text-foreground/80">集保持股分布</span>
-        <span className="text-[9px] text-muted-foreground/60">{data.full ? '全級距 · 週增減' : '歷史僅大戶比例'}</span>
       </div>
-      <div className="flex flex-wrap justify-center gap-1 mb-1 px-1">
+      <div className="flex flex-wrap justify-start gap-1 mb-1 px-1">
         {tabWeeks.map(w => {
           const on = w.date === data.date;
           return (

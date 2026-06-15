@@ -121,6 +121,13 @@ const INTERVAL_CONFIGS: Array<{ key: string; label: string; title: string }> = [
   { key: '1mo', label: '月', title: '月 K（中長線多空趨勢）' },
 ];
 
+/** 技術面核心副圖（量/KD/MACD）— 獨立開關，可與套組 tab 混搭 */
+const INDICATOR_CONFIGS = [
+  { key: 'volume' as const, label: '量', title: '成交量副圖' },
+  { key: 'kd' as const, label: 'KD', title: 'KD 隨機指標副圖（9,3,3）' },
+  { key: 'macd' as const, label: 'MACD', title: 'MACD 副圖（12,26,9）' },
+];
+
 /** 籌碼面「法人四」(TW) — 合併成單一「籌碼」鈕一次開關（外資/投信/自營/散戶） */
 const CHIP_GROUP_KEYS_TW = ['foreign', 'trust', 'dealer', 'retail'] as const;
 /** 籌碼面 (CN) — 主力/散戶資金，合併成「籌碼」鈕 */
@@ -330,6 +337,17 @@ export default function ChartToolbar({
           }`}
           title="布林通道 (20, 2)"
         >BB</button>
+        {INDICATOR_CONFIGS.map(({ key, label, title }) => (
+          <button key={key}
+            onClick={() => onIndicatorToggle(key)}
+            aria-pressed={!!indicators[key]}
+            aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${label} 副圖`}
+            title={title}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              indicators[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+          >{label}</button>
+        ))}
         {isTW && onHolderLineToggle && (
           <button
             onClick={onHolderLineToggle}
@@ -341,11 +359,25 @@ export default function ChartToolbar({
             title="千張大戶持股趨勢線（集保）— 淡淡一條疊主圖看格局強弱；純參考、不發訊號（回測無預測力）"
           >大戶</button>
         )}
-        {(isTW || isCN) && ((onChipGroupToggle && !onApplyPreset) || isTW) && (
+        {(isTW || isCN) && (
           <>
             <span className="w-px h-3.5 bg-border/60 mx-0.5" />
-            {/* 獨立「籌碼」開關：僅在沒有套組 tab 時顯示（套組已有籌碼按鈕，避免重複）*/}
-            {onChipGroupToggle && !onApplyPreset && (
+            {/* 三色資金副圖：主力狀態 / 捕撈季節（獨立開關，可與套組/籌碼混搭）*/}
+            {(['mainForce', 'season'] as const).map(key => (
+              <button key={key}
+                onClick={() => onIndicatorToggle(key)}
+                aria-pressed={!!indicators[key]}
+                aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${key === 'mainForce' ? '主力狀態' : '捕撈季節'} 副圖`}
+                title={key === 'mainForce'
+                  ? '主力狀態F（三色資金）副圖：中線主力/控盤/短線游資/超跌五色柱'
+                  : '捕撈季節（三色資金）副圖：XYS 動能柱 + 快慢線 + 金叉死叉'}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                  indicators[key] ? 'bg-fuchsia-700/60 text-fuchsia-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+                }`}
+              >{key === 'mainForce' ? '主力狀態' : '捕撈季節'}</button>
+            ))}
+            {/* 「籌碼」合併鈕：一鍵開該市場法人/主力散戶副圖（與套組籌碼鈕功能相同但不互斥清場，故套組存在時也顯示）*/}
+            {onChipGroupToggle && (
               <button
                 onClick={() => onChipGroupToggle(!chipGroupOn)}
                 aria-pressed={chipGroupOn}

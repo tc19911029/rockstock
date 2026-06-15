@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { getBullBearColors } from '@/lib/chart/colors';
 import { KD_OVERBOUGHT, KD_OVERSOLD } from '@/lib/analysis/bookThresholds';
 import {
@@ -562,6 +562,27 @@ function HolderChart({ holderKey, candles, chips, hoverCandle }: {
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const valMapRef = useRef<Map<string, number>>(new Map()); // candle.date → forward-fill 後的當週比例
+  const dataRef = useRef<Array<{ time: Time; value?: number }>>([]); // 餵給 series 的資料（含空白柱）
+  const visRangeRef = useRef<{ min: number; max: number } | null>(null); // 目前可見柱子的高/低
+
+  // 只用「目前畫面看得到的柱子」算 Y 軸高低 → 週與週的小變化才看得出來、最高柱不被切
+  const recomputeVisible = useCallback((logical: LogicalRange | null) => {
+    const data = dataRef.current;
+    if (data.length === 0) { visRangeRef.current = null; return; }
+    let from = 0, to = data.length - 1;
+    if (logical) {
+      from = Math.max(0, Math.floor(logical.from));
+      to = Math.min(data.length - 1, Math.ceil(logical.to));
+    }
+    let min = Infinity, max = -Infinity;
+    for (let i = from; i <= to; i++) {
+      const v = data[i]?.value;
+      if (typeof v !== 'number') continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    visRangeRef.current = min === Infinity ? null : { min, max };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -570,11 +591,24 @@ function HolderChart({ holderKey, candles, chips, hoverCandle }: {
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
       priceLineVisible: false,
       lastValueVisible: false,
+      base: 0, // 柱子從底部實心畫上來（同玩股網附圖）；Y 軸縮放改由 autoscaleInfoProvider 緊貼可見區間
+      autoscaleInfoProvider: () => {
+        const r = visRangeRef.current;
+        if (!r) return null;
+        const span = r.max - r.min;
+        const pad = Math.max(0.3, span * 0.15);
+        return { priceRange: { minValue: Math.max(0, r.min - pad), maxValue: r.max + pad } };
+      },
     });
+    // 頂端多留白給標題文字（大戶XXX% / vs 上週 / 近N週高低），避免最高柱被標題壓住看不完整
+    chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.28, bottom: 0.05 } });
     chartRef.current = chart;
 
     const unsub = subscribeRangeSync((range: LogicalRange | null) => {
-      if (range) chart.timeScale().setVisibleLogicalRange(range);
+      if (range) {
+        recomputeVisible(range);
+        chart.timeScale().setVisibleLogicalRange(range);
+      }
     });
     // ── Crosshair sync from main chart：跟主圖+其他副圖共享垂直對齊線 ──
     const unsubCrosshair = subscribeCrosshairSync((time) => {
@@ -591,7 +625,7 @@ function HolderChart({ holderKey, candles, chips, hoverCandle }: {
     });
     ro.observe(containerRef.current);
     return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
-  }, [holderKey]);
+  }, [holderKey, recomputeVisible]);
 
   useEffect(() => {
     if (!seriesRef.current) return;
@@ -610,19 +644,17 @@ function HolderChart({ holderKey, candles, chips, hoverCandle }: {
       return { time: toTime(c.date), value: v, color: up ? `${bull}cc` : `${bear}cc` };
     });
     valMapRef.current = valMap;
-    // base 取略低於區間最小值，讓週變化在副圖看得出來（不從 0 畫滿一整根）
-    const vals = [...valMap.values()];
-    if (vals.length > 0) {
-      const min = Math.min(...vals), max = Math.max(...vals);
-      const pad = Math.max(0.5, (max - min) * 0.15);
-      seriesRef.current.applyOptions({ base: Math.max(0, min - pad) });
-    }
+    dataRef.current = data;
+    recomputeVisible(getLastRange()); // 先依目前可見範圍算好高低，setData 觸發的自動縮放才讀得到
     seriesRef.current.setData(data);
     requestAnimationFrame(() => {
       const r = getLastRange();
-      if (r && chartRef.current) chartRef.current.timeScale().setVisibleLogicalRange(r);
+      if (r && chartRef.current) {
+        recomputeVisible(r);
+        chartRef.current.timeScale().setVisibleLogicalRange(r);
+      }
     });
-  }, [candles, chips, holderKey]);
+  }, [candles, chips, holderKey, recomputeVisible]);
 
   const { empty, current, value, delta, hi, lo, weeks } = computeHolderReadout(chips, holderKey, hoverCandle, candles);
 
