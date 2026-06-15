@@ -104,8 +104,10 @@ const LIGHT_DOT: Record<ScoreLight, string> = {
 
 // 此面板提供的排序選項。'default' 為 inline 選項（保持 API 預排順序，不走 applySort）；
 // 其餘 id 走 lib/sorting/registry 中央清單，順序＝顯示順序。
+// 此頁專屬（預設）｜共用區（fwd.*；無 mkt.* 盤面欄資料）
 const AGENT_SORT_OPTIONS: SortControlOption[] = [
   { id: 'default', label: '預設' },
+  '|',
   'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
 ];
 // 前瞻報酬 id → StockForwardPerformance 欄位名（accessor 用）

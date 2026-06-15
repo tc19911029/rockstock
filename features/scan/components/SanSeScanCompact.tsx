@@ -23,7 +23,7 @@ import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
-import type { SortDir } from '@/lib/sorting/registry';
+import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
 
 type ScanLevel = 'strict' | 'medium' | 'loose';       // 後端 results 的三個 level
 type Level = SanSeScanLevel;                            // 嚴/中/寬 + 具名策略 id（底反/全共振/紅+黃+觸發/紅+雙B…）；策略 = 從 records 衍生
@@ -212,16 +212,16 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 
-// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單）：
+// 該頁專屬（應買/三色細項/今日熱點）+ '|' 分隔線 + 共用區（全 UNIVERSAL_SORT_OPTIONS）。
 const SANSE_SORT_OPTIONS = [
-  'score.sanseCombo', 'sanse.shortAttack', 'sanse.midStrength', 'sanse.midControl', 'sanse.shortOversold',
-  'mkt.change', 'mkt.price', 'mkt.turnover', 'heat.theme',
-  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+  'score.sanseCombo', 'sanse.shortAttack', 'sanse.midStrength', 'sanse.midControl', 'sanse.shortOversold', 'heat.theme',
+  '|', ...UNIVERSAL_SORT_OPTIONS,
 ];
 
 const FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
   'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
-  'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
 };
 
 interface Props {

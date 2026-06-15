@@ -34,8 +34,10 @@ interface Props {
 type FilterKey = 'all' | 'A' | 'B+';
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+// 該頁專屬（老師面向）→ '|' 分隔線 → 共用區（本頁有完整 fwd 七欄）
 const YT_SORT_OPTIONS = [
   'teacher.mentions', 'teacher.rating', 'teacher.accuracy',
+  '|',
   'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
 ];
 // 前瞻報酬 id → PerformanceItem.performance 的欄位名

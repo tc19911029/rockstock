@@ -35,9 +35,11 @@ const RATING_RANK: Record<BrokerRatingNormalized, number> = {
 };
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；'rating' 是券商評等、券商面板專屬用 inline）
+// 該頁專屬（評等/目標價）→ '|' 分隔線 → 共用區（broker performance 無 fwd.maxLoss 欄）
 const BROKER_SORT_OPTIONS = [
   { id: 'rating', label: '評等' },
   'trust.upside', 'trust.achievement',
+  '|',
   'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain',
 ];
 const BROKER_FWD_FIELD: Record<string, string> = {

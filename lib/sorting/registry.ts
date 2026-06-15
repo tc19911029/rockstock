@@ -118,6 +118,25 @@ export const SORT_OPTIONS: Record<string, SortOptionDef> = {
   'trust.confirmed': { id: 'trust.confirmed', label: '進場確認', family: 'trust', defaultDir: 'desc', missingLast: false, tip: '✅進場 > ⏸不進 > 未知' },
 };
 
+/**
+ * 「共用區」排序選項 — 每一頁的排序列前面都放這一段、同順序，做到視覺統一（2026-06-15 使用者要求）。
+ *
+ * 用法：各面板 `options={[...這裡能用的共用 id, '|', ...該頁專屬]}`。
+ * 注意：不是每頁都有全部資料（例：候選池/多代理/YouTube/法人報告沒有成交額·漲幅·股價；
+ * 打板沒有前瞻報酬）。為了「不要有按了沒反應的死按鈕」，各面板只放自己有資料的共用 id
+ * （用 SUPPORTED 過濾），但**順序一律照這裡**，所以共用的部分每頁長一樣、排同位置。
+ */
+export const UNIVERSAL_SORT_OPTIONS: readonly string[] = [
+  'mkt.turnover', 'mkt.change', 'mkt.price',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+];
+
+/** 依面板支援的 id 過濾共用區，順序照 UNIVERSAL_SORT_OPTIONS。 */
+export function universalOptionsFor(supported: Iterable<string>): string[] {
+  const set = supported instanceof Set ? supported : new Set(supported);
+  return UNIVERSAL_SORT_OPTIONS.filter((id) => set.has(id));
+}
+
 /** 取得排序選項定義；未知 id 拋錯（合約測試與開發期防呆）。 */
 export function sortOption(id: string): SortOptionDef {
   const def = SORT_OPTIONS[id];

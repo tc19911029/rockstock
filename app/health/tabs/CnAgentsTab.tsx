@@ -336,12 +336,17 @@ export function CnAgentsTab() {
 // ── 子元件 ───────────────────────────────────────────────────────────────────
 
 // 選股清單排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）。
+// 版面統一：該頁專屬在前，'|' 分隔線後接共用區（UNIVERSAL_SORT_OPTIONS 順序，去掉陸股沒資料的 fwd.open / fwd.d10）。
 // 預設「應買」=score.cnBuy（accessor 回 totalScore，registry 設 defaultDir=asc → 低分在前）。
 // 回測證實 totalScore 是反指標：分數最高(最熱/追漲停)的事後系統性跌、分數最低(最不熱)的反而較會漲。
 // 三色專屬的短攻/中強/中控/超短跌與隔日開盤前瞻欄不適用陸股，改用陸股有的欄位。
 const CN_SORT_OPTIONS = [
-  'score.cnBuy', 'score.cnTotal', 'mkt.change', 'mkt.price', 'mkt.turnover',
-  'mkt.boards', 'fwd.d1', 'fwd.d5', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+  // 陸股這頁專屬
+  'score.cnBuy', 'score.cnTotal', 'mkt.boards',
+  // 共用區（照 UNIVERSAL_SORT_OPTIONS；陸股沒 fwd.open / fwd.d10）
+  '|',
+  'mkt.turnover', 'mkt.change', 'mkt.price',
+  'fwd.d1', 'fwd.d5', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
 ];
 const CN_PERF_FIELD: Record<string, PerfCellKey> = {
   'fwd.d1': 'd1', 'fwd.d5': 'd5', 'fwd.d20': 'd20', 'fwd.maxGain': 'mfe', 'fwd.maxLoss': 'mae',

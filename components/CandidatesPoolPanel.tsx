@@ -89,10 +89,11 @@ const SOURCE_COLOR: Record<SourceName, string> = {
 const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+// 此頁專屬（加權總分 / YouTube 提及）｜共用區（fwd.*；無 mkt.* 盤面欄資料）
 const POOL_SORT_OPTIONS = [
-  'score.poolTotal',
+  'score.poolTotal', 'heat.youtube',
+  '|',
   'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
-  'heat.youtube',
 ];
 // 前瞻報酬 id → StockForwardPerformance 欄位名（accessor 用）
 const POOL_FWD_FIELD: Record<string, keyof StockForwardPerformance> = {

@@ -71,7 +71,11 @@ export function SortControl({
       {leading != null && (
         <span className={`${txt} text-muted-foreground/70 mr-0.5`}>{leading}</span>
       )}
-      {options.map((opt) => {
+      {options.map((opt, i) => {
+        // '|' = 分隔線：共用區 與 該頁專屬區 的視覺分界
+        if (opt === '|') {
+          return <span key={`div-${i}`} className="w-px self-stretch bg-border mx-0.5" aria-hidden="true" />;
+        }
         const { id, label, tip, defaultDir } = resolve(opt);
         const active = value === id;
         return (

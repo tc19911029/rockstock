@@ -16,16 +16,14 @@ import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
-import type { SortDir } from '@/lib/sorting/registry';
+import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
 
-// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
-const SCAN_SORT_OPTIONS = [
-  'heat.theme', 'mkt.turnover', 'mkt.change', 'score.sixCond', 'mkt.price',
-  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss', 'heat.youtube',
-];
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單）：
+// 該頁專屬（六條件/今日熱點/YouTube 提及）+ '|' 分隔線 + 共用區（全 UNIVERSAL_SORT_OPTIONS）。
+const SCAN_SORT_OPTIONS = ['score.sixCond', 'heat.theme', 'heat.youtube', '|', ...UNIVERSAL_SORT_OPTIONS];
 const SCAN_FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
   'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
-  'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
 };
 
 // 去市場後綴拿裸代號（YouTube 提及 map 以裸代號為 key）
