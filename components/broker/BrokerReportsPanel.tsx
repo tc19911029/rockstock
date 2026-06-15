@@ -17,6 +17,9 @@ import type { BrokerPerformanceResponse } from '@/app/api/broker/performance/rou
 import type { BrokerStockPerformance } from '@/lib/broker/brokerPerformance';
 import type { BrokerConsensusStock } from '@/lib/broker/brokerConsensus';
 import type { BrokerRatingNormalized } from '@/lib/broker/types';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 interface Props {
   date: string;
@@ -25,26 +28,38 @@ interface Props {
   selectedCode?: string | null;
 }
 
-type SortKey = 'rating' | 'upside' | 'progress' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain';
 type FilterKey = 'all' | 'buy' | 'upgraded' | 'reached' | 'covered';
 
 const RATING_RANK: Record<BrokerRatingNormalized, number> = {
   buy: 6, overweight: 5, neutral: 3, hold: 3, underweight: 2, sell: 1, other: 0,
 };
 
-function perfVal(it: BrokerStockPerformance, key: SortKey): number | null {
-  if (key === 'rating') return RATING_RANK[it.rating] ?? 0;
-  if (key === 'upside') return it.target.upsideAtReport;
-  if (key === 'progress') return it.target.progressPct;
-  return (it.performance as unknown as Record<string, number | null>)[key] ?? null;
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；'rating' 是券商評等、券商面板專屬用 inline）
+const BROKER_SORT_OPTIONS = [
+  { id: 'rating', label: '評等' },
+  'trust.upside', 'trust.achievement',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain',
+];
+const BROKER_FWD_FIELD: Record<string, string> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain',
+};
+
+function perfVal(it: BrokerStockPerformance, id: string): SortValue {
+  if (id === 'rating') return RATING_RANK[it.rating] ?? 0;
+  if (id === 'trust.upside') return it.target.upsideAtReport;
+  if (id === 'trust.achievement') return it.target.progressPct;
+  const f = BROKER_FWD_FIELD[id];
+  if (f) return (it.performance as unknown as Record<string, number | null>)[f] ?? null;
+  return null;
 }
 
 export function BrokerReportsPanel({ date, onDateChange, onSelectStock, selectedCode }: Props) {
   const [data, setData] = useState<BrokerPerformanceResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<SortKey>('rating');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState<string>('rating');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [consensusOpen, setConsensusOpen] = useState(false);
   // 只在「初次載入」時，若當前日期沒報告就自動跳到最新有報告的日期（之後尊重手動切換）
@@ -102,18 +117,11 @@ export function BrokerReportsPanel({ date, onDateChange, onSelectStock, selected
   }, [data, filter]);
 
   const sorted = useMemo(() => {
-    const arr = [...filtered];
-    const dir = sortDir === 'desc' ? 1 : -1;
-    arr.sort((a, b) => {
-      const va = perfVal(a, sortBy);
-      const vb = perfVal(b, sortBy);
-      if (va == null && vb == null) return 0;
-      if (va == null) return 1;   // null 永遠墊底
-      if (vb == null) return -1;
-      if (va === vb) return RATING_RANK[b.rating] - RATING_RANK[a.rating];
-      return dir * (vb - va);
-    });
-    return arr;
+    // 先按評等 desc 穩定排好當基準 → 再 applySort：同值時穩定排序保留評等次鍵（等效舊 tie-break）
+    const base = [...filtered].sort((a, b) => RATING_RANK[b.rating] - RATING_RANK[a.rating]);
+    // 'rating' 是 inline id（非 registry），需顯式 missingLast；其餘走 registry 預設（fwd.* 與 trust.* 皆墊底）
+    const opts = sortBy === 'rating' ? { missingLast: false } : undefined;
+    return applySort(base, sortBy, sortDir, perfVal, opts);
   }, [filtered, sortBy, sortDir]);
 
   return (
@@ -154,34 +162,13 @@ export function BrokerReportsPanel({ date, onDateChange, onSelectStock, selected
           {dist.bear > 0 && <span className="px-1 py-0.5 rounded text-[9px] bg-red-900/40 text-red-300">空 {dist.bear}</span>}
         </div>
 
-        {/* Sort pills */}
-        <div className="flex flex-wrap gap-1 items-center">
-          <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-          {([
-            { key: 'rating' as const, label: '評等' },
-            { key: 'upside' as const, label: '上漲空間' },
-            { key: 'progress' as const, label: '達標度' },
-            { key: 'openReturn' as const, label: '漲跌·隔開' },
-            { key: 'd1Return' as const, label: '漲跌·1日' },
-            { key: 'd5Return' as const, label: '漲跌·5日' },
-            { key: 'd10Return' as const, label: '漲跌·10日' },
-            { key: 'd20Return' as const, label: '漲跌·20日' },
-            { key: 'maxGain' as const, label: '漲跌·最高' },
-          ]).map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => {
-                if (sortBy === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
-                else { setSortBy(key); setSortDir('desc'); }
-              }}
-              className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                sortBy === key ? 'bg-rose-700 text-foreground' : 'bg-secondary text-muted-foreground'
-              }`}
-            >
-              {label}{sortBy === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
-            </button>
-          ))}
-        </div>
+        {/* Sort pills — 共用 SortControl + 中央排序清單 */}
+        <SortControl
+          options={BROKER_SORT_OPTIONS}
+          value={sortBy}
+          dir={sortDir}
+          onChange={(id, d) => { setSortBy(id); setSortDir(d); }}
+        />
 
         {/* Filter pills */}
         <div className="flex flex-wrap gap-1 items-center">

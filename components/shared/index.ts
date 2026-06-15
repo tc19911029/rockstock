@@ -10,3 +10,5 @@ export { ChartContainer, useChartTheme } from './ChartContainer';
 export { StockChartView } from './StockChartView';
 export type { StockChartViewProps } from './StockChartView';
 export { EmptyState } from './EmptyState';
+export { SortControl } from './SortControl';
+export type { SortControlOption, SortControlProps } from './SortControl';

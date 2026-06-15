@@ -17,6 +17,9 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { RedFlagChips } from '@/components/RedFlagChips';
 import type { EmotionStage, SeatType, StockPosition } from '@/lib/cn-agents/types';
 import type { RedFlag } from '@/lib/redflags/types';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 // ── /day 回傳形狀 ───────────────────────────────────────────────────────────
 interface Perf { d1: number | null; d2: number | null; d3: number | null; d4: number | null; d5: number | null; d10: number | null; d20: number | null; mfe: number | null; mae: number | null; success: boolean | null }
@@ -332,47 +335,40 @@ export function CnAgentsTab() {
 
 // ── 子元件 ───────────────────────────────────────────────────────────────────
 
-// 選股清單排序鍵。預設「應買」= 回測證實 totalScore 是反指標 → 挑「分數最低（最不熱）」的在前。
-// 三色專屬的短攻/中強/中控/超短跌與漲跌·隔開不適用陸股，改用陸股有的欄位。
-type SortKey = 'buy' | 'score' | 'change' | 'price' | 'turnover' | 'boards' | 'd1' | 'd5' | 'd20' | 'mfe' | 'mae';
-const SORT_PILLS: Array<{ key: SortKey; label: string; tip: string }> = [
-  { key: 'buy', label: '應買', tip: '預設。回測證實這套分數是「反指標」— 分數最高(最熱/追漲停)的事後系統性跌、分數最低(最不熱)的反而較會漲。所以應買挑分數最低的在前。⚠ 也只是「打平+靠少數中獎」、不保證、非買賣建議。' },
-  { key: 'score', label: '分數', tip: '系統原始綜合分（高在前）。⚠ 回測上分數越高事後跌越凶（最高5檔 d20 超額中位約 −9%）→ 比較適合當「該避開」清單看。' },
-  { key: 'change', label: '漲幅', tip: '當日漲跌幅 %（大的排前面）' },
-  { key: 'price', label: '股價', tip: '當日收盤價' },
-  { key: 'turnover', label: '成交量', tip: '當日成交額（大的排前面）' },
-  { key: 'boards', label: '連板', tip: '連續漲停天數（首板=1）' },
-  { key: 'd1', label: '漲跌·1日', tip: '推薦後第 1 個交易日漲跌幅' },
-  { key: 'd5', label: '漲跌·5日', tip: '推薦後第 5 個交易日漲跌幅（成功門檻看這天）' },
-  { key: 'd20', label: '漲跌·20日', tip: '推薦後第 20 個交易日漲跌幅' },
-  { key: 'mfe', label: '漲跌·最高', tip: '推薦後區間最大累計漲幅' },
-  { key: 'mae', label: '漲跌·最低', tip: '推薦後區間最大累計跌幅' },
+// 選股清單排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）。
+// 預設「應買」=score.cnBuy（accessor 回 totalScore，registry 設 defaultDir=asc → 低分在前）。
+// 回測證實 totalScore 是反指標：分數最高(最熱/追漲停)的事後系統性跌、分數最低(最不熱)的反而較會漲。
+// 三色專屬的短攻/中強/中控/超短跌與隔日開盤前瞻欄不適用陸股，改用陸股有的欄位。
+const CN_SORT_OPTIONS = [
+  'score.cnBuy', 'score.cnTotal', 'mkt.change', 'mkt.price', 'mkt.turnover',
+  'mkt.boards', 'fwd.d1', 'fwd.d5', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
 ];
+const CN_PERF_FIELD: Record<string, PerfCellKey> = {
+  'fwd.d1': 'd1', 'fwd.d5': 'd5', 'fwd.d20': 'd20', 'fwd.maxGain': 'mfe', 'fwd.maxLoss': 'mae',
+};
 
-// 「應買排序值」= 純顯示排序（不動 totalScore/tier/事件）。回測（train/test + 稽核 + scripts/research-cn-ls-fix.ts）
-// 證實 totalScore 是反指標：高分(追漲停)事後系統性跌。四變體裡「分數低在前」是 out-of-sample 唯一勉強
-// 打平的（d20 超額中位 test +0.9%/勝52%），其餘（高分在前/反向漲停結構子分/移除子分）都仍負。
-// 故應買 = 分數低排前面。改此排序前先重跑 research-cn-ls-fix.ts 複驗。純排序、不改分數/分層/事件。
-function buyRank(c: Candidate): number {
-  return -c.totalScore;
-}
-
-function sortVal(c: Candidate, key: SortKey): number | null {
-  switch (key) {
-    case 'buy': return buyRank(c);
-    case 'score': return c.totalScore;
-    case 'change': return c.info?.changePct ?? null;
-    case 'price': return c.info?.close ?? null;
-    case 'turnover': return c.info?.turnoverCny ?? null;
-    case 'boards': return c.info?.consecBoards ?? null;
-    default: return c.perf ? c.perf[key] : null;
+// 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）。
+// 應買=score.cnBuy：accessor 直接回 totalScore，registry 預設方向 asc 等效原本 -totalScore desc（分數低在前）。
+// 回測（train/test + 稽核 + scripts/research-cn-ls-fix.ts）證實 totalScore 是反指標。改此排序前先重跑複驗。
+function sortVal(c: Candidate, id: string): SortValue {
+  const pk = CN_PERF_FIELD[id];
+  if (pk) return c.perf ? c.perf[pk] : null;
+  switch (id) {
+    case 'score.cnBuy': return c.totalScore;
+    case 'score.cnTotal': return c.totalScore;
+    case 'mkt.change': return c.info?.changePct ?? null;
+    case 'mkt.price': return c.info?.close ?? null;
+    case 'mkt.turnover': return c.info?.turnoverCny ?? null;
+    case 'mkt.boards': return c.info?.consecBoards ?? null;
+    default: return null;
   }
 }
 
 /** 選股清單：排序 pill + 模式篩選 chip + 卡片（仿台股策略掃描卡） */
 function CandidateList({ candidates, date, themes }: { candidates: Candidate[]; date: string | null; themes: Theme[] }) {
-  const [sort, setSort] = useState<SortKey>('buy');
-  const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+  // 預設「應買」=score.cnBuy，方向 asc＝分數低在前（回測過的反指標決議，務必保留）
+  const [sort, setSort] = useState<string>('score.cnBuy');
+  const [dir, setDir] = useState<SortDir>('asc');
   const [modeFilter, setModeFilter] = useState<string>('all');
 
   const modes = useMemo(() => [...new Set(candidates.map((c) => c.mode))], [candidates]);
@@ -383,34 +379,20 @@ function CandidateList({ candidates, date, themes }: { candidates: Candidate[]; 
   }, [themes]);
 
   const shown = useMemo(() => {
-    const sign = dir === 'desc' ? 1 : -1;
-    return candidates
-      .filter((c) => modeFilter === 'all' || c.mode === modeFilter)
-      .slice()
-      .sort((a, b) => {
-        const va = sortVal(a, sort);
-        const vb = sortVal(b, sort);
-        if (va == null && vb == null) return 0;
-        if (va == null) return 1; // 缺值永遠落底
-        if (vb == null) return -1;
-        return sign * (vb - va);
-      })
-      .slice(0, 30);
+    const filtered = candidates.filter((c) => modeFilter === 'all' || c.mode === modeFilter);
+    // missingLast: true 對齊原本「缺值永遠落底」（盤面欄位 registry 預設 false，這裡統一墊底）
+    return applySort(filtered, sort, dir, sortVal, { missingLast: true }).slice(0, 30);
   }, [candidates, sort, dir, modeFilter]);
 
   return (
     <div className="space-y-1.5">
-      {/* 排序 pill 列 */}
-      <div className="flex flex-wrap gap-1 items-center">
-        <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-        {SORT_PILLS.map(({ key, label, tip }) => (
-          <button key={key} title={tip}
-            onClick={() => { if (sort === key) setDir((x) => (x === 'desc' ? 'asc' : 'desc')); else { setSort(key); setDir('desc'); } }}
-            className={`text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${sort === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'}`}>
-            {label}{sort === key && <span className="ml-0.5">{dir === 'desc' ? '▼' : '▲'}</span>}
-          </button>
-        ))}
-      </div>
+      {/* 排序 pill 列 — 共用 SortControl + 中央排序清單 */}
+      <SortControl
+        options={CN_SORT_OPTIONS}
+        value={sort}
+        dir={dir}
+        onChange={(id, d) => { setSort(id); setDir(d); }}
+      />
       {/* 模式篩選 chip */}
       {modes.length > 1 && (
         <div className="flex flex-wrap gap-1">

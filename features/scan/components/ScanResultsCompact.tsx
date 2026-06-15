@@ -4,16 +4,29 @@ import { useState, useEffect, useMemo, Fragment } from 'react';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
-import type { StockForwardPerformance } from '@/lib/scanner/types';
+import type { StockForwardPerformance, StockScanResult } from '@/lib/scanner/types';
 import type { TrendState } from '@/lib/analysis/trendAnalysis';
 import type { LockWatchRecord } from '@/lib/scanner/lockWatchTypes';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { buildAllStrategyReasons, type StrategyReasonRow } from './strategyReasons';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
-import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
+import { panelSortKey } from '@/lib/selection/applyPanelFilter';
 import { ForwardPerfRow } from './ForwardPerfRow';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
+
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+const SCAN_SORT_OPTIONS = [
+  'heat.theme', 'mkt.turnover', 'mkt.change', 'score.sixCond', 'mkt.price',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss', 'heat.youtube',
+];
+const SCAN_FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+};
 
 // 去市場後綴拿裸代號（YouTube 提及 map 以裸代號為 key）
 const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -75,8 +88,8 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   const [ytRecentOnly, setYtRecentOnly] = useState(false);
   // 排序選項：成交額排名為預設（依 0512 v12 全期間綜合回測，A 級組合多靠此排序勝出）
   // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
-  const [scanSort, setScanSort] = useState<'turnover' | 'change' | 'sixCond' | 'price' | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss' | 'youtubeMentions' | 'hotTheme'>('turnover');
-  const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
+  const [scanSort, setScanSort] = useState<string>('mkt.turnover');
+  const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
 
   // YouTube 提及 map（截至掃描當日）— 純展示 join，不進掃描/選股邏輯
   // 只台股有對應；陸股代號不重疊，傳 undefined 不發請求（與三色掃描一致）
@@ -149,45 +162,25 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     .filter(r => conceptFilter === 'all' || r.industry === conceptFilter)
     .filter(r => !ytRecentOnly || (ytMap.get(bareCode(r.symbol))?.count7d ?? 0) > 0);
 
-  const FWD_KEY: Record<string, keyof StockForwardPerformance> = {
-    fwdOpen: 'openReturn', fwdD1: 'd1Return', fwdD5: 'd5Return',
-    fwdD20: 'd20Return', fwdMaxGain: 'maxGain', fwdMaxLoss: 'maxLoss',
+  // 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）
+  const scanSortValue = (r: StockScanResult, id: string): SortValue => {
+    const fk = SCAN_FWD_FIELD[id];
+    if (fk) return (perfMap.get(r.symbol)?.[fk] as number | null | undefined) ?? null;
+    switch (id) {
+      case 'mkt.price':   return r.price ?? null;
+      case 'mkt.change':  // 漲幅/六條件/ma20Slope 三層 — 單一事實 panelSortKey（rule 10）
+        return panelSortKey(r);
+      case 'score.sixCond': return (r.sixConditionsScore ?? 0) * 100 + (r.changePercent ?? 0) / 100;
+      case 'mkt.turnover':  return -(r.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
+      case 'heat.youtube':  return ytMap.get(bareCode(r.symbol))?.count30d ?? null; // 未提及排最後
+      case 'heat.theme': {  // 個股按所屬產業熱度排，同產業內再按漲幅（壓進尾數）
+        const h = industryHot.get(r.industry ?? '');
+        return h == null ? null : h * 10_000 + (r.changePercent ?? 0);
+      }
+      default: return null;
+    }
   };
-  const sorted = [...filtered].sort((a, b) => {
-    const dir = scanSortDir === 'desc' ? 1 : -1;
-    if (scanSort in FWD_KEY) {
-      const k = FWD_KEY[scanSort];
-      const va = perfMap.get(a.symbol)?.[k];
-      const vb = perfMap.get(b.symbol)?.[k];
-      const aNull = va == null;
-      const bNull = vb == null;
-      if (aNull && bNull) return 0;
-      if (aNull) return 1;
-      if (bNull) return -1;
-      return dir * ((vb as number) - (va as number));
-    }
-    switch (scanSort) {
-      case 'price':      return dir * ((b.price ?? 0) - (a.price ?? 0));
-      case 'change':     // 對齊 panelSortCompare（漲幅/六條件/ma20Slope 三層）— 單一事實來源 rule 10
-        return dir * panelSortCompare(a, b);
-      case 'sixCond':    return dir * (((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0)) * 100
-                                       + ((b.changePercent ?? 0) - (a.changePercent ?? 0)) / 100);
-      case 'turnover':   // rank 1 = 最大成交額；desc → 小 rank 在前
-        return dir * ((a.turnoverRank ?? 999_999) - (b.turnoverRank ?? 999_999));
-      case 'youtubeMentions': {  // 近 30 天 YouTube 提及次數（未提及 = -1 排最後）
-        const va = ytMap.get(bareCode(a.symbol))?.count30d ?? -1;
-        const vb = ytMap.get(bareCode(b.symbol))?.count30d ?? -1;
-        return dir * (vb - va);
-      }
-      case 'hotTheme': {  // 今日熱點：個股按所屬產業熱度排，同產業內再按個股漲幅
-        const va = industryHot.get(a.industry ?? '') ?? -1;
-        const vb = industryHot.get(b.industry ?? '') ?? -1;
-        if (va !== vb) return dir * (vb - va);
-        return dir * ((b.changePercent ?? 0) - (a.changePercent ?? 0));
-      }
-      default:           return 0;
-    }
-  });
+  const sorted = applySort(filtered, scanSort, scanSortDir, scanSortValue);
 
   if (!scanOnly) return null;
   if (scanResults.length === 0 && isLoadingCronSession) return null;
@@ -220,34 +213,13 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
       </div>
 
 
-      {/* Sort selector pills */}
-      <div className="flex flex-wrap gap-1 items-center">
-        <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-        {([
-          { key: 'hotTheme' as const, label: '今日熱點', tip: '按「當天最熱題材/產業」排：哪個產業今天最多檔上榜＋平均漲最兇＝最熱；個股按所屬產業熱度排（同產業內再按漲幅）。⚠ 最熱=追高，回測上反而偏跌 → 這是「看熱點在哪」的觀察工具，不是買進排名。' },
-          { key: 'turnover' as const, label: '成交額', tip: '當日成交金額大的排前面（回測 A 級組合多靠此排序勝出）' },
-          { key: 'change'   as const, label: '漲幅',   tip: '當日漲跌幅 %（同分用六條件當 tie-breaker，對齊面板預設排序）' },
-          { key: 'sixCond'  as const, label: '六條件', tip: '朱家泓五步法六條件總分（次鍵：漲幅）' },
-          { key: 'price'    as const, label: '股價',   tip: '當前股價高低' },
-          { key: 'fwdOpen'    as const, label: '漲跌·隔開', tip: '掃出後隔日開盤漲跌幅（缺值排最後）' },
-          { key: 'fwdD1'      as const, label: '漲跌·1日',  tip: '掃出後 1 日漲跌幅' },
-          { key: 'fwdD5'      as const, label: '漲跌·5日',  tip: '掃出後 5 日漲跌幅' },
-          { key: 'fwdD20'     as const, label: '漲跌·20日', tip: '掃出後 20 日漲跌幅' },
-          { key: 'fwdMaxGain' as const, label: '漲跌·最高', tip: '掃出後 20 日內最大累計漲幅' },
-          { key: 'fwdMaxLoss' as const, label: '漲跌·最低', tip: '掃出後 20 日內最大累計跌幅' },
-          { key: 'youtubeMentions' as const, label: 'YouTube 提及', tip: '依近 30 天 YouTube 節目提及次數排序（未提及排最後）' },
-        ]).map(({ key, label, tip }) => (
-          <button key={key}
-            onClick={() => {
-              if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
-              else { setScanSort(key); setScanSortDir('desc'); }
-            }}
-            title={tip}
-            className={`text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${scanSort === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'}`}>
-            {label}{scanSort === key && <span className="ml-0.5">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
-          </button>
-        ))}
-      </div>
+      {/* Sort selector pills — 共用 SortControl + 中央排序清單 */}
+      <SortControl
+        options={SCAN_SORT_OPTIONS}
+        value={scanSort}
+        dir={scanSortDir}
+        onChange={(id, d) => { setScanSort(id); setScanSortDir(d); }}
+      />
 
       {/* YouTube 提及篩選 */}
       <div className="flex flex-wrap gap-1 items-center">
@@ -464,7 +436,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                       return (
                         <>
                           <span className={`text-[8px] px-1.5 h-3.5 flex items-center rounded-sm ${color}`}
-                            title="法人偷買(原)：股價在跌 + 5日籌碼集中度在增加 + 法人連買（觀察用，回測無穩定超額）">
+                            title="大戶法人偷買：股價在跌 + 5日籌碼集中度在增加 + 法人連買（觀察用，回測無穩定超額）">
                             {methodNames.Y}
                           </span>
                           {drop != null && (

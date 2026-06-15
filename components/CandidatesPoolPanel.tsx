@@ -35,6 +35,9 @@ import type { RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { useYouTubeMentionMap, type YouTubeMentionSummary } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { RedFlagChips } from '@/components/RedFlagChips';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 interface PoolResponse {
   ok: boolean;
@@ -85,6 +88,18 @@ const SOURCE_COLOR: Record<SourceName, string> = {
 // 去市場後綴拿裸代號（YouTube 提及 map 以裸代號為 key）
 const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+const POOL_SORT_OPTIONS = [
+  'score.poolTotal',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+  'heat.youtube',
+];
+// 前瞻報酬 id → StockForwardPerformance 欄位名（accessor 用）
+const POOL_FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+};
+
 export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol, onDateChange }: Props) {
   const [date, setDateLocal] = useState(defaultDate ?? lastBusinessDayYmd());
   const setDate = useCallback((d: string) => {
@@ -94,9 +109,10 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   // YouTube 提及 map（截至候選池當日）— 純展示 join，不進選股分數/排序
   const { map: ytMap } = useYouTubeMentionMap(date);
   const [minSourceCount, setMinSourceCount] = useState(1);  // 預設 ≥1 面向：一開就看得到候選（共享常數仍 = 3、見合約測試，故不動它）
-  // 排序維度：總分（預設）或漲跌幅（forward perf 各日 / 區間最高最低）或 YouTube 提及數
-  type SortKey = 'total' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss' | 'youtubeMentions';
-  const [sortBy, setSortBy] = useState<SortKey>('total');
+  // 排序維度：加權總分（預設）或漲跌幅（forward perf 各日 / 區間最高最低）或 YouTube 提及數
+  // id 走 lib/sorting/registry 中央清單；缺值/升降序由 sortEngine 統一處理
+  const [sortBy, setSortBy] = useState<string>('score.poolTotal');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   // YouTube display-layer 篩選（不改候選池資料/分數）
   const [ytRecentOnly, setYtRecentOnly] = useState(false);
   const [highConsensusOnly, setHighConsensusOnly] = useState(false);
@@ -216,31 +232,23 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     if (highConsensusOnly) {
       withScores = withScores.filter(c => c.sources.youtube?.inHighConsensus === true);
     }
-    if (sortBy === 'total') {
-      return withScores.sort((a, b) => b.scores.total - a.scores.total);
-    }
-    if (sortBy === 'youtubeMentions') {
-      // 使用者手動選的「檢視排序」（等同漲跌幅排序選項）；預設 total 不受影響、不加組合分
-      return withScores.sort((a, b) => {
-        const va = ytMap.get(bareCode(a.symbol))?.count30d ?? a.strengthSignals.youtubeMentionCount;
-        const vb = ytMap.get(bareCode(b.symbol))?.count30d ?? b.strengthSignals.youtubeMentionCount;
-        if (vb !== va) return vb - va;
-        return b.scores.total - a.scores.total;
-      });
-    }
-    // 漲跌幅排序：以 forwardMap 內對應欄位降序；缺值排最後，同值 fallback 用 total
-    return withScores.sort((a, b) => {
-      const va = forwardMap.get(a.symbol)?.[sortBy];
-      const vb = forwardMap.get(b.symbol)?.[sortBy];
-      const aNull = va == null;
-      const bNull = vb == null;
-      if (aNull && bNull) return b.scores.total - a.scores.total;
-      if (aNull) return 1;
-      if (bNull) return -1;
-      if (vb !== va) return (vb as number) - (va as number);
-      return b.scores.total - a.scores.total;
-    });
-  }, [data?.candidates, customWeights, sortBy, forwardMap, ytMap, ytRecentOnly, highConsensusOnly]);
+    // 先按加權總分 desc 當「基底序」— 既是 score.poolTotal 的排序本身，
+    // 也是其他排序（前瞻報酬/YouTube 提及）同值時的 tie-break（applySort 穩定，保留基底序）
+    type Scored = (typeof withScores)[number];
+    const baseSorted: Scored[] = [...withScores].sort((a, b) => b.scores.total - a.scores.total);
+    if (sortBy === 'score.poolTotal') return baseSorted;
+    // 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）
+    const poolSortValue = (c: Scored, id: string): SortValue => {
+      const fk = POOL_FWD_FIELD[id];
+      if (fk) return (forwardMap.get(c.symbol)?.[fk] as number | null | undefined) ?? null;
+      if (id === 'heat.youtube') {
+        // YouTube 提及：近 30 天提及次數；未提及回 null 排最後
+        return ytMap.get(bareCode(c.symbol))?.count30d ?? null;
+      }
+      return null;
+    };
+    return applySort(baseSorted, sortBy, sortDir, poolSortValue);
+  }, [data?.candidates, customWeights, sortBy, sortDir, forwardMap, ytMap, ytRecentOnly, highConsensusOnly]);
 
   // ⚡ 今日強進場 top 5 — entry_state 不是 no_chase + sourceCount ≥ 2 + score ≥ 50 + 大盤 ≠ bear
   // 排序：can_enter 優先於 watch，內部按 score
@@ -340,24 +348,13 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
             <option value={4}>4 個面向</option>
           </select>
         </label>
-        <label className="text-muted-foreground flex items-center gap-1" title="切換排序維度">
-          排序
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-card ring-1 ring-foreground/10 rounded px-1.5 py-0.5 text-[11px]"
-          >
-            <option value="total">總分</option>
-            <option value="openReturn">漲跌幅·隔日開</option>
-            <option value="d1Return">漲跌幅·1日</option>
-            <option value="d5Return">漲跌幅·5日</option>
-            <option value="d10Return">漲跌幅·10日</option>
-            <option value="d20Return">漲跌幅·20日</option>
-            <option value="maxGain">漲跌幅·最高</option>
-            <option value="maxLoss">漲跌幅·最低</option>
-            <option value="youtubeMentions">YouTube 提及數</option>
-          </select>
-        </label>
+        <SortControl
+          options={POOL_SORT_OPTIONS}
+          value={sortBy}
+          dir={sortDir}
+          onChange={(id, d) => { setSortBy(id); setSortDir(d); }}
+          size="normal"
+        />
         <button
           type="button"
           onClick={() => setShowWeights(v => !v)}

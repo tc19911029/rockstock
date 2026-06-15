@@ -21,6 +21,9 @@ import type { ThemeRef } from '@/lib/theme-sanse/types';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 type ScanLevel = 'strict' | 'medium' | 'loose';       // 後端 results 的三個 level
 type Level = SanSeScanLevel;                            // 嚴/中/寬 + 具名策略 id（底反/全共振/紅+黃+觸發/紅+雙B…）；策略 = 從 records 衍生
@@ -159,52 +162,40 @@ function bestHeatRank(themeHeatMap: Map<string, ThemeRef[]>, symbol: string): nu
   return refs && refs.length > 0 ? refs[0].heatRank : Infinity;
 }
 
-/** 共用排序比較器（畫面清單 + 漲幅抓取目標共用，確保顯示的股票就是有抓漲幅的股票）。 */
-function rowComparator(
-  sortKey: SortKey,
-  dir: number,
+// 排序值取法（id 走 lib/sorting/registry 中央清單；缺值/升降序由 sortEngine 統一處理）。
+// 畫面清單 + 漲幅抓取目標共用 accessor，確保顯示的股票就是有抓漲幅的股票。
+function sanseSortValue(
+  h: Hit,
+  id: string,
   perf: Record<string, StockForwardPerformance>,
   reportMap: Map<string, ConditionReport>,
-  themeHeatMap: Map<string, ThemeRef[]> = new Map(),
-) {
-  const fwdField = FWD_FIELD[sortKey];
-  return (a: Hit, b: Hit): number => {
-    if (sortKey === 'themeHeatRank') {
-      // 三色票按「所屬最熱題材名次」排序（低名次=更熱→排前）；無題材排最後。
-      const ra = bestHeatRank(themeHeatMap, a.symbol);
-      const rb = bestHeatRank(themeHeatMap, b.symbol);
-      if (ra === Infinity && rb === Infinity) return 0;
-      if (ra === Infinity) return 1;
-      if (rb === Infinity) return -1;
-      if (ra === rb) return 0;
-      return dir * (ra - rb);
+  themeHeatMap: Map<string, ThemeRef[]>,
+): SortValue {
+  const fwdField = FWD_FIELD[id];
+  if (fwdField) {
+    return (perf[h.symbol]?.[fwdField] as number | null | undefined) ?? null;
+  }
+  switch (id) {
+    case 'score.sanseCombo': {
+      // 既有 buyScore 綜合分；< 0（舊固化無 combo）視為缺值排最後
+      const s = buyScore(reportMap.get(h.symbol));
+      return s < 0 ? null : s;
     }
-    if (fwdField) {
-      const va = perf[a.symbol]?.[fwdField];
-      const vb = perf[b.symbol]?.[fwdField];
-      if (va == null && vb == null) return 0;       // 缺值永遠排最後（不受 asc/desc 影響）
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      return dir * ((vb as number) - (va as number));
+    case 'heat.theme': {
+      // 所屬最熱題材名次（低名次=更熱）→ 取負，desc 時最熱排前；無題材回 null 排最後
+      const rank = bestHeatRank(themeHeatMap, h.symbol);
+      return rank === Infinity ? null : -rank;
     }
-    if (sortKey === 'turnoverRank') {
-      const ra = a.turnoverRank; const rb = b.turnoverRank;
-      if (ra == null && rb == null) return 0;
-      if (ra == null) return 1;
-      if (rb == null) return -1;
-      return dir * (ra - rb);
-    }
-    if (sortKey === 'combo') {
-      const ra = buyScore(reportMap.get(a.symbol)); const rb = buyScore(reportMap.get(b.symbol));
-      if (ra < 0 && rb < 0) return 0;
-      if (ra < 0) return 1;
-      if (rb < 0) return -1;
-      if (ra === rb) return 0;
-      return dir * (rb - ra);
-    }
-    const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
-    return dir * ((b[key] ?? 0) - (a[key] ?? 0));
-  };
+    case 'mkt.turnover':
+      return -(h.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
+    case 'sanse.shortAttack':  return h.shortAttack ?? 0;
+    case 'sanse.midStrength':  return h.midStrength ?? 0;
+    case 'sanse.midControl':   return h.midControl ?? 0;
+    case 'sanse.shortOversold': return h.shortOversold ?? 0;
+    case 'mkt.change':         return h.changePct ?? 0;
+    case 'mkt.price':          return h.price ?? 0;
+    default: return null;
+  }
 }
 
 const LEVELS: { key: Level; label: string; desc: string }[] = [
@@ -221,31 +212,16 @@ const LEVELS: { key: Level; label: string; desc: string }[] = [
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 
-type SortKey = 'combo' | 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price' | 'turnoverRank'
-  | 'themeHeatRank'
-  | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
-
-const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
-  { key: 'combo', label: '應買', tip: '最應該買進排序（回測推導）：三組齊發(3/3)>紅當前提+觸發>紅+黃中線>紅待觸發>無紅；同級再比共振組數/短攻，有賣出警示降級。⚠️三組齊發台股短線期望值最高但很稀有(一天個位數)，平時看「紅當前提+觸發」那級就夠用、機會多；陸股牛市那段 3/3 反而輸大盤' },
-  { key: 'shortAttack', label: '短攻', tip: '短線上攻（游資資金）分數' },
-  { key: 'midStrength', label: '中強', tip: '中線強勢（主力資金）分數' },
-  { key: 'midControl', label: '中控', tip: '中線控盤（主力控盤）分數' },
-  { key: 'shortOversold', label: '超短跌', tip: '短線超跌（跌破 MA20 後的超跌幅度）' },
-  { key: 'changePct', label: '漲幅', tip: '掃描當日漲跌幅 %' },
-  { key: 'price', label: '股價', tip: '當前股價' },
-  { key: 'turnoverRank', label: '成交量', tip: '當日成交額排名（1=最大；缺值排最後）' },
-  { key: 'themeHeatRank', label: '🔥今日熱點', tip: '三色選出的票，按「所屬最熱題材的熱度名次」排序（最熱題材裡的票排最前；不在熱門題材的排最後）。回測：台股有效（最熱題材那段 D5 平均漲幅約是後段 2 倍）；陸股回測未支持、僅供參考。' },
-  { key: 'fwdOpen', label: '漲跌·隔開', tip: '掃出後隔日開盤漲跌幅（缺值排最後）' },
-  { key: 'fwdD1', label: '漲跌·1日', tip: '掃出後 1 日漲跌幅' },
-  { key: 'fwdD5', label: '漲跌·5日', tip: '掃出後 5 日漲跌幅' },
-  { key: 'fwdD20', label: '漲跌·20日', tip: '掃出後 20 日漲跌幅' },
-  { key: 'fwdMaxGain', label: '漲跌·最高', tip: '掃出後 20 日內最大累計漲幅' },
-  { key: 'fwdMaxLoss', label: '漲跌·最低', tip: '掃出後 20 日內最大累計跌幅' },
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+const SANSE_SORT_OPTIONS = [
+  'score.sanseCombo', 'sanse.shortAttack', 'sanse.midStrength', 'sanse.midControl', 'sanse.shortOversold',
+  'mkt.change', 'mkt.price', 'mkt.turnover', 'heat.theme',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
 ];
 
-const FWD_FIELD: Partial<Record<SortKey, keyof StockForwardPerformance>> = {
-  fwdOpen: 'openReturn', fwdD1: 'd1Return', fwdD5: 'd5Return',
-  fwdD20: 'd20Return', fwdMaxGain: 'maxGain', fwdMaxLoss: 'maxLoss',
+const FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
 };
 
 interface Props {
@@ -270,8 +246,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   const [perf, setPerf] = useState<Record<string, StockForwardPerformance>>({});
   const [perfLoading, setPerfLoading] = useState(false);
   // 排序：預設「應買」(使用順序評級綜合分)高→低，最該買進的在最前；點同鍵切換高低
-  const [sortKey, setSortKey] = useState<SortKey>('combo');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortKey, setSortKey] = useState<string>('score.sanseCombo');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   // 裸碼 → 所屬熱門題材 refs（「🔥今日熱點」排序 + 卡片題材標籤用）；只在 lastDate 變時抓一次
   const [themeHeatMap, setThemeHeatMap] = useState<Map<string, ThemeRef[]>>(new Map());
   // 三色買進訊號篩選（cond id 集合；含 'hideConflict'）
@@ -429,9 +405,9 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
   const fetchTargets = useMemo(() => {
     const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
-    const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
-    rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap, themeHeatMap));
-    return rows.slice(0, 50);
+    // 依 fwd 漲幅排序本身需要 perf（尚未抓到）→ 退回 combo 序當抓取依據，避免循環依賴
+    const baseKey = FWD_FIELD[sortKey] ? 'score.sanseCombo' : sortKey;
+    return applySort(rows, baseKey, sortDir, (h, id) => sanseSortValue(h, id, {}, reportMap, themeHeatMap)).slice(0, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levelRows, sortKey, sortDir, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
   const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
@@ -481,8 +457,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
 
   const hits = useMemo(() => {
     const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
-    rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap, themeHeatMap));
-    return rows.slice(0, 50);
+    return applySort(rows, sortKey, sortDir, (h, id) => sanseSortValue(h, id, perf, reportMap, themeHeatMap)).slice(0, 50);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levelRows, sortKey, sortDir, perf, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -574,24 +549,15 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         </p>
       </div>
 
-      {/* 排序 pills（點同鍵切換高/低）— 對齊書本買法的排序列 */}
+      {/* 排序 pills（點同鍵切換高/低）— 共用 SortControl + 中央排序清單 */}
       <div className="shrink-0 px-2 py-1.5 border-b border-border flex flex-wrap gap-1 items-center">
-        <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-        {SORT_PILLS.map(({ key, label, tip }) => (
-          <button key={key}
-            onClick={() => {
-              if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-              else { setSortKey(key); setSortDir('desc'); }
-            }}
-            title={tip}
-            className={cn(
-              'text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap',
-              sortKey === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground',
-            )}>
-            {label}{sortKey === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
-          </button>
-        ))}
-        {sortKey === 'themeHeatRank' && (
+        <SortControl
+          options={SANSE_SORT_OPTIONS}
+          value={sortKey}
+          dir={sortDir}
+          onChange={(id, d) => { setSortKey(id); setSortDir(d); }}
+        />
+        {sortKey === 'heat.theme' && (
           <span className="basis-full text-[9px] leading-snug mt-0.5 text-amber-400/90">
             {market === 'TW'
               ? '🔥 三色票按今日最熱題材排序。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'

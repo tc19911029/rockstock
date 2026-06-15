@@ -20,6 +20,9 @@ import type { PerformanceResponse, PerformanceItem, ConsensusSummary } from '@/a
 import type { TeacherLeaderboardResponse } from '@/lib/youtube/recoTypes';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 import type { AccuracyHint } from './YoutubeStockCard';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 interface Props {
   date: string;                                // 'YYYY-MM-DD'
@@ -28,8 +31,19 @@ interface Props {
   selectedCode?: string | null;
 }
 
-type SortKey = 'mention' | 'rating' | 'accuracy' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
 type FilterKey = 'all' | 'A' | 'B+';
+
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+const YT_SORT_OPTIONS = [
+  'teacher.mentions', 'teacher.rating', 'teacher.accuracy',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+];
+// 前瞻報酬 id → PerformanceItem.performance 的欄位名
+const YT_FWD_FIELD: Record<string, string> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return',
+  'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+};
 
 const RATING_ORDER: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
 
@@ -45,8 +59,8 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
   const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
   const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
   // 預設按評級排（A>B>C>D>未評），同級再按提及次數 tie-break — 對齊 deriveStockMentions 的順序
-  const [sortBy, setSortBy] = useState<SortKey>('rating');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState<string>('teacher.rating');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filter, setFilter] = useState<FilterKey>('all');
   // 跨節目共識面板（仿主頁朱老師分析的折疊樣式）— 預設收起,需要時自行展開
   const [consensusOpen, setConsensusOpen] = useState(false);
@@ -171,52 +185,36 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
     return items;
   }, [data, filter]);
 
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    const dir = sortDir === 'desc' ? 1 : -1;
-    arr.sort((a, b) => {
-      const ar = a.rating ? RATING_ORDER[a.rating] ?? 0 : 0;
-      const br = b.rating ? RATING_ORDER[b.rating] ?? 0 : 0;
-      switch (sortBy) {
-        case 'mention':
-          // 主鍵：提及次數；同 mention 用 rating tie-break（避免 C 排在 A 上面）
-          if (b.mention_count !== a.mention_count) return dir * (b.mention_count - a.mention_count);
-          return dir * (br - ar);
-        case 'rating':
-          if (ar !== br) return dir * (br - ar);
-          return dir * (b.mention_count - a.mention_count);
-        case 'accuracy': {
-          // 主鍵：最準來源的 D5 勝率；無準度資料的排最後；同分用樣本數 tie-break
-          const aa = accByCode.get(a.stock_code);
-          const ba = accByCode.get(b.stock_code);
-          if (!aa && !ba) return dir * (b.mention_count - a.mention_count);
-          if (!aa) return 1;
-          if (!ba) return -1;
-          if (ba.winRate !== aa.winRate) return dir * (ba.winRate - aa.winRate);
-          return dir * (ba.scored - aa.scored);
-        }
-        case 'openReturn':
-        case 'd1Return':
-        case 'd5Return':
-        case 'd10Return':
-        case 'd20Return':
-        case 'maxGain':
-        case 'maxLoss': {
-          const va = (a.performance as unknown as Record<string, number | null | undefined>)[sortBy];
-          const vb = (b.performance as unknown as Record<string, number | null | undefined>)[sortBy];
-          const aNull = va == null;
-          const bNull = vb == null;
-          if (aNull && bNull) return 0;
-          if (aNull) return 1;
-          if (bNull) return -1;
-          return dir * ((vb as number) - (va as number));
-        }
-        default:
-          return 0;
+  // 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）
+  const ytSortValue = (it: PerformanceItem, id: string): SortValue => {
+    const fk = YT_FWD_FIELD[id];
+    if (fk) {
+      return (it.performance as unknown as Record<string, number | null | undefined>)[fk] ?? null;
+    }
+    const rating = it.rating ? RATING_ORDER[it.rating] ?? 0 : 0;
+    switch (id) {
+      case 'teacher.mentions':
+        // 主鍵：提及次數；同 mention 用 rating tie-break（rating 0-4 壓進尾數）
+        return it.mention_count * 10 + rating;
+      case 'teacher.rating':
+        // 主鍵：評級（A>B>C>D>未評）；同級用提及次數 tie-break（壓進尾數）
+        return rating * 1e6 + it.mention_count;
+      case 'teacher.accuracy': {
+        // 主鍵：最準來源 D5 勝率；無準度資料回 null 排最後；同分用樣本數 tie-break
+        const acc = accByCode.get(it.stock_code);
+        if (!acc) return null;
+        return acc.winRate * 1e6 + acc.scored;
       }
-    });
-    return arr;
-  }, [filtered, sortBy, sortDir, accByCode]);
+      default:
+        return null;
+    }
+  };
+  const sorted = useMemo(
+    () => applySort(filtered, sortBy, sortDir, ytSortValue),
+    // ytSortValue 依賴 accByCode；filtered/sortBy/sortDir 已列
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filtered, sortBy, sortDir, accByCode],
+  );
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -273,35 +271,13 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
           )}
         </div>
 
-        {/* Sort pills */}
-        <div className="flex flex-wrap gap-1 items-center">
-          <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-          {([
-            { key: 'mention' as const, label: '提及' },
-            { key: 'rating' as const, label: '評級' },
-            { key: 'accuracy' as const, label: '🎯 準度' },
-            { key: 'openReturn' as const, label: '漲跌·隔開' },
-            { key: 'd1Return' as const, label: '漲跌·1日' },
-            { key: 'd5Return' as const, label: '漲跌·5日' },
-            { key: 'd10Return' as const, label: '漲跌·10日' },
-            { key: 'd20Return' as const, label: '漲跌·20日' },
-            { key: 'maxGain' as const, label: '漲跌·最高' },
-            { key: 'maxLoss' as const, label: '漲跌·最低' },
-          ]).map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => {
-                if (sortBy === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
-                else { setSortBy(key); setSortDir('desc'); }
-              }}
-              className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                sortBy === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'
-              }`}
-            >
-              {label}{sortBy === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
-            </button>
-          ))}
-        </div>
+        {/* Sort pills — 共用 SortControl + 中央排序清單 */}
+        <SortControl
+          options={YT_SORT_OPTIONS}
+          value={sortBy}
+          dir={sortDir}
+          onChange={(id, d) => { setSortBy(id); setSortDir(d); }}
+        />
 
         {/* Filter pills */}
         <div className="flex flex-wrap gap-1 items-center">

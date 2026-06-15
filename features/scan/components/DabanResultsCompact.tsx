@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { DabanScanResult, DabanScanSession, StockForwardPerformance } from '@/lib/scanner/types';
 import type { SelectedStock } from './ScanChartPanel';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 interface RealtimePrice {
   open: number;
@@ -49,6 +52,9 @@ const COMPACT_FWD = [
   { key: 'maxLoss' as const, label: '最低' },
 ] as const;
 
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+const DABAN_SORT_OPTIONS = ['mkt.turnover', 'mkt.change', 'mkt.boards', 'mkt.price', 'trust.confirmed'];
+
 interface DabanResultsCompactProps {
   date: string;
   onSelectStock?: (stock: SelectedStock) => void;
@@ -66,8 +72,8 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
   const [turnoverRankMap, setTurnoverRankMap] = useState<Map<string, number>>(new Map());
-  const [dabanSort, setDabanSort] = useState<'turnover' | 'change' | 'boards' | 'price' | 'confirmed'>('turnover');
-  const [dabanSortDir, setDabanSortDir] = useState<'asc' | 'desc'>('desc');
+  const [dabanSort, setDabanSort] = useState<string>('mkt.turnover');
+  const [dabanSortDir, setDabanSortDir] = useState<SortDir>('desc');
 
   // 載入全市場 20 日均成交額排名（top 500）
   useEffect(() => {
@@ -208,25 +214,23 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
   const buyable = session.results.filter(r => !r.isYiZiBan);
   const locked = session.results.filter(r => r.isYiZiBan);
 
-  const sortedBuyable = [...buyable].sort((a, b) => {
-    const dir = dabanSortDir === 'desc' ? 1 : -1;
-    switch (dabanSort) {
-      case 'turnover': return dir * ((b.turnover ?? 0) - (a.turnover ?? 0));
-      case 'change':   // 漲幅主鍵；同分用連板數當 tie-breaker（多數漲停股 +10%）
-        return dir * (((b.limitUpPct - a.limitUpPct) * 1000)
-                      + ((b.consecutiveBoards ?? 0) - (a.consecutiveBoards ?? 0)));
-      case 'boards':   // 連板天數高優先；同連板用成交額 tie-breaker
-        return dir * (((b.consecutiveBoards ?? 0) - (a.consecutiveBoards ?? 0)) * 1e12
-                      + ((b.turnover ?? 0) - (a.turnover ?? 0)));
-      case 'price':    return dir * ((b.closePrice ?? 0) - (a.closePrice ?? 0));
-      case 'confirmed': {
+  // 排序值取法（id 走中央清單；保留打板的複合排序，升降序由 sortEngine 統一處理）
+  const dabanSortValue = (r: DabanScanResult, id: string): SortValue => {
+    switch (id) {
+      case 'mkt.turnover': return r.turnover ?? null; // 成交額數值（非 rank）
+      case 'mkt.change':   // 漲幅主鍵；同分用連板數當 tie-breaker（多數漲停股 +10%）
+        return r.limitUpPct * 1000 + (r.consecutiveBoards ?? 0);
+      case 'mkt.boards':   // 連板天數高優先；同連板用成交額 tie-breaker
+        return (r.consecutiveBoards ?? 0) * 1e12 + (r.turnover ?? 0);
+      case 'mkt.price':    return r.closePrice ?? null;
+      case 'trust.confirmed': {
         const rank = (v: boolean | undefined) => (v === true ? 2 : v === false ? 1 : 0);
-        const primary = rank(b.openConfirmed) - rank(a.openConfirmed);
-        return dir * (primary * 1e12 + ((b.turnover ?? 0) - (a.turnover ?? 0)));
+        return rank(r.openConfirmed) * 1e12 + (r.turnover ?? 0);
       }
-      default:         return 0;
+      default:             return null;
     }
-  });
+  };
+  const sortedBuyable = applySort(buyable, dabanSort, dabanSortDir, dabanSortValue);
 
   return (
     <div className="space-y-1.5 px-2">
@@ -276,27 +280,13 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
         );
       })()}
 
-      {/* Sort selector pills（鏡像 ScanResultsCompact 樣式） */}
-      <div className="flex flex-wrap gap-1 items-center">
-        <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-        {([
-          { key: 'turnover' as const, label: '成交額', tip: '當日成交金額大的排前面（打版預設）' },
-          { key: 'change'   as const, label: '漲幅',   tip: '當日漲跌幅 %（同分用連板數當 tie-breaker）' },
-          { key: 'boards'   as const, label: '連板',   tip: '連續漲停天數（首板/二板/三板/四板+；同連板用成交額排）' },
-          { key: 'price'    as const, label: '股價',   tip: '當前股價高低' },
-          { key: 'confirmed' as const, label: '可進場', tip: '✅ 進場（9:25集合競價 ≥ 門檻）→ ⏸ 不進 → 未知；同組內按成交額排' },
-        ]).map(({ key, label, tip }) => (
-          <button key={key}
-            onClick={() => {
-              if (dabanSort === key) setDabanSortDir(d => d === 'desc' ? 'asc' : 'desc');
-              else { setDabanSort(key); setDabanSortDir('desc'); }
-            }}
-            title={tip}
-            className={`text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${dabanSort === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'}`}>
-            {label}{dabanSort === key && <span className="ml-0.5">{dabanSortDir === 'desc' ? '▼' : '▲'}</span>}
-          </button>
-        ))}
-      </div>
+      {/* Sort selector pills — 共用 SortControl + 中央排序清單 */}
+      <SortControl
+        options={DABAN_SORT_OPTIONS}
+        value={dabanSort}
+        dir={dabanSortDir}
+        onChange={(id, d) => { setDabanSort(id); setDabanSortDir(d); }}
+      />
 
       {/* Realtime controls */}
       <div className="flex items-center gap-1.5 text-[10px]">

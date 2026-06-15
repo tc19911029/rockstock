@@ -15,6 +15,8 @@ import type { SelectedStock } from './ScanChartPanel';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 interface LockWatchPanelProps {
   market: 'TW' | 'CN';
@@ -59,18 +61,17 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   // 股票名稱對照（symbol → name），lockwatch record 沒存 name 欄位，UI 端從 stock list API 拉
   const [nameMap, setNameMap] = useState<Record<string, string>>({});
-  // 排序設定
-  type SortKey = 'signal' | 'symbol' | 'name' | 'pattern' | 'triggerPrice' | 'currentClose' | 'upside' | 'achievement' | 'stage' | 'triggeredDate' | 'days';
-  const [sortKey, setSortKey] = useState<SortKey>('upside');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // 排序設定（id 走 lib/sorting 中央清單：trust.* 為 registry id；純資料欄用 inline id）
+  const [sortKey, setSortKey] = useState<string>('trust.upside');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [favFirst, setFavFirst] = useState(false);
   const watchlistItems = useWatchlistStore((s) => s.items);  // 訂閱以便 toggle 自選後重新排序
   const inWatchlistSet = useMemo(() => new Set(watchlistItems.map(i => i.symbol)), [watchlistItems]);
-  const toggleSort = (k: SortKey) => {
+  const toggleSort = (k: string) => {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(k); setSortDir('desc'); }
   };
-  const sortIndicator = (k: SortKey) => sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const sortIndicator = (k: string) => sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
   // 拉股票名稱對照表（每市場一次，cache 在 component state）
   useEffect(() => {
@@ -131,50 +132,46 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
     'structure-broken': 5,
   };
 
+  // 排序值取法（id 走中央清單；accessor 完全照舊邏輯回值，缺值沿用舊的 -Infinity/0/99 不改成 null）
+  const lockWatchSortValue = (r: LockWatchRecord, id: string): SortValue => {
+    switch (id) {
+      case 'signal': return r.triggerSignal;
+      case 'symbol': return r.symbol;
+      case 'name': return nameMap[r.symbol] ?? '';
+      case 'pattern': return r.patternType ?? '';
+      case 'triggerPrice': return r.triggerPrice;
+      case 'currentClose': return r.currentClose ?? -Infinity;
+      case 'trust.upside': {
+        // Phase D：用現價算到目標的爬升空間（跟 UI 顯示一致）
+        const ref = r.currentClose ?? r.triggerPrice;
+        return r.patternTargetPrice && ref > 0 ? (r.patternTargetPrice - ref) / ref : -Infinity;
+      }
+      case 'trust.achievement': return r.patternAchievementRate ?? 0;
+      case 'trust.stage': return STAGE_ORDER[r.currentStage] ?? 99;
+      case 'triggeredDate': return r.triggeredDate;
+      case 'trust.days': return r.daysObserved;
+      default: return null;
+    }
+  };
+
   const sortedRecords = useMemo(() => {
     // 0514 用戶反饋：結構失效不要顯示（型態已死，留著佔版面）。已撤銷/手動移除留著當「軟失敗」紀錄
     const arr = (snapshot?.records ?? []).filter(r => r.currentStage !== 'structure-broken');
-    arr.sort((a, b) => {
-      // 自選優先（toggle 開時）
-      if (favFirst) {
-        const af = inWatchlistSet.has(a.symbol) ? 0 : 1;
-        const bf = inWatchlistSet.has(b.symbol) ? 0 : 1;
-        if (af !== bf) return af - bf;
-      }
-      let cmp = 0;
-      switch (sortKey) {
-        case 'signal': cmp = a.triggerSignal.localeCompare(b.triggerSignal); break;
-        case 'symbol': cmp = a.symbol.localeCompare(b.symbol); break;
-        case 'name': cmp = (nameMap[a.symbol] ?? '').localeCompare(nameMap[b.symbol] ?? ''); break;
-        case 'pattern': cmp = (a.patternType ?? '').localeCompare(b.patternType ?? ''); break;
-        case 'triggerPrice': cmp = a.triggerPrice - b.triggerPrice; break;
-        case 'currentClose': {
-          const aC = a.currentClose ?? -Infinity;
-          const bC = b.currentClose ?? -Infinity;
-          cmp = aC - bC;
-          break;
-        }
-        case 'upside': {
-          // Phase D：用現價算到目標的爬升空間（跟 UI 顯示一致）
-          const aRef = a.currentClose ?? a.triggerPrice;
-          const bRef = b.currentClose ?? b.triggerPrice;
-          const aU = a.patternTargetPrice && aRef > 0
-            ? (a.patternTargetPrice - aRef) / aRef
-            : -Infinity;
-          const bU = b.patternTargetPrice && bRef > 0
-            ? (b.patternTargetPrice - bRef) / bRef
-            : -Infinity;
-          cmp = aU - bU;
-          break;
-        }
-        case 'achievement': cmp = (a.patternAchievementRate ?? 0) - (b.patternAchievementRate ?? 0); break;
-        case 'stage': cmp = (STAGE_ORDER[a.currentStage] ?? 99) - (STAGE_ORDER[b.currentStage] ?? 99); break;
-        case 'triggeredDate': cmp = a.triggeredDate.localeCompare(b.triggeredDate); break;
-        case 'days': cmp = a.daysObserved - b.daysObserved; break;
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return arr;
+    // 對 registry id（trust.*）靠 registry 預設；對 inline id（純資料欄）傳 missingLast:false 不查 registry
+    const isRegistryId = sortKey.startsWith('trust.');
+    const sorted = applySort(
+      arr, sortKey, sortDir, lockWatchSortValue,
+      isRegistryId ? undefined : { missingLast: false },
+    );
+    // 自選優先（toggle 開時）：穩定 partition，永遠壓在欄位排序之上
+    if (favFirst) {
+      const fav: LockWatchRecord[] = [];
+      const rest: LockWatchRecord[] = [];
+      for (const r of sorted) (inWatchlistSet.has(r.symbol) ? fav : rest).push(r);
+      return [...fav, ...rest];
+    }
+    return sorted;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, sortKey, sortDir, favFirst, nameMap, inWatchlistSet]);
 
   // 沒任何 active record 時整個區塊不渲染（避免「暫無」一行佔版面）
@@ -284,30 +281,30 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
                         title="現價（每日 cron 維護的最近 close）+ 相對鎖定價的漲跌幅。點擊排序">
                       現價{sortIndicator('currentClose')}
                     </th>
-                    <th onClick={() => toggleSort('upside')}
+                    <th onClick={() => toggleSort('trust.upside')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
                         title="目標價及爬升空間（從現價算起，反映「現在進場到目標還能賺多少」）。點擊按爬升空間排序">
-                      目標價{sortIndicator('upside')}
+                      目標價{sortIndicator('trust.upside')}
                     </th>
-                    <th onClick={() => toggleSort('achievement')}
+                    <th onClick={() => toggleSort('trust.achievement')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
                         title="書本明寫的型態達成率（《抓飆股》p.314-342）。點擊排序">
-                      達成率{sortIndicator('achievement')}
+                      達成率{sortIndicator('trust.achievement')}
                     </th>
-                    <th onClick={() => toggleSort('stage')}
+                    <th onClick={() => toggleSort('trust.stage')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
                         title="已觸發 / 已買進 / 已撤銷 / 手動移除。結構失效不顯示（型態已死直接濾掉）。點擊排序">
-                      階段{sortIndicator('stage')}
+                      階段{sortIndicator('trust.stage')}
                     </th>
                     <th onClick={() => toggleSort('triggeredDate')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
                         title="該記錄被鎖定（觸發 LockWatch）的日期。點擊排序">
                       觸發日{sortIndicator('triggeredDate')}
                     </th>
-                    <th onClick={() => toggleSort('days')}
+                    <th onClick={() => toggleSort('trust.days')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
                         title="觸發後經過的交易日數。點擊排序">
-                      天數{sortIndicator('days')}
+                      天數{sortIndicator('trust.days')}
                     </th>
                     <th className="text-center py-1.5 px-2 min-w-[110px]">動作</th>
                   </tr>
