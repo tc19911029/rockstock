@@ -8,7 +8,6 @@ import { DabanResultsCompact } from './components/DabanResultsCompact';
 import { ScanCoachDigest } from './components/ScanCoachDigest';
 import { LockWatchPanel } from './components/LockWatchPanel';
 import { SanSeScanCompact } from './components/SanSeScanCompact';
-import { TodayTopPriorityCard } from './components/TodayTopPriorityCard';
 // 2026-05-11 ReentryCandidatesPanel 移除：用戶反饋無實質用途（跟 B 回後買上漲重疊高、書本對齊度低）。檔案保留供日後重做
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import type { SelectedStock } from './components/ScanChartPanel';
@@ -283,11 +282,8 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 <div className="flex items-center gap-1 flex-wrap">
                   {renderBtn('Q', 'bg-purple-700/70 border-purple-600 text-purple-100')}
                   {renderBtn('R', 'bg-cyan-700/70 border-cyan-600 text-cyan-100')}
-                  {/* 大戶偷買（W，籌碼集中度軌，2026-06-13）— 擺在乖離率右邊 */}
-                  {renderBtn('W', 'bg-emerald-700/70 border-emerald-600 text-emerald-100')}
-                  {/* 法人接刀（X，2026-06-14）— grid 唯一兩年都正買方向，擺在 W 右邊 */}
-                  {renderBtn('X', 'bg-teal-700/70 border-teal-600 text-teal-100')}
-                  {/* 法人偷買(原)（Y，2026-06-14）— 最初版三條件 AND，擺在 X 右邊 */}
+                  {/* 大戶偷買(W) / 法人接刀(X) 2026-06-15 從畫面拿掉（程式留著、可選回）— 只留 Y */}
+                  {/* 大戶法人偷買（Y，2026-06-14）— 三條件 AND */}
                   {renderBtn('Y', 'bg-amber-700/70 border-amber-600 text-amber-100')}
                   {/* 三色資金（自創策略，台股+陸股）— 嚴格/中等/寬鬆 三檔並排在乖離率旁邊 */}
                   {([
@@ -354,9 +350,6 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
         )}
 
       </div>
-
-      {/* 🎯 今日最優先（C1 2026-06-12）— 回測最強策略×排序的今日 top1-3，降低決策摩擦 */}
-      {scanDirection === 'long' && <TodayTopPriorityCard market={market} />}
 
       {sanSeMode && scanDirection === 'long' ? (
         // 三色僅做多；切到 空/打板 時退回書本買法清單（level 仍保留，切回「多」會自動恢復三色）

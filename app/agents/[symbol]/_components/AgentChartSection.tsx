@@ -75,6 +75,17 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
   const [showDescendingTrendline, setShowDescendingTrendline] = useState(false);
   const [showAscendingChannel, setShowAscendingChannel] = useState(false);
   const [showDescendingChannel, setShowDescendingChannel] = useState(false);
+  // 上升線/下降線：切線 + 軌道整合成單一開關（一鍵同開同關）
+  const toggleAscendingLine = () => {
+    const next = !(showAscendingTrendline || showAscendingChannel);
+    setShowAscendingTrendline(next);
+    setShowAscendingChannel(next);
+  };
+  const toggleDescendingLine = () => {
+    const next = !(showDescendingTrendline || showDescendingChannel);
+    setShowDescendingTrendline(next);
+    setShowDescendingChannel(next);
+  };
   const [showConsolidationLines, setShowConsolidationLines] = useState(false);
   const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
   const [showBollinger, setShowBollinger] = useState(false);
@@ -86,6 +97,9 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
     cnMain: false, cnRetail: false,
     mainForce: false, season: false,
   });
+  // 「籌碼」合併鈕：一鍵開關法人四（TW）+ CN 主力/散戶副圖
+  const toggleChipGroup = (next: boolean) =>
+    setIndicators(p => ({ ...p, foreign: next, trust: next, dealer: next, retail: next, cnMain: next, cnRetail: next }));
   const [showIndicators, setShowIndicators] = useState(true);
   const [chartSplit, setChartSplit] = useState(0.65);
 
@@ -135,6 +149,7 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                onChipGroupToggle={toggleChipGroup}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -147,14 +162,10 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
                 onNecklineToggle={() => setShowNeckline(v => !v)}
                 showPattern={showPattern}
                 onPatternToggle={() => setShowPattern(v => !v)}
-                showAscendingTrendline={showAscendingTrendline}
-                onAscendingTrendlineToggle={() => setShowAscendingTrendline(v => !v)}
-                showDescendingTrendline={showDescendingTrendline}
-                onDescendingTrendlineToggle={() => setShowDescendingTrendline(v => !v)}
-                showAscendingChannel={showAscendingChannel}
-                onAscendingChannelToggle={() => setShowAscendingChannel(v => !v)}
-                showDescendingChannel={showDescendingChannel}
-                onDescendingChannelToggle={() => setShowDescendingChannel(v => !v)}
+                showAscendingLine={showAscendingTrendline || showAscendingChannel}
+                onAscendingLineToggle={toggleAscendingLine}
+                showDescendingLine={showDescendingTrendline || showDescendingChannel}
+                onDescendingLineToggle={toggleDescendingLine}
                 showConsolidationLines={showConsolidationLines}
                 onConsolidationLinesToggle={() => setShowConsolidationLines(v => !v)}
                 avgCost={metrics.avgCost}

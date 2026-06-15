@@ -61,7 +61,7 @@ function MiniProgress({ value, target, pass }: { value: number; target: number; 
 /** Metric badge showing the key numeric value */
 function MetricBadge({ label, pass }: { label: string; pass: boolean }) {
   return (
-    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${
+    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md whitespace-nowrap shrink-0 ${
       pass ? 'bg-green-900/40 text-green-300 border border-green-800/50' : 'bg-muted text-muted-foreground border border-transparent'
     }`}>
       {label}
@@ -209,12 +209,12 @@ export default function SixConditionsPanel() {
     },
     {
       key: 'position', pass: sc.position.pass, detail: sc.position.detail,
-      metric: deviation !== null && deviation !== undefined ? `乖離${(deviation * 100).toFixed(1)}%` : undefined,
+      metric: deviation !== null && deviation !== undefined ? `月線乖離${(deviation * 100).toFixed(1)}%` : undefined,
       changed: changedKeys.has('position') ? (sc.position.pass ? 'gained' : 'lost') : undefined,
     },
     {
       key: 'volume', pass: sc.volume.pass, detail: sc.volume.detail,
-      metric: volRatio !== null && volRatio !== undefined ? `×${volRatio}` : undefined,
+      metric: volRatio !== null && volRatio !== undefined ? `×${volRatio}倍` : undefined,
       progress: volRatio !== null && volRatio !== undefined ? { value: volRatio, target: volThreshold } : undefined,
       changed: changedKeys.has('volume') ? (sc.volume.pass ? 'gained' : 'lost') : undefined,
     },

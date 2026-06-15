@@ -668,10 +668,10 @@ export const ZHU_INST_DIP: StrategyConfig = {
  */
 export const ZHU_INST_STEAL: StrategyConfig = {
   id:          'zhu-inst-steal',
-  name:        '法人偷買(原)（Y）',
+  name:        '大戶法人偷買（Y）',
   description: '股價在跌 + 5日籌碼集中度在增加 + 法人連續買（三條件同時成立），不過六條件、觀察用',
   version:     '1.0.0',
-  author:      '法人偷買(原)',
+  author:      '大戶法人偷買',
   createdAt:   '2026-06-14T00:00:00.000Z',
   isBuiltIn:   true,
   strategyType: 'mechanical-rank',

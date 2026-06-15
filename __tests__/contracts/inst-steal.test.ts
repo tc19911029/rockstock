@@ -33,8 +33,8 @@ describe('Y 法人偷買(原) — 軌道分類契約', () => {
     expect(NON_STEP1_SET.has('Y')).toBe(true);
   });
 
-  it('Y 中文名固定為「法人偷買(原)」（單一事實 LETTER_NAMES）', () => {
-    expect(LETTER_NAMES.Y).toBe('法人偷買(原)');
+  it('Y 中文名固定為「大戶法人偷買」（單一事實 LETTER_NAMES）', () => {
+    expect(LETTER_NAMES.Y).toBe('大戶法人偷買');
   });
 });
 

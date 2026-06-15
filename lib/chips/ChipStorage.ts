@@ -170,7 +170,8 @@ export async function loadChipSeries(code: string, days: number, market: 'TW' | 
     readTdccStock(code),
   ]);
   const inst = (instFile?.data ?? []).slice(-days);
-  const tdccCount = Math.ceil(days / 5) + 4;
+  // 週資料量小：至少回 200 週（~4 年）讓走圖滑到較舊日期時「集保持股分布」仍有對應週
+  const tdccCount = Math.max(200, Math.ceil(days / 5) + 4);
   const tdcc = (tdccFile?.data ?? []).slice(-tdccCount);
   return { symbol: code, inst, tdcc };
 }

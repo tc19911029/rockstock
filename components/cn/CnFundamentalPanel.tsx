@@ -66,23 +66,46 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
   return (
     <div className="flex flex-col gap-3 p-2.5 text-xs overflow-auto">
       {/* 估值頭 */}
-      <section className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2">
-        <div className="flex items-baseline gap-2">
+      <section className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2.5">
+        <div className="text-center">
           <span className="font-semibold text-fuchsia-300">{val?.name ?? code}</span>
-          {price != null && <span className="font-mono text-base font-bold">{price}</span>}
+          {price != null && <span className="ml-2 font-mono text-base font-bold">{price}</span>}
         </div>
-        <div className="flex gap-4 mt-1 text-[11px]">
-          {pe != null && <span className="text-muted-foreground">本益比<span className="text-[9px]">動</span> <span className="font-mono text-foreground">{f2(pe)}</span></span>}
-          <span className="text-muted-foreground">PB <span className="font-mono text-foreground">{f2(pb)}</span></span>
-          {latest?.roe != null && <span className="text-muted-foreground">ROE <span className="font-mono text-foreground">{f2(latest.roe)}%</span></span>}
-          {latest?.eps != null && <span className="text-muted-foreground">EPS <span className="font-mono text-foreground">{f2(latest.eps)}</span></span>}
-          {latest?.bps != null && <span className="text-muted-foreground">每股淨值 <span className="font-mono text-foreground">{f2(latest.bps)}</span></span>}
+        <div className="mt-2 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[11px]">
+          {pe != null && (
+            <div className="flex flex-col items-center">
+              <span className="text-muted-foreground">本益比<span className="text-[9px]">動</span></span>
+              <span className="font-mono text-foreground">{f2(pe)}</span>
+            </div>
+          )}
+          <div className="flex flex-col items-center">
+            <span className="text-muted-foreground">PB</span>
+            <span className="font-mono text-foreground">{f2(pb)}</span>
+          </div>
+          {latest?.roe != null && (
+            <div className="flex flex-col items-center">
+              <span className="text-muted-foreground">ROE</span>
+              <span className="font-mono text-foreground">{f2(latest.roe)}%</span>
+            </div>
+          )}
+          {latest?.eps != null && (
+            <div className="flex flex-col items-center">
+              <span className="text-muted-foreground">EPS</span>
+              <span className="font-mono text-foreground">{f2(latest.eps)}</span>
+            </div>
+          )}
+          {latest?.bps != null && (
+            <div className="flex flex-col items-center">
+              <span className="text-muted-foreground">每股淨值</span>
+              <span className="font-mono text-foreground">{f2(latest.bps)}</span>
+            </div>
+          )}
         </div>
       </section>
 
       {/* 逐季財報趨勢 */}
       <section>
-        <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="flex items-center justify-center gap-1.5 mb-1.5">
           <span className="font-semibold text-fuchsia-300">逐季財報</span>
           <span className="text-[10px] text-muted-foreground">营收/净利/ROE/毛利（YoY=年增率）</span>
         </div>
@@ -93,28 +116,28 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
         )}
         {fin.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-[10px]">
+            <table className="w-full text-[9px] tracking-tight">
               <thead>
                 <tr className="text-muted-foreground border-b border-border/40">
-                  <th className="text-left font-normal py-0.5">報告期</th>
-                  <th className="text-right font-normal">营收(YoY)</th>
-                  <th className="text-right font-normal">净利(YoY)</th>
-                  <th className="text-right font-normal">ROE</th>
-                  <th className="text-right font-normal">毛利</th>
+                  <th className="text-center font-normal py-0.5 whitespace-nowrap">報告期</th>
+                  <th className="text-center font-normal whitespace-nowrap">营收(YoY)</th>
+                  <th className="text-center font-normal whitespace-nowrap">净利(YoY)</th>
+                  <th className="text-center font-normal whitespace-nowrap">ROE</th>
+                  <th className="text-center font-normal whitespace-nowrap">毛利</th>
                 </tr>
               </thead>
               <tbody className="font-mono">
                 {fin.map((q) => (
                   <tr key={q.reportDate} className="border-b border-border/20">
-                    <td className="py-0.5">{q.reportDate}</td>
-                    <td className="text-right">
-                      {yi(q.revenue)}<span className={cn('ml-1', (q.revenueYoY ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>{pct(q.revenueYoY)}</span>
+                    <td className="py-0.5 text-center whitespace-nowrap text-[8px] text-muted-foreground">{q.reportDate}</td>
+                    <td className="text-center whitespace-nowrap">
+                      {yi(q.revenue)}<span className={cn('ml-0.5 text-[8px]', (q.revenueYoY ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>{pct(q.revenueYoY)}</span>
                     </td>
-                    <td className="text-right">
-                      {yi(q.netProfit)}<span className={cn('ml-1', (q.netProfitYoY ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>{pct(q.netProfitYoY)}</span>
+                    <td className="text-center whitespace-nowrap">
+                      {yi(q.netProfit)}<span className={cn('ml-0.5 text-[8px]', (q.netProfitYoY ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>{pct(q.netProfitYoY)}</span>
                     </td>
-                    <td className="text-right">{f2(q.roe)}%</td>
-                    <td className="text-right">{q.grossMargin != null ? `${q.grossMargin.toFixed(1)}%` : '—'}</td>
+                    <td className="text-center whitespace-nowrap">{f2(q.roe)}%</td>
+                    <td className="text-center whitespace-nowrap">{q.grossMargin != null ? `${q.grossMargin.toFixed(1)}%` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -123,7 +146,7 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
         ) : <div className="text-muted-foreground">暂无財報</div>}
       </section>
 
-      <div className="text-[9px] text-muted-foreground/60 mt-1">
+      <div className="text-center text-[9px] text-muted-foreground/60 mt-1">
         資料源：EastMoney（财报+估值）→ 新浪AkShare fallback · 本益比(動)=年化最新季
       </div>
     </div>

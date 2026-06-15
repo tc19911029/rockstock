@@ -277,7 +277,6 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         {/* Profile switcher — 只在持倉 tab 顯示「誰的持倉」*/}
         {tab === 'portfolio' && (
           <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border">
-            <span className="text-[10px] text-muted-foreground shrink-0">誰的</span>
             <PortfolioProfileSwitcher size="sm" />
           </div>
         )}

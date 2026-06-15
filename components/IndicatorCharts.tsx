@@ -131,7 +131,7 @@ function VolumeChart({ candles, hoverCandle, isTW, isCN }: { candles: CandleWith
 
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">成交量{isTW ? '(張)' : isCN ? '(手)' : ''}</span>
         <span className="text-blue-400">MV5 {display?.avgVol5 ? formatVolume(display.avgVol5, !!isTW, !!isCN) : '—'}</span>
         <span className={`font-bold ${volColor}`}>量 {display ? formatVolume(display.volume, !!isTW, !!isCN) : '—'} {volArrow}</span>
@@ -206,7 +206,7 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
 
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">MACD</span>
         <span className="text-amber-400">MACD10 {display?.macdSignal?.toFixed(2) ?? '—'}</span>
         <span className="text-blue-400">DIF {display?.macdDIF?.toFixed(2) ?? '—'}</span>
@@ -293,7 +293,7 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
 
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">KD</span>
         <span className="text-blue-400">K5 {display?.kdK?.toFixed(2) ?? '—'} {kArrow}</span>
         <span className="text-orange-400">D5 {display?.kdD?.toFixed(2) ?? '—'} {dArrow}</span>
@@ -370,7 +370,7 @@ function RSIChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; h
 
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">RSI(14)</span>
         <span className={rsiColor}>{rsiVal?.toFixed(2) ?? '—'} {rsiZone && <span className="text-[10px]">{rsiZone}</span>}</span>
       </div>
@@ -490,7 +490,7 @@ function ChipChart({ seriesKey, candles, chips, hoverCandle }: {
 
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">{CHIP_LABELS[seriesKey]}買賣超(張)</span>
         <span className={(value ?? 0) >= 0 ? 'text-bull' : 'text-bear'}>
           {value != null ? `${value >= 0 ? '+' : ''}${value.toLocaleString()}` : '—'}
@@ -505,10 +505,10 @@ function ChipChart({ seriesKey, candles, chips, hoverCandle }: {
   );
 }
 
-// ── 大戶持股（TDCC 集保戶股權分散） — 精簡 badge ─────────────────────────────
-// TDCC opendata 只回傳最新一週快照，無歷史端點；累積週數 < 視覺有意義門檻時
-// 折線會是一條直線。改用 badge 顯示：當週值 + vs 上週變化 + 近 N 週區間。
-// 走圖 hover K 棒會切到「日期 <= hover.date 的最後一筆」TDCC 週資料。
+// ── 大戶持股（TDCC 集保戶股權分散） — 週柱狀副圖 ─────────────────────────────
+// FinMind 補上逐週歷史後（2330 可回到 2015），改用柱狀子圖呈現（同玩股網 400/1000 張附圖）：
+// 每根 K 棒 forward-fill 當週大戶比例；紅=本週增加、綠=本週減少；base 取略低於區間最小值，
+// 讓週與週的變化看得出來（不從 0 畫滿）。走圖 hover 切到「日期 <= hover.date 的最後一筆」週資料。
 
 type HolderKey = 'h400' | 'h1000';
 const HOLDER_LABELS: Record<HolderKey, string> = {
@@ -524,14 +524,14 @@ function pickHolderValue(row: { holder400Pct: number; holder1000Pct: number }, k
   return key === 'h400' ? row.holder400Pct : row.holder1000Pct;
 }
 
-function HolderBadge({ holderKey, chips, hoverCandle, candles }: {
-  holderKey: HolderKey;
-  chips?: ChipsData | null;
-  hoverCandle?: CandleWithIndicators | null;
-  candles: CandleWithIndicators[];
-}) {
+/** 從 tdcc 週序列算出 header 速讀：當週值 + vs 上週變化 + 近 N 週區間 + 基準日 */
+function computeHolderReadout(
+  chips: ChipsData | null | undefined,
+  holderKey: HolderKey,
+  hoverCandle: CandleWithIndicators | null | undefined,
+  candles: CandleWithIndicators[],
+) {
   const tdccData = [...(chips?.tdcc ?? [])].sort((a, b) => a.date.localeCompare(b.date));
-
   // hover 模式：找 date <= hoverCandle.date 的最後一筆；沒 hover 用最新一筆
   const display = hoverCandle ?? candles[candles.length - 1];
   let displayIdx = tdccData.length - 1;
@@ -542,47 +542,118 @@ function HolderBadge({ holderKey, chips, hoverCandle, candles }: {
   }
   const current = displayIdx >= 0 ? tdccData[displayIdx] : null;
   const prior = displayIdx > 0 ? tdccData[displayIdx - 1] : null;
-
   const value = current ? pickHolderValue(current, holderKey) : null;
   const priorValue = prior ? pickHolderValue(prior, holderKey) : null;
   const delta = value != null && priorValue != null ? value - priorValue : null;
-
-  // 近 N 週高低（取到 displayIdx 為止的最後 8 週）
   const window = tdccData.slice(Math.max(0, displayIdx - 7), displayIdx + 1)
     .map(r => pickHolderValue(r, holderKey));
   const hi = window.length >= 2 ? Math.max(...window) : null;
   const lo = window.length >= 2 ? Math.min(...window) : null;
+  return { empty: tdccData.length === 0, current, value, delta, hi, lo, weeks: window.length };
+}
 
-  if (tdccData.length === 0) {
-    return (
-      <div className="h-full flex items-center gap-3 px-3 text-xs font-mono">
-        <span className="text-muted-foreground">{HOLDER_LABELS[holderKey]}</span>
-        <span className="text-muted-foreground/60">無資料（每週四公布）</span>
-      </div>
-    );
-  }
+function HolderChart({ holderKey, candles, chips, hoverCandle }: {
+  holderKey: HolderKey;
+  candles: CandleWithIndicators[];
+  chips?: ChipsData | null;
+  hoverCandle?: CandleWithIndicators | null;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const valMapRef = useRef<Map<string, number>>(new Map()); // candle.date → forward-fill 後的當週比例
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = makeChart(containerRef.current, false);
+    seriesRef.current = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    chartRef.current = chart;
+
+    const unsub = subscribeRangeSync((range: LogicalRange | null) => {
+      if (range) chart.timeScale().setVisibleLogicalRange(range);
+    });
+    // ── Crosshair sync from main chart：跟主圖+其他副圖共享垂直對齊線 ──
+    const unsubCrosshair = subscribeCrosshairSync((time) => {
+      if (!chartRef.current || !seriesRef.current) return;
+      if (!time) { chartRef.current.clearCrosshairPosition(); return; }
+      const v = valMapRef.current.get(time);
+      if (v != null) chartRef.current.setCrosshairPosition(v, toTime(time), seriesRef.current);
+    });
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) chart.applyOptions({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight || 80,
+      });
+    });
+    ro.observe(containerRef.current);
+    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); };
+  }, [holderKey]);
+
+  useEffect(() => {
+    if (!seriesRef.current) return;
+    const { bull, bear } = getBullBearColors();
+    const tdcc = [...(chips?.tdcc ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+    const valMap = new Map<string, number>();
+    // forward-fill：每根 K 棒套用「日期 <= 該棒」的最後一筆週資料（candles 與 tdcc 皆已升冪）
+    let wi = -1;
+    const data = candles.map((c) => {
+      while (wi + 1 < tdcc.length && tdcc[wi + 1].date <= c.date) wi++;
+      if (wi < 0) return { time: toTime(c.date) }; // 第一筆週資料之前 → 空白柱（保持與主圖等量對齊）
+      const v = pickHolderValue(tdcc[wi], holderKey);
+      const priorWeek = wi > 0 ? pickHolderValue(tdcc[wi - 1], holderKey) : null;
+      const up = priorWeek == null ? true : v >= priorWeek; // 紅=本週增加、綠=本週減少
+      valMap.set(c.date, v);
+      return { time: toTime(c.date), value: v, color: up ? `${bull}cc` : `${bear}cc` };
+    });
+    valMapRef.current = valMap;
+    // base 取略低於區間最小值，讓週變化在副圖看得出來（不從 0 畫滿一整根）
+    const vals = [...valMap.values()];
+    if (vals.length > 0) {
+      const min = Math.min(...vals), max = Math.max(...vals);
+      const pad = Math.max(0.5, (max - min) * 0.15);
+      seriesRef.current.applyOptions({ base: Math.max(0, min - pad) });
+    }
+    seriesRef.current.setData(data);
+    requestAnimationFrame(() => {
+      const r = getLastRange();
+      if (r && chartRef.current) chartRef.current.timeScale().setVisibleLogicalRange(r);
+    });
+  }, [candles, chips, holderKey]);
+
+  const { empty, current, value, delta, hi, lo, weeks } = computeHolderReadout(chips, holderKey, hoverCandle, candles);
 
   return (
-    <div className="h-full flex items-center gap-3 px-3 text-xs font-mono">
-      <span className="text-muted-foreground shrink-0">{HOLDER_LABELS[holderKey]}</span>
-      <span className="font-bold tabular-nums" style={{ color: HOLDER_COLORS[holderKey] }}>
-        {value != null ? `${value.toFixed(2)}%` : '—'}
-      </span>
-      {delta != null ? (
-        <span className={`tabular-nums ${delta >= 0 ? 'text-bull' : 'text-bear'}`}>
-          {delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(2)} vs 上週
-        </span>
-      ) : (
-        <span className="text-muted-foreground/50">vs 上週 —（待累積）</span>
-      )}
-      {hi != null && lo != null && (
-        <span className="text-muted-foreground/70 tabular-nums">
-          近{window.length}週 高 {hi.toFixed(2)} / 低 {lo.toFixed(2)}
-        </span>
-      )}
-      {current && (
-        <span className="text-muted-foreground/50 text-[10px] ml-auto">基準 {current.date}</span>
-      )}
+    <div className="relative h-full">
+      <div className="absolute top-1 left-2 right-2 z-10 flex flex-wrap gap-x-3 text-xs font-mono pointer-events-none leading-tight bg-[#0f172a]/90 rounded px-1.5 py-px">
+        <span className="text-muted-foreground">{HOLDER_LABELS[holderKey]}</span>
+        {empty ? (
+          <span className="text-muted-foreground/60">無資料（每週四公布）</span>
+        ) : (
+          <>
+            <span className="font-bold tabular-nums" style={{ color: HOLDER_COLORS[holderKey] }}>
+              {value != null ? `${value.toFixed(2)}%` : '—'}
+            </span>
+            {delta != null && (
+              <span className={`tabular-nums ${delta >= 0 ? 'text-bull' : 'text-bear'}`}>
+                {delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(2)} vs 上週
+              </span>
+            )}
+            {hi != null && lo != null && (
+              <span className="text-muted-foreground/70 tabular-nums">
+                近{weeks}週 高 {hi.toFixed(2)} / 低 {lo.toFixed(2)}
+              </span>
+            )}
+            {current && (
+              <span className="text-muted-foreground/50 text-[10px]">基準 {current.date}</span>
+            )}
+          </>
+        )}
+      </div>
+      <div ref={containerRef} className="w-full h-full" />
     </div>
   );
 }
@@ -667,7 +738,7 @@ function CnFlowChart({ flowKey, candles, chips, hoverCandle }: {
 
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">{CN_FLOW_LABELS[flowKey]}(萬元)</span>
         <span className={(value ?? 0) >= 0 ? 'text-bull' : 'text-bear'}>
           {value != null ? `${value >= 0 ? '+' : ''}${value.toLocaleString()}` : '—'}
@@ -758,7 +829,7 @@ function MainForceChart({ candles, zhuli, hoverCandle }: { candles: CandleWithIn
   const d = (hoverCandle ?? candles[candles.length - 1])?.date;
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none">
+      <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">主力狀態F</span>
         <span className="text-fuchsia-400">短攻 {valAt(zhuli.shortAttack, d)}</span>
         <span style={{ color: '#FF433D' }}>中強 {valAt(zhuli.midStrength, d)}</span>
@@ -835,7 +906,7 @@ function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicat
   const xys0v = xys.xys0.find(b => b.time === d)?.value;
   return (
     <div className="relative h-full">
-      <div className="absolute top-1 left-2 z-10 flex flex-wrap gap-x-3 text-xs font-mono pointer-events-none leading-tight">
+      <div className="absolute top-1 left-2 right-2 z-10 flex flex-wrap gap-x-3 text-xs font-mono pointer-events-none leading-tight bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">捕撈季節</span>
         <span className={(xys0v ?? 0) >= 0 ? 'text-fuchsia-400' : 'text-emerald-400'}>XYS0 {at(xys.xys0)}</span>
         <span className="text-muted-foreground/60">ZZX 0.00</span>
@@ -903,12 +974,13 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
     show.trust && isTW && <div key="trust" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="trust" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.dealer && isTW && <div key="dealer" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="dealer" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.retail && isTW && <div key="retail" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="retail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
-    show.h400 && isTW && <div key="h400" className="shrink-0 h-7 bg-card border-t border-border/40"><HolderBadge holderKey="h400" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
-    show.h1000 && isTW && <div key="h1000" className="shrink-0 h-7 bg-card border-t border-border/40"><HolderBadge holderKey="h1000" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnMain && isCN && <div key="cnMain" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnMain" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnRetail && isCN && <div key="cnRetail" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnRetail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.mainForce && (isCN || isTW) && sanseZhuli && <div key="mainForce" className="flex-1 min-h-0 bg-card"><MainForceChart candles={candles} zhuli={sanseZhuli} hoverCandle={hoverCandle} /></div>,
     show.season && (isCN || isTW) && sanseXys && <div key="season" className="flex-[1.7] min-h-0 bg-card"><SeasonChart candles={candles} xys={sanseXys} hoverCandle={hoverCandle} /></div>,
+    // 大戶持股（400張/1000張）一律排最後 → 不論技術/三色/籌碼模式都固定在副圖最下面（週資料，位置統一）
+    show.h400 && isTW && <div key="h400" className="flex-1 min-h-0 bg-card"><HolderChart holderKey="h400" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
+    show.h1000 && isTW && <div key="h1000" className="flex-1 min-h-0 bg-card"><HolderChart holderKey="h1000" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
   ].filter(Boolean);
 
   if (panels.length === 0) return <div className="h-full bg-card flex items-center justify-center text-xs text-muted-foreground/60">請開啟至少一個指標面板</div>;

@@ -97,15 +97,7 @@ export default function HealthPage() {
                   每日選股
                 </Link>
               )}
-              {t.key === 'cn-agents' && (
-                <Link
-                  href="/smartmoney"
-                  className="px-3 py-2 text-sm rounded-t-md transition-colors border-b-2 -mb-px border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/40"
-                >
-                  <span className="mr-1.5">🕵️</span>
-                  大戶偷買
-                </Link>
-              )}
+              {/* 大戶偷買(/smartmoney) 入口 2026-06-15 從畫面拿掉（頁面與程式留著、可復原） */}
               <button
                 role="tab"
                 aria-selected={tab === t.key}
