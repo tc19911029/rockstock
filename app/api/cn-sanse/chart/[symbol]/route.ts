@@ -1,7 +1,6 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { apiOk, apiError } from '@/lib/api/response';
-import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { CN_STOCKS } from '@/lib/scanner/cnStocks';
 import { computeSanSeChart } from '@/lib/cn-sanse/indicators';
 import { evalConditions } from '@/lib/cn-sanse/conditions';
 import { fetchDayExtrasCached } from '@/lib/cn-sanse/cnDayExtras';
@@ -11,13 +10,11 @@ import type { Candle } from '@/types';
 
 export const runtime = 'nodejs';
 
+// 股名對照：用已進 git 的 CN_STOCKS（Vercel 也讀得到），取代本地 data/cn_stocklist.json
 let nameMap: Map<string, { name: string; industry: string }> | null = null;
-async function lookupStock(symbol: string): Promise<{ name: string; industry: string }> {
+function lookupStock(symbol: string): { name: string; industry: string } {
   if (!nameMap) {
-    try {
-      const raw = await fs.readFile(path.join(process.cwd(), 'data/cn_stocklist.json'), 'utf8');
-      nameMap = new Map((JSON.parse(raw).stocks ?? []).map((s: { symbol: string; name: string; industry?: string }) => [s.symbol, { name: s.name, industry: s.industry ?? '' }]));
-    } catch { nameMap = new Map(); }
+    nameMap = new Map(CN_STOCKS.map((s) => [s.symbol, { name: s.name, industry: '' }]));
   }
   return nameMap.get(symbol) ?? { name: symbol, industry: '' };
 }
@@ -33,11 +30,10 @@ export async function GET(
   const asOf = new URL(req.url).searchParams.get('asOf');
 
   try {
-    const dir = getLocalCandleDir('CN');
+    // K 線走 Blob-aware adapter（本地讀 data/candles/CN，Vercel 讀 Blob），不再直接 fs 讀本地檔
     let allCandles: Candle[] | undefined;
-    try {
-      allCandles = JSON.parse(await fs.readFile(path.join(dir, `${symbol}.json`), 'utf8'))?.candles as Candle[] | undefined;
-    } catch { /* 本地缺檔（不在掃描宇宙）→ 下面 on-demand 抓 */ }
+    const file = await readCandleFile(symbol, 'CN');
+    if (file?.candles) allCandles = file.candles;
     // 不在掃描宇宙（無本地 L1，如 301205）→ 用與 /api/stock 同款 pipeline 線上抓，讓任何股票都能看三色
     // （單檔 walk-the-chart，非全市場掃描，不違反鐵則 #3；dataProvider 會順手快取進 L1，下次就走本地）
     if (!Array.isArray(allCandles) || allCandles.length < 60) {
@@ -132,8 +128,8 @@ export async function GET(
     // 大盤指數（上證 000001.SS）→ 按日期對齊個股 K（主力狀態F 的中線強勢需要）
     let indexClose: number[] | undefined;
     try {
-      const idxRaw = await fs.readFile(path.join(dir, '000001.SS.json'), 'utf8');
-      const idx = JSON.parse(idxRaw)?.candles as Candle[];
+      const idxFile = await readCandleFile('000001.SS', 'CN');
+      const idx = idxFile?.candles ?? [];
       const idxMap = new Map(idx.map((c) => [c.date, c.close]));
       if (injectedTodayDate && todayIndexClose != null) idxMap.set(injectedTodayDate, todayIndexClose);
       let last = NaN;
@@ -159,7 +155,7 @@ export async function GET(
     const afterCut = <T extends { time: string }>(a: T[]) => a.filter((p) => p.time >= cutoff);
     const z = chart.zhuli;
     const xt = chart.xysTiers;
-    const meta = await lookupStock(symbol);
+    const meta = lookupStock(symbol);
     const last = candles[candles.length - 1];
     const prev = candles[candles.length - 2];
     return apiOk({

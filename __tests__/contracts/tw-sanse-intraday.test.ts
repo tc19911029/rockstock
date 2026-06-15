@@ -41,25 +41,34 @@ const MASTER = {
   ],
 };
 
-jest.mock('@/lib/datasource/LocalCandleStore', () => ({
-  getLocalCandleDir: () => '/fake/candles/TW',
-}));
-
 // 不打網路：stub TWSE 產業 fetch（保留真實 getTWConcept）
 jest.mock('@/lib/scanner/conceptMap', () => ({
   ...jest.requireActual('@/lib/scanner/conceptMap'),
   fetchTWIndustryMap: jest.fn().mockResolvedValue(new Map()),
 }));
 
+// K 線 / universe 改走 Blob-aware adapter（本地 FS、Vercel Blob），不再 raw fs + readdir
+jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
+  readCandleFile: jest.fn(async (symbol: string) => {
+    const c = CANDLE_MAP[symbol];
+    return c ? { candles: c } : null;
+  }),
+  listCandleSymbols: jest.fn(async () => Object.keys(CANDLE_MAP)),
+}));
+
+// 成交額索引不存在 → readTurnoverRank null → 前置粗掃帽 degrade to full（缺口防護/新鮮度照驗）
+jest.mock('@/lib/scanner/TurnoverRank', () => ({
+  readTurnoverRank: jest.fn(async () => null),
+  computeTurnoverRankAsOfDate: jest.fn(async () => new Map()),
+}));
+
+// loadNameMap 仍從 stock-master.json（fs）補中文名
 jest.mock('fs/promises', () => ({
   readFile: jest.fn(async (p: string) => {
     const s = String(p);
     if (s.includes('stock-master')) return JSON.stringify(MASTER);
-    const base = s.split('/').pop()!.replace('.json', '');
-    if (CANDLE_MAP[base]) return JSON.stringify({ candles: CANDLE_MAP[base] });
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   }),
-  readdir: jest.fn(async () => Object.keys(CANDLE_MAP).map((s) => `${s}.json`)),
 }));
 
 // scanTwSanSe 必須在 mock 宣告之後 import

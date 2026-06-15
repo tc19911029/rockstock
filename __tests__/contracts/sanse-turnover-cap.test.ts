@@ -37,26 +37,28 @@ const CANDLE_MAP: Record<string, Candle[]> = {
   '600003.SS': genCandles(D_1, 260, 100_000), // low → topN=1/2 時被剔
 };
 
-const STOCKLIST = {
-  stocks: [
-    { symbol: '600001.SS', name: '高量股', industry: 'X' },
-    { symbol: '600002.SS', name: '中量股', industry: 'X' },
-    { symbol: '600003.SS', name: '低量股', industry: 'X' },
+// universe 改用 CN_STOCKS（取代本地 cn_stocklist.json）
+jest.mock('@/lib/scanner/cnStocks', () => ({
+  CN_STOCKS: [
+    { symbol: '600001.SS', name: '高量股' },
+    { symbol: '600002.SS', name: '中量股' },
+    { symbol: '600003.SS', name: '低量股' },
   ],
-};
-
-jest.mock('@/lib/datasource/LocalCandleStore', () => ({
-  getLocalCandleDir: () => '/fake/candles/CN',
 }));
 
-jest.mock('fs/promises', () => ({
-  readFile: jest.fn(async (p: string) => {
-    const s = String(p);
-    if (s.includes('cn_stocklist')) return JSON.stringify(STOCKLIST);
-    const base = s.split('/').pop()!.replace('.json', '');
-    if (CANDLE_MAP[base]) return JSON.stringify({ candles: CANDLE_MAP[base] });
-    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+// K 線改走 Blob-aware adapter（不再 raw fs），記憶體 fixture 餵 readCandleFile
+jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
+  readCandleFile: jest.fn(async (symbol: string) => {
+    const c = CANDLE_MAP[symbol];
+    return c ? { candles: c } : null;
   }),
+}));
+
+// 成交額索引不存在 → readTurnoverRank null → 前置粗掃帽 degrade to full；
+// 端對端的 cap 由 scan 內 topTurnoverRanks(freshTurnovers, topN) 套用（本測試鎖的正是這條）。
+jest.mock('@/lib/scanner/TurnoverRank', () => ({
+  readTurnoverRank: jest.fn(async () => null),
+  computeTurnoverRankAsOfDate: jest.fn(async () => new Map()),
 }));
 
 // 在 mock 宣告之後 import（ts-jest commonjs）

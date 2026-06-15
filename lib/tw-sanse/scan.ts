@@ -15,7 +15,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Candle } from '@/types';
-import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
+import { readCandleFile, listCandleSymbols } from '@/lib/datasource/CandleStorageAdapter';
+import { readTurnoverRank, computeTurnoverRankAsOfDate } from '@/lib/scanner/TurnoverRank';
 import { getTWConcept, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { computeSanSe, evalLatest, type SanSeLevel } from '@/lib/cn-sanse/selectors';
 import { evalConditions, isReversalBuy } from '@/lib/cn-sanse/conditions';
@@ -30,8 +31,8 @@ const MIN_BARS = 250;
 interface StockEntry { symbol: string; name: string; industry?: string }
 
 /** 台股普通股池：4 位數代碼 + .TW/.TWO；排除 ETF(00 開頭)、權證、含字母的碼、指數本身。 */
-function isCommonStock(file: string): boolean {
-  const m = file.match(/^(\d{4})\.(TW|TWO)\.json$/);
+function isCommonStock(symbol: string): boolean {
+  const m = symbol.match(/^(\d{4})\.(TW|TWO)$/);
   if (!m) return false;             // 非 4 位純數字（00400A 等 ETF/特殊碼、^TWII）→ 排除
   if (m[1].startsWith('00')) return false; // ETF
   return true;
@@ -51,28 +52,18 @@ async function loadNameMap(): Promise<Map<string, string>> {
   return map;
 }
 
-async function readCandles(dir: string, symbol: string): Promise<Candle[] | null> {
-  try {
-    const raw = await fs.readFile(path.join(dir, `${symbol}.json`), 'utf8');
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data?.candles)) return null;
-    // 去除 TWSE 除權息日標記（"2026-05-29*" → "2026-05-29"），對齊 readCandleFile；
-    // 否則除權息當天個股 date 帶 * 會對不上 ^TWII 乾淨日期 → 誤判 stale 掉出掃描 / 指數錯位。
-    const candles = data.candles as Candle[];
-    for (const c of candles) if (typeof c.date === 'string' && c.date.endsWith('*')) c.date = c.date.slice(0, -1);
-    return candles;
-  } catch {
-    return null;
-  }
+async function readCandles(symbol: string): Promise<Candle[] | null> {
+  // 本地讀 data/candles/TW，Vercel 讀 Blob；readCandleFile 已自動去除 TWSE 除權息日標記 "*"
+  const file = await readCandleFile(symbol, 'TW');
+  return file?.candles ?? null;
 }
 
-/** 從本地 TW 候選清單建股票池（掃 candle 目錄全覆蓋 + stock-master 補名 + 排除存託憑證 DR）。 */
-async function loadTwUniverse(dir: string): Promise<StockEntry[]> {
-  const [files, nameMap, industryMap] = await Promise.all([fs.readdir(dir), loadNameMap(), fetchTWIndustryMap()]);
+/** 建台股股票池（universe = 已下載 K 線的 symbol：本地讀目錄、Vercel 讀 Blob list；只列檔名不讀內容）。 */
+async function loadTwUniverse(): Promise<StockEntry[]> {
+  const [symbols, nameMap, industryMap] = await Promise.all([listCandleSymbols('TW'), loadNameMap(), fetchTWIndustryMap()]);
   const out: StockEntry[] = [];
-  for (const f of files) {
-    if (!isCommonStock(f)) continue;
-    const symbol = f.replace(/\.json$/, '');
+  for (const symbol of symbols) {
+    if (!isCommonStock(symbol)) continue;
     const code = symbol.replace(/\.(TW|TWO)$/i, '');
     const name = nameMap.get(code) ?? symbol;
     // 排除存託憑證（外國企業 TDR，名稱含「DR」，非台股普通股；如 9103 美德醫DR）
@@ -92,21 +83,36 @@ async function loadTwUniverse(dir: string): Promise<StockEntry[]> {
  *                      沒有即時報價的個股 last 仍停在前一交易日 → 被新鮮度檢查當殭屍股跳過（正確：無即時資料不選）。
  */
 export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; intraday?: SanSeIntradayInput }): Promise<SanSeScanResult> {
-  const dir = getLocalCandleDir('TW');
   const intraday = opts?.intraday;
   const asOf = intraday ? undefined : opts?.asOfDate;
   const truncate = (cs: Candle[] | null): Candle[] | null =>
     cs && asOf ? cs.filter((c) => c.date <= asOf) : cs;
 
   const seen = new Set<string>();
-  const stocks = (await loadTwUniverse(dir)).filter((s) => {
+  let stocks = (await loadTwUniverse()).filter((s) => {
     if (seen.has(s.symbol)) return false;
     seen.add(s.symbol);
     return true;
   });
 
+  // 鐵則 #3 粗掃帽：單檔成交額索引把 universe 收斂到 top-N，再逐檔精讀（不全市場逐檔讀 Blob）。
+  //   asOf 回補用 as-of 計算；latest 用最新索引；索引缺 → degrade to full（對齊書本 prefilterByL2）。
+  const wantTopN = opts?.topN ?? SANSE_TURNOVER_TOP_N.TW;
+  let coarseRanks = new Map<string, number>();
+  try {
+    if (asOf) {
+      coarseRanks = await computeTurnoverRankAsOfDate('TW', stocks, asOf, wantTopN);
+    } else {
+      const tr = await readTurnoverRank('TW');
+      if (tr) coarseRanks = tr.ranks;
+    }
+  } catch { /* 索引讀取失敗 → degrade to full */ }
+  if (coarseRanks.size) {
+    stocks = stocks.filter((s) => coarseRanks.has(s.symbol));
+  }
+
   // 加權指數 → date→close map（行情日曆 + RS 基準）。盤中：把今日即時指數 append 成進行中那根。
-  let idxCandles = truncate(await readCandles(dir, INDEX_SYMBOL));
+  let idxCandles = truncate(await readCandles(INDEX_SYMBOL));
   if (!idxCandles || idxCandles.length === 0) throw new Error(`找不到大盤指數 ${INDEX_SYMBOL} 的本地K線`);
   // 盤中 append 前先記「封存前一交易日」= 指數封存最後一根；個股只有封存對齊到這天才貼今日（缺口防護）。
   const archivedLast = idxCandles[idxCandles.length - 1]?.date ?? '';
@@ -125,7 +131,7 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
   const BATCH = 100;
   for (let i = 0; i < stocks.length; i += BATCH) {
     const batch = stocks.slice(i, i + BATCH);
-    const loaded = await Promise.all(batch.map((s) => readCandles(dir, s.symbol)));
+    const loaded = await Promise.all(batch.map((s) => readCandles(s.symbol)));
 
     batch.forEach((s, k) => {
       let candles = truncate(loaded[k]);
@@ -178,8 +184,7 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
   }
 
   // 成交額粗篩：只保留 fresh universe 內「掃描日成交額」前 N 檔（對齊書本買法 prefilterByL2 的 TOP_N）。
-  const topN = opts?.topN ?? SANSE_TURNOVER_TOP_N.TW;
-  const ranks = topTurnoverRanks(freshTurnovers, topN);
+  const ranks = topTurnoverRanks(freshTurnovers, wantTopN);
   const evaluated = ranks.size;
   const turnoverFiltered = freshTurnovers.length - ranks.size;
   (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) => {
@@ -213,7 +218,7 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
     evaluated,
     staleSkipped,
     turnoverFiltered,
-    turnoverCap: topN,
+    turnoverCap: wantTopN,
     counts: { strict: results.strict.length, medium: results.medium.length, loose: results.loose.length },
     results,
     records: keptRecords,

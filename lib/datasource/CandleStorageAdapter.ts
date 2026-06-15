@@ -51,7 +51,7 @@ import { getFromCache, updateCache, triggerPreload } from './L1CandleCache';
 
 // ── Filesystem helpers ───────────────────────────────────────────────────────
 
-import { readFile, mkdir } from 'fs/promises';
+import { readFile, mkdir, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
@@ -126,6 +126,35 @@ export async function readCandleFile(
     return data;
   } catch {
     return null;
+  }
+}
+
+/**
+ * 列出某市場已存在 K 線的 symbol（不含 .json）。
+ * Local dev：讀 data/candles/{market} 目錄；Vercel：Blob list candles/{market}/ prefix。
+ * 全市場掃描取 universe 用 — 只列檔名、不讀內容（鐵則 #3：不逐檔讀 Blob 內容）。
+ */
+export async function listCandleSymbols(market: 'TW' | 'CN'): Promise<string[]> {
+  if (IS_VERCEL) {
+    const { list } = await import('@vercel/blob');
+    const out: string[] = [];
+    let cursor: string | undefined;
+    const prefix = `candles/${market}/`;
+    do {
+      const res = await list({ prefix, limit: 1000, cursor });
+      for (const b of res.blobs) {
+        const m = b.pathname.match(/([^/]+)\.json$/);
+        if (m) out.push(m[1]);
+      }
+      cursor = res.hasMore ? res.cursor : undefined;
+    } while (cursor);
+    return out;
+  }
+  try {
+    const files = await readdir(path.join(DATA_ROOT, market));
+    return files.filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
+  } catch {
+    return [];
   }
 }
 

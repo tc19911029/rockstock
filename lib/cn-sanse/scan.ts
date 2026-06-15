@@ -1,10 +1,10 @@
 // ============================================================
 // 三色資金 — 全市場掃描（陸股 / A股）。Server-only（讀本地檔）。
 // ============================================================
-import * as fs from 'fs/promises';
-import * as path from 'path';
 import type { Candle } from '@/types';
-import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { CN_STOCKS } from '@/lib/scanner/cnStocks';
+import { readTurnoverRank, computeTurnoverRankAsOfDate } from '@/lib/scanner/TurnoverRank';
 import { computeSanSe, evalLatest, type SanSeLevel } from './selectors';
 import { evalConditions, isReversalBuy, type ConditionReport } from './conditions';
 import { computeIndicators } from '@/lib/indicators';
@@ -137,14 +137,10 @@ function isExcluded(symbol: string, name: string): boolean {
   return false;
 }
 
-async function readCandles(dir: string, symbol: string): Promise<Candle[] | null> {
-  try {
-    const raw = await fs.readFile(path.join(dir, `${symbol}.json`), 'utf8');
-    const data = JSON.parse(raw);
-    return Array.isArray(data?.candles) ? (data.candles as Candle[]) : null;
-  } catch {
-    return null;
-  }
+async function readCandles(symbol: string): Promise<Candle[] | null> {
+  // 本地讀 data/candles/CN，Vercel 讀 Blob（Blob-aware adapter）
+  const file = await readCandleFile(symbol, 'CN');
+  return file?.candles ?? null;
 }
 
 /**
@@ -156,28 +152,44 @@ async function readCandles(dir: string, symbol: string): Promise<Candle[] | null
  *                      → 被既有新鮮度檢查當殭屍股跳過（正確：無即時資料不選）。
  */
 export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntradayInput; topN?: number }): Promise<SanSeScanResult> {
-  const root = process.cwd();
-  const dir = getLocalCandleDir('CN');
   const intraday = opts?.intraday;
   const asOf = intraday ? undefined : opts?.asOfDate;
   const truncate = (cs: Candle[] | null): Candle[] | null =>
     cs && asOf ? cs.filter((c) => c.date <= asOf) : cs;
 
-  // 股票清單
-  const listRaw = await fs.readFile(path.join(root, 'data/cn_stocklist.json'), 'utf8');
+  // 股票清單：用已進 git 的 CN_STOCKS（Vercel 也讀得到），取代本地 data/cn_stocklist.json
   const seen = new Set<string>();
-  const stocks: StockEntry[] = (JSON.parse(listRaw).stocks ?? []).filter((s: StockEntry) => {
+  let stocks: StockEntry[] = CN_STOCKS.filter((s) => {
     if (isExcluded(s.symbol, s.name)) return false;
     if (seen.has(s.symbol)) return false; // 清單有同代號重複（不同產業分類），去重
     seen.add(s.symbol);
     return true;
   });
 
+  // 鐵則 #3 粗掃帽：讀「單檔」成交額索引（Blob/FS，由書本 pipeline 每日維護）把 universe
+  // 收斂到 top-N，再逐檔精讀 → 不對全市場逐檔讀 Blob（避免 Vercel 超時）。
+  //   - asOf 回補：用 as-of 計算（讀候選 K 線算當時排名）
+  //   - latest：用最新索引（單檔讀）
+  //   - 索引缺（首次部署 / 本地無索引）→ 不收斂、degrade to full（對齊書本 prefilterByL2 降級行為）
+  const wantTopN = opts?.topN ?? SANSE_TURNOVER_TOP_N.CN;
+  let coarseRanks = new Map<string, number>();
+  try {
+    if (asOf) {
+      coarseRanks = await computeTurnoverRankAsOfDate('CN', stocks, asOf, wantTopN);
+    } else {
+      const tr = await readTurnoverRank('CN');
+      if (tr) coarseRanks = tr.ranks;
+    }
+  } catch { /* 索引讀取失敗 → degrade to full */ }
+  if (coarseRanks.size) {
+    stocks = stocks.filter((s) => coarseRanks.has(s.symbol));
+  }
+
   // 大盤指數 → date→close map（asOf 時截斷到該日；盤中時 append 今日即時指數）。
   // 上證(滬市基準 + 行情日曆) + 深證成指(深市基準)；深證缺檔時 fallback 上證。
-  let idxCandles = truncate(await readCandles(dir, INDEX_SYMBOL));
+  let idxCandles = truncate(await readCandles(INDEX_SYMBOL));
   if (!idxCandles || idxCandles.length === 0) throw new Error(`找不到大盤指數 ${INDEX_SYMBOL} 的本地K線`);
-  let idxCandlesSZ = truncate(await readCandles(dir, INDEX_SYMBOL_SZ));
+  let idxCandlesSZ = truncate(await readCandles(INDEX_SYMBOL_SZ));
   // 盤中：append 前先記下「封存前一交易日」= 指數封存最後一根。個股只有封存對齊到這天才貼今日，
   // 否則（停牌復牌 / 下載漏昨日）封存有缺口，貼今日會算出跨缺口的失真 MA/SUM → 用此 base 把它擋掉。
   const archivedLast = idxCandles[idxCandles.length - 1]?.date ?? '';
@@ -201,7 +213,7 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
   const BATCH = 100;
   for (let i = 0; i < stocks.length; i += BATCH) {
     const batch = stocks.slice(i, i + BATCH);
-    const loaded = await Promise.all(batch.map((s) => readCandles(dir, s.symbol)));
+    const loaded = await Promise.all(batch.map((s) => readCandles(s.symbol)));
 
     batch.forEach((s, k) => {
       let candles = truncate(loaded[k]);
@@ -267,8 +279,7 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
 
   // 成交額粗篩：只保留 fresh universe 內「掃描日成交額」前 N 檔（對齊書本買法 prefilterByL2 的 TOP_N）。
   // 三色全市場掃 → 取 top-N 剔除冷門薄量股；不足 N 檔則全收。evaluated 即入圍 universe 數。
-  const topN = opts?.topN ?? SANSE_TURNOVER_TOP_N.CN;
-  const ranks = topTurnoverRanks(freshTurnovers, topN);
+  const ranks = topTurnoverRanks(freshTurnovers, wantTopN);
   const evaluated = ranks.size;
   const turnoverFiltered = freshTurnovers.length - ranks.size;
   (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) => {
@@ -304,7 +315,7 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
     evaluated,
     staleSkipped,
     turnoverFiltered,
-    turnoverCap: topN,
+    turnoverCap: wantTopN,
     counts: { strict: results.strict.length, medium: results.medium.length, loose: results.loose.length },
     results,
     records: keptRecords,

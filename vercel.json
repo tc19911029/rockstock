@@ -134,6 +134,8 @@
     { "path": "/api/cron/fetch-etf-holdings", "schedule": "0 14 * * 1-5" },
     { "path": "/api/cron/fetch-etf-holdings", "schedule": "0 1 * * 2-6" },
     { "path": "/api/cron/update-etf-tracking", "schedule": "0 15 * * 1-5" },
-    { "path": "/api/cron/agents-daily-decide?market=TW", "schedule": "0 9 * * 1-5" }
+    { "path": "/api/cron/agents-daily-decide?market=TW", "schedule": "0 9 * * 1-5" },
+    { "path": "/api/cron/scan-tw-sanse", "schedule": "25 6 * * 1-5" },
+    { "path": "/api/cron/scan-cn-sanse", "schedule": "35 8 * * 1-5" }
   ]
 }
