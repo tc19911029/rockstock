@@ -158,6 +158,60 @@ export async function fetchJsonWithCurlFallback<T>(
 }
 
 /**
+ * 抓 UTF-8 文字（HTML / 純文字），Node fetch 失敗 *或內容沒過 validate* 就走 curl。
+ *
+ * 背景（2026-06-15）：Yahoo 籌碼分頁（tw.stock.yahoo.com/.../broker-trading）對 Node 端
+ * fetch 回 **200 OK 但只有 ~3KB 的反爬蟲 stub**（真頁是 ~340KB、含 `"brokerTrades":` JSON），
+ * 同一台機器的 curl 帶 Mozilla UA 卻拿得到完整頁。因為是 200 不是 4xx，純看 status 的
+ * fallback 不會觸發 → 主力分點 snapshot 每天 missed:250、籌碼集中度卡在舊日期。
+ *
+ * 所以這個 helper 多收一個 `validate(text)`：Node fetch 即使 200，內容沒過驗證
+ *（如「不含 brokerTrades marker」）也視為失敗、改走 curl（含本機代理 fallback）。
+ */
+export async function fetchTextWithCurlFallback(
+  url: string,
+  options: CurlFetchOptions & { validate?: (text: string) => boolean } = {},
+): Promise<{ text: string; source: CurlFetchSource }> {
+  const timeoutMs = options.timeoutMs ?? 15000;
+  const ua = options.headers?.['User-Agent'] ?? options.userAgent ?? DEFAULT_UA;
+  const headers: Record<string, string> = { 'User-Agent': ua, ...(options.headers ?? {}) };
+  const maxBuffer = options.maxBuffer ?? 50 * 1024 * 1024;
+  const validate = options.validate ?? (() => true);
+
+  // ── 1) Node fetch 第一試（內容要過 validate） ────────────────────────
+  let lastErr: unknown = null;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers });
+    if (res.ok) {
+      const text = await res.text();
+      if (validate(text)) return { text, source: 'node-fetch' };
+      lastErr = new Error(`node fetch 200 but content failed validation (anti-bot stub? ${text.length}B)`);
+    } else {
+      lastErr = new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    lastErr = err;
+  }
+
+  // ── 2) curl shell fallback（含本機代理 fallback） ─────────────────────
+  try {
+    const args = ['-s', '-4', '--max-time', String(Math.ceil(timeoutMs / 1000))];
+    for (const [k, v] of Object.entries(headers)) {
+      args.push('-H', `${k}: ${v}`);
+    }
+    args.push(url);
+    const { stdout } = await execCurlWithProxyFallback(args, maxBuffer);
+    if (!stdout || stdout.length === 0) throw new Error('curl returned empty stdout');
+    if (!validate(stdout)) throw new Error(`curl content failed validation (${stdout.length}B)`);
+    return { text: stdout, source: 'curl' };
+  } catch (err) {
+    const fetchMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    const curlMsg = err instanceof Error ? err.message : String(err);
+    throw new Error(`text fetch failed (${fetchMsg}); curl fallback also failed (${curlMsg})`);
+  }
+}
+
+/**
  * 抓 binary（任意 encoding 的 raw bytes），Node fetch 失敗就走 curl。
  * 用途：Big5 / GBK 編碼的 HTML（ISIN C_public.jsp）— Node fetch 在 dev runtime
  * 經常被 Cloudflare 阻成 timeout，但 curl 1-2s 內就能回。

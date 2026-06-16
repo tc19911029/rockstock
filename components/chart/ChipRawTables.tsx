@@ -17,6 +17,9 @@ type BrokerPt = { date: string; netDifference: number };
 type InstPt = { date: string } & InstDay;
 type TdccPt = { date: string } & TdccDay;
 type CandlePt = { date: string; close: number; volume: number };
+/** 跟看盤 app 對齊的「正式公式」集中度（HiStock 分點區間彙總算，見 /api/stock/concentration）。
+ *  只覆蓋最近數日的 5日(c5)/20日(c20)；其餘日期/週期 fallback 本檔自算近似值。 */
+type ConcPt = { date: string; c5: number | null; c20: number | null };
 
 const CONC_PERIODS = [1, 5, 10, 20, 60] as const;
 const INST_SUM_PERIODS = [5, 10, 20, 60] as const;
@@ -74,12 +77,22 @@ const thCls = () => 'px-0.5 py-1 font-medium whitespace-nowrap text-center overf
 const tdCls = (cls?: string) => `px-0.5 py-1 whitespace-nowrap text-center overflow-hidden text-ellipsis ${cls ?? 'text-foreground/85'}`;
 
 // ── 1. 主力分點集中度（逐日）──────────────────────────────────────────────
-function BrokerConcTable({ broker, candles, cursorDate }: { broker: BrokerPt[]; candles: CandlePt[]; cursorDate: string | null }) {
+function BrokerConcTable({ broker, candles, cursorDate, concExact }: { broker: BrokerPt[]; candles: CandlePt[]; cursorDate: string | null; concExact?: ConcPt[] }) {
   const [periodA, setPeriodA] = useState(5);
   const [periodB, setPeriodB] = useState(20);
   const rows = useMemo(() => {
     if (!broker.length || candles.length < 2) return [];
     const byDate = new Map(broker.map(d => [d.date, d.netDifference]));
+    // 跟看盤 app 對齊的正式集中度（5日/20日）；其餘日期/週期 fallback 本檔自算
+    const exByDate = new Map((concExact ?? []).map(p => [p.date, p]));
+    const pick = (i: number, period: number): number | null => {
+      // HiStock 有抓到的日期(在 exByDate)＋週期是 5/20 → 用正式公式值（含 null=當天分點未出「結算中」，
+      // 不退回舊式近似，免得跟看盤 app 對不上）。更早日期/其他週期 → 本檔自算。
+      const ex = exByDate.get(candles[i].date);
+      if (ex && period === 5) return ex.c5;
+      if (ex && period === 20) return ex.c20;
+      return conc(candles, byDate, i, period);
+    };
     const start = Math.max(0, candles.length - 120);
     const out: { date: string; brokerNet: number | null; cA: number | null; cB: number | null; price: number }[] = [];
     for (let i = start; i < candles.length; i++) {
@@ -87,13 +100,13 @@ function BrokerConcTable({ broker, candles, cursorDate }: { broker: BrokerPt[]; 
       out.push({
         date: d,
         brokerNet: byDate.has(d) ? byDate.get(d)! : null,
-        cA: conc(candles, byDate, i, periodA),
-        cB: conc(candles, byDate, i, periodB),
+        cA: pick(i, periodA),
+        cB: pick(i, periodB),
         price: candles[i].close,
       });
     }
     return out.reverse();
-  }, [broker, candles, periodA, periodB]);
+  }, [broker, candles, periodA, periodB, concExact]);
   const hiRef = useScrollToHighlight(cursorDate);
   if (!rows.length) return null;
   return (
@@ -325,12 +338,14 @@ export interface ChipRawTablesProps {
   tdcc?: TdccPt[];
   candles: CandlePt[];
   cursorDate: string | null;
+  /** 跟看盤 app 對齊的正式集中度（HiStock 分點區間彙總，最近數日 5日/20日） */
+  concExact?: ConcPt[];
 }
 
-export default function ChipRawTables({ broker, inst, tdcc, candles, cursorDate }: ChipRawTablesProps) {
+export default function ChipRawTables({ broker, inst, tdcc, candles, cursorDate, concExact }: ChipRawTablesProps) {
   return (
     <div>
-      <BrokerConcTable broker={broker ?? []} candles={candles} cursorDate={cursorDate} />
+      <BrokerConcTable broker={broker ?? []} candles={candles} cursorDate={cursorDate} concExact={concExact} />
       <InstTable inst={inst ?? []} cursorDate={cursorDate} />
       <HolderDistTable tdcc={tdcc ?? []} cursorDate={cursorDate} />
     </div>

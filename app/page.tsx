@@ -531,6 +531,19 @@ function HomePage() {
     if (!ticker) setChips(null);
   }, [ticker]);
 
+  // 主力分點集中度「跟看盤 app 對齊版」（最近數日 5日/20日，HiStock 分點區間彙總算正式公式）。
+  // 與 /api/stock/chips 分開 lazy fetch（HiStock 多視窗抓取較慢，不阻塞籌碼面板其餘三表）。
+  const [concExact, setConcExact] = useState<Array<{ date: string; c5: number | null; c20: number | null }>>([]);
+  useEffect(() => {
+    if (!chipFetchKey || !/^\d{4,5}(\.(TW|TWO))?$/i.test(chipFetchKey)) { setConcExact([]); return; }
+    const ctrl = new AbortController();
+    fetch(`/api/stock/concentration?symbol=${encodeURIComponent(chipFetchKey)}&recentN=10`, { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(json => { if (json.ok) setConcExact(json.conc ?? []); })
+      .catch(err => { if (err.name !== 'AbortError') console.warn('[concentration] load failed:', err); });
+    return () => ctrl.abort();
+  }, [chipFetchKey]);
+
   // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
   // 陸股走 /cn-sanse、台股走 /tw-sanse（同一份 SanSeChartPayload 形狀）：圖層由各 toggle 控制。
   // conditions 兩市場都寫（三色模式時中間條件/訊號 tab 用，由 showSanseView 控制）。
@@ -792,15 +805,17 @@ function HomePage() {
     const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
     const brokerByDate = new Map(chips.broker.map(d => [d.date, d.netDifference]));
     const instByDate = new Map(chips.inst.map(d => [d.date, d.total]));
-    const ev = stealEvaluateAt(allCandles, brokerByDate, instByDate, idx);
+    // 集中度跟看盤 app + 顯示表統一：用 FinMind 正式公式（concExact）；該日沒載到才退回簡化版
+    const conc5ByDate = new Map(concExact.map(p => [p.date, p.c5]));
+    const ev = stealEvaluateAt(allCandles, brokerByDate, instByDate, idx, undefined, conc5ByDate);
     if (!ev) return null;
     const rows: CondRow[] = [
       { icon: '①', name: '股價在跌', value: `近5日${ev.drop5 >= 0 ? '+' : ''}${ev.drop5.toFixed(1)}%`, pass: ev.isDropping, tip: '近5日在回檔（跌幅夠）才是「偷買」場景' },
-      { icon: '②', name: '集中度在爬', value: `${ev.conc5prev.toFixed(1)}→${ev.conc5.toFixed(1)}%`, pass: ev.isConcRising, tip: '5日主力分點集中度>0、比5日前高、且不爆量＝慢慢集中' },
+      { icon: '②', name: '集中度在爬', value: `${ev.conc5prev.toFixed(1)}→${ev.conc5.toFixed(1)}%`, pass: ev.isConcRising, tip: '5日主力分點集中度比5日前高（回升中，含還沒翻正）、未過上限、不爆量＝慢慢集中' },
       { icon: '③', name: '法人連買', value: `${ev.instConsecDays}天 ${ev.instSumK > 0 ? '+' : ''}${ev.instSumK.toLocaleString()}張`, pass: ev.isInstBuying, tip: '三大法人合計連買≥2天且近5日淨買超>0' },
     ];
     return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit };
-  }, [market, chips?.broker, chips?.inst, currentIndex, allCandles]);
+  }, [market, chips?.broker, chips?.inst, currentIndex, allCandles, concExact]);
 
   // 走圖游標當天日期（三張共用 CMoney 籌碼表的高亮基準 + 持股分布取週）
   const cursorDate = allCandles.length
@@ -813,6 +828,7 @@ function HomePage() {
     tdcc: chips?.tdcc,
     candles: allCandles,
     cursorDate,
+    concExact,
   };
 
   const sidebarContent = (

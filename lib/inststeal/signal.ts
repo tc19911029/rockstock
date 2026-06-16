@@ -54,15 +54,25 @@ export function evaluateAt(
   instByDate: Map<string, number>,
   t: number,
   params: InstStealParams = DEFAULT_PARAMS,
+  /** 跟看盤 app 對齊的「正式集中度」(FinMind 區間前15排名)。給了就用它(統一條件面板/掃描/顯示)，
+   *  不給則退回主力分點淨額÷量的簡化版(向下相容、回測舊資料用)。 */
+  conc5ByDate?: Map<string, number | null>,
+  /** 嚴格模式（掃描用）：conc5ByDate 該日缺 FinMind 值 → 直接略過該股（回 null），
+   *  不退回簡化版（避免「FinMind 限流時靜默選到舊公式的股」）。條件面板走圖往回看用 false。 */
+  strictConc = false,
 ): InstStealEval | null {
-  const { dropWin, dropMax, concWin, concRiseBack, concCap, volRatioMax, instWin, instConsecMin } = params;
+  const { dropWin, dropMax, concWin, concRiseBack, concCap, volRatioMax, instWin, instConsecMin, concRequirePositive } = params;
   // 往回需要：concWin + concRiseBack（算 concRiseBack 日前的集中度）、20（量比）、dropWin、instWin
   const need = Math.max(concWin + concRiseBack, 20, dropWin, instWin);
   if (t < need || t >= candles.length) return null;
-  if (!brokerByDate.has(candles[t].date)) return null;
 
-  const conc5 = concentration(candles, brokerByDate, t, concWin);
-  const conc5prev = concentration(candles, brokerByDate, t - concRiseBack, concWin);
+  // 集中度：優先 FinMind 正式公式（跟看盤 app + 顯示表統一）。strict=該日缺就 null；
+  // 非 strict 才退回主力分點淨額÷量的簡化版（走圖往回看超出 FinMind 視窗 / 回測舊資料）。
+  const fmConc5 = conc5ByDate?.get(candles[t].date);
+  const fmConc5prev = conc5ByDate?.get(candles[t - concRiseBack].date);
+  const noFallback = strictConc && !!conc5ByDate;
+  const conc5 = fmConc5 != null ? fmConc5 : (noFallback ? null : concentration(candles, brokerByDate, t, concWin));
+  const conc5prev = fmConc5prev != null ? fmConc5prev : (noFallback ? null : concentration(candles, brokerByDate, t - concRiseBack, concWin));
   if (conc5 == null || conc5prev == null) return null;
 
   // 法人 instWin 日合計淨買超 + 連買天數（資料任一日缺 → 不評估）
@@ -86,7 +96,8 @@ export function evaluateAt(
   const drop5 = (candles[t].close / candles[t - dropWin].close - 1) * 100;
 
   const isDropping = drop5 < dropMax;
-  const isConcRising = conc5 > 0 && conc5 > conc5prev && conc5 <= concCap && volRatio < volRatioMax;
+  // concRequirePositive=false（預設）：集中度只要比 concRiseBack 日前高即算「在爬」，即使仍為負（少賣＝回升中）。
+  const isConcRising = (!concRequirePositive || conc5 > 0) && conc5 > conc5prev && conc5 <= concCap && volRatio < volRatioMax;
   const isInstBuying = instSum > 0 && instConsecDays >= instConsecMin;
 
   return {
@@ -111,11 +122,16 @@ export function evaluateLatest(
   brokerByDate: Map<string, number>,
   instByDate: Map<string, number>,
   params: InstStealParams = DEFAULT_PARAMS,
+  conc5ByDate?: Map<string, number | null>,
+  strictConc = false,
 ): InstStealEval | null {
   const need = Math.max(params.concWin + params.concRiseBack, 20, params.dropWin, params.instWin);
+  // strict：該日有集中度 = FinMind 有；非 strict：FinMind 有 或 broker 有（會退回 broker）
+  const hasConc = (d: string) =>
+    strictConc && conc5ByDate ? conc5ByDate.get(d) != null : (conc5ByDate?.get(d) != null) || brokerByDate.has(d);
   for (let t = candles.length - 1; t >= need; t--) {
-    if (brokerByDate.has(candles[t].date) && instByDate.has(candles[t].date)) {
-      return evaluateAt(candles, brokerByDate, instByDate, t, params);
+    if (hasConc(candles[t].date) && instByDate.has(candles[t].date)) {
+      return evaluateAt(candles, brokerByDate, instByDate, t, params, conc5ByDate, strictConc);
     }
   }
   return null;

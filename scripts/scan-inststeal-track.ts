@@ -12,8 +12,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-const INST_DIR = path.join(process.cwd(), 'data/chips/TW/inst');
-const BROKER_DIR = path.join(process.cwd(), 'data/chips/TW/broker');
 const TWII = path.join(process.cwd(), 'data/candles/TW/^TWII.json');
 
 async function tradingDays(n: number, upto?: string): Promise<string[]> {
@@ -23,11 +21,6 @@ async function tradingDays(n: number, upto?: string): Promise<string[]> {
   return dates.slice(-n);
 }
 
-async function codesIn(dir: string): Promise<Set<string>> {
-  const files = (await fs.readdir(dir)).filter(f => /^\d{4,}\.json$/.test(f));
-  return new Set(files.map(f => f.replace('.json', '')));
-}
-
 async function main() {
   const args = process.argv.slice(2);
   const dateArg = args.includes('--date') ? args[args.indexOf('--date') + 1] : null;
@@ -35,15 +28,13 @@ async function main() {
   const fromArg = args.includes('--from') ? args[args.indexOf('--from') + 1] : null;
   const toArg = args.includes('--to') ? args[args.indexOf('--to') + 1] : null;
 
-  // Y 需主力分點 + 法人兩份都有 → 池子取交集
-  const instCodes = await codesIn(INST_DIR);
-  const brokerCodes = await codesIn(BROKER_DIR);
-  const both = new Set([...instCodes].filter(c => brokerCodes.has(c)));
+  // 池子＝當日成交額前 500（與 W/X 軌一致；不再用 broker∩inst 限制）。
+  // scanInstSteal 內部仍需 broker+inst 齊備才評估該股，缺資料自動略過。
   const { TaiwanScanner } = await import('../lib/scanner/TaiwanScanner');
+  const { computeTurnoverRankAsOfDate } = await import('../lib/scanner/TurnoverRank');
   const scanner = new TaiwanScanner();
   const allStocks = await scanner.getStockList();
-  const stocks = allStocks.filter((s: { symbol: string }) => both.has(s.symbol.split('.')[0]));
-  console.log(`股票池：主力分點∩法人 ${stocks.length} 檔（全市場 ${allStocks.length}）`);
+  console.log(`全市場 ${allStocks.length} 檔 → 每日取「成交額前 500」當池子（上市+上櫃）`);
 
   let dates: string[];
   if (dateArg) dates = [dateArg];
@@ -58,6 +49,9 @@ async function main() {
 
   for (const date of dates) {
     try {
+      // 當日成交額前 500（point-in-time，歷史重跑用當時的前 500，不偷看今天）
+      const rankMap = await computeTurnoverRankAsOfDate('TW', allStocks, date, 500);
+      const stocks = allStocks.filter((s: { symbol: string }) => rankMap.has(s.symbol));
       const results = await scanner.scanInstSteal(stocks, date, 'long', 15);
       await injectForwardPerf(results, date, `Y-track:${date}`);
       await saveScanSession({

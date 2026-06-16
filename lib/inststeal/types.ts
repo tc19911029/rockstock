@@ -6,7 +6,8 @@
  *
  * 三條件同時成立（使用者描述的「最初版」定義）：
  *   1. 股價在跌（近 dropWin 日報酬 < dropMax）
- *   2. 5 日籌碼集中度「慢慢在增加」（主力分點集中度 > 0 且比 concRiseBack 日前高、未爆量、未過高）
+ *   2. 5 日籌碼集中度「慢慢在增加」（主力分點集中度比 concRiseBack 日前高、未爆量、未過高；
+ *      concRequirePositive=true 時另需 > 0）
  *   3. 法人陸續買進（三大法人合計近 instWin 日淨買超 > 0 且連買 ≥ instConsecMin 天）
  *
  * 定位＝看盤觀察清單，不接主掃描/排行榜/scan-parity 合約。
@@ -36,6 +37,12 @@ export interface InstStealParams {
   instWin: number;
   /** 法人合計「連買」最少天數（陸續買進） */
   instConsecMin: number;
+  /** 集中度「在爬」是否要求 > 0（true=必須翻正才算；
+   *  false=只要比 concRiseBack 日前高、即使仍為負（還在賣但少賣＝慢慢回升）也算在爬）。
+   *  2026-06-15 使用者決議改 false：放寬讓「集中度回升中但還沒翻正」也入選（如 6691 @ 06-10）。
+   *  ⚠️ 誠實附記：放寬後回測選股多一倍但品質下降（持20日 超額 +0.72%→+0.10%、贏面 56%→54%、
+   *     持10日超額由正翻負），見 scripts/compare-inststeal-concpos.ts。屬看盤觀察清單、非自動買進依據。 */
+  concRequirePositive: boolean;
 }
 
 export const DEFAULT_PARAMS: InstStealParams = {
@@ -47,6 +54,7 @@ export const DEFAULT_PARAMS: InstStealParams = {
   volRatioMax: 2,
   instWin: 5,
   instConsecMin: 2,
+  concRequirePositive: false, // 2026-06-15 放寬：負但回升中也算「在爬」
 };
 
 /** 單檔命中結果 */

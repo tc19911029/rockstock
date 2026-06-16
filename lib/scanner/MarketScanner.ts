@@ -2030,11 +2030,14 @@ export abstract class MarketScanner {
 
     const { evaluateLatest } = await import('@/lib/inststeal/signal');
     const { DEFAULT_PARAMS } = await import('@/lib/inststeal/types');
+    const { computeConc5Map } = await import('@/lib/chips/chipConcentration');
     const { promises: fs } = await import('fs');
     const path = await import('path');
     const BROKER_DIR = path.join(process.cwd(), 'data/chips/TW/broker');
     const INST_DIR = path.join(process.cwd(), 'data/chips/TW/inst');
     const minBars = Math.max(DEFAULT_PARAMS.concWin + DEFAULT_PARAMS.concRiseBack, 20, DEFAULT_PARAMS.dropWin, DEFAULT_PARAMS.instWin) + 1;
+    // 集中度單一事實 = FinMind 正式公式（跟看盤 app + 顯示表同一套）；只 TTL 真正的今天那根
+    const realToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 
     const candidates = this.prefilterByL2(stocks, 'scanInstSteal');
     type Scored = { result: StockScanResult; consec: number; conc5: number };
@@ -2066,7 +2069,16 @@ export abstract class MarketScanner {
           );
         } catch { return null; }
 
-        const ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS);
+        // 兩階段（省 FinMind 配額）：先用便宜條件(在跌+法人連買)粗篩，過了才抓 FinMind 集中度精算。
+        const cheap = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS);
+        if (!cheap || !cheap.isDropping || !cheap.isInstBuying) return null;
+        // 通過粗篩 → FinMind 正式集中度（跟看盤 app + 顯示表同一套公式）重評「集中度在爬」
+        const conc5Map = await computeConc5Map(code, candles, {
+          win: DEFAULT_PARAMS.concWin,
+          count: DEFAULT_PARAMS.concRiseBack + 2,
+          todayDate: realToday,
+        });
+        const ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS, conc5Map, true /* strict: FinMind 缺就略過、不用舊公式 */);
         if (!ev || !ev.isHit) return null;
 
         const lastIdx = candles.length - 1;
