@@ -29,9 +29,9 @@ export interface InstStealParams {
   concWin: number;
   /** 與「幾日前」比，判斷集中度「在增加」 */
   concRiseBack: number;
-  /** 集中度上限%（過高=隔日沖鎖股，剔除） */
+  /** 集中度警示門檻%（> 此值＝過高/疑隔日沖鎖股；2026-06-16 改「警示」不再剔除） */
   concCap: number;
-  /** 量比上限（今日量 ÷ 20日均量），> 此值=爆量，剔除（維持「慢慢」累積） */
+  /** 量比警示門檻（今日量 ÷ 20日均量），≥ 此值＝爆量；2026-06-16 改「警示」不再剔除 */
   volRatioMax: number;
   /** 法人近 N 日累計淨買超的回看天數 */
   instWin: number;

@@ -64,6 +64,8 @@ export interface StockScanResult {
   instStealConc5Prev?: number;       // concRiseBack 日前的 5 日集中度%（看「在增加」）
   instStealInstK?: number;           // 三大法人 5 日淨買超(張)
   instStealConsec?: number;          // 三大法人合計連續買超天數（排序主鍵）
+  instStealVolumeWarn?: boolean;     // ⚠️ 爆量（今日量≥2倍20日均量；2026-06-16改警示不剔除）
+  instStealConcHighWarn?: boolean;   // ⚠️ 集中度過高(>12%，疑隔日沖鎖股；改警示不剔除)
   // ── 33 種贏家圖像 ──────────────────────────────────────────────────────
   winnerBearishPatterns?: string[];   // 多轉空圖像名稱
   winnerBullishPatterns?: string[];   // 空轉多圖像名稱

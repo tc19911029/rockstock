@@ -453,6 +453,18 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                               法人連買{consec}天
                             </span>
                           )}
+                          {r.instStealVolumeWarn && (
+                            <span className="text-[9px] font-bold ml-1 px-1 rounded-sm bg-amber-500/20 text-amber-400"
+                              title="爆量：今日量≥2倍20日均量。可能是隔日沖/追高，不是慢慢吸籌，留意">
+                              ⚠️爆量
+                            </span>
+                          )}
+                          {r.instStealConcHighWarn && (
+                            <span className="text-[9px] font-bold ml-1 px-1 rounded-sm bg-amber-500/20 text-amber-400"
+                              title="集中度過高(>12%)：疑隔日沖鎖股，同漲停買不到、易被洗，留意">
+                              ⚠️集中度高
+                            </span>
+                          )}
                         </>
                       );
                     }

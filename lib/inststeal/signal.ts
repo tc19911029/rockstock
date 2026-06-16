@@ -20,6 +20,9 @@ export interface InstStealEval {
   isConcRising: boolean;  // 條件2：集中度慢慢增加
   isInstBuying: boolean;  // 條件3：法人陸續買進
   isHit: boolean;
+  // 2026-06-16 使用者決議：爆量/集中度過高不再剔除，改成「警示」（仍算命中，旗標提醒）
+  volumeWarn: boolean;    // ⚠️ 爆量（今日量 ≥ volRatioMax × 20日均量）
+  concHighWarn: boolean;  // ⚠️ 集中度過高（> concCap，疑隔日沖鎖股）
 }
 
 /** 在 candles 第 t 根算「結束於 t、長度 w」的主力分點集中度%（資料不齊回 null） */
@@ -97,8 +100,11 @@ export function evaluateAt(
 
   const isDropping = drop5 < dropMax;
   // concRequirePositive=false（預設）：集中度只要比 concRiseBack 日前高即算「在爬」，即使仍為負（少賣＝回升中）。
-  const isConcRising = (!concRequirePositive || conc5 > 0) && conc5 > conc5prev && conc5 <= concCap && volRatio < volRatioMax;
+  // 2026-06-16：爆量(volRatioMax)、集中度過高(concCap) 不再當剔除條件，改成警示 → 仍算「在爬/命中」。
+  const isConcRising = (!concRequirePositive || conc5 > 0) && conc5 > conc5prev;
   const isInstBuying = instSum > 0 && instConsecDays >= instConsecMin;
+  const volumeWarn = volRatio >= volRatioMax;   // ⚠️ 爆量（原本會剔除，現在只警示）
+  const concHighWarn = conc5 > concCap;          // ⚠️ 集中度過高/疑隔日沖鎖股（只警示）
 
   return {
     date: candles[t].date,
@@ -113,6 +119,8 @@ export function evaluateAt(
     isConcRising,
     isInstBuying,
     isHit: isDropping && isConcRising && isInstBuying,
+    volumeWarn,
+    concHighWarn,
   };
 }
 

@@ -811,7 +811,7 @@ function HomePage() {
     if (!ev) return null;
     const rows: CondRow[] = [
       { icon: '①', name: '股價在跌', value: `近5日${ev.drop5 >= 0 ? '+' : ''}${ev.drop5.toFixed(1)}%`, pass: ev.isDropping, tip: '近5日在回檔（跌幅夠）才是「偷買」場景' },
-      { icon: '②', name: '集中度在爬', value: `${ev.conc5prev.toFixed(1)}→${ev.conc5.toFixed(1)}%`, pass: ev.isConcRising, tip: '5日主力分點集中度比5日前高（回升中，含還沒翻正）、未過上限、不爆量＝慢慢集中' },
+      { icon: '②', name: '集中度在爬', value: `${ev.conc5prev.toFixed(1)}→${ev.conc5.toFixed(1)}%${ev.concHighWarn ? ' ⚠️過高' : ''}${ev.volumeWarn ? ' ⚠️爆量' : ''}`, pass: ev.isConcRising, tip: '5日主力分點集中度比5日前高（回升中，含還沒翻正）＝慢慢集中。⚠️爆量(≥2倍量)/集中度過高(>12%隔日沖鎖股)現在只警示、不剔除' },
       { icon: '③', name: '法人連買', value: `${ev.instConsecDays}天 ${ev.instSumK > 0 ? '+' : ''}${ev.instSumK.toLocaleString()}張`, pass: ev.isInstBuying, tip: '三大法人合計連買≥2天且近5日淨買超>0' },
     ];
     return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit };

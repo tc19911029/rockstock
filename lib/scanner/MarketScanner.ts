@@ -2100,6 +2100,8 @@ export abstract class MarketScanner {
           instStealConc5Prev: ev.conc5prev,
           instStealInstK: ev.instSumK,
           instStealConsec: ev.instConsecDays,
+          instStealVolumeWarn: ev.volumeWarn,
+          instStealConcHighWarn: ev.concHighWarn,
           dataFreshness: { lastCandleDate: fetchResult.lastCandleDate, daysStale: fetchResult.staleDays, source: fetchResult.source },
         };
         return { result, consec: ev.instConsecDays, conc5: ev.conc5 };
