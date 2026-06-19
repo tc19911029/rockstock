@@ -142,15 +142,19 @@ function RankBadge({ rank }: { rank: number }) {
 function RotationCell({ r }: { r?: ThemeRotation | null }) {
   // 名次怎麼變：5天前第幾名 → 今天第幾名（最白話）
   const move = r?.rankPrev != null && r?.rankNow != null ? `${r.rankPrev}→${r.rankNow}名` : '';
-  const d = r?.rankDelta;
-  const delta = d != null && d !== 0 ? `（${d > 0 ? '爬' + d : '掉' + -d}名）` : '';
   if (r?.bucket === 'in') {
     return <span className="text-xs whitespace-nowrap" title="名次往上爬＝資金流進（描述用，非買賣訊號）">🟢 流進 <span className="text-muted-foreground/70">{move}</span></span>;
   }
   if (r?.bucket === 'out') {
     return <span className="text-xs whitespace-nowrap" title="名次往下掉＝資金流出（描述用，非買賣訊號）">🔴 流出 <span className="text-muted-foreground/70">{move}</span></span>;
   }
-  return <span className="text-xs text-muted-foreground/45 whitespace-nowrap">{move ? `${move}${delta}` : '—'}</span>;
+  // 名次沒大變（資金沒明顯進出）：直接寫目前是第幾名（最強前3名加🔥）
+  if (r?.rankNow != null) {
+    return <span className="text-xs whitespace-nowrap text-muted-foreground/65" title="名次沒大變動，資金沒明顯進出（維持原本強弱）">
+      {r.rankNow <= 3 ? '🔥 ' : ''}第{r.rankNow}名
+    </span>;
+  }
+  return <span className="text-xs text-muted-foreground/45 whitespace-nowrap">—</span>;
 }
 
 // 熱度小橫條：視覺強度 + 數字（0-100）
