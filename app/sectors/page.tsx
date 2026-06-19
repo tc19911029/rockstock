@@ -22,10 +22,8 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { bullBearClass } from '@/lib/format';
 import { PERF_PERIODS } from '@/lib/themes/perfPeriods';
 
-// 成分股排序選項（inline 自訂，對齊績效欄位 1~10,20 日）
-const MEMBER_SORT_OPTIONS = PERF_PERIODS.map((p) => ({
-  id: `r${p}`, label: `${p}日`, tip: `按過去 ${p} 日漲幅排序`, defaultDir: 'desc' as SortDir,
-}));
+// 績效格預設只看的關鍵天數（其餘點「展開」才出現）
+const KEY_PERIODS = [1, 5, 10, 20];
 const periodIndex = (id: string) => (PERF_PERIODS as readonly number[]).indexOf(Number(id.slice(1)));
 
 // 題材本身的排序選項（inline）
@@ -175,68 +173,83 @@ function HeatBar({ v }: { v: number }) {
   );
 }
 
-// 成分股績效表（一排一檔 + 過去 1~10,20 日漲幅）。可排序（點欄位/排序鈕）、左欄凍結、橫向捲。
+// 成分股績效表。預設只看 1/5/10/20 日（可展開全部）；可排序；每列框出「發動最猛的那段」。
 function PerfGrid({ members }: {
   members: Array<{ code: string; name: string; rets?: (number | null)[]; isLimitUp?: boolean; isNotice?: boolean }>;
 }) {
+  const [showAll, setShowAll] = useState(false);
   const [sortId, setSortId] = useState('r5');
   const [dir, setDir] = useState<SortDir>('desc');
+  const periods = showAll ? [...PERF_PERIODS] : KEY_PERIODS;
   const activeIdx = periodIndex(sortId);
+  const idxOf = (p: number) => (PERF_PERIODS as readonly number[]).indexOf(p);
 
-  const sorted = applySort(
-    members, sortId, dir,
-    (m, id) => m.rets?.[periodIndex(id)] ?? null,
-    { missingLast: true },
-  );
+  const sortOpts = periods.map((p) => ({ id: `r${p}`, label: `${p}日`, tip: `按過去 ${p} 日漲幅排序`, defaultDir: 'desc' as SortDir }));
+  const sorted = applySort(members, sortId, dir, (m, id) => m.rets?.[periodIndex(id)] ?? null, { missingLast: true });
+  const sortBy = (id: string) => { if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc'); else { setSortId(id); setDir('desc'); } };
 
-  const sortBy = (id: string) => {
-    if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc');
-    else { setSortId(id); setDir('desc'); }
+  // 「發動最猛的那段」= 目前顯示天數中，每天平均漲最兇的那一格（短線剛噴 vs 長線累積）
+  const hottestPeriod = (m: { rets?: (number | null)[] }): number | null => {
+    let best = 0, bp: number | null = null;
+    for (const p of periods) { const v = m.rets?.[idxOf(p)]; if (v != null && v > 0 && v / p > best) { best = v / p; bp = p; } }
+    return bp;
   };
 
   return (
     <div className="bg-muted/15 border-t border-border">
-      <div className="px-3 py-2">
-        <SortControl options={MEMBER_SORT_OPTIONS} value={sortId} dir={dir}
+      <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
+        <SortControl options={sortOpts} value={sortId} dir={dir}
           onChange={(id, d) => { setSortId(id); setDir(d); }} leading="排序" size="compact" />
+        <button type="button" onClick={() => setShowAll((s) => !s)}
+          className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30">
+          {showAll ? '收合（只看 1/5/10/20）' : '展開全部天數'}
+        </button>
+        <span className="text-[10px] text-muted-foreground/45">🔸框＝發動最猛那段</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-xs min-w-[720px]">
+        <table className={`w-full text-xs ${showAll ? 'min-w-[720px]' : ''}`}>
           <thead>
             <tr className="text-muted-foreground/50 text-[10px] border-b border-border/40">
               <th className="text-left font-medium pl-3 pr-2 py-2 sticky left-0 bg-card z-10">個股</th>
-              {PERF_PERIODS.map((p, i) => (
-                <th key={p}
-                  onClick={() => sortBy(`r${p}`)}
-                  className={`text-right font-medium px-2 py-2 tabular-nums cursor-pointer select-none hover:text-foreground ${i === activeIdx ? 'text-sky-400' : ''}`}>
-                  {p}日{i === activeIdx ? (dir === 'desc' ? ' ▼' : ' ▲') : ''}
+              {periods.map((p) => (
+                <th key={p} onClick={() => sortBy(`r${p}`)}
+                  className={`text-right font-medium px-2 py-2 tabular-nums cursor-pointer select-none hover:text-foreground ${idxOf(p) === activeIdx ? 'text-sky-400' : ''}`}>
+                  {p}日{idxOf(p) === activeIdx ? (dir === 'desc' ? ' ▼' : ' ▲') : ''}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {sorted.map((m) => (
-              <tr key={m.code} className="border-b border-border/25 last:border-0 hover:bg-muted/40 transition-colors">
-                <td className="pl-3 pr-2 py-1.5 sticky left-0 bg-card">
-                  <div className="flex items-center gap-1.5 whitespace-nowrap">
-                    <Link href={`/?load=${m.code}`} className="hover:text-sky-400 inline-flex items-center gap-1.5">
-                      <span className="text-foreground/90">{m.name}</span>
-                      <span className="text-muted-foreground/50">{m.code}</span>
-                    </Link>
-                    {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
-                    {m.isNotice && <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">注意</span>}
-                    <Link href={`/?load=${m.code}`} title="走圖"
-                      className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-sky-400 hover:border-sky-400/40">走圖</Link>
-                    <AddWatchBtn code={m.code} name={m.name} />
-                  </div>
-                </td>
-                {PERF_PERIODS.map((p, i) => (
-                  <td key={p} className={`text-right px-2 py-1.5 font-mono tabular-nums ${i === activeIdx ? 'bg-sky-500/5' : ''}`}>
-                    <Pct v={m.rets?.[i] ?? null} />
+            {sorted.map((m) => {
+              const hot = hottestPeriod(m);
+              return (
+                <tr key={m.code} className="border-b border-border/25 last:border-0 hover:bg-muted/40 transition-colors">
+                  <td className="pl-3 pr-2 py-1.5 sticky left-0 bg-card">
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                      <Link href={`/?load=${m.code}`} className="hover:text-sky-400 inline-flex items-center gap-1.5">
+                        <span className="text-foreground/90">{m.name}</span>
+                        <span className="text-muted-foreground/50">{m.code}</span>
+                      </Link>
+                      {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
+                      {m.isNotice && <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">注意</span>}
+                      <Link href={`/?load=${m.code}`} title="走圖"
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-sky-400 hover:border-sky-400/40">走圖</Link>
+                      <AddWatchBtn code={m.code} name={m.name} />
+                    </div>
                   </td>
-                ))}
-              </tr>
-            ))}
+                  {periods.map((p) => {
+                    const i = idxOf(p);
+                    return (
+                      <td key={p} className={`text-right px-2 py-1.5 font-mono tabular-nums ${i === activeIdx ? 'bg-sky-500/5' : ''}`}>
+                        <span className={p === hot ? 'ring-1 ring-amber-400/50 rounded px-1 py-0.5' : ''}>
+                          <Pct v={m.rets?.[i] ?? null} />
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -315,23 +328,60 @@ function SourceTag({ source }: { source: HotTheme['source'] }) {
   return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-muted text-muted-foreground/70 align-middle">{label}</span>;
 }
 
+function HotThemeTable({ rows, rankBase, expanded, setExpanded }: {
+  rows: HotTheme[]; rankBase: number; expanded: string | null; setExpanded: (s: string | null) => void;
+}) {
+  return (
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-muted-foreground text-xs border-b border-border bg-secondary/30">
+              <th className="text-left py-2.5 pl-3 pr-2 font-medium">#</th>
+              <th className="text-left py-2.5 pr-3 font-medium">題材</th>
+              <th className="text-right py-2.5 px-2 font-medium">熱門數</th>
+              <th className="text-right py-2.5 px-2 font-medium">平均漲</th>
+              <th className="text-right py-2.5 px-2 font-medium">最強漲</th>
+              <th className="text-right py-2.5 px-2 font-medium">熱度</th>
+              <th className="text-left py-2.5 pl-2 pr-3 font-medium">代表股</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t, i) => (
+              <HotRow key={t.theme} t={t} rank={rankBase + i + 1}
+                expanded={expanded === t.theme}
+                onToggle={() => setExpanded(expanded === t.theme ? null : t.theme)} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function HotView({ hot, error, expanded, setExpanded }: {
   hot: HotFile | null; error: string | null;
   expanded: string | null; setExpanded: (s: string | null) => void;
 }) {
   const [sortId, setSortId] = useState('score');
   const [dir, setDir] = useState<SortDir>('desc');
+  const [showCoarse, setShowCoarse] = useState(false);
   const themes = hot
     ? applySort(hot.themes, sortId, dir,
         (t, id) => id === 'score' ? t.score : id === 'count' ? t.hotCount : id === 'avg' ? t.avgChange : id === 'max' ? t.maxChange : null,
         { missingLast: true })
     : [];
+  // 細題材（概念）排上面；廣義「產業別/未分類」收進可展開區（雜訊）
+  const concept = themes.filter((t) => t.source === 'concept');
+  const coarse = themes.filter((t) => t.source !== 'concept');
+  const coarseHot = coarse.reduce((a, t) => a + t.hotCount, 0);
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        先掃全市場找今天在熱的股（漲幅＋爆量{hot?.instFresh ? '＋法人買超' : ''}），再自動歸題材排名。
-        <span className="text-bull">紅</span>=漲。標「<span className="text-muted-foreground/70">產業</span>」的是新熱點落到粗分類（細題材清單還沒收），點一列看成分股。
+        先掃全市場找今天在熱的股（漲幅＋爆量{hot?.instFresh ? '＋法人買超' : ''}），自動歸題材。
+        <b>細題材排上面</b>；廣義的「產業別／未分類」收進下面（雜訊，點開才看）。
+        <span className="text-bull">紅</span>=漲，點一列看成分股。
       </p>
 
       {error && <EmptyState icon="⚠️" title="尚無資料" description={`${error}（需要當日 L2 全市場快照）`} />}
@@ -345,30 +395,23 @@ function HotView({ hot, error, expanded, setExpanded }: {
         <>
           <SortControl options={HOT_THEME_SORT_OPTIONS} value={sortId} dir={dir}
             onChange={(id, d) => { setSortId(id); setDir(d); }} leading="題材排序" size="normal" />
-          <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-muted-foreground text-xs border-b border-border bg-secondary/30">
-                    <th className="text-left py-2.5 pl-3 pr-2 font-medium">#</th>
-                    <th className="text-left py-2.5 pr-3 font-medium">題材</th>
-                    <th className="text-right py-2.5 px-2 font-medium">熱門數</th>
-                    <th className="text-right py-2.5 px-2 font-medium">平均漲</th>
-                    <th className="text-right py-2.5 px-2 font-medium">最強漲</th>
-                    <th className="text-right py-2.5 px-2 font-medium">熱度</th>
-                    <th className="text-left py-2.5 pl-2 pr-3 font-medium">代表股</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {themes.map((t, i) => (
-                    <HotRow key={t.theme} t={t} rank={i + 1}
-                      expanded={expanded === t.theme}
-                      onToggle={() => setExpanded(expanded === t.theme ? null : t.theme)} />
-                  ))}
-                </tbody>
-              </table>
+
+          {concept.length > 0 ? (
+            <HotThemeTable rows={concept} rankBase={0} expanded={expanded} setExpanded={setExpanded} />
+          ) : (
+            <EmptyState icon="🔍" title="今天沒有明確的細題材在熱" description="熱門股都落在廣義產業（見下方展開）" />
+          )}
+
+          {coarse.length > 0 && (
+            <div className="space-y-2">
+              <button type="button" onClick={() => setShowCoarse((s) => !s)}
+                className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                <span className={`transition-transform ${showCoarse ? 'rotate-90' : ''}`}>›</span>
+                廣義分類（產業別／未分類）· {coarse.length} 群 · {coarseHot} 檔
+              </button>
+              {showCoarse && <HotThemeTable rows={coarse} rankBase={concept.length} expanded={expanded} setExpanded={setExpanded} />}
             </div>
-          </div>
+          )}
         </>
       )}
     </div>
