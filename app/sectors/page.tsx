@@ -436,7 +436,7 @@ function HotRow({ t, rank, expanded, onToggle }: {
         <td className="text-right px-2 text-muted-foreground font-mono tabular-nums whitespace-nowrap">{t.hotCount} 檔</td>
         <td className="text-right px-2 font-mono tabular-nums"><Pct v={t.avgChange} /></td>
         <td className="text-right px-2 font-mono tabular-nums"><Pct v={t.maxChange} /></td>
-        <td className="px-2"><HeatBar v={t.avgHeat} /></td>
+        <td className="px-2" title={`熱度 ${t.avgHeat}（個股平均）＋檔數加分 → 排名分 ${t.score}`}><HeatBar v={t.score} /></td>
         <td className="py-3 pl-2 pr-3 text-foreground/80">
           {t.topStock ? (
             <Link href={`/?load=${t.topStock.code}`} className="hover:text-sky-400 whitespace-nowrap"
