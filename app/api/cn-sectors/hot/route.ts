@@ -9,6 +9,7 @@
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { readHotnessDay, readLimitUpPoolDay, listBoardsDates } from '@/lib/cn-agents/storage';
+import { getCnNameMap } from '@/lib/cn-agents/cnStockNames';
 
 export const runtime = 'nodejs';
 
@@ -20,12 +21,22 @@ export async function GET(req: NextRequest) {
     date = dates[dates.length - 1];
   }
 
-  const [hotness, pool] = await Promise.all([readHotnessDay(date), readLimitUpPoolDay(date)]);
+  const [hotness, pool, nameMap] = await Promise.all([
+    readHotnessDay(date),
+    readLimitUpPoolDay(date),
+    getCnNameMap(),
+  ]);
   if (!hotness && !pool) return apiError(`no hotness / limit-up data for ${date}`, 404);
+
+  // 人氣榜原始資料常缺名（不含 ST/創業/科創）→ 補本地對照，補不到才維持裸代號
+  const hotRank = (hotness?.emRank ?? []).map((e) => ({
+    ...e,
+    name: e.name ?? nameMap.get(e.symbol) ?? null,
+  }));
 
   return apiOk({
     date,
-    hotRank: hotness?.emRank ?? [],
+    hotRank,
     limitUp: pool?.limitUp ?? [],
     broken: pool?.broken ?? [],
     stats: pool?.stats ?? null,
