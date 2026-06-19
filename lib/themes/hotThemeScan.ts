@@ -21,7 +21,8 @@
 import { readIntradaySnapshot, readMABase } from '@/lib/datasource/IntradayCache';
 import { TW_CONCEPT_MAP, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
-import { PERF_PERIODS } from './perfPeriods';
+import { readInstStock } from '@/lib/chips/ChipStorage';
+import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
 
 export type ThemeLabelSource = 'concept' | 'industry' | 'other';
 
@@ -46,6 +47,8 @@ export interface HotStock {
   themeSource: ThemeLabelSource;
   /** 過去 N 日漲幅 %（對齊 PERF_PERIODS = 1,2,…,10,20；buildHotThemeScan 才補，純聚合時 undefined） */
   rets?: (number | null)[];
+  /** 外資+投信過去 N 日買超金額 (元；對齊 INST_PERIODS=1,3,5,10) */
+  instAmt?: (number | null)[];
 }
 
 export interface HotTheme {
@@ -214,22 +217,46 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
 // ── 載入 + 建構（IO）─────────────────────────────────────────────────────────
 
 /** 過去 N 日漲幅 %（對齊 PERF_PERIODS），讀 L1 日K；與 sectorRanking 同公式（trailing）。 */
-async function trailingReturnsTW(code: string, date: string): Promise<(number | null)[]> {
+async function memberPerfTW(code: string, date: string): Promise<{ rets: (number | null)[]; instAmt: (number | null)[] }> {
+  const noRets = PERF_PERIODS.map(() => null);
+  const noAmt: (number | null)[] = INST_PERIODS.map(() => null);
   const file = (await readCandleFile(`${code}.TW`, 'TW'))
     ?? (await readCandleFile(`${code}.TWO`, 'TW'));
-  if (!file?.candles?.length) return PERF_PERIODS.map(() => null);
+  if (!file?.candles?.length) return { rets: noRets, instAmt: noAmt };
   const candles = file.candles;
   let idx = -1;
   for (let i = candles.length - 1; i >= 0; i--) {
     if (candles[i].date <= date) { idx = i; break; }
   }
-  if (idx < 0) return PERF_PERIODS.map(() => null);
+  if (idx < 0) return { rets: noRets, instAmt: noAmt };
   const close = candles[idx].close;
-  return PERF_PERIODS.map((n) => {
+  const rets = PERF_PERIODS.map((n) => {
     if (idx - n < 0) return null;
     const base = candles[idx - n].close;
     return base > 0 ? +(((close - base) / base) * 100).toFixed(1) : null;
   });
+  // 外資+投信過去 N 日買超金額 = 逐日(張×1000×當日收盤)
+  let instAmt = noAmt;
+  try {
+    const inst = await readInstStock(code);
+    if (inst?.data?.length) {
+      const past = inst.data.filter((r) => r.date <= date);
+      const closeByDate = new Map(candles.map((c) => [c.date, c.close]));
+      instAmt = INST_PERIODS.map((n) => {
+        const rows = past.slice(-n);
+        if (rows.length === 0) return null;
+        let amt = 0; let any = false;
+        for (const r of rows) {
+          const c = closeByDate.get(r.date);
+          if (c == null) continue;
+          amt += ((r.foreign ?? 0) + (r.trust ?? 0)) * 1000 * c;
+          any = true;
+        }
+        return any ? Math.round(amt) : null;
+      });
+    }
+  } catch { /* 法人 optional */ }
+  return { rets, instAmt };
 }
 
 /**
@@ -306,17 +333,21 @@ export async function buildHotThemeScan(date: string): Promise<HotThemeScanFile 
     instFresh,
   });
 
-  // 每檔熱門成分股補「過去 1~10,20 日漲幅」（讀 L1，併發 16）。同股可跨題材重複，先去重再算。
+  // 每檔熱門成分股補「過去 1~10,20 日漲幅」+「法人 1/3/5/10 日買超金額」（讀 L1+inst，併發 16）。
   const members = result.themes.flatMap((t) => t.members);
   const uniqCodes = [...new Set(members.map((m) => m.code))];
-  const retMap = new Map<string, (number | null)[]>();
+  const perfMap = new Map<string, { rets: (number | null)[]; instAmt: (number | null)[] }>();
   const CONC = 16;
   for (let i = 0; i < uniqCodes.length; i += CONC) {
     const batch = uniqCodes.slice(i, i + CONC);
-    const rows = await Promise.all(batch.map((c) => trailingReturnsTW(c, snapshot.date)));
-    batch.forEach((c, j) => retMap.set(c, rows[j]));
+    const rows = await Promise.all(batch.map((c) => memberPerfTW(c, snapshot.date)));
+    batch.forEach((c, j) => perfMap.set(c, rows[j]));
   }
-  for (const m of members) m.rets = retMap.get(m.code);
+  for (const m of members) {
+    const p = perfMap.get(m.code);
+    m.rets = p?.rets;
+    m.instAmt = p?.instAmt;
+  }
 
   return result;
 }

@@ -8,3 +8,6 @@
  * 不可拉進任何 server-only（fs / candle）相依。trailing 漲幅的計算放在各 server 模組內。
  */
 export const PERF_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20] as const;
+
+/** 法人買超金額的固定天數視窗（看資金流入用金額，不看張數—便宜股張數會虛胖） */
+export const INST_PERIODS = [1, 3, 5, 10] as const;

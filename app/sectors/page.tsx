@@ -20,7 +20,8 @@ import { applySort } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { bullBearClass } from '@/lib/format';
-import { PERF_PERIODS } from '@/lib/themes/perfPeriods';
+import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
+import { CnView } from './CnView';
 
 // 績效格預設只看的關鍵天數（其餘點「展開」才出現）
 const KEY_PERIODS = [1, 5, 10, 20];
@@ -43,6 +44,7 @@ interface ThemeStockPerf {
   d1: number | null; d5: number | null; d20: number | null; d60: number | null;
   volRatio: number | null; instNet5: number | null;
   rets?: (number | null)[];
+  instAmt?: (number | null)[];
 }
 interface ThemeRotation {
   rankNow?: number; rankPrev?: number | null;
@@ -51,7 +53,7 @@ interface ThemeRotation {
 interface ThemeRank {
   theme: string; stockCount: number;
   avgD1: number | null; avgD5: number | null; avgD20: number | null; avgD60: number | null;
-  avgVolRatio: number | null; breadth: number | null; instNet5: number | null;
+  avgVolRatio: number | null; breadth: number | null; instNet5: number | null; instAmt5?: number | null;
   stage: string;
   topStock: { code: string; name: string; d1: number } | null;
   members: ThemeStockPerf[];
@@ -65,6 +67,7 @@ interface HotStock {
   isLimitUp: boolean; isNotice: boolean; heat: number;
   theme: string; themeSource: 'concept' | 'industry' | 'other';
   rets?: (number | null)[];
+  instAmt?: (number | null)[];
 }
 interface HotTheme {
   theme: string; source: 'concept' | 'industry' | 'other';
@@ -79,6 +82,7 @@ interface HotFile {
 }
 
 type Mode = 'fixed' | 'hot';
+type Market = 'TW' | 'CN';
 
 // 階段 badge — 用主題友善的色階（半透明底 + 邊框，深淺主題皆可讀）
 const STAGE_STYLE: Record<string, string> = {
@@ -101,11 +105,13 @@ function Pct({ v }: { v: number | null }) {
   return <span className={`${bullBearClass(v)} ${tone} tabular-nums`}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
 }
 
-function Lots({ v }: { v: number | null }) {
-  if (v == null) return <span className="text-muted-foreground/50">—</span>;
-  const abs = Math.abs(v);
-  const text = abs >= 10000 ? `${(v / 10000).toFixed(1)}萬` : `${v}`;
-  return <span className={bullBearClass(v)}>{v > 0 ? '+' : ''}{text}</span>;
+// 法人買超金額（元 → 億/萬）。買超(+)=紅(資金流入)、賣超=綠；接近 0 灰。
+function Amt({ v }: { v: number | null }) {
+  if (v == null) return <span className="text-muted-foreground/40">—</span>;
+  const a = Math.abs(v);
+  const text = a >= 1e8 ? `${(v / 1e8).toFixed(1)}億` : a >= 1e4 ? `${Math.round(v / 1e4)}萬` : `${Math.round(v)}`;
+  if (a < 1e7) return <span className="text-muted-foreground/55 tabular-nums">{v > 0 ? '+' : ''}{text}</span>;
+  return <span className={`${bullBearClass(v)} tabular-nums`}>{v > 0 ? '+' : ''}{text}</span>;
 }
 
 // 名次徽章：前 3 名用暖色強調，其餘淡灰數字（顏色 + 數字雙重，不只靠顏色）
@@ -172,8 +178,9 @@ function HeatBar({ v }: { v: number }) {
 
 // 成分股績效表。預設只看 1/5/10/20 日（可展開全部）；可排序；每列框出「發動最猛的那段」。
 function PerfGrid({ members }: {
-  members: Array<{ code: string; name: string; rets?: (number | null)[]; isLimitUp?: boolean; isNotice?: boolean }>;
+  members: Array<{ code: string; name: string; rets?: (number | null)[]; instAmt?: (number | null)[]; isLimitUp?: boolean; isNotice?: boolean }>;
 }) {
+  const [view, setView] = useState<'ret' | 'inst'>('ret');
   const [showAll, setShowAll] = useState(true); // 預設顯示全部 1~10,20 日（看績效固定要求）
   const [sortId, setSortId] = useState('r5');
   const [dir, setDir] = useState<SortDir>('desc');
@@ -181,7 +188,6 @@ function PerfGrid({ members }: {
   const activeIdx = periodIndex(sortId);
   const idxOf = (p: number) => (PERF_PERIODS as readonly number[]).indexOf(p);
 
-  const sortOpts = periods.map((p) => ({ id: `r${p}`, label: `${p}日`, tip: `按過去 ${p} 日漲幅排序`, defaultDir: 'desc' as SortDir }));
   const sorted = applySort(members, sortId, dir, (m, id) => m.rets?.[periodIndex(id)] ?? null, { missingLast: true });
   const sortBy = (id: string) => { if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc'); else { setSortId(id); setDir('desc'); } };
 
@@ -192,9 +198,72 @@ function PerfGrid({ members }: {
     return bp;
   };
 
+  // 個股名稱欄（兩種視角共用）
+  const NameCell = (m: typeof members[number]) => (
+    <td className="pl-3 pr-2 py-1.5 sticky left-0 bg-card">
+      <div className="flex items-center gap-1.5 whitespace-nowrap">
+        <Link href={`/?load=${m.code}`} className="hover:text-sky-400 inline-flex items-center gap-1.5">
+          <span className="text-foreground/90">{m.name}</span>
+          <span className="text-muted-foreground/50">{m.code}</span>
+        </Link>
+        {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
+        {m.isNotice && <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">注意</span>}
+        <Link href={`/?load=${m.code}`} title="走圖"
+          className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-sky-400 hover:border-sky-400/40">走圖</Link>
+        <AddWatchBtn code={m.code} name={m.name} />
+      </div>
+    </td>
+  );
+
+  const Toggle = (
+    <div className="inline-flex rounded-md border border-border overflow-hidden text-[10px]">
+      <button type="button" onClick={() => setView('ret')}
+        className={`px-2 py-0.5 ${view === 'ret' ? 'bg-sky-700 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>漲幅</button>
+      <button type="button" onClick={() => setView('inst')}
+        className={`px-2 py-0.5 ${view === 'inst' ? 'bg-sky-700 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>法人金額</button>
+    </div>
+  );
+
+  // ── 法人金額視角（1/3/5/10 日買超金額；外資+投信）──
+  if (view === 'inst') {
+    return (
+      <div className="bg-muted/15 border-t border-border">
+        <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
+          {Toggle}
+          <span className="text-[10px] text-muted-foreground/45">外資+投信買超金額（紅=買進/流入、綠=賣出）</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted-foreground/50 text-[10px] border-b border-border/40">
+                <th className="text-left font-medium pl-3 pr-2 py-2 sticky left-0 bg-card z-10">個股</th>
+                {INST_PERIODS.map((p) => (
+                  <th key={p} className="text-right font-medium px-2 py-2 tabular-nums">法人{p}日</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {members.map((m) => (
+                <tr key={m.code} className="border-b border-border/25 last:border-0 hover:bg-muted/40 transition-colors">
+                  {NameCell(m)}
+                  {INST_PERIODS.map((p, i) => (
+                    <td key={p} className="text-right px-2 py-1.5 font-mono tabular-nums"><Amt v={m.instAmt?.[i] ?? null} /></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 漲幅視角（過去 1~10,20 日）──
+  const sortOpts = periods.map((p) => ({ id: `r${p}`, label: `${p}日`, tip: `按過去 ${p} 日漲幅排序`, defaultDir: 'desc' as SortDir }));
   return (
     <div className="bg-muted/15 border-t border-border">
       <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
+        {Toggle}
         <SortControl options={sortOpts} value={sortId} dir={dir}
           onChange={(id, d) => { setSortId(id); setDir(d); }} leading="排序" size="compact" />
         <button type="button" onClick={() => setShowAll((s) => !s)}
@@ -221,19 +290,7 @@ function PerfGrid({ members }: {
               const hot = hottestPeriod(m);
               return (
                 <tr key={m.code} className="border-b border-border/25 last:border-0 hover:bg-muted/40 transition-colors">
-                  <td className="pl-3 pr-2 py-1.5 sticky left-0 bg-card">
-                    <div className="flex items-center gap-1.5 whitespace-nowrap">
-                      <Link href={`/?load=${m.code}`} className="hover:text-sky-400 inline-flex items-center gap-1.5">
-                        <span className="text-foreground/90">{m.name}</span>
-                        <span className="text-muted-foreground/50">{m.code}</span>
-                      </Link>
-                      {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
-                      {m.isNotice && <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">注意</span>}
-                      <Link href={`/?load=${m.code}`} title="走圖"
-                        className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-sky-400 hover:border-sky-400/40">走圖</Link>
-                      <AddWatchBtn code={m.code} name={m.name} />
-                    </div>
-                  </td>
+                  {NameCell(m)}
                   {periods.map((p) => {
                     const i = idxOf(p);
                     return (
@@ -255,6 +312,7 @@ function PerfGrid({ members }: {
 }
 
 export default function SectorsPage() {
+  const [market, setMarket] = useState<Market>('TW');
   const [mode, setMode] = useState<Mode>('hot');
 
   const [data, setData] = useState<RankingFile | null>(null);
@@ -265,7 +323,20 @@ export default function SectorsPage() {
   const [hotError, setHotError] = useState<string | null>(null);
   const [hotExpanded, setHotExpanded] = useState<string | null>(null);
 
+  // 初次掛載讀 ?market=（SSR 預設 TW，避免 hydration 不一致；effect 內再校正）
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('market') === 'CN') setMarket('CN');
+  }, []);
+
+  // 市場切換寫回網址（書籤用，不導航）
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (market === 'CN') url.searchParams.set('market', 'CN'); else url.searchParams.delete('market');
+    window.history.replaceState(null, '', url.toString());
+  }, [market]);
+
+  useEffect(() => {
+    if (market !== 'TW') return;
     if (mode === 'fixed' && !data && !error) {
       fetch('/api/themes/ranking')
         .then(r => r.json())
@@ -284,30 +355,48 @@ export default function SectorsPage() {
         })
         .catch(e => setHotError(e instanceof Error ? e.message : String(e)));
     }
-  }, [mode, data, error, hot, hotError]);
+  }, [market, mode, data, error, hot, hotError]);
 
-  const subtitle = mode === 'hot'
+  const twSubtitle = mode === 'hot'
     ? (hot ? `資料日 ${hot.date} · 全市場 ${hot.hotStockCount} 檔在熱` : '全市場自動歸類熱點')
     : (data ? `資料日 ${data.date} · ${data.themes.length} 個熱門題材` : '熱門題材聚合報酬');
+  const subtitle = market === 'CN' ? '陸股板塊／概念強弱 · 人氣榜 · 漲停池' : twSubtitle;
+
+  const hotLabel = market === 'CN' ? '🔥 今日熱點（人氣／漲停）' : '🔥 今日全市場熱點';
+  const fixedLabel = market === 'CN' ? '📋 熱門板塊' : '📋 熱門題材';
 
   return (
     <PageShell
       headerSlot={<PageHeader title="📊 題材分類" subtitle={subtitle} backButton />}
     >
       <div className="p-4 space-y-3">
-        {/* 切換鈕 */}
+        {/* 市場切換（台股/陸股）*/}
         <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
+          <button
+            onClick={() => setMarket('TW')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${market === 'TW' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+          >🇹🇼 台股</button>
+          <button
+            onClick={() => setMarket('CN')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${market === 'CN' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+          >🇨🇳 陸股</button>
+        </div>
+
+        {/* 視角切換（熱點 / 熱門題材或板塊）*/}
+        <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm sm:ml-2 align-middle">
           <button
             onClick={() => setMode('hot')}
             className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'hot' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-          >🔥 今日全市場熱點</button>
+          >{hotLabel}</button>
           <button
             onClick={() => setMode('fixed')}
             className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'fixed' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-          >📋 熱門題材</button>
+          >{fixedLabel}</button>
         </div>
 
-        {mode === 'hot' ? (
+        {market === 'CN' ? (
+          <CnView mode={mode} />
+        ) : mode === 'hot' ? (
           <HotView hot={hot} error={hotError} expanded={hotExpanded} setExpanded={setHotExpanded} />
         ) : (
           <FixedView data={data} error={error} expanded={expanded} setExpanded={setExpanded} />
@@ -466,7 +555,7 @@ function FixedView({ data, error, expanded, setExpanded }: {
   const sortBy = (id: string) => { if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc'); else { setSortId(id); setDir('desc'); } };
   const themes = data
     ? applySort(data.themes, sortId, dir,
-        (t, id) => id === 'rot' ? (t.rotation?.rankDelta ?? null) : id === 'd1' ? t.avgD1 : id === 'd5' ? t.avgD5 : id === 'd20' ? t.avgD20 : id === 'd60' ? t.avgD60 : id === 'breadth' ? t.breadth : id === 'inst' ? t.instNet5 : null,
+        (t, id) => id === 'rot' ? (t.rotation?.rankDelta ?? null) : id === 'd1' ? t.avgD1 : id === 'd5' ? t.avgD5 : id === 'd20' ? t.avgD20 : id === 'd60' ? t.avgD60 : id === 'breadth' ? t.breadth : id === 'inst' ? (t.instAmt5 ?? null) : null,
         { missingLast: true })
     : [];
 
@@ -506,7 +595,7 @@ function FixedView({ data, error, expanded, setExpanded }: {
                     <SortTh id="d20" label="20日" sortId={sortId} dir={dir} onSort={sortBy} />
                     <SortTh id="d60" label="60日" sortId={sortId} dir={dir} onSort={sortBy} />
                     <SortTh id="breadth" label="廣度" sortId={sortId} dir={dir} onSort={sortBy} />
-                    <SortTh id="inst" label="法人5日(張)" sortId={sortId} dir={dir} onSort={sortBy} />
+                    <SortTh id="inst" label="法人5日金額" sortId={sortId} dir={dir} onSort={sortBy} />
                     <th className="text-center py-2.5 px-2 font-medium">階段</th>
                     <th className="text-left py-2.5 pl-2 pr-3 font-medium">當日最強</th>
                   </tr>
@@ -550,7 +639,7 @@ function SectorRow({ t, rank, expanded, onToggle }: {
         <td className="text-right px-2 text-muted-foreground font-mono tabular-nums">
           {t.breadth != null ? `${Math.round(t.breadth * 100)}%` : '—'}
         </td>
-        <td className="text-right px-2 font-mono tabular-nums"><Lots v={t.instNet5} /></td>
+        <td className="text-right px-2 font-mono tabular-nums"><Amt v={t.instAmt5 ?? null} /></td>
         <td className="text-center px-2">
           <span className={`text-xs px-1.5 py-0.5 rounded border ${STAGE_STYLE[t.stage] ?? STAGE_STYLE['盤整']}`}>
             {t.stage}
