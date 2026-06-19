@@ -21,6 +21,7 @@ import { applySort } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
 import { bullBearClass } from '@/lib/format';
 import { PERF_PERIODS } from '@/lib/themes/perfPeriods';
+import { FlowRotationBoards, type RankItem } from './RankBoards';
 
 // ── 型別（對齊 /api/cn-sectors/* 回傳）─────────────────────────────────────────
 
@@ -308,6 +309,18 @@ function FixedView({ date, concepts, industries }: { date: string; concepts: CnB
         <button onClick={() => setKind('industry')}
           className={`px-3 py-1.5 rounded-md transition-colors ${kind === 'industry' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>行業 {industries.length}</button>
       </div>
+      {boards.length > 0 && (
+        <FlowRotationBoards
+          moneyLabel="主力淨流入"
+          items={boards.map((b): RankItem => ({
+            key: b.code, name: b.name,
+            pct: b.pct5d, money: b.mainNetCny,
+            rotDelta: b.rotation?.rankDelta ?? null,
+            rotPrev: b.rotation?.rankPrev ?? null,
+            rotNow: b.rotation?.rankNow ?? null,
+          }))}
+        />
+      )}
       {boards.length > 0
         ? <BoardTable boards={boards} date={date} />
         : <EmptyState icon="🔍" title="沒有板塊資料" description="這天的板塊快照可能沒抓到（歷史日無當日板塊）" />}

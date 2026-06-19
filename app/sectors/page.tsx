@@ -22,6 +22,7 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { bullBearClass } from '@/lib/format';
 import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
 import { CnView } from './CnView';
+import { FlowRotationBoards, type RankItem } from './RankBoards';
 
 // 績效格預設只看的關鍵天數（其餘點「展開」才出現）
 const KEY_PERIODS = [1, 5, 10, 20];
@@ -613,6 +614,16 @@ function FixedView({ data, error, expanded, setExpanded }: {
 
       {data && (
         <>
+          <FlowRotationBoards
+            moneyLabel="法人買超"
+            items={data.themes.map((t): RankItem => ({
+              key: t.theme, name: t.theme,
+              pct: t.avgD5, money: t.instAmt5 ?? null,
+              rotDelta: t.rotation?.rankDelta ?? null,
+              rotPrev: t.rotation?.rankPrev ?? null,
+              rotNow: t.rotation?.rankNow ?? null,
+            }))}
+          />
           <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

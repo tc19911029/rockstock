@@ -90,6 +90,18 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '5443', name: '均豪' }, { code: '6196', name: '帆宣' },
     { code: '6510', name: '精測' }, { code: '3680', name: '家登' },
   ],
+  // 玻璃基板 / TGV（玻璃穿孔）先進封裝載板 — 2026 驗證年，Intel 玻璃基板登場帶動台廠
+  '玻璃基板': [
+    // 載板廠轉玻璃核心載板（欣興＝Intel R&D 夥伴；南電/景碩同步切入）
+    { code: '3037', name: '欣興' }, { code: '8046', name: '南電' },
+    { code: '3189', name: '景碩' },
+    // 玻璃加工（正達熱成型 TGV、TPK-KY 觸控玻璃轉 TGV 試產）
+    { code: '3149', name: '正達' }, { code: '3673', name: 'TPK-KY' },
+    // TGV 雷射鑽孔 / 封裝設備
+    { code: '6207', name: '雷科' }, { code: '6664', name: '群翊' },
+    // 高階玻璃材料（中釉類晶玻璃陶瓷、晶呈氣相蝕刻）
+    { code: '1809', name: '中釉' }, { code: '4768', name: '晶呈科技' },
+  ],
   '機器人': [
     { code: '2049', name: '上銀' }, { code: '1590', name: '亞德客-KY' },
     { code: '6215', name: '和椿' }, { code: '4583', name: '台灣精銳' },
