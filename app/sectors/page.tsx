@@ -111,8 +111,13 @@ const STAGE_STYLE: Record<string, string> = {
 };
 
 function Pct({ v }: { v: number | null }) {
-  if (v == null) return <span className="text-muted-foreground/50">—</span>;
-  return <span className={bullBearClass(v)}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
+  if (v == null) return <span className="text-muted-foreground/40">—</span>;
+  const a = Math.abs(v);
+  // 接近持平用中性灰（不染紅綠）→ 減少滿屏一片紅
+  if (a < 1) return <span className="text-muted-foreground/55 tabular-nums">{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
+  // 紅漲綠跌＋「強度分層」：小漲淡、大漲才亮且粗 → 一片紅變成有層次、強的跳出來
+  const tone = a >= 12 ? 'font-semibold' : a >= 5 ? 'opacity-90' : 'opacity-55';
+  return <span className={`${bullBearClass(v)} ${tone} tabular-nums`}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
 }
 
 function Lots({ v }: { v: number | null }) {
