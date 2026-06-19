@@ -174,7 +174,7 @@ function HeatBar({ v }: { v: number }) {
 function PerfGrid({ members }: {
   members: Array<{ code: string; name: string; rets?: (number | null)[]; isLimitUp?: boolean; isNotice?: boolean }>;
 }) {
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useState(true); // 預設顯示全部 1~10,20 日（看績效固定要求）
   const [sortId, setSortId] = useState('r5');
   const [dir, setDir] = useState<SortDir>('desc');
   const periods = showAll ? [...PERF_PERIODS] : KEY_PERIODS;
