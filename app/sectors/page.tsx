@@ -146,10 +146,10 @@ function RotationCell({ r }: { r?: ThemeRotation | null }) {
   // 名次怎麼變：5天前第幾名 → 今天第幾名（最白話）
   const move = r?.rankPrev != null && r?.rankNow != null ? `${r.rankPrev}→${r.rankNow}名` : '';
   if (r?.bucket === 'in') {
-    return <span className="text-xs whitespace-nowrap" title="名次往上爬＝資金流進（描述用，非買賣訊號）">🟢 流進 <span className="text-muted-foreground/70">{move}</span></span>;
+    return <span className="text-xs whitespace-nowrap" title="名次往上爬＝資金流進（描述用，非買賣訊號）">🟢 資金流進 <span className="text-muted-foreground/70">{move}</span></span>;
   }
   if (r?.bucket === 'out') {
-    return <span className="text-xs whitespace-nowrap" title="名次往下掉＝資金流出（描述用，非買賣訊號）">🔴 流出 <span className="text-muted-foreground/70">{move}</span></span>;
+    return <span className="text-xs whitespace-nowrap" title="名次往下掉＝資金流出（描述用，非買賣訊號）">🔴 資金流出 <span className="text-muted-foreground/70">{move}</span></span>;
   }
   // 名次沒大變（資金沒明顯進出）：直接寫目前是第幾名（最強前3名加🔥）
   if (r?.rankNow != null) {
