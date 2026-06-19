@@ -185,3 +185,69 @@ export async function fetchBoardSnapshot(
 
   return { entries, source: 'em-push2ex' };
 }
+
+// ── 板塊成分股（/cn-sectors 點開板塊看逐檔績效用，lazy on-demand） ─────────────
+
+/** 板塊成分股單筆（即時欄位；歷史報酬由 boardMembersPerf 另抓 K 線算） */
+export interface BoardMember {
+  /** 6 位裸碼 */
+  code: string;
+  name: string;
+  /** 帶交易所後綴（600xxx.SS / 000xxx.SZ），給 Tencent/EM 日K 用 */
+  symbol: string;
+  /** 當日漲跌幅 % */
+  pct: number;
+  /** 成交額（元） */
+  turnoverCny: number | null;
+}
+
+/**
+ * 6 位裸碼 → 帶後綴 symbol。A 股前綴規則：
+ *   6/9 → 上海(.SS)；0/2/3 → 深圳(.SZ)；4/8 → 北交所（無 Tencent qfq，回 null 跳過）
+ * 用代號前綴判別（不依賴 EM f13），避免欄位缺漏。
+ */
+function memberCodeToSymbol(code: string): string | null {
+  const c = code[0];
+  if (c === '6' || c === '9') return `${code}.SS`;
+  if (c === '0' || c === '2' || c === '3') return `${code}.SZ`;
+  return null; // 北交所 4/8 開頭：v1 不支援
+}
+
+/**
+ * 抓某板塊（BKxxxx）成分股全量清單（pz=100 翻頁，code dedup）。
+ * fs=b:BKxxxx 是 EM 板塊成分股標準查詢；回當日漲跌幅 + 成交額（歷史報酬另抓）。
+ * 北交所成分（4/8 開頭）跳過。失敗（第一頁就無資料）→ throw 給 caller 處理。
+ */
+export async function fetchBoardMembers(boardCode: string): Promise<BoardMember[]> {
+  if (!/^BK\d+$/i.test(boardCode)) throw new Error(`fetchBoardMembers: 非法板塊代碼 '${boardCode}'`);
+  const seen = new Set<string>();
+  const out: BoardMember[] = [];
+  let total = Number.POSITIVE_INFINITY;
+
+  for (let pn = 1; pn <= MAX_PAGES && out.length < total; pn++) {
+    if (pn > 1) await sleep(PAGE_GAP_MS);
+    const urlPath =
+      '/api/qt/clist/get'
+      + `?pn=${pn}&pz=${PAGE_SIZE}&po=1&np=1&fltt=2&invt=2&fid=f3`
+      + `&fs=b:${boardCode}`
+      + '&fields=f12,f14,f3,f6';
+    const data = await fetchPageWithRetry(urlPath);
+    const diff = data?.data?.diff;
+    if (!Array.isArray(diff) || diff.length === 0) {
+      if (pn === 1) throw new Error(`EM clist 板塊 ${boardCode} 第一頁無資料（rc=${data?.rc}）`);
+      break;
+    }
+    if (typeof data?.data?.total === 'number' && data.data.total > 0) total = data.data.total;
+    for (const row of diff) {
+      const code = toStr(row.f12);
+      const name = toStr(row.f14);
+      if (!code || !name || seen.has(code)) continue;
+      const symbol = memberCodeToSymbol(code);
+      if (!symbol) continue; // 北交所跳過
+      seen.add(code);
+      out.push({ code, name, symbol, pct: toNum(row.f3) ?? 0, turnoverCny: toNum(row.f6) });
+    }
+    if (diff.length < PAGE_SIZE) break;
+  }
+  return out;
+}

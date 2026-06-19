@@ -156,6 +156,33 @@ export async function readBoardsDay(date: string): Promise<BoardsDay | null> {
   return getJson<BoardsDay>('boards', `${date}.json`);
 }
 
+/** 列出已落地的板塊快照日期（升冪）。/cn-sectors 取最新日 + 算輪動的前一檔用。 */
+export async function listBoardsDates(): Promise<string[]> {
+  if (IS_VERCEL) {
+    const { list: blobList } = await import('@vercel/blob');
+    const out: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await blobList({ prefix: `${ROOT}/boards/`, limit: 100, cursor });
+      for (const b of result.blobs) {
+        const m = b.pathname.match(/(\d{4}-\d{2}-\d{2})\.json$/);
+        if (m) out.push(m[1]);
+      }
+      cursor = result.hasMore ? result.cursor : undefined;
+    } while (cursor);
+    return out.sort();
+  }
+  const path = await import('path');
+  const { promises: fs } = await import('fs');
+  const files = await fs
+    .readdir(path.join(process.cwd(), 'data', ROOT, 'boards'))
+    .catch(() => [] as string[]);
+  return files
+    .filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+    .map((f) => f.slice(0, 10))
+    .sort();
+}
+
 // ── 人氣熱度 ──────────────────────────────────────────────────────────────────
 
 export async function saveHotnessDay(day: HotnessDay): Promise<void> {
