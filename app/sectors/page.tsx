@@ -598,9 +598,9 @@ function FixedView({ data, error, expanded, setExpanded }: {
         <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。<b>點欄位標題可排序</b>，點一列看成分股近 1~20 日績效。
         <br />
         <span className="text-muted-foreground/70">
-          題材用「最近 5 日漲幅」互相排名次。「輪動」欄的 <b>a→b名</b> = 5 天前第 a 名 → 今天第 b 名：
+          題材用「今日漲幅」互相排名次。「輪動」欄的 <b>a→b名</b> = 昨天第 a 名 → 今天第 b 名：
           名次往上 = <b>🟢 資金流進</b>、往下 = <b>🔴 資金流出</b>。
-          例：面板 <b>25→2 名</b>（從墊底衝到第 2，資金大量流進）。
+          例：某題材 <b>20→3 名</b>（今天大漲衝上來，資金轉進）。
           預設流進排最上、流出排最下；只看錢流向，<b>別當買賣訊號</b>。
         </span>
       </p>
@@ -618,7 +618,9 @@ function FixedView({ data, error, expanded, setExpanded }: {
             moneyLabel="法人買超"
             items={data.themes.map((t): RankItem => ({
               key: t.theme, name: t.theme,
-              pct: t.avgD5, money: t.instAmt5 ?? null,
+              // 日線：今日漲幅 + 今日法人買超金額（成分股 instAmt[0]=1日 加總）
+              pct: t.avgD1,
+              money: t.members.reduce((s, m) => s + (m.instAmt?.[0] ?? 0), 0),
               rotDelta: t.rotation?.rankDelta ?? null,
               rotPrev: t.rotation?.rankPrev ?? null,
               rotNow: t.rotation?.rankNow ?? null,

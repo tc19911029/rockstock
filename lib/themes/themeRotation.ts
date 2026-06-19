@@ -35,30 +35,41 @@ export interface ThemeRotation {
 
 const RANK_DELTA_TH = 3;
 
+/** 依「今日漲幅 avgD1」排名次（缺值沉底）：theme → 1-based 名次。 */
+function rankByD1(themes: SectorRankingFile['themes']): Map<string, number> {
+  const sorted = [...themes].sort((a, b) => (b.avgD1 ?? -Infinity) - (a.avgD1 ?? -Infinity));
+  const m = new Map<string, number>();
+  sorted.forEach((t, i) => m.set(t.theme, i + 1));
+  return m;
+}
+
+/**
+ * 輪動＝「今日漲幅名次」今天 vs 昨天（caller 傳前一交易日檔當 prior）。
+ * 2026-06-19 改日線：原本用 5 日漲幅名次、比 ~5 交易日前，反應太慢；改成每天看
+ * （今日漲幅排名 vs 昨日漲幅排名），抓「今天資金轉進哪個題材」。
+ */
 export function computeRotation(
   today: SectorRankingFile,
   prior: SectorRankingFile | null,
 ): Map<string, ThemeRotation> {
-  const priorRank = new Map<string, number>();
-  const priorD5 = new Map<string, number | null>();
-  prior?.themes.forEach((t, i) => {
-    priorRank.set(t.theme, i + 1);
-    priorD5.set(t.theme, t.avgD5);
-  });
+  const nowRank = rankByD1(today.themes);
+  const prevRank = prior ? rankByD1(prior.themes) : null;
+  const priorD1 = new Map<string, number | null>();
+  prior?.themes.forEach((t) => priorD1.set(t.theme, t.avgD1));
 
   const out = new Map<string, ThemeRotation>();
-  today.themes.forEach((t, i) => {
-    const rankNow = i + 1;
-    const rp = priorRank.get(t.theme);
-    const rankDelta = rp != null ? rp - rankNow : null;
-    const ap = priorD5.get(t.theme);
-    const accel = t.avgD5 != null && ap != null ? +(t.avgD5 - ap).toFixed(1) : null;
+  for (const t of today.themes) {
+    const rankNow = nowRank.get(t.theme)!;
+    const rankPrev = prevRank?.get(t.theme) ?? null;
+    const rankDelta = rankPrev != null ? rankPrev - rankNow : null;
+    const ap = priorD1.get(t.theme);
+    const accel = t.avgD1 != null && ap != null ? +(t.avgD1 - ap).toFixed(1) : null;
     let bucket: RotationBucket = 'mid';
     if (rankDelta != null) {
       if (rankDelta >= RANK_DELTA_TH) bucket = 'in';
       else if (rankDelta <= -RANK_DELTA_TH) bucket = 'out';
     }
-    out.set(t.theme, { rankNow, rankPrev: rp ?? null, rankDelta, accel, bucket });
-  });
+    out.set(t.theme, { rankNow, rankPrev, rankDelta, accel, bucket });
+  }
   return out;
 }

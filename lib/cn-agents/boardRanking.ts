@@ -46,8 +46,8 @@ export interface CnBoardRankingFile {
 }
 
 const RANK_DELTA_TH = 3;
-/** 輪動比較跨幾個交易日（取 listBoardsDates 的索引回退量） */
-const ROTATION_LOOKBACK = 5;
+/** 輪動比較跨幾個交易日（取 listBoardsDates 的索引回退量）。2026-06-19 改日線＝1（昨天）。 */
+const ROTATION_LOOKBACK = 1;
 
 /**
  * 板塊階段 heuristic（顯示用，非回測）。優先序由「最該標出的狀態」往下：
@@ -72,24 +72,25 @@ export function classifyBoardStage(b: Pick<BoardEntry, 'pct' | 'pct5d'>): CnBoar
   return '盤整';
 }
 
-/** 同 kind 內按 5 日漲幅（缺值沉底）排出名次 map：code → 1-based 名次。 */
-function rankByPct5d(boards: BoardEntry[]): Map<string, number> {
-  const sorted = [...boards].sort((a, b) => (b.pct5d ?? -Infinity) - (a.pct5d ?? -Infinity));
+/** 同 kind 內按「今日漲幅 pct」（缺值沉底）排出名次 map：code → 1-based 名次。 */
+function rankByTodayPct(boards: BoardEntry[]): Map<string, number> {
+  const sorted = [...boards].sort((a, b) => (b.pct ?? -Infinity) - (a.pct ?? -Infinity));
   const m = new Map<string, number>();
   sorted.forEach((e, i) => m.set(e.code, i + 1));
   return m;
 }
 
 /**
- * 算一組板塊（同 kind）的輪動：今日 5 日強弱名次 vs prior。
+ * 算一組板塊（同 kind）的輪動：今日漲幅名次 vs 昨天（prior 傳前一交易日）。
+ * 2026-06-19 改日線（原本用 5 日漲幅名次比 5 交易日前，反應太慢）。
  * prior 為 null（無前一檔）→ 全部 rankDelta=null、bucket='mid'。
  */
 export function computeBoardRotation(
   today: BoardEntry[],
   prior: BoardEntry[] | null,
 ): Map<string, CnBoardRotation> {
-  const nowRank = rankByPct5d(today);
-  const prevRank = prior ? rankByPct5d(prior) : null;
+  const nowRank = rankByTodayPct(today);
+  const prevRank = prior ? rankByTodayPct(prior) : null;
   const out = new Map<string, CnBoardRotation>();
   for (const b of today) {
     const rankNow = nowRank.get(b.code)!;

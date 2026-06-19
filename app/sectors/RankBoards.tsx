@@ -4,13 +4,13 @@
  * 資金流入 / 資金輪動 排行榜面板（2026-06-19）— 台股題材 + 陸股板塊共用。
  *
  * 兩種排名（顯示層，描述性，不參與選股 鐵則 #5）：
- *   💰 資金流入：誰現在最強/錢最多。給兩個指標都顯示：
- *       - 依漲幅（5日漲幅）
- *       - 依金額（台股=法人買超金額、陸股=主力淨流入）
- *   🔄 資金輪動：近 5 交易日「名次」爬升最多的（a→b名）。例：面板 25→2 名。
+ *   💰 資金流入：誰今天最強/錢最多。給兩個指標都顯示：
+ *       - 依今日漲幅
+ *       - 依今日金額（台股=法人買超金額、陸股=主力淨流入）
+ *   🔄 資金輪動：今日漲幅「名次」vs 昨天爬升最多的（a→b名）。
  *
- * 名次基準＝各市場用「5 日漲幅」互相排名次（與 /sectors 既有輪動同一套），
- * 輪動時間窗＝約 5 個交易日（≈ 一週）。
+ * 2026-06-19 改日線：原本用 5 日漲幅 + 比 5 交易日前，反應太慢 → 全改今天 vs 昨天。
+ * 名次基準＝各市場用「今日漲幅」互相排名次（與 /sectors 輪動欄同一套）。
  */
 
 import { bullBearClass } from '@/lib/format';
@@ -79,17 +79,17 @@ export function FlowRotationBoards({ items, moneyLabel, topN = 5 }: {
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
       <MiniList
         title="💰 資金流入·漲幅"
-        hint="近5日漲最多"
+        hint="今日漲最多"
         rows={byPct.map((x) => ({ key: x.key, name: x.name, valueText: fmtPct(x.pct), valueClass: bullBearClass(x.pct) }))}
       />
       <MiniList
         title={`💰 資金流入·${moneyLabel}`}
-        hint="買最多錢"
+        hint="今日買最多"
         rows={byMoney.map((x) => ({ key: x.key, name: x.name, valueText: fmtMoney(x.money), valueClass: bullBearClass(x.money) }))}
       />
       <MiniList
         title="🔄 資金輪動"
-        hint="近5交易日名次爬升"
+        hint="昨天→今天爬升"
         rows={byRot.map((x) => ({
           key: x.key, name: x.name,
           sub: x.rotPrev != null && x.rotNow != null ? `${x.rotPrev}→${x.rotNow}名` : undefined,

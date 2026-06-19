@@ -98,8 +98,8 @@ function RankBadge({ rank }: { rank: number }) {
 
 function RotationCell({ r }: { r?: CnRotation | null }) {
   const move = r?.rankPrev != null && r?.rankNow != null ? `${r.rankPrev}→${r.rankNow}名` : '';
-  if (r?.bucket === 'in') return <span className="text-xs whitespace-nowrap" title="5日強弱名次往上爬＝資金流進（描述用，非買賣訊號）">🟢 資金流進 <span className="text-muted-foreground/70">{move}</span></span>;
-  if (r?.bucket === 'out') return <span className="text-xs whitespace-nowrap" title="5日強弱名次往下掉＝資金流出（描述用，非買賣訊號）">🔴 資金流出 <span className="text-muted-foreground/70">{move}</span></span>;
+  if (r?.bucket === 'in') return <span className="text-xs whitespace-nowrap" title="今日漲幅名次往上爬（昨天→今天）＝資金流進（描述用，非買賣訊號）">🟢 資金流進 <span className="text-muted-foreground/70">{move}</span></span>;
+  if (r?.bucket === 'out') return <span className="text-xs whitespace-nowrap" title="今日漲幅名次往下掉（昨天→今天）＝資金流出（描述用，非買賣訊號）">🔴 資金流出 <span className="text-muted-foreground/70">{move}</span></span>;
   if (r?.rankNow != null) return <span className="text-xs whitespace-nowrap text-muted-foreground/65" title="名次沒大變動，資金沒明顯進出">{r.rankNow <= 3 ? '🔥 ' : ''}第{r.rankNow}名</span>;
   return <span className="text-xs text-muted-foreground/45 whitespace-nowrap">—</span>;
 }
@@ -301,7 +301,7 @@ function FixedView({ date, concepts, industries }: { date: string; concepts: CnB
       <p className="text-xs text-muted-foreground">
         東方財富現成的板塊強弱（不是自選題材）· 階段為顯示用分類，<b>不參與選股</b>。
         <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。<b>點欄位標題排序</b>，點一列看成分股近 1~20 日績效。
-        「輪動」= 用近 5 日漲幅互相排名次，往上 <b>🟢 資金流進</b>、往下 <b>🔴 資金流出</b>（描述用，別當買賣訊號）。
+        「輪動」= 用今日漲幅互相排名次、昨天→今天，往上 <b>🟢 資金流進</b>、往下 <b>🔴 資金流出</b>（描述用，別當買賣訊號）。
       </p>
       <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
         <button onClick={() => setKind('concept')}
@@ -314,7 +314,8 @@ function FixedView({ date, concepts, industries }: { date: string; concepts: CnB
           moneyLabel="主力淨流入"
           items={boards.map((b): RankItem => ({
             key: b.code, name: b.name,
-            pct: b.pct5d, money: b.mainNetCny,
+            // 日線：今日漲幅 + 今日主力淨流入（mainNetCny 本就是當日）
+            pct: b.pct, money: b.mainNetCny,
             rotDelta: b.rotation?.rankDelta ?? null,
             rotPrev: b.rotation?.rankPrev ?? null,
             rotNow: b.rotation?.rankNow ?? null,
