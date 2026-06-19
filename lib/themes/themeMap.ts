@@ -65,6 +65,7 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2327', name: '國巨*' }, { code: '2492', name: '華新科' },
     { code: '3026', name: '禾伸堂' }, { code: '2375', name: '凱美' },
     { code: '6173', name: '信昌電' }, { code: '2478', name: '大毅' },
+    { code: '3236', name: '千如' },
   ],
   'PCB': [
     { code: '3037', name: '欣興' }, { code: '8046', name: '南電' },
