@@ -36,6 +36,7 @@ const HOT_THEME_SORT_OPTIONS = [
   { id: 'max', label: '最強漲', defaultDir: 'desc' as SortDir },
 ];
 const FIXED_THEME_SORT_OPTIONS = [
+  { id: 'rot', label: '資金流向', tip: '按名次變化排：錢流進(名次爬)在上、流出(名次掉)在下', defaultDir: 'desc' as SortDir },
   { id: 'd1', label: '今日', defaultDir: 'desc' as SortDir },
   { id: 'd5', label: '5日', defaultDir: 'desc' as SortDir },
   { id: 'd20', label: '20日', defaultDir: 'desc' as SortDir },
@@ -407,11 +408,11 @@ function FixedView({ data, error, expanded, setExpanded }: {
   data: RankingFile | null; error: string | null;
   expanded: string | null; setExpanded: (s: string | null) => void;
 }) {
-  const [sortId, setSortId] = useState('d5');
+  const [sortId, setSortId] = useState('rot');
   const [dir, setDir] = useState<SortDir>('desc');
   const themes = data
     ? applySort(data.themes, sortId, dir,
-        (t, id) => id === 'd1' ? t.avgD1 : id === 'd5' ? t.avgD5 : id === 'd20' ? t.avgD20 : id === 'd60' ? t.avgD60 : id === 'breadth' ? t.breadth : id === 'inst' ? t.instNet5 : null,
+        (t, id) => id === 'rot' ? (t.rotation?.rankDelta ?? null) : id === 'd1' ? t.avgD1 : id === 'd5' ? t.avgD5 : id === 'd20' ? t.avgD20 : id === 'd60' ? t.avgD60 : id === 'breadth' ? t.breadth : id === 'inst' ? t.instNet5 : null,
         { missingLast: true })
     : [];
 
@@ -422,8 +423,8 @@ function FixedView({ data, error, expanded, setExpanded }: {
         <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。點一列看成分股近 1~20 日績效。
         <br />
         <span className="text-muted-foreground/70">
-          「輪動」= vs 約 5 日前的名次變化（🟢資金轉入 / 🔴轉出）。
-          <b>純情境參考</b>：回測顯示輪動無穩定超額、退潮常回彈，<b>別當買賣訊號</b>。
+          預設按「資金流向」排：<b>🟢 錢流進（名次爬）在最上、🔴 錢流出（名次掉）在最下</b>。
+          數字 ↑↓ = vs 約 5 天前的名次變化。只是看錢往哪流，<b>別當買賣訊號</b>（回測無穩定超額）。
         </span>
       </p>
 
