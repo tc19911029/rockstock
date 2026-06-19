@@ -26,6 +26,19 @@ function dateMinusDays(date: string, days: number): string {
 async function main() {
   const missingOnly = process.argv.includes('--missing-only');
   const target = getLastTradingDay('TW');
+
+  // 先用當前 L1 重建 turnover 索引 → 對到「掃描真正用的池子」（病史：索引曾被污染，warming 灌錯池子）。
+  // idempotent + degenerate guard；失敗沿用既有索引。
+  try {
+    const { buildTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
+    const { TaiwanScanner } = await import('@/lib/scanner/TaiwanScanner');
+    const all = await new TaiwanScanner().getStockList();
+    const idx = await buildTurnoverRank('TW', all, 500);
+    console.log(`[backfill-inst-top500] turnover 索引重建 date=${idx.date} 前3=${idx.symbols.slice(0, 3).join(',')}`);
+  } catch (e) {
+    console.warn('[backfill-inst-top500] 索引重建失敗(沿用既有):', e instanceof Error ? e.message : e);
+  }
+
   const top500: string[] = JSON.parse(
     await fs.readFile(path.join(process.cwd(), 'data/turnover-rank/TW.json'), 'utf8'),
   ).symbols.map((s: string) => s.split('.')[0]);
