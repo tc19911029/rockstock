@@ -36,6 +36,7 @@ import { detectLetterO } from '@/lib/analysis/v12LetterO';
 import { detectLetterP } from '@/lib/analysis/v12LetterP';
 import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
 import { STOP_LOSS_PRICE_MULT, PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/bookThresholds';
+import { deductPrice, daysUntilMaTurn, daysUntilGoldenCross } from '@/lib/analysis/maDeduction';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
 import ChartCoachAdvice from './ChartCoachAdvice';
@@ -540,6 +541,9 @@ export default function SignalSummaryCard() {
                 </p>
               )}
             </div>
+
+            {/* 移動扣抵預測（W3c · 純顯示）— 用既有收盤序列推「均線下一步」，不發進出場訊號 */}
+            <MaDeductionForecast candles={allCandles} index={currentIndex} />
           </div>
 
           {/* ── 4. 為什麼？分組 ───────────────────────────── */}
@@ -563,6 +567,106 @@ export default function SignalSummaryCard() {
       <div className="border-t border-border/60 bg-secondary/30 p-3">
         <ChartCoachAdvice defaultCollapsed />
       </div>
+    </div>
+  );
+}
+
+// ── 子元件：移動扣抵預測（W3c · 純顯示層）─────────────────────────────────
+//
+// 「移動扣抵」是均線的內建確定性：N 日線下一根會丟掉 N 天前那根收盤（扣抵值）、
+// 補進今收。今收 vs 扣抵值就先告訴你均線下一步往上/往下，再往前推估「幾天後翻向」
+// 「短均線幾天後黃金交叉」。純提示用，刻意不接選股、不做進出場訊號。
+// 未來 K 棒一律假設「價停在今收」，越往後越粗估 → 黃金交叉只看近窗（5 根內）。
+
+const MA_FORECAST_SET: ReadonlyArray<{ n: number; label: string }> = [
+  { n: 5, label: 'MA5' },
+  { n: 10, label: 'MA10' },
+  { n: 20, label: 'MA20' },
+];
+
+function MaDeductionForecast({
+  candles, index,
+}: {
+  candles: CandleWithIndicators[];
+  index: number;
+}) {
+  const view = useMemo(() => {
+    if (!candles.length) return null;
+    const asOf = Math.min(Math.max(index, 0), candles.length - 1);
+    const closes = candles.map(c => c.close);
+    const today = closes[asOf];
+    if (today == null) return null;
+
+    const rows = MA_FORECAST_SET.map(({ n, label }) => {
+      const dp = deductPrice(closes, n, asOf);
+      const turn = daysUntilMaTurn(closes, n, asOf);
+      return { n, label, deduct: dp, turn };
+    }).filter(r => r.deduct != null);
+
+    // 黃金交叉只估近窗 5 根（凍結價假設往後不可靠）
+    const gc5x20 = daysUntilGoldenCross(closes, 5, 20, asOf, 5);
+
+    if (rows.length === 0) return null;
+    return { today, rows, gc5x20 };
+  }, [candles, index]);
+
+  if (!view) return null;
+
+  return (
+    <div className="pt-2 border-t border-border/20 space-y-1">
+      <p className="text-[11px] leading-relaxed">
+        <span
+          className="text-muted-foreground"
+          title="移動扣抵：N 日均線下一根會丟掉 N 天前的收盤（扣抵值）、補進今收。今收 > 扣抵值 → 均線往上；今收 < 扣抵值 → 往下。純預測提示、不發進出場訊號，未來假設價停在今收、越往後越粗估。"
+        >均線預測</span>
+        <span className="ml-2 text-muted-foreground/60">扣抵推估</span>
+      </p>
+
+      <div className="space-y-0.5">
+        {view.rows.map(r => {
+          const dir = r.turn.direction;
+          const dirText = dir === 'up' ? '將上揚' : dir === 'down' ? '將下彎' : '走平';
+          // 紅漲綠跌（台股慣例）：上揚紅、下彎綠
+          const dirColor = dir === 'up' ? 'text-rose-300' : dir === 'down' ? 'text-emerald-300' : 'text-muted-foreground';
+          const cmp = view.today > (r.deduct as number) ? '今收高於扣抵' : view.today < (r.deduct as number) ? '今收低於扣抵' : '今收等於扣抵';
+          return (
+            <p key={r.n} className="text-[11px] leading-relaxed flex items-baseline gap-1.5 flex-wrap">
+              <span className="text-foreground/70 font-mono w-9 shrink-0">{r.label}</span>
+              <span className="text-muted-foreground/70">扣抵</span>
+              <span className="font-mono text-foreground/80">{(r.deduct as number).toFixed(2)}</span>
+              <span className={`font-bold ${dirColor}`}>{dirText}</span>
+              {r.turn.days != null && r.turn.turnTo !== dir && (
+                <span className="text-amber-300/90">約 {r.turn.days} 天後翻{r.turn.turnTo === 'up' ? '上' : r.turn.turnTo === 'down' ? '下' : '平'}</span>
+              )}
+              <span className="text-muted-foreground/45">（{cmp}）</span>
+            </p>
+          );
+        })}
+
+        {/* 5×20 黃金交叉預測（近窗）*/}
+        {view.gc5x20.alreadyAbove ? (
+          <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+            <span className="text-foreground/70">MA5/MA20</span>
+            <span className="ml-1.5 text-rose-300/90">短均線已在長均線之上</span>
+            <span className="ml-1.5 text-muted-foreground/45">（多頭排列）</span>
+          </p>
+        ) : view.gc5x20.days != null ? (
+          <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+            <span className="text-foreground/70">MA5/MA20</span>
+            <span className="ml-1.5 text-amber-300/90">約 {view.gc5x20.days} 天內可能黃金交叉</span>
+            <span className="ml-1.5 text-muted-foreground/45">（{view.gc5x20.trend === 'converging' ? '正在靠近' : view.gc5x20.trend === 'diverging' ? '仍在遠離' : '持平'}）</span>
+          </p>
+        ) : (
+          <p className="text-[11px] leading-relaxed text-muted-foreground/55">
+            <span className="text-foreground/60">MA5/MA20</span>
+            <span className="ml-1.5">近 5 日內無黃金交叉跡象</span>
+          </p>
+        )}
+      </div>
+
+      <p className="text-[10px] text-muted-foreground/45 leading-relaxed">
+        粗估提示，假設未來價停在今收；非進出場訊號。
+      </p>
     </div>
   );
 }

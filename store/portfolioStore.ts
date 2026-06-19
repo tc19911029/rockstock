@@ -54,6 +54,19 @@ export interface PortfolioHolding {
   operationMode?: 'short' | 'long';
 
   /**
+   * 部位方向（賠少-1 做空 live 風控，2026-06-19）
+   * 'long' = 做多（買進）；'short' = 做空（放空）。
+   * 缺省 / 未設 = 'long'（向下相容，既有持倉行為位元不變）。
+   *
+   * 與 operationMode（短線/長線，控停利用哪條均線）是**正交**兩維：
+   *   - positionSide 決定盈虧方向與停損/回補語意（做多停損 vs 做空停損回補）
+   *   - operationMode 決定守哪條均線
+   * 只有 positionSide==='short' 才走 holdingsActionEngine 的做空分支；
+   * 'long' / 缺省一律走原本的做多出場邏輯，完全不受影響。
+   */
+  positionSide?: 'long' | 'short';
+
+  /**
    * 進階紀律啟用 flag（議題 B 寶典 #5/#6）
    * B/P 訊號累計獲利 ≥ 10% 後啟用「< 10% 續抱、≥ 10% 才停利」紀律
    */

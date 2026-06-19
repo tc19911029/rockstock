@@ -18,13 +18,15 @@ import { CandleWithIndicators, RuleSignal, ChartSignalMarker } from '@/types';
 import { getBullBearColors } from '@/lib/chart/colors';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import { detectLetterNStructure, detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
+import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
 
 const MA_COLORS = {
   ma5:   '#facc15', // 黃
   ma10:  '#3b82f6', // 藍
   ma20:  '#a855f7', // 紫
   ma60:  '#e2e8f0', // 白
-  ma240: '#f97316', // 橘
+  ma120: '#22d3ee', // 青（半年線）
+  ma240: '#f97316', // 橘（年線）
 };
 
 /** Convert date string to lightweight-charts Time.
@@ -146,7 +148,7 @@ interface CandleChartProps {
   onDoubleClick?: (candle: CandleWithIndicators) => void;
   height?: number;
   fillContainer?: boolean;
-  maToggles?: { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma240: boolean };
+  maToggles?: { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma120: boolean; ma240: boolean };
   showBollinger?: boolean;
   /** 顯示書本 p.37/p.38 切線（下降切線+上升切線），預設開 */
   showTrendlines?: boolean;
@@ -164,6 +166,11 @@ interface CandleChartProps {
   showPivots?: boolean;
   /** 顯示前高壓/前低撐/大量撐壓線，預設關 */
   showSupportResistance?: boolean;
+  /**
+   * 顯示最近一根長紅/長黑 K 的三層支撐/壓力標線（書本 CH2-04 最高=最強、1/2=平均成本、最低=最弱），
+   * 純顯示的階梯式出場框架，不接 gate。預設關。
+   */
+  showCandleSR?: boolean;
   /** 顯示形態頸線 + 目標價 + 結構失效價，預設關 */
   showNeckline?: boolean;
   /** 顯示形態關鍵點（ABCDE / L1L2L3 + H1H2 等）與連線，預設關 */
@@ -217,7 +224,7 @@ interface CandleChartProps {
 
 export default function CandleChart({
   candles, signals, chartMarkers = [], avgCost, stopLossPrice, onCrosshairMove, onDoubleClick, height = 400, fillContainer = false,
-  maToggles = { ma5: true, ma10: true, ma20: true, ma60: true, ma240: false },
+  maToggles = { ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false },
   showBollinger = false,
   showTrendlines = true,
   showAscendingTrendline,
@@ -227,6 +234,7 @@ export default function CandleChart({
   showConsolidationLines = false,
   showPivots = false,
   showSupportResistance = false,
+  showCandleSR = false,
   showNeckline = false,
   showPattern = false,
   highlightDate,
@@ -249,6 +257,8 @@ export default function CandleChart({
   const avgCostLineRef   = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
   const stopLossLineRef  = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
   const srLineRefs       = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([]);
+  // K 棒三層支撐/壓力標線（最近一根長紅/長黑的最高/1半/最低）
+  const candleSRLineRefs = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([]);
   // 形態 toggle 用 LineSeries（支援水平+斜線；descending-wedge 頸線是斜的）
   const necklineRef       = useRef<ISeriesApi<'Line'> | null>(null);
   const targetRef         = useRef<ISeriesApi<'Line'> | null>(null);
@@ -382,7 +392,7 @@ export default function CandleChart({
       wickUpColor: bull, wickDownColor: bear,
     });
 
-    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
+    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma120', 'ma240'] as const;
     const newMARef: Record<string, ISeriesApi<'Line'>> = {};
     for (const key of maKeys) {
       newMARef[key] = chart.addSeries(LineSeries, {
@@ -552,7 +562,7 @@ export default function CandleChart({
     /** 過濾 null/undefined/NaN（分鐘K MA 數據不足時會產生 NaN） */
     const validNum = (v: number | undefined | null): v is number =>
       v != null && Number.isFinite(v);
-    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
+    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma120', 'ma240'] as const;
     for (const key of maKeys) {
       maRefs.current[key]?.setData(
         candles.filter(c => validNum(c[key])).map(c => ({ time: toTime(c.date), value: c[key]! }))
@@ -820,7 +830,7 @@ export default function CandleChart({
 
   // ── MA visibility toggle ─────────────────────────────────────────────────
   useEffect(() => {
-    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
+    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma120', 'ma240'] as const;
     for (const key of maKeys) {
       const series = maRefs.current[key];
       if (series) {
@@ -1001,6 +1011,43 @@ export default function CandleChart({
       }));
     }
   }, [showSupportResistance, candles]);
+
+  // ── K 棒三層支撐/壓力標線（書本 CH2-04：最高=最強、1/2=平均成本、最低=最弱）──
+  // 錨定「最近一根長紅/長黑 K」，畫 3 條水平線；純顯示的階梯式出場框架，不接 gate。
+  useEffect(() => {
+    if (!candleRef.current) return;
+    for (const line of candleSRLineRefs.current) {
+      try { candleRef.current.removePriceLine(line); } catch { /* noop */ }
+    }
+    candleSRLineRefs.current = [];
+
+    if (!showCandleSR || candles.length === 0) return;
+
+    // 從最新往回找最近一根長紅（多方）或長黑（空方）K 棒當錨點
+    let anchorIdx = -1;
+    for (let i = candles.length - 1; i >= 0; i--) {
+      if (isLongRedCandle(candles[i]) || isLongBlackCandle(candles[i])) { anchorIdx = i; break; }
+    }
+    if (anchorIdx < 0) return;  // 近期無長紅/長黑 → 不畫
+
+    const lv = candleSRLevels(candles[anchorIdx]);
+    const isUp = lv.direction === 'up';
+    // 多方三層支撐用綠、空方三層壓力用紅；中線（平均成本）一律 amber 虛線
+    const strongColor = isUp ? '#10b981' : '#ec4899';
+    const weakColor   = isUp ? '#10b981' : '#ec4899';
+    const prefix = isUp ? '撐' : '壓';
+    const lines: Array<{ price: number; color: string; title: string; width: 1 | 2 }> = [
+      { price: lv.strong, color: strongColor, title: `最強${prefix}`,    width: 2 },
+      { price: lv.mid,    color: '#f59e0b',   title: '½平均成本',          width: 1 },
+      { price: lv.weak,   color: weakColor,   title: `最弱${prefix}`,    width: 1 },
+    ];
+    for (const ln of lines) {
+      candleSRLineRefs.current.push(candleRef.current.createPriceLine({
+        price: ln.price, color: ln.color, lineWidth: ln.width, lineStyle: 2,
+        axisLabelVisible: true, title: ln.title,
+      }));
+    }
+  }, [showCandleSR, candles]);
 
   // ── 頸線 / 目標 / 結構失效（showNeckline）+ 形態連線（showPattern） ──
   useEffect(() => {

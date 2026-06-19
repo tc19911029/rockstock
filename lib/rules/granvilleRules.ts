@@ -1,6 +1,6 @@
 import { TradingRule, RuleSignal } from '@/types';
 import { maDeviation } from './ruleUtils';
-import { HIGH_DEVIATION_PCT } from '@/lib/analysis/bookThresholds';
+import { HIGH_DEVIATION_PCT, BOOK_RECLAIM_LOOKBACK } from '@/lib/analysis/bookThresholds';
 
 // ═══════════════════════════════════════════════════════════════
 //  葛蘭碧八大法則 (Granville's 8 Rules)
@@ -34,6 +34,30 @@ function isMaFlattening(candles: { ma20?: number }[], index: number): boolean {
   const p5 = candles[index - 5].ma20;
   if (c == null || p5 == null) return false;
   return Math.abs(c - p5) / p5 < 0.005; // 變動率 < 0.5%
+}
+
+/**
+ * 賣點 7 空單時效（expiry）— 書本 CH3-06：反彈站回月線後 1–3 天內沒跌回 → 訊號失效不能再空。
+ * 「超過 3 天還站在月線上（扣抵翻上彎、月線要上揚）就不能再做空；強勢轉強股會連三紅站穩月線。」
+ *
+ * 判定：在「今日之前」的近窗內，若曾出現「收盤連續 ≥ BOOK_RECLAIM_LOOKBACK(=3) 天站上 MA20」，
+ * 表示這波反彈已站穩月線、沒在 3 天內跌回 → 空單訊號過期，granvilleSell7 不再發空訊。
+ * 回看窗用 2×BOOK_RECLAIM_LOOKBACK，足以涵蓋「站回後觀察 3 天」這段；用既有常數不新增魔術數。
+ */
+function isShortSignalExpired(candles: { close: number; ma20?: number }[], index: number): boolean {
+  const window = BOOK_RECLAIM_LOOKBACK * 2;
+  let consecutiveAbove = 0;
+  // 掃今日之前的近窗（不含今日，因今日多半已跌回月線之下才會觸發賣點 7 主邏輯）
+  for (let i = index - 1; i >= 0 && i > index - 1 - window; i--) {
+    const k = candles[i];
+    if (k.ma20 != null && k.close > k.ma20) {
+      consecutiveAbove++;
+      if (consecutiveAbove >= BOOK_RECLAIM_LOOKBACK) return true;
+    } else {
+      consecutiveAbove = 0;
+    }
+  }
+  return false;
 }
 
 // ── 買入法則 1-4 ───────────────────────────────────────────────
@@ -274,6 +298,10 @@ export const granvilleSell7: TradingRule = {
     const prev = candles[index - 1];
     if (c.ma20 == null || prev.ma20 == null) return null;
     if (!isMaFalling(candles, index)) return null;
+
+    // 賠少-14：空單時效保護（書本 CH3-06）— 反彈站回月線後 1–3 天內沒跌回則訊號失效。
+    // 若近期已連續 ≥3 天站上 MA20（扣抵翻上彎、月線要上揚），不再發空訊（強勢轉強）。
+    if (isShortSignalExpired(candles, index)) return null;
 
     let allBelow = true;
     for (let i = index - 4; i <= index; i++) {

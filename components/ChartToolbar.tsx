@@ -4,7 +4,7 @@ import type { Candle } from '@/types';
 import type { TrendState } from '@/lib/analysis/trendAnalysis';
 import { MarketTrendBadge } from './MarketTrendBadge';
 
-interface MaToggles { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma240: boolean }
+interface MaToggles { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma120: boolean; ma240: boolean }
 interface Indicators {
   macd: boolean; kd: boolean; volume: boolean; rsi: boolean;
   /** 外資買賣超副圖 */
@@ -73,6 +73,9 @@ interface ChartToolbarProps {
   onPivotsToggle?: () => void;
   showSupportResistance?: boolean;
   onSupportResistanceToggle?: () => void;
+  /** K 棒三層支撐/壓力標線（最近長紅/長黑：最高=最強、1/2=平均成本、最低=最弱）*/
+  showCandleSR?: boolean;
+  onCandleSRToggle?: () => void;
   showNeckline?: boolean;
   onNecklineToggle?: () => void;
   showPattern?: boolean;
@@ -102,12 +105,14 @@ interface ChartToolbarProps {
   scanDate?: string | null;
 }
 
-const MA_CONFIGS = [
-  { key: 'ma5' as const, label: 'MA5' },
-  { key: 'ma10' as const, label: 'MA10' },
-  { key: 'ma20' as const, label: 'MA20' },
-  { key: 'ma60' as const, label: 'MA60' },
-  { key: 'ma240' as const, label: 'MA240' },
+const MA_CONFIGS: Array<{ key: keyof MaToggles; label: string; title: string; locked?: boolean }> = [
+  { key: 'ma5',   label: 'MA5',   title: '顯示/隱藏 5 日線' },
+  { key: 'ma10',  label: 'MA10',  title: '顯示/隱藏 10 日線' },
+  // 月線（20MA）是做多核心過濾、回檔最後防線 → 書本 CH3-03「20MA 一定要打開、不可關掉」，固定顯示不可關
+  { key: 'ma20',  label: 'MA20',  title: '月線（20MA）— 做多核心過濾、回檔最後防線；書本規定固定顯示，不可關閉', locked: true },
+  { key: 'ma60',  label: 'MA60',  title: '顯示/隱藏 60 日線（季線）' },
+  { key: 'ma120', label: 'MA120', title: '顯示/隱藏 120 日線（半年線）' },
+  { key: 'ma240', label: 'MA240', title: '顯示/隱藏 240 日線（年線）— 整年買盤平均成本' },
 ];
 
 const INTERVAL_CONFIGS: Array<{ key: string; label: string; title: string }> = [
@@ -150,13 +155,14 @@ function activeChartPreset(
   // 籌碼套組：有籌碼副圖、且技術/三色副圖全關（主圖均線維持技術設定，不納入判定）
   if (anyChipSub && !anyTechSub && !anySanseSub) return 'chip';
   if (
-    ma.ma5 && ma.ma10 && ma.ma20 && ma.ma60 && !ma.ma240 &&
+    ma.ma5 && ma.ma10 && ma.ma20 && ma.ma60 && !ma.ma120 && !ma.ma240 &&
     !showBollinger && !showShuangB &&
     ind.volume && ind.kd && !ind.rsi && ind.macd &&
     !ind.mainForce && !ind.season && showPivots
   ) return 'technical';
+  // 三色套組：均線只保留月線（20MA 固定不可關），其餘清空
   if (
-    !ma.ma5 && !ma.ma10 && !ma.ma20 && !ma.ma60 && !ma.ma240 &&
+    !ma.ma5 && !ma.ma10 && ma.ma20 && !ma.ma60 && !ma.ma120 && !ma.ma240 &&
     !showBollinger && showShuangB &&
     !ind.volume && !ind.kd && !ind.rsi && !ind.macd &&
     ind.mainForce && ind.season && !showPivots
@@ -178,6 +184,7 @@ export default function ChartToolbar({
   signalStrengthMin, onSignalStrengthChange,
   showPivots = false, onPivotsToggle,
   showSupportResistance = false, onSupportResistanceToggle,
+  showCandleSR = false, onCandleSRToggle,
   showNeckline = false, onNecklineToggle,
   showPattern = false, onPatternToggle,
   showAscendingLine = false, onAscendingLineToggle,
@@ -316,15 +323,18 @@ export default function ChartToolbar({
             <span className="w-px h-3.5 bg-border/60 mx-0.5" />
           </>
         )}
-        {MA_CONFIGS.map(({ key, label }) => (
+        {MA_CONFIGS.map(({ key, label, title, locked }) => (
           <button key={key}
-            onClick={() => onMaToggle(key)}
+            onClick={locked ? undefined : () => onMaToggle(key)}
+            disabled={locked}
             aria-pressed={maToggles[key]}
-            aria-label={`${maToggles[key] ? '隱藏' : '顯示'} ${label}`}
+            aria-label={locked ? `${label}（固定顯示，不可關閉）` : `${maToggles[key] ? '隱藏' : '顯示'} ${label}`}
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              maToggles[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+              locked
+                ? 'bg-sky-700/60 text-sky-200 ring-1 ring-sky-400/40 cursor-default'
+                : maToggles[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title={`顯示/隱藏 ${label}`}
+            title={title}
           >{label}</button>
         ))}
         <span className="w-px h-3.5 bg-border/60 mx-0.5" />
@@ -425,6 +435,17 @@ export default function ChartToolbar({
             }`}
             title="找壓力與支撐線（突破壓力買、跌破支撐賣）"
           >壓撐</button>
+        )}
+        {onCandleSRToggle && (
+          <button
+            onClick={onCandleSRToggle}
+            aria-pressed={showCandleSR}
+            aria-label={`${showCandleSR ? '隱藏' : '顯示'}K棒三層支撐壓力`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showCandleSR ? 'bg-amber-600/60 text-amber-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="K 棒三層支撐/壓力（最近長紅/長黑：最高=最強、½=平均成本、最低=最弱）｜書本 CH2-04 階梯式出場框架"
+          >三層撐壓</button>
         )}
         {onNecklineToggle && (
           <button

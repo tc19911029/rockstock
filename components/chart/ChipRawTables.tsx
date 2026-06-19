@@ -19,7 +19,7 @@ type TdccPt = { date: string } & TdccDay;
 type CandlePt = { date: string; close: number; volume: number };
 /** 跟看盤 app 對齊的「正式公式」集中度（HiStock 分點區間彙總算，見 /api/stock/concentration）。
  *  只覆蓋最近數日的 5日(c5)/20日(c20)；其餘日期/週期 fallback 本檔自算近似值。 */
-type ConcPt = { date: string; c5: number | null; c20: number | null };
+type ConcPt = { date: string; c5: number | null; c20: number | null; net?: number | null };
 
 const CONC_PERIODS = [1, 5, 10, 20, 60] as const;
 const INST_SUM_PERIODS = [5, 10, 20, 60] as const;
@@ -81,7 +81,8 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact }: { broker: B
   const [periodA, setPeriodA] = useState(5);
   const [periodB, setPeriodB] = useState(20);
   const rows = useMemo(() => {
-    if (!broker.length || candles.length < 2) return [];
+    // 買賣超可來自 FinMind 集中度同源（concExact.net），所以 broker 檔空也能渲染
+    if (candles.length < 2 || (!broker.length && !(concExact?.length))) return [];
     const byDate = new Map(broker.map(d => [d.date, d.netDifference]));
     // 跟看盤 app 對齊的正式集中度（5日/20日）；其餘日期/週期 fallback 本檔自算
     const exByDate = new Map((concExact ?? []).map(p => [p.date, p]));
@@ -97,9 +98,11 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact }: { broker: B
     const out: { date: string; brokerNet: number | null; cA: number | null; cB: number | null; price: number }[] = [];
     for (let i = start; i < candles.length; i++) {
       const d = candles[i].date;
+      // 買賣超：優先用 FinMind 分點同源值（含當天、補回 Yahoo cron 漏掉的近日）；缺才退回 broker 檔
+      const exNet = exByDate.get(d)?.net;
       out.push({
         date: d,
-        brokerNet: byDate.has(d) ? byDate.get(d)! : null,
+        brokerNet: exNet != null ? exNet : (byDate.has(d) ? byDate.get(d)! : null),
         cA: pick(i, periodA),
         cB: pick(i, periodB),
         price: candles[i].close,

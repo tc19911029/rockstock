@@ -16,10 +16,16 @@ import type { Candle } from '@/types';
 import {
   PROFIT_SHORT_RULE, PROFIT_MID_RULE, PROFIT_LONG_RULE, sma,
 } from '@/lib/agents/holdingsActionEngine';
+import { ABSOLUTE_STOP_LOSS_PRICE_MULT } from '@/lib/sell/v12StopLoss';
+import { computeIndicators } from '@/lib/indicators';
+import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
 
 export interface ShadowEvent {
   date: string;
-  action: 'stop_loss' | 'exit_all_ma20' | 'exit_all_ma10' | 'reduce_half_ma5';
+  action:
+    | 'stop_loss' | 'hard_stop_10pct' | 'exit_all_ma20' | 'exit_all_ma10' | 'reduce_half_ma5'
+    // 賠少-1：做空版回補事件
+    | 'short_stop_cover' | 'short_cover_signal';
   price: number;
   sharesSold: number;
   label: string;
@@ -50,7 +56,15 @@ export function computeShadowLedger(args: {
   shares: number;
   stopLoss: number;
   candles: Candle[];
+  /** 賠少-1：做空部位（缺省=long）。short 走做空回補影子規則。 */
+  positionSide?: 'long' | 'short';
+  /** 賠少-1：做空進場黑K最高點（停損價）；缺值 fallback stopLoss。 */
+  entryHigh?: number;
 }): ShadowResult | null {
+  // 賠少-1：做空走獨立影子規則（進場黑K高點停損 + detectShortExitSignals 回補）。
+  if (args.positionSide === 'short') {
+    return computeShortShadowLedger(args);
+  }
   const { symbol, entryDate, entryPrice, shares, stopLoss, candles } = args;
   if (!candles.length) return null;
   const closes = candles.map(c => c.close);
@@ -76,6 +90,13 @@ export function computeShadowLedger(args: {
     if (close <= stopLoss) {
       realized += close * remaining;
       events.push({ date: c.date, action: 'stop_loss', price: close, sharesSold: remaining, label: `觸發停損 ${stopLoss.toFixed(2)} → 全出` });
+      remaining = 0;
+      break;
+    }
+    // 賠少-2：書本「跌幅 >10% 強制停損」硬規則（與 holdingsActionEngine 同源），獨立於固定價停損。
+    if (close <= entryPrice * ABSOLUTE_STOP_LOSS_PRICE_MULT) {
+      realized += close * remaining;
+      events.push({ date: c.date, action: 'hard_stop_10pct', price: close, sharesSold: remaining, label: `跌幅 >10% 強制停損 → 全出` });
       remaining = 0;
       break;
     }
@@ -105,6 +126,73 @@ export function computeShadowLedger(args: {
   const shadowFinal = realized + remaining * lastClose;
   const shadowPnL = shadowFinal - entryPrice * shares;
   const actualPnL = (lastClose - entryPrice) * shares;
+  return {
+    symbol, entryDate, entryPrice, shares,
+    events,
+    remainingShares: remaining,
+    shadowPnL,
+    actualPnL,
+    disciplineGap: shadowPnL - actualPnL,
+    lastClose,
+    lastDate,
+  };
+}
+
+/**
+ * 賠少-1：做空版影子帳本 — 逐日重放書本做空回補規則（單一事實 = shortAnalysis）：
+ *   - close ≥ 進場黑K最高點（entryHigh）→ 停損回補全出（書本做空停損 5-7%）
+ *   - 出現 detectShortExitSignals high severity（底底高 / 突破MA5 / 急跌長紅）→ 回補全出
+ * 做空損益 = (entryPrice − markClose) × shares（下跌為正）。其餘語意與做多版對稱。
+ */
+function computeShortShadowLedger(args: {
+  symbol: string;
+  entryDate: string;
+  entryPrice: number;
+  shares: number;
+  stopLoss: number;
+  candles: Candle[];
+  entryHigh?: number;
+}): ShadowResult | null {
+  const { symbol, entryDate, entryPrice, shares, stopLoss, candles, entryHigh } = args;
+  if (!candles.length) return null;
+  const lastIdx = candles.length - 1;
+  const lastClose = candles[lastIdx].close;
+  const lastDate = candles[lastIdx].date;
+  const coverStop = entryHigh ?? stopLoss;
+  const withInd = computeIndicators(candles);
+
+  let remaining = shares;
+  let realized = 0; // 做空已實現「回補損益」累加：每次回補 sold 股的 (entryPrice − close) × sold
+  const events: ShadowEvent[] = [];
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (c.date <= entryDate) continue;
+    if (remaining <= 0) break;
+    const close = c.close;
+
+    // ① 停損回補：收盤站上進場黑K高點 → 全部回補。
+    if (close >= coverStop) {
+      realized += (entryPrice - close) * remaining;
+      events.push({ date: c.date, action: 'short_stop_cover', price: close, sharesSold: remaining, label: `站上進場黑K高點 ${coverStop.toFixed(2)} → 回補全出` });
+      remaining = 0;
+      break;
+    }
+
+    // ② 做空回補訊號（單一事實）：high severity → 全部回補。
+    const sigs = detectShortExitSignals(withInd, i);
+    if (sigs.some(s => s.severity === 'high')) {
+      realized += (entryPrice - close) * remaining;
+      const label = sigs.find(s => s.severity === 'high')?.label ?? '回補訊號';
+      events.push({ date: c.date, action: 'short_cover_signal', price: close, sharesSold: remaining, label: `${label} → 回補全出` });
+      remaining = 0;
+      break;
+    }
+  }
+
+  // shadow 損益 = 已回補損益 + 剩餘按最新收盤 mark（做空 = (entry − close)×remaining）
+  const shadowPnL = realized + (entryPrice - lastClose) * remaining;
+  const actualPnL = (entryPrice - lastClose) * shares;
   return {
     symbol, entryDate, entryPrice, shares,
     events,

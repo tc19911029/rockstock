@@ -633,9 +633,14 @@ export function evaluateSixConditions(
   if (div.priceUpVolDown) warnings.push('⚠️ 價漲量縮背離(書p.500)');
   if (div.pricePlatVolUp) warnings.push('⚠️ 價平量增停滯(書p.502)');
   if (div.priceUpVolPlat) warnings.push('⚠️ 價漲量平止漲(書p.505)');
-  // 高檔爆量 3 種判定（書本 p.493-499）
+  // 高檔爆量 3 種判定（書本 p.493-499）+ 出貨分級語意（賠少-8 / 小修-4，純避雷顯示）
   const hpv = detectHighPeakVolume(candles, index);
   if (hpv.distributionVolume) warnings.push('⚠️ 高檔出貨量(書p.498)');
+  if (hpv.luringDistribution) warnings.push('⚠️ 誘多出貨量(反彈再爆量騙進場,書p.495)');
+  if ((hpv.consecutiveHighBlackK ?? 0) >= 2) warnings.push(`⚠️ 連${hpv.consecutiveHighBlackK}根高檔爆量黑K(累積出貨)`);
+  if (hpv.positionLabel === 'doubled')   warnings.push('⚠️ 已漲一倍高檔(主力目標區,書p.493)');
+  if (hpv.positionLabel === 'firstHead') warnings.push('⚠️ 做頭第1個頭出貨量(書p.75)');
+  if (hpv.positionLabel === 'secondHead') warnings.push('⚠️ 做頭第2個頭頭頭低(書p.75)');
   // MACD 7 條細則 + 高檔背離（書本 p.540-547）
   const macd7 = detectMacdOsc7(candles, index);
   if (macd7.highPeakDiverge) warnings.push('⚠️ MACD高檔背離(書p.547)');

@@ -34,6 +34,8 @@ export interface DailyActionItem {
   entryPrice: number;
   stopLoss: number;
   shares: number;
+  /** 賠少-1：部位方向（'short' = 做空回補語意）；缺省 = 'long' 做多。 */
+  positionSide?: 'long' | 'short';
   todayClose: number | null;
   asOfDate: string | null;
   unrealizedAmount: number | null;
@@ -80,6 +82,9 @@ export async function GET(req: NextRequest) {
         const mkt = (h.market === 'CN' ? 'CN' : 'TW') as 'TW' | 'CN';
         const { thresholds } = await regimeFor(mkt);
         const stopLoss = h.stopLoss ?? h.entryPrice * 0.93;
+        // 賠少-1：做空 live 風控 — positionSide / 進場黑K最高點皆走 ui blob passthrough。
+        // 缺省（既有持倉）= 做多，行為位元不變。
+        const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
         const base: Omit<DailyActionItem, 'todayClose' | 'asOfDate' | 'unrealizedAmount' | 'action' | 'label' | 'signals' | 'profitPct' | 'suggestedStop' | 'metrics'> = {
           symbol: h.symbol,
           name: h.name,
@@ -88,6 +93,7 @@ export async function GET(req: NextRequest) {
           entryPrice: h.entryPrice,
           stopLoss,
           shares: h.shares,
+          positionSide,
         };
 
         let candles = await loadLocalCandles(h.symbol, mkt);
@@ -107,6 +113,12 @@ export async function GET(req: NextRequest) {
 
         const lastCandle = candles[candles.length - 1];
         const todayClose = lastCandle.close;
+        // 賠少-17：進場買法字母在 ui.triggerSignal（passthrough blob）→ 傳給 engine
+        // 判斷是否為逆勢/搶反彈軌（反轉軌 D/F/N/O）以走專屬「翻黑就走」出場。
+        const triggerSignal = typeof h.ui?.triggerSignal === 'string' ? h.ui.triggerSignal : undefined;
+        // 賠少-1：做空進場黑K最高點（停損價）走 ui.entryKbar.high。
+        const entryKbar = h.ui?.entryKbar as { high?: number } | undefined;
+        const entryHigh = typeof entryKbar?.high === 'number' ? entryKbar.high : undefined;
         const result = evaluateHolding({
           symbol: h.symbol,
           entryPrice: h.entryPrice,
@@ -114,12 +126,18 @@ export async function GET(req: NextRequest) {
           candles,
           todayClose,
           thresholds,
+          triggerSignal,
+          positionSide,
+          entryHigh,
         });
         return {
           ...base,
           todayClose,
           asOfDate: lastCandle.date,
-          unrealizedAmount: (todayClose - h.entryPrice) * h.shares,
+          // 賠少-1：做空未實現損益反向（放空後下跌才賺）；做多 / 缺省維持原算式。
+          unrealizedAmount: positionSide === 'short'
+            ? (h.entryPrice - todayClose) * h.shares
+            : (todayClose - h.entryPrice) * h.shares,
           action: result.action,
           label: result.label,
           signals: result.signals,

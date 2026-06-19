@@ -18,7 +18,7 @@
  *   - 副圖預設只開成交量 / KD / MACD（不開籌碼，籌碼有專屬 ChipDetail 區塊）
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { useV12HistoricalMarkers } from '@/lib/hooks/useV12HistoricalMarkers';
 import { useLockedPattern } from '@/lib/hooks/useLockedPattern';
@@ -69,6 +69,8 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
   const [showMarkers, setShowMarkers] = useState(false);
   const [showPivots, setShowPivots] = useState(true);
   const [showSupportResistance, setShowSupportResistance] = useState(false);
+  // K 棒三層支撐/壓力標線（最近一根長紅/長黑：最高/1半/最低），預設關
+  const [showCandleSR, setShowCandleSR] = useState(false);
   const [showNeckline, setShowNeckline] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
   const [showAscendingTrendline, setShowAscendingTrendline] = useState(false);
@@ -87,7 +89,12 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
     setShowDescendingChannel(next);
   };
   const [showConsolidationLines, setShowConsolidationLines] = useState(false);
-  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
+  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
+  // 月線（20MA）固定顯示、不可關（書本 CH3-03）
+  const handleMaToggle = useCallback((key: keyof typeof maToggles) => {
+    if (key === 'ma20') return;
+    setMaToggles(p => ({ ...p, [key]: !p[key] }));
+  }, []);
   const [showBollinger, setShowBollinger] = useState(false);
   // 副圖：成交量 / KD / MACD 預設開（agent 頁不需要籌碼疊圖，已有專屬區塊）
   const [indicators, setIndicators] = useState({
@@ -144,7 +151,7 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
                 stockName={currentStock?.name}
                 trend={currentTrend}
                 maToggles={maToggles}
-                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
@@ -158,6 +165,8 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
                 onPivotsToggle={() => setShowPivots(v => !v)}
                 showSupportResistance={showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showCandleSR={showCandleSR}
+                onCandleSRToggle={() => setShowCandleSR(v => !v)}
                 showNeckline={showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
                 showPattern={showPattern}
@@ -192,6 +201,7 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
               showBollinger,
               showPivots,
               showSupportResistance,
+              showCandleSR,
               showAscendingTrendline,
               showDescendingTrendline,
               showAscendingChannel,

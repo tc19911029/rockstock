@@ -46,7 +46,7 @@ import {
 } from '@/lib/backtest/WalkForwardTest';
 import { useSettingsStore } from './settingsStore';
 import { AI_CONFIDENCE_HIGH, AI_CONFIDENCE_MEDIUM } from '@/lib/analysis/bookThresholds';
-import { REVERSAL_OR_SYSTEM_SET } from '@/lib/scanner/buyMethodTracks';
+import { REVERSAL_OR_SYSTEM_SET, SMARTMONEY_TRACK_SET, INSTDIP_TRACK_SET, INSTSTEAL_TRACK_SET } from '@/lib/scanner/buyMethodTracks';
 
 // Module-level abort controller for scan operations
 let scanAbortController: AbortController | null = null;
@@ -360,11 +360,12 @@ export const useBacktestStore = create<BacktestState>()(
             ? scanDirection
             : 'long';
         await get().fetchCronDates(market, fetchDirection);
-        // 若已有 scanDate 直接用，否則從 cronDates 選最新有結果的日期
-        const targetDate = scanDate ?? (() => {
-          const dates = get().cronDates.filter(c => c.market === market);
-          return (dates.find(c => c.resultCount > 0) ?? dates[0])?.date ?? null;
-        })();
+        // 切換買法軌 → 跳到「該軌最新有結果的一天」，不要黏在前一軌停的舊日期上。
+        // 例：Y 軌盤後 18:xx 才掃完，使用者若已停在 06-15 切過來，舊版 `scanDate ??` 會卡 06-15、
+        //     看不到剛跑好的 06-16。想比同一天 → 切完軌後再點日期列上那天即可。
+        const dates = get().cronDates.filter(c => c.market === market);
+        const targetDate =
+          (dates.find(c => c.resultCount > 0) ?? dates[0])?.date ?? scanDate ?? null;
         if (!targetDate) return;
         // 委託 loadCronSession（會補填 forward performance）
         await loadCronSession(market, targetDate, { scanOnly: true, direction: fetchDirection });
@@ -994,8 +995,14 @@ export const useBacktestStore = create<BacktestState>()(
             // - 機械軌（R）：純排名，不過 Step 1 → 不過濾 A（REVERSAL_OR_SYSTEM_SET 在 buyMethodTracks 已含 R）
             // 之前的 bug：所有 method 都加 A filter，導致 N/F/O/D/Q session 內反轉軌訊號被擋（如 3026 跌菱形 80% 沒過 A 但 N matched 應顯示）
             const requireA = !REVERSAL_OR_SYSTEM_SET.has(activeBuyMethod);
+            // 籌碼觀察軌（W 大戶偷買 / X 法人接刀 / Y 大戶法人偷買）只是「看大戶在偷買誰」的
+            // 觀察清單、非進場明牌 → 處置股照顯示（卡片標 ⚠️處置），不像書本買法軌硬排除。
+            // 2026-06-16 使用者決議：處置股全是的日子若一律藏掉會整片空白、看不到觀察結果。
+            const isChipObsTrack = SMARTMONEY_TRACK_SET.has(activeBuyMethod)
+              || INSTDIP_TRACK_SET.has(activeBuyMethod)
+              || INSTSTEAL_TRACK_SET.has(activeBuyMethod);
             const scanResults = (session?.results ?? []).filter(r =>
-              !isDisposalVetoed(r) && (!requireA || r.matchedMethods?.includes('A')),
+              (isChipObsTrack || !isDisposalVetoed(r)) && (!requireA || r.matchedMethods?.includes('A')),
             );
             set({ scanResults, isLoadingBuyMethod: false });
 

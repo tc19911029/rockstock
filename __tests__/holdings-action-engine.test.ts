@@ -128,4 +128,87 @@ describe('evaluateHolding', () => {
     const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 105, candles, todayClose: 100 });
     expect(r.action).toBe('stop_loss');
   });
+
+  // 賠少-2：跌幅 >10% 強制停損（獨立於固定價 stopLoss）
+  it('跌幅 >10% → 即使固定停損更寬也強制 stop_loss', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, () => 100));
+    // 固定停損設很寬（80），但跌幅 11% 仍強制停損
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 80, candles, todayClose: 89 });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals[0].type).toBe('hard_stop_10pct');
+  });
+
+  // 賠少-16：當日帳上虧損 >5% → watch_stop（與 near_stop 並存，不剔除）
+  it('帳上虧損 >5% → watch_stop（loss_over_5pct）', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, () => 100));
+    // 跌 7%（未破 10% 硬停損、固定停損設很寬）
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 80, candles, todayClose: 93 });
+    expect(r.action).toBe('watch_stop');
+    expect(r.signals.some(s => s.type === 'loss_over_5pct')).toBe(true);
+  });
+
+  // 賠少-11：飆股獲利 >20% + 爆量黑K → reduce_half
+  it('獲利 >20% + 爆量黑K → reduce_half（blowoff_black_reduce）', () => {
+    const closes = Array.from({ length: 30 }, (_, i) => 100 + i * 1.0); // 緩升，避免破均線
+    const candles = closes.map((c, i) => {
+      const d = new Date('2026-01-01'); d.setDate(d.getDate() + i);
+      return { date: d.toISOString().slice(0, 10), open: c, high: c * 1.005, low: c * 0.995, close: c, volume: 10000 };
+    });
+    // 今日：高開收黑（爆量黑K），收盤仍 >MA5/MA10/MA20 且漲幅 >20%
+    const prevClose = closes[closes.length - 1]; // 129
+    const todayOpen = prevClose + 5;
+    const todayClose = prevClose - 1; // 收黑
+    candles.push({ date: '2026-02-15', open: todayOpen, high: todayOpen + 1, low: todayClose - 1, close: todayClose, volume: 50000 });
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 90, candles, todayClose });
+    expect(r.profitPct).toBeGreaterThanOrEqual(0.20);
+    expect(r.action).toBe('reduce_half');
+    expect(r.signals.some(s => s.type === 'blowoff_black_reduce')).toBe(true);
+  });
+});
+
+// 賠少-1：做空 live 風控分支（positionSide==='short'）。long 部位完全不受影響。
+describe('evaluateHolding — 做空分支（positionSide=short）', () => {
+  it('收盤站上進場黑K最高點 → stop_loss（回補）', () => {
+    // 空頭走勢但今日反彈站上 entryHigh → 回補停損
+    const closes = Array.from({ length: 30 }, (_, i) => 100 - i * 0.5);
+    closes.push(90); // today 反彈
+    const candles = makeCandles(closes);
+    const r = evaluateHolding({
+      symbol: 'S', entryPrice: 88, stopLoss: 999, candles, todayClose: 90,
+      positionSide: 'short', entryHigh: 89,
+    });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals[0].type).toBe('short_stop_cover');
+    // 做空虧損：進場 88 → 反彈到 90，profitPct = (88-90)/88 < 0
+    expect(r.profitPct).toBeLessThan(0);
+  });
+
+  it('做空獲利反向計算：進場 100、現價 90 → profitPct +10%', () => {
+    const closes = Array.from({ length: 31 }, (_, i) => 100 - i * 0.3);
+    const candles = makeCandles(closes);
+    const r = evaluateHolding({
+      symbol: 'S', entryPrice: 100, stopLoss: 999, candles, todayClose: 90,
+      positionSide: 'short', entryHigh: 110, // 未觸發回補停損
+    });
+    expect(r.profitPct).toBeCloseTo(0.10, 2);
+    expect(['hold', 'watch_stop', 'cover_all']).toContain(r.action);
+  });
+
+  it('entryHigh 缺值 → fallback 用 stopLoss 當回補價', () => {
+    const closes = Array.from({ length: 30 }, () => 100);
+    const candles = makeCandles(closes);
+    const r = evaluateHolding({
+      symbol: 'S', entryPrice: 95, stopLoss: 100, candles, todayClose: 100,
+      positionSide: 'short',
+    });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals[0].type).toBe('short_stop_cover');
+  });
+
+  it('long 部位（缺省 positionSide）行為位元不變 — 同輸入仍走做多停損', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, () => 100));
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 95, candles, todayClose: 94 });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals[0].type).toBe('absolute_stop'); // 做多路徑，不是 short_stop_cover
+  });
 });

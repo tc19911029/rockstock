@@ -256,6 +256,7 @@ export function computeIndicators(candles: Candle[]): CandleWithIndicators[] {
       ma10:    sma(closes, i, 10),
       ma20:    sma(closes, i, 20),
       ma60:    sma(closes, i, 60),
+      ma120:   sma(closes, i, 120),
       ma240:   sma(closes, i, 240),
       ma3:     sma(closes, i, 3),
       ma24:    sma(closes, i, 24),

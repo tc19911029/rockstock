@@ -14,6 +14,12 @@
 import { CandleWithIndicators } from '@/types';
 import { detectTrend, detectTrendPosition, findPivots } from './trendAnalysis';
 import type { TrendState, TrendPosition, ConditionResult } from './trendAnalysis';
+import {
+  BLACKK_MIN_BODY_PCT,
+  BLACKK_MIN_VOL_RATIO,
+  BASE_HIGH_VOL_RATIO,
+  TRUE_BREAKDOWN_PCT,
+} from './bookThresholds';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +36,23 @@ export interface ShortSixConditionsResult {
 }
 
 export interface ShortExitSignal {
+  type: string;
+  label: string;
+  detail: string;
+  severity: 'high' | 'medium' | 'low';
+}
+
+/**
+ * 空頭續跌避雷訊號（賠少-12 / CH4-08、CH4-06）
+ *
+ * 與 `ShortExitSignal`（回補空單，趨勢將盡）方向相反：這裡是「空頭續勢、別搶反彈接刀」
+ * 的純避雷顯示訊號。兩種型態（書本「空頭進場 2 大口訣」之延伸觀察）：
+ *   1. 行進間大量長黑（midTrendBigBlack）— 空頭行進間出現大量長黑且破前日低 → 還有低點，續跌
+ *   2. 彈後支撐線跌破（reboundSupportBreak）— 反彈後再下跌、收盤跌破前波低點(支撐線) → 換手失敗、續跌
+ *
+ * 純避雷/出場側顯示，**不接做多選股 gate、不進掃描 universe**。
+ */
+export interface ShortContinuationSignal {
   type: string;
   label: string;
   detail: string;
@@ -238,6 +261,89 @@ export function detectShortExitSignals(
         detail: `爆量長下影線（下影線為實體${(lowerShadow/bodySize).toFixed(1)}倍），止跌訊號`,
         severity: 'medium',
       });
+    }
+  }
+
+  return signals;
+}
+
+// ── 空頭續跌避雷（賠少-12 / CH4-08、CH4-06）──────────────────────────────────
+
+/**
+ * 偵測空頭續跌避雷訊號 — 行進間大量長黑 + 彈後支撐線跌破與否（書本 CH4-08 / CH4-06）
+ *
+ * 純避雷/出場側顯示：提醒「空頭還沒走完、別搶反彈接刀」（多單避雷）／「空單續抱」（做空側）。
+ * **不接做多選股 gate、不進掃描 universe、不加任何排序因子。**
+ *
+ * 門檻全部沿用既有 bookThresholds 常數，不新增魔術數字：
+ *   - 大量：avg5 × BASE_HIGH_VOL_RATIO(1.5) 或 前日 × BLACKK_MIN_VOL_RATIO(1.3)
+ *   - 長黑：實體 ≥ BLACKK_MIN_BODY_PCT(1.5%)
+ *   - 真跌破支撐：收盤 < 前波低點 ×(1 - TRUE_BREAKDOWN_PCT(3%))
+ */
+export function detectShortContinuationSignals(
+  candles: CandleWithIndicators[],
+  index: number,
+): ShortContinuationSignal[] {
+  if (index < 10) return [];
+  const c = candles[index];
+  const prev = candles[index - 1];
+  if (!c || !prev) return [];
+
+  // 僅在空頭趨勢中才談「續跌」；多頭/盤整的黑K是回檔或洗盤，不在此判定。
+  const trend = detectTrend(candles, index);
+  if (trend !== '空頭') return [];
+
+  // 末跌段已乖離過大 → 反而易反彈，不要再喊「續跌」（與做空戒律 3 同精神）。
+  const stage = detectTrendPosition(candles, index);
+  if (stage === '末跌段(低檔)') return [];
+
+  const signals: ShortContinuationSignal[] = [];
+
+  // 共用「大量長黑」判定（書本「大量長黑 K」之長 + 大量門檻）
+  const avg5 = c.avgVol5 ?? 0;
+  const bodyPct = c.open > 0 ? Math.abs(c.close - c.open) / c.open : 0;
+  const isBlackK = c.close < c.open;
+  const isLongBlack = isBlackK && bodyPct >= BLACKK_MIN_BODY_PCT / 100;
+  const isBigVol =
+    (avg5 > 0 && c.volume >= avg5 * BASE_HIGH_VOL_RATIO) ||
+    (prev.volume > 0 && c.volume >= prev.volume * BLACKK_MIN_VOL_RATIO);
+
+  // ① 行進間大量長黑（CH4-08）：空頭行進間出現大量長黑 + 收盤破前日低 → 還有低點，續跌。
+  if (isLongBlack && isBigVol && c.close < prev.low) {
+    signals.push({
+      type: 'SHORT_MIDTREND_BIG_BLACK',
+      label: '行進間大量長黑',
+      detail: `空頭${stage}出現大量長黑K（實體${(bodyPct * 100).toFixed(1)}%）破前日低${prev.low.toFixed(1)}，續跌、別接刀`,
+      severity: 'high',
+    });
+  }
+
+  // ② 彈後看支撐線跌破與否（CH4-06）：先有一段反彈（近 6 根 close 曾站回 MA5），
+  //    今日再下跌且收盤真跌破前波低點(支撐線) → 換手失敗 / 反彈結束、續跌。
+  const recentRebound =
+    c.ma5 != null &&
+    (() => {
+      for (let i = Math.max(1, index - 6); i < index; i++) {
+        const k = candles[i];
+        if (k.ma5 != null && k.close > k.ma5) return true;
+      }
+      return false;
+    })();
+
+  if (recentRebound && isBlackK) {
+    // 支撐線 = 最近一個前波低點（findPivots 回傳 most-recent-first）
+    const lows = findPivots(candles, index, 8).filter((p) => p.type === 'low');
+    const support = lows.length > 0 ? lows[0].price : null;
+    if (support != null) {
+      const brokeSupport = c.close < support * (1 - TRUE_BREAKDOWN_PCT);
+      if (brokeSupport) {
+        signals.push({
+          type: 'SHORT_REBOUND_SUPPORT_BREAK',
+          label: '彈後跌破支撐線',
+          detail: `反彈後再下跌、收盤(${c.close.toFixed(1)})真跌破前波低支撐${support.toFixed(1)}，換手失敗、空頭續跌`,
+          severity: 'high',
+        });
+      }
     }
   }
 

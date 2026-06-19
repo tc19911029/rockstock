@@ -35,6 +35,16 @@ import type { CandleWithIndicators } from '../../types';
 
 import type { V12Letter } from '../analysis/v12Signals';
 
+// ── 10% 絕對下限單一事實（議題 S3-7：④ 10% 上限 + ⑥-4 合併）─────────────
+/**
+ * 書本「絕對停損：跌幅 >10% 必走」硬規則。任何停損點都不得寬於 entry×(1−此值)。
+ * 本人回測（記憶 exit_stoploss_backtest）也指向 -10% 是甜蜜點。
+ * 全站凡「10% 絕對下限 / 跌幅>10% 強制停損」一律 import 此常數，不可再寫 0.10 / 0.90 字面值。
+ */
+export const ABSOLUTE_STOP_LOSS_PCT = 0.10;
+/** 絕對下限價係數：1 − ABSOLUTE_STOP_LOSS_PCT = 0.90（給 entry 直接乘） */
+export const ABSOLUTE_STOP_LOSS_PRICE_MULT = 1 - ABSOLUTE_STOP_LOSS_PCT;
+
 // ── 字母 → 主停損方法 / 對應均線（議題 S3-1 + Step 3 ③）──────────────────
 
 /** 主停損方法類型 */
@@ -178,7 +188,7 @@ export function calculateInitialStopLoss(inputs: StopLossInputs): StopLossResult
   const { letter, entryPrice, entryKbar, tickSize } = inputs;
   const method = SIGNAL_TO_PRIMARY_STOP[letter];
   const fixedPct = SIGNAL_TO_FIXED_STOP_PCT[letter];
-  const absoluteFloor = entryPrice * (1 - 0.10);  // 10% 絕對下限
+  const absoluteFloor = entryPrice * ABSOLUTE_STOP_LOSS_PRICE_MULT;  // 10% 絕對下限
 
   let primarySL = 0;
   let detail = '';
@@ -274,7 +284,7 @@ export function updateStopLossDaily(
     if (maValue != null && maValue > initial.stopLossPrice) {
       return {
         ...initial,
-        stopLossPrice: Math.max(maValue, entryPrice * 0.90),  // 仍套 10% 絕對下限
+        stopLossPrice: Math.max(maValue, entryPrice * ABSOLUTE_STOP_LOSS_PRICE_MULT),  // 仍套 10% 絕對下限
         detail: `${trailingMA} 跟隨上揚: ${maValue.toFixed(2)}`,
       };
     }
@@ -366,7 +376,7 @@ export function checkAbsoluteStopLoss(inputs: AbsoluteStopLossInputs): AbsoluteS
   }
 
   // ⑥-4：跌幅 > 10%（議題 S3-7 合併 ④/⑥-4）
-  if (todayClose < entryPrice * 0.90) {
+  if (todayClose < entryPrice * ABSOLUTE_STOP_LOSS_PRICE_MULT) {
     return {
       triggered: true,
       reason: 'loss-over-10pct',

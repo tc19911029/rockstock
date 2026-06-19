@@ -33,6 +33,8 @@ export interface StorePortfolioHolding {
   market?: MarketId;
   notes?: string;
   triggerSignal?: string;
+  /** 賠少-1：做空 live 風控。缺省=long；非 core key → 自動進 ui blob、hydration 展回頂層 */
+  positionSide?: 'long' | 'short';
   // ... 其他 UI-only 欄位忽略
 }
 

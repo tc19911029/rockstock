@@ -13,6 +13,7 @@ const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   watch_stop:  'bg-yellow-900/40 text-yellow-200 border-yellow-700',
   can_add:     'bg-cyan-900/50 text-cyan-100 border-cyan-500',
   hold:        'bg-slate-800/60 text-slate-200 border-slate-600',
+  cover_all:   'bg-orange-900/60 text-orange-100 border-orange-500', // 賠少-1：做空回補
   no_data:     'bg-secondary text-muted-foreground border-border',
 };
 
@@ -72,7 +73,7 @@ export function PortfolioDailyActionPanel() {
   if (!data || data.items.length === 0) return null;
 
   const actionable = data.items.filter(it =>
-    ['stop_loss', 'exit_all', 'reduce_half', 'watch_stop'].includes(it.action),
+    ['stop_loss', 'exit_all', 'reduce_half', 'watch_stop', 'cover_all'].includes(it.action),
   );
 
   return (
@@ -114,6 +115,9 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
     <div className="px-3 py-2 hover:bg-muted/30 transition-colors">
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 min-w-0">
+          {item.positionSide === 'short' && (
+            <span className="text-[9px] px-1 rounded bg-rose-900/50 text-rose-200 border border-rose-700" title="做空（放空）部位">🔻空</span>
+          )}
           <span className="font-mono text-[11px] text-foreground/80">{item.symbol.replace(/\.(TW|TWO)$/, '')}</span>
           <span className="text-xs font-medium text-foreground truncate">{item.name}</span>
         </div>
@@ -154,7 +158,7 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
           </div>
         )}
 
-        {item.suggestedStop != null && item.suggestedStop > item.stopLoss + 0.01 && (
+        {item.positionSide !== 'short' && item.suggestedStop != null && item.suggestedStop > item.stopLoss + 0.01 && (
           <span className="text-cyan-300/80" title="建議把停損上移到此價（鎖獲利）">
             💡 停損上移 {item.stopLoss.toFixed(2)} → <span className="font-bold">{item.suggestedStop.toFixed(2)}</span>
           </span>

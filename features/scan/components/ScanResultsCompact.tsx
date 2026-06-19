@@ -437,6 +437,12 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                             title="大戶法人偷買：股價在跌 + 5日籌碼集中度在增加 + 法人連買（觀察用，回測無穩定超額）">
                             {methodNames.Y}
                           </span>
+                          {r.disposalVeto && (
+                            <span className="text-[9px] font-bold ml-1 px-1 rounded-sm bg-red-500/25 text-red-400"
+                              title="處置股：分盤交易、跟漲停一樣常常買不到。只是觀察大戶在偷買誰，不是叫你買">
+                              ⚠️處置
+                            </span>
+                          )}
                           {drop != null && (
                             <span className={`text-[10px] font-mono font-bold ml-1 ${drop >= 0 ? 'text-bull' : 'text-bear'}`} title="近5日漲跌%（負=在跌）">
                               近5日{drop >= 0 ? '+' : ''}{drop.toFixed(1)}%

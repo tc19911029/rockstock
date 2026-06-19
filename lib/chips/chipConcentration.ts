@@ -20,7 +20,7 @@ const KEEP_DAYS = 60; // 快取最多留近 60 個交易日（控檔案大小）
 
 type DayCache = Record<string, { net: Record<string, number>; at: number }>;
 
-export interface ConcPoint { date: string; c5: number | null; c20: number | null }
+export interface ConcPoint { date: string; c5: number | null; c20: number | null; net: number | null }
 
 async function loadCache(code: string): Promise<DayCache> {
   try { return JSON.parse(await fs.readFile(path.join(CACHE_DIR, `${code}.json`), 'utf8')); }
@@ -41,6 +41,16 @@ function concFromNets(branchNet: Map<string, number>, volK: number): number | nu
   const top15buy = v.filter((x) => x > 0).sort((a, b) => b - a).slice(0, 15).reduce((a, b) => a + b, 0);
   const top15sell = v.filter((x) => x < 0).sort((a, b) => a - b).slice(0, 15).reduce((a, b) => a + b, 0);
   return +(((top15buy + top15sell) / volK) * 100).toFixed(2);
+}
+
+/** 當日「主力分點淨買賣超」(張) = 當日前15大買超合計 + 前15大賣超合計（與集中度同口徑、同源）。
+ *  分點明細缺 → null（結算中），不退回 Yahoo 的當日快照（那個只有當天、又被 250 檔上限砍）。 */
+export function dailyNetFromBranch(branchNet: Map<string, number> | undefined): number | null {
+  if (!branchNet || branchNet.size === 0) return null;
+  const v = [...branchNet.values()];
+  const top15buy = v.filter((x) => x > 0).sort((a, b) => b - a).slice(0, 15).reduce((a, b) => a + b, 0);
+  const top15sell = v.filter((x) => x < 0).sort((a, b) => a - b).slice(0, 15).reduce((a, b) => a + b, 0);
+  return Math.round(top15buy + top15sell);
 }
 
 /**
@@ -105,7 +115,12 @@ export async function computeConcSeries(
     return concFromNets(agg, volK);
   };
   for (let i = startIdx; i < n; i++) {
-    out.push({ date: candles[i].date, c5: calc(i, periods[0]), c20: calc(i, periods[1]) });
+    out.push({
+      date: candles[i].date,
+      c5: calc(i, periods[0]),
+      c20: calc(i, periods[1]),
+      net: dailyNetFromBranch(dayNet.get(candles[i].date)),
+    });
   }
   return out;
 }

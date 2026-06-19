@@ -47,20 +47,26 @@ function saveState(s: NotifyState) {
   writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
 
-const ACTIONABLE = new Set(['stop_loss', 'exit_all', 'reduce_half', 'watch_stop']);
+// 賠少-1：cover_all = 做空回補（全出），與 exit_all 同等緊急。
+const ACTIONABLE = new Set(['stop_loss', 'exit_all', 'reduce_half', 'watch_stop', 'cover_all']);
 
 function priorityOf(action: string): 1 | 2 | 3 | 4 | 5 {
   if (action === 'stop_loss') return 5;
   if (action === 'exit_all') return 4;
   if (action === 'reduce_half') return 4;
+  if (action === 'cover_all') return 4; // 做空回補
   return 3; // watch_stop
 }
 
 function buildMessage(it: DailyActionItem, execWindow: boolean, profileName: string): { title: string; message: string } {
+  const isShort = it.positionSide === 'short';
+  const sideTag = isShort ? '🔻空 ' : '';
   const head = execWindow ? '⏰ 13:25 執行窗 — ' : '';
-  const title = `${head}${profileName}｜${it.name} ${it.label}`;
+  const title = `${head}${profileName}｜${sideTag}${it.name} ${it.label}`;
   const lines: string[] = [];
-  lines.push(`${it.symbol} 現價 ${it.todayClose ?? '?'}｜報酬 ${it.profitPct != null ? it.profitPct.toFixed(1) + '%' : '?'}｜停損 ${it.stopLoss}`);
+  // 賠少-1：做空把「停損」字樣改成「回補停損」（站上進場黑K高點回補）。
+  const stopLabel = isShort ? '回補停損' : '停損';
+  lines.push(`${it.symbol} 現價 ${it.todayClose ?? '?'}｜報酬 ${it.profitPct != null ? it.profitPct.toFixed(1) + '%' : '?'}｜${stopLabel} ${it.stopLoss}`);
   for (const s of it.signals ?? []) {
     const h = empiricalHeaviness(s.type);
     lines.push(`${tierEmoji(h.tier)} ${s.label}${h.tier === 'heavy' ? '（實證重訊）' : h.tier === 'light' ? '（落後指標，參考）' : ''}`);

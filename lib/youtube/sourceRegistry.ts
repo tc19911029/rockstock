@@ -1,5 +1,5 @@
 /**
- * YouTube source registry — 17 個追蹤的理財節目來源（2026-05-22 v2 改版）。
+ * YouTube source registry — 18 個追蹤的理財節目來源（2026-05-22 v2 改版）。
  *
  * 設計：seed-or-load
  *   - 首次呼叫 loadSources() 時若 sources.json 不存在 → 寫入 DEFAULT_SOURCES 並回傳
@@ -216,6 +216,18 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     active: true,
     created_at: '2026-06-04T09:15:58.000Z',
     default_analysts: ['李蜀芳'],  // 永誠國際投顧
+  },
+  {
+    source_id: 'touzi-jiandan',
+    display_name: '投資明明很簡單（紀緯明）',
+    kind: 'playlist',
+    url: 'https://www.youtube.com/playlist?list=PLrUyRbPQ6eoDPZZbL3pQ1RqQvs1aLQuus',
+    expected_cadence: 'daily',  // 每日台股節目
+    market_type: 'TW_STOCK',
+    first_scan_done: false,
+    active: true,
+    created_at: '2026-06-18T00:00:00.000Z',
+    default_analysts: ['紀緯明'],
   },
 ];
 

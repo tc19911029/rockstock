@@ -7,7 +7,7 @@ import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
-import { getTWSESingleIntraday, getTWSEQuote } from '@/lib/datasource/TWSERealtime';
+import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot, fetchTWIndexQuote } from '@/lib/datasource/IntradayCache';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
@@ -255,9 +255,14 @@ export async function GET(req: NextRequest) {
               }
             } else if (isTW) {
               const twCode = pureCode;
+              // 只用 mis.twse 盤中即時報價（getTWSESingleIntraday）；不再 fallback getTWSEQuote。
+              // getTWSEQuote 走 openapi 收盤端點（STOCK_DAY_ALL / TPEx），盤中只回「昨日收盤」，
+              // 會以「非 null 的舊價」佔住注入鏈、被 date!==today 擋掉又吃掉注入預算，
+              // 害真正抓得到今日的 Fugle（fallback 2）來不及跑 → 上櫃股走圖今日那根補不上。
+              // 限時 1500ms，留足預算給下方 Fugle / L2 fallback（對齊可用的 /api/stock/quote 取價順序）。
               const q = await withTimeout(
-                (async () => (await getTWSESingleIntraday(twCode)) ?? (await getTWSEQuote(twCode)))(),
-                INJECT_BUDGET_MS,
+                getTWSESingleIntraday(twCode),
+                Math.min(INJECT_BUDGET_MS, 1500),
                 null,
               );
               if (q && q.close > 0 && (!q.date || q.date === today)) {

@@ -135,6 +135,22 @@ export function parseProgramDate(title: string, now: Date): string | null {
   return null;
 }
 
+/**
+ * 防未來日守衛：節目不可能在「上傳之後」才播出。
+ * 標題解析到的 program_date 若晚於 published_at 推算的台灣日，視為誤判
+ * （例：標題「台積電7/16法說」把法說會日期當成節目日，整集被丟到未來檔）
+ * → 回 null，下游 effectiveProgramDate 會改用 published_at 推算的台灣日。
+ * published_at 缺失時不動（無從判斷）。
+ */
+export function clampProgramDateToPublish(
+  programDate: string | null,
+  publishedAt: string | null,
+): string | null {
+  if (!programDate || !publishedAt) return programDate;
+  const pubYmd = todayYmdTaipei(new Date(publishedAt));
+  return programDate > pubYmd ? null : programDate;
+}
+
 function isValidYmd(y: number, m: number, d: number): boolean {
   if (m < 1 || m > 12 || d < 1 || d > 31) return false;
   const dt = new Date(Date.UTC(y, m - 1, d));

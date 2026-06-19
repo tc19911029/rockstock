@@ -111,11 +111,18 @@ interface FlatBottomResult {
  * 2. 至少MA5/MA10/MA20糾結在一起
  * 3. 盤整期間量極少，突破後量才放大
  * 4. 等大量突破確認後再買進
+ *
+ * @param opts.maxTightness 盤整窄幅上限（spread / minClose）。
+ *   **研究專用旗標、預設 = CONSOL_MAX_TIGHTNESS（0.15），生產行為位元不變。**
+ *   進場-14 變體：書本《抓住飆股》一字底窄幅 ≤10%，傳 0.10 收緊後做回測對照，
+ *   不改生產預設（D 軌掃描永遠走 undefined → 0.15）。
  */
 export function detectStrategyE(
   candles: CandleWithIndicators[],
   idx: number,
+  opts?: { maxTightness?: number },
 ): FlatBottomResult | null {
+  const maxTightness = opts?.maxTightness ?? CONSOL_MAX_TIGHTNESS;
   // 至少需要 60 根K線（40天盤整 + 20天前期參考）
   if (idx < FLATBOTTOM_MIN_HISTORY) return null;
   const c = candles[idx];
@@ -144,7 +151,7 @@ export function detectStrategyE(
     if (minC <= 0) break;
     const spread = (maxC - minC) / minC;
 
-    if (spread >= CONSOL_MAX_TIGHTNESS) break;
+    if (spread >= maxTightness) break;
     consolStart = i;
   }
 

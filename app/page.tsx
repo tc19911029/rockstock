@@ -416,6 +416,8 @@ function HomePage() {
   const [showMarkers, setShowMarkers] = useState(false);  // 訊號 markers 預設關（M/N/O/P/Q/F 歷史觸發日）— 用戶偏好
   const [showPivots, setShowPivots] = useState(true);     // 頭底標記預設開 — 用戶偏好
   const [showSupportResistance, setShowSupportResistance] = useState(false);
+  // K 棒三層支撐/壓力標線（最近一根長紅/長黑：最高/1半/最低），預設關
+  const [showCandleSR, setShowCandleSR] = useState(false);
   const [showAscendingTrendline, setShowAscendingTrendline] = useState(false);
   const [showDescendingTrendline, setShowDescendingTrendline] = useState(false);
   const [showAscendingChannel, setShowAscendingChannel] = useState(false);
@@ -434,7 +436,12 @@ function HomePage() {
   const [showConsolidationLines, setShowConsolidationLines] = useState(false);
   const [showNeckline, setShowNeckline] = useState(false);  // 形態頸線 + 目標價 + 結構失效價
   const [showPattern, setShowPattern] = useState(false);    // 形態 ABCDE 關鍵點與連線
-  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
+  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
+  // 月線（20MA）固定顯示、不可關（書本 CH3-03「20MA 一定要打開來看，不可以把它關掉」）— 守在 handler 層
+  const handleMaToggle = useCallback((key: keyof typeof maToggles) => {
+    if (key === 'ma20') return;
+    setMaToggles(p => ({ ...p, [key]: !p[key] }));
+  }, []);
   const [showBollinger, setShowBollinger] = useState(false);
   const [indicators, setIndicators] = useState({
     macd: true, kd: true, volume: true, rsi: false,
@@ -452,20 +459,21 @@ function HomePage() {
     const chipOff = { foreign: false, trust: false, dealer: false, retail: false, cnMain: false, cnRetail: false };
     const chipOn = { foreign: true, trust: true, dealer: true, retail: true, cnMain: true, cnRetail: true };
     if (preset === 'technical') {
-      setMaToggles({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
+      setMaToggles({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
       setShowBollinger(false);
       setShowShuangB(false);
       setIndicators(p => ({ ...p, ...chipOff, volume: true, kd: true, rsi: false, macd: true, mainForce: false, season: false }));
       setShowPivots(true);
     } else if (preset === 'chip') {
       // 籌碼套組：價＋均線主圖沿用技術設定，副圖全換成法人/主力資金；量/KD/MACD/三色副圖全關
-      setMaToggles({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
+      setMaToggles({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
       setShowBollinger(false);
       setShowShuangB(false);
       setIndicators(p => ({ ...p, ...chipOn, volume: false, kd: false, rsi: false, macd: false, mainForce: false, season: false }));
       setShowPivots(true);
     } else {
-      setMaToggles({ ma5: false, ma10: false, ma20: false, ma60: false, ma240: false });
+      // 三色套組：均線清空讓出主圖給雙B，但月線（20MA）固定保留（書本 CH3-03「20MA 不可關」）
+      setMaToggles({ ma5: false, ma10: false, ma20: true, ma60: false, ma120: false, ma240: false });
       setShowBollinger(false);
       setShowShuangB(true);
       setIndicators(p => ({ ...p, ...chipOff, volume: false, kd: false, rsi: false, macd: false, mainForce: true, season: true }));
@@ -533,7 +541,7 @@ function HomePage() {
 
   // 主力分點集中度「跟看盤 app 對齊版」（最近數日 5日/20日，HiStock 分點區間彙總算正式公式）。
   // 與 /api/stock/chips 分開 lazy fetch（HiStock 多視窗抓取較慢，不阻塞籌碼面板其餘三表）。
-  const [concExact, setConcExact] = useState<Array<{ date: string; c5: number | null; c20: number | null }>>([]);
+  const [concExact, setConcExact] = useState<Array<{ date: string; c5: number | null; c20: number | null; net: number | null }>>([]);
   useEffect(() => {
     if (!chipFetchKey || !/^\d{4,5}(\.(TW|TWO))?$/i.test(chipFetchKey)) { setConcExact([]); return; }
     const ctrl = new AbortController();
@@ -1032,7 +1040,7 @@ function HomePage() {
                 currentInterval={currentInterval}
                 onIntervalChange={handleIntervalChange}
                 maToggles={maToggles}
-                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
@@ -1051,6 +1059,8 @@ function HomePage() {
                 onPivotsToggle={() => setShowPivots(v => !v)}
                 showSupportResistance={showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showCandleSR={showCandleSR}
+                onCandleSRToggle={() => setShowCandleSR(v => !v)}
                 showNeckline={showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
                 showPattern={showPattern}
@@ -1092,6 +1102,7 @@ function HomePage() {
               showBollinger,
               showPivots,
               showSupportResistance,
+              showCandleSR,
               showAscendingTrendline,
               showDescendingTrendline,
               showAscendingChannel,
@@ -1410,7 +1421,7 @@ function HomePage() {
                 currentInterval={currentInterval}
                 onIntervalChange={handleIntervalChange}
                 maToggles={maToggles}
-                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
@@ -1429,6 +1440,8 @@ function HomePage() {
                 onPivotsToggle={() => setShowPivots(v => !v)}
                 showSupportResistance={showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showCandleSR={showCandleSR}
+                onCandleSRToggle={() => setShowCandleSR(v => !v)}
                 showNeckline={showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
                 showPattern={showPattern}
@@ -1479,6 +1492,7 @@ function HomePage() {
                       showBollinger={showBollinger}
                       showPivots={showPivots}
                       showSupportResistance={showSupportResistance}
+                      showCandleSR={showCandleSR}
                       showAscendingTrendline={showAscendingTrendline}
                       showDescendingTrendline={showDescendingTrendline}
                       showAscendingChannel={showAscendingChannel}
