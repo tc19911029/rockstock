@@ -22,6 +22,7 @@ import { readIntradaySnapshot, readMABase } from '@/lib/datasource/IntradayCache
 import { TW_CONCEPT_MAP, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
+import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
 import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
 
 export type ThemeLabelSource = 'concept' | 'industry' | 'other';
@@ -49,6 +50,8 @@ export interface HotStock {
   rets?: (number | null)[];
   /** 外資+投信過去 N 日買超金額 (元；對齊 INST_PERIODS=1,3,5,10) */
   instAmt?: (number | null)[];
+  /** 散戶(融資)過去 N 日買超金額 (元；對齊 INST_PERIODS) */
+  retailAmt?: (number | null)[];
 }
 
 export interface HotTheme {
@@ -217,31 +220,31 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
 // ── 載入 + 建構（IO）─────────────────────────────────────────────────────────
 
 /** 過去 N 日漲幅 %（對齊 PERF_PERIODS），讀 L1 日K；與 sectorRanking 同公式（trailing）。 */
-async function memberPerfTW(code: string, date: string): Promise<{ rets: (number | null)[]; instAmt: (number | null)[] }> {
+async function memberPerfTW(code: string, date: string): Promise<{ rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[] }> {
   const noRets = PERF_PERIODS.map(() => null);
   const noAmt: (number | null)[] = INST_PERIODS.map(() => null);
   const file = (await readCandleFile(`${code}.TW`, 'TW'))
     ?? (await readCandleFile(`${code}.TWO`, 'TW'));
-  if (!file?.candles?.length) return { rets: noRets, instAmt: noAmt };
+  if (!file?.candles?.length) return { rets: noRets, instAmt: noAmt, retailAmt: noAmt };
   const candles = file.candles;
   let idx = -1;
   for (let i = candles.length - 1; i >= 0; i--) {
     if (candles[i].date <= date) { idx = i; break; }
   }
-  if (idx < 0) return { rets: noRets, instAmt: noAmt };
+  if (idx < 0) return { rets: noRets, instAmt: noAmt, retailAmt: noAmt };
   const close = candles[idx].close;
   const rets = PERF_PERIODS.map((n) => {
     if (idx - n < 0) return null;
     const base = candles[idx - n].close;
     return base > 0 ? +(((close - base) / base) * 100).toFixed(1) : null;
   });
+  const closeByDate = new Map(candles.map((c) => [c.date, c.close]));
   // 外資+投信過去 N 日買超金額 = 逐日(張×1000×當日收盤)
   let instAmt = noAmt;
   try {
     const inst = await readInstStock(code);
     if (inst?.data?.length) {
       const past = inst.data.filter((r) => r.date <= date);
-      const closeByDate = new Map(candles.map((c) => [c.date, c.close]));
       instAmt = INST_PERIODS.map((n) => {
         const rows = past.slice(-n);
         if (rows.length === 0) return null;
@@ -256,7 +259,27 @@ async function memberPerfTW(code: string, date: string): Promise<{ rets: (number
       });
     }
   } catch { /* 法人 optional */ }
-  return { rets, instAmt };
+  // 散戶(融資)過去 N 日買超金額 = 逐日(融資淨變化張×1000×當日收盤)
+  let retailAmt = noAmt;
+  try {
+    const margin = await readMarginStock(code);
+    if (margin?.data?.length) {
+      const past = margin.data.filter((r) => r.date <= date);
+      retailAmt = INST_PERIODS.map((n) => {
+        const rows = past.slice(-n);
+        if (rows.length === 0) return null;
+        let amt = 0; let any = false;
+        for (const r of rows) {
+          const c = closeByDate.get(r.date);
+          if (c == null || r.marginNet == null) continue;
+          amt += r.marginNet * 1000 * c;
+          any = true;
+        }
+        return any ? Math.round(amt) : null;
+      });
+    }
+  } catch { /* 融資 optional */ }
+  return { rets, instAmt, retailAmt };
 }
 
 /**
@@ -336,7 +359,7 @@ export async function buildHotThemeScan(date: string): Promise<HotThemeScanFile 
   // 每檔熱門成分股補「過去 1~10,20 日漲幅」+「法人 1/3/5/10 日買超金額」（讀 L1+inst，併發 16）。
   const members = result.themes.flatMap((t) => t.members);
   const uniqCodes = [...new Set(members.map((m) => m.code))];
-  const perfMap = new Map<string, { rets: (number | null)[]; instAmt: (number | null)[] }>();
+  const perfMap = new Map<string, { rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[] }>();
   const CONC = 16;
   for (let i = 0; i < uniqCodes.length; i += CONC) {
     const batch = uniqCodes.slice(i, i + CONC);
@@ -347,6 +370,7 @@ export async function buildHotThemeScan(date: string): Promise<HotThemeScanFile 
     const p = perfMap.get(m.code);
     m.rets = p?.rets;
     m.instAmt = p?.instAmt;
+    m.retailAmt = p?.retailAmt;
   }
 
   return result;

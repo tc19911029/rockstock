@@ -45,6 +45,7 @@ interface ThemeStockPerf {
   volRatio: number | null; instNet5: number | null;
   rets?: (number | null)[];
   instAmt?: (number | null)[];
+  retailAmt?: (number | null)[];
 }
 interface ThemeRotation {
   rankNow?: number; rankPrev?: number | null;
@@ -68,6 +69,7 @@ interface HotStock {
   theme: string; themeSource: 'concept' | 'industry' | 'other';
   rets?: (number | null)[];
   instAmt?: (number | null)[];
+  retailAmt?: (number | null)[];
 }
 interface HotTheme {
   theme: string; source: 'concept' | 'industry' | 'other';
@@ -178,9 +180,10 @@ function HeatBar({ v }: { v: number }) {
 
 // 成分股績效表。預設只看 1/5/10/20 日（可展開全部）；可排序；每列框出「發動最猛的那段」。
 function PerfGrid({ members }: {
-  members: Array<{ code: string; name: string; rets?: (number | null)[]; instAmt?: (number | null)[]; isLimitUp?: boolean; isNotice?: boolean }>;
+  members: Array<{ code: string; name: string; rets?: (number | null)[]; instAmt?: (number | null)[]; retailAmt?: (number | null)[]; isLimitUp?: boolean; isNotice?: boolean }>;
 }) {
   const [view, setView] = useState<'ret' | 'inst'>('ret');
+  const [chipWin, setChipWin] = useState(5); // 籌碼比較的天數視窗（1/3/5/10）
   const [showAll, setShowAll] = useState(true); // 預設顯示全部 1~10,20 日（看績效固定要求）
   const [sortId, setSortId] = useState('r5');
   const [dir, setDir] = useState<SortDir>('desc');
@@ -220,37 +223,60 @@ function PerfGrid({ members }: {
       <button type="button" onClick={() => setView('ret')}
         className={`px-2 py-0.5 ${view === 'ret' ? 'bg-sky-700 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>漲幅</button>
       <button type="button" onClick={() => setView('inst')}
-        className={`px-2 py-0.5 ${view === 'inst' ? 'bg-sky-700 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>法人金額</button>
+        className={`px-2 py-0.5 ${view === 'inst' ? 'bg-sky-700 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>籌碼(法人vs散戶)</button>
     </div>
   );
 
-  // ── 法人金額視角（1/3/5/10 日買超金額；外資+投信）──
+  // ── 籌碼視角：法人 vs 散戶(融資) 並排 + 判讀（選 1/3/5/10 日視窗）──
   if (view === 'inst') {
+    const wi = (INST_PERIODS as readonly number[]).indexOf(chipWin);
+    const FLOOR = 1e7; // 1000萬以上才算「明顯買/賣」
+    const chipVerdict = (inst: number | null | undefined, retail: number | null | undefined) => {
+      if (inst == null || retail == null) return { t: '—', c: 'text-muted-foreground/40' };
+      const ib = inst > FLOOR, is = inst < -FLOOR, rb = retail > FLOOR, rs = retail < -FLOOR;
+      if (ib && rs) return { t: '✅ 法人買·散戶賣', c: 'text-bull' };       // 籌碼沉澱到法人=好
+      if (is && rb) return { t: '⚠️ 法人賣·散戶接', c: 'text-bear' };       // 散戶接刀=危險
+      if (ib && rb) return { t: '🟡 兩邊都買', c: 'text-muted-foreground/70' };
+      if (is && rs) return { t: '🟢 兩邊都賣', c: 'text-muted-foreground/70' };
+      return { t: '—', c: 'text-muted-foreground/40' };
+    };
     return (
       <div className="bg-muted/15 border-t border-border">
         <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
           {Toggle}
-          <span className="text-[10px] text-muted-foreground/45">外資+投信買超金額（紅=買進/流入、綠=賣出）</span>
+          <span className="text-[10px] text-muted-foreground/50">天數</span>
+          <div className="inline-flex rounded-md border border-border overflow-hidden text-[10px]">
+            {INST_PERIODS.map((p) => (
+              <button key={p} type="button" onClick={() => setChipWin(p)}
+                className={`px-2 py-0.5 ${chipWin === p ? 'bg-sky-700 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>{p}日</button>
+            ))}
+          </div>
+          <span className="text-[10px] text-muted-foreground/45">金額：紅=買進、綠=賣出</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-muted-foreground/50 text-[10px] border-b border-border/40">
                 <th className="text-left font-medium pl-3 pr-2 py-2 sticky left-0 bg-card z-10">個股</th>
-                {INST_PERIODS.map((p) => (
-                  <th key={p} className="text-right font-medium px-2 py-2 tabular-nums">法人{p}日</th>
-                ))}
+                <th className="text-right font-medium px-2 py-2">法人{chipWin}日</th>
+                <th className="text-right font-medium px-2 py-2">散戶融資{chipWin}日</th>
+                <th className="text-left font-medium px-2 py-2">籌碼判讀</th>
               </tr>
             </thead>
             <tbody>
-              {members.map((m) => (
-                <tr key={m.code} className="border-b border-border/25 last:border-0 hover:bg-muted/40 transition-colors">
-                  {NameCell(m)}
-                  {INST_PERIODS.map((p, i) => (
-                    <td key={p} className="text-right px-2 py-1.5 font-mono tabular-nums"><Amt v={m.instAmt?.[i] ?? null} /></td>
-                  ))}
-                </tr>
-              ))}
+              {members.map((m) => {
+                const iv = m.instAmt?.[wi] ?? null;
+                const rv = m.retailAmt?.[wi] ?? null;
+                const vd = chipVerdict(iv, rv);
+                return (
+                  <tr key={m.code} className="border-b border-border/25 last:border-0 hover:bg-muted/40 transition-colors">
+                    {NameCell(m)}
+                    <td className="text-right px-2 py-1.5 font-mono tabular-nums"><Amt v={iv} /></td>
+                    <td className="text-right px-2 py-1.5 font-mono tabular-nums"><Amt v={rv} /></td>
+                    <td className={`px-2 py-1.5 text-xs whitespace-nowrap ${vd.c}`}>{vd.t}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -370,28 +396,31 @@ export default function SectorsPage() {
       headerSlot={<PageHeader title="📊 題材分類" subtitle={subtitle} backButton />}
     >
       <div className="p-4 space-y-3">
-        {/* 市場切換（台股/陸股）*/}
-        <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
-          <button
-            onClick={() => setMarket('TW')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${market === 'TW' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-          >🇹🇼 台股</button>
-          <button
-            onClick={() => setMarket('CN')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${market === 'CN' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-          >🇨🇳 陸股</button>
-        </div>
+        {/* 市場切換 + 視角切換：同一水平列（窄螢幕才換行）*/}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 市場切換（台股/陸股）*/}
+          <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
+            <button
+              onClick={() => setMarket('TW')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${market === 'TW' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+            >🇹🇼 台股</button>
+            <button
+              onClick={() => setMarket('CN')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${market === 'CN' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+            >🇨🇳 陸股</button>
+          </div>
 
-        {/* 視角切換（熱點 / 熱門題材或板塊）*/}
-        <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm sm:ml-2 align-middle">
-          <button
-            onClick={() => setMode('hot')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'hot' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-          >{hotLabel}</button>
-          <button
-            onClick={() => setMode('fixed')}
-            className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'fixed' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-          >{fixedLabel}</button>
+          {/* 視角切換（熱點 / 熱門題材或板塊）*/}
+          <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
+            <button
+              onClick={() => setMode('hot')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'hot' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+            >{hotLabel}</button>
+            <button
+              onClick={() => setMode('fixed')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'fixed' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+            >{fixedLabel}</button>
+          </div>
         </div>
 
         {market === 'CN' ? (

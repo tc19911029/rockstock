@@ -16,6 +16,7 @@ import { THEME_MAP, type ThemeStock } from './themeMap';
 import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
+import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
 
 const SECTORS_DIR = path.join(process.cwd(), 'data', 'sectors', 'TW');
 
@@ -37,6 +38,8 @@ export interface ThemeStockPerf {
   rets: (number | null)[];
   /** 外資+投信過去 N 日買超「金額」(元；對齊 INST_PERIODS=1,3,5,10；逐日張×1000×當日收盤) */
   instAmt: (number | null)[];
+  /** 散戶(融資)過去 N 日買超金額 (元；融資淨變化張×1000×當日收盤；對齊 INST_PERIODS) */
+  retailAmt: (number | null)[];
 }
 
 export interface ThemeRank {
@@ -74,6 +77,7 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
     d1: null, d5: null, d20: null, d60: null, volRatio: null, instNet5: null,
     rets: PERF_PERIODS.map(() => null),
     instAmt: INST_PERIODS.map(() => null),
+    retailAmt: INST_PERIODS.map(() => null),
   };
   // 檔名格式 {code}.TW.json / {code}.TWO.json
   const file = (await readCandleFile(`${stock.code}.TW`, 'TW'))
@@ -129,11 +133,33 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
     }
   } catch { /* 無籌碼資料不影響報酬欄 */ }
 
+  // 散戶(融資)過去 N 日買超金額 = 逐日(融資淨變化張×1000×當日收盤)
+  let retailAmt: (number | null)[] = INST_PERIODS.map(() => null);
+  try {
+    const margin = await readMarginStock(stock.code);
+    if (margin?.data?.length) {
+      const past = margin.data.filter(r => r.date <= date);
+      const closeByDate = new Map(candles.map(c => [c.date, c.close]));
+      retailAmt = INST_PERIODS.map((n) => {
+        const rows = past.slice(-n);
+        if (rows.length === 0) return null;
+        let amt = 0; let any = false;
+        for (const r of rows) {
+          const c = closeByDate.get(r.date);
+          if (c == null || r.marginNet == null) continue;
+          amt += r.marginNet * 1000 * c; // 融資淨變化張×1000股×元 = 元
+          any = true;
+        }
+        return any ? Math.round(amt) : null;
+      });
+    }
+  } catch { /* 無融資資料不影響其他欄 */ }
+
   return {
     code: stock.code, name: stock.name,
     d1: ret(1), d5: ret(5), d20: ret(20), d60: ret(60), volRatio, instNet5,
     rets: PERF_PERIODS.map((n) => ret(n)),
-    instAmt,
+    instAmt, retailAmt,
   };
 }
 
