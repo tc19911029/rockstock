@@ -396,10 +396,12 @@ export default function SectorsPage() {
       headerSlot={<PageHeader title="📊 題材分類" subtitle={subtitle} backButton />}
     >
       <div className="p-4 space-y-3">
-        {/* 市場切換 + 視角切換：同一水平列（窄螢幕才換行）*/}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* 市場切換 + 視角切換：同一水平列（窄螢幕才換行）。
+            items-stretch + 各 pill items-center → 兩 pill 等高、按鈕垂直置中，
+            避免不同瀏覽器（如 Firefox）國旗 emoji 較高造成上下錯位。*/}
+        <div className="flex flex-wrap items-stretch gap-2">
           {/* 市場切換（台股/陸股）*/}
-          <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
+          <div className="inline-flex items-center rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
             <button
               onClick={() => setMarket('TW')}
               className={`px-3 py-1.5 rounded-md transition-colors ${market === 'TW' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
@@ -411,7 +413,7 @@ export default function SectorsPage() {
           </div>
 
           {/* 視角切換（熱點 / 熱門題材或板塊）*/}
-          <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
+          <div className="inline-flex items-center rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
             <button
               onClick={() => setMode('hot')}
               className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'hot' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
