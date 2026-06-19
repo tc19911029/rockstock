@@ -1,24 +1,69 @@
 'use client';
 
 /**
- * /sectors — 板塊（題材）強弱排名頁（2026-06-12 A2；2026-06-14 套用統一版面）
+ * /sectors — 板塊（題材）強弱排名頁（2026-06-12 A2；2026-06-14 套用統一版面；
+ *            2026-06-19 加「今日全市場熱點」切換）
  *
- * 顯示層參考：25 題材的今日/5/20/60 日聚合報酬、廣度、法人 5 日合計、6 階段分類。
- * 不參與選股（鐵則 #5）— 用途是回答「今天資金流向哪些題材」「哪個板塊是主流」。
- * 資料：/api/themes/ranking（盤後 17:10 cron 產出，data/sectors/TW/{date}.json）。
+ * 兩種視角（顯示層參考，不參與選股 鐵則 #5）：
+ *   - 固定25題材：寫死的 25 題材成分股聚合報酬（/api/themes/ranking，盤後 17:10 cron）。
+ *   - 今日全市場熱點：掃全市場 L2 快照找今天在熱的股（漲幅+爆量+法人），自動歸題材後排名
+ *     （/api/themes/hot，即時算）。能抓到固定清單外的新熱點。
  *
- * 版面：統一走 PageShell + PageHeader + 主題 CSS 變數（不再寫死深灰固定底色，主題切換不會壞）。
+ * 版面：統一走 PageShell + PageHeader + 主題 CSS 變數（不再寫死深灰固定底色）。
  */
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageShell, PageHeader, EmptyState } from '@/components/shared';
+import { SortControl } from '@/components/shared/SortControl';
+import { applySort } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
+import { useWatchlistStore } from '@/store/watchlistStore';
 import { bullBearClass } from '@/lib/format';
+import { PERF_PERIODS } from '@/lib/themes/perfPeriods';
+
+// 成分股排序選項（inline 自訂，對齊績效欄位 1~10,20 日）
+const MEMBER_SORT_OPTIONS = PERF_PERIODS.map((p) => ({
+  id: `r${p}`, label: `${p}日`, tip: `按過去 ${p} 日漲幅排序`, defaultDir: 'desc' as SortDir,
+}));
+const periodIndex = (id: string) => (PERF_PERIODS as readonly number[]).indexOf(Number(id.slice(1)));
+
+// 題材本身的排序選項（inline）
+const HOT_THEME_SORT_OPTIONS = [
+  { id: 'score', label: '熱度', defaultDir: 'desc' as SortDir },
+  { id: 'count', label: '熱門數', defaultDir: 'desc' as SortDir },
+  { id: 'avg', label: '平均漲', defaultDir: 'desc' as SortDir },
+  { id: 'max', label: '最強漲', defaultDir: 'desc' as SortDir },
+];
+const FIXED_THEME_SORT_OPTIONS = [
+  { id: 'd1', label: '今日', defaultDir: 'desc' as SortDir },
+  { id: 'd5', label: '5日', defaultDir: 'desc' as SortDir },
+  { id: 'd20', label: '20日', defaultDir: 'desc' as SortDir },
+  { id: 'd60', label: '60日', defaultDir: 'desc' as SortDir },
+  { id: 'breadth', label: '廣度', defaultDir: 'desc' as SortDir },
+  { id: 'inst', label: '法人5日', defaultDir: 'desc' as SortDir },
+];
+
+// 加入自選鈕（reactive：加入後即時顯示 ✓）
+function AddWatchBtn({ code, name }: { code: string; name: string }) {
+  const has = useWatchlistStore((s) => s.items.some((i) => i.symbol === code));
+  return (
+    <button type="button" title={has ? '已在自選' : '加入自選'}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); useWatchlistStore.getState().add(code, name); }}
+      className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${has ? 'border-emerald-500/40 text-emerald-400' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
+      {has ? '✓' : '＋'}
+    </button>
+  );
+}
 
 interface ThemeStockPerf {
   code: string; name: string;
   d1: number | null; d5: number | null; d20: number | null; d60: number | null;
   volRatio: number | null; instNet5: number | null;
+  rets?: (number | null)[];
+}
+interface ThemeRotation {
+  rankDelta: number | null; accel: number | null; bucket: 'in' | 'mid' | 'out';
 }
 interface ThemeRank {
   theme: string; stockCount: number;
@@ -27,8 +72,30 @@ interface ThemeRank {
   stage: string;
   topStock: { code: string; name: string; d1: number } | null;
   members: ThemeStockPerf[];
+  rotation?: ThemeRotation | null;
 }
 interface RankingFile { date: string; generatedAt: string; themes: ThemeRank[] }
+
+interface HotStock {
+  code: string; name: string; changePercent: number; volume: number;
+  volRatio: number | null; instNet: number | null;
+  isLimitUp: boolean; isNotice: boolean; heat: number;
+  theme: string; themeSource: 'concept' | 'industry' | 'other';
+  rets?: (number | null)[];
+}
+interface HotTheme {
+  theme: string; source: 'concept' | 'industry' | 'other';
+  hotCount: number; avgChange: number; maxChange: number; avgHeat: number; score: number;
+  topStock: { code: string; name: string; changePercent: number } | null;
+  members: HotStock[];
+}
+interface HotFile {
+  date: string; generatedAt: string; market: string;
+  totalScanned: number; hotStockCount: number; uncategorizedCount: number; instFresh: boolean;
+  themes: HotTheme[];
+}
+
+type Mode = 'fixed' | 'hot';
 
 // 階段 badge — 用主題友善的色階（半透明底 + 邊框，深淺主題皆可讀）
 const STAGE_STYLE: Record<string, string> = {
@@ -53,45 +120,218 @@ function Lots({ v }: { v: number | null }) {
   return <span className={bullBearClass(v)}>{v > 0 ? '+' : ''}{text}</span>;
 }
 
+// 名次徽章：前 3 名用暖色強調，其餘淡灰數字（顏色 + 數字雙重，不只靠顏色）
+function RankBadge({ rank }: { rank: number }) {
+  if (rank <= 3) {
+    const tone = ['bg-orange-500/20 text-orange-400 ring-orange-500/30',
+      'bg-amber-500/15 text-amber-400 ring-amber-500/25',
+      'bg-yellow-500/15 text-yellow-500 ring-yellow-500/25'][rank - 1];
+    return (
+      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold ring-1 ${tone} tabular-nums`}>
+        {rank}
+      </span>
+    );
+  }
+  return <span className="inline-flex items-center justify-center w-6 text-sm text-muted-foreground/50 tabular-nums">{rank}</span>;
+}
+
+// 輪動標籤（描述性，非買賣訊號）：🟢轉入 / 🔴轉出 / 主流。
+// 用 🟢🟡🔴 表「錢進/出」，刻意跟漲跌紅綠分開避免混淆；名次變化用淡字。
+function RotationCell({ r }: { r?: ThemeRotation | null }) {
+  const d = r?.rankDelta;
+  const arrow = d != null && d !== 0 ? (d > 0 ? `↑${d}` : `↓${-d}`) : '';
+  if (r?.bucket === 'in') {
+    return <span className="text-xs whitespace-nowrap" title="名次爬升＋動能加速：資金轉入（描述用，回測無穩定超額，非買訊）">🟢 轉入 <span className="text-muted-foreground/70">{arrow}</span></span>;
+  }
+  if (r?.bucket === 'out') {
+    return <span className="text-xs whitespace-nowrap" title="名次下滑＋動能轉弱：資金轉出（描述用，退潮常均值回歸，非賣訊）">🔴 轉出 <span className="text-muted-foreground/70">{arrow}</span></span>;
+  }
+  return <span className="text-xs text-muted-foreground/45 whitespace-nowrap">{arrow || '—'}</span>;
+}
+
+// 熱度小橫條：視覺強度 + 數字（0-100）
+function HeatBar({ v }: { v: number }) {
+  const pct = Math.max(4, Math.min(100, v));
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <div className="hidden sm:block w-12 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-orange-400 font-mono tabular-nums w-7 text-right">{v.toFixed(0)}</span>
+    </div>
+  );
+}
+
+// 成分股績效表（一排一檔 + 過去 1~10,20 日漲幅）。可排序（點欄位/排序鈕）、左欄凍結、橫向捲。
+function PerfGrid({ members }: {
+  members: Array<{ code: string; name: string; rets?: (number | null)[]; isLimitUp?: boolean; isNotice?: boolean }>;
+}) {
+  const [sortId, setSortId] = useState('r5');
+  const [dir, setDir] = useState<SortDir>('desc');
+  const activeIdx = periodIndex(sortId);
+
+  const sorted = applySort(
+    members, sortId, dir,
+    (m, id) => m.rets?.[periodIndex(id)] ?? null,
+    { missingLast: true },
+  );
+
+  const sortBy = (id: string) => {
+    if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc');
+    else { setSortId(id); setDir('desc'); }
+  };
+
+  return (
+    <div className="bg-muted/15 border-t border-border">
+      <div className="px-3 py-2">
+        <SortControl options={MEMBER_SORT_OPTIONS} value={sortId} dir={dir}
+          onChange={(id, d) => { setSortId(id); setDir(d); }} leading="排序" size="compact" />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-[720px]">
+          <thead>
+            <tr className="text-muted-foreground/50 text-[10px] border-b border-border/40">
+              <th className="text-left font-medium pl-3 pr-2 py-2 sticky left-0 bg-card z-10">個股</th>
+              {PERF_PERIODS.map((p, i) => (
+                <th key={p}
+                  onClick={() => sortBy(`r${p}`)}
+                  className={`text-right font-medium px-2 py-2 tabular-nums cursor-pointer select-none hover:text-foreground ${i === activeIdx ? 'text-sky-400' : ''}`}>
+                  {p}日{i === activeIdx ? (dir === 'desc' ? ' ▼' : ' ▲') : ''}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((m) => (
+              <tr key={m.code} className="border-b border-border/25 last:border-0 hover:bg-muted/40 transition-colors">
+                <td className="pl-3 pr-2 py-1.5 sticky left-0 bg-card">
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <Link href={`/?load=${m.code}`} className="hover:text-sky-400 inline-flex items-center gap-1.5">
+                      <span className="text-foreground/90">{m.name}</span>
+                      <span className="text-muted-foreground/50">{m.code}</span>
+                    </Link>
+                    {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
+                    {m.isNotice && <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">注意</span>}
+                    <Link href={`/?load=${m.code}`} title="走圖"
+                      className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-sky-400 hover:border-sky-400/40">走圖</Link>
+                    <AddWatchBtn code={m.code} name={m.name} />
+                  </div>
+                </td>
+                {PERF_PERIODS.map((p, i) => (
+                  <td key={p} className={`text-right px-2 py-1.5 font-mono tabular-nums ${i === activeIdx ? 'bg-sky-500/5' : ''}`}>
+                    <Pct v={m.rets?.[i] ?? null} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function SectorsPage() {
+  const [mode, setMode] = useState<Mode>('hot');
+
   const [data, setData] = useState<RankingFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  const [hot, setHot] = useState<HotFile | null>(null);
+  const [hotError, setHotError] = useState<string | null>(null);
+  const [hotExpanded, setHotExpanded] = useState<string | null>(null);
+
   useEffect(() => {
-    fetch('/api/themes/ranking')
-      .then(r => r.json())
-      .then(j => {
-        if (j.ok === false) throw new Error(j.error ?? '載入失敗');
-        setData((j.data ?? j) as RankingFile);
-      })
-      .catch(e => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
+    if (mode === 'fixed' && !data && !error) {
+      fetch('/api/themes/ranking')
+        .then(r => r.json())
+        .then(j => {
+          if (j.ok === false) throw new Error(j.error ?? '載入失敗');
+          setData((j.data ?? j) as RankingFile);
+        })
+        .catch(e => setError(e instanceof Error ? e.message : String(e)));
+    }
+    if (mode === 'hot' && !hot && !hotError) {
+      fetch('/api/themes/hot')
+        .then(r => r.json())
+        .then(j => {
+          if (j.ok === false) throw new Error(j.error ?? '載入失敗');
+          setHot((j.data ?? j) as HotFile);
+        })
+        .catch(e => setHotError(e instanceof Error ? e.message : String(e)));
+    }
+  }, [mode, data, error, hot, hotError]);
+
+  const subtitle = mode === 'hot'
+    ? (hot ? `資料日 ${hot.date} · 全市場 ${hot.hotStockCount} 檔在熱` : '全市場自動歸類熱點')
+    : (data ? `資料日 ${data.date} · 25 題材 · 預設按 5 日` : '25 題材聚合報酬');
 
   return (
     <PageShell
-      headerSlot={
-        <PageHeader
-          title="📊 板塊強弱排名"
-          subtitle={data ? `資料日 ${data.date} · 25 題材 · 預設按 5 日` : '25 題材聚合報酬'}
-          backButton
-        />
-      }
+      headerSlot={<PageHeader title="📊 題材分類" subtitle={subtitle} backButton />}
     >
       <div className="p-4 space-y-3">
-        <p className="text-xs text-muted-foreground">
-          25 題材聚合報酬（成分股單純平均）· 階段為顯示用分類，<b>不參與選股</b>。
-          <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。點一列看成分股。
-        </p>
+        {/* 切換鈕 */}
+        <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
+          <button
+            onClick={() => setMode('hot')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'hot' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+          >🔥 今日全市場熱點</button>
+          <button
+            onClick={() => setMode('fixed')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'fixed' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+          >📋 固定25題材</button>
+        </div>
 
-        {error && (
-          <EmptyState icon="⚠️" title="尚未產生資料" description={`${error}（盤後 17:10 cron 產出，可先手動跑 compute-sector-strength）`} />
+        {mode === 'hot' ? (
+          <HotView hot={hot} error={hotError} expanded={hotExpanded} setExpanded={setHotExpanded} />
+        ) : (
+          <FixedView data={data} error={error} expanded={expanded} setExpanded={setExpanded} />
         )}
-        {!data && !error && (
-          <div className="text-muted-foreground text-sm py-12 text-center animate-pulse">載入中…</div>
-        )}
+      </div>
+    </PageShell>
+  );
+}
 
-        {data && (
+// ── 今日全市場熱點 ────────────────────────────────────────────────────────────
+
+function SourceTag({ source }: { source: HotTheme['source'] }) {
+  if (source === 'concept') return null;
+  const label = source === 'industry' ? '產業' : '未分類';
+  return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-muted text-muted-foreground/70 align-middle">{label}</span>;
+}
+
+function HotView({ hot, error, expanded, setExpanded }: {
+  hot: HotFile | null; error: string | null;
+  expanded: string | null; setExpanded: (s: string | null) => void;
+}) {
+  const [sortId, setSortId] = useState('score');
+  const [dir, setDir] = useState<SortDir>('desc');
+  const themes = hot
+    ? applySort(hot.themes, sortId, dir,
+        (t, id) => id === 'score' ? t.score : id === 'count' ? t.hotCount : id === 'avg' ? t.avgChange : id === 'max' ? t.maxChange : null,
+        { missingLast: true })
+    : [];
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        先掃全市場找今天在熱的股（漲幅＋爆量{hot?.instFresh ? '＋法人買超' : ''}），再自動歸題材排名。
+        <span className="text-bull">紅</span>=漲。標「<span className="text-muted-foreground/70">產業</span>」的是新熱點落到粗分類（細題材清單還沒收），點一列看成分股。
+      </p>
+
+      {error && <EmptyState icon="⚠️" title="尚無資料" description={`${error}（需要當日 L2 全市場快照）`} />}
+      {!hot && !error && <div className="text-muted-foreground text-sm py-12 text-center animate-pulse">掃描全市場中…</div>}
+
+      {hot && hot.themes.length === 0 && (
+        <EmptyState icon="😴" title="今天沒什麼在熱" description={`掃了 ${hot.totalScanned} 檔，沒有達到熱度門檻的個股`} />
+      )}
+
+      {hot && hot.themes.length > 0 && (
+        <>
+          <SortControl options={HOT_THEME_SORT_OPTIONS} value={sortId} dir={dir}
+            onChange={(id, d) => { setSortId(id); setDir(d); }} leading="題材排序" size="normal" />
           <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -99,6 +339,113 @@ export default function SectorsPage() {
                   <tr className="text-muted-foreground text-xs border-b border-border bg-secondary/30">
                     <th className="text-left py-2.5 pl-3 pr-2 font-medium">#</th>
                     <th className="text-left py-2.5 pr-3 font-medium">題材</th>
+                    <th className="text-right py-2.5 px-2 font-medium">熱門數</th>
+                    <th className="text-right py-2.5 px-2 font-medium">平均漲</th>
+                    <th className="text-right py-2.5 px-2 font-medium">最強漲</th>
+                    <th className="text-right py-2.5 px-2 font-medium">熱度</th>
+                    <th className="text-left py-2.5 pl-2 pr-3 font-medium">代表股</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {themes.map((t, i) => (
+                    <HotRow key={t.theme} t={t} rank={i + 1}
+                      expanded={expanded === t.theme}
+                      onToggle={() => setExpanded(expanded === t.theme ? null : t.theme)} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HotRow({ t, rank, expanded, onToggle }: {
+  t: HotTheme; rank: number; expanded: boolean; onToggle: () => void;
+}) {
+  return (
+    <>
+      <tr onClick={onToggle}
+        className={`border-b border-border last:border-0 hover:bg-muted/40 cursor-pointer transition-colors ${expanded ? 'bg-muted/30' : ''}`}>
+        <td className="py-3 pl-3 pr-1"><RankBadge rank={rank} /></td>
+        <td className="py-3 pr-3">
+          <div className="flex items-center gap-1.5">
+            <span className={`text-muted-foreground/40 transition-transform ${expanded ? 'rotate-90' : ''}`}>›</span>
+            <span className="font-medium">{t.theme}</span>
+            <SourceTag source={t.source} />
+          </div>
+        </td>
+        <td className="text-right px-2 text-muted-foreground font-mono tabular-nums whitespace-nowrap">{t.hotCount} 檔</td>
+        <td className="text-right px-2 font-mono tabular-nums"><Pct v={t.avgChange} /></td>
+        <td className="text-right px-2 font-mono tabular-nums"><Pct v={t.maxChange} /></td>
+        <td className="px-2"><HeatBar v={t.avgHeat} /></td>
+        <td className="py-3 pl-2 pr-3 text-foreground/80">
+          {t.topStock ? (
+            <Link href={`/?load=${t.topStock.code}`} className="hover:text-sky-400 whitespace-nowrap"
+              onClick={e => e.stopPropagation()}>
+              {t.topStock.name} <Pct v={t.topStock.changePercent} />
+            </Link>
+          ) : '—'}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={7} className="p-0">
+            <PerfGrid members={t.members} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// ── 固定 25 題材（原視角）─────────────────────────────────────────────────────
+
+function FixedView({ data, error, expanded, setExpanded }: {
+  data: RankingFile | null; error: string | null;
+  expanded: string | null; setExpanded: (s: string | null) => void;
+}) {
+  const [sortId, setSortId] = useState('d5');
+  const [dir, setDir] = useState<SortDir>('desc');
+  const themes = data
+    ? applySort(data.themes, sortId, dir,
+        (t, id) => id === 'd1' ? t.avgD1 : id === 'd5' ? t.avgD5 : id === 'd20' ? t.avgD20 : id === 'd60' ? t.avgD60 : id === 'breadth' ? t.breadth : id === 'inst' ? t.instNet5 : null,
+        { missingLast: true })
+    : [];
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        25 題材聚合報酬（成分股單純平均）· 階段為顯示用分類，<b>不參與選股</b>。
+        <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。點一列看成分股近 1~20 日績效。
+        <br />
+        <span className="text-muted-foreground/70">
+          「輪動」= vs 約 5 日前的名次變化（🟢資金轉入 / 🔴轉出）。
+          <b>純情境參考</b>：回測顯示輪動無穩定超額、退潮常回彈，<b>別當買賣訊號</b>。
+        </span>
+      </p>
+
+      {error && (
+        <EmptyState icon="⚠️" title="尚未產生資料" description={`${error}（盤後 17:10 cron 產出，可先手動跑 compute-sector-strength）`} />
+      )}
+      {!data && !error && (
+        <div className="text-muted-foreground text-sm py-12 text-center animate-pulse">載入中…</div>
+      )}
+
+      {data && (
+        <>
+          <SortControl options={FIXED_THEME_SORT_OPTIONS} value={sortId} dir={dir}
+            onChange={(id, d) => { setSortId(id); setDir(d); }} leading="題材排序" size="normal" />
+          <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-muted-foreground text-xs border-b border-border bg-secondary/30">
+                    <th className="text-left py-2.5 pl-3 pr-2 font-medium">#</th>
+                    <th className="text-left py-2.5 pr-3 font-medium">題材</th>
+                    <th className="text-left py-2.5 px-2 font-medium">輪動</th>
                     <th className="text-right py-2.5 px-2 font-medium">今日</th>
                     <th className="text-right py-2.5 px-2 font-medium">5日</th>
                     <th className="text-right py-2.5 px-2 font-medium">20日</th>
@@ -110,7 +457,7 @@ export default function SectorsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.themes.map((t, i) => (
+                  {themes.map((t, i) => (
                     <SectorRow key={t.theme} t={t} rank={i + 1}
                       expanded={expanded === t.theme}
                       onToggle={() => setExpanded(expanded === t.theme ? null : t.theme)} />
@@ -119,9 +466,9 @@ export default function SectorsPage() {
               </table>
             </div>
           </div>
-        )}
-      </div>
-    </PageShell>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -131,12 +478,16 @@ function SectorRow({ t, rank, expanded, onToggle }: {
   return (
     <>
       <tr onClick={onToggle}
-        className="border-b border-border last:border-0 hover:bg-muted/40 cursor-pointer transition-colors">
-        <td className="py-2.5 pl-3 pr-2 text-muted-foreground">{rank}</td>
-        <td className="py-2.5 pr-3 font-medium">
-          {t.theme}
-          <span className="ml-1 text-xs text-muted-foreground/60">({t.stockCount})</span>
+        className={`border-b border-border last:border-0 hover:bg-muted/40 cursor-pointer transition-colors ${expanded ? 'bg-muted/30' : ''}`}>
+        <td className="py-3 pl-3 pr-1"><RankBadge rank={rank} /></td>
+        <td className="py-3 pr-3">
+          <div className="flex items-center gap-1.5">
+            <span className={`text-muted-foreground/40 transition-transform ${expanded ? 'rotate-90' : ''}`}>›</span>
+            <span className="font-medium">{t.theme}</span>
+            <span className="text-xs text-muted-foreground/50">{t.stockCount}</span>
+          </div>
         </td>
+        <td className="px-2"><RotationCell r={t.rotation} /></td>
         <td className="text-right px-2 font-mono tabular-nums"><Pct v={t.avgD1} /></td>
         <td className="text-right px-2 font-mono tabular-nums"><Pct v={t.avgD5} /></td>
         <td className="text-right px-2 font-mono tabular-nums"><Pct v={t.avgD20} /></td>
@@ -150,9 +501,9 @@ function SectorRow({ t, rank, expanded, onToggle }: {
             {t.stage}
           </span>
         </td>
-        <td className="py-2.5 pl-2 pr-3 text-foreground/80">
+        <td className="py-3 pl-2 pr-3 text-foreground/80">
           {t.topStock ? (
-            <Link href={`/?load=${t.topStock.code}`} className="hover:text-sky-400"
+            <Link href={`/?load=${t.topStock.code}`} className="hover:text-sky-400 whitespace-nowrap"
               onClick={e => e.stopPropagation()}>
               {t.topStock.name} <Pct v={t.topStock.d1} />
             </Link>
@@ -160,20 +511,9 @@ function SectorRow({ t, rank, expanded, onToggle }: {
         </td>
       </tr>
       {expanded && (
-        <tr className="bg-muted/20">
-          <td colSpan={10} className="px-4 py-3">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1.5 text-xs">
-              {t.members.map(m => (
-                <div key={m.code} className="flex justify-between gap-2">
-                  <Link href={`/?load=${m.code}`} className="text-foreground/80 hover:text-sky-400">
-                    {m.name} <span className="text-muted-foreground/60">{m.code}</span>
-                  </Link>
-                  <span className="font-mono tabular-nums">
-                    <Pct v={m.d1} /> <span className="text-muted-foreground/60">/5日</span> <Pct v={m.d5} />
-                  </span>
-                </div>
-              ))}
-            </div>
+        <tr>
+          <td colSpan={11} className="p-0">
+            <PerfGrid members={t.members} />
           </td>
         </tr>
       )}

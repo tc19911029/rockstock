@@ -127,6 +127,7 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
                       items: [
                         { href: '/',          label: '🏠 首頁工作台',   icon: Activity },
                         { href: '/watchlist', label: '⭐ 自選股',       icon: Star },
+                        { href: '/sectors',   label: '🔥 題材分類',     icon: TrendingUp },
                         { href: '/etf',       label: '📈 ETF 追蹤',     icon: TrendingUp },
                         { href: '/youtube',   label: '📺 YouTube 提及', icon: Newspaper },
                         { href: '/realtime',  label: '📡 分時監控',     icon: Radio },

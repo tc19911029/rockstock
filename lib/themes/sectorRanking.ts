@@ -13,6 +13,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { THEME_MAP, type ThemeStock } from './themeMap';
+import { PERF_PERIODS } from './perfPeriods';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
 
@@ -32,6 +33,8 @@ export interface ThemeStockPerf {
   volRatio: number | null;
   /** 外資+投信近 5 日合計買賣超（張；無資料 = null） */
   instNet5: number | null;
+  /** 過去 N 日漲幅 %（對齊 PERF_PERIODS = 1,2,…,10,20；資料不足 = null） */
+  rets: (number | null)[];
 }
 
 export interface ThemeRank {
@@ -65,6 +68,7 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
   const empty: ThemeStockPerf = {
     code: stock.code, name: stock.name,
     d1: null, d5: null, d20: null, d60: null, volRatio: null, instNet5: null,
+    rets: PERF_PERIODS.map(() => null),
   };
   // 檔名格式 {code}.TW.json / {code}.TWO.json
   const file = (await readCandleFile(`${stock.code}.TW`, 'TW'))
@@ -105,7 +109,11 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
     }
   } catch { /* 無籌碼資料不影響報酬欄 */ }
 
-  return { code: stock.code, name: stock.name, d1: ret(1), d5: ret(5), d20: ret(20), d60: ret(60), volRatio, instNet5 };
+  return {
+    code: stock.code, name: stock.name,
+    d1: ret(1), d5: ret(5), d20: ret(20), d60: ret(60), volRatio, instNet5,
+    rets: PERF_PERIODS.map((n) => ret(n)),
+  };
 }
 
 // ── 題材 6 階段（顯示用 heuristic，門檻單一事實在此）────────────────────────────
@@ -193,6 +201,16 @@ export async function readSectorRanking(date: string): Promise<SectorRankingFile
     return JSON.parse(raw) as SectorRankingFile;
   } catch {
     return null;
+  }
+}
+
+/** 列出所有已產生的題材排名日期（升冪） */
+export async function listSectorDates(): Promise<string[]> {
+  try {
+    const files = await fs.readdir(SECTORS_DIR);
+    return files.filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).map((f) => f.replace('.json', '')).sort();
+  } catch {
+    return [];
   }
 }
 
