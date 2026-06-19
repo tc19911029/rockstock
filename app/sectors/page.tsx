@@ -64,6 +64,7 @@ interface ThemeStockPerf {
   rets?: (number | null)[];
 }
 interface ThemeRotation {
+  rankNow?: number; rankPrev?: number | null;
   rankDelta: number | null; accel: number | null; bucket: 'in' | 'mid' | 'out';
 }
 interface ThemeRank {
@@ -139,15 +140,17 @@ function RankBadge({ rank }: { rank: number }) {
 // 輪動標籤（描述性，非買賣訊號）：🟢轉入 / 🔴轉出 / 主流。
 // 用 🟢🟡🔴 表「錢進/出」，刻意跟漲跌紅綠分開避免混淆；名次變化用淡字。
 function RotationCell({ r }: { r?: ThemeRotation | null }) {
+  // 名次怎麼變：5天前第幾名 → 今天第幾名（最白話）
+  const move = r?.rankPrev != null && r?.rankNow != null ? `${r.rankPrev}→${r.rankNow}名` : '';
   const d = r?.rankDelta;
-  const arrow = d != null && d !== 0 ? (d > 0 ? `↑${d}` : `↓${-d}`) : '';
+  const delta = d != null && d !== 0 ? `（${d > 0 ? '爬' + d : '掉' + -d}名）` : '';
   if (r?.bucket === 'in') {
-    return <span className="text-xs whitespace-nowrap" title="名次爬升＋動能加速：資金轉入（描述用，回測無穩定超額，非買訊）">🟢 轉入 <span className="text-muted-foreground/70">{arrow}</span></span>;
+    return <span className="text-xs whitespace-nowrap" title="名次往上爬＝資金流進（描述用，非買賣訊號）">🟢 流進 <span className="text-muted-foreground/70">{move}</span></span>;
   }
   if (r?.bucket === 'out') {
-    return <span className="text-xs whitespace-nowrap" title="名次下滑＋動能轉弱：資金轉出（描述用，退潮常均值回歸，非賣訊）">🔴 轉出 <span className="text-muted-foreground/70">{arrow}</span></span>;
+    return <span className="text-xs whitespace-nowrap" title="名次往下掉＝資金流出（描述用，非買賣訊號）">🔴 流出 <span className="text-muted-foreground/70">{move}</span></span>;
   }
-  return <span className="text-xs text-muted-foreground/45 whitespace-nowrap">{arrow || '—'}</span>;
+  return <span className="text-xs text-muted-foreground/45 whitespace-nowrap">{move ? `${move}${delta}` : '—'}</span>;
 }
 
 // 熱度小橫條：視覺強度 + 數字（0-100）
@@ -423,8 +426,10 @@ function FixedView({ data, error, expanded, setExpanded }: {
         <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。點一列看成分股近 1~20 日績效。
         <br />
         <span className="text-muted-foreground/70">
-          預設按「資金流向」排：<b>🟢 錢流進（名次爬）在最上、🔴 錢流出（名次掉）在最下</b>。
-          數字 ↑↓ = vs 約 5 天前的名次變化。只是看錢往哪流，<b>別當買賣訊號</b>（回測無穩定超額）。
+          25 題材用「最近 5 日漲幅」互相排名次。「輪動」欄的 <b>a→b名</b> = 5 天前第 a 名 → 今天第 b 名：
+          名次往上 = <b>🟢 錢流進</b>、往下 = <b>🔴 錢流出</b>。
+          例：面板 <b>25→2 名</b>（從墊底衝到第 2，錢大量流進）。
+          預設流進排最上、流出排最下；只看錢流向，<b>別當買賣訊號</b>。
         </span>
       </p>
 

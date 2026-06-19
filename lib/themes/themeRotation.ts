@@ -22,6 +22,10 @@ import type { SectorRankingFile } from './sectorRanking';
 export type RotationBucket = 'in' | 'mid' | 'out';
 
 export interface ThemeRotation {
+  /** 今日名次（1 = 最強；依 avgD5 排） */
+  rankNow: number;
+  /** 約 5 日前名次；無 prior = null */
+  rankPrev: number | null;
   /** 名次變化（vs prior；正=爬升）；無 prior = null */
   rankDelta: number | null;
   /** 近段動能變化（avgD5 今日 − prior）；null = 資料不足 */
@@ -54,7 +58,7 @@ export function computeRotation(
       if (rankDelta >= RANK_DELTA_TH) bucket = 'in';
       else if (rankDelta <= -RANK_DELTA_TH) bucket = 'out';
     }
-    out.set(t.theme, { rankDelta, accel, bucket });
+    out.set(t.theme, { rankNow, rankPrev: rp ?? null, rankDelta, accel, bucket });
   });
   return out;
 }
