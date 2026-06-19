@@ -26,23 +26,6 @@ import { PERF_PERIODS } from '@/lib/themes/perfPeriods';
 const KEY_PERIODS = [1, 5, 10, 20];
 const periodIndex = (id: string) => (PERF_PERIODS as readonly number[]).indexOf(Number(id.slice(1)));
 
-// 題材本身的排序選項（inline）
-const HOT_THEME_SORT_OPTIONS = [
-  { id: 'score', label: '熱度', defaultDir: 'desc' as SortDir },
-  { id: 'count', label: '熱門數', defaultDir: 'desc' as SortDir },
-  { id: 'avg', label: '平均漲', defaultDir: 'desc' as SortDir },
-  { id: 'max', label: '最強漲', defaultDir: 'desc' as SortDir },
-];
-const FIXED_THEME_SORT_OPTIONS = [
-  { id: 'rot', label: '資金流向', tip: '按名次變化排：錢流進(名次爬)在上、流出(名次掉)在下', defaultDir: 'desc' as SortDir },
-  { id: 'd1', label: '今日', defaultDir: 'desc' as SortDir },
-  { id: 'd5', label: '5日', defaultDir: 'desc' as SortDir },
-  { id: 'd20', label: '20日', defaultDir: 'desc' as SortDir },
-  { id: 'd60', label: '60日', defaultDir: 'desc' as SortDir },
-  { id: 'breadth', label: '廣度', defaultDir: 'desc' as SortDir },
-  { id: 'inst', label: '法人5日', defaultDir: 'desc' as SortDir },
-];
-
 // 加入自選鈕（reactive：加入後即時顯示 ✓）
 function AddWatchBtn({ code, name }: { code: string; name: string }) {
   const has = useWatchlistStore((s) => s.items.some((i) => i.symbol === code));
@@ -158,6 +141,20 @@ function RotationCell({ r }: { r?: ThemeRotation | null }) {
     </span>;
   }
   return <span className="text-xs text-muted-foreground/45 whitespace-nowrap">—</span>;
+}
+
+// 可點排序的欄位標題（點同欄切升降序、點別欄換欄）
+function SortTh({ id, label, sortId, dir, onSort, align = 'right' }: {
+  id: string; label: string; sortId: string; dir: SortDir; onSort: (id: string) => void; align?: 'left' | 'right' | 'center';
+}) {
+  const active = sortId === id;
+  const a = align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right';
+  return (
+    <th onClick={() => onSort(id)}
+      className={`py-2.5 px-2 font-medium cursor-pointer select-none hover:text-foreground whitespace-nowrap ${a} ${active ? 'text-sky-400' : ''}`}>
+      {label}{active ? (dir === 'desc' ? ' ▼' : ' ▲') : ''}
+    </th>
+  );
 }
 
 // 熱度小橫條：視覺強度 + 數字（0-100）
@@ -291,7 +288,7 @@ export default function SectorsPage() {
 
   const subtitle = mode === 'hot'
     ? (hot ? `資料日 ${hot.date} · 全市場 ${hot.hotStockCount} 檔在熱` : '全市場自動歸類熱點')
-    : (data ? `資料日 ${data.date} · 25 題材 · 預設按 5 日` : '25 題材聚合報酬');
+    : (data ? `資料日 ${data.date} · ${data.themes.length} 個熱門題材` : '熱門題材聚合報酬');
 
   return (
     <PageShell
@@ -307,7 +304,7 @@ export default function SectorsPage() {
           <button
             onClick={() => setMode('fixed')}
             className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'fixed' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-          >📋 固定25題材</button>
+          >📋 熱門題材</button>
         </div>
 
         {mode === 'hot' ? (
@@ -328,8 +325,9 @@ function SourceTag({ source }: { source: HotTheme['source'] }) {
   return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-muted text-muted-foreground/70 align-middle">{label}</span>;
 }
 
-function HotThemeTable({ rows, rankBase, expanded, setExpanded }: {
+function HotThemeTable({ rows, rankBase, expanded, setExpanded, sortId, dir, onSort }: {
   rows: HotTheme[]; rankBase: number; expanded: string | null; setExpanded: (s: string | null) => void;
+  sortId: string; dir: SortDir; onSort: (id: string) => void;
 }) {
   return (
     <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
@@ -339,10 +337,10 @@ function HotThemeTable({ rows, rankBase, expanded, setExpanded }: {
             <tr className="text-muted-foreground text-xs border-b border-border bg-secondary/30">
               <th className="text-left py-2.5 pl-3 pr-2 font-medium">#</th>
               <th className="text-left py-2.5 pr-3 font-medium">題材</th>
-              <th className="text-right py-2.5 px-2 font-medium">熱門數</th>
-              <th className="text-right py-2.5 px-2 font-medium">平均漲</th>
-              <th className="text-right py-2.5 px-2 font-medium">最強漲</th>
-              <th className="text-right py-2.5 px-2 font-medium">熱度</th>
+              <SortTh id="count" label="熱門數" sortId={sortId} dir={dir} onSort={onSort} />
+              <SortTh id="avg" label="平均漲" sortId={sortId} dir={dir} onSort={onSort} />
+              <SortTh id="max" label="最強漲" sortId={sortId} dir={dir} onSort={onSort} />
+              <SortTh id="score" label="熱度" sortId={sortId} dir={dir} onSort={onSort} />
               <th className="text-left py-2.5 pl-2 pr-3 font-medium">代表股</th>
             </tr>
           </thead>
@@ -366,6 +364,7 @@ function HotView({ hot, error, expanded, setExpanded }: {
   const [sortId, setSortId] = useState('score');
   const [dir, setDir] = useState<SortDir>('desc');
   const [showCoarse, setShowCoarse] = useState(false);
+  const sortBy = (id: string) => { if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc'); else { setSortId(id); setDir('desc'); } };
   const themes = hot
     ? applySort(hot.themes, sortId, dir,
         (t, id) => id === 'score' ? t.score : id === 'count' ? t.hotCount : id === 'avg' ? t.avgChange : id === 'max' ? t.maxChange : null,
@@ -393,11 +392,9 @@ function HotView({ hot, error, expanded, setExpanded }: {
 
       {hot && hot.themes.length > 0 && (
         <>
-          <SortControl options={HOT_THEME_SORT_OPTIONS} value={sortId} dir={dir}
-            onChange={(id, d) => { setSortId(id); setDir(d); }} leading="題材排序" size="normal" />
-
           {concept.length > 0 ? (
-            <HotThemeTable rows={concept} rankBase={0} expanded={expanded} setExpanded={setExpanded} />
+            <HotThemeTable rows={concept} rankBase={0} expanded={expanded} setExpanded={setExpanded}
+              sortId={sortId} dir={dir} onSort={sortBy} />
           ) : (
             <EmptyState icon="🔍" title="今天沒有明確的細題材在熱" description="熱門股都落在廣義產業（見下方展開）" />
           )}
@@ -409,7 +406,8 @@ function HotView({ hot, error, expanded, setExpanded }: {
                 <span className={`transition-transform ${showCoarse ? 'rotate-90' : ''}`}>›</span>
                 廣義分類（產業別／未分類）· {coarse.length} 群 · {coarseHot} 檔
               </button>
-              {showCoarse && <HotThemeTable rows={coarse} rankBase={concept.length} expanded={expanded} setExpanded={setExpanded} />}
+              {showCoarse && <HotThemeTable rows={coarse} rankBase={concept.length} expanded={expanded} setExpanded={setExpanded}
+                sortId={sortId} dir={dir} onSort={sortBy} />}
             </div>
           )}
         </>
@@ -465,6 +463,7 @@ function FixedView({ data, error, expanded, setExpanded }: {
 }) {
   const [sortId, setSortId] = useState('rot');
   const [dir, setDir] = useState<SortDir>('desc');
+  const sortBy = (id: string) => { if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc'); else { setSortId(id); setDir('desc'); } };
   const themes = data
     ? applySort(data.themes, sortId, dir,
         (t, id) => id === 'rot' ? (t.rotation?.rankDelta ?? null) : id === 'd1' ? t.avgD1 : id === 'd5' ? t.avgD5 : id === 'd20' ? t.avgD20 : id === 'd60' ? t.avgD60 : id === 'breadth' ? t.breadth : id === 'inst' ? t.instNet5 : null,
@@ -474,13 +473,13 @@ function FixedView({ data, error, expanded, setExpanded }: {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        25 題材聚合報酬（成分股單純平均）· 階段為顯示用分類，<b>不參與選股</b>。
-        <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。點一列看成分股近 1~20 日績效。
+        熱門題材聚合報酬（成分股單純平均）· 階段為顯示用分類，<b>不參與選股</b>。
+        <span className="text-bull">紅</span>=漲、<span className="text-bear">綠</span>=跌。<b>點欄位標題可排序</b>，點一列看成分股近 1~20 日績效。
         <br />
         <span className="text-muted-foreground/70">
-          25 題材用「最近 5 日漲幅」互相排名次。「輪動」欄的 <b>a→b名</b> = 5 天前第 a 名 → 今天第 b 名：
-          名次往上 = <b>🟢 錢流進</b>、往下 = <b>🔴 錢流出</b>。
-          例：面板 <b>25→2 名</b>（從墊底衝到第 2，錢大量流進）。
+          題材用「最近 5 日漲幅」互相排名次。「輪動」欄的 <b>a→b名</b> = 5 天前第 a 名 → 今天第 b 名：
+          名次往上 = <b>🟢 資金流進</b>、往下 = <b>🔴 資金流出</b>。
+          例：面板 <b>25→2 名</b>（從墊底衝到第 2，資金大量流進）。
           預設流進排最上、流出排最下；只看錢流向，<b>別當買賣訊號</b>。
         </span>
       </p>
@@ -494,8 +493,6 @@ function FixedView({ data, error, expanded, setExpanded }: {
 
       {data && (
         <>
-          <SortControl options={FIXED_THEME_SORT_OPTIONS} value={sortId} dir={dir}
-            onChange={(id, d) => { setSortId(id); setDir(d); }} leading="題材排序" size="normal" />
           <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -503,13 +500,13 @@ function FixedView({ data, error, expanded, setExpanded }: {
                   <tr className="text-muted-foreground text-xs border-b border-border bg-secondary/30">
                     <th className="text-left py-2.5 pl-3 pr-2 font-medium">#</th>
                     <th className="text-left py-2.5 pr-3 font-medium">題材</th>
-                    <th className="text-left py-2.5 px-2 font-medium">輪動</th>
-                    <th className="text-right py-2.5 px-2 font-medium">今日</th>
-                    <th className="text-right py-2.5 px-2 font-medium">5日</th>
-                    <th className="text-right py-2.5 px-2 font-medium">20日</th>
-                    <th className="text-right py-2.5 px-2 font-medium">60日</th>
-                    <th className="text-right py-2.5 px-2 font-medium">廣度</th>
-                    <th className="text-right py-2.5 px-2 font-medium">法人5日(張)</th>
+                    <SortTh id="rot" label="輪動" sortId={sortId} dir={dir} onSort={sortBy} align="left" />
+                    <SortTh id="d1" label="今日" sortId={sortId} dir={dir} onSort={sortBy} />
+                    <SortTh id="d5" label="5日" sortId={sortId} dir={dir} onSort={sortBy} />
+                    <SortTh id="d20" label="20日" sortId={sortId} dir={dir} onSort={sortBy} />
+                    <SortTh id="d60" label="60日" sortId={sortId} dir={dir} onSort={sortBy} />
+                    <SortTh id="breadth" label="廣度" sortId={sortId} dir={dir} onSort={sortBy} />
+                    <SortTh id="inst" label="法人5日(張)" sortId={sortId} dir={dir} onSort={sortBy} />
                     <th className="text-center py-2.5 px-2 font-medium">階段</th>
                     <th className="text-left py-2.5 pl-2 pr-3 font-medium">當日最強</th>
                   </tr>
