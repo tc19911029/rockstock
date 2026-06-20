@@ -37,7 +37,6 @@ import SixConditionsPanel from '@/components/SixConditionsPanel';
 import BuyMethodConditionsPanel from '@/components/BuyMethodConditionsPanel';
 import { SanSeConditionsPanel } from '@/components/cn-sanse/SanSeConditionsPanel';
 import { SanSeSignalsPanel } from '@/components/cn-sanse/SanSeSignalsPanel';
-import { SellHeavinessReference } from '@/components/shared/SellHeavinessReference';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
 import ChipRawTables, { type ChipRawTablesProps } from '@/components/chart/ChipRawTables';
@@ -860,8 +859,12 @@ function HomePage() {
           <SectionBoundary section="籌碼分析">
             {isCnTicker
               ? <CnChipPanel symbol={currentStock.ticker} />
-              : <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />}
-            <SellHeavinessReference market={isCnTicker ? 'CN' : 'TW'} className="mt-2" />
+              : (
+                  <>
+                    <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
+                    <ChipRawTables {...chipTables} />
+                  </>
+                )}
           </SectionBoundary>
         ) : (
           <EmptyState

@@ -101,32 +101,6 @@ function getPctSignal(v: number) {
   return { label: '中立', cls: 'text-yellow-400' };
 }
 
-// ── 集保大戶分層：tier「跟前一週比」週變化（▲/▼ delta，台股慣例增=紅/減=綠）+ 連續週趨勢（連 N 增/減）──
-function TierChange({ delta, trend }: { delta?: number | null; trend?: TrendInfo }) {
-  return (
-    <div className="leading-tight">
-      {delta == null ? (
-        <div className="text-[7px] text-muted-foreground/40">—</div>
-      ) : Math.abs(delta) < 0.005 ? (
-        <div className="text-[7px] text-yellow-400/70">±0</div>
-      ) : (
-        <div className={`text-[7px] font-mono ${delta > 0 ? 'text-bull' : 'text-bear'}`}>
-          {delta > 0 ? '▲+' : '▼'}{delta.toFixed(2)}
-        </div>
-      )}
-      {trend && trend.direction !== 'flat' && trend.label && (
-        <div className={`text-[7px] leading-tight ${
-          trend.direction === 'up'
-            ? (trend.reversal ? 'text-bull' : 'text-bull-light')
-            : (trend.reversal ? 'text-bear' : 'text-bear-light')
-        }`}>
-          {trend.label}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Gauge bar ───────────────────────────────────────────────────────────────
 // Shows current value position in a fixed symmetric range
 function GaugeBar({ value, range }: { value: number; range: number }) {
@@ -226,22 +200,6 @@ function ChipTile({
       {/* Gauge */}
       {!noData && <GaugeBar value={value} range={range} />}
     </div>
-  );
-}
-
-// ── 法人連買 / 占量（v5 衍生欄位）────────────────────────────────────────────
-function InstConsecLeg({ label, days, pct }: { label: string; days: number; pct?: number | null }) {
-  return (
-    <span className="whitespace-nowrap">
-      {label}連買{' '}
-      <span className={`font-mono font-bold ${days > 0 ? 'text-bull' : 'text-muted-foreground/70'}`}>{days}</span>
-      {' '}日
-      {pct != null && (
-        <span className={`font-mono ${pct > 0 ? 'text-bull-light' : pct < 0 ? 'text-bear-light' : 'text-muted-foreground/70'}`}>
-          （占量 {pct > 0 ? '+' : ''}{pct.toFixed(1)}%）
-        </span>
-      )}
-    </span>
   );
 }
 
@@ -422,120 +380,6 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           />
         ))}
       </div>
-
-      {/* ── 法人連買 / 占量（v5 衍生欄位；純顯示不進評分）── */}
-      {data.foreignConsecBuyDays != null && data.trustConsecBuyDays != null && (
-        <div className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
-          <InstConsecLeg label="外資" days={data.foreignConsecBuyDays} pct={data.foreignNetToVolumePct} />
-          <span className="text-muted-foreground/40">／</span>
-          <InstConsecLeg label="投信" days={data.trustConsecBuyDays} pct={data.trustNetToVolumePct} />
-          {data.instSyncBuy && (
-            <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 border border-red-700/50">
-              外資+投信同步買 {data.instSyncBuyDays} 日
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* ── 主力券商分點（v3 Yahoo scraper）── */}
-      {data.brokerNetBuy != null && data.topBuyers && data.topSellers && (
-        <details className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30">
-          <summary className="cursor-pointer select-none flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground font-medium">主力券商前 15 大</span>
-            <span className="flex items-center gap-2">
-              <span className={`text-[10px] font-mono ${data.brokerNetBuy >= 0 ? 'text-bull' : 'text-bear'}`}>
-                {data.brokerNetBuy >= 0 ? '+' : ''}{data.brokerNetBuy.toLocaleString()} 張
-              </span>
-              {data.brokerConcentration != null && (
-                <span className={`text-[10px] font-mono ${data.brokerConcentration >= 0 ? 'text-bull' : 'text-bear'}`}>
-                  集中 {data.brokerConcentration >= 0 ? '+' : ''}{data.brokerConcentration.toFixed(2)}%
-                </span>
-              )}
-            </span>
-          </summary>
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            <div>
-              <div className="text-[9px] text-bull font-medium mb-1">前 15 大買進</div>
-              <div className="space-y-0.5">
-                {data.topBuyers.slice(0, 8).map(b => (
-                  <div key={`b${b.rank}`} className="flex justify-between text-[10px]">
-                    <span className="text-foreground/80 truncate" title={b.name}>{b.rank}. {b.name}</span>
-                    <span className="text-bull font-mono shrink-0">+{b.netVolK}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="text-[9px] text-bear font-medium mb-1">前 15 大賣出</div>
-              <div className="space-y-0.5">
-                {data.topSellers.slice(0, 8).map(s => (
-                  <div key={`s${s.rank}`} className="flex justify-between text-[10px]">
-                    <span className="text-foreground/80 truncate" title={s.name}>{s.rank}. {s.name}</span>
-                    <span className="text-bear font-mono shrink-0">{s.netVolK}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </details>
-      )}
-
-      {/* ── 集保大戶分層（依股價選 tier；千金股看 100 張、平價看 1000 張）── */}
-      {(data.holder100Pct != null || data.holder400Pct != null) && (
-        <div className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30 space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground font-medium">
-              集保大戶分層
-              {data.tdccPrevDate && (
-                <span className="text-[8px] text-muted-foreground/60 ml-1">資料 {data.tdccDate?.slice(5)}｜週變化 vs {data.tdccPrevDate.slice(5)}</span>
-              )}
-            </span>
-            {data.structureBuilding && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 border border-red-700/50">
-                ✨ 主力卡位
-              </span>
-            )}
-          </div>
-          <div className="grid grid-cols-4 gap-1 text-[9px] font-mono">
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">100張↑</div>
-              <div className="text-foreground/90 font-bold">{data.holder100Pct?.toFixed(1) ?? '—'}%</div>
-              <TierChange delta={data.holderTierChange?.h100} trend={data.holderTierTrend?.h100} />
-            </div>
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">200張↑</div>
-              <div className="text-foreground/90 font-bold">{data.holder200Pct?.toFixed(1) ?? '—'}%</div>
-              <TierChange delta={data.holderTierChange?.h200} trend={data.holderTierTrend?.h200} />
-            </div>
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">400張↑</div>
-              <div className="text-foreground/90 font-bold">{data.holder400Pct?.toFixed(1) ?? '—'}%</div>
-              <TierChange delta={data.holderTierChange?.h400} trend={data.holderTierTrend?.h400} />
-            </div>
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">1000張↑</div>
-              <div className="text-foreground/90 font-bold">{data.largeHolderPct.toFixed(1)}%</div>
-              <TierChange delta={data.holderTierChange?.h1000} trend={data.holderTierTrend?.h1000} />
-            </div>
-          </div>
-          {data.structureBuilding && (
-            <div className="grid grid-cols-3 gap-1 text-[8px] font-mono text-muted-foreground/80">
-              <div className="text-center">
-                <div>400-600: {data.holder400To600Pct?.toFixed(2)}%</div>
-                <TierChange delta={data.holderTierChange?.h400To600} />
-              </div>
-              <div className="text-center">
-                <div>600-800: {data.holder600To800Pct?.toFixed(2)}%</div>
-                <TierChange delta={data.holderTierChange?.h600To800} />
-              </div>
-              <div className="text-center">
-                <div>800-1000: {data.holder800To1000Pct?.toFixed(2)}%</div>
-                <TierChange delta={data.holderTierChange?.h800To1000} />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── Margin detail ── */}
       <div className="grid grid-cols-2 gap-1.5 text-[9px] text-muted-foreground">
