@@ -252,7 +252,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '6806', name: '森崴能源' }, { code: '6869', name: '雲豹能源' },
     { code: '6873', name: '泓德能源' }, { code: '6443', name: '元晶' },
     { code: '3576', name: '聯合再生' }, { code: '6477', name: '安集' },
-    { code: '1609', name: '大亞' }, { code: '6244', name: '茂迪' },
+    // 2026-06-20 稽核：移除大亞1609（綠能僅佔營收~5%，本質電纜廠）
+    { code: '6244', name: '茂迪' },
   ],
   // 2026-06-20 新增：伺服器電源/BBU（電源供應器 + 電池備援模組/超級電容）
   '伺服器電源': [
@@ -261,14 +262,17 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3015', name: '全漢' }, { code: '6781', name: 'AES-KY' },
     { code: '3211', name: '順達' }, { code: '3323', name: '加百裕' },
     { code: '4931', name: '新盛力' }, { code: '6121', name: '新普' },
+    // 2026-06-20 稽核補：GB200 BBU 電池模組連接器
+    { code: '3003', name: '健和興' },
   ],
   // 2026-06-20 新增：高速連接/銅纜（伺服器 socket + 高速銅纜 + 連接器/線束）
   '高速連接': [
     { code: '3533', name: '嘉澤' }, { code: '6205', name: '詮欣' },
     { code: '3526', name: '凡甲' }, { code: '3092', name: '鴻碩' },
     { code: '5457', name: '宣德' }, { code: '3023', name: '信邦' },
-    { code: '6134', name: '萬旭' }, { code: '6290', name: '良維' },
-    { code: '3501', name: '維熹' }, { code: '3665', name: '貿聯-KY' },
+    { code: '6134', name: '萬旭' }, { code: '3665', name: '貿聯-KY' },
+    // 2026-06-20 稽核補：DAC 直連銅纜純度龍頭（移除維熹3501/良維6290＝電源線非高速訊號）
+    { code: '6197', name: '佳必琪' },
   ],
 };
 
