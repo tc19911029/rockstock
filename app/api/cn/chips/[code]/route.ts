@@ -1,7 +1,7 @@
 import { apiOk, apiError } from '@/lib/api/response';
 import { fetchShareholderCount } from '@/lib/datasource/EastMoneyShareholderCount';
 import { fetchDragonTiger } from '@/lib/datasource/EastMoneyDragonTiger';
-import { fetchCapitalFlow } from '@/lib/datasource/EastMoneyCapitalFlow';
+import { fetchCapitalFlow, fetchTodayCapitalFlow } from '@/lib/datasource/EastMoneyCapitalFlow';
 import { fetchCnMarginHistory } from '@/lib/cn-agents/datasource/emMarginBalance';
 
 export const runtime = 'nodejs';
@@ -15,10 +15,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ code: s
   if (!/^\d{6}$/.test(code)) return apiError('代號格式錯誤', 400);
   try {
     // 各源獨立 try（allSettled）：某源掛掉不拖垮整個面板
-    const [shRes, lhbRes, cfRes, mgRes] = await Promise.allSettled([
+    const [shRes, lhbRes, cfRes, cfTodayRes, mgRes] = await Promise.allSettled([
       fetchShareholderCount(code, 8),
       fetchDragonTiger(code, 8),
       fetchCapitalFlow(code, 10),            // toSecid 以首碼猜交易所（6→滬、3/0→深）
+      fetchTodayCapitalFlow(code),           // 盤中即時今日累計（分鐘端點）
       fetchCnMarginHistory(code, 10),
     ]);
     const val = <T>(r: PromiseSettledResult<T>, dflt: T): T => (r.status === 'fulfilled' ? r.value : dflt);
@@ -27,6 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ code: s
       shareholders: val(shRes, []),
       dragontiger: val(lhbRes, []),
       capitalFlow: val(cfRes, []),
+      capitalFlowToday: val(cfTodayRes, null),
       margin: val(mgRes, []),
     });
   } catch (e) {

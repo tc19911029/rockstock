@@ -133,6 +133,40 @@ async function fetchCapitalFlowEM(
   return [];
 }
 
+// 盤中即時：fflow 分鐘線（klt=1, lmt=0 = 今日全日逐分鐘），最後一筆 = 當下今日累計。
+// daykline 會延遲 1~2 日、不含今日盤中；分鐘端點才是真正盤中即時值。同樣用 http 避 TLS reset。
+const FFLOW_RT_HOSTS = ['push2.eastmoney.com', '1.push2.eastmoney.com', 'push2delay.eastmoney.com'];
+
+/**
+ * 今日盤中即時累計資金流（分鐘線最後一筆）。
+ * 收盤後 = 今日最終累計；非交易時段 = 最後交易日。抓不到回 null（caller 退回 daykline）。
+ */
+export async function fetchTodayCapitalFlow(symbol: string): Promise<CapitalFlowDay | null> {
+  const secid = toSecid(symbol);
+  const qs = `?lmt=0&klt=1&secid=${secid}&fields1=f1&fields2=f51,f52,f53,f54,f55,f56`;
+  for (const host of FFLOW_RT_HOSTS) {
+    try {
+      const res = await fetch(`http://${host}/api/qt/stock/fflow/kline/get${qs}`, {
+        signal: AbortSignal.timeout(6_000),
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'http://quote.eastmoney.com/' },
+      });
+      if (!res.ok) continue;
+      const json = await res.json() as EMResponse;
+      const klines = json.data?.klines ?? [];
+      if (klines.length === 0) continue;
+      // f51,f52,f53,f54,f55,f56 = 時間,主力淨,小單,中單,大單,超大單
+      const p = klines[klines.length - 1].split(',');
+      return {
+        date:     (p[0] ?? '').slice(0, 10),
+        mainNet:  parseFloat(p[1]) || 0,
+        largeNet: p[4] != null ? (parseFloat(p[4]) || 0) : null,
+        superNet: p[5] != null ? (parseFloat(p[5]) || 0) : null,
+      };
+    } catch { /* 下一個 host */ }
+  }
+  return null;
+}
+
 /**
  * 抓單股近 N 天資金流（日K）
  * 優先 EastMoney，失敗或空時 fallback Sina

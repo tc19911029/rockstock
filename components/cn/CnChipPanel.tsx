@@ -24,7 +24,17 @@ interface MarginDay {
 interface Resp {
   ok?: boolean; error?: string;
   shareholders?: Shareholder[]; dragontiger?: DragonTiger[];
-  capitalFlow?: CapitalFlowDay[]; margin?: MarginDay[];
+  capitalFlow?: CapitalFlowDay[]; capitalFlowToday?: CapitalFlowDay | null; margin?: MarginDay[];
+}
+
+// 陸股交易時段（北京時間=台灣 CST）：平日 09:30-11:30 / 13:00-15:00
+function isCnSessionNow(): boolean {
+  const now = new Date();
+  const bj = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60_000);
+  const day = bj.getDay();
+  if (day === 0 || day === 6) return false;
+  const hm = bj.getHours() * 100 + bj.getMinutes();
+  return (hm >= 930 && hm <= 1131) || (hm >= 1300 && hm <= 1501);
 }
 
 const yi = (n: number | null | undefined) => (n == null ? '—' : `${(n / 1e8).toFixed(2)}億`);
@@ -38,16 +48,29 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
+  // 首抓 + 盤中自動刷新（每 60s；收盤後停輪詢，只保留首抓）。
+  // 主力資金走「今日盤中即時累計」會跳動；其餘（龙虎榜/兩融/股东户数）盤後/期間更新、刷新不變屬正常。
   useEffect(() => {
     let alive = true;
-    setLoading(true); setErr(null);
-    fetch(`/api/cn/chips/${code}`, { signal: AbortSignal.timeout(8000) })
-      .then((r) => r.json())
-      .then((j: Resp) => { if (!alive) return; if (j.error) setErr(j.error); else setData(j); })
-      .catch(() => { if (alive) setErr('讀取失敗'); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    setLoading(true); setErr(null); setData(null);
+    const load = (silent: boolean) => {
+      if (!silent && alive) setLoading(true);
+      fetch(`/api/cn/chips/${code}`, { signal: AbortSignal.timeout(8000) })
+        .then((r) => r.json())
+        .then((j: Resp) => {
+          if (!alive) return;
+          if (j.error) { if (!silent) setErr(j.error); return; }
+          setData(j); setErr(null);
+          setUpdatedAt(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }));
+        })
+        .catch(() => { if (alive && !silent) setErr('讀取失敗'); })
+        .finally(() => { if (alive && !silent) setLoading(false); });
+    };
+    load(false);
+    const timer = setInterval(() => { if (alive && isCnSessionNow()) load(true); }, 60_000);
+    return () => { alive = false; clearInterval(timer); };
   }, [code]);
 
   if (loading) return <div className="p-4 text-sm text-muted-foreground">載入陸股籌碼中…</div>;
@@ -59,10 +82,15 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
   // 户数变化：负=集中(偏多,绿)、正=分散(偏空,红)
   const concentrating = (latest?.holderNumRatio ?? 0) < 0;
 
-  // 主力資金流向（provider 回升冪：最後一筆=最新）
-  const cf = data?.capitalFlow ?? [];
-  const cfLatest = cf[cf.length - 1];
-  const cfTrend = cf.slice(-6).reverse();
+  // 主力資金：今日盤中即時值（分鐘端點）優先當頭，歷史日K 疊在下面（去重同日）
+  const cfToday = data?.capitalFlowToday ?? null;
+  const cfHist = data?.capitalFlow ?? [];
+  const cfLatest = cfToday ?? cfHist[cfHist.length - 1];
+  const cfIsLive = cfToday != null && cfLatest === cfToday;
+  const histDesc = [...cfHist].reverse();
+  const cfTrend = (cfToday && (histDesc.length === 0 || histDesc[0].date !== cfToday.date)
+    ? [cfToday, ...histDesc]
+    : histDesc).slice(0, 6);
 
   // 兩融（升冪；最後一筆=最新，前一筆算日變化）
   const mg = data?.margin ?? [];
@@ -117,13 +145,16 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
       <section>
         <div className="flex items-center gap-1.5 mb-1.5">
           <span className="font-semibold text-fuchsia-300">主力資金</span>
-          <span className="text-[10px] text-muted-foreground">個股資金流向（超大單=主買，紅進綠出）</span>
+          {cfIsLive && isCnSessionNow() && (
+            <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">● 盤中即時</span>
+          )}
+          <span className="text-[10px] text-muted-foreground">超大單=主買，紅進綠出</span>
         </div>
         {cfLatest ? (
           <>
             <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2 flex items-center gap-3">
               <div>
-                <div className="text-[10px] text-muted-foreground">{cfLatest.date} 主力淨流入</div>
+                <div className="text-[10px] text-muted-foreground">{cfLatest.date} 主力淨流入{cfIsLive ? '（今日累計）' : ''}</div>
                 <div className={cn('font-mono text-base font-bold', cfLatest.mainNet >= 0 ? 'text-bull' : 'text-bear')}>
                   {yiSigned(cfLatest.mainNet)}
                 </div>
@@ -224,7 +255,11 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
         ) : <div className="text-muted-foreground">近期无上榜</div>}
       </section>
 
-      <div className="text-[9px] text-muted-foreground/60 mt-1">資料源：EastMoney datacenter</div>
+      <div className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">
+        資料源：EastMoney{updatedAt ? ` · 更新 ${updatedAt}` : ''}
+        {isCnSessionNow() && <span className="text-red-400/70"> · 盤中每 60 秒自動刷新</span>}
+        <br />主力資金=今日盤中即時跳動；龙虎榜/兩融/股东户数為盤後/期間資料，盤中不變動屬正常。
+      </div>
     </div>
   );
 }
