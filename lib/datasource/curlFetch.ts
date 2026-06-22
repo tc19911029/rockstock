@@ -35,27 +35,38 @@ const PROXY_CACHE_TTL_MS = 10 * 60_000;
 async function execCurlWithProxyFallback(
   baseArgs: string[],
   maxBuffer: number,
+  proxyFirst = false,
 ): Promise<{ stdout: string }> {
   // -f：HTTP ≥400 讓 curl exit 22 而不是 0 — 否則 Cloudflare 403 challenge HTML 會被
   // 當成「成功」直接進 JSON.parse 炸掉，代理重試永遠不會觸發（2026-06-12 實測 TPEx openapi）
   baseArgs = ['-f', ...baseArgs];
+  const run = (args: string[]) => execFileAsync('curl', args, { encoding: 'utf-8', maxBuffer });
+  const cached = workingProxyCache && Date.now() - workingProxyCache.at < PROXY_CACHE_TTL_MS
+    ? workingProxyCache.proxy : null;
+  const proxies = cached
+    ? [cached, ...LOCAL_PROXY_CANDIDATES.filter((p) => p !== cached)]
+    : [...LOCAL_PROXY_CANDIDATES];
+
+  // proxyFirst（台灣站 TWSE/TPEx/Yahoo 用）：中國線路直連這些站會 hang（fake-ip），代理 ~1s 就通 →
+  // 代理優先、全失敗才直連兜底（人不在中國/代理沒開時直連會通）。
+  if (proxyFirst) {
+    let lastErr: unknown = null;
+    for (const proxy of proxies) {
+      try { const r = await run(['-x', proxy, ...baseArgs]); workingProxyCache = { proxy, at: Date.now() }; return r; }
+      catch (e) { lastErr = e; }
+    }
+    try { return await run([...baseArgs, '--max-time', '5']); }
+    catch (e) { throw e instanceof Error ? e : (lastErr ?? e); }
+  }
+
+  // 預設：直連優先（5s 上限，curl 取最後一個 --max-time）→ 代理。
   try {
-    // 直連短 timeout 5s（curl 取最後一個 --max-time）：中國線路對台站(TWSE/TPEx/FinMind/Yahoo)直連常
-    // hang 滿 15s 才退代理，多個來源累加 → /api/chip 卡 40-60s。直連 5s 內沒通就快退代理（代理 ~1s 通）。
-    return await execFileAsync('curl', [...baseArgs, '--max-time', '5'], { encoding: 'utf-8', maxBuffer });
+    return await run([...baseArgs, '--max-time', '5']);
   } catch (directErr) {
-    const cached = workingProxyCache && Date.now() - workingProxyCache.at < PROXY_CACHE_TTL_MS
-      ? workingProxyCache.proxy : null;
-    const candidates = cached
-      ? [cached, ...LOCAL_PROXY_CANDIDATES.filter((p) => p !== cached)]
-      : [...LOCAL_PROXY_CANDIDATES];
     let lastErr: unknown = directErr;
-    for (const proxy of candidates) {
-      try {
-        const r = await execFileAsync('curl', ['-x', proxy, ...baseArgs], { encoding: 'utf-8', maxBuffer });
-        workingProxyCache = { proxy, at: Date.now() };
-        return r;
-      } catch (e) { lastErr = e; }
+    for (const proxy of proxies) {
+      try { const r = await run(['-x', proxy, ...baseArgs]); workingProxyCache = { proxy, at: Date.now() }; return r; }
+      catch (e) { lastErr = e; }
     }
     throw lastErr;
   }
@@ -74,6 +85,9 @@ interface CurlFetchOptions {
   method?: 'GET' | 'POST';
   /** POST body（x-www-form-urlencoded 字串；fetch 與 curl 兩端共用）*/
   body?: string;
+  /** 代理優先（台灣站 TWSE/TPEx/Yahoo 用）：跳過 Node fetch 直連、curl 也代理優先。
+   *  中國線路對這些站直連 fake-ip hang、代理 ~1s 通；代理沒開/不在中國時自動退直連，故各環境皆安全。 */
+  proxyFirst?: boolean;
 }
 
 export type CurlFetchSource = 'node-fetch' | 'curl';
@@ -110,9 +124,10 @@ export async function fetchJsonWithCurlFallback<T>(
     headers['Referer'] = 'https://www.tpex.org.tw/zh-tw/mainboard/trading/info/stock-pricing.html';
   }
 
-  // ── 1) Node fetch 第一試（TPEx 跳過） ────────────────────────────────
+  // ── 1) Node fetch 第一試（TPEx / proxyFirst 跳過） ───────────────────
+  const proxyFirst = options.proxyFirst ?? false;
   let lastErr: unknown = null;
-  if (!isTpex) {
+  if (!isTpex && !proxyFirst) {
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)), // 直連 5s 上限：台站在中國線路 hang，快退 curl→代理
@@ -129,7 +144,7 @@ export async function fetchJsonWithCurlFallback<T>(
       lastErr = err;
     }
   } else {
-    lastErr = new Error('tpex.org.tw → curl-first（跳過 node fetch）');
+    lastErr = new Error(proxyFirst ? 'proxyFirst → curl 代理優先' : 'tpex.org.tw → curl-first（跳過 node fetch）');
   }
 
   // ── 2) curl shell fallback ────────────────────────────────────────
@@ -145,7 +160,7 @@ export async function fetchJsonWithCurlFallback<T>(
       args.push('-X', 'POST', '--data', options.body ?? '');
     }
     args.push(url);
-    const { stdout } = await execCurlWithProxyFallback(args, maxBuffer);
+    const { stdout } = await execCurlWithProxyFallback(args, maxBuffer, proxyFirst);
     if (!stdout || stdout.length === 0) {
       throw new Error('curl returned empty stdout');
     }
@@ -180,19 +195,24 @@ export async function fetchTextWithCurlFallback(
   const maxBuffer = options.maxBuffer ?? 50 * 1024 * 1024;
   const validate = options.validate ?? (() => true);
 
-  // ── 1) Node fetch 第一試（內容要過 validate） ────────────────────────
+  // ── 1) Node fetch 第一試（內容要過 validate；proxyFirst 跳過） ─────────
+  const proxyFirst = options.proxyFirst ?? false;
   let lastErr: unknown = null;
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)), headers });
-    if (res.ok) {
-      const text = await res.text();
-      if (validate(text)) return { text, source: 'node-fetch' };
-      lastErr = new Error(`node fetch 200 but content failed validation (anti-bot stub? ${text.length}B)`);
-    } else {
-      lastErr = new Error(`HTTP ${res.status}`);
+  if (!proxyFirst) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)), headers });
+      if (res.ok) {
+        const text = await res.text();
+        if (validate(text)) return { text, source: 'node-fetch' };
+        lastErr = new Error(`node fetch 200 but content failed validation (anti-bot stub? ${text.length}B)`);
+      } else {
+        lastErr = new Error(`HTTP ${res.status}`);
+      }
+    } catch (err) {
+      lastErr = err;
     }
-  } catch (err) {
-    lastErr = err;
+  } else {
+    lastErr = new Error('proxyFirst → curl 代理優先');
   }
 
   // ── 2) curl shell fallback（含本機代理 fallback） ─────────────────────
@@ -202,7 +222,7 @@ export async function fetchTextWithCurlFallback(
       args.push('-H', `${k}: ${v}`);
     }
     args.push(url);
-    const { stdout } = await execCurlWithProxyFallback(args, maxBuffer);
+    const { stdout } = await execCurlWithProxyFallback(args, maxBuffer, proxyFirst);
     if (!stdout || stdout.length === 0) throw new Error('curl returned empty stdout');
     if (!validate(stdout)) throw new Error(`curl content failed validation (${stdout.length}B)`);
     return { text: stdout, source: 'curl' };

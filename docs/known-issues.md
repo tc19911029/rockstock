@@ -132,3 +132,11 @@
   4. `/api/chip` margin 三源 **串行 fallback → 並行取最快**；allSettled **每源包 8s 上限**(超時當 null 優雅降級)；加 **10 分鐘回應快取**。
 - **結果**：冷載入 **60s+ → 8.5s**，再看(快取) **0.008s**。配合前端 I-12 重試 → 面板穩定載入。
 - **教訓**：第二輪「裸-fetch 掃描乾淨」**漏判**——當時只用 twse.com 關鍵字掃，但這些是打 **FinMind**(api.finmindtrade.com)，所以漏。掃描關鍵字要含所有上游 host。
+
+### I-13 後續 ✅ — 籌碼面板「想想辦法」:proxyFirst + SBL 並行（2026-06-22）
+- **proxyFirst 選項**：curlFetch 加 `proxyFirst`（台灣站 TWSE/TPEx/Yahoo 用）——跳過必 hang 的直連、
+  curl 代理優先（代理 ~1s 通；代理沒開/不在中國時退直連，各環境安全）。接到 5 個 TW provider。
+- **SBL 歷史並行**：fetchTwse/TpexSblHistory 原本逐日 await 串行（30 天 = 135s!）→ 改並行(限並發8)
+  + 全市場日 cache 共用 + 窗口 30→15 天。
+- **結果**：上市 2330 → 3.9s(暖快取後)、上櫃 6488 → 5.5s、**已暖股 3006 → 1.5s**、同檔重看 0.01s。
+  全市場 SBL「一天一抓共用」→ 第一檔填快取後，當日其餘股票都 ~1.5s。

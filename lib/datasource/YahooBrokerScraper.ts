@@ -59,6 +59,7 @@ export async function fetchYahooBrokerTrades(code: string): Promise<YahooBrokerT
     // 2026-06-15：Yahoo 對 Node fetch 回 200 但只有 ~3KB 反爬蟲 stub（無 brokerTrades）；
     // curl 帶 UA 才拿得到完整頁。validate 沒看到 marker → 自動走 curl fallback（含本機代理）。
     const { text: html } = await fetchTextWithCurlFallback(url, {
+      proxyFirst: true,
       timeoutMs: 12_000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0',

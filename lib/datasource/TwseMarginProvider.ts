@@ -57,7 +57,7 @@ async function fetchTwseMarginAll(date: string): Promise<TwseMarginRow[]> {
   try {
     // TWSE 直連間歇性 connect timeout / TLS reset（2026-06-12 B2 實測）→ curl-first helper
     const { fetchJsonWithCurlFallback } = await import('./curlFetch');
-    const { data: json } = await fetchJsonWithCurlFallback<TwseResp>(url);
+    const { data: json } = await fetchJsonWithCurlFallback<TwseResp>(url, { proxyFirst: true });
     if (json.stat !== 'OK' || !Array.isArray(json.tables)) return [];
 
     // tables[0] 是市場彙總，tables[1] 才是個股

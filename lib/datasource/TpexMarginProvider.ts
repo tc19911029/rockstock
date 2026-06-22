@@ -51,7 +51,7 @@ async function fetchTpexMarginAll(dateIso: string): Promise<TpexMarginRow[]> {
   try {
     // 2026-06-12 B2：裸 fetch 被 TPEx Cloudflare 擋（TLS 指紋）→ 改 curl-first helper
     const { fetchJsonWithCurlFallback } = await import('./curlFetch');
-    const { data: json } = await fetchJsonWithCurlFallback<TpexResp>(url);
+    const { data: json } = await fetchJsonWithCurlFallback<TpexResp>(url, { proxyFirst: true });
     const table = json.tables?.[0];
     if (!table?.data) return [];
 

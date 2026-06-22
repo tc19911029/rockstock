@@ -470,7 +470,7 @@ export async function GET(req: NextRequest) {
       cap(fetchTwseSblForStock(code, date).then(r => r ?? fetchTpexSblForStock(code, date)).catch(() => null)),
       cap(getSharesIssued(code)),
       // 30 天歷史做趨勢；TWSE 沒有就試 TPEX
-      cap(fetchTwseSblHistory(code, date, 30).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 30)).catch(() => [])),
+      cap(fetchTwseSblHistory(code, date, 15).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 15)).catch(() => [])),
       // v3: 主力券商分點（Yahoo 籌碼頁；對齊籌碼K線「主力 -102」）
       cap(fetchYahooBrokerTrades(code)),
       // v5: 法人最新資料日的當日成交量（張，本地 L1；衍生欄位占量計算用）
