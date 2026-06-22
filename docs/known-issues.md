@@ -22,22 +22,32 @@
 - **根因假設**：使用者人在中國，台灣站（TWSE/TPEx）直連被 TLS reset（同 push2his 老問題）。若 fetch-institutional 沒走 `curlFetch` 的代理 fallback、用裸 Node fetch → 必掛。
 - **待辦**：(1) 查 fetch-institutional route + provider 用的是裸 fetch 還是 curlFetch；(2) 確認 TWSE/TPEx 法人端點是否該加進 Verge DIRECT 或走代理 fallback；(3) 補回 06-19~06-22 法人資料。
 
-### I-2 🟡 youtube-transcript 逾時（exit 28 = curl 30 分逾時）
+### I-2 ✅ MITIGATED — youtube-transcript curl 逾時（2026-06-22）
+- **修法**：plist `--max-time 1800 → 2700`（45 分，仍 < 60 分 hourly 間隔不重疊）。且本來就部分自癒——每小時跑一次、route idempotent，逾時批次下一輪會補。
+- **原始**：
 - **證據**：`rockstock-youtube-transcript.err.log`：`curl: (28) Operation timed out after 1800076 ms`；但 .log 顯示部分影片有成功轉錄。
 - **影響**：長影片 Whisper 在 in-server 跑太久撞 curl 1800s 上限 → 該批後段影片漏轉錄。已知 jetsam 搶記憶體問題（見記憶 youtube_whisper_long_m4a_fails）。
 - **待辦**：確認 deferForWhisper 讓路機制是否生效、或把 curl --max-time 拉長 / 拆批。
 
-### I-3 🟢 youtube-analysis 在「無節目日」誤判失敗（exit 1）
+### I-3 ✅ FIXED — youtube-analysis 無節目日誤報（2026-06-22）
+- **修法**：`~/.local/bin/rockstock-youtube-nightly-analysis.sh` 加 guard：`data/youtube/transcripts/$D` 為空就 `exit 0` 乾淨跳過，不叫 claude 硬撐 3 次。
+- **原始**：
 - **證據**：6/21(週日)無 transcript，headless claude 連 3 次「未產出 analysis」→ exit 1；morning-check log 顯示 claude 回「今天不用分析，沒有 transcript…跟我說一聲」(對話式回應、非乾淨 skip)。
 - **影響**：純噪音（週末本來就沒節目），但每個無節目日都報 ❌、headless prompt 回對話而非乾淨跳過。
 - **待辦**：youtube-nightly-analysis.sh 在「無 transcript」時應 early-exit 0、不重試 3 次。
 
-### I-4 🟢 .TWO 次檔位收盤 settle 漏網（已自癒/待確認）
+### I-4 ✅ REPAIRED（單根）+ 系統性累犯（2026-06-22）
+- **現況**：5 檔中 4 檔已自癒；**6855.TWO 06-22 收盤 121.75（次檔位，TPEx 官方=121.00）**已直接修正 L1（只有 close 錯、OHLC 本對）。
+- **系統性**：.TWO settle 偶爾把 close snap 成次檔位（FinMind 402 退 Yahoo 中間價，見記憶 tw_settle_subtick_close_contamination）；audit（I-5 修好後週一也會跑）會持續抓，根因修復屬另案。
+- **原始**：
 - **證據**：audit-l1-invariant log（06-20 09:00）`exit 1`：5 檔次檔位收盤漏網 `1538.TW / 2924.TWO / 2937.TWO / 6855.TWO / 7718.TWO`（2026-06-18）。
 - **現況**：最新 health-snapshot `l1-invariant-2026-06-20.json` 顯示 violations:0 → 似已修復/自癒。audit exit=1 是警報機制正常運作（見記憶 tw_settle_subtick_close_contamination）。
 - **待辦**：確認那 5 檔 06-18 的收盤現在是否已修正（repair-twoo-tail.ts）。
 
-### I-5 🟡 audit-l1-invariant 快照停在 06-20（可能週末沒跑/停滯）
+### I-5 ✅ FIXED — audit-l1 plist Weekday off-by-one（2026-06-22）
+- **真因**：plist 排 Weekday **2-6（週二到週六）、漏週一(1)、多週六**→ 週一 audit 從沒跑（06-22 無快照）。
+- **修法**：改 Weekday 1-5（週一到週五）09:00 並 reload。
+- **原始**：
 - **證據**：`data/health-snapshot/l1-invariant-*.json` 最新只到 2026-06-20，無 06-21/06-22（audit 排 09:00 平日，06-22 週一 09:00 應有）。
 - **待辦**：確認 audit-l1-invariant 06-22 有沒有跑（跟 sector-strength 一樣可能排程問題）。**下一輪深挖**。
 
