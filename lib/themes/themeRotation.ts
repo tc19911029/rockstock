@@ -6,7 +6,7 @@
  * （退潮會均值回歸）。詳見記憶 theme_rotation_no_edge。
  * 因此：只標「錢在進/出哪個題材」供盯盤參考，**不排序成該買、不做避雷名單、不進選股 gate**（鐵則 #5）。
  *
- * 算法：今日 vs 約 5 個交易日前的題材排名（兩份都按 avgD5 排）：
+ * 算法：今日 vs 約 5 個交易日前的題材排名（兩份都按「法人資金流入5日」排，見 rankByMoneyIn）：
  *   rankDelta = 前次名次 − 今日名次（正 = 名次爬升 = 資金轉入）
  *   accel     = 今日 avgD5 − 前次 avgD5（顯示用：近段動能變化）
  *
@@ -23,7 +23,7 @@ import { INST_PERIODS } from './perfPeriods';
 export type RotationBucket = 'in' | 'mid' | 'out';
 
 export interface ThemeRotation {
-  /** 今日名次（1 = 最強；依 avgD5 排） */
+  /** 今日名次（1 = 最強；依「近5日三大法人買超金額」排，見 rankByMoneyIn） */
   rankNow: number;
   /** 約 5 日前名次；無 prior = null */
   rankPrev: number | null;
