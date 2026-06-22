@@ -55,3 +55,18 @@
 
 > 備註：prod-server exit=-9 是 `launchctl kickstart -k` 重啟的正常訊號，非錯誤。
 > cn-* / youtube-scan 等 exit=0 正常。
+
+---
+
+## 2026-06-22 第二輪：裸-fetch 連線地雷掃描 + 排名邏輯查核
+
+### I-6 ✅ 無其他「裸 fetch + 台灣站」地雷（掃描結論）
+- 從 I-1 學到「裸 Node fetch 打 TWSE/TPEx/Yahoo 在中國線路 TLS reset」是一整類風險。
+- 系統掃 `lib/datasource|chips|storage|market` 所有打 twse/tpex/yahoo/goodinfo… 的檔，
+  交叉比對有沒有走 curlFetch → **沒有漏網的**。I-1（TWSEInstitutional）是唯一個案，已修。
+
+### I-7 ✅ FIXED — themeRotation 過時註解（avgD5 → 法人資金流入5日）
+- **真相**：盤後排行的「排名」= `rankByMoneyIn` = **近 5 日三大法人買超金額**（成分股加總）由高到低，
+  代表「這週法人在累積哪個題材」。2026-06-19 從今日漲幅改成資金流入、06-20 改看 5 日累計。
+- **bug**：檔頭(line 9) + rankNow 欄位(line 26) 註解還寫「依 avgD5 排」→ 誤導。已修正（commit 52f9d56）。
+- **附帶澄清**：snapshot 檔預設 avgD5 排序、UI FixedView 預設 'd5'，但點「排名」欄走 rankNow(法人5日)。
