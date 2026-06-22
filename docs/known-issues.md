@@ -86,3 +86,22 @@
 ### I-10 🟡 待查 — scan-fundamental-revaluation-tw cron 無 log
 - plist 排平日 19:35，但 `/tmp/rockstock-scan-fundamental-revaluation-tw*.log` **找不到** → 可能 log 路徑不同 or 沒真的跑。
 - **下一輪深挖**：確認該 cron 是否真有產出 `data/strategies/fundamental-revaluation/TW/`。
+
+---
+
+## 2026-06-22 第四輪：收尾 + 分支健康驗證
+
+### I-10 ✅ 非問題 — scan-fundamental cron 正常（虛驚）
+- log 路徑其實是 `/tmp/rockstock-scan-fundamental-tw.log`（非 `-revaluation-tw`，又猜錯路徑）；
+  產出 `data/strategies/fundamental-revaluation/TW/2026-06-22.json` **今天有產** → cron 正常。
+
+### I-11 ✅ 分支健康 — 合約測試全綠 + TODO 極少
+- `npm run test:contracts`：**70 套 / 940 passed / 9 skipped，全綠**。大刪除 cn-agents 後沒破壞任何合約。
+- 全 codebase 只有 6 個 TODO/FIXME，全是規劃中（spec-score overseas B4、agents P4/P5 stub、ST 判定），非 bug。
+- 小瑕疵：jest 跑完有 "did not exit"（async handle 未關）警告，純測試衛生、非失敗。
+
+---
+
+## 階段結論（四輪）
+真正的 bug 集中在**第一輪**（法人 TLS reset 500、audit 漏排週一、.TWO 次檔位、過時註解），已全修。
+二~四輪多為虛驚/預期狀況。系統現驗證為**健康**：合約測試全綠、無殘留壞 import、無裸-fetch 地雷、資料新鮮度正常。
