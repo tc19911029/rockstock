@@ -11,6 +11,8 @@
  */
 
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   classifyVideoType,
   decideShouldAnalyze,
@@ -345,9 +347,6 @@ describe('fetchRecentVideos (NDJSON parsing)', () => {
 // scanRunner.assertPlaylistUrl() 會在 scan 前擋掉，這裡額外做 static check。
 
 describe('sources.json playlist-URL invariant', () => {
-  const fs = require('fs') as typeof import('fs');
-  const path = require('path') as typeof import('path');
-
   it('all sources are playlist URLs (no channel URLs)', () => {
     const sourcesPath = path.join(process.cwd(), 'data/youtube/sources.json');
     if (!fs.existsSync(sourcesPath)) return; // skip if not seeded

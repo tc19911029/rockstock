@@ -5,7 +5,7 @@
  *  1. 每個成分股代號存在於 data/youtube/stock-master.json 且名稱完全一致
  *     （鐵則：代號絕不可憑記憶 — 曾因此寫錯 5 個代號）
  *  2. 規格書點名股 100% 覆蓋（六組海外對照的台股側）
- *  3. 題材數 = 29（規格書 Step 4 清單 25 + 玻璃基板 + 2026-06-20 綠能/伺服器電源/高速連接）
+ *  3. 題材數 = 37（規格書 25 + 玻璃基板 + 綠能/伺服器電源/高速連接 + 成熟製程 + 2026-06-22 IC設計/矽晶圓/第三代半導體/網通/半導體通路/工具機/自行車）
  */
 import fs from 'fs';
 import path from 'path';
@@ -22,8 +22,8 @@ function loadMaster(): Map<string, string> {
 describe('themeMap contracts', () => {
   const master = loadMaster();
 
-  test('題材數 = 29', () => {
-    expect(THEME_NAMES).toHaveLength(29);
+  test('題材數 = 37', () => {
+    expect(THEME_NAMES).toHaveLength(37);
   });
 
   test('每個成分股代號存在於 stock-master 且名稱一致', () => {

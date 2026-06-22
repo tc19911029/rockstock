@@ -21,8 +21,10 @@
  */
 
 export interface CapitalFlowDay {
-  date:    string;   // YYYY-MM-DD
-  mainNet: number;   // 主力淨流入（大+超大單）
+  date:     string;          // YYYY-MM-DD
+  mainNet:  number;          // 主力淨流入（大+超大單）
+  superNet: number | null;   // 超大單淨流入（主買資金 — 機構/大戶真實買賣，f56）
+  largeNet: number | null;   // 大單淨流入（f55）
 }
 
 interface EMResponse {
@@ -85,35 +87,50 @@ async function fetchCapitalFlowSina(
   if (!text.trim().startsWith('[')) return [];
   const rows = JSON.parse(text) as SinaFlowRow[];
   return rows.map(r => ({
-    date:    (r.opendate ?? '').slice(0, 10),
-    mainNet: parseFloat(r.r0_net ?? '0') || 0,
+    date:     (r.opendate ?? '').slice(0, 10),
+    mainNet:  parseFloat(r.r0_net ?? '0') || 0,
+    superNet: null,   // Sina 只給主力綜合，無超大單/大單拆分
+    largeNet: null,
   })).filter(r => r.date);
 }
 
 /**
  * EastMoney primary
  */
+// ⚠️ 必須用 http://（非 https）：push2his 的 HTTPS 在本機（中國線路）會 TLS reset → curl 000、
+// Node fetch ECONNRESET（見記憶 direct_tls_reset_proxy_env_illusion）；HTTP 同 endpoint 秒回 200。
+// 壞時段主站全滅 → 走 host failover（鏡像同結構），仿 emBoards。
+const FFLOW_HOSTS = ['push2his.eastmoney.com', 'push2delay.eastmoney.com', '1.push2his.eastmoney.com'];
+
 async function fetchCapitalFlowEM(
   symbol: string, lmt: number,
 ): Promise<CapitalFlowDay[]> {
   const secid = toSecid(symbol);
-  const url = `https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get`
-    + `?secid=${secid}&klt=101&lmt=${lmt}`
+  const qs = `?secid=${secid}&klt=101&lmt=${lmt}`
     + `&fields1=f1&fields2=f51,f52,f53,f54,f55,f56,f57`;
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(10_000),
-    headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Referer':    'https://quote.eastmoney.com/',
-    },
-  });
-  if (!res.ok) return [];
-  const json = await res.json() as EMResponse;
-  const klines = json.data?.klines ?? [];
-  return klines.map(line => {
-    const parts = line.split(',');
-    return { date: parts[0], mainNet: parseFloat(parts[1]) || 0 };
-  });
+  for (const host of FFLOW_HOSTS) {
+    try {
+      const res = await fetch(`http://${host}/api/qt/stock/fflow/daykline/get${qs}`, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'http://quote.eastmoney.com/' },
+      });
+      if (!res.ok) continue;
+      const json = await res.json() as EMResponse;
+      const klines = json.data?.klines ?? [];
+      if (klines.length === 0) continue;
+      // f51,f52,f53,f54,f55,f56,f57 = 日期,主力淨,小單,中單,大單,超大單,漲跌幅
+      return klines.map(line => {
+        const p = line.split(',');
+        return {
+          date:     p[0],
+          mainNet:  parseFloat(p[1]) || 0,
+          largeNet: p[4] != null ? (parseFloat(p[4]) || 0) : null,
+          superNet: p[5] != null ? (parseFloat(p[5]) || 0) : null,
+        };
+      });
+    } catch { /* 下一個 host */ }
+  }
+  return [];
 }
 
 /**

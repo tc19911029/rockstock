@@ -32,13 +32,15 @@ export interface ThemeStockPerf {
   d60: number | null;
   /** 最新量 / 前 5 根均量 */
   volRatio: number | null;
-  /** 外資+投信近 5 日合計買賣超（張；無資料 = null） */
+  /** 今日成交金額（元 = 量張×1000×收盤；無資料 = null） */
+  turnover: number | null;
+  /** 三大法人（外資+投信+自營）近 5 日合計買賣超（張；無資料 = null） */
   instNet5: number | null;
   /** 過去 N 日漲幅 %（對齊 PERF_PERIODS = 1,2,…,10,20；資料不足 = null） */
   rets: (number | null)[];
   /** 外資+投信過去 N 日買超「金額」(元；對齊 INST_PERIODS=1,3,5,10；逐日張×1000×當日收盤) */
   instAmt: (number | null)[];
-  /** 散戶(融資)過去 N 日買超金額 (元；融資淨變化張×1000×當日收盤；對齊 INST_PERIODS) */
+  /** 散戶(融資)過去 N 日淨變化金額 (元；融資淨變化張×1000×當日收盤；對齊 INST_PERIODS) */
   retailAmt: (number | null)[];
 }
 
@@ -74,7 +76,7 @@ export interface SectorRankingFile {
 async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStockPerf> {
   const empty: ThemeStockPerf = {
     code: stock.code, name: stock.name,
-    d1: null, d5: null, d20: null, d60: null, volRatio: null, instNet5: null,
+    d1: null, d5: null, d20: null, d60: null, volRatio: null, turnover: null, instNet5: null,
     rets: PERF_PERIODS.map(() => null),
     instAmt: INST_PERIODS.map(() => null),
     retailAmt: INST_PERIODS.map(() => null),
@@ -105,6 +107,8 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
     const avg = s / 5;
     volRatio = avg > 0 ? +(candles[idx].volume / avg).toFixed(2) : null;
   }
+  // 今日成交金額（元）= 量(張)×1000×收盤
+  const turnover = candles[idx].volume > 0 ? Math.round(candles[idx].volume * 1000 * close) : null;
 
   // 外資+投信近 5 日合計（張）+ 過去 1/3/5/10 日買超「金額」(逐日張×1000×當日收盤)
   let instNet5: number | null = null;
@@ -115,7 +119,7 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
       const past = inst.data.filter(r => r.date <= date);
       const rows5 = past.slice(-5);
       if (rows5.length > 0) {
-        instNet5 = rows5.reduce((acc, r) => acc + (r.foreign ?? 0) + (r.trust ?? 0), 0);
+        instNet5 = rows5.reduce((acc, r) => acc + (r.foreign ?? 0) + (r.trust ?? 0) + (r.dealer ?? 0), 0);
       }
       const closeByDate = new Map(candles.map(c => [c.date, c.close]));
       instAmt = INST_PERIODS.map((n) => {
@@ -125,7 +129,7 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
         for (const r of rows) {
           const c = closeByDate.get(r.date);
           if (c == null) continue;
-          amt += ((r.foreign ?? 0) + (r.trust ?? 0)) * 1000 * c; // 張×1000股×元 = 元
+          amt += ((r.foreign ?? 0) + (r.trust ?? 0) + (r.dealer ?? 0)) * 1000 * c; // 三大法人 張×1000股×元 = 元
           any = true;
         }
         return any ? Math.round(amt) : null;
@@ -133,21 +137,22 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
     }
   } catch { /* 無籌碼資料不影響報酬欄 */ }
 
-  // 散戶(融資)過去 N 日買超金額 = 逐日(融資淨變化張×1000×當日收盤)
+  // 融資過去 N 日淨變化「金額」（逐日 張×1000股×當日收盤＝元；正=融資加碼、負=融資減）
   let retailAmt: (number | null)[] = INST_PERIODS.map(() => null);
   try {
     const margin = await readMarginStock(stock.code);
     if (margin?.data?.length) {
       const past = margin.data.filter(r => r.date <= date);
-      const closeByDate = new Map(candles.map(c => [c.date, c.close]));
+      const marginCloseByDate = new Map(candles.map(c => [c.date, c.close]));
       retailAmt = INST_PERIODS.map((n) => {
         const rows = past.slice(-n);
         if (rows.length === 0) return null;
         let amt = 0; let any = false;
         for (const r of rows) {
-          const c = closeByDate.get(r.date);
-          if (c == null || r.marginNet == null) continue;
-          amt += r.marginNet * 1000 * c; // 融資淨變化張×1000股×元 = 元
+          if (r.marginNet == null) continue;
+          const c = marginCloseByDate.get(r.date);
+          if (c == null) continue;
+          amt += r.marginNet * 1000 * c; // 融資淨變化 張×1000股×當日收盤 = 元
           any = true;
         }
         return any ? Math.round(amt) : null;
@@ -157,7 +162,7 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
 
   return {
     code: stock.code, name: stock.name,
-    d1: ret(1), d5: ret(5), d20: ret(20), d60: ret(60), volRatio, instNet5,
+    d1: ret(1), d5: ret(5), d20: ret(20), d60: ret(60), volRatio, turnover, instNet5,
     rets: PERF_PERIODS.map((n) => ret(n)),
     instAmt, retailAmt,
   };
@@ -216,7 +221,7 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
     const instVals = members.map(m => m.instNet5).filter((x): x is number => x != null);
     const instNet5 = instVals.length > 0 ? instVals.reduce((a, b) => a + b, 0) : null;
     // 5 日買超金額 = 成分股 instAmt[5日] 加總（INST_PERIODS 索引 2 = 5 日）
-    const amtVals = members.map(m => m.instAmt?.[2]).filter((x): x is number => x != null);
+    const amtVals = members.map(m => m.instAmt?.[INST_PERIODS.indexOf(5)]).filter((x): x is number => x != null);
     const instAmt5 = amtVals.length > 0 ? amtVals.reduce((a, b) => a + b, 0) : null;
     const top = withD1.length > 0
       ? withD1.reduce((best, m) => ((m.d1 ?? -Infinity) > (best.d1 ?? -Infinity) ? m : best))

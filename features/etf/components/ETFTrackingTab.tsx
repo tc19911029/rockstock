@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useETFStore } from '@/store/etfStore';
-import { ACTIVE_ETF_LIST, chartLoadSymbol, shortETFName } from '@/lib/etf/etfList';
+import { TW_ETF_LIST, isGlobalETF, chartLoadSymbol, shortETFName } from '@/lib/etf/etfList';
 import type { ETFTrackingEntry } from '@/lib/etf/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatPct } from '../utils/format';
@@ -27,7 +27,9 @@ export function ETFTrackingTab() {
     fetch(`/api/etf/tracking?${qs.toString()}`)
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled) setData({ key: currentKey, entries: d.entries ?? [] });
+        // 只留台股型 ETF（「全部」時隱藏全球／美國型）
+        const filtered = (d.entries ?? []).filter((e: ETFTrackingEntry) => !isGlobalETF(e.etfCode));
+        if (!cancelled) setData({ key: currentKey, entries: filtered });
       })
       .catch(() => {
         if (!cancelled) setData({ key: currentKey, entries: [] });
@@ -51,7 +53,7 @@ export function ETFTrackingTab() {
         >
           全部
         </button>
-        {ACTIVE_ETF_LIST.map((etf) => (
+        {TW_ETF_LIST.map((etf) => (
           <button
             key={etf.etfCode}
             onClick={() => setSelectedEtfCode(etf.etfCode)}

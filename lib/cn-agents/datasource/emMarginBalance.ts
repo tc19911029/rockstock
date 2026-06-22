@@ -16,13 +16,16 @@ export interface CnMarginDay {
   date: string;
   /** 融資融券餘額（元） */
   rzrqYe: number;
-  /** 融資餘額（元） */
+  /** 融資餘額（元，做多槓桿） */
   rzYe: number;
+  /** 融券餘額（元，做空；缺值 null） */
+  rqYe: number | null;
 }
 
 interface GgmxRow {
   DATE?: string;
   RZYE?: number | null;
+  RQYE?: number | null;
   RZRQYE?: number | null;
 }
 interface GgmxResp {
@@ -52,8 +55,9 @@ export async function fetchCnMarginHistory(code: string, pageSize = 60): Promise
       if (!r.DATE) continue;
       const rzrq = typeof r.RZRQYE === 'number' ? r.RZRQYE : null;
       const rz = typeof r.RZYE === 'number' ? r.RZYE : null;
+      const rq = typeof r.RQYE === 'number' ? r.RQYE : null;
       if (rzrq == null) continue;
-      out.push({ date: r.DATE.slice(0, 10), rzrqYe: rzrq, rzYe: rz ?? rzrq });
+      out.push({ date: r.DATE.slice(0, 10), rzrqYe: rzrq, rzYe: rz ?? rzrq, rqYe: rq });
     }
     // datacenter 回傳降冪（新→舊）→ 轉升冪方便對齊
     out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

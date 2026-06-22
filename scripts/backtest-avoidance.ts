@@ -27,8 +27,16 @@ import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
 import { computeSanSe } from '@/lib/cn-sanse/selectors';
 import { computeDualB, computeXys } from '@/lib/cn-sanse/dualB';
 import { isNum } from '@/lib/cn-sanse/tdx';
-import { computeStop } from '@/lib/dailyPick/buildDailyPick';
 import type { Candle } from '@/types';
+
+// 停損守訊號日紅K低，夾在現價 -3% ~ -7% 之間（原 lib/dailyPick/buildDailyPick，已隨每日選股功能移除 → 內聯）
+function computeStop(price: number, signalLow: number | null): { stop: number; stopPct: number } {
+  const floor7 = price * 0.93;
+  const ceil3 = price * 0.97;
+  const raw = signalLow ?? floor7;
+  const stop = Math.max(floor7, Math.min(raw, ceil3));
+  return { stop: +stop.toFixed(2), stopPct: +(((stop - price) / price) * 100).toFixed(1) };
+}
 
 const ENTRY_MIN_IDX = 480;
 const LIMIT_GAP = 0.095;

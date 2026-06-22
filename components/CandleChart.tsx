@@ -220,6 +220,13 @@ interface CandleChartProps {
   holderLine?: { time: string; value: number }[] | null;
   /** 大戶持股線的級距標籤（依股價自動挑：千張/400張/百張大戶），預設「千張大戶」 */
   holderLineLabel?: string;
+  /**
+   * 顯示均線「移動扣抵」三角標 — 在每條均線「下一根要丟掉」的那根 K 棒下方畫一個同色 ▲
+   * （MA5＝往左數第 5 根、MA10＝第 10 根、MA20＝第 20 根…扣抵棒索引 = 最新一根 − N + 1）。
+   * 今收高於該三角指的那根收盤 → 均線下一步往上。算法同 lib/analysis/maDeduction。
+   * 三角跟著各 MA 的顯示/隱藏連動（關掉 MA10 → 它的三角也消失）。預設開。
+   */
+  showMaDeduction?: boolean;
 }
 
 export default function CandleChart({
@@ -244,6 +251,7 @@ export default function CandleChart({
   abcOverlay = null,
   holderLine = null,
   holderLineLabel = '千張大戶',
+  showMaDeduction = true,
 }: CandleChartProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
@@ -276,6 +284,8 @@ export default function CandleChart({
   const onCrosshairRef = useRef(onCrosshairMove);
   const onDoubleClickRef = useRef(onDoubleClick);
   const [hoverCandle, setHoverCandle] = useState<CandleWithIndicators | null>(null);
+  // 均線移動扣抵三角標（貼在圖最底下一排，x 對齊各 MA「下一根要丟掉」的那根 K 棒）
+  const [deductMarks, setDeductMarks] = useState<Array<{ key: keyof typeof MA_COLORS; n: number; color: string; x: number }>>([]);
   const [trendlineStatus, setTrendlineStatus] = useState<{
     ascending: { anchorIndex: number; anchorPrice: number; slope: number } | null;
     descending: { anchorIndex: number; anchorPrice: number; slope: number } | null;
@@ -956,6 +966,48 @@ export default function CandleChart({
     markersPlugRef.current.setMarkers(converted);
   }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern, shuangB, abcOverlay]);
 
+  // ── 均線移動扣抵三角標：算各 MA「下一根要丟掉」那根 K 棒的 x 像素，貼在圖最底一排 ──
+  // 扣抵棒索引 = 最新一根 − N + 1（今收高於該根收盤 → 均線下一步往上，見 lib/analysis/maDeduction）。
+  // 跟著各 MA 顯示與否連動；用 timeToCoordinate 對齊，捲動/縮放/resize 都重算，捲出畫面就不畫。
+  useEffect(() => {
+    const chart = chartRef.current;
+    const node  = containerRef.current;
+    if (!chart || !node) return;
+    const ts = chart.timeScale();
+    const deductMAs: Array<{ n: number; key: keyof typeof MA_COLORS }> = [
+      { n: 5,  key: 'ma5'  },
+      { n: 10, key: 'ma10' },
+      { n: 20, key: 'ma20' },
+      { n: 60, key: 'ma60' },
+    ];
+
+    const recompute = () => {
+      if (!showMaDeduction || candles.length === 0) { setDeductMarks([]); return; }
+      const asOf = candles.length - 1;
+      const marks: Array<{ key: keyof typeof MA_COLORS; n: number; color: string; x: number }> = [];
+      for (const { n, key } of deductMAs) {
+        if (!maToggles[key]) continue;          // 該 MA 沒開 → 不畫它的扣抵三角
+        const dropIdx = asOf - n + 1;
+        if (dropIdx < 0) continue;              // 窗口還沒滿
+        const bar = candles[dropIdx];
+        if (!bar) continue;
+        const x = ts.timeToCoordinate(toTime(bar.date));
+        if (x == null) continue;               // 扣抵棒捲出畫面
+        marks.push({ key, n, color: MA_COLORS[key], x: x as number });
+      }
+      setDeductMarks(marks);
+    };
+
+    recompute();
+    ts.subscribeVisibleLogicalRangeChange(recompute);
+    const ro = new ResizeObserver(recompute);
+    ro.observe(node);
+    return () => {
+      ts.unsubscribeVisibleLogicalRangeChange(recompute);
+      ro.disconnect();
+    };
+  }, [candles, maToggles, showMaDeduction]);
+
   // ── Support/resistance price lines (前高壓 / 前低撐 / 大量撐壓) ──────────
   useEffect(() => {
     if (!candleRef.current) return;
@@ -1375,6 +1427,23 @@ export default function CandleChart({
       </div>{/* /左上資訊區 container（含 MA + 信號 badge + 形態 chip + 切線 legend）*/}
 
       <div ref={containerRef} className={fillContainer ? 'w-full h-full' : 'w-full'} style={fillContainer ? undefined : { height }} />
+
+      {/* 均線移動扣抵三角標 ▲ — 貼在圖最底一排（x 對齊各 MA「下一根要丟掉」的 K 棒，同色） */}
+      {showMaDeduction && deductMarks.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 z-10" style={{ bottom: 24 }}>
+          {deductMarks.map(m => (
+            <div
+              key={m.key}
+              className="absolute flex flex-col items-center font-mono leading-none"
+              style={{ left: m.x, transform: 'translateX(-50%)' }}
+              title={`MA${m.n} 扣抵棒 — 今收高於這根 → ${m.n} 日線下一步往上`}
+            >
+              <span style={{ color: m.color, fontSize: 11 }}>▲</span>
+              <span style={{ color: m.color, fontSize: 9 }}>{m.n}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

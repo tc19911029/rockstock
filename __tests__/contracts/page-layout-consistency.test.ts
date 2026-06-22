@@ -23,6 +23,7 @@ const REDIRECT_STUBS = new Set([
   'youtube/trends/page.tsx',
   'agents/page.tsx',
   'agents/pool/page.tsx',
+  'etf/page.tsx',     // → 首頁右側「ETF 追蹤」tab（2026-06-21）
 ]);
 
 // 非產品頁（設計系統示範）— 故意展示各種 class，完全排除
@@ -34,7 +35,6 @@ const EXCLUDE = new Set([
 const ALLOWLIST = new Set([
   'diagnose/[market]/[symbol]/[date]/page.tsx',
   'disclaimer/page.tsx',
-  'etf/page.tsx', // 委派 ETFPageContent
 ]);
 
 function findPages(dir: string, base = ''): string[] {
@@ -80,7 +80,7 @@ describe('頁面版面一致性 guardrail', () => {
   });
 
   test('allowlist 不可膨脹（debt 只能減不能增）', () => {
-    // 目前允許 3 個待修舊頁；新增頁不可塞進 allowlist 規避
-    expect(ALLOWLIST.size).toBeLessThanOrEqual(3);
+    // 目前允許 2 個待修舊頁；新增頁不可塞進 allowlist 規避
+    expect(ALLOWLIST.size).toBeLessThanOrEqual(2);
   });
 });

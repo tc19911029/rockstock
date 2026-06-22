@@ -44,8 +44,8 @@ function asOfBounds(): { min: string; max: string } {
 
 type WindowDays = 30 | 60 | 90;
 type SortKey = 'scored' | 'payoff' | 'd20_ex' | `${RecoHorizon}_avg` | `${RecoHorizon}_win`;
-/** 動態欄位設定：哪幾天有資料、贏大盤用哪個橫斷、賺賠比是否顯示 */
-type Cols = { horizons: RecoHorizon[]; lastHz: RecoHorizon; showExcess: boolean; showPayoff: boolean; excessLabel: string };
+/** 動態欄位設定：哪幾天有資料、贏大盤用哪個橫斷、賺賠比是否顯示、最佳/最雷是否顯示 */
+type Cols = { horizons: RecoHorizon[]; lastHz: RecoHorizon; showExcess: boolean; showPayoff: boolean; showPicks: boolean; excessLabel: string };
 
 /** 熱力條顯示哪幾天（D60 資料還沒走完，先不顯示） */
 const SHOW_HORIZONS: RecoHorizon[] = ['d1', 'd2', 'd3', 'd4', 'd5', 'd10', 'd20'];
@@ -228,7 +228,7 @@ function sortVal(t: TeacherRow, key: SortKey): number {
   return metric === 'win' ? s.winRatePct : s.avgPct;
 }
 
-export function TeacherLeaderboard() {
+export function TeacherLeaderboard({ compact = false }: { compact?: boolean } = {}) {
   const [days, setDays] = useState<WindowDays>(30);
   const [data, setData] = useState<TeacherLeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -280,11 +280,13 @@ export function TeacherLeaderboard() {
   const lastHz = activeHorizons[activeHorizons.length - 1];
   // 贏大盤：用「最長且有資料」的橫斷（現在是 D10，D20 走完會自動換成 D20）
   const showExcess = useMemo(() => !!data && data.teachers.some(t => t.byHorizon[lastHz]?.excessAvgPct != null), [data, lastHz]);
-  const showPayoff = useMemo(() => !!data && data.teachers.some(t => t.payoffRatio != null), [data]);
+  // compact（嵌進首頁窄面板）：砍掉最寬的「賺賠比 + 最佳/最雷」兩欄，只留 老師｜樣本｜熱力條｜贏大盤
+  const showPayoff = useMemo(() => !compact && !!data && data.teachers.some(t => t.payoffRatio != null), [data, compact]);
+  const showPicks = !compact;
   const excessLabel = `贏大盤(${lastHz.toUpperCase()})`;
-  const cols = { horizons: activeHorizons, lastHz, showExcess, showPayoff, excessLabel };
-  // colSpan：老師 + 樣本 + 天數欄 + 贏大盤? + 賺賠比? + 最佳/最雷
-  const fullSpan = 2 + activeHorizons.length + (showExcess ? 1 : 0) + (showPayoff ? 1 : 0) + 1;
+  const cols = { horizons: activeHorizons, lastHz, showExcess, showPayoff, showPicks, excessLabel };
+  // colSpan：老師 + 樣本 + 天數欄 + 贏大盤? + 賺賠比? + 最佳/最雷?
+  const fullSpan = 2 + activeHorizons.length + (showExcess ? 1 : 0) + (showPayoff ? 1 : 0) + (showPicks ? 1 : 0);
 
   const sortByHz = (hz: RecoHorizon) => setSortKey(`${hz}_avg`);
 
@@ -412,7 +414,7 @@ export function TeacherLeaderboard() {
                     {showPayoff && (
                       <th className="px-2 py-2 text-right font-medium" title="平均賺 ÷ 平均賠">賺賠比</th>
                     )}
-                    <th className="px-3 py-2 text-left font-medium">最佳 / 最雷</th>
+                    {showPicks && <th className="px-3 py-2 text-left font-medium">最佳 / 最雷</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -512,13 +514,15 @@ function TeacherRowView({ teacher: t, cols, fullSpan, isOpen, days, onToggle, di
           <td className="px-2 py-2.5 text-right align-middle tabular-nums text-foreground/80">{t.payoffRatio ?? '—'}</td>
         )}
         {/* 最佳/最雷 */}
-        <td className="px-3 py-2.5 align-middle text-[11px]" onClick={e => e.stopPropagation()}>
-          <PickLine pick={t.bestPick} dir="best" />
-          {t.worstPick && !(t.worstPick.stock_code === t.bestPick?.stock_code && t.worstPick.date === t.bestPick?.date) && (
-            <PickLine pick={t.worstPick} dir="worst" />
-          )}
-          {!t.bestPick && !t.worstPick && '—'}
-        </td>
+        {cols.showPicks && (
+          <td className="px-3 py-2.5 align-middle text-[11px]" onClick={e => e.stopPropagation()}>
+            <PickLine pick={t.bestPick} dir="best" />
+            {t.worstPick && !(t.worstPick.stock_code === t.bestPick?.stock_code && t.worstPick.date === t.bestPick?.date) && (
+              <PickLine pick={t.worstPick} dir="worst" />
+            )}
+            {!t.bestPick && !t.worstPick && '—'}
+          </td>
+        )}
       </tr>
       {isOpen && (
         <tr className="border-b border-border/40 bg-secondary/10">
@@ -664,13 +668,15 @@ function ProgramSection({ programs, minScored, cols, fullSpan, sortByHz, sortKey
       {cols.showPayoff && (
         <td className="px-2 py-2.5 text-right align-middle tabular-nums text-foreground/80">{p.payoffRatio ?? '—'}</td>
       )}
-      <td className="px-3 py-2.5 align-middle text-[11px]">
-        <PickLine pick={p.bestPick} dir="best" />
-        {p.worstPick && !(p.worstPick.stock_code === p.bestPick?.stock_code && p.worstPick.date === p.bestPick?.date) && (
-          <PickLine pick={p.worstPick} dir="worst" />
-        )}
-        {!p.bestPick && !p.worstPick && '—'}
-      </td>
+      {cols.showPicks && (
+        <td className="px-3 py-2.5 align-middle text-[11px]">
+          <PickLine pick={p.bestPick} dir="best" />
+          {p.worstPick && !(p.worstPick.stock_code === p.bestPick?.stock_code && p.worstPick.date === p.bestPick?.date) && (
+            <PickLine pick={p.worstPick} dir="worst" />
+          )}
+          {!p.bestPick && !p.worstPick && '—'}
+        </td>
+      )}
     </tr>
   );
   return (
@@ -685,7 +691,7 @@ function ProgramSection({ programs, minScored, cols, fullSpan, sortByHz, sortKey
               <HeatHeaders horizons={cols.horizons} onSort={sortByHz} sortKey={sortKey} />
               {cols.showExcess && <th className="px-2 py-2 text-right font-medium border-l border-border/20">{cols.excessLabel}</th>}
               {cols.showPayoff && <th className="px-2 py-2 text-right font-medium">賺賠比</th>}
-              <th className="px-3 py-2 text-left font-medium">最佳 / 最雷</th>
+              {cols.showPicks && <th className="px-3 py-2 text-left font-medium">最佳 / 最雷</th>}
             </tr>
           </thead>
           <tbody>
@@ -754,16 +760,8 @@ function StockCardGrid({ rows, horizons, title, subtitle, icon, countOf }: {
   );
 }
 
-// ── 推薦後漲最多 / 跌最多（每個橫斷各取前幾名，下拉切換）─────────────────────────
-function ExtremesSection({ gainers, losers, horizons }: {
-  gainers: Record<RecoHorizon, ExtremeEvent[]>; losers: Record<RecoHorizon, ExtremeEvent[]>; horizons: RecoHorizon[];
-}) {
-  const [hz, setHz] = useState<RecoHorizon>(horizons.includes('d5') ? 'd5' : horizons[horizons.length - 1]);
-  const g = gainers?.[hz] ?? [];
-  const l = losers?.[hz] ?? [];
-  if (g.length === 0 && l.length === 0) return null;
-
-  const List = ({ items, dir }: { items: ExtremeEvent[]; dir: 'gain' | 'loss' }) => (
+function ExtremeEventList({ items, dir }: { items: ExtremeEvent[]; dir: 'gain' | 'loss' }) {
+  return (
     <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
       <div className={cn('px-3 py-2 text-xs font-semibold border-b border-border', dir === 'gain' ? 'text-bull' : 'text-bear')}>
         {dir === 'gain' ? '▲ 漲最多' : '▼ 跌最多'}
@@ -783,6 +781,16 @@ function ExtremesSection({ gainers, losers, horizons }: {
       </ul>
     </div>
   );
+}
+
+// ── 推薦後漲最多 / 跌最多（每個橫斷各取前幾名，下拉切換）─────────────────────────
+function ExtremesSection({ gainers, losers, horizons }: {
+  gainers: Record<RecoHorizon, ExtremeEvent[]>; losers: Record<RecoHorizon, ExtremeEvent[]>; horizons: RecoHorizon[];
+}) {
+  const [hz, setHz] = useState<RecoHorizon>(horizons.includes('d5') ? 'd5' : horizons[horizons.length - 1]);
+  const g = gainers?.[hz] ?? [];
+  const l = losers?.[hz] ?? [];
+  if (g.length === 0 && l.length === 0) return null;
 
   return (
     <section className="space-y-2.5">
@@ -795,8 +803,8 @@ function ExtremesSection({ gainers, losers, horizons }: {
         </select>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-        <List items={g} dir="gain" />
-        <List items={l} dir="loss" />
+        <ExtremeEventList items={g} dir="gain" />
+        <ExtremeEventList items={l} dir="loss" />
       </div>
     </section>
   );

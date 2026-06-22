@@ -9,7 +9,7 @@
  * 並從 FinMind TaiwanStockPrice 補成交金額算 VWAP（精準版）。
  */
 
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import path from 'path';
 import type { MarginDay, SblDay, PriceDay } from './types';
 
@@ -24,7 +24,7 @@ function getToken(): string {
   // Script context (npx tsx) 不會自動載 .env.local — 手動讀一次
   try {
     const envPath = path.join(process.cwd(), '.env.local');
-    const txt = require('fs').readFileSync(envPath, 'utf8') as string;
+    const txt = readFileSync(envPath, 'utf8');
     for (const line of txt.split('\n')) {
       const m = line.match(/^FINMIND_API_TOKEN\s*=\s*(.+)$/);
       if (m) { t = m[1].replace(/['"]/g, '').trim(); break; }

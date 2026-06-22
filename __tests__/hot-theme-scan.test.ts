@@ -8,13 +8,21 @@ import {
   type AggregateParams,
 } from '@/lib/themes/hotThemeScan';
 
+// 測試輸入可省略 close/prevClose，預設用 prevClose=100 + 依漲跌幅推回 close
+type QuoteInput = Omit<AggregateParams['quotes'][number], 'close' | 'prevClose'>
+  & { close?: number; prevClose?: number };
+
 function makeParams(
-  quotes: AggregateParams['quotes'],
+  quotes: QuoteInput[],
   overrides: Partial<AggregateParams> = {},
 ): AggregateParams {
   return {
     date: '2026-06-18',
-    quotes,
+    quotes: quotes.map((q) => {
+      const prevClose = q.prevClose ?? 100;
+      const close = q.close ?? +(prevClose * (1 + q.changePercent / 100)).toFixed(2);
+      return { ...q, close, prevClose };
+    }),
     volRatioOf: () => null,
     instOf: () => null,
     industryOf: () => undefined,
@@ -114,11 +122,18 @@ describe('aggregateHotThemes', () => {
     expect(mem!.topStock?.code).toBe('2408');
   });
 
-  it('漲停旗標（≥9.5%）', () => {
-    const r = aggregateHotThemes(makeParams([
-      { symbol: '2330', name: '台積電', changePercent: 9.9, volume: 1 },
+  it('漲停旗標用真實漲停價（前收×1.10），非寬估 9.5%', () => {
+    // 達漲停：前收 100 → 漲停價 110，收 110 → true
+    const hit = aggregateHotThemes(makeParams([
+      { symbol: '2330', name: '台積電', changePercent: 10, volume: 1, prevClose: 100, close: 110 },
     ]));
-    expect(r.themes[0].members[0].isLimitUp).toBe(true);
+    expect(hit.themes[0].members[0].isLimitUp).toBe(true);
+
+    // 漲很多但未達漲停：+9.5%（收 109.5，低漲停價一檔）→ false（修正前會誤標 true）
+    const near = aggregateHotThemes(makeParams([
+      { symbol: '2330', name: '台積電', changePercent: 9.5, volume: 1, prevClose: 100, close: 109.5 },
+    ]));
+    expect(near.themes[0].members[0].isLimitUp).toBe(false);
   });
 
   it('門檻常數保持一致（避免誤改）', () => {

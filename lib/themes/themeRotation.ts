@@ -18,6 +18,7 @@
  * 改成只看名次相對變化，普漲日也能正確標出誰被資金拋下（退出）。
  */
 import type { SectorRankingFile } from './sectorRanking';
+import { INST_PERIODS } from './perfPeriods';
 
 export type RotationBucket = 'in' | 'mid' | 'out';
 
@@ -35,9 +36,16 @@ export interface ThemeRotation {
 
 const RANK_DELTA_TH = 3;
 
-/** 依「今日漲幅 avgD1」排名次（缺值沉底）：theme → 1-based 名次。 */
-function rankByD1(themes: SectorRankingFile['themes']): Map<string, number> {
-  const sorted = [...themes].sort((a, b) => (b.avgD1 ?? -Infinity) - (a.avgD1 ?? -Infinity));
+/** 依「資金流入5日」（近 5 日三大法人買超金額，成分股加總）排名次（缺值沉底）：theme → 1-based 名次。
+ *  2026-06-19 改：原本按今日漲幅 → 改按「資金流入」。
+ *  2026-06-20 改：原本看 1 日，法人一天一個樣、名次暴跳（記憶體一天 25→1）→ 改看 5 日累計，比較穩、看「這一週法人在累積哪個題材」。 */
+function rankByMoneyIn(themes: SectorRankingFile['themes']): Map<string, number> {
+  const i5 = INST_PERIODS.indexOf(5); // 5 日視窗索引（不寫死）
+  const moneyOf = (t: SectorRankingFile['themes'][number]): number | null => {
+    const vals = t.members.map((m) => m.instAmt?.[i5]).filter((x): x is number => x != null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+  };
+  const sorted = [...themes].sort((a, b) => (moneyOf(b) ?? -Infinity) - (moneyOf(a) ?? -Infinity));
   const m = new Map<string, number>();
   sorted.forEach((t, i) => m.set(t.theme, i + 1));
   return m;
@@ -52,8 +60,8 @@ export function computeRotation(
   today: SectorRankingFile,
   prior: SectorRankingFile | null,
 ): Map<string, ThemeRotation> {
-  const nowRank = rankByD1(today.themes);
-  const prevRank = prior ? rankByD1(prior.themes) : null;
+  const nowRank = rankByMoneyIn(today.themes);
+  const prevRank = prior ? rankByMoneyIn(prior.themes) : null;
   const priorD1 = new Map<string, number | null>();
   prior?.themes.forEach((t) => priorD1.set(t.theme, t.avgD1));
 

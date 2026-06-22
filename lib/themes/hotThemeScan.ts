@@ -19,6 +19,7 @@
  */
 
 import { readIntradaySnapshot, readMABase } from '@/lib/datasource/IntradayCache';
+import { isLimitUp as isLimitUpPrice } from '@/lib/utils/limitRules';
 import { TW_CONCEPT_MAP, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
@@ -36,6 +37,8 @@ export interface HotStock {
   volume: number;
   /** 今日量 / 前 5 日均量（無 MA base = null） */
   volRatio: number | null;
+  /** 今日成交金額（元 = 量張×1000×收盤；buildHotThemeScan 才補，純聚合時 undefined） */
+  turnover?: number | null;
   /** 三大法人淨買賣（有當日全市場資料才有，否則 null） */
   instNet: number | null;
   /** 漲停（TW ±10%，≥9.5% 視為漲停） */
@@ -50,7 +53,7 @@ export interface HotStock {
   rets?: (number | null)[];
   /** 外資+投信過去 N 日買超金額 (元；對齊 INST_PERIODS=1,3,5,10) */
   instAmt?: (number | null)[];
-  /** 散戶(融資)過去 N 日買超金額 (元；對齊 INST_PERIODS) */
+  /** 散戶(融資)過去 N 日淨變化金額 (元；融資淨變化張×1000×當日收盤；對齊 INST_PERIODS) */
   retailAmt?: (number | null)[];
 }
 
@@ -93,7 +96,6 @@ export interface HotThemeScanFile {
 
 export const HOT_MIN_HEAT = 25; // 熱度門檻：約 +4.2% 單漲、或 +2.5% 帶量
 export const HOT_MIN_CHANGE = 1; // 至少要上漲（濾掉量爆但價平/下跌的雜訊）
-export const LIMIT_UP_THRESHOLD = 9.5; // TW 漲停 ±10%
 
 export function computeHeat(
   changePercent: number,
@@ -132,6 +134,8 @@ export interface AggregateParams {
     name: string;
     changePercent: number;
     volume: number;
+    close: number;
+    prevClose: number;
   }>;
   volRatioOf: (code: string) => number | null;
   instOf: (code: string) => number | null;
@@ -163,7 +167,8 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
       volume: q.volume,
       volRatio,
       instNet,
-      isLimitUp: q.changePercent >= LIMIT_UP_THRESHOLD,
+      // 用真實漲停價判斷（前收 × 1.10 + tick 容忍），不再用 +9.5% 寬估誤判
+      isLimitUp: q.close > 0 && q.prevClose > 0 && isLimitUpPrice(q.close, q.prevClose, 'TW', code),
       isNotice: isNotice(code),
       heat,
       theme,
@@ -220,19 +225,21 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
 // ── 載入 + 建構（IO）─────────────────────────────────────────────────────────
 
 /** 過去 N 日漲幅 %（對齊 PERF_PERIODS），讀 L1 日K；與 sectorRanking 同公式（trailing）。 */
-async function memberPerfTW(code: string, date: string): Promise<{ rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[] }> {
+async function memberPerfTW(code: string, date: string): Promise<{ rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[]; turnover: number | null }> {
   const noRets = PERF_PERIODS.map(() => null);
   const noAmt: (number | null)[] = INST_PERIODS.map(() => null);
   const file = (await readCandleFile(`${code}.TW`, 'TW'))
     ?? (await readCandleFile(`${code}.TWO`, 'TW'));
-  if (!file?.candles?.length) return { rets: noRets, instAmt: noAmt, retailAmt: noAmt };
+  if (!file?.candles?.length) return { rets: noRets, instAmt: noAmt, retailAmt: noAmt, turnover: null };
   const candles = file.candles;
   let idx = -1;
   for (let i = candles.length - 1; i >= 0; i--) {
     if (candles[i].date <= date) { idx = i; break; }
   }
-  if (idx < 0) return { rets: noRets, instAmt: noAmt, retailAmt: noAmt };
+  if (idx < 0) return { rets: noRets, instAmt: noAmt, retailAmt: noAmt, turnover: null };
   const close = candles[idx].close;
+  // 今日成交金額（元）= 量(張)×1000×收盤
+  const turnover = candles[idx].volume > 0 ? Math.round(candles[idx].volume * 1000 * close) : null;
   const rets = PERF_PERIODS.map((n) => {
     if (idx - n < 0) return null;
     const base = candles[idx - n].close;
@@ -252,14 +259,14 @@ async function memberPerfTW(code: string, date: string): Promise<{ rets: (number
         for (const r of rows) {
           const c = closeByDate.get(r.date);
           if (c == null) continue;
-          amt += ((r.foreign ?? 0) + (r.trust ?? 0)) * 1000 * c;
+          amt += ((r.foreign ?? 0) + (r.trust ?? 0) + (r.dealer ?? 0)) * 1000 * c; // 三大法人
           any = true;
         }
         return any ? Math.round(amt) : null;
       });
     }
   } catch { /* 法人 optional */ }
-  // 散戶(融資)過去 N 日買超金額 = 逐日(融資淨變化張×1000×當日收盤)
+  // 融資過去 N 日淨變化「金額」= 逐日(張×1000×當日收盤)＝元
   let retailAmt = noAmt;
   try {
     const margin = await readMarginStock(code);
@@ -270,22 +277,32 @@ async function memberPerfTW(code: string, date: string): Promise<{ rets: (number
         if (rows.length === 0) return null;
         let amt = 0; let any = false;
         for (const r of rows) {
+          if (r.marginNet == null) continue;
           const c = closeByDate.get(r.date);
-          if (c == null || r.marginNet == null) continue;
-          amt += r.marginNet * 1000 * c;
+          if (c == null) continue;
+          amt += r.marginNet * 1000 * c; // 融資淨變化 張×1000股×當日收盤 = 元
           any = true;
         }
         return any ? Math.round(amt) : null;
       });
     }
   } catch { /* 融資 optional */ }
-  return { rets, instAmt, retailAmt };
+  return { rets, instAmt, retailAmt, turnover };
 }
 
 /**
  * 算指定日期的全市場熱門題材。讀單一 L2 快照（鐵則 #3），無快照回 null。
+ *
+ * opts.enrich（預設 true）：補每檔熱門成分股「過去 N 日漲幅 + 法人/融資金額」。
+ *   - true  = 盤後完整版（/api/themes/hot），會逐檔讀 L1+籌碼，較重。
+ *   - false = 盤中即時輕量版（/api/themes/live），只回純聚合（題材/即時漲跌/熱度/領漲股/廣度），
+ *             跳過逐檔 L1 讀取 → 快、適合 60s 輪詢。
  */
-export async function buildHotThemeScan(date: string): Promise<HotThemeScanFile | null> {
+export async function buildHotThemeScan(
+  date: string,
+  opts: { enrich?: boolean } = {},
+): Promise<HotThemeScanFile | null> {
+  const { enrich = true } = opts;
   const snapshot = await readIntradaySnapshot('TW', date);
   if (!snapshot || snapshot.quotes.length === 0) return null;
 
@@ -347,6 +364,8 @@ export async function buildHotThemeScan(date: string): Promise<HotThemeScanFile 
       name: q.name,
       changePercent: q.changePercent,
       volume: q.volume,
+      close: q.close,
+      prevClose: q.prevClose,
     })),
     volRatioOf,
     instOf,
@@ -357,32 +376,39 @@ export async function buildHotThemeScan(date: string): Promise<HotThemeScanFile 
   });
 
   // 每檔熱門成分股補「過去 1~10,20 日漲幅」+「法人 1/3/5/10 日買超金額」（讀 L1+inst，併發 16）。
-  const members = result.themes.flatMap((t) => t.members);
-  const uniqCodes = [...new Set(members.map((m) => m.code))];
-  const perfMap = new Map<string, { rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[] }>();
-  const CONC = 16;
-  for (let i = 0; i < uniqCodes.length; i += CONC) {
-    const batch = uniqCodes.slice(i, i + CONC);
-    const rows = await Promise.all(batch.map((c) => memberPerfTW(c, snapshot.date)));
-    batch.forEach((c, j) => perfMap.set(c, rows[j]));
-  }
-  for (const m of members) {
-    const p = perfMap.get(m.code);
-    m.rets = p?.rets;
-    m.instAmt = p?.instAmt;
-    m.retailAmt = p?.retailAmt;
+  // 即時輕量版（enrich=false）跳過這段重活，只回純聚合結果。
+  if (enrich) {
+    const members = result.themes.flatMap((t) => t.members);
+    const uniqCodes = [...new Set(members.map((m) => m.code))];
+    const perfMap = new Map<string, { rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[]; turnover: number | null }>();
+    const CONC = 16;
+    for (let i = 0; i < uniqCodes.length; i += CONC) {
+      const batch = uniqCodes.slice(i, i + CONC);
+      const rows = await Promise.all(batch.map((c) => memberPerfTW(c, snapshot.date)));
+      batch.forEach((c, j) => perfMap.set(c, rows[j]));
+    }
+    for (const m of members) {
+      const p = perfMap.get(m.code);
+      m.rets = p?.rets;
+      m.instAmt = p?.instAmt;
+      m.retailAmt = p?.retailAmt;
+      m.turnover = p?.turnover ?? null;
+    }
   }
 
   return result;
 }
 
 /** 最近一個有 L2 快照的交易日（往回找 maxBack 個日曆日） */
-export async function buildLatestHotThemeScan(maxBack = 7): Promise<HotThemeScanFile | null> {
+export async function buildLatestHotThemeScan(
+  maxBack = 7,
+  opts: { enrich?: boolean } = {},
+): Promise<HotThemeScanFile | null> {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
   const base = new Date(`${today}T00:00:00Z`);
   for (let i = 0; i <= maxBack; i++) {
     const iso = new Date(base.getTime() - i * 86400_000).toISOString().slice(0, 10);
-    const file = await buildHotThemeScan(iso);
+    const file = await buildHotThemeScan(iso, opts);
     if (file && file.hotStockCount > 0) return file;
   }
   return null;

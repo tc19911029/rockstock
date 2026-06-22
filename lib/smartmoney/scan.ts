@@ -4,23 +4,31 @@
  */
 import { promises as fs } from 'fs';
 import path from 'path';
-import { SmartMoneyParams, SmartMoneyHit, SmartMoneyDay, DEFAULT_PARAMS } from './types';
-import { evaluateLatest, Candle } from './signal';
+import type { SmartMoneyParams, SmartMoneyHit, SmartMoneyDay } from './types';
+import { DEFAULT_PARAMS } from './types';
+import { evaluateLatest, type Candle } from './signal';
 
 const BROKER_DIR = path.join(process.cwd(), 'data/chips/TW/broker');
 const CANDLE_DIR = path.join(process.cwd(), 'data/candles/TW');
 const NAMES = path.join(process.cwd(), 'data/youtube/stock-master.json');
 
+type BrokerDay = { date: string; netDifference?: number };
+type BrokerFile = { data?: BrokerDay[] };
+type CandleFile = { candles?: Candle[] };
+type StockMasterFile = { entries?: Array<{ code?: string; name?: string }> };
+
 async function loadNames(): Promise<Map<string, string>> {
   const m = new Map<string, string>();
   try {
-    const j = JSON.parse(await fs.readFile(NAMES, 'utf8'));
-    for (const e of j.entries || []) m.set(e.code, e.name);
+    const j = JSON.parse(await fs.readFile(NAMES, 'utf8')) as StockMasterFile;
+    for (const e of j.entries ?? []) {
+      if (e.code && e.name) m.set(e.code, e.name);
+    }
   } catch {}
   return m;
 }
 
-async function readJson(p: string): Promise<any | null> {
+async function readJson<T>(p: string): Promise<T | null> {
   try { return JSON.parse(await fs.readFile(p, 'utf8')); } catch { return null; }
 }
 
@@ -38,12 +46,12 @@ export async function runScan(params: SmartMoneyParams = DEFAULT_PARAMS): Promis
     const code = f.replace('.json', '');
     if (!/^\d{4}$/.test(code)) continue;
 
-    const broker = await readJson(path.join(BROKER_DIR, f));
-    const cdl = await readJson(path.join(CANDLE_DIR, `${code}.TW.json`));
+    const broker = await readJson<BrokerFile>(path.join(BROKER_DIR, f));
+    const cdl = await readJson<CandleFile>(path.join(CANDLE_DIR, `${code}.TW.json`));
     if (!broker || !cdl) continue;
 
-    const bdays: any[] = broker.data || [];
-    const candles: Candle[] = (cdl.candles || []).filter((c: Candle) => c.close > 0);
+    const bdays = broker.data ?? [];
+    const candles: Candle[] = (cdl.candles ?? []).filter((c: Candle) => c.close > 0);
     if (bdays.length < need + 1 || candles.length < need + 1) continue;
 
     const brokerByDate = new Map<string, number>();

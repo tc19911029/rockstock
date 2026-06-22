@@ -311,6 +311,7 @@ interface MinimalAlert {
 }
 
 function HoldingBadge({ symbol }: { symbol: string }) {
+  const [nowMs] = useState(() => Date.now());
   const [holding, setHolding] = useState<MinimalHolding | null>(null);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [latestAlert, setLatestAlert] = useState<MinimalAlert | null>(null);
@@ -345,7 +346,7 @@ function HoldingBadge({ symbol }: { symbol: string }) {
     ? ((currentPrice - holding.entryPrice) / holding.entryPrice) * 100
     : null;
   const daysHeld = Math.max(0, Math.floor(
-    (Date.now() - new Date(holding.entryDate + 'T00:00:00').getTime()) / 86400000,
+    (nowMs - new Date(holding.entryDate + 'T00:00:00').getTime()) / 86400000,
   ));
   const stopLossDistPct = currentPrice && holding.stopLoss
     ? ((currentPrice - holding.stopLoss) / currentPrice) * 100
@@ -590,4 +591,3 @@ function FallbackFacetVerdicts({
     </div>
   );
 }
-

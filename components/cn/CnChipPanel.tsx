@@ -15,9 +15,20 @@ interface DragonTiger {
   buyAmt: number | null; sellAmt: number | null; reason: string;
   fwdD5: number | null; fwdD10: number | null;
 }
-interface Resp { ok?: boolean; error?: string; shareholders?: Shareholder[]; dragontiger?: DragonTiger[] }
+interface CapitalFlowDay {
+  date: string; mainNet: number; superNet: number | null; largeNet: number | null;
+}
+interface MarginDay {
+  date: string; rzrqYe: number; rzYe: number; rqYe: number | null;
+}
+interface Resp {
+  ok?: boolean; error?: string;
+  shareholders?: Shareholder[]; dragontiger?: DragonTiger[];
+  capitalFlow?: CapitalFlowDay[]; margin?: MarginDay[];
+}
 
 const yi = (n: number | null | undefined) => (n == null ? '—' : `${(n / 1e8).toFixed(2)}億`);
+const yiSigned = (n: number | null | undefined) => (n == null ? '—' : `${n >= 0 ? '+' : '−'}${(Math.abs(n) / 1e8).toFixed(2)}億`);
 const wan = (n: number | null | undefined) => (n == null ? '—' : `${(n / 1e4).toFixed(1)}萬`);
 const pct = (n: number | null | undefined) => (n == null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(1)}%`);
 const numfmt = (n: number) => n.toLocaleString('en-US');
@@ -47,6 +58,19 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
   const latest = gd[0];
   // 户数变化：负=集中(偏多,绿)、正=分散(偏空,红)
   const concentrating = (latest?.holderNumRatio ?? 0) < 0;
+
+  // 主力資金流向（provider 回升冪：最後一筆=最新）
+  const cf = data?.capitalFlow ?? [];
+  const cfLatest = cf[cf.length - 1];
+  const cfTrend = cf.slice(-6).reverse();
+
+  // 兩融（升冪；最後一筆=最新，前一筆算日變化）
+  const mg = data?.margin ?? [];
+  const mgLatest = mg[mg.length - 1];
+  const mgPrev = mg[mg.length - 2];
+  const rzChg = mgLatest && mgPrev && mgLatest.rzYe != null && mgPrev.rzYe != null ? mgLatest.rzYe - mgPrev.rzYe : null;
+  const rqChg = mgLatest && mgPrev && mgLatest.rqYe != null && mgPrev.rqYe != null ? mgLatest.rqYe - mgPrev.rqYe : null;
+  const mgTrend = mg.slice(-6).reverse();
 
   return (
     <div className="flex flex-col gap-3 p-2.5 text-xs overflow-auto">
@@ -87,6 +111,84 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
             </div>
           </>
         ) : <div className="text-muted-foreground">暂无股东户数</div>}
+      </section>
+
+      {/* 主力資金流向 */}
+      <section>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="font-semibold text-fuchsia-300">主力資金</span>
+          <span className="text-[10px] text-muted-foreground">個股資金流向（超大單=主買，紅進綠出）</span>
+        </div>
+        {cfLatest ? (
+          <>
+            <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2 flex items-center gap-3">
+              <div>
+                <div className="text-[10px] text-muted-foreground">{cfLatest.date} 主力淨流入</div>
+                <div className={cn('font-mono text-base font-bold', cfLatest.mainNet >= 0 ? 'text-bull' : 'text-bear')}>
+                  {yiSigned(cfLatest.mainNet)}
+                </div>
+              </div>
+              <div className="ml-auto text-right text-[10px]">
+                <div className={cn('font-mono', (cfLatest.superNet ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>
+                  超大單(主買) {yiSigned(cfLatest.superNet)}
+                </div>
+                <div className={cn('font-mono', (cfLatest.largeNet ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>
+                  大單 {yiSigned(cfLatest.largeNet)}
+                </div>
+              </div>
+            </div>
+            <div className="mt-1.5 grid grid-cols-1 gap-0.5">
+              {cfTrend.map((d) => (
+                <div key={d.date} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span className="w-20 shrink-0 font-mono">{d.date}</span>
+                  <span className="text-muted-foreground/60">主力淨流入</span>
+                  <span className={cn('ml-auto font-mono', d.mainNet >= 0 ? 'text-bull' : 'text-bear')}>{yiSigned(d.mainNet)}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : <div className="text-muted-foreground">暂无资金流数据</div>}
+      </section>
+
+      {/* 兩融（融資融券） */}
+      <section>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="font-semibold text-fuchsia-300">兩融</span>
+          <span className="text-[10px] text-muted-foreground">融資=做多槓桿 / 融券=做空</span>
+        </div>
+        {mgLatest ? (
+          <>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2">
+                <div className="text-[10px] text-muted-foreground">融資餘額 · {mgLatest.date}</div>
+                <div className="font-mono text-sm font-bold">{yi(mgLatest.rzYe)}</div>
+                {rzChg != null && (
+                  <div className={cn('text-[10px] font-mono', rzChg >= 0 ? 'text-bull' : 'text-bear')}>
+                    {rzChg >= 0 ? '▲增 ' : '▼減 '}{yi(Math.abs(rzChg))}
+                  </div>
+                )}
+              </div>
+              <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2">
+                <div className="text-[10px] text-muted-foreground">融券餘額（做空）</div>
+                <div className="font-mono text-sm font-bold">{yi(mgLatest.rqYe)}</div>
+                {rqChg != null && (
+                  <div className={cn('text-[10px] font-mono', rqChg >= 0 ? 'text-bear' : 'text-bull')}>
+                    {rqChg >= 0 ? '▲增 ' : '▼減 '}{yi(Math.abs(rqChg))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="mt-1.5 grid grid-cols-1 gap-0.5">
+              {mgTrend.map((d) => (
+                <div key={d.date} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span className="w-20 shrink-0 font-mono">{d.date}</span>
+                  <span>融資 {yi(d.rzYe)}</span>
+                  <span className="ml-auto">兩融 {yi(d.rzrqYe)}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : <div className="text-muted-foreground">暂无两融数据</div>}
       </section>
 
       {/* 龙虎榜 */}

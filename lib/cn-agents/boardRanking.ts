@@ -113,6 +113,33 @@ export function filterRealConcepts(boards: BoardEntry[]): BoardEntry[] {
 }
 
 /**
+ * 盤口/行為/財務/指數型「概念」板塊 — 2026-06-22（盤中即時「純題材」視圖用）
+ *
+ * 東財 m:90+t:3 除了真題材（CPO/先進封裝/固態電池…），還塞了一堆「不是可操作產業題材」的
+ * 盤面板塊：盤口行為（昨日漲停/連板/打二板/炸板/高換手/新高、東方財富熱股、題材股、趨勢股、
+ * 反轉股、週期股、行業龍頭、微盤/低價/超跌/價值/權重/紅利股）、籌碼（基金/機構/社保/QFII重倉、
+ * 證金持股）、財報預告（XX季報/年報預增…）、事件（並購重組、轉債標的、舉牌、股權激勵/轉讓、
+ * 破發、IPO受益、首發經濟、科創板做市、北交所概念、參股XX、創投）、寬基指數（上證50/中證500…）、
+ * 次新股 / ST / B股 / GDR。這些 filterRealConcepts 沒擋（它只擋風格/大盤/寬基大指數）。
+ *
+ * 盤中「即時題材」視圖只想看可操作產業題材 → 用 filterThemeConcepts 再濾掉這類盤面板塊。
+ * 刻意保留地域/政策題材（一帶一路/雄安/自貿…），那是 A 股真實題材，非盤面。
+ */
+const BEHAVIORAL_NAME_RE = /^昨日|多板$|新高$|^东方财富热股$|^题材股$|^趋势股$|^反转股$|^周期股$|^行业龙头$|^微利股$|^超跌股$|^价值股$|^权重股$|^红利股$|微盘|^低价股$|次新股$|ST股$|^B股$|^AB股$|^AH股$|^GDR$|重仓$|^证金持股$|^独角兽$|季报|年报|^并购重组概念$|^转债标的$|^举牌$|^股权激励$|^股权转让$|破增发价股$|^破发股$|^IPO受益$|^首发经济$|科创板做市|^北交所概念$|^参股|^创投$|^(上证|深证|中证|央视|沪深)\d+[R_]?$/;
+
+/** 是否為盤口/行為/財務/指數型「非題材」概念板塊（→ 純題材視圖不顯示）。 */
+export function isBehavioralBoard(b: Pick<BoardEntry, 'name'>): boolean {
+  return b.name != null && BEHAVIORAL_NAME_RE.test(b.name);
+}
+
+/** 純題材概念（盤中即時題材用）：filterRealConcepts 後再濾盤口/行為/財務/指數型 → 只留可操作產業題材，依今日漲幅重排名次。 */
+export function filterThemeConcepts(boards: BoardEntry[]): BoardEntry[] {
+  return filterRealConcepts(boards)
+    .filter((b) => !isBehavioralBoard(b))
+    .map((b, i) => ({ ...b, rank: i + 1 }));
+}
+
+/**
  * 板塊階段 heuristic（顯示用，非回測）。優先序由「最該標出的狀態」往下：
  *   退潮   ：近 5 日轉弱（pct5d ≤ -3）
  *   高潮噴出：近 5 日大漲且今天還在衝（pct5d ≥ 8 且 pct ≥ 2）

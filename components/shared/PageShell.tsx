@@ -5,17 +5,12 @@ import { usePathname } from 'next/navigation';
 import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun,
-  Briefcase, Menu,
-  Activity, Settings, FileText,
-  Star, TrendingUp, Newspaper, Radio, Calculator, ShieldAlert, BookOpen, Target,
+  Briefcase,
+  Activity,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
-import {
-  Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle,
-} from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,7 +28,6 @@ interface PageShellProps {
 export function PageShell({ children, headerSlot, fullViewport, className }: PageShellProps) {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -66,11 +60,11 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Secondary Nav — desktop icon-only
-              整合進首頁原則：所有「日常看股」功能在首頁 TodayBriefing + DecisionPanel
+          {/* 輔助導覽（桌機 + 行動都顯示）— 2026-06-21 移除「全部頁面」側邊選單後唯一的 header 入口
+              整合進首頁原則：所有「日常看股」功能在首頁 TodayBriefing + DecisionPanel + 右側 tab
               nav 只留「編輯持倉」和「系統健康」兩個必要管理入口
-              其餘舊頁路由保留、可手打 URL (today/growth/risk/sizer/watchlist/journal/realtime/etf) */}
-          <nav aria-label="輔助導覽" className="hidden md:flex items-center gap-0.5">
+              其餘舊頁路由保留、可手打 URL (today/growth/risk/sizer/watchlist/journal/realtime) */}
+          <nav aria-label="輔助導覽" className="flex items-center gap-0.5">
             {([
               { href: '/portfolio', label: '持倉',     icon: Briefcase },
               { href: '/health',    label: '系統健康',  icon: Activity },
@@ -105,80 +99,6 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
               <Moon className="absolute w-4 h-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             </Button>
           </nav>
-
-          {/* 完整選單（桌面 + 行動都顯示）— UX1：所有頁收進可發現的選單，不再只能手打 URL */}
-          <div>
-            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-              <SheetTrigger
-                render={<Button variant="ghost" size="icon" aria-label="開啟選單" title="全部頁面" className="text-muted-foreground hover:text-foreground/80 w-8 h-8" />}
-              >
-                <Menu className="w-5 h-5" />
-              </SheetTrigger>
-              <SheetContent side="right" className="w-64 bg-background border-border overflow-y-auto">
-                <SheetHeader>
-                  <SheetTitle className="text-sky-400">
-                    全部頁面
-                  </SheetTitle>
-                </SheetHeader>
-                <nav aria-label="全站導覽" className="flex flex-col gap-4 mt-4 px-2">
-                  {([
-                    {
-                      title: '看股 / 追蹤',
-                      items: [
-                        { href: '/',          label: '🏠 首頁工作台',   icon: Activity },
-                        { href: '/watchlist', label: '⭐ 自選股',       icon: Star },
-                        { href: '/sectors',   label: '🔥 題材分類',     icon: TrendingUp },
-                        { href: '/etf',       label: '📈 ETF 追蹤',     icon: TrendingUp },
-                        { href: '/youtube',   label: '📺 YouTube 提及', icon: Newspaper },
-                        { href: '/realtime',  label: '📡 分時監控',     icon: Radio },
-                        { href: '/backtest/leaderboard', label: '📊 策略排行榜', icon: TrendingUp },
-                      ],
-                    },
-                    {
-                      title: '持倉 / 決策',
-                      items: [
-                        { href: '/portfolio', label: '💼 持倉',     icon: Briefcase },
-                        { href: '/sizer',     label: '🧮 部位試算', icon: Calculator },
-                        { href: '/risk',      label: '🛡 風險面板',  icon: ShieldAlert },
-                        { href: '/journal',   label: '📓 交易日誌', icon: BookOpen },
-                        { href: '/growth',    label: '🎯 成長路徑', icon: Target },
-                      ],
-                    },
-                    {
-                      title: '系統',
-                      items: [
-                        { href: '/health',     label: '💚 系統健康',  icon: Activity },
-                        { href: '/settings',   label: '⚙️ 設定',       icon: Settings },
-                        { href: '/disclaimer', label: '📄 免責聲明',   icon: FileText },
-                      ],
-                    },
-                  ] as const).map((group) => (
-                    <div key={group.title} className="flex flex-col gap-1">
-                      <div className="px-3 text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">
-                        {group.title}
-                      </div>
-                      {group.items.map(({ href, label, icon: Icon }) => (
-                        <Link
-                          key={href}
-                          href={href}
-                          onClick={() => setMobileOpen(false)}
-                          className={cn(
-                            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                            isActive(href)
-                              ? 'bg-sky-500/15 text-sky-400'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-secondary',
-                          )}
-                        >
-                          <Icon className="w-4 h-4" />
-                          {label}
-                        </Link>
-                      ))}
-                    </div>
-                  ))}
-                </nav>
-              </SheetContent>
-            </Sheet>
-          </div>
         </div>
       </header>
 

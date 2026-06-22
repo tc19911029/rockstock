@@ -1,1 +1,1 @@
-export { ETFPageContent } from './ETFPageContent';
+export { ETFPageContent, ETFPanel } from './ETFPageContent';

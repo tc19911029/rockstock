@@ -26,8 +26,6 @@ import { evaluateAt as stealEvaluateAt } from '@/lib/inststeal/signal';
 import { computeChipAvoidSignals } from '@/lib/avoidance/chipAvoidSignals';
 import StockSelector from '@/components/StockSelector';
 import { PageShell, EmptyState, BackButton, StockChartView } from '@/components/shared';
-import { DecisionPanel } from '@/components/decision/DecisionPanel';
-import { TodayBriefing } from '@/components/today/TodayBriefing';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import SignalSummaryCard from '@/components/SignalSummaryCard';
 import { useV12HistoricalMarkers } from '@/lib/hooks/useV12HistoricalMarkers';
@@ -50,11 +48,10 @@ import { ScanPanelVertical } from '@/features/scan';
 import { DataHealthBadge } from '@/features/scan/components/DataHealthBadge';
 import type { SelectedStock } from '@/features/scan';
 import type { SanSeChartPayload } from '@/components/cn-sanse/SanSeChart';
-import { YoutubeStocksPanel } from '@/components/youtube/YoutubeStocksPanel';
+import { YoutubePanel } from '@/components/youtube/YoutubePanel';
 import { BrokerReportsPanel } from '@/components/broker/BrokerReportsPanel';
-import { CandidatesPoolPanel } from '@/components/CandidatesPoolPanel';
-import { FundamentalRevaluationPanel } from '@/components/FundamentalRevaluationPanel';
-import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
+import { SectorsPanel } from '@/components/sectors/SectorsPanel';
+import { ETFPanel } from '@/features/etf';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { getABCDisplayStructure } from '@/lib/analysis/abcBreakoutEntry';
 import { useBacktestStore } from '@/store/backtestStore';
@@ -252,7 +249,7 @@ function HomePage() {
     const date = searchParams.get('date');
     const urlTab = searchParams.get('tab');
     const tfParam = searchParams.get('tf');
-    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'fundamental' || urlTab === 'pool' || urlTab === 'agent' || urlTab === 'broker') {
+    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'sectors' || urlTab === 'broker' || urlTab === 'etf') {
       setRightTab(urlTab);
       // 套用後立刻把 ?tab= 從 URL 拿掉 — inbound link 進來會切 tab,但 reload 不會再套用,維持 default scan
       // 保留其他 query param(?load / ?date / ?tf)
@@ -318,8 +315,8 @@ function HomePage() {
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel — v12 預設展開讓用戶一進來就看到新功能（14 字母 tabs/Step 0 banner/LockWatch panel/警示徽章）
   const [scannerOpen, setScannerOpen] = useState(true);
-  // Stage 7-10：右側 panel tab — 策略掃描 / YouTube 提及 / 候選池 / Multi-Agent
-  type RightTab = 'scan' | 'youtube' | 'fundamental' | 'pool' | 'agent' | 'broker';
+  // 右側 panel tab — 策略掃描 / YouTube 提及 / 題材分類 / 法人報告 / ETF 追蹤（2026-06-21 ETF 併入，五入口）
+  type RightTab = 'scan' | 'youtube' | 'sectors' | 'broker' | 'etf';
   const [rightTab, setRightTab] = useState<RightTab>('scan');
   // Stage 16：3 tab 共用 date state（YouTube / Pool / Multi-Agent 都看同一天）
   // 預設「最近工作日」，因為 today 的資料通常還沒跑完
@@ -330,7 +327,9 @@ function HomePage() {
     setLoadError(null);
     // YouTube source 都是 TW 股，補 .TW suffix
     const symbol = /\.(TW|TWO|SS|SZ)$/i.test(code) ? code : `${code}.TW`;
-    loadStock(symbol, '1d', '2y', tabDate).catch((e: Error) => {
+    // 點股票看圖一律載「即時」（不傳 tabDate）：tabDate 預設是上個工作日，
+    // 當 as-of 傳入會把 K 線凍在那天、不注入今日 bar、不輪詢（見 replayStore startPolling guard）
+    loadStock(symbol, '1d', '2y').catch((e: Error) => {
       toast.error(`載入 ${code} 失敗：${e.message || '請稍後再試'}`);
     });
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -338,23 +337,22 @@ function HomePage() {
       setScannerOpen(false);
       try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
     }
-  }, [loadStock, tabDate]);
+  }, [loadStock]);
 
-  // Pool tab / Multi-Agent tab 點股票 → loadStock（symbol 已是 2330.TW 格式，不必補 suffix）
-  // 帶 tabDate 讓 K 線停在當天，user 看的是「該日的條件分析」而非總是最新
-  const handlePoolSelectStock = useCallback((symbol: string) => {
+  // 題材分類 tab 點股票 → loadStock。台股裸碼補 .TW；陸股已帶 .SS/.SZ/.BJ 後綴照用
+  const handleSectorSelectStock = useCallback((codeOrSymbol: string) => {
     setLoadError(null);
-    loadStock(symbol, '1d', '2y', tabDate).catch((e: Error) => {
-      toast.error(`載入 ${symbol} 失敗：${e.message || '請稍後再試'}`);
+    const symbol = /\.(TW|TWO|SS|SZ|BJ)$/i.test(codeOrSymbol) ? codeOrSymbol : `${codeOrSymbol}.TW`;
+    // 點股票看圖一律載「即時」（不傳 tabDate）：題材是盤中即時清單，點進去理應看即時 K 線
+    loadStock(symbol, '1d', '2y').catch((e: Error) => {
+      toast.error(`載入 ${codeOrSymbol} 失敗：${e.message || '請稍後再試'}`);
     });
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setMobileChartFullscreen(true);
       setScannerOpen(false);
       try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
     }
-  }, [loadStock, tabDate]);
-  // Multi-Agent tab 共用 Pool 的 callback（symbol 格式相同）
-  const handleAgentSelectStock = handlePoolSelectStock;
+  }, [loadStock]);
   // 手機點「走圖」→ 全螢幕 K 線視圖
   const [mobileChartFullscreen, setMobileChartFullscreen] = useState(false);
   const openMobileChart = useCallback(() => {
@@ -899,9 +897,6 @@ function HomePage() {
     </div>
   );
 
-  // 是否顯示深度決策面板：有選股且非大盤指數
-  const showDecisionPanel = !!currentStock && !/^\^|^000001\.SS$/.test(currentStock.ticker);
-
   // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫。
   // 三色 overlay/副圖只有日線版本 → 加 currentInterval==='1d' 閘，分鐘線一律不渲染
   //（否則日線 sanse 資料疊到分鐘線會把主圖帶歪、副圖空白錯位）。
@@ -1219,49 +1214,18 @@ function HomePage() {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={rightTab === 'fundamental'}
-                  onClick={() => setRightTab('fundamental')}
+                  aria-selected={rightTab === 'sectors'}
+                  onClick={() => setRightTab('sectors')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
-                    rightTab === 'fundamental'
-                      ? 'text-foreground border-b-2 border-orange-500 -mb-px bg-card/60'
+                    rightTab === 'sectors'
+                      ? 'text-foreground border-b-2 border-teal-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
-                  title="基本面補漲 Top 20"
+                  title="題材分類：題材熱度／資金流入／法人買賣超／排名變化"
                 >
-                  <span aria-hidden="true">📊</span>
-                  <span className="hidden md:inline">基本面補漲</span>
-                  <span className="md:hidden">補漲</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightTab === 'pool'}
-                  onClick={() => setRightTab('pool')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
-                    rightTab === 'pool'
-                      ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  title="多源候選股票池"
-                >
-                  <span aria-hidden="true">🗂</span>
-                  <span>候選池</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightTab === 'agent'}
-                  onClick={() => setRightTab('agent')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
-                    rightTab === 'agent'
-                      ? 'text-foreground border-b-2 border-amber-500 -mb-px bg-card/60'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  title="多代理已完成決策"
-                >
-                  <span aria-hidden="true">🤖</span>
-                  <span className="hidden md:inline">多代理</span>
-                  <span className="md:hidden">代理</span>
+                  <span aria-hidden="true">🔥</span>
+                  <span className="hidden md:inline">題材分類</span>
+                  <span className="md:hidden">題材</span>
                 </button>
                 <button
                   type="button"
@@ -1279,6 +1243,22 @@ function HomePage() {
                   <span className="hidden md:inline">法人報告</span>
                   <span className="md:hidden">法人</span>
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'etf'}
+                  onClick={() => setRightTab('etf')}
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'etf'
+                      ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="ETF 追蹤：績效排行／持股異動／共識買榜／被納入後表現"
+                >
+                  <span aria-hidden="true">📈</span>
+                  <span className="hidden md:inline">ETF 追蹤</span>
+                  <span className="md:hidden">ETF</span>
+                </button>
                 <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)}
                   className="px-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -1294,7 +1274,7 @@ function HomePage() {
                   <ScanPanelVertical onSelectStock={handleScanSelectStock} />
                 )}
                 {rightTab === 'youtube' && (
-                  <YoutubeStocksPanel
+                  <YoutubePanel
                     date={tabDate}
                     onDateChange={setTabDate}
                     onSelectStock={handleYoutubeSelectStock}
@@ -1302,28 +1282,10 @@ function HomePage() {
                     selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
                 )}
-                {rightTab === 'fundamental' && (
-                  <FundamentalRevaluationPanel
-                    date={tabDate}
-                    onDateChange={setTabDate}
-                    onSelectStock={handleYoutubeSelectStock}
-                    selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
-                  />
-                )}
-                {rightTab === 'pool' && (
-                  <CandidatesPoolPanel
-                    onSelectStock={handlePoolSelectStock}
-                    selectedSymbol={currentStock?.ticker}
-                    defaultDate={tabDate}
-                    onDateChange={setTabDate}
-                  />
-                )}
-                {rightTab === 'agent' && (
-                  <MultiAgentTopPanel
-                    onSelectStock={handleAgentSelectStock}
-                    selectedSymbol={currentStock?.ticker}
-                    defaultDate={tabDate}
-                    onDateChange={setTabDate}
+                {rightTab === 'sectors' && (
+                  <SectorsPanel
+                    onSelectStock={handleSectorSelectStock}
+                    selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ|BJ)$/i, '') ?? null}
                   />
                 )}
                 {rightTab === 'broker' && (
@@ -1333,6 +1295,9 @@ function HomePage() {
                     onSelectStock={handleYoutubeSelectStock}
                     selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
+                )}
+                {rightTab === 'etf' && (
+                  <ETFPanel />
                 )}
               </div>
             </>
@@ -1350,14 +1315,6 @@ function HomePage() {
         </div>
 
         </div>{/* end 3-col flex */}
-
-        {/* 今日簡報 — 永遠顯示（不限選股） */}
-        <TodayBriefing market={market} />
-
-        {/* 深度決策面板（A1：走圖區下方垂直展開）— 選了個股才顯示 */}
-        {showDecisionPanel && currentStock && (
-          <DecisionPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />
-        )}
 
       </div>
       {/* P1-5: Keyboard shortcut help overlay */}

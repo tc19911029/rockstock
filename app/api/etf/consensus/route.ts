@@ -5,7 +5,7 @@
  */
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
-import { ACTIVE_ETF_LIST } from '@/lib/etf/etfList';
+import { ACTIVE_ETF_LIST, isGlobalETF } from '@/lib/etf/etfList';
 import {
   loadConsensus,
   listConsensusDates,
@@ -13,9 +13,22 @@ import {
   listChangeDates,
 } from '@/lib/etf/etfStorage';
 import { computeConsensus } from '@/lib/etf/consensusCalc';
-import type { ETFChange } from '@/lib/etf/types';
+import type { ETFChange, ETFConsensusEntry } from '@/lib/etf/types';
 
 export const runtime = 'nodejs';
+
+// 只留台股型 ETF：把全球／美國型 ETF 從每筆共識的 etfCodes 拿掉後重新門檻過濾。
+// 只由全球 ETF 撐起的外國股共識 → etfCodes 變空 → 自動消失。
+function twOnlyConsensus(entries: ETFConsensusEntry[], minEtfs: number): ETFConsensusEntry[] {
+  return entries
+    .map((e) => {
+      const keep = e.etfCodes
+        .map((c, i) => [c, i] as const)
+        .filter(([c]) => !isGlobalETF(c));
+      return { ...e, etfCodes: keep.map(([c]) => c), etfNames: keep.map(([, i]) => e.etfNames[i]) };
+    })
+    .filter((e) => e.etfCodes.length >= minEtfs);
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,7 +36,8 @@ export async function GET(req: NextRequest) {
     const minEtfsParam = Number(req.nextUrl.searchParams.get('minEtfs') ?? '2');
     const minEtfs = Number.isFinite(minEtfsParam) && minEtfsParam >= 1 ? minEtfsParam : 2;
 
-    const allCodes = ACTIVE_ETF_LIST.map((e) => e.etfCode);
+    // 只考慮台股型 ETF（全球／美國型隱藏）
+    const allCodes = ACTIVE_ETF_LIST.filter((e) => !isGlobalETF(e.etfCode)).map((e) => e.etfCode);
 
     // 試讀快取
     if (dateParam) {
@@ -32,7 +46,7 @@ export async function GET(req: NextRequest) {
         return apiOk({
           date: dateParam,
           windowDays: 1,
-          entries: cached.filter((c) => c.etfCodes.length >= minEtfs),
+          entries: twOnlyConsensus(cached, minEtfs),
         });
       }
     } else {
@@ -43,7 +57,7 @@ export async function GET(req: NextRequest) {
           return apiOk({
             date: d,
             windowDays: 1,
-            entries: cached.filter((c) => c.etfCodes.length >= minEtfs),
+            entries: twOnlyConsensus(cached, minEtfs),
           });
         }
       }

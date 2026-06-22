@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { RefreshCw, ChevronDown, ExternalLink } from 'lucide-react';
 import { useETFStore } from '@/store/etfStore';
-import { ACTIVE_ETF_LIST, shortETFName, chartLoadSymbol, formatHoldingShares, formatHoldingShareDelta } from '@/lib/etf/etfList';
+import { ACTIVE_ETF_LIST, TW_ETF_LIST, isGlobalETF, shortETFName, chartLoadSymbol, formatHoldingShares, formatHoldingShareDelta } from '@/lib/etf/etfList';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import type { ETFChange, ETFHolding } from '@/lib/etf/types';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -427,7 +427,7 @@ export function ETFChangesTab() {
         >
           全部
         </button>
-        {ACTIVE_ETF_LIST.map((etf) => (
+        {TW_ETF_LIST.map((etf) => (
           <button
             key={etf.etfCode}
             onClick={() => setSelectedEtfCode(etf.etfCode)}
@@ -488,7 +488,8 @@ function ETFChangesContent({ etfCode }: { etfCode: string | null }) {
       .then(r => r.json())
       .then(d => {
         if (cancelled) return;
-        setChanges(d.changes ?? []);
+        // 只留台股型 ETF（「全部」時隱藏全球／美國型）
+        setChanges((d.changes ?? []).filter((c: ETFChange) => !isGlobalETF(c.etfCode)));
         if (d.availableDates?.length) {
           setAvailableDates(d.availableDates);
           if (!toDate) {

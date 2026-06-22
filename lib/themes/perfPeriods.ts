@@ -9,5 +9,6 @@
  */
 export const PERF_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20] as const;
 
-/** 法人買超金額的固定天數視窗（看資金流入用金額，不看張數—便宜股張數會虛胖） */
-export const INST_PERIODS = [1, 3, 5, 10] as const;
+/** 法人金額 / 融資張數的天數視窗。與 PERF_PERIODS 的卡片顯示窗 [1,2,3,4,5,10,20] 對齊，
+ *  讓「漲幅／法人／融資」三排同欄。索引一律用 INST_PERIODS.indexOf(n) 動態取，不可寫死。 */
+export const INST_PERIODS = [1, 2, 3, 4, 5, 10, 20] as const;

@@ -18,6 +18,7 @@ import { bullBearClass } from '@/lib/format';
 import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
 import { SectorsNavContext, SectorsBadgesContext, useSectorBadges, StockLink, StockBadges, AddWatchBtn, type SectorSelectStock, type SectorBadgeSets, type ScanSig, type SixCondSig } from './StockLink';
 import { CnView } from './CnView';
+import { LiveThemesView } from './LiveThemesView';
 
 // ── 型別 ──────────────────────────────────────────────────────────────────────
 
@@ -495,7 +496,10 @@ export function SectorsPanel({ onSelectStock, selectedCode: _selectedCode }: {
 }) {
   // 台股 / 陸股切換（2026-06-21 復原；陸股走 <CnView/>，台股走下方兩視角）
   const [market, setMarket] = useState<Market>('TW');
-  const [mode, setMode] = useState<Mode>('hot');
+  // 預設停在「熱門題材」（裡面預設＝盤中即時）
+  const [mode, setMode] = useState<Mode>('fixed');
+  // 熱門題材／熱門板塊內的子切換：盤中即時(預設) ↔ 盤後多日排行
+  const [liveMode, setLiveMode] = useState(true);
 
   const [data, setData] = useState<RankingFile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -509,7 +513,8 @@ export function SectorsPanel({ onSelectStock, selectedCode: _selectedCode }: {
 
   useEffect(() => {
     if (market !== 'TW') return;
-    if (mode === 'fixed' && !data && !error) {
+    // 盤後多日排行只有在「熱門題材 → 盤後排行」子視角才需要（盤中即時走 LiveThemesView 自己抓）
+    if (mode === 'fixed' && !liveMode && !data && !error) {
       fetch('/api/themes/ranking')
         .then(r => r.json())
         .then(j => { if (j.ok === false) throw new Error(j.error ?? '載入失敗'); setData((j.data ?? j) as RankingFile); })
@@ -521,7 +526,7 @@ export function SectorsPanel({ onSelectStock, selectedCode: _selectedCode }: {
         .then(j => { if (j.ok === false) throw new Error(j.error ?? '載入失敗'); setHot((j.data ?? j) as HotFile); })
         .catch(e => setHotError(e instanceof Error ? e.message : String(e)));
     }
-  }, [market, mode, data, error, hot, hotError]);
+  }, [market, mode, liveMode, data, error, hot, hotError]);
 
   // 跨來源徽章：近期 YouTube 提及 + 今日三色選中 + 策略掃描信號（台股；命中個股顯示 📺 / 🎨三色 / 6/6 等）
   const [badges, setBadges] = useState<SectorBadgeSets>({ youtube: new Set(), sanse: new Set(), scan: new Map(), six: new Map() });
@@ -607,19 +612,34 @@ export function SectorsPanel({ onSelectStock, selectedCode: _selectedCode }: {
           </div>
           {/* 視角切換（熱點 / 熱門題材或板塊）*/}
           <div className="inline-flex items-center rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
-            <button onClick={() => setMode('hot')}
-              className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'hot' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>{hotLabel}</button>
             <button onClick={() => setMode('fixed')}
               className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'fixed' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>{fixedLabel}</button>
+            <button onClick={() => setMode('hot')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${mode === 'hot' ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>{hotLabel}</button>
           </div>
+          {/* 熱門題材／熱門板塊內：盤中即時 ↔ 盤後多日排行（盤中即時做在這裡，不另開頂層分頁）*/}
+          {mode === 'fixed' && (
+            <div className="inline-flex items-center rounded-lg border border-border bg-secondary/30 p-0.5 text-sm">
+              <button onClick={() => setLiveMode(true)}
+                className={`px-3 py-1.5 rounded-md transition-colors ${liveMode ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>🔴 盤中即時</button>
+              <button onClick={() => setLiveMode(false)}
+                className={`px-3 py-1.5 rounded-md transition-colors ${!liveMode ? 'bg-card text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>📊 盤後排行</button>
+            </div>
+          )}
         </div>
 
-        {market === 'CN' ? (
-          <CnView mode={mode} />
-        ) : mode === 'hot' ? (
-          <HotView hot={hot} error={hotError} expanded={hotExpanded} setExpanded={setHotExpanded} />
+        {mode === 'fixed' ? (
+          liveMode ? (
+            <LiveThemesView market={market} />
+          ) : market === 'CN' ? (
+            <CnView mode="fixed" />
+          ) : (
+            <FixedView data={data} error={error} expanded={expanded} setExpanded={setExpanded} />
+          )
+        ) : market === 'CN' ? (
+          <CnView mode="hot" />
         ) : (
-          <FixedView data={data} error={error} expanded={expanded} setExpanded={setExpanded} />
+          <HotView hot={hot} error={hotError} expanded={hotExpanded} setExpanded={setHotExpanded} />
         )}
       </div>
      </SectorsBadgesContext.Provider>
