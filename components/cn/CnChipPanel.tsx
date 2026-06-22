@@ -21,10 +21,14 @@ interface CapitalFlowDay {
 interface MarginDay {
   date: string; rzrqYe: number; rzYe: number; rqYe: number | null;
 }
+interface MainBuySell {
+  mainIn: number; mainOut: number; mainNet: number; netPct: number | null;
+}
 interface Resp {
   ok?: boolean; error?: string;
   shareholders?: Shareholder[]; dragontiger?: DragonTiger[];
-  capitalFlow?: CapitalFlowDay[]; capitalFlowToday?: CapitalFlowDay | null; margin?: MarginDay[];
+  capitalFlow?: CapitalFlowDay[]; capitalFlowToday?: CapitalFlowDay | null;
+  mainBuySell?: MainBuySell | null; margin?: MarginDay[];
 }
 
 // 陸股交易時段（北京時間=台灣 CST）：平日 09:30-11:30 / 13:00-15:00
@@ -91,6 +95,8 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
   const cfTrend = (cfToday && (histDesc.length === 0 || histDesc[0].date !== cfToday.date)
     ? [cfToday, ...histDesc]
     : histDesc).slice(0, 6);
+  // 主買/主賣毛額（今日，主力流入/流出）
+  const mbs = data?.mainBuySell ?? null;
 
   // 兩融（升冪；最後一筆=最新，前一筆算日變化）
   const mg = data?.margin ?? [];
@@ -102,53 +108,14 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
 
   return (
     <div className="flex flex-col gap-3 p-2.5 text-xs overflow-auto">
-      {/* 股东户数 */}
-      <section>
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <span className="font-semibold text-fuchsia-300">股东户数</span>
-          <span className="text-[10px] text-muted-foreground">散戶集中度（對標台股集保）</span>
-        </div>
-        {latest ? (
-          <>
-            <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2 flex items-center gap-3">
-              <div>
-                <div className="text-[10px] text-muted-foreground">{latest.endDate} 股东户数</div>
-                <div className="font-mono text-base font-bold">{numfmt(latest.holderNum)} 户</div>
-              </div>
-              <div className={cn('font-mono text-sm font-bold', concentrating ? 'text-bull' : 'text-bear')}>
-                {pct(latest.holderNumRatio)}
-                <div className="text-[10px] font-normal">{concentrating ? '↓ 籌碼集中（偏多）' : '↑ 籌碼分散（偏空）'}</div>
-              </div>
-              <div className="ml-auto text-right text-[10px] text-muted-foreground">
-                <div>户均 {latest.avgHoldNum != null ? Math.round(latest.avgHoldNum).toLocaleString() : '—'} 股</div>
-                <div>户均市值 {wan(latest.avgMarketCap)}</div>
-              </div>
-            </div>
-            {/* 近幾期趨勢 */}
-            <div className="mt-1.5 grid grid-cols-1 gap-0.5">
-              {gd.slice(0, 6).map((q) => {
-                const conc = (q.holderNumRatio ?? 0) < 0;
-                return (
-                  <div key={q.endDate} className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="w-20 shrink-0 font-mono">{q.endDate}</span>
-                    <span className="font-mono">{numfmt(q.holderNum)} 户</span>
-                    <span className={cn('ml-auto font-mono', conc ? 'text-bull' : 'text-bear')}>{pct(q.holderNumRatio)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        ) : <div className="text-muted-foreground">暂无股东户数</div>}
-      </section>
-
-      {/* 主力資金流向 */}
+      {/* 1. 主力資金流向 */}
       <section>
         <div className="flex items-center gap-1.5 mb-1.5">
           <span className="font-semibold text-fuchsia-300">主力資金</span>
           {cfIsLive && isCnSessionNow() && (
             <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">● 盤中即時</span>
           )}
-          <span className="text-[10px] text-muted-foreground">超大單=主買，紅進綠出</span>
+          <span className="text-[10px] text-muted-foreground">淨流入=買−賣，紅進綠出</span>
         </div>
         {cfLatest ? (
           <>
@@ -157,11 +124,12 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
                 <div className="text-[10px] text-muted-foreground">{cfLatest.date} 主力淨流入{cfIsLive ? '（今日累計）' : ''}</div>
                 <div className={cn('font-mono text-base font-bold', cfLatest.mainNet >= 0 ? 'text-bull' : 'text-bear')}>
                   {yiSigned(cfLatest.mainNet)}
+                  {mbs?.netPct != null && <span className="ml-1 text-[10px] font-normal">淨佔比 {mbs.netPct.toFixed(1)}%</span>}
                 </div>
               </div>
               <div className="ml-auto text-right text-[10px]">
                 <div className={cn('font-mono', (cfLatest.superNet ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>
-                  超大單(主買) {yiSigned(cfLatest.superNet)}
+                  超大單 {yiSigned(cfLatest.superNet)}
                 </div>
                 <div className={cn('font-mono', (cfLatest.largeNet ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>
                   大單 {yiSigned(cfLatest.largeNet)}
@@ -181,7 +149,30 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
         ) : <div className="text-muted-foreground">暂无资金流数据</div>}
       </section>
 
-      {/* 兩融（融資融券） */}
+      {/* 2. 主買資金（主力買入/賣出毛額） */}
+      <section>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="font-semibold text-fuchsia-300">主買資金</span>
+          {mbs && isCnSessionNow() && (
+            <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">● 盤中即時</span>
+          )}
+          <span className="text-[10px] text-muted-foreground">主力買入/賣出毛額（買−賣=淨流入）</span>
+        </div>
+        {mbs ? (
+          <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2 grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-[10px] text-muted-foreground">主買 · 主力流入</div>
+              <div className="font-mono text-sm font-bold text-bull">{yi(mbs.mainIn)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground">主賣 · 主力流出</div>
+              <div className="font-mono text-sm font-bold text-bear">{yi(mbs.mainOut)}</div>
+            </div>
+          </div>
+        ) : <div className="text-muted-foreground">暂无主买卖数据</div>}
+      </section>
+
+      {/* 3. 兩融（融資融券） */}
       <section>
         <div className="flex items-center gap-1.5 mb-1.5">
           <span className="font-semibold text-fuchsia-300">兩融</span>
@@ -222,7 +213,45 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
         ) : <div className="text-muted-foreground">暂无两融数据</div>}
       </section>
 
-      {/* 龙虎榜 */}
+      {/* 4. 股东户数 */}
+      <section>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="font-semibold text-fuchsia-300">股东户数</span>
+          <span className="text-[10px] text-muted-foreground">散戶集中度（對標台股集保）</span>
+        </div>
+        {latest ? (
+          <>
+            <div className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2 flex items-center gap-3">
+              <div>
+                <div className="text-[10px] text-muted-foreground">{latest.endDate} 股东户数</div>
+                <div className="font-mono text-base font-bold">{numfmt(latest.holderNum)} 户</div>
+              </div>
+              <div className={cn('font-mono text-sm font-bold', concentrating ? 'text-bull' : 'text-bear')}>
+                {pct(latest.holderNumRatio)}
+                <div className="text-[10px] font-normal">{concentrating ? '↓ 籌碼集中（偏多）' : '↑ 籌碼分散（偏空）'}</div>
+              </div>
+              <div className="ml-auto text-right text-[10px] text-muted-foreground">
+                <div>户均 {latest.avgHoldNum != null ? Math.round(latest.avgHoldNum).toLocaleString() : '—'} 股</div>
+                <div>户均市值 {wan(latest.avgMarketCap)}</div>
+              </div>
+            </div>
+            <div className="mt-1.5 grid grid-cols-1 gap-0.5">
+              {gd.slice(0, 6).map((q) => {
+                const conc = (q.holderNumRatio ?? 0) < 0;
+                return (
+                  <div key={q.endDate} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span className="w-20 shrink-0 font-mono">{q.endDate}</span>
+                    <span className="font-mono">{numfmt(q.holderNum)} 户</span>
+                    <span className={cn('ml-auto font-mono', conc ? 'text-bull' : 'text-bear')}>{pct(q.holderNumRatio)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : <div className="text-muted-foreground">暂无股东户数</div>}
+      </section>
+
+      {/* 5. 龙虎榜 */}
       <section>
         <div className="flex items-center gap-1.5 mb-1.5">
           <span className="font-semibold text-fuchsia-300">龙虎榜</span>
@@ -258,7 +287,7 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
       <div className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">
         資料源：EastMoney{updatedAt ? ` · 更新 ${updatedAt}` : ''}
         {isCnSessionNow() && <span className="text-red-400/70"> · 盤中每 60 秒自動刷新</span>}
-        <br />主力資金=今日盤中即時跳動；龙虎榜/兩融/股东户数為盤後/期間資料，盤中不變動屬正常。
+        <br />主力/主買資金=今日盤中即時跳動；兩融/股东户数/龙虎榜為盤後/期間資料，盤中不變動屬正常。
       </div>
     </div>
   );

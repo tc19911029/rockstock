@@ -167,6 +167,43 @@ export async function fetchTodayCapitalFlow(symbol: string): Promise<CapitalFlow
   return null;
 }
 
+/** 今日主買/主賣毛額（主力流入/流出，非淨額）— 回答「主買資金」 */
+export interface MainBuySell {
+  mainIn:  number;        // 主力流入（主買，毛額）f135
+  mainOut: number;        // 主力流出（主賣，毛額）f136
+  mainNet: number;        // 主力淨額 f137（= mainIn − mainOut）
+  netPct:  number | null; // 主力淨佔比 % f184
+}
+
+/**
+ * 今日盤中主力「買/賣」毛額（push2 即時 quote f135/f136/f137/f184）。
+ * 「主買資金」= 主力流入毛額（買盤實際投入），跟「主力淨流入」（買−賣）不同。
+ * 同 http + host failover。抓不到回 null。
+ */
+export async function fetchTodayMainBuySell(symbol: string): Promise<MainBuySell | null> {
+  const secid = toSecid(symbol);
+  const qs = `?secid=${secid}&fields=f135,f136,f137,f184`;
+  for (const host of FFLOW_RT_HOSTS) {
+    try {
+      const res = await fetch(`http://${host}/api/qt/stock/get${qs}`, {
+        signal: AbortSignal.timeout(6_000),
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'http://quote.eastmoney.com/' },
+      });
+      if (!res.ok) continue;
+      const json = await res.json() as { data?: Record<string, number | null> | null };
+      const d = json.data;
+      if (!d || d.f135 == null || d.f136 == null) continue;
+      return {
+        mainIn:  Number(d.f135) || 0,
+        mainOut: Number(d.f136) || 0,
+        mainNet: Number(d.f137) || 0,
+        netPct:  d.f184 != null ? Number(d.f184) : null,
+      };
+    } catch { /* 下一個 host */ }
+  }
+  return null;
+}
+
 /**
  * 抓單股近 N 天資金流（日K）
  * 優先 EastMoney，失敗或空時 fallback Sina
