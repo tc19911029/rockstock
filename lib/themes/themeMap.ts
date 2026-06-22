@@ -308,10 +308,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   '蘋果供應鏈': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
-    { code: '2308', name: '台達電' },
     { code: '2392', name: '正崴' },
     { code: '2317', name: '鴻海' }, { code: '3008', name: '大立光' },
-    { code: '2354', name: '鴻準' }, { code: '2474', name: '可成' },
     { code: '4958', name: '臻鼎-KY' }, { code: '4938', name: '和碩' },
     { code: '2382', name: '廣達' }, { code: '6269', name: '台郡' },
     { code: '2330', name: '台積電' },
@@ -319,14 +317,10 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3406', name: '玉晶光' }, { code: '2439', name: '美律' },
     { code: '4915', name: '致伸' },
   ],
+  // 真靠中國市場零售/內需收成（2026-06-22 稽核：移除基建/出口/代工/已脫手的台泥/寶成/巨大/潤泰全/潤泰新）
   '中國政策受惠': [
-    // 2026-06-22 稽核補（分身研究+master 驗證）
-    { code: '1227', name: '佳格' },
-    { code: '1216', name: '統一' }, { code: '2912', name: '統一超' },
-    { code: '9904', name: '寶成' }, { code: '1101', name: '台泥' },
-    { code: '9921', name: '巨大' }, { code: '1210', name: '大成' },
-    // 2026-06-20 補：中國零售收成（高鑫/大潤發）
-    { code: '2915', name: '潤泰全' }, { code: '9945', name: '潤泰新' },
+    { code: '1216', name: '統一' }, { code: '1227', name: '佳格' },
+    { code: '2912', name: '統一超' }, { code: '1210', name: '大成' },
   ],
   // 2026-06-20 新增：綠能/發電（太陽能 + 風電 + 儲能 + 綠電售電 + 電纜）
   '綠能': [
