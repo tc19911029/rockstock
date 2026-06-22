@@ -70,3 +70,19 @@
   代表「這週法人在累積哪個題材」。2026-06-19 從今日漲幅改成資金流入、06-20 改看 5 日累計。
 - **bug**：檔頭(line 9) + rankNow 欄位(line 26) 註解還寫「依 avgD5 排」→ 誤導。已修正（commit 52f9d56）。
 - **附帶澄清**：snapshot 檔預設 avgD5 排序、UI FixedView 預設 'd5'，但點「排名」欄走 rankNow(法人5日)。
+
+---
+
+## 2026-06-22 第三輪：cron 實際產出新鮮度 + 殘留壞 import
+
+### I-8 ✅ 非問題 — theme-sanse/hot「殘留 import」是虛驚
+- `app/api/theme-sanse/hot/route.ts` import `lib/theme-sanse/{hotThemes,codeThemes,types}` — 這三檔**都還在**
+  （cn-agents/題材三色刪除只刪部分；TW theme-sanse 刻意保留）。route 回 400=缺參數、可跑，非壞 route。
+
+### I-9 ✅ 資料「停滯」多為預期（非 cron 故障）
+- 法人 06-18 = 端午放假（I-1 已釐清）；題材排名/健康快照 06-22 fresh ✓（sector-strength cron 修生效）。
+- 券商報告 06-16、估值 06-10 = **skill 手動產出**（broker-analysis / valuation skill，非 cron），屬正常非停滯。
+
+### I-10 🟡 待查 — scan-fundamental-revaluation-tw cron 無 log
+- plist 排平日 19:35，但 `/tmp/rockstock-scan-fundamental-revaluation-tw*.log` **找不到** → 可能 log 路徑不同 or 沒真的跑。
+- **下一輪深挖**：確認該 cron 是否真有產出 `data/strategies/fundamental-revaluation/TW/`。
