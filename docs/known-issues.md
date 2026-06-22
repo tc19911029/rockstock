@@ -9,10 +9,12 @@
 
 掃 `launchctl list | grep rockstock` 的最後 exit code，4 個 job 上次失敗：
 
-### I-1 🟡 tw-institutional cron 失敗（exit 22 = HTTP ≥400）
-- **證據**：`launchctl list` 顯示 `com.rockstock.tw-institutional exit=22`；`/tmp/*institutional*` **連 log 都沒有**（job 可能沒寫 log、或 label/路徑對不上）。
-- **影響**：三大法人買賣超資料抓取失敗 → 籌碼面分析、題材盤後排行「法人」欄、紅旗避雷可能用到舊資料。
-- **待辦**：找出 tw-institutional plist 實際跑什麼指令、為何 HTTP 400（端點改版？被擋？）、補 log。**下一輪深挖**。
+### I-1 🔴 法人資料 stale 在 06-18 — fetch-institutional route 一直回 500（已深挖）
+- **真因**：cron 15:45 平日 curl `http://localhost:3000/api/cron/fetch-institutional`（log 在 `tw-inst.log` 非 `tw-institutional`，所以一開始找不到）；route 從 06-22 起回 **HTTP 500，body `{"error":"fetch failed"}`** = 抓上游（TWSE/TPEx 三大法人端點）Node fetch 網路失敗。06-19 還正常（寫到 06-18 共 14607 筆），之後就壞。
+- **資料證據**：`data/institutional/` 最新只到 **TW-2026-06-18.json**（今天 06-22）= stale 4 天。
+- **影響**：籌碼面分析、題材盤後排行「法人」欄、紅旗避雷（法人連賣）全部在用舊法人資料。
+- **根因假設**：使用者人在中國，台灣站（TWSE/TPEx）直連被 TLS reset（同 push2his 老問題）。若 fetch-institutional 沒走 `curlFetch` 的代理 fallback、用裸 Node fetch → 必掛。
+- **待辦**：(1) 查 fetch-institutional route + provider 用的是裸 fetch 還是 curlFetch；(2) 確認 TWSE/TPEx 法人端點是否該加進 Verge DIRECT 或走代理 fallback；(3) 補回 06-19~06-22 法人資料。
 
 ### I-2 🟡 youtube-transcript 逾時（exit 28 = curl 30 分逾時）
 - **證據**：`rockstock-youtube-transcript.err.log`：`curl: (28) Operation timed out after 1800076 ms`；但 .log 顯示部分影片有成功轉錄。
