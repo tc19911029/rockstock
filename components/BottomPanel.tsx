@@ -469,6 +469,9 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
   const dailyPnL = dayPnL(h.shares, cur, price?.changePercent ?? 0);
   // 陸股股價一律顯示小數點兩位；台股維持 ≥100 取整、<100 兩位
   const isCN = classifyMarket(h.symbol) === 'CN';
+  // 本金（成本）= 股數 × 均價；現值（市值）= 股數 × 現價（shares 為股、價為每股，直接相乘）
+  const costTotal = h.shares * h.costPrice;
+  const marketTotal = cur > 0 ? h.shares * cur : 0;
 
   return (
     <div>
@@ -519,6 +522,18 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
                 <span className="font-normal ml-1">({formatPercent(pnlPct, 1)})</span>
               </span>
             ) : <span className="ml-1 text-muted-foreground">—</span>}
+          </span>
+        </div>
+
+        {/* Row 3: 本金 ── 現值 */}
+        <div className="flex items-baseline justify-between mt-0.5">
+          <span className="text-[9px] text-muted-foreground">
+            本金 <span className="ml-0.5 font-mono text-foreground/75">{formatMoney(costTotal)}</span>
+          </span>
+          <span className="text-[9px] text-muted-foreground">
+            現值 {cur > 0
+              ? <span className="ml-0.5 font-mono text-foreground/75">{formatMoney(marketTotal)}</span>
+              : <span className="ml-0.5 text-muted-foreground">—</span>}
           </span>
         </div>
       </button>
