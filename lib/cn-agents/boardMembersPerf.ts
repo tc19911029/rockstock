@@ -16,8 +16,11 @@
 
 import { fetchBoardMembers } from './datasource/emBoards';
 import { fetchTencentDailyBars } from './datasource/emDailyKlines';
-import { PERF_PERIODS } from '@/lib/themes/perfPeriods';
+import { fetchCapitalFlow, type CapitalFlowDay } from '@/lib/datasource/EastMoneyCapitalFlow';
+import { fetchCnMarginHistory, type CnMarginDay } from './datasource/emMarginBalance';
+import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
 import { shiftDateYmd } from '@/lib/dateDefaults';
+import { evaluateStockSignal, type StockSignal } from '@/lib/analysis/stockSignal';
 
 /** 一檔成分股的當日狀態 + 1~10/20 日滾動報酬（rets 對齊 PERF_PERIODS） */
 export interface CnMemberPerf {
@@ -27,8 +30,16 @@ export interface CnMemberPerf {
   /** 當日漲跌幅 %（EM clist f3，即時） */
   changePercent: number;
   turnoverCny: number | null;
+  /** 主力淨流入（元，EM f62 當日；A股「法人」對應—東財大單推估） */
+  mainNetCny: number | null;
+  /** 主力淨流入 N 日累計（元；EM 資金流日K 主力大+超大單），index 對齊 INST_PERIODS（缺 → null） */
+  mainFlow: (number | null)[];
+  /** 兩融（融資融券）餘額 N 日變化（元），index 對齊 INST_PERIODS（缺 → null） */
+  marginChg: (number | null)[];
   /** 過去 N 日滾動報酬 %，index 對齊 PERF_PERIODS（缺資料 → null） */
   rets: (number | null)[];
+  /** 六大進場條件 + 趨勢（朱老師書本同一支判讀，純顯示；K 線不足 → null） */
+  signal?: StockSignal | null;
 }
 
 export interface CnBoardMembersFile {
@@ -44,8 +55,8 @@ export interface CnBoardMembersFile {
 /** 成分股太多 → 只取成交額前 N 檔算 K 線（UI 標示「顯示前 N 檔」） */
 const MAX_MEMBERS = 40;
 const CONCURRENCY = 8;
-/** 抓 K 線往前的日曆天數（要蓋住 20 個交易日 + 假日緩衝） */
-const KLINE_LOOKBACK_DAYS = 45;
+/** 抓 K 線往前的日曆天數（要蓋住六條件 MA60 + 結構轉折 ~100 交易日；報酬只用近 20 根不受影響） */
+const KLINE_LOOKBACK_DAYS = 160;
 
 const stripDashes = (ymd: string) => ymd.replace(/-/g, '');
 
@@ -68,6 +79,34 @@ function computeRets(bars: { date: string; close: number }[], date: string): (nu
     const prev = bars[j].close;
     if (!(prev > 0)) return null;
     return +((anchorClose / prev - 1) * 100).toFixed(2);
+  });
+}
+
+/** 主力淨流入 N 日累計（元）：anchor = 最後一筆 date<=目標日，sum 近 n 筆（含 anchor）。對齊 INST_PERIODS。 */
+function flowSums(flow: CapitalFlowDay[], date: string): (number | null)[] {
+  const asc = [...flow].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  let ai = -1;
+  for (let i = 0; i < asc.length; i++) { if (asc[i].date <= date) ai = i; else break; }
+  if (ai < 0) return INST_PERIODS.map(() => null);
+  return INST_PERIODS.map((n) => {
+    const start = ai - n + 1;
+    if (start < 0) return null;
+    let s = 0;
+    for (let i = start; i <= ai; i++) s += asc[i].mainNet;
+    return Math.round(s);
+  });
+}
+
+/** 兩融餘額 N 日變化（元）：anchor 餘額 − n 筆前餘額（margin 已升冪）。對齊 INST_PERIODS。 */
+function marginChgs(margin: CnMarginDay[], date: string): (number | null)[] {
+  let ai = -1;
+  for (let i = 0; i < margin.length; i++) { if (margin[i].date <= date) ai = i; else break; }
+  if (ai < 0) return INST_PERIODS.map(() => null);
+  const anchor = margin[ai].rzrqYe;
+  return INST_PERIODS.map((n) => {
+    const j = ai - n;
+    if (j < 0) return null;
+    return Math.round(anchor - margin[j].rzrqYe);
   });
 }
 
@@ -106,20 +145,22 @@ export async function buildBoardMembersPerf(boardCode: string, date: string): Pr
   const endYmd8 = stripDashes(date);
 
   const perf = await mapPool(top, CONCURRENCY, async (m): Promise<CnMemberPerf> => {
-    let rets: (number | null)[];
-    try {
-      const bars = await fetchTencentDailyBars(m.symbol, begYmd8, endYmd8);
-      rets = computeRets(bars, date);
-    } catch {
-      rets = PERF_PERIODS.map(() => null);
-    }
+    // 三路並行：日K（漲幅）＋資金流（主力）＋兩融餘額。任一失敗只讓該欄空，不壞整檔。
+    const [bars, flow, margin] = await Promise.all([
+      fetchTencentDailyBars(m.symbol, begYmd8, endYmd8).catch(() => null),
+      fetchCapitalFlow(m.symbol, 40).catch(() => [] as CapitalFlowDay[]),
+      fetchCnMarginHistory(m.code, 40).catch(() => [] as CnMarginDay[]),
+    ]);
     return {
       code: m.code,
       name: m.name,
       symbol: m.symbol,
       changePercent: m.pct,
       turnoverCny: m.turnoverCny,
-      rets,
+      mainNetCny: m.mainNetCny,
+      mainFlow: flowSums(flow ?? [], date),
+      marginChg: marginChgs(margin ?? [], date),
+      rets: bars ? computeRets(bars, date) : PERF_PERIODS.map(() => null),
     };
   });
 

@@ -14,8 +14,19 @@
  * rotation / stage 兩個 pure 函式有單元測試（__tests__/cn-board-ranking.test.ts）守。
  */
 
+import path from 'path';
+import { promises as fs } from 'fs';
 import type { BoardEntry } from './types';
 import { readBoardsDay, listBoardsDates } from './storage';
+import { INST_PERIODS } from '@/lib/themes/perfPeriods';
+
+/** 板塊卡片日視窗（對齊個股卡 CN_RET_COLS = INST_PERIODS [1,2,3,4,5,10,20]） */
+const BOARD_WIN = INST_PERIODS as readonly number[];
+/** 板塊衍生視窗：漲幅（複利串接每日 pct）＋主力（累加每日 mainNetCny），index 對齊 BOARD_WIN。 */
+export interface CnBoardWindows {
+  rets: (number | null)[];
+  mainFlow: (number | null)[];
+}
 
 export type CnBoardStage = '剛啟動' | '主升段' | '高潮噴出' | '退潮' | '盤整';
 
@@ -34,6 +45,10 @@ export interface CnBoardRotation {
 export interface CnRankedBoard extends BoardEntry {
   rotation: CnBoardRotation | null;
   stage: CnBoardStage;
+  /** 漲幅 N 日（複利串接每日 pct），index 對齊 BOARD_WIN；歷史不足 → null */
+  rets?: (number | null)[];
+  /** 主力 N 日累計（累加每日 mainNetCny，元），index 對齊 BOARD_WIN；歷史不足 → null */
+  mainFlow?: (number | null)[];
 }
 
 export interface CnBoardRankingFile {
@@ -48,6 +63,54 @@ export interface CnBoardRankingFile {
 const RANK_DELTA_TH = 3;
 /** 輪動比較跨幾個交易日（取 listBoardsDates 的索引回退量）。2026-06-19 改日線＝1（昨天）。 */
 const ROTATION_LOOKBACK = 1;
+
+/**
+ * 風格/大盤/寬基指數「非題材」板塊濾除 — 2026-06-20（2026-06-22 從紀錄復原）
+ *
+ * 東財 m:90+t:3 把「風格板塊（科技風格…）、市值規模（大盤股/中盤股…）、寬基指數成份
+ * （HS300/MSCI/富時羅素/深成500/創業板綜…）、資金通道（融資融券/滬股通/深股通）、
+ * 估值規模分組（破淨股/百元股/茅指數…）」全塞進「概念」。這些是「一籃子股票的大指數」，
+ * 不是像「先進封裝/CPO」那種可操作題材；東財 App 的概念排行不顯示它們。
+ * /cn-sectors 概念排行用本濾除對齊 App（顯示層，鐵則 #5，不參與選股）。
+ *
+ * 判定 = 不規則命名走代碼黑名單 ∪ 命名穩定者（風格/大中小盤）走名稱規則。
+ * 刻意保留東財也當概念的行為型板塊（次新股、ST股、昨日漲停/高振幅…）。
+ */
+const META_BOARD_CODES = new Set<string>([
+  'BK0596', // 融资融券
+  'BK0707', // 沪股通
+  'BK0804', // 深股通
+  'BK0821', // MSCI中国
+  'BK0867', // 富时罗素
+  'BK0879', // 标准普尔
+  'BK0500', // HS300_
+  'BK0568', // 深成500
+  'BK0638', // 创业成份
+  'BK0742', // 创业板综
+  'BK0683', // 央国企改革
+  'BK0999', // 茅指数
+  'BK1000', // 宁组合
+  'BK1112', // 破净股
+  'BK1635', // 长期破净
+  'BK1636', // 红利破净股
+  'BK1059', // 百元股
+]);
+
+/** 風格板塊（科技/消費/金融地产/先进制造/医药医疗 风格）＋ 市值規模（大中小盘×成长/价值/股）。命名穩定 → 規則抓，順帶接住未來同型新增。 */
+const META_NAME_RE = /风格$|^(大盘|中盘|小盘)(成长|价值|股)$/;
+
+/** 是否為「非題材」的風格/大盤/寬基指數板塊（→ 概念排行不顯示）。 */
+export function isMetaStyleBoard(b: Pick<BoardEntry, 'code' | 'name'>): boolean {
+  return META_BOARD_CODES.has(b.code) || (b.name != null && META_NAME_RE.test(b.name));
+}
+
+/** 濾掉風格/大盤/寬基指數，只留真題材；並依今日漲幅重排回填 rank（顯示用名次）。 */
+export function filterRealConcepts(boards: BoardEntry[]): BoardEntry[] {
+  return boards
+    .filter((b) => !isMetaStyleBoard(b))
+    .sort((a, b) => (b.pct ?? -Infinity) - (a.pct ?? -Infinity))
+    .map((b, i) => ({ ...b, rank: i + 1 }));
+}
 
 /**
  * 板塊階段 heuristic（顯示用，非回測）。優先序由「最該標出的狀態」往下：
@@ -106,12 +169,80 @@ export function computeBoardRotation(
   return out;
 }
 
-/** 把一組板塊加掛 rotation + stage（rotation 來自 computeBoardRotation 的 map）。 */
-function enrich(boards: BoardEntry[], rot: Map<string, CnBoardRotation>): CnRankedBoard[] {
+type DaySeriesPt = { pct: number; mainNet: number | null };
+
+/** 由一段升冪日序列算 BOARD_WIN 視窗（漲幅複利串接、主力累加）。 */
+function windowsFromSeries(arr: DaySeriesPt[]): CnBoardWindows {
+  const rets = BOARD_WIN.map((n) => {
+    if (arr.length < n) return null;
+    const last = arr.slice(arr.length - n);
+    let f = 1;
+    for (const x of last) f *= 1 + x.pct / 100;
+    return +((f - 1) * 100).toFixed(1);
+  });
+  const mainFlow = BOARD_WIN.map((n) => {
+    if (arr.length < n) return null;
+    const last = arr.slice(arr.length - n);
+    let s = 0; let any = false;
+    for (const x of last) { if (x.mainNet != null) { s += x.mainNet; any = true; } }
+    return any ? Math.round(s) : null;
+  });
+  return { rets, mainFlow };
+}
+
+/**
+ * 算每個板塊的「漲幅 N 日（複利串接每日 pct）＋主力 N 日（累加 mainNetCny）」。
+ * 板塊是 EM 指數（每日 pct = 當日漲跌幅），串接即得 N 日累積報酬。
+ * 資料來源 merge：board-history.json（回補的東財歷史 K，補 10/20 日）＋ 我們每天的板塊快照（最近、權威）；
+ * 同日以快照為準。板塊層沒有「兩融」（兩融是個股欄位、無板塊合計源）→ 板塊卡只有漲幅／主力兩排。
+ */
+function computeBoardWindows(
+  dated: { date: string; boards: BoardEntry[] | null }[],
+  history: Record<string, { date: string; pct: number; mainNet: number | null }[]>,
+): Map<string, CnBoardWindows> {
+  // 每日 code→{pct,mainNet} map（快照，權威），避免 O(板塊²)
+  const dayMaps = dated.map((d) => ({
+    date: d.date,
+    map: new Map((d.boards ?? []).map((b) => [b.code, { pct: b.pct ?? 0, mainNet: b.mainNetCny }] as const)),
+  }));
+  const codes = new Set<string>();
+  for (const dm of dayMaps) for (const c of dm.map.keys()) codes.add(c);
+  for (const c of Object.keys(history)) codes.add(c);
+
+  const out = new Map<string, CnBoardWindows>();
+  for (const code of codes) {
+    const byDate = new Map<string, DaySeriesPt>();
+    for (const h of history[code] ?? []) byDate.set(h.date, { pct: h.pct, mainNet: h.mainNet }); // 先放回補歷史
+    for (const dm of dayMaps) { const b = dm.map.get(code); if (b) byDate.set(dm.date, b); }      // 快照覆蓋同日
+    const arr = [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map((e) => e[1]);
+    out.set(code, windowsFromSeries(arr));
+  }
+  return out;
+}
+
+/** 讀回補的板塊歷史（board-history.json）；無檔 → 空（板塊卡 10/20 日就空白，靠快照慢慢長）。 */
+async function loadBoardHistory(): Promise<Record<string, { date: string; pct: number; mainNet: number | null }[]>> {
+  try {
+    const p = path.join(process.cwd(), 'data/cn-agents/board-history.json');
+    const j = JSON.parse(await fs.readFile(p, 'utf8')) as { boards?: Record<string, { date: string; pct: number; mainNet: number | null }[]> };
+    return j.boards ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** 把一組板塊加掛 rotation + stage + 視窗（漲幅/主力）。 */
+function enrich(
+  boards: BoardEntry[],
+  rot: Map<string, CnBoardRotation>,
+  win: Map<string, CnBoardWindows>,
+): CnRankedBoard[] {
   return boards.map((b) => ({
     ...b,
     rotation: rot.get(b.code) ?? null,
     stage: classifyBoardStage(b),
+    rets: win.get(b.code)?.rets,
+    mainFlow: win.get(b.code)?.mainFlow,
   }));
 }
 
@@ -129,15 +260,29 @@ export async function buildCnBoardRanking(date: string): Promise<CnBoardRankingF
   if (idx > 0) priorDate = dates[Math.max(0, idx - ROTATION_LOOKBACK)];
   const prior = priorDate && priorDate !== date ? await readBoardsDay(priorDate) : null;
 
-  const conceptRot = computeBoardRotation(today.concepts, prior?.concepts ?? null);
+  // 概念排行濾掉風格/大盤/寬基指數大指數（對齊東財 App），industries 是真行業不動
+  const todayConcepts = filterRealConcepts(today.concepts);
+  const priorConcepts = prior?.concepts ? filterRealConcepts(prior.concepts) : null;
+
+  const conceptRot = computeBoardRotation(todayConcepts, priorConcepts);
   const industryRot = computeBoardRotation(today.industries, prior?.industries ?? null);
+
+  // 漲幅/主力視窗：merge 回補歷史（board-history.json）+ 近 20 交易日板塊快照（升冪，快照同日為準）
+  const history = await loadBoardHistory();
+  const winStart = idx >= 0 ? Math.max(0, idx - 20) : 0;
+  const winDates = idx >= 0 ? dates.slice(winStart, idx + 1) : [date];
+  const winFiles = await Promise.all(winDates.map((d) => (d === date ? Promise.resolve(today) : readBoardsDay(d))));
+  const conceptDated = winDates.map((d, i) => ({ date: d, boards: winFiles[i]?.concepts ?? null }));
+  const industryDated = winDates.map((d, i) => ({ date: d, boards: winFiles[i]?.industries ?? null }));
+  const conceptWin = computeBoardWindows(conceptDated, history);
+  const industryWin = computeBoardWindows(industryDated, history);
 
   return {
     date,
     priorDate: prior ? priorDate : null,
     generatedAt: new Date().toISOString(),
-    concepts: enrich(today.concepts, conceptRot),
-    industries: enrich(today.industries, industryRot),
+    concepts: enrich(todayConcepts, conceptRot, conceptWin),
+    industries: enrich(today.industries, industryRot, industryWin),
   };
 }
 

@@ -199,6 +199,8 @@ export interface BoardMember {
   pct: number;
   /** 成交額（元） */
   turnoverCny: number | null;
+  /** 主力淨流入（元，EM f62；A股「法人」對應指標—東財大單推估） */
+  mainNetCny: number | null;
 }
 
 /**
@@ -230,7 +232,7 @@ export async function fetchBoardMembers(boardCode: string): Promise<BoardMember[
       '/api/qt/clist/get'
       + `?pn=${pn}&pz=${PAGE_SIZE}&po=1&np=1&fltt=2&invt=2&fid=f3`
       + `&fs=b:${boardCode}`
-      + '&fields=f12,f14,f3,f6';
+      + '&fields=f12,f14,f3,f6,f62';
     const data = await fetchPageWithRetry(urlPath);
     const diff = data?.data?.diff;
     if (!Array.isArray(diff) || diff.length === 0) {
@@ -245,7 +247,7 @@ export async function fetchBoardMembers(boardCode: string): Promise<BoardMember[
       const symbol = memberCodeToSymbol(code);
       if (!symbol) continue; // 北交所跳過
       seen.add(code);
-      out.push({ code, name, symbol, pct: toNum(row.f3) ?? 0, turnoverCny: toNum(row.f6) });
+      out.push({ code, name, symbol, pct: toNum(row.f3) ?? 0, turnoverCny: toNum(row.f6), mainNetCny: toNum(row.f62) });
     }
     if (diff.length < PAGE_SIZE) break;
   }
