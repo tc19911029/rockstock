@@ -59,21 +59,30 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
   useEffect(() => {
     let alive = true;
     setLoading(true); setErr(null); setData(null);
-    const load = (silent: boolean) => {
-      if (!silent && alive) setLoading(true);
-      fetch(`/api/cn/chips/${code}`, { signal: AbortSignal.timeout(8000) })
-        .then((r) => r.json())
-        .then((j: Resp) => {
+    const stamp = () => setUpdatedAt(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }));
+    // 15s timeout：route 抓 6 個東財來源(股東/龍虎/資金流/今日資金流/主買賣/兩融)+host failover，偶爾需更久。
+    const fetchOnce = () => fetch(`/api/cn/chips/${code}`, { signal: AbortSignal.timeout(15000) }).then((r) => r.json() as Promise<Resp>);
+    // 首抓含退避重試：東財偶爾瞬慢/瞬斷，8s 太緊、收盤後又不輪詢 → 曾永久卡「載入失敗」(2026-06-22 修)。
+    (async () => {
+      for (let i = 0; i < 3; i++) {
+        try {
+          const j = await fetchOnce();
           if (!alive) return;
-          if (j.error) { if (!silent) setErr(j.error); return; }
-          setData(j); setErr(null);
-          setUpdatedAt(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }));
-        })
-        .catch(() => { if (alive && !silent) setErr('讀取失敗'); })
-        .finally(() => { if (alive && !silent) setLoading(false); });
-    };
-    load(false);
-    const timer = setInterval(() => { if (alive && isCnSessionNow()) load(true); }, 60_000);
+          if (j.error) throw new Error(j.error);
+          setData(j); setErr(null); stamp(); setLoading(false);
+          return;
+        } catch {
+          if (!alive) return;
+          if (i < 2) { await new Promise((r) => setTimeout(r, 800 * (i + 1))); continue; }
+          setErr('讀取失敗（已重試 3 次，東財暫時無回應）'); setLoading(false);
+        }
+      }
+    })();
+    // 盤中每 60s 靜默刷新（收盤後停；失敗不洗掉已顯示資料）
+    const timer = setInterval(() => {
+      if (!alive || !isCnSessionNow()) return;
+      fetchOnce().then((j) => { if (alive && !j.error) { setData(j); stamp(); } }).catch(() => {});
+    }, 60_000);
     return () => { alive = false; clearInterval(timer); };
   }, [code]);
 
