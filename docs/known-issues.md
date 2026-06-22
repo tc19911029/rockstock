@@ -116,3 +116,19 @@
   **收盤後**若首抓遇東財瞬慢/冷啟動(route 抓 6 個東財來源+host failover、首次編譯)超過 8s →
   失敗後永遠不重試，直到手動刷新。後端端點本身正常(實測 1.6s)。
 - **修法**：首抓改 **3 次退避重試**(800/1600ms) + timeout **8s→15s**；盤中靜默刷新失敗不洗掉已顯示資料。
+
+---
+
+## 2026-06-22 第六輪：使用者回報 — 台股籌碼面板「常下載不出來」(/api/chip 卡 60s)
+
+### I-13 ✅ FIXED — /api/chip 從中國卡 60s+ → 9s（重大）
+- **症狀**：台股籌碼面板永遠「載入籌碼資料中…」最後失敗。後端 `/api/chip` 端點 **hang >60s**(2330/6488 都是)。
+- **根因**：route 抓一整排台灣/FinMind 來源，**多個用裸 fetch/長 timeout**，在中國線路直連 hang。
+  計時定位：allSettled 裡某來源(Yahoo 主力分點多頁/SBL fallback)hang 滿才回 → 拖垮整個 route。
+- **修法（多管）**：
+  1. `TwseT86Provider` 裸 fetch 30s → curlFetch 6s + 失敗回空(graceful)。
+  2. `FinmindChipExtras` / `FinMindClient` 裸 fetch 15s → 6s。
+  3. `curlFetch` 直連嘗試加 **5s 上限**（台站直連 hang 快退代理；代理 ~1s 通）。
+  4. `/api/chip` margin 三源 **串行 fallback → 並行取最快**；allSettled **每源包 8s 上限**(超時當 null 優雅降級)；加 **10 分鐘回應快取**。
+- **結果**：冷載入 **60s+ → 8.5s**，再看(快取) **0.008s**。配合前端 I-12 重試 → 面板穩定載入。
+- **教訓**：第二輪「裸-fetch 掃描乾淨」**漏判**——當時只用 twse.com 關鍵字掃，但這些是打 **FinMind**(api.finmindtrade.com)，所以漏。掃描關鍵字要含所有上游 host。

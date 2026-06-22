@@ -326,6 +326,10 @@ import { getCostBasisBundle, toCostBasisSummary } from '@/lib/chipcost/aggregate
 import type { CostBasisSummary } from '@/lib/chipcost/types';
 import { computeInstDerived } from '@/lib/chips/instDerived';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { globalCache } from '@/lib/datasource/MemoryCache';
+
+// 籌碼回應快取：中國線路抓多個台站來源慢，成功一次後 10 分鐘內(prewarm/重複載入/集中度切窗)秒回。
+const CHIP_CACHE_TTL = 10 * 60 * 1000;
 
 /** 讀本地 L1 日K，取指定日的成交量（張）；上市 .TW → 上櫃 .TWO fallback；缺 → null */
 async function loadVolumeLotsOnDate(code: string, date: string): Promise<number | null> {
@@ -408,6 +412,10 @@ export async function GET(req: NextRequest) {
 
   const date = await findLatestTradingDate(rawDate);
 
+  const cacheKey = `chip:${code}:${date}`;
+  const cached = globalCache.get<ChipData>(cacheKey);
+  if (cached) return apiOk(cached);
+
   try {
     // ── 1) 法人：先讀 L1，缺則 FinMind 補抓 ──
     let instFile = await readInstStock(code);
@@ -436,27 +444,37 @@ export async function GET(req: NextRequest) {
     // ── 2) 大戶持股 TDCC L1 + 3) 融資融券、當沖、借券、4) 已發行股數（FinMind 並行）──
     // 用 allSettled：任何單一資料源失敗不應打掉整個籌碼面板（書本實務以外資+融資為主，借券/股本缺值可接受）
     // 融資融券：TWSE（上市）→ TPEX（上櫃）→ FinMind 最後 fallback；全部免費無 quota
+    // 中國線路每個台站直連都慢/hang → 三源「並行取最快有效」（原本串行 fallback：TWSE hang→TPEx hang→FinMind，
+    // 時間是三者相加，是 /api/chip 卡 40-60s 的主因之一）。優先序仍 TWSE > TPEx > FinMind。2026-06-22 修。
     const marginPromise = (async () => {
-      const tw = await fetchTwseMarginForStock(code, date).catch(() => null);
-      if (tw) return { marginBalance: tw.marginBalance, marginNet: tw.marginNet, shortBalance: tw.shortBalance, shortNet: tw.shortNet, marginUtilRate: tw.marginUtilRate };
-      const tpex = await fetchTpexMarginForStock(code, date).catch(() => null);
-      if (tpex) return { marginBalance: tpex.marginBalance, marginNet: tpex.marginNet, shortBalance: tpex.shortBalance, shortNet: tpex.shortNet, marginUtilRate: tpex.marginUtilRate };
-      return fetchMarginForStock(code, date);
+      const norm = (x: { marginBalance: number; marginNet: number; shortBalance: number; shortNet: number; marginUtilRate: number } | null) =>
+        x ? { marginBalance: x.marginBalance, marginNet: x.marginNet, shortBalance: x.shortBalance, shortNet: x.shortNet, marginUtilRate: x.marginUtilRate } : null;
+      const [tw, tpex, fm] = await Promise.allSettled([
+        fetchTwseMarginForStock(code, date),
+        fetchTpexMarginForStock(code, date),
+        fetchMarginForStock(code, date),
+      ]);
+      const v = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
+      return norm(v(tw)) ?? norm(v(tpex)) ?? v(fm);
     })();
 
+    // 每個來源包 8s 上限：中國線路某些台站來源(Yahoo 主力分點多頁/SBL fallback)會 hang 很久，
+    // 拖垮整個 /api/chip(曾卡 60s 載入失敗)。超時當 null 優雅降級 → 面板照載、缺的欄位顯示「—」。2026-06-22 修。
+    const cap = <T,>(p: Promise<T>, ms = 8000): Promise<T | null> =>
+      Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
     const settled = await Promise.allSettled([
-      readTdccStock(code),
-      marginPromise,
-      fetchDayTradeForStock(code, date),
+      cap(readTdccStock(code)),
+      cap(marginPromise),
+      cap(fetchDayTradeForStock(code, date)),
       // v3: SBL — TWSE（上市）→ TPEX（上櫃）fallback；全免費無 quota
-      fetchTwseSblForStock(code, date).then(r => r ?? fetchTpexSblForStock(code, date)).catch(() => null),
-      getSharesIssued(code),
+      cap(fetchTwseSblForStock(code, date).then(r => r ?? fetchTpexSblForStock(code, date)).catch(() => null)),
+      cap(getSharesIssued(code)),
       // 30 天歷史做趨勢；TWSE 沒有就試 TPEX
-      fetchTwseSblHistory(code, date, 30).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 30)).catch(() => []),
+      cap(fetchTwseSblHistory(code, date, 30).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 30)).catch(() => [])),
       // v3: 主力券商分點（Yahoo 籌碼頁；對齊籌碼K線「主力 -102」）
-      fetchYahooBrokerTrades(code),
+      cap(fetchYahooBrokerTrades(code)),
       // v5: 法人最新資料日的當日成交量（張，本地 L1；衍生欄位占量計算用）
-      instOnDate ? loadVolumeLotsOnDate(code, instOnDate.date) : Promise.resolve(null),
+      cap(instOnDate ? loadVolumeLotsOnDate(code, instOnDate.date) : Promise.resolve(null)),
     ]);
     const pickFulfilled = <T,>(idx: number): T | null => {
       const r = settled[idx];
@@ -722,6 +740,7 @@ export async function GET(req: NextRequest) {
       console.warn('[/api/chip] costBasis 計算失敗:', err instanceof Error ? err.message : err);
     }
 
+    globalCache.set(cacheKey, data, CHIP_CACHE_TTL);
     return apiOk(data);
   } catch (err) {
     console.error('[/api/chip] error:', err);

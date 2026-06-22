@@ -57,7 +57,7 @@ export async function finmindFetch<T>(dataset: string, params: Record<string, st
 
   const doFetch = async (withToken: boolean): Promise<Response> => {
     return fetch(buildUrl(withToken).toString(), {
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(6000),
       headers: { 'Accept': 'application/json' },
       cache: 'no-store',
     });

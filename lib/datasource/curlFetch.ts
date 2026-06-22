@@ -40,7 +40,9 @@ async function execCurlWithProxyFallback(
   // 當成「成功」直接進 JSON.parse 炸掉，代理重試永遠不會觸發（2026-06-12 實測 TPEx openapi）
   baseArgs = ['-f', ...baseArgs];
   try {
-    return await execFileAsync('curl', baseArgs, { encoding: 'utf-8', maxBuffer });
+    // 直連短 timeout 5s（curl 取最後一個 --max-time）：中國線路對台站(TWSE/TPEx/FinMind/Yahoo)直連常
+    // hang 滿 15s 才退代理，多個來源累加 → /api/chip 卡 40-60s。直連 5s 內沒通就快退代理（代理 ~1s 通）。
+    return await execFileAsync('curl', [...baseArgs, '--max-time', '5'], { encoding: 'utf-8', maxBuffer });
   } catch (directErr) {
     const cached = workingProxyCache && Date.now() - workingProxyCache.at < PROXY_CACHE_TTL_MS
       ? workingProxyCache.proxy : null;
@@ -113,7 +115,7 @@ export async function fetchJsonWithCurlFallback<T>(
   if (!isTpex) {
     try {
       const res = await fetch(url, {
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)), // 直連 5s 上限：台站在中國線路 hang，快退 curl→代理
         headers,
         ...(options.method === 'POST' ? { method: 'POST', body: options.body ?? '' } : {}),
       });
@@ -181,7 +183,7 @@ export async function fetchTextWithCurlFallback(
   // ── 1) Node fetch 第一試（內容要過 validate） ────────────────────────
   let lastErr: unknown = null;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers });
+    const res = await fetch(url, { signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)), headers });
     if (res.ok) {
       const text = await res.text();
       if (validate(text)) return { text, source: 'node-fetch' };
@@ -227,7 +229,7 @@ export async function fetchBufferWithCurlFallback(
 
   let lastErr: unknown = null;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers });
+    const res = await fetch(url, { signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)), headers });
     if (res.ok) {
       const buf = new Uint8Array(await res.arrayBuffer());
       return { buffer: buf, source: 'node-fetch' };

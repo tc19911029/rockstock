@@ -16,7 +16,7 @@ async function fmGet<T>(dataset: string, code: string, startDate: string, endDat
   const end = endDate ?? startDate;
   const url = `${FINMIND_API}?dataset=${dataset}&data_id=${encodeURIComponent(code)}&start_date=${startDate}&end_date=${end}&token=${encodeURIComponent(token)}`;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'Accept': 'application/json' } });
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000), headers: { 'Accept': 'application/json' } });
     if (!res.ok) return [];
     const json = await res.json() as { status?: number; data?: T[] };
     if (json.status !== 200) return [];
