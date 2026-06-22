@@ -100,7 +100,7 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '5289', name: '宜鼎' }, { code: '8271', name: '宇瞻' },
     // 2026-06-20 補：DRAM IP / 記憶體模組
     { code: '5351', name: '鈺創' }, { code: '6531', name: '愛普*' },
-    { code: '2451', name: '創見' }, { code: '8277', name: '商丞' },
+    { code: '2451', name: '創見' }, 
   ],
   '被動元件': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
@@ -111,7 +111,6 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3236', name: '千如' }, { code: '2472', name: '立隆電' },
     { code: '6449', name: '鈺邦' },
     // 2026-06-22 補：被動元件二線
-    { code: '8043', name: '蜜望實' },
   ],
   'PCB': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
@@ -209,7 +208,6 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   '重電': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '1608', name: '華榮' },
-    { code: '1611', name: '中電' },
     { code: '1513', name: '中興電' }, { code: '1519', name: '華城' },
     { code: '1503', name: '士電' }, { code: '1504', name: '東元' },
     { code: '1514', name: '亞力' }, { code: '2371', name: '大同' },
@@ -219,7 +217,6 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   '電力': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '1608', name: '華榮' },
-    { code: '1611', name: '中電' },
     { code: '1513', name: '中興電' }, { code: '1519', name: '華城' },
     { code: '1503', name: '士電' }, { code: '1504', name: '東元' },
     { code: '1514', name: '亞力' }, { code: '2371', name: '大同' },
@@ -264,8 +261,7 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   '車用電子': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '2360', name: '致茂' },
-    { code: '4551', name: '智伸科' },
-    { code: '2231', name: '為升' }, { code: '2201', name: '裕隆' },
+    { code: '2231', name: '為升' }, 
     { code: '2308', name: '台達電' }, { code: '8261', name: '富鼎' },
     { code: '6279', name: '胡連' }, { code: '1533', name: '車王電' },
     { code: '2497', name: '怡利電' },
@@ -325,9 +321,6 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   '中國政策受惠': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
-    { code: '1215', name: '卜蜂' },
-    { code: '9907', name: '統一實' },
-    { code: '2911', name: '麗嬰房' },
     { code: '1227', name: '佳格' },
     { code: '1216', name: '統一' }, { code: '2912', name: '統一超' },
     { code: '9904', name: '寶成' }, { code: '1101', name: '台泥' },
@@ -349,7 +342,6 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   // 2026-06-20 新增：伺服器電源/BBU（電源供應器 + 電池備援模組/超級電容）
   '伺服器電源': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
-    { code: '5309', name: '系統電' },
     { code: '2457', name: '飛宏' },
     { code: '2308', name: '台達電' }, { code: '2301', name: '光寶科' },
     { code: '6282', name: '康舒' }, { code: '6412', name: '群電' },
@@ -362,7 +354,7 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   // 2026-06-20 新增：高速連接/銅纜（伺服器 socket + 高速銅纜 + 連接器/線束）
   '高速連接': [
     { code: '3533', name: '嘉澤' }, { code: '6205', name: '詮欣' },
-    { code: '3526', name: '凡甲' }, { code: '3092', name: '鴻碩' },
+    { code: '3526', name: '凡甲' }, 
     { code: '5457', name: '宣德' }, { code: '3023', name: '信邦' },
     { code: '6134', name: '萬旭' }, { code: '3665', name: '貿聯-KY' },
     // 2026-06-20 稽核補：DAC 直連銅纜純度龍頭（移除維熹3501/良維6290＝電源線非高速訊號）
@@ -422,7 +414,6 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   '半導體通路': [
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '3048', name: '益登' },
-    { code: '3055', name: '蔚華科' },
     { code: '3702', name: '大聯大' }, { code: '3036', name: '文曄' },
     { code: '8112', name: '至上' }, { code: '2347', name: '聯強' },
     { code: '3028', name: '增你強' },
@@ -440,7 +431,6 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '4536', name: '拓凱' },
     { code: '6804', name: '明係' },
-    { code: '3162', name: '精確' },
     { code: '9921', name: '巨大' }, { code: '9914', name: '美利達' },
     { code: '5306', name: '桂盟' }, { code: '1517', name: '利奇' },
     { code: '8933', name: '愛地雅' },
