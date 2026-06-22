@@ -39,6 +39,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3693', name: '營邦' }, { code: '3533', name: '嘉澤' },
   ],
   '散熱': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '6805', name: '富世達' },
     { code: '3017', name: '奇鋐' }, { code: '3324', name: '雙鴻' },
     { code: '3653', name: '健策' }, { code: '8996', name: '高力' },
     { code: '2421', name: '建準' }, { code: '6230', name: '尼得科超眾' },
@@ -56,6 +58,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '6643', name: 'M31' },
   ],
   'CPO': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3665', name: '貿聯-KY' },
+    { code: '6715', name: '嘉基' },
     { code: '4977', name: '眾達-KY' }, { code: '3363', name: '上詮' },
     { code: '6442', name: '光聖' }, { code: '3081', name: '聯亞' },
     { code: '4979', name: '華星光' }, { code: '3163', name: '波若威' },
@@ -65,12 +70,19 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3234', name: '光環' }, { code: '4908', name: '前鼎' },
   ],
   '矽光子': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3450', name: '聯鈞' },
+    { code: '3163', name: '波若威' },
+    { code: '4977', name: '眾達-KY' },
     { code: '3363', name: '上詮' }, { code: '3081', name: '聯亞' },
     { code: '6442', name: '光聖' }, { code: '4979', name: '華星光' },
     { code: '6451', name: '訊芯-KY' }, { code: '3105', name: '穩懋' },
     { code: '2455', name: '全新' },
   ],
   '光通訊': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3665', name: '貿聯-KY' },
+    { code: '6715', name: '嘉基' },
     { code: '3081', name: '聯亞' }, { code: '4979', name: '華星光' },
     { code: '3363', name: '上詮' }, { code: '6442', name: '光聖' },
     { code: '3163', name: '波若威' }, { code: '4977', name: '眾達-KY' },
@@ -91,6 +103,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2451', name: '創見' }, { code: '8277', name: '商丞' },
   ],
   '被動元件': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3357', name: '臺慶科' },
     { code: '2327', name: '國巨*' }, { code: '2492', name: '華新科' },
     { code: '3026', name: '禾伸堂' }, { code: '2375', name: '凱美' },
     { code: '6173', name: '信昌電' }, { code: '2478', name: '大毅' },
@@ -100,6 +114,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '8043', name: '蜜望實' },
   ],
   'PCB': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '2316', name: '楠梓電' },
+    { code: '6191', name: '精成科' },
     { code: '3037', name: '欣興' }, { code: '8046', name: '南電' },
     { code: '3189', name: '景碩' }, { code: '6269', name: '台郡' },
     { code: '4958', name: '臻鼎-KY' }, { code: '2368', name: '金像電' },
@@ -113,25 +130,42 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '5439', name: '高技' },
   ],
   'CCL': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '6672', name: '騰輝電子-KY' },
+    { code: '1802', name: '台玻' },
     { code: '2383', name: '台光電' }, { code: '6213', name: '聯茂' },
     { code: '6274', name: '台燿' },
     // 上游原料：銅箔（金居）、玻纖布（富喬）— 壓成銅箔基板的兩大關鍵料
     { code: '8358', name: '金居' }, { code: '1815', name: '富喬' },
   ],
   '先進封裝': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '6515', name: '穎崴' },
+    { code: '6223', name: '旺矽' },
+    { code: '6510', name: '精測' },
     { code: '3711', name: '日月光投控' }, { code: '6239', name: '力成' },
     { code: '6147', name: '頎邦' }, { code: '8150', name: '南茂' },
     { code: '2449', name: '京元電子' },
     // 2026-06-20 補：封測二線（異質整合/打線/導線架）
     { code: '6271', name: '同欣電' }, { code: '2441', name: '超豐' },
     { code: '2369', name: '菱生' },
+    // 2026-06-22 補：記憶體封測/晶圓測試
+    { code: '8131', name: '福懋科' }, { code: '3264', name: '欣銓' },
+    { code: '2329', name: '華泰' }, { code: '6257', name: '矽格' },
   ],
   'CoWoS': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3680', name: '家登' },
+    { code: '6223', name: '旺矽' },
+    { code: '6515', name: '穎崴' },
     { code: '6187', name: '萬潤' }, { code: '3131', name: '弘塑' },
     { code: '3583', name: '辛耘' }, { code: '6196', name: '帆宣' },
     { code: '2467', name: '志聖' }, { code: '5443', name: '均豪' },
   ],
   '半導體設備': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '6223', name: '旺矽' },
+    { code: '6515', name: '穎崴' },
     { code: '6187', name: '萬潤' }, { code: '2467', name: '志聖' },
     { code: '3131', name: '弘塑' }, { code: '3583', name: '辛耘' },
     { code: '5443', name: '均豪' }, { code: '6196', name: '帆宣' },
@@ -145,6 +179,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 玻璃基板 / TGV（玻璃穿孔）先進封裝載板 — 2026 驗證年，Intel 玻璃基板登場帶動台廠
   '玻璃基板': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '1802', name: '台玻' },
     // 載板廠轉玻璃核心載板（欣興＝Intel R&D 夥伴；南電/景碩同步切入）
     { code: '3037', name: '欣興' }, { code: '8046', name: '南電' },
     { code: '3189', name: '景碩' },
@@ -157,6 +193,11 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '1809', name: '中釉' }, { code: '4768', name: '晶呈科技' },
   ],
   '機器人': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '4585', name: '達明' },
+    { code: '7750', name: '新代' },
+    { code: '3023', name: '信邦' },
+    { code: '6188', name: '廣明' },
     { code: '2049', name: '上銀' }, { code: '1590', name: '亞德客-KY' },
     { code: '6215', name: '和椿' }, { code: '4583', name: '台灣精銳' },
     { code: '1536', name: '和大' }, { code: '4540', name: '全球傳動' },
@@ -166,6 +207,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '6125', name: '廣運' }, { code: '8374', name: '羅昇' },
   ],
   '重電': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '1608', name: '華榮' },
+    { code: '1611', name: '中電' },
     { code: '1513', name: '中興電' }, { code: '1519', name: '華城' },
     { code: '1503', name: '士電' }, { code: '1504', name: '東元' },
     { code: '1514', name: '亞力' }, { code: '2371', name: '大同' },
@@ -173,6 +217,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '1605', name: '華新' }, { code: '1609', name: '大亞' },
   ],
   '電力': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '1608', name: '華榮' },
+    { code: '1611', name: '中電' },
     { code: '1513', name: '中興電' }, { code: '1519', name: '華城' },
     { code: '1503', name: '士電' }, { code: '1504', name: '東元' },
     { code: '1514', name: '亞力' }, { code: '2371', name: '大同' },
@@ -180,6 +227,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '1605', name: '華新' }, { code: '1609', name: '大亞' },
   ],
   '軍工': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '2645', name: '長榮航太' },
+    { code: '5222', name: '全訊' },
     { code: '2634', name: '漢翔' }, { code: '8033', name: '雷虎' },
     { code: '3005', name: '神基' }, { code: '6753', name: '龍德造船' },
     { code: '5371', name: '中光電' },
@@ -187,6 +237,11 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2630', name: '亞航' }, { code: '8222', name: '寶一' },
   ],
   '生技': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '6919', name: '康霈*' },
+    { code: '4142', name: '國光生' },
+    { code: '4726', name: '永昕' },
+    { code: '1762', name: '中化生' },
     { code: '6547', name: '高端疫苗' }, { code: '4743', name: '合一' },
     { code: '6446', name: '藥華藥' }, { code: '1760', name: '寶齡富錦' },
     { code: '4147', name: '中裕' }, { code: '6472', name: '保瑞' },
@@ -197,12 +252,19 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '6541', name: '泰福-KY' }, { code: '6576', name: '逸達' },
   ],
   '面板': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '6176', name: '瑞儀' },
+    { code: '5371', name: '中光電' },
+    { code: '6456', name: 'GIS-KY' },
     { code: '2409', name: '友達' }, { code: '3481', name: '群創' },
     { code: '6116', name: '彩晶' }, { code: '8069', name: '元太' },
     // 2026-06-20 補：中小尺寸面板/背光模組
     { code: '8105', name: '凌巨' }, { code: '6120', name: '達運' },
   ],
   '車用電子': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '2360', name: '致茂' },
+    { code: '4551', name: '智伸科' },
     { code: '2231', name: '為升' }, { code: '2201', name: '裕隆' },
     { code: '2308', name: '台達電' }, { code: '8261', name: '富鼎' },
     { code: '6279', name: '胡連' }, { code: '1533', name: '車王電' },
@@ -215,6 +277,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '1521', name: '大億' },
   ],
   '航運': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '2646', name: '星宇航空' },
+    { code: '2636', name: '台驊控股' },
     { code: '2603', name: '長榮' }, { code: '2609', name: '陽明' },
     { code: '2615', name: '萬海' }, { code: '2618', name: '長榮航' },
     { code: '2610', name: '華航' }, { code: '2637', name: '慧洋-KY' },
@@ -234,14 +299,21 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2889', name: '國票金' },
   ],
   '低軌衛星': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '5222', name: '全訊' },
+    { code: '3481', name: '群創' },
+    { code: '3152', name: '璟德' },
     { code: '3491', name: '昇達科' }, { code: '2455', name: '全新' },
-    { code: '4968', name: '立積' }, { code: '2313', name: '華通' },
+    { code: '2313', name: '華通' },
     { code: '6285', name: '啟碁' }, { code: '2314', name: '台揚' },
     { code: '3105', name: '穩懋' },
     // 2026-06-20 補：衛星 RF 模組
     { code: '6271', name: '同欣電' },
   ],
   '蘋果供應鏈': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '2308', name: '台達電' },
+    { code: '2392', name: '正崴' },
     { code: '2317', name: '鴻海' }, { code: '3008', name: '大立光' },
     { code: '2354', name: '鴻準' }, { code: '2474', name: '可成' },
     { code: '4958', name: '臻鼎-KY' }, { code: '4938', name: '和碩' },
@@ -252,6 +324,11 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '4915', name: '致伸' },
   ],
   '中國政策受惠': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '1215', name: '卜蜂' },
+    { code: '9907', name: '統一實' },
+    { code: '2911', name: '麗嬰房' },
+    { code: '1227', name: '佳格' },
     { code: '1216', name: '統一' }, { code: '2912', name: '統一超' },
     { code: '9904', name: '寶成' }, { code: '1101', name: '台泥' },
     { code: '9921', name: '巨大' }, { code: '1210', name: '大成' },
@@ -260,6 +337,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 2026-06-20 新增：綠能/發電（太陽能 + 風電 + 儲能 + 綠電售電 + 電纜）
   '綠能': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3708', name: '上緯投控' },
+    { code: '8926', name: '台汽電' },
     { code: '6806', name: '森崴能源' }, { code: '6869', name: '雲豹能源' },
     { code: '6873', name: '泓德能源' }, { code: '6443', name: '元晶' },
     { code: '3576', name: '聯合再生' }, { code: '6477', name: '安集' },
@@ -268,6 +348,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 2026-06-20 新增：伺服器電源/BBU（電源供應器 + 電池備援模組/超級電容）
   '伺服器電源': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '5309', name: '系統電' },
+    { code: '2457', name: '飛宏' },
     { code: '2308', name: '台達電' }, { code: '2301', name: '光寶科' },
     { code: '6282', name: '康舒' }, { code: '6412', name: '群電' },
     { code: '3015', name: '全漢' }, { code: '6781', name: 'AES-KY' },
@@ -293,6 +376,13 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 2026-06-22 新增：IC設計（標準產品 IC 設計廠 — SoC/連網/類比電源/IO 控制；ASIC 服務廠另列）
   'IC設計': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '4919', name: '新唐' },
+    { code: '3227', name: '原相' },
+    { code: '6202', name: '盛群' },
+    { code: '6138', name: '茂達' },
+    { code: '8081', name: '致新' },
+    { code: '4961', name: '天鈺' },
     { code: '2454', name: '聯發科' }, { code: '3034', name: '聯詠' },
     { code: '2379', name: '瑞昱' }, { code: '4966', name: '譜瑞-KY' },
     { code: '5269', name: '祥碩' }, { code: '5274', name: '信驊' },
@@ -309,6 +399,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 2026-06-22 新增：第三代半導體（化合物 SiC/GaN — 功率/射頻/磊晶基板）
   '第三代半導體': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3714', name: '富采' },
+    { code: '2455', name: '全新' },
     { code: '3105', name: '穩懋' }, { code: '8086', name: '宏捷科' },
     { code: '3707', name: '漢磊' }, { code: '3016', name: '嘉晶' },
     { code: '2481', name: '強茂' }, { code: '5425', name: '台半' },
@@ -316,6 +409,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 2026-06-22 新增：網通（交換器/路由器/Wi-Fi/網通設備）
   '網通': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3558', name: '神準' },
+    { code: '6263', name: '普萊德' },
     { code: '2345', name: '智邦' }, { code: '6285', name: '啟碁' },
     { code: '5388', name: '中磊' }, { code: '3596', name: '智易' },
     { code: '3380', name: '明泰' }, { code: '3704', name: '合勤控' },
@@ -324,18 +420,27 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 2026-06-22 新增：半導體通路（IC 通路代理商）
   '半導體通路': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '3048', name: '益登' },
+    { code: '3055', name: '蔚華科' },
     { code: '3702', name: '大聯大' }, { code: '3036', name: '文曄' },
     { code: '8112', name: '至上' }, { code: '2347', name: '聯強' },
     { code: '3028', name: '增你強' },
   ],
   // 2026-06-22 新增：工具機（CNC 工具機/綜合加工機/自動化）
   '工具機': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '1540', name: '喬福' },
     { code: '2049', name: '上銀' }, { code: '1583', name: '程泰' },
     { code: '1530', name: '亞崴' }, { code: '4526', name: '東台' },
     { code: '6609', name: '瀧澤科' }, { code: '4510', name: '高鋒' },
   ],
   // 2026-06-22 新增：自行車（整車/鏈條/零組件）
   '自行車': [
+    // 2026-06-22 稽核補（分身研究+master 驗證）
+    { code: '4536', name: '拓凱' },
+    { code: '6804', name: '明係' },
+    { code: '3162', name: '精確' },
     { code: '9921', name: '巨大' }, { code: '9914', name: '美利達' },
     { code: '5306', name: '桂盟' }, { code: '1517', name: '利奇' },
     { code: '8933', name: '愛地雅' },
