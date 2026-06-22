@@ -12,7 +12,11 @@
  *
  * 書本依據：Part 10 淘汰 #8「三大法人連續賣超」
  * 用於偵測主力出貨。
+ *
+ * 抓取：用 fetchJsonWithCurlFallback（裸 Node fetch 對 www.twse.com.tw 在中國線路會 TLS reset →
+ * 「fetch failed」、法人資料卡住；curl 直連失敗會自動帶本機代理 fallback）。見 docs/known-issues I-1。
  */
+import { fetchJsonWithCurlFallback } from './curlFetch';
 
 export interface InstitutionalRecord {
   symbol:  string;           // 純數字，例如 '2330'
@@ -44,13 +48,10 @@ export async function fetchTWSEInstitutional(date: string): Promise<Institutiona
   const yyyymmdd = date.replace(/-/g, '');
   const url = `https://www.twse.com.tw/rwd/zh/fund/T86?date=${yyyymmdd}&selectType=ALL&response=json`;
 
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(15_000),
+  const { data: json } = await fetchJsonWithCurlFallback<TWSEResponse>(url, {
+    timeoutMs: 15_000,
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; rockstock/2.0)' },
   });
-  if (!res.ok) throw new Error(`TWSE T86 HTTP ${res.status} for ${date}`);
-
-  const json = await res.json() as TWSEResponse;
   if (json.stat !== 'OK' || !json.data) {
     // 非交易日或資料未公布，回空
     return [];

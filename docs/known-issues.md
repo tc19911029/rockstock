@@ -9,7 +9,13 @@
 
 掃 `launchctl list | grep rockstock` 的最後 exit code，4 個 job 上次失敗：
 
-### I-1 🔴 法人資料 stale 在 06-18 — fetch-institutional route 一直回 500（已深挖）
+### I-1 ✅ RESOLVED — fetch-institutional 裸 fetch → curlFetch（2026-06-22 修）
+- **修法**：`lib/datasource/TWSEInstitutional.ts` 裸 `fetch(www.twse.com.tw)` → `fetchJsonWithCurlFallback`
+  （直連 TLS reset 時自動帶本機代理 fallback）。驗證：force 重抓 06-18 回 `count:14607`，500 消失。
+- **澄清**：「卡在 06-18」其實正常——**06-19 是端午節非交易日** + 週末，06-18 本就是最後交易日。
+  06-22(今日) TWSE T86 回「查詢日期小於101/05/02」= TWSE 端無該日資料（疑此環境時鐘超前真實 TWSE），
+  非連線 bug；cron 每日會自動補上。
+- **原始紀錄（保留）**：
 - **真因**：cron 15:45 平日 curl `http://localhost:3000/api/cron/fetch-institutional`（log 在 `tw-inst.log` 非 `tw-institutional`，所以一開始找不到）；route 從 06-22 起回 **HTTP 500，body `{"error":"fetch failed"}`** = 抓上游（TWSE/TPEx 三大法人端點）Node fetch 網路失敗。06-19 還正常（寫到 06-18 共 14607 筆），之後就壞。
 - **資料證據**：`data/institutional/` 最新只到 **TW-2026-06-18.json**（今天 06-22）= stale 4 天。
 - **影響**：籌碼面分析、題材盤後排行「法人」欄、紅旗避雷（法人連賣）全部在用舊法人資料。
