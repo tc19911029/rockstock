@@ -205,6 +205,9 @@ export default function ChartToolbar({
   // TW: .TW/.TWO 後綴或 4-5 位數字（裸代碼）；CN: .SS/.SZ 或 6 位數字
   const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
   const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
+  // 台股指數（^TWII / ^TWOII）：三色套組 tab + 主力/捕撈獨立開關比照台股顯示；
+  // 不併進 isTW，避免動到量(張)標籤、籌碼/大戶副圖判斷。CN 指數 000001.SS 已由 isCN(.SS) 涵蓋。
+  const isTwIndex = ticker ? /^\^TW/i.test(ticker) : false;
   // 指標套組 tab 目前選中誰（從 toggle 反推；僅在三色可用市場 TW/CN 才顯示）
   const activePreset = activeChartPreset(maToggles, showBollinger, showShuangB, indicators, showPivots);
   // 「籌碼」合併鈕亮燈狀態：該市場的法人/主力散戶副圖任一開啟即亮
@@ -261,7 +264,7 @@ export default function ChartToolbar({
 
       {/* Row 2: Controls — timeframe pills, MA toggles, BB, indicators, signals, nav */}
       <div className="flex flex-wrap items-center gap-1 px-3 py-1 bg-secondary/30">
-        {onApplyPreset && (isCN || isTW) && (
+        {onApplyPreset && (isCN || isTW || isTwIndex) && (
           <>
             <div
               role="group"
@@ -369,7 +372,7 @@ export default function ChartToolbar({
             title="千張大戶持股趨勢線（集保）— 淡淡一條疊主圖看格局強弱；純參考、不發訊號（回測無預測力）"
           >大戶</button>
         )}
-        {(isTW || isCN) && (
+        {(isTW || isCN || isTwIndex) && (
           <>
             <span className="w-px h-3.5 bg-border/60 mx-0.5" />
             {/* 三色資金副圖：主力狀態 / 捕撈季節（獨立開關，可與套組/籌碼混搭）*/}
