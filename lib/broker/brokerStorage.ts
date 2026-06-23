@@ -31,6 +31,10 @@ export const DEFAULT_BROKERS: BrokerRegistryEntry[] = [
   { key: 'cls', display: '里昂', aliases: ['cls', 'clsa'], default_currency: 'TWD' },
   { key: 'jefferies', display: '傑富瑞', aliases: ['jefferies', 'jef'], default_currency: 'TWD' },
   { key: 'hsbc', display: '滙豐', aliases: ['hsbc'], default_currency: 'TWD' },
+  { key: 'morningstar', display: '晨星', aliases: ['morningstar', 'mstar'], default_currency: 'USD' },
+  { key: 'wellsfargo', display: '富國', aliases: ['wellsfargo', 'wells fargo', 'wfc'], default_currency: 'USD' },
+  { key: 'barclays', display: '巴克萊', aliases: ['barclays', 'barc'], default_currency: 'USD' },
+  { key: 'stifel', display: 'Stifel', aliases: ['stifel'], default_currency: 'USD' },
   // 本土券商
   { key: 'kgi', display: '凱基', aliases: ['kgi', '凱基', '凱基投顧'], default_currency: 'TWD' },
   { key: 'fubon', display: '富邦', aliases: ['fubon', '富邦', '富邦投顧'], default_currency: 'TWD' },
