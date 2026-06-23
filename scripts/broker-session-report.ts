@@ -81,11 +81,11 @@ async function main() {
       L.push(`### ${g}（${items.length} 筆）`);
       L.push('');
       if (g === '台股') {
-        L.push('| 股票 | 券商 | 評等 | 動作 | 舊目標 | 新目標 | 報告日上漲空間 | 距現價 |');
+        L.push('| 股票 | 券商 | 評等 | 動作 | 舊目標 | 新目標 | 現價 | 距現價 |');
         L.push('|---|---|---|:--:|---:|---:|---:|---:|');
         for (const it of items) {
           const name = it.stock_code ? `${it.stock_code} ${it.stock_name}` : it.stock_name;
-          L.push(`| ${name} | ${it.broker_display} | ${ratingZh(it.rating_raw, it.rating)} | ${ACTION_LABEL[it.rating_action] || '—'} | ${num(it.prev_target_price)} | ${num(it.target_price)} | ${pct(it.target.upsideAtReport)} | ${pct(it.target.distanceToTargetPct)} |`);
+          L.push(`| ${name} | ${it.broker_display} | ${ratingZh(it.rating_raw, it.rating)} | ${ACTION_LABEL[it.rating_action] || '—'} | ${num(it.prev_target_price)} | ${num(it.target_price)} | ${num(it.target.currentPrice)} | ${pct(it.target.distanceToTargetPct)} |`);
         }
       } else {
         L.push('| 股票 | 券商 | 評等 | 動作 | 舊目標 | 新目標 | 幣別 |');
@@ -99,7 +99,7 @@ async function main() {
   }
 
   L.push('---');
-  L.push(`_本批合計：台股 ${totalTW} 筆、海外 ${totalFX} 筆、券商 ${brokers.size} 家。動作：首評/升評/降評/維持。「報告日上漲空間」＝目標價 vs 報告日收盤；「距現價」正＝還有空間。_`);
+  L.push(`_本批合計：台股 ${totalTW} 筆、海外 ${totalFX} 筆、券商 ${brokers.size} 家。動作：首評/升評/降評/維持。「現價」＝最新收盤；「距現價」＝（新目標−現價）÷現價，正＝還有上漲空間。海外股不追股價故不列現價。_`);
 
   await fs.mkdir(path.dirname(out), { recursive: true });
   await fs.writeFile(out, L.join('\n'), 'utf-8');
