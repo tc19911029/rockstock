@@ -37,6 +37,7 @@ export const DEFAULT_BROKERS: BrokerRegistryEntry[] = [
   { key: 'ctbc', display: '中信', aliases: ['ctbc', '中信', '中信投顧'], default_currency: 'TWD' },
   { key: 'sinopac', display: '永豐', aliases: ['sinopac', '永豐', '永豐投顧'], default_currency: 'TWD' },
   { key: 'masterlink', display: '元富', aliases: ['masterlink', '元富', '元富投顧'], default_currency: 'TWD' },
+  { key: 'yuanta', display: '元大', aliases: ['yuanta', '元大', '元大投顧', '元大證券'], default_currency: 'TWD' },
 ];
 
 // ── blob/fs helper（照 analysisStorage.ts）─────────────────────────────────────
