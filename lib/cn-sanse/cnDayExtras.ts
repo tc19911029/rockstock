@@ -29,6 +29,29 @@ const num = (v: string | undefined): number => {
   return Number.isFinite(n) ? n : NaN;
 };
 
+// 騰訊 qfq 日K endpoint。主網域 web.ifzq.gtimg.cn 自 2026-06 被 WAF 封（回 501，
+// env -i 直連、零並發都 501，非限流）→ 改走同源鏡像 proxy.finance.qq.com（回傳格式逐位元相同：
+// {code:0, data:{[tc]:{qfqday:[[date,open,close,high,low,vol手],...]}}}）。保留舊網域當 fallback，
+// 哪天鏡像也被封還能自動退回。640 根 ≈ 2.6 年（騰訊文件上限）。
+const KLINE_HOSTS = [
+  'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get',
+  'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get',
+];
+async function fetchKlineRes(tc: string): Promise<Response> {
+  let lastErr: unknown;
+  for (const host of KLINE_HOSTS) {
+    try {
+      const res = await fetch(`${host}?param=${tc},day,,,640,qfq`, {
+        headers: { 'User-Agent': UA, Referer: 'https://gu.qq.com/' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (res.ok) return res; // 501/WAF → 試下一個 host
+      lastErr = new Error(`kline ${host} HTTP ${res.status}`);
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr ?? new Error('kline all hosts failed');
+}
+
 /** 即時報價推流通股本（流通市值 ÷ 現價）；抓不到回 NaN */
 async function fetchFloatShares(tc: string): Promise<number> {
   try {
@@ -63,10 +86,7 @@ export async function fetchDayExtras(symbol: string, localCandles?: Candle[]): P
   let floatShares = NaN;
   try {
     const [klineRes, fs] = await Promise.all([
-      fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tc},day,,,1000,qfq`, {
-        headers: { 'User-Agent': UA, Referer: 'https://gu.qq.com/' },
-        signal: AbortSignal.timeout(12000),
-      }),
+      fetchKlineRes(tc),
       fetchFloatShares(tc),
     ]);
     floatShares = fs;
