@@ -281,6 +281,9 @@ export default function CandleChart({
   // Keep latest candles accessible inside event closures without re-subscribing
   const candlesRef     = useRef<CandleWithIndicators[]>(candles);
   const timeMapRef     = useRef<Map<string | number, CandleWithIndicators>>(new Map());
+  // 記住上次「自動套用可視範圍」的視窗身分 — 只有換股/換週期/換中心日才重置，
+  // 盤中輪詢換新 candles reference 不重置（否則使用者拖動的視窗每 ~30s 被打回原樣）
+  const lastFitKeyRef  = useRef<string | null>(null);
   const onCrosshairRef = useRef(onCrosshairMove);
   const onDoubleClickRef = useRef(onDoubleClick);
   const [hoverCandle, setHoverCandle] = useState<CandleWithIndicators | null>(null);
@@ -778,32 +781,38 @@ export default function CandleChart({
       const totalBars = candles.length;
       const visibleBars = 80;
 
-      if (centerOnDate) {
-        // 以指定日期為中心，前後各顯示 40 根
-        let centerIdx = candles.findIndex(c => c.date === centerOnDate);
-        if (centerIdx === -1) {
-          // fallback: 找最近前一根
-          for (let i = candles.length - 1; i >= 0; i--) {
-            if (candles[i].date <= centerOnDate) { centerIdx = i; break; }
+      // 只有「換股 / 換週期 / 換中心日」才自動套用可視範圍；盤中輪詢只是換新 candles
+      // reference（同檔同週期、只動最後一根），key 不變 → 不重置，保留使用者拖動的視窗。
+      const fitKey = `${centerOnDate ?? ''}|${candles[0]?.date ?? ''}|${candles[1]?.date ?? ''}`;
+      if (lastFitKeyRef.current !== fitKey) {
+        lastFitKeyRef.current = fitKey;
+        if (centerOnDate) {
+          // 以指定日期為中心，前後各顯示 40 根
+          let centerIdx = candles.findIndex(c => c.date === centerOnDate);
+          if (centerIdx === -1) {
+            // fallback: 找最近前一根
+            for (let i = candles.length - 1; i >= 0; i--) {
+              if (candles[i].date <= centerOnDate) { centerIdx = i; break; }
+            }
           }
+          if (centerIdx === -1) centerIdx = totalBars - 1;
+          const half = Math.floor(visibleBars / 2);
+          chart.timeScale().setVisibleLogicalRange({
+            from: centerIdx - half,
+            to:   centerIdx + half,
+          });
+        } else {
+          // 預設顯示最近 80 根K棒（仿 WantGoo 6個月日線），讓K棒大小清晰
+          chart.timeScale().setVisibleLogicalRange({
+            from: totalBars - visibleBars - 1,
+            to:   totalBars + 3,
+          });
         }
-        if (centerIdx === -1) centerIdx = totalBars - 1;
-        const half = Math.floor(visibleBars / 2);
-        chart.timeScale().setVisibleLogicalRange({
-          from: centerIdx - half,
-          to:   centerIdx + half,
-        });
-      } else {
-        // 預設顯示最近 80 根K棒（仿 WantGoo 6個月日線），讓K棒大小清晰
-        chart.timeScale().setVisibleLogicalRange({
-          from: totalBars - visibleBars - 1,
-          to:   totalBars + 3,
+        requestAnimationFrame(() => {
+          const range = chart.timeScale().getVisibleLogicalRange();
+          if (range) broadcastRange(range as { from: number; to: number });
         });
       }
-      requestAnimationFrame(() => {
-        const range = chart.timeScale().getVisibleLogicalRange();
-        if (range) broadcastRange(range as { from: number; to: number });
-      });
     }
   }, [candles, centerOnDate, highlightDate, showTrendlines, showAscendingTrendline, showDescendingTrendline, showAscendingChannel, showDescendingChannel, showConsolidationLines]);
 
