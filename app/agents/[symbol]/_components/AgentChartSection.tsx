@@ -90,9 +90,8 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
   };
   const [showConsolidationLines, setShowConsolidationLines] = useState(false);
   const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
-  // 月線（20MA）固定顯示、不可關（書本 CH3-03）
+  // 月線（20MA）預設打開（書本 CH3-03），但使用者可手動開關
   const handleMaToggle = useCallback((key: keyof typeof maToggles) => {
-    if (key === 'ma20') return;
     setMaToggles(p => ({ ...p, [key]: !p[key] }));
   }, []);
   const [showBollinger, setShowBollinger] = useState(false);

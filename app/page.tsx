@@ -434,9 +434,8 @@ function HomePage() {
   const [showNeckline, setShowNeckline] = useState(false);  // 形態頸線 + 目標價 + 結構失效價
   const [showPattern, setShowPattern] = useState(false);    // 形態 ABCDE 關鍵點與連線
   const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
-  // 月線（20MA）固定顯示、不可關（書本 CH3-03「20MA 一定要打開來看，不可以把它關掉」）— 守在 handler 層
+  // 月線（20MA）預設打開（書本 CH3-03 做多核心防線），但使用者可手動開關
   const handleMaToggle = useCallback((key: keyof typeof maToggles) => {
-    if (key === 'ma20') return;
     setMaToggles(p => ({ ...p, [key]: !p[key] }));
   }, []);
   const [showBollinger, setShowBollinger] = useState(false);
@@ -469,8 +468,8 @@ function HomePage() {
       setIndicators(p => ({ ...p, ...chipOn, volume: false, kd: false, rsi: false, macd: false, mainForce: false, season: false }));
       setShowPivots(true);
     } else {
-      // 三色套組：均線清空讓出主圖給雙B，但月線（20MA）固定保留（書本 CH3-03「20MA 不可關」）
-      setMaToggles({ ma5: false, ma10: false, ma20: true, ma60: false, ma120: false, ma240: false });
+      // 三色套組：均線全清空讓出主圖給雙B（含月線 20MA；使用者要看可手動打開）
+      setMaToggles({ ma5: false, ma10: false, ma20: false, ma60: false, ma120: false, ma240: false });
       setShowBollinger(false);
       setShowShuangB(true);
       setIndicators(p => ({ ...p, ...chipOff, volume: false, kd: false, rsi: false, macd: false, mainForce: true, season: true }));

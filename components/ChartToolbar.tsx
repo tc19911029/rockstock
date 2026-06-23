@@ -108,8 +108,8 @@ interface ChartToolbarProps {
 const MA_CONFIGS: Array<{ key: keyof MaToggles; label: string; title: string; locked?: boolean }> = [
   { key: 'ma5',   label: 'MA5',   title: '顯示/隱藏 5 日線' },
   { key: 'ma10',  label: 'MA10',  title: '顯示/隱藏 10 日線' },
-  // 月線（20MA）是做多核心過濾、回檔最後防線 → 書本 CH3-03「20MA 一定要打開、不可關掉」，固定顯示不可關
-  { key: 'ma20',  label: 'MA20',  title: '月線（20MA）— 做多核心過濾、回檔最後防線；書本規定固定顯示，不可關閉', locked: true },
+  // 月線（20MA）是做多核心過濾、回檔最後防線（書本 CH3-03）→ 預設打開，但使用者可手動關
+  { key: 'ma20',  label: 'MA20',  title: '顯示/隱藏月線（20MA）— 做多核心過濾、回檔最後防線' },
   { key: 'ma60',  label: 'MA60',  title: '顯示/隱藏 60 日線（季線）' },
   { key: 'ma120', label: 'MA120', title: '顯示/隱藏 120 日線（半年線）' },
   { key: 'ma240', label: 'MA240', title: '顯示/隱藏 240 日線（年線）— 整年買盤平均成本' },
