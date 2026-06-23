@@ -996,6 +996,9 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
   if (candles.length === 0) return null;
   const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
   const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
+  // 台股指數（^TWII 加權 / ^TWOII 櫃買）：三色副圖（主力狀態/捕撈季節）比照台股放行；
+  // 不併進 isTW，避免動到量(張)標籤與籌碼副圖的判斷。CN 指數 000001.SS 已由 isCN(.SS) 涵蓋。
+  const isTwIndex = ticker ? /^\^TW/i.test(ticker) : false;
   const show = indicators ?? { macd: true, kd: true, volume: true, rsi: false };
   const panels = [
     show.volume && <div key="vol" className="flex-1 min-h-0 bg-card"><VolumeChart candles={candles} hoverCandle={hoverCandle} isTW={isTW} isCN={isCN} /></div>,
@@ -1008,8 +1011,8 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
     show.retail && isTW && <div key="retail" className="flex-1 min-h-0 bg-card"><ChipChart seriesKey="retail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnMain && isCN && <div key="cnMain" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnMain" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.cnRetail && isCN && <div key="cnRetail" className="flex-1 min-h-0 bg-card"><CnFlowChart flowKey="cnRetail" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
-    show.mainForce && (isCN || isTW) && sanseZhuli && <div key="mainForce" className="flex-1 min-h-0 bg-card"><MainForceChart candles={candles} zhuli={sanseZhuli} hoverCandle={hoverCandle} /></div>,
-    show.season && (isCN || isTW) && sanseXys && <div key="season" className="flex-[1.7] min-h-0 bg-card"><SeasonChart candles={candles} xys={sanseXys} hoverCandle={hoverCandle} /></div>,
+    show.mainForce && (isCN || isTW || isTwIndex) && sanseZhuli && <div key="mainForce" className="flex-1 min-h-0 bg-card"><MainForceChart candles={candles} zhuli={sanseZhuli} hoverCandle={hoverCandle} /></div>,
+    show.season && (isCN || isTW || isTwIndex) && sanseXys && <div key="season" className="flex-[1.7] min-h-0 bg-card"><SeasonChart candles={candles} xys={sanseXys} hoverCandle={hoverCandle} /></div>,
     // 大戶持股（400張/1000張）一律排最後 → 不論技術/三色/籌碼模式都固定在副圖最下面（週資料，位置統一）
     show.h400 && isTW && <div key="h400" className="flex-1 min-h-0 bg-card"><HolderChart holderKey="h400" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
     show.h1000 && isTW && <div key="h1000" className="flex-1 min-h-0 bg-card"><HolderChart holderKey="h1000" candles={candles} chips={chips} hoverCandle={hoverCandle} /></div>,
