@@ -1,7 +1,8 @@
 /**
  * TencentHistProvider — 騰訊財經歷史K線 Provider（備援，A股 + 美股）
  *
- * API: https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
+ * API: app/fqkline/get（host 走 tencentKlineHosts：鏡像 proxy.finance.qq.com 優先、
+ *      舊網域 web.ifzq.gtimg.cn fallback；舊網域對 CN 代號自 2026-06 被 WAF 封回 501）
  *
  * 股票代碼格式：
  *   A股上海: sh600519    A股深圳: sz000858
@@ -18,6 +19,7 @@ import { computeIndicators } from '@/lib/indicators';
 import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
 import { aggregateCandles } from './aggregateCandles';
+import { TENCENT_FQKLINE_BASES } from './tencentKlineHosts';
 import { rateLimiter } from './UnifiedRateLimiter';
 
 // ── 快取 TTL ──────────────────────────────────────────────────────────────────
@@ -128,17 +130,21 @@ async function fetchTencentKlines(
   // 統一限流
   await rateLimiter.acquire('tencent');
 
-  const url =
-    `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get` +
-    `?param=${code},day,${startDate},${endDate},${maxRecords},qfq`;
+  const query = `?param=${code},day,${startDate},${endDate},${maxRecords},qfq`;
 
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10000),
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    });
-    if (!res.ok) {
-      rateLimiter.reportError('tencent', res.status);
+    // 主網域 web.ifzq 對 CN 代號被 WAF 封(501) → 鏡像優先、舊網域 fallback（見 tencentKlineHosts）。
+    // 只換 host、不動解析/限流/快取。任一 host 回 ok 即用；全失敗才回空。
+    let res: Response | null = null;
+    for (const base of TENCENT_FQKLINE_BASES) {
+      const r = await fetch(base + query, {
+        signal: AbortSignal.timeout(10000),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      });
+      if (r.ok) { res = r; break; }
+      rateLimiter.reportError('tencent', r.status);
+    }
+    if (!res) {
       return [];
     }
     rateLimiter.reportSuccess('tencent');

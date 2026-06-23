@@ -10,6 +10,7 @@
 // ============================================================
 
 import type { Candle } from '@/types';
+import { TENCENT_FQKLINE_BASES } from '@/lib/datasource/tencentKlineHosts';
 
 export interface DayExtras { amount: number; vol: number; turnover: number }
 
@@ -29,17 +30,11 @@ const num = (v: string | undefined): number => {
   return Number.isFinite(n) ? n : NaN;
 };
 
-// 騰訊 qfq 日K endpoint。主網域 web.ifzq.gtimg.cn 自 2026-06 被 WAF 封（回 501，
-// env -i 直連、零並發都 501，非限流）→ 改走同源鏡像 proxy.finance.qq.com（回傳格式逐位元相同：
-// {code:0, data:{[tc]:{qfqday:[[date,open,close,high,low,vol手],...]}}}）。保留舊網域當 fallback，
-// 哪天鏡像也被封還能自動退回。640 根 ≈ 2.6 年（騰訊文件上限）。
-const KLINE_HOSTS = [
-  'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get',
-  'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get',
-];
+// 騰訊 qfq 日K endpoint host 走 tencentKlineHosts（鏡像 proxy.finance.qq.com 優先、舊網域 fallback；
+// 舊網域 web.ifzq.gtimg.cn 對 CN 代號自 2026-06 被 WAF 封回 501）。640 根 ≈ 2.6 年（騰訊文件上限）。
 async function fetchKlineRes(tc: string): Promise<Response> {
   let lastErr: unknown;
-  for (const host of KLINE_HOSTS) {
+  for (const host of TENCENT_FQKLINE_BASES) {
     try {
       const res = await fetch(`${host}?param=${tc},day,,,640,qfq`, {
         headers: { 'User-Agent': UA, Referer: 'https://gu.qq.com/' },

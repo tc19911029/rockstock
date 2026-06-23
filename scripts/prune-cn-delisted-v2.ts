@@ -56,7 +56,7 @@ async function tencentLastKlineDate(symbol: string): Promise<string | null> {
   const pfx = symbol.endsWith('.SS') ? 'sh' : 'sz';
   try {
     const res = await fetch(
-      `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${pfx}${code},day,,,5,qfq`,
+      `https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param=${pfx}${code},day,,,5,qfq`,
       { signal: AbortSignal.timeout(10000) },
     );
     const j = await res.json() as { data?: Record<string, { qfqday?: unknown[][]; day?: unknown[][] }> };

@@ -26,6 +26,7 @@
  */
 
 import { fetchJsonWithCurlFallback } from '@/lib/datasource/curlFetch';
+import { TENCENT_FQKLINE_BASES } from '@/lib/datasource/tencentKlineHosts';
 import type { BackfillSeriesBar, BackfillSymbolMeta } from '../backfillPools';
 
 const EM_REFERER = 'https://quote.eastmoney.com/';
@@ -202,13 +203,16 @@ export async function fetchTencentDailyBars(
 ): Promise<EmDailyBar[]> {
   const code = cnSymbolToTencentCode(symbol);
   // count 給足窗口上限（2 年日線 < 520 根，給 800 留裕度）
-  const url =
-    `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get` +
-    `?param=${code},day,${ymd8ToDash(begYmd8)},${ymd8ToDash(endYmd8)},800,qfq`;
-  const { data } = await fetchJsonWithCurlFallback<TencentKlineResponse>(url, {
-    timeoutMs: 15000,
-  });
-  const stock = data?.data?.[code];
+  const query = `?param=${code},day,${ymd8ToDash(begYmd8)},${ymd8ToDash(endYmd8)},800,qfq`;
+  // 主網域 web.ifzq 對 CN 代號被 WAF 封(501) → 鏡像優先、舊網域 fallback（見 tencentKlineHosts）。只換 host。
+  let stock: { qfqday?: unknown[][]; day?: unknown[][] } | undefined;
+  for (const base of TENCENT_FQKLINE_BASES) {
+    const { data } = await fetchJsonWithCurlFallback<TencentKlineResponse>(base + query, {
+      timeoutMs: 15000,
+    });
+    stock = data?.data?.[code];
+    if ((stock?.qfqday?.length ?? 0) > 0 || (stock?.day?.length ?? 0) > 0) break;
+  }
   const rows = stock?.qfqday ?? stock?.day ?? [];
   const out: EmDailyBar[] = [];
   for (const row of rows) {
