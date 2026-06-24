@@ -13,6 +13,8 @@ import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
 import { panelSortKey } from '@/lib/selection/applyPanelFilter';
 import { ForwardPerfRow } from './ForwardPerfRow';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
+import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
+import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
@@ -93,6 +95,10 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   // 只台股有對應；陸股代號不重疊，傳 undefined 不發請求（與三色掃描一致）
   const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? (scanDate ?? undefined) : undefined);
 
+  // 今日題材熱度 map（裸碼 → 所屬最熱題材；refs[0]=今日最熱）— 「🔥今日題材熱度」排序 + 卡片標籤用
+  // TW=38 題材按今日漲幅；CN=概念板塊按今日 pct（即時抓成分股）。純展示/排序，不進選股 gate。
+  const themeHeatMap = useThemeHeatMap(market, scanDate ?? undefined);
+
   // 即時 raw trend（跟 banner 同源）— saved session 的 marketTrend 是舊邏輯（含降級）
   // 不可用，會跟 banner 顯示不一致（「banner 多頭、結果欄盤整」這種）
   const [liveTrend, setLiveTrend] = useState<TrendState | null>(storeTrend ?? null);
@@ -138,22 +144,6 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   }, [performance]);
 
 
-  // 今日熱點：每個產業/題材的「熱度分」= 上榜檔數(廣度)×100 + 平均漲幅(強度)。
-  // 來源純掃描結果（industry + changePercent），TW/CN 都適用、不需外部資料。
-  // hotTheme 排序時個股 = 所屬產業熱度（同產業內再按個股漲幅）。
-  const industryHot = useMemo(() => {
-    const agg = new Map<string, { n: number; sumChg: number }>();
-    for (const r of scanResults) {
-      const ind = r.industry; if (!ind) continue;
-      const a = agg.get(ind) ?? { n: 0, sumChg: 0 };
-      a.n += 1; a.sumChg += (r.changePercent ?? 0);
-      agg.set(ind, a);
-    }
-    const score = new Map<string, number>();
-    for (const [ind, a] of agg) score.set(ind, a.n * 100 + (a.n ? a.sumChg / a.n : 0));
-    return score;
-  }, [scanResults]);
-
   const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
 
   const filtered = scanResults
@@ -171,9 +161,9 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
       case 'score.sixCond': return (r.sixConditionsScore ?? 0) * 100 + (r.changePercent ?? 0) / 100;
       case 'mkt.turnover':  return -(r.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
       case 'heat.youtube':  return ytMap.get(bareCode(r.symbol))?.count30d ?? null; // 未提及排最後
-      case 'heat.theme': {  // 個股按所屬產業熱度排，同產業內再按漲幅（壓進尾數）
-        const h = industryHot.get(r.industry ?? '');
-        return h == null ? null : h * 10_000 + (r.changePercent ?? 0);
+      case 'heat.theme': {  // 所屬「今日最熱題材」名次（1=最熱）→ 同題材內再按漲幅；無題材排最後
+        const rank = bestHeatRank(themeHeatMap, r.symbol);
+        return rank === Infinity ? null : -(rank * 1000) + (r.changePercent ?? 0);
       }
       default: return null;
     }
@@ -218,6 +208,13 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
         dir={scanSortDir}
         onChange={(id, d) => { setScanSort(id); setScanSortDir(d); }}
       />
+      {scanSort === 'heat.theme' && (
+        <p className="text-[9px] leading-snug text-amber-400/90">
+          {market === 'TW'
+            ? '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+            : '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'}
+        </p>
+      )}
 
       {/* YouTube 提及篩選 */}
       <div className="flex flex-wrap gap-1 items-center">
@@ -293,6 +290,20 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{r.price.toFixed(2)}</span>
                 {r.industry && <span className="truncate max-w-[60px]">{r.industry}</span>}
+                {(() => {
+                  const refs = themeHeatMap.get(bareCode(r.symbol));
+                  if (!refs || refs.length === 0) return null;
+                  const best = refs[0];
+                  return (
+                    <span
+                      className="text-amber-400/90 truncate max-w-[110px]"
+                      title={refs.map((x) => `${x.themeName} #${x.heatRank}`).join('、')}
+                    >
+                      🔥{best.themeName} #{best.heatRank}
+                      {refs.length > 1 && <span className="text-muted-foreground"> +{refs.length - 1}</span>}
+                    </span>
+                  );
+                })()}
                 <span>{r.trendState}</span>
                 <span className="truncate">{r.trendPosition}</span>
                 {(ytSummary || r.turnoverRank !== undefined) && (

@@ -33,6 +33,8 @@ import { EntryStateBadge } from '@/components/EntryStateBadge';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 import type { RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { useYouTubeMentionMap, type YouTubeMentionSummary } from '@/lib/hooks/useYouTubeMentionMap';
+import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
+import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { RedFlagChips } from '@/components/RedFlagChips';
 import { SortControl } from '@/components/shared';
@@ -91,7 +93,7 @@ const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
 // 此頁專屬（加權總分 / YouTube 提及）｜共用區（fwd.*；無 mkt.* 盤面欄資料）
 const POOL_SORT_OPTIONS = [
-  'score.poolTotal', 'heat.youtube',
+  'score.poolTotal', 'heat.youtube', 'heat.theme',
   '|',
   'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
 ];
@@ -145,6 +147,8 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 今日題材熱度 map（裸碼 → 所屬最熱題材）— 「🔥今日題材熱度」排序用；純展示/排序不進選股分數
+  const themeHeatMap = useThemeHeatMap(data?.market, date);
   const [banner, setBanner] = useState<string | null>(null);
   // forward perf — 跟策略掃描走同 endpoint(POST /api/backtest/forward,有 10min cache)
   const [forwardMap, setForwardMap] = useState<Map<string, StockForwardPerformance>>(new Map());
@@ -246,10 +250,15 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
         // YouTube 提及：近 30 天提及次數；未提及回 null 排最後
         return ytMap.get(bareCode(c.symbol))?.count30d ?? null;
       }
+      if (id === 'heat.theme') {
+        // 所屬「今日最熱題材」名次（1=最熱）→ 取負，desc 時最熱排前；無題材回 null 排最後
+        const rank = bestHeatRank(themeHeatMap, c.symbol);
+        return rank === Infinity ? null : -rank;
+      }
       return null;
     };
     return applySort(baseSorted, sortBy, sortDir, poolSortValue);
-  }, [data?.candidates, customWeights, sortBy, sortDir, forwardMap, ytMap, ytRecentOnly, highConsensusOnly]);
+  }, [data?.candidates, customWeights, sortBy, sortDir, forwardMap, ytMap, ytRecentOnly, highConsensusOnly, themeHeatMap]);
 
   // ⚡ 今日強進場 top 5 — entry_state 不是 no_chase + sourceCount ≥ 2 + score ≥ 50 + 大盤 ≠ bear
   // 排序：can_enter 優先於 watch，內部按 score
@@ -401,6 +410,13 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
 
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
+        {sortBy === 'heat.theme' && (
+          <p className="mx-2 mt-2 text-[10px] leading-snug text-amber-400/90">
+            {data?.market === 'CN'
+              ? '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'
+              : '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'}
+          </p>
+        )}
         {loading && !data && !error && (
           <div className="text-center py-12 text-muted-foreground text-xs">載入中…</div>
         )}
@@ -561,6 +577,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                   onSelect={onSelectStock}
                   selected={selectedSymbol === c.symbol}
                   ytSummary={ytMap.get(bareCode(c.symbol))}
+                  themeRef={themeHeatMap.get(bareCode(c.symbol))?.[0] ?? null}
                 />
               ))}
             </tbody>
@@ -579,6 +596,7 @@ function PoolRow({
   onSelect,
   selected,
   ytSummary,
+  themeRef,
 }: {
   candidate: Candidate;
   totalScore?: number;
@@ -587,6 +605,7 @@ function PoolRow({
   onSelect?: (symbol: string) => void;
   selected?: boolean;
   ytSummary?: YouTubeMentionSummary;
+  themeRef?: { themeName: string; heatRank: number } | null;
 }) {
   const pureSymbol = candidate.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const ytResonance = resonanceTags(ytSummary);
@@ -678,6 +697,14 @@ function PoolRow({
               );
             })}
             {ytSummary && <YouTubeMentionBadge summary={ytSummary} bareCode={pureSymbol} size="xs" />}
+            {themeRef && (
+              <span
+                title={`今日熱門題材：${themeRef.themeName}（第 ${themeRef.heatRank} 名）`}
+                className="inline-flex items-center px-1 py-0.5 rounded border text-[9px] bg-amber-900/30 text-amber-300 border-amber-700/50 max-w-[90px] truncate"
+              >
+                🔥{themeRef.themeName} #{themeRef.heatRank}
+              </span>
+            )}
             {candidate.comboBadges?.map(b => (
               <span
                 key={b}

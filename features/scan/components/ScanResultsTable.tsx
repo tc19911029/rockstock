@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import type { StockForwardPerformance, StockScanResult } from '@/lib/scanner/types';
 import { MTF_SCORE_STRONG, MTF_SCORE_OK } from '@/lib/analysis/bookThresholds';
 import { panelSortKey } from '@/lib/selection/applyPanelFilter';
+import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
+import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
@@ -53,7 +55,10 @@ const TOTAL_COLS = 22; // 代號+名稱+概念+價格+當日漲跌+趨勢+位置
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
 // 註：舊「面板對齊(panel)」與「漲幅(change)」邏輯完全相同（都走 panelSortKey），合併為單一 mkt.change。
-const SCAN_TABLE_SORT_OPTIONS = ['mkt.turnover', 'mkt.change', 'score.sixCond', 'mkt.price'];
+const SCAN_TABLE_SORT_OPTIONS = ['mkt.turnover', 'mkt.change', 'score.sixCond', 'heat.theme', 'mkt.price'];
+
+// 去市場後綴拿裸代號（今日題材熱度 map 以裸代號為 key）
+const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
 interface ScanResultsTableProps {
   onSelectStock?: (stock: SelectedStock) => void;
@@ -82,6 +87,9 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
   const [scanSort, setScanSort] = useState<string>('mkt.turnover');
   const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
+
+  // 今日題材熱度 map（裸碼 → 所屬最熱題材）— 「🔥今日題材熱度」排序用；純展示/排序不進選股 gate
+  const themeHeatMap = useThemeHeatMap(market, scanDate ?? undefined);
 
   // Build performance lookup map
   const perfMap = useMemo(() => {
@@ -161,6 +169,10 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
         return panelSortKey(r);
       case 'score.sixCond': return (r.sixConditionsScore ?? 0) * 100 + (r.changePercent ?? 0) / 100;
       case 'mkt.turnover':  return -(r.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
+      case 'heat.theme': {  // 所屬「今日最熱題材」名次（1=最熱）→ 同題材內再按漲幅；無題材排最後
+        const rank = bestHeatRank(themeHeatMap, r.symbol);
+        return rank === Infinity ? null : -(rank * 1000) + (r.changePercent ?? 0);
+      }
       default:              return null;
     }
   };
@@ -244,6 +256,13 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
         leading="排序："
         size="normal"
       />
+      {scanSort === 'heat.theme' && (
+        <p className="text-[10px] leading-snug text-amber-400/90 px-1">
+          {market === 'TW'
+            ? '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+            : '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'}
+        </p>
+      )}
 
       {/* Concept filter pills */}
       {availableConcepts.length > 1 && (
@@ -375,8 +394,19 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                     )}
                   </div>
                 </td>
-                {/* 概念 */}
-                <td className="py-1.5 px-1 text-[10px] text-muted-foreground max-w-[80px] truncate" title={r.industry}>{r.industry ?? '—'}</td>
+                {/* 概念：有今日熱門題材命中 → 顯示 🔥題材 #名次，否則退回產業別 */}
+                {(() => {
+                  const refs = themeHeatMap.get(bareCode(r.symbol));
+                  const best = refs && refs.length > 0 ? refs[0] : null;
+                  return (
+                    <td
+                      className={`py-1.5 px-1 text-[10px] max-w-[80px] truncate ${best ? 'text-amber-400/90' : 'text-muted-foreground'}`}
+                      title={best ? refs!.map((x) => `${x.themeName} #${x.heatRank}`).join('、') : (r.industry ?? '')}
+                    >
+                      {best ? `🔥${best.themeName} #${best.heatRank}` : (r.industry ?? '—')}
+                    </td>
+                  );
+                })()}
                 {/* 價格 + 當日漲跌 */}
                 {(() => {
                   const sym = r.symbol.replace(/\.(TW|TWO)$/i, '');
