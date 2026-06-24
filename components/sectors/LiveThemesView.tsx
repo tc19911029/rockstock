@@ -17,6 +17,7 @@ import type { SortDir } from '@/lib/sorting/registry';
 import { bullBearClass } from '@/lib/format';
 import { useIsChartCurrent } from '@/lib/chartListNav';
 import { StockLink } from './StockLink';
+import { CnBoardBadges } from './CnBoardBadges';
 
 type Market = 'TW' | 'CN';
 
@@ -265,6 +266,7 @@ function CnLiveMemberRow({ m }: { m: CnLiveMember }) {
           <span className="font-medium text-foreground text-sm">{m.name}</span>
           <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
         </StockLink>
+        <CnBoardBadges code={m.code} name={m.name} />
         <span className="text-[10px] text-muted-foreground/55">成交 {fmtTurnover(m.turnoverCny)}</span>
         <span className="text-[10px] text-muted-foreground/55 inline-flex items-baseline gap-0.5">主力 <Amt v={m.mainNetCny} /></span>
       </div>

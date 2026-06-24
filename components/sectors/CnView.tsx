@@ -18,6 +18,7 @@ import { bullBearClass } from '@/lib/format';
 import { useIsChartCurrent } from '@/lib/chartListNav';
 import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
 import { StockLink, AddWatchBtn } from './StockLink';
+import { CnBoardBadges } from './CnBoardBadges';
 
 // ── 型別（對齊 /api/cn-sectors/* 回傳）─────────────────────────────────────────
 
@@ -148,6 +149,7 @@ function CnStockCard({ m, idxOf }: { m: CnMemberPerf; idxOf: (p: number) => numb
             <span className="font-semibold text-foreground text-sm">{m.name}</span>
             <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
           </StockLink>
+          <CnBoardBadges code={m.code} name={m.name} />
           <StockLink code={m.symbol} title="走圖"
             className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-sky-400 hover:border-sky-400/40">走圖</StockLink>
           <AddWatchBtn code={m.symbol} name={m.name} />
