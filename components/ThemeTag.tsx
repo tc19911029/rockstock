@@ -47,8 +47,13 @@ export function ThemeTag({ market, code, hotMap, fallback, className }: ThemeTag
     return fallback ? <span className={cn('text-muted-foreground truncate', className)} title={fallback}>{fallback}</span> : null;
   }
 
+  // 主顯示題材 = refs[0]（TW：今日最熱；CN：最專一/最具代表性）。
+  // 是否「今天在燒」= 所屬題材中有人進今日前段（min 名次 ≤ HOT_RANK）。
   const primary = names[0];
-  const isHot = primary.rank != null && primary.rank <= HOT_RANK;
+  const minRank = names.reduce((m, n) => (n.rank != null && n.rank < m ? n.rank : m), Infinity);
+  const isHot = minRank <= HOT_RANK;
+  // 只有「主顯示題材本身就是今日最熱那個」才在名字後綴 #名次，避免名稱與名次對不上
+  const showRank = isHot && primary.rank === minRank;
   const title = names.map((n) => (n.rank != null ? `${n.name}（今日第 ${n.rank} 名）` : n.name)).join('、');
 
   return (
@@ -56,7 +61,7 @@ export function ThemeTag({ market, code, hotMap, fallback, className }: ThemeTag
       title={isHot ? `🔥 今日熱門題材\n${title}` : `所屬題材／概念\n${title}`}
       className={cn('truncate', isHot ? 'text-amber-400/90' : 'text-sky-300/80', className)}
     >
-      {isHot ? '🔥' : ''}{primary.name}{isHot && primary.rank != null ? ` #${primary.rank}` : ''}
+      {isHot ? '🔥' : ''}{primary.name}{showRank ? ` #${primary.rank}` : ''}
       {names.length > 1 && <span className="text-muted-foreground"> +{names.length - 1}</span>}
     </span>
   );

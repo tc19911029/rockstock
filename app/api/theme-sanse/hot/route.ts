@@ -4,7 +4,8 @@ import type { ThemeRef, TsMarket } from '@/lib/theme-sanse/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// CN 首次建（抓全部 ~390 概念成分股）約 40s；給 120s 安全邊際。建好寫硬碟快取後秒回。
+export const maxDuration = 120;
 
 /**
  * 輕量題材熱度查詢（給全站策略掃描頁的「🔥今日題材熱度」排序用）。

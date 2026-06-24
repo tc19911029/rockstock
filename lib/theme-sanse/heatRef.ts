@@ -12,10 +12,13 @@ import type { ThemeRef } from './types';
 export const stripCodeSuffix = (s: string): string => s.replace(/\.(TW|TWO|SS|SZ|BJ)$/i, '');
 
 /**
- * 該股所屬「最熱題材」的名次（1 = 今日最熱）；不在任何排名題材 → Infinity（排序時排最後）。
- * map 的值已按 heatRank 升冪（todayHot/codeThemes 保證），取 refs[0] 即最熱。
+ * 該股所屬題材/概念中「今日最熱」的名次（1 = 今日最熱）；不在任何排名題材 → Infinity（排序時排最後）。
+ * 取 refs 內 heatRank 最小者（TW refs 本就升冪；CN refs 以「最專一」排序、非熱度序，故必須取 min）。
  */
 export function bestHeatRank(map: Map<string, ThemeRef[]>, symbol: string): number {
   const refs = map.get(stripCodeSuffix(symbol));
-  return refs && refs.length > 0 ? refs[0].heatRank : Infinity;
+  if (!refs || refs.length === 0) return Infinity;
+  let min = Infinity;
+  for (const r of refs) if (r.heatRank < min) min = r.heatRank;
+  return min;
 }

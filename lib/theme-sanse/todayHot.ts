@@ -23,15 +23,19 @@ import { fetchBoardMembers } from '@/lib/cn-agents/datasource/emBoards';
 import type { ThemeRef, TsMarket } from './types';
 
 /**
- * CN：即時抓成分股的熱門概念數上限（控制 fetchBoardMembers 次數 / route 時間）。
- * 取今日漲幅前 N 名概念 → 反查成分股；用於「今日題材熱度」排序 + 個股題材標注。
- * 80 ≈ 涵蓋當日有動能的概念，覆蓋多數被選出的活躍股；更冷門的概念退回個股「行業」標注。
+ * CN：即時抓成分股的概念數上限（safety；filterThemeConcepts 實際約 390）。
+ * 抓「全部真題材概念」反查成分股 → 不論該概念今天熱不熱，個股都標得到它本來的概念
+ * （例：永兴材料屬鋰礦概念，今天冷門也要標）。用於個股題材標注 + 今日題材熱度排序。
  */
-const CN_TOP_CONCEPTS = 80;
+const CN_MAX_CONCEPTS = 420;
+/** 每檔最多顯示幾個概念（取「成分股最少＝最專一」者，最具代表性；外加今日最熱那個供 🔥/排序）。 */
+const CN_DISPLAY_REFS = 3;
 /** CN：fetchBoardMembers 併發上限（EM clist 同 IP 過量併發會被限流）。 */
-const CN_FETCH_CONCURRENCY = 6;
+const CN_FETCH_CONCURRENCY = 8;
 /** CN 概念→成分股反查結果硬碟快取目錄（每日建一次，重啟後不用重抓）。 */
 const CN_CACHE_DIR = path.join(process.cwd(), 'data/theme-sanse/CN/today-hot');
+/** 快取格式版本（改反查邏輯時 +1，舊快取自動作廢重建）。 */
+const CN_CACHE_VERSION = 2;
 
 /** 一個熱門題材的輕量表示（heatRank 1 = 今日最熱）。 */
 interface TodayThemeLite {
@@ -42,19 +46,39 @@ interface TodayThemeLite {
   memberCodes: string[];
 }
 
-/** 把一批今日熱門題材反推成 code → ThemeRef[]（依 heatRank 升冪）。 */
-function invert(themes: TodayThemeLite[]): Map<string, ThemeRef[]> {
+/** TW：把 38 題材反推成 code → ThemeRef[]（依 heatRank 升冪，refs[0]=今日最熱題材）。 */
+function invertTw(themes: TodayThemeLite[]): Map<string, ThemeRef[]> {
   const map = new Map<string, ThemeRef[]>();
   for (const t of themes) {
     const ref: ThemeRef = { themeId: t.id, themeName: t.name, heatRank: t.heatRank };
-    for (const code of t.memberCodes) {
-      const arr = map.get(code) ?? [];
-      arr.push(ref);
-      map.set(code, arr);
-    }
+    for (const code of t.memberCodes) (map.get(code) ?? map.set(code, []).get(code)!).push(ref);
   }
   for (const arr of map.values()) arr.sort((a, b) => a.heatRank - b.heatRank);
   return map;
+}
+
+/**
+ * CN：把全部概念反推成 code → ThemeRef[]，每檔挑「最具代表性」的概念顯示。
+ * A 股一檔常屬十幾個概念 → 取「成分股最少＝最專一」的前 N 個（像鋰礦概念，而非反內捲這種大雜燴），
+ * 再確保「今日最熱的那個概念」一定在集合內（供 🔥 標示 + 今日題材熱度排序的 min 名次）。
+ * refs[0] = 最專一的概念（顯示主題材）；集合內含今日最熱者（bestHeatRank 取 min 找得到）。
+ */
+function invertCn(themes: TodayThemeLite[]): Map<string, ThemeRef[]> {
+  type Raw = { themeId: string; themeName: string; heatRank: number; size: number };
+  const raw = new Map<string, Raw[]>();
+  for (const t of themes) {
+    const r: Raw = { themeId: t.id, themeName: t.name, heatRank: t.heatRank, size: t.memberCodes.length };
+    for (const code of t.memberCodes) (raw.get(code) ?? raw.set(code, []).get(code)!).push(r);
+  }
+  const out = new Map<string, ThemeRef[]>();
+  for (const [code, arr] of raw) {
+    const hottest = arr.reduce((a, b) => (b.heatRank < a.heatRank ? b : a));
+    const specific = [...arr].sort((a, b) => a.size - b.size).slice(0, CN_DISPLAY_REFS); // 最專一在前
+    const picked = [...specific];
+    if (!picked.some((r) => r.themeId === hottest.themeId)) picked.push(hottest); // 保證含今日最熱
+    out.set(code, picked.map(({ themeId, themeName, heatRank }) => ({ themeId, themeName, heatRank })));
+  }
+  return out;
 }
 
 // ── TW：38 題材按 avgD1（今日題材平均漲幅）排 ───────────────────────────────────
@@ -74,8 +98,8 @@ async function twTodayThemes(date: string): Promise<TodayThemeLite[]> {
 async function cnTodayThemes(date: string): Promise<TodayThemeLite[]> {
   const day = await readBoardsDay(date);
   if (!day) return [];
-  // filterThemeConcepts：濾掉風格/大盤/盤口板塊 + 依今日漲幅重排 rank（1-based）
-  const concepts = filterThemeConcepts(day.concepts).slice(0, CN_TOP_CONCEPTS);
+  // filterThemeConcepts：濾掉風格/大盤/盤口板塊 + 依今日漲幅重排 rank（1-based）。抓全部（safety cap）。
+  const concepts = filterThemeConcepts(day.concepts).slice(0, CN_MAX_CONCEPTS);
 
   const out: TodayThemeLite[] = [];
   for (let i = 0; i < concepts.length; i += CN_FETCH_CONCURRENCY) {
@@ -99,9 +123,10 @@ async function cnTodayThemes(date: string): Promise<TodayThemeLite[]> {
 async function readCnCache(date: string): Promise<Map<string, ThemeRef[]> | null> {
   try {
     const j = JSON.parse(await fs.readFile(path.join(CN_CACHE_DIR, `${date}.json`), 'utf8')) as {
-      byCode?: Record<string, ThemeRef[]>;
+      v?: number; byCode?: Record<string, ThemeRef[]>;
     };
-    return j.byCode ? new Map(Object.entries(j.byCode)) : null;
+    if (j.v !== CN_CACHE_VERSION || !j.byCode) return null; // 舊版格式 → 作廢重建
+    return new Map(Object.entries(j.byCode));
   } catch {
     return null;
   }
@@ -111,7 +136,10 @@ async function writeCnCache(date: string, map: Map<string, ThemeRef[]>): Promise
   try {
     await fs.mkdir(CN_CACHE_DIR, { recursive: true });
     const byCode = Object.fromEntries(map);
-    await fs.writeFile(path.join(CN_CACHE_DIR, `${date}.json`), JSON.stringify({ generatedAt: new Date().toISOString(), byCode }));
+    await fs.writeFile(
+      path.join(CN_CACHE_DIR, `${date}.json`),
+      JSON.stringify({ v: CN_CACHE_VERSION, generatedAt: new Date().toISOString(), byCode }),
+    );
   } catch {
     /* 快取寫失敗不致命（下次重抓） */
   }
@@ -121,10 +149,11 @@ async function writeCnCache(date: string, map: Map<string, ThemeRef[]>): Promise
 const memCache = new Map<string, Map<string, ThemeRef[]>>();
 
 /**
- * 裸碼 → 今日所屬熱門題材 refs（依今日漲幅；refs[0] = 最熱）。
- * 同時供「今日題材熱度」排序 + 個股題材標注（一檔可屬多題材，refs 依名次升冪）。
+ * 裸碼 → 所屬題材/概念 refs（供「今日題材熱度」排序 + 個股題材標注）。
+ * TW：refs 依今日漲幅名次升冪（refs[0]=今日最熱題材）。
+ * CN：refs[0]=最具代表性（最專一）概念；集合內含今日最熱者（bestHeatRank 取 min 找得到）。
  * 陸股題材分類已於 2026-06-21 從 hotThemes 移除（5 日合成路線）；此處改走 cn-agents 概念板塊
- * 即時反查（前 80 熱概念），重新支援陸股，但「今天哪個概念在燒」當排序＝反指標、僅觀察。
+ * 即時反查全部概念（一檔都標得到本來的概念），其中「今天哪個概念在燒」當排序＝反指標、僅觀察。
  */
 export async function rankCodeToThemesToday(market: TsMarket, date: string): Promise<Map<string, ThemeRef[]>> {
   const key = `${market}:${date}`;
@@ -133,13 +162,13 @@ export async function rankCodeToThemesToday(market: TsMarket, date: string): Pro
 
   let map: Map<string, ThemeRef[]>;
   if (market === 'TW') {
-    map = invert(await twTodayThemes(date)); // TW 純讀 sectorRanking，快、記憶體快取即可
+    map = invertTw(await twTodayThemes(date)); // TW 純讀 sectorRanking，快、記憶體快取即可
   } else {
     const cached = await readCnCache(date);
     if (cached) {
       map = cached;
     } else {
-      map = invert(await cnTodayThemes(date));
+      map = invertCn(await cnTodayThemes(date));
       if (map.size > 0) await writeCnCache(date, map); // 抓到才寫（避免把空結果固化）
     }
   }
