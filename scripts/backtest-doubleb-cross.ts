@@ -1,10 +1,17 @@
 // ============================================================
-// 雙B戰法 — 「智能交易線從下往上穿過黃紅線」獨立回測實驗
+// 雙B戰法 — 「站上兩條線」正確定義回測
 //
-// 訊號：智能交易線(zhineng) 上穿 黃線(zb4) / 紅線(zb5) / 兩者(較高者)。
-//   這是「雙B戰法」既有兩支買訊（b_gold 黃紅金叉 CROSS(zb4,zb5)、
-//   b_break 突破智能線 CROSS(C,zhineng)）之外的變體，故用獨立腳本實驗，
-//   不動正式選股鏈路（CLAUDE.md rule #5/#10）。
+// 「雙B」= 兩個 B，每個 B 是一次「站上線」：
+//   B① 站上智能交易線(zhineng)        ＝ 收盤 > zhineng
+//   B② 站上紅黃線(zb4 黃 / zb5 紅)     ＝ 收盤 > 黃且 > 紅（紅黃當一組要兩條都站上）
+//   雙B 成立 ＝ B① 且 B② 同時站上。
+//
+// 進場觸發 ＝「由非雙B 翻成雙B 的那天」（價格新站上兩條線）。
+//
+// 為了看出「少掉那個 B 有沒有用」，同時對照：
+//   單B-智能：只看新站上智能線（＝舊 b_break）
+//   單B-紅黃：只看新站上紅黃線
+//   雙B     ：兩條都新站上（站上其中一條時、另一條已在上方）
 //
 // 指標公式直接複用 lib/cn-sanse/tdx 原生函式，與走圖/掃描同一事實來源：
 //   ZB      = (C+H+O+L)/4
@@ -12,21 +19,22 @@
 //   ZB3     = (3C+O+L+H)/6
 //   zb4     = 20日線性加權(ZB3)            黃線
 //   zb5     = MA(zb4,6)                    紅線
-//   duokong = MA(C,60)                     多空線（濾網用）
+//   ma60    = MA(C,60)                     多空線（濾網用）
 //
 // 進場：訊號日隔日開盤；報酬 = (後續收盤 − 進場開盤)/進場開盤。
+// 研究腳本，不動正式選股鏈路（CLAUDE.md rule #5/#10）。
 //
 // 用法：
-//   npx tsx scripts/backtest-doubleb-cross.ts            # 自動：有 data/candles 用全市場，否則用 fixtures 示範
+//   npx tsx scripts/backtest-doubleb-cross.ts            # 有 data/candles 用全市場，否則 fixtures 示範
 //   npx tsx scripts/backtest-doubleb-cross.ts TW         # 指定市場（data/candles/TW）
 //   npx tsx scripts/backtest-doubleb-cross.ts CN
-//   npx tsx scripts/backtest-doubleb-cross.ts fixtures   # 強制用 __tests__/fixtures/candles 示範
+//   npx tsx scripts/backtest-doubleb-cross.ts fixtures   # 強制用 fixtures 示範
 //   旗標：--above60  只取「站上多空線(MA60)」的訊號（順勢濾網）
 // ============================================================
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import path from 'path';
-import { HHV, MA, CROSS, mul, isNum } from '@/lib/cn-sanse/tdx';
+import { HHV, MA, mul, isNum } from '@/lib/cn-sanse/tdx';
 import type { Candle } from '@/types';
 
 const ZB4_WEIGHTS = (() => {
@@ -55,24 +63,38 @@ function computeLines(candles: Candle[]): Lines {
   return { zhineng, zb4, zb5, ma60 };
 }
 
-// 三種「黃紅線」定義：紅線(慢)、黃線(快)、兩者較高者（真正穿出雙線帶）
-type Variant = 'red' | 'yellow' | 'band';
-const VARIANTS: { key: Variant; label: string; line: (l: Lines) => number[] }[] = [
-  { key: 'red', label: '上穿紅線(zb5)', line: (l) => l.zb5 },
-  { key: 'yellow', label: '上穿黃線(zb4)', line: (l) => l.zb4 },
-  { key: 'band', label: '穿出黃紅帶(max)', line: (l) => l.zb4.map((v, i) => Math.max(v, l.zb5[i])) },
+// 三種訊號：兩種單B 各一條線，雙B 是兩條都新站上
+type Variant = 'b_smart' | 'b_yr' | 'dual';
+const VARIANTS: { key: Variant; label: string }[] = [
+  { key: 'b_smart', label: '單B｜新站上智能線' },
+  { key: 'b_yr', label: '單B｜新站上紅黃線' },
+  { key: 'dual', label: '雙B｜兩條都站上' },
 ];
 
-const HOLD = [3, 5, 10] as const;
+const HOLD = [10, 20, 40] as const;
 interface Trade { d: Record<number, number | null>; maxGain: number | null; maxLoss: number | null; above60: boolean }
 
 function backtestStock(candles: Candle[], variant: Variant): Trade[] {
-  const lines = computeLines(candles);
-  const cross = CROSS(lines.zhineng, VARIANTS.find((v) => v.key === variant)!.line(lines));
+  const { zhineng, zb4, zb5, ma60 } = computeLines(candles);
   const n = candles.length;
-  const trades: Trade[] = [];
+  const C = candles.map((c) => c.close);
+
+  // 每日「站上」狀態
+  const aboveSmart: boolean[] = new Array(n).fill(false); // 站上智能線
+  const aboveYR: boolean[] = new Array(n).fill(false);    // 站上紅黃線（黃且紅都站上）
+  const aboveBoth: boolean[] = new Array(n).fill(false);  // 雙B 狀態
   for (let i = 0; i < n; i++) {
-    if (!cross[i]) continue;
+    aboveSmart[i] = isNum(zhineng[i]) && C[i] > zhineng[i];
+    aboveYR[i] = isNum(zb4[i]) && isNum(zb5[i]) && C[i] > zb4[i] && C[i] > zb5[i];
+    aboveBoth[i] = aboveSmart[i] && aboveYR[i];
+  }
+  // 觸發 = 由 false 翻成 true 的那天（新站上）
+  const stateOf = (i: number): boolean =>
+    variant === 'b_smart' ? aboveSmart[i] : variant === 'b_yr' ? aboveYR[i] : aboveBoth[i];
+
+  const trades: Trade[] = [];
+  for (let i = 1; i < n; i++) {
+    if (!(stateOf(i) && !stateOf(i - 1))) continue; // 新站上才進場
     const entryIdx = i + 1;            // 隔日開盤進場
     if (entryIdx >= n) continue;
     const entry = candles[entryIdx].open;
@@ -87,7 +109,7 @@ function backtestStock(candles: Candle[], variant: Variant): Trade[] {
     for (let j = entryIdx; j <= last; j++) { hi = Math.max(hi, candles[j].high); lo = Math.min(lo, candles[j].low); }
     const maxGain = hi > -Infinity ? +(((hi - entry) / entry) * 100).toFixed(2) : null;
     const maxLoss = lo < Infinity ? +(((lo - entry) / entry) * 100).toFixed(2) : null;
-    const above60 = isNum(lines.ma60[i]) && candles[i].close > lines.ma60[i];
+    const above60 = isNum(ma60[i]) && C[i] > ma60[i];
     trades.push({ d, maxGain, maxLoss, above60 });
   }
   return trades;
@@ -149,9 +171,9 @@ function main() {
   const arg = args.find((a) => !a.startsWith('--')) ?? 'auto';
   const { source, stocks } = loadCandleSet(arg);
 
-  console.log(`\n雙B戰法回測 — 智能交易線從下往上穿過黃紅線`);
+  console.log(`\n雙B戰法回測 — 站上兩條線（智能線 + 紅黃線）`);
   console.log(`資料源：${source}`);
-  console.log(`進場：訊號日隔日開盤｜持有：3/5/10 交易日收盤｜maxGain/Loss：10 日窗最高/最低`);
+  console.log(`進場：訊號日隔日開盤｜持有：10/20/40 交易日收盤｜maxGain/Loss：10 日窗最高/最低`);
   if (above60Only) console.log(`濾網：僅取「站上多空線(MA60)」的訊號`);
   console.log('');
 
@@ -164,11 +186,12 @@ function main() {
     }
     const sum = summarize(all);
     console.log(`■ ${v.label}`);
-    console.log(`   訊號數 ${sum.n}｜3日 ${sum.d3}｜5日 ${sum.d5}｜10日 ${sum.d10}｜平均最高 ${sum.maxGain}｜平均最低 ${sum.maxLoss}`);
+    const holdStr = HOLD.map((h) => `${h}日 ${sum[`d${h}`]}`).join('｜');
+    console.log(`   訊號數 ${sum.n}｜${holdStr}｜平均最高 ${sum.maxGain}｜平均最低 ${sum.maxLoss}`);
   }
   console.log('');
-  console.log('> 註：fixtures 僅 15 檔、訊號樣本極少，結果僅供「跑通驗證」，不可當勝率結論。');
-  console.log('> 全市場回測請在有 data/candles/{TW,CN} 完整 Layer-1 K 線庫的機器執行同一腳本。');
+  console.log('> 雙B vs 單B 並排：若「雙B」勝率/期望優於兩個單B，代表那個「多出來的 B」確實有過濾作用。');
+  console.log('> fixtures 為小樣本僅供跑通驗證；勝率結論以 data/candles/{TW,CN} 全市場為準。');
 }
 
 main();

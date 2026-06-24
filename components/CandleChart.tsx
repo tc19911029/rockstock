@@ -193,7 +193,7 @@ interface CandleChartProps {
     zb4: { time: string; value: number }[];
     zb5: { time: string; value: number }[];
     duokong: { time: string; value: number }[];
-    markers: { time: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown'; color: string; text: string }[];
+    markers: { time: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown' | 'circle'; color: string; text: string }[];
   } | null;
   /**
    * ABC 突破偵測器選用的腳位疊加（除錯/驗證用，2026-05-30）— 把 detectABCBreakout 實際選的
