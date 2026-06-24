@@ -53,8 +53,12 @@ function extractUSTicker(symbol: string): string | null {
   return null;
 }
 
-/** A 股代碼 → secid（suffix 優先，否則用首字判斷） */
+/** A 股代碼 → secid（北交所優先 → suffix → 首字判斷） */
 function cnSecid(code: string, suffix?: 'SS' | 'SZ' | null): string {
+  // 北交所（920xxx / 8xxxxx / 43xxxx）市場碼一律 0，與滬深無代碼歧義 → 最優先判斷。
+  // 必須早於 suffix：上游解析器不認 .BJ，常把 920xxx 依「9 開頭→上海」誤標成 .SS，
+  // 落到 1.920060（上海）會抓空（北交所 920060 万源通 正解=0.920060）。
+  if (/^(92|8|4)/.test(code)) return `0.${code}`;
   // suffix 是權威來源：000001.SS = 上證指數 (market=1)、000001.SZ = 平安銀行 (market=0)
   // 不可只看首字判斷，否則 000001.SS 會被誤路由到 0.000001（平安銀行）
   if (suffix === 'SS') return `1.${code}`;
