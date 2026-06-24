@@ -16,6 +16,7 @@ import { applySort } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
 import { bullBearClass } from '@/lib/format';
 import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
+import { useIsChartCurrent } from '@/lib/chartListNav';
 import { SectorsNavContext, SectorsBadgesContext, useSectorBadges, StockLink, StockBadges, AddWatchBtn, type SectorSelectStock, type SectorBadgeSets, type ScanSig, type SixCondSig } from './StockLink';
 import { CnView } from './CnView';
 import { LiveThemesView } from './LiveThemesView';
@@ -147,8 +148,9 @@ const CARD_SORTS: Array<{ id: string; label: string }> = [
 function StockCard({ m }: { m: PerfMember }) {
   const badges = useSectorBadges();
   const sc = badges?.scan.get(m.code);
+  const isCur = useIsChartCurrent(m.code);
   return (
-    <div className="rounded-lg border border-foreground/20 bg-card/40 px-3 py-2 hover:border-foreground/40 hover:bg-muted/30 transition-colors">
+    <div className={`rounded-lg border bg-card/40 px-3 py-2 hover:border-foreground/40 hover:bg-muted/30 transition-colors ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/20'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
           <StockLink code={m.code} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
@@ -225,7 +227,8 @@ function PerfGrid({ members }: { members: PerfMember[] }) {
           {onlyBull ? '✓ ' : ''}只看多頭
         </button>
       </div>
-      <div className="p-1.5 space-y-1.5">
+      {/* data-navlist：鍵盤 ↑↓ 跳股的清單範圍（題材成分股共用 sector-members，同時只展開一個） */}
+      <div className="p-1.5 space-y-1.5" data-navlist="sector-members">
         {shown.map((m) => <StockCard key={m.code} m={m} />)}
         {onlyBull && shown.length === 0 && (
           <div className="px-2 py-3 text-center text-[11px] text-muted-foreground/55">此題材沒有趨勢為多頭的成分股（或六條件判讀中…）</div>

@@ -16,6 +16,8 @@ import { ThemeTag } from '@/components/ThemeTag';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
+import { useReplayStore } from '@/store/replayStore';
+import { navKey } from '@/lib/chartListNav';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,6 +81,8 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     activeBuyMethod,
   } = useBacktestStore();
 
+  // 目前走圖載入那檔（高亮列用）— navKey 正規化後比對
+  const navCurrentKey = useReplayStore((s) => navKey(s.currentStock?.ticker));
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [newsCache, setNewsCache] = useState<Record<string, { sentiment: number; summary: string; hasNews: boolean; loading: boolean }>>({});
@@ -337,11 +341,13 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
               <th className="text-center py-1.5 px-2 whitespace-nowrap" style={{ width: '90px' }}>操作</th>
             </tr>
           </thead>
-          <tbody>
+          {/* data-navlist：鍵盤 ↑↓ 跳股的清單範圍（掃描結果） */}
+          <tbody data-navlist="scan-results">
             {sortedScanResults.slice(0, 50).map((r) => {
               const perf = perfMap.get(r.symbol);
+              const isCur = navCurrentKey === navKey(r.symbol);
               return (<Fragment key={r.symbol}>
-              <tr className={`group border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''}`}
+              <tr className={`group border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''} ${isCur ? 'ring-1 ring-inset ring-sky-400/60 bg-sky-500/5' : ''}`}
                 onClick={() => setExpandedStock(expandedStock === r.symbol ? null : r.symbol)}>
                 {/* 代號 — sticky */}
                 <td className="py-1.5 px-2 font-mono text-foreground/90 sticky left-0 bg-card group-hover:bg-secondary/40 z-10 transition-colors">
@@ -435,6 +441,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                 {/* 操作 */}
                 <td className="py-1.5 px-2 text-center whitespace-nowrap">
                   <button
+                    data-navstock={navKey(r.symbol)}
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectStock?.({ symbol: r.symbol, name: r.name, market: market as 'TW' | 'CN' });

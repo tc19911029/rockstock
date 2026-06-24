@@ -27,6 +27,7 @@ import { SPEC_STOCK_TYPE_LABEL, SPEC_DIM_LABEL, COMBO_BADGE_LABEL } from '@/lib/
 import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { formatLetters } from '@/lib/scanner/buyMethodTracks';
+import { navKey } from '@/lib/chartListNav';
 import { signalOf } from '@/lib/i18n/fundamentalLabels';
 import { ForwardPerfRow } from '@/features/scan/components/ForwardPerfRow';
 import { EntryStateBadge } from '@/components/EntryStateBadge';
@@ -568,7 +569,8 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                 <th className="px-2 py-1.5 text-left font-medium">理由</th>
               </tr>
             </thead>
-            <tbody>
+            {/* data-navlist：鍵盤 ↑↓ 跳股的清單範圍（候選池） */}
+            <tbody data-navlist="pool">
               {sortedCandidates.map((c) => (
                 <PoolRow
                   key={c.symbol}
@@ -636,6 +638,7 @@ function PoolRow({
     <Fragment>
       <tr
         className={hoverClass}
+        data-navstock={navKey(candidate.symbol)}
         onClick={() => onSelect?.(candidate.symbol)}
         title={reasons.length > 0 ? reasons.join('\n') : `${candidate.name}（${candidate.industry ?? '—'}）`}
       >

@@ -24,6 +24,7 @@ import { evaluateAt as smEvaluateAt } from '@/lib/smartmoney/signal';
 import { evaluateAt as instEvaluateAt } from '@/lib/instdip/signal';
 import { evaluateAt as stealEvaluateAt } from '@/lib/inststeal/signal';
 import { computeChipAvoidSignals } from '@/lib/avoidance/chipAvoidSignals';
+import { useChartListNavCapture, navigateStockList } from '@/lib/chartListNav';
 import StockSelector from '@/components/StockSelector';
 import { PageShell, EmptyState, BackButton, StockChartView } from '@/components/shared';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -228,6 +229,9 @@ function HomePage() {
 
   useEffect(() => { initData(); }, [initData]);
 
+  // ↑↓ 跳股票：記住「最後點到的股票」屬於哪個清單（題材/掃描/候選池），鍵盤上下鍵據此換股
+  useChartListNavCapture();
+
   // 大盤指數預設：TW→加權指數 ^TWII，CN→上證指數 000001.SS
   const market = useBacktestStore(s => s.market);
   const scanDate = useBacktestStore(s => s.scanDate);
@@ -378,6 +382,14 @@ function HomePage() {
     else if (e.key === 'ArrowLeft' && e.shiftKey) { e.preventDefault(); jumpToBuyPoint('prev'); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); nextCandle(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); prevCandle(); }
+    // ↑↓：在「題材成分股 / 掃描結果 / 候選池」清單裡跳上一檔/下一檔並載圖。
+    // 沒有作用中的清單（沒點過、或清單已切走）→ navigateStockList 回 false，讓上下鍵照常捲動頁面。
+    else if (e.key === 'ArrowDown') {
+      if (navigateStockList(1, useReplayStore.getState().currentStock?.ticker ?? null)) e.preventDefault();
+    }
+    else if (e.key === 'ArrowUp') {
+      if (navigateStockList(-1, useReplayStore.getState().currentStock?.ticker ?? null)) e.preventDefault();
+    }
     else if (e.key === ' ') { e.preventDefault(); if (isPlaying) stopPlay(); else startPlay(); }
     // P2-3: tab switching
     else if (e.key === '1') { e.preventDefault(); setSideTab('conditions'); }

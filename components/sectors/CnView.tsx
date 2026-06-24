@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/shared';
 import { applySort } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
 import { bullBearClass } from '@/lib/format';
+import { useIsChartCurrent } from '@/lib/chartListNav';
 import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
 import { StockLink, AddWatchBtn } from './StockLink';
 
@@ -138,8 +139,9 @@ const cnIIdxOf = (p: number) => (INST_PERIODS as readonly number[]).indexOf(p);
 
 // 成分股卡片（陸股：漲幅 + 主力淨流入 + 成交額；A股無台股那種法人/融資）
 function CnStockCard({ m, idxOf }: { m: CnMemberPerf; idxOf: (p: number) => number }) {
+  const isCur = useIsChartCurrent(m.symbol);
   return (
-    <div className="rounded-lg border border-foreground/20 bg-card/40 px-3 py-2 hover:border-foreground/40 hover:bg-muted/30 transition-colors">
+    <div className={`rounded-lg border bg-card/40 px-3 py-2 hover:border-foreground/40 hover:bg-muted/30 transition-colors ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/20'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
           <StockLink code={m.symbol} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
@@ -218,7 +220,8 @@ function CnPerfGrid({ file }: { file: CnMembersFile | 'loading' | 'error' | unde
         </button>
         {onlyBull && <span className="text-muted-foreground/45">今日紅 + 5日紅 · {shown.length} 檔</span>}
       </div>
-      <div className="p-1.5 space-y-1.5">
+      {/* data-navlist：鍵盤 ↑↓ 跳股的清單範圍（題材成分股共用 sector-members） */}
+      <div className="p-1.5 space-y-1.5" data-navlist="sector-members">
         {shown.map((m) => <CnStockCard key={m.code} m={m} idxOf={idxOf} />)}
         {onlyBull && shown.length === 0 && (
           <div className="px-2 py-3 text-center text-[11px] text-muted-foreground/55">這個板塊沒有「今日紅＋5日紅」的成分股</div>

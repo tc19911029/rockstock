@@ -13,6 +13,7 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useWatchlistStore } from '@/store/watchlistStore';
+import { navKey } from '@/lib/chartListNav';
 
 export type SectorSelectStock = (code: string) => void;
 
@@ -87,16 +88,17 @@ export function StockLink({ code, className, title, children }: {
   children: ReactNode;
 }) {
   const onSelect = useContext(SectorsNavContext);
+  // data-navstock：鍵盤 ↑↓ 跳股用的裸碼標記（見 lib/chartListNav）
   if (onSelect) {
     return (
-      <button type="button" className={className} title={title}
+      <button type="button" className={className} title={title} data-navstock={navKey(code)}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSelect(code); }}>
         {children}
       </button>
     );
   }
   return (
-    <Link href={`/?load=${code}`} className={className} title={title}
+    <Link href={`/?load=${code}`} className={className} title={title} data-navstock={navKey(code)}
       onClick={(e) => e.stopPropagation()}>
       {children}
     </Link>

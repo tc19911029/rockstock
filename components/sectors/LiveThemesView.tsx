@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/shared';
 import { applySort } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
 import { bullBearClass } from '@/lib/format';
+import { useIsChartCurrent } from '@/lib/chartListNav';
 import { StockLink } from './StockLink';
 
 type Market = 'TW' | 'CN';
@@ -156,6 +157,24 @@ function LiveBar({ market, marketOpen, stale, updatedAt, refreshing, onRefresh, 
 
 // ── 台股：題材卡（完整成分股，可展開）──────────────────────────────────────────
 
+// 成分股一列（抽成元件才能用 useIsChartCurrent 高亮目前走圖那檔）
+function TwLiveMemberRow({ m }: { m: LiveThemeMember }) {
+  const isCur = useIsChartCurrent(m.code);
+  return (
+    <div className={`flex items-center justify-between gap-2 rounded border bg-card/40 px-2.5 py-1.5 ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/15'}`}>
+      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+        <StockLink code={m.code} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
+          <span className="font-medium text-foreground text-sm">{m.name}</span>
+          <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
+        </StockLink>
+        {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
+        <span className="text-[10px] text-muted-foreground/55">量 {m.volRatio != null ? `${m.volRatio.toFixed(1)}×` : '—'}</span>
+      </div>
+      <span className="font-mono tabular-nums shrink-0"><Pct v={m.changePercent} /></span>
+    </div>
+  );
+}
+
 function TwThemeCard({ t, rank, expanded, onToggle }: {
   t: LiveTheme; rank: number; expanded: boolean; onToggle: () => void;
 }) {
@@ -185,20 +204,9 @@ function TwThemeCard({ t, rank, expanded, onToggle }: {
         </div>
       </div>
       {expanded && (
-        <div className="bg-muted/20 border-t border-border border-l-2 border-l-sky-500/40 p-1.5 space-y-1">
-          {members.map((m) => (
-            <div key={m.code} className="flex items-center justify-between gap-2 rounded border border-foreground/15 bg-card/40 px-2.5 py-1.5">
-              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                <StockLink code={m.code} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
-                  <span className="font-medium text-foreground text-sm">{m.name}</span>
-                  <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
-                </StockLink>
-                {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
-                <span className="text-[10px] text-muted-foreground/55">量 {m.volRatio != null ? `${m.volRatio.toFixed(1)}×` : '—'}</span>
-              </div>
-              <span className="font-mono tabular-nums shrink-0"><Pct v={m.changePercent} /></span>
-            </div>
-          ))}
+        // data-navlist：鍵盤 ↑↓ 跳股的清單範圍（題材成分股共用 sector-members）
+        <div className="bg-muted/20 border-t border-border border-l-2 border-l-sky-500/40 p-1.5 space-y-1" data-navlist="sector-members">
+          {members.map((m) => <TwLiveMemberRow key={m.code} m={m} />)}
         </div>
       )}
     </div>
@@ -245,6 +253,24 @@ const CN_SORTS = [
 interface CnLiveMember {
   code: string; name: string; symbol: string;
   pct: number; turnoverCny: number | null; mainNetCny: number | null;
+}
+
+// 陸股板塊成分股一列（抽成元件才能用 useIsChartCurrent 高亮目前走圖那檔）
+function CnLiveMemberRow({ m }: { m: CnLiveMember }) {
+  const isCur = useIsChartCurrent(m.symbol);
+  return (
+    <div className={`flex items-center justify-between gap-2 rounded border bg-card/40 px-2.5 py-1.5 ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/15'}`}>
+      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+        <StockLink code={m.symbol} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
+          <span className="font-medium text-foreground text-sm">{m.name}</span>
+          <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
+        </StockLink>
+        <span className="text-[10px] text-muted-foreground/55">成交 {fmtTurnover(m.turnoverCny)}</span>
+        <span className="text-[10px] text-muted-foreground/55 inline-flex items-baseline gap-0.5">主力 <Amt v={m.mainNetCny} /></span>
+      </div>
+      <span className="font-mono tabular-nums shrink-0"><Pct v={m.pct} /></span>
+    </div>
+  );
 }
 
 function CnBoardRow({ b, rank, sortId, dir }: { b: LiveBoard; rank: number; sortId: string; dir: SortDir }) {
@@ -309,23 +335,12 @@ function CnBoardRow({ b, rank, sortId, dir }: { b: LiveBoard; rank: number; sort
         </div>
       </div>
       {expanded && (
-        <div className="bg-muted/20 border-t border-border border-l-2 border-l-sky-500/40 p-1.5 space-y-1">
+        // data-navlist：鍵盤 ↑↓ 跳股的清單範圍（題材成分股共用 sector-members）
+        <div className="bg-muted/20 border-t border-border border-l-2 border-l-sky-500/40 p-1.5 space-y-1" data-navlist="sector-members">
           {loading && <div className="text-[11px] text-muted-foreground/60 py-3 text-center animate-pulse">抓成分股中…</div>}
           {err && !loading && <div className="text-[11px] text-amber-400/80 py-3 text-center">成分股抓不到（{err}）</div>}
           {members && members.length === 0 && !loading && <div className="text-[11px] text-muted-foreground/60 py-3 text-center">無成分股資料</div>}
-          {sortedMembers && sortedMembers.map((m) => (
-            <div key={m.code} className="flex items-center justify-between gap-2 rounded border border-foreground/15 bg-card/40 px-2.5 py-1.5">
-              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                <StockLink code={m.symbol} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
-                  <span className="font-medium text-foreground text-sm">{m.name}</span>
-                  <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
-                </StockLink>
-                <span className="text-[10px] text-muted-foreground/55">成交 {fmtTurnover(m.turnoverCny)}</span>
-                <span className="text-[10px] text-muted-foreground/55 inline-flex items-baseline gap-0.5">主力 <Amt v={m.mainNetCny} /></span>
-              </div>
-              <span className="font-mono tabular-nums shrink-0"><Pct v={m.pct} /></span>
-            </div>
-          ))}
+          {sortedMembers && sortedMembers.map((m) => <CnLiveMemberRow key={m.code} m={m} />)}
         </div>
       )}
     </div>
