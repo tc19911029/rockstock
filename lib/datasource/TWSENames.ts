@@ -92,8 +92,10 @@ export async function getCNChineseName(code: string, suffix?: 'SS' | 'SZ'): Prom
 
   // 3. 東方財富 API 動態查詢（僅靜態清單查無時才打 API）
   try {
-    // suffix 權威：SS=上海(1.code)、SZ=深圳(0.code)。否則退回首字判斷
-    const secid = suffix === 'SS' ? `1.${code}`
+    // 北交所（920/8/4 開頭）市場碼一律 0、與滬深無代碼歧義 → 最優先（上游常把 920xxx 誤標 .SS，
+    // 落到 1.920xxx 上海會抓空，名字出不來只剩裸代號）。其餘 suffix 權威：SS=上海(1.code)、SZ=深圳(0.code)。
+    const secid = /^(92|8|4)/.test(code) ? `0.${code}`
+      : suffix === 'SS' ? `1.${code}`
       : suffix === 'SZ' ? `0.${code}`
       : code.startsWith('6') ? `1.${code}` : `0.${code}`;
     const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f58&_=${Date.now()}`;
@@ -112,7 +114,7 @@ export async function getCNChineseName(code: string, suffix?: 'SS' | 'SZ'): Prom
 
   // 4. 騰訊財經 API（備援，GBK 編碼）
   try {
-    const prefix = suffix === 'SS' ? 'sh' : suffix === 'SZ' ? 'sz' : code.startsWith('6') ? 'sh' : 'sz';
+    const prefix = /^(92|8|4)/.test(code) ? 'bj' : suffix === 'SS' ? 'sh' : suffix === 'SZ' ? 'sz' : code.startsWith('6') ? 'sh' : 'sz';
     const url = `https://qt.gtimg.cn/q=${prefix}${code}`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
