@@ -20,7 +20,7 @@ export interface BarPoint { time: string; value: number; color: string }
 export interface ChartMarker {
   time: string;
   position: 'aboveBar' | 'belowBar';
-  shape: 'arrowUp' | 'arrowDown';
+  shape: 'arrowUp' | 'arrowDown' | 'circle';
   color: string;
   text: string;
   size?: number; // lightweight-charts marker 大小倍率（預設 1）；放大讓金叉/死叉箭頭更醒目
@@ -89,28 +89,32 @@ export function computeSanSeChart(
   const dates = candles.map((c) => c.date);
   const C = candles.map((c) => c.close);
   const n = candles.length;
-  // 只在「該訊號最近一次」標文字，其餘只留彩色箭頭 → 訊號密集時標籤不互疊
-  const lastTrue = (arr: boolean[]): number => { for (let k = n - 1; k >= 0; k--) if (arr[k]) return k; return -1; };
 
   // ── 雙B戰法主圖（共用 ./dualB）──────────────────────────────────
   const db = computeDualB(candles);
   const { zb4, zb5, zhineng, ma60: duokong } = db;
-  const buy = db.goldCross;          // 黃紅雙線金叉
-  const sell = db.deadCross;         // 黃紅雙線死叉
-  const breakUp = db.breakUp;        // 突破智能交易線
-  const breakDn = db.breakDn;        // 跌破智能交易線
+  const buy = db.goldCross;          // 黃金交叉（黃上穿紅）→ 紅箭頭向上
+  const sell = db.deadCross;         // 死叉（黃下穿紅）→ 綠箭頭向下
+  const breakUp = db.breakUp;        // 突破智能線 → 藍 B
+  const breakDn = db.breakDn;        // 跌破智能線 → 藍 S
+  const breakUpYR = db.breakUpYR;    // 突破紅黃線 → 紅 B
+  const breakDnYR = db.breakDnYR;    // 跌破紅黃線 → 紅 S
 
-  const lastBuy = lastTrue(buy);
-  const lastSell = lastTrue(sell);
-  const lastBreakUp = lastTrue(breakUp);
-  const lastBreakDn = lastTrue(breakDn);
   const mainMarkers: ChartMarker[] = [];
   for (let i = 0; i < n; i++) {
-    // B/S = 黃紅雙線金叉/死叉（紅 B 買、綠 S 賣）；突破/跌破 = 智能交易線。各只在最近一次標字，其餘留箭頭。
-    if (buy[i]) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: i === lastBuy ? 'B' : '' });
-    if (sell[i]) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN, text: i === lastSell ? 'S' : '' });
-    if (breakUp[i]) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: YELLOW, text: i === lastBreakUp ? '突破' : '' });
-    if (breakDn[i]) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: BLUE, text: i === lastBreakDn ? '跌破' : '' });
+    // ── 站上線 = B 字母：紅=紅黃線、藍=智能線、紫=同時站上 ──
+    const bYR = breakUpYR[i], bSmart = breakUp[i];
+    if (bYR && bSmart) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'circle', color: PURPLE, text: 'B' });
+    else if (bYR) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'circle', color: RED, text: 'B' });
+    else if (bSmart) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'circle', color: BLUE, text: 'B' });
+    // ── 跌破線 = S 字母：紅=紅黃線、藍=智能線、紫=同時跌破 ──
+    const sYR = breakDnYR[i], sSmart = breakDn[i];
+    if (sYR && sSmart) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'circle', color: PURPLE, text: 'S' });
+    else if (sYR) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'circle', color: RED, text: 'S' });
+    else if (sSmart) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'circle', color: BLUE, text: 'S' });
+    // ── 黃紅金叉/死叉 = 箭頭：紅箭頭向上 / 綠箭頭向下（放大更醒目）──
+    if (buy[i]) mainMarkers.push({ time: dates[i], position: 'belowBar', shape: 'arrowUp', color: RED, text: '', size: 2 });
+    if (sell[i]) mainMarkers.push({ time: dates[i], position: 'aboveBar', shape: 'arrowDown', color: GREEN_SELL, text: '', size: 2 });
   }
 
   // K線變色（涨停洋紅 / 大漲黃；其餘走 A 股紅漲綠跌預設）
@@ -173,11 +177,15 @@ export function computeSanSeChart(
   const i = n - 1;
   const buySig: string[] = [];
   const sellSig: string[] = [];
-  if (buy[i]) buySig.push('黃紅雙線金叉（雙線轉強，可持有/加倉）');
-  if (breakUp[i]) buySig.push('突破智能交易線（站上中期支撐，加倉訊號）');
+  if (breakUpYR[i]) buySig.push('突破紅黃線（站上紅黃均線帶，紅 B）');
+  if (breakUp[i]) buySig.push('突破智能交易線（站上中期支撐，藍 B）');
+  if (breakUpYR[i] && breakUp[i]) buySig.push('同時突破紅黃線＋智能線（紫 B，雙線齊站上）');
+  if (buy[i]) buySig.push('黃紅雙線金叉（紅箭頭，雙線轉強可持有/加倉）');
   if (goldCross[i]) buySig.push(XYS1[i] < 0 ? '動能空頭區金叉（底部反彈）' : '動能多頭區金叉（趨勢延續）');
-  if (sell[i]) sellSig.push('黃紅雙線死叉（雙線轉弱，離場）');
-  if (breakDn[i]) sellSig.push('跌破智能交易線（跌破中期支撐，減倉）');
+  if (breakDnYR[i]) sellSig.push('跌破紅黃線（跌破紅黃均線帶，紅 S）');
+  if (breakDn[i]) sellSig.push('跌破智能交易線（跌破中期支撐，藍 S）');
+  if (breakDnYR[i] && breakDn[i]) sellSig.push('同時跌破紅黃線＋智能線（紫 S，雙線齊跌破）');
+  if (sell[i]) sellSig.push('黃紅雙線死叉（綠箭頭，雙線轉弱離場）');
   if (deadCross[i]) sellSig.push(XYS1[i] > 0 ? '動能多頭區死叉（短期見頂）' : '動能空頭區死叉（下跌加速）');
 
   // ── 主力狀態F（需大盤指數）：複用選股引擎的三色分數 + 補兩條超跌 ──

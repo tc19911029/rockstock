@@ -21,6 +21,7 @@ export interface XysTiers { green: LinePoint[]; yellow: LinePoint[]; cyan: LineP
 export interface DualBSeries {
   zb4: number[]; zb5: number[]; zhineng: number[]; ma60: number[];
   goldCross: boolean[]; deadCross: boolean[]; breakUp: boolean[]; breakDn: boolean[];
+  breakUpYR: boolean[]; breakDnYR: boolean[]; // 突破/跌破紅黃線（站上整條帶 max / 跌破整條帶 min）
 }
 export interface XysSeries { xys0: number[]; xys1: number[]; xys2: number[]; goldCross: boolean[]; deadCross: boolean[] }
 
@@ -53,12 +54,16 @@ export function computeDualB(candles: Candle[], p: SanSeParams = PRODUCTION_PARA
   }
   const zb5 = MA(zb4, p.dualB.zb5Ma);
   const ma60 = MA(C, p.dualB.ma60);
+  const yrHigh = zb4.map((v, k) => Math.max(v, zb5[k])); // 紅黃帶上緣
+  const yrLow = zb4.map((v, k) => Math.min(v, zb5[k]));  // 紅黃帶下緣
   return {
     zb4, zb5, zhineng, ma60,
     goldCross: CROSS(zb4, zb5),
     deadCross: CROSS(zb5, zb4),
     breakUp: CROSS(C, zhineng),
     breakDn: CROSS(zhineng, C),
+    breakUpYR: CROSS(C, yrHigh),
+    breakDnYR: CROSS(yrLow, C),
   };
 }
 
