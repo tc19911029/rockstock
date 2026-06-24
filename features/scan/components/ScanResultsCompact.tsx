@@ -15,6 +15,7 @@ import { ForwardPerfRow } from './ForwardPerfRow';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
 import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
+import { ThemeTag } from '@/components/ThemeTag';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
@@ -289,21 +290,8 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
               {/* Row 2: Price + Industry + Trend + Position + Turnover Rank */}
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{r.price.toFixed(2)}</span>
-                {r.industry && <span className="truncate max-w-[60px]">{r.industry}</span>}
-                {(() => {
-                  const refs = themeHeatMap.get(bareCode(r.symbol));
-                  if (!refs || refs.length === 0) return null;
-                  const best = refs[0];
-                  return (
-                    <span
-                      className="text-amber-400/90 truncate max-w-[110px]"
-                      title={refs.map((x) => `${x.themeName} #${x.heatRank}`).join('、')}
-                    >
-                      🔥{best.themeName} #{best.heatRank}
-                      {refs.length > 1 && <span className="text-muted-foreground"> +{refs.length - 1}</span>}
-                    </span>
-                  );
-                })()}
+                {r.industry && <span className="truncate max-w-[56px]">{r.industry}</span>}
+                <ThemeTag market={market} code={bareCode(r.symbol)} hotMap={themeHeatMap} className="max-w-[120px]" />
                 <span>{r.trendState}</span>
                 <span className="truncate">{r.trendPosition}</span>
                 {(ytSummary || r.turnoverRank !== undefined) && (

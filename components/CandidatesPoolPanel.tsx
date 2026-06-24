@@ -35,6 +35,8 @@ import type { RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { useYouTubeMentionMap, type YouTubeMentionSummary } from '@/lib/hooks/useYouTubeMentionMap';
 import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
 import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
+import type { ThemeRef } from '@/lib/theme-sanse/types';
+import { ThemeTag } from '@/components/ThemeTag';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { RedFlagChips } from '@/components/RedFlagChips';
 import { SortControl } from '@/components/shared';
@@ -577,7 +579,8 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                   onSelect={onSelectStock}
                   selected={selectedSymbol === c.symbol}
                   ytSummary={ytMap.get(bareCode(c.symbol))}
-                  themeRef={themeHeatMap.get(bareCode(c.symbol))?.[0] ?? null}
+                  market={data?.market}
+                  themeHotMap={themeHeatMap}
                 />
               ))}
             </tbody>
@@ -596,7 +599,8 @@ function PoolRow({
   onSelect,
   selected,
   ytSummary,
-  themeRef,
+  market,
+  themeHotMap,
 }: {
   candidate: Candidate;
   totalScore?: number;
@@ -605,7 +609,8 @@ function PoolRow({
   onSelect?: (symbol: string) => void;
   selected?: boolean;
   ytSummary?: YouTubeMentionSummary;
-  themeRef?: { themeName: string; heatRank: number } | null;
+  market?: string;
+  themeHotMap: Map<string, ThemeRef[]>;
 }) {
   const pureSymbol = candidate.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const ytResonance = resonanceTags(ytSummary);
@@ -697,14 +702,7 @@ function PoolRow({
               );
             })}
             {ytSummary && <YouTubeMentionBadge summary={ytSummary} bareCode={pureSymbol} size="xs" />}
-            {themeRef && (
-              <span
-                title={`今日熱門題材：${themeRef.themeName}（第 ${themeRef.heatRank} 名）`}
-                className="inline-flex items-center px-1 py-0.5 rounded border text-[9px] bg-amber-900/30 text-amber-300 border-amber-700/50 max-w-[90px] truncate"
-              >
-                🔥{themeRef.themeName} #{themeRef.heatRank}
-              </span>
-            )}
+            <ThemeTag market={market} code={pureSymbol} hotMap={themeHotMap} className="text-[9px] max-w-[110px]" />
             {candidate.comboBadges?.map(b => (
               <span
                 key={b}

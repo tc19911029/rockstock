@@ -22,6 +22,7 @@ import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
 import { SortControl } from '@/components/shared';
+import { ThemeTag } from '@/components/ThemeTag';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
 
@@ -693,21 +694,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               {/* Row 2: 股價 + 產業 + YouTube 提及 + 成交量名次（三色分數收進卡片 hover）*/}
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{fmt(h.price)}</span>
-                {h.industry && <span className="truncate max-w-[80px]">{h.industry}</span>}
-                {(() => {
-                  const refs = themeHeatMap.get(bare(h.symbol));
-                  if (!refs || refs.length === 0) return null;
-                  const best = refs[0];
-                  return (
-                    <span
-                      className="text-amber-400/90 truncate max-w-[120px]"
-                      title={refs.map((r) => `${r.themeName} #${r.heatRank}`).join('、')}
-                    >
-                      🔥{best.themeName} #{best.heatRank}
-                      {refs.length > 1 && <span className="text-muted-foreground"> +{refs.length - 1}</span>}
-                    </span>
-                  );
-                })()}
+                {h.industry && <span className="truncate max-w-[72px]">{h.industry}</span>}
+                <ThemeTag market={market} code={bare(h.symbol)} hotMap={themeHeatMap} className="max-w-[120px]" />
                 {(ytSummary || h.turnoverRank !== undefined) && (
                   <div className="ml-auto flex items-center gap-1 shrink-0">
                     {ytResonance[0] && (

@@ -12,6 +12,7 @@ import { MTF_SCORE_STRONG, MTF_SCORE_OK } from '@/lib/analysis/bookThresholds';
 import { panelSortKey } from '@/lib/selection/applyPanelFilter';
 import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
 import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
+import { ThemeTag } from '@/components/ThemeTag';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
@@ -394,19 +395,10 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                     )}
                   </div>
                 </td>
-                {/* 概念：有今日熱門題材命中 → 顯示 🔥題材 #名次，否則退回產業別 */}
-                {(() => {
-                  const refs = themeHeatMap.get(bareCode(r.symbol));
-                  const best = refs && refs.length > 0 ? refs[0] : null;
-                  return (
-                    <td
-                      className={`py-1.5 px-1 text-[10px] max-w-[80px] truncate ${best ? 'text-amber-400/90' : 'text-muted-foreground'}`}
-                      title={best ? refs!.map((x) => `${x.themeName} #${x.heatRank}`).join('、') : (r.industry ?? '')}
-                    >
-                      {best ? `🔥${best.themeName} #${best.heatRank}` : (r.industry ?? '—')}
-                    </td>
-                  );
-                })()}
+                {/* 概念：所屬題材/概念（台股38題材／陸股今日熱門概念）；無命中退回產業別 */}
+                <td className="py-1.5 px-1 text-[10px] max-w-[90px]">
+                  <ThemeTag market={market} code={bareCode(r.symbol)} hotMap={themeHeatMap} fallback={r.industry ?? '—'} className="inline-block max-w-[90px] align-bottom" />
+                </td>
                 {/* 價格 + 當日漲跌 */}
                 {(() => {
                   const sym = r.symbol.replace(/\.(TW|TWO)$/i, '');
