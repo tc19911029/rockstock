@@ -1013,18 +1013,30 @@ function HomePage() {
                       className="text-sky-400 hover:text-sky-300 underline">重試</button>
                   </div>
                 )}
-                {dataGaps.length > 0 && currentInterval === '1d' && (
-                  <div className="shrink-0 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between">
-                    <span>
-                      資料斷層：{dataGaps.map((g: { fromDate: string; toDate: string; calendarDays: number }) => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天）`).join('、')}
-                    </span>
-                    <button
-                      onClick={() => { if (!currentStock) return; loadStock(currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, ''), '1d', '2y').catch(() => {}); }}
-                      className="text-yellow-300 hover:text-yellow-200 underline ml-2 whitespace-nowrap">
-                      重新下載
-                    </button>
-                  </div>
-                )}
+                {dataGaps.length > 0 && currentInterval === '1d' && (() => {
+                  const halts = dataGaps.filter((g) => g.kind === 'halt');
+                  const stale = dataGaps.find((g) => g.kind === 'stale');
+                  return (
+                    <div className="shrink-0 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between gap-2">
+                      <span>
+                        {halts.length > 0 && (
+                          <>停牌 {halts.map((g) => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天無交易）`).join('、')}</>
+                        )}
+                        {halts.length > 0 && stale && <span className="mx-1">·</span>}
+                        {stale && (
+                          <>資料 {stale.calendarDays} 天未更新（{stale.fromDate} 起）</>
+                        )}
+                      </span>
+                      {stale && (
+                        <button
+                          onClick={() => { if (!currentStock) return; loadStock(currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, ''), '1d', '2y').catch(() => {}); }}
+                          className="text-yellow-300 hover:text-yellow-200 underline ml-2 whitespace-nowrap">
+                          重新下載
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             }
             toolbarSlot={displayCandle && (

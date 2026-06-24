@@ -182,12 +182,20 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
         </div>
       </div>
 
-      {/* Data gap warning */}
-      {!collapsed && dataGaps.length > 0 && interval === '1d' && (
-        <div className="px-4 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between">
+      {/* Data gap warning：中間洞=停牌（抓不回來），末端洞=資料過舊未更新（可重抓） */}
+      {!collapsed && dataGaps.length > 0 && interval === '1d' && (() => {
+        const halts = dataGaps.filter(g => g.kind === 'halt');
+        const stale = dataGaps.find(g => g.kind === 'stale');
+        return (
+        <div className="px-4 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between gap-2">
           <span>
-            資料斷層：{dataGaps.map(g => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天）`).join('、')}
+            {halts.length > 0 && (
+              <>停牌 {halts.map(g => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天無交易）`).join('、')}</>
+            )}
+            {halts.length > 0 && stale && <span className="mx-1">·</span>}
+            {stale && (<>資料 {stale.calendarDays} 天未更新（{stale.fromDate} 起）</>)}
           </span>
+          {stale && (
           <button
             className="ml-2 px-2 py-0.5 rounded bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 text-xs whitespace-nowrap"
             onClick={() => {
@@ -197,8 +205,10 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
           >
             重新下載
           </button>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* Chart area */}
       {!collapsed && displayCandles.length > 0 && (

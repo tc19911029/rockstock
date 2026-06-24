@@ -86,8 +86,12 @@ interface ReplayStore {
   isPolling: boolean;
 
   // ── Data Integrity ───────────────────────────────────────
-  /** K線資料斷層（日曆天數 > 10 天的gap） */
-  dataGaps: Array<{ fromDate: string; toDate: string; calendarDays: number }>;
+  /**
+   * K線資料斷層（日曆天數 > 15 天的gap）。
+   * kind='halt'：兩根 K 棒「中間」的洞 → 該股那段沒交易（停牌/未掛牌），抓也抓不回來。
+   * kind='stale'：最後一根 K 棒距今太久 → 資料過舊未更新，可重新下載。
+   */
+  dataGaps: Array<{ fromDate: string; toDate: string; calendarDays: number; kind: 'halt' | 'stale' }>;
 
   // ── Actions ───────────────────────────────────────────────
   initData: () => void;
@@ -249,15 +253,19 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         index = calcStartIndex(allCandles);
       }
       // 偵測資料斷層（日K限定，週/月K不檢查因為聚合後自然有gap）
-      const gaps = interval === '1d' ? detectCandleGaps(allCandles, 15) : [];
-      // 末端斷層：最後一根 K 棒距今超過 15 天（資料過舊，容忍農曆新年/國慶等長假）
+      // 中間的洞 = 該股那段停牌/未交易（資料源本來就沒這幾根），不是漏抓。
+      const gaps: Array<{ fromDate: string; toDate: string; calendarDays: number; kind: 'halt' | 'stale' }> =
+        interval === '1d'
+          ? detectCandleGaps(allCandles, 15).map((g) => ({ ...g, kind: 'halt' as const }))
+          : [];
+      // 末端斷層：最後一根 K 棒距今超過 15 天（資料過舊未更新，可重新下載；容忍農曆新年/國慶等長假）
       if (interval === '1d' && allCandles.length > 0) {
         const lastDate = allCandles[allCandles.length - 1].date;
         const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
         const diffMs = new Date(todayStr + 'T12:00:00').getTime() - new Date(lastDate + 'T12:00:00').getTime();
         const diffDays = Math.round(diffMs / 86400000);
         if (diffDays > 15) {
-          gaps.push({ fromDate: lastDate, toDate: todayStr, calendarDays: diffDays });
+          gaps.push({ fromDate: lastDate, toDate: todayStr, calendarDays: diffDays, kind: 'stale' });
         }
       }
 
