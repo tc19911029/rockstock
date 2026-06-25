@@ -410,6 +410,7 @@ export default function CandleChart({
     for (const key of maKeys) {
       newMARef[key] = chart.addSeries(LineSeries, {
         color: MA_COLORS[key], lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerRadius: 2,
       });
     }
 

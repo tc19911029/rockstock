@@ -71,8 +71,8 @@ function VolumeChart({ candles, hoverCandle, isTW, isCN }: { candles: CandleWith
     if (!containerRef.current) return;
     const chart = makeChart(containerRef.current, false);
     volRef.current  = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false });
-    mv5Ref.current  = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    mv20Ref.current = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    mv5Ref.current  = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
+    mv20Ref.current = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
     chartRef.current = chart;
 
     const unsub = subscribeRangeSync((range: LogicalRange | null) => {
@@ -154,8 +154,8 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
   useEffect(() => {
     if (!containerRef.current) return;
     const chart = makeChart(containerRef.current, false);
-    difRef.current    = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    signalRef.current = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    difRef.current    = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
+    signalRef.current = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
     histRef.current   = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false });
     chartRef.current  = chart;
 
@@ -233,8 +233,8 @@ function KDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; ho
     if (!containerRef.current) return;
     const chart = makeChart(containerRef.current, false);
 
-    const kSeries = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    const dSeries = chart.addSeries(LineSeries, { color: '#f97316', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    const kSeries = chart.addSeries(LineSeries, { color: '#3b82f6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
+    const dSeries = chart.addSeries(LineSeries, { color: '#f97316', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
     kRef.current  = kSeries;
     dRef.current  = dSeries;
     kMarkRef.current = createSeriesMarkers(kSeries, []);
@@ -316,7 +316,7 @@ function RSIChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; h
     if (!containerRef.current) return;
     const chart = makeChart(containerRef.current, false);
 
-    const rsiSeries = chart.addSeries(LineSeries, { color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+    const rsiSeries = chart.addSeries(LineSeries, { color: '#a855f7', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
     rsiRef.current  = rsiSeries;
     markRef.current = createSeriesMarkers(rsiSeries, []);
     chartRef.current = chart;
@@ -846,7 +846,7 @@ function MainForceChart({ candles, zhuli, hoverCandle }: { candles: CandleWithIn
     }
     let lastLine: ISeriesApi<'Line'> | null = null;
     for (const [pts, color] of [[zhuli.midStrength, '#FF433D'], [zhuli.midControl, '#FFD000']] as [LinePoint[], string][]) {
-      const s = chart.addSeries(LineSeries, { color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      const s = chart.addSeries(LineSeries, { color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
       s.setData(alignToCandles(candles, pts));
       seriesRef.current.push(s);
       lastLine = s;
@@ -923,10 +923,10 @@ function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicat
       tierBar(xys.xysTiers.green, '#16C784'); tierBar(xys.xysTiers.yellow, '#FFD000');
       tierBar(xys.xysTiers.cyan, '#22D3EE'); tierBar(xys.xysTiers.blue, '#1D4ED8');
     }
-    const fast = chart.addSeries(LineSeries, { color: '#3B82F6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    const fast = chart.addSeries(LineSeries, { color: '#3B82F6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
     fast.setData(alignToCandles(candles, xys.xys1));
     seriesRef.current.push(fast);
-    const slow = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    const slow = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
     slow.setData(alignToCandles(candles, xys.xys2));
     seriesRef.current.push(slow);
     createSeriesMarkers(slow, xys.subMarkers.map(m => ({ time: toTime(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text, size: m.size })));
