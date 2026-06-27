@@ -160,9 +160,9 @@ function activeChartPreset(
     ind.volume && ind.kd && !ind.rsi && ind.macd &&
     !ind.mainForce && !ind.season && showPivots
   ) return 'technical';
-  // 三色套組：均線只保留月線（20MA 固定不可關），其餘清空
+  // 三色套組：均線全清空讓出主圖給雙B（與 applyChartPreset('sanse') 一致；20MA 也關）
   if (
-    !ma.ma5 && !ma.ma10 && ma.ma20 && !ma.ma60 && !ma.ma120 && !ma.ma240 &&
+    !ma.ma5 && !ma.ma10 && !ma.ma20 && !ma.ma60 && !ma.ma120 && !ma.ma240 &&
     !showBollinger && showShuangB &&
     !ind.volume && !ind.kd && !ind.rsi && !ind.macd &&
     ind.mainForce && ind.season && !showPivots
