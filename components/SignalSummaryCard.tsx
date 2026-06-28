@@ -27,6 +27,7 @@ import { useBacktestStore } from '@/store/backtestStore';
 import { classifySignal, SignalSubtype } from '@/lib/rules/signalClassifier';
 import { calcKLineStopLoss } from '@/lib/sell/v12StopLoss';
 import { getOperationMA } from '@/lib/sell/v12Operation';
+import { computePartialExitState, type PartialExitState } from '@/lib/sell/v12PartialExit';
 import { sopFor } from '@/lib/portfolio/letterSOP';
 import { getTickSize } from '@/lib/utils/tickSize';
 import { marketFromSymbol, formatSharesAsLots } from '@/lib/utils/shareUnits';
@@ -434,6 +435,18 @@ export default function SignalSummaryCard() {
     ? ((candle.close - heldPosition.costPrice) / heldPosition.costPrice) * 100
     : null;
 
+  // ── CH8 8-5 三條均線分批出場（選用「賠少」模式，純顯示，不改既有停損停利）──
+  let partialExitState: PartialExitState | null = null;
+  if (hasPosition && heldPosition?.costPrice != null && allCandles.length > 0) {
+    const eIdx = allCandles.findIndex(c => c.date === heldPosition.buyDate);
+    if (eIdx >= 0) {
+      const upto = allCandles.slice(0, Math.min(currentIndex, allCandles.length - 1) + 1);
+      if (upto.length > eIdx + 1) {
+        partialExitState = computePartialExitState(upto, eIdx, heldPosition.costPrice, 'long');
+      }
+    }
+  }
+
   return (
     <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-hidden">
       <div className="flex">
@@ -511,13 +524,16 @@ export default function SignalSummaryCard() {
                 兩種模式互斥，避免持股者誤以為叫他加碼 */}
           <div className="border-t border-border/40 pt-2 space-y-3">
             {hasPosition ? (
-              <HoldingDiscipline
-                candle={candle}
-                operatingMA={operatingMA}
-                profitLine={profitLine}
-                profitLineReached={profitLineReached}
-                profitLineSource={profitLineSource}
-              />
+              <>
+                <HoldingDiscipline
+                  candle={candle}
+                  operatingMA={operatingMA}
+                  profitLine={profitLine}
+                  profitLineReached={profitLineReached}
+                  profitLineSource={profitLineSource}
+                />
+                {partialExitState && <PartialExitMini state={partialExitState} />}
+              </>
             ) : (
               <EntryProjection
                 projEntry={projEntry}
@@ -726,6 +742,42 @@ function HoldingDiscipline({
           )}
         </p>
       )}
+    </div>
+  );
+}
+
+// ── 子元件：CH8 8-5 三條均線分批出場（選用「賠少」模式，純顯示）────────────
+// 課程 CH8-5：部位拆 3 份，跌破 MA5/10/20 各出 1/3、站回各買 1/3。
+// 回測定位＝控回撤工具（賠少），非賺最多；不改既有動態停損/停利，只多給一個參考。
+function PartialExitMini({ state }: { state: PartialExitState }) {
+  const { unitsHeld, totalUnits, todayAction, ended, endReason } = state;
+  const endText = endReason === 'stop-loss' ? '觸 −5% 停損 → 全部出場'
+    : endReason === 'full-take-profit' ? '賺超過 20% 又跌破 MA5 → 總停利全出'
+    : endReason === 'trend-broken' ? '均線多頭排列被破壞（趨勢改變）→ 建議全出'
+    : null;
+  const actionText = ended ? (endText ?? '方法已結束')
+    : todayAction === 'sell-third' ? `跌破均線 → 賣 1/3（剩 ${unitsHeld}/${totalUnits}）`
+    : todayAction === 'buy-third' ? `站回均線 → 買回 1/3（持有 ${unitsHeld}/${totalUnits}）`
+    : todayAction === 'flat' ? '已空手'
+    : `續抱 ${unitsHeld}/${totalUnits}`;
+  const tone = ended && endReason !== 'full-take-profit' ? 'text-rose-300'
+    : todayAction === 'sell-third' ? 'text-amber-300'
+    : todayAction === 'buy-third' ? 'text-emerald-300'
+    : 'text-muted-foreground';
+  return (
+    <div className="mt-2 pt-2 border-t border-border/20 space-y-1 text-xs leading-relaxed">
+      <div className="flex items-center justify-between">
+        <span
+          className="text-[11px] font-bold text-sky-300"
+          title="課程 CH8-5 三條均線分批法（選用）：部位拆 3 份，收盤跌破 MA5/10/20 各賣 1/3、站回各買回 1/3。回測顯示這是「少賠/控回撤」工具，不是賺最多的工具，僅供參考，不取代上面的動態停損。"
+        >分批出場 · 賠少模式</span>
+        <span className="flex gap-0.5" title={`目前應持有 ${unitsHeld}/${totalUnits} 份`}>
+          {Array.from({ length: totalUnits }).map((_, i) => (
+            <span key={i} className={`inline-block w-2.5 h-2.5 rounded-sm ${i < unitsHeld ? 'bg-sky-400' : 'bg-foreground/15'}`} />
+          ))}
+        </span>
+      </div>
+      <p className={tone}>今天：{actionText}</p>
     </div>
   );
 }

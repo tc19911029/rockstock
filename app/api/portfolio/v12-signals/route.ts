@@ -16,6 +16,7 @@ import { detectTrend, findPivots } from '@/lib/analysis/trendAnalysis';
 import { calcKLineStopLoss, updateStopLossDaily, checkAbsoluteStopLoss, SIGNAL_TO_TRAILING_MA, SIGNAL_TO_FIXED_STOP_PCT } from '@/lib/sell/v12StopLoss';
 import { checkKLineExit, checkMAExit, getOperationMA, canUpgradeToLongTerm } from '@/lib/sell/v12Operation';
 import { checkTakeProfitTargets, detectKBarExitSignal } from '@/lib/sell/v12TakeProfit';
+import { computePartialExitState } from '@/lib/sell/v12PartialExit';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
 import { HIGH_DEVIATION_PCT } from '@/lib/analysis/bookThresholds';
 import { getTickSize } from '@/lib/utils/tickSize';
@@ -173,6 +174,13 @@ export async function GET(req: NextRequest) {
         })
       : { triggered: false };
 
+    // ── CH8 8-5 三條均線分批出場（選用「賠少」模式，不覆寫預設 step3/4/5）──
+    // 回測定位：分批是控回撤工具（最大賠 -50% vs 固定停損跳空 -75%），不是賺最多工具。
+    // 只計算做多（portfolio 持倉預設做多）；資料不足/趨勢破壞由模組內部處理。
+    const partialExit = entryIdx >= 0
+      ? computePartialExitState(candles, entryIdx, entryPrice, 'long')
+      : null;
+
     // ── 議題 C1：書本 9+ 條出場訊號完整清單 ──
     // 跟 SignalSummaryCard 共用 detectSellSignals，避免兩處邏輯飄移
     const triggeredSellSignals = detectSellSignals(candles, lastIdx).map((s) => ({
@@ -228,6 +236,16 @@ export async function GET(req: NextRequest) {
         kbarSignal,
         triggeredSellSignals,
       },
+      // CH8 8-5 分批出場（選用「賠少」模式）— 前端可選擇顯示
+      partialExit: partialExit ? {
+        unitsHeld: partialExit.unitsHeld,
+        totalUnits: partialExit.totalUnits,
+        todayAction: partialExit.todayAction,
+        todayReason: partialExit.todayReason,
+        ended: partialExit.ended,
+        endReason: partialExit.endReason,
+        recentLadder: partialExit.ladder.slice(-6),
+      } : null,
     });
   } catch (err) {
     logger.error('failed', err);

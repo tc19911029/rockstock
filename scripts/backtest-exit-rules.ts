@@ -20,6 +20,42 @@ function isoWeek(d: string) { const dt = new Date(d + 'T00:00:00Z'); const day =
 
 // 出場策略：回傳 (報酬%, 持有天數)
 type Exit = (cs: OHLC[], e: number, ma10: number[]) => { ret: number; days: number };
+
+// 任意期 SMA（用於 8-5 三條均線分批）
+function smaAt(cs: OHLC[], i: number, n: number): number {
+  if (i < n - 1) return 0;
+  let s = 0; for (let k = i - n + 1; k <= i; k++) s += cs[k].close; return s / n;
+}
+
+// CH8 8-5 三條均線分批出場：部位拆 3 份，收盤跌破 MA5/MA10/MA20 各出 1/3（階梯式，外層先出）。
+// 賺 >20% 跌破 MA5 → 剩餘全出（總停利）。stopPct≠null 時，盤中破 -stop% 剩餘一次全出（絕對停損）。
+// 報酬 = 3 份各自 (出場價/進場open−1) 的等權平均。不模擬站回加碼（加碼會引入接回價噪音，先只驗分批「出」的賠少效果）。
+function partialMAExit(cs: OHLC[], e: number, stopPct: number | null): { ret: number; days: number } {
+  const entry = cs[e].open;
+  const end = Math.min(e + MAXHOLD, cs.length - 1);
+  const stop = stopPct != null ? entry * (1 - stopPct) : null;
+  const sold = [false, false, false]; // [MA5層, MA10層, MA20層]
+  let held = 3; const rets: number[] = []; let lastDay = e;
+  for (let d = e + 1; d <= end && held > 0; d++) {
+    lastDay = d;
+    if (stop != null && cs[d].low <= stop) { const px = Math.min(cs[d].open, stop); while (held > 0) { rets.push(px / entry - 1); held--; } break; }
+    const c = cs[d].close;
+    const ma5 = smaAt(cs, d, 5), ma10 = smaAt(cs, d, 10), ma20 = smaAt(cs, d, 20);
+    if (!sold[0] && ma5 > 0 && c < ma5) { sold[0] = true; rets.push(c / entry - 1); held--; }
+    if (held > 0 && !sold[1] && ma10 > 0 && c < ma10) { sold[1] = true; rets.push(c / entry - 1); held--; }
+    if (held > 0 && !sold[2] && ma20 > 0 && c < ma20) { sold[2] = true; rets.push(c / entry - 1); held--; }
+    if (held > 0 && (c / entry - 1) >= 0.20 && ma5 > 0 && c < ma5) { while (held > 0) { rets.push(c / entry - 1); held--; } break; }
+  }
+  while (held > 0) { rets.push(cs[end].close / entry - 1); held--; }
+  return { ret: (rets.reduce((s, x) => s + x, 0) / rets.length) * 100, days: lastDay - e };
+}
+
+// 整批跌破單一均線全出（與分批對照的基準）
+function fullMAExit(cs: OHLC[], e: number, n: number): { ret: number; days: number } {
+  const end = Math.min(e + MAXHOLD, cs.length - 1);
+  for (let d = e + 1; d <= end; d++) { const ma = smaAt(cs, d, n); if (ma > 0 && cs[d].close < ma) return { ret: (cs[d].close / cs[e].open - 1) * 100, days: d - e }; }
+  return { ret: (cs[end].close / cs[e].open - 1) * 100, days: end - e };
+}
 const exits: Record<string, Exit> = {
   '死抱20天(不停損)': (cs, e) => { const x = Math.min(e + MAXHOLD, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e }; },
   '固定停損-7%': (cs, e) => {
@@ -59,6 +95,11 @@ const exits: Record<string, Exit> = {
     }
     const x = Math.min(e + MAXHOLD, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e };
   },
+  // ── CH8 8-5 三條均線分批 vs 整批對照 ──
+  '整批跌破MA5全出': (cs, e) => fullMAExit(cs, e, 5),
+  '整批跌破MA20全出': (cs, e) => fullMAExit(cs, e, 20),
+  '分批MA5/10/20各1/3': (cs, e) => partialMAExit(cs, e, null),
+  '分批+停損5%': (cs, e) => partialMAExit(cs, e, 0.05),
 };
 
 function report(label: string, rets: { ret: number; days: number }[]) {
