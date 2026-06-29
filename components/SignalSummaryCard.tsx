@@ -750,12 +750,15 @@ function HoldingDiscipline({
 // 課程 CH8-5：部位拆 3 份，跌破 MA5/10/20 各出 1/3、站回各買 1/3。
 // 回測定位＝控回撤工具（賠少），非賺最多；不改既有動態停損/停利，只多給一個參考。
 function PartialExitMini({ state }: { state: PartialExitState }) {
-  const { unitsHeld, totalUnits, todayAction, ended, endReason } = state;
-  const endText = endReason === 'stop-loss' ? '觸 −5% 停損 → 全部出場'
-    : endReason === 'full-take-profit' ? '賺超過 20% 又跌破 MA5 → 總停利全出'
-    : endReason === 'trend-broken' ? '均線多頭排列被破壞（趨勢改變）→ 建議全出'
-    : null;
-  const actionText = ended ? (endText ?? '方法已結束')
+  const { unitsHeld, totalUnits, todayAction, ended, endReason, ladder } = state;
+  // 終止事件（exit-all）的日期 — 給「已結束」時顯示是哪天、為何結束
+  const endEvent = ended ? [...ladder].reverse().find(l => l.action === 'exit-all') : null;
+  const endWhy = endReason === 'stop-loss' ? '觸 −5% 停損'
+    : endReason === 'full-take-profit' ? '賺超過 20% 又跌破 MA5 → 總停利'
+    : endReason === 'trend-broken' ? '均線多頭排列被破壞（趨勢改變）'
+    : '全部出場';
+  const actionText = ended
+    ? `分批法已於 ${endEvent?.date ?? '—'} 建議全出（${endWhy}）— 之後續抱是你的選擇`
     : todayAction === 'sell-third' ? `跌破均線 → 賣 1/3（剩 ${unitsHeld}/${totalUnits}）`
     : todayAction === 'buy-third' ? `站回均線 → 買回 1/3（持有 ${unitsHeld}/${totalUnits}）`
     : todayAction === 'flat' ? '已空手'
