@@ -113,6 +113,15 @@ export async function loadStockMaster(forceRefresh = false): Promise<StockMaster
     memoryCacheLoadedAt = Date.now();
     return existing;
   }
+  // 防單日掉碼（2026-06-29）：上游 TWSE/TPEx 是「當日有成交才回」的快照，
+  // 某檔當天無成交/停牌就會從 master 掉光（theme-map / youtube 代號測試會紅、走圖沒名）。
+  // → union：保留舊 master 有、但今天上游沒回的代號（新名/新碼仍以上游為主，只「不刪」）。
+  if (existing) {
+    const freshCodes = new Set(refreshed.entries.map(e => e.code));
+    for (const e of existing.entries) {
+      if (!freshCodes.has(e.code)) refreshed.entries.push(e);
+    }
+  }
   await saveToDisk(refreshed);
   memoryCache = refreshed;
   memoryCacheLoadedAt = Date.now();
