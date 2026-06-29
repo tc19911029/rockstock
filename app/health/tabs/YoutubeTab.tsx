@@ -18,6 +18,7 @@ import type {
   YouTubeSourceHealth,
   YouTubeVideo,
 } from '@/lib/youtube/types';
+import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { YoutubeProgramStocks } from '@/components/youtube/YoutubeProgramStocks';
 import { VideoSourceBreakdown } from '@/components/youtube/VideoSourceBreakdown';
 import { TeacherAccuracyPanel } from '@/components/youtube/TeacherAccuracyPanel';
@@ -104,7 +105,9 @@ function todayYmd(): string {
 export function YoutubeTab() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [videos, setVideos] = useState<VideoWithTranscript[]>([]);
-  const [date, setDate] = useState(todayYmd);
+  // 預設「最近交易日」而非今天：白天打開時今日通常還沒節目分析，預設 today 會一片空白（曾被誤認為壞掉）。
+  // 仍保留下方「今日」按鈕可一鍵跳回今天看掃描狀態。
+  const [date, setDate] = useState(lastBusinessDayYmd);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
