@@ -410,6 +410,25 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
     } catch { /* parse error */ }
   }
 
+  // 2026-06-30：TPEx OpenAPI（tpex_mainboard_quotes）被 Cloudflare 403 擋時 otcCodes 整批掉光
+  // → 上櫃股全部缺即時報價（題材面板/三色/掃描的上櫃段空白，環球晶 6488/中美晶 5483/合晶 6182
+  // 顯示「量 —」即此）。改用本地 stock-master 的上櫃代號清單當備援，再交給 mis.twse 批量抓
+  // （mis 端 otc_ 通道實測可用、不經 Cloudflare）。stock-master 7 天 TTL、讀本地檔不打網路。
+  if (otcCodes.length === 0) {
+    try {
+      const { loadStockMaster } = await import('@/lib/youtube/stockMaster');
+      const master = await loadStockMaster();
+      for (const e of master.entries) {
+        if (e.market === 'TPEx' && /^\d{4}$/.test(e.code)) otcCodes.push(e.code);
+      }
+      if (otcCodes.length > 0) {
+        console.info(`[TWSERealtimeIntraday] TPEx OpenAPI 無代號 → 改用 stock-master 上櫃清單備援 (${otcCodes.length} 檔)`);
+      }
+    } catch (err) {
+      console.warn('[TWSERealtimeIntraday] stock-master 上櫃備援失敗:', String(err));
+    }
+  }
+
   if (tseCodes.length === 0 && otcCodes.length === 0) {
     console.warn('[TWSERealtimeIntraday] 無法取得代碼清單，fallback 到 STOCK_DAY_ALL');
     return fetchAllQuotes(); // 降級回 STOCK_DAY_ALL
