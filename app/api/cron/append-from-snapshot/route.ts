@@ -75,21 +75,44 @@ async function fetchTWQuotes(date: string): Promise<Map<string, Quote>> {
   return out;
 }
 
-async function fetchCNQuotes(date: string): Promise<Map<string, Quote>> {
+const bareCode = (symbol: string) => symbol.replace(/\.(SS|SZ)$/i, '');
+
+async function fetchCNQuotes(date: string, symbols: string[]): Promise<Map<string, Quote>> {
+  const out = new Map<string, Quote>();
   const snap = await readSnapshotQuotes('CN', date);
   if (snap.size > 500) {
     console.log(`[append-from-snapshot] CN 用本地 L2 snapshot (${snap.size} 筆)`);
-    return snap;
+    for (const [code, q] of snap) out.set(code, q);
+  } else {
+    console.log(`[append-from-snapshot] CN 本地 snapshot 不足 (${snap.size})，打 EastMoney realtime`);
+    try {
+      const { getEastMoneyRealtime } = await import('@/lib/datasource/EastMoneyRealtime');
+      const raw = await getEastMoneyRealtime();
+      for (const [code, q] of raw) {
+        if (q.close > 0) out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+      }
+    } catch { /* fallthrough */ }
   }
-  console.log(`[append-from-snapshot] CN 本地 snapshot 不足 (${snap.size})，fallback 打 EastMoney realtime`);
-  const out = new Map<string, Quote>();
-  try {
-    const { getEastMoneyRealtime } = await import('@/lib/datasource/EastMoneyRealtime');
-    const raw = await getEastMoneyRealtime();
-    for (const [code, q] of raw) {
-      if (q.close > 0) out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
-    }
-  } catch { /* fallthrough */ }
+
+  // 用清單比對缺漏 → 騰訊補缺。涵蓋兩種情況：(1) 東財 push2 整個掛（本機常 TLS reset/502）；
+  // (2) 本地快照或 push2 只回主板、缺科創/創業（snapshot writer 沒涵蓋新板）。
+  // 騰訊 qt.gtimg.cn 直連可達、量單位板塊敏感已對齊。見記憶 cn_gem_star_added_to_scan。
+  const missing = symbols.filter((s) => !out.has(bareCode(s)));
+  if (missing.length > 200) {
+    console.warn(`[append-from-snapshot] CN 清單缺 ${missing.length} 檔報價 → 騰訊補缺`);
+    try {
+      const { getTencentRealtime } = await import('@/lib/datasource/TencentRealtime');
+      const ten = await getTencentRealtime(missing);
+      let added = 0;
+      for (const [code, q] of ten) {
+        if (q.close > 0 && !out.has(code)) {
+          out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+          added++;
+        }
+      }
+      console.log(`[append-from-snapshot] CN 騰訊補 ${added} 檔，共 ${out.size} 筆`);
+    } catch (e) { console.warn('[append-from-snapshot] CN 騰訊補缺失敗', e); }
+  }
   return out;
 }
 
@@ -113,13 +136,16 @@ export async function GET(req: NextRequest) {
     return apiOk({ skipped: true, reason: '非盤後窗口' });
   }
 
-  const quotes = market === 'TW' ? await fetchTWQuotes(date) : await fetchCNQuotes(date);
-  if (quotes.size === 0) return apiOk({ skipped: true, reason: '0 筆報價' });
-
   const scanner = market === 'TW'
     ? new (await import('@/lib/scanner/TaiwanScanner')).TaiwanScanner()
     : new (await import('@/lib/scanner/ChinaScanner')).ChinaScanner();
   const stocks = await scanner.getStockList();
+
+  // CN 走「本地快照 → 東財即時 → 騰訊即時」三層 fallback（東財 push2 常掛時靠騰訊補當日 bar）。
+  const quotes = market === 'TW'
+    ? await fetchTWQuotes(date)
+    : await fetchCNQuotes(date, stocks.map((s) => s.symbol));
+  if (quotes.size === 0) return apiOk({ skipped: true, reason: '0 筆報價' });
 
   let appended = 0;
   let already = 0;
