@@ -17,6 +17,7 @@ import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
 import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
 import { ThemeTag } from '@/components/ThemeTag';
 import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
+import { CnBoardBadge } from '@/components/shared/CnBoardBadge';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
@@ -273,7 +274,9 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
               {/* Row 1: Symbol + Name + Change% + Actions */}
               <div className="flex items-center gap-1.5 mb-1">
                 <span className="font-mono text-[11px] text-foreground/90 shrink-0">{ticker}</span>
-                <span className="text-[11px] text-foreground/80 truncate flex-1">{r.name}</span>
+                <span className="text-[11px] text-foreground/80 truncate">{r.name}</span>
+                <CnBoardBadge symbol={r.symbol} />
+                <div className="flex-1" />
                 {hasProhibition && (
                   <span
                     className="text-[8px] px-1 h-3.5 flex items-center rounded-sm bg-rose-900/40 text-rose-300 font-bold shrink-0"

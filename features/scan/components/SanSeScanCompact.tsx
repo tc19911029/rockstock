@@ -17,6 +17,7 @@ import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
 import { matchedStrategies, getStrategy, type SanSeScanLevel } from '@/lib/cn-sanse/namedStrategies';
 import { buyScore } from '@/lib/cn-sanse/buyScore';
+import { CnBoardBadge } from '@/components/shared/CnBoardBadge';
 import type { ThemeRef } from '@/lib/theme-sanse/types';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
@@ -684,6 +685,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               <div className="flex items-baseline gap-1.5 mb-1">
                 <div className="flex items-baseline gap-1.5 flex-wrap flex-1 min-w-0">
                   <span className="text-[11px] font-medium text-foreground/90 leading-tight break-words">{h.name}</span>
+                  <CnBoardBadge symbol={h.symbol} />
                   <span className="font-mono text-[10px] text-muted-foreground">{ticker}</span>
                 </div>
                 <span className={cn('font-mono text-[11px] font-bold shrink-0', h.changePct >= 0 ? 'text-bull' : 'text-bear')}>

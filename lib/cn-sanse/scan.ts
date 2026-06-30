@@ -4,6 +4,8 @@
 import type { Candle } from '@/types';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { CN_STOCKS } from '@/lib/scanner/cnStocks';
+import { CN_STOCKS_GEM_STAR } from '@/lib/scanner/cnStocksGemStar';
+import { getLimitMovePct } from '@/lib/utils/limitRules';
 import { readTurnoverRank, computeTurnoverRankAsOfDate } from '@/lib/scanner/TurnoverRank';
 import { computeSanSe, evalLatest, type SanSeLevel } from './selectors';
 import { evalConditions, isReversalBuy, type ConditionReport } from './conditions';
@@ -128,10 +130,14 @@ export function appendTodayBar(cs: Candle[], date: string, bar: IntradayBar): Ca
   return cs; // 封存資料比 today 還新 → 異常，不動
 }
 
-/** 板塊 / ST 排除：創業板(30x) + 科創(688) + 北交/老三板(8/4) + ST 股名。 */
+/**
+ * 板塊 / ST 排除：北交/老三板(8/4/920) + ST 股名。
+ * 創業板(30x)/科創(688) 自 2026-06-30 起納入 universe（CN_STOCKS_GEM_STAR，各成交額前 N 檔），
+ * 漲停 20% 由 getLimitMovePct 板塊敏感處理、前端掛科創/創業徽章 → 不再排除。
+ */
 function isExcluded(symbol: string, name: string): boolean {
   const code = symbol.split('.')[0];
-  if (/^(30|688|8|4)/.test(code)) return true;          // 創業板 / 科創 / 北交
+  if (/^(8|4|920)/.test(code)) return true;             // 北交所 / 老三板
   if (name.includes('ST') || name.startsWith('*') || name.startsWith('S')) return true; // ST/*ST/S*ST
   if (name.includes('退')) return true;                  // 退市整理
   return false;
@@ -157,9 +163,9 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
   const truncate = (cs: Candle[] | null): Candle[] | null =>
     cs && asOf ? cs.filter((c) => c.date <= asOf) : cs;
 
-  // 股票清單：用已進 git 的 CN_STOCKS（Vercel 也讀得到），取代本地 data/cn_stocklist.json
+  // 股票清單：主板 CN_STOCKS + 科創/創業 CN_STOCKS_GEM_STAR（均已進 git，Vercel 也讀得到）。
   const seen = new Set<string>();
-  let stocks: StockEntry[] = CN_STOCKS.filter((s) => {
+  let stocks: StockEntry[] = [...CN_STOCKS, ...CN_STOCKS_GEM_STAR].filter((s) => {
     if (isExcluded(s.symbol, s.name)) return false;
     if (seen.has(s.symbol)) return false; // 清單有同代號重複（不同產業分類），去重
     seen.add(s.symbol);
@@ -265,8 +271,9 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
         }
       });
 
-      // 共振紀錄：≥1 組買點才收（過濾無訊號的大宗，檔案不爆）
-      const report = evalConditions(candles, indexClose, series);
+      // 共振紀錄：≥1 組買點才收（過濾無訊號的大宗，檔案不爆）。
+      // 漲停門檻板塊敏感：科創/創業 20%、主板 10%（getLimitMovePct），避免 12% 誤判成漲停。
+      const report = evalConditions(candles, indexClose, series, getLimitMovePct('CN', s.symbol));
       if (report.selected) {
         records.push({
           symbol: s.symbol, name: s.name, industry: s.industry ?? '',

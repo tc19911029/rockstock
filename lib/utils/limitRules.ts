@@ -94,6 +94,24 @@ function isSTStock(_symbol: string): boolean {
   return false;
 }
 
+// ── 陸股板塊分類（徽章 / 顯示層單一事實）─────────────────────────────────────
+
+/** 陸股交易板塊。主板=滬深主板/中小板；chinext=創業板；star=科創板；bse=北交所/老三板。 */
+export type CnBoard = 'main' | 'chinext' | 'star' | 'bse' | 'other';
+
+/**
+ * 依代號判定陸股交易板塊（純函式，前後端共用）。
+ * 創業板 30xxxx / 科創板 68[89]xxx 用既有 isChiNext/isStarMarket（與漲停幅度同一份判定）。
+ */
+export function cnBoard(symbol: string): CnBoard {
+  if (isChiNext(symbol)) return 'chinext';   // 創業板 20%
+  if (isStarMarket(symbol)) return 'star';   // 科創板 20%
+  const code = symbol.split('.')[0];
+  if (/^(8|4|920)/.test(code)) return 'bse'; // 北交所 / 老三板
+  if (/^(60|000|001|002|003)/.test(code)) return 'main'; // 滬深主板 + 中小板
+  return 'other';
+}
+
 // ── 公開測試用 ────────────────────────────────────────────────────────────
 
 /** 公開供測試用 */
