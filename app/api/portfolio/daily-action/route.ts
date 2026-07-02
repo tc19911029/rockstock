@@ -18,7 +18,7 @@ import { listOpenHoldings } from '@/lib/agents/portfolio/storage';
 import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
-import { evaluateHolding, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
+import { evaluateHolding, DEFAULT_STOP_LOSS_MULT, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
 import { detectMarketRegime, thresholdsForRegime, type RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
 import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
       activeHoldings.map(async (h: PortfolioHolding): Promise<DailyActionItem> => {
         const mkt = (h.market === 'CN' ? 'CN' : 'TW') as 'TW' | 'CN';
         const { thresholds } = await regimeFor(mkt);
-        const stopLoss = h.stopLoss ?? h.entryPrice * 0.93;
+        const stopLoss = h.stopLoss ?? h.entryPrice * DEFAULT_STOP_LOSS_MULT;
         // 賠少-1：做空 live 風控 — positionSide / 進場黑K最高點皆走 ui blob passthrough。
         // 缺省（既有持倉）= 做多，行為位元不變。
         const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';

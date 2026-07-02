@@ -297,12 +297,16 @@ interface MinimalHolding {
   shares: number;
   stopLoss?: number;
 }
-type AlertRule = 'blowoff-bearish' | 'blowoff-bullish' | 'terminal-rally' | 'ma5-breakdown';
+type AlertRule = 'blowoff-bearish' | 'blowoff-bullish' | 'terminal-rally' | 'ma5-breakdown'
+  | 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop';
 const RULE_LABEL: Record<AlertRule, string> = {
   'blowoff-bearish': '爆量長黑',
   'blowoff-bullish': '爆量長紅',
   'terminal-rally':  '末升段',
   'ma5-breakdown':   'MA5 跌破',
+  'stop-loss-breach': '跌破停損',
+  'pump-reversal':   '拉高回落',
+  'rapid-drop':      '急殺',
 };
 interface MinimalAlert {
   rule: AlertRule;

@@ -60,7 +60,8 @@ interface YoutubeTopStock { code: string; name: string; rating?: string; mention
 
 interface AlertItem {
   symbol: string;
-  rule: 'blowoff-bearish' | 'blowoff-bullish' | 'terminal-rally' | 'ma5-breakdown';
+  rule: 'blowoff-bearish' | 'blowoff-bullish' | 'terminal-rally' | 'ma5-breakdown'
+    | 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop';
   firedAt: number;
   tfMin: 1 | 5;
   isHolding: boolean;
@@ -78,6 +79,9 @@ const RULE_LABEL: Record<AlertItem['rule'], string> = {
   'blowoff-bullish': '爆量長紅',
   'terminal-rally':  '末升段',
   'ma5-breakdown':   'MA5 跌破',
+  'stop-loss-breach': '跌破停損',
+  'pump-reversal':   '拉高回落',
+  'rapid-drop':      '急殺',
 };
 
 const REVIEW_LABEL: Record<ReviewAction, { zh: string; cls: string }> = {

@@ -19,11 +19,27 @@ import { REALTIME_RULES } from '@/lib/config';
 import { promises as fs } from 'fs';
 import path from 'path';
 
+/**
+ * 持倉保命警報層（holdingsGuard）需要的持倉資訊。
+ * positionSide / entryHigh 派生逐字對齊 daily-action route（ui blob passthrough）。
+ */
+export interface MonitoredHoldingInfo {
+  name: string;
+  entryPrice: number;
+  /** 缺省時由 guard 用 DEFAULT_STOP_LOSS_MULT 補（單一事實在 holdingsActionEngine） */
+  stopLoss?: number;
+  positionSide: 'long' | 'short';
+  /** 做空回補停損 = ui.entryKbar.high（進場黑K最高點） */
+  entryHigh?: number;
+}
+
 export interface MonitoredSymbol {
   symbol: string;        // 帶 suffix：3661.TW / 603986.SS
   market: 'TW' | 'CN';
   source: 'holding' | 'manual' | 'watchlist' | 'scan';
   isHolding: boolean;
+  /** 只有 source='holding' 才帶（guard 規則1 停損判斷用） */
+  holding?: MonitoredHoldingInfo;
 }
 
 export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
@@ -33,7 +49,7 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
   const holdings = await readHoldings();
   for (const h of holdings) {
     if (seen.has(h.symbol)) continue;
-    out.push({ symbol: h.symbol, market: h.market, source: 'holding', isHolding: true });
+    out.push({ symbol: h.symbol, market: h.market, source: 'holding', isHolding: true, holding: h.holding });
     seen.add(h.symbol);
   }
 
@@ -68,10 +84,14 @@ interface RawHolding {
   symbol: string;
   market?: 'TW' | 'CN';
   status?: string;
+  name?: string;
+  entryPrice?: number;
+  stopLoss?: number;
+  ui?: Record<string, unknown>;
 }
 
-async function readHoldings(): Promise<Array<{ symbol: string; market: 'TW' | 'CN' }>> {
-  const result: Array<{ symbol: string; market: 'TW' | 'CN' }> = [];
+async function readHoldings(): Promise<Array<{ symbol: string; market: 'TW' | 'CN'; holding?: MonitoredHoldingInfo }>> {
+  const result: Array<{ symbol: string; market: 'TW' | 'CN'; holding?: MonitoredHoldingInfo }> = [];
   // TW：data/agents/portfolio/holdings.json（業務邏輯 legacy 路徑）
   await pushHoldings(path.join(process.cwd(), 'data', 'agents', 'portfolio', 'holdings.json'), result);
   // CN：data/portfolio/holdings-cn.json（鐵則：陸股持倉不放 agents/portfolio）。
@@ -80,15 +100,40 @@ async function readHoldings(): Promise<Array<{ symbol: string; market: 'TW' | 'C
   return result;
 }
 
-async function pushHoldings(p: string, out: Array<{ symbol: string; market: 'TW' | 'CN' }>): Promise<void> {
+async function pushHoldings(
+  p: string,
+  out: Array<{ symbol: string; market: 'TW' | 'CN'; holding?: MonitoredHoldingInfo }>,
+): Promise<void> {
   try {
     const raw = await fs.readFile(p, 'utf-8');
     const parsed = JSON.parse(raw) as { holdings?: RawHolding[] };
     for (const h of parsed.holdings ?? []) {
       if (!h.symbol || h.status === 'closed') continue;
-      out.push({ symbol: h.symbol, market: h.market ?? inferMarketFromSymbol(h.symbol) });
+      // 場外基金（.OF）無盤中 K 線，且 6 位裸碼與 A 股撞號（000001 基金 vs 平安銀行）
+      // → 入池會拿錯標的的 quote 發保命警報，一律排除
+      if (/\.OF$/i.test(h.symbol)) continue;
+      out.push({
+        symbol: h.symbol,
+        market: h.market ?? inferMarketFromSymbol(h.symbol),
+        holding: toHoldingInfo(h),
+      });
     }
   } catch { /* 檔案不存在 / parse 失敗 → skip */ }
+}
+
+/** 派生做空語意 — 逐字對齊 daily-action route（ui.positionSide / ui.entryKbar.high） */
+function toHoldingInfo(h: RawHolding): MonitoredHoldingInfo | undefined {
+  if (typeof h.entryPrice !== 'number' || h.entryPrice <= 0) return undefined;
+  const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
+  const entryKbar = h.ui?.entryKbar as { high?: number } | undefined;
+  const entryHigh = typeof entryKbar?.high === 'number' ? entryKbar.high : undefined;
+  return {
+    name: h.name ?? h.symbol,
+    entryPrice: h.entryPrice,
+    stopLoss: typeof h.stopLoss === 'number' && h.stopLoss > 0 ? h.stopLoss : undefined,
+    positionSide,
+    entryHigh,
+  };
 }
 
 interface RawExtraSymbol {
