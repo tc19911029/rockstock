@@ -137,7 +137,7 @@ Layer 4: 掃描結果層（複合主鍵，intraday vs post_close）
   - `health.json` — 來源健康滾動快照
   - `transcripts/{YYYY-MM-DD}/{video_id}.json` — 完整逐字稿 + cues + 品質分數
   - `transcript-index.json` — 全域 transcript metadata 索引
-  - `analysis/{YYYY-MM-DD}.json` — **Claude（在對話內）寫的 DailyAnalysis** (`market_view + consensus + stocks`)
+  - `analysis/{YYYY-MM-DD}.json` — **Claude（在對話內）寫的 DailyAnalysis** (`market_view + consensus + stocks + video_summaries`)
   - `stock-master.json` — TWSE+TPEx code↔name 對照（7 天 TTL，~26K entries）
 - **暫存區（不持久化）**：`/tmp/rockstock-youtube/{date}-question.json` — 程式產出，給 skill 讀
 - **三段式 cron 流水線**（全部走 launchd → curl localhost，不上 Vercel）：
@@ -160,6 +160,11 @@ Layer 4: 掃描結果層（複合主鍵，intraday vs post_close）
 - **彙整門檻**：`deriveStockMentions(analysis)` 只列入 `matched != null` 且 `combined_confidence ≥ 0.6`
 - **為何不上 Vercel cron / 為何不打 SDK**：(1) yt-dlp 是系統 binary，serverless 跑不動 (2) 分析走訂閱模式更靈活、能用 Opus、能即時修 prompt
 - **前端**：`/youtube`（紅綠燈卡 + 今日跨節目共識區 + 今日提到股票表 + 影片表含「逐字稿」「稿品質」欄）
+- **每日節目總結報告（2026-07 加）**：skill Step 6.5 對每支影片寫 `video_summaries[]`（2-4 句摘要 +
+  must_watch/skim/skip 分級，必看 ≤3/日）→ 首頁 YouTube「總結」子分頁（預設）+
+  `/api/youtube/daily-summary/[date]`（server-side join 持倉提醒：`lib/youtube/holdingAlerts.ts`，
+  持倉 symbol 剝後綴對 mention 裸碼）+ markdown 報告節目總結 section；
+  合約測試 `youtube-video-summaries` 守 enum/長度/代號。**回填只能靠 $TMPDIR question 檔（僅存近幾天）**
 - **規則** (合約測試保證)：
   - should_analyze=false ⇒ 必有 skip_reason
   - transcript status=unavailable ⇒ score=0
