@@ -14,6 +14,7 @@
  */
 
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 export interface YtdlpVideo {
@@ -65,13 +66,25 @@ function probeProxy(proxy: string): Promise<boolean> {
   });
 }
 
+/**
+ * 新版 yt-dlp（2026.06+）解 YouTube JS 挑戰需要 JS runtime，預設只認 deno；
+ * 本機沒 deno 但有 node-22 → 明確指過去。沒有 node 就不帶 flag（降級模式，metadata 多半仍可用）。
+ * 為什麼放這裡：所有 yt-dlp 呼叫點（scan/transcript/keyframes/whisper）都經過 ytdlpProxyArgs，
+ * 而 spawn 帶 --ignore-config 吃不到 ~/.config/yt-dlp/config，只能在 args 注入。
+ */
+const NODE_BIN = `${homedir()}/.local/node-22/bin/node`;
+function jsRuntimeArgs(): string[] {
+  return existsSync(NODE_BIN) ? ['--js-runtimes', `node:${NODE_BIN}`] : [];
+}
+
 export async function ytdlpProxyArgs(): Promise<string[]> {
-  if (process.env.YTDLP_PROXY !== undefined) return ['--proxy', process.env.YTDLP_PROXY];
+  if (process.env.YTDLP_PROXY !== undefined) return ['--proxy', process.env.YTDLP_PROXY, ...jsRuntimeArgs()];
   if (proxyProbeCache && Date.now() - proxyProbeCache.at < PROXY_PROBE_TTL_MS) return proxyProbeCache.args;
   let args = ['--proxy', ''];
   for (const p of LOCAL_PROXY_CANDIDATES) {
     if (await probeProxy(p)) { args = ['--proxy', p]; break; }
   }
+  args = [...args, ...jsRuntimeArgs()];
   proxyProbeCache = { args, at: Date.now() };
   return args;
 }
