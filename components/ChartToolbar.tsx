@@ -4,7 +4,7 @@ import type { Candle } from '@/types';
 import type { TrendState } from '@/lib/analysis/trendAnalysis';
 import { MarketTrendBadge } from './MarketTrendBadge';
 
-interface MaToggles { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma240: boolean }
+interface MaToggles { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma120: boolean; ma240: boolean }
 interface Indicators {
   macd: boolean; kd: boolean; volume: boolean; rsi: boolean;
   /** 外資買賣超副圖 */
@@ -23,11 +23,21 @@ interface Indicators {
   cnMain?: boolean;
   /** CN 散戶資金（中單+小單） */
   cnRetail?: boolean;
-  /** 三色資金「主力狀態F」副圖 — 僅 CN */
+  /** 三色資金「主力狀態F」副圖 — CN + TW（台股走 /api/tw-sanse） */
   mainForce?: boolean;
-  /** 三色資金「捕撈季節」副圖 — 僅 CN */
+  /** 三色資金「捕撈季節」副圖 — CN + TW（台股無換手率，不畫 4 級彩柱） */
   season?: boolean;
 }
+
+/**
+ * 指標套組（一鍵切換 tab）：
+ * - technical 技術面：MA5/10/20/60 ＋ 量 ＋ KD ＋ MACD ＋ 頭底（朱書標準看盤）
+ * - sanse 三色資金：雙B ＋ 主力狀態 ＋ 捕撈季節（自創資金指標；雙B 疊主圖、其餘副圖）
+ * - chip 籌碼面：價＋均線主圖不變，副圖全換成法人四（TW 外資/投信/自營/散戶）或主力/散戶（CN）
+ * 三者「副圖」互斥：切到任一套組就把另外兩組的副圖全關（量/KD/MACD ⇄ 主力狀態/捕撈季節 ⇄ 籌碼）。
+ * 切線/形態 overlay、大戶持股趨勢線、訊號 markers 不受套組切換影響。
+ */
+export type ChartIndicatorPreset = 'technical' | 'sanse' | 'chip';
 
 interface ChartToolbarProps {
   candle: Candle;
@@ -46,8 +56,15 @@ interface ChartToolbarProps {
   /** 雙B戰法主圖疊加（陸股自創；像 BB 一樣疊在 K 線主圖上）*/
   showShuangB?: boolean;
   onShuangBToggle?: () => void;
+  /** 大戶持股趨勢線（千張大戶%）疊主圖 — 僅 TW；純格局參考、不發訊號 */
+  showHolderLine?: boolean;
+  onHolderLineToggle?: () => void;
   indicators: Indicators;
   onIndicatorToggle: (key: keyof Indicators) => void;
+  /** 「籌碼」合併鈕：一鍵開關法人四（TW 外資/投信/自營/散戶）或主力/散戶（CN）；next=目標開關狀態 */
+  onChipGroupToggle?: (next: boolean) => void;
+  /** 一鍵切換指標套組（技術面 / 三色資金）；不提供則不顯示套組 tab */
+  onApplyPreset?: (preset: ChartIndicatorPreset) => void;
   showMarkers: boolean;
   onMarkersToggle: () => void;
   signalStrengthMin: number;
@@ -56,18 +73,18 @@ interface ChartToolbarProps {
   onPivotsToggle?: () => void;
   showSupportResistance?: boolean;
   onSupportResistanceToggle?: () => void;
+  /** K 棒三層支撐/壓力標線（最近長紅/長黑：最高=最強、1/2=平均成本、最低=最弱）*/
+  showCandleSR?: boolean;
+  onCandleSRToggle?: () => void;
   showNeckline?: boolean;
   onNecklineToggle?: () => void;
   showPattern?: boolean;
   onPatternToggle?: () => void;
-  showAscendingTrendline?: boolean;
-  onAscendingTrendlineToggle?: () => void;
-  showDescendingTrendline?: boolean;
-  onDescendingTrendlineToggle?: () => void;
-  showAscendingChannel?: boolean;
-  onAscendingChannelToggle?: () => void;
-  showDescendingChannel?: boolean;
-  onDescendingChannelToggle?: () => void;
+  // 上升線 = 上升切線 + 上升軌道整合；下降線 = 下降切線 + 下跌軌道整合
+  showAscendingLine?: boolean;
+  onAscendingLineToggle?: () => void;
+  showDescendingLine?: boolean;
+  onDescendingLineToggle?: () => void;
   showConsolidationLines?: boolean;
   onConsolidationLinesToggle?: () => void;
   avgCost?: number;
@@ -88,12 +105,14 @@ interface ChartToolbarProps {
   scanDate?: string | null;
 }
 
-const MA_CONFIGS = [
-  { key: 'ma5' as const, label: 'MA5' },
-  { key: 'ma10' as const, label: 'MA10' },
-  { key: 'ma20' as const, label: 'MA20' },
-  { key: 'ma60' as const, label: 'MA60' },
-  { key: 'ma240' as const, label: 'MA240' },
+const MA_CONFIGS: Array<{ key: keyof MaToggles; label: string; title: string; locked?: boolean }> = [
+  { key: 'ma5',   label: 'MA5',   title: '顯示/隱藏 5 日線' },
+  { key: 'ma10',  label: 'MA10',  title: '顯示/隱藏 10 日線' },
+  // 月線（20MA）是做多核心過濾、回檔最後防線（書本 CH3-03）→ 預設打開，但使用者可手動關
+  { key: 'ma20',  label: 'MA20',  title: '顯示/隱藏月線（20MA）— 做多核心過濾、回檔最後防線' },
+  { key: 'ma60',  label: 'MA60',  title: '顯示/隱藏 60 日線（季線）' },
+  { key: 'ma120', label: 'MA120', title: '顯示/隱藏 120 日線（半年線）' },
+  { key: 'ma240', label: 'MA240', title: '顯示/隱藏 240 日線（年線）— 整年買盤平均成本' },
 ];
 
 const INTERVAL_CONFIGS: Array<{ key: string; label: string; title: string }> = [
@@ -107,46 +126,69 @@ const INTERVAL_CONFIGS: Array<{ key: string; label: string; title: string }> = [
   { key: '1mo', label: '月', title: '月 K（中長線多空趨勢）' },
 ];
 
+/** 技術面核心副圖（量/KD/MACD）— 獨立開關，可與套組 tab 混搭 */
 const INDICATOR_CONFIGS = [
-  { key: 'volume' as const, label: '量' },
-  { key: 'kd' as const, label: 'KD' },
-  { key: 'rsi' as const, label: 'RSI' },
-  { key: 'macd' as const, label: 'MACD' },
+  { key: 'volume' as const, label: '量', title: '成交量副圖' },
+  { key: 'kd' as const, label: 'KD', title: 'KD 隨機指標副圖（9,3,3）' },
+  { key: 'macd' as const, label: 'MACD', title: 'MACD 副圖（12,26,9）' },
 ];
 
-/** 籌碼面副圖（僅 TW 有資料） */
-const CHIP_CONFIGS_TW = [
-  { key: 'foreign' as const, label: '外資', title: '外資買賣超（含外資自營商）' },
-  { key: 'trust' as const, label: '投信', title: '投信買賣超' },
-  { key: 'dealer' as const, label: '自營', title: '自營商買賣超（自行買賣 + 避險）' },
-  { key: 'retail' as const, label: '散戶', title: '散戶買賣超（推算 = −三大法人合計）' },
+/** 籌碼面「法人四」(TW) — 合併成單一「籌碼」鈕一次開關（外資/投信/自營/散戶） */
+const CHIP_GROUP_KEYS_TW = ['foreign', 'trust', 'dealer', 'retail'] as const;
+/** 籌碼面 (CN) — 主力/散戶資金，合併成「籌碼」鈕 */
+const CHIP_GROUP_KEYS_CN = ['cnMain', 'cnRetail'] as const;
+
+/** 大戶持股副圖（TW only）— 維持獨立鈕（不在「籌碼」合併鈕內） */
+const CHIP_HOLDER_CONFIGS_TW = [
   { key: 'h400' as const, label: '大戶400張', title: '大戶持股 400 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
   { key: 'h1000' as const, label: '大戶1000張', title: '大戶持股 1000 張↑ 比例（TDCC 集保戶股權分散，每週四公布）' },
 ];
 
-/** CN 籌碼面副圖（EastMoney 主力資金） */
-const CHIP_CONFIGS_CN = [
-  { key: 'cnMain' as const, label: '主力', title: 'CN 主力資金（超大單+大單，淨流入萬元，每日 16:00 自動抓）' },
-  { key: 'cnRetail' as const, label: '散戶', title: 'CN 散戶資金（中單+小單，淨流入萬元）' },
-];
+/** 由當前 toggle 狀態反推目前套在哪個套組（兩者皆不符＝自訂混搭，回 null 不高亮） */
+function activeChartPreset(
+  ma: MaToggles, showBollinger: boolean, showShuangB: boolean,
+  ind: Indicators, showPivots: boolean,
+): ChartIndicatorPreset | null {
+  const anyChipSub = !!(ind.foreign || ind.trust || ind.dealer || ind.retail || ind.cnMain || ind.cnRetail);
+  const anyTechSub = !!(ind.volume || ind.kd || ind.rsi || ind.macd);
+  const anySanseSub = !!(ind.mainForce || ind.season);
+  // 籌碼套組：有籌碼副圖、且技術/三色副圖全關（主圖均線維持技術設定，不納入判定）
+  if (anyChipSub && !anyTechSub && !anySanseSub) return 'chip';
+  if (
+    ma.ma5 && ma.ma10 && ma.ma20 && ma.ma60 && !ma.ma120 && !ma.ma240 &&
+    !showBollinger && !showShuangB &&
+    ind.volume && ind.kd && !ind.rsi && ind.macd &&
+    !ind.mainForce && !ind.season && showPivots
+  ) return 'technical';
+  // 三色套組：均線全清空讓出主圖給雙B（與 applyChartPreset('sanse') 一致；20MA 也關）
+  if (
+    !ma.ma5 && !ma.ma10 && !ma.ma20 && !ma.ma60 && !ma.ma120 && !ma.ma240 &&
+    !showBollinger && showShuangB &&
+    !ind.volume && !ind.kd && !ind.rsi && !ind.macd &&
+    ind.mainForce && ind.season && !showPivots
+  ) return 'sanse';
+  return null;
+}
 
 export default function ChartToolbar({
   candle, prevCandle, isHover, stockName, trend,
   currentInterval, onIntervalChange,
   maToggles, onMaToggle,
   showBollinger, onBollingerToggle,
-  showShuangB = false, onShuangBToggle,
+  showShuangB = false,
+  showHolderLine = false, onHolderLineToggle,
   indicators, onIndicatorToggle,
+  onChipGroupToggle,
+  onApplyPreset,
   showMarkers, onMarkersToggle,
   signalStrengthMin, onSignalStrengthChange,
   showPivots = false, onPivotsToggle,
   showSupportResistance = false, onSupportResistanceToggle,
+  showCandleSR = false, onCandleSRToggle,
   showNeckline = false, onNecklineToggle,
   showPattern = false, onPatternToggle,
-  showAscendingTrendline = false, onAscendingTrendlineToggle,
-  showDescendingTrendline = false, onDescendingTrendlineToggle,
-  showAscendingChannel = false, onAscendingChannelToggle,
-  showDescendingChannel = false, onDescendingChannelToggle,
+  showAscendingLine = false, onAscendingLineToggle,
+  showDescendingLine = false, onDescendingLineToggle,
   showConsolidationLines = false, onConsolidationLinesToggle,
   avgCost, shares,
   onPrev, onNext, onReset,
@@ -163,6 +205,14 @@ export default function ChartToolbar({
   // TW: .TW/.TWO 後綴或 4-5 位數字（裸代碼）；CN: .SS/.SZ 或 6 位數字
   const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
   const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
+  // 台股指數（^TWII / ^TWOII）：三色套組 tab + 主力/捕撈獨立開關比照台股顯示；
+  // 不併進 isTW，避免動到量(張)標籤、籌碼/大戶副圖判斷。CN 指數 000001.SS 已由 isCN(.SS) 涵蓋。
+  const isTwIndex = ticker ? /^\^TW/i.test(ticker) : false;
+  // 指標套組 tab 目前選中誰（從 toggle 反推；僅在三色可用市場 TW/CN 才顯示）
+  const activePreset = activeChartPreset(maToggles, showBollinger, showShuangB, indicators, showPivots);
+  // 「籌碼」合併鈕亮燈狀態：該市場的法人/主力散戶副圖任一開啟即亮
+  const chipGroupKeys = isTW ? CHIP_GROUP_KEYS_TW : isCN ? CHIP_GROUP_KEYS_CN : [];
+  const chipGroupOn = chipGroupKeys.some(k => !!indicators[k]);
 
   const unrealizedPct = shares && shares > 0 && avgCost && avgCost > 0
     ? ((candle.close - avgCost) / avgCost) * 100
@@ -214,6 +264,49 @@ export default function ChartToolbar({
 
       {/* Row 2: Controls — timeframe pills, MA toggles, BB, indicators, signals, nav */}
       <div className="flex flex-wrap items-center gap-1 px-3 py-1 bg-secondary/30">
+        {onApplyPreset && (isCN || isTW || isTwIndex) && (
+          <>
+            <div
+              role="group"
+              aria-label="指標套組一鍵切換"
+              className="flex items-center rounded-md ring-1 ring-border/70 overflow-hidden shrink-0"
+            >
+              <button
+                onClick={() => onApplyPreset('technical')}
+                aria-pressed={activePreset === 'technical'}
+                className={`px-2 py-0.5 text-[10px] font-bold transition ${
+                  activePreset === 'technical'
+                    ? 'bg-sky-600 text-white'
+                    : 'bg-secondary text-muted-foreground/60 hover:text-muted-foreground'
+                }`}
+                title="技術面套組：MA5/10/20/60 ＋ 量 ＋ KD ＋ MACD ＋ 頭底（朱書標準看盤）"
+              >技術</button>
+              <button
+                onClick={() => onApplyPreset('sanse')}
+                aria-pressed={activePreset === 'sanse'}
+                className={`px-2 py-0.5 text-[10px] font-bold border-l border-border/70 transition ${
+                  activePreset === 'sanse'
+                    ? 'bg-fuchsia-600 text-white'
+                    : 'bg-secondary text-muted-foreground/60 hover:text-muted-foreground'
+                }`}
+                title="三色資金套組：雙B ＋ 主力狀態 ＋ 捕撈季節（自創資金指標）"
+              >三色</button>
+              <button
+                onClick={() => onApplyPreset('chip')}
+                aria-pressed={activePreset === 'chip'}
+                className={`px-2 py-0.5 text-[10px] font-bold border-l border-border/70 transition ${
+                  activePreset === 'chip'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-secondary text-muted-foreground/60 hover:text-muted-foreground'
+                }`}
+                title={isTW
+                  ? '籌碼面套組：外資／投信／自營／散戶買賣超副圖（量/KD/MACD 與三色副圖全關）'
+                  : '籌碼面套組：主力／散戶資金副圖（量/KD/MACD 與三色副圖全關）'}
+              >籌碼</button>
+            </div>
+            <span className="w-px h-3.5 bg-border/60 mx-0.5" />
+          </>
+        )}
         {onIntervalChange && (
           <>
             {INTERVAL_CONFIGS.map(({ key, label, title }) => (
@@ -233,15 +326,18 @@ export default function ChartToolbar({
             <span className="w-px h-3.5 bg-border/60 mx-0.5" />
           </>
         )}
-        {MA_CONFIGS.map(({ key, label }) => (
+        {MA_CONFIGS.map(({ key, label, title, locked }) => (
           <button key={key}
-            onClick={() => onMaToggle(key)}
+            onClick={locked ? undefined : () => onMaToggle(key)}
+            disabled={locked}
             aria-pressed={maToggles[key]}
-            aria-label={`${maToggles[key] ? '隱藏' : '顯示'} ${label}`}
+            aria-label={locked ? `${label}（固定顯示，不可關閉）` : `${maToggles[key] ? '隱藏' : '顯示'} ${label}`}
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              maToggles[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+              locked
+                ? 'bg-sky-700/60 text-sky-200 ring-1 ring-sky-400/40 cursor-default'
+                : maToggles[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title={`顯示/隱藏 ${label}`}
+            title={title}
           >{label}</button>
         ))}
         <span className="w-px h-3.5 bg-border/60 mx-0.5" />
@@ -254,44 +350,60 @@ export default function ChartToolbar({
           }`}
           title="布林通道 (20, 2)"
         >BB</button>
-        {isCN && onShuangBToggle && (
-          <button
-            onClick={onShuangBToggle}
-            aria-pressed={showShuangB}
-            aria-label={`${showShuangB ? '隱藏' : '顯示'}雙B戰法`}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              showShuangB ? 'bg-fuchsia-700/60 text-fuchsia-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
-            }`}
-            title="雙B戰法（三色資金）— 智能交易線/ZB4/ZB5/多空線 + 黃紅雙線金叉死叉買賣點，疊在 K 線主圖上"
-          >雙B</button>
-        )}
-        {INDICATOR_CONFIGS.map(({ key, label }) => (
+        {INDICATOR_CONFIGS.map(({ key, label, title }) => (
           <button key={key}
             onClick={() => onIndicatorToggle(key)}
-            aria-pressed={indicators[key]}
-            aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${label} 指標`}
+            aria-pressed={!!indicators[key]}
+            aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${label} 副圖`}
+            title={title}
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               indicators[key] ? 'bg-sky-700/60 text-sky-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
           >{label}</button>
         ))}
-        {isCN && (['mainForce', 'season'] as const).map(key => (
-          <button key={key}
-            onClick={() => onIndicatorToggle(key)}
-            aria-pressed={!!indicators[key]}
-            aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${key === 'mainForce' ? '主力狀態' : '捕撈季節'} 副圖`}
-            title={key === 'mainForce'
-              ? '主力狀態F（三色資金）副圖：中線主力/控盤/短線游資/超跌五色柱'
-              : '捕撈季節（三色資金）副圖：XYS 動能柱 + 快慢線 + 金叉死叉'}
+        {isTW && onHolderLineToggle && (
+          <button
+            onClick={onHolderLineToggle}
+            aria-pressed={showHolderLine}
+            aria-label={`${showHolderLine ? '隱藏' : '顯示'}千張大戶持股趨勢線`}
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              indicators[key] ? 'bg-fuchsia-700/60 text-fuchsia-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+              showHolderLine ? 'bg-pink-700/60 text-pink-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-          >{key === 'mainForce' ? '主力狀態' : '捕撈季節'}</button>
-        ))}
-        {(isTW || isCN) && (
+            title="千張大戶持股趨勢線（集保）— 淡淡一條疊主圖看格局強弱；純參考、不發訊號（回測無預測力）"
+          >大戶</button>
+        )}
+        {(isTW || isCN || isTwIndex) && (
           <>
             <span className="w-px h-3.5 bg-border/60 mx-0.5" />
-            {(isTW ? CHIP_CONFIGS_TW : CHIP_CONFIGS_CN).map(({ key, label, title }) => (
+            {/* 三色資金副圖：主力狀態 / 捕撈季節（獨立開關，可與套組/籌碼混搭）*/}
+            {(['mainForce', 'season'] as const).map(key => (
+              <button key={key}
+                onClick={() => onIndicatorToggle(key)}
+                aria-pressed={!!indicators[key]}
+                aria-label={`${indicators[key] ? '隱藏' : '顯示'} ${key === 'mainForce' ? '主力狀態' : '捕撈季節'} 副圖`}
+                title={key === 'mainForce'
+                  ? '主力狀態F（三色資金）副圖：中線主力/控盤/短線游資/超跌五色柱'
+                  : '捕撈季節（三色資金）副圖：XYS 動能柱 + 快慢線 + 金叉死叉'}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                  indicators[key] ? 'bg-fuchsia-700/60 text-fuchsia-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+                }`}
+              >{key === 'mainForce' ? '主力狀態' : '捕撈季節'}</button>
+            ))}
+            {/* 「籌碼」合併鈕：一鍵開該市場法人/主力散戶副圖（與套組籌碼鈕功能相同但不互斥清場，故套組存在時也顯示）*/}
+            {onChipGroupToggle && (
+              <button
+                onClick={() => onChipGroupToggle(!chipGroupOn)}
+                aria-pressed={chipGroupOn}
+                aria-label={`${chipGroupOn ? '隱藏' : '顯示'}籌碼面副圖`}
+                title={isTW
+                  ? '籌碼面：一鍵開外資／投信／自營／散戶買賣超副圖'
+                  : '籌碼面：一鍵開主力／散戶資金副圖'}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                  chipGroupOn ? 'bg-amber-700/60 text-amber-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+                }`}
+              >籌碼</button>
+            )}
+            {isTW && CHIP_HOLDER_CONFIGS_TW.map(({ key, label, title }) => (
               <button key={key}
                 onClick={() => onIndicatorToggle(key)}
                 aria-pressed={!!indicators[key]}
@@ -327,6 +439,17 @@ export default function ChartToolbar({
             title="找壓力與支撐線（突破壓力買、跌破支撐賣）"
           >壓撐</button>
         )}
+        {onCandleSRToggle && (
+          <button
+            onClick={onCandleSRToggle}
+            aria-pressed={showCandleSR}
+            aria-label={`${showCandleSR ? '隱藏' : '顯示'}K棒三層支撐壓力`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showCandleSR ? 'bg-amber-600/60 text-amber-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="K 棒三層支撐/壓力（最近長紅/長黑：最高=最強、½=平均成本、最低=最弱）｜書本 CH2-04 階梯式出場框架"
+          >三層撐壓</button>
+        )}
         {onNecklineToggle && (
           <button
             onClick={onNecklineToggle}
@@ -349,49 +472,27 @@ export default function ChartToolbar({
             title="型態關鍵點（紫色圈圈是系統判斷型態的依據點）"
           >形態</button>
         )}
-        {onAscendingTrendlineToggle && (
+        {onAscendingLineToggle && (
           <button
-            onClick={onAscendingTrendlineToggle}
-            aria-pressed={showAscendingTrendline}
-            aria-label={`${showAscendingTrendline ? '隱藏' : '顯示'}上升切線`}
+            onClick={onAscendingLineToggle}
+            aria-pressed={showAscendingLine}
+            aria-label={`${showAscendingLine ? '隱藏' : '顯示'}上升線`}
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              showAscendingTrendline ? 'bg-red-600/60 text-red-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+              showAscendingLine ? 'bg-red-600/60 text-red-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="上升趨勢線（連最近兩個底）— 跌破代表上升趨勢結束"
-          >上升切線</button>
+            title="上升線（上升切線連最近兩底 + 平行上升軌道壓力位）｜書本《抓住飆股》p.205"
+          >上升線</button>
         )}
-        {onDescendingTrendlineToggle && (
+        {onDescendingLineToggle && (
           <button
-            onClick={onDescendingTrendlineToggle}
-            aria-pressed={showDescendingTrendline}
-            aria-label={`${showDescendingTrendline ? '隱藏' : '顯示'}下降切線`}
+            onClick={onDescendingLineToggle}
+            aria-pressed={showDescendingLine}
+            aria-label={`${showDescendingLine ? '隱藏' : '顯示'}下降線`}
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              showDescendingTrendline ? 'bg-emerald-600/60 text-emerald-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+              showDescendingLine ? 'bg-emerald-600/60 text-emerald-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="下降趨勢線（連最近兩個頭）— 突破代表下降趨勢結束"
-          >下降切線</button>
-        )}
-        {onAscendingChannelToggle && (
-          <button
-            onClick={onAscendingChannelToggle}
-            aria-pressed={showAscendingChannel}
-            aria-label={`${showAscendingChannel ? '隱藏' : '顯示'}上升軌道線`}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              showAscendingChannel ? 'bg-red-600/40 text-red-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
-            }`}
-            title="上升軌道線（平行上升切線、預估壓力位置）｜書本《抓住飆股》p.205"
-          >上升軌道</button>
-        )}
-        {onDescendingChannelToggle && (
-          <button
-            onClick={onDescendingChannelToggle}
-            aria-pressed={showDescendingChannel}
-            aria-label={`${showDescendingChannel ? '隱藏' : '顯示'}下跌軌道線`}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              showDescendingChannel ? 'bg-emerald-600/40 text-emerald-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
-            }`}
-            title="下跌軌道線（平行下降切線、預估支撐位置）｜書本《抓住飆股》p.205"
-          >下跌軌道</button>
+            title="下降線（下降切線連最近兩頭 + 平行下跌軌道支撐位）｜書本《抓住飆股》p.205"
+          >下降線</button>
         )}
         {onConsolidationLinesToggle && (
           <button

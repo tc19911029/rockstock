@@ -17,11 +17,63 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { TW_UNIVERSE_MIN_PRICE } from '@/lib/analysis/bookThresholds';
 
 const IS_VERCEL = process.env.VERCEL === '1';
 const INDEX_DIR = path.join(process.cwd(), 'data', 'turnover-rank');
 const AVG_WINDOW = 20;
 const MIN_VALID_DAYS = 5;
+
+// 退化守衛：TW top500 正常含 ~150 檔 .TWO 上櫃股。2026-06-12 凌晨 TPEx 整夜不通，
+// getStockList 的 Promise.allSettled 把 fetchTPExStocks 失敗靜默吞掉、回上市-only 清單，
+// 重建出 0 檔 .TWO 的索引；且 index.date 已寫成新一天 → needsRebuild 整天不再觸發，
+// 當天所有掃描把整個上櫃市場排除在 universe 外。守衛：輸出退化時拒絕覆蓋既有索引。
+const TW_MIN_OTC_IN_TOP_N = 30;
+// 只對正式用途（topN ≥ 100）把關；研究/測試用小 topN 不適用此比例假設
+const GUARD_MIN_TOP_N = 100;
+
+/** 回傳退化原因；null = 健康 */
+function detectDegenerateUniverse(
+  market: 'TW' | 'CN',
+  symbols: string[],
+  topN: number,
+): string | null {
+  if (topN < GUARD_MIN_TOP_N) return null;
+  if (market === 'TW') {
+    const two = symbols.filter(s => s.endsWith('.TWO')).length;
+    if (two < TW_MIN_OTC_IN_TOP_N) {
+      return `top${topN} 內 .TWO 僅 ${two} 檔（下限 ${TW_MIN_OTC_IN_TOP_N}，正常 ~150）— 疑 TPEx 清單抓取失敗`;
+    }
+    return null;
+  }
+  // CN：滬深任一整片消失即退化
+  const ss = symbols.filter(s => s.endsWith('.SS')).length;
+  const sz = symbols.filter(s => s.endsWith('.SZ')).length;
+  if (ss === 0 || sz === 0) {
+    return `top${topN} 內 .SS=${ss} / .SZ=${sz} — 疑滬/深清單抓取失敗`;
+  }
+  return null;
+}
+
+/** 退化警示（payload 與 daily-health-snapshot 同款：{ text, level, dateKey, markets }）*/
+async function postDegenerateAlert(market: 'TW' | 'CN', reason: string, kept: boolean): Promise<void> {
+  const webhookUrl = process.env.HEALTH_ALERT_WEBHOOK_URL;
+  if (!webhookUrl) return;
+  const dateKey = new Date().toISOString().slice(0, 10);
+  const text =
+    `🚨 TurnoverRank ${market} 索引重建退化 — ${reason}` +
+    (kept ? '（已拒絕覆蓋，沿用既有索引）' : '（無既有索引可退回，重建已 abort）');
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, level: 'red', dateKey, markets: [market] }),
+    });
+    if (!res.ok) console.warn(`[TurnoverRank] alert webhook HTTP ${res.status}`);
+  } catch (err) {
+    console.warn('[TurnoverRank] alert webhook failed:', err);
+  }
+}
 
 // ── Blob/FS 統一讀寫（與 CandleStorageAdapter 同模式）────────────────────
 
@@ -105,6 +157,11 @@ export async function buildTurnoverRank(
 
         // 取最近 AVG_WINDOW 根
         const recent = file.candles.slice(-AVG_WINDOW);
+
+        // 去除 < 5 元仙股（書本 CH5-2「特別報價」；TW only，CN 價階不同）
+        const lastClose = recent[recent.length - 1]?.close ?? 0;
+        if (market === 'TW' && lastClose > 0 && lastClose < TW_UNIVERSE_MIN_PRICE) return null;
+
         let sum = 0;
         let count = 0;
         for (const c of recent) {
@@ -128,6 +185,24 @@ export async function buildTurnoverRank(
 
   rankings.sort((a, b) => b.avgTurnover - a.avgTurnover);
   const top = rankings.slice(0, topN);
+
+  // ── 退化守衛：上櫃/滬深整片消失時，寧可沿用昨日索引也不寫壞索引 ──────────
+  // 沿用舊索引時不更新 date → 下一次掃描 needsRebuild 仍會觸發重建，來源恢復即自我修復
+  const degenerateReason = detectDegenerateUniverse(market, top.map(r => r.symbol), topN);
+  if (degenerateReason) {
+    const existingRaw = await readIndexRaw(market);
+    let existing: TurnoverRankIndex | null = null;
+    if (existingRaw) {
+      try { existing = JSON.parse(existingRaw) as TurnoverRankIndex; } catch { /* 壞檔視同不存在 */ }
+    }
+    console.error(
+      `[TurnoverRank] ${market} 索引重建退化（${degenerateReason}）` +
+      (existing ? `→ 保留既有索引（date=${existing.date}）不覆蓋` : '→ 無既有索引可退回，abort'),
+    );
+    await postDegenerateAlert(market, degenerateReason, !!existing);
+    if (existing) return existing;
+    throw new Error(`[TurnoverRank] ${market} 索引重建退化且無既有索引可退回：${degenerateReason}`);
+  }
 
   const today = new Date().toLocaleString('sv-SE', {
     timeZone: market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai',
@@ -202,6 +277,10 @@ export async function computeTurnoverRankAsOfDate(
 
         const startIdx = Math.max(0, endIdx - AVG_WINDOW);
         const window = file.candles.slice(startIdx, endIdx);
+
+        // 去除 < 5 元仙股（與 live buildTurnoverRank 同步；用 as-of 收盤保 point-in-time）
+        const asOfClose = window[window.length - 1]?.close ?? 0;
+        if (market === 'TW' && asOfClose > 0 && asOfClose < TW_UNIVERSE_MIN_PRICE) return null;
 
         let sum = 0;
         let count = 0;

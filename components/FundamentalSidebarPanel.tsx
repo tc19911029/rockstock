@@ -11,7 +11,20 @@ import Link from 'next/link';
 import type { FundamentalAnswer } from '@/lib/agents/types';
 
 // 估值情境（悲觀/中性/樂觀）— Tier 1 才有，來自 FundamentalAnswer.valuation
-function ValuationScenarios({ valuation }: { valuation: NonNullable<FundamentalAnswer['valuation']> }) {
+//
+// ⚠️ 距現價 / Forward PE / TTM PE 都是「價格衍生」欄位：估值產生當下（valuationDate）用當時
+// 股價算好、寫死進 JSON。股價一旦移動，這些就過期（曾發生：2408 估值日 312 元、現價 401.5，
+// 卻仍顯示 +38.7% 距現價，實際只剩 +7.8%）。→ 一律用即時價 currentPrice 重算。
+// 合理價 / EPS / 合理 PE 是分析師輸出，不隨股價變，照舊顯示。
+function ValuationScenarios({
+  valuation,
+  currentPrice,
+  valuationDate,
+}: {
+  valuation: NonNullable<FundamentalAnswer['valuation']>;
+  currentPrice?: number;
+  valuationDate?: string;
+}) {
   const { ttmPe, monthlyEpsEstimate, scenarios } = valuation;
   const tiers: Array<{ key: 'pessimistic' | 'base' | 'optimistic'; label: string; cls: string }> = [
     { key: 'pessimistic', label: '悲觀', cls: 'text-rose-300 border-rose-700/40 bg-rose-900/20' },
@@ -19,15 +32,24 @@ function ValuationScenarios({ valuation }: { valuation: NonNullable<FundamentalA
     { key: 'optimistic',  label: '樂觀', cls: 'text-emerald-300 border-emerald-700/40 bg-emerald-900/20' },
   ];
 
+  const live = currentPrice && currentPrice > 0 ? currentPrice : null;
+  // 反推估值基準價：upside ≡ (fairPrice − basePrice)/basePrice → basePrice = fairPrice/(1+upside)
+  const basePriceAtVal = scenarios.base && scenarios.base.upside > -1
+    ? scenarios.base.fairPrice / (1 + scenarios.base.upside)
+    : null;
+  // 反推 TTM EPS（舊檔沒存）：ttmPe = basePrice / ttmEps → 再用即時價重算 TTM PE
+  const ttmEps = basePriceAtVal && ttmPe > 0 ? basePriceAtVal / ttmPe : null;
+  const liveTtmPe = live && ttmEps ? live / ttmEps : ttmPe;
+
   return (
-    <details className="border border-border/60 rounded bg-card/40 overflow-hidden" open>
+    <details className="ring-1 ring-foreground/10 rounded bg-card/40 overflow-hidden" open>
       <summary className="px-2.5 py-1.5 bg-secondary/40 text-[11px] font-semibold text-cyan-300 cursor-pointer hover:text-cyan-200 select-none border-b border-border/40">
         估值情境（預估 EPS / 預估 PE / 合理股價）
       </summary>
       <div className="px-2.5 py-2 space-y-2">
         {/* 月化 EPS 推算（如果有）*/}
         {monthlyEpsEstimate && (
-          <div className="rounded border border-border/50 bg-card/60 p-2">
+          <div className="rounded ring-1 ring-foreground/10 bg-card/60 p-2">
             <div className="text-[10px] text-muted-foreground mb-1">
               {monthlyEpsEstimate.month} 月化 EPS 推算
             </div>
@@ -43,17 +65,27 @@ function ValuationScenarios({ valuation }: { valuation: NonNullable<FundamentalA
           </div>
         )}
 
-        {/* TTM PE 基準 */}
+        {/* TTM PE 基準（依即時價重算）*/}
         <div className="flex items-baseline justify-between px-1">
           <span className="text-[11px] text-muted-foreground">TTM 本益比（過去 4 季）</span>
-          <span className="font-mono text-xs font-semibold text-foreground/90">{ttmPe.toFixed(2)} 倍</span>
+          <span className="font-mono text-xs font-semibold text-foreground/90">{liveTtmPe.toFixed(2)} 倍</span>
         </div>
+
+        {/* 估值基準揭露：合理價/EPS 為基準日分析；距現價・Forward PE・TTM PE 已用即時價重算 */}
+        {live && basePriceAtVal && (
+          <div className="text-[10px] text-muted-foreground/70 px-1 leading-snug">
+            合理價/EPS 為{valuationDate ? ` ${valuationDate} ` : ''}估值（基準價 {Math.round(basePriceAtVal)}）；
+            距現價・Forward PE・TTM PE 依即時價 {live.toFixed(live > 100 ? 0 : 2)} 重算
+          </div>
+        )}
 
         {/* 三情境表 */}
         <div className="space-y-1.5">
           {tiers.map(t => {
             const s = scenarios[t.key];
-            const upPct = s.upside * 100;
+            // 距現價・Forward PE 一律用即時價重算（無即時價才退回 JSON 寫死值）
+            const upPct = live ? ((s.fairPrice - live) / live) * 100 : s.upside * 100;
+            const fwdPe = live && s.fullYearEps > 0 ? live / s.fullYearEps : s.forwardPe;
             return (
               <div key={t.key} className={`rounded border px-2 py-1.5 ${t.cls}`}>
                 <div className="flex items-center justify-between mb-1">
@@ -69,7 +101,7 @@ function ValuationScenarios({ valuation }: { valuation: NonNullable<FundamentalA
                   </div>
                   <div className="flex justify-between">
                     <span className="opacity-70">Forward PE</span>
-                    <span className="font-mono font-semibold">{s.forwardPe.toFixed(1)}×</span>
+                    <span className="font-mono font-semibold">{fwdPe.toFixed(1)}×</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="opacity-70">合理 PE</span>
@@ -96,7 +128,7 @@ function ValuationScenarios({ valuation }: { valuation: NonNullable<FundamentalA
 }
 
 // Tier 2 — 原始財務數字（無 AI 分析時 fallback）
-function RawFundamentalsView({ raw, symbol, standaloneValuation }: { raw: RawFundamentals; symbol: string; standaloneValuation: ValuationOnly | null }) {
+function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice }: { raw: RawFundamentals; symbol: string; standaloneValuation: ValuationOnly | null; currentPrice?: number }) {
   const fmt = (v: number | undefined, suffix = '', digits = 2) =>
     v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(digits)}${suffix}`;
   const fmtRevenue = (v: number | undefined) => {
@@ -143,7 +175,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation }: { raw: RawFun
   return (
     <div className="space-y-2 text-xs">
       {sections.map(sec => (
-        <div key={sec.title} className="border border-border/60 rounded bg-card/40 overflow-hidden">
+        <div key={sec.title} className="ring-1 ring-foreground/10 rounded bg-card/40 overflow-hidden">
           <div className="px-2.5 py-1.5 bg-secondary/40 text-[11px] font-semibold text-cyan-300 border-b border-border/40">
             {sec.title}
           </div>
@@ -172,6 +204,8 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation }: { raw: RawFun
             conclusion: 'fair',
             reasoning: '',
           }}
+          currentPrice={currentPrice}
+          valuationDate={standaloneValuation.date}
         />
       )}
 
@@ -330,15 +364,20 @@ function formatMonth(date: string | null | undefined): string | null {
 interface Props {
   symbol: string;
   date?: string;
+  /** 即時價（= 走圖 header 顯示價）。用來把估值卡的距現價/Forward PE/TTM PE 從估值基準價重算成即時。 */
+  currentPrice?: number;
+  /** DU2：走圖回放中（步退至歷史日）。true 時加警示，提醒基本面/估值為最新資料、非走圖日。 */
+  isHistorical?: boolean;
 }
 
 interface ValuationOnly {
   ttmPe?: number;
+  date?: string;
   monthlyEpsEstimate?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsEstimate'];
   scenarios?: NonNullable<FundamentalAnswer['valuation']>['scenarios'];
 }
 
-export function FundamentalSidebarPanel({ symbol, date }: Props) {
+export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistorical }: Props) {
   const [data, setData] = useState<FundamentalAnswer | null>(null);
   const [rawData, setRawData] = useState<RawFundamentals | null>(null);
   const [standaloneValuation, setStandaloneValuation] = useState<ValuationOnly | null>(null);
@@ -353,11 +392,12 @@ export function FundamentalSidebarPanel({ symbol, date }: Props) {
     setRawData(null);
     setStandaloneValuation(null);
     const bareSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    if (symbol.startsWith('^')) { setLoading(false); return; }  // 指數無基本面/估值，短路不打 decisions API（否則回「symbol 格式不合法」）
 
     // Tier 1: Multi-Agent 完整分析（API 規定 date 必填，預設今天台北日）
     const effectiveDate = date ?? new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
     const decisionUrl = `/api/agents/decisions/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`;
-    fetch(decisionUrl)
+    fetch(decisionUrl, { signal: AbortSignal.timeout(8000) })
       .then(r => r.json())
       .then(async (j: DecisionPayload) => {
         if (cancelled) return;
@@ -371,8 +411,8 @@ export function FundamentalSidebarPanel({ symbol, date }: Props) {
         }
         // Tier 2: 標準 fallback — 抓原始財務數字 + standalone 估值（可能存在）
         const [rawRes, valRes] = await Promise.all([
-          fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`).catch(() => null),
-          fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`).catch(() => null),
+          fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
+          fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
         ]);
         if (cancelled) return;
         try {
@@ -389,14 +429,27 @@ export function FundamentalSidebarPanel({ symbol, date }: Props) {
     return () => { cancelled = true; };
   }, [symbol, date]);
 
+  if (symbol.startsWith('^')) return <div className="p-3 text-xs text-muted-foreground py-6 text-center">指數無基本面 / 估值資料</div>;
   if (loading) return <div className="p-3 text-xs text-muted-foreground animate-pulse">載入基本面分析…</div>;
   if (error) return <div className="p-3 text-xs text-rose-400">載入失敗：{error}</div>;
 
   const cleanSymbolEarly = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
+  // DU2：走圖回放中提醒「基本面/估值為最新資料、不隨走圖回溯」（避免歷史價配當前 PER 被誤讀）。
+  // 觸發涵蓋兩種歷史情境：(1) 手動步退回放（isHistorical=currentIndex<last）；
+  // (2) asOf 載入舊掃描結果（走圖日 date 早於基本面資料日 → 資料比走圖新）。
+  // 比「資料日」而非 today，避免週末/非交易日把最新日誤判成歷史。
+  const dataFreshDate = data?.date ?? rawData?.periods?.valuationDate ?? null;
+  const showWalkNote = isHistorical || (!!date && !!dataFreshDate && date < dataFreshDate);
+  const historicalNote = showWalkNote ? (
+    <div className="px-2.5 py-1.5 rounded border border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-700 dark:text-amber-200/90 leading-snug">
+      ⚠ 走圖回放中{date ? `（${date}）` : ''}：以下基本面 / 估值為<b>最新資料</b>，非走圖當日（財報與估值不隨走圖回溯）。
+    </div>
+  ) : null;
+
   // Tier 2 fallback: 只有原始財務數字，無 AI 深度分析
   if (!data && rawData) {
-    return <RawFundamentalsView raw={rawData} symbol={cleanSymbolEarly} standaloneValuation={standaloneValuation} />;
+    return <div className="space-y-2">{historicalNote}<RawFundamentalsView raw={rawData} symbol={cleanSymbolEarly} standaloneValuation={standaloneValuation} currentPrice={currentPrice} /></div>;
   }
 
   if (!data) {
@@ -415,6 +468,7 @@ export function FundamentalSidebarPanel({ symbol, date }: Props) {
 
   return (
     <div className="space-y-2 text-xs">
+      {historicalNote}
       {/* Verdict + overview */}
       <div className={`px-2.5 py-1.5 rounded border ${style.bg}`}>
         <div className="flex items-center justify-between mb-0.5">
@@ -425,14 +479,14 @@ export function FundamentalSidebarPanel({ symbol, date }: Props) {
       </div>
 
       {/* 估值情境（悲觀 / 中性 / 樂觀預估股價）*/}
-      {data.valuation && <ValuationScenarios valuation={data.valuation} />}
+      {data.valuation && <ValuationScenarios valuation={data.valuation} currentPrice={currentPrice} valuationDate={data.date} />}
 
       {/* 4 段論述 (collapsible) */}
       <div className="space-y-1">
         {data.reasoning.map((r, i) => (
           <details
             key={r.section}
-            className="border border-border/60 rounded bg-card/40"
+            className="ring-1 ring-foreground/10 rounded bg-card/40"
             {...(i === 0 ? { open: true } : {})}
           >
             <summary className="px-2 py-1.5 cursor-pointer text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 select-none">
@@ -454,7 +508,7 @@ export function FundamentalSidebarPanel({ symbol, date }: Props) {
 
       {/* dataPoints summary */}
       {data.dataPoints && data.dataPoints.length > 0 && (
-        <details className="border border-border/60 rounded bg-card/40">
+        <details className="ring-1 ring-foreground/10 rounded bg-card/40">
           <summary className="px-2 py-1.5 cursor-pointer text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 select-none">
             數據點（{data.dataPoints.length} 筆）
           </summary>

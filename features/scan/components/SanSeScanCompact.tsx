@@ -15,9 +15,20 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import type { SelectedStock } from './ScanChartPanel';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, type ConditionReport, type ComboGrade } from '@/lib/cn-sanse/conditions';
+import { matchedStrategies, getStrategy, type SanSeScanLevel } from '@/lib/cn-sanse/namedStrategies';
+import { buyScore } from '@/lib/cn-sanse/buyScore';
+import { CnBoardBadge } from '@/components/shared/CnBoardBadge';
+import type { ThemeRef } from '@/lib/theme-sanse/types';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
+import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
+import { SortControl } from '@/components/shared';
+import { ThemeTag } from '@/components/ThemeTag';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
 
-type Level = 'strict' | 'medium' | 'loose';
+type ScanLevel = 'strict' | 'medium' | 'loose';       // 後端 results 的三個 level
+type Level = SanSeScanLevel;                            // 嚴/中/寬 + 具名策略 id（底反/全共振/紅+黃+觸發/紅+雙B…）；策略 = 從 records 衍生
 
 /** 三色盤中即時掃描活躍時段 = 該市場開盤 或 盤後窗口。TW + CN 共用同一判斷。 */
 function isIntradayActive(market: 'TW' | 'CN'): boolean {
@@ -30,13 +41,29 @@ interface Hit {
   shortOversold?: number; // 短線超跌（舊固化資料可能沒有此欄 → undefined）
   turnoverRank?: number;  // 當日成交額名次（1=最大；舊固化資料無此欄）
 }
-interface RecordRow { symbol: string; report: ConditionReport }
+interface RecordRow {
+  symbol: string; name?: string; industry?: string; price?: number; changePct?: number; turnoverRank?: number;
+  report: ConditionReport;
+  /** 朱六條件確認（core=前5核心全過；台股交集回測有效、陸股僅參考；舊固化無此欄）。 */
+  zhuSix?: { core: boolean; total: number };
+}
 interface ScanResp {
   ok: boolean; lastDate: string; evaluated: number; staleSkipped?: number;
-  counts: Record<Level, number>; results: Record<Level, Hit[]>;
+  counts: Record<ScanLevel, number>; results: Record<ScanLevel, Hit[]>;
   records?: RecordRow[]; sessionType?: 'post_close' | 'intraday'; cached?: boolean; error?: string;
   turnoverCap?: number;       // 成交額粗篩上限（TW 500 / CN 800）
   turnoverFiltered?: number;  // 被粗篩剔除的冷門薄量股檔數
+}
+
+/** records 列 → 畫面 Hit（底反/具名策略衍生清單共用，避免欄位漂移）。 */
+function recToHit(r: RecordRow): Hit {
+  return {
+    symbol: r.symbol, name: r.name ?? r.symbol, industry: r.industry ?? '',
+    price: r.price ?? 0, changePct: r.changePct ?? 0,
+    shortAttack: r.report.scores.shortAttack, midStrength: r.report.scores.midStrength,
+    midControl: r.report.scores.midControl, kongPan: r.report.scores.kongPan,
+    turnoverRank: r.turnoverRank,
+  };
 }
 
 /** 使用順序評級 badge 配色（回測推導；強→弱）。*/
@@ -48,8 +75,8 @@ const COMBO_BADGE: Record<ComboGrade, string> = {
   weak: 'bg-zinc-600/20 text-zinc-400 border-zinc-600/40',
 };
 
-/** 精簡 chip：使用順序評級 + 共振N/3 + 賣出警示。觸發明細(雙B/主力/捕撈)＋判讀收進 badge hover。*/
-function CondChips({ rep }: { rep?: ConditionReport }) {
+/** 精簡 chip：使用順序評級 + 六條件確認 + 共振N/3 + 賣出警示。觸發明細(雙B/主力/捕撈)＋判讀收進 badge hover。*/
+function CondChips({ rep, zhu, market }: { rep?: ConditionReport; zhu?: { core: boolean; total: number }; market?: 'TW' | 'CN' }) {
   if (!rep) return null;
   const trigs = [
     ...rep.doubleB.buy.filter((c) => c.kind === 'signal' && c.met).map((c) => '雙B ' + c.label),
@@ -64,11 +91,19 @@ function CondChips({ rep }: { rep?: ConditionReport }) {
           {COMBO_LABEL[rep.combo.grade]}{rep.combo.bottomReversal ? '·底部' : ''}
         </span>
       )}
+      {zhu?.core && (
+        <span
+          className="px-1 py-0.5 rounded border bg-sky-500/15 text-sky-200 border-sky-400/40 font-medium"
+          title={`朱六條件確認：核心5條全過（總分 ${zhu.total}/6）。${market === 'CN' ? '⚠️ 陸股交集回測無效，僅供參考' : '台股回測：六條件∩三色 5日 +0.31% 優於兩者單獨'}`}
+        >
+          六✓{zhu.total}
+        </span>
+      )}
       {rep.sellWarnings.length > 0 && <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">⚠️{rep.sellWarnings.join('、')}</span>}
     </div>
   );
 }
-interface DateEntry { date: string; counts: Record<Level, number>; scannedAt: string }
+interface DateEntry { date: string; counts: Record<ScanLevel, number>; scannedAt: string }
 
 // 三色買進訊號篩選：分 3 組、每組照書本順序排。點哪個 chip 就要該訊號亮（多個 = AND）。
 type FilterGroup = 'doubleB' | 'mainforce' | 'catch';
@@ -100,6 +135,9 @@ function passFilters(report: ConditionReport | undefined, active: Set<string>): 
   if (active.size === 0) return true;
   if (!report) return false;
   if (active.has('hideConflict') && report.conflict) return false;
+  // 趨勢＝相對多空線（季線 MA60）的位置：空頭=跌破、多頭=站上（與「0軸下空頭區金叉」的動能不同層次）
+  if (active.has('trend_bear') && !report.doubleB.sell.some((c) => c.id === 'b_below' && c.met)) return false;
+  if (active.has('trend_bull') && !report.doubleB.buy.some((c) => c.id === 'b_above' && c.met)) return false;
   if (active.has('cf_top') && report.combo?.grade !== 'top') return false;
   if (active.has('cf_redGate') && !report.combo?.redGate) return false;
   if (active.has('cf_prime') && !(report.combo?.grade === 'top' || report.combo?.grade === 'prime')) return false;
@@ -117,85 +155,75 @@ function passFilters(report: ConditionReport | undefined, active: Set<string>): 
  * 評級 grade 為主軸（top>prime>mid>watch>weak，每級差 100），同級再比共振組數(×10)、
  * 有賣出警示降一點、捕撈底部反彈加一點、最後用短攻做不跨級的細排。缺 combo（舊固化）回 -1 排最後。
  */
-function buyScore(rep?: ConditionReport): number {
-  const c = rep?.combo;
-  if (!c) return -1;
-  let s = c.rank * 100 + (rep!.groupBuyCount ?? 0) * 10;
-  if (rep!.conflict) s -= 5;
-  if (c.bottomReversal) s += 1;
-  const sa = rep!.scores?.shortAttack ?? 0;
-  s += Math.min(Math.max(sa, 0), 99) / 100;
-  return s;
+// buyScore 抽至 lib/cn-sanse/buyScore.ts（2026-06-12 單一事實 — 今日最優先卡/paper-trade 共用）
+
+const stripSuffix = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+/** 該股所屬「最熱題材」的名次（1=最熱）；不在任何排名題材 → Infinity（排最後）。 */
+function bestHeatRank(themeHeatMap: Map<string, ThemeRef[]>, symbol: string): number {
+  const refs = themeHeatMap.get(stripSuffix(symbol)); // 已按 heatRank 升冪
+  return refs && refs.length > 0 ? refs[0].heatRank : Infinity;
 }
 
-/** 共用排序比較器（畫面清單 + 漲幅抓取目標共用，確保顯示的股票就是有抓漲幅的股票）。 */
-function rowComparator(
-  sortKey: SortKey,
-  dir: number,
+// 排序值取法（id 走 lib/sorting/registry 中央清單；缺值/升降序由 sortEngine 統一處理）。
+// 畫面清單 + 漲幅抓取目標共用 accessor，確保顯示的股票就是有抓漲幅的股票。
+function sanseSortValue(
+  h: Hit,
+  id: string,
   perf: Record<string, StockForwardPerformance>,
   reportMap: Map<string, ConditionReport>,
-) {
-  const fwdField = FWD_FIELD[sortKey];
-  return (a: Hit, b: Hit): number => {
-    if (fwdField) {
-      const va = perf[a.symbol]?.[fwdField];
-      const vb = perf[b.symbol]?.[fwdField];
-      if (va == null && vb == null) return 0;       // 缺值永遠排最後（不受 asc/desc 影響）
-      if (va == null) return 1;
-      if (vb == null) return -1;
-      return dir * ((vb as number) - (va as number));
+  themeHeatMap: Map<string, ThemeRef[]>,
+): SortValue {
+  const fwdField = FWD_FIELD[id];
+  if (fwdField) {
+    return (perf[h.symbol]?.[fwdField] as number | null | undefined) ?? null;
+  }
+  switch (id) {
+    case 'score.sanseCombo': {
+      // 既有 buyScore 綜合分；< 0（舊固化無 combo）視為缺值排最後
+      const s = buyScore(reportMap.get(h.symbol));
+      return s < 0 ? null : s;
     }
-    if (sortKey === 'turnoverRank') {
-      const ra = a.turnoverRank; const rb = b.turnoverRank;
-      if (ra == null && rb == null) return 0;
-      if (ra == null) return 1;
-      if (rb == null) return -1;
-      return dir * (ra - rb);
+    case 'heat.theme': {
+      // 所屬最熱題材名次（低名次=更熱）→ 取負，desc 時最熱排前；無題材回 null 排最後
+      const rank = bestHeatRank(themeHeatMap, h.symbol);
+      return rank === Infinity ? null : -rank;
     }
-    if (sortKey === 'combo') {
-      const ra = buyScore(reportMap.get(a.symbol)); const rb = buyScore(reportMap.get(b.symbol));
-      if (ra < 0 && rb < 0) return 0;
-      if (ra < 0) return 1;
-      if (rb < 0) return -1;
-      if (ra === rb) return 0;
-      return dir * (rb - ra);
-    }
-    const key = sortKey as 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price';
-    return dir * ((b[key] ?? 0) - (a[key] ?? 0));
-  };
+    case 'mkt.turnover':
+      return -(h.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
+    case 'sanse.shortAttack':  return h.shortAttack ?? 0;
+    case 'sanse.midStrength':  return h.midStrength ?? 0;
+    case 'sanse.midControl':   return h.midControl ?? 0;
+    case 'sanse.shortOversold': return h.shortOversold ?? 0;
+    case 'mkt.change':         return h.changePct ?? 0;
+    case 'mkt.price':          return h.price ?? 0;
+    default: return null;
+  }
 }
 
 const LEVELS: { key: Level; label: string; desc: string }[] = [
   { key: 'strict', label: '嚴格', desc: '三色資金共振 — 短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位' },
   { key: 'medium', label: '中等', desc: '更新版 — 短攻 / 中強 / 中控 三個分數都 > 0' },
   { key: 'loose', label: '寬鬆', desc: '游資資金翻正 — 短線動能今天剛由負轉正' },
+  { key: 'reversal', label: '底反', desc: '底反該買 — 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握' },
+  // 具名策略（從 records 衍生、全市場命中；由工具列「三色(全共振⭐)…」按鈕經 level 驅動）
+  { key: 'resonance', label: '全共振⭐', desc: '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同日（三組齊發，回測漲幅最大但稀有）' },
+  { key: 'red_yellow_trigger', label: '紅+黃+觸發', desc: '🔴紅 ＋ 🟡黃 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）' },
+  { key: 'red_dualb_gold', label: '紅+雙B金叉', desc: '🔴紅在場 ＋ 黃線穿紅線（只認金叉、較乾淨）' },
+  { key: 'red_dualb_any', label: '紅+雙B金叉/突破', desc: '🔴紅在場 ＋（黃紅金叉 或 收盤突破智能交易線）' },
 ];
 
 const fmt = (n: number | undefined) => (n != null && Number.isFinite(n) ? n.toFixed(2) : '—');
 
-type SortKey = 'combo' | 'shortAttack' | 'midStrength' | 'midControl' | 'shortOversold' | 'changePct' | 'price' | 'turnoverRank'
-  | 'fwdOpen' | 'fwdD1' | 'fwdD5' | 'fwdD20' | 'fwdMaxGain' | 'fwdMaxLoss';
-
-const SORT_PILLS: { key: SortKey; label: string; tip: string }[] = [
-  { key: 'combo', label: '應買', tip: '最應該買進排序（回測推導）：三組齊發(3/3)>紅當前提+觸發>紅+黃中線>紅待觸發>無紅；同級再比共振組數/短攻，有賣出警示降級。⚠️三組齊發台股短線期望值最高但很稀有(一天個位數)，平時看「紅當前提+觸發」那級就夠用、機會多；陸股牛市那段 3/3 反而輸大盤' },
-  { key: 'shortAttack', label: '短攻', tip: '短線上攻（游資資金）分數' },
-  { key: 'midStrength', label: '中強', tip: '中線強勢（主力資金）分數' },
-  { key: 'midControl', label: '中控', tip: '中線控盤（主力控盤）分數' },
-  { key: 'shortOversold', label: '超短跌', tip: '短線超跌（跌破 MA20 後的超跌幅度）' },
-  { key: 'changePct', label: '漲幅', tip: '掃描當日漲跌幅 %' },
-  { key: 'price', label: '股價', tip: '當前股價' },
-  { key: 'turnoverRank', label: '成交量', tip: '當日成交額排名（1=最大；缺值排最後）' },
-  { key: 'fwdOpen', label: '漲跌·隔開', tip: '掃出後隔日開盤漲跌幅（缺值排最後）' },
-  { key: 'fwdD1', label: '漲跌·1日', tip: '掃出後 1 日漲跌幅' },
-  { key: 'fwdD5', label: '漲跌·5日', tip: '掃出後 5 日漲跌幅' },
-  { key: 'fwdD20', label: '漲跌·20日', tip: '掃出後 20 日漲跌幅' },
-  { key: 'fwdMaxGain', label: '漲跌·最高', tip: '掃出後 20 日內最大累計漲幅' },
-  { key: 'fwdMaxLoss', label: '漲跌·最低', tip: '掃出後 20 日內最大累計跌幅' },
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單）：
+// 該頁專屬（應買/三色細項/今日熱點）+ '|' 分隔線 + 共用區（全 UNIVERSAL_SORT_OPTIONS）。
+const SANSE_SORT_OPTIONS = [
+  'score.sanseCombo', 'sanse.shortAttack', 'sanse.midStrength', 'sanse.midControl', 'sanse.shortOversold', 'heat.theme',
+  '|', ...UNIVERSAL_SORT_OPTIONS,
 ];
 
-const FWD_FIELD: Partial<Record<SortKey, keyof StockForwardPerformance>> = {
-  fwdOpen: 'openReturn', fwdD1: 'd1Return', fwdD5: 'd5Return',
-  fwdD20: 'd20Return', fwdMaxGain: 'maxGain', fwdMaxLoss: 'maxLoss',
+const FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
 };
 
 interface Props {
@@ -220,8 +248,10 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   const [perf, setPerf] = useState<Record<string, StockForwardPerformance>>({});
   const [perfLoading, setPerfLoading] = useState(false);
   // 排序：預設「應買」(使用順序評級綜合分)高→低，最該買進的在最前；點同鍵切換高低
-  const [sortKey, setSortKey] = useState<SortKey>('combo');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortKey, setSortKey] = useState<string>('score.sanseCombo');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  // 裸碼 → 所屬熱門題材 refs（「🔥今日熱點」排序 + 卡片題材標籤用）；只在 lastDate 變時抓一次
+  const [themeHeatMap, setThemeHeatMap] = useState<Map<string, ThemeRef[]>>(new Map());
   // 三色買進訊號篩選（cond id 集合；含 'hideConflict'）
   const [filters, setFilters] = useState<Set<string>>(new Set());
   const toggleFilter = (k: string) => setFilters((prev) => {
@@ -229,6 +259,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     next.has(k) ? next.delete(k) : next.add(k);
     return next;
   });
+  // 近 7 天有 YouTube 提及（只台股；display-layer 篩選，切市場時重置）
+  const [ytRecentOnly, setYtRecentOnly] = useState(false);
 
   // 切市場（apiBase 變）時，舊市場的 in-flight fetch 後到不可覆蓋新市場資料 → 用 ref 守門。
   const liveBaseRef = useRef(apiBase);
@@ -283,15 +315,43 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     } finally { if (liveBaseRef.current === myBase) setLoading(false); }
   }, [loadDates, apiBase]);
 
-  // 進場：盤中活躍時段預設即時，否則盤後（在 effect 內判斷避免 SSR/CSR hydration 不一致）
+  // 收盤後決策：今天盤後已固化 → 顯示盤後；今天盤後還沒生（lastDate 落後今天盤中，例如指數 16:39
+  // 才封、盤後掃描要等 16:45）但今天盤中快照在 → 顯示今天的盤中、不退回昨天的盤後。
+  // 等今天盤後一固化（lastDate 追平今天盤中）下次載入/重整自動切回盤後。
+  const loadAfterClose = useCallback(async () => {
+    const myBase = apiBase;
+    setLoading(true); setErr(null);
+    try {
+      const [pcR, idR] = await Promise.all([
+        fetch(`${apiBase}/scan`).then((r) => r.json()).catch(() => null),
+        fetch(`${apiBase}/scan?session=intraday`).then((r) => r.json()).catch(() => null),
+      ]);
+      if (liveBaseRef.current !== myBase) return;
+      const pc = pcR as ScanResp | null;
+      const id = idR as ScanResp | null;
+      // 今天盤中比盤後新（= 今天盤後還沒固化）→ 顯示今天盤中；否則盤後封存
+      const preferIntraday = !!(id?.ok && (!pc?.ok || id.lastDate > pc.lastDate));
+      if (preferIntraday && id) { setSession('intraday'); setData(id); }
+      else if (pc?.ok) { setSession('post_close'); setData(pc); }
+      else throw new Error(pc?.error || id?.error || '讀取失敗');
+    } catch (e) {
+      if (liveBaseRef.current !== myBase) return;
+      setErr(e instanceof Error ? e.message : '讀取失敗');
+    } finally { if (liveBaseRef.current === myBase) setLoading(false); }
+  }, [apiBase]);
+
+  // 進場：盤中活躍時段預設即時，否則交給 loadAfterClose（在 effect 內判斷避免 SSR/CSR hydration 不一致）
   useEffect(() => {
     liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
-    setData(null); setDates([]); setPerf({}); // 清掉前一市場殘留，避免短暫顯示錯市場
+    setData(null); setDates([]); setPerf({}); setYtRecentOnly(false); setThemeHeatMap(new Map()); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
-    // TW + CN 皆依該市場時段決定：盤中/盤後窗口 → 即時，否則盤後封存
-    const initial = isIntradayActive(market) ? 'intraday' : 'post_close';
-    setSession(initial);
-    loadDate(undefined, initial);
+    // 盤中/盤後窗口 → 即時；收盤後 → loadAfterClose（今天盤後沒生就顯示今天盤中，不退回昨天）
+    if (isIntradayActive(market)) {
+      setSession('intraday');
+      loadDate(undefined, 'intraday');
+    } else {
+      loadAfterClose();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase]);
 
@@ -312,15 +372,46 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     () => new Map((data?.records ?? []).map((r) => [r.symbol, r.report])),
     [data],
   );
+  // symbol → 朱六條件確認（舊固化無此欄 → 不在 map；篩選時視為不過）
+  const zhuMap = useMemo(
+    () => new Map((data?.records ?? []).filter((r) => r.zhuSix).map((r) => [r.symbol, r.zhuSix!])),
+    [data],
+  );
+  // 「∩六條件」篩選謂詞（display-layer；未開啟時全過）
+  const passZhu = (h: Hit) => !filters.has('zhu_core') || zhuMap.get(h.symbol)?.core === true;
+
+  /**
+   * 當前 level 的來源清單：
+   *  - 具名策略（底反/全共振/紅+黃+觸發/紅+雙B…）→ 從 records 衍生、全市場命中（不受嚴/中/寬主力閘限制，
+   *    舊固化資料只要有 combo 就能算 → 免重跑 backfill）。
+   *  - 嚴/中/寬 → 走後端 results[level]。
+   */
+  const levelRows = useMemo<Hit[]>(() => {
+    const s = getStrategy(level);
+    if (s) return (data?.records ?? []).filter((r) => s.match(r.report)).map(recToHit);
+    return data?.results[level as ScanLevel] ?? [];
+  }, [data, level]);
+  const countFor = (k: Level): number | undefined => {
+    const s = getStrategy(k);
+    if (s) return (data?.records ?? []).filter((r) => s.match(r.report)).length;
+    return data?.counts[k as ScanLevel];
+  };
+
+  // YouTube 提及（純展示 join）— 只台股有對應；陸股代號不重疊，傳 undefined 不發請求
+  const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? data?.lastDate : undefined);
+  const bare = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  // 「近 7 天有 YouTube 提及」篩選謂詞（display-layer；ytRecentOnly 關閉時全過）
+  const passYt = (h: Hit) => !ytRecentOnly || (ytMap.get(bare(h.symbol))?.count7d ?? 0) > 0;
 
   // 漲幅要抓「畫面實際會顯示的那 50 檔」(濾鏡+排序後)，否則改排序/濾鏡後顯示的股票沒抓到漲幅 → 空白。
   // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
   const fetchTargets = useMemo(() => {
-    const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
-    const baseKey: SortKey = FWD_FIELD[sortKey] ? 'combo' : sortKey;
-    rows.sort(rowComparator(baseKey, sortDir === 'desc' ? 1 : -1, {}, reportMap));
-    return rows.slice(0, 50);
-  }, [data, level, sortKey, sortDir, filters, reportMap]);
+    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
+    // 依 fwd 漲幅排序本身需要 perf（尚未抓到）→ 退回 combo 序當抓取依據，避免循環依賴
+    const baseKey = FWD_FIELD[sortKey] ? 'score.sanseCombo' : sortKey;
+    return applySort(rows, baseKey, sortDir, (h, id) => sanseSortValue(h, id, {}, reportMap, themeHeatMap)).slice(0, 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levelRows, sortKey, sortDir, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
   const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
 
   // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
@@ -349,11 +440,28 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data?.lastDate, fetchKey]);
 
+  // 題材熱度（「🔥今日熱點」排序 + 卡片標籤）— 只在封存日變時抓一次（非每次盤中輪詢）
+  useEffect(() => {
+    const d = data?.lastDate;
+    if (!d) { setThemeHeatMap(new Map()); return; }
+    let alive = true;
+    const myBase = apiBase;
+    fetch(`/api/theme-sanse/hot?market=${market}&date=${d}`)
+      .then((r) => r.json())
+      .then((j: { ok?: boolean; byCode?: Record<string, ThemeRef[]> }) => {
+        if (!alive || liveBaseRef.current !== myBase) return; // 切市場後到的舊回應丟棄
+        setThemeHeatMap(j.ok && j.byCode ? new Map(Object.entries(j.byCode)) : new Map());
+      })
+      .catch(() => { /* 熱度取不到不致命 — 排序退回無題材 */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.lastDate, market]);
+
   const hits = useMemo(() => {
-    const rows = (data?.results[level] ?? []).filter((h) => passFilters(reportMap.get(h.symbol), filters));
-    rows.sort(rowComparator(sortKey, sortDir === 'desc' ? 1 : -1, perf, reportMap));
-    return rows.slice(0, 50);
-  }, [data, level, sortKey, sortDir, perf, filters, reportMap]);
+    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
+    return applySort(rows, sortKey, sortDir, (h, id) => sanseSortValue(h, id, perf, reportMap, themeHeatMap)).slice(0, 50);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levelRows, sortKey, sortDir, perf, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   return (
@@ -363,7 +471,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="font-semibold text-fuchsia-300 shrink-0">🎨 三色資金</span>
           <span className="text-[10px] text-muted-foreground truncate">
-            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${data.turnoverCap ? `（成交額前 ${data.turnoverCap}）` : ''}${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
+            {data ? `${data.lastDate}｜掃 ${data.evaluated} 檔${data.turnoverCap ? (data.turnoverCap >= 10000 ? '（全市場）' : `（成交額前 ${data.turnoverCap}）`) : ''}${session === 'intraday' ? ' · 盤中跳動' : ''}` : `${market === 'TW' ? '台股' : '陸股 A 股'}自創策略`}
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -432,34 +540,32 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                   level === l.key ? 'bg-sky-500/15 text-sky-400 border-sky-500/40' : 'text-muted-foreground border-transparent hover:bg-secondary',
                 )}
               >
-                {l.label}<span className="ml-1 opacity-70">{data?.counts[l.key] ?? '–'}</span>
+                {l.label}<span className="ml-1 opacity-70">{countFor(l.key) ?? '–'}</span>
               </button>
             ))}
           </div>
         )}
         <p className={cn('text-[11px] leading-snug text-muted-foreground', !controlledLevel && 'mt-1.5')}>
-          {controlledLevel && <span className="font-semibold text-fuchsia-300 mr-1">{LEVELS.find((l) => l.key === level)?.label}（{data?.counts[level] ?? '–'}）·</span>}
+          {controlledLevel && <span className="font-semibold text-fuchsia-300 mr-1">{LEVELS.find((l) => l.key === level)?.label}（{countFor(level) ?? '–'}）·</span>}
           {LEVELS.find((l) => l.key === level)?.desc}
         </p>
       </div>
 
-      {/* 排序 pills（點同鍵切換高/低）— 對齊書本買法的排序列 */}
+      {/* 排序 pills（點同鍵切換高/低）— 共用 SortControl + 中央排序清單 */}
       <div className="shrink-0 px-2 py-1.5 border-b border-border flex flex-wrap gap-1 items-center">
-        <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-        {SORT_PILLS.map(({ key, label, tip }) => (
-          <button key={key}
-            onClick={() => {
-              if (sortKey === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-              else { setSortKey(key); setSortDir('desc'); }
-            }}
-            title={tip}
-            className={cn(
-              'text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap',
-              sortKey === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground',
-            )}>
-            {label}{sortKey === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
-          </button>
-        ))}
+        <SortControl
+          options={SANSE_SORT_OPTIONS}
+          value={sortKey}
+          dir={sortDir}
+          onChange={(id, d) => { setSortKey(id); setSortDir(d); }}
+        />
+        {sortKey === 'heat.theme' && (
+          <span className="basis-full text-[9px] leading-snug mt-0.5 text-amber-400/90">
+            {market === 'TW'
+              ? '🔥 三色票按今日最熱題材排序。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+              : '⚠ 陸股回測顯示這樣排「反而把較差的排前面」（最熱題材那段報酬最差）— 不建議用此排序選股，僅供觀察。'}
+          </span>
+        )}
       </div>
 
       {/* 三色買進訊號篩選：分 3 組、每組照書本順序；多個 chip = AND（同時滿足）*/}
@@ -502,8 +608,42 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
               filters.has('hideConflict') ? 'bg-amber-500/15 text-amber-300 border-amber-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
             )}
           >隱藏衝突</button>
-          {filters.size > 0 && (
-            <button onClick={() => setFilters(new Set())} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
+          <button
+            onClick={() => toggleFilter('trend_bull')}
+            title="只看站上多空線（季線 MA60）的股票 — 大趨勢仍多頭、屬多頭中的回檔底反；跌破多空線的會被濾掉"
+            className={cn(
+              'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+              filters.has('trend_bull') ? 'bg-rose-500/15 text-rose-300 border-rose-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}
+          >多頭趨勢</button>
+          <button
+            onClick={() => toggleFilter('trend_bear')}
+            title="只看跌破多空線（季線 MA60）的股票 — 大趨勢仍空頭、屬空頭中的底部反彈；站上多空線的回檔買點會被濾掉"
+            className={cn(
+              'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+              filters.has('trend_bear') ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}
+          >空頭趨勢</button>
+          <button
+            onClick={() => toggleFilter('zhu_core')}
+            title={`只看「朱六條件核心5條全過」的股票（交集確認）。${market === 'CN' ? '⚠️ 陸股交集回測無效，僅供參考' : '台股回測：六條件∩三色紅+觸發 5日 +0.31%，優於兩者單獨'}`}
+            className={cn(
+              'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+              filters.has('zhu_core') ? 'bg-sky-500/15 text-sky-200 border-sky-400/40' : 'text-muted-foreground border-border hover:bg-secondary',
+            )}
+          >∩六條件</button>
+          {market === 'TW' && (
+            <button
+              onClick={() => setYtRecentOnly((v) => !v)}
+              title="只看近 7 天有被 YouTube 理財節目提到的股票"
+              className={cn(
+                'px-1.5 py-0.5 rounded text-[9px] border transition-colors',
+                ytRecentOnly ? 'bg-purple-500/20 text-purple-200 border-purple-400/40' : 'text-muted-foreground border-border hover:bg-secondary',
+              )}
+            >近7天提及</button>
+          )}
+          {(filters.size > 0 || ytRecentOnly) && (
+            <button onClick={() => { setFilters(new Set()); setYtRecentOnly(false); }} className="px-1.5 py-0.5 rounded text-[9px] border border-border text-muted-foreground hover:bg-secondary">清除</button>
           )}
         </div>
       </div>
@@ -517,12 +657,16 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
           const ticker = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const isSel = pureSelected && ticker === pureSelected;
           const inWatch = useWatchlistStore.getState().has(h.symbol);
+          const ytSummary = ytMap.get(ticker);
+          const ytResonance = resonanceTags(ytSummary);
           const rep = reportMap.get(h.symbol);
           // 精簡：原始分數 + 命中嚴/中/寬 收進卡片 hover（不佔版面）
-          const lvHit = (['strict', 'medium', 'loose'] as Level[])
+          const lvHit = (['strict', 'medium', 'loose'] as ScanLevel[])
             .filter((lv) => levelSets[lv].has(h.symbol)).map((lv) => LEVELS.find((l) => l.key === lv)?.label).join('/');
+          const stratHit = matchedStrategies(rep).map((s) => s.label).join('、');
           const detailTitle = `短攻 ${fmt(h.shortAttack)}｜中強 ${fmt(h.midStrength)}｜中控 ${fmt(h.midControl)}｜超短跌 ${fmt(h.shortOversold)}`
             + (rep ? `\n共振 ${rep.groupBuyCount}/3（雙B/主力/捕撈 中幾組）` : '')
+            + (stratHit ? `\n命中型態：${stratHit}` : '')
             + (lvHit ? `\n命中策略：${lvHit}` : '');
           return (
             <div
@@ -537,31 +681,48 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                 isSel ? 'bg-secondary/60 border-fuchsia-700/50' : 'bg-card border-border/60 hover:bg-secondary/40',
               )}
             >
-              {/* Row 1: 代號 + 名稱 + 漲跌% */}
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="font-mono text-[11px] text-foreground/90 shrink-0">{ticker}</span>
-                <span className="text-[11px] text-foreground/80 truncate flex-1">{h.name}</span>
+              {/* Row 1: 名稱 + 代號 + 漲跌%（名稱在前、股號在後；名稱不截斷，過長自動換行確保看到完整名稱）*/}
+              <div className="flex items-baseline gap-1.5 mb-1">
+                <div className="flex items-baseline gap-1.5 flex-wrap flex-1 min-w-0">
+                  <span className="text-[11px] font-medium text-foreground/90 leading-tight break-words">{h.name}</span>
+                  <CnBoardBadge symbol={h.symbol} />
+                  <span className="font-mono text-[10px] text-muted-foreground">{ticker}</span>
+                </div>
                 <span className={cn('font-mono text-[11px] font-bold shrink-0', h.changePct >= 0 ? 'text-bull' : 'text-bear')}>
                   {h.changePct >= 0 ? '+' : ''}{fmt(h.changePct)}%
                 </span>
               </div>
 
-              {/* Row 2: 股價 + 產業 + 成交量名次（三色分數收進卡片 hover）*/}
+              {/* Row 2: 股價 + 產業 + YouTube 提及 + 成交量名次（三色分數收進卡片 hover）*/}
               <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground mb-1">
                 <span className="font-mono">{fmt(h.price)}</span>
-                {h.industry && <span className="truncate max-w-[80px]">{h.industry}</span>}
-                {h.turnoverRank !== undefined && (
-                  <span
-                    className="ml-auto text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded shrink-0"
-                    title={`當日成交額排名（全市場前 ${data?.turnoverCap ?? ''} 內）`}
-                  >
-                    成交量第{h.turnoverRank}名
-                  </span>
+                {h.industry && <span className="truncate max-w-[72px]">{h.industry}</span>}
+                <ThemeTag market={market} code={bare(h.symbol)} hotMap={themeHeatMap} className="max-w-[120px]" />
+                {(ytSummary || h.turnoverRank !== undefined) && (
+                  <div className="ml-auto flex items-center gap-1 shrink-0">
+                    {ytResonance[0] && (
+                      <span
+                        title={ytResonance[0].title}
+                        className={`text-[8px] px-1 h-3.5 flex items-center rounded-sm border ${ytResonance[0].cls}`}
+                      >
+                        {ytResonance[0].label}
+                      </span>
+                    )}
+                    {ytSummary && <YouTubeMentionBadge summary={ytSummary} bareCode={ticker} size="xs" />}
+                    {h.turnoverRank !== undefined && (
+                      <span
+                        className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded"
+                        title={data?.turnoverCap && data.turnoverCap < 10000 ? `當日成交額排名（全市場前 ${data.turnoverCap} 內）` : '當日成交額排名（全市場）'}
+                      >
+                        成交量第{h.turnoverRank}名
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
-              {/* Row 2.5: 使用順序評級 + 共振 + 賣出警示（觸發/階段收進 badge hover）；判讀句只在選中卡顯示 */}
-              <CondChips rep={rep} />
+              {/* Row 2.5: 使用順序評級 + 六條件確認 + 賣出警示（觸發/階段收進 badge hover）；判讀句只在選中卡顯示 */}
+              <CondChips rep={rep} zhu={zhuMap.get(h.symbol)} market={market} />
               {isSel && rep?.combo && (
                 <p className="text-[9px] leading-snug text-muted-foreground/90 mb-1">→ {COMBO_HINT[rep.combo.grade]}</p>
               )}

@@ -46,13 +46,16 @@ function parseTencentLine(line: string): EastMoneyQuote | null {
   const close = parseFloat(parts[3]);
   const prevClose = parseFloat(parts[4]);
   const open = parseFloat(parts[5]);
-  const volume = parseFloat(parts[6]) * 100; // f6 單位為「手」；×100 轉為「股」與 L1 歷史一致
+  // 量單位板塊敏感：騰訊對科創(688/689)回「股」、主板/創業回「手」（同 qfq kline 陷阱，
+  // 見記憶 cn_gem_star_added_to_scan）→ 科創不 ×100，其餘 ×100 轉股，統一對齊 L1。
+  const isStar = /^68[89]/.test(code);
+  const volume = parseFloat(parts[6]) * (isStar ? 1 : 100);
   const high = parseFloat(parts[33]);
   const low = parseFloat(parts[34]);
 
   if (!code || !close || close <= 0) return null;
-  // 只保留主板
-  if (!/^(00[0-3]|60[0135])\d{3}$/.test(code)) return null;
+  // 主板 + 創業板(300-302) + 科創板(688/689)；排除 B股/三板/北交所。
+  if (!/^(00[0-3]|60[0135]|30[0-2]|68[89])\d{3}$/.test(code)) return null;
 
   return {
     code,

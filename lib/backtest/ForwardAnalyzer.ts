@@ -1,6 +1,7 @@
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import { rateLimiter } from '@/lib/datasource/UnifiedRateLimiter';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { StockForwardPerformance, ForwardCandle } from '@/lib/scanner/types';
 import type { Candle } from '@/types';
 
@@ -187,21 +188,34 @@ async function analyzeOne(
     // (1) cap safeEndStr ≤ today（未來資料不該打 API）
     // (2) 若 cap 後 lastL1Date 到 safeEndStr 沒任何 trading day → 進一步 cap = lastL1Date
     // 保留連假/週末過後 lastL1Date 仍落後 today 多日（有可補 trading day）→ 仍走 API 補足
+    // 補抓窗口終點永遠壓到「最後一個已收盤交易日」。今日盤前/盤中還沒有收盤 K：
+    // 上方 L2 inject 已負責今日盤中那根；連 L2 都沒有就等盤後 L1 cron 補，
+    // 不該在此為了「今日」去打 FinMind。否則週一盤前本地停在週五，50 檔全去
+    // 補週末+今日缺口（無資料）→ 整批 forward POST 超時 → UI 漲跌幅全空（「又沒有漲跌幅」）。
+    //
+    // 2026-06-01 fix：cap 移出 `if (candles.length > 0)` —— 原本當 scanDate 之後本地完全
+    // 沒有 forward K（例：掃描日就是最後交易日，週一盤前看週五掃描）時整段被跳過，
+    // safeEndStr 仍 = 今日 → needSupplement(candles.length===0) 對不存在的今日 K 空打
+    // 限流中的 FinMind，單檔卡 40-80s。filteredCandles 用 todayStr（非 safeEndStr）當上界，
+    // 故此 cap 不會濾掉 L2 已注入的今日盤中 K。
+    const lastClosed = getLastTradingDay(market);
+    if (safeEndStr > lastClosed) safeEndStr = lastClosed;
     if (candles.length > 0) {
       const lastL1Date = candles[candles.length - 1].date;
-      if (lastL1Date < safeEndStr) {
-        if (safeEndStr > todayStr) safeEndStr = todayStr;
-        if (tradingDaysBetween(lastL1Date, safeEndStr, market) === 0) {
-          safeEndStr = lastL1Date;
-        }
+      // cap 後 lastL1Date 到 safeEndStr 之間若無交易日（全週末/假日）→ 無新資料可補
+      if (lastL1Date < safeEndStr && tradingDaysBetween(lastL1Date, safeEndStr, market) === 0) {
+        safeEndStr = lastL1Date;
       }
     }
 
     // 檢查本地（含 L2 inject 後）數據是否涵蓋到最新交易日
     // 若最後一根 K 棒日期 < safeEndStr 且距今超過 1 天，用 API 補足缺口
     const lastLocalDate = candles.length > 0 ? candles[candles.length - 1].date : '';
-    const needSupplement = candles.length === 0
-      || (lastLocalDate < safeEndStr && daysBetween(lastLocalDate, safeEndStr) >= 1);
+    // startStr > safeEndStr（cap 後 scanDate 之後已無已收盤交易日）→ 無窗口可補，不打 API；
+    // 落到下方 candles.length===0 分支回「待定」空結果（近期掃描）或 null。
+    const needSupplement = startStr <= safeEndStr
+      && (candles.length === 0
+        || (lastLocalDate < safeEndStr && daysBetween(lastLocalDate, safeEndStr) >= 1));
 
     if (needSupplement) {
       try {
@@ -291,6 +305,7 @@ async function analyzeOne(
     const entryC = forwardCandles[0];
     const lockUp = entryC && entryC.low > 0 &&
       entryC.open === entryC.high && (entryC.high - entryC.low) / entryC.low < 0.005;
+    // nextOpenPrice = 可成交進場價：一字鎖死買不到 → null（給 retFromOpen / 回測進場對齊用，維持原樣）
     const nextOpenPrice = forwardCandles.length > 0 && !lockUp ? entryC.open : null;
     function retFromOpen(idx: number): number | null {
       if (nextOpenPrice == null || nextOpenPrice <= 0) return null;
@@ -298,8 +313,12 @@ async function analyzeOne(
       return +((forwardCandles[idx].close - nextOpenPrice) / nextOpenPrice * 100).toFixed(2);
     }
 
-    const openReturn: number | null = nextOpenPrice != null
-      ? +((nextOpenPrice - scanPrice) / scanPrice * 100).toFixed(2)
+    // openReturn = 隔日開盤漲跌幅（純市場事實：掃描收盤 → 隔日開盤），與「能不能進場」無關。
+    // 2026-06-02：一字漲停也照實顯示「+10%」缺口，不再因 lockUp 留空「—」（用戶要求）。
+    //   留空「—」會跟「無資料」混淆；開盤確實跳空 +10% 是事實，該顯示。
+    //   只解耦顯示用的 openReturn；nextOpenPrice / *FromOpen 仍保留 lockUp 防呆（回測進場不能買一字板）。
+    const openReturn: number | null = entryC && entryC.open > 0
+      ? +((entryC.open - scanPrice) / scanPrice * 100).toFixed(2)
       : null;
 
     let maxGain = 0;

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>清除快取中…</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: system-ui, -apple-system, "Helvetica Neue", sans-serif;
+      background: #0b0e14; color: #e6e6e6;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .box { text-align: center; max-width: 420px; padding: 24px; }
+    h2 { font-weight: 600; margin: 0 0 12px; }
+    p { color: #9aa4b2; line-height: 1.6; margin: 6px 0; font-size: 14px; }
+    code { color: #7dd3fc; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>清除舊快取中…</h2>
+    <p id="status">正在登出 Service Worker 並清除快取（你的自選股會保留）…</p>
+  </div>
+  <script>
+    (async () => {
+      var status = document.getElementById('status');
+      var log = [];
+      try {
+        // 1) 登出所有 Service Worker（解掉卡住舊版的根源）
+        if ('serviceWorker' in navigator) {
+          var regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(function (r) { return r.unregister(); }));
+          log.push('SW x' + regs.length);
+        }
+        // 2) 清掉 Cache Storage（舊 chunk / 舊報價回應）
+        if ('caches' in window) {
+          var keys = await caches.keys();
+          await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          log.push('cache x' + keys.length);
+        }
+        // 注意：刻意不動 localStorage → 自選股 / 持倉 UI 設定全部保留
+        status.textContent = '完成（' + log.join(', ') + '），重新載入新版…';
+      } catch (e) {
+        status.textContent = '清除時出錯：' + (e && e.message) + '（仍會重新載入）';
+      }
+      // 3) 用 query 破 HTTP 快取，強制抓新版首頁
+      setTimeout(function () { location.replace('/?fresh=' + Date.now()); }, 700);
+    })();
+  </script>
+</body>
+</html>

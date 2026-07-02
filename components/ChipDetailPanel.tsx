@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { toast } from 'sonner';
 import { DAY_TRADE_RATIO_HIGH, DAY_TRADE_RATIO_WARN } from '@/lib/analysis/bookThresholds';
+import type { CostBasisSummary } from '@/lib/chipcost/types';
 
 interface TrendInfo {
   direction: 'up' | 'down' | 'flat';
@@ -33,6 +34,8 @@ interface ChipInfo {
   lendingNet: number;
   largeHolderPct: number;
   largeHolderChange: number;
+  // v4 成本／壓力價摘要（外資/投信/自營/主力/融資/融券/券賣 成本 + 嘎空價 + 斷頭價）
+  costBasis?: CostBasisSummary;
   holder100Pct?: number;
   holder200Pct?: number;
   holder400Pct?: number;
@@ -40,6 +43,15 @@ interface ChipInfo {
   holder600To800Pct?: number;
   holder800To1000Pct?: number;
   structureBuilding?: boolean;
+  holderTierChange?: {
+    h100: number | null; h200: number | null; h400: number | null; h1000: number | null;
+    h400To600: number | null; h600To800: number | null; h800To1000: number | null;
+  };
+  holderTierTrend?: {
+    h100?: TrendInfo; h200?: TrendInfo; h400?: TrendInfo; h1000?: TrendInfo;
+  };
+  tdccDate?: string;
+  tdccPrevDate?: string;
   chipScore: number;
   chipGrade: string;
   chipSignal: string;
@@ -63,6 +75,13 @@ interface ChipInfo {
   brokerConcentration?: number;
   topBuyers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
   topSellers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
+  // v5 三大法人衍生欄位（連買天數 / 占量 / 同步買）
+  foreignConsecBuyDays?: number;
+  trustConsecBuyDays?: number;
+  foreignNetToVolumePct?: number | null;
+  trustNetToVolumePct?: number | null;
+  instSyncBuy?: boolean;
+  instSyncBuyDays?: number;
 }
 
 // ── Signal label + color ────────────────────────────────────────────────────
@@ -184,6 +203,21 @@ function ChipTile({
   );
 }
 
+// ── 成本／壓力價摘要 ──────────────────────────────────────────────────────────
+const COST_CELLS = [
+  { key: 'foreignCost', label: '外資' },
+  { key: 'trustCost', label: '投信' },
+  { key: 'dealerCost', label: '自營' },
+  { key: 'brokerCost', label: '主力' },
+  { key: 'marginCost', label: '融資' },
+  { key: 'shortCost', label: '融券' },
+  { key: 'sblCost', label: '券賣' },
+] as const;
+
+function costNum(v: number | null | undefined): string {
+  return v == null || !Number.isFinite(v) ? '—' : v.toFixed(1);
+}
+
 // ── Grade badge ─────────────────────────────────────────────────────────────
 const GRADE_CLS: Record<string, string> = {
   S: 'text-bull border-red-600',
@@ -201,10 +235,12 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
   const [retryCount, setRetryCount] = useState(0);
 
   const cleanSym = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const isIndex = symbol.startsWith('^');  // ^TWII/^TWOII 等指數沒有籌碼資料
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!cleanSym) return;
+    if (isIndex) { setLoading(false); setData(null); setError(null); return; }  // 指數短路，不打 chip API（否則卡載入）
     setLoading(true);
     setError(null);
 
@@ -219,9 +255,12 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       })
       .catch(() => { setError('載入失敗'); toast.error('籌碼資料載入失敗', { id: 'chip-error', duration: 3000 }); })
       .finally(() => setLoading(false));
-  }, [cleanSym, date, retryCount]);
+  }, [cleanSym, isIndex, date, retryCount]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  if (isIndex) return (
+    <div className="text-xs text-muted-foreground/60 py-6 text-center">指數無籌碼資料</div>
+  );
   if (loading) return (
     <div className="space-y-3 p-3">
       <div className="flex items-center gap-2">
@@ -320,6 +359,13 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
         </span>
       </div>
 
+      {/* ── 籌碼面一句結論（提到評分下方更醒目）── */}
+      {data.chipDetail && data.chipDetail !== '中性' && (
+        <div className="text-[11px] text-foreground/85 bg-secondary/40 rounded px-2.5 py-1.5 border border-border/30 leading-relaxed">
+          {data.chipDetail}
+        </div>
+      )}
+
       {/* ── 3-column grid ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
         {tiles.map(t => (
@@ -335,95 +381,6 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
         ))}
       </div>
 
-      {/* ── 主力券商分點（v3 Yahoo scraper）── */}
-      {data.brokerNetBuy != null && data.topBuyers && data.topSellers && (
-        <details className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30">
-          <summary className="cursor-pointer select-none flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground font-medium">主力券商前 15 大</span>
-            <span className="flex items-center gap-2">
-              <span className={`text-[10px] font-mono ${data.brokerNetBuy >= 0 ? 'text-bull' : 'text-bear'}`}>
-                {data.brokerNetBuy >= 0 ? '+' : ''}{data.brokerNetBuy.toLocaleString()} 張
-              </span>
-              {data.brokerConcentration != null && (
-                <span className={`text-[10px] font-mono ${data.brokerConcentration >= 0 ? 'text-bull' : 'text-bear'}`}>
-                  集中 {data.brokerConcentration >= 0 ? '+' : ''}{data.brokerConcentration.toFixed(2)}%
-                </span>
-              )}
-            </span>
-          </summary>
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            <div>
-              <div className="text-[9px] text-bull font-medium mb-1">前 15 大買進</div>
-              <div className="space-y-0.5">
-                {data.topBuyers.slice(0, 8).map(b => (
-                  <div key={`b${b.rank}`} className="flex justify-between text-[10px]">
-                    <span className="text-foreground/80 truncate" title={b.name}>{b.rank}. {b.name}</span>
-                    <span className="text-bull font-mono shrink-0">+{b.netVolK}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="text-[9px] text-bear font-medium mb-1">前 15 大賣出</div>
-              <div className="space-y-0.5">
-                {data.topSellers.slice(0, 8).map(s => (
-                  <div key={`s${s.rank}`} className="flex justify-between text-[10px]">
-                    <span className="text-foreground/80 truncate" title={s.name}>{s.rank}. {s.name}</span>
-                    <span className="text-bear font-mono shrink-0">{s.netVolK}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </details>
-      )}
-
-      {/* ── 集保大戶分層（依股價選 tier；千金股看 100 張、平價看 1000 張）── */}
-      {(data.holder100Pct != null || data.holder400Pct != null) && (
-        <div className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30 space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground font-medium">集保大戶分層</span>
-            {data.structureBuilding && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 border border-red-700/50">
-                ✨ 主力卡位
-              </span>
-            )}
-          </div>
-          <div className="grid grid-cols-4 gap-1 text-[9px] font-mono">
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">100張↑</div>
-              <div className="text-foreground/90 font-bold">{data.holder100Pct?.toFixed(1) ?? '—'}%</div>
-            </div>
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">200張↑</div>
-              <div className="text-foreground/90 font-bold">{data.holder200Pct?.toFixed(1) ?? '—'}%</div>
-            </div>
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">400張↑</div>
-              <div className="text-foreground/90 font-bold">{data.holder400Pct?.toFixed(1) ?? '—'}%</div>
-            </div>
-            <div className="bg-secondary/60 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">1000張↑</div>
-              <div className="text-foreground/90 font-bold">{data.largeHolderPct.toFixed(1)}%</div>
-            </div>
-          </div>
-          {data.structureBuilding && (
-            <div className="grid grid-cols-3 gap-1 text-[8px] font-mono text-muted-foreground/80">
-              <div className="text-center">400-600: {data.holder400To600Pct?.toFixed(2)}%</div>
-              <div className="text-center">600-800: {data.holder600To800Pct?.toFixed(2)}%</div>
-              <div className="text-center">800-1000: {data.holder800To1000Pct?.toFixed(2)}%</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Summary ── */}
-      {data.chipDetail && data.chipDetail !== '中性' && (
-        <div className="text-[9px] text-muted-foreground bg-secondary/40 rounded px-2 py-1.5 border border-border/30 leading-relaxed">
-          {data.chipDetail}
-        </div>
-      )}
-
       {/* ── Margin detail ── */}
       <div className="grid grid-cols-2 gap-1.5 text-[9px] text-muted-foreground">
         <div className="bg-secondary/40 rounded px-2 py-1 border border-border/30">
@@ -431,7 +388,15 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           <span className="float-right text-muted-foreground font-mono">{data.marginBalance.toLocaleString()}張</span>
           <div className="clear-both" />
           <span>使用率</span>
-          <span className="float-right text-muted-foreground font-mono">{data.marginUtilRate}%</span>
+          <span className="float-right font-mono">
+            <span className="text-muted-foreground">{data.marginUtilRate}%</span>
+            {typeof data.marginNet === 'number' && data.marginNet !== 0 && (
+              <span className={`ml-1 ${data.marginNet > 0 ? 'text-bull' : 'text-bear'}`}
+                title={`融資餘額較前一日${data.marginNet > 0 ? '增加' : '減少'} ${Math.abs(data.marginNet).toLocaleString()} 張`}>
+                {data.marginNet > 0 ? '▲增' : '▼減'}
+              </span>
+            )}
+          </span>
         </div>
         <div className="bg-secondary/40 rounded px-2 py-1 border border-border/30">
           <span>融券餘額</span>
@@ -443,6 +408,50 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           </span>
         </div>
       </div>
+
+      {/* ── 成本／壓力價摘要（估算；外資/投信/自營/主力/融資/融券/券賣 + 嘎空價 + 斷頭價）── */}
+      {data.costBasis && (
+        <details className="bg-secondary/40 rounded px-2 py-1.5 border border-border/30">
+          <summary className="cursor-pointer select-none flex items-center justify-between">
+            <span className="text-[10px] text-muted-foreground font-medium">💰 成本／壓力價（估算）</span>
+            {data.costBasis.marginLiquidationPrice != null && (
+              <span className="text-[10px] font-mono text-rose-300">
+                斷頭 {data.costBasis.marginLiquidationPrice.toFixed(1)}
+                {data.costBasis.distanceToLiquidationPct != null && (
+                  <span className="text-muted-foreground ml-1">
+                    ({data.costBasis.distanceToLiquidationPct < 0 ? '已破' : '距'}{Math.abs(data.costBasis.distanceToLiquidationPct).toFixed(1)}%)
+                  </span>
+                )}
+              </span>
+            )}
+          </summary>
+          <div className="grid grid-cols-4 gap-1 mt-2 text-[9px] font-mono">
+            {COST_CELLS.map(c => {
+              const brokerNone = c.key === 'brokerCost' && data.costBasis!.brokerCostMethod === 'none';
+              const brokerComposite = c.key === 'brokerCost' && data.costBasis!.brokerCostMethod === 'composite';
+              return (
+                <div key={c.key} className="bg-secondary/60 rounded px-1 py-1 text-center">
+                  <div className="text-muted-foreground/70 text-[8px]">{c.label}{brokerComposite && '*'}</div>
+                  <div className="text-foreground/90 font-bold">
+                    {brokerNone ? <span className="text-amber-400 text-[8px]">累積中</span> : costNum(data.costBasis![c.key])}
+                  </div>
+                </div>
+              );
+            })}
+            <div className="bg-rose-950/20 border border-rose-500/30 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">斷頭130%</div>
+              <div className="text-rose-200 font-bold">{costNum(data.costBasis.marginLiquidationPrice)}</div>
+            </div>
+            <div className="bg-fuchsia-950/20 border border-fuchsia-500/30 rounded px-1 py-1 text-center">
+              <div className="text-muted-foreground/70 text-[8px]">嘎空價</div>
+              <div className="text-fuchsia-200 font-bold">{costNum(data.costBasis.squeezePrice)}</div>
+            </div>
+          </div>
+          <div className="mt-1 text-[8px] text-muted-foreground/70 leading-relaxed">
+            成本皆為估算（淨增張數×當日均價加權）。融資維持率券商看「整戶」非個股，斷頭價僅供參考。{data.costBasis.brokerCostMethod === 'composite' && '＊主力=綜合估算（分點歷史累積中）。'}完整版見個股頁。
+          </div>
+        </details>
+      )}
     </div>
   );
 }

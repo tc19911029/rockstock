@@ -36,18 +36,14 @@ async function fetchTpexSblAll(dateIso: string): Promise<TwseSblRow[]> {
   if (cached && cached.expiresAt > Date.now()) return cached.rows;
 
   try {
-    const res = await fetch(TPEX_SBL_URL, {
+    // 2026-06-12 B2：裸 fetch 被 TPEx Cloudflare 擋（TLS 指紋）→ 改 curl-first helper（POST）
+    const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+    const { data: json } = await fetchJsonWithCurlFallback<TpexResp>(TPEX_SBL_URL, {
+      proxyFirst: true,
       method: 'POST',
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': 'application/json',
-      },
       body: `date=${isoToRocSlash(dateIso)}&response=json&type=Daily`,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
-    if (!res.ok) return [];
-    const json: TpexResp = await res.json();
     const table = json.tables?.[0];
     if (!table?.data) return [];
 
@@ -93,21 +89,29 @@ export async function fetchTpexSblForStock(stockId: string, dateIso: string): Pr
   return all.find(r => r.stockId === stockId) ?? null;
 }
 
+/** 全市場單日 bulk（/api/cron/fetch-chip-extras 每日持久化用；2026-06-12 B2）*/
+export async function fetchTpexSblBulk(dateIso: string): Promise<TwseSblRow[]> {
+  return fetchTpexSblAll(dateIso);
+}
+
 export async function fetchTpexSblHistory(
   stockId: string,
   endDateIso: string,
   days = 30,
 ): Promise<TwseSblRow[]> {
-  const result: TwseSblRow[] = [];
+  // 並行抓（限並發 8）：原本逐日 await 串行拖垮 /api/chip（上櫃股）。fetchTpexSblAll 有日 cache + proxyFirst。2026-06-22 修。
   const end = new Date(endDateIso + 'T00:00:00Z');
-  for (let i = 0; i < days; i++) {
-    const d = new Date(end.getTime() - i * 86400_000);
-    const dow = d.getUTCDay();
-    if (dow === 0 || dow === 6) continue;
-    const dateIso = d.toISOString().slice(0, 10);
-    const all = await fetchTpexSblAll(dateIso);
-    const row = all.find(r => r.stockId === stockId);
-    if (row) result.push(row);
+  const isoDays = [...Array(days)].map((_, i) => new Date(end.getTime() - i * 86400_000))
+    .filter((d) => d.getUTCDay() !== 0 && d.getUTCDay() !== 6)
+    .map((d) => d.toISOString().slice(0, 10));
+  const result: TwseSblRow[] = [];
+  const CONC = 8;
+  for (let i = 0; i < isoDays.length; i += CONC) {
+    const batch = await Promise.all(isoDays.slice(i, i + CONC).map(async (iso) => {
+      const all = await fetchTpexSblAll(iso).catch(() => []);
+      return all.find((r) => r.stockId === stockId) ?? null;
+    }));
+    for (const row of batch) if (row) result.push(row);
   }
   return result.reverse();
 }

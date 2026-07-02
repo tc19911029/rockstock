@@ -29,7 +29,7 @@ async function fetchTencent(tencentSym: string): Promise<Candle[]> {
   startDate.setFullYear(startDate.getFullYear() - 2);
   const start = startDate.toISOString().split('T')[0];
 
-  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tencentSym},day,${start},${TARGET_DATE},800,qfq`;
+  const url = `https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param=${tencentSym},day,${start},${TARGET_DATE},800,qfq`;
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`Tencent ${res.status}`);
   const json = await res.json() as any;

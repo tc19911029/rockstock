@@ -34,7 +34,7 @@ export async function GET(
     if (!analysis) {
       return apiOk({
         analysis: null,
-        message: 'no analysis for this date — run /youtube-analysis skill after question payload is prepared',
+        message: '此日無 YouTube 分析資料',
       });
     }
 

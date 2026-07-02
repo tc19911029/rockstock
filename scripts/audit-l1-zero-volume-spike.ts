@@ -35,7 +35,7 @@ interface L1File {
   candles: RawCandle[];
 }
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+const REPO_ROOT = '/Users/tc/Desktop/rockstock';
 const CANDLES_ROOT = path.join(REPO_ROOT, 'data', 'candles');
 
 interface Pollution {

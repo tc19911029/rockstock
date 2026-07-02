@@ -19,6 +19,7 @@ import {
   SourceResult,
 } from './types';
 import type { MarketId } from '@/lib/scanner/types';
+import { computeRedFlags } from '@/lib/redflags/compute';
 
 export interface MergeArgs {
   market: MarketId;
@@ -48,11 +49,14 @@ export function mergeCandidates(args: MergeArgs): CandidatesPool {
     }
   }
 
-  // 計算 sourceCount + strengthSignals
+  // 計算 sourceCount + strengthSignals（+ comboBadges 純顯示徽章，不參與排序）
   const candidates: Candidate[] = [];
   for (const c of merged.values()) {
     c.sourceCount = countSources(c);
     c.strengthSignals = computeStrengthSignals(c);
+    c.comboBadges = computeComboBadges(c);
+    const flags = computeCandidateRedFlags(c);
+    if (flags.length > 0) c.redFlags = flags;
     candidates.push(c);
   }
 
@@ -112,6 +116,36 @@ function countSources(c: Candidate): number {
   ).length;
 }
 
+/**
+ * 組合徽章（2026-06-12 A3）— 純顯示，不參與 countSources / strengthSignals / 排序。
+ * 「pool 不加組合 bonus」決議不變：徽章標示組合事實，分數一分不加。
+ */
+export function computeComboBadges(c: Candidate): string[] {
+  const badges: string[] = [];
+  const chipSignals = c.sources.chip?.signals ?? [];
+  const foreignBuy = chipSignals.includes('foreign_strong_buy');
+  const trustBuy = chipSignals.includes('trust_buy');
+  if (foreignBuy && trustBuy) {
+    badges.push(c.sources.technical ? 'sync_buy_with_tech' : 'inst_sync_buy');
+  }
+  if (c.sourceCount === 4) badges.push('full_house');
+  return badges;
+}
+
+/**
+ * 買進前紅旗（2026-06-13）— 純顯示零分數影響（同 comboBadges）。
+ * TW pool 階段先用 candidate 已有的 fundamental attribution（epsYoY/per）算
+ * 業績爆雷 / 獲利衰退 / 本益比虛高；籌碼/治理類旗待接 TW 資料源後在 build 端補。
+ */
+export function computeCandidateRedFlags(c: Candidate) {
+  const f = c.sources.fundamental;
+  if (!f) return [];
+  return computeRedFlags({
+    epsYoYPct: f.epsYoY ?? null,
+    per: f.per ?? null,
+  });
+}
+
 function computeStrengthSignals(c: Candidate): Candidate['strengthSignals'] {
   const tech = c.sources.technical;
   const yt = c.sources.youtube;
@@ -147,10 +181,11 @@ function computeFundamentalScore(fund: Candidate['sources']['fundamental']): num
 
 function weightedStrength(c: Candidate): number {
   const s = c.strengthSignals;
-  // 各維度權重相同，每維歸一化到 0-100
+  // DF5：normalize 與 poolWeights.computeFacetScores 對齊（後者才是 UI/合約的 ranking 單一事實；
+  // 本函數只在 sort=sourceCount 當 tie-break、UI 從不請求）。對齊避免兩套分歧。
   return (
-    Math.min(100, s.technicalTracksCount * 10) +  // 10 tracks → 滿分
-    Math.min(100, s.youtubeMentionCount * 20) +    // 5 節目 → 滿分
+    Math.min(100, s.technicalTracksCount * 50) +  // ≥2 軌 → 滿分
+    Math.min(100, s.youtubeMentionCount * 25) +    // ≥4 節目 → 滿分
     s.chipScore +
     s.fundamentalScore
   );

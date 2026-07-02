@@ -6,8 +6,10 @@
  * Docs: https://finmindtrade.com/analysis/#/data/api
  */
 
+import { getFinMindToken } from '@/lib/env';
+
 const FINMIND_BASE = 'https://api.finmindtrade.com/api/v4/data';
-const FINMIND_TOKEN = process.env.FINMIND_API_TOKEN ?? '';  // optional paid token
+const FINMIND_TOKEN = getFinMindToken() ?? '';  // optional paid token
 
 const TTL = {
   INSTITUTIONAL:  24 * 60 * 60 * 1000,  // 24h
@@ -55,7 +57,7 @@ export async function finmindFetch<T>(dataset: string, params: Record<string, st
 
   const doFetch = async (withToken: boolean): Promise<Response> => {
     return fetch(buildUrl(withToken).toString(), {
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(6000),
       headers: { 'Accept': 'application/json' },
       cache: 'no-store',
     });
@@ -73,6 +75,16 @@ export async function finmindFetch<T>(dataset: string, params: Record<string, st
     } else {
       throw new Error(`FinMind ${res.status} ${res.statusText} body=${body.slice(0, 200)}`);
     }
+  }
+
+  // 額度用罄（402 "Requests reach the upper limit" / 429）：付費 token 的 hourly 配額打爆，
+  // 但免費層是 per-IP 另計配額、常常還有額度 → 退免費層 retry 一次（本次請求限定，不永久 disable，
+  // 因為限流是暫時的、下個小時就回復，token 在未撞限時段仍有更高配額）。
+  // 不修這條時：402 會一路 throw 進 getQuarterlyHistory 等 catch 被靜默吞成空陣列 →
+  // ttmEps=null → 估值面板誤報「FinMind 尚未開放或代號錯誤」（實際只是限流）。
+  if (!res.ok && useToken && (res.status === 402 || res.status === 429)) {
+    console.warn(`[FinMind] token rate-limited (${res.status}) on ${dataset}, retrying on free tier`);
+    res = await doFetch(false);
   }
 
   if (!res.ok) {
@@ -631,7 +643,9 @@ export async function getQuarterlyHistory(
 
     if (result.length > 0) cacheSet(cacheKey, result, TTL.FUNDAMENTALS);
     return result;
-  } catch {
+  } catch (e) {
+    // 不靜默吞：限流(402)/逾時等失敗會讓 computeTTM 回 null → 估值誤報「代號錯誤」，難診斷。
+    console.warn(`[FinMind] getQuarterlyHistory(${stockId}) failed: ${(e as Error).message}`);
     return [];
   }
 }

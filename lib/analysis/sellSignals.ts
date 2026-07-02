@@ -1,5 +1,7 @@
 import { CandleWithIndicators } from '@/types';
 import { findPivots, detectTrend } from '@/lib/analysis/trendAnalysis';
+import { halfPrice, isLongRedCandle } from '@/lib/rules/ruleUtils';
+import { recentHigh } from '@/lib/indicators';
 
 export type SellSignalType =
   | 'DEATH_CROSS'         // MA5 crosses below MA20
@@ -19,6 +21,8 @@ export type SellSignalType =
   | 'SEASON_LINE_DOWN_BREAK' // 季線向下回檔跌破5均（第20條）
   // 寶典 Part 11-1 停損 5 法第 5 條「支阻停損」（p.703）
   | 'SUPPORT_BREAK_STOPLOSS' // 跌破關鍵支撐（前波低點 / 季線 MA60）→ 多單停損
+  // 朱家泓 CH4-09 / CH2-04「逃命波」（破月線＋破前低後的反彈＝最後出場機會）
+  | 'ESCAPE_WAVE'         // 破月線+破前低後的反彈紅K，未過破壞前高/月線 → 最後逃命
   // 寶典 Part 11-1 停利 / 短線 K 線出場法
   | 'RED_K_LOW_BREAK'     // 收盤跌破最後一根紅 K 低點（寶典短線 K 線出場法）
   // 寶典「自高檔下殺 8 個 K 線訊號」（抓住線圖第 3 篇 p.150-154）
@@ -26,13 +30,45 @@ export type SellSignalType =
   | 'HIGH_LEVEL_DOJI'     // 第 3 條：高檔十字 K（次日跌破前一日最低）
   | 'HIGH_LEVEL_HANGING_MAN' // 第 4 條：高檔吊人 K（長下影）
   | 'HIGH_LEVEL_BEARISH_ENGULF' // 第 6 條：高檔陰包陽吞噬
-  | 'HIGH_LEVEL_OPEN_FLAT_BLACK'; // 第 7 條：高檔開平低（開=昨低）轉長黑
+  | 'HIGH_LEVEL_OPEN_FLAT_BLACK' // 第 7 條：高檔開平低（開=昨低）轉長黑
+  // 朱家泓 CH2-05/CH2-07/CH4-09：反轉訊號「次日確認」（兩根 K 棒事件窗，降假訊號）
+  | 'BLOWOFF_BLACK_CONFIRMED'    // 爆量長黑反轉 + 次日收盤跌破該長黑低點才確認
+  // 朱家泓 CH2-01：長上影線紅 K「次日看開盤」— 次日跌破長上影紅 K 低點確認轉弱
+  | 'UPPER_SHADOW_NEXTDAY_BREAK' // 高檔長上影紅K 次日收盤跌破其低點確認
+  // Wave2 進場-11（回測過關）：帶量突破紅K 後 T+1/T+2 黑K收盤跌破其 1/2 價 = 假突破
+  | 'FALSE_BREAKOUT_FAIL'; // 假突破跌破1/2價（持倉端避雷出場，不接進場 gate）
 
 export interface SellSignal {
   type: SellSignalType;
   label: string;
   detail: string;
   severity: 'high' | 'medium' | 'low';
+}
+
+// ════════════════════════════════════════════════════════════════
+// 書本嚴重度排序（賠少-13，對齊朱家泓 CH1-07 / 寶典停損 5 法）
+//   書本明示：「跌破前波低點」破壞多頭結構，比「跌破月線」更嚴重。
+//   兩者 detector 都標 severity:'high'，但消費端（holdingVerdict 取 sellHigh[0]、
+//   SixConditionsPanel 依陣列序顯示）只看「同 high 內誰排前」。
+//   這裡在 detectSellSignals 末端做穩定排序：把「破前低/支撐」類擺在「破月線」之前，
+//   讓 verdict 報的第一個 high 與 UI 第一條警示都對齊書本。純顯示/優先序層，不改任何 gate。
+// ════════════════════════════════════════════════════════════════
+//
+// rank 越小＝越重（越靠前）。未列出的訊號用 DEFAULT_SELL_RANK，保留原相對序（穩定排序）。
+const SELL_SEVERITY_RANK: Partial<Record<SellSignalType, number>> = {
+  // 趨勢結構破壞（最重）— 空頭確認 / 頭頭低
+  TREND_BEARISH: 0,
+  LOWER_LOW: 1,
+  // 關鍵支撐跌破：前波低點 / 季線（書本「跌破前低」比「跌破月線」重）
+  SUPPORT_BREAK_STOPLOSS: 2,
+  ESCAPE_WAVE: 3,
+  // 月線保護線失守（比前低輕）
+  BREAK_MA20: 4,
+};
+const DEFAULT_SELL_RANK = 3.5; // 介於支撐破壞與月線之間，未分級者維持既有相對序
+
+function sellSeverityRank(t: SellSignalType): number {
+  return SELL_SEVERITY_RANK[t] ?? DEFAULT_SELL_RANK;
 }
 
 /**
@@ -179,6 +215,53 @@ export function detectSellSignals(
         type: 'PROFIT_CLIMAX_EXIT',
         label: '急漲後長黑出場',
         detail: `連續3日急漲後出現大量長黑K覆蓋，主力出貨訊號`,
+        severity: 'high',
+      });
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // 反轉訊號「次日確認」（朱家泓 CH2-05/CH2-07/CH4-09）
+  //   書本：反轉訊號要「次日收盤跌破該訊號 K 棒低點」才確認，降假訊號。
+  //   引入 2 根 K 棒事件窗 — 昨日是反轉 K、今日收盤跌破其低點才報。
+  //   量比口徑沿用上方 volRatio5（5 日均量），不新增魔術數。
+  // ════════════════════════════════════════════════════════════════
+  if (prev) {
+    // 昨日相對「前 5 日均量」的量比（與當日 volRatio5 同口徑，視窗位移一根）
+    const prevVolRatio5 = (() => {
+      const vols = candles.slice(Math.max(0, index - 6), index - 1).map(x => x.volume).filter(v => v > 0);
+      if (vols.length === 0) return null;
+      return prev.volume / (vols.reduce((a, b) => a + b, 0) / vols.length);
+    })();
+    const prevBody = Math.abs(prev.close - prev.open);
+    const prevBodyPct = prev.open > 0 ? prevBody / prev.open : 0;
+    const prevUpperShadow = prev.high - Math.max(prev.close, prev.open);
+    const prevInHigh = prev.ma5 != null && prev.ma20 != null && prev.ma5 > prev.ma20;
+
+    // 賠少-6：爆量長黑反轉 + 次日確認 — 昨日爆量長黑(實體≥2%)，今日收盤跌破昨低
+    const prevBlowoffBlack = prev.close < prev.open
+      && prevBodyPct >= 0.02
+      && (prevVolRatio5 ?? 0) > 1.5;
+    if (prevBlowoffBlack && c.close < prev.low) {
+      signals.push({
+        type: 'BLOWOFF_BLACK_CONFIRMED',
+        label: '爆量長黑反轉(次日確認)',
+        detail: `昨日爆量長黑(量比 ${(prevVolRatio5 ?? 0).toFixed(1)}x)，今日收盤 ${c.close.toFixed(2)} 跌破昨日低 ${prev.low.toFixed(2)}，反轉確認`,
+        severity: 'high',
+      });
+    }
+
+    // 賠少-19：高檔長上影紅K「次日看開盤」— 昨日高檔爆量長上影紅K，今日收盤跌破昨低確認轉弱
+    const prevHighVolUpperShadow = prevInHigh
+      && prev.close > prev.open                  // 紅 K（當天即使收漲也是警訊）
+      && prevBody > 0
+      && prevUpperShadow > prevBody * 2
+      && (prevVolRatio5 ?? 0) > 1.5;
+    if (prevHighVolUpperShadow && c.close < prev.low) {
+      signals.push({
+        type: 'UPPER_SHADOW_NEXTDAY_BREAK',
+        label: '長上影紅K次日破低',
+        detail: `昨日高檔爆量長上影紅K(警訊)，今日收盤 ${c.close.toFixed(2)} 跌破昨日低 ${prev.low.toFixed(2)}，次日看開盤已轉弱確認`,
         severity: 'high',
       });
     }
@@ -449,5 +532,109 @@ export function detectSellSignals(
     }
   }
 
-  return signals;
+  // ════════════════════════════════════════════════════════════════
+  // 朱家泓 CH4-09 / CH2-04「逃命波」（破月線＋破前低後的反彈）
+  //   書本：股價先跌破月線(MA20)、再跌破最近前波低點（雙線/雙重支撐破壞），
+  //   隨後出現「反彈紅 K」但收盤未過「破壞前的前波高」也未站回月線
+  //   → 這是最後一波逃命機會，禁止做多、多單該出場。
+  //   容差沿用：MA20 緩衝 0.99（同 BREAK_MA20）、findPivots window 8（同 SUPPORT_BREAK_STOPLOSS）。
+  //   嚴重度 high → holdingVerdict 自動判「該出場」，不必改決策樹。
+  // ════════════════════════════════════════════════════════════════
+  if (index >= 21 && ma20 != null) {
+    const isReboundRedK = c.close > c.open;            // 當前為反彈紅 K
+    if (isReboundRedK) {
+      // (1) 近期曾跌破月線（回看窗內任一日 close < 其 MA20*0.99）
+      let brokeMa20Recently = false;
+      for (let i = index - 1; i >= Math.max(1, index - 10); i--) {
+        const k = candles[i];
+        if (k.ma20 != null && k.close < k.ma20 * 0.99) { brokeMa20Recently = true; break; }
+      }
+
+      // (2) 已跌破最近前波低點（findPivots low pivot，邏輯同 SUPPORT_BREAK_STOPLOSS）
+      //     在「當前反彈日之前」窗內曾出現 close < 該前低
+      const pivots = findPivots(candles, index - 1, 8);
+      const lastLow = pivots.find(p => p.type === 'low');
+      let brokePivotLow = false;
+      if (lastLow) {
+        for (let i = lastLow.index + 1; i <= index - 1; i++) {
+          if (candles[i].close < lastLow.price) { brokePivotLow = true; break; }
+        }
+      }
+
+      // 破壞前的前波高：findPivots 最近一個 high pivot（前低之前 / 結構頭部）
+      const lastHigh = pivots.find(p => p.type === 'high');
+      const priorHighPrice = lastHigh?.price;
+
+      // (3) 反彈紅 K 收盤未過「破壞前的前波高」且未站回月線（MA20*0.99）
+      const notPastPriorHigh = priorHighPrice == null || c.close < priorHighPrice;
+      const notReclaimedMa20 = c.close < ma20 * 0.99;
+
+      if (brokeMa20Recently && brokePivotLow && notPastPriorHigh && notReclaimedMa20) {
+        const refHigh = priorHighPrice != null ? priorHighPrice.toFixed(2) : '前波高';
+        signals.push({
+          type: 'ESCAPE_WAVE',
+          label: '逃命波(破月線+破前低後反彈，最後出場機會)',
+          detail: `已破月線(MA20 ${ma20.toFixed(2)})又破前低${lastLow ? ` ${lastLow.price.toFixed(2)}` : ''}，今反彈紅K收 ${c.close.toFixed(2)} 未過前波高 ${refHigh}／未站回月線，是最後逃命波（CH4-09）`,
+          severity: 'high',
+        });
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Wave2 進場-11「假突破跌破 1/2 價」— 持倉端避雷出場（回測已過關）
+  //   回測（92-wave2回測結果.md C18）：帶量突破紅K 後 T+1/T+2 出現黑 K 收盤跌破
+  //   該突破長紅 K 的「1/2 價」(halfPrice=(high+low)/2) → 判假突破。
+  //   假突破組後續 d5 淨超額 −4.70%、過濾後 +1.26%、勝率 37%→48%、train/test 一致。
+  //   這裡把它做成持倉端「出場避雷」訊號（非選股 gate）：
+  //     近 1~3 根曾有「帶量突破紅K」(實體大 ≥2% via isLongRedCandle、收盤過區間高、量比>1.5)，
+  //     而當前為其 T+1/T+2 黑K、收盤跌破該突破紅K 的 halfPrice → push severity high。
+  //   沿用既有 halfPrice / isLongRedCandle / recentHigh / volRatio>1.5 量比口徑，不新增魔術數。
+  //   ⚠️ 純出場避雷，不接任何進場/選股 gate。
+  // ════════════════════════════════════════════════════════════════
+  const isBlackNow = c.close < c.open;
+  if (isBlackNow && index >= 20) {
+    // 突破日只看 T-1 / T-2（對應假突破 lookahead 1~2，當前為 T+1/T+2 黑 K）
+    for (let bi = index - 1; bi >= index - 2; bi--) {
+      const bk = candles[bi];
+      if (!bk) continue;
+      // (1) 帶量突破紅 K：實體大長紅（≥2%）、量比 > 1.5（沿用本檔「帶量/爆量」口徑）
+      const bkVolRatio5 = (() => {
+        const vols = candles.slice(Math.max(0, bi - 5), bi).map((x) => x.volume).filter((v) => v > 0);
+        if (vols.length === 0) return null;
+        return bk.volume / (vols.reduce((a, b) => a + b, 0) / vols.length);
+      })();
+      const isBreakoutRedK = isLongRedCandle(bk)
+        && (bkVolRatio5 ?? 0) > 1.5
+        && bk.close > recentHigh(candles, bi, 20); // 收盤過前 20 根區間高 = 突破
+      if (!isBreakoutRedK) continue;
+
+      // (2) 當前黑 K 收盤跌破該突破紅 K 的 1/2 價（halfPrice）
+      const bkHalf = halfPrice(bk);
+      if (c.close < bkHalf) {
+        const tPlus = index - bi; // 1 = T+1、2 = T+2
+        signals.push({
+          type: 'FALSE_BREAKOUT_FAIL',
+          label: '假突破跌破1/2價(該出場)',
+          detail: `${tPlus}日前帶量突破長紅K(${bk.date})收 ${bk.close.toFixed(2)}，今日黑K收 ${c.close.toFixed(2)} 跌破其1/2價 ${bkHalf.toFixed(2)}，假突破確認（Wave2 進場-11），該出場`,
+          severity: 'high',
+        });
+        break; // 命中最近一根突破即可，不重複報
+      }
+    }
+  }
+
+  // 賠少-13：書本嚴重度排序 — 同 severity 內「破前低/支撐」排在「破月線」之前。
+  // 用 (severity 三級 → rank) 做主鍵、SELL_SEVERITY_RANK 做次鍵，index 做 tiebreaker 保穩定。
+  const severityWeight = (s: SellSignal['severity']) => (s === 'high' ? 0 : s === 'medium' ? 1 : 2);
+  return signals
+    .map((sig, i) => ({ sig, i }))
+    .sort((a, b) => {
+      const sw = severityWeight(a.sig.severity) - severityWeight(b.sig.severity);
+      if (sw !== 0) return sw;
+      const rk = sellSeverityRank(a.sig.type) - sellSeverityRank(b.sig.type);
+      if (rk !== 0) return rk;
+      return a.i - b.i; // 同權重維持原插入序（穩定）
+    })
+    .map((x) => x.sig);
 }

@@ -72,8 +72,19 @@ async function main() {
   console.log('═══ 生成滬深主板 A 股清單（東方財富 API・中文名） ═══\n');
 
   console.log('🔍 從東方財富 API 取得股票清單...');
+  // 排除清單（2026-06-12）：已確認下市股留痕於 data/cn-delisted-removed.json，
+  // EastMoney clist 偶爾還掛著這些殭屍代碼（帶停牌殘價），重生成時必須過濾，
+  // 否則 prune 一次就被加回來。維護：scripts/prune-cn-delisted-v2.ts 會自動補登。
+  const removedPath = path.join(process.cwd(), 'data', 'cn-delisted-removed.json');
+  const removedSet = new Set<string>(
+    fs.existsSync(removedPath)
+      ? (JSON.parse(fs.readFileSync(removedPath, 'utf-8')) as Array<{ symbol: string }>).map(r => r.symbol)
+      : [],
+  );
   const allStocks = (await fetchFromEastMoney())
+    .filter(s => !removedSet.has(s.symbol))
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
+  if (removedSet.size) console.log(`   ⛔ 排除已下市留痕 ${removedSet.size} 檔`);
 
   const shCount = allStocks.filter(s => s.symbol.endsWith('.SS')).length;
   const szCount = allStocks.filter(s => s.symbol.endsWith('.SZ')).length;

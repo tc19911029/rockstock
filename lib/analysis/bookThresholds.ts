@@ -21,6 +21,21 @@ export const BOOK_BODY_PCT_MIN = 2.0;
 /** 攻擊量最低倍數 vs 前一日（寶典 p.54 ④）— 大量長紅 K 的「大量」定義 */
 export const BOOK_VOL_RATIO_MIN = 1.3;
 
+// ── K 棒三級制（朱家泓課程 CH2-4/2-5：小棒 / 中棒 / 最大棒）─────────────────
+// 實體比例 fraction，與 ruleUtils.bodyPct 同單位（0.065 = 6.5%）。
+// 平行於既有 isLongRed/isMedLong（≥2%）與 isSmallCandle（<1.5%），純新增、先不接 gate。
+
+/** 最大棒實體下限（漲停級長紅，課程「最大棒」≥ 6.5%）*/
+export const MAX_CANDLE_BODY_PCT = 0.065;
+/** 中棒實體下限（三級制中棒 3.5%–6.5%）*/
+export const MEDIUM_CANDLE_BODY_MIN = 0.035;
+
+// ── 主掃宇宙最低股價（朱家泓 5 步驟 CH5-2 特別報價「去除股價 < 5 元」）──────────
+// 僅 TW；CN 價階不同，暫不套用。供 lib/scanner/TurnoverRank.ts 主掃宇宙過濾。
+
+/** TW 主掃宇宙最低股價（元）— 排除 < 5 元仙股 */
+export const TW_UNIVERSE_MIN_PRICE = 5;
+
 // ── F：V 形反轉（寶典 Part 12 祕笈圖 #1 + 抓住K線 第 7 篇）──────────────────
 
 /** 連跌天數門檻：5 根中至少 3 根下跌 */
@@ -112,8 +127,22 @@ export const TRUE_BREAKDOWN_PCT = 0.03;
 
 export const BASE_COMPLETION_MIN_DAYS = 10;
 export const BASE_COMPLETION_MAX_LOOKBACK = 60;
-/** 打底期「大量」門檻 vs 過去 5 日均量 */
+/** 打底期「大量」門檻 vs 過去 5 日均量（O 打底 ×1.5）*/
 export const BASE_HIGH_VOL_RATIO = 1.5;
+
+// ── 底部型態爆量門檻（黃金右腳 / 草叢量，寶典第2篇 多頭打底量價）─────────────
+//
+// 小修-6：黃金右腳 ×1.8 / 草叢量 ×2 / O 打底 ×1.5（BASE_HIGH_VOL_RATIO）原本散落在
+// bottomFormationRules.ts 內裸寫，皆是「底部打底期主力進貨爆量」同源同概念門檻，
+// 收斂成具名常數集中管理（純重構、值不變、不接 gate）。書本只說「異常大量 / 出奇大量」
+// 未給精確倍數，下列數值沿用原 detector 既有實作值，故為「實作值」非「書本值」。
+
+/** 黃金右腳：第 1 支腳附近爆量門檻 vs 5 日均量（原 1.8 裸寫）*/
+export const GOLDEN_FOOT_SPIKE_VOL_RATIO = 1.8;
+/** 黃金右腳：今日突破頸線時的帶量門檻 vs 5 日均量（原 1.2 裸寫）*/
+export const GOLDEN_FOOT_BREAKOUT_VOL_RATIO = 1.2;
+/** 草叢量：盤整低檔異常大量門檻 vs 20 日均量（原 2 裸寫）*/
+export const ACCUMULATION_VOL_RATIO = 2.0;
 
 // ── P：高檔淺回（高勝率位置 3「等拉回」）──────────────────────────────────
 
@@ -130,6 +159,8 @@ export const PULLBACK_MIN_PRIOR_RUN_PCT = 5;
 // 朱家泓「短線守則」p.41 + 寶典 Part 2：停損 7%、獲利達 10% 啟用進階紀律。
 // 這是書本明確規則，UI 任何停損/停利顯示都應讀這兩個常數。
 
+/** 持倉警示：書本 CH7-3「每天檢視、跌幅 >5% 就列警示股準備賣」（純警示，非強制出場）*/
+export const LOSS_WATCH_PCT = 0.05;
 /** 停損守則：書本「停損 7%」上限 — 進場價 × (1 - 0.07) */
 export const STOP_LOSS_RULE_PCT = 0.07;
 /** 停損價係數：1 - STOP_LOSS_RULE_PCT = 0.93（給 UI 直接乘） */

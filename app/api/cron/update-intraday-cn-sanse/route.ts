@@ -59,6 +59,13 @@ export async function GET(req: NextRequest) {
     if (snap.date !== date) {
       return apiOk({ skipped: true, reason: `L2 快照日 ${snap.date} ≠ 交易日 ${date}（等刷新）`, date, snapDate: snap.date });
     }
+    // 退化快照防呆：盤前競價 / 刷新凍結時所有報價塌成扁平根（O=H=L=C、量=0），餵進三色會憑空生假金叉/底反。
+    // 偵測到就跳過、不覆蓋上一份好的盤中結果（force 也擋——壞快照算不出有效訊號，強跑無意義）。
+    const { degenerateSnapshotReason } = await import('@/lib/datasource/IntradayCache');
+    const degenerate = degenerateSnapshotReason(snap);
+    if (degenerate) {
+      return apiOk({ skipped: true, reason: `L2 快照退化（${degenerate}）— 跳過盤中三色，避免假金叉/底反`, date });
+    }
 
     // 個股報價 → Map<純6位代碼, bar>；指數 000001.SS / 399001.SZ 另外抽出（避免與個股撞 key）
     const quotes = new Map<string, IntradayBar>();

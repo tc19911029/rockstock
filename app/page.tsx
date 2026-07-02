@@ -20,10 +20,13 @@ import { useSearchParams } from 'next/navigation';
 import { useReplayStore } from '@/store/replayStore';
 import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
+import { evaluateAt as smEvaluateAt } from '@/lib/smartmoney/signal';
+import { evaluateAt as instEvaluateAt } from '@/lib/instdip/signal';
+import { evaluateAt as stealEvaluateAt } from '@/lib/inststeal/signal';
+import { computeChipAvoidSignals } from '@/lib/avoidance/chipAvoidSignals';
+import { useChartListNavCapture, navigateStockList } from '@/lib/chartListNav';
 import StockSelector from '@/components/StockSelector';
 import { PageShell, EmptyState, BackButton, StockChartView } from '@/components/shared';
-import { DecisionPanel } from '@/components/decision/DecisionPanel';
-import { TodayBriefing } from '@/components/today/TodayBriefing';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import SignalSummaryCard from '@/components/SignalSummaryCard';
 import { useV12HistoricalMarkers } from '@/lib/hooks/useV12HistoricalMarkers';
@@ -35,24 +38,28 @@ import { SanSeConditionsPanel } from '@/components/cn-sanse/SanSeConditionsPanel
 import { SanSeSignalsPanel } from '@/components/cn-sanse/SanSeSignalsPanel';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
+import ChipRawTables, { type ChipRawTablesProps } from '@/components/chart/ChipRawTables';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
+import CnChipPanel from '@/components/cn/CnChipPanel';
+import CnFundamentalPanel from '@/components/cn/CnFundamentalPanel';
+import { FundamentalScoreSummary } from '@/components/analysis/FundamentalScoreSummary';
 import { ErrorBoundary, SectionBoundary } from '@/components/ErrorBoundary';
 import BottomPanel from '@/components/BottomPanel';
 import { ScanPanelVertical } from '@/features/scan';
 import { DataHealthBadge } from '@/features/scan/components/DataHealthBadge';
 import type { SelectedStock } from '@/features/scan';
 import type { SanSeChartPayload } from '@/components/cn-sanse/SanSeChart';
-import { YoutubeStocksPanel } from '@/components/youtube/YoutubeStocksPanel';
-import { CandidatesPoolPanel } from '@/components/CandidatesPoolPanel';
-import { FundamentalRevaluationPanel } from '@/components/FundamentalRevaluationPanel';
-import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
+import { YoutubePanel } from '@/components/youtube/YoutubePanel';
+import { BrokerReportsPanel } from '@/components/broker/BrokerReportsPanel';
+import { SectorsPanel } from '@/components/sectors/SectorsPanel';
+import { ETFPanel } from '@/features/etf';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { getABCDisplayStructure } from '@/lib/analysis/abcBreakoutEntry';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { ChevronDown, Search } from 'lucide-react';
 import { toast } from 'sonner';
-import ChartToolbar from '@/components/ChartToolbar';
+import ChartToolbar, { type ChartIndicatorPreset } from '@/components/ChartToolbar';
 
 // Mobile fullscreen 仍直接使用 CandleChart / IndicatorCharts（StockChartView 抽出範圍只到 desktop 主視窗）
 const CandleChart = nextDynamic(() => import('@/components/CandleChart'), {
@@ -68,9 +75,42 @@ const IndicatorCharts = nextDynamic(() => import('@/components/IndicatorCharts')
 
 type SideTab = 'conditions' | 'signals' | 'chip' | 'fundamental';
 
+/** 像六條件那種「每條件一列、●綠紅燈 + 數值」的檢查清單（隨走圖游標跑）*/
+export type CondRow = { icon: string; name: string; value: string; pass: boolean; tip?: string };
+export type CondList = { date: string; rows: CondRow[]; passCount: number; total: number; hit: boolean } | null;
+
+function CondChecklist({ data, hitText, missText }: { data: CondList; hitText: string; missText: string }) {
+  if (!data) return <div className="px-3 py-2 text-[11px] text-muted-foreground/60">此日無足夠籌碼資料</div>;
+  return (
+    <div>
+      <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+        <span className="text-muted-foreground/70">當天（{data.date}）</span>
+        <span className={data.hit ? 'text-green-400 font-bold' : 'text-muted-foreground'}>{data.passCount}/{data.total}</span>
+      </div>
+      <div className="border-t border-border/40">
+        {data.rows.map(r => (
+          <div key={r.icon} className="flex items-center gap-2 px-3 py-1.5 border-b border-border/30 last:border-0 text-[11px]">
+            <span className={r.pass ? 'text-green-400' : 'text-red-400'}>●</span>
+            <span className="text-muted-foreground/70 w-3 font-mono">{r.icon}</span>
+            <span className="font-medium text-foreground/90" title={r.tip}>{r.name}</span>
+            <span className="flex-1" />
+            <span className={`font-mono px-1.5 py-0.5 rounded ${r.pass ? 'bg-green-900/40 text-green-300' : 'bg-muted text-muted-foreground'}`}>{r.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className={`px-3 py-1.5 text-[11px] ${data.hit ? 'text-green-400' : 'text-muted-foreground/70'}`}>
+        {data.hit ? hitText : missText}
+      </div>
+    </div>
+  );
+}
+
 /** 根據 activeBuyMethod 切換渲染：A 走六條件，其他走買法條件面板。
  *  v11 G/H/I 自動轉 v12 J/L/K（用戶 0512 決議只留 v12） */
-function ConditionsPanelSwitch() {
+function ConditionsPanelSwitch({ wConds, xConds, yConds, chipTables }: {
+  wConds?: CondList; xConds?: CondList; yConds?: CondList;
+  chipTables: ChipRawTablesProps;
+}) {
   const method = useBacktestStore(s => s.activeBuyMethod);
   if (method === 'A') return <SixConditionsPanel />;
   // R 機械軌純排名，無 detector 條件可顯示 — 簡單說明即可
@@ -80,6 +120,53 @@ function ConditionsPanelSwitch() {
         <div className="font-semibold text-cyan-300/80">機械軌（R · 乖離率）</div>
         <div>純排名策略，不過六條件、不過戒律、不過 Step 0 大盤過濾。</div>
         <div>做多取成交額前 500 中 MA20 乖離率最負 top 10；做空取最正 top 10。</div>
+      </div>
+    );
+  }
+  // W 大戶偷買軌純籌碼（refined），無 detector 條件可顯示 — 說明 + 看盤要追蹤的指標
+  if (method === 'W') {
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        <div className="px-3 pt-2 pb-1 space-y-0.5">
+          <div className="font-semibold text-emerald-300/80">大戶偷買（W · 主力分點集中度）</div>
+          <div>主力分點（前15大券商）剛開始默默吃貨，4 道濾網全過才入選。隨走圖看當天：</div>
+        </div>
+        <CondChecklist data={wConds ?? null}
+          hitText="✅ 四道全過 — 這天符合大戶偷買" missText="○ 未全過（這天非進場日）" />
+        <div className="px-3 py-1.5 text-amber-400/70 border-t border-border/40">
+          ⚠️ 回測無穩定贏大盤的本事（refined 比粗版好但 &lt;50%）— 當參考、不是明牌。
+        </div>
+      </div>
+    );
+  }
+  // X 法人接刀軌（2026-06-14）：grid 唯一兩年都正的買方向。
+  if (method === 'X') {
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        <div className="px-3 pt-2 pb-1 space-y-0.5">
+          <div className="font-semibold text-teal-300/80">法人接刀（X）</div>
+          <div>股價在跌/長黑、法人逆勢買、避開大戶持股超高。隨走圖看當天 3 道：</div>
+        </div>
+        <CondChecklist data={xConds ?? null}
+          hitText="✅ 三道全過 — 這天符合法人接刀" missText="○ 未全過（這天非進場日）" />
+        <div className="px-3 py-1.5 space-y-0.5 border-t border-border/40">
+          <div className="text-emerald-400/90">📈 回測：買進後約1個月 64% 會漲、平均 +10.4%（多頭那年）。</div>
+          <div className="text-amber-400/70">⚠️ 弱市那年只 +2%、約36% 會賠。部位別重、停損守好。</div>
+        </div>
+      </div>
+    );
+  }
+  // Y 法人偷買(原)軌：跌 + 5日籌碼集中度在增加 + 法人連買，三個同時成立（單一事實 lib/inststeal）
+  if (method === 'Y') {
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        <div className="px-3 pt-2 pb-1 space-y-0.5">
+          <div className="font-semibold text-amber-300/80">大戶法人偷買（Y）</div>
+          <div>股價在跌、籌碼5日集中度慢慢在爬、法人連續買 — 三個同時成立。隨走圖看當天 3 道：</div>
+        </div>
+        <CondChecklist data={yConds ?? null}
+          hitText="✅ 三道全過 — 這天符合大戶法人偷買" missText="○ 未全過（這天非進場日）" />
+        <ChipRawTables {...chipTables} />
       </div>
     );
   }
@@ -142,6 +229,9 @@ function HomePage() {
 
   useEffect(() => { initData(); }, [initData]);
 
+  // ↑↓ 跳股票：記住「最後點到的股票」屬於哪個清單（題材/掃描/候選池），鍵盤上下鍵據此換股
+  useChartListNavCapture();
+
   // 大盤指數預設：TW→加權指數 ^TWII，CN→上證指數 000001.SS
   const market = useBacktestStore(s => s.market);
   const scanDate = useBacktestStore(s => s.scanDate);
@@ -163,7 +253,7 @@ function HomePage() {
     const date = searchParams.get('date');
     const urlTab = searchParams.get('tab');
     const tfParam = searchParams.get('tf');
-    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'fundamental' || urlTab === 'pool' || urlTab === 'agent') {
+    if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'sectors' || urlTab === 'broker' || urlTab === 'etf') {
       setRightTab(urlTab);
       // 套用後立刻把 ?tab= 從 URL 拿掉 — inbound link 進來會切 tab,但 reload 不會再套用,維持 default scan
       // 保留其他 query param(?load / ?date / ?tf)
@@ -203,9 +293,15 @@ function HomePage() {
   useEffect(() => {
     if (lastMarketRef.current === market) return;
     lastMarketRef.current = market;
+    // DU1：只有「當前走圖是大盤指數（或尚未載入）」時才跟著切到新市場指數；
+    // 使用者已載入個股則保留個股圖、不覆蓋（切掃描市場 ≠ 丟失走圖）。
+    // hydration 初始 chart 仍是指數，故 TW→CN 照常切到 000001.SS。
+    const INDEX_TICKERS = new Set(['^TWII', '000001.SS', '000300.SS']);
+    const cur = currentStock?.ticker ?? '';
+    if (cur && !INDEX_TICKERS.has(cur)) return;
     const { symbol } = getMarketIndex(market);
     loadStock(symbol, '1d', '2y').catch(() => {});
-  }, [market, loadStock, getMarketIndex]);
+  }, [market, loadStock, getMarketIndex, currentStock]);
 
   // P1-2: remember last tab per interval (declared before handleKey to avoid TDZ errors)
   const [sideTabPerInterval, setSideTabPerInterval] = useState<Record<string, SideTab>>({});
@@ -218,12 +314,13 @@ function HomePage() {
   const [showIndicators, setShowIndicators] = useState(true);
   // 三色資金圖層（陸股）：雙B戰法疊主圖（像 BB）；主力狀態/捕撈季節是副圖（像 MACD/KD）
   const [showShuangB, setShowShuangB] = useState(false);
+  const [showHolderLine, setShowHolderLine] = useState(false);
   // P1-5: keyboard shortcut help overlay
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel — v12 預設展開讓用戶一進來就看到新功能（14 字母 tabs/Step 0 banner/LockWatch panel/警示徽章）
   const [scannerOpen, setScannerOpen] = useState(true);
-  // Stage 7-10：右側 panel tab — 策略掃描 / YouTube 提及 / 候選池 / Multi-Agent
-  type RightTab = 'scan' | 'youtube' | 'fundamental' | 'pool' | 'agent';
+  // 右側 panel tab — 策略掃描 / YouTube 提及 / 題材分類 / 法人報告 / ETF 追蹤（2026-06-21 ETF 併入，五入口）
+  type RightTab = 'scan' | 'youtube' | 'sectors' | 'broker' | 'etf';
   const [rightTab, setRightTab] = useState<RightTab>('scan');
   // Stage 16：3 tab 共用 date state（YouTube / Pool / Multi-Agent 都看同一天）
   // 預設「最近工作日」，因為 today 的資料通常還沒跑完
@@ -234,7 +331,9 @@ function HomePage() {
     setLoadError(null);
     // YouTube source 都是 TW 股，補 .TW suffix
     const symbol = /\.(TW|TWO|SS|SZ)$/i.test(code) ? code : `${code}.TW`;
-    loadStock(symbol, '1d', '2y', tabDate).catch((e: Error) => {
+    // 點股票看圖一律載「即時」（不傳 tabDate）：tabDate 預設是上個工作日，
+    // 當 as-of 傳入會把 K 線凍在那天、不注入今日 bar、不輪詢（見 replayStore startPolling guard）
+    loadStock(symbol, '1d', '2y').catch((e: Error) => {
       toast.error(`載入 ${code} 失敗：${e.message || '請稍後再試'}`);
     });
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -242,23 +341,22 @@ function HomePage() {
       setScannerOpen(false);
       try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
     }
-  }, [loadStock, tabDate]);
+  }, [loadStock]);
 
-  // Pool tab / Multi-Agent tab 點股票 → loadStock（symbol 已是 2330.TW 格式，不必補 suffix）
-  // 帶 tabDate 讓 K 線停在當天，user 看的是「該日的條件分析」而非總是最新
-  const handlePoolSelectStock = useCallback((symbol: string) => {
+  // 題材分類 tab 點股票 → loadStock。台股裸碼補 .TW；陸股已帶 .SS/.SZ/.BJ 後綴照用
+  const handleSectorSelectStock = useCallback((codeOrSymbol: string) => {
     setLoadError(null);
-    loadStock(symbol, '1d', '2y', tabDate).catch((e: Error) => {
-      toast.error(`載入 ${symbol} 失敗：${e.message || '請稍後再試'}`);
+    const symbol = /\.(TW|TWO|SS|SZ|BJ)$/i.test(codeOrSymbol) ? codeOrSymbol : `${codeOrSymbol}.TW`;
+    // 點股票看圖一律載「即時」（不傳 tabDate）：題材是盤中即時清單，點進去理應看即時 K 線
+    loadStock(symbol, '1d', '2y').catch((e: Error) => {
+      toast.error(`載入 ${codeOrSymbol} 失敗：${e.message || '請稍後再試'}`);
     });
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setMobileChartFullscreen(true);
       setScannerOpen(false);
       try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
     }
-  }, [loadStock, tabDate]);
-  // Multi-Agent tab 共用 Pool 的 callback（symbol 格式相同）
-  const handleAgentSelectStock = handlePoolSelectStock;
+  }, [loadStock]);
   // 手機點「走圖」→ 全螢幕 K 線視圖
   const [mobileChartFullscreen, setMobileChartFullscreen] = useState(false);
   const openMobileChart = useCallback(() => {
@@ -284,6 +382,14 @@ function HomePage() {
     else if (e.key === 'ArrowLeft' && e.shiftKey) { e.preventDefault(); jumpToBuyPoint('prev'); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); nextCandle(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); prevCandle(); }
+    // ↑↓：在「題材成分股 / 掃描結果 / 候選池」清單裡跳上一檔/下一檔並載圖。
+    // 沒有作用中的清單（沒點過、或清單已切走）→ navigateStockList 回 false，讓上下鍵照常捲動頁面。
+    else if (e.key === 'ArrowDown') {
+      if (navigateStockList(1, useReplayStore.getState().currentStock?.ticker ?? null)) e.preventDefault();
+    }
+    else if (e.key === 'ArrowUp') {
+      if (navigateStockList(-1, useReplayStore.getState().currentStock?.ticker ?? null)) e.preventDefault();
+    }
     else if (e.key === ' ') { e.preventDefault(); if (isPlaying) stopPlay(); else startPlay(); }
     // P2-3: tab switching
     else if (e.key === '1') { e.preventDefault(); setSideTab('conditions'); }
@@ -319,14 +425,31 @@ function HomePage() {
   const [showMarkers, setShowMarkers] = useState(false);  // 訊號 markers 預設關（M/N/O/P/Q/F 歷史觸發日）— 用戶偏好
   const [showPivots, setShowPivots] = useState(true);     // 頭底標記預設開 — 用戶偏好
   const [showSupportResistance, setShowSupportResistance] = useState(false);
+  // K 棒三層支撐/壓力標線（最近一根長紅/長黑：最高/1半/最低），預設關
+  const [showCandleSR, setShowCandleSR] = useState(false);
   const [showAscendingTrendline, setShowAscendingTrendline] = useState(false);
   const [showDescendingTrendline, setShowDescendingTrendline] = useState(false);
   const [showAscendingChannel, setShowAscendingChannel] = useState(false);
   const [showDescendingChannel, setShowDescendingChannel] = useState(false);
+  // 上升線/下降線：切線 + 軌道整合成單一開關（一鍵同開同關）
+  const toggleAscendingLine = () => {
+    const next = !(showAscendingTrendline || showAscendingChannel);
+    setShowAscendingTrendline(next);
+    setShowAscendingChannel(next);
+  };
+  const toggleDescendingLine = () => {
+    const next = !(showDescendingTrendline || showDescendingChannel);
+    setShowDescendingTrendline(next);
+    setShowDescendingChannel(next);
+  };
   const [showConsolidationLines, setShowConsolidationLines] = useState(false);
   const [showNeckline, setShowNeckline] = useState(false);  // 形態頸線 + 目標價 + 結構失效價
   const [showPattern, setShowPattern] = useState(false);    // 形態 ABCDE 關鍵點與連線
-  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
+  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
+  // 月線（20MA）預設打開（書本 CH3-03 做多核心防線），但使用者可手動開關
+  const handleMaToggle = useCallback((key: keyof typeof maToggles) => {
+    setMaToggles(p => ({ ...p, [key]: !p[key] }));
+  }, []);
   const [showBollinger, setShowBollinger] = useState(false);
   const [indicators, setIndicators] = useState({
     macd: true, kd: true, volume: true, rsi: false,
@@ -335,25 +458,65 @@ function HomePage() {
     cnMain: false, cnRetail: false,
     mainForce: false, season: false, // 三色資金副圖（陸股）：主力狀態F / 捕撈季節
   });
+  // 指標套組一鍵切換（ChartToolbar tab）：技術面（MA+量+KD+MACD+頭底）⇄ 三色資金（雙B+主力狀態+捕撈季節）
+  // 只動核心指標家族；籌碼面（法人/大戶/CN主力）與訊號 markers 保留不變
+  const applyChartPreset = useCallback((preset: ChartIndicatorPreset) => {
+    // 三套組「副圖」互斥：每套都把另外兩套的副圖明確關掉，切換＝整批換掉（不殘留）。
+    // 籌碼鍵（foreign/trust/dealer/retail + cnMain/cnRetail）由 IndicatorCharts 依市場 gate，
+    // 兩市場一起設無副作用：TW 只畫法人四、CN 只畫主力/散戶。
+    const chipOff = { foreign: false, trust: false, dealer: false, retail: false, cnMain: false, cnRetail: false };
+    const chipOn = { foreign: true, trust: true, dealer: true, retail: true, cnMain: true, cnRetail: true };
+    if (preset === 'technical') {
+      setMaToggles({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
+      setShowBollinger(false);
+      setShowShuangB(false);
+      setIndicators(p => ({ ...p, ...chipOff, volume: true, kd: true, rsi: false, macd: true, mainForce: false, season: false }));
+      setShowPivots(true);
+    } else if (preset === 'chip') {
+      // 籌碼套組：價＋均線主圖沿用技術設定，副圖全換成法人/主力資金；量/KD/MACD/三色副圖全關
+      setMaToggles({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
+      setShowBollinger(false);
+      setShowShuangB(false);
+      setIndicators(p => ({ ...p, ...chipOn, volume: false, kd: false, rsi: false, macd: false, mainForce: false, season: false }));
+      setShowPivots(true);
+    } else {
+      // 三色套組：均線全清空讓出主圖給雙B（含月線 20MA；使用者要看可手動打開）
+      setMaToggles({ ma5: false, ma10: false, ma20: false, ma60: false, ma120: false, ma240: false });
+      setShowBollinger(false);
+      setShowShuangB(true);
+      setIndicators(p => ({ ...p, ...chipOff, volume: false, kd: false, rsi: false, macd: false, mainForce: true, season: true }));
+      setShowPivots(false);
+    }
+  }, []);
+  // 「籌碼」合併鈕：一鍵開關法人四（TW 外資/投信/自營/散戶）+ CN 主力/散戶副圖
+  const toggleChipGroup = useCallback((next: boolean) => {
+    setIndicators(p => ({ ...p, foreign: next, trust: next, dealer: next, retail: next, cnMain: next, cnRetail: next }));
+  }, []);
   // ── 籌碼面資料（TW 法人/大戶 + CN 主力資金） ────────────────────────────────
   // 優化：用 ticker + 「是否需要籌碼」字串 key 當依賴；同一 key 不會 refetch
+  // 大戶持股趨勢線（showHolderLine）也需要 tdcc 資料 → 一併納入觸發條件。
   const anyTwChipOn = indicators.foreign || indicators.trust || indicators.dealer
-    || indicators.retail || indicators.h400 || indicators.h1000;
+    || indicators.retail || indicators.h400 || indicators.h1000 || showHolderLine;
   const anyCnChipOn = indicators.cnMain || indicators.cnRetail;
   const ticker = currentStock?.ticker ?? '';
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
   const isCnTicker = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
+  // 三色資金（雙B/主力/捕撈）台股+陸股皆可；^TWII 加權指數比照陸股 000001.SS 也可（指數三色為退化值但版面一致）
+  const sanseEnabled = isCnTicker || isTwTicker || ticker === '^TWII';
   // 中間「條件/訊號」面板跟著掃描面板選的策略換：
   //   三色 level（CN 自創策略）被選中 → 顯示三色面板；否則 → 書本買法面板（含陸股）。
   // sanseLevel 為單一事實來源（store），由掃描面板「三色(嚴格/中等/寬鬆)」按鈕設定、選任何書本買法時自動清空。
   const sanseLevel = useBacktestStore(s => s.sanseLevel);
-  const showSanseView = isCnTicker && sanseLevel != null;
-  const wantChips = (isTwTicker && anyTwChipOn) || (isCnTicker && anyCnChipOn);
+  // 三色模式（台股+陸股）：選了 level 且當前股票屬三色可用市場 → 中間條件/訊號改顯示 SanSe 面板
+  const showSanseView = sanseEnabled && sanseLevel != null;
+  // 載入台股個股一律抓籌碼 → 讓「買進前避雷檢查」恆常跑（賠少第一線）。^TWII 指數不算 isTwTicker 不受影響。
+  const wantChips = (isTwTicker && (anyTwChipOn || !!currentStock)) || (isCnTicker && anyCnChipOn);
   // 把 fetch trigger 編成單一 string key，dep 比較穩定
   const chipFetchKey = wantChips ? ticker : '';
   const [chips, setChips] = useState<{
     inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
-    tdcc: Array<{ date: string; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+    tdcc: Array<{ date: string; holder100Pct?: number; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
+    broker?: Array<{ date: string; netDifference: number }>;
     cnFlow?: Array<{ date: string; mainNet: number; superLargeNet: number; largeNet: number; mediumNet: number; smallNet: number }>;
     divergence?: { type: 'bullish' | 'bearish'; priceChangePct: number; volumeChangePct: number; strength: 0|1|2|3; detail: string } | null;
   } | null>(null);
@@ -363,12 +526,13 @@ function HomePage() {
     const ctrl = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 載入 flag，搭配下方 finally 清除
     setChipsLoading(true);
-    fetch(`/api/stock/chips?symbol=${encodeURIComponent(chipFetchKey)}&days=180`, { signal: ctrl.signal })
+    fetch(`/api/stock/chips?symbol=${encodeURIComponent(chipFetchKey)}&days=500`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(json => {
         if (json.ok) setChips({
           inst: json.inst ?? [],
           tdcc: json.tdcc ?? [],
+          broker: json.broker ?? [],
           cnFlow: json.cnFlow ?? [],
           divergence: json.divergence ?? null,
         });
@@ -383,36 +547,72 @@ function HomePage() {
     if (!ticker) setChips(null);
   }, [ticker]);
 
+  // 主力分點集中度「跟看盤 app 對齊版」（最近數日 5日/20日，HiStock 分點區間彙總算正式公式）。
+  // 與 /api/stock/chips 分開 lazy fetch（HiStock 多視窗抓取較慢，不阻塞籌碼面板其餘三表）。
+  const [concExact, setConcExact] = useState<Array<{ date: string; c5: number | null; c20: number | null; net: number | null }>>([]);
+  useEffect(() => {
+    if (!chipFetchKey || !/^\d{4,5}(\.(TW|TWO))?$/i.test(chipFetchKey)) { setConcExact([]); return; }
+    const ctrl = new AbortController();
+    fetch(`/api/stock/concentration?symbol=${encodeURIComponent(chipFetchKey)}&recentN=10`, { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(json => { if (json.ok) setConcExact(json.conc ?? []); })
+      .catch(err => { if (err.name !== 'AbortError') console.warn('[concentration] load failed:', err); });
+    return () => ctrl.abort();
+  }, [chipFetchKey]);
+
   // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
   // 陸股走 /cn-sanse、台股走 /tw-sanse（同一份 SanSeChartPayload 形狀）：圖層由各 toggle 控制。
-  // 台股是純視覺疊圖，不進選股流程；中間「條件」tab（showSanseView）仍只給陸股，故台股不寫 conditions。
+  // conditions 兩市場都寫（三色模式時中間條件/訊號 tab 用，由 showSanseView 控制）。
   // 走圖步進：日K 時帶 asOf=當前可見最後一根日期 → 標記/條件/訊號跟著步進的位置重算（練習器核心）。
-  const sanseEnabled = isCnTicker || isTwTicker;
-  const sanseAsOf = sanseEnabled && currentInterval === '1d' && visibleCandles.length
-    ? visibleCandles[visibleCandles.length - 1].date
-    : '';
-  const sanseFetchKey = sanseEnabled ? `${ticker}@${sanseAsOf}` : '';
+  const sanseLastBar = sanseEnabled && currentInterval === '1d' && visibleCandles.length
+    ? visibleCandles[visibleCandles.length - 1]
+    : null;
+  const sanseAsOf = sanseLastBar ? sanseLastBar.date : '';
+  // 盤中即時更新：主圖每 ~60s 輪詢會就地更新「今日那根」的 close（日期不變）。把 close 折進 fetchKey，
+  // 今日價一動就連帶重抓三色（後端 tw-/cn-sanse/chart 讀最新 L2 快照重算雙B/主力狀態/捕撈季節）；
+  // 否則 key 只看 ticker@date、盤中永遠不變 → 三色凍在載入當下。收盤後主圖停輪詢→close 不再變→自動停抓；
+  // 歷史步進時 asOf 本來就會變，不受影響。
+  const sanseFetchKey = sanseEnabled ? `${ticker}@${sanseAsOf}@${sanseLastBar?.close ?? ''}` : '';
   const [sanse, setSanse] = useState<SanSeChartPayload | null>(null);
   const [sanseConditions, setSanseConditions] = useState<ConditionReport | null>(null);
+  // 暫時性失敗自動重試計數。為什麼非要不可：sanse fetch 只在 sanseFetchKey(=ticker@asOf@close) 變動時才重發，
+  // 但「漲停/停牌/盤後/薄量」時 close 凍住 → key 凍住 → 不再重抓。若首抓正好遇上 server 開盤瞬間高負載失敗
+  // （Fugle quote timeout / L1 檔正被 cron 寫到一半 / route 404），就會永遠卡「載入三色訊號…」直到換股 —
+  // 即使 endpoint 幾秒後就恢復。退避重試讓 key 凍住的情況也能自我復原。換 key 時歸零（給全新重試額度）。
+  const [sanseRetry, setSanseRetry] = useState(0);
+  useEffect(() => { setSanseRetry(0); }, [sanseFetchKey]);
   useEffect(() => {
     if (!sanseEnabled || !ticker) { setSanse(null); setSanseConditions(null); return; }
     const ctrl = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const base = isCnTicker ? '/api/cn-sanse/chart' : '/api/tw-sanse/chart';
     const url = `${base}/${encodeURIComponent(ticker)}${sanseAsOf ? `?asOf=${sanseAsOf}` : ''}`;
+    // 暫時性失敗 → 退避重試（最多 4 次：2s/4s/6s/8s，共 ~20s）。server 開盤負載通常幾秒內就恢復。
+    const scheduleRetry = () => {
+      if (sanseRetry >= 4) return;
+      retryTimer = setTimeout(() => setSanseRetry((n) => n + 1), 2000 * (sanseRetry + 1));
+    };
     fetch(url, { signal: ctrl.signal })
       .then(r => r.json())
       .then(j => {
         if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload);
-        // 條件報告只給陸股的中間面板用；台股不驅動選股條件 tab
-        if (isCnTicker && j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
-        else if (!isCnTicker) setSanseConditions(null);
+        // 失敗/無 chart 要清掉，否則上一檔的三色疊圖會殘留、畫在新股票 K 線上
+        // （如 301205 不在掃描宇宙、無本地 L1 → cn-sanse/chart 404 → 智能/黃/紅/多空線停在前一檔 ~4000）
+        else setSanse(null);
+        // 條件報告兩市場都寫（三色模式時中間條件/訊號 tab 用）
+        if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
+        else { setSanseConditions(null); if (!j.ok) scheduleRetry(); }  // ok:false=暫時性失敗 → 重試
       })
-      .catch(err => { if (err.name !== 'AbortError') console.warn('[sanse] load failed:', err); });
-    return () => ctrl.abort();
+      .catch(err => { if (err.name !== 'AbortError') { console.warn('[sanse] load failed:', err); scheduleRetry(); } });
+    return () => { ctrl.abort(); if (retryTimer) clearTimeout(retryTimer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sanseFetchKey]);
+  }, [sanseFetchKey, sanseRetry]);
 
   const handleScanSelectStock = useCallback((stock: SelectedStock) => {
+    // 點卡片時同步掃描面板市場（避免 market=CN 卻點到 TW 卡片 → 面板/下一次三色 fetch 仍停在 CN）
+    if (stock.market && useBacktestStore.getState().market !== stock.market) {
+      useBacktestStore.getState().setMarket(stock.market);
+    }
     // 優先用該股自帶的掃描日（三色資金帶 cn-sanse 固化日），否則回退書本掃描日 → K 線停在掃描日而非最新
     const fallbackDate = useBacktestStore.getState().scanDate;
     const date = stock.date ?? fallbackDate ?? undefined;
@@ -432,8 +632,16 @@ function HomePage() {
   const handleIntervalChange = useCallback((newInterval: string) => {
     if (!currentStock) return;
     if (newInterval === currentInterval) return;
-    // 去 suffix（store loadStock 內部會自動處理 suffix）
-    const symbol = currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    // 三色指標只有日線版本（主力狀態要 ~507 根日K、捕撈季節要日換手率），套在分鐘線上會壞：
+    // 副圖空白 + 主圖被日線 sanse overlay 帶歪到舊窗格。切到分鐘線且目前在三色套組 →
+    // 自動回退技術套組（MA/量/KD/MACD），確保分鐘線指標正常顯示。
+    const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(newInterval);
+    if (isIntraday && (indicators.mainForce || indicators.season || showShuangB)) {
+      applyChartPreset('technical');
+    }
+    // 用完整 ticker（含後綴）重載：指數 000001.SS 去後綴會撞同碼個股 000001(平安銀行)。
+    // currentStock.ticker 本就是 loadStock 當初成功載入的代號，原樣帶回必然同解析。
+    const symbol = currentStock.ticker;
     setLoadError(null);
     useReplayStore.getState().stopPolling();
     loadStock(symbol, newInterval, undefined, targetDate ?? undefined)
@@ -441,7 +649,17 @@ function HomePage() {
       .catch((e: Error) => {
         toast.error(`切換 ${newInterval} 失敗：${e.message || '請稍後再試'}`);
       });
-  }, [currentStock, currentInterval, targetDate, loadStock]);
+  }, [currentStock, currentInterval, targetDate, loadStock, indicators, showShuangB, applyChartPreset]);
+
+  // 三色指標（主力狀態/捕撈季節/雙B）只有日線版本 → 只要落到「分鐘線 + 三色指標開著」就回退技術，
+  // 確保分鐘線一定有指標可看（量/KD/MACD），不會出現「請開啟至少一個指標面板」的空副圖。
+  // 涵蓋所有入口：切換到分鐘線、載入時就在分鐘線、在分鐘線「手動點三色 / 開三色副圖」。
+  useEffect(() => {
+    const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(currentInterval);
+    if (isIntraday && (indicators.mainForce || indicators.season || showShuangB)) {
+      applyChartPreset('technical');
+    }
+  }, [currentInterval, indicators.mainForce, indicators.season, showShuangB, applyChartPreset]);
 
   // P1-5: 可拖拽分隔條 — K 線圖 vs 副圖指標
   // 預設 0.55（主圖 55% / 副圖 45%，副圖整區較高）；mount 後再從 localStorage 讀取，避免 SSR hydration mismatch
@@ -524,6 +742,111 @@ function HomePage() {
     </div>
   );
 
+  // 選中的買法（abcOverlay / wLive / holderTier 共用）
+  const activeBuyMethod = useBacktestStore(s => s.activeBuyMethod);
+
+  // 大戶持股趨勢線級距 — 依股價自動挑：高價股(世芯3661)看千張無意義（1000張=幾十億），改看低級距。
+  // 便宜股<50→千張、50~250→400張、≥250→百張（capital 約當 ~數千萬大戶）。
+  const holderTier = useMemo(() => {
+    const px = visibleCandles.length ? visibleCandles[visibleCandles.length - 1].close : 0;
+    if (px >= 250) return { key: 'holder100Pct' as const, label: '百張大戶' };
+    if (px >= 50) return { key: 'holder400Pct' as const, label: '400張大戶' };
+    return { key: 'holder1000Pct' as const, label: '千張大戶' };
+  }, [visibleCandles]);
+
+  // 買進前避雷檢查（賠少第一線）— 台股個股恆常跑，用已載入的籌碼資料即時算 3 個 grid 驗證的紅旗。
+  const chipAvoid = useMemo(() => {
+    if (market !== 'TW' || !chips || visibleCandles.length < 21) return null;
+    const brokerByDate = new Map((chips.broker ?? []).map(d => [d.date, d.netDifference]));
+    const instByDate = new Map((chips.inst ?? []).map(d => [d.date, d.total]));
+    if (brokerByDate.size === 0 && instByDate.size === 0 && (chips.tdcc ?? []).length === 0) return null;
+    const price = visibleCandles[visibleCandles.length - 1].close;
+    const { flags } = computeChipAvoidSignals({
+      price,
+      candles: visibleCandles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
+      holderRows: chips.tdcc ?? [],
+      brokerByDate, instByDate,
+    });
+    return flags.length ? flags : null;
+  }, [market, chips, visibleCandles]);
+
+  // W 大戶偷買 4 道濾網（隨走圖游標）— 委派 lib/smartmoney 單一事實
+  const wConds = useMemo<CondList>(() => {
+    if (market !== 'TW' || !chips?.broker?.length || !allCandles.length) return null;
+    const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
+    const brokerByDate = new Map(chips.broker.map(d => [d.date, d.netDifference]));
+    const ev = smEvaluateAt(allCandles, brokerByDate, idx);
+    if (!ev) return null;
+    const c1 = ev.conc20 > 0 && ev.conc20prev <= 0, c2 = ev.conc20 >= 1 && ev.conc20 <= 5, c3 = ev.conc5 < 8, c4 = ev.volRatio < 1.8;
+    const rows: CondRow[] = [
+      { icon: '①', name: '20日由負轉正', value: `${ev.conc20prev.toFixed(1)}→${ev.conc20.toFixed(1)}%`, pass: c1, tip: '主力分點20日集中度從≤0翻正＝剛開始吃貨' },
+      { icon: '②', name: '落在1~5%', value: `${ev.conc20.toFixed(1)}%`, pass: c2, tip: '太高＝已吃完' },
+      { icon: '③', name: '5日濾隔日沖', value: `${ev.conc5.toFixed(1)}%`, pass: c3, tip: '5日<8%才非隔日沖假象' },
+      { icon: '④', name: '不爆量', value: `${ev.volRatio.toFixed(2)}x`, pass: c4, tip: '量比<1.8' },
+    ];
+    return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 4, hit: ev.isHit };
+  }, [market, chips?.broker, currentIndex, allCandles]);
+
+  // X 法人接刀 3 道（隨走圖游標）— 委派 lib/instdip + 大戶超高避雷
+  const xConds = useMemo<CondList>(() => {
+    if (market !== 'TW' || !chips?.inst?.length || !allCandles.length) return null;
+    const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
+    const instByDate = new Map(chips.inst.map(d => [d.date, d.total]));
+    const ev = instEvaluateAt(allCandles, instByDate, idx);
+    if (!ev) return null;
+    const price = allCandles[idx].close, date = allCandles[idx].date;
+    const tdcc = (chips.tdcc ?? []).filter(r => r.date <= date).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const last = tdcc[tdcc.length - 1];
+    let hl: number | null = null, th = 80, tierName = '千張';
+    if (price >= 250) { hl = last?.holder100Pct ?? null; th = 88; tierName = '百張'; }
+    else if (price >= 50) { hl = last?.holder400Pct ?? null; th = 86; tierName = '400張'; }
+    else { hl = last?.holder1000Pct ?? null; }
+    const tooHigh = hl != null && hl > th;
+    const c1 = ev.isWeak, c2 = ev.instBuy, c3 = !tooHigh;
+    const rows: CondRow[] = [
+      { icon: '①', name: '在跌/長黑',
+        value: ev.todayChg < -3 && !(ev.drop5 < -3)
+          ? `長黑${ev.todayChg.toFixed(1)}%`                              // 靠「今日長黑」入選 → 顯示收/開跌幅
+          : `近5日${ev.drop5 >= 0 ? '+' : ''}${ev.drop5.toFixed(1)}%`,   // 否則顯示近5日漲跌（按正負，不再寫死「跌」）
+        pass: c1, tip: '近5日跌>3%（在跌）或 今日收<開>3%（長黑）＝買恐慌' },
+      { icon: '②', name: '法人逆勢買', value: `${ev.inst5K > 0 ? '+' : ''}${ev.inst5K.toLocaleString()}張`, pass: c2, tip: '法人5日淨買超>0＝聰明錢接刀' },
+      { icon: '③', name: '非大戶超高', value: hl != null ? `${tierName}${hl.toFixed(0)}%` : '—', pass: c3, tip: '大戶持股太高＝流通量少陷阱' },
+    ];
+    return { date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit && c3 };
+  }, [market, chips?.inst, chips?.tdcc, currentIndex, allCandles]);
+
+  // Y 法人偷買(原) 3 道（隨走圖游標）— 委派 lib/inststeal 單一事實：跌 + 5日集中度在爬 + 法人連買
+  const yConds = useMemo<CondList>(() => {
+    if (market !== 'TW' || !chips?.broker?.length || !chips?.inst?.length || !allCandles.length) return null;
+    const idx = Math.min(Math.max(currentIndex, 0), allCandles.length - 1);
+    const brokerByDate = new Map(chips.broker.map(d => [d.date, d.netDifference]));
+    const instByDate = new Map(chips.inst.map(d => [d.date, d.total]));
+    // 集中度跟看盤 app + 顯示表統一：用 FinMind 正式公式（concExact）；該日沒載到才退回簡化版
+    const conc5ByDate = new Map(concExact.map(p => [p.date, p.c5]));
+    const ev = stealEvaluateAt(allCandles, brokerByDate, instByDate, idx, undefined, conc5ByDate);
+    if (!ev) return null;
+    const rows: CondRow[] = [
+      { icon: '①', name: '股價在跌', value: `近5日${ev.drop5 >= 0 ? '+' : ''}${ev.drop5.toFixed(1)}%`, pass: ev.isDropping, tip: '近5日在回檔（跌幅夠）才是「偷買」場景' },
+      { icon: '②', name: '集中度在爬', value: `${ev.conc5prev.toFixed(1)}→${ev.conc5.toFixed(1)}%${ev.concHighWarn ? ' ⚠️過高' : ''}${ev.volumeWarn ? ' ⚠️爆量' : ''}`, pass: ev.isConcRising, tip: '5日主力分點集中度比5日前高（回升中，含還沒翻正）＝慢慢集中。⚠️爆量(≥2倍量)/集中度過高(>12%隔日沖鎖股)現在只警示、不剔除' },
+      { icon: '③', name: '法人連買', value: `${ev.instConsecDays}天 ${ev.instSumK > 0 ? '+' : ''}${ev.instSumK.toLocaleString()}張`, pass: ev.isInstBuying, tip: '三大法人合計連買≥2天且近5日淨買超>0' },
+    ];
+    return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit };
+  }, [market, chips?.broker, chips?.inst, currentIndex, allCandles, concExact]);
+
+  // 走圖游標當天日期（三張共用 CMoney 籌碼表的高亮基準 + 持股分布取週）
+  const cursorDate = allCandles.length
+    ? allCandles[Math.min(Math.max(currentIndex, 0), allCandles.length - 1)].date
+    : null;
+  // CMoney 風格三張籌碼表（主力分點集中度 / 三大法人 / 集保持股分布）共用 props
+  const chipTables: ChipRawTablesProps = {
+    broker: chips?.broker,
+    inst: chips?.inst,
+    tdcc: chips?.tdcc,
+    candles: allCandles,
+    cursorDate,
+    concExact,
+  };
+
   const sidebarContent = (
     <div
       id={`panel-${sideTab}`}
@@ -532,18 +855,25 @@ function HomePage() {
     >
       {sideTab === 'conditions' && (
         <SectionBoundary section="買法條件">
-          {showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch />}
+          {showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch wConds={wConds} xConds={xConds} yConds={yConds} chipTables={chipTables} />}
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
         <SectionBoundary section="訊號分析">
-          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} /> : <SignalSummaryCard />}
+          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} /> : <SignalSummaryCard />}
         </SectionBoundary>
       )}
       {sideTab === 'chip' && (
         currentStock ? (
           <SectionBoundary section="籌碼分析">
-            <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
+            {isCnTicker
+              ? <CnChipPanel symbol={currentStock.ticker} />
+              : (
+                  <>
+                    <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
+                    <ChipRawTables {...chipTables} />
+                  </>
+                )}
           </SectionBoundary>
         ) : (
           <EmptyState
@@ -557,7 +887,14 @@ function HomePage() {
       {sideTab === 'fundamental' && (
         currentStock ? (
           <SectionBoundary section="基本面分析">
-            <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />
+            {isCnTicker
+              ? <CnFundamentalPanel symbol={currentStock.ticker} />
+              : (
+                <>
+                  <FundamentalScoreSummary symbol={currentStock.ticker} currentPrice={allCandles[currentIndex]?.close} />
+                  <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} isHistorical={currentIndex < allCandles.length - 1} />
+                </>
+              )}
           </SectionBoundary>
         ) : (
           <EmptyState
@@ -571,25 +908,23 @@ function HomePage() {
     </div>
   );
 
-  // 是否顯示深度決策面板：有選股且非大盤指數
-  const showDecisionPanel = !!currentStock && !/^\^|^000001\.SS$/.test(currentStock.ticker);
-
-  // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫
-  const shuangBOverlay = showShuangB && sanseEnabled && sanse ? {
+  // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫。
+  // 三色 overlay/副圖只有日線版本 → 加 currentInterval==='1d' 閘，分鐘線一律不渲染
+  //（否則日線 sanse 資料疊到分鐘線會把主圖帶歪、副圖空白錯位）。
+  const shuangBOverlay = showShuangB && sanseEnabled && sanse && currentInterval === '1d' ? {
     zhineng: sanse.zhineng, zb4: sanse.zb4, zb5: sanse.zb5, duokong: sanse.duokong,
     markers: sanse.mainMarkers,
   } : null;
   // 副圖（主力狀態F / 捕撈季節）資料 — 對齊主圖 candle 由 IndicatorCharts 自行 map
   // 台股無換手率 → xysTiers 為 undefined（4 級彩柱不畫），金叉/動能柱照常
-  const sanseZhuli = sanseEnabled && indicators.mainForce ? sanse?.zhuli ?? null : null;
-  const sanseXys = sanseEnabled && indicators.season && sanse ? {
+  const sanseZhuli = sanseEnabled && indicators.mainForce && currentInterval === '1d' ? sanse?.zhuli ?? null : null;
+  const sanseXys = sanseEnabled && indicators.season && sanse && currentInterval === '1d' ? {
     xys0: sanse.xys0, xys1: sanse.xys1, xys2: sanse.xys2,
     subMarkers: sanse.subMarkers, xysTiers: sanse.xysTiers ?? null,
   } : null;
 
   // ABC 偵測器腳位疊加（除錯/驗證）— 選「ABC 突破」買法(J，舊代號 G)且非三色視圖時，
   // 把 detectABCBreakout 實際選的 A/B/C 腳 + 它的下降切線畫到走圖（用走圖游標 currentIndex 對齊面板）。
-  const activeBuyMethod = useBacktestStore(s => s.activeBuyMethod);
   const abcOverlay = useMemo(() => {
     const isAbcMethod = activeBuyMethod === 'J' || activeBuyMethod === 'G';
     if (showSanseView || !isAbcMethod) return null;
@@ -621,6 +956,25 @@ function HomePage() {
     };
   }, [showSanseView, activeBuyMethod, allCandles, currentIndex]);
 
+  // 大戶持股趨勢線 — 只有開關開 + 台股 + 日線才畫。集保是週資料，forward-fill 到每根 K 棒（時間軸對齊），
+  // 用 useMemo 穩定 reference 免得每次 hover 重設線。純「格局強弱」參考、不發訊號。
+  const holderLineOverlay = useMemo(() => {
+    if (!showHolderLine || market !== 'TW' || currentInterval !== '1d') return null;
+    const key = holderTier.key;
+    const rows = (chips?.tdcc ?? [])
+      .filter(r => typeof r[key] === 'number')
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    if (rows.length === 0 || visibleCandles.length === 0) return null;
+    const out: { time: string; value: number }[] = [];
+    let j = 0;
+    for (const c of visibleCandles) {
+      while (j + 1 < rows.length && rows[j + 1].date <= c.date) j++;
+      if (rows[j].date <= c.date) out.push({ time: c.date, value: rows[j][key]! });
+    }
+    return out.length ? out : null;
+  }, [showHolderLine, market, currentInterval, chips?.tdcc, visibleCandles, holderTier]);
+
   return (
     // fullViewport=false 永遠允許整頁 vertical scroll（避免 ^TWII 時整頁鎖死無法捲動）
     // chart 區填滿到視窗底（header 49px + py-2 8px = 57px 上方位移 → 扣 58px 讓排底貼齊視窗底、今日簡報退到摺疊線下）
@@ -651,6 +1005,19 @@ function HomePage() {
             }
             topAlertSlot={
               <>
+                {chipAvoid && currentInterval === '1d' && (
+                  <div className="shrink-0 px-3 py-1.5 bg-red-900/25 border-b border-red-700/50 text-[11px]">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-red-300">🚩 買進前避雷</span>
+                      {chipAvoid.map(f => (
+                        <span key={f.key} className="px-1.5 py-0.5 rounded bg-red-800/50 text-red-200 font-medium" title={f.detail}>
+                          {f.label}
+                        </span>
+                      ))}
+                      <span className="text-muted-foreground/70">— 只示警不擋，回測這幾個事後系統性偏弱</span>
+                    </div>
+                  </div>
+                )}
                 {loadError && (
                   <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-red-900/30 border-b border-red-700/50 text-xs">
                     <span className="text-red-400">{loadError}</span>
@@ -658,18 +1025,30 @@ function HomePage() {
                       className="text-sky-400 hover:text-sky-300 underline">重試</button>
                   </div>
                 )}
-                {dataGaps.length > 0 && currentInterval === '1d' && (
-                  <div className="shrink-0 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between">
-                    <span>
-                      資料斷層：{dataGaps.map((g: { fromDate: string; toDate: string; calendarDays: number }) => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天）`).join('、')}
-                    </span>
-                    <button
-                      onClick={() => { if (!currentStock) return; loadStock(currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, ''), '1d', '2y').catch(() => {}); }}
-                      className="text-yellow-300 hover:text-yellow-200 underline ml-2 whitespace-nowrap">
-                      重新下載
-                    </button>
-                  </div>
-                )}
+                {dataGaps.length > 0 && currentInterval === '1d' && (() => {
+                  const halts = dataGaps.filter((g) => g.kind === 'halt');
+                  const stale = dataGaps.find((g) => g.kind === 'stale');
+                  return (
+                    <div className="shrink-0 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between gap-2">
+                      <span>
+                        {halts.length > 0 && (
+                          <>停牌 {halts.map((g) => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天無交易）`).join('、')}</>
+                        )}
+                        {halts.length > 0 && stale && <span className="mx-1">·</span>}
+                        {stale && (
+                          <>資料 {stale.calendarDays} 天未更新（{stale.fromDate} 起）</>
+                        )}
+                      </span>
+                      {stale && (
+                        <button
+                          onClick={() => { if (!currentStock) return; loadStock(currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, ''), '1d', '2y').catch(() => {}); }}
+                          className="text-yellow-300 hover:text-yellow-200 underline ml-2 whitespace-nowrap">
+                          重新下載
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             }
             toolbarSlot={displayCandle && (
@@ -682,13 +1061,17 @@ function HomePage() {
                 currentInterval={currentInterval}
                 onIntervalChange={handleIntervalChange}
                 maToggles={maToggles}
-                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                onChipGroupToggle={toggleChipGroup}
+                onApplyPreset={applyChartPreset}
                 showShuangB={showShuangB}
                 onShuangBToggle={() => setShowShuangB(v => !v)}
+                showHolderLine={showHolderLine}
+                onHolderLineToggle={() => setShowHolderLine(v => !v)}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -697,18 +1080,16 @@ function HomePage() {
                 onPivotsToggle={() => setShowPivots(v => !v)}
                 showSupportResistance={showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showCandleSR={showCandleSR}
+                onCandleSRToggle={() => setShowCandleSR(v => !v)}
                 showNeckline={showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
                 showPattern={showPattern}
                 onPatternToggle={() => setShowPattern(v => !v)}
-                showAscendingTrendline={showAscendingTrendline}
-                onAscendingTrendlineToggle={() => setShowAscendingTrendline(v => !v)}
-                showDescendingTrendline={showDescendingTrendline}
-                onDescendingTrendlineToggle={() => setShowDescendingTrendline(v => !v)}
-                showAscendingChannel={showAscendingChannel}
-                onAscendingChannelToggle={() => setShowAscendingChannel(v => !v)}
-                showDescendingChannel={showDescendingChannel}
-                onDescendingChannelToggle={() => setShowDescendingChannel(v => !v)}
+                showAscendingLine={showAscendingTrendline || showAscendingChannel}
+                onAscendingLineToggle={toggleAscendingLine}
+                showDescendingLine={showDescendingTrendline || showDescendingChannel}
+                onDescendingLineToggle={toggleDescendingLine}
                 showConsolidationLines={showConsolidationLines}
                 onConsolidationLinesToggle={() => setShowConsolidationLines(v => !v)}
                 avgCost={metrics.avgCost}
@@ -742,6 +1123,7 @@ function HomePage() {
               showBollinger,
               showPivots,
               showSupportResistance,
+              showCandleSR,
               showAscendingTrendline,
               showDescendingTrendline,
               showAscendingChannel,
@@ -753,6 +1135,8 @@ function HomePage() {
               lockedPattern,
               shuangB: shuangBOverlay,
               abcOverlay,
+              holderLine: holderLineOverlay,
+              holderLineLabel: holderTier.label,
             }}
             indicatorProps={{
               candles: visibleCandles,
@@ -809,7 +1193,7 @@ function HomePage() {
         </div>
 
         {/* ── Right: 多源候選 panel（tab：策略掃描 / YouTube 提及） ── */}
-        <div className={`shrink-0 flex flex-col min-h-0 border border-border bg-card/80 rounded-lg overflow-hidden transition-all duration-300 ${
+        <div className={`shrink-0 flex flex-col min-h-0 ring-1 ring-foreground/10 bg-card/80 rounded-xl overflow-hidden transition-all duration-300 ${
           scannerOpen
             ? 'w-full md:w-[600px] min-h-[50vh] md:min-h-0'
             : 'w-full md:w-8 h-10 md:h-auto'
@@ -853,49 +1237,50 @@ function HomePage() {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={rightTab === 'fundamental'}
-                  onClick={() => setRightTab('fundamental')}
+                  aria-selected={rightTab === 'sectors'}
+                  onClick={() => setRightTab('sectors')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
-                    rightTab === 'fundamental'
-                      ? 'text-foreground border-b-2 border-orange-500 -mb-px bg-card/60'
+                    rightTab === 'sectors'
+                      ? 'text-foreground border-b-2 border-teal-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
-                  title="基本面補漲 Top 20"
+                  title="題材分類：題材熱度／資金流入／法人買賣超／排名變化"
                 >
-                  <span aria-hidden="true">📊</span>
-                  <span className="hidden md:inline">基本面補漲</span>
-                  <span className="md:hidden">補漲</span>
+                  <span aria-hidden="true">🔥</span>
+                  <span className="hidden md:inline">題材分類</span>
+                  <span className="md:hidden">題材</span>
                 </button>
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={rightTab === 'pool'}
-                  onClick={() => setRightTab('pool')}
+                  aria-selected={rightTab === 'broker'}
+                  onClick={() => setRightTab('broker')}
                   className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
-                    rightTab === 'pool'
+                    rightTab === 'broker'
+                      ? 'text-foreground border-b-2 border-rose-500 -mb-px bg-card/60'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="法人報告：報告後漲跌幅 + 目標價達成度"
+                >
+                  <span aria-hidden="true">🏦</span>
+                  <span className="hidden md:inline">法人報告</span>
+                  <span className="md:hidden">法人</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightTab === 'etf'}
+                  onClick={() => setRightTab('etf')}
+                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                    rightTab === 'etf'
                       ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
-                  title="多源候選股票池"
+                  title="ETF 追蹤：績效排行／持股異動／共識買榜／被納入後表現"
                 >
-                  <span aria-hidden="true">🗂</span>
-                  <span>候選池</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={rightTab === 'agent'}
-                  onClick={() => setRightTab('agent')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
-                    rightTab === 'agent'
-                      ? 'text-foreground border-b-2 border-amber-500 -mb-px bg-card/60'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  title="多代理已完成決策"
-                >
-                  <span aria-hidden="true">🤖</span>
-                  <span className="hidden md:inline">多代理</span>
-                  <span className="md:hidden">代理</span>
+                  <span aria-hidden="true">📈</span>
+                  <span className="hidden md:inline">ETF 追蹤</span>
+                  <span className="md:hidden">ETF</span>
                 </button>
                 <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)}
@@ -912,7 +1297,7 @@ function HomePage() {
                   <ScanPanelVertical onSelectStock={handleScanSelectStock} />
                 )}
                 {rightTab === 'youtube' && (
-                  <YoutubeStocksPanel
+                  <YoutubePanel
                     date={tabDate}
                     onDateChange={setTabDate}
                     onSelectStock={handleYoutubeSelectStock}
@@ -920,29 +1305,22 @@ function HomePage() {
                     selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
                 )}
-                {rightTab === 'fundamental' && (
-                  <FundamentalRevaluationPanel
+                {rightTab === 'sectors' && (
+                  <SectorsPanel
+                    onSelectStock={handleSectorSelectStock}
+                    selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ|BJ)$/i, '') ?? null}
+                  />
+                )}
+                {rightTab === 'broker' && (
+                  <BrokerReportsPanel
                     date={tabDate}
                     onDateChange={setTabDate}
                     onSelectStock={handleYoutubeSelectStock}
                     selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
                 )}
-                {rightTab === 'pool' && (
-                  <CandidatesPoolPanel
-                    onSelectStock={handlePoolSelectStock}
-                    selectedSymbol={currentStock?.ticker}
-                    defaultDate={tabDate}
-                    onDateChange={setTabDate}
-                  />
-                )}
-                {rightTab === 'agent' && (
-                  <MultiAgentTopPanel
-                    onSelectStock={handleAgentSelectStock}
-                    selectedSymbol={currentStock?.ticker}
-                    defaultDate={tabDate}
-                    onDateChange={setTabDate}
-                  />
+                {rightTab === 'etf' && (
+                  <ETFPanel />
                 )}
               </div>
             </>
@@ -961,14 +1339,6 @@ function HomePage() {
 
         </div>{/* end 3-col flex */}
 
-        {/* 今日簡報 — 永遠顯示（不限選股） */}
-        <TodayBriefing market={market} />
-
-        {/* 深度決策面板（A1：走圖區下方垂直展開）— 選了個股才顯示 */}
-        {showDecisionPanel && currentStock && (
-          <DecisionPanel symbol={currentStock.ticker} date={targetDate ?? undefined} />
-        )}
-
       </div>
       {/* P1-5: Keyboard shortcut help overlay */}
       {showHelp && (
@@ -977,7 +1347,7 @@ function HomePage() {
           onClick={() => setShowHelp(false)}
         >
           <div
-            className="bg-card border border-border rounded-xl shadow-2xl p-5 w-80 max-w-[90vw]"
+            className="bg-card ring-1 ring-foreground/10 rounded-xl shadow-2xl p-5 w-80 max-w-[90vw]"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
@@ -1034,13 +1404,17 @@ function HomePage() {
                 currentInterval={currentInterval}
                 onIntervalChange={handleIntervalChange}
                 maToggles={maToggles}
-                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                onChipGroupToggle={toggleChipGroup}
+                onApplyPreset={applyChartPreset}
                 showShuangB={showShuangB}
                 onShuangBToggle={() => setShowShuangB(v => !v)}
+                showHolderLine={showHolderLine}
+                onHolderLineToggle={() => setShowHolderLine(v => !v)}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -1049,18 +1423,16 @@ function HomePage() {
                 onPivotsToggle={() => setShowPivots(v => !v)}
                 showSupportResistance={showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showCandleSR={showCandleSR}
+                onCandleSRToggle={() => setShowCandleSR(v => !v)}
                 showNeckline={showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
                 showPattern={showPattern}
                 onPatternToggle={() => setShowPattern(v => !v)}
-                showAscendingTrendline={showAscendingTrendline}
-                onAscendingTrendlineToggle={() => setShowAscendingTrendline(v => !v)}
-                showDescendingTrendline={showDescendingTrendline}
-                onDescendingTrendlineToggle={() => setShowDescendingTrendline(v => !v)}
-                showAscendingChannel={showAscendingChannel}
-                onAscendingChannelToggle={() => setShowAscendingChannel(v => !v)}
-                showDescendingChannel={showDescendingChannel}
-                onDescendingChannelToggle={() => setShowDescendingChannel(v => !v)}
+                showAscendingLine={showAscendingTrendline || showAscendingChannel}
+                onAscendingLineToggle={toggleAscendingLine}
+                showDescendingLine={showDescendingTrendline || showDescendingChannel}
+                onDescendingLineToggle={toggleDescendingLine}
                 showConsolidationLines={showConsolidationLines}
                 onConsolidationLinesToggle={() => setShowConsolidationLines(v => !v)}
                 avgCost={metrics.avgCost}
@@ -1103,6 +1475,7 @@ function HomePage() {
                       showBollinger={showBollinger}
                       showPivots={showPivots}
                       showSupportResistance={showSupportResistance}
+                      showCandleSR={showCandleSR}
                       showAscendingTrendline={showAscendingTrendline}
                       showDescendingTrendline={showDescendingTrendline}
                       showAscendingChannel={showAscendingChannel}
@@ -1114,6 +1487,8 @@ function HomePage() {
                       lockedPattern={lockedPattern}
                       shuangB={shuangBOverlay}
                       abcOverlay={abcOverlay}
+                      holderLine={holderLineOverlay}
+                      holderLineLabel={holderTier.label}
                     />
                   </ErrorBoundary>
                 </div>

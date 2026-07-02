@@ -3,12 +3,12 @@ import { persist } from 'zustand/middleware';
 import type { Candle } from '../types';
 import type { MarketId } from '../lib/scanner/types';
 import {
-  mapStoreToServerHolding,
-  toUpsertApiBody,
   mapStoreHoldingsToImportRows,
-  shouldSyncToServer,
+  toFullUpsertApiBody,
+  mapServerToStoreHolding,
   type StorePortfolioHolding,
 } from '../lib/portfolio/storeToHoldingsMapping';
+import { getActiveProfileId } from './portfolioProfileStore';
 
 export interface PortfolioHolding {
   id: string;
@@ -52,6 +52,19 @@ export interface PortfolioHolding {
    * 0513 ABCDE E：'wave' 已砍（fall-through 跟 short 一樣，誤導用戶）
    */
   operationMode?: 'short' | 'long';
+
+  /**
+   * 部位方向（賠少-1 做空 live 風控，2026-06-19）
+   * 'long' = 做多（買進）；'short' = 做空（放空）。
+   * 缺省 / 未設 = 'long'（向下相容，既有持倉行為位元不變）。
+   *
+   * 與 operationMode（短線/長線，控停利用哪條均線）是**正交**兩維：
+   *   - positionSide 決定盈虧方向與停損/回補語意（做多停損 vs 做空停損回補）
+   *   - operationMode 決定守哪條均線
+   * 只有 positionSide==='short' 才走 holdingsActionEngine 的做空分支；
+   * 'long' / 缺省一律走原本的做多出場邏輯，完全不受影響。
+   */
+  positionSide?: 'long' | 'short';
 
   /**
    * 進階紀律啟用 flag（議題 B 寶典 #5/#6）
@@ -150,28 +163,24 @@ interface PortfolioStore {
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * 把單筆 UI holding 同步到 server holdings.json
+ * 把單筆 UI holding 全保真同步到 server 持倉檔（2026-05-29：server 為唯一真相）
  *
  * Fire-and-forget — 失敗不擋 UI 動作。SSR 環境（無 window）跳過。
- * 失敗時印 console.warn 但不 throw。
  *
- * **TW-only**：2026-05-23 用戶決議「不要管陸股」(memory project_cn_excluded_from_path)，
- * 陸股不 fire upsert（避免污染 holdings.json）。
+ * 與舊版差異：
+ *   - **保留 UI 富欄位**（entryPattern / triggerPrice / operationMode 等 → ui blob）
+ *   - **台股+陸股都寫**（依 market 路由：CN → holdings-cn.json、TW → holdings.json）
+ *     ← 持倉這條線解除 TW-only；其他 TW-only 業務邏輯（sizer/growthPath/月報）不受影響
  */
 async function syncHoldingToServer(h: StorePortfolioHolding): Promise<void> {
   if (typeof window === 'undefined') return;
-  if (!shouldSyncToServer(h)) {
-    console.debug('[portfolioStore] sync skip (CN excluded):', h.symbol);
-    return;
-  }
   try {
-    const mapped = mapStoreToServerHolding(h);
-    if (!mapped.ok || !mapped.payload) {
-      console.warn('[portfolioStore] sync skip:', h.symbol, mapped.reason);
+    const body = toFullUpsertApiBody(h as StorePortfolioHolding & Record<string, unknown>);
+    if (!body) {
+      console.warn('[portfolioStore] sync skip (映射失敗):', h.symbol);
       return;
     }
-    const body = toUpsertApiBody(mapped.payload);
-    const resp = await fetch('/api/agents/portfolio', {
+    const resp = await fetch(`/api/agents/portfolio?profile=${encodeURIComponent(getActiveProfileId())}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -186,6 +195,34 @@ async function syncHoldingToServer(h: StorePortfolioHolding): Promise<void> {
 }
 
 /**
+ * 從 server 持倉檔（台股+陸股）灌入 store（2026-05-29：server 為唯一真相）
+ *
+ * App 啟動時呼叫一次；之後 UI 動作 optimistic 改本地 + fire-and-forget 寫回 server。
+ * 失敗保留現有 holdings（不清空），避免暫時性網路問題清掉畫面。
+ */
+export async function hydrateHoldingsFromServer(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    const resp = await fetch(`/api/agents/portfolio?status=open&profile=${encodeURIComponent(getActiveProfileId())}`, { cache: 'no-store' });
+    if (!resp.ok) {
+      console.warn('[portfolioStore] hydrate fail:', resp.status);
+      return false;
+    }
+    const json = await resp.json() as { data?: { holdings?: unknown[] }; holdings?: unknown[] };
+    const rows = json.data?.holdings ?? json.holdings ?? [];
+    if (!Array.isArray(rows)) return false;
+    const holdings = rows
+      .map(r => mapServerToStoreHolding(r as Record<string, unknown>))
+      .filter(Boolean) as unknown as PortfolioHolding[];
+    usePortfolioStore.setState({ holdings });
+    return true;
+  } catch (e) {
+    console.warn('[portfolioStore] hydrate error:', e);
+    return false;
+  }
+}
+
+/**
  * 從 server holdings.json 刪除一檔（hard delete）
  *
  * Fire-and-forget；對應 UI remove() 動作。
@@ -194,7 +231,7 @@ async function unsyncHoldingFromServer(symbol: string): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
     const resp = await fetch(
-      `/api/agents/portfolio?symbol=${encodeURIComponent(symbol)}&hard=1`,
+      `/api/agents/portfolio?symbol=${encodeURIComponent(symbol)}&hard=1&profile=${encodeURIComponent(getActiveProfileId())}`,
       { method: 'DELETE' },
     );
     if (!resp.ok && resp.status !== 404) {
@@ -233,7 +270,7 @@ async function syncCloseTradeToServer(args: {
 }): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    const resp = await fetch('/api/portfolio/close-trade', {
+    const resp = await fetch(`/api/portfolio/close-trade?profile=${encodeURIComponent(getActiveProfileId())}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -380,6 +417,14 @@ export const usePortfolioStore = create<PortfolioStore>()(
     {
       name: 'portfolio-v1',
       version: 3,
+      // 2026-05-29：holdings 改由 server 持倉檔當唯一真相，**不再**持久化到 localStorage
+      //（啟動時 hydrateHoldingsFromServer 灌入）。realizedTrades / cashBalance /
+      // cashReservePct 目前 UI 無顯示但仍留本機（避免行為改變）。
+      partialize: (state) => ({
+        realizedTrades: state.realizedTrades,
+        cashBalance: state.cashBalance,
+        cashReservePct: state.cashReservePct,
+      }),
       migrate: (persisted: unknown, fromVersion: number) => {
         const state = (persisted ?? {}) as Record<string, unknown>;
         // v0/v1 → v2：cashBalance 從單一數字改成 { TW, CN }
@@ -407,6 +452,13 @@ export const usePortfolioStore = create<PortfolioStore>()(
           }));
         }
         return state as Partial<PortfolioStore>;
+      },
+      // 2026-05-29：holdings 改 server 唯一真相 — 即使 localStorage 殘留舊 holdings
+      // 也一律丟棄，只認啟動時 hydrateHoldingsFromServer 灌入的，避免重載瞬間閃舊資料。
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Record<string, unknown>;
+        const { holdings: _ignored, ...rest } = p;
+        return { ...current, ...rest } as PortfolioStore;
       },
     },
   ),
@@ -454,7 +506,7 @@ export async function syncAllHoldingsToServer(): Promise<SyncAllResult> {
     return { inserted: 0, rejected: rejections.length, cnSkipped, total: holdings.length };
   }
   try {
-    const resp = await fetch('/api/portfolio/import', {
+    const resp = await fetch(`/api/portfolio/import?profile=${encodeURIComponent(getActiveProfileId())}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rows, forcePrice: true }),

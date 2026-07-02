@@ -5,16 +5,12 @@ import { usePathname } from 'next/navigation';
 import NavigationProgress from '@/components/NavigationProgress';
 import {
   Moon, Sun,
-  Briefcase, Menu,
-  Activity, Settings, FileText,
+  Briefcase,
+  Activity,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
-import {
-  Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle,
-} from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,7 +28,6 @@ interface PageShellProps {
 export function PageShell({ children, headerSlot, fullViewport, className }: PageShellProps) {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
@@ -65,11 +60,11 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Secondary Nav — desktop icon-only
-              整合進首頁原則：所有「日常看股」功能在首頁 TodayBriefing + DecisionPanel
+          {/* 輔助導覽（桌機 + 行動都顯示）— 2026-06-21 移除「全部頁面」側邊選單後唯一的 header 入口
+              整合進首頁原則：所有「日常看股」功能在首頁 TodayBriefing + DecisionPanel + 右側 tab
               nav 只留「編輯持倉」和「系統健康」兩個必要管理入口
-              其餘舊頁路由保留、可手打 URL (today/growth/risk/sizer/watchlist/journal/realtime/etf) */}
-          <nav aria-label="輔助導覽" className="hidden md:flex items-center gap-0.5">
+              其餘舊頁路由保留、可手打 URL (today/growth/risk/sizer/watchlist/journal/realtime) */}
+          <nav aria-label="輔助導覽" className="flex items-center gap-0.5">
             {([
               { href: '/portfolio', label: '持倉',     icon: Briefcase },
               { href: '/health',    label: '系統健康',  icon: Activity },
@@ -104,60 +99,6 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
               <Moon className="absolute w-4 h-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             </Button>
           </nav>
-
-          {/* Mobile Menu */}
-          <div className="md:hidden">
-            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-              <SheetTrigger
-                render={<Button variant="ghost" size="icon" aria-label="開啟選單" className="text-muted-foreground w-8 h-8" />}
-              >
-                <Menu className="w-5 h-5" />
-              </SheetTrigger>
-              <SheetContent side="right" className="w-64 bg-background border-border">
-                <SheetHeader>
-                  <SheetTitle className="text-sky-400">
-                    選單
-                  </SheetTitle>
-                </SheetHeader>
-                <nav aria-label="行動版導覽" className="flex flex-col gap-4 mt-4 px-2">
-                  {/* Mobile: 跟桌面同步、只留必要管理入口（其餘已整合進首頁）*/}
-                  {([
-                    {
-                      title: '管理',
-                      items: [
-                        { href: '/portfolio',  label: '💼 編輯持倉',  icon: Briefcase },
-                        { href: '/health',     label: '💚 系統健康',  icon: Activity },
-                        { href: '/settings',   label: '⚙️ 設定',       icon: Settings },
-                        { href: '/disclaimer', label: '📄 免責聲明',   icon: FileText },
-                      ],
-                    },
-                  ] as const).map((group) => (
-                    <div key={group.title} className="flex flex-col gap-1">
-                      <div className="px-3 text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">
-                        {group.title}
-                      </div>
-                      {group.items.map(({ href, label, icon: Icon }) => (
-                        <Link
-                          key={href}
-                          href={href}
-                          onClick={() => setMobileOpen(false)}
-                          className={cn(
-                            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                            isActive(href)
-                              ? 'bg-sky-500/15 text-sky-400'
-                              : 'text-muted-foreground hover:text-foreground hover:bg-secondary',
-                          )}
-                        >
-                          <Icon className="w-4 h-4" />
-                          {label}
-                        </Link>
-                      ))}
-                    </div>
-                  ))}
-                </nav>
-              </SheetContent>
-            </Sheet>
-          </div>
         </div>
       </header>
 

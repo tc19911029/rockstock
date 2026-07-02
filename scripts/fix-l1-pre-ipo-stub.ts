@@ -16,7 +16,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+const REPO_ROOT = '/Users/tc/Desktop/rockstock';
 const CANDLES_ROOT = path.join(REPO_ROOT, 'data', 'candles');
 
 interface Candle { date: string; open: number; high: number; low: number; close: number; volume?: number; }

@@ -132,7 +132,7 @@ export function StockChartView({
   return (
     <div
       ref={containerRef}
-      className={`relative flex flex-col flex-1 rounded-xl border border-border overflow-hidden bg-card transition-opacity animate-fade-in ${
+      className={`relative flex flex-col flex-1 rounded-xl ring-1 ring-foreground/10 overflow-hidden bg-card transition-opacity animate-fade-in ${
         isLoading ? 'opacity-40 pointer-events-none' : ''
       } ${className ?? ''}`}
     >

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { DailyActionResponse, DailyActionItem } from '@/app/api/portfolio/daily-action/route';
 import type { HoldingAction } from '@/lib/agents/holdingsActionEngine';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
+import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 
 const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   stop_loss:   'bg-red-900/60 text-red-100 border-red-500',
@@ -12,6 +13,7 @@ const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   watch_stop:  'bg-yellow-900/40 text-yellow-200 border-yellow-700',
   can_add:     'bg-cyan-900/50 text-cyan-100 border-cyan-500',
   hold:        'bg-slate-800/60 text-slate-200 border-slate-600',
+  cover_all:   'bg-orange-900/60 text-orange-100 border-orange-500', // 賠少-1：做空回補
   no_data:     'bg-secondary text-muted-foreground border-border',
 };
 
@@ -31,12 +33,13 @@ export function PortfolioDailyActionPanel() {
   const [data, setData] = useState<DailyActionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const activeProfileId = usePortfolioProfileStore(s => s.activeProfileId);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/portfolio/daily-action');
+      const res = await fetch(`/api/portfolio/daily-action?profile=${encodeURIComponent(activeProfileId)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error ?? 'unknown error');
@@ -46,13 +49,13 @@ export function PortfolioDailyActionPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeProfileId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading && !data) {
     return (
-      <div className="rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground">
+      <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-3 text-xs text-muted-foreground">
         持倉 daily action 載入中…
       </div>
     );
@@ -70,11 +73,11 @@ export function PortfolioDailyActionPanel() {
   if (!data || data.items.length === 0) return null;
 
   const actionable = data.items.filter(it =>
-    ['stop_loss', 'exit_all', 'reduce_half', 'watch_stop'].includes(it.action),
+    ['stop_loss', 'exit_all', 'reduce_half', 'watch_stop', 'cover_all'].includes(it.action),
   );
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gradient-to-r from-sky-900/30 to-transparent border-b border-border">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-foreground">📋 今日操作建議</span>
@@ -112,6 +115,9 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
     <div className="px-3 py-2 hover:bg-muted/30 transition-colors">
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 min-w-0">
+          {item.positionSide === 'short' && (
+            <span className="text-[9px] px-1 rounded bg-rose-900/50 text-rose-200 border border-rose-700" title="做空（放空）部位">🔻空</span>
+          )}
           <span className="font-mono text-[11px] text-foreground/80">{item.symbol.replace(/\.(TW|TWO)$/, '')}</span>
           <span className="text-xs font-medium text-foreground truncate">{item.name}</span>
         </div>
@@ -125,8 +131,8 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
         <span className="text-[11px] font-mono">
           today <span className="text-foreground font-bold">{item.todayClose?.toFixed(2) ?? '—'}</span>
         </span>
-        <span className={`text-[11px] font-mono font-bold ${isProfit ? 'text-emerald-300' : 'text-rose-300'}`}>
-          {fmtPct(item.profitPct)}
+        <span className={`text-[11px] font-mono font-bold ${isProfit ? 'text-emerald-300' : 'text-rose-300'}`} title="總報酬（買進至今未實現），非今日漲跌幅">
+          總 {fmtPct(item.profitPct)}
         </span>
         <span className={`text-[10px] font-mono ${isProfit ? 'text-emerald-400/70' : 'text-rose-400/70'}`}>
           {fmtCurrency(item.unrealizedAmount)}
@@ -152,7 +158,7 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
           </div>
         )}
 
-        {item.suggestedStop != null && item.suggestedStop > item.stopLoss + 0.01 && (
+        {item.positionSide !== 'short' && item.suggestedStop != null && item.suggestedStop > item.stopLoss + 0.01 && (
           <span className="text-cyan-300/80" title="建議把停損上移到此價（鎖獲利）">
             💡 停損上移 {item.stopLoss.toFixed(2)} → <span className="font-bold">{item.suggestedStop.toFixed(2)}</span>
           </span>

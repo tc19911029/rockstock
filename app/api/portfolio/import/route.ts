@@ -19,6 +19,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { upsertHolding } from '@/lib/agents/portfolio/storage';
+import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
 import {
   parseImportCsv,
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
 
   const { csv, rows: jsonRows, forcePrice } = parsed.data;
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
   const today = todayCstDate();
   const results: RowResult[] = [];
 
@@ -121,7 +123,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      await upsertHolding(holdingData);
+      await upsertHolding(holdingData, profileId);
       results.push({ rowNumber: p.rowNumber, symbol: p.row.symbol, status: 'inserted' });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

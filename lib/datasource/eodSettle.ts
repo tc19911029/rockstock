@@ -14,11 +14,12 @@
  *   CN: EastMoney → Tencent → EODHD → Yahoo Chart
  */
 
-import { eodhdHistProvider } from './EODHDHistProvider';
 import { yahooProvider } from './YahooDataProvider';
 import { tencentHistProvider } from './TencentHistProvider';
 import { eastMoneyHistProvider } from './EastMoneyHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
+import { fugleDailyProvider } from './FugleProvider';
+import { isValidTwTick, snapTwTick, isTwEtf } from './twTick';
 import type { Candle } from '@/types';
 import type { VendorBatchCache } from './eodSettleBatch';
 import { lookupBulkQuote } from './eodSettleBatch';
@@ -39,6 +40,7 @@ export type SettleStatus =
   | 'settled-single-source'      // 只有 1 vendor 回，但仍寫入（標警告）
   | 'pending-multi-disagree'     // 多 vendor 但 close 不一致
   | 'pending-no-vendor-data'     // 全部 vendor 沒回
+  | 'pending-unverified'         // settled 但無官方源/獨立雙源背書（degraded 日）→ T+1 複驗
   | 'skipped-already-correct';   // L1 已有當日資料且與 vendor 一致
 
 export interface SettleResult {
@@ -51,6 +53,12 @@ export interface SettleResult {
   existing?: VendorQuote;         // L1 既有值（若有）
   disagreements?: string[];       // multi-disagree 時的 close 差距列表
   warning?: string;
+  /** 與 settled.close 一致的「非 L1-existing」vendor 數。
+   *  L1-existing 參與多數決會造成「Yahoo 殘值 + L1 盤中殘值同源互證」假多源
+   *  （2026-06-11 事故：bulk=0 + FinMind 402 → 833 檔上櫃假收盤）。 */
+  independentAgree?: number;
+  /** 一致群內是否含官方 bulk 源（TWSE/TPEx/EastMoney） */
+  officialAnchor?: boolean;
 }
 
 const CLOSE_AGREE_TOLERANCE = 0.005; // 0.5% — vendor 之間 close 允許差距
@@ -102,36 +110,60 @@ async function fetchOne(
   }
 }
 
-/** 從多 vendor 結果決定 settled 值 */
-function reconcile(quotes: VendorQuote[]): { settled?: VendorQuote; status: SettleStatus; disagreements?: string[] } {
+type ReconcileResult = { settled?: VendorQuote; status: SettleStatus; disagreements?: string[]; warning?: string };
+
+/**
+ * TW 檔位守衛：封存前若收盤非合法檔位（FinMind 被 402 熔斷缺席時，只剩 Yahoo/EODHD 的中間價，
+ * 如 100-500 區間出現 158.75）→ snap 到最近合法檔位 + 標警，保證 L1 永不寫入次檔位偽價。
+ * CN 檔位規則不同，不套用。詳見 [[twTick]] / docs。
+ */
+function finalizeTwTick(q: VendorQuote, status: SettleStatus, market: Market, isEtf: boolean): ReconcileResult {
+  if (market === 'TW' && q.close > 0 && !isValidTwTick(q.close, isEtf)) {
+    const snapped: VendorQuote = {
+      ...q,
+      open: isValidTwTick(q.open, isEtf) ? q.open : snapTwTick(q.open, isEtf),
+      high: isValidTwTick(q.high, isEtf) ? q.high : snapTwTick(q.high, isEtf),
+      low: isValidTwTick(q.low, isEtf) ? q.low : snapTwTick(q.low, isEtf),
+      close: snapTwTick(q.close, isEtf),
+    };
+    return { settled: snapped, status, warning: `次檔位收盤 ${q.close}(vendor=${q.vendor}) → snap ${snapped.close}` };
+  }
+  return { settled: q, status };
+}
+
+/** 從多 vendor 結果決定 settled 值。isEtf：TW ETF/ETN（00 開頭）套較細檔位表（見 [[twTick]]）。 */
+export function reconcile(quotes: VendorQuote[], market: Market, isEtf = false): ReconcileResult {
   if (quotes.length === 0) return { status: 'pending-no-vendor-data' };
   if (quotes.length === 1) {
-    return { settled: quotes[0], status: 'settled-single-source' };
+    return finalizeTwTick(quotes[0], 'settled-single-source', market, isEtf);
   }
 
   // 找一組「至少 2 vendor close 一致」的 vendors
   for (let i = 0; i < quotes.length; i++) {
     for (let j = i + 1; j < quotes.length; j++) {
       if (isClose(quotes[i].close, quotes[j].close)) {
-        // 找到一致對。從 i, j 中選 vendor 優先序高的（前者）作為 settled
-        // 但 volume 取「最大值」(因為某些 vendor 給 0 或部分日資料)
-        const base = quotes[i];
-        const allVolumes = quotes.filter(q => isClose(q.close, base.close)).map(q => q.volume);
-        const maxVol = Math.max(...allVolumes, 0);
-        return {
-          settled: { ...base, volume: maxVol > 0 ? maxVol : base.volume },
-          status: 'settled-multi-source',
-        };
+        // 一致群：與 quotes[i] 收盤一致的所有 vendor（已按原優先序）。
+        const agreeing = quotes.filter(q => isClose(q.close, quotes[i].close));
+        // TW 優先挑「檔位合法」的收盤：合法 159 勝過中間價 158.75，即使兩者在 0.5% 容差內被視為一致；
+        // 一致群內無合法者才退回最高優先序，並由 finalizeTwTick snap。
+        const base = (market === 'TW' ? agreeing.find(q => isValidTwTick(q.close, isEtf)) : undefined) ?? agreeing[0];
+        // volume：一致群內有官方 bulk 源（TWSE/TPEx/EastMoney）→ 用官方量（成交股數是
+        // 交易所 ground truth）；否則退回一致群最大值（部分 vendor 回盤中累計量會偏少）。
+        const official = agreeing.find(q => (q.vendor === 'TWSE' || q.vendor === 'TPEx' || q.vendor === 'EastMoney') && q.volume > 0);
+        const maxVol = Math.max(...agreeing.map(q => q.volume), 0);
+        return finalizeTwTick(
+          { ...base, volume: official ? official.volume : (maxVol > 0 ? maxVol : base.volume) },
+          'settled-multi-source',
+          market,
+          isEtf,
+        );
       }
     }
   }
 
   // 多 vendor 但無一致對
   const disagreements = quotes.map(q => `${q.vendor}=${q.close.toFixed(2)}`);
-  return {
-    status: 'pending-multi-disagree',
-    disagreements,
-  };
+  return { status: 'pending-multi-disagree', disagreements };
 }
 
 /**
@@ -160,9 +192,18 @@ export async function settleSymbol(
   //    EastMoney provider for CN 也已被 batch 取代（雖然 batch 目前 stub）
   //    FinMind 2026-05-20 補進 TW 鏈路（之前只有 EODHD + Yahoo，TPEx 小型股若 EODHD
   //    沒回資料就只剩 Yahoo 對打 L1 → pending-multi-disagree 暴增）
+  //    2026-06-12（QA 提案 #3 額度預算）：已有官方 bulk 錨（TWSE/TPEx）時跳過 FinMind —
+  //    bulk + Yahoo/EODHD 即可多源驗證，省下每輪 ~2000 次配額呼叫，把額度留給
+  //    bulk 失敗的 degraded 日與其他 cron。bulk 缺席時 FinMind 照舊參與。
+  // 2026-06-13：EODHD 不續訂（token 401）從錨點移除，補 Fugle（官方 API、上市+上櫃）
+  // 頂替它的「第三獨立廠商」角色。TW bulk 在場 = 官方 bulk + Fugle + Yahoo + L1-existing
+  // 四票（.TWO 另有 twTick 次檔位鐵證守衛）；bulk 缺席照舊 FinMind 補錨。
+  const hasBulkAnchor = quotes.length > 0;
   const perSymProviders = market === 'TW'
-    ? [finmindHistProvider, eodhdHistProvider, yahooProvider]
-    : [eastMoneyHistProvider, tencentHistProvider, eodhdHistProvider, yahooProvider];
+    ? (hasBulkAnchor
+      ? [fugleDailyProvider, yahooProvider]
+      : [finmindHistProvider, fugleDailyProvider, yahooProvider])
+    : [eastMoneyHistProvider, tencentHistProvider, yahooProvider];
 
   const settled = await Promise.allSettled(
     perSymProviders.map(p => fetchOne(p, symbol, date, market)),
@@ -176,7 +217,18 @@ export async function settleSymbol(
     quotes.push({ ...existing, vendor: 'L1-existing' });
   }
 
-  const { settled: settledQuote, status, disagreements } = reconcile(quotes);
+  const { settled: settledQuote, status, disagreements, warning: tickWarning } = reconcile(quotes, market, isTwEtf(symbol));
+  const warnings = [
+    tickWarning,
+    status === 'settled-single-source' ? '只有 1 vendor 回，未經多源驗證' : null,
+  ].filter(Boolean);
+  let independentAgree = 0;
+  let officialAnchor = false;
+  if (settledQuote) {
+    const agreeing = quotes.filter(q => q.vendor !== 'L1-existing' && isClose(q.close, settledQuote.close));
+    independentAgree = agreeing.length;
+    officialAnchor = agreeing.some(q => q.vendor === 'TWSE' || q.vendor === 'TPEx' || q.vendor === 'EastMoney');
+  }
   return {
     symbol,
     market,
@@ -186,7 +238,9 @@ export async function settleSymbol(
     settled: settledQuote,
     existing,
     disagreements,
-    warning: status === 'settled-single-source' ? '只有 1 vendor 回，未經多源驗證' : undefined,
+    warning: warnings.length ? warnings.join('；') : undefined,
+    independentAgree,
+    officialAnchor,
   };
 }
 

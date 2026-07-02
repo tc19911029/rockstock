@@ -26,6 +26,7 @@ import {
   NewsRssSummary,
   NewsYouTubeMention,
 } from '@/lib/agents/types';
+import { NEWS_JUDGMENT_RULES } from '@/lib/agents/judgmentRules';
 import type { DailyAnalysis, AnalyzedStockMention } from '@/lib/youtube/analysisStorage';
 import type { YouTubeVideo } from '@/lib/youtube/types';
 import type { MarketId } from '@/lib/scanner/types';
@@ -88,6 +89,7 @@ export async function buildNewsQuestion(args: BuildNewsQuestionArgs): Promise<Ne
     symbol,
     market,
     groundTruth,
+    judgmentRulesRef: NEWS_JUDGMENT_RULES,
   };
   if (candidate) {
     question.entryContext = {

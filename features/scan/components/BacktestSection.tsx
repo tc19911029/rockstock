@@ -11,6 +11,8 @@ import { HorizonCard } from './HorizonCard';
 import { BacktestStatsPanel } from './BacktestStatsPanel';
 import { Button } from '@/components/ui/button';
 import { COMPOSITE_STRONG, COMPOSITE_OK, WIN_RATE_STRONG, WIN_RATE_MEDIUM } from '@/lib/analysis/bookThresholds';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 export function BacktestSection() {
   const {
@@ -28,10 +30,10 @@ export function BacktestSection() {
   } = useBacktestStore();
 
   const [activeHorizon, setHorizon] = useState<BacktestHorizon>('d5');
-  const [sortBy, setSortBy] = useState<'composite' | 'netReturn' | 'signalScore' | 'surgeScore' | 'histWinRate' | 'holdDays'>('composite');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [scanSort, setScanSort] = useState<'composite' | 'score' | 'grade' | 'potential' | 'winRate' | 'price' | 'change'>('composite');
-  const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState<string>('score.composite');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [scanSort, setScanSort] = useState<string>('score.composite');
+  const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
 
   const horizonLabels: { key: BacktestHorizon; label: string }[] = [
     { key: 'open', label: '隔日開' }, { key: 'd1', label: '1日' },
@@ -44,33 +46,36 @@ export function BacktestSection() {
 
   const perfMap = useMemo(() => new Map(performance.map(p => [p.symbol, p])), [performance]);
 
-  const sortedTrades = [...trades].sort((a, b) => {
-    const dir = sortDir === 'desc' ? 1 : -1;
-    if (sortBy === 'composite')    return dir * (calcTradeComposite(b, scanResults) - calcTradeComposite(a, scanResults));
-    if (sortBy === 'netReturn')    return dir * (b.netReturn - a.netReturn);
-    if (sortBy === 'signalScore')  return dir * (b.signalScore - a.signalScore);
-    if (sortBy === 'surgeScore')   return dir * ((b.signalScore ?? 0) - (a.signalScore ?? 0));
-    if (sortBy === 'histWinRate')  return dir * ((b.histWinRate ?? 0) - (a.histWinRate ?? 0));
-    if (sortBy === 'holdDays')     return dir * (a.holdDays - b.holdDays);
-    return 0;
-  });
-
-  const sortedScanResults = [...scanResults].sort((a, b) => {
-    const dir = scanSortDir === 'desc' ? 1 : -1;
-    switch (scanSort) {
-      case 'composite':  return dir * (calcComposite(b) - calcComposite(a));
-      case 'score':     return dir * ((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0));
-      case 'grade': {
-        const gradeOrder: Record<string, number> = { S: 5, A: 4, B: 3, C: 2, D: 1 };
-        return dir * ((gradeOrder[b.surgeGrade ?? ''] ?? 0) - (gradeOrder[a.surgeGrade ?? ''] ?? 0));
-      }
-      case 'potential':  return dir * ((b.surgeScore ?? 0) - (a.surgeScore ?? 0));
-      case 'winRate':    return dir * ((b.histWinRate ?? 0) - (a.histWinRate ?? 0));
-      case 'price':      return dir * ((b.price ?? 0) - (a.price ?? 0));
-      case 'change':     return dir * ((b.changePercent ?? 0) - (a.changePercent ?? 0));
-      default:           return 0;
+  // 排序值取法（id 走 lib/sorting/registry 中央清單；缺值/升降序由 sortEngine 統一處理）
+  const tradeSortValue = (t: typeof trades[number], id: string): SortValue => {
+    switch (id) {
+      case 'score.composite':   return calcTradeComposite(t, scanResults);
+      case 'score.sixCond':     return t.signalScore;
+      case 'score.surge':       return t.signalScore ?? 0; // 「等級」「潛力」兩欄都對 score.surge，accessor 照舊回 signalScore
+      case 'score.histWinRate': return t.histWinRate ?? 0;
+      case 'trust.days':        return t.holdDays;
+      case 'score.netReturn':   return t.netReturn;
+      default:                  return null;
     }
-  });
+  };
+  const sortedTrades = applySort(trades, sortBy, sortDir, tradeSortValue);
+
+  const scanSortValue = (r: typeof scanResults[number], id: string): SortValue => {
+    switch (id) {
+      case 'score.composite':   return calcComposite(r);
+      case 'score.sixCond':     return r.sixConditionsScore ?? 0;
+      case 'score.grade': {
+        const gradeOrder: Record<string, number> = { S: 5, A: 4, B: 3, C: 2, D: 1 };
+        return gradeOrder[r.surgeGrade ?? ''] ?? 0;
+      }
+      case 'score.surge':       return r.surgeScore ?? 0;
+      case 'score.histWinRate': return r.histWinRate ?? 0;
+      case 'mkt.price':         return r.price ?? 0;
+      case 'mkt.change':        return r.changePercent ?? 0;
+      default:                  return null;
+    }
+  };
+  const sortedScanResults = applySort(scanResults, scanSort, scanSortDir, scanSortValue);
 
   if (scanOnly) return null;
 
@@ -119,11 +124,11 @@ export function BacktestSection() {
                   <th className="text-left py-1.5 px-2">名稱</th>
                   <th className="text-left py-1.5 px-2">概念</th>
                   {([
-                    { key: 'composite' as const, label: '綜合', tooltip: '綜合評分 (0-100)\n六條件35% + 潛力25% + 勝率20%\n+ 位置10% + 量能10%\n越高代表多維度共振越強' },
-                    { key: 'signalScore' as const, label: '評分', tooltip: '六大條件評分 (0-6)\n1.趨勢 2.位置 3.K棒\n4.均線 5.量能 6.指標\n≥4分才列入選股' },
-                    { key: 'surgeScore' as const, label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
-                    { key: 'surgeScore' as const, label: '潛力', tooltip: '飆股潛力分 (0-100)\n9大維度加權：動能18% 量能15%\n突破15% 趨勢15% 波動12%\n長線10% 位置5% K棒5% 共振5%' },
-                    { key: 'histWinRate' as const, label: '勝率', tooltip: '歷史勝率\n過去120天同類信號\n隔日開盤買→持有5日賣\n有多少次是賺錢的' },
+                    { key: 'score.composite', label: '綜合', tooltip: '綜合評分 (0-100)\n六條件35% + 潛力25% + 勝率20%\n+ 位置10% + 量能10%\n越高代表多維度共振越強' },
+                    { key: 'score.sixCond', label: '評分', tooltip: '六大條件評分 (0-6)\n1.趨勢 2.位置 3.K棒\n4.均線 5.量能 6.指標\n≥4分才列入選股' },
+                    { key: 'score.surge', label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
+                    { key: 'score.surge', label: '潛力', tooltip: '飆股潛力分 (0-100)\n9大維度加權：動能18% 量能15%\n突破15% 趨勢15% 波動12%\n長線10% 位置5% K棒5% 共振5%' },
+                    { key: 'score.histWinRate', label: '勝率', tooltip: '歷史勝率\n過去120天同類信號\n隔日開盤買→持有5日賣\n有多少次是賺錢的' },
                   ]).map(({ key, label, tooltip }) => (
                     <th key={label}
                       title={tooltip || undefined}
@@ -143,17 +148,17 @@ export function BacktestSection() {
                   <th className="text-right py-1.5 px-2 whitespace-nowrap">出場價</th>
                   <th className="text-center py-1.5 px-2 whitespace-nowrap cursor-pointer hover:text-foreground select-none"
                     onClick={() => {
-                      if (sortBy === 'holdDays') setSortDir(d => d === 'desc' ? 'asc' : 'desc');
-                      else { setSortBy('holdDays'); setSortDir('desc'); }
+                      if (sortBy === 'trust.days') setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                      else { setSortBy('trust.days'); setSortDir('desc'); }
                     }}>
-                    持有{sortBy === 'holdDays' && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
+                    持有{sortBy === 'trust.days' && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
                   </th>
                   <th className="text-right py-1.5 px-2 whitespace-nowrap cursor-pointer hover:text-foreground select-none"
                     onClick={() => {
-                      if (sortBy === 'netReturn') setSortDir(d => d === 'desc' ? 'asc' : 'desc');
-                      else { setSortBy('netReturn'); setSortDir('desc'); }
+                      if (sortBy === 'score.netReturn') setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                      else { setSortBy('score.netReturn'); setSortDir('desc'); }
                     }}>
-                    淨報酬{sortBy === 'netReturn' && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
+                    淨報酬{sortBy === 'score.netReturn' && <span className="ml-0.5 text-sky-400">{sortDir === 'desc' ? '▼' : '▲'}</span>}
                   </th>
                   <th className="text-center py-1.5 px-1">出場</th>
                   <th className="text-center py-1.5 px-2">操作</th>
@@ -210,17 +215,17 @@ export function BacktestSection() {
                   <th className="text-left py-1.5 px-2">名稱</th>
                   <th className="text-left py-1.5 px-2">概念</th>
                   {([
-                    { key: 'composite' as const, label: '綜合', tooltip: '綜合評分 (0-100)\n六條件35% + 潛力25% + 勝率20%\n+ 位置10% + 量能10%' },
-                    { key: 'score' as const, label: '評分', tooltip: '六大條件評分 (0-6)\n1.趨勢 2.位置 3.K棒\n4.均線 5.量能 6.指標' },
-                    { key: 'grade' as const, label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
-                    { key: 'potential' as const, label: '潛力', tooltip: '飆股潛力分 (0-100)\n9大維度加權計算' },
-                    { key: 'winRate' as const, label: '勝率', tooltip: '過去120天同類信號的歷史勝率' },
-                    { key: 'price' as const, label: '價格', tooltip: '' },
-                    { key: 'change' as const, label: '漲跌%', tooltip: '' },
+                    { key: 'score.composite', label: '綜合', tooltip: '綜合評分 (0-100)\n六條件35% + 潛力25% + 勝率20%\n+ 位置10% + 量能10%' },
+                    { key: 'score.sixCond', label: '評分', tooltip: '六大條件評分 (0-6)\n1.趨勢 2.位置 3.K棒\n4.均線 5.量能 6.指標' },
+                    { key: 'score.grade', label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
+                    { key: 'score.surge', label: '潛力', tooltip: '飆股潛力分 (0-100)\n9大維度加權計算' },
+                    { key: 'score.histWinRate', label: '勝率', tooltip: '過去120天同類信號的歷史勝率' },
+                    { key: 'mkt.price', label: '價格', tooltip: '' },
+                    { key: 'mkt.change', label: '漲跌%', tooltip: '' },
                   ]).map(({ key, label, tooltip }) => (
                     <th key={key}
                       title={tooltip || undefined}
-                      className={`${key === 'price' || key === 'change' ? 'text-right' : 'text-center'} py-1.5 px-1 cursor-pointer hover:text-foreground select-none`}
+                      className={`${key === 'mkt.price' || key === 'mkt.change' ? 'text-right' : 'text-center'} py-1.5 px-1 cursor-pointer hover:text-foreground select-none`}
                       onClick={() => {
                         if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
                         else { setScanSort(key); setScanSortDir('desc'); }

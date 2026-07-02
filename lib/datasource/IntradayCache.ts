@@ -300,6 +300,33 @@ export function isSnapshotFresh(snapshot: IntradaySnapshot | null, maxAgeMs = 12
   return age < maxAgeMs;
 }
 
+/** 扁平根門檻：> 90% 的有效報價都是 O=H=L=C 且量=0 即視為退化。正常盤中 < 1%（停牌/整日鎖漲停少數檔），
+ *  盤前集合競價 / 刷新凍結會衝到 ~100% → 門檻有極大餘裕，不會誤擋正常快照。 */
+export const FLAT_DEGENERATE_FRACTION = 0.9;
+
+/**
+ * 快照「退化」偵測：盤前集合競價、或盤中刷新失敗凍結時，所有報價會塌成「扁平根」
+ * （O=H=L=C、量=0）—— 只有最後撮合價、沒有真實盤中高低量。把這種快照當「今日那根」餵進三色，
+ * 捕撈動能 X1=(2C+H+L)/3 在 H=L=C 時被墊高，會憑空生出假金叉/死叉 → 假底反（2026-06-09 實例：
+ * 早盤 DNS 斷線害 L2 凍在 09:17 盤前，3064 檔全扁平，盤中三色誤標 37 檔底反，走圖卻無金叉）。
+ *
+ * 盤中三色 cron 偵測到就跳過，不用壞快照算訊號、也不覆蓋上一份好的盤中結果。
+ * 純看「報價內容」而非 updatedAt：凍結快照的 date 仍是今日、會通過 isSnapshotFresh 以外的日期檢查，
+ * 唯有「扁平根占比」能抓出它沒有真實 OHLC。
+ * @returns 退化原因字串（cron 用來回報並跳過）；正常則 null。
+ */
+export function degenerateSnapshotReason(snapshot: IntradaySnapshot | null): string | null {
+  if (!snapshot) return 'snapshot 不存在';
+  const live = snapshot.quotes.filter((q) => q.close > 0);
+  if (live.length === 0) return 'snapshot 無有效報價（全停牌/空）';
+  const flat = live.filter((q) => q.open === q.high && q.high === q.low && q.low === q.close && !q.volume).length;
+  const flatFrac = flat / live.length;
+  if (flatFrac > FLAT_DEGENERATE_FRACTION) {
+    return `flat-dominated ${(flatFrac * 100).toFixed(1)}%（O=H=L=C、量=0 的盤前/凍結快照，無真實盤中 OHLC）`;
+  }
+  return null;
+}
+
 // ── Fetch & Build ───────────────────────────────────────────────────────────
 
 /**
@@ -447,7 +474,21 @@ async function _refreshIntradaySnapshotImpl(market: 'TW' | 'CN'): Promise<Intrad
     return { market, date: today, updatedAt: new Date().toISOString(), count: 0, quotes: [] };
   }
 
-  // ── 部分數據保護：新數據量 < 現有快照的 30% → 保留現有（要求 existing 仍 fresh）──
+  // ── 部分數據保護（2026-07-02 強化，連兩天病根修正）──
+  // 新抓量低於健康門檻(minExpected) 且 現有快照更完整 → 一律保留現有，「不看 age」。
+  //   為什麼不看 age：盤後最終那次抓常只回半套（如 2026-07-01 的 897/2092），此時
+  //   盤中最後一筆好快照必然已 >30min，舊的 existingFresh(age<30min) gate 會失效放行 →
+  //   好的整套被壞的半套覆蓋，題材/掃描全出現一片「—」。
+  //   規則對稱安全：新抓若「多於」現有(改善/次日開盤 bootstrap) 仍照常寫入。
+  if (existing && quotes.length < minExpected && existing.quotes.length > quotes.length) {
+    console.warn(
+      `[IntradayCache] ⚠️ ${market} 新抓 ${quotes.length} 檔 < 健康門檻 ${minExpected} 且少於現有 ${existing.quotes.length} 檔，` +
+      `保留現有快照不覆蓋（age ${Math.round(existingAgeMs / 1000)}s）`
+    );
+    return existing;
+  }
+
+  // ── 部分數據保護（原規則保留）：新數據 < 現有的 30% 且 existing 仍 fresh → 保留現有 ──
   if (existingFresh && quotes.length < existing!.quotes.length * 0.3) {
     console.warn(
       `[IntradayCache] ⚠️ ${market} 新數據嚴重不足（${quotes.length} vs 現有 ${existing!.quotes.length}, age ${Math.round(existingAgeMs / 1000)}s），` +
@@ -631,7 +672,7 @@ const MIS_HEADERS_INDEX = {
   Referer: 'https://mis.twse.com.tw/stock/',
 };
 
-async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote | null> {
+export async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote | null> {
   try {
     const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0&_=${Date.now()}`;
     const res = await fetch(url, { headers: MIS_HEADERS_INDEX, signal: AbortSignal.timeout(5000) });

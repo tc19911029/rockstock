@@ -106,8 +106,9 @@ export function generateMilestones(args: {
   const startYM = args.startDate.slice(0, 7);     // 'YYYY-MM'
   const endYM = args.targetDate.slice(0, 7);
   const milestones: GrowthMilestone[] = [];
-  let [year, month0] = startYM.split('-').map(Number);
-  let month = month0 - 1; // 0-indexed
+  const [startYear, startMonth] = startYM.split('-').map(Number);
+  let year = startYear;
+  let month = startMonth - 1; // 0-indexed
   let i = 0;
   while (true) {
     const ym = `${year}-${String(month + 1).padStart(2, '0')}`;

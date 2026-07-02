@@ -139,7 +139,7 @@ function BacktestPage() {
         />
       }
     >
-      <div className="max-w-6xl mx-auto p-3 sm:p-4 space-y-3 sm:space-y-4">
+      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
 
         {/* 日期區間 */}
         <div className="flex items-center gap-2 flex-wrap text-xs">
@@ -188,7 +188,7 @@ function BacktestPage() {
         {summary && summary.totalDecisions > 0 && (
           <>
             {/* 最終決策統計 */}
-            <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <section className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 space-y-3">
               <h2 className="text-xs font-semibold tracking-wider text-foreground">▸ 最終決策績效</h2>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -229,10 +229,17 @@ function BacktestPage() {
                   </tbody>
                 </table>
               </div>
+              {(['buy', 'watch', 'skip'] as const).every(a =>
+                summary.byAction[a].avgD5Return == null && summary.byAction[a].avgD20Return == null
+              ) && (
+                <p className="text-[11px] text-muted-foreground">
+                  報酬／勝率欄為「—」通常是區間內樣本太近：forward 報酬要等掃描日之後幾個交易日才算得出（如 20 日報酬需 20 個交易日後）。把上方「從」日期往前拉到約一個月前，即可看到已實現報酬的樣本。
+                </p>
+              )}
             </section>
 
             {/* 各代理判定命中率（§0 — 每個代理各自統計，不混合）*/}
-            <section className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <section className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 space-y-3">
               <h2 className="text-xs font-semibold tracking-wider text-foreground">
                 ▸ 各代理判定命中率 <span className="text-muted-foreground font-normal">（§0 — 各自獨立統計）</span>
               </h2>
@@ -276,7 +283,7 @@ function BacktestPage() {
             </section>
 
             {/* 區間內納入的日期 */}
-            <details className="bg-card border border-border rounded-xl p-4 text-xs">
+            <details className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 text-xs">
               <summary className="cursor-pointer text-foreground font-medium select-none">
                 納入的日期（{data?.datesIncluded.length}）
               </summary>

@@ -19,6 +19,8 @@ export interface CandleWithIndicators extends Candle {
   ma10?: number;
   ma20?: number;
   ma60?: number;
+  /** 120-day MA — 半年線（書本六線多排第 5 條，CH3-04） */
+  ma120?: number;
   ma240?: number;
   /** 3-day MA — 三條均線戰法用 */
   ma3?: number;

@@ -1,4 +1,4 @@
-import { suspectsLimitOverwrite, limitPctFor } from '@/lib/datasource/limitMoveGuard';
+import { suspectsLimitOverwrite, suspectsGrossJump, limitPctFor } from '@/lib/datasource/limitMoveGuard';
 
 describe('limitMoveGuard', () => {
   describe('limitPctFor', () => {
@@ -76,6 +76,32 @@ describe('limitMoveGuard', () => {
       expect(suspectsLimitOverwrite(null, q, 'TW', '2330')).toBe(false);
       expect(suspectsLimitOverwrite(0, q, 'TW', '2330')).toBe(false);
       expect(suspectsLimitOverwrite(undefined, q, 'TW', '2330')).toBe(false);
+    });
+  });
+
+  describe('suspectsGrossJump', () => {
+    // 真實案例：000001.SS 上證指數值(4075)撞庫寫進 000001.SZ 平安銀行(前收 10.99)
+    test('detects index-collision gross jump (000001.SZ 10.99→4075)', () => {
+      expect(suspectsGrossJump(10.99, { open: 4061.46, high: 4089.57, low: 4032.58, close: 4075.1 })).toBe(true);
+    });
+    // 壞跌(penny 股 -89%)也擋下 → 改走 API 拿正確值
+    test('detects gross bad drop (1.87→0.19, -89%)', () => {
+      expect(suspectsGrossJump(1.87, { open: 0.19, high: 0.2, low: 0.18, close: 0.19 })).toBe(true);
+    });
+    // 合法單日波動全部不誤判：漲跌停 ±10/20%、高息除息、近 50% 崩跌
+    test('does NOT flag legit single-day moves', () => {
+      expect(suspectsGrossJump(10.99, { open: 11, high: 11.1, low: 10.9, close: 11.08 })).toBe(false); // 平安正常
+      expect(suspectsGrossJump(100, { open: 110, high: 110, low: 110, close: 110 })).toBe(false);       // TW 漲停 +10%
+      expect(suspectsGrossJump(100, { open: 120, high: 120, low: 120, close: 120 })).toBe(false);       // 創業板 +20%
+      expect(suspectsGrossJump(100, { open: 82, high: 85, low: 80, close: 82 })).toBe(false);           // 高息除息 -18%
+      expect(suspectsGrossJump(100, { open: 51, high: 60, low: 51, close: 51 })).toBe(false);           // -49%(剛好不到 50%)
+    });
+    test('missing/zero prevClose or close returns false', () => {
+      const q = { open: 100, high: 100, low: 100, close: 100 };
+      expect(suspectsGrossJump(null, q)).toBe(false);
+      expect(suspectsGrossJump(0, q)).toBe(false);
+      expect(suspectsGrossJump(undefined, q)).toBe(false);
+      expect(suspectsGrossJump(100, { open: 0, high: 0, low: 0, close: 0 })).toBe(false);
     });
   });
 });

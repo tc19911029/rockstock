@@ -6,14 +6,13 @@ export async function GET() {
   const checks: Record<string, 'ok' | 'missing' | 'error'> = {
     blob: 'missing',
     finmind: 'missing',
-    eodhd: 'missing',
     cronSecret: 'missing',
   };
 
   // 1. Check env vars
+  // （2026-06-13：EODHD 不續訂 — 移除 env 檢查，token 存在但 401 只會誤報 ok）
   if (process.env.BLOB_READ_WRITE_TOKEN) checks.blob = 'ok';
   if (process.env.FINMIND_API_TOKEN) checks.finmind = 'ok';
-  if (process.env.EODHD_API_TOKEN) checks.eodhd = 'ok';
   if (process.env.CRON_SECRET) checks.cronSecret = 'ok';
 
   // 2. Actually test Blob connectivity if token exists

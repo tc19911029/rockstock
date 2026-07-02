@@ -37,7 +37,7 @@ async function main() {
   const args = process.argv.slice(2);
   const reportPath = args.includes('--report-path')
     ? args[args.indexOf('--report-path') + 1]
-    : `/Users/tzu-chienhsu/Desktop/rockstock/data/reports/l1-daily-change-violations-${new Date().toISOString().slice(0, 10)}.json`;
+    : `/Users/tc/Desktop/rockstock/data/reports/l1-daily-change-violations-${new Date().toISOString().slice(0, 10)}.json`;
 
   const raw = await fs.readFile(reportPath, 'utf-8');
   const report = JSON.parse(raw) as Report;

@@ -866,6 +866,20 @@ export abstract class MarketScanner {
 
       const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate, diag);
       if (fetchResult.candles.length < 30) { if (diag) diag.tooFewCandles++; return null; }
+
+      // DF4 修正：對齊多方 scanOne 的 fail-closed 守衛 —— 掃描目標日=今日時 L1 末根必須===今日，
+      // 否則跳過，避免用昨日 bar 冒充今日結果寫進 L4（空方原本缺這道、post_close/intraday 會污染）。
+      if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+        if (asOfDate === today) {
+          if (diag) {
+            diag.filteredOut++;
+            diag.skippedStaleL1 = (diag.skippedStaleL1 ?? 0) + 1;
+          }
+          return null;
+        }
+      }
+
       const candles = fetchResult.candles;
 
       const lastIdx = candles.length - 1;
@@ -1799,6 +1813,307 @@ export abstract class MarketScanner {
       direction === 'long' ? a.dev - b.dev : b.dev - a.dev,
     );
 
+    return scored.slice(0, topN).map(s => s.result);
+  }
+
+  /**
+   * 大戶偷買軌（W，2026-06-14 refined）：主力分點(前15大券商)20日集中度「由負轉正」
+   * + 5日集中度<8 濾隔日沖 + 不爆量。訊號委派 lib/smartmoney（單一事實）。
+   * 僅 TW（主力分點 broker）；CN 回空。只做多。
+   * 為何用主力分點不用法人：retest-crude-vs-refined.ts 三窗 refined 全贏粗版。
+   */
+  async scanSmartMoneyDip(
+    stocks: StockEntry[],
+    asOfDate: string | undefined,
+    direction: 'long' | 'short',
+    topN = 15,
+  ): Promise<StockScanResult[]> {
+    const config = this.getMarketConfig();
+    if (config.marketId !== 'TW') return []; // CN 主力分點歷史不足
+    if (direction !== 'long') return [];      // 大戶偷買只做多
+
+    const { evaluateLatest } = await import('@/lib/smartmoney/signal');
+    const { DEFAULT_PARAMS } = await import('@/lib/smartmoney/types');
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    const BROKER_DIR = path.join(process.cwd(), 'data/chips/TW/broker');
+    const minBars = DEFAULT_PARAMS.longWin + DEFAULT_PARAMS.turnBack + 1;
+
+    const candidates = this.prefilterByL2(stocks, 'scanSmartMoneyDip');
+    type Scored = { result: StockScanResult; conc: number };
+    const scored: Scored[] = [];
+
+    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+      const batch = candidates.slice(i, i + CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
+        const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
+        if (!fetchResult || fetchResult.candles.length < minBars) return null;
+        if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+          if (asOfDate === today) return null;
+        }
+        const candles = fetchResult.candles;
+
+        // 讀主力分點（前15大券商淨買賣超，純代號）
+        const code = symbol.split('.')[0];
+        let brokerByDate: Map<string, number>;
+        try {
+          const broker = JSON.parse(await fs.readFile(path.join(BROKER_DIR, `${code}.json`), 'utf8'));
+          brokerByDate = new Map<string, number>(
+            (broker.data || []).map((d: { date: string; netDifference?: number }): [string, number] => [d.date, d.netDifference ?? 0]),
+          );
+        } catch { return null; } // 無主力分點資料 → 不評估
+
+        const ev = evaluateLatest(candles, brokerByDate, DEFAULT_PARAMS);
+        if (!ev || !ev.isHit) return null;
+
+        const lastIdx = candles.length - 1;
+        const last = candles[lastIdx];
+        const prev = candles[lastIdx - 1];
+        const changePercent = prev?.close > 0
+          ? +((last.close - prev.close) / prev.close * 100).toFixed(2)
+          : 0;
+
+        const result: StockScanResult = {
+          symbol,
+          name,
+          market: config.marketId,
+          industry,
+          price: last.close,
+          changePercent,
+          volume: last.volume,
+          triggeredRules: [],
+          matchedMethods: ['W'],
+          sixConditionsScore: 0,
+          sixConditionsBreakdown: {
+            trend: false, position: false, kbar: false,
+            ma: false, volume: false, indicator: false,
+          },
+          trendState: detectTrend(candles, lastIdx),
+          trendPosition: detectTrendPosition(candles, lastIdx),
+          scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+          direction: 'long',
+          smartMoneyConc: ev.conc20,
+          smartMoneyConc5: ev.conc5,
+          smartMoneyConcPrev: ev.conc20prev,
+          smartMoneyVolRatio: ev.volRatio,
+          smartMoneyDrop: +ev.drop5.toFixed(2),
+          dataFreshness: {
+            lastCandleDate: fetchResult.lastCandleDate,
+            daysStale: fetchResult.staleDays,
+            source: fetchResult.source,
+          },
+        };
+        return { result, conc: ev.conc20 };
+      }));
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) scored.push(r.value);
+      }
+      if (i + CONCURRENCY < candidates.length) await sleep(BATCH_DELAY_MS);
+    }
+
+    scored.sort((a, b) => b.conc - a.conc); // 集中度最高排前
+    return scored.slice(0, topN).map(s => s.result);
+  }
+
+  /**
+   * 法人接刀軌（X，2026-06-14）：股價在跌/長黑 + 法人逆勢買，剔除大戶持股水位超高。
+   * 訊號委派 lib/instdip（單一事實）。大戶超高的剔除是 cross-sectional → 在本方法
+   * 對「通過的候選」取大戶持股水位前10%剔除。僅 TW（法人 T86）；CN 回空；只做多。
+   */
+  async scanInstDip(
+    stocks: StockEntry[],
+    asOfDate: string | undefined,
+    direction: 'long' | 'short',
+    topN = 15,
+  ): Promise<StockScanResult[]> {
+    const config = this.getMarketConfig();
+    if (config.marketId !== 'TW') return [];
+    if (direction !== 'long') return [];
+
+    const { evaluateLatest } = await import('@/lib/instdip/signal');
+    const { DEFAULT_PARAMS } = await import('@/lib/instdip/types');
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    const INST_DIR = path.join(process.cwd(), 'data/chips/TW/inst');
+    const TDCC_DIR = path.join(process.cwd(), 'data/chips/TW/tdcc');
+
+    const candidates = this.prefilterByL2(stocks, 'scanInstDip');
+    type Scored = { result: StockScanResult; instK: number; holderLvl: number | null };
+    const scored: Scored[] = [];
+
+    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+      const batch = candidates.slice(i, i + CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
+        const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
+        if (!fetchResult || fetchResult.candles.length < DEFAULT_PARAMS.lookback + 1) return null;
+        if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+          if (asOfDate === today) return null;
+        }
+        const candles = fetchResult.candles;
+        const code = symbol.split('.')[0];
+        let instByDate: Map<string, number>;
+        try {
+          const inst = JSON.parse(await fs.readFile(path.join(INST_DIR, `${code}.json`), 'utf8'));
+          instByDate = new Map<string, number>(
+            (inst.data || []).map((d: { date: string; total?: number }): [string, number] => [d.date, d.total ?? 0]),
+          );
+        } catch { return null; }
+
+        const ev = evaluateLatest(candles, instByDate, DEFAULT_PARAMS);
+        if (!ev || !ev.isHit) return null;
+
+        // 大戶持股水位（依股價挑級距）— 給 cross-sectional 剔除超高 + 顯示
+        let holderLvl: number | null = null;
+        try {
+          const tj = JSON.parse(await fs.readFile(path.join(TDCC_DIR, `${code}.json`), 'utf8'));
+          const rows = (tj.data || []).filter((r: { date: string }) => r.date <= ev.date);
+          const last = rows[rows.length - 1];
+          if (last) {
+            const px = ev.price;
+            holderLvl = px >= 250 ? (last.holder100Pct ?? null) : px >= 50 ? (last.holder400Pct ?? null) : (last.holder1000Pct ?? null);
+          }
+        } catch { /* 無集保資料 → holderLvl null，不剔除 */ }
+
+        const lastIdx = candles.length - 1;
+        const last = candles[lastIdx];
+        const prev = candles[lastIdx - 1];
+        const changePercent = prev?.close > 0 ? +((last.close - prev.close) / prev.close * 100).toFixed(2) : 0;
+
+        const result: StockScanResult = {
+          symbol, name, market: config.marketId, industry,
+          price: last.close, changePercent, volume: last.volume,
+          triggeredRules: [], matchedMethods: ['X'], sixConditionsScore: 0,
+          sixConditionsBreakdown: { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false },
+          trendState: detectTrend(candles, lastIdx),
+          trendPosition: detectTrendPosition(candles, lastIdx),
+          scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+          direction: 'long',
+          instDipDrop: +ev.drop5.toFixed(2),
+          instDipTodayChg: +ev.todayChg.toFixed(2),
+          instDipInstK: ev.inst5K,
+          instDipHolderLvl: holderLvl ?? undefined,
+          dataFreshness: { lastCandleDate: fetchResult.lastCandleDate, daysStale: fetchResult.staleDays, source: fetchResult.source },
+        };
+        return { result, instK: ev.inst5K, holderLvl };
+      }));
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) scored.push(r.value);
+      }
+      if (i + CONCURRENCY < candidates.length) await sleep(BATCH_DELAY_MS);
+    }
+
+    // 避雷：剔除大戶持股水位最高 10%（cross-sectional，在通過的候選內排名）
+    const withLvl = scored.filter(s => s.holderLvl != null).sort((a, b) => (b.holderLvl as number) - (a.holderLvl as number));
+    const cutoff = new Set(withLvl.slice(0, Math.floor(withLvl.length * 0.1)).map(s => s.result.symbol));
+    const kept = scored.filter(s => !cutoff.has(s.result.symbol));
+
+    kept.sort((a, b) => b.instK - a.instK); // 法人買超最多排前
+    return kept.slice(0, topN).map(s => s.result);
+  }
+
+  /**
+   * 法人偷買(原)軌（Y，2026-06-14）：跌 + 5日籌碼集中度在增加 + 法人連買，三條件同時成立。
+   * 訊號委派 lib/inststeal（單一事實，需主力分點 broker + 三大法人 inst 兩份資料）。
+   * 僅 TW；CN 回空；只做多。⚠️ 回測無穩定超額（觀察用非明牌，見 [[inststeal_original_observation_tool]]）。
+   */
+  async scanInstSteal(
+    stocks: StockEntry[],
+    asOfDate: string | undefined,
+    direction: 'long' | 'short',
+    topN = 15,
+  ): Promise<StockScanResult[]> {
+    const config = this.getMarketConfig();
+    if (config.marketId !== 'TW') return [];
+    if (direction !== 'long') return [];
+
+    const { evaluateLatest } = await import('@/lib/inststeal/signal');
+    const { DEFAULT_PARAMS } = await import('@/lib/inststeal/types');
+    const { computeConc5Map } = await import('@/lib/chips/chipConcentration');
+    const { promises: fs } = await import('fs');
+    const path = await import('path');
+    const BROKER_DIR = path.join(process.cwd(), 'data/chips/TW/broker');
+    const INST_DIR = path.join(process.cwd(), 'data/chips/TW/inst');
+    const minBars = Math.max(DEFAULT_PARAMS.concWin + DEFAULT_PARAMS.concRiseBack, 20, DEFAULT_PARAMS.dropWin, DEFAULT_PARAMS.instWin) + 1;
+    // 集中度單一事實 = FinMind 正式公式（跟看盤 app + 顯示表同一套）；只 TTL 真正的今天那根
+    const realToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+
+    const candidates = this.prefilterByL2(stocks, 'scanInstSteal');
+    type Scored = { result: StockScanResult; consec: number; conc5: number };
+    const scored: Scored[] = [];
+
+    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+      const batch = candidates.slice(i, i + CONCURRENCY);
+      const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
+        const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
+        if (!fetchResult || fetchResult.candles.length < minBars) return null;
+        if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+          if (asOfDate === today) return null;
+        }
+        const candles = fetchResult.candles;
+        const code = symbol.split('.')[0];
+
+        // 需主力分點 + 三大法人兩份資料齊備才評估
+        let brokerByDate: Map<string, number>;
+        let instByDate: Map<string, number>;
+        try {
+          const broker = JSON.parse(await fs.readFile(path.join(BROKER_DIR, `${code}.json`), 'utf8'));
+          brokerByDate = new Map<string, number>(
+            (broker.data || []).map((d: { date: string; netDifference?: number }): [string, number] => [d.date, d.netDifference ?? 0]),
+          );
+          const inst = JSON.parse(await fs.readFile(path.join(INST_DIR, `${code}.json`), 'utf8'));
+          instByDate = new Map<string, number>(
+            (inst.data || []).map((d: { date: string; total?: number }): [string, number] => [d.date, d.total ?? 0]),
+          );
+        } catch { return null; }
+
+        // 兩階段（省 FinMind 配額）：先用便宜條件(在跌+法人連買)粗篩，過了才抓 FinMind 集中度精算。
+        const cheap = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS);
+        if (!cheap || !cheap.isDropping || !cheap.isInstBuying) return null;
+        // 通過粗篩 → FinMind 正式集中度（跟看盤 app + 顯示表同一套公式）重評「集中度在爬」
+        const conc5Map = await computeConc5Map(code, candles, {
+          win: DEFAULT_PARAMS.concWin,
+          count: DEFAULT_PARAMS.concRiseBack + 2,
+          todayDate: realToday,
+        });
+        const ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS, conc5Map, true /* strict: FinMind 缺就略過、不用舊公式 */);
+        if (!ev || !ev.isHit) return null;
+
+        const lastIdx = candles.length - 1;
+        const last = candles[lastIdx];
+        const prev = candles[lastIdx - 1];
+        const changePercent = prev?.close > 0 ? +((last.close - prev.close) / prev.close * 100).toFixed(2) : 0;
+
+        const result: StockScanResult = {
+          symbol, name, market: config.marketId, industry,
+          price: last.close, changePercent, volume: last.volume,
+          triggeredRules: [], matchedMethods: ['Y'], sixConditionsScore: 0,
+          sixConditionsBreakdown: { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false },
+          trendState: detectTrend(candles, lastIdx),
+          trendPosition: detectTrendPosition(candles, lastIdx),
+          scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
+          direction: 'long',
+          instStealDrop: ev.drop5,
+          instStealConc5: ev.conc5,
+          instStealConc5Prev: ev.conc5prev,
+          instStealInstK: ev.instSumK,
+          instStealConsec: ev.instConsecDays,
+          instStealVolumeWarn: ev.volumeWarn,
+          instStealConcHighWarn: ev.concHighWarn,
+          dataFreshness: { lastCandleDate: fetchResult.lastCandleDate, daysStale: fetchResult.staleDays, source: fetchResult.source },
+        };
+        return { result, consec: ev.instConsecDays, conc5: ev.conc5 };
+      }));
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) scored.push(r.value);
+      }
+      if (i + CONCURRENCY < candidates.length) await sleep(BATCH_DELAY_MS);
+    }
+
+    // 法人連買天數最多排前，同天數再依 5 日集中度高低
+    scored.sort((a, b) => b.consec - a.consec || b.conc5 - a.conc5);
     return scored.slice(0, topN).map(s => s.result);
   }
 

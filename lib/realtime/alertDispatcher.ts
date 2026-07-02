@@ -15,7 +15,7 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { sendNtfy } from '@/lib/notify/ntfy';
+import { sendNtfy, type NtfyResult } from '@/lib/notify/ntfy';
 import type { Signal, RuleId } from './blowoffDetector';
 
 // ── module state ────────────────────────────────────────────────────────
@@ -71,7 +71,12 @@ export async function dispatch(
     result.fired++;
 
     const { title, message, tags, priority } = formatPayload(sig);
-    const sendResult = await sendNtfy({ title, message, tags, priority });
+    // 爆量手機推播預設停用（已改用三色 sanse-notify 做買賣推播）。偵測、jsonl 紀錄、
+    // 走圖爆量標記（useBlowoffMarkers）、/api/realtime/* 全照舊不受影響 — 只是不再進手機。
+    // 設 BLOWOFF_NTFY_ENABLED=true 可還原爆量手機推播。
+    const sendResult: NtfyResult = process.env.BLOWOFF_NTFY_ENABLED === 'true'
+      ? await sendNtfy({ title, message, tags, priority })
+      : { ok: false, reason: 'disabled' };
     if (sendResult.ok) {
       result.notifyOk++;
     } else {

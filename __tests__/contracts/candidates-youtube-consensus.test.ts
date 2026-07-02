@@ -19,6 +19,21 @@ import type {
 } from '@/lib/youtube/analysisStorage';
 import type { YouTubeSourceAttribution } from '@/lib/agents/candidates/types';
 
+// ── 切斷真實網路：mock TaiwanScanner.getStockList ────────────────────────────
+// youtubeSource.extract 會 `new TaiwanScanner().getStockList()` 分類上市/上櫃，
+// 該方法走 curl fallback 打真實 TPEx（不經 global.fetch，mock 攔不到），
+// 全套件並行跑時外連 >5s 會讓本檔間歇性 timeout。固定回傳測試用清單、零網路。
+// （此清單把 2330/2454/3661 都歸 TWSE → 全部 .TW，與下方斷言一致。）
+jest.mock('@/lib/scanner/TaiwanScanner', () => ({
+  TaiwanScanner: jest.fn().mockImplementation(() => ({
+    getStockList: jest.fn(async () => [
+      { symbol: '2330.TW', name: '台積電' },
+      { symbol: '2454.TW', name: '聯發科' },
+      { symbol: '3661.TW', name: '世芯-KY' },
+    ]),
+  })),
+}));
+
 // ── 測試用 fake analysis ─────────────────────────────────────────────────────
 
 function makeMention(opts: {

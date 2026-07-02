@@ -5,7 +5,8 @@
  *   npx tsx scripts/fetch-tdcc-week.ts                 # 抓所有股
  *   npx tsx scripts/fetch-tdcc-week.ts --symbols 2330,3661  # 只存指定股（其他 skip）
  *
- * 建議排程：每週四晚上 18:00 跑（TDCC 公布時間）
+ * 排程：每天傍晚自動跑（instrumentation.ts local-cron + vercel.json）；
+ *       TDCC「週五分散表」週末才公布，固定週四會慢一週（route 對已有基準日自動 skip）
  */
 
 import { config } from 'dotenv';

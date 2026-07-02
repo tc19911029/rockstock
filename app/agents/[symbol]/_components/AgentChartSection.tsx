@@ -18,7 +18,7 @@
  *   - 副圖預設只開成交量 / KD / MACD（不開籌碼，籌碼有專屬 ChipDetail 區塊）
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { useV12HistoricalMarkers } from '@/lib/hooks/useV12HistoricalMarkers';
 import { useLockedPattern } from '@/lib/hooks/useLockedPattern';
@@ -69,14 +69,31 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
   const [showMarkers, setShowMarkers] = useState(false);
   const [showPivots, setShowPivots] = useState(true);
   const [showSupportResistance, setShowSupportResistance] = useState(false);
+  // K 棒三層支撐/壓力標線（最近一根長紅/長黑：最高/1半/最低），預設關
+  const [showCandleSR, setShowCandleSR] = useState(false);
   const [showNeckline, setShowNeckline] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
   const [showAscendingTrendline, setShowAscendingTrendline] = useState(false);
   const [showDescendingTrendline, setShowDescendingTrendline] = useState(false);
   const [showAscendingChannel, setShowAscendingChannel] = useState(false);
   const [showDescendingChannel, setShowDescendingChannel] = useState(false);
+  // 上升線/下降線：切線 + 軌道整合成單一開關（一鍵同開同關）
+  const toggleAscendingLine = () => {
+    const next = !(showAscendingTrendline || showAscendingChannel);
+    setShowAscendingTrendline(next);
+    setShowAscendingChannel(next);
+  };
+  const toggleDescendingLine = () => {
+    const next = !(showDescendingTrendline || showDescendingChannel);
+    setShowDescendingTrendline(next);
+    setShowDescendingChannel(next);
+  };
   const [showConsolidationLines, setShowConsolidationLines] = useState(false);
-  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma240: false });
+  const [maToggles, setMaToggles] = useState({ ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false });
+  // 月線（20MA）預設打開（書本 CH3-03），但使用者可手動開關
+  const handleMaToggle = useCallback((key: keyof typeof maToggles) => {
+    setMaToggles(p => ({ ...p, [key]: !p[key] }));
+  }, []);
   const [showBollinger, setShowBollinger] = useState(false);
   // 副圖：成交量 / KD / MACD 預設開（agent 頁不需要籌碼疊圖，已有專屬區塊）
   const [indicators, setIndicators] = useState({
@@ -86,6 +103,9 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
     cnMain: false, cnRetail: false,
     mainForce: false, season: false,
   });
+  // 「籌碼」合併鈕：一鍵開關法人四（TW）+ CN 主力/散戶副圖
+  const toggleChipGroup = (next: boolean) =>
+    setIndicators(p => ({ ...p, foreign: next, trust: next, dealer: next, retail: next, cnMain: next, cnRetail: next }));
   const [showIndicators, setShowIndicators] = useState(true);
   const [chartSplit, setChartSplit] = useState(0.65);
 
@@ -130,11 +150,12 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
                 stockName={currentStock?.name}
                 trend={currentTrend}
                 maToggles={maToggles}
-                onMaToggle={key => setMaToggles(p => ({ ...p, [key]: !p[key] }))}
+                onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
+                onChipGroupToggle={toggleChipGroup}
                 showMarkers={showMarkers}
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
@@ -143,18 +164,16 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
                 onPivotsToggle={() => setShowPivots(v => !v)}
                 showSupportResistance={showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
+                showCandleSR={showCandleSR}
+                onCandleSRToggle={() => setShowCandleSR(v => !v)}
                 showNeckline={showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
                 showPattern={showPattern}
                 onPatternToggle={() => setShowPattern(v => !v)}
-                showAscendingTrendline={showAscendingTrendline}
-                onAscendingTrendlineToggle={() => setShowAscendingTrendline(v => !v)}
-                showDescendingTrendline={showDescendingTrendline}
-                onDescendingTrendlineToggle={() => setShowDescendingTrendline(v => !v)}
-                showAscendingChannel={showAscendingChannel}
-                onAscendingChannelToggle={() => setShowAscendingChannel(v => !v)}
-                showDescendingChannel={showDescendingChannel}
-                onDescendingChannelToggle={() => setShowDescendingChannel(v => !v)}
+                showAscendingLine={showAscendingTrendline || showAscendingChannel}
+                onAscendingLineToggle={toggleAscendingLine}
+                showDescendingLine={showDescendingTrendline || showDescendingChannel}
+                onDescendingLineToggle={toggleDescendingLine}
                 showConsolidationLines={showConsolidationLines}
                 onConsolidationLinesToggle={() => setShowConsolidationLines(v => !v)}
                 avgCost={metrics.avgCost}
@@ -181,6 +200,7 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
               showBollinger,
               showPivots,
               showSupportResistance,
+              showCandleSR,
               showAscendingTrendline,
               showDescendingTrendline,
               showAscendingChannel,

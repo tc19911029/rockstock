@@ -33,6 +33,23 @@ export async function POST(req: NextRequest) {
     return apiOk({ skipped: true, reason: 'non-trading day (weekend)', date });
   }
 
+  // 2026-06-12：pre-market 守門 — date 是「今天」但該市場盤後封存時間未到就跑
+  // post_close，會存 0 檔空紀錄，讓 /health「最近掃描」整個早上誤顯示今日 (0 檔)
+  //（首頁 scan panel 凌晨自動 backfill 即觸發）。未來日期一律擋。
+  const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+  const now = new Date();
+  const todayMkt = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+  if (date > todayMkt) {
+    return apiOk({ skipped: true, reason: 'future date', date });
+  }
+  if (date === todayMkt) {
+    const hm = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+    const cutoff = market === 'TW' ? '14:30' : '15:30';
+    if (hm < cutoff) {
+      return apiOk({ skipped: true, reason: `today post_close not sealed yet (before ${cutoff} ${tz})`, date });
+    }
+  }
+
   try {
     const result = await runScanPipeline({
       market: market as 'TW' | 'CN',

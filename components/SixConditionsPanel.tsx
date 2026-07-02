@@ -5,6 +5,8 @@ import { useReplayStore } from '@/store/replayStore';
 import { SixConditionsResult } from '@/lib/analysis/trendAnalysis';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
 import { EmptyState } from '@/components/shared';
+import { HeavinessBadgeFor } from '@/components/shared/HeavinessBadge';
+import { classifyMarket } from '@/lib/market/classify';
 import ProhibitionsBlock from './ProhibitionsBlock';
 import { CORE_SCORE_MIN, BOOK_VOL_RATIO_MIN, BOOK_BODY_PCT_MIN } from '@/lib/analysis/bookThresholds';
 
@@ -59,7 +61,7 @@ function MiniProgress({ value, target, pass }: { value: number; target: number; 
 /** Metric badge showing the key numeric value */
 function MetricBadge({ label, pass }: { label: string; pass: boolean }) {
   return (
-    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${
+    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md whitespace-nowrap shrink-0 ${
       pass ? 'bg-green-900/40 text-green-300 border border-green-800/50' : 'bg-muted text-muted-foreground border border-transparent'
     }`}>
       {label}
@@ -129,6 +131,8 @@ export default function SixConditionsPanel() {
   const prevSixConditions = useReplayStore(s => s.prevSixConditions);
   const allCandles    = useReplayStore(s => s.allCandles);
   const currentIndex  = useReplayStore(s => s.currentIndex);
+  const ticker        = useReplayStore(s => s.currentStock?.ticker);
+  const market        = classifyMarket(ticker ?? '');
   const [expanded, setExpanded] = useState<ConditionKey | null>(null);
 
   // detectSellSignals 跑 15+ 條規則，沒 memo 會在每個 expand/click 重算
@@ -205,12 +209,12 @@ export default function SixConditionsPanel() {
     },
     {
       key: 'position', pass: sc.position.pass, detail: sc.position.detail,
-      metric: deviation !== null && deviation !== undefined ? `乖離${(deviation * 100).toFixed(1)}%` : undefined,
+      metric: deviation !== null && deviation !== undefined ? `月線乖離${(deviation * 100).toFixed(1)}%` : undefined,
       changed: changedKeys.has('position') ? (sc.position.pass ? 'gained' : 'lost') : undefined,
     },
     {
       key: 'volume', pass: sc.volume.pass, detail: sc.volume.detail,
-      metric: volRatio !== null && volRatio !== undefined ? `×${volRatio}` : undefined,
+      metric: volRatio !== null && volRatio !== undefined ? `×${volRatio}倍` : undefined,
       progress: volRatio !== null && volRatio !== undefined ? { value: volRatio, target: volThreshold } : undefined,
       changed: changedKeys.has('volume') ? (sc.volume.pass ? 'gained' : 'lost') : undefined,
     },
@@ -310,6 +314,7 @@ export default function SixConditionsPanel() {
                 'bg-yellow-900/30 text-yellow-400'
               }`}>
                 <span className="font-bold shrink-0">{sig.label}</span>
+                <HeavinessBadgeFor market={market} signalId={sig.type} className="shrink-0" />
                 <span className="text-[9px] opacity-80">{sig.detail}</span>
               </div>
             ))}

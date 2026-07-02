@@ -16,16 +16,16 @@ import { PageShell } from '@/components/shared';
 import { MarketDataTab } from './tabs/MarketDataTab';
 import { YoutubeTab } from './tabs/YoutubeTab';
 import { PlaceholderTab } from './tabs/PlaceholderTab';
-import { SystemTab } from './tabs/SystemTab';
 
-type TabKey = 'market' | 'youtube' | 'technical' | 'agent' | 'system';
+type TabKey = 'market' | 'youtube' | 'technical' | 'agent';
 
 const TABS: Array<{ key: TabKey; label: string; icon: string }> = [
   { key: 'market',    label: '行情資料',     icon: '📈' },
   { key: 'youtube',   label: 'YouTube 節目', icon: '📺' },
-  { key: 'technical', label: '技術策略',     icon: '⚙️' },
-  { key: 'agent',     label: '多代理分析',   icon: '🤖' },
-  { key: 'system',    label: '系統任務',     icon: '🛠️' },
+  // 技術策略 / 多代理分析 tab 尚未實作（只有施工中佔位），先隱藏避免使用者撞到空頁；
+  // 下方 render 區塊與 PlaceholderTab 暫留，待實作後再把這兩行加回 TABS。
+  // { key: 'technical', label: '技術策略',     icon: '⚙️' },
+  // { key: 'agent',     label: '多代理分析',   icon: '🤖' },
 ];
 
 function fmtTime(iso: string | null): string {
@@ -71,7 +71,7 @@ export default function HealthPage() {
 
   return (
     <PageShell>
-      <div className="max-w-6xl mx-auto p-4 space-y-4">
+      <div className="p-4 space-y-4">
         <div className="flex items-baseline justify-between">
           <h1 className="text-2xl font-bold">資料健康狀態</h1>
           <div className="text-xs text-muted-foreground">
@@ -127,7 +127,6 @@ export default function HealthPage() {
               ]}
             />
           )}
-          {tab === 'system' && <SystemTab />}
         </div>
       </div>
     </PageShell>

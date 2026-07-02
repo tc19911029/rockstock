@@ -62,7 +62,7 @@ function httpGet(url: string, headers: Record<string, string> = {}): Promise<str
 async function fetchCN_Tencent(symbol: string): Promise<Candle[]> {
   const [code, sfx] = symbol.split('.');
   const prefix = sfx === 'SS' ? 'sh' : 'sz';
-  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${prefix}${code},day,,2024-01-01,${TARGET_DATE},800&_var=kline_day`;
+  const url = `https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param=${prefix}${code},day,,2024-01-01,${TARGET_DATE},800&_var=kline_day`;
   const raw = await httpGet(url);
   const jsonStr = raw.replace(/^var kline_day=/, '');
   const data = JSON.parse(jsonStr);

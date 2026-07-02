@@ -99,6 +99,13 @@ export interface SizingResult {
 
 // ────────────────────────────────────────────────────────────────────────────
 // 預設 config（letterWeights 從 data/backtest_results_per_letter.json 反推）
+//
+// ⚠️ 誠實警語（2026-06-14）：下方 letterWeights / resonanceBonus 來自「小樣本、單一多頭視窗」
+//    回測（如 B+J=1.30「d5+6.29%/勝72%」），與 smartmoney +5% 同款假象風險。誠實 edge 重評
+//    （scripts/compute-honest-edge.ts）顯示這些字母/組合扣成本後多數無穩定 alpha。
+//    → **預設 mode 是 fixedFraction（固定比例），不吃這組權重**；letterAware/kelly 屬「實驗模式」。
+//    要穩健控險請用 fixedFraction 或 riskParity（不靠訊號強弱、只靠資金比例/停損距離）。
+//    （未改數值是因合約測試硬編這組值＝backtest 來源；重設權重需先重跑 Kelly 回測，屬獨立工項。）
 // ────────────────────────────────────────────────────────────────────────────
 
 export const DEFAULT_LETTER_WEIGHTS: Readonly<Record<string, number>> = {
@@ -212,7 +219,8 @@ function letterAwareMode(req: SizingRequest, config: SizingConfig): {
   const resPart = resonanceMatched ? ` × 共振 ${resonanceMatched}=${resonanceMultiplier}` : '';
   return {
     rawCapital,
-    reasoning: `letterAware：${(baseFraction * 100).toFixed(1)}% × 字母 ${letter}=${letterMultiplier}${resPart} = ${(finalFraction * 100).toFixed(2)}%；${rawCapital.toLocaleString()}`,
+    reasoning: `letterAware：${(baseFraction * 100).toFixed(1)}% × 字母 ${letter}=${letterMultiplier}${resPart} = ${(finalFraction * 100).toFixed(2)}%；${rawCapital.toLocaleString()}` +
+      `（⚠️ 字母/共振權重來自小樣本回測、誠實 edge 顯示多不可靠；穩健控險建議改用 fixedFraction 或 riskParity）`,
     letterMultiplier,
     resonanceMultiplier,
   };

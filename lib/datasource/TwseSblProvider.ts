@@ -61,12 +61,9 @@ async function fetchTwseSblAll(date: string): Promise<TwseSblRow[]> {
 
   const url = `${TWSE_URL}?date=${date}&response=json`;
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-    });
-    if (!res.ok) return [];
-    const json: TwseResp = await res.json();
+    // TWSE 直連間歇性 connect timeout / TLS reset（2026-06-12 B2 實測）→ curl-first helper
+    const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+    const { data: json } = await fetchJsonWithCurlFallback<TwseResp>(url, { proxyFirst: true });
     if (json.stat !== 'OK' || !Array.isArray(json.data)) return [];
 
     // 日期格式 "YYYYMMDD" → "YYYY-MM-DD"
@@ -124,6 +121,11 @@ export async function fetchTwseSblForStock(
   return all.find(r => r.stockId === stockId) ?? null;
 }
 
+/** 全市場單日 bulk（/api/cron/fetch-chip-extras 每日持久化用；2026-06-12 B2）*/
+export async function fetchTwseSblBulk(dateIso: string): Promise<TwseSblRow[]> {
+  return fetchTwseSblAll(dateIso.replace(/-/g, ''));
+}
+
 /**
  * 抓單檔股票多日歷史（每日呼叫一次 TWSE）— 用於趨勢偵測
  */
@@ -132,17 +134,21 @@ export async function fetchTwseSblHistory(
   endDateIso: string,
   days = 30,
 ): Promise<TwseSblRow[]> {
-  const result: TwseSblRow[] = [];
+  // 收集要抓的交易日（跳週末）
   const end = new Date(endDateIso + 'T00:00:00Z');
-  for (let i = 0; i < days; i++) {
-    const d = new Date(end.getTime() - i * 86400_000);
-    const dow = d.getUTCDay();
-    if (dow === 0 || dow === 6) continue;  // skip weekend
-    const dateCompact = d.toISOString().slice(0, 10).replace(/-/g, '');
-    const dateIso = d.toISOString().slice(0, 10);
-    const all = await fetchTwseSblAll(dateCompact);
-    const row = all.find(r => r.stockId === stockId);
-    if (row) result.push(row);
+  const days8 = [...Array(days)].map((_, i) => new Date(end.getTime() - i * 86400_000))
+    .filter((d) => d.getUTCDay() !== 0 && d.getUTCDay() !== 6)
+    .map((d) => d.toISOString().slice(0, 10).replace(/-/g, ''));
+  // 並行抓（限並發 8）：原本逐日 await 串行 = 30 天 ×1s ≈ 30-135s，拖垮 /api/chip(8s 上限砍掉趨勢)。
+  // fetchTwseSblAll 有全市場日 cache + proxyFirst，並行安全且快（~3-5s 拿齊 30 天）。2026-06-22 修。
+  const result: TwseSblRow[] = [];
+  const CONC = 8;
+  for (let i = 0; i < days8.length; i += CONC) {
+    const batch = await Promise.all(days8.slice(i, i + CONC).map(async (dc) => {
+      const all = await fetchTwseSblAll(dc).catch(() => []);
+      return all.find((r) => r.stockId === stockId) ?? null;
+    }));
+    for (const row of batch) if (row) result.push(row);
   }
   return result.reverse();  // 升冪
 }

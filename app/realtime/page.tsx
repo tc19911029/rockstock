@@ -195,7 +195,7 @@ export default function RealtimePage() {
                   candles={candles}
                   signals={[]}
                   fillContainer
-                  maToggles={{ ma5: true, ma10: true, ma20: true, ma60: false, ma240: false }}
+                  maToggles={{ ma5: true, ma10: true, ma20: true, ma60: false, ma120: false, ma240: false }}
                 />
               </div>
             )}

@@ -21,6 +21,7 @@ import {
   FundamentalGroundTruth,
   FundamentalQuestion,
 } from '@/lib/agents/types';
+import { FUNDAMENTAL_JUDGMENT_RULES } from '@/lib/agents/judgmentRules';
 import type { MarketId } from '@/lib/scanner/types';
 import type { Candidate } from '@/lib/agents/candidates/types';
 import { sliceSourcesForAgent } from '@/lib/agents/candidates/types';
@@ -96,6 +97,7 @@ export async function buildFundamentalQuestion(
     symbol,
     market,
     groundTruth,
+    judgmentRulesRef: FUNDAMENTAL_JUDGMENT_RULES,
   };
   if (candidate) {
     question.entryContext = {
@@ -204,7 +206,7 @@ export async function buildValuationInputsTW(
   // 產業模板 — 優先用 FinMind 真實 industry_category（更精確），fallback candidate.industry
   // candidate.industry 經常是上層分類（如「其他電子業」），無法 detect 出 ASIC
   const industryStr = stockInfo?.industry_category ?? industryHint ?? null;
-  const template = detectIndustryTemplate(industryStr);
+  const template = detectIndustryTemplate(industryStr, symbol); // symbol 級半導體白名單覆寫
   const peRange = getReasonablePeRange(template);
 
   // monthly normalisation（FinMind RevenueRow → 我們的 schema）

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-reco-settle</string>
+
+  <!--
+    老師推薦事件基準價結算 — 每交易日 15:30 CST。
+    route 做兩件事:
+      (a) sweep 近 3 天 analysis 抽推薦事件(nightly 23:55 漏跑時這裡補抽)
+      (b) 結算所有日期還 pending 的基準價(昨日提及 → 今日開盤價;
+          eod-settle-tw 14:30 封當日 L1 後才有 K 可結,故排 15:30)
+    報酬不持久化(讀排行榜時從 L1 即時算),此 cron 只凍結 entry_open。
+    curl 走系統 binary;CRON_SECRET 為字面字串(對齊 tw-sanse plist 慣例)。
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/curl</string>
+    <string>-fsS</string>
+    <string>--max-time</string>
+    <string>300</string>
+    <string>-X</string>
+    <string>POST</string>
+    <string>-H</string>
+    <string>Authorization: Bearer CRON_SECRET</string>
+    <string>http://localhost:3000/api/cron/youtube-reco-events</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>15</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-reco-settle.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-reco-settle.err.log</string>
+</dict>
+</plist>

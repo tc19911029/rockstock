@@ -60,9 +60,9 @@ export function SanSeConditionsPanel({ report }: { report: ConditionReport | nul
   const v = tradeVerdict(r);
   return (
     <div className="p-2.5 space-y-2">
-      {/* 一眼結論：該買 / 該賣 / 觀望 */}
-      <div className={cn('rounded-md border px-2 py-1 text-[12px] font-bold', VERDICT_STYLE[v.tone].cls)}>
-        {VERDICT_STYLE[v.tone].head}<span className="text-[10px] font-normal opacity-80"> — {v.reason}</span>
+      {/* 一眼結論：底反該買(最高把握) / 該買 / 該賣 / 觀望 */}
+      <div className={cn('rounded-md border px-2 py-1 text-[12px] font-bold', v.reversal ? 'bg-rose-600/25 text-rose-100 border-rose-400/70 ring-1 ring-rose-400/50' : VERDICT_STYLE[v.tone].cls)}>
+        {v.reversal ? '🔥 底反該買' : VERDICT_STYLE[v.tone].head}<span className="text-[10px] font-normal opacity-80"> — {v.reason}</span>
       </div>
       <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
         <span className="font-semibold text-fuchsia-300">🎨 三色條件</span>

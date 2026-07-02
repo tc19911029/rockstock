@@ -18,6 +18,9 @@ import type { StockForwardPerformance } from '@/lib/scanner/types';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { GradeBadge, UnscoredBadge } from '@/components/agents/ScoreLightBadge';
 import type { ScoreLight, StockGrade, SuitableFor } from '@/lib/agents/scoringTypes';
+import { SortControl, type SortControlOption } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 type Verdict = 'pass' | 'watch' | 'fail';
 type FinalAction = 'buy' | 'watch' | 'skip';
@@ -99,6 +102,20 @@ const LIGHT_DOT: Record<ScoreLight, string> = {
   red:          'bg-red-500',
 };
 
+// 此面板提供的排序選項。'default' 為 inline 選項（保持 API 預排順序，不走 applySort）；
+// 其餘 id 走 lib/sorting/registry 中央清單，順序＝顯示順序。
+// 此頁專屬（預設）｜共用區（fwd.*；無 mkt.* 盤面欄資料）
+const AGENT_SORT_OPTIONS: SortControlOption[] = [
+  { id: 'default', label: '預設' },
+  '|',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+];
+// 前瞻報酬 id → StockForwardPerformance 欄位名（accessor 用）
+const AGENT_FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+};
+
 export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol, onDateChange }: Props) {
   const [date, setDateLocal] = useState(defaultDate ?? lastBusinessDayYmd());
   const setDate = useCallback((d: string) => {
@@ -106,8 +123,9 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
     onDateChange?.(d);
   }, [onDateChange]);
   const [filter, setFilter] = useState<'all' | 'buy' | 'completed'>('all');
-  type SortKey = 'default' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
-  const [sortBy, setSortBy] = useState<SortKey>('default');
+  // 排序：'default' 維持 API 預排；其餘漲跌幅 id 走 lib/sorting/registry 中央清單
+  const [sortBy, setSortBy] = useState<string>('default');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [data, setData] = useState<DecisionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,20 +226,15 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
     return true;
   });
 
-  // 漲跌幅排序（缺值排最後）；default 維持 API 預排
+  // 漲跌幅排序（缺值排最後）；default 維持 API 預排（不走 applySort）
   const sortedRuns = useMemo(() => {
     if (sortBy === 'default') return runs;
-    return [...runs].sort((a, b) => {
-      const va = forwardMap.get(a.symbol)?.[sortBy];
-      const vb = forwardMap.get(b.symbol)?.[sortBy];
-      const aNull = va == null;
-      const bNull = vb == null;
-      if (aNull && bNull) return 0;
-      if (aNull) return 1;
-      if (bNull) return -1;
-      return (vb as number) - (va as number);
-    });
-  }, [runs, sortBy, forwardMap]);
+    const agentSortValue = (r: RunListItem, id: string): SortValue => {
+      const fk = AGENT_FWD_FIELD[id];
+      return fk ? ((forwardMap.get(r.symbol)?.[fk] as number | null | undefined) ?? null) : null;
+    };
+    return applySort(runs, sortBy, sortDir, agentSortValue);
+  }, [runs, sortBy, sortDir, forwardMap]);
 
   const stats = (data?.runs ?? []).reduce(
     (acc, r) => {
@@ -259,23 +272,13 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
             </button>
           ))}
         </div>
-        <label className="ml-2 text-muted-foreground flex items-center gap-1 text-[10px]" title="依漲跌幅排序（缺值排最後）">
-          排序
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-card border border-border rounded px-1.5 py-0.5 text-[10px]"
-          >
-            <option value="default">預設</option>
-            <option value="openReturn">漲跌·隔開</option>
-            <option value="d1Return">漲跌·1日</option>
-            <option value="d5Return">漲跌·5日</option>
-            <option value="d10Return">漲跌·10日</option>
-            <option value="d20Return">漲跌·20日</option>
-            <option value="maxGain">漲跌·最高</option>
-            <option value="maxLoss">漲跌·最低</option>
-          </select>
-        </label>
+        <SortControl
+          options={AGENT_SORT_OPTIONS}
+          value={sortBy}
+          dir={sortDir}
+          onChange={(id, d) => { setSortBy(id); setSortDir(d); }}
+          className="ml-2"
+        />
         <div className="flex-1" />
       </div>
       {/* 一行小說明 — 讓使用者快速理解這 tab 的功能與欄位 */}

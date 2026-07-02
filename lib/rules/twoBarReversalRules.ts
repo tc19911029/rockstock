@@ -1,12 +1,14 @@
 /**
  * 朱家泓《抓住K線 獲利無限》第3篇 — 2根K線看轉折
- * 高檔轉折向下 4 種 + 低檔轉折向上 4 種 = 8 條規則
+ * 高檔轉折向下 5 種 + 低檔轉折向上 4 種 = 9 條規則
+ * （高檔含長黑遭遇/一日封口，課程 CH2-06「左藏紅右藏黑」6 組之第 2 組）
  */
 import { TradingRule, RuleSignal } from '@/types';
 import {
   bodyPct, isMedLongRed, isMedLongBlack, isRedCandle, isBlackCandle,
   isUptrendWave, isDowntrendWave,
 } from './ruleUtils';
+import { classifyVolume } from '@/lib/analysis/volumePatterns';
 
 // ═══════════════════════════════════════════
 // 高檔 2 根 K 線轉折向下（第3篇 Ch1-2）
@@ -145,6 +147,75 @@ export const bearishPiercingHigh: TradingRule = {
         '配合大量，容易一日反轉。',
       ].join('\n'),
       ruleId: this.id,
+    };
+  },
+};
+
+/**
+ * 長黑遭遇 / 一日封口（課程 CH2-06「左藏紅右藏黑」6 組之第 2 組）
+ *
+ * 黑K開高（跳空高於昨日紅K收盤）走低，收盤≈昨日紅K收盤、開盤缺口當天就回補 → 一日封口。
+ * 預設＝止漲（WATCH，黃燈休息）；**一旦伴隨爆大量（classifyVolume blowoff）→ 升級成「主力出貨」加重警示（SELL）**。
+ * （課程原句：「遭遇線一旦爆大量，就不是只有止漲，是有人在賣股票，高檔黑K爆大量＝主力出貨。」）
+ *
+ * 與同檔其他高檔規則互斥的幾何界線（避免重複觸發）：
+ *   - 收盤停在紅K實體上半（> redHalf）＝「沒深入」→ 深入紅K實體一半以下由 darkCloudCover（烏雲蓋頂）接手
+ *   - 收盤未跌破紅K開盤（>= red.open）＝「沒吞噬/沒貫穿」→ 跌破由 bearishEngulfingHigh / bearishPiercingHigh 接手
+ */
+export const bearishEncounterHigh: TradingRule = {
+  id: 'zhu-bearish-encounter-high',
+  name: '長黑遭遇（一日封口）',
+  description: '上漲到高檔，紅K後黑K開高走低，收盤回到昨日紅K收盤附近、開盤缺口當天封住',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 5) return null;
+    const red = candles[index - 1];
+    const black = candles[index];
+
+    if (!isMedLongRed(red)) return null;
+    if (!isBlackCandle(black)) return null;
+    if (bodyPct(black) < 0.015) return null;
+    // 黑K開高：跳空高於昨日紅K收盤（一日封口的前提＝開盤先有向上缺口）
+    if (black.open <= red.close) return null;
+    const redHalf = (red.open + red.close) / 2;
+    // 收盤≈昨日紅K收盤、缺口回補：停在紅K實體上半（> redHalf），且未創更高收盤（<= 紅K最高）
+    if (black.close <= redHalf) return null;   // 深入實體一半以下＝烏雲蓋頂，交給 darkCloudCover
+    if (black.close > red.high) return null;    // 收更高＝沒封口、續強，不算遭遇
+    // 未跌破紅K開盤（否則就是吞噬/貫穿，交給對應規則）
+    if (black.close < red.open) return null;
+    // 需在高檔
+    if (!isUptrendWave(candles, index - 1, 8)) return null;
+
+    // ── 爆量升級：止漲 → 主力出貨（純出場警示，不進任何選股 gate）──────────────
+    const isBlowoff = classifyVolume(candles, index).includes('blowoff');
+
+    if (isBlowoff) {
+      return {
+        type: 'SELL',
+        label: '長黑遭遇爆量（主力出貨）',
+        description: `黑K開高${black.open.toFixed(2)}走低收${black.close.toFixed(2)}封住缺口＋爆大量(≥5日均量×2)，主力出貨警示`,
+        reason: [
+          '【朱家泓 課程 CH2-06 高檔變盤】長黑遭遇（一日封口）＝黑K開高走低、收盤回到昨日紅K收盤附近、開盤缺口當天就封住。',
+          '遭遇線一旦「爆大量」就不只是止漲——是有人在不計價賣股票，高檔黑K爆大量＝主力出貨訊號。',
+          '出場就是跟著主力一起出場；飆股飆完一定要會跑，別捨不得。',
+          '這2根K線的最高點與最低點是重要壓力/支撐；變盤線低點被跌破，後面通常還有一波下跌。',
+        ].join('\n'),
+        ruleId: this.id,
+        subtype: 'exit_strong',
+      };
+    }
+
+    return {
+      type: 'WATCH',
+      label: '長黑遭遇（一日封口）',
+      description: `黑K開高${black.open.toFixed(2)}走低收${black.close.toFixed(2)}，回到昨日紅K收盤附近、開盤缺口當天封住，止漲警示`,
+      reason: [
+        '【朱家泓 課程 CH2-06 高檔變盤】長黑遭遇（一日封口）＝黑K開高走低、收盤回到昨日紅K收盤附近、開盤缺口當天就封住，是高檔止漲（黃燈休息）訊號。',
+        '次日不一定馬上跌，但要看次日「開低 + 收黑K」確認變盤，兩個都有就提高警覺。',
+        '若同時爆大量（5日均量×2）就升級成主力出貨，要立刻出場。',
+        '這2根K線的最高點與最低點是重要壓力/支撐；變盤線低點被跌破，後面通常還有一波下跌。',
+      ].join('\n'),
+      ruleId: this.id,
+      subtype: 'warn',
     };
   },
 };
@@ -302,6 +373,7 @@ export const TWO_BAR_REVERSAL_RULES: TradingRule[] = [
   bearishEngulfingHigh,
   bearishHaramiHigh,
   bearishPiercingHigh,
+  bearishEncounterHigh,
   risingSun,
   bullishEngulfingLow,
   bullishHaramiLow,

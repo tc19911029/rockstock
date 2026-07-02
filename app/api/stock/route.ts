@@ -1,17 +1,100 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { getTWChineseName, getCNChineseName } from '@/lib/datasource/TWSENames';
+import { twNameWithTimeout, cnNameWithTimeout } from '@/lib/datasource/nameWithTimeout';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import { getFugleIntradayCandles, getFugleHistoricalMinuteCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
-import { getTWSESingleIntraday, getTWSEQuote } from '@/lib/datasource/TWSERealtime';
+import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
-import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { readIntradaySnapshot, fetchTWIndexQuote } from '@/lib/datasource/IntradayCache';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { isFundSymbol } from '@/lib/market/classify';
+import type { Candle } from '@/types';
+import { promises as fsp } from 'node:fs';
+import path from 'node:path';
+
+// ── Route segment config（2026-06-08 冷啟動止血）─────────────────────────────
+// 走圖主資料路由：用 fs/Blob → 必須 Node runtime；force-dynamic 確保永遠讀即時資料、
+// 不被靜態快取；maxDuration 給冷啟動上限保護，避免慢冷啟動被 gateway 砍成 504。
+// 用 120（非 60）：現行 production 無 maxDuration 時冷啟動實測 ~65s 才回 200（方案上限 ≥64s），
+// 設 60 反而會把「慢但成功」變成 504 regression；120 是安全屋簷、又在 Pro/Fluid 上限內。
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
+
+// ── best-effort 外部呼叫總時間預算：逾時/失敗回 fallback，永不 reject ──────────
+// 用於「今日 K 棒注入」這種 nice-to-have 的即時報價鏈。冷啟動時 TWSE/EastMoney/Fugle/L2
+// 連線全冷會逐段累加卡死整個 /api/stock（曾見 ~65s 冷啟動）→ 逾時就放棄今日那根、直接
+// 回封存日K（圖照樣秒開，最多少今天那根即時 bar）。
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; resolve(fallback); }
+    }, ms);
+    p.then(
+      (v) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } },
+      () => { if (!settled) { settled = true; clearTimeout(timer); resolve(fallback); } },
+    );
+  });
+}
+
+// ── 中文名稱查詢（local 與 API 兩條路徑共用唯一一份，防 timeout 包覆 drift）──────────
+// 名稱是 nice-to-have：buildNameMap 冷啟動要打 TWSE/TPEx/ISIN 三源、CN 走 EastMoney/騰訊，
+// fake-IP DNS 下 Node fetch 會卡數十秒。設 3s 預算，逾時就回 null（呼叫端用代號當名稱），
+// 圖照樣秒出、name-map 之後在背景建好、下次就有名。曾因兩條路徑各自包覆、只改一條而 regress。
+async function resolveChineseName(opts: { isTW: boolean; isCN: boolean; pureCode: string; symbol: string }): Promise<string | null> {
+  const { isTW, isCN, pureCode, symbol } = opts;
+  if (isTW) return await twNameWithTimeout(pureCode);
+  if (isCN) {
+    const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
+    return await cnNameWithTimeout(pureCode, cnSuffix);
+  }
+  return null;
+}
+
+// ── 場外基金(.OF) K 線：讀 data/funds/{symbol}.json（淨值歷史，與股票 L1 隔離）──────────
+//   基金一天只有一個單位淨值 → 退化 K 棒 O=H=L=C=NAV、volume=0。資料由
+//   scripts/fetch-fund-candles.ts 預抓寫入；本路徑只讀檔 + 依 interval 聚合 + 切 period。
+function fundPeriodToDays(period: string): number {
+  const m = period.match(/^(\d+)(y|mo|d)$/);
+  if (!m) return 730;
+  const n = parseInt(m[1], 10);
+  return m[2] === 'y' ? n * 365 : m[2] === 'mo' ? n * 31 : n;
+}
+
+interface FundCandleFile { symbol: string; name: string; lastDate: string; candles: Candle[] }
+
+async function handleFundChart(symbol: string, interval: string, period: string) {
+  if (!/^\d{6}\.OF$/i.test(symbol)) return apiError(`不支援的基金代號：${symbol}`, 400);
+  if (['1m', '5m', '15m', '30m', '60m'].includes(interval)) {
+    return apiError(`場外基金 ${symbol} 無分鐘 K（一日一淨值）`, 404);
+  }
+  let file: FundCandleFile;
+  try {
+    file = JSON.parse(await fsp.readFile(path.join(process.cwd(), 'data', 'funds', `${symbol.toUpperCase()}.json`), 'utf-8'));
+  } catch {
+    return apiError(`基金 ${symbol} 尚無淨值資料，請先跑 scripts/fetch-fund-candles.ts`, 404);
+  }
+  const cutoff = new Date(Date.now() - fundPeriodToDays(period) * 86400000)
+    .toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' });
+  const daily = (file.candles ?? []).filter(c => c.date >= cutoff);
+  const candles = interval === '1d' ? daily : aggregateCandles(daily, interval);
+  if (candles.length === 0) return apiError(`基金 ${symbol} 無 ${period} 區間淨值`, 404);
+  return apiOk({
+    ticker: file.symbol,
+    name: file.name,
+    currency: 'CNY',
+    interval,
+    candles: candles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
+    totalBars: candles.length,
+    source: 'fund-nav',
+  });
+}
 
 // ── 週K/月K 聚合結果快取（避免重複聚合 + computeIndicators） ──
 const aggregateCache = new Map<string, { data: unknown; expires: number }>();
@@ -96,15 +179,28 @@ export async function GET(req: NextRequest) {
     return apiValidationError(parsed.error);
   }
   const { symbol, interval, period, local: localParam, scanDate } = parsed.data;
+
+  // 場外基金(.OF)：走獨立淨值資料路徑（早 return，不進股票 provider / L1 邏輯）
+  if (isFundSymbol(symbol)) {
+    return handleFundChart(symbol, interval, period);
+  }
+
   const { candidates, isTW, isCN } = resolveSymbol(symbol);
   const pureCode = symbol.replace(/\.(SZ|SS|TW|TWO)$/i, '');
   // CN 指數（000001.SS 上證 / 000300.SS 滬深300）：pureCode='000001'/'000300' 會撞到深市
   // 平安銀行(000001.SZ) 等同碼個股 → L2 快照比對必須用完整 symbol，且不可走 EastMoney 個股報價
   // （它對指數會誤回平安銀行的價，~10.83）。對齊 /api/stock/quote 的指數處理。
   const isCnIndex = symbol === '000001.SS' || symbol === '000300.SS';
+  const isTwIndex = symbol === '^TWII';
   const l2LookupSymbol = isCnIndex ? symbol : pureCode;
 
   const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
+
+  // 陸股指數無可靠分鐘 K 資料源：000001.SS/000300.SS 去後綴後的裸碼會撞同碼個股
+  // （000001→平安銀行）→ 任何分鐘 provider 都會回錯股的 K。寧可回 404 也不顯示錯資料。
+  if (isCnIndex && isMinuteInterval) {
+    return apiError(`陸股指數 ${symbol} 暫無分鐘 K 資料`, 404);
+  }
 
   // ── 本地檔案快速路徑（先讀本地秒開 → 即時覆蓋今日 K） ──
   // 支援日K(1d)直接使用，以及週K(1wk)/月K(1mo)本地聚合
@@ -115,9 +211,13 @@ export async function GET(req: NextRequest) {
       // 容忍 5 個交易日差距（涵蓋週末 + 假日）
       // 遍歷所有候選（如 2330.TW → 2330.TWO），避免只試第一個就 fallthrough 到 API
       let result: Awaited<ReturnType<typeof loadLocalCandlesWithTolerance>> = null;
+      // 記住「實際載到資料」的那個候選 —— 上櫃股(.TWO)用裸碼進來時 candidates[0] 是 .TW，
+      // 但資料在 .TWO；回傳 ticker 必須是真正命中的候選，否則 currentStock.ticker 標錯後綴，
+      // 下游(三色 overlay /chart/{ticker}、籌碼/基本面面板)會用錯後綴打 API 而失敗。
+      let loadedTicker = candidates[0];
       for (const candidate of candidates) {
         result = await loadLocalCandlesWithTolerance(candidate, market, today, 5);
-        if (result && result.candles.length > 0) break;
+        if (result && result.candles.length > 0) { loadedTicker = candidate; break; }
       }
       if (result && result.candles.length > 0) {
         // ── 盤中即時覆蓋：若 lastDate < today，主動拉即時報價湊今日 K 棒 ──
@@ -140,10 +240,31 @@ export async function GET(req: NextRequest) {
         const lastIsToday = !!lastCandle && lastCandle.date === today;
         if (shouldInjectToday && lastCandle && (lastCandle.date < today || lastIsToday)) {
           let todayQuote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
+          // 冷啟動止血（2026-06-08）：今日即時報價整條外部 fallback 鏈設總時間預算，
+          // 逾時放棄今日 bar、直接回封存日K（圖秒開）。避免冷啟動連線全冷時逐段累加卡死。
+          const INJECT_BUDGET_MS = Number(process.env.STOCK_INJECT_BUDGET_MS) || 3500;
+          const injectDeadline = Date.now() + INJECT_BUDGET_MS;
           try {
-            if (isTW) {
+            if (isTW && isTwIndex) {
+              // 大盤指數(^TWII)：個股報價端點(getTWSEQuote)對指數無效 → 走專屬 t00 即時值。
+              // 與 L2 snapshot 同源 fetchTWIndexQuote，確保走圖今日那根與掃描/快照一致；
+              // L2 snapshot(l2LookupSymbol='^TWII') 仍當下方 fallback 3 的次要來源。
+              const iq = await withTimeout(fetchTWIndexQuote(today), INJECT_BUDGET_MS, null);
+              if (iq && iq.close > 0) {
+                todayQuote = { open: iq.open, high: iq.high, low: iq.low, close: iq.close, volume: iq.volume };
+              }
+            } else if (isTW) {
               const twCode = pureCode;
-              const q = await getTWSESingleIntraday(twCode) ?? await getTWSEQuote(twCode);
+              // 只用 mis.twse 盤中即時報價（getTWSESingleIntraday）；不再 fallback getTWSEQuote。
+              // getTWSEQuote 走 openapi 收盤端點（STOCK_DAY_ALL / TPEx），盤中只回「昨日收盤」，
+              // 會以「非 null 的舊價」佔住注入鏈、被 date!==today 擋掉又吃掉注入預算，
+              // 害真正抓得到今日的 Fugle（fallback 2）來不及跑 → 上櫃股走圖今日那根補不上。
+              // 限時 1500ms，留足預算給下方 Fugle / L2 fallback（對齊可用的 /api/stock/quote 取價順序）。
+              const q = await withTimeout(
+                getTWSESingleIntraday(twCode),
+                Math.min(INJECT_BUDGET_MS, 1500),
+                null,
+              );
               if (q && q.close > 0 && (!q.date || q.date === today)) {
                 todayQuote = q;
               } else if (q) {
@@ -152,7 +273,7 @@ export async function GET(req: NextRequest) {
             } else if (isCN && !isCnIndex) {
               // 指數不走 EastMoney 個股報價（會誤回平安銀行）→ 落到下方 L2 fallback 取指數即時值
               const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-              const q = await getEastMoneySingleQuote(pureCode, cnSuffix);
+              const q = await withTimeout(getEastMoneySingleQuote(pureCode, cnSuffix), INJECT_BUDGET_MS, null);
               if (q && q.close > 0) {
                 todayQuote = q;
               } else if (q) {
@@ -164,9 +285,9 @@ export async function GET(req: NextRequest) {
           }
 
           // fallback 2: Fugle 即時報價（分鐘K已驗證可用，比 mis.twse 穩定）
-          if (!todayQuote && isTW && isFugleAvailable()) {
+          if (!todayQuote && isTW && !isTwIndex && isFugleAvailable() && Date.now() < injectDeadline) {
             try {
-              const fq = await getFugleQuote(pureCode);
+              const fq = await withTimeout(getFugleQuote(pureCode), Math.max(500, injectDeadline - Date.now()), null);
               if (fq && fq.close > 0 && (!fq.date || fq.date === today)) {
                 todayQuote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
               }
@@ -176,9 +297,9 @@ export async function GET(req: NextRequest) {
           }
 
           // fallback 3: 從 L2 全市場快照中找該股報價
-          if (!todayQuote) {
+          if (!todayQuote && Date.now() < injectDeadline) {
             try {
-              const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
+              const snapshot = await withTimeout(readIntradaySnapshot(market as 'TW' | 'CN', today), Math.max(500, injectDeadline - Date.now()), null);
               if (snapshot) {
                 const sq = snapshot.quotes.find(q => q.symbol === l2LookupSymbol);
                 if (sq && sq.close > 0) {
@@ -297,18 +418,12 @@ export async function GET(req: NextRequest) {
         }
 
         let name = candidates[0];
-        if (isTW) {
-          const twName = await getTWChineseName(pureCode).catch(() => null);
-          if (twName) name = twName;
-        } else if (isCN) {
-          const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-          const cnName = await getCNChineseName(pureCode, cnSuffix);
-          if (cnName) name = cnName;
-        }
+        const localName = await resolveChineseName({ isTW, isCN, pureCode, symbol });
+        if (localName) name = localName;
         const indexName = INDEX_NAMES[candidates[0].toUpperCase()];
         if (indexName) name = indexName;
         return apiOk({
-          ticker: candidates[0],
+          ticker: loadedTicker,
           name,
           currency: '',
           interval,
@@ -353,9 +468,18 @@ export async function GET(req: NextRequest) {
 
     // MultiMarketProvider 多源備援（日K 主要路徑，或 CN/US 分鐘 K 的備援）
     if (candles.length === 0) {
+      // 外部抓取設共用時間預算（C-2）：外部來源卡死時（如本機 DNS 把外網解到假 IP、Node fetch 直連卡死）
+      // 不讓整條 request 卡 70s；逾時當作落空，往下走 L1 退路 / 404。
+      const HIST_BUDGET_MS = Number(process.env.STOCK_HIST_BUDGET_MS) || 9000;
+      const histDeadline = Date.now() + HIST_BUDGET_MS;
       for (const candidate of candidates) {
         try {
-          const result = await dataProvider.getHistoricalCandles(candidate, period, undefined, interval);
+          const remaining = Math.max(500, histDeadline - Date.now());
+          const result = await withTimeout(
+            dataProvider.getHistoricalCandles(candidate, period, undefined, interval),
+            remaining,
+            [],
+          );
           if (result.length > 0) {
             ticker = candidate;
             candles = result.map(c => ({
@@ -374,6 +498,24 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // C-2 退路：外部來源全逾時/落空時，TW/CN 日K 退回本地 L1 封存（至少有圖、不卡死也不 404）
+    if (candles.length === 0 && !isMinuteInterval && (isTW || isCN)) {
+      try {
+        const market = isTW ? 'TW' as const : 'CN' as const;
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+        for (const candidate of candidates) {
+          const local = await loadLocalCandlesWithTolerance(candidate, market, today, 5);
+          if (local && local.candles.length > 0) {
+            ticker = candidate;
+            candles = local.candles.map(c => ({
+              date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
+            }));
+            break;
+          }
+        }
+      } catch { /* 退路失敗就往下 404 */ }
+    }
+
     if (candles.length === 0) {
       return apiError(
         `找不到股票代號 ${symbol}。台股格式：2330（上市）/8299（上櫃）、陸股：603986（上海）/000858（深圳）、美股：AAPL`,
@@ -381,16 +523,31 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 中文名稱查詢
-    let name = ticker;
-    if (isTW) {
-      const twName = await getTWChineseName(pureCode).catch(() => null);
-      if (twName) name = twName;
-    } else if (isCN) {
-      const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-      const cnName = await getCNChineseName(pureCode, cnSuffix);
-      if (cnName) name = cnName;
+    // ── 非宇宙 CN 日線：dataProvider 只到昨日封存 → 用即時報價補今日那根 ──
+    // 創業板/科創不在 L1（走 dataProvider on-demand）也不在 L2 快照 → 上面 local 路徑的今日注入碰不到，
+    // 主圖會停在昨日。三色 overlay 的 asOf 跟著主圖最後一根，主圖補了今日它才會跟著補 → 此處是源頭。
+    // 與 cn-sanse/chart 用同一個 buildTodayBarFromQuote（騰訊報價 + 量單位對齊），確保兩邊今日那根一致。
+    if (isCN && !isCnIndex && !isMinuteInterval) {
+      try {
+        const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+        const lastBar = candles[candles.length - 1];
+        const { isTradingDay } = await import('@/lib/utils/tradingDay');
+        if (lastBar && lastBar.date < todayCN && isTradingDay(todayCN, 'CN')) {
+          const { fetchQuote, buildTodayBarFromQuote } = await import('@/lib/cn-sanse/cnQuote');
+          const todayBar = buildTodayBarFromQuote(await fetchQuote(ticker), candles.slice(-20), todayCN);
+          if (todayBar) {
+            // 報價健全檢查（防千倍誤差），對齊 local 路徑；critical 才丟棄
+            const sanity = checkQuoteSanity(todayBar.close, todayBar.volume, lastBar.close, lastBar.volume, 'CN');
+            if (sanity.level !== 'critical') candles.push(todayBar);
+          }
+        }
+      } catch { /* 注入失敗不致命，退回封存 */ }
     }
+
+    // 中文名稱查詢 — 走共用 resolveChineseName（3s 預算、local/API 兩路徑同一份，防 drift）
+    let name = ticker;
+    const resolvedName = await resolveChineseName({ isTW, isCN, pureCode, symbol });
+    if (resolvedName) name = resolvedName;
     const indexName = INDEX_NAMES[ticker.toUpperCase()];
     if (indexName) name = indexName;
 

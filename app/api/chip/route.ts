@@ -43,6 +43,18 @@ export interface ChipData {
   holder800To1000Pct: number;    // 800-1000 張比例
   /** 主力卡位訊號：400/600/800/1000 四級都有持股（業界：籌碼結構最完整）*/
   structureBuilding: boolean;
+  /** 各 tier 週變化（pp，最新一週 vs 前一週）；null = 兩週缺欄位無法比較 */
+  holderTierChange?: {
+    h100: number | null; h200: number | null; h400: number | null; h1000: number | null;
+    h400To600: number | null; h600To800: number | null; h800To1000: number | null;
+  };
+  /** 主 tier 連續週趨勢（連 N 增/減）— 對 weekly delta 序列跑 detectTrend */
+  holderTierTrend?: {
+    h100?: TrendInfo; h200?: TrendInfo; h400?: TrendInfo; h1000?: TrendInfo;
+  };
+  /** TDCC 最新基準日 / 前一週基準日（UI 顯示「週變化 vs MM/DD」）*/
+  tdccDate?: string;
+  tdccPrevDate?: string;
   // 投信動向（陳威良 3比8 proxy；用最近窗口累計淨買 ÷ 已發行股數，動向 pp，不是絕對持股 %）
   sharesIssued: number;                     // 已發行股數（股，from FinMind）；0 = 缺資料
   trustNetBuy30d: number;                   // 30 天累計投信淨買（張）
@@ -94,6 +106,24 @@ export interface ChipData {
   topBuyers?: BrokerRankRow[];
   /** 前 15 大賣出券商 */
   topSellers?: BrokerRankRow[];
+
+  // v4 成本／壓力價精簡摘要（外資/投信/自營/主力/融資/融券/券賣 成本 + 嘎空價 + 斷頭價）
+  // 純顯示，不進 chipScore；完整版走 /api/cost-basis
+  costBasis?: CostBasisSummary;
+
+  // v5 三大法人衍生欄位（純衍生計算，零新資料源；純顯示不進 chipScore / 選股 gate）
+  /** 外資連續買超天數（從最新交易日往回數，淨買 > 0 算連續；最新日賣超 → 0） */
+  foreignConsecBuyDays: number;
+  /** 投信連續買超天數（同上） */
+  trustConsecBuyDays: number;
+  /** 最新日外資買賣超(張) ÷ 當日成交量(張) × 100（1 位小數；成交量缺或 0 → null） */
+  foreignNetToVolumePct: number | null;
+  /** 最新日投信買賣超(張) ÷ 當日成交量(張) × 100（同上） */
+  trustNetToVolumePct: number | null;
+  /** 外資 + 投信最新日同步買超（兩者淨買 > 0） */
+  instSyncBuy: boolean;
+  /** 外資 + 投信「同日同步買超」連續天數 */
+  instSyncBuyDays: number;
 }
 
 // ── 計算籌碼面綜合評分 v2 ────────────────────────────────────────────────────
@@ -282,14 +312,35 @@ const chipQuerySchema = z.object({
 
 import { fetchT86ForStock } from '@/lib/datasource/TwseT86Provider';
 import { readTdccStock, readInstStock, writeInstStock } from '@/lib/chips/ChipStorage';
+import type { TdccDay } from '@/lib/chips/types';
 import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock, fetchLendingHistoryForStock } from '@/lib/datasource/FinmindChipExtras';
 import { getSharesIssued } from '@/lib/datasource/FinMindClient';
 import { detectTrend, rollingChange } from '@/lib/chips/trends';
 import { fetchYahooBrokerTrades, type BrokerRankRow } from '@/lib/datasource/YahooBrokerScraper';
+import { readBrokerStock } from '@/lib/chips/BrokerStorage';
 import { fetchTwseSblForStock, fetchTwseSblHistory } from '@/lib/datasource/TwseSblProvider';
 import { fetchTpexSblForStock, fetchTpexSblHistory } from '@/lib/datasource/TpexSblProvider';
 import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
 import { fetchTpexMarginForStock } from '@/lib/datasource/TpexMarginProvider';
+import { getCostBasisBundle, toCostBasisSummary } from '@/lib/chipcost/aggregate';
+import type { CostBasisSummary } from '@/lib/chipcost/types';
+import { computeInstDerived } from '@/lib/chips/instDerived';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { globalCache } from '@/lib/datasource/MemoryCache';
+
+// 籌碼回應快取：中國線路抓多個台站來源慢，成功一次後 10 分鐘內(prewarm/重複載入/集中度切窗)秒回。
+const CHIP_CACHE_TTL = 10 * 60 * 1000;
+
+/** 讀本地 L1 日K，取指定日的成交量（張）；上市 .TW → 上櫃 .TWO fallback；缺 → null */
+async function loadVolumeLotsOnDate(code: string, date: string): Promise<number | null> {
+  for (const suffix of ['TW', 'TWO'] as const) {
+    const file = await readCandleFile(`${code}.${suffix}`, 'TW').catch(() => null);
+    if (!file) continue;
+    const bar = file.candles.find(c => c.date === date);
+    return bar?.volume ?? null;   // 檔案存在但該日無 bar → null（不再試另一後綴）
+  }
+  return null;
+}
 
 // ── 投信動向（陳威良 3比8 法則的 proxy）────────────────────────────────────
 // FinMind 免費層無「絕對投信持股 %」資料源；先用「最近 30/60/90 天投信淨買 ÷ 已發行股數」
@@ -361,6 +412,10 @@ export async function GET(req: NextRequest) {
 
   const date = await findLatestTradingDate(rawDate);
 
+  const cacheKey = `chip:${code}:${date}`;
+  const cached = globalCache.get<ChipData>(cacheKey);
+  if (cached) return apiOk(cached);
+
   try {
     // ── 1) 法人：先讀 L1，缺則 FinMind 補抓 ──
     let instFile = await readInstStock(code);
@@ -389,25 +444,37 @@ export async function GET(req: NextRequest) {
     // ── 2) 大戶持股 TDCC L1 + 3) 融資融券、當沖、借券、4) 已發行股數（FinMind 並行）──
     // 用 allSettled：任何單一資料源失敗不應打掉整個籌碼面板（書本實務以外資+融資為主，借券/股本缺值可接受）
     // 融資融券：TWSE（上市）→ TPEX（上櫃）→ FinMind 最後 fallback；全部免費無 quota
+    // 中國線路每個台站直連都慢/hang → 三源「並行取最快有效」（原本串行 fallback：TWSE hang→TPEx hang→FinMind，
+    // 時間是三者相加，是 /api/chip 卡 40-60s 的主因之一）。優先序仍 TWSE > TPEx > FinMind。2026-06-22 修。
     const marginPromise = (async () => {
-      const tw = await fetchTwseMarginForStock(code, date).catch(() => null);
-      if (tw) return { marginBalance: tw.marginBalance, marginNet: tw.marginNet, shortBalance: tw.shortBalance, shortNet: tw.shortNet, marginUtilRate: tw.marginUtilRate };
-      const tpex = await fetchTpexMarginForStock(code, date).catch(() => null);
-      if (tpex) return { marginBalance: tpex.marginBalance, marginNet: tpex.marginNet, shortBalance: tpex.shortBalance, shortNet: tpex.shortNet, marginUtilRate: tpex.marginUtilRate };
-      return fetchMarginForStock(code, date);
+      const norm = (x: { marginBalance: number; marginNet: number; shortBalance: number; shortNet: number; marginUtilRate: number } | null) =>
+        x ? { marginBalance: x.marginBalance, marginNet: x.marginNet, shortBalance: x.shortBalance, shortNet: x.shortNet, marginUtilRate: x.marginUtilRate } : null;
+      const [tw, tpex, fm] = await Promise.allSettled([
+        fetchTwseMarginForStock(code, date),
+        fetchTpexMarginForStock(code, date),
+        fetchMarginForStock(code, date),
+      ]);
+      const v = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
+      return norm(v(tw)) ?? norm(v(tpex)) ?? v(fm);
     })();
 
+    // 每個來源包 8s 上限：中國線路某些台站來源(Yahoo 主力分點多頁/SBL fallback)會 hang 很久，
+    // 拖垮整個 /api/chip(曾卡 60s 載入失敗)。超時當 null 優雅降級 → 面板照載、缺的欄位顯示「—」。2026-06-22 修。
+    const cap = <T,>(p: Promise<T>, ms = 8000): Promise<T | null> =>
+      Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
     const settled = await Promise.allSettled([
-      readTdccStock(code),
-      marginPromise,
-      fetchDayTradeForStock(code, date),
+      cap(readTdccStock(code)),
+      cap(marginPromise),
+      cap(fetchDayTradeForStock(code, date)),
       // v3: SBL — TWSE（上市）→ TPEX（上櫃）fallback；全免費無 quota
-      fetchTwseSblForStock(code, date).then(r => r ?? fetchTpexSblForStock(code, date)).catch(() => null),
-      getSharesIssued(code),
+      cap(fetchTwseSblForStock(code, date).then(r => r ?? fetchTpexSblForStock(code, date)).catch(() => null)),
+      cap(getSharesIssued(code)),
       // 30 天歷史做趨勢；TWSE 沒有就試 TPEX
-      fetchTwseSblHistory(code, date, 30).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 30)).catch(() => []),
+      cap(fetchTwseSblHistory(code, date, 15).then(h => h.length > 0 ? h : fetchTpexSblHistory(code, date, 15)).catch(() => [])),
       // v3: 主力券商分點（Yahoo 籌碼頁；對齊籌碼K線「主力 -102」）
-      fetchYahooBrokerTrades(code),
+      cap(fetchYahooBrokerTrades(code)),
+      // v5: 法人最新資料日的當日成交量（張，本地 L1；衍生欄位占量計算用）
+      cap(instOnDate ? loadVolumeLotsOnDate(code, instOnDate.date) : Promise.resolve(null)),
     ]);
     const pickFulfilled = <T,>(idx: number): T | null => {
       const r = settled[idx];
@@ -420,6 +487,10 @@ export async function GET(req: NextRequest) {
     const sharesIssued = pickFulfilled<number>(4);
     const sblHistory = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblHistory>>>(5) ?? [];
     const brokerTrades = pickFulfilled<Awaited<ReturnType<typeof fetchYahooBrokerTrades>>>(6);
+    const latestVolumeLots = pickFulfilled<number | null>(7);
+    // 主力券商分點「歷史」：Yahoo 只給當日，走圖看過去要讀回填的 BrokerStorage（FinMind Sponsor 灌的正版集中度）
+    const brokerHist = await readBrokerStock(code).catch(() => null);
+    const brokerStored = brokerHist?.data.find(d => d.date === date) ?? null;
     // 把 sblToday 轉成 lendingInfo shape 給後面 code 用（向下相容）
     const lendingInfo = sblToday ? {
       lendingBalance: sblToday.lendingBalance,
@@ -498,6 +569,15 @@ export async function GET(req: NextRequest) {
     const trustHoldingChange60d = netBuyToPp(trustNetBuy60d, sharesIssued);
     const trustHoldingChange90d = netBuyToPp(trustNetBuy90d, sharesIssued);
     const trustMomentumStage = classifyTrustMomentum(trustHoldingChange30d);
+
+    // ── v5: 三大法人衍生欄位（連買天數 / 占量 / 同步買）──
+    // 錨定在「實際回傳的法人資料日」（instOnDate 可能是盤中 fallback 的最新歷史日），
+    // 序列只取錨定日（含）以前，確保連買天數與 foreignBuy 顯示值同一基準。
+    const anchorInstDate = instOnDate?.date;
+    const instDerived = computeInstDerived(
+      anchorInstDate ? instRows.filter(r => r.date <= anchorInstDate) : [],
+      latestVolumeLots,
+    );
     // 算實際資料涵蓋天數：(date - oldest row) 內的最大值，cap 90
     const oldestInst = instRows[0]?.date;
     const trustDataCoverageDays = oldestInst
@@ -524,6 +604,38 @@ export async function GET(req: NextRequest) {
     const holder1000Change = latestTdcc && prevTdcc
       ? +(clampPct(latestTdcc.holder1000Pct) - clampPct(prevTdcc.holder1000Pct)).toFixed(2)
       : 0;
+
+    // ── 各 tier「跟前一週比」週變化（pp）+ 連續週趨勢（連 N 增/減）──
+    //    防呆：holder100/200 與三個細分桶是 2026-05-22 後才有的選填欄位；
+    //    舊週缺值會被 clampPct→0 算成「假性暴增」，所以一律要「兩週都有原始值」才比。
+    const tierWoW = (cur?: number, prev?: number): number | null =>
+      (cur != null && prev != null) ? +(clampPct(cur) - clampPct(prev)).toFixed(2) : null;
+    const holderTierChange = latestTdcc ? {
+      h100:       tierWoW(latestTdcc.holder100Pct,       prevTdcc?.holder100Pct),
+      h200:       tierWoW(latestTdcc.holder200Pct,       prevTdcc?.holder200Pct),
+      h400:       tierWoW(latestTdcc.holder400Pct,       prevTdcc?.holder400Pct),
+      h1000:      tierWoW(latestTdcc.holder1000Pct,      prevTdcc?.holder1000Pct),
+      h400To600:  tierWoW(latestTdcc.holder400To600Pct,  prevTdcc?.holder400To600Pct),
+      h600To800:  tierWoW(latestTdcc.holder600To800Pct,  prevTdcc?.holder600To800Pct),
+      h800To1000: tierWoW(latestTdcc.holder800To1000Pct, prevTdcc?.holder800To1000Pct),
+    } : undefined;
+
+    // 連續週趨勢：只用「該欄位有值」的週來組 weekly delta 序列（跳過缺欄位週，避免初次出現算成假跳階）
+    const tierDeltaSeries = (pick: (d: TdccDay) => number | undefined): number[] => {
+      const vals: number[] = [];
+      for (const r of (tdccFile?.data ?? [])) { const v = pick(r); if (v != null) vals.push(clampPct(v)); }
+      const ds: number[] = [];
+      for (let i = 1; i < vals.length; i++) ds.push(vals[i] - vals[i - 1]);
+      return ds.slice(-10);
+    };
+    const tierTrend = (pick: (d: TdccDay) => number | undefined): TrendInfo | undefined =>
+      (tdccFile?.data?.length ?? 0) >= 2 ? detectTrend(tierDeltaSeries(pick), 'inc_dec') : undefined;
+    const holderTierTrend = latestTdcc ? {
+      h100:  tierTrend(d => d.holder100Pct),
+      h200:  tierTrend(d => d.holder200Pct),
+      h400:  tierTrend(d => d.holder400Pct),
+      h1000: tierTrend(d => d.holder1000Pct),
+    } : undefined;
 
     const inst = instOnDate ? { foreignBuy, trustBuy, dealerBuy, totalBuy, name: '' } : undefined;
     const { score, grade, signal, detail } = calculateChipScore({
@@ -576,6 +688,10 @@ export async function GET(req: NextRequest) {
       holder600To800Pct: h600To800,
       holder800To1000Pct: h800To1000,
       structureBuilding,
+      holderTierChange,
+      holderTierTrend,
+      tdccDate: latestTdcc?.date,
+      tdccPrevDate: prevTdcc?.date,
       sharesIssued: sharesIssued ?? 0,
       trustNetBuy30d,
       trustNetBuy60d,
@@ -603,15 +719,28 @@ export async function GET(req: NextRequest) {
       },
       holder5wChange,
       holder5mChange,
-      // v3 主力券商分點
-      brokerNetBuy: brokerTrades?.totalDifferenceVolK,
-      brokerConcentration: brokerTrades
-        ? (brokerTrades.concentration * 100 * (brokerTrades.totalDifferenceVolK >= 0 ? 1 : -1))
-        : undefined,
+      // v3 主力券商分點 — 優先讀回填的歷史(走圖看過去)，無則退 Yahoo 當日
+      brokerNetBuy: brokerStored?.netDifference ?? brokerTrades?.totalDifferenceVolK,
+      brokerConcentration: brokerStored
+        ? brokerStored.concentration
+        : brokerTrades
+          ? (brokerTrades.concentration * 100 * (brokerTrades.totalDifferenceVolK >= 0 ? 1 : -1))
+          : undefined,
       topBuyers: brokerTrades?.buyerRankList,
       topSellers: brokerTrades?.sellerRankList,
+      // v5 三大法人衍生欄位（純顯示）
+      ...instDerived,
     };
 
+    // v4 成本／壓力價摘要（best-effort；失敗不影響籌碼面板主體）
+    try {
+      const bundle = await getCostBasisBundle(rawSymbol, date);
+      data.costBasis = toCostBasisSummary(bundle);
+    } catch (err) {
+      console.warn('[/api/chip] costBasis 計算失敗:', err instanceof Error ? err.message : err);
+    }
+
+    globalCache.set(cacheKey, data, CHIP_CACHE_TTL);
     return apiOk(data);
   } catch (err) {
     console.error('[/api/chip] error:', err);

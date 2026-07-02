@@ -11,11 +11,14 @@
 // ============================================================
 
 import type { ConditionReport } from './conditions';
+import { getLimitMovePct } from '@/lib/utils/limitRules';
 
-/** 排序/回測只需要這兩個欄位 — ResonanceRecord 與前端 RecordRow 都結構相容。 */
+/** 排序/回測只需要這幾個欄位 — ResonanceRecord 與前端 RecordRow 都結構相容。 */
 export interface RankRecord {
   changePct: number;
   report: ConditionReport;
+  /** 板塊敏感漲停門檻用；缺則退主板 10%（舊資料相容）。 */
+  symbol?: string;
 }
 
 export const BT_HORIZONS = [
@@ -115,7 +118,9 @@ export function bucketsForRecord(r: RankRecord): string[] {
   const bothB = rep.doubleB.buy.some((c) => c.id === 'b_break' && c.met)
     && rep.doubleB.buy.some((c) => c.id === 'b_gold' && c.met);
   if (bothB && mThree && hasC && cVol) keys.push('allin');
-  keys.push(r.changePct >= 9.5 ? 'limitup' : 'notlimitup');
+  // 漲停門檻板塊敏感：主板 9.5%、科創/創業 19.5%（缺 symbol 退主板）。
+  const limitThr = r.symbol ? getLimitMovePct('CN', r.symbol) * 100 - 0.5 : 9.5;
+  keys.push(r.changePct >= limitThr ? 'limitup' : 'notlimitup');
   keys.push(rep.conflict ? 'conflict' : 'noconflict');
   return keys;
 }

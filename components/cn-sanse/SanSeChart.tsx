@@ -137,7 +137,7 @@ export function SanSeChart({
       line(data.xys1, BLUE, 2, xysPane);
       const slow = line(data.xys2, '#4080FF', 2, xysPane);
       createSeriesMarkers(slow, data.subMarkers.map((m) => ({
-        time: t(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text,
+        time: t(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text, size: m.size,
       })));
     }
 

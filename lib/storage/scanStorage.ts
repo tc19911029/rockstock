@@ -31,7 +31,7 @@ export interface ScanDateEntry {
 // 用於 listScanDates 的 legacy filter — 漏列任一字母會讓 daily 模式 date list
 // 把 buy-method post_close 誤列為 daily entry（議題：0421 -F- bug 同類）
 // R = 乖離率（機械軌, 2026-05-21）；V = 基本面補漲（基本面軌, 2026-05-27）
-const BUY_METHOD_LETTERS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'V'] as const;
+const BUY_METHOD_LETTERS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'V', 'W', 'X', 'Y'] as const;
 const BUY_METHOD_FILE_TOKENS = BUY_METHOD_LETTERS.map((l) => `-${l}-`);
 const isBuyMethodFile = (filename: string): boolean =>
   BUY_METHOD_FILE_TOKENS.some((token) => filename.includes(token));
@@ -198,6 +198,19 @@ export async function saveScanSession(
   session: ScanSession,
   opts?: SaveScanOptions,
 ): Promise<void> {
+  // ── 處置股/注意股蓋章（2026-06-12 B1）──
+  // 所有掃描路徑（六條件/買法軌/R 軌/盤中）的 L4 寫入都經過這裡，蓋章只做一處。
+  // 只標記不剔除（L4 保留完整紀錄）；硬排除在 applyPanelFilter.isDisposalVetoed。
+  // 名單沒抓過 / 讀檔失敗 = no-op，絕不可擋掃描寫入。
+  if (session.market === 'TW' && session.results?.length) {
+    try {
+      const { stampAttentionFlags } = await import('@/lib/market/attentionList');
+      await stampAttentionFlags(session.results, session.date);
+    } catch (err) {
+      console.warn('[scanStorage] stampAttentionFlags failed (non-critical):', err);
+    }
+  }
+
   const data = JSON.stringify(session);
   const dir = session.direction ?? 'long';
   const mtf = sessionMtfMode(session);

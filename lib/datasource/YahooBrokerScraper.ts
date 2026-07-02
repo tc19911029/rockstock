@@ -10,6 +10,7 @@
  *
  * 資料更新時間：每日盤後 17:00 後（券商分點要等 TWSE 公布）
  */
+import { fetchTextWithCurlFallback } from '@/lib/datasource/curlFetch';
 
 const CACHE = new Map<string, { data: YahooBrokerTrades; expiresAt: number }>();
 const CACHE_TTL = 30 * 60_000;  // 30 分鐘 — 該資料一天只更新一次，但避免抓太頻繁
@@ -55,15 +56,17 @@ export async function fetchYahooBrokerTrades(code: string): Promise<YahooBrokerT
 
   const url = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(code)}.TW/broker-trading`;
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10_000),
+    // 2026-06-15：Yahoo 對 Node fetch 回 200 但只有 ~3KB 反爬蟲 stub（無 brokerTrades）；
+    // curl 帶 UA 才拿得到完整頁。validate 沒看到 marker → 自動走 curl fallback（含本機代理）。
+    const { text: html } = await fetchTextWithCurlFallback(url, {
+      proxyFirst: true,
+      timeoutMs: 12_000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0',
         'Accept-Language': 'zh-TW,zh;q=0.9',
       },
+      validate: (t) => t.includes('"brokerTrades":'),
     });
-    if (!res.ok) return null;
-    const html = await res.text();
     const parsed = extractBrokerTrades(html);
     if (!parsed) return null;
     CACHE.set(cacheKey, { data: parsed, expiresAt: Date.now() + CACHE_TTL });

@@ -29,6 +29,17 @@ export interface InstDayFile {
   data: Record<string, InstDay>;
 }
 
+/** TDCC 持股分級單一級距（CMoney 集保戶股權分散表一列）。
+ *  level 1=1張以下(零股) … 9=50~100張、10=100~200 … 15=1000張以上。 */
+export interface TdccBracket {
+  /** 持股分級 1-15 */
+  level: number;
+  /** 該級距持股人數 */
+  holders: number;
+  /** 占集保庫存比例（%） */
+  pct: number;
+}
+
 /** 單一股票 ‧ 單一資料日 ‧ 大戶持股分散（TDCC 集保） */
 export interface TdccDay {
   /** 100 張↑ 比例（%） = level 10-15 加總；千金股大戶門檻 */
@@ -47,6 +58,17 @@ export interface TdccDay {
   holder800To1000Pct?: number;
   /** 總股東戶數 */
   holderCount?: number;
+  /** 全 15 級距明細（人數+比例，升冪 by level）— 2026-06 新增。
+   *  舊快照無此欄；UI 缺值時退回上方大戶聚合比例。 */
+  brackets?: TdccBracket[];
+}
+
+/** 單一股票 ‧ 單一交易日 ‧ 主力券商分點（Yahoo broker-trading top-15 聚合，單位：張） */
+export interface BrokerDay {
+  /** 前 15 大買超 − 前 15 大賣超（張，正=主力淨買）= totalDifferenceVolK */
+  netDifference: number;
+  /** 主力集中度（%，正值；方向看 netDifference 符號） */
+  concentration: number;
 }
 
 /** 一週全市場 TDCC 資料（週四晚公布上週五持股） */

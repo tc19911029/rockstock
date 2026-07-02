@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
         date,
         baseDate: date,
         items: [],
-        message: 'no analysis for this date — run /youtube-analysis skill',
+        message: '此日無 YouTube 分析資料',
       });
     }
 

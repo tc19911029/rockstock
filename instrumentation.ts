@@ -8,6 +8,8 @@
 
 import { isMarketOpen, isPostCloseWindow, getLastTradingDay } from '@/lib/datasource/marketHours';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+// ⚠️ 只 import 純狀態模組（無 fs/path）— 維持本檔 Edge-safe 邊界（見檔頭鐵律 4）。
+import { isTranscriptionActive } from '@/lib/youtube/transcriptionLock';
 
 function localUrl(path: string): string {
   const port = process.env.PORT || '3000';
@@ -34,23 +36,68 @@ async function callRoute(path: string, label: string): Promise<unknown> {
   }
 }
 
+// Whisper 轉錄期間，記憶體重活 cron 讓路：跳過「本輪」（不設 done 旗標 → 下一輪 60s 後再來，
+// 不會掉今天的工作）。根因：whisper 子程序與重活同時跑會被 jetsam 砍（見 transcriptionLock.ts）。
+// ⚠️ 守衛必須放在各工作「設 done 旗標之前」，所以在每個 interval/函式最前面呼叫，不能塞進 callRoute。
+let lastDeferLogAt = 0;
+function deferForWhisper(label: string): boolean {
+  if (!isTranscriptionActive()) return false;
+  const now = Date.now();
+  if (now - lastDeferLogAt > 60_000) {  // 每分鐘最多印一次，避免洗版
+    console.log(`[local-cron] ${label} 本輪跳過：Whisper 轉錄進行中，記憶體重活讓路（下輪重試）`);
+    lastDeferLogAt = now;
+  }
+  return true;
+}
+
 export async function register() {
   // 只在本地開發啟動定時器（Vercel 有自己的 cron）
   if (process.env.VERCEL || process.env.NODE_ENV === 'test') return;
-  // 手動關閉開關：DISABLE_LOCAL_CRON=1 npm run dev → dev server 不跑 cron
+  // 只有 production（npm run start，:3000 正牌 prod server）才註冊 local-cron。
+  // dev server（next dev，Claude Preview :3100）一律略過 —— 它的 cron 會打 localhost:3000
+  // 與 prod 重複觸發（同一份 L2 刷新/三色掃描跑兩次，盤中多吃一份 /api/stock）。
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[local-cron] 非 production（dev server），略過本地 cron 模擬，避免與 prod 重複觸發');
+    return;
+  }
+  // 手動關閉開關：DISABLE_LOCAL_CRON=1（prod 維護模式：launchctl setenv 後 kickstart）→ 連 prod 也不跑 cron
   if (process.env.DISABLE_LOCAL_CRON === '1') {
     console.log('[local-cron] DISABLE_LOCAL_CRON=1 已停用本地 cron 模擬');
     return;
   }
 
   console.log('[local-cron] 本地開發模式：定期呼叫 API route 模擬 Vercel Cron');
-  console.log('[local-cron] L2：每 5 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5');
+  console.log('[local-cron] L2：每 5 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5 | 三色推播：每 2 分鐘');
+
+  // ── 開機補抓緩衝 + 錯開（2026-06-02 修：重啟補抓風暴餓死 /api/stock）────────
+  // 病根：setInterval 的去重旗標（postCloseDailyDone / l1Downloaded / postCloseBmDone…）
+  // 是 in-memory，kickstart 重啟後全部歸零 → 重啟若落在盤中/盤後窗口，下一輪 tick 就把
+  // 「今天其實已做過的重活」（全量 CN 下載 3127 檔 + TW/CN 盤後掃描 + 盤中掃描）同時重跑，
+  // 一起搶 rate-limiter 桶與 event loop → /api/stock（走圖主資料）被餓死、走圖載不出來。
+  // 修法：重活在開機後一段緩衝內跳過、且彼此用 offset 錯開，讓重啟瞬間 server 先能服務
+  // 請求，之後回到「正常 staggered 排程」（= 事故前運作正常的狀態）。輕量工作（L2 刷新、
+  // realtime-scan）不擋。可用 LOCAL_CRON_BOOT_GRACE_MS 調整基準緩衝。
+  const bootAt = Date.now();
+  const BOOT_GRACE_MS = Number(process.env.LOCAL_CRON_BOOT_GRACE_MS) || 90_000;
+  function bootCoolingDown(label: string, extraOffsetMs = 0): boolean {
+    const elapsed = Date.now() - bootAt;
+    const threshold = BOOT_GRACE_MS + extraOffsetMs;
+    if (elapsed < threshold) {
+      console.log(
+        `[local-cron] ${label} 開機緩衝中跳過 (${Math.round(elapsed / 1000)}s/${Math.round(threshold / 1000)}s) ` +
+        `— 避免重啟瞬間補抓風暴餓死 /api/stock`,
+      );
+      return true;
+    }
+    return false;
+  }
 
   // ── 盤中：買法掃描批次（3 track 取代 16 字母）─────────────────────────
   // 0513 ABCDE E：scan-bm-batch 之後再批 intraday — 把 16 字母獨立 cron 改成
   // 3 track 一 cron。同 track 內字母共用 stockList / L2 / TurnoverRank /
   // marketTrend，比舊版省 ~5 倍前置時間。
   async function scanIntradayBatchTrack(market: 'TW' | 'CN', track: 'bullish' | 'reversal' | 'system') {
+    if (bootCoolingDown(`${market} bm-batch ${track}`, 30_000)) return;
     if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
     const data = await callRoute(
       `/api/cron/update-intraday-bm-batch?market=${market}&track=${track}`,
@@ -66,32 +113,35 @@ export async function register() {
     }
   }
 
-  // ── 盤中：三色資金即時掃描（CN 自創策略），每 10 分鐘 ──
-  // 把 L2 快照合成今日進行中日K 重算三色，寫 intraday 快照（不碰盤後封存）。
-  let sanseIntradayInFlight = false;
-  async function scanIntradaySanSe() {
-    if (!isMarketOpen('CN') && !isPostCloseWindow('CN')) return;
-    if (sanseIntradayInFlight) { console.log('[local-cron] CN 三色盤中：上一輪未完成，跳過'); return; }
-    sanseIntradayInFlight = true;
+  // ── 盤中：三色資金即時掃描（TW + CN 自創策略），每 10 分鐘 ──
+  // 把該市場 L2 快照合成今日進行中日K 重算三色，寫 intraday 快照（不碰盤後封存）。
+  const sanseIntradayInFlight = { TW: false, CN: false };
+  async function scanIntradaySanSe(market: 'TW' | 'CN') {
+    if (bootCoolingDown(`${market} 三色盤中`, 15_000)) return;
+    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
+    if (sanseIntradayInFlight[market]) { console.log(`[local-cron] ${market} 三色盤中：上一輪未完成，跳過`); return; }
+    sanseIntradayInFlight[market] = true;
     try {
+    const route = market === 'CN' ? '/api/cron/update-intraday-cn-sanse' : '/api/cron/update-intraday-tw-sanse';
     const data = await callRoute(
-      '/api/cron/update-intraday-cn-sanse',
-      'CN update-intraday-cn-sanse',
+      route,
+      `${market} update-intraday-${market === 'CN' ? 'cn' : 'tw'}-sanse`,
     ) as { data?: { skipped?: boolean; reason?: string; counts?: Record<string, number>; evaluated?: number } } | null;
     const payload = data?.data ?? data ?? {};
     if ((payload as { skipped?: boolean }).skipped) {
-      console.log(`[local-cron] CN 三色盤中跳過：${(payload as { reason?: string }).reason}`);
+      console.log(`[local-cron] ${market} 三色盤中跳過：${(payload as { reason?: string }).reason}`);
     } else {
       const c = (payload as { counts?: Record<string, number> }).counts ?? {};
-      console.log(`[local-cron] CN 三色盤中: strict=${c.strict ?? '?'} medium=${c.medium ?? '?'} loose=${c.loose ?? '?'}（評估 ${(payload as { evaluated?: number }).evaluated ?? '?'} 檔）`);
+      console.log(`[local-cron] ${market} 三色盤中: strict=${c.strict ?? '?'} medium=${c.medium ?? '?'} loose=${c.loose ?? '?'}（評估 ${(payload as { evaluated?: number }).evaluated ?? '?'} 檔）`);
     }
     } finally {
-      sanseIntradayInFlight = false;
+      sanseIntradayInFlight[market] = false;
     }
   }
 
   // ── 盤中：六條件掃描（scan-intraday），每 10 分鐘 ──
   async function scanIntradayDaily(market: 'TW' | 'CN') {
+    if (bootCoolingDown(`${market} scan-intraday`, 0)) return;
     if (!isMarketOpen(market)) return;
     const data = await callRoute(
       `/api/cron/scan-intraday?market=${market}`,
@@ -109,6 +159,8 @@ export async function register() {
   // TW：14:10 CST；CN：16:10 CST（確保 L1 已下載）
   const postCloseDailyDone = { TW: '', CN: '' };
   async function scanPostCloseDaily(market: 'TW' | 'CN') {
+    if (deferForWhisper(`${market} scan post_close`)) return;
+    if (bootCoolingDown(`${market} scan post_close`, 75_000)) return;
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
     const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -167,6 +219,7 @@ export async function register() {
               market,
               staleMin: health.staleMin,
             }),
+            signal: AbortSignal.timeout(5000),
           }).catch(() => {});
         }
       }
@@ -181,6 +234,8 @@ export async function register() {
   type Track = 'bullish' | 'reversal' | 'system';
   const postCloseBmDone = { TW: '', CN: '' };
   async function scanPostCloseBatch(market: 'TW' | 'CN', track: Track) {
+    if (deferForWhisper(`${market} scan-bm-batch ${track}`)) return;
+    if (bootCoolingDown(`${market} scan-bm-batch ${track}`, 60_000)) return;
     const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
     const nowLocal = new Date(new Date().toLocaleString('en-US', { timeZone: tz }));
     const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -240,6 +295,9 @@ export async function register() {
     return 'rest';
   }
   async function downloadL1(market: 'TW' | 'CN') {
+    // 最重（全量下載 3127 檔）→ 開機後最晚才放行，給前面較輕的工作先做完
+    if (deferForWhisper(`${market} download-candles`)) return;
+    if (bootCoolingDown(`${market} download-candles`, 90_000)) return;
     if (isMarketOpen(market)) return; // 盤中不下（收盤價還沒定）
     const lastTrading = getLastTradingDay(market);
     const phase = l1DownloadPhase(market);
@@ -261,6 +319,8 @@ export async function register() {
   // (2) 觸發前強制 call 一次 refreshIntradaySnapshot，確保用最新 L2 而非 in-memory stale。
   const l1SnapshotDone = { TW: '', CN: '' };
   async function appendL1FromSnapshot(market: 'TW' | 'CN') {
+    if (deferForWhisper(`${market} append-from-snapshot`)) return;
+    if (bootCoolingDown(`${market} append-from-snapshot`, 45_000)) return;
     if (isMarketOpen(market)) return;
     const lastTrading = getLastTradingDay(market);
     if (l1SnapshotDone[market] === lastTrading) return;
@@ -352,9 +412,10 @@ export async function register() {
   setInterval(() => {
     const now = new Date();
     const min = now.getMinutes();
-    // :09 → 三色資金盤中（CN 自創策略，獨立於買法軌）
+    // :09 → 三色資金盤中（TW + CN 自創策略，獨立於買法軌）
     if (min % 10 === 9) {
-      scanIntradaySanSe().catch(err => console.error('[local-cron] CN 三色盤中:', err));
+      scanIntradaySanSe('TW').catch(err => console.error('[local-cron] TW 三色盤中:', err));
+      scanIntradaySanSe('CN').catch(err => console.error('[local-cron] CN 三色盤中:', err));
     }
     let track: 'bullish' | 'reversal' | 'system' | null = null;
     if (min % 10 === 2) track = 'bullish';
@@ -396,6 +457,25 @@ export async function register() {
     );
   }, 30 * 1000);
 
+  // ── 三色資金買賣推播 (/api/cron/sanse-notify → ntfy)：每 120 秒 ──
+  // 取代舊爆量手機推播：盯「所有持倉人 open 持倉聯集」（2026-06-12 改，持倉派生，
+  // 不再用手寫清單），三色翻成該買/該賣就推一次（route 內自帶開盤 gate + 當日去重，
+  // 盤外是廉價 no-op）。
+  setInterval(() => {
+    callRoute('/api/cron/sanse-notify', 'sanse-notify').catch(err =>
+      console.error('[local-cron] sanse-notify:', err),
+    );
+  }, 120 * 1000);
+
+  // ── 持倉動作推播 (/api/cron/portfolio-notify → ntfy)：每 120 秒（2026-06-12 A1）──
+  // 停損/全出/減半觸發即推手機 + 13:18-13:30 執行窗再提醒「13:25 掛市價」。
+  // route 內自帶交易日/時段 gate + 當日去重，盤外是廉價 no-op。
+  setInterval(() => {
+    callRoute('/api/cron/portfolio-notify', 'portfolio-notify').catch(err =>
+      console.error('[local-cron] portfolio-notify:', err),
+    );
+  }, 120 * 1000);
+
   // Auto-repair watchdog：主下載 cron 完成後，檢查 verify 報告，
   // 若 stocksStale > 50 或 coverage < 97% 自動觸發 retry-failed
   // 開發本地：每 30 分鐘檢查一次（vercel 上是固定排程）
@@ -411,6 +491,7 @@ export async function register() {
   let lastEtfFetchDate = '';
   let lastEtfTrackDate = '';
   setInterval(() => {
+    if (deferForWhisper('ETF')) return;
     const now = new Date();
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Taipei',
@@ -467,6 +548,7 @@ export async function register() {
   // UI /health 頁讀此快照顯示紅綠燈。一天各市場 1 次去重。
   let lastDailyHealthDate = '';
   setInterval(() => {
+    if (deferForWhisper('daily-health-snapshot')) return;
     const now = new Date();
     const tw = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
@@ -493,27 +575,112 @@ export async function register() {
     }
   }, 60 * 1000);
 
-  // TDCC 大戶持股：每週四 18:30 CST 自動抓最新一週（公布時間 ~17:00）
-  // 用 60s interval 偵測，命中當週四 18:30 CST 才執行；用旗標避免同一天重跑
+  // TDCC 大戶持股：每天傍晚 18:00 CST 後自動檢查、抓最新一週
+  // 為什麼每天而非固定週四：TDCC 的「週五分散表」是週末才公布，固定週四永遠慢一週（2026-06-07 踩過）；
+  // 改每天檢查 → 哪天公布隔天傍晚就抓到、機器睡過頭也會在下次傍晚補抓；route 對已有基準日會自動 skip（便宜）。
+  // 用 60s interval 偵測，hour >= 18 命中傍晚後第一個 tick；旗標避免同一天重跑、機器晚開（>18:00）也能即時補跑
   let lastTdccDate = '';
   setInterval(() => {
     const now = new Date();
     const cst = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Taipei',
       hour12: false,
-      weekday: 'short',
-      hour: '2-digit', minute: '2-digit',
+      hour: '2-digit',
     }).formatToParts(now);
     const get = (t: string) => cst.find(p => p.type === t)?.value ?? '';
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
-    const isThu = get('weekday') === 'Thu';
     const hour = parseInt(get('hour'), 10);
-    const min = parseInt(get('minute'), 10);
-    if (isThu && hour === 18 && min >= 30 && min < 35 && today !== lastTdccDate) {
+    if (hour >= 18 && today !== lastTdccDate) {
+      if (deferForWhisper('TDCC daily')) return;
       lastTdccDate = today;
-      console.log('[local-cron] TDCC 週四自動抓取觸發');
-      callRoute('/api/cron/fetch-tdcc-week', 'TDCC weekly').catch(err =>
+      console.log('[local-cron] TDCC 每日自動抓取觸發');
+      callRoute('/api/cron/fetch-tdcc-week', 'TDCC daily').catch(err =>
         console.error('[local-cron] TDCC fetch failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 海外同業日K：每天 06:35 CST 後抓一次（美股已收盤、日韓抓前日；2026-06-12 B4 補掛 —
+  // 當天部署時漏了這條排程）。route 內建限流退避 + 提早收工，partial 隔日自然補。
+  let lastGlobalPeersDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 635 && today !== lastGlobalPeersDate) {
+      if (deferForWhisper('global-peers daily')) return;
+      lastGlobalPeersDate = today;
+      console.log('[local-cron] global-peers 海外日K抓取觸發');
+      callRoute('/api/cron/fetch-global-peers', 'global-peers daily').catch(err =>
+        console.error('[local-cron] global-peers fetch failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 板塊（題材）強弱排名：每天 17:10 CST 後算一次（TW L1 14:30 eod-settle 已封；2026-06-12 A2）
+  // 讀 themeMap 成分股 L1 → data/sectors/TW/{date}.json，/sectors 頁與 /api/themes/ranking 消費。
+  let lastSectorDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 1710 && today !== lastSectorDate) {
+      if (deferForWhisper('sector-strength daily')) return;
+      lastSectorDate = today;
+      console.log('[local-cron] sector-strength 板塊排名觸發');
+      callRoute('/api/cron/compute-sector-strength', 'sector-strength daily').catch(err =>
+        console.error('[local-cron] sector-strength failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 融資券/借券/當沖全市場持久化：每天 21:40 CST 後抓一次（借券 TWT93U ~21:00 後完整；2026-06-12 B2）
+  // 寫 data/chips/TW/{margin,sbl,daytrade}/，給「融資暴增/借券暴增/當沖過高」時間序判斷與回測用。
+  let lastChipExtrasDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 2140 && today !== lastChipExtrasDate) {
+      if (deferForWhisper('chip-extras daily')) return;
+      lastChipExtrasDate = today;
+      console.log('[local-cron] chip-extras 持久化觸發');
+      callRoute('/api/cron/fetch-chip-extras', 'chip-extras daily').catch(err =>
+        console.error('[local-cron] chip-extras fetch failed:', err),
+      );
+    }
+  }, 60 * 1000);
+
+  // 處置股/注意股官方名單：每天 17:35 CST 後抓一次（公布在收盤後；2026-06-12 B1）
+  // 寫 data/market/TW/attention/，saveScanSession 蓋 disposalVeto / applyPanelFilter 硬排除。
+  // ≥ 比對 + 當日旗標：機器晚開也會在當天第一個 tick 補抓。
+  let lastAttentionDate = '';
+  setInterval(() => {
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now);
+    const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    const hhmm = parseInt(get('hour'), 10) * 100 + parseInt(get('minute'), 10);
+    if (hhmm >= 1735 && today !== lastAttentionDate) {
+      if (deferForWhisper('attention-list daily')) return;
+      lastAttentionDate = today;
+      console.log('[local-cron] 處置股/注意股名單抓取觸發');
+      callRoute('/api/cron/fetch-attention-list', 'attention-list daily').catch(err =>
+        console.error('[local-cron] attention-list fetch failed:', err),
       );
     }
   }, 60 * 1000);

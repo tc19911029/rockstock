@@ -18,6 +18,10 @@ import type {
   YouTubeSourceHealth,
   YouTubeVideo,
 } from '@/lib/youtube/types';
+import { lastBusinessDayYmd } from '@/lib/dateDefaults';
+import { YoutubeProgramStocks } from '@/components/youtube/YoutubeProgramStocks';
+import { VideoSourceBreakdown } from '@/components/youtube/VideoSourceBreakdown';
+import { TeacherAccuracyPanel } from '@/components/youtube/TeacherAccuracyPanel';
 
 type LightLevel = 'green' | 'yellow' | 'red' | 'gray';
 type FetchStatus = 'fetched' | 'no_new' | 'failed' | 'pending' | 'stale';
@@ -29,6 +33,11 @@ interface HealthResponse {
   lights?: Array<{ source_id: string; light: LightLevel; status: FetchStatus; statusLabel: string }>;
   overall?: LightLevel;
   message?: string;
+  /** 關鍵幀管線狀態（只列 keyframe_enabled 來源；今日） */
+  keyframes?: Array<{
+    source_id: string; enabled: boolean;
+    analyzable: number; done: number; failed: number; frames_kept: number;
+  }>;
 }
 
 interface VideoWithTranscript extends YouTubeVideo {
@@ -96,7 +105,9 @@ function todayYmd(): string {
 export function YoutubeTab() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [videos, setVideos] = useState<VideoWithTranscript[]>([]);
-  const [date, setDate] = useState(todayYmd);
+  // 預設「最近交易日」而非今天：白天打開時今日通常還沒節目分析，預設 today 會一片空白（曾被誤認為壞掉）。
+  // 仍保留下方「今日」按鈕可一鍵跳回今天看掃描狀態。
+  const [date, setDate] = useState(lastBusinessDayYmd);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -123,29 +134,29 @@ export function YoutubeTab() {
   const overall: LightLevel = health?.overall ?? 'red';
   const lightConfig: Record<LightLevel, { bg: string; text: string; emoji: string; label: string; tip: string }> = {
     green: {
-      bg: 'bg-green-950/60 border-green-700',
-      text: 'text-green-300',
+      bg: 'bg-green-500/10 border-green-500/30',
+      text: 'text-green-400',
       emoji: '✓',
       label: '已抓到當日新節目',
       tip: '至少一個來源今天有抓到並寫入新節目影片(analyzable > 0)。',
     },
     yellow: {
-      bg: 'bg-yellow-950/60 border-yellow-700',
-      text: 'text-yellow-300',
+      bg: 'bg-yellow-500/10 border-yellow-500/30',
+      text: 'text-yellow-400',
       emoji: '!',
       label: '部分來源連續空日警告',
       tip: 'IRREGULAR 來源連續多日無新節目,可能漏抓 — 請看下方卡片。',
     },
     red: {
-      bg: 'bg-red-950/60 border-red-700',
-      text: 'text-red-300',
+      bg: 'bg-red-500/10 border-red-500/30',
+      text: 'text-red-400',
       emoji: '✗',
       label: '需要處理',
       tip: 'DAILY 來源連續 4 日無新節目 或 抓取失敗 — 可能 yt-dlp 失效或頻道改名。',
     },
     gray: {
-      bg: 'bg-slate-800/60 border-slate-600',
-      text: 'text-slate-400',
+      bg: 'bg-secondary/60 border-border',
+      text: 'text-muted-foreground',
       emoji: '—',
       label: '今日尚未有新節目',
       tip: '掃了 playlist 但今日沒新節目(IRREGULAR 節目常見)或排程還沒跑。屬於正常,非錯誤。',
@@ -168,7 +179,7 @@ export function YoutubeTab() {
           type="date"
           value={date}
           onChange={e => setDate(e.target.value)}
-          className="px-2 py-1 rounded bg-card border border-border text-foreground"
+          className="px-2 py-1 rounded bg-card ring-1 ring-foreground/10 text-foreground"
         />
         <button
           onClick={() => setDate(todayYmd())}
@@ -194,7 +205,7 @@ export function YoutubeTab() {
       )}
 
       {health && !health.snapshot && (
-        <div className="rounded border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+        <div className="rounded ring-1 ring-foreground/10 bg-card p-6 text-center text-sm text-muted-foreground">
           {health.message ?? '尚未有掃描紀錄，請先觸發一次 cron。'}
         </div>
       )}
@@ -217,8 +228,44 @@ export function YoutubeTab() {
         </div>
       )}
 
+      {/* 關鍵幀管線狀態（簡報截圖 OCR；只列 keyframe_enabled 來源，今日） */}
+      {health?.keyframes && health.keyframes.length > 0 && (
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-3 space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold">🖼 簡報關鍵幀（今日）</h2>
+            <span className="text-[11px] text-muted-foreground">
+              影片下載 → 場景偵測 → OCR 初篩；OCR 文字進每晚分析 payload
+            </span>
+          </div>
+          <div className="flex gap-3 flex-wrap text-[11px]">
+            {health.keyframes.map(k => {
+              const sourceName = health.snapshot?.sources.find(s => s.source_id === k.source_id)?.display_name ?? k.source_id;
+              return (
+                <span key={k.source_id} className="whitespace-nowrap">
+                  <span className="text-foreground/80">{sourceName}</span>{' '}
+                  <span className={k.failed > 0 ? 'text-red-400' : k.done >= k.analyzable && k.analyzable > 0 ? 'text-green-400' : 'text-muted-foreground'}>
+                    {k.done}/{k.analyzable}
+                  </span>
+                  {k.frames_kept > 0 && <span className="text-sky-400 ml-1">{k.frames_kept} 幀</span>}
+                  {k.failed > 0 && <span className="text-red-400 ml-1">⚠{k.failed}</span>}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 語音 vs 畫面 — 各影片抓到哪些股票（凸顯關鍵幀 OCR 的獨家貢獻）*/}
+      <VideoSourceBreakdown date={date} />
+
+      {/* 老師準度排序（誰講的準）— 接 teacher-leaderboard，按贏大盤排，誠實框 */}
+      <TeacherAccuracyPanel horizon="d5" />
+
+      {/* 各節目談了哪些股票（以節目為主軸，反轉 /api/youtube/performance）*/}
+      <YoutubeProgramStocks date={date} />
+
       {/* 影片表 */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-lg font-semibold">影片列表</h2>
           <span className="text-xs text-muted-foreground">共 {videos.length} 支</span>
@@ -299,18 +346,18 @@ function SourceCard({ health, light, fetchStatus, fetchStatusLabel }: {
     green: 'bg-green-500',
     yellow: 'bg-yellow-500',
     red: 'bg-red-500',
-    gray: 'bg-slate-500',
+    gray: 'bg-muted-foreground/50',
   };
   const statusTextCls: Record<FetchStatus, string> = {
-    fetched: 'text-green-300',
-    no_new:  'text-slate-400',
-    failed:  'text-red-300',
-    pending: 'text-slate-400',
-    stale:   'text-yellow-300',
+    fetched: 'text-green-400',
+    no_new:  'text-muted-foreground',
+    failed:  'text-red-400',
+    pending: 'text-muted-foreground',
+    stale:   'text-yellow-400',
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3 space-y-2">
+    <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-3 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`w-3 h-3 rounded-full ${dotCls[light]}`} />

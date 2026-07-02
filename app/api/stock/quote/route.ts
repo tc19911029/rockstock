@@ -5,6 +5,7 @@ import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider'
 import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -80,13 +81,29 @@ export async function GET(req: NextRequest) {
 
   // ── CN ──
   if (isCN) {
+    // suffix：明示優先；裸碼用首位推（6/9→上海 SS、其餘→深圳 SZ）。
+    const cnSuffix: 'SS' | 'SZ' = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ'
+      : (/^[69]/.test(pureCode) ? 'SS' : 'SZ');
+
+    // 1) 主源騰訊 qt.gtimg.cn — 與 CN K 線同源、穩定（EastMoney push2 部分環境常 502）。
+    //    F2 修正：原本只走 EastMoney 單次、無重試/fallback → 間歇 404「無法取得報價」。
     try {
-      const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
-      const q = await getEastMoneySingleQuote(pureCode, cnSuffix);
-      if (q && q.close > 0) {
-        quote = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
+      const tq = await fetchQuote(`${pureCode}.${cnSuffix}`);
+      if (tq && tq.price > 0 && tq.open > 0 && tq.high > 0 && tq.low > 0) {
+        // 騰訊量單位「手」、CN L1 基準「股」→ ×100 對齊
+        quote = { open: tq.open, high: tq.high, low: tq.low, close: tq.price, volume: tq.volumeLots * 100 };
       }
     } catch { /* fallthrough */ }
+
+    // 2) fallback EastMoney push2
+    if (!quote) {
+      try {
+        const q = await getEastMoneySingleQuote(pureCode, cnSuffix);
+        if (q && q.close > 0) {
+          quote = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
+        }
+      } catch { /* fallthrough */ }
+    }
   }
 
   // ── L2 fallback（指數要排除，避免 pureCode='000001' 撞到深圳平安銀行 SZ）──

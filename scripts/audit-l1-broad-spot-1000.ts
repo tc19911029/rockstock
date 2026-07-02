@@ -5,7 +5,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { isTradingDay } from '../lib/utils/tradingDay';
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+const REPO_ROOT = '/Users/tc/Desktop/rockstock';
 
 async function main() {
   const today = new Date('2026-05-08');

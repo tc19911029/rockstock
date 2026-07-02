@@ -406,7 +406,7 @@ export async function runTwSingle(
     ? inp.todayPrice / balance.bookValuePerShare
     : null;
   const industryCategory = info?.industry_category ?? null;
-  const industryTemplate = detectIndustryTemplateFor('TW', industryCategory);
+  const industryTemplate = detectIndustryTemplateFor('TW', industryCategory, inp.symbol);
   const peRange = getReasonablePe(industryTemplate);
   const ttmPe = quartersDerived.ttmEps != null && quartersDerived.ttmEps > 0
     ? computeTTMPe(inp.todayPrice, quartersDerived.ttmEps)

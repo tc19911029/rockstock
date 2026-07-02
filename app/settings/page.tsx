@@ -217,7 +217,7 @@ export default function SettingsPage() {
         </div>
 
         {/* 漲跌色彩主題 */}
-        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+        <div className="bg-card ring-1 ring-foreground/10 rounded-xl p-5 space-y-3">
           <h2 className="text-sm font-semibold text-foreground">漲跌色彩</h2>
           <div className="flex gap-3">
             {([

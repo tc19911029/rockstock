@@ -6,10 +6,31 @@ import {
 } from '@/lib/valuation/industryTemplate';
 
 describe('valuation/industryTemplate', () => {
-  it('detects high_growth_asic', () => {
-    expect(detectIndustryTemplate('半導體業')).toBe('high_growth_asic');
+  it('detects high_growth_asic (IC 設計 / 設計服務 / ASIC 關鍵字)', () => {
     expect(detectIndustryTemplate('IC設計')).toBe('high_growth_asic');
     expect(detectIndustryTemplate('其他電子業 - 設計服務')).toBe('high_growth_asic');
+    expect(detectIndustryTemplate('ASIC 設計')).toBe('high_growth_asic');
+  });
+
+  // 2026-06-03 (commit e3fd68d)：裸「半導體業」不再 blanket → high_growth_asic
+  // （TWSE 對所有半導體股都只回「半導體業」，blanket PE50 會把威剛/南亞科等循環/成熟股灌爆）。
+  // 半導體細分改走 SEMI_SYMBOL_TEMPLATE symbol 級白名單；未列入者落回 'other'。
+  it('routes 半導體業 by symbol whitelist, not blanket high_growth_asic', () => {
+    // 裸產業字串、無 symbol → 落回 other（中性 PE），不再預設高成長
+    expect(detectIndustryTemplate('半導體業')).toBe('other');
+    // 真·高成長：晶圓代工龍頭 / IC 設計 / ASIC / IP
+    expect(detectIndustryTemplate('半導體業', '2330')).toBe('high_growth_asic'); // 台積電
+    expect(detectIndustryTemplate('半導體業', '3661')).toBe('high_growth_asic'); // 世芯-KY (ASIC)
+    // DRAM / 記憶體模組 → 景氣循環（威剛/南亞科不再被灌成 PE50）
+    expect(detectIndustryTemplate('半導體業', '2408')).toBe('cyclical'); // 南亞科 (DRAM)
+    expect(detectIndustryTemplate('半導體業', '3260')).toBe('cyclical'); // 威剛 (DRAM 模組)
+    // 成熟代工 / 封測 → 穩定成熟
+    expect(detectIndustryTemplate('半導體業', '2303')).toBe('stable_mature'); // 聯電 (成熟代工)
+    expect(detectIndustryTemplate('半導體業', '3711')).toBe('stable_mature'); // 日月光投控 (封測)
+    // 白名單外的半導體股 → other
+    expect(detectIndustryTemplate('半導體業', '9999')).toBe('other');
+    // symbol 後綴會被去除再比對
+    expect(detectIndustryTemplate('半導體業', '2330.TW')).toBe('high_growth_asic');
   });
 
   it('detects cyclical', () => {

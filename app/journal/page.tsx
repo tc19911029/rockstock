@@ -101,7 +101,8 @@ export default function JournalPage() {
       avgHold,
       avgWinPct,
       avgLossPct,
-      payoffRatio: avgLossPct !== 0 ? Math.abs(avgWinPct / avgLossPct) : 0,
+      // 0 敗時盈虧比未定義（不是 0）— 用 null 代表「尚無虧損」，顯示層轉成 ∞
+      payoffRatio: avgLossPct !== 0 ? Math.abs(avgWinPct / avgLossPct) : null,
       reasonDist,
     };
   }, [items]);
@@ -116,7 +117,7 @@ export default function JournalPage() {
 
   return (
     <PageShell headerSlot={header}>
-      <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
+      <div className="px-4 py-4 space-y-4">
 
         {/* Stats */}
         {stats && (
@@ -125,8 +126,10 @@ export default function JournalPage() {
             <StatCard label="勝率" value={`${stats.winRate.toFixed(1)}%`} tone={stats.winRate >= 50 ? 'good' : 'warn'} />
             <StatCard label="累計損益" value={formatNT(stats.totalPnL)} tone={stats.totalPnL >= 0 ? 'good' : 'bad'} />
             <StatCard label="平均持有" value={`${stats.avgHold.toFixed(1)} 天`} />
-            <StatCard label="盈虧比" value={stats.payoffRatio.toFixed(2)} tone={stats.payoffRatio >= 1.5 ? 'good' : 'warn'}
-              hint={`勝 +${stats.avgWinPct.toFixed(1)}% / 敗 ${stats.avgLossPct.toFixed(1)}%`} />
+            <StatCard label="盈虧比"
+              value={stats.payoffRatio == null ? (stats.wins > 0 ? '∞' : '—') : stats.payoffRatio.toFixed(2)}
+              tone={stats.payoffRatio == null ? (stats.wins > 0 ? 'good' : undefined) : stats.payoffRatio >= 1.5 ? 'good' : 'warn'}
+              hint={`勝 +${stats.avgWinPct.toFixed(1)}% / 敗 ${stats.losses > 0 ? stats.avgLossPct.toFixed(1) + '%' : '— 尚無虧損'}`} />
           </section>
         )}
 

@@ -1,4 +1,5 @@
 import { CandleWithIndicators } from '@/types';
+import { MAX_CANDLE_BODY_PCT, MEDIUM_CANDLE_BODY_MIN } from '@/lib/analysis/bookThresholds';
 
 /** K棒實體大小（絕對值，百分比） */
 export function bodyPct(c: CandleWithIndicators): number {
@@ -18,6 +19,32 @@ export function isLongBlackCandle(c: CandleWithIndicators): boolean {
 /** K棒1/2價（最高+最低）÷2 */
 export function halfPrice(c: CandleWithIndicators): number {
   return (c.high + c.low) / 2;
+}
+
+/**
+ * K 棒三層支撐/壓力價位（書本 CH2-04 長紅棒三層支撐 / 長黑棒三層壓力，投影片 p06）。
+ *
+ * 長紅 K（多方）：
+ *   - strong = 最高價（最強支撐；黑K跌破→攻擊力道減弱，需 3~5 日站回）
+ *   - mid    = 1/2 價 = (最高+最低)/2 = 當日平均成本（跌破→賣壓出籠）
+ *   - weak   = 最低價（最弱支撐；跌破→多空易位、長紅變壓力）
+ * 長黑 K（空方）為鏡像：strong=最低、weak=最高（突破最高=空多易位）。
+ *
+ * 純顯示用（走圖階梯式出場框架），不接選股 gate。mid 一律走 halfPrice()=（高+低）/2。
+ */
+export interface CandleSRLevels {
+  /** 紅K=向上長棒（多方三層支撐）｜黑K=向下長棒（三層壓力，鏡像） */
+  direction: 'up' | 'down';
+  strong: number;  // 最強（紅K最高 / 黑K最低）
+  mid:    number;  // 1/2 平均成本價（halfPrice）
+  weak:   number;  // 最弱（紅K最低 / 黑K最高）
+}
+
+export function candleSRLevels(c: CandleWithIndicators): CandleSRLevels {
+  const up = c.close >= c.open;
+  return up
+    ? { direction: 'up',   strong: c.high, mid: halfPrice(c), weak: c.low }
+    : { direction: 'down', strong: c.low,  mid: halfPrice(c), weak: c.high };
 }
 
 /** 計算收盤與MA的乖離率（正=高於MA，負=低於MA） */
@@ -110,6 +137,31 @@ export function isMedLongRed(c: CandleWithIndicators): boolean {
 /** 是否為中長黑K（實體 >= 2%；2026-05-04 從 2.5% 對齊寶典 2024） */
 export function isMedLongBlack(c: CandleWithIndicators): boolean {
   return c.close < c.open && bodyPct(c) >= 0.02;
+}
+
+// ─── 朱家泓課程 K 棒三級制（CH2-4/2-5：小棒 / 中棒 / 最大棒）───────────────
+// 平行於 isLongRed/isMedLong（≥2%）與 isSmallCandle（<1.5%），純新增、不接 gate。
+
+/** 最大棒紅K（漲停級長紅，實體 ≥ 6.5%）— 課程 CH2-4/2-5「最大棒」 */
+export function isMaxBullishCandle(c: CandleWithIndicators): boolean {
+  return c.close > c.open && bodyPct(c) >= MAX_CANDLE_BODY_PCT;
+}
+
+/** 最大棒黑K（實體 ≥ 6.5%）*/
+export function isMaxBearishCandle(c: CandleWithIndicators): boolean {
+  return c.close < c.open && bodyPct(c) >= MAX_CANDLE_BODY_PCT;
+}
+
+/** 中紅棒（實體 3.5%–6.5%）— 三級制中棒 */
+export function isMediumRed(c: CandleWithIndicators): boolean {
+  const b = bodyPct(c);
+  return c.close > c.open && b >= MEDIUM_CANDLE_BODY_MIN && b < MAX_CANDLE_BODY_PCT;
+}
+
+/** 中黑棒（實體 3.5%–6.5%）*/
+export function isMediumBlack(c: CandleWithIndicators): boolean {
+  const b = bodyPct(c);
+  return c.close < c.open && b >= MEDIUM_CANDLE_BODY_MIN && b < MAX_CANDLE_BODY_PCT;
 }
 
 /** 向上跳空缺口：curr.low > prev.high */

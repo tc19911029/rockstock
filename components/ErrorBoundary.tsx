@@ -42,7 +42,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
       const section = this.props.section ?? '模組';
       return (
-        <div className="flex items-center justify-center h-full min-h-[120px] bg-card border border-border rounded-lg text-muted-foreground p-4">
+        <div className="flex items-center justify-center h-full min-h-[120px] bg-card ring-1 ring-foreground/10 rounded-xl text-muted-foreground p-4">
           <div className="text-center space-y-2">
             <p className="text-sm font-medium">{section}載入失敗</p>
             <p className="text-xs text-red-400/80 max-w-xs truncate">

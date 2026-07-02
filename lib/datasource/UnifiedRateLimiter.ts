@@ -154,7 +154,9 @@ class TokenBucket {
     this.state.stats.errors++;
     this.state.stats.lastError = `${status}: ${message ?? 'unknown'}`;
 
-    if (status === 402 || status === 429 || status >= 500) {
+    // status 0 = 網路層失敗（socket closed / abort / DNS）—— 來源在丟連線，退避才能止血，
+    // 否則上層連續 fetch throw 時限流器全速放行、持續硬打失敗來源（2026-06-02 EastMoney 風暴）。
+    if (status === 0 || status === 402 || status === 429 || status >= 500) {
       const backoffMs = Math.min(
         this.config.backoffMs * this.state.backoffMultiplier,
         this.config.maxBackoffMs,

@@ -2,7 +2,7 @@
  * CN A 股 L1 全面稽核（04-29 / 04-30）
  *
  * 資料源：Tencent ifzq.gtimg.cn 日K（qfq 前復權）
- *   https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=<prefix><code>,day,YYYY-MM-DD,YYYY-MM-DD,1,qfq
+ *   https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param=<prefix><code>,day,YYYY-MM-DD,YYYY-MM-DD,1,qfq
  *   prefix: sh / sz
  *   每筆：[date, open, close, high, low, volume(手)]
  *
@@ -54,7 +54,7 @@ interface Official {
 
 async function fetchTencent(code: string, suffix: 'SS' | 'SZ'): Promise<Map<string, Official>> {
   const prefix = suffix === 'SS' ? 'sh' : 'sz';
-  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${prefix}${code},day,2026-04-20,2026-04-30,10,qfq`;
+  const url = `https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param=${prefix}${code},day,2026-04-20,2026-04-30,10,qfq`;
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0' },
     signal: AbortSignal.timeout(10000),

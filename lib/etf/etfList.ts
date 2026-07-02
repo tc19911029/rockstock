@@ -36,6 +36,29 @@ export const ACTIVE_ETF_LIST: ETFListItem[] = [
   { etfCode: '00997A', etfName: '主動群益美國增長',  market: 'TW', inceptionDate: null, inceptionPrice: null, issuer: '群益投信' },
 ];
 
+/**
+ * 全球／美國型主動 ETF（持股以外國股為主，顯示原文公司名）。
+ * 分類依據＝實際持股的「外國股占比」（2026-06-21 量測：這 6 檔 ≥65%，其餘 15 檔 ≤2%，中間有明顯斷層）。
+ * ⚠️ 不可憑名字猜：00986A「台新龍頭成長」名稱像台股、實際 88% 外國股。
+ * 用途＝ETF 追蹤面板「只看台股型」過濾（顯示層）；cron 下載仍抓全部 21 檔，不受影響。
+ */
+const GLOBAL_ETF_CODES = new Set([
+  '00983A', // 中信ARK創新   — 外股 100%
+  '00986A', // 台新龍頭成長  — 外股 88%
+  '00988A', // 統一全球創新  — 外股 65%
+  '00989A', // 摩根美國科技  — 外股 100%
+  '00990A', // 元大AI新經濟  — 外股 67%
+  '00997A', // 群益美國增長  — 外股 83%
+]);
+
+/** 是否為全球／美國型 ETF（持股以外國股為主）。 */
+export function isGlobalETF(etfCode: string): boolean {
+  return GLOBAL_ETF_CODES.has(etfCode);
+}
+
+/** 台股型主動 ETF（持股以台股為主）— ETF 追蹤面板預設只顯示這些。 */
+export const TW_ETF_LIST: ETFListItem[] = ACTIVE_ETF_LIST.filter((e) => !isGlobalETF(e.etfCode));
+
 export function findETF(etfCode: string): ETFListItem | null {
   return ACTIVE_ETF_LIST.find((e) => e.etfCode === etfCode) ?? null;
 }

@@ -16,6 +16,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { ytdlpProxyArgs } from './ytdlp';
 
 const DEFAULT_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -76,6 +77,7 @@ export async function fetchTranscript(opts: FetchTranscriptOptions): Promise<Tra
       '--convert-subs', 'vtt',
       '--no-warnings',
       '--ignore-config',
+      ...(await ytdlpProxyArgs()),
       '-o', path.join(work, '%(id)s.%(ext)s'),
       opts.videoUrl,
     ];

@@ -13,7 +13,7 @@ import path from 'path';
 import { TaiwanScanner } from '../lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '../lib/scanner/ChinaScanner';
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+const REPO_ROOT = '/Users/tc/Desktop/rockstock';
 
 async function refresh(market: 'TW' | 'CN') {
   const scanner = market === 'TW' ? new TaiwanScanner() : new ChinaScanner();

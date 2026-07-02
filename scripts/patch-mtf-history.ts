@@ -7,7 +7,7 @@
  *       只更新 mtfWeeklyPass/mtfScore，不動其他六條件欄位。
  *
  * 使用方式：
- *   cd /Users/tzu-chienhsu/Desktop/rockstock
+ *   cd /Users/tc/Desktop/rockstock
  *   npx ts-node --project tsconfig.scripts.json scripts/patch-mtf-history.ts
  *
  * 可加 --market CN 只跑 CN（預設 TW）

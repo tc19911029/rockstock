@@ -18,13 +18,15 @@ import { CandleWithIndicators, RuleSignal, ChartSignalMarker } from '@/types';
 import { getBullBearColors } from '@/lib/chart/colors';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import { detectLetterNStructure, detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
+import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
 
 const MA_COLORS = {
   ma5:   '#facc15', // 黃
   ma10:  '#3b82f6', // 藍
   ma20:  '#a855f7', // 紫
   ma60:  '#e2e8f0', // 白
-  ma240: '#f97316', // 橘
+  ma120: '#22d3ee', // 青（半年線）
+  ma240: '#f97316', // 橘（年線）
 };
 
 /** Convert date string to lightweight-charts Time.
@@ -146,7 +148,7 @@ interface CandleChartProps {
   onDoubleClick?: (candle: CandleWithIndicators) => void;
   height?: number;
   fillContainer?: boolean;
-  maToggles?: { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma240: boolean };
+  maToggles?: { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma120: boolean; ma240: boolean };
   showBollinger?: boolean;
   /** 顯示書本 p.37/p.38 切線（下降切線+上升切線），預設開 */
   showTrendlines?: boolean;
@@ -164,6 +166,11 @@ interface CandleChartProps {
   showPivots?: boolean;
   /** 顯示前高壓/前低撐/大量撐壓線，預設關 */
   showSupportResistance?: boolean;
+  /**
+   * 顯示最近一根長紅/長黑 K 的三層支撐/壓力標線（書本 CH2-04 最高=最強、1/2=平均成本、最低=最弱），
+   * 純顯示的階梯式出場框架，不接 gate。預設關。
+   */
+  showCandleSR?: boolean;
   /** 顯示形態頸線 + 目標價 + 結構失效價，預設關 */
   showNeckline?: boolean;
   /** 顯示形態關鍵點（ABCDE / L1L2L3 + H1H2 等）與連線，預設關 */
@@ -193,7 +200,7 @@ interface CandleChartProps {
     zb4: { time: string; value: number }[];
     zb5: { time: string; value: number }[];
     duokong: { time: string; value: number }[];
-    markers: { time: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown'; color: string; text: string }[];
+    markers: { time: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown' | 'circle'; color: string; text: string; size?: number }[];
   } | null;
   /**
    * ABC 突破偵測器選用的腳位疊加（除錯/驗證用，2026-05-30）— 把 detectABCBreakout 實際選的
@@ -205,11 +212,26 @@ interface CandleChartProps {
     trendline: { time: string; value: number }[];
     broke: boolean;   // 今日收盤是否突破切線（決定切線顏色）
   } | null;
+  /**
+   * 大戶持股趨勢線（TDCC 千張大戶持股%）— 淡淡一條疊在主圖上，用自己的隱形價格軸（holderPct），
+   * 不壓壞 K 線價格刻度。純「格局強弱」參考、不發訊號（回測證實沒有預測力，2026-06-14）。
+   * 傳 null = 不畫。值已 forward-fill 對齊到 K 棒日期。
+   */
+  holderLine?: { time: string; value: number }[] | null;
+  /** 大戶持股線的級距標籤（依股價自動挑：千張/400張/百張大戶），預設「千張大戶」 */
+  holderLineLabel?: string;
+  /**
+   * 顯示均線「移動扣抵」三角標 — 在每條均線「下一根要丟掉」的那根 K 棒下方畫一個同色 ▲
+   * （MA5＝往左數第 5 根、MA10＝第 10 根、MA20＝第 20 根…扣抵棒索引 = 最新一根 − N + 1）。
+   * 今收高於該三角指的那根收盤 → 均線下一步往上。算法同 lib/analysis/maDeduction。
+   * 三角跟著各 MA 的顯示/隱藏連動（關掉 MA10 → 它的三角也消失）。預設開。
+   */
+  showMaDeduction?: boolean;
 }
 
 export default function CandleChart({
   candles, signals, chartMarkers = [], avgCost, stopLossPrice, onCrosshairMove, onDoubleClick, height = 400, fillContainer = false,
-  maToggles = { ma5: true, ma10: true, ma20: true, ma60: true, ma240: false },
+  maToggles = { ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false },
   showBollinger = false,
   showTrendlines = true,
   showAscendingTrendline,
@@ -219,6 +241,7 @@ export default function CandleChart({
   showConsolidationLines = false,
   showPivots = false,
   showSupportResistance = false,
+  showCandleSR = false,
   showNeckline = false,
   showPattern = false,
   highlightDate,
@@ -226,6 +249,9 @@ export default function CandleChart({
   lockedPattern,
   shuangB = null,
   abcOverlay = null,
+  holderLine = null,
+  holderLineLabel = '千張大戶',
+  showMaDeduction = true,
 }: CandleChartProps) {
   const containerRef   = useRef<HTMLDivElement>(null);
   const chartRef       = useRef<IChartApi | null>(null);
@@ -239,6 +265,8 @@ export default function CandleChart({
   const avgCostLineRef   = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
   const stopLossLineRef  = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null);
   const srLineRefs       = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([]);
+  // K 棒三層支撐/壓力標線（最近一根長紅/長黑的最高/1半/最低）
+  const candleSRLineRefs = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([]);
   // 形態 toggle 用 LineSeries（支援水平+斜線；descending-wedge 頸線是斜的）
   const necklineRef       = useRef<ISeriesApi<'Line'> | null>(null);
   const targetRef         = useRef<ISeriesApi<'Line'> | null>(null);
@@ -248,12 +276,19 @@ export default function CandleChart({
   const shuangBRefs       = useRef<{ zhineng?: ISeriesApi<'Line'>; zb4?: ISeriesApi<'Line'>; zb5?: ISeriesApi<'Line'>; duokong?: ISeriesApi<'Line'> }>({});
   // ABC 偵測器腳位切線（除錯/驗證疊加）
   const abcTrendlineRef   = useRef<ISeriesApi<'Line'> | null>(null);
+  // 大戶持股趨勢線（千張大戶%，自己的隱形價格軸）
+  const holderLineRef     = useRef<ISeriesApi<'Line'> | null>(null);
   // Keep latest candles accessible inside event closures without re-subscribing
   const candlesRef     = useRef<CandleWithIndicators[]>(candles);
   const timeMapRef     = useRef<Map<string | number, CandleWithIndicators>>(new Map());
+  // 記住上次「自動套用可視範圍」的視窗身分 — 只有換股/換週期/換中心日才重置，
+  // 盤中輪詢換新 candles reference 不重置（否則使用者拖動的視窗每 ~30s 被打回原樣）
+  const lastFitKeyRef  = useRef<string | null>(null);
   const onCrosshairRef = useRef(onCrosshairMove);
   const onDoubleClickRef = useRef(onDoubleClick);
   const [hoverCandle, setHoverCandle] = useState<CandleWithIndicators | null>(null);
+  // 均線移動扣抵三角標（貼在圖最底下一排，x 對齊各 MA「下一根要丟掉」的那根 K 棒）
+  const [deductMarks, setDeductMarks] = useState<Array<{ key: keyof typeof MA_COLORS; n: number; color: string; x: number }>>([]);
   const [trendlineStatus, setTrendlineStatus] = useState<{
     ascending: { anchorIndex: number; anchorPrice: number; slope: number } | null;
     descending: { anchorIndex: number; anchorPrice: number; slope: number } | null;
@@ -370,11 +405,12 @@ export default function CandleChart({
       wickUpColor: bull, wickDownColor: bear,
     });
 
-    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
+    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma120', 'ma240'] as const;
     const newMARef: Record<string, ISeriesApi<'Line'>> = {};
     for (const key of maKeys) {
       newMARef[key] = chart.addSeries(LineSeries, {
         color: MA_COLORS[key], lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerRadius: 2,
       });
     }
 
@@ -459,6 +495,13 @@ export default function CandleChart({
       title: 'ABC切線',
     });
 
+    // ── 大戶持股趨勢線（千張大戶%）：淡粉細線，掛自己的隱形軸 holderPct，不動 K 線價格刻度 ──
+    holderLineRef.current = chart.addSeries(LineSeries, {
+      color: 'rgba(236, 72, 153, 0.5)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+      priceScaleId: 'holderPct',
+    });
+    chart.priceScale('holderPct').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.08 } });
+
     chartRef.current  = chart;
     candleRef.current = candleSeries;
     maRefs.current    = newMARef;
@@ -526,19 +569,14 @@ export default function CandleChart({
   useEffect(() => {
     if (!candleRef.current || candles.length === 0) return;
 
-    // 訊號日那根 K 棒整根塗黃（取代舊的黃點 + 「訊號日」文字標記）
-    const hlDate = highlightDate ? highlightDate.replace(/\*$/, '') : null;
-    candleRef.current.setData(candles.map(c => {
-      const base = { time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close };
-      if (hlDate && c.date.replace(/\*$/, '') === hlDate) {
-        return { ...base, color: '#facc15', borderColor: '#facc15', wickColor: '#facc15' };
-      }
-      return base;
-    }));
+    // 進場/訊號日那根 K 棒維持原本紅綠顏色；改在 K 棒下方加黃圓點標記（見下方 markers effect）
+    candleRef.current.setData(candles.map(c => ({
+      time: toTime(c.date), open: c.open, high: c.high, low: c.low, close: c.close,
+    })));
     /** 過濾 null/undefined/NaN（分鐘K MA 數據不足時會產生 NaN） */
     const validNum = (v: number | undefined | null): v is number =>
       v != null && Number.isFinite(v);
-    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
+    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma120', 'ma240'] as const;
     for (const key of maKeys) {
       maRefs.current[key]?.setData(
         candles.filter(c => validNum(c[key])).map(c => ({ time: toTime(c.date), value: c[key]! }))
@@ -744,32 +782,38 @@ export default function CandleChart({
       const totalBars = candles.length;
       const visibleBars = 80;
 
-      if (centerOnDate) {
-        // 以指定日期為中心，前後各顯示 40 根
-        let centerIdx = candles.findIndex(c => c.date === centerOnDate);
-        if (centerIdx === -1) {
-          // fallback: 找最近前一根
-          for (let i = candles.length - 1; i >= 0; i--) {
-            if (candles[i].date <= centerOnDate) { centerIdx = i; break; }
+      // 只有「換股 / 換週期 / 換中心日」才自動套用可視範圍；盤中輪詢只是換新 candles
+      // reference（同檔同週期、只動最後一根），key 不變 → 不重置，保留使用者拖動的視窗。
+      const fitKey = `${centerOnDate ?? ''}|${candles[0]?.date ?? ''}|${candles[1]?.date ?? ''}`;
+      if (lastFitKeyRef.current !== fitKey) {
+        lastFitKeyRef.current = fitKey;
+        if (centerOnDate) {
+          // 以指定日期為中心，前後各顯示 40 根
+          let centerIdx = candles.findIndex(c => c.date === centerOnDate);
+          if (centerIdx === -1) {
+            // fallback: 找最近前一根
+            for (let i = candles.length - 1; i >= 0; i--) {
+              if (candles[i].date <= centerOnDate) { centerIdx = i; break; }
+            }
           }
+          if (centerIdx === -1) centerIdx = totalBars - 1;
+          const half = Math.floor(visibleBars / 2);
+          chart.timeScale().setVisibleLogicalRange({
+            from: centerIdx - half,
+            to:   centerIdx + half,
+          });
+        } else {
+          // 預設顯示最近 80 根K棒（仿 WantGoo 6個月日線），讓K棒大小清晰
+          chart.timeScale().setVisibleLogicalRange({
+            from: totalBars - visibleBars - 1,
+            to:   totalBars + 3,
+          });
         }
-        if (centerIdx === -1) centerIdx = totalBars - 1;
-        const half = Math.floor(visibleBars / 2);
-        chart.timeScale().setVisibleLogicalRange({
-          from: centerIdx - half,
-          to:   centerIdx + half,
-        });
-      } else {
-        // 預設顯示最近 80 根K棒（仿 WantGoo 6個月日線），讓K棒大小清晰
-        chart.timeScale().setVisibleLogicalRange({
-          from: totalBars - visibleBars - 1,
-          to:   totalBars + 3,
+        requestAnimationFrame(() => {
+          const range = chart.timeScale().getVisibleLogicalRange();
+          if (range) broadcastRange(range as { from: number; to: number });
         });
       }
-      requestAnimationFrame(() => {
-        const range = chart.timeScale().getVisibleLogicalRange();
-        if (range) broadcastRange(range as { from: number; to: number });
-      });
     }
   }, [candles, centerOnDate, highlightDate, showTrendlines, showAscendingTrendline, showDescendingTrendline, showAscendingChannel, showDescendingChannel, showConsolidationLines]);
 
@@ -783,6 +827,13 @@ export default function CandleChart({
     r.zb5?.setData(shuangB ? toLine(shuangB.zb5) : []);
     r.duokong?.setData(shuangB ? toLine(shuangB.duokong) : []);
   }, [shuangB]);
+
+  // ── 大戶持股趨勢線：set/clear（值已對齊 K 棒日期）──
+  useEffect(() => {
+    holderLineRef.current?.setData(
+      holderLine ? holderLine.map(p => ({ time: toTime(p.time), value: p.value })) : []
+    );
+  }, [holderLine]);
 
   // ── ABC 偵測器腳位切線：set/clear（markers 併入下方 markers effect）──
   useEffect(() => {
@@ -799,7 +850,7 @@ export default function CandleChart({
 
   // ── MA visibility toggle ─────────────────────────────────────────────────
   useEffect(() => {
-    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma240'] as const;
+    const maKeys = ['ma5', 'ma10', 'ma20', 'ma60', 'ma120', 'ma240'] as const;
     for (const key of maKeys) {
       const series = maRefs.current[key];
       if (series) {
@@ -892,7 +943,7 @@ export default function CandleChart({
       for (const m of shuangB.markers) {
         converted.push({
           time: toTime(m.time), position: m.position, shape: m.shape,
-          color: m.color, text: m.text, size: 1,
+          color: m.color, text: m.text, size: m.size ?? 1,
         });
       }
     }
@@ -905,6 +956,17 @@ export default function CandleChart({
         });
       }
     }
+    // 進場/訊號日 — K 棒下方黃圓點（取代整根塗黃）
+    const hlMark = highlightDate ? highlightDate.replace(/\*$/, '') : null;
+    if (hlMark) {
+      const bar = candles.find(c => c.date.replace(/\*$/, '') === hlMark);
+      if (bar) {
+        converted.push({
+          time: toTime(bar.date), position: 'belowBar', shape: 'circle',
+          color: '#facc15', text: '', size: 2,
+        });
+      }
+    }
     // lightweight-charts 要求 markers 按時間升序
     converted.sort((a, b) => {
       const ta = String(a.time);
@@ -913,6 +975,48 @@ export default function CandleChart({
     });
     markersPlugRef.current.setMarkers(converted);
   }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern, shuangB, abcOverlay]);
+
+  // ── 均線移動扣抵三角標：算各 MA「下一根要丟掉」那根 K 棒的 x 像素，貼在圖最底一排 ──
+  // 扣抵棒索引 = 最新一根 − N + 1（今收高於該根收盤 → 均線下一步往上，見 lib/analysis/maDeduction）。
+  // 跟著各 MA 顯示與否連動；用 timeToCoordinate 對齊，捲動/縮放/resize 都重算，捲出畫面就不畫。
+  useEffect(() => {
+    const chart = chartRef.current;
+    const node  = containerRef.current;
+    if (!chart || !node) return;
+    const ts = chart.timeScale();
+    const deductMAs: Array<{ n: number; key: keyof typeof MA_COLORS }> = [
+      { n: 5,  key: 'ma5'  },
+      { n: 10, key: 'ma10' },
+      { n: 20, key: 'ma20' },
+      { n: 60, key: 'ma60' },
+    ];
+
+    const recompute = () => {
+      if (!showMaDeduction || candles.length === 0) { setDeductMarks([]); return; }
+      const asOf = candles.length - 1;
+      const marks: Array<{ key: keyof typeof MA_COLORS; n: number; color: string; x: number }> = [];
+      for (const { n, key } of deductMAs) {
+        if (!maToggles[key]) continue;          // 該 MA 沒開 → 不畫它的扣抵三角
+        const dropIdx = asOf - n + 1;
+        if (dropIdx < 0) continue;              // 窗口還沒滿
+        const bar = candles[dropIdx];
+        if (!bar) continue;
+        const x = ts.timeToCoordinate(toTime(bar.date));
+        if (x == null) continue;               // 扣抵棒捲出畫面
+        marks.push({ key, n, color: MA_COLORS[key], x: x as number });
+      }
+      setDeductMarks(marks);
+    };
+
+    recompute();
+    ts.subscribeVisibleLogicalRangeChange(recompute);
+    const ro = new ResizeObserver(recompute);
+    ro.observe(node);
+    return () => {
+      ts.unsubscribeVisibleLogicalRangeChange(recompute);
+      ro.disconnect();
+    };
+  }, [candles, maToggles, showMaDeduction]);
 
   // ── Support/resistance price lines (前高壓 / 前低撐 / 大量撐壓) ──────────
   useEffect(() => {
@@ -969,6 +1073,43 @@ export default function CandleChart({
       }));
     }
   }, [showSupportResistance, candles]);
+
+  // ── K 棒三層支撐/壓力標線（書本 CH2-04：最高=最強、1/2=平均成本、最低=最弱）──
+  // 錨定「最近一根長紅/長黑 K」，畫 3 條水平線；純顯示的階梯式出場框架，不接 gate。
+  useEffect(() => {
+    if (!candleRef.current) return;
+    for (const line of candleSRLineRefs.current) {
+      try { candleRef.current.removePriceLine(line); } catch { /* noop */ }
+    }
+    candleSRLineRefs.current = [];
+
+    if (!showCandleSR || candles.length === 0) return;
+
+    // 從最新往回找最近一根長紅（多方）或長黑（空方）K 棒當錨點
+    let anchorIdx = -1;
+    for (let i = candles.length - 1; i >= 0; i--) {
+      if (isLongRedCandle(candles[i]) || isLongBlackCandle(candles[i])) { anchorIdx = i; break; }
+    }
+    if (anchorIdx < 0) return;  // 近期無長紅/長黑 → 不畫
+
+    const lv = candleSRLevels(candles[anchorIdx]);
+    const isUp = lv.direction === 'up';
+    // 多方三層支撐用綠、空方三層壓力用紅；中線（平均成本）一律 amber 虛線
+    const strongColor = isUp ? '#10b981' : '#ec4899';
+    const weakColor   = isUp ? '#10b981' : '#ec4899';
+    const prefix = isUp ? '撐' : '壓';
+    const lines: Array<{ price: number; color: string; title: string; width: 1 | 2 }> = [
+      { price: lv.strong, color: strongColor, title: `最強${prefix}`,    width: 2 },
+      { price: lv.mid,    color: '#f59e0b',   title: '½平均成本',          width: 1 },
+      { price: lv.weak,   color: weakColor,   title: `最弱${prefix}`,    width: 1 },
+    ];
+    for (const ln of lines) {
+      candleSRLineRefs.current.push(candleRef.current.createPriceLine({
+        price: ln.price, color: ln.color, lineWidth: ln.width, lineStyle: 2,
+        axisLabelVisible: true, title: ln.title,
+      }));
+    }
+  }, [showCandleSR, candles]);
 
   // ── 頸線 / 目標 / 結構失效（showNeckline）+ 形態連線（showPattern） ──
   useEffect(() => {
@@ -1076,6 +1217,40 @@ export default function CandleChart({
     return 'pending';
   }, [activePattern, candles]);
 
+  // 雙B 線（智能交易線/黃線/紅線/多空線）在 hover（或最新）K 棒的數值 —
+  // 比照 MA 圖例：疊圖開啟時把線值標出來，游標移動時跟著變。
+  const shuangBMaps = useMemo(() => {
+    if (!shuangB) return null;
+    const m = (pts: { time: string; value: number }[]) =>
+      new Map(pts.map(p => [String(p.time).replace(/\*$/, ''), p.value] as const));
+    return { zhineng: m(shuangB.zhineng), zb4: m(shuangB.zb4), zb5: m(shuangB.zb5), duokong: m(shuangB.duokong) };
+  }, [shuangB]);
+  const shuangBLegend = (() => {
+    if (!shuangBMaps || !displayForLegend) return null;
+    const d = displayForLegend.date.replace(/\*$/, '');
+    const pd = prevForLegend?.date?.replace(/\*$/, '');
+    const at = (map: Map<string, number>) => {
+      const v = map.get(d);
+      if (v == null) return null;
+      const pv = pd != null ? map.get(pd) : undefined;
+      return { v, arrow: pv != null ? (v >= pv ? ' ↑' : ' ↓') : '' };
+    };
+    const z = at(shuangBMaps.zhineng), y = at(shuangBMaps.zb4), r = at(shuangBMaps.zb5), dk = at(shuangBMaps.duokong);
+    return (z || y || r || dk) ? { z, y, r, dk } : null;
+  })();
+
+  // 大戶持股趨勢線在 hover（或最新）K 棒的數值
+  const holderLegend = (() => {
+    if (!holderLine || !displayForLegend) return null;
+    const map = new Map(holderLine.map(p => [String(p.time).replace(/\*$/, ''), p.value] as const));
+    const d = displayForLegend.date.replace(/\*$/, '');
+    const v = map.get(d);
+    if (v == null) return null;
+    const pd = prevForLegend?.date?.replace(/\*$/, '');
+    const pv = pd != null ? map.get(pd) : undefined;
+    return { v, arrow: pv != null ? (v >= pv ? ' ↑' : v < pv ? ' ↓' : '') : '' };
+  })();
+
   const statusLabel: Record<PatternStatus, { text: string; cls: string }> = {
     pending: { text: '待突破',  cls: 'bg-amber-900/80 text-amber-100 border-amber-700' },
     success: { text: '已突破',  cls: 'bg-emerald-900/80 text-emerald-100 border-emerald-700' },
@@ -1108,6 +1283,23 @@ export default function CandleChart({
             }`}>{bestSignal.label}</span>
           )}
         </div>
+
+        {/* Row 1.5: 雙B 線數值（智能交易線/黃線/紅線/多空線）— 疊圖開啟才顯示，對齊 hover/最新 K 棒 */}
+        {shuangBLegend && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-mono">
+            {shuangBLegend.z && <span style={{ color: '#22D3EE' }}>智能線 {shuangBLegend.z.v.toFixed(2)}{shuangBLegend.z.arrow}</span>}
+            {shuangBLegend.y && <span style={{ color: '#FFD000' }}>黃線 {shuangBLegend.y.v.toFixed(2)}{shuangBLegend.y.arrow}</span>}
+            {shuangBLegend.r && <span style={{ color: '#FF433D' }}>紅線 {shuangBLegend.r.v.toFixed(2)}{shuangBLegend.r.arrow}</span>}
+            {shuangBLegend.dk && <span style={{ color: '#FFD000' }} className="opacity-70">多空線 {shuangBLegend.dk.v.toFixed(2)}{shuangBLegend.dk.arrow}</span>}
+          </div>
+        )}
+
+        {/* Row 1.6: 大戶持股趨勢線數值（千張大戶%）— 開啟才顯示，對齊 hover/最新 K 棒 */}
+        {holderLegend && (
+          <div className="flex items-center text-xs font-mono">
+            <span style={{ color: '#ec4899' }} className="opacity-80">{holderLineLabel} {holderLegend.v.toFixed(1)}%{holderLegend.arrow}</span>
+          </div>
+        )}
 
         {/* Row 2: 形態 chip + 頸/標/失（一排，存在才顯示；信號 badge 在右上獨立）*/}
         {hasInfoRow && (
@@ -1245,6 +1437,23 @@ export default function CandleChart({
       </div>{/* /左上資訊區 container（含 MA + 信號 badge + 形態 chip + 切線 legend）*/}
 
       <div ref={containerRef} className={fillContainer ? 'w-full h-full' : 'w-full'} style={fillContainer ? undefined : { height }} />
+
+      {/* 均線移動扣抵三角標 ▲ — 貼在圖最底一排（x 對齊各 MA「下一根要丟掉」的 K 棒，同色） */}
+      {showMaDeduction && deductMarks.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 z-10" style={{ bottom: 24 }}>
+          {deductMarks.map(m => (
+            <div
+              key={m.key}
+              className="absolute flex flex-col items-center font-mono leading-none"
+              style={{ left: m.x, transform: 'translateX(-50%)' }}
+              title={`MA${m.n} 扣抵棒 — 今收高於這根 → ${m.n} 日線下一步往上`}
+            >
+              <span style={{ color: m.color, fontSize: 11 }}>▲</span>
+              <span style={{ color: m.color, fontSize: 9 }}>{m.n}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

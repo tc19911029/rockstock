@@ -21,17 +21,28 @@ import type { Candidate, SourceName } from '@/lib/agents/candidates/types';
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 import {
   POOL_WEIGHTS,
-  POOL_MIN_SOURCE_COUNT_DEFAULT,
   computeFacetScores,
 } from '@/lib/agents/candidates/poolWeights';
+import { SPEC_STOCK_TYPE_LABEL, SPEC_DIM_LABEL, COMBO_BADGE_LABEL } from '@/lib/spec-score/weights';
 import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { formatLetters } from '@/lib/scanner/buyMethodTracks';
+import { navKey } from '@/lib/chartListNav';
 import { signalOf } from '@/lib/i18n/fundamentalLabels';
 import { ForwardPerfRow } from '@/features/scan/components/ForwardPerfRow';
 import { EntryStateBadge } from '@/components/EntryStateBadge';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 import type { RegimeDetectResult } from '@/lib/agents/marketRegime';
+import { useYouTubeMentionMap, type YouTubeMentionSummary } from '@/lib/hooks/useYouTubeMentionMap';
+import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
+import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
+import type { ThemeRef } from '@/lib/theme-sanse/types';
+import { ThemeTag } from '@/components/ThemeTag';
+import { YouTubeMentionBadge, resonanceTags } from '@/components/youtube/YouTubeMentionBadge';
+import { RedFlagChips } from '@/components/RedFlagChips';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 interface PoolResponse {
   ok: boolean;
@@ -79,16 +90,38 @@ const SOURCE_COLOR: Record<SourceName, string> = {
   fundamental: 'bg-teal-700/40 text-teal-300 border-teal-500/50',
 };
 
+// 去市場後綴拿裸代號（YouTube 提及 map 以裸代號為 key）
+const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+// 此頁專屬（加權總分 / YouTube 提及）｜共用區（fwd.*；無 mkt.* 盤面欄資料）
+const POOL_SORT_OPTIONS = [
+  'score.poolTotal', 'heat.youtube', 'heat.theme',
+  '|',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+];
+// 前瞻報酬 id → StockForwardPerformance 欄位名（accessor 用）
+const POOL_FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+};
+
 export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol, onDateChange }: Props) {
   const [date, setDateLocal] = useState(defaultDate ?? lastBusinessDayYmd());
   const setDate = useCallback((d: string) => {
     setDateLocal(d);
     onDateChange?.(d);
   }, [onDateChange]);
-  const [minSourceCount, setMinSourceCount] = useState(POOL_MIN_SOURCE_COUNT_DEFAULT);
-  // 排序維度：總分（預設）或漲跌幅（forward perf 各日 / 區間最高最低）
-  type SortKey = 'total' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
-  const [sortBy, setSortBy] = useState<SortKey>('total');
+  // YouTube 提及 map（截至候選池當日）— 純展示 join，不進選股分數/排序
+  const { map: ytMap } = useYouTubeMentionMap(date);
+  const [minSourceCount, setMinSourceCount] = useState(1);  // 預設 ≥1 面向：一開就看得到候選（共享常數仍 = 3、見合約測試，故不動它）
+  // 排序維度：加權總分（預設）或漲跌幅（forward perf 各日 / 區間最高最低）或 YouTube 提及數
+  // id 走 lib/sorting/registry 中央清單；缺值/升降序由 sortEngine 統一處理
+  const [sortBy, setSortBy] = useState<string>('score.poolTotal');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  // YouTube display-layer 篩選（不改候選池資料/分數）
+  const [ytRecentOnly, setYtRecentOnly] = useState(false);
+  const [highConsensusOnly, setHighConsensusOnly] = useState(false);
   // 權重 popover 開關 + 自訂權重（存 localStorage，只覆蓋 client display 排序）
   const [showWeights, setShowWeights] = useState(false);
   const [customWeights, setCustomWeights] = useState<typeof POOL_WEIGHTS>(() => {
@@ -117,6 +150,8 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 今日題材熱度 map（裸碼 → 所屬最熱題材）— 「🔥今日題材熱度」排序用；純展示/排序不進選股分數
+  const themeHeatMap = useThemeHeatMap(data?.market, date);
   const [banner, setBanner] = useState<string | null>(null);
   // forward perf — 跟策略掃描走同 endpoint(POST /api/backtest/forward,有 10min cache)
   const [forwardMap, setForwardMap] = useState<Map<string, StockForwardPerformance>>(new Map());
@@ -188,7 +223,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   // server 已用 POOL_WEIGHTS default 排序，沒改 weights 時不會雙排，加 score 顯示即可
   const sortedCandidates = useMemo(() => {
     if (!data?.candidates) return [];
-    const withScores = data.candidates.map(c => {
+    let withScores = data.candidates.map(c => {
       const base = computeFacetScores(c);
       const customTotal = Math.round(
         base.technical * customWeights.technical +
@@ -198,22 +233,35 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
       );
       return { ...c, scores: { ...base, total: customTotal } };
     });
-    if (sortBy === 'total') {
-      return withScores.sort((a, b) => b.scores.total - a.scores.total);
+    // display-layer 篩選（不改候選池資料/分數）
+    if (ytRecentOnly) {
+      withScores = withScores.filter(c => (ytMap.get(bareCode(c.symbol))?.count7d ?? 0) > 0);
     }
-    // 漲跌幅排序：以 forwardMap 內對應欄位降序；缺值排最後，同值 fallback 用 total
-    return withScores.sort((a, b) => {
-      const va = forwardMap.get(a.symbol)?.[sortBy];
-      const vb = forwardMap.get(b.symbol)?.[sortBy];
-      const aNull = va == null;
-      const bNull = vb == null;
-      if (aNull && bNull) return b.scores.total - a.scores.total;
-      if (aNull) return 1;
-      if (bNull) return -1;
-      if (vb !== va) return (vb as number) - (va as number);
-      return b.scores.total - a.scores.total;
-    });
-  }, [data?.candidates, customWeights, sortBy, forwardMap]);
+    if (highConsensusOnly) {
+      withScores = withScores.filter(c => c.sources.youtube?.inHighConsensus === true);
+    }
+    // 先按加權總分 desc 當「基底序」— 既是 score.poolTotal 的排序本身，
+    // 也是其他排序（前瞻報酬/YouTube 提及）同值時的 tie-break（applySort 穩定，保留基底序）
+    type Scored = (typeof withScores)[number];
+    const baseSorted: Scored[] = [...withScores].sort((a, b) => b.scores.total - a.scores.total);
+    if (sortBy === 'score.poolTotal') return baseSorted;
+    // 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）
+    const poolSortValue = (c: Scored, id: string): SortValue => {
+      const fk = POOL_FWD_FIELD[id];
+      if (fk) return (forwardMap.get(c.symbol)?.[fk] as number | null | undefined) ?? null;
+      if (id === 'heat.youtube') {
+        // YouTube 提及：近 30 天提及次數；未提及回 null 排最後
+        return ytMap.get(bareCode(c.symbol))?.count30d ?? null;
+      }
+      if (id === 'heat.theme') {
+        // 所屬「今日最熱題材」名次（1=最熱）→ 取負，desc 時最熱排前；無題材回 null 排最後
+        const rank = bestHeatRank(themeHeatMap, c.symbol);
+        return rank === Infinity ? null : -rank;
+      }
+      return null;
+    };
+    return applySort(baseSorted, sortBy, sortDir, poolSortValue);
+  }, [data?.candidates, customWeights, sortBy, sortDir, forwardMap, ytMap, ytRecentOnly, highConsensusOnly, themeHeatMap]);
 
   // ⚡ 今日強進場 top 5 — entry_state 不是 no_chase + sourceCount ≥ 2 + score ≥ 50 + 大盤 ≠ bear
   // 排序：can_enter 優先於 watch，內部按 score
@@ -304,7 +352,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           <select
             value={minSourceCount}
             onChange={(e) => setMinSourceCount(Number(e.target.value))}
-            className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px]"
+            className="bg-card ring-1 ring-foreground/10 rounded px-1.5 py-0.5 text-[11px]"
             title="只看至少這幾個面向同時看好的股票"
           >
             <option value={1}>1 個面向</option>
@@ -313,23 +361,13 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
             <option value={4}>4 個面向</option>
           </select>
         </label>
-        <label className="text-muted-foreground flex items-center gap-1" title="切換排序維度">
-          排序
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortKey)}
-            className="bg-card border border-border rounded px-1.5 py-0.5 text-[11px]"
-          >
-            <option value="total">總分</option>
-            <option value="openReturn">漲跌幅·隔日開</option>
-            <option value="d1Return">漲跌幅·1日</option>
-            <option value="d5Return">漲跌幅·5日</option>
-            <option value="d10Return">漲跌幅·10日</option>
-            <option value="d20Return">漲跌幅·20日</option>
-            <option value="maxGain">漲跌幅·最高</option>
-            <option value="maxLoss">漲跌幅·最低</option>
-          </select>
-        </label>
+        <SortControl
+          options={POOL_SORT_OPTIONS}
+          value={sortBy}
+          dir={sortDir}
+          onChange={(id, d) => { setSortBy(id); setSortDir(d); }}
+          size="normal"
+        />
         <button
           type="button"
           onClick={() => setShowWeights(v => !v)}
@@ -347,6 +385,22 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
             onClose={() => setShowWeights(false)}
           />
         )}
+        <button
+          type="button"
+          onClick={() => setYtRecentOnly(v => !v)}
+          title="只看近 7 天有被 YouTube 理財節目提及的候選"
+          className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${ytRecentOnly ? 'bg-purple-700 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted/60'}`}
+        >
+          近7天提及
+        </button>
+        <button
+          type="button"
+          onClick={() => setHighConsensusOnly(v => !v)}
+          title="只看 YouTube 高共識（≥2 節目同向）的候選"
+          className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${highConsensusOnly ? 'bg-purple-700 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted/60'}`}
+        >
+          ★ 高共識
+        </button>
         <div className="flex-1" />
         {data?.marketRegime && <MarketRegimeFlag regime={data.marketRegime} size="xs" />}
         <span
@@ -359,6 +413,13 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
 
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
+        {sortBy === 'heat.theme' && (
+          <p className="mx-2 mt-2 text-[10px] leading-snug text-amber-400/90">
+            {data?.market === 'CN'
+              ? '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'
+              : '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'}
+          </p>
+        )}
         {loading && !data && !error && (
           <div className="text-center py-12 text-muted-foreground text-xs">載入中…</div>
         )}
@@ -502,12 +563,14 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                 <th className="px-2 py-1.5 text-left font-medium">股票</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="幾個面向同時看好">面向</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="4 面向加權總分（受權重 popover 設定影響）">總分</th>
+                <th className="px-1 py-1.5 text-center font-medium" title="規格書 4 套類型權重總分（顯示層參考，不影響排序；hover 看維度明細與覆蓋率）">規格</th>
                 <th className="px-1 py-1.5 text-center font-medium" title="進場時機（書本規則：連 2 漲停 / 月線乖離>15% / 末升段 → 不可追；回測 MA5 不破 → 可進；其他觀望）">時機</th>
                 <th className="px-1 py-1.5 text-left font-medium">命中</th>
                 <th className="px-2 py-1.5 text-left font-medium">理由</th>
               </tr>
             </thead>
-            <tbody>
+            {/* data-navlist：鍵盤 ↑↓ 跳股的清單範圍（候選池） */}
+            <tbody data-navlist="pool">
               {sortedCandidates.map((c) => (
                 <PoolRow
                   key={c.symbol}
@@ -517,6 +580,9 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
                   isFetchingForward={isFetchingForward}
                   onSelect={onSelectStock}
                   selected={selectedSymbol === c.symbol}
+                  ytSummary={ytMap.get(bareCode(c.symbol))}
+                  market={data?.market}
+                  themeHotMap={themeHeatMap}
                 />
               ))}
             </tbody>
@@ -534,6 +600,9 @@ function PoolRow({
   isFetchingForward,
   onSelect,
   selected,
+  ytSummary,
+  market,
+  themeHotMap,
 }: {
   candidate: Candidate;
   totalScore?: number;
@@ -541,13 +610,21 @@ function PoolRow({
   isFetchingForward?: boolean;
   onSelect?: (symbol: string) => void;
   selected?: boolean;
+  ytSummary?: YouTubeMentionSummary;
+  market?: string;
+  themeHotMap: Map<string, ThemeRef[]>;
 }) {
   const pureSymbol = candidate.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const ytResonance = resonanceTags(ytSummary);
   const reasons: string[] = [];
   const t = candidate.sources.technical;
   if (t) reasons.push(`技 ${t.tracks.length > 0 ? formatLetters(t.tracks) + '｜' : ''}六條件 ${t.sixConditionsScore}/6`);
   const y = candidate.sources.youtube;
   if (y) reasons.push(`消 ${y.mentionCount} 節目${y.inHighConsensus ? '｜★高共識' : ''}`);
+  // 跨日提及（近 7/30 天）— 純展示
+  if (ytSummary && ytSummary.count30d > 0) {
+    reasons.push(`近7天 ${ytSummary.count7d}次·近30天 ${ytSummary.count30d}次${ytSummary.lastDate ? `（最近 ${ytSummary.lastDate}）` : ''}`);
+  }
   const ch = candidate.sources.chip;
   if (ch && ch.signals.length > 0) reasons.push(`籌 ${signalOf(ch.signals[0])}`);
   const f = candidate.sources.fundamental;
@@ -561,6 +638,7 @@ function PoolRow({
     <Fragment>
       <tr
         className={hoverClass}
+        data-navstock={navKey(candidate.symbol)}
         onClick={() => onSelect?.(candidate.symbol)}
         title={reasons.length > 0 ? reasons.join('\n') : `${candidate.name}（${candidate.industry ?? '—'}）`}
       >
@@ -578,6 +656,26 @@ function PoolRow({
               : totalScore >= 50 ? 'text-amber-300'
               : 'text-rose-300'
             }>{totalScore}</span>
+          ) : <span className="text-muted-foreground">—</span>}
+        </td>
+        <td className="px-1 pt-1.5 pb-0.5 text-center font-mono">
+          {candidate.specScore?.total != null ? (
+            <span
+              className={
+                candidate.specScore.total >= 70 ? 'text-violet-300'
+                : candidate.specScore.total >= 50 ? 'text-violet-400/80'
+                : 'text-muted-foreground'
+              }
+              title={[
+                `規格分 ${candidate.specScore.total}（${SPEC_STOCK_TYPE_LABEL[candidate.specScore.stockType]}權重·覆蓋 ${Math.round(candidate.specScore.coverage * 100)}%）`,
+                ...candidate.specScore.dims
+                  .filter(d => d.score != null)
+                  .map(d => `  ${SPEC_DIM_LABEL[d.dim] ?? d.dim} ${d.score}（w${d.weight}）${d.note ? `· ${d.note}` : ''}`),
+              ].join('\n')}
+            >
+              {candidate.specScore.total}
+              {candidate.specScore.coverage < 0.6 && <span className="text-[9px] text-muted-foreground">*</span>}
+            </span>
           ) : <span className="text-muted-foreground">—</span>}
         </td>
         <td className="px-1 pt-1.5 pb-0.5 text-center">
@@ -606,9 +704,28 @@ function PoolRow({
                 </span>
               );
             })}
+            {ytSummary && <YouTubeMentionBadge summary={ytSummary} bareCode={pureSymbol} size="xs" />}
+            <ThemeTag market={market} code={pureSymbol} hotMap={themeHotMap} className="text-[9px] max-w-[110px]" />
+            {candidate.comboBadges?.map(b => (
+              <span
+                key={b}
+                title="組合徽章：純標示不加分（「不加組合 bonus」決議）"
+                className="inline-flex items-center px-1 py-0.5 rounded border text-[9px] bg-rose-900/40 text-rose-200 border-rose-700"
+              >
+                {COMBO_BADGE_LABEL[b] ?? b}
+              </span>
+            ))}
+            <RedFlagChips flags={candidate.redFlags} />
           </div>
         </td>
         <td className="px-2 pt-1.5 pb-0.5 text-[10px] text-muted-foreground">
+          {ytResonance.length > 0 && (
+            <div className="flex flex-wrap gap-0.5 mb-0.5">
+              {ytResonance.map((tag, i) => (
+                <span key={i} title={tag.title} className={`px-1 rounded border text-[9px] ${tag.cls}`}>{tag.label}</span>
+              ))}
+            </div>
+          )}
           <div className="space-y-0.5">
             {reasons.map((r, i) => <div key={i}>{r}</div>)}
           </div>
@@ -619,7 +736,7 @@ function PoolRow({
         className={`border-b border-border/40 ${hoverClass}`}
         onClick={() => onSelect?.(candidate.symbol)}
       >
-        <td colSpan={6} className="px-2 pb-1.5 pt-0">
+        <td colSpan={7} className="px-2 pb-1.5 pt-0">
           <ForwardPerfRow performance={performance} isFetching={isFetchingForward} />
         </td>
       </tr>
@@ -644,7 +761,7 @@ function WeightPopover({
   };
   return (
     <div
-      className="absolute top-full left-0 mt-1 z-50 w-72 bg-card border border-border rounded-lg shadow-xl p-3 space-y-2"
+      className="absolute top-full left-0 mt-1 z-50 w-72 bg-card ring-1 ring-foreground/10 rounded-xl shadow-xl p-3 space-y-2"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between">

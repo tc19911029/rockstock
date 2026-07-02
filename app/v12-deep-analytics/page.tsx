@@ -15,6 +15,9 @@
 
 import { useEffect, useState } from 'react';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
+import { PageShell, PageHeader } from '@/components/shared';
+import { bullBearClass } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 interface EnsembleStat {
   letters: string;
@@ -83,13 +86,10 @@ function winColor(rate: number | null): string {
   return 'text-rose-300';
 }
 
+// 報酬色：對齊全站「紅漲綠跌」（bullBearClass），|報酬|>5 加粗
 function retColor(val: number | null): string {
   if (val == null) return 'text-muted-foreground';
-  if (val > 5) return 'text-emerald-400 font-bold';
-  if (val > 0) return 'text-emerald-300';
-  if (val < -5) return 'text-rose-400 font-bold';
-  if (val < 0) return 'text-rose-300';
-  return 'text-foreground';
+  return cn(bullBearClass(val), Math.abs(val) > 5 && 'font-bold');
 }
 
 function ddColor(val: number | null): string {
@@ -120,37 +120,41 @@ export default function V12DeepAnalyticsPage() {
   useEffect(() => { load(market); }, [market]);
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-foreground">v12 深度分析</h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              組合勝率提升 / 大盤狀態細分 / 回撤分析 / 產業熱度
-              {data && ` · ${data.sampleSize.totalHits.toLocaleString()} 筆觸發 · ${data.sampleSize.uniqueStockDays.toLocaleString()} 個股日 · 計算於 ${new Date(data.generatedAt).toLocaleString('zh-TW')}`}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex bg-muted/40 rounded">
+    <PageShell
+      headerSlot={
+        <PageHeader
+          title="🔬 v12 深度分析"
+          subtitle={
+            data
+              ? `${data.sampleSize.totalHits.toLocaleString()} 筆觸發 · 組合/大盤/回撤/產業`
+              : '組合勝率 / 大盤狀態 / 回撤 / 產業熱度'
+          }
+          backButton="/v12-performance"
+          actions={
+            <>
+              <div className="flex bg-muted/40 rounded-md overflow-hidden border border-border">
+                {(['TW', 'CN'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setMarket(m)}
+                    className={cn('px-3 py-1.5 text-xs transition-colors',
+                      market === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+                  >{m === 'TW' ? '🇹🇼 TW' : '🇨🇳 CN'}</button>
+                ))}
+              </div>
               <button
-                onClick={() => setMarket('TW')}
-                className={`px-3 py-1.5 text-xs rounded ${market === 'TW' ? 'bg-blue-600 text-white' : 'text-muted-foreground hover:text-foreground'}`}
-              >🇹🇼 TW</button>
-              <button
-                onClick={() => setMarket('CN')}
-                className={`px-3 py-1.5 text-xs rounded ${market === 'CN' ? 'bg-blue-600 text-white' : 'text-muted-foreground hover:text-foreground'}`}
-              >🇨🇳 CN</button>
-            </div>
-            <button
-              onClick={() => load(market)}
-              disabled={loading}
-              className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
-            >
-              {loading ? '計算中…' : '🔄 重算'}
-            </button>
-          </div>
-        </div>
-
+                onClick={() => load(market)}
+                disabled={loading}
+                className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {loading ? '計算中…' : '🔄 重算'}
+              </button>
+            </>
+          }
+        />
+      }
+    >
+      <div className="space-y-6 p-4">
         {loading && !data ? (
           <div className="text-xs text-muted-foreground py-8 text-center">計算中…（首次需要拉 5 天 forward 樣本，約 30-60 秒）</div>
         ) : data ? (
@@ -160,7 +164,7 @@ export default function V12DeepAnalyticsPage() {
               {data.ensemble.length === 0 ? (
                 <Empty msg="樣本不足（每組合需 ≥5 次同步觸發）" />
               ) : (
-                <div className="bg-card border border-border rounded-lg overflow-x-auto">
+                <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead className="bg-muted/40 text-muted-foreground">
                       <tr>
@@ -193,7 +197,7 @@ export default function V12DeepAnalyticsPage() {
 
             {/* 2. Regime */}
             <Section title="🌗 大盤狀態細分（Regime）" subtitle="每字母在多頭 / 盤整 / 空頭三種大盤狀態的勝率與平均報酬，看哪個字母「擇時敏感」哪個「全狀態適用」">
-              <div className="bg-card border border-border rounded-lg overflow-x-auto">
+              <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/40 text-muted-foreground">
                     <tr>
@@ -229,7 +233,7 @@ export default function V12DeepAnalyticsPage() {
 
             {/* 3. Drawdown */}
             <Section title="📉 回撤分析（Drawdown）" subtitle="進場後 5 天內最低點相對進場價的最大回撤；配合平均報酬看每字母的「risk/reward」">
-              <div className="bg-card border border-border rounded-lg overflow-x-auto">
+              <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/40 text-muted-foreground">
                     <tr>
@@ -264,7 +268,7 @@ export default function V12DeepAnalyticsPage() {
               <Section title="🏭 產業熱度（Industry）" subtitle="每字母在各產業的勝率排名（≥3 樣本，取前 5；已過濾「未分類」）">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {data.industry.filter((i) => i.industries.length > 0).map((i) => (
-                    <div key={i.letter} className={`border border-border rounded-lg p-3 ${TRACK_BG[i.letter] ?? 'bg-card'}`}>
+                    <div key={i.letter} className={`ring-1 ring-foreground/10 rounded-xl p-3 ${TRACK_BG[i.letter] ?? 'bg-card'}`}>
                       <div className="flex items-baseline gap-2 mb-2">
                         <span className="font-bold text-base">{i.letter}</span>
                         <span className="text-xs text-muted-foreground">{LETTER_NAMES[i.letter] ?? i.letter}</span>
@@ -313,7 +317,7 @@ export default function V12DeepAnalyticsPage() {
           <Empty msg="無資料" />
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 

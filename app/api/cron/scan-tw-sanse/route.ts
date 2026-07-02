@@ -5,6 +5,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { scanTwSanSe } from '@/lib/tw-sanse/scan';
 import { saveTwSanSeScan } from '@/lib/tw-sanse/scanStorage';
+import { degenerateScanReason } from '@/lib/cn-sanse/scanGuard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -25,6 +26,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await scanTwSanSe(dateParam ? { asOfDate: dateParam } : undefined);
+    // 退化掃描防呆：指數封存落後個股（早班 16:00 撞指數 ~16:39 才封）會讓全市場被判 stale、
+    // lastDate 錯標成前一日。此時不存檔，避免把前一日的好紀錄覆蓋成近乎空的結果；
+    // 交給 18:35 最終版（資料齊全後）重產。見 lib/cn-sanse/scanGuard.ts。
+    const degenerate = degenerateScanReason(result);
+    if (degenerate) {
+      return apiOk({
+        skipped: true, reason: degenerate, date: result.lastDate,
+        evaluated: result.evaluated, staleSkipped: result.staleSkipped,
+      });
+    }
     await saveTwSanSeScan(result);
     return apiOk({
       ok: true,

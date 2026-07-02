@@ -4,7 +4,7 @@ import { fetchCandlesTWSE } from '@/lib/datasource/TWSEDataSource';
 import { MarketScanner, StockEntry } from './MarketScanner';
 import { MarketConfig } from './types';
 import { detectTrend, TrendState } from '@/lib/analysis/trendAnalysis';
-import { getTWConcept } from './conceptMap';
+import { getTWConcept, fetchTWIndustryMap } from './conceptMap';
 
 // Fallback list if exchange APIs are unavailable
 const FALLBACK_TW_STOCKS: StockEntry[] = [
@@ -28,85 +28,8 @@ const FALLBACK_TW_STOCKS: StockEntry[] = [
 type TWSERow = { Code: string; Name: string; TradeVolume?: string };
 type TPExRow = { SecuritiesCompanyCode: string; CompanyName: string; TradingShares?: string };
 
-// ── 產業分類 ──────────────────────────────────────────────────────────────────
-
-/** TWSE 產業代碼 → 中文名稱 */
-const TWSE_INDUSTRY_MAP: Record<string, string> = {
-  '01': '水泥', '02': '食品', '03': '塑膠', '04': '紡織',
-  '05': '電機機械', '06': '電器電纜', '08': '玻璃陶瓷', '09': '造紙',
-  '10': '鋼鐵', '11': '橡膠', '12': '汽車', '14': '營建',
-  '15': '航運', '16': '觀光', '17': '金融保險', '18': '貿易百貨',
-  '20': '其他', '21': '化學', '22': '生技醫療', '23': '油電燃氣',
-  '24': '半導體', '25': '電腦週邊', '26': '光電', '27': '通信網路',
-  '28': '電子零組件', '29': '電子通路', '30': '資訊服務', '31': '其他電子',
-  '32': '文化創意', '33': '農業科技', '34': '電子商務', '35': '綠能環保',
-  '36': '數位雲端', '37': '運動休閒', '38': '居家生活',
-  '91': '存託憑證',
-};
-
-let industryCache: Map<string, string> | null = null;
-let industryCacheTime = 0;
-const INDUSTRY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24小時
-
-/**
- * 從 TWSE/TPEx 取得全部公司產業分類
- * TWSE API 回傳「產業別」欄位為代碼（如 "24"），需轉換為中文名稱
- */
-async function fetchTWIndustryMap(): Promise<Map<string, string>> {
-  if (industryCache && Date.now() - industryCacheTime < INDUSTRY_CACHE_TTL) {
-    return industryCache;
-  }
-
-  const map = new Map<string, string>();
-  try {
-    // TWSE 上市公司基本資料
-    const res = await fetch(
-      'https://openapi.twse.com.tw/v1/opendata/t187ap03_L',
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (res.ok) {
-      const data = await res.json() as Array<{
-        公司代號: string;
-        產業別: string;
-      }>;
-      for (const row of data) {
-        const code = row.公司代號?.trim();
-        const indCode = row.產業別?.trim();
-        if (code && indCode) {
-          map.set(code, TWSE_INDUSTRY_MAP[indCode] ?? indCode);
-        }
-      }
-    }
-  } catch {
-    // 取得上市產業分類失敗，忽略
-  }
-
-  try {
-    // TPEx 上櫃公司基本資料（欄位名稱與上市不同）
-    const res2 = await fetch(
-      'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O',
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (res2.ok) {
-      const data2 = await res2.json() as Array<Record<string, string>>;
-      for (const row of data2) {
-        const code = (row['SecuritiesCompanyCode'] || '').trim();
-        const indCode = (row['SecuritiesIndustryCode'] || '').trim();
-        if (code && indCode) {
-          map.set(code, TWSE_INDUSTRY_MAP[indCode] ?? indCode);
-        }
-      }
-    }
-  } catch {
-    // 取得上櫃產業分類失敗，忽略
-  }
-
-  if (map.size > 0) {
-    industryCache = map;
-    industryCacheTime = Date.now();
-  }
-  return map;
-}
+// 產業分類（TWSE_INDUSTRY_MAP + fetchTWIndustryMap）已移到 ./conceptMap，
+// 與三色掃描(tw-sanse) 共用同一份來源；此處改 import 使用。
 
 /** 從 TWSE 取得上市股票，按當日成交量排序 */
 async function fetchTWSEStocks(): Promise<(StockEntry & { vol: number })[]> {

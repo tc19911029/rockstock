@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
+import { useWatchlistStore } from '@/store/watchlistStore';
 
 const DEFAULT_QUICK_STOCKS = [
   { symbol: 'mock',  name: '📊 範例資料（離線）' },
@@ -40,6 +41,10 @@ export default function StockSelector() {
   const { loadStock, isLoadingStock, currentStock, currentInterval, startPolling, stopPolling } = useReplayStore();
   const recentItems  = useSearchHistoryStore(s => s.items);
   const clearHistory = useSearchHistoryStore(s => s.clear);
+  const watchItems   = useWatchlistStore(s => s.items);
+  const addWatch     = useWatchlistStore(s => s.add);
+  const removeWatch  = useWatchlistStore(s => s.remove);
+  const inWatchlist  = currentStock ? watchItems.some(i => i.symbol === currentStock.ticker) : false;
   const [input,    setInput]    = useState('');
   const [showDrop, setShowDrop] = useState(false);
   const [error,    setError]    = useState('');
@@ -76,6 +81,13 @@ export default function StockSelector() {
   const closeOnOutside = (e: React.MouseEvent) => {
     if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setShowDrop(false);
   };
+
+  // 切換目前載入的股票是否在自選股
+  const toggleWatch = useCallback(() => {
+    if (!currentStock?.ticker) return;
+    if (inWatchlist) removeWatch(currentStock.ticker);
+    else addWatch(currentStock.ticker, currentStock.name || rawSymbol(currentStock.ticker));
+  }, [currentStock, inWatchlist, addWatch, removeWatch]);
 
   const filtered = input.length > 0
     ? DEFAULT_QUICK_STOCKS.filter(s => s.symbol.toUpperCase().includes(input.toUpperCase()) || s.name.includes(input))
@@ -150,6 +162,16 @@ export default function StockSelector() {
         {isLoadingStock
           ? <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 border-2 border-foreground border-t-transparent rounded-full animate-spin" />載入</span>
           : '載入'}
+      </button>
+      {/* 加入/移除自選股（沿用載入的那檔） */}
+      <button onClick={toggleWatch} disabled={!currentStock}
+        title={!currentStock ? '先載入一檔股票' : inWatchlist ? '從自選股移除' : '加入自選股'}
+        className={`shrink-0 px-2.5 py-1 rounded text-xs font-bold transition disabled:opacity-40 ${
+          inWatchlist
+            ? 'bg-amber-500 hover:bg-amber-400 text-black'
+            : 'bg-secondary hover:bg-secondary/70 text-foreground border border-border'
+        }`}>
+        {inWatchlist ? '★ 已自選' : '☆ 加自選'}
       </button>
       {/* timeframe pills 已移至 ChartToolbar（緊鄰走圖區） */}
 

@@ -104,6 +104,55 @@ export const MECHANICAL_TRACK_LETTERS = ['R'] as const;
  */
 export const FUNDAMENTAL_TRACK_LETTERS = ['V'] as const;
 
+/**
+ * 大戶偷買軌字母（2026-06-13 新增）
+ *
+ * 自創策略，源自 TVBS《財經鈔能力》徐黎芳「籌碼集中度」法 + CMoney 籌碼K線課程。
+ * 訊號＝近5日股價在跌 + 三大法人逆勢買超集中度高（單一事實 lib/smartmoney）。
+ * 已用半年法人資料回測：跌+集中度>8% → 隔日開盤買持有5日，贏大盤 +4.4% / 勝 83%。
+ *
+ *   W = 大戶偷買（成交額前500 → 在跌 + 法人籌碼集中度高，依集中度排序）
+ *
+ * ⚠️ 這「不是」2026-05-25 移除的舊 S 軌（TDCC 大戶持股累積，回測無 alpha）。
+ * 舊 S = 集保持股「狀態」、無預測力；W = 法人買賣超「動作」、已驗證。不同資料、勿混。
+ *
+ * strategyType='mechanical-rank'（沿用，意即純排名、跳過六條件/戒律/淘汰法/Step 0/MTF/KD）。
+ * 底層走 MarketScanner.scanSmartMoneyDip()（TW 法人；CN 主力資金歷史不足 → 暫回空）。
+ * CLAUDE.md 規則 #5（只用書本規則）對 W 軌不適用，比照 R/V 軌（[[project_r_track_kept]]）。
+ */
+export const SMARTMONEY_TRACK_LETTERS = ['W'] as const;
+
+/**
+ * 法人接刀軌字母（2026-06-14 新增）
+ *
+ * 自創策略，源自 scripts/factor-grid-search.ts + best-rule-test.ts（234 組合 train/test）的
+ * 唯一兩年都正買方向：股價在跌/長黑 + 法人逆勢買，剔除大戶持股水位超高。
+ *
+ *   X = 法人接刀（成交額前500 → 在跌/長黑 + 法人逆勢買，剔除大戶持股超高）
+ *
+ * 與 W（大戶偷買=主力分點集中度）並排對照：同是「逆勢承接」概念，X 走法人+價量+避雷，
+ * grid 實測比 W 的 refined 主力分點更 robust（train+test 都正）。但贏大盤仍 <50%，靠賠小賺大。
+ *
+ * strategyType='mechanical-rank'（純排名，跳過六條件/戒律/淘汰法/Step 0/MTF/KD）。
+ * 底層走 MarketScanner.scanInstDip()（僅 TW 法人；CN 暫回空）。
+ * CLAUDE.md 規則 #5 對 X 軌不適用，比照 R/V/W（[[project_r_track_kept]]）。
+ */
+export const INSTDIP_TRACK_LETTERS = ['X'] as const;
+
+/**
+ * 法人偷買(原) 軌字母（2026-06-14 新增）
+ *
+ * 使用者要的「最初版」三條件同時成立：①股價在跌 ②5日籌碼集中度(主力分點)>0 且在爬
+ * ③法人(三大法人合計)連買≥2天。與 W（只看集中度由負轉正）/ X（跌+法人買，無集中度）並排對照。
+ *
+ *   Y = 法人偷買(原)（跌 + 5日集中度在增加 + 法人連買，單一事實 lib/inststeal）
+ *
+ * strategyType='mechanical-rank'（純排名，跳過六條件/戒律/淘汰法/Step 0/MTF/KD）。
+ * ⚠️ 誠實：回測扣成本後超額≈0、贏大盤<50%、train負test正（不穩）→ 觀察用非明牌
+ * （[[smartmoney_dip_strategy]] / [[inststeal_original_observation_tool]]）。CLAUDE.md #5 比照 R/V/W/X 不適用。
+ */
+export const INSTSTEAL_TRACK_LETTERS = ['Y'] as const;
+
 /** 全部買法字母（A = 六條件池子本身，不算 Step 2 軌道）*/
 export const ALL_BUY_METHOD_LETTERS = [
   'A',
@@ -112,6 +161,9 @@ export const ALL_BUY_METHOD_LETTERS = [
   ...SYSTEM_TRACK_LETTERS,
   ...MECHANICAL_TRACK_LETTERS,
   ...FUNDAMENTAL_TRACK_LETTERS,
+  ...SMARTMONEY_TRACK_LETTERS,
+  ...INSTDIP_TRACK_LETTERS,
+  ...INSTSTEAL_TRACK_LETTERS,
 ] as const;
 
 /** Set 形式 — 給 has() 快速查詢 */
@@ -128,6 +180,9 @@ export const REVERSAL_TRACK_SET: ReadonlySet<string> = new Set(REVERSAL_TRACK_LE
 export const SYSTEM_TRACK_SET: ReadonlySet<string> = new Set(SYSTEM_TRACK_LETTERS);
 export const MECHANICAL_TRACK_SET: ReadonlySet<string> = new Set(MECHANICAL_TRACK_LETTERS);
 export const FUNDAMENTAL_TRACK_SET: ReadonlySet<string> = new Set(FUNDAMENTAL_TRACK_LETTERS);
+export const SMARTMONEY_TRACK_SET: ReadonlySet<string> = new Set(SMARTMONEY_TRACK_LETTERS);
+export const INSTDIP_TRACK_SET: ReadonlySet<string> = new Set(INSTDIP_TRACK_LETTERS);
+export const INSTSTEAL_TRACK_SET: ReadonlySet<string> = new Set(INSTSTEAL_TRACK_LETTERS);
 
 /**
  * 不過 Step 1 池子的字母集合（反轉軌 ∪ 戰法軌 ∪ 機械軌）
@@ -140,6 +195,9 @@ export const NON_STEP1_SET: ReadonlySet<string> = new Set([
   ...SYSTEM_TRACK_LETTERS,
   ...MECHANICAL_TRACK_LETTERS,
   ...FUNDAMENTAL_TRACK_LETTERS,
+  ...SMARTMONEY_TRACK_LETTERS,
+  ...INSTDIP_TRACK_LETTERS,
+  ...INSTSTEAL_TRACK_LETTERS,
 ]);
 
 /** @deprecated 用 NON_STEP1_SET（2026-05-21 加入機械軌後更名）*/
@@ -150,15 +208,21 @@ export type ReversalLetter = typeof REVERSAL_TRACK_LETTERS[number];
 export type SystemLetter = typeof SYSTEM_TRACK_LETTERS[number];
 export type MechanicalLetter = typeof MECHANICAL_TRACK_LETTERS[number];
 export type FundamentalLetter = typeof FUNDAMENTAL_TRACK_LETTERS[number];
+export type SmartMoneyLetter = typeof SMARTMONEY_TRACK_LETTERS[number];
+export type InstDipLetter = typeof INSTDIP_TRACK_LETTERS[number];
+export type InstStealLetter = typeof INSTSTEAL_TRACK_LETTERS[number];
 
 /** 判斷某字母屬於哪個軌道 */
-export function trackOf(letter: string): 'pool' | 'bullish' | 'reversal' | 'system' | 'mechanical' | 'fundamental' | 'unknown' {
+export function trackOf(letter: string): 'pool' | 'bullish' | 'reversal' | 'system' | 'mechanical' | 'fundamental' | 'smartmoney' | 'instdip' | 'inststeal' | 'unknown' {
   if (letter === 'A') return 'pool';
   if (BULLISH_TRACK_SET.has(letter)) return 'bullish';
   if (REVERSAL_TRACK_SET.has(letter)) return 'reversal';
   if (SYSTEM_TRACK_SET.has(letter)) return 'system';
   if (MECHANICAL_TRACK_SET.has(letter)) return 'mechanical';
   if (FUNDAMENTAL_TRACK_SET.has(letter)) return 'fundamental';
+  if (SMARTMONEY_TRACK_SET.has(letter)) return 'smartmoney';
+  if (INSTDIP_TRACK_SET.has(letter)) return 'instdip';
+  if (INSTSTEAL_TRACK_SET.has(letter)) return 'inststeal';
   return 'unknown';
 }
 
@@ -199,6 +263,12 @@ export const LETTER_NAMES: Readonly<Record<string, string>> = {
   R: '乖離率',             // 成交額前500 + MA20 乖離率（long: 負最多 / short: 正最多）
   // ── 基本面軌（2026-05-27 新增）──
   V: '基本面補漲',         // TW: 月營收推 Forward EPS；CN: 季報 + 扣非淨利
+  // ── 大戶偷買軌（2026-06-13 新增；徐黎芳籌碼集中度法，跌+法人逆勢買超，已回測）──
+  W: '大戶偷買',           // 成交額前500 + 近5日在跌 + 法人籌碼集中度高（依集中度排序）
+  // ── 法人接刀軌（2026-06-14 新增；grid 唯一兩年都正買方向）──
+  X: '法人接刀',           // 成交額前500 + 在跌/長黑 + 法人逆勢買，剔除大戶持股超高
+  // ── 法人偷買(原)軌（2026-06-14 新增；最初版三條件 AND，觀察用非明牌）──
+  Y: '大戶法人偷買',       // 跌 + 5日籌碼集中度在增加 + 法人連買（原名「法人偷買(原)」，2026-06-15 改名）
   // 注意：v11 G/H/I 字母不在 LETTER_NAMES 中。讀舊資料時應先 normalizeLetter() 轉成 v12。
 };
 

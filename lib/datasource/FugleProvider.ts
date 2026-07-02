@@ -331,3 +331,118 @@ export async function getFugleQuote(symbol: string): Promise<FugleQuote | null> 
 export function isFugleAvailable(): boolean {
   return !!getApiKey();
 }
+
+// ── 日K Provider（2026-06-13，EODHD 不續訂後補強 TW 鏈）──────────────────────
+//
+// historical/candles?timeframe=D：上市 + 上櫃皆覆蓋（實測 2330/5483.TWO 200）、
+// 免費層可用（60 次/分）。限制：單次請求範圍須 < 1 年 → 自動分窗合併；
+// 深度實測至少回溯到 2023。volume 單位是「股」→ ÷1000 轉「張」（與 L1 慣例一致）。
+// 在 MultiMarketProvider TW 鏈位置：FinMind → Fugle → TWSE官方 → Yahoo。
+
+const FUGLE_DAILY_WINDOW_DAYS = 360;
+const FUGLE_DAILY_TTL = 5 * 60 * 1000;
+
+interface FugleDailyRow {
+  date: string;   // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number; // 股
+}
+
+async function fetchFugleDailyWindow(code: string, fromIso: string, toIso: string): Promise<Candle[]> {
+  await rateLimiter.acquire('fugle');
+  const url = `${FUGLE_BASE}/historical/candles/${code}?timeframe=D&from=${fromIso}&to=${toIso}`;
+  const res = await fetch(url, { headers: fugleHeaders(), signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) {
+    rateLimiter.reportError('fugle', res.status);
+    return [];
+  }
+  rateLimiter.reportSuccess('fugle');
+  const json = (await res.json()) as { data?: FugleDailyRow[] };
+  return (json.data ?? [])
+    .filter(d => d.close > 0)
+    .map(d => ({
+      date: d.date,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: Math.round(d.volume / 1000), // 股 → 張
+    }));
+}
+
+/** 取台股日K（自動分 ≤360 天窗，升冪去重）。symbol 可帶 .TW/.TWO 後綴。 */
+export async function getFugleDailyCandles(
+  symbol: string,
+  fromIso: string,
+  toIso: string,
+): Promise<Candle[]> {
+  if (!getApiKey()) return [];
+  const code = symbol.split('.')[0];
+  if (!/^\d{4,6}[A-Z]?$/.test(code)) return []; // 指數/異形代號不支援
+
+  const cacheKey = `fugle:daily:${code}:${fromIso}:${toIso}`;
+  const cached = globalCache.get<Candle[]>(cacheKey);
+  if (cached) return cached;
+
+  const byDate = new Map<string, Candle>();
+  let cursor = new Date(`${fromIso}T00:00:00Z`).getTime();
+  const endMs = new Date(`${toIso}T00:00:00Z`).getTime();
+  try {
+    while (cursor <= endMs) {
+      const winEnd = Math.min(cursor + (FUGLE_DAILY_WINDOW_DAYS - 1) * 86_400_000, endMs);
+      const winFrom = new Date(cursor).toISOString().slice(0, 10);
+      const winTo = new Date(winEnd).toISOString().slice(0, 10);
+      const candles = await fetchFugleDailyWindow(code, winFrom, winTo);
+      for (const c of candles) byDate.set(c.date, c);
+      cursor = winEnd + 86_400_000;
+    }
+  } catch (err) {
+    console.warn('[Fugle] daily candles error:', err);
+    // partial 結果照用（後面 provider 還有機會補）
+  }
+
+  const merged = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  if (merged.length > 0) globalCache.set(cacheKey, merged, FUGLE_DAILY_TTL);
+  return merged;
+}
+
+function fugleDailyPeriodToDays(period: string): number {
+  const m = period.match(/^(\d+)(mo|y|d)$/);
+  if (!m) return 730; // 預設 2y
+  const n = parseInt(m[1], 10);
+  if (m[2] === 'd') return n;
+  if (m[2] === 'mo') return n * 30;
+  return n * 365;
+}
+
+/** MultiMarketProvider 鏈用的日K provider 介面（getHistoricalCandles / getCandlesRange）*/
+export const fugleDailyProvider = {
+  name: 'Fugle',
+
+  async getHistoricalCandles(
+    symbol: string,
+    period = '2y',
+    asOfDate?: string,
+    interval?: string,
+  ) {
+    // 只供日K；週/月線聚合交給鏈上其他 provider（FinMind/TWSE 有 aggregate）
+    if (interval && interval !== '1d') return [];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    const to = asOfDate && asOfDate < today ? asOfDate : today;
+    const days = fugleDailyPeriodToDays(period);
+    const from = new Date(new Date(`${to}T00:00:00Z`).getTime() - days * 86_400_000)
+      .toISOString().slice(0, 10);
+    const candles = await getFugleDailyCandles(symbol, from, to);
+    const filtered = asOfDate ? candles.filter(c => c.date <= asOfDate) : candles;
+    if (filtered.length === 0) return [];
+    const { computeIndicators } = await import('@/lib/indicators');
+    return computeIndicators(filtered);
+  },
+
+  async getCandlesRange(symbol: string, startDate: string, endDate: string): Promise<Candle[]> {
+    return getFugleDailyCandles(symbol, startDate, endDate);
+  },
+};

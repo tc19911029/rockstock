@@ -61,6 +61,37 @@ export function renderMarkdownReport(a: DailyAnalysis): string {
   lines.push(a.market_view || '(無)');
   lines.push('');
 
+  // ── 節目總結（2026-07 加；舊 analysis 無 video_summaries 不渲染）──
+  if (a.video_summaries && a.video_summaries.length > 0) {
+    lines.push('## 節目總結（看報告代替看節目）');
+    lines.push('');
+    const groups: Array<{ key: 'must_watch' | 'skim' | 'skip'; title: string }> = [
+      { key: 'must_watch', title: '🔴 必看' },
+      { key: 'skim', title: '🟡 略讀（看摘要即可）' },
+      { key: 'skip', title: '⚪ 可跳過' },
+    ];
+    for (const g of groups) {
+      const vids = a.video_summaries.filter(v => v.watch_priority === g.key);
+      if (vids.length === 0) continue;
+      lines.push(`### ${g.title}`);
+      lines.push('');
+      for (const v of vids) {
+        const who = v.analysts && v.analysts.length > 0 ? `（${v.analysts.join('、')}）` : '';
+        const dur = v.duration_sec ? ` · 約 ${Math.round(v.duration_sec / 60)} 分鐘` : '';
+        const url = v.url ?? `https://www.youtube.com/watch?v=${v.video_id}`;
+        lines.push(`**${v.source_name}**${who}${dur} — [${v.title}](${url})`);
+        lines.push('');
+        lines.push(v.summary);
+        lines.push('');
+        lines.push(`> 💡 ${v.watch_reason}`);
+        if (v.key_stocks.length > 0) {
+          lines.push(`> 重點股：${v.key_stocks.map(s => `${s.name}(${s.code})`).join('、')}`);
+        }
+        lines.push('');
+      }
+    }
+  }
+
   // ── 共識 ────────────────────────────────────────────────────────
   if (a.bullish_consensus.length > 0) {
     lines.push('## 看多共識');

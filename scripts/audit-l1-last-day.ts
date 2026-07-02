@@ -31,9 +31,13 @@ interface MarketAuditResult {
   totalFiles: number;
   filesWithData: number;
   missingLastDay: number;
+  /** 近 7 日內才開始缺的（pipeline 新鮮故障，紅線只算這個） */
+  missingFresh: number;
+  /** 缺很久的（停牌/下市長尾，列出但不觸發紅線）— 2026-06-12 QA 提案 #8 */
+  missingChronic: number;
   coverageRate: number;
   lastDateHistogram: Record<string, number>;
-  missingSamples: { symbol: string; lastDate: string }[];
+  missingSamples: { symbol: string; lastDate: string; chronic: boolean }[];
 }
 
 function auditMarket(market: Market): MarketAuditResult {
@@ -45,12 +49,18 @@ function auditMarket(market: Market): MarketAuditResult {
     totalFiles: 0,
     filesWithData: 0,
     missingLastDay: 0,
+    missingFresh: 0,
+    missingChronic: 0,
     coverageRate: 0,
     lastDateHistogram: {},
     missingSamples: [],
   };
 
   if (!existsSync(candleDir)) return out;
+  // 缺超過 7 個日曆日視為慢性（停牌/下市），不觸發紅線 — 真正要警報的是
+  // 「昨天還有、今天突然缺」的 pipeline 故障
+  const freshCutoff = new Date(new Date(lastTradingDay).getTime() - 7 * 86400_000)
+    .toISOString().slice(0, 10);
 
   for (const f of readdirSync(candleDir)) {
     if (!f.endsWith('.json')) continue;
@@ -67,13 +77,16 @@ function auditMarket(market: Market): MarketAuditResult {
     out.lastDateHistogram[last] = (out.lastDateHistogram[last] ?? 0) + 1;
     if (last < lastTradingDay) {
       out.missingLastDay++;
+      const chronic = last < freshCutoff;
+      if (chronic) out.missingChronic++; else out.missingFresh++;
       if (out.missingSamples.length < 20) {
-        out.missingSamples.push({ symbol: sym, lastDate: last });
+        out.missingSamples.push({ symbol: sym, lastDate: last, chronic });
       }
     }
   }
+  // 覆蓋率只扣「新鮮缺」— 慢性停牌/下市不算 pipeline 故障
   out.coverageRate = out.filesWithData > 0
-    ? (out.filesWithData - out.missingLastDay) / out.filesWithData
+    ? (out.filesWithData - out.missingFresh) / out.filesWithData
     : 0;
   return out;
 }
@@ -94,7 +107,7 @@ function printSummary(r: MarketAuditResult) {
   console.log(`=== ${r.market} L1 audit ===`);
   console.log(`  最近交易日: ${r.lastTradingDay}`);
   console.log(`  L1 檔案總數: ${r.totalFiles} (有資料 ${r.filesWithData})`);
-  console.log(`  缺最近交易日: ${r.missingLastDay} (${((1 - r.coverageRate) * 100).toFixed(1)}%)`);
+  console.log(`  缺最近交易日: ${r.missingLastDay}（新鮮故障 ${r.missingFresh} / 慢性停牌下市 ${r.missingChronic}）；紅線覆蓋率 ${(r.coverageRate * 100).toFixed(1)}%`);
   const hist = Object.entries(r.lastDateHistogram)
     .sort((a, b) => b[0].localeCompare(a[0]))
     .slice(0, 6);

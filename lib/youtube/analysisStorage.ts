@@ -13,7 +13,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
-import type { StockLookupResult } from './stockMaster';
+import { loadStockMaster } from './stockMaster';
+import type { StockLookupResult, StockMasterFile } from './stockMaster';
+import { validateAnalysisNames } from './validateAnalysisNames';
 
 const IS_VERCEL = !!process.env.VERCEL;
 const BLOB_PREFIX = 'youtube';
@@ -22,6 +24,13 @@ const FS_ROOT = path.join(process.cwd(), 'data', 'youtube');
 export type StockSentiment =
   | 'bullish' | 'bearish' | 'neutral' | 'watchlist'
   | 'risk_warning' | 'mentioned_only';
+
+/** mention 的證據來源（keyframe 管線 2026-06-12 加；舊分析無此欄 = 'speech' 視之） */
+export type MentionSourceType = 'speech' | 'slide' | 'speech+slide';
+
+/** 推薦強度分級（節目語境用詞；老師績效追蹤的 cohort 依據，見 recoEvents.ts） */
+export type RecommendationType =
+  | '明確買進' | '看多' | '觀察' | '等回檔' | '小心追高' | '偏空' | '只介紹';
 
 /** Claude 分析後寫回的單筆股票 mention（已通過 stockMaster 對照） */
 export interface AnalyzedStockMention {
@@ -41,6 +50,22 @@ export interface AnalyzedStockMention {
    * 例：["李兆華", "朱家泓"] / ["蔡萬得"] / ["錢線百分百"]（無明確分析師時的 fallback）。
    */
   analysts?: string[];
+
+  // ── keyframe 管線新欄（2026-06-12；全部 optional，舊 analysis 檔向下相容）──
+  /** 證據來源：純口述 / 純簡報截圖 / 兩者皆有。新分析必填；舊檔缺 = 'speech' */
+  source_type?: MentionSourceType;
+  /** 影片內提及秒數（slide 取 keyframe ts；speech 取 cue start；皆有取較早者） */
+  mention_time?: number;
+  /** 佐證截圖 repo 相對路徑（data/youtube/keyframes/...），無則省略 */
+  screenshot_ref?: string;
+  /** 推薦強度分級；舊檔缺 → recoEvents 由 sentiment fallback 映射 */
+  recommendation_type?: RecommendationType;
+  /** 提及當下講的價位（簡報/口述；無則省略） */
+  mentioned_price?: number;
+  /** 目標價（簡報/口述明確給的才填，不可推算） */
+  target_price?: number;
+  /** 停損價（同上） */
+  stop_loss?: number;
 }
 
 /** MVP 5: 每檔股票的多因子評分 + A/B/C/D 分級 */
@@ -91,6 +116,38 @@ export interface StockScoring {
   reasoning: string;
 }
 
+/** 節目必看分級（2026-07 每日節目總結報告） */
+export type WatchPriority = 'must_watch' | 'skim' | 'skip';
+
+/** 該集對大盤的態度 */
+export type MarketStance = 'bullish' | 'bearish' | 'neutral' | 'mixed';
+
+/**
+ * 每支影片的節目摘要 + 必看分級（2026-07 加；全部檔案層 optional，舊 analysis 向下相容）。
+ * 讓使用者「看報告代替看節目」：這集講了什麼、值不值得花時間回看。
+ */
+export interface VideoSummary {
+  video_id: string;
+  source_id: string;
+  /** 節目顯示名（question 的 source_display_name 原樣帶下） */
+  source_name: string;
+  title: string;
+  /** 缺時 UI 以 video_id 組 youtube.com/watch?v= */
+  url?: string;
+  /** 同 AnalyzedStockMention.analysts 慣例（主持人 + 來賓） */
+  analysts?: string[];
+  /** 2-4 句白話繁中：這集講了什麼、結論是什麼（禁止改寫標題充數） */
+  summary: string;
+  market_stance?: MarketStance;
+  /** 該集最重要 1-5 檔（code 以 stock_master 對照後為準） */
+  key_stocks: Array<{ code: string; name: string }>;
+  watch_priority: WatchPriority;
+  /** 一句話，必須引具體內容（哪檔股票/什麼論述） */
+  watch_reason: string;
+  /** 影片長度，「值不值得花時間」參考 */
+  duration_sec?: number;
+}
+
 export interface DailyAnalysis {
   date: string;                 // YYYY-MM-DD Asia/Taipei
   generated_at: string;         // ISO，Claude 寫入時
@@ -108,6 +165,8 @@ export interface DailyAnalysis {
   weak_signal_stocks: AnalyzedStockMention[];
   /** MVP 5: 每檔被提到股票的多因子評分（可選 — 舊 analysis 沒這欄） */
   stock_scoring?: StockScoring[];
+  /** 每支影片的節目摘要 + 必看分級（2026-07 加 — 舊 analysis 沒這欄） */
+  video_summaries?: VideoSummary[];
   /** 統計 */
   stats: {
     videos_analyzed: number;
@@ -171,6 +230,13 @@ export interface DailyStockMention {
     combined_confidence: number;
     /** 這集講這檔股票的分析師（從 video.analysts 帶下來） */
     analysts?: string[];
+    /** keyframe 管線新欄（optional 透傳） */
+    source_type?: MentionSourceType;
+    mention_time?: number;
+    screenshot_ref?: string;
+    recommendation_type?: RecommendationType;
+    target_price?: number;
+    stop_loss?: number;
   }>;
   mention_count: number;
   bullish_count: number;
@@ -238,12 +304,14 @@ async function fsGet(key: string): Promise<string | null> {
   }
 }
 
-async function putJson<T>(key: string, value: T): Promise<void> {
+/** dual-storage put（Vercel→Blob / 本地→FS）。export 給 recoStorage 等同 prefix 模組重用。 */
+export async function putJson<T>(key: string, value: T): Promise<void> {
   const data = JSON.stringify(value, null, 2);
   if (IS_VERCEL) await blobPut(key, data); else await fsPut(key, data);
 }
 
-async function getJson<T>(key: string): Promise<T | null> {
+/** dual-storage get。export 給 recoStorage 等同 prefix 模組重用。 */
+export async function getJson<T>(key: string): Promise<T | null> {
   const raw = IS_VERCEL ? await blobGet(key) : await fsGet(key);
   if (!raw) return null;
   try { return JSON.parse(raw) as T; }
@@ -264,6 +332,16 @@ export async function loadDailyAnalysis(date: string): Promise<DailyAnalysis | n
 }
 
 export async function saveDailyAnalysis(analysis: DailyAnalysis): Promise<void> {
+  // 寫入前驗證 code/name 對應 stock-master（防寫錯名持久化進 git，如 4958「臻鼎」應為「臻鼎-KY」）。
+  // master 載入失敗（離線/限流）→ 略過驗證照常寫；只有「確定不符」才擋下並拋錯，與合約測試共用同一份規則。
+  let master: StockMasterFile | null = null;
+  try { master = await loadStockMaster(); } catch { master = null; }
+  if (master) {
+    const errs = validateAnalysisNames(analysis, master);
+    if (errs.length > 0) {
+      throw new Error(`analysis 名稱與 stock-master 不符（${errs.length} 筆，請修正代號/名稱後再存）：${errs.slice(0, 5).join('; ')}`);
+    }
+  }
   await putJson(analysisKey(analysis.date), analysis);
 }
 
@@ -297,6 +375,12 @@ export function deriveStockMentions(a: DailyAnalysis): DailyStockMentions {
       reason: m.reason,
       combined_confidence: m.combined_confidence,
       analysts: m.analysts,
+      source_type: m.source_type,
+      mention_time: m.mention_time,
+      screenshot_ref: m.screenshot_ref,
+      recommendation_type: m.recommendation_type,
+      target_price: m.target_price,
+      stop_loss: m.stop_loss,
     });
     agg.mention_count += 1;
     if (m.sentiment === 'bullish') agg.bullish_count += 1;

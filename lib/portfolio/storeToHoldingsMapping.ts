@@ -33,6 +33,8 @@ export interface StorePortfolioHolding {
   market?: MarketId;
   notes?: string;
   triggerSignal?: string;
+  /** 賠少-1：做空 live 風控。缺省=long；非 core key → 自動進 ui blob、hydration 展回頂層 */
+  positionSide?: 'long' | 'short';
   // ... 其他 UI-only 欄位忽略
 }
 
@@ -158,5 +160,66 @@ export function toUpsertApiBody(payload: ServerHoldingPayload): Record<string, u
     ...payload,
     status: 'open',
     forcePrice: true,  // 均價可能跟單日 K 線對不上是正常的（5/22 偵測到的 bug 教訓）
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 全保真雙向映射（2026-05-29 持倉改 server 唯一真相）
+//
+// 與上面「簡化鏡像」(mapStoreToServerHolding) 不同：這組**保留 UI 富欄位**，
+// 把核心欄位以外的全部塞進 server holding 的 `ui` blob，hydration 時原樣展開。
+// reports / mini-agent 只讀核心欄位、忽略 `ui`。
+// ════════════════════════════════════════════════════════════════════════════
+
+/** store 端核心欄位（其餘一律視為 UI-only，進 ui blob）*/
+const CORE_STORE_KEYS = new Set([
+  'id', 'symbol', 'name', 'shares', 'costPrice', 'buyDate', 'market', 'notes',
+]);
+
+type FullStoreHolding = StorePortfolioHolding & Record<string, unknown>;
+
+/**
+ * store holding → 全保真 `/api/agents/portfolio` POST body（含 ui blob）
+ *
+ * 失敗（缺核心欄位）回 null — caller 應略過。
+ */
+export function toFullUpsertApiBody(h: FullStoreHolding): Record<string, unknown> | null {
+  const base = mapStoreToServerHolding(h);
+  if (!base.ok || !base.payload) return null;
+  // 核心欄位以外的全部進 ui（triggerPrice/operationMode/entryPattern/entryKbar…）
+  const ui: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(h)) {
+    if (!CORE_STORE_KEYS.has(k) && v !== undefined) ui[k] = v;
+  }
+  return {
+    ...base.payload,
+    ...(Object.keys(ui).length > 0 ? { ui } : {}),
+    status: 'open',
+    forcePrice: true,
+  };
+}
+
+/**
+ * server holding → store holding（hydration 用）
+ *
+ * entryPrice→costPrice、entryDate→buyDate；`ui` blob 原樣展開回頂層。
+ * id 用 symbol 衍生（穩定、利於 React key 與 remove(by symbol)）。
+ */
+export function mapServerToStoreHolding(
+  s: Record<string, unknown>,
+): FullStoreHolding | null {
+  const symbol = s.symbol;
+  if (typeof symbol !== 'string' || !symbol) return null;
+  const ui = (s.ui && typeof s.ui === 'object') ? s.ui as Record<string, unknown> : {};
+  return {
+    ...ui,                                 // 先展開 UI 富欄位（會被下面核心欄位覆蓋）
+    id: `srv-${symbol}`,
+    symbol,
+    name: typeof s.name === 'string' ? s.name : symbol,
+    shares: Number(s.shares) || 0,
+    costPrice: Number(s.entryPrice) || 0,
+    buyDate: typeof s.entryDate === 'string' ? s.entryDate : '',
+    market: (s.market === 'CN' ? 'CN' : 'TW') as MarketId,
+    ...(typeof s.notes === 'string' ? { notes: s.notes } : {}),
   };
 }

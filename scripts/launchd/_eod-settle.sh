@@ -18,6 +18,6 @@ DATE=$(/bin/date +%Y-%m-%d)
 LOG="/tmp/rockstock-eod-settle-${MARKET}.log"
 
 echo "[$(date '+%F %T')] [eod-settle-${MARKET}] start date=${DATE}" >> "$LOG"
-cd /Users/tzu-chienhsu/Desktop/rockstock
+cd /Users/tc/Desktop/rockstock
 /usr/local/bin/npx tsx scripts/eod-settle.ts --market "$MARKET" --date "$DATE" --apply --concurrency 10 >> "$LOG" 2>&1
 echo "[$(date '+%F %T')] [eod-settle-${MARKET}] done exit=$?" >> "$LOG"

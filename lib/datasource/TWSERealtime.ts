@@ -221,11 +221,14 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
     // 嘗試上市(tse)和上櫃(otc)兩種
     const exCh = `tse_${code}.tw|otc_${code}.tw`;
     const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
-    const res = await fetch(url, {
-      headers: MIS_HEADERS,
-      signal: AbortSignal.timeout(5000),
-    });
-    const json = await res.json();
+    // 2026-06-15：mis.twse 盤中常大量 Node fetch 逾時（HeadersTimeout），走圖今日注入
+    // 一卡就乾等 → 改走 curl fallback（curl 對 mis 實測穩定 ~0.7s、且會自動試本機代理）。
+    // timeoutMs 收到 3500ms：Node fetch 不通時快速落到 curl，避免走圖第一次載入卡 8 秒。
+    const { data: json, source } = await fetchJsonWithCurlFallback<{ msgArray?: Array<Record<string, string | undefined>> }>(
+      url,
+      { headers: MIS_HEADERS, timeoutMs: 3500 },
+    );
+    if (source === 'curl') console.info('[TWSERealtime] 單檔即時報價 經 curl fallback 成功');
     const d = json?.msgArray?.[0];
     if (!d) return null;
     const close = resolveMisClose(d);
@@ -407,6 +410,25 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
     } catch { /* parse error */ }
   }
 
+  // 2026-06-30：TPEx OpenAPI（tpex_mainboard_quotes）被 Cloudflare 403 擋時 otcCodes 整批掉光
+  // → 上櫃股全部缺即時報價（題材面板/三色/掃描的上櫃段空白，環球晶 6488/中美晶 5483/合晶 6182
+  // 顯示「量 —」即此）。改用本地 stock-master 的上櫃代號清單當備援，再交給 mis.twse 批量抓
+  // （mis 端 otc_ 通道實測可用、不經 Cloudflare）。stock-master 7 天 TTL、讀本地檔不打網路。
+  if (otcCodes.length === 0) {
+    try {
+      const { loadStockMaster } = await import('@/lib/youtube/stockMaster');
+      const master = await loadStockMaster();
+      for (const e of master.entries) {
+        if (e.market === 'TPEx' && /^\d{4}$/.test(e.code)) otcCodes.push(e.code);
+      }
+      if (otcCodes.length > 0) {
+        console.info(`[TWSERealtimeIntraday] TPEx OpenAPI 無代號 → 改用 stock-master 上櫃清單備援 (${otcCodes.length} 檔)`);
+      }
+    } catch (err) {
+      console.warn('[TWSERealtimeIntraday] stock-master 上櫃備援失敗:', String(err));
+    }
+  }
+
   if (tseCodes.length === 0 && otcCodes.length === 0) {
     console.warn('[TWSERealtimeIntraday] 無法取得代碼清單，fallback 到 STOCK_DAY_ALL');
     return fetchAllQuotes(); // 降級回 STOCK_DAY_ALL
@@ -417,11 +439,13 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
     try {
       const exCh = codes.map(c => `${exchange}_${c}.tw`).join('|');
       const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
-      const res = await fetch(url, {
-        headers: MIS_HEADERS,
-        signal: AbortSignal.timeout(15000),
-      });
-      const json = await res.json();
+      // 2026-06-15：mis.twse 盤中 Node fetch 常整批逾時（"批次失敗"）→ 80 檔即時報價漏抓。
+      // 與大批量端點一致改走 curl fallback（curl 穩定 + 本機代理 fallback）。
+      const { data: json, source } = await fetchJsonWithCurlFallback<{ msgArray?: Array<Record<string, string | undefined>> }>(
+        url,
+        { headers: MIS_HEADERS, timeoutMs: 12000 },
+      );
+      if (source === 'curl') console.info(`[TWSERealtimeIntraday] ${exchange} 批次經 curl fallback 成功`);
       for (const d of json?.msgArray ?? []) {
         const code = d.c;
         if (!code) continue;

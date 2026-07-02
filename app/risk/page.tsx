@@ -62,17 +62,23 @@ export default function RiskDashboardPage() {
           status: gp.status,
         });
       }
-      // 撈每檔最新收盤
-      const priceMap: Record<string, number> = {};
-      await Promise.all(hold.map(async h => {
-        const r = await fetch(`/api/stock?symbol=${encodeURIComponent(h.symbol)}&period=1mo`)
-          .then(r => r.ok ? r.json() : null).catch(() => null);
-        const candles = r?.candles as Array<{ close: number }> | undefined;
-        if (candles?.length) priceMap[h.symbol] = candles[candles.length - 1].close;
-      }));
-      if (!canceled) {
-        setPrices(priceMap);
-        setLoading(false);
+      // 先解除 loading：畫面先用成本價墊著 render，報價回來再補，
+      // 避免整頁卡死等報價（D-1：原本逐檔 await /api/stock 歷史鏈，DNS 異常時卡 70s）
+      setLoading(false);
+      // 撈每檔最新報價 — 走輕量 quotes 端點（同 /portfolio，有逾時與負快取、上限約 10s），
+      // 不走會在 DNS 異常時卡 70s 的 /api/stock?period=1mo 歷史 K 線鏈
+      if (hold.length > 0) {
+        const symbols = hold.map(h => h.symbol);
+        fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(symbols.join(','))}`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(json => {
+            if (canceled || !json) return;
+            const quotes = (json.quotes ?? []) as Array<{ symbol: string; price: number }>;
+            const priceMap: Record<string, number> = {};
+            for (const q of quotes) if (q.price > 0) priceMap[q.symbol] = q.price;
+            setPrices(priceMap);
+          })
+          .catch(() => {});
       }
     })();
     return () => { canceled = true; };
@@ -82,7 +88,7 @@ export default function RiskDashboardPage() {
     if (holdings.length === 0 || !totalCapital) return null;
 
     const rows = holdings.map(h => {
-      const close = prices[h.symbol] ?? 0;
+      const close = prices[h.symbol] ?? h.entryPrice;  // 報價未到先用成本價墊（不顯示 -100%）
       const cost = h.entryPrice * h.shares;
       const marketValue = close * h.shares;
       const concentrationPct = (marketValue / totalCapital) * 100;
@@ -147,7 +153,7 @@ export default function RiskDashboardPage() {
 
   return (
     <PageShell headerSlot={header}>
-      <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
+      <div className="px-4 py-4 space-y-4">
 
         {loading && <p className="text-sm text-muted-foreground text-center py-8">載入中…</p>}
 
@@ -193,7 +199,7 @@ export default function RiskDashboardPage() {
             </section>
 
             {/* 集中度警示 */}
-            <section className="rounded-lg border border-border bg-card p-4 space-y-2">
+            <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-2">
               <h2 className="text-sm font-semibold flex items-center gap-1.5">🎯 集中度分析</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 <div>
@@ -245,7 +251,7 @@ export default function RiskDashboardPage() {
             </section>
 
             {/* 風險預算 vs 朱書建議 */}
-            <section className="rounded-lg border border-border bg-card p-4 space-y-2">
+            <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-2">
               <h2 className="text-sm font-semibold">💰 風險預算 vs 書本建議</h2>
               <div className="text-xs space-y-1 text-foreground/80">
                 <p>朱書建議單筆風險 1-2% 總資金（書本《活用技術分析寶典》p.488）</p>
@@ -263,7 +269,7 @@ export default function RiskDashboardPage() {
             </section>
 
             {/* 每檔細節 */}
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="rounded-xl ring-1 ring-foreground/10 bg-card p-4">
               <h2 className="text-sm font-semibold mb-2">📋 每檔細節</h2>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">

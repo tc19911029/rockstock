@@ -11,6 +11,7 @@ import {
 import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { isFundSymbol } from '@/lib/market/classify';
 import { loadMockData } from '@/lib/data/mockData';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 import {
@@ -85,8 +86,12 @@ interface ReplayStore {
   isPolling: boolean;
 
   // ── Data Integrity ───────────────────────────────────────
-  /** K線資料斷層（日曆天數 > 10 天的gap） */
-  dataGaps: Array<{ fromDate: string; toDate: string; calendarDays: number }>;
+  /**
+   * K線資料斷層（日曆天數 > 15 天的gap）。
+   * kind='halt'：兩根 K 棒「中間」的洞 → 該股那段沒交易（停牌/未掛牌），抓也抓不回來。
+   * kind='stale'：最後一根 K 棒距今太久 → 資料過舊未更新，可重新下載。
+   */
+  dataGaps: Array<{ fromDate: string; toDate: string; calendarDays: number; kind: 'halt' | 'stale' }>;
 
   // ── Actions ───────────────────────────────────────────────
   initData: () => void;
@@ -248,19 +253,29 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         index = calcStartIndex(allCandles);
       }
       // 偵測資料斷層（日K限定，週/月K不檢查因為聚合後自然有gap）
-      const gaps = interval === '1d' ? detectCandleGaps(allCandles, 15) : [];
-      // 末端斷層：最後一根 K 棒距今超過 15 天（資料過舊，容忍農曆新年/國慶等長假）
+      // 中間的洞 = 該股那段停牌/未交易（資料源本來就沒這幾根），不是漏抓。
+      const gaps: Array<{ fromDate: string; toDate: string; calendarDays: number; kind: 'halt' | 'stale' }> =
+        interval === '1d'
+          ? detectCandleGaps(allCandles, 15).map((g) => ({ ...g, kind: 'halt' as const }))
+          : [];
+      // 末端斷層：最後一根 K 棒距今超過 15 天（資料過舊未更新，可重新下載；容忍農曆新年/國慶等長假）
       if (interval === '1d' && allCandles.length > 0) {
         const lastDate = allCandles[allCandles.length - 1].date;
         const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
         const diffMs = new Date(todayStr + 'T12:00:00').getTime() - new Date(lastDate + 'T12:00:00').getTime();
         const diffDays = Math.round(diffMs / 86400000);
         if (diffDays > 15) {
-          gaps.push({ fromDate: lastDate, toDate: todayStr, calendarDays: diffDays });
+          gaps.push({ fromDate: lastDate, toDate: todayStr, calendarDays: diffDays, kind: 'stale' });
         }
       }
 
       const account = createAccount(INITIAL_CAPITAL);
+      // 名稱查詢逾時時 API 會回空名（server 冷啟動 nameMap 還沒建好）：
+      // 同一檔已有名字就別被空值洗掉（背景更新晚到帶空名的情況）；換股票時不沿用舊名
+      const prevStock = get().currentStock;
+      const keptName = json.name
+        || (prevStock?.ticker === json.ticker ? prevStock.name : '')
+        || '';
       set({
         allCandles,
         currentIndex: index,
@@ -268,7 +283,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         targetDate: targetDate ?? null,
         account,
         dataGaps: gaps,
-        currentStock: { ticker: json.ticker, name: json.name },
+        currentStock: { ticker: json.ticker, name: keptName },
         ...(showLoading ? { isLoadingStock: false } : {}),
         ...buildState(allCandles, index, account),
       });
@@ -277,7 +292,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       const isIndex = /^\^|^000001\.SS$/.test(json.ticker);
       if (!isIndex) {
         const cleanSymbol = json.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-        useSearchHistoryStore.getState().record(cleanSymbol, json.name);
+        useSearchHistoryStore.getState().record(cleanSymbol, keptName);
       }
       return true;
     };
@@ -357,6 +372,10 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     const { currentStock, currentInterval, targetDate } = get();
     if (!currentStock || currentStock.ticker === 'DEMO') return;
 
+    // 場外基金：單位淨值一天才定盤一次，盤中沒有即時報價可 poll（且 /api/stock/quote
+    // 是股票端點，對 .OF 無資料）→ 直接不啟動 polling。
+    if (isFundSymbol(currentStock.ticker)) return;
+
     // 歷史 scan 模式不要 poll：targetDate 是過去日，盤中報價跟它無關，
     // 而 polling 每 30s 重抓+全量 precomputeMarkers 很貴，純浪費
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
@@ -370,6 +389,9 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
 
     set({ isPolling: true });
     const symbol = currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    // 指數(000001.SS)裸碼後會撞個股(000001=平安銀行)→日K 報價/今日 bar 注入一律用完整代號
+    // （/api/stock/quote 是 suffix-aware：000001.SS→4083、000001→10.99；個股帶不帶後綴結果相同）
+    const quoteSymbol = currentStock.ticker;
     const interval = currentInterval;
     const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
     const defaultPeriod: Record<string, string> = {
@@ -383,7 +405,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         if (isMinuteInterval) {
           // 分K：重抓完整分鐘資料（Fugle intraday）
           const res = await fetch(
-            `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${period}`
+            `/api/stock?symbol=${encodeURIComponent(quoteSymbol)}&interval=${interval}&period=${period}`
           );
           if (!res.ok) return;
           const json = await res.json();
@@ -396,7 +418,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           set({ allCandles: candles, currentIndex: newIndex, ...buildState(candles, newIndex, account) });
         } else {
           // 日K/週K/月K：只更新今日最後一根 bar，避免重讀 2 年 L1 觸發 bulk preload
-          const res = await fetch(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`);
+          const res = await fetch(`/api/stock/quote?symbol=${encodeURIComponent(quoteSymbol)}`);
           if (!res.ok) return;
           const q = await res.json();
           if (!q.close || q.close <= 0) return;
@@ -421,6 +443,14 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           // 不要拿這個值來偽造一根「今日 bar」造成 04-24/04-25 重複
           const todayIsTradingDay = isTradingDay(today, market);
 
+          // 2026-06-12（QA 提案 #9）：交易日 00:00～開盤前，quote 端點回的是昨收殘值，
+          // 會偽造一根 O=H=L=C、漲跌 0.00 的扁平「今日」bar（凌晨看盤誤導、三色 asOf 連坐）
+          // → 開盤前（TW <09:00 / CN <09:30 當地時間）不新增今日 bar；已存在的今日 bar 照常覆蓋。
+          const hm = new Intl.DateTimeFormat('en-GB', {
+            timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
+          }).format(new Date());
+          const marketOpened = hm >= (isTW ? '09:00' : '09:30');
+
           // quote.date 比 lastCandle.date 早 → 是舊資料（如 INDEX L1 fallback 回昨天的 K）
           // 必須拒絕，否則會把 /api/stock?local=1 注入好的今日 bar 蓋成「昨天 OHLCV + 今日 high」混合。
           if (q.date && q.date < lastCandle.date) {
@@ -436,8 +466,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
               close: q.close,
               volume: q.volume || lastCandle.volume,
             };
-          } else if (lastCandle.date < today && todayIsTradingDay) {
-            // 新增今日 bar（只在交易日才加，避免週末/假日把昨日收盤當今日 bar）
+          } else if (lastCandle.date < today && todayIsTradingDay && marketOpened) {
+            // 新增今日 bar（只在交易日且已開盤才加，避免週末/假日/凌晨把昨收殘值當今日 bar）
             updatedCandles.push({
               date: today,
               open: q.open || q.close,

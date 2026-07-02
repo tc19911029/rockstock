@@ -5,6 +5,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { scanSanSe } from '@/lib/cn-sanse/scan';
 import { saveSanSeScan } from '@/lib/cn-sanse/scanStorage';
+import { degenerateScanReason } from '@/lib/cn-sanse/scanGuard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -24,6 +25,15 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await scanSanSe(dateParam ? { asOfDate: dateParam } : undefined);
+    // 退化掃描防呆（同 TW）：指數 L1 封存落後個股 / 全市場資料缺口時不存檔，
+    // 避免覆蓋既有好紀錄；交給較晚那一輪重產。見 lib/cn-sanse/scanGuard.ts。
+    const degenerate = degenerateScanReason(result);
+    if (degenerate) {
+      return apiOk({
+        skipped: true, reason: degenerate, date: result.lastDate,
+        evaluated: result.evaluated, staleSkipped: result.staleSkipped,
+      });
+    }
     await saveSanSeScan(result);
     return apiOk({
       ok: true,

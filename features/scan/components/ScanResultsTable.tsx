@@ -7,9 +7,17 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { POLLING } from '@/lib/config';
 // import { fetchInstitutionalBatch } from '@/lib/datasource/useInstitutionalSummary'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { Button } from '@/components/ui/button';
-import type { StockForwardPerformance } from '@/lib/scanner/types';
+import type { StockForwardPerformance, StockScanResult } from '@/lib/scanner/types';
 import { MTF_SCORE_STRONG, MTF_SCORE_OK } from '@/lib/analysis/bookThresholds';
-import { panelSortCompare } from '@/lib/selection/applyPanelFilter';
+import { panelSortKey } from '@/lib/selection/applyPanelFilter';
+import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
+import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
+import { ThemeTag } from '@/components/ThemeTag';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
+import { useReplayStore } from '@/store/replayStore';
+import { navKey } from '@/lib/chartListNav';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,6 +56,13 @@ const FWD_COLS = [
 
 const TOTAL_COLS = 22; // 代號+名稱+概念+價格+當日漲跌+趨勢+位置 + 14 fwd cols + 操作
 
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+// 註：舊「面板對齊(panel)」與「漲幅(change)」邏輯完全相同（都走 panelSortKey），合併為單一 mkt.change。
+const SCAN_TABLE_SORT_OPTIONS = ['mkt.turnover', 'mkt.change', 'score.sixCond', 'heat.theme', 'mkt.price'];
+
+// 去市場後綴拿裸代號（今日題材熱度 map 以裸代號為 key）
+const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+
 interface ScanResultsTableProps {
   onSelectStock?: (stock: SelectedStock) => void;
 }
@@ -66,6 +81,8 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     activeBuyMethod,
   } = useBacktestStore();
 
+  // 目前走圖載入那檔（高亮列用）— navKey 正規化後比對
+  const navCurrentKey = useReplayStore((s) => navKey(s.currentStock?.ticker));
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
   const [justAdded, setJustAdded] = useState<string | null>(null);
   const [newsCache, setNewsCache] = useState<Record<string, { sentiment: number; summary: string; hasNews: boolean; loading: boolean }>>({});
@@ -73,8 +90,11 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   const [conceptFilter, setConceptFilter] = useState<string>('all');
   // 排序選項：成交額排名為預設（依 0512 v12 全期間綜合回測，A 級組合幾乎都靠這個排序勝出）
   // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
-  const [scanSort, setScanSort] = useState<'price' | 'change' | 'sixCond' | 'turnover' | 'panel'>('turnover');
-  const [scanSortDir, setScanSortDir] = useState<'asc' | 'desc'>('desc');
+  const [scanSort, setScanSort] = useState<string>('mkt.turnover');
+  const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
+
+  // 今日題材熱度 map（裸碼 → 所屬最熱題材）— 「🔥今日題材熱度」排序用；純展示/排序不進選股 gate
+  const themeHeatMap = useThemeHeatMap(market, scanDate ?? undefined);
 
   // Build performance lookup map
   const perfMap = useMemo(() => {
@@ -146,21 +166,22 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     ? scanResults
     : scanResults.filter(r => r.industry === conceptFilter);
 
-  const sortedScanResults = [...filteredScanResults].sort((a, b) => {
-    const dir = scanSortDir === 'desc' ? 1 : -1;
-    switch (scanSort) {
-      case 'price':      return dir * ((b.price ?? 0) - (a.price ?? 0));
-      case 'change':     // 對齊 panelSortCompare（漲幅/六條件/ma20Slope 三層）— 單一事實來源 rule 10
-      case 'panel':      // 同上
-        return dir * panelSortCompare(a, b);
-      case 'sixCond':    return dir * (((b.sixConditionsScore ?? 0) - (a.sixConditionsScore ?? 0)) * 100
-                                       + ((b.changePercent ?? 0) - (a.changePercent ?? 0)) / 100);
-      case 'turnover':   // 對齊產線 ScanPipeline 的 turnoverRank：rank 1 = 最大成交額
-        // desc = 大成交額（rank 小）優先 → a.rank - b.rank 為負時 a 在前
-        return dir * ((a.turnoverRank ?? 999_999) - (b.turnoverRank ?? 999_999));
-      default:           return 0;
+  // 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）
+  const scanTableSortValue = (r: StockScanResult, id: string): SortValue => {
+    switch (id) {
+      case 'mkt.price':     return r.price ?? null;
+      case 'mkt.change':    // 漲幅/六條件/ma20Slope 三層 — 單一事實 panelSortKey（rule 10）
+        return panelSortKey(r);
+      case 'score.sixCond': return (r.sixConditionsScore ?? 0) * 100 + (r.changePercent ?? 0) / 100;
+      case 'mkt.turnover':  return -(r.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
+      case 'heat.theme': {  // 所屬「今日最熱題材」名次（1=最熱）→ 同題材內再按漲幅；無題材排最後
+        const rank = bestHeatRank(themeHeatMap, r.symbol);
+        return rank === Infinity ? null : -(rank * 1000) + (r.changePercent ?? 0);
+      }
+      default:              return null;
     }
-  });
+  };
+  const sortedScanResults = applySort(filteredScanResults, scanSort, scanSortDir, scanTableSortValue);
 
   if (!scanOnly) return null;
 
@@ -231,30 +252,22 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
         </Button>
       </div>
 
-      {/* Sort selector pills */}
-      <div className="flex flex-wrap gap-1 items-center">
-        <span className="text-[10px] text-muted-foreground mr-1">排序：</span>
-        {([
-          { key: 'turnover' as const, label: '成交額排名', tip: '當日成交金額大的排前面（回測 A 級組合多靠此排序勝出）' },
-          { key: 'change'   as const, label: '當日漲幅', tip: '當日收盤價相對前日收盤的漲跌幅%' },
-          { key: 'sixCond'  as const, label: '六條件分', tip: '朱家泓五步法六條件通過分數（次鍵：漲幅）' },
-          { key: 'panel'    as const, label: '面板對齊', tip: '對齊 UI 預設排序（主鍵漲幅、次鍵六條件）' },
-          { key: 'price'    as const, label: '股價', tip: '當前股價高低' },
-        ]).map(({ key, label, tip }) => (
-          <Button key={key}
-            onClick={() => {
-              if (scanSort === key) setScanSortDir(d => d === 'desc' ? 'asc' : 'desc');
-              else { setScanSort(key); setScanSortDir('desc'); }
-            }}
-            variant={scanSort === key ? 'default' : 'secondary'}
-            size="sm"
-            title={tip}
-            className={`text-[10px] px-2 py-0.5 h-auto rounded-full ${scanSort === key ? 'bg-sky-700 hover:bg-sky-600' : ''}`}>
-            {label}
-            {scanSort === key && <span className="ml-1 text-[9px]">{scanSortDir === 'desc' ? '▼' : '▲'}</span>}
-          </Button>
-        ))}
-      </div>
+      {/* Sort selector pills — 共用 SortControl + 中央排序清單 */}
+      <SortControl
+        options={SCAN_TABLE_SORT_OPTIONS}
+        value={scanSort}
+        dir={scanSortDir}
+        onChange={(id, d) => { setScanSort(id); setScanSortDir(d); }}
+        leading="排序："
+        size="normal"
+      />
+      {scanSort === 'heat.theme' && (
+        <p className="text-[10px] leading-snug text-amber-400/90 px-1">
+          {market === 'TW'
+            ? '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+            : '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'}
+        </p>
+      )}
 
       {/* Concept filter pills */}
       {availableConcepts.length > 1 && (
@@ -300,8 +313,8 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
               <th className="text-left py-1.5 px-2 sticky left-[72px] bg-card z-10 whitespace-nowrap" style={{ width: '100px' }}>名稱</th>
               <th className="text-left py-1.5 px-2 whitespace-nowrap" style={{ width: '80px' }}>概念</th>
               {([
-                { key: 'price' as const, label: '價格', w: '64px', tip: '掃描日收盤價' },
-                { key: 'change' as const, label: '當日漲跌', w: '72px', tip: '掃描日收盤價相對前一交易日收盤價的漲跌百分比' },
+                { key: 'mkt.price' as const, label: '價格', w: '64px', tip: '掃描日收盤價' },
+                { key: 'mkt.change' as const, label: '當日漲跌', w: '72px', tip: '掃描日收盤價相對前一交易日收盤價的漲跌百分比' },
               ]).map(({ key, label, w, tip }) => (
                 <th key={key}
                   className="text-right py-1.5 px-1 cursor-pointer hover:text-foreground select-none whitespace-nowrap"
@@ -328,11 +341,13 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
               <th className="text-center py-1.5 px-2 whitespace-nowrap" style={{ width: '90px' }}>操作</th>
             </tr>
           </thead>
-          <tbody>
+          {/* data-navlist：鍵盤 ↑↓ 跳股的清單範圍（掃描結果） */}
+          <tbody data-navlist="scan-results">
             {sortedScanResults.slice(0, 50).map((r) => {
               const perf = perfMap.get(r.symbol);
+              const isCur = navCurrentKey === navKey(r.symbol);
               return (<Fragment key={r.symbol}>
-              <tr className={`group border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''}`}
+              <tr className={`group border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''} ${isCur ? 'ring-1 ring-inset ring-sky-400/60 bg-sky-500/5' : ''}`}
                 onClick={() => setExpandedStock(expandedStock === r.symbol ? null : r.symbol)}>
                 {/* 代號 — sticky */}
                 <td className="py-1.5 px-2 font-mono text-foreground/90 sticky left-0 bg-card group-hover:bg-secondary/40 z-10 transition-colors">
@@ -386,8 +401,10 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                     )}
                   </div>
                 </td>
-                {/* 概念 */}
-                <td className="py-1.5 px-1 text-[10px] text-muted-foreground max-w-[80px] truncate" title={r.industry}>{r.industry ?? '—'}</td>
+                {/* 概念：所屬題材/概念（台股38題材／陸股今日熱門概念）；無命中退回產業別 */}
+                <td className="py-1.5 px-1 text-[10px] max-w-[90px]">
+                  <ThemeTag market={market} code={bareCode(r.symbol)} hotMap={themeHeatMap} fallback={r.industry ?? '—'} className="inline-block max-w-[90px] align-bottom" />
+                </td>
                 {/* 價格 + 當日漲跌 */}
                 {(() => {
                   const sym = r.symbol.replace(/\.(TW|TWO)$/i, '');
@@ -424,6 +441,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                 {/* 操作 */}
                 <td className="py-1.5 px-2 text-center whitespace-nowrap">
                   <button
+                    data-navstock={navKey(r.symbol)}
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelectStock?.({ symbol: r.symbol, name: r.name, market: market as 'TW' | 'CN' });

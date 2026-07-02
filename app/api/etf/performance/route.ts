@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server';
 import { apiOk } from '@/lib/api/response';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { ACTIVE_ETF_LIST } from '@/lib/etf/etfList';
+import { ACTIVE_ETF_LIST, isGlobalETF } from '@/lib/etf/etfList';
 import { loadPerformance, listPerformanceDates } from '@/lib/etf/etfStorage';
 import { computeETFPerformance, rankByPeriod, type PeriodKey } from '@/lib/etf/performanceCalc';
 import type { ETFPerformanceEntry } from '@/lib/etf/types';
@@ -62,7 +62,9 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const ranked = rankByPeriod(entries, period).slice(0, top);
+  // 只留台股型 ETF（全球／美國型隱藏，持股多為外國股；分類見 etfList.isGlobalETF）
+  const twEntries = entries.filter((e) => !isGlobalETF(e.etfCode));
+  const ranked = rankByPeriod(twEntries, period).slice(0, top);
   return apiOk({
     period,
     latestDate: ranked[0]?.latestDate ?? getLastTradingDay('TW'),

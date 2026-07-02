@@ -184,8 +184,10 @@ interface EastMoneyItem {
   f18: number;  // 昨收
 }
 
-// A 股市場代碼（只含主板，排除創業板 m:1+t:23 和科創板 m:0+t:80）
-const CN_FS = 'm:0+t:6,m:1+t:2';
+// A 股市場代碼：滬主板(m:0+t:6) + 深主板(m:1+t:2) + 科創板(m:1+t:23) + 創業板(m:0+t:80)。
+// 2026-06-30：納入科創/創業（掃描宇宙已收各成交額前 N 檔），L2 快照需含其報價，否則
+// 買法 prefilterByL2 會把它們當「無報價」濾掉、盤中三色也吃不到。漲停 20% 由 getLimitMovePct 處理。
+const CN_FS = 'm:0+t:6,m:1+t:2,m:1+t:23,m:0+t:80';
 // 美股市場代碼（NASDAQ + NYSE + AMEX）
 const US_FS = 'm:105,m:106,m:107';
 
@@ -201,9 +203,9 @@ function parseItem(item: EastMoneyItem, market: 'cn' | 'us'): EastMoneyQuote | n
 
   if (market === 'cn') {
     if (!/^\d{6}$/.test(code)) return null;
-    // 只保留主板：600/601/603/605(滬主板), 000/001/002/003(深主板)
-    // 排除：創業板(300/301), 科創板(688), B股(200/900), 三板(4xx), 北交所(8xx)
-    if (!/^(00[0-3]|60[0135])\d{3}$/.test(code)) return null;
+    // 主板 600/601/603/605(滬) + 000/001/002/003(深) + 創業板(300-302) + 科創板(688/689)。
+    // 仍排除：B股(200/900)、三板(4xx)、北交所(8xx)。
+    if (!/^(00[0-3]|60[0135]|30[0-2]|68[89])\d{3}$/.test(code)) return null;
 
     return {
       code,
@@ -272,7 +274,7 @@ async function fetchMarketQuotes(market: 'cn' | 'us'): Promise<Map<string, EastM
 
   // Phase 2: 並行抓取剩餘頁（10 頁一批避免被限流）
   const BATCH_SIZE = 10;
-  const maxTotalPages = market === 'us' ? 100 : 60;
+  const maxTotalPages = market === 'us' ? 100 : 70; // CN 主板+科創+創業 ~5100 檔 ≈ 52 頁，留餘裕
 
   for (let batchStart = 2; batchStart <= maxTotalPages; batchStart += BATCH_SIZE) {
     const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, maxTotalPages);

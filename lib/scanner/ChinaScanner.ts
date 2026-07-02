@@ -4,7 +4,15 @@ import { MarketScanner, StockEntry } from './MarketScanner';
 import { MarketConfig } from './types';
 import { detectTrend, TrendState } from '@/lib/analysis/trendAnalysis';
 import { CN_STOCKS } from './cnStocks';
+import { CN_STOCKS_GEM_STAR } from './cnStocksGemStar';
 import { fetchEastMoneyStockList } from './eastMoneyApi';
+
+/** 主板清單併入科創/創業（去重，主板優先保留原 entry）。 */
+function mergeGemStar(base: StockEntry[]): StockEntry[] {
+  const seen = new Set(base.map((s) => s.symbol));
+  const extra = CN_STOCKS_GEM_STAR.filter((s) => !seen.has(s.symbol));
+  return [...base, ...extra];
+}
 
 export class ChinaScanner extends MarketScanner {
   getMarketConfig(): MarketConfig {
@@ -17,16 +25,16 @@ export class ChinaScanner extends MarketScanner {
   }
 
   async getStockList(): Promise<StockEntry[]> {
-    // 嘗試從東方財富 API 動態取得全部 A 股清單
+    // 主板：嘗試東方財富動態清單，失敗退靜態 CN_STOCKS
+    let base: StockEntry[] = CN_STOCKS;
     try {
       const stocks = await fetchEastMoneyStockList();
-      if (stocks.length > 500) {
-        return stocks;
-      }
+      if (stocks.length > 500) base = stocks;
     } catch {
       // 東方財富 API 失敗，使用靜態名單
     }
-    return CN_STOCKS;
+    // 併入科創/創業（各成交額前 N 檔、已有日K）。去重，前端依代號掛板塊徽章。
+    return mergeGemStar(base);
   }
 
   async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {

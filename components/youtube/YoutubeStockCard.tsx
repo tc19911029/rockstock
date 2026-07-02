@@ -13,9 +13,20 @@
 import { useState } from 'react';
 import type { PerformanceItem } from '@/app/api/youtube/performance/route';
 import { EntryStateBadge } from '@/components/EntryStateBadge';
+import { SENTIMENT_LABEL, sentimentRank } from './sentimentLabels';
+
+/** 提及這檔最準的老師/節目（D5 勝率），給卡片標「🎯 準度」徽章用 */
+export interface AccuracyHint {
+  winRate: number;          // D5 勝率 %
+  scored: number;           // 已結算樣本數
+  excess: number | null;    // D5 平均贏過大盤 %
+  label: string;            // 最準的老師或節目名
+  kind: 'teacher' | 'program';
+}
 
 interface Props {
   item: PerformanceItem;
+  accuracy?: AccuracyHint;
   selected?: boolean;
   onSelect?: (code: string) => void;
 }
@@ -25,16 +36,6 @@ const RATING_CLASS: Record<string, string> = {
   B: 'bg-blue-900/40 text-blue-300 border-blue-700',
   C: 'bg-yellow-900/40 text-yellow-300 border-yellow-700',
   D: 'bg-red-900/40 text-red-300 border-red-700',
-};
-
-// 對齊 /youtube 主頁 SENTIMENT_LABEL — 把 LLM 寫的英文 sentiment token 翻成中文
-const SENTIMENT_LABEL: Record<string, { text: string; cls: string }> = {
-  bullish:        { text: '看多', cls: 'text-bull' },
-  bearish:        { text: '看空', cls: 'text-bear' },
-  watchlist:      { text: '觀察', cls: 'text-yellow-400' },
-  risk_warning:   { text: '風險', cls: 'text-orange-400' },
-  neutral:        { text: '中立', cls: 'text-muted-foreground' },
-  mentioned_only: { text: '提及', cls: 'text-muted-foreground' },
 };
 
 function fmtRet(val: number | null | undefined): string {
@@ -74,15 +75,14 @@ const FWD_COLS = [
   { key: 'maxLoss' as const, label: '最低' },
 ] as const;
 
-export function YoutubeStockCard({ item, selected, onSelect }: Props) {
+export function YoutubeStockCard({ item, accuracy, selected, onSelect }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   // 先排序：bullish/bearish 強訊號優先 > neutral/watchlist；
   // 找有實質 reason 的第一條當卡片摘要
-  const sortedSources = [...item.sources].sort((a, b) => {
-    const order: Record<string, number> = { bullish: 1, bearish: 2, risk_warning: 3, watchlist: 4, neutral: 5, mentioned_only: 6 };
-    return (order[a.sentiment] ?? 9) - (order[b.sentiment] ?? 9);
-  });
+  const sortedSources = [...item.sources].sort(
+    (a, b) => sentimentRank(a.sentiment) - sentimentRank(b.sentiment),
+  );
   // 卡片預覽用 context 或 reason，選較長的更有資訊量
   const bestSrc = sortedSources.find(s => (s.context && s.context.length > 0) || (s.reason && s.reason.length > 0));
   const bestReason = bestSrc ? (bestSrc.context || bestSrc.reason || '') : '';
@@ -141,6 +141,23 @@ export function YoutubeStockCard({ item, selected, onSelect }: Props) {
         )}
         {item.entryGate && <EntryStateBadge gate={item.entryGate} size="xs" />}
         <span title={sentimentLabel.title} className={`text-[10px] font-bold shrink-0 cursor-help ${sentimentLabel.cls}`}>{sentimentLabel.text}</span>
+        {accuracy && (
+          <span
+            className={`text-[9px] px-1 h-3.5 flex items-center rounded-sm border shrink-0 cursor-help ${
+              accuracy.winRate >= 50
+                ? 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50'
+                : 'bg-secondary/60 text-muted-foreground border-border/60'
+            }`}
+            title={
+              `提及此股最準的來源：${accuracy.label}（${accuracy.kind === 'teacher' ? '老師' : '節目'}）\n` +
+              `D5 勝率 ${accuracy.winRate.toFixed(0)}%｜已結算 ${accuracy.scored} 筆｜` +
+              (accuracy.excess == null ? '贏大盤 —' : `贏大盤 ${accuracy.excess >= 0 ? '+' : ''}${accuracy.excess.toFixed(1)}%`) +
+              `\n⚠ 準度為近 4 週滾動、樣本短，僅供參考`
+            }
+          >
+            🎯{accuracy.winRate.toFixed(0)}%
+          </span>
+        )}
       </div>
 
       {/* Row 2: 節目來源 chips（去重後算節目數）*/}

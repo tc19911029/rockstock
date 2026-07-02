@@ -103,6 +103,25 @@ export async function loadStockMaster(forceRefresh = false): Promise<StockMaster
   }
   // refresh from upstream
   const refreshed = await fetchAndBuild();
+  // 防呆（2026-06-14）：上游抓壞時（整批上櫃掉光 / 筆數暴跌）不要用爛的覆蓋好的舊 master，
+  // 否則 theme-map/broker-reports/youtube 代號測試會紅、走圖上櫃股沒名。
+  const tpexCount = refreshed.entries.filter(e => e.market === 'TPEx').length;
+  const existingCount = existing?.entries.length ?? 0;
+  if (existing && (tpexCount === 0 || refreshed.entries.length < existingCount * 0.9)) {
+    console.warn(`[stockMaster] refresh 疑似抓壞（新 ${refreshed.entries.length}/上櫃 ${tpexCount} vs 舊 ${existingCount}）→ 保留舊 master`);
+    memoryCache = existing;
+    memoryCacheLoadedAt = Date.now();
+    return existing;
+  }
+  // 防單日掉碼（2026-06-29）：上游 TWSE/TPEx 是「當日有成交才回」的快照，
+  // 某檔當天無成交/停牌就會從 master 掉光（theme-map / youtube 代號測試會紅、走圖沒名）。
+  // → union：保留舊 master 有、但今天上游沒回的代號（新名/新碼仍以上游為主，只「不刪」）。
+  if (existing) {
+    const freshCodes = new Set(refreshed.entries.map(e => e.code));
+    for (const e of existing.entries) {
+      if (!freshCodes.has(e.code)) refreshed.entries.push(e);
+    }
+  }
   await saveToDisk(refreshed);
   memoryCache = refreshed;
   memoryCacheLoadedAt = Date.now();
@@ -151,38 +170,29 @@ interface TpexRow { SecuritiesCompanyCode: string; CompanyName: string }
 
 async function fetchAndBuild(): Promise<StockMasterFile> {
   const entries: StockMasterEntry[] = [];
+  // 2026-06-14：改用 curl fallback — Node fetch 直連 TWSE/TPEx 會被 TLS reset/Cloudflare 擋，
+  // 導致上櫃(.TWO)整批掉光、master 只剩上市（theme-map/broker-reports/youtube 代號測試會紅）。
+  const { fetchJsonWithCurlFallback } = await import('@/lib/datasource/curlFetch');
 
   // TWSE
   try {
-    const r = await fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG_ALL', {
-      headers: { Accept: 'application/json' },
-    });
-    if (r.ok) {
-      const rows = (await r.json()) as TwseRow[];
-      for (const row of rows) {
-        if (!row.Code || !row.Name) continue;
-        entries.push({
-          code: row.Code, name: row.Name, market: 'TWSE', aliases: [],
-        });
-      }
+    const { data: rows } = await fetchJsonWithCurlFallback<TwseRow[]>(
+      'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_AVG_ALL', { timeoutMs: 15000 });
+    for (const row of rows) {
+      if (!row.Code || !row.Name) continue;
+      entries.push({ code: row.Code, name: row.Name, market: 'TWSE', aliases: [] });
     }
   } catch (err) {
     console.warn('[stockMaster] TWSE fetch failed:', err);
   }
 
-  // TPEx
+  // TPEx（上櫃）— 一定要走 curl fallback，否則整批上櫃掉光
   try {
-    const r = await fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes', {
-      headers: { Accept: 'application/json' },
-    });
-    if (r.ok) {
-      const rows = (await r.json()) as TpexRow[];
-      for (const row of rows) {
-        if (!row.SecuritiesCompanyCode || !row.CompanyName) continue;
-        entries.push({
-          code: row.SecuritiesCompanyCode, name: row.CompanyName, market: 'TPEx', aliases: [],
-        });
-      }
+    const { data: rows } = await fetchJsonWithCurlFallback<TpexRow[]>(
+      'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes', { timeoutMs: 15000 });
+    for (const row of rows) {
+      if (!row.SecuritiesCompanyCode || !row.CompanyName) continue;
+      entries.push({ code: row.SecuritiesCompanyCode, name: row.CompanyName, market: 'TPEx', aliases: [] });
     }
   } catch (err) {
     console.warn('[stockMaster] TPEx fetch failed:', err);

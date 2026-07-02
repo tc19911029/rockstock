@@ -19,6 +19,7 @@ import {
   decideShouldAnalyze,
   effectiveProgramDate,
   parseProgramDate,
+  clampProgramDateToPublish,
   todayYmdTaipei,
   ymdTaipei,
   videoConfidenceScore,
@@ -107,7 +108,9 @@ export async function scanOneSource(opts: ScanOneOptions): Promise<ScanOneResult
   const transformed: YouTubeVideo[] = result.videos.map(raw => {
     const videoType = classifyVideoType(raw);
     const publishedAt = uploadDateToIso(raw.upload_date, raw.timestamp);
-    const programDate = parseProgramDate(raw.title, now);
+    // 防未來日誤判：標題裡的日期若晚於上傳日（例：「台積電7/16法說」把法說會日期
+    // 當成節目日，整集被丟到未來檔）→ 退回 published_at 推算的台灣日。
+    const programDate = clampProgramDateToPublish(parseProgramDate(raw.title, now), publishedAt);
     const known = videoIndex.byId[raw.id];
     const discovered_at = known ? '' : startedAt; // 真正值在下方 patch
 

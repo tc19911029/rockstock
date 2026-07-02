@@ -1,34 +1,28 @@
 'use client';
 
 /**
- * /agents → redirect to /?tab=agent
+ * /agents — 多代理決策中心（獨立頁）。
  *
- * 此頁已整合進首頁右側 tab「多代理」（components/MultiAgentTopPanel）。
- * 保留路由為了向下相容：舊 deep link 自動轉到首頁對應 tab。
+ * 2026-06-19：首頁右側分頁瘦身成四入口（策略掃描／YouTube／題材分類／法人報告），
+ * 多代理移出首頁但功能保留 → 改回獨立頁，URL 仍可進。點股票跳回首頁走圖。
  */
 
-import { Suspense, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { PageShell, PageHeader } from '@/components/shared';
+import { MultiAgentTopPanel } from '@/components/MultiAgentTopPanel';
 
-export default function AgentsRedirectPage() {
-  return <Suspense fallback={null}><AgentsRedirect /></Suspense>;
-}
-
-function AgentsRedirect() {
+export default function AgentsPage() {
   const router = useRouter();
-  const sp = useSearchParams();
-
-  useEffect(() => {
-    const params = new URLSearchParams();
-    params.set('tab', 'agent');
-    const date = sp.get('date');
-    if (date) params.set('date', date);
-    router.replace(`/?${params.toString()}`);
-  }, [router, sp]);
+  const onSelectStock = useCallback((symbol: string) => {
+    router.push(`/?load=${encodeURIComponent(symbol)}`);
+  }, [router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-      多代理決策中心已整合進首頁 → 轉跳中…
-    </div>
+    <PageShell
+      headerSlot={<PageHeader title="🤖 多代理決策" subtitle="4 階段：分析師 → 風控 → 多空 → 決策" backButton />}
+    >
+      <MultiAgentTopPanel onSelectStock={onSelectStock} />
+    </PageShell>
   );
 }

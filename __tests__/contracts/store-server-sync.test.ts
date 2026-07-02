@@ -16,6 +16,8 @@ import {
   mapStoreHoldingsToImportRows,
   shouldSyncToServer,
   toUpsertApiBody,
+  toFullUpsertApiBody,
+  mapServerToStoreHolding,
   type StorePortfolioHolding,
 } from '@/lib/portfolio/storeToHoldingsMapping';
 
@@ -255,5 +257,104 @@ describe('toUpsertApiBody', () => {
       entryPrice: 203.83,
       shares: 6000,
     });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 2026-05-31 補測：持倉改 server 唯一真相後 store 改用的全保真雙向映射
+// （toFullUpsertApiBody / mapServerToStoreHolding）— 舊測只覆蓋簡化鏡像
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('toFullUpsertApiBody (全保真：核心欄位 + ui blob)', () => {
+  test('UI 富欄位進 ui blob，核心欄位留頂層；含 status/forcePrice', () => {
+    const h: StorePortfolioHolding & Record<string, unknown> = {
+      ...makeHolding(),
+      triggerPrice: 200,
+      operationMode: 'short',
+      entryKbar: { open: 200, high: 210, low: 195, close: 205, date: '2026-05-20', volume: 100000 },
+    };
+    const body = toFullUpsertApiBody(h)!;
+    expect(body).not.toBeNull();
+    expect(body).toMatchObject({
+      symbol: '2408.TW', name: '南亞科', market: 'TW',
+      entryDate: '2026-05-20', entryPrice: 203.83, shares: 6000,
+      status: 'open', forcePrice: true,
+    });
+    const ui = body.ui as Record<string, unknown>;
+    expect(ui.triggerPrice).toBe(200);
+    expect(ui.operationMode).toBe('short');
+    expect(ui.entryKbar).toMatchObject({ close: 205 });
+    // UI 欄位不可洩漏到頂層（reports/mini-agent 只讀核心欄位）
+    expect(body.triggerPrice).toBeUndefined();
+    expect(body.entryKbar).toBeUndefined();
+  });
+
+  test('無 UI 富欄位 → 不產生 ui key', () => {
+    const body = toFullUpsertApiBody({ ...makeHolding() })!;
+    expect(body.ui).toBeUndefined();
+  });
+
+  test('缺核心欄位（costPrice 無效）→ 回 null', () => {
+    expect(toFullUpsertApiBody({ ...makeHolding({ costPrice: -1 }) })).toBeNull();
+  });
+});
+
+describe('mapServerToStoreHolding (hydration：server → store)', () => {
+  test('entryPrice→costPrice、entryDate→buyDate、id=srv-symbol', () => {
+    const s = mapServerToStoreHolding({
+      symbol: '2408.TW', name: '南亞科', market: 'TW',
+      entryDate: '2026-05-20', entryPrice: 203.83, shares: 6000,
+    })!;
+    expect(s).not.toBeNull();
+    expect(s.costPrice).toBe(203.83);
+    expect(s.buyDate).toBe('2026-05-20');
+    expect(s.id).toBe('srv-2408.TW');
+    expect(s.market).toBe('TW');
+  });
+
+  test('ui blob 原樣展開回頂層', () => {
+    const s = mapServerToStoreHolding({
+      symbol: '2408.TW', name: '南亞科', entryPrice: 203.83, shares: 6000,
+      entryDate: '2026-05-20',
+      ui: { triggerPrice: 200, operationMode: 'short' },
+    })! as Record<string, unknown>;
+    expect(s.triggerPrice).toBe(200);
+    expect(s.operationMode).toBe('short');
+  });
+
+  test('核心欄位覆蓋 ui 同名欄位（ui 不可污染核心）', () => {
+    const s = mapServerToStoreHolding({
+      symbol: '2408.TW', name: '南亞科', entryPrice: 203.83, shares: 6000,
+      entryDate: '2026-05-20',
+      ui: { symbol: 'HACKED', costPrice: 999 },
+    })!;
+    expect(s.symbol).toBe('2408.TW');
+    expect(s.costPrice).toBe(203.83);
+  });
+
+  test('.SS → market CN', () => {
+    const s = mapServerToStoreHolding({
+      symbol: '603986.SS', name: '兆易创新', market: 'CN',
+      entryPrice: 302.95, shares: 3200, entryDate: '2026-05-20',
+    })!;
+    expect(s.market).toBe('CN');
+  });
+
+  test('缺 symbol → 回 null', () => {
+    expect(mapServerToStoreHolding({ name: 'x', entryPrice: 1, shares: 1 })).toBeNull();
+  });
+
+  test('round-trip：store → server → store 保留 UI 富欄位與核心值', () => {
+    const original: StorePortfolioHolding & Record<string, unknown> = {
+      ...makeHolding(),
+      triggerPrice: 200,
+      operationMode: 'short',
+    };
+    const serverBody = toFullUpsertApiBody(original)!;
+    const restored = mapServerToStoreHolding(serverBody)! as Record<string, unknown>;
+    expect(restored.costPrice).toBe(203.83);
+    expect(restored.buyDate).toBe('2026-05-20');
+    expect(restored.triggerPrice).toBe(200);
+    expect(restored.operationMode).toBe('short');
   });
 });

@@ -29,7 +29,7 @@ export default function DisclaimerPage() {
 
         <section>
           <h2 className="text-lg font-bold text-foreground mb-2">如何正確解讀回測數據</h2>
-          <div className="bg-card/80 border border-border rounded-lg p-4 space-y-2">
+          <div className="bg-card/80 ring-1 ring-foreground/10 rounded-xl p-4 space-y-2">
             <p className="text-amber-300 font-medium">請注意以下量化指標的參考門檻：</p>
             <ul className="list-disc list-inside space-y-1.5 text-foreground/80">
               <li><strong>樣本數量</strong>：單次回測至少需要 <strong className="text-foreground">30 筆以上</strong>的交易才具有統計參考價值，少於此數的勝率和期望值偏差可能很大</li>
@@ -81,7 +81,7 @@ export default function DisclaimerPage() {
               { q: '數據來源是什麼？準確嗎？', a: '數據來自 Yahoo Finance，是免費公開數據。可能有少許延遲或缺漏，但對日線級別的技術分析影響不大。若需要更精確的即時數據，建議搭配券商軟體使用。' },
               { q: '這個工具適合新手嗎？', a: '適合。K線走圖練習功能可以幫助新手理解股票走勢的規律，掃描功能可以節省選股時間。但建議新手先用紙上模擬交易功能，不要急著用真金白銀操作。' },
             ].map((faq, i) => (
-              <details key={i} className="bg-card/60 border border-border rounded-lg">
+              <details key={i} className="bg-card/60 ring-1 ring-foreground/10 rounded-xl">
                 <summary className="px-4 py-2.5 cursor-pointer text-sm text-foreground/90 font-medium hover:text-foreground transition">
                   {faq.q}
                 </summary>

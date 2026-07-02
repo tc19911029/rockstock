@@ -9,6 +9,7 @@
 
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 import {
   getBars, aggregateBars, ensureSymbol, backfillFromVendor,
 } from '@/lib/realtime/minuteBarStore';
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get('symbol');
   const tfParam = req.nextUrl.searchParams.get('tf') ?? '1m';
   if (!symbol) return apiError('symbol required', 400);
+  if (isIndexSymbol(symbol)) return apiError('指數無分時資料', 400);
 
   const market = inferMarket(symbol);
   ensureSymbol(symbol, market);

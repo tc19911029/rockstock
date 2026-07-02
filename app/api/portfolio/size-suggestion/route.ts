@@ -37,6 +37,7 @@ import {
 import { listOpenHoldings } from '@/lib/agents/portfolio/storage';
 import { trackOf } from '@/lib/scanner/buyMethodTracks';
 import type { MarketId } from '@/lib/scanner/types';
+import { classifyMarket } from '@/lib/market/classify';
 
 export const runtime = 'nodejs';
 
@@ -109,7 +110,9 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
 
   const { candidate, totalCapital, modeOverride, currentPortfolioMddPct } = parsed.data;
-  const market: MarketId = candidate.market ?? (candidate.symbol.endsWith('.TW') ? 'TW' : 'CN');
+  // DF1 修正：原 endsWith('.TW') 會把上櫃 .TWO 與裸碼（如打 2330 不加後綴）誤判成 CN
+  // → 張數/手續費套錯市場。改用 classifyMarket（處理 .TWO / .SS / 裸碼位數）。
+  const market: MarketId = candidate.market ?? (classifyMarket(candidate.symbol) === 'CN' ? 'CN' : 'TW');
 
   // track 推導
   const track = candidate.track ?? (candidate.letter ? trackOf(candidate.letter) : undefined);

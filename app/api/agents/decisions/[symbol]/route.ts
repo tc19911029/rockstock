@@ -12,6 +12,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 import { readPhaseState, readFundamentalQuestion } from '@/lib/agents/orchestrator';
 import { agentsGet } from '@/lib/agents/persistStorage';
 import { loadPool } from '@/lib/agents/candidates/poolStorage';
@@ -65,6 +66,7 @@ export async function GET(
   const symParse = symbolSchema.safeParse(rawSymbol);
   if (!symParse.success) return apiError('symbol 格式不合法', 400);
   const symbol = symParse.data;
+  if (isIndexSymbol(symbol)) return apiError('指數無多代理分析', 400);
 
   const qParse = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!qParse.success) return apiValidationError(qParse.error);

@@ -203,7 +203,7 @@ export default function AnalysisChat({ sidebar = false }: Props) {
             onKeyDown={handleKeyDown}
             aria-label="輸入問題"
             placeholder="輸入問題（Enter 發送）..."
-            className="flex-1 bg-card text-foreground text-xs rounded px-2 py-1.5 resize-none outline-none border border-border focus:border-blue-500 placeholder-muted-foreground min-h-[36px] max-h-20"
+            className="flex-1 bg-card text-foreground text-xs rounded px-2 py-1.5 resize-none outline-none ring-1 ring-foreground/10 focus:border-blue-500 placeholder-muted-foreground min-h-[36px] max-h-20"
             rows={2} disabled={loading} />
           <button onClick={() => sendMessage(input)} disabled={!input.trim() || loading}
             aria-label="送出訊息"

@@ -4,7 +4,7 @@
 
 log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a /tmp/blob-repair.log; }
 
-cd /Users/tzu-chienhsu/Desktop/rockstock
+cd /Users/tc/Desktop/rockstock
 
 # ─── TW ─────────────────────────────────────────────────────────────────────
 log "🇹🇼 開始修復 Vercel Blob TW..."

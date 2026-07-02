@@ -49,12 +49,9 @@ async function fetchTpexMarginAll(dateIso: string): Promise<TpexMarginRow[]> {
   const rocDate = isoToRocDate(dateIso);
   const url = `${TPEX_URL}?l=zh-tw&d=${rocDate}&se=AL`;
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-    });
-    if (!res.ok) return [];
-    const json: TpexResp = await res.json();
+    // 2026-06-12 B2：裸 fetch 被 TPEx Cloudflare 擋（TLS 指紋）→ 改 curl-first helper
+    const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+    const { data: json } = await fetchJsonWithCurlFallback<TpexResp>(url, { proxyFirst: true });
     const table = json.tables?.[0];
     if (!table?.data) return [];
 
@@ -90,4 +87,9 @@ async function fetchTpexMarginAll(dateIso: string): Promise<TpexMarginRow[]> {
 export async function fetchTpexMarginForStock(stockId: string, dateIso: string): Promise<TpexMarginRow | null> {
   const all = await fetchTpexMarginAll(dateIso);
   return all.find(r => r.stockId === stockId) ?? null;
+}
+
+/** 全市場單日 bulk（/api/cron/fetch-chip-extras 每日持久化用；2026-06-12 B2）*/
+export async function fetchTpexMarginBulk(dateIso: string): Promise<TpexMarginRow[]> {
+  return fetchTpexMarginAll(dateIso);
 }

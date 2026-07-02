@@ -320,7 +320,7 @@ export function ChartPracticeLedger() {
                 type="date"
                 value={effDateRaw}
                 onChange={e => setCustomDate(e.target.value)}
-                className="px-1 py-0.5 bg-card border border-border rounded text-foreground font-mono outline-none focus:border-sky-400"
+                className="px-1 py-0.5 bg-card ring-1 ring-foreground/10 rounded text-foreground font-mono outline-none focus:border-sky-400"
                 title="成交日（可改成過去日期）"
               />
               <input
@@ -330,7 +330,7 @@ export function ChartPracticeLedger() {
                 placeholder={cursorPrice != null ? cursorPrice.toFixed(2) : '價格'}
                 value={customPrice}
                 onChange={e => setCustomPrice(e.target.value)}
-                className="w-16 px-1 py-0.5 bg-card border border-border rounded text-foreground font-mono text-right outline-none focus:border-sky-400"
+                className="w-16 px-1 py-0.5 bg-card ring-1 ring-foreground/10 rounded text-foreground font-mono text-right outline-none focus:border-sky-400"
                 title="成交價（空白＝游標當日收盤）"
               />
               <input
@@ -338,7 +338,7 @@ export function ChartPracticeLedger() {
                 min={1}
                 value={customLots}
                 onChange={e => setCustomLots(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-12 px-1 py-0.5 bg-card border border-border rounded text-foreground font-mono text-center outline-none focus:border-sky-400"
+                className="w-12 px-1 py-0.5 bg-card ring-1 ring-foreground/10 rounded text-foreground font-mono text-center outline-none focus:border-sky-400"
                 title="張數"
               />
               <span className="text-muted-foreground shrink-0">{unitLabel}</span>
@@ -391,7 +391,7 @@ export function ChartPracticeLedger() {
                     const v = parseInt(e.target.value) || 0;
                     usePracticeStore.getState().setInitialCapital(market, ticker, v);
                   }}
-                  className="flex-1 px-1.5 py-0.5 bg-card border border-border rounded text-foreground font-mono outline-none focus:border-sky-400"
+                  className="flex-1 px-1.5 py-0.5 bg-card ring-1 ring-foreground/10 rounded text-foreground font-mono outline-none focus:border-sky-400"
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -406,7 +406,7 @@ export function ChartPracticeLedger() {
                     const v = parseFloat(e.target.value) || 1;
                     usePracticeStore.getState().setFeeDiscount(market, ticker, v);
                   }}
-                  className="w-16 px-1.5 py-0.5 bg-card border border-border rounded text-foreground font-mono outline-none focus:border-sky-400"
+                  className="w-16 px-1.5 py-0.5 bg-card ring-1 ring-foreground/10 rounded text-foreground font-mono outline-none focus:border-sky-400"
                 />
                 <span className="text-[9px] text-muted-foreground">
                   ({(liveSession.feeDiscount * 100).toFixed(0)}% 折)

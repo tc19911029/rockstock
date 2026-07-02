@@ -8,6 +8,11 @@ import {
   isLongRedCandle,
   isMaTrendingUp, bodyPct,
 } from './ruleUtils';
+import {
+  GOLDEN_FOOT_SPIKE_VOL_RATIO,
+  GOLDEN_FOOT_BREAKOUT_VOL_RATIO,
+  ACCUMULATION_VOL_RATIO,
+} from '@/lib/analysis/bookThresholds';
 
 // ── 工具函數 ──────────────────────────────────────────────────────────────────
 
@@ -69,7 +74,7 @@ export const goldenRightFoot: TradingRule = {
 
     // 條件3：第1支腳附近有大量（±2根內有爆量）
     const foot1Spikes = findVolumeSpikeIndices(
-      candles, Math.max(0, foot1.idx - 2), Math.min(index, foot1.idx + 2), 1.8,
+      candles, Math.max(0, foot1.idx - 2), Math.min(index, foot1.idx + 2), GOLDEN_FOOT_SPIKE_VOL_RATIO,
     );
     if (foot1Spikes.length === 0) return null;
 
@@ -83,7 +88,7 @@ export const goldenRightFoot: TradingRule = {
     // 條件5：今日帶量突破頸線
     if (c.close <= neckline) return null;
     if (!isLongRedCandle(c)) return null;
-    if (c.avgVol5 != null && c.volume < c.avgVol5 * 1.2) return null;
+    if (c.avgVol5 != null && c.volume < c.avgVol5 * GOLDEN_FOOT_BREAKOUT_VOL_RATIO) return null;
 
     return {
       type: 'BUY',
@@ -119,7 +124,7 @@ export const accumulationVolume: TradingRule = {
     if (c.ma20 != null && c.close > c.ma20 * 1.05) return null;
 
     // 條件3：今日成交量 >= 20日均量 * 2（異常大量）
-    if (c.avgVol20 == null || c.volume < c.avgVol20 * 2) return null;
+    if (c.avgVol20 == null || c.volume < c.avgVol20 * ACCUMULATION_VOL_RATIO) return null;
 
     // 條件4：不是大跌（收盤不能跌超過3%，主力進貨不會殺太低）
     if (bodyPct(c) > 0.03 && c.close < c.open) return null;

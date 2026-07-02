@@ -1,6 +1,11 @@
 /**
  * EODHDHistProvider — EODHD 全球歷史 K 線 Provider
  *
+ * ⚠️ 已棄用（2026-06-13）：token 401 失效、使用者決定不續訂。已從所有鏈路移除
+ * （MultiMarketProvider / eodSettle 錨點 / retry-failed / scanner ingest）。
+ * 替代：TW = FinMind→TWSE官方→Yahoo；CN = EastMoney→Tencent→Yahoo（皆免費既有源）。
+ * 檔案保留：若日後續訂，把 provider 加回上述鏈路即可（搜 "2026-06-13：EODHD 不續訂"）。
+ *
  * 支援台股 (.TW/.TWO) 和陸股 (.SS/.SZ)，一次 API call 取全部歷史。
  * API: https://eodhd.com/api/eod/{TICKER}?api_token={TOKEN}&fmt=json&from={date}&to={date}
  *

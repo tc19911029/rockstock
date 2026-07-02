@@ -6,7 +6,9 @@ import {
   ScanDiagnostics, createEmptyDiagnostics, mergeDiagnostics, diagnosticsSummary,
 } from '@/lib/scanner/types';
 import { TrendState } from '@/lib/analysis/trendAnalysis';
+import { isDisposalVetoed } from '@/lib/selection/applyPanelFilter';
 import { getMissingTradingDays } from '@/lib/utils/tradingDay';
+import type { SanSeScanLevel } from '@/lib/cn-sanse/namedStrategies';
 // Inline calcBacktestSummary to avoid pulling server-only ForwardAnalyzer → LocalCandleStore (fs)
 function calcBacktestSummary(
   perf: StockForwardPerformance[],
@@ -44,7 +46,7 @@ import {
 } from '@/lib/backtest/WalkForwardTest';
 import { useSettingsStore } from './settingsStore';
 import { AI_CONFIDENCE_HIGH, AI_CONFIDENCE_MEDIUM } from '@/lib/analysis/bookThresholds';
-import { REVERSAL_OR_SYSTEM_SET } from '@/lib/scanner/buyMethodTracks';
+import { REVERSAL_OR_SYSTEM_SET, SMARTMONEY_TRACK_SET, INSTDIP_TRACK_SET, INSTSTEAL_TRACK_SET } from '@/lib/scanner/buyMethodTracks';
 
 // Module-level abort controller for scan operations
 let scanAbortController: AbortController | null = null;
@@ -145,11 +147,11 @@ interface BacktestState {
   /** 掃描方向：long=做多, short=做空, daban=打板 */
   scanDirection: 'long' | 'short' | 'daban';
   /** 當前買法（並列買法架構，Phase 6，2026-04-20）— 只在 scanDirection='long' 時有意義 */
-  activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
+  activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
   /** 三色資金 level（陸股自創策略）— null = 走書本買法（activeBuyMethod）；非 null = 三色該 level 視角。
    *  單一事實來源：ScanPanelVertical（掃描清單）+ app/page.tsx（中間「條件/訊號」面板）共用，
    *  讓「點哪個策略 → 中間面板換成對應條件/訊號」一致。不持久化（reload 回 null）。 */
-  sanseLevel: 'strict' | 'medium' | 'loose' | null;
+  sanseLevel: SanSeScanLevel | null;
   /** 載入買法結果的狀態 */
   isLoadingBuyMethod: boolean;
 
@@ -171,8 +173,8 @@ interface BacktestState {
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
-  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R') => Promise<void>;
-  setSanseLevel:          (lv: 'strict' | 'medium' | 'loose' | null) => void;
+  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y') => Promise<void>;
+  setSanseLevel:          (lv: SanSeScanLevel | null) => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
   runScan:                () => Promise<void>;  // 統一入口（掃描+回測）
@@ -358,11 +360,12 @@ export const useBacktestStore = create<BacktestState>()(
             ? scanDirection
             : 'long';
         await get().fetchCronDates(market, fetchDirection);
-        // 若已有 scanDate 直接用，否則從 cronDates 選最新有結果的日期
-        const targetDate = scanDate ?? (() => {
-          const dates = get().cronDates.filter(c => c.market === market);
-          return (dates.find(c => c.resultCount > 0) ?? dates[0])?.date ?? null;
-        })();
+        // 切換買法軌 → 跳到「該軌最新有結果的一天」，不要黏在前一軌停的舊日期上。
+        // 例：Y 軌盤後 18:xx 才掃完，使用者若已停在 06-15 切過來，舊版 `scanDate ??` 會卡 06-15、
+        //     看不到剛跑好的 06-16。想比同一天 → 切完軌後再點日期列上那天即可。
+        const dates = get().cronDates.filter(c => c.market === market);
+        const targetDate =
+          (dates.find(c => c.resultCount > 0) ?? dates[0])?.date ?? scanDate ?? null;
         if (!targetDate) return;
         // 委託 loadCronSession（會補填 forward performance）
         await loadCronSession(market, targetDate, { scanOnly: true, direction: fetchDirection });
@@ -384,6 +387,9 @@ export const useBacktestStore = create<BacktestState>()(
           // 過濾：只保留 MTF 週線 + 月線都通過的股票
           // （scan 時已 ALWAYS 計算 mtfWeeklyPass/mtfMonthlyPass，即使 MTF flag=off）
           // null = MTF 未計算（舊 B/C/D/E session）→ 保留；false = 明確不通過 → 過濾
+          // 寬容 `== null || === true` 是刻意的：UI 即時 toggle 不可把舊 session 整批清空。
+          // lib/selection/applyPanelFilter.ts 的 oracle 版用嚴格 `=== true`（null 不該出現），
+          // 兩處語意差異是設計而非 bug，改任一處前先看對方註解 + CLAUDE.md #10。
           const filtered = scanResults.filter(r =>
             r.mtfWeeklyPass == null || r.mtfWeeklyPass === true,
           );
@@ -691,10 +697,12 @@ export const useBacktestStore = create<BacktestState>()(
           return;
         }
 
+        // 處置股硬排除（鐵則 #10：與 applyPanelFilter 同一判定）。
+        // 在進 store / scanCache 之前就剔除，MTF toggle 還原不會復活被 veto 的列。
         const combined: StockScanResult[] = [
           ...results1,
           ...results2,
-        ].sort((a, b) =>
+        ].filter(r => !isDisposalVetoed(r)).sort((a, b) =>
           b.sixConditionsScore !== a.sixConditionsScore
             ? b.sixConditionsScore - a.sixConditionsScore
             : b.changePercent - a.changePercent
@@ -987,8 +995,14 @@ export const useBacktestStore = create<BacktestState>()(
             // - 機械軌（R）：純排名，不過 Step 1 → 不過濾 A（REVERSAL_OR_SYSTEM_SET 在 buyMethodTracks 已含 R）
             // 之前的 bug：所有 method 都加 A filter，導致 N/F/O/D/Q session 內反轉軌訊號被擋（如 3026 跌菱形 80% 沒過 A 但 N matched 應顯示）
             const requireA = !REVERSAL_OR_SYSTEM_SET.has(activeBuyMethod);
+            // 籌碼觀察軌（W 大戶偷買 / X 法人接刀 / Y 大戶法人偷買）只是「看大戶在偷買誰」的
+            // 觀察清單、非進場明牌 → 處置股照顯示（卡片標 ⚠️處置），不像書本買法軌硬排除。
+            // 2026-06-16 使用者決議：處置股全是的日子若一律藏掉會整片空白、看不到觀察結果。
+            const isChipObsTrack = SMARTMONEY_TRACK_SET.has(activeBuyMethod)
+              || INSTDIP_TRACK_SET.has(activeBuyMethod)
+              || INSTSTEAL_TRACK_SET.has(activeBuyMethod);
             const scanResults = (session?.results ?? []).filter(r =>
-              !requireA || r.matchedMethods?.includes('A'),
+              (isChipObsTrack || !isDisposalVetoed(r)) && (!requireA || r.matchedMethods?.includes('A')),
             );
             set({ scanResults, isLoadingBuyMethod: false });
 
@@ -1088,7 +1102,8 @@ export const useBacktestStore = create<BacktestState>()(
           if (!res.ok) throw new Error('無法載入歷史掃描結果');
           const json = await res.json() as { sessions?: Array<{ results: StockScanResult[]; marketTrend?: string; dataFreshness?: { avgStaleDays: number; maxStaleDays: number; staleCount: number; totalScanned: number; coverageRate: number; dataStatus: string } }> };
           const session0 = json.sessions?.[0];
-          let scanResults = session0?.results ?? [];
+          // 處置股硬排除：進 store / scanCache 之前剔除（同 applyPanelFilter，鐵則 #10）
+          let scanResults = (session0?.results ?? []).filter(r => !isDisposalVetoed(r));
           if (scanResults.length === 0) {
             set({ isLoadingCronSession: false });
             return;
@@ -1353,6 +1368,7 @@ export const useBacktestStore = create<BacktestState>()(
       partialize: (s) => ({
         market: s.market, scanDate: s.scanDate,
         strategy: s.strategy,
+        sanseLevel: s.sanseLevel,  // 持久化三色模式：重整後不用再重點嚴格/中等/寬鬆
         // Compact sessions: keep only last 5, strip heavy forwardCandles
         sessions: s.sessions.slice(0, 5).map(sess => ({
           ...sess,

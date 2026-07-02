@@ -10,6 +10,7 @@
 
 import type { StockScanResult, MarketId } from '@/lib/scanner/types';
 import type { CandidateSources } from '@/lib/agents/candidates/types';
+import type { JudgmentRule } from '@/lib/agents/judgmentRules';
 import type {
   AgentScoreBlock,
   GradeBlock,
@@ -374,6 +375,8 @@ export interface NewsQuestion {
   groundTruth: NewsGroundTruth;
   /** P3.5：進入 pool 的理由切片（§0 隔離 — 只給 youtube 面向）*/
   entryContext?: { sources: Pick<CandidateSources, 'youtube'>; sourceCount: number };
+  /** 判讀規則清單（2026-06-12 A1，描述性引用不計分 — lib/agents/judgmentRules.ts）*/
+  judgmentRulesRef?: JudgmentRule[];
 }
 
 export interface NewsAnswer {
@@ -468,6 +471,8 @@ export interface ChipQuestion {
   groundTruth: ChipGroundTruth;
   /** P3.5：進入 pool 的理由切片（§0 隔離 — 只給 chip 面向）*/
   entryContext?: { sources: Pick<CandidateSources, 'chip'>; sourceCount: number };
+  /** 判讀規則清單（2026-06-12 A1，描述性引用不計分 — lib/agents/judgmentRules.ts）*/
+  judgmentRulesRef?: JudgmentRule[];
 }
 
 export interface ChipAnswer {
@@ -615,6 +620,8 @@ export interface FundamentalQuestion {
   groundTruth: FundamentalGroundTruth;
   /** P3.5：進入 pool 的理由切片（§0 隔離 — 只給 fundamental 面向）*/
   entryContext?: { sources: Pick<CandidateSources, 'fundamental'>; sourceCount: number };
+  /** 判讀規則清單（2026-06-12 A1，描述性引用不計分 — lib/agents/judgmentRules.ts）*/
+  judgmentRulesRef?: JudgmentRule[];
 }
 
 export interface FundamentalAnswer {
@@ -774,6 +781,12 @@ export interface RiskGroundTruth {
   };
   /** 大盤 regime（從 /api/scanner/market-trend 取）*/
   marketRegime: string | null;
+  /**
+   * 處置股/注意股官方名單旗標（2026-06-12 B1，lib/market/attentionList.ts 即時查）。
+   * disposal=true → 紅燈（分盤交易，制度層不可交易）；notice=true → 黃燈警示。
+   * null = 名單未收集（TW 以外市場或名單檔不存在）。
+   */
+  attentionFlags?: { disposal: boolean; notice: boolean } | null;
   fetchErrors: string[];
 }
 

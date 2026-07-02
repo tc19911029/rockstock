@@ -15,6 +15,15 @@ const MIS_HEADERS: Record<string, string> = {
   'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
 };
 
+// ── 無資料負快取（避免 polling 對已下市/打錯代號重跑整條 fallback chain）──────────────
+// 已下市 / 打錯 / 暫時無報價的代號，冷查詢會把 TWSE(10s)→Fugle→L2 或 騰訊(5s)→EastMoney→L2
+// 全跑一輪才放棄；前台每 30s polling 重來一次很浪費（重啟後上游冷時單一冷標的就要 3-4 秒）。
+// 命中報價的代號永遠即時、會清掉負快取，不影響有效標的（合約 #6：不改有效標的的 provider 路由，
+// 只是「確認過這輪沒資料」的代號短期略過）。指數(^TWII)/純英文(NVDA) market='unknown' 本來就
+// 不進 tw/cn、不打上游，已是 fail-fast；負快取補的是「數字格式正確但其實查不到」的代號。
+const NO_DATA_TTL_MS = 90_000;
+const noDataUntil = new Map<string, number>(); // resolved symbol → 略過到期的 epoch ms
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 輕量即時報價 API — 只回傳 price + changePercent，用於持倉 polling
 // 支援台股（TWSE mis）+ 陸股（騰訊/東方財富）批次查詢
@@ -230,6 +239,58 @@ async function fetchCNQuotes(symbols: string[]): Promise<QuoteTick[]> {
   return results;
 }
 
+// ── 場外基金淨值（天天基金 估值 → 歷史淨值 fallback）───────────────────────────
+
+/**
+ * 場外開放式基金（.OF）「現價」= 最新「已定盤」單位淨值(NAV)，跟銀行/券商 App 市值對齊。
+ *
+ * 1) 東財歷史淨值 API（lsjz）為主：row[0] 永遠是最新定盤淨值 DWJZ + 真實當日漲跌 JZZZL。
+ *    （估值端點 fundgz 的 dwjz 對部分基金會「慢一天」— 例：019917 已出 06-05=1.3750，
+ *      fundgz 仍回 06-04=1.3956 → 必須以 lsjz 為準才不會抓到過期淨值。）
+ * 2) fundgz.1234567.com.cn fallback：lsjz 掛掉時救場（dwjz + 估算漲跌 gszzl + name）。
+ */
+async function fetchFundNav(code: string): Promise<{ nav: number; changePercent: number; name: string } | null> {
+  try {
+    const res = await fetch(
+      `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fundf10.eastmoney.com/' }, signal: AbortSignal.timeout(6000) },
+    );
+    const json = await res.json() as { Data?: { LSJZList?: Array<{ DWJZ?: string; JZZZL?: string }> } };
+    const row = json?.Data?.LSJZList?.[0];
+    const nav = parseFloat(row?.DWJZ ?? '');
+    if (nav > 0) return { nav, changePercent: parseFloat(row?.JZZZL ?? '0') || 0, name: '' };
+  } catch { /* try fundgz fallback */ }
+
+  try {
+    const res = await fetch(`https://fundgz.1234567.com.cn/js/${code}.js`, {
+      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fund.eastmoney.com/' },
+      signal: AbortSignal.timeout(6000),
+    });
+    const text = await res.text();
+    const m = text.match(/jsonpgz\((\{.+?\})\)/);
+    if (m) {
+      const d = JSON.parse(m[1]) as { dwjz?: string; gszzl?: string; name?: string };
+      const nav = parseFloat(d.dwjz ?? '');
+      if (nav > 0) return { nav, changePercent: parseFloat(d.gszzl ?? '0') || 0, name: d.name ?? '' };
+    }
+  } catch { /* give up */ }
+
+  return null;
+}
+
+async function fetchFundQuotes(symbols: string[]): Promise<QuoteTick[]> {
+  if (symbols.length === 0) return [];
+  const results: QuoteTick[] = [];
+  await Promise.allSettled(symbols.map(async (sym) => {
+    const code = sym.replace(/\.OF$/i, '');
+    const r = await fetchFundNav(code);
+    if (r && r.nav > 0) {
+      results.push({ symbol: sym, price: r.nav, changePercent: r.changePercent, name: r.name || undefined });
+    }
+  }));
+  return results;
+}
+
 // ── Route Handler ────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -246,10 +307,11 @@ export async function GET(req: NextRequest) {
   }
 
   // 對沒有後綴的 symbol 依位數猜市場，並記住原始 key 以便回傳格式一致
-  type SymbolEntry = { original: string; resolved: string; market: 'TW' | 'CN' | 'unknown' };
+  type SymbolEntry = { original: string; resolved: string; market: 'TW' | 'CN' | 'FUND' | 'unknown' };
   const entries: SymbolEntry[] = rawSymbols.map(s => {
     if (/\.(TW|TWO)$/i.test(s)) return { original: s, resolved: s, market: 'TW' };
     if (/\.(SS|SZ)$/i.test(s)) return { original: s, resolved: s, market: 'CN' };
+    if (/\.OF$/i.test(s)) return { original: s, resolved: s, market: 'FUND' }; // 場外基金 → 天天基金淨值
     const digits = s.replace(/\D/g, '');
     if (/^\d{6}$/.test(digits)) {
       const suffix = digits[0] === '6' || digits[0] === '9' ? 'SS' : 'SZ';
@@ -261,11 +323,16 @@ export async function GET(req: NextRequest) {
     return { original: s, resolved: s, market: 'unknown' };
   });
 
-  const twEntries = entries.filter(e => e.market === 'TW');
-  const cnEntries = entries.filter(e => e.market === 'CN');
+  // 負快取：略過近期確認「無資料」的代號，避免每次 polling 重跑整條 fallback chain。
+  // 有效/命中過的代號不在內，照常即時查；market='unknown' 本來就不查（已 fail-fast）。
+  const now = Date.now();
+  const fetchable = entries.filter(e => e.market !== 'unknown' && (noDataUntil.get(e.resolved) ?? 0) <= now);
+  const twEntries = fetchable.filter(e => e.market === 'TW');
+  const cnEntries = fetchable.filter(e => e.market === 'CN');
+  const fundEntries = fetchable.filter(e => e.market === 'FUND');
 
   // 並行抓取（傳入 resolved symbol，結果 symbol 改回 original）
-  const [twQuotes, cnQuotes] = await Promise.all([
+  const [twQuotes, cnQuotes, fundQuotes] = await Promise.all([
     fetchTWSEQuotes(twEntries.map(e => e.resolved)).then(qs =>
       qs.map(q => {
         const entry = twEntries.find(e => e.resolved.replace(/\.(TW|TWO)$/i, '') === q.symbol.replace(/\.(TW|TWO)$/i, ''));
@@ -278,9 +345,10 @@ export async function GET(req: NextRequest) {
         return entry ? { ...q, symbol: entry.original } : q;
       })
     ),
+    fetchFundQuotes(fundEntries.map(e => e.resolved)),
   ]);
 
-  const quotes = [...twQuotes, ...cnQuotes];
+  const quotes = [...twQuotes, ...cnQuotes, ...fundQuotes];
 
   // L2 快照補漏（EastMoney/騰訊/Fugle 掛掉時 + 週末/假日無 live 報價時）
   // CN + TW 並行 fallback（原本順序執行延遲 2x）
@@ -331,6 +399,15 @@ export async function GET(req: NextRequest) {
 
   const [cnFilled, twFilled] = await Promise.all([cnFallback(), twFallback()]);
   quotes.push(...cnFilled, ...twFilled);
+
+  // 更新負快取：這次有去抓的代號 —— 命中清除、仍缺則標記略過 NO_DATA_TTL_MS
+  for (const e of fetchable) {
+    if (quotes.some(q => q.symbol === e.original)) noDataUntil.delete(e.resolved);
+    else noDataUntil.set(e.resolved, now + NO_DATA_TTL_MS);
+  }
+  if (noDataUntil.size > 2000) { // 防無界成長：清掉過期項
+    for (const [k, exp] of noDataUntil) if (exp <= now) noDataUntil.delete(k);
+  }
 
   return apiOk(
     { quotes },

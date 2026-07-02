@@ -13,7 +13,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-const REPO_ROOT = '/Users/tzu-chienhsu/Desktop/rockstock';
+// 用 process.cwd() — 別寫死絕對路徑（舊 Mac 路徑 /Users/tc/... 在現機 ENOENT、audit 從沒跑成）。
+const REPO_ROOT = process.cwd();
 const CANDLES_ROOT = path.join(REPO_ROOT, 'data', 'candles');
 
 interface Candle { date: string; open: number; high: number; low: number; close: number; volume?: number; }

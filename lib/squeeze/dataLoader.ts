@@ -9,7 +9,7 @@
  * 並從 FinMind TaiwanStockPrice 補成交金額算 VWAP（精準版）。
  */
 
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import path from 'path';
 import type { MarginDay, SblDay, PriceDay } from './types';
 
@@ -24,7 +24,7 @@ function getToken(): string {
   // Script context (npx tsx) 不會自動載 .env.local — 手動讀一次
   try {
     const envPath = path.join(process.cwd(), '.env.local');
-    const txt = require('fs').readFileSync(envPath, 'utf8') as string;
+    const txt = readFileSync(envPath, 'utf8');
     for (const line of txt.split('\n')) {
       const m = line.match(/^FINMIND_API_TOKEN\s*=\s*(.+)$/);
       if (m) { t = m[1].replace(/['"]/g, '').trim(); break; }
@@ -197,27 +197,37 @@ interface FmPriceRow {
  */
 export async function getPriceSeries(code: string, startDate: string, endDate: string): Promise<PriceDay[]> {
   // 1. 讀 L1 K 棒：走 Blob-aware adapter（本地讀 data/candles/TW，Vercel 讀 Blob），不再 raw fs
+  //    先試 .TW（上市），再試 .TWO（上櫃）
   const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
-  const file = await readCandleFile(`${code}.TW`, 'TW');
+  let file = null;
+  for (const suffix of ['TW', 'TWO'] as const) {
+    file = await readCandleFile(`${code}.${suffix}`, 'TW');
+    if (file) break;
+  }
   const inRange = (file?.candles ?? []).filter(c => c.date >= startDate && c.date <= endDate);
 
-  // 2. 嘗試 FinMind 補 Trading_money
+  // 2. 抓 FinMind TaiwanStockPrice（成交金額 + 成交量，同源）
   const fm = await fmRange<FmPriceRow>('TaiwanStockPrice', code, startDate, endDate);
-  const turnoverMap = new Map<string, number>();
-  for (const r of fm) turnoverMap.set(r.date, r.Trading_money ?? 0);
+  const fmMap = new Map<string, { money: number; vol: number }>();
+  for (const r of fm) fmMap.set(r.date, { money: r.Trading_money ?? 0, vol: r.Trading_Volume ?? 0 });
 
   return inRange.map(c => {
-    const tn = turnoverMap.get(c.date) ?? 0;
-    // FinMind Trading_Volume 為「股」、本地 c.volume 亦為「股」；Trading_money 為「元」。
-    // 經實測（6770 等），若 tn/volume 得到的「每股價」與 close 偏離 >5×，視為單位異常，fallback 用 (H+L+C)/3。
-    let vwap = (c.high + c.low + c.close) / 3;
-    if (tn > 0 && c.volume > 0) {
-      const raw = tn / c.volume;
-      if (Math.abs(raw - c.close) / Math.max(c.close, 1) <= 5) {
-        vwap = raw;
-      } else if (Math.abs(raw / 1000 - c.close) / Math.max(c.close, 1) <= 5) {
-        vwap = raw / 1000;  // Trading_Volume 實際是張的情況
-      }
+    const fmd = fmMap.get(c.date);
+    const tn = fmd?.money ?? 0;
+    // VWAP（成交均價）本質上必落在當日 [low, high] 內 —— 每筆成交價都在區間內，加權平均亦然。
+    // 本地 K 線「成交量」對部分股（如 2330）會 undercount 真實量（已對 FinMind 證實），
+    // 所以「FinMind金額 ÷ 本地量」會失真（曾使 2330 融資成本算出 3038 > 歷史最高 2425）。
+    // 採用順序：①FinMind 自家「金額÷量」(同源、最準) ②FinMind金額÷本地量(±1000) ③typical (H+L+C)/3。
+    // 每個候選都必須落在當日價格區間內才採用；否則退到必在 bar 內的 typical price。
+    const typical = (c.high + c.low + c.close) / 3;
+    const lo = Math.min(c.low, c.close) * 0.95;
+    const hi = Math.max(c.high, c.close) * 1.05;
+    const cands: number[] = [];
+    if (fmd && fmd.money > 0 && fmd.vol > 0) cands.push(fmd.money / fmd.vol);
+    if (tn > 0 && c.volume > 0) cands.push(tn / c.volume, tn / c.volume / 1000);
+    let vwap = typical;
+    for (const cand of cands) {
+      if (cand >= lo && cand <= hi) { vwap = cand; break; }
     }
     return {
       date: c.date,

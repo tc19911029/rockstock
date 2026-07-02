@@ -3,7 +3,7 @@
  *
  * 守門員：
  *   - classifyVideoType 對六種 fixture 都分對
- *   - parseProgramDate 對 8 種 title 變體正確/拒絕
+ *   - parseProgramDate 對多種 title 變體正確/拒絕（含緊湊 8 位 YYYYMMDD、MM/DD/YYYY）
  *   - decideShouldAnalyze invariant: should=false ⇒ skip_reason ≠ null
  *   - dedup: 同一份 NDJSON 跑兩次，第二次 0 new
  *   - scanRunner 收到失敗 stderr 時，scan log 的 error 欄位 non-null
@@ -11,10 +11,13 @@
  */
 
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   classifyVideoType,
   decideShouldAnalyze,
   parseProgramDate,
+  clampProgramDateToPublish,
   videoConfidenceScore,
 } from '@/lib/youtube/classify';
 import { fetchRecentVideos } from '@/lib/youtube/ytdlp';
@@ -75,6 +78,10 @@ describe('parseProgramDate', () => {
     ['5月22日 林漢偉分析', '2026-05-22'],
     ['5月22號 收盤', '2026-05-22'],
     ['04月10日 春季特輯', '2026-04-10'],
+    // 緊湊 8 位 YYYYMMDD（非凡電視標題慣例：金融曼哈頓 / 股市全芳位）
+    ['20260522金融曼哈頓 #阮蕙慈 #大華國際投顧', '2026-05-22'],
+    // MM/DD/YYYY 英文（非凡同節目偶爾改英文標題）
+    ['05/22/2026 Financial Manhattan #RuanHuici', '2026-05-22'],
   ])('parses %s → %s', (title, expected) => {
     expect(parseProgramDate(title, now)).toBe(expected);
   });
@@ -108,6 +115,32 @@ describe('parseProgramDate', () => {
     '上漲 3.5億美元',
   ])('rejects quantity-with-unit not a date: %s', (title) => {
     expect(parseProgramDate(title, now)).toBeNull();
+  });
+});
+
+// ── clampProgramDateToPublish（防未來日誤判）─────────────────────────────────
+// bug 2026-06-18: 標題「台積電7/16法說 國巨要衝1355元」於 6/15 上傳，7/16 被當節目日
+// → 整集 57股市同學會被丟進 videos/2026-07-16.json，6/15 分析完全漏掉。
+describe('clampProgramDateToPublish', () => {
+  it('rejects program_date later than published date → null (退回 published_at)', () => {
+    // 6/15 上傳，標題解析出 7/16（法說會日期）→ 不可能，回 null
+    expect(clampProgramDateToPublish('2026-07-16', '2026-06-15T10:30:17.000Z')).toBeNull();
+  });
+
+  it('keeps program_date on the publish day', () => {
+    expect(clampProgramDateToPublish('2026-06-15', '2026-06-15T10:30:17.000Z')).toBe('2026-06-15');
+  });
+
+  it('keeps program_date earlier than publish (晚間節目隔天 00:xx 才 upload)', () => {
+    // 標題寫 6/15，隔天 00:10 CST(=6/14 16:10Z) 上傳 → published 台灣日=6/15，program 6/15 合法
+    expect(clampProgramDateToPublish('2026-06-15', '2026-06-15T16:10:00.000Z')).toBe('2026-06-15');
+    // program 早於 publish 也保留（不是未來日）
+    expect(clampProgramDateToPublish('2026-06-14', '2026-06-15T16:10:00.000Z')).toBe('2026-06-14');
+  });
+
+  it('no-op when program_date or published_at missing', () => {
+    expect(clampProgramDateToPublish(null, '2026-06-15T10:30:17.000Z')).toBeNull();
+    expect(clampProgramDateToPublish('2026-07-16', null)).toBe('2026-07-16');
   });
 });
 
@@ -314,9 +347,6 @@ describe('fetchRecentVideos (NDJSON parsing)', () => {
 // scanRunner.assertPlaylistUrl() 會在 scan 前擋掉，這裡額外做 static check。
 
 describe('sources.json playlist-URL invariant', () => {
-  const fs = require('fs') as typeof import('fs');
-  const path = require('path') as typeof import('path');
-
   it('all sources are playlist URLs (no channel URLs)', () => {
     const sourcesPath = path.join(process.cwd(), 'data/youtube/sources.json');
     if (!fs.existsSync(sourcesPath)) return; // skip if not seeded

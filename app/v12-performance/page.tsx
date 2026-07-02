@@ -12,6 +12,9 @@
 
 import { useEffect, useState } from 'react';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
+import { PageShell, PageHeader } from '@/components/shared';
+import { bullBearClass } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 interface LetterStats {
   letter: string;
@@ -34,21 +37,19 @@ const TRACK_COLOR: Record<string, string> = {
   G: 'border-stone-600/60', H: 'border-stone-600/60', I: 'border-stone-600/60',
 };
 
+// 報酬色：對齊全站「紅漲綠跌」（bullBearClass），|報酬|>5 加粗
 function retColor(val: number | null): string {
   if (val == null) return 'text-muted-foreground';
-  if (val > 5) return 'text-emerald-400 font-bold';
-  if (val > 0) return 'text-emerald-300';
-  if (val < -5) return 'text-rose-400 font-bold';
-  if (val < 0) return 'text-rose-300';
-  return 'text-foreground';
+  return cn(bullBearClass(val), Math.abs(val) > 5 && 'font-bold');
 }
 
+// 勝率是「品質」非「漲跌方向」→ 用中性品質梯度（高=主色強）
 function winColor(rate: number | null): string {
   if (rate == null) return 'text-muted-foreground';
-  if (rate >= 60) return 'text-emerald-400 font-bold';
-  if (rate >= 50) return 'text-emerald-300';
-  if (rate >= 40) return 'text-amber-300';
-  return 'text-rose-300';
+  if (rate >= 60) return 'text-foreground font-bold';
+  if (rate >= 50) return 'text-foreground';
+  if (rate >= 40) return 'text-muted-foreground';
+  return 'text-muted-foreground/60';
 }
 
 export default function V12PerformancePage() {
@@ -79,33 +80,35 @@ export default function V12PerformancePage() {
   useEffect(() => { load(); }, []);
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-foreground">v12 14 軌策略績效</h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              過去 20 天歷史 scan 後驗（持有 5 天統計）
-              {generatedAt && ` · 計算於 ${new Date(generatedAt).toLocaleString('zh-TW')}`}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <a
-              href="/v12-deep-analytics"
-              className="px-3 py-1.5 text-xs bg-purple-600 hover:bg-purple-500 text-white rounded"
-            >
-              🔬 深度分析
-            </a>
-            <button
-              onClick={load}
-              disabled={loading}
-              className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50"
-            >
-              {loading ? '計算中…' : '🔄 重新計算'}
-            </button>
-          </div>
-        </div>
-
+    <PageShell
+      headerSlot={
+        <PageHeader
+          title="📊 v12 14軌策略績效"
+          subtitle={
+            <>過去 20 天後驗（持有 5 天）{generatedAt && ` · 計算於 ${new Date(generatedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`}</>
+          }
+          backButton
+          actions={
+            <>
+              <a
+                href="/v12-deep-analytics"
+                className="px-3 py-1.5 text-xs rounded-md ring-1 ring-foreground/10 bg-card hover:bg-secondary transition-colors"
+              >
+                🔬 深度分析
+              </a>
+              <button
+                onClick={load}
+                disabled={loading}
+                className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {loading ? '計算中…' : '🔄 重新計算'}
+              </button>
+            </>
+          }
+        />
+      }
+    >
+      <div className="space-y-6 p-4">
         {/* 三軌制圖例 */}
         <div className="text-[11px] text-muted-foreground flex items-center gap-3 flex-wrap">
           <span><span className="text-red-400">▲</span> 多頭軌</span>
@@ -138,7 +141,7 @@ export default function V12PerformancePage() {
           </ul>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -146,7 +149,7 @@ function PerformanceTable({ stats, loading }: { stats: LetterStats[]; loading: b
   if (loading) return <div className="text-xs text-muted-foreground py-4">計算中…</div>;
   if (stats.length === 0) return <div className="text-xs text-muted-foreground py-4">無資料</div>;
   return (
-    <div className="bg-card border border-border rounded-lg overflow-x-auto">
+    <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-x-auto">
       <table className="w-full text-xs">
         <thead className="bg-muted/40 text-muted-foreground">
           <tr>

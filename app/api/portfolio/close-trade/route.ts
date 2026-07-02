@@ -17,18 +17,14 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
-import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import {
   appendTrade,
   type TradeExitReason,
 } from '@/lib/portfolio/tradeRecorder';
-import {
-  PORTFOLIO_SCHEMA_VERSION,
-  type PortfolioFile,
-} from '@/lib/agents/portfolio/types';
+import { loadHoldings, saveHoldings } from '@/lib/agents/portfolio/storage';
+import { resolveProfileId } from '@/lib/portfolio/profiles';
+import { classifyMarket } from '@/lib/market/classify';
 
 export const runtime = 'nodejs';
 
@@ -49,23 +45,6 @@ function todayCstDate(): string {
   return tw.toISOString().slice(0, 10);
 }
 
-const HOLDINGS_FILE = path.join(process.cwd(), 'data', 'agents', 'portfolio', 'holdings.json');
-
-async function loadRawHoldings(): Promise<PortfolioFile> {
-  try {
-    const raw = await fs.readFile(HOLDINGS_FILE, 'utf-8');
-    return JSON.parse(raw) as PortfolioFile;
-  } catch {
-    return { schemaVersion: PORTFOLIO_SCHEMA_VERSION, holdings: [], updatedAt: new Date().toISOString() };
-  }
-}
-
-async function saveRawHoldings(file: PortfolioFile): Promise<void> {
-  await fs.mkdir(path.dirname(HOLDINGS_FILE), { recursive: true });
-  file.updatedAt = new Date().toISOString();
-  await atomicFsPut(HOLDINGS_FILE, JSON.stringify(file, null, 2));
-}
-
 export async function POST(req: NextRequest) {
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }
@@ -73,9 +52,11 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
   const input = parsed.data;
   const exitDate = input.exitDate ?? todayCstDate();
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
 
-  // 1. 找 holding
-  const file = await loadRawHoldings();
+  // 1. 找 holding（依 symbol 後綴推市場，CN → holdings-cn.json）
+  const market = classifyMarket(input.symbol) === 'CN' ? 'CN' : 'TW';
+  const file = await loadHoldings(market, profileId);
   const idx = file.holdings.findIndex(h => h.symbol === input.symbol && h.status === 'open');
   if (idx < 0) return apiError(`open holding ${input.symbol} 不存在`, 404);
   const holding = file.holdings[idx];
@@ -100,7 +81,7 @@ export async function POST(req: NextRequest) {
       exitReason: input.exitReason as TradeExitReason,
       exitNote: input.exitNote,
       notes: input.notes,
-    });
+    }, profileId);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return apiError(`appendTrade 失敗：${msg}`, 422);
@@ -108,7 +89,7 @@ export async function POST(req: NextRequest) {
 
   // 3. 從 holdings 移除
   file.holdings.splice(idx, 1);
-  await saveRawHoldings(file);
+  await saveHoldings(file, market, profileId);
 
   return apiOk({ trade });
 }

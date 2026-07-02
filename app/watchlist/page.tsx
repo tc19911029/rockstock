@@ -9,6 +9,7 @@ import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { PageShell, PageHeader, EmptyState } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { formatPrice, formatPercent, formatDate, formatTime, bullBearClass } from '@/lib/format';
+import { classifyMarket, filterByMarket, type MarketTab } from '@/lib/market/classify';
 
 interface ConditionData {
   symbol: string;
@@ -49,6 +50,7 @@ export default function WatchlistPage() {
   const [addLoading, setAddLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [marketTab, setMarketTab] = useState<MarketTab>('all');
   // 避免 zustand persist 與 SSR 不一致：等 client mount 後再渲染依賴 items 的內容
   const [hasMounted, setHasMounted] = useState(false);
   useEffect(() => { setHasMounted(true); }, []);
@@ -91,8 +93,21 @@ export default function WatchlistPage() {
     try {
       // Fast path: resolve symbol + get current price via lightweight quotes endpoint.
       // This avoids the heavy 1-year candle fetch that times out when providers are down.
-      const isTwDigits = /^\d+$/.test(sym);
-      const candidates = isTwDigits ? [`${sym}.TW`, `${sym}.TWO`] : [sym.toUpperCase()];
+      // 代號→候選後綴：台股 4-5 碼(.TW/.TWO)、陸股 6 碼(6/9 開頭=上海 .SS，其餘=深圳 .SZ)。
+      // 已帶後綴的直接用。曾因 6 碼陸股(如 600707)被硬塞 .TW/.TWO 而搜不到。
+      const upper = sym.toUpperCase();
+      let candidates: string[];
+      if (/\.(TW|TWO|SS|SZ)$/i.test(upper)) {
+        candidates = [upper];
+      } else if (/^\d{6}$/.test(sym)) {
+        candidates = (sym[0] === '6' || sym[0] === '9')
+          ? [`${sym}.SS`, `${sym}.SZ`]
+          : [`${sym}.SZ`, `${sym}.SS`];
+      } else if (/^\d{4,5}$/.test(sym)) {
+        candidates = [`${sym}.TW`, `${sym}.TWO`];
+      } else {
+        candidates = [upper];
+      }
 
       let resolvedSymbol = '';
       let resolvedName = '';
@@ -153,6 +168,10 @@ export default function WatchlistPage() {
     return sb - sa;
   });
 
+  const twCount = items.filter(i => classifyMarket(i.symbol) === 'TW').length;
+  const cnCount = items.filter(i => classifyMarket(i.symbol) === 'CN').length;
+  const filtered = filterByMarket(sorted, marketTab);
+
   const watchlistHeader = (
     <PageHeader
       title="⭐ 自選股"
@@ -175,7 +194,7 @@ export default function WatchlistPage() {
 
   return (
     <PageShell headerSlot={watchlistHeader}>
-      <div className="p-3 sm:p-4 max-w-4xl mx-auto space-y-3 sm:space-y-4">
+      <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
 
         {/* Add stock input */}
         <div className="space-y-2">
@@ -184,7 +203,7 @@ export default function WatchlistPage() {
               value={addInput}
               onChange={e => setAddInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAdd()}
-              placeholder="輸入股票代號（如：2330、603986.SS）"
+              placeholder="輸入股票代號（台股如 2330、陸股如 600707）"
               className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:border-blue-500"
             />
             <Button onClick={handleAdd} disabled={addLoading || !addInput.trim()}
@@ -213,9 +232,32 @@ export default function WatchlistPage() {
           />
         )}
 
+        {/* Market filter tabs */}
+        {hasMounted && items.length > 0 && (
+          <div className="flex gap-1.5">
+            {([
+              { id: 'all' as MarketTab, label: '全部', count: items.length },
+              { id: 'TW' as MarketTab, label: '台股', count: twCount },
+              { id: 'CN' as MarketTab, label: '陸股', count: cnCount },
+            ]).map(m => (
+              <button
+                key={m.id}
+                onClick={() => setMarketTab(m.id)}
+                className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                  marketTab === m.id
+                    ? 'bg-sky-600 text-white'
+                    : 'bg-secondary text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                {m.label} {m.count}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Stock cards */}
         <div className="space-y-3">
-          {hasMounted && sorted.map(item => {
+          {hasMounted && filtered.map(item => {
             const d = data[item.symbol];
             const score = d?.sixConditions?.totalScore ?? null;
             const scoreColor = score == null ? 'bg-muted text-muted-foreground' :
@@ -358,6 +400,11 @@ export default function WatchlistPage() {
               </div>
             );
           })}
+          {hasMounted && items.length > 0 && filtered.length === 0 && (
+            <p className="text-center text-sm text-muted-foreground py-8">
+              {marketTab === 'TW' ? '沒有台股自選股' : marketTab === 'CN' ? '沒有陸股自選股' : '沒有自選股'}
+            </p>
+          )}
         </div>
       </div>
     </PageShell>

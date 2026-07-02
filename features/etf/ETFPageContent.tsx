@@ -1,7 +1,6 @@
 'use client';
 
 import { useETFStore, type ETFTab } from '@/store/etfStore';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { PageShell, PageHeader } from '@/components/shared';
 import { ETFPerformanceTab } from './components/ETFPerformanceTab';
 import { ETFChangesTab } from './components/ETFChangesTab';
@@ -15,26 +14,49 @@ const TABS: Array<{ value: ETFTab; label: string }> = [
   { value: 'tracking', label: '被納入後表現' },
 ];
 
-export function ETFPageContent() {
+/**
+ * ETFPanel — 免外框版面，給首頁右側「ETF 追蹤」tab 用（600px 面板內）。
+ * 版型對齊「題材分類」分頁（SectorsPanel）：p-4 space-y-3 外框 + 分段式 pill 切換，
+ * 不用 shadcn Tabs（避免跟其他面板長得不一樣）。不含 PageShell / PageHeader / max-w-7xl。
+ */
+export function ETFPanel() {
   const { activeTab, setActiveTab } = useETFStore();
 
+  return (
+    <div className="p-4 space-y-3 h-full overflow-y-auto">
+      <div className="flex flex-wrap items-stretch gap-2">
+        <div className="inline-flex items-center rounded-lg border border-border bg-secondary/30 p-0.5 text-sm max-w-full overflow-x-auto">
+          {TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => setActiveTab(t.value)}
+              className={`px-3 py-1.5 rounded-md whitespace-nowrap transition-colors ${
+                activeTab === t.value
+                  ? 'bg-card text-foreground shadow-sm font-medium'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeTab === 'performance' && <ETFPerformanceTab />}
+      {activeTab === 'changes' && <ETFChangesTab />}
+      {activeTab === 'consensus' && <ETFConsensusTab />}
+      {activeTab === 'tracking' && <ETFTrackingTab />}
+    </div>
+  );
+}
+
+export function ETFPageContent() {
   const header = <PageHeader title="📈 ETF 追蹤" backButton />;
 
   return (
     <PageShell headerSlot={header}>
-      <div className="px-4 py-4 max-w-7xl mx-auto">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ETFTab)}>
-          <TabsList>
-            {TABS.map((t) => (
-              <TabsTrigger key={t.value} value={t.value}>{t.label}</TabsTrigger>
-            ))}
-          </TabsList>
-
-          <TabsContent value="performance"><ETFPerformanceTab /></TabsContent>
-          <TabsContent value="changes"><ETFChangesTab /></TabsContent>
-          <TabsContent value="consensus"><ETFConsensusTab /></TabsContent>
-          <TabsContent value="tracking"><ETFTrackingTab /></TabsContent>
-        </Tabs>
+      <div className="max-w-7xl mx-auto">
+        <ETFPanel />
       </div>
     </PageShell>
   );

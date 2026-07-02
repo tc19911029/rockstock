@@ -20,9 +20,10 @@ import type { Candle, CandleWithIndicators } from '@/types';
 import { DataProvider } from './DataProvider';
 import { twseHistProvider } from './TWSEHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
+import { fugleDailyProvider } from './FugleProvider';
 import { eastMoneyHistProvider, getSinaMinuteCandles } from './EastMoneyHistProvider';
 import { tencentHistProvider } from './TencentHistProvider';
-import { eodhdHistProvider } from './EODHDHistProvider';
+import { baiduHistProvider } from './BaiduHistProvider';
 import { yahooProvider } from './YahooDataProvider';
 import { getTWSEQuote, getTWSERealtimeIntraday } from './TWSERealtime';
 import { getEastMoneyQuote, getUSStockQuote } from './EastMoneyRealtime';
@@ -387,15 +388,17 @@ export class MultiMarketProvider implements DataProvider {
     const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval ?? '');
 
     if (market === 'TW') {
-      // 走圖路由：FinMind → EODHD → TWSE → Yahoo（4 層 fallback）
+      // 走圖路由：FinMind → Fugle → TWSE → Yahoo（4 層 fallback）
+      // 2026-06-13：EODHD 不續訂移除；補 Fugle 日K（官方 API、上市+上櫃、
+      // 免費層 60 次/分、FinMind 402 熔斷時的快速第二層 — TWSE 逐月較慢墊後）
       result = await tryProvidersWithRacing([
         {
           name: `FinMind ${symbol}`,
           fn: () => finmindHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
         {
-          name: `EODHD ${symbol}`,
-          fn: () => eodhdHistProvider.getHistoricalCandles(symbol, period, asOfDate),
+          name: `Fugle ${symbol}`,
+          fn: () => fugleDailyProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
         {
           name: `TWSE ${symbol}`,
@@ -428,19 +431,20 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else {
-      // 陸股/美股走圖路由：Tencent → Yahoo → EODHD → EastMoney（騰訊/Sina/Yahoo 優先，EastMoney 墊底）
+      // 陸股/美股走圖路由：Tencent → 百度(CN,不封IP) → Yahoo → EastMoney（EastMoney 墊底）
+      // 2026-06-13：EODHD 不續訂移除（同上）
       result = await tryProvidersWithRacing([
         {
           name: `Tencent ${symbol}`,
           fn: () => tencentHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
         {
-          name: `Yahoo ${symbol}`,
-          fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
+          name: `Baidu ${symbol}`,
+          fn: () => baiduHistProvider.getHistoricalCandles(symbol, period, asOfDate, interval),
         },
         {
-          name: `EODHD ${symbol}`,
-          fn: () => eodhdHistProvider.getHistoricalCandles(symbol, period, asOfDate),
+          name: `Yahoo ${symbol}`,
+          fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
         },
         {
           name: `EastMoney ${symbol}`,
@@ -499,18 +503,23 @@ export class MultiMarketProvider implements DataProvider {
     let result: Candle[];
 
     if (market === 'TW') {
+      // 2026-06-13：EODHD 不續訂移除，補 Fugle 日K 第二層
       result = await tryProvidersWithRacing([
         {
           name: `FinMind range ${symbol}`,
           fn: () => finmindHistProvider.getCandlesRange(symbol, startDate, endDate),
         },
         {
-          name: `EODHD range ${symbol}`,
-          fn: () => eodhdHistProvider.getCandlesRange(symbol, startDate, endDate),
+          name: `Fugle range ${symbol}`,
+          fn: () => fugleDailyProvider.getCandlesRange(symbol, startDate, endDate),
         },
         {
           name: `TWSE range ${symbol}`,
           fn: () => twseHistProvider.getCandlesRange(symbol, startDate, endDate),
+        },
+        {
+          name: `Yahoo range ${symbol}`,
+          fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate),
         },
       ]);
     } else if (market === 'INDEX') {
@@ -521,6 +530,7 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else {
+      // 2026-06-13：EODHD 不續訂移除，第三層改 Yahoo（.SS/.SZ Yahoo 可抓）
       result = await tryProvidersWithRacing([
         {
           name: `EastMoney range ${symbol}`,
@@ -531,8 +541,8 @@ export class MultiMarketProvider implements DataProvider {
           fn: () => tencentHistProvider.getCandlesRange(symbol, startDate, endDate),
         },
         {
-          name: `EODHD range ${symbol}`,
-          fn: () => eodhdHistProvider.getCandlesRange(symbol, startDate, endDate),
+          name: `Yahoo range ${symbol}`,
+          fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate),
         },
       ]);
     }

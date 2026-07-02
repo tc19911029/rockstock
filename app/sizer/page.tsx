@@ -10,7 +10,7 @@
  * 預設總資產讀 growth-path startCapital。
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,8 +45,8 @@ export default function SizerPage() {
 
   const [symbol, setSymbol] = useState('2330.TW');
   const [name, setName] = useState('台積電');
-  const [entryPrice, setEntryPrice] = useState('1100');
-  const [stopLoss, setStopLoss] = useState('1020');
+  const [entryPrice, setEntryPrice] = useState('');  // 不帶寫死範例價（避免顯示與現價差很遠的過時數字）
+  const [stopLoss, setStopLoss] = useState('');
   const [letter, setLetter] = useState<string>('');
   const [industry, setIndustry] = useState('');
   const [capitalInput, setCapitalInput] = useState('');
@@ -54,6 +54,17 @@ export default function SizerPage() {
   const [result, setResult] = useState<SizingResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // C2（2026-06-12）：支援 query 預填 — 掃描卡/今日最優先卡「📐 試算」一鍵帶入
+  // /sizer?symbol=2330.TW&name=台積電&entry=985&stop=920&letter=B
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const qs = q.get('symbol'); if (qs) setSymbol(qs);
+    const qn = q.get('name'); if (qn) setName(qn);
+    const qe = q.get('entry'); if (qe && Number(qe) > 0) setEntryPrice(qe);
+    const qst = q.get('stop'); if (qst && Number(qst) > 0) setStopLoss(qst);
+    const ql = q.get('letter'); if (ql) setLetter(ql);
+  }, []);
 
   async function compute() {
     setLoading(true);
@@ -114,7 +125,7 @@ export default function SizerPage() {
         </div>
 
         {/* Form */}
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Field label="股票代號" value={symbol} onChange={setSymbol} placeholder="2330.TW" />
             <Field label="名稱" value={name} onChange={setName} />

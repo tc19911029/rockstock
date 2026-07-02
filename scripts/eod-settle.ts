@@ -92,6 +92,7 @@ async function main() {
     'settled-single-source': 0,
     'pending-multi-disagree': 0,
     'pending-no-vendor-data': 0,
+    'pending-unverified': 0,
     'skipped-already-correct': 0,
   };
 
@@ -102,8 +103,27 @@ async function main() {
       const existing = readExisting(market, sym, date);
       const result = await settleSymbol(sym, market, date, existing, batchCache);
 
-      // 若 settled 與 existing 一致 → skipped-already-correct
-      if (result.settled && existing && Math.abs(result.settled.close - existing.close) / Math.max(result.settled.close, existing.close) < 0.005 && existing.volume > 0) {
+      // 2026-06-12 收緊，TW only（06-11 事故：bulk=0 + FinMind 402 → Yahoo 殘值跟 L1
+      // 盤中殘值同源互證，1649 檔誤標 already-correct 且 T+1 不複驗 → 833 檔上櫃假收盤）：
+      //   1. 既有 bar 存在但 settled 無官方 bulk 源、也無 ≥2 獨立 vendor 背書
+      //      → pending-unverified，不寫不跳過，留給 T+1（08:00 官方 feed 可用、額度重置）。
+      //      existing 缺的 gap-fill 路徑保持原行為（單源可寫，tick 守衛仍在）。
+      //   2. already-correct 改精確比對 close（原 0.5% 容差讓 58.3 vs 58.4 永久留存），
+      //      並加驗 volume（過去 volume 從不對賬 → 盤中部分量永久殘留，污染三色換手率）。
+      // CN 維持原規則：CN 無官方 bulk（stub）、實務常只剩騰訊一源，套雙源背書會
+      // 整市場 pending（2026-06-12 dry 實測 57/60）、宇宙外補 bar 機制全斷。
+      if (market === 'TW') {
+        const verified = result.officialAnchor || (result.independentAgree ?? 0) >= 2;
+        if (result.settled && existing && !verified) {
+          result.status = 'pending-unverified';
+        } else if (result.settled && existing) {
+          const closeSame = Math.abs(result.settled.close - existing.close) <= 0.001;
+          const volSame = existing.volume === result.settled.volume;
+          if (closeSame && volSame && existing.volume > 0) {
+            result.status = 'skipped-already-correct';
+          }
+        }
+      } else if (result.settled && existing && Math.abs(result.settled.close - existing.close) / Math.max(result.settled.close, existing.close) < 0.005 && existing.volume > 0) {
         result.status = 'skipped-already-correct';
       }
       return result;
@@ -147,10 +167,11 @@ async function main() {
   }
   console.log(`寫入 L1: ${written}`);
 
-  // 輸出 settle report 供 T+1 fill 用
+  // 輸出 settle report 供 T+1 fill 用（dry 模式不覆寫，避免 dry 測試把真實 cron 的
+  // pending 清單蓋掉 → T+1 會漏補。2026-06-12 修）
   const reportPath = path.join(process.cwd(), 'data', 'settle-reports');
   mkdirSync(reportPath, { recursive: true });
-  const reportFile = path.join(reportPath, `settle-${market}-${date}.json`);
+  const reportFile = path.join(reportPath, dry ? `settle-${market}-${date}.dry.json` : `settle-${market}-${date}.json`);
   writeFileSync(reportFile, JSON.stringify({
     generatedAt: new Date().toISOString(),
     market, date, dry,
@@ -165,7 +186,7 @@ async function main() {
   console.log(`報告寫入 ${reportFile}`);
 
   // Invariant：pending 比例 >5% 視為 settlement 失敗
-  const pendingTotal = stats['pending-multi-disagree'] + stats['pending-no-vendor-data'];
+  const pendingTotal = stats['pending-multi-disagree'] + stats['pending-no-vendor-data'] + stats['pending-unverified'];
   const pendingRate = symbols.length > 0 ? pendingTotal / symbols.length : 0;
   if (pendingRate > 0.05) {
     console.error(`★ pending ${(pendingRate * 100).toFixed(1)}% (${pendingTotal}/${symbols.length}) 超過 5%，settlement 視為部分失敗 — exit 1`);

@@ -18,6 +18,9 @@ import {
   REVERSAL_TRACK_SET,
   SYSTEM_TRACK_SET,
   MECHANICAL_TRACK_SET,
+  SMARTMONEY_TRACK_SET,
+  INSTDIP_TRACK_SET,
+  INSTSTEAL_TRACK_SET,
   LETTER_NAMES,
 } from '@/lib/scanner/buyMethodTracks';
 
@@ -50,12 +53,12 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
   const [coachCollapsed, setCoachCollapsed] = useState(true);
 
-  // 三色資金（陸股自創）— 放在「朱老師戰法」排的 Q/R 旁邊，選一個 level 就切到該策略結果。
+  // 三色資金（自創策略，台股+陸股）— 放在「朱老師戰法」排的 Q/R 旁邊，選一個 level 就切到該策略結果。
   // null = 走書本買法（A-R 字母）；非 null = 顯示三色資金該 level 命中清單。
   // level 提升到 backtestStore（單一事實來源），讓中間「條件/訊號」面板也能跟著三色/書本切換。
   const cnSanSeLevel = sanseLevel;
   const setCnSanSeLevel = setSanseLevel;
-  const cnSanSe = market === 'CN' && cnSanSeLevel !== null;
+  const sanSeMode = cnSanSeLevel !== null;
   // 走圖目前選中的代號 → 三色資金清單高亮
   const selectedTicker = useReplayStore(s => s.currentStock?.ticker ?? null);
 
@@ -181,14 +184,20 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
             P: { name: LETTER_NAMES.P, track: '多頭軌', ma: 'MA5' },
             Q: { name: LETTER_NAMES.Q, track: '戰法軌', ma: 'MA10' },
             R: { name: LETTER_NAMES.R, track: '機械軌', ma: 'MA20' },
+            W: { name: LETTER_NAMES.W, track: '大戶軌', ma: '—' },
+            X: { name: LETTER_NAMES.X, track: '接刀軌', ma: '—' },
+            Y: { name: LETTER_NAMES.Y, track: '偷買軌(原)', ma: '—' },
           };
-          type M = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
+          type M = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
           const renderBtn = (method: M, color: string) => {
             const m = META[method];
             const isBullish = BULLISH_TRACK_SET.has(method);
             const isReversal = REVERSAL_TRACK_SET.has(method);
             const isSystem = SYSTEM_TRACK_SET.has(method);
             const isMechanical = MECHANICAL_TRACK_SET.has(method);
+            const isSmartMoney = SMARTMONEY_TRACK_SET.has(method);
+            const isInstDip = INSTDIP_TRACK_SET.has(method);
+            const isInstSteal = INSTSTEAL_TRACK_SET.has(method);
             const tooltip = method === 'A'
               ? `A · ${m.name}（書本五步法 Step 1 預選池：六條件 + 戒律 + 淘汰法）。多頭軌字母 B/C/E/J/K/L/M/P 都從這個池子挑進場時機。`
               : isBullish
@@ -199,13 +208,19 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                     ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚠ 全市場掃 — 自含 SOP（過戒律但不過 Step 1）`
                     : isMechanical
                       ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚙ 純機械式排名 — 不過六條件、不過戒律、不過 Step 0 大盤過濾\n做多：成交額前500中乖離率最負 top10 / 做空：成交額前500中乖離率最正 top10`
-                      : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
+                      : isSmartMoney
+                        ? `${method} · ${m.name}（籌碼集中度軌）\n🕵️ 成交額前500中：近5日股價在跌 + 三大法人逆勢買超集中度高，依集中度排序\n不過六條件、不過戒律、不過 Step 0（徐黎芳籌碼集中度法，已半年回測）`
+                        : isInstDip
+                          ? `${method} · ${m.name}（接刀軌，2026-06-14）\n🔪 成交額前500中：股價在跌/長黑 + 法人逆勢買，剔除大戶持股超高，依法人買超排序\n不過六條件/戒律/Step 0。grid 唯一兩年都正買方向（但贏大盤<50%，靠賠小賺大）`
+                          : isInstSteal
+                            ? `${method} · ${m.name}（最初版三條件，2026-06-14）\n🕵️ 股價在跌 + 5日籌碼集中度在增加 + 法人連續買，三個同時成立\n不過六條件/戒律/Step 0。⚠️ 回測扣成本後超額≈0、贏大盤<50%（train負test正、不穩）→ 觀察用非明牌`
+                            : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
             return (
               <button key={method}
                 onClick={() => { setCnSanSeLevel(null); setActiveBuyMethod(method); }}
                 disabled={isLoadingBuyMethod}
                 className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
-                  activeBuyMethod === method && !cnSanSe
+                  activeBuyMethod === method && !sanSeMode
                     ? color
                     : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                 }`}
@@ -267,11 +282,20 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 <div className="flex items-center gap-1 flex-wrap">
                   {renderBtn('Q', 'bg-purple-700/70 border-purple-600 text-purple-100')}
                   {renderBtn('R', 'bg-cyan-700/70 border-cyan-600 text-cyan-100')}
-                  {/* 三色資金（陸股自創）— 嚴格/中等/寬鬆 三檔並排在乖離率旁邊 */}
-                  {market === 'CN' && ([
+                  {/* 大戶偷買(W) / 法人接刀(X) 2026-06-15 從畫面拿掉（程式留著、可選回）— 只留 Y */}
+                  {/* 大戶法人偷買（Y，2026-06-14）— 三條件 AND */}
+                  {renderBtn('Y', 'bg-amber-700/70 border-amber-600 text-amber-100')}
+                  {/* 三色資金（自創策略，台股+陸股）— 嚴格/中等/寬鬆 三檔並排在乖離率旁邊 */}
+                  {([
                     ['strict', '三色(嚴格)', '三色資金共振：短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位'],
                     ['medium', '三色(中等)', '更新版：短攻/中強/中控 三分數都 > 0'],
                     ['loose', '三色(寬鬆)', '游資資金翻正：短線動能今天剛由負轉正'],
+                    ['reversal', '🔥三色(底反)', '底反該買 = 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握（台股該買勝率 +7→+15pp、陸股空頭段 +9pp）'],
+                    // 具名型態策略（從 records 衍生、掃全市場命中；判定 = lib/cn-sanse/namedStrategies）
+                    ['resonance', '三色(全共振⭐)', '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同日（三組齊發）。回測漲幅最大但稀有；台股最強、陸股牛市那段被稀釋'],
+                    ['red_yellow_trigger', '三色(紅+黃+觸發)', '🔴紅(機構) ＋ 🟡黃(控盤) 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）。大樣本、最實用的中線進場'],
+                    ['red_dualb_gold', '三色(紅+雙B金叉)', '🔴紅(機構)在場 ＋ 主圖黃線穿紅線（雙B黃紅金叉、只認金叉、較乾淨）'],
+                    ['red_dualb_any', '三色(紅+雙B金叉/突破)', '🔴紅(機構)在場 ＋（黃紅金叉 或 收盤突破智能交易線）'],
                   ] as const).map(([lv, label, tip]) => (
                     <button key={lv}
                       onClick={() => setCnSanSeLevel(lv)}
@@ -280,7 +304,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                           ? 'bg-fuchsia-700/70 border-fuchsia-600 text-fuchsia-100'
                           : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                       }`}
-                      title={`${label} · 陸股自創策略\n${tip}`}>
+                      title={`${label} · ${market === 'TW' ? '台股' : '陸股'}自創策略\n${tip}`}>
                       {label}
                     </button>
                   ))}
@@ -327,8 +351,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
       </div>
 
-      {cnSanSe ? (
-        <SanSeScanCompact level={cnSanSeLevel ?? 'medium'} onSelectStock={onSelectStock} selectedSymbol={selectedTicker} />
+      {sanSeMode && scanDirection === 'long' ? (
+        // 三色僅做多；切到 空/打板 時退回書本買法清單（level 仍保留，切回「多」會自動恢復三色）
+        <SanSeScanCompact market={market} level={cnSanSeLevel ?? 'medium'} onSelectStock={onSelectStock} selectedSymbol={selectedTicker} />
       ) : (
       <>
       {/* ── 鎖股觀察（4 區塊之後，結果列表之前）── */}

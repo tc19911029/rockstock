@@ -87,14 +87,21 @@ export async function fetchT86ForStock(
   if (!token) throw new Error('FINMIND_API_TOKEN 未設定');
 
   const url = `${FINMIND_API}?dataset=TaiwanStockInstitutionalInvestorsBuySell&data_id=${encodeURIComponent(code)}&start_date=${startDate}&end_date=${endDate}&token=${encodeURIComponent(token)}`;
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(30000),
-    headers: { 'Accept': 'application/json' },
-  });
-  if (!res.ok) throw new Error(`FinMind T86 HTTP ${res.status} for ${code}`);
-  const json = (await res.json()) as FinmindResponse;
-  if (json.status !== 200) {
-    throw new Error(`FinMind T86 status=${json.status} msg=${json.msg}`);
+  // 裸 fetch + 30s timeout 對 FinMind 在中國線路會 TLS reset / hang → /api/chip 整個卡 40s（籌碼面板永遠載入中）。
+  // 改 curlFetch(代理 fallback) + 12s；失敗（含 402 限流）優雅回空 Map，不讓整個籌碼面板卡死。2026-06-22 修。
+  const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+  try {
+    const { data: json } = await fetchJsonWithCurlFallback<FinmindResponse>(url, {
+      timeoutMs: 6_000,
+      headers: { 'Accept': 'application/json' },
+    });
+    if (json.status !== 200) {
+      console.warn(`[TwseT86] FinMind status=${json.status} msg=${json.msg} for ${code} → 略過(用既有快取)`);
+      return new Map();
+    }
+    return mergeRows(json.data ?? []);
+  } catch (e) {
+    console.warn(`[TwseT86] 抓取失敗 for ${code}: ${e instanceof Error ? e.message : e} → 略過(用既有快取)`);
+    return new Map();
   }
-  return mergeRows(json.data ?? []);
 }

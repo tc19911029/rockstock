@@ -2,15 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePortfolioStore, PortfolioHolding, syncAllHoldingsToServer } from '@/store/portfolioStore';
+import { usePortfolioStore, PortfolioHolding } from '@/store/portfolioStore';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { classifyMarket } from '@/lib/market/classify';
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
-import { formatSharesAsLots, marketFromSymbol } from '@/lib/utils/shareUnits';
+import { formatHoldingQty } from '@/lib/utils/shareUnits';
 import { POLLING } from '@/lib/config';
 import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDailyActionPanel';
+import { DisciplineShadowCard } from '@/components/portfolio/DisciplineShadowCard';
+import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
 function todayCST(): string {
@@ -50,15 +52,7 @@ interface AnalysisSummary {
 export default function PortfolioPage() {
   const { holdings, add, remove, update } = usePortfolioStore();
   const [prices, setPrices] = useState<Record<string, PriceData>>({});
-  // server holdings.json 上的持倉數（給 sync 提示用，不是 source of truth）
-  const [serverCount, setServerCount] = useState<number | null>(null);
   const [analysisSummaries, setAnalysisSummaries] = useState<Record<string, AnalysisSummary>>({});
-  useEffect(() => {
-    fetch('/api/agents/portfolio?status=open')
-      .then(r => r.ok ? r.json() : null)
-      .then(j => setServerCount(j?.holdings?.length ?? 0))
-      .catch(() => setServerCount(null));
-  }, []);
   // 載入每檔持股的分析摘要
   const symbolListForSummary = holdings.map(h => h.symbol).join(',');
   useEffect(() => {
@@ -399,16 +393,6 @@ export default function PortfolioPage() {
               e.target.value = '';
             }} />
           </label>
-          <Button variant="secondary" size="sm"
-            title="把 UI 持股（瀏覽器 localStorage）同步到 server holdings.json,讓 portfolio-review skill / 月報 / /today 頁能看到。陸股因業務邏輯 TW-only 不入 server"
-            onClick={async () => {
-              const r = await syncAllHoldingsToServer();
-              if (r.skipped) return;
-              const cnNote = r.cnSkipped > 0 ? `\n(其中 ${r.cnSkipped} 檔陸股 TW-only 不入 server,屬正常)` : '';
-              alert(`同步到 server:成功 ${r.inserted} / 失敗 ${r.rejected} / 陸股略過 ${r.cnSkipped} / 共 ${r.total} 檔${cnNote}\n\n之後 portfolio-review、月報、/today 都會看到這些持倉`);
-            }}>
-            → 同步到 server
-          </Button>
           <Button size="sm" onClick={() => { cancelForm(); setShowForm(v => !v); }}
             className="bg-blue-600 hover:bg-blue-500 font-bold">
             + 新增
@@ -420,52 +404,23 @@ export default function PortfolioPage() {
 
   return (
     <PageShell headerSlot={portfolioHeader}>
-      <div className="p-4 max-w-3xl mx-auto space-y-4">
+      <div className="p-4 space-y-4">
 
-        {/* Server vs Local 持倉數不一致提示
-         *  2026-05-25 修:比對只看 TW(陸股 TW-only 不入 server,屬正常),避免永遠紅
-         */}
-        {serverCount != null && serverCount !== twHoldings.length && (
-          <div className="rounded-lg border border-amber-700/50 bg-amber-900/15 p-3 text-xs text-amber-200 leading-relaxed">
-            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-              <div className="font-semibold text-amber-300">
-                ⚠ 持倉資料兩邊不一致(本機台股 {twHoldings.length} 檔 / 伺服器 {serverCount} 檔
-                {cnHoldings.length > 0 ? `;另有陸股 ${cnHoldings.length} 檔不計入比對` : ''})
-              </div>
-              {twHoldings.length > serverCount && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!confirm(`要把本機 ${twHoldings.length} 檔台股持倉推到伺服器 holdings.json?\n\n陸股 ${cnHoldings.length} 檔不入 server(TW-only 業務邏輯,memory 2026-05-23 決議)。\n\n影響:portfolio-review、月報、TodayBriefing 都會看到這些持倉。`)) return;
-                    try {
-                      const r = await syncAllHoldingsToServer();
-                      if (r.skipped) return;
-                      const cnNote = r.cnSkipped > 0 ? ` / 陸股略過 ${r.cnSkipped}` : '';
-                      alert(`同步完成:成功 ${r.inserted} / 失敗 ${r.rejected}${cnNote} / 共 ${r.total} 檔`);
-                      window.location.reload();
-                    } catch (e) {
-                      alert('同步失敗、請看 console:' + (e instanceof Error ? e.message : String(e)));
-                    }
-                  }}
-                  className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold"
-                  title="一鍵把本機台股持倉推到伺服器,給 portfolio-review skill / 月報 / TodayBriefing 讀(陸股不入)"
-                >
-                  ⚡ 一鍵同步
-                </button>
-              )}
-            </div>
-            <p className="text-amber-300/70 text-[11px]">
-              <strong>什麼意思</strong>:你在這頁編輯的持倉存在瀏覽器(localStorage),但分析用的 server(holdings.json)跟它分開。
-              {twHoldings.length > serverCount
-                ? ' → 本機比較新、點上方「⚡ 一鍵同步」推上去就好。'
-                : ' → server 多於本機,可能是 server 有手動加的、本機沒匯入。'}
-              {cnHoldings.length > 0 && ' (陸股因業務邏輯 TW-only 不入 server,屬正常)'}
-            </p>
-          </div>
-        )}
+        {/* 2026-05-29：持倉已改 server 唯一真相（holdings.json / holdings-cn.json）。
+            store 啟動時從 server 灌入，UI 動作 optimistic 寫回 server，
+            不再有「本機 vs server」分裂，舊的同步提示與一鍵同步按鈕已移除。 */}
 
-        {/* 📋 今日操作建議（書本訊號 daily action）— 讀 server holdings.json (本機 zustand 可能不同步) */}
+        {/* 👤 持倉檔案切換（多人：我的 / 朋友的…）— 切換即重載對應持倉 */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground shrink-0">持倉檔案</span>
+          <PortfolioProfileSwitcher />
+        </div>
+
+        {/* 📋 今日操作建議（書本訊號 daily action）— 讀 server holdings.json */}
         <PortfolioDailyActionPanel />
+
+        {/* 📐 紀律影子帳本（A2 2026-06-12）— 書本規則嚴格執行版 vs 實際抱單的差額 */}
+        <DisciplineShadowCard />
 
         {/* Summary — TWD / CNY 分開顯示，損益已扣買賣手續費+交易稅 */}
         {holdings.length > 0 && (
@@ -631,11 +586,11 @@ export default function PortfolioPage() {
                 <div className="flex items-center gap-3 px-4 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-foreground">{h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</span>
-                      <span className="text-xs text-muted-foreground truncate" title={p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}>{p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</span>
+                      <span className="font-bold text-foreground">{h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}</span>
+                      <span className="text-xs text-muted-foreground truncate" title={p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}>{p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}</span>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {formatSharesAsLots(h.shares, marketFromSymbol(h.symbol))} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
+                      {formatHoldingQty(h.shares, h.symbol)} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
                       · 買進 {h.buyDate}
                     </div>
                   </div>
@@ -659,7 +614,7 @@ export default function PortfolioPage() {
                   {/* P&L */}
                   {currentPrice > 0 && (
                     <div className={`text-right shrink-0 text-xs font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
-                      <div>{pnlPos ? '+' : ''}${Math.abs(pnl).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}</div>
+                      <div>{pnlPos ? '+' : '-'}${Math.abs(pnl).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}</div>
                       <div>{pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%</div>
                     </div>
                   )}
@@ -669,7 +624,7 @@ export default function PortfolioPage() {
                       className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold transition">走圖</Link>
                     <AnalyzeHoldingButton symbol={h.symbol} summary={analysisSummaries[h.symbol]} />
                     <Button variant="secondary" size="sm" onClick={() => openEdit(h)}>編輯</Button>
-                    <Button variant="destructive" size="sm" onClick={() => remove(h.id)}>刪除</Button>
+                    <Button variant="destructive" size="sm" onClick={() => { if (window.confirm(`刪除「${h.name ?? h.symbol}」這筆持股？\n\n會永久移除、不留交易紀錄、無法復原。\n（若要平倉並記錄交易，請改用賣出流程）`)) remove(h.id); }}>刪除</Button>
                   </div>
                 </div>
 
@@ -678,8 +633,8 @@ export default function PortfolioPage() {
                   const alerts: Array<{ level: 'danger' | 'warning' | 'profit'; text: string }> = [];
 
                   // 止損警報（含具體建議動作）
-                  if (pnlPct <= -7) alerts.push({ level: 'danger', text: `虧損 ${pnlPct.toFixed(1)}% — 已達止損線！建議：開盤以市價單全數賣出，嚴守紀律不凹單` });
-                  else if (pnlPct <= -5) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 接近止損，建議：設定停損單在成本價×0.93，或明日開盤觀察若跌破立即出場` });
+                  if (pnlPct <= -7) alerts.push({ level: 'danger', text: `虧損 ${pnlPct.toFixed(1)}% — 已達止損線！建議：13:20 確認跌破、13:25 掛市價單全數賣出，嚴守紀律不凹單（書本時點，非開盤）` });
+                  else if (pnlPct <= -5) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 接近止損，建議：明日 13:20 觀察，若收盤前確認跌破成本價×0.93 即 13:25 掛市價出場` });
                   else if (pnlPct <= -3) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 留意：觀察是否跌破 MA5 或支撐位` });
 
                   // 止盈提醒（含具體建議動作）
@@ -785,7 +740,7 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
             'px-1.5 py-0.5 rounded text-[10px] font-semibold ' +
             (summary.valuationConclusion === 'undervalued' ? 'bg-emerald-900/60 text-emerald-300' :
              summary.valuationConclusion === 'overvalued' ? 'bg-rose-900/60 text-rose-300' :
-             'bg-slate-700 text-slate-200')
+             'bg-secondary text-foreground')
           }>
             {summary.valuationConclusion === 'undervalued' ? '低估' :
              summary.valuationConclusion === 'overvalued' ? '高估' : '合理'}
@@ -898,7 +853,7 @@ function MarketSummaryRow({ label, currency, summary, returnPct }:
         <div>
           <p className="text-[10px] text-muted-foreground mb-0.5">損益</p>
           <p className={`text-sm font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
-            {pnlPos ? '+' : ''}{symbol}{Math.abs(summary.totalPnL).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
+            {pnlPos ? '+' : '-'}{symbol}{Math.abs(summary.totalPnL).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
           </p>
         </div>
         <div>

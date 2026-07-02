@@ -12,6 +12,7 @@ import { computeIndicators } from '@/lib/indicators';
 import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
 import { aggregateCandles } from './aggregateCandles';
+import { getFinMindToken } from '@/lib/env';
 
 // ── 快取 TTL ──────────────────────────────────────────────────────────────────
 
@@ -88,12 +89,10 @@ interface TWSEResponse {
 async function fetchTWSEMonth(code: string, dateStr: string): Promise<Candle[]> {
   const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${dateStr}&stockNo=${code}`;
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10_000),
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; rockstock/2.0)' },
-    });
-    if (!res.ok) return [];
-    const json = (await res.json()) as TWSEResponse;
+    // 2026-06-13：TWSE 直連間歇性 TLS reset（裸 fetch 卡 timeout 回 0）→ curl-first helper
+    // EODHD 拔除後本 provider 是 TW 鏈第二層，必須可靠
+    const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+    const { data: json } = await fetchJsonWithCurlFallback<TWSEResponse>(url, { timeoutMs: 10_000 });
     if (json.stat !== 'OK' || !json.data) return [];
 
     return json.data
@@ -136,14 +135,9 @@ async function fetchTPExMonth(code: string, dateStr: string): Promise<Candle[]> 
     `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock` +
     `?date=${formattedDate}&code=${code}&response=json`;
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-      },
-    });
-    if (!res.ok) return [];
-    const json = (await res.json()) as TPExNewResponse;
+    // 2026-06-13：TPEx Cloudflare 擋裸 fetch → curl-first helper（對 tpex.org.tw 自動 curl 優先）
+    const { fetchJsonWithCurlFallback } = await import('./curlFetch');
+    const { data: json } = await fetchJsonWithCurlFallback<TPExNewResponse>(url, { timeoutMs: 10_000 });
     if (json.stat !== 'ok') return [];
     const rows = json.tables?.[0]?.data;
     if (!rows || rows.length === 0) return [];
@@ -170,7 +164,7 @@ async function fetchTPExMonth(code: string, dateStr: string): Promise<Candle[]> 
 // ── FinMind fallback（TPEx Cloudflare 403 / TWSE rate-limit 時用） ───────────
 // FinMind dataset=TaiwanStockPrice 上市/上櫃通用，stock_id 不帶後綴
 // Trading_Volume 單位是「股」，除以 1000 轉張
-const FINMIND_TOKEN = process.env.FINMIND_API_TOKEN ?? '';
+const FINMIND_TOKEN = getFinMindToken() ?? '';
 
 interface FinMindPriceRow {
   date: string;

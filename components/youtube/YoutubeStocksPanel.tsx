@@ -17,7 +17,12 @@ import { YoutubeStockCard } from './YoutubeStockCard';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { fmtDateLabelTw } from '@/lib/dateDefaults';
 import type { PerformanceResponse, PerformanceItem, ConsensusSummary } from '@/app/api/youtube/performance/route';
+import type { TeacherLeaderboardResponse } from '@/lib/youtube/recoTypes';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
+import type { AccuracyHint } from './YoutubeStockCard';
+import { SortControl } from '@/components/shared';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
 
 interface Props {
   date: string;                                // 'YYYY-MM-DD'
@@ -26,10 +31,28 @@ interface Props {
   selectedCode?: string | null;
 }
 
-type SortKey = 'mention' | 'rating' | 'openReturn' | 'd1Return' | 'd5Return' | 'd10Return' | 'd20Return' | 'maxGain' | 'maxLoss';
 type FilterKey = 'all' | 'A' | 'B+';
 
+// 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
+// 該頁專屬（老師面向）→ '|' 分隔線 → 共用區（本頁有完整 fwd 七欄）
+const YT_SORT_OPTIONS = [
+  'teacher.mentions', 'teacher.rating', 'teacher.accuracy',
+  '|',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+];
+// 前瞻報酬 id → PerformanceItem.performance 的欄位名
+const YT_FWD_FIELD: Record<string, string> = {
+  'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return',
+  'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
+};
+
 const RATING_ORDER: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
+
+// 「準度」= 提及這檔的老師/節目的歷史 D5 勝率（贏過大盤幅度放 tooltip）。
+// 樣本太小會出現「2 天 94% 勝率」的假象 → 設門檻，未達者不列入準度。
+const ACC_MIN_SCORED = 20;
+type WinStat = { win: number; scored: number; excess: number | null; label: string };
 
 export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selectedCode }: Props) {
   const [data, setData] = useState<PerformanceResponse | null>(null);
@@ -38,11 +61,13 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
   const [emptyDates, setEmptyDates] = useState<Set<string>>(() => new Set());
   const [populatedDates, setPopulatedDates] = useState<Set<string>>(() => new Set());
   // 預設按評級排（A>B>C>D>未評），同級再按提及次數 tie-break — 對齊 deriveStockMentions 的順序
-  const [sortBy, setSortBy] = useState<SortKey>('rating');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState<string>('teacher.rating');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filter, setFilter] = useState<FilterKey>('all');
   // 跨節目共識面板（仿主頁朱老師分析的折疊樣式）— 預設收起,需要時自行展開
   const [consensusOpen, setConsensusOpen] = useState(false);
+  // 老師/節目歷史準度（teacher-leaderboard，與日期無關、整窗滾動）— 背景載入不擋股票清單
+  const [leaderboard, setLeaderboard] = useState<TeacherLeaderboardResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +91,66 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [date]);
+
+  // 準度資料只抓一次（整窗滾動、與當前 date 無關）。
+  // ⚠ 首頁 mount 會同時噴幾十個 API → 容易撞限流 429；一次性 fetch 失敗就永久空白，
+  //    所以遇到 429 / 網路錯誤要退避重試（仿 sanse 面板「暫時性失敗不重抓→永久卡」教訓）。
+  useEffect(() => {
+    let cancelled = false;
+    const delays = [400, 900, 1600, 2600];
+    const attempt = async (i: number): Promise<void> => {
+      if (cancelled) return;
+      try {
+        const r = await fetch('/api/youtube/teacher-leaderboard?days=90');
+        if (r.status === 429) throw new Error('429');
+        const json: TeacherLeaderboardResponse & { ok?: boolean } = await r.json();
+        if (!cancelled && json?.ok) { setLeaderboard(json); return; }
+        throw new Error('not ok');
+      } catch {
+        if (cancelled || i >= delays.length) return;   // 準度是加值排序，最終失敗不影響主清單
+        setTimeout(() => { void attempt(i + 1); }, delays[i]);
+      }
+    };
+    void attempt(0);
+    return () => { cancelled = true; };
+  }, []);
+
+  // 老師名 / 節目 source_id → D5 勝率
+  const winMaps = useMemo(() => {
+    const teacherWin = new Map<string, WinStat>();
+    const programWin = new Map<string, WinStat>();
+    for (const t of leaderboard?.teachers ?? []) {
+      const d5 = t.byHorizon?.d5;
+      if (d5) teacherWin.set(t.teacher, { win: d5.winRatePct, scored: t.scored_events, excess: d5.excessAvgPct, label: t.teacher });
+    }
+    for (const p of leaderboard?.programs ?? []) {
+      const d5 = p.byHorizon?.d5;
+      if (d5) programWin.set(p.source_id, { win: d5.winRatePct, scored: p.scored_events, excess: d5.excessAvgPct, label: p.display_name });
+    }
+    return { teacherWin, programWin };
+  }, [leaderboard]);
+
+  // 每檔的準度 = 提及它的老師/節目中，歷史 D5 勝率最高的那個（樣本須 ≥ 門檻）
+  const accByCode = useMemo(() => {
+    const { teacherWin, programWin } = winMaps;
+    const out = new Map<string, AccuracyHint>();
+    for (const it of data?.items ?? []) {
+      let best: AccuracyHint | null = null;
+      const consider = (s: WinStat | undefined, kind: AccuracyHint['kind']) => {
+        if (!s || s.scored < ACC_MIN_SCORED) return;
+        if (!best || s.win > best.winRate) best = { winRate: s.win, scored: s.scored, excess: s.excess, label: s.label, kind };
+      };
+      for (const src of it.sources) {
+        consider(programWin.get(src.source_id), 'program');
+        for (const a of src.analysts ?? []) {
+          const name = a.replace(/[（(][^（()）]*[）)]/g, '').trim();
+          consider(teacherWin.get(name), 'teacher');
+        }
+      }
+      if (best) out.set(it.stock_code, best);
+    }
+    return out;
+  }, [data, winMaps]);
 
   const datePickerMeta = useMemo<Record<string, DateMeta>>(() => {
     const m: Record<string, DateMeta> = {};
@@ -102,42 +187,36 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
     return items;
   }, [data, filter]);
 
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    const dir = sortDir === 'desc' ? 1 : -1;
-    arr.sort((a, b) => {
-      const ar = a.rating ? RATING_ORDER[a.rating] ?? 0 : 0;
-      const br = b.rating ? RATING_ORDER[b.rating] ?? 0 : 0;
-      switch (sortBy) {
-        case 'mention':
-          // 主鍵：提及次數；同 mention 用 rating tie-break（避免 C 排在 A 上面）
-          if (b.mention_count !== a.mention_count) return dir * (b.mention_count - a.mention_count);
-          return dir * (br - ar);
-        case 'rating':
-          if (ar !== br) return dir * (br - ar);
-          return dir * (b.mention_count - a.mention_count);
-        case 'openReturn':
-        case 'd1Return':
-        case 'd5Return':
-        case 'd10Return':
-        case 'd20Return':
-        case 'maxGain':
-        case 'maxLoss': {
-          const va = (a.performance as unknown as Record<string, number | null | undefined>)[sortBy];
-          const vb = (b.performance as unknown as Record<string, number | null | undefined>)[sortBy];
-          const aNull = va == null;
-          const bNull = vb == null;
-          if (aNull && bNull) return 0;
-          if (aNull) return 1;
-          if (bNull) return -1;
-          return dir * ((vb as number) - (va as number));
-        }
-        default:
-          return 0;
+  // 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）
+  const ytSortValue = (it: PerformanceItem, id: string): SortValue => {
+    const fk = YT_FWD_FIELD[id];
+    if (fk) {
+      return (it.performance as unknown as Record<string, number | null | undefined>)[fk] ?? null;
+    }
+    const rating = it.rating ? RATING_ORDER[it.rating] ?? 0 : 0;
+    switch (id) {
+      case 'teacher.mentions':
+        // 主鍵：提及次數；同 mention 用 rating tie-break（rating 0-4 壓進尾數）
+        return it.mention_count * 10 + rating;
+      case 'teacher.rating':
+        // 主鍵：評級（A>B>C>D>未評）；同級用提及次數 tie-break（壓進尾數）
+        return rating * 1e6 + it.mention_count;
+      case 'teacher.accuracy': {
+        // 主鍵：最準來源 D5 勝率；無準度資料回 null 排最後；同分用樣本數 tie-break
+        const acc = accByCode.get(it.stock_code);
+        if (!acc) return null;
+        return acc.winRate * 1e6 + acc.scored;
       }
-    });
-    return arr;
-  }, [filtered, sortBy, sortDir]);
+      default:
+        return null;
+    }
+  };
+  const sorted = useMemo(
+    () => applySort(filtered, sortBy, sortDir, ytSortValue),
+    // ytSortValue 依賴 accByCode；filtered/sortBy/sortDir 已列
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filtered, sortBy, sortDir, accByCode],
+  );
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -194,34 +273,13 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
           )}
         </div>
 
-        {/* Sort pills */}
-        <div className="flex flex-wrap gap-1 items-center">
-          <span className="text-[9px] text-muted-foreground/70 mr-0.5">排序</span>
-          {([
-            { key: 'mention' as const, label: '提及' },
-            { key: 'rating' as const, label: '評級' },
-            { key: 'openReturn' as const, label: '漲跌·隔開' },
-            { key: 'd1Return' as const, label: '漲跌·1日' },
-            { key: 'd5Return' as const, label: '漲跌·5日' },
-            { key: 'd10Return' as const, label: '漲跌·10日' },
-            { key: 'd20Return' as const, label: '漲跌·20日' },
-            { key: 'maxGain' as const, label: '漲跌·最高' },
-            { key: 'maxLoss' as const, label: '漲跌·最低' },
-          ]).map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => {
-                if (sortBy === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
-                else { setSortBy(key); setSortDir('desc'); }
-              }}
-              className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                sortBy === key ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'
-              }`}
-            >
-              {label}{sortBy === key && <span className="ml-0.5">{sortDir === 'desc' ? '▼' : '▲'}</span>}
-            </button>
-          ))}
-        </div>
+        {/* Sort pills — 共用 SortControl + 中央排序清單 */}
+        <SortControl
+          options={YT_SORT_OPTIONS}
+          value={sortBy}
+          dir={sortDir}
+          onChange={(id, d) => { setSortBy(id); setSortDir(d); }}
+        />
 
         {/* Filter pills */}
         <div className="flex flex-wrap gap-1 items-center">
@@ -254,9 +312,9 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
         {!loading && !error && (data?.items.length ?? 0) === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <p className="text-2xl mb-2">📺</p>
-            <p className="text-xs text-muted-foreground mb-1">{data?.message ?? '此日無 YouTube 提及紀錄'}</p>
+            <p className="text-xs text-muted-foreground mb-1">此日無 YouTube 提及紀錄</p>
             <p className="text-[10px] text-muted-foreground/70">
-              請用上方箭頭切換日期，或執行 /youtube-analysis 產生資料
+              請用上方日期切換到有資料的日期（當日分析通常於晚間產生）
             </p>
           </div>
         )}
@@ -264,6 +322,7 @@ export function YoutubeStocksPanel({ date, onDateChange, onSelectStock, selected
           <YoutubeStockCard
             key={item.stock_code}
             item={item}
+            accuracy={accByCode.get(item.stock_code)}
             selected={selectedCode === item.stock_code}
             onSelect={onSelectStock}
           />

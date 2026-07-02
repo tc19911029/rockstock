@@ -19,11 +19,11 @@ import { readCandleFile, listCandleSymbols } from '@/lib/datasource/CandleStorag
 import { readTurnoverRank, computeTurnoverRankAsOfDate } from '@/lib/scanner/TurnoverRank';
 import { getTWConcept, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
 import { computeSanSe, evalLatest, type SanSeLevel } from '@/lib/cn-sanse/selectors';
-import { evalConditions } from '@/lib/cn-sanse/conditions';
+import { evalConditions, isReversalBuy } from '@/lib/cn-sanse/conditions';
 import type {
   SanSeHit, ResonanceRecord, ResonanceCounts, SanSeScanResult, SanSeIntradayInput,
 } from '@/lib/cn-sanse/scan';
-import { SANSE_TURNOVER_TOP_N, topTurnoverRanks, appendTodayBar } from '@/lib/cn-sanse/scan';
+import { SANSE_TURNOVER_TOP_N, topTurnoverRanks, appendTodayBar, computeZhuSix } from '@/lib/cn-sanse/scan';
 
 const INDEX_SYMBOL = '^TWII';   // 加權指數（RS 基準 + 行情日曆）
 const MIN_BARS = 250;
@@ -175,7 +175,10 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
 
       const report = evalConditions(candles, indexClose, series);
       if (report.selected) {
-        records.push({ symbol: s.symbol, name: s.name, industry: s.industry ?? '', price: lastClose, changePct, report });
+        records.push({
+          symbol: s.symbol, name: s.name, industry: s.industry ?? '', price: lastClose, changePct, report,
+          zhuSix: computeZhuSix(candles), // 六條件確認欄（只對入選紀錄算；台股交集回測有效）
+        });
       }
     });
   }
@@ -196,7 +199,10 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
   (['strict', 'medium', 'loose'] as SanSeLevel[]).forEach((lv) =>
     results[lv].sort((a, b) => b.shortAttack - a.shortAttack),
   );
-  keptRecords.sort((a, b) => b.report.groupBuyCount - a.report.groupBuyCount || b.report.scores.shortAttack - a.report.scores.shortAttack);
+  keptRecords.sort((a, b) =>
+    (isReversalBuy(b.report) ? 1 : 0) - (isReversalBuy(a.report) ? 1 : 0) ||
+    b.report.groupBuyCount - a.report.groupBuyCount ||
+    b.report.scores.shortAttack - a.report.scores.shortAttack);
 
   const resonanceCounts: ResonanceCounts = {
     strong: keptRecords.filter((r) => r.report.level === 'strong').length,
