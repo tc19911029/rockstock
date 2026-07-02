@@ -116,6 +116,38 @@ export interface StockScoring {
   reasoning: string;
 }
 
+/** 節目必看分級（2026-07 每日節目總結報告） */
+export type WatchPriority = 'must_watch' | 'skim' | 'skip';
+
+/** 該集對大盤的態度 */
+export type MarketStance = 'bullish' | 'bearish' | 'neutral' | 'mixed';
+
+/**
+ * 每支影片的節目摘要 + 必看分級（2026-07 加；全部檔案層 optional，舊 analysis 向下相容）。
+ * 讓使用者「看報告代替看節目」：這集講了什麼、值不值得花時間回看。
+ */
+export interface VideoSummary {
+  video_id: string;
+  source_id: string;
+  /** 節目顯示名（question 的 source_display_name 原樣帶下） */
+  source_name: string;
+  title: string;
+  /** 缺時 UI 以 video_id 組 youtube.com/watch?v= */
+  url?: string;
+  /** 同 AnalyzedStockMention.analysts 慣例（主持人 + 來賓） */
+  analysts?: string[];
+  /** 2-4 句白話繁中：這集講了什麼、結論是什麼（禁止改寫標題充數） */
+  summary: string;
+  market_stance?: MarketStance;
+  /** 該集最重要 1-5 檔（code 以 stock_master 對照後為準） */
+  key_stocks: Array<{ code: string; name: string }>;
+  watch_priority: WatchPriority;
+  /** 一句話，必須引具體內容（哪檔股票/什麼論述） */
+  watch_reason: string;
+  /** 影片長度，「值不值得花時間」參考 */
+  duration_sec?: number;
+}
+
 export interface DailyAnalysis {
   date: string;                 // YYYY-MM-DD Asia/Taipei
   generated_at: string;         // ISO，Claude 寫入時
@@ -133,6 +165,8 @@ export interface DailyAnalysis {
   weak_signal_stocks: AnalyzedStockMention[];
   /** MVP 5: 每檔被提到股票的多因子評分（可選 — 舊 analysis 沒這欄） */
   stock_scoring?: StockScoring[];
+  /** 每支影片的節目摘要 + 必看分級（2026-07 加 — 舊 analysis 沒這欄） */
+  video_summaries?: VideoSummary[];
   /** 統計 */
   stats: {
     videos_analyzed: number;

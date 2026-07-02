@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * YoutubePanel — 首頁右側「YouTube 提及」分頁的外框，內含三個子分頁：
+ * YoutubePanel — 首頁右側「YouTube 提及」分頁的外框，內含四個子分頁：
+ *   - 總結   ：YoutubeDailySummary（每日節目總結報告：每集摘要 + 必看標記 + 持倉提醒）
  *   - 提及   ：YoutubeStocksPanel（今日節目提及的股票 + N 日漲跌追蹤）
  *   - 老師排行：TeacherLeaderboard（誰講得準，原 /youtube/teachers）
  *   - 抓取狀態：YoutubeTab（來源紅綠燈 / 影片表 / Audit，原 /health?tab=youtube）
@@ -13,11 +14,12 @@
  */
 
 import { useState } from 'react';
+import { YoutubeDailySummary } from './YoutubeDailySummary';
 import { YoutubeStocksPanel } from './YoutubeStocksPanel';
 import { TeacherLeaderboard } from './TeacherLeaderboard';
 import { YoutubeTab } from '@/app/health/tabs/YoutubeTab';
 
-type SubTab = 'mentions' | 'teachers' | 'health';
+type SubTab = 'summary' | 'mentions' | 'teachers' | 'health';
 
 interface Props {
   date: string;
@@ -27,13 +29,14 @@ interface Props {
 }
 
 const SUBTABS: Array<{ key: SubTab; label: string; icon: string; title: string }> = [
+  { key: 'summary',  label: '總結',     icon: '📋', title: '每日節目總結報告（每集摘要 + 必看標記 + 持倉提醒）' },
   { key: 'mentions', label: '提及',     icon: '📺', title: '今日節目提及的股票 + N 日漲跌追蹤' },
   { key: 'teachers', label: '老師排行', icon: '🎓', title: '老師推薦績效排行榜（誰講得準）' },
   { key: 'health',   label: '抓取狀態', icon: '🩺', title: 'YouTube 來源抓取／掃描健康狀態' },
 ];
 
 export function YoutubePanel({ date, onDateChange, onSelectStock, selectedCode }: Props) {
-  const [sub, setSub] = useState<SubTab>('mentions');
+  const [sub, setSub] = useState<SubTab>('summary');
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -61,6 +64,14 @@ export function YoutubePanel({ date, onDateChange, onSelectStock, selectedCode }
 
       {/* 子分頁內容 */}
       <div className="flex-1 min-h-0">
+        {sub === 'summary' && (
+          <YoutubeDailySummary
+            date={date}
+            onDateChange={onDateChange}
+            onSelectStock={onSelectStock}
+            selectedCode={selectedCode}
+          />
+        )}
         {sub === 'mentions' && (
           <YoutubeStocksPanel
             date={date}
