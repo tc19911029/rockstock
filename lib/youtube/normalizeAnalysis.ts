@@ -97,6 +97,8 @@ function normalizeMentionFields(m: AnalyzedStockMention, where: string): string[
  *  的 ALIAS_MAP(避免「鑑定/盟力/超風」等通用詞污染代號查詢)。新發現補這裡。 */
 const WHISPER_HOMONYMS: Record<string, string[]> = {
   '3006': ['金豪科', '金豪可', '金豪客'],   // 晶豪科
+  '1304': ['台劇'],            // 台聚（「台劇集團」= 台聚集團，2026-07-02 理財達人秀實例）
+  '1308': ['雅劇'],            // 亞聚
   '6770': ['立基電', '立基墊', '立機店', '利機店'], // 力積電
   '3624': ['光潔'],            // 光頡
   '3131': ['紅塑'],            // 弘塑
