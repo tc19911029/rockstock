@@ -94,7 +94,7 @@ interface TencentResponse {
  * EM f6 成交額 110 億 ÷ 收盤 140.31 可交叉驗證）、600519 回 34,268（手）。
  * → 科創不 ×100，其餘 ×100 轉股對齊 L1。code 為騰訊格式（sh688981）。
  */
-function tencentVolumeMultiplier(code: string, isCN: boolean): number {
+export function tencentVolumeMultiplier(code: string, isCN: boolean): number {
   if (!isCN) return 1;
   return /^sh68[89]/.test(code) ? 1 : 100;
 }
