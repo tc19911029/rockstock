@@ -18,6 +18,7 @@ import type { StockMasterFile } from './stockMaster';
 import type { DimensionResult, MacroData, StockDataBundle } from './stockDataLoader';
 import type { KeyframeRecord } from './keyframeStorage';
 import { selectTopImages, transcriptWindow } from './keyframeScreen';
+import { findPhoneticHits, estimateCueTime, chineseCore } from './phoneticMatch';
 
 export const QUESTION_DIR = path.join(tmpdir(), 'rockstock-youtube');
 
@@ -70,6 +71,16 @@ export interface QuestionVideo {
     in_payload: number;
     with_image: number;
   };
+  /**
+   * 拼音同音嫌疑（程式產）：keyframe hit_codes 中「股名字面不在逐字稿」的代號，
+   * 用拼音掃全逐字稿找到的疑似 Whisper 誤植段落（台聚→「台劇」這類）。
+   * 有此欄 = 語音很可能有實質討論，必須讀 context 判斷，不可未讀就標 slide-only。
+   */
+  phonetic_suspects?: Array<{
+    code: string;
+    name: string;
+    forms: Array<{ form: string; count: number; approx_time: number | null; context: string }>;
+  }>;
 }
 
 export interface QuestionPayload {
@@ -161,6 +172,11 @@ const INSTRUCTIONS = `你是台灣股市分析師。下面 payload 是今天 You
      若 window 內老師有講到同檔股票 → source_type='speech+slide'
    - image_path 非 null 的幀可用 Read 工具看圖（OCR 不確定/表格亂掉才看）；
      ⚠ 全部影片合計最多 Read 15 張圖，先挑 hit_codes 多且 novel 的
+   - videos[].phonetic_suspects（程式產）：畫面有代號但股名字面不在逐字稿時，
+     程式已用拼音把疑似 Whisper 同音誤植的段落找出來（例：台聚→逐字稿寫成「台劇」）。
+     每筆 forms[].context 都必須讀：真的在討論該股 → source_type='speech+slide'、
+     sentiment/信心照 speech 給、context 引用該段（註明同音校正）；只是同音常用詞
+     （如 中纖 vs 中線）→ 維持 slide。不可未讀 context 就當 slide-only 只介紹。
 
 3. 跨節目找共識：
    - high_consensus_stocks：≥2 個節目同向提到的股票（bullish 共識或 bearish 共識）
@@ -219,6 +235,7 @@ export function buildQuestion(input: BuildQuestionInput): QuestionPayload {
   }
 
   // keyframes：top-N 圖片跨影片全域挑選（每影片 5、全日 40），OCR 文字每影片 ≤30 幀
+  const masterByCode = new Map(input.master.entries.map(e => [e.code, e]));
   if (input.keyframes && input.keyframes.size > 0) {
     const selectable = videosWithTranscript.flatMap(v => {
       const rec = input.keyframes!.get(v.video_id);
@@ -251,6 +268,32 @@ export function buildQuestion(input: BuildQuestionInput): QuestionPayload {
         in_payload: v.keyframes.length,
         with_image: v.keyframes.filter(k => k.image_path != null).length,
       };
+
+      // 拼音同音嫌疑：OCR 有代號但股名字面不在逐字稿 → 掃同音誤植段落
+      // （2026-07-02 台聚→「台劇」教訓：語音有整段討論但字面 grep 查無，被降成 slide-only）
+      const allHitCodes = new Set(rec.frames.flatMap(fr => fr.hit_codes));
+      const suspects: NonNullable<QuestionVideo['phonetic_suspects']> = [];
+      for (const code of allHitCodes) {
+        const entry = masterByCode.get(code);
+        if (!entry) continue;
+        const nameForms = [entry.name, ...(entry.aliases ?? [])]
+          .map(chineseCore)
+          .filter(s => s.length >= 2);
+        if (nameForms.some(nf => v.transcript_text.includes(nf))) continue;
+        const hits = findPhoneticHits(entry.name, v.transcript_text);
+        if (hits.length === 0) continue;
+        suspects.push({
+          code,
+          name: entry.name,
+          forms: hits.map(h => ({
+            form: h.form,
+            count: h.count,
+            approx_time: estimateCueTime(cues, h.first_index),
+            context: h.context,
+          })),
+        });
+      }
+      if (suspects.length > 0) v.phonetic_suspects = suspects;
     }
   }
 

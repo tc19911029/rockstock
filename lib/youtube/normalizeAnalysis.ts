@@ -22,6 +22,7 @@ import type {
   RecommendationType, MentionSourceType,
 } from './analysisStorage';
 import { lookupStock, type StockMasterFile } from './stockMaster';
+import { findPhoneticHits } from './phoneticMatch';
 
 // ── keyframe 欄位枚舉（2026-06-12 新欄；合約 youtube-analysis-keyframe-fields 把關）────
 const VALID_RECO = new Set<string>(['明確買進', '看多', '觀察', '等回檔', '小心追高', '偏空', '只介紹']);
@@ -97,8 +98,9 @@ function normalizeMentionFields(m: AnalyzedStockMention, where: string): string[
  *  的 ALIAS_MAP(避免「鑑定/盟力/超風」等通用詞污染代號查詢)。新發現補這裡。 */
 const WHISPER_HOMONYMS: Record<string, string[]> = {
   '3006': ['金豪科', '金豪可', '金豪客'],   // 晶豪科
-  '1304': ['台劇'],            // 台聚（「台劇集團」= 台聚集團，2026-07-02 理財達人秀實例）
-  '1308': ['雅劇'],            // 亞聚
+  '1304': ['台劇', '臺巨', '台巨'], // 台聚（「台劇集團」= 台聚集團，2026-07-02 理財達人秀/錢線實例）
+  '1308': ['雅劇', '雅巨'],    // 亞聚
+  '2408': ['藍牙坑'],          // 南亞科（n/l 聲母混淆，拼音比對蓋不到 → 必須靜態列）
   '6770': ['立基電', '立基墊', '立機店', '利機店'], // 力積電
   '3624': ['光潔'],            // 光頡
   '3131': ['紅塑'],            // 弘塑
@@ -208,6 +210,14 @@ function ground(
   for (const [vid, text] of Object.entries(transcriptsByVideo)) {
     const hit = forms.find(f => text.includes(f));
     if (hit) { foundIn.push(vid); matchedForm ??= hit; }
+  }
+  if (foundIn.length > 0) return { foundIn, matchedForm };
+
+  // 字面/已知同音全查無 → 拼音退路：掃 Whisper 未知同音誤植（台聚→「台劇」這類），
+  // 找到就不誤標 ungrounded（matchedForm 註記「音似」供人判）。
+  for (const [vid, text] of Object.entries(transcriptsByVideo)) {
+    const hits = findPhoneticHits(name, text, { maxForms: 1 });
+    if (hits.length > 0) { foundIn.push(vid); matchedForm ??= `${hits[0].form}(音似)`; }
   }
   return { foundIn, matchedForm };
 }
