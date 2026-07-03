@@ -64,12 +64,24 @@ jest.mock('@/lib/scanner/TurnoverRank', () => ({
 // 在 mock 宣告之後 import（ts-jest commonjs）
 import { SANSE_TURNOVER_TOP_N, topTurnoverRanks } from '@/lib/cn-sanse/scan';
 import { scanSanSe } from '@/lib/cn-sanse/scan';
+// universeTopN 是純常數模組（刻意不住在被 mock 的 TurnoverRank 裡）→ 這裡拿到真值
+import { TURNOVER_INDEX_TOP_N, BOOK_UNIVERSE_TOP_N } from '@/lib/scanner/universeTopN';
 
 // ───────────── Part 1：純函式 + 常數 ─────────────
 describe('三色 universe 成交額粗篩 — 常數與純函式', () => {
   test('TOP_N 對齊書本買法：TW 500 / CN 800', () => {
     expect(SANSE_TURNOVER_TOP_N.TW).toBe(500);
     expect(SANSE_TURNOVER_TOP_N.CN).toBe(800);
+  });
+
+  // 2026-07-03 修正鎖死：索引收錄深度必須涵蓋所有消費者。曾因建索引呼叫端寫死 topN=500，
+  // CN 三色（設計 800）實際池只有 ~500 檔（600110.SS 底反成立但排 556 被索引擋掉）。
+  test('索引收錄深度 ≥ 三色池深 且 ≥ 書本池深（TW/CN）', () => {
+    (['TW', 'CN'] as const).forEach((m) => {
+      expect(TURNOVER_INDEX_TOP_N[m]).toBeGreaterThanOrEqual(SANSE_TURNOVER_TOP_N[m]);
+      expect(TURNOVER_INDEX_TOP_N[m]).toBeGreaterThanOrEqual(BOOK_UNIVERSE_TOP_N);
+    });
+    expect(BOOK_UNIVERSE_TOP_N).toBe(500); // 書本回測冠軍組合 top500，兩市場一致
   });
 
   test('不足 topN → 全收（不誤殺正常股），名次照成交額排', () => {

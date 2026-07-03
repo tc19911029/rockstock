@@ -122,9 +122,14 @@ export async function GET(req: NextRequest) {
     }
     let turnoverRanks: Map<string, number> | null = null;
     try {
+      const { BOOK_UNIVERSE_TOP_N } = await import('@/lib/scanner/universeTopN');
       const rank = await readTurnoverRank(market);
       if (rank && rank.symbols.size > 0) {
-        stocks = stocks.filter(s => rank.symbols.has(s.symbol));
+        // 書本池 = 名次 ≤ BOOK_UNIVERSE_TOP_N（CN 索引收錄 800 是給三色的，不可整份當池子）
+        stocks = stocks.filter(s => {
+          const r = rank.ranks.get(s.symbol);
+          return r != null && r <= BOOK_UNIVERSE_TOP_N;
+        });
         turnoverRanks = rank.ranks;
       }
     } catch { /* 不致命 */ }

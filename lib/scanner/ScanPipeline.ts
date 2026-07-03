@@ -13,6 +13,7 @@
 import type { ScanSession, MarketId, ScanDirection } from './types';
 import type { TaiwanScanner } from './TaiwanScanner';
 import type { ChinaScanner } from './ChinaScanner';
+import { BOOK_UNIVERSE_TOP_N, TURNOVER_INDEX_TOP_N } from './universeTopN';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -114,30 +115,41 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
     console.info(`[ScanPipeline] ${market} 歷史 top500 override: ${stocks.length}/${before} (asOfDate=${date})`);
   } else {
     // 標準路徑：前 N 成交額過濾 + 自動重建索引（回測冠軍組合：前 500 + MTF≥3 = +238%）
-    // 索引 stale 時自動重建（本地 fs / Vercel Blob 統一處理）
+    // 索引 stale 或深度不足（部署後 CN 500→800 升深自癒）時自動重建（本地 fs / Vercel Blob 統一處理）
     // Fail-closed: 索引讀/建失敗 → abort 掃描，不回退到「無過濾全掃」
     const { readTurnoverRank, buildTurnoverRank } = await import('./TurnoverRank');
+    const wantIndexTopN = TURNOVER_INDEX_TOP_N[market as 'TW' | 'CN'];
     let rank: Awaited<ReturnType<typeof readTurnoverRank>> = null;
     try {
       rank = await readTurnoverRank(market as 'TW' | 'CN');
-      const needsRebuild = !rank || rank.date < date;
+      const needsRebuild = !rank || rank.date < date || rank.topN < wantIndexTopN;
       if (needsRebuild) {
-        console.info(`[ScanPipeline] ${market} 索引 stale（have=${rank?.date ?? 'none'}, want=${date}）→ 自動重建`);
-        await buildTurnoverRank(market as 'TW' | 'CN', stocks, 500);
+        console.info(
+          `[ScanPipeline] ${market} 索引 stale（have=${rank?.date ?? 'none'}@top${rank?.topN ?? 0}, ` +
+          `want=${date}@top${wantIndexTopN}）→ 自動重建`,
+        );
+        await buildTurnoverRank(market as 'TW' | 'CN', stocks);
         rank = await readTurnoverRank(market as 'TW' | 'CN');
       }
     } catch (err) {
-      console.error(`[ScanPipeline] ${market} top500 索引讀/建失敗 → abort`, err);
-      throw new Error(`top500 索引失敗，掃描 abort (${market} ${date}): ${String(err)}`);
+      console.error(`[ScanPipeline] ${market} top${wantIndexTopN} 索引讀/建失敗 → abort`, err);
+      throw new Error(`top${wantIndexTopN} 索引失敗，掃描 abort (${market} ${date}): ${String(err)}`);
     }
     if (!rank || rank.symbols.size === 0) {
-      console.error(`[ScanPipeline] ${market} top500 索引空或 null → abort`);
-      throw new Error(`top500 索引空 (${market} ${date})`);
+      console.error(`[ScanPipeline] ${market} top${wantIndexTopN} 索引空或 null → abort`);
+      throw new Error(`top${wantIndexTopN} 索引空 (${market} ${date})`);
     }
+    // 書本池 = 名次 ≤ BOOK_UNIVERSE_TOP_N（不可用「索引成員身分」— CN 索引收錄 800 是給三色的）
     const before = stocks.length;
-    stocks = stocks.filter(s => rank!.symbols.has(s.symbol));
+    stocks = stocks.filter(s => {
+      const r = rank!.ranks.get(s.symbol);
+      return r != null && r <= BOOK_UNIVERSE_TOP_N;
+    });
     turnoverRanks = rank.ranks;
-    console.info(`[ScanPipeline] ${market} 前 ${rank.topN} 成交額過濾: ${stocks.length}/${before} (index=${rank.date})`);
+    console.info(
+      `[ScanPipeline] ${market} 前 ${Math.min(rank.topN, BOOK_UNIVERSE_TOP_N)} 成交額過濾: ` +
+      `${stocks.length}/${before} (index=${rank.date}@top${rank.topN})`,
+    );
   }
 
   // buyMethods 需要全量股票，在批次切片前先保存

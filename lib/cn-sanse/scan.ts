@@ -7,6 +7,7 @@ import { CN_STOCKS } from '@/lib/scanner/cnStocks';
 import { CN_STOCKS_GEM_STAR } from '@/lib/scanner/cnStocksGemStar';
 import { getLimitMovePct } from '@/lib/utils/limitRules';
 import { readTurnoverRank, computeTurnoverRankAsOfDate } from '@/lib/scanner/TurnoverRank';
+import { TURNOVER_INDEX_TOP_N } from '@/lib/scanner/universeTopN';
 import { computeSanSe, evalLatest, type SanSeLevel } from './selectors';
 import { evalConditions, isReversalBuy, type ConditionReport } from './conditions';
 import { computeIndicators } from '@/lib/indicators';
@@ -24,8 +25,11 @@ const MIN_BARS = 250;
  * 剔除冷門/薄量股、聚焦主流大量股。TW 500 / CN 800（與買法同一套數字、同一套精神）。
  * 三色雖是自創因子，但此粗篩純屬「流動性聚焦」、不涉及書本選股規則 → 不違反鐵則 #5。
  * （2026-06-11 曾短暫誤改 10000 全市場，同日依使用者澄清改回；zhuSix 六條件確認欄保留。）
+ *
+ * 單一事實 = lib/scanner/universeTopN.ts 的 TURNOVER_INDEX_TOP_N（索引收錄深度直接跟著
+ * 三色需求走；2026-07-03 前索引寫死 topN=500，CN 三色實際池只有 ~500 檔的 bug 由此修正）。
  */
-export const SANSE_TURNOVER_TOP_N: Record<'TW' | 'CN', number> = { TW: 500, CN: 800 };
+export const SANSE_TURNOVER_TOP_N: Record<'TW' | 'CN', number> = TURNOVER_INDEX_TOP_N;
 
 /**
  * 取成交額（close×volume）前 topN：回傳 symbol → 名次（1-based，1 = 當日成交額最大）。

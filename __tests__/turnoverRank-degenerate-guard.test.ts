@@ -120,4 +120,21 @@ describe('TurnoverRank 退化守衛', () => {
     await buildTurnoverRank('CN', symbols({ '.SS': 150, '.SZ': 150 }), 500);
     expect(mockAtomicFsPut).toHaveBeenCalledTimes(1);
   });
+
+  // 2026-07-03 修正：索引深度按市場分（TW 500 / CN 800）。CN 曾被呼叫端寫死 500，
+  // 導致三色（設計 800）實際池只有 ~500 檔（600110.SS 排 556 被擋）。
+  test('不帶 topN → 深度按市場：CN 寫 top800', async () => {
+    await buildTurnoverRank('CN', symbols({ '.SS': 500, '.SZ': 500 }));
+    const written = JSON.parse(mockAtomicFsPut.mock.calls[0][1] as string);
+    expect(written.topN).toBe(800);
+    expect(written.symbols.length).toBe(800);
+  });
+
+  test('不帶 topN → 深度按市場：TW 寫 top500', async () => {
+    // fixture 成交額全等 → 穩定排序保留清單順序；.TWO 排前面才不會掉出 top500 觸發退化守衛
+    await buildTurnoverRank('TW', symbols({ '.TWO': 100, '.TW': 500 }));
+    const written = JSON.parse(mockAtomicFsPut.mock.calls[0][1] as string);
+    expect(written.topN).toBe(500);
+    expect(written.symbols.length).toBe(500);
+  });
 });

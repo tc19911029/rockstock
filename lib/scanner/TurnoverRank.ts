@@ -18,6 +18,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { TW_UNIVERSE_MIN_PRICE } from '@/lib/analysis/bookThresholds';
+import { TURNOVER_INDEX_TOP_N } from './universeTopN';
 
 const IS_VERCEL = process.env.VERCEL === '1';
 const INDEX_DIR = path.join(process.cwd(), 'data', 'turnover-rank');
@@ -135,13 +136,14 @@ export interface TurnoverRankIndex {
  *
  * @param market   市場
  * @param stocks   候選股票清單（通常由 scanner.getStockList() 取得）
- * @param topN     前 N 名（預設 500）
+ * @param topN     前 N 名（預設 TURNOVER_INDEX_TOP_N[market]：TW 500 / CN 800。
+ *                 CN 索引比書本池深是給三色用；書本鏈路以名次 ≤ BOOK_UNIVERSE_TOP_N 截取）
  * @param timezone 用於決定索引檔日期，預設由 market 推導
  */
 export async function buildTurnoverRank(
   market: 'TW' | 'CN',
   stocks: { symbol: string }[],
-  topN: number = 500,
+  topN: number = TURNOVER_INDEX_TOP_N[market],
 ): Promise<TurnoverRankIndex> {
   const rankings: { symbol: string; avgTurnover: number }[] = [];
 
