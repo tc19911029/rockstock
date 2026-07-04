@@ -136,6 +136,26 @@ export const bearishPiercingHigh: TradingRule = {
     // 需在高檔
     if (!isUptrendWave(candles, index - 1, 8)) return null;
 
+    // 2026-07-04 修（兆易创新 603986 6/23 誤殺案例）：書本貫穿的完整幾何=「開高走低、一路向下」。
+    // 黑K「開低」（開在昨日紅K實體內）且只小幅刺穿紅K開盤（<1%）＝實體幾乎被昨日紅K包住，
+    // 屬「類母子」變盤而非貫穿 — CH2 鐵律：變盤線要看次日開盤確認，不可立即出場。
+    // （該案例：開 680 < 昨收 689.7、收 640.99 僅刺穿昨開 643 的 0.3%，次日開平走高 +10%。）
+    const openedHigh = black.open >= red.close * 0.99; // 開在昨收附近或以上（⚠️ 0.99 自創容差）
+    const pierceDepth = red.open > 0 ? (red.open - black.close) / red.open : 0;
+    if (!openedHigh && pierceDepth < 0.01) {
+      return {
+        type: 'WATCH',
+        label: '高檔黑K變盤（類母子，次日確認）',
+        description: `黑K開低（${black.open.toFixed(2)} < 昨收 ${red.close.toFixed(2)}）收 ${black.close.toFixed(2)}，僅小幅刺穿昨紅K開盤 ${red.open.toFixed(2)}（${(pierceDepth * 100).toFixed(1)}%）— 變盤未確認`,
+        reason: [
+          '【朱家泓 CH2 次日確認鐵律】黑K實體幾乎被昨日紅K包住＝類母子懷抱變盤，不是「一路向下貫穿」。',
+          '次日開盤位置很重要：開高（不破今日低）容易向上反轉續攻，開低或跌破今日最低＝空方確認才出場。',
+          '明日開低或收盤跌破今日低點 → 執行出場；明日開高走高 → 續抱。',
+        ].join('\n'),
+        ruleId: this.id,
+      };
+    }
+
     return {
       type: 'SELL',
       label: '高檔長黑貫穿',
