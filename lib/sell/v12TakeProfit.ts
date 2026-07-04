@@ -149,14 +149,17 @@ export interface KBarSignalResult {
 }
 
 /**
- * 課程 CH9-3(二)(三) 訊號日幾何+量能判定（純函式，訊號日/次日共用）：
- *   bar 為「高檔爆大量長黑吞噬 prev」或「爆大量長上影」，且收盤未跌破 prev 低點。
+ * 課程 CH9-3(二)(三)/CH8-3(6) 訊號日幾何+量能判定（純函式，訊號日/次日共用）：
+ *   bar 為「高檔爆大量長黑吞噬 prev」「爆大量長上影」或「爆大量長黑（非吞噬）」，
+ *   且收盤未跌破 prev 低點。
  * 爆量口徑：avgVol5 ×1.5（與 sellSignals 爆量家族同口徑）；avgVol5 缺值退 prev 量比 ×1.5。
+ * 2026-07-05 補 'long-black'：CH8-3(6)「高檔爆量長黑或爆量長上影 → 當日停利1/2、
+ * 次日下跌全部停利」的長黑（非吞噬幾何）之前斷鏈。
  */
 function isCh9BlowoffReversalBar(
   bar: CandleWithIndicators,
   prev: CandleWithIndicators,
-): { kind: 'engulf' | 'upper-shadow' } | null {
+): { kind: 'engulf' | 'upper-shadow' | 'long-black' } | null {
   if (bar.close < prev.low) return null; // 已破前日低 → 走既有整批出場訊號，不屬本分支
   const volRatio = bar.avgVol5 != null && bar.avgVol5 > 0
     ? bar.volume / bar.avgVol5
@@ -172,8 +175,18 @@ function isCh9BlowoffReversalBar(
   if (fullLen > 0 && upperShadow / fullLen > 0.5) {
     return { kind: 'upper-shadow' };
   }
+  // 爆量長黑（非吞噬）：實體 ≥2% 收黑
+  if (bar.close < bar.open && bar.open > 0 && (bar.open - bar.close) / bar.open >= 0.02) {
+    return { kind: 'long-black' };
+  }
   return null;
 }
+
+const CH9_KIND_LABEL: Record<'engulf' | 'upper-shadow' | 'long-black', string> = {
+  'engulf': '長黑吞噬',
+  'upper-shadow': '長上影',
+  'long-black': '爆量長黑',
+};
 
 /**
  * Step 5 ③ K 棒訊號偵測
@@ -199,18 +212,21 @@ export function detectKBarExitSignal(inputs: KBarSignalInputs): KBarSignalResult
   // 條件比下方通用吞噬/長上影分支更特定（加 爆量 + 未破昨低 + >15%），先判。
   // advisory 非強制出場（triggered:false），跨日免持久化：次日用 yesterday/twoDaysAgo 重算（path-independent）。
   //
-  // 訊號日：今日爆量吞噬/長上影、未破昨低、獲利 > 15% → 先停利 1/2
+  // 訊號日：今日爆量長上影/爆量長黑（非吞噬）、未破昨低、獲利 > 15% → 先停利 1/2
+  // 2026-07-05 忠實度修：**吞噬不走 1/2** — 課程口徑「長黑吞噬當天全部停利」（CH8-3 講義
+  // ＋CH9-3 口述「主力今天跑光光，你不用再等明天」），讓吞噬 fall through 到下方
+  // bearish-engulfing 分支照舊 triggered:true 全出，不再被 advisory 攔截弱化。
   const ch9Today = isCh9BlowoffReversalBar(todayCandle, yesterdayCandle);
-  if (ch9Today && cumulativeProfit > PROFIT_PARTIAL_TP_PCT) {
+  if (ch9Today && ch9Today.kind !== 'engulf' && cumulativeProfit > PROFIT_PARTIAL_TP_PCT) {
     return {
       triggered: false,
       signalType: 'ch9-blowoff-reversal',
       advisory: 'partial-tp-half',
       sellFraction: 0.5,
-      detail: `③ 課程 CH9-3：高檔爆大量${ch9Today.kind === 'engulf' ? '長黑吞噬' : '長上影'}未破昨低、獲利 ${(cumulativeProfit * 100).toFixed(1)}% > 15% → 先停利 1/2，明日下跌全數賣出`,
+      detail: `③ 課程 CH9-3/CH8-3(6)：高檔爆大量${CH9_KIND_LABEL[ch9Today.kind]}未破昨低、獲利 ${(cumulativeProfit * 100).toFixed(1)}% > 15% → 先停利 1/2，明日下跌全數賣出`,
     };
   }
-  // 次日：昨日為訊號日（重算）且今日下跌 → 剩餘全出
+  // 次日：昨日為訊號日（重算）且今日下跌 → 剩餘全出（含吞噬：若昨日沒出，今日補全出）
   if (twoDaysAgoCandle) {
     const ch9Yesterday = isCh9BlowoffReversalBar(yesterdayCandle, twoDaysAgoCandle);
     const profitAtSignal = yesterdayCumulativeProfit ?? cumulativeProfit;
@@ -220,7 +236,7 @@ export function detectKBarExitSignal(inputs: KBarSignalInputs): KBarSignalResult
         signalType: 'ch9-blowoff-reversal',
         advisory: 'exit-remaining',
         sellFraction: 1,
-        detail: `③ 課程 CH9-3：昨日爆量${ch9Yesterday.kind === 'engulf' ? '長黑吞噬' : '長上影'}(獲利>15% 停利1/2)，今日下跌（${todayCandle.close.toFixed(2)} < ${yesterdayCandle.close.toFixed(2)}）→ 剩餘全數賣出`,
+        detail: `③ 課程 CH9-3：昨日爆量${CH9_KIND_LABEL[ch9Yesterday.kind]}(獲利>15% 應已停利)，今日下跌（${todayCandle.close.toFixed(2)} < ${yesterdayCandle.close.toFixed(2)}）→ 剩餘全數賣出`,
       };
     }
   }

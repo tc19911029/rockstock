@@ -359,6 +359,12 @@ function ProfitTargetsBlock({ candles, index }: { candles: CandleWithIndicators[
           <span className="ml-1 text-muted-foreground">{open ? '▾' : '▸'}</span>
         </span>
       </button>
+      {/* 課程 9-2 唯一的判斷式：獲利空間 ≥10% 才進場；只有 3~5% 這筆不做（2026-07-05 補） */}
+      {upPct != null && Number(upPct) < 10 && (
+        <div className="mt-1 text-[10px] px-2 py-1 rounded bg-rose-900/30 text-rose-300">
+          ⚠️ 課程 9-2：距最近壓力僅 +{upPct}%，獲利空間不足 10% — 這筆不建議進場（扣掉停損 5% 划不來）
+        </div>
+      )}
       {open && (
         <div className="mt-1.5 space-y-2">
           {([['短線（日線）', short.targets], ...(long ? [['長線（週線）', long.targets] as const] : [])] as Array<readonly [string, typeof short.targets]>).map(([title, targets]) => (

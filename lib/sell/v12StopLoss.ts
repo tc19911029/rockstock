@@ -125,11 +125,17 @@ export const SIGNAL_TO_FIXED_STOP_PCT: Record<V12Letter, number> = {
  * 進場紅 K 漲幅：
  * - 2% ~ 2.5%：紅 K 最低 - 2 ticks（放寬 2 碼）
  * - 2.5% ~ 5%：紅 K 最低（含下影線）
- * - ≥ 5%：紅 K 1/2 位置
+ * - ≥ 5% 且「高檔＋大量」：紅 K 1/2 位置（嚴控特例）
+ *
+ * 2026-07-05 忠實度修：書本「守 1/2」只出現在「**高檔大量長紅**」特例
+ *（課程 CH7-2 主句是「守進場當天 K 線最低點」）。之前 ≥5% 無差別守 1/2，
+ * 低檔盤整突破的大紅 K 停損被抬到 -3% 附近、比課程緊一倍 → 系統性誤殺。
+ * 現在 ≥5% 預設守最低點，只有 highLevelBlowoff=true（高檔+爆量）才守 1/2。
  */
 export function calcKLineStopLoss(
   entryKbar: { open: number; close: number; low: number; high: number },
   tickSize: number,
+  opts?: { highLevelBlowoff?: boolean },
 ): number {
   const bodyPct = ((entryKbar.close - entryKbar.open) / entryKbar.open) * 100;
   const half = (entryKbar.open + entryKbar.close) / 2;
@@ -138,12 +144,12 @@ export function calcKLineStopLoss(
     // 弱紅 K：放寬 2 ticks
     return entryKbar.low - tickSize * 2;
   }
-  if (bodyPct < 5) {
-    // 中紅 K：守紅 K 最低
-    return entryKbar.low;
+  if (bodyPct >= 5 && opts?.highLevelBlowoff) {
+    // 強紅 K（≥ 5%）且高檔大量：守 1/2 位置（書本嚴控特例）
+    return half;
   }
-  // 強紅 K（≥ 5%）：守 1/2 位置
-  return half;
+  // 一般：守紅 K 最低（課程 CH7-2 主句）
+  return entryKbar.low;
 }
 
 // ── 主停損計算（議題 S3-1 單一主方法）────────────────────────────────────
@@ -161,6 +167,8 @@ export interface StopLossInputs {
   isEndPhase?: boolean;
   /** 議題 S3-3 trailing stop 用：持倉中觀察到的最高 close */
   recentHigh?: number;
+  /** 2026-07-05：進場K是否「高檔＋大量」（決定 ≥5% 強紅K 是否守 1/2 嚴控特例）*/
+  highLevelBlowoff?: boolean;
 }
 
 export interface StopLossResult {
@@ -200,7 +208,7 @@ export function calculateInitialStopLoss(inputs: StopLossInputs): StopLossResult
         primarySL = inputs.triggerKLow;
         detail = `L 黑 K low: ${primarySL.toFixed(2)}`;
       } else {
-        primarySL = calcKLineStopLoss(entryKbar, tickSize);
+        primarySL = calcKLineStopLoss(entryKbar, tickSize, { highLevelBlowoff: inputs.highLevelBlowoff });
         detail = `① K 線三段式: ${primarySL.toFixed(2)}`;
       }
       break;
@@ -278,8 +286,12 @@ export function updateStopLossDaily(
   }
 
   // ── 跟隨均線上揚（③ 移動停損）──
+  // 2026-07-05 忠實度修：課程 CH7-3「獲利已達 7% 以上……才放棄原停損改設停利（均線跟隨）」。
+  // 之前無獲利門檻，進場第 2-3 天獲利 0-2% 就把停損抬到均線 → 停損變「跌破 MA5 就觸發」，
+  // 與 checkMAExit（<10% 續抱）自相矛盾。現在獲利 ≥7% 才啟動均線跟隨。
   const trailingMA = SIGNAL_TO_TRAILING_MA[letter];
-  if (trailingMA) {
+  const profitForTrailing = entryPrice > 0 ? (today.close - entryPrice) / entryPrice : 0;
+  if (trailingMA && profitForTrailing >= 0.07) {
     const maValue = today[trailingMA.toLowerCase() as 'ma5' | 'ma10' | 'ma20' | 'ma3'];
     if (maValue != null && maValue > initial.stopLossPrice) {
       return {
@@ -362,16 +374,17 @@ export function checkAbsoluteStopLoss(inputs: AbsoluteStopLossInputs): AbsoluteS
     };
   }
 
-  // ⑥-2：個股 detectTrend 翻空頭（昨日非空頭、今日空頭）
-  if (
-    trendStateToday === '空頭' &&
-    trendStateYesterday != null &&
-    trendStateYesterday !== '空頭'
-  ) {
+  // ⑥-2：個股 detectTrend 翻空頭
+  // 2026-07-05 忠實度修：課程 CH7-2 絕對停損 2「一旦再破前低變空頭，就一定要停損」是**狀態**
+  // 不是單日事件。舊寫法「昨日非空頭、今日空頭」錯過翻空當天（假日/沒開頁）之後就永不觸發。
+  // 改成狀態判定：今日空頭即觸發（持倉本來就不該抱空頭股，重複提示無害）。
+  if (trendStateToday === '空頭') {
     return {
       triggered: true,
       reason: 'trend-flipped-down',
-      detail: '⑥-2 多頭翻空頭確認',
+      detail: trendStateYesterday != null && trendStateYesterday !== '空頭'
+        ? '⑥-2 多頭翻空頭確認（今日翻空）'
+        : '⑥-2 個股空頭狀態（絕對停損：多單不抱空頭股）',
     };
   }
 

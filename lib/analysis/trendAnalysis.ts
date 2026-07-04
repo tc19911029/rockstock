@@ -421,14 +421,17 @@ function hasConsecLongRed(candles: CandleWithIndicators[], index: number, n = 3)
   return true;
 }
 
-/** 高檔異常爆天量 + 長黑 K（p.50 情境①） */
+/** 高檔異常爆天量 + 長黑 K（p.50 情境①）
+ *  2026-07-05 忠實度修：課程 CH4-7 原文「量比前一天多 **2 到 5 倍以上**」— 舊版寫死 ×3，
+ *  2~3 倍的爆天量黑K（課程已該警覺）全漏。門檻降到 ×2 對齊課程下緣。
+ *  （消費端=detectTrendPosition 末升段合議 ≥2 訊號，非單獨 gate。） */
 function hasBlowoffBlackReversal(candles: CandleWithIndicators[], index: number): boolean {
   const c = candles[index];
   const prev = candles[index - 1];
   if (!c || !prev) return false;
-  // 今日量 ≥ 前日量 × 3
+  // 今日量 ≥ 前日量 × 2（課程 2~5 倍區間下緣）
   if (prev.volume <= 0) return false;
-  if (c.volume < prev.volume * 3) return false;
+  if (c.volume < prev.volume * 2) return false;
   // 今日是長黑 K（實體 ≥ 2%）
   const body = c.open > 0 ? Math.abs(c.close - c.open) / c.open : 0;
   const isLongBlack = c.close < c.open && body >= 0.02;
@@ -629,10 +632,18 @@ export function evaluateSixConditions(
     warnings.push(`⚠️ MA20乖離${(ma20Dev*100).toFixed(1)}%追高警示(書p.568)`);
   }
   // 量價背離（書本 p.500-506）
+  // 2026-07-05 忠實度修（CH4-5）：課程明講「**行進間**的價漲量縮＝惜售，是很好的、後面
+  // 還有高點」，只有**高檔**的價漲量縮才是背離警訊 — 加高檔 gate（乖離 >5% 或已漲一倍），
+  // 行進間改標良性惜售（資訊性，不帶 ⚠️）。
   const div = detectVolumePriceDivergence(candles, index);
-  if (div.priceUpVolDown) warnings.push('⚠️ 價漲量縮背離(書p.500)');
+  const divHighGate = (ma20Dev !== null && ma20Dev > 0.05)
+    || detectHighPeakVolume(candles, index).positionLabel === 'doubled';
+  if (div.priceUpVolDown) {
+    if (divHighGate) warnings.push('⚠️ 高檔價漲量縮背離(書p.500)');
+    else warnings.push('ℹ️ 行進間量縮惜售(良性,課程CH4-5:後面還有高點)');
+  }
   if (div.pricePlatVolUp) warnings.push('⚠️ 價平量增停滯(書p.502)');
-  if (div.priceUpVolPlat) warnings.push('⚠️ 價漲量平止漲(書p.505)');
+  if (div.priceUpVolPlat) warnings.push('⚠️ 價漲量平止漲(書p.505,出黑K才確認;出大量紅K過高反轉強)');
   // 高檔爆量 3 種判定（書本 p.493-499）+ 出貨分級語意（賠少-8 / 小修-4，純避雷顯示）
   const hpv = detectHighPeakVolume(candles, index);
   if (hpv.distributionVolume) warnings.push('⚠️ 高檔出貨量(書p.498)');

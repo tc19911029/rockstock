@@ -26,10 +26,15 @@ describe('v12 Step 3 — calcKLineStopLoss', () => {
     expect(result).toBe(98);
   });
 
-  it('強紅 K (≥5%) → 守 1/2 位置', () => {
-    // open 100, close 110 (body 10%) → 強紅 K
-    const result = calcKLineStopLoss({ open: 100, high: 112, low: 99, close: 110 }, 0.05);
+  it('強紅 K (≥5%) + 高檔大量 → 守 1/2 位置（書本嚴控特例）', () => {
+    // open 100, close 110 (body 10%) → 強紅 K；2026-07-05 忠實度修：要高檔+大量才守 1/2
+    const result = calcKLineStopLoss({ open: 100, high: 112, low: 99, close: 110 }, 0.05, { highLevelBlowoff: true });
     expect(result).toBe(105); // (100+110)/2
+  });
+
+  it('強紅 K (≥5%) 但非高檔大量 → 守紅 K low（課程 CH7-2 主句）', () => {
+    const result = calcKLineStopLoss({ open: 100, high: 112, low: 99, close: 110 }, 0.05);
+    expect(result).toBe(99); // 低檔盤整突破大紅K不再被抬到 1/2 誤殺
   });
 });
 
@@ -126,13 +131,13 @@ describe('v12 Step 4 — checkMAExit B/P 寶典 #5/#6', () => {
   it('B <10% 跌破 MA5 → 續抱（寶典 #5）', () => {
     const r = checkMAExit(98, 100, 'B', 95);  // close=98 < MA5=100, 獲利 (98-95)/95 = 3.16%
     expect(r.shouldExit).toBe(false);
-    expect(r.reason).toContain('B/P');
+    expect(r.reason).toContain('進階紀律');
   });
   it('B ≥10% 跌破 MA5 → 停利（寶典 #6）', () => {
     const r = checkMAExit(108, 110, 'B', 95);  // close=108 < MA5=110, 獲利 13.7%
     expect(r.shouldExit).toBe(true);
     // 0513 ABCDE D：技術代號 (Step 5 ①) 已翻人話 (B/P 進階紀律 #6)
-    expect(r.reason).toContain('B/P 進階紀律 #6');
+    expect(r.reason).toContain('進階紀律 #6');
   });
   it('其他訊號跌破 MA → 直接出場（不適用 #5/#6）', () => {
     const r = checkMAExit(95, 100, 'C', 90);

@@ -56,15 +56,29 @@ describe('evaluateHolding', () => {
     expect(r.signals.some(s => s.type === 'break_ma20_long')).toBe(true);
   });
 
-  it('跌破 MA5 + 漲幅 ≥ 10% (但 MA10 不破) → reduce_half', () => {
+  it('跌破 MA5 + 漲幅 10~20% (但 MA10 不破) → reduce_half', () => {
+    const closes = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+                    100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+                    100, 100, 100, 100, 105, 110, 115, 120, 125, 130];
+    closes.push(120);
+    const candles = makeCandles(closes);
+    // 2026-07-05：entry 107 → 獲利 12.1%（<20%），走 reduce_half；≥20% 由下一條測全出
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 107, stopLoss: 95, candles, todayClose: 120 });
+    expect(r.action).toBe('reduce_half');
+    expect(r.signals.some(s => s.type === 'break_ma5_short')).toBe(true);
+  });
+
+  // 課程 CH8-4/8-5（2026-07-05 忠實度修）：賺 >20% 收盤跌破 MA5 → 全部停利
+  it('賺 ≥20% + 跌破 MA5 → exit_all（break_ma5_high_profit）', () => {
     const closes = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
                     100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
                     100, 100, 100, 100, 105, 110, 115, 120, 125, 130];
     closes.push(120);
     const candles = makeCandles(closes);
     const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 95, candles, todayClose: 120 });
-    expect(r.action).toBe('reduce_half');
-    expect(r.signals.some(s => s.type === 'break_ma5_short')).toBe(true);
+    expect(r.profitPct).toBeGreaterThanOrEqual(0.20);
+    expect(r.action).toBe('exit_all');
+    expect(r.signals.some(s => s.type === 'break_ma5_high_profit')).toBe(true);
   });
 
   it('距停損 < 3% → watch_stop', () => {

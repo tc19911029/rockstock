@@ -93,10 +93,12 @@ export const granvilleBuy1: TradingRule = {
 };
 
 /** 買入法則2: 價格跌破上升中的均線後迅速反彈站回 */
+// 2026-07-05 忠實度修：課程 3-6 編號 — ②=回測支撐（回而不破）、③=助漲（跌破後站回）。
+// 本規則邏輯是「跌破後站回」＝課程**買點③**；舊標籤誤標②。id 保留不改（避免破壞既有引用）。
 export const granvilleBuy2: TradingRule = {
   id: 'granville-buy-2',
-  name: '葛蘭碧②：跌破上升均線後站回',
-  description: '價格跌破上升中的MA20後，迅速站回均線之上',
+  name: '葛蘭碧③：跌破上升均線後站回（助漲）',
+  description: '價格跌破上升中的MA20後，迅速站回均線之上（課程買點③）',
   evaluate(candles, index): RuleSignal | null {
     if (index < 3) return null;
     const c = candles[index];
@@ -118,10 +120,10 @@ export const granvilleBuy2: TradingRule = {
 
     return {
       type: 'BUY',
-      label: '葛蘭碧②買入',
+      label: '葛蘭碧③買入（助漲）',
       description: `價格跌破上升中MA20後迅速站回(${c.close} > MA20=${c.ma20.toFixed(1)})`,
       reason: [
-        '【葛蘭碧法則②】價格短暫跌破上升中的均線後迅速站回，是「回測支撐成功」的訊號。',
+        '【葛蘭碧法則③（課程 3-6：助漲買點）】價格短暫跌破上升中的均線後迅速回漲站回均線上方。',
         '【原理】上升中的均線有強支撐力，短暫跌破只是洗盤，快速站回代表多方仍然強勢。',
         '【操作建議】這是加碼好時機。若再次跌破且無法站回則停損。',
       ].join('\n'),
@@ -130,11 +132,12 @@ export const granvilleBuy2: TradingRule = {
   },
 };
 
-/** 買入法則3: 價格在均線上方回跌但未跌破均線又上漲 */
+/** 課程買點②：價格在均線上方回跌但未跌破均線又上漲（回測支撐）
+ *  2026-07-05 忠實度修：此邏輯＝課程**買點②**（支撐買點）；舊標籤誤標③。id 保留不改。 */
 export const granvilleBuy3: TradingRule = {
   id: 'granville-buy-3',
-  name: '葛蘭碧③：均線上方回而不破',
-  description: '上升趨勢中價格回跌靠近MA20但未跌破，再度上漲',
+  name: '葛蘭碧②：均線上方回而不破（支撐）',
+  description: '上升趨勢中價格回跌靠近MA20但未跌破，再度上漲（課程買點②）',
   evaluate(candles, index): RuleSignal | null {
     if (index < 5) return null;
     const c = candles[index];
@@ -172,10 +175,10 @@ export const granvilleBuy3: TradingRule = {
 
     return {
       type: 'BUY',
-      label: '葛蘭碧③加碼',
+      label: '葛蘭碧②加碼（支撐）',
       description: `上升趨勢中回測MA20(${c.ma20.toFixed(1)})未破，再度上漲至${c.close}`,
       reason: [
-        '【葛蘭碧法則③】價格在上升的均線上方回跌但未跌破，再度上漲，是加碼買入的訊號。',
+        '【葛蘭碧法則②（課程 3-6：支撐買點）】價格回檔到上升均線附近未跌破，轉而上漲。',
         '【原理】上升趨勢中的回調是健康的，回而不破代表趨勢依然完好。',
         '【操作建議】可加碼做多。停損設在 MA20 下方。',
       ].join('\n'),
@@ -232,17 +235,36 @@ export const granvilleSell5: TradingRule = {
     const prev = candles[index - 1];
     if (c.ma20 == null || prev.ma20 == null) return null;
 
-    const maFlatOrDown = isMaFlattening(candles, index) || isMaFalling(candles, index);
+    // 2026-07-05 忠實度修：課程 3-6 賣點⑤原文「均線由上升轉為**下彎**，股價跌破這均線」
+    //「一定要月線下彎才能空」— 賣側判準比買側嚴（買點①允許走平，賣點⑤不允許）。
+    // 舊版把買側寫法鏡像到賣側（走平也發 SELL）→ 出場提前誤殺。走平降級 WATCH。
     const priceCross = prev.close > prev.ma20! && c.close < c.ma20;
+    if (!priceCross) return null;
+    const maDown = isMaFalling(candles, index);
+    const maFlat = isMaFlattening(candles, index);
+    if (!maDown && !maFlat) return null;
 
-    if (!maFlatOrDown || !priceCross) return null;
+    if (!maDown) {
+      // 只走平未下彎：課程說還不能確認轉空 → 警示不出場
+      return {
+        type: 'WATCH',
+        label: '葛蘭碧⑤預警（月線走平）',
+        description: `價格跌破 MA20(${c.ma20.toFixed(1)}) 但月線僅走平未下彎 — 課程：月線下彎才確認賣點⑤`,
+        reason: [
+          '【葛蘭碧法則⑤（課程 3-6）】「均線由上升轉為下彎、股價跌破均線」才是賣點⑤。',
+          '目前月線只走平還沒下彎，可能只是回測月線支撐（買點③的前奏），先觀察。',
+          '【操作建議】月線一下彎且價格仍在其下 → 執行出場；站回月線 → 解除警戒。',
+        ].join('\n'),
+        ruleId: this.id,
+      };
+    }
 
     return {
       type: 'SELL',
       label: '葛蘭碧⑤賣出',
-      description: `價格由${prev.close}跌破MA20(${c.ma20.toFixed(1)})，均線已轉平/下降`,
+      description: `價格由${prev.close}跌破MA20(${c.ma20.toFixed(1)})，均線已下彎`,
       reason: [
-        '【葛蘭碧法則⑤】均線從上升轉為水平或下降時，價格由上向下跌破均線，是賣出訊號。',
+        '【葛蘭碧法則⑤（課程 3-6）】均線由上升轉為下彎，價格由上向下跌破均線，是賣出訊號。',
         '【原理】均線方向轉變 + 價格跌破，雙重確認趨勢反轉。',
         '【操作建議】持有者應停損出場。不宜搶反彈。',
       ].join('\n'),
@@ -251,11 +273,12 @@ export const granvilleSell5: TradingRule = {
   },
 };
 
-/** 賣出法則6: 價格突破下降中的均線後迅速回落 */
+/** 課程賣點⑦：價格突破下降中的均線後迅速回落（假突破）
+ *  2026-07-05 忠實度修：此邏輯＝課程**賣點⑦**；舊標籤誤標⑥。id 保留不改。 */
 export const granvilleSell6: TradingRule = {
   id: 'granville-sell-6',
-  name: '葛蘭碧⑥：假突破下降均線',
-  description: '價格突破下降中的MA20後，無法站穩又跌回均線之下',
+  name: '葛蘭碧⑦：假突破下降均線',
+  description: '價格突破下降中的MA20後，無法站穩又跌回均線之下（課程賣點⑦）',
   evaluate(candles, index): RuleSignal | null {
     if (index < 3) return null;
     const c = candles[index];
@@ -275,7 +298,7 @@ export const granvilleSell6: TradingRule = {
 
     return {
       type: 'SELL',
-      label: '葛蘭碧⑥假突破',
+      label: '葛蘭碧⑦假突破',
       description: `價格曾突破下降中MA20但無法站穩，跌回${c.close} < MA20=${c.ma20.toFixed(1)}`,
       reason: [
         '【葛蘭碧法則⑥】價格突破下降中的均線後迅速回落，是「假突破」的賣出訊號。',
@@ -287,11 +310,12 @@ export const granvilleSell6: TradingRule = {
   },
 };
 
-/** 賣出法則7: 價格在均線下方反彈但未突破均線又下跌 */
+/** 課程賣點⑥：價格在均線下方反彈但未突破均線又下跌（壓力賣點）
+ *  2026-07-05 忠實度修：此邏輯＝課程**賣點⑥**（彈到均線附近遇壓下跌）；舊標籤誤標⑦。id 保留不改。 */
 export const granvilleSell7: TradingRule = {
   id: 'granville-sell-7',
-  name: '葛蘭碧⑦：均線下方彈不過',
-  description: '下降趨勢中價格反彈靠近MA20但未突破，再度下跌',
+  name: '葛蘭碧⑥：均線下方彈不過（壓力）',
+  description: '下降趨勢中價格反彈靠近MA20但未突破，再度下跌（課程賣點⑥）',
   evaluate(candles, index): RuleSignal | null {
     if (index < 5) return null;
     const c = candles[index];
@@ -327,7 +351,7 @@ export const granvilleSell7: TradingRule = {
 
     return {
       type: 'SELL',
-      label: '葛蘭碧⑦加空',
+      label: '葛蘭碧⑥加空（壓力）',
       description: `下降趨勢中反彈靠近MA20(${c.ma20.toFixed(1)})未過，再度下跌至${c.close}`,
       reason: [
         '【葛蘭碧法則⑦】價格在下降的均線下方反彈但未突破，再度下跌，是加碼賣出的訊號。',
@@ -359,6 +383,16 @@ export const granvilleSell8: TradingRule = {
     const hasLongUpperShadow = body > 0 && upperShadow > body;
 
     if (!isBlackCandle && !hasLongUpperShadow) return null;
+
+    // 2026-07-05 忠實度修：課程 3-6 賣點⑧條列「高檔**連 3 日爆大量**」為前提之一 —
+    // 舊版只看乖離+滯漲，強勢噴出段每天都可能提前叫減碼。補「近 3 日內至少一日爆量
+    //（≥5日均量×1.5）」才發訊。
+    let hasRecentBlowoff = false;
+    for (let i = Math.max(0, index - 2); i <= index; i++) {
+      const k = candles[i];
+      if (k.avgVol5 != null && k.avgVol5 > 0 && k.volume >= k.avgVol5 * 1.5) { hasRecentBlowoff = true; break; }
+    }
+    if (!hasRecentBlowoff) return null;
 
     return {
       type: 'REDUCE',

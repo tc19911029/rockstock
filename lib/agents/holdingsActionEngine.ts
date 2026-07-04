@@ -134,12 +134,12 @@ function detectMomentumFadeBlowoff(candles: Candle[]): { type: string; label: st
 }
 
 /**
- * 課程 CH9-3(二)(三)（2026-07-04）：爆量反轉 bar 判定（訊號日/次日共用）。
- *   bar i 為「爆大量長黑吞噬」或「爆大量長上影」，且收盤未跌破前一日低點
- *   （已破低走既有整批出場，不屬分批停利分支）。
+ * 課程 CH9-3(二)(三)/CH8-3(6)（2026-07-04，07-05 補 long-black）：爆量反轉 bar 判定。
+ *   bar i 為「爆大量長黑吞噬」「爆大量長上影」或「爆大量長黑（非吞噬）」，
+ *   且收盤未跌破前一日低點（已破低走既有整批出場，不屬分批停利分支）。
  * 爆量口徑 = 前 5 日均量 ×1.5（與 sellSignals 爆量家族同口徑）。
  */
-function detectCh9BlowoffReversalBar(candles: Candle[], i: number): 'engulf' | 'upper-shadow' | null {
+function detectCh9BlowoffReversalBar(candles: Candle[], i: number): 'engulf' | 'upper-shadow' | 'long-black' | null {
   if (i < 6) return null;
   const bar = candles[i];
   const prevB = candles[i - 1];
@@ -157,8 +157,16 @@ function detectCh9BlowoffReversalBar(candles: Candle[], i: number): 'engulf' | '
   const fullLen = bar.high - bar.low;
   const upper = bar.high - Math.max(bar.open, bar.close);
   if (fullLen > 0 && upper / fullLen > 0.5) return 'upper-shadow';
+  // 爆量長黑（非吞噬）：實體 ≥2% 收黑（CH8-3(6)）
+  if (bar.close < bar.open && bar.open > 0 && (bar.open - bar.close) / bar.open >= 0.02) return 'long-black';
   return null;
 }
+
+const CH9_KIND_LABEL_ENGINE: Record<'engulf' | 'upper-shadow' | 'long-black', string> = {
+  'engulf': '長黑吞噬',
+  'upper-shadow': '長上影',
+  'long-black': '爆量長黑',
+};
 
 /**
  * 賠少-17：逆勢/搶反彈買法（反轉軌 D/F/N/O）的專屬「翻黑就走」出場。
@@ -395,7 +403,8 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
     }
   }
 
-  // 課程 CH9-3(二)(三)（2026-07-04）：爆量反轉分批停利 — 與賠少-11（≥20% 門檻較高、先判先贏）並存。
+  // 課程 CH9-3(二)(三)/CH8-3(6)（2026-07-04，07-05 修）：爆量反轉分批停利 —
+  // 與賠少-11（≥20% 門檻較高、先判先贏）並存。
   // 次日分支優先（動作更重）：昨日為訊號日（重算、path-independent）+ 今日下跌 → 剩餘全出。
   if (last >= 7) {
     const todayCandle = candles[last];
@@ -407,19 +416,41 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
         type: 'ch9_exit_remaining',
         label: '爆量反轉次日下跌（剩餘全出）',
         severity: 'high',
-        detail: `昨日高檔爆量${kindYesterday === 'engulf' ? '長黑吞噬' : '長上影'}（獲利 ${(profitAtSignal * 100).toFixed(1)}% > 15% 應已停利 1/2），今日下跌 ${todayCandle.close.toFixed(2)} < ${yestCandle.close.toFixed(2)}，課程 CH9-3：剩餘全數賣出`,
+        detail: `昨日高檔爆量${CH9_KIND_LABEL_ENGINE[kindYesterday]}（獲利 ${(profitAtSignal * 100).toFixed(1)}% > 15% 應已停利），今日下跌 ${todayCandle.close.toFixed(2)} < ${yestCandle.close.toFixed(2)}，課程 CH9-3：剩餘全數賣出`,
       }]);
     }
-    // 訊號日分支：今日爆量吞噬/長上影、未破昨低、獲利 > 15% → 先停利 1/2
+    // 訊號日分支：獲利 > 15% + 爆量反轉未破昨低。
+    // 2026-07-05 忠實度修：**吞噬 → 當天全出**（課程 CH8-3 講義「長黑吞噬當天全部停利」＋
+    // CH9-3 口述「主力今天跑光光，不用等明天」）；長上影/爆量長黑 → 先停利 1/2。
     const kindToday = detectCh9BlowoffReversalBar(candles, last);
     if (kindToday && profitPct > PROFIT_PARTIAL_TP_PCT) {
+      if (kindToday === 'engulf') {
+        return finalize('exit_all', [{
+          type: 'ch9_engulf_exit_all',
+          label: '高檔爆量長黑吞噬（當天全出）',
+          severity: 'high',
+          detail: `高檔爆大量長黑吞噬、獲利 ${(profitPct * 100).toFixed(1)}%，課程 CH8-3：長黑吞噬當天全部停利（主力出貨，跟著主力一起出場）`,
+        }]);
+      }
       return finalize('reduce_half', [{
         type: 'ch9_partial_tp_half',
         label: '爆量反轉未破昨低（先停利1/2）',
         severity: 'high',
-        detail: `高檔爆大量${kindToday === 'engulf' ? '長黑吞噬' : '長上影'}未破昨低、獲利 ${(profitPct * 100).toFixed(1)}% > 15%，課程 CH9-3：先停利 1/2，明日下跌全數賣出`,
+        detail: `高檔爆大量${CH9_KIND_LABEL_ENGINE[kindToday]}未破昨低、獲利 ${(profitPct * 100).toFixed(1)}% > 15%，課程 CH9-3/CH8-3(6)：先停利 1/2，明日下跌全數賣出`,
       }]);
     }
+  }
+
+  // 課程 CH8-4/8-5/直播Q1（2026-07-05 忠實度修）：賺 >20% 收盤跌破 MA5 → 全部停利。
+  // 課程三處明寫的「大賺後第一道保護」，之前主路徑只有 reduce_half（break_ma5_short）、
+  // 要等破 MA20 才全出 — 大賺回吐保護缺席。放在 MA10/MA20 停利之後、賠少-11 之前。
+  if (profitPct >= PROFIT_HIGH_TIER_PCT && distToMa5Pct != null && distToMa5Pct < 0) {
+    return finalize('exit_all', [{
+      type: 'break_ma5_high_profit',
+      label: '賺>20% 跌破 MA5（全部停利）',
+      severity: 'high',
+      detail: `獲利 +${(profitPct * 100).toFixed(1)}% ≥ 20%，收盤 ${todayClose.toFixed(2)} 跌破 MA5 ${ma5!.toFixed(2)}，課程 CH8-4/8-5：連續波段賺超過 20% 跌破 MA5 全部停利`,
+    }]);
   }
 
   if (profitPct >= PROFIT_SHORT_RULE && distToMa5Pct != null && distToMa5Pct < 0) {

@@ -49,6 +49,11 @@ export interface DailyActionItem {
   metrics: HoldingActionResult['metrics'] | null;
   /** 課程 CH9-2（2026-07-04）：六壓力位中最近的上方壓力價（純顯示；null = 創新高無壓/資料不足） */
   nearestTarget?: number | null;
+  /**
+   * 課程「收盤確認」鐵律（2026-07-05）：盤中呼叫時今日 bar 是 L2 半根 K，
+   * 收盤級規則（均線/K線出場）只能當「盤中預警」，收盤才確認。true = 盤中暫定。
+   */
+  intradayProvisional?: boolean;
 }
 
 export interface DailyActionResponse {
@@ -57,6 +62,18 @@ export interface DailyActionResponse {
   marketRegime: RegimeDetectResult;
   totalUnrealized: number;
   items: DailyActionItem[];
+}
+
+/**
+ * 盤中判定（CST）：TW 09:00-13:45 / CN 09:30-15:10 之間視為盤中（今日 bar 是半根 K）。
+ * 粗判即可 — 只影響「盤中預警」文案，不影響訊號計算。
+ */
+function isIntradayNow(market: 'TW' | 'CN'): boolean {
+  const nowCst = new Date(Date.now() + 8 * 3600_000); // UTC+8
+  const day = nowCst.getUTCDay();
+  if (day === 0 || day === 6) return false;
+  const hm = nowCst.getUTCHours() * 100 + nowCst.getUTCMinutes();
+  return market === 'TW' ? hm >= 900 && hm <= 1345 : hm >= 930 && hm <= 1510;
 }
 
 export async function GET(req: NextRequest) {
@@ -167,6 +184,8 @@ export async function GET(req: NextRequest) {
           suggestedStop: result.suggestedStop,
           metrics: result.metrics,
           nearestTarget: profitTargets?.nearestAbove ?? null,
+          // 盤中且今日 bar 已被 L2 半根覆蓋 → 收盤級動作標「盤中預警」
+          intradayProvisional: lastCandle.date === today && isIntradayNow(mkt),
         };
       }),
     );

@@ -36,15 +36,23 @@ export function classifyVolume(
   const types: VolumeType[] = [];
   const avg5 = c.avgVol5 ?? 0;
 
-  // 攻擊量（寶典 p.54 ④ ×1.3，0513 ABCDE D：改 import BOOK_VOL_RATIO_MIN 統一）
-  if (prev.volume > 0 && c.volume >= prev.volume * BOOK_VOL_RATIO_MIN) types.push('attack');
+  // 攻擊量（寶典 p.54 ④ ×1.3 前日基準 OR 課程 CH4-2「基本量(5日均)×1.2~1.3」）
+  // 2026-07-05 忠實度修：(1) 課程原文「這樣子**股價也上漲**的話，我就認定有攻擊量」—
+  //   補上漲前提（之前爆量長黑也會被貼攻擊量）；(2) 補課程 avg5×1.2 的 OR 分支
+  //  （之前只有前日×1.3 書本軌，1.2~1.3 倍的合格攻擊量會漏）。
+  const attackVol = (prev.volume > 0 && c.volume >= prev.volume * BOOK_VOL_RATIO_MIN)
+    || (avg5 > 0 && c.volume >= avg5 * 1.2);
+  if (attackVol && c.close > c.open) types.push('attack');
 
   // 爆大量（5 日均量 × 2）— 抓住飆股 / 朱家泓 YouTube #17
   if (avg5 > 0 && c.volume >= avg5 * 2) types.push('blowoff');
 
   // 止跌量（5 日均量 × 0.5，且當日不破低）
   // ×0.5 對齊書本 CH4-2「止跌量 = 基本量 × 0.5」（基本量 = 5 日均量），非自創工程值。
-  if (avg5 > 0 && c.volume <= avg5 * 0.5 && c.low >= prev.low) types.push('stopDrop');
+  // 2026-07-05 忠實度修：課程原文「**當股價下跌的時候**量急縮到一半」— 補下跌段前提
+  //（收盤在 MA5 之下），多頭行進間的量縮小紅不再誤標止跌量（位置錯）。
+  const inDecline = c.ma5 != null && c.ma5 > 0 && c.close < c.ma5;
+  if (avg5 > 0 && c.volume <= avg5 * 0.5 && c.low >= prev.low && inDecline) types.push('stopDrop');
 
   // 「大量」單一口徑（與 detectHighPeakVolume / 做頭判定共用 BASE_HIGH_VOL_RATIO=1.5）：
   //   avg5 × BASE_HIGH_VOL_RATIO 或 前日量 × BOOK_VOL_RATIO_MIN(1.3)。
@@ -52,28 +60,55 @@ export function classifyVolume(
   const isBig = (avg5 > 0 && c.volume >= avg5 * BASE_HIGH_VOL_RATIO) || (prev.volume > 0 && c.volume >= prev.volume * BOOK_VOL_RATIO_MIN);
   if (isBig && c.close > c.open) types.push('accumulate');
 
-  // 出貨量（大量 + 黑K）
-  if (isBig && c.close < c.open) types.push('distribution');
+  // 出貨量（大量 + 黑K + **高檔**）
+  // 2026-07-05 忠實度修：課程 CH4-2「漲到**相對高檔**爆大量出黑K＝出貨」、CH4-8 反例
+  //「大量黑K第一隻腳（空頭低檔）是主力**進貨**量，壓低在進貨」— 同一根大量黑K
+  // 高檔=出貨、低檔=進貨，意義相反。補高檔 gate（ma5>ma20 多頭段）；
+  // 低檔（ma5<ma20）的大量黑K不再誤標出貨。
+  const highSide = c.ma5 != null && c.ma20 != null && c.ma5 > c.ma20;
+  if (isBig && c.close < c.open && highSide) types.push('distribution');
 
-  // 換手量（當日為大量K，3 日內被後續紅K 突破高點）
-  if (index >= 3 && avg5 > 0) {
-    const past = candles[index - 3];
-    if (past.volume >= avg5 * BASE_HIGH_VOL_RATIO && past.close > past.open) {
-      const brokeOut = [candles[index - 2], candles[index - 1], c].some(k => k?.close > past.high);
-      if (brokeOut) types.push('turnover');
+  // 換手量（近 3 日內的大量**黑K** 高點被今日收盤突破 =「該跌不跌」籌碼換手成功）
+  // 2026-07-05 忠實度修（本章最重的方向性 bug）：課程原文「三天之內股價突破**大量黑K**
+  // 的高點……被突破的大量就叫換手量」— 舊版要求被突破的是**紅K**（方向寫反），
+  // 且只看固定 3 根前那一根。改成滾動窗：近 1~3 根內任一大量黑K，今日收盤過其高。
+  if (index >= 1) {
+    for (let k = 1; k <= 3; k++) {
+      if (index - k < 1) break;
+      const past = candles[index - k];
+      const pastAvg5 = past.avgVol5 ?? avg5;
+      if (pastAvg5 > 0 && past.volume >= pastAvg5 * BASE_HIGH_VOL_RATIO
+        && past.close < past.open           // 大量「黑K」（課程正字定義）
+        && c.close > past.high) {
+        types.push('turnover');
+        break;
+      }
     }
   }
 
-  // 調節量（高檔大量K 下跌後又上漲突破）
-  if (index >= 5 && avg5 > 0) {
-    const past = candles[index - 5];
-    if (past.volume >= avg5 * BASE_HIGH_VOL_RATIO && past.close < past.open) {  // 大量黑K
-      if (c.close > past.high) types.push('wash');
+  // 調節量（高檔大量黑K 下跌修正後又上漲突破）
+  // 2026-07-05 忠實度修：舊版只看固定 5 根前那一根（修正 4 或 6 天的全漏）。
+  // 改滾動窗：近 4~7 根內任一大量黑K高點被今日收盤突破（與換手量 1~3 根窗銜接）。
+  if (index >= 5) {
+    for (let k = 4; k <= 7; k++) {
+      if (index - k < 1) break;
+      const past = candles[index - k];
+      const pastAvg5 = past.avgVol5 ?? avg5;
+      if (pastAvg5 > 0 && past.volume >= pastAvg5 * BASE_HIGH_VOL_RATIO
+        && past.close < past.open
+        && c.close > past.high) {
+        types.push('wash');
+        break;
+      }
     }
   }
 
-  // 搶反彈量（空頭低檔大量 + 紅K反彈）
-  if (c.ma20 && c.ma20 > 0 && c.close < c.ma20 && isBig && c.close > c.open) {
+  // 搶反彈量（**空頭**低檔大量 + 紅K + 突破前一日高點）
+  // 2026-07-05 忠實度修：課程原文「空頭跌到低檔…紅K**突破前一日K線最高點**」—
+  // (1) 補突破昨高確認 (2) 空頭前提從單一 close<MA20 加嚴為 ma5<ma20（跌破月線的
+  //     多頭深回檔不再誤標搶反彈量）。
+  const lowSide = c.ma5 != null && c.ma20 != null && c.ma5 < c.ma20;
+  if (c.ma20 && c.ma20 > 0 && c.close < c.ma20 && lowSide && isBig && c.close > c.open && c.close > prev.high) {
     types.push('rebound');
   }
 
@@ -163,11 +198,21 @@ export function detectHighPeakVolume(
 
   if (inHighZone && isBlowoff && prev) {
     // 調節量：當日大量黑 → 後續紅K 站回
-    // （簡化版：當日大量黑 + 不破前低）
+    // （簡化版：當日大量黑 + 不破前低；「待突破確認」語意見 classifyVolume 滾動窗版）
     if (c.close < c.open && c.low > prev.low * 0.98) washVolume = true;
 
-    // 換手量：連續大量但股價未破 → 強勢
-    if (c.close > prev.close) turnoverVolume = true;
+    // 換手量：近 1~3 根內有爆量黑K、今日收盤突破該黑K高點（籌碼換手成功）
+    // 2026-07-05 忠實度修：課程 CH4-3「爆量下跌後…再突破前一日**黑K高點**＝換手成功」；
+    // 舊版「今收 > 昨收」就標換手 — 高檔爆量長紅（課程警告十之八九是拉高出貨）被貼成
+    // 續漲正面標籤，判準鬆到變質。
+    if (c.close > c.open) {
+      for (let i = index - 1; i >= Math.max(1, index - 3); i--) {
+        const k = candles[i];
+        const kAvg5 = k.avgVol5 ?? 0;
+        const kBlackBig = kAvg5 > 0 && k.volume >= kAvg5 * 1.5 && k.close < k.open;
+        if (kBlackBig && c.close > k.high) { turnoverVolume = true; break; }
+      }
+    }
 
     // 出貨量：高檔大量 + 黑K + 收盤跌破前日低
     if (c.close < c.open && c.close < prev.low) distributionVolume = true;
@@ -241,8 +286,11 @@ export function detectChokingVolume(
   const c = candles[index];
   const prev = candles[index - 1];
   if (!prev?.avgVol5) return false;
-  const prevIsBigVol = prev.volume >= prev.avgVol5 * 2;
-  return prevIsBigVol && c.volume <= prev.volume * 0.5 && c.close < c.open;
+  // 2026-07-05 忠實度修：課程 CH4-8「**爆量長黑後**若次日續跌且量縮至一半」—
+  // 前一日必須是爆量**長黑**（舊版沒驗黑K，高檔爆量長紅隔日縮量也被標窒息量，
+  // 位置與方向都不對 — 窒息量是下跌末端訊號）。
+  const prevIsBigBlack = prev.volume >= prev.avgVol5 * 2 && prev.close < prev.open;
+  return prevIsBigBlack && c.volume <= prev.volume * 0.5 && c.close < c.open;
 }
 
 /**

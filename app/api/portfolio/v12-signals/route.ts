@@ -74,6 +74,13 @@ export async function GET(req: NextRequest) {
     // 找到買進日 K 棒（用於 Step 3 K 線三段式）
     const entryIdx = candles.findIndex((c) => c.date === buyDate);
     const entryKbar = entryIdx >= 0 ? candles[entryIdx] : today_c;
+    // 2026-07-05 忠實度修：進場K「高檔＋大量」才啟用 ≥5% 守 1/2 嚴控特例（書本原文前提）
+    const entryBarFull = entryIdx >= 0 ? candles[entryIdx] : undefined;
+    const highLevelBlowoff = entryBarFull != null
+      && entryBarFull.avgVol5 != null && entryBarFull.avgVol5 > 0
+      && entryBarFull.volume >= entryBarFull.avgVol5 * 1.5
+      && entryBarFull.ma5 != null && entryBarFull.ma20 != null
+      && entryBarFull.ma5 > entryBarFull.ma20;
 
     const tickSize = getTickSize(entryPrice, market);
     const trendState = detectTrend(candles, lastIdx);
@@ -100,9 +107,10 @@ export async function GET(req: NextRequest) {
       pivotLow: entryKbar.low,
       supportLevel,
       triggerKLow: entryKbar.low,
+      highLevelBlowoff,
     };
     const slResult = updateStopLossDaily(slInputs, today_c);
-    const klineStop = calcKLineStopLoss(entryKbar, tickSize);
+    const klineStop = calcKLineStopLoss(entryKbar, tickSize, { highLevelBlowoff });
     const stopLossPrice = slResult.stopLossPrice;
     const profitPct = (today_c.close - entryPrice) / entryPrice;
 
@@ -149,7 +157,7 @@ export async function GET(req: NextRequest) {
 
     const klineExit = checkKLineExit(today_c, yesterday_c, trendState);
     const maExit = maValue != null
-      ? checkMAExit(today_c.close, maValue, letter, entryPrice)
+      ? checkMAExit(today_c.close, maValue, letter, entryPrice, operatingMA ?? undefined)
       : { shouldExit: false };
     // 小修-CH8-3（2026-07-04）：升級長線加「週線多頭確認」gate（課程 8-4 三線共振）
     const weeklyCandles = computeIndicators(aggregateCandles(candles, '1wk'));

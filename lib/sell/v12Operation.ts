@@ -56,11 +56,25 @@ export function checkKLineExit(
     return { shouldExit: false };
   }
 
+  // 2026-07-05 忠實度修：課程 CH8-2「只適合走勢明確的強勢多頭股（飆股/強勢股/急漲）」
+  // ＋大架構需「MA20 之上、MA10/MA20 多頭排列」；直播 Q47「碰到飆股才改 K 線出場」。
+  // 舊版無差別套用 → 慢漲波段股一根正常回檔收破昨低（MA5 都沒破）就喊出場。
+  // 用 K 線自帶指標做 gate：MA20 之上 + MA10>MA20 多排 + 急漲特徵（收盤高於 MA5 乖離 ≥3%
+  // 或 昨日收盤距 5 日前收盤 ≥6%）才啟用；不滿足 → 交給均線出場法。
+  const aboveMa20 = todayCandle.ma20 == null || todayCandle.close >= todayCandle.ma20;
+  const maAligned = todayCandle.ma10 == null || todayCandle.ma20 == null || todayCandle.ma10 >= todayCandle.ma20;
+  // ⚠️ 自創量化：「急漲/強勢」= 昨收在 MA5 上方乖離 ≥3%；缺 MA 資料不擋（fail-open，向下相容）
+  const isMomentum = yesterdayCandle.ma5 == null || yesterdayCandle.ma5 <= 0
+    || (yesterdayCandle.close - yesterdayCandle.ma5) / yesterdayCandle.ma5 >= 0.03;
+  if (!aboveMa20 || !maAligned || !isMomentum) {
+    return { shouldExit: false };
+  }
+
   // 收盤跌破前一日最低 → 出場
   if (todayCandle.close < yesterdayCandle.low) {
     return {
       shouldExit: true,
-      reason: `收盤 ${todayCandle.close.toFixed(2)} 跌破前一日最低 ${yesterdayCandle.low.toFixed(2)}（智慧 K 線出場法 / 抓住線圖第 4 篇第 6 章 p.245）`,
+      reason: `收盤 ${todayCandle.close.toFixed(2)} 跌破前一日最低 ${yesterdayCandle.low.toFixed(2)}（智慧 K 線出場法／限強勢急漲股，CH8-2）`,
     };
   }
 
@@ -86,27 +100,33 @@ export function checkMAExit(
   maValueToday: number,
   letter: V12Letter,
   entryPrice: number,
+  maName?: string,
 ): { shouldExit: boolean; reason?: string } {
   // 沒跌破均線 → 不出場
   if (closeToday >= maValueToday) {
     return { shouldExit: false };
   }
 
-  // ── 衝突 α：B/P 用 MA5 + 寶典 #5/#6 切換 ──
+  // ── 衝突 α：A/B/P 用 MA5 + 寶典 #5/#6 切換 ──
   // 0513 ABCDE D：10% 改 import PROFIT_TARGET_RULE_PCT 統一書本守則 #5/#6
-  if (letter === 'B' || letter === 'P') {
+  // 2026-07-05 忠實度修：(1) 「<10% 續抱」是 **MA5 短線**洗盤條款（CH8-3）——長線模式
+  //   （operatingMA=MA20，9-1 收盤跌破 MA20 即停利，無 10% 豁免）不可套用；用 maName gate。
+  //   （缺 maName 時維持舊行為，向下相容。）(2) A 字母守 MA5（沿 B 邏輯），一併納入豁免，
+  //   否則 A 部位 +3% 碰 MA5 就被叫出場。
+  const isMa5Context = maName == null || maName === 'MA5';
+  if ((letter === 'A' || letter === 'B' || letter === 'P') && isMa5Context) {
     const profitPct = (closeToday - entryPrice) / entryPrice;
     if (profitPct < PROFIT_TARGET_RULE_PCT) {
       // 累計獲利 < 10%：即使跌破 MA5 也續抱（寶典 #5）
       return {
         shouldExit: false,
-        reason: `B/P 進階紀律 #5：獲利 ${(profitPct * 100).toFixed(2)}% < ${(PROFIT_TARGET_RULE_PCT * 100).toFixed(0)}%，跌破 MA5 仍續抱`,
+        reason: `${letter} 進階紀律 #5：獲利 ${(profitPct * 100).toFixed(2)}% < ${(PROFIT_TARGET_RULE_PCT * 100).toFixed(0)}%，跌破 MA5 仍續抱（洗盤條款）`,
       };
     }
     // ≥ 10%：跌破 MA5 → 停利
     return {
       shouldExit: true,
-      reason: `B/P 進階紀律 #6：獲利 ≥ ${(PROFIT_TARGET_RULE_PCT * 100).toFixed(0)}%，跌破 MA5 停利`,
+      reason: `${letter} 進階紀律 #6：獲利 ≥ ${(PROFIT_TARGET_RULE_PCT * 100).toFixed(0)}%，跌破 MA5 停利`,
     };
   }
 

@@ -50,7 +50,7 @@ describe('detectKBarExitSignal — CH9-3 分批停利 advisory', () => {
     expect(r.advisory).toBeUndefined();
   });
 
-  it('爆量長黑吞噬未破昨低 + 獲利>15% → partial-tp-half', () => {
+  it('爆量長黑吞噬 → 當天全出（triggered，2026-07-05 課程口徑：吞噬不走1/2）', () => {
     const yest = bar({ open: 103, high: 106.5, low: 99, close: 106 }); // 紅 K、低點壓低
     const engulfToday = bar({ open: 107, high: 107.5, low: 101.5, close: 102, volume: 30000, avgVol5: 10000 }); // 吞噬但 close 102 ≥ 昨低 99
     const r = detectKBarExitSignal({
@@ -58,8 +58,21 @@ describe('detectKBarExitSignal — CH9-3 分批停利 advisory', () => {
       yesterdayCandle: yest,
       cumulativeProfit: 0.2,
     });
+    expect(r.advisory).toBeUndefined();       // 不再被 1/2 advisory 攔截
+    expect(r.triggered).toBe(true);           // 落回 bearish-engulfing 全出
+    expect(r.signalType).toBe('bearish-engulfing');
+  });
+
+  it('爆量長黑（非吞噬）未破昨低 + 獲利>15% → partial-tp-half（CH8-3(6) long-black 型）', () => {
+    const yest = bar({ open: 100, high: 105.5, low: 99.5, close: 105 });
+    const longBlackToday = bar({ open: 104.5, high: 105, low: 100.5, close: 101, volume: 30000, avgVol5: 10000 }); // 黑實體 3.3%、未破昨低、開低（非吞噬）
+    const r = detectKBarExitSignal({
+      todayCandle: longBlackToday,
+      yesterdayCandle: yest,
+      cumulativeProfit: 0.18,
+    });
     expect(r.advisory).toBe('partial-tp-half');
-    expect(r.detail).toContain('吞噬');
+    expect(r.detail).toContain('爆量長黑');
   });
 
   it('已跌破昨日低點 → 不走 advisory（落入既有整批出場訊號）', () => {

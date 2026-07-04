@@ -558,17 +558,22 @@ export const zhuStopLossKlineLow: TradingRule = {
     const maxGain = changePct(entryCandle);
 
     // 計算停損價
-    // 2026-05-04 寶典對齊：高檔嚴控閾值 4.5% → 5%（《活用技術分析寶典》2024 Part 11-1
-    //                       ＜5% 守上漲轉折最低點，≥5% 守紅K最低點；保留書本「< 2.5% 向下放寬 2 碼」
-    //                       與「高檔大量長紅 1/2 位置」兩段補強）
+    // 2026-07-05 忠實度修：「守 1/2」只適用書本原文的「**高檔大量長紅**」特例 —
+    // 之前 ≥5% 無差別守 1/2（沒驗高檔、沒驗大量），低檔盤整突破大紅K的停損被抬到
+    // 實體一半（約 -3%）、比課程「守最低點」緊一倍 → 系統性誤殺。
+    const entryHighLevelBlowoff = entryCandle.avgVol5 != null && entryCandle.avgVol5 > 0
+      && entryCandle.volume >= entryCandle.avgVol5 * 1.5
+      && entryCandle.ma5 != null && entryCandle.ma20 != null
+      && entryCandle.ma5 > entryCandle.ma20;
     let stopPrice: number;
     if (changePct(entryCandle) < 0.025) {
       // 漲幅 < 2.5%：最低點再向下放寬2碼（5步驟微幅補強，避免被洗）
       stopPrice = ticksBelow(entryCandle.low, 2);
-    } else if (changePct(entryCandle) >= 0.05) {
-      // 漲幅 ≥ 5%（高檔大量長紅）：停損在1/2位置（嚴控風險）
+    } else if (changePct(entryCandle) >= 0.05 && entryHighLevelBlowoff) {
+      // 漲幅 ≥ 5% 且高檔＋大量長紅：停損在1/2位置（書本嚴控特例）
       stopPrice = halfPrice(entryCandle);
     } else {
+      // 一般（含 ≥5% 但非高檔大量）：守進場K最低點（課程 CH7-2 主句）
       stopPrice = entryCandle.low;
     }
 
@@ -714,17 +719,18 @@ export const zhuShortKlineExit: TradingRule = {
     const c = candles[index];
     const prev = candles[index - 1];
 
-    // 前日是紅K（持有多單中）
-    if (prev.close <= prev.open) return null;
-
-    // 今日黑K收盤跌破前日最低點
-    if (c.close >= c.open) return null; // 今日要是黑K
+    // 2026-07-05 忠實度修：課程 CH8-2 原文「**收盤價**跌破前一日最低點，多單出場」—
+    // 不限今日 K 色、不限前日紅 K。舊寫法多加「前日紅K＋今日黑K」兩個課程沒有的條件，
+    // 開低走高的紅 K 收盤仍破昨低（轉折確認成立）會漏報 → 該出沒叫出。
+    // 今日收盤跌破前日最低點 → 轉折確認
     if (c.close >= prev.low) return null;
+    // 事件型 dedup：昨日已跌破前日低（轉折已確認過），今日續跌不重複報
+    if (index >= 2 && prev.close < candles[index - 2].low) return null;
 
     return {
       type: 'REDUCE',
       label: 'K線轉折',
-      description: `黑K收盤${c.close}跌破前日低點${prev.low.toFixed(2)}，短線轉折確認`,
+      description: `收盤${c.close}跌破前日低點${prev.low.toFixed(2)}，短線轉折確認`,
       reason: [
         '【朱家泓短線K線操作法】',
         '做多時，每日收盤守前一日K線最低點。',

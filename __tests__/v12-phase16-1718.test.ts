@@ -208,10 +208,15 @@ describe('v12 Phase 1.8 — calcKLineStopLoss 三段式', () => {
     expect(result).toBe(99.5);
   });
 
-  it('紅 K 漲幅 ≥ 5% → 紅 K 1/2 位置', () => {
-    const result = calcKLineStopLoss({ open: 100, close: 106, low: 99, high: 106.5 }, 0.05);
-    // bodyPct = 6%, ≥ 5% → (open + close) / 2 = 103
+  it('紅 K 漲幅 ≥ 5% + 高檔大量 → 紅 K 1/2 位置（2026-07-05 忠實度修）', () => {
+    const result = calcKLineStopLoss({ open: 100, close: 106, low: 99, high: 106.5 }, 0.05, { highLevelBlowoff: true });
+    // bodyPct = 6%, ≥ 5% 且高檔大量 → (open + close) / 2 = 103
     expect(result).toBe(103);
+  });
+
+  it('紅 K 漲幅 ≥ 5% 非高檔大量 → 守紅 K low（課程主句）', () => {
+    const result = calcKLineStopLoss({ open: 100, close: 106, low: 99, high: 106.5 }, 0.05);
+    expect(result).toBe(99);
   });
 });
 
