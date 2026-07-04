@@ -23,6 +23,25 @@ import type { MarketId } from '@/lib/scanner/types';
 
 export const SIZING_SCHEMA_VERSION = 1 as const;
 
+/** 「接近歷史高檔」門檻：指數收盤 ≥ 歷史最高收盤 × 0.95（⚠️ 自創 padding，書本未量化「高檔」） */
+export const INDEX_NEAR_ATH_RATIO = 0.95;
+
+// 大盤 regime → 總投入成數上限（書本 CH5-06「大盤歷史高檔投入上限五成」+
+// 直播課 2026-07-01 QA#15 口述成數表：大多頭 7~8 成 / 高檔盤整 5 成 / 空頭做多 ≤3 成）
+export const EXPOSURE_CAP_BULL = 0.8;
+export const EXPOSURE_CAP_CONSOLIDATION = 0.5;
+export const EXPOSURE_CAP_BEAR = 0.3;
+
+/**
+ * 從大盤 regime + 是否近歷史高檔 → 總投入成數上限。
+ * 近歷史高檔時即使 strong_bull 也壓到五成（書本 CH5-06 高檔優先）。
+ */
+export function regimeExposureCap(regime: 'strong_bull' | 'normal' | 'bear', nearAth: boolean): number {
+  if (regime === 'bear') return EXPOSURE_CAP_BEAR;
+  if (nearAth || regime === 'normal') return EXPOSURE_CAP_CONSOLIDATION;
+  return EXPOSURE_CAP_BULL;
+}
+
 export type SizingMode = 'fixedFraction' | 'kelly' | 'letterAware' | 'riskParity';
 
 export interface SizingConfig {
@@ -75,6 +94,11 @@ export interface SizingRequest {
   letterStatsByLetter?: Record<string, LetterStats>;
   /** Optional MDD 觸發（呼叫端從 growthPath 或 trades 算出來傳入）*/
   currentPortfolioMddPct?: number;
+  /**
+   * 書本 CH5-06 + 直播 2026-07-01 QA#15（2026-07-04 體檢補）：總投入成數上限（0~1，含既有部位市值）。
+   * 呼叫端用 regimeExposureCap(大盤 regime, 是否近歷史高檔) 算出後傳入；缺值不啟用（向下相容）。
+   */
+  totalInvestCapPct?: number;
 }
 
 export interface SizingResult {
@@ -344,6 +368,23 @@ export function applyRiskGuards(args: {
       `組合 MDD ${(req.currentPortfolioMddPct * 100).toFixed(1)}% 已過紅燈門檻 ${(config.portfolioMddTriggerPct * 100).toFixed(0)}%；` +
       `sizer 自動 ×0.5 降槓桿（規則 #5：禁止放寬選股條件）`,
     );
+  }
+
+  // 書本 CH5-06 + 直播 QA#15（2026-07-04 體檢補）：大盤 regime → 總投入成數上限
+  //（大多頭 8 成 / 高檔或盤整 5 成 / 空頭做多 3 成）。含既有部位市值；
+  // 與 MDD 紅燈同屬「動 sizer 不動選股」（規則 #5）。
+  if (req.totalInvestCapPct != null && req.totalInvestCapPct > 0 && req.totalInvestCapPct < 1) {
+    const investedCap = req.totalCapital * req.totalInvestCapPct;
+    const alreadyInvested = req.existingHoldings.reduce((s, h) => s + h.currentValue, 0);
+    const remaining = Math.max(0, investedCap - alreadyInvested);
+    if (capital > remaining) {
+      capital = remaining;
+      appliedGuards.push('totalExposureCap');
+      warnings.push(
+        `大盤 regime 總投入上限 ${(req.totalInvestCapPct * 100).toFixed(0)}%（書本 CH5-06 + 直播 QA 成數表）；` +
+        `既有部位 ${alreadyInvested.toLocaleString()}，本筆剩餘額度 ${remaining.toLocaleString()}`,
+      );
+    }
   }
 
   // perPosition cap

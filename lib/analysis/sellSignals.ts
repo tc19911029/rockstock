@@ -2,6 +2,31 @@ import { CandleWithIndicators } from '@/types';
 import { findPivots, detectTrend } from '@/lib/analysis/trendAnalysis';
 import { halfPrice, isLongRedCandle } from '@/lib/rules/ruleUtils';
 import { recentHigh } from '@/lib/indicators';
+import { MAX_CANDLE_BODY_PCT, MEDIUM_CANDLE_BODY_MIN } from '@/lib/analysis/bookThresholds';
+
+/**
+ * 賠少-5（2026-07-04 體檢補，純顯示標註）：黑 K 三級制（課程 CH2-4/2-5）。
+ * 觸發邏輯不變（仍用各 detector 既有門檻），只在 detail 文字標出級別 —
+ * 「最大黑 ≥6.5%」比「小黑」警訊重得多，讓使用者一眼分辨。
+ */
+function blackTierSuffix(c: CandleWithIndicators): string {
+  if (!(c.close < c.open) || c.open <= 0) return '';
+  const body = (c.open - c.close) / c.open;
+  if (body >= MAX_CANDLE_BODY_PCT) return '【最大黑 ≥6.5%】';
+  if (body >= MEDIUM_CANDLE_BODY_MIN) return '【中黑】';
+  return '【小黑】';
+}
+
+/**
+ * 賠少-7（2026-07-04 體檢補，純顯示標註）：爆量分級（書本 CH4-07「2~5 倍」區間）。
+ * ≥5×=爆天量（最強警訊）、≥2×=爆大量、其餘=大量。不改任何觸發門檻。
+ */
+function volGradeLabel(volRatio: number | null | undefined): string {
+  if (volRatio == null) return '大量';
+  if (volRatio >= 5) return '爆天量';
+  if (volRatio >= 2) return '爆大量';
+  return '大量';
+}
 
 export type SellSignalType =
   | 'DEATH_CROSS'         // MA5 crosses below MA20
@@ -216,7 +241,7 @@ export function detectSellSignals(
       signals.push({
         type: 'PROFIT_CLIMAX_EXIT',
         label: '急漲後長黑出場',
-        detail: `連續3日急漲後出現大量長黑K覆蓋，主力出貨訊號`,
+        detail: `連續3日急漲後出現${volGradeLabel(volRatio5)}長黑K覆蓋（量比 ${(volRatio5 ?? 0).toFixed(1)}x）${blackTierSuffix(c)}，主力出貨訊號`,
         severity: 'high',
       });
     }
@@ -248,7 +273,7 @@ export function detectSellSignals(
       signals.push({
         type: 'BLOWOFF_BLACK_CONFIRMED',
         label: '爆量長黑反轉(次日確認)',
-        detail: `昨日爆量長黑(量比 ${(prevVolRatio5 ?? 0).toFixed(1)}x)，今日收盤 ${c.close.toFixed(2)} 跌破昨日低 ${prev.low.toFixed(2)}，反轉確認`,
+        detail: `昨日${volGradeLabel(prevVolRatio5)}長黑(量比 ${(prevVolRatio5 ?? 0).toFixed(1)}x)${blackTierSuffix(prev)}，今日收盤 ${c.close.toFixed(2)} 跌破昨日低 ${prev.low.toFixed(2)}，反轉確認`,
         severity: 'high',
       });
     }
@@ -414,7 +439,7 @@ export function detectSellSignals(
       signals.push({
         type: 'TRENDLINE_BREAK_BLACK',
         label: '跌破切線長黑',
-        detail: `上升趨勢中長黑K收 ${c.close.toFixed(2)} 跌破前 2 日最低 ${prev2Low.toFixed(2)}（寶典 8 下殺第 1 條）`,
+        detail: `上升趨勢中長黑K${blackTierSuffix(c)}收 ${c.close.toFixed(2)} 跌破前 2 日最低 ${prev2Low.toFixed(2)}（寶典 8 下殺第 1 條）`,
         severity: 'high',
       });
     }

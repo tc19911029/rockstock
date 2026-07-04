@@ -147,6 +147,21 @@ describe('evaluateHolding', () => {
     expect(r.signals.some(s => s.type === 'loss_over_5pct')).toBe(true);
   });
 
+  // 賠少-10（2026-07-04 體檢補接）：跌破進場K線低點=生死線 → 硬停損
+  it('跌破進場K線低點 → stop_loss（entry_kline_low_break，比 -10% 更早觸發）', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, () => 100));
+    // 固定停損設很寬（80）、跌幅只 -2.5% 未觸硬停損，但已破進場K低點 98
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 80, candles, todayClose: 97.5, entryKlineLow: 98 });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals[0].type).toBe('entry_kline_low_break');
+  });
+
+  it('entryKlineLow 缺值 → 行為不變（同輸入走 watch/hold）', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, () => 100));
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 80, candles, todayClose: 97.5 });
+    expect(r.action).not.toBe('stop_loss');
+  });
+
   // 課程 CH10-1（2026-07-04）：當日跌幅 >5% → watch_stop（day_drop_over_5pct，當日跌幅口徑）
   it('獲利中但當日跌 >5% → watch_stop（day_drop_over_5pct）', () => {
     const closes = Array.from({ length: 30 }, () => 100);

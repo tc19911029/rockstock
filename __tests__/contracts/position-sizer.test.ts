@@ -17,6 +17,7 @@
 import {
   suggestPositionSize,
   applyRiskGuards,
+  regimeExposureCap,
   loadSizingConfig,
   DEFAULT_SIZING_CONFIG,
   DEFAULT_LETTER_WEIGHTS,
@@ -371,5 +372,49 @@ describe('sizer-no-self-invented-factors（letterWeights 來源驗證）', () =>
 
   test('J letterWeight = 1.0（backtest 半 Kelly 最高）', () => {
     expect(DEFAULT_LETTER_WEIGHTS.J).toBe(1.0);
+  });
+});
+
+// 書本 CH5-06 + 直播 2026-07-01 QA#15（2026-07-04 體檢補）：大盤 regime → 總投入成數上限
+describe('totalInvestCapPct（大盤 regime 總投入上限）', () => {
+  test('缺值 → 不啟用（向下相容）', () => {
+    const g = applyRiskGuards({
+      rawCapital: 7_600_000,
+      req: makeRequest(),
+      config: DEFAULT_SIZING_CONFIG,
+    });
+    expect(g.appliedGuards).not.toContain('totalExposureCap');
+  });
+
+  test('空頭 3 成：既有部位已占 25% → 本筆只剩 5% 額度', () => {
+    const g = applyRiskGuards({
+      rawCapital: 7_600_000, // raw 10%
+      req: makeRequest({
+        totalInvestCapPct: 0.3,
+        existingHoldings: [{ symbol: 'X', currentValue: 19_000_000 }], // 25% of 76M
+      }),
+      config: DEFAULT_SIZING_CONFIG,
+    });
+    expect(g.appliedGuards).toContain('totalExposureCap');
+    expect(g.cappedCapital).toBeCloseTo(76_000_000 * 0.30 - 19_000_000, 0); // 3,800,000 = 5%
+  });
+
+  test('既有部位已超過上限 → 本筆額度 0', () => {
+    const g = applyRiskGuards({
+      rawCapital: 7_600_000,
+      req: makeRequest({
+        totalInvestCapPct: 0.3,
+        existingHoldings: [{ symbol: 'X', currentValue: 30_000_000 }], // ~39%
+      }),
+      config: DEFAULT_SIZING_CONFIG,
+    });
+    expect(g.cappedCapital).toBe(0);
+  });
+
+  test('regimeExposureCap 梯度：空頭0.3 / 盤整或近高0.5 / 強多頭0.8', () => {
+    expect(regimeExposureCap('bear', false)).toBe(0.3);
+    expect(regimeExposureCap('normal', false)).toBe(0.5);
+    expect(regimeExposureCap('strong_bull', true)).toBe(0.5);  // 近歷史高檔壓五成（CH5-06 優先）
+    expect(regimeExposureCap('strong_bull', false)).toBe(0.8);
   });
 });

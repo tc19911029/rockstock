@@ -50,6 +50,13 @@ export interface HoldingActionInput {
    * 缺值 → fallback 用 stopLoss（既有欄位）當回補價。
    */
   entryHigh?: number;
+
+  /**
+   * 賠少-10（2026-07-04 體檢補接）：做多進場K線最低點=「生死線」。
+   * 書本 CH4-04：起漲大量紅K最低點被跌破＝誘多失敗，立刻出場（硬停損家族）。
+   * 呼叫端從 ui.entryKbar.low 或 candles 中 entryDate 那根的 low 取得；缺值不判（向下相容）。
+   */
+  entryKlineLow?: number;
 }
 
 export interface HoldingActionResult {
@@ -327,6 +334,17 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
       label: '跌幅 >10% 強制停損',
       severity: 'high',
       detail: `跌幅 ${(profitPct * 100).toFixed(1)}% ≤ -${(ABSOLUTE_STOP_LOSS_PCT * 100).toFixed(0)}%（書本絕對停損下限）`,
+    }, ...trappedSigs]);
+  }
+
+  // 賠少-10（2026-07-04 體檢補接）：跌破進場K線低點=生死線 → 硬停損。
+  // 書本 CH4-04「起漲紅K最低點被跌破＝誘多失敗，立刻出」。通常比 -10% 硬停損更早觸發（賠更少）。
+  if (input.entryKlineLow != null && input.entryKlineLow > 0 && todayClose < input.entryKlineLow) {
+    return finalize('stop_loss', [{
+      type: 'entry_kline_low_break',
+      label: '跌破進場K線低點（生死線）',
+      severity: 'high',
+      detail: `today ${todayClose.toFixed(2)} < 進場K線低點 ${input.entryKlineLow.toFixed(2)}，書本 CH4-04：誘多失敗立刻出場`,
     }, ...trappedSigs]);
   }
 

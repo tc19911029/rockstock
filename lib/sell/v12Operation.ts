@@ -125,20 +125,27 @@ export function checkMAExit(
  * 議題 Step 4 ③：用戶獲利 ≥ 10% 後 UI 提供切換按鈕（手動升級）。
  * 升級後**所有訊號統一切到 MA20**（衝突 β 修正）。
  *
+ * 小修-CH8-3（2026-07-04 體檢補）：課程 8-4「升級長線要日+週+月三線共振」——
+ * 加 optional 週線多頭確認 gate：weeklyBullish===false 時擋升級；缺值不擋（向下相容）。
+ *
  * @param currentClose 當前收盤
  * @param entryPrice 進場價
  * @param currentMode 當前操作模式
+ * @param weeklyBullish 週線是否多頭（呼叫端用 aggregateCandles('1wk') + detectTrend 算）
  * @returns 是否可升級長線
  */
 export function canUpgradeToLongTerm(
   currentClose: number,
   entryPrice: number,
   currentMode: OperationMode,
-): { canUpgrade: boolean; profitPct: number } {
+  weeklyBullish?: boolean,
+): { canUpgrade: boolean; profitPct: number; weeklyBullish?: boolean } {
   const profitPct = (currentClose - entryPrice) / entryPrice;
+  const weeklyOk = weeklyBullish !== false; // 缺值 = 不擋（向下相容）
   return {
-    canUpgrade: profitPct >= 0.10 && currentMode === 'short',
+    canUpgrade: profitPct >= 0.10 && currentMode === 'short' && weeklyOk,
     profitPct,
+    weeklyBullish,
   };
 }
 

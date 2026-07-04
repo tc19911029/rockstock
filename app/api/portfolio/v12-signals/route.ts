@@ -18,6 +18,8 @@ import { checkKLineExit, checkMAExit, getOperationMA, canUpgradeToLongTerm } fro
 import { checkTakeProfitTargets, detectKBarExitSignal } from '@/lib/sell/v12TakeProfit';
 import { computePartialExitState } from '@/lib/sell/v12PartialExit';
 import { computeProfitTargets } from '@/lib/sell/profitTargets';
+import { computeIndicators } from '@/lib/indicators';
+import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
 import { HIGH_DEVIATION_PCT } from '@/lib/analysis/bookThresholds';
 import { getTickSize } from '@/lib/utils/tickSize';
@@ -149,7 +151,12 @@ export async function GET(req: NextRequest) {
     const maExit = maValue != null
       ? checkMAExit(today_c.close, maValue, letter, entryPrice)
       : { shouldExit: false };
-    const upgradeCheck = canUpgradeToLongTerm(today_c.close, entryPrice, operationMode);
+    // 小修-CH8-3（2026-07-04）：升級長線加「週線多頭確認」gate（課程 8-4 三線共振）
+    const weeklyCandles = computeIndicators(aggregateCandles(candles, '1wk'));
+    const weeklyBullish = weeklyCandles.length >= 15
+      ? detectTrend(weeklyCandles, weeklyCandles.length - 1) === '多頭'
+      : undefined; // 週線資料不足不擋（向下相容）
+    const upgradeCheck = canUpgradeToLongTerm(today_c.close, entryPrice, operationMode, weeklyBullish);
 
     // ── Step 5 停利 ──
     // 找最近 confirmed pivot high 給「到達壓力」判定（書本 5 步驟步驟 5 第 4 章 #1）

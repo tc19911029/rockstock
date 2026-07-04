@@ -31,9 +31,11 @@ import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import {
-  suggestPositionSize, loadSizingConfig,
+  suggestPositionSize, loadSizingConfig, INDEX_NEAR_ATH_RATIO, regimeExposureCap,
   type SizingMode, type ExistingHolding,
 } from '@/lib/portfolio/positionSizer';
+import { detectMarketRegime } from '@/lib/agents/marketRegime';
+import type { Candle } from '@/types';
 import { listOpenHoldings } from '@/lib/agents/portfolio/storage';
 import { trackOf } from '@/lib/scanner/buyMethodTracks';
 import type { MarketId } from '@/lib/scanner/types';
@@ -65,6 +67,26 @@ async function loadLatestClose(symbol: string, market: MarketId): Promise<number
     const data = JSON.parse(raw) as { candles?: Array<{ close: number }> };
     const c = data.candles ?? [];
     return c.length > 0 ? c[c.length - 1].close : null;
+  } catch { return null; }
+}
+
+/**
+ * 書本 CH5-06 + 直播 2026-07-01 QA#15（2026-07-04 體檢補）：
+ * 從 ^TWII 歷史 K 算「總投入成數上限」— 大多頭 8 成 / 高檔或盤整 5 成 / 空頭做多 3 成。
+ * 近歷史高檔（收盤 ≥ 歷史最高收盤 × 0.95）即使強多頭也壓五成。
+ * 讀不到指數資料回 null（不啟用 cap，fail-open）。
+ */
+async function computeTotalInvestCap(): Promise<number | null> {
+  try {
+    const p = path.join(process.cwd(), 'data', 'candles', 'TW', '^TWII.json');
+    const raw = await fs.readFile(p, 'utf-8');
+    const data = JSON.parse(raw) as { candles?: Candle[] };
+    const cs = (data.candles ?? []).filter(c => c.close > 0);
+    if (cs.length < 60) return null;
+    const ath = Math.max(...cs.map(c => c.close));
+    const nearAth = cs[cs.length - 1].close >= ath * INDEX_NEAR_ATH_RATIO;
+    const regime = detectMarketRegime(cs).regime;
+    return regimeExposureCap(regime, nearAth);
   } catch { return null; }
 }
 
@@ -117,10 +139,12 @@ export async function POST(req: NextRequest) {
   // track 推導
   const track = candidate.track ?? (candidate.letter ? trackOf(candidate.letter) : undefined);
 
-  const [config, existingHoldings, letterStatsByLetter] = await Promise.all([
+  const [config, existingHoldings, letterStatsByLetter, totalInvestCapPct] = await Promise.all([
     loadSizingConfig(),
     loadExistingHoldings(),
     loadLetterStats(),
+    // 書本 CH5-06 + 直播 QA#15：大盤 regime → 總投入成數（sizer 業務 TW-only，指數看 ^TWII；CN 候選不啟用）
+    market === 'TW' ? computeTotalInvestCap() : Promise.resolve(null),
   ]);
 
   const effectiveConfig = modeOverride ? { ...config, mode: modeOverride } : config;
@@ -137,6 +161,7 @@ export async function POST(req: NextRequest) {
     existingHoldings,
     letterStatsByLetter,
     currentPortfolioMddPct,
+    totalInvestCapPct: totalInvestCapPct ?? undefined,
   }, effectiveConfig);
 
   return apiOk({

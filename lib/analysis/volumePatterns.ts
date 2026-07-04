@@ -88,6 +88,11 @@ export function classifyVolume(
  *   本函式是「相鄰兩根」短線量價背離（今日 vs 昨日），用於當日量價同步檢查。
  *   trendAnalysis 內的 hasVolumePriceDivergence 是「波段量峰」背離（今日新高 vs 前一個
  *   findPivots 高點當日量），用於趨勢頭部判定。兩者粒度不同、用途不同，不應互相覆寫。
+ *
+ * 賠少-9 語意分流（2026-07-04 體檢註記）：量價背離依「你在場外還是場內」意義相反 —
+ *   場外（進場端）＝勿進場做多（entryProhibitions 戒律3 三合一硬禁入）；
+ *   場內（持倉端）＝上漲一段後的「停利警訊」（該準備出，不是停損）。
+ *   消費本函式時務必分清用途，不可把持倉停利警訊當進場禁入、反之亦然。
  */
 export interface VolumePriceDivergence {
   priceUpVolDown: boolean;   // 價漲量縮（背離）

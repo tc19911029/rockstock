@@ -121,8 +121,13 @@ export async function GET(req: NextRequest) {
         // 判斷是否為逆勢/搶反彈軌（反轉軌 D/F/N/O）以走專屬「翻黑就走」出場。
         const triggerSignal = typeof h.ui?.triggerSignal === 'string' ? h.ui.triggerSignal : undefined;
         // 賠少-1：做空進場黑K最高點（停損價）走 ui.entryKbar.high。
-        const entryKbar = h.ui?.entryKbar as { high?: number } | undefined;
+        const entryKbar = h.ui?.entryKbar as { high?: number; low?: number } | undefined;
         const entryHigh = typeof entryKbar?.high === 'number' ? entryKbar.high : undefined;
+        // 賠少-10（2026-07-04）：做多生死線=進場K線低點。優先 ui.entryKbar.low，
+        // 缺值 fallback 用 candles 裡 entryDate 那根的 low（找不到該日就不判）。
+        const entryKlineLow = typeof entryKbar?.low === 'number'
+          ? entryKbar.low
+          : candles.find(c => c.date === h.entryDate)?.low;
         const result = evaluateHolding({
           symbol: h.symbol,
           entryPrice: h.entryPrice,
@@ -133,6 +138,7 @@ export async function GET(req: NextRequest) {
           triggerSignal,
           positionSide,
           entryHigh,
+          entryKlineLow,
         });
         // 課程 CH9-2（2026-07-04）：六壓力位最近上方壓力價（純顯示）
         const profitTargets = positionSide === 'long' ? computeProfitTargets(candles, 'short') : null;

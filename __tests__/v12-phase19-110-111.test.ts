@@ -108,6 +108,22 @@ describe('v12 Phase 1.9 — canUpgradeToLongTerm 升級長線', () => {
     const result = canUpgradeToLongTerm(105, 100, 'short');
     expect(result.canUpgrade).toBe(false);
   });
+
+  // 小修-CH8-3（2026-07-04）：課程 8-4 升級長線要週線多頭確認
+  it('週線非多頭（weeklyBullish=false）→ 擋升級', () => {
+    const result = canUpgradeToLongTerm(110, 100, 'short', false);
+    expect(result.canUpgrade).toBe(false);
+  });
+
+  it('週線多頭（weeklyBullish=true）→ 放行', () => {
+    const result = canUpgradeToLongTerm(110, 100, 'short', true);
+    expect(result.canUpgrade).toBe(true);
+  });
+
+  it('weeklyBullish 缺值 → 不擋（向下相容）', () => {
+    const result = canUpgradeToLongTerm(110, 100, 'short');
+    expect(result.canUpgrade).toBe(true);
+  });
 });
 
 describe('v12 Phase 1.9 — getOperationMA 操作均線對應', () => {
