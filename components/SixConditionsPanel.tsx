@@ -1,9 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import type { CandleWithIndicators } from '@/types';
 import { useReplayStore } from '@/store/replayStore';
 import { SixConditionsResult } from '@/lib/analysis/trendAnalysis';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
+import { computeProfitTargets } from '@/lib/sell/profitTargets';
 import { EmptyState } from '@/components/shared';
 import { HeavinessBadgeFor } from '@/components/shared/HeavinessBadge';
 import { classifyMarket } from '@/lib/market/classify';
@@ -320,6 +322,62 @@ export default function SixConditionsPanel() {
                 <div className="text-[10px] opacity-80 leading-relaxed mt-0.5">{sig.detail}</div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* 課程 CH9-2（2026-07-04）：獲利目標 = 六種壓力位（純顯示，不進 gate/排序） */}
+      <ProfitTargetsBlock candles={allCandles} index={currentIndex} />
+    </div>
+  );
+}
+
+/** 課程 CH9-2 六壓力位獲利目標（收合區塊；短線=日線、長線=週線） */
+function ProfitTargetsBlock({ candles, index }: { candles: CandleWithIndicators[]; index: number }) {
+  const [open, setOpen] = useState(false);
+  const short = useMemo(() => computeProfitTargets(candles, 'short', index), [candles, index]);
+  const long = useMemo(
+    () => (open ? computeProfitTargets(candles, 'long', index) : null),
+    [candles, index, open],
+  );
+  if (!short) return null;
+  const upPct = short.nearestAbove != null && short.asOfClose > 0
+    ? ((short.nearestAbove / short.asOfClose - 1) * 100).toFixed(1)
+    : null;
+  return (
+    <div className="mt-3 pt-3 border-t border-border">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <span className="text-[10px] font-bold text-muted-foreground">🎯 獲利目標（課程 9-2 六壓力位）</span>
+        <span className="text-[11px] font-mono">
+          {short.nearestAbove != null
+            ? <>最近壓力 <span className="font-bold text-foreground">{short.nearestAbove.toFixed(2)}</span>{upPct != null && <span className="text-muted-foreground">（+{upPct}%）</span>}</>
+            : <span className="text-muted-foreground">上方無壓（創新高）</span>}
+          <span className="ml-1 text-muted-foreground">{open ? '▾' : '▸'}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-2">
+          {([['短線（日線）', short.targets], ...(long ? [['長線（週線）', long.targets] as const] : [])] as Array<readonly [string, typeof short.targets]>).map(([title, targets]) => (
+            <div key={title}>
+              <div className="text-[10px] text-muted-foreground mb-0.5">{title}</div>
+              <div className="space-y-0.5">
+                {targets.map(t => (
+                  <div key={t.type} className="flex items-center justify-between text-[11px] px-2 py-1 rounded bg-secondary/40" title={t.detail}>
+                    <span className="text-muted-foreground">{t.label}</span>
+                    <span className={`font-mono ${t.price != null ? 'text-foreground font-bold' : 'text-muted-foreground/60'}`}>
+                      {t.price != null ? t.price.toFixed(2) : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="text-[9px] text-muted-foreground/70">
+            量價研判壓力位置預估獲利幅度（CH9-2）；手填 target 不受影響。純顯示、不進選股。
           </div>
         </div>
       )}

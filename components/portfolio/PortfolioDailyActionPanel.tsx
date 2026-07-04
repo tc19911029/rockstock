@@ -102,7 +102,7 @@ export function PortfolioDailyActionPanel() {
       </div>
 
       <div className="px-3 py-1.5 text-[9px] text-muted-foreground/70 bg-secondary/30 border-t border-border">
-        💡 訊號依朱家泓寶典：跌破 MA5+漲≥10% → 減半｜跌破 MA10+漲≥10% → 全出｜跌破 MA20+漲≥20% → 全出。不是 financial advice。
+        💡 訊號依朱家泓寶典＋課程：跌破 MA5+漲≥10% → 減半｜跌破 MA10+漲≥10% → 全出｜跌破 MA20+漲≥20% → 全出｜爆量反轉+賺&gt;15% → 先賣1/2、次日下跌全出（CH9-3）｜當日跌&gt;5% 列警示股、套牢分級（CH10-1）。不是 financial advice。
       </div>
     </div>
   );
@@ -161,6 +161,15 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
         {item.positionSide !== 'short' && item.suggestedStop != null && item.suggestedStop > item.stopLoss + 0.01 && (
           <span className="text-cyan-300/80" title="建議把停損上移到此價（鎖獲利）">
             💡 停損上移 {item.stopLoss.toFixed(2)} → <span className="font-bold">{item.suggestedStop.toFixed(2)}</span>
+          </span>
+        )}
+
+        {item.positionSide !== 'short' && item.nearestTarget != null && (
+          <span className="text-violet-300/80" title="課程 CH9-2：六種壓力位（長均線/前高/切線/盤整區/缺口/大量黑K）中最近的上方壓力，作獲利目標預估。純顯示。">
+            🎯 壓力 <span className="font-bold">{item.nearestTarget.toFixed(2)}</span>
+            {item.todayClose != null && item.todayClose > 0 && (
+              <span className="opacity-70">（+{((item.nearestTarget / item.todayClose - 1) * 100).toFixed(1)}%）</span>
+            )}
           </span>
         )}
 

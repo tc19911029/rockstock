@@ -211,6 +211,31 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [targetHint, setTargetHint] = useState<string | null>(null);
+
+  // 課程 CH9-2（2026-07-04）：一鍵帶入六壓力位目標價（使用者按了才寫入，不自動覆寫）
+  const fillCourseTargets = async () => {
+    if (!form.symbol) { setTargetHint('先填股票代號'); return; }
+    setTargetHint('計算中…');
+    try {
+      const res = await fetch(`/api/stock?symbol=${encodeURIComponent(form.symbol)}`);
+      const json = await res.json();
+      const candles = json?.data?.candles ?? json?.candles;
+      if (!Array.isArray(candles) || candles.length < 30) { setTargetHint('K 線不足，無法估壓力位'); return; }
+      const { computeProfitTargets } = await import('@/lib/sell/profitTargets');
+      const r = computeProfitTargets(candles, 'short');
+      if (!r || r.nearestAbove == null) { setTargetHint('上方無壓力位（創新高中）'); return; }
+      const prices = r.targets.map(t => t.price).filter((p): p is number => p != null).sort((a, b) => a - b);
+      setForm(f => ({
+        ...f,
+        target1: String(prices[0]),
+        target2: prices.length > 1 ? String(prices[1]) : f.target2,
+      }));
+      setTargetHint(`已帶入課程 9-2 壓力位（${r.nearestType ? '最近=' : ''}${prices[0]}${prices[1] ? ` / ${prices[1]}` : ''}）`);
+    } catch {
+      setTargetHint('壓力位計算失敗');
+    }
+  };
 
   const submit = async () => {
     setBusy(true);
@@ -281,6 +306,17 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
         <Field label="停損價" k="stopLoss" type="number" placeholder="195" />
         <Field label="目標 1" k="target1" type="number" placeholder="240" />
         <Field label="目標 2" k="target2" type="number" placeholder="260" />
+        <div className="col-span-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={fillCourseTargets}
+            className="text-[11px] px-2 py-1 rounded border border-violet-700/60 bg-violet-900/30 text-violet-200 hover:bg-violet-900/50"
+            title="課程 CH9-2：以六種壓力位（長均線/前高/下降切線/盤整區/缺口/大量黑K）估獲利目標，帶入最近兩檔"
+          >
+            🎯 帶入課程壓力價
+          </button>
+          {targetHint && <span className="text-[10px] text-muted-foreground">{targetHint}</span>}
+        </div>
         <label className="col-span-2 space-y-1">
           <span className="text-xs text-muted-foreground">備註</span>
           <input

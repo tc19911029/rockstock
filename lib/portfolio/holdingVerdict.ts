@@ -14,7 +14,7 @@
  *   9. profitPct < 0 → 緊盯停損
  *   10. default → 繼續持有
  */
-import { PROFIT_TARGET_RULE_PCT } from '@/lib/analysis/bookThresholds';
+import { PROFIT_TARGET_RULE_PCT, TRAPPED_PCT, TRAPPED_DEEP_PCT, DAY_DROP_WATCH_PCT } from '@/lib/analysis/bookThresholds';
 import { sopFor } from './letterSOP';
 
 export type VerdictLevel = 'good' | 'warn' | 'bad';
@@ -29,6 +29,8 @@ export interface VerdictResult {
 export interface VerdictInput {
   letter: string;
   profitPct: number;
+  /** 課程 CH10-1 警示股（2026-07-04）：當日漲跌幅（vs 前一日收盤）。optional，缺值走舊行為。 */
+  dayChangePct?: number;
   step3: {
     stopLossPrice: number;
     slDistancePct: number;
@@ -41,7 +43,8 @@ export interface VerdictInput {
   };
   step5: {
     takeProfit: { triggered: boolean; detail?: string };
-    kbarSignal: { triggered: boolean; detail?: string };
+    /** advisory = 課程 CH9-3 分批停利建議（partial-tp-half / exit-remaining），非強制出場 */
+    kbarSignal: { triggered: boolean; detail?: string; advisory?: 'partial-tp-half' | 'exit-remaining' };
     triggeredSellSignals?: Array<{ type: string; label: string; detail: string; severity: 'high' | 'medium' | 'low' }>;
   };
 }
@@ -72,6 +75,13 @@ export function holdingVerdict(data: VerdictInput): VerdictResult {
   if (data.step5.kbarSignal.triggered) {
     return { level: 'bad', label: '該停利', reason: data.step5.kbarSignal.detail ?? 'K 棒反轉訊號' };
   }
+  // 課程 CH9-3（2026-07-04）分批停利 advisory：次日下跌全出 > 訊號日先停利 1/2
+  if (data.step5.kbarSignal.advisory === 'exit-remaining') {
+    return { level: 'bad', label: '剩餘全出', reason: data.step5.kbarSignal.detail ?? '課程 CH9-3：爆量反轉次日下跌，剩餘全數賣出' };
+  }
+  if (data.step5.kbarSignal.advisory === 'partial-tp-half') {
+    return { level: 'warn', label: '先停利1/2', reason: data.step5.kbarSignal.detail ?? '課程 CH9-3：爆量反轉未破昨低、獲利>15%，先停利 1/2' };
+  }
 
   // 書本出場訊號（detectSellSignals）按字母過濾不適用後判 severity
   const sop = sopFor(data.letter);
@@ -91,12 +101,23 @@ export function holdingVerdict(data: VerdictInput): VerdictResult {
     return { level: 'warn', label: '緊盯停損', reason: `現價距停損僅 ${data.step3.slDistancePct.toFixed(1)}%` };
   }
 
+  // 課程 CH10-1 警示股（2026-07-04）：當日跌幅 >5% 列警示股準備賣出（有帶 dayChangePct 才判）
+  if (data.dayChangePct != null && data.dayChangePct <= -DAY_DROP_WATCH_PCT) {
+    return { level: 'warn', label: '警示股', reason: `今日跌 ${(data.dayChangePct * 100).toFixed(1)}% > 5%，課程 CH10-1 列警示股、準備賣出` };
+  }
+
   // 獲利達 10% — 書本可考慮停利或啟用紀律（寶典 #6）
   if (data.profitPct >= PROFIT_TARGET_RULE_PCT) {
     return { level: 'good', label: '可續抱', reason: `已達 ${(data.profitPct * 100).toFixed(1)}% 獲利，跟 ${data.step4.operatingMA} 走` };
   }
 
-  // 虧損中
+  // 虧損中 — 課程 CH10-1 套牢三級文案（2026-07-04）
+  if (data.profitPct <= -TRAPPED_DEEP_PCT) {
+    return { level: 'bad', label: '深度套牢', reason: `賠損 ${(data.profitPct * 100).toFixed(1)}% >20%，課程三條路：反彈反手做空／換多頭股／打底完成等加碼` };
+  }
+  if (data.profitPct <= -TRAPPED_PCT) {
+    return { level: 'bad', label: '套牢', reason: `賠損 ${(data.profitPct * 100).toFixed(1)}% >10% 已套牢，課程：反彈遇壓不漲時認賠出場` };
+  }
   if (data.profitPct < 0) {
     return { level: 'warn', label: '緊盯停損', reason: `目前虧損 ${(data.profitPct * 100).toFixed(1)}%，停損 ${data.step3.stopLossPrice.toFixed(2)}` };
   }

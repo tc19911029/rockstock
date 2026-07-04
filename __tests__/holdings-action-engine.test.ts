@@ -147,6 +147,81 @@ describe('evaluateHolding', () => {
     expect(r.signals.some(s => s.type === 'loss_over_5pct')).toBe(true);
   });
 
+  // 課程 CH10-1（2026-07-04）：當日跌幅 >5% → watch_stop（day_drop_over_5pct，當日跌幅口徑）
+  it('獲利中但當日跌 >5% → watch_stop（day_drop_over_5pct）', () => {
+    const closes = Array.from({ length: 30 }, () => 100);
+    closes.push(94); // 今日 100 → 94 = -6%
+    const candles = makeCandles(closes);
+    // entry 88 → 帳上還賺 6.8%（不觸 loss_over_5pct），純粹當日重挫
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 88, stopLoss: 80, candles, todayClose: 94 });
+    expect(r.action).toBe('watch_stop');
+    expect(r.signals.some(s => s.type === 'day_drop_over_5pct')).toBe(true);
+    expect(r.signals.some(s => s.type === 'loss_over_5pct')).toBe(false);
+  });
+
+  // 課程 CH10-1（2026-07-04）：套牢分級附加訊號（action 不變、signals 增量）
+  it('賠損 10-20%（陰跌無反彈）→ stop_loss + trapped_flag 附註', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, () => 100));
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 70, candles, todayClose: 85 });
+    expect(r.action).toBe('stop_loss'); // 硬停損主建議不變
+    expect(r.signals[0].type).toBe('hard_stop_10pct');
+    expect(r.signals.some(s => s.type === 'trapped_flag')).toBe(true);
+  });
+
+  it('賠損 >20% → stop_loss + 深套三條路附註', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, () => 100));
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 60, candles, todayClose: 75 });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals.some(s => s.type === 'trapped_deep_three_paths')).toBe(true);
+  });
+
+  it('賠損 10-20% + 反彈遇壓不漲 → trapped_rebound_stall（high）附註', () => {
+    const closes = [
+      ...Array.from({ length: 20 }, () => 100),
+      96, 92, 88, 84, 80,
+      84, 89, 93.5,      // 反彈觸 MA20 被壓回
+      90, 89, 88,        // 3 日未創反彈新高
+    ];
+    const candles = makeCandles(closes);
+    // entry 104 → today 88 = -15.4%
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 104, stopLoss: 70, candles, todayClose: 88 });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals.some(s => s.type === 'trapped_rebound_stall' && s.severity === 'high')).toBe(true);
+  });
+
+  // 課程 CH9-3(二)(三)（2026-07-04）：爆量反轉 獲利>15% 先停利1/2、次日下跌全出
+  it('獲利 19% + 爆量長上影未破昨低 → reduce_half（ch9_partial_tp_half）', () => {
+    const candles = makeCandles(Array.from({ length: 28 }, () => 100));
+    // 昨日：大紅 K（100 → 118）
+    candles.push({ date: '2026-02-10', open: 100, high: 118.5, low: 99.8, close: 118, volume: 10000 });
+    // 今日：爆量長上影（高 130 收 119，上影 88% 全長）、未破昨低
+    candles.push({ date: '2026-02-11', open: 118, high: 130, low: 117.5, close: 119, volume: 30000 });
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 90, candles, todayClose: 119 });
+    expect(r.profitPct).toBeCloseTo(0.19, 2);
+    expect(r.action).toBe('reduce_half');
+    expect(r.signals.some(s => s.type === 'ch9_partial_tp_half')).toBe(true);
+  });
+
+  it('訊號日次日下跌 → exit_all（ch9_exit_remaining）', () => {
+    const candles = makeCandles(Array.from({ length: 28 }, () => 100));
+    candles.push({ date: '2026-02-10', open: 100, high: 118.5, low: 99.8, close: 118, volume: 10000 });
+    candles.push({ date: '2026-02-11', open: 118, high: 130, low: 117.5, close: 119, volume: 30000 }); // 昨日=訊號日
+    candles.push({ date: '2026-02-12', open: 118, high: 118.5, low: 115.5, close: 116, volume: 10000 }); // 今日下跌
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 90, candles, todayClose: 116 });
+    expect(r.action).toBe('exit_all');
+    expect(r.signals.some(s => s.type === 'ch9_exit_remaining')).toBe(true);
+  });
+
+  it('訊號日次日上漲 → 不觸發 ch9 全出（續抱跟均線）', () => {
+    const candles = makeCandles(Array.from({ length: 28 }, () => 100));
+    candles.push({ date: '2026-02-10', open: 100, high: 118.5, low: 99.8, close: 118, volume: 10000 });
+    candles.push({ date: '2026-02-11', open: 118, high: 130, low: 117.5, close: 119, volume: 30000 });
+    candles.push({ date: '2026-02-12', open: 119.5, high: 122.5, low: 119, close: 122, volume: 10000 }); // 今日上漲
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 90, candles, todayClose: 122 });
+    expect(r.signals.some(s => s.type === 'ch9_exit_remaining')).toBe(false);
+    expect(r.action).not.toBe('exit_all');
+  });
+
   // 賠少-11：飆股獲利 >20% + 爆量黑K → reduce_half
   it('獲利 >20% + 爆量黑K → reduce_half（blowoff_black_reduce）', () => {
     const closes = Array.from({ length: 30 }, (_, i) => 100 + i * 1.0); // 緩升，避免破均線

@@ -17,6 +17,7 @@ import { calcKLineStopLoss, updateStopLossDaily, checkAbsoluteStopLoss, SIGNAL_T
 import { checkKLineExit, checkMAExit, getOperationMA, canUpgradeToLongTerm } from '@/lib/sell/v12Operation';
 import { checkTakeProfitTargets, detectKBarExitSignal } from '@/lib/sell/v12TakeProfit';
 import { computePartialExitState } from '@/lib/sell/v12PartialExit';
+import { computeProfitTargets } from '@/lib/sell/profitTargets';
 import { detectSellSignals } from '@/lib/analysis/sellSignals';
 import { HIGH_DEVIATION_PCT } from '@/lib/analysis/bookThresholds';
 import { getTickSize } from '@/lib/utils/tickSize';
@@ -169,6 +170,8 @@ export async function GET(req: NextRequest) {
           twoDaysAgoCandle: candles[lastIdx - 2],
           threeDaysAgoCandle: candles[lastIdx - 3],
           cumulativeProfit: profitPct,
+          // 課程 CH9-3 次日分支：以「訊號日（昨日）」收盤算獲利，避免今日下跌把 >15% 拉掉
+          yesterdayCumulativeProfit: (yesterday_c.close - entryPrice) / entryPrice,
           // 末升段觸發時啟用 高檔長上影 / 急漲反轉 偵測（書本「末升段」訊號）
           isEndPhase: endPhaseTriggered ?? false,
         })
@@ -235,6 +238,8 @@ export async function GET(req: NextRequest) {
         takeProfit,
         kbarSignal,
         triggeredSellSignals,
+        // 課程 CH9-2（2026-07-04）：六壓力位獲利目標（純顯示，不影響 verdict）
+        profitTargets: computeProfitTargets(candles, 'short', lastIdx),
       },
       // CH8 8-5 分批出場（選用「賠少」模式）— 前端可選擇顯示
       partialExit: partialExit ? {

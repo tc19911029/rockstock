@@ -19,6 +19,8 @@ import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
 import { evaluateHolding, DEFAULT_STOP_LOSS_MULT, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
+import { readAveragedDownFlag } from '@/lib/portfolio/averagingDownGuard';
+import { computeProfitTargets } from '@/lib/sell/profitTargets';
 import { detectMarketRegime, thresholdsForRegime, type RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
 import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
@@ -45,6 +47,8 @@ export interface DailyActionItem {
   profitPct: number | null;
   suggestedStop: number | null;
   metrics: HoldingActionResult['metrics'] | null;
+  /** 課程 CH9-2（2026-07-04）：六壓力位中最近的上方壓力價（純顯示；null = 創新高無壓/資料不足） */
+  nearestTarget?: number | null;
 }
 
 export interface DailyActionResponse {
@@ -130,6 +134,18 @@ export async function GET(req: NextRequest) {
           positionSide,
           entryHigh,
         });
+        // 課程 CH9-2（2026-07-04）：六壓力位最近上方壓力價（純顯示）
+        const profitTargets = positionSide === 'long' ? computeProfitTargets(candles, 'short') : null;
+        // 課程 CH10-2（2026-07-04）：向下攤平紅旗（upsert 咽喉寫入 ui.disciplineFlags）→ 常駐透出到平倉
+        const avgDown = readAveragedDownFlag(h.ui);
+        const signals = avgDown
+          ? [{
+              type: 'averaging_down_flag',
+              label: '🚩 向下攤平（紀律紅旗）',
+              severity: 'high' as const,
+              detail: `${avgDown.date} 曾虧損中向下攤平（均價 ${avgDown.fromPrice} → ${avgDown.toPrice}）。課程 CH10-2：攤平=加碼下跌中的股票，完全錯誤；紅旗常駐到平倉`,
+            }, ...result.signals]
+          : result.signals;
         return {
           ...base,
           todayClose,
@@ -140,10 +156,11 @@ export async function GET(req: NextRequest) {
             : (todayClose - h.entryPrice) * h.shares,
           action: result.action,
           label: result.label,
-          signals: result.signals,
+          signals,
           profitPct: result.profitPct,
           suggestedStop: result.suggestedStop,
           metrics: result.metrics,
+          nearestTarget: profitTargets?.nearestAbove ?? null,
         };
       }),
     );

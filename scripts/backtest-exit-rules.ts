@@ -56,6 +56,77 @@ function fullMAExit(cs: OHLC[], e: number, n: number): { ret: number; days: numb
   for (let d = e + 1; d <= end; d++) { const ma = smaAt(cs, d, n); if (ma > 0 && cs[d].close < ma) return { ret: (cs[d].close / cs[e].open - 1) * 100, days: d - e }; }
   return { ret: (cs[end].close / cs[e].open - 1) * 100, days: end - e };
 }
+
+// ── 課程 CH9-3(二)(三)（2026-07-04）：爆量反轉分批停利 ────────────────────────
+// 訊號 bar 判定（鏡像 lib/agents/holdingsActionEngine.detectCh9BlowoffReversalBar）：
+// 爆大量（前5日均量×1.5）長黑吞噬 或 長上影（上影>50%全長），且收盤未破前日低。
+function ch9Kind(cs: OHLC[], i: number): 'engulf' | 'upper' | null {
+  if (i < 6) return null;
+  const bar = cs[i], prev = cs[i - 1];
+  if (bar.close < prev.low) return null;
+  let s = 0, n = 0; for (let k = i - 5; k <= i - 1; k++) { if (cs[k].volume > 0) { s += cs[k].volume; n++; } }
+  if (n === 0 || bar.volume / (s / n) < 1.5) return null;
+  if (prev.close > prev.open && bar.close < bar.open && bar.open > prev.close && bar.close < prev.open) return 'engulf';
+  const full = bar.high - bar.low, upper = bar.high - Math.max(bar.open, bar.close);
+  if (full > 0 && upper / full > 0.5) return 'upper';
+  return null;
+}
+// 基線 = 固定停損-10%；持有中訊號日（獲利>15%）收盤出1/2、次日收黑再全出，否則回基線。
+function ch9PartialTpExit(cs: OHLC[], e: number): { ret: number; days: number } {
+  const entry = cs[e].open, stop = entry * 0.90;
+  const end = Math.min(e + MAXHOLD, cs.length - 1);
+  let half = false, halfRet = 0, sigIdx = -1;
+  for (let d = e + 1; d <= end; d++) {
+    if (cs[d].low <= stop) {
+      const px = Math.min(cs[d].open, stop); const r = px / entry - 1;
+      return { ret: (half ? (halfRet + r) / 2 : r) * 100, days: d - e };
+    }
+    if (half && d === sigIdx + 1 && cs[d].close < cs[sigIdx].close) {
+      return { ret: ((halfRet + (cs[d].close / entry - 1)) / 2) * 100, days: d - e };
+    }
+    if (!half) {
+      const kind = ch9Kind(cs, d);
+      if (kind && cs[d].close / entry - 1 > 0.15) { half = true; halfRet = cs[d].close / entry - 1; sigIdx = d; }
+    }
+  }
+  const tail = cs[end].close / entry - 1;
+  return { ret: (half ? (halfRet + tail) / 2 : tail) * 100, days: end - e };
+}
+
+// ── 課程 CH10-1（2026-07-04）：套牢 10%+ 反彈遇壓不漲認賠（60 天視窗，對照死抱60天）──
+// 反彈遇壓不漲（鏡像 lib/portfolio/trappedTier.detectReboundStallAtResistance）：
+// 近30根波段低點反彈≥3% → 觸 MA20×0.98 被壓回 → 觸壓後連3日未創反彈新高。
+const HOLD60 = 60;
+function reboundStallAt(cs: OHLC[], d: number): boolean {
+  if (d < 25) return false;
+  const start = Math.max(0, d - 29);
+  let lowIdx = start;
+  for (let i = start; i <= d; i++) { if (cs[i].low < cs[lowIdx].low) lowIdx = i; }
+  if (lowIdx >= d) return false;
+  let reboundHigh = -Infinity;
+  for (let i = lowIdx + 1; i <= d; i++) { if (cs[i].high > reboundHigh) reboundHigh = cs[i].high; }
+  if (reboundHigh / cs[lowIdx].low - 1 < 0.03) return false;
+  let touchIdx = -1;
+  for (let i = lowIdx + 1; i <= d; i++) {
+    const ma20 = smaAt(cs, i, 20);
+    if (ma20 > 0 && cs[i].high >= ma20 * 0.98 && cs[i].close < ma20) { touchIdx = i; break; }
+  }
+  if (touchIdx < 0 || d - touchIdx < 3) return false;
+  let highAtTouch = -Infinity;
+  for (let i = lowIdx + 1; i <= touchIdx; i++) { if (cs[i].high > highAtTouch) highAtTouch = cs[i].high; }
+  for (let i = touchIdx + 1; i <= d; i++) { if (cs[i].high > highAtTouch) return false; }
+  return true;
+}
+function trappedStallExit(cs: OHLC[], e: number): { ret: number; days: number } {
+  const entry = cs[e].open;
+  const end = Math.min(e + HOLD60, cs.length - 1);
+  let trapped = false;
+  for (let d = e + 1; d <= end; d++) {
+    if (!trapped && cs[d].close / entry - 1 <= -0.10) trapped = true;
+    if (trapped && reboundStallAt(cs, d)) return { ret: (cs[d].close / entry - 1) * 100, days: d - e };
+  }
+  return { ret: (cs[end].close / entry - 1) * 100, days: end - e };
+}
 const exits: Record<string, Exit> = {
   '死抱20天(不停損)': (cs, e) => { const x = Math.min(e + MAXHOLD, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e }; },
   '固定停損-7%': (cs, e) => {
@@ -100,6 +171,11 @@ const exits: Record<string, Exit> = {
   '整批跌破MA20全出': (cs, e) => fullMAExit(cs, e, 20),
   '分批MA5/10/20各1/3': (cs, e) => partialMAExit(cs, e, null),
   '分批+停損5%': (cs, e) => partialMAExit(cs, e, 0.05),
+  // ── 課程 CH9-3（2026-07-04）：爆量反轉 15% 減半 + 次日下跌全出（基線=固定停損-10%）──
+  'CH9爆量反轉15%減半': (cs, e) => ch9PartialTpExit(cs, e),
+  // ── 課程 CH10-1（2026-07-04）：套牢反彈遇壓認賠 vs 死抱（60 天視窗，兩條一起看）──
+  '死抱60天(對照)': (cs, e) => { const x = Math.min(e + HOLD60, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e }; },
+  '套牢反彈遇壓認賠60天': (cs, e) => trappedStallExit(cs, e),
 };
 
 function report(label: string, rets: { ret: number; days: number }[]) {

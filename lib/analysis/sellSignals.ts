@@ -35,6 +35,8 @@ export type SellSignalType =
   | 'BLOWOFF_BLACK_CONFIRMED'    // 爆量長黑反轉 + 次日收盤跌破該長黑低點才確認
   // 朱家泓 CH2-01：長上影線紅 K「次日看開盤」— 次日跌破長上影紅 K 低點確認轉弱
   | 'UPPER_SHADOW_NEXTDAY_BREAK' // 高檔長上影紅K 次日收盤跌破其低點確認
+  // 課程 CH9-3(一)（2026-07-04）：跌破高檔連續兩日大量 K 線的低點（一日反轉）→ 多單停利
+  | 'HIGH_VOL_2DAY_LOW_BREAK'
   // Wave2 進場-11（回測過關）：帶量突破紅K 後 T+1/T+2 黑K收盤跌破其 1/2 價 = 假突破
   | 'FALSE_BREAKOUT_FAIL'; // 假突破跌破1/2價（持倉端避雷出場，不接進場 gate）
 
@@ -483,6 +485,42 @@ export function detectSellSignals(
         detail: `開盤 ${c.open.toFixed(2)} ≈ 昨日最低 ${prev.low.toFixed(2)}，一路拉長黑收 ${c.close.toFixed(2)}（寶典 8 下殺第 7 條）`,
         severity: 'high',
       });
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // 課程 CH9-3(一)（2026-07-04）：跌破高檔連續兩日大量 K 線的低點 → 多單停利
+  //   高檔出現「爆大量 + 爆次大量」連續兩日，其低點是多空攻防線；
+  //   收盤首次跌破兩根大量 K 線低點（課程圖標「一日反轉」）→ 停利。
+  //   爆量口徑沿用本檔 avgVol5 × 1.5（同第 14 條）；事件型 dedup 沿用 firstBreak 模式。
+  // ════════════════════════════════════════════════════════════════
+  if (isHighLevel && index >= 12) {
+    // 回看 10 根內找最近的「連續兩日皆爆量」K 線對（不含今日）
+    let pairIdx = -1; // 兩日對的第二根 index
+    for (let i = index - 1; i >= Math.max(1, index - 10); i--) {
+      const a = candles[i - 1];
+      const b = candles[i];
+      if (a.avgVol5 != null && a.avgVol5 > 0 && b.avgVol5 != null && b.avgVol5 > 0
+        && a.volume >= a.avgVol5 * 1.5 && b.volume >= b.avgVol5 * 1.5) {
+        pairIdx = i;
+        break;
+      }
+    }
+    if (pairIdx > 0) {
+      const clusterLow = Math.min(candles[pairIdx - 1].low, candles[pairIdx].low);
+      // 事件型：自兩日大量形成後「首次」收盤跌破其低點才報，續跌不重複
+      let firstBreakIdx = -1;
+      for (let i = pairIdx + 1; i <= index; i++) {
+        if (candles[i].close < clusterLow) { firstBreakIdx = i; break; }
+      }
+      if (firstBreakIdx === index) {
+        signals.push({
+          type: 'HIGH_VOL_2DAY_LOW_BREAK',
+          label: '跌破兩日大量低點(9-3停利)',
+          detail: `高檔連兩日大量（${candles[pairIdx - 1].date}/${candles[pairIdx].date}），今日收盤 ${c.close.toFixed(2)} 首次跌破兩日大量低點 ${clusterLow.toFixed(2)}，課程 CH9-3(一) 多單停利`,
+          severity: 'high',
+        });
+      }
     }
   }
 

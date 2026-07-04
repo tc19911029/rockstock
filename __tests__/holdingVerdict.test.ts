@@ -295,3 +295,36 @@ describe('holdingVerdict — dispatch path', () => {
     });
   });
 });
+
+// 課程 CH10-1（2026-07-04）：警示股（當日跌幅）+ 套牢三級文案
+describe('holdingVerdict — 課程 CH10-1 警示股 / 套牢分級', () => {
+  it('dayChangePct ≤ -5% → 警示股（即使獲利中）', () => {
+    const v = holdingVerdict(makeInput({ profitPct: 0.15, dayChangePct: -0.06 }));
+    expect(v.level).toBe('warn');
+    expect(v.label).toBe('警示股');
+  });
+
+  it('dayChangePct 缺值 → 走舊行為（獲利 15% 可續抱）', () => {
+    const v = holdingVerdict(makeInput({ profitPct: 0.15 }));
+    expect(v.label).toBe('可續抱');
+  });
+
+  it('賠損 -12% → 套牢（bad）', () => {
+    const v = holdingVerdict(makeInput({ profitPct: -0.12 }));
+    expect(v.level).toBe('bad');
+    expect(v.label).toBe('套牢');
+    expect(v.reason).toContain('反彈遇壓');
+  });
+
+  it('賠損 -25% → 深度套牢（三條路）', () => {
+    const v = holdingVerdict(makeInput({ profitPct: -0.25 }));
+    expect(v.level).toBe('bad');
+    expect(v.label).toBe('深度套牢');
+    expect(v.reason).toContain('反手做空');
+  });
+
+  it('賠損 -5%（未達套牢）→ 維持緊盯停損', () => {
+    const v = holdingVerdict(makeInput({ profitPct: -0.05 }));
+    expect(v.label).toBe('緊盯停損');
+  });
+});

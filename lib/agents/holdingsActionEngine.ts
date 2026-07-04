@@ -1,7 +1,8 @@
 import type { Candle } from '@/types';
 import { computeEntryState, type EntryGateThresholds } from './entryGate';
 import { ABSOLUTE_STOP_LOSS_PCT, ABSOLUTE_STOP_LOSS_PRICE_MULT } from '@/lib/sell/v12StopLoss';
-import { LOSS_WATCH_PCT, PROFIT_HIGH_TIER_PCT } from '@/lib/analysis/bookThresholds';
+import { LOSS_WATCH_PCT, PROFIT_HIGH_TIER_PCT, DAY_DROP_WATCH_PCT, PROFIT_PARTIAL_TP_PCT } from '@/lib/analysis/bookThresholds';
+import { buildTrappedSignals } from '@/lib/portfolio/trappedTier';
 import { trackOf } from '@/lib/scanner/buyMethodTracks';
 import { computeIndicators } from '@/lib/indicators';
 import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
@@ -122,6 +123,33 @@ function detectMomentumFadeBlowoff(candles: Candle[]): { type: string; label: st
       detail: `量比 ${volRatio.toFixed(1)}x、上影線為實體 ${(upperShadow / body).toFixed(1)} 倍，先賣一半`,
     };
   }
+  return null;
+}
+
+/**
+ * 課程 CH9-3(二)(三)（2026-07-04）：爆量反轉 bar 判定（訊號日/次日共用）。
+ *   bar i 為「爆大量長黑吞噬」或「爆大量長上影」，且收盤未跌破前一日低點
+ *   （已破低走既有整批出場，不屬分批停利分支）。
+ * 爆量口徑 = 前 5 日均量 ×1.5（與 sellSignals 爆量家族同口徑）。
+ */
+function detectCh9BlowoffReversalBar(candles: Candle[], i: number): 'engulf' | 'upper-shadow' | null {
+  if (i < 6) return null;
+  const bar = candles[i];
+  const prevB = candles[i - 1];
+  if (!bar || !prevB) return null;
+  if (bar.close < prevB.low) return null; // 已破前日低 → 非本分支
+  const vols = candles.slice(Math.max(0, i - 5), i).map(x => x.volume).filter(v => v > 0);
+  if (vols.length === 0) return null;
+  const volRatio = bar.volume / (vols.reduce((a, b) => a + b, 0) / vols.length);
+  if (volRatio < 1.5) return null;
+  // 長黑吞噬（幾何同 v12TakeProfit bearish-engulfing）
+  if (prevB.close > prevB.open && bar.close < bar.open && bar.open > prevB.close && bar.close < prevB.open) {
+    return 'engulf';
+  }
+  // 長上影（上影 > 50% K 線全長）
+  const fullLen = bar.high - bar.low;
+  const upper = bar.high - Math.max(bar.open, bar.close);
+  if (fullLen > 0 && upper / fullLen > 0.5) return 'upper-shadow';
   return null;
 }
 
@@ -277,13 +305,18 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
 
   const signals: HoldingActionSignal[] = [];
 
+  // 課程 CH10-1 套牢分級（2026-07-04）：賠損 >10% 的存量部位附加課程建議
+  //（10-20% 反彈遇壓不漲認賠 / >20% 三條路）。只增 signals、不改 action —
+  // 硬停損照樣是主建議；能套牢到這裡代表使用者沒執行硬停損，附註告訴他書本下一步。
+  const trappedSigs = buildTrappedSignals(profitPct, candles);
+
   if (todayClose <= stopLoss) {
     return finalize('stop_loss', [{
       type: 'absolute_stop',
       label: '觸發停損',
       severity: 'high',
       detail: `today ${todayClose.toFixed(2)} ≤ 停損 ${stopLoss.toFixed(2)}`,
-    }]);
+    }, ...trappedSigs]);
   }
 
   // 賠少-2：書本「絕對停損：跌幅 >10% 必走」硬規則（議題 S3-7 / v12 ⑥-4）。
@@ -294,7 +327,7 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
       label: '跌幅 >10% 強制停損',
       severity: 'high',
       detail: `跌幅 ${(profitPct * 100).toFixed(1)}% ≤ -${(ABSOLUTE_STOP_LOSS_PCT * 100).toFixed(0)}%（書本絕對停損下限）`,
-    }]);
+    }, ...trappedSigs]);
   }
 
   // 賠少-17：逆勢/搶反彈部位（反轉軌 D/F/N/O）專屬出場 —「翻黑或趨勢轉空立即走」。
@@ -344,6 +377,33 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
     }
   }
 
+  // 課程 CH9-3(二)(三)（2026-07-04）：爆量反轉分批停利 — 與賠少-11（≥20% 門檻較高、先判先贏）並存。
+  // 次日分支優先（動作更重）：昨日為訊號日（重算、path-independent）+ 今日下跌 → 剩餘全出。
+  if (last >= 7) {
+    const todayCandle = candles[last];
+    const yestCandle = candles[last - 1];
+    const kindYesterday = detectCh9BlowoffReversalBar(candles, last - 1);
+    const profitAtSignal = (yestCandle.close - entryPrice) / entryPrice;
+    if (kindYesterday && profitAtSignal > PROFIT_PARTIAL_TP_PCT && todayCandle.close < yestCandle.close) {
+      return finalize('exit_all', [{
+        type: 'ch9_exit_remaining',
+        label: '爆量反轉次日下跌（剩餘全出）',
+        severity: 'high',
+        detail: `昨日高檔爆量${kindYesterday === 'engulf' ? '長黑吞噬' : '長上影'}（獲利 ${(profitAtSignal * 100).toFixed(1)}% > 15% 應已停利 1/2），今日下跌 ${todayCandle.close.toFixed(2)} < ${yestCandle.close.toFixed(2)}，課程 CH9-3：剩餘全數賣出`,
+      }]);
+    }
+    // 訊號日分支：今日爆量吞噬/長上影、未破昨低、獲利 > 15% → 先停利 1/2
+    const kindToday = detectCh9BlowoffReversalBar(candles, last);
+    if (kindToday && profitPct > PROFIT_PARTIAL_TP_PCT) {
+      return finalize('reduce_half', [{
+        type: 'ch9_partial_tp_half',
+        label: '爆量反轉未破昨低（先停利1/2）',
+        severity: 'high',
+        detail: `高檔爆大量${kindToday === 'engulf' ? '長黑吞噬' : '長上影'}未破昨低、獲利 ${(profitPct * 100).toFixed(1)}% > 15%，課程 CH9-3：先停利 1/2，明日下跌全數賣出`,
+      }]);
+    }
+  }
+
   if (profitPct >= PROFIT_SHORT_RULE && distToMa5Pct != null && distToMa5Pct < 0) {
     signals.push({
       type: 'break_ma5_short',
@@ -362,6 +422,18 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
       label: '當日帳上虧損 >5%',
       severity: 'medium',
       detail: `跌幅 ${(profitPct * 100).toFixed(1)}% ≤ -${(LOSS_WATCH_PCT * 100).toFixed(0)}%，書本列警示股、準備賣`,
+    });
+  }
+  // 課程 CH10-1（2026-07-04）：「每天檢視手上股票跌幅超過 5% 列為警示股準備賣出」
+  // — 當日跌幅口徑（vs 前一日收盤），與上面帳上虧損口徑並存。獲利中的持倉單日重挫也會亮。
+  const prevClose = last >= 1 ? closes[last - 1] : null;
+  const dayChangePct = prevClose != null && prevClose > 0 ? (todayClose - prevClose) / prevClose : null;
+  if (dayChangePct != null && dayChangePct <= -DAY_DROP_WATCH_PCT) {
+    watchSigs.push({
+      type: 'day_drop_over_5pct',
+      label: '當日跌幅 >5%（警示股）',
+      severity: 'medium',
+      detail: `今日 ${(dayChangePct * 100).toFixed(1)}%（${prevClose!.toFixed(2)} → ${todayClose.toFixed(2)}），課程 CH10-1 列警示股、準備賣出`,
     });
   }
   if (distToStopPct > 0 && distToStopPct < 0.03) {

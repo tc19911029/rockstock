@@ -21,7 +21,7 @@
 import type { CandleWithIndicators } from '../../types';
 
 import type { V12Letter } from '../analysis/v12Signals';
-import { HIGH_DEVIATION_PCT, PROFIT_TARGET_RULE_PCT, PROFIT_HIGH_TIER_PCT, BOOK_VOL_RATIO_MIN } from '../analysis/bookThresholds';
+import { HIGH_DEVIATION_PCT, PROFIT_TARGET_RULE_PCT, PROFIT_HIGH_TIER_PCT, BOOK_VOL_RATIO_MIN, PROFIT_PARTIAL_TP_PCT } from '../analysis/bookThresholds';
 
 // ── Step 5 ② 獲利目標停利 ───────────────────────────────────────────────
 
@@ -123,6 +123,8 @@ export interface KBarSignalInputs {
   threeDaysAgoCandle?: CandleWithIndicators;
   /** 持倉中累計獲利（議題 G：> 0% 才啟用 K 棒訊號）*/
   cumulativeProfit: number;
+  /** 昨日收盤的累計獲利（課程 CH9-3 次日分支用；缺值時次日分支退用 cumulativeProfit） */
+  yesterdayCumulativeProfit?: number;
   /** 是否末升段（議題 13）*/
   isEndPhase?: boolean;
 }
@@ -134,8 +136,43 @@ export interface KBarSignalResult {
     | 'long-upper-shadow'      // 高檔長上影（寶典圖 6）
     | 'three-red-with-shadow'  // 連 3 紅 + 上影（寶典 #7）
     | 'bearish-engulfing'      // 高檔長黑吞噬
-    | 'high-vol-black-break';  // 寶典 #8 大量長黑 K 跌破前 K 低
+    | 'high-vol-black-break'   // 寶典 #8 大量長黑 K 跌破前 K 低
+    | 'ch9-blowoff-reversal';  // 課程 CH9-3(二)(三) 爆量反轉（分批停利 advisory）
   detail?: string;
+  /**
+   * 課程 CH9-3（2026-07-04）分批停利建議（advisory，不是強制出場 → triggered 保持 false）：
+   *   'partial-tp-half'  = 訊號日：爆大量長黑吞噬/長上影、未破前日低、獲利 >15% → 先停利 1/2
+   *   'exit-remaining'   = 次日：昨日為上述訊號日且今日下跌 → 剩餘全數賣出
+   */
+  advisory?: 'partial-tp-half' | 'exit-remaining';
+  sellFraction?: 0.5 | 1;
+}
+
+/**
+ * 課程 CH9-3(二)(三) 訊號日幾何+量能判定（純函式，訊號日/次日共用）：
+ *   bar 為「高檔爆大量長黑吞噬 prev」或「爆大量長上影」，且收盤未跌破 prev 低點。
+ * 爆量口徑：avgVol5 ×1.5（與 sellSignals 爆量家族同口徑）；avgVol5 缺值退 prev 量比 ×1.5。
+ */
+function isCh9BlowoffReversalBar(
+  bar: CandleWithIndicators,
+  prev: CandleWithIndicators,
+): { kind: 'engulf' | 'upper-shadow' } | null {
+  if (bar.close < prev.low) return null; // 已破前日低 → 走既有整批出場訊號，不屬本分支
+  const volRatio = bar.avgVol5 != null && bar.avgVol5 > 0
+    ? bar.volume / bar.avgVol5
+    : prev.volume > 0 ? bar.volume / prev.volume : 0;
+  if (volRatio < 1.5) return null;
+  // 長黑吞噬（幾何同 bearish-engulfing 分支）
+  if (prev.close > prev.open && bar.close < bar.open && bar.open > prev.close && bar.close < prev.open) {
+    return { kind: 'engulf' };
+  }
+  // 長上影（幾何同 long-upper-shadow 分支：上影 > 50% K 線全長）
+  const fullLen = bar.high - bar.low;
+  const upperShadow = bar.high - Math.max(bar.open, bar.close);
+  if (fullLen > 0 && upperShadow / fullLen > 0.5) {
+    return { kind: 'upper-shadow' };
+  }
+  return null;
 }
 
 /**
@@ -150,11 +187,42 @@ export interface KBarSignalResult {
  * 4. 寶典 #8 急漲後大量長黑跌破前 K 低
  */
 export function detectKBarExitSignal(inputs: KBarSignalInputs): KBarSignalResult {
-  const { todayCandle, yesterdayCandle, twoDaysAgoCandle, cumulativeProfit, isEndPhase } = inputs;
+  const { todayCandle, yesterdayCandle, twoDaysAgoCandle, cumulativeProfit, yesterdayCumulativeProfit, isEndPhase } = inputs;
 
   // 議題 G：累計獲利 > 0% 才啟用
   if (cumulativeProfit <= 0) {
     return { triggered: false };
+  }
+
+  // ── 課程 CH9-3(二)(三)（2026-07-04）：爆量反轉分批停利 advisory ──
+  // 「爆大量長黑吞噬/長上影沒有跌破前一日低點，但獲利超過 15%，可先停利 1/2，次日下跌全數賣出」
+  // 條件比下方通用吞噬/長上影分支更特定（加 爆量 + 未破昨低 + >15%），先判。
+  // advisory 非強制出場（triggered:false），跨日免持久化：次日用 yesterday/twoDaysAgo 重算（path-independent）。
+  //
+  // 訊號日：今日爆量吞噬/長上影、未破昨低、獲利 > 15% → 先停利 1/2
+  const ch9Today = isCh9BlowoffReversalBar(todayCandle, yesterdayCandle);
+  if (ch9Today && cumulativeProfit > PROFIT_PARTIAL_TP_PCT) {
+    return {
+      triggered: false,
+      signalType: 'ch9-blowoff-reversal',
+      advisory: 'partial-tp-half',
+      sellFraction: 0.5,
+      detail: `③ 課程 CH9-3：高檔爆大量${ch9Today.kind === 'engulf' ? '長黑吞噬' : '長上影'}未破昨低、獲利 ${(cumulativeProfit * 100).toFixed(1)}% > 15% → 先停利 1/2，明日下跌全數賣出`,
+    };
+  }
+  // 次日：昨日為訊號日（重算）且今日下跌 → 剩餘全出
+  if (twoDaysAgoCandle) {
+    const ch9Yesterday = isCh9BlowoffReversalBar(yesterdayCandle, twoDaysAgoCandle);
+    const profitAtSignal = yesterdayCumulativeProfit ?? cumulativeProfit;
+    if (ch9Yesterday && profitAtSignal > PROFIT_PARTIAL_TP_PCT && todayCandle.close < yesterdayCandle.close) {
+      return {
+        triggered: false,
+        signalType: 'ch9-blowoff-reversal',
+        advisory: 'exit-remaining',
+        sellFraction: 1,
+        detail: `③ 課程 CH9-3：昨日爆量${ch9Yesterday.kind === 'engulf' ? '長黑吞噬' : '長上影'}(獲利>15% 停利1/2)，今日下跌（${todayCandle.close.toFixed(2)} < ${yesterdayCandle.close.toFixed(2)}）→ 剩餘全數賣出`,
+      };
+    }
   }
 
   // ── 1. 穿心黑 K（強覆蓋）—— 跌破前一日紅 K 的 1/2 位置 ──

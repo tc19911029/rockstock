@@ -19,6 +19,8 @@ import {
 } from '@/lib/agents/portfolio/storage';
 import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
+import { detectAveragingDown, mergeAveragedDownFlag } from '@/lib/portfolio/averagingDownGuard';
+import { todayYmdTaipei } from '@/lib/youtube/classify';
 
 export const runtime = 'nodejs';
 
@@ -98,6 +100,23 @@ export async function POST(req: NextRequest) {
     if (!check.ok) {
       return apiError(check.reason ?? 'entryPrice validation failed', 422);
     }
+  }
+
+  // 課程 CH10-2（2026-07-04）：向下攤平紅旗 — upsert 咽喉單點偵測
+  // （portfolioStore sync / import / 直接打 API 全走這裡）。只標旗不擋寫入。
+  const all = await loadAllHoldings(profileId);
+  const existing = all.find(h => h.symbol === holdingData.symbol && h.market === holdingData.market && h.status === 'open');
+  if (existing) {
+    const det = detectAveragingDown({
+      existing: { entryPrice: existing.entryPrice, shares: existing.shares },
+      incoming: { entryPrice: holdingData.entryPrice, shares: holdingData.shares },
+    });
+    const newFlag = det.flagged
+      ? { date: todayYmdTaipei(new Date()), fromPrice: existing.entryPrice, toPrice: holdingData.entryPrice }
+      : null;
+    // 新旗 or 既有旗都要留（紅旗常駐到平倉，client 全量覆寫 ui 不得洗掉）
+    const mergedUi = mergeAveragedDownFlag(holdingData.ui, existing.ui, newFlag);
+    if (mergedUi !== holdingData.ui) holdingData.ui = mergedUi;
   }
 
   const holding = await upsertHolding(holdingData, profileId);
