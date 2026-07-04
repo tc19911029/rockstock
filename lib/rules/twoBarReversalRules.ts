@@ -97,8 +97,11 @@ export const bearishHaramiHigh: TradingRule = {
     if (!isMedLongRed(mother)) return null;
     // 子線被母線完全包住
     if (child.high > mother.high || child.low < mother.low) return null;
-    // 子線實體要小
-    if (bodyPct(child) > 0.02) return null;
+    // 子線實體上限：紅K/十字子線=傳統小子線 ≤2%；黑K子線**不限實體大小**
+    // （2026-07-04 修：課程 CH2-6 第4組「左長紅右長黑」母子懷抱，右邊明確是長黑 —
+    //   兆易创新 603986 6/23 的 -5.7% 長黑整根被昨日紅K包住即此型，之前被 2% 上限擋掉
+    //   而流到貫穿規則誤判硬出場）
+    if (!isBlackCandle(child) && bodyPct(child) > 0.02) return null;
     // 需在高檔
     if (!isUptrendWave(candles, index - 1, 8)) return null;
 
@@ -131,40 +134,45 @@ export const bearishPiercingHigh: TradingRule = {
 
     if (!isMedLongRed(red)) return null;
     if (!isMedLongBlack(black)) return null;
-    // 黑K收盤跌破紅K的開盤價（實體高點=收盤，低點=開盤）
+    // 黑K收盤至少跌破紅K的開盤價（實體低點）——否則屬覆蓋/遭遇族，由對應規則處理
     if (black.close > red.open) return null;
     // 需在高檔
     if (!isUptrendWave(candles, index - 1, 8)) return null;
 
-    // 2026-07-04 修（兆易创新 603986 6/23 誤殺案例）：書本貫穿的完整幾何=「開高走低、一路向下」。
-    // 黑K「開低」（開在昨日紅K實體內）且只小幅刺穿紅K開盤（<1%）＝實體幾乎被昨日紅K包住，
-    // 屬「類母子」變盤而非貫穿 — CH2 鐵律：變盤線要看次日開盤確認，不可立即出場。
-    // （該案例：開 680 < 昨收 689.7、收 640.99 僅刺穿昨開 643 的 0.3%，次日開平走高 +10%。）
-    const openedHigh = black.open >= red.close * 0.99; // 開在昨收附近或以上（⚠️ 0.99 自創容差）
-    const pierceDepth = red.open > 0 ? (red.open - black.close) / red.open : 0;
-    if (!openedHigh && pierceDepth < 0.01) {
+    // ── 2026-07-04 修（兆易创新 603986 6/23 誤殺案例）— 對齊課程 CH2-6 六組判準 ──
+    // 課程第 6 組「破底貫穿／一路向下」原文＝「開低走低收低**破紅K低點**」：
+    // 分界線是「收盤有沒有破昨日最低點(red.low)」，不是破實體開盤價。
+    // 沒破低點的（如兆易：收 640.99 > 昨低 635）課程歸第 4 組母子（止漲、次日確認）。
+
+    // 實體吞噬幾何（開高於昨收 + 收破昨開）→ 課程第 5 組，讓給 bearishEngulfingHigh（避免同 bar 雙報）
+    if (black.open >= red.close) return null;
+    // 整根被昨日紅K包住 → 課程第 4 組母子，讓給 bearishHaramiHigh
+    if (black.high <= red.high && black.low >= red.low) return null;
+
+    // 課程第 6 組成立：收盤跌破昨日最低點 = 破底貫穿（一路向下）
+    if (black.close < red.low) {
       return {
-        type: 'WATCH',
-        label: '高檔黑K變盤（類母子，次日確認）',
-        description: `黑K開低（${black.open.toFixed(2)} < 昨收 ${red.close.toFixed(2)}）收 ${black.close.toFixed(2)}，僅小幅刺穿昨紅K開盤 ${red.open.toFixed(2)}（${(pierceDepth * 100).toFixed(1)}%）— 變盤未確認`,
+        type: 'SELL',
+        label: '高檔長黑貫穿（破底）',
+        description: `黑K收 ${black.close.toFixed(2)} 跌破前日紅K最低 ${red.low.toFixed(2)}，一路向下、多空易位`,
         reason: [
-          '【朱家泓 CH2 次日確認鐵律】黑K實體幾乎被昨日紅K包住＝類母子懷抱變盤，不是「一路向下貫穿」。',
-          '次日開盤位置很重要：開高（不破今日低）容易向上反轉續攻，開低或跌破今日最低＝空方確認才出場。',
-          '明日開低或收盤跌破今日低點 → 執行出場；明日開高走高 → 續抱。',
+          '【朱家泓 課程 CH2-6 第6組 破底貫穿】開低走低收低破紅K低點＝一路向下，多空主控權易位。',
+          '貫穿的黑K線越長，轉折力道越強。',
+          '貫穿當日或前一日出現大量，反轉訊號越強；配合大量，容易一日反轉。',
         ].join('\n'),
         ruleId: this.id,
       };
     }
 
+    // 破實體但未破昨日最低：課程歸「止漲變盤」族 — 次日確認，不可當一路向下立即出場
     return {
-      type: 'SELL',
-      label: '高檔長黑貫穿',
-      description: `黑K(${black.close.toFixed(2)})貫穿前日紅K(開盤${red.open.toFixed(2)})，多空易位`,
+      type: 'WATCH',
+      label: '高檔黑K變盤（破實體未破底，次日確認）',
+      description: `黑K收 ${black.close.toFixed(2)} 破昨紅K實體低點 ${red.open.toFixed(2)} 但未破昨日最低 ${red.low.toFixed(2)} — 變盤未確認`,
       reason: [
-        '【朱家泓《抓住K線》第3篇 高檔貫穿】長黑貫穿代表多方當天向下貫穿，多空主控權產生易位。',
-        '貫穿的黑K線越長，轉折力道越強。',
-        '貫穿當日或前一日出現大量，反轉訊號越強。',
-        '配合大量，容易一日反轉。',
+        '【朱家泓 CH2 次日確認鐵律】未破昨日最低＝不是「破底貫穿」，屬高檔止漲變盤。',
+        '次日開盤位置很重要：開高（不破今日低）容易向上反轉續攻，開低或跌破今日最低＝空方確認才出場。',
+        '明日開低或收盤跌破今日低點 → 執行出場；明日開高走高 → 續抱。',
       ].join('\n'),
       ruleId: this.id,
     };
@@ -335,7 +343,9 @@ export const bullishHaramiLow: TradingRule = {
 
     if (!isMedLongBlack(mother)) return null;
     if (child.high > mother.high || child.low < mother.low) return null;
-    if (bodyPct(child) > 0.02) return null;
+    // 子線實體上限：黑K/十字子線=傳統小子線 ≤2%；紅K子線**不限實體大小**
+    //（2026-07-04 修：課程 CH2-7 第④組「母子懷抱・光明在望」＝左長黑右長紅，右邊是長紅）
+    if (!isRedCandle(child) && bodyPct(child) > 0.02) return null;
     if (!isDowntrendWave(candles, index - 1, 8)) return null;
 
     const isChildDoji = bodyPct(child) < 0.005;
@@ -367,21 +377,45 @@ export const bullishPiercingLow: TradingRule = {
 
     if (!isMedLongBlack(black)) return null;
     if (!isMedLongRed(red)) return null;
-    // 紅K收盤突破黑K的開盤價（黑K實體高點=開盤）
+    // 紅K收盤至少突破黑K的開盤價（實體高點）——否則屬覆蓋（旭日東升）族
     if (red.close < black.open) return null;
     // 需在低檔
     if (!isDowntrendWave(candles, index - 1, 8)) return null;
 
+    // ── 2026-07-04 修 — 對齊課程 CH2-7 六組判準（高檔貫穿的鏡像）──
+    // 課程第⑥組「破高貫穿／一路向上」原文＝「一開盤就開高、收盤再過**黑K高點**」：
+    // 分界線是「收盤有沒有過昨日最高點(black.high)」，不是過實體開盤價。
+
+    // 實體吞噬幾何（開低於昨收 + 收破昨開）→ 課程第⑤組，讓給 bullishEngulfingLow
+    if (red.open <= black.close) return null;
+    // 整根被昨日黑K包住 → 課程第④組母子（光明在望），讓給 bullishHaramiLow
+    if (red.high <= black.high && red.low >= black.low) return null;
+
+    // 課程第⑥組成立：收盤突破昨日最高點 = 破高貫穿（一路向上）
+    if (red.close > black.high) {
+      return {
+        type: 'BUY',
+        label: '低檔長紅貫穿（破高）',
+        description: `紅K收 ${red.close.toFixed(2)} 突破前日黑K最高 ${black.high.toFixed(2)}，一路向上、多空易位`,
+        reason: [
+          '【朱家泓 課程 CH2-7 第⑥組 破高貫穿】一開盤就開高、收盤再過黑K高點＝一路向上、一日反轉。',
+          '貫穿的紅K線越長，轉折力道越強。',
+          '貫穿當日或前一日出現大量，反轉訊號越強，轉折向上機率越高。',
+          '短線連續下跌或急跌獲利達15%以上，出現長紅貫穿，一日反轉的機率很高。',
+          '低檔出現爆量長紅貫穿K線後反彈，日後再下跌，長紅貫穿的K線會形成重大支撐，容易形成底底高的底部型態。',
+        ].join('\n'),
+        ruleId: this.id,
+      };
+    }
+
+    // 破實體但未破昨日最高：課程歸「止跌變盤」族 — 次日開高收紅才確認反轉
     return {
-      type: 'BUY',
-      label: '低檔長紅貫穿',
-      description: `紅K(${red.close.toFixed(2)})貫穿前日黑K(開盤${black.open.toFixed(2)})，多空易位`,
+      type: 'WATCH',
+      label: '低檔紅K變盤（破實體未破高，次日確認）',
+      description: `紅K收 ${red.close.toFixed(2)} 破昨黑K實體高點 ${black.open.toFixed(2)} 但未破昨日最高 ${black.high.toFixed(2)} — 止跌未確認`,
       reason: [
-        '【朱家泓《抓住K線》第3篇 低檔貫穿】長紅貫穿代表多方當天向上貫穿，多空主控權產生易位。',
-        '貫穿的紅K線越長，轉折力道越強。',
-        '貫穿當日或前一日出現大量，反轉訊號越強，轉折向上機率越高。',
-        '短線連續下跌或急跌獲利達15%以上，出現長紅貫穿，一日反轉的機率很高。',
-        '低檔出現爆量長紅貫穿K線後反彈，日後再下跌，長紅貫穿的K線會形成重大支撐，容易形成底底高的底部型態。',
+        '【朱家泓 CH2-7 次日確認】未過昨日最高＝不是「破高貫穿」，屬低檔止跌變盤。',
+        '看次日開高收紅才確認反轉；次日開低則止跌失敗、空方續跌。',
       ].join('\n'),
       ruleId: this.id,
     };

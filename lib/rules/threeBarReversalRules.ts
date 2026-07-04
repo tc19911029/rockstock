@@ -160,43 +160,85 @@ export const bearishDoubleStarTransition: TradingRule = {
 // 低檔 3 根 K 線轉折向上（第4篇 Ch3-4）
 // ═══════════════════════════════════════════
 
-/** 低檔晨星（含孤島晨星）— 黑K + 星 + 紅K，低檔轉折最基本型態 */
+/** 晨星型態幾何（at 紅K bar j）：黑K + 星 + 紅K，低檔 + 深入黑K實體 1/2 */
+function morningStarAt(candles: Parameters<TradingRule['evaluate']>[0], j: number):
+  { c0: (typeof candles)[number]; c1: (typeof candles)[number]; c2: (typeof candles)[number]; isIsland: boolean } | null {
+  if (j < 5) return null;
+  const c0 = candles[j - 2]; // 黑K
+  const c1 = candles[j - 1]; // 星（變盤線）
+  const c2 = candles[j];     // 紅K
+  if (!isMedLongBlack(c0)) return null;
+  if (!isSmallCandle(c1) && !isDoji(c1)) return null;
+  if (!isMedLongRed(c2)) return null;
+  // 紅K收盤要深入黑K實體（至少到1/2）
+  const blackHalf = (c0.open + c0.close) / 2;
+  if (c2.close < blackHalf) return null;
+  // 需在低檔
+  if (!isDowntrendWave(candles, j - 2, 8)) return null;
+  return { c0, c1, c2, isIsland: c1.high < c0.low && c1.high < c2.low };
+}
+
+/**
+ * 低檔晨星（含孤島晨星）— 黑K + 星 + 紅K，低檔轉折最基本型態
+ *
+ * 2026-07-04 修（課程 CH2-8 確認時機不對稱）：
+ *   夜星＝右長黑K「收盤完成」即確認（即時）；
+ *   晨星＝右長紅K「**高點被突破**」才確認（要多走一根）。
+ * 兩段式：型態成形日＝WATCH（等突破確認）；之後收盤首次突破紅K高點＝BUY 確認。
+ */
 export const morningStarLow: TradingRule = {
   id: 'zhu-morning-star-low',
   name: '低檔晨星轉折',
-  description: '中長黑K + 變盤線(星) + 中長紅K，下跌低點反轉向上',
+  description: '中長黑K + 變盤線(星) + 中長紅K，收盤突破紅K高點才確認反轉',
   evaluate(candles, index): RuleSignal | null {
     if (index < 5) return null;
-    const c0 = candles[index - 2]; // 黑K
-    const c1 = candles[index - 1]; // 星（變盤線）
-    const c2 = candles[index];     // 紅K
 
-    if (!isMedLongBlack(c0)) return null;
-    if (!isSmallCandle(c1) && !isDoji(c1)) return null;
-    if (!isMedLongRed(c2)) return null;
+    // (a) 今日即型態第 3 根（紅K）→ 成形但未確認
+    const formedToday = morningStarAt(candles, index);
+    if (formedToday) {
+      const { c0, c1, c2, isIsland } = formedToday;
+      return {
+        type: 'WATCH',
+        label: isIsland ? '孤島晨星成形（待突破確認）' : '低檔晨星成形（待突破確認）',
+        description: `黑K(${c0.close.toFixed(2)}) + ${isDoji(c1) ? '十字星' : '星線'} + 紅K(${c2.close.toFixed(2)})，收盤突破 ${c2.high.toFixed(2)} 才確認`,
+        reason: [
+          `【朱家泓 課程 CH2-8】${isIsland ? '孤島晨星是最強烈的向上轉折訊號' : '晨星是下跌轉折向上的基本型態'}，但**確認時機與夜星不對稱**：`,
+          '晨星要等「右邊長紅K的高點被突破」才算轉折確認（夜星則是長黑收盤即確認）。',
+          `突破 ${c2.high.toFixed(2)} → 轉折確認可做多；反之紅K低點 ${c2.low.toFixed(2)} 被跌破 → 結構破壞。`,
+        ].join('\n'),
+        ruleId: this.id,
+      };
+    }
 
-    // 紅K收盤要深入黑K實體（至少到1/2）
-    const blackHalf = (c0.open + c0.close) / 2;
-    if (c2.close < blackHalf) return null;
-
-    // 需在低檔
-    if (!isDowntrendWave(candles, index - 2, 8)) return null;
-
-    const isIsland = c1.high < c0.low && c1.high < c2.low;
-
-    return {
-      type: 'BUY',
-      label: isIsland ? '孤島晨星反轉' : '低檔晨星反轉',
-      description: `黑K(${c0.close.toFixed(2)}) + ${isDoji(c1) ? '十字星' : '星線'} + 紅K(${c2.close.toFixed(2)})`,
-      reason: [
-        `【朱家泓《抓住K線》第4篇 Ch3】${isIsland ? '孤島晨星是最強烈的向上轉折訊號' : '晨星轉折是股價下跌轉折向上的基本型態'}。`,
-        '下跌低檔出現晨星組合，同時爆大量，轉折向上的機率大大提高，上漲力道強。',
-        isDoji(c1) ? '中間是十字星，多空交戰後多方勝出，反轉力道更強。' : '',
-        '晨星轉折的組合如果上漲中長紅K線低點被下跌的黑K線跌破，轉折向上的結構就會被破壞。',
-        '運用費波南係數注意變盤線第1、3、5、8、13、21日的K線轉折走勢。',
-      ].filter(Boolean).join('\n'),
-      ruleId: this.id,
-    };
+    // (b) 近 1~3 根內成形 + 今日收盤首次突破紅K高點 → 轉折確認
+    for (let k = 1; k <= 3; k++) {
+      const formed = morningStarAt(candles, index - k);
+      if (!formed) continue;
+      const { c1, c2, isIsland } = formed;
+      // 結構破壞（紅K低點被收盤跌破）→ 作廢
+      let broken = false;
+      let alreadyConfirmed = false;
+      for (let m = index - k + 1; m < index; m++) {
+        if (candles[m].close < c2.low) { broken = true; break; }
+        if (candles[m].close > c2.high) { alreadyConfirmed = true; break; } // 之前已突破，只報首次
+      }
+      if (broken || alreadyConfirmed) continue;
+      if (candles[index].close > c2.high) {
+        return {
+          type: 'BUY',
+          label: isIsland ? '孤島晨星確認（突破紅K高點）' : '低檔晨星確認（突破紅K高點）',
+          description: `收盤 ${candles[index].close.toFixed(2)} 突破晨星右紅K高點 ${c2.high.toFixed(2)}，轉折向上確認`,
+          reason: [
+            '【朱家泓 課程 CH2-8】右邊紅K棒的高點一被突破，晨星變盤就確認了，後面開始轉折往上。',
+            '下跌低檔出現晨星組合，同時爆大量，轉折向上的機率大大提高，上漲力道強。',
+            isDoji(c1) ? '中間是十字星，多空交戰後多方勝出，反轉力道更強。' : '',
+            '晨星的中長紅K線低點如果被下跌的黑K線收盤跌破，轉折向上的結構就會被破壞。',
+          ].filter(Boolean).join('\n'),
+          ruleId: this.id,
+        };
+      }
+    }
+    return null;
   },
 };
 
@@ -286,16 +328,18 @@ export const bullishDoubleStarTransition: TradingRule = {
         patternName = `群星變盤(${starCount}星)`;
       }
 
+      // 2026-07-04 修（課程 CH2-8 確認不對稱，同 morningStarLow）：
+      // 晨星家族要「右紅K高點被突破」才確認 — 成形日先 WATCH，突破由 morningStarLow 型
+      // 的確認機制覆蓋（雙星的紅K突破日會再收長紅/續漲，屬確認後行情）。
       return {
-        type: 'BUY',
-        label: `低檔${patternName}`,
-        description: `長黑(${black.close.toFixed(2)}) + ${starCount}顆星 + 長紅(${red.close.toFixed(2)})`,
+        type: 'WATCH',
+        label: `低檔${patternName}成形（待突破確認）`,
+        description: `長黑(${black.close.toFixed(2)}) + ${starCount}顆星 + 長紅(${red.close.toFixed(2)})，收盤突破 ${red.high.toFixed(2)} 才確認`,
         reason: [
-          `【朱家泓《抓住K線》第4篇 Ch4】低檔${patternName}是轉折向上的訊號。`,
-          '如果同時低檔出現大量或爆大量，反轉更明顯，空單要回補。',
-          `群星${starCount}顆，多方控盤時間至少${starCount}天，上漲力道越強。`,
-          '在多頭回檔時出現此組合，將繼續上漲，要把握做多。',
-          '晨星轉折的中長紅K線低點如果被下跌的黑K線跌破，轉折向上的結構就會被破壞。',
+          `【朱家泓 課程 CH2-8】低檔${patternName}是轉折向上的訊號，但要等「右邊長紅K的高點被突破」才算轉折確認。`,
+          '如果同時低檔出現大量或爆大量，反轉更明顯。',
+          `群星${starCount}顆，多方控盤時間至少${starCount}天，一旦確認上漲力道越強。`,
+          '晨星轉折的中長紅K線低點如果被下跌的黑K線收盤跌破，轉折向上的結構就會被破壞。',
         ].join('\n'),
         ruleId: this.id,
       };
