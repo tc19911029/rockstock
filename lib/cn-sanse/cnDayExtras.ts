@@ -88,11 +88,13 @@ export async function fetchDayExtras(symbol: string, localCandles?: Candle[]): P
     if (!klineRes.ok) return extendWithLocal(map, localCandles, floatShares);
     const json = (await klineRes.json()) as { data?: Record<string, { qfqday?: string[][]; day?: string[][] }> };
     const rows = json.data?.[tc]?.qfqday ?? json.data?.[tc]?.day ?? [];
+    // 騰訊 fqkline 量單位板塊敏感：科創(688/689)回「股」、其餘回「手」→ 科創 ÷100 正規化成「手」
+    const starDiv = /^sh68[89]/.test(tc) ? 100 : 1;
     for (const r of rows) {
       // [date, open, close, high, low, volume(手)]
       const date = r[0];
       const close = num(r[2]);
-      const volLots = num(r[5]);
+      const volLots = num(r[5]) / starDiv;
       if (!date || !Number.isFinite(volLots)) continue;
       const amount = Number.isFinite(close) ? close * volLots * 100 : NaN; // 元（近似：close×股數）
       const turnover = floatShares > 0 ? (volLots * 10000) / floatShares : NaN; // 換手率 %

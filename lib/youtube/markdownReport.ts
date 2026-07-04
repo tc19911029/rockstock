@@ -81,7 +81,10 @@ export function renderMarkdownReport(a: DailyAnalysis): string {
         const url = v.url ?? `https://www.youtube.com/watch?v=${v.video_id}`;
         lines.push(`**${v.source_name}**${who}${dur} — [${v.title}](${url})`);
         lines.push('');
-        lines.push(v.summary);
+        // 一句一行（bullet），跟 UI 同款可讀性處理 — 長段落對閱讀障礙不友善
+        for (const s of v.summary.split(/(?<=[。；！？])/).map(x => x.trim()).filter(Boolean)) {
+          lines.push(`- ${s}`);
+        }
         lines.push('');
         lines.push(`> 💡 ${v.watch_reason}`);
         if (v.key_stocks.length > 0) {

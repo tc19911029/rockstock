@@ -43,6 +43,8 @@ export interface DetectorContext {
   market: 'TW' | 'CN';
   /** 持股才會收 ma5-breakdown，其他規則對所有人 */
   isHolding: boolean;
+  /** 監控池來源（holdingsGuard scope gate 用；缺省視為 'scan'） */
+  source?: 'holding' | 'manual' | 'watchlist' | 'scan';
 }
 
 export interface Signal {
@@ -71,6 +73,8 @@ export interface Signal {
   };
   caveat: 'minute-inference';
   isHolding: boolean;
+  /** 監控池來源透傳（holdingsGuard scope gate 用） */
+  source?: 'holding' | 'manual' | 'watchlist' | 'scan';
 }
 
 /**
@@ -190,6 +194,7 @@ function makeSignal(
     meta,
     caveat: 'minute-inference',
     isHolding: ctx.isHolding,
+    source: ctx.source,
   };
 }
 

@@ -17,6 +17,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadStockMaster } from '@/lib/youtube/stockMaster';
 import { buildScreenMaster, codeContextConfident } from '@/lib/youtube/keyframeScreen';
+import { findPhoneticHits, chineseCore, estimateCueTime } from '@/lib/youtube/phoneticMatch';
 
 const date = process.argv[2];
 if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -86,6 +87,37 @@ async function main() {
       warns += 1;
       console.log(`WARN mention ${m.matched?.code ?? m.raw_query}（${m.source_type}）缺 screenshot_ref`);
     }
+  }
+
+  // slide-only mention 但逐字稿有拼音同音嫌疑 → 疑似 Whisper 誤植害語音端漏判
+  // （2026-07-02 台聚→「台劇」教訓：整段看多被降成 slide-only 只介紹）
+  const transcriptCache = new Map<string, { text: string; cues: Array<{ start: number; text: string }> } | null>();
+  async function loadTranscript(videoId: string) {
+    if (transcriptCache.has(videoId)) return transcriptCache.get(videoId)!;
+    let rec: { text: string; cues: Array<{ start: number; text: string }> } | null = null;
+    try {
+      const raw = JSON.parse(await fs.readFile(path.join(ROOT, 'transcripts', date, `${videoId}.json`), 'utf-8'));
+      const cues: Array<{ start: number; text: string }> = raw.cues ?? [];
+      rec = { text: cues.length > 0 ? cues.map(c => c.text).join(' ') : (raw.text ?? ''), cues };
+    } catch { /* 無逐字稿 → 跳過 */ }
+    transcriptCache.set(videoId, rec);
+    return rec;
+  }
+  for (const m of mentions) {
+    if (m.source_type !== 'slide' || !m.matched?.code || !m.video_id) continue;
+    const t = await loadTranscript(m.video_id);
+    if (!t || !t.text) continue;
+    const core = chineseCore(m.matched.name ?? '');
+    if (core.length < 2 || t.text.includes(core)) continue; // 字面有出現 → skill 已可自行合併
+    const hits = findPhoneticHits(m.matched.name ?? '', t.text, { maxForms: 1 });
+    if (hits.length === 0) continue;
+    warns += 1;
+    const at = estimateCueTime(t.cues, hits[0].first_index);
+    console.log(
+      `WARN mention ${m.matched.code} ${m.matched.name}（slide-only）逐字稿有同音嫌疑` +
+      `「${hits[0].form}」×${hits[0].count} @${at ?? '?'}s — 必須讀該段判斷是否升 speech+slide：` +
+      `「${hits[0].context}」`,
+    );
   }
 
   console.log(`\n[keyframe-coverage] ${date}: 強訊號漏抽 ${strongMisses}、警告 ${warns}`);

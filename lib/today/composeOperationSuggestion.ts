@@ -46,7 +46,10 @@ export type RealtimeRule =
   | 'blowoff-bearish'
   | 'blowoff-bullish'
   | 'terminal-rally'
-  | 'ma5-breakdown';
+  | 'ma5-breakdown'
+  | 'stop-loss-breach'
+  | 'pump-reversal'
+  | 'rapid-drop';
 
 export interface AlertForSuggestion {
   symbol: string;
@@ -74,10 +77,16 @@ const RULE_LABEL: Record<RealtimeRule, string> = {
   'blowoff-bullish': '爆量長紅',
   'terminal-rally':  '末升段',
   'ma5-breakdown':   'MA5 跌破',
+  'stop-loss-breach': '跌破停損',
+  'pump-reversal':   '拉高回落',
+  'rapid-drop':      '急殺',
 };
 
-// 嚴重程度排序（越前面越嚴重）
+// 嚴重程度排序（越前面越嚴重）— 持倉保命訊號排最重（跌破停損 > 急殺 > 拉高回落）
 const RULE_SEVERITY: Record<RealtimeRule, number> = {
+  'stop-loss-breach': 6,
+  'rapid-drop':      5,
+  'pump-reversal':   4,
   'blowoff-bearish': 3,
   'terminal-rally':  2,
   'ma5-breakdown':   1,

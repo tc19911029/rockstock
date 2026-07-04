@@ -13,6 +13,7 @@ if (existsSync('.env.local')) config({ path: '.env.local' });
 config();
 
 import { readTurnoverRank } from '@/lib/scanner/TurnoverRank';
+import { BOOK_UNIVERSE_TOP_N } from '@/lib/scanner/universeTopN';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { computeIndicators } from '@/lib/indicators';
@@ -60,11 +61,12 @@ function mergeTodayL2(l1: Candle[], l2Quote: { open: number; high: number; low: 
 async function scanMarket(market: MarketId): Promise<void> {
   const date = todayDateFor(market);
   const idx = await readTurnoverRank(market);
-  if (!idx || !idx.symbols || idx.symbols.length === 0) {
+  if (!idx || !idx.symbols || idx.symbols.size === 0) {
     console.warn(`[${market}] top500 索引為空，放棄`);
     return;
   }
-  const symbols = idx.symbols ?? [];
+  // 書本池 = 索引前 500 名（Set 迭代順序 = 名次順序；CN 索引收錄 800 是給三色的）
+  const symbols = [...idx.symbols].slice(0, BOOK_UNIVERSE_TOP_N);
   console.log(`[${market}] 掃描 ${symbols.length} 支 top500，目標日期 ${date}`);
 
   const snapshot = await readIntradaySnapshot(market, date);

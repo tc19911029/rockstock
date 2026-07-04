@@ -17,28 +17,64 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { sendNtfy, type NtfyResult } from '@/lib/notify/ntfy';
 import type { Signal, RuleId } from './blowoffDetector';
+import { scopeAllows, type GuardSignal, type GuardRuleId } from './holdingsGuard';
+import { HOLDINGS_GUARD } from '@/lib/config';
+
+// ── 型別聯集：既有分K形態訊號 + 持倉保命訊號 ─────────────────────────────
+
+export type AlertRuleId = RuleId | GuardRuleId;
+export type AlertSignal = Signal | GuardSignal;
+
+const GUARD_RULES: ReadonlySet<string> = new Set<GuardRuleId>([
+  'stop-loss-breach', 'pump-reversal', 'rapid-drop',
+]);
+
+function isGuardSignal(sig: AlertSignal): sig is GuardSignal {
+  return GUARD_RULES.has(sig.rule);
+}
 
 // ── module state ────────────────────────────────────────────────────────
 
-/** Dedup Set：key = `${date}:${symbol}:${rule}:${barTs}` */
+/** Dedup Set：key = `${date}:${symbol}:${rule}:${barTs}`（level 型 = `...:day`） */
 const firedKeys: Set<string> = new Set();
 /** firedKeys 對應的日期 — 跨日重建 */
 let firedKeysLoadedForDate: string | null = null;
+/** 首載 single-flight — 防兩個並行 dispatch 在 readFile 期間拿空 set 重複推播 */
+let loadInFlight: Promise<void> | null = null;
+/**
+ * 瞬時推送失敗（http/fetch）重試計數：失敗時不消耗 dedup key，讓 30s 迴圈自然重試 —
+ * 否則一次網路抖動就吃掉 day 型警報（停損）「當天唯一一次」的推播機會。
+ * 上限防 ntfy 整天全掛時 jsonl 每 30s 刷一行 + 每輪白等 8s timeout。
+ * 注意：'disabled'/'no-url'（刻意關閉，含 HOLDINGS_GUARD_NTFY_DISABLED 滅音）視為已消耗 —
+ * 滅音期間觸發的 day 警報解除滅音後當天不補推（刻意設計：滅音就是要它安靜）。
+ */
+const notifyRetryCount: Map<string, number> = new Map();
+const NOTIFY_MAX_RETRY = 10;
 
 export interface AlertRecord {
   /** Wall-clock ms 觸發時間 */
   firedAt: number;
-  rule: RuleId;
+  rule: AlertRuleId;
   symbol: string;
   market: 'TW' | 'CN';
   /** Bar 觸發的 ts */
   barTs: number;
   tfMin: 1 | 5;
   isHolding: boolean;
-  meta: Signal['meta'];
+  meta: Signal['meta'] | GuardSignal['meta'];
+  /** level 型規則（同日同檔同規則一次）；缺省 = bar 型（向下相容舊 jsonl） */
+  dedupScope?: 'day';
+  /** 監控池來源 */
+  source?: 'holding' | 'manual' | 'watchlist' | 'scan';
   /** ntfy 推送結果 */
   notified: boolean;
   notifyError?: string;
+  /**
+   * 推送失敗原因（NtfyResult.reason）。重啟後 rebuild dedup 用：
+   * 'http'/'fetch'（瞬時失敗）的行不消耗 dedup key → 重啟後繼續重試；
+   * 'disabled'/'no-url'（刻意關閉）與舊行（缺此欄）視為已消耗（向下相容）。
+   */
+  notifyReason?: string;
 }
 
 export interface DispatchResult {
@@ -48,9 +84,35 @@ export interface DispatchResult {
   notifyFail: number;
 }
 
-/** 主入口 — 收到 detector 一批 signals，去重後派發 */
+/**
+ * 推播 gate（export 供合約測試鎖行為）：
+ * - guard 規則（1/2/3）→ HOLDINGS_GUARD.ENABLED + 各自 SCOPE
+ * - 既有形態規則 → BLOWOFF_NTFY_ENABLED=true（舊全域語意：全池推，預設關）
+ *   或 在 PATTERN_RULES 內且過 PATTERN_NTFY scope（新：持倉才推手機，
+ *   非持倉照舊只記 jsonl / 走圖標記）
+ * - env HOLDINGS_GUARD_NTFY_DISABLED=true → guard 相關路徑全滅音（緊急逃生口，
+ *   不用 rebuild；jsonl 照記可事後 audit）
+ */
+export function decideNotify(sig: AlertSignal): boolean {
+  const guardMuted = process.env.HOLDINGS_GUARD_NTFY_DISABLED === 'true';
+  if (isGuardSignal(sig)) {
+    if (guardMuted || !HOLDINGS_GUARD.ENABLED) return false;
+    const scope = sig.rule === 'stop-loss-breach' ? HOLDINGS_GUARD.SCOPE.STOP_LOSS_BREACH
+      : sig.rule === 'pump-reversal' ? HOLDINGS_GUARD.SCOPE.PUMP_REVERSAL
+      : HOLDINGS_GUARD.SCOPE.RAPID_DROP;
+    return scopeAllows(scope, sig);
+  }
+  // 既有形態規則：舊全域開關語意不變（全池推播，預設關）
+  if (process.env.BLOWOFF_NTFY_ENABLED === 'true') return true;
+  // 新：持倉的出貨形態訊號走 guard scope 推手機
+  if (guardMuted || !HOLDINGS_GUARD.ENABLED) return false;
+  return (HOLDINGS_GUARD.PATTERN_RULES as readonly string[]).includes(sig.rule)
+    && scopeAllows(HOLDINGS_GUARD.SCOPE.PATTERN_NTFY, sig);
+}
+
+/** 主入口 — 收到 detector/guard 一批 signals，去重後派發 */
 export async function dispatch(
-  signals: Signal[],
+  signals: AlertSignal[],
   options: { logToDisk?: boolean } = {},
 ): Promise<DispatchResult> {
   const result: DispatchResult = { fired: 0, debounced: 0, notifyOk: 0, notifyFail: 0 };
@@ -62,7 +124,12 @@ export async function dispatch(
 
   for (const sig of signals) {
     const dateKey = dateKeyOf(sig.market, now);
-    const key = `${dateKey}:${sig.symbol}:${sig.rule}:${sig.ts}`;
+    const dedupScope = isGuardSignal(sig) ? sig.dedupScope : undefined;
+    // level 型（day）：同日同檔同規則只 fire 一次 — 價格在停損/回檔門檻附近震盪時
+    // 不能用 barTs（每根新 bar 都會重推）
+    const key = dedupScope === 'day'
+      ? `${dateKey}:${sig.symbol}:${sig.rule}:day`
+      : `${dateKey}:${sig.symbol}:${sig.rule}:${sig.ts}`;
     if (firedKeys.has(key)) {
       result.debounced++;
       continue;
@@ -71,16 +138,21 @@ export async function dispatch(
     result.fired++;
 
     const { title, message, tags, priority } = formatPayload(sig);
-    // 爆量手機推播預設停用（已改用三色 sanse-notify 做買賣推播）。偵測、jsonl 紀錄、
-    // 走圖爆量標記（useBlowoffMarkers）、/api/realtime/* 全照舊不受影響 — 只是不再進手機。
-    // 設 BLOWOFF_NTFY_ENABLED=true 可還原爆量手機推播。
-    const sendResult: NtfyResult = process.env.BLOWOFF_NTFY_ENABLED === 'true'
+    const sendResult: NtfyResult = decideNotify(sig)
       ? await sendNtfy({ title, message, tags, priority })
       : { ok: false, reason: 'disabled' };
     if (sendResult.ok) {
       result.notifyOk++;
+      notifyRetryCount.delete(key);
     } else {
       result.notifyFail++;
+      // 瞬時失敗（http/fetch）→ 放回 dedup key，下一輪（30s）自然重試。
+      // 對 day 型（停損等保命警報）尤其關鍵：不這樣做，一次網路抖動 = 整天不再推。
+      if (sendResult.reason === 'http' || sendResult.reason === 'fetch') {
+        const n = (notifyRetryCount.get(key) ?? 0) + 1;
+        notifyRetryCount.set(key, n);
+        if (n < NOTIFY_MAX_RETRY) firedKeys.delete(key);
+      }
     }
 
     records.push({
@@ -92,8 +164,11 @@ export async function dispatch(
       tfMin: sig.tfMin,
       isHolding: sig.isHolding,
       meta: sig.meta,
+      dedupScope,
+      source: sig.source,
       notified: sendResult.ok,
       notifyError: sendResult.ok ? undefined : (sendResult.error ?? sendResult.reason),
+      notifyReason: sendResult.ok ? undefined : sendResult.reason,
     });
   }
 
@@ -130,23 +205,60 @@ export async function listRecentAlerts(limit = 50): Promise<AlertRecord[]> {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-const RULE_LABELS: Record<RuleId, string> = {
+const RULE_LABELS: Record<AlertRuleId, string> = {
   'blowoff-bearish': '爆量長黑',
   'blowoff-bullish': '爆量長紅',
   'terminal-rally': '末升段警示',
   'ma5-breakdown': '5m MA5 跌破',
+  'stop-loss-breach': '跌破停損',
+  'pump-reversal': '拉高回落',
+  'rapid-drop': '急殺',
 };
 
-const RULE_TAGS: Record<RuleId, string[]> = {
+const RULE_TAGS: Record<AlertRuleId, string[]> = {
   'blowoff-bearish': ['chart_with_downwards_trend', 'warning'],
   'blowoff-bullish': ['rocket'],
   'terminal-rally': ['rotating_light', 'warning'],
   'ma5-breakdown': ['chart_with_downwards_trend'],
+  'stop-loss-breach': ['rotating_light', 'warning'],
+  'pump-reversal': ['chart_with_downwards_trend', 'warning'],
+  'rapid-drop': ['chart_with_downwards_trend', 'warning'],
 };
 
-function formatPayload(sig: Signal): {
+/** 持倉保命訊號的推播文案（規則1 priority 5，其餘 4） */
+function formatGuardPayload(sig: GuardSignal): {
   title: string; message: string; tags: string[]; priority: 1 | 2 | 3 | 4 | 5;
 } {
+  const code = sig.symbol.split('.')[0];
+  const m = sig.meta;
+  const nameSuffix = m.name ? ` ${m.name}` : '';
+  const lines: string[] = [`${sig.symbol}${nameSuffix}`];
+  let title: string;
+  let priority: 4 | 5;
+
+  if (sig.rule === 'stop-loss-breach') {
+    title = `🚨 ${code} 跌破停損（持倉保命）`;
+    priority = 5;
+    lines.push(m.positionSide === 'short'
+      ? `現價 ${m.price} ≥ 回補停損 ${m.stopLoss}（做空進場 ${m.entryPrice}）`
+      : `現價 ${m.price} ≤ 停損 ${m.stopLoss}（進場 ${m.entryPrice}）`);
+  } else if (sig.rule === 'pump-reversal') {
+    title = `⚠ ${code} 拉高回落（持倉保命）`;
+    priority = 4;
+    lines.push(`當日高 ${m.dayHigh}（+${m.dayGainPct}% vs 昨收）→ 現價 ${m.price}（自高點 -${m.drawdownPct}%）`);
+  } else {
+    title = `⚠ ${code} 急殺（持倉保命）`;
+    priority = 4;
+    lines.push(`近 ${m.windowMin} 分鐘 -${m.dropPct}%（${m.refClose} → ${m.price}）`);
+  }
+  lines.push('(分時推論，非書本日 K 規則)');
+  return { title, message: lines.join('\n'), tags: RULE_TAGS[sig.rule], priority };
+}
+
+function formatPayload(sig: AlertSignal): {
+  title: string; message: string; tags: string[]; priority: 1 | 2 | 3 | 4 | 5;
+} {
+  if (isGuardSignal(sig)) return formatGuardPayload(sig);
   const label = RULE_LABELS[sig.rule];
   const code = sig.symbol.split('.')[0];
   const title = `🔔 ${code} ${label}（分時）`;
@@ -198,10 +310,20 @@ function dateKeyOf(market: 'TW' | 'CN', ms: number): string {
  * 同 date 內只 IO 一次。
  */
 async function ensureFiredKeysLoaded(today: string): Promise<void> {
-  if (firedKeysLoadedForDate === today) return;
+  if (firedKeysLoadedForDate === today) {
+    // single-flight：首載進行中時後進者等同一個 promise，不能拿空 set 跑 dedup
+    if (loadInFlight) await loadInFlight;
+    return;
+  }
   // 跨日：清舊 set 後再載
   firedKeys.clear();
+  notifyRetryCount.clear();
   firedKeysLoadedForDate = today;
+  loadInFlight = loadFiredKeysFromDisk(today).finally(() => { loadInFlight = null; });
+  await loadInFlight;
+}
+
+async function loadFiredKeysFromDisk(today: string): Promise<void> {
   try {
     const p = path.join(process.cwd(), 'data', 'realtime', 'alerts', `${today}.jsonl`);
     const raw = await fs.readFile(p, 'utf-8');
@@ -209,8 +331,15 @@ async function ensureFiredKeysLoaded(today: string): Promise<void> {
       if (!line) continue;
       try {
         const r = JSON.parse(line) as AlertRecord;
+        // 瞬時推送失敗（http/fetch）的行不消耗 dedup — 重啟後繼續重試；
+        // 'disabled'/'no-url'（刻意關閉）與舊行（缺 notifyReason）視為已消耗（向下相容）。
+        if (r.notified === false && (r.notifyReason === 'http' || r.notifyReason === 'fetch')) continue;
         const date = dateKeyOf(r.market, r.firedAt);
-        firedKeys.add(`${date}:${r.symbol}:${r.rule}:${r.barTs}`);
+        // day-level dedup 與 dispatch 同款 key — 重啟/HMR 後 level 警報一樣不重推；
+        // 舊 jsonl 行缺 dedupScope → 走 barTs key，向下相容。
+        firedKeys.add(r.dedupScope === 'day'
+          ? `${date}:${r.symbol}:${r.rule}:day`
+          : `${date}:${r.symbol}:${r.rule}:${r.barTs}`);
       } catch { /* skip 壞行 */ }
     }
   } catch { /* file 不存在 — 今日尚無 alert */ }
@@ -221,6 +350,8 @@ async function ensureFiredKeysLoaded(today: string): Promise<void> {
 export function _resetDebounceForTest(): void {
   firedKeys.clear();
   firedKeysLoadedForDate = null;
+  loadInFlight = null;
+  notifyRetryCount.clear();
 }
 
 export function _peekDebounceSize(): number {

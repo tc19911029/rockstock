@@ -308,14 +308,16 @@ export default function SixConditionsPanel() {
           <div className="text-[10px] font-bold text-muted-foreground mb-1.5">⚠ 出場警示</div>
           <div className="space-y-1">
             {sellSignals.map(sig => (
-              <div key={sig.type} className={`text-[10px] px-2 py-1 rounded flex items-start gap-1.5 ${
+              <div key={sig.type} className={`text-[11px] px-2 py-1.5 rounded ${
                 sig.severity === 'high' ? 'bg-red-900/40 text-red-300' :
                 sig.severity === 'medium' ? 'bg-orange-900/40 text-orange-300' :
                 'bg-yellow-900/30 text-yellow-400'
               }`}>
-                <span className="font-bold shrink-0">{sig.label}</span>
-                <HeavinessBadgeFor market={market} signalId={sig.type} className="shrink-0" />
-                <span className="text-[9px] opacity-80">{sig.detail}</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-bold">{sig.label}</span>
+                  <HeavinessBadgeFor market={market} signalId={sig.type} className="shrink-0" />
+                </div>
+                <div className="text-[10px] opacity-80 leading-relaxed mt-0.5">{sig.detail}</div>
               </div>
             ))}
           </div>

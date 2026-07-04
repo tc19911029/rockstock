@@ -131,3 +131,39 @@ export const REALTIME_RULES = {
   /** scan 觸發週期（毫秒，launchd plist 對齊） */
   SCAN_INTERVAL_MS: 30 * 1000,
 } as const;
+
+// ── 持倉保命警報層（holdings guard）─────────────────────────────────────
+// 掛在 realtime-scan 30s 迴圈內的「即時提醒」層；正式操作建議仍由
+// portfolio-notify（120s）負責。純警報：不下單、不改持倉檔、不進選股鏈路。
+// 緊急滅音：env HOLDINGS_GUARD_NTFY_DISABLED=true（不用 rebuild；jsonl 照記）。
+export type GuardScope = 'off' | 'holding' | 'holding_manual' | 'all';
+export const HOLDINGS_GUARD = {
+  /** 總開關（關掉 = 三規則不偵測、形態訊號也不走持倉推播） */
+  ENABLED: true,
+  /** 各規則警報範圍 */
+  SCOPE: {
+    /** 規則1：跌破停損價（本質只對有停損價的持倉有效） */
+    STOP_LOSS_BREACH: 'holding' as GuardScope,
+    /** 規則2：拉高出貨保護（當日大漲後自高點回檔） */
+    PUMP_REVERSAL: 'holding' as GuardScope,
+    /** 規則3：急殺（N 分鐘視窗跌幅） */
+    RAPID_DROP: 'holding' as GuardScope,
+    /** 規則4：既有 5m 形態訊號（PATTERN_RULES）推手機的範圍 */
+    PATTERN_NTFY: 'holding' as GuardScope,
+  },
+  /** 規則2：當日曾漲幅門檻（dayHigh vs 昨收）— 4% 高於多數個股日常振幅 */
+  PUMP_MIN_GAIN_PCT: 0.04,
+  /** 規則2：自當日高點回檔門檻 — 回 3% 已抹掉大半漲幅（倒貨實質確認） */
+  PUMP_DRAWDOWN_PCT: 0.03,
+  /** 規則3：急殺視窗（分鐘） */
+  RAPID_DROP_WINDOW_MIN: 5,
+  /** 規則3：視窗內跌幅門檻 — 5 分鐘 3% ≈ 正常 1m 波動的 2-6 倍 */
+  RAPID_DROP_PCT: 0.03,
+  /** 規則3：基準 bar 距視窗邊界的容忍度（分鐘）— 太舊（CN 午休/斷線缺口）視同無基準 skip，
+   *  否則午休跳空/40 分鐘緩跌會被誤報成「近 5 分鐘急殺」還吃掉當日 dedup */
+  RAPID_DROP_REF_TOLERANCE_MIN: 3,
+  /** 規則2/3 開盤暖機分鐘數（避開集合競價/開盤噪音；規則1 保命不暖機） */
+  OPEN_WARMUP_MIN: 5,
+  /** 規則4：哪些既有形態規則走持倉推播（blowoff-bullish 是買訊、非保命，不含） */
+  PATTERN_RULES: ['blowoff-bearish', 'terminal-rally', 'ma5-breakdown'],
+} as const;

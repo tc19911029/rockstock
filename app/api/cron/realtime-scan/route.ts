@@ -21,8 +21,9 @@ import {
   pushTick, ensureSymbol, getBars, aggregateBars, backfillFromVendor,
   restoreFromDisk, startFlushLoop,
 } from '@/lib/realtime/minuteBarStore';
-import { detect, type Signal } from '@/lib/realtime/blowoffDetector';
-import { dispatch } from '@/lib/realtime/alertDispatcher';
+import { detect } from '@/lib/realtime/blowoffDetector';
+import { detectGuardSignals } from '@/lib/realtime/holdingsGuard';
+import { dispatch, type AlertSignal } from '@/lib/realtime/alertDispatcher';
 import { REALTIME_RULES } from '@/lib/config';
 
 export const runtime = 'nodejs';
@@ -134,19 +135,35 @@ export async function GET(req: NextRequest) {
   // 收盤後不對該 market 的 symbol 跑 detector — 否則停滯 bar 會反覆觸發 ma5-breakdown
   // 給持股推 ntfy。整個 cron 只要 TW || CN 任一在盤中就會繼續跑，但 detect 必須按 symbol
   // 所屬 market 個別 gate。
-  const allSignals: Signal[] = [];
+  const allSignals: AlertSignal[] = [];
+  let guardSignalCount = 0;
   for (const item of pool) {
     const isMarketLive = item.market === 'TW' ? twOpen : cnOpen;
     if (!isMarketLive) continue;
 
     const bars1m = getBars(item.symbol);
-    if (bars1m.length < REALTIME_RULES.MIN_BARS_FOR_DETECT) continue;
-
     const ctx = {
       symbol: item.symbol,
       market: item.market,
       isHolding: item.isHolding,
+      source: item.source,
     };
+
+    // ── 持倉保命層：純 quote + 1m 視窗，不受 MIN_BARS_FOR_DETECT 限制 ──
+    // （重啟後分K殘缺時，跌破停損/拉高回落仍要能工作）
+    const code = item.symbol.split('.')[0];
+    const q = item.market === 'TW' ? twQuoteMap?.get(code) : cnQuoteMap?.get(code);
+    const guardSignals = detectGuardSignals(
+      q && q.close > 0
+        ? { price: q.close, dayHigh: q.high, prevClose: q.prevClose }
+        : null,
+      bars1m,
+      { ...ctx, holding: item.holding },
+    );
+    guardSignalCount += guardSignals.length;
+    allSignals.push(...guardSignals);
+
+    if (bars1m.length < REALTIME_RULES.MIN_BARS_FOR_DETECT) continue;
 
     allSignals.push(...detect(bars1m, ctx, 1));
 
@@ -166,19 +183,28 @@ export async function GET(req: NextRequest) {
     ticksPushed,
     backfilled: backfillJobs.length,
     signalsDetected: allSignals.length,
+    guardSignals: guardSignalCount,
     dispatch: dispatchResult,
   });
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-async function fetchTWBatch(): Promise<Map<string, { close: number; volume: number }>> {
+/** 帶 high/prevClose 給 holdingsGuard 規則2（拉高出貨保護）用 */
+interface BatchQuote {
+  close: number;
+  volume: number;
+  high?: number;
+  prevClose?: number;
+}
+
+async function fetchTWBatch(): Promise<Map<string, BatchQuote>> {
   try {
     const { getTWSERealtimeIntraday } = await import('@/lib/datasource/TWSERealtime');
     const map = await getTWSERealtimeIntraday();
-    const out = new Map<string, { close: number; volume: number }>();
+    const out = new Map<string, BatchQuote>();
     for (const [code, q] of map) {
-      out.set(code, { close: q.close, volume: q.volume });
+      out.set(code, { close: q.close, volume: q.volume, high: q.high, prevClose: q.previousClose });
     }
     return out;
   } catch (err) {
@@ -187,13 +213,13 @@ async function fetchTWBatch(): Promise<Map<string, { close: number; volume: numb
   }
 }
 
-async function fetchCNBatch(): Promise<Map<string, { close: number; volume: number }>> {
+async function fetchCNBatch(): Promise<Map<string, BatchQuote>> {
   try {
     const { getEastMoneyRealtime } = await import('@/lib/datasource/EastMoneyRealtime');
     const map = await getEastMoneyRealtime();
-    const out = new Map<string, { close: number; volume: number }>();
+    const out = new Map<string, BatchQuote>();
     for (const [code, q] of map) {
-      out.set(code, { close: q.close, volume: q.volume });
+      out.set(code, { close: q.close, volume: q.volume, high: q.high, prevClose: q.prevClose });
     }
     return out;
   } catch (err) {

@@ -210,9 +210,9 @@ async function buildRankIndex(market: 'TW' | 'CN') {
   const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
   const stocks = await scanner.getStockList();
 
-  console.log(`\n📊 [${market}] Step 1.5: 計算成交額排名（前 500）...`);
-  const index = await buildTurnoverRank(market, stocks, 500);
-  console.log(`   ✅ 寫入 data/turnover-rank/${market}.json — ${index.symbols.length} 支，日期 ${index.date}`);
+  console.log(`\n📊 [${market}] Step 1.5: 計算成交額排名（前 N 按市場，TW 500 / CN 800）...`);
+  const index = await buildTurnoverRank(market, stocks); // 深度 = TURNOVER_INDEX_TOP_N[market]
+  console.log(`   ✅ 寫入 data/turnover-rank/${market}.json — ${index.symbols.length} 支（top${index.topN}），日期 ${index.date}`);
 }
 
 // ── Step 2: Run scans (via ScanPipeline) ───────────────────────────────

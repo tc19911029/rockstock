@@ -6,6 +6,9 @@ import {
   V11_TO_V12_LETTER,
   normalizeMatchedMethods,
 } from '@/lib/scanner/buyMethodTracks';
+// 書本池深度（500）。CN 成交額索引收錄 800（給三色），書本 session 的過濾/補 rank
+// 一律以名次 ≤ BOOK_UNIVERSE_TOP_N 判定，不可用「索引成員身分」。
+import { BOOK_UNIVERSE_TOP_N } from '@/lib/scanner/universeTopN';
 
 // ── Storage abstraction for scan sessions ────────────────────────────────────
 // Production (Vercel): uses Vercel Blob for durable persistence
@@ -538,7 +541,7 @@ export async function listScanDates(
         const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', mode);
         if (session && session.results) {
           const realCount = session.results.filter(r =>
-            r.turnoverRank != null || rankIdx!.ranks.has(r.symbol)
+            r.turnoverRank != null || (rankIdx!.ranks.get(r.symbol) ?? Infinity) <= BOOK_UNIVERSE_TOP_N
           ).length;
           e.resultCount = realCount;
         }
@@ -859,9 +862,9 @@ async function applyTurnoverFilter(session: ScanSession, market: MarketId): Prom
     const filtered = session.results.filter(r => {
       // 有 turnoverRank 代表當日 filter 時在前 500 → 一律保留
       if (r.turnoverRank != null) return true;
-      // 沒有 rank → 需確認當前索引含否
+      // 沒有 rank → 需確認當前是否在書本池（名次 ≤ 500；CN 索引 501-800 是三色收錄範圍，不算）
       const currentRank = idx.ranks.get(r.symbol);
-      if (currentRank != null) {
+      if (currentRank != null && currentRank <= BOOK_UNIVERSE_TOP_N) {
         r.turnoverRank = currentRank;
         return true;
       }

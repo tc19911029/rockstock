@@ -74,6 +74,12 @@ export const PROFIT_SHORT_RULE = 0.10;
 export const PROFIT_MID_RULE = 0.10;
 export const PROFIT_LONG_RULE = 0.20;
 
+/**
+ * 持倉缺 stopLoss 時的預設停損價係數（entryPrice × 0.93 = 書本 7% 停損）。
+ * 單一事實：daily-action route 與 realtime holdingsGuard 皆 import 此值。
+ */
+export const DEFAULT_STOP_LOSS_MULT = 0.93;
+
 export function sma(closes: number[], end: number, n: number): number | null {
   if (end < n - 1 || n <= 0) return null;
   let s = 0;

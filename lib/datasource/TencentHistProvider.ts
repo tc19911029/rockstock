@@ -88,7 +88,18 @@ interface TencentResponse {
   }>;
 }
 
-function parseEntries(entries: TencentKlineEntry[], isCN: boolean): Candle[] {
+/**
+ * 騰訊 fqkline 量單位板塊敏感（與 qt.gtimg 即時報價同一陷阱，見記憶 cn_gem_star_added_to_scan）：
+ * 科創板(688/689)回「股」、主板/創業板回「手」。2026-07-03 實測：688981 回 77,041,178（=真實股數，
+ * EM f6 成交額 110 億 ÷ 收盤 140.31 可交叉驗證）、600519 回 34,268（手）。
+ * → 科創不 ×100，其餘 ×100 轉股對齊 L1。code 為騰訊格式（sh688981）。
+ */
+export function tencentVolumeMultiplier(code: string, isCN: boolean): number {
+  if (!isCN) return 1;
+  return /^sh68[89]/.test(code) ? 1 : 100;
+}
+
+function parseEntries(entries: TencentKlineEntry[], volMult: number): Candle[] {
   return entries
     .map((row) => {
       const date = row[0]; // YYYY-MM-DD
@@ -100,9 +111,7 @@ function parseEntries(entries: TencentKlineEntry[], isCN: boolean): Candle[] {
 
       if (isNaN(close) || close <= 0) return null;
 
-      // A 股 volume 單位不確定（有時是手，有時已轉換），
-      // 騰訊 API 的 volume 通常是「手」
-      if (isCN) volume = volume * 100;
+      volume = volume * volMult;
 
       return {
         date,
@@ -166,7 +175,7 @@ async function fetchTencentKlines(
     }
 
     const entries = stockData.qfqday ?? stockData.day ?? [];
-    return parseEntries(entries as TencentKlineEntry[], isCN);
+    return parseEntries(entries as TencentKlineEntry[], tencentVolumeMultiplier(code, isCN));
   } catch (err) {
     // 網路/解析錯誤：必須留痕（否則盤中走圖看不到更新時無從判斷是 API 掛還是真停牌）
     rateLimiter.reportError('tencent', 0, String(err));
