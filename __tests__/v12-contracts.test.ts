@@ -243,25 +243,37 @@ describe.skip('v12 合約測試 — StrategyConfig 鎖定（Jest only）', () =>
 
 // ── 規格漂移防護（議題 漂移檢查）────────────────────────────────────────
 
-describe('v12 合約測試 — 規格漂移防護', () => {
-  it('多頭軌字母總數鎖定為 8（A 不含、B/P/C/E/J/K/L/M）', () => {
-    const longTrendLetters = ['B', 'P', 'C', 'E', 'J', 'K', 'L', 'M'];
-    expect(longTrendLetters.length).toBe(8);
+describe('v12 合約測試 — 規格漂移防護（鎖 buyMethodTracks 單一事實）', () => {
+  // 2026-07-05 用戶拍板：J（ABC 突破）多頭軌 → 反轉軌。
+  // 課程依據：寶典 Part 11-1 位置 6 — ABC 修正「形成短期空頭」後突破切線進場；
+  // 突破日 detectTrend 必為空頭（頭頭低底底低是結構要件）→ 掛 Step 1 = 系統性漏抓。
+  const tracks = jest.requireActual<typeof import('../lib/scanner/buyMethodTracks')>(
+    '../lib/scanner/buyMethodTracks');
+
+  it('多頭軌字母鎖定為 7（B/C/E/K/L/M/P，J 已移反轉軌）', () => {
+    expect([...tracks.BULLISH_TRACK_LETTERS]).toEqual(['B', 'C', 'E', 'K', 'L', 'M', 'P']);
   });
 
-  it('轉折軌字母總數鎖定為 4（D/F/N/O）', () => {
-    const reversalLetters = ['D', 'F', 'N', 'O'];
-    expect(reversalLetters.length).toBe(4);
+  it('轉折軌字母鎖定為 5（D/F/J/N/O）', () => {
+    expect([...tracks.REVERSAL_TRACK_LETTERS]).toEqual(['D', 'F', 'J', 'N', 'O']);
   });
 
   it('戰法軌只有 Q', () => {
-    const systemLetters = ['Q'];
-    expect(systemLetters.length).toBe(1);
+    expect([...tracks.SYSTEM_TRACK_LETTERS]).toEqual(['Q']);
   });
 
-  it('總計 14 字母（含 A 六條件 + 13 訊號）', () => {
-    const all = ['A', 'B', 'P', 'C', 'E', 'J', 'K', 'L', 'M', 'D', 'F', 'N', 'O', 'Q'];
-    expect(all.length).toBe(14);
+  it('J 不過 Step 1；v11 alias G 跟隨 J、H/I 仍多頭軌', () => {
+    expect(tracks.trackOf('J')).toBe('reversal');
+    expect(tracks.requiresStep1Pool('J')).toBe(false);
+    expect(tracks.requiresStep1Pool('G')).toBe(false); // G→J 隨新軌道
+    expect(tracks.requiresStep1Pool('H')).toBe(true);  // H→L 多頭軌
+    expect(tracks.requiresStep1Pool('I')).toBe(true);  // I→K 多頭軌
+  });
+
+  it('書本字母總計 14（含 A 六條件 + 13 訊號）', () => {
+    const bookLetters = ['A',
+      ...tracks.BULLISH_TRACK_LETTERS, ...tracks.REVERSAL_TRACK_LETTERS, ...tracks.SYSTEM_TRACK_LETTERS];
+    expect(bookLetters.length).toBe(14);
   });
 });
 

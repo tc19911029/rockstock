@@ -10,6 +10,12 @@
  * - **反轉軌**：書本「抓底/反轉」設計上全市場掃，不過 Step 1 — UI 不再過濾 A
  * - **戰法軌**：朱家泓三均戰法（MA3+10+24），自含趨勢判定，不過 Step 1
  *
+ * 2026-07-05 用戶拍板：J（ABC 突破）多頭軌 → 反轉軌。
+ * 課程原文（寶典 Part 11-1 位置 6 p.697）：ABC 修正「形成短期空頭」後突破切線進場 —
+ * 突破當日 detectTrend 幾乎必為空頭（頭頭低底底低是 ABC 結構要件）、均線未多排，
+ * 六條件天生不可能 ≥5 分 → 掛多頭軌等於系統性漏抓標準 ABC（600110 2026-07-03 實證）。
+ * detector 自帶「站上 MA20 且 MA20 向上 + 修正前多頭」門檻，與反轉軌語意一致。
+ *
  * 改動本檔同時更新：
  * - `lib/scanner/ScanPipeline.ts`（生產掃描）
  * - `lib/scanner/MarketScanner.ts`
@@ -21,8 +27,8 @@
  * - `__tests__/contracts/scan-parity.test.ts`
  */
 
-/** 多頭軌字母（書本《活用技術分析寶典》Part 11-1 八種進場位置 + v12 鎖股對應）*/
-export const BULLISH_TRACK_LETTERS = ['B', 'C', 'E', 'J', 'K', 'L', 'M', 'P'] as const;
+/** 多頭軌字母（書本《活用技術分析寶典》Part 11-1 八種進場位置 + v12 鎖股對應；J 於 2026-07-05 移反轉軌）*/
+export const BULLISH_TRACK_LETTERS = ['B', 'C', 'E', 'K', 'L', 'M', 'P'] as const;
 
 /**
  * v11 → v12 字母對照（讀舊資料用，新代碼不寫 v11）
@@ -58,8 +64,8 @@ export function normalizeMatchedMethods(matched: readonly string[]): string[] {
   return out;
 }
 
-/** 反轉軌字母（書本「抓底/反轉」型態）*/
-export const REVERSAL_TRACK_LETTERS = ['D', 'F', 'N', 'O'] as const;
+/** 反轉軌字母（書本「抓底/反轉」型態；J=ABC 突破 2026-07-05 自多頭軌移入，突破日結構天生短空）*/
+export const REVERSAL_TRACK_LETTERS = ['D', 'F', 'J', 'N', 'O'] as const;
 
 /** 戰法軌字母（朱家泓網路課程「三條均線戰法 MA3+10+24」）*/
 export const SYSTEM_TRACK_LETTERS = ['Q'] as const;
@@ -170,11 +176,14 @@ export const ALL_BUY_METHOD_LETTERS = [
 export const BULLISH_TRACK_SET: ReadonlySet<string> = new Set(BULLISH_TRACK_LETTERS);
 /**
  * 多頭軌（含 v11 alias）— 給 Step 1 gate / filter-on-read 用
- * v11 G/H/I 仍可能出現在舊 scan 資料的 matchedMethods 裡，必須當作多頭軌過 Step 1
+ * v11 alias（G/H/I）跟隨其 v12 對應字母的軌道：H→L、I→K 仍多頭軌；
+ * G→J 隨 J 移反轉軌後不再過 Step 1 gate（2026-07-05）。
  */
 export const BULLISH_TRACK_SET_WITH_V11: ReadonlySet<string> = new Set([
   ...BULLISH_TRACK_LETTERS,
-  ...Object.keys(V11_TO_V12_LETTER),
+  ...Object.entries(V11_TO_V12_LETTER)
+    .filter(([, v12]) => (BULLISH_TRACK_LETTERS as readonly string[]).includes(v12))
+    .map(([v11]) => v11),
 ]);
 export const REVERSAL_TRACK_SET: ReadonlySet<string> = new Set(REVERSAL_TRACK_LETTERS);
 export const SYSTEM_TRACK_SET: ReadonlySet<string> = new Set(SYSTEM_TRACK_LETTERS);
@@ -243,11 +252,10 @@ export function requiresStep1Pool(letter: string): boolean {
 /** 字母 → 簡潔中文名（UI tab / chip / row 用，書本對齊）*/
 export const LETTER_NAMES: Readonly<Record<string, string>> = {
   A: '六條件',
-  // ── 多頭軌（8 種進場位置，書本 Part 11-1 + 寶典 p.694-699）──
+  // ── 多頭軌（書本 Part 11-1 進場位置 + 寶典 p.694-699）──
   B: '回後買上漲',         // 寶典 Part 11-1 位置 2 / 5 步驟 p.40
   C: '盤整突破',           // 寶典 Part 11-1 位置 1 / 5 步驟 p.40
   E: '缺口',               // 寶典 Part 11-1 位置 4 / 5 步驟 p.40
-  J: 'ABC 突破',           // 寶典 Part 11-1 位置 6 p.697
   K: 'K 線橫盤',           // 寶典 Part 11-1 位置 3 p.694
   L: '過大量黑 K',         // 寶典 Part 11-1 位置 8 p.699
   M: '突破軌道線',         // 寶典 p.387
@@ -255,6 +263,7 @@ export const LETTER_NAMES: Readonly<Record<string, string>> = {
   // ── 反轉軌（書本「抓底/反轉」）──
   D: '一字底',             // 抓住飆股 25 型態 #9
   F: 'V 型反轉',           // 寶典 Part 12 祕笈圖 #1 + 抓住K線 第 7 篇
+  J: 'ABC 突破',           // 寶典 Part 11-1 位置 6 p.697（2026-07-05 移入：突破日結構天生短空，不可掛 Step 1）
   N: '型態確認',           // 抓住飆股 25 型態
   O: '打底完成',           // 寶典 Part 11-1 位置 1（反轉解讀）
   // ── 戰法軌 ──

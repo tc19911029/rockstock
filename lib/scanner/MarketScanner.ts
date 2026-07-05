@@ -1336,10 +1336,10 @@ export abstract class MarketScanner {
     // ══════════════════════════════════════════════════════════════
     // 軌道分類 — 決定要不要過 Step 1 池子 + 戒律檢查（書本對應）
     // ══════════════════════════════════════════════════════════════
-    // 多頭軌（B/C/E/J/K/L/M/P 8 個書本進場位置）：
+    // 多頭軌（B/C/E/K/L/M/P 書本進場位置）：
     //   → 必須先過 Step 1（六條件+戒律+淘汰法）才能進場
     //   → 從今日 Step 1 池子挑候選，不全市場掃
-    // 反轉軌（D/F/N/O 抓底/反轉）：
+    // 反轉軌（D/F/J/N/O 抓底/反轉；J 2026-07-05 移入 — ABC 突破日天生短空過不了六條件）：
     //   → 不過 Step 1（過了就抓不到底部反轉）
     //   → 全市場掃描
     // 戰法軌 Q（朱老師三均線）：
@@ -1347,17 +1347,17 @@ export abstract class MarketScanner {
     //   → 但仍過戒律（書本 p.262 沒說可以無視戒律）
     //   → 全市場掃描
     // 軌道分類讀 lib/scanner/buyMethodTracks.ts 單一事實來源
-    // REVERSAL_TRACK = D/F/N/O — 不過 Step 1 + 不過戒律（隱含：fall-through to default behavior）
-    const isBullish = BULLISH_TRACK_SET_WITH_V11.has(method);  // 含 v11 G/H/I — 跟 J/L/K 用同 detector，Step 1 gate 一致
+    // REVERSAL_TRACK = D/F/J/N/O — 不過 Step 1 + 不過戒律（隱含：fall-through to default behavior）
+    const isBullish = BULLISH_TRACK_SET_WITH_V11.has(method);  // 含跟隨 v12 軌道的 v11 alias（H/I；G 隨 J 移反轉軌後除外）
     const isSystem = SYSTEM_TRACK_SET.has(method);
 
     // 載入今日 Step 1 池子（兩個用途）：
-    //   1. 多頭軌方法（B/C/E/J/K/L/M/P）：拿池子當候選來源（filter candidates）
-    //   2. 反轉/戰法軌方法（D/F/N/O/Q）：cross-strategy 推**多頭軌字母**時當 gate
+    //   1. 多頭軌方法（B/C/E/K/L/M/P）：拿池子當候選來源（filter candidates）
+    //   2. 反轉/戰法軌方法（D/F/J/N/O/Q）：cross-strategy 推**多頭軌字母**時當 gate
     //      — 用戶 0512 明確：「(600089)他根本不符合回後買上漲 因為他不符合 step1
     //        所以當然也不會是 step2 裡的回後買上漲 但是他是不是型態確認不一定要過 step1」
-    //      → 多頭軌字母 (B/C/E/J/K/L/M/P) 在 cross-strategy badge 必須過 Step 1
-    //      → 反轉/戰法軌字母 (D/F/N/O/Q) 在 cross-strategy badge 不過 Step 1
+    //      → 多頭軌字母 (B/C/E/K/L/M/P) 在 cross-strategy badge 必須過 Step 1
+    //      → 反轉/戰法軌字母 (D/F/J/N/O/Q) 在 cross-strategy badge 不過 Step 1
     let step1Symbols: Set<string> | null = null;
     {
       const poolDate = asOfDate
@@ -1614,7 +1614,8 @@ export abstract class MarketScanner {
           // ── v12 新字母 J-Q 跨策略命中 ─────────────
           // 2026-05-12：移除 v11 G/H/I cross-strategy push（用戶決議只留 v12）
           // J(ABC 突破) / K(K 線橫盤) / L(過大量黑 K) 共用 v11 detector 已涵蓋
-          if (method !== 'J' && method !== 'G' && inStep1Pool) {
+          // 2026-07-05：J 移反轉軌（ABC 突破日結構天生短空，六條件不可能過）→ 不再吃 inStep1Pool gate
+          if (method !== 'J' && method !== 'G') {
             try {
               const { detectABCBreakout } = await import('@/lib/analysis/abcBreakoutEntry');
               if (detectABCBreakout(candles, lastIdx)?.isABCBreakout) matchedMethods.push('J');

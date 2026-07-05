@@ -1,9 +1,10 @@
 import { ScanSession, MarketId, ScanDirection, MtfMode } from '@/lib/scanner/types';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 // 0512: v11 G/H/I 已被 normalizeMatchedMethods 自動轉成 v12 J/L/K
+// 0705: 多頭軌集合（含 v11 alias）改吃 BULLISH_TRACK_SET_WITH_V11 單一事實 —
+//       J 移反轉軌後 alias G 必須跟著離開 Step 1 gate，不可在這裡手工重組
 import {
-  BULLISH_TRACK_LETTERS,
-  V11_TO_V12_LETTER,
+  BULLISH_TRACK_SET_WITH_V11,
   normalizeMatchedMethods,
 } from '@/lib/scanner/buyMethodTracks';
 // 書本池深度（500）。CN 成交額索引收錄 800（給三色），書本 session 的過濾/補 rank
@@ -770,7 +771,7 @@ async function stripMultiTrackLeakFromMatched(session: ScanSession): Promise<voi
     const pool = await loadStep1Pool(session.market, session.date);
     if (!pool || pool.symbols.length === 0) return; // 池子缺漏 — 不剝，等池子回來再處理
     const allowed = new Set(pool.symbols);
-    const bullishSet = new Set<string>([...BULLISH_TRACK_LETTERS, ...Object.keys(V11_TO_V12_LETTER)]);
+    const bullishSet = BULLISH_TRACK_SET_WITH_V11;
     for (const r of session.results) {
       if (!Array.isArray(r.matchedMethods) || r.matchedMethods.length === 0) continue;
       if (allowed.has(r.symbol)) continue; // 已在池子裡 — 多頭軌字母合法
@@ -784,15 +785,13 @@ async function stripMultiTrackLeakFromMatched(session: ScanSession): Promise<voi
 }
 
 /**
- * 多頭軌字母（書本 8 個進場位置 + v11 alias G/H/I）— 必須過 Step 1 池子才能進場
+ * 多頭軌字母（書本進場位置 + 跟隨 v12 對應軌道的 v11 alias）— 必須過 Step 1 池子才能進場
  *
- * 0512 修：含 G/H/I 因為它們是 J/L/K 的 alias 用同 detector
- * （若不含，舊 I scan 跟新 K scan 對同一檔股會給不同結果）
+ * 0512 修：alias 與其 v12 字母用同 detector，Step 1 gate 必須一致
+ * （若不含，舊 I scan 跟新 K scan 對同一檔股會給不同結果）。
+ * 0705：直接吃 BULLISH_TRACK_SET_WITH_V11 — J（與 alias G）移反轉軌後自動排除。
  */
-const BULLISH_LETTERS = new Set<MtfMode>([
-  ...BULLISH_TRACK_LETTERS,
-  ...Object.keys(V11_TO_V12_LETTER),
-] as readonly MtfMode[]);
+const BULLISH_LETTERS: ReadonlySet<string> = BULLISH_TRACK_SET_WITH_V11;
 
 
 /**
