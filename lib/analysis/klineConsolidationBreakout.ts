@@ -52,7 +52,7 @@ export interface KlineConsolidationBreakoutResult {
 }
 
 // 書本門檻單一事實來源：lib/analysis/bookThresholds.ts
-const MIN_CONSOL_DAYS = KLINE_CONSOL_MIN_DAYS;       // 至少 4 根橫盤 K（含今日突破共 ≥ 5 天）
+const MIN_CONSOL_DAYS = KLINE_CONSOL_MIN_DAYS;       // 至少 3 根橫盤 K（課程 CH2-3「連續三天」，2026-07-05 裁決 4→3）
 const MAX_CONSOL_DAYS = KLINE_CONSOL_MAX_DAYS;       // 最多 15 根（更久就接近位置 1 盤整突破）
 const MIN_ANCHOR_BODY_PCT = KLINE_CONSOL_ANCHOR_BODY_PCT;   // 中長紅 K：實體 ≥ 3%（寶典 Part 4-1「長紅」）
 const MAX_RANGE_WIDTH_PCT = KLINE_CONSOL_MAX_RANGE_PCT;     // 橫盤狹幅：高低差 / 錨點高 < 5%
