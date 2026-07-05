@@ -18,6 +18,12 @@
 import { REALTIME_RULES } from '@/lib/config';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
+import { computeIndicators } from '@/lib/indicators';
+import {
+  darkCloudCover, bearishEngulfingHigh, bearishHaramiHigh,
+  bearishPiercingHigh, bearishEncounterHigh,
+} from '@/lib/rules/twoBarReversalRules';
 
 /**
  * 持倉保命警報層（holdingsGuard）需要的持倉資訊。
@@ -31,6 +37,11 @@ export interface MonitoredHoldingInfo {
   positionSide: 'long' | 'short';
   /** 做空回補停損 = ui.entryKbar.high（進場黑K最高點） */
   entryHigh?: number;
+  /**
+   * 漏網-3（2026-07-05）：昨日日K是否出現高檔轉折/變盤訊號（課程 CH2-6/2-9）。
+   * 有 → guard 規則5 在開盤窗監看「開低=變盤確認」。每日快取、long 持倉才算。
+   */
+  reversalWatch?: { label: string; yLow: number; yClose: number };
 }
 
 export interface MonitoredSymbol {
@@ -49,6 +60,10 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
   const holdings = await readHoldings();
   for (const h of holdings) {
     if (seen.has(h.symbol)) continue;
+    // 漏網-3（2026-07-05）：long 持倉補「昨日轉折訊號」旗標（每日快取，guard 規則5 用）
+    if (h.holding && h.holding.positionSide === 'long') {
+      h.holding.reversalWatch = await detectYesterdayReversalWatch(h.symbol, h.market);
+    }
     out.push({ symbol: h.symbol, market: h.market, source: 'holding', isHolding: true, holding: h.holding });
     seen.add(h.symbol);
   }
@@ -76,6 +91,44 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
   }
 
   return out;
+}
+
+// ── 漏網-3：昨日高檔轉折/變盤訊號（課程 CH2-6/2-9「次日開盤定強弱」）───────────
+//
+// 讀 L1 日K（盤中時最後一根＝昨日已收盤 bar），跑高檔雙K轉折家族。
+// 命中（WATCH 變盤或 SELL 吞噬/貫穿）→ 回 {label, 昨低, 昨收} 給 guard 規則5：
+// 今晨開低 = 課程「開低確認變盤」→ 即時推播。每日每檔快取一次（30s 輪詢不重算）。
+
+const reversalWatchCache = new Map<string, { date: string; rw?: { label: string; yLow: number; yClose: number } }>();
+
+async function detectYesterdayReversalWatch(
+  symbol: string,
+  market: 'TW' | 'CN',
+): Promise<{ label: string; yLow: number; yClose: number } | undefined> {
+  const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10); // CST 日期
+  const cached = reversalWatchCache.get(symbol);
+  if (cached && cached.date === today) return cached.rw;
+
+  let rw: { label: string; yLow: number; yClose: number } | undefined;
+  try {
+    const raw = await loadLocalCandles(symbol, market);
+    if (raw && raw.length >= 25) {
+      // L1 只有已收盤日K；若最後一根就是今天（罕見：盤前跑到已封存）也無妨 — 看最後一根
+      const candles = computeIndicators(raw);
+      const last = candles.length - 1;
+      const rules = [bearishEngulfingHigh, bearishPiercingHigh, bearishHaramiHigh, bearishEncounterHigh, darkCloudCover];
+      for (const rule of rules) {
+        const r = rule.evaluate(candles, last, undefined as never);
+        if (r) {
+          rw = { label: r.label, yLow: candles[last].low, yClose: candles[last].close };
+          break;
+        }
+      }
+    }
+  } catch { /* 缺K線 → 無旗標 */ }
+
+  reversalWatchCache.set(symbol, { date: today, rw });
+  return rw;
 }
 
 // ── readers ──────────────────────────────────────────────────────────────

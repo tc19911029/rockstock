@@ -21,7 +21,7 @@ import type { MonitoredHoldingInfo, MonitoredSymbol } from './monitorPool';
 import { HOLDINGS_GUARD, type GuardScope } from '@/lib/config';
 import { DEFAULT_STOP_LOSS_MULT } from '@/lib/agents/holdingsActionEngine';
 
-export type GuardRuleId = 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop';
+export type GuardRuleId = 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop' | 'reversal-open-low';
 
 export interface GuardQuote {
   /** 最新成交價 */
@@ -69,6 +69,14 @@ export interface GuardSignal {
     windowMin?: number;
     /** 規則3：視窗基準價 */
     refClose?: number;
+    /** 規則5：昨日轉折訊號名（課程 CH2 變盤家族） */
+    reversalLabel?: string;
+    /** 規則5：昨日最低（收盤跌破=出場執行線） */
+    yLow?: number;
+    /** 規則5：昨收（開低基準） */
+    yClose?: number;
+    /** 規則5：目前開低幅度 % */
+    openLowPct?: number;
   };
   caveat: 'minute-inference';
   isHolding: boolean;
@@ -196,6 +204,29 @@ export function detectGuardSignals(
           windowMin: HOLDINGS_GUARD.RAPID_DROP_WINDOW_MIN,
         }));
       }
+    }
+  }
+
+  // ── 規則5（2026-07-05 漏網-3）：昨日轉折訊號 + 今晨開低 = 變盤確認 ────────
+  // 課程 CH2-9「次日開盤方向定強弱」：昨日日K出現高檔變盤/轉折（母子/遭遇/吞噬/貫穿/覆蓋），
+  // 今晨開盤窗（前 30 分鐘）現價低於昨收 0.5% → 開低確認變盤，即時提醒（不等收盤）。
+  // 收盤級的正式出場判定仍在 daily-action（這裡是「開盤那一刻的早鳥提醒」）。
+  if (
+    quote && quote.price > 0 && side !== 'short' && !cnAuction
+    && ctx.holding?.reversalWatch
+    && sinceOpen >= 0 && sinceOpen <= HOLDINGS_GUARD.REVERSAL_OPEN_WINDOW_MIN
+    && scopeAllows(HOLDINGS_GUARD.SCOPE.REVERSAL_OPEN, ctx)
+  ) {
+    const rw = ctx.holding.reversalWatch;
+    const openLow = 1 - quote.price / rw.yClose;
+    if (rw.yClose > 0 && openLow >= HOLDINGS_GUARD.REVERSAL_OPEN_LOW_PCT) {
+      signals.push(makeSignal('reversal-open-low', ctx, now, {
+        price: quote.price,
+        reversalLabel: rw.label,
+        yLow: rw.yLow,
+        yClose: rw.yClose,
+        openLowPct: round2(openLow * 100),
+      }));
     }
   }
 

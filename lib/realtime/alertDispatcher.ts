@@ -26,7 +26,7 @@ export type AlertRuleId = RuleId | GuardRuleId;
 export type AlertSignal = Signal | GuardSignal;
 
 const GUARD_RULES: ReadonlySet<string> = new Set<GuardRuleId>([
-  'stop-loss-breach', 'pump-reversal', 'rapid-drop',
+  'stop-loss-breach', 'pump-reversal', 'rapid-drop', 'reversal-open-low',
 ]);
 
 function isGuardSignal(sig: AlertSignal): sig is GuardSignal {
@@ -99,6 +99,7 @@ export function decideNotify(sig: AlertSignal): boolean {
     if (guardMuted || !HOLDINGS_GUARD.ENABLED) return false;
     const scope = sig.rule === 'stop-loss-breach' ? HOLDINGS_GUARD.SCOPE.STOP_LOSS_BREACH
       : sig.rule === 'pump-reversal' ? HOLDINGS_GUARD.SCOPE.PUMP_REVERSAL
+      : sig.rule === 'reversal-open-low' ? HOLDINGS_GUARD.SCOPE.REVERSAL_OPEN
       : HOLDINGS_GUARD.SCOPE.RAPID_DROP;
     return scopeAllows(scope, sig);
   }
@@ -213,6 +214,7 @@ const RULE_LABELS: Record<AlertRuleId, string> = {
   'stop-loss-breach': '跌破停損',
   'pump-reversal': '拉高回落',
   'rapid-drop': '急殺',
+  'reversal-open-low': '變盤開低確認',
 };
 
 const RULE_TAGS: Record<AlertRuleId, string[]> = {
@@ -223,6 +225,7 @@ const RULE_TAGS: Record<AlertRuleId, string[]> = {
   'stop-loss-breach': ['rotating_light', 'warning'],
   'pump-reversal': ['chart_with_downwards_trend', 'warning'],
   'rapid-drop': ['chart_with_downwards_trend', 'warning'],
+  'reversal-open-low': ['eyes', 'warning'],
 };
 
 /** 持倉保命訊號的推播文案（規則1 priority 5，其餘 4） */
@@ -246,6 +249,11 @@ function formatGuardPayload(sig: GuardSignal): {
     title = `⚠ ${code} 拉高回落（持倉保命）`;
     priority = 4;
     lines.push(`當日高 ${m.dayHigh}（+${m.dayGainPct}% vs 昨收）→ 現價 ${m.price}（自高點 -${m.drawdownPct}%）`);
+  } else if (sig.rule === 'reversal-open-low') {
+    title = `👀 ${code} 昨日${m.reversalLabel ?? '轉折訊號'}・今開低（變盤確認）`;
+    priority = 4;
+    lines.push(`昨收 ${m.yClose} → 現價 ${m.price}（開低 -${m.openLowPct}%）`);
+    lines.push(`課程 CH2：變盤線次日開低=空方確認。收盤跌破昨低 ${m.yLow} → 執行出場；拉回站穩 → 解除。`);
   } else {
     title = `⚠ ${code} 急殺（持倉保命）`;
     priority = 4;
