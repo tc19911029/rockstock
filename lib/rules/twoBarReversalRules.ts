@@ -470,12 +470,49 @@ export const bullishEncounterLow: TradingRule = {
   },
 };
 
+/** 標準長紅長黑 — 課程 CH2-6 第1組「標準形態」：高低點都跟紅K差不多、彼此沒過＝止漲（6組最弱） */
+export const standardRedBlackHigh: TradingRule = {
+  id: 'zhu-standard-red-black-high',
+  name: '標準長紅長黑（止漲）',
+  description: '高檔長紅後接長黑，兩根高低點差不多、彼此沒過 — 6組裡最弱的止漲訊號，次日確認',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 5) return null;
+    const red = candles[index - 1];
+    const black = candles[index];
+
+    if (!isMedLongRed(red)) return null;
+    if (!isMedLongBlack(black)) return null;
+    // 課程原文：「高低點都跟紅K差不多、彼此沒過」（±0.5% 容差 ⚠️ 自創 padding）
+    if (black.high > red.high * 1.005 || black.low < red.low * 0.995) return null;
+    // 互斥讓位（其他 5 組幾何優先，各自有專屬規則）：
+    if (black.close < red.low) return null;                              // 第6組 貫穿
+    if (black.open >= red.close && black.close <= red.open) return null; // 第5組 吞噬
+    if (black.open > red.high) return null;                              // 第2/3組 遭遇/覆蓋（都開高於紅K高）
+    if (black.high <= red.high && black.low >= red.low) return null;     // 第4組 母子（整根被包住）
+    // 需在高檔
+    if (!isUptrendWave(candles, index - 1, 8)) return null;
+
+    return {
+      type: 'WATCH',
+      label: '標準長紅長黑（止漲・次日確認）',
+      description: `長紅(${red.close.toFixed(2)})後接長黑(${black.close.toFixed(2)})，高低點差不多、彼此沒過（課程 CH2-6 第1組）`,
+      reason: [
+        '【朱家泓 課程 CH2-6 第1組 標準形態】左長紅右長黑＝止漲，是 6 組紅黑配裡最弱的一組。',
+        '課程共同判斷原則：觀察次日，次日開低確認止漲、注意是否轉折下跌；開高則多方仍在。',
+        `這兩根的低點 ${Math.min(red.low, black.low).toFixed(2)} 是關鍵防線：被跌破後面容易有一波下跌。`,
+      ].join('\n'),
+      ruleId: this.id,
+    };
+  },
+};
+
 export const TWO_BAR_REVERSAL_RULES: TradingRule[] = [
   darkCloudCover,
   bearishEngulfingHigh,
   bearishHaramiHigh,
   bearishPiercingHigh,
   bearishEncounterHigh,
+  standardRedBlackHigh,
   risingSun,
   bullishEngulfingLow,
   bullishHaramiLow,

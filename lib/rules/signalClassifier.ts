@@ -204,6 +204,7 @@ export const RULE_ID_TO_SUBTYPE: Record<string, SignalSubtype> = {
   // 變盤類（要等下根確認）
   'zhu-bearish-mother-son-transition':  'exit_soft',
   'zhu-bearish-harami-high':            'exit_soft',
+  'zhu-standard-red-black-high':        'exit_soft', // 課程 CH2-6 第1組標準形態（6組最弱，次日確認）
   'sop-high-reversal-warning':          'exit_soft', // 「準備停利」= 軟訊號
   // 短線變盤
   'high-cross-sell':                    'exit_soft',

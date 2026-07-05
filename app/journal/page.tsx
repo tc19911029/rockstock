@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { formatNT } from '@/lib/portfolio/useTotalCapital';
+import { gradeTrade, summarizeTradeGrades, TRADE_GRADE_LABEL } from '@/lib/portfolio/perfMetrics';
 
 interface ClosedTrade {
   tradeId: string;
@@ -104,6 +105,8 @@ export default function JournalPage() {
       // 0 敗時盈虧比未定義（不是 0）— 用 null 代表「尚無虧損」，顯示層轉成 ∞
       payoffRatio: avgLossPct !== 0 ? Math.abs(avgWinPct / avgLossPct) : null,
       reasonDist,
+      // 大賺/小賺/小賠 三級（直播課 2026-07-01 Q25：>10%大賺、獲利<10%小賺、賠<10%小賠、賠≥10%大賠）
+      grades: summarizeTradeGrades(all),
     };
   }, [items]);
 
@@ -130,6 +133,18 @@ export default function JournalPage() {
               value={stats.payoffRatio == null ? (stats.wins > 0 ? '∞' : '—') : stats.payoffRatio.toFixed(2)}
               tone={stats.payoffRatio == null ? (stats.wins > 0 ? 'good' : undefined) : stats.payoffRatio >= 1.5 ? 'good' : 'warn'}
               hint={`勝 +${stats.avgWinPct.toFixed(1)}% / 敗 ${stats.losses > 0 ? stats.avgLossPct.toFixed(1) + '%' : '— 尚無虧損'}`} />
+          </section>
+        )}
+
+        {/* 大賺/小賺/小賠 節奏（課程：1 大賺 + 3 小賺小賠互抵 = 贏家） */}
+        {stats && stats.total > 0 && (
+          <section className="rounded-lg border border-border bg-card px-3 py-2 text-sm flex items-center gap-3 flex-wrap">
+            <span className="font-medium">節奏：</span>
+            <span className="text-bull">大賺 {stats.grades.counts.big_win}</span>
+            <span className="text-bull/80">小賺 {stats.grades.counts.small_win}</span>
+            <span className="text-bear/80">小賠 {stats.grades.counts.small_loss}</span>
+            {stats.grades.counts.big_loss > 0 && <span className="text-bear font-bold">大賠 {stats.grades.counts.big_loss}</span>}
+            <span className="text-xs text-muted-foreground">{stats.grades.verdict}</span>
           </section>
         )}
 
@@ -244,6 +259,9 @@ function TradeCard({ item, onSaved }: { item: ItemJoin; onSaved: () => void }) {
           {trade.industry && <span className="text-xs text-muted-foreground ml-2">· {trade.industry}</span>}
         </div>
         <div className={`text-base font-bold font-mono ${win ? 'text-bull' : 'text-bear'}`}>
+          <span className={`mr-2 px-1.5 py-0.5 rounded text-[10px] font-sans border ${
+            gradeTrade(trade.netReturnPct) === 'big_loss' ? 'border-bear text-bear' : 'border-border text-muted-foreground'
+          }`}>{TRADE_GRADE_LABEL[gradeTrade(trade.netReturnPct)]}</span>
           {win ? '+' : ''}{formatNT(trade.netPnL)} ({trade.netReturnPct >= 0 ? '+' : ''}{trade.netReturnPct.toFixed(2)}%)
         </div>
       </header>

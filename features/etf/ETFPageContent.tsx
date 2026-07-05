@@ -6,6 +6,7 @@ import { ETFPerformanceTab } from './components/ETFPerformanceTab';
 import { ETFChangesTab } from './components/ETFChangesTab';
 import { ETFConsensusTab } from './components/ETFConsensusTab';
 import { ETFTrackingTab } from './components/ETFTrackingTab';
+import { ETFTrendCheckBanner } from './components/ETFTrendCheckBanner';
 
 const TABS: Array<{ value: ETFTab; label: string }> = [
   { value: 'performance', label: '績效排行' },
@@ -24,6 +25,7 @@ export function ETFPanel() {
 
   return (
     <div className="p-4 space-y-3 h-full overflow-y-auto">
+      <ETFTrendCheckBanner />
       <div className="flex flex-wrap items-stretch gap-2">
         <div className="inline-flex items-center rounded-lg border border-border bg-secondary/30 p-0.5 text-sm max-w-full overflow-x-auto">
           {TABS.map((t) => (

@@ -14,6 +14,43 @@ import type { ClosedTrade } from '@/lib/portfolio/tradeRecorder';
 
 export const MIN_SAMPLE = 10;
 
+// ── 大賺/小賺/小賠 三級分類（直播課 2026-07-01 Q25 朱老師口述量化）────────────
+// 原話：「大賺有標準的，賺 10% 以上就叫大賺，我只賺 8%、5%、7% 就叫小賺，
+//        那我停損賠了 6%，那就小賠」。賠超過 −10%＝沒守紀律的大賠（北極星要避免的）。
+// 贏家節奏＝一個月 1 次大賺 + 3 次小賺小賠互抵。純顯示分級，不進任何 gate。
+
+export type TradeGrade = 'big_win' | 'small_win' | 'small_loss' | 'big_loss';
+
+export const TRADE_GRADE_LABEL: Record<TradeGrade, string> = {
+  big_win: '大賺',
+  small_win: '小賺',
+  small_loss: '小賠',
+  big_loss: '大賠',
+};
+
+/** netReturnPct 單位＝百分比數字（10 = +10%）。 */
+export function gradeTrade(netReturnPct: number): TradeGrade {
+  if (netReturnPct >= 10) return 'big_win';
+  if (netReturnPct >= 0) return 'small_win';
+  if (netReturnPct > -10) return 'small_loss';
+  return 'big_loss';
+}
+
+/** 期間分級統計＋贏家節奏一句話（顯示用）。 */
+export function summarizeTradeGrades(trades: readonly { netReturnPct: number }[]): {
+  counts: Record<TradeGrade, number>;
+  verdict: string;
+} {
+  const counts: Record<TradeGrade, number> = { big_win: 0, small_win: 0, small_loss: 0, big_loss: 0 };
+  for (const t of trades) counts[gradeTrade(t.netReturnPct)]++;
+  let verdict = '';
+  if (trades.length === 0) verdict = '';
+  else if (counts.big_loss > 0) verdict = `⚠️ 有 ${counts.big_loss} 筆大賠（>-10%）— 課程：先解決大賠，才談贏家節奏`;
+  else if (counts.big_win >= 1) verdict = '✅ 贏家節奏：大賺 + 小賺小賠互抵（課程 Q25）';
+  else verdict = '小賺小賠互抵中 — 等一次大賺（>10%）就是贏家節奏';
+  return { counts, verdict };
+}
+
 export type PerfStatus = 'ok' | 'insufficient-sample';
 
 export interface PerfMetrics {
