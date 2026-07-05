@@ -223,6 +223,10 @@ const FILTERS: Def[] = [
 
 const anySell: Pred = (g, i) => g.bDead[i] || g.bBreakDn[i] || g.cDead[i] || g.redTurnNeg[i];
 
+// 近 LB 根內某訊號曾觸發（給「先穿越、幾天內再突破金叉」的序列型組合用）
+const SEQ_LB = 5;
+const anyBack = (a: boolean[], i: number, lb = SEQ_LB): boolean => { for (let j = Math.max(0, i - lb + 1); j <= i; j++) if (a[j]) return true; return false; };
+
 interface NamedModel { id: string; label: string; fn: Pred; bucket: 'named' | 'avoid' }
 const NAMED: NamedModel[] = [
   // 官方教的買法（逐條驗證）
@@ -233,6 +237,13 @@ const NAMED: NamedModel[] = [
   { id: 'off_cGoldTier', label: '官方·捕撈金叉+彩柱確認', fn: (g, i) => g.cGold[i] && g.tierAny[i], bucket: 'named' },
   { id: 'reson3', label: '三組齊發(雙B+主力+捕撈同日)', fn: (g, i) => g.mainBuy[i] && (g.bGold[i] || g.bBreak[i]) && g.cGold[i], bucket: 'named' },
   { id: 'bottomRev', label: '底反(紅+空頭區金叉)·既有最強基準', fn: (g, i) => g.red[i] && g.cGold[i] && g.xBelow0[i], bucket: 'named' },
+  // ★使用者圖示序列：智能線穿過黃紅 → 突破 + 金叉（同日版 + 近5日序列版 + 紅燈/捕撈版）
+  { id: 'seq_bg_stack', label: '突破+金叉同日 ＋ 智能在黃紅上(多頭排列)', fn: (g, i) => g.bRes[i] && g.stackZHY[i], bucket: 'named' },
+  { id: 'seq_bg_stack_red', label: '突破+金叉 ＋ 智能排列 ＋ 紅燈', fn: (g, i) => g.bRes[i] && g.stackZHY[i] && g.red[i], bucket: 'named' },
+  { id: 'seq_cross_then_bg', label: '近5日穿越黃紅 → 今日突破+金叉', fn: (g, i) => anyBack(g.zCross, i) && g.bRes[i], bucket: 'named' },
+  { id: 'seq_cross_then_bg_red', label: '近5日穿越 → 突破+金叉 ＋ 紅燈', fn: (g, i) => anyBack(g.zCross, i) && g.bRes[i] && g.red[i], bucket: 'named' },
+  { id: 'seq_cross_then_bORg', label: '近5日穿越 → 今日突破或金叉(放寬)', fn: (g, i) => anyBack(g.zCross, i) && (g.bBreak[i] || g.bGold[i]), bucket: 'named' },
+  { id: 'seq_full_cgold', label: '穿越 → 突破+金叉 ＋ 捕撈金叉(你完整描述)', fn: (g, i) => anyBack(g.zCross, i) && g.bRes[i] && g.cGold[i], bucket: 'named' },
   // 使用者觀察的滿配 + 逐步放寬
   { id: 'user_full', label: '你的滿配(智能排序+紅+雙箭頭+空頭金叉)', fn: (g, i) => g.stackZHY[i] && g.red[i] && g.bRes[i] && g.cGold[i] && g.xBelow0[i], bucket: 'named' },
   { id: 'user_relax1', label: '你·放寬(智能排序+紅+雙B擇一+捕撈金叉)', fn: (g, i) => g.stackZHY[i] && g.red[i] && (g.bGold[i] || g.bBreak[i]) && g.cGold[i], bucket: 'named' },
@@ -597,6 +608,11 @@ function buildReport(meta: any, rows: any[]): string {
   L.push('## 你的觀察逐條驗證');
   const verify = (id: string, name: string) => { const r = get(id); if (!r) { L.push(`- ${name}：無此模型`); return; } L.push(`- ${name}：${r.n < MIN_N ? `樣本只 ${r.n} 筆、不下結論` : `${r.n} 筆，比大盤平均 ${fmtPct(r.meanEx)}、勝率 ${fmt1(r.winEx)}%、測試段 ${fmtPct(r.testEx)}`}`); };
   verify('user_stackRed', '智能>黃>紅 + 紅在');
+  verify('seq_bg_stack', '突破+金叉同日 + 智能在黃紅上');
+  verify('seq_bg_stack_red', '突破+金叉 + 智能排列 + 紅燈');
+  verify('seq_cross_then_bg', '近5日穿越 → 突破+金叉');
+  verify('seq_cross_then_bg_red', '近5日穿越 → 突破+金叉 + 紅燈');
+  verify('seq_full_cgold', '穿越 → 突破+金叉 + 捕撈金叉');
   verify('user_full', '你的滿配(排序+紅+雙箭頭+空頭金叉)');
   verify('0t_bBreak', '突破智能線(單用)');
   verify('0t_bGold', '黃紅金叉(單用)');
