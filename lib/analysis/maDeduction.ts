@@ -1,15 +1,23 @@
 /**
- * 移動扣抵預測（W3c · 顯示層 · 純函式）
+ * 移動扣抵預測（課程 CH3-2「移動扣抵」· 顯示層 · 純函式）
  *
- * 「移動扣抵」是均線的內建確定性：N 日均線每往前走一根，就把 N 天前那一根的
- * 收盤（＝扣抵值）丟掉、補進今天的收盤。所以只要拿「今天收盤」對比「即將被丟掉的
- * 扣抵值」，就能在 K 棒還沒出來前先知道均線「下一步往上還往下」——
+ * 課程判準（CH3-2 投影片 p01 表格，抄原文）：
+ *   抵（加入今日最新收盤）> 扣（減去最前面那一天的收盤）→ 總數增加 → 均線上彎
+ *   抵 = 扣 → 總數不變 → 均線走平
+ *   抵 < 扣 → 總數減少 → 均線下彎
+ *
+ * 「未卜先知」（CH3-2 標題頁原文「可以提前預知均線方向何時改變」）：
+ * 未來每一根要扣的收盤都是**已知歷史資料**，不用預測未來價 —
+ * 假設未來收盤凍在今收 C，第 j 根的均線增減 = (C − closes[asOf−N+j]) / N，
+ * 符號只看「今收 vs 該根扣抵價」：
  *
  *   今收 > 扣抵值  → 均線會往上（扣低補高）
  *   今收 < 扣抵值  → 均線會往下（扣高補低）
  *   今收 = 扣抵值  → 均線走平
  *
- * 再往前推幾根，就能估「幾天後均線會翻向」「兩條均線幾天後黃金交叉」。
+ * 再往前推幾根，就能估「幾天後均線會翻向」「兩條均線幾天後黃金交叉」
+ * （CH3-2 應用一：加權指數 2022/11/7 收 13223 > 明天扣抵 13106 → 明天月線翻上；
+ *   應用二：聯亞 3081 用扣抵估 10MA/20MA 約 4~5 天黃金交叉）。
  *
  * ⚠️ 純顯示／提示用：給走圖右側「均線預測」資訊欄。
  *    刻意**不接選股 gate、不做排序因子**（Wave2 已知此類預測對選股無穩定 edge，
@@ -21,6 +29,9 @@
 
 /**
  * 扣抵值 — N 日均線「下一根」要丟掉的那一根收盤價。
+ *
+ * 課程 CH3-2：看盤軟體在 K 線下方用「小三角形」標出明天要扣哪一根（不要扣錯），
+ * 游標移上去讀它的收盤就是扣抵價（本站 CandleChart 已畫此三角形）。
  *
  * 以 asOf 那根為「最新一根」，下一根均線會丟掉窗口最舊的收盤，
  * 也就是 closes[asOf - period + 1]。把它和今收一比就知道均線下一步方向。
@@ -43,12 +54,23 @@ export function deductPrice(
 }
 
 export interface MaTurnForecast {
-  /** 幾天後均線會翻向（1 = 下一根就翻；資料不足或方向不變回 null）*/
+  /**
+   * 幾天後均線會翻向 — 課程數法：均線在「未來第 s 根」翻向 → days = s（1 = 明天）。
+   * direction 描述的就是明天那根，所以這裡偵測到的翻向最早是 2；
+   * 「明天就翻」的課程情境（今天還下彎、明天翻上）看 todayDirection ≠ direction。
+   * 資料不足或視窗內方向不變回 null。
+   */
   days: number | null;
-  /** 目前均線的方向（用「今收 vs 扣抵值」判斷下一根會往哪走）*/
+  /** 明天那根均線的方向（今收 vs 明天扣抵值；課程 CH3-2：抵>扣上彎、抵<扣下彎）*/
   direction: 'up' | 'down' | 'flat';
   /** 預測會翻去的方向；direction 已定、預測未翻則同 direction */
   turnTo: 'up' | 'down' | 'flat';
+  /** 今天實際那根均線方向（真資料：今收 vs 今天丟掉的 closes[asOf−N]）；資料不足 null */
+  todayDirection: 'up' | 'down' | 'flat' | null;
+  /** 造成翻向那根「被扣掉的歷史 K 棒」索引（呼叫端可對回日期）；未翻 null */
+  turnDeductIdx: number | null;
+  /** 造成翻向的扣抵價（課程：「N 天後要扣的高價/低價」）；未翻 null */
+  turnDeductPrice: number | null;
 }
 
 /**
@@ -68,16 +90,19 @@ export function daysUntilMaTurn(
   asOf: number = closes.length - 1,
   maxLookahead: number = maN,
 ): MaTurnForecast {
-  const flat: MaTurnForecast = { days: null, direction: 'flat', turnTo: 'flat' };
-  if (maN <= 1) return flat;
-  if (asOf < maN - 1 || asOf >= closes.length) return flat;
+  const none: MaTurnForecast = {
+    days: null, direction: 'flat', turnTo: 'flat',
+    todayDirection: null, turnDeductIdx: null, turnDeductPrice: null,
+  };
+  if (maN <= 1) return none;
+  if (asOf < maN - 1 || asOf >= closes.length) return none;
 
   const todayClose = closes[asOf];
 
   // 用「均線值差」判斷方向：nextMA - curMA 的正負。
-  // nextMA = curMA + (today - drop)/maN，故方向 = sign(today - drop)。
+  // nextMA = curMA + (today - drop)/maN，故方向 = sign(today - drop)（課程：抵 vs 扣）。
   const dirOf = (futureStep: number): 'up' | 'down' | 'flat' => {
-    // 第 futureStep 根（1-based）要丟掉的歷史扣抵值
+    // 第 futureStep 根（1 = 明天；0 = 今天實際那步）要丟掉的歷史扣抵值
     const dropIdx = asOf - maN + futureStep;
     // dropIdx 落在歷史序列內才是真扣抵；超過 asOf 表示丟掉的也是今收 → 走平
     const dropPrice = dropIdx >= 0 && dropIdx <= asOf ? closes[dropIdx] : todayClose;
@@ -87,22 +112,27 @@ export function daysUntilMaTurn(
   };
 
   const direction = dirOf(1);
+  // 今天實際方向（真資料）：今天丟掉的是 closes[asOf−N]，窗口剛滿時沒有這根
+  const todayDirection = asOf - maN >= 0 ? dirOf(0) : null;
+
   if (direction === 'flat') {
-    return { days: null, direction: 'flat', turnTo: 'flat' };
+    return { ...none, todayDirection };
   }
 
+  // 課程數法：dirOf(s) 是「未來第 s 根」的均線增減，s 就是「幾天後」（1 = 明天）。
+  // 舊版回 s−1 少算一天，2026-07-05 對齊課程 CH3-2 修正。
   const cap = Math.max(1, Math.min(maxLookahead, maN));
   for (let step = 2; step <= cap; step++) {
     const d = dirOf(step);
-    if (d !== direction && d !== 'flat') {
-      return { days: step - 1, direction, turnTo: d };
-    }
-    if (d === 'flat') {
-      // 走平視為「即將翻向」的臨界 — 回報走平那根
-      return { days: step - 1, direction, turnTo: 'flat' };
+    if (d !== direction) {
+      const dropIdx = asOf - maN + step;
+      return {
+        days: step, direction, turnTo: d, todayDirection,
+        turnDeductIdx: dropIdx, turnDeductPrice: closes[dropIdx],
+      };
     }
   }
-  return { days: null, direction, turnTo: direction };
+  return { days: null, direction, turnTo: direction, todayDirection, turnDeductIdx: null, turnDeductPrice: null };
 }
 
 export interface GoldenCrossForecast {
@@ -182,4 +212,119 @@ export function daysUntilGoldenCross(
     }
   }
   return { days: null, alreadyAbove: false, trend };
+}
+
+export interface DeductionPoint {
+  /** 未來第幾根（1 = 明天） */
+  daysAhead: number;
+  /** 該根要扣掉的歷史收盤在 closes 的索引（可對回日期） */
+  index: number;
+  /** 扣抵價 */
+  price: number;
+}
+
+/**
+ * 未來 k 根的扣抵價序列 — 課程 CH3-2「未卜先知」的原料，全部是已知歷史資料。
+ *
+ * 未來第 j 根（1 = 明天）要扣 closes[asOf − maN + j]；j > maN 之後扣的是
+ * 「未來自己的收盤」不再是已知資料，所以序列天然只到 min(k, maN)。
+ */
+export function deductSeries(
+  closes: ReadonlyArray<number>,
+  maN: number,
+  k: number = maN,
+  asOf: number = closes.length - 1,
+): DeductionPoint[] {
+  if (maN <= 0 || asOf < maN - 1 || asOf >= closes.length) return [];
+  const cap = Math.min(Math.max(1, Math.floor(k)), maN);
+  const out: DeductionPoint[] = [];
+  for (let j = 1; j <= cap; j++) {
+    const index = asOf - maN + j;
+    out.push({ daysAhead: j, index, price: closes[index] });
+  }
+  return out;
+}
+
+// ── 白話結論句（顯示層文案，先結論、短句）────────────────────────────────
+
+/** 白話均線名（課程慣用），結論句用 */
+export const MA_PLAIN_LABEL: Record<number, string> = {
+  5: '5日線',
+  10: '10日線',
+  20: '月線',
+  60: '季線',
+};
+
+export interface MaDeductionLine {
+  text: string;
+  /** warn = 將下彎（警覺）；good = 將上彎 */
+  tone: 'warn' | 'good';
+}
+
+const fmtPrice = (p: number): string => String(Number(p.toFixed(2)));
+
+/** YYYY-MM-DD → M/D；沒有日期回 null */
+const fmtDate = (dates: ReadonlyArray<string> | undefined, idx: number): string | null => {
+  const d = dates?.[idx];
+  const m = d ? /^\d{4}-(\d{2})-(\d{2})/.exec(d) : null;
+  return m ? `${Number(m[1])}/${Number(m[2])}` : null;
+};
+
+/**
+ * 把單一均線的扣抵預測翻成一行白話結論（課程 CH3-2 兩個實戰方向）：
+ * - 「上不去就等下來」：未來改扣低價 → 股價不跌，均線就上彎
+ * - 頭部對稱用法：未來要扣高價 → 股價不漲，均線就下彎（警覺）
+ *
+ * 例：「月線 3 天後要扣 6/12 的高價 58.2 → 股價不漲將下彎（警覺）」
+ * 沒有翻向結論（方向不變 / 走平 / 資料不足）回 null，面板保持安靜。
+ */
+export function formatMaTurnLine(opts: {
+  /** 白話均線名，例：月線（見 MA_PLAIN_LABEL） */
+  label: string;
+  closes: ReadonlyArray<number>;
+  maN: number;
+  asOf?: number;
+  /** 最多往前看幾根（課程說 7~8 天前未卜先知，顯示層建議 ≤10） */
+  maxLookahead?: number;
+  /** 與 closes 對齊的日期（YYYY-MM-DD），有給才會寫出「6/12 的」 */
+  dates?: ReadonlyArray<string>;
+}): MaDeductionLine | null {
+  const { label, closes, maN, dates } = opts;
+  const asOf = opts.asOf ?? closes.length - 1;
+  const turn = daysUntilMaTurn(closes, maN, asOf, opts.maxLookahead ?? maN);
+
+  const priceAt = (idx: number, price: number, kind: '高價' | '低價'): string => {
+    const d = fmtDate(dates, idx);
+    return d ? `${d} 的${kind} ${fmtPrice(price)}` : `${kind} ${fmtPrice(price)}`;
+  };
+
+  // 情境一（課程加權指數 2022/11/7 例）：今天實際還下彎、明天就翻 → 明天的扣抵價
+  if (
+    turn.todayDirection != null &&
+    turn.direction !== 'flat' &&
+    turn.direction !== turn.todayDirection
+  ) {
+    const dp = deductPrice(closes, maN, asOf);
+    if (dp != null) {
+      const idx = asOf - maN + 1;
+      return turn.direction === 'up'
+        ? { tone: 'good', text: `${label}明天改扣 ${priceAt(idx, dp, '低價')} → 股價不跌就上彎` }
+        : { tone: 'warn', text: `${label}明天要扣 ${priceAt(idx, dp, '高價')} → 股價不漲就下彎（警覺）` };
+    }
+  }
+
+  // 情境二：未來第 days 根翻向（days = 課程數法「幾天後」）
+  if (
+    turn.days != null &&
+    turn.turnDeductIdx != null &&
+    turn.turnDeductPrice != null &&
+    turn.turnTo !== 'flat' &&
+    turn.turnTo !== turn.direction
+  ) {
+    return turn.turnTo === 'down'
+      ? { tone: 'warn', text: `${label} ${turn.days} 天後要扣 ${priceAt(turn.turnDeductIdx, turn.turnDeductPrice, '高價')} → 股價不漲將下彎（警覺）` }
+      : { tone: 'good', text: `${label} ${turn.days} 天後改扣 ${priceAt(turn.turnDeductIdx, turn.turnDeductPrice, '低價')} → 股價不跌將上彎` };
+  }
+
+  return null;
 }

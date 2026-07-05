@@ -37,7 +37,7 @@ import { detectLetterO } from '@/lib/analysis/v12LetterO';
 import { detectLetterP } from '@/lib/analysis/v12LetterP';
 import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
 import { STOP_LOSS_PRICE_MULT, PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/bookThresholds';
-import { deductPrice, daysUntilMaTurn, daysUntilGoldenCross } from '@/lib/analysis/maDeduction';
+import { deductPrice, daysUntilMaTurn, daysUntilGoldenCross, formatMaTurnLine, MA_PLAIN_LABEL } from '@/lib/analysis/maDeduction';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
 import ChartCoachAdvice from './ChartCoachAdvice';
@@ -607,18 +607,24 @@ export default function SignalSummaryCard() {
   );
 }
 
-// ── 子元件：移動扣抵預測（W3c · 純顯示層）─────────────────────────────────
+// ── 子元件：移動扣抵預測（課程 CH3-2 · 純顯示層）──────────────────────────
 //
 // 「移動扣抵」是均線的內建確定性：N 日線下一根會丟掉 N 天前那根收盤（扣抵值）、
-// 補進今收。今收 vs 扣抵值就先告訴你均線下一步往上/往下，再往前推估「幾天後翻向」
-// 「短均線幾天後黃金交叉」。純提示用，刻意不接選股、不做進出場訊號。
-// 未來 K 棒一律假設「價停在今收」，越往後越粗估 → 黃金交叉只看近窗（5 根內）。
+// 補進今收。今收 vs 扣抵值就先告訴你均線下一步往上/往下（課程 CH3-2：抵>扣上彎、
+// 抵<扣下彎），再往前推估「幾天後翻向」「短均線幾天後黃金交叉」。
+// 純提示用，刻意不接選股、不做進出場訊號。
+// 未來 K 棒一律假設「價停在今收」，越往後越粗估 → 黃金交叉只看近窗（5 根內）、
+// 翻向結論句只看近窗 10 根（課程說 7~8 天前未卜先知）。
 
 const MA_FORECAST_SET: ReadonlyArray<{ n: number; label: string }> = [
   { n: 5, label: 'MA5' },
   { n: 10, label: 'MA10' },
   { n: 20, label: 'MA20' },
+  { n: 60, label: 'MA60' },
 ];
+
+/** 翻向結論句最多往前看幾根（課程 CH3-2：7~8 天前未卜先知，再遠凍結價假設不可靠） */
+const MA_TURN_LOOKAHEAD = 10;
 
 function MaDeductionForecast({
   candles, index,
@@ -633,17 +639,29 @@ function MaDeductionForecast({
     const today = closes[asOf];
     if (today == null) return null;
 
+    const dates = candles.map(c => c.date);
     const rows = MA_FORECAST_SET.map(({ n, label }) => {
       const dp = deductPrice(closes, n, asOf);
-      const turn = daysUntilMaTurn(closes, n, asOf);
+      const turn = daysUntilMaTurn(closes, n, asOf, Math.min(n, MA_TURN_LOOKAHEAD));
       return { n, label, deduct: dp, turn };
     }).filter(r => r.deduct != null);
+
+    // 白話結論句（課程 CH3-2）：只對有翻向結論的均線出一行，例
+    // 「月線 3 天後要扣 6/12 的高價 58.2 → 股價不漲將下彎（警覺）」
+    const turnLines = MA_FORECAST_SET
+      .map(({ n }) => formatMaTurnLine({
+        label: MA_PLAIN_LABEL[n] ?? `${n}日線`,
+        closes, maN: n, asOf,
+        maxLookahead: Math.min(n, MA_TURN_LOOKAHEAD),
+        dates,
+      }))
+      .filter((l): l is NonNullable<typeof l> => l != null);
 
     // 黃金交叉只估近窗 5 根（凍結價假設往後不可靠）
     const gc5x20 = daysUntilGoldenCross(closes, 5, 20, asOf, 5);
 
     if (rows.length === 0) return null;
-    return { today, rows, gc5x20 };
+    return { today, rows, turnLines, gc5x20 };
   }, [candles, index]);
 
   if (!view) return null;
@@ -671,13 +689,20 @@ function MaDeductionForecast({
               <span className="text-muted-foreground/70">扣抵</span>
               <span className="font-mono text-foreground/80">{(r.deduct as number).toFixed(2)}</span>
               <span className={`font-bold ${dirColor}`}>{dirText}</span>
-              {r.turn.days != null && r.turn.turnTo !== dir && (
-                <span className="text-amber-300/90">約 {r.turn.days} 天後翻{r.turn.turnTo === 'up' ? '上' : r.turn.turnTo === 'down' ? '下' : '平'}</span>
-              )}
               <span className="text-muted-foreground/45">（{cmp}）</span>
             </p>
           );
         })}
+
+        {/* 白話結論句（課程 CH3-2「未卜先知」）：哪條均線、幾天後、扣哪天的什麼價 → 會怎樣 */}
+        {view.turnLines.map(line => (
+          <p
+            key={line.text}
+            className={`text-[11px] leading-relaxed ${line.tone === 'warn' ? 'text-amber-300/90' : 'text-rose-300/90'}`}
+          >
+            {line.text}
+          </p>
+        ))}
 
         {/* 5×20 黃金交叉預測（近窗）*/}
         {view.gc5x20.alreadyAbove ? (

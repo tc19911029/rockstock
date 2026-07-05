@@ -1,11 +1,16 @@
 /**
- * lib/analysis/maDeduction.ts — 移動扣抵預測（W3c · 顯示層純函式）
+ * lib/analysis/maDeduction.ts — 移動扣抵預測（課程 CH3-2 · 顯示層純函式）
+ *
+ * 課程判準（CH3-2 投影片 p01）：抵（今收）> 扣（扣抵價）→ 上彎；抵 < 扣 → 下彎；相等走平。
+ * 翻向天數用課程數法：均線在「未來第 s 根」翻向 = 「s 天後」（1 = 明天）。
  */
 
 import {
   deductPrice,
+  deductSeries,
   daysUntilMaTurn,
   daysUntilGoldenCross,
+  formatMaTurnLine,
 } from '@/lib/analysis/maDeduction';
 
 describe('deductPrice — N 日均線下一根要丟掉的扣抵價', () => {
@@ -33,7 +38,32 @@ describe('deductPrice — N 日均線下一根要丟掉的扣抵價', () => {
   });
 });
 
-describe('daysUntilMaTurn — 依扣抵估幾天後均線翻向', () => {
+describe('deductSeries — 未來 k 天扣抵價序列（課程 CH3-2：全是已知歷史資料）', () => {
+  const closes = [10, 11, 12, 13, 14, 15];
+
+  it('5 日線預設看滿 maN 根：未來第 j 根扣 closes[asOf−5+j]', () => {
+    const s = deductSeries(closes, 5);
+    expect(s).toEqual([
+      { daysAhead: 1, index: 1, price: 11 },
+      { daysAhead: 2, index: 2, price: 12 },
+      { daysAhead: 3, index: 3, price: 13 },
+      { daysAhead: 4, index: 4, price: 14 },
+      { daysAhead: 5, index: 5, price: 15 }, // 第 maN 根扣到今天自己 → 之後不再是已知資料
+    ]);
+  });
+
+  it('k 限制序列長度；k > maN 自動截到 maN', () => {
+    expect(deductSeries(closes, 5, 2)).toHaveLength(2);
+    expect(deductSeries(closes, 5, 99)).toHaveLength(5);
+  });
+
+  it('窗口沒滿 / 非法參數 → 空陣列', () => {
+    expect(deductSeries([1, 2, 3], 5)).toEqual([]);
+    expect(deductSeries(closes, 0)).toEqual([]);
+  });
+});
+
+describe('daysUntilMaTurn — 依扣抵估幾天後均線翻向（課程數法：第 s 根翻向 = s 天後）', () => {
   it('今收 > 扣抵值 → 均線往上', () => {
     // 一路上漲，今收一定大於最舊扣抵值 → 方向 up
     const closes = [10, 11, 12, 13, 14, 15, 16, 17];
@@ -47,17 +77,42 @@ describe('daysUntilMaTurn — 依扣抵估幾天後均線翻向', () => {
     expect(r.direction).toBe('down');
   });
 
-  it('剛從跌轉漲：均線雖還在跌，但能估出幾天後翻上', () => {
-    // 前段在高位（被丟掉的扣抵值偏高 → 均線往下），但今收已拉回較低又回升。
-    // 構造：高位 30,29,28,27,26 然後低位反彈 20,21,22。
-    // 以最後一根(22)為 asOf，5 日均線目前仍下彎，但隨高位扣抵值被丟掉會翻上。
+  it('已知序列：3 天後翻上（驗證確切轉彎天數＋翻向扣抵棒）', () => {
+    // 高位 30,29,28,27,26 後低位反彈 20,21,22（asOf=7，今收 22，5 日線）。
+    // 逐根手算（凍結今收 22）：
+    //   今天 MA = (27+26+20+21+22)/5 = 23.2
+    //   +1 根扣 closes[3]=27 → MA 22.2（下彎）
+    //   +2 根扣 closes[4]=26 → MA 21.4（下彎）
+    //   +3 根扣 closes[5]=20 → MA 21.8（翻上！）→ 課程數法 = 3 天後翻上
     const closes = [30, 29, 28, 27, 26, 20, 21, 22];
     const r = daysUntilMaTurn(closes, 5);
-    // 今收 22 vs 下一根扣抵 closes[3]=27 → 22<27 → 仍 down
     expect(r.direction).toBe('down');
-    // 但再往前丟掉 26/27 等高扣抵值後，今收 22 會大於扣抵 → 翻上
-    expect(r.days).not.toBeNull();
+    expect(r.days).toBe(3);
     expect(r.turnTo).toBe('up');
+    // 造成翻向的是「改扣 20 那根」（低價被扣掉 → 上彎），可對回日期
+    expect(r.turnDeductIdx).toBe(5);
+    expect(r.turnDeductPrice).toBe(20);
+  });
+
+  it('已知序列：3 天後翻下（頭部對稱 — 要扣高價）', () => {
+    // 低位 10..14 後高位 30,29,28（asOf=7，今收 28，5 日線）。
+    //   +1 根扣 13 → 上彎；+2 根扣 14 → 上彎；+3 根扣 30（高價）→ 翻下
+    const closes = [10, 11, 12, 13, 14, 30, 29, 28];
+    const r = daysUntilMaTurn(closes, 5);
+    expect(r.direction).toBe('up');
+    expect(r.days).toBe(3);
+    expect(r.turnTo).toBe('down');
+    expect(r.turnDeductIdx).toBe(5);
+    expect(r.turnDeductPrice).toBe(30);
+  });
+
+  it('課程加權指數情境：今天實際還下彎、明天就翻上（todayDirection ≠ direction）', () => {
+    // CH3-2 應用一：2022/11/7 收 13223、明天扣抵 13106 → 今天月線還向下，明天翻上。
+    // 縮小版：今天丟 closes[1]=30（高）→ 今天實際下彎；明天丟 closes[2]=20（低）→ 明天翻上
+    const closes = [9, 30, 20, 21, 22, 23, 24];
+    const r = daysUntilMaTurn(closes, 5);
+    expect(r.todayDirection).toBe('down');
+    expect(r.direction).toBe('up');
   });
 
   it('資料不足 / maN<=1 → flat、days=null', () => {
@@ -70,6 +125,44 @@ describe('daysUntilMaTurn — 依扣抵估幾天後均線翻向', () => {
     const snapshot = [...closes];
     daysUntilMaTurn(closes, 5);
     expect(closes).toEqual(snapshot);
+  });
+});
+
+describe('formatMaTurnLine — 一行白話結論（課程 CH3-2）', () => {
+  it('將下彎（警覺）：幾天後、扣哪天的高價，先結論短句', () => {
+    const closes = [10, 11, 12, 13, 14, 30, 29, 28];
+    const dates = [
+      '2026-06-03', '2026-06-04', '2026-06-05', '2026-06-06',
+      '2026-06-09', '2026-06-12', '2026-06-13', '2026-06-16',
+    ];
+    const line = formatMaTurnLine({ label: '月線', closes, maN: 5, dates });
+    expect(line).toEqual({
+      tone: 'warn',
+      text: '月線 3 天後要扣 6/12 的高價 30 → 股價不漲將下彎（警覺）',
+    });
+  });
+
+  it('將上彎：改扣低價 →「上不去就等下來」', () => {
+    const closes = [30, 29, 28, 27, 26, 20, 21, 22];
+    const line = formatMaTurnLine({ label: '10日線', closes, maN: 5 });
+    expect(line?.tone).toBe('good');
+    expect(line?.text).toBe('10日線 3 天後改扣 低價 20 → 股價不跌將上彎');
+  });
+
+  it('課程 11/7 情境：明天就翻上 → 用明天的扣抵價講', () => {
+    const closes = [9, 30, 20, 21, 22, 23, 24];
+    const line = formatMaTurnLine({ label: '月線', closes, maN: 5 });
+    expect(line?.tone).toBe('good');
+    expect(line?.text).toBe('月線明天改扣 低價 20 → 股價不跌就上彎');
+  });
+
+  it('方向不變（近窗只剩凍結價走平）→ null，面板保持安靜', () => {
+    const closes = [10, 11, 12, 13, 14, 15, 16, 17];
+    expect(formatMaTurnLine({ label: '5日線', closes, maN: 5 })).toBeNull();
+  });
+
+  it('資料不足 → null', () => {
+    expect(formatMaTurnLine({ label: '月線', closes: [1, 2, 3], maN: 20 })).toBeNull();
   });
 });
 
