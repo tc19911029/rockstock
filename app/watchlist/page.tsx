@@ -7,6 +7,7 @@ import { useWatchlistStore } from '@/store/watchlistStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { PageShell, PageHeader, EmptyState } from '@/components/shared';
+import LockRosterPanel from '@/components/LockRosterPanel';
 import { Button } from '@/components/ui/button';
 import { formatPrice, formatPercent, formatDate, formatTime, bullBearClass } from '@/lib/format';
 import { classifyMarket, filterByMarket, type MarketTab } from '@/lib/market/classify';
@@ -195,6 +196,9 @@ export default function WatchlistPage() {
   return (
     <PageShell headerSlot={watchlistHeader}>
       <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+
+        {/* 鎖股名單（獵兔計劃）— 課程 CH5-6 持久化 roster（批次D 2026-07-05） */}
+        <LockRosterPanel market="TW" />
 
         {/* Add stock input */}
         <div className="space-y-2">
