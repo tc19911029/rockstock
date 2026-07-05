@@ -21,6 +21,10 @@ export const BOOK_BODY_PCT_MIN = 2.0;
 /** 攻擊量最低倍數 vs 前一日（寶典 p.54 ④）— 大量長紅 K 的「大量」定義 */
 export const BOOK_VOL_RATIO_MIN = 1.3;
 
+/** 攻擊量課程口徑（線上課程 1-5 投影片「量增 20% 以上」；2026-07-05 裁決-2 使用者拍板按課程）
+ *  六條件④ gate 用此值；個別 detector 引寶典原文 ×1.3 者維持 BOOK_VOL_RATIO_MIN。 */
+export const ATTACK_VOL_RATIO_COURSE = 1.2;
+
 // ── K 棒三級制（朱家泓課程 CH2-4/2-5：小棒 / 中棒 / 最大棒）─────────────────
 // 實體比例 fraction，與 ruleUtils.bodyPct 同單位（0.065 = 6.5%）。
 // 平行於既有 isLongRed/isMedLong（≥2%）與 isSmallCandle（<1.5%），純新增、先不接 gate。
@@ -54,10 +58,10 @@ export const FLATBOTTOM_BREAKOUT_VOL_MULT = 2.0;
 
 // ── I / K：K 線橫盤突破（寶典 Part 11-1 位置 3 + Part 12-4 祕笈圖 #5）──────
 
-/** 中長紅 K 錨點實體 %（寶典 Part 4-1「長紅」）*/
+/** 錨點 K 實體 %（2026-07-05 課程對齊：紅黑不管；實體門檻為 ⚠️自創殘留防噪音）*/
 export const KLINE_CONSOL_ANCHOR_BODY_PCT = 3;
-/** 橫盤天數區間 */
-export const KLINE_CONSOL_MIN_DAYS = 4;
+/** 橫盤天數區間（2026-07-05 裁決按課程：6-3「連續三天」→ 3；原 4 偏嚴漏掉課程原型）*/
+export const KLINE_CONSOL_MIN_DAYS = 3;
 export const KLINE_CONSOL_MAX_DAYS = 15;
 /** 橫盤狹幅（高低差 / 錨點高 %）*/
 export const KLINE_CONSOL_MAX_RANGE_PCT = 5;

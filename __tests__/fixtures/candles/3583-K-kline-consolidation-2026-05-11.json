@@ -2,13 +2,13 @@
   "symbol": "3583.TW",
   "triggerDate": "2026-05-11",
   "letter": "K",
-  "description": "K K線盤整突破 — anchor 4/29 high 791 / range 6 天 / breakout",
+  "description": "K K線盤整突破 — 2026-07-05 課程對齊後：anchor 5/4 high 828（紅黑不管+3天窗+收盤判定，由近往遠取最近合格窗）",
   "expected": {
     "isBreakout": true,
-    "anchorHighMin": 785,
-    "anchorHighMax": 800,
+    "anchorHighMin": 820,
+    "anchorHighMax": 835,
     "rangeWidthPctMax": 10,
-    "consolidationDaysMin": 5
+    "consolidationDaysMin": 3
   },
   "candles": [
     {

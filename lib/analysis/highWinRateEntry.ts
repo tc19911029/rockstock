@@ -113,16 +113,15 @@ interface FlatBottomResult {
  * 4. 等大量突破確認後再買進
  *
  * @param opts.maxTightness 盤整窄幅上限（spread / minClose）。
- *   **研究專用旗標、預設 = CONSOL_MAX_TIGHTNESS（0.15），生產行為位元不變。**
- *   進場-14 變體：書本《抓住飆股》一字底窄幅 ≤10%，傳 0.10 收緊後做回測對照，
- *   不改生產預設（D 軌掃描永遠走 undefined → 0.15）。
+ *   2026-07-05 裁決按課程：預設改 0.10（課程 6-4 投影片明標「區間範圍 10%」，
+ *   >10% 課程分類為矩形非一字底）。舊 0.15 為自創放寬（回測-2 已結案）。
  */
 export function detectStrategyE(
   candles: CandleWithIndicators[],
   idx: number,
   opts?: { maxTightness?: number },
 ): FlatBottomResult | null {
-  const maxTightness = opts?.maxTightness ?? CONSOL_MAX_TIGHTNESS;
+  const maxTightness = opts?.maxTightness ?? 0.10;
   // 至少需要 60 根K線（40天盤整 + 20天前期參考）
   if (idx < FLATBOTTOM_MIN_HISTORY) return null;
   const c = candles[idx];

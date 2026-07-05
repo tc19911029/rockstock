@@ -126,19 +126,18 @@ export const accumulationVolume: TradingRule = {
     // 條件3：今日成交量 >= 20日均量 * 2（異常大量）
     if (c.avgVol20 == null || c.volume < c.avgVol20 * ACCUMULATION_VOL_RATIO) return null;
 
-    // 條件4：不是大跌（收盤不能跌超過3%，主力進貨不會殺太低）
-    if (bodyPct(c) > 0.03 && c.close < c.open) return null;
-
-    // 條件5：收在當日高低的上半部（多方較強）
+    // 2026-07-05 回測-19 按課程：舊條件4/5（非大跌黑K/收上半）是課程沒有的自加過濾 —
+    // 課程 4-6「打底盤整中出現的大量，暫視為主力進貨量」無 K 色/收盤位置要求；
+    // 4-8 更明講「大量黑K第一隻腳是主力**壓低進貨**」。移除硬擋，改為信心註記。
     const halfLine = (c.high + c.low) / 2;
-    if (c.close < halfLine) return null;
+    const strongClose = c.close >= halfLine && !(bodyPct(c) > 0.03 && c.close < c.open);
 
     const volRatio = (c.volume / c.avgVol20).toFixed(1);
 
     return {
       type: 'WATCH',
       label: '草叢量',
-      description: `盤整低檔爆量${volRatio}倍，收在半分價之上，疑似主力進貨`,
+      description: `盤整低檔爆量${volRatio}倍${strongClose ? '，收在半分價之上（多方較強）' : '，收盤偏弱（課程：壓低進貨型也算草叢量）'}，疑似主力進貨`,
       reason: [
         '【朱家泓《活用技術分析寶典》第2篇 多頭打底量價變化】',
         '打底盤整中出現的異常大量，暫視為主力的進貨量（也稱為草叢量）。',

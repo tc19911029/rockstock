@@ -208,8 +208,8 @@ function MACDChart({ candles, hoverCandle }: { candles: CandleWithIndicators[]; 
     <div className="relative h-full">
       <div className="absolute top-1 left-2 z-10 flex gap-3 text-xs font-mono pointer-events-none bg-[#0f172a]/90 rounded px-1.5 py-px">
         <span className="text-muted-foreground">MACD</span>
-        <span className="text-amber-400">MACD10 {display?.macdSignal?.toFixed(2) ?? '—'}</span>
         <span className="text-blue-400">DIF {display?.macdDIF?.toFixed(2) ?? '—'}</span>
+        <span className="text-amber-400">MACD10 {display?.macdSignal?.toFixed(2) ?? '—'}</span>
         <span className={display?.macdOSC != null && display.macdOSC >= 0 ? 'text-bull' : 'text-bear'}>
           OSC {display?.macdOSC?.toFixed(2) ?? '—'} {oscArrow}
         </span>

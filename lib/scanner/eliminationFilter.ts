@@ -20,7 +20,7 @@
  */
 
 import { CandleWithIndicators } from '@/types';
-import { detectTrend } from '@/lib/analysis/trendAnalysis';
+import { detectTrend, findPivots } from '@/lib/analysis/trendAnalysis';
 
 export interface EliminationResult {
   eliminated: boolean;
@@ -126,8 +126,16 @@ function rule07_indicatorDivergence(candles: CandleWithIndicators[], idx: number
   if (idx < 10) return null;
 
   // 書本要求「趨勢呈現頭頭低」才檢查指標背離
+  // 2026-07-05 回測-11 按課程：前置從「空頭」（頭頭低**且**底底低）放寬為「頭頭低」—
+  // 頭頭低但還沒破底的背離股（課程正字目標）之前漏擋。用 findPivots 兩個 high 遞減判頭頭低。
   const trend = detectTrend(candles, idx);
-  if (trend !== '空頭') return null;
+  const lowerHighs = (() => {
+    if (trend === '空頭') return true;
+    const pivots = findPivots(candles, idx, 8, false);
+    const highs = pivots.filter(p => p.type === 'high');
+    return highs.length >= 2 && highs[0].price < highs[1].price; // newest-first：最新頭 < 前頭
+  })();
+  if (!lowerHighs) return null;
 
   const c = candles[idx];
   const prev5 = candles[idx - 5];

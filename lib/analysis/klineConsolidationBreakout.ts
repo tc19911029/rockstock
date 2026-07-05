@@ -90,14 +90,15 @@ function findAnchorAndRange(
     const a = candles[anchorIdx];
     if (!a || a.open <= 0) continue;
 
-    // 必須是中長紅 K
-    if (a.close <= a.open) continue;
-    const anchorBodyPct = ((a.close - a.open) / a.open) * 100;
+    // 2026-07-05 課程對齊（6-3）：「第一根 K 棒紅黑不管」— 拿掉紅K限制，改看實體大小
+    //（實體門檻保留 ⚠️ 自創殘留，防每根小K都成錨點）
+    const anchorBodyPct = (Math.abs(a.close - a.open) / a.open) * 100;
     if (anchorBodyPct < MIN_ANCHOR_BODY_PCT) continue;
 
     // 檢查 anchorIdx+1 .. idx-1 的橫盤：
-    //   每根 low >= anchorLow（不破錨點低點）
-    //   range 最高 - anchor 高的相對距離 < MAX_RANGE_WIDTH_PCT
+    //   2026-07-05 課程對齊（6-3 逐字稿「聽清楚是**收盤**沒有破」）：
+    //   「不破錨點低點/不過錨點高點」都用**收盤**判定（舊版用影線 low 判破=盤中刺破就作廢）
+    //   橫盤日「收盤過錨點高」＝那天就是突破日 → 這個窗不成立（避免突破價被墊高）
     let rangeHigh = a.high;
     let rangeLow = a.low;
     let valid = true;
@@ -105,8 +106,10 @@ function findAnchorAndRange(
     for (let i = anchorIdx + 1; i < idx; i++) {
       const k = candles[i];
       if (!k) { valid = false; break; }
-      // 不可跌破錨點低點
-      if (k.low < a.low) { valid = false; break; }
+      // 收盤不可跌破錨點低點（課程收盤判定）
+      if (k.close < a.low) { valid = false; break; }
+      // 收盤過錨點高 → 該日已是突破日，此錨點窗作廢（課程：收盤過第一根高點＝突破）
+      if (k.close > a.high) { valid = false; break; }
       if (k.high > rangeHigh) rangeHigh = k.high;
       if (k.low < rangeLow) rangeLow = k.low;
     }
@@ -169,8 +172,10 @@ export function detectKlineConsolidationBreakout(
   const volumeRatio = c.volume / prev.volume;
   if (volumeRatio < BOOK_VOL_RATIO_MIN) return null;
 
-  // 6. 收盤突破橫盤期間最高點
-  if (c.close <= found.rangeHigh) return null;
+  // 6. 收盤突破錨點（第一根 K）最高點 — 2026-07-05 課程對齊（6-3）：
+  // 突破判準＝「收盤過第一根K棒的最高點」，不是過含影線的區間最高（舊版突破價被墊高）。
+  const gapUp = c.open > prev.high; // 課程：「還跳空過，這是最強的進場位置」（顯示用）
+  if (c.close <= found.anchor.high) return null;
 
   return {
     isBreakout: true,
@@ -185,8 +190,9 @@ export function detectKlineConsolidationBreakout(
     bodyPct,
     volumeRatio,
     detail:
-      `K 線橫盤突破（${found.anchor.date} 中長紅 K 高 ${found.anchor.high.toFixed(2)} 實體 ${found.anchor.bodyPct.toFixed(2)}%，` +
+      `K 線橫盤突破（${found.anchor.date} 錨點K 高 ${found.anchor.high.toFixed(2)} 實體 ${found.anchor.bodyPct.toFixed(2)}%，` +
       `${found.consolidationDays} 天橫盤幅度 ${found.rangeWidthPct.toFixed(2)}%，` +
-      `今日突破 ${found.rangeHigh.toFixed(2)}：實體 ${bodyPct.toFixed(2)}%＋量×${volumeRatio.toFixed(2)}）`,
+      `今日收盤突破錨點高 ${found.anchor.high.toFixed(2)}：實體 ${bodyPct.toFixed(2)}%＋量×${volumeRatio.toFixed(2)}` +
+      `${gapUp ? '＋跳空突破（課程：最強進場位置）' : ''}）`,
   };
 }

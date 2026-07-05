@@ -116,7 +116,7 @@ export default function StockSelector() {
           )}
         </div>
         {showDrop && (filtered.length > 0 || showRecents) && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-muted border border-border rounded shadow-xl z-50 max-h-72 overflow-y-auto">
+          <div className="absolute top-full left-0 mt-1 w-64 max-w-[80vw] bg-muted border border-border rounded shadow-xl z-50 max-h-72 overflow-y-auto">
             {showRecents && (
               <>
                 <div className="flex items-center justify-between px-2 py-1 sticky top-0 bg-muted border-b border-border">

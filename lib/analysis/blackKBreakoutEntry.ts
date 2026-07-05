@@ -120,6 +120,16 @@ export function detectBlackKBreakout(
   // 1. 必須在多頭趨勢中（書本「多頭上漲一波後」）
   if (detectTrend(candles, idx) !== '多頭') return null;
 
+  // 1b. 2026-07-05 回測-15 按課程（6-7 投影片條 02）：「MA20 月線要維持上揚」顯式 gate
+  if (c.ma20 != null && prev.ma20 != null && c.ma20 < prev.ma20) return null;
+
+  // 1c. 2026-07-05 回測-6 按課程（6-7）：「這個位置只在**飆股**出現」— 飆股前提
+  //（⚠️ 自創量化：近 10 根漲幅 ≥10% ＝ 回檔前急漲的證據。
+  //  不驗「近3日 MA5 上」— L 的型態本身就是「大量黑K回檔」，回檔日必然破5均，驗了自相矛盾）
+  const base10 = candles[Math.max(0, idx - 10)];
+  const surging = base10 != null && base10.close > 0 && c.close / base10.close - 1 >= 0.10;
+  if (!surging) return null;
+
   // 2. 找最近 3 日內的大量黑 K
   const blackK = findRecentLargeVolumeBlackK(candles, idx);
   if (!blackK) return null;

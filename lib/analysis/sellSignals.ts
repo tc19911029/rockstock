@@ -64,6 +64,8 @@ export type SellSignalType =
   | 'HIGH_VOL_2DAY_LOW_BREAK'
   // 課程 CH2-6/2-9（2026-07-05 漏網-2）：高檔「該漲不漲就是跌」— 連 3 根動能停滯
   | 'PRICE_STALL_HIGH'
+  // 課程 CH2-9（2026-07-05 漏網-4）：「預壓有壓」— 盤中觸及具體壓力位未過、收回留上影
+  | 'PRESSURE_REJECT_SHADOW'
   // Wave2 進場-11（回測過關）：帶量突破紅K 後 T+1/T+2 黑K收盤跌破其 1/2 價 = 假突破
   | 'FALSE_BREAKOUT_FAIL'; // 假突破跌破1/2價（持倉端避雷出場，不接進場 gate）
 
@@ -548,6 +550,38 @@ export function detectSellSignals(
           label: '跌破兩日大量低點(9-3停利)',
           detail: `高檔連兩日大量（${candles[pairIdx - 1].date}/${candles[pairIdx].date}），今日收盤 ${c.close.toFixed(2)} 首次跌破兩日大量低點 ${clusterLow.toFixed(2)}，課程 CH9-3(一) 多單停利`,
           severity: 'high',
+        });
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // 課程 CH2-9（2026-07-05 漏網-4）：「預壓有壓」— 盤中觸及**具體壓力位**（前波高/季線）
+  //   沒過、收回留長上影 → 該壓力有效，次日不可跌破今日低點。
+  //   與 HIGH_VOL_UPPER_SHADOW 差異：這條驗「觸及哪個 SR」（課程核心），不看量。
+  // ════════════════════════════════════════════════════════════════
+  if (isHighLevel && index >= 21) {
+    const upperShadowLen2 = c.high - Math.max(c.open, c.close);
+    const bodyLen2 = Math.abs(c.close - c.open);
+    if (bodyLen2 > 0 && upperShadowLen2 > bodyLen2) {
+      // 觸到哪個壓力？(a) 前波 pivot high (b) 上方季線 MA60
+      const pvs = findPivots(candles, index - 1, 8);
+      const ph = pvs.find(p => p.type === 'high' && p.price > c.close);
+      let pressureName = '';
+      let pressureVal = 0;
+      if (ph && c.high >= ph.price * 0.995 && c.close < ph.price) {
+        pressureName = `前波高 ${ph.price.toFixed(2)}`;
+        pressureVal = ph.price;
+      } else if (c.ma60 != null && c.ma60 > c.close && c.high >= c.ma60 * 0.995) {
+        pressureName = `季線 MA60 ${c.ma60.toFixed(2)}`;
+        pressureVal = c.ma60;
+      }
+      if (pressureVal > 0) {
+        signals.push({
+          type: 'PRESSURE_REJECT_SHADOW',
+          label: '預壓有壓（觸壓收回）',
+          detail: `盤中觸及 ${pressureName} 未過、收回留上影 — 課程 CH2-9：該壓力有效，明日不可跌破今日低點 ${c.low.toFixed(2)}，跌破則回檔展開`,
+          severity: 'medium',
         });
       }
     }

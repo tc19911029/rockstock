@@ -148,7 +148,7 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   maLongPeriod:   20,
   kbarMinBodyPct: 0.02,
   upperShadowMax: 0.20,
-  volumeRatioMin: 1.3,  // 書上p.54：攻擊量 ≥ 前一日 × 1.3
+  volumeRatioMin: 1.2,  // 2026-07-05 裁決-2 按課程：線上課 1-5「量增 20% 以上」（書 p.54 為 ×1.3，課程口徑優先）
   kdMaxEntry:     88,
   deviationMax:   0.15,
   minScore:       4,    // 基本門檻 4 分

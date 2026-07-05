@@ -234,6 +234,12 @@ function makeResult(
     return structureOnly('N 型態已接近/超過目標價，視為已達標非進場時機');
   }
 
+  // 2026-07-05 回測-3 按課程：課程 6-4 只收高勝率型態當進場；雙重底書本明寫達成率 36%
+  // → 不再發進場訊號（triggered:false），保留結構顯示供走圖參考。
+  if (PATTERN_ACHIEVEMENT[match.patternType] < 50) {
+    return structureOnly(`N ${getPatternName(match.patternType)} 達成率僅 ${PATTERN_ACHIEVEMENT[match.patternType]}%（課程只收高勝率型態）— 僅顯示不進場`);
+  }
+
   return {
     triggered: true,
     patternType: match.patternType,

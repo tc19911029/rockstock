@@ -85,6 +85,9 @@ export function findPivots(
   for (let i = start; i <= endIndex; i++) {
     const c = candles[i];
     if (!c || c.ma5 == null) continue;
+    // 2026-07-05 課程對齊（CH1-1「跟均線平的表示還沒跌破，要等明天確認」）：
+    // 收盤 == MA5（平盤）沿用前一段狀態，不當跌破/站上（舊版歸 negative 會提前一天確認轉折）
+    if (c.close === c.ma5 && segType !== null) continue;
     const curr: 'positive' | 'negative' = c.close > c.ma5 ? 'positive' : 'negative';
 
     if (segType === null) {
@@ -208,22 +211,27 @@ function resolveStructuralPivots(
 
   let openLow = Infinity, openLowIdx = -1;
   let openHigh = -Infinity, openHighIdx = -1;
+  let openCloseMin = Infinity, openCloseMax = -Infinity;
   for (let i = latestPivotIdx + 1; i <= index; i++) {
     const k = candles[i];
     if (!k) continue;
     if (k.low  < openLow)  { openLow  = k.low;  openLowIdx  = i; }
     if (k.high > openHigh) { openHigh = k.high; openHighIdx = i; }
+    if (k.close < openCloseMin) openCloseMin = k.close;
+    if (k.close > openCloseMax) openCloseMax = k.close;
   }
 
   const extended: Pivot[] = [];
-  // 最近確認 pivot low；若 open seg running low 已破即延伸
+  // 2026-07-05 裁決-1（使用者拍板回歸課程）：「破前低/過前頭」的判定用**收盤**
+  //（課程 CH1 鐵律「收盤判定，不看盤中」「收盤跌破前低才變」）。
+  // 舊版用盤中極值（2026-05-21 6770 決議）— 下影線刺破前低、收盤收回，當天就翻結構 → 誤判。
+  // 收盤確認破壞後，延伸 pivot 的「價位」仍用該段真實極值（轉折點本來就是 high/low）。
   const latestLow  = confirmed.find(p => p.type === 'low');
-  if (latestLow && openLowIdx >= 0 && openLow < latestLow.price) {
+  if (latestLow && openLowIdx >= 0 && openCloseMin < latestLow.price) {
     extended.push({ index: openLowIdx, price: openLow, type: 'low' });
   }
-  // 最近確認 pivot high；若 open seg running high 已過即延伸
   const latestHigh = confirmed.find(p => p.type === 'high');
-  if (latestHigh && openHighIdx >= 0 && openHigh > latestHigh.price) {
+  if (latestHigh && openHighIdx >= 0 && openCloseMax > latestHigh.price) {
     extended.push({ index: openHighIdx, price: openHigh, type: 'high' });
   }
 
@@ -507,9 +515,17 @@ export function detectTrendPosition(
     const blowoffNoRise   = hasConsecBlowoffNoRise(candles, index);
     const volPriceDiv     = hasVolumePriceDivergence(candles, index, pivots);
     const biasOverExt     = isBiasOverExtended(candles, index);
+    // 2026-07-05 課程對齊（1-5「連續急漲漲幅超過 20% → 高檔爆量 → 容易反轉」）：
+    // 近 20 根累計漲幅 >20% 且今日爆量（avgVol5×2）納入末升段合議
+    const surgedOver20 = (() => {
+      const base = candles[Math.max(0, index - 20)];
+      if (!base || base.close <= 0) return false;
+      const gain = c.close / base.close - 1;
+      return gain > 0.20 && c.avgVol5 != null && c.avgVol5 > 0 && c.volume >= c.avgVol5 * 2;
+    })();
 
     const endSignals = [
-      consecSurge, blowoffReversal, blowoffNoRise, volPriceDiv, biasOverExt,
+      consecSurge, blowoffReversal, blowoffNoRise, volPriceDiv, biasOverExt, surgedOver20,
     ].filter(Boolean).length;
     if (endSignals >= 2) return '末升段(高檔)';
 
@@ -618,7 +634,10 @@ export function evaluateSixConditions(
   // 不擋 gate，純加分 — 給長多升級訊號用（2026-05-09 新增）
   const ma60FullAlign = c.ma5 != null && c.ma10 != null && c.ma20 != null && c.ma60 != null
     && c.ma5 > c.ma10 && c.ma10 > c.ma20 && c.ma20 > c.ma60
-    && c.close > c.ma60;
+    && c.close > c.ma60
+    // 2026-07-05 課程對齊（1-9 公式5「4 線多頭排列**向上**」）：MA20/MA60 也要向上
+    && (prev?.ma20 == null || c.ma20 > prev.ma20)
+    && (prev?.ma60 == null || c.ma60 >= prev.ma60);
   if (ma60FullAlign) highWinTags.push('🎯 4 線多排');
 
   // 書本 p.54 #3 gate：收盤在 MA10、MA20 之上；乖離 ≤ devMax（用戶設定 15%）
@@ -740,10 +759,13 @@ export function evaluateSixConditions(
 
   const maAlign      = ma5 != null && ma10 != null && ma20 != null
     && ma5 > ma10 && ma10 > ma20;                            // 三線多排（對齊 p.54）
+  // 2026-07-05 課程對齊（3-4 投影片「3 條均線方向皆向上」）：補 MA5 向上（之前只驗 MA10/20）
+  const prevMa5q = prev?.ma5;
+  const ma5Rising    = ma5 != null && prevMa5q != null && ma5 > prevMa5q;
   const ma10Rising   = ma10 != null && prevMa10 != null && ma10 > prevMa10;
   const ma20Rising   = ma20 != null && prevMa20q != null && ma20 > prevMa20q;
 
-  const bullishAlign = maAlign && ma10Rising && ma20Rising;
+  const bullishAlign = maAlign && ma5Rising && ma10Rising && ma20Rising;
 
   // MA60 季線壓力警示（書本 p.54 原文「季線如果在上方下彎要警示」，非 gate）
   const ma60Pressure = ma60 != null && prevMa60 != null
@@ -751,12 +773,13 @@ export function evaluateSixConditions(
 
   const maAlignment = (() => {
     if (bullishAlign) {
-      const base = `✅ MA5(${ma5?.toFixed(1)})>MA10(${ma10?.toFixed(1)})>MA20(${ma20?.toFixed(1)}) 三線多排，MA10/20 均向上`;
+      const base = `✅ MA5(${ma5?.toFixed(1)})>MA10(${ma10?.toFixed(1)})>MA20(${ma20?.toFixed(1)}) 三線多排，三線皆向上`;
       return ma60Pressure ? `${base}（⚠️ 季線 ${ma60?.toFixed(1)} 下彎在上方，靠近有壓力）` : base;
     }
     if (ma5 == null || ma10 == null || ma20 == null) return '均線資料不足';
     const issues = [
       !maAlign       ? `⚠️ 三線未完全多排（MA5=${ma5.toFixed(1)} MA10=${ma10.toFixed(1)} MA20=${ma20.toFixed(1)}）` : '',
+      !ma5Rising     ? `MA5 未向上(${prevMa5q?.toFixed(1)}→${ma5.toFixed(1)})` : '',
       !ma10Rising    ? `MA10 未向上(${prevMa10?.toFixed(1)}→${ma10.toFixed(1)})` : '',
       !ma20Rising    ? `MA20 未向上(${prevMa20q?.toFixed(1)}→${ma20.toFixed(1)})` : '',
     ].filter(Boolean).join('，');
@@ -786,7 +809,8 @@ export function evaluateSixConditions(
     isPullbackVol = allLow && todayUp;
   }
 
-  // 「新鮮信號」過濾：前2日不能已有大量上漲日，避免買到追高的第N棒
+  // 2026-07-05 裁決-3（使用者拍板回歸課程）：「新鮮信號」是課程沒有的自創 gate
+  //（課程 CH1-05 高勝率三條件無「第3根大量作廢」條款）— 從 gate 降級為警示 tag。
   const isFreshSignal = (() => {
     if (index < 2 || !avgVol5) return true;
     const prev1 = candles[index - 1];
@@ -796,13 +820,11 @@ export function evaluateSixConditions(
     return !(prev1BigUp && prev2BigUp);
   })();
 
-  const volumePass = (attackVolume || isPullbackVol) && isFreshSignal;
+  const volumePass = attackVolume || isPullbackVol;
   const volumeDetail = volVsPrevDay !== null
     ? volumePass
-      ? `✅ 成交量 ${volVsPrevDay}x 前日${isPullbackVol ? '（量縮回檔後量增）' : '（攻擊量）'}${volVsPrevDay >= 2 ? '🔥力道強' : ''}`
-      : !isFreshSignal
-        ? `⚠️ 前2日已連續大量上漲，訊號陳舊（避免追高）`
-        : `⚠️ 成交量 ${volVsPrevDay}x 前日（未達${volMin}x基準）`
+      ? `✅ 成交量 ${volVsPrevDay}x 前日${isPullbackVol ? '（量縮回檔後量增）' : '（攻擊量）'}${volVsPrevDay >= 2 ? '🔥力道強' : ''}${!isFreshSignal ? '（⚠️ 已連漲帶量 2 日，第 3 棒追高風險）' : ''}`
+      : `⚠️ 成交量 ${volVsPrevDay}x 前日（未達${volMin}x基準）`
     : '前日成交量資料不足';
 
   // ─────────────────────────────────────────────────────────────────────────

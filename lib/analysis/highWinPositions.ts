@@ -97,12 +97,17 @@ export function detectStrongPullbackResume(
   if (prev.volume <= 0 || c.volume < prev.volume * BOOK_VOL_RATIO_MIN) return false;
 
   // 找過去 1~2 日的「下跌黑K」，取其最高點
+  // 2026-07-05 回測-7 按課程（圖 12-1-6 明標）：回檔黑K「也大量」— 補黑K量檢查
+  const isBigBlack = (k: CandleWithIndicators | null): boolean =>
+    k != null && k.close < k.open
+    && ((k.avgVol5 != null && k.avgVol5 > 0 && k.volume >= k.avgVol5 * BOOK_VOL_RATIO_MIN));
   const prev2 = index >= 2 ? candles[index - 2] : null;
   const prev3 = index >= 3 ? candles[index - 3] : null;
   let blackKHigh: number | null = null;
 
   if (prev.close < prev.open) {
-    // 1 日回檔（前一根是黑K）
+    // 1 日回檔（前一根是黑K）— 需大量
+    if (!isBigBlack(prev)) return false;
     blackKHigh = prev.high;
     if (prev2 && prev2.close < prev2.open) {
       // 2 日都是黑K，取較高的 high
@@ -111,7 +116,8 @@ export function detectStrongPullbackResume(
       if (prev3 && prev3.close < prev3.open) return false;
     }
   } else if (prev2 && prev2.close < prev2.open) {
-    // 2 日前是黑K，昨日小幅回升（仍在回檔範圍）
+    // 2 日前是黑K，昨日小幅回升（仍在回檔範圍）— 需大量
+    if (!isBigBlack(prev2)) return false;
     blackKHigh = prev2.high;
   } else {
     return false; // 近 2 日沒有黑K = 非短回型態
@@ -211,6 +217,10 @@ export function detectMaClusterBreak(
     (Math.max(prev5.ma5, prev5.ma10, prev5.ma20) -
       Math.min(prev5.ma5, prev5.ma10, prev5.ma20)) / prev5.close;
   if (prevSpread >= MA_CLUSTER_MAX_SPREAD) return false;
+
+  // 2026-07-05 回測-17 按課程（3-5「均線逐漸**走平**靠攏」）：MA20 需走平
+  //（近 5 根 MA20 變動 <1%，⚠️ 自創量化）— 排除急跌後均線快速交會的假糾結
+  if (prev5.ma20 > 0 && Math.abs(c.ma20 - prev5.ma20) / prev5.ma20 >= 0.01) return false;
 
   // 當日紅K 實體 ≥2%
   if (c.close <= c.open) return false;
@@ -402,6 +412,24 @@ export function detectPullbackBuy(
     const bar = candles[i];
     if (bar.ma5 == null || bar.close >= bar.ma5) break;
     pullbackDays++;
+  }
+
+  // 2026-07-05 回測-4 按課程（6-2/1-9 黃金分割回檔強弱★）：
+  // 回檔深度比 = (前波高 − 回檔低) / (前波高 − **起漲低**)。
+  // 起漲低 = 前波高「之前」的 pivot low（那一波漲勢的起點），不是回檔自己形成的低。
+  // 課程：0.318 最強／0.5 還行／**0.682 最弱、先觀察不買** — 深回檔 >0.618 不發 B 訊號。
+  const lastHigh = pivots.find(p => p.type === 'high');
+  const rallyBase = lastHigh ? pivots.find(p => p.type === 'low' && p.index < lastHigh.index) : undefined;
+  if (lastHigh && rallyBase && lastHigh.price > rallyBase.price) {
+    // 回檔低 = 前波高之後、reclaimDay 之前的最低 low
+    let pullLow = Infinity;
+    for (let i = lastHigh.index; i < reclaimDay; i++) {
+      if (candles[i] && candles[i].low < pullLow) pullLow = candles[i].low;
+    }
+    if (pullLow !== Infinity) {
+      const depthRatio = (lastHigh.price - pullLow) / (lastHigh.price - rallyBase.price);
+      if (depthRatio > 0.618) return null; // 課程：回檔過深（≈0.682 級）先不買
+    }
   }
 
   return {

@@ -196,8 +196,11 @@ export function detectABCBreakout(
   // 4. 量比 ≥ 1.3
   const volumeRatio = c.volume / prev.volume;
   if (volumeRatio < BOOK_VOL_RATIO_MIN) return null;
-  // 6. 收盤站上 MA20（書本明寫「股價在月線上時做多」）
+  // 6. 收盤站上 MA20 且月線向上（課程 6-5「月線之上**而且月線向上**，鐵則不能改變」）
+  // 2026-07-05 回測-15 按課程：補月線向上（detector 單獨用時之前缺這條）
   if (c.ma20 == null || c.close <= c.ma20) return null;
+  const prevMa20ForJ = candles[idx - 1]?.ma20;
+  if (prevMa20ForJ != null && c.ma20 < prevMa20ForJ) return null;
 
   // 1. 列舉所有結構合格的 ABC，取第一個（由近至遠）同時滿足：
   //    0'. ABC 修正之前（legAHigh 處）為多頭（書本 Part 11-1 p.697「多頭一波後 ABC 修正再攻」）
