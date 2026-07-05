@@ -2,8 +2,8 @@
  * 策略 I：K 線橫盤突破進場偵測
  *
  * 朱家泓《活用技術分析寶典》Part 11-1 8 種進場位置「位置 3：等 K 線橫盤突破」（p.694）：
- *   多頭中長紅 K 上漲後，股價維持在這根紅 K 上方「橫盤整理」，
- *   隨後再大量中長紅 K 突破橫盤最高點，做多。
+ *   多頭上漲中出現一根中長 K（錨點，課程 6-3：第一根紅黑不管），股價維持在其
+ *   高低區間「橫盤整理」，隨後大量中長紅 K 收盤突破橫盤最高點，做多。
  *
  * 對應寶典 Part 12-4「18 種空轉多祕笈圖」第 5 圖「K 線橫盤突破」（p.802）。
  *
@@ -37,7 +37,7 @@ import {
 
 export interface KlineConsolidationBreakoutResult {
   isBreakout: boolean;
-  anchorDate: string;          // 中長紅 K 錨點日期
+  anchorDate: string;          // 錨點 K 日期（課程 6-3：第一根紅黑不管，實體 ≥3% 即可）
   anchorHigh: number;          // 錨點 K 最高
   anchorLow: number;           // 錨點 K 最低（停損參考）
   anchorBodyPct: number;       // 錨點實體 %
@@ -53,7 +53,7 @@ export interface KlineConsolidationBreakoutResult {
 // 書本門檻單一事實來源：lib/analysis/bookThresholds.ts
 const MIN_CONSOL_DAYS = KLINE_CONSOL_MIN_DAYS;       // 至少 3 根橫盤 K（課程 CH2-3「連續三天」，2026-07-05 裁決 4→3）
 const MAX_CONSOL_DAYS = KLINE_CONSOL_MAX_DAYS;       // 最多 15 根（更久就接近位置 1 盤整突破）
-const MIN_ANCHOR_BODY_PCT = KLINE_CONSOL_ANCHOR_BODY_PCT;   // 中長紅 K：實體 ≥ 3%（寶典 Part 4-1「長紅」）
+const MIN_ANCHOR_BODY_PCT = KLINE_CONSOL_ANCHOR_BODY_PCT;   // 錨點中長 K：實體 ≥ 3%（紅黑不管，寶典 Part 4-1 實體門檻）
 const MAX_RANGE_WIDTH_PCT = KLINE_CONSOL_MAX_RANGE_PCT;     // 橫盤狹幅：高低差 / 錨點高 < 5%
 
 interface AnchorCandidate {

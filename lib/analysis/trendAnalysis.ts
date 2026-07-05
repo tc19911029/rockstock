@@ -294,6 +294,56 @@ export function detectTrend(
   return '盤整';
 }
 
+// ── 盤整四型態分類（課程 CH1-4，純顯示不進 gate）────────────────────────────
+
+export type ConsolidationShape = '三角收斂' | '矩形盤整' | '上升三角' | '下降三角';
+
+/** 頭/底「差不多平」容差（課程投影片只畫圖沒給數字 ⚠️ 自創 padding 1.5%） */
+const CONSOL_FLAT_TOL = 0.015;
+
+/**
+ * 盤整四種常見型態（課程 CH1-4 投影片，左上→右下）：
+ *   三角收斂＝頭頭低＋底底高；矩形＝上頭平＋下底平；
+ *   上升三角＝上平＋底底高；下降三角＝頭頭低＋下平。
+ *
+ * 課程明講：四種只是盤整的**外觀分類**，操作一律「畫上下頸線、等突破/跌破表態」，
+ * 不必為每種各記一套做法 → 本函式**純顯示標籤**，不做任何選股/排序輸入。
+ *
+ * 只在 detectTrend === '盤整' 時有意義；用與 detectTrend 相同的 structural pivots
+ * （最近兩頭兩底）判定，對不上四型任何一型（如頭高底低發散）回 null。
+ */
+export function classifyConsolidationShape(
+  candles: CandleWithIndicators[],
+  index: number,
+): { shape: ConsolidationShape; detail: string } | null {
+  if (index < 20) return null;
+  const pivots = resolveStructuralPivots(candles, index);
+  const highs = pivots.filter(p => p.type === 'high').slice(0, 2);
+  const lows  = pivots.filter(p => p.type === 'low').slice(0, 2);
+  if (highs.length < 2 || lows.length < 2) return null;
+
+  const flat = (a: number, b: number) => b > 0 && Math.abs(a - b) / b <= CONSOL_FLAT_TOL;
+  const highFlat  = flat(highs[0].price, highs[1].price);
+  const lowFlat   = flat(lows[0].price, lows[1].price);
+  const lowerHigh = !highFlat && highs[0].price < highs[1].price;  // 頭頭低
+  const higherLow = !lowFlat && lows[0].price > lows[1].price;     // 底底高
+
+  const shape: ConsolidationShape | null =
+    lowerHigh && higherLow ? '三角收斂' :
+    highFlat  && lowFlat   ? '矩形盤整' :
+    highFlat  && higherLow ? '上升三角' :
+    lowerHigh && lowFlat   ? '下降三角' :
+    null;
+  if (!shape) return null;
+
+  const upper = Math.max(highs[0].price, highs[1].price);
+  const lower = Math.min(lows[0].price, lows[1].price);
+  return {
+    shape,
+    detail: `${shape}（上頸線≈${upper.toFixed(2)}／下頸線≈${lower.toFixed(2)}，課程 CH1-4：畫上下頸線等市場表態，突破做多、跌破做空）`,
+  };
+}
+
 // ── Trendline (切線) detection — 書本 p.37/p.38 警示用，不做進出場判斷 ───────────
 
 export interface TrendlineInfo {
@@ -586,10 +636,14 @@ export function evaluateSixConditions(
   // ─────────────────────────────────────────────────────────────────────────
   const trendState = detectTrend(candles, index);
   const trendPass  = trendState === '多頭';
+  // 盤整時附四型態外觀標籤（課程 CH1-4，純顯示）
+  const consolShape = trendState === '盤整' ? classifyConsolidationShape(candles, index) : null;
   const trendDetail = trendState === '多頭'
     ? '✅ 多頭趨勢（頭頭高、底底高）'
     : trendState === '空頭'
     ? '❌ 空頭趨勢（頭頭低、底底低）—— 不宜做多'
+    : consolShape
+    ? `⚠️ 盤整趨勢 — ${consolShape.detail}`
     : '⚠️ 盤整趨勢（方向不明）—— 觀望';
 
   // ─────────────────────────────────────────────────────────────────────────

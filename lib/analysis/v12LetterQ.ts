@@ -47,6 +47,14 @@ export interface LetterQResult {
   /** MA24 是否上揚 */
   ma24Up?: boolean;
   bodyPct?: number;
+  /**
+   * 成本乖離（課程 CH3-1 成本理論，2026-07-05 小修-13）：(close − MA) / MA。
+   * 正值＝這段期間買的人平均賺 X%、負值＝平均賠 X% — 比 aboveMA3 布林更細的顯示欄位。
+   * 純顯示不進 gate。
+   */
+  costGapMA3?: number;
+  costGapMA10?: number;
+  costGapMA24?: number;
   detail: string;
 }
 
@@ -98,6 +106,11 @@ export function detectLetterQ(
   if (!isValidRedK(c, prevPrev.close, market, symbol)) return empty;
   const bodyPct = ((c.close - c.open) / c.open) * 100;
 
+  // 成本乖離（課程 CH3-1 成本理論）：收盤 vs 各均線＝該期間買的人平均賺賠幅度（顯示用）
+  const costGapMA3  = (c.close - c.ma3)  / c.ma3;
+  const costGapMA10 = (c.close - c.ma10) / c.ma10;
+  const costGapMA24 = (c.close - c.ma24) / c.ma24;
+
   return {
     triggered: true,
     stopLossMA: c.ma10,
@@ -108,7 +121,10 @@ export function detectLetterQ(
     aboveMA3,
     ma24Up,
     bodyPct,
-    detail: `Q 三條均線戰法（MA3=${c.ma3.toFixed(2)} 金叉 MA10=${c.ma10.toFixed(2)}+站上 MA3+MA24=${c.ma24.toFixed(2)} 上揚+紅K${bodyPct.toFixed(2)}%）`,
+    costGapMA3,
+    costGapMA10,
+    costGapMA24,
+    detail: `Q 三條均線戰法（MA3=${c.ma3.toFixed(2)} 金叉 MA10=${c.ma10.toFixed(2)}+站上 MA3+MA24=${c.ma24.toFixed(2)} 上揚+紅K${bodyPct.toFixed(2)}%）｜成本乖離：3日買家 ${(costGapMA3 * 100).toFixed(1)}%／10日 ${(costGapMA10 * 100).toFixed(1)}%／24日 ${(costGapMA24 * 100).toFixed(1)}%（CH3-1 成本理論）`,
   };
 }
 

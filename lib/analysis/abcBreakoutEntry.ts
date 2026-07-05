@@ -40,6 +40,14 @@ export interface ABCBreakoutResult {
   legBHighIdx: number;
   legCLowIdx: number;
   preEntryDays: number;       // 修正持續天數
+  // ── 旗形（齊形）目標價 D — 課程 6-5 第 3/7 點，純顯示不進 gate（2026-07-05 回測-14）──
+  /** 旗桿起點（ABC 修正前那波多頭的起漲低點） */
+  poleLow?: number;
+  poleLowIdx?: number;
+  /** 修正 ≤20 天完成＝課程「飆旗」型態，可算目標價 D */
+  isFlagPattern?: boolean;
+  /** 目標價 D＝突破日收盤＋旗桿高度（左右兩段等長 D；投射錨點=突破點 ⚠️ 課程只給圖示，錨點屬近似） */
+  flagTargetD?: number;
   detail: string;
 }
 
@@ -73,6 +81,9 @@ interface ABCStructure {
   legBHighIdx: number;
   legCLow: number;
   legCLowIdx: number;
+  /** 旗桿起點（legAHigh 之前那波多頭的起漲低點）— 旗形目標價 D 用，顯示層 */
+  poleLow: number;
+  poleLowIdx: number;
 }
 
 /**
@@ -133,19 +144,27 @@ function findABCStructures(
     if (correctionSpanDays < MIN_CORRECTION_SPAN_DAYS) continue;
 
     // 多頭波幅檢查：legAHigh 相對更早的低點 ≥ MIN_PRIOR_RUN_PCT
+    // （該低點同時就是旗形「旗桿」起點，留給目標價 D 顯示用）
+    let poleLow: number;
+    let poleLowIdx: number;
     const earlierLow = recent.find(p => p.type === 'low' && p.index < legAHigh.index);
     if (earlierLow) {
       const runPct = ((legAHigh.price - earlierLow.price) / earlierLow.price) * 100;
       if (runPct < MIN_PRIOR_RUN_PCT) continue;
+      poleLow = earlierLow.price;
+      poleLowIdx = earlierLow.index;
     } else {
       // 沒有更早的低點 → 用區間最低近似
       const startIdx = Math.max(0, idx - MAX_LOOKBACK);
       let minLow = candles[startIdx].low;
+      let minLowIdx = startIdx;
       for (let i = startIdx; i < legAHigh.index; i++) {
-        if (candles[i].low < minLow) minLow = candles[i].low;
+        if (candles[i].low < minLow) { minLow = candles[i].low; minLowIdx = i; }
       }
       const runPct = ((legAHigh.price - minLow) / minLow) * 100;
       if (runPct < MIN_PRIOR_RUN_PCT) continue;
+      poleLow = minLow;
+      poleLowIdx = minLowIdx;
     }
 
     out.push({
@@ -157,6 +176,8 @@ function findABCStructures(
       legBHighIdx: legB.index,
       legCLow: legC.price,
       legCLowIdx: legC.index,
+      poleLow,
+      poleLowIdx,
     });
   }
 
@@ -215,6 +236,16 @@ export function detectABCBreakout(
 
     const preEntryDays = idx - abc.legAHighIdx;
 
+    // ── 旗形（齊形）目標價 D — 課程 6-5 純顯示（2026-07-05 回測-14）──────────
+    // 投影片第 3 點：「多頭的 ABC 一般在 20 天之內完成；若突破點落在 20 天之內，
+    // 就視為飆旗（旗形）型態，可以計算目標價 D」。
+    // 第 7 點：旗桿＝前一波低到高的距離，兩段等長的 D（左邊旗桿、右邊投射）。
+    // 課程也強調「看不懂齊形沒關係、以趨勢操作為主，還可能超標」→ 純追蹤參考。
+    const FLAG_MAX_CORRECTION_DAYS = 20;
+    const isFlagPattern = preEntryDays <= FLAG_MAX_CORRECTION_DAYS;
+    const poleHeight = abc.legAHigh - abc.poleLow;
+    const flagTargetD = isFlagPattern && poleHeight > 0 ? c.close + poleHeight : undefined;
+
     return {
       isABCBreakout: true,
       trendlineValue,
@@ -229,10 +260,17 @@ export function detectABCBreakout(
       legBHighIdx: abc.legBHighIdx,
       legCLowIdx: abc.legCLowIdx,
       preEntryDays,
+      poleLow: abc.poleLow,
+      poleLowIdx: abc.poleLowIdx,
+      isFlagPattern,
+      flagTargetD,
       detail:
         `ABC 突破（A峰 ${abc.legAHigh.toFixed(1)}→A底 ${abc.legALow.toFixed(1)}→` +
         `B峰 ${abc.legBHigh.toFixed(1)}→C底 ${abc.legCLow.toFixed(1)}，` +
-        `修正 ${preEntryDays} 天，今日突破下降切線 ${trendlineValue.toFixed(1)}＋實體 ${bodyPct.toFixed(2)}%＋量×${volumeRatio.toFixed(2)}＋站上 MA20）`,
+        `修正 ${preEntryDays} 天，今日突破下降切線 ${trendlineValue.toFixed(1)}＋實體 ${bodyPct.toFixed(2)}%＋量×${volumeRatio.toFixed(2)}＋站上 MA20）` +
+        (flagTargetD != null
+          ? `｜修正 ≤20 天＝飆旗型態，目標價 D≈${flagTargetD.toFixed(1)}（旗桿 ${abc.poleLow.toFixed(1)}→${abc.legAHigh.toFixed(1)} 投射，課程 6-5：追蹤參考、可能超標）`
+          : ''),
     };
   }
 

@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/shared';
 import { HeavinessBadgeFor } from '@/components/shared/HeavinessBadge';
 import { classifyMarket } from '@/lib/market/classify';
 import ProhibitionsBlock from './ProhibitionsBlock';
+import CourseTeachingBlock from './CourseTeachingBlock';
 import { CORE_SCORE_MIN, BOOK_VOL_RATIO_MIN, BOOK_BODY_PCT_MIN } from '@/lib/analysis/bookThresholds';
 
 const HIGH_WIN_POS_NUM: Record<string, string> = {
@@ -328,6 +329,9 @@ export default function SixConditionsPanel() {
 
       {/* 課程 CH9-2（2026-07-04）：獲利目標 = 六種壓力位（純顯示，不進 gate/排序） */}
       <ProfitTargetsBlock candles={allCandles} index={currentIndex} />
+
+      {/* 課程教學卡（2026-07-05 批次A）：五步驟＋口訣／趨勢全景圖／7 進場位置勝率（純教學） */}
+      <CourseTeachingBlock candles={allCandles} index={currentIndex} />
     </div>
   );
 }
