@@ -21,7 +21,7 @@ import type { MonitoredHoldingInfo, MonitoredSymbol } from './monitorPool';
 import { HOLDINGS_GUARD, type GuardScope } from '@/lib/config';
 import { DEFAULT_STOP_LOSS_MULT } from '@/lib/agents/holdingsActionEngine';
 
-export type GuardRuleId = 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop' | 'reversal-open-low';
+export type GuardRuleId = 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop' | 'reversal-open-low' | 'gap-open-buffer';
 
 export interface GuardQuote {
   /** 最新成交價 */
@@ -75,7 +75,7 @@ export interface GuardSignal {
     yLow?: number;
     /** 規則5：昨收（開低基準） */
     yClose?: number;
-    /** 規則5：目前開低幅度 % */
+    /** 規則5/6：目前開低幅度 % */
     openLowPct?: number;
   };
   caveat: 'minute-inference';
@@ -225,6 +225,26 @@ export function detectGuardSignals(
         reversalLabel: rw.label,
         yLow: rw.yLow,
         yClose: rw.yClose,
+        openLowPct: round2(openLow * 100),
+      }));
+    }
+  }
+
+  // ── 規則6（2026-07-05 直播 QA③）：大跌開低「禁開盤殺單」緩衝提示 ──────────
+  // 課程紀律：大跌開低日開盤那批市價殺單常成交在最差價；先觀察開盤緩衝窗，
+  // 交易時點在 13:20-13:25 按規則處理（含停損執行）。純提醒、不壓抑規則1。
+  if (
+    quote && quote.price > 0 && side !== 'short' && !cnAuction
+    && ctx.isHolding
+    && quote.prevClose != null && quote.prevClose > 0
+    && sinceOpen >= 0 && sinceOpen <= HOLDINGS_GUARD.GAP_OPEN_WINDOW_MIN
+    && scopeAllows(HOLDINGS_GUARD.SCOPE.GAP_OPEN_BUFFER, ctx)
+  ) {
+    const openLow = 1 - quote.price / quote.prevClose;
+    if (openLow >= HOLDINGS_GUARD.GAP_OPEN_LOW_PCT) {
+      signals.push(makeSignal('gap-open-buffer', ctx, now, {
+        price: quote.price,
+        prevClose: quote.prevClose,
         openLowPct: round2(openLow * 100),
       }));
     }

@@ -152,6 +152,8 @@ export const HOLDINGS_GUARD = {
     PATTERN_NTFY: 'holding' as GuardScope,
     /** 規則5（2026-07-05 漏網-3）：昨日高檔轉折訊號＋今晨開低（課程 CH2-9 開盤定強弱） */
     REVERSAL_OPEN: 'holding' as GuardScope,
+    /** 規則6（2026-07-05 直播 QA③）：大跌開低「禁開盤殺單」緩衝提示 */
+    GAP_OPEN_BUFFER: 'holding' as GuardScope,
   },
   /** 規則2：當日曾漲幅門檻（dayHigh vs 昨收）— 4% 高於多數個股日常振幅 */
   PUMP_MIN_GAIN_PCT: 0.04,
@@ -170,6 +172,10 @@ export const HOLDINGS_GUARD = {
   REVERSAL_OPEN_WINDOW_MIN: 30,
   /** 規則5：「開低」門檻（vs 昨收）— 0.5%（⚠️ 自創量化，課程只說開低） */
   REVERSAL_OPEN_LOW_PCT: 0.005,
+  /** 規則6：「大跌開低」門檻（vs 昨收）— 3%（⚠️ 自創量化，直播 QA 只說大跌開低） */
+  GAP_OPEN_LOW_PCT: 0.03,
+  /** 規則6：開盤緩衝觀察窗（分鐘）— 課程紀律：開盤別市價殺單，13:20 再按規則處理 */
+  GAP_OPEN_WINDOW_MIN: 30,
   /** 規則4：哪些既有形態規則走持倉推播（blowoff-bullish 是買訊、非保命，不含） */
   PATTERN_RULES: ['blowoff-bearish', 'terminal-rally', 'ma5-breakdown'],
 } as const;

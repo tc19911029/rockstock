@@ -26,7 +26,7 @@ export type AlertRuleId = RuleId | GuardRuleId;
 export type AlertSignal = Signal | GuardSignal;
 
 const GUARD_RULES: ReadonlySet<string> = new Set<GuardRuleId>([
-  'stop-loss-breach', 'pump-reversal', 'rapid-drop', 'reversal-open-low',
+  'stop-loss-breach', 'pump-reversal', 'rapid-drop', 'reversal-open-low', 'gap-open-buffer',
 ]);
 
 function isGuardSignal(sig: AlertSignal): sig is GuardSignal {
@@ -100,6 +100,7 @@ export function decideNotify(sig: AlertSignal): boolean {
     const scope = sig.rule === 'stop-loss-breach' ? HOLDINGS_GUARD.SCOPE.STOP_LOSS_BREACH
       : sig.rule === 'pump-reversal' ? HOLDINGS_GUARD.SCOPE.PUMP_REVERSAL
       : sig.rule === 'reversal-open-low' ? HOLDINGS_GUARD.SCOPE.REVERSAL_OPEN
+      : sig.rule === 'gap-open-buffer' ? HOLDINGS_GUARD.SCOPE.GAP_OPEN_BUFFER
       : HOLDINGS_GUARD.SCOPE.RAPID_DROP;
     return scopeAllows(scope, sig);
   }
@@ -215,6 +216,7 @@ const RULE_LABELS: Record<AlertRuleId, string> = {
   'pump-reversal': '拉高回落',
   'rapid-drop': '急殺',
   'reversal-open-low': '變盤開低確認',
+  'gap-open-buffer': '大跌開低緩衝',
 };
 
 const RULE_TAGS: Record<AlertRuleId, string[]> = {
@@ -226,6 +228,7 @@ const RULE_TAGS: Record<AlertRuleId, string[]> = {
   'pump-reversal': ['chart_with_downwards_trend', 'warning'],
   'rapid-drop': ['chart_with_downwards_trend', 'warning'],
   'reversal-open-low': ['eyes', 'warning'],
+  'gap-open-buffer': ['fire_extinguisher', 'warning'],
 };
 
 /** 持倉保命訊號的推播文案（規則1 priority 5，其餘 4） */
@@ -254,6 +257,11 @@ function formatGuardPayload(sig: GuardSignal): {
     priority = 4;
     lines.push(`昨收 ${m.yClose} → 現價 ${m.price}（開低 -${m.openLowPct}%）`);
     lines.push(`課程 CH2：變盤線次日開低=空方確認。收盤跌破昨低 ${m.yLow} → 執行出場；拉回站穩 → 解除。`);
+  } else if (sig.rule === 'gap-open-buffer') {
+    title = `🧯 ${code} 大跌開低・先別殺（開盤緩衝）`;
+    priority = 4;
+    lines.push(`昨收 ${m.prevClose} → 現價 ${m.price}（開低 -${m.openLowPct}%）`);
+    lines.push('課程紀律：大跌開低別開盤市價殺單（常成交在最差價）。先看開盤 30 分鐘，13:20 再按規則處理（含停損執行）。');
   } else {
     title = `⚠ ${code} 急殺（持倉保命）`;
     priority = 4;
