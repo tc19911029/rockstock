@@ -6,6 +6,7 @@
 import { TradingRule, RuleSignal } from '@/types';
 import {
   isMedLongRed, isMedLongBlack, isSmallCandle, isDoji,
+  isRedCandle, isBlackCandle,
   isUptrendWave, isDowntrendWave,
 } from './ruleUtils';
 
@@ -138,16 +139,23 @@ export const bearishDoubleStarTransition: TradingRule = {
       // 需在高檔
       if (!isUptrendWave(candles, index - gap, 8)) continue;
 
-      const patternName = starCount === 2 ? '雙星變盤' : `${starCount}星變盤（群星變盤）`;
+      // 命名對齊課程 CH2-8 投影片 p01：中間兩個小黑K=雙鴉變盤、兩顆星=雙星變盤、
+      // 2個以上變盤線=群星變盤（星越多空方控盤越久）
+      const middles = candles.slice(index - gap + 1, index);
+      const patternName = starCount >= 3
+        ? `群星變盤(${starCount}星)`
+        : middles.every(m => isBlackCandle(m)) ? '雙鴉變盤' : '雙星變盤';
       return {
         type: 'SELL',
-        label: patternName,
+        label: `高檔${patternName}`,
         description: `長紅(${red.close.toFixed(2)}) + ${starCount}顆星 + 長黑(${black.close.toFixed(2)})`,
         reason: [
-          `【朱家泓《抓住K線》第4篇 Ch2】高檔${patternName}是轉折向下的強烈訊號。`,
+          `【朱家泓 課程 CH2-8】高檔${patternName}是轉折向下的強烈訊號。`,
           '出現在多頭上漲高檔，如果同時爆大量，反轉更明顯，多單要立刻出場。',
-          starCount > 2 ? `群星${starCount}顆，空方蓄積能量越大，下跌力道越強。` : '',
-          '在多頭回檔時出現此組合，股價將繼續下跌。',
+          patternName.startsWith('雙鴉') ? '中間兩根小黑K是壓力（雙鴉），空方連續兩天占上風。' : '',
+          starCount >= 3 ? `群星 ${starCount} 顆，中間星越多、後續空方控盤越久（課程原文）；批次B回測：群星(≥3星)後 20 日兩段皆弱於大盤（-1.3%/-2.0%），與課程方向一致（溫和，僅顯示不做硬避開）。` : '',
+          '課程 p01：高檔群星夜星 → 右邊黑K跌破 5 均＝多單馬上出場，別等跌深才懊悔。',
+          '即使後續沒有快速下跌，這些變盤線的高點日後都容易變成壓力。',
         ].filter(Boolean).join('\n'),
         ruleId: this.id,
       };
@@ -319,14 +327,13 @@ export const bullishDoubleStarTransition: TradingRule = {
 
       if (!isDowntrendWave(candles, index - gap, 8)) continue;
 
-      let patternName: string;
-      if (starCount === 2) {
-        patternName = '雙星變盤';
-      } else if (starCount <= 4) {
-        patternName = '雙肩變盤';
-      } else {
-        patternName = `群星變盤(${starCount}星)`;
-      }
+      // 命名對齊課程 CH2-8 投影片 p06：中間兩個小紅K（或兩小十字/紡錘）=雙肩變盤、
+      // 兩顆星=雙星變盤、三顆星以上=群星變盤（星越多多方控盤越久）。
+      // （舊版把 3~4 星標成「雙肩」是誤植 — 雙肩專指中間兩小紅，與夜星「雙鴉」對稱）
+      const middles = candles.slice(index - gap + 1, index);
+      const patternName = starCount >= 3
+        ? `群星變盤(${starCount}星)`
+        : middles.every(m => isRedCandle(m) || isDoji(m)) ? '雙肩變盤' : '雙星變盤';
 
       // 2026-07-04 修（課程 CH2-8 確認不對稱，同 morningStarLow）：
       // 晨星家族要「右紅K高點被突破」才確認 — 成形日先 WATCH，突破由 morningStarLow 型

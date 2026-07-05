@@ -462,6 +462,19 @@ export function detectTrendlineBreakout(
  * 空頭方向對稱（用底底低次數判斷）。
  */
 
+/** 連續 n 根長黑 K（末跌段合議用，2026-07-05 批次B）
+ *  空頭對量要求寬鬆（CH5-1 投影片「沒人買股價就跌」）→ 不設量門檻，只看連續長黑實體 */
+function hasConsecLongBlack(candles: CandleWithIndicators[], index: number, n = 3): boolean {
+  if (index < n) return false;
+  for (let i = 0; i < n; i++) {
+    const c = candles[index - i];
+    if (!c) return false;
+    const body = c.open > 0 ? Math.abs(c.close - c.open) / c.open : 0;
+    if (!(c.close < c.open && body >= 0.02)) return false;
+  }
+  return true;
+}
+
 /** 連續 n 根大量長紅 K（p.46 特性 5：連漲 3 天以上容易賣壓）
  *  「大量」對齊書本 p.54 第 4 條：量 ≥ 前日 × 1.3 */
 function hasConsecLongRed(candles: CandleWithIndicators[], index: number, n = 3): boolean {
@@ -586,14 +599,24 @@ export function detectTrendPosition(
     }
     return '多頭上升段';
   } else {
-    // 空頭：對稱判末跌 vs 一般下跌
-    const lows = pivots.filter(p => p.type === 'low');
-    let lowerLowCount = 0;
-    for (let i = 0; i < lows.length - 1; i++) {
-      if (lows[i].price < lows[i + 1].price) lowerLowCount++;
-      else break;
-    }
-    if (lowerLowCount >= 5) return '末跌段(低檔)';
+    // 空頭：末跌段合議（2026-07-05 批次B修）
+    // 舊判準 lowerLowCount≥5 純自創（回測-20）且全市場兩年 36,740 個空頭股日 0 觸發＝死分支
+    // （findPivots 10 個 pivot 最多 ~5 個底，連 5 段底底低幾乎不可能）。
+    // 改用與末升段對稱的合議判準 ≥2（課程空頭鏡像；量要求寬鬆 CH5-1「沒人買股價就跌」）：
+    const consecPlunge  = hasConsecLongBlack(candles, index, 3);           // 連 3 長黑急跌
+    const panicBlowoff  = hasBlowoffBlackReversal(candles, index);         // 量×2 長黑＝恐慌殺盤/竭盡
+    const droppedOver20 = (() => {                                         // 近 20 根累跌 >20%（鏡像末升段 20%）
+      const base = candles[Math.max(0, index - 20)];
+      if (!base || base.close <= 0) return false;
+      return c.close / base.close - 1 < -0.20;
+    })();
+    const biasOverSold = (() => {                                          // 遛狗鏡像：乖離 <-15%
+      if (c.ma5 != null && c.ma5 > 0 && (c.close - c.ma5) / c.ma5 < -0.15) return true;
+      if (c.ma20 != null && c.ma20 > 0 && (c.close - c.ma20) / c.ma20 < -0.15) return true;
+      return false;
+    })();
+    const endDownSignals = [consecPlunge, panicBlowoff, droppedOver20, biasOverSold].filter(Boolean).length;
+    if (endDownSignals >= 2) return '末跌段(低檔)';
 
     // 接近支撐區：未達末跌，但收盤已逼近近 60 根 swing low
     const swingLo = findSwingLow(candles, index, 60);
@@ -825,10 +848,22 @@ export function evaluateSixConditions(
   const ma60Pressure = ma60 != null && prevMa60 != null
     && ma60 > c.close && ma60 < prevMa60;
 
+  // 季線動能警示（2026-07-05 批次B回測 backtest-course-research-batch Q3）：
+  // 多頭股按 MA60 10 日斜率五分位，train/test 皆單調 — 最陡桶唯一正超額（+0.06/+0.41%）、
+  // 走平/下彎桶 test D20 -4.72%。「多頭但季線沒在漲」＝弱勢群 → 純顯示警示，不進 gate/排序
+  // （升級排序須過 backtest-unified-leaderboard 變體，另案）。課程對應 CH3-3 均線助漲力道。
+  const ma60Ago = candles[index - 10]?.ma60;
+  const ma60Slope10 = ma60 != null && ma60Ago != null && ma60Ago > 0 ? ma60 / ma60Ago - 1 : null;
+  const ma60Stalling = ma60Slope10 != null && ma60Slope10 <= 0;
+
   const maAlignment = (() => {
     if (bullishAlign) {
       const base = `✅ MA5(${ma5?.toFixed(1)})>MA10(${ma10?.toFixed(1)})>MA20(${ma20?.toFixed(1)}) 三線多排，三線皆向上`;
-      return ma60Pressure ? `${base}（⚠️ 季線 ${ma60?.toFixed(1)} 下彎在上方，靠近有壓力）` : base;
+      const warns = [
+        ma60Pressure ? `⚠️ 季線 ${ma60?.toFixed(1)} 下彎在上方，靠近有壓力` : '',
+        ma60Stalling ? `⚠️ 季線 10 日走平/下彎（${((ma60Slope10 ?? 0) * 100).toFixed(1)}%）— 回測弱勢群（批次B Q3），助漲力不足` : '',
+      ].filter(Boolean);
+      return warns.length ? `${base}（${warns.join('；')}）` : base;
     }
     if (ma5 == null || ma10 == null || ma20 == null) return '均線資料不足';
     const issues = [
