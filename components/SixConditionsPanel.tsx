@@ -11,6 +11,7 @@ import { HeavinessBadgeFor } from '@/components/shared/HeavinessBadge';
 import { classifyMarket } from '@/lib/market/classify';
 import ProhibitionsBlock from './ProhibitionsBlock';
 import CourseTeachingBlock from './CourseTeachingBlock';
+import { detectShortEntries } from '@/lib/analysis/shortEntries';
 import { CORE_SCORE_MIN, BOOK_VOL_RATIO_MIN, BOOK_BODY_PCT_MIN } from '@/lib/analysis/bookThresholds';
 
 const HIGH_WIN_POS_NUM: Record<string, string> = {
@@ -330,8 +331,44 @@ export default function SixConditionsPanel() {
       {/* 課程 CH9-2（2026-07-04）：獲利目標 = 六種壓力位（純顯示，不進 gate/排序） */}
       <ProfitTargetsBlock candles={allCandles} index={currentIndex} />
 
+      {/* 做空 7 進場位置（2026-07-05 批次C）：課程 CH6-8~14 對照顯示，回測未過 edge 不進掃描 */}
+      <ShortEntriesBlock candles={allCandles} index={currentIndex} />
+
       {/* 課程教學卡（2026-07-05 批次A）：五步驟＋口訣／趨勢全景圖／7 進場位置勝率（純教學） */}
       <CourseTeachingBlock candles={allCandles} index={currentIndex} />
+    </div>
+  );
+}
+
+/**
+ * 做空 7 進場位置顯示（課程 CH6-8~14，批次C 2026-07-05）
+ * 回測（backtest-short-entries，24,850 筆）：絕對做空紀律模擬 test 全負、市場中立 α train/test 翻面
+ * → 不開掃描軌，純走圖對照 + 多單警訊參考。只在當日有命中時渲染。
+ */
+function ShortEntriesBlock({ candles, index }: { candles: CandleWithIndicators[]; index: number }) {
+  const signals = useMemo(
+    () => (candles.length && index >= 0 && index < candles.length ? detectShortEntries(candles, index) : []),
+    [candles, index],
+  );
+  if (!signals.length) return null;
+  return (
+    <div className="mt-3 pt-3 border-t border-border">
+      <div className="text-[10px] font-bold text-muted-foreground mb-1.5">🐻 做空進場位置命中（課程 CH6-8~14 對照）</div>
+      <div className="space-y-1">
+        {signals.map(s => (
+          <div key={s.id} className="text-[11px] px-2 py-1.5 rounded bg-secondary/40" title={s.detail}>
+            <div className="flex items-center justify-between">
+              <span className="font-bold">位置{s.position} {s.name}</span>
+              <span className="font-mono text-muted-foreground">停損(回補) {s.stopLoss.toFixed(2)}{s.targetPrice != null ? `｜目標 ${s.targetPrice.toFixed(2)}` : ''}</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{s.detail}</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-1 text-[9px] text-muted-foreground/70 leading-relaxed">
+        課程紀律：停損＝進場黑K最高點、站上 5 均回補。⚠️ 2026-07-05 回測 24,850 筆：絕對做空期望 test 全負、
+        對大盤超額兩段翻面 — 無穩定 edge，僅供課程對照與多單警訊，不是做空建議（位置6/7 跌破後反而常相對大盤走強）。
+      </div>
     </div>
   );
 }
