@@ -117,6 +117,34 @@ function reboundStallAt(cs: OHLC[], d: number): boolean {
   for (let i = touchIdx + 1; i <= d; i++) { if (cs[i].high > highAtTouch) return false; }
   return true;
 }
+// ── 課程 CH9-1 口述（2026-07-05 漏網-9）：長短單各半「長線保護短線」──────────
+// 資金拆兩半：½ 守 MA5（短線）、½ 守 MA20（長線），兩半皆有 -10% 絕對停損。
+// 60 天視窗（與死抱60對照）。報酬 = 兩半等權平均。
+function halvesExit(cs: OHLC[], e: number): { ret: number; days: number } {
+  const entry = cs[e].open, stop = entry * 0.90;
+  const end = Math.min(e + HOLD60, cs.length - 1);
+  let retA: number | null = null; // ½ 守 MA5
+  let retB: number | null = null; // ½ 守 MA20
+  let lastDay = e;
+  for (let d = e + 1; d <= end && (retA === null || retB === null); d++) {
+    lastDay = d;
+    if (cs[d].low <= stop) {
+      const px = Math.min(cs[d].open, stop) / entry - 1;
+      if (retA === null) retA = px;
+      if (retB === null) retB = px;
+      break;
+    }
+    const c = cs[d].close;
+    const ma5 = smaAt(cs, d, 5), ma20 = smaAt(cs, d, 20);
+    if (retA === null && ma5 > 0 && c < ma5) retA = c / entry - 1;
+    if (retB === null && ma20 > 0 && c < ma20) retB = c / entry - 1;
+  }
+  const tail = cs[end].close / entry - 1;
+  if (retA === null) retA = tail;
+  if (retB === null) retB = tail;
+  return { ret: ((retA + retB) / 2) * 100, days: lastDay - e };
+}
+
 function trappedStallExit(cs: OHLC[], e: number): { ret: number; days: number } {
   const entry = cs[e].open;
   const end = Math.min(e + HOLD60, cs.length - 1);
@@ -176,6 +204,8 @@ const exits: Record<string, Exit> = {
   // ── 課程 CH10-1（2026-07-04）：套牢反彈遇壓認賠 vs 死抱（60 天視窗，兩條一起看）──
   '死抱60天(對照)': (cs, e) => { const x = Math.min(e + HOLD60, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e }; },
   '套牢反彈遇壓認賠60天': (cs, e) => trappedStallExit(cs, e),
+  // 課程 CH9-1 口述「長短各半、長線保護短線」（漏網-9 回測）
+  '長短各半(½MA5+½MA20)60天': (cs, e) => halvesExit(cs, e),
 };
 
 function report(label: string, rets: { ret: number; days: number }[]) {

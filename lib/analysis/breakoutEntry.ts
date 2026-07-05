@@ -62,7 +62,7 @@ export function detectConsolidationBreakout(
     volumeRatio: r.volumeRatio,
     consolidationLow: r.lowerNecklineToday,
     preEntryDays: r.preEntryDays,
-    detail: `盤整突破（${r.preEntryDays}天盤整 ${r.lowerNecklineToday.toFixed(1)}~${r.upperNecklineToday.toFixed(1)}→突破+實體${r.bodyPct.toFixed(2)}%+量×${r.volumeRatio.toFixed(2)}）`,
+    detail: `盤整突破（${r.preEntryDays}天盤整 ${r.lowerNecklineToday.toFixed(1)}~${r.upperNecklineToday.toFixed(1)}→突破+實體${r.bodyPct.toFixed(2)}%+量×${r.volumeRatio.toFixed(2)}）｜${r.positionGradeLabel}`,
   };
 }
 

@@ -467,6 +467,13 @@ export interface RangeBreakoutResult {
   preEntryDays: number;        // 盤整持續天數
   bodyPct: number;             // 紅 K 實體 %
   volumeRatio: number;         // 量比
+  /**
+   * 課程 6-1 盤整四位置分級（2026-07-05 回測-5，純顯示不 gate）：
+   *   pos1 空頭低檔（站上月線才買）｜pos2 出升→主升（勝率約8成）｜
+   *   pos3 主升→末升（約7成）｜pos4 高檔漲一倍（防假突破，課程「錢不要賺」）
+   */
+  positionGrade: 'pos1' | 'pos2' | 'pos3' | 'pos4';
+  positionGradeLabel: string;
 }
 
 export function detectRangeBreakout(
@@ -528,12 +535,36 @@ export function detectRangeBreakout(
   if (volumeRatio < BOOK_VOL_RATIO_MIN) return null;
   if (c.close <= upperToday) return null;
 
+  // 課程 6-1 盤整四位置分級（顯示用）：
+  //   pos4 = 已漲一倍（近60根最低收盤×2）— 高檔假突破區，課程「錢不要賺」
+  //   pos1 = 收盤仍在 MA60 下（空頭低檔第一種）
+  //   pos3 = MA20 乖離 >8%（主升偏後段，⚠️自創分界）
+  //   pos2 = 其餘（出升→主升，課程勝率約8成的甜蜜區）
+  const grade = (() => {
+    let lo = Infinity;
+    for (let i = Math.max(0, index - 60); i <= index; i++) {
+      if (candles[i].close < lo) lo = candles[i].close;
+    }
+    if (lo > 0 && lo !== Infinity && c.close >= lo * 2) return 'pos4' as const;
+    if (c.ma60 != null && c.close < c.ma60) return 'pos1' as const;
+    const dev20 = c.ma20 != null && c.ma20 > 0 ? (c.close - c.ma20) / c.ma20 : 0;
+    return dev20 > 0.08 ? ('pos3' as const) : ('pos2' as const);
+  })();
+  const gradeLabel = {
+    pos1: '位置①空頭低檔（課程：站上月線才買）',
+    pos2: '位置②出升→主升（課程勝率約8成）',
+    pos3: '位置③主升→末升（課程約7成，短線為主）',
+    pos4: '位置④高檔已漲一倍（課程：防假突破、錢不要賺）',
+  }[grade];
+
   return {
     upperNecklineToday: upperToday,
     lowerNecklineToday: lowerToday,
     preEntryDays,
     bodyPct: bodyPct * 100,
     volumeRatio,
+    positionGrade: grade,
+    positionGradeLabel: gradeLabel,
   };
 }
 

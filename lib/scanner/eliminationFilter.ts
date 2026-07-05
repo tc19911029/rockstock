@@ -189,6 +189,34 @@ function rule09_highVolNoRise(candles: CandleWithIndicators[], idx: number): str
  * 任一條命中即淘汰（對齊朱家泓「假突破收盤跌破=嚴重，立即出場」精神）。
  * 2026-04-20 移除「嚴重 1 條 / 一般 2 條」分類 — 書本+網路朱家泓資料均無此分級。
  */
+/**
+ * 12.（課程 CH5-3 淘汰 7，2026-07-05 回測-8 補實作）長期打底未突破大量壓力
+ *
+ * 課程原文：「長期打底但上方有大量壓力沒突破前不要買」（友訊 2332 投影片例，
+ * 朱明講「沒過重壓前都不要買」）。
+ * 量化：打底中（detectTrend=盤整）且近 120 根內「爆量日（avg5×2）」的最高點
+ * 仍在今收上方 → 淘汰（突破那根大量壓力後自然解除）。
+ */
+function rule12_baseUnderPressure(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 40) return null;
+  const c = candles[idx];
+  if (detectTrend(candles, idx) !== '盤整') return null; // 只管「長期打底」情境
+  let pressHigh = -Infinity;
+  let pressDate = '';
+  for (let i = Math.max(1, idx - 120); i < idx; i++) {
+    const k = candles[i];
+    if (k.avgVol5 != null && k.avgVol5 > 0 && k.volume >= k.avgVol5 * 2 && k.high > pressHigh) {
+      pressHigh = k.high;
+      pressDate = String(k.date);
+    }
+  }
+  if (pressHigh === -Infinity) return null;
+  if (c.close < pressHigh) {
+    return `淘汰12: 長期打底未突破大量壓力（${pressDate} 高 ${pressHigh.toFixed(2)}，課程：沒過重壓前不要買）`;
+  }
+  return null;
+}
+
 const ELIMINATION_RULES = [
   rule01_notOutOfBottom,
   rule02_resistanceBlockBreakMA5,
@@ -197,6 +225,7 @@ const ELIMINATION_RULES = [
   rule06_resistanceLongBlack,
   rule07_indicatorDivergence,
   rule09_highVolNoRise,
+  rule12_baseUnderPressure,
   // 2026-04-20 用戶決議移除以下三條：
   // R8 法人連續賣超 — rockstock 無法人資料，代理指標（大量黑K）不精確
   // R10 看不懂（長期盤整）— 30/8%/2% 完全自創
