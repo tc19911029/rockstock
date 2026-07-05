@@ -192,7 +192,16 @@ export function detectHighPeakVolume(
   const isBlowoff = c.volume >= avg5 * 2;
 
   // 是否高檔（MA20 乖離 >5%）
-  const inHighZone = c.ma20 && c.ma20 > 0 && (c.close - c.ma20) / c.ma20 > 0.05;
+  // 高檔判定：MA20 乖離 >5%（工程近似）OR 漲一倍（課程 CH4-3「底部起漲漲一倍叫多頭高檔」的正字尺度）
+  // 2026-07-05 顯示-2：補「漲一倍」OR 條件，讓三型判定共享課程尺度
+  const doubledFromLow = (() => {
+    let lo = Infinity;
+    for (let i = Math.max(0, index - 60); i <= index; i++) {
+      if (candles[i].close < lo) lo = candles[i].close;
+    }
+    return lo > 0 && lo !== Infinity && c.close >= lo * 2;
+  })();
+  const inHighZone = (c.ma20 && c.ma20 > 0 && (c.close - c.ma20) / c.ma20 > 0.05) || doubledFromLow;
 
   let washVolume = false, turnoverVolume = false, distributionVolume = false;
 

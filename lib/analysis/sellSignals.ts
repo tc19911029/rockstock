@@ -62,6 +62,8 @@ export type SellSignalType =
   | 'UPPER_SHADOW_NEXTDAY_BREAK' // 高檔長上影紅K 次日收盤跌破其低點確認
   // 課程 CH9-3(一)（2026-07-04）：跌破高檔連續兩日大量 K 線的低點（一日反轉）→ 多單停利
   | 'HIGH_VOL_2DAY_LOW_BREAK'
+  // 課程 CH2-6/2-9（2026-07-05 漏網-2）：高檔「該漲不漲就是跌」— 連 3 根動能停滯
+  | 'PRICE_STALL_HIGH'
   // Wave2 進場-11（回測過關）：帶量突破紅K 後 T+1/T+2 黑K收盤跌破其 1/2 價 = 假突破
   | 'FALSE_BREAKOUT_FAIL'; // 假突破跌破1/2價（持倉端避雷出場，不接進場 gate）
 
@@ -162,12 +164,14 @@ export function detectSellSignals(
   }
 
   // 4. 跌破 MA5（輕度警示）
+  // 漏網-5（2026-07-05）：課程 CH1-5「紅K收盤跌破5均比黑K跌破更要警覺」— 連紅K都收不住＝更弱，文字加註
   if (ma5 != null && prev?.ma5 != null) {
     if (prev.close >= prev.ma5 && c.close < ma5 && c.close >= (ma20 ?? 0)) {
+      const redButBroke = c.close > c.open ? '（⚠️ 紅K仍收破5均 — 課程：比黑K跌破更弱）' : '';
       signals.push({
         type: 'BREAK_MA5',
         label: '跌破週線MA5',
-        detail: `收盤(${c.close}) 跌破 MA5(${ma5.toFixed(2)})，短線動能轉弱`,
+        detail: `收盤(${c.close}) 跌破 MA5(${ma5.toFixed(2)})，短線動能轉弱${redButBroke}`,
         severity: 'low',
       });
     }
@@ -546,6 +550,27 @@ export function detectSellSignals(
           severity: 'high',
         });
       }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // 課程 CH2-6/2-9（2026-07-05 漏網-2）：高檔「該漲不漲就是跌」
+  //   純價格動能停滯：連 3 根收盤都「沒過前一根最高、也沒破前一根最低」＝多方推不動。
+  //   高檔（isHighLevel）才報；帶量版另有 淘汰9/hasConsecBlowoffNoRise。
+  //   事件型：恰好湊滿 3 根當天報一次（第 4 根起不重複）。
+  // ════════════════════════════════════════════════════════════════
+  if (isHighLevel && index >= 4) {
+    const isStallBar = (i: number) =>
+      candles[i].close <= candles[i - 1].high && candles[i].close >= candles[i - 1].low;
+    const stall3 = isStallBar(index) && isStallBar(index - 1) && isStallBar(index - 2);
+    const wasStallYesterday = isStallBar(index - 1) && isStallBar(index - 2) && isStallBar(index - 3);
+    if (stall3 && !wasStallYesterday) {
+      signals.push({
+        type: 'PRICE_STALL_HIGH',
+        label: '高檔該漲不漲（動能停滯）',
+        detail: `連 3 根收盤未過前根最高也未破前根最低 — 課程 CH2：「該漲不漲就是跌」，高檔推不動要警覺，跌破 3 根中最低點 ${Math.min(candles[index].low, candles[index - 1].low, candles[index - 2].low).toFixed(2)} 先出`,
+        severity: 'medium',
+      });
     }
   }
 

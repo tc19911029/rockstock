@@ -102,7 +102,7 @@ export function PortfolioDailyActionPanel() {
       </div>
 
       <div className="px-3 py-1.5 text-[9px] text-muted-foreground/70 bg-secondary/30 border-t border-border">
-        💡 訊號依朱家泓寶典＋課程：跌破 MA5+漲≥10% → 減半｜跌破 MA10+漲≥10% → 全出｜跌破 MA20+漲≥20% → 全出｜爆量反轉+賺&gt;15% → 先賣1/2、次日下跌全出（CH9-3）｜當日跌&gt;5% 列警示股、套牢分級（CH10-1）。不是 financial advice。
+        💡 訊號依朱家泓寶典＋課程：跌破 MA5+漲≥10% → 減半｜跌破 MA10+漲≥10% → 全出｜跌破 MA20+漲≥20% → 全出｜賺&gt;20% 破 MA5 → 全出（CH8-4）｜爆量反轉+賺&gt;15% → 先賣1/2、次日下跌全出（CH9-3）｜當日跌&gt;5% 列警示股、套牢分級（CH10-1）。課程停損口徑=進場價 −5% 收盤確認（系統各軌 5/7/10% 為回測背書值）。不是 financial advice。
       </div>
     </div>
   );

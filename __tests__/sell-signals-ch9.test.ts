@@ -86,3 +86,31 @@ describe('HIGH_VOL_2DAY_LOW_BREAK — 課程 CH9-3(一)', () => {
     expect(sigs.some(s => s.type === 'HIGH_VOL_2DAY_LOW_BREAK')).toBe(false);
   });
 });
+
+// 漏網-2（2026-07-05）：高檔「該漲不漲」動能停滯
+describe('PRICE_STALL_HIGH — 課程 CH2「該漲不漲就是跌」', () => {
+  it('高檔連 3 根停滯 → 觸發一次（第 4 根不重複）', () => {
+    const bars: { close: number; volume?: number }[] = [];
+    for (let i = 0; i < 25; i++) bars.push({ close: 100 + i * 1.2 }); // 上升（高檔 ma5>ma20）
+    // 連 3 根停滯：收盤都在前根 high/low 之間（makeCandles high=max*1.005 low=min*0.995）
+    bars.push({ close: 128.9 });
+    bars.push({ close: 128.8 });
+    bars.push({ close: 128.9 });
+    const candles = computeIndicators(makeCandles(bars));
+    const sigs = detectSellSignals(candles, candles.length - 1);
+    expect(sigs.some(s => s.type === 'PRICE_STALL_HIGH')).toBe(true);
+    // 第 4 根停滯 → 不重複
+    bars.push({ close: 128.85 });
+    const candles2 = computeIndicators(makeCandles(bars));
+    const sigs2 = detectSellSignals(candles2, candles2.length - 1);
+    expect(sigs2.some(s => s.type === 'PRICE_STALL_HIGH')).toBe(false);
+  });
+
+  it('上漲推進中（收盤過前根高）→ 不觸發', () => {
+    const bars: { close: number; volume?: number }[] = [];
+    for (let i = 0; i < 28; i++) bars.push({ close: 100 + i * 1.2 });
+    const candles = computeIndicators(makeCandles(bars));
+    const sigs = detectSellSignals(candles, candles.length - 1);
+    expect(sigs.some(s => s.type === 'PRICE_STALL_HIGH')).toBe(false);
+  });
+});

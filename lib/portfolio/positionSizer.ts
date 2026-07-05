@@ -387,6 +387,15 @@ export function applyRiskGuards(args: {
     }
   }
 
+  // 課程 CH5-6 贏家策略②（2026-07-05 漏網-8，純提醒不 cap）：持股 2~5 檔、資金平均分配、
+  // 100 萬以下最多 2 檔或集中 1 檔。只出 warnings 文字，不改額度（檔數是人的決策）。
+  const openCount = req.existingHoldings.filter(h => h.currentValue > 0).length;
+  if (openCount >= 5) {
+    warnings.push(`課程 CH5-6：持股 2~5 檔為宜，目前已 ${openCount} 檔 — 再買會分散照顧不來，先想汰弱`);
+  } else if (req.totalCapital <= 1_000_000 && openCount >= 2) {
+    warnings.push(`課程 CH5-6：資金 100 萬以下最多 2 檔（或集中 1 檔），目前已 ${openCount} 檔`);
+  }
+
   // perPosition cap
   const perPositionCap = req.totalCapital * config.perPositionMaxPct;
   if (capital > perPositionCap) {

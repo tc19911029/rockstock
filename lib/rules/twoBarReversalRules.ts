@@ -423,6 +423,53 @@ export const bullishPiercingLow: TradingRule = {
   },
 };
 
+/**
+ * 長紅遭遇 / 一日封口（低檔版）— 課程 CH2-07「左長黑右長紅」6 組之第②組（漏網-1，2026-07-05）
+ *
+ * 紅K開低（跳空低於昨日黑K收盤）走高，收盤≈昨日黑K收盤、開盤向下缺口當天回補 → 止跌訊號。
+ * 對稱高檔 bearishEncounterHigh；低檔遭遇＋大量 = 有人進貨，加強止跌語意（仍 WATCH，
+ * 課程：低檔止跌要「次日開高收紅」確認反轉才做多）。
+ */
+export const bullishEncounterLow: TradingRule = {
+  id: 'zhu-bullish-encounter-low',
+  name: '長紅遭遇（低檔一日封口）',
+  description: '下跌到低檔，黑K後紅K開低走高，收盤回到昨日黑K收盤附近、向下缺口當天封住',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 5) return null;
+    const black = candles[index - 1];
+    const red = candles[index];
+
+    if (!isMedLongBlack(black)) return null;
+    if (!isRedCandle(red)) return null;
+    if (bodyPct(red) < 0.015) return null;
+    // 紅K開低：跳空低於昨日黑K收盤（黑K收盤=實體低點）
+    if (red.open >= black.close) return null;
+    const blackHalf = (black.open + black.close) / 2;
+    // 收盤≈昨日黑K收盤附近：站回實體下半（< blackHalf 之上不算，深入上半=旭日東升）
+    if (red.close >= blackHalf) return null;   // 深入實體一半以上＝旭日東升，交給 risingSun
+    if (red.close < black.low) return null;     // 收更低＝沒封口、續弱
+    if (red.close < black.close) return null;   // 至少收回昨收（封住向下缺口）
+    // 需在低檔
+    if (!isDowntrendWave(candles, index - 1, 8)) return null;
+
+    const isBlowoff = classifyVolume(candles, index).includes('blowoff');
+
+    return {
+      type: 'WATCH',
+      label: isBlowoff ? '長紅遭遇爆量（低檔有人進貨）' : '長紅遭遇（低檔一日封口）',
+      description: `紅K開低${red.open.toFixed(2)}走高收${red.close.toFixed(2)}，封住向下缺口${isBlowoff ? '＋爆大量（主力進貨跡象）' : ''}，止跌訊號`,
+      reason: [
+        '【朱家泓 課程 CH2-07 低檔變盤】長紅遭遇（一日封口）＝紅K開低走高、收盤回到昨日黑K收盤附近、向下缺口當天封住，是低檔止跌訊號。',
+        isBlowoff ? '低檔遭遇爆大量＝有人在買股票（主力進貨），止跌可信度升高。' : '',
+        '次日確認：開高＋收紅 → 止跌反轉確認；開低 → 止跌失敗、空方續跌。',
+        '這2根K線的最低點是重要支撐；跌破則止跌作廢。',
+      ].filter(Boolean).join('\n'),
+      ruleId: this.id,
+      subtype: 'warn',
+    };
+  },
+};
+
 export const TWO_BAR_REVERSAL_RULES: TradingRule[] = [
   darkCloudCover,
   bearishEngulfingHigh,
@@ -433,4 +480,5 @@ export const TWO_BAR_REVERSAL_RULES: TradingRule[] = [
   bullishEngulfingLow,
   bullishHaramiLow,
   bullishPiercingLow,
+  bullishEncounterLow,
 ];
