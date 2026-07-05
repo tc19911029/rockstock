@@ -218,6 +218,34 @@ export function detectShortExitSignals(
     }
   }
 
+  // 課程 CH1-6 第4點：「突破前高壓力＝頭頭高＝空頭趨勢改變 → 不宜再繼續做空」
+  // （CH1-3 出場標準：六字只要有改變就回補。底底高在上面第4條，這裡補另一半「頭頭高」。）
+  // 事件型觸發：今日為「首次收盤突破最近一個反彈高點」才報，之後不重複（鏡像多單側頭頭低出場的寫法）。
+  if (index >= 10) {
+    const recentHighs: { idx: number; price: number }[] = [];
+    for (let i = index - 1; i >= Math.max(1, index - 20) && recentHighs.length < 2; i--) {
+      const ci = candles[i];
+      if (ci.high > candles[i - 1].high && ci.high > candles[i + 1].high) {
+        recentHighs.push({ idx: i, price: ci.high });
+      }
+    }
+    if (recentHighs.length >= 1) {
+      const newerHigh = recentHighs[0];
+      let firstBreakIdx = -1;
+      for (let i = newerHigh.idx + 1; i <= index; i++) {
+        if (candles[i].close > newerHigh.price) { firstBreakIdx = i; break; }
+      }
+      if (firstBreakIdx === index) {
+        signals.push({
+          type: 'SHORT_BREAK_PREV_HIGH',
+          label: '過前高回補（頭頭高）',
+          detail: `收盤(${c.close.toFixed(1)})突破前反彈高點${newerHigh.price.toFixed(1)}＝頭頭高，空頭趨勢改變，不宜再空`,
+          severity: 'high',
+        });
+      }
+    }
+  }
+
   // 第7條：收盤從 MA5 之下突破上來 → 空單考慮回補（書本「獲利>10% + 突破MA5 出場」需 ctx.avgCost 才能精確判斷，這裡只發 MA5 結構訊號）
   if (c.ma5 != null && prev?.ma5 != null) {
     if (prev.close <= prev.ma5 && c.close > c.ma5) {
