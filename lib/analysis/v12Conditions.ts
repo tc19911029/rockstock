@@ -17,6 +17,7 @@
 import type { CandleWithIndicators } from '@/types';
 
 import { findPivots } from './trendAnalysis';
+import { ATTACK_VOL_RATIO_COURSE } from './bookThresholds';
 
 // ── 議題 51：⑥ 指標純書本（拿掉 OSC，只用 KD + MACD）────────────────────────
 
@@ -109,17 +110,18 @@ export interface VolumeLevelResult {
 /**
  * v12 議題 88：⑤ 量分等級
  *
- * - 一般攻擊量（normal）：1.3 ≤ ratio < 2
+ * - 一般攻擊量（normal）：門檻 ≤ ratio < 2
  * - 爆量（climax）：ratio ≥ 2
  *
- * 書本依據：寶典 p.55「攻擊量 ≥ 1.3 倍以上，**如有 2 倍以上的量，攻擊力道更強**」⭐
+ * 門檻依據：課程 CH1-5「量增 20% 以上」＝ ×1.2（2026-07-05 裁決課程口徑優先；寶典 p.55 原文 ×1.3）。
+ * 與六條件④ BASE_THRESHOLDS.volumeRatioMin 同值 — 之前這裡預設 1.3，themes 顯示層會跟掃描主閘門打架。
  *
- * coreScore 不影響（過 1.3 即過 ⑤）；爆量加分到 compositeScore（議題 102）。
+ * coreScore 不影響（過門檻即過 ⑤）；爆量加分到 compositeScore（議題 102）。
  */
 export function evaluateVolumeV12(
   candle: CandleWithIndicators,
   prev: CandleWithIndicators | null,
-  minRatio = 1.3,
+  minRatio = ATTACK_VOL_RATIO_COURSE,
 ): VolumeLevelResult {
   if (!prev || prev.volume === 0) {
     return { passed: false, ratio: null, detail: '前日量資料不足' };

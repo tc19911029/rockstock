@@ -1576,7 +1576,9 @@ export abstract class MarketScanner {
           let sixCondsResult: ReturnType<typeof evaluateSixConditions> | null = null;
           try {
             const { evaluateSixConditions } = await import('@/lib/analysis/trendAnalysis');
-            sixCondsResult = evaluateSixConditions(candles, lastIdx);
+            // 課程 CH1-5 裁決（2026-07-05）：④攻擊量=1.2。不帶 thresholds 會 fallback 書本 1.3，
+            // 與主閘門（上方 evaluateSixConditions(candles, lastIdx, thresholds)）自打架。
+            sixCondsResult = evaluateSixConditions(candles, lastIdx, BASE_THRESHOLDS);
             if (sixCondsResult.isCoreReady) matchedMethods.push('A');
           } catch { /* non-critical */ }
           // ── 多頭軌字母（過 Step 1 gate）─────────────────────────

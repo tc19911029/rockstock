@@ -42,16 +42,16 @@ describe('v12 合約測試 — 純書本數字（不可漂移）', () => {
     )).toBe(true);
   });
 
-  it('量比 ≥ 1.3 倍（寶典 p.55）', () => {
+  it('量比 ≥ 1.2 倍（課程 CH1-5「量增20%」，2026-07-05 裁決課程口徑優先於寶典 p.55 的 1.3）', () => {
     const result = evaluateVolumeV12(
-      { date: '', open: 100, high: 101, low: 99, close: 100, volume: 1300 },
+      { date: '', open: 100, high: 101, low: 99, close: 100, volume: 1200 },
       { date: '', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
     );
     expect(result.passed).toBe(true);
-    expect(result.ratio).toBe(1.3);
+    expect(result.ratio).toBe(1.2);
 
     const fail = evaluateVolumeV12(
-      { date: '', open: 100, high: 101, low: 99, close: 100, volume: 1290 },
+      { date: '', open: 100, high: 101, low: 99, close: 100, volume: 1190 },
       { date: '', open: 100, high: 101, low: 99, close: 100, volume: 1000 },
     );
     expect(fail.passed).toBe(false);

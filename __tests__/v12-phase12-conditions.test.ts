@@ -99,13 +99,20 @@ describe('v12 Phase 1.2 — evaluateVolumeV12（議題 88）', () => {
     expect(result.detail).toContain('爆量');
   });
 
-  it('量比 1.2× → 不過', () => {
-    const result = evaluateVolumeV12(
+  it('量比 1.2× → 過（課程 CH1-5「量增20%」門檻，2026-07-05 裁決）；1.1× → 不過', () => {
+    const pass = evaluateVolumeV12(
       mkCandle({ close: 100, volume: 1200 }),
       mkCandle({ close: 99, volume: 1000 }),
     );
-    expect(result.passed).toBe(false);
-    expect(result.level).toBeUndefined();
+    expect(pass.passed).toBe(true);
+    expect(pass.level).toBe('normal');
+
+    const fail = evaluateVolumeV12(
+      mkCandle({ close: 100, volume: 1100 }),
+      mkCandle({ close: 99, volume: 1000 }),
+    );
+    expect(fail.passed).toBe(false);
+    expect(fail.level).toBeUndefined();
   });
 
   it('前日量為 0（停牌）→ 不過（純書本不防呆）', () => {
