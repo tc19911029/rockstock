@@ -13,7 +13,9 @@
  *   5.  大幅上漲達 1 倍 AND 呈盤整趨勢           — ✅（2026-04-19 加「盤整」前置）
  *   6.  遇壓力大量長黑                           — ✅
  *   7.  趨勢頭頭低 AND MACD/KD 背離              — ✅（2026-04-19 加「頭頭低」前置）
- *   8.  三大法人連續賣超                         — ⚠️ 用大量黑K代理（無法人資料）
+ *   8.  三大法人連續賣超                         — ✅ 2026-07-05 復活於避雷標示層
+ *       （lib/avoidance/chipAvoidSignals ④⑤，backtest-r8-inst-sell-streak 過關；
+ *         不進本檔硬排除：inst 資料本機 lazy-fetch 無 Blob，Vercel 掃描讀不到會破 scan-parity）
  *   9.  頻頻爆大量股價不漲                       — ✅
  *   10. 看不懂的股票（長期盤整均線糾結代理）     — ⚠️ 代理實作
  *   11. 有基本面、沒有技術面                     — ❌ 未實作（rockstock 無基本面資料源）
@@ -227,7 +229,7 @@ const ELIMINATION_RULES = [
   rule09_highVolNoRise,
   rule12_baseUnderPressure,
   // 2026-04-20 用戶決議移除以下三條：
-  // R8 法人連續賣超 — rockstock 無法人資料，代理指標（大量黑K）不精確
+  // R8 法人連續賣超 — 當年無法人資料（2026-07-05 已復活於 lib/avoidance/chipAvoidSignals ④⑤ 避雷標示層）
   // R10 看不懂（長期盤整）— 30/8%/2% 完全自創
   // R11 基本面好沒技術面 — 基本面判定超出系統範圍
 ];

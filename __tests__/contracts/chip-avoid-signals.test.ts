@@ -27,6 +27,7 @@ describe('籌碼避雷 — 門檻凍結', () => {
     expect(CHIP_AVOID_PARAMS.fakeConcMin).toBe(3);
     expect(CHIP_AVOID_PARAMS.blackKpct).toBe(-3);
     expect(CHIP_AVOID_PARAMS.volSpikeX).toBe(2);
+    expect(CHIP_AVOID_PARAMS.instSellStreakMin).toBe(3); // 書本 R8；回測 ≥3 兩段皆負
   });
 });
 
@@ -124,5 +125,53 @@ describe('籌碼避雷 — ④ 高檔法人連賣（課程淘汰法13 / R8，bac
     const inst = new Map(candles.map((c, i) => [c.date, i >= 68 ? -50 : 100]));
     const r = computeChipAvoidSignals({ price: 140, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
     expect(r.flags.some(f => f.key === 'inst_sell_streak_high')).toBe(false);
+  });
+
+  function seqCandles(n: number, close = 100): AvoidCandle[] {
+    // 平盤序列，日期用序號保證唯一
+    return Array.from({ length: n }, (_, i) => ({
+      date: `2026-${String(Math.floor(i / 28) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`,
+      open: close, high: close, low: close, close, volume: 1000,
+    }));
+  }
+
+  describe('⑤ 法人連賣（書本 R8 原文版，backtest-r8-inst-sell-streak 驗證）', () => {
+    it('非高檔 + 連賣 3 天 → 報 ⑤（不報 ④）', () => {
+      const candles = seqCandles(70);
+      const inst = new Map(candles.map((c, i) => [c.date, i >= 67 ? -50 : 100]));
+      const r = computeChipAvoidSignals({ price: 100, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
+      expect(r.flags.some(f => f.key === 'inst_sell_streak')).toBe(true);
+      expect(r.flags.some(f => f.key === 'inst_sell_streak_high')).toBe(false);
+      expect(r.flags.find(f => f.key === 'inst_sell_streak')!.detail).toContain('3 天');
+    });
+
+    it('高檔連賣 → 只報 ④、⑤ 不疊報', () => {
+      const candles = risingCandles(70);
+      const inst = new Map(candles.map((c, i) => [c.date, i >= 67 ? -50 : 100]));
+      const r = computeChipAvoidSignals({ price: 140, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
+      expect(r.flags.some(f => f.key === 'inst_sell_streak_high')).toBe(true);
+      expect(r.flags.some(f => f.key === 'inst_sell_streak')).toBe(false);
+    });
+
+    it('連賣 2 天 → 不報（門檻 instSellStreakMin=3）', () => {
+      const candles = seqCandles(70);
+      const inst = new Map(candles.map((c, i) => [c.date, i >= 68 ? -50 : 100]));
+      const r = computeChipAvoidSignals({ price: 100, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
+      expect(r.flags.some(f => f.key === 'inst_sell_streak')).toBe(false);
+    });
+
+    it('法人資料缺 → 不報（fail-open，缺資料不當有雷）', () => {
+      const candles = seqCandles(70);
+      const r = computeChipAvoidSignals({ price: 100, candles, holderRows: [], brokerByDate: new Map(), instByDate: new Map() });
+      expect(r.flags.some(f => f.key === 'inst_sell_streak')).toBe(false);
+    });
+
+    it('中途一天買超斷鏈 → 從斷點重算（最後 2 天賣不達 3）', () => {
+      const candles = seqCandles(70);
+      const inst = new Map(candles.map((c, i) => [c.date, i >= 65 ? (i === 67 ? 50 : -50) : 100]));
+      // 65,66 賣、67 買（斷）、68,69 賣 → streak=2 → 不報
+      const r = computeChipAvoidSignals({ price: 100, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
+      expect(r.flags.some(f => f.key === 'inst_sell_streak')).toBe(false);
+    });
   });
 });
