@@ -70,7 +70,10 @@ export function computeTurningWave(
     const ma = getMA(c);
     if (ma == null) continue;
 
-    const currentAbove = c.close > ma;
+    // 課程 CH1-1：收盤價與均線「一模一樣」不算突破/跌破，沿用前一段狀態、等明天確認
+    // （findPivots 2026-07-05 已按同判準修過；此處同步，否則平盤日會被當跌破提前一天出轉折點）
+    const currentAbove: boolean | null = c.close > ma ? true : c.close < ma ? false : aboveMA;
+    if (currentAbove === null) continue; // 首根就收在均線上（平盤）→ 無法定位，等下一根
 
     // 初始化
     if (aboveMA === null) {
