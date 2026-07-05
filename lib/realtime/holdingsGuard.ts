@@ -21,7 +21,7 @@ import type { MonitoredHoldingInfo, MonitoredSymbol } from './monitorPool';
 import { HOLDINGS_GUARD, type GuardScope } from '@/lib/config';
 import { DEFAULT_STOP_LOSS_MULT } from '@/lib/agents/holdingsActionEngine';
 
-export type GuardRuleId = 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop' | 'reversal-open-low' | 'gap-open-buffer';
+export type GuardRuleId = 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop' | 'reversal-open-low' | 'gap-open-buffer' | 'key-level-breakout';
 
 export interface GuardQuote {
   /** 最新成交價 */
@@ -39,6 +39,8 @@ export interface GuardContext {
   isHolding: boolean;
   /** 從 monitorPool 透傳（source='holding' 才有） */
   holding?: MonitoredHoldingInfo;
+  /** 從 monitorPool 透傳（source='lockroster' 才有）— 規則7 越關鍵價提醒（批次E） */
+  lockTrigger?: MonitoredSymbol['lockTrigger'];
 }
 
 export interface GuardSignal {
@@ -77,6 +79,10 @@ export interface GuardSignal {
     yClose?: number;
     /** 規則5/6：目前開低幅度 % */
     openLowPct?: number;
+    /** 規則7：鎖股關鍵價 / 分類 / 在等什麼（批次E） */
+    keyLevel?: number;
+    keyLabel?: string;
+    waitingFor?: string;
   };
   caveat: 'minute-inference';
   isHolding: boolean;
@@ -248,6 +254,27 @@ export function detectGuardSignals(
         openLowPct: round2(openLow * 100),
       }));
     }
+  }
+
+  // ── 規則7（2026-07-05 批次E，漏網-12 v1）：鎖股盤中越過關鍵價 ─────────────────
+  // 課程 CH5-6 鎖股「在等什麼」的關鍵價（頸線/區間高/切線/黑K高）盤中被越過 →
+  // 即時提醒（不是叫你開盤追：課程紀律 13:20 看、13:25 掛市價；開高 ≥5% 禁追）。
+  // 條件：昨收還在關鍵價下（今天才越過）+ 暖機後（避開競價噪音）。day dedup 一天一次。
+  if (
+    quote && quote.price > 0 && !cnAuction && warmedUp
+    && ctx.lockTrigger != null && ctx.lockTrigger.level > 0
+    && quote.price >= ctx.lockTrigger.level
+    && quote.prevClose != null && quote.prevClose < ctx.lockTrigger.level
+    && scopeAllows(HOLDINGS_GUARD.SCOPE.KEY_LEVEL_BREAKOUT, ctx)
+  ) {
+    signals.push(makeSignal('key-level-breakout', ctx, now, {
+      price: quote.price,
+      prevClose: quote.prevClose,
+      name: ctx.lockTrigger.name,
+      keyLevel: ctx.lockTrigger.level,
+      keyLabel: ctx.lockTrigger.label,
+      waitingFor: ctx.lockTrigger.waitingFor,
+    }));
   }
 
   return signals;

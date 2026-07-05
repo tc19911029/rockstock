@@ -154,6 +154,8 @@ export const HOLDINGS_GUARD = {
     REVERSAL_OPEN: 'holding' as GuardScope,
     /** 規則6（2026-07-05 直播 QA③）：大跌開低「禁開盤殺單」緩衝提示 */
     GAP_OPEN_BUFFER: 'holding' as GuardScope,
+    /** 規則7（2026-07-05 批次E）：鎖股名單盤中越關鍵價提醒（lockroster 項本來就非持倉 → 'all'） */
+    KEY_LEVEL_BREAKOUT: 'all' as GuardScope,
   },
   /** 規則2：當日曾漲幅門檻（dayHigh vs 昨收）— 4% 高於多數個股日常振幅 */
   PUMP_MIN_GAIN_PCT: 0.04,

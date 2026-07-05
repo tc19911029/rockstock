@@ -47,10 +47,15 @@ export interface MonitoredHoldingInfo {
 export interface MonitoredSymbol {
   symbol: string;        // 帶 suffix：3661.TW / 603986.SS
   market: 'TW' | 'CN';
-  source: 'holding' | 'manual' | 'watchlist' | 'scan';
+  source: 'holding' | 'manual' | 'watchlist' | 'scan' | 'lockroster';
   isHolding: boolean;
   /** 只有 source='holding' 才帶（guard 規則1 停損判斷用） */
   holding?: MonitoredHoldingInfo;
+  /**
+   * 鎖股關鍵價（批次E 2026-07-05，漏網-12 v1）：source='lockroster' 才帶。
+   * 盤中價越過 level → guard 規則7 推「越關鍵價」提醒（課程紀律：13:20 確認、13:25 掛，勿開盤追）。
+   */
+  lockTrigger?: { level: number; label: string; waitingFor: string; name: string };
 }
 
 export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
@@ -76,6 +81,19 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
     seen.add(x.symbol);
   }
 
+  // 鎖股名單（批次E 2026-07-05）：有關鍵觸發價的鎖股進監控池（≤15 檔，優先級高於 scan 候選）
+  // 課程 CH5-6：鎖股就是在「等發動」— 盤中越過關鍵價要即時知道，不是等收盤。
+  const lockEntries = await readLockRosterTriggers();
+  for (const e of lockEntries) {
+    if (seen.has(e.symbol)) continue;
+    if (out.length >= REALTIME_RULES.POOL_HARD_CAP) break;
+    out.push({
+      symbol: e.symbol, market: e.market, source: 'lockroster', isHolding: false,
+      lockTrigger: e.lockTrigger,
+    });
+    seen.add(e.symbol);
+  }
+
   for (const market of ['TW', 'CN'] as const) {
     if (out.length >= REALTIME_RULES.POOL_HARD_CAP) break;
     const candidates = await readPoolCandidates(market);
@@ -91,6 +109,31 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
   }
 
   return out;
+}
+
+/** 鎖股名單 → 監控項（只收有 triggerLevel 的；roster 本身 ≤15 檔） */
+async function readLockRosterTriggers(): Promise<Array<{
+  symbol: string; market: 'TW' | 'CN';
+  lockTrigger: NonNullable<MonitoredSymbol['lockTrigger']>;
+}>> {
+  try {
+    const { loadLockRoster } = await import('@/lib/storage/lockRosterStorage');
+    const roster = await loadLockRoster('TW');
+    return (roster?.entries ?? [])
+      .filter(e => e.triggerLevel != null && e.triggerLevel > 0)
+      .map(e => ({
+        symbol: e.symbol,
+        market: e.market,
+        lockTrigger: {
+          level: e.triggerLevel!,
+          label: e.label,
+          waitingFor: e.waitingFor,
+          name: e.name,
+        },
+      }));
+  } catch {
+    return [];
+  }
 }
 
 // ── 漏網-3：昨日高檔轉折/變盤訊號（課程 CH2-6/2-9「次日開盤定強弱」）───────────

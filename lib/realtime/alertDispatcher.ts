@@ -27,6 +27,7 @@ export type AlertSignal = Signal | GuardSignal;
 
 const GUARD_RULES: ReadonlySet<string> = new Set<GuardRuleId>([
   'stop-loss-breach', 'pump-reversal', 'rapid-drop', 'reversal-open-low', 'gap-open-buffer',
+  'key-level-breakout',
 ]);
 
 function isGuardSignal(sig: AlertSignal): sig is GuardSignal {
@@ -65,7 +66,7 @@ export interface AlertRecord {
   /** level 型規則（同日同檔同規則一次）；缺省 = bar 型（向下相容舊 jsonl） */
   dedupScope?: 'day';
   /** 監控池來源 */
-  source?: 'holding' | 'manual' | 'watchlist' | 'scan';
+  source?: 'holding' | 'manual' | 'watchlist' | 'scan' | 'lockroster';
   /** ntfy 推送結果 */
   notified: boolean;
   notifyError?: string;
@@ -101,6 +102,7 @@ export function decideNotify(sig: AlertSignal): boolean {
       : sig.rule === 'pump-reversal' ? HOLDINGS_GUARD.SCOPE.PUMP_REVERSAL
       : sig.rule === 'reversal-open-low' ? HOLDINGS_GUARD.SCOPE.REVERSAL_OPEN
       : sig.rule === 'gap-open-buffer' ? HOLDINGS_GUARD.SCOPE.GAP_OPEN_BUFFER
+      : sig.rule === 'key-level-breakout' ? HOLDINGS_GUARD.SCOPE.KEY_LEVEL_BREAKOUT
       : HOLDINGS_GUARD.SCOPE.RAPID_DROP;
     return scopeAllows(scope, sig);
   }
@@ -217,6 +219,7 @@ const RULE_LABELS: Record<AlertRuleId, string> = {
   'rapid-drop': '急殺',
   'reversal-open-low': '變盤開低確認',
   'gap-open-buffer': '大跌開低緩衝',
+  'key-level-breakout': '鎖股越關鍵價',
 };
 
 const RULE_TAGS: Record<AlertRuleId, string[]> = {
@@ -229,6 +232,7 @@ const RULE_TAGS: Record<AlertRuleId, string[]> = {
   'rapid-drop': ['chart_with_downwards_trend', 'warning'],
   'reversal-open-low': ['eyes', 'warning'],
   'gap-open-buffer': ['fire_extinguisher', 'warning'],
+  'key-level-breakout': ['key', 'chart_with_upwards_trend'],
 };
 
 /** 持倉保命訊號的推播文案（規則1 priority 5，其餘 4） */
@@ -262,6 +266,12 @@ function formatGuardPayload(sig: GuardSignal): {
     priority = 4;
     lines.push(`昨收 ${m.prevClose} → 現價 ${m.price}（開低 -${m.openLowPct}%）`);
     lines.push('課程紀律：大跌開低別開盤市價殺單（常成交在最差價）。先看開盤 30 分鐘，13:20 再按規則處理（含停損執行）。');
+  } else if (sig.rule === 'key-level-breakout') {
+    title = `🔑 ${code} 鎖股越關鍵價（${m.keyLabel ?? '發動'}）`;
+    priority = 4;
+    lines.push(`現價 ${m.price} 越過關鍵價 ${m.keyLevel}（昨收 ${m.prevClose} 還在下方）`);
+    if (m.waitingFor) lines.push(`在等：${m.waitingFor}`);
+    lines.push('課程紀律：13:20 看確認、13:25 掛市價 — 勿盤中追高；開高 ≥5% 禁追、收盤跌回關鍵價下=假突破不做。');
   } else {
     title = `⚠ ${code} 急殺（持倉保命）`;
     priority = 4;

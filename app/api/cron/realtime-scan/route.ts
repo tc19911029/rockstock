@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
         ? { price: q.close, dayHigh: q.high, prevClose: q.prevClose }
         : null,
       bars1m,
-      { ...ctx, holding: item.holding },
+      { ...ctx, holding: item.holding, lockTrigger: item.lockTrigger },
     );
     guardSignalCount += guardSignals.length;
     allSignals.push(...guardSignals);

@@ -92,3 +92,43 @@ describe('規則6 gap-open-buffer — 大跌開低「禁開盤殺單」緩衝提
     expect(sigs.some(s => s.rule === 'stop-loss-breach')).toBe(true);
   });
 });
+
+describe('規則7 key-level-breakout — 鎖股盤中越關鍵價（批次E 2026-07-05）', () => {
+  const lockCtx = {
+    symbol: '6829.TWO', market: 'TW' as const, source: 'lockroster' as const, isHolding: false,
+    lockTrigger: { level: 241, label: '等型態', waitingFor: '大量中長紅K收盤突破頸線 241.00', name: '千附精密' },
+  };
+  // TW 開盤後 40 分鐘（09:40 CST，過暖機窗）
+  const openPlus40 = new Date('2026-07-06T01:40:00Z').getTime();
+
+  it('昨收在關鍵價下、盤中越過 → 觸發（day dedup 型）', () => {
+    const sigs = detectGuardSignals({ price: 242.5, prevClose: 236 }, [], lockCtx, openPlus40);
+    const hit = sigs.find(s => s.rule === 'key-level-breakout');
+    expect(hit).toBeDefined();
+    expect(hit!.dedupScope).toBe('day');
+    expect(hit!.meta.keyLevel).toBe(241);
+    expect(hit!.meta.name).toBe('千附精密');
+  });
+
+  it('還沒越過關鍵價 → 不觸發', () => {
+    const sigs = detectGuardSignals({ price: 239, prevClose: 236 }, [], lockCtx, openPlus40);
+    expect(sigs.some(s => s.rule === 'key-level-breakout')).toBe(false);
+  });
+
+  it('昨收已在關鍵價上（早突破過）→ 不觸發（避免天天重報）', () => {
+    const sigs = detectGuardSignals({ price: 245, prevClose: 243 }, [], lockCtx, openPlus40);
+    expect(sigs.some(s => s.rule === 'key-level-breakout')).toBe(false);
+  });
+
+  it('開盤暖機窗內 → 不觸發（避開競價噪音）', () => {
+    const openPlus2 = new Date('2026-07-06T01:02:00Z').getTime();
+    const sigs = detectGuardSignals({ price: 242.5, prevClose: 236 }, [], lockCtx, openPlus2);
+    expect(sigs.some(s => s.rule === 'key-level-breakout')).toBe(false);
+  });
+
+  it('非 lockroster 項（無 lockTrigger）→ 不觸發', () => {
+    const ctx = { symbol: '2330.TW', market: 'TW' as const, source: 'scan' as const, isHolding: false };
+    const sigs = detectGuardSignals({ price: 242.5, prevClose: 236 }, [], ctx, openPlus40);
+    expect(sigs.some(s => s.rule === 'key-level-breakout')).toBe(false);
+  });
+});
