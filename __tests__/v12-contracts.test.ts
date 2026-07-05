@@ -275,6 +275,14 @@ describe('v12 合約測試 — 規格漂移防護（鎖 buyMethodTracks 單一�
       ...tracks.BULLISH_TRACK_LETTERS, ...tracks.REVERSAL_TRACK_LETTERS, ...tracks.SYSTEM_TRACK_LETTERS];
     expect(bookLetters.length).toBe(14);
   });
+
+  it('逆勢搶反彈集合 = D/F/N/O，J 永不在內（掃描軌道≠操作性質）', () => {
+    // 書本 CH7-1/CH7-3 逆勢交易「翻黑就走」只適用抓底/搶反彈；
+    // J（ABC 突破）是順勢修正再攻（守 MA20/C 底），收黑 K 就趕出場會誤殺正常回檔。
+    expect([...tracks.COUNTER_TREND_SET].sort()).toEqual(['D', 'F', 'N', 'O']);
+    expect(tracks.COUNTER_TREND_SET.has('J')).toBe(false);
+    expect(tracks.COUNTER_TREND_SET.has(tracks.normalizeLetter('G'))).toBe(false); // 舊 G=J
+  });
 });
 
 // ── Phase 0.3 schemaVersion 鎖定 ─────────────────────────────────────────

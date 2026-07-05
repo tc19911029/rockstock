@@ -3,7 +3,7 @@ import { computeEntryState, type EntryGateThresholds } from './entryGate';
 import { ABSOLUTE_STOP_LOSS_PCT, ABSOLUTE_STOP_LOSS_PRICE_MULT } from '@/lib/sell/v12StopLoss';
 import { LOSS_WATCH_PCT, PROFIT_HIGH_TIER_PCT, DAY_DROP_WATCH_PCT, PROFIT_PARTIAL_TP_PCT } from '@/lib/analysis/bookThresholds';
 import { buildTrappedSignals } from '@/lib/portfolio/trappedTier';
-import { trackOf } from '@/lib/scanner/buyMethodTracks';
+import { COUNTER_TREND_SET, normalizeLetter } from '@/lib/scanner/buyMethodTracks';
 import { computeIndicators } from '@/lib/indicators';
 import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
 
@@ -175,7 +175,9 @@ const CH9_KIND_LABEL_ENGINE: Record<'engulf' | 'upper-shadow' | 'long-black', st
  * 翻黑/趨勢轉空立刻走」。大趨勢還是空頭，搶的是反彈，一旦反彈失敗（當日收黑K）或
  * 趨勢確認轉空（收盤跌破 MA20 操作線）就出，不等固定停損價。
  *
- * 只在 trackOf(letter) === 'reversal' 時觸發；其他軌（順勢多頭/戰法/機械…）不受影響。
+ * 只在 COUNTER_TREND_SET（D/F/N/O 真逆勢搶反彈）時觸發；其他軌（順勢多頭/戰法/機械…）不受影響。
+ * ⚠ 不可用 trackOf === 'reversal'：J（ABC 突破）2026-07-05 移反轉軌只是掃描不過 Step 1，
+ *   操作性質是順勢修正再攻（守 MA20/C 底），收根黑 K 就趕出場會誤殺正常回檔。
  * 回 null 表示「非逆勢部位」或「逆勢但反彈仍健康」→ 繼續走一般順勢出場邏輯。
  */
 function detectReversalTurnBlack(
@@ -184,7 +186,7 @@ function detectReversalTurnBlack(
   ma20: number | null,
 ): { type: string; label: string; detail: string } | null {
   if (!triggerSignal) return null;
-  if (trackOf(triggerSignal) !== 'reversal') return null;
+  if (!COUNTER_TREND_SET.has(normalizeLetter(triggerSignal))) return null;
 
   const isBlack = todayCandle.close < todayCandle.open;
   const brokeMa20 = ma20 != null && todayCandle.close < ma20;

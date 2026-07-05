@@ -162,8 +162,8 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
         {/* 4 區塊策略選擇（書本五步法分層）— 只在做多時顯示
             ┌─ Step 1 池子 ─ A
-            ├─ Step 2 多頭進場 ─ B/C/E/J/K/L/M/P（從 Step 1 挑）
-            ├─ 反轉訊號 ─ D/F/N/O（不過 Step 1）
+            ├─ Step 2 多頭進場 ─ B/C/E/K/L/M/P（從 Step 1 挑）
+            ├─ 反轉訊號 ─ D/F/J/N/O（不過 Step 1；J=ABC 突破 2026-07-05 移入，突破日天生短空）
             └─ 戰法軌 ─ Q（自含 SOP，套戒律）
         */}
         {scanDirection === 'long' && (() => {
@@ -175,7 +175,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
             D: { name: LETTER_NAMES.D, track: '轉折軌', ma: 'MA20' },
             E: { name: LETTER_NAMES.E, track: '多頭軌', ma: 'MA10' },
             F: { name: LETTER_NAMES.F, track: '轉折軌', ma: 'MA3' },
-            J: { name: LETTER_NAMES.J, track: '多頭軌', ma: 'MA20' },
+            J: { name: LETTER_NAMES.J, track: '轉折軌', ma: 'MA20' },
             K: { name: LETTER_NAMES.K, track: '多頭軌', ma: 'MA10' },
             L: { name: LETTER_NAMES.L, track: '多頭軌', ma: 'MA10' },
             M: { name: LETTER_NAMES.M, track: '多頭軌', ma: 'MA10' },
@@ -199,11 +199,11 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
             const isInstDip = INSTDIP_TRACK_SET.has(method);
             const isInstSteal = INSTSTEAL_TRACK_SET.has(method);
             const tooltip = method === 'A'
-              ? `A · ${m.name}（書本五步法 Step 1 預選池：六條件 + 戒律 + 淘汰法）。多頭軌字母 B/C/E/J/K/L/M/P 都從這個池子挑進場時機。`
+              ? `A · ${m.name}（書本五步法 Step 1 預選池：六條件 + 戒律 + 淘汰法）。多頭軌字母 B/C/E/K/L/M/P 都從這個池子挑進場時機。`
               : isBullish
                 ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n✓ 從 Step 1 池子篩選（結果為 A 子集；若池子被重新生成過，舊 session 不會 retro-filter）`
                 : isReversal
-                  ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚠ 全市場掃 — 不過 Step 1（書本：抓底/反轉就不能先過六條件，過了就抓不到底）`
+                  ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚠ 全市場掃 — 不過 Step 1（抓底/反轉先過六條件就抓不到底；ABC 突破日天生短空也過不了六條件）`
                   : isSystem
                     ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚠ 全市場掃 — 自含 SOP（過戒律但不過 Step 1）`
                     : isMechanical
@@ -247,9 +247,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               {/* Step 2：多頭進場（從 Step 1 池子挑）*/}
               <div className="space-y-0.5">
                 <div className="text-[9px] text-muted-foreground/70 px-0.5"
-                  title="多頭軌字母（B/C/E/J/K/L/M/P）只從 Step 1 池子裡挑；結果必為 A 子集">
+                  title="多頭軌字母（B/C/E/K/L/M/P）只從 Step 1 池子裡挑；結果必為 A 子集（ABC 突破在反轉訊號列 — 突破日天生短空過不了六條件）">
                   <span className="font-bold text-red-300/80">Step 2 多頭進場</span>
-                  <span className="ml-1.5">✓ 從 Step 1 池子挑進場時機 · 書本 8 種多頭位置</span>
+                  <span className="ml-1.5">✓ 從 Step 1 池子挑進場時機 · 書本多頭位置</span>
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
                   {BULLISH_TRACK_LETTERS.map(m =>
@@ -261,9 +261,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               {/* 反轉訊號（不過 Step 1，全市場掃）*/}
               <div className="space-y-0.5">
                 <div className="text-[9px] text-muted-foreground/70 px-0.5"
-                  title="反轉軌（跳空抓底 / V 反轉 / 型態確認 / 打底完成）全市場掃，不過 Step 1；結果可能不在六條件池子裡，這是書本要求（抓底就不能先過六條件）">
+                  title="反轉軌（跳空抓底 / V 反轉 / ABC 突破 / 型態確認 / 打底完成）全市場掃，不過 Step 1；結果可能不在六條件池子裡（抓底不能先過六條件；ABC 突破日天生短空也過不了）。注意：ABC 突破操作上仍是順勢進場（守 MA20/C 底），不套「翻黑就走」逆勢出場">
                   <span className="font-bold text-blue-300/80">反轉訊號</span>
-                  <span className="ml-1.5">⚠ 全市場抓底 / 反轉 · 不過六條件（過了就抓不到底）</span>
+                  <span className="ml-1.5">⚠ 全市場掃 · 不過六條件（抓底/反轉 + ABC 突破）</span>
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
                   {REVERSAL_TRACK_LETTERS.map(m =>

@@ -67,6 +67,16 @@ export function normalizeMatchedMethods(matched: readonly string[]): string[] {
 /** 反轉軌字母（書本「抓底/反轉」型態；J=ABC 突破 2026-07-05 自多頭軌移入，突破日結構天生短空）*/
 export const REVERSAL_TRACK_LETTERS = ['D', 'F', 'J', 'N', 'O'] as const;
 
+/**
+ * 逆勢搶反彈字母（書本 CH7-1/CH7-3「逆勢交易」：抓底/搶反彈 — 不對立刻跑、
+ * 翻黑/跌破 MA20 立即出，不拘泥停損價）。給持倉出場引擎判定「逆勢部位」用。
+ *
+ * ⚠ 刻意不等於 REVERSAL_TRACK_LETTERS：J（ABC 突破）掛反轉軌只是「掃描不過 Step 1」
+ * （突破日結構天生短空、六條件過不了），操作性質仍是多頭修正再攻的**順勢**進場
+ * （操作線 MA20、停損守 C 底），不適用「翻黑就走」逆勢出場。
+ */
+export const COUNTER_TREND_SET: ReadonlySet<string> = new Set(['D', 'F', 'N', 'O']);
+
 /** 戰法軌字母（朱家泓網路課程「三條均線戰法 MA3+10+24」）*/
 export const SYSTEM_TRACK_LETTERS = ['Q'] as const;
 
