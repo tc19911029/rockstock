@@ -3,6 +3,7 @@ import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { CN_STOCKS } from '@/lib/scanner/cnStocks';
 import { computeSanSeChart } from '@/lib/cn-sanse/indicators';
 import { evalConditions } from '@/lib/cn-sanse/conditions';
+import { computeCatchCrossTrigger } from '@/lib/cn-sanse/crossTrigger';
 import { fetchDayExtrasCached } from '@/lib/cn-sanse/cnDayExtras';
 import { fetchQuote, buildTodayBarFromQuote } from '@/lib/cn-sanse/cnQuote';
 import { getLimitMovePct } from '@/lib/utils/limitRules';
@@ -168,6 +169,7 @@ export async function GET(
       quote, // 即時報價列（量比/換手/市盈/總額/總值…）；非交易時段為 null
       scores: chart.scores,
       conditions: evalConditions(candles, indexClose, undefined, limitPct), // 三色條件報告（給中間條件面板）
+      catchTrigger: computeCatchCrossTrigger(candles, limitPct), // 捕撈金叉/死叉觸發價（訊號面板價位預告）
 
       chart: {
         candles: tail(chart.candles),

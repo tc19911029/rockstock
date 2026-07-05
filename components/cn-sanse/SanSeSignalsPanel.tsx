@@ -5,6 +5,7 @@
 
 import { cn } from '@/lib/utils';
 import { STAGE_LABEL, STAGE_ICON, COMBO_LABEL, COMBO_HINT, tradeVerdict, type ConditionReport, type GroupReport, type CondGroup, type TradeVerdict } from '@/lib/cn-sanse/conditions';
+import type { CatchCrossTrigger } from '@/lib/cn-sanse/crossTrigger';
 import { HeavinessBadge, HeavinessBadgeFor } from '@/components/shared/HeavinessBadge';
 import { lookupSellHeaviness, SELL_HEAVINESS_WINDOW } from '@/lib/analysis/sellHeavinessTable';
 import { SanSeSopCard } from './SanSeSopCard';
@@ -45,7 +46,25 @@ function comboAction(r: ConditionReport): string {
   return s;
 }
 
-export function SanSeSignalsPanel({ report, market }: { report: ConditionReport | null; market?: 'TW' | 'CN' | 'other' }) {
+/** 捕撈金叉/死叉「觸發價」一句話（先講價位、再講意義；短句白話）。 */
+function catchTriggerText(t: CatchCrossTrigger): { head: string; body: string } {
+  const fmt = (p: number) => p.toFixed(2);
+  const pct = t.pctFromClose != null ? `（離現價 ${t.pctFromClose > 0 ? '+' : ''}${t.pctFromClose.toFixed(1)}%）` : '';
+  if (t.side === 'gold') {
+    const zone = t.zone === 'bull' ? '多頭區金叉（趨勢延續）' : '空頭區金叉（底部反彈・回測勝率較高）';
+    if (!t.reachable) return { head: '捕撈金叉價', body: '今天就算漲停也到不了 → 金叉最快明天再看。' };
+    if (t.always) return { head: '捕撈金叉', body: '今天怎麼收都會金叉（收跌停也一樣）。' };
+    if (t.crossedNow) return { head: `捕撈金叉價 ${fmt(t.price!)}`, body: `現價已站上。今天收盤守住這個價 → ${zone}；跌回去金叉就沒了。` };
+    return { head: `捕撈金叉價 ${fmt(t.price!)}`, body: `今天收盤漲到這裡以上 → ${zone}${pct}。` };
+  }
+  const zone = t.zone === 'bull' ? '多頭區死叉（短期見頂）' : '空頭區死叉（下跌加速）';
+  if (!t.reachable) return { head: '捕撈死叉價', body: '今天就算跌停也不會死叉 → 短線動能還安全。' };
+  if (t.always) return { head: '捕撈死叉', body: '今天怎麼收都會死叉（收漲停也一樣）。' };
+  if (t.crossedNow) return { head: `捕撈死叉價 ${fmt(t.price!)}`, body: `現價已跌破。今天收盤站不回去 → ${zone}；站回去死叉就解除。` };
+  return { head: `捕撈死叉價 ${fmt(t.price!)}`, body: `今天收盤跌破這裡 → ${zone}${pct}。` };
+}
+
+export function SanSeSignalsPanel({ report, market, catchTrigger }: { report: ConditionReport | null; market?: 'TW' | 'CN' | 'other'; catchTrigger?: CatchCrossTrigger | null }) {
   if (!report) return <div className="p-3 text-[11px] text-muted-foreground">載入三色訊號…（或此檔資料不足）</div>;
   const r = report;
   const buys: { g: string; label: string }[] = [];
@@ -80,6 +99,18 @@ export function SanSeSignalsPanel({ report, market }: { report: ConditionReport 
         <div className="text-[11px] mt-1 leading-snug">{v.reason}</div>
         {r.combo && <div className="text-[10px] mt-1.5 opacity-75">評級：{COMBO_LABEL[r.combo.grade]}{r.combo.bottomReversal ? '·底部反彈' : ''}｜{COMBO_HINT[r.combo.grade]}</div>}
       </div>
+
+      {/* 捕撈金叉/死叉觸發價預告 — 「今天收盤到多少錢會金叉/死叉」 */}
+      {catchTrigger && (() => {
+        const t = catchTriggerText(catchTrigger);
+        const isGold = catchTrigger.side === 'gold';
+        return (
+          <div className={cn('rounded-md border p-2', isGold ? 'border-rose-500/30 bg-rose-500/5' : 'border-emerald-500/30 bg-emerald-500/5')}>
+            <div className={cn('font-medium text-[11px]', isGold ? 'text-rose-300' : 'text-emerald-300')}>📐 {t.head}</div>
+            <div className="text-[11px] mt-0.5 leading-snug text-foreground/90">{t.body}</div>
+          </div>
+        );
+      })()}
 
       <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-2">
         <div className="text-rose-400 font-medium mb-1">🔺 今日買進訊號</div>

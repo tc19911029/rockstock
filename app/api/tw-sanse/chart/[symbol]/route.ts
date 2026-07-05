@@ -3,6 +3,7 @@ import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { computeSanSeChart, TW_TIER_THRESHOLDS } from '@/lib/cn-sanse/indicators';
 import { fetchTwDayExtras } from '@/lib/cn-sanse/twDayExtras';
 import { evalConditions } from '@/lib/cn-sanse/conditions';
+import { computeCatchCrossTrigger } from '@/lib/cn-sanse/crossTrigger';
 import type { Candle } from '@/types';
 
 export const runtime = 'nodejs';
@@ -150,6 +151,8 @@ export async function GET(
       changePct: prev?.close ? +(((last.close - prev.close) / prev.close) * 100).toFixed(2) : 0,
       scores: chart.scores,
       conditions: evalConditions(candles, indexClose),
+      catchTrigger: computeCatchCrossTrigger(candles), // 台股漲跌停 10%
+
       chart: {
         candles: tail(chart.candles),
         zhineng: tail(chart.zhineng),

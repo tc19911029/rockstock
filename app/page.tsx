@@ -37,6 +37,7 @@ import BuyMethodConditionsPanel from '@/components/BuyMethodConditionsPanel';
 import { SanSeConditionsPanel } from '@/components/cn-sanse/SanSeConditionsPanel';
 import { SanSeSignalsPanel } from '@/components/cn-sanse/SanSeSignalsPanel';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
+import type { CatchCrossTrigger } from '@/lib/cn-sanse/crossTrigger';
 import ChipDetailPanel from '@/components/ChipDetailPanel';
 import ChipRawTables, { type ChipRawTablesProps } from '@/components/chart/ChipRawTables';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
@@ -575,6 +576,7 @@ function HomePage() {
   const sanseFetchKey = sanseEnabled ? `${ticker}@${sanseAsOf}@${sanseLastBar?.close ?? ''}` : '';
   const [sanse, setSanse] = useState<SanSeChartPayload | null>(null);
   const [sanseConditions, setSanseConditions] = useState<ConditionReport | null>(null);
+  const [sanseCatchTrigger, setSanseCatchTrigger] = useState<CatchCrossTrigger | null>(null);
   // 暫時性失敗自動重試計數。為什麼非要不可：sanse fetch 只在 sanseFetchKey(=ticker@asOf@close) 變動時才重發，
   // 但「漲停/停牌/盤後/薄量」時 close 凍住 → key 凍住 → 不再重抓。若首抓正好遇上 server 開盤瞬間高負載失敗
   // （Fugle quote timeout / L1 檔正被 cron 寫到一半 / route 404），就會永遠卡「載入三色訊號…」直到換股 —
@@ -582,7 +584,7 @@ function HomePage() {
   const [sanseRetry, setSanseRetry] = useState(0);
   useEffect(() => { setSanseRetry(0); }, [sanseFetchKey]);
   useEffect(() => {
-    if (!sanseEnabled || !ticker) { setSanse(null); setSanseConditions(null); return; }
+    if (!sanseEnabled || !ticker) { setSanse(null); setSanseConditions(null); setSanseCatchTrigger(null); return; }
     const ctrl = new AbortController();
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const base = isCnTicker ? '/api/cn-sanse/chart' : '/api/tw-sanse/chart';
@@ -602,6 +604,7 @@ function HomePage() {
         // 條件報告兩市場都寫（三色模式時中間條件/訊號 tab 用）
         if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
         else { setSanseConditions(null); if (!j.ok) scheduleRetry(); }  // ok:false=暫時性失敗 → 重試
+        setSanseCatchTrigger(j.ok && j.catchTrigger ? (j.catchTrigger as CatchCrossTrigger) : null);
       })
       .catch(err => { if (err.name !== 'AbortError') { console.warn('[sanse] load failed:', err); scheduleRetry(); } });
     return () => { ctrl.abort(); if (retryTimer) clearTimeout(retryTimer); };
@@ -860,7 +863,7 @@ function HomePage() {
       )}
       {sideTab === 'signals' && (
         <SectionBoundary section="訊號分析">
-          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} /> : <SignalSummaryCard />}
+          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} catchTrigger={sanseCatchTrigger} /> : <SignalSummaryCard />}
         </SectionBoundary>
       )}
       {sideTab === 'chip' && (
