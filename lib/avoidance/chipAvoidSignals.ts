@@ -6,6 +6,8 @@
  *   ① 大戶持股水位超高 — 流通量太少/大戶已吃完 → 系統性偏弱（門檻=各級距 90 百分位）
  *   ② 假集中度 — 主力分點集中度看似高，但法人同步在賣（多半隔日沖假象）
  *   ③ 爆量長黑破月線且法人沒接 — 真破線（注意：爆量長黑+法人接=反彈，差在法人站哪邊）
+ *   ④ 高檔法人連賣 — 課程淘汰法13（R8 復活，2026-07-05 backtest-inst-sell-avoid：
+ *      六個 train/test 段全同方向更弱，test D20 −1.9pp、事後跌率 59% vs 對照 52%）
  *
  * ⚠️ 只示警、不剔除（呼應 [[redflags_pre_buy_check]] 慣例）。價量型危險訊號單獨不可當避雷
  *   （[[avoidance_layer_price_signals_reverse]]）— 故 ③ 一定要綁「法人沒接」才成立。
@@ -23,7 +25,7 @@ export interface ChipAvoidInput {
 }
 
 export interface AvoidFlag {
-  key: 'holder_too_high' | 'fake_concentration' | 'volume_black_breakdown';
+  key: 'holder_too_high' | 'fake_concentration' | 'volume_black_breakdown' | 'inst_sell_streak_high';
   label: string;
   detail: string;
 }
@@ -102,6 +104,29 @@ export function computeChipAvoidSignals(input: ChipAvoidInput): { flags: AvoidFl
       label: '爆量長黑破月線',
       detail: `今日長黑 ${todayChg.toFixed(1)}% + 爆量(${(last.volume / avgVol).toFixed(1)}倍) + 跌破月線，且法人沒接 — 真破線、之後更弱`,
     });
+  }
+
+  // ④ 高檔法人連賣（課程淘汰法13 / R8）：高檔＋三大法人合計連續賣超 ≥3 天
+  //    高檔=收盤在近60根最高收盤 90% 以上 且 近60根漲幅 ≥20%（與回測同口徑）
+  if (n >= 61) {
+    let streak = 0;
+    for (let k = t; k >= Math.max(0, t - 9); k--) {
+      const v = instByDate.get(candles[k].date);
+      if (v == null || v >= 0) break;
+      streak++;
+    }
+    if (streak >= 3) {
+      let hi60 = 0;
+      for (let k = t - 60; k <= t; k++) hi60 = Math.max(hi60, candles[k].close);
+      const gain60 = candles[t - 60].close > 0 ? candles[t].close / candles[t - 60].close - 1 : 0;
+      if (candles[t].close >= hi60 * 0.90 && gain60 >= 0.20) {
+        flags.push({
+          key: 'inst_sell_streak_high',
+          label: '高檔法人連賣',
+          detail: `法人已連續賣超 ${streak} 天且股價在高檔 — 課程淘汰法：別碰（回測：這種股之後 10 次有 6 次輸大盤）`,
+        });
+      }
+    }
   }
 
   return { flags, hasAvoid: flags.length > 0 };

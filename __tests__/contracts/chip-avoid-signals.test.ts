@@ -88,3 +88,41 @@ describe('籌碼避雷 — ③ 爆量長黑破月線', () => {
     expect(r.flags.some(f => f.key === 'volume_black_breakdown')).toBe(false);
   });
 });
+
+describe('籌碼避雷 — ④ 高檔法人連賣（課程淘汰法13 / R8，backtest-inst-sell-avoid 驗證）', () => {
+  function risingCandles(n: number): AvoidCandle[] {
+    return Array.from({ length: n }, (_, i) => {
+      const close = 100 + i * 0.6; // 60 根 +36%，收在近高
+      const date = `2026-${String(Math.floor(i / 28) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`;
+      return { date, open: close - 0.3, high: close + 0.2, low: close - 0.5, close, volume: 1000 };
+    });
+  }
+
+  it('高檔 + 法人連賣 3 天 → 紅旗', () => {
+    const candles = risingCandles(70);
+    const inst = new Map(candles.map((c, i) => [c.date, i >= 67 ? -50 : 100])); // 最後 3 天連賣
+    const r = computeChipAvoidSignals({ price: 140, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
+    expect(r.flags.some(f => f.key === 'inst_sell_streak_high')).toBe(true);
+  });
+
+  it('連賣 3 天但股價不在高檔（平盤）→ 不報', () => {
+    const candles = flatCandles(28, 100).concat(
+      Array.from({ length: 42 }, (_, i) => ({
+        date: `2026-05-${String((i % 28) + 1).padStart(2, '0')}-x${i}`.slice(0, 10),
+        open: 100, high: 100, low: 100, close: 100, volume: 1000,
+      })),
+    );
+    // 用序號保證日期唯一
+    candles.forEach((c, i) => { c.date = `2026-${String(Math.floor(i / 28) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`; });
+    const inst = new Map(candles.map((c, i) => [c.date, i >= candles.length - 3 ? -50 : 100]));
+    const r = computeChipAvoidSignals({ price: 100, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
+    expect(r.flags.some(f => f.key === 'inst_sell_streak_high')).toBe(false);
+  });
+
+  it('高檔但只連賣 2 天 → 不報（門檻 3 天）', () => {
+    const candles = risingCandles(70);
+    const inst = new Map(candles.map((c, i) => [c.date, i >= 68 ? -50 : 100]));
+    const r = computeChipAvoidSignals({ price: 140, candles, holderRows: [], brokerByDate: new Map(), instByDate: inst });
+    expect(r.flags.some(f => f.key === 'inst_sell_streak_high')).toBe(false);
+  });
+});
