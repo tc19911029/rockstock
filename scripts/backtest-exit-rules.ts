@@ -155,22 +155,22 @@ function trappedStallExit(cs: OHLC[], e: number): { ret: number; days: number } 
   }
   return { ret: (cs[end].close / entry - 1) * 100, days: end - e };
 }
+// 固定停損參數化（課程 CH7 講 7%、書本講 10% → 5/7/8/10/12 梯度一起驗）
+const fixedStopExit = (pct: number): Exit => (cs, e) => {
+  const stop = cs[e].open * (1 - pct);
+  for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) {
+    if (cs[d].low <= stop) { const px = Math.min(cs[d].open, stop); return { ret: (px / cs[e].open - 1) * 100, days: d - e }; }
+  }
+  const x = Math.min(e + MAXHOLD, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e };
+};
+
 const exits: Record<string, Exit> = {
   '死抱20天(不停損)': (cs, e) => { const x = Math.min(e + MAXHOLD, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e }; },
-  '固定停損-7%': (cs, e) => {
-    const stop = cs[e].open * 0.93;
-    for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) {
-      if (cs[d].low <= stop) { const px = Math.min(cs[d].open, stop); return { ret: (px / cs[e].open - 1) * 100, days: d - e }; }
-    }
-    const x = Math.min(e + MAXHOLD, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e };
-  },
-  '固定停損-10%': (cs, e) => {
-    const stop = cs[e].open * 0.90;
-    for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) {
-      if (cs[d].low <= stop) { const px = Math.min(cs[d].open, stop); return { ret: (px / cs[e].open - 1) * 100, days: d - e }; }
-    }
-    const x = Math.min(e + MAXHOLD, cs.length - 1); return { ret: (cs[x].close / cs[e].open - 1) * 100, days: x - e };
-  },
+  '固定停損-5%': fixedStopExit(0.05),
+  '固定停損-7%': fixedStopExit(0.07),
+  '固定停損-8%': fixedStopExit(0.08),
+  '固定停損-10%': fixedStopExit(0.10),
+  '固定停損-12%': fixedStopExit(0.12),
   '跌破MA10收盤出': (cs, e, ma10) => {
     for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) {
       if (ma10[d] > 0 && cs[d].close < ma10[d]) return { ret: (cs[d].close / cs[e].open - 1) * 100, days: d - e };

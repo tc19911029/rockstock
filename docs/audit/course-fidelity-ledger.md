@@ -63,7 +63,7 @@
 | CH6-15 如何操作飆股 | ✅ | 飆股 K 線出場 checkKLineExit+賠少-11（>20% 爆量黑/上影先賣半）✓；沿5均專屬軌=L 部分承接 | — |
 | CH7-01 停損的意義功能與原則 | ✅ | reentryRules 有接生產；逆勢單專屬出場=課程紀律提醒（顯示層建議） | — |
 | CH7-02 停損的功能與設定方法 | ✅ | 10% 硬停損 hard_stop_10pct ✓；≥5%守1/2 只在高檔+大量特例（0ef9307 忠實修）✓ | — |
-| CH7-03 停損的改變與正面思考 | 🔧 | 深審翻案：TREND_BEARISH 只在走圖/v12 面板層，**daily-action 推播鏈**對「已翻空頭但沒到停損價」的一般多單全程續抱 → holdingsActionEngine 補 trend_bearish_exit（detectTrend 狀態型，同⑥-2 修法）。7% vs 10% 門檻=課程 vs 書本衝突記待回測 | 見本列 commit |
+| CH7-03 停損的改變與正面思考 | 🔧 | 深審翻案：TREND_BEARISH 只在走圖/v12 面板層，**daily-action 推播鏈**對「已翻空頭但沒到停損價」的一般多單全程續抱 → holdingsActionEngine 補 trend_bearish_exit（detectTrend 狀態型，同⑥-2 修法）。7% vs 10% 門檻=課程 vs 書本衝突**已回測結案（2026-07-05）**：backtest-exit-rules 加 5/7/8/10/12 梯度，train/test 一致 10% 期望值皆勝 7%（+2.10/+7.43 vs +1.84/+6.14）、最大賠相同（跳空封頂 ~-20%）、7% 只小幅壓平均賠但勝率低 9pp → **維持書本 10%，課程 7% 不採** | 見本列 commit |
 | CH8-01 做長線與做短線的比較 | ✅ | 長短線=位置不是股票 — 顯示層已有位階標示 | — |
 | CH8-02 K線轉折戰法 | ✅ | 已在 CH8 落地批（ch8_operation_already_in_rockstock） | — |
 | CH8-03 短線均線戰法 | ✅ | 「先1/2隔日全出」= ch9_partial_tp_half 已有；8-5 式全面分批=回測無edge裁決不接 | — |
