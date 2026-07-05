@@ -106,16 +106,17 @@ export const bearishHaramiHigh: TradingRule = {
     if (!isUptrendWave(candles, index - 1, 8)) return null;
 
     const isChildDoji = bodyPct(child) < 0.005;
+    const isChildLongBlack = isBlackCandle(child) && bodyPct(child) > 0.02;
 
     return {
       type: 'WATCH',
-      label: '高檔母子懷抱',
-      description: `長紅(${mother.close.toFixed(2)})後出現${isChildDoji ? '十字線' : '小K'}被完全包住，變盤警示`,
+      label: '高檔母子懷抱（變盤・次日確認）',
+      description: `長紅(${mother.close.toFixed(2)})後${isChildDoji ? '十字線' : isChildLongBlack ? '長黑' : '小K'}整根被包住（課程 CH2-6 第4組「不懷好意」）— 止漲變盤，看明日開盤確認`,
       reason: [
-        '【朱家泓《抓住K線》第3篇 高檔懷抱】母子懷抱代表多空開始不安定，走勢突然變得不確定。',
-        '母線長紅K線的最高點與最低點是重要觀察位置，向上突破最高點多方反轉掌控主動權，向下跌破最低點空方繼續主導下跌。',
+        '【朱家泓 課程 CH2-6 高檔懷抱】母子懷抱代表多空開始不安定，走勢突然變得不確定＝止漲（黃燈休息），不是立即出場訊號。',
+        `母線高點 ${mother.high.toFixed(2)}／低點 ${mother.low.toFixed(2)} 是攻防線：向上突破 ${mother.high.toFixed(2)} 多方重新掌控、向下跌破 ${mother.low.toFixed(2)} 空方主導下跌。`,
         isChildDoji ? '子線是十字線，反轉力道大於一般母子懷抱，是強力反轉訊號！容易形成高檔夜星轉折。' : '',
-        '次日開盤位置很重要，開高容易向上反轉，開低容易下跌。',
+        `明日確認：開低＋收黑 → 變盤確認、執行出場；開高不破今日低點 ${child.low.toFixed(2)} → 續抱觀察。`,
       ].filter(Boolean).join('\n'),
       ruleId: this.id,
     };

@@ -204,7 +204,7 @@ export const morningStarLow: TradingRule = {
         reason: [
           `【朱家泓 課程 CH2-8】${isIsland ? '孤島晨星是最強烈的向上轉折訊號' : '晨星是下跌轉折向上的基本型態'}，但**確認時機與夜星不對稱**：`,
           '晨星要等「右邊長紅K的高點被突破」才算轉折確認（夜星則是長黑收盤即確認）。',
-          `突破 ${c2.high.toFixed(2)} → 轉折確認可做多；反之紅K低點 ${c2.low.toFixed(2)} 被跌破 → 結構破壞。`,
+          `次日起確認：收盤突破 ${c2.high.toFixed(2)} → 轉折確認可做多；收盤跌破紅K低點 ${c2.low.toFixed(2)} → 結構破壞作廢。`,
         ].join('\n'),
         ruleId: this.id,
       };

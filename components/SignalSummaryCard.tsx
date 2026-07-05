@@ -164,6 +164,8 @@ function getVerdict(
   prohibitionCount: number,
   hasTopPattern: boolean = false,
   criticalProhibitions: string[] = [],
+  firstExitDesc?: string,
+  reversalWatch?: { label: string; description?: string } | null,
 ): Verdict {
   const counts: Record<SignalSubtype, number> = {
     entry_strong: 0, entry_soft: 0, exit_strong: 0, exit_soft: 0, trend: 0, warn: 0,
@@ -181,10 +183,13 @@ function getVerdict(
       };
     }
     if (counts.exit_strong > 0) {
+      // 2026-07-05 訊號教學化：結論列直接講「為什麼」（訊號內容），不再只丟訊號名
       return {
         level: 'bad',
         label: '該出場',
-        basis: `出現硬出場訊號（${signalLabels.exit.slice(0, 2).join('、') || '硬出場'}），書本要求立即出場`,
+        basis: firstExitDesc
+          ? `${signalLabels.exit[0] ?? '硬出場'}：${firstExitDesc}`
+          : `出現硬出場訊號（${signalLabels.exit.slice(0, 2).join('、') || '硬出場'}），書本要求立即出場`,
       };
     }
     if (counts.exit_soft >= 2) {
@@ -199,6 +204,15 @@ function getVerdict(
     }
     if (counts.exit_soft === 1) {
       return { level: 'warn', label: '緊盯停損', basis: signalLabels.exit[0] ?? '輕微減碼警示' };
+    }
+    // 課程 CH2 變盤線（2026-07-05）：止漲變盤成形 → 結論=「看明日開盤確認」而非「繼續持有」
+    // 課程鐵律：變盤線出現當天不動作，次日開低+收黑=變盤確認才出場、開高續抱。
+    if (reversalWatch) {
+      return {
+        level: 'warn',
+        label: '變盤警示・看明日開盤',
+        basis: `${reversalWatch.label}${reversalWatch.description ? `：${reversalWatch.description}` : ''}（課程 CH2：明日開低收黑→出場；開高不破今低→續抱）`,
+      };
     }
     // 議題 C3：結構轉變戒律觸發 → 即使無出場訊號也要警示「持股風險升高」
     if (criticalProhibitions.length > 0) {
@@ -361,6 +375,10 @@ export default function SignalSummaryCard() {
   });
   const warnSigs = currentSignals.filter(s => (s.subtype ?? classifySignal(s)) === 'warn');
 
+  // 課程 CH2 變盤線家族（2026-07-05 訊號教學化）：母子/遭遇/晨星夜星成形/破實體未破底…
+  // 這類「止漲變盤、次日確認」訊號要影響結論列 — 不是硬出場、但也不是「繼續持有沒事」。
+  const reversalWatchSig = warnSigs.find(s => /變盤|次日確認|母子|遭遇|止漲|成形/.test(s.label));
+
   const criticalProhibitions = pickCriticalProhibitions(longProhibitions?.reasons ?? []);
   const verdict = getVerdict(
     hasPosition,
@@ -369,6 +387,8 @@ export default function SignalSummaryCard() {
     longProhibitions?.reasons?.length ?? 0,
     topPatternHit !== null,  // 頂部型態觸發（持股 → 該出場；未持倉 → 不要進場）
     criticalProhibitions,
+    exitSigs[0]?.description,  // 硬出場時把「為什麼」帶進結論（不再只給訊號名）
+    reversalWatchSig ? { label: reversalWatchSig.label, description: reversalWatchSig.description } : null,
   );
 
   // 主訊號字母 — 優先用掃描面板「選的策略」（讓訊號跟著策略換）：
@@ -997,12 +1017,18 @@ function ReasonRow({ signal: s, bgColor }: { signal: RuleSignal; bgColor: string
   const mainText = override ?? s.description ?? '';
   const bookRef = override ? undefined : extractBookRef(s.reason);
   const operationHint = override ? undefined : extractOperationHint(s.reason);
+  const nextDayHint = extractNextDayHint(s.reason); // 變盤線家族「明日怎麼辦」— 不因 override 而隱藏
   return (
     <div className={`rounded px-2.5 py-2 ${bgColor}`}>
       <p className="text-sm font-bold text-foreground/90">{s.label}</p>
       {mainText && (
         <p className="text-[11px] text-foreground/85 leading-snug mt-1 break-words">
           {mainText}
+        </p>
+      )}
+      {nextDayHint && (
+        <p className="text-[11px] leading-snug mt-1 break-words px-1.5 py-1 rounded bg-amber-900/30 text-amber-200">
+          👀 {nextDayHint}
         </p>
       )}
       {operationHint && (
@@ -1050,4 +1076,14 @@ function extractOperationHint(reason: string | undefined): string | undefined {
   // 匹配「操作：」或「策略：」開頭的 1-2 句
   const m = reason.match(/(?:操作|策略|建議)[：:]\s*([^\n。]+(?:。[^\n。]{0,40})?)/);
   return m?.[1] ? `操作：${m[1].trim()}` : undefined;
+}
+
+/**
+ * 課程 CH2 訊號教學化（2026-07-05）：從 reason 抓「明日/次日 怎麼辦」那一行 —
+ * 變盤線家族的核心可操作資訊（開低出場/開高續抱＋關鍵價位），highlight 顯示。
+ */
+function extractNextDayHint(reason: string | undefined): string | undefined {
+  if (!reason) return undefined;
+  const line = reason.split('\n').find(l => /(明日|次日)[^\n]*(確認|開低|開高|開盤)/.test(l));
+  return line?.trim();
 }
