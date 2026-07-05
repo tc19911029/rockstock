@@ -186,6 +186,12 @@ export const PROFIT_HIGH_TIER_PCT = 0.20;
  * 注意：CH8 筆記口述值 20% 是舊值，CH9 講義明確寫 15%（以講義為準）。
  */
 export const PROFIT_PARTIAL_TP_PCT = 0.15;
+/**
+ * CH9-3/CH8-3(6) 爆量反轉的「長黑」實體門檻（收黑實體 ≥2%，比例值）。
+ * 2026-07-05 巡邏：原 0.02 hard-code 在 v12TakeProfit 與 holdingsActionEngine 兩處 → 抽單一事實。
+ * 注意與 BLACKK_MIN_BODY_PCT（1.5，百分比值、L 黑K突破買法用）口徑不同、刻意分開。
+ */
+export const CH9_LONG_BLACK_BODY_PCT = 0.02;
 /** 套牢定義（課程 CH10-1）：「當股票賠損超過 10% 而持有時稱為被套牢」 */
 export const TRAPPED_PCT = 0.10;
 /** 深度套牢分界（課程 CH10-1）：跌幅 10~20% 反彈遇壓認賠；超過 20% 走三條路 */

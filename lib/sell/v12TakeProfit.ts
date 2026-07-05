@@ -21,7 +21,7 @@
 import type { CandleWithIndicators } from '../../types';
 
 import type { V12Letter } from '../analysis/v12Signals';
-import { HIGH_DEVIATION_PCT, PROFIT_TARGET_RULE_PCT, PROFIT_HIGH_TIER_PCT, BOOK_VOL_RATIO_MIN, PROFIT_PARTIAL_TP_PCT } from '../analysis/bookThresholds';
+import { HIGH_DEVIATION_PCT, PROFIT_TARGET_RULE_PCT, PROFIT_HIGH_TIER_PCT, BOOK_VOL_RATIO_MIN, PROFIT_PARTIAL_TP_PCT, CH9_LONG_BLACK_BODY_PCT } from '../analysis/bookThresholds';
 
 // ── Step 5 ② 獲利目標停利 ───────────────────────────────────────────────
 
@@ -41,7 +41,8 @@ export interface TakeProfitResult {
   reason?:
     | 'pattern-target'      // ② 達型態目標價
     | 'reach-resistance'    // ② 到達壓力區（書本特定條件 #1，2026-05-09 新增）
-    | 'high-deviation'      // ② 乖離 ≥ 25%（切 MA5，不直接停利；2026-05-19 放寬，原 15%）
+    | 'high-deviation'      // ② 乖離 ≥ 15%（切 MA5，不直接停利；書本 p.568，2026-07-04 回滾書本值）
+    | 'high-profit-20'      // ② 賺 >20% 改用 MA5 收尾（課程 CH8-4 操作程序(3)，長線模式也生效）
     | 'profit-target-10'    // ② 達 10% 獲利（切換進階紀律 flag）
     | 'high-vol-black-k';   // ③ 寶典 #7/#8 急漲反轉
   /** 進階紀律是否啟用（B/P MA5 切換）*/
@@ -99,6 +100,18 @@ export function checkTakeProfitTargets(inputs: TakeProfitInputs): TakeProfitResu
         detail: `乖離 ${(deviation * 100).toFixed(2)}% ≥ ${(HIGH_DEVIATION_PCT * 100).toFixed(0)}%，建議切 MA5 跟隨`,
       };
     }
+  }
+
+  // 課程 CH8-4 操作程序(3)（2026-07-05 巡邏補接）：「連續上漲波段獲利超過 20% 以上
+  // → 收盤跌破 MA5 停利（賺夠了就用最敏感的 MA5 收尾）」。
+  // advisory 建議切 MA5（不強制出場）；長線模式（守 MA20）之前完全缺這道大賺回吐保護。
+  if (profitPct >= PROFIT_HIGH_TIER_PCT) {
+    return {
+      triggered: false,
+      reason: 'high-profit-20',
+      modeRecommendation: 'short-bias-MA5',
+      detail: `獲利 ${(profitPct * 100).toFixed(1)}% ≥ 20%，課程 CH8-4：改用 MA5 收尾，收盤跌破 MA5 全部停利`,
+    };
   }
 
   // 達 10% → 啟用 B/P 進階紀律（議題 Step 5 ② / 衝突 α）
@@ -175,8 +188,8 @@ function isCh9BlowoffReversalBar(
   if (fullLen > 0 && upperShadow / fullLen > 0.5) {
     return { kind: 'upper-shadow' };
   }
-  // 爆量長黑（非吞噬）：實體 ≥2% 收黑
-  if (bar.close < bar.open && bar.open > 0 && (bar.open - bar.close) / bar.open >= 0.02) {
+  // 爆量長黑（非吞噬）：實體 ≥2% 收黑（口徑單一事實 bookThresholds）
+  if (bar.close < bar.open && bar.open > 0 && (bar.open - bar.close) / bar.open >= CH9_LONG_BLACK_BODY_PCT) {
     return { kind: 'long-black' };
   }
   return null;

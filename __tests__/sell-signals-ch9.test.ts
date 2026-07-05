@@ -33,9 +33,9 @@ function baseScenario(pairVol = 30000): Bar[] {
   // index 27, 28：連續兩日爆大量（收盤續漲）
   bars.push({ close: 113.5, volume: pairVol });
   bars.push({ close: 114, volume: pairVol });
-  // index 29：還沒破
-  bars.push({ close: 114.5 });
-  // index 30（今日）：收盤跌破兩日大量低點（≈112.93）
+  // index 29：還沒破、也沒再創新高（收平於 pair 高之下；課程：沒再創新高 → 低點不能被跌破）
+  bars.push({ close: 114 });
+  // index 30（今日）：黑K收盤跌破兩日大量低點（≈112.93）
   bars.push({ close: 112 });
   return bars;
 }
@@ -71,6 +71,25 @@ describe('HIGH_VOL_2DAY_LOW_BREAK — 課程 CH9-3(一)', () => {
     bars.push({ close: 107 });
     bars.push({ close: 104 }); // 跌破兩日大量低點但趨勢空頭
     const candles = computeIndicators(makeCandles(bars));
+    const sigs = detectSellSignals(candles, candles.length - 1);
+    expect(sigs.some(s => s.type === 'HIGH_VOL_2DAY_LOW_BREAK')).toBe(false);
+  });
+
+  // 2026-07-05 巡邏補的兩個課程條件
+  it('兩日大量後曾再創新高 → 不觸發（課程：之後沒再創新高才算頭部）', () => {
+    const bars = baseScenario();
+    bars[29] = { close: 116 }; // pair 後大漲創新高 → pair 已非頭部
+    const candles = computeIndicators(makeCandles(bars));
+    const sigs = detectSellSignals(candles, candles.length - 1);
+    expect(sigs.some(s => s.type === 'HIGH_VOL_2DAY_LOW_BREAK')).toBe(false);
+  });
+
+  it('紅K收盤跌破（跳空低開收紅）→ 不觸發（課程：黑K收盤跌破才確認）', () => {
+    const raw = makeCandles(baseScenario());
+    const last = raw[raw.length - 1];
+    // 跳空低開收紅：收盤仍破兩日大量低點（≈112.93）但當根收紅
+    last.open = 111; last.close = 112; last.low = 110.8; last.high = 112.6;
+    const candles = computeIndicators(raw);
     const sigs = detectSellSignals(candles, candles.length - 1);
     expect(sigs.some(s => s.type === 'HIGH_VOL_2DAY_LOW_BREAK')).toBe(false);
   });

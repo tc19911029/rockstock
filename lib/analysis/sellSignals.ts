@@ -539,12 +539,20 @@ export function detectSellSignals(
     }
     if (pairIdx > 0) {
       const clusterLow = Math.min(candles[pairIdx - 1].low, candles[pairIdx].low);
+      const clusterHigh = Math.max(candles[pairIdx - 1].high, candles[pairIdx].high);
+      // 課程條件（2026-07-05 巡邏補）：「之後股價**沒有再創新高** → 低點不能被跌破」
+      // — 兩日大量後若又創新高，該對已非頭部，破低訊號意義變質 → 不報。
+      let madeNewHigh = false;
+      for (let i = pairIdx + 1; i < index; i++) {
+        if (candles[i].high > clusterHigh) { madeNewHigh = true; break; }
+      }
       // 事件型：自兩日大量形成後「首次」收盤跌破其低點才報，續跌不重複
       let firstBreakIdx = -1;
       for (let i = pairIdx + 1; i <= index; i++) {
         if (candles[i].close < clusterLow) { firstBreakIdx = i; break; }
       }
-      if (firstBreakIdx === index) {
+      // 課程條件（2026-07-05 巡邏補）：「一旦**黑K收盤**跌破 → 轉折確認」— 跌破那根須收黑
+      if (!madeNewHigh && firstBreakIdx === index && c.close < c.open) {
         signals.push({
           type: 'HIGH_VOL_2DAY_LOW_BREAK',
           label: '跌破兩日大量低點(9-3停利)',

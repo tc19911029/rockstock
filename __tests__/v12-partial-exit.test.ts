@@ -2,7 +2,7 @@
  * CH8 8-5 三條均線分批出場 — 單元測試
  *
  * 驗證課程規則：跌破 MA5/10/20 各出 1/3、站回各買 1/3、−5% 停損、賺>20% 跌破 MA5 全出、
- * 多頭排列破壞全出、資料不足不誤判。
+ * 排列非多排只擋買回（2026-07-05 巡邏修：賣出階梯不受排列 gate 影響）、資料不足不誤判。
  */
 
 import type { CandleWithIndicators } from '../types';
@@ -73,6 +73,23 @@ describe('CH8 8-5 分批出場 computePartialExitState（做多）', () => {
     const cs = mk(closes);
     const s = computePartialExitState(cs, entryIdx, cs[entryIdx].close, 'long');
     expect(s.ladder.some(l => l.action === 'buy-third')).toBe(true);
+  });
+});
+
+describe('CH8 8-5 排列 gate 只擋買回（2026-07-05 巡邏修）', () => {
+  test('緩跌至排列破壞：賣出階梯照走、不再 trend-broken 全出', () => {
+    // 進場 596 後緩跌（不觸 −5% 停損 566.2）：跌破 MA5 → MA10 逐步出，
+    // 末段 MA5 下穿 MA10（排列破壞）— 舊版此時 exit-all，新版照階梯持有
+    const closes = Array.from({ length: 25 }, (_, i) => 500 + i * 4); // 500..596
+    closes.push(590, 586, 584, 582, 580);
+    const cs = mk(closes);
+    const s = computePartialExitState(cs, 24, cs[24].close, 'long');
+    expect(s.ended).toBe(false);
+    expect(s.endReason).toBeNull();
+    expect(s.ladder.every(l => l.action !== 'exit-all')).toBe(true);
+    // 階梯有分批出（至少兩次 sell-third：破 MA5、破 MA10）
+    expect(s.ladder.filter(l => l.action === 'sell-third').length).toBeGreaterThanOrEqual(2);
+    expect(s.unitsHeld).toBeLessThan(3);
   });
 });
 

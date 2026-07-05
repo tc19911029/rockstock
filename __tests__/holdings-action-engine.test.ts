@@ -316,3 +316,36 @@ describe('evaluateHolding — 做空分支（positionSide=short）', () => {
     expect(r.signals[0].type).toBe('absolute_stop'); // 做多路徑，不是 short_stop_cover
   });
 });
+
+// 2026-07-05 課程忠實度巡邏（CH7-3 / CH9-3 順序修）
+describe('evaluateHolding — 巡邏批（趨勢翻空提早出場 / 吞噬全出順序）', () => {
+  it('課程 CH7-3：趨勢翻空（頭頭低底底低）→ 未到停損價也 stop_loss（trend_bearish_exit）', () => {
+    // 下降 zigzag：H120 → L104 → H116（頭頭低）→ L96（底底低）→ H108 → 今日 92
+    const closes = [
+      100, 104, 108, 112, 116, 120,
+      116, 112, 108, 104,
+      108, 112, 116,
+      112, 108, 104, 100, 96,
+      100, 104, 108,
+      104, 100, 96, 92,
+    ];
+    const candles = makeCandles(closes);
+    // 停損 85、今日 92：固定停損 / -10% 硬停損（90）都沒到 → 之前會顯示續抱
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 85, candles, todayClose: 92 });
+    expect(r.action).toBe('stop_loss');
+    expect(r.signals.some(s => s.type === 'trend_bearish_exit')).toBe(true);
+  });
+
+  it('課程 CH9-3 順序修：獲利 ≥20% 高檔爆量長黑吞噬 → exit_all（不被賠少-11 降級成減半）', () => {
+    const closes = Array.from({ length: 29 }, (_, i) => 100 + i * 1.2); // 一路漲到 ~133.6
+    const candles = makeCandles(closes);
+    // 昨日紅K
+    const prev = candles[candles.length - 1];
+    prev.open = 130; prev.close = 133.6; prev.high = 134; prev.low = 129.8;
+    // 今日爆量長黑吞噬（開高 > 昨收、收 < 昨開、未破昨低、量 3 倍）
+    candles.push({ date: '2026-02-01', open: 134.5, high: 135, low: 129.8, close: 129.85, volume: 30000 });
+    const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 90, candles, todayClose: 129.85 });
+    expect(r.action).toBe('exit_all');
+    expect(r.signals.some(s => s.type === 'ch9_engulf_exit_all')).toBe(true);
+  });
+});

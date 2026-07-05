@@ -74,6 +74,13 @@ export function detectLetterM(
   // 1. 多頭趨勢前提
   if (detectTrend(candles, idx) !== '多頭') return empty;
 
+  // 1'. 課程 6-6（2026-07-05 巡邏）：「股價要在月線之上、月線向上 — 鐵則」。
+  // 同批 J/L 已補顯式 gate、M 被漏掉；生產掃描有 Step 1 六條件擋，
+  // 但 detector 單獨用（走圖/回測腳本）時月線鐵則失守 → 補齊。
+  if (c.ma20 == null || c.close <= c.ma20) return empty;
+  const prevMa20ForM = candles[idx - 1]?.ma20;
+  if (prevMa20ForM != null && c.ma20 < prevMa20ForM) return empty;
+
   // 2. 找 2 個確認 pivot low（依時間從新到舊）
   const pivots = findPivots(candles, idx, 10, false);
   const lows = pivots.filter(p => p.type === 'low').slice(0, 2);

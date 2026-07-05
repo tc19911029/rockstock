@@ -9,7 +9,9 @@
  * - 多頭趨勢不變，收盤站回 MA5 → 買回 1/3；站回 MA10 → 再 1/3；站回 MA20 → 滿倉。
  * - 停損：進場價 −5%（收盤跌破即全出）。
  * - 賺 > 20% 且收盤跌破 MA5 → 剩餘全部停利（總停利）。
- * - 只在「多頭排列（MA5>MA10>MA20）」時運作；排列被破壞＝趨勢改變，建議全出。
+ * - 「多頭趨勢不變」是**買回側**前提（2026-07-05 巡邏修）：排列非多排時暫不買回；
+ *   賣出階梯純看收盤 vs 三線位置（課程 8-5 分批出場本身沒有多排前提 —
+ *   舊版排列一破就全出，會讓「破 MA10 賣 1/3、破 MA20 賣最後 1/3」兩階走不到、階梯退化）。
  *
  * 設計：以「收盤相對三條均線的位置」決定**今天應持有幾份**（path-independent，洗盤來回也穩定）：
  *   收盤 ≥ MA5 → 3 份；MA5↔MA10 → 2 份；MA10↔MA20 → 1 份；跌破 MA20 → 0 份。
@@ -70,25 +72,31 @@ function sma(cs: { close: number }[], i: number, n: number): number {
  * 依「收盤相對三均線」算今天**應持有份數**（不含終止事件覆寫）。
  * - 數字 0~3：應持有份數
  * - 'insufficient'：均線資料不足（進場日前歷史 <19 根）→ 無法評估，當日持平不動
- * - 'misaligned'：均線非多/空排列 → 趨勢改變，方法終止
+ *
+ * 2026-07-05 巡邏修：拿掉排列 gate — 賣出階梯純看收盤 vs 三線（課程 8-5 原文只說
+ * 「跌破 5 均賣 1/3、續跌破 10 均再 1/3、破 20 均最後 1/3」）；
+ * 排列判定移到呼叫端、只擋**買回**（課程「多頭趨勢不變 → 站回買回」）。
  */
 function desiredUnits(
   close: number, ma5: number, ma10: number, ma20: number, dir: PartialDirection,
-): number | 'insufficient' | 'misaligned' {
+): number | 'insufficient' {
   if (!(ma5 > 0 && ma10 > 0 && ma20 > 0)) return 'insufficient';
   if (dir === 'long') {
-    if (!(ma5 > ma10 && ma10 > ma20)) return 'misaligned';   // 需多頭排列
     if (close >= ma5) return 3;
     if (close >= ma10) return 2;
     if (close >= ma20) return 1;
     return 0;
   } else {
-    if (!(ma5 < ma10 && ma10 < ma20)) return 'misaligned';   // 需空頭排列
     if (close <= ma5) return 3;
     if (close <= ma10) return 2;
     if (close <= ma20) return 1;
     return 0;
   }
+}
+
+/** 買回側前提：均線多/空排列（課程「多頭趨勢不變」的均線代理）。 */
+function isAligned(ma5: number, ma10: number, ma20: number, dir: PartialDirection): boolean {
+  return dir === 'long' ? (ma5 > ma10 && ma10 > ma20) : (ma5 < ma10 && ma10 < ma20);
 }
 
 function actionLabel(prev: number, next: number, dir: PartialDirection): { action: PartialAction; reason: string } {
@@ -153,14 +161,10 @@ export function computePartialExitState(
       ladder.push({ date: cs[d].date, unitsHeld: held, action: held === 0 ? 'flat' : 'hold', reason: '均線資料不足，持平' });
       continue;
     }
-    // 均線排列被破壞 → 視為趨勢改變，建議全出
-    if (want === 'misaligned') {
-      if (held > 0) {
-        held = 0; ended = true; endReason = 'trend-broken';
-        ladder.push({ date: cs[d].date, unitsHeld: 0, action: 'exit-all', reason: `均線${dir === 'long' ? '多' : '空'}頭排列被破壞（趨勢改變）→ 建議全出` });
-      } else {
-        ladder.push({ date: cs[d].date, unitsHeld: 0, action: 'flat', reason: '已空手' });
-      }
+    // 課程 8-5（2026-07-05 巡邏修）：「多頭趨勢不變」只擋**買回**（站回買回的前提）—
+    // 賣出階梯照走；排列非多排時想加份數 → 暫不買回、持平。
+    if (want > held && !isAligned(ma5, ma10, ma20, dir)) {
+      ladder.push({ date: cs[d].date, unitsHeld: held, action: held === 0 ? 'flat' : 'hold', reason: `站回均線但${dir === 'long' ? '多' : '空'}頭排列未恢復，暫不${dir === 'long' ? '買回' : '加空'}` });
       continue;
     }
 

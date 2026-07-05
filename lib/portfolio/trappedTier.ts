@@ -143,6 +143,6 @@ export function buildTrappedSignals(profitPct: number, candles: Candle[]): Trapp
     type: 'trapped_deep_three_paths',
     label: '深度套牢（>20%）三條路',
     severity: 'medium',
-    detail: `賠損 ${(profitPct * 100).toFixed(1)}%。課程 CH10-1 三條路：①空頭不變 → 反彈賣出後反手做空 ②反彈賣出換其它多頭股 ③已大量止跌打底 → 等反轉多頭時加碼`,
+    detail: `賠損 ${(profitPct * 100).toFixed(1)}%。課程 CH10-1 三條路：①空頭不變 → 反彈賣出後反手做空（限空頭初段，跌深不空；底底高就回補）②反彈賣出換其它多頭股 ③已大量止跌打底 → 不要賣在最低檔，等反轉多頭時加碼`,
   }];
 }
