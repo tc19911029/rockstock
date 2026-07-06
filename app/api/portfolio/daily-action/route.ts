@@ -20,6 +20,7 @@ import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
 import { evaluateHolding, DEFAULT_STOP_LOSS_MULT, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
 import { readAveragedDownFlag } from '@/lib/portfolio/averagingDownGuard';
+import { readStopLossLoweredFlag } from '@/lib/portfolio/stopLossGuard';
 import { computeProfitTargets } from '@/lib/sell/profitTargets';
 import { detectMarketRegime, thresholdsForRegime, type RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
@@ -161,14 +162,48 @@ export async function GET(req: NextRequest) {
         const profitTargets = positionSide === 'long' ? computeProfitTargets(candles, 'short') : null;
         // 課程 CH10-2（2026-07-04）：向下攤平紅旗（upsert 咽喉寫入 ui.disciplineFlags）→ 常駐透出到平倉
         const avgDown = readAveragedDownFlag(h.ui);
-        const signals = avgDown
-          ? [{
-              type: 'averaging_down_flag',
-              label: '🚩 向下攤平（紀律紅旗）',
-              severity: 'high' as const,
-              detail: `${avgDown.date} 曾虧損中向下攤平（均價 ${avgDown.fromPrice} → ${avgDown.toPrice}）。課程 CH10-2：攤平=加碼下跌中的股票，完全錯誤；紅旗常駐到平倉`,
-            }, ...result.signals]
-          : result.signals;
+        // 課程 CH7-1（2026-07-06）：停損下修紅旗（upsert 咽喉寫入 ui.disciplineFlags）→ 常駐透出到平倉
+        const slLowered = readStopLossLoweredFlag(h.ui);
+        const disciplineSignals = [
+          ...(slLowered ? [{
+            type: 'stop_loss_lowered_flag',
+            label: '🚩 停損往鬆改（紀律紅旗）',
+            severity: 'high' as const,
+            detail: `${slLowered.date} 曾把停損${slLowered.side === 'long' ? '往下' : '往上'}改（${slLowered.fromStop} → ${slLowered.toStop}）。課程 CH7-1：停損設了就不可以改，往鬆改＝等於沒設停損；紅旗常駐到平倉`,
+          }] : []),
+          ...(avgDown ? [{
+            type: 'averaging_down_flag',
+            label: '🚩 向下攤平（紀律紅旗）',
+            severity: 'high' as const,
+            detail: `${avgDown.date} 曾虧損中向下攤平（均價 ${avgDown.fromPrice} → ${avgDown.toPrice}）。課程 CH10-2：攤平=加碼下跌中的股票，完全錯誤；紅旗常駐到平倉`,
+          }] : []),
+        ];
+        // 課程 CH8-3（2026-07-06，逐字-1）：賺 10% 停利「達標＝進場後盤中曾觸及 +10% 價位」（事件式），
+        // 非「出場日收盤獲利率 ≥10%」。程式 checkMAExit 用出場日收盤判 → 曾摸過 10% 又跌回、今日破 MA5 時
+        // 會誤判「獲利<10% 續抱洗盤」（與課程/投影片相反）。此處**只加提示、不改硬出場期望值**（出場類改硬 gate
+        // 須先過 backtest-exit-rules，本專案紀律）。只服務短線 MA5 操作字母 A/B/P、做多、且正落在該誤判區間。
+        const ma5 = lastCandle.ma5;
+        const abpTouchAdvisory = (() => {
+          if (positionSide !== 'long') return null;
+          if (!(triggerSignal === 'A' || triggerSignal === 'B' || triggerSignal === 'P')) return null;
+          if (ma5 == null || todayClose >= ma5) return null; // 今日未收破 MA5
+          const curProfitPct = (todayClose - h.entryPrice) / h.entryPrice;
+          if (curProfitPct >= 0.10) return null; // 現獲利已 ≥10%，既有停利規則自會處理
+          const target10 = h.entryPrice * 1.10;
+          let peak = -Infinity;
+          for (const c of candles) {
+            if (c.date < h.entryDate) continue;
+            if (c.high > peak) peak = c.high;
+          }
+          if (!(peak >= target10)) return null; // 進場後從未觸及 +10%
+          return {
+            type: 'ch83_touched_10pct_break_ma5',
+            label: '📗 課程停利提示：曾達 +10%、今破 5 均',
+            severity: 'medium' as const,
+            detail: `進場後盤中曾觸及 +10% 價位（${target10.toFixed(2)}，實際最高 ${peak.toFixed(2)}），今日收盤 ${todayClose.toFixed(2)} 跌破 MA5 ${ma5.toFixed(2)}。課程 CH8-3：達標＝「曾摸到 10% 價位」即算，此時破 5 均就該停利（就算現在只剩 +${(curProfitPct * 100).toFixed(1)}%）。系統硬出場仍走收盤獲利率判定（未改），此為紀律提示。`,
+          };
+        })();
+        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...result.signals];
         return {
           ...base,
           todayClose,

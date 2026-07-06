@@ -20,6 +20,7 @@ import {
 import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
 import { detectAveragingDown, mergeAveragedDownFlag } from '@/lib/portfolio/averagingDownGuard';
+import { detectStopLossLowered, mergeStopLossLoweredFlag, type PositionSide } from '@/lib/portfolio/stopLossGuard';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
 
 export const runtime = 'nodejs';
@@ -117,6 +118,20 @@ export async function POST(req: NextRequest) {
     // 新旗 or 既有旗都要留（紅旗常駐到平倉，client 全量覆寫 ui 不得洗掉）
     const mergedUi = mergeAveragedDownFlag(holdingData.ui, existing.ui, newFlag);
     if (mergedUi !== holdingData.ui) holdingData.ui = mergedUi;
+
+    // 課程 CH7-1（2026-07-06）：停損下修紅旗 — 同咽喉單點偵測（往「放鬆」方向改停損＝凹單）。
+    // 做多往下、做空往上為放鬆；只標旗不擋寫入，紅旗常駐到平倉。串在攤平之後，兩旗共存於 disciplineFlags。
+    const side: PositionSide = (existing.ui as Record<string, unknown> | undefined)?.positionSide === 'short' ? 'short' : 'long';
+    const slDet = detectStopLossLowered({
+      existing: { stopLoss: existing.stopLoss },
+      incoming: { stopLoss: holdingData.stopLoss },
+      positionSide: side,
+    });
+    const newSlFlag = slDet.flagged
+      ? { date: todayYmdTaipei(new Date()), fromStop: existing.stopLoss!, toStop: holdingData.stopLoss!, side }
+      : null;
+    const mergedUi2 = mergeStopLossLoweredFlag(holdingData.ui, existing.ui, newSlFlag);
+    if (mergedUi2 !== holdingData.ui) holdingData.ui = mergedUi2;
   }
 
   const holding = await upsertHolding(holdingData, profileId);
