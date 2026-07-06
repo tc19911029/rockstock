@@ -324,28 +324,76 @@ export interface PullbackBuyResult {
   barsSinceReclaim: number; // 站回後第幾日補量突破（0 = 站回當日 = 舊行為）
 }
 
+/** 逐關判定的 gate key — UI 顯示層照這組 key 對映，不可自己重算 */
+export type PullbackBuyGateKey =
+  | 'trend'          // 1. 多頭趨勢
+  | 'reclaimHold'    // 2+3. 近 3 根內站回 MA5 且此後守住（書本「回後」）
+  | 'noBreakLow'     // 4. 回檔不破前低
+  | 'redBody'        // 5. 紅 K 實體 ≥ 2%
+  | 'volume'         // 6. 量比 ≥ 1.3
+  | 'breakPrevHigh'  // 7. 收盤突破前一日高
+  | 'freshSignal'    // 8. 一次回後對應一次進場（防重複標 B）
+  | 'pullbackDepth'; // 9. 回檔深度 ≤ 0.618（課程 6-2/1-9）
+
+export interface PullbackBuyGate {
+  key: PullbackBuyGateKey;
+  pass: boolean;
+  detail: string;   // 顯示層直接用的文案（含實際數值），不可在 UI 另組
+  metric?: string;  // 面板右側 badge 用的短數值
+}
+
+/**
+ * detectPullbackBuy 的逐關明細版 — 判定邏輯的單一事實。
+ *
+ * 兩種走法：
+ *   - earlyExit=true：第一個失敗 gate 就返回（gates 截斷）— detectPullbackBuy 用，
+ *     保持掃描熱路徑效能與舊版一致（趨勢不對就不算 pivots）
+ *   - earlyExit=false（預設）：全部 gate 都算完 — 條件面板用，每一條的 ✓✗ 各自獨立
+ * 兩種模式的 ok 值恆等（gate 為純函式，AND 順序不影響結果）。
+ */
+export interface PullbackBuyExplain {
+  dataReady: boolean;  // false = K 棒不足 21 根 / MA5 未成形 / 量價異常，gates 為空
+  ok: boolean;         // 全 gate 通過 ⟺ detectPullbackBuy() !== null（合約測試守）
+  gates: PullbackBuyGate[];
+  result: PullbackBuyResult | null;
+}
+
 // 共 3 根（含今日）：index, index-1, index-2
 // 對齊 bookThresholds.BOOK_RECLAIM_LOOKBACK = 3；不直接 import 是為了避開
 // trendAnalysis ↔ highWinPositions 循環依賴造成的 module-init TDZ。
 // 改 BOOK_RECLAIM_LOOKBACK 時必須同步改這裡（合約測試 scan-parity 會抓不一致）。
 const RECLAIM_LOOKBACK = 2;
 
-export function detectPullbackBuy(
+export function explainPullbackBuy(
   candles: CandleWithIndicators[],
   index: number,
-): PullbackBuyResult | null {
-  if (index < 21) return null;
+  opts?: { earlyExit?: boolean },
+): PullbackBuyExplain {
+  const earlyExit = !!opts?.earlyExit;
 
   const c = candles[index];
   const prev = candles[index - 1];
-  if (!c || !prev) return null;
-  if (c.ma5 == null || prev.ma5 == null) return null;
-  if (prev.volume <= 0 || c.open <= 0) return null;
+  if (
+    index < 21 || !c || !prev ||
+    c.ma5 == null || prev.ma5 == null ||
+    prev.volume <= 0 || c.open <= 0
+  ) {
+    return { dataReady: false, ok: false, gates: [], result: null };
+  }
+
+  const gates: PullbackBuyGate[] = [];
+  const bail = (): PullbackBuyExplain => ({ dataReady: true, ok: false, gates, result: null });
 
   // 1. 多頭趨勢
-  if (detectTrend(candles, index) !== '多頭') return null;
+  const isTrend = detectTrend(candles, index) === '多頭';
+  gates.push({
+    key: 'trend',
+    pass: isTrend,
+    detail: isTrend ? '多頭（頭頭高底底高）' : '非多頭趨勢',
+  });
+  if (earlyExit && !isTrend) return bail();
 
-  // 2. 近 3 根內找最早的合格站回日 j（取最早是為了讓 gate 3 能擋掉
+  // 2. 近 3 根內找最早的合格站回日 j（取最早是為了讓「守 MA5」能擋掉
   //    「站回 → 跌破 → 又站回 → 突破」的雜訊）
   let reclaimDay = -1;
   for (let j = Math.max(1, index - RECLAIM_LOOKBACK); j <= index; j++) {
@@ -358,31 +406,81 @@ export function detectPullbackBuy(
       break;
     }
   }
-  if (reclaimDay < 0) return null;
 
   // 3. 自 reclaimDay 起每日 close ≥ MA5（含 index 自己）
-  for (let k = reclaimDay; k <= index; k++) {
-    const bk = candles[k];
-    if (bk.ma5 == null || bk.close < bk.ma5) return null;
+  let heldMa5 = reclaimDay >= 0;
+  if (reclaimDay >= 0) {
+    for (let k = reclaimDay; k <= index; k++) {
+      const bk = candles[k];
+      if (bk.ma5 == null || bk.close < bk.ma5) {
+        heldMa5 = false;
+        break;
+      }
+    }
   }
+  const reclaimPass = reclaimDay >= 0 && heldMa5;
+  const barsSinceReclaim = reclaimDay >= 0 ? index - reclaimDay : -1;
+  gates.push({
+    key: 'reclaimHold',
+    pass: reclaimPass,
+    detail: reclaimDay < 0
+      ? `過去 ${RECLAIM_LOOKBACK + 1} 根 K 棒未出現「昨收<MA5 → 今收≥MA5」站回`
+      : reclaimPass
+        ? (barsSinceReclaim === 0 ? '今日站回 MA5' : `${barsSinceReclaim} 日前站回 MA5，此後收盤守住 MA5`)
+        : `${barsSinceReclaim} 日前站回 MA5，但其後收盤又跌破 MA5`,
+  });
+  if (earlyExit && !reclaimPass) return bail();
 
   // 4. 不破前低（書本 p.37 原文）
   const pivots = findPivots(candles, index, 8, false); // confirmed only
   const lastLow = pivots.find(p => p.type === 'low');
-  if (!lastLow) return null;                   // 沒確認底，無法判定「不破前低」
-  if (c.low < lastLow.price) return null;
+  const noBreakLowPass = !!lastLow && c.low >= lastLow.price; // 沒確認底 → 無法判定 → 不過
+  gates.push({
+    key: 'noBreakLow',
+    pass: noBreakLowPass,
+    detail: !lastLow
+      ? '無已確認前低，無法判定「不破前低」'
+      : noBreakLowPass
+        ? `今日低 ${c.low.toFixed(2)} 未破前低 ${lastLow.price.toFixed(2)}`
+        : `今日低 ${c.low.toFixed(2)} 破前低 ${lastLow.price.toFixed(2)}`,
+    metric: lastLow ? lastLow.price.toFixed(2) : undefined,
+  });
+  if (earlyExit && !noBreakLowPass) return bail();
 
   // 5. 紅 K + 實體 ≥ 2%
-  if (c.close <= c.open) return null;
+  const isRed = c.close > c.open;
   const bodyPct = ((c.close - c.open) / c.open) * 100;
-  if (bodyPct < BOOK_BODY_PCT_MIN) return null;
+  const redBodyPass = isRed && bodyPct >= BOOK_BODY_PCT_MIN;
+  gates.push({
+    key: 'redBody',
+    pass: redBodyPass,
+    detail: isRed ? `實體 ${bodyPct.toFixed(2)}%` : '非紅 K',
+    metric: `${bodyPct.toFixed(2)}%`,
+  });
+  if (earlyExit && !redBodyPass) return bail();
 
   // 6. 量 ≥ 前日 × 1.3
   const volumeRatio = c.volume / prev.volume;
-  if (volumeRatio < BOOK_VOL_RATIO_MIN) return null;
+  const volumePass = volumeRatio >= BOOK_VOL_RATIO_MIN;
+  gates.push({
+    key: 'volume',
+    pass: volumePass,
+    detail: `×${volumeRatio.toFixed(2)}`,
+    metric: `×${volumeRatio.toFixed(2)}`,
+  });
+  if (earlyExit && !volumePass) return bail();
 
   // 7. 收盤 > 前一日 high
-  if (c.close <= prev.high) return null;
+  const breakHighPass = c.close > prev.high;
+  gates.push({
+    key: 'breakPrevHigh',
+    pass: breakHighPass,
+    detail: breakHighPass
+      ? `突破前K高 ${prev.high.toFixed(1)}`
+      : `未突破前K高 ${prev.high.toFixed(1)}`,
+    metric: prev.high.toFixed(1),
+  });
+  if (earlyExit && !breakHighPass) return bail();
 
   // 8. 0512 修：「一次回後對應一次進場」— reclaimDay 到 index-1 之間若已有任何一天
   //    滿足完整 B 觸發條件（close > prev.high + 紅K ≥ 2% + 量 ≥ 1.3），
@@ -390,21 +488,66 @@ export function detectPullbackBuy(
   //
   // 例：2610 華航 5/7 close 18.60 已突破 5/6 high + body 2.76% + vol ×2.5（5/5 全過）
   //     原本 detector 在 5/11 還抓 5/7 reclaim → 重複標 B → 用戶誤以為又是進場點
-  for (let k = reclaimDay; k < index; k++) {
-    const bk = candles[k];
-    const bkPrev = candles[k - 1];
-    if (!bk || !bkPrev || bk.open <= 0 || bkPrev.volume <= 0) continue;
-    if (bk.close <= bk.open) continue; // 黑K 不算觸發
-    const kClosePastPrevHigh = bk.close > bkPrev.high;
-    const kBodyPct = ((bk.close - bk.open) / bk.open) * 100;
-    const kVolRatio = bk.volume / bkPrev.volume;
-    const kBodyOk = kBodyPct >= BOOK_BODY_PCT_MIN;
-    const kVolOk = kVolRatio >= BOOK_VOL_RATIO_MIN;
-    if (kClosePastPrevHigh && kBodyOk && kVolOk) {
-      // 之前那天已完整觸發 → 今日不算新訊號
-      return null;
+  let freshSignal = true;
+  if (reclaimDay >= 0) {
+    for (let k = reclaimDay; k < index; k++) {
+      const bk = candles[k];
+      const bkPrev = candles[k - 1];
+      if (!bk || !bkPrev || bk.open <= 0 || bkPrev.volume <= 0) continue;
+      if (bk.close <= bk.open) continue; // 黑K 不算觸發
+      const kClosePastPrevHigh = bk.close > bkPrev.high;
+      const kBodyPct = ((bk.close - bk.open) / bk.open) * 100;
+      const kVolRatio = bk.volume / bkPrev.volume;
+      if (kClosePastPrevHigh && kBodyPct >= BOOK_BODY_PCT_MIN && kVolRatio >= BOOK_VOL_RATIO_MIN) {
+        // 之前那天已完整觸發 → 今日不算新訊號
+        freshSignal = false;
+        break;
+      }
     }
   }
+  gates.push({
+    key: 'freshSignal',
+    pass: freshSignal,
+    detail: freshSignal
+      ? '站回後首次完整觸發'
+      : '站回後已有 K 棒完整觸發過，今日為延續非新訊號',
+  });
+  if (earlyExit && !freshSignal) return bail();
+
+  // 9. 2026-07-05 回測-4 按課程（6-2/1-9 黃金分割回檔強弱★）：
+  // 回檔深度比 = (前波高 − 回檔低) / (前波高 − **起漲低**)。
+  // 起漲低 = 前波高「之前」的 pivot low（那一波漲勢的起點），不是回檔自己形成的低。
+  // 課程：0.318 最強／0.5 還行／**0.682 最弱、先觀察不買** — 深回檔 >0.618 不發 B 訊號。
+  let depthPass = true;
+  let depthRatio: number | null = null;
+  if (reclaimDay >= 0) {
+    const lastHigh = pivots.find(p => p.type === 'high');
+    const rallyBase = lastHigh ? pivots.find(p => p.type === 'low' && p.index < lastHigh.index) : undefined;
+    if (lastHigh && rallyBase && lastHigh.price > rallyBase.price) {
+      // 回檔低 = 前波高之後、reclaimDay 之前的最低 low
+      let pullLow = Infinity;
+      for (let i = lastHigh.index; i < reclaimDay; i++) {
+        if (candles[i] && candles[i].low < pullLow) pullLow = candles[i].low;
+      }
+      if (pullLow !== Infinity) {
+        depthRatio = (lastHigh.price - pullLow) / (lastHigh.price - rallyBase.price);
+        depthPass = depthRatio <= 0.618; // 課程：回檔過深（≈0.682 級）先不買
+      }
+    }
+  }
+  gates.push({
+    key: 'pullbackDepth',
+    pass: depthPass,
+    detail: depthRatio == null
+      ? '無可量測回檔段（不擋）'
+      : depthPass
+        ? `回檔深度 ${depthRatio.toFixed(3)} ≤ 0.618`
+        : `回檔深度 ${depthRatio.toFixed(3)} > 0.618（課程：過深先觀察不買）`,
+    metric: depthRatio != null ? depthRatio.toFixed(2) : undefined,
+  });
+
+  const ok = gates.every(g => g.pass);
+  if (!ok) return { dataReady: true, ok: false, gates, result: null };
 
   // 回檔天數（info only）— 從 reclaimDay-1 往回數連續 close < MA5 的天數
   let pullbackDays = 0;
@@ -414,33 +557,27 @@ export function detectPullbackBuy(
     pullbackDays++;
   }
 
-  // 2026-07-05 回測-4 按課程（6-2/1-9 黃金分割回檔強弱★）：
-  // 回檔深度比 = (前波高 − 回檔低) / (前波高 − **起漲低**)。
-  // 起漲低 = 前波高「之前」的 pivot low（那一波漲勢的起點），不是回檔自己形成的低。
-  // 課程：0.318 最強／0.5 還行／**0.682 最弱、先觀察不買** — 深回檔 >0.618 不發 B 訊號。
-  const lastHigh = pivots.find(p => p.type === 'high');
-  const rallyBase = lastHigh ? pivots.find(p => p.type === 'low' && p.index < lastHigh.index) : undefined;
-  if (lastHigh && rallyBase && lastHigh.price > rallyBase.price) {
-    // 回檔低 = 前波高之後、reclaimDay 之前的最低 low
-    let pullLow = Infinity;
-    for (let i = lastHigh.index; i < reclaimDay; i++) {
-      if (candles[i] && candles[i].low < pullLow) pullLow = candles[i].low;
-    }
-    if (pullLow !== Infinity) {
-      const depthRatio = (lastHigh.price - pullLow) / (lastHigh.price - rallyBase.price);
-      if (depthRatio > 0.618) return null; // 課程：回檔過深（≈0.682 級）先不買
-    }
-  }
-
   return {
-    prevSwingLow: lastLow.price,
-    pullbackDays,
-    bodyPct,
-    volumeRatio,
-    breakoutPrice: prev.high,
-    reclaimDay,
-    barsSinceReclaim: index - reclaimDay,
+    dataReady: true,
+    ok: true,
+    gates,
+    result: {
+      prevSwingLow: lastLow!.price,
+      pullbackDays,
+      bodyPct,
+      volumeRatio,
+      breakoutPrice: prev.high,
+      reclaimDay,
+      barsSinceReclaim: index - reclaimDay,
+    },
   };
+}
+
+export function detectPullbackBuy(
+  candles: CandleWithIndicators[],
+  index: number,
+): PullbackBuyResult | null {
+  return explainPullbackBuy(candles, index, { earlyExit: true }).result;
 }
 
 /**

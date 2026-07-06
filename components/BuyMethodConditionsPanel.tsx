@@ -17,7 +17,8 @@
 import { useReplayStore } from '@/store/replayStore';
 import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
-import { detectBreakoutEntry, detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
+import { detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
+import { buildPullbackBuyConditions } from '@/lib/analysis/pullbackBuyConditions';
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
 import { detectVReversal, detectVReversalStructure } from '@/lib/analysis/vReversalDetector';
 import { detectABCBreakout } from '@/lib/analysis/abcBreakoutEntry';
@@ -32,7 +33,6 @@ import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
 import {
   BOOK_BODY_PCT_MIN,
   BOOK_VOL_RATIO_MIN,
-  BOOK_RECLAIM_LOOKBACK,
   VREVERSAL_VOL_MULT,
   KLINE_CONSOL_ANCHOR_BODY_PCT,
   BLACKK_MAX_DAYS_AFTER,
@@ -87,63 +87,11 @@ function evaluateMethod(
 
   switch (method) {
     case 'B': {
-      // 回後買上漲 — 對齊 detectPullbackBuy（過去 ${BOOK_RECLAIM_LOOKBACK} 根內任一天站回 MA5，不一定昨日）
-      // 0512 修：原本 ② 只看昨日 close<MA5 太嚴格，跟 detector 的 RECLAIM_LOOKBACK=3 不一致
-      //         例如 T-2 站回 → 今天才補量突破，detector 過、panel ② ✗，誤導用戶
-      const r = detectBreakoutEntry(candles, idx);
-      const bodyPct = c.open > 0 && c.close > c.open ? (c.close - c.open) / c.open * 100 : 0;
-      const volRatio = prev && prev.volume > 0 ? c.volume / prev.volume : 0;
-
-      const isTrend = c.ma5 != null && detectTrend(candles, idx) === '多頭';
-      const prevHigh = prev?.high ?? 0;
-      const isBreakoutHigh = prevHigh > 0 && c.close > prevHigh;
-
-      // ② 站回 MA5：用 detector 結果（過去 ${BOOK_RECLAIM_LOOKBACK} 根任一天）
-      // r 為 BreakoutEntryResult｜null；底層 detectPullbackBuy 取 reclaimDay
-      // breakoutEntry.ts 沒透傳 reclaimDay 給上層，但會在 detail 字串組「站回MA5+N日」
-      const reclaimMatched = !!r?.isBreakout && r.subType === 'pullback_buy';
-      const ma5ReclaimDetail = reclaimMatched
-        ? r!.detail  // 例：「回後買上漲（多頭+站回MA5+2日+守MA5+...）」
-        : (() => {
-            const hasMa5 = c.ma5 != null && prev?.ma5 != null;
-            if (!hasMa5) return '無 MA5 資料';
-            // detector 沒抓到 — 顯示「過去 ${BOOK_RECLAIM_LOOKBACK} 根無站回」
-            return `過去 ${BOOK_RECLAIM_LOOKBACK} 根 K 棒未出現「昨收<MA5 → 今收≥MA5」站回（detector RECLAIM_LOOKBACK=3）`;
-          })();
-
-      const conditions: ConditionItem[] = [
-        {
-          icon: '①', name: '多頭趨勢',
-          detail: isTrend ? '多頭（頭頭高底底高）' : '非多頭趨勢',
-          pass: isTrend,
-        },
-        {
-          icon: '②', name: `過去 ${BOOK_RECLAIM_LOOKBACK} 根內站回 MA5（書本「回後」）`,
-          detail: ma5ReclaimDetail,
-          pass: reclaimMatched,
-        },
-        {
-          icon: '③', name: '收盤突破前K高',
-          detail: isBreakoutHigh
-            ? `突破前K高 ${prevHigh.toFixed(0)}`
-            : `未突破前K高 ${prevHigh.toFixed(0)}`,
-          pass: isBreakoutHigh,
-          metric: prevHigh > 0 ? prevHigh.toFixed(0) : undefined,
-        },
-        {
-          icon: '④', name: `紅 K 實體 ≥ ${BOOK_BODY_PCT_MIN}%`,
-          detail: `實體 ${bodyPct.toFixed(2)}%`,
-          pass: bodyPct >= BOOK_BODY_PCT_MIN,
-          metric: `${bodyPct.toFixed(2)}%`,
-        },
-        {
-          icon: '⑤', name: `量比 ≥ ${BOOK_VOL_RATIO_MIN}`,
-          detail: `×${volRatio.toFixed(2)}`,
-          pass: volRatio >= BOOK_VOL_RATIO_MIN,
-          metric: `×${volRatio.toFixed(2)}`,
-        },
-      ];
-      return { title, conditions, allPass: !!r?.isBreakout };
+      // 回後買上漲 — 顯示層零邏輯：逐關 ✓✗ 與文案全部來自 buildPullbackBuyConditions
+      // （判定單一事實 = explainPullbackBuy；合約測試 pullback-panel-parity 守一致性）
+      // 2026-07-06 修：舊版 ② 綁整個 detector 結果，量比不足時會誤顯示「無站回」
+      const { conditions, allPass } = buildPullbackBuyConditions(candles, idx);
+      return { title, conditions, allPass };
     }
 
     case 'C': {
