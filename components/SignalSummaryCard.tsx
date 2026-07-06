@@ -802,10 +802,13 @@ function PartialExitMini({ state }: { state: PartialExitState }) {
     : endReason === 'full-take-profit' ? '賺超過 20% 又跌破 MA5 → 總停利'
     : endReason === 'trend-broken' ? '均線多頭排列被破壞（趨勢改變）'
     : '全部出場';
+  // 一天可連破兩條線（如同日跌破 MA5+MA10 → 出 2 份），賣/買份數要用前一日差值算
+  const prevUnits = ladder.length >= 2 ? ladder[ladder.length - 2].unitsHeld : totalUnits;
+  const deltaUnits = Math.abs(unitsHeld - prevUnits);
   const actionText = ended
     ? `分批法已於 ${endEvent?.date ?? '—'} 建議全出（${endWhy}）— 之後續抱是你的選擇`
-    : todayAction === 'sell-third' ? `跌破均線 → 賣 1/3（剩 ${unitsHeld}/${totalUnits}）`
-    : todayAction === 'buy-third' ? `站回均線 → 買回 1/3（持有 ${unitsHeld}/${totalUnits}）`
+    : todayAction === 'sell-third' ? `跌破均線 → 賣 ${deltaUnits}/${totalUnits}（剩 ${unitsHeld}/${totalUnits}）`
+    : todayAction === 'buy-third' ? `站回均線 → 買回 ${deltaUnits}/${totalUnits}（持有 ${unitsHeld}/${totalUnits}）`
     : todayAction === 'flat' ? '已空手'
     : `續抱 ${unitsHeld}/${totalUnits}`;
   const tone = ended && endReason !== 'full-take-profit' ? 'text-rose-300'
