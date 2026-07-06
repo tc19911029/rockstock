@@ -118,7 +118,8 @@ export const LETTER_SOP: Readonly<Record<V12Letter, LetterSOP>> = {
     stopHint: '跌破 C 段底（pivot low）就出（書本停損 5 法 ②）',
     takeProfitHint: '跟 MA20，跌破即停利',
     enhancedDiscipline: false,
-    inapplicableSellSignals: EMPTY_SET,
+    // 操作 MA20 — 突破後回測期股價常在 MA5/MA10 下方震盪，比照 D/O 不因短均線跌破升 verdict
+    inapplicableSellSignals: new Set(['BREAK_MA5', 'BREAK_MA10']),
   },
   K: {
     name: 'K 線橫盤',

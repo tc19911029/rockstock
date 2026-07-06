@@ -363,17 +363,64 @@ export default function SignalSummaryCard() {
   const heldPosition = holdings.find(h => h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === currentSymbol);
   const hasPosition = !!heldPosition;
 
-  // ── 訊號分類 ────────────────────────────────────────────────────────────
-  const subtypes = currentSignals.map(s => s.subtype ?? classifySignal(s));
-  const entrySigs = currentSignals.filter(s => {
-    const t = s.subtype ?? classifySignal(s);
-    return t === 'entry_strong' || t === 'entry_soft' || t === 'trend';
+  // ── 主訊號字母（2026-07-06 持倉買法優先）──────────────────────────────
+  //   持股中：這筆「怎麼買的」（triggerSignal）決定出場 SOP — 面板換策略不改持倉守則
+  //   未持倉：跟掃描面板選的策略（讓訊號跟著策略換）→ V12 偵測 → 持倉字母 → 'B'
+  const ENTRY_LETTERS = new Set(['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']);
+  const V11_ALIAS_MAP: Record<string, string> = { G: 'J', H: 'L', I: 'K' };
+  const heldLetterRaw = heldPosition?.triggerSignal;
+  const heldLetterNorm = heldLetterRaw ? (V11_ALIAS_MAP[heldLetterRaw] ?? heldLetterRaw) : null;
+  const heldLetter: V12Letter | null = heldLetterNorm && ENTRY_LETTERS.has(heldLetterNorm)
+    ? (heldLetterNorm as V12Letter)
+    : null;
+  const normalizedActive = V11_ALIAS_MAP[activeBuyMethod] ?? activeBuyMethod;
+  const strategyLetter: V12Letter | null = ENTRY_LETTERS.has(normalizedActive) ? (normalizedActive as V12Letter) : null;
+  const PRIORITY: EntryLetter[] = ['Q', 'N', 'M', 'P', 'O'];
+  const primaryV12 = PRIORITY.map(l => v12Hits.find(h => h.letter === l)).find(Boolean);
+  const primaryLetter: V12Letter = heldLetter
+    ?? strategyLetter
+    ?? primaryV12?.letter
+    ?? 'B';
+  // 策略視角顯示名（持倉買法優先時標示來源；A/R 不是單一進場字母，特別標示）
+  const strategyName = heldLetter ? `${sopFor(primaryLetter).name}（持倉買法）`
+    : activeBuyMethod === 'A' ? '六條件（預選池）'
+    : activeBuyMethod === 'R' ? '機械軌（乖離率）'
+    : sopFor(primaryLetter).name;
+  // 0513 ABCDE C1：用 letterSOP 取代 getOperationMA 散落定義；對 'short' mode 兩者必須等價
+  // (cross-source consistency test 在 __tests__/letterSOP.test.ts 強制驗)
+  const operatingMA = sopFor(primaryLetter).operatingMA;
+  // 0513 ABCDE E：super-long / wave 已砍；getOperationMA 仍保留處理 'long' upgrade
+  void getOperationMA;
+
+  // ── 訊號分類（出場訊號對齊操作均線）────────────────────────────────────
+  // 持股中：比操作均線「短」的跌破均線出場訊號降級為軟出場（緊盯/減碼，不喊該出場）。
+  // 例：J（ABC 突破）操作 MA20 — 破 MA5/MA10 只是減碼警示，收盤破 MA20 才是硬出場。
+  const MA_RANK: Record<string, number> = { MA3: 1, MA5: 2, MA10: 3, MA20: 4, MA60: 5 };
+  const opRank = MA_RANK[operatingMA] ?? null;
+  const maRankOfSignal = (s: RuleSignal): number | null => {
+    const hay = `${s.ruleId} ${s.label} ${s.description ?? ''}`;
+    const hits = (['MA60', 'MA20', 'MA10', 'MA5', 'MA3'] as const)
+      .filter(m => new RegExp(`${m}(?![0-9])`, 'i').test(hay));
+    return hits.length === 1 ? MA_RANK[hits[0]] : null;  // 一次講多條均線的訊號不動
+  };
+  const classified = currentSignals.map(s => {
+    let t = s.subtype ?? classifySignal(s);
+    if (hasPosition && opRank != null && t === 'exit_strong') {
+      const r = maRankOfSignal(s);
+      if (r != null && r < opRank) t = 'exit_soft';
+    }
+    return { sig: s, subtype: t };
   });
-  const exitSigs = currentSignals.filter(s => {
-    const t = s.subtype ?? classifySignal(s);
-    return t === 'exit_strong' || t === 'exit_soft';
-  });
-  const warnSigs = currentSignals.filter(s => (s.subtype ?? classifySignal(s)) === 'warn');
+  const subtypes = classified.map(c => c.subtype);
+  const entrySigs = classified
+    .filter(c => c.subtype === 'entry_strong' || c.subtype === 'entry_soft' || c.subtype === 'trend')
+    .map(c => c.sig);
+  // 硬出場排前面 — verdict 的 basis 引用 exitSigs[0]，要對到真正觸發「該出場」的那條
+  const exitSigs = [
+    ...classified.filter(c => c.subtype === 'exit_strong'),
+    ...classified.filter(c => c.subtype === 'exit_soft'),
+  ].map(c => c.sig);
+  const warnSigs = classified.filter(c => c.subtype === 'warn').map(c => c.sig);
 
   // 課程 CH2 變盤線家族（2026-07-05 訊號教學化）：母子/遭遇/晨星夜星成形/破實體未破底…
   // 這類「止漲變盤、次日確認」訊號要影響結論列 — 不是硬出場、但也不是「繼續持有沒事」。
@@ -390,28 +437,6 @@ export default function SignalSummaryCard() {
     exitSigs[0]?.description,  // 硬出場時把「為什麼」帶進結論（不再只給訊號名）
     reversalWatchSig ? { label: reversalWatchSig.label, description: reversalWatchSig.description } : null,
   );
-
-  // 主訊號字母 — 優先用掃描面板「選的策略」（讓訊號跟著策略換）：
-  //   activeBuyMethod 是進場字母（B-Q，v11 G/H/I 轉 v12 J/L/K）→ 套它的 SOP（操作均線/停損停利框架）
-  //   A（六條件預選池）/ R（機械軌）非單一進場 SOP → 回退 V12 偵測 / 持倉觸發字母
-  const ENTRY_LETTERS = new Set(['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']);
-  const normalizedActive = ({ G: 'J', H: 'L', I: 'K' } as Record<string, string>)[activeBuyMethod] ?? activeBuyMethod;
-  const strategyLetter: V12Letter | null = ENTRY_LETTERS.has(normalizedActive) ? (normalizedActive as V12Letter) : null;
-  const PRIORITY: EntryLetter[] = ['Q', 'N', 'M', 'P', 'O'];
-  const primaryV12 = PRIORITY.map(l => v12Hits.find(h => h.letter === l)).find(Boolean);
-  const primaryLetter: V12Letter = strategyLetter
-    ?? primaryV12?.letter
-    ?? (heldPosition?.triggerSignal as V12Letter | undefined)
-    ?? 'B';
-  // 策略視角顯示名（A/R 不是單一進場字母，特別標示）
-  const strategyName = activeBuyMethod === 'A' ? '六條件（預選池）'
-    : activeBuyMethod === 'R' ? '機械軌（乖離率）'
-    : sopFor(primaryLetter).name;
-  // 0513 ABCDE C1：用 letterSOP 取代 getOperationMA 散落定義；對 'short' mode 兩者必須等價
-  // (cross-source consistency test 在 __tests__/letterSOP.test.ts 強制驗)
-  const operatingMA = sopFor(primaryLetter).operatingMA;
-  // 0513 ABCDE E：super-long / wave 已砍；getOperationMA 仍保留處理 'long' upgrade
-  void getOperationMA;
 
   // ── 停損 / 停利 ─────────────────────────────────────────────────────────
   // 持股中 vs 未持倉 兩條計算徹底分流，不再共用 entryPrice
