@@ -64,4 +64,5 @@ export const NEWS_JUDGMENT_RULES: JudgmentRule[] = [
   { id: 'n-06', label: 'GDR/增資/可轉債進行中', guidance: '稀釋與折價定價壓力 → 警示；定價日前外資常有套利賣壓。' },
   { id: 'n-07', label: '處置股/注意股', guidance: '處置 = 分盤交易制度層排除（Risk red 域）；注意 = 警示。' },
   { id: 'n-08', label: '券商報告評等', guidance: '晨報/法人報告提及與目標價。⚠️ broker_bullish 樣本窗 d5 超額 −4.63%、勝率 0% — 引用需保守，目標價當參考座標而非依據。' },
+  { id: 'n-09', label: '利多不漲（出貨嫌疑）', guidance: '課程 CH4-1／4-5：財報亮眼或利多頻傳、股價卻不漲反跌 → 主力趁散戶追買時出貨的嫌疑，特別小心（描述性警示，非計分；與價量面「價平量增」互為佐證）。' },
 ];

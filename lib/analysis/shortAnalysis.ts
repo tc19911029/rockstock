@@ -249,10 +249,53 @@ export function detectShortExitSignals(
   // 第7條：收盤從 MA5 之下突破上來 → 空單考慮回補（書本「獲利>10% + 突破MA5 出場」需 ctx.avgCost 才能精確判斷，這裡只發 MA5 結構訊號）
   if (c.ma5 != null && prev?.ma5 != null) {
     if (prev.close <= prev.ma5 && c.close > c.ma5) {
+      // 逐字-4a（課程 CH6-10 橫盤例外）：K線橫盤中紅K站上5均→短線空單「暫不用出場」、改守橫盤突破。
+      // 偵測近 4 根（不含今日）是否為窄幅橫盤（高低區間 < 5%）；是則降級為 watch 並附課程指引。
+      let consolidating = false;
+      if (index >= 5) {
+        const win = [candles[index-1], candles[index-2], candles[index-3], candles[index-4]];
+        const hi = Math.max(...win.map(x => x.high));
+        const lo = Math.min(...win.map(x => x.low));
+        consolidating = lo > 0 && (hi - lo) / lo < 0.05;
+      }
       signals.push({
         type: 'SHORT_BREAK_ABOVE_MA5',
-        label: '突破MA5回補',
-        detail: `收盤(${c.close.toFixed(1)})突破MA5(${c.ma5.toFixed(1)})，空單考慮回補`,
+        label: consolidating ? '突破MA5回補（橫盤例外·暫可續抱）' : '突破MA5回補',
+        detail: consolidating
+          ? `收盤(${c.close.toFixed(1)})突破MA5(${c.ma5.toFixed(1)})，但前 4 日為K線橫盤。課程 CH6-10：橫盤中紅K站上5均空單暫不用出場，改守「橫盤突破」（區間高）才回補`
+          : `收盤(${c.close.toFixed(1)})突破MA5(${c.ma5.toFixed(1)})，空單考慮回補`,
+        severity: consolidating ? 'medium' : 'medium',
+      });
+    }
+  }
+
+  // 逐字-5（課程 CH1-6／1-8 長線空單三回補時機之一）：收盤從月線之下突破月線 → 長線空單回補。
+  // 短線走 MA5（上方第7條），長線守 MA20；「突破月線就回補、還沒站上20均就不補」是長空明確出場點。
+  if (c.ma20 != null && prev?.ma20 != null) {
+    if (prev.close <= prev.ma20 && c.close > c.ma20) {
+      signals.push({
+        type: 'SHORT_BREAK_ABOVE_MA20',
+        label: '突破月線回補（長線空單）',
+        detail: `收盤(${c.close.toFixed(1)})突破月線MA20(${c.ma20.toFixed(1)})，課程 CH1-8：長線空單「反彈突破月線才回補」，此為長空出場時機`,
+        severity: 'high',
+      });
+    }
+  }
+
+  // 逐字-4b（課程 CH6-8 第7點）：空頭下跌黑K，次日出現「並排紅K實體棒」（左長黑右長紅、實體重疊）
+  // → 容易是假下跌，準備停損/回補。比「收盤過黑K高點」的硬停損早一天提醒。
+  if (prev) {
+    const prevBlackBody = (prev.open - prev.close) / (prev.open || 1);
+    const todayRedBody = (c.close - c.open) / (c.open || 1);
+    const prevIsLongBlack = prev.close < prev.open && prevBlackBody >= 0.02;
+    const todayIsLongRed = c.close > c.open && todayRedBody >= 0.02;
+    // 並排＝今日紅K實體與昨日黑K實體有明顯重疊（今開落在昨日實體區間內、今收 ≥ 昨收）
+    const sideBySide = c.open <= prev.open && c.open >= prev.close && c.close >= prev.close;
+    if (prevIsLongBlack && todayIsLongRed && sideBySide) {
+      signals.push({
+        type: 'SHORT_PARALLEL_RED_FALSE_BREAK',
+        label: '並排紅K（假跌破警示）',
+        detail: `昨長黑、今長紅並排實體（左長黑右長紅）。課程 CH6-8：容易是假的下跌，做空/剛跌破者準備停損回補（比過黑K高點早一天）`,
         severity: 'medium',
       });
     }

@@ -453,6 +453,35 @@ export const innerThreeBlack: TradingRule = {
   },
 };
 
+/** 上漲組合4 變體：內困三紅 — 母子懷抱後突破確認反轉（內困三黑的多方鏡像；書-15，2026-07-07 補） */
+export const innerThreeRed: TradingRule = {
+  id: 'kline-inner-three-red',
+  name: '內困三紅（變盤反轉確認）',
+  description: '長黑 + 母子懷抱紅K + 突破長黑高點的長紅',
+  evaluate(candles, index): RuleSignal | null {
+    if (index < 3) return null;
+    const c0 = candles[index - 2]; // 長黑
+    const c1 = candles[index - 1]; // 母子懷抱的紅K（被c0包住）
+    const c2 = candles[index];     // 突破長黑高點的長紅
+
+    if (!isLongBlackCandle(c0)) return null;
+    // c1 被 c0 包住（母子懷抱）
+    if (c1.high > c0.high || c1.low < c0.low) return null;
+    if (!isRedCandle(c1)) return null;
+    // c2 突破 c0 高點
+    if (!isMedLongRed(c2)) return null;
+    if (c2.close <= c0.high) return null;
+
+    return {
+      type: 'BUY',
+      label: '內困三紅反轉',
+      description: `長黑(${c0.close.toFixed(2)}) → 母子懷抱紅K → 長紅突破(${c2.close.toFixed(2)})`,
+      reason: '【朱家泓《抓住K線》第5篇 上漲組合4 內困三紅（內困三黑之多方鏡像）】長黑 + 次日紅K母子懷抱（變盤訊號）+ 再一根長紅突破長黑高點 = 變盤反轉的確認，多方強力表態；突破時放量更佳。',
+      ruleId: this.id,
+    };
+  },
+};
+
 /** 組合5：下跌黑紅黑 — 階梯式下跌，紅K是誘多 */
 export const blackRedBlack: TradingRule = {
   id: 'kline-black-red-black',
@@ -544,13 +573,14 @@ export const downGapFilled: TradingRule = {
   },
 };
 
-/** 全部 15 條行進中K線組合規則 */
+/** 全部 16 條行進中K線組合規則（上漲 9 + 下跌 7；內困三紅 2026-07-07 補齊多空鏡像） */
 export const KLINE_COMBO_RULES: TradingRule[] = [
-  // 上漲中 8 種
+  // 上漲中 9 種
   oneStarTwoYang,
   risingThreeMethods,
   threeLineReverseRed,
   threeConsecutiveRed,
+  innerThreeRed,
   redBlackRed,
   smallStepUp,
   majorResistanceAhead,

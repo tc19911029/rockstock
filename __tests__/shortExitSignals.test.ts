@@ -43,3 +43,35 @@ describe('detectShortExitSignals — 過前高回補（頭頭高）', () => {
     expect(signals.some((s) => s.type === 'SHORT_BREAK_PREV_HIGH')).toBe(false);
   });
 });
+
+// 逐字-5：長線空單「收盤突破月線 MA20 → 回補」
+describe('detectShortExitSignals — 突破月線回補（長線空單）', () => {
+  function barMa(close: number, ma20: number, ma5?: number): CandleWithIndicators {
+    return { date: 'd', open: close, close, high: close + 0.2, low: close - 0.2, volume: 1000, ma20, ma5: ma5 ?? close } as unknown as CandleWithIndicators;
+  }
+  test('昨收在月線下、今收突破月線 → 報 MA20 回補', () => {
+    const base = Array.from({ length: 10 }, () => barMa(90, 100));
+    const candles = [...base, barMa(99, 100), barMa(101, 100)]; // 昨99<100、今101>100
+    const signals = detectShortExitSignals(candles, candles.length - 1);
+    expect(signals.some((s) => s.type === 'SHORT_BREAK_ABOVE_MA20')).toBe(true);
+  });
+  test('持續在月線下 → 不報', () => {
+    const candles = Array.from({ length: 12 }, () => barMa(95, 100));
+    const signals = detectShortExitSignals(candles, candles.length - 1);
+    expect(signals.some((s) => s.type === 'SHORT_BREAK_ABOVE_MA20')).toBe(false);
+  });
+});
+
+// 逐字-4b：進場黑K次日並排紅K（左長黑右長紅）＝假跌破警示
+describe('detectShortExitSignals — 並排紅K假跌破', () => {
+  function ohlc(open: number, close: number): CandleWithIndicators {
+    return { date: 'd', open, close, high: Math.max(open, close) + 0.1, low: Math.min(open, close) - 0.1, volume: 1000, ma5: 100, ma20: 100 } as unknown as CandleWithIndicators;
+  }
+  test('昨長黑、今長紅並排實體 → 報假跌破', () => {
+    const base = Array.from({ length: 6 }, () => ohlc(100, 100));
+    // 昨長黑 100→96（-4%），今長紅 96.5→99（開落在昨實體內、收≥昨收）
+    const candles = [...base, ohlc(100, 96), ohlc(96.5, 99)];
+    const signals = detectShortExitSignals(candles, candles.length - 1);
+    expect(signals.some((s) => s.type === 'SHORT_PARALLEL_RED_FALSE_BREAK')).toBe(true);
+  });
+});

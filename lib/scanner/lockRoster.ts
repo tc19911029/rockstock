@@ -194,11 +194,19 @@ export function classifyHuntCategory(
     // ④ 等上漲：回檔中（收盤在5均下、未破前低）→ 進場比等拉回快（課程原話）
     if (c.ma5 != null && c.close < c.ma5) {
       const prevHigh = candles[idx - 1]?.high ?? c.high;
+      const prevLow = candles[idx - 1]?.low ?? c.low;
+      // 逐字-15（課程 CH5-2 原話）：回檔第二天就止跌（出長下影線／紅K、且沒再破前一日低）→
+      // 「這支我明天第一個就看你」，擺最前面。urgency 拉到與三角收斂尾端同級。
+      const lowerShadow = Math.min(c.open, c.close) - c.low;
+      const body = Math.abs(c.close - c.open);
+      const stoppedFalling = c.low >= prevLow && (c.close > c.open || lowerShadow > body);
       return {
         category: 4, label: HUNT_LABELS[4],
         waitingFor: `站回5均＋大量紅K過前一日最高 ${prevHigh.toFixed(2)}（回後買上漲）`,
-        urgency: 65,
-        urgencyDetail: '已在回檔中，符合條件就做（比等拉回類快）',
+        urgency: stoppedFalling ? 90 : 65,
+        urgencyDetail: stoppedFalling
+          ? '回檔第二天就止跌（長下影／紅K未破前低），擺最前面明天第一個看（課程 CH5-2 原話）'
+          : '已在回檔中，符合條件就做（比等拉回類快）',
         triggerLevel: prevHigh,
       };
     }

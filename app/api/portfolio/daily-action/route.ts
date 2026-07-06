@@ -203,7 +203,40 @@ export async function GET(req: NextRequest) {
             detail: `進場後盤中曾觸及 +10% 價位（${target10.toFixed(2)}，實際最高 ${peak.toFixed(2)}），今日收盤 ${todayClose.toFixed(2)} 跌破 MA5 ${ma5.toFixed(2)}。課程 CH8-3：達標＝「曾摸到 10% 價位」即算，此時破 5 均就該停利（就算現在只剩 +${(curProfitPct * 100).toFixed(1)}%）。系統硬出場仍走收盤獲利率判定（未改），此為紀律提示。`,
           };
         })();
-        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...result.signals];
+        // 課程 CH2-4（2026-07-06，逐字-6）：大量長紅K 的最高價＝第一層支撐。跌破後「3~5 日內要站回紅K之上」，
+        // 否則很有機會轉折向下。candleSRLevels 原本只畫線、無「已跌破 N 日未站回」監控 → 這裡補持倉/走圖提示（做多）。
+        const srNoRegainAdvisory = (() => {
+          if (positionSide !== 'long') return null;
+          const n = candles.length;
+          // 近 30 根找最後一根「大量長紅K」當支撐錨（實體≥2%、量≥5日均量×1.5）
+          let anchorIdx = -1;
+          for (let i = n - 2; i >= Math.max(1, n - 30); i--) {
+            const k = candles[i];
+            const body = k.open > 0 ? (k.close - k.open) / k.open : 0;
+            if (!(k.close > k.open && body >= 0.02)) continue;
+            const vols = candles.slice(Math.max(0, i - 5), i).map(x => x.volume);
+            const avg5 = vols.length ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
+            if (avg5 > 0 && k.volume >= avg5 * 1.5) { anchorIdx = i; break; }
+          }
+          if (anchorIdx < 0) return null;
+          const anchorHigh = candles[anchorIdx].high;
+          // 錨之後第一根收盤跌破 anchorHigh 的日子
+          let breakIdx = -1;
+          for (let i = anchorIdx + 1; i < n; i++) {
+            if (candles[i].close < anchorHigh) { breakIdx = i; break; }
+          }
+          if (breakIdx < 0) return null;
+          if (todayClose >= anchorHigh) return null; // 今日已站回，不警示
+          const daysSince = (n - 1) - breakIdx + 1;
+          if (daysSince < 3) return null; // 課程給 3~5 日緩衝
+          return {
+            type: 'ch24_support_no_regain',
+            label: daysSince >= 5 ? '⚠️ 大量長紅高價跌破逾5日未站回' : '📗 大量長紅高價跌破，注意 3~5 日站回',
+            severity: daysSince >= 5 ? 'high' as const : 'medium' as const,
+            detail: `大量長紅K 最高價 ${anchorHigh.toFixed(2)}（第一層支撐）已跌破 ${daysSince} 日未站回（今收 ${todayClose.toFixed(2)}）。課程 CH2-4：跌破後 3~5 日內要站回紅K之上，否則很有機會轉折向下，宜提高警覺。`,
+          };
+        })();
+        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...result.signals];
         return {
           ...base,
           todayClose,
