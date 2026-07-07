@@ -335,6 +335,45 @@ export function detectShortExitSignals(
     }
   }
 
+  // 逐字-10a（課程 CH1-6）：空單連跌 3 天以上、累跌 > 8% → 容易反彈，若「有紅K上來」可先短線獲利一趟。
+  // 比 SHORT_CLIMAX_COVER（要大量長紅覆蓋）輕，是「先落袋一趟」的主動提示，非趨勢反轉。
+  // 累跌從「下跌前」(index-4 收盤) 量到「谷底」(index-1 收盤)，今日(index)為紅K反彈。
+  if (index >= 5) {
+    const prev3Down = [candles[index - 1], candles[index - 2], candles[index - 3]].every(x => x.close < x.open);
+    const declineRef = candles[index - 4];
+    const bottom = candles[index - 1];
+    const drop3 = declineRef && declineRef.close > 0 ? (declineRef.close - bottom.close) / declineRef.close : 0;
+    const redComesUp = c.close > c.open; // 「有紅K上來」前置（課程原話）
+    if (prev3Down && drop3 > 0.08 && redComesUp) {
+      signals.push({
+        type: 'SHORT_PLUNGE_3D_TAKE_PROFIT',
+        label: '連跌3天逾8%＋紅K → 先獲利一趟',
+        detail: `連跌 3 天累跌 ${(drop3 * 100).toFixed(1)}%（>8%）後今日紅K上來，課程 CH1-6：容易反彈，短空單可先短線獲利一趟（非趨勢反轉、回補後仍可再空）`,
+        severity: 'medium',
+      });
+    }
+  }
+
+  // 逐字-10b（課程 CH8-3 做空守則6）：急跌 > 15% 後出現爆量長紅/長下影 → 分批回補（先補一半、隔日再漲全補）。
+  // 做空效率低，門檻用 15%（非多單 20%）。此為分批提示（sizing 由人決定，engine 不管股數）。
+  if (index >= 6) {
+    const base6 = candles[index - 6];
+    const drop6 = base6 && base6.close > 0 ? (base6.close - c.close) / base6.close : 0;
+    const avgVol5 = c.avgVol5;
+    const bigVol = avgVol5 != null && avgVol5 > 0 && c.volume >= avgVol5 * 1.5;
+    const longRed = c.close > c.open && (c.close - c.open) / c.open >= 0.02;
+    const longLowerShadow = dayRange > 0 && lowerShadow > bodySize;
+    if (drop6 > 0.15 && bigVol && (longRed || longLowerShadow)) {
+      signals.push({
+        type: 'SHORT_15PCT_PARTIAL_COVER',
+        label: '急跌逾15%＋爆量長紅/下影 → 分批回補',
+        detail: `近 6 日急跌 ${(drop6 * 100).toFixed(1)}%（>15%）後爆量${longRed ? '長紅' : '長下影'}，課程 CH8-3 做空守則6：先回補一半，隔日再漲全補（做空效率低，門檻取 15% 非 20%）`,
+        // medium → watch_stop（盯著分批回補），不用 high/cover_all 以免與「先補一半」語意衝突
+        severity: 'medium',
+      });
+    }
+  }
+
   return signals;
 }
 

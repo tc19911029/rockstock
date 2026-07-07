@@ -68,6 +68,22 @@ function volInfo(candles: CandleWithIndicators[], idx: number): { ratio: number 
   return { ratio, has: ratio >= BOOK_VOL_RATIO_MIN };
 }
 
+/** 跳空下跌 tag（課程 6-8/6-9/6-11/6-12：「當天若是跳空下跌的中長黑，力道更強、更要把握」）— 做空側顯示補齊 */
+function gapDownTag(candles: CandleWithIndicators[], idx: number): string {
+  const c = candles[idx], prev = candles[idx - 1];
+  return prev && c.open > 0 && c.open < prev.close ? '｜跳空下跌力道更強' : '';
+}
+
+/** 某根紅K是否為「大量紅K」（相對其前 5 根均量 ≥1.3；資料不足時放行）— S7 反彈紅K用（課程 6-14「大量紅K反彈」） */
+function isBigVolRedBar(candles: CandleWithIndicators[], j: number): boolean {
+  const r = candles[j];
+  if (!(r.close > r.open)) return false;
+  const prior = candles.slice(Math.max(0, j - 5), j);
+  if (prior.length < 3) return true; // 資料不足不擋
+  const avg = prior.reduce((s, x) => s + x.volume, 0) / prior.length;
+  return avg <= 0 || r.volume >= avg * 1.3;
+}
+
 /** S1 彈後空下跌（6-8）：空頭反彈未過前高 → 中長黑破前日低＋破5均，月線下向下；量不要求 */
 function detectS1ReboundShort(candles: CandleWithIndicators[], idx: number): ShortEntrySignal | null {
   const c = candles[idx], prev = candles[idx - 1];
@@ -87,7 +103,7 @@ function detectS1ReboundShort(candles: CandleWithIndicators[], idx: number): Sho
   return {
     position: 1, id: 'S1_rebound_short', name: '彈後空下跌',
     stopLoss: c.high, volumeRatio: v.ratio, hasVolume: v.has,
-    detail: `空頭反彈未過前高，中長黑收 ${c.close.toFixed(2)} 破前日低 ${prev.low.toFixed(2)}＋破5均（課程 6-8；量不要求）`,
+    detail: `空頭反彈未過前高，中長黑收 ${c.close.toFixed(2)} 破前日低 ${prev.low.toFixed(2)}＋破5均（課程 6-8；量不要求）${gapDownTag(candles, idx)}`,
   };
 }
 
@@ -115,7 +131,7 @@ function detectS2RangeBreakdown(candles: CandleWithIndicators[], idx: number): S
   return {
     position: 2, id: 'S2_range_breakdown', name: '盤整的跌破',
     stopLoss: c.high, volumeRatio: v.ratio, hasVolume: v.has,
-    detail: `中長黑收 ${c.close.toFixed(2)} 首次跌破盤整下頸線 ${at(idx).toFixed(2)}（課程 6-9；月線下向下${v.has ? '＋大量' : ''}）`,
+    detail: `中長黑收 ${c.close.toFixed(2)} 首次跌破盤整下頸線 ${at(idx).toFixed(2)}（課程 6-9；月線下向下${v.has ? '＋大量' : ''}）${gapDownTag(candles, idx)}`,
   };
 }
 
@@ -220,7 +236,7 @@ function detectS6ChannelBreakdown(candles: CandleWithIndicators[], idx: number):
   return {
     position: 6, id: 'S6_channel_breakdown', name: '跌破下跌軌道線',
     stopLoss: c.high, volumeRatio: v.ratio, hasVolume: v.has,
-    detail: `大量中長黑收 ${c.close.toFixed(2)} 跌破下降軌道線 ${lineToday.toFixed(2)}，空方轉強（課程 6-13）`,
+    detail: `大量中長黑收 ${c.close.toFixed(2)} 跌破下降軌道線 ${lineToday.toFixed(2)}，空方轉強（課程 6-13）${gapDownTag(candles, idx)}`,
   };
 }
 
@@ -234,6 +250,7 @@ function detectS7PlungeReboundBreak(candles: CandleWithIndicators[], idx: number
   for (let j = idx - 1; j >= Math.max(1, idx - 3); j--) {
     const r = candles[j];
     if (!(r.open > 0 && r.close > r.open && (r.close - r.open) / r.open >= MIN_BODY_PCT)) continue;
+    if (!isBigVolRedBar(candles, j)) continue;                 // 課程 6-14：反彈紅K要「大量紅K」
     if (c.close >= r.low) continue;                            // 收盤跌破反彈紅K最低點
     // 下跌飆股：反彈紅K 之前 20 根累跌 >20%（⚠️ 課程無數字，鏡像 L 軌）
     const base = candles[Math.max(0, j - 20)];
@@ -243,7 +260,7 @@ function detectS7PlungeReboundBreak(candles: CandleWithIndicators[], idx: number
     return {
       position: 7, id: 'S7_plunge_rebound_break', name: '飆股反彈紅K低點跌破',
       stopLoss: c.high, volumeRatio: v.ratio, hasVolume: v.has,
-      detail: `下跌飆股反彈紅K（${r.date}）低點 ${r.low.toFixed(2)} 被大量中長黑收 ${c.close.toFixed(2)} 跌破（課程 6-14）`,
+      detail: `下跌飆股大量反彈紅K（${r.date}）低點 ${r.low.toFixed(2)} 被大量中長黑收 ${c.close.toFixed(2)} 跌破（課程 6-14）${gapDownTag(candles, idx)}`,
     };
   }
   return null;

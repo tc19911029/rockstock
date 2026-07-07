@@ -62,6 +62,26 @@ describe('detectShortExitSignals — 突破月線回補（長線空單）', () =
   });
 });
 
+// 逐字-10a：空單連跌3天>8% + 今日紅K → 先獲利一趟
+describe('detectShortExitSignals — 連跌3天逾8%先獲利一趟', () => {
+  function ohlc(open: number, close: number): CandleWithIndicators {
+    return { date: 'd', open, close, high: Math.max(open, close) + 0.1, low: Math.min(open, close) - 0.1, volume: 1000, ma5: 200, ma20: 200 } as unknown as CandleWithIndicators;
+  }
+  test('連跌3天累跌>8% + 今日紅K → 報先獲利一趟', () => {
+    const base = Array.from({ length: 5 }, () => ohlc(100, 100));
+    // 3 天連跌：100→97→94→91（base3=100, today 收紅 92>開91.5，累跌 (100-92)/100=8%... 用更深）
+    const candles = [...base, ohlc(100, 100), ohlc(100, 96), ohlc(96, 93), ohlc(93, 90), ohlc(90.5, 92)];
+    const signals = detectShortExitSignals(candles, candles.length - 1);
+    expect(signals.some(s => s.type === 'SHORT_PLUNGE_3D_TAKE_PROFIT')).toBe(true);
+  });
+  test('連跌3天但今日續黑（沒紅K上來）→ 不報', () => {
+    const base = Array.from({ length: 5 }, () => ohlc(100, 100));
+    const candles = [...base, ohlc(100, 100), ohlc(100, 96), ohlc(96, 93), ohlc(93, 90), ohlc(90, 88)];
+    const signals = detectShortExitSignals(candles, candles.length - 1);
+    expect(signals.some(s => s.type === 'SHORT_PLUNGE_3D_TAKE_PROFIT')).toBe(false);
+  });
+});
+
 // 逐字-4b：進場黑K次日並排紅K（左長黑右長紅）＝假跌破警示
 describe('detectShortExitSignals — 並排紅K假跌破', () => {
   function ohlc(open: number, close: number): CandleWithIndicators {
