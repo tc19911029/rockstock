@@ -121,8 +121,8 @@ export function normalizeRating(raw: string): BrokerRatingNormalized {
   if (/減少持股|賣出|減碼|劣於大盤|區間偏空/.test(s)) return 'sell';
   if (/增加持股|買進|加碼|強力買進|逢低買進|優於大盤|區間偏多|看好/.test(s)) return 'buy';
   if (/中立|區間操作|區間整理|同步大盤|持有/.test(s)) return 'neutral';
-  if (/(^|[^a-z])(overweight|ow)([^a-z]|$)/.test(s)) return 'overweight';
-  if (/(^|[^a-z])(underweight|uw)([^a-z]|$)/.test(s)) return 'underweight';
+  if (/(^|[^a-z])(overweight|overwt|ow)([^a-z]|$)/.test(s)) return 'overweight';
+  if (/(^|[^a-z])(underweight|underwt|uw)([^a-z]|$)/.test(s)) return 'underweight';
   if (/(equal[\s-]?weight|equalwt|(^|[^a-z])ew([^a-z]|$)|market[\s-]?perform|in[\s-]?line|neutral)/.test(s)) return 'neutral';
   if (/(outperform|strong\s*buy|conviction|(^|[^a-z])buy([^a-z]|$)|accumulate|(^|[^a-z])add([^a-z]|$)|(^|[^a-z])long([^a-z]|$))/.test(s)) return 'buy';
   if (/(underperform|(^|[^a-z])sell([^a-z]|$)|reduce|(^|[^a-z])short([^a-z]|$))/.test(s)) return 'sell';
