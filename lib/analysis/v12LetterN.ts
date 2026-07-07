@@ -43,11 +43,15 @@ export type PatternType =
   // 2026-05-10 補入：
   | 'n-shape';             // N 字底（A 高→B 低→C 突破 A 高）
 
-/** 頂部型態（向下跌破做空 / 出場警示，2026-05-10 補實作） */
+/** 頂部型態（向下跌破做空 / 出場警示，2026-05-10 補實作；2026-07-07 補 S4 v2 四型） */
 export type TopPatternType =
-  | 'head-shoulder-top'    // 頭肩頂
-  | 'triple-top'           // 三重頂
-  | 'double-top';          // 雙重頂
+  | 'head-shoulder-top'          // 頭肩頂
+  | 'triple-top'                 // 三重頂
+  | 'double-top'                 // 雙重頂
+  | 'complex-head-shoulder-top'  // 複式頭肩頂（多肩，S4 v2）
+  | 'inverted-n-top'             // 倒N字頂（高→低→反彈不過高→跌破，S4 v2）
+  | 'long-double-top'            // 長雙頭頂（兩頂間隔久，較雙重頂可靠，S4 v2）
+  | 'one-line-top';              // 一字頂 / 島狀反轉頂（跳空孤島，S4 v2）
 
 const PATTERN_ACHIEVEMENT: Record<PatternType, number> = {
   'head-shoulder': 83,
@@ -61,9 +65,13 @@ const PATTERN_ACHIEVEMENT: Record<PatternType, number> = {
 };
 
 const TOP_PATTERN_ACHIEVEMENT: Record<TopPatternType, number> = {
-  'head-shoulder-top': 83,  // 對稱頭肩底
-  'triple-top': 95,         // 對稱三重底
-  'double-top': 36,         // 對稱雙重底
+  'head-shoulder-top': 83,          // 對稱頭肩底
+  'triple-top': 95,                 // 對稱三重底
+  'double-top': 36,                 // 對稱雙重底
+  'complex-head-shoulder-top': 80,  // 對稱複式頭肩底
+  'inverted-n-top': 75,             // 對稱 n-shape（保守）
+  'long-double-top': 50,            // 長雙頭頂：間隔久較可靠，介於雙重(36)與三重(95)
+  'one-line-top': 85,               // 島狀反轉頂（跳空孤島，強反轉）
 };
 
 export interface LetterNResult {
@@ -274,6 +282,10 @@ function getTopPatternName(t: TopPatternType): string {
     'head-shoulder-top': '頭肩頂',
     'triple-top': '三重頂',
     'double-top': '雙重頂',
+    'complex-head-shoulder-top': '複式頭肩頂',
+    'inverted-n-top': '倒N字頂',
+    'long-double-top': '長雙頭頂',
+    'one-line-top': '一字頂',
   };
   return names[t];
 }
@@ -771,11 +783,23 @@ export function detectTopPatterns(
   const tripleTop = detectTripleTop(candles, idx);
   if (tripleTop) return makeTopResult(tripleTop, c.close);
 
+  const complexHST = detectComplexHeadShoulderTop(candles, idx);   // 複式在頭肩前（較特定）
+  if (complexHST) return makeTopResult(complexHST, c.close);
+
   const headShoulderTop = detectHeadShoulderTop(candles, idx);
   if (headShoulderTop) return makeTopResult(headShoulderTop, c.close);
 
+  const longDoubleTop = detectLongDoubleTop(candles, idx);          // 長雙頭在雙重前（較特定）
+  if (longDoubleTop) return makeTopResult(longDoubleTop, c.close);
+
   const doubleTop = detectDoubleTop(candles, idx);
   if (doubleTop) return makeTopResult(doubleTop, c.close);
+
+  const invertedNTop = detectInvertedNTop(candles, idx);
+  if (invertedNTop) return makeTopResult(invertedNTop, c.close);
+
+  const oneLineTop = detectOneLineTop(candles, idx);
+  if (oneLineTop) return makeTopResult(oneLineTop, c.close);
 
   return empty;
 }
@@ -789,7 +813,10 @@ export function detectTopPatternsStructure(
 ): TopPatternResult {
   if (idx < N_MIN_HISTORY || candles.length === 0) return { triggered: false, detail: '' };
 
-  const detectors = [detectTripleTop, detectHeadShoulderTop, detectDoubleTop];
+  const detectors = [
+    detectTripleTop, detectComplexHeadShoulderTop, detectHeadShoulderTop,
+    detectLongDoubleTop, detectDoubleTop, detectInvertedNTop, detectOneLineTop,
+  ];
   for (const d of detectors) {
     const m = d(candles, idx);
     if (m) {
@@ -987,4 +1014,84 @@ function detectDoubleTop(
     structureBrokenPrice,
     pivots: [high1, high2, valleyLow],
   };
+}
+
+// ── S4 v2（2026-07-07 補齊 4 型，皆顯示層；先於對應基本型偵測以取更精確分類）──────
+
+// 長雙頭頂（課程 6-11）：兩頂價位相近但「間隔久」（≥ LONG_DOUBLE_MIN_GAP 根），比一般雙重頂可靠。
+const LONG_DOUBLE_MIN_GAP = 20;
+function detectLongDoubleTop(candles: CandleWithIndicators[], idx: number): TopPatternMatch | null {
+  const pivots = findPivots(candles, idx, 12, false, 0.005);
+  const highs = pivots.filter(p => p.type === 'high').slice(0, 2);
+  const allLows = pivots.filter(p => p.type === 'low');
+  if (highs.length < 2) return null;
+  const [high1, high2] = highs; // high1 較新、high2 較舊
+  if (high1.index - high2.index < LONG_DOUBLE_MIN_GAP) return null;   // 必須間隔久才算「長」雙頭
+  const minH = Math.min(high1.price, high2.price), maxH = Math.max(high1.price, high2.price);
+  if ((maxH - minH) / minH > DOUBLE_TOP_TOLERANCE_PCT) return null;
+  const interiorLows = allLows.filter(l => l.index > high2.index && l.index < high1.index);
+  if (interiorLows.length < 1) return null;
+  const necklinePrice = Math.min(...interiorLows.map(l => l.price));
+  const patternTargetPrice = necklinePrice - (maxH - necklinePrice);
+  const valleyLow = interiorLows.find(l => l.price === necklinePrice) ?? interiorLows[0];
+  return { patternType: 'long-double-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [high1, high2, valleyLow] };
+}
+
+// 複式頭肩頂（課程 6-11）：頭部最高、兩側各 ≥2 個相近價位的肩。
+function detectComplexHeadShoulderTop(candles: CandleWithIndicators[], idx: number): TopPatternMatch | null {
+  const pivots = findPivots(candles, idx, 10, false, 0.005);
+  const highs = pivots.filter(p => p.type === 'high').slice(0, 5);
+  const allLows = pivots.filter(p => p.type === 'low');
+  if (highs.length < 5 || allLows.length < 2) return null;
+  // 頭 = 5 高點中最高者，且必須是「內部」（兩側都有肩）
+  let headArrIdx = 0;
+  for (let i = 1; i < highs.length; i++) if (highs[i].price > highs[headArrIdx].price) headArrIdx = i;
+  if (headArrIdx === 0 || headArrIdx === highs.length - 1) return null;
+  const head = highs[headArrIdx];
+  const rightShoulders = highs.slice(0, headArrIdx);        // 較新側
+  const leftShoulders = highs.slice(headArrIdx + 1);        // 較舊側
+  if (rightShoulders.length < 2 || leftShoulders.length < 2) return null;  // 複式 = 每側 ≥2 肩
+  const shoulders = [...rightShoulders, ...leftShoulders];
+  if (shoulders.some(s => s.price >= head.price)) return null;            // 肩皆低於頭
+  const shAvg = shoulders.reduce((s, x) => s + x.price, 0) / shoulders.length;
+  if (shoulders.some(s => Math.abs(s.price - shAvg) / shAvg > 0.12)) return null;  // 肩價位相近
+  const interiorLows = allLows.filter(l => l.index > highs[highs.length - 1].index && l.index < highs[0].index);
+  if (interiorLows.length < 2) return null;
+  const necklinePrice = Math.max(...interiorLows.map(l => l.price));
+  const patternTargetPrice = necklinePrice - (head.price - necklinePrice);
+  return { patternType: 'complex-head-shoulder-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [head, ...shoulders] };
+}
+
+// 倒N字頂（課程 6-11，n-shape 底之鏡像）：高A → 低B → 反彈高C（不過A＝頭頭低）→ 跌破B。
+function detectInvertedNTop(candles: CandleWithIndicators[], idx: number): TopPatternMatch | null {
+  const pivots = findPivots(candles, idx, 10, false, 0.005);
+  const highs = pivots.filter(p => p.type === 'high').slice(0, 2);
+  const lows = pivots.filter(p => p.type === 'low');
+  if (highs.length < 2 || lows.length < 1) return null;
+  const [highC, highA] = highs;                    // C 較新、A 較舊
+  if (highC.price >= highA.price) return null;      // 頭頭低（反彈不過前高）
+  if ((highA.price - highC.price) / highA.price < 0.03) return null;  // C 明顯低於 A，避免雙頂誤判
+  const lowB = lows.find(l => l.index > highC.index && l.index < highA.index);   // A、C 之間的低點
+  if (!lowB) return null;
+  const necklinePrice = lowB.price;                 // 跌破 B = 倒N確認（makeTopResult 判 close ≤ B×0.97）
+  const patternTargetPrice = necklinePrice - (highA.price - necklinePrice);
+  return { patternType: 'inverted-n-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [highC, highA, lowB] };
+}
+
+// 一字頂 / 島狀反轉頂（課程 6-11 / 抓住線圖）：向上跳空進入孤島 → 高點 → 向下跳空離開，跌破缺口下緣確認。
+function detectOneLineTop(candles: CandleWithIndicators[], idx: number): TopPatternMatch | null {
+  const lo = Math.max(1, idx - 20);
+  let gapUpIdx = -1, gapDownIdx = -1;
+  for (let i = lo + 1; i <= idx; i++) {
+    if (gapUpIdx < 0 && candles[i].low > candles[i - 1].high) gapUpIdx = i;                       // 向上跳空進入
+    else if (gapUpIdx >= 0 && gapDownIdx < 0 && candles[i].high < candles[i - 1].low) gapDownIdx = i; // 向下跳空離開
+  }
+  if (gapUpIdx < 1 || gapDownIdx <= gapUpIdx) return null;
+  let islandHigh = -Infinity, islandHighIdx = gapUpIdx;
+  for (let i = gapUpIdx; i < gapDownIdx; i++) if (candles[i].high > islandHigh) { islandHigh = candles[i].high; islandHighIdx = i; }
+  const necklinePrice = candles[gapUpIdx - 1].high;   // 缺口下緣（跳空前一根高點）
+  if (islandHigh <= necklinePrice) return null;
+  const patternTargetPrice = necklinePrice - (islandHigh - necklinePrice);
+  const pv = (index: number, price: number): Pivot => ({ index, price, type: 'high' });
+  return { patternType: 'one-line-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [pv(islandHighIdx, islandHigh), pv(gapUpIdx - 1, necklinePrice)] };
 }

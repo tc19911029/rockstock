@@ -89,6 +89,10 @@ const TOP_PATTERN_LABEL: Record<TopPatternType, string> = {
   'head-shoulder-top': '頭肩頂',
   'triple-top': '三重頂',
   'double-top': '雙重頂',
+  'complex-head-shoulder-top': '複式頭肩頂',
+  'inverted-n-top': '倒N字頂',
+  'long-double-top': '長雙頭頂',
+  'one-line-top': '一字頂',
 };
 
 /** V12 字母解釋（hover tooltip 顯示）— 用於「操作均線」行的字母 underline */

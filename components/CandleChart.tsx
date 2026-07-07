@@ -91,6 +91,10 @@ function getPatternDisplayName(patternType: string): string {
     'triple-top': '三重頂',
     'head-shoulder-top': '頭肩頂',
     'double-top': '雙重頂',
+    'complex-head-shoulder-top': '複式頭肩頂',
+    'inverted-n-top': '倒N字頂',
+    'long-double-top': '長雙頭頂',
+    'one-line-top': '一字頂',
   };
   return names[patternType] ?? patternType;
 }
@@ -108,6 +112,13 @@ function getPivotLabels(patternType: string, pivots: Pivot[]): string[] {
     case 'triple-top':          return ['H1', 'H2', 'H3', 'L1', 'L2'];
     case 'head-shoulder-top':   return ['RS', '頂', 'LS', 'RN', 'LN'];
     case 'double-top':          return ['H1', 'H2', 'L'];
+    case 'long-double-top':     return ['H1', 'H2', 'L'];               // 同雙重頂結構（間隔久）
+    case 'inverted-n-top':      return ['C', 'A', 'B'];                 // 高C(頭頭低)/前高A/頸線B
+    case 'one-line-top':        return ['島頂', '缺口'];                 // 孤島高點 / 跳空缺口下緣
+    case 'complex-head-shoulder-top': {
+      // 結構：[head, ...shoulders]（head 在首位，其餘皆肩）
+      return pivots.map((_, i) => (i === 0 ? '頭' : `肩${i}`));
+    }
     case 'complex-head-shoulder': {
       // 結構：[...rightShoulders, head(最低), ...leftShoulders, h1, h2]
       // 找 head：lows 中 price 最小者
