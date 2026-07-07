@@ -159,14 +159,19 @@ export function canUpgradeToLongTerm(
   entryPrice: number,
   currentMode: OperationMode,
   weeklyBullish?: boolean,
-): { canUpgrade: boolean; profitPct: number; weeklyBullish?: boolean } {
+  opts?: { fourLineBullish?: boolean; nearDoubled?: boolean },
+): { canUpgrade: boolean; profitPct: number; weeklyBullish?: boolean; blockedBy?: string } {
   const profitPct = (currentClose - entryPrice) / entryPrice;
   const weeklyOk = weeklyBullish !== false; // 缺值 = 不擋（向下相容）
-  return {
-    canUpgrade: profitPct >= 0.10 && currentMode === 'short' && weeklyOk,
-    profitPct,
-    weeklyBullish,
-  };
+  // 逐字-22（課程 8-4）：升級長線兩個前置 —— 日線「四線多排」才開始做長線、且非末升段（漲近一倍）不可升。
+  // 皆缺值不擋（向下相容）。
+  const fourLineOk = opts?.fourLineBullish !== false;
+  const notEndStage = opts?.nearDoubled !== true;
+  const canUpgrade = profitPct >= 0.10 && currentMode === 'short' && weeklyOk && fourLineOk && notEndStage;
+  const blockedBy = !canUpgrade
+    ? (profitPct < 0.10 ? '獲利未達10%' : currentMode !== 'short' ? '非短線模式' : !weeklyOk ? '週線未多頭' : !fourLineOk ? '日線非四線多排（課程8-4）' : !notEndStage ? '已到末升段/漲近一倍（課程8-4禁升長線）' : undefined)
+    : undefined;
+  return { canUpgrade, profitPct, weeklyBullish, blockedBy };
 }
 
 // ── Step 4 ④ 升級超長線（2026-05-09 新增三階升級）─────────────────────

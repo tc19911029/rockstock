@@ -236,7 +236,20 @@ export async function GET(req: NextRequest) {
             detail: `大量長紅K 最高價 ${anchorHigh.toFixed(2)}（第一層支撐）已跌破 ${daysSince} 日未站回（今收 ${todayClose.toFixed(2)}）。課程 CH2-4：跌破後 3~5 日內要站回紅K之上，否則很有機會轉折向下，宜提高警覺。`,
           };
         })();
-        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...result.signals];
+        // 課程 CH7-3（2026-07-07，逐字-26）：每日檢視「自買價跌幅 > 5%」列警示股準備賣出（做多）。
+        // 與賠少-16「當日跌幅>5%」（單日）、watch_stop（距停損<3%）基準不同 —— 這是自進場價的累計跌幅。
+        const fromEntryAdvisory = (() => {
+          if (positionSide !== 'long') return null;
+          const dropFromEntry = (h.entryPrice - todayClose) / h.entryPrice;
+          if (dropFromEntry <= 0.05) return null;
+          return {
+            type: 'ch73_down_5pct_from_entry',
+            label: '📗 自買價已跌逾5%（警示股）',
+            severity: 'medium' as const,
+            detail: `自進場價 ${h.entryPrice} 跌 ${(dropFromEntry * 100).toFixed(1)}%（今收 ${todayClose.toFixed(2)}）。課程 CH7-3：每日檢視自買價跌幅 > 5% 應列警示股、準備賣出，別放任凹單。`,
+          };
+        })();
+        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
         return {
           ...base,
           todayClose,

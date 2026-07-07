@@ -193,8 +193,9 @@ export const granvilleBuy4: TradingRule = {
   name: '葛蘭碧④：急跌遠離均線反彈',
   description: '價格急跌遠離MA20（乖離率超過-15%），短線反彈買入',
   evaluate(candles, index): RuleSignal | null {
-    if (index < 1) return null;
+    if (index < 4) return null;
     const c = candles[index];
+    const prev = candles[index - 1];
     if (c.ma20 == null) return null;
 
     const dev = maDeviation(c, 'ma20');
@@ -208,12 +209,23 @@ export const granvilleBuy4: TradingRule = {
 
     if (!isRedCandle && !hasLongLowerShadow) return null;
 
+    // 逐字-24（課程 6-3 買點④原文）：搶反彈買點需「急跌 3 天以上 + 大量後紅K + 突破前一日K線高點」。
+    // 對稱賣⑧已於 0ef9307 補「連 3 日爆大量」，買側本輪補齊。葛蘭碧只餵顯示不進 gate，齊三條件才升 BUY。
+    const prev3Down = [candles[index - 1], candles[index - 2], candles[index - 3]].every(x => x.close < x.open);
+    const avgVol5 = c.avgVol5;
+    const bigVolume = avgVol5 != null && avgVol5 > 0 && c.volume >= avgVol5 * 1.3;
+    const breakPrevHigh = prev != null && c.close > prev.high;
+    const fullSignal = prev3Down && bigVolume && breakPrevHigh;
+
     return {
-      type: 'WATCH',
-      label: '葛蘭碧④反彈',
-      description: `價格急跌遠離MA20，乖離率=${(dev * 100).toFixed(1)}%，出現止跌跡象`,
+      type: fullSignal ? 'BUY' : 'WATCH',
+      label: fullSignal ? '葛蘭碧④搶反彈（急跌後大量過前高）' : '葛蘭碧④反彈觀察',
+      description: `價格急跌遠離MA20，乖離率=${(dev * 100).toFixed(1)}%，出現止跌跡象${fullSignal ? '＋急跌3日後大量紅K突破前一日高' : '（未齊急跌3日/大量/過前日高三條件，僅觀察）'}`,
       reason: [
         '【葛蘭碧法則④】價格急跌遠離均線，乖離率過大，短線有均值回歸的反彈需求。',
+        fullSignal
+          ? '【課程 6-3 買④】急跌 3 天以上、大量後紅K突破前一日K線最高點 = 搶反彈的買進訊號。'
+          : '【注意】止跌跡象出現但未齊「急跌3日+大量+過前日高」三條件，僅觀察。',
         '【注意】這是短線反彈訊號，不是趨勢反轉。反彈目標通常是回到均線附近。',
         '【操作建議】輕倉試多，嚴設停損。到達均線附近即停利，不要貪心。',
       ].join('\n'),

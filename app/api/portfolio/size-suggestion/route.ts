@@ -76,7 +76,7 @@ async function loadLatestClose(symbol: string, market: MarketId): Promise<number
  * 近歷史高檔（收盤 ≥ 歷史最高收盤 × 0.95）即使強多頭也壓五成。
  * 讀不到指數資料回 null（不啟用 cap，fail-open）。
  */
-async function computeTotalInvestCap(): Promise<number | null> {
+async function computeTotalInvestCap(totalCapital?: number): Promise<number | null> {
   try {
     const p = path.join(process.cwd(), 'data', 'candles', 'TW', '^TWII.json');
     const raw = await fs.readFile(p, 'utf-8');
@@ -86,7 +86,7 @@ async function computeTotalInvestCap(): Promise<number | null> {
     const ath = Math.max(...cs.map(c => c.close));
     const nearAth = cs[cs.length - 1].close >= ath * INDEX_NEAR_ATH_RATIO;
     const regime = detectMarketRegime(cs).regime;
-    return regimeExposureCap(regime, nearAth);
+    return regimeExposureCap(regime, nearAth, totalCapital);
   } catch { return null; }
 }
 
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
     loadExistingHoldings(),
     loadLetterStats(),
     // 書本 CH5-06 + 直播 QA#15：大盤 regime → 總投入成數（sizer 業務 TW-only，指數看 ^TWII；CN 候選不啟用）
-    market === 'TW' ? computeTotalInvestCap() : Promise.resolve(null),
+    market === 'TW' ? computeTotalInvestCap(totalCapital) : Promise.resolve(null),
   ]);
 
   const effectiveConfig = modeOverride ? { ...config, mode: modeOverride } : config;

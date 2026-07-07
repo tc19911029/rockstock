@@ -164,7 +164,13 @@ export async function GET(req: NextRequest) {
     const weeklyBullish = weeklyCandles.length >= 15
       ? detectTrend(weeklyCandles, weeklyCandles.length - 1) === '多頭'
       : undefined; // 週線資料不足不擋（向下相容）
-    const upgradeCheck = canUpgradeToLongTerm(today_c.close, entryPrice, operationMode, weeklyBullish);
+    // 逐字-22（課程 8-4）：日線四線多排 + 非漲近一倍（末升段）才可升級長線
+    const fourLineBullish = today_c.ma5 != null && today_c.ma10 != null && today_c.ma20 != null && today_c.ma60 != null
+      ? today_c.ma5 > today_c.ma10 && today_c.ma10 > today_c.ma20 && today_c.ma20 > today_c.ma60
+      : undefined;
+    const lookbackLow = candles.slice(Math.max(0, lastIdx - 60), lastIdx + 1).reduce((m, x) => Math.min(m, x.low), Infinity);
+    const nearDoubled = lookbackLow > 0 && Number.isFinite(lookbackLow) ? (today_c.close / lookbackLow - 1) >= 0.9 : undefined;
+    const upgradeCheck = canUpgradeToLongTerm(today_c.close, entryPrice, operationMode, weeklyBullish, { fourLineBullish, nearDoubled });
 
     // ── Step 5 停利 ──
     // 找最近 confirmed pivot high 給「到達壓力」判定（書本 5 步驟步驟 5 第 4 章 #1）

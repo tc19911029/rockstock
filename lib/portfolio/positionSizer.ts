@@ -32,13 +32,19 @@ export const EXPOSURE_CAP_BULL = 0.8;
 export const EXPOSURE_CAP_CONSOLIDATION = 0.5;
 export const EXPOSURE_CAP_BEAR = 0.3;
 
+/** 小資族門檻（課程 CH5-6：100 萬以下）— 與檔數提醒同口徑 */
+export const SMALL_CAPITAL_THRESHOLD = 1_000_000;
+
 /**
  * 從大盤 regime + 是否近歷史高檔 → 總投入成數上限。
  * 近歷史高檔時即使 strong_bull 也壓到五成（書本 CH5-06 高檔優先）。
+ * 逐字-18（課程 CH5-6）：**小資族例外** —— 高檔盤整壓五成的規則，對 ≤100 萬的小資族放寬（錢不多再砍
+ * 一半幾乎買不到一張股票）。傳入 totalCapital 且 ≤ 門檻時，盤整/高檔不壓五成、回多頭成數（缺值＝不啟用）。
  */
-export function regimeExposureCap(regime: 'strong_bull' | 'normal' | 'bear', nearAth: boolean): number {
-  if (regime === 'bear') return EXPOSURE_CAP_BEAR;
-  if (nearAth || regime === 'normal') return EXPOSURE_CAP_CONSOLIDATION;
+export function regimeExposureCap(regime: 'strong_bull' | 'normal' | 'bear', nearAth: boolean, totalCapital?: number): number {
+  if (regime === 'bear') return EXPOSURE_CAP_BEAR; // 空頭一律壓，小資也不例外（避免大賠）
+  const isSmall = totalCapital != null && totalCapital <= SMALL_CAPITAL_THRESHOLD;
+  if (nearAth || regime === 'normal') return isSmall ? EXPOSURE_CAP_BULL : EXPOSURE_CAP_CONSOLIDATION;
   return EXPOSURE_CAP_BULL;
 }
 

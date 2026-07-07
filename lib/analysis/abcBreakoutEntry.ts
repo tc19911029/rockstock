@@ -241,10 +241,12 @@ export function detectABCBreakout(
     // 就視為飆旗（旗形）型態，可以計算目標價 D」。
     // 第 7 點：旗桿＝前一波低到高的距離，兩段等長的 D（左邊旗桿、右邊投射）。
     // 課程也強調「看不懂齊形沒關係、以趨勢操作為主，還可能超標」→ 純追蹤參考。
+    // 逐字-27（2026-07-07 render PDF 更正）：課程 6-5 p1 圖示 D 箭頭底端落在「C 波轉折低」虛線、頂端=目標價，
+    // 投射錨＝legCLow 非突破日收盤（c.close > legCLow 會系統性高估目標價）。改用 legCLow + 旗桿高度。
     const FLAG_MAX_CORRECTION_DAYS = 20;
     const isFlagPattern = preEntryDays <= FLAG_MAX_CORRECTION_DAYS;
     const poleHeight = abc.legAHigh - abc.poleLow;
-    const flagTargetD = isFlagPattern && poleHeight > 0 ? c.close + poleHeight : undefined;
+    const flagTargetD = isFlagPattern && poleHeight > 0 ? abc.legCLow + poleHeight : undefined;
 
     return {
       isABCBreakout: true,
