@@ -49,15 +49,58 @@ function partialMAExit(cs: OHLC[], e: number, stopPct: number | null): { ret: nu
   return { ret: (rets.reduce((s, x) => s + x, 0) / rets.length) * 100, days: lastDay - e };
 }
 
+// 逐字-9（CH6-15）：賺 20% 前守 MA10（飆股現行 baseline），達 20% 後「放鬆」＝只看爆量黑K/長上影才出（讓贏家跑）
+function loosenAfter20(cs: OHLC[], e: number): { ret: number; days: number } {
+  const entry = cs[e].open, end = Math.min(e + MAXHOLD, cs.length - 1);
+  let reached20 = false;
+  for (let d = e + 1; d <= end; d++) {
+    const c = cs[d].close, profit = c / entry - 1;
+    if (profit >= 0.20) reached20 = true;
+    if (!reached20) {
+      const ma10 = smaAt(cs, d, 10);
+      if (ma10 > 0 && c < ma10) return { ret: profit * 100, days: d - e };
+    } else {
+      const vma5 = volSmaAt(cs, d, 5), isBig = vma5 > 0 && cs[d].volume >= vma5 * 1.5;
+      const body = Math.abs(cs[d].close - cs[d].open), upSh = cs[d].high - Math.max(cs[d].open, cs[d].close);
+      const bigBlack = isBig && cs[d].close < cs[d].open && (cs[d].open - cs[d].close) / cs[d].open >= 0.02;
+      const longUpper = isBig && body > 0 && upSh >= body;
+      if (bigBlack || longUpper) return { ret: profit * 100, days: d - e };
+    }
+  }
+  return lastClose(cs, e);
+}
+// 逐字-8（CH6-15 量觀察③④）：賺 20% 後爆量黑K/長上影「先賣半」，其餘守 MA10；賣半報酬 = 兩半等權
+function halfOnBlowoff(cs: OHLC[], e: number): { ret: number; days: number } {
+  const entry = cs[e].open, end = Math.min(e + MAXHOLD, cs.length - 1);
+  let soldHalf = false; const rets: number[] = []; let lastDay = e;
+  for (let d = e + 1; d <= end; d++) {
+    lastDay = d;
+    const c = cs[d].close, profit = c / entry - 1, ma10 = smaAt(cs, d, 10);
+    if (!soldHalf && profit >= 0.20) {
+      const vma5 = volSmaAt(cs, d, 5), isBig = vma5 > 0 && cs[d].volume >= vma5 * 1.5;
+      const body = Math.abs(cs[d].close - cs[d].open), upSh = cs[d].high - Math.max(cs[d].open, cs[d].close);
+      const bigBlack = isBig && cs[d].close < cs[d].open;
+      const longUpper = isBig && body > 0 && upSh >= body;
+      if (bigBlack || longUpper) { rets.push(profit); soldHalf = true; continue; }
+    }
+    if (ma10 > 0 && c < ma10) { rets.push(profit); while (rets.length < 2) rets.push(profit); break; }
+  }
+  while (rets.length < 2) rets.push(cs[end].close / entry - 1);
+  return { ret: (rets.reduce((s, x) => s + x, 0) / rets.length) * 100, days: lastDay - e };
+}
+
 const exits: Record<string, Exit> = {
   '死抱40天(不停損)': (cs, e) => lastClose(cs, e),
   '固定停損-7%': (cs, e) => { const stop = cs[e].open * 0.93; for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) if (cs[d].low <= stop) { const px = Math.min(cs[d].open, stop); return { ret: (px / cs[e].open - 1) * 100, days: d - e }; } return lastClose(cs, e); },
   '固定停損-10%': (cs, e) => { const stop = cs[e].open * 0.90; for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) if (cs[d].low <= stop) { const px = Math.min(cs[d].open, stop); return { ret: (px / cs[e].open - 1) * 100, days: d - e }; } return lastClose(cs, e); },
   '移動停利(回落8%)': (cs, e) => { let peak = cs[e].open; for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) { peak = Math.max(peak, cs[d].close); if (cs[d].close <= peak * 0.92) return { ret: (cs[d].close / cs[e].open - 1) * 100, days: d - e }; } return lastClose(cs, e); },
   '8-2前一日最低出': (cs, e) => { for (let d = e + 1; d <= Math.min(e + MAXHOLD, cs.length - 1); d++) if (cs[d].close < cs[d - 1].low) return { ret: (cs[d].close / cs[e].open - 1) * 100, days: d - e }; return lastClose(cs, e); },
+  '整批跌破MA3全出(逐字7)': (cs, e) => fullMAExit(cs, e, 3),
   '整批跌破MA5全出': (cs, e) => fullMAExit(cs, e, 5),
   '整批跌破MA10全出': (cs, e) => fullMAExit(cs, e, 10),
   '整批跌破MA20全出': (cs, e) => fullMAExit(cs, e, 20),
+  '賺20後放鬆只看爆黑(逐字9)': (cs, e) => loosenAfter20(cs, e),
+  '賺20爆黑賣半+守MA10(逐字8)': (cs, e) => halfOnBlowoff(cs, e),
   '8-5分批MA5/10/20': (cs, e) => partialMAExit(cs, e, null),
   '8-5分批+停損5%': (cs, e) => partialMAExit(cs, e, 0.05),
 };
