@@ -45,6 +45,7 @@ import {
 import type { PortfolioHoldingReview, PortfolioReviewFile } from '@/lib/agents/portfolio/types';
 import type { MarketId } from '@/lib/scanner/types';
 import { marketFromSymbol } from '@/lib/utils/shareUnits';
+import { loadLatestClose } from '@/lib/portfolio/latestClose';
 
 export const runtime = 'nodejs';
 
@@ -96,23 +97,6 @@ async function loadRecentReviewsBySymbol(
 }
 
 /** 載入 candles 取最新 close */
-async function loadLatestClose(
-  symbol: string, market: MarketId,
-): Promise<number | null> {
-  const candlesPath = path.join(
-    process.cwd(), 'data', 'candles', market, `${symbol}.json`,
-  );
-  try {
-    const raw = await fs.readFile(candlesPath, 'utf-8');
-    const data = JSON.parse(raw) as { candles?: Array<{ date: string; close: number }> };
-    const candles = data.candles ?? [];
-    if (candles.length === 0) return null;
-    return candles[candles.length - 1].close;
-  } catch {
-    return null;
-  }
-}
-
 export async function POST(req: NextRequest) {
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }

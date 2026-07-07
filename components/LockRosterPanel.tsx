@@ -24,8 +24,9 @@ export default function LockRosterPanel({ market = 'TW' }: { market?: 'TW' | 'CN
     try {
       const res = await fetch(`/api/lockroster?market=${market}`, { cache: 'no-store' });
       const j = await res.json();
-      setRoster(j?.data?.roster ?? null);
-      setReviews(j?.data?.recentReviews ?? []);
+      // apiOk 回的是最外層 { ok, roster, recentReviews }，沒有 data 包一層（舊版讀 j.data.* → 永遠空）
+      setRoster(j?.roster ?? null);
+      setReviews(j?.recentReviews ?? []);
     } catch { /* 顯示空狀態 */ }
     setLoading(false);
   }, [market]);

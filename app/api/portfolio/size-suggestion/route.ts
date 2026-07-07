@@ -40,6 +40,7 @@ import { listOpenHoldings } from '@/lib/agents/portfolio/storage';
 import { trackOf } from '@/lib/scanner/buyMethodTracks';
 import type { MarketId } from '@/lib/scanner/types';
 import { classifyMarket } from '@/lib/market/classify';
+import { loadLatestClose } from '@/lib/portfolio/latestClose';
 
 export const runtime = 'nodejs';
 
@@ -59,16 +60,6 @@ const bodySchema = z.object({
   modeOverride: z.enum(['fixedFraction', 'kelly', 'letterAware', 'riskParity']).optional(),
   currentPortfolioMddPct: z.coerce.number().min(0).optional(),
 });
-
-async function loadLatestClose(symbol: string, market: MarketId): Promise<number | null> {
-  const p = path.join(process.cwd(), 'data', 'candles', market, `${symbol}.json`);
-  try {
-    const raw = await fs.readFile(p, 'utf-8');
-    const data = JSON.parse(raw) as { candles?: Array<{ close: number }> };
-    const c = data.candles ?? [];
-    return c.length > 0 ? c[c.length - 1].close : null;
-  } catch { return null; }
-}
 
 /**
  * 書本 CH5-06 + 直播 2026-07-01 QA#15（2026-07-04 體檢補）：
