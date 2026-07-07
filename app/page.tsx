@@ -274,6 +274,15 @@ function HomePage() {
       const key = `${sym}|${tf}|${date ?? ''}`;
       if (lastLoadedRef.current === key) return;
       lastLoadedRef.current = key;
+      // inbound ?load 套用後把 load/date/tf 從網址移除（同 ?tab 的處理）：
+      // 否則網址卡在某檔（如 /?load=00991A），瀏覽器重開/重整會一直還原它 → 主畫面永遠停在該檔而非大盤。
+      // 移除後回到乾淨「/」，下次開啟走 default（大盤指數）；當前 session 的走圖仍在 currentStock 不受影響。
+      const sp2 = new URLSearchParams(window.location.search);
+      if (sp2.has('load') || sp2.has('symbol') || sp2.has('date') || sp2.has('tf')) {
+        sp2.delete('load'); sp2.delete('symbol'); sp2.delete('date'); sp2.delete('tf');
+        const qs2 = sp2.toString();
+        window.history.replaceState(null, '', qs2 ? `${window.location.pathname}?${qs2}` : window.location.pathname);
+      }
       loadStock(sym, tf, undefined, date ?? undefined)
         .then(() => setLoadError(null)) // 成功載入 → 清掉先前冷啟動 race 的失敗 banner
         .catch((e: Error) => {
