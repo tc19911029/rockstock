@@ -22,7 +22,9 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const LETTERS: MtfMode[] = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'];
+// G/H/I 是 v11 舊字母，v12 已改名 G→J、H→L、I→K，生產掃描早已不再產生（近 3 萬掃描檔 0 筆）。
+// 從績效清單移除，避免與 J/K/L 重複顯示空殼列。
+const LETTERS: MtfMode[] = ['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'];
 
 interface LetterStats {
   letter: string;
