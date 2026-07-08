@@ -57,6 +57,10 @@ export interface LockRosterEntry {
   lastReviewDate: string;
   /** 課程 8 種轉弱旗標（f6/f7/f8 = 硬汰弱；其餘資訊性） */
   weakFlags: string[];
+  /** 避雷紅旗（處置/注意股 + 籌碼避雷）— 只示警不剔除（北極星＝賺多賠少、避雷最可信） */
+  avoidFlags?: string[];
+  /** 避雷等級：avoid=別碰（處置股/法人連賣等）、notice=注意股、none */
+  avoidLevel?: 'none' | 'notice' | 'avoid';
   matchedLetters?: string[];
   history: { date: string; event: 'added' | 'reclassified' | 'weak-flag' | 'removed'; detail: string }[];
 }
@@ -301,6 +305,26 @@ export function evaluateWeakFlags(
     flags.push(f); hardRemove.push(f);
   }
   return { flags, hardRemove };
+}
+
+/**
+ * 避雷紅旗標註（純函式）— 把處置/注意股 + 籌碼避雷訊號蓋到 roster entry。
+ *   avoid = 別碰（處置股＝分盤交易不可正常買 / 法人連賣等籌碼避雷）
+ *   notice = 注意股（軟警示）
+ * 只示警不剔除；排序時 avoid 級往下沉、不推薦當「明天最可能發動」。
+ */
+export function annotateAvoidance(
+  entry: LockRosterEntry,
+  opts: { disposal?: boolean; notice?: boolean; chipFlags?: string[] },
+): LockRosterEntry {
+  const flags: string[] = [];
+  if (opts.disposal) flags.push('處置股（分盤交易、別碰）');
+  if (opts.chipFlags?.length) flags.push(...opts.chipFlags);
+  if (opts.notice) flags.push('注意股');
+  const level: 'none' | 'notice' | 'avoid' =
+    (opts.disposal || (opts.chipFlags?.length ?? 0) > 0) ? 'avoid'
+      : opts.notice ? 'notice' : 'none';
+  return { ...entry, avoidFlags: flags, avoidLevel: level };
 }
 
 export interface RosterCandidate {

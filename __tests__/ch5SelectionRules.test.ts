@@ -8,6 +8,8 @@ import {
   reboundHoldMA20Breakout,
   strongSurgeSecondWave,
 } from '../lib/rules/ch5SelectionRules';
+import { annotateAvoidance } from '../lib/scanner/lockRoster';
+import type { LockRosterEntry } from '../lib/scanner/lockRoster';
 import type { CandleWithIndicators } from '../types';
 
 function mk(
@@ -133,5 +135,43 @@ describe('強勢飆股第二波', () => {
     const arr = buildSecondWave();
     arr[arr.length - 1].ma60 = 200; // 破壞多排
     expect(strongSurgeSecondWave.evaluate(arr, arr.length - 1)).toBeNull();
+  });
+});
+
+// ── annotateAvoidance（避雷紅旗標註）─────────────────────────────────────────
+function baseEntry(): LockRosterEntry {
+  return {
+    symbol: '2330.TW', name: '台積電', market: 'TW', addedDate: '2026-07-08',
+    source: 'auto-scan', category: 2, label: '等突破', waitingFor: '',
+    urgency: 80, urgencyDetail: '', lastClose: 100, lastReviewDate: '2026-07-08',
+    weakFlags: [], history: [],
+  };
+}
+
+describe('annotateAvoidance 避雷紅旗', () => {
+  it('處置股 → avoid 級', () => {
+    const e = annotateAvoidance(baseEntry(), { disposal: true });
+    expect(e.avoidLevel).toBe('avoid');
+    expect(e.avoidFlags?.[0]).toContain('處置股');
+  });
+  it('法人連賣籌碼紅旗 → avoid 級', () => {
+    const e = annotateAvoidance(baseEntry(), { chipFlags: ['法人連賣'] });
+    expect(e.avoidLevel).toBe('avoid');
+    expect(e.avoidFlags).toContain('法人連賣');
+  });
+  it('只有注意股 → notice 級', () => {
+    const e = annotateAvoidance(baseEntry(), { notice: true });
+    expect(e.avoidLevel).toBe('notice');
+  });
+  it('無任何旗標 → none 級', () => {
+    const e = annotateAvoidance(baseEntry(), {});
+    expect(e.avoidLevel).toBe('none');
+    expect(e.avoidFlags).toEqual([]);
+  });
+  it('處置＋注意同時 → avoid（處置優先，兩旗都列）', () => {
+    const e = annotateAvoidance(baseEntry(), { disposal: true, notice: true });
+    expect(e.avoidLevel).toBe('avoid');
+    expect(e.avoidFlags?.some(f => f.includes('處置'))).toBe(true);
+    expect(e.avoidFlags).toContain('注意股');
   });
 });

@@ -92,13 +92,17 @@ export default function LockRosterBoardPage() {
     void reload();
   }, [market, reload]);
 
+  // avoid 級（處置股/法人連賣等）往下沉，同級按緊迫度
   const entries = useMemo(
-    () => [...(roster?.entries ?? [])].sort((a, b) => b.urgency - a.urgency),
+    () => [...(roster?.entries ?? [])].sort((a, b) =>
+      (a.avoidLevel === 'avoid' ? 1 : 0) - (b.avoidLevel === 'avoid' ? 1 : 0) || b.urgency - a.urgency),
     [roster],
   );
-  const top3 = entries.slice(0, 3);
-  const hotCount = entries.filter(e => e.urgency >= 85).length;
+  // 明天最可能發動：排除避雷級（不推薦陷阱）
+  const top3 = entries.filter(e => e.avoidLevel !== 'avoid').slice(0, 3);
+  const hotCount = entries.filter(e => e.urgency >= 85 && e.avoidLevel !== 'avoid').length;
   const weakCount = entries.filter(e => e.weakFlags.length > 0).length;
+  const avoidCount = entries.filter(e => e.avoidLevel === 'avoid').length;
 
   const header = (
     <PageHeader
@@ -142,9 +146,10 @@ export default function LockRosterBoardPage() {
         ) : (
           <>
             {/* 數字卡 */}
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
               <StatsCard label="鎖股檔數" value={`${entries.length} / 15`} sub="課程：10~15 檔最好" />
-              <StatsCard label="即將發動" value={hotCount} tone={hotCount > 0 ? 'bull' : 'muted'} sub="緊迫 ≥ 85" />
+              <StatsCard label="即將發動" value={hotCount} tone={hotCount > 0 ? 'bull' : 'muted'} sub="緊迫 ≥ 85（不含避雷）" />
+              <StatsCard label="避雷紅旗" value={avoidCount} tone={avoidCount > 0 ? 'bear' : 'muted'} sub="🚫 別碰（處置/法人連賣）" />
               <StatsCard label="出現轉弱" value={weakCount} tone={weakCount > 0 ? 'bear' : 'muted'} sub="課程：連放都不要放" />
             </div>
 
@@ -179,6 +184,9 @@ export default function LockRosterBoardPage() {
                           </span>
                         )}
                       </div>
+                      {e.avoidLevel === 'avoid' && e.avoidFlags && e.avoidFlags.length > 0 && (
+                        <div className="text-[11px] text-bear font-medium">🚫 {e.avoidFlags.join('、')}</div>
+                      )}
                       {flagged && (
                         <div className={`text-[11px] ${hasHardWeak(e) ? 'text-bear font-medium' : 'text-amber-400'}`}>
                           🚩 {e.weakFlags.join('、')}
@@ -216,6 +224,14 @@ export default function LockRosterBoardPage() {
                               <span className="text-[10px] font-mono text-muted-foreground">
                                 關鍵價 {e.triggerLevel.toFixed(2)}｜{d >= 0 ? '距 +' : '已越 '}{Math.abs(d).toFixed(1)}%
                               </span>
+                            )}
+                            {e.avoidLevel === 'avoid' && e.avoidFlags && e.avoidFlags.length > 0 && (
+                              <span className="text-[10px] text-bear font-medium" title={e.avoidFlags.join('\n')}>
+                                🚫 {e.avoidFlags[0]}{e.avoidFlags.length > 1 ? ` +${e.avoidFlags.length - 1}` : ''}
+                              </span>
+                            )}
+                            {e.avoidLevel === 'notice' && (
+                              <span className="text-[10px] text-amber-400" title="注意股">🚫 注意股</span>
                             )}
                             {e.weakFlags.length > 0 && (
                               <span className={`text-[10px] ${hasHardWeak(e) ? 'text-bear font-medium' : 'text-amber-400'}`} title={e.weakFlags.join('\n')}>

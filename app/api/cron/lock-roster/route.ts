@@ -72,6 +72,50 @@ export async function GET(req: NextRequest) {
       candlesOf: (s) => candleMap.get(s) ?? null,
     });
 
+    // ── 避雷紅旗（北極星＝賺多賠少）：Tier1 處置/注意股一定套；Tier2 籌碼避雷讀本地快取 best-effort ──
+    if (market === 'TW') {
+      try {
+        const { annotateAvoidance } = await import('@/lib/scanner/lockRoster');
+        const { getActiveDisposalSet, getRecentNoticeSet, bareCode } = await import('@/lib/market/attentionList');
+        const { computeChipAvoidSignals } = await import('@/lib/avoidance/chipAvoidSignals');
+        const { readInstStock } = await import('@/lib/chips/ChipStorage');
+        const { readBrokerStock } = await import('@/lib/chips/BrokerStorage');
+        const [disposalSet, noticeSet] = await Promise.all([
+          getActiveDisposalSet(date).catch(() => new Set<string>()),
+          getRecentNoticeSet(date, 5).catch(() => new Set<string>()),
+        ]);
+        roster.entries = await Promise.all(roster.entries.map(async (e) => {
+          const bare = bareCode(e.symbol);
+          const disposal = disposalSet.has(bare);
+          const notice = noticeSet.has(bare);
+          let chipFlags: string[] = [];
+          const cs = candleMap.get(e.symbol);
+          if (cs && cs.length >= 21) {
+            try {
+              const code = e.symbol.replace(/\.(TW|TWO)$/i, '');
+              const [inst, broker] = await Promise.all([readInstStock(code), readBrokerStock(code)]);
+              const instByDate = new Map((inst?.data ?? []).map(d => [d.date, d.total]));
+              const brokerByDate = new Map((broker?.data ?? []).map(d => [d.date, d.netDifference]));
+              if (instByDate.size > 0 || brokerByDate.size > 0) {
+                const { flags } = computeChipAvoidSignals({
+                  price: cs[cs.length - 1].close,
+                  candles: cs.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
+                  holderRows: [], brokerByDate, instByDate,
+                });
+                chipFlags = flags.map(f => f.label);
+              }
+            } catch { /* 本地無籌碼快取 → 略過 Tier2（誠實部分覆蓋） */ }
+          }
+          return annotateAvoidance(e, { disposal, notice, chipFlags });
+        }));
+        // avoid 級往下沉（不推薦陷阱當「明天最可能發動」），同級維持 urgency 排序
+        roster.entries.sort((a, b) =>
+          (a.avoidLevel === 'avoid' ? 1 : 0) - (b.avoidLevel === 'avoid' ? 1 : 0) || b.urgency - a.urgency);
+      } catch (e) {
+        console.warn('[lock-roster] 避雷紅旗標註略過:', e);
+      }
+    }
+
     await saveLockRoster(roster);
     await saveRosterReview(review);
 
