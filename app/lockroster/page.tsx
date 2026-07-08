@@ -134,6 +134,7 @@ export default function LockRosterBoardPage() {
         <p className="text-[12px] text-muted-foreground">
           鎖股名單汰弱留強、每檔標「在等什麼」。每日 19:05 從盤後掃描自動補位，破月線／前低自動汰弱。
           「明天怎麼辦」是課程紀律提示，不是自動下單。
+          <span className="text-muted-foreground/70">（排序＝離發動遠近的組織順序；回測顯示緊迫度不預測勝率，別把「即將發動」當包贏。）</span>
         </p>
 
         {loading ? (
