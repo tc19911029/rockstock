@@ -31,9 +31,16 @@ export async function GET(req: NextRequest) {
 
     const inputs: ETFHoldingsInput[] = [];
     let latestDate: string | null = null;
+    let earliestDate: string | null = null;
     for (const code of codes) {
-      const snap = await loadLatestETFSnapshot(code);
-      if (!snap || snap.holdings.length === 0 || snap.source === 'stub') continue;
+      // 單檔 I/O 或壞 JSON 只跳過該檔，不讓整個端點 500
+      let snap;
+      try {
+        snap = await loadLatestETFSnapshot(code);
+      } catch {
+        continue;
+      }
+      if (!snap || !Array.isArray(snap.holdings) || snap.holdings.length === 0 || snap.source === 'stub') continue;
       inputs.push({
         etfCode: snap.etfCode,
         etfName: snap.etfName,
@@ -41,11 +48,13 @@ export async function GET(req: NextRequest) {
         disclosureDate: snap.disclosureDate,
       });
       if (!latestDate || snap.disclosureDate > latestDate) latestDate = snap.disclosureDate;
+      if (!earliestDate || snap.disclosureDate < earliestDate) earliestDate = snap.disclosureDate;
     }
 
     if (inputs.length < 2) {
       return apiOk({
         asOfDate: latestDate,
+        earliestDate,
         etfCount: inputs.length,
         topN,
         sharedHoldings: [],
@@ -61,6 +70,7 @@ export async function GET(req: NextRequest) {
 
     return apiOk({
       asOfDate: latestDate,
+      earliestDate,
       etfCount: inputs.length,
       topN,
       sharedHoldings,

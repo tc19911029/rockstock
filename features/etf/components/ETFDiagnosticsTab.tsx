@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 interface DiagData {
   asOfDate: string | null;
+  earliestDate?: string | null;
   etfCount: number;
   topN: number;
   sharedHoldings: SharedHoldingEntry[];
@@ -45,7 +46,19 @@ export function ETFDiagnosticsTab() {
     let cancelled = false;
     fetch('/api/etf/diagnostics?topN=10&minOverlap=40')
       .then((r) => r.json())
-      .then((d) => { if (!cancelled) setData(d); })
+      .then((d) => {
+        if (cancelled) return;
+        // API 500 回 { error }（無 sharedHoldings/overlapPairs）→ 正規化成安全形狀，避免 render 崩
+        setData({
+          asOfDate: d.asOfDate ?? null,
+          earliestDate: d.earliestDate ?? null,
+          etfCount: d.etfCount ?? 0,
+          topN: d.topN ?? 10,
+          sharedHoldings: d.sharedHoldings ?? [],
+          overlapPairs: d.overlapPairs ?? [],
+          note: d.note ?? (d.error ? String(d.error) : undefined),
+        });
+      })
       .catch(() => { if (!cancelled) setData({ asOfDate: null, etfCount: 0, topN: 10, sharedHoldings: [], overlapPairs: [], note: '查詢失敗' }); });
     return () => { cancelled = true; };
   }, []);
@@ -68,7 +81,10 @@ export function ETFDiagnosticsTab() {
           <h3 className="text-sm font-medium">🔍 成分股集中榜</h3>
           {data?.asOfDate && (
             <span className="text-xs text-muted-foreground">
-              {data.etfCount} 檔 ETF · 前 {data.topN} 大 · {data.asOfDate}
+              {data.etfCount} 檔 ETF · 前 {data.topN} 大 · 各檔最新揭露
+              {data.earliestDate && data.earliestDate !== data.asOfDate
+                ? `（${data.earliestDate}~${data.asOfDate}）`
+                : `（${data.asOfDate}）`}
             </span>
           )}
         </div>

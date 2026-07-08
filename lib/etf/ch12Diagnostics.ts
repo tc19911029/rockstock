@@ -50,9 +50,12 @@ export interface OverlapPair {
   sharedNames: string[];
 }
 
-/** 取一檔 ETF 前 N 大持股（依權重 desc；權重相同保持原序） */
+/** 取一檔 ETF 前 N 大持股（依權重 desc；權重相同保持原序）
+ *  先剔除空／空白 symbol（現金、期貨保證金、「其他」等佔位），避免跨 ETF 併成假的集中持股。 */
 function topHoldings(holdings: ETFHolding[], topN: number): ETFHolding[] {
-  return [...holdings]
+  return holdings
+    .filter((h) => h.symbol && h.symbol.trim() !== '')
+    .slice()
     .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
     .slice(0, topN);
 }
@@ -70,7 +73,7 @@ export function computeSharedHoldings(
     for (const h of topHoldings(etf.holdings, topN)) {
       const key = h.symbol;
       const cur = bySymbol.get(key) ?? { name: h.name, codes: [], weights: [] };
-      // 名稱優先用中文（純數字代號常有本地化名）；已存在就保留
+      // 第一個非空名稱優先（snapshot 寫入前已 normalizeHoldingNames 統一中文）；後續不覆蓋
       if (!cur.name && h.name) cur.name = h.name;
       cur.codes.push(etf.etfCode);
       cur.weights.push(h.weight ?? 0);
