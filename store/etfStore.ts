@@ -4,7 +4,7 @@
 import { create } from 'zustand';
 import type { PeriodKey } from '@/lib/etf/performanceCalc';
 
-export type ETFTab = 'performance' | 'changes' | 'consensus' | 'tracking';
+export type ETFTab = 'performance' | 'changes' | 'consensus' | 'tracking' | 'diagnostics';
 
 interface ETFStore {
   activeTab: ETFTab;

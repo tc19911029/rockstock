@@ -6,6 +6,7 @@ import { ETFPerformanceTab } from './components/ETFPerformanceTab';
 import { ETFChangesTab } from './components/ETFChangesTab';
 import { ETFConsensusTab } from './components/ETFConsensusTab';
 import { ETFTrackingTab } from './components/ETFTrackingTab';
+import { ETFDiagnosticsTab } from './components/ETFDiagnosticsTab';
 import { ETFTrendCheckBanner } from './components/ETFTrendCheckBanner';
 
 const TABS: Array<{ value: ETFTab; label: string }> = [
@@ -13,6 +14,7 @@ const TABS: Array<{ value: ETFTab; label: string }> = [
   { value: 'changes', label: '持股異動' },
   { value: 'consensus', label: '共識買榜' },
   { value: 'tracking', label: '被納入後表現' },
+  { value: 'diagnostics', label: 'ETF 體檢' },
 ];
 
 /**
@@ -48,6 +50,7 @@ export function ETFPanel() {
       {activeTab === 'changes' && <ETFChangesTab />}
       {activeTab === 'consensus' && <ETFConsensusTab />}
       {activeTab === 'tracking' && <ETFTrackingTab />}
+      {activeTab === 'diagnostics' && <ETFDiagnosticsTab />}
     </div>
   );
 }
