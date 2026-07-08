@@ -53,13 +53,18 @@ export default function LockRosterPanel({ market = 'TW' }: { market?: 'TW' | 'CN
             課程 CH5-6：汰弱留強 10~15 檔，按「在等什麼」排操作順序
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowReviews(s => !s)}
-          className="text-[11px] text-muted-foreground hover:text-foreground"
-        >
-          汰弱紀錄 {showReviews ? '▾' : '▸'}
-        </button>
+        <div className="flex items-center gap-3">
+          <Link href="/lockroster" className="text-[11px] text-blue-400 hover:underline">
+            開看板 →
+          </Link>
+          <button
+            type="button"
+            onClick={() => setShowReviews(s => !s)}
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            汰弱紀錄 {showReviews ? '▾' : '▸'}
+          </button>
+        </div>
       </div>
 
       {(!roster || roster.entries.length === 0) ? (
