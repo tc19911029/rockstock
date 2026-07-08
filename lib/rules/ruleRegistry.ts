@@ -139,6 +139,7 @@ import { GAP_TRADING_RULES } from './gapTradingRules';
 import { TURNING_WAVE_RULES } from './turningWaveRules';
 import { BOTTOM_FORMATION_RULES } from './bottomFormationRules';
 import { ENTRY_MISTAKE_RULES } from './entryMistakeRules';
+import { CH5_SELECTION_RULES } from './ch5SelectionRules';
 // 朱家泓《抓住飆股輕鬆賺》（合併進 zhu-momentum，飆股動能觀點統一）
 import { ZHU_SOAR_STOCK_RULES } from './zhuSoarStockRules';
 // 朱家泓長線操作 SOP 8 條
@@ -213,11 +214,12 @@ function createDefaultRegistry(): RuleRegistry {
     id: 'zhu-advanced',
     name: '朱家泓進階（寶典）',
     author: '朱家泓',
-    description: '《活用技術分析寶典》轉折波系統(8條) + 底部型態(4條) + 進場錯誤(7條)',
+    description: '《活用技術分析寶典》轉折波系統(8條) + 底部型態(4條) + 進場錯誤(7條) + CH5選股補強(底部③/飆股第二波)',
     rules: [
       ...TURNING_WAVE_RULES,
       ...BOTTOM_FORMATION_RULES,
       ...ENTRY_MISTAKE_RULES,
+      ...CH5_SELECTION_RULES,
     ],
   });
 
