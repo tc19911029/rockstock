@@ -39,18 +39,39 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
   const {
     visibleCandles, currentSignals, chartMarkers,
     isLoadingStock, allCandles, currentIndex,
-    loadStock, currentStock,
+    loadStock, currentStock, currentInterval,
     signalStrengthMin, setSignalStrengthMin,
     metrics, nextCandle, prevCandle, isPlaying, resetReplay, targetDate,
   } = useReplayStore();
 
-  // 載入該股 K 線（symbol 改變或 scanDate 改變時重載）
+  // 載入該股 K 線（symbol 改變或 scanDate 改變時重載；預設日線）
   useEffect(() => {
     if (!symbol) return;
     loadStock(symbol, '1d', '2y', scanDate).catch((err: Error) => {
       toast.error(`載入 ${symbol} K 線失敗：${err.message || '請稍後再試'}`);
     });
   }, [symbol, scanDate, loadStock]);
+
+  // 時間週期切換（1m/5m/15m/30m/60m/1d/1wk/1mo），與首頁同一套邏輯
+  const handleIntervalChange = useCallback((newInterval: string) => {
+    if (!currentStock) return;
+    if (newInterval === currentInterval) return;
+    // 三色/主力/季節/籌碼副圖只有日線版本（主力狀態要 ~507 根日K、捕撈季節要日換手率、
+    // 法人籌碼是日資料），套在分鐘線會壞副圖 → 切到分鐘線時自動關掉這些日線專屬指標。
+    const isIntraday = ['1m', '5m', '15m', '30m', '60m'].includes(newInterval);
+    if (isIntraday) {
+      setIndicators(p => ({
+        ...p, mainForce: false, season: false,
+        foreign: false, trust: false, dealer: false, retail: false, cnMain: false, cnRetail: false,
+      }));
+    }
+    // 用完整 ticker（含後綴）重載：指數 000001.SS 去後綴會撞同碼個股。
+    const sym = currentStock.ticker;
+    useReplayStore.getState().stopPolling();
+    loadStock(sym, newInterval, undefined, targetDate ?? undefined).catch((e: Error) => {
+      toast.error(`切換 ${newInterval} 失敗：${e.message || '請稍後再試'}`);
+    });
+  }, [currentStock, currentInterval, targetDate, loadStock]);
 
   // v12 markers + locked pattern（與首頁同一套）
   const v12Markers = useV12HistoricalMarkers(allCandles, currentStock?.ticker ?? '', true);
@@ -148,6 +169,8 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
                 prevCandle={prev}
                 isHover={!!hoverCandle}
                 stockName={currentStock?.name}
+                currentInterval={currentInterval}
+                onIntervalChange={handleIntervalChange}
                 trend={currentTrend}
                 maToggles={maToggles}
                 onMaToggle={handleMaToggle}
