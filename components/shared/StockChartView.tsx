@@ -151,14 +151,7 @@ export function StockChartView({
           style={showIndicators ? { height: `${+(chartSplit * 100).toFixed(2)}%` } : undefined}
         >
           <ErrorBoundary>
-            {/* 日K↔分鐘K 時間軸型別不同（business-day 字串 vs UTC 時間戳），
-                lightweight-charts 同一實例切換會停在空白直到下次 reflow。
-                跨這條界線時換 key 強制重建圖表 → 立即正確繪出。 */}
-            <CandleChart
-              key={chartProps.candles?.[0]?.date?.includes(' ') ? 'intraday' : 'daily'}
-              {...chartProps}
-              fillContainer
-            />
+            <CandleChart {...chartProps} fillContainer />
           </ErrorBoundary>
         </div>
 
@@ -192,11 +185,7 @@ export function StockChartView({
         {showIndicators && indicatorProps && (
           <div className="flex-1 min-h-0 overflow-hidden">
             <ErrorBoundary>
-              {/* 同上：副圖也跨日K↔分鐘K 重建，避免時間軸型別切換後空白 */}
-              <IndicatorCharts
-                key={indicatorProps.candles?.[0]?.date?.includes(' ') ? 'intraday' : 'daily'}
-                {...indicatorProps}
-              />
+              <IndicatorCharts {...indicatorProps} />
             </ErrorBoundary>
           </div>
         )}
