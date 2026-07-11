@@ -499,6 +499,19 @@ function HomePage() {
       setShowPivots(false);
     }
   }, []);
+  // 楊氏EMA濾網開關：打開＝清空主圖其他線/標記(MA/BB/三色/頭底)只留楊濾網+訊號箭頭；關閉＝回技術套組
+  const handleYangEmaToggle = useCallback(() => {
+    const next = !showYangEma;
+    setShowYangEma(next);
+    if (next) {
+      setMaToggles({ ma5: false, ma10: false, ma20: false, ma60: false, ma120: false, ma240: false });
+      setShowBollinger(false);
+      setShowShuangB(false);
+      setShowPivots(false);
+    } else {
+      applyChartPreset('technical');
+    }
+  }, [showYangEma, applyChartPreset]);
   // 「籌碼」合併鈕：一鍵開關法人四（TW 外資/投信/自營/散戶）+ CN 主力/散戶副圖
   const toggleChipGroup = useCallback((next: boolean) => {
     setIndicators(p => ({ ...p, foreign: next, trust: next, dealer: next, retail: next, cnMain: next, cnRetail: next }));
@@ -1078,7 +1091,7 @@ function HomePage() {
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 showYangEma={showYangEma}
-                onYangEmaToggle={() => setShowYangEma(v => !v)}
+                onYangEmaToggle={handleYangEmaToggle}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
                 onChipGroupToggle={toggleChipGroup}
@@ -1424,7 +1437,7 @@ function HomePage() {
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
                 showYangEma={showYangEma}
-                onYangEmaToggle={() => setShowYangEma(v => !v)}
+                onYangEmaToggle={handleYangEmaToggle}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
                 onChipGroupToggle={toggleChipGroup}
