@@ -49,9 +49,9 @@ function computeEMA(vals: number[], n: number): number[] {
   return out;
 }
 
-// 楊氏濾網移動停利參數（可調）：獲利到 +10% 才啟動移動停利，之後回檔吃掉「最大漲幅」的 30% 就出
-const YANG_TRAIL_ARM = 0.10;
-const YANG_TRAIL_GIVEBACK = 0.30;
+// 楊氏濾網移動停利參數（可調）：獲利到 +5% 才啟動移動停利，之後從「最高獲利」回落 5 個百分點就出
+const YANG_TRAIL_ARM = 0.05;      // 啟動門檻：最高賺過 5%
+const YANG_TRAIL_GIVEBACK = 0.05; // 回落幅度：從最高獲利掉 5 個百分點（減法，非最大漲幅的百分比）
 
 /**
  * 楊雲翔特殊EMA濾網買賣訊號（收盤確認，標在觸發那根 K 棒）：
@@ -79,7 +79,7 @@ function computeYangMarkers(candles: CandleWithIndicators[]): SeriesMarker<Time>
     } else {
       peakGain = Math.max(peakGain, (c.high - entry) / entry);
       const gain = (c.close - entry) / entry;
-      const trail = peakGain >= YANG_TRAIL_ARM && gain <= peakGain * (1 - YANG_TRAIL_GIVEBACK);
+      const trail = peakGain >= YANG_TRAIL_ARM && gain <= peakGain - YANG_TRAIL_GIVEBACK;
       const brk60 = c.close < e60[i];
       const brk3 = c.close <= e23[i] * 0.97;
       const brk1x2 = c.close <= e23[i] * 0.99 && pc.close <= e23[i - 1] * 0.99;
