@@ -53,6 +53,9 @@ interface ChartToolbarProps {
   onMaToggle: (key: keyof MaToggles) => void;
   showBollinger: boolean;
   onBollingerToggle: () => void;
+  /** 楊雲翔特殊EMA濾網疊圖：EMA23 ＋ ±1%/±3% 帶 ＋ EMA60（純視覺疊主圖）*/
+  showYangEma?: boolean;
+  onYangEmaToggle?: () => void;
   /** 雙B戰法主圖疊加（陸股自創；像 BB 一樣疊在 K 線主圖上）*/
   showShuangB?: boolean;
   onShuangBToggle?: () => void;
@@ -175,6 +178,7 @@ export default function ChartToolbar({
   currentInterval, onIntervalChange,
   maToggles, onMaToggle,
   showBollinger, onBollingerToggle,
+  showYangEma = false, onYangEmaToggle,
   showShuangB = false,
   showHolderLine = false, onHolderLineToggle,
   indicators, onIndicatorToggle,
@@ -350,6 +354,17 @@ export default function ChartToolbar({
           }`}
           title="布林通道 (20, 2)"
         >BB</button>
+        {onYangEmaToggle && (
+          <button
+            onClick={onYangEmaToggle}
+            aria-pressed={showYangEma}
+            aria-label={`${showYangEma ? '隱藏' : '顯示'}楊氏EMA濾網`}
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+              showYangEma ? 'bg-amber-700/60 text-amber-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            }`}
+            title="楊雲翔特殊EMA濾網：EMA23 ＋ ±1%/±3% 濾網帶 ＋ EMA60 大方向線（純視覺疊圖，不發訊號）"
+          >楊EMA</button>
+        )}
         {INDICATOR_CONFIGS.map(({ key, label, title }) => (
           <button key={key}
             onClick={() => onIndicatorToggle(key)}

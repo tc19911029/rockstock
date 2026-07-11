@@ -42,6 +42,13 @@ function toTime(date: string): Time {
   return date.replace(/\*$/, '') as Time;
 }
 
+/** 指數移動平均（seeded：out[0]=vals[0]），供楊氏EMA濾網疊圖用 */
+function computeEMA(vals: number[], n: number): number[] {
+  const k = 2 / (n + 1); const out: number[] = []; let prev = NaN;
+  for (let i = 0; i < vals.length; i++) { prev = i === 0 ? vals[0] : vals[i] * k + prev * (1 - k); out[i] = prev; }
+  return out;
+}
+
 // ── Chart sync — imported from store, re-exported for backwards compatibility ─
 import {
   broadcastRange,
@@ -161,6 +168,8 @@ interface CandleChartProps {
   fillContainer?: boolean;
   maToggles?: { ma5: boolean; ma10: boolean; ma20: boolean; ma60: boolean; ma120: boolean; ma240: boolean };
   showBollinger?: boolean;
+  /** 楊雲翔特殊EMA濾網疊圖：EMA23 ＋ ±1%/±3% 濾網帶 ＋ EMA60 大方向線（純視覺，不發訊號） */
+  showYangEma?: boolean;
   /** 顯示書本 p.37/p.38 切線（下降切線+上升切線），預設開 */
   showTrendlines?: boolean;
   /** 顯示上升切線（底底高），獨立 toggle；若 undefined 則跟 showTrendlines */
@@ -244,6 +253,7 @@ export default function CandleChart({
   candles, signals, chartMarkers = [], avgCost, stopLossPrice, onCrosshairMove, onDoubleClick, height = 400, fillContainer = false,
   maToggles = { ma5: true, ma10: true, ma20: true, ma60: true, ma120: false, ma240: false },
   showBollinger = false,
+  showYangEma = false,
   showTrendlines = true,
   showAscendingTrendline,
   showDescendingTrendline,
@@ -285,6 +295,8 @@ export default function CandleChart({
   const patternConnectorRef = useRef<ISeriesApi<'Line'> | null>(null);
   // 雙B戰法主圖疊加（三色資金）：智能交易線/ZB4/ZB5/多空線
   const shuangBRefs       = useRef<{ zhineng?: ISeriesApi<'Line'>; zb4?: ISeriesApi<'Line'>; zb5?: ISeriesApi<'Line'>; duokong?: ISeriesApi<'Line'> }>({});
+  // 楊氏EMA濾網疊圖：EMA23 + ±1%/±3% 帶 + EMA60
+  const yangEmaRefs       = useRef<{ ema23?: ISeriesApi<'Line'>; up1?: ISeriesApi<'Line'>; up3?: ISeriesApi<'Line'>; dn1?: ISeriesApi<'Line'>; dn3?: ISeriesApi<'Line'>; ema60?: ISeriesApi<'Line'> }>({});
   // ABC 偵測器腳位切線（除錯/驗證疊加）
   const abcTrendlineRef   = useRef<ISeriesApi<'Line'> | null>(null);
   // 大戶持股趨勢線（千張大戶%，自己的隱形價格軸）
@@ -508,6 +520,15 @@ export default function CandleChart({
     shuangBRefs.current.duokong = chart.addSeries(LineSeries, {
       color: '#FFD000', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2,
     });
+
+    // ── 楊雲翔特殊EMA濾網疊主圖：EMA60 大方向(藍虛線) + ±3%/±1% 濾網帶(紅上/綠下) + EMA23(琥珀) ──
+    // 加入順序 = 由下往上疊，EMA23 最後加 → 畫在最上層。全部預設隱藏，由 showYangEma effect 控制。
+    yangEmaRefs.current.ema60 = chart.addSeries(LineSeries, { color: '#3B82F6', lineWidth: 2, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false, title: 'EMA60' });
+    yangEmaRefs.current.up3 = chart.addSeries(LineSeries, { color: 'rgba(239,68,68,0.85)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.up1 = chart.addSeries(LineSeries, { color: 'rgba(239,68,68,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.dn1 = chart.addSeries(LineSeries, { color: 'rgba(34,197,94,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.dn3 = chart.addSeries(LineSeries, { color: 'rgba(34,197,94,0.85)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.ema23 = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, visible: false, title: 'EMA23' });
 
     // ── ABC 偵測器腳位切線（除錯/驗證）：amber 粗線，與通用綠色下降切線區分 ──
     abcTrendlineRef.current = chart.addSeries(LineSeries, {
@@ -892,6 +913,32 @@ export default function CandleChart({
     bbRefs.current.upper?.applyOptions({ visible: showBollinger });
     bbRefs.current.lower?.applyOptions({ visible: showBollinger });
   }, [showBollinger]);
+
+  // ── 楊氏EMA濾網：算 EMA23/EMA60 + ±1%/±3% 帶，set data + 顯示切換 ──
+  useEffect(() => {
+    const r = yangEmaRefs.current;
+    const keys = ['ema23', 'up1', 'up3', 'dn1', 'dn3', 'ema60'] as const;
+    if (!r.ema23) return;
+    if (!showYangEma || candles.length === 0) {
+      for (const k of keys) r[k]?.applyOptions({ visible: false });
+      return;
+    }
+    const closes = candles.map(c => c.close);
+    const e23 = computeEMA(closes, 23);
+    const e60 = computeEMA(closes, 60);
+    const mk = (arr: number[], mult: number) =>
+      candles.reduce<{ time: Time; value: number }[]>((acc, c, i) => {
+        if (Number.isFinite(arr[i])) acc.push({ time: toTime(c.date), value: arr[i] * mult });
+        return acc;
+      }, []);
+    r.ema23!.setData(mk(e23, 1));
+    r.up1!.setData(mk(e23, 1.01));
+    r.up3!.setData(mk(e23, 1.03));
+    r.dn1!.setData(mk(e23, 0.99));
+    r.dn3!.setData(mk(e23, 0.97));
+    r.ema60!.setData(mk(e60, 1));
+    for (const k of keys) r[k]?.applyOptions({ visible: true });
+  }, [candles, showYangEma]);
 
   // ── Avg cost price line ───────────────────────────────────────────────────
   useEffect(() => {

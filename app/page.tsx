@@ -461,6 +461,7 @@ function HomePage() {
     setMaToggles(p => ({ ...p, [key]: !p[key] }));
   }, []);
   const [showBollinger, setShowBollinger] = useState(false);
+  const [showYangEma, setShowYangEma] = useState(false);
   const [indicators, setIndicators] = useState({
     macd: true, kd: true, volume: true, rsi: false,
     foreign: false, trust: false, dealer: false, retail: false,
@@ -1076,6 +1077,8 @@ function HomePage() {
                 onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
+                showYangEma={showYangEma}
+                onYangEmaToggle={() => setShowYangEma(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
                 onChipGroupToggle={toggleChipGroup}
@@ -1133,6 +1136,7 @@ function HomePage() {
               },
               maToggles,
               showBollinger,
+              showYangEma,
               showPivots,
               showSupportResistance,
               showCandleSR,
@@ -1419,6 +1423,8 @@ function HomePage() {
                 onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
+                showYangEma={showYangEma}
+                onYangEmaToggle={() => setShowYangEma(v => !v)}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
                 onChipGroupToggle={toggleChipGroup}
@@ -1485,6 +1491,7 @@ function HomePage() {
                       fillContainer
                       maToggles={maToggles}
                       showBollinger={showBollinger}
+                      showYangEma={showYangEma}
                       showPivots={showPivots}
                       showSupportResistance={showSupportResistance}
                       showCandleSR={showCandleSR}
