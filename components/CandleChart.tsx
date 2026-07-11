@@ -49,6 +49,53 @@ function computeEMA(vals: number[], n: number): number[] {
   return out;
 }
 
+// 楊氏濾網移動停利參數（可調）：獲利到 +10% 才啟動移動停利，之後回檔吃掉「最大漲幅」的 30% 就出
+const YANG_TRAIL_ARM = 0.10;
+const YANG_TRAIL_GIVEBACK = 0.30;
+
+/**
+ * 楊雲翔特殊EMA濾網買賣訊號（收盤確認，標在觸發那根 K 棒）：
+ *   進場▲＝站上 EMA60（大方向偏多）＋（單根收盤 ≥ EMA23×1.03 或 連兩根 ≥ EMA23×1.01）
+ *   出場▼＝三層擇一先到：移動停利(獲利鎖利) / 收破 EMA60(大方向轉壞) / 跌破 EMA23 濾網(時機轉壞)
+ * 純視覺標記，非回測 fill；進出以「收盤」為準。
+ */
+function computeYangMarkers(candles: CandleWithIndicators[]): SeriesMarker<Time>[] {
+  if (candles.length < 24) return [];
+  const closes = candles.map(c => c.close);
+  const e23 = computeEMA(closes, 23);
+  const e60 = computeEMA(closes, 60);
+  const out: SeriesMarker<Time>[] = [];
+  let inPos = false, entry = 0, peakGain = 0;
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i], pc = candles[i - 1];
+    if (!inPos) {
+      const above60 = c.close >= e60[i];
+      const f3 = c.close >= e23[i] * 1.03;
+      const f1x2 = c.close >= e23[i] * 1.01 && pc.close >= e23[i - 1] * 1.01;
+      if (above60 && (f3 || f1x2)) {
+        inPos = true; entry = c.close; peakGain = 0;
+        out.push({ time: toTime(c.date), position: 'belowBar', shape: 'arrowUp', color: '#22c55e', text: '楊買', size: 2 });
+      }
+    } else {
+      peakGain = Math.max(peakGain, (c.high - entry) / entry);
+      const gain = (c.close - entry) / entry;
+      const trail = peakGain >= YANG_TRAIL_ARM && gain <= peakGain * (1 - YANG_TRAIL_GIVEBACK);
+      const brk60 = c.close < e60[i];
+      const brk3 = c.close <= e23[i] * 0.97;
+      const brk1x2 = c.close <= e23[i] * 0.99 && pc.close <= e23[i - 1] * 0.99;
+      let reason = '';
+      if (trail) reason = '移利';           // 移動停利（鎖利出）
+      else if (brk60) reason = '破60';       // 大方向轉壞
+      else if (brk3 || brk1x2) reason = '停損'; // 時機轉壞
+      if (reason) {
+        inPos = false;
+        out.push({ time: toTime(c.date), position: 'aboveBar', shape: 'arrowDown', color: reason === '移利' ? '#3b82f6' : '#ef4444', text: '楊' + reason, size: 2 });
+      }
+    }
+  }
+  return out;
+}
+
 // ── Chart sync — imported from store, re-exported for backwards compatibility ─
 import {
   broadcastRange,
@@ -1042,6 +1089,10 @@ export default function CandleChart({
         });
       }
     }
+    // 楊氏EMA濾網買賣訊號 ▲進▼出（開啟疊圖時才標）
+    if (showYangEma) {
+      for (const m of computeYangMarkers(candles)) converted.push(m);
+    }
     // lightweight-charts 要求 markers 按時間升序
     converted.sort((a, b) => {
       const ta = String(a.time);
@@ -1049,7 +1100,7 @@ export default function CandleChart({
       return ta < tb ? -1 : ta > tb ? 1 : 0;
     });
     markersPlugRef.current.setMarkers(converted);
-  }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern, shuangB, abcOverlay]);
+  }, [chartMarkers, highlightDate, candles, showPivots, showPattern, activePattern, shuangB, abcOverlay, showYangEma]);
 
   // ── 均線移動扣抵三角標：算各 MA「下一根要丟掉」那根 K 棒的 x 像素，貼在圖最底一排 ──
   // 扣抵棒索引 = 最新一根 − N + 1（今收高於該根收盤 → 均線下一步往上，見 lib/analysis/maDeduction）。
