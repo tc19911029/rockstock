@@ -800,7 +800,15 @@ export default function CandleChart({
     const chart = chartRef.current;
     if (chart) {
       const totalBars = candles.length;
-      const visibleBars = 80;
+      // 日K 預設看最近 80 根（~4 個月，K 棒大小清晰）；分鐘K 若也只給 80 根＝才 ~4 天，
+      // 均線沒背景、看起來又短又跳 → 分鐘K 改成預設看最近 ~15 個交易日（估每日根數 × 15）。
+      const isIntradayBars = candles[0]?.date?.includes(' ') ?? false;
+      let visibleBars = 80;
+      if (isIntradayBars) {
+        const days = new Set(candles.map(c => c.date.slice(0, 10))).size || 1;
+        const perDay = candles.length / days;
+        visibleBars = Math.min(Math.round(perDay * 15), candles.length - 1);
+      }
 
       // 只有「換股 / 換週期 / 換中心日」才自動套用可視範圍；盤中輪詢只是換新 candles
       // reference（同檔同週期、只動最後一根），key 不變 → 不重置，保留使用者拖動的視窗。
