@@ -453,10 +453,14 @@ export async function GET(req: NextRequest) {
         ]);
         // historical 是新→舊（descending），reverse 成 ascending
         const historical = [...historicalRaw].reverse();
-        // 取台北今日字串、historical 過濾掉今日（避免和 intraday 重複，intraday 是即時的）
-        const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-        const historicalPrior = historical.filter(c => c.date.slice(0, 10) < todayStr);
-        const merged = [...historicalPrior, ...intradayCandles];
+        // dedup by 時間戳（同一根以 intraday 為準，較新）＋ 排序 ascending。
+        // 修：週末/盤後 Fugle intraday 會回「上一場 session」的整批 bar，舊寫法
+        //（historical 過濾今日 + 直接 concat intraday）會讓同一天重複且時間倒退
+        //（…07-09 13:30, 07-09 09:00, 09:30…），害均線/走圖畫成鋸齒扇形。
+        const byTime = new Map<string, (typeof historical)[number]>();
+        for (const c of historical) byTime.set(c.date, c);
+        for (const c of intradayCandles) byTime.set(c.date, c);
+        const merged = [...byTime.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
         if (merged.length > 0) {
           ticker = candidates[0];
           candles = merged;
