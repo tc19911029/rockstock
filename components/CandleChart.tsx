@@ -985,7 +985,9 @@ export default function CandleChart({
     r.dn1!.setData(mk(e23, 0.99));
     r.dn3!.setData(mk(e23, 0.97));
     r.ema60!.setData(mk(e60, 1));
-    for (const k of keys) r[k]?.applyOptions({ visible: true });
+    // EMA23/EMA60 中線會壓在 K 棒上擋視線 → 只顯示濾網帶(±1%/±3%)+訊號箭頭，中線隱藏（邏輯仍用它算）
+    for (const k of ['up1', 'up3', 'dn1', 'dn3'] as const) r[k]?.applyOptions({ visible: true });
+    for (const k of ['ema23', 'ema60'] as const) r[k]?.applyOptions({ visible: false });
   }, [candles, showYangEma]);
 
   // ── Avg cost price line ───────────────────────────────────────────────────
