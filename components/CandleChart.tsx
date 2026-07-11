@@ -298,6 +298,15 @@ export default function CandleChart({
   const onCrosshairRef = useRef(onCrosshairMove);
   const onDoubleClickRef = useRef(onDoubleClick);
   const [hoverCandle, setHoverCandle] = useState<CandleWithIndicators | null>(null);
+  // 分鐘K 首次渲染 pane 常卡住不 composite（資料其實都在 series）；任何一次「重跑資料
+  // effect（重設 series + 重新 fit 視窗）」就會畫出來（等同手動切指標/盤中輪詢那一拍）。
+  // → 分鐘K 載入後主動 bump 一次 paintNonce（進 data effect deps + fitKey），逼它重畫。
+  const [paintNonce, setPaintNonce] = useState(0);
+  useEffect(() => {
+    if (candles.length === 0 || !candles[0]?.date?.includes(' ')) return;
+    const t = setTimeout(() => setPaintNonce(n => n + 1), 200);
+    return () => clearTimeout(t);
+  }, [candles]);
   // 均線移動扣抵三角標（貼在圖最底下一排，x 對齊各 MA「下一根要丟掉」的那根 K 棒）
   const [deductMarks, setDeductMarks] = useState<Array<{ key: keyof typeof MA_COLORS; n: number; color: string; x: number }>>([]);
   const [trendlineStatus, setTrendlineStatus] = useState<{
@@ -795,7 +804,7 @@ export default function CandleChart({
 
       // 只有「換股 / 換週期 / 換中心日」才自動套用可視範圍；盤中輪詢只是換新 candles
       // reference（同檔同週期、只動最後一根），key 不變 → 不重置，保留使用者拖動的視窗。
-      const fitKey = `${centerOnDate ?? ''}|${candles[0]?.date ?? ''}|${candles[1]?.date ?? ''}`;
+      const fitKey = `${centerOnDate ?? ''}|${candles[0]?.date ?? ''}|${candles[1]?.date ?? ''}|${paintNonce}`;
       if (lastFitKeyRef.current !== fitKey) {
         lastFitKeyRef.current = fitKey;
         if (centerOnDate) {
@@ -826,7 +835,7 @@ export default function CandleChart({
         });
       }
     }
-  }, [candles, centerOnDate, highlightDate, showTrendlines, showAscendingTrendline, showDescendingTrendline, showAscendingChannel, showDescendingChannel, showConsolidationLines]);
+  }, [candles, centerOnDate, highlightDate, showTrendlines, showAscendingTrendline, showDescendingTrendline, showAscendingChannel, showDescendingChannel, showConsolidationLines, paintNonce]);
 
   // ── 雙B戰法主圖疊加：set/clear 四條線（markers 併入下方 markers effect）──
   useEffect(() => {
