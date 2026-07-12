@@ -571,12 +571,12 @@ export default function CandleChart({
 
     // ── 楊雲翔特殊EMA濾網疊主圖：EMA60 大方向(藍虛線) + ±3%/±1% 濾網帶(紅上/綠下) + EMA23(琥珀) ──
     // 加入順序 = 由下往上疊，EMA23 最後加 → 畫在最上層。全部預設隱藏，由 showYangEma effect 控制。
-    yangEmaRefs.current.ema60 = chart.addSeries(LineSeries, { color: '#3B82F6', lineWidth: 2, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false, title: 'EMA60' });
-    yangEmaRefs.current.up3 = chart.addSeries(LineSeries, { color: 'rgba(239,68,68,0.85)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
-    yangEmaRefs.current.up1 = chart.addSeries(LineSeries, { color: 'rgba(239,68,68,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
-    yangEmaRefs.current.dn1 = chart.addSeries(LineSeries, { color: 'rgba(34,197,94,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
-    yangEmaRefs.current.dn3 = chart.addSeries(LineSeries, { color: 'rgba(34,197,94,0.85)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
-    yangEmaRefs.current.ema23 = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, visible: false, title: 'EMA23' });
+    yangEmaRefs.current.ema60 = chart.addSeries(LineSeries, { color: '#3B82F6', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.up3 = chart.addSeries(LineSeries, { color: 'rgba(239,68,68,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.up1 = chart.addSeries(LineSeries, { color: 'rgba(239,68,68,0.35)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.dn1 = chart.addSeries(LineSeries, { color: 'rgba(34,197,94,0.35)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.dn3 = chart.addSeries(LineSeries, { color: 'rgba(34,197,94,0.8)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
+    yangEmaRefs.current.ema23 = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, visible: false });
 
     // ── ABC 偵測器腳位切線（除錯/驗證）：amber 粗線，與通用綠色下降切線區分 ──
     abcTrendlineRef.current = chart.addSeries(LineSeries, {
@@ -985,9 +985,7 @@ export default function CandleChart({
     r.dn1!.setData(mk(e23, 0.99));
     r.dn3!.setData(mk(e23, 0.97));
     r.ema60!.setData(mk(e60, 1));
-    // EMA23/EMA60 中線會壓在 K 棒上擋視線 → 只顯示濾網帶(±1%/±3%)+訊號箭頭，中線隱藏（邏輯仍用它算）
-    for (const k of ['up1', 'up3', 'dn1', 'dn3'] as const) r[k]?.applyOptions({ visible: true });
-    for (const k of ['ema23', 'ema60'] as const) r[k]?.applyOptions({ visible: false });
+    for (const k of keys) r[k]?.applyOptions({ visible: true });
   }, [candles, showYangEma]);
 
   // ── Avg cost price line ───────────────────────────────────────────────────
