@@ -322,6 +322,7 @@ export interface PullbackBuyResult {
   breakoutPrice: number;    // 前一日 high（被突破）
   reclaimDay: number;       // 站回 MA5 的 K 棒 index（絕對 index）
   barsSinceReclaim: number; // 站回後第幾日補量突破（0 = 站回當日 = 舊行為）
+  depthRatio: number | null; // 回檔深度比（課程 6-2 黃金分割：0.318 最強、越小越強）；無可量測段=null
 }
 
 /** 逐關判定的 gate key — UI 顯示層照這組 key 對映，不可自己重算 */
@@ -517,7 +518,11 @@ export function explainPullbackBuy(
   // 9. 2026-07-05 回測-4 按課程（6-2/1-9 黃金分割回檔強弱★）：
   // 回檔深度比 = (前波高 − 回檔低) / (前波高 − **起漲低**)。
   // 起漲低 = 前波高「之前」的 pivot low（那一波漲勢的起點），不是回檔自己形成的低。
-  // 課程：0.318 最強／0.5 還行／**0.682 最弱、先觀察不買** — 深回檔 >0.618 不發 B 訊號。
+  // 課程：0.318 最強／0.5 還行／**0.682 最弱、先觀察不買** — 深回檔到最弱界不發 B 訊號。
+  // 2026-07-12：門檻維持 0.618（非課程數字，是費波南希慣用值；比課程 0.682 嚴）。
+  //   回測（2023-2026，B 5785 筆）證實放寬到課程 0.682 反而傷品質：
+  //   0.618–0.682 band（1109 筆）D20 +0.83%/勝41% vs 核心<0.618 +1.58%/勝44%——
+  //   這正是課程說的「最弱先觀察不買」那段。故守 0.618 較嚴＝對齊課程精神＋回測擇優。
   let depthPass = true;
   let depthRatio: number | null = null;
   if (reclaimDay >= 0) {
@@ -531,7 +536,7 @@ export function explainPullbackBuy(
       }
       if (pullLow !== Infinity) {
         depthRatio = (lastHigh.price - pullLow) / (lastHigh.price - rallyBase.price);
-        depthPass = depthRatio <= 0.618; // 課程：回檔過深（≈0.682 級）先不買
+        depthPass = depthRatio <= 0.618; // 守 0.618（比課程 0.682 嚴，回測擇優，見上註）
       }
     }
   }
@@ -542,7 +547,7 @@ export function explainPullbackBuy(
       ? '無可量測回檔段（不擋）'
       : depthPass
         ? `回檔深度 ${depthRatio.toFixed(3)} ≤ 0.618`
-        : `回檔深度 ${depthRatio.toFixed(3)} > 0.618（課程：過深先觀察不買）`,
+        : `回檔深度 ${depthRatio.toFixed(3)} > 0.618（過深＝課程最弱區，先觀察不買）`,
     metric: depthRatio != null ? depthRatio.toFixed(2) : undefined,
   });
 
@@ -569,6 +574,7 @@ export function explainPullbackBuy(
       breakoutPrice: prev.high,
       reclaimDay,
       barsSinceReclaim: index - reclaimDay,
+      depthRatio,
     },
   };
 }
@@ -674,8 +680,9 @@ export function detectRangeBreakout(
 
   // 課程 6-1 盤整四位置分級（顯示用）：
   //   pos4 = 已漲一倍（近60根最低收盤×2）— 高檔假突破區，課程「錢不要賺」
-  //   pos1 = 收盤仍在 MA60 下（空頭低檔第一種）
-  //   pos3 = MA20 乖離 >8%（主升偏後段，⚠️自創分界）
+  //   pos1 = 收盤仍在月線 MA20 下（空頭低檔第一種）— 2026-07-12 修：課程①分界是月線非季線
+  //          （課程 6-1「站上月線之上才可以進場」；原用 MA60 季線分界與標籤自相矛盾）
+  //   pos3 = MA20 乖離 >8%（主升偏後段，⚠️自創分界；課程③本為「上漲第二波後」波段數）
   //   pos2 = 其餘（出升→主升，課程勝率約8成的甜蜜區）
   const grade = (() => {
     let lo = Infinity;
@@ -683,7 +690,7 @@ export function detectRangeBreakout(
       if (candles[i].close < lo) lo = candles[i].close;
     }
     if (lo > 0 && lo !== Infinity && c.close >= lo * 2) return 'pos4' as const;
-    if (c.ma60 != null && c.close < c.ma60) return 'pos1' as const;
+    if (c.ma20 != null && c.close < c.ma20) return 'pos1' as const;
     const dev20 = c.ma20 != null && c.ma20 > 0 ? (c.close - c.ma20) / c.ma20 : 0;
     return dev20 > 0.08 ? ('pos3' as const) : ('pos2' as const);
   })();

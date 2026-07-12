@@ -706,14 +706,14 @@ function detectNShape(
   const prevLow = lows[1];
   if (!prevLow || b.price <= prevLow.price) return null;
 
-  // 目標價 = A 高（突破點）+ (A 高 - B 低)
-  // 書本《抓飆股》Part 7：N 字底突破 A 高後再漲 nHeight 距離（往上的另一個 N）
-  // 2026-05-10 修：原邏輯用 close 當突破點 → target 跟著 close 漂移，
-  //   無法被 makeResult 的「close >= target × 0.97」過濾「已達標」case；
-  //   且跟其他型態不一致（其他都是 neckline + height）
-  const nHeight = a.price - b.price;
-  if (nHeight <= 0) return null;
-  const patternTargetPrice = a.price + nHeight;
+  // 目標價 = 正波段算法（課程 6-4：N 字底是 6 型態裡唯一例外，「只有它不一樣」）
+  // 2026-07-12 修：課程 6-4 明訂 N 字底不用「突破點+型態高度」一般算法，改用正波段——
+  //   型態距離＝前高 A（壓力）− 型態低點（支撐，取較深的第一隻腳 prevLow）；
+  //   目標價＝從「突破點往前找的轉折低」（右腳 B）往上算一個型態距離＝ B + (A − prevLow)。
+  //   （量初升腿 prevLow→A 的長度，從右腳 B 投射，= 教科書量測移動；非退化成 A）
+  const patternHeight = a.price - prevLow.price;
+  if (patternHeight <= 0) return null;
+  const patternTargetPrice = b.price + patternHeight;
 
   // pivots 順序：A 高（突破點）+ B 低（標籤 A/B）
   return {
