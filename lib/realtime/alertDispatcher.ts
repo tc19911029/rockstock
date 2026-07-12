@@ -242,38 +242,40 @@ function formatGuardPayload(sig: GuardSignal): {
   const code = sig.symbol.split('.')[0];
   const m = sig.meta;
   const nameSuffix = m.name ? ` ${m.name}` : '';
+  // 標題股名：`代號 名稱`；無名稱時退回只有代號（向下相容）
+  const codeName = `${code}${nameSuffix}`;
   const lines: string[] = [`${sig.symbol}${nameSuffix}`];
   let title: string;
   let priority: 4 | 5;
 
   if (sig.rule === 'stop-loss-breach') {
-    title = `🚨 ${code} 跌破停損（持倉保命）`;
+    title = `🚨 ${codeName} 跌破停損（持倉保命）`;
     priority = 5;
     lines.push(m.positionSide === 'short'
       ? `現價 ${m.price} ≥ 回補停損 ${m.stopLoss}（做空進場 ${m.entryPrice}）`
       : `現價 ${m.price} ≤ 停損 ${m.stopLoss}（進場 ${m.entryPrice}）`);
   } else if (sig.rule === 'pump-reversal') {
-    title = `⚠ ${code} 拉高回落（持倉保命）`;
+    title = `⚠ ${codeName} 拉高回落（持倉保命）`;
     priority = 4;
     lines.push(`當日高 ${m.dayHigh}（+${m.dayGainPct}% vs 昨收）→ 現價 ${m.price}（自高點 -${m.drawdownPct}%）`);
   } else if (sig.rule === 'reversal-open-low') {
-    title = `👀 ${code} 昨日${m.reversalLabel ?? '轉折訊號'}・今開低（變盤確認）`;
+    title = `👀 ${codeName} 昨日${m.reversalLabel ?? '轉折訊號'}・今開低（變盤確認）`;
     priority = 4;
     lines.push(`昨收 ${m.yClose} → 現價 ${m.price}（開低 -${m.openLowPct}%）`);
     lines.push(`課程 CH2：變盤線次日開低=空方確認。收盤跌破昨低 ${m.yLow} → 執行出場；拉回站穩 → 解除。`);
   } else if (sig.rule === 'gap-open-buffer') {
-    title = `🧯 ${code} 大跌開低・先別殺（開盤緩衝）`;
+    title = `🧯 ${codeName} 大跌開低・先別殺（開盤緩衝）`;
     priority = 4;
     lines.push(`昨收 ${m.prevClose} → 現價 ${m.price}（開低 -${m.openLowPct}%）`);
     lines.push('課程紀律：大跌開低別開盤市價殺單（常成交在最差價）。先看開盤 30 分鐘，13:20 再按規則處理（含停損執行）。');
   } else if (sig.rule === 'key-level-breakout') {
-    title = `🔑 ${code} 鎖股越關鍵價（${m.keyLabel ?? '發動'}）`;
+    title = `🔑 ${codeName} 鎖股越關鍵價（${m.keyLabel ?? '發動'}）`;
     priority = 4;
     lines.push(`現價 ${m.price} 越過關鍵價 ${m.keyLevel}（昨收 ${m.prevClose} 還在下方）`);
     if (m.waitingFor) lines.push(`在等：${m.waitingFor}`);
     lines.push('課程紀律：13:20 看確認、13:25 掛市價 — 勿盤中追高；開高 ≥5% 禁追、收盤跌回關鍵價下=假突破不做。');
   } else {
-    title = `⚠ ${code} 急殺（持倉保命）`;
+    title = `⚠ ${codeName} 急殺（持倉保命）`;
     priority = 4;
     lines.push(`近 ${m.windowMin} 分鐘 -${m.dropPct}%（${m.refClose} → ${m.price}）`);
   }
@@ -287,12 +289,13 @@ function formatPayload(sig: AlertSignal): {
   if (isGuardSignal(sig)) return formatGuardPayload(sig);
   const label = RULE_LABELS[sig.rule];
   const code = sig.symbol.split('.')[0];
-  const title = `🔔 ${code} ${label}（分時）`;
+  const nameSuffix = sig.name ? ` ${sig.name}` : '';
+  const title = `🔔 ${code}${nameSuffix} ${label}（分時）`;
 
   const tf = `${sig.tfMin}m`;
   const arrow = sig.meta.pctChange >= 0 ? '↑' : '↓';
   const lines: string[] = [
-    `${sig.symbol} [${tf}]`,
+    `${sig.symbol}${nameSuffix} [${tf}]`,
     `${sig.meta.open} ${arrow} ${sig.meta.close} (${sig.meta.pctChange >= 0 ? '+' : ''}${sig.meta.pctChange}%)`,
     `vol ${sig.meta.volume}張 (${sig.meta.volumeMultiplier}x MA20)`,
   ];

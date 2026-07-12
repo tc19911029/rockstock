@@ -49,6 +49,8 @@ export interface MonitoredSymbol {
   market: 'TW' | 'CN';
   source: 'holding' | 'manual' | 'watchlist' | 'scan' | 'lockroster';
   isHolding: boolean;
+  /** 中文名（推播標題用）；來源檔有就帶，scan 候選常缺 → 缺省 fallback 代號 */
+  name?: string;
   /** 只有 source='holding' 才帶（guard 規則1 停損判斷用） */
   holding?: MonitoredHoldingInfo;
   /**
@@ -69,7 +71,7 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
     if (h.holding && h.holding.positionSide === 'long') {
       h.holding.reversalWatch = await detectYesterdayReversalWatch(h.symbol, h.market);
     }
-    out.push({ symbol: h.symbol, market: h.market, source: 'holding', isHolding: true, holding: h.holding });
+    out.push({ symbol: h.symbol, market: h.market, source: 'holding', isHolding: true, holding: h.holding, name: h.holding?.name });
     seen.add(h.symbol);
   }
 
@@ -77,7 +79,7 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
   for (const x of extras) {
     if (seen.has(x.symbol)) continue;
     if (out.length >= REALTIME_RULES.POOL_HARD_CAP) break;
-    out.push({ symbol: x.symbol, market: x.market, source: 'manual', isHolding: x.isHolding });
+    out.push({ symbol: x.symbol, market: x.market, source: 'manual', isHolding: x.isHolding, name: x.name });
     seen.add(x.symbol);
   }
 
@@ -89,7 +91,7 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
     if (out.length >= REALTIME_RULES.POOL_HARD_CAP) break;
     out.push({
       symbol: e.symbol, market: e.market, source: 'lockroster', isHolding: false,
-      lockTrigger: e.lockTrigger,
+      lockTrigger: e.lockTrigger, name: e.lockTrigger.name,
     });
     seen.add(e.symbol);
   }
@@ -102,7 +104,7 @@ export async function getActiveSymbols(): Promise<MonitoredSymbol[]> {
       if (seen.has(c.symbol)) continue;
       out.push({
         symbol: c.symbol, market,
-        source: 'scan', isHolding: false,
+        source: 'scan', isHolding: false, name: c.name,
       });
       seen.add(c.symbol);
     }
@@ -239,20 +241,20 @@ interface RawExtraSymbol {
   isHolding?: boolean;
 }
 
-async function readExtraSymbols(): Promise<Array<{ symbol: string; market: 'TW' | 'CN'; isHolding: boolean }>> {
+async function readExtraSymbols(): Promise<Array<{ symbol: string; market: 'TW' | 'CN'; isHolding: boolean; name?: string }>> {
   try {
     const p = path.join(process.cwd(), 'data', 'realtime', 'extra-symbols.json');
     const raw = await fs.readFile(p, 'utf-8');
     const parsed = JSON.parse(raw) as { symbols?: RawExtraSymbol[] };
     return (parsed.symbols ?? [])
       .filter(s => s.symbol && (s.market === 'TW' || s.market === 'CN'))
-      .map(s => ({ symbol: s.symbol, market: s.market, isHolding: s.isHolding ?? false }));
+      .map(s => ({ symbol: s.symbol, market: s.market, isHolding: s.isHolding ?? false, name: s.name }));
   } catch {
     return [];
   }
 }
 
-async function readPoolCandidates(market: 'TW' | 'CN'): Promise<Array<{ symbol: string }>> {
+async function readPoolCandidates(market: 'TW' | 'CN'): Promise<Array<{ symbol: string; name?: string }>> {
   try {
     const today = todayInMarket(market);
     const p = path.join(process.cwd(), 'data', 'agents', 'pool', market, `${today}.json`);
@@ -261,7 +263,7 @@ async function readPoolCandidates(market: 'TW' | 'CN'): Promise<Array<{ symbol: 
     const age = Date.now() - stat.mtimeMs;
     if (age > REALTIME_RULES.SCAN_CANDIDATE_TTL_MS) return [];
     const raw = await fs.readFile(p, 'utf-8');
-    const parsed = JSON.parse(raw) as { candidates?: Array<{ symbol: string }> };
+    const parsed = JSON.parse(raw) as { candidates?: Array<{ symbol: string; name?: string }> };
     return (parsed.candidates ?? []).filter(c => c.symbol);
   } catch {
     return [];

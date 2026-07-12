@@ -147,6 +147,7 @@ export async function GET(req: NextRequest) {
       market: item.market,
       isHolding: item.isHolding,
       source: item.source,
+      name: item.name ?? item.holding?.name ?? item.lockTrigger?.name,
     };
 
     // ── 持倉保命層：純 quote + 1m 視窗，不受 MIN_BARS_FOR_DETECT 限制 ──

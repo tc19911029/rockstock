@@ -45,6 +45,8 @@ export interface DetectorContext {
   isHolding: boolean;
   /** 監控池來源（holdingsGuard scope gate 用；缺省視為 'scan'） */
   source?: 'holding' | 'manual' | 'watchlist' | 'scan' | 'lockroster';
+  /** 中文名（推播標題用）；缺省 fallback 代號 */
+  name?: string;
 }
 
 export interface Signal {
@@ -75,6 +77,8 @@ export interface Signal {
   isHolding: boolean;
   /** 監控池來源透傳（holdingsGuard scope gate 用） */
   source?: 'holding' | 'manual' | 'watchlist' | 'scan' | 'lockroster';
+  /** 中文名（推播標題用）；缺省 fallback 代號 */
+  name?: string;
 }
 
 /**
@@ -195,6 +199,7 @@ function makeSignal(
     caveat: 'minute-inference',
     isHolding: ctx.isHolding,
     source: ctx.source,
+    name: ctx.name,
   };
 }
 
