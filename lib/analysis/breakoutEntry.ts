@@ -90,6 +90,11 @@ export function detectBreakoutEntry(
     ? '今日站回MA5'
     : `站回MA5+${pb.barsSinceReclaim}日`;
 
+  // 課程 6-2 黃金分割：回檔越淺越強（0.318 最強）。顯示深度供「優先選回檔最小那檔」參考。
+  const depthNote = pb.depthRatio != null
+    ? `+回檔深度${pb.depthRatio.toFixed(3)}（越小越強，0.318最強）`
+    : '';
+
   return {
     isBreakout: true,
     subType: 'pullback_buy',
@@ -98,6 +103,6 @@ export function detectBreakoutEntry(
     volumeRatio: pb.volumeRatio,
     prevSwingLow: pb.prevSwingLow,
     preEntryDays: pb.pullbackDays,
-    detail: `回後買上漲（多頭+${reclaimNote}+守MA5+不破前低${pb.prevSwingLow.toFixed(2)}+紅K實體${pb.bodyPct.toFixed(2)}%+量×${pb.volumeRatio.toFixed(2)}+突破前K高${pb.breakoutPrice.toFixed(1)}）`,
+    detail: `回後買上漲（多頭+${reclaimNote}+守MA5+不破前低${pb.prevSwingLow.toFixed(2)}+紅K實體${pb.bodyPct.toFixed(2)}%+量×${pb.volumeRatio.toFixed(2)}+突破前K高${pb.breakoutPrice.toFixed(1)}${depthNote}）`,
   };
 }

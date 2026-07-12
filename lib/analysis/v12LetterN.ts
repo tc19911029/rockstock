@@ -1074,7 +1074,12 @@ function detectInvertedNTop(candles: CandleWithIndicators[], idx: number): TopPa
   const lowB = lows.find(l => l.index > highC.index && l.index < highA.index);   // A、C 之間的低點
   if (!lowB) return null;
   const necklinePrice = lowB.price;                 // 跌破 B = 倒N確認（makeTopResult 判 close ≤ B×0.97）
-  const patternTargetPrice = necklinePrice - (highA.price - necklinePrice);
+  // 目標價 = 正波段算法（課程 6-11：倒 N 與 N 字底一樣，是 6 頭部型態裡唯一例外）
+  // 2026-07-12 修：課程明訂倒 N「不是從跌破點往下減，而是從轉折高往下算」。鏡像 N 字底
+  //   （target = 右腳 + (前高 − 深腳)）：型態距離 = 高峰 highA − 頸線 lowB；
+  //   從「跌破點往前找的轉折高」（右肩 highC）往下算 = highC − (highA − lowB)。
+  const patternHeight = highA.price - lowB.price;
+  const patternTargetPrice = highC.price - patternHeight;
   return { patternType: 'inverted-n-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [highC, highA, lowB] };
 }
 
