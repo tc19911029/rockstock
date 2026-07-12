@@ -1352,6 +1352,13 @@ export default function CandleChart({
       new Map(pts.map(p => [String(p.time).replace(/\*$/, ''), p.value] as const));
     return { zhineng: m(shuangB.zhineng), zb4: m(shuangB.zb4), zb5: m(shuangB.zb5), duokong: m(shuangB.duokong) };
   }, [shuangB]);
+
+  // 楊氏EMA濾網數值（EMA23/EMA60）— 疊圖開啟時算，供左上圖例顯示
+  const yangEmaArrays = useMemo(() => {
+    if (!showYangEma || candles.length === 0) return null;
+    const closes = candles.map(c => c.close);
+    return { e23: computeEMA(closes, 23), e60: computeEMA(closes, 60) };
+  }, [showYangEma, candles]);
   const shuangBLegend = (() => {
     if (!shuangBMaps || !displayForLegend) return null;
     const d = displayForLegend.date.replace(/\*$/, '');
@@ -1376,6 +1383,17 @@ export default function CandleChart({
     const pd = prevForLegend?.date?.replace(/\*$/, '');
     const pv = pd != null ? map.get(pd) : undefined;
     return { v, arrow: pv != null ? (v >= pv ? ' ↑' : v < pv ? ' ↓' : '') : '' };
+  })();
+
+  // 楊氏EMA濾網在 hover（或最新）K 棒的數值：EMA23 + ±1%/±3% + EMA60
+  const yangEmaLegend = (() => {
+    if (!yangEmaArrays || idxForLegend < 0) return null;
+    const e23 = yangEmaArrays.e23[idxForLegend], e60 = yangEmaArrays.e60[idxForLegend];
+    if (!Number.isFinite(e23) || !Number.isFinite(e60)) return null;
+    const p23 = idxForLegend > 0 ? yangEmaArrays.e23[idxForLegend - 1] : undefined;
+    const p60 = idxForLegend > 0 ? yangEmaArrays.e60[idxForLegend - 1] : undefined;
+    const arr = (v: number, pv?: number) => pv != null ? (v >= pv ? ' ↑' : ' ↓') : '';
+    return { e23, up1: e23 * 1.01, up3: e23 * 1.03, dn1: e23 * 0.99, dn3: e23 * 0.97, e60, a23: arr(e23, p23), a60: arr(e60, p60) };
   })();
 
   const statusLabel: Record<PatternStatus, { text: string; cls: string }> = {
@@ -1425,6 +1443,18 @@ export default function CandleChart({
         {holderLegend && (
           <div className="flex items-center text-xs font-mono">
             <span style={{ color: '#ec4899' }} className="opacity-80">{holderLineLabel} {holderLegend.v.toFixed(1)}%{holderLegend.arrow}</span>
+          </div>
+        )}
+
+        {/* Row 1.7: 楊氏EMA濾網數值（EMA23 + ±1%/±3% + EMA60）— 疊圖開啟才顯示，對齊 hover/最新 K 棒 */}
+        {showYangEma && yangEmaLegend && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-mono">
+            <span style={{ color: '#F59E0B' }}>EMA23 {yangEmaLegend.e23.toFixed(2)}{yangEmaLegend.a23}</span>
+            <span style={{ color: 'rgba(239,68,68,0.95)' }}>+3% {yangEmaLegend.up3.toFixed(2)}</span>
+            <span style={{ color: 'rgba(239,68,68,0.6)' }}>+1% {yangEmaLegend.up1.toFixed(2)}</span>
+            <span style={{ color: 'rgba(34,197,94,0.6)' }}>−1% {yangEmaLegend.dn1.toFixed(2)}</span>
+            <span style={{ color: 'rgba(34,197,94,0.95)' }}>−3% {yangEmaLegend.dn3.toFixed(2)}</span>
+            <span style={{ color: '#3B82F6' }}>EMA60 {yangEmaLegend.e60.toFixed(2)}{yangEmaLegend.a60}</span>
           </div>
         )}
 
