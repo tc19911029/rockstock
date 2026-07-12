@@ -178,6 +178,11 @@ export const HOLDINGS_GUARD = {
   GAP_OPEN_LOW_PCT: 0.03,
   /** 規則6：開盤緩衝觀察窗（分鐘）— 課程紀律：開盤別市價殺單，13:20 再按規則處理 */
   GAP_OPEN_WINDOW_MIN: 30,
-  /** 規則4：哪些既有形態規則走持倉推播（blowoff-bullish 是買訊、非保命，不含） */
-  PATTERN_RULES: ['blowoff-bearish', 'terminal-rally', 'ma5-breakdown'],
+  /**
+   * 規則4：哪些既有形態規則走持倉推播。
+   * 2026-07-12 使用者決議：跌破MA5 太吵（一天 100+ 則）→ 移除 ma5-breakdown；
+   * 「突然爆天量」不分方向都要報 → 保留 blowoff-bearish(爆量長黑)、
+   * 補上 blowoff-bullish(爆量長紅衝高)，末升段警示(terminal-rally)照留。
+   */
+  PATTERN_RULES: ['blowoff-bearish', 'blowoff-bullish', 'terminal-rally'],
 } as const;

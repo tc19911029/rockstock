@@ -361,15 +361,19 @@ describe('alertDispatcher — decideNotify gate', () => {
     expect(decideNotify(guardSig({ isHolding: false, source: 'scan' }))).toBe(false);
   });
 
-  test('形態規則：BLOWOFF_NTFY_ENABLED 未設 → 持倉的出貨形態推、非持倉不推', () => {
+  test('形態規則：BLOWOFF_NTFY_ENABLED 未設 → 持倉的爆量/末升段推、非持倉不推', () => {
     expect(decideNotify(patternSig())).toBe(true);                                     // 持倉 blowoff-bearish
     expect(decideNotify(patternSig({ isHolding: false, source: 'scan' }))).toBe(false); // 非持倉
     expect(decideNotify(patternSig({ rule: 'terminal-rally' }))).toBe(true);
-    expect(decideNotify(patternSig({ rule: 'ma5-breakdown' }))).toBe(true);
   });
 
-  test('blowoff-bullish 是買訊非保命 → 不在 PATTERN_RULES，不推', () => {
-    expect(decideNotify(patternSig({ rule: 'blowoff-bullish' }))).toBe(false);
+  test('2026-07-12 決議：ma5-breakdown 太吵移出 PATTERN_RULES → 持倉也不推', () => {
+    expect(decideNotify(patternSig({ rule: 'ma5-breakdown' }))).toBe(false);
+  });
+
+  test('2026-07-12 決議：爆天量不分方向都報 → blowoff-bullish 持倉推、非持倉不推', () => {
+    expect(decideNotify(patternSig({ rule: 'blowoff-bullish' }))).toBe(true);
+    expect(decideNotify(patternSig({ rule: 'blowoff-bullish', isHolding: false, source: 'scan' }))).toBe(false);
   });
 
   test('BLOWOFF_NTFY_ENABLED=true 舊全域語意：全池（含非持倉）都推', () => {
