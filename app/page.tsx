@@ -499,19 +499,6 @@ function HomePage() {
       setShowPivots(false);
     }
   }, []);
-  // 楊氏EMA濾網開關：打開＝清空主圖其他線/標記(MA/BB/三色/頭底)只留楊濾網+訊號箭頭；關閉＝回技術套組
-  const handleYangEmaToggle = useCallback(() => {
-    const next = !showYangEma;
-    setShowYangEma(next);
-    if (next) {
-      setMaToggles({ ma5: false, ma10: false, ma20: false, ma60: false, ma120: false, ma240: false });
-      setShowBollinger(false);
-      setShowShuangB(false);
-      setShowPivots(false);
-    } else {
-      applyChartPreset('technical');
-    }
-  }, [showYangEma, applyChartPreset]);
   // 「籌碼」合併鈕：一鍵開關法人四（TW 外資/投信/自營/散戶）+ CN 主力/散戶副圖
   const toggleChipGroup = useCallback((next: boolean) => {
     setIndicators(p => ({ ...p, foreign: next, trust: next, dealer: next, retail: next, cnMain: next, cnRetail: next }));
@@ -676,6 +663,23 @@ function HomePage() {
         toast.error(`切換 ${newInterval} 失敗：${e.message || '請稍後再試'}`);
       });
   }, [currentStock, currentInterval, targetDate, loadStock, indicators, showShuangB, applyChartPreset]);
+
+  // 楊氏EMA濾網開關：打開＝清空主圖其他線/標記(MA/BB/三色/頭底)只留楊濾網+訊號箭頭 + 自動切 30 分K(楊法週期)；
+  //              關閉＝回技術套組 + 切回日K
+  const handleYangEmaToggle = useCallback(() => {
+    const next = !showYangEma;
+    setShowYangEma(next);
+    if (next) {
+      setMaToggles({ ma5: false, ma10: false, ma20: false, ma60: false, ma120: false, ma240: false });
+      setShowBollinger(false);
+      setShowShuangB(false);
+      setShowPivots(false);
+      handleIntervalChange('30m');
+    } else {
+      applyChartPreset('technical');
+      handleIntervalChange('1d');
+    }
+  }, [showYangEma, applyChartPreset, handleIntervalChange]);
 
   // 三色指標（主力狀態/捕撈季節/雙B）只有日線版本 → 只要落到「分鐘線 + 三色指標開著」就回退技術，
   // 確保分鐘線一定有指標可看（量/KD/MACD），不會出現「請開啟至少一個指標面板」的空副圖。
