@@ -1409,7 +1409,7 @@ export default function CandleChart({
       <div className="absolute top-2 left-3 z-10 flex flex-col gap-1 pointer-events-none">
         {/* Row 1: MA Legend + 信號 badge（接在 MA240 之後） */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-mono">
-          {(Object.entries(MA_COLORS) as [keyof typeof MA_COLORS, string][]).map(([key, color]) => {
+          {(Object.entries(MA_COLORS) as [keyof typeof MA_COLORS, string][]).filter(([key]) => maToggles[key]).map(([key, color]) => {
             const val  = displayForLegend?.[key];
             const pVal = prevForLegend?.[key];
             const arrow = val != null && pVal != null ? (val >= pVal ? ' ↑' : ' ↓') : '';
