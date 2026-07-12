@@ -46,7 +46,9 @@ export interface ABCBreakoutResult {
   poleLowIdx?: number;
   /** 修正 ≤20 天完成＝課程「飆旗」型態，可算目標價 D */
   isFlagPattern?: boolean;
-  /** 目標價 D＝突破日收盤＋旗桿高度（左右兩段等長 D；投射錨點=突破點 ⚠️ 課程只給圖示，錨點屬近似） */
+  /** 目標價 D＝C 波轉折低（legCLow）＋旗桿高度（左右兩段等長 D）。
+   *  投射錨點＝C 波低：課程 6-5 p1 圖示 D 箭頭底端落在「C 波轉折低」虛線（逐字-27 更正），
+   *  非突破日收盤（用 c.close 會系統性高估目標價）。⚠️ 課程只給圖示，錨點屬近似。 */
   flagTargetD?: number;
   detail: string;
 }

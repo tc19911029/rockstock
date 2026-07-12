@@ -2,8 +2,8 @@
  * 策略 I：K 線橫盤突破進場偵測
  *
  * 朱家泓《活用技術分析寶典》Part 11-1 8 種進場位置「位置 3：等 K 線橫盤突破」（p.694）：
- *   多頭上漲中出現一根中長 K（錨點，課程 6-3：第一根紅黑不管），股價維持在其
- *   高低區間「橫盤整理」，隨後大量中長紅 K 收盤突破橫盤最高點，做多。
+ *   多頭上漲中出現一根 K（錨點，課程 6-3 投影片：**第一根紅黑不管、實體大小不管**），
+ *   股價維持在其高低區間「橫盤整理」，隨後大量中長紅 K 收盤突破橫盤最高點，做多。
  *
  * 對應寶典 Part 12-4「18 種空轉多祕笈圖」第 5 圖「K 線橫盤突破」（p.802）。
  *
@@ -15,7 +15,8 @@
  *
  * 條件（2026-07-05 課程 CH2-3/6-3 對齊）：
  *   1. 多頭趨勢中
- *   2. 過去 3-15 根 K 線中，可找到一根實體 ≥ 3% 的 K 當錨點（課程：第一根紅黑不管）
+ *   2. 過去 3-15 根 K 線中，找一根 K 當錨點（課程 6-3：第一根紅黑不管、實體大小不管；
+ *      不設實體門檻，橫盤成立與否由「後續收盤含納 + 狹幅 <5%」把關）
  *   3. 從錨點次日起到昨日，收盤維持在錨點高低之間「橫盤」（課程：收盤判定）：
  *      - 收盤不破錨點低點、收盤不過錨點高點（過了＝那天已是突破日）
  *      - 期間最高與錨點高的距離 < 5%（狹幅整理）
@@ -32,12 +33,12 @@ import { detectTrend } from '@/lib/analysis/trendAnalysis';
 import {
   BOOK_BODY_PCT_MIN, BOOK_VOL_RATIO_MIN,
   KLINE_CONSOL_MIN_DAYS, KLINE_CONSOL_MAX_DAYS,
-  KLINE_CONSOL_ANCHOR_BODY_PCT, KLINE_CONSOL_MAX_RANGE_PCT,
+  KLINE_CONSOL_MAX_RANGE_PCT,
 } from './bookThresholds';
 
 export interface KlineConsolidationBreakoutResult {
   isBreakout: boolean;
-  anchorDate: string;          // 錨點 K 日期（課程 6-3：第一根紅黑不管，實體 ≥3% 即可）
+  anchorDate: string;          // 錨點 K 日期（課程 6-3：第一根紅黑不管、實體大小不管）
   anchorHigh: number;          // 錨點 K 最高
   anchorLow: number;           // 錨點 K 最低（停損參考）
   anchorBodyPct: number;       // 錨點實體 %
@@ -53,7 +54,6 @@ export interface KlineConsolidationBreakoutResult {
 // 書本門檻單一事實來源：lib/analysis/bookThresholds.ts
 const MIN_CONSOL_DAYS = KLINE_CONSOL_MIN_DAYS;       // 至少 3 根橫盤 K（課程 CH2-3「連續三天」，2026-07-05 裁決 4→3）
 const MAX_CONSOL_DAYS = KLINE_CONSOL_MAX_DAYS;       // 最多 15 根（更久就接近位置 1 盤整突破）
-const MIN_ANCHOR_BODY_PCT = KLINE_CONSOL_ANCHOR_BODY_PCT;   // 錨點中長 K：實體 ≥ 3%（紅黑不管，寶典 Part 4-1 實體門檻）
 const MAX_RANGE_WIDTH_PCT = KLINE_CONSOL_MAX_RANGE_PCT;     // 橫盤狹幅：高低差 / 錨點高 < 5%
 
 interface AnchorCandidate {
@@ -89,10 +89,11 @@ function findAnchorAndRange(
     const a = candles[anchorIdx];
     if (!a || a.open <= 0) continue;
 
-    // 2026-07-05 課程對齊（6-3）：「第一根 K 棒紅黑不管」— 拿掉紅K限制，改看實體大小
-    //（實體門檻保留 ⚠️ 自創殘留，防每根小K都成錨點）
-    const anchorBodyPct = (Math.abs(a.close - a.open) / a.open) * 100;
-    if (anchorBodyPct < MIN_ANCHOR_BODY_PCT) continue;
+    // 2026-07-12 課程對齊（6-3 投影片：「第一根 K 棒紅黑不管、實體大小不管」）：
+    // 移除自創的錨點實體 ≥3% 門檻（原「自創殘留」）。橫盤成立與否純由下方
+    // 「後續收盤含納錨點高低 + 狹幅 <5%」把關；小實體/十字/黑K 起手的橫盤（課程原型）
+    // 因此不再被漏抓。錨點若範圍過窄，後續收盤會破其高/低而自動失效，不致淪為雜訊。
+    const anchorBodyPct = (Math.abs(a.close - a.open) / a.open) * 100; // 僅顯示用
 
     // 檢查 anchorIdx+1 .. idx-1 的橫盤：
     //   2026-07-05 課程對齊（6-3 逐字稿「聽清楚是**收盤**沒有破」）：

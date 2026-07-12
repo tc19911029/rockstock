@@ -51,7 +51,7 @@ export type TopPatternType =
   | 'complex-head-shoulder-top'  // 複式頭肩頂（多肩，S4 v2）
   | 'inverted-n-top'             // 倒N字頂（高→低→反彈不過高→跌破，S4 v2）
   | 'long-double-top'            // 長雙頭頂（兩頂間隔久，較雙重頂可靠，S4 v2）
-  | 'one-line-top';              // 一字頂 / 島狀反轉頂（跳空孤島，S4 v2）
+  | 'one-line-top';              // 一字頂（高檔窄幅橫盤+均線靠攏，大量長黑跌破支撐）
 
 const PATTERN_ACHIEVEMENT: Record<PatternType, number> = {
   'head-shoulder': 83,
@@ -71,7 +71,7 @@ const TOP_PATTERN_ACHIEVEMENT: Record<TopPatternType, number> = {
   'complex-head-shoulder-top': 80,  // 對稱複式頭肩底
   'inverted-n-top': 75,             // 對稱 n-shape（保守）
   'long-double-top': 50,            // 長雙頭頂：間隔久較可靠，介於雙重(36)與三重(95)
-  'one-line-top': 85,               // 島狀反轉頂（跳空孤島，強反轉）
+  'one-line-top': 85,               // 一字頂（高檔均線靠攏窄幅盤頭，跌破連續下跌）
 };
 
 export interface LetterNResult {
@@ -1078,20 +1078,60 @@ function detectInvertedNTop(candles: CandleWithIndicators[], idx: number): TopPa
   return { patternType: 'inverted-n-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [highC, highA, lowB] };
 }
 
-// 一字頂 / 島狀反轉頂（課程 6-11 / 抓住線圖）：向上跳空進入孤島 → 高點 → 向下跳空離開，跌破缺口下緣確認。
+// 一字頂（課程 6-11）：高檔「高點不過高、低點不破低」窄幅橫盤盤頭 + 均線靠攏
+//（尤其 MA20/MA60 靠在一起）；隨後大量長黑 K 收盤跌破橫盤支撐＝空點。
+// 2026-07-12 重寫：原實作要求兩個跳空缺口＝島狀反轉，是「另一個型態」（課程一字頂無缺口要件）；
+// 改為鏡像一字底（highWinRateEntry.detectStrategyE 的均線糾結窄幅盤）。
+// 大量長黑 + 收盤真跌破支撐（頸線×0.97）由呼叫端 detectTopPatterns / makeTopResult 統一把關。
 function detectOneLineTop(candles: CandleWithIndicators[], idx: number): TopPatternMatch | null {
-  const lo = Math.max(1, idx - 20);
-  let gapUpIdx = -1, gapDownIdx = -1;
-  for (let i = lo + 1; i <= idx; i++) {
-    if (gapUpIdx < 0 && candles[i].low > candles[i - 1].high) gapUpIdx = i;                       // 向上跳空進入
-    else if (gapUpIdx >= 0 && gapDownIdx < 0 && candles[i].high < candles[i - 1].low) gapDownIdx = i; // 向下跳空離開
+  const MIN_DAYS = 3;          // 課程：一字頂「盤頭時間不會很久」
+  const MAX_DAYS = 20;
+  const MAX_RANGE_PCT = 0.10;  // 高檔窄幅（區間 ≤10%，鏡像一字底課程 6-4「區間範圍 10%」）
+  if (idx < MAX_DAYS + 2) return null;
+
+  // 橫盤窗＝往前擴到最長的窄幅收盤區間（含納 idx-1，不含今日突破 K）
+  let start = idx - 1;
+  for (let i = idx - 1; i >= Math.max(1, idx - MAX_DAYS); i--) {
+    const win = candles.slice(i, idx);            // i .. idx-1
+    const closes = win.map(x => x.close);
+    const maxC = Math.max(...closes);
+    const minC = Math.min(...closes);
+    if (minC <= 0) break;
+    if ((maxC - minC) / minC > MAX_RANGE_PCT) break;
+    start = i;
   }
-  if (gapUpIdx < 1 || gapDownIdx <= gapUpIdx) return null;
-  let islandHigh = -Infinity, islandHighIdx = gapUpIdx;
-  for (let i = gapUpIdx; i < gapDownIdx; i++) if (candles[i].high > islandHigh) { islandHigh = candles[i].high; islandHighIdx = i; }
-  const necklinePrice = candles[gapUpIdx - 1].high;   // 缺口下緣（跳空前一根高點）
-  if (islandHigh <= necklinePrice) return null;
-  const patternTargetPrice = necklinePrice - (islandHigh - necklinePrice);
-  const pv = (index: number, price: number): Pivot => ({ index, price, type: 'high' });
-  return { patternType: 'one-line-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [pv(islandHighIdx, islandHigh), pv(gapUpIdx - 1, necklinePrice)] };
+  const boxDays = (idx - 1) - start + 1;
+  if (boxDays < MIN_DAYS) return null;
+
+  const box = candles.slice(start, idx);          // start .. idx-1
+  let boxHigh = -Infinity, boxHighIdx = start;
+  let supportLow = Infinity, supportIdx = start;
+  for (let i = start; i < idx; i++) {
+    if (candles[i].high > boxHigh) { boxHigh = candles[i].high; boxHighIdx = i; }
+    if (candles[i].close < supportLow) { supportLow = candles[i].close; supportIdx = i; } // 支撐＝橫盤收盤低（跌破用收盤判）
+  }
+  void box;
+
+  // 均線靠攏：MA5/10/20 糾結 且 MA20 與 MA60 靠攏（課程強調 20/60 靠在一起）
+  const ref = candles[idx - 1];
+  const { ma5, ma10, ma20, ma60 } = ref;
+  if (ma5 == null || ma10 == null || ma20 == null || ma60 == null) return null;
+  if (ma60 <= 0) return null;
+  const cluster3 = (Math.max(ma5, ma10, ma20) - Math.min(ma5, ma10, ma20)) / Math.min(ma5, ma10, ma20);
+  if (cluster3 >= 0.03) return null;                       // 三線糾結 <3%
+  if (Math.abs(ma20 - ma60) / ma60 >= 0.05) return null;   // MA20 與 MA60 靠攏 <5%
+
+  // 高檔盤頭（排除低檔一字＝一字底）：橫盤高點在均線帶之上
+  if (boxHigh <= ma20) return null;
+
+  const necklinePrice = supportLow;                        // 跌破此支撐＝一字頂確認
+  const patternTargetPrice = necklinePrice - (boxHigh - necklinePrice);
+  const pv = (index: number, price: number, type: 'high' | 'low'): Pivot => ({ index, price, type });
+  return {
+    patternType: 'one-line-top',
+    necklinePrice,
+    patternTargetPrice,
+    structureBrokenPrice: necklinePrice,
+    pivots: [pv(boxHighIdx, boxHigh, 'high'), pv(supportIdx, necklinePrice, 'low')],
+  };
 }
