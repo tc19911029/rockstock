@@ -114,11 +114,11 @@ function ConditionsPanelSwitch({ wConds, xConds, yConds, chipTables }: {
 }) {
   const method = useBacktestStore(s => s.activeBuyMethod);
   if (method === 'A') return <SixConditionsPanel />;
-  // A30：同一套六條件，跑在「開盤第一根 30分K(09:30)」選當天名單（收盤根幾乎不動、選不到；快照近似）
+  // A30：同一套六條件，盤中每 30 分掃一次、名單累加（13:30 那次為當天最終；快照近似）
   if (method === 'A30') return (
     <div>
       <div className="px-3 pt-2 text-[10px] text-amber-300/80 leading-relaxed">
-        六條件（30分K）· 用開盤第一根（09:30）選當天名單 · 快照近似值
+        六條件（30分K）· 盤中每 30 分更新、名單累加 · 13:30 為當天最終 · 快照近似值
       </div>
       <SixConditionsPanel />
     </div>
