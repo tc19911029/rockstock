@@ -409,6 +409,7 @@ export async function register() {
   //   :02 → bullish（B/C/E/J/K/L/M/P 8 字母共一 call）
   //   :05 → reversal（D/F/N/O 4 字母共一 call）
   //   :08 → system（Q 戰法軌，每 30 分鐘）
+  const scan30mDone = { d: '' }; // 六條件(30分K)開盤選股：一天一次去重旗標
   setInterval(() => {
     const now = new Date();
     const min = now.getMinutes();
@@ -417,9 +418,15 @@ export async function register() {
       scanIntradaySanSe('TW').catch(err => console.error('[local-cron] TW 三色盤中:', err));
       scanIntradaySanSe('CN').catch(err => console.error('[local-cron] CN 三色盤中:', err));
     }
-    // :00 / :30 → 六條件(30分K)盤中掃描（TW；對齊 30分K收盤 09:30..13:30，route 內部 gate + 算邊界）
-    if (min === 0 || min === 30) {
-      callRoute('/api/cron/scan-intraday-30m?market=TW', 'scan-30m').catch(err => console.error('[local-cron] TW scan-30m:', err));
+    // 09:30 開盤那根 → 六條件(30分K)當天選股（TW；一天一次，route 內部 gate + idempotent）
+    // 為何只在開盤：收盤前 30分K 幾乎不動、六條件⑤「紅K實體≥2%」是日K尺度，收盤根近乎 0 檔；
+    // 攻擊訊號集中在開盤那根。改「當天最後一根」→「當天開盤那根」（2026-07 使用者決議）。
+    if (now.getHours() === 9 && min >= 30 && min <= 35) {
+      const todayTpe = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+      if (scan30mDone.d !== todayTpe) {
+        scan30mDone.d = todayTpe;
+        callRoute('/api/cron/scan-intraday-30m?market=TW', 'scan-30m').catch(err => console.error('[local-cron] TW scan-30m:', err));
+      }
     }
     let track: 'bullish' | 'reversal' | 'system' | null = null;
     if (min % 10 === 2) track = 'bullish';

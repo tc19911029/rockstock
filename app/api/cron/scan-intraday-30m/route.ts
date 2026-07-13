@@ -1,14 +1,16 @@
 /**
  * GET /api/cron/scan-intraday-30m?market=TW&force=1
  *
- * 六條件(30分K)盤中掃描 — 每 30 分(09:30/10:00/.../13:30)一輪。
+ * 六條件(30分K)選股 — **用開盤第一根 30分K(09:30 收)當每天的選股時點**。
+ *
+ * 為什麼是開盤那根：實測收盤前 30分K 幾乎不動(最大漲幅~3%、多數~0.5%)，六條件⑤
+ * 「紅K實體≥2%」是日K尺度，收盤根幾乎永遠 0 檔；攻擊訊號集中在開盤(09:30 那根動能最大)。
  *
  * 資料流(不逐檔抓 30分K，靠自建 30分K快照層)：
  *   1. 讀全市場 L2 快照(一次讀完，便宜)
- *   2. appendIntraday30mBar：為每檔把「本邊界的 30分K」堆進 30分K宇宙(近似)
- *   3. 讀 30分K宇宙(暖機歷史 + 今日堆疊) → scanSixConditions30m(ZHU_PURE_BOOK，原封不動)
- *   4. saveScanSession(sessionType='intraday', timeframe='30m' → mtfMode='daily30')
- *   13:30 那輪額外補寫 post_close(觸發 prune + 穩定 final)
+ *   2. appendIntraday30mBar：把「開盤 30分K」堆進 30分K宇宙(近似；同邊界重觸發 idempotent)
+ *   3. 讀 30分K宇宙(暖機歷史 + 今日開盤根) → scanSixConditions30m(ZHU_PURE_BOOK，原封不動)
+ *   4. 09:30 那輪寫 post_close(當天正式名單 + 觸發 prune)
  *
  * 只做台股(六條件是朱家泓台股方法；陸股/停利不在此功能)。
  * 暖機需先跑 scripts/backfill-30m-warmup.ts；盤後由 refresh-30m-eod 用 Fugle 準確版覆蓋。
@@ -57,7 +59,7 @@ export async function GET(req: NextRequest) {
     const { saveScanSession } = await import('@/lib/storage/scanStorage');
 
     // ── 1+2. 盤中堆疊(有新鮮且非退化的 L2 才 append)─────────────────────
-    const boundary = force && !currentBoundaryLabel() ? '13:30' : currentBoundaryLabel();
+    const boundary = force && !currentBoundaryLabel() ? '09:30' : currentBoundaryLabel();
     let appended = 0;
     let l2Count = 0;
     const snap = await readIntradaySnapshot('TW', date);
@@ -115,9 +117,9 @@ export async function GET(req: NextRequest) {
       sessionType: 'intraday' as const,
     });
 
-    // 13:30 最終那輪：補寫 post_close(觸發 prune + 穩定 final)
-    const isFinal = boundary === '13:30';
-    if (isFinal) {
+    // 開盤 09:30 那輪 = 當天正式名單：寫 post_close(觸發 prune + 穩定結果)
+    const isOpening = boundary === '09:30';
+    if (isOpening) {
       await saveScanSession({
         ...baseSession,
         id: `TW-long-daily30-${date}-postclose`,
@@ -134,7 +136,7 @@ export async function GET(req: NextRequest) {
       evaluated: stats.evaluated,
       tooFew: stats.tooFew,
       passed: stats.passed,
-      isFinal,
+      isOpening,
       elapsedMs: Date.now() - startTime,
     });
   } catch (err) {

@@ -38,6 +38,8 @@ export interface Candle30mUniverse {
 export interface Candle30mCursor {
   date: string;
   updatedAt: string;
+  /** 上一次已 append 的邊界標籤(如 "09:30")；同邊界重觸發時跳過，避免二次 append 弄壞該根 */
+  lastBoundary?: string;
   /** symbol → 上一邊界的今日累計 { close, high, low, cumVolume } */
   data: Record<string, { close: number; high: number; low: number; cumVolume: number }>;
 }
@@ -200,8 +202,10 @@ export async function appendIntraday30mBar(
 ): Promise<{ appended: number }> {
   const barDate = `${date} ${barTime}`;
   const prevCursor = await read30mCursor(date);
+  // 同邊界重觸發 → 跳過(避免二次 append 把該根算成 delta 弄壞)
+  if (prevCursor?.lastBoundary === barTime) return { appended: 0 };
   const u = (await read30mUniverse()) ?? { market: MARKET, date, updatedAt: '', data: {} };
-  const nextCursor: Candle30mCursor = { date, updatedAt: new Date().toISOString(), data: {} };
+  const nextCursor: Candle30mCursor = { date, updatedAt: new Date().toISOString(), lastBoundary: barTime, data: prevCursor?.data ?? {} };
   let appended = 0;
 
   for (const q of quotes) {
