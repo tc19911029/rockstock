@@ -170,6 +170,8 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
           // META: name 從 LETTER_NAMES 單一事實來源讀；track/ma 是本 panel 特有顯示欄位
           const META: Record<string, { name: string; track: string; ma: string }> = {
             A: { name: LETTER_NAMES.A, track: '預選池', ma: '—' },
+            // A30：六條件(30分K)盤中掃描 — 非買法字母，獨立 30分K宇宙變體(mtf=daily30)
+            A30: { name: '六條件(30分)', track: '盤中30分', ma: '30分K' },
             B: { name: LETTER_NAMES.B, track: '多頭軌', ma: 'MA5' },
             C: { name: LETTER_NAMES.C, track: '多頭軌', ma: 'MA10' },
             D: { name: LETTER_NAMES.D, track: '轉折軌', ma: 'MA20' },
@@ -188,7 +190,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
             X: { name: LETTER_NAMES.X, track: '接刀軌', ma: '—' },
             Y: { name: LETTER_NAMES.Y, track: '偷買軌(原)', ma: '—' },
           };
-          type M = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
+          type M = 'A' | 'A30' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
           const renderBtn = (method: M, color: string) => {
             const m = META[method];
             const isBullish = BULLISH_TRACK_SET.has(method);
@@ -200,6 +202,8 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
             const isInstSteal = INSTSTEAL_TRACK_SET.has(method);
             const tooltip = method === 'A'
               ? `A · ${m.name}（書本五步法 Step 1 預選池：六條件 + 戒律 + 淘汰法）。多頭軌字母 B/C/E/K/L/M/P 都從這個池子挑進場時機。`
+              : method === 'A30'
+              ? `${m.name} · 盤中每 30 分鐘用「30分K」掃同一套六條件（成交額前 500 大台股）。\n每 30 分更新一次，收盤前 13:30 那根是當天最終。\n⚠️ 30分K盤中為快照近似值；回測顯示此法無穩定超額，屬盯盤/紀律工具。`
               : isBullish
                 ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n✓ 從 Step 1 池子篩選（結果為 A 子集；若池子被重新生成過，舊 session 不會 retro-filter）`
                 : isReversal
@@ -241,6 +245,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
                   {renderBtn('A', 'bg-amber-700/70 border-amber-600 text-amber-100')}
+                  {renderBtn('A30', 'bg-amber-700/70 border-amber-600 text-amber-100')}
                 </div>
               </div>
 

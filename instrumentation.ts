@@ -417,6 +417,10 @@ export async function register() {
       scanIntradaySanSe('TW').catch(err => console.error('[local-cron] TW 三色盤中:', err));
       scanIntradaySanSe('CN').catch(err => console.error('[local-cron] CN 三色盤中:', err));
     }
+    // :00 / :30 → 六條件(30分K)盤中掃描（TW；對齊 30分K收盤 09:30..13:30，route 內部 gate + 算邊界）
+    if (min === 0 || min === 30) {
+      callRoute('/api/cron/scan-intraday-30m?market=TW', 'scan-30m').catch(err => console.error('[local-cron] TW scan-30m:', err));
+    }
     let track: 'bullish' | 'reversal' | 'system' | null = null;
     if (min % 10 === 2) track = 'bullish';
     else if (min % 10 === 5) track = 'reversal';

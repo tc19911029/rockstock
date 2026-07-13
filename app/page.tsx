@@ -114,6 +114,15 @@ function ConditionsPanelSwitch({ wConds, xConds, yConds, chipTables }: {
 }) {
   const method = useBacktestStore(s => s.activeBuyMethod);
   if (method === 'A') return <SixConditionsPanel />;
+  // A30：同一套六條件，跑在盤中 30分K（每 30 分更新，13:30 為當天最終；盤中為快照近似）
+  if (method === 'A30') return (
+    <div>
+      <div className="px-3 pt-2 text-[10px] text-amber-300/80 leading-relaxed">
+        六條件（30分K）· 盤中每 30 分更新 · 收盤前 13:30 為當天最終 · 盤中為快照近似值
+      </div>
+      <SixConditionsPanel />
+    </div>
+  );
   // R 機械軌純排名，無 detector 條件可顯示 — 簡單說明即可
   if (method === 'R') {
     return (

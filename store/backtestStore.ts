@@ -147,7 +147,8 @@ interface BacktestState {
   /** 掃描方向：long=做多, short=做空, daban=打板 */
   scanDirection: 'long' | 'short' | 'daban';
   /** 當前買法（並列買法架構，Phase 6，2026-04-20）— 只在 scanDirection='long' 時有意義 */
-  activeBuyMethod: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
+  // 'A30' = 六條件(30分K)盤中掃描偽字母，映射到 mtf=daily30(非買法字母，獨立 30分K宇宙)
+  activeBuyMethod: 'A' | 'A30' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
   /** 三色資金 level（陸股自創策略）— null = 走書本買法（activeBuyMethod）；非 null = 三色該 level 視角。
    *  單一事實來源：ScanPanelVertical（掃描清單）+ app/page.tsx（中間「條件/訊號」面板）共用，
    *  讓「點哪個策略 → 中間面板換成對應條件/訊號」一致。不持久化（reload 回 null）。 */
@@ -173,7 +174,7 @@ interface BacktestState {
   setScanOnly:            (v: boolean) => void;
   setScanMode:            (m: 'full' | 'pure' | 'sop') => void;
   setScanDirection:       (d: 'long' | 'short' | 'daban') => void;
-  setActiveBuyMethod:     (m: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y') => Promise<void>;
+  setActiveBuyMethod:     (m: 'A' | 'A30' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y') => Promise<void>;
   setSanseLevel:          (lv: SanSeScanLevel | null) => void;
   setWalkForwardConfig:   (c: Partial<WalkForwardConfig>) => void;
   computeWalkForward:     () => void;
@@ -943,8 +944,10 @@ export const useBacktestStore = create<BacktestState>()(
       fetchCronDates: async (market, direction) => {
         const dir = direction ?? get().scanDirection;
         const { activeBuyMethod } = get();
-        // B/C/D/E 讀對應買法 session 清單；A 讀 daily（MTF 在前端過濾）
-        const mtfParam = (activeBuyMethod && activeBuyMethod !== 'A') ? activeBuyMethod : 'daily';
+        // B/C/D/E 讀對應買法 session 清單；A 讀 daily（MTF 在前端過濾）；A30 → daily30(30分K)
+        const mtfParam = activeBuyMethod === 'A' ? 'daily'
+          : activeBuyMethod === 'A30' ? 'daily30'
+          : (activeBuyMethod ?? 'daily');
         set({ isFetchingCron: true });
         try {
           const res = await fetch(`/api/scanner/results?market=${market}&direction=${dir}&mtf=${mtfParam}`);
@@ -984,7 +987,8 @@ export const useBacktestStore = create<BacktestState>()(
             // R 機械軌特殊：用實際 scanDirection（long/short）載入對應 session；
             // 其他字母（B-Q）固定走 long
             const fetchDir = activeBuyMethod === 'R' ? direction : 'long';
-            const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${fetchDir}&mtf=${activeBuyMethod}`);
+            const mtfParam = activeBuyMethod === 'A30' ? 'daily30' : activeBuyMethod; // A30 → daily30(30分K)
+            const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${fetchDir}&mtf=${mtfParam}`);
             const json = await res.json();
             if (!res.ok || !json.ok) throw new Error(json.error ?? '載入失敗');
             const session = (json as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
@@ -994,7 +998,8 @@ export const useBacktestStore = create<BacktestState>()(
             // - 戰法軌（Q）：自含 MA24 趨勢判定，不過 Step 1 → 不過濾 A
             // - 機械軌（R）：純排名，不過 Step 1 → 不過濾 A（REVERSAL_OR_SYSTEM_SET 在 buyMethodTracks 已含 R）
             // 之前的 bug：所有 method 都加 A filter，導致 N/F/O/D/Q session 內反轉軌訊號被擋（如 3026 跌菱形 80% 沒過 A 但 N matched 應顯示）
-            const requireA = !REVERSAL_OR_SYSTEM_SET.has(activeBuyMethod);
+            // A30(六條件30分K) 是自己的 top500 宇宙，不套「matchedMethods 含 A」過濾
+            const requireA = activeBuyMethod !== 'A30' && !REVERSAL_OR_SYSTEM_SET.has(activeBuyMethod);
             // 籌碼觀察軌（W 大戶偷買 / X 法人接刀 / Y 大戶法人偷買）只是「看大戶在偷買誰」的
             // 觀察清單、非進場明牌 → 處置股照顯示（卡片標 ⚠️處置），不像書本買法軌硬排除。
             // 2026-06-16 使用者決議：處置股全是的日子若一律藏掉會整片空白、看不到觀察結果。

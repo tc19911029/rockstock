@@ -495,6 +495,7 @@ export type ScanDirection = 'long' | 'short' | 'daban';
 // 2026-05-04 新增: G=ABC 突破（寶典 Part 11-1 位置 6）、H=突破大量黑 K（位置 8）、I=K線橫盤突破（位置 3）
 export type MtfMode =
   | 'daily'
+  | 'daily30'  // 六條件(30分K)盤中掃描變體(2026-07：獨立 30分K宇宙，非買法字母)
   | 'mtf'
   // v11 字母（含 v12 釋出的 G/H/I — 歷史 record 仍存在）
   | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I'
@@ -602,6 +603,8 @@ export interface ScanSession {
   buyMethod?: 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
   /** Schema 版本（議題 83）；未填視為 v11 */
   schemaVersion?: 'v11' | 'v12';
+  /** 時間框架：'30m' = 六條件(30分K)盤中掃描；未填 = 日K。決定 sessionMtfMode → 'daily30' */
+  timeframe?: '30m';
   /** 掃描時段：intraday=盤中快照, post_close=收盤後正式結果 */
   sessionType?: SessionType;
   scanTime: string;

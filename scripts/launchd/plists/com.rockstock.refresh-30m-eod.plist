@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.refresh-30m-eod</string>
+
+  <!--
+    六條件(30分K) 盤後準確刷新：每個交易日收盤後(14:05 CST)用 Fugle 準確 30分K 覆蓋
+    當日盤中「快照近似」堆疊的 bars，並維持 30分K宇宙暖機(MA60)準確。
+    這就是「一次性 backfill」的每日維持版 — 重跑同一支 backfill 腳本即可(mergePrune 讓準確版蓋近似版)。
+
+    載入：
+      launchctl bootstrap gui/$(id -u) ~/Desktop/rockstock/scripts/launchd/plists/com.rockstock.refresh-30m-eod.plist
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/tc/.local/node-22/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/npx tsx scripts/backfill-30m-warmup.ts --top 500 &gt;&gt; /tmp/rockstock-refresh-30m-eod.log 2&gt;&amp;1</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>5</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-refresh-30m-eod.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-refresh-30m-eod.err.log</string>
+</dict>
+</plist>

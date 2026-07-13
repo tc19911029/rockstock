@@ -152,6 +152,7 @@ async function fsListPrefix(prefix: string): Promise<string[]> {
 
 /** Derive MTF mode from session — 買法 session (buyMethod=B-Q) 優先 */
 function sessionMtfMode(session: ScanSession): MtfMode {
+  if (session.timeframe === '30m') return 'daily30'; // 六條件(30分K)獨立變體槽
   if (session.buyMethod) return session.buyMethod;
   return session.multiTimeframeEnabled ? 'mtf' : 'daily';
 }
@@ -717,6 +718,10 @@ async function loadScanSessionUncached(
     if (mtfMode === 'daily') {
       await applyTurnoverFilter(session, market);
       if (!session.step1Filter) session.step1Filter = 'bypassed'; // daily session 設計上不過 Step 1
+    } else if (mtfMode === 'daily30') {
+      // 六條件(30分K)：自己的 30分K宇宙(=成交額 top500)，不過 Step 1、不套買法軌 matchedMethods 過濾。
+      // ⚠️ 若掉進下面 else 分支會被 matchedMethods.includes('daily30') 洗成空 → 必須有這個獨立分支。
+      if (!session.step1Filter) session.step1Filter = 'bypassed';
     } else if (BULLISH_LETTERS.has(mtfMode)) {
       // 多頭軌字母 (B/C/E/J/K/L/M/P) retro-filter：只保留仍在當日 Step 1 池子內的股票
       // 防 drift：池子被 cron 重跑 / 手動 scan / 回填 覆蓋後，凍結 session 不會 retro-filter
