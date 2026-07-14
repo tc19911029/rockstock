@@ -21,6 +21,8 @@ import { CnBoardBadge } from '@/components/shared/CnBoardBadge';
 import { SortControl } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
+import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { RefreshCw } from 'lucide-react';
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單）：
 // 該頁專屬（六條件/今日熱點/YouTube 提及）+ '|' 分隔線 + 共用區（全 UNIVERSAL_SORT_OPTIONS）。
@@ -81,8 +83,23 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   const {
     scanResults, scanDate, market, marketTrend: storeTrend, scanOnly,
     performance, isFetchingForward, isLoadingCronSession,
-    activeBuyMethod,
+    activeBuyMethod, activeSessionScanTime, loadCronSession, isLoadingBuyMethod,
   } = useBacktestStore();
+
+  // A30（六條件30分K）盤中狀態列：盤中/盤後 + 最後更新時間 + 刷新 + 盤中每分鐘自動輪詢
+  const isA30 = activeBuyMethod === 'A30';
+  const a30Live = isA30 && market === 'TW' && (isMarketOpen('TW') || isPostCloseWindow('TW'));
+  const a30UpdatedAt = activeSessionScanTime
+    ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(activeSessionScanTime))
+    : null;
+  const refreshA30 = () => { if (scanDate) loadCronSession(market, scanDate, { scanOnly: true, direction: 'long' }); };
+  useEffect(() => {
+    if (!a30Live || !scanDate) return;
+    const id = setInterval(() => {
+      loadCronSession(market, scanDate, { scanOnly: true, direction: 'long' });
+    }, 60_000); // 盤中每分鐘自動重載（30分K每半點更新，1分鐘輪詢即可跟上）
+    return () => clearInterval(id);
+  }, [a30Live, market, scanDate, loadCronSession]);
 
   const [expandedStock, setExpandedStock] = useState<string | null>(null);
   const [conceptFilter, setConceptFilter] = useState<string>('all');
@@ -201,6 +218,32 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
           <span className="text-[9px] text-sky-400 animate-pulse">載入中…</span>
         )}
       </div>
+
+      {/* A30 六條件(30分K) 盤中狀態列（仿三色資金：盤中/盤後 + 最後更新 + 刷新）*/}
+      {isA30 && (
+        <div className="flex items-center justify-between gap-1 px-1.5 py-1 rounded bg-amber-950/30 border border-amber-800/40">
+          <div className="flex items-center gap-1.5 text-[10px] flex-wrap min-w-0">
+            <span className="font-semibold text-amber-300 shrink-0">🕐 六條件30分</span>
+            {a30Live ? (
+              <span className="text-rose-400 flex items-center gap-1 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse inline-block" />盤中跳動
+              </span>
+            ) : (
+              <span className="text-sky-400 shrink-0">盤後</span>
+            )}
+            {a30UpdatedAt && <span className="text-muted-foreground/80">· 最後更新 {a30UpdatedAt}</span>}
+            <span className="text-muted-foreground/80">· 累積 {scanResults.length} 檔</span>
+          </div>
+          <button
+            onClick={refreshA30}
+            disabled={isLoadingBuyMethod}
+            title="立即重新載入盤中名單（盤中每 30 分自動掃、名單累加）"
+            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground shrink-0 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${isLoadingBuyMethod ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      )}
 
 
       {/* Sort selector pills — 共用 SortControl + 中央排序清單 */}

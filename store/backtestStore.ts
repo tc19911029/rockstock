@@ -112,6 +112,8 @@ interface BacktestState {
   scanningCount: string;       // 進度文字，如 "123/600"
   scanError:     string | null;
   scanResults:   StockScanResult[];
+  /** 目前載入的買法 session scanTime（A30 盤中「最後更新」用；ISO 字串） */
+  activeSessionScanTime: string | null;
   marketTrend:   TrendState | null;   // 大盤趨勢（掃描時取得）
   /** 掃描 session 的數據新鮮度摘要（從 ScanSession.dataFreshness 取得） */
   sessionDataFreshness: { avgStaleDays: number; maxStaleDays: number; staleCount: number; totalScanned: number; coverageRate: number; dataStatus: string } | null;
@@ -244,6 +246,7 @@ export const useBacktestStore = create<BacktestState>()(
       scanningCount: '',
       scanError:    null,
       scanResults:  [],
+      activeSessionScanTime: null,
       marketTrend:  null,
       scanTiming:   null,
       sessionDataFreshness: null,
@@ -991,7 +994,7 @@ export const useBacktestStore = create<BacktestState>()(
             const res = await fetch(`/api/scanner/results?market=${market}&date=${date}&direction=${fetchDir}&mtf=${mtfParam}`);
             const json = await res.json();
             if (!res.ok || !json.ok) throw new Error(json.error ?? '載入失敗');
-            const session = (json as { sessions?: Array<{ results: StockScanResult[] }> })?.sessions?.[0];
+            const session = (json as { sessions?: Array<{ results: StockScanResult[]; scanTime?: string }> })?.sessions?.[0];
             // Step 2 tab 顯示邏輯（書本軌道分類）：
             // - 多頭軌（B/C/E/J/K/L/M/P）：必須過 Step 1（六條件+戒律+淘汰法）→ 要 matchedMethods 含 'A'
             // - 反轉軌（D/F/N/O）：書本「抓底/反轉」設計就是不過 Step 1 全市場掃 → 不過濾 A
@@ -1009,7 +1012,7 @@ export const useBacktestStore = create<BacktestState>()(
             const scanResults = (session?.results ?? []).filter(r =>
               (isChipObsTrack || !isDisposalVetoed(r)) && (!requireA || r.matchedMethods?.includes('A')),
             );
-            set({ scanResults, isLoadingBuyMethod: false });
+            set({ scanResults, isLoadingBuyMethod: false, activeSessionScanTime: session?.scanTime ?? null });
 
             // 補填 forward performance（同 A 路徑）
             // 2026-05-21：永遠打 POST。
