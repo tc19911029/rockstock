@@ -75,6 +75,26 @@ const MENTIONS_BY_DATE: Record<string, Spec[]> = {
     { code: '2404', name: '漢唐', sentiment: 'bullish',
       headlines: ['在手訂單達 1,939 億、創高'] },
   ],
+
+  '2026-07-15': [
+    // 盤前外電：iPhone 組裝量調研（外電只講「美系大行」、未指名個股，歸屬 iPhone 組裝鏈）
+    { code: '2317', name: '鴻海', sentiment: 'neutral',
+      headlines: [
+        '美系大行調研 2Q26 iPhone 組裝量 5,200 萬支符合預期（約季減 7%、年增 12%），優於過往季節性',
+        '3Q26 iPhone 組裝量預估維持 5,400 萬支（約季增 4%、年減 2%）；年減因新機 SKU 高階先上（18 Pro/Pro Max/Fold），標準版 18 遞延至 1H27',
+        '摺疊機 iPhone Fold 組裝量預估維持 700-800 萬支',
+      ] },
+    { code: '4938', name: '和碩', sentiment: 'neutral',
+      headlines: [
+        '美系大行調研 2Q26 iPhone 組裝量 5,200 萬支符合預期、優於季節性；3Q 估 5,400 萬支（年減 2%）',
+        '標準版 iPhone 18 遞延至 1H27，3Q 新機組裝以高階 SKU 為主',
+      ] },
+  ],
+};
+
+/** 該日 digest 的來源標籤（沒填 → 預設晨報三報）。 */
+const SOURCE_BY_DATE: Record<string, string> = {
+  '2026-07-15': '盤前外電綜合整理',
 };
 
 const MENTIONS: Spec[] = MENTIONS_BY_DATE[DATE] ?? [];
@@ -160,7 +180,7 @@ async function main() {
 
   const digest: NewsDigest = {
     date: DATE,
-    source: '晨報（電子時報/工商時報/經濟日報）',
+    source: SOURCE_BY_DATE[DATE] ?? '晨報（電子時報/工商時報/經濟日報）',
     generated_at: new Date().toISOString(),
     mentions,
     stats: {
