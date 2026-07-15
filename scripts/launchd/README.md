@@ -70,6 +70,34 @@ macOS Sequoia/Sonoma 預設不准 launchd job 執行 `~/Desktop` 下的 shell �
 
 **新增 plist 一律鏡像現有 inline 寫法，不要走 sh wrapper 路徑**，除非 wrapper 搬離 `~/Desktop` 或 `/bin/zsh` 取得完全取用磁碟權限。
 
+## 📍 `bin/` — 住在 ~/.local/bin 的腳本（0715 建立）
+
+有些排程不是單一 curl 而是多步驟腳本（YouTube nightly 分析等），必須是真的 `.sh`。
+因為上述沙箱 + iCloud evict 問題，它們**只能住在 `~/.local/bin/`**，不能從 Desktop 執行。
+
+**約定（重要）**：
+
+| | 位置 | 角色 |
+|---|---|---|
+| 版控真相 | `scripts/launchd/bin/*.sh` | 改這裡，進 git |
+| 實際執行 | `~/.local/bin/*.sh` | launchd 跑這裡，**不進 git** |
+
+```bash
+bash scripts/launchd/sync-bin.sh          # repo → ~/.local/bin 部署
+bash scripts/launchd/sync-bin.sh --check  # 只檢查漂移，有差異 exit 1
+```
+
+**為什麼要有這條規矩**：0715 發現 `scripts/youtube-nightly-analysis.sh`（repo）與
+`~/.local/bin/rockstock-youtube-nightly-analysis.sh`（實跑）**無聲分岔一個月**。
+06-13 commit e45f403 把 normalize 步驟加進 repo 那份，看起來已上線、git 也有紀錄，
+但實跑的那份從沒被同步 → **normalize 從 06-13 到 07-15 一次都沒在生產跑過**。
+repo 那份「留作參考」的舊副本已刪除，只留 `bin/` + `sync-bin.sh` 這條單向路徑。
+
+改完腳本沒跑 sync = 改的是沒在跑的那份。排查任何「腳本明明改了卻沒效果」先跑 `--check`。
+
+`sync-bin.sh` 用「寫暫存 + `mv`」而非 `cp`：zsh 邊讀邊執行，就地覆寫正在跑的腳本會讓它
+執行到亂碼；rename 換的是新 inode，執行中的舊 inode 不受影響。
+
 ## 安裝
 
 ```bash
