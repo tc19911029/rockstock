@@ -378,6 +378,12 @@ function ConsensusSection({
               ⚠ 手動填的示範資料，請用 /youtube-analysis 寫真實版覆蓋
             </div>
           )}
+          {consensus.scoring_data_asof && (
+            <div className="rounded border border-amber-700/60 bg-amber-900/20 px-2 py-1 text-[10px] text-amber-200">
+              ⚠ 此日為事後補跑：下方評分／評級是用 {consensus.scoring_data_asof} 的行情算的，不是 {date} 當天。
+              不可當作「當天就選得出來」的證據。（提及內容與老師準度不受影響）
+            </div>
+          )}
           {consensus.market_view && (
             <div className="whitespace-pre-wrap leading-relaxed text-foreground/90">
               {consensus.market_view}

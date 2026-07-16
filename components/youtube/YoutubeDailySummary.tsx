@@ -139,6 +139,12 @@ export function YoutubeDailySummary({ date, onDateChange, onSelectStock, selecte
               </div>
             )}
 
+            {data.scoring_data_asof && (
+              <div className="px-2.5 py-1.5 text-xs text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded">
+                ⚠ 這天是事後補跑：評分／評級用的是 {data.scoring_data_asof} 的行情，不是當天。節目講了什麼、老師準度不受影響。
+              </div>
+            )}
+
             {/* ── ① 今天一句話（先結論）──────────────────────────── */}
             {data.consensus && (
               <div className="p-3 rounded-lg border border-border bg-card/60 space-y-2">

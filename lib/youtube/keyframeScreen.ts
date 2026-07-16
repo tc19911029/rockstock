@@ -89,6 +89,16 @@ export function isPriceLikeContext(text: string, idx: number, len: number): bool
  * 代號上下文是否「高信心」：±adjacency 字內出現該代號的正式股名/alias，
  * 或（代號）括號格式（電視台 K 線圖標題慣例「（5522）遠雄日線圖」）。
  * audit-keyframe-coverage 的 FAIL 門檻用這個（裸代號只 WARN 不擋）。
+ *
+ * ⚠️ 2026-07-15：括號格式**不可無條件採信**。OCR 認錯數字遠比認錯中文字容易
+ * （實例：簡報「台勝科（3532）」被讀成 3332、「國巨（2327）」讀成 2321，
+ *  用 07-13 真實 K 棒對照確認：3532 開 465.5 吻合簡報、3332 根本無此行情）。
+ * 舊版看到「（3332）」就判高信心 → audit FAIL → 依 CLAUDE.md 規則 skill「必須補 mention」
+ * → **等於強迫把錯的股票寫進資料**。
+ * 修正：相鄰股名對代號有否決權 —
+ *   1. 有股名「同意」（該股名的 code === code）→ 高信心（同意優先，一幀可能多檔並列）
+ *   2. 括號格式 + 沒有任何股名反對 → 高信心（維持原本電視台標題慣例）
+ *   3. 括號格式 + 有股名反對且無人同意 → 判定 OCR 看錯數字 → 不算高信心（降為 WARN）
  */
 export function codeContextConfident(
   text: string,
@@ -98,17 +108,47 @@ export function codeContextConfident(
 ): boolean {
   const idx = text.indexOf(code);
   if (idx < 0) return false;
-  // （code）/ (code) 括號格式
-  const re = new RegExp(`[（(]\\s?${code}\\s?[）)]`);
-  if (re.test(text)) return true;
-  // ±adjacency 內有該代號的股名/alias
+
+  // ±adjacency 內的股名命中，分成「同意」與「反對」
   const lo = Math.max(0, idx - adjacency);
   const hi = Math.min(text.length, idx + code.length + adjacency);
   const window = text.slice(lo, hi);
+  let contradicted = false;
   for (const [name, entry] of sm.nameToEntry) {
-    if (entry.code === code && window.includes(name)) return true;
+    if (!window.includes(name)) continue;
+    if (entry.code === code) return true;   // 1) 有股名同意 → 直接高信心
+    contradicted = true;                    // 相鄰股名指向別的代號
   }
+
+  // 2/3) （code）/ (code) 括號格式：只在沒有股名反對時採信
+  const re = new RegExp(`[（(]\\s?${code}\\s?[）)]`);
+  if (re.test(text)) return !contradicted;
+
   return false;
+}
+
+/**
+ * 相鄰股名指向的代號（用於 audit 提示「這個 OCR 代號可能其實是誰」）。
+ * 只在 codeContextConfident 因股名反對而降級時有意義。
+ */
+export function adjacentNameCode(
+  text: string,
+  code: string,
+  sm: ScreenMaster,
+  adjacency = 10,
+): { name: string; code: string } | null {
+  const idx = text.indexOf(code);
+  if (idx < 0) return null;
+  const lo = Math.max(0, idx - adjacency);
+  const hi = Math.min(text.length, idx + code.length + adjacency);
+  const window = text.slice(lo, hi);
+  let best: { name: string; code: string } | null = null;
+  for (const [name, entry] of sm.nameToEntry) {
+    if (entry.code === code || !window.includes(name)) continue;
+    // 長名優先（避免短 alias 誤命中）
+    if (!best || name.length > best.name.length) best = { name, code: entry.code };
+  }
+  return best;
 }
 
 /** 列舉文字內所有股名命中（substring 比對 master，長名優先、去重疊） */

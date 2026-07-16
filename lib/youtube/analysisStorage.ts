@@ -153,6 +153,19 @@ export interface DailyAnalysis {
   generated_at: string;         // ISO，Claude 寫入時
   /** true=手動填的示範資料，不是真實 LLM 分析。前端應提示用戶 */
   is_placeholder?: boolean;
+  /**
+   * 補跑專用：stock_scoring 的行情資料實際「站在哪一天」（YYYY-MM-DD）。
+   *
+   * 2026-07-15：OAuth 過期害 07-13~15 三天沒分析，隔天補跑。但 skill 的 9 維評分是打
+   * 本機 internal API 拿「最新收盤」— 補跑 07-13 時抓到的是 07-15 的行情。
+   * 也就是說補跑日的 technical/chip 分數是**用事後資料算的**，不是站在當天。
+   * 老師準度追蹤不受影響（mention 走逐字稿、基準價走 L1 隔日開盤），但評分/評級
+   * 若被當訊號讀就是前視偏誤（違反 [[誠實 edge 紀律]]）。
+   *
+   * 有值 = 該日評分含前視、不可拿來評估「當天就選得出來嗎」；undefined = 當日跑的，乾淨。
+   * 由 scripts/stamp-scoring-asof.ts 依 factor_evidence 內實際引用的行情日期回填。
+   */
+  scoring_data_asof?: string;
   /** 跨節目大盤共識 */
   market_view: string;
   /** 多數節目共同看好的方向 */

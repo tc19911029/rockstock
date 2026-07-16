@@ -62,6 +62,8 @@ export interface PerformanceItem {
 export interface ConsensusSummary {
   generated_at: string;
   is_placeholder?: boolean;
+  /** 有值=該日評分用的是這天的行情（補跑造成的前視），非分析當日 */
+  scoring_data_asof?: string;
   market_view: string;
   bullish_consensus: string[];
   bearish_consensus: string[];
@@ -178,6 +180,7 @@ export async function GET(req: NextRequest) {
     const consensus: ConsensusSummary = {
       generated_at: analysis.generated_at,
       is_placeholder: analysis.is_placeholder,
+      scoring_data_asof: analysis.scoring_data_asof,
       market_view: analysis.market_view,
       bullish_consensus: analysis.bullish_consensus ?? [],
       bearish_consensus: analysis.bearish_consensus ?? [],

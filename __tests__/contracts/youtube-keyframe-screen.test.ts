@@ -90,6 +90,18 @@ describe('codeContextConfident（audit FAIL 門檻）', () => {
     expect(codeContextConfident('代號 2330 個股 台積電 出關日', '2330', sm)).toBe(true);
     expect(codeContextConfident('近5日台指期外資 2330 留倉 -69146', '2330', sm)).toBe(false);
   });
+
+  // 2026-07-15：OCR 認錯數字遠比認錯中文字容易，相鄰股名對代號有否決權。
+  // 舊版看到「（3332）」就判高信心 → audit FAIL → skill 依規則「必須補 mention」→ 強迫寫錯股票。
+  it('括號代號與相鄰股名矛盾（OCR 看錯數字）→ 不算高信心', () => {
+    // 簡報實為「台積電（2330）」，代號被 OCR 讀成 2331（華邦電舊碼段，master 內另有其股）
+    expect(codeContextConfident('台積電（2331）日線圖', '2331', sm)).toBe(false);
+  });
+
+  it('同幀多檔並列時，有股名同意就算高信心（不被別檔股名誤否決）', () => {
+    expect(codeContextConfident('台積電（2330）供應鏈 聯發科（2454）', '2454', sm)).toBe(true);
+    expect(codeContextConfident('台積電（2330）供應鏈 聯發科（2454）', '2330', sm)).toBe(true);
+  });
 });
 
 describe('scoreFrame', () => {

@@ -32,6 +32,8 @@ export interface DailySummaryResponse {
   has_analysis: boolean;
   has_video_summaries: boolean;
   is_placeholder?: boolean;
+  /** 有值=該日評分用的是這天的行情（補跑造成的前視），非分析當日 */
+  scoring_data_asof?: string;
   consensus: {
     market_view: string;
     bullish_consensus: string[];
@@ -89,6 +91,7 @@ export async function GET(
       has_analysis: true,
       has_video_summaries: videos.length > 0,
       is_placeholder: analysis.is_placeholder,
+      scoring_data_asof: analysis.scoring_data_asof,
       consensus: {
         market_view: analysis.market_view,
         bullish_consensus: analysis.bullish_consensus,
