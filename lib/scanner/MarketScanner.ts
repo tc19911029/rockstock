@@ -2041,6 +2041,9 @@ export abstract class MarketScanner {
     const minBars = Math.max(DEFAULT_PARAMS.concWin + DEFAULT_PARAMS.concRiseBack, 20, DEFAULT_PARAMS.dropWin, DEFAULT_PARAMS.instWin) + 1;
     // 集中度單一事實 = FinMind 正式公式（跟看盤 app + 顯示表同一套）；只 TTL 真正的今天那根
     const realToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    // FinMind Sponsor 訂閱失效時設 INSTSTEAL_NO_FINMIND=1（.env.local）→ 集中度改走 broker 檔
+    // （Yahoo 券商分點前15大淨張，資料齊到今天、無缺口）的「淨額÷量」公式。續訂後移除旗標即回正式公式。
+    const noFinmind = process.env.INSTSTEAL_NO_FINMIND === '1';
 
     const candidates = this.prefilterByL2(stocks, 'scanInstSteal');
     type Scored = { result: StockScanResult; consec: number; conc5: number };
@@ -2075,13 +2078,20 @@ export abstract class MarketScanner {
         // 兩階段（省 FinMind 配額）：先用便宜條件(在跌+法人連買)粗篩，過了才抓 FinMind 集中度精算。
         const cheap = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS);
         if (!cheap || !cheap.isDropping || !cheap.isInstBuying) return null;
-        // 通過粗篩 → FinMind 正式集中度（跟看盤 app + 顯示表同一套公式）重評「集中度在爬」
-        const conc5Map = await computeConc5Map(code, candles, {
-          win: DEFAULT_PARAMS.concWin,
-          count: DEFAULT_PARAMS.concRiseBack + 2,
-          todayDate: realToday,
-        });
-        const ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS, conc5Map, true /* strict: FinMind 缺就略過、不用舊公式 */);
+        let ev;
+        if (noFinmind) {
+          // FinMind 失效：退回 broker(Yahoo 前15大)「淨額÷量」集中度。broker 檔齊到今天無缺口，
+          // 與 FinMind 同用前15大資料，差別僅「區間排名 vs 每日加總」，資訊等價。
+          ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS);
+        } else {
+          // 通過粗篩 → FinMind 正式集中度（跟看盤 app + 顯示表同一套公式）重評「集中度在爬」
+          const conc5Map = await computeConc5Map(code, candles, {
+            win: DEFAULT_PARAMS.concWin,
+            count: DEFAULT_PARAMS.concRiseBack + 2,
+            todayDate: realToday,
+          });
+          ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS, conc5Map, true /* strict: FinMind 缺就略過、不用舊公式 */);
+        }
         if (!ev || !ev.isHit) return null;
 
         const lastIdx = candles.length - 1;

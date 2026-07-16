@@ -12,8 +12,14 @@
  */
 import { promises as fs } from 'fs';
 import path from 'path';
+import { config } from 'dotenv';
+
+config({ path: '.env.local' }); // 讀旗標（launchd npx tsx 不自動載）
 
 const THRESHOLD = 0.95; // 覆蓋率低於 95% → 警告
+// FinMind Sponsor 失效時 = 集中度改走 broker(Yahoo 前15大)。此時不查 finmind-branch，
+// 集中度覆蓋直接看 broker（同一份資料源），避免對「已改用替代來源」誤報紅燈。
+const NO_FINMIND = process.env.INSTSTEAL_NO_FINMIND === '1';
 const BROKER_DIR = path.join(process.cwd(), 'data/chips/TW/broker');
 const INST_DIR = path.join(process.cwd(), 'data/chips/TW/inst');
 const CONC_DIR = path.join(process.cwd(), 'data/chips/TW/finmind-branch');
@@ -86,22 +92,25 @@ async function main() {
   for (const code of codes) {
     if (await hasDate(BROKER_DIR, code, date)) b++;
     if (await hasDate(INST_DIR, code, date)) i++;
-    if (await hasConc(code, date)) c++;
+    if (!NO_FINMIND && await hasConc(code, date)) c++;
   }
   const n = codes.length;
   const bPct = b / n, iPct = i / n, cPct = c / n;
+  // NO_FINMIND：集中度走 broker（前15大淨額÷量），覆蓋率＝broker 覆蓋率
+  const concPct = NO_FINMIND ? bPct : cPct;
+  const concLabel = NO_FINMIND ? '集中度(走broker)' : '集中度';
 
   console.log(`Y軌池子覆蓋率 @${date}（即時前${n}）：`);
   console.log(`  主力分點 ${b}/${n} (${(bPct * 100).toFixed(0)}%)`);
   console.log(`  法人     ${i}/${n} (${(iPct * 100).toFixed(0)}%)`);
-  console.log(`  集中度   ${c}/${n} (${(cPct * 100).toFixed(0)}%)`);
+  console.log(`  ${concLabel}   ${NO_FINMIND ? b : c}/${n} (${(concPct * 100).toFixed(0)}%)`);
   console.log(`  索引健康：2330在前500=${has2330}，.TWO=${two}（正常80~280）`);
 
   const problems: string[] = [];
   if (indexBad) problems.push(`turnover索引異常(2330在前=${has2330}, .TWO=${two})`);
   if (bPct < THRESHOLD) problems.push(`主力分點覆蓋 ${(bPct * 100).toFixed(0)}%`);
   if (iPct < THRESHOLD) problems.push(`法人覆蓋 ${(iPct * 100).toFixed(0)}%`);
-  if (cPct < THRESHOLD) problems.push(`集中度覆蓋 ${(cPct * 100).toFixed(0)}%`);
+  if (concPct < THRESHOLD) problems.push(`${concLabel}覆蓋 ${(concPct * 100).toFixed(0)}%`);
 
   if (problems.length) {
     const text = `🚨 Y軌資料不齊 @${date}：${problems.join('；')} — 法人偷買掃描會 silent 漏股。修：npx tsx scripts/backfill-inst-top500.ts + node scripts/run-broker-bulk.ts`;
@@ -109,7 +118,7 @@ async function main() {
     await alert(text);
     process.exit(1);
   }
-  const okText = `Y軌資料齊全 @${date}：主力分點/法人/集中度 各 ${(bPct * 100).toFixed(0)}/${(iPct * 100).toFixed(0)}/${(cPct * 100).toFixed(0)}%，索引健康（2330在前、.TWO ${two}）。即時掃描池子完整覆蓋。`;
+  const okText = `Y軌資料齊全 @${date}：主力分點/法人/${concLabel} 各 ${(bPct * 100).toFixed(0)}/${(iPct * 100).toFixed(0)}/${(concPct * 100).toFixed(0)}%，索引健康（2330在前、.TWO ${two}）。即時掃描池子完整覆蓋。`;
   console.log('\n✅ ' + okText);
   await confirmOnceIfFlagged(okText);
 }

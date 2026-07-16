@@ -11,6 +11,10 @@
  */
 import { promises as fs } from 'fs';
 import path from 'path';
+import { config } from 'dotenv';
+
+// 讀 .env.local（launchd 用 npx tsx 不會自動載）→ INSTSTEAL_NO_FINMIND / FINMIND_API_TOKEN 生效
+config({ path: '.env.local' });
 
 const TWII = path.join(process.cwd(), 'data/candles/TW/^TWII.json');
 
