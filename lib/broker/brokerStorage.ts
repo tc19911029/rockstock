@@ -38,6 +38,7 @@ export const DEFAULT_BROKERS: BrokerRegistryEntry[] = [
   { key: 'wellsfargo', display: '富國', aliases: ['wellsfargo', 'wells fargo', 'wfc'], default_currency: 'USD' },
   { key: 'barclays', display: '巴克萊', aliases: ['barclays', 'barc'], default_currency: 'USD' },
   { key: 'stifel', display: 'Stifel', aliases: ['stifel'], default_currency: 'USD' },
+  { key: 'aletheia', display: 'Aletheia', aliases: ['aletheia', 'aletheia capital', 'tag'], default_currency: 'TWD' },
   // 本土券商
   { key: 'kgi', display: '凱基', aliases: ['kgi', '凱基', '凱基投顧'], default_currency: 'TWD' },
   { key: 'fubon', display: '富邦', aliases: ['fubon', '富邦', '富邦投顧'], default_currency: 'TWD' },
