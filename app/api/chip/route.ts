@@ -318,7 +318,7 @@ import { getSharesIssued } from '@/lib/datasource/FinMindClient';
 import { detectTrend, rollingChange } from '@/lib/chips/trends';
 import { fetchYahooBrokerTrades, type BrokerRankRow } from '@/lib/datasource/YahooBrokerScraper';
 import { readBrokerStock } from '@/lib/chips/BrokerStorage';
-import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
+import { readMarginStock, readSblStock } from '@/lib/chips/ChipExtrasStorage';
 import { fetchTwseSblForStock, fetchTwseSblHistory } from '@/lib/datasource/TwseSblProvider';
 import { fetchTpexSblForStock, fetchTpexSblHistory } from '@/lib/datasource/TpexSblProvider';
 import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
@@ -502,7 +502,20 @@ export async function GET(req: NextRequest) {
       }
     }
     const dayTradeInfo = pickFulfilled<Awaited<ReturnType<typeof fetchDayTradeForStock>>>(2);
-    const sblToday = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblForStock>>>(3);
+    let sblToday = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblForStock>>>(3);
+    // 借券同融資：TWSE/TPEx 只查當日、盤中必然沒有 → fallback 本地 chip-extras 最新一筆（≤查詢日）
+    if (!sblToday) {
+      const stored = await readSblStock(code).catch(() => null);
+      const prior = (stored?.data ?? []).filter(r => r.date <= date);
+      const last = prior[prior.length - 1];
+      if (last) {
+        sblToday = {
+          lendingBalance: last.lendingBalance,
+          lendingNet: last.lendingNet,
+          lendingShortSales: last.lendingShortSales,
+        } as NonNullable<Awaited<ReturnType<typeof fetchTwseSblForStock>>>;
+      }
+    }
     const sharesIssued = pickFulfilled<number>(4);
     const sblHistory = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblHistory>>>(5) ?? [];
     const brokerTrades = pickFulfilled<Awaited<ReturnType<typeof fetchYahooBrokerTrades>>>(6);
