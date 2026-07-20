@@ -15,9 +15,15 @@
  *   4        | near_stop_loss           | 距停損 ≤ 3%
  *   5        | deep_underwater          | 含費 returnPct < -5%
  *   6        | hold_observe_neutral     | review.action='hold_observe'
- *   7        | small_gain_lock          | 0 < 含費 returnPct < 5%（小賺鎖利）
- *   8        | strong_hold_keep         | review.action='hold_strong'（最不該賣）
- *   9        | unknown_default          | 無 review 資料
+ *   7        | underwater_small         | 含費 returnPct < 0（小賠 — 課程 CH11-1 汰弱換強）
+ *   8        | small_gain_lock          | 0 < 含費 returnPct < 5%（小賺鎖利）
+ *   9        | strong_hold_keep         | review.action='hold_strong'（最不該賣）
+ *   10       | unknown_default          | 無 review 資料
+ *
+ * ⚠️ 2026-07-20 第七輪：新增 priority 7 小賠級並把 8/9/10 往後推。
+ *   課程 CH11-1 逐字稿：「才賺 1% 也是賺的，你就繼續抱；跌 3%、跌 5% 的趕快離開。」
+ *   舊版沒有小賠級 → 小賠且無 review 的持倉落到 unknown_default（最末），
+ *   排序上竟比「小賺」還晚才被建議賣，與課程原則相反。
  *
  * 同 priority tiebreaker：netReturnPct 升序（賠最多先賣）→ proceedsNet 降序
  *
@@ -184,25 +190,39 @@ function classifyPriority(args: {
       matchedRule: `review=hold_observe（${review.actionPath}）— 中性可換`,
     };
   }
-  // priority 8: hold_strong（強訊號優先 check — 不該因 small_gain 被誤判賣出）
+  // priority 9: hold_strong（強訊號優先 check — 不該因小賠/小賺被誤判賣出）
   if (review?.action === 'hold_strong') {
     return {
-      priority: 8,
+      priority: 9,
       reasonPath: 'strong_hold_keep',
       matchedRule: `review=hold_strong — 不建議賣，僅在無更弱選項時考慮`,
     };
   }
-  // priority 7: 小賺鎖利
-  if (netReturnPct > 0 && netReturnPct < 5) {
+  // priority 7: 小賠先走（課程 CH11-1 汰弱換強）
+  // 2026-07-20 第七輪補：逐字稿「不管我這個才賺 1%，也是賺的……你就繼續抱。
+  // 但手中不要留已經跌 3% 的、跌 5% 的，趕快離開。」
+  // 舊版沒有這一級 → 小賠且無 review 資料的持倉落到 unknown_default（最末），
+  // 排序上比「小賺」還晚才被建議賣，與課程原則正好相反。
+  // 注意：3%/5% 是老師的口語舉例不是門檻表（見 ledger），這裡不設數字門檻，
+  // 只做「賠 vs 賺」的相對排序 — 賠的一律排在賺的前面。深水 <-5% 已由 priority 5 接走。
+  if (netReturnPct < 0) {
     return {
       priority: 7,
+      reasonPath: 'underwater_small',
+      matchedRule: `小賠 ${netReturnPct.toFixed(1)}% — 課程：手中只留上漲的，走弱的先淘汰`,
+    };
+  }
+  // priority 8: 小賺鎖利
+  if (netReturnPct > 0 && netReturnPct < 5) {
+    return {
+      priority: 8,
       reasonPath: 'small_gain_lock',
       matchedRule: `小賺 ${netReturnPct.toFixed(1)}% 可鎖利`,
     };
   }
-  // priority 9: default
+  // priority 10: default
   return {
-    priority: 9,
+    priority: 10,
     reasonPath: 'unknown_default',
     matchedRule: '無 review 資料 + 無明顯信號',
   };

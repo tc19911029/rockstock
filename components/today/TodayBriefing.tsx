@@ -242,8 +242,12 @@ export function TodayBriefing({ market = 'TW' }: Props) {
       portfolioReview: rev,
       alertsToday: al,
       growthGap: growth ? { gapPct: growth.gapPct, status: growth.status } : null,
+      // 2026-07-20 第七輪：大盤 regime 接進建議文案。
+      // trend 本來就在這個元件裡（HeroCard「今日大盤」用同一個值），
+      // 但建議句以前完全不看它 → 大盤翻空時不會主動提降成數/休息。
+      marketRegime: trend ?? null,
     });
-  }, [decisions, reviews, alerts, growth, holdings]);
+  }, [decisions, reviews, alerts, growth, holdings, trend]);
 
   const buyRuns = decisions.filter(d => d.decision?.action === 'buy');
   const watchRuns = decisions.filter(d => d.decision?.action === 'watch');

@@ -9,6 +9,7 @@ import {
   ETF_ALLOCATION_2026,
   ACTIVE_ETF_ADVANTAGES,
   ACTIVE_ETF_SELECTION_CRITERIA,
+  ETF_MA20_SOP,
   overlapLevel,
   type SharedHoldingEntry,
   type OverlapPair,
@@ -188,6 +189,22 @@ export function ETFDiagnosticsTab() {
         <h3 className="text-sm font-medium mb-2">✅ 篩選 ETF 要點</h3>
         <div className="space-y-2">
           {ETF_SCREENING_POINTS.map((s, i) => (
+            <div key={i} className="rounded-lg border border-border bg-card p-3">
+              <div className="text-sm font-medium mb-0.5">{s.title}</div>
+              <div className="text-xs text-muted-foreground leading-relaxed">{s.detail}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* 四之二、月線進出場 SOP（課程 12-5 口述，投影片沒有） */}
+      <section>
+        <h3 className="text-sm font-medium mb-1">📉 ETF 月線進出場（課程 12-5）</h3>
+        <p className="text-xs text-muted-foreground mb-2">
+          這段投影片上沒有，是老師口述講的。跟現有「週線轉空提示」互補，不衝突。
+        </p>
+        <div className="space-y-2">
+          {ETF_MA20_SOP.map((s, i) => (
             <div key={i} className="rounded-lg border border-border bg-card p-3">
               <div className="text-sm font-medium mb-0.5">{s.title}</div>
               <div className="text-xs text-muted-foreground leading-relaxed">{s.detail}</div>

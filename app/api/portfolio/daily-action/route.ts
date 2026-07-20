@@ -203,6 +203,42 @@ export async function GET(req: NextRequest) {
             detail: `進場後盤中曾觸及 +10% 價位（${target10.toFixed(2)}，實際最高 ${peak.toFixed(2)}），今日收盤 ${todayClose.toFixed(2)} 跌破 MA5 ${ma5.toFixed(2)}。課程 CH8-3：達標＝「曾摸到 10% 價位」即算，此時破 5 均就該停利（就算現在只剩 +${(curProfitPct * 100).toFixed(1)}%）。系統硬出場仍走收盤獲利率判定（未改），此為紀律提示。`,
           };
         })();
+        // 課程 CH11-2（2026-07-20 第七輪，逐字稿）：「連續上漲超過 3 天、漲幅超過 10% → 採取 K 線戰法停利」，
+        // 且明講「第三天第四天黑K跌破昨天的低點我就賣了，**不一定有跌破五均**」。
+        //
+        // ⚠️ 回測結論（backtest-r7b-ch11-2-exit，n=10,962，train/test 分界 2025-04-14）：
+        //   賠少側**大勝且兩段一致**：平均虧損 −4.3% vs 現行 −7.8%，P5 尾巴 −9.4% vs −14.5%，
+        //   最差一筆 test −18.9% vs −90.3%。
+        //   但期望值 test 段輸 1.38pp（多頭急著跑就少賺），且該狀態本身平均還會續漲
+        //   （無腦抱 20 天 3.99% > 現行 1.89% > 課程 1.17%）。
+        // → **裁決：不取代現行 20% 規則，只做 advisory**（同 ch83_touched_10pct 前例）。
+        //   誰的優先序是「賠少」就照這個走；要賺滿的就忽略提示。
+        const ch11ClimbExitAdvisory = (() => {
+          if (positionSide !== 'long') return null;
+          const n = candles.length;
+          if (n < 5) return null;
+          const today = candles[n - 1];
+          const prevBar = candles[n - 2];
+          // 連續上漲 3 天以上（收盤比昨收高，非看K棒顏色 — 課程 CH2-1 口徑）
+          let upDays = 0;
+          for (let i = n - 2; i >= 1; i--) {
+            if (candles[i].close > candles[i - 1].close) upDays++;
+            else break;
+          }
+          if (upDays < 3) return null;
+          // 漲幅超過 10%（自這段連漲起點起算）
+          const legStart = candles[n - 2 - upDays + 1 - 1] ?? candles[0];
+          const legGainPct = legStart.close > 0 ? (prevBar.close - legStart.close) / legStart.close : 0;
+          if (legGainPct < 0.10) return null;
+          // 今日黑K收盤跌破昨天的最低點
+          if (!(today.close < today.open && today.close < prevBar.low)) return null;
+          return {
+            type: 'ch11_climb3_break_prev_low',
+            label: '📗 課程風控提示：連漲逾 3 天 +10% 後破昨低',
+            severity: 'medium' as const,
+            detail: `連續上漲 ${upDays} 天、這段漲幅 +${(legGainPct * 100).toFixed(1)}%，今日黑K收盤 ${today.close.toFixed(2)} 跌破昨日最低 ${prevBar.low.toFixed(2)}。課程 CH11-2：這時用 K 線戰法停利，不必等跌破 5 均。回測：照這條走平均虧損砍半（−4.3% vs −7.8%），但多頭段會少賺 — 系統硬出場未改，這是給「優先賠少」的紀律提示。`,
+          };
+        })();
         // 課程 CH2-4（2026-07-06，逐字-6）：大量長紅K 的最高價＝第一層支撐。跌破後「3~5 日內要站回紅K之上」，
         // 否則很有機會轉折向下。candleSRLevels 原本只畫線、無「已跌破 N 日未站回」監控 → 這裡補持倉/走圖提示（做多）。
         const srNoRegainAdvisory = (() => {
@@ -249,7 +285,7 @@ export async function GET(req: NextRequest) {
             detail: `自進場價 ${h.entryPrice} 跌 ${(dropFromEntry * 100).toFixed(1)}%（今收 ${todayClose.toFixed(2)}）。課程 CH7-3：每日檢視自買價跌幅 > 5% 應列警示股、準備賣出，別放任凹單。`,
           };
         })();
-        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
+        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...(ch11ClimbExitAdvisory ? [ch11ClimbExitAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
         return {
           ...base,
           todayClose,

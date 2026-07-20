@@ -148,6 +148,18 @@ export function detectBlackKBreakout(
   // 6. 今日收盤突破大量黑 K 最高點
   if (c.close <= blackK.high) return null;
 
+  // 7. 首次突破（課程 CH6-7「次日或 3 天內**出現**大量中長紅K收盤突破」＝狀態轉換，不是位置比較）
+  //
+  // 2026-07-20 第七輪新增，**已通過回測才上**（backtest-r7-ml-freshness-gate）：
+  //   1,064 筆訊號、gate 砍 33%。fresh vs stale 四格全部 fresh 較優、不翻面：
+  //     train fresh D20 +1.46% vs stale −0.40%；test fresh −1.15% vs stale −2.43%
+  //   切三段 D20 差值 +1.28 / +1.63 / +1.64，穩定。
+  // ⚠️ 誠實揭露：這是**避雷型改善不是 alpha** — fresh 組自己在 test 仍是負超額，
+  //   只是避開更爛的子集（符合本專案「edge 在避雷不在選股」的既有結論）。
+  // ⚠️ 同批測的 M 買法同 gate **被否決**（test D20 翻面 −1.22%），故只加在 L。
+  // 實質效果＝黑K後第 2、3 天若昨天收盤已經突破過就不追（D+1 依定義不可能 stale）。
+  if (prev.close > blackK.high) return null;
+
   const daysSinceBlackK = idx - blackK.index;
 
   return {

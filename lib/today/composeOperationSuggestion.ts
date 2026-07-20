@@ -68,6 +68,15 @@ export interface ComposeInput {
   portfolioReview: PortfolioReviewForSuggestion[];
   alertsToday: AlertForSuggestion[];
   growthGap?: GrowthGapForSuggestion | null;
+  /**
+   * 大盤 regime（課程 CH5-6 / 直播 2026-07-01「大盤不好是休息的」）。
+   * 2026-07-20 第七輪補：本函式原本完全不看大盤 —— 空手觀望的判斷依據只有
+   * 「候選池空不空」，大盤翻空時建議文案不會主動提降成數/休息，
+   * 使用者只有在按下單試算時才會撞到 regimeExposureCap 的上限。
+   * ⚠️ 老師原話是「也不是說一定不能做…你要做就把資金控管好」＝許可不是義務，
+   * 所以這裡只做提示，**不加任何硬 gate**。
+   */
+  marketRegime?: '多頭' | '盤整' | '空頭' | null;
 }
 
 // ── 標籤對照 ─────────────────────────────────────────────────────────────────
@@ -163,13 +172,24 @@ export function composeOperationSuggestion(input: ComposeInput): string {
   // 4. 沒有任何訊號 → 空手觀望
   if (parts.length === 0) {
     let base = '今日候選池無 ≥3 共識股、持股無重大警示，建議空手觀望';
+    if (input.marketRegime === '空頭') {
+      base += '；大盤空頭，課程：不操作也是一種策略，贏家大盤不好是休息的';
+    }
     if (input.growthGap && input.growthGap.status === 'red') {
       base += `；進度落後目標 ${Math.abs(input.growthGap.gapPct).toFixed(1)}%（紅燈），避免衝動操作`;
     }
     return base;
   }
 
-  // 5. 書本紀律提醒（朱書 1:20 看 / 1:25 掛市價）
+  // 5. 大盤 regime 資金成數提醒（課程 CH5-6 成數表；只提示不擋）
+  //    多頭 8 成 / 盤整 5 成 / 空頭 3 成 — 與 positionSizer.regimeExposureCap 同一組數字。
+  if (input.marketRegime === '空頭') {
+    parts.push('大盤空頭：資金控管降到三成以內，做不好就趕快跑（課程紀律）');
+  } else if (input.marketRegime === '盤整') {
+    parts.push('大盤盤整：資金控管五成以內（課程紀律）');
+  }
+
+  // 6. 書本紀律提醒（朱書 1:20 看 / 1:25 掛市價）
   parts.push('下午 13:20 確認 K 棒收盤再動作（朱書紀律）');
 
   return parts.join('；');

@@ -96,3 +96,14 @@ export function thresholdsForRegime(regime: MarketRegime): EntryGateThresholds {
     default:            return ENTRY_GATE_THRESHOLDS;
   }
 }
+
+/**
+ * ⚠️ 2026-07-20 第七輪查核紀錄（**刻意不改，留給使用者裁決**）：
+ * 上面的 `bear` 與 `normal` 回同一組門檻 → **大盤翻空時 regime 驅動的門檻收緊實際上是 no-op**。
+ * 課程 CH5-6 成數表（多頭8成/盤整5成/空頭3成）目前只由 positionSizer.regimeExposureCap 承接，
+ * 而它只在單筆下單試算（/api/portfolio/size-suggestion）時被呼叫，不進每日建議鏈。
+ *
+ * 為什麼不逕自加一組 ENTRY_GATE_THRESHOLDS_BEAR：
+ * 那是**收緊進場 gate**，依 CLAUDE.md 誠實 edge 紀律必須先過 compute-honest-edge 且 train/test 一致。
+ * 本輪已改的是提示層（composeOperationSuggestion 帶入 regime 文案），不動 gate。
+ */

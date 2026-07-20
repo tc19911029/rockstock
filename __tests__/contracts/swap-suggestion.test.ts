@@ -2,10 +2,11 @@
  * Contract test：swap-suggestion 排序規則 + 集中度警示
  *
  * 守的規則：
- *   - 9 條 priority 規則的命中順序固定（top-down）
+ *   - 10 條 priority 規則的命中順序固定（top-down）
  *   - 同 priority tiebreaker：netReturnPct asc → proceedsNet desc
  *   - 無 currentPrice 的 holding 不參與排序
- *   - hold_strong 永遠 priority 8（最不該賣）
+ *   - hold_strong 永遠 priority 9（最不該賣）
+ *   - 課程 CH11-1：小賠（7）必須排在小賺（8）之前 — 汰弱換強
  *   - estimateBuyShares 必須按 lot size 對齊（TW 1000 / CN 100）
  *   - 同產業集中度警示必出
  */
@@ -135,17 +136,44 @@ describe('rankHoldingsForSwap — priority rules', () => {
     expect(ranked[0].reasonPath).toBe('hold_observe_neutral');
   });
 
-  test('priority 7: 小賺 0 < netReturnPct < 5%', () => {
+  // 2026-07-20 第七輪：新增 priority 7「小賠先走」（課程 CH11-1 汰弱換強），8/9/10 往後推
+  test('priority 7: 小賠（含費 < 0，未達深水 -5%）→ 排在小賺之前', () => {
+    const ranked = rankHoldingsForSwap({
+      holdings: [makeHolding({ entryPrice: 200, stopLoss: 150 })],
+      currentPrices: new Map([['2408.TW', 196]]), // -2% gross
+      reviewsBySymbol: new Map(),
+    });
+    expect(ranked[0].priority).toBe(7);
+    expect(ranked[0].reasonPath).toBe('underwater_small');
+  });
+
+  test('課程 CH11-1：小賠必須排在小賺之前（賺 1% 也抱、走弱的先淘汰）', () => {
+    const ranked = rankHoldingsForSwap({
+      holdings: [
+        makeHolding({ symbol: '1111.TW', entryPrice: 200, stopLoss: 150 }),
+        makeHolding({ symbol: '2222.TW', entryPrice: 200, stopLoss: 150 }),
+      ],
+      currentPrices: new Map([
+        ['1111.TW', 204], // 小賺
+        ['2222.TW', 196], // 小賠
+      ]),
+      reviewsBySymbol: new Map(),
+    });
+    expect(ranked[0].sellSymbol).toBe('2222.TW'); // 小賠先賣
+    expect(ranked[0].reasonPath).toBe('underwater_small');
+  });
+
+  test('priority 8: 小賺 0 < netReturnPct < 5%', () => {
     const ranked = rankHoldingsForSwap({
       holdings: [makeHolding({ entryPrice: 200, stopLoss: 150 })],
       currentPrices: new Map([['2408.TW', 204]]), // +2% gross；含費 1.4%
       reviewsBySymbol: new Map(),
     });
-    expect(ranked[0].priority).toBe(7);
+    expect(ranked[0].priority).toBe(8);
     expect(ranked[0].reasonPath).toBe('small_gain_lock');
   });
 
-  test('priority 8: hold_strong → 最不該賣', () => {
+  test('priority 9: hold_strong → 最不該賣', () => {
     const ranked = rankHoldingsForSwap({
       holdings: [makeHolding()],
       currentPrices: new Map([['2408.TW', 210]]),
@@ -153,17 +181,17 @@ describe('rankHoldingsForSwap — priority rules', () => {
         ['2408.TW', makeReview({ action: 'hold_strong', actionPath: 'tech_pass_green' })],
       ]),
     });
-    expect(ranked[0].priority).toBe(8);
+    expect(ranked[0].priority).toBe(9);
     expect(ranked[0].reasonPath).toBe('strong_hold_keep');
   });
 
-  test('priority 9: 無 review + 無明顯信號（含費 ≈ 0）', () => {
+  test('priority 10: 無 review + 獲利已超過小賺級（無明顯信號）', () => {
     const ranked = rankHoldingsForSwap({
       holdings: [makeHolding({ entryPrice: 200, stopLoss: 150 })],
-      currentPrices: new Map([['2408.TW', 201]]), // 接近平盤
+      currentPrices: new Map([['2408.TW', 215]]), // +7.5% gross，超過小賺 5% 級
       reviewsBySymbol: new Map(),
     });
-    expect(ranked[0].priority).toBe(9);
+    expect(ranked[0].priority).toBe(10);
     expect(ranked[0].reasonPath).toBe('unknown_default');
   });
 
