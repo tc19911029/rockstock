@@ -5,7 +5,7 @@
  *   #4 主力                          ← computeBrokerCosts（BrokerStorage，歷史累積）
  *   #5 融資                          ← computeMarginLongCosts（marginNet）
  *   #6 融券 / #7 券賣 / #8 嘎空價    ← computeShortCosts + marginCallPrice（reuse squeeze）
- *   #9 融資斷頭價                    ← marginLiquidationPrice
+ *   #9 融資追繳價（130%）            ← marginLiquidationPrice
  */
 
 import path from 'path';
@@ -26,6 +26,7 @@ import {
 } from './marginLiquidationPrice';
 import { computeMarginLiquidationScore } from './marginLiquidationScorer';
 import { detectMarginRatio } from './marginPressure';
+import { adjustMarginNetForExRights, fetchExRightsEvents } from './exRightsAdjust';
 import { buildMarginInterpretation, buildMarginWarnings } from './narrator';
 import type { CostBasisBundle, CostBucket, CostBasisSummary } from './types';
 import { EMPTY_BUCKET } from './types';
@@ -63,20 +64,24 @@ function vsClose(bucket: CostBucket, close: number): number | null {
 
 const refOf = (b: CostBucket): number | null => b.d20 ?? b.d10 ?? b.d5 ?? b.d60 ?? null;
 
-// 融資成數判定（上市 0.6 / 上櫃 0.5）單一事實來源在 marginPressure.ts
+// 融資成數判定（上市/上櫃同為 0.6）單一事實來源在 marginPressure.ts
 
 export async function getCostBasisBundle(symbol: string, asOfDate: string): Promise<CostBasisBundle> {
   const code = symbol.replace(/\.(TW|TWO)$/i, '');
   const startDate = ymdDaysAgo(asOfDate, LOOKBACK_CALENDAR_DAYS);
 
-  const [margin, sbl, prices, instFile, brokerFile, name] = await Promise.all([
+  const [rawMargin, sbl, prices, instFile, brokerFile, name, exRights] = await Promise.all([
     getMarginSeries(code, startDate, asOfDate),
     getSblSeries(code, startDate, asOfDate),
     getPriceSeries(code, startDate, asOfDate),
     readInstStock(code),
     readBrokerStock(code),
     loadStockName(code),
+    fetchExRightsEvents(code, startDate, asOfDate),
   ]);
+
+  // 除權日餘額膨脹 → 檔案 marginNet 會假性變正，成本被往低價拉。先修正（見 exRightsAdjust.ts）
+  const margin = adjustMarginNetForExRights(rawMargin, exRights);
 
   const close = prices[prices.length - 1]?.close ?? 0;
   const inst = (instFile?.data ?? []).filter(r => r.date >= startDate && r.date <= asOfDate);
@@ -86,14 +91,14 @@ export async function getCostBasisBundle(symbol: string, asOfDate: string): Prom
   const shortCosts = computeShortCosts(margin, sbl, prices);
   const squeezePrice = marginCallPrice(refOf(shortCosts.combined));
 
-  // ── #5 融資成本 + #9 斷頭/追繳價 ──
+  // ── #5 融資成本 + #9 追繳/警戒價 ──
   const marginCosts = computeMarginLongCosts(margin, prices);
   const refMargin = refOf(marginCosts);
   const ratio = await detectMarginRatio(code, symbol);
   const liqPrice = marginLiquidationPrice(refMargin, ratio);                              // 130%
   const callPrice140 = marginLiquidationPrice(refMargin, ratio, MARGIN_CALL_MAINTENANCE); // 140%
   const distToLiq = liqPrice !== null && close > 0
-    ? +(((close - liqPrice) / close) * 100).toFixed(2)   // 正=現價在斷頭價之上、有緩衝
+    ? +(((close - liqPrice) / close) * 100).toFixed(2)   // 正=現價在追繳價之上、有緩衝
     : null;
 
   // ── #1/#2/#3 法人成本 ──
@@ -127,7 +132,7 @@ export async function getCostBasisBundle(symbol: string, asOfDate: string): Prom
     sbl: shortCosts.sbl,
   };
 
-  // ── 融資斷頭壓力分數 + 解讀 ──
+  // ── 融資追繳壓力分數 + 解讀 ──
   const marginBal = margin.map(m => m.marginBalance);
   const score = computeMarginLiquidationScore({
     margin, prices, marginCosts, liquidationPrice: liqPrice, close,
