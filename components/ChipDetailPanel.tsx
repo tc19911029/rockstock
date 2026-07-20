@@ -34,7 +34,7 @@ interface ChipInfo {
   lendingNet: number;
   largeHolderPct: number;
   largeHolderChange: number;
-  // v4 成本／壓力價摘要（外資/投信/自營/主力/融資/融券/券賣 成本 + 嘎空價 + 斷頭價）
+  // v4 成本／壓力價摘要（外資/投信/自營/主力/融資/融券/券賣 成本 + 嘎空價 + 追繳價）
   costBasis?: CostBasisSummary;
   holder100Pct?: number;
   holder200Pct?: number;
@@ -416,7 +416,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
             <span className="text-[10px] text-muted-foreground font-medium">💰 成本／壓力價（估算）</span>
             {data.costBasis.marginLiquidationPrice != null && (
               <span className="text-[10px] font-mono text-rose-300">
-                斷頭 {data.costBasis.marginLiquidationPrice.toFixed(1)}
+                追繳 {data.costBasis.marginLiquidationPrice.toFixed(1)}
                 {data.costBasis.distanceToLiquidationPct != null && (
                   <span className="text-muted-foreground ml-1">
                     ({data.costBasis.distanceToLiquidationPct < 0 ? '已破' : '距'}{Math.abs(data.costBasis.distanceToLiquidationPct).toFixed(1)}%)
@@ -439,7 +439,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
               );
             })}
             <div className="bg-rose-950/20 border border-rose-500/30 rounded px-1 py-1 text-center">
-              <div className="text-muted-foreground/70 text-[8px]">斷頭130%</div>
+              <div className="text-muted-foreground/70 text-[8px]">追繳130%</div>
               <div className="text-rose-200 font-bold">{costNum(data.costBasis.marginLiquidationPrice)}</div>
             </div>
             <div className="bg-fuchsia-950/20 border border-fuchsia-500/30 rounded px-1 py-1 text-center">
@@ -448,7 +448,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
             </div>
           </div>
           <div className="mt-1 text-[8px] text-muted-foreground/70 leading-relaxed">
-            成本皆為估算（淨增張數×當日均價加權）。融資維持率券商看「整戶」非個股，斷頭價僅供參考。{data.costBasis.brokerCostMethod === 'composite' && '＊主力=綜合估算（分點歷史累積中）。'}完整版見個股頁。
+            成本皆為估算（淨增張數×當日均價加權）。融資維持率券商看「整戶」非個股，追繳價僅供參考（跌破 130% 券商發追繳令，逾期未補才斷頭）。{data.costBasis.brokerCostMethod === 'composite' && '＊主力=綜合估算（分點歷史累積中）。'}完整版見個股頁。
           </div>
         </details>
       )}

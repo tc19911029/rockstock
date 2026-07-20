@@ -53,8 +53,10 @@ describe('marginLiquidationPrice (#9 融資斷頭價)', () => {
 });
 
 describe('marginRatioForSymbol', () => {
-  it('.TWO（上櫃）→ 0.5', () => {
-    expect(marginRatioForSymbol('5483.TWO')).toBe(0.5);
+  // 金管會令（103.11.10 生效）「最高融資比率上市及上櫃有價證券為六成」
+  // → 上櫃不再是舊制 0.5。2026-07-20 修正。
+  it('.TWO（上櫃）→ 0.6（與上市相同）', () => {
+    expect(marginRatioForSymbol('5483.TWO')).toBe(0.6);
   });
   it('上市（無後綴或 .TW）→ 0.6', () => {
     expect(marginRatioForSymbol('3661')).toBe(0.6);

@@ -4,7 +4,7 @@
  * 成本／壓力價總覽面板（/agents/[symbol] 專用）
  *
  * 9 項：外資/投信/自營/主力/融資/融券/券賣 加權平均成本（5/10/20/60d）
- *      + 嘎空價（融券追繳）+ 融資斷頭/追繳價 + 融資斷頭壓力分數 + 解讀 + 風險提示。
+ *      + 嘎空價（融券追繳）+ 融資追繳/警戒價 + 融資追繳壓力分數 + 解讀 + 風險提示。
  *
  * 全部為「估算」、純顯示用，不進選股 gate。配色用 rose 區別軋空面板（fuchsia）。
  */
@@ -138,7 +138,7 @@ function PriceRow({ data }: { data: CostBasisBundle }) {
     <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
       <Stat label="嘎空價（融券追繳）" value={fmt(data.squeezePrice)} sub="價漲觸發回補" />
       <Stat label="融資追繳價（140%）" value={fmt(data.marginCallPrice140)} sub={`融資成數 ${(data.marginRatio * 100).toFixed(0)}%`} />
-      <Stat label="融資斷頭價（130%）" value={fmt(data.marginLiquidationPrice)} sub={distTxt} highlight />
+      <Stat label="融資追繳價（130%）" value={fmt(data.marginLiquidationPrice)} sub={distTxt} highlight />
       <Stat label="融資成本（綜合）" value={fmt(refOf(data.costs.margin))} sub={`資料 ${data.dataCompleteness.marginDays}d`} />
     </div>
   );
@@ -160,7 +160,7 @@ function ScoreBlock({ data }: { data: CostBasisBundle }) {
   return (
     <div className="rounded border border-border/40 bg-background/40 p-3">
       <div className="mb-2 flex items-baseline justify-between">
-        <div className="text-xs text-muted-foreground">融資斷頭壓力分數</div>
+        <div className="text-xs text-muted-foreground">融資追繳壓力分數</div>
         <div className="flex items-baseline gap-2">
           <span className={`font-mono text-2xl font-bold ${color}`}>{s.total}</span>
           <span className="text-xs text-muted-foreground">/ 100</span>
@@ -171,7 +171,7 @@ function ScoreBlock({ data }: { data: CostBasisBundle }) {
         <SubScore label="融資累積" v={s.marginAccumulation} />
         <SubScore label="使用率" v={s.utilizationHigh} />
         <SubScore label="跌破成本" v={s.belowMarginCost} />
-        <SubScore label="斷頭壓力" v={s.liquidationPressure} />
+        <SubScore label="追繳壓力" v={s.liquidationPressure} />
         <SubScore label="量價走弱" v={s.breakdownVolume} />
       </div>
     </div>

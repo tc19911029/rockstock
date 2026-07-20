@@ -18,6 +18,7 @@ import { computeMarginLongCosts } from './marginLongCost';
 import {
   marginLiquidationPrice,
   MARGIN_CALL_MAINTENANCE,
+  MARGIN_RELEASE_MAINTENANCE,
   MARGIN_RATIO_LISTED,
   MARGIN_RATIO_OTC,
 } from './marginLiquidationPrice';
@@ -31,10 +32,12 @@ export interface MarginPressure {
   symbol: string;
   /** 融資（多方）加權平均成本估算 */
   marginCost: number | null;
-  /** 追繳警戒價 */
+  /** 警戒價（維持率 140%，台股）／警戒線（150%，陸股） */
   marginCallPrice: number | null;
-  /** 斷頭價 */
+  /** 追繳價（維持率 130%，台股）／平倉價（130%，陸股） */
   liquidationPrice: number | null;
+  /** 解除追繳價（維持率 166%，台股限定；陸股不適用回 null） */
+  releasePrice: number | null;
   /** 最新收盤 */
   close: number;
   /** 現價距斷頭價 %（正=現價在斷頭價之上、有緩衝；負=已跌破） */
@@ -92,12 +95,14 @@ export async function computeTwMarginPressure(symbol: string, asOfDate: string):
   const marginCost = refOfBucket(computeMarginLongCosts(margin, prices));
   const liquidationPrice = marginLiquidationPrice(marginCost, ratio);
   const marginCallPrice = marginLiquidationPrice(marginCost, ratio, MARGIN_CALL_MAINTENANCE);
+  const releasePrice = marginLiquidationPrice(marginCost, ratio, MARGIN_RELEASE_MAINTENANCE);
 
   return {
     symbol,
     marginCost,
     marginCallPrice,
     liquidationPrice,
+    releasePrice,
     close,
     distanceToLiquidationPct: distanceToLiquidation(close, liquidationPrice),
     marginRatio: ratio,

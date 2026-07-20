@@ -130,6 +130,7 @@ export async function computeCnMarginPressure(symbol: string): Promise<MarginPre
     marginCost,
     marginCallPrice,
     liquidationPrice,
+    releasePrice: null,   // 陸股無「解除追繳」對應制度（補到平倉線以上即可）
     close,
     distanceToLiquidationPct: distanceToLiquidation(close, liquidationPrice),
     marginRatio: CN_DEBT_RATIO,

@@ -58,7 +58,7 @@ export default function PortfolioPage() {
   // 載入每檔持股的分析摘要
   const symbolListForSummary = holdings.map(h => h.symbol).join(',');
 
-  // 載入每檔持股的融資斷頭壓力（融資成本回推 → 追繳/斷頭價）
+  // 載入每檔持股的融資追繳壓力（融資成本回推 → 警戒/追繳價）
   useEffect(() => {
     if (!symbolListForSummary) return;
     const date = todayCST();
@@ -694,7 +694,7 @@ export default function PortfolioPage() {
                   );
                 })()}
 
-                {/* 融資斷頭壓力（估算，純顯示） */}
+                {/* 融資追繳壓力（估算，純顯示） */}
                 <MarginPressureRow pressure={marginPressures[h.symbol]} />
               </div>
             );
@@ -710,18 +710,19 @@ export default function PortfolioPage() {
 interface SummaryData { totalCost: number; totalValue: number; totalPnL: number }
 
 // ────────────────────────────────────────────────────────────────────────────
-// 融資斷頭壓力（估算，純顯示層，不進選股）
+// 融資追繳壓力（估算，純顯示層，不進選股）
 //
 // 融資成本 = Σ(當日融資增加量 × 當日均價) ÷ Σ(當日融資增加量) — 只算增加的日子。
-// 斷頭/追繳價 = 成本 × 融資成數 × 維持率門檻（台股 130%/140%、陸股 130%/150%）。
-// 券商看的是「整戶」維持率、不是單一檔 → 這是壓力區參考，不是保證斷頭點。
+// 警戒/追繳價 = 成本 × 融資成數 × 維持率門檻（台股 140%/130%/166%、陸股 150%/130%）。
+// 跌破 130% 券商發追繳令，補到 166% 解除；逾期未補才斷頭 — 所以 130% 是追繳線不是斷頭價。
+// 券商看的是「整戶」維持率、不是單一檔 → 這是壓力區參考。
 // ────────────────────────────────────────────────────────────────────────────
 
 function MarginPressureRow({ pressure }: { pressure?: MarginPressure | null }) {
   if (!pressure || pressure.marginCost === null || pressure.liquidationPrice === null) return null;
 
   const dist = pressure.distanceToLiquidationPct;
-  // 距斷頭 <10% = 融資戶已在懸崖邊，標紅
+  // 距追繳 <10% = 融資戶已在懸崖邊，標紅
   const near = dist !== null && dist < 10;
 
   return (
@@ -737,21 +738,24 @@ function MarginPressureRow({ pressure }: { pressure?: MarginPressure | null }) {
         {pressure.marginCallPrice !== null && (
           <span>追繳 <span className="font-mono text-yellow-400">${pressure.marginCallPrice.toFixed(2)}</span></span>
         )}
-        <span>斷頭 <span className="font-mono text-red-400">${pressure.liquidationPrice.toFixed(2)}</span></span>
+        <span>追繳 <span className="font-mono text-red-400">${pressure.liquidationPrice.toFixed(2)}</span></span>
+        {pressure.releasePrice !== null && (
+          <span className="text-muted-foreground/60">解除追繳 <span className="font-mono">${pressure.releasePrice.toFixed(2)}</span></span>
+        )}
         {dist !== null && (
           dist >= 0 ? (
             <span className={near ? 'text-bear font-bold' : ''}>
-              還要跌 <span className="font-mono">{dist.toFixed(1)}%</span> 才到斷頭價{near && ' ⚠️'}
+              還要跌 <span className="font-mono">{dist.toFixed(1)}%</span> 才到追繳價{near && ' ⚠️'}
             </span>
           ) : (
             <span className="text-bear font-bold">
-              已跌破斷頭價 <span className="font-mono">{Math.abs(dist).toFixed(1)}%</span> ⚠️
+              已跌破追繳價 <span className="font-mono">{Math.abs(dist).toFixed(1)}%</span> ⚠️
             </span>
           )
         )}
         <span
           className="ml-auto text-muted-foreground/50 cursor-help"
-          title="券商看的是整戶維持率、不是單一檔股票，此價僅為壓力區參考，非保證斷頭點"
+          title="券商看的是整戶維持率、不是單一檔股票。跌破 130% 券商發追繳令、補到 166% 解除，逾期未補才斷頭 — 此價僅為壓力區參考"
         >
           壓力區參考
         </span>
