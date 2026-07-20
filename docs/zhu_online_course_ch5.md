@@ -102,7 +102,7 @@ v12 實際**只啟用 7 條**（[eliminationFilter.ts:184-196](../lib/scanner/el
 |---|---|---|
 | 特別報價前 N 檔（強勢/弱勢/量放大）| 成交額 20 日均 top-N（`SANSE_TURNOVER_TOP_N` TW:500 / CN:800，[cn-sanse/scan.ts:22](../lib/cn-sanse/scan.ts#L22)）| 🟡 用成交額排名近似 |
 | **去除量過低**（書本 CH5-2：強弱榜昨量 < 500 張、量放大榜 < 1000 張剔除；早期誤記為 2000 張）| **無絕對張數硬篩**（top-N 成交額間接濾）| 🟡 回測證實 top-500 內加此硬篩無改善（見 92-wave2 C14） |
-| **去除價<5 元**（朱原話）| **無此硬篩** | 🔴 缺漏 |
+| **去除價<5 元**（朱原話）| `TW_UNIVERSE_MIN_PRICE = 5`（[bookThresholds.ts](../lib/analysis/bookThresholds.ts)）→ `TurnoverRank.ts:165/285` | ✅ 已補（2026-07-20 更正舊紅燈）<br>⚠️ 但 `CoarseScanner.ts:99` 盤中粗掃另寫 `TW: 10`（來源 737aaf7 遺留、無註解），5~10 元區間兩條路徑判定不一致 → 待回測+裁決 |
 | 類股群聚（同類股齊漲 = 題材）| 無類股群聚偵測 | 🔴 |
 | 週線研判（建鎖股夾再看週線）| MTF 週線六條件 gate（`applyPanelFilter.ts:37` `mtfWeeklyPass`）| ✅ |
 | 鎖股按強弱排序、每日汰換 | `panelSortCompare`（漲幅→六條件分→MA20 斜率）+ LockWatch（`lockWatchManager.ts`，僅 F/N）| 🟡 |
@@ -129,7 +129,7 @@ v12 實際**只啟用 7 條**（[eliminationFilter.ts:184-196](../lib/scanner/el
 
 ✅ **已對齊**：六條件（六六大順）、淘汰法核心、獵兔 8 分類 = 書本字母、底部 O/N、MTF 週線、鎖股 LockWatch、排序優先序。
 ⚠️ **待補缺口**（詳見 [docs/audit/v12-gaps-from-online-course.md](audit/v12-gaps-from-online-course.md) CH5 段）：
-- **C-S1** universe 缺「量過低 / 價<5 元」硬篩（目前只有成交額排名）。
+- ~~**C-S1** universe 缺「量過低 / 價<5 元」硬篩~~ → 價<5 元已補（`TW_UNIVERSE_MIN_PRICE`）；量過低回測證實無改善不補。**剩餘議題＝盤中粗掃底門 10 元與盤後 5 元不一致**（2026-07-20 第七輪查出）。
 - **C-S2** 底部圖形③（反彈突破月線橫盤）無獨立 detector。
 - **C-S3** 強勢飆股「鎖第一波高檔、等第二波主升段」無專屬選股法。
 - **C-S4** 類股群聚（題材股齊漲）偵測缺漏。

@@ -7,6 +7,7 @@ import { buildTrappedSignals } from '@/lib/portfolio/trappedTier';
 import { COUNTER_TREND_SET, normalizeLetter } from '@/lib/scanner/buyMethodTracks';
 import { computeIndicators } from '@/lib/indicators';
 import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
+import { detectSellSignals, type SellSignalType } from '@/lib/analysis/sellSignals';
 
 export type HoldingAction =
   | 'stop_loss'
@@ -377,8 +378,11 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
   // 之前只在 v12-signals 面板流（⑥-2）與走圖賣訊有，daily-action 推播鏈缺席 →
   // 已翻空頭的一般多單會一路顯示「續抱」直到跌到停損價。
   // 狀態型判定（同 ⑥-2 07-05 修法）：只要今天仍是空頭就持續亮，重複提示無害。
-  if (candles.length >= 21) {
-    const withInd = computeIndicators(candles);
+  // 第七輪（2026-07-20）：withInd 上提 — 原本只在趨勢翻空分支內算，
+  // 下方「課程出場訊號接推播鏈」分支也要用，避免重算兩次。
+  const withInd = candles.length >= 21 ? computeIndicators(candles) : null;
+
+  if (withInd) {
     if (detectTrend(withInd, withInd.length - 1) === '空頭') {
       return finalize('stop_loss', [{
         type: 'trend_bearish_exit',
@@ -477,6 +481,67 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
       severity: 'high',
       detail: `獲利 +${(profitPct * 100).toFixed(1)}% ≥ 20%，收盤 ${todayClose.toFixed(2)} 跌破 MA5 ${ma5!.toFixed(2)}，課程 CH8-4/8-5：連續波段賺超過 20% 跌破 MA5 全部停利`,
     }]);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // 第七輪（2026-07-20）：課程出場訊號接上 daily-action 推播鏈
+  //
+  // 病根：detectSellSignals（lib/analysis/sellSignals.ts）只餵走圖面板（v12-signals route）
+  //   與回測腳本，daily-action / ntfy 推播完全讀不到 → 課程明講「多單要停利」的訊號
+  //   走圖會亮紅字、推播卻照樣輸出「續抱」。三個獨立審計 agent 各自撞到同一個洞。
+  //
+  // 只接「課程明文出場」的三條，不接全部 21 種（其餘多為書本細則或顯示層警示）：
+  //   ① CH9-3(一) 跌破高檔連兩日大量K低點 → 多單停利（無獲利門檻）
+  //   ② CH8-3(5)  收盤跌破 MA5 + 頭頭低 → 小賠或小賺出場（無獲利門檻）
+  //   ③ CH8-3(6)  急漲3天以上中長紅K + 高檔爆量長黑 → 收盤停利 1/2（無獲利門檻）
+  //
+  // ⚠️ 位置：放在 break_ma5_high_profit（賺>20% 破MA5全出）之後、break_ma5_short
+  //   （賺≥10% 破MA5 減半）之前。理由＝課程 CH8-3(5) 的「頭頭低就走」比短線減半重，
+  //   不可被 reduce_half 攔截降級（同 2026-07-05 吞噬全出被賠少-11 攔截的 C 類教訓）。
+  //   ≥20% 與更早的硬停損分支全部保持原順序不動，行為位元相容。
+  //
+  // ⚠️ 刻意不動 getOperationMA（v12Operation.ts:230）長線→MA20：
+  //   直播 2026-07-01 三處明講「做短線跌破五均賣、做長線跌破20均賣」，
+  //   老師講的是「頭頭低本身就是出場事由」，不是「改用 MA5 當跟隨線」。
+  //   收斂跟隨均線會直接違背課程 CH8-4，是把一個真缺口修成兩個假 bug。
+  // ════════════════════════════════════════════════════════════════
+  if (withInd) {
+    const courseSigs = detectSellSignals(withInd, withInd.length - 1);
+    const has = (t: SellSignalType) => courseSigs.find(s => s.type === t);
+
+    // ① CH9-3(一)：跌破高檔連兩日大量K棒低點 → 停利（detector 已含「未再創新高」+「黑K收盤跌破」）
+    const twoDayVol = has('HIGH_VOL_2DAY_LOW_BREAK');
+    if (twoDayVol) {
+      return finalize('exit_all', [{
+        type: 'ch9_high_vol_2day_low_break',
+        label: '跌破兩日大量低點（課程停利）',
+        severity: 'high',
+        detail: `${twoDayVol.detail}（目前 ${profitPct >= 0 ? '獲利' : '虧損'} ${(profitPct * 100).toFixed(1)}%）`,
+      }, ...trappedSigs]);
+    }
+
+    // ② CH8-3(5)：收盤跌破 MA5 + 頭頭低 → 小賠或小賺出場
+    //   課程 (4) 是「沒到 10% 破 MA5 續抱」，(5) 是它的逃生門 —— 只抄 (4) 會抱到硬停損才走。
+    const lowerHigh = has('LOWER_LOW'); // 型別名沿用舊稱，語意＝頭頭低
+    if (lowerHigh && distToMa5Pct != null && distToMa5Pct < 0) {
+      return finalize('exit_all', [{
+        type: 'ch8_lower_high_break_ma5',
+        label: '頭頭低＋跌破 MA5（趨勢改變出場）',
+        severity: 'high',
+        detail: `${lowerHigh.detail}，收盤 ${todayClose.toFixed(2)} 跌破 MA5 ${ma5!.toFixed(2)}。課程 CH8-3(5)：趨勢已改變，小賠或小賺出場，不要等跌破月線或前低`,
+      }, ...trappedSigs]);
+    }
+
+    // ③ CH8-3(6)：急漲3天以上 + 高檔爆量長黑 → 先停利 1/2（次日下跌全出走既有 ch9_exit_remaining）
+    const climax = has('PROFIT_CLIMAX_EXIT');
+    if (climax) {
+      return finalize('reduce_half', [{
+        type: 'ch8_climax_partial_tp',
+        label: '急漲後爆量長黑（先停利1/2）',
+        severity: 'high',
+        detail: `${climax.detail}。課程 CH8-3(6)：當日收盤停利 1/2，次日下跌全部停利`,
+      }, ...trappedSigs]);
+    }
   }
 
   if (profitPct >= PROFIT_SHORT_RULE && distToMa5Pct != null && distToMa5Pct < 0) {

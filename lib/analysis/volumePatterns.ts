@@ -10,7 +10,7 @@
  * 用法：各函式回傳 boolean，供上層判斷當前 K 棒是否符合該量價型態。
  */
 import type { CandleWithIndicators } from '@/types';
-import { BOOK_VOL_RATIO_MIN, BASE_HIGH_VOL_RATIO } from './bookThresholds';
+import { BOOK_VOL_RATIO_MIN, BASE_HIGH_VOL_RATIO, ATTACK_VOL_RATIO_COURSE } from './bookThresholds';
 import { detectTopFormation } from './reversalStructure';
 
 /** 量分類（書本 p.487-488） */
@@ -41,7 +41,7 @@ export function classifyVolume(
   //   補上漲前提（之前爆量長黑也會被貼攻擊量）；(2) 補課程 avg5×1.2 的 OR 分支
   //  （之前只有前日×1.3 書本軌，1.2~1.3 倍的合格攻擊量會漏）。
   const attackVol = (prev.volume > 0 && c.volume >= prev.volume * BOOK_VOL_RATIO_MIN)
-    || (avg5 > 0 && c.volume >= avg5 * 1.2);
+    || (avg5 > 0 && c.volume >= avg5 * ATTACK_VOL_RATIO_COURSE);
   if (attackVol && c.close > c.open) types.push('attack');
 
   // 爆大量（5 日均量 × 2）— 抓住飆股 / 朱家泓 YouTube #17

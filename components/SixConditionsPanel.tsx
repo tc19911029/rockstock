@@ -13,6 +13,7 @@ import ProhibitionsBlock from './ProhibitionsBlock';
 import CourseTeachingBlock from './CourseTeachingBlock';
 import { detectShortEntries } from '@/lib/analysis/shortEntries';
 import { CORE_SCORE_MIN, BOOK_VOL_RATIO_MIN, BOOK_BODY_PCT_MIN } from '@/lib/analysis/bookThresholds';
+import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
 
 const HIGH_WIN_POS_NUM: Record<string, string> = {
   '🎯 打底趨勢確認': '①',
@@ -27,7 +28,9 @@ const CONDITION_LABELS = [
   { key: 'trend',     icon: '①', name: '趨勢條件', tip: '日線波浪型態符合「頭頭高、底底高」多頭架構', required: true },
   { key: 'ma',        icon: '②', name: '均線條件', tip: 'MA5>MA10>MA20 三線多排，MA10/20 方向向上', required: true },
   { key: 'position',  icon: '③', name: '股價位置', tip: '收盤在 MA10、MA20 之上，判斷初升/主升/末升段', required: true },
-  { key: 'volume',    icon: '④', name: '成交量',   tip: `攻擊量 ≥ 前一日 × ${BOOK_VOL_RATIO_MIN}（書本 p.54，2 倍更強）`, required: true },
+  // 2026-07-20 第七輪：tooltip 原寫死 1.3（書本值），但實際 gate 走 BASE_THRESHOLDS.volumeRatioMin = 1.2
+  // （課程 1-5「量增 20% 以上」，2026-07-05 拍板按課程）→ 使用者看到的門檻與實際判定不符，改讀同一個值。
+  { key: 'volume',    icon: '④', name: '成交量',   tip: `攻擊量 ≥ 前一日 × ${BASE_THRESHOLDS.volumeRatioMin}（課程 1-5「量增 20% 以上」，2 倍更強）`, required: true },
   { key: 'kbar',      icon: '⑤', name: '進場K線', tip: `價漲、量增、紅K實體棒 > ${BOOK_BODY_PCT_MIN}%`, required: true },
   { key: 'indicator', icon: '⑥', name: '指標參考', tip: 'MACD 綠柱縮短或紅柱延長；KD 黃金交叉向上多排', required: false },
 ] as const;

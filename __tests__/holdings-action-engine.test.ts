@@ -348,4 +348,56 @@ describe('evaluateHolding — 巡邏批（趨勢翻空提早出場 / 吞噬全�
     expect(r.action).toBe('exit_all');
     expect(r.signals.some(s => s.type === 'ch9_engulf_exit_all')).toBe(true);
   });
+
+  // ══════════════════════════════════════════════════════════════
+  // 第七輪（2026-07-20）：課程出場訊號接上 daily-action 推播鏈
+  //   病根＝detectSellSignals 只餵走圖面板，推播讀不到 → 走圖亮紅字、推播說「續抱」。
+  // ══════════════════════════════════════════════════════════════
+  describe('課程出場訊號接推播鏈（第七輪）', () => {
+    it('CH8-3(5)：獲利未達 10% + 頭頭低 + 跌破 MA5 → exit_all（不再一路續抱到硬停損）', () => {
+      // 結構：高點 120（idx10）→ 回檔 → 緩升到較低高點 116（idx28）→ 今日收 108 首破該高點。
+      // idx11~27 刻意做成「高點嚴格遞增」，中間不會產生假 pivot；
+      // 低點一路墊高（底底高）→ detectTrend 不會判空頭，確保測到的是新分支而非 trend_bearish_exit。
+      // ⚠️ 前波低點刻意壓到 104（低於今日 108）：只有頭頭低、沒有底底低，
+      //    否則 detectTrend 會判空頭、被更早的 trend_bearish_exit 接走，測不到本分支。
+      const closes = [
+        100, 102, 104, 106, 108, 110, 112, 114, 116, 118, // 0-9
+        119,                                              // 10 = 較高的頭（high 120）
+        106, 104,                                         // 11-12 回檔（前波低 104）
+        105, 105.7, 106.4, 107.1, 107.8, 108.5, 109.2,    // 13-19 緩升
+        109.9, 110.6, 111.3, 112, 112.7, 113.4, 114.1, 114.8, // 20-27
+        115.5,                                            // 28 = 較低的頭（high 116 < 120）
+        108,                                              // 29 = 今日，首次收破 116；仍高於前波低 104
+      ];
+      const candles = makeCandles(closes);
+      candles[10].high = 120;
+      candles[28].high = 116;
+      candles[29].high = 110; // 今日高點低於 idx28 → idx28 成立為 pivot high
+      const today = 108;
+
+      const r = evaluateHolding({ symbol: 'T', entryPrice: 105, stopLoss: 96, candles, todayClose: today });
+
+      // 獲利僅 +2.9%：舊行為會落到 watch_stop/hold（課程要求出場）
+      expect(r.profitPct).toBeLessThan(0.10);
+      expect(r.action).toBe('exit_all');
+      expect(r.signals.some(s => s.type === 'ch8_lower_high_break_ma5')).toBe(true);
+    });
+
+    it('頭頭低但收盤仍在 MA5 之上 → 不觸發（課程要「跌破 MA5」才走）', () => {
+      const closes = Array.from({ length: 30 }, (_, i) => 100 + i * 0.5);
+      const candles = makeCandles(closes);
+      const today = closes[closes.length - 1];
+      const r = evaluateHolding({ symbol: 'T', entryPrice: 105, stopLoss: 96, candles, todayClose: today });
+      expect(r.signals.some(s => s.type === 'ch8_lower_high_break_ma5')).toBe(false);
+    });
+
+    it('新分支不搶既有較重分支：獲利 ≥20% 破 MA5 仍走 break_ma5_high_profit', () => {
+      const closes = Array.from({ length: 30 }, (_, i) => 100 + i * 1.5);
+      closes.push(138); // 今日回落破 MA5
+      const candles = makeCandles(closes);
+      const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 90, candles, todayClose: 138 });
+      expect(r.action).toBe('exit_all');
+      expect(r.signals.some(s => s.type === 'break_ma5_high_profit')).toBe(true);
+    });
+  });
 });

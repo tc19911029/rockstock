@@ -8,7 +8,8 @@
  */
 
 import { TradingRule, RuleSignal, CandleWithIndicators } from '@/types';
-import { isUptrendWave, isDowntrendWave } from './ruleUtils';
+import { isUptrendWave, isDowntrendWave, isMedLongBlack } from './ruleUtils';
+import { BOOK_VOL_RATIO_MIN } from '@/lib/analysis/bookThresholds';
 
 // ─── 內部輔助 ────────────────────────────────────────────────────────────────
 
@@ -641,7 +642,14 @@ export const surgeStockDowntrendBreak: TradingRule = {
 export const surgeStockHoldOrSell: TradingRule = {
   id: 'zhu-surge-hold-or-sell',
   name: '飆股續抱/出場判斷',
-  description: '未破前2日低/MA5/無黑K→續抱，2項以上違反→出場',
+  // 2026-07-20 第七輪忠實度修（顯示層，不進出場 gate — 生產出場走 v12Operation.checkKLineExit）：
+  // 課程 CH6-15/p07 四條「未破…可續抱」，逐字稿講得斬釘截鐵：
+  //   「如果出現 1、2、3、4 其中一個，你就獲利了結。」＝ OR，任一破就走。
+  // 舊實作是 violations >= 2（AND-ish），且三條判準各自比課程鬆：
+  //   前一日低 → 寫成前 2 日低 / 3 日均線 → 寫成 MA5 / 大量中長黑K → 寫成任何黑K。
+  // 本次改為忠於課程：任一違反即發訊，判準逐條對齊。
+  // 「未破上升切線」仍缺（需切線資料，本規則拿不到）→ 明列於 description 免得再被當成已實作。
+  description: '課程 CH6-15：未破前一日低／未破 3 日均線／未出現大量中長黑K → 續抱；任一違反即獲利了結（上升切線那條未實作）',
   evaluate(candles: CandleWithIndicators[], index: number) {
     if (index < 10) return null;
     const c = candles[index];
@@ -652,18 +660,20 @@ export const surgeStockHoldOrSell: TradingRule = {
     let violations = 0;
     const reasons: string[] = [];
 
-    // 規則1: 破前2日低價
-    const prev2Low = Math.min(candles[index - 1]?.low ?? Infinity, candles[index - 2]?.low ?? Infinity);
-    if (c.close < prev2Low) { violations++; reasons.push('破前2日低'); }
+    // 規則1: 收盤破「前一日」低點（課程原文；舊版用前 2 日最低＝比課程鬆）
+    const prevLow = candles[index - 1]?.low;
+    if (prevLow != null && c.close < prevLow) { violations++; reasons.push('破前一日低'); }
 
-    // 規則2: 破MA5（3日均線近似）
-    if (c.ma5 != null && c.close < c.ma5) { violations++; reasons.push('破MA5'); }
+    // 規則2: 收盤破 3 日均線（課程原文寫 3 日均線；舊版用 MA5＝比課程鬆）
+    if (c.ma3 != null && c.close < c.ma3) { violations++; reasons.push('破3日均線'); }
 
-    // 規則3: 出現黑K
-    if (c.close < c.open) { violations++; reasons.push('出現黑K'); }
+    // 規則3: 出現「大量中長黑K」（課程原文；舊版任何黑K都算＝過度敏感、雜訊多）
+    if (isMedLongBlack(c) && (c.avgVol5 ?? 0) > 0 && c.volume >= c.avgVol5! * BOOK_VOL_RATIO_MIN) {
+      violations++; reasons.push('大量中長黑K');
+    }
 
-    // 2個以上條件違反 → 賣出
-    if (violations >= 2) {
+    // 課程 CH6-15 逐字稿：「出現 1、2、3、4 其中一個，你就獲利了結」＝任一違反即出場（OR）
+    if (violations >= 1) {
       return {
         type: 'SELL' as const,
         label: '飆股出場',

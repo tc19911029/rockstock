@@ -488,7 +488,12 @@ export const standardRedBlackHigh: TradingRule = {
     // 互斥讓位（其他 5 組幾何優先，各自有專屬規則）：
     if (black.close < red.low) return null;                              // 第6組 貫穿
     if (black.open >= red.close && black.close <= red.open) return null; // 第5組 吞噬
-    if (black.open > red.high) return null;                              // 第2/3組 遭遇/覆蓋（都開高於紅K高）
+    // 第2/3組 遭遇/覆蓋讓位。
+    // 2026-07-20 第七輪修：舊條件是 `black.open > red.high`（開高於紅K**最高**），
+    // 但 2026-07-05 已把遭遇(:208)/烏雲(:32) 的開高口徑對齊課程改成「高於紅K**收盤**」→
+    // 黑K開在「昨收～昨高」之間時，遭遇/烏雲會發 SELL、本規則卻不讓位，同一根K雙報互斥標籤。
+    // 讓位門檻跟著對象規則走，才是真的互斥。
+    if (black.open > red.close) return null;
     if (black.high <= red.high && black.low >= red.low) return null;     // 第4組 母子（整根被包住）
     // 需在高檔
     if (!isUptrendWave(candles, index - 1, 8)) return null;

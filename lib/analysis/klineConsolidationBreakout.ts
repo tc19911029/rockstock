@@ -119,7 +119,10 @@ function findAnchorAndRange(
     // 狹幅整理：rangeHigh 相對 anchorHigh 不可超過 MAX_RANGE_WIDTH_PCT
     const rangeWidthPct = ((rangeHigh - a.high) / a.high) * 100;
     if (rangeWidthPct > MAX_RANGE_WIDTH_PCT) continue;
-    if (rangeWidthPct < 0) continue; // 整理期間連錨點高都沒摸到 → 不算橫盤
+    // 2026-07-20 第七輪：移除 `if (rangeWidthPct < 0) continue;` — 那是死碼。
+    // rangeHigh 由 `let rangeHigh = a.high` 起算且迴圈只單向放大（k.high > rangeHigh 才更新），
+    // 故 rangeHigh >= a.high 恆成立 → rangeWidthPct 恆 ≥ 0，該分支永遠不會執行。
+    // 留著會讓後續審計誤以為「橫盤需摸到錨點高」而重複開錯誤的票（本輪就被騙過一次）。
 
     const consolidationDays = idx - anchorIdx - 1;
 

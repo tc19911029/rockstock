@@ -34,7 +34,6 @@ import {
   BOOK_BODY_PCT_MIN,
   BOOK_VOL_RATIO_MIN,
   VREVERSAL_VOL_MULT,
-  KLINE_CONSOL_ANCHOR_BODY_PCT,
   BLACKK_MAX_DAYS_AFTER,
   FLATBOTTOM_MIN_CONSOL_DAYS,
 } from '@/lib/analysis/bookThresholds';
@@ -299,15 +298,18 @@ function evaluateMethod(
           pass: isUptrend,
         },
         {
-          icon: '②', name: `中長紅 K 錨點（實體 ≥ ${KLINE_CONSOL_ANCHOR_BODY_PCT}%）`,
+          // 2026-07-20 第七輪：面板原寫「實體 ≥ 3%」「5-15 天」，但 643926b（07-12）已把
+          // 錨點實體濾網移除（課程 6-3：「第一根紅黑不管實體」），最小橫盤天數也是 3 不是 5。
+          // 面板說一套、引擎做一套 → 改成引擎實際判準。
+          icon: '②', name: '紅/黑 K 錨點（課程：第一根不限實體）',
           detail: r
-            ? `${r.anchorDate} 中長紅 K（高 ${r.anchorHigh.toFixed(2)}，實體 ${r.anchorBodyPct.toFixed(2)}%）`
-            : '未找到 5-15 天前的中長紅 K 錨點',
+            ? `${r.anchorDate} 錨點 K（高 ${r.anchorHigh.toFixed(2)}，實體 ${r.anchorBodyPct.toFixed(2)}%）`
+            : '未找到符合的錨點 K',
           pass: !!r,
           metric: r ? `${r.anchorBodyPct.toFixed(2)}%` : '—',
         },
         {
-          icon: '③', name: '錨點上方狹幅橫盤（5-15 天 / 幅度 ≤ 5%）',
+          icon: '③', name: '錨點上方狹幅橫盤（≥ 3 天 / 幅度 ≤ 5%）',
           detail: r
             ? `橫盤 ${r.consolidationDays} 天，幅度 ${r.rangeWidthPct.toFixed(2)}%`
             : '橫盤條件未成立',

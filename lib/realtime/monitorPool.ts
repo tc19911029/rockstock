@@ -22,7 +22,7 @@ import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { computeIndicators } from '@/lib/indicators';
 import {
   darkCloudCover, bearishEngulfingHigh, bearishHaramiHigh,
-  bearishPiercingHigh, bearishEncounterHigh,
+  bearishPiercingHigh, bearishEncounterHigh, standardRedBlackHigh,
 } from '@/lib/rules/twoBarReversalRules';
 
 /**
@@ -161,7 +161,12 @@ async function detectYesterdayReversalWatch(
       // L1 只有已收盤日K；若最後一根就是今天（罕見：盤前跑到已封存）也無妨 — 看最後一根
       const candles = computeIndicators(raw);
       const last = candles.length - 1;
-      const rules = [bearishEngulfingHigh, bearishPiercingHigh, bearishHaramiHigh, bearishEncounterHigh, darkCloudCover];
+      // 課程 CH2-6 高檔紅K+黑K 六組，任一成立 → 觀察次日「開低確認止漲」（guard 規則5）。
+      // 2026-07-20 第七輪補漏：standardRedBlackHigh（第1組 標準長紅長黑）是 07-05 18:06 才新增的規則，
+      // 而 guard 規則5 在同日 14:38 就寫好了 → 新規則沒回頭補進這份清單，命中時盤中開低推播永遠不會發。
+      // ⚠️ 刻意不加 CH2-8 夜星家族：夜星是三根K棒、右邊長黑收盤「當下即確認」（發 SELL 不是 WATCH），
+      //    塞進「等次日開低才確認」的管線反而會把已確認訊號往後拖延。
+      const rules = [bearishEngulfingHigh, bearishPiercingHigh, bearishHaramiHigh, bearishEncounterHigh, darkCloudCover, standardRedBlackHigh];
       for (const rule of rules) {
         const r = rule.evaluate(candles, last, undefined as never);
         if (r) {
