@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import type { MarginPressure } from '@/lib/chipcost/marginPressure';
 
 interface Shareholder {
   endDate: string; holderNum: number; holderNumRatio: number | null;
@@ -29,6 +30,8 @@ interface Resp {
   shareholders?: Shareholder[]; dragontiger?: DragonTiger[];
   capitalFlow?: CapitalFlowDay[]; capitalFlowToday?: CapitalFlowDay | null;
   mainBuySell?: MainBuySell | null; margin?: MarginDay[];
+  /** 融資成本回推 + 平倉/警戒壓力價（估算，純顯示層） */
+  marginPressure?: MarginPressure | null;
 }
 
 // 陸股交易時段（北京時間=台灣 CST）：平日 09:30-11:30 / 13:00-15:00
@@ -107,6 +110,7 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
   // 主買/主賣毛額（今日，主力流入/流出）
   const mbs = data?.mainBuySell ?? null;
 
+  const mp = data?.marginPressure ?? null;
   // 兩融（升冪；最後一筆=最新，前一筆算日變化）
   const mg = data?.margin ?? [];
   const mgLatest = mg[mg.length - 1];
@@ -220,6 +224,43 @@ export default function CnChipPanel({ symbol }: { symbol: string }) {
             </div>
           </>
         ) : <div className="text-muted-foreground">暂无两融数据</div>}
+
+        {/* 融資成本回推 + 平倉／警戒壓力價（估算，與台股同一套 weightedCost 數學） */}
+        {mp && mp.marginCost != null && mp.liquidationPrice != null && (
+          <div className="mt-2 rounded-xl ring-1 ring-rose-500/25 bg-rose-950/10 px-2.5 py-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-muted-foreground font-medium">💰 融資成本／壓力價（估算）</span>
+              {mp.distanceToLiquidationPct != null && (
+                <span className={cn(
+                  'text-[10px] font-mono',
+                  mp.distanceToLiquidationPct < 0 ? 'text-bear font-bold' : 'text-rose-300',
+                )}>
+                  {mp.distanceToLiquidationPct < 0
+                    ? `已破平倉線 ${Math.abs(mp.distanceToLiquidationPct).toFixed(1)}%`
+                    : `還要跌 ${mp.distanceToLiquidationPct.toFixed(1)}%`}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-1 text-[9px] font-mono">
+              <div className="bg-card rounded px-1 py-1 text-center">
+                <div className="text-muted-foreground/70 text-[8px]">融資成本</div>
+                <div className="text-foreground/90 font-bold">{mp.marginCost.toFixed(2)}</div>
+              </div>
+              <div className="bg-card rounded px-1 py-1 text-center ring-1 ring-yellow-500/25">
+                <div className="text-muted-foreground/70 text-[8px]">警戒150%</div>
+                <div className="text-yellow-200 font-bold">{mp.marginCallPrice?.toFixed(2) ?? '—'}</div>
+              </div>
+              <div className="bg-card rounded px-1 py-1 text-center ring-1 ring-rose-500/30">
+                <div className="text-muted-foreground/70 text-[8px]">平倉130%</div>
+                <div className="text-rose-200 font-bold">{mp.liquidationPrice.toFixed(2)}</div>
+              </div>
+            </div>
+            <div className="mt-1 text-[8px] text-muted-foreground/70 leading-relaxed">
+              成本為估算（融資餘額日增額 ÷ 當日均價換股數後加權）。維持擔保比例券商看「整戶」非個股，
+              且各家保證金比例不同（此處按交易所下限 100%），壓力價僅供參考。
+            </div>
+          </div>
+        )}
       </section>
 
       {/* 4. 股东户数 */}

@@ -89,9 +89,21 @@ export function cnLiquidationPrice(cost: number | null, maintenance: number): nu
   return +(cost * CN_DEBT_RATIO * maintenance).toFixed(2);
 }
 
-/** 陸股日K → { date, close, vwap }；沒有成交金額欄位，vwap 用 (H+L+C)/3 */
+/**
+ * 陸股日K → { date, close, vwap }；沒有成交金額欄位，vwap 用 (H+L+C)/3
+ *
+ * symbol 沒帶後綴（走圖/籌碼 API 常只給裸碼）時依序試 .SS/.SZ。
+ */
 async function loadCnPrices(symbol: string): Promise<CnPriceRow[]> {
-  const file = await readCandleFile(symbol, 'CN');
+  let file = null;
+  if (/\.(SS|SZ)$/i.test(symbol)) {
+    file = await readCandleFile(symbol, 'CN');
+  } else {
+    for (const suffix of ['SS', 'SZ'] as const) {
+      file = await readCandleFile(`${symbol}.${suffix}`, 'CN');
+      if (file) break;
+    }
+  }
   return (file?.candles ?? []).map(c => ({
     date: c.date,
     close: c.close,

@@ -318,6 +318,7 @@ import { getSharesIssued } from '@/lib/datasource/FinMindClient';
 import { detectTrend, rollingChange } from '@/lib/chips/trends';
 import { fetchYahooBrokerTrades, type BrokerRankRow } from '@/lib/datasource/YahooBrokerScraper';
 import { readBrokerStock } from '@/lib/chips/BrokerStorage';
+import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
 import { fetchTwseSblForStock, fetchTwseSblHistory } from '@/lib/datasource/TwseSblProvider';
 import { fetchTpexSblForStock, fetchTpexSblHistory } from '@/lib/datasource/TpexSblProvider';
 import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
@@ -481,7 +482,25 @@ export async function GET(req: NextRequest) {
       return r.status === 'fulfilled' ? (r.value as T) : null;
     };
     const tdccFile = pickFulfilled<Awaited<ReturnType<typeof readTdccStock>>>(0);
-    const marginInfo = pickFulfilled<Awaited<ReturnType<typeof fetchMarginForStock>>>(1);
+    let marginInfo = pickFulfilled<Awaited<ReturnType<typeof fetchMarginForStock>>>(1);
+    // 三源都查不到當日 → fallback 本地 chip-extras 最新一筆（≤ 查詢日）。
+    // 融資融券 21:00 後才揭露，盤中/當日查必然三源全 null，若不 fallback 面板會顯示
+    // 「融資餘額 0 張、使用率 0%」誤導用戶（同一頁的融資成本卻算得出來，自相矛盾）。
+    // 與上方法人 T86 的 fallback 同一個道理。2026-07-20 修。
+    if (!marginInfo) {
+      const stored = await readMarginStock(code).catch(() => null);
+      const prior = (stored?.data ?? []).filter(r => r.date <= date);
+      const last = prior[prior.length - 1];
+      if (last) {
+        marginInfo = {
+          marginBalance: last.marginBalance,
+          marginNet: last.marginNet,
+          shortBalance: last.shortBalance,
+          shortNet: last.shortNet,
+          marginUtilRate: last.marginUtilRate,
+        };
+      }
+    }
     const dayTradeInfo = pickFulfilled<Awaited<ReturnType<typeof fetchDayTradeForStock>>>(2);
     const sblToday = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblForStock>>>(3);
     const sharesIssued = pickFulfilled<number>(4);
