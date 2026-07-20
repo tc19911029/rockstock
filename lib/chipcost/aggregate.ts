@@ -23,10 +23,9 @@ import type { BrokerCostMethod } from './types';
 import {
   marginLiquidationPrice,
   MARGIN_CALL_MAINTENANCE,
-  MARGIN_RATIO_LISTED,
-  MARGIN_RATIO_OTC,
 } from './marginLiquidationPrice';
 import { computeMarginLiquidationScore } from './marginLiquidationScorer';
+import { detectMarginRatio } from './marginPressure';
 import { buildMarginInterpretation, buildMarginWarnings } from './narrator';
 import type { CostBasisBundle, CostBucket, CostBasisSummary } from './types';
 import { EMPTY_BUCKET } from './types';
@@ -64,16 +63,7 @@ function vsClose(bucket: CostBucket, close: number): number | null {
 
 const refOf = (b: CostBucket): number | null => b.d20 ?? b.d10 ?? b.d5 ?? b.d60 ?? null;
 
-/** 融資成數：明確 .TWO 或本地有 .TWO 日K（symbol 可能被誤標 .TW）→ 上櫃 0.5，否則上市 0.6 */
-async function detectMarginRatio(code: string, symbol: string): Promise<number> {
-  if (/\.TWO$/i.test(symbol)) return MARGIN_RATIO_OTC;
-  try {
-    await fs.access(path.join(process.cwd(), 'data', 'candles', 'TW', `${code}.TWO.json`));
-    return MARGIN_RATIO_OTC;
-  } catch {
-    return MARGIN_RATIO_LISTED;
-  }
-}
+// 融資成數判定（上市 0.6 / 上櫃 0.5）單一事實來源在 marginPressure.ts
 
 export async function getCostBasisBundle(symbol: string, asOfDate: string): Promise<CostBasisBundle> {
   const code = symbol.replace(/\.(TW|TWO)$/i, '');

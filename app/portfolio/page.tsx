@@ -13,6 +13,7 @@ import { POLLING } from '@/lib/config';
 import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDailyActionPanel';
 import { DisciplineShadowCard } from '@/components/portfolio/DisciplineShadowCard';
 import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
+import type { MarginPressure } from '@/lib/chipcost/marginPressure';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
 function todayCST(): string {
@@ -53,8 +54,23 @@ export default function PortfolioPage() {
   const { holdings, add, remove, update } = usePortfolioStore();
   const [prices, setPrices] = useState<Record<string, PriceData>>({});
   const [analysisSummaries, setAnalysisSummaries] = useState<Record<string, AnalysisSummary>>({});
+  const [marginPressures, setMarginPressures] = useState<Record<string, MarginPressure | null>>({});
   // 載入每檔持股的分析摘要
   const symbolListForSummary = holdings.map(h => h.symbol).join(',');
+
+  // 載入每檔持股的融資斷頭壓力（融資成本回推 → 追繳/斷頭價）
+  useEffect(() => {
+    if (!symbolListForSummary) return;
+    const date = todayCST();
+    fetch(`/api/portfolio/margin-pressure?date=${date}&symbols=${encodeURIComponent(symbolListForSummary)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        const map = j?.data?.pressures ?? j?.pressures ?? null;
+        if (map && typeof map === 'object') setMarginPressures(map);
+      })
+      .catch(() => { /* silent：算不出來就不顯示這行 */ });
+  }, [symbolListForSummary]);
+
   useEffect(() => {
     if (!symbolListForSummary) return;
     const date = todayCST();
@@ -677,6 +693,9 @@ export default function PortfolioPage() {
                     </div>
                   );
                 })()}
+
+                {/* 融資斷頭壓力（估算，純顯示） */}
+                <MarginPressureRow pressure={marginPressures[h.symbol]} />
               </div>
             );
           })}
@@ -689,6 +708,57 @@ export default function PortfolioPage() {
 }
 
 interface SummaryData { totalCost: number; totalValue: number; totalPnL: number }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 融資斷頭壓力（估算，純顯示層，不進選股）
+//
+// 融資成本 = Σ(當日融資增加量 × 當日均價) ÷ Σ(當日融資增加量) — 只算增加的日子。
+// 斷頭/追繳價 = 成本 × 融資成數 × 維持率門檻（台股 130%/140%、陸股 130%/150%）。
+// 券商看的是「整戶」維持率、不是單一檔 → 這是壓力區參考，不是保證斷頭點。
+// ────────────────────────────────────────────────────────────────────────────
+
+function MarginPressureRow({ pressure }: { pressure?: MarginPressure | null }) {
+  if (!pressure || pressure.marginCost === null || pressure.liquidationPrice === null) return null;
+
+  const dist = pressure.distanceToLiquidationPct;
+  // 距斷頭 <10% = 融資戶已在懸崖邊，標紅
+  const near = dist !== null && dist < 10;
+
+  return (
+    <div className="px-4 pb-2">
+      <div className="flex items-center gap-3 flex-wrap text-[10px] text-muted-foreground border-t border-border pt-1.5">
+        <span
+          title="沒人公布融資戶真實成本，這是用「每日融資增加量 × 當日均價」加權回推的估算值"
+          className="cursor-help"
+        >
+          融資成本 <span className="font-mono text-foreground">${pressure.marginCost.toFixed(2)}</span>
+          <span className="text-muted-foreground/60">（估算）</span>
+        </span>
+        {pressure.marginCallPrice !== null && (
+          <span>追繳 <span className="font-mono text-yellow-400">${pressure.marginCallPrice.toFixed(2)}</span></span>
+        )}
+        <span>斷頭 <span className="font-mono text-red-400">${pressure.liquidationPrice.toFixed(2)}</span></span>
+        {dist !== null && (
+          dist >= 0 ? (
+            <span className={near ? 'text-bear font-bold' : ''}>
+              還要跌 <span className="font-mono">{dist.toFixed(1)}%</span> 才到斷頭價{near && ' ⚠️'}
+            </span>
+          ) : (
+            <span className="text-bear font-bold">
+              已跌破斷頭價 <span className="font-mono">{Math.abs(dist).toFixed(1)}%</span> ⚠️
+            </span>
+          )
+        )}
+        <span
+          className="ml-auto text-muted-foreground/50 cursor-help"
+          title="券商看的是整戶維持率、不是單一檔股票，此價僅為壓力區參考，非保證斷頭點"
+        >
+          壓力區參考
+        </span>
+      </div>
+    </div>
+  );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // 分析按鈕 — 單檔 / 批量
