@@ -34,6 +34,7 @@ import {
   BOOK_BODY_PCT_MIN,
   BOOK_VOL_RATIO_MIN,
   VREVERSAL_VOL_MULT,
+  VREVERSAL_MIN_DROP_PCT,
   BLACKK_MAX_DAYS_AFTER,
   FLATBOTTOM_MIN_CONSOL_DAYS,
 } from '@/lib/analysis/bookThresholds';
@@ -186,56 +187,54 @@ function evaluateMethod(
     }
 
     case 'F': {
-      // F=V形反轉
-      // 結構部分（①②③）獨立計算，即使進場 K 量 fail 也顯示結構狀態
-      // 例：4/8 量 ×1.15 不到 1.5，但連跌+變盤線 4/7+不破變盤線 都 OK → 顯示 4/5 而非誤導 1/5
+      // F=V形反轉 — 忠於朱老師第57集「八個字四個條件」：急跌→底部爆量→止跌(變盤線或紅K)→過高進場
+      // 結構部分（①②③④）由 detectVReversalStructure 一起算（連跌+底部爆量+止跌線+守住）；
+      // ⑤ 過高是進場確認，獨立顯示。
       const struct = detectVReversalStructure(candles, idx);
       const r = detectVReversal(candles, idx);
-      const prev5 = candles.slice(idx - 5, idx);
-      const vols = prev5.map(k => k.volume).filter(v => v > 0);
-      const avgVol5 = vols.length > 0 ? vols.reduce((a, b) => a + b, 0) / vols.length : 0;
-      const volRatio5 = avgVol5 > 0 ? c.volume / avgVol5 : 0;
       const bodyPct = c.open > 0 && c.close > c.open ? (c.close - c.open) / c.open * 100 : 0;
       const breakPrevHigh = !!prev && c.close > prev.high;
 
       const conditions: ConditionItem[] = [
         {
-          icon: '①', name: '連續下跌（5 根 ≥ 3 跌 + 跌幅 ≥ 10%）',
+          icon: '①', name: `連續下跌（急跌 ≥ ${VREVERSAL_MIN_DROP_PCT}%）`,
           detail: struct
-            ? `前 ${struct.precedingDownDays}/5 天下跌，段跌幅 ${struct.precedingDrop.toFixed(1)}%`
-            : '未偵測到符合的下跌段',
+            ? `前 ${struct.precedingDownDays} 天下跌，段跌幅 ${struct.precedingDrop.toFixed(1)}%`
+            : '未偵測到夠深的下跌段',
           pass: !!struct,
-          metric: struct ? `${struct.precedingDownDays}/5 · -${struct.precedingDrop.toFixed(1)}%` : '—',
+          metric: struct ? `${struct.precedingDownDays}跌 · -${struct.precedingDrop.toFixed(1)}%` : '—',
         },
         {
-          icon: '②', name: '變盤線止跌（十字/紡錘/長下影）',
+          icon: '②', name: `底部爆量（低檔出量 × ${VREVERSAL_VOL_MULT}）`,
           detail: struct
-            ? `${struct.stopBarOffset} 根前出現 [${struct.stopBarShape}]`
-            : '過去 15 根內未找到變盤線',
+            ? `低檔 ${struct.bottomVolOffset} 根前爆量 ×${struct.bottomVolRatio.toFixed(1)} 段前均量`
+            : '前提未成立（需先有夠深下跌段）',
+          pass: !!struct,
+          metric: struct ? `×${struct.bottomVolRatio.toFixed(1)}` : '—',
+        },
+        {
+          icon: '③', name: '止跌訊號（變盤線 或 紅K）',
+          detail: struct
+            ? `${struct.stopBarOffset} 根前出現 [${struct.stopBarShape}] 止跌`
+            : '過去 15 根內未找到止跌訊號',
           pass: !!struct,
           metric: struct ? `${struct.stopBarShape}·${struct.stopBarOffset}根前` : '—',
         },
         {
-          icon: '③', name: '止跌等待（不破變盤線低）',
+          icon: '④', name: '止跌守住（不破止跌低）',
           detail: struct
-            ? `變盤線 low ${struct.stopBarLow.toFixed(2)} 之後 ${struct.stopBarOffset - 1} 天未跌破`
-            : '前提未成立（需先有變盤線）',
+            ? `止跌 low ${struct.stopBarLow.toFixed(2)} 之後 ${struct.stopBarOffset - 1} 天未跌破`
+            : '前提未成立（需先有止跌訊號）',
           pass: !!struct,
         },
         {
-          icon: '④', name: `今日紅 K + 帶量（× ${VREVERSAL_VOL_MULT}）`,
-          detail: c.close > c.open
-            ? `實體 +${bodyPct.toFixed(2)}%、量 ×${volRatio5.toFixed(2)} 5日均量`
-            : '今日為黑 K',
-          pass: c.close > c.open && volRatio5 >= VREVERSAL_VOL_MULT,
-          metric: `×${volRatio5.toFixed(2)}`,
-        },
-        {
-          icon: '⑤', name: '收盤 > 前 K 高（含上影線）',
+          icon: '⑤', name: '過高進場（紅K 收盤 > 前 K 高）',
           detail: prev
-            ? `收 ${c.close.toFixed(2)} vs 前高 ${prev.high.toFixed(2)}`
+            ? (c.close > c.open
+                ? `收 ${c.close.toFixed(2)} vs 前高 ${prev.high.toFixed(2)}（紅K +${bodyPct.toFixed(1)}%）`
+                : `今日為黑 K，收 ${c.close.toFixed(2)} vs 前高 ${prev.high.toFixed(2)}`)
             : '無前日資料',
-          pass: breakPrevHigh,
+          pass: c.close > c.open && breakPrevHigh,
         },
       ];
       return { title, conditions, allPass: !!r?.isVReversal };
