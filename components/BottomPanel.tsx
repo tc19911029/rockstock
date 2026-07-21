@@ -209,9 +209,13 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
     }
   }, [uniqueSymbols.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch prices when panel opens + start 30s polling
+  // Fetch prices 只要有持倉/自選就抓，**不綁面板展開 open**。
+  // 原本綁 open 會出事：硬刷新後 open 先 false、持倉又是非同步從 server hydrate，
+  // 兩者時序一錯開（展開當下 holdings 還沒到 → effect early return 沒設 interval，
+  // 或收合時完全不抓）就會卡在「有持倉、卻一直沒報價 → 全部『—』」。
+  // 解綁後：collapsed 也先備好價，展開瞬間就有數字。
   useEffect(() => {
-    if (!open || uniqueSymbols.length === 0) return;
+    if (uniqueSymbols.length === 0) return;
 
     // 立即取得輕量報價（不用 watchlist/conditions，那個會 timeout）
     refreshQuotes();
@@ -222,7 +226,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     };
-  }, [open, uniqueSymbols.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [uniqueSymbols.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Portfolio summary ──────────────────────────────────────────────────────
 
