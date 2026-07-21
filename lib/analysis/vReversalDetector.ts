@@ -128,9 +128,12 @@ export function detectVReversalStructure(
     const drop = ((segHigh - sb.low) / segHigh) * 100;
     if (drop < MIN_DROP_PCT) continue;
 
-    // (b) 底部爆量：急跌段（preSeg）中某根量 ≥ 段前 5 根均量 × 門檻（老師：低檔看到一支爆大量）
+    // (b) 底部爆量：低檔區間某根量 ≥ 段前 5 根均量 × 門檻（老師：低檔看到一支爆大量）
+    //     窗口涵蓋「急跌段 → 止跌線 → 今日反轉那根」整個低檔區——因為一字跌停時買不到、
+    //     跌停那幾天沒量，真正的爆量會出現在跌停打開翻紅那天（例：連續跌停後爆量長紅）。
+    const segStart = idx - k - PRE_DROP_WINDOW + 1;
     const baseSeg = candles
-      .slice(idx - k - PRE_DROP_WINDOW + 1 - VOL_BASELINE_WINDOW, idx - k - PRE_DROP_WINDOW + 1)
+      .slice(segStart - VOL_BASELINE_WINDOW, segStart)
       .map(c => c.volume)
       .filter(v => v > 0);
     if (baseSeg.length < 3) continue;
@@ -138,11 +141,11 @@ export function detectVReversalStructure(
     if (baseVol <= 0) continue;
     let bottomVolRatio = 0;
     let bottomVolOffset = k;
-    for (let i = 0; i < preSeg.length; i++) {
-      const ratio = preSeg[i].volume / baseVol;
+    for (let i = segStart; i <= idx; i++) {
+      const ratio = candles[i].volume / baseVol;
       if (ratio > bottomVolRatio) {
         bottomVolRatio = ratio;
-        bottomVolOffset = idx - (idx - k - PRE_DROP_WINDOW + 1 + i);
+        bottomVolOffset = idx - i;
       }
     }
     if (bottomVolRatio < BOTTOM_VOL_MULT) continue;
