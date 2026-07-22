@@ -45,7 +45,9 @@ function parseFilename(fname: string): { report_id: string; date: string | null;
   const dm = base.match(/(\d{6})/);
   const date = dm ? `20${dm[1].slice(0, 2)}-${dm[1].slice(2, 4)}-${dm[1].slice(4, 6)}` : null;
   const idm = base.match(/^(\d{6,})/);
-  const report_id = idm ? idm[1] : base.slice(0, 24);
+  // report_id 用整個 base（同日多份會共用前面那串日期，只取數字會撞號＋撞 page PNG 目錄）
+  const report_id = base.slice(0, 64);
+  void idm;
   return { report_id, date, broker: matchBrokerFromText(base), topic: base };
 }
 
@@ -56,7 +58,18 @@ function matchBroker(tok: string): string | null {
   }
   return t || null;
 }
+/**
+ * 從 `{YYMMDD}_{broker}_{topic}` 這種沒有 msgid 的檔名找券商。
+ * 先用「_ 切出來的整段 token」精準比對（第 2 段優先），再退回全文 includes。
+ * 全文 includes 單獨用會誤判：kingslide 命中 gs、substrate 命中 ubs、chengshin 命中 gs。
+ */
 function matchBrokerFromText(text: string): string | null {
+  const tokens = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  for (const tok of tokens) {
+    for (const b of DEFAULT_BROKERS) {
+      if (b.key === tok || b.aliases.includes(tok)) return b.key;
+    }
+  }
   const t = text.toLowerCase();
   for (const b of DEFAULT_BROKERS) {
     if (b.aliases.some(a => t.includes(a))) return b.key;
