@@ -686,8 +686,18 @@ export async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote 
     const high = parseFloat(d.h ?? '') || close;
     const low = parseFloat(d.l ?? '') || close;
     const prevClose = parseFloat(d.y ?? '') || close;
-    // mis.twse 對 t00 指數**只有 m（累計成交量）沒有 v**（個股用 v）；m 量級對齊既有 L1 (~8M)
-    const volume = parseInt((d.m ?? d.v ?? '0').replace(/,/g, ''), 10) || 0;
+    // mis.twse 對 t00 指數**只有 m（累計成交量，張）沒有 v**（個股用 v）
+    let volume = parseInt((d.m ?? d.v ?? '0').replace(/,/g, ''), 10) || 0;
+    // 收盤後改用 TWSE 官方 FMTQIK 成交股數（2026-07-23）：mis 的 m 比官方少 ~1%
+    // （盤後定價交易沒算進去），而 append-from-snapshot 寫進 L1 後沒有人會再覆寫它
+    //（download-candles-batch 看 lastDate 已是今天就 skip）→ 誤差會永久留在 L1。
+    // 官方要收盤後才發，盤中查無 → 保留 mis 的 m。
+    try {
+      const { fetchTwseMarketStatsMonth } = await import('./TwseMarketStats');
+      const stats = await fetchTwseMarketStatsMonth(todayTW.slice(0, 4) + todayTW.slice(5, 7));
+      const official = stats.get(todayTW);
+      if (official && official.volume > 0) volume = official.volume;
+    } catch { /* fail-open：官方站掛掉就用 mis 的 m */ }
     // 日期守門：mis d.d 是當前報價日期（盤前可能是上一交易日），不是 today 就丟
     const misDate = d.d ? `${d.d.slice(0, 4)}-${d.d.slice(4, 6)}-${d.d.slice(6, 8)}` : todayTW;
     if (misDate !== todayTW) {

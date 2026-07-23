@@ -19,7 +19,7 @@ import { tencentHistProvider } from './TencentHistProvider';
 import { eastMoneyHistProvider } from './EastMoneyHistProvider';
 import { finmindHistProvider } from './FinMindHistProvider';
 import { fugleDailyProvider } from './FugleProvider';
-import { isValidTwTick, snapTwTick, isTwEtf } from './twTick';
+import { isValidTwTick, snapTwTick, isTwEtf, isTwIndex } from './twTick';
 import type { Candle } from '@/types';
 import type { VendorBatchCache } from './eodSettleBatch';
 import { lookupBulkQuote } from './eodSettleBatch';
@@ -117,7 +117,10 @@ type ReconcileResult = { settled?: VendorQuote; status: SettleStatus; disagreeme
  * 如 100-500 區間出現 158.75）→ snap 到最近合法檔位 + 標警，保證 L1 永不寫入次檔位偽價。
  * CN 檔位規則不同，不套用。詳見 [[twTick]] / docs。
  */
-function finalizeTwTick(q: VendorQuote, status: SettleStatus, market: Market, isEtf: boolean): ReconcileResult {
+function finalizeTwTick(q: VendorQuote, status: SettleStatus, market: Market, isEtf: boolean, isIndex = false): ReconcileResult {
+  // 指數（^TWII）是加權平均計算值不是撮合價，任何小數都合法 → 整段守衛跳過。
+  // 沒跳會被當成「≥1000 元 → 檔位 5」，44,825.78 snap 成 44,825（2026-07-23 抓到）。
+  if (isIndex) return { settled: q, status };
   if (market === 'TW' && q.close > 0 && !isValidTwTick(q.close, isEtf)) {
     const snapped: VendorQuote = {
       ...q,
@@ -131,11 +134,15 @@ function finalizeTwTick(q: VendorQuote, status: SettleStatus, market: Market, is
   return { settled: q, status };
 }
 
-/** 從多 vendor 結果決定 settled 值。isEtf：TW ETF/ETN（00 開頭）套較細檔位表（見 [[twTick]]）。 */
-export function reconcile(quotes: VendorQuote[], market: Market, isEtf = false): ReconcileResult {
+/**
+ * 從多 vendor 結果決定 settled 值。
+ * isEtf：TW ETF/ETN（00 開頭）套較細檔位表（見 [[twTick]]）。
+ * isIndex：指數（^TWII）完全不套檔位規則。
+ */
+export function reconcile(quotes: VendorQuote[], market: Market, isEtf = false, isIndex = false): ReconcileResult {
   if (quotes.length === 0) return { status: 'pending-no-vendor-data' };
   if (quotes.length === 1) {
-    return finalizeTwTick(quotes[0], 'settled-single-source', market, isEtf);
+    return finalizeTwTick(quotes[0], 'settled-single-source', market, isEtf, isIndex);
   }
 
   // 找一組「至少 2 vendor close 一致」的 vendors
@@ -146,7 +153,7 @@ export function reconcile(quotes: VendorQuote[], market: Market, isEtf = false):
         const agreeing = quotes.filter(q => isClose(q.close, quotes[i].close));
         // TW 優先挑「檔位合法」的收盤：合法 159 勝過中間價 158.75，即使兩者在 0.5% 容差內被視為一致；
         // 一致群內無合法者才退回最高優先序，並由 finalizeTwTick snap。
-        const base = (market === 'TW' ? agreeing.find(q => isValidTwTick(q.close, isEtf)) : undefined) ?? agreeing[0];
+        const base = (market === 'TW' && !isIndex ? agreeing.find(q => isValidTwTick(q.close, isEtf)) : undefined) ?? agreeing[0];
         // volume：一致群內有官方 bulk 源（TWSE/TPEx/EastMoney）→ 用官方量（成交股數是
         // 交易所 ground truth）；否則退回一致群最大值（部分 vendor 回盤中累計量會偏少）。
         const official = agreeing.find(q => (q.vendor === 'TWSE' || q.vendor === 'TPEx' || q.vendor === 'EastMoney') && q.volume > 0);
@@ -156,6 +163,7 @@ export function reconcile(quotes: VendorQuote[], market: Market, isEtf = false):
           'settled-multi-source',
           market,
           isEtf,
+          isIndex,
         );
       }
     }
@@ -217,7 +225,7 @@ export async function settleSymbol(
     quotes.push({ ...existing, vendor: 'L1-existing' });
   }
 
-  const { settled: settledQuote, status, disagreements, warning: tickWarning } = reconcile(quotes, market, isTwEtf(symbol));
+  const { settled: settledQuote, status, disagreements, warning: tickWarning } = reconcile(quotes, market, isTwEtf(symbol), isTwIndex(symbol));
   const warnings = [
     tickWarning,
     status === 'settled-single-source' ? '只有 1 vendor 回，未經多源驗證' : null,

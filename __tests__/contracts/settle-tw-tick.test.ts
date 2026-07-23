@@ -12,7 +12,7 @@
  */
 
 import { reconcile } from '@/lib/datasource/eodSettle';
-import { isValidTwTick, snapTwTick, twTickSize, isTwEtf } from '@/lib/datasource/twTick';
+import { isValidTwTick, snapTwTick, twTickSize, isTwEtf, isTwIndex } from '@/lib/datasource/twTick';
 
 const q = (vendor: string, close: number, vol = 10) => ({
   vendor, open: close, high: close, low: close, close, volume: vol,
@@ -97,6 +97,40 @@ describe('settle reconcile — TW 檔位守衛', () => {
   test('個股的 100.95 視為次檔位 → snap 101', () => {
     const r = reconcile([q('Yahoo', 100.95)], 'TW', false);
     expect(r.settled?.close).toBe(101);
+    expect(r.warning).toMatch(/snap/);
+  });
+});
+
+/**
+ * 指數豁免（2026-07-23）：^TWII 是加權平均計算值不是撮合成交價，任何小數都合法。
+ * 沒豁免會被當成「≥1000 元 → 檔位 5」，實案：2026-07-22 收盤 44,825.78 被 snap 成 44,825、
+ * 開盤 44,513.75 被 snap 成 44,515（四價全變 5 的倍數）。
+ */
+describe('指數不套檔位守衛', () => {
+  test('isTwIndex 認得 ^ 前綴', () => {
+    expect(isTwIndex('^TWII')).toBe(true);
+    expect(isTwIndex('2330.TW')).toBe(false);
+    expect(isTwIndex('0050.TW')).toBe(false);
+  });
+
+  test('單源：44825.78 原樣保留、不 snap 成 44825', () => {
+    const r = reconcile([q('Yahoo', 44825.78)], 'TW', false, true);
+    expect(r.settled?.close).toBe(44825.78);
+    expect(r.warning).toBeUndefined();
+  });
+
+  test('多源一致：OHLC 小數全保留', () => {
+    const bar = { vendor: 'Yahoo', open: 44513.75, high: 45323.75, low: 44513.75, close: 44825.78, volume: 11296458 };
+    const r = reconcile([bar, { ...bar, vendor: 'TWSE' }], 'TW', false, true);
+    expect(r.settled?.open).toBe(44513.75);
+    expect(r.settled?.high).toBe(45323.75);
+    expect(r.settled?.close).toBe(44825.78);
+    expect(r.warning).toBeUndefined();
+  });
+
+  test('isIndex=false 時同一根仍會被 snap（證明豁免真的有作用）', () => {
+    const r = reconcile([q('Yahoo', 44825.78)], 'TW', false);
+    expect(r.settled?.close).toBe(44825);
     expect(r.warning).toMatch(/snap/);
   });
 });

@@ -19,7 +19,40 @@ import { invalidateEntry } from '@/lib/datasource/L1CandleCache';
 import type { Candle } from '@/types';
 
 const APPLY = process.argv.includes('--apply');
+const VS_QFQ = process.argv.includes('--vs-qfq');
+const DAYS = Number(process.argv[process.argv.indexOf('--days') + 1]) || 40;
 const DIR = path.join(process.cwd(), 'data/candles/CN');
+
+/** 逐日報酬與 qfq 差 > 這個值即判為接合點。0.8pp 遠大於浮點/四捨五入誤差，又抓得到最小的現金股利。 */
+const QFQ_RETURN_GAP = 0.008;
+
+/**
+ * qfq 偵測：抓 Tencent 前復權近 DAYS 日，比對「逐日報酬」。
+ * 為什麼比報酬不比價位：qfq 全段被乘上還原因子，價位本來就會跟 L1 差一個常數，
+ * 只有**報酬**才是兩邊都該相同的量 —— 報酬對不上就代表 L1 在那天把股利當成了跌幅。
+ */
+async function detectViaQfq(sym: string, cs: Candle[]): Promise<string[]> {
+  const from = cs.length > DAYS ? String(cs[cs.length - DAYS].date) : String(cs[0].date);
+  const code = sym.slice(0, 6);
+  const px = sym.endsWith('.SS') ? 'sh' : 'sz';
+  const url = `https://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param=${px}${code},day,${from},2030-01-01,${DAYS + 10},qfq`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const j = await res.json() as { data?: Record<string, { qfqday?: string[][]; day?: string[][] }> };
+  const rows = j.data?.[px + code]?.qfqday ?? j.data?.[px + code]?.day;
+  if (!Array.isArray(rows) || rows.length < 5) throw new Error('qfq rows 不足');
+  const q = new Map(rows.map((r) => [r[0], Number(r[2])]));
+  const bars = cs.filter((b) => String(b.date) >= from);
+  const out: string[] = [];
+  for (let i = 1; i < bars.length; i++) {
+    const pv = q.get(String(bars[i - 1].date)), cv = q.get(String(bars[i].date));
+    if (!pv || !cv || pv <= 0 || bars[i - 1].close <= 0) continue;
+    const rL1 = bars[i].close / bars[i - 1].close - 1;
+    const rQ = cv / pv - 1;
+    if (Math.abs(rL1 - rQ) > QFQ_RETURN_GAP) out.push(String(bars[i].date).replace('*', ''));
+  }
+  return out;
+}
 
 /** 接合偵測：回傳該股的接合日清單（空=乾淨）。
  *  2026-06-12 收緊：門檻改市場別 — 主板漲跌停 ±10% → >11% 即不可能真實成交；
@@ -47,13 +80,35 @@ function detectSplices(cs: Candle[], sym: string): string[] {
 async function main() {
   const files = (await fs.readdir(DIR)).filter((f) => /\.(SS|SZ)\.json$/.test(f));
   const affected: { sym: string; dates: string[] }[] = [];
-  for (const f of files) {
-    let cs: Candle[];
-    try { cs = JSON.parse(await fs.readFile(path.join(DIR, f), 'utf8')).candles; } catch { continue; }
-    if (!Array.isArray(cs)) continue;
-    const sym = f.replace('.json', '');
-    const dates = detectSplices(cs, sym);
-    if (dates.length) affected.push({ sym, dates });
+  let detectErr = 0;
+
+  if (VS_QFQ) {
+    const CONC_DETECT = 6; // 短窗查詢比 5y 輕，但仍要避開騰訊 WAF
+    let done = 0;
+    for (let i = 0; i < files.length; i += CONC_DETECT) {
+      await Promise.all(files.slice(i, i + CONC_DETECT).map(async (f) => {
+        let cs: Candle[];
+        try { cs = JSON.parse(await fs.readFile(path.join(DIR, f), 'utf8')).candles; } catch { return; }
+        if (!Array.isArray(cs) || cs.length < 5) return;
+        const sym = f.replace('.json', '');
+        try {
+          const dates = await detectViaQfq(sym, cs);
+          if (dates.length) affected.push({ sym, dates });
+        } catch { detectErr++; }
+      }));
+      done += CONC_DETECT;
+      if (done % 600 === 0) console.log(`  偵測中 ${Math.min(done, files.length)}/${files.length}…命中 ${affected.length}`);
+    }
+    console.log(`qfq 報酬對比（近 ${DAYS} 日）：${files.length} 檔掃完，抓取失敗 ${detectErr}`);
+  } else {
+    for (const f of files) {
+      let cs: Candle[];
+      try { cs = JSON.parse(await fs.readFile(path.join(DIR, f), 'utf8')).candles; } catch { continue; }
+      if (!Array.isArray(cs)) continue;
+      const sym = f.replace('.json', '');
+      const dates = detectSplices(cs, sym);
+      if (dates.length) affected.push({ sym, dates });
+    }
   }
   console.log(`偵測到未還權接合：${affected.length} 檔 / ${affected.reduce((s, a) => s + a.dates.length, 0)} 接合點`);
   if (!affected.length) return;

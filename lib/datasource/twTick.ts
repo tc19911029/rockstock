@@ -17,6 +17,17 @@ export function isTwEtf(symbol: string): boolean {
   return /^00/.test(symbol.replace(/\.(TW|TWO)$/i, ''));
 }
 
+/**
+ * 代號是否為指數（^TWII 等）→ **完全不套檔位規則**。
+ *
+ * 指數是加權平均出來的計算值，不是撮合成交價，任何小數都合法。2026-07-23 抓到的 bug：
+ * ^TWII 走 TW settle 路徑時被當成「股價 ≥1000 → 檔位 5 元」，44,825.78 被 snap 成 44,825、
+ * 44,513.75 被 snap 成 44,515（四價全變成 5 的倍數）。指數必須跳過整段守衛。
+ */
+export function isTwIndex(symbol: string): boolean {
+  return symbol.startsWith('^');
+}
+
 export function twTickSize(price: number, isEtf = false): number {
   if (isEtf) return price < 50 ? 0.01 : 0.05;
   if (price < 10) return 0.01;
