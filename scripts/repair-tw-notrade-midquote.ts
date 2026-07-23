@@ -1,22 +1,21 @@
 /**
- * 修「無成交日被填中間價假 K」（2026-07-23）。
+ * 修「無成交日被填了假價」（2026-07-23）。
  *
- * 病灶：上櫃某檔當天沒成交 → TPEx bulk 不列它 → 封存鏈路落到報價型 vendor，
- * 拿回「(最佳買價+最佳賣價)/2」當收盤，寫成一根 volume=0 但價格會動的假 K。
- * 實案 2026-07-22：8 檔；8077.TWO 連 3 天（44.775 / 45.225 / 45.025），
- * 官方/Yahoo 一致顯示這 3 天都沒成交、價格應停在 44.05。
+ * 封存鏈路在該檔缺官方 bulk 資料時會退到報價型 vendor，把「當下的報價」寫成收盤。
+ * 只修**兩種能證明不是真實成交價**的假 K，其餘一律不動：
  *
- * 判準（四條同時成立才動，避免誤殺真實 vol=0 資料）：
- *   1. volume === 0（沒有成交）
- *   2. close 不在合法檔位上（= 中間價，證明它不是撮合出來的價）
- *   3. close ≠ 前一根 close（沒成交本來就不該變價）
- *   4. **前後兩根都在合法檔位上** —— 這條是防誤殺的關鍵：被除權還原過的序列
- *      （如 1235.TW 的 82.9166…、5274.TWO 的 15586.36）整段價位本來就不在檔位網格上，
- *      「次檔位」對它們毫無意義。只有前後鄰居都合法（= 未還原的原始價序列）時，
- *      夾在中間那根的次檔位才真的是中間價污染。
- *   5. 偏離前一根收盤 < 5% —— 沒成交日的中間價一定貼著前收（就在最佳買賣價之間）。
- *      偏離更大代表遇到的是還原因子換檔之類的別種現象，寧可放著也不亂改。
- * 修法：整根改成前一根收盤的平盤（O=H=L=C=prevClose, V=0）——與 Yahoo 對無成交日的表示一致。
+ *   A. 中間價：(最佳買+最佳賣)/2 → 落在兩個檔位中間，撮合不可能產生這種價
+ *      （2026-07-22 有 89 檔 .TWO 中招；8077.TWO 連 3 天）
+ *      防誤殺：被還原過的序列整段本來就不在檔位網格上（5274.TWO 的 15586.36 是正常的）
+ *      → 要求前後鄰居都在合法檔位，且偏離前收 <5%。
+ *
+ *   B. 孤立尖刺：整根跳離前收 >3%，但**下一根有成交的 bar 又回到前收附近（<3%）**。
+ *      來源沒套用還原（4806.TWO 2025-09-18 寫 15.40 = 2×7.70，下一根成交日回到 7.89）。
+ *      「有沒有回來」是尺度無關的判準 —— 不必知道 L1 用哪種還原慣例。
+ *
+ * ⚠️ 為什麼不用「volume=0 就一律延用前收」這種更簡單的規則：**會誤殺**。
+ *    台股 volume 單位是張，盤中零股成交 <500 股會四捨五入成 0 張，那天是真的有成交、
+ *    價格也真的會動（1236.TW 2025-05-23 收 22.65 v=0，Yahoo 同樣是 22.65 不是前收 22.60）。
  *
  * 用法：npx tsx scripts/repair-tw-notrade-midquote.ts [--apply]
  */
@@ -26,10 +25,14 @@ import { isValidTwTick, isTwEtf } from '../lib/datasource/twTick';
 
 const APPLY = process.argv.includes('--apply');
 const DIR = path.join(process.cwd(), 'data/candles/TW');
+const NOISE = 0.0005;       // 相對差小於此視為浮點雜訊（Yahoo float32）
+const MIDQUOTE_MAX_DEV = 0.05;
+const SPIKE_MIN_DEV = 0.03;  // 孤立尖刺門檻
+const SPIKE_RETURN_TOL = 0.03; // 下一根成交價回到前收的容差
 
 interface Bar { date: string; open: number; high: number; low: number; close: number; volume: number }
 
-let files = 0, fixedBars = 0, fixedFiles = 0, skippedFar = 0;
+let files = 0, fixA = 0, fixB = 0, fixedFiles = 0;
 const samples: string[] = [];
 
 for (const f of fs.readdirSync(DIR)) {
@@ -44,26 +47,30 @@ for (const f of fs.readdirSync(DIR)) {
   let touched = 0;
   for (let i = 1; i < cs.length; i++) {
     const b = cs[i], prev = cs[i - 1];
-    if (b.volume !== 0) continue;
-    if (isValidTwTick(b.close, etf)) continue;
-    if (!(prev.close > 0) || Math.abs(b.close - prev.close) < 1e-9) continue;
-    // 條件 4：前後鄰居都必須落在合法檔位（證明這是原始價序列、不是還原價序列）
-    if (!isValidTwTick(prev.close, etf)) continue;
-    // 往後找第一根「有成交」的 bar 當鄰居基準 —— 連續無成交日會串成一條假 K 鏈
-    // （8077.TWO 2026-07-20~22 連 3 天），直接看 i+1 會被鏈上的下一根假 K 擋住。
-    const next = cs.slice(i + 1).find((x) => x.volume > 0);
-    if (next && !isValidTwTick(next.close, etf)) continue;
-    // 條件 5：偏離前收 <5%（沒成交的中間價必然貼著前收）
-    if (Math.abs(b.close - prev.close) / prev.close >= 0.05) { skippedFar++; continue; }
-    if (samples.length < 12) samples.push(`  ${sym} ${b.date}  ${b.close} → ${prev.close}（前一根收盤，V=0）`);
+    if (b.volume !== 0 || !(prev.close > 0) || !(b.close > 0)) continue;
+    const dev = Math.abs(b.close - prev.close) / prev.close;
+    if (dev < NOISE) continue;
+
+    let rule = '';
+    // A：中間價
+    if (dev < MIDQUOTE_MAX_DEV && !isValidTwTick(b.close, etf) && isValidTwTick(prev.close, etf)) {
+      const nextTraded = cs.slice(i + 1).find((x) => x.volume > 0 && x.close > 0);
+      if (!nextTraded || isValidTwTick(nextTraded.close, etf)) rule = 'A中間價';
+    }
+    // B：孤立尖刺（下一根成交價回到前收附近）
+    if (!rule && dev > SPIKE_MIN_DEV) {
+      const nextTraded = cs.slice(i + 1).find((x) => x.volume > 0 && x.close > 0);
+      if (nextTraded && Math.abs(nextTraded.close - prev.close) / prev.close < SPIKE_RETURN_TOL) rule = 'B孤立尖刺';
+    }
+    if (!rule) continue;
+
+    if (samples.length < 10) samples.push(`  [${rule}] ${sym} ${b.date}  ${b.close} → ${prev.close}`);
     b.open = b.high = b.low = b.close = prev.close;
-    touched++; fixedBars++;
+    if (rule.startsWith('A')) fixA++; else fixB++;
+    touched++;
   }
-  if (touched > 0) {
-    fixedFiles++;
-    if (APPLY) fs.writeFileSync(path.join(DIR, f), JSON.stringify(d, null, 2));
-  }
+  if (touched > 0) { fixedFiles++; if (APPLY) fs.writeFileSync(path.join(DIR, f), JSON.stringify(d, null, 2)); }
 }
 
-console.log(`掃 ${files} 檔；命中 ${fixedFiles} 檔 / ${fixedBars} 根${APPLY ? '（已寫入）' : ' [dry-run，加 --apply 才寫]'}；偏離前收 ≥5% 保守跳過 ${skippedFar} 根`);
+console.log(`掃 ${files} 檔；修 ${fixedFiles} 檔 / ${fixA + fixB} 根（A中間價 ${fixA}、B孤立尖刺 ${fixB}）${APPLY ? '（已寫入）' : ' [dry-run]'}`);
 if (samples.length) console.log(samples.join('\n'));

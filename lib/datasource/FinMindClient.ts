@@ -103,18 +103,22 @@ export async function finmindFetch<T>(dataset: string, params: Record<string, st
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+/**
+ * dataset=TaiwanStockInstitutionalInvestorsBuySellWide 的一列。
+ * 2026-07-23：FinMind 把舊的 `TaiwanStockInstitutionalInvestors` 下架（打過去只回 enum
+ * validation error，不是 4xx），舊呼叫被 catch 吞成空陣列 → /api/institutional 一路回 null，
+ * chipAgent 的「法人連續買賣超天數」整個失效。Wide 變體欄位對得上，但**只給 buy / sell
+ * 不給 net**，淨額要自己相減。
+ */
 export interface InstitutionalRow {
   date: string;
   stock_id: string;
   Foreign_Investor_buy: number;
   Foreign_Investor_sell: number;
-  Foreign_Investor_buy_sell: number;  // net
   Investment_Trust_buy: number;
   Investment_Trust_sell: number;
-  Investment_Trust_buy_sell: number;  // net
   Dealer_self_buy: number;
   Dealer_self_sell: number;
-  Dealer_self_buy_sell: number;  // net
 }
 
 export interface MarginRow {
@@ -220,7 +224,7 @@ export async function getInstitutional(
     startDate.setDate(startDate.getDate() - days * 2);  // extra buffer for weekends
     const start = startDate.toISOString().split('T')[0];
 
-    const rows = await finmindFetch<InstitutionalRow>('TaiwanStockInstitutionalInvestors', {
+    const rows = await finmindFetch<InstitutionalRow>('TaiwanStockInstitutionalInvestorsBuySellWide', {
       data_id: stockId,
       start_date: start,
     });
@@ -229,21 +233,31 @@ export async function getInstitutional(
     rows.sort((a, b) => b.date.localeCompare(a.date));
     const recent = rows.slice(0, days);
 
+    // Wide dataset 只給 buy / sell，淨額自己算（單位＝股，與舊 dataset 一致）
+    const net = (r: InstitutionalRow) => ({
+      foreign: (r.Foreign_Investor_buy ?? 0) - (r.Foreign_Investor_sell ?? 0),
+      trust:   (r.Investment_Trust_buy ?? 0) - (r.Investment_Trust_sell ?? 0),
+      dealer:  (r.Dealer_self_buy ?? 0) - (r.Dealer_self_sell ?? 0),
+    });
+
     // Calculate consecutive foreign buy days
     let consecutiveForeignBuy = 0;
     for (const r of recent) {
-      if (r.Foreign_Investor_buy_sell > 0) consecutiveForeignBuy++;
+      if (net(r).foreign > 0) consecutiveForeignBuy++;
       else break;
     }
 
-    const result: InstitutionalData[] = recent.map(r => ({
-      date: r.date,
-      foreignNet: r.Foreign_Investor_buy_sell,
-      trustNet: r.Investment_Trust_buy_sell,
-      dealerNet: r.Dealer_self_buy_sell,
-      totalNet: r.Foreign_Investor_buy_sell + r.Investment_Trust_buy_sell + r.Dealer_self_buy_sell,
-      consecutiveForeignBuy,
-    }));
+    const result: InstitutionalData[] = recent.map(r => {
+      const n = net(r);
+      return {
+        date: r.date,
+        foreignNet: n.foreign,
+        trustNet: n.trust,
+        dealerNet: n.dealer,
+        totalNet: n.foreign + n.trust + n.dealer,
+        consecutiveForeignBuy,
+      };
+    });
 
     cacheSet(cacheKey, result, TTL.INSTITUTIONAL);
     return result;
