@@ -430,6 +430,19 @@ export class MultiMarketProvider implements DataProvider {
           fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
         },
       ]);
+      // ^TWII 成交量改用 TWSE 官方（2026-07-23）：Yahoo 只給官方成交股數的 35~57%
+      // 且比例逐日浮動（崩盤爆量日反而縮得最兇）→ 爆量/量縮判讀全錯。只換 volume，OHLC 留 Yahoo。
+      if (symbol === '^TWII' && result.length > 0) {
+        const { applyTwseIndexVolume } = await import('./TwseMarketStats');
+        result = await applyTwseIndexVolume(result);
+        // 今日那根官方 FMTQIK 要收盤後才發 → 盤中改用 mis.twse t00 的 m（累計成交張數，同單位）
+        const last = result[result.length - 1];
+        if (last.date === today) {
+          const { fetchTWIndexQuote } = await import('./IntradayCache');
+          const q = await fetchTWIndexQuote(today).catch(() => null);
+          if (q && q.volume > 0) last.volume = q.volume;
+        }
+      }
     } else {
       // 陸股/美股走圖路由：Tencent → 百度(CN,不封IP) → Yahoo → EastMoney（EastMoney 墊底）
       // 2026-06-13：EODHD 不續訂移除（同上）
