@@ -71,11 +71,14 @@ async function main() {
   const { TaiwanScanner } = await import('@/lib/scanner/TaiwanScanner');
   const { computeTurnoverRankAsOfDate } = await import('@/lib/scanner/TurnoverRank');
   const dateArg = process.argv.includes('--date') ? process.argv[process.argv.indexOf('--date') + 1] : null;
-  // 查「最後一個完整結算交易日」= 倒數第 2 個交易日。
-  // 為何不查最新交易日：集中度走 bulk parquet、隔天才產出 → 查當天必假性不齊。倒數第2日三者都齊備。
+  // 選日規則依集中度來源不同：
+  //  - FinMind 模式：集中度走 bulk parquet、隔天才產出 → 查最新日必假性不齊 → 查倒數第 2 個交易日（三者都齊）。
+  //  - NO_FINMIND 模式：集中度走 broker（Yahoo 前15大），跟法人一樣「當天盤後即出」→ 查最新完整交易日才對。
+  //    查倒數第 2 日反而會踩到「某天 snapshot cron 漏跑、Yahoo 無歷史→永久死日」而誤報（如 07-14/15、07-23）。
+  //    查最新日還有 self-heal 好處：當天 17:30 broker cron 若失敗，18:30 稽核當場抓到、可趁 Yahoo 未翻頁手動補跑。
   const twii = JSON.parse(await fs.readFile(path.join(process.cwd(), 'data/candles/TW/^TWII.json'), 'utf8'));
   const tdays: string[] = (twii.candles || []).map((c: { date: string }) => c.date);
-  const date = dateArg ?? tdays[tdays.length - 2];
+  const date = dateArg ?? (NO_FINMIND ? tdays[tdays.length - 1] : tdays[tdays.length - 2]);
 
   const sc = new TaiwanScanner();
   const all = await sc.getStockList();
