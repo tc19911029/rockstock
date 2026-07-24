@@ -25,7 +25,13 @@ export interface InstStealEval {
   concHighWarn: boolean;  // ⚠️ 集中度過高（> concCap，疑隔日沖鎖股）
 }
 
-/** 在 candles 第 t 根算「結束於 t、長度 w」的主力分點集中度%（資料不齊回 null） */
+/** 在 candles 第 t 根算「結束於 t、長度 w」的主力分點集中度%。
+ *  容許視窗內少數天缺 broker：只加總「有 broker 的天」的淨額÷量，需至少 60% 的天在場
+ *  （w=5 → ≥3 天）才回值，否則資料太稀不可信 → null。
+ *  為何容缺（2026-07-24）：Yahoo 券商分點只給當天、無歷史，某天 snapshot cron 漏跑就是永久洞
+ *  （如 07-14/15、07-23）。舊版「缺一天整段回 null」會讓那個洞污染之後 concWin+concRiseBack≈10 個
+ *  交易日的掃描（每個含洞的視窗都 null → 靜默漏股）。缺 1 天改用其餘 4 天的淨額÷量仍是合法集中度、
+ *  非 fabricate，且對未來任何單日漏跑自動免疫。 */
 function concentration(
   candles: Candle[],
   brokerByDate: Map<string, number>,
@@ -33,13 +39,15 @@ function concentration(
   w: number,
 ): number | null {
   if (t - w + 1 < 0) return null;
-  let net = 0, vol = 0;
+  let net = 0, vol = 0, present = 0;
   for (let k = t - w + 1; k <= t; k++) {
     const dk = candles[k].date;
-    if (!brokerByDate.has(dk)) return null;
+    if (!brokerByDate.has(dk)) continue; // 缺該日 → 跳過，不整段作廢
     net += brokerByDate.get(dk)!;
     vol += candles[k].volume || 0;
+    present++;
   }
+  if (present < Math.ceil(w * 0.6)) return null; // 在場天數太少 → 不可信
   if (vol <= 0) return null;
   return (net / vol) * 100; // 兩者皆「張」，不可再 ×1000
 }

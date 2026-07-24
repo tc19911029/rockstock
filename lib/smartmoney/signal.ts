@@ -19,7 +19,10 @@ export interface SmartMoneyEval {
   isHit: boolean;      // 是否同時滿足 refined 全部條件
 }
 
-/** 在 candles 第 t 根算「結束於 t、長度 w」的主力分點集中度%（資料不齊回 null） */
+/** 在 candles 第 t 根算「結束於 t、長度 w」的主力分點集中度%。
+ *  容許視窗內少數天缺 broker（只加總在場天的淨額÷量，需 ≥60% 天在場才回值）。
+ *  同 lib/inststeal/signal 的容缺理由：Yahoo 券商分點無歷史，某天 snapshot cron 漏跑＝永久洞，
+ *  「缺一天整段回 null」會讓那洞污染 W 軌 longWin(20) 日視窗、拖垮之後約 20 個交易日的掃描。 */
 function concentration(
   candles: Candle[],
   brokerByDate: Map<string, number>,
@@ -27,13 +30,15 @@ function concentration(
   w: number,
 ): number | null {
   if (t - w + 1 < 0) return null;
-  let net = 0, vol = 0;
+  let net = 0, vol = 0, present = 0;
   for (let k = t - w + 1; k <= t; k++) {
     const dk = candles[k].date;
-    if (!brokerByDate.has(dk)) return null;
+    if (!brokerByDate.has(dk)) continue; // 缺該日 → 跳過，不整段作廢
     net += brokerByDate.get(dk)!;
     vol += candles[k].volume || 0;
+    present++;
   }
+  if (present < Math.ceil(w * 0.6)) return null; // 在場天數太少 → 不可信
   if (vol <= 0) return null;
   return (net / vol) * 100; // 兩者皆「張」，不可再 ×1000
 }
