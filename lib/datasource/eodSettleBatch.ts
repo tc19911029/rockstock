@@ -8,35 +8,90 @@
  * 每檔 settleSymbol 從 cache lookup。EODHD/Yahoo 仍走 per-symbol（它們是 per-symbol API）。
  */
 
-import { fetchJsonWithCurlFallback } from './curlFetch';
+import { fetchJsonWithCurlFallback, fetchTextWithCurlFallback } from './curlFetch';
 import type { VendorQuote, Market } from './eodSettle';
 
 interface BulkRow { open: number; high: number; low: number; close: number; volume: number; }
 
 // ── TW bulk fetchers ─────────────────────────────────────────────────────────
 
-/** TWSE MI_INDEX (上市) 全市場 OHLCV — 一次拉整天 */
+/** TWSE MI_INDEX (上市) 全市場 OHLCV — 一次拉整天
+ *
+ * 2026-07-29：MI_INDEX 在機器塞爆時間歇回空（tables[8] 抓不到）→ 全部上市股掉到逐檔
+ * FinMind，FinMind 免費層 600/日一下 402 → 569 檔（含 2330/0050）變 pending-no-vendor-data。
+ * 修法：MI_INDEX 回空時 fallback 到 STOCK_DAY_ALL（同為 TWSE 官方整批、塞爆時仍活），
+ * 不改 provider 路由策略，只加同源冗餘（比照 TPEx 已有的 curl fallback）。
+ */
 export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, BulkRow>> {
   const d = date.replace(/-/g, '');
   const url = `https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${d}&type=ALLBUT0999`;
+  let map = new Map<string, BulkRow>();
   try {
     const { data } = await fetchJsonWithCurlFallback<{ stat: string; tables: Array<{ data: string[][] }> }>(url, { timeoutMs: 30_000 });
-    const map = new Map<string, BulkRow>();
-    if (data.stat !== 'OK') { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} stat=${data.stat}（資料未發布或日期錯）→ bulk 空`); return map; }
-    const table = data.tables?.[8];
-    if (!table?.data?.length) { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} tables[8] 空 → bulk 空`); return map; }
-    const num = (s: string) => { const n = parseFloat((s ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
-    for (const row of table.data) {
-      const code = row[0]?.trim();
+    if (data.stat !== 'OK') { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} stat=${data.stat}（資料未發布或日期錯）`); }
+    else {
+      const table = data.tables?.[8];
+      if (!table?.data?.length) { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} tables[8] 空`); }
+      else {
+        const num = (s: string) => { const n = parseFloat((s ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+        for (const row of table.data) {
+          const code = row[0]?.trim();
+          if (!code || !/^\d{4,}[A-Z]?$/.test(code)) continue;
+          const open = num(row[5]), high = num(row[6]), low = num(row[7]), close = num(row[8]);
+          const volume = Math.round(num(row[2]) / 1000);
+          if (close > 0 && open > 0) map.set(code, { open, high, low, close, volume });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} 抓取失敗: ${(e as Error).message}`);
+  }
+  // MI_INDEX 回空 → 備援 STOCK_DAY_ALL（官方整批 CSV，塞爆時仍活）
+  if (map.size === 0) {
+    const fallback = await fetchTWSEStockDayAll(date);
+    if (fallback.size > 0) { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} 空 → STOCK_DAY_ALL 備援補 ${fallback.size} 檔`); map = fallback; }
+  }
+  return map;
+}
+
+/** TWSE STOCK_DAY_ALL（個股當日成交，CSV）— MI_INDEX 的整批備援源
+ *
+ * ⚠️ 此端點只出「最新交易日」、無 date 參數 → 用 feed 自帶的民國日比對，
+ * 只有 feed 日 === 要封的 date 才採用（防歷史回填被今天資料污染，比照 TPEx bulk 守衛）。
+ */
+export async function fetchTWSEStockDayAll(date: string): Promise<Map<string, BulkRow>> {
+  const map = new Map<string, BulkRow>();
+  try {
+    const url = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=json';
+    const { text } = await fetchTextWithCurlFallback(url, {
+      timeoutMs: 20_000,
+      proxyFirst: true, // TWSE 是台灣站，中國線路走代理優先
+      validate: (t) => t.includes('證券代號'),
+    });
+    if (!text || !text.includes('證券代號')) { console.warn(`[eodSettleBatch] STOCK_DAY_ALL ${date} 回應非預期 → 備援空`); return map; }
+    const num = (s: string | undefined) => { const n = parseFloat((s ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+    let feedDate: string | null = null;
+    for (const line of text.split('\n')) {
+      // 每欄都被雙引號包住 → 抽出所有引號內字串當欄位
+      const cells = (line.match(/"([^"]*)"/g) || []).map(c => c.slice(1, -1));
+      if (cells.length < 9) continue;
+      const roc = cells[0]?.trim();
+      if (!/^\d{7}$/.test(roc)) continue;
+      if (!feedDate) feedDate = rocDateToAd(roc);
+      const code = cells[1]?.trim();
       if (!code || !/^\d{4,}[A-Z]?$/.test(code)) continue;
-      const open = num(row[5]), high = num(row[6]), low = num(row[7]), close = num(row[8]);
-      const volume = Math.round(num(row[2]) / 1000);
+      const open = num(cells[5]), high = num(cells[6]), low = num(cells[7]), close = num(cells[8]);
+      const volume = Math.round(num(cells[3]) / 1000); // 成交股數 → 張
       if (close > 0 && open > 0) map.set(code, { open, high, low, close, volume });
+    }
+    if (feedDate && feedDate !== date) {
+      console.warn(`[eodSettleBatch] STOCK_DAY_ALL feed 日=${feedDate} ≠ 要封 ${date}（只出最新交易日）→ 備援不採用`);
+      return new Map();
     }
     return map;
   } catch (e) {
-    console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} 抓取失敗: ${(e as Error).message} → bulk 空`);
-    return new Map();
+    console.warn(`[eodSettleBatch] STOCK_DAY_ALL ${date} 抓取失敗: ${(e as Error).message} → 備援空`);
+    return map;
   }
 }
 
