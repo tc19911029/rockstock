@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rockstock.youtube-analysis-incremental</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/tc/.local/bin/rockstock-youtube-incremental-analysis.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/tc</string>
+    <key>USER</key><string>tc</string>
+    <key>LOGNAME</key><string>tc</string>
+    <key>PATH</key><string>/Users/tc/.local/node-22/bin:/Users/tc/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>55</integer></dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/tmp/rockstock-youtube-analysis-incremental.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/rockstock-youtube-analysis-incremental.err.log</string>
+</dict>
+</plist>
