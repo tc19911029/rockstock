@@ -11,7 +11,7 @@
  *   7. default                       → hold
  */
 
-import { evaluateHolding } from '@/lib/agents/holdingsActionEngine';
+import { evaluateHolding, evaluateOperationMaExit } from '@/lib/agents/holdingsActionEngine';
 import type { Candle } from '@/types';
 
 function makeCandles(closes: number[]): Candle[] {
@@ -267,6 +267,54 @@ describe('evaluateHolding', () => {
     expect(r.profitPct).toBeGreaterThanOrEqual(0.20);
     expect(r.action).toBe('reduce_half');
     expect(r.signals.some(s => s.type === 'blowoff_black_reduce')).toBe(true);
+  });
+});
+
+describe('evaluateOperationMaExit — 課程操作模式', () => {
+  it('長線模式只守 MA20：跌破 MA10 但仍在 MA20 上不出場', () => {
+    const candles = makeCandles([
+      ...Array.from({ length: 20 }, () => 90),
+      ...Array.from({ length: 9 }, () => 110),
+      105,
+    ]);
+    const r = evaluateOperationMaExit({
+      candles, index: candles.length - 1, entryPrice: 90,
+      triggerSignal: 'B', operationMode: 'long',
+    });
+    expect(r?.maName).toBe('MA20');
+    expect(r?.shouldExit).toBe(false);
+  });
+
+  it('長線模式跌破 MA20 → 正式 exit_all', () => {
+    const candles = makeCandles([...Array.from({ length: 29 }, () => 110), 100]);
+    const r = evaluateHolding({
+      symbol: 'T', entryPrice: 100, stopLoss: 80, candles, todayClose: 100,
+      triggerSignal: 'B', operationMode: 'long', entryDate: candles[0].date,
+    });
+    expect(r.action).toBe('exit_all');
+    expect(r.signals.some(s => s.type === 'break_operation_ma20')).toBe(true);
+  });
+
+  it('B 短線進場後盤中曾觸及 +10%，今日破 MA5 即全出，即使收盤已低於 +10%', () => {
+    const candles = makeCandles([...Array.from({ length: 29 }, () => 108), 105]);
+    candles[20].high = 111;
+    const r = evaluateOperationMaExit({
+      candles, index: candles.length - 1, entryPrice: 100,
+      entryDate: candles[0].date, triggerSignal: 'B', operationMode: 'short',
+    });
+    expect(r?.touchedTenPct).toBe(true);
+    expect(r?.maName).toBe('MA5');
+    expect(r?.shouldExit).toBe(true);
+  });
+
+  it('B 短線從未觸及 +10% 且目前不足 +10%，單獨破 MA5 不出場', () => {
+    const candles = makeCandles([...Array.from({ length: 29 }, () => 108), 105]);
+    const r = evaluateOperationMaExit({
+      candles, index: candles.length - 1, entryPrice: 100,
+      entryDate: candles[0].date, triggerSignal: 'B', operationMode: 'short',
+    });
+    expect(r?.touchedTenPct).toBe(false);
+    expect(r?.shouldExit).toBe(false);
   });
 });
 

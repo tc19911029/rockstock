@@ -3,7 +3,7 @@ import { ruleEngine } from '@/lib/rules/ruleEngine';
 import { ma20Slope, isStrongInWeaknessAtBottom } from '@/lib/rules/ruleUtils';
 import { evaluateSixConditions, detectTrend, detectTrendPosition, TrendState } from '@/lib/analysis/trendAnalysis';
 import { checkLongProhibitions, checkShortProhibitions } from '@/lib/rules/entryProhibitions';
-import { evaluateShortSixConditions } from '@/lib/analysis/shortAnalysis';
+import { evaluateShortCourseSetup } from '@/lib/analysis/shortCandidate';
 import { StockScanResult, MarketConfig, TriggeredRule, ScanDiagnostics, createEmptyDiagnostics } from './types';
 import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
@@ -903,9 +903,10 @@ export abstract class MarketScanner {
       // 第一層：選股（純朱家泓書本體系 — 做空版）
       // ══════════════════════════════════════════════════════════════════
 
-      // ── 1. 空頭六條件（前5個=核心門檻）─────────────────────────────
-      const shortConds = evaluateShortSixConditions(candles, lastIdx);
-      if (!shortConds.isCoreReady) return null;
+      // ── 1. 正式做空進場 S1–S7；六條件只作品質分數 ─────────────────
+      const shortSetup = evaluateShortCourseSetup(candles, lastIdx);
+      const shortConds = shortSetup.quality;
+      if (!shortSetup.isEntryReady) return null;
 
       // ── 2. 做空戒律 ────────────────────────────────────────────────
       const prohib = checkShortProhibitions(candles, lastIdx);
@@ -921,6 +922,12 @@ export abstract class MarketScanner {
       const triggeredRules: TriggeredRule[] = signals.map(s => ({
         ruleId: s.ruleId, ruleName: s.label, signalType: s.type, reason: s.description,
       }));
+      triggeredRules.unshift(...shortSetup.entries.map(s => ({
+        ruleId: `ZH-ENTRY-S${s.position}`,
+        ruleName: s.name,
+        signalType: 'SELL' as const,
+        reason: s.detail,
+      })));
 
       const changePercent = lastIdx > 0 && candles[lastIdx - 1]?.close > 0
         ? +((last.close - candles[lastIdx - 1].close) / candles[lastIdx - 1].close * 100).toFixed(2)
@@ -948,8 +955,13 @@ export abstract class MarketScanner {
           kbar:      shortConds.kbar.pass,
           indicator: shortConds.indicator.pass,
         },
+        shortEntryIds: shortSetup.entries.map(s => s.id),
+        shortEntryNames: shortSetup.entries.map(s => s.name),
+        shortEntryDetails: shortSetup.entries.map(s => s.detail),
+        shortEntrySourceVariants: shortSetup.entries.map(s => s.sourceVariant ?? null),
+        shortEntryStopLoss: Math.max(...shortSetup.entries.map(s => s.stopLoss)),
         direction: 'short',
-        trendState: '空頭',
+        trendState: shortConds.trend.state,
         trendPosition: shortConds.position.stage ?? '',
         scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
         ma20Slope: ma20Slope(candles, lastIdx) ?? undefined,

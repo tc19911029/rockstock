@@ -14,8 +14,9 @@
  */
 import type { Candle } from '@/types';
 import {
-  PROFIT_SHORT_RULE, PROFIT_MID_RULE, PROFIT_LONG_RULE, sma,
+  PROFIT_SHORT_RULE, PROFIT_MID_RULE, PROFIT_LONG_RULE, sma, evaluateOperationMaExit,
 } from '@/lib/agents/holdingsActionEngine';
+import type { OperationMode } from '@/lib/sell/v12Operation';
 import { ABSOLUTE_STOP_LOSS_PRICE_MULT } from '@/lib/sell/v12StopLoss';
 import { computeIndicators } from '@/lib/indicators';
 import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
@@ -23,7 +24,7 @@ import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
 export interface ShadowEvent {
   date: string;
   action:
-    | 'stop_loss' | 'hard_stop_10pct' | 'exit_all_ma20' | 'exit_all_ma10' | 'reduce_half_ma5'
+    | 'stop_loss' | 'hard_stop_10pct' | 'exit_all_operation_ma' | 'exit_all_ma20' | 'exit_all_ma10' | 'reduce_half_ma5'
     // 賠少-1：做空版回補事件
     | 'short_stop_cover' | 'short_cover_signal';
   price: number;
@@ -60,6 +61,10 @@ export function computeShadowLedger(args: {
   positionSide?: 'long' | 'short';
   /** 賠少-1：做空進場黑K最高點（停損價）；缺值 fallback stopLoss。 */
   entryHigh?: number;
+  /** 課程 CH8：有值時重放正式操作均線；缺值保留歷史影子帳本規則。 */
+  operationMode?: OperationMode;
+  /** 進場買法字母，決定 short 模式的 MA3/5/10/20。 */
+  triggerSignal?: string;
 }): ShadowResult | null {
   // 賠少-1：做空走獨立影子規則（進場黑K高點停損 + detectShortExitSignals 回補）。
   if (args.positionSide === 'short') {
@@ -100,19 +105,41 @@ export function computeShadowLedger(args: {
       remaining = 0;
       break;
     }
-    if (profitPct >= PROFIT_LONG_RULE && ma20 != null && close < ma20) {
+
+    const operationExit = evaluateOperationMaExit({
+      candles,
+      index: i,
+      entryPrice,
+      entryDate,
+      triggerSignal: args.triggerSignal,
+      operationMode: args.operationMode,
+    });
+    if (operationExit?.shouldExit) {
+      realized += close * remaining;
+      events.push({
+        date: c.date,
+        action: 'exit_all_operation_ma',
+        price: close,
+        sharesSold: remaining,
+        label: `跌破 ${operationExit.maName}（操作均線）→ 全出`,
+      });
+      remaining = 0;
+      break;
+    }
+
+    if (args.operationMode == null && profitPct >= PROFIT_LONG_RULE && ma20 != null && close < ma20) {
       realized += close * remaining;
       events.push({ date: c.date, action: 'exit_all_ma20', price: close, sharesSold: remaining, label: '漲≥20% 跌破 MA20 → 全出' });
       remaining = 0;
       break;
     }
-    if (profitPct >= PROFIT_MID_RULE && ma10 != null && close < ma10) {
+    if (args.operationMode == null && profitPct >= PROFIT_MID_RULE && ma10 != null && close < ma10) {
       realized += close * remaining;
       events.push({ date: c.date, action: 'exit_all_ma10', price: close, sharesSold: remaining, label: '漲≥10% 跌破 MA10 → 全出' });
       remaining = 0;
       break;
     }
-    if (!halfDone && profitPct >= PROFIT_SHORT_RULE && ma5 != null && close < ma5) {
+    if (args.operationMode == null && !halfDone && profitPct >= PROFIT_SHORT_RULE && ma5 != null && close < ma5) {
       const sold = Math.floor(remaining / 2);
       if (sold > 0) {
         realized += close * sold;

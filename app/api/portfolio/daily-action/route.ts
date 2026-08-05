@@ -25,6 +25,7 @@ import { computeProfitTargets } from '@/lib/sell/profitTargets';
 import { detectMarketRegime, thresholdsForRegime, type RegimeDetectResult } from '@/lib/agents/marketRegime';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
 import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
+import type { OperationMode } from '@/lib/sell/v12Operation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,6 +40,8 @@ export interface DailyActionItem {
   shares: number;
   /** 賠少-1：部位方向（'short' = 做空回補語意）；缺省 = 'long' 做多。 */
   positionSide?: 'long' | 'short';
+  /** 課程 CH8：此持倉實際採用的短線／長線操作模式。 */
+  operationMode?: OperationMode;
   todayClose: number | null;
   asOfDate: string | null;
   unrealizedAmount: number | null;
@@ -107,6 +110,8 @@ export async function GET(req: NextRequest) {
         // 賠少-1：做空 live 風控 — positionSide / 進場黑K最高點皆走 ui blob passthrough。
         // 缺省（既有持倉）= 做多，行為位元不變。
         const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
+        // UI 建倉預設就是 short；舊資料缺欄位時沿用同一預設，避免 daily-action 落回另一套 legacy 均線。
+        const operationMode: OperationMode = h.ui?.operationMode === 'long' ? 'long' : 'short';
         const base: Omit<DailyActionItem, 'todayClose' | 'asOfDate' | 'unrealizedAmount' | 'action' | 'label' | 'signals' | 'profitPct' | 'suggestedStop' | 'metrics'> = {
           symbol: h.symbol,
           name: h.name,
@@ -116,6 +121,7 @@ export async function GET(req: NextRequest) {
           stopLoss,
           shares: h.shares,
           positionSide,
+          operationMode,
         };
 
         let candles = await loadLocalCandles(h.symbol, mkt);
@@ -154,6 +160,8 @@ export async function GET(req: NextRequest) {
           todayClose,
           thresholds,
           triggerSignal,
+          operationMode,
+          entryDate: h.entryDate,
           positionSide,
           entryHigh,
           entryKlineLow,
@@ -178,31 +186,6 @@ export async function GET(req: NextRequest) {
             detail: `${avgDown.date} 曾虧損中向下攤平（均價 ${avgDown.fromPrice} → ${avgDown.toPrice}）。課程 CH10-2：攤平=加碼下跌中的股票，完全錯誤；紅旗常駐到平倉`,
           }] : []),
         ];
-        // 課程 CH8-3（2026-07-06，逐字-1）：賺 10% 停利「達標＝進場後盤中曾觸及 +10% 價位」（事件式），
-        // 非「出場日收盤獲利率 ≥10%」。程式 checkMAExit 用出場日收盤判 → 曾摸過 10% 又跌回、今日破 MA5 時
-        // 會誤判「獲利<10% 續抱洗盤」（與課程/投影片相反）。此處**只加提示、不改硬出場期望值**（出場類改硬 gate
-        // 須先過 backtest-exit-rules，本專案紀律）。只服務短線 MA5 操作字母 A/B/P、做多、且正落在該誤判區間。
-        const ma5 = lastCandle.ma5;
-        const abpTouchAdvisory = (() => {
-          if (positionSide !== 'long') return null;
-          if (!(triggerSignal === 'A' || triggerSignal === 'B' || triggerSignal === 'P')) return null;
-          if (ma5 == null || todayClose >= ma5) return null; // 今日未收破 MA5
-          const curProfitPct = (todayClose - h.entryPrice) / h.entryPrice;
-          if (curProfitPct >= 0.10) return null; // 現獲利已 ≥10%，既有停利規則自會處理
-          const target10 = h.entryPrice * 1.10;
-          let peak = -Infinity;
-          for (const c of candles) {
-            if (c.date < h.entryDate) continue;
-            if (c.high > peak) peak = c.high;
-          }
-          if (!(peak >= target10)) return null; // 進場後從未觸及 +10%
-          return {
-            type: 'ch83_touched_10pct_break_ma5',
-            label: '📗 課程停利提示：曾達 +10%、今破 5 均',
-            severity: 'medium' as const,
-            detail: `進場後盤中曾觸及 +10% 價位（${target10.toFixed(2)}，實際最高 ${peak.toFixed(2)}），今日收盤 ${todayClose.toFixed(2)} 跌破 MA5 ${ma5.toFixed(2)}。課程 CH8-3：達標＝「曾摸到 10% 價位」即算，此時破 5 均就該停利（就算現在只剩 +${(curProfitPct * 100).toFixed(1)}%）。系統硬出場仍走收盤獲利率判定（未改），此為紀律提示。`,
-          };
-        })();
         // 課程 CH11-2（2026-07-20 第七輪，逐字稿）：「連續上漲超過 3 天、漲幅超過 10% → 採取 K 線戰法停利」，
         // 且明講「第三天第四天黑K跌破昨天的低點我就賣了，**不一定有跌破五均**」。
         //
@@ -285,7 +268,7 @@ export async function GET(req: NextRequest) {
             detail: `自進場價 ${h.entryPrice} 跌 ${(dropFromEntry * 100).toFixed(1)}%（今收 ${todayClose.toFixed(2)}）。課程 CH7-3：每日檢視自買價跌幅 > 5% 應列警示股、準備賣出，別放任凹單。`,
           };
         })();
-        const signals = [...disciplineSignals, ...(abpTouchAdvisory ? [abpTouchAdvisory] : []), ...(ch11ClimbExitAdvisory ? [ch11ClimbExitAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
+        const signals = [...disciplineSignals, ...(ch11ClimbExitAdvisory ? [ch11ClimbExitAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
         return {
           ...base,
           todayClose,

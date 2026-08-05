@@ -15,12 +15,12 @@
  *
  * 條件（2026-07-05 課程 CH2-3/6-3 對齊）：
  *   1. 多頭趨勢中
- *   2. 過去 3-15 根 K 線中，找一根 K 當錨點（課程 6-3：第一根紅黑不管、實體大小不管；
+ *   2. 突破前共 3-15 根 K 線（含錨點），找第一根 K 當錨點（課程 6-3：第一根紅黑不管、實體大小不管；
  *      不設實體門檻，橫盤成立與否由「後續收盤含納 + 狹幅 <5%」把關）
  *   3. 從錨點次日起到昨日，收盤維持在錨點高低之間「橫盤」（課程：收盤判定）：
  *      - 收盤不破錨點低點、收盤不過錨點高點（過了＝那天已是突破日）
  *      - 期間最高與錨點高的距離 < 5%（狹幅整理）
- *      - 至少 3 根 K（課程 CH2-3「連續三天」）
+ *      - 含錨點至少共 3 根 K（最新講義 CH2-3「連續三天」）
  *   4. 今日紅 K 實體 ≥ 2%（寶典 2024）
  *   5. 今日量 ≥ 前日 × 1.3
  *   6. 今日收盤突破錨點（第一根 K）最高點；跳空開盤＝最強（顯示標註）
@@ -45,14 +45,15 @@ export interface KlineConsolidationBreakoutResult {
   rangeHigh: number;           // 橫盤期間最高（被突破的目標）
   rangeLow: number;            // 橫盤期間最低
   rangeWidthPct: number;       // 橫盤幅度（rangeHigh / anchorHigh - 1）
-  consolidationDays: number;   // 橫盤天數（含錨點次日至昨日）
+  consolidationDays: number;   // 突破前整理天數（含錨點）
   bodyPct: number;             // 今日紅 K 實體
   volumeRatio: number;         // 今日量比
+  sourceVersion: 'latest_handout_3_total';
   detail: string;
 }
 
 // 書本門檻單一事實來源：lib/analysis/bookThresholds.ts
-const MIN_CONSOL_DAYS = KLINE_CONSOL_MIN_DAYS;       // 至少 3 根橫盤 K（課程 CH2-3「連續三天」，2026-07-05 裁決 4→3）
+const MIN_CONSOL_DAYS = KLINE_CONSOL_MIN_DAYS;       // 突破前含錨點至少共 3 根（最新講義 CH2-3「連續三天」）
 const MAX_CONSOL_DAYS = KLINE_CONSOL_MAX_DAYS;       // 最多 15 根（更久就接近位置 1 盤整突破）
 const MAX_RANGE_WIDTH_PCT = KLINE_CONSOL_MAX_RANGE_PCT;     // 橫盤狹幅：高低差 / 錨點高 < 5%
 
@@ -65,12 +66,12 @@ interface AnchorCandidate {
 }
 
 /**
- * 在 [idx-MAX_CONSOL_DAYS-1, idx-MIN_CONSOL_DAYS-1] 區間內搜尋「中長紅 K 錨點」：
+ * 在 [idx-MAX_CONSOL_DAYS, idx-MIN_CONSOL_DAYS] 區間內搜尋錨點：
  *   錨點之後到昨日（idx-1）必須形成狹幅橫盤。
  *
  * 回傳第一個（最近的）符合條件的錨點。
  */
-function findAnchorAndRange(
+export function findKlineConsolidationRange(
   candles: CandleWithIndicators[],
   idx: number,
 ): {
@@ -80,10 +81,9 @@ function findAnchorAndRange(
   rangeWidthPct: number;
   consolidationDays: number;
 } | null {
-  // 從近往遠找，錨點最近不能晚於 idx-MIN_CONSOL_DAYS-1
-  // 例：MIN=4 → 錨點最近 idx-5（之後 idx-4..idx-1 共 4 根橫盤 + idx 突破）
-  const newest = idx - MIN_CONSOL_DAYS - 1;
-  const oldest = Math.max(0, idx - MAX_CONSOL_DAYS - 1);
+  // 最新講義口徑：MIN=3 表示突破前「錨點 + 後續 2 根」共三天，idx 是第 4 天突破。
+  const newest = idx - MIN_CONSOL_DAYS;
+  const oldest = Math.max(0, idx - MAX_CONSOL_DAYS);
 
   for (let anchorIdx = newest; anchorIdx >= oldest; anchorIdx--) {
     const a = candles[anchorIdx];
@@ -124,7 +124,7 @@ function findAnchorAndRange(
     // 故 rangeHigh >= a.high 恆成立 → rangeWidthPct 恆 ≥ 0，該分支永遠不會執行。
     // 留著會讓後續審計誤以為「橫盤需摸到錨點高」而重複開錯誤的票（本輪就被騙過一次）。
 
-    const consolidationDays = idx - anchorIdx - 1;
+    const consolidationDays = idx - anchorIdx;
 
     return {
       anchor: {
@@ -161,7 +161,7 @@ export function detectKlineConsolidationBreakout(
   if (detectTrend(candles, idx) !== '多頭') return null;
 
   // 2. 找錨點 + 橫盤區間
-  const found = findAnchorAndRange(candles, idx);
+  const found = findKlineConsolidationRange(candles, idx);
   if (!found) return null;
 
   // 3. 今日紅 K
@@ -192,9 +192,10 @@ export function detectKlineConsolidationBreakout(
     consolidationDays: found.consolidationDays,
     bodyPct,
     volumeRatio,
+    sourceVersion: 'latest_handout_3_total',
     detail:
       `K 線橫盤突破（${found.anchor.date} 錨點K 高 ${found.anchor.high.toFixed(2)} 實體 ${found.anchor.bodyPct.toFixed(2)}%，` +
-      `${found.consolidationDays} 天橫盤幅度 ${found.rangeWidthPct.toFixed(2)}%，` +
+      `突破前含錨點 ${found.consolidationDays} 天、橫盤幅度 ${found.rangeWidthPct.toFixed(2)}%，` +
       `今日收盤突破錨點高 ${found.anchor.high.toFixed(2)}：實體 ${bodyPct.toFixed(2)}%＋量×${volumeRatio.toFixed(2)}` +
       `${gapUp ? '＋跳空突破（課程：最強進場位置）' : ''}）`,
   };

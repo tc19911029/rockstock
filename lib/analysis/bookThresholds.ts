@@ -73,7 +73,7 @@ export const FLATBOTTOM_BREAKOUT_VOL_MULT = 2.0;
 
 /** 錨點 K 實體 %（2026-07-05 課程對齊：紅黑不管；實體門檻為 ⚠️自創殘留防噪音）*/
 export const KLINE_CONSOL_ANCHOR_BODY_PCT = 3;
-/** 橫盤天數區間（2026-07-05 裁決按課程：6-3「連續三天」→ 3；原 4 偏嚴漏掉課程原型）*/
+/** 最新講義口徑：突破前整理 K 共 3-15 根（含第一根錨點）；舊實作曾誤解為錨點後再 3 根。 */
 export const KLINE_CONSOL_MIN_DAYS = 3;
 export const KLINE_CONSOL_MAX_DAYS = 15;
 /** 橫盤狹幅（高低差 / 錨點高 %）*/

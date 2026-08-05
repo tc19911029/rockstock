@@ -93,6 +93,13 @@ export interface StockScanResult {
     kbar: boolean;
     indicator: boolean;
   };
+  /** 正式做空進場位置（S1–S7）；至少一項命中才會進做空候選。 */
+  shortEntryIds?: string[];
+  shortEntryNames?: string[];
+  shortEntryDetails?: string[];
+  shortEntrySourceVariants?: Array<string | null>;
+  /** 命中空點的共同風控：進場黑 K 最高點回補；多訊號時取最寬的最高價。 */
+  shortEntryStopLoss?: number;
   // ── 長線保護短線（多時間框架） ───────────────────────────────────────────
   mtfScore?: number;                          // 0-4 多時間框架總分
   mtfWeeklyTrend?: string;                    // '多頭'/'空頭'/'盤整'

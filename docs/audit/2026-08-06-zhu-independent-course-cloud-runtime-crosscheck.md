@@ -27,6 +27,18 @@
 
 本報告不修改交易邏輯；只校正 canonical 文件與列出可驗收的落地順序。
 
+### 0.1 後續修復狀態（2026-08-06）
+
+本報告以下「現行／目前」描述保留為修復前稽核快照。使用者授權修復後，已落地：
+
+1. `daily-action` 與 shadow ledger 已讀取 `operationMode`、`triggerSignal`、`entryDate`，共用同一操作均線判定；A／B／P 改用「進場後盤中曾觸及 +10%」事件。
+2. 正式做空 scanner 改為 S1–S7 至少命中一項才入選，六條件降為品質分；每筆結果保存空點 id、名稱、detail、來源版本與黑 K 高點停損。
+3. S7 production 採量能選配版本，量只記錄、不作 hard gate；提示文字不再一律假稱大量。
+4. 多方 K 與空方 S3 採最新講義「突破前含錨點共三根」；K detector 輸出 `latest_handout_3_total`，教材狀態仍保留 `source_conflict`。
+5. AI loader 已把 `ZHU_TECHNICAL_KNOWLEDGE_SPEC_2026.md` 放在兩份舊整理之前。
+
+驗證：完整 Jest 180 suites／2,334 tests 通過（12 skipped），TypeScript `--noEmit` 通過，Next.js production build 通過。尚未關閉的項目仍包括 rejection ledger、所有 UI 的來源 badge、舊影片 K 版本的平行 shadow 統計與其餘自創量化的逐項裁決。
+
 ## 1. 本輪實際覆核範圍
 
 ### 1.1 線上課程與最新講義

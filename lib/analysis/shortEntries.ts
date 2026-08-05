@@ -8,14 +8,13 @@
  *   S4 型態確認賣點（6-11） — 頭部型態大量中長黑跌破頸線×3%（重用 detectTopPatterns；v2 已補齊 7 型）
  *   S5 ABC反彈跌破上升切線（6-12）— 空頭反彈 ABC 短多，黑K跌破原始上升切線，月線下向下【量不要求】
  *   S6 跌破下跌軌道線（6-13）— 下降通道緩跌，大量中長黑收盤跌破軌道線，MA20 向下【明確要大量】
- *   S7 飆股反彈紅K低點跌破（6-14）— 下跌飆股反彈紅K後 3 天內大量中長黑收盤破紅K低點
+ *   S7 飆股反彈紅K低點跌破（6-14）— 下跌飆股反彈紅K後 3 天內中長黑收盤破紅K低點；最新講義量能選配
  *
  * 共同紀律（每節投影片都有）：停損（回補）= 進場黑K最高點；站上 5 均回補。
  * 出場側已上線（evaluateShortHolding / detectShortExitSignals），本模組只補「進場」。
  *
- * ⚠️ 上線層級由 scripts/backtest-short-entries.ts 誠實 edge 裁決：
- *    過 → 開字母軌接掃描（需同步 buyMethodTracks + scan-parity）；不過 → 走圖/顯示層 only。
- *    目前 = 顯示層（走圖做空面板），不進任何掃描 gate。
+ * 2026-08-06：S1–S7 已接入正式做空掃描；六條件保留為品質分數，不再用全域大量條件
+ * 擋掉 S1/S5/S7 這些課程明訂量不要求或最新講義量選配的進場位置。
  *
  * S4 頂部型態 v2（2026-07-07 補齊）：三重頂/頭肩頂/雙重頂 + 複式頭肩頂/倒N字頂/長雙頭頂/一字頂 共 7 型
  * （detectTopPatterns 內，顯示層；達成率<50 的雙重頂/長雙頭僅顯示不進場，同底部側規則）。
@@ -39,12 +38,14 @@ export interface ShortEntrySignal {
   volumeRatio: number | null;
   /** 量 ≥ 前日 ×1.3（S1/S5 課程明講量不要求 → 純記錄；S6 課程明確要大量 → gate） */
   hasVolume: boolean;
+  /** 同一課題有來源版本差異時，記錄本次採用的裁決。 */
+  sourceVariant?: 'latest_handout_volume_optional';
   detail: string;
 }
 
 const MIN_BODY_PCT = 0.02;          // 中長黑實體 ≥2%（與做多側 BOOK_BODY_PCT_MIN 對稱）
 const ANCHOR_BODY_PCT = 0.03;       // S3 錨點中長K實體 ≥3%（鏡像 KLINE_CONSOL_ANCHOR_BODY_PCT）
-const CONSOL_MIN_BARS = 3;          // S3 橫盤至少 3 根（課程 CH2-3「連續三天」）
+const CONSOL_MIN_BARS = 3;          // S3 突破前至少 3 根（含錨點；最新講義「連續三天」）
 const CONSOL_MAX_BARS = 15;
 const CONSOL_MAX_RANGE = 0.05;      // S3 狹幅 5%（鏡像做多側）
 const PLUNGE_PCT = -0.20;           // S7 下跌飆股：近20根累跌 >20%（⚠️ 課程「連續急跌」無數字，鏡像 L 軌 20%）
@@ -140,7 +141,7 @@ function detectS3KlineConsolBreakdown(candles: CandleWithIndicators[], idx: numb
   const c = candles[idx];
   if (!isMedLongBlackBar(c)) return null;
   if (c.ma20 == null || c.close >= c.ma20) return null;        // 下跌途中/破月線後
-  for (let gap = CONSOL_MIN_BARS + 1; gap <= CONSOL_MAX_BARS; gap++) {
+  for (let gap = CONSOL_MIN_BARS; gap <= CONSOL_MAX_BARS; gap++) {
     const aIdx = idx - gap;
     if (aIdx < 1) break;
     const a = candles[aIdx];
@@ -160,7 +161,7 @@ function detectS3KlineConsolBreakdown(candles: CandleWithIndicators[], idx: numb
     return {
       position: 3, id: 'S3_kline_consol_breakdown', name: 'K線橫盤的跌破',
       stopLoss: c.high, volumeRatio: v.ratio, hasVolume: v.has,
-      detail: `橫盤 ${gap - 1} 根後中長黑收 ${c.close.toFixed(2)} 跌破橫盤最低 ${minLow.toFixed(2)}（課程 6-10）`,
+      detail: `含錨點橫盤 ${gap} 根後中長黑收 ${c.close.toFixed(2)} 跌破橫盤最低 ${minLow.toFixed(2)}（課程 6-10；最新講義口徑）`,
     };
   }
   return null;
@@ -240,7 +241,7 @@ function detectS6ChannelBreakdown(candles: CandleWithIndicators[], idx: number):
   };
 }
 
-/** S7 飆股反彈紅K低點跌破（6-14）：下跌飆股（近20根累跌>20%）反彈紅K後 3 天內大量中長黑收盤破紅K低點 */
+/** S7 飆股反彈紅K低點跌破（6-14）：最新講義以價位跌破為硬條件，量能只作強度標記。 */
 function detectS7PlungeReboundBreak(candles: CandleWithIndicators[], idx: number): ShortEntrySignal | null {
   const c = candles[idx];
   if (!isMedLongBlackBar(c)) return null;
@@ -250,7 +251,7 @@ function detectS7PlungeReboundBreak(candles: CandleWithIndicators[], idx: number
   for (let j = idx - 1; j >= Math.max(1, idx - 3); j--) {
     const r = candles[j];
     if (!(r.open > 0 && r.close > r.open && (r.close - r.open) / r.open >= MIN_BODY_PCT)) continue;
-    if (!isBigVolRedBar(candles, j)) continue;                 // 課程 6-14：反彈紅K要「大量紅K」
+    const reboundHasVolume = isBigVolRedBar(candles, j);
     if (c.close >= r.low) continue;                            // 收盤跌破反彈紅K最低點
     // 下跌飆股：反彈紅K 之前 20 根累跌 >20%（⚠️ 課程無數字，鏡像 L 軌）
     const base = candles[Math.max(0, j - 20)];
@@ -260,7 +261,8 @@ function detectS7PlungeReboundBreak(candles: CandleWithIndicators[], idx: number
     return {
       position: 7, id: 'S7_plunge_rebound_break', name: '飆股反彈紅K低點跌破',
       stopLoss: c.high, volumeRatio: v.ratio, hasVolume: v.has,
-      detail: `下跌飆股大量反彈紅K（${r.date}）低點 ${r.low.toFixed(2)} 被大量中長黑收 ${c.close.toFixed(2)} 跌破（課程 6-14）${gapDownTag(candles, idx)}`,
+      sourceVariant: 'latest_handout_volume_optional',
+      detail: `下跌飆股反彈紅K（${r.date}；${reboundHasVolume ? '有大量' : '量未放大'}）低點 ${r.low.toFixed(2)} 被中長黑收 ${c.close.toFixed(2)} 跌破（${v.has ? '跌破K有大量' : '跌破K量未放大'}；課程 6-14 最新講義量能選配）${gapDownTag(candles, idx)}`,
     };
   }
   return null;

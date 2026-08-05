@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
       }
       candles = await injectL2TodayIfNeeded(candles, h.symbol, 'TW', today);
       if (!candles || candles.length === 0) continue;
+      const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
+      const entryKbar = h.ui?.entryKbar as { high?: number } | undefined;
       const r = computeShadowLedger({
         symbol: h.symbol,
         entryDate: h.entryDate,
@@ -43,6 +45,10 @@ export async function GET(req: NextRequest) {
         shares: h.shares,
         stopLoss: h.stopLoss ?? h.entryPrice * 0.93,
         candles,
+        positionSide,
+        entryHigh: typeof entryKbar?.high === 'number' ? entryKbar.high : undefined,
+        operationMode: h.ui?.operationMode === 'long' ? 'long' : 'short',
+        triggerSignal: typeof h.ui?.triggerSignal === 'string' ? h.ui.triggerSignal : undefined,
       });
       if (r) items.push({ ...r, name: h.name });
     }

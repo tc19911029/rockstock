@@ -4,6 +4,7 @@ import path from 'node:path';
 let cached: string | null = null;
 
 const SOURCES: { file: string; label: string }[] = [
+  { file: 'docs/ZHU_TECHNICAL_KNOWLEDGE_SPEC_2026.md', label: '最高優先：朱老師 2026 線上課程＋最新講義交叉核對規格（含來源衝突裁決）' },
   { file: 'docs/TECHNICAL_ANALYSIS_5STEPS.md', label: '書本：五步法整理稿 v11（朱家泓 5 本 + 林穎 1 本精華 + 附錄 50+）' },
   { file: 'docs/RockStar_5Steps_Framework_v12.md', label: '書本：v12 框架（用戶版整理）' },
 ];

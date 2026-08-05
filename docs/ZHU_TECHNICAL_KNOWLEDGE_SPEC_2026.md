@@ -14,6 +14,21 @@ RockStock 若要以朱老師體系為核心，不能把全課程壓成一組全�
 
 本文件把教材規則保留在原本情境，並將「教材規則」「口述建議」「舊書補充」「RockStock 生產決策」分層，避免不同模型再次把局部規則合併成全域常數。
 
+### 0.1 RockStock 採用快照（2026-08-06）
+
+以下是 production 採用狀態，不改寫上面的教材真意：
+
+| 項目 | production 採用 | 可稽核欄位／正式 caller |
+|---|---|---|
+| 持倉操作均線 | `daily-action` 與 shadow ledger 共用 `operationMode + triggerSignal`；長線 MA20，短線依字母 MA3／5／10／20 | `break_operation_ma*`、`exit_all_operation_ma` |
+| A／B／P +10% | 以進場後任一日盤中最高價曾觸及 +10% 為事件；之後收破 MA5 全出 | `touchedTenPct` |
+| 正式做空候選 | S1–S7 至少一項命中；六條件只作品質分，不再以全域大量門檻取代各位置規則 | `shortEntryIds`、`shortEntryDetails` |
+| S7 量能衝突 | production 採最新講義「量能選配」，同時記錄反彈 K／跌破 K 是否放量 | `latest_handout_volume_optional` |
+| K／S3 橫盤根數 | production 採最新講義「突破前含錨點共三根，第四根可突破」；仍保留 `source_conflict` 教材狀態 | `latest_handout_3_total` |
+| AI 教材來源 | canonical 規格為第一來源，舊書整理降級為補充 | `lib/ai/bookContextLoader.ts` |
+
+尚未因本次修復自動宣告完成的項目包括：淘汰原因 rejection ledger、所有 UI 的 rule/source badge、舊影片 K 根數的平行 shadow 統計，以及所有自創量化窗的逐項樣本外裁決。
+
 ## 1. 範圍與非目標
 
 本規格涵蓋：

@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import { detectABCBreakout } from '../lib/analysis/abcBreakoutEntry';
-import { detectKlineConsolidationBreakout } from '../lib/analysis/klineConsolidationBreakout';
+import { detectKlineConsolidationBreakout, findKlineConsolidationRange } from '../lib/analysis/klineConsolidationBreakout';
 import { detectBlackKBreakout } from '../lib/analysis/blackKBreakoutEntry';
 import { computeIndicators } from '../lib/indicators';
 import jFix from './fixtures/candles/8147TWO-J-abc-breakout-2026-04-17.json';
@@ -55,10 +55,27 @@ describe('detectKlineConsolidationBreakout (K) — 真實 fixture', () => {
     expect(result).not.toBeNull();
     if (!result) return;
     expect(result.isBreakout).toBe(true);
-    expect(result.anchorHigh).toBeGreaterThanOrEqual(kFix.expected.anchorHighMin);
-    expect(result.anchorHigh).toBeLessThanOrEqual(kFix.expected.anchorHighMax);
+    // 最新講義採「突破前含錨點共三根」，會選到比舊版更近的有效錨點（本 fixture = 812）。
+    expect(result.sourceVersion).toBe('latest_handout_3_total');
+    expect(result.anchorHigh).toBeCloseTo(812, 0);
     expect(result.rangeWidthPct).toBeLessThanOrEqual(kFix.expected.rangeWidthPctMax);
     expect(result.consolidationDays).toBeGreaterThanOrEqual(kFix.expected.consolidationDaysMin);
+  });
+
+  it('最新講義：錨點 + 後續 2 根共三天，第 4 天即可突破', () => {
+    const raw = Array.from({ length: 20 }, (_, i) => ({
+      date: `2026-01-${String(i + 1).padStart(2, '0')}`,
+      open: 95, high: 96, low: 94, close: 95, volume: 1000,
+    }));
+    raw[16] = { ...raw[16], open: 100, high: 101, low: 99, close: 100 };
+    raw[17] = { ...raw[17], open: 100, high: 101.1, low: 99.4, close: 100.2 };
+    raw[18] = { ...raw[18], open: 100.2, high: 101.2, low: 99.6, close: 100.5 };
+    raw[19] = { ...raw[19], open: 100.5, high: 104, low: 100.4, close: 103, volume: 1500 };
+    const candles = computeIndicators(raw);
+    const range = findKlineConsolidationRange(candles, 19);
+    expect(range).not.toBeNull();
+    expect(range?.anchor.index).toBe(16);
+    expect(range?.consolidationDays).toBe(3);
   });
 });
 

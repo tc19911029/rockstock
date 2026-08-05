@@ -8,6 +8,8 @@ import { COUNTER_TREND_SET, normalizeLetter } from '@/lib/scanner/buyMethodTrack
 import { computeIndicators } from '@/lib/indicators';
 import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
 import { detectSellSignals, type SellSignalType } from '@/lib/analysis/sellSignals';
+import { getOperationMA, type OperationMode } from '@/lib/sell/v12Operation';
+import type { V12Letter } from '@/lib/analysis/v12Signals';
 
 export type HoldingAction =
   | 'stop_loss'
@@ -39,6 +41,17 @@ export interface HoldingActionInput {
    * 逆勢部位走專屬出場（翻黑/趨勢轉空立即走），缺值 → 走一般順勢出場。
    */
   triggerSignal?: string;
+
+  /**
+   * 課程 CH8：持倉一開始就選定短線／長線操作週期。
+   * - short：依進場字母守 MA3／MA5／MA10／MA20
+   * - long：統一守 MA20
+   * 缺值保留 2026-08-06 以前的 legacy 獲利分層行為，供舊呼叫端向下相容。
+   */
+  operationMode?: OperationMode;
+
+  /** 進場日期，用來判斷「進場後盤中曾觸及 +10%」事件。 */
+  entryDate?: string;
 
   /**
    * 賠少-1：部位方向。'short' = 做空（放空）；'long' / 缺省 = 做多。
@@ -90,11 +103,76 @@ export const PROFIT_LONG_RULE = 0.20;
  */
 export const DEFAULT_STOP_LOSS_MULT = 0.93;
 
+export interface OperationMaExitDecision {
+  shouldExit: boolean;
+  maName: 'MA3' | 'MA5' | 'MA10' | 'MA20';
+  maValue: number | null;
+  touchedTenPct: boolean;
+  signal?: HoldingActionSignal;
+}
+
 export function sma(closes: number[], end: number, n: number): number | null {
   if (end < n - 1 || n <= 0) return null;
   let s = 0;
   for (let i = end - n + 1; i <= end; i++) s += closes[i];
   return s / n;
+}
+
+/**
+ * 課程 CH8 的單一操作均線判定，供 daily-action 與 shadow ledger 共用。
+ *
+ * A/B/P 的 MA5 特例以「進場後曾盤中觸及 +10%」為切換事件；沒有摸到
+ * +10% 時，第一次跌破 MA5 仍交給停損與「頭頭低＋破 MA5」等逃生規則。
+ */
+export function evaluateOperationMaExit(args: {
+  candles: Candle[];
+  index: number;
+  entryPrice: number;
+  entryDate?: string;
+  triggerSignal?: string;
+  operationMode?: OperationMode;
+}): OperationMaExitDecision | null {
+  if (args.operationMode == null) return null;
+  const c = args.candles[args.index];
+  if (!c || args.entryPrice <= 0) return null;
+
+  const rawLetter = normalizeLetter(args.triggerSignal ?? 'B') as V12Letter;
+  const maName = getOperationMA(rawLetter, args.operationMode);
+  if (maName == null) return null;
+
+  const period = maName === 'MA3' ? 3 : maName === 'MA5' ? 5 : maName === 'MA10' ? 10 : 20;
+  const closes = args.candles.map(k => k.close);
+  const maValue = sma(closes, args.index, period);
+  const target = args.entryPrice * 1.10;
+  const touchedTenPct = args.candles.slice(0, args.index + 1).some(k =>
+    (args.entryDate == null || k.date >= args.entryDate) && k.high >= target,
+  );
+
+  if (maValue == null || c.close >= maValue) {
+    return { shouldExit: false, maName, maValue, touchedTenPct };
+  }
+
+  const isAbpMa5 = maName === 'MA5' && (rawLetter === 'A' || rawLetter === 'B' || rawLetter === 'P');
+  const profitPct = (c.close - args.entryPrice) / args.entryPrice;
+  if (isAbpMa5 && !touchedTenPct && profitPct < PROFIT_SHORT_RULE) {
+    return { shouldExit: false, maName, maValue, touchedTenPct };
+  }
+
+  const touchedNote = isAbpMa5
+    ? `；進場後${touchedTenPct ? '曾盤中觸及' : '目前仍有'} +10%`
+    : '';
+  return {
+    shouldExit: true,
+    maName,
+    maValue,
+    touchedTenPct,
+    signal: {
+      type: `break_operation_${maName.toLowerCase()}`,
+      label: `跌破 ${maName}（${args.operationMode === 'long' ? '長線' : '短線'}操作出場）`,
+      severity: 'high',
+      detail: `收盤 ${c.close.toFixed(2)} 跌破操作均線 ${maName} ${maValue.toFixed(2)}${touchedNote}，依課程 CH8 全數出場`,
+    },
+  };
 }
 
 /**
@@ -393,8 +471,23 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
     }
   }
 
+  // 課程 CH8：有明確操作模式時，只守該部位一開始選定的操作均線。
+  // 這條是正式出場，不再只在 daily-action 額外掛 advisory。
+  const operationMaExit = evaluateOperationMaExit({
+    candles,
+    index: last,
+    entryPrice,
+    entryDate: input.entryDate,
+    triggerSignal: input.triggerSignal,
+    operationMode: input.operationMode,
+  });
+  if (operationMaExit?.shouldExit && operationMaExit.signal) {
+    return finalize('exit_all', [operationMaExit.signal, ...trappedSigs]);
+  }
+
   const exitAllSigs: HoldingActionSignal[] = [];
-  if (profitPct >= PROFIT_LONG_RULE && distToMa20Pct != null && distToMa20Pct < 0) {
+  // 沒有 operationMode 的舊持倉／舊呼叫端才走歷史獲利分層，避免同時守兩套均線。
+  if (input.operationMode == null && profitPct >= PROFIT_LONG_RULE && distToMa20Pct != null && distToMa20Pct < 0) {
     exitAllSigs.push({
       type: 'break_ma20_long',
       label: '跌破 MA20（長線停利）',
@@ -402,7 +495,7 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
       detail: `today ${todayClose.toFixed(2)} < MA20 ${ma20!.toFixed(2)}, 漲幅 +${(profitPct * 100).toFixed(1)}% ≥ 20%`,
     });
   }
-  if (profitPct >= PROFIT_MID_RULE && distToMa10Pct != null && distToMa10Pct < 0) {
+  if (input.operationMode == null && profitPct >= PROFIT_MID_RULE && distToMa10Pct != null && distToMa10Pct < 0) {
     exitAllSigs.push({
       type: 'break_ma10_mid',
       label: '跌破 MA10（中線停利）',
@@ -544,7 +637,7 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
     }
   }
 
-  if (profitPct >= PROFIT_SHORT_RULE && distToMa5Pct != null && distToMa5Pct < 0) {
+  if (input.operationMode == null && profitPct >= PROFIT_SHORT_RULE && distToMa5Pct != null && distToMa5Pct < 0) {
     signals.push({
       type: 'break_ma5_short',
       label: '跌破 MA5（短線停利）',
@@ -619,10 +712,27 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
   function finalize(action: HoldingAction, sigs: HoldingActionSignal[]): HoldingActionResult {
     let stop = stopLoss;
     if (action !== 'stop_loss') {
-      if (profitPct >= PROFIT_LONG_RULE && ma20 != null) {
-        stop = Math.max(stop, ma20 * 0.995);
-      } else if (profitPct >= PROFIT_MID_RULE && ma10 != null) {
-        stop = Math.max(stop, ma10 * 0.995);
+      if (input.operationMode != null) {
+        const active = evaluateOperationMaExit({
+          candles,
+          index: last,
+          entryPrice,
+          entryDate: input.entryDate,
+          triggerSignal: input.triggerSignal,
+          operationMode: input.operationMode,
+        });
+        const activeLetter = normalizeLetter(input.triggerSignal ?? 'B');
+        const abpNotArmed = active?.maName === 'MA5'
+          && (activeLetter === 'A' || activeLetter === 'B' || activeLetter === 'P')
+          && !active.touchedTenPct
+          && profitPct < PROFIT_SHORT_RULE;
+        if (active?.maValue != null && !abpNotArmed) stop = Math.max(stop, active.maValue * 0.995);
+      } else {
+        if (profitPct >= PROFIT_LONG_RULE && ma20 != null) {
+          stop = Math.max(stop, ma20 * 0.995);
+        } else if (profitPct >= PROFIT_MID_RULE && ma10 != null) {
+          stop = Math.max(stop, ma10 * 0.995);
+        }
       }
     }
     return {

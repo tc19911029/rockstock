@@ -201,6 +201,7 @@ export function detectV12K(
       rangeHigh: result.rangeHigh,
       rangeLow: result.rangeLow,
       rangeWidthPct: result.rangeWidthPct,
+      sourceVersion: result.sourceVersion,
     },
   };
 }
