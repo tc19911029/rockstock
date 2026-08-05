@@ -6,7 +6,7 @@ RockStock 並不是「完全沒做朱老師系統」；相反地，多頭六條�
 
 本輪沿真正的 runtime call chain 稽核後，確認最高優先的問題有四項：
 
-1. **每日持股建議忽略 `operationMode`**：持倉明明保存短線／升級長線狀態，`v12-signals` 也會依狀態選 MA5、MA10、MA20，但 `daily-action` 沒把它傳入 `holdingsActionEngine`。同一持股可能在詳細面板與每日推播得到不同出場結論。
+1. **每日持股建議忽略 `operationMode`**：持倉明明保存短線／升級長線狀態，`v12-signals` API 也會依狀態選 MA5、MA10、MA20，但 `daily-action` 沒把它傳入 `holdingsActionEngine`。目前未找到前端直接消費 `v12-signals`；所以實際問題更直接：主要持倉頁與手機推播沒有使用已存在的操作模式邏輯。
 2. **空方七位置未接正式掃描**：CH6-8～CH6-14 的七個 detector 已存在，但目前只供走圖與回測；正式空方候選仍用舊版「空頭六條件」池，而且把量比 ≥1.3 設成硬門檻，會漏掉課程明說「不一定需要大量」的空點。
 3. **AI 仍只讀舊整理**：聊天 runtime 只載入 `TECHNICAL_ANALYSIS_5STEPS.md` 與 `RockStar_5Steps_Framework_v12.md`，沒有讀最新 CH1–CH12 或本次 canonical 規格。
 4. **淘汰法只有 8 個 hard detector**：最新課程拆分後有 15 個 reason code；現行 8 條中又有數條只是代理量化。部分缺項會被六條件先擋掉，但系統只回 `filteredOut`，沒有保留「為何被淘汰」的教材 reason code。
@@ -20,7 +20,7 @@ RockStock 並不是「完全沒做朱老師系統」；相反地，多頭六條�
 本報告以 [朱家泓技術分析知識規格](../ZHU_TECHNICAL_KNOWLEDGE_SPEC_2026.md) 為教材真意層，來源優先順序為：
 
 1. P0：2026 線上課程上下冊合集投影片。
-2. P0.5：同課影片／逐字稿，只補口述，不覆蓋投影片明文。
+2. P0.5：同課影片／逐字稿與直播；晚於主課錄影的直播可作較新口述證據，但衝突仍須保存。
 3. P1：2024《活用技術分析寶典》。
 4. P2：2017《做對 5 個實戰步驟》。
 5. P3：其他朱老師舊書與林穎老師補充。
@@ -85,7 +85,7 @@ flowchart TD
 
 | ID | 嚴重度 | 判定 | 已確認現況 | 實際影響 |
 |---|---:|---|---|---|
-| ZC-001 | P0 | `confirmed_defect` | `operationMode` 保存在 holding `ui`，`v12-signals` 會讀，但 `daily-action` 呼叫 `evaluateHolding` 時未傳。 | 已升級長線的部位仍可能被每日建議依 MA10／MA5 提前退出；面板與推播不一致。 |
+| ZC-001 | P0 | `confirmed_defect` | `operationMode` 保存在 holding `ui`，`v12-signals` API 會讀，但 `daily-action` 呼叫 `evaluateHolding` 時未傳；repository 內也未找到前端消費該 API。 | 已升級長線的部位仍可能被主要持倉頁與推播依 MA10／MA5 提前退出；較完整的模式邏輯實際未成為主路徑。 |
 | ZC-002 | P0 | `confirmed_defect` | `shortEntries.detectShortEntries` 七位置只被 `SixConditionsPanel` 與回測使用，正式空方 scanner 未呼叫。 | 正式候選無法回答「今天命中哪一個 CH6 空點」，也可能完全漏選。 |
 | ZC-003 | P0 | `confirmed_defect` | 正式空頭池要求量比 ≥1.3；CH6-S1、S5 明確不要求量，S7 還有教材內部量能衝突。 | 無量但結構正確的空點被系統性排除。 |
 | ZC-004 | P0 | `confirmed_defect` | `bookContextLoader` 只載入兩份舊文件。 | AI 問答不知道最新版 CH1–CH12 與已校正的 20%／15%、前日量／5 日均量差異。 |
@@ -97,7 +97,7 @@ flowchart TD
 | ZC-010 | P1 | `confirmed_defect` | `daily-action` 與 `shadowLedger` 都不接 `operationMode`；影子帳本仍自稱「書本嚴格執行版」。 | 「紀律差額」可能拿錯持倉週期計算，屬呈現與決策品質缺陷。 |
 | ZC-011 | P2 | `production_override` | 候選 universe 用 20 日平均成交額前 500；最終排序先看當日漲幅。 | 有回測／流動性理由，但不是最新課程「1,000 張、500 張彈性」與「接近發動」原文。 |
 | ZC-012 | P2 | `production_quantization` | K 橫盤 5% 區間；M/N/O 真突破 3%；多項 5／10／20／60／120 日窗。 | 可作產品參數，但必須標示自創，不能回寫成朱老師明訂數字。 |
-| ZC-013 | P1 | `confirmed_defect` | 多空 K 線橫盤 detector 都把 `MIN=3` 解讀成「錨點之後再 3 根」，而 P0 明確是「第一根包含在 3 根內」。 | 教材允許第 4 根突破／跌破，程式最快要到第 5 根，會漏掉最早的標準訊號。 |
+| ZC-013 | P1 | `source_conflict` | 多空 K 線橫盤 detector 把 `MIN=3` 解讀成「錨點之後再 3 根」，符合 CH6-3／6-10 主課影片；較新的下冊合訂講義與 2026-07-01 直播則明確說「三根包含第一根、第四根突破」。 | 程式採到較舊影片版本，與目前建議的最新版預設不同；改動前須保留雙版本並 shadow 比較，不能把任一版本冒充唯一原文。 |
 
 ## 4. 基礎判別點：趨勢、K 棒、均線、成交量
 
@@ -191,7 +191,7 @@ flowchart TD
 |---|---|---|---|
 | L1 盤整突破 | C / `detectRangeBreakout` | `mostly_complete` | 額加至少 6 日、區間 ≤15%、頸線上揚容差等量化。 |
 | L2 回後買上漲 | B / `detectPullbackBuy` | `mostly_complete` | 站回 MA5 後容許 0–2 日補量突破；另加 0.618 深度 gate。 |
-| L3 K 線橫盤 | K | `partial` | 錨點已正確改成紅黑／實體不限；但程式要求錨點後再 3 根，教材是含錨點共 3 根，存在 off-by-one；5% 區間為自創。 |
+| L3 K 線橫盤 | K | `partial` | 錨點已正確改成紅黑／實體不限；程式採「錨點後再 3 根」的主課影片版本，未採較新講義／直播的「含錨點共 3 根」；5% 區間為自創。 |
 | L4 六型態確認 | N，加上 D/O 部分分流 | `partial` | N 實際含 8 型，缺少一字底於同一 detector；另混入舊書達成率與 ×3% 真突破。 |
 | L5 ABC 修正突破 | J | `mostly_complete` | 額加前波 ≥8%、修正 ≥3%、至少 6 日等防噪量化。 |
 | L6 上升通道突破 | M | `partial` | 軌道幾何正確；收盤需超過上軌 3% 是舊書 overlay，P0 只要求收盤突破。 |
@@ -201,7 +201,7 @@ flowchart TD
 
 正式字母還包含 D、E、F、O、P、Q：一字底、缺口、V 反轉、打底完成、高檔淺回、三均線戰法。這些可作 P1–P3 補充，但 UI 與知識 registry 應明確標記來源，不應把 B～Q 全稱為「2026 線上課七位置」。
 
-K 橫盤另有一個已確認的索引錯位：`KLINE_CONSOL_MIN_DAYS=3` 本身沒錯，但 `findAnchorAndRange` 用 `idx - MIN_CONSOL_DAYS - 1` 找最近錨點，等於要求「錨點 + 後續 3 根橫盤 + 今日突破」至少 5 根。合集 CH2-3 明確說三根包含第一根，第三根後即可突破，標準最短序列應是「錨點 + 2 根受約束 + 第 4 根突破」。空方 S3 使用相同的錨點後 3 根概念，也有同一個 off-by-one。
+K 橫盤不是單純的索引錯位，而是來源版本衝突。`KLINE_CONSOL_MIN_DAYS=3` 搭配 `idx - MIN_CONSOL_DAYS - 1`，實際要求「錨點 + 後續 3 根橫盤 + 今日突破」至少 5 根；這符合 CH6-3／6-10 主課影片「一根錨點、後面一二三」的口述。較新的下冊合訂講義與 2026-07-01 直播則明確說三根包含第一根，最短序列為「錨點 + 2 根受約束 + 第 4 根突破」。因此 canonical production 預設建議採後者，但要標 `source_conflict`，並保留舊版 shadow 結果。空方 S3 有相同版本選擇。
 
 `bookThresholds.ts` 仍保留未使用的 `KLINE_CONSOL_ANCHOR_BODY_PCT=3`，但正式 K detector 已於 2026-07-12 移除錨點實體門檻。這個常數應標 deprecated 或刪除，避免下一位維護者誤以為 production 仍要求 3%。
 
@@ -268,7 +268,7 @@ Q 確實來自舊書《抓住線圖》MA3／MA10／MA24，不是 2026 最新線�
 
 ## 9. CH8–CH9 持倉與停利
 
-### 9.1 已確認的雙路徑分歧
+### 9.1 已確認的主路徑缺口與 API 分歧
 
 `app/api/portfolio/v12-signals/route.ts`：
 
@@ -276,6 +276,7 @@ Q 確實來自舊書《抓住線圖》MA3／MA10／MA24，不是 2026 最新線�
 - 短線按字母選 MA3／MA5／MA10／MA20。
 - 升級長線統一 MA20。
 - 會計算長線升級資格與動態停損。
+- repository 內未找到前端 `fetch('/api/portfolio/v12-signals')`；目前主要是 API、smoke 與單元測試存在，不能稱為正在使用的詳細面板主路徑。
 
 `app/api/portfolio/daily-action/route.ts → holdingsActionEngine`：
 
@@ -283,7 +284,7 @@ Q 確實來自舊書《抓住線圖》MA3／MA10／MA24，不是 2026 最新線�
 - 引擎固定依獲利率同時檢查 MA10、MA20，再檢查 MA5。
 - 影子帳本也照同一套固定順序重播。
 
-這會造成例如：某 B 部位已升級長線、理論上守 MA20，但獲利 12% 且收盤跌破 MA10 時，daily-action 可能直接建議全出；v12 詳細面板則仍顯示按 MA20 續抱。
+這會造成例如：某 B 部位已升級長線、理論上守 MA20，但獲利 12% 且收盤跌破 MA10 時，主要 `daily-action` 仍可能直接建議全出；若直接呼叫 `v12-signals` API，則會按 MA20 續抱。也就是較完整的計算存在，卻沒有成為使用者主決策鏈。
 
 ### 9.2 20% 與 15% 必須保留三個 context
 
