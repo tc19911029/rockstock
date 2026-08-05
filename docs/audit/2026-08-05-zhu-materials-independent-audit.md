@@ -138,3 +138,5 @@ docs/RockStar_5Steps_Framework_v12.md
 4. 若程式與教材不同，是 bug，還是有回測證據的 production override？
 
 本次文件已把這四個問題納入固定欄位，可作後續知識點落地與程式審計的基準。
+
+後續已完成正式執行鏈深挖，詳見 [朱家泓教材規則到 RockStock 程式深度稽核](./2026-08-05-zhu-rule-to-code-deep-audit.md)。該報告逐條區分確認缺陷、部分覆蓋、資料限制、產品覆寫與自創量化。
