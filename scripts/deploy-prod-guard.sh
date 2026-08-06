@@ -24,7 +24,7 @@
 set -e
 LABEL="com.rockstock.prod-server"
 UID_="$(id -u)"
-ROOT="$HOME/Desktop/rockstock"
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 export PATH="$HOME/.local/node-22/bin:$PATH"
 
 FORCE=0
@@ -60,10 +60,36 @@ else
   launchctl unsetenv DISABLE_LOCAL_CRON 2>/dev/null || true
 fi
 
-# ── build ──────────────────────────────────────────────────────────────────
-echo "→ npm run build ..."
+# ── 旁路 build ─────────────────────────────────────────────────────────────
+# 不直接在 production 正在讀取的 .next 上 build。Next build 一開始會清 distDir；
+# 若編譯失敗，舊做法會讓存活中的 server 找不到靜態檔，頁面就可能整片黑。
 cd "$ROOT"
-npm run build
+STAGE_DIR="$ROOT/.next-deploy"
+BACKUP_DIR="$ROOT/.next-before-deploy"
+SWAPPED=0
+
+rollback_on_error() {
+  status="$?"
+  if [ "$status" -ne 0 ] && [ "$SWAPPED" = "1" ]; then
+    echo "✗ 新版啟動失敗，還原上一版 .next ..."
+    rm -rf "$ROOT/.next"
+    if [ -d "$BACKUP_DIR" ]; then
+      mv "$BACKUP_DIR" "$ROOT/.next"
+      launchctl kickstart -k "gui/$UID_/$LABEL" 2>/dev/null || true
+    fi
+  fi
+  exit "$status"
+}
+trap rollback_on_error EXIT INT TERM
+
+rm -rf "$STAGE_DIR" "$BACKUP_DIR"
+echo "→ NEXT_DEPLOY_BUILD=1 npm run build（旁路：.next-deploy）..."
+NEXT_DEPLOY_BUILD=1 npm run build
+
+# build 完整成功後才切換；兩次 rename 的空窗極短，舊 .next 會保留到健康檢查通過。
+[ -d "$ROOT/.next" ] && mv "$ROOT/.next" "$BACKUP_DIR"
+mv "$STAGE_DIR" "$ROOT/.next"
+SWAPPED=1
 
 # ── 重啟 ───────────────────────────────────────────────────────────────────
 echo "→ launchctl kickstart -k gui/$UID_/$LABEL ..."
@@ -81,8 +107,14 @@ done
 if [ "$ok" = "1" ]; then
   echo "✓ server 已起（HTTP 200）"
 else
-  echo "✗ 90s 內沒等到 200（code=$code）— 自己檢查 launchctl print gui/$UID_/$LABEL 與 log"
+  echo "✗ 90s 內沒等到 200（code=$code）— 將自動回復上一版"
+  exit 1
 fi
+
+# 新版已健康，上一版 build 才可清除；關閉錯誤回復 trap。
+rm -rf "$BACKUP_DIR"
+SWAPPED=0
+trap - EXIT INT TERM
 
 # ── 清 L1 cache（讓剛改的資料/碼即時生效）──────────────────────────────────
 SECRET="$(grep -E '^CRON_SECRET=' "$ROOT/.env.local" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs)"
