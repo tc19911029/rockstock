@@ -527,7 +527,7 @@ export default function ChartToolbar({
           className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
             showMarkers ? 'bg-blue-600/60 text-blue-200' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
           }`}
-          title="買賣訊號標記（M/N/O/P/Q/F 等買法觸發點）"
+          title="買賣訊號標記：綠色上箭頭＝買、紅色下箭頭＝賣，箭頭越大代表共振越強；訊號密集時自動隱藏重複文字，避免遮住 K 棒"
         >訊號</button>
         {showMarkers && (
           <select

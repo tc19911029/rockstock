@@ -17,6 +17,11 @@ import { CandleWithIndicators, RuleSignal, ChartSignalMarker } from '@/types';
 
 import { getBullBearColors } from '@/lib/chart/colors';
 import {
+  getCompactSignalMarkerLabel,
+  isAggregateSignalMarker,
+  shouldHideAggregateSignalLabels,
+} from '@/lib/chart/markerDisplay';
+import {
   formatPivotPrice,
   getPatternDisplayName,
   getPivotLabels,
@@ -1005,9 +1010,23 @@ export default function CandleChart({
   useEffect(() => {
     if (!markersPlugRef.current) return;
     const markerCfg = getMarkerConfig();
+    // 主圖通常顯示最近約 120 根；密集時保留每個箭頭位置，但拿掉重複的「買×N／賣×N」文字。
+    // 字母買法與特殊風險警示仍顯示原標籤，強共振則用較大的箭頭表達。
+    const recentDates = new Set(candles.slice(-120).map(candle => candle.date.replace(/\*$/, '')));
+    const recentMarkers = chartMarkers.filter(marker => recentDates.has(marker.date.replace(/\*$/, '')));
+    const hideAggregateSignalLabels = shouldHideAggregateSignalLabels(recentMarkers);
     const converted: SeriesMarker<Time>[] = chartMarkers.map(m => {
       const cfg = markerCfg[m.type];
-      return { time: toTime(m.date), position: cfg.position, shape: cfg.shape, color: cfg.color, text: m.label, size: 1 };
+      return {
+        time: toTime(m.date),
+        position: cfg.position,
+        shape: cfg.shape,
+        color: cfg.color,
+        text: hideAggregateSignalLabels && isAggregateSignalMarker(m)
+          ? ''
+          : getCompactSignalMarkerLabel(m),
+        size: (m.strength ?? 0) >= 4 ? 2 : 1,
+      };
     });
     // 訊號日改為整根 K 棒塗黃（見上方 candle setData），不再用黃點 + 文字標記
     // 加入頭底標記（寶典 p.21-22 MA5 分段轉折波，書本規則無振幅門檻）
