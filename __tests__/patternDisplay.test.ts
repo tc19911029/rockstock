@@ -2,20 +2,16 @@ import type { Pivot } from '@/lib/analysis/trendAnalysis';
 import {
   formatPivotPrice,
   getPivotLabels,
-  getPivotMarkerLabel,
-  getPivotMarkerText,
   resolvePatternPivotSnapshots,
 } from '@/lib/chart/patternDisplay';
 
 const pivot = (type: Pivot['type'], price: number, index = 0): Pivot => ({ type, price, index });
 
 describe('patternDisplay', () => {
-  it('頭底 marker 明確帶出可核對的價格', () => {
-    expect(getPivotMarkerText(pivot('high', 123.456))).toBe('頭 123.46');
-    expect(getPivotMarkerText(pivot('low', 98))).toBe('底 98.00');
+  it('頭底與型態核對面板的價格統一顯示到小數 2 位', () => {
+    expect(formatPivotPrice(123.456)).toBe('123.46');
+    expect(formatPivotPrice(98)).toBe('98.00');
     expect(formatPivotPrice(Number.NaN)).toBe('—');
-    expect(getPivotMarkerLabel(pivot('high', 123.456))).toBe('頭');
-    expect(getPivotMarkerLabel(pivot('low', 98))).toBe('底');
   });
 
   it('倒 N 腳位依 detector 回傳順序標成 C/A/B', () => {

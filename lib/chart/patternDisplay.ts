@@ -88,15 +88,6 @@ export function formatPivotPrice(price: number): string {
   return Number.isFinite(price) ? price.toFixed(2) : '—';
 }
 
-export function getPivotMarkerText(pivot: Pivot): string {
-  return `${pivot.type === 'high' ? '頭' : '底'} ${formatPivotPrice(pivot.price)}`;
-}
-
-/** K 棒旁只放短標籤；精確價格固定顯示在 DOM 圖例，避免窄圖互相蓋住。 */
-export function getPivotMarkerLabel(pivot: Pivot): '頭' | '底' {
-  return pivot.type === 'high' ? '頭' : '底';
-}
-
 /**
  * 把 LockWatch 在觸發日凍結的腳位轉回目前日 K 的 index。
  * 週／月 K 日期無法精確對上時會略過，絕不把錯日期硬套到別根 K 棒。
