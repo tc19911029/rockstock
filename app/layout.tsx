@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { RiskDisclaimerModal, FeatureGuideModal } from "@/components/RiskDisclaimer";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -8,28 +7,6 @@ import { ColorThemeInit } from "@/components/ColorThemeInit";
 import { Toaster } from "sonner";
 import RegisterPWA from "@/components/RegisterPWA";
 import StoreSync from "@/components/StoreSync";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const dmSans = DM_Sans({
-  variable: "--font-dm-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -71,7 +48,13 @@ export default function RootLayout({
   return (
     <html
       lang="zh-TW"
-      className={`dark ${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} ${dmSans.variable} h-full antialiased`}
+      className="dark h-full antialiased"
+      style={{
+        "--font-geist-sans": "system-ui",
+        "--font-dm-sans": "system-ui",
+        "--font-geist-mono": "ui-monospace",
+        "--font-jetbrains-mono": "ui-monospace",
+      } as React.CSSProperties}
       suppressHydrationWarning
     >
       <head>
