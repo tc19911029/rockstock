@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { isTopPatternType } from '@/lib/analysis/patternCatalog';
 
 export interface LockedPattern {
   patternType: string;
@@ -33,8 +34,6 @@ interface LockwatchApiResponse {
   snapshot?: { records?: LockwatchRecordShape[] } | null;
 }
 
-const TOP_PATTERNS = new Set(['head-shoulder-top', 'triple-top', 'double-top']);
-
 /**
  * 鎖股觀察紀錄 → 走圖型態 chip 的穩定資料源。
  * 只要 symbol 變動就重抓；走圖前後切時間軸不會重算。
@@ -51,7 +50,6 @@ export function useLockedPattern(symbol: string | null | undefined): {
 
   useEffect(() => {
     if (!symbol) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- symbol 變 null 時 reset state；React 19 新規則對「dep reset」誤判
       setLockedPattern(null);
       return;
     }
@@ -83,10 +81,10 @@ export function useLockedPattern(symbol: string | null | undefined): {
           patternType: rec.patternType,
           necklinePrice: rec.triggerPrice,
           targetPrice: rec.patternTargetPrice,
-          stopPrice: rec.vBottom,  // F 才有；N 由 CandleChart fallback necklinePrice * 0.93
+          stopPrice: rec.vBottom,  // F 才有；N 由 CandleChart 依底/頂方向套用頸線 ±3% fallback
           achievementRate:
             rec.patternAchievementRate != null ? rec.patternAchievementRate * 100 : undefined,
-          kind: TOP_PATTERNS.has(rec.patternType) ? 'top' : 'bottom',
+          kind: isTopPatternType(rec.patternType) ? 'top' : 'bottom',
         });
       })
       .catch(() => {

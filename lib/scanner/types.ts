@@ -265,7 +265,11 @@ export interface StockScanResult {
       | 'n-shape'
       | 'head-shoulder-top'
       | 'triple-top'
-      | 'double-top';
+      | 'double-top'
+      | 'complex-head-shoulder-top'
+      | 'inverted-n-top'
+      | 'long-double-top'
+      | 'one-line-top';
     patternTargetPrice?: number;
     patternAchievementRate?: number;
   };

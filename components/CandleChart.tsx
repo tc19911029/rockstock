@@ -16,6 +16,12 @@ import {
 import { CandleWithIndicators, RuleSignal, ChartSignalMarker } from '@/types';
 
 import { getBullBearColors } from '@/lib/chart/colors';
+import {
+  formatPivotPrice,
+  getPatternDisplayName,
+  getPivotLabels,
+  getPivotMarkerText,
+} from '@/lib/chart/patternDisplay';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import { detectLetterNStructure, detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
 import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
@@ -130,78 +136,6 @@ function getMarkerConfig(): Record<ChartSignalMarker['type'], {
     SELL:   { position: 'aboveBar', shape: 'arrowDown', color: bear },
     WATCH:  { position: 'aboveBar', shape: 'arrowDown', color: '#eab308' },
   };
-}
-
-/** 形態 patternType → 中文顯示名稱 */
-function getPatternDisplayName(patternType: string): string {
-  const names: Record<string, string> = {
-    'triple-bottom': '三重底',
-    'head-shoulder': '頭肩底',
-    'rounding-bottom': '圓弧底',
-    'complex-head-shoulder': '複式頭肩底',
-    'falling-diamond': '跌菱形',
-    'descending-wedge': '下降楔形',
-    'double-bottom': '雙重底',
-    'n-shape': 'N 字底',
-    'triple-top': '三重頂',
-    'head-shoulder-top': '頭肩頂',
-    'double-top': '雙重頂',
-    'complex-head-shoulder-top': '複式頭肩頂',
-    'inverted-n-top': '倒N字頂',
-    'long-double-top': '長雙頭頂',
-    'one-line-top': '一字頂',
-  };
-  return names[patternType] ?? patternType;
-}
-
-/** 形態 pivots 的中文標籤對照（順序與 v12LetterN.ts 各 detector 內部一致）*/
-function getPivotLabels(patternType: string, pivots: Pivot[]): string[] {
-  switch (patternType) {
-    case 'triple-bottom':       return ['L1', 'L2', 'L3', 'H1', 'H2'];
-    case 'head-shoulder':       return ['RS', '頭', 'LS', 'RN', 'LN'];
-    case 'descending-wedge':    return ['H1', 'H2', 'L1', 'L2'];
-    case 'falling-diamond':     return ['H1', 'H2', 'H3', 'H4', 'L1', 'L2', 'L3', 'L4'];
-    case 'double-bottom':       return ['L1', 'L2', 'H'];
-    case 'rounding-bottom':     return ['H1', '弧底', 'H2'];
-    case 'n-shape':             return ['A', 'B'];
-    case 'triple-top':          return ['H1', 'H2', 'H3', 'L1', 'L2'];
-    case 'head-shoulder-top':   return ['RS', '頂', 'LS', 'RN', 'LN'];
-    case 'double-top':          return ['H1', 'H2', 'L'];
-    case 'long-double-top':     return ['H1', 'H2', 'L'];               // 同雙重頂結構（間隔久）
-    case 'inverted-n-top':      return ['C', 'A', 'B'];                 // 高C(頭頭低)/前高A/頸線B
-    case 'one-line-top':        return ['島頂', '缺口'];                 // 孤島高點 / 跳空缺口下緣
-    case 'complex-head-shoulder-top': {
-      // 結構：[head, ...shoulders]（head 在首位，其餘皆肩）
-      return pivots.map((_, i) => (i === 0 ? '頭' : `肩${i}`));
-    }
-    case 'complex-head-shoulder': {
-      // 結構：[...rightShoulders, head(最低), ...leftShoulders, h1, h2]
-      // 找 head：lows 中 price 最小者
-      let headIdx = -1;
-      let headPrice = Infinity;
-      for (let i = 0; i < pivots.length; i++) {
-        if (pivots[i].type === 'low' && pivots[i].price < headPrice) {
-          headPrice = pivots[i].price;
-          headIdx = i;
-        }
-      }
-      const labels: string[] = [];
-      let lowCount = 0;
-      let highCount = 0;
-      for (let i = 0; i < pivots.length; i++) {
-        if (i === headIdx) labels.push('頭');
-        else if (pivots[i].type === 'low') {
-          lowCount++;
-          labels.push(`肩${lowCount}`);
-        } else {
-          highCount++;
-          labels.push(`頸${highCount}`);
-        }
-      }
-      return labels;
-    }
-    default: return pivots.map((_, i) => `P${i + 1}`);
-  }
 }
 
 interface CandleChartProps {
@@ -395,7 +329,7 @@ export default function CandleChart({
   // 優先順序：lockedPattern（鎖股觀察紀錄）> fresh detection
   //   解 0512 bug：5/5 鎖圓弧底（目標 320）5/6 chart detector 卻偵測成頭肩底（目標 261）
   //   → 兩個資料源不一致，用戶看到型態跳動 + 目標縮水
-  //   修法：有 lockedPattern 直接用，pivots 仍從 fresh detection 取（避免 marker 對不上 K 線）
+  //   修法：有 lockedPattern 直接用；只有 fresh detection 型態相同時才借用 pivots。
   const activePattern = useMemo<{
     kind: 'bottom' | 'top';
     pivots: Pivot[];
@@ -405,6 +339,8 @@ export default function CandleChart({
     patternType: string;
     achievementRate?: number;
     isLocked?: boolean;  // 來自鎖股觀察的旗標
+    /** 鎖定型態與即時 detector 型態一致時才允許畫腳位，避免用另一種型態的 pivots 冒充。 */
+    pivotsVerified: boolean;
   } | null>(() => {
     if (!showNeckline && !showPattern) return null;
     if (candles.length < 30) return null;
@@ -414,22 +350,24 @@ export default function CandleChart({
 
     // 優先用 lockedPattern（穩定 — 跟鎖股觀察一致）
     if (lockedPattern && lockedPattern.necklinePrice != null && lockedPattern.targetPrice != null) {
-      // 取對應方向的 fresh detection 提供 pivots（marker 對齊 K 線）
       const freshSource = lockedPattern.kind === 'bottom' ? bottom : top;
+      const pivotsVerified = freshSource.patternType === lockedPattern.patternType;
       return {
         kind: lockedPattern.kind,
-        pivots: freshSource.pivots ?? [],
+        // 型態不同時寧可不畫腳位，也不能把頭肩底的腳標成圓弧底等錯誤型態。
+        pivots: pivotsVerified ? (freshSource.pivots ?? []) : [],
         necklinePrice: lockedPattern.necklinePrice,
         targetPrice: lockedPattern.targetPrice,
-        stopPrice: lockedPattern.stopPrice ?? lockedPattern.necklinePrice * 0.93,
+        stopPrice: lockedPattern.stopPrice ?? lockedPattern.necklinePrice * (lockedPattern.kind === 'bottom' ? 0.97 : 1.03),
         patternType: lockedPattern.patternType,
-        achievementRate: lockedPattern.achievementRate ?? freshSource.achievementRate,
+        achievementRate: lockedPattern.achievementRate ?? (pivotsVerified ? freshSource.achievementRate : undefined),
         isLocked: true,
+        pivotsVerified,
       };
     }
 
-    if (bottom.pivots && bottom.necklinePrice != null && bottom.patternTargetPrice != null && bottom.structureBrokenPrice != null) {
-      return {
+    const bottomCandidate = bottom.pivots && bottom.necklinePrice != null && bottom.patternTargetPrice != null && bottom.structureBrokenPrice != null
+      ? {
         kind: 'bottom',
         pivots: bottom.pivots,
         necklinePrice: bottom.necklinePrice,
@@ -437,10 +375,11 @@ export default function CandleChart({
         stopPrice: bottom.structureBrokenPrice,
         patternType: bottom.patternType ?? '',
         achievementRate: bottom.achievementRate,
-      };
-    }
-    if (top.pivots && top.necklinePrice != null && top.patternTargetPrice != null && top.structureBrokenPrice != null) {
-      return {
+        pivotsVerified: true,
+      } as const
+      : null;
+    const topCandidate = top.pivots && top.necklinePrice != null && top.patternTargetPrice != null && top.structureBrokenPrice != null
+      ? {
         kind: 'top',
         pivots: top.pivots,
         necklinePrice: top.necklinePrice,
@@ -448,9 +387,19 @@ export default function CandleChart({
         stopPrice: top.structureBrokenPrice,
         patternType: top.patternType ?? '',
         achievementRate: top.achievementRate,
-      };
-    }
-    return null;
+        pivotsVerified: true,
+      } as const
+      : null;
+
+    if (!bottomCandidate) return topCandidate;
+    if (!topCandidate) return bottomCandidate;
+
+    // 同一視窗可能殘留舊底部與新頂部結構；以最近完成的 pivot 決定顯示，
+    // 不再無條件讓底部型態遮掉較新的頂部警示。若同日則維持原本底部優先。
+    const latestPivot = (ps: Pivot[]) => Math.max(...ps.map(p => p.index));
+    return latestPivot(topCandidate.pivots) > latestPivot(bottomCandidate.pivots)
+      ? topCandidate
+      : bottomCandidate;
   }, [candles, showNeckline, showPattern, lockedPattern]);
 
   useEffect(() => {
@@ -862,7 +811,6 @@ export default function CandleChart({
       consolidationRefs.current.upper?.setData([]);
       consolidationRefs.current.lower?.setData([]);
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切線狀態同步給 legend
     setTrendlineStatus({ ascending: ascInfo, descending: descInfo });
     setChannelStatus({ ascending: ascChInfo, descending: descChInfo });
     setConsolidationStatus({ upper: consUpperInfo, lower: consLowerInfo });
@@ -1031,8 +979,13 @@ export default function CandleChart({
     // 加入頭底標記（寶典 p.21-22 MA5 分段轉折波，書本規則無振幅門檻）
     // 只顯示已確認 pivot（不含 provisional），進行中段不算頭/底
     if (showPivots && candles.length >= 20) {
+      const patternPivotIndices = new Set(
+        showPattern && activePattern ? activePattern.pivots.map(p => p.index) : [],
+      );
       const pivots = findPivots(candles, candles.length - 1, 30);
       for (const p of pivots) {
+        // 同一轉折已由型態腳位（如 H1/L1/頭/肩）標示時，不再疊一層「頭/底」。
+        if (patternPivotIndices.has(p.index)) continue;
         const c = candles[p.index];
         if (!c) continue;
         converted.push({
@@ -1040,14 +993,14 @@ export default function CandleChart({
           position: p.type === 'high' ? 'aboveBar' : 'belowBar',
           shape: p.type === 'high' ? 'arrowDown' : 'arrowUp',
           color: p.type === 'high' ? '#ec4899' : '#06b6d4',
-          text: p.type === 'high' ? '頭' : '底',
+          text: getPivotMarkerText(p),
           size: 1,
         });
       }
     }
     // 加入形態 ABCDE 關鍵點標籤（showPattern toggle）
     if (showPattern && activePattern) {
-      const labels = getPivotLabels(activePattern.patternType, activePattern.pivots);
+      const pivotLabels = getPivotLabels(activePattern.patternType, activePattern.pivots);
       for (let i = 0; i < activePattern.pivots.length; i++) {
         const p = activePattern.pivots[i];
         const c = candles[p.index];
@@ -1057,7 +1010,8 @@ export default function CandleChart({
           position: p.type === 'high' ? 'aboveBar' : 'belowBar',
           shape: 'circle',
           color: '#e879f9',  // 紫桃，配合 patternConnectorRef
-          text: labels[i] ?? `P${i + 1}`,
+          // K 棒旁保留短標籤避免窄圖重疊；精確價位與日期固定列在左上「腳位」圖例。
+          text: pivotLabels[i] ?? `P${i + 1}`,
           size: 2,
         });
       }
@@ -1309,6 +1263,26 @@ export default function CandleChart({
     : candles.length - 1;
   const prevForLegend = candles[idxForLegend - 1];
 
+  // 頭／底與型態腳位不只畫在 canvas，也以文字列出日期和價位。
+  // canvas marker 會受縮放與可視範圍影響，文字圖例才可讓使用者穩定核對算法輸出。
+  const pivotValueLegend = useMemo(() => {
+    if (!showPivots || candles.length < 20) return [];
+    return findPivots(candles, candles.length - 1, 6).map(pivot => ({
+      ...pivot,
+      date: candles[pivot.index]?.date?.replace(/\*$/, '') ?? '',
+    }));
+  }, [showPivots, candles]);
+
+  const patternPivotLegend = useMemo(() => {
+    if (!showPattern || !activePattern || activePattern.pivots.length === 0) return [];
+    const labels = getPivotLabels(activePattern.patternType, activePattern.pivots);
+    return activePattern.pivots.map((pivot, index) => ({
+      ...pivot,
+      label: labels[index] ?? `P${index + 1}`,
+      date: candles[pivot.index]?.date?.replace(/\*$/, '') ?? '',
+    }));
+  }, [showPattern, activePattern, candles]);
+
   // 信號（右上獨立）+ 形態 chip（左側 row 2）預先計算
   const PRIORITY: Record<string, number> = { SELL: 4, BUY: 3, REDUCE: 2, ADD: 1 };
   const filteredSignals = signals.filter(s => s.type !== 'WATCH');
@@ -1459,6 +1433,24 @@ export default function CandleChart({
           </div>
         )}
 
+        {/* 頭底數值：顯示最近確認轉折，避免 canvas 標記被縮放遮掉後無法驗算。 */}
+        {pivotValueLegend.length > 0 && (
+          <div
+            data-testid="pivot-value-legend"
+            className="flex max-w-[min(78vw,900px)] flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono"
+          >
+            {pivotValueLegend.map(pivot => (
+              <span
+                key={`${pivot.type}-${pivot.index}`}
+                className={pivot.type === 'high' ? 'text-pink-300' : 'text-cyan-300'}
+                title={`${pivot.date} 第 ${pivot.index + 1} 根 K 棒`}
+              >
+                {getPivotMarkerText(pivot)} <span className="opacity-65">{pivot.date}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Row 2: 形態 chip + 頸/標/失（一排，存在才顯示；信號 badge 在右上獨立）*/}
         {hasInfoRow && (
           <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-mono">
@@ -1484,6 +1476,14 @@ export default function CandleChart({
                   即時
                 </span>
               )
+            )}
+            {showPatternChip && activePattern.isLocked && !activePattern.pivotsVerified && showPattern && (
+              <span
+                className="px-1.5 py-0.5 rounded border border-amber-500/70 text-amber-200 text-[10px] font-normal"
+                title="鎖定紀錄與目前走圖偵測到的型態不同；已保留鎖定的頸線與目標，但不冒用另一型態的腳位。"
+              >
+                腳位待對齊
+              </span>
             )}
             {showPatternChip && patternStatus && activePattern && (() => {
               const close = candles[candles.length - 1]?.close ?? 0;
@@ -1527,6 +1527,23 @@ export default function CandleChart({
                 </span>
               </>
             )}
+          </div>
+        )}
+
+        {patternPivotLegend.length > 0 && (
+          <div
+            data-testid="pattern-pivot-values"
+            className="flex max-w-[min(78vw,900px)] flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono text-fuchsia-200"
+          >
+            <span className="opacity-70">腳位</span>
+            {patternPivotLegend.map((pivot, index) => (
+              <span
+                key={`${pivot.label}-${pivot.index}-${index}`}
+                title={`${pivot.date} 第 ${pivot.index + 1} 根 K 棒`}
+              >
+                {pivot.label} {formatPivotPrice(pivot.price)} <span className="opacity-60">{pivot.date}</span>
+              </span>
+            ))}
           </div>
         )}
 

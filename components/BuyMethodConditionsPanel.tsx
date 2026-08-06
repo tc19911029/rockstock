@@ -411,7 +411,7 @@ function evaluateMethod(
       return { title, subTitle: '寶典 p.387 上升軌道線', conditions, allPass: r.triggered };
     }
     case 'N': {
-      // N=型態確認（v12 新訊號，7 種底部型態）
+      // N=型態確認（8 種底部型態；最新課程 6 型優先、書本補充在後）
       // 雙層 detector：
       //   - detectLetterN：完整觸發（含 ×3% 真突破）— 全部條件過才算 ✓
       //   - detectLetterNStructure：只看「結構成立」（pivots + 達成率）— 給 pending-breakout 顯示
@@ -439,9 +439,9 @@ function evaluateMethod(
         {
           icon: '①', name: '型態結構',
           detail: r.triggered
-            ? `${patternName}（達成率 ${achievement}%）`
+            ? `${patternName}${achievement != null ? `（書本達成率 ${achievement}%）` : ''}`
             : hasStructure
-              ? `${patternName}（達成率 ${achievement}% · 結構成立待突破）`
+              ? `${patternName}（${achievement != null ? `書本達成率 ${achievement}% · ` : ''}結構成立待突破）`
               : '未識別',
           pass: r.triggered || hasStructure,
         },

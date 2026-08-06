@@ -52,6 +52,10 @@ export interface LockWatchRecord {
    * - 'head-shoulder-top' 頭肩頂
    * - 'triple-top' 三重頂
    * - 'double-top' 雙重頂
+   * - 'complex-head-shoulder-top' 複式頭肩頂
+   * - 'inverted-n-top' 倒 N 字頂
+   * - 'long-double-top' 長雙頭頂
+   * - 'one-line-top' 一字頂
    */
   patternType?:
     | 'head-shoulder'
@@ -64,7 +68,11 @@ export interface LockWatchRecord {
     | 'n-shape'
     | 'head-shoulder-top'
     | 'triple-top'
-    | 'double-top';
+    | 'double-top'
+    | 'complex-head-shoulder-top'
+    | 'inverted-n-top'
+    | 'long-double-top'
+    | 'one-line-top';
 
   /**
    * 觸發日鎖定的突破點價格（議題 24 / 75）

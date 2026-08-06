@@ -41,6 +41,10 @@ const PATTERN_NAME: Record<NonNullable<LockWatchRecord['patternType']>, string> 
   'head-shoulder-top': '頭肩頂',
   'triple-top': '三重頂',
   'double-top': '雙重頂',
+  'complex-head-shoulder-top': '複式頭肩頂',
+  'inverted-n-top': '倒 N 字頂',
+  'long-double-top': '長雙頭頂',
+  'one-line-top': '一字頂',
 };
 
 // 2026-05-13 對齊書本：observation = 觸發書本進場條件（已可進場）；

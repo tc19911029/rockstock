@@ -11,6 +11,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 
 import { detectLetterN, detectTopPatterns } from '../lib/analysis/v12LetterN';
+import { TOP_PATTERN_TYPES } from '../lib/analysis/patternCatalog';
 import { computeIndicators } from '../lib/indicators';
 import type { Candle, CandleWithIndicators } from '../types';
 
@@ -76,7 +77,7 @@ async function main() {
   console.log(`bottom triggered: ${bottomTriggered} | top triggered: ${topTriggered}`);
 
   const ALL_BOTTOM = ['head-shoulder', 'complex-head-shoulder', 'triple-bottom', 'falling-diamond', 'rounding-bottom', 'descending-wedge', 'double-bottom', 'n-shape'];
-  const ALL_TOP = ['head-shoulder-top', 'triple-top', 'double-top'];
+  const ALL_TOP = TOP_PATTERN_TYPES;
 
   console.log('\n底部型態（detectLetterN）:');
   for (const p of ALL_BOTTOM) {

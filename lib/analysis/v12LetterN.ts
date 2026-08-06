@@ -30,6 +30,9 @@ import { isValidRedK } from './redKValidator';
 import type { MarketId } from '../scanner/types';
 import { BOOK_BODY_PCT_MIN, BOOK_VOL_RATIO_MIN } from './bookThresholds';
 import { N_MIN_HISTORY } from './historyMinimums';
+import type { TopPatternType } from './patternCatalog';
+
+export type { TopPatternType } from './patternCatalog';
 
 export type PatternType =
   | 'head-shoulder'        // 頭肩底（達成率 83%）
@@ -44,16 +47,9 @@ export type PatternType =
   | 'n-shape';             // N 字底（A 高→B 低→C 突破 A 高）
 
 /** 頂部型態（向下跌破做空 / 出場警示，2026-05-10 補實作；2026-07-07 補 S4 v2 四型） */
-export type TopPatternType =
-  | 'head-shoulder-top'          // 頭肩頂
-  | 'triple-top'                 // 三重頂
-  | 'double-top'                 // 雙重頂
-  | 'complex-head-shoulder-top'  // 複式頭肩頂（多肩，S4 v2）
-  | 'inverted-n-top'             // 倒N字頂（高→低→反彈不過高→跌破，S4 v2）
-  | 'long-double-top'            // 長雙頭頂（兩頂間隔久，較雙重頂可靠，S4 v2）
-  | 'one-line-top';              // 一字頂（高檔窄幅橫盤+均線靠攏，大量長黑跌破支撐）
-
-const PATTERN_ACHIEVEMENT: Record<PatternType, number> = {
+// 《抓飆股》附錄有明載者才填；最新線上課合集只稱「高勝率」，沒有印統一百分比。
+// N 字底過去的 75% 是系統自行估值，不能再冒充教材數字。
+const PATTERN_ACHIEVEMENT: Partial<Record<PatternType, number>> = {
   'head-shoulder': 83,
   'triple-bottom': 95,
   'rounding-bottom': 85,
@@ -61,18 +57,11 @@ const PATTERN_ACHIEVEMENT: Record<PatternType, number> = {
   'falling-diamond': 80,
   'descending-wedge': 90,
   'double-bottom': 36,  // 書本明寫成功率低，仍實作但加警示
-  'n-shape': 75,        // 書本未明寫達成率，採保守估值
 };
 
-const TOP_PATTERN_ACHIEVEMENT: Record<TopPatternType, number> = {
-  'head-shoulder-top': 83,          // 對稱頭肩底
-  'triple-top': 95,                 // 對稱三重底
-  'double-top': 36,                 // 對稱雙重底
-  'complex-head-shoulder-top': 80,  // 對稱複式頭肩底
-  'inverted-n-top': 75,             // 對稱 n-shape（保守）
-  'long-double-top': 50,            // 長雙頭頂：間隔久較可靠，介於雙重(36)與三重(95)
-  'one-line-top': 85,               // 一字頂（高檔均線靠攏窄幅盤頭，跌破連續下跌）
-};
+// 線上課 CH6-11 未提供頂部各型態的精確達成率；舊版用底部型態對稱值與人工估值，
+// 會讓 UI 看起來像朱老師公布的統計，因此保留欄位但不填假數字。
+const TOP_PATTERN_ACHIEVEMENT: Partial<Record<TopPatternType, number>> = {};
 
 export interface LetterNResult {
   triggered: boolean;
@@ -123,14 +112,10 @@ export function detectLetterN(
   const volumeRatio = c.volume / prev.volume;
   if (volumeRatio < BOOK_VOL_RATIO_MIN) return empty;
 
-  // 依序試 8 個型態（按達成率降序）：
-  //   三重底 95% → 下降楔形 90% → 圓弧底 85% → 頭肩底 83% →
-  //   複式頭肩底/跌菱形 80% → N 字底 75% → 雙重底 36%
+  // 最新課程 6-4 的高勝率型態優先；書本補充型態放後面，避免次要型態
+  // 先命中後把同一段更符合課程的圓弧底／頭肩底遮掉。
   const tripleBottom = detectTripleBottom(candles, idx);
   if (tripleBottom) return makeResult(tripleBottom, c.close, bodyPct, volumeRatio);
-
-  const descendingWedge = detectDescendingWedge(candles, idx);
-  if (descendingWedge) return makeResult(descendingWedge, c.close, bodyPct, volumeRatio);
 
   const roundingBottom = detectRoundingBottom(candles, idx);
   if (roundingBottom) return makeResult(roundingBottom, c.close, bodyPct, volumeRatio);
@@ -141,11 +126,15 @@ export function detectLetterN(
   const complexHeadShoulder = detectComplexHeadShoulder(candles, idx);
   if (complexHeadShoulder) return makeResult(complexHeadShoulder, c.close, bodyPct, volumeRatio);
 
-  const fallingDiamond = detectFallingDiamond(candles, idx);
-  if (fallingDiamond) return makeResult(fallingDiamond, c.close, bodyPct, volumeRatio);
-
   const nShape = detectNShape(candles, idx);
   if (nShape) return makeResult(nShape, c.close, bodyPct, volumeRatio);
+
+  // 書本補充型態（非最新課程 6-4 六型）仍保留，但不得搶先分類。
+  const descendingWedge = detectDescendingWedge(candles, idx);
+  if (descendingWedge) return makeResult(descendingWedge, c.close, bodyPct, volumeRatio);
+
+  const fallingDiamond = detectFallingDiamond(candles, idx);
+  if (fallingDiamond) return makeResult(fallingDiamond, c.close, bodyPct, volumeRatio);
 
   const doubleBottom = detectDoubleBottom(candles, idx);
   if (doubleBottom) return makeResult(doubleBottom, c.close, bodyPct, volumeRatio);
@@ -165,9 +154,11 @@ export function detectLetterNStructure(
   if (idx < N_MIN_HISTORY || candles.length === 0) return { triggered: false, detail: '' };
 
   const detectors = [
-    detectTripleBottom, detectDescendingWedge, detectRoundingBottom,
-    detectHeadShoulder, detectComplexHeadShoulder, detectFallingDiamond,
-    detectNShape, detectDoubleBottom,
+    // 最新課程 6-4 優先（第六型一字底由 D 策略負責）
+    detectTripleBottom, detectRoundingBottom, detectHeadShoulder,
+    detectComplexHeadShoulder, detectNShape,
+    // 書本補充型態
+    detectDescendingWedge, detectFallingDiamond, detectDoubleBottom,
   ];
   for (const d of detectors) {
     const m = d(candles, idx);
@@ -244,14 +235,15 @@ function makeResult(
 
   // 2026-07-05 回測-3 按課程：課程 6-4 只收高勝率型態當進場；雙重底書本明寫達成率 36%
   // → 不再發進場訊號（triggered:false），保留結構顯示供走圖參考。
-  if (PATTERN_ACHIEVEMENT[match.patternType] < 50) {
-    return structureOnly(`N ${getPatternName(match.patternType)} 達成率僅 ${PATTERN_ACHIEVEMENT[match.patternType]}%（課程只收高勝率型態）— 僅顯示不進場`);
+  const achievementRate = PATTERN_ACHIEVEMENT[match.patternType];
+  if (achievementRate != null && achievementRate < 50) {
+    return structureOnly(`N ${getPatternName(match.patternType)} 達成率僅 ${achievementRate}%（課程只收高勝率型態）— 僅顯示不進場`);
   }
 
   return {
     triggered: true,
     patternType: match.patternType,
-    achievementRate: PATTERN_ACHIEVEMENT[match.patternType],
+    achievementRate,
     necklinePrice: match.necklinePrice,
     breakoutThreshold,
     patternTargetPrice: match.patternTargetPrice,
@@ -259,7 +251,7 @@ function makeResult(
     pivots: match.pivots,
     bodyPct,
     volumeRatio,
-    detail: `N ${getPatternName(match.patternType)}（達成率 ${PATTERN_ACHIEVEMENT[match.patternType]}%${PATTERN_ACHIEVEMENT[match.patternType] < 50 ? ' ⚠️ 低達成率' : ''}+突破頸線 ${match.necklinePrice.toFixed(2)}×3%+紅K${bodyPct.toFixed(2)}%）`,
+    detail: `N ${getPatternName(match.patternType)}（${achievementRate != null ? `書本達成率 ${achievementRate}%+` : ''}突破頸線 ${match.necklinePrice.toFixed(2)}×3%+紅K${bodyPct.toFixed(2)}%）`,
   };
 }
 
@@ -484,8 +476,8 @@ function detectComplexHeadShoulder(
   const leftShoulders = lows.slice(headIdx + 1);   // 較舊（lows 由新→舊）
   const rightShoulders = lows.slice(0, headIdx);   // 較新
 
-  // 兩側肩各至少 1 個（簡化版至少 1+1，書本「複式」 ≥ 2+2 我們放寬以提高觸發率）
-  if (leftShoulders.length < 1 || rightShoulders.length < 1) return null;
+  // 複式頭肩底必須兩側各至少 2 個肩；不可為提高觸發率放寬成一般頭肩底。
+  if (leftShoulders.length < 2 || rightShoulders.length < 2) return null;
 
   // 兩側肩價位接近（取兩側平均，差 < 15%）
   const leftAvg = leftShoulders.reduce((s, p) => s + p.price, 0) / leftShoulders.length;
@@ -789,17 +781,18 @@ export function detectTopPatterns(
   const headShoulderTop = detectHeadShoulderTop(candles, idx);
   if (headShoulderTop) return makeTopResult(headShoulderTop, c.close);
 
-  const longDoubleTop = detectLongDoubleTop(candles, idx);          // 長雙頭在雙重前（較特定）
-  if (longDoubleTop) return makeTopResult(longDoubleTop, c.close);
-
-  const doubleTop = detectDoubleTop(candles, idx);
-  if (doubleTop) return makeTopResult(doubleTop, c.close);
-
   const invertedNTop = detectInvertedNTop(candles, idx);
   if (invertedNTop) return makeTopResult(invertedNTop, c.close);
 
+  const longDoubleTop = detectLongDoubleTop(candles, idx);          // 長雙頭在雙重前（較特定）
+  if (longDoubleTop) return makeTopResult(longDoubleTop, c.close);
+
   const oneLineTop = detectOneLineTop(candles, idx);
   if (oneLineTop) return makeTopResult(oneLineTop, c.close);
+
+  // 一般雙重頂是書本補充型態，放在最新課程六型之後，避免課程型態被搶先分類。
+  const doubleTop = detectDoubleTop(candles, idx);
+  if (doubleTop) return makeTopResult(doubleTop, c.close);
 
   return empty;
 }
@@ -815,7 +808,8 @@ export function detectTopPatternsStructure(
 
   const detectors = [
     detectTripleTop, detectComplexHeadShoulderTop, detectHeadShoulderTop,
-    detectLongDoubleTop, detectDoubleTop, detectInvertedNTop, detectOneLineTop,
+    detectInvertedNTop, detectLongDoubleTop, detectOneLineTop,
+    detectDoubleTop,
   ];
   for (const d of detectors) {
     const m = d(candles, idx);
@@ -877,7 +871,7 @@ function makeTopResult(match: TopPatternMatch, closePrice: number): TopPatternRe
     patternTargetPrice: match.patternTargetPrice,
     structureBrokenPrice: structureBrokenThreshold,
     pivots: match.pivots,
-    detail: `${getTopPatternName(match.patternType)}（達成率 ${TOP_PATTERN_ACHIEVEMENT[match.patternType]}%${TOP_PATTERN_ACHIEVEMENT[match.patternType] < 50 ? ' ⚠️ 低達成率' : ''}+跌破頸線 ${match.necklinePrice.toFixed(2)}×3%）`,
+    detail: `${getTopPatternName(match.patternType)}（跌破頸線 ${match.necklinePrice.toFixed(2)}×3%；教材未提供本型態精確達成率）`,
   };
 }
 
@@ -1071,7 +1065,10 @@ function detectInvertedNTop(candles: CandleWithIndicators[], idx: number): TopPa
   const [highC, highA] = highs;                    // C 較新、A 較舊
   if (highC.price >= highA.price) return null;      // 頭頭低（反彈不過前高）
   if ((highA.price - highC.price) / highA.price < 0.03) return null;  // C 明顯低於 A，避免雙頂誤判
-  const lowB = lows.find(l => l.index > highC.index && l.index < highA.index);   // A、C 之間的低點
+  // findPivots 是新→舊；highC 較新（index 大）、highA 較舊（index 小）。
+  // B 必須在 A 與 C 之間：highA.index < B.index < highC.index。
+  // 舊條件方向顛倒，形成不可能區間，導致倒 N 字頂永遠偵測不到。
+  const lowB = lows.find(l => l.index > highA.index && l.index < highC.index);
   if (!lowB) return null;
   const necklinePrice = lowB.price;                 // 跌破 B = 倒N確認（makeTopResult 判 close ≤ B×0.97）
   // 目標價 = 正波段算法（課程 6-11：倒 N 與 N 字底一樣，是 6 頭部型態裡唯一例外）

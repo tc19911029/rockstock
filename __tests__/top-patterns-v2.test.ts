@@ -1,6 +1,6 @@
 /**
  * S4 頂部型態 v2（2026-07-07）：複式頭肩頂/倒N字頂/長雙頭頂/一字頂
- * 型別/名稱/達成率完整性 + 一字頂（島狀反轉）結構偵測。
+ * 型別/名稱完整性 + 一字頂（高檔窄幅盤整）結構偵測。
  */
 import { detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
 import type { CandleWithIndicators } from '@/types';
@@ -33,6 +33,8 @@ describe('一字頂（課程 6-11：高檔窄幅橫盤 + 均線靠攏）detectTo
     expect(r.patternType).toBe('one-line-top');
     expect(r.necklinePrice).toBeGreaterThan(0);
     expect(r.patternTargetPrice).toBeLessThan(r.necklinePrice!); // 目標在頸線之下（等距投射）
+    // 最新課程沒有公布一字頂精確達成率，不能顯示舊系統自行估的 85%。
+    expect(r.achievementRate).toBeUndefined();
   });
 
   test('均線沒靠攏（MA20 遠離 MA60）→ 不算一字頂', () => {
@@ -47,7 +49,7 @@ describe('一字頂（課程 6-11：高檔窄幅橫盤 + 均線靠攏）detectTo
   });
 });
 
-describe('S4 v2 型別完整性（enum ↔ 名稱 ↔ 達成率）', () => {
+describe('S4 v2 型別完整性', () => {
   test('7 型都有中文名（間接驗 Record 完整，缺 key tsc 會擋）', () => {
     // detectTopPatternsStructure 對空/無結構回 triggered:false，此處只驗模組載入不拋錯
     const empty = detectTopPatternsStructure([bar('d0', 100, 101, 99, 100)], 0);

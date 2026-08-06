@@ -14,6 +14,7 @@ import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDaily
 import { DisciplineShadowCard } from '@/components/portfolio/DisciplineShadowCard';
 import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
 import type { MarginPressure } from '@/lib/chipcost/marginPressure';
+import { isTopPatternType } from '@/lib/analysis/patternCatalog';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
 function todayCST(): string {
@@ -119,13 +120,12 @@ export default function PortfolioPage() {
       const target = params.get('target');
       const stop = params.get('stop');
       if (patternType && neckline && target) {
-        const TOP_PATTERNS = new Set(['head-shoulder-top', 'triple-top', 'double-top']);
         setPrefilledEntryPattern({
           patternType,
           necklinePrice: Number(neckline),
           targetPrice: Number(target),
           stopPrice: stop ? Number(stop) : undefined,
-          kind: TOP_PATTERNS.has(patternType) ? 'top' : 'bottom',
+          kind: isTopPatternType(patternType) ? 'top' : 'bottom',
         });
       }
       setShowForm(true);
