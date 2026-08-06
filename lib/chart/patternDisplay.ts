@@ -1,4 +1,5 @@
 import type { Pivot } from '@/lib/analysis/trendAnalysis';
+import type { PatternPivotSnapshot } from '@/lib/analysis/patternCatalog';
 
 /** 形態 patternType → 中文顯示名稱。純函式放在 chart 外，方便回歸測試。 */
 export function getPatternDisplayName(patternType: string): string {
@@ -39,8 +40,25 @@ export function getPivotLabels(patternType: string, pivots: Pivot[]): string[] {
     case 'inverted-n-top':      return ['C', 'A', 'B'];
     // 一字頂已由舊「島狀反轉」重寫為高檔橫盤；兩點是箱頂與箱底支撐。
     case 'one-line-top':        return ['箱頂', '支撐'];
-    case 'complex-head-shoulder-top':
-      return pivots.map((_, i) => (i === 0 ? '頭' : `肩${i}`));
+    case 'complex-head-shoulder-top': {
+      let headIdx = -1;
+      let headPrice = -Infinity;
+      for (let i = 0; i < pivots.length; i++) {
+        if (pivots[i].type === 'high' && pivots[i].price > headPrice) {
+          headPrice = pivots[i].price;
+          headIdx = i;
+        }
+      }
+      const labels: string[] = [];
+      let shoulderCount = 0;
+      let neckCount = 0;
+      for (let i = 0; i < pivots.length; i++) {
+        if (i === headIdx) labels.push('頭');
+        else if (pivots[i].type === 'high') labels.push(`肩${++shoulderCount}`);
+        else labels.push(`頸${++neckCount}`);
+      }
+      return labels;
+    }
     case 'complex-head-shoulder': {
       let headIdx = -1;
       let headPrice = Infinity;
@@ -72,4 +90,32 @@ export function formatPivotPrice(price: number): string {
 
 export function getPivotMarkerText(pivot: Pivot): string {
   return `${pivot.type === 'high' ? '頭' : '底'} ${formatPivotPrice(pivot.price)}`;
+}
+
+/** K 棒旁只放短標籤；精確價格固定顯示在 DOM 圖例，避免窄圖互相蓋住。 */
+export function getPivotMarkerLabel(pivot: Pivot): '頭' | '底' {
+  return pivot.type === 'high' ? '頭' : '底';
+}
+
+/**
+ * 把 LockWatch 在觸發日凍結的腳位轉回目前日 K 的 index。
+ * 週／月 K 日期無法精確對上時會略過，絕不把錯日期硬套到別根 K 棒。
+ */
+export function resolvePatternPivotSnapshots(
+  snapshots: readonly PatternPivotSnapshot[] | undefined,
+  candleDates: readonly string[],
+): Pivot[] {
+  if (!snapshots?.length || candleDates.length === 0) return [];
+
+  const dateToIndex = new Map<string, number>();
+  candleDates.forEach((date, index) => dateToIndex.set(date.replace(/\*$/, ''), index));
+
+  const resolved: Pivot[] = [];
+  for (const snapshot of snapshots) {
+    if (!snapshot.date || (snapshot.type !== 'high' && snapshot.type !== 'low')) continue;
+    const index = dateToIndex.get(snapshot.date.replace(/\*$/, ''));
+    if (index == null || !Number.isFinite(snapshot.price)) continue;
+    resolved.push({ index, price: snapshot.price, type: snapshot.type });
+  }
+  return resolved;
 }

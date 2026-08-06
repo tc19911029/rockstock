@@ -47,6 +47,7 @@ export function createLockWatchFromN(args: {
   currentClose: number;
   patternTargetPrice?: number;
   patternAchievementRate?: number;
+  patternPivots?: LockWatchRecord['patternPivots'];
 }): LockWatchRecord {
   return {
     symbol: args.symbol,
@@ -57,6 +58,7 @@ export function createLockWatchFromN(args: {
     triggerPrice: args.triggerPrice,
     patternTargetPrice: args.patternTargetPrice,
     patternAchievementRate: args.patternAchievementRate,
+    patternPivots: args.patternPivots,
     currentStage: 'observation',
     daysObserved: 0,
     currentClose: args.currentClose,

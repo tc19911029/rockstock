@@ -5,6 +5,8 @@ import {
   BOOK_VOL_RATIO_MIN,
   KLINE_CONSOL_MAX_RANGE_PCT,
 } from '@/lib/analysis/bookThresholds';
+import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
+import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 
 export interface StrategyReasonRow {
   /** 用於 A 六條件子條件：true=pass、false=fail；其他策略不填 */
@@ -26,35 +28,6 @@ export interface StrategyReasonBlock {
 
 // 字母→名稱讀 lib/scanner/buyMethodTracks.ts 單一事實來源
 const METHOD_NAMES = LETTER_NAMES;
-
-const PATTERN_LABEL: Record<string, string> = {
-  'head-shoulder': '頭肩底',
-  'complex-head-shoulder': '複式頭肩底',
-  'triple-bottom': '三重底',
-  'falling-diamond': '跌菱形',
-  'rounding-bottom': '圓弧底',
-  'descending-wedge': '下降楔形',
-  'double-bottom': '雙重底',
-  'n-shape': 'N 字底',
-  'head-shoulder-top': '頭肩頂',
-  'triple-top': '三重頂',
-  'double-top': '雙重頂',
-};
-
-/** 書本《抓飆股》Part 7 統計達成率（百分比，0-100） */
-const PATTERN_ACHIEVEMENT_PCT: Record<string, number> = {
-  'triple-bottom': 95,
-  'descending-wedge': 90,
-  'rounding-bottom': 85,
-  'head-shoulder': 83,
-  'complex-head-shoulder': 80,
-  'falling-diamond': 80,
-  'n-shape': 75,
-  'double-bottom': 36,
-  'head-shoulder-top': 83,
-  'triple-top': 95,
-  'double-top': 36,
-};
 
 /** 書本規則描述（無逐檔 detail 欄位的策略，先用靜態描述） */
 const STATIC_BOOK_RULES: Record<string, string[]> = {
@@ -155,10 +128,8 @@ function buildPatternConfirm(r: StockScanResult): StrategyReasonBlock {
       rows: [{ text: '型態確認觸發但無 lockWatch 細節' }],
     };
   }
-  const name = PATTERN_LABEL[lw.patternType] ?? lw.patternType;
-  const ratePct = lw.patternAchievementRate != null
-    ? Math.round(lw.patternAchievementRate * 100)
-    : PATTERN_ACHIEVEMENT_PCT[lw.patternType];
+  const name = getPatternDisplayName(lw.patternType);
+  const ratePct = getLegacyBookAchievementRate(lw.patternType);
   const target = lw.patternTargetPrice;
   const trigger = lw.triggerPrice;
   const upsidePct = target != null
@@ -170,8 +141,8 @@ function buildPatternConfirm(r: StockScanResult): StrategyReasonBlock {
   ];
   if (ratePct != null) {
     rows.push({
-      label: '達成率',
-      text: `${ratePct}%（書本《抓飆股》Part 7 歷史統計）`,
+      label: '舊書達標率',
+      text: `${ratePct}%（《抓住飆股》附錄的型態達標統計，非 Rockstock 回測勝率）`,
     });
   }
   if (trigger != null) {

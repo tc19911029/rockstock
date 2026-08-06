@@ -253,6 +253,7 @@ export async function GET(req: NextRequest) {
                 currentClose: r.price,  // Phase C：依 close 跟 neckline×1.03 比較決定 stage
                 patternTargetPrice: p.patternTargetPrice,
                 patternAchievementRate: p.patternAchievementRate,
+                patternPivots: p.patternPivots,
               });
             })
             .filter((x): x is NonNullable<typeof x> => x != null);

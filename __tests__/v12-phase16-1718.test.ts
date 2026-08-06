@@ -54,12 +54,20 @@ describe('v12 Phase 1.6 — LockWatch 機制', () => {
       triggerPrice: 50,
       currentClose: 52,  // 50 × 1.03 = 51.5，close 52 已過 → observation
       patternTargetPrice: 60,
-      patternAchievementRate: 95,
+      patternAchievementRate: 0.95,
+      patternPivots: [
+        { date: '2026-04-20', price: 45, type: 'low' },
+        { date: '2026-04-28', price: 50, type: 'high' },
+      ],
     });
     expect(record.triggerSignal).toBe('N');
     expect(record.patternType).toBe('triple-bottom');
     expect(record.currentStage).toBe('observation');
-    expect(record.patternAchievementRate).toBe(95);
+    expect(record.patternAchievementRate).toBe(0.95);
+    expect(record.patternPivots).toEqual([
+      { date: '2026-04-20', price: 45, type: 'low' },
+      { date: '2026-04-28', price: 50, type: 'high' },
+    ]);
   });
 
   it('建立 N LockWatch → 統一 observation（0513 對齊書本砍 pending-breakout）', () => {

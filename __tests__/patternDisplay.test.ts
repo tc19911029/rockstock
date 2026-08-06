@@ -2,7 +2,9 @@ import type { Pivot } from '@/lib/analysis/trendAnalysis';
 import {
   formatPivotPrice,
   getPivotLabels,
+  getPivotMarkerLabel,
   getPivotMarkerText,
+  resolvePatternPivotSnapshots,
 } from '@/lib/chart/patternDisplay';
 
 const pivot = (type: Pivot['type'], price: number, index = 0): Pivot => ({ type, price, index });
@@ -12,6 +14,8 @@ describe('patternDisplay', () => {
     expect(getPivotMarkerText(pivot('high', 123.456))).toBe('頭 123.46');
     expect(getPivotMarkerText(pivot('low', 98))).toBe('底 98.00');
     expect(formatPivotPrice(Number.NaN)).toBe('—');
+    expect(getPivotMarkerLabel(pivot('high', 123.456))).toBe('頭');
+    expect(getPivotMarkerLabel(pivot('low', 98))).toBe('底');
   });
 
   it('倒 N 腳位依 detector 回傳順序標成 C/A/B', () => {
@@ -24,5 +28,30 @@ describe('patternDisplay', () => {
     expect(labels).toEqual(['箱頂', '支撐']);
     expect(labels).not.toContain('島頂');
     expect(labels).not.toContain('缺口');
+  });
+
+  it('複式頭肩頂同時標出頭、肩與頸線，不漏掉低點', () => {
+    const pivots = [
+      pivot('high', 130, 20),
+      pivot('high', 110, 30),
+      pivot('high', 108, 10),
+      pivot('low', 90, 25),
+      pivot('low', 92, 15),
+    ];
+    expect(getPivotLabels('complex-head-shoulder-top', pivots)).toEqual([
+      '頭', '肩1', '肩2', '頸1', '頸2',
+    ]);
+  });
+
+  it('鎖定腳位依日期精確還原，不把不存在的日期硬套到鄰近 K 棒', () => {
+    const resolved = resolvePatternPivotSnapshots([
+      { date: '2026-07-01', price: 80, type: 'low' },
+      { date: '2026-07-03', price: 100, type: 'high' },
+      { date: '2026-07-09', price: 90, type: 'low' },
+    ], ['2026-07-01', '2026-07-02', '2026-07-03*']);
+    expect(resolved).toEqual([
+      { index: 0, price: 80, type: 'low' },
+      { index: 2, price: 100, type: 'high' },
+    ]);
   });
 });

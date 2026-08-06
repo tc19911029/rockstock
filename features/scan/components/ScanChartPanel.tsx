@@ -59,7 +59,7 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
   const isMinute = (MINUTE_INTERVALS as readonly string[]).includes(interval);
 
   // 鎖股觀察紀錄 → 走圖型態 chip 穩定來源（避免拖時間軸時 fresh detector 跳動）
-  const { lockedPattern } = useLockedPattern(selectedStock?.symbol);
+  const { lockedPattern } = useLockedPattern(selectedStock?.symbol, selectedStock?.market);
 
   // 共用的載入後處理
   const onLoadSuccess = useCallback(() => {

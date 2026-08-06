@@ -1,3 +1,5 @@
+import type { PatternPivotSnapshot } from '../analysis/patternCatalog';
+
 export type MarketId = 'TW' | 'CN';
 
 export interface TriggeredRule {
@@ -245,7 +247,8 @@ export interface StockScanResult {
    * scan-bm cron 收到結果後，會抽取此欄位寫入 LockWatch daily snapshot。
    *
    * - F：triggerPrice = V 底反彈起點 close（鎖定價）；vBottom = 變盤線 low（結構失效判定用）
-   * - N：triggerPrice = 頸線價、patternType、patternTargetPrice、patternAchievementRate 全填
+   * - N：triggerPrice = 頸線價、patternType、patternTargetPrice、patternPivots；
+   *      patternAchievementRate 只有舊書明載的同名型態才填
    */
   lockWatchPayload?: {
     triggerPrice: number;
@@ -272,6 +275,8 @@ export interface StockScanResult {
       | 'one-line-top';
     patternTargetPrice?: number;
     patternAchievementRate?: number;
+    /** N 觸發當下凍結的腳位（日期／價格／頭底方向）。 */
+    patternPivots?: PatternPivotSnapshot[];
   };
 }
 

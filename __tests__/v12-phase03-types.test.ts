@@ -159,7 +159,7 @@ describe('v12 Phase 0.3 — LockWatchRecord（議題 23/65/93）', () => {
       patternType: 'head-shoulder',
       triggerPrice: 1000,
       patternTargetPrice: 1100,
-      patternAchievementRate: 83,
+      patternAchievementRate: 0.83,
       currentStage: 'observation',
       daysObserved: 0,
       history: [{ date: '2026-05-08', event: 'triggered' }],
@@ -168,7 +168,7 @@ describe('v12 Phase 0.3 — LockWatchRecord（議題 23/65/93）', () => {
     expect(fRecord.triggerSignal).toBe('F');
     expect(nRecord.triggerSignal).toBe('N');
     expect(nRecord.patternType).toBe('head-shoulder');
-    expect(nRecord.patternAchievementRate).toBe(83);
+    expect(nRecord.patternAchievementRate).toBe(0.83);
   });
 
   it('LockWatchEvent 完整生命週期', () => {

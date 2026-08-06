@@ -1,7 +1,7 @@
 /**
  * Pattern detection coverage audit
  *
- * 對 TW 全市場跑 detectLetterN（8 種底部）+ detectTopPatterns（3 種頂部），
+ * 對 TW/CN 全市場跑 detectLetterN（8 種底部）+ detectTopPatterns（7 種頂部），
  * 統計每種型態命中數 + 列出哪幾種完全沒命中。
  *
  * Usage: npx tsx scripts/audit-pattern-coverage.ts [TW|CN] [date]
@@ -11,7 +11,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 
 import { detectLetterN, detectTopPatterns } from '../lib/analysis/v12LetterN';
-import { TOP_PATTERN_TYPES } from '../lib/analysis/patternCatalog';
+import { BOTTOM_PATTERN_TYPES, TOP_PATTERN_TYPES } from '../lib/analysis/patternCatalog';
 import { computeIndicators } from '../lib/indicators';
 import type { Candle, CandleWithIndicators } from '../types';
 
@@ -43,7 +43,7 @@ async function main() {
       const parsed = JSON.parse(raw);
       // 檔案結構：{ symbol, lastDate, updatedAt, candles: Candle[] }
       const candles: Candle[] = Array.isArray(parsed) ? parsed : (parsed.candles || []);
-      const idx = candles.findIndex(c => c.date === asOfDate);
+      const idx = candles.findIndex(c => c.date.replace(/\*$/, '') === asOfDate);
       if (idx < 0 || idx < 30) continue;
       const sliced = candles.slice(0, idx + 1);
       const withInd: CandleWithIndicators[] = computeIndicators(sliced);
@@ -76,7 +76,13 @@ async function main() {
   console.log(`\nprocessed ${totalProcessed} symbols`);
   console.log(`bottom triggered: ${bottomTriggered} | top triggered: ${topTriggered}`);
 
-  const ALL_BOTTOM = ['head-shoulder', 'complex-head-shoulder', 'triple-bottom', 'falling-diamond', 'rounding-bottom', 'descending-wedge', 'double-bottom', 'n-shape'];
+  if (totalProcessed === 0) {
+    console.error(`\n沒有任何 ${market} K 線包含 ${asOfDate}；本次 ZERO 不代表 detector 零命中。`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const ALL_BOTTOM = BOTTOM_PATTERN_TYPES;
   const ALL_TOP = TOP_PATTERN_TYPES;
 
   console.log('\n底部型態（detectLetterN）:');

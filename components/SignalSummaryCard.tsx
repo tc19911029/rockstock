@@ -40,6 +40,7 @@ import { STOP_LOSS_PRICE_MULT, PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/b
 import { deductPrice, daysUntilMaTurn, daysUntilGoldenCross, formatMaTurnLine, MA_PLAIN_LABEL } from '@/lib/analysis/maDeduction';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
+import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 import ChartCoachAdvice from './ChartCoachAdvice';
 
 // ── 訊號白話說明對照表 ────────────────────────────────────────────────────────
@@ -71,7 +72,7 @@ type EntryLetter = 'M' | 'N' | 'O' | 'P' | 'Q';
 // trackName 不含字母前綴（badge 已標 M/N/O/P/Q，避免顯示時 Q + Q 三均線戰法 + Q ... 三層重複）
 const V12_TRACK_NAMES: Record<EntryLetter, string> = {
   M: '突破上升軌道（多頭續攻）',
-  N: '型態確認突破頸線（25 種圖形）',
+  N: '型態確認突破頸線（課程六型優先＋舊書補充）',
   O: '打底完成由空翻多',
   P: '高檔淺回 1-2 天後再上漲',
   Q: '三均線戰法（MA3+10+24）',
@@ -958,9 +959,9 @@ function Reasons({
                 {h.patternType && h.patternTargetPrice && h.necklinePrice && (
                   <div className="mt-1.5 pt-1.5 border-t border-border/30 space-y-0.5 text-[11px]">
                     <div className="flex items-baseline justify-between">
-                      <span className="text-indigo-300 font-bold">{PATTERN_LABEL[h.patternType] ?? h.patternType}</span>
+                      <span className="text-indigo-300 font-bold">{getPatternDisplayName(h.patternType)}</span>
                       {h.achievementRate != null && (
-                        <span className="text-amber-300">達成率 {(h.achievementRate * 100).toFixed(0)}%</span>
+                        <span className="text-amber-300">舊書達標率 {(h.achievementRate * 100).toFixed(0)}%</span>
                       )}
                     </div>
                     <div className="flex items-baseline justify-between text-muted-foreground">
@@ -996,9 +997,9 @@ function Reasons({
             {topPatternHit && (
               <div className="rounded px-2.5 py-2 bg-rose-900/15">
                 <div className="flex items-baseline justify-between gap-2 mb-1">
-                  <span className="text-xs font-bold text-rose-300">{TOP_PATTERN_LABEL[topPatternHit.patternType]}</span>
+                  <span className="text-xs font-bold text-rose-300">{getPatternDisplayName(topPatternHit.patternType)}</span>
                   {topPatternHit.achievementRate != null && (
-                    <span className="text-[11px] text-amber-300">達成率 {(topPatternHit.achievementRate * 100).toFixed(0)}%</span>
+                    <span className="text-[11px] text-amber-300">舊書達標率 {(topPatternHit.achievementRate * 100).toFixed(0)}%</span>
                   )}
                 </div>
                 <div className="space-y-0.5 text-[11px]">

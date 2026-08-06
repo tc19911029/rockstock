@@ -17,6 +17,7 @@ import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
+import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
 
 interface LockWatchPanelProps {
   market: 'TW' | 'CN';
@@ -150,7 +151,9 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
         const ref = r.currentClose ?? r.triggerPrice;
         return r.patternTargetPrice && ref > 0 ? (r.patternTargetPrice - ref) / ref : -Infinity;
       }
-      case 'trust.achievement': return r.patternAchievementRate ?? 0;
+      case 'trust.achievement': return r.patternType != null
+        ? (getLegacyBookAchievementRate(r.patternType) ?? null)
+        : null;
       case 'trust.stage': return STAGE_ORDER[r.currentStage] ?? 99;
       case 'triggeredDate': return r.triggeredDate;
       case 'trust.days': return r.daysObserved;
@@ -213,7 +216,7 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
           <div className="text-[10px] text-emerald-200/80 bg-emerald-900/15 border border-emerald-700/30 rounded px-2 py-1 my-1.5 leading-relaxed space-y-1">
             <div>
               <span className="font-bold text-emerald-300">這是「已觸發」紀錄</span>：
-              <span className="font-semibold ml-1">型態確認</span>＝突破頸線（書本 8 種底部型態，《寶典》Part 11-1 第 7 位置 p.697「型態確認上漲大量紅 K」）；
+              <span className="font-semibold ml-1">型態確認</span>＝突破頸線（2026 課程六型優先，另保留舊書補充型態；《寶典》Part 11-1 第 7 位置 p.697「型態確認上漲大量紅 K」）；
               <span className="font-semibold ml-1">V 反轉</span>＝反轉戰法（《抓住K線》4 條件：連跌+變盤線止跌+紅K帶量+突破前K高）。
               <span className="font-semibold">書本明寫觸發當下即進場訊號。</span>
             </div>
@@ -292,8 +295,8 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
                     </th>
                     <th onClick={() => toggleSort('trust.achievement')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
-                        title="書本明寫的型態達成率（《抓飆股》p.314-342）。點擊排序">
-                      達成率{sortIndicator('trust.achievement')}
+                        title="舊書《抓住飆股》附錄的型態達標統計，不是 Rockstock 回測勝率。點擊排序">
+                      舊書達標率{sortIndicator('trust.achievement')}
                     </th>
                     <th onClick={() => toggleSort('trust.stage')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
@@ -446,8 +449,8 @@ function LockWatchTableRow({
         )}
       </td>
       <td className="whitespace-nowrap py-1.5 px-2 text-center font-mono tabular-nums text-amber-300/80">
-        {record.patternAchievementRate != null
-          ? `${(record.patternAchievementRate * 100).toFixed(0)}%`
+        {record.patternType != null && getLegacyBookAchievementRate(record.patternType) != null
+          ? `${getLegacyBookAchievementRate(record.patternType)}%`
           : '—'}
       </td>
       <td className={`whitespace-nowrap py-1.5 px-2 text-center ${stage.color}`}>

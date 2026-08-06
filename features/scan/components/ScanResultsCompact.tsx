@@ -23,6 +23,8 @@ import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { RefreshCw } from 'lucide-react';
+import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
+import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單）：
 // 該頁專屬（六條件/今日熱點/YouTube 提及）+ '|' 分隔線 + 共用區（全 UNIVERSAL_SORT_OPTIONS）。
@@ -634,17 +636,8 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
 
                 {/* v12 N 型態確認專用：型態名 + 達成率 + 目標價（議題 65）*/}
                 {r.lockWatchPayload?.patternType && (() => {
-                  const PATTERN_LABEL: Record<string, string> = {
-                    'head-shoulder': '頭肩底', 'complex-head-shoulder': '複式頭肩底',
-                    'triple-bottom': '三重底', 'falling-diamond': '跌菱形',
-                    'rounding-bottom': '圓弧底', 'descending-wedge': '下降楔形',
-                    'double-bottom': '雙重底', 'n-shape': 'N 字底',
-                    'head-shoulder-top': '頭肩頂', 'triple-top': '三重頂', 'double-top': '雙重頂',
-                    'complex-head-shoulder-top': '複式頭肩頂', 'inverted-n-top': '倒 N 字頂',
-                    'long-double-top': '長雙頭頂', 'one-line-top': '一字頂',
-                  };
-                  const name = PATTERN_LABEL[r.lockWatchPayload.patternType] ?? r.lockWatchPayload.patternType;
-                  const rate = r.lockWatchPayload.patternAchievementRate;
+                  const name = getPatternDisplayName(r.lockWatchPayload.patternType);
+                  const rate = getLegacyBookAchievementRate(r.lockWatchPayload.patternType);
                   const target = r.lockWatchPayload.patternTargetPrice;
                   // 目標相對現價的距離 — 正 = 仍有上漲空間；負 = 已達/超過目標
                   const upsideNum = target ? ((target - r.price) / r.price * 100) : null;
@@ -655,9 +648,10 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                   const failReason = stage === 'structure-broken'
                     ? `已跌破頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} ×0.97 = ${(r.lockWatchPayload.triggerPrice * 0.97).toFixed(2)}，型態結構失效`
                     : stage === 'revoked' ? '訊號已撤銷' : '';
+                  const rateText = rate != null ? ` · 舊書達標率 ${rate}%` : '';
                   const baseTitle = reached
-                    ? `N 型態：${name} · 達成率 ${rate ? (rate * 100).toFixed(0) : '?'}% · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 目標 ${target?.toFixed(2) ?? '?'}（已達標：現價超過目標 ${Math.abs(upsideNum!).toFixed(1)}%）`
-                    : `N 型態：${name} · 達成率 ${rate ? (rate * 100).toFixed(0) : '?'}% · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 目標 ${target?.toFixed(2) ?? '?'}（距目標還有 ${upsideNum?.toFixed(1) ?? '?'}% 空間）`;
+                    ? `N 型態：${name}${rateText} · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 目標 ${target?.toFixed(2) ?? '?'}（已達標：現價超過目標 ${Math.abs(upsideNum!).toFixed(1)}%）`
+                    : `N 型態：${name}${rateText} · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 目標 ${target?.toFixed(2) ?? '?'}（距目標還有 ${upsideNum?.toFixed(1) ?? '?'}% 空間）`;
                   return (
                     <span
                       className={`text-[8px] px-1 h-3.5 flex items-center gap-0.5 rounded-sm font-bold ${
@@ -666,7 +660,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                           : 'bg-indigo-900/60 text-indigo-200'
                       }`}
                       title={failed ? `${baseTitle}\n— ${failReason}` : baseTitle}>
-                      {name}{rate != null && <span className="opacity-75 ml-0.5">{(rate * 100).toFixed(0)}%</span>}
+                      {name}{rate != null && <span className="opacity-75 ml-0.5">舊書 {rate}%</span>}
                       {target != null && upsideNum != null && !failed && (
                         reached ? (
                           // 已達 / 超過目標 → 提示停利

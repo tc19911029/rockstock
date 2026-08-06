@@ -14,8 +14,23 @@
 
 import type { LockWatchDailySnapshot, LockWatchRecord } from '@/lib/scanner/lockWatchTypes';
 import type { MarketId } from '@/lib/scanner/types';
+import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
 
 const IS_VERCEL = !!process.env.VERCEL;
+
+export function sanitizeLockWatchSnapshot(snapshot: LockWatchDailySnapshot): LockWatchDailySnapshot {
+  return {
+    ...snapshot,
+    records: snapshot.records.map(record => {
+      if (!record.patternType) return record;
+      const documentedPct = getLegacyBookAchievementRate(record.patternType);
+      return {
+        ...record,
+        patternAchievementRate: documentedPct != null ? documentedPct / 100 : undefined,
+      };
+    }),
+  };
+}
 
 // ── Vercel Blob helpers ──────────────────────────────────────────────────────
 
@@ -118,7 +133,10 @@ export async function loadLockWatchSnapshot(
     : await fsGet(market, date);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as LockWatchDailySnapshot;
+    const snapshot = JSON.parse(raw) as LockWatchDailySnapshot;
+    // 舊快照曾存過 N=0.75 與頂部對稱估值。讀取時依 canonical 舊書表校正，
+    // 避免 API、排序或 AI 直接讀 raw 欄位又把自行估值當教材統計。
+    return sanitizeLockWatchSnapshot(snapshot);
   } catch {
     return null;
   }

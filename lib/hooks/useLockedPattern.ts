@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { isTopPatternType } from '@/lib/analysis/patternCatalog';
+import {
+  getLegacyBookAchievementRate,
+  isTopPatternType,
+  type PatternPivotSnapshot,
+} from '@/lib/analysis/patternCatalog';
+import {
+  inferPatternMarket,
+  selectLatestLockedPattern,
+} from '@/lib/scanner/lockedPatternSelection';
+import type { MarketId } from '@/lib/scanner/types';
 
 export interface LockedPattern {
   patternType: string;
@@ -10,6 +19,7 @@ export interface LockedPattern {
   stopPrice?: number;
   achievementRate?: number;
   kind: 'bottom' | 'top';
+  pivots?: PatternPivotSnapshot[];
 }
 
 interface LockwatchRecordShape {
@@ -24,10 +34,10 @@ interface LockwatchRecordShape {
   triggerSignal?: string;
   /** 紀錄階段 — 結構失效/已撤銷的紀錄不可作為走圖鎖定來源 */
   currentStage?: string;
+  triggeredDate?: string;
+  market?: MarketId;
+  patternPivots?: PatternPivotSnapshot[];
 }
-
-/** 仍有效的 stage（observation / entry-signal alias / purchased 持倉中仍可看到鎖定型態） */
-const ACTIVE_STAGES = new Set(['observation', 'entry-signal', 'purchased']);
 
 interface LockwatchApiResponse {
   ok?: boolean;
@@ -41,7 +51,7 @@ interface LockwatchApiResponse {
  * 為什麼存在：app/page.tsx 跟 ScanChartPanel 都要把 lockedPattern 傳進 CandleChart，
  * 兩處原本各自實作會漂移；統一抽 hook 並補掃描側 wiring，型態/頸線就不會跟著時間軸跳動。
  */
-export function useLockedPattern(symbol: string | null | undefined): {
+export function useLockedPattern(symbol: string | null | undefined, marketHint?: MarketId): {
   lockedPattern: LockedPattern | null;
   loading: boolean;
 } {
@@ -53,8 +63,7 @@ export function useLockedPattern(symbol: string | null | undefined): {
       setLockedPattern(null);
       return;
     }
-    // L3 fix：裸數字 symbol (如 '2330') 推斷為 TW；含 .SS/.SZ 為 CN；其他為 TW
-    const market: 'TW' | 'CN' = /\.(SS|SZ)$/i.test(symbol) ? 'CN' : 'TW';
+    const market = inferPatternMarket(symbol, marketHint);
     let cancelled = false;
     setLoading(true);
     fetch(`/api/lockwatch?market=${market}`)
@@ -65,14 +74,7 @@ export function useLockedPattern(symbol: string | null | undefined): {
           setLockedPattern(null);
           return;
         }
-        const bare = symbol.replace(/\.(TW|TWO)$/i, '');
-        // 0513 audit H3：只取仍有效 stage 的紀錄（revoked/structure-broken/manually-removed 排除）
-        const rec = (j.snapshot.records ?? []).find(
-          (r) =>
-            (r.symbol === symbol || r.symbol === bare) &&
-            (r.currentStage == null || ACTIVE_STAGES.has(r.currentStage)),
-        );
-        // N 訊號才有 patternType + neckline（= triggerPrice）+ 目標價；F 不走型態鎖定
+        const rec = selectLatestLockedPattern(j.snapshot.records ?? [], symbol);
         if (!rec || !rec.patternType || rec.triggerPrice == null || rec.patternTargetPrice == null) {
           setLockedPattern(null);
           return;
@@ -82,9 +84,10 @@ export function useLockedPattern(symbol: string | null | undefined): {
           necklinePrice: rec.triggerPrice,
           targetPrice: rec.patternTargetPrice,
           stopPrice: rec.vBottom,  // F 才有；N 由 CandleChart 依底/頂方向套用頸線 ±3% fallback
-          achievementRate:
-            rec.patternAchievementRate != null ? rec.patternAchievementRate * 100 : undefined,
+          // 舊資料可能存過自行估算的 N=75% 或頂部對稱值；只從 canonical 舊書表取可核對數字。
+          achievementRate: getLegacyBookAchievementRate(rec.patternType),
           kind: isTopPatternType(rec.patternType) ? 'top' : 'bottom',
+          pivots: rec.patternPivots,
         });
       })
       .catch(() => {
@@ -96,7 +99,7 @@ export function useLockedPattern(symbol: string | null | undefined): {
     return () => {
       cancelled = true;
     };
-  }, [symbol]);
+  }, [symbol, marketHint]);
 
   return { lockedPattern, loading };
 }

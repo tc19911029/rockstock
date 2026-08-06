@@ -1528,6 +1528,16 @@ export abstract class MarketScanner {
                   patternTargetPrice: r.patternTargetPrice,
                   patternAchievementRate:
                     typeof r.achievementRate === 'number' ? r.achievementRate / 100 : undefined,
+                  patternPivots: r.pivots?.flatMap((pivot) => {
+                    const pivotCandle = candles[pivot.index];
+                    return pivotCandle
+                      ? [{
+                          date: pivotCandle.date.replace(/\*$/, ''),
+                          price: pivot.price,
+                          type: pivot.type,
+                        }]
+                      : [];
+                  }),
                 };
               }
             }

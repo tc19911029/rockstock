@@ -20,8 +20,11 @@ import {
   formatPivotPrice,
   getPatternDisplayName,
   getPivotLabels,
+  getPivotMarkerLabel,
   getPivotMarkerText,
+  resolvePatternPivotSnapshots,
 } from '@/lib/chart/patternDisplay';
+import type { PatternPivotSnapshot } from '@/lib/analysis/patternCatalog';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import { detectLetterNStructure, detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
 import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
@@ -192,6 +195,7 @@ interface CandleChartProps {
     stopPrice?: number;
     achievementRate?: number;
     kind: 'bottom' | 'top';
+    pivots?: PatternPivotSnapshot[];
   } | null;
   /**
    * 雙B戰法主圖疊加（三色資金，陸股自創）— 像 MA/BB 一樣疊在 K 線主圖上。
@@ -349,13 +353,37 @@ export default function CandleChart({
     const top = detectTopPatternsStructure(candles, lastIdx);
 
     // 優先用 lockedPattern（穩定 — 跟鎖股觀察一致）
-    if (lockedPattern && lockedPattern.necklinePrice != null && lockedPattern.targetPrice != null) {
+    if (
+      lockedPattern &&
+      Number.isFinite(lockedPattern.necklinePrice) && lockedPattern.necklinePrice > 0 &&
+      Number.isFinite(lockedPattern.targetPrice) && lockedPattern.targetPrice > 0
+    ) {
       const freshSource = lockedPattern.kind === 'bottom' ? bottom : top;
-      const pivotsVerified = freshSource.patternType === lockedPattern.patternType;
+      const frozenPivots = resolvePatternPivotSnapshots(
+        lockedPattern.pivots,
+        candles.map(candle => candle.date),
+      );
+      const frozenPivotsComplete =
+        lockedPattern.pivots != null &&
+        lockedPattern.pivots.length > 0 &&
+        frozenPivots.length === lockedPattern.pivots.length;
+      const freshNecklineAligned =
+        freshSource.necklinePrice != null &&
+        Math.abs(freshSource.necklinePrice - lockedPattern.necklinePrice) /
+          Math.max(Math.abs(lockedPattern.necklinePrice), Number.EPSILON) <= 0.03;
+      // 新紀錄優先用觸發日凍結腳位。舊紀錄沒有快照時，必須同型且頸線落在 3% 內才可借用；
+      // 只比 patternType 仍可能把另一個同名型態的頭底冒充成原鎖定腳位。
+      const freshPivotsVerified =
+        freshSource.patternType === lockedPattern.patternType && freshNecklineAligned;
+      const pivotsVerified = frozenPivotsComplete || freshPivotsVerified;
       return {
         kind: lockedPattern.kind,
         // 型態不同時寧可不畫腳位，也不能把頭肩底的腳標成圓弧底等錯誤型態。
-        pivots: pivotsVerified ? (freshSource.pivots ?? []) : [],
+        pivots: frozenPivotsComplete
+          ? frozenPivots
+          : freshPivotsVerified
+            ? (freshSource.pivots ?? [])
+            : [],
         necklinePrice: lockedPattern.necklinePrice,
         targetPrice: lockedPattern.targetPrice,
         stopPrice: lockedPattern.stopPrice ?? lockedPattern.necklinePrice * (lockedPattern.kind === 'bottom' ? 0.97 : 1.03),
@@ -993,7 +1021,7 @@ export default function CandleChart({
           position: p.type === 'high' ? 'aboveBar' : 'belowBar',
           shape: p.type === 'high' ? 'arrowDown' : 'arrowUp',
           color: p.type === 'high' ? '#ec4899' : '#06b6d4',
-          text: getPivotMarkerText(p),
+          text: getPivotMarkerLabel(p),
           size: 1,
         });
       }
@@ -1445,7 +1473,7 @@ export default function CandleChart({
                 className={pivot.type === 'high' ? 'text-pink-300' : 'text-cyan-300'}
                 title={`${pivot.date} 第 ${pivot.index + 1} 根 K 棒`}
               >
-                {getPivotMarkerText(pivot)} <span className="opacity-65">{pivot.date}</span>
+                {getPivotMarkerText(pivot)}
               </span>
             ))}
           </div>
@@ -1457,7 +1485,7 @@ export default function CandleChart({
             {showPatternChip && (
               <span className="px-1.5 py-0.5 rounded bg-fuchsia-900/80 text-fuchsia-100">
                 {getPatternDisplayName(activePattern.patternType)}
-                {activePattern.achievementRate != null && ` ${activePattern.achievementRate}%`}
+                {activePattern.achievementRate != null && `｜舊書達標率 ${activePattern.achievementRate}%`}
               </span>
             )}
             {showPatternChip && (
@@ -1541,7 +1569,7 @@ export default function CandleChart({
                 key={`${pivot.label}-${pivot.index}-${index}`}
                 title={`${pivot.date} 第 ${pivot.index + 1} 根 K 棒`}
               >
-                {pivot.label} {formatPivotPrice(pivot.price)} <span className="opacity-60">{pivot.date}</span>
+                {pivot.label} {formatPivotPrice(pivot.price)}
               </span>
             ))}
           </div>

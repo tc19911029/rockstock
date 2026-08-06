@@ -10,7 +10,7 @@
  *   v11 既有：B=回後買上漲、C=盤整突破、D=一字底、E=缺口、F=V形反轉
  *             G=ABC 突破（寶典位置 6）、H=突破大量黑K（位置 8）、I=K線橫盤（位置 5）
  *   v12 新增：J=ABC 突破（=v11 G）、K=K線橫盤（=v11 I）、L=過大量黑K（=v11 H）
- *             M=突破軌道線（寶典 p.387）、N=型態確認（25 型態）、O=打底完成（位置 1）
+ *             M=突破軌道線（寶典 p.387）、N=型態確認（課程六型優先＋舊書補充）、O=打底完成（位置 1）
  *             P=高檔拉回（位置 3 等拉回）、Q=三條均線戰法（MA3+10+24，戰法軌）
  */
 
@@ -439,9 +439,9 @@ function evaluateMethod(
         {
           icon: '①', name: '型態結構',
           detail: r.triggered
-            ? `${patternName}${achievement != null ? `（書本達成率 ${achievement}%）` : ''}`
+            ? `${patternName}${achievement != null ? `（舊書達標率 ${achievement}%）` : ''}`
             : hasStructure
-              ? `${patternName}（${achievement != null ? `書本達成率 ${achievement}% · ` : ''}結構成立待突破）`
+              ? `${patternName}（${achievement != null ? `舊書達標率 ${achievement}% · ` : ''}結構成立待突破）`
               : '未識別',
           pass: r.triggered || hasStructure,
         },
@@ -468,10 +468,10 @@ function evaluateMethod(
       return {
         title,
         subTitle: r.triggered
-          ? `${patternName}（達成率 ${achievement}%）`
+          ? `${patternName}${achievement != null ? `（舊書達標率 ${achievement}%）` : ''}`
           : hasStructure
-            ? `${patternName}（達成率 ${achievement}% · 結構成立待突破，已進鎖股觀察）`
-            : '抓飆股 25 型態',
+            ? `${patternName}${achievement != null ? `（舊書達標率 ${achievement}%）` : ''} · 結構成立待突破`
+            : '課程六型優先＋舊書型態補充',
         conditions,
         allPass: r.triggered,
       };

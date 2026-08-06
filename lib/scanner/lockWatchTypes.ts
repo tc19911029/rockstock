@@ -19,6 +19,7 @@
  */
 
 import type { MarketId } from './types';
+import type { PatternPivotSnapshot } from '../analysis/patternCatalog';
 
 /**
  * 一筆觀察名單紀錄
@@ -99,16 +100,19 @@ export interface LockWatchRecord {
    * - 三重底：頸線 + (頸線 - 三底最低點)
    * - 圓弧底：頸線 + 弧底深度
    * - 雙重底：頸線 + (頸線 - 兩底最低)
-   * - N 字底：C 突破點 + (A 高 - B 低)
+   * - N 字底：右腳 B + (前高 A - 第一隻深腳)
    * - 頭肩頂：頸線 - (頭部最高 - 頸線)
    * - 三重頂：頸線 - (最高點 - 頸線)
    * - 雙重頂：頸線 - (最高點 - 頸線)
    */
   patternTargetPrice?: number;
 
+  /** 觸發日凍結的型態腳位；避免日後 pivot 重組後，圖上冒用另一組同名型態。 */
+  patternPivots?: PatternPivotSnapshot[];
+
   /**
-   * 型態達成率（抓飆股 p.314-342 書本明寫）
-   * 用於排序與 UI 顯示
+   * 舊書型態達成目標價比例（0–1）；不是 Rockstock 回測勝率。
+   * 新 UI 會依 canonical 型態表顯示，忽略舊資料中的自行估值。
    */
   patternAchievementRate?: number;
 
