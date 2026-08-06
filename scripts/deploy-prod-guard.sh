@@ -111,6 +111,35 @@ else
   exit 1
 fi
 
+# npm 不會把 launchd 的 SIGTERM 完整轉交給 next-server；舊 server 因而可能變成
+# PPID=1、已不監聽任何 port，卻繼續跑 local-cron。只清理「同 repo cwd + PPID=1
+# + next-server + 無 LISTEN socket」的孤兒，絕不碰目前 :3000 listener 或 preview。
+cleanup_orphan_next_servers() {
+  orphan_pids="$(ps -Ao pid=,ppid=,command= | awk '$2 == 1 && index($0, "next-server") { print $1 }')"
+  [ -n "$orphan_pids" ] || return 0
+
+  for orphan_pid in $orphan_pids; do
+    orphan_cwd="$(lsof -a -p "$orphan_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    [ "$orphan_cwd" = "$ROOT" ] || continue
+
+    if lsof -nP -a -p "$orphan_pid" -iTCP -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+      continue
+    fi
+
+    echo "→ 清理舊 next-server 孤兒 PID $orphan_pid（不監聽 port、仍會跑 cron）"
+    kill -TERM "$orphan_pid" 2>/dev/null || continue
+    waited=0
+    while kill -0 "$orphan_pid" 2>/dev/null && [ "$waited" -lt 5 ]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
+    if kill -0 "$orphan_pid" 2>/dev/null; then
+      kill -KILL "$orphan_pid" 2>/dev/null || true
+    fi
+  done
+}
+cleanup_orphan_next_servers
+
 # 新版已健康，上一版 build 才可清除；關閉錯誤回復 trap。
 rm -rf "$BACKUP_DIR"
 SWAPPED=0
