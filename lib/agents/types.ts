@@ -568,6 +568,16 @@ export interface FundamentalGroundTruth {
       mom: number | null;
       yoy: number | null;
     }>;
+    /** 交易所最新季報的本年度累計口徑；避免把各季 EPS 相加造成加權股數誤差。 */
+    latestCumulativeActual?: {
+      fiscalYear: number;
+      quarter: number;
+      reportedThrough: string;
+      cumulativeRevenue: number | null;
+      cumulativeNetIncome: number | null;
+      cumulativeEps: number | null;
+      sourceUrl: string;
+    };
     /** 流通在外股數 / 總股本 */
     sharesOutstanding: number | null;
     /** 每股淨值 / 每股淨資產 */
@@ -659,6 +669,11 @@ export interface FundamentalAnswer {
     fiscalYear?: number;
     reportedThrough?: string;
     actualEpsYtd?: number;
+    /** 本次估值實際納入的資料期別，用來偵測後續新公告。 */
+    dataAsOf?: {
+      financialReportPeriod?: string;
+      monthlyRevenuePeriod?: string;
+    };
     /** 真正未來 12 個月（NTM）估值；資料不足時應省略，不得用本年度 EPS 冒充。 */
     ntmEstimate?: {
       period: string;

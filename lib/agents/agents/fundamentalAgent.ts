@@ -32,6 +32,7 @@ import {
   getBalanceSheet,
   getStockInfo,
 } from '@/lib/datasource/FinMindClient';
+import { getQuarterlyAny } from '@/lib/datasource/TwseOpenApiProvider';
 import { getEastMoneyFundamentals } from '@/lib/datasource/EastMoneyFundamentals';
 import { fetchCnFinancials } from '@/lib/datasource/EastMoneyFinancials';
 import { normalizeCnQuarterlyHistory, sumLatestFourQuarterEps } from '@/lib/valuation/cnQuarterly';
@@ -154,20 +155,23 @@ export async function buildValuationInputsTW(
   const [
     quoteRaw,
     quarterly,
-    monthly,
+    monthlySource,
     shares,
     balance,
     stockInfo,
     dilution,
+    latestCumulative,
   ] = await Promise.all([
     fetchJSON(internalUrl(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`))
       .catch((e) => { fetchErrors.push(`quote: ${e}`); return null; }),
     getQuarterlyHistory(ticker, 8).catch((e) => { fetchErrors.push(`quarterly: ${e}`); return []; }),
-    getMonthlyRevenue(ticker, 12).catch((e) => { fetchErrors.push(`monthly: ${e}`); return []; }),
+    // 需要 24 個月才能替畫面上的近 12 個月逐月計算去年同期 YoY。
+    getMonthlyRevenue(ticker, 24).catch((e) => { fetchErrors.push(`monthly: ${e}`); return []; }),
     getSharesIssued(ticker).catch((e) => { fetchErrors.push(`shares: ${e}`); return null; }),
     getBalanceSheet(ticker).catch((e) => { fetchErrors.push(`balanceSheet: ${e}`); return null; }),
     getStockInfo(ticker).catch((e) => { fetchErrors.push(`stockInfo: ${e}`); return null; }),
     readDilutionEvents(ticker).catch((e) => { fetchErrors.push(`dilution: ${e}`); return []; }),
+    getQuarterlyAny(ticker).catch((e) => { fetchErrors.push(`twseCumulative: ${e}`); return null; }),
   ]);
 
   // 解 quote API 的 apiOk 包裝
@@ -212,20 +216,21 @@ export async function buildValuationInputsTW(
   const peRange = getReasonablePeRange(template);
 
   // monthly normalisation（FinMind RevenueRow → 我們的 schema）
-  const monthlyHistory = monthly.map((r) => ({
+  const monthlyHistoryWithPriorYear = monthlySource.map((r) => ({
     month: r.date,
     revenue: r.revenue,
     mom: null as number | null,
     yoy: null as number | null,
   }));
   // 補 mom/yoy
-  for (let i = 0; i < monthlyHistory.length; i++) {
-    const cur = monthlyHistory[i].revenue;
-    const prev = monthlyHistory[i + 1]?.revenue;
-    const yoyPrev = monthlyHistory[i + 12]?.revenue;
-    if (prev && prev > 0) monthlyHistory[i].mom = (cur - prev) / prev;
-    if (yoyPrev && yoyPrev > 0) monthlyHistory[i].yoy = (cur - yoyPrev) / yoyPrev;
+  for (let i = 0; i < monthlyHistoryWithPriorYear.length; i++) {
+    const cur = monthlyHistoryWithPriorYear[i].revenue;
+    const prev = monthlyHistoryWithPriorYear[i + 1]?.revenue;
+    const yoyPrev = monthlyHistoryWithPriorYear[i + 12]?.revenue;
+    if (prev && prev > 0) monthlyHistoryWithPriorYear[i].mom = (cur - prev) / prev;
+    if (yoyPrev && yoyPrev > 0) monthlyHistoryWithPriorYear[i].yoy = (cur - yoyPrev) / yoyPrev;
   }
+  const monthlyHistory = monthlyHistoryWithPriorYear.slice(0, 12);
 
   const sourceUrls: Record<string, string> = {
     quote: `internal:/api/stock/quote?symbol=${symbol}`,
@@ -249,6 +254,15 @@ export async function buildValuationInputsTW(
       grossMargin: q.grossMargin,
     })),
     monthlyRevenueHistory: monthlyHistory,
+    latestCumulativeActual: latestCumulative ? {
+      fiscalYear: latestCumulative.rocYear + 1911,
+      quarter: latestCumulative.season,
+      reportedThrough: `${latestCumulative.rocYear + 1911}Q${latestCumulative.season}`,
+      cumulativeRevenue: latestCumulative.revenue == null ? null : latestCumulative.revenue * 1000,
+      cumulativeNetIncome: latestCumulative.netIncome == null ? null : latestCumulative.netIncome * 1000,
+      cumulativeEps: latestCumulative.eps,
+      sourceUrl: 'https://openapi.twse.com.tw/v1/opendata/t187ap14_L',
+    } : undefined,
     sharesOutstanding: shares,
     bookValuePerShare: balance?.bookValuePerShare ?? null,
     ttmEps,

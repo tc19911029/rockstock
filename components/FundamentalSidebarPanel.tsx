@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Calculator, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react';
 import type { FundamentalAnswer } from '@/lib/agents/types';
+import { detectValuationFreshness } from '@/lib/valuation/freshness';
 
 // 估值情境（悲觀/中性/樂觀）— 可來自 Multi-Agent 或獨立 valuation skill。
 //
@@ -23,12 +24,14 @@ function ValuationScenarios({
   valuationDate,
   ageDays,
   caveat,
+  latestFundamentals,
 }: {
   valuation: NonNullable<FundamentalAnswer['valuation']>;
   currentPrice?: number;
   valuationDate?: string;
   ageDays?: number;
   caveat?: string;
+  latestFundamentals?: RawFundamentals | null;
 }) {
   const { ttmPe, monthlyEpsEstimate, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough } = valuation;
   const tiers: Array<{ key: 'pessimistic' | 'base' | 'optimistic'; label: string; cls: string }> = [
@@ -58,6 +61,7 @@ function ValuationScenarios({
           ? { label: '中性～樂觀區間', cls: 'text-amber-200 bg-amber-500/10 border-amber-500/25' }
           : { label: '高於樂觀合理價', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/25' };
   const isStale = ageDays != null && ageDays > 30;
+  const freshness = detectValuationFreshness(valuation, valuationDate, latestFundamentals);
 
   return (
     <details className="overflow-hidden rounded-lg border border-cyan-500/20 bg-gradient-to-b from-cyan-950/20 to-card/50" open>
@@ -85,11 +89,36 @@ function ValuationScenarios({
             估值已超過 30 天，合理價仍可參考，但 EPS 與同業 PE 應重新估算。
           </div>
         )}
+        {freshness.hasNewData && latestFundamentals && (
+          <div className="rounded border border-rose-500/35 bg-rose-500/10 px-2 py-1.5 text-[10px] leading-snug text-rose-800 dark:text-rose-200">
+            <div className="flex gap-1.5 font-semibold">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+              下方估值尚未納入最新正式資料
+            </div>
+            <div className="mt-1 space-y-0.5 pl-4 text-foreground/75">
+              {freshness.hasNewFinancialReport && (
+                <div>
+                  {formatQuarter(freshness.financialReportDate) ?? '最新季報'}：
+                  單季 EPS {latestFundamentals.eps != null ? `${latestFundamentals.eps.toFixed(2)} 元` : '已公布'}
+                  {latestFundamentals.epsYtd != null ? `，本年累計 EPS ${latestFundamentals.epsYtd.toFixed(2)} 元` : ''}
+                </div>
+              )}
+              {freshness.hasNewMonthlyRevenue && (
+                <div>
+                  {formatMonth(latestFundamentals.periods?.revenueMonth) ?? '最新月'}營收：
+                  {latestFundamentals.revenueLatest != null ? formatRevenue(latestFundamentals.revenueLatest) : '已公布'}
+                </div>
+              )}
+            </div>
+            <div className="mt-1 pl-4">請重新估算；舊情境只保留作歷史快照，不能當作目前合理價。</div>
+          </div>
+        )}
         {/* 月化 EPS 推算（如果有）*/}
         {monthlyEpsEstimate && (
           <div className="rounded ring-1 ring-foreground/10 bg-card/60 p-2">
             <div className="text-[10px] text-muted-foreground mb-1">
               {monthlyEpsEstimate.month} 月 EPS 模型估計
+              {freshness.hasNewData && <span className="ml-1 text-rose-700 dark:text-rose-300">（舊快照）</span>}
             </div>
             <div className="flex items-baseline justify-between">
               <span className="text-[11px] text-foreground/80">月化 EPS</span>
@@ -239,7 +268,7 @@ function PeerComparisonBlock({ comparison }: { comparison?: PeerComparison }) {
 
 // Tier 2 — 原始財務數字（無 AI 分析時 fallback）
 function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, onValuationReady }: { raw: RawFundamentals; symbol: string; standaloneValuation: ValuationOnly | null; currentPrice?: number; onValuationReady: (valuation: ValuationOnly) => void }) {
-  const fmt = (v: number | undefined, suffix = '', digits = 2) =>
+  const fmt = (v: number | null | undefined, suffix = '', digits = 2) =>
     v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(digits)}${suffix}`;
   const fmtRevenue = (v: number | undefined) => {
     if (v == null) return '—';
@@ -258,7 +287,8 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
     {
       title: `獲利能力${quarter ? `（${quarter} 財報）` : '（最新季財報）'}`,
       rows: [
-        { label: '每股盈餘 EPS', hint: '該季淨利 ÷ 流通股數', value: fmt(raw.eps, ' 元') },
+        { label: '單季 EPS', hint: '該季淨利 ÷ 該季加權平均股數', value: fmt(raw.eps, ' 元') },
+        ...(raw.epsYtd != null ? [{ label: '本年累計 EPS', hint: '交易所正式財報累計基本 EPS', value: fmt(raw.epsYtd, ' 元') }] : []),
         { label: 'EPS 季增率', hint: '本季 EPS vs 上一季', value: fmt(raw.epsYoY, '%'), cls: yoyColor(raw.epsYoY) },
         { label: '毛利率', hint: '(營收−成本) ÷ 營收', value: fmt(raw.grossMargin, '%') },
         { label: '淨利率', hint: '稅後淨利 ÷ 營收', value: fmt(raw.netMargin, '%') },
@@ -310,6 +340,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
             fiscalYear: standaloneValuation.fiscalYear,
             reportedThrough: standaloneValuation.reportedThrough,
             actualEpsYtd: standaloneValuation.actualEpsYtd,
+            dataAsOf: standaloneValuation.dataAsOf,
             ntmEstimate: standaloneValuation.ntmEstimate,
             peerComparison: standaloneValuation.peerComparison,
             monthlyEpsEstimate: standaloneValuation.monthlyEpsEstimate,
@@ -323,16 +354,22 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
           valuationDate={standaloneValuation.date}
           ageDays={standaloneValuation.ageDays}
           caveat={standaloneValuation.valuationCaveat ?? standaloneValuation.reasoning}
+          latestFundamentals={raw}
         />
       )}
 
       {/* 預估股價按鈕 — 觸發 valuation skill */}
-      <ValuationButton symbol={symbol} currentValuation={standaloneValuation} onValuationReady={onValuationReady} />
+      <ValuationButton
+        symbol={symbol}
+        currentValuation={standaloneValuation}
+        hasNewData={standaloneValuation ? detectValuationFreshness(standaloneValuation, standaloneValuation.date, raw).hasNewData : false}
+        onValuationReady={onValuationReady}
+      />
     </div>
   );
 }
 
-function ValuationButton({ symbol, currentValuation, onValuationReady }: { symbol: string; currentValuation: ValuationOnly | null; onValuationReady: (valuation: ValuationOnly) => void }) {
+function ValuationButton({ symbol, currentValuation, hasNewData = false, onValuationReady }: { symbol: string; currentValuation: ValuationOnly | null; hasNewData?: boolean; onValuationReady: (valuation: ValuationOnly) => void }) {
   const [phase, setPhase] = useState<'idle' | 'preparing' | 'waiting' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -402,7 +439,7 @@ function ValuationButton({ symbol, currentValuation, onValuationReady }: { symbo
     : phase === 'waiting'
     ? '朱老師估算中…'
     : currentValuation?.scenarios
-    ? '重新估算股價'
+    ? hasNewData ? '納入新資料重新估算' : '重新估算股價'
     : '預估股價';
 
   return (
@@ -451,6 +488,7 @@ interface DecisionPayload {
 
 interface RawFundamentals {
   eps?: number;
+  epsYtd?: number | null;
   epsYoY?: number;
   grossMargin?: number;
   netMargin?: number;
@@ -465,6 +503,10 @@ interface RawFundamentals {
     revenueMonth?: string | null;
     valuationDate?: string | null;
   };
+}
+
+function formatRevenue(value: number): string {
+  return value >= 1e8 ? `${(value / 1e8).toFixed(2)} 億` : `${(value / 1e4).toFixed(0)} 萬`;
 }
 
 /** "2026-03-31" → "26Q1"；不是季底就回原 YYYY-MM */
@@ -508,6 +550,7 @@ interface ValuationOnly {
   fiscalYear?: number;
   reportedThrough?: string;
   actualEpsYtd?: number;
+  dataAsOf?: NonNullable<FundamentalAnswer['valuation']>['dataAsOf'];
   ntmEstimate?: NonNullable<FundamentalAnswer['valuation']>['ntmEstimate'];
   peerComparison?: NonNullable<FundamentalAnswer['valuation']>['peerComparison'];
   monthlyEpsEstimate?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsEstimate'];
@@ -521,6 +564,7 @@ function toAgentValuation(valuation: ValuationOnly | null): NonNullable<Fundamen
     fiscalYear: valuation.fiscalYear,
     reportedThrough: valuation.reportedThrough,
     actualEpsYtd: valuation.actualEpsYtd,
+    dataAsOf: valuation.dataAsOf,
     ntmEstimate: valuation.ntmEstimate,
     peerComparison: valuation.peerComparison,
     monthlyEpsEstimate: valuation.monthlyEpsEstimate,
@@ -685,6 +729,9 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
   const displayedCaveat = useStandaloneValuation
     ? standaloneValuation?.valuationCaveat ?? standaloneValuation?.reasoning
     : data.valuation?.reasoning;
+  const displayedFreshness = displayedValuation
+    ? detectValuationFreshness(displayedValuation, displayedValuationDate, rawData)
+    : null;
 
   return (
     <div className="space-y-2 text-xs">
@@ -706,9 +753,15 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
           valuationDate={displayedValuationDate}
           ageDays={displayedAgeDays}
           caveat={displayedCaveat}
+          latestFundamentals={rawData}
         />
       )}
-      <ValuationButton symbol={cleanSymbol} currentValuation={standaloneValuation} onValuationReady={setStandaloneValuation} />
+      <ValuationButton
+        symbol={cleanSymbol}
+        currentValuation={standaloneValuation}
+        hasNewData={displayedFreshness?.hasNewData}
+        onValuationReady={setStandaloneValuation}
+      />
 
       {/* 4 段論述 (collapsible) */}
       <div className="space-y-1">

@@ -134,11 +134,25 @@ export interface MarginRow {
 }
 
 export interface RevenueRow {
-  date: string;           // YYYY-MM
+  /** 正規化後的實際營收月份 YYYY-MM-01；FinMind 原始 date 是次月公告資料列日期。 */
+  date: string;
   stock_id: string;
   revenue: number;
   revenue_month: number;
   revenue_year: number;
+}
+
+/**
+ * FinMind TaiwanStockMonthRevenue 的 date 是次月 1 日，真正月份在 revenue_year/month。
+ * 例如 date=2026-07-01, revenue_month=6 代表 2026 年 6 月營收。
+ */
+export function normalizeRevenuePeriod(row: RevenueRow): RevenueRow {
+  const year = Number(row.revenue_year);
+  const month = Number(row.revenue_month);
+  if (!Number.isInteger(year) || year < 1900 || year > 2200 || !Number.isInteger(month) || month < 1 || month > 12) {
+    return row;
+  }
+  return { ...row, date: `${year}-${String(month).padStart(2, '0')}-01` };
 }
 
 /**
@@ -186,6 +200,8 @@ export interface MarginData {
 
 export interface FundamentalsData {
   eps: number | null;
+  /** 交易所最新財報的本年度累計基本 EPS（與 eps 單季口徑分開）。 */
+  epsYtd?: number | null;
   epsYoY: number | null;   // EPS YoY growth %
   grossMargin: number | null;
   netMargin: number | null;
@@ -199,7 +215,7 @@ export interface FundamentalsData {
   periods?: {
     /** 財報期 YYYY-MM-DD（e.g. 2026-03-31 = 26Q1）*/
     financialReportDate?: string | null;
-    /** 月營收的月份 YYYY-MM-DD（e.g. 2026-04-01 = 2026 年 4 月）*/
+    /** 實際月營收月份 YYYY-MM-DD（不是 FinMind 次月公告資料列日期）。 */
     revenueMonth?: string | null;
     /** PER/PBR/殖利率的交易日 YYYY-MM-DD（即時市價，每日更新）*/
     valuationDate?: string | null;
@@ -325,8 +341,9 @@ export async function getMonthlyRevenue(
       start_date: start,
     });
 
-    rows.sort((a, b) => b.date.localeCompare(a.date));
-    const recent = rows.slice(0, months);
+    const normalized = rows.map(normalizeRevenuePeriod);
+    normalized.sort((a, b) => b.date.localeCompare(a.date));
+    const recent = normalized.slice(0, months);
     cacheSet(cacheKey, recent, TTL.FUNDAMENTALS);
     return recent;
   } catch {

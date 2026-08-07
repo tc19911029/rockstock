@@ -80,7 +80,7 @@ export async function POST(
         valuationInputs,
       },
       outputContract: {
-        required: ['ttmPe', 'fiscalYear', 'reportedThrough', 'actualEpsYtd', 'peerComparison', 'scenarios'],
+        required: ['ttmPe', 'fiscalYear', 'reportedThrough', 'actualEpsYtd', 'dataAsOf', 'peerComparison', 'scenarios'],
         peerComparison: {
           minimumIncludedPeers: 3,
           requiredPeerFields: ['symbol', 'name', 'market', 'ttmPe', 'currentYearPe', 'excluded', 'asOf', 'sourceUrl'],
@@ -94,7 +94,7 @@ export async function POST(
         '依商業模式、獲利驅動因子與景氣循環位置挑選真正可比同業；列出同業 TTM PE／本年預估 PE，排除虧損、一次性收益與極端值後，以中位數及四分位距校準合理 PE。',
         '檢查最新股本、流通股數、增資、GDR、私募與可轉債等潛在稀釋；EPS 與合理價一律使用最新完全稀釋股數重算。',
         market === 'TW'
-          ? '台股納入逐月營收與自結 EPS；月營收沒有正式 EPS 時，才以最近一個已公告季度的正常化淨利率估算，並清楚標示為模型值。'
+          ? '台股納入逐月營收與自結／正式 EPS；若 latestCumulativeActual 存在，actualEpsYtd 必須直接採交易所累計 EPS，不得把單季 EPS 相加取代。月營收沒有正式 EPS 時，才以最近一個已公告季度的正常化淨利率估算，並清楚標示為模型值。'
           : '陸股以正式季報為主，補充業績快報與業績預告；quarterlyHistory 已轉成單季口徑，沒有月營收時不得虛構月度 EPS。',
         '先辨識 valuationInputs.quarterlyHistory 中本年度已公告到哪一季；已公告季度必須照實列入 actualEpsYtd，不得再估一次，只推估尚未公告季度。',
         '推估悲觀／中性／樂觀三情境的後續季度營收、淨利率、EPS，以及情境成立所需的月營收或營收成長門檻；scenarios 的已公告季度欄位填實際值。',
@@ -102,7 +102,8 @@ export async function POST(
         '每個 scenario 必須附 revenueBasis / netMarginBasis / assumptionEvidence（含 sourceUrl + rawQuote），並提供後續可驗證的 validationTriggers。',
         '輸出 peerComparison：至少 3 家未排除的真正可比同業（不足時如實說明），逐家列 TTM PE／本年度預估 PE／來源日期／URL／排除原因，並計算中位數與四分位。',
         '若能取得未來四季預估，輸出 ntmEstimate{period,eps,pe,method}；否則省略此欄位，不得以本年度 EPS 冒充 NTM。',
-        '輸出格式對齊 lib/agents/types.ts 的 FundamentalAnswer.valuation 區塊，並包含 fiscalYear、reportedThrough、actualEpsYtd、peerComparison；所有舊欄位保持相容。',
+        '輸出 dataAsOf{financialReportPeriod,monthlyRevenuePeriod}，精確記錄本次估值實際納入的最新季報與月營收期別，讓前端能在新公告出現時立即判定估值失效。',
+        '輸出格式對齊 lib/agents/types.ts 的 FundamentalAnswer.valuation 區塊，並包含 fiscalYear、reportedThrough、actualEpsYtd、dataAsOf、peerComparison；所有舊欄位保持相容。',
       ],
     };
 
@@ -116,6 +117,8 @@ export async function POST(
         currentPrice: valuationInputs.currentPrice,
         quarterlyRows: valuationInputs.quarterlyHistory.length,
         monthlyRows: valuationInputs.monthlyRevenueHistory.length,
+        latestRevenuePeriod: valuationInputs.monthlyRevenueHistory[0]?.month ?? null,
+        latestCumulativeActual: valuationInputs.latestCumulativeActual ?? null,
         fetchErrors,
       });
     }
