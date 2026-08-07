@@ -27,6 +27,10 @@ import {
   getPivotLabels,
   resolvePatternPivotSnapshots,
 } from '@/lib/chart/patternDisplay';
+import {
+  getPatternLifecycleStatus,
+  type PatternLifecycleStatus,
+} from '@/lib/chart/patternLifecycle';
 import type { PatternPivotSnapshot } from '@/lib/analysis/patternCatalog';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import { detectLetterNStructure, detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
@@ -1362,30 +1366,24 @@ export default function CandleChart({
   const hasStructureValues = pivotValueLegend.length > 0 || patternPivotLegend.length > 0;
 
   /**
-   * 形態狀態判定（顯示用）— 根據目前 K 棒收盤價對照頸線 / 結構失效 / 目標：
-   *   bottom 型態（圓弧底 / 頭肩底 / 雙重底 / 三重底 / 跌菱形 / 下降楔形 / N 字底）：
-   *     - failed：close ≤ stopPrice（跌破結構失效價）
-   *     - target：close ≥ targetPrice
-   *     - success：close ≥ neckline × 1.03（真突破，書本 3% gate）
-   *     - pending：close 在頸線附近，結構成立但未真突破
-   *   top 型態（頭肩頂 / 三重頂 / 雙重頂）：方向反過來
+   * 形態狀態必須遵守生命週期：形成 → 真突破 → 回測／失效。
+   * 尚未曾真突破的型態不能只因位於頸線下方就被倒推為「結構失效」。
    */
-  type PatternStatus = 'pending' | 'success' | 'failed' | 'target';
-  const patternStatus = useMemo<PatternStatus | null>(() => {
+  const patternStatus = useMemo<PatternLifecycleStatus | null>(() => {
     if (!activePattern || candles.length === 0) return null;
     const last = candles[candles.length - 1];
-    const close = last.close;
-    if (activePattern.kind === 'bottom') {
-      if (close <= activePattern.stopPrice) return 'failed';
-      if (close >= activePattern.targetPrice) return 'target';
-      if (close >= activePattern.necklinePrice * 1.03) return 'success';
-      return 'pending';
-    }
-    // top
-    if (close >= activePattern.stopPrice) return 'failed';
-    if (close <= activePattern.targetPrice) return 'target';
-    if (close <= activePattern.necklinePrice * 0.97) return 'success';
-    return 'pending';
+    const formationIndex = activePattern.pivots.length > 0
+      ? Math.max(...activePattern.pivots.map(pivot => pivot.index))
+      : 0;
+    return getPatternLifecycleStatus({
+      kind: activePattern.kind,
+      currentClose: last.close,
+      necklinePrice: activePattern.necklinePrice,
+      targetPrice: activePattern.targetPrice,
+      stopPrice: activePattern.stopPrice,
+      closesSinceFormation: candles.slice(formationIndex).map(candle => candle.close),
+      assumeConfirmed: activePattern.isLocked,
+    });
   }, [activePattern, candles]);
 
   // 雙B 線（智能交易線/黃線/紅線/多空線）在 hover（或最新）K 棒的數值 —
@@ -1440,9 +1438,10 @@ export default function CandleChart({
     return { e23, up1: e23 * 1.01, up3: e23 * 1.03, dn1: e23 * 0.99, dn3: e23 * 0.97, e60, a23: arr(e23, p23), a60: arr(e60, p60) };
   })();
 
-  const statusLabel: Record<PatternStatus, { text: string; cls: string }> = {
+  const statusLabel: Record<PatternLifecycleStatus, { text: string; cls: string }> = {
     pending: { text: '待突破',  cls: 'bg-amber-900/80 text-amber-100 border-amber-700' },
     success: { text: '已突破',  cls: 'bg-emerald-900/80 text-emerald-100 border-emerald-700' },
+    retest:  { text: '突破後回測', cls: 'bg-sky-900/80 text-sky-100 border-sky-700' },
     failed:  { text: '結構失效', cls: 'bg-red-900/80 text-red-100 border-red-700' },
     target:  { text: '目標達成', cls: 'bg-blue-900/80 text-blue-100 border-blue-700' },
   };
@@ -1627,6 +1626,7 @@ export default function CandleChart({
             {showPatternChip && patternStatus && activePattern && (() => {
               const close = candles[candles.length - 1]?.close ?? 0;
               const target = activePattern.targetPrice;
+              const patternName = getPatternDisplayName(activePattern.patternType);
               const gapPct = close > 0 ? ((target - close) / close * 100) : 0;
               // 預估目標價：所有狀態都顯示，並標明距現價爬升空間 %
               // bottom 型態：target > close 為正向（爬升）
@@ -1635,8 +1635,11 @@ export default function CandleChart({
                 ? (gapPct > 0 ? `+${gapPct.toFixed(1)}%` : `${gapPct.toFixed(1)}%`)
                 : (gapPct < 0 ? `${gapPct.toFixed(1)}%` : `+${gapPct.toFixed(1)}%`);
               return (
-                <span className={`px-1.5 py-0.5 rounded border text-[11px] font-bold ${statusLabel[patternStatus].cls}`}>
-                  {statusLabel[patternStatus].text}
+                <span
+                  className={`px-1.5 py-0.5 rounded border text-[11px] font-bold ${statusLabel[patternStatus].cls}`}
+                  title={`${patternName}：${statusLabel[patternStatus].text}`}
+                >
+                  {patternName}｜{statusLabel[patternStatus].text}
                   {patternStatus !== 'target' && (
                     <span className="ml-1 opacity-80 font-normal">
                       目標 {target.toFixed(2)}（{gapText}）
