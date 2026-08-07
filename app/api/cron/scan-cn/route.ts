@@ -5,6 +5,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { runScanPipeline } from '@/lib/scanner/ScanPipeline';
 import { assertL1Coverage } from '@/lib/scanner/coverageGuard';
+import { verifyPostCloseScanCompletion } from '@/lib/scanner/scanCompletion';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -15,6 +16,8 @@ export async function GET(req: NextRequest) {
 
   const dateParam = req.nextUrl.searchParams.get('date');
   const date = dateParam ?? getLastTradingDay('CN');
+  const directions = ['long', 'short'] as const;
+  const mtfModes = ['daily', 'mtf'] as const;
 
   if (!isTradingDay(date, 'CN')) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
@@ -24,11 +27,23 @@ export async function GET(req: NextRequest) {
   const batch = parseInt(req.nextUrl.searchParams.get('batch') ?? '0', 10) || undefined;
   const totalBatches = parseInt(req.nextUrl.searchParams.get('totalBatches') ?? '0', 10) || undefined;
 
-  // L1 覆蓋率守門（CN 用較鬆的 90% 因為 EastMoney/Tencent 偶有缺漏）
+  // 非分批本地排程會重試；已有四份正式主檔就直接成功。
+  if (!batch) {
+    const existing = await verifyPostCloseScanCompletion({
+      market: 'CN', date,
+      directions: [...directions],
+      mtfModes: [...mtfModes],
+    });
+    if (existing.completed && req.nextUrl.searchParams.get('force') !== '1') {
+      return apiOk({ skipped: true, completed: true, reason: 'post_close already complete', market: 'CN', date });
+    }
+  }
+
+  // L1 覆蓋率守門：CN 多源偶有退市/停牌長尾，但活躍股至少要 95% 含目標日 K 棒。
   // 可用 ?force=1 強制跑（手動 backfill 場景）
   const force = req.nextUrl.searchParams.get('force') === '1';
   if (!force) {
-    const coverage = await assertL1Coverage('CN', date, 0.90);
+    const coverage = await assertL1Coverage('CN', date, 0.95);
     if (!coverage.ok) {
       // 2026-05-08：原 silent warn → alert + 自動觸發 download-batch 救援
       console.error(`[cron/scan-cn] ★★ 跳過 scan: ${coverage.reason} — 自動觸發 download-candles-batch 救援`);
@@ -53,20 +68,29 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 0512 修：post-close 一次寫完所有 v12 買法 session（13 支字母）
-    // 不再依賴 vercel.json update-intraday-bm per-letter cron（本地 launchd 不裝）
-    // v11 G/H/I 已退場 — 不寫入新資料（舊資料 normalize-on-read 處理）
+    const startedAt = Date.now();
+    // 這個 endpoint 只寫 A 六條件 daily/mtf；B～R 由 scan-bm-batch 分軌負責。
     const result = await runScanPipeline({
       market: 'CN',
       date,
       sessionType: 'post_close',
-      directions: ['long', 'short'],
-      mtfModes: ['daily', 'mtf'],
-      buyMethods: ['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'],
+      directions: [...directions],
+      mtfModes: [...mtfModes],
       force: true,
       batch,
       totalBatches,
     });
+
+    const completion = await verifyPostCloseScanCompletion({
+      market: 'CN', date,
+      directions: [...directions],
+      mtfModes: [...mtfModes],
+      startedAt,
+    });
+    if (result.timedOut || !completion.completed) {
+      console.error('[cron/scan-cn] post_close incomplete', { date, batch, timedOut: result.timedOut, completion });
+      return apiError(`CN ${date} post_close incomplete: missing=${completion.missing.join(',') || '-'} stale=${completion.stale.join(',') || '-'}`, 503);
+    }
 
     const alert = (result.counts['long-daily'] ?? 0) === 0;
     if (alert) {
@@ -75,6 +99,7 @@ export async function GET(req: NextRequest) {
 
     return apiOk({
       ...result,
+      completed: true,
       ...(alert && { alert: true, warning: `交易日 ${date} long-daily 0 筆` }),
     });
   } catch (err) {

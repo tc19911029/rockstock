@@ -31,15 +31,6 @@ export interface ScanDateEntry {
   scanTime: string;
 }
 
-// 所有 buy-method 字母（v11 B-I + v12 J-Q）
-// 用於 listScanDates 的 legacy filter — 漏列任一字母會讓 daily 模式 date list
-// 把 buy-method post_close 誤列為 daily entry（議題：0421 -F- bug 同類）
-// R = 乖離率（機械軌, 2026-05-21）；V = 基本面補漲（基本面軌, 2026-05-27）
-const BUY_METHOD_LETTERS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'V', 'W', 'X', 'Y'] as const;
-const BUY_METHOD_FILE_TOKENS = BUY_METHOD_LETTERS.map((l) => `-${l}-`);
-const isBuyMethodFile = (filename: string): boolean =>
-  BUY_METHOD_FILE_TOKENS.some((token) => filename.includes(token));
-
 // ── loadScanSession in-memory cache ──────────────────────────────────────────
 //
 // 為什麼：盤中點日期會卡 30 秒以上的根因是 loadScanSession 內 loadLatestIntradayRaw
@@ -155,6 +146,69 @@ function sessionMtfMode(session: ScanSession): MtfMode {
   if (session.timeframe === '30m') return 'daily30'; // 六條件(30分K)獨立變體槽
   if (session.buyMethod) return session.buyMethod;
   return session.multiTimeframeEnabled ? 'mtf' : 'daily';
+}
+
+/** 盤中快照只屬於市場「今天」；歷史日期必須以正式 post_close 為準。 */
+export function isCurrentMarketDate(
+  date: string,
+  market: MarketId,
+  now: Date = new Date(),
+): boolean {
+  const timeZone = market === 'CN' ? 'Asia/Shanghai' : 'Asia/Taipei';
+  return date === new Intl.DateTimeFormat('en-CA', { timeZone }).format(now);
+}
+
+/** 舊版 daily 只有兩種精確檔名；daily30、字母策略與 intraday 都不可混入。 */
+export function isLegacyDailyScanFilename(
+  filename: string,
+  market: MarketId,
+  direction?: ScanDirection,
+): boolean {
+  const suffix = '\\d{4}-\\d{2}-\\d{2}\\.json';
+  return direction
+    ? new RegExp('^scan-' + market + '-' + direction + '-' + suffix + '$').test(filename)
+    : new RegExp('^scan-' + market + '-' + suffix + '$').test(filename);
+}
+
+/** 只讀正式盤後主檔，不回退到 intraday。供完成驗證與重試判斷使用。 */
+async function loadPostCloseRaw(
+  market: MarketId,
+  date: string,
+  direction: ScanDirection,
+  mtfMode: MtfMode,
+): Promise<string | null> {
+  let raw: string | null = null;
+  if (IS_VERCEL) {
+    try {
+      raw = await blobGet(`scans/${market}/${direction}/${mtfMode}/${date}.json`);
+      if (!raw && mtfMode === 'daily') raw = await blobGet(`scans/${market}/${direction}/${date}.json`);
+      if (!raw && mtfMode === 'daily' && direction === 'long') raw = await blobGet(`scans/${market}/${date}.json`);
+    } catch { /* local fallback below */ }
+  }
+  if (!raw) raw = await fsGet(`scan-${market}-${direction}-${mtfMode}-${date}.json`);
+  if (!raw && mtfMode === 'daily') raw = await fsGet(`scan-${market}-${direction}-${date}.json`);
+  if (!raw && mtfMode === 'daily' && direction === 'long') raw = await fsGet(`scan-${market}-${date}.json`);
+  return raw;
+}
+
+export async function loadPostCloseScanSession(
+  market: MarketId,
+  date: string,
+  direction: ScanDirection = 'long',
+  mtfMode: MtfMode = 'daily',
+): Promise<ScanSession | null> {
+  const raw = await loadPostCloseRaw(market, date, direction, mtfMode);
+  if (!raw) return null;
+  try {
+    const session = JSON.parse(raw) as ScanSession;
+    if ((session.sessionType ?? 'post_close') !== 'post_close') return null;
+    if (session.market !== market || session.date !== date) return null;
+    if ((session.direction ?? 'long') !== direction) return null;
+    if (sessionMtfMode(session) !== mtfMode) return null;
+    return session;
+  } catch {
+    return null;
+  }
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -406,16 +460,12 @@ export async function listScanDates(
     // Always merge legacy format files (old format without direction/mtf dimension)
     // so that new-format and old-format records coexist seamlessly.
     {
-      let files = await fsListPrefix(`scan-${market}-${direction}-`);
-      // 排除已在上面讀過的 new-format files + 所有 buy-method 字母（B-Q）
-      files = files.filter(f => !f.includes('-daily-') && !f.includes('-mtf-') && !isBuyMethodFile(f));
+      let files = (await fsListPrefix(`scan-${market}-${direction}-`))
+        .filter(f => isLegacyDailyScanFilename(f, market, direction));
       // Legacy fallback (no direction prefix)
       if (files.length === 0 && direction === 'long') {
-        const legacyFiles = await fsListPrefix(`scan-${market}-`);
-        files = legacyFiles.filter(f =>
-          !f.includes('-long-') && !f.includes('-short-') && !f.includes('-daily-') && !f.includes('-mtf-') &&
-          !isBuyMethodFile(f),
-        );
+        files = (await fsListPrefix(`scan-${market}-`))
+          .filter(f => isLegacyDailyScanFilename(f, market));
       }
       for (const file of files) {
         const match = file.match(/(\d{4}-\d{2}-\d{2})\.json$/);
@@ -441,9 +491,11 @@ export async function listScanDates(
     }
   }
 
-  // ── 盤中 intraday session 也納入清單 ──
-  // 不再跳過已有 post_close 的日期，讓 intraday 進入 entries，
-  // 由下方 dedup 步驟依 scanTime 取最新（盤中 intraday 較新 → 選 intraday）
+  // ── 盤中 intraday 只納入「市場今天」 ──
+  // 歷史日期只能顯示正式 post_close，避免日期列有該日、點入卻是過期盤中空快照。
+  const marketToday = new Intl.DateTimeFormat('en-CA', {
+    timeZone: market === 'CN' ? 'Asia/Shanghai' : 'Asia/Taipei',
+  }).format(new Date());
 
   if (IS_VERCEL) {
     try {
@@ -455,6 +507,7 @@ export async function listScanDates(
           const intradayMatch = blob.pathname.match(/(\d{4}-\d{2}-\d{2})\/intraday\/\d{4,6}\.json$/);
           if (!intradayMatch) continue;
           const dateStr = intradayMatch[1];
+          if (dateStr !== marketToday) continue;
           // 不跳過：讓 intraday 與 post_close 共存，由 dedup 取最新 scanTime
           entries.push({
             market, direction, mtfMode: m,
@@ -472,6 +525,7 @@ export async function listScanDates(
         const intradayMatch = file.match(/(\d{4}-\d{2}-\d{2})-intraday-\d{4,6}\.json$/);
         if (!intradayMatch) continue;
         const dateStr = intradayMatch[1];
+        if (dateStr !== marketToday) continue;
         // 不跳過也不加入 existingDates，讓同日多筆 intraday 都進 entries，由 dedup 取最新
         try {
           const raw = await fsGet(file);
@@ -499,8 +553,8 @@ export async function listScanDates(
     }
   }
 
-  // Deduplicate by date+mtfMode
-  // 選擇規則（和 loadScanSession 邏輯保持一致）：
+  // Deduplicate by date+mtfMode（intraday 只可能出現在市場今天）
+  // 選擇規則（和 loadScanSession 的今日邏輯保持一致）：
   // 1) 優先選 resultCount > 0 的 entry
   // 2) 同是有結果（或同為 0） → 取最新 scanTime
   // 這樣空 post_close（歷史日期 backfill 重跑變 0）不會遮蓋有結果的 intraday
@@ -561,19 +615,10 @@ async function loadScanSessionRaw(
   direction: ScanDirection,
   mtfMode: MtfMode,
 ): Promise<ScanSession | null> {
-  let raw: string | null = null;
-  if (IS_VERCEL) {
-    try {
-      raw = await blobGet(`scans/${market}/${direction}/${mtfMode}/${date}.json`);
-      if (!raw && mtfMode === 'daily') raw = await blobGet(`scans/${market}/${direction}/${date}.json`);
-      if (!raw && mtfMode === 'daily' && direction === 'long') raw = await blobGet(`scans/${market}/${date}.json`);
-    } catch { /* ignore */ }
-  }
-  if (!raw) raw = await fsGet(`scan-${market}-${direction}-${mtfMode}-${date}.json`);
-  if (!raw && mtfMode === 'daily') raw = await fsGet(`scan-${market}-${direction}-${date}.json`);
-  if (!raw && mtfMode === 'daily' && direction === 'long') raw = await fsGet(`scan-${market}-${date}.json`);
+  let raw = await loadPostCloseRaw(market, date, direction, mtfMode);
+  const allowIntraday = isCurrentMarketDate(date, market);
 
-  if (raw) {
+  if (raw && allowIntraday) {
     const intradayRaw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
     if (intradayRaw) {
       try {
@@ -585,7 +630,7 @@ async function loadScanSessionRaw(
       } catch { /* use post_close */ }
     }
   }
-  if (!raw) raw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
+  if (!raw && allowIntraday) raw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
   if (!raw) return null;
   try { return JSON.parse(raw) as ScanSession; } catch { return null; }
 }
@@ -643,44 +688,14 @@ async function loadScanSessionUncached(
   direction: ScanDirection,
   mtfMode: MtfMode,
 ): Promise<ScanSession | null> {
-  let raw: string | null = null;
+  let raw = await loadPostCloseRaw(market, date, direction, mtfMode);
+  const allowIntraday = isCurrentMarketDate(date, market);
 
-  if (IS_VERCEL) {
-    try {
-      // New MTF-aware path
-      raw = await blobGet(`scans/${market}/${direction}/${mtfMode}/${date}.json`);
-      // Fallback: old direction path (no mtf) — only for daily mode
-      // (old format data was effectively daily-only; don't serve it for mtf requests)
-      if (!raw && mtfMode === 'daily') {
-        raw = await blobGet(`scans/${market}/${direction}/${date}.json`);
-      }
-      // Fallback: legacy path (no direction) — only for daily + long
-      if (!raw && mtfMode === 'daily' && direction === 'long') {
-        raw = await blobGet(`scans/${market}/${date}.json`);
-      }
-    } catch (err) {
-      console.error('[scanStorage] Blob loadScanSession failed (token missing?):', err);
-    }
-  }
-
-  // Local filesystem: new format
-  if (!raw) {
-    raw = await fsGet(`scan-${market}-${direction}-${mtfMode}-${date}.json`);
-  }
-  // Fallback: old format without mtf — only for daily mode
-  if (!raw && mtfMode === 'daily') {
-    raw = await fsGet(`scan-${market}-${direction}-${date}.json`);
-  }
-  // Legacy fallback — only for daily + long
-  if (!raw && mtfMode === 'daily' && direction === 'long') {
-    raw = await fsGet(`scan-${market}-${date}.json`);
-  }
-
-  // 若有 post_close，決定是否改用 intraday：
+  // 市場今天若有 post_close，決定是否改用較新的 intraday：
   //   1) 空的 post_close + 有結果的 intraday → 一律優先 intraday
-  //      （歷史日期的 post_close 被重跑變 0 筆，不該蓋掉真實盤中結果）
+  //      （只限今天；歷史日期永遠以正式 post_close 為準）
   //   2) intraday 比 post_close 新且有結果 → 優先 intraday（盤中即時覆蓋）
-  if (raw) {
+  if (raw && allowIntraday) {
     const intradayRaw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
     if (intradayRaw) {
       try {
@@ -697,8 +712,8 @@ async function loadScanSessionUncached(
     }
   }
 
-  // Fallback: 若無 post_close session，嘗試載入最新的 intraday session
-  if (!raw) {
+  // 市場今天若無 post_close session，才回退到最新 intraday。
+  if (!raw && allowIntraday) {
     raw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
   }
 

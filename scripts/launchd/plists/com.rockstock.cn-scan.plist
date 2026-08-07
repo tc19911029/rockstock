@@ -6,9 +6,9 @@
   <string>com.rockstock.cn-scan</string>
 
   <!--
-    CN 盤後 scan：跑 daily + mtf + 13 個 v12 買法（B/C/D/E/F/J/K/L/M/N/O/P/Q）
-    時間：20:00 CST（A 股盤後 15:00 + L1 download 完成 + verify 報告寫入後，CN 資料較慢）
-    取代 vercel.json 的 update-intraday-bm 26 條 per-letter cron — 本地一次跑完
+    CN 盤後 A 策略 scan：跑 daily + mtf；B-R 字母策略由 scan-bm-batch 獨立排程處理。
+    時間：20:00 / 20:15 / 20:30 CST。第一次成功後 endpoint 會依正式主檔完成狀態冪等跳過。
+    多時點用來自動補救 L1 verify 延遲、server 短暫錯誤或單次逾時。
   -->
   <key>ProgramArguments</key>
   <array>
@@ -23,11 +23,21 @@
 
   <key>StartCalendarInterval</key>
   <array>
-    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
     <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>30</integer></dict>
     <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>30</integer></dict>
     <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>30</integer></dict>
     <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>20</integer><key>Minute</key><integer>30</integer></dict>
   </array>
 
   <key>StandardOutPath</key>

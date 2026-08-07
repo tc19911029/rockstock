@@ -5,6 +5,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { runScanPipeline } from '@/lib/scanner/ScanPipeline';
 import { assertL1Coverage } from '@/lib/scanner/coverageGuard';
+import { verifyPostCloseScanCompletion } from '@/lib/scanner/scanCompletion';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -15,9 +16,21 @@ export async function GET(req: NextRequest) {
 
   const dateParam = req.nextUrl.searchParams.get('date');
   const date = dateParam ?? getLastTradingDay('TW');
+  const directions = ['long', 'short'] as const;
+  const mtfModes = ['daily', 'mtf'] as const;
 
   if (!isTradingDay(date, 'TW')) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
+  }
+
+  // launchd 會在固定間隔重試；已有四份正式主檔時直接成功返回，避免重算。
+  const existing = await verifyPostCloseScanCompletion({
+    market: 'TW', date,
+    directions: [...directions],
+    mtfModes: [...mtfModes],
+  });
+  if (existing.completed && req.nextUrl.searchParams.get('force') !== '1') {
+    return apiOk({ skipped: true, completed: true, reason: 'post_close already complete', market: 'TW', date });
   }
 
   // L1 覆蓋率守門：若 download 未完成或殘缺，拒絕跑 scan，避免覆蓋既有正確結果
@@ -49,18 +62,28 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 0512 修：post-close 一次寫完所有 v12 買法 session（13 支字母）
-    // 不再依賴 vercel.json update-intraday-bm per-letter cron（本地 launchd 不裝）
-    // v11 G/H/I 已退場 — 不寫入新資料（舊資料 normalize-on-read 處理）
+    const startedAt = Date.now();
+    // 這個 endpoint 只寫 A 六條件 daily/mtf；B～R 由 scan-bm-batch 分軌負責。
+    // 避免兩邊重複全市場掃描，使 A 主檔在 deadline 內可靠封存。
     const result = await runScanPipeline({
       market: 'TW',
       date,
       sessionType: 'post_close',
-      directions: ['long', 'short'],
-      mtfModes: ['daily', 'mtf'],
-      buyMethods: ['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'],
+      directions: [...directions],
+      mtfModes: [...mtfModes],
       force: true,
     });
+
+    const completion = await verifyPostCloseScanCompletion({
+      market: 'TW', date,
+      directions: [...directions],
+      mtfModes: [...mtfModes],
+      startedAt,
+    });
+    if (result.timedOut || !completion.completed) {
+      console.error('[cron/scan-tw] post_close incomplete', { date, timedOut: result.timedOut, completion });
+      return apiError(`TW ${date} post_close incomplete: missing=${completion.missing.join(',') || '-'} stale=${completion.stale.join(',') || '-'}`, 503);
+    }
 
     const alert = (result.counts['long-daily'] ?? 0) === 0;
     if (alert) {
@@ -69,6 +92,7 @@ export async function GET(req: NextRequest) {
 
     return apiOk({
       ...result,
+      completed: true,
       ...(alert && { alert: true, warning: `交易日 ${date} long-daily 0 筆` }),
     });
   } catch (err) {

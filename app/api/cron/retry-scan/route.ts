@@ -1,10 +1,11 @@
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { checkCronAuth } from '@/lib/api/cronAuth';
-import { loadScanSession } from '@/lib/storage/scanStorage';
+import { loadPostCloseScanSession } from '@/lib/storage/scanStorage';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { runScanPipeline } from '@/lib/scanner/ScanPipeline';
+import { verifyPostCloseScanCompletion } from '@/lib/scanner/scanCompletion';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -26,14 +27,20 @@ export async function GET(req: NextRequest) {
   }
 
   // 已有結果則跳過
-  const existing = await loadScanSession(market, date, 'long', 'daily');
-  if (existing && existing.resultCount > 0) {
-    return apiOk({ skipped: true, reason: 'scan already has results', date, resultCount: existing.resultCount });
+  const existing = await loadPostCloseScanSession(market, date, 'long', 'daily');
+  const existingCompletion = await verifyPostCloseScanCompletion({
+    market, date,
+    directions: ['long', 'short'],
+    mtfModes: ['daily', 'mtf'],
+  });
+  if (existingCompletion.completed) {
+    return apiOk({ skipped: true, completed: true, reason: 'post_close already complete', date, resultCount: existing?.resultCount ?? 0 });
   }
 
   console.warn(`[retry-scan] ${market} ${date} long-daily resultCount=${existing?.resultCount ?? 'missing'}, 重新掃描`);
 
   try {
+    const startedAt = Date.now();
     const result = await runScanPipeline({
       market,
       date,
@@ -43,7 +50,17 @@ export async function GET(req: NextRequest) {
       force: true,
     });
 
-    return apiOk({ retried: true, ...result });
+    const completion = await verifyPostCloseScanCompletion({
+      market, date,
+      directions: ['long', 'short'],
+      mtfModes: ['daily', 'mtf'],
+      startedAt,
+    });
+    if (result.timedOut || !completion.completed) {
+      return apiError(`${market} ${date} retry incomplete: missing=${completion.missing.join(',') || '-'} stale=${completion.stale.join(',') || '-'}`, 503);
+    }
+
+    return apiOk({ retried: true, completed: true, ...result });
   } catch (err) {
     console.error('[retry-scan] error:', err);
     return apiError(String(err));
