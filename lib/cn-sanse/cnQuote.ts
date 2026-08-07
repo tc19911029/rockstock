@@ -10,6 +10,8 @@ import type { Candle } from '@/types';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
 
 export interface SanSeQuote {
+  /** 報價所屬交易日（YYYY-MM-DD）；休市日不可冒充成今天。 */
+  date?: string;
   price: number;        // 現價
   prevClose: number;    // 昨收
   open: number;         // 今開
@@ -61,6 +63,9 @@ export async function fetchQuote(symbol: string): Promise<SanSeQuote | null> {
     if (!(price > 0)) return null; // 停牌/無報價
 
     return {
+      date: /^\d{8}/.test(p[30] ?? '')
+        ? `${p[30].slice(0, 4)}-${p[30].slice(4, 6)}-${p[30].slice(6, 8)}`
+        : undefined,
       price,
       prevClose: num(p[4]),
       open: num(p[5]),

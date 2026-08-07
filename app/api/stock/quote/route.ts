@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
       const q = await getTWSESingleIntraday(pureCode);
       if (q && q.close > 0 && (!q.date || q.date === today)) {
         quote = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
+        quoteDate = q.date ?? today;
       }
     } catch { /* fallthrough */ }
 
@@ -74,6 +75,7 @@ export async function GET(req: NextRequest) {
         const fq = await getFugleQuote(pureCode);
         if (fq && fq.close > 0) {
           quote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
+          quoteDate = fq.date ?? today;
         }
       } catch { /* fallthrough */ }
     }
@@ -92,6 +94,7 @@ export async function GET(req: NextRequest) {
       if (tq && tq.price > 0 && tq.open > 0 && tq.high > 0 && tq.low > 0) {
         // 騰訊量單位「手」、CN L1 基準「股」→ ×100 對齊
         quote = { open: tq.open, high: tq.high, low: tq.low, close: tq.price, volume: tq.volumeLots * 100 };
+        quoteDate = tq.date ?? today;
       }
     } catch { /* fallthrough */ }
 
@@ -101,6 +104,7 @@ export async function GET(req: NextRequest) {
         const q = await getEastMoneySingleQuote(pureCode, cnSuffix);
         if (q && q.close > 0) {
           quote = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
+          quoteDate = q.date ?? today;
         }
       } catch { /* fallthrough */ }
     }

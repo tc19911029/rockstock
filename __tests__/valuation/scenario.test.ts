@@ -79,6 +79,31 @@ describe('valuation/scenario', () => {
     expect(r.optimistic.fairPe).toBe(50);
   });
 
+  it('keeps an announced Q2 actual and assigns partial monthly revenue to Q3', () => {
+    const result = computeScenario(
+      [
+        { quarter: '2026Q2', revenue: 100, netIncome: 20, eps: 2 },
+        { quarter: '2026Q1', revenue: 80, netIncome: 8, eps: 0.8 },
+      ],
+      {
+        partialQuarterRevenue: 30,
+        q2Revenue: 999,
+        q3Revenue: 70,
+        q4Revenue: 120,
+        q2NetMargin: 0.99,
+        q3NetMargin: 0.2,
+        q4NetMargin: 0.2,
+      },
+      10,
+      10,
+      100,
+    );
+    expect(result.q2Eps).toBe(2);
+    expect(result.q3Eps).toBe(2); // (已公布月 30 + 尚餘 70) × 20% / 10
+    expect(result.q4Eps).toBe(2.4);
+    expect(result.fullYearEps).toBeCloseTo(7.2);
+  });
+
   it('derives conclusion correctly', () => {
     const make = (forwardPe: number, fairPe: number) => ({
       q2Eps: 0, q3Eps: 0, q4Eps: 0, fullYearEps: 100, forwardPe, fairPe, fairPrice: 0, upside: 0,

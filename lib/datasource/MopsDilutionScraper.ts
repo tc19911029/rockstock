@@ -64,6 +64,7 @@ export interface DilutionEntry {
   sourceUrl: string;
   announcedAt: string;
   description: string;
+  status?: 'pending' | 'approved' | 'completed' | 'cancelled';
 }
 
 // 順序有意義：一則公告可能同時命中多個關鍵字（例：「以私募方式辦理現金增資」），
@@ -72,15 +73,18 @@ const KEYWORD_MAP: Array<{ pattern: RegExp; type: DilutionType }> = [
   { pattern: /海外.*存託憑證|GDR|ADR/i, type: 'gdr' },
   { pattern: /現金增資/, type: 'rights_issue' },
   { pattern: /可轉換公司債|海外可轉換/, type: 'convertible_bond' },
-  { pattern: /員工認股權|庫藏股轉讓予員工|限制員工權利新股/, type: 'employee_option' },
+  { pattern: /員工認股權|限制員工權利新股/, type: 'employee_option' },
   { pattern: /私募/, type: 'private_placement' },
 ];
 
 // 命中關鍵字但明顯不是「新的稀釋事件」的雜訊主旨 — 例：既發行 CB 觸及
 // 注意交易/處置標準的市場監視公告（實抓踩到：49793 華星光三達公布注意交易資訊標準）
-const NOISE_PATTERN = /注意交易資訊|處置(?:有價證券|股票|交易)/;
+const NOISE_PATTERN = /注意交易資訊|處置(?:有價證券|股票|交易)|代重要子公司|代子公司|認購.*現金增資|取得.*私募|投資.*私募|調整.*轉換價格|轉換價格.*調整|減資|庫藏股註銷|洽特定人認購|催繳|延長募集期間/;
+const CANCELLED_PATTERN = /不繼續辦理|撤銷|取消|終止辦理|停止辦理/;
+const COMPLETED_PATTERN = /完成募集|完成訂價|完成定價|收足股款|發行新股變更登記完成|已完成/;
+const APPROVED_PATTERN = /核准|申報生效|董事會決議|股東會決議/;
 
-function classify(subject: string): DilutionType | null {
+export function classifyDilutionSubject(subject: string): DilutionType | null {
   // 剝掉所有空白再比對 — MOPS 主旨會在詞中間強制斷行（\r\n），不剝會截斷關鍵字
   const flat = subject.replace(/\s+/g, '');
   if (NOISE_PATTERN.test(flat)) return null;
@@ -90,11 +94,19 @@ function classify(subject: string): DilutionType | null {
   return null;
 }
 
+export function inferDilutionStatus(subject: string): DilutionEntry['status'] {
+  const flat = subject.replace(/\s+/g, '');
+  if (CANCELLED_PATTERN.test(flat)) return 'cancelled';
+  if (COMPLETED_PATTERN.test(flat)) return 'completed';
+  if (APPROVED_PATTERN.test(flat)) return 'approved';
+  return 'pending';
+}
+
 /**
  * 從主旨/說明文字中粗略解析新增股數（萬股 / 仟股 / 股）。
  * 解析不到就回 0 — UI 會標「待人工確認」。
  */
-function parseNewShares(text: string): number {
+export function parseNewShares(text: string): number {
   // 「不超過 600 萬股」「以 600,000 千股」「3,000,000 股」
   const wan = text.match(/(?:不超過|擬發行|預計發行)?[^\d]{0,5}([\d,.]+)\s*萬股/);
   if (wan) return Math.round(parseFloat(wan[1].replace(/,/g, '')) * 10000);
@@ -160,7 +172,7 @@ export async function scrapeMopsDilution(opts?: { dryRun?: boolean }): Promise<S
     const announcedDateRoc = String(row.發言日期 ?? '').trim();
     if (!/^\d{4,6}$/.test(code) || !subject) continue;
 
-    const type = classify(subject);
+    const type = classifyDilutionSubject(subject);
     if (!type) continue;
     matched++;
 
@@ -176,6 +188,7 @@ export async function scrapeMopsDilution(opts?: { dryRun?: boolean }): Promise<S
       sourceUrl,
       announcedAt,
       description: subjectFlat + (description ? ' / ' + description.replace(/\s+/g, ' ').slice(0, 200) : ''),
+      status: inferDilutionStatus(subject),
     };
 
     bySymbol[code] ??= [];

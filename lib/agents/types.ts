@@ -549,6 +549,8 @@ export interface FundamentalGroundTruth {
     market: 'TW' | 'CN';
     /** 當天最新股價（FinMind quote / TWSE / EastMoney） */
     currentPrice: number | null;
+    /** 報價真正所屬交易日；休市日不得填成今天。 */
+    currentPriceDate?: string | null;
     /** 近 8 季逐季財報 — 由近到遠 */
     quarterlyHistory: Array<{
       quarter: string;
@@ -614,11 +616,15 @@ export interface FundamentalGroundTruth {
     /** 程式預先算好的 TTM */
     ttmEps: number | null;
     ttmPe: number | null;
+    /** 以最新股數重算的備考 TTM；增資／配股後與報表 EPS 並列，不互相冒充。 */
+    proFormaTtmEps?: number | null;
+    proFormaTtmPe?: number | null;
+    ttmNetIncome?: number | null;
     /** 動態 PE = 股價 /（最新季 EPS × 4）— 兩市場通用，陸股 App 顯示「市盈率（動）」 */
     dynamicPe: number | null;
     /** 靜態 PE = 股價 / 去年全年 EPS — 陸股 App 顯示「市盈率（靜）」 */
     staticPe: number | null;
-    /** 去年全年 EPS（quarters[4..7] 加總） */
+    /** 最近一個完整會計年度的四季 EPS 加總。 */
     lastYearTotalEps: number | null;
     /** 從 data/dilution/{symbol}.json 讀的 GDR/增資/CB 公告（陸股目前空陣列） */
     dilutionEvents: Array<{
@@ -747,6 +753,13 @@ export interface FundamentalAnswer {
       upperQuartilePe: number | null;
       appliedPeRationale: string;
     };
+    /** 產業適配的主估值法與交叉驗證，避免所有公司一律只套 PE。 */
+    valuationMethod?: {
+      primaryModel: string;
+      crossChecks: string[];
+      rationale: string;
+      probabilityWeightedFairPrice?: number;
+    };
     /** skill 推估的當月 EPS（用月營收 × 上一季淨利率 / 股數） */
     monthlyEpsEstimate?: {
       month: string;
@@ -792,6 +805,8 @@ export interface FundamentalAnswer {
 
 /** 三情境之一的輸出（skill 填寫） */
 export interface ScenarioOutput {
+  /** 情境機率（0-1）；三情境合計必須為 1。 */
+  probability?: number;
   /** Q2-Q4 各季營收假設（億 / 與 quarterlyHistory 同單位） */
   q2Revenue: number;
   q3Revenue: number;
@@ -805,6 +820,10 @@ export interface ScenarioOutput {
   q3Eps: number;
   q4Eps: number;
   fullYearEps: number;
+  /** 實際拿來乘合理 PE、算 Forward PE 的 EPS；必須與 fairPrice 同口徑。 */
+  valuationEps?: number;
+  /** reported=報表、latest_shares=最新股數備考、fully_diluted=完全稀釋、normalized=剔除一次性。 */
+  valuationEpsBasis?: 'reported' | 'latest_shares' | 'fully_diluted' | 'normalized';
   forwardPe: number;
   fairPe: number;
   fairPrice: number;

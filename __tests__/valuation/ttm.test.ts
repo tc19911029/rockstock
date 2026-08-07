@@ -1,4 +1,4 @@
-import { computeTTM, computeTTMPe } from '@/lib/valuation/ttm';
+import { computeLastYearEps, computeTTM, computeTTMPe } from '@/lib/valuation/ttm';
 import type { QuarterRow } from '@/lib/valuation/types';
 
 describe('valuation/ttm', () => {
@@ -26,6 +26,29 @@ describe('valuation/ttm', () => {
 
   it('returns null when fewer than 4 quarters', () => {
     expect(computeTTM(quarters.slice(0, 3))).toBeNull();
+  });
+
+  it('sorts quarters, rejects gaps, and computes latest-share pro-forma EPS', () => {
+    const unordered = [quarters[2], quarters[0], quarters[3], quarters[1]];
+    const result = computeTTM(unordered, 2)!;
+    expect(result.ttmEps).toBeCloseTo(68.23, 2);
+    expect(result.proFormaTtmEps).toBeCloseTo((14.28 + 13 + 12.5 + 12) / 2, 2);
+    expect(computeTTM([quarters[0], quarters[1], quarters[2], { ...quarters[3], quarter: '2025-03-31' }])).toBeNull();
+  });
+
+  it('does not turn missing accounting data into zero', () => {
+    expect(computeTTM([{ ...quarters[0], eps: Number.NaN }, ...quarters.slice(1)])).toBeNull();
+  });
+
+  it('finds the latest complete prior fiscal year instead of relying on array offsets', () => {
+    const rows: QuarterRow[] = [
+      { quarter: '2026Q2', revenue: 1, netIncome: 1, eps: 2 },
+      { quarter: '2025Q3', revenue: 1, netIncome: 1, eps: 3 },
+      { quarter: '2025Q1', revenue: 1, netIncome: 1, eps: 1 },
+      { quarter: '2025Q4', revenue: 1, netIncome: 1, eps: 4 },
+      { quarter: '2025Q2', revenue: 1, netIncome: 1, eps: 2 },
+    ];
+    expect(computeLastYearEps(rows)).toBe(10);
   });
 
   it('TTM PE = price / TTM EPS', () => {

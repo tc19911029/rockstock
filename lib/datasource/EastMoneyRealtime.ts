@@ -25,6 +25,8 @@ export interface EastMoneyQuote {
   volume: number;     // 成交量（股）
   /** 昨收（A股從 f18 取得，美股可能無） */
   prevClose?: number;
+  /** 報價所屬交易日（YYYY-MM-DD）；避免週末把週五收盤誤標成今天。 */
+  date?: string;
 }
 
 // ── A 股 ──────────────────────────────────────────────────────────────────────
@@ -97,7 +99,7 @@ export async function getEastMoneySingleQuote(code: string, suffix?: 'SS' | 'SZ'
       : suffix === 'SZ' ? `0.${code}`
       : code[0] === '6' || code[0] === '9' ? `1.${code}` : `0.${code}`;
     // push2 會 302 redirect 到 push2delay；同時帶 live (f2/f15-f17) 與 delay (f43-f60) 欄位，哪邊有資料就用哪邊
-    const fields = 'f2,f5,f12,f14,f15,f16,f17,f43,f44,f45,f46,f47,f60';
+    const fields = 'f2,f5,f12,f14,f15,f16,f17,f43,f44,f45,f46,f47,f60,f124';
     const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secId}&fields=${fields}&ut=fa5fd1943c7b386f172d6893dbfba10b`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://quote.eastmoney.com/' },
@@ -125,6 +127,9 @@ export async function getEastMoneySingleQuote(code: string, suffix?: 'SS' | 'SZ'
       : (item.f45 != null && item.f45 > 0 ? item.f45 / 100 : close);
     const volume = (hasLive ? (item.f5 ?? 0) : (item.f47 ?? 0)) * 100; // f5/f47 單位為「手」；×100 轉為「股」與 L1 歷史一致
     const prevClose = item.f60 != null && item.f60 > 0 ? (hasLive ? item.f60 : item.f60 / 100) : undefined;
+    const quoteDate = typeof item.f124 === 'number' && item.f124 > 0
+      ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(item.f124 * 1000))
+      : undefined;
 
     return {
       code: item.f12 || code,
@@ -135,6 +140,7 @@ export async function getEastMoneySingleQuote(code: string, suffix?: 'SS' | 'SZ'
       close,
       volume,
       prevClose,
+      date: quoteDate,
     };
   } catch {
     return null;

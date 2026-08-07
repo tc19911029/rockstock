@@ -30,7 +30,7 @@ import {
   getBalanceSheet,
   getStockInfo,
 } from '@/lib/datasource/FinMindClient';
-import { getQuarterlyAny } from '@/lib/datasource/TwseOpenApiProvider';
+import { getMonthlyAny, getQuarterlyAny } from '@/lib/datasource/TwseOpenApiProvider';
 import { getEastMoneyFundamentals } from '@/lib/datasource/EastMoneyFundamentals';
 import { fetchCnFinancials } from '@/lib/datasource/EastMoneyFinancials';
 import { normalizeCnQuarterlyHistory, sumLatestFourQuarterEps } from '@/lib/valuation/cnQuarterly';
@@ -161,6 +161,7 @@ export async function buildValuationInputsTW(
     quoteRaw,
     quarterly,
     monthlySource,
+    officialMonthly,
     shares,
     balance,
     stockInfo,
@@ -174,6 +175,7 @@ export async function buildValuationInputsTW(
     getQuarterlyHistory(ticker, 8).catch((e) => { fetchErrors.push(`quarterly: ${e}`); return []; }),
     // 需要 24 個月才能替畫面上的近 12 個月逐月計算去年同期 YoY。
     getMonthlyRevenue(ticker, 24).catch((e) => { fetchErrors.push(`monthly: ${e}`); return []; }),
+    getMonthlyAny(ticker).catch((e) => { fetchErrors.push(`officialMonthly: ${e}`); return null; }),
     getSharesIssued(ticker).catch((e) => { fetchErrors.push(`shares: ${e}`); return null; }),
     getBalanceSheet(ticker).catch((e) => { fetchErrors.push(`balanceSheet: ${e}`); return null; }),
     getStockInfo(ticker).catch((e) => { fetchErrors.push(`stockInfo: ${e}`); return null; }),
@@ -188,6 +190,9 @@ export async function buildValuationInputsTW(
       return null;
     }),
   ]);
+
+  if (quarterly.length === 0 && !supplement?.quarterlyActuals?.length) fetchErrors.push('quarterly: empty result');
+  if (monthlySource.length === 0 && !officialMonthly) fetchErrors.push('monthly: empty result from FinMind and exchange');
 
   const quarterlyHistory = mergeQuarterlyActuals(quarterly, supplement?.quarterlyActuals);
   const selfReportedMonthlyActuals = mergeSelfReportedActuals(
@@ -206,22 +211,25 @@ export async function buildValuationInputsTW(
   } : undefined);
 
   // 解 quote API 的 apiOk 包裝
-  const quote = unwrapApi(quoteRaw) as { close?: number } | null;
+  const quote = unwrapApi(quoteRaw) as { close?: number; date?: string } | null;
   const currentPrice = typeof quote?.close === 'number' ? quote.close : null;
 
   // TTM 計算
   const ttm = computeTTM(
     quarterlyHistory.map((q) => ({
       quarter: q.quarter,
-      revenue: q.revenue ?? 0,
+      revenue: q.revenue ?? Number.NaN,
       grossProfit: q.grossProfit ?? undefined,
-      netIncome: q.netIncome ?? 0,
-      eps: q.eps ?? 0,
+      netIncome: q.netIncome ?? Number.NaN,
+      eps: q.eps ?? Number.NaN,
       netMargin: q.netMargin ?? undefined,
     })),
+    effectiveShares,
   );
   const ttmEps = ttm?.ttmEps ?? null;
   const ttmPe = ttmEps && currentPrice ? computeTTMPe(currentPrice, ttmEps) : null;
+  const proFormaTtmEps = ttm?.proFormaTtmEps ?? null;
+  const proFormaTtmPe = proFormaTtmEps && currentPrice ? computeTTMPe(currentPrice, proFormaTtmEps) : null;
 
   // 動態 / 靜態 PE
   const latestQuarterEps = quarterlyHistory[0]?.eps ?? null;
@@ -247,7 +255,23 @@ export async function buildValuationInputsTW(
   const peRange = getReasonablePeRange(template);
 
   // monthly normalisation（FinMind RevenueRow → 我們的 schema）
-  const monthlyHistoryWithPriorYear = monthlySource.map((r) => ({
+  const mergedMonthlySource = [...monthlySource];
+  const officialYm = officialMonthly?.yearMonth.match(/^(\d{3})(\d{2})$/);
+  if (officialMonthly && officialYm && officialMonthly.revenue != null) {
+    const month = `${Number(officialYm[1]) + 1911}-${officialYm[2]}-01`;
+    const officialRow = {
+      date: month,
+      stock_id: ticker,
+      revenue_year: Number(officialYm[1]) + 1911,
+      revenue_month: Number(officialYm[2]),
+      revenue: officialMonthly.revenue * 1000,
+    };
+    const existingIndex = mergedMonthlySource.findIndex(row => row.date === month);
+    if (existingIndex >= 0) mergedMonthlySource[existingIndex] = { ...mergedMonthlySource[existingIndex], ...officialRow };
+    else mergedMonthlySource.push(officialRow);
+    mergedMonthlySource.sort((a, b) => b.date.localeCompare(a.date));
+  }
+  const monthlyHistoryWithPriorYear = mergedMonthlySource.map((r) => ({
     month: r.date,
     revenue: r.revenue,
     mom: null as number | null,
@@ -266,7 +290,9 @@ export async function buildValuationInputsTW(
   const sourceUrls: Record<string, string> = {
     quote: `internal:/api/stock/quote?symbol=${symbol}`,
     quarterlyHistory: `finmind:TaiwanStockFinancialStatements?data_id=${ticker}`,
-    monthlyRevenue: `finmind:TaiwanStockMonthRevenue?data_id=${ticker}`,
+    monthlyRevenue: officialMonthly
+      ? 'https://openapi.twse.com.tw/v1/opendata/t187ap05_L / https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O'
+      : `finmind:TaiwanStockMonthRevenue?data_id=${ticker}`,
     selfReportedMonthlyActuals: `https://tw.stock.yahoo.com/quote/${ticker}.TW/news`,
     sharesOutstanding: `finmind:TaiwanStockShareholding?data_id=${ticker}`,
     bookValuePerShare: `finmind:TaiwanStockBalanceSheet?data_id=${ticker}`,
@@ -277,6 +303,7 @@ export async function buildValuationInputsTW(
   return {
     market: 'TW',
     currentPrice,
+    currentPriceDate: quote?.date ?? null,
     quarterlyHistory: quarterlyHistory.map((q) => ({
       quarter: q.quarter,
       revenue: q.revenue,
@@ -294,6 +321,9 @@ export async function buildValuationInputsTW(
     bookValuePerShare: balance?.bookValuePerShare ?? null,
     ttmEps,
     ttmPe,
+    proFormaTtmEps,
+    proFormaTtmPe,
+    ttmNetIncome: ttm?.ttmNetIncome ?? null,
     dynamicPe,
     staticPe,
     lastYearTotalEps,
@@ -329,7 +359,7 @@ export async function buildValuationInputsCN(
       .catch((e) => { fetchErrors.push(`supplementalFundamentals: ${e}`); return null; }),
   ]);
 
-  const quote = unwrapApi(quoteRaw) as { close?: number } | null;
+  const quote = unwrapApi(quoteRaw) as { close?: number; date?: string } | null;
   // 優先使用 quote API 的 close，fallback 用 EastMoney price
   const currentPrice = (typeof quote?.close === 'number' ? quote.close : null) ?? em?.price ?? null;
 
@@ -367,6 +397,7 @@ export async function buildValuationInputsCN(
   return {
     market: 'CN',
     currentPrice,
+    currentPriceDate: quote?.date ?? null,
     quarterlyHistory,
     monthlyRevenueHistory: [],  // 陸股不抓月營收
     earningsGuidance: supplement?.earningsGuidance,

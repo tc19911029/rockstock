@@ -89,9 +89,19 @@ function BasicInfoCard({
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
       <Stat label="股價" value={fmtPrice(inputs.currentPrice)} />
       <Stat label="TTM EPS" value={fmt(inputs.ttmEps, 2)} />
+      {inputs.proFormaTtmEps != null && inputs.ttmEps != null && Math.abs(inputs.proFormaTtmEps - inputs.ttmEps) >= 0.01 && (
+        <Stat
+          label="備考 TTM EPS"
+          value={fmt(inputs.proFormaTtmEps, 2)}
+          sub="TTM 淨利 ÷ 最新股數（非報表 EPS）"
+        />
+      )}
       <Stat label="TTM PE"
             value={inputs.ttmPe != null ? fmt(inputs.ttmPe, 1) + ' 倍' : 'N/A'}
             hint={inputs.ttmPe && inputs.ttmPe > 50 ? 'high' : undefined} />
+      {inputs.proFormaTtmPe != null && inputs.proFormaTtmEps != null && (
+        <Stat label="備考 TTM PE" value={fmt(inputs.proFormaTtmPe, 1) + ' 倍'} sub="按最新股數重算" />
+      )}
       <Stat label="動態 PE"
             value={inputs.dynamicPe != null ? fmt(inputs.dynamicPe, 1) + ' 倍' : 'N/A'}
             sub="股價/(最新季 EPS×4)" />

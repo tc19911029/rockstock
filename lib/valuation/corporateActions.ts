@@ -17,7 +17,8 @@ export async function readDilutionEvents(symbol: string): Promise<DilutionEvent[
     return parsed.filter((entry): entry is DilutionEvent => {
       if (!entry || typeof entry !== 'object') return false;
       const item = entry as Partial<DilutionEvent>;
-      return typeof item.type === 'string'
+      return item.status !== 'cancelled'
+        && typeof item.type === 'string'
         && typeof item.newShares === 'number'
         && Number.isFinite(item.newShares)
         && item.newShares >= 0;

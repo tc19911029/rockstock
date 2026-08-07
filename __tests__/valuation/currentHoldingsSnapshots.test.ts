@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { validateValuationOutput } from '@/lib/valuation/outputValidation';
 
 const root = process.cwd();
 
@@ -10,11 +11,18 @@ describe('2026-08-08 holdings valuation refresh', () => {
     const file = path.join(root, 'data', 'valuation', '2026-08-08', `${symbol}.json`);
     const valuation = JSON.parse(readFileSync(file, 'utf-8')) as any;
     expect(valuation.date).toBe('2026-08-08');
-    expect(valuation.peerComparison.peers.filter((p: any) => !p.excluded).length).toBeGreaterThanOrEqual(3);
+    const includedPeers = valuation.peerComparison.peers.filter((p: any) => !p.excluded).length;
+    expect(includedPeers).toBeGreaterThanOrEqual(valuation.symbol === '6770' ? 2 : 3);
     expect(valuation.scenarios.pessimistic.fullYearEps).toBeGreaterThan(0);
     expect(valuation.scenarios.base.fullYearEps).toBeGreaterThan(valuation.scenarios.pessimistic.fullYearEps);
     expect(valuation.scenarios.optimistic.fullYearEps).toBeGreaterThan(valuation.scenarios.base.fullYearEps);
     expect(valuation.dataAsOf.dilutionSignature).toEqual(expect.any(String));
+    expect(validateValuationOutput(valuation, new Date('2026-08-07T18:30:00.000Z')).valid).toBe(true);
+  });
+
+  it('excludes TSMC from PSMC core peer median', () => {
+    const psmc = JSON.parse(readFileSync(path.join(root, 'data/valuation/2026-08-08/6770.json'), 'utf-8'));
+    expect(psmc.peerComparison.peers.find((peer: any) => peer.symbol === '2330')).toMatchObject({ excluded: true });
   });
 
   it('records 3006 July self-reported EPS and 3081 post-dividend shares', () => {

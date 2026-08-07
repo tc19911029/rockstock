@@ -68,7 +68,7 @@ export async function POST(
     const outputPath = `data/valuation/${date}/${bareSymbol}.json`;
 
     const question = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       task: 'per-stock-valuation',
       date,
       symbol: bareSymbol,
@@ -80,18 +80,23 @@ export async function POST(
         valuationInputs,
       },
       outputContract: {
-        required: ['ttmPe', 'fiscalYear', 'reportedThrough', 'actualEpsYtd', 'dataAsOf', 'peerComparison', 'scenarios'],
+        required: ['generatedAt', 'currentPriceContext', 'ttmPe', 'fiscalYear', 'reportedThrough', 'actualEpsYtd', 'dataAsOf', 'peerComparison', 'scenarios'],
         peerComparison: {
           minimumIncludedPeers: 3,
           requiredPeerFields: ['symbol', 'name', 'market', 'ttmPe', 'currentYearPe', 'excluded', 'asOf', 'sourceUrl'],
           requiredSummaryFields: ['selectionBasis', 'medianTtmPe', 'medianCurrentYearPe', 'lowerQuartilePe', 'upperQuartilePe', 'appliedPeRationale'],
         },
         ntmEstimate: '只有取得真正未來四季 EPS 預估時才輸出；不得以本年度 EPS 代替。',
+        valuationMethod: '至少一個產業適配的主估值法與一個獨立交叉驗證；不得所有產業一律只套歷史 PE。',
         compatibility: '保留既有 monthlyEpsEstimate、dilution、riskFlags、conclusion、reasoning 與三情境欄位。',
+        scenarioArithmetic: '每個情境必填 valuationEps 與 valuationEpsBasis；forwardPe=currentPrice/valuationEps，fairPrice=valuationEps*fairPe。fullYearEps 可保留報表口徑，但不得再拿不同 EPS 口徑混算。',
       },
       instructions: [
         '所有數字先核對資料日期；公司公告、交易所與法說會為第一優先，法人預估只能作為輔助，不得把新聞轉述當成公司正式財測。',
         '依商業模式、獲利驅動因子與景氣循環位置挑選真正可比同業；列出同業 TTM PE／本年預估 PE，排除虧損、一次性收益與極端值後，以中位數及四分位距校準合理 PE。',
+        '估值採產業適配的雙模型：高成長股以正常化 Forward PE 為主、PEG／反向 DCF 為交叉驗證；景氣循環股以中周期正常化 EPS×PE 為主、PB-ROE／EV-EBITDA 為交叉驗證；成熟穩定股用 PE 搭配 DCF／股利模型；虧損股不得用 PE，改用 EV/Sales 或 EV/EBITDA。輸出 valuationMethod 說明模型與理由。',
+        '合理 PE 不能直接照抄同業中位數：需明確調整未來營收／EPS 成長、ROE／利潤率、財務槓桿、客戶集中、流動性、治理與景氣位置。若同業 forward PE 不足三家，信心最高只能 low，且必須列為限制。',
+        '將非經常損益、資產處分、公允價值變動、補貼與匯兌等拆出，reported EPS、normalized EPS、最新股數備考 EPS、完全稀釋 EPS 四種口徑不得混用。報表 EPS 仍遵循各期加權平均股數，最新股數重算值只能標為備考。',
         '檢查最新股本、流通股數、增資、GDR、私募與可轉債等潛在稀釋；EPS 與合理價一律使用最新完全稀釋股數重算。',
         market === 'TW'
           ? '台股納入逐月營收與自結／正式 EPS；valuationInputs.selfReportedMonthlyActuals 是公司依注意股規定公告的單月合併自結實績，優先級高於模型。若 latestCumulativeActual 存在，actualEpsYtd 必須直接採交易所累計 EPS，不得把單季 EPS 相加取代。只有 selfReportedMonthlyActuals 沒有該月 EPS 時，才可以最近一個已公告季度的正常化淨利率估算，並清楚標示為模型值。'
@@ -100,7 +105,10 @@ export async function POST(
         '先辨識 valuationInputs.quarterlyHistory 中本年度已公告到哪一季；已公告季度必須照實列入 actualEpsYtd，不得再估一次，只推估尚未公告季度。',
         '推估悲觀／中性／樂觀三情境的後續季度營收、淨利率、EPS，以及情境成立所需的月營收或營收成長門檻；scenarios 的已公告季度欄位填實際值。',
         '區分 TTM PE、以本年度 EPS 計算的預估 PE，以及真正未來 12 個月 NTM PE；資料不足時不得混用或假裝精確。',
+        'currentPriceContext 必須包含 currentPrice、priceDate、sharesOutstanding、ttmEps；priceDate 採報價資料源真正交易日，休市日不得填今天。',
+        '每個情境必填 valuationEps 與 valuationEpsBasis；Forward PE、合理價與距現價必須全部用 valuationEps 計算。若採完全稀釋或正常化 EPS，fullYearEps 仍可另列，但不得混用公式。',
         '每個 scenario 必須附 revenueBasis / netMarginBasis / assumptionEvidence（含 sourceUrl + rawQuote），並提供後續可驗證的 validationTriggers。',
+        '三情境請給機率並計算機率加權合理價；機率總和必須為 100%，但中性合理價仍單獨保留。缺乏正式指引時應放寬區間並降低信心，不得用更多小數位假裝精確。',
         '輸出 peerComparison：至少 3 家未排除的真正可比同業（不足時如實說明），逐家列 TTM PE／本年度預估 PE／來源日期／URL／排除原因，並計算中位數與四分位。',
         '若能取得未來四季預估，輸出 ntmEstimate{period,eps,pe,method}；否則省略此欄位，不得以本年度 EPS 冒充 NTM。',
         `輸出 dataAsOf{financialReportPeriod,monthlyRevenuePeriod,selfReportedPeriod,sharesOutstanding,dilutionSignature}；sharesOutstanding=${valuationInputs.sharesOutstanding ?? 'null'}，dilutionSignature=${JSON.stringify((valuationInputs.dilutionEvents ?? []).map(e => [e.type, e.status ?? '', e.newShares, e.expectedDate ?? '', e.announcedAt ?? '', e.sourceUrl ?? ''].join('|')).sort().join('||'))}。精確記錄本次實際納入的季報、月營收、自結、股數與稀釋事件，讓前端在公司行動後立即判定估值失效。`,
@@ -115,7 +123,11 @@ export async function POST(
         outputPath,
         ttmEps: valuationInputs.ttmEps,
         ttmPe: valuationInputs.ttmPe,
+        proFormaTtmEps: valuationInputs.proFormaTtmEps ?? null,
+        proFormaTtmPe: valuationInputs.proFormaTtmPe ?? null,
         currentPrice: valuationInputs.currentPrice,
+        currentPriceDate: valuationInputs.currentPriceDate ?? null,
+        sharesOutstanding: valuationInputs.sharesOutstanding,
         quarterlyRows: valuationInputs.quarterlyHistory.length,
         monthlyRows: valuationInputs.monthlyRevenueHistory.length,
         latestRevenuePeriod: valuationInputs.monthlyRevenueHistory[0]?.month ?? null,

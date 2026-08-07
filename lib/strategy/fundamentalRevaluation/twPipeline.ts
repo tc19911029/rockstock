@@ -242,7 +242,7 @@ async function readDilution(symbol: string): Promise<DilutionEvent[]> {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((e): e is DilutionEvent =>
-      e && typeof e === 'object' && typeof e.type === 'string' && typeof e.newShares === 'number',
+      e && typeof e === 'object' && e.status !== 'cancelled' && typeof e.type === 'string' && typeof e.newShares === 'number',
     );
   } catch {
     return [];
@@ -315,17 +315,19 @@ interface ScenarioPlanInput {
   shares: number;
   /** 三情境用「當季淨利率」為基準 ± 偏差；若旗有 one_time_gain，用前一季淨利率作為「本業淨利率」基準 */
   baseNetMargin: number;
-  /** 4 月實際營收（partialQuarter）— 用最新月營收當代理。沒有就 0 */
+  /** 尚未公告季度內，已公布月份的累計營收。沒有就 0。 */
   partialQuarterRevenue: number;
-  /** Q1 已知營收（最近季的 revenue） */
-  q1Revenue: number;
+  /** 最近一個已公告季度營收，作為下一季 run-rate 基準。 */
+  latestActualQuarterRevenue: number;
+  /** 最近已公告季度號；例如 Q2 已公告時為 2。 */
+  latestActualQuarter: number;
 }
 
 function buildScenarioAssumptions(
   inp: ScenarioPlanInput,
 ): Record<ScenarioKey, ScenarioAssumption> {
   // 簡化模型：用 Q1 revenue 當基準營收，Q2-Q4 按情境設成長率
-  const baseRev = inp.q1Revenue;
+  const baseRev = inp.latestActualQuarterRevenue;
   if (!baseRev || baseRev <= 0) {
     // 無 Q1 營收 → 三情境均回 0，由 scoring 端對應跳過
     const zero: ScenarioAssumption = {
@@ -338,29 +340,34 @@ function buildScenarioAssumptions(
 
   const margin = inp.baseNetMargin > 0 ? inp.baseNetMargin : 0;
 
+  const remainingRevenue = (quarter: number, targetRevenue: number) =>
+    quarter === inp.latestActualQuarter + 1
+      ? Math.max(0, targetRevenue - inp.partialQuarterRevenue)
+      : targetRevenue;
+
   return {
     pessimistic: {
-      q2Revenue: baseRev * 0.95,
-      q3Revenue: baseRev * 0.95,
-      q4Revenue: baseRev * 0.95,
+      q2Revenue: remainingRevenue(2, baseRev * 0.95),
+      q3Revenue: remainingRevenue(3, baseRev * 0.95),
+      q4Revenue: remainingRevenue(4, baseRev * 0.95),
       q2NetMargin: Math.max(margin - 0.02, 0.01),
       q3NetMargin: Math.max(margin - 0.02, 0.01),
       q4NetMargin: Math.max(margin - 0.02, 0.01),
       partialQuarterRevenue: inp.partialQuarterRevenue,
     },
     base: {
-      q2Revenue: baseRev * 1.05,
-      q3Revenue: baseRev * 1.10,
-      q4Revenue: baseRev * 1.10,
+      q2Revenue: remainingRevenue(2, baseRev * 1.05),
+      q3Revenue: remainingRevenue(3, baseRev * 1.10),
+      q4Revenue: remainingRevenue(4, baseRev * 1.10),
       q2NetMargin: margin,
       q3NetMargin: margin,
       q4NetMargin: margin,
       partialQuarterRevenue: inp.partialQuarterRevenue,
     },
     optimistic: {
-      q2Revenue: baseRev * 1.15,
-      q3Revenue: baseRev * 1.25,
-      q4Revenue: baseRev * 1.30,
+      q2Revenue: remainingRevenue(2, baseRev * 1.15),
+      q3Revenue: remainingRevenue(3, baseRev * 1.25),
+      q4Revenue: remainingRevenue(4, baseRev * 1.30),
       q2NetMargin: margin + 0.02,
       q3NetMargin: margin + 0.02,
       q4NetMargin: margin + 0.02,
@@ -438,20 +445,36 @@ export async function runTwSingle(
   });
 
   // 6. Forward EPS 三情境
-  const q1Revenue = quartersDerived.quarters[0]?.revenue ?? 0;
+  const latestActual = quartersDerived.quarters[0];
+  const latestActualQuarter = (() => {
+    const label = latestActual?.quarter.match(/Q([1-4])$/i);
+    if (label) return Number(label[1]);
+    const date = latestActual?.quarter.match(/^\d{4}-(\d{2})/);
+    return date ? Math.ceil(Number(date[1]) / 3) : 0;
+  })();
   const baseNetMargin = (() => {
     // 一次性收益旗 → 用前一季淨利率
     if (riskFlags.includes('one_time_gain') && previousNetMargin != null) return previousNetMargin;
     if (quartersDerived.latestNetMargin != null) return quartersDerived.latestNetMargin / 100;
     return 0;
   })();
-  const partialQuarterRevenue = monthlyDerived.monthly[0]?.revenue ?? 0;
+  const latestActualYear = latestActual?.quarter.match(/^(\d{4})/)?.[1];
+  const nextQuarterMonths = latestActualQuarter < 4
+    ? new Set([latestActualQuarter * 3 + 1, latestActualQuarter * 3 + 2, latestActualQuarter * 3 + 3])
+    : new Set<number>();
+  const partialQuarterRevenue = monthlyDerived.monthly
+    .filter((row) => {
+      const match = row.month.match(/^(\d{4})-(\d{2})$/);
+      return Boolean(match && match[1] === latestActualYear && nextQuarterMonths.has(Number(match[2])));
+    })
+    .reduce((sum, row) => sum + row.revenue, 0);
   const assumptions = buildScenarioAssumptions({
     quarters: quartersDerived.quarters,
     shares: shares ?? 0,
     baseNetMargin,
     partialQuarterRevenue,
-    q1Revenue,
+    latestActualQuarterRevenue: latestActual?.revenue ?? 0,
+    latestActualQuarter,
   });
   const scenarios = shares && shares > 0
     ? computeAllScenarios(quartersDerived.quarters, assumptions, shares, peRange, inp.todayPrice)

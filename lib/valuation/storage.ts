@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { validateValuationOutput, type ValuationQualityReport } from './outputValidation';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -10,6 +11,7 @@ export interface StoredValuation<T = unknown> {
   fellBackFrom?: string;
   ageDays: number;
   updatedAt: string;
+  quality: ValuationQualityReport;
 }
 
 function calendarDaysBetween(from: string, to: string): number {
@@ -55,13 +57,15 @@ export async function readLatestValuation<T = unknown>(options: {
         fs.readFile(filePath, 'utf-8'),
         fs.stat(filePath),
       ]);
+      const valuation = JSON.parse(raw) as T;
       return {
-        valuation: JSON.parse(raw) as T,
+        valuation,
         date,
         requestedDate: targetDate,
         ...(date === targetDate ? {} : { fellBackFrom: targetDate }),
         ageDays: calendarDaysBetween(date, targetDate),
         updatedAt: stat.mtime.toISOString(),
+        quality: validateValuationOutput(valuation),
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;

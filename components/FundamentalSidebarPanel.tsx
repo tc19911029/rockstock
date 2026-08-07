@@ -25,6 +25,7 @@ function ValuationScenarios({
   ageDays,
   caveat,
   latestFundamentals,
+  quality,
 }: {
   valuation: NonNullable<FundamentalAnswer['valuation']>;
   currentPrice?: number;
@@ -32,6 +33,7 @@ function ValuationScenarios({
   ageDays?: number;
   caveat?: string;
   latestFundamentals?: RawFundamentals | null;
+  quality?: ValuationOnly['quality'];
 }) {
   const { ttmPe, monthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough, dilution, riskFlags } = valuation;
   const latestSelfReported = monthlyEpsActuals?.[0] ?? latestFundamentals?.selfReportedMonthlyActuals?.[0];
@@ -91,6 +93,18 @@ function ValuationScenarios({
           <div className="flex gap-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-200">
             <AlertTriangle aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
             估值已超過 30 天，合理價仍可參考，但 EPS 與同業 PE 應重新估算。
+          </div>
+        )}
+        {quality && !quality.valid && (
+          <div className="flex gap-1.5 rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1.5 text-[10px] leading-snug text-rose-800 dark:text-rose-200">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+            <span>估值快照未通過算術／來源驗證（{quality.errors.length} 項），合理價暫不應視為有效結論。請重新估算。</span>
+          </div>
+        )}
+        {quality?.valid && quality.warnings.length > 0 && (
+          <div className="flex gap-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-800 dark:text-amber-200">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+            <span>估值已通過核心算術驗證，但仍有 {quality.warnings.length} 項資料限制：{quality.warnings.map(item => item.message).join('；')}</span>
           </div>
         )}
         {freshness.hasNewData && latestFundamentals && (
@@ -228,9 +242,10 @@ function ValuationScenarios({
         <div className="space-y-1.5">
           {tiers.map(t => {
             const s = scenarios[t.key];
+            const valuationEps = s.valuationEps ?? s.fullYearEps;
             // 距現價・本年預估 PE 一律用即時價重算（無即時價才退回 JSON 寫死值）
             const upPct = live ? ((s.fairPrice - live) / live) * 100 : s.upside * 100;
-            const fwdPe = live && s.fullYearEps > 0 ? live / s.fullYearEps : s.forwardPe;
+            const fwdPe = live && valuationEps > 0 ? live / valuationEps : s.forwardPe;
             return (
               <div key={t.key} className={`rounded border px-2 py-1.5 ${t.cls}`}>
                 <div className="flex items-center justify-between mb-1">
@@ -241,8 +256,8 @@ function ValuationScenarios({
                 </div>
                 <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
                   <div className="flex justify-between">
-                    <span className="opacity-70">全年 EPS</span>
-                    <span className="font-mono font-semibold">{s.fullYearEps.toFixed(2)}</span>
+                    <span className="opacity-70">{s.valuationEps != null && s.valuationEps !== s.fullYearEps ? '估值 EPS' : '全年 EPS'}</span>
+                    <span className="font-mono font-semibold">{valuationEps.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="opacity-70">本年預估 PE</span>
@@ -441,6 +456,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
           ageDays={standaloneValuation.ageDays}
           caveat={standaloneValuation.valuationCaveat ?? standaloneValuation.reasoning}
           latestFundamentals={raw}
+          quality={standaloneValuation.quality}
         />
       )}
 
@@ -513,7 +529,7 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
           stopPolling();
           setPhase('idle');
           setMessage('估值已更新，下方情境已套用最新結果。');
-          onValuationReady({ ...j.valuation, date: j.date, ageDays: j.ageDays, updatedAt: j.updatedAt });
+          onValuationReady({ ...j.valuation, date: j.date, ageDays: j.ageDays, updatedAt: j.updatedAt, quality: j.quality });
         }
       } catch { /* 繼續 poll */ }
     }, 5000);  // 每 5 秒 check 一次
@@ -658,6 +674,11 @@ interface ValuationOnly {
   dilution?: NonNullable<FundamentalAnswer['valuation']>['dilution'];
   riskFlags?: NonNullable<FundamentalAnswer['valuation']>['riskFlags'];
   conclusion?: NonNullable<FundamentalAnswer['valuation']>['conclusion'];
+  quality?: {
+    valid: boolean;
+    errors: Array<{ code: string; message: string; path?: string }>;
+    warnings: Array<{ code: string; message: string; path?: string }>;
+  };
 }
 
 function toAgentValuation(valuation: ValuationOnly | null): NonNullable<FundamentalAnswer['valuation']> | null {
@@ -748,6 +769,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
               date: json.date,
               ageDays: json.ageDays,
               updatedAt: json.updatedAt,
+              quality: json.quality,
             });
             setLoading(false);
           }
@@ -814,6 +836,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
             valuationDate={standaloneValuation?.date}
             ageDays={standaloneValuation?.ageDays}
             caveat={standaloneValuation?.valuationCaveat ?? standaloneValuation?.reasoning}
+            quality={standaloneValuation?.quality}
           />
         )}
         <ValuationButton symbol={cleanSymbolEarly} currentValuation={standaloneValuation} onValuationReady={setStandaloneValuation} />
@@ -858,6 +881,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
           ageDays={displayedAgeDays}
           caveat={displayedCaveat}
           latestFundamentals={rawData}
+          quality={useStandaloneValuation ? standaloneValuation?.quality : undefined}
         />
       )}
       <ValuationButton

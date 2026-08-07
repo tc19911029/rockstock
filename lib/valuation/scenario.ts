@@ -36,16 +36,32 @@ export function computeScenario(
     };
   }
 
-  const q1 = quarters[0];
-  const q1Eps = q1?.eps ?? 0;
+  const parsed = quarters
+    .map((row) => ({ row, parsed: parseQuarter(row.quarter) }))
+    .filter((item): item is { row: QuarterRow; parsed: { year: number; quarter: number } } => item.parsed != null)
+    .sort((a, b) => b.parsed.year - a.parsed.year || b.parsed.quarter - a.parsed.quarter);
+  const fiscalYear = parsed[0]?.parsed.year;
+  const actualByQuarter = new Map<number, QuarterRow>();
+  for (const item of parsed) {
+    if (item.parsed.year !== fiscalYear || actualByQuarter.has(item.parsed.quarter)) continue;
+    if (Number.isFinite(item.row.eps)) actualByQuarter.set(item.parsed.quarter, item.row);
+  }
 
-  const q2RevenueIncludingMonthly =
-    (assumption.partialQuarterRevenue ?? 0) + (assumption.q2Revenue ?? 0);
-  const q2Eps =
-    (q2RevenueIncludingMonthly * (assumption.q2NetMargin ?? 0)) / shares;
-  const q3Eps = ((assumption.q3Revenue ?? 0) * (assumption.q3NetMargin ?? 0)) / shares;
-  const q4Eps = ((assumption.q4Revenue ?? 0) * (assumption.q4NetMargin ?? 0)) / shares;
+  const latestActualQuarter = Math.max(0, ...actualByQuarter.keys());
+  const partialQuarter = Math.min(4, latestActualQuarter + 1);
+  const estimate = (quarter: 2 | 3 | 4): number => {
+    const actual = actualByQuarter.get(quarter);
+    if (actual) return actual.eps;
+    const revenue = assumption[`q${quarter}Revenue`] ?? 0;
+    const margin = assumption[`q${quarter}NetMargin`] ?? 0;
+    const partial = quarter === partialQuarter ? assumption.partialQuarterRevenue ?? 0 : 0;
+    return ((revenue + partial) * margin) / shares;
+  };
 
+  const q1Eps = actualByQuarter.get(1)?.eps ?? 0;
+  const q2Eps = estimate(2);
+  const q3Eps = estimate(3);
+  const q4Eps = estimate(4);
   const fullYearEps = q1Eps + q2Eps + q3Eps + q4Eps;
   const forwardPe = fullYearEps > 0 ? currentPrice / fullYearEps : Number.POSITIVE_INFINITY;
   const fairPrice = fullYearEps * fairPe;
@@ -61,6 +77,16 @@ export function computeScenario(
     fairPrice,
     upside,
   };
+}
+
+function parseQuarter(value: string): { year: number; quarter: number } | null {
+  const label = value.match(/^(\d{4})Q([1-4])$/i);
+  if (label) return { year: Number(label[1]), quarter: Number(label[2]) };
+  const date = value.match(/^(\d{4})-(\d{2})/);
+  if (!date) return null;
+  const month = Number(date[2]);
+  if (month < 1 || month > 12) return null;
+  return { year: Number(date[1]), quarter: Math.ceil(month / 3) };
 }
 
 /**
