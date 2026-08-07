@@ -568,6 +568,19 @@ export interface FundamentalGroundTruth {
       mom: number | null;
       yoy: number | null;
     }>;
+    /** 注意股重大訊息揭露的單月自結實績；正式程度高於月營收模型、低於核閱季報。 */
+    selfReportedMonthlyActuals?: Array<{
+      period: string;
+      revenue: number | null;
+      pretaxIncome: number | null;
+      netIncome: number | null;
+      eps: number;
+      announcedAt: string;
+      sourceUrl: string;
+      source: 'yahoo_tw_mops_republication';
+      audited: false;
+      note: string;
+    }>;
     /** 交易所最新季報的本年度累計口徑；避免把各季 EPS 相加造成加權股數誤差。 */
     latestCumulativeActual?: {
       fiscalYear: number;
@@ -673,7 +686,19 @@ export interface FundamentalAnswer {
     dataAsOf?: {
       financialReportPeriod?: string;
       monthlyRevenuePeriod?: string;
+      selfReportedPeriod?: string;
     };
+    /** 已納入情境計算的單月公司自結實績；不得再以 monthlyEpsEstimate 覆蓋同月份。 */
+    monthlyEpsActuals?: Array<{
+      period: string;
+      eps: number;
+      revenue?: number | null;
+      netIncome?: number | null;
+      announcedAt: string;
+      sourceUrl: string;
+      audited: false;
+      note: string;
+    }>;
     /** 真正未來 12 個月（NTM）估值；資料不足時應省略，不得用本年度 EPS 冒充。 */
     ntmEstimate?: {
       period: string;

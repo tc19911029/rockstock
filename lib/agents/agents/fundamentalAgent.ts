@@ -36,6 +36,7 @@ import { getQuarterlyAny } from '@/lib/datasource/TwseOpenApiProvider';
 import { getEastMoneyFundamentals } from '@/lib/datasource/EastMoneyFundamentals';
 import { fetchCnFinancials } from '@/lib/datasource/EastMoneyFinancials';
 import { normalizeCnQuarterlyHistory, sumLatestFourQuarterEps } from '@/lib/valuation/cnQuarterly';
+import { getTwSelfReportedMonthlyActuals } from '@/lib/datasource/TwSelfReportedEps';
 import {
   computeTTM,
   computeTTMPe,
@@ -161,6 +162,7 @@ export async function buildValuationInputsTW(
     stockInfo,
     dilution,
     latestCumulative,
+    selfReportedMonthlyActuals,
   ] = await Promise.all([
     fetchJSON(internalUrl(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`))
       .catch((e) => { fetchErrors.push(`quote: ${e}`); return null; }),
@@ -172,6 +174,10 @@ export async function buildValuationInputsTW(
     getStockInfo(ticker).catch((e) => { fetchErrors.push(`stockInfo: ${e}`); return null; }),
     readDilutionEvents(ticker).catch((e) => { fetchErrors.push(`dilution: ${e}`); return []; }),
     getQuarterlyAny(ticker).catch((e) => { fetchErrors.push(`twseCumulative: ${e}`); return null; }),
+    getTwSelfReportedMonthlyActuals(ticker).catch((e) => {
+      fetchErrors.push(`selfReportedMonthlyActuals: ${e}`);
+      return [];
+    }),
   ]);
 
   // 解 quote API 的 apiOk 包裝
@@ -236,6 +242,7 @@ export async function buildValuationInputsTW(
     quote: `internal:/api/stock/quote?symbol=${symbol}`,
     quarterlyHistory: `finmind:TaiwanStockFinancialStatements?data_id=${ticker}`,
     monthlyRevenue: `finmind:TaiwanStockMonthRevenue?data_id=${ticker}`,
+    selfReportedMonthlyActuals: `https://tw.stock.yahoo.com/quote/${ticker}.TW/news`,
     sharesOutstanding: `finmind:TaiwanStockShareholding?data_id=${ticker}`,
     bookValuePerShare: `finmind:TaiwanStockBalanceSheet?data_id=${ticker}`,
     industry: stockInfo ? `finmind:TaiwanStockInfo?data_id=${ticker}` : 'candidate.industry',
@@ -254,6 +261,7 @@ export async function buildValuationInputsTW(
       grossMargin: q.grossMargin,
     })),
     monthlyRevenueHistory: monthlyHistory,
+    selfReportedMonthlyActuals,
     latestCumulativeActual: latestCumulative ? {
       fiscalYear: latestCumulative.rocYear + 1911,
       quarter: latestCumulative.season,

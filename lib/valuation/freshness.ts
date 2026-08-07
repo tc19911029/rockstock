@@ -2,9 +2,11 @@ export interface CurrentFundamentalSnapshot {
   eps?: number | null;
   epsYtd?: number | null;
   revenueLatest?: number | null;
+  selfReportedMonthlyActuals?: Array<{ period: string; eps: number }>;
   periods?: {
     financialReportDate?: string | null;
     revenueMonth?: string | null;
+    selfReportedPeriod?: string | null;
   };
 }
 
@@ -12,16 +14,20 @@ export interface ValuationPeriodSnapshot {
   dataAsOf?: {
     financialReportPeriod?: string;
     monthlyRevenuePeriod?: string;
+    selfReportedPeriod?: string;
   };
   monthlyEpsEstimate?: { month: string };
+  monthlyEpsActuals?: Array<{ period: string }>;
 }
 
 export interface ValuationFreshness {
   hasNewData: boolean;
   hasNewFinancialReport: boolean;
   hasNewMonthlyRevenue: boolean;
+  hasNewSelfReportedEps: boolean;
   financialReportDate: string | null;
   monthlyRevenuePeriod: string | null;
+  selfReportedPeriod: string | null;
 }
 
 function monthKey(value: string | null | undefined): string | null {
@@ -45,6 +51,9 @@ export function detectValuationFreshness(
 ): ValuationFreshness {
   const financialReportDate = current?.periods?.financialReportDate ?? null;
   const monthlyRevenuePeriod = monthKey(current?.periods?.revenueMonth);
+  const selfReportedPeriod = monthKey(
+    current?.periods?.selfReportedPeriod ?? current?.selfReportedMonthlyActuals?.[0]?.period,
+  );
 
   const savedFinancial = valuation.dataAsOf?.financialReportPeriod;
   const currentQuarter = quarterKey(financialReportDate);
@@ -64,11 +73,27 @@ export function detectValuationFreshness(
     monthlyRevenuePeriod && savedMonth && monthlyRevenuePeriod > savedMonth,
   );
 
+  const savedSelfReportedPeriod = monthKey(
+    valuation.dataAsOf?.selfReportedPeriod
+      ?? valuation.monthlyEpsActuals?.[0]?.period,
+  );
+  // 若舊估值完全沒有自結欄位，只要目前抓到自結實績即視為新資料；不能因同月營收已納入
+  // 就把自結 EPS 當成「沒有更新」。
+  const hasNewSelfReportedEps = Boolean(
+    selfReportedPeriod && (
+      savedSelfReportedPeriod
+        ? selfReportedPeriod > savedSelfReportedPeriod
+        : true
+    ),
+  );
+
   return {
-    hasNewData: hasNewFinancialReport || hasNewMonthlyRevenue,
+    hasNewData: hasNewFinancialReport || hasNewMonthlyRevenue || hasNewSelfReportedEps,
     hasNewFinancialReport,
     hasNewMonthlyRevenue,
+    hasNewSelfReportedEps,
     financialReportDate,
     monthlyRevenuePeriod,
+    selfReportedPeriod,
   };
 }

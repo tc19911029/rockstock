@@ -5,6 +5,7 @@ import { getFundamentalsWithFallback } from '@/lib/datasource/FundamentalsFallba
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { isIndexSymbol } from '@/lib/utils/symbols';
 import { getMonthlyAny, getQuarterlyAny } from '@/lib/datasource/TwseOpenApiProvider';
+import { getTwSelfReportedMonthlyActuals } from '@/lib/datasource/TwSelfReportedEps';
 
 const querySchema = z.object({
   mode: z.enum(['full', 'revenue']).default('full'),
@@ -31,10 +32,11 @@ export async function GET(
       return apiOk({ data });
     }
     // 多源 fallback：FinMind 失敗自動換 TWSE
-    const [result, officialQuarter, officialMonth] = await Promise.all([
+    const [result, officialQuarter, officialMonth, selfReportedMonthlyActuals] = await Promise.all([
       getFundamentalsWithFallback(stockId),
       getQuarterlyAny(stockId),
       getMonthlyAny(stockId),
+      getTwSelfReportedMonthlyActuals(stockId).catch(() => []),
     ]);
     const { sourceUsed, sourceAttempts, ...data } = result;
     const officialFinancialReportDate = officialQuarter && officialQuarter.rocYear > 0 && officialQuarter.season >= 1
@@ -64,10 +66,12 @@ export async function GET(
         revenueYoY: officialMonth.revenueYoY ?? data.revenueYoY,
       } : {}),
       epsYtd: useOfficialQuarter ? officialQuarter?.eps ?? null : null,
+      selfReportedMonthlyActuals,
       periods: {
         ...data.periods,
         financialReportDate,
         revenueMonth,
+        selfReportedPeriod: selfReportedMonthlyActuals[0]?.period ?? null,
       },
     };
     return apiOk(

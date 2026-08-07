@@ -41,4 +41,40 @@ describe('detectValuationFreshness', () => {
 
     expect(result.hasNewData).toBe(false);
   });
+
+  it('invalidates a valuation when a same-month self-reported EPS appears after revenue', () => {
+    const result = detectValuationFreshness(
+      { dataAsOf: { financialReportPeriod: '2026Q2', monthlyRevenuePeriod: '2026-07' } },
+      '2026-08-04',
+      {
+        periods: {
+          financialReportDate: '2026-06-30',
+          revenueMonth: '2026-07-01',
+          selfReportedPeriod: '2026-07',
+        },
+        selfReportedMonthlyActuals: [{ period: '2026-07', eps: 11.61 }],
+      },
+    );
+
+    expect(result.hasNewMonthlyRevenue).toBe(false);
+    expect(result.hasNewSelfReportedEps).toBe(true);
+    expect(result.hasNewData).toBe(true);
+  });
+
+  it('does not invalidate when the valuation records the latest self-reported period', () => {
+    const result = detectValuationFreshness(
+      { dataAsOf: { financialReportPeriod: '2026Q2', monthlyRevenuePeriod: '2026-07', selfReportedPeriod: '2026-07' } },
+      '2026-08-08',
+      {
+        periods: {
+          financialReportDate: '2026-06-30',
+          revenueMonth: '2026-07-01',
+          selfReportedPeriod: '2026-07',
+        },
+      },
+    );
+
+    expect(result.hasNewSelfReportedEps).toBe(false);
+    expect(result.hasNewData).toBe(false);
+  });
 });

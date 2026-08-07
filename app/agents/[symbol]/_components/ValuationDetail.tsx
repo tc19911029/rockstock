@@ -27,6 +27,7 @@ export function ValuationDetail({ answer, question }: Props) {
   const v = answer?.valuation ?? null;
   const inputs = question?.groundTruth?.valuationInputs ?? null;
   const symbol = answer?.symbol ?? question?.symbol ?? '';
+  const latestMonthlyActual = v?.monthlyEpsActuals?.[0] ?? inputs?.selfReportedMonthlyActuals?.[0];
 
   if (!v && !inputs) return null;
 
@@ -49,8 +50,9 @@ export function ValuationDetail({ answer, question }: Props) {
       {inputs && <BasicInfoCard inputs={inputs} />}
       {v && inputs && <PeComparison v={v} inputs={inputs} />}
       {v?.peerComparison && <PeerComparisonDetail comparison={v.peerComparison} />}
+      {latestMonthlyActual && <MonthlyEpsActualBlock actual={latestMonthlyActual} />}
       {/* 月營收推估 EPS 區塊只對台股顯示（陸股無月營收） */}
-      {inputs?.market !== 'CN' && v?.monthlyEpsEstimate && <MonthlyEpsBlock m={v.monthlyEpsEstimate} />}
+      {inputs?.market !== 'CN' && v?.monthlyEpsEstimate && v.monthlyEpsEstimate.month !== latestMonthlyActual?.period && <MonthlyEpsBlock m={v.monthlyEpsEstimate} />}
       {v && <ScenarioTable v={v} />}
       {v?.dilution && <DilutionBlock d={v.dilution} />}
       {v?.riskFlags && v.riskFlags.length > 0 && <RiskFlagChips flags={v.riskFlags} />}
@@ -245,6 +247,28 @@ function MonthlyEpsBlock({ m }: { m: NonNullable<FundamentalAnswer['valuation']>
         <Stat label="預估月 EPS" value={fmt(m.estimatedEps, 2)} />
       </div>
       <p className="mt-2 text-[10px] text-amber-300/70 italic">※ {m.note || '此為用月營收 × 上一季淨利率 / 股數的推估，非公司正式 EPS'}</p>
+    </div>
+  );
+}
+
+function MonthlyEpsActualBlock({
+  actual,
+}: {
+  actual: NonNullable<NonNullable<FundamentalQuestion['groundTruth']['valuationInputs']>['selfReportedMonthlyActuals']>[number]
+    | NonNullable<NonNullable<FundamentalAnswer['valuation']>['monthlyEpsActuals']>[number];
+}) {
+  return (
+    <div className="rounded border border-emerald-600/35 bg-emerald-950/20 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-emerald-300">
+        <span>公司單月自結實績 · {actual.period}</span>
+        <a href={actual.sourceUrl} target="_blank" rel="noreferrer" className="text-[10px] text-sky-300 hover:underline">公告來源</a>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs font-mono sm:grid-cols-3">
+        <Stat label="單月 EPS" value={`${fmt(actual.eps, 2)} 元`} />
+        <Stat label="單月營收" value={actual.revenue != null ? fmtBillion(actual.revenue) : 'N/A'} />
+        <Stat label="公告日" value={actual.announcedAt} />
+      </div>
+      <p className="mt-2 text-[10px] italic text-emerald-300/70">注意股重大訊息之自結數，優先於月營收模型；未經會計師查核或核閱。</p>
     </div>
   );
 }

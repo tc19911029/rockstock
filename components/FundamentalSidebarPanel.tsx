@@ -33,7 +33,11 @@ function ValuationScenarios({
   caveat?: string;
   latestFundamentals?: RawFundamentals | null;
 }) {
-  const { ttmPe, monthlyEpsEstimate, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough } = valuation;
+  const { ttmPe, monthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough } = valuation;
+  const latestSelfReported = monthlyEpsActuals?.[0] ?? latestFundamentals?.selfReportedMonthlyActuals?.[0];
+  const modelSuperseded = Boolean(
+    monthlyEpsEstimate && latestSelfReported && monthlyEpsEstimate.month === latestSelfReported.period,
+  );
   const tiers: Array<{ key: 'pessimistic' | 'base' | 'optimistic'; label: string; cls: string }> = [
     { key: 'pessimistic', label: '悲觀', cls: 'text-rose-300 border-rose-700/40 bg-rose-900/20' },
     { key: 'base',        label: '中性', cls: 'text-amber-300 border-amber-700/40 bg-amber-900/20' },
@@ -109,12 +113,42 @@ function ValuationScenarios({
                   {latestFundamentals.revenueLatest != null ? formatRevenue(latestFundamentals.revenueLatest) : '已公布'}
                 </div>
               )}
+              {freshness.hasNewSelfReportedEps && latestFundamentals.selfReportedMonthlyActuals?.[0] && (
+                <div>
+                  {latestFundamentals.selfReportedMonthlyActuals[0].period} 自結 EPS：
+                  {latestFundamentals.selfReportedMonthlyActuals[0].eps.toFixed(2)} 元
+                </div>
+              )}
             </div>
             <div className="mt-1 pl-4">請重新估算；舊情境只保留作歷史快照，不能當作目前合理價。</div>
           </div>
         )}
-        {/* 月化 EPS 推算（如果有）*/}
-        {monthlyEpsEstimate && (
+        {latestSelfReported && (
+          <div className="rounded border border-emerald-500/30 bg-emerald-500/10 p-2">
+            <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-emerald-800 dark:text-emerald-200">
+              <span>{latestSelfReported.period} 單月自結 EPS</span>
+              <span className="rounded border border-emerald-500/25 px-1 py-0.5 text-[8px]">公司公告</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-[11px] text-foreground/80">每股盈餘</span>
+              <span className="font-mono text-sm font-bold text-foreground">{latestSelfReported.eps.toFixed(2)} 元</span>
+            </div>
+            {'revenue' in latestSelfReported && latestSelfReported.revenue != null && (
+              <div className="mt-1 text-[9px] text-foreground/65">單月營收 {formatRevenue(latestSelfReported.revenue)}</div>
+            )}
+            <div className="mt-1 flex items-center justify-between gap-2 text-[9px] text-muted-foreground">
+              <span>注意股重大訊息之自結數，未經會計師核閱</span>
+              {latestSelfReported.sourceUrl && (
+                <a href={latestSelfReported.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-6 shrink-0 items-center gap-0.5 text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">
+                  公告<ExternalLink aria-hidden="true" className="size-2.5" />
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 月化 EPS 推算（同月份已有自結實績時隱藏，避免模型覆蓋真值）*/}
+        {monthlyEpsEstimate && !modelSuperseded && (
           <div className="rounded ring-1 ring-foreground/10 bg-card/60 p-2">
             <div className="text-[10px] text-muted-foreground mb-1">
               {monthlyEpsEstimate.month} 月 EPS 模型估計
@@ -280,6 +314,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
   const quarter = formatQuarter(raw.periods?.financialReportDate);
   const month = formatMonth(raw.periods?.revenueMonth);
   const valuationDate = raw.periods?.valuationDate ?? null;
+  const latestSelfReported = raw.selfReportedMonthlyActuals?.[0];
 
   // 注意：FinMind getFundamentals 內 epsYoY 實際是「本季 vs 上一季」(QoQ)，不是真正 YoY
   // (FinancialStatements 是季資料、source code 用 prevDate = finDates[1] 上一筆)
@@ -314,6 +349,27 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
 
   return (
     <div className="space-y-2 text-xs">
+      {latestSelfReported && (
+        <div className="overflow-hidden rounded border border-emerald-500/30 bg-emerald-500/10">
+          <div className="flex items-center justify-between border-b border-emerald-500/20 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
+            <span>公司單月自結（{latestSelfReported.period}）</span>
+            <a href={latestSelfReported.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-6 items-center gap-0.5 text-[9px] text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">
+              公告<ExternalLink aria-hidden="true" className="size-2.5" />
+            </a>
+          </div>
+          <div className="grid grid-cols-2 gap-2 px-2.5 py-2">
+            <div>
+              <div className="text-[9px] text-muted-foreground">單月 EPS</div>
+              <div className="font-mono text-sm font-bold">{latestSelfReported.eps.toFixed(2)} 元</div>
+            </div>
+            <div>
+              <div className="text-[9px] text-muted-foreground">單月營收</div>
+              <div className="font-mono text-sm font-bold">{latestSelfReported.revenue != null ? fmtRevenue(latestSelfReported.revenue) : '—'}</div>
+            </div>
+          </div>
+          <div className="px-2.5 pb-1.5 text-[9px] leading-snug text-muted-foreground">自結實績優先於月營收模型；未經會計師查核或核閱。</div>
+        </div>
+      )}
       {sections.map(sec => (
         <div key={sec.title} className="ring-1 ring-foreground/10 rounded bg-card/40 overflow-hidden">
           <div className="px-2.5 py-1.5 bg-secondary/40 text-[11px] font-semibold text-cyan-300 border-b border-border/40">
@@ -344,6 +400,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
             ntmEstimate: standaloneValuation.ntmEstimate,
             peerComparison: standaloneValuation.peerComparison,
             monthlyEpsEstimate: standaloneValuation.monthlyEpsEstimate,
+            monthlyEpsActuals: standaloneValuation.monthlyEpsActuals,
             scenarios: standaloneValuation.scenarios,
             dilution: null,
             riskFlags: [],
@@ -498,9 +555,20 @@ interface RawFundamentals {
   revenueLatest?: number;
   revenueMoM?: number;
   revenueYoY?: number;
+  selfReportedMonthlyActuals?: Array<{
+    period: string;
+    revenue: number | null;
+    netIncome: number | null;
+    eps: number;
+    announcedAt: string;
+    sourceUrl: string;
+    audited: false;
+    note: string;
+  }>;
   periods?: {
     financialReportDate?: string | null;
     revenueMonth?: string | null;
+    selfReportedPeriod?: string | null;
     valuationDate?: string | null;
   };
 }
@@ -554,6 +622,7 @@ interface ValuationOnly {
   ntmEstimate?: NonNullable<FundamentalAnswer['valuation']>['ntmEstimate'];
   peerComparison?: NonNullable<FundamentalAnswer['valuation']>['peerComparison'];
   monthlyEpsEstimate?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsEstimate'];
+  monthlyEpsActuals?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsActuals'];
   scenarios?: NonNullable<FundamentalAnswer['valuation']>['scenarios'];
 }
 
@@ -568,6 +637,7 @@ function toAgentValuation(valuation: ValuationOnly | null): NonNullable<Fundamen
     ntmEstimate: valuation.ntmEstimate,
     peerComparison: valuation.peerComparison,
     monthlyEpsEstimate: valuation.monthlyEpsEstimate,
+    monthlyEpsActuals: valuation.monthlyEpsActuals,
     scenarios: valuation.scenarios,
     dilution: null,
     riskFlags: [],

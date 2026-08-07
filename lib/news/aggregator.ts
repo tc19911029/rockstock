@@ -6,6 +6,7 @@
  */
 import { createHash } from 'crypto';
 import type { NewsItem } from './types';
+import { fetchYahooTwStockNews } from './yahooTwStockNews';
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
@@ -110,7 +111,8 @@ export async function aggregateNews(ticker: string, companyName?: string): Promi
   const yahooUrl = `https://finance.yahoo.com/rss/headline?s=${encodeURIComponent(ticker)}.TW`;
 
   // Fetch all feeds in parallel
-  const [yahooEntries, ...genericEntrySets] = await Promise.all([
+  const [yahooTwItems, yahooEntries, ...genericEntrySets] = await Promise.all([
+    fetchYahooTwStockNews(ticker).catch(() => []),
     fetchFeed(yahooUrl),
     ...GENERIC_FEEDS.map((f) => fetchFeed(f.url)),
   ]);
@@ -125,7 +127,9 @@ export async function aggregateNews(ticker: string, companyName?: string): Promi
       .map((e) => toNewsItem(e, feed.name))
   );
 
-  const allItems = [...yahooItems, ...genericItems];
+  // 台灣 Yahoo 個股頁會即時轉載 MOPS 公告；美國 Yahoo RSS 對台股經常回空，
+  // 但仍保留作次要 fallback。
+  const allItems = [...yahooTwItems, ...yahooItems, ...genericItems];
 
   // Apply 3-day freshness filter (NEWS-02)
   const fresh = allItems.filter((item) => {
