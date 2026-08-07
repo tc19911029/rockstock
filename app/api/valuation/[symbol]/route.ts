@@ -2,14 +2,13 @@
  * GET /api/valuation/{symbol}?date=YYYY-MM-DD
  *
  * 讀 data/valuation/{date}/{symbol}.json（由 valuation skill 寫入）
- * 若無 → 嘗試找近 7 天最新一份，回 { ok: true, valuation: null, fallbackDate?: ... }
+ * 若指定日無資料 → 回傳指定日以前最近一份，並附 ageDays 供 UI 顯示新鮮度。
  */
 
 import { NextRequest } from 'next/server';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { readLatestValuation } from '@/lib/valuation/storage';
 
 export const runtime = 'nodejs';
 
@@ -38,25 +37,9 @@ export async function GET(
   const targetDate = parsed.data.date ?? ymd(new Date(Date.now() + 8 * 3600_000));
 
   try {
-    // 試指定日
-    const primaryPath = path.join(process.cwd(), 'data', 'valuation', targetDate, `${bareSymbol}.json`);
-    try {
-      const raw = await fs.readFile(primaryPath, 'utf-8');
-      return apiOk({ valuation: JSON.parse(raw), date: targetDate });
-    } catch { /* 找不到 → 退而求其次找近 7 天 */ }
-
-    for (let i = 1; i <= 7; i++) {
-      const d = new Date(targetDate);
-      d.setDate(d.getDate() - i);
-      const fallbackDate = ymd(d);
-      const fbPath = path.join(process.cwd(), 'data', 'valuation', fallbackDate, `${bareSymbol}.json`);
-      try {
-        const raw = await fs.readFile(fbPath, 'utf-8');
-        return apiOk({ valuation: JSON.parse(raw), date: fallbackDate, fellBackFrom: targetDate });
-      } catch { /* try next */ }
-    }
-
-    return apiOk({ valuation: null, date: targetDate });
+    const result = await readLatestValuation({ symbol: bareSymbol, targetDate });
+    if (!result) return apiOk({ valuation: null, date: targetDate, ageDays: null });
+    return apiOk(result);
   } catch (e) {
     return apiError((e as Error).message);
   }

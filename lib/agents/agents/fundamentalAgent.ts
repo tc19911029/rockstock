@@ -266,7 +266,7 @@ export async function buildValuationInputsTW(
 // 陸股版（不抓月營收，用季度情境推估）
 // ────────────────────────────────────────────────────────────────────────────
 
-async function buildValuationInputsCN(
+export async function buildValuationInputsCN(
   symbol: string,
   industryHint: string | undefined,
   fetchErrors: string[],

@@ -3,14 +3,15 @@
 /**
  * 基本面側邊面板 — 主頁分析 tab 用
  * 抓 /api/agents/decisions/{symbol}?date={date} 取 fundamental answer
- * 緊湊版（不含估值情境/scenarios — 那留給 /agents/{symbol} 完整頁）
+ * 緊湊版：整合原始財報、Multi-Agent 判讀與可重新產生的估值情境。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { AlertTriangle, Calculator, CheckCircle2, RefreshCw } from 'lucide-react';
 import type { FundamentalAnswer } from '@/lib/agents/types';
 
-// 估值情境（悲觀/中性/樂觀）— Tier 1 才有，來自 FundamentalAnswer.valuation
+// 估值情境（悲觀/中性/樂觀）— 可來自 Multi-Agent 或獨立 valuation skill。
 //
 // ⚠️ 距現價 / Forward PE / TTM PE 都是「價格衍生」欄位：估值產生當下（valuationDate）用當時
 // 股價算好、寫死進 JSON。股價一旦移動，這些就過期（曾發生：2408 估值日 312 元、現價 401.5，
@@ -20,10 +21,14 @@ function ValuationScenarios({
   valuation,
   currentPrice,
   valuationDate,
+  ageDays,
+  caveat,
 }: {
   valuation: NonNullable<FundamentalAnswer['valuation']>;
   currentPrice?: number;
   valuationDate?: string;
+  ageDays?: number;
+  caveat?: string;
 }) {
   const { ttmPe, monthlyEpsEstimate, scenarios } = valuation;
   const tiers: Array<{ key: 'pessimistic' | 'base' | 'optimistic'; label: string; cls: string }> = [
@@ -40,18 +45,48 @@ function ValuationScenarios({
   // 反推 TTM EPS（舊檔沒存）：ttmPe = basePrice / ttmEps → 再用即時價重算 TTM PE
   const ttmEps = basePriceAtVal && ttmPe > 0 ? basePriceAtVal / ttmPe : null;
   const liveTtmPe = live && ttmEps ? live / ttmEps : ttmPe;
+  const position = live == null
+    ? null
+    : live <= scenarios.pessimistic.fairPrice
+      ? { label: '低於悲觀合理價', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25' }
+      : live <= scenarios.base.fairPrice
+        ? { label: '悲觀～中性區間', cls: 'text-cyan-200 bg-cyan-500/10 border-cyan-500/25' }
+        : live <= scenarios.optimistic.fairPrice
+          ? { label: '中性～樂觀區間', cls: 'text-amber-200 bg-amber-500/10 border-amber-500/25' }
+          : { label: '高於樂觀合理價', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/25' };
+  const isStale = ageDays != null && ageDays > 30;
 
   return (
-    <details className="ring-1 ring-foreground/10 rounded bg-card/40 overflow-hidden" open>
-      <summary className="px-2.5 py-1.5 bg-secondary/40 text-[11px] font-semibold text-cyan-300 cursor-pointer hover:text-cyan-200 select-none border-b border-border/40">
-        估值情境（預估 EPS / 預估 PE / 合理股價）
+    <details className="overflow-hidden rounded-lg border border-cyan-500/20 bg-gradient-to-b from-cyan-950/20 to-card/50" open>
+      <summary className="min-h-11 cursor-pointer select-none border-b border-border/40 bg-secondary/35 px-2.5 py-2 text-[11px] font-semibold text-cyan-200 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+        <span className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5"><Calculator aria-hidden="true" className="size-3.5" />深度估值</span>
+          {valuationDate && (
+            <span className={`rounded border px-1.5 py-0.5 font-mono text-[9px] ${isStale ? 'border-amber-500/35 bg-amber-500/10 text-amber-200' : 'border-foreground/10 bg-background/30 text-muted-foreground'}`}>
+              {valuationDate}{ageDays ? ` · ${ageDays} 天前` : ''}
+            </span>
+          )}
+        </span>
       </summary>
       <div className="px-2.5 py-2 space-y-2">
+        {position && (
+          <div className={`flex items-center justify-between rounded border px-2 py-1.5 ${position.cls}`}>
+            <span className="text-[10px] opacity-80">現價位置</span>
+            <span className="text-[11px] font-semibold">{position.label}</span>
+          </div>
+        )}
+
+        {isStale && (
+          <div className="flex gap-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-200">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+            估值已超過 30 天，合理價仍可參考，但 EPS 與同業 PE 應重新估算。
+          </div>
+        )}
         {/* 月化 EPS 推算（如果有）*/}
         {monthlyEpsEstimate && (
           <div className="rounded ring-1 ring-foreground/10 bg-card/60 p-2">
             <div className="text-[10px] text-muted-foreground mb-1">
-              {monthlyEpsEstimate.month} 月化 EPS 推算
+              {monthlyEpsEstimate.month} 月 EPS 模型估計
             </div>
             <div className="flex items-baseline justify-between">
               <span className="text-[11px] text-foreground/80">月化 EPS</span>
@@ -62,6 +97,7 @@ function ValuationScenarios({
             {monthlyEpsEstimate.note && (
               <div className="text-[10px] text-muted-foreground/70 mt-1 leading-snug">{monthlyEpsEstimate.note}</div>
             )}
+            <div className="mt-1 text-[9px] leading-snug text-amber-200/75">模型推估，非公司公告的正式 EPS。</div>
           </div>
         )}
 
@@ -71,11 +107,11 @@ function ValuationScenarios({
           <span className="font-mono text-xs font-semibold text-foreground/90">{liveTtmPe.toFixed(2)} 倍</span>
         </div>
 
-        {/* 估值基準揭露：合理價/EPS 為基準日分析；距現價・Forward PE・TTM PE 已用即時價重算 */}
+        {/* 估值基準揭露：合理價/EPS 為基準日分析；價格衍生數字依即時價重算 */}
         {live && basePriceAtVal && (
           <div className="text-[10px] text-muted-foreground/70 px-1 leading-snug">
             合理價/EPS 為{valuationDate ? ` ${valuationDate} ` : ''}估值（基準價 {Math.round(basePriceAtVal)}）；
-            距現價・Forward PE・TTM PE 依即時價 {live.toFixed(live > 100 ? 0 : 2)} 重算
+            距現價・本年預估 PE・TTM PE 依即時價 {live.toFixed(live > 100 ? 0 : 2)} 重算
           </div>
         )}
 
@@ -83,7 +119,7 @@ function ValuationScenarios({
         <div className="space-y-1.5">
           {tiers.map(t => {
             const s = scenarios[t.key];
-            // 距現價・Forward PE 一律用即時價重算（無即時價才退回 JSON 寫死值）
+            // 距現價・本年預估 PE 一律用即時價重算（無即時價才退回 JSON 寫死值）
             const upPct = live ? ((s.fairPrice - live) / live) * 100 : s.upside * 100;
             const fwdPe = live && s.fullYearEps > 0 ? live / s.fullYearEps : s.forwardPe;
             return (
@@ -100,7 +136,7 @@ function ValuationScenarios({
                     <span className="font-mono font-semibold">{s.fullYearEps.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="opacity-70">Forward PE</span>
+                    <span className="opacity-70">本年預估 PE</span>
                     <span className="font-mono font-semibold">{fwdPe.toFixed(1)}×</span>
                   </div>
                   <div className="flex justify-between">
@@ -122,13 +158,21 @@ function ValuationScenarios({
             );
           })}
         </div>
+        {caveat && (
+          <details className="rounded border border-foreground/10 bg-background/20">
+            <summary className="min-h-9 cursor-pointer px-2 py-2 text-[10px] font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+              估值依據與限制
+            </summary>
+            <div className="border-t border-border/40 px-2 py-1.5 text-[10px] leading-relaxed text-foreground/70">{caveat}</div>
+          </details>
+        )}
       </div>
     </details>
   );
 }
 
 // Tier 2 — 原始財務數字（無 AI 分析時 fallback）
-function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice }: { raw: RawFundamentals; symbol: string; standaloneValuation: ValuationOnly | null; currentPrice?: number }) {
+function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, onValuationReady }: { raw: RawFundamentals; symbol: string; standaloneValuation: ValuationOnly | null; currentPrice?: number; onValuationReady: (valuation: ValuationOnly) => void }) {
   const fmt = (v: number | undefined, suffix = '', digits = 2) =>
     v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(digits)}${suffix}`;
   const fmtRevenue = (v: number | undefined) => {
@@ -206,18 +250,28 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice }:
           }}
           currentPrice={currentPrice}
           valuationDate={standaloneValuation.date}
+          ageDays={standaloneValuation.ageDays}
+          caveat={standaloneValuation.valuationCaveat ?? standaloneValuation.reasoning}
         />
       )}
 
       {/* 預估股價按鈕 — 觸發 valuation skill */}
-      <ValuationButton symbol={symbol} hasResult={!!standaloneValuation?.scenarios} />
+      <ValuationButton symbol={symbol} currentValuation={standaloneValuation} onValuationReady={onValuationReady} />
     </div>
   );
 }
 
-function ValuationButton({ symbol, hasResult }: { symbol: string; hasResult: boolean }) {
+function ValuationButton({ symbol, currentValuation, onValuationReady }: { symbol: string; currentValuation: ValuationOnly | null; onValuationReady: (valuation: ValuationOnly) => void }) {
   const [phase, setPhase] = useState<'idle' | 'preparing' | 'waiting' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollTimer.current) clearInterval(pollTimer.current);
+    pollTimer.current = null;
+  };
+
+  useEffect(() => stopPolling, [symbol]);
 
   const onClick = async () => {
     if (phase === 'preparing' || phase === 'waiting') return;
@@ -231,14 +285,13 @@ function ValuationButton({ symbol, hasResult }: { symbol: string; hasResult: boo
         setMessage(j.error ?? '準備失敗');
         return;
       }
-      if (j.data.autoTrigger?.ok) {
+      if (j.autoTrigger?.ok) {
         setPhase('waiting');
-        setMessage('已切到 Claude session 觸發 /valuation。skill 分析中…（通常需 1-2 分鐘）');
-        // 開始 poll read endpoint
-        startPolling();
+        setMessage('資料整理完成，深度估值運算中（通常約 1–2 分鐘）…');
+        startPolling(currentValuation?.updatedAt);
       } else {
         setPhase('error');
-        setMessage(`自動觸發失敗：${j.data.autoTrigger?.detail ?? '?'}\n請手動在 Claude 對話輸入 ${j.data.skillInvocation}`);
+        setMessage(`估值工作已建立，但自動分析未啟動：${j.autoTrigger?.detail ?? '未知原因'}。可在分析終端輸入 ${j.skillInvocation}。`);
       }
     } catch (e) {
       setPhase('error');
@@ -246,26 +299,27 @@ function ValuationButton({ symbol, hasResult }: { symbol: string; hasResult: boo
     }
   };
 
-  const startPolling = () => {
+  const startPolling = (previousUpdatedAt?: string) => {
+    stopPolling();
     const start = Date.now();
     const MAX_MS = 5 * 60 * 1000;  // 5 分鐘 timeout
-    const interval = setInterval(async () => {
+    pollTimer.current = setInterval(async () => {
       if (Date.now() - start > MAX_MS) {
-        clearInterval(interval);
+        stopPolling();
         setPhase('error');
-        setMessage('等待超時（5 分鐘）。請手動 reload 頁面看是否已有結果。');
+        setMessage('等待超過 5 分鐘。分析可能仍在背景進行，稍後可按「重新估算」再確認。');
         return;
       }
       try {
         const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-        const res = await fetch(`/api/valuation/${encodeURIComponent(symbol)}?date=${today}`);
+        const res = await fetch(`/api/valuation/${encodeURIComponent(symbol)}?date=${today}&_=${Date.now()}`, { cache: 'no-store' });
         const j = await res.json();
-        if (j.ok && j.valuation) {
-          clearInterval(interval);
+        const isNewResult = j.ok && j.valuation && j.date === today && (!previousUpdatedAt || j.updatedAt !== previousUpdatedAt);
+        if (isNewResult) {
+          stopPolling();
           setPhase('idle');
-          setMessage('✓ 估值結果已寫入，重新整理頁面查看');
-          // 簡單 reload 讓 FundamentalSidebarPanel 重抓 standaloneValuation
-          setTimeout(() => window.location.reload(), 800);
+          setMessage('估值已更新，下方情境已套用最新結果。');
+          onValuationReady({ ...j.valuation, date: j.date, ageDays: j.ageDays, updatedAt: j.updatedAt });
         }
       } catch { /* 繼續 poll */ }
     }, 5000);  // 每 5 秒 check 一次
@@ -276,7 +330,7 @@ function ValuationButton({ symbol, hasResult }: { symbol: string; hasResult: boo
     ? '準備中…'
     : phase === 'waiting'
     ? '朱老師估算中…'
-    : hasResult
+    : currentValuation?.scenarios
     ? '重新估算股價'
     : '預估股價';
 
@@ -286,16 +340,19 @@ function ValuationButton({ symbol, hasResult }: { symbol: string; hasResult: boo
         type="button"
         onClick={onClick}
         disabled={busy}
-        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-purple-500/40 bg-gradient-to-r from-purple-500/15 to-indigo-500/15 hover:from-purple-500/25 hover:to-indigo-500/25 text-[12px] font-semibold text-purple-100 disabled:opacity-60 transition-all"
+        className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-[12px] font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-wait disabled:opacity-60"
       >
-        <span>{busy ? '⏳' : '📊'}</span>
+        {busy ? <RefreshCw aria-hidden="true" className="size-4 animate-spin" /> : <Calculator aria-hidden="true" className="size-4" />}
         <span>{label} {symbol}</span>
       </button>
       {message && (
         <div className={`text-[10px] leading-snug px-1 whitespace-pre-line ${
           phase === 'error' ? 'text-rose-400' : 'text-emerald-300/90'
         }`}>
-          {message}
+          <span className="inline-flex gap-1.5">
+            {phase === 'error' ? <AlertTriangle aria-hidden="true" className="mt-0.5 size-3 shrink-0" /> : <CheckCircle2 aria-hidden="true" className="mt-0.5 size-3 shrink-0" />}
+            {message}
+          </span>
         </div>
       )}
     </div>
@@ -373,8 +430,34 @@ interface Props {
 interface ValuationOnly {
   ttmPe?: number;
   date?: string;
+  ageDays?: number;
+  updatedAt?: string;
+  valuationCaveat?: string;
+  reasoning?: string;
   monthlyEpsEstimate?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsEstimate'];
   scenarios?: NonNullable<FundamentalAnswer['valuation']>['scenarios'];
+}
+
+function toAgentValuation(valuation: ValuationOnly | null): NonNullable<FundamentalAnswer['valuation']> | null {
+  if (valuation?.ttmPe == null || !valuation.scenarios) return null;
+  return {
+    ttmPe: valuation.ttmPe,
+    monthlyEpsEstimate: valuation.monthlyEpsEstimate,
+    scenarios: valuation.scenarios,
+    dilution: null,
+    riskFlags: [],
+    conclusion: 'fair',
+    reasoning: valuation.reasoning ?? '',
+  };
+}
+
+function ageInDays(date: string | undefined): number | undefined {
+  if (!date) return undefined;
+  const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+  const start = Date.parse(`${date}T00:00:00Z`);
+  const end = Date.parse(`${today}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return undefined;
+  return Math.max(0, Math.floor((end - start) / 86_400_000));
 }
 
 export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistorical }: Props) {
@@ -394,46 +477,81 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
     const bareSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     if (symbol.startsWith('^')) { setLoading(false); return; }  // 指數無基本面/估值，短路不打 decisions API（否則回「symbol 格式不合法」）
 
-    // Tier 1: Multi-Agent 完整分析（API 規定 date 必填，預設今天台北日）
-    const effectiveDate = date ?? new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    // 三種資料固定並行載入：完整分析不再阻擋原始財報或獨立估值。
+    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const effectiveDate = date ?? today;
     const decisionUrl = `/api/agents/decisions/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`;
-    fetch(decisionUrl, { signal: AbortSignal.timeout(8000) })
-      .then(r => r.json())
-      .then(async (j: DecisionPayload) => {
-        if (cancelled) return;
-        if (j.error) {
-          setError(j.error);
-          return;
-        }
-        if (j.fundamental) {
-          setData(j.fundamental);
-          return;
-        }
-        // Tier 2: 標準 fallback — 抓原始財務數字 + standalone 估值（可能存在）
-        const [rawRes, valRes] = await Promise.all([
-          fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
-          fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${effectiveDate}`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
-        ]);
-        if (cancelled) return;
+    const load = async () => {
+      const safeJson = async (request: Promise<Response>) => {
         try {
-          const rawJson = rawRes ? await rawRes.json() : null;
-          if (rawJson?.ok && rawJson.data) setRawData(rawJson.data as RawFundamentals);
-        } catch { /* ignore */ }
-        try {
-          const valJson = valRes ? await valRes.json() : null;
-          if (valJson?.ok && valJson.valuation) setStandaloneValuation(valJson.valuation as ValuationOnly);
-        } catch { /* ignore */ }
-      })
-      .catch(err => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+          const response = await request;
+          return await response.json();
+        } catch {
+          return null;
+        }
+      };
+      const decisionRequest = safeJson(fetch(decisionUrl, { signal: AbortSignal.timeout(8000) }))
+        .then(json => {
+          const decision = json as DecisionPayload | null;
+          if (!cancelled && decision?.fundamental) {
+            setData(decision.fundamental);
+            setLoading(false);
+          }
+          return json;
+        });
+      const rawRequest = safeJson(fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`, { signal: AbortSignal.timeout(8000) }))
+        .then(json => {
+          if (!cancelled && json?.ok && json.data) {
+            setRawData(json.data as RawFundamentals);
+            setLoading(false);
+          }
+          return json;
+        });
+      const valuationRequest = safeJson(fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${today}`, { signal: AbortSignal.timeout(8000), cache: 'no-store' }))
+        .then(json => {
+          if (!cancelled && json?.ok && json.valuation) {
+            setStandaloneValuation({
+              ...(json.valuation as ValuationOnly),
+              date: json.date,
+              ageDays: json.ageDays,
+              updatedAt: json.updatedAt,
+            });
+            setLoading(false);
+          }
+          return json;
+        });
+      const [decisionJson, rawJson, valuationJson] = await Promise.all([decisionRequest, rawRequest, valuationRequest]);
+      if (cancelled) return;
+
+      const decision = decisionJson as DecisionPayload | null;
+      if (!decision?.fundamental && !rawJson?.data && !valuationJson?.valuation) {
+        setError(decision?.error ?? rawJson?.error ?? '目前找不到可用的基本面資料');
+      }
+      setLoading(false);
+    };
+    void load().catch(err => {
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : '載入失敗');
+        setLoading(false);
+      }
+    });
     return () => { cancelled = true; };
   }, [symbol, date]);
 
   if (symbol.startsWith('^')) return <div className="p-3 text-xs text-muted-foreground py-6 text-center">指數無基本面 / 估值資料</div>;
   if (loading) return <div className="p-3 text-xs text-muted-foreground animate-pulse">載入基本面分析…</div>;
-  if (error) return <div className="p-3 text-xs text-rose-400">載入失敗：{error}</div>;
 
   const cleanSymbolEarly = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const standaloneAsAgent = toAgentValuation(standaloneValuation);
+
+  if (error && !data && !rawData && !standaloneValuation) {
+    return (
+      <div className="space-y-2 p-3 text-xs">
+        <div className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-rose-300">資料載入不完整：{error}</div>
+        <ValuationButton symbol={cleanSymbolEarly} currentValuation={null} onValuationReady={setStandaloneValuation} />
+      </div>
+    );
+  }
 
   // DU2：走圖回放中提醒「基本面/估值為最新資料、不隨走圖回溯」（避免歷史價配當前 PER 被誤讀）。
   // 觸發涵蓋兩種歷史情境：(1) 手動步退回放（isHistorical=currentIndex<last）；
@@ -449,13 +567,23 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
 
   // Tier 2 fallback: 只有原始財務數字，無 AI 深度分析
   if (!data && rawData) {
-    return <div className="space-y-2">{historicalNote}<RawFundamentalsView raw={rawData} symbol={cleanSymbolEarly} standaloneValuation={standaloneValuation} currentPrice={currentPrice} /></div>;
+    return <div className="space-y-2">{historicalNote}<RawFundamentalsView raw={rawData} symbol={cleanSymbolEarly} standaloneValuation={standaloneValuation} currentPrice={currentPrice} onValuationReady={setStandaloneValuation} /></div>;
   }
 
   if (!data) {
     return (
       <div className="p-3 text-xs text-muted-foreground space-y-2">
-        <div>該檔尚無基本面資料。</div>
+        <div>該檔尚無完整財報資料，仍可查看或建立估值。</div>
+        {standaloneAsAgent && (
+          <ValuationScenarios
+            valuation={standaloneAsAgent}
+            currentPrice={currentPrice}
+            valuationDate={standaloneValuation?.date}
+            ageDays={standaloneValuation?.ageDays}
+            caveat={standaloneValuation?.valuationCaveat ?? standaloneValuation?.reasoning}
+          />
+        )}
+        <ValuationButton symbol={cleanSymbolEarly} currentValuation={standaloneValuation} onValuationReady={setStandaloneValuation} />
         <div className="text-[11px] text-muted-foreground/70">
           資料來源失敗（FinMind/EastMoney）。要看 AI 深度分析請到 <Link href={`/agents/${encodeURIComponent(cleanSymbolEarly)}`} className="text-sky-400 underline">/agents/{cleanSymbolEarly}</Link> 觸發 prepare。
         </div>
@@ -465,6 +593,13 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
 
   const style = VERDICT_STYLE[data.verdict];
   const cleanSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const useStandaloneValuation = !!standaloneAsAgent && (!data.valuation || (standaloneValuation?.date ?? '') >= data.date);
+  const displayedValuation = useStandaloneValuation ? standaloneAsAgent : data.valuation ?? null;
+  const displayedValuationDate = useStandaloneValuation ? standaloneValuation?.date : data.date;
+  const displayedAgeDays = useStandaloneValuation ? standaloneValuation?.ageDays : ageInDays(data.date);
+  const displayedCaveat = useStandaloneValuation
+    ? standaloneValuation?.valuationCaveat ?? standaloneValuation?.reasoning
+    : data.valuation?.reasoning;
 
   return (
     <div className="space-y-2 text-xs">
@@ -479,7 +614,16 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
       </div>
 
       {/* 估值情境（悲觀 / 中性 / 樂觀預估股價）*/}
-      {data.valuation && <ValuationScenarios valuation={data.valuation} currentPrice={currentPrice} valuationDate={data.date} />}
+      {displayedValuation && (
+        <ValuationScenarios
+          valuation={displayedValuation}
+          currentPrice={currentPrice}
+          valuationDate={displayedValuationDate}
+          ageDays={displayedAgeDays}
+          caveat={displayedCaveat}
+        />
+      )}
+      <ValuationButton symbol={cleanSymbol} currentValuation={standaloneValuation} onValuationReady={setStandaloneValuation} />
 
       {/* 4 段論述 (collapsible) */}
       <div className="space-y-1">
