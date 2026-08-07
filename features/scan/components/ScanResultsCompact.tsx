@@ -642,16 +642,16 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                   // 目標相對現價的距離 — 正 = 仍有上漲空間；負 = 已達/超過目標
                   const upsideNum = target ? ((target - r.price) / r.price * 100) : null;
                   const reached = upsideNum != null && upsideNum <= 0;
-                  // 結構失效 / 已撤銷 → 整個 N 徽章降灰 + 加 ✗ 後綴
+                  // N 已完成真突破；後續跌破回測防守才叫「突破失敗」，避免與未確認型態混淆。
                   const stage = findLockWatch(r.symbol, 'N')?.currentStage;
                   const failed = stage === 'structure-broken' || stage === 'revoked';
                   const failReason = stage === 'structure-broken'
-                    ? `已跌破頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} ×0.97 = ${(r.lockWatchPayload.triggerPrice * 0.97).toFixed(2)}，型態結構失效`
+                    ? `真突破後已跌破回測防守：頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} ×0.97 = ${(r.lockWatchPayload.triggerPrice * 0.97).toFixed(2)}`
                     : stage === 'revoked' ? '訊號已撤銷' : '';
-                  const rateText = rate != null ? ` · 舊書達標率 ${rate}%` : '';
+                  const rateText = rate != null ? ` · 舊書達標統計 ${rate}%（非本站回測）` : '';
                   const baseTitle = reached
-                    ? `N 型態：${name}${rateText} · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 目標 ${target?.toFixed(2) ?? '?'}（已達標：現價超過目標 ${Math.abs(upsideNum!).toFixed(1)}%）`
-                    : `N 型態：${name}${rateText} · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 目標 ${target?.toFixed(2) ?? '?'}（距目標還有 ${upsideNum?.toFixed(1) ?? '?'}% 空間）`;
+                    ? `N 型態訊號：${name}${rateText} · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 突破後測量目標 ${target?.toFixed(2) ?? '?'}（已到達）`
+                    : `N 型態訊號：${name}${rateText} · 頸線 ${r.lockWatchPayload.triggerPrice.toFixed(2)} · 突破後測量目標 ${target?.toFixed(2) ?? '?'}（理論距離 ${upsideNum?.toFixed(1) ?? '?'}%）`;
                   return (
                     <span
                       className={`text-[8px] px-1 h-3.5 flex items-center gap-0.5 rounded-sm font-bold ${
@@ -660,7 +660,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                           : 'bg-indigo-900/60 text-indigo-200'
                       }`}
                       title={failed ? `${baseTitle}\n— ${failReason}` : baseTitle}>
-                      {name}{rate != null && <span className="opacity-75 ml-0.5">舊書 {rate}%</span>}
+                      N訊號·{name}{rate != null && <span className="opacity-75 ml-0.5">舊書統計 {rate}%</span>}
                       {target != null && upsideNum != null && !failed && (
                         reached ? (
                           // 已達 / 超過目標 → 提示停利
@@ -670,25 +670,25 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                         ) : (
                           // 仍有空間 → 顯示目標價 + 距現價百分比
                           <span className="ml-0.5 text-emerald-300">
-                            目標 {target.toFixed(0)} (+{upsideNum.toFixed(1)}%)
+                            測量目標 {target.toFixed(0)} (+{upsideNum.toFixed(1)}%)
                           </span>
                         )
                       )}
                       {failed && (
                         <span className="ml-0.5 text-rose-400/80 no-underline" title={failReason}>
-                          ✗ {stage === 'structure-broken' ? '結構失效' : '已撤銷'}
+                          ✗ {stage === 'structure-broken' ? '突破失敗' : '已撤銷'}
                         </span>
                       )}
                     </span>
                   );
                 })()}
 
-                {/* v12 F V 反轉觸發鎖定價（含結構失效 cross-ref ✗）*/}
+                {/* v12 F V 反轉：成立價與 V 底防守分開顯示，避免把成立價誤當停損。 */}
                 {r.lockWatchPayload?.triggerPrice && !r.lockWatchPayload.patternType && (() => {
                   const fStage = findLockWatch(r.symbol, 'F')?.currentStage;
                   const fFailed = fStage === 'structure-broken' || fStage === 'revoked';
                   const fReason = fStage === 'structure-broken'
-                    ? `已跌破 V 底（變盤線 low），結構失效`
+                    ? `後續 K 棒 low 已跌破 V 底 ${r.lockWatchPayload.vBottom?.toFixed(2) ?? '—'}，V 反轉結構失效`
                     : fStage === 'revoked' ? '訊號已撤銷' : '';
                   return (
                     <span
@@ -698,10 +698,13 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                           : 'bg-rose-900/60 text-rose-200'
                       }`}
                       title={fFailed
-                        ? `F V 反轉鎖定價：${r.lockWatchPayload.triggerPrice.toFixed(2)}\n— ${fReason}`
-                        : `F V 反轉鎖定價（觸發即進場參考）：${r.lockWatchPayload.triggerPrice.toFixed(2)}`
+                        ? `F V 反轉訊號成立價：${r.lockWatchPayload.triggerPrice.toFixed(2)}\n— ${fReason}`
+                        : `F V 反轉訊號成立價：${r.lockWatchPayload.triggerPrice.toFixed(2)}（不是建議買價、停損價或目標價）${r.lockWatchPayload.vBottom != null ? `\nV 底防守：${r.lockWatchPayload.vBottom.toFixed(2)}（後續 low 跌破才失效）` : ''}`
                       }>
-                      🔒{r.lockWatchPayload.triggerPrice.toFixed(2)}
+                      V訊號 {r.lockWatchPayload.triggerPrice.toFixed(2)}
+                      {r.lockWatchPayload.vBottom != null && !fFailed && (
+                        <span className="ml-0.5 opacity-75">守 {r.lockWatchPayload.vBottom.toFixed(2)}</span>
+                      )}
                       {fFailed && (
                         <span className="ml-0.5 text-rose-400/80 no-underline" title={fReason}>
                           ✗ {fStage === 'structure-broken' ? '結構失效' : '已撤銷'}
@@ -734,7 +737,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                       title={
                         effectiveStatus === 'confirmed' ? `已確認（停留 ≥3 天）` :
                         effectiveStatus === 'revoked' ? `已撤銷（close 跌破 ${r.provisional.triggerPrice.toFixed(2)}）` :
-                        `三天驗證中（剩 ${actualRemaining} 天，鎖定價 ${r.provisional.triggerPrice.toFixed(2)}）`
+                        `三天驗證中（剩 ${actualRemaining} 天，驗證基準價 ${r.provisional.triggerPrice.toFixed(2)}）`
                       }>
                       {effectiveStatus === 'confirmed' ? '✓ 確認' :
                        effectiveStatus === 'revoked' ? '✗ 撤銷' :

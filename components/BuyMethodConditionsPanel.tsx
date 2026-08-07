@@ -39,6 +39,7 @@ import {
   FLATBOTTOM_MIN_CONSOL_DAYS,
 } from '@/lib/analysis/bookThresholds';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
+import { isLegacyBookObservationOnly } from '@/lib/analysis/patternCatalog';
 import type { CandleWithIndicators } from '@/types';
 import ProhibitionsBlock from './ProhibitionsBlock';
 
@@ -435,29 +436,39 @@ function evaluateMethod(
       const achievement = r.achievementRate ?? struct.achievementRate;
       const neckline = r.necklinePrice ?? struct.necklinePrice;
       const target = r.patternTargetPrice ?? struct.patternTargetPrice;
+      const observationOnly = (r.patternType ?? struct.patternType)
+        ? isLegacyBookObservationOnly((r.patternType ?? struct.patternType)!)
+        : false;
+      const confirmationThreshold = neckline != null ? neckline * 1.03 : null;
       const conditions: ConditionItem[] = [
         {
           icon: '①', name: '型態結構',
           detail: r.triggered
-            ? `${patternName}${achievement != null ? `（舊書達標率 ${achievement}%）` : ''}`
+            ? `${patternName}${achievement != null ? `（舊書達標統計 ${achievement}%）` : ''}`
             : hasStructure
-              ? `${patternName}（${achievement != null ? `舊書達標率 ${achievement}% · ` : ''}結構成立待突破）`
+              ? observationOnly
+                ? `${patternName}（舊書達標統計 ${achievement}% · 低達標統計，僅供圖表觀察，不列入 N 進場）`
+                : `${patternName}（${achievement != null ? `舊書達標統計 ${achievement}% · ` : ''}結構成立，等待真突破）`
               : '未識別',
           pass: r.triggered || hasStructure,
         },
         {
-          icon: '②', name: '頸線突破 ×3%',
+          icon: '②', name: '收盤通過真突破門檻（頸線 +3%）',
           detail: neckline
             ? r.triggered
-              ? `頸線 ${neckline.toFixed(2)} → close ${c.close.toFixed(2)}（已突破）`
-              : `頸線 ${neckline.toFixed(2)} → close ${c.close.toFixed(2)}（${c.close >= neckline ? '已過頸線但未滿 ×3%' : '未過頸線'}）`
+              ? `頸線 ${neckline.toFixed(2)}／真突破 ${confirmationThreshold?.toFixed(2)} → close ${c.close.toFixed(2)}（訊號成立）`
+              : `頸線 ${neckline.toFixed(2)}／真突破 ${confirmationThreshold?.toFixed(2)} → close ${c.close.toFixed(2)}（${observationOnly ? '此型態只供觀察' : c.close >= neckline ? '已過頸線但未滿 3%' : '尚未突破'}）`
             : '無頸線',
           pass: r.triggered,
         },
         {
-          icon: '③', name: '型態目標價（停利參考）',
-          detail: target ? `目標 ${target.toFixed(2)}` : '—',
-          pass: !!target,
+          icon: '③', name: '突破後測量目標（非保證價）',
+          detail: target
+            ? r.triggered
+              ? `訊號已成立，測量目標 ${target.toFixed(2)}`
+              : `尚未完成真突破，${target.toFixed(2)} 目前只是條件式估算`
+            : '—',
+          pass: r.triggered && !!target,
         },
         {
           icon: '④', name: `紅 K + 量 ≥ ${BOOK_VOL_RATIO_MIN}`,
@@ -468,9 +479,11 @@ function evaluateMethod(
       return {
         title,
         subTitle: r.triggered
-          ? `${patternName}${achievement != null ? `（舊書達標率 ${achievement}%）` : ''}`
+          ? `${patternName}${achievement != null ? `（舊書達標統計 ${achievement}%）` : ''}`
           : hasStructure
-            ? `${patternName}${achievement != null ? `（舊書達標率 ${achievement}%）` : ''} · 結構成立待突破`
+            ? observationOnly
+              ? `${patternName} · 低達標統計，僅供圖表觀察，不列入 N 進場`
+              : `${patternName}${achievement != null ? `（舊書達標統計 ${achievement}%）` : ''} · 結構成立，等待真突破`
             : '課程六型優先＋舊書型態補充',
         conditions,
         allPass: r.triggered,

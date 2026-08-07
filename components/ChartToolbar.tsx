@@ -469,12 +469,12 @@ export default function ChartToolbar({
           <button
             onClick={onNecklineToggle}
             aria-pressed={showNeckline}
-            aria-label={`${showNeckline ? '隱藏' : '顯示'}形態頸線`}
+            aria-label={`${showNeckline ? '隱藏' : '顯示'}型態關鍵價位`}
             className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
               showNeckline ? 'bg-cyan-600/60 text-cyan-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="型態頸線 + 預估目標價 + 結構失效價（破了就無效）"
-          >頸線</button>
+            title="型態頸線、±3% 真突破門檻、突破後測量目標與回測防守價"
+          >型態價位</button>
         )}
         {onPatternToggle && (
           <button

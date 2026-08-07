@@ -1,6 +1,7 @@
 import {
   BOTTOM_PATTERN_TYPES,
   getLegacyBookAchievementRate,
+  isLegacyBookObservationOnly,
   isPatternType,
   isTopPatternType,
   TOP_PATTERN_TYPES,
@@ -31,5 +32,11 @@ describe('patternCatalog', () => {
     expect(getLegacyBookAchievementRate('double-bottom')).toBe(36);
     expect(getLegacyBookAchievementRate('n-shape')).toBeUndefined();
     expect(getLegacyBookAchievementRate('head-shoulder-top')).toBeUndefined();
+  });
+
+  it('低於 N 進場門檻的舊書型態只標示為觀察', () => {
+    expect(isLegacyBookObservationOnly('double-bottom')).toBe(true);
+    expect(isLegacyBookObservationOnly('head-shoulder')).toBe(false);
+    expect(isLegacyBookObservationOnly('n-shape')).toBe(false);
   });
 });

@@ -32,6 +32,7 @@ import { BOOK_BODY_PCT_MIN, BOOK_VOL_RATIO_MIN } from './bookThresholds';
 import { N_MIN_HISTORY } from './historyMinimums';
 import {
   getLegacyBookAchievementRate,
+  isLegacyBookObservationOnly,
   type BottomPatternType,
   type TopPatternType,
 } from './patternCatalog';
@@ -238,7 +239,7 @@ function makeResult(
   // 2026-07-05 回測-3 按課程：課程 6-4 只收高勝率型態當進場；雙重底書本明寫達成率 36%
   // → 不再發進場訊號（triggered:false），保留結構顯示供走圖參考。
   const achievementRate = getLegacyBookAchievementRate(match.patternType);
-  if (achievementRate != null && achievementRate < 50) {
+  if (isLegacyBookObservationOnly(match.patternType)) {
     return structureOnly(`N ${getPatternName(match.patternType)} 達成率僅 ${achievementRate}%（課程只收高勝率型態）— 僅顯示不進場`);
   }
 

@@ -45,6 +45,9 @@ const LEGACY_BOOK_ACHIEVEMENT_RATE: Readonly<Partial<Record<PatternType, number>
   'double-bottom': 36,
 };
 
+/** 舊書達標統計低於此門檻者，只保留圖表觀察，不列入 N 型態進場訊號。 */
+export const LEGACY_BOOK_ENTRY_RATE_MIN = 50;
+
 export interface PatternPivotSnapshot {
   date: string;
   price: number;
@@ -69,4 +72,10 @@ export function isPatternType(patternType: string): patternType is PatternType {
 
 export function getLegacyBookAchievementRate(patternType: string): number | undefined {
   return isPatternType(patternType) ? LEGACY_BOOK_ACHIEVEMENT_RATE[patternType] : undefined;
+}
+
+/** 與 N detector 共用，避免 UI 把「僅觀察」型態包裝成可執行進場訊號。 */
+export function isLegacyBookObservationOnly(patternType: string): boolean {
+  const rate = getLegacyBookAchievementRate(patternType);
+  return rate != null && rate < LEGACY_BOOK_ENTRY_RATE_MIN;
 }

@@ -4,6 +4,7 @@ import {
   BOOK_BODY_PCT_MIN,
   BOOK_VOL_RATIO_MIN,
   KLINE_CONSOL_MAX_RANGE_PCT,
+  TRUE_BREAKOUT_PCT,
 } from '@/lib/analysis/bookThresholds';
 import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
@@ -141,25 +142,30 @@ function buildPatternConfirm(r: StockScanResult): StrategyReasonBlock {
   ];
   if (ratePct != null) {
     rows.push({
-      label: '舊書達標率',
+      label: '舊書達標統計',
       text: `${ratePct}%（《抓住飆股》附錄的型態達標統計，非 Rockstock 回測勝率）`,
     });
   }
   if (trigger != null) {
-    rows.push({ label: '頸線價', text: trigger.toFixed(2) });
+    rows.push({ label: '頸線', text: trigger.toFixed(2) });
+    rows.push({
+      label: '真突破門檻',
+      text: `${(trigger * (1 + TRUE_BREAKOUT_PCT)).toFixed(2)}（收盤站上頸線 3%，訊號才成立）`,
+      tone: 'good',
+    });
   }
   if (target != null) {
-    rows.push({ label: '目標價', text: target.toFixed(2) });
+    rows.push({ label: '突破後測量目標', text: `${target.toFixed(2)}（型態等幅估算，不保證到價）` });
     if (upsidePct != null) {
       if (upsidePct > 0) {
         rows.push({
-          label: '距現價',
-          text: `+${upsidePct.toFixed(1)}% 空間（現價 ${r.price.toFixed(2)} → 目標 ${target.toFixed(2)}）`,
+          label: '理論距離',
+          text: `+${upsidePct.toFixed(1)}%（現價 ${r.price.toFixed(2)} → 測量目標 ${target.toFixed(2)}）`,
           tone: 'good',
         });
       } else {
         rows.push({
-          label: '距現價',
+          label: '理論距離',
           text: `目標已達標（現價超過目標 ${Math.abs(upsidePct).toFixed(1)}%）`,
           tone: 'warn',
         });
@@ -177,15 +183,15 @@ function buildVReversal(r: StockScanResult): StrategyReasonBlock {
   ];
   if (lw?.triggerPrice != null) {
     rows.push({
-      label: '鎖定價',
-      text: `${lw.triggerPrice.toFixed(2)}（V 底反彈起點 close）`,
+      label: '訊號成立收盤',
+      text: `${lw.triggerPrice.toFixed(2)}（系統確認 V 反轉時的收盤價；不是停損價或目標價）`,
       tone: 'good',
     });
   }
   if (lw?.vBottom != null) {
     rows.push({
-      label: 'V 底',
-      text: `${lw.vBottom.toFixed(2)}（變盤線 low，跌破 = 結構失效）`,
+      label: 'V 底防守',
+      text: `${lw.vBottom.toFixed(2)}（任一後續 K 棒 low 跌破，V 反轉結構才失效）`,
     });
   }
   return { method: 'F', title: METHOD_NAMES.F, rows };

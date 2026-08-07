@@ -51,13 +51,13 @@ const PATTERN_NAME: Record<NonNullable<LockWatchRecord['patternType']>, string> 
 // 2026-05-13 對齊書本：observation = 觸發書本進場條件（已可進場）；
 // pending-breakout / entry-signal 為舊資料 stage，向下相容顯示
 const STAGE_STYLE: Record<LockWatchRecord['currentStage'], { label: string; color: string }> = {
-  observation: { label: '已觸發', color: 'text-emerald-300 font-bold' },
+  observation: { label: '訊號已成立', color: 'text-emerald-300 font-bold' },
   'pending-breakout': { label: '舊資料（已棄）', color: 'text-muted-foreground/60' },
-  'entry-signal': { label: '已觸發', color: 'text-emerald-300 font-bold' },
+  'entry-signal': { label: '訊號已成立', color: 'text-emerald-300 font-bold' },
   purchased: { label: '已買進', color: 'text-sky-300' },
   revoked: { label: '已撤銷', color: 'text-muted-foreground/60 line-through' },
   'manually-removed': { label: '手動移除', color: 'text-muted-foreground/60 line-through' },
-  'structure-broken': { label: '結構失效', color: 'text-rose-400/70 line-through' },
+  'structure-broken': { label: '訊號失效', color: 'text-rose-400/70 line-through' },
 };
 
 export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
@@ -196,7 +196,7 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
             ? 'bg-amber-900/30 text-amber-200 hover:bg-amber-900/40'
             : 'text-muted-foreground hover:text-foreground'
         }`}
-        title="反轉訊號觸發紀錄：型態確認（突破頸線，書本《寶典》Part 11-1 #7「等型態確認」p.697）、V 反轉（書本《抓住K線》V 反轉戰法）。書本明寫觸發當下即進場訊號。本表保留紀錄是為了走圖鎖定型態+頸線+目標價、以及進場按鈕一鍵帶入持倉。"
+        title="反轉策略訊號紀錄：N 型態確認與 F V 反轉。這是策略條件成立紀錄，不代表保證獲利或必須買進。"
       >
         <span className="flex items-center gap-1.5">
           <span className="font-semibold">反轉訊號紀錄</span>
@@ -215,13 +215,13 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
           {/* 對齊書本：型態確認 / V 反轉 觸發即進場訊號（寶典 Part 11-1 #7 + 抓住K線 V 反轉戰法） */}
           <div className="text-[10px] text-emerald-200/80 bg-emerald-900/15 border border-emerald-700/30 rounded px-2 py-1 my-1.5 leading-relaxed space-y-1">
             <div>
-              <span className="font-bold text-emerald-300">這是「已觸發」紀錄</span>：
+              <span className="font-bold text-emerald-300">這是「策略訊號已成立」紀錄，不等於建議買進</span>：
               <span className="font-semibold ml-1">型態確認</span>＝突破頸線（2026 課程六型優先，另保留舊書補充型態；《寶典》Part 11-1 第 7 位置 p.697「型態確認上漲大量紅 K」）；
               <span className="font-semibold ml-1">V 反轉</span>＝反轉戰法（《抓住K線》4 條件：連跌+變盤線止跌+紅K帶量+突破前K高）。
-              <span className="font-semibold">書本明寫觸發當下即進場訊號。</span>
+              <span className="font-semibold">它只代表書本條件已完成，仍須自行檢查戒律、風險報酬與停損距離。</span>
             </div>
             <div className="text-muted-foreground/80">
-              本表保留紀錄是為了：(1) 點代號開走圖時鎖定型態 chip+頸線+目標價（標「鎖定」不跳動）；(2) 一鍵進場帶入持倉的 entryPattern 凍結。
+              本表用途：(1) 鎖定訊號觸發日的型態、頸線與測量目標；(2)「記錄買入」只會開啟持倉表單，不會送出券商委託。
             </div>
           </div>
           {/* 排序選項列 */}
@@ -280,27 +280,27 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
                     </th>
                     <th onClick={() => toggleSort('triggerPrice')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
-                        title="型態確認=突破時的型態頸線價；V 反轉=反彈起點 close。點擊排序">
-                      鎖定價{sortIndicator('triggerPrice')}
+                        title="不同訊號的基準不同：N＝頸線；F＝V 反轉訊號成立時的收盤價。不是統一的買進價或停損價。點擊排序">
+                      訊號基準{sortIndicator('triggerPrice')}
                     </th>
                     <th onClick={() => toggleSort('currentClose')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
-                        title="現價（每日 cron 維護的最近 close）+ 相對鎖定價的漲跌幅。點擊排序">
-                      現價{sortIndicator('currentClose')}
+                        title="每日資料維護的最近收盤，不是盤中即時報價；旁邊百分比為相對訊號基準的變化。點擊排序">
+                      最近收盤{sortIndicator('currentClose')}
                     </th>
                     <th onClick={() => toggleSort('trust.upside')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
-                        title="目標價及爬升空間（從現價算起，反映「現在進場到目標還能賺多少」）。點擊按爬升空間排序">
-                      目標價{sortIndicator('trust.upside')}
+                        title="型態突破後的等幅測量目標，以及相對最近收盤的理論距離；不是預期報酬或保證價。點擊排序">
+                      測量目標{sortIndicator('trust.upside')}
                     </th>
                     <th onClick={() => toggleSort('trust.achievement')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
                         title="舊書《抓住飆股》附錄的型態達標統計，不是 Rockstock 回測勝率。點擊排序">
-                      舊書達標率{sortIndicator('trust.achievement')}
+                      舊書統計{sortIndicator('trust.achievement')}
                     </th>
                     <th onClick={() => toggleSort('trust.stage')}
                         className="text-center py-1.5 px-2 cursor-pointer hover:text-foreground select-none"
-                        title="已觸發 / 已買進 / 已撤銷 / 手動移除。結構失效不顯示（型態已死直接濾掉）。點擊排序">
+                        title="已觸發 / 已買進 / 已撤銷 / 手動移除。訊號失效紀錄不顯示。點擊排序">
                       階段{sortIndicator('trust.stage')}
                     </th>
                     <th onClick={() => toggleSort('triggeredDate')}
@@ -361,13 +361,13 @@ function LockWatchTableRow({
   const canRemove =
     record.currentStage === 'observation' || record.currentStage === 'entry-signal';
   const symbolBare = record.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-  // Phase D：用現價算到目標價的爬升空間（從現價買進到目標還能賺多少）
+  // Phase D：用最近收盤計算到測量目標的理論距離（不是即時報酬預測）
   const refPrice = record.currentClose ?? record.triggerPrice;
   const upsidePct =
     record.patternTargetPrice != null && refPrice > 0
       ? ((record.patternTargetPrice - refPrice) / refPrice) * 100
       : null;
-  // 現價相對鎖定價的漲幅（看現在已經漲多少）
+  // 最近收盤相對訊號基準的變化
   const closeVsTriggerPct =
     record.currentClose != null && record.triggerPrice > 0
       ? ((record.currentClose - record.triggerPrice) / record.triggerPrice) * 100
@@ -401,16 +401,24 @@ function LockWatchTableRow({
         {name || '—'}
       </td>
       <td className="whitespace-nowrap py-1.5 px-2 text-muted-foreground">{patternName ?? '—'}</td>
-      <td className="whitespace-nowrap py-1.5 px-2 text-center font-mono tabular-nums">
-        {record.triggerPrice.toFixed(2)}
+      <td
+        className="whitespace-nowrap py-1.5 px-2 text-center font-mono tabular-nums"
+        title={record.triggerSignal === 'N'
+          ? `N 型態頸線 ${record.triggerPrice.toFixed(2)}；真突破門檻 ${(record.triggerPrice * 1.03).toFixed(2)}`
+          : `F V 反轉訊號成立收盤 ${record.triggerPrice.toFixed(2)}；結構失效看 V 底，不看此價`}
+      >
+        <div>{record.triggerPrice.toFixed(2)}</div>
+        <div className="text-[9px] font-sans text-muted-foreground/60">
+          {record.triggerSignal === 'N' ? '頸線' : '成立收盤'}
+        </div>
       </td>
       {/* Phase D：現價（每日 cron 維護的最近 close） */}
       <td
         className="whitespace-nowrap py-1.5 px-2 text-center font-mono tabular-nums"
         title={
           record.currentClose != null
-            ? `最近一次更新時 close = ${record.currentClose.toFixed(2)}（每日 cron 自動維護）`
-            : '尚未有 cron update，現價未維護'
+            ? `最近一次更新的日 K 收盤 = ${record.currentClose.toFixed(2)}；不是盤中即時報價`
+            : '尚未有每日更新，最近收盤未維護'
         }
       >
         {record.currentClose != null ? (
@@ -426,12 +434,12 @@ function LockWatchTableRow({
           <span className="text-muted-foreground/40">—</span>
         )}
       </td>
-      {/* 目標價 + 爬升空間 %（Phase D：基準改為現價，反映「現在進場到目標還能賺多少」） */}
+      {/* 測量目標 + 理論距離（以最近收盤計算，不是報酬承諾） */}
       <td
         className="whitespace-nowrap py-1.5 px-2 text-center font-mono tabular-nums text-emerald-400/80"
         title={
           upsidePct != null
-            ? `型態目標價 ${record.patternTargetPrice!.toFixed(2)}（從現價 ${refPrice.toFixed(2)} 爬升 ${upsidePct >= 0 ? '+' : ''}${upsidePct.toFixed(1)}%）`
+            ? `突破後型態測量目標 ${record.patternTargetPrice!.toFixed(2)}；相對最近收盤 ${refPrice.toFixed(2)} 的理論距離 ${upsidePct >= 0 ? '+' : ''}${upsidePct.toFixed(1)}%，不代表預期報酬`
             : undefined
         }
       >
@@ -470,10 +478,11 @@ function LockWatchTableRow({
               onClick={() => {
                 // 帶上鎖股的型態 + 頸線 + 目標價 + 結構失效價 → /portfolio 寫入 holding.entryPattern
                 // 議題 C2：避免 Step 5 停利目標每日重算跳動
+                const entryReferencePrice = record.currentClose ?? record.triggerPrice;
                 const ep = new URLSearchParams({
                   prefill: symbolBare,
                   trigger: record.triggerSignal,
-                  price: String(record.triggerPrice),
+                  price: String(entryReferencePrice),
                 });
                 if (record.patternType) ep.set('patternType', record.patternType);
                 // N 訊號：triggerPrice = 頸線價（書本撤銷判定基準）
@@ -484,9 +493,9 @@ function LockWatchTableRow({
                 window.open(`/portfolio?${ep.toString()}`, '_self');
               }}
               className="shrink-0 px-2 py-0.5 rounded border border-emerald-700/50 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 font-bold"
-              title={`進場：跳到持倉表單，自動填入 ${sig.name} 訊號 + 觸發價 ${record.triggerPrice.toFixed(2)}`}
+              title={`開啟持倉表單，預填最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}（可修改）；不會送出券商委託`}
             >
-              進場
+              記錄買入
             </button>
           ) : <span className="w-[42px]" />}
           {/* 自選 toggle — 加入/移除自選股；不可動的記錄佔位保持等寬 */}
@@ -502,10 +511,10 @@ function LockWatchTableRow({
             ) : (
               <button
                 onClick={() =>
-                  useWatchlistStore.getState().add(record.symbol, name || record.symbol, record.triggerPrice)
+                  useWatchlistStore.getState().add(record.symbol, name || record.symbol, record.currentClose ?? record.triggerPrice)
                 }
                 className="shrink-0 px-2 py-0.5 rounded border border-amber-700/50 text-amber-400 hover:text-amber-300 hover:bg-amber-900/30 font-bold"
-                title={`加入自選股（${symbolBare} 觸發價 ${record.triggerPrice.toFixed(2)}）`}
+                title={`加入自選股（${symbolBare}，參考最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}）`}
               >
                 自選
               </button>

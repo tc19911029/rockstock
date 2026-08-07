@@ -961,7 +961,7 @@ function Reasons({
                     <div className="flex items-baseline justify-between">
                       <span className="text-indigo-300 font-bold">{getPatternDisplayName(h.patternType)}</span>
                       {h.achievementRate != null && (
-                        <span className="text-amber-300">舊書達標率 {(h.achievementRate * 100).toFixed(0)}%</span>
+                        <span className="text-amber-300" title="舊書附錄的歷史達標統計，不是本站回測勝率">舊書達標統計 {(h.achievementRate * 100).toFixed(0)}%</span>
                       )}
                     </div>
                     <div className="flex items-baseline justify-between text-muted-foreground">
@@ -969,7 +969,7 @@ function Reasons({
                       <span className="font-mono">{h.necklinePrice.toFixed(2)}</span>
                     </div>
                     <div className="flex items-baseline justify-between text-emerald-400">
-                      <span>目標價</span>
+                      <span>突破後測量目標</span>
                       <span className="font-mono">
                         {h.patternTargetPrice.toFixed(2)} ({((h.patternTargetPrice - todayClose) / todayClose * 100).toFixed(1)}%)
                       </span>
@@ -999,7 +999,7 @@ function Reasons({
                 <div className="flex items-baseline justify-between gap-2 mb-1">
                   <span className="text-xs font-bold text-rose-300">{getPatternDisplayName(topPatternHit.patternType)}</span>
                   {topPatternHit.achievementRate != null && (
-                    <span className="text-[11px] text-amber-300">舊書達標率 {(topPatternHit.achievementRate * 100).toFixed(0)}%</span>
+                    <span className="text-[11px] text-amber-300" title="舊書附錄的歷史達標統計，不是本站回測勝率">舊書達標統計 {(topPatternHit.achievementRate * 100).toFixed(0)}%</span>
                   )}
                 </div>
                 <div className="space-y-0.5 text-[11px]">
@@ -1011,7 +1011,7 @@ function Reasons({
                   )}
                   {topPatternHit.patternTargetPrice != null && (
                     <div className="flex items-baseline justify-between text-rose-300">
-                      <span>目標價（下跌）</span>
+                      <span>跌破後測量目標</span>
                       <span className="font-mono">
                         {topPatternHit.patternTargetPrice.toFixed(2)} ({((topPatternHit.patternTargetPrice - todayClose) / todayClose * 100).toFixed(1)}%)
                       </span>
