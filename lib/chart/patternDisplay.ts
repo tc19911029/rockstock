@@ -83,9 +83,9 @@ export function getPivotLabels(patternType: string, pivots: Pivot[]): string[] {
   }
 }
 
-/** 圖上所有頭／底／型態腳位統一顯示到小數 2 位，避免只能看到名稱、無法驗算。 */
-export function formatPivotPrice(price: number): string {
-  return Number.isFinite(price) ? price.toFixed(2) : '—';
+/** 一般轉折點在 K 棒旁直接顯示的短標籤。 */
+export function getPivotMarkerLabel(pivot: Pivot): '頭' | '底' {
+  return pivot.type === 'high' ? '頭' : '底';
 }
 
 /**

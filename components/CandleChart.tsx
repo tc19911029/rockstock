@@ -22,8 +22,8 @@ import {
   shouldHideAggregateSignalLabels,
 } from '@/lib/chart/markerDisplay';
 import {
-  formatPivotPrice,
   getPatternDisplayName,
+  getPivotMarkerLabel,
   getPivotLabels,
   resolvePatternPivotSnapshots,
 } from '@/lib/chart/patternDisplay';
@@ -1011,7 +1011,7 @@ export default function CandleChart({
   }, [stopLossPrice]);
 
   // ── Chart markers ─────────────────────────────────────────────────────────
-  // 頭底圖上與核對清單共用同一批 pivot，避免「圖上有標、清單卻查不到數值」。
+  // 頭底標記共用同一批已確認 pivot；不顯示進行中的 provisional 轉折。
   const confirmedPivots = useMemo(
     () => showPivots && candles.length >= 20
       ? findPivots(candles, candles.length - 1, 30)
@@ -1057,9 +1057,8 @@ export default function CandleChart({
           position: p.type === 'high' ? 'aboveBar' : 'belowBar',
           shape: p.type === 'high' ? 'arrowDown' : 'arrowUp',
           color: p.type === 'high' ? '#ec4899' : '#06b6d4',
-          // 箭頭方向與顏色已足以辨識頭／底；文字會直接蓋住 K 棒與相鄰均線。
-          // 精確名稱、日期、價位改由左上「轉折數值」按需展開。
-          text: '',
+          // 直接標示中文，不要求使用者記住顏色或箭頭方向。
+          text: getPivotMarkerLabel(p),
           size: 1,
         });
       }
@@ -1333,40 +1332,6 @@ export default function CandleChart({
     : candles.length - 1;
   const prevForLegend = candles[idxForLegend - 1];
 
-  // 頭／底與型態腳位在圖上只負責定位；日期和價位收進可展開清單供驗算。
-  // 這批資料必須和 canvas 共用 confirmedPivots，否則使用者會遇到圖文對不起來。
-  const pivotValueLegend = useMemo(() => {
-    return confirmedPivots.map(pivot => ({
-      ...pivot,
-      date: candles[pivot.index]?.date?.replace(/\*$/, '') ?? '',
-    }));
-  }, [confirmedPivots, candles]);
-
-  const patternPivotLegend = useMemo(() => {
-    if (!showPattern || !activePattern || activePattern.pivots.length === 0) return [];
-    const labels = getPivotLabels(activePattern.patternType, activePattern.pivots);
-    return activePattern.pivots.map((pivot, index) => ({
-      ...pivot,
-      label: labels[index] ?? `P${index + 1}`,
-      date: candles[pivot.index]?.date?.replace(/\*$/, '') ?? '',
-    }));
-  }, [showPattern, activePattern, candles]);
-
-  // MA5 穿越交界日依課程規則同時納入前、後兩段；大區間 K 因此可能同日既是頭也是底。
-  // UI 明確標出，避免使用者誤以為演算法重複寫入同一轉折。
-  const dualPivotDates = useMemo(() => {
-    const typesByDate = new Map<string, Set<Pivot['type']>>();
-    for (const pivot of pivotValueLegend) {
-      if (!pivot.date) continue;
-      const types = typesByDate.get(pivot.date) ?? new Set<Pivot['type']>();
-      types.add(pivot.type);
-      typesByDate.set(pivot.date, types);
-    }
-    return new Set(
-      [...typesByDate.entries()].filter(([, types]) => types.size > 1).map(([date]) => date),
-    );
-  }, [pivotValueLegend]);
-
   // 信號（右上獨立）+ 形態 chip（左側 row 2）預先計算
   const PRIORITY: Record<string, number> = { SELL: 4, BUY: 3, REDUCE: 2, ADD: 1 };
   const filteredSignals = signals.filter(s => s.type !== 'WATCH');
@@ -1375,8 +1340,6 @@ export default function CandleChart({
     : null;
   const showPatternChip = (showNeckline || showPattern) && activePattern;
   const hasInfoRow = showPatternChip;  // 信號移到右上，不算左側 row 2
-  const hasStructureValues = pivotValueLegend.length > 0 || patternPivotLegend.length > 0;
-
   /**
    * 形態狀態必須遵守生命週期：形成 → 真突破 → 回測／失效。
    * 尚未曾真突破的型態不能只因位於頸線下方就被倒推為「結構失效」。
@@ -1525,94 +1488,6 @@ export default function CandleChart({
             <span style={{ color: 'rgba(34,197,94,0.95)' }}>−3% {yangEmaLegend.dn3.toFixed(2)}</span>
             <span style={{ color: '#3B82F6' }}>EMA60 {yangEmaLegend.e60.toFixed(2)}{yangEmaLegend.a60}</span>
           </div>
-        )}
-
-        {/*
-          結構數值採漸進揭露：預設只留一顆小型圖例，不再用多排數字壓住 K 棒。
-          使用者需要驗算時才展開完整日期／價位；原生 details 同時支援鍵盤與觸控。
-        */}
-        {hasStructureValues && (
-          <details
-            data-testid="structure-value-disclosure"
-            className="group relative w-fit max-w-full pointer-events-auto font-mono"
-          >
-            <summary
-              className="flex min-h-6 cursor-pointer list-none select-none items-center gap-1.5 rounded border border-border/70 bg-background/90 px-2 py-0.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
-              aria-label={`展開轉折與型態腳位數值，共 ${pivotValueLegend.length + patternPivotLegend.length} 筆`}
-            >
-              {pivotValueLegend.length > 0 && (
-                <>
-                  <span className="text-pink-300">▼頭</span>
-                  <span className="text-cyan-300">▲底</span>
-                </>
-              )}
-              <span className="text-foreground/80">核對數值</span>
-              <span className="rounded bg-secondary px-1 tabular-nums">
-                {pivotValueLegend.length + patternPivotLegend.length}
-              </span>
-              <span aria-hidden="true" className="transition-transform group-open:rotate-180">⌄</span>
-            </summary>
-
-            <div className="absolute left-0 top-full z-30 mt-1 w-[min(19rem,calc(100vw-2rem))] overflow-hidden rounded-md border border-border bg-background/95 text-[10px] text-foreground shadow-xl backdrop-blur-md">
-              {pivotValueLegend.length > 0 && (
-                <section aria-label="最近確認轉折數值">
-                  <div className="sticky top-0 flex items-center justify-between border-b border-border/70 bg-secondary/95 px-2.5 py-1.5 font-sans">
-                    <span className="font-semibold">最近確認轉折</span>
-                    <span className="text-muted-foreground">共 {pivotValueLegend.length} 點</span>
-                  </div>
-                  <div
-                    data-testid="pivot-value-legend"
-                    className="grid max-h-44 grid-cols-2 gap-px overflow-y-auto bg-border/40 p-px"
-                  >
-                    {pivotValueLegend.map(pivot => (
-                      <div
-                        key={`${pivot.type}-${pivot.index}`}
-                        className="grid grid-cols-[2.8rem_1.4rem_1fr] items-center gap-1 bg-background/95 px-2 py-1"
-                        title={`${pivot.date} 第 ${pivot.index + 1} 根 K 棒`}
-                      >
-                        <time className="text-muted-foreground" dateTime={pivot.date}>
-                          {pivot.date.slice(5)}{dualPivotDates.has(pivot.date) ? '＊' : ''}
-                        </time>
-                        <span className={pivot.type === 'high' ? 'text-pink-300' : 'text-cyan-300'}>
-                          {pivot.type === 'high' ? '▼頭' : '▲底'}
-                        </span>
-                        <span className="text-right tabular-nums">{formatPivotPrice(pivot.price)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {dualPivotDates.size > 0 && (
-                    <p className="border-t border-border/70 bg-amber-950/35 px-2.5 py-1.5 font-sans leading-relaxed text-amber-200/85">
-                      ＊同日頭底是 MA5 穿越交界 K：依課程規則同時納入前、後兩段，並非重複資料。
-                    </p>
-                  )}
-                </section>
-              )}
-
-              {patternPivotLegend.length > 0 && (
-                <section data-testid="pattern-pivot-values" aria-label="目前型態腳位數值" className="border-t border-border/70">
-                  <div className="flex items-center justify-between border-b border-border/70 bg-fuchsia-950/80 px-2.5 py-1.5 font-sans text-fuchsia-100">
-                    <span className="font-semibold">型態腳位</span>
-                    <span className="opacity-70">{getPatternDisplayName(activePattern?.patternType ?? '')}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-px bg-border/40 p-px">
-                    {patternPivotLegend.map((pivot, index) => (
-                      <div
-                        key={`${pivot.label}-${pivot.index}-${index}`}
-                        className="grid grid-cols-[2.8rem_2rem_1fr] items-center gap-1 bg-background/95 px-2 py-1"
-                        title={`${pivot.date} 第 ${pivot.index + 1} 根 K 棒`}
-                      >
-                        <time className="text-muted-foreground" dateTime={pivot.date}>
-                          {pivot.date.slice(5)}
-                        </time>
-                        <span className="text-fuchsia-200">{pivot.label}</span>
-                        <span className="text-right tabular-nums">{formatPivotPrice(pivot.price)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </div>
-          </details>
         )}
 
         {/* Row 2: 圖表型態來源 + 生命週期 + 關鍵價位（信號 badge 在右上獨立）*/}
