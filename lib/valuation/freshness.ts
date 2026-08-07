@@ -3,6 +3,8 @@ export interface CurrentFundamentalSnapshot {
   epsYtd?: number | null;
   revenueLatest?: number | null;
   selfReportedMonthlyActuals?: Array<{ period: string; eps: number }>;
+  sharesOutstanding?: number | null;
+  dilutionSignature?: string | null;
   periods?: {
     financialReportDate?: string | null;
     revenueMonth?: string | null;
@@ -15,6 +17,8 @@ export interface ValuationPeriodSnapshot {
     financialReportPeriod?: string;
     monthlyRevenuePeriod?: string;
     selfReportedPeriod?: string;
+    sharesOutstanding?: number;
+    dilutionSignature?: string;
   };
   monthlyEpsEstimate?: { month: string };
   monthlyEpsActuals?: Array<{ period: string }>;
@@ -25,9 +29,12 @@ export interface ValuationFreshness {
   hasNewFinancialReport: boolean;
   hasNewMonthlyRevenue: boolean;
   hasNewSelfReportedEps: boolean;
+  hasShareCountChange: boolean;
+  hasNewDilutionEvent: boolean;
   financialReportDate: string | null;
   monthlyRevenuePeriod: string | null;
   selfReportedPeriod: string | null;
+  sharesOutstanding: number | null;
 }
 
 function monthKey(value: string | null | undefined): string | null {
@@ -87,13 +94,33 @@ export function detectValuationFreshness(
     ),
   );
 
+  const sharesOutstanding = current?.sharesOutstanding ?? null;
+  const savedShares = valuation.dataAsOf?.sharesOutstanding;
+  // 舊估值沒留下股數時，只要目前能取得股數就保守視為需要重算；避免除權配股後仍沿用舊 EPS。
+  const hasShareCountChange = Boolean(
+    sharesOutstanding != null && sharesOutstanding > 0 && (
+      savedShares == null || Math.abs(sharesOutstanding - savedShares) >= 1
+    ),
+  );
+  const dilutionSignature = current?.dilutionSignature ?? null;
+  const savedDilutionSignature = valuation.dataAsOf?.dilutionSignature;
+  const hasNewDilutionEvent = Boolean(
+    dilutionSignature && (
+      savedDilutionSignature == null || dilutionSignature !== savedDilutionSignature
+    ),
+  );
+
   return {
-    hasNewData: hasNewFinancialReport || hasNewMonthlyRevenue || hasNewSelfReportedEps,
+    hasNewData: hasNewFinancialReport || hasNewMonthlyRevenue || hasNewSelfReportedEps
+      || hasShareCountChange || hasNewDilutionEvent,
     hasNewFinancialReport,
     hasNewMonthlyRevenue,
     hasNewSelfReportedEps,
+    hasShareCountChange,
+    hasNewDilutionEvent,
     financialReportDate,
     monthlyRevenuePeriod,
     selfReportedPeriod,
+    sharesOutstanding,
   };
 }

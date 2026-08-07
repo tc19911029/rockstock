@@ -77,4 +77,29 @@ describe('detectValuationFreshness', () => {
     expect(result.hasNewSelfReportedEps).toBe(false);
     expect(result.hasNewData).toBe(false);
   });
+
+  it('invalidates after a stock dividend changes outstanding shares', () => {
+    const result = detectValuationFreshness(
+      { dataAsOf: { financialReportPeriod: '2026Q1', monthlyRevenuePeriod: '2026-07', sharesOutstanding: 92_517_270 } },
+      '2026-08-01',
+      {
+        periods: { financialReportDate: '2026-03-31', revenueMonth: '2026-07-01' },
+        sharesOutstanding: 101_769_004,
+      },
+    );
+
+    expect(result.hasShareCountChange).toBe(true);
+    expect(result.hasNewData).toBe(true);
+  });
+
+  it('invalidates when a pending dilution announcement appears', () => {
+    const result = detectValuationFreshness(
+      { dataAsOf: { dilutionSignature: '' } },
+      '2026-08-01',
+      { dilutionSignature: 'private_placement|pending|68053697|2026-12-31|2026-03-07|source' },
+    );
+
+    expect(result.hasNewDilutionEvent).toBe(true);
+    expect(result.hasNewData).toBe(true);
+  });
 });

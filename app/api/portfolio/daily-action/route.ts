@@ -14,7 +14,7 @@
 
 import { NextRequest } from 'next/server';
 import { apiError, apiOk } from '@/lib/api/response';
-import { listOpenHoldings } from '@/lib/agents/portfolio/storage';
+import { loadAllHoldings } from '@/lib/agents/portfolio/storage';
 import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
   try {
     const today = todayYmdTaipei(new Date());
     const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
-    const holdings = await listOpenHoldings(profileId);
+    const holdings = (await loadAllHoldings(profileId)).filter(h => h.status === 'open');
     // 2026-06-14：擴成台股+陸股皆出停損檢查（賠少 P0③ CN 補齊）。evaluateHolding 市場無關。
     const activeHoldings = holdings.filter(h => h.market === 'TW' || h.market === 'CN');
 

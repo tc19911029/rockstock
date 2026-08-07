@@ -591,6 +591,22 @@ export interface FundamentalGroundTruth {
       cumulativeEps: number | null;
       sourceUrl: string;
     };
+    /** 正式季報前的公司業績預告／快報；不得混入已審閱 TTM。 */
+    earningsGuidance?: Array<{
+      period: string;
+      status: 'forecast' | 'preliminary' | 'actual';
+      revenueMin?: number | null;
+      revenueMax?: number | null;
+      netIncomeMin?: number | null;
+      netIncomeMax?: number | null;
+      normalizedNetIncomeMin?: number | null;
+      normalizedNetIncomeMax?: number | null;
+      epsMin?: number | null;
+      epsMax?: number | null;
+      announcedAt: string;
+      sourceUrl: string;
+      note: string;
+    }>;
     /** 流通在外股數 / 總股本 */
     sharesOutstanding: number | null;
     /** 每股淨值 / 每股淨資產 */
@@ -608,6 +624,8 @@ export interface FundamentalGroundTruth {
     dilutionEvents: Array<{
       type: 'gdr' | 'rights_issue' | 'convertible_bond' | 'employee_option' | 'private_placement';
       newShares: number;
+      status?: 'pending' | 'approved' | 'completed' | 'cancelled';
+      potentialDilutionPct?: number;
       expectedDate?: string;
       priceIfKnown?: number;
       sourceUrl?: string;
@@ -687,6 +705,8 @@ export interface FundamentalAnswer {
       financialReportPeriod?: string;
       monthlyRevenuePeriod?: string;
       selfReportedPeriod?: string;
+      sharesOutstanding?: number;
+      dilutionSignature?: string;
     };
     /** 已納入情境計算的單月公司自結實績；不得再以 monthlyEpsEstimate 覆蓋同月份。 */
     monthlyEpsActuals?: Array<{

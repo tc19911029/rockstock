@@ -33,7 +33,7 @@ function ValuationScenarios({
   caveat?: string;
   latestFundamentals?: RawFundamentals | null;
 }) {
-  const { ttmPe, monthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough } = valuation;
+  const { ttmPe, monthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough, dilution, riskFlags } = valuation;
   const latestSelfReported = monthlyEpsActuals?.[0] ?? latestFundamentals?.selfReportedMonthlyActuals?.[0];
   const modelSuperseded = Boolean(
     monthlyEpsEstimate && latestSelfReported && monthlyEpsEstimate.month === latestSelfReported.period,
@@ -119,6 +119,12 @@ function ValuationScenarios({
                   {latestFundamentals.selfReportedMonthlyActuals[0].eps.toFixed(2)} 元
                 </div>
               )}
+              {freshness.hasShareCountChange && (
+                <div>流通股數已變更為 {freshness.sharesOutstanding?.toLocaleString()} 股，EPS／合理價需按新股數重算。</div>
+              )}
+              {freshness.hasNewDilutionEvent && (
+                <div>新增或更新稀釋事件（增資／GDR／私募／可轉債），需重算完全稀釋 EPS。</div>
+              )}
             </div>
             <div className="mt-1 pl-4">請重新估算；舊情境只保留作歷史快照，不能當作目前合理價。</div>
           </div>
@@ -186,6 +192,29 @@ function ValuationScenarios({
         </div>
 
         <PeerComparisonBlock comparison={peerComparison} />
+
+        {dilution && (
+          <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px]">
+            <div className="flex items-center justify-between gap-2 font-semibold text-amber-800 dark:text-amber-200">
+              <span>股本／稀釋已納入</span>
+              <span className="font-mono">{dilution.ratio > 0 ? `${(dilution.ratio * 100).toFixed(1)}%` : '股數待定'}</span>
+            </div>
+            {dilution.originalShares > 0 && dilution.newShares > 0 && (
+              <div className="mt-1 text-foreground/70">{dilution.originalShares.toLocaleString()} → {dilution.newShares.toLocaleString()} 股</div>
+            )}
+            {dilution.events?.map((event, index) => (
+              <div key={`${event.type}-${index}`} className="mt-1 leading-snug text-foreground/70">
+                {event.description ?? `${event.type} 新增 ${event.newShares.toLocaleString()} 股`}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {riskFlags?.length ? (
+          <div className="flex flex-wrap gap-1">
+            {riskFlags.map(flag => <span key={flag} className="rounded border border-rose-500/25 bg-rose-500/10 px-1.5 py-0.5 text-[9px] text-rose-700 dark:text-rose-200">{flag}</span>)}
+          </div>
+        ) : null}
 
         {/* 估值基準揭露：合理價/EPS 為基準日分析；價格衍生數字依即時價重算 */}
         {live && basePriceAtVal && (
@@ -402,8 +431,8 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
             monthlyEpsEstimate: standaloneValuation.monthlyEpsEstimate,
             monthlyEpsActuals: standaloneValuation.monthlyEpsActuals,
             scenarios: standaloneValuation.scenarios,
-            dilution: null,
-            riskFlags: [],
+            dilution: standaloneValuation.dilution ?? null,
+            riskFlags: standaloneValuation.riskFlags ?? [],
             conclusion: 'fair',
             reasoning: '',
           }}
@@ -565,6 +594,8 @@ interface RawFundamentals {
     audited: false;
     note: string;
   }>;
+  sharesOutstanding?: number | null;
+  dilutionSignature?: string | null;
   periods?: {
     financialReportDate?: string | null;
     revenueMonth?: string | null;
@@ -624,6 +655,9 @@ interface ValuationOnly {
   monthlyEpsEstimate?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsEstimate'];
   monthlyEpsActuals?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsActuals'];
   scenarios?: NonNullable<FundamentalAnswer['valuation']>['scenarios'];
+  dilution?: NonNullable<FundamentalAnswer['valuation']>['dilution'];
+  riskFlags?: NonNullable<FundamentalAnswer['valuation']>['riskFlags'];
+  conclusion?: NonNullable<FundamentalAnswer['valuation']>['conclusion'];
 }
 
 function toAgentValuation(valuation: ValuationOnly | null): NonNullable<FundamentalAnswer['valuation']> | null {
@@ -639,9 +673,9 @@ function toAgentValuation(valuation: ValuationOnly | null): NonNullable<Fundamen
     monthlyEpsEstimate: valuation.monthlyEpsEstimate,
     monthlyEpsActuals: valuation.monthlyEpsActuals,
     scenarios: valuation.scenarios,
-    dilution: null,
-    riskFlags: [],
-    conclusion: 'fair',
+    dilution: valuation.dilution ?? null,
+    riskFlags: valuation.riskFlags ?? [],
+    conclusion: valuation.conclusion ?? 'fair',
     reasoning: valuation.reasoning ?? '',
   };
 }

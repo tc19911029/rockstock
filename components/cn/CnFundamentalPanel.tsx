@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
 
 interface Fin {
   reportDate: string; revenue: number | null; revenueYoY: number | null;
@@ -144,6 +145,11 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
             </table>
           </div>
         ) : <div className="text-muted-foreground">暂无財報</div>}
+      </section>
+
+      {/* 陸股也共用單檔估值工作流：業績預告、同業 PE、稀釋與三情境不可只留在 API。 */}
+      <section className="border-t border-border/40 pt-2">
+        <FundamentalSidebarPanel symbol={symbol} currentPrice={price ?? undefined} />
       </section>
 
       <div className="text-center text-[9px] text-muted-foreground/60 mt-1">

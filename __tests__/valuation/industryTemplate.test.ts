@@ -33,6 +33,15 @@ describe('valuation/industryTemplate', () => {
     expect(detectIndustryTemplate('半導體業', '2330.TW')).toBe('high_growth_asic');
   });
 
+  it('routes the current TW/CN holdings to their business-model templates', () => {
+    expect(detectIndustryTemplate('半導體業', '3006.TW')).toBe('cyclical');
+    expect(detectIndustryTemplate('半導體業', '6770.TW')).toBe('stable_mature');
+    expect(detectIndustryTemplate('光電業', '3081.TWO')).toBe('hype_extreme_growth');
+    expect(detectIndustryTemplate(undefined, '000988.SZ')).toBe('high_growth_asic');
+    expect(detectIndustryTemplate(undefined, '001309.SZ')).toBe('cyclical');
+    expect(detectIndustryTemplate(undefined, '603986.SS')).toBe('cyclical');
+  });
+
   it('detects cyclical', () => {
     expect(detectIndustryTemplate('面板')).toBe('cyclical');
     expect(detectIndustryTemplate('航運業')).toBe('cyclical');

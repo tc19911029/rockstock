@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { getMonthlyRevenue } from '@/lib/datasource/FinMindClient';
+import { getMonthlyRevenue, getSharesIssued } from '@/lib/datasource/FinMindClient';
 import { getFundamentalsWithFallback } from '@/lib/datasource/FundamentalsFallbackChain';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { isIndexSymbol } from '@/lib/utils/symbols';
 import { getMonthlyAny, getQuarterlyAny } from '@/lib/datasource/TwseOpenApiProvider';
 import { getTwSelfReportedMonthlyActuals } from '@/lib/datasource/TwSelfReportedEps';
+import { dilutionEventSignature, readDilutionEvents } from '@/lib/valuation/corporateActions';
+import { loadFundamentalSupplement, mergeSelfReportedActuals } from '@/lib/valuation/supplementalFundamentals';
 
 const querySchema = z.object({
   mode: z.enum(['full', 'revenue']).default('full'),
@@ -32,11 +34,22 @@ export async function GET(
       return apiOk({ data });
     }
     // 多源 fallback：FinMind 失敗自動換 TWSE
-    const [result, officialQuarter, officialMonth, selfReportedMonthlyActuals] = await Promise.all([
+    const [
+      result,
+      officialQuarter,
+      officialMonth,
+      fetchedSelfReportedMonthlyActuals,
+      sharesOutstanding,
+      dilutionEvents,
+      supplement,
+    ] = await Promise.all([
       getFundamentalsWithFallback(stockId),
       getQuarterlyAny(stockId),
       getMonthlyAny(stockId),
       getTwSelfReportedMonthlyActuals(stockId).catch(() => []),
+      getSharesIssued(stockId).catch(() => null),
+      readDilutionEvents(stockId).catch(() => []),
+      loadFundamentalSupplement(stockId).catch(() => null),
     ]);
     const { sourceUsed, sourceAttempts, ...data } = result;
     const officialFinancialReportDate = officialQuarter && officialQuarter.rocYear > 0 && officialQuarter.season >= 1
@@ -47,7 +60,13 @@ export async function GET(
       officialFinancialReportDate
       && (!finmindFinancialReportDate || officialFinancialReportDate >= finmindFinancialReportDate),
     );
-    const financialReportDate = useOfficialQuarter ? officialFinancialReportDate : finmindFinancialReportDate;
+    const supplementalQuarter = supplement?.quarterlyActuals
+      ?.slice()
+      .sort((a, b) => b.quarter.localeCompare(a.quarter))[0];
+    const baseFinancialReportDate = useOfficialQuarter ? officialFinancialReportDate : finmindFinancialReportDate;
+    const financialReportDate = supplementalQuarter?.quarter && (
+      !baseFinancialReportDate || supplementalQuarter.quarter >= baseFinancialReportDate
+    ) ? supplementalQuarter.quarter : baseFinancialReportDate;
     const revenueYearMonth = officialMonth?.yearMonth.match(/^(\d{3})(\d{2})$/);
     const officialRevenueMonth = revenueYearMonth
       ? `${Number(revenueYearMonth[1]) + 1911}-${revenueYearMonth[2]}-01`
@@ -58,15 +77,33 @@ export async function GET(
       && (!finmindRevenueMonth || officialRevenueMonth >= finmindRevenueMonth),
     );
     const revenueMonth = useOfficialMonth ? officialRevenueMonth : finmindRevenueMonth;
+    const selfReportedMonthlyActuals = mergeSelfReportedActuals(
+      fetchedSelfReportedMonthlyActuals,
+      supplement?.selfReportedMonthlyActuals,
+    );
+    const effectiveShares = supplement?.sharesOutstanding ?? sharesOutstanding;
+    const epsYtd = supplement?.latestCumulativeActual?.cumulativeEps
+      ?? (useOfficialQuarter ? officialQuarter?.eps ?? null : null);
+    const asPercent = (value: number | null | undefined) => value == null
+      ? undefined
+      : Math.abs(value) <= 1 ? value * 100 : value;
     const enrichedData = {
       ...data,
+      ...(supplementalQuarter ? {
+        eps: supplementalQuarter.eps ?? data.eps,
+        netMargin: asPercent(supplementalQuarter.netMargin) ?? data.netMargin,
+        grossMargin: asPercent(supplementalQuarter.grossMargin) ?? data.grossMargin,
+      } : {}),
       ...(useOfficialMonth && officialMonth ? {
         revenueLatest: officialMonth.revenue == null ? data.revenueLatest : officialMonth.revenue * 1000,
         revenueMoM: officialMonth.revenueMoM ?? data.revenueMoM,
         revenueYoY: officialMonth.revenueYoY ?? data.revenueYoY,
       } : {}),
-      epsYtd: useOfficialQuarter ? officialQuarter?.eps ?? null : null,
+      epsYtd,
       selfReportedMonthlyActuals,
+      sharesOutstanding: effectiveShares,
+      dilutionEvents,
+      dilutionSignature: dilutionEventSignature(dilutionEvents),
       periods: {
         ...data.periods,
         financialReportDate,

@@ -16,7 +16,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import { loadScanSession } from '@/lib/storage/scanStorage';
 import {
-  listOpenHoldings,
+  loadAllHoldings,
   loadReview,
 } from '@/lib/agents/portfolio/storage';
 import {
@@ -48,10 +48,20 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date } = parsed.data;
 
-  const holdings = await listOpenHoldings();
+  const holdings = (await loadAllHoldings()).filter(h => h.status === 'open');
   if (holdings.length === 0) {
     return apiOk({ message: '無持股需要 review', holdings: 0 });
   }
+
+  // 報價不能依賴「剛好入選 L4」：未入選候選池的持股也必須有現價才能執行停損規則。
+  const quoteRaw = await fetchJSON(internalUrl(
+    `/api/portfolio/quotes?symbols=${encodeURIComponent(holdings.map(h => h.symbol).join(','))}`,
+  )).catch(() => null) as {
+    quotes?: Array<{ symbol: string; price: number }>;
+    data?: { quotes?: Array<{ symbol: string; price: number }> };
+  } | null;
+  const quotes = quoteRaw?.quotes ?? quoteRaw?.data?.quotes ?? [];
+  const normalizedSymbol = (value: string) => value.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   // 對每檔並行拉 context（L4 candidateRow + chip + news）
   const sessionCache = new Map<string, Awaited<ReturnType<typeof loadScanSession>>>();
@@ -65,7 +75,7 @@ export async function POST(req: NextRequest) {
         session = await loadScanSession(market, date, 'long', 'daily');
         sessionCache.set(cacheKey, session);
       }
-      const candidateRow = session?.results.find(r => r.symbol === h.symbol);
+      const candidateRow = session?.results.find(r => normalizedSymbol(r.symbol) === normalizedSymbol(h.symbol));
 
       const [chip, news] = await Promise.all([
         fetchJSON(internalUrl(`/api/chip?symbol=${encodeURIComponent(h.symbol)}`)).catch(() => null),
@@ -74,7 +84,8 @@ export async function POST(req: NextRequest) {
           : null,
       ]);
 
-      const currentPrice = candidateRow?.price ?? null;
+      const directQuote = quotes.find(q => normalizedSymbol(q.symbol) === normalizedSymbol(h.symbol));
+      const currentPrice = directQuote?.price ?? candidateRow?.price ?? null;
 
       return {
         symbol: h.symbol,

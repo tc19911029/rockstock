@@ -29,7 +29,10 @@ export interface MonthlyRevenueRow {
 
 export interface DilutionEvent {
   type: 'gdr' | 'rights_issue' | 'convertible_bond' | 'employee_option' | 'private_placement';
+  /** 尚未確定最終發行數時為 0，但事件仍保留並標示 pending。 */
   newShares: number;
+  status?: 'pending' | 'approved' | 'completed' | 'cancelled';
+  potentialDilutionPct?: number;
   expectedDate?: string;
   priceIfKnown?: number;
   sourceUrl?: string;

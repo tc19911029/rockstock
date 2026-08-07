@@ -62,7 +62,7 @@ describe('FundamentalQuestion schema invariants', () => {
         staticPe: 75.6,           // 4500 / 59.5 (假設去年全年)
         lastYearTotalEps: 59.5,
         dilutionEvents: [
-          { type: 'gdr', newShares: 6000000, expectedDate: '2026-07-01' },
+          { type: 'gdr', newShares: 6000000, status: 'completed', expectedDate: '2026-07-01' },
         ],
         industryTemplate: 'high_growth_asic',
         industryTemplateLabel: '高成長 ASIC / AI 半導體',
@@ -75,6 +75,7 @@ describe('FundamentalQuestion schema invariants', () => {
     };
     expect(v2.valuationInputs?.industryTemplate).toBe('high_growth_asic');
     expect(v2.valuationInputs?.dilutionEvents[0].type).toBe('gdr');
+    expect(v2.valuationInputs?.dilutionEvents[0].status).toBe('completed');
     expect(v2.valuationInputs?.market).toBe('TW');
   });
 
@@ -99,6 +100,10 @@ describe('FundamentalQuestion schema invariants', () => {
         staticPe: 218.74,
         lastYearTotalEps: 2.35,
         dilutionEvents: [],
+        earningsGuidance: [{
+          period: '2026H1', status: 'forecast', netIncomeMin: 6.9e9, netIncomeMax: 6.9e9,
+          announcedAt: '2026-07-10', sourceUrl: 'https://static.cninfo.com.cn/example.pdf', note: '未經審計',
+        }],
         industryTemplate: 'high_growth_asic',
         industryTemplateLabel: '高成長 ASIC / AI 半導體',
         reasonablePeRange: { pessimistic: 40, base: 50, optimistic: 60 },
@@ -112,6 +117,7 @@ describe('FundamentalQuestion schema invariants', () => {
     expect(cn.valuationInputs?.market).toBe('CN');
     expect(cn.valuationInputs?.monthlyRevenueHistory.length).toBe(0);
     expect(cn.valuationInputs?.dynamicPe).toBeCloseTo(61.68, 1);
+    expect(cn.valuationInputs?.earningsGuidance?.[0].period).toBe('2026H1');
   });
 
   it('FundamentalAnswer.valuation is optional (v1 answers still valid)', () => {

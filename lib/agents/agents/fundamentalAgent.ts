@@ -13,8 +13,6 @@
  *   - 給 skill 用來算三情境 + 合理股價 + 稀釋後 EPS
  */
 
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
 import { fetchJSON, internalUrl, bareTicker } from './_fetchHelper';
 import {
   AGENT_SCHEMA_VERSION,
@@ -37,6 +35,12 @@ import { getEastMoneyFundamentals } from '@/lib/datasource/EastMoneyFundamentals
 import { fetchCnFinancials } from '@/lib/datasource/EastMoneyFinancials';
 import { normalizeCnQuarterlyHistory, sumLatestFourQuarterEps } from '@/lib/valuation/cnQuarterly';
 import { getTwSelfReportedMonthlyActuals } from '@/lib/datasource/TwSelfReportedEps';
+import { readDilutionEvents } from '@/lib/valuation/corporateActions';
+import {
+  loadFundamentalSupplement,
+  mergeQuarterlyActuals,
+  mergeSelfReportedActuals,
+} from '@/lib/valuation/supplementalFundamentals';
 import {
   computeTTM,
   computeTTMPe,
@@ -162,7 +166,8 @@ export async function buildValuationInputsTW(
     stockInfo,
     dilution,
     latestCumulative,
-    selfReportedMonthlyActuals,
+    fetchedSelfReportedMonthlyActuals,
+    supplement,
   ] = await Promise.all([
     fetchJSON(internalUrl(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`))
       .catch((e) => { fetchErrors.push(`quote: ${e}`); return null; }),
@@ -178,7 +183,27 @@ export async function buildValuationInputsTW(
       fetchErrors.push(`selfReportedMonthlyActuals: ${e}`);
       return [];
     }),
+    loadFundamentalSupplement(ticker).catch((e) => {
+      fetchErrors.push(`supplementalFundamentals: ${e}`);
+      return null;
+    }),
   ]);
+
+  const quarterlyHistory = mergeQuarterlyActuals(quarterly, supplement?.quarterlyActuals);
+  const selfReportedMonthlyActuals = mergeSelfReportedActuals(
+    fetchedSelfReportedMonthlyActuals,
+    supplement?.selfReportedMonthlyActuals,
+  );
+  const effectiveShares = supplement?.sharesOutstanding ?? shares;
+  const effectiveCumulative = supplement?.latestCumulativeActual ?? (latestCumulative ? {
+    fiscalYear: latestCumulative.rocYear + 1911,
+    quarter: latestCumulative.season,
+    reportedThrough: `${latestCumulative.rocYear + 1911}Q${latestCumulative.season}`,
+    cumulativeRevenue: latestCumulative.revenue == null ? null : latestCumulative.revenue * 1000,
+    cumulativeNetIncome: latestCumulative.netIncome == null ? null : latestCumulative.netIncome * 1000,
+    cumulativeEps: latestCumulative.eps,
+    sourceUrl: 'https://openapi.twse.com.tw/v1/opendata/t187ap14_L',
+  } : undefined);
 
   // 解 quote API 的 apiOk 包裝
   const quote = unwrapApi(quoteRaw) as { close?: number } | null;
@@ -186,7 +211,7 @@ export async function buildValuationInputsTW(
 
   // TTM 計算
   const ttm = computeTTM(
-    quarterly.map((q) => ({
+    quarterlyHistory.map((q) => ({
       quarter: q.quarter,
       revenue: q.revenue ?? 0,
       grossProfit: q.grossProfit ?? undefined,
@@ -199,12 +224,12 @@ export async function buildValuationInputsTW(
   const ttmPe = ttmEps && currentPrice ? computeTTMPe(currentPrice, ttmEps) : null;
 
   // 動態 / 靜態 PE
-  const latestQuarterEps = quarterly[0]?.eps ?? null;
+  const latestQuarterEps = quarterlyHistory[0]?.eps ?? null;
   const dynamicPe = latestQuarterEps && currentPrice
     ? computeDynamicPe(currentPrice, latestQuarterEps)
     : null;
   const lastYearTotalEps = computeLastYearEps(
-    quarterly.map((q) => ({
+    quarterlyHistory.map((q) => ({
       quarter: q.quarter,
       revenue: q.revenue ?? 0,
       netIncome: q.netIncome ?? 0,
@@ -246,12 +271,13 @@ export async function buildValuationInputsTW(
     sharesOutstanding: `finmind:TaiwanStockShareholding?data_id=${ticker}`,
     bookValuePerShare: `finmind:TaiwanStockBalanceSheet?data_id=${ticker}`,
     industry: stockInfo ? `finmind:TaiwanStockInfo?data_id=${ticker}` : 'candidate.industry',
+    ...(supplement?.sourceUrls ?? {}),
   };
 
   return {
     market: 'TW',
     currentPrice,
-    quarterlyHistory: quarterly.map((q) => ({
+    quarterlyHistory: quarterlyHistory.map((q) => ({
       quarter: q.quarter,
       revenue: q.revenue,
       grossProfit: q.grossProfit,
@@ -262,16 +288,9 @@ export async function buildValuationInputsTW(
     })),
     monthlyRevenueHistory: monthlyHistory,
     selfReportedMonthlyActuals,
-    latestCumulativeActual: latestCumulative ? {
-      fiscalYear: latestCumulative.rocYear + 1911,
-      quarter: latestCumulative.season,
-      reportedThrough: `${latestCumulative.rocYear + 1911}Q${latestCumulative.season}`,
-      cumulativeRevenue: latestCumulative.revenue == null ? null : latestCumulative.revenue * 1000,
-      cumulativeNetIncome: latestCumulative.netIncome == null ? null : latestCumulative.netIncome * 1000,
-      cumulativeEps: latestCumulative.eps,
-      sourceUrl: 'https://openapi.twse.com.tw/v1/opendata/t187ap14_L',
-    } : undefined,
-    sharesOutstanding: shares,
+    latestCumulativeActual: effectiveCumulative,
+    earningsGuidance: supplement?.earningsGuidance,
+    sharesOutstanding: effectiveShares,
     bookValuePerShare: balance?.bookValuePerShare ?? null,
     ttmEps,
     ttmPe,
@@ -297,13 +316,17 @@ export async function buildValuationInputsCN(
 ): Promise<FundamentalGroundTruth['valuationInputs']> {
   const bare = symbol.replace(/\.(SS|SZ)$/i, '');
 
-  const [quoteRaw, em, cnFinancials] = await Promise.all([
+  const [quoteRaw, em, cnFinancials, dilution, supplement] = await Promise.all([
     fetchJSON(internalUrl(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`))
       .catch((e) => { fetchErrors.push(`quote: ${e}`); return null; }),
     getEastMoneyFundamentals(symbol)
       .catch((e) => { fetchErrors.push(`emFundamentals: ${e}`); return null; }),
     fetchCnFinancials(bare, 8)
       .catch((e) => { fetchErrors.push(`cnFinancials: ${e}`); return []; }),
+    readDilutionEvents(bare)
+      .catch((e) => { fetchErrors.push(`dilution: ${e}`); return []; }),
+    loadFundamentalSupplement(bare)
+      .catch((e) => { fetchErrors.push(`supplementalFundamentals: ${e}`); return null; }),
   ]);
 
   const quote = unwrapApi(quoteRaw) as { close?: number } | null;
@@ -311,7 +334,11 @@ export async function buildValuationInputsCN(
   const currentPrice = (typeof quote?.close === 'number' ? quote.close : null) ?? em?.price ?? null;
 
   // EastMoney 原始季報是 YTD 累計口徑；先轉成單季，避免 Q1+Q2累計+Q3累計重複加總。
-  const quarterlyHistory = normalizeCnQuarterlyHistory(cnFinancials, em?.totalShares ?? null);
+  const effectiveShares = supplement?.sharesOutstanding ?? em?.totalShares ?? null;
+  const quarterlyHistory = mergeQuarterlyActuals(
+    normalizeCnQuarterlyHistory(cnFinancials, effectiveShares),
+    supplement?.quarterlyActuals,
+  );
 
   // PE 優先用市值/淨利自算值；估值快照缺欄時，用最近四個「單季」EPS 回補。
   const quarterlyTtmEps = sumLatestFourQuarterEps(quarterlyHistory);
@@ -327,13 +354,14 @@ export async function buildValuationInputsCN(
   const lastYearTotalEps = staticPe && currentPrice ? currentPrice / staticPe : null;
 
   // 產業模板 — 陸股目前只能用 industryHint
-  const template = detectIndustryTemplate(industryHint);
+  const template = detectIndustryTemplate(industryHint, symbol);
   const peRange = getReasonablePeRange(template);
 
   const sourceUrls: Record<string, string> = {
     quote: `internal:/api/stock/quote?symbol=${symbol}`,
     eastmoney: em?.sourceUrl ?? `https://quote.eastmoney.com/concept/${bare}.html`,
     quarterlyHistory: `eastmoney:RPT_LICO_FN_CPD?SECURITY_CODE=${bare}`,
+    ...(supplement?.sourceUrls ?? {}),
   };
 
   return {
@@ -341,14 +369,15 @@ export async function buildValuationInputsCN(
     currentPrice,
     quarterlyHistory,
     monthlyRevenueHistory: [],  // 陸股不抓月營收
-    sharesOutstanding: em?.totalShares ?? null,
+    earningsGuidance: supplement?.earningsGuidance,
+    sharesOutstanding: effectiveShares,
     bookValuePerShare: em?.bookValuePerShare ?? null,
     ttmEps,
     ttmPe,
     dynamicPe,
     staticPe,
     lastYearTotalEps,
-    dilutionEvents: [],  // 陸股增資公告後續擴充（巨潮資訊）
+    dilutionEvents: dilution,
     industryTemplate: template,
     industryTemplateLabel: getTemplateLabel(template),
     reasonablePeRange: peRange,
@@ -361,33 +390,4 @@ function unwrapApi(raw: unknown): unknown {
   const w = raw as { ok?: boolean; data?: unknown };
   if (w.ok === true && w.data) return w.data;
   return raw;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// data/dilution/{symbol}.json — 由 MOPS scraper cron 寫入
-// 格式：[{ type, newShares, expectedDate?, priceIfKnown?, sourceUrl?, announcedAt?, description? }]
-// ────────────────────────────────────────────────────────────────────────────
-
-interface DilutionFileEntry {
-  type: 'gdr' | 'rights_issue' | 'convertible_bond' | 'employee_option' | 'private_placement';
-  newShares: number;
-  expectedDate?: string;
-  priceIfKnown?: number;
-  sourceUrl?: string;
-  announcedAt?: string;
-  description?: string;
-}
-
-async function readDilutionEvents(ticker: string): Promise<DilutionFileEntry[]> {
-  const filePath = path.join(process.cwd(), 'data', 'dilution', `${ticker}.json`);
-  try {
-    const raw = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((e): e is DilutionFileEntry =>
-      e && typeof e === 'object' && typeof e.type === 'string' && typeof e.newShares === 'number',
-    );
-  } catch {
-    return [];
-  }
 }

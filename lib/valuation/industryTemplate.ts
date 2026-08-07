@@ -125,6 +125,8 @@ export const SEMI_SYMBOL_TEMPLATE: Record<string, IndustryTemplate> = {
   '6533': 'high_growth_asic', // 晶心科 (CPU IP)
   '4966': 'high_growth_asic', // 譜瑞-KY (高速傳輸 IC)
   '5274': 'high_growth_asic', // 信驊 (BMC IC)
+  '000988': 'high_growth_asic', // 華工科技（光模組／雷射設備，AI 高速光通訊）
+  '3081': 'hype_extreme_growth', // 聯亞（高速光通訊磊晶／矽光子，高成長高波動）
   // DRAM / 記憶體 / 模組 → 景氣循環
   '2408': 'cyclical', // 南亞科 (DRAM)
   '3260': 'cyclical', // 威剛 (DRAM 模組)
@@ -132,6 +134,9 @@ export const SEMI_SYMBOL_TEMPLATE: Record<string, IndustryTemplate> = {
   '8299': 'cyclical', // 群聯 (NAND 控制/模組)
   '2337': 'cyclical', // 旺宏 (NOR/NAND)
   '4967': 'cyclical', // 十銓 (記憶體模組)
+  '3006': 'cyclical', // 晶豪科（利基型 DRAM / SRAM）
+  '001309': 'cyclical', // 德明利（NAND 儲存產品，獲利受報價循環影響）
+  '603986': 'cyclical', // 兆易創新（NOR Flash / DRAM / MCU，須正常化一次性收益）
   // 成熟代工 / 封測 / 測試 → 穩定成熟
   '2303': 'stable_mature', // 聯電 (成熟代工)
   '3711': 'stable_mature', // 日月光投控 (封測)
@@ -141,6 +146,7 @@ export const SEMI_SYMBOL_TEMPLATE: Record<string, IndustryTemplate> = {
   '6239': 'stable_mature', // 力成 (封測)
   '8150': 'stable_mature', // 南茂 (封測)
   '2329': 'stable_mature', // 華泰 (封測)
+  '6770': 'stable_mature', // 力積電（成熟製程晶圓代工，另須併看 PB／正常化本業）
 };
 
 export function detectIndustryTemplate(
