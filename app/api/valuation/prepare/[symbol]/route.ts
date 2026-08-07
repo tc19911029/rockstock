@@ -16,12 +16,14 @@ import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { buildValuationInputsCN, buildValuationInputsTW } from '@/lib/agents/agents/fundamentalAgent';
 import { triggerSkillKeystroke } from '@/lib/ai/skillAutoTrigger';
+import { detectValuationMarket } from '@/lib/valuation/market';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const querySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dryRun: z.enum(['0', '1']).default('0'),
 });
 
 const TMP_DIR = '/tmp/rockstock-valuation';
@@ -36,11 +38,10 @@ export async function POST(
 
   const date = parsed.data.date ?? new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
   const bareSymbol = rawSymbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-  const market = /\.(SS|SZ)$/i.test(rawSymbol) || /^\d{6}$/.test(bareSymbol) ? 'CN' : 'TW';
-  const isSupported = market === 'TW' ? /^\d{4,5}$/.test(bareSymbol) : /^\d{6}$/.test(bareSymbol);
+  const market = detectValuationMarket(rawSymbol);
 
-  if (!isSupported) {
-    return apiError('目前估值推估支援台股 4–5 碼與陸股 6 碼代號');
+  if (!market) {
+    return apiError('目前估值推估支援台股 4–5 碼與陸股 6 碼代號', 400);
   }
 
   try {
@@ -67,7 +68,7 @@ export async function POST(
     const outputPath = `data/valuation/${date}/${bareSymbol}.json`;
 
     const question = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       task: 'per-stock-valuation',
       date,
       symbol: bareSymbol,
@@ -78,19 +79,46 @@ export async function POST(
       groundTruth: {
         valuationInputs,
       },
+      outputContract: {
+        required: ['ttmPe', 'fiscalYear', 'reportedThrough', 'actualEpsYtd', 'peerComparison', 'scenarios'],
+        peerComparison: {
+          minimumIncludedPeers: 3,
+          requiredPeerFields: ['symbol', 'name', 'market', 'ttmPe', 'currentYearPe', 'excluded', 'asOf', 'sourceUrl'],
+          requiredSummaryFields: ['selectionBasis', 'medianTtmPe', 'medianCurrentYearPe', 'lowerQuartilePe', 'upperQuartilePe', 'appliedPeRationale'],
+        },
+        ntmEstimate: '只有取得真正未來四季 EPS 預估時才輸出；不得以本年度 EPS 代替。',
+        compatibility: '保留既有 monthlyEpsEstimate、dilution、riskFlags、conclusion、reasoning 與三情境欄位。',
+      },
       instructions: [
         '所有數字先核對資料日期；公司公告、交易所與法說會為第一優先，法人預估只能作為輔助，不得把新聞轉述當成公司正式財測。',
         '依商業模式、獲利驅動因子與景氣循環位置挑選真正可比同業；列出同業 TTM PE／本年預估 PE，排除虧損、一次性收益與極端值後，以中位數及四分位距校準合理 PE。',
         '檢查最新股本、流通股數、增資、GDR、私募與可轉債等潛在稀釋；EPS 與合理價一律使用最新完全稀釋股數重算。',
         market === 'TW'
-          ? '台股納入逐月營收與自結 EPS；月營收沒有正式 EPS 時，才以最近一季正常化淨利率估算，並清楚標示為模型值。'
-          : '陸股以正式季報為主，補充業績快報與業績預告；沒有月營收時不得虛構月度 EPS，改用季度情境與累計口徑推估。',
-        '推估悲觀／中性／樂觀三情境的後續季度營收、淨利率、EPS，以及情境成立所需的月營收或營收成長門檻。',
+          ? '台股納入逐月營收與自結 EPS；月營收沒有正式 EPS 時，才以最近一個已公告季度的正常化淨利率估算，並清楚標示為模型值。'
+          : '陸股以正式季報為主，補充業績快報與業績預告；quarterlyHistory 已轉成單季口徑，沒有月營收時不得虛構月度 EPS。',
+        '先辨識 valuationInputs.quarterlyHistory 中本年度已公告到哪一季；已公告季度必須照實列入 actualEpsYtd，不得再估一次，只推估尚未公告季度。',
+        '推估悲觀／中性／樂觀三情境的後續季度營收、淨利率、EPS，以及情境成立所需的月營收或營收成長門檻；scenarios 的已公告季度欄位填實際值。',
         '區分 TTM PE、以本年度 EPS 計算的預估 PE，以及真正未來 12 個月 NTM PE；資料不足時不得混用或假裝精確。',
         '每個 scenario 必須附 revenueBasis / netMarginBasis / assumptionEvidence（含 sourceUrl + rawQuote），並提供後續可驗證的 validationTriggers。',
-        '輸出格式對齊 lib/agents/types.ts 的 FundamentalAnswer.valuation 區塊（ttmPe + monthlyEpsEstimate + scenarios{pessimistic,base,optimistic}）。',
+        '輸出 peerComparison：至少 3 家未排除的真正可比同業（不足時如實說明），逐家列 TTM PE／本年度預估 PE／來源日期／URL／排除原因，並計算中位數與四分位。',
+        '若能取得未來四季預估，輸出 ntmEstimate{period,eps,pe,method}；否則省略此欄位，不得以本年度 EPS 冒充 NTM。',
+        '輸出格式對齊 lib/agents/types.ts 的 FundamentalAnswer.valuation 區塊，並包含 fiscalYear、reportedThrough、actualEpsYtd、peerComparison；所有舊欄位保持相容。',
       ],
     };
+
+    if (parsed.data.dryRun === '1') {
+      return apiOk({
+        dryRun: true,
+        market,
+        outputPath,
+        ttmEps: valuationInputs.ttmEps,
+        ttmPe: valuationInputs.ttmPe,
+        currentPrice: valuationInputs.currentPrice,
+        quarterlyRows: valuationInputs.quarterlyHistory.length,
+        monthlyRows: valuationInputs.monthlyRevenueHistory.length,
+        fetchErrors,
+      });
+    }
 
     await fs.mkdir(TMP_DIR, { recursive: true });
     const questionPath = path.join(TMP_DIR, `${bareSymbol}-${date}-question.json`);

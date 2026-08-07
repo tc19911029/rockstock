@@ -8,12 +8,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Calculator, CheckCircle2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Calculator, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react';
 import type { FundamentalAnswer } from '@/lib/agents/types';
 
 // 估值情境（悲觀/中性/樂觀）— 可來自 Multi-Agent 或獨立 valuation skill。
 //
-// ⚠️ 距現價 / Forward PE / TTM PE 都是「價格衍生」欄位：估值產生當下（valuationDate）用當時
+// ⚠️ 距現價 / 本年度預估 PE / TTM PE 都是「價格衍生」欄位：估值產生當下（valuationDate）用當時
 // 股價算好、寫死進 JSON。股價一旦移動，這些就過期（曾發生：2408 估值日 312 元、現價 401.5，
 // 卻仍顯示 +38.7% 距現價，實際只剩 +7.8%）。→ 一律用即時價 currentPrice 重算。
 // 合理價 / EPS / 合理 PE 是分析師輸出，不隨股價變，照舊顯示。
@@ -30,7 +30,7 @@ function ValuationScenarios({
   ageDays?: number;
   caveat?: string;
 }) {
-  const { ttmPe, monthlyEpsEstimate, scenarios } = valuation;
+  const { ttmPe, monthlyEpsEstimate, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough } = valuation;
   const tiers: Array<{ key: 'pessimistic' | 'base' | 'optimistic'; label: string; cls: string }> = [
     { key: 'pessimistic', label: '悲觀', cls: 'text-rose-300 border-rose-700/40 bg-rose-900/20' },
     { key: 'base',        label: '中性', cls: 'text-amber-300 border-amber-700/40 bg-amber-900/20' },
@@ -45,6 +45,9 @@ function ValuationScenarios({
   // 反推 TTM EPS（舊檔沒存）：ttmPe = basePrice / ttmEps → 再用即時價重算 TTM PE
   const ttmEps = basePriceAtVal && ttmPe > 0 ? basePriceAtVal / ttmPe : null;
   const liveTtmPe = live && ttmEps ? live / ttmEps : ttmPe;
+  const liveNtmPe = ntmEstimate && ntmEstimate.eps > 0
+    ? (live ?? basePriceAtVal ?? ntmEstimate.pe * ntmEstimate.eps) / ntmEstimate.eps
+    : null;
   const position = live == null
     ? null
     : live <= scenarios.pessimistic.fairPrice
@@ -101,11 +104,25 @@ function ValuationScenarios({
           </div>
         )}
 
-        {/* TTM PE 基準（依即時價重算）*/}
-        <div className="flex items-baseline justify-between px-1">
-          <span className="text-[11px] text-muted-foreground">TTM 本益比（過去 4 季）</span>
-          <span className="font-mono text-xs font-semibold text-foreground/90">{liveTtmPe.toFixed(2)} 倍</span>
+        {/* 歷史與前瞻 PE 分開，避免把本年度 EPS 冒充 NTM。 */}
+        <div className="grid grid-cols-2 gap-1.5 rounded border border-foreground/10 bg-background/20 p-2">
+          <div>
+            <div className="text-[9px] text-muted-foreground">TTM PE · 過去四季</div>
+            <div className="font-mono text-xs font-semibold text-foreground/90">{liveTtmPe.toFixed(2)} 倍</div>
+          </div>
+          <div>
+            <div className="text-[9px] text-muted-foreground">NTM PE · 未來十二月</div>
+            <div className="font-mono text-xs font-semibold text-foreground/90">{liveNtmPe != null ? `${liveNtmPe.toFixed(2)} 倍` : '資料不足'}</div>
+          </div>
+          {actualEpsYtd != null && (
+            <div className="col-span-2 flex items-baseline justify-between border-t border-border/40 pt-1.5">
+              <span className="text-[9px] text-muted-foreground">已公告累積 EPS{reportedThrough ? `（至 ${reportedThrough}）` : ''}</span>
+              <span className="font-mono text-[11px] font-semibold">{actualEpsYtd.toFixed(2)}</span>
+            </div>
+          )}
         </div>
+
+        <PeerComparisonBlock comparison={peerComparison} />
 
         {/* 估值基準揭露：合理價/EPS 為基準日分析；價格衍生數字依即時價重算 */}
         {live && basePriceAtVal && (
@@ -166,6 +183,55 @@ function ValuationScenarios({
             <div className="border-t border-border/40 px-2 py-1.5 text-[10px] leading-relaxed text-foreground/70">{caveat}</div>
           </details>
         )}
+      </div>
+    </details>
+  );
+}
+
+type PeerComparison = NonNullable<NonNullable<FundamentalAnswer['valuation']>['peerComparison']>;
+
+function PeerComparisonBlock({ comparison }: { comparison?: PeerComparison }) {
+  if (!comparison) {
+    return (
+      <div className="flex gap-1.5 rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-700 dark:text-amber-200/80">
+        <AlertTriangle aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+        此份估值未保存同業 PE 明細，合理倍數無法逐家核驗；重新估算後補齊。
+      </div>
+    );
+  }
+
+  const included = comparison.peers.filter(peer => !peer.excluded);
+  const median = comparison.medianCurrentYearPe ?? comparison.medianTtmPe;
+
+  return (
+    <details className="rounded border border-foreground/10 bg-background/20">
+      <summary className="min-h-10 cursor-pointer px-2 py-2 text-[10px] font-medium text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+        <span className="flex items-center justify-between gap-2">
+          <span>同業 PE 校準 · {included.length} 家有效</span>
+          <span className="font-mono text-cyan-700 dark:text-cyan-200">中位 {median != null ? `${median.toFixed(1)}×` : '—'}</span>
+        </span>
+      </summary>
+      <div className="space-y-1.5 border-t border-border/40 px-2 py-2">
+        <p className="text-[9px] leading-snug text-muted-foreground">{comparison.selectionBasis}</p>
+        {comparison.peers.map(peer => (
+          <div key={`${peer.market}-${peer.symbol}`} className={`rounded border px-1.5 py-1 ${peer.excluded ? 'border-foreground/5 opacity-55' : 'border-foreground/10'}`}>
+            <div className="flex items-center justify-between gap-1 text-[9px]">
+              <span className="min-w-0 truncate font-medium text-foreground/80">{peer.name} {peer.symbol}</span>
+              <span className="shrink-0 font-mono text-foreground/70">
+                FY {peer.currentYearPe != null ? `${peer.currentYearPe.toFixed(1)}×` : '—'} · TTM {peer.ttmPe != null ? `${peer.ttmPe.toFixed(1)}×` : '—'}
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center justify-between gap-1 text-[8px] text-muted-foreground">
+              <span>{peer.excluded ? `排除：${peer.exclusionReason ?? '不具可比性'}` : peer.asOf}</span>
+              {peer.sourceUrl && (
+                <a href={peer.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-6 items-center gap-0.5 text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">
+                  來源<ExternalLink aria-hidden="true" className="size-2.5" />
+                </a>
+              )}
+            </div>
+          </div>
+        ))}
+        <p className="text-[9px] leading-snug text-foreground/65">{comparison.appliedPeRationale}</p>
       </div>
     </details>
   );
@@ -241,6 +307,11 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
         <ValuationScenarios
           valuation={{
             ttmPe: standaloneValuation.ttmPe,
+            fiscalYear: standaloneValuation.fiscalYear,
+            reportedThrough: standaloneValuation.reportedThrough,
+            actualEpsYtd: standaloneValuation.actualEpsYtd,
+            ntmEstimate: standaloneValuation.ntmEstimate,
+            peerComparison: standaloneValuation.peerComparison,
             monthlyEpsEstimate: standaloneValuation.monthlyEpsEstimate,
             scenarios: standaloneValuation.scenarios,
             dilution: null,
@@ -421,7 +492,7 @@ function formatMonth(date: string | null | undefined): string | null {
 interface Props {
   symbol: string;
   date?: string;
-  /** 即時價（= 走圖 header 顯示價）。用來把估值卡的距現價/Forward PE/TTM PE 從估值基準價重算成即時。 */
+  /** 即時價（= 走圖 header 顯示價）。用來把估值卡的距現價/本年度預估 PE/TTM PE 從估值基準價重算成即時。 */
   currentPrice?: number;
   /** DU2：走圖回放中（步退至歷史日）。true 時加警示，提醒基本面/估值為最新資料、非走圖日。 */
   isHistorical?: boolean;
@@ -434,6 +505,11 @@ interface ValuationOnly {
   updatedAt?: string;
   valuationCaveat?: string;
   reasoning?: string;
+  fiscalYear?: number;
+  reportedThrough?: string;
+  actualEpsYtd?: number;
+  ntmEstimate?: NonNullable<FundamentalAnswer['valuation']>['ntmEstimate'];
+  peerComparison?: NonNullable<FundamentalAnswer['valuation']>['peerComparison'];
   monthlyEpsEstimate?: NonNullable<FundamentalAnswer['valuation']>['monthlyEpsEstimate'];
   scenarios?: NonNullable<FundamentalAnswer['valuation']>['scenarios'];
 }
@@ -442,6 +518,11 @@ function toAgentValuation(valuation: ValuationOnly | null): NonNullable<Fundamen
   if (valuation?.ttmPe == null || !valuation.scenarios) return null;
   return {
     ttmPe: valuation.ttmPe,
+    fiscalYear: valuation.fiscalYear,
+    reportedThrough: valuation.reportedThrough,
+    actualEpsYtd: valuation.actualEpsYtd,
+    ntmEstimate: valuation.ntmEstimate,
+    peerComparison: valuation.peerComparison,
     monthlyEpsEstimate: valuation.monthlyEpsEstimate,
     scenarios: valuation.scenarios,
     dilution: null,
@@ -475,6 +556,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
     setRawData(null);
     setStandaloneValuation(null);
     const bareSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const isCnSymbol = /\.(SS|SZ)$/i.test(symbol) || /^\d{6}$/.test(bareSymbol);
     if (symbol.startsWith('^')) { setLoading(false); return; }  // 指數無基本面/估值，短路不打 decisions API（否則回「symbol 格式不合法」）
 
     // 三種資料固定並行載入：完整分析不再阻擋原始財報或獨立估值。
@@ -499,14 +581,17 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
           }
           return json;
         });
-      const rawRequest = safeJson(fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`, { signal: AbortSignal.timeout(8000) }))
-        .then(json => {
-          if (!cancelled && json?.ok && json.data) {
-            setRawData(json.data as RawFundamentals);
-            setLoading(false);
-          }
-          return json;
-        });
+      // /api/fundamentals 是台股 FinMind fallback；陸股不可拿六位碼誤打台股資料源。
+      const rawRequest = isCnSymbol
+        ? Promise.resolve(null)
+        : safeJson(fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`, { signal: AbortSignal.timeout(8000) }))
+          .then(json => {
+            if (!cancelled && json?.ok && json.data) {
+              setRawData(json.data as RawFundamentals);
+              setLoading(false);
+            }
+            return json;
+          });
       const valuationRequest = safeJson(fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${today}`, { signal: AbortSignal.timeout(8000), cache: 'no-store' }))
         .then(json => {
           if (!cancelled && json?.ok && json.valuation) {

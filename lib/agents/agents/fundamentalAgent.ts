@@ -33,6 +33,8 @@ import {
   getStockInfo,
 } from '@/lib/datasource/FinMindClient';
 import { getEastMoneyFundamentals } from '@/lib/datasource/EastMoneyFundamentals';
+import { fetchCnFinancials } from '@/lib/datasource/EastMoneyFinancials';
+import { normalizeCnQuarterlyHistory, sumLatestFourQuarterEps } from '@/lib/valuation/cnQuarterly';
 import {
   computeTTM,
   computeTTMPe,
@@ -273,40 +275,32 @@ export async function buildValuationInputsCN(
 ): Promise<FundamentalGroundTruth['valuationInputs']> {
   const bare = symbol.replace(/\.(SS|SZ)$/i, '');
 
-  const [quoteRaw, em] = await Promise.all([
+  const [quoteRaw, em, cnFinancials] = await Promise.all([
     fetchJSON(internalUrl(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`))
       .catch((e) => { fetchErrors.push(`quote: ${e}`); return null; }),
     getEastMoneyFundamentals(symbol)
       .catch((e) => { fetchErrors.push(`emFundamentals: ${e}`); return null; }),
+    fetchCnFinancials(bare, 8)
+      .catch((e) => { fetchErrors.push(`cnFinancials: ${e}`); return []; }),
   ]);
 
   const quote = unwrapApi(quoteRaw) as { close?: number } | null;
   // 優先使用 quote API 的 close，fallback 用 EastMoney price
   const currentPrice = (typeof quote?.close === 'number' ? quote.close : null) ?? em?.price ?? null;
 
-  // 陸股 quarterlyHistory MVP：先用 EastMoney 給的單季 EPS 當 quarterly[0]
-  // 完整 8 季歷史要爬巨潮資訊，後續擴充
-  const quarterlyHistory = em?.latestQuarterEps != null
-    ? [{
-        quarter: em.fetchedAt.slice(0, 10),
-        revenue: null,
-        grossProfit: null,
-        netIncome: em.netIncome ?? null,
-        nonRecurringNetIncome: null,
-        eps: em.latestQuarterEps,
-        netMargin: null,
-        grossMargin: null,
-      }]
-    : [];
+  // EastMoney 原始季報是 YTD 累計口徑；先轉成單季，避免 Q1+Q2累計+Q3累計重複加總。
+  const quarterlyHistory = normalizeCnQuarterlyHistory(cnFinancials, em?.totalShares ?? null);
 
-  // PE 計算優先用 EastMoney 的官方值（已是市場標準算法）
-  const ttmPe = em?.ttmPe ?? null;
+  // PE 優先用市值/淨利自算值；估值快照缺欄時，用最近四個「單季」EPS 回補。
+  const quarterlyTtmEps = sumLatestFourQuarterEps(quarterlyHistory);
+  const ttmEps = em?.ttmPe && currentPrice
+    ? currentPrice / em.ttmPe
+    : quarterlyTtmEps;
+  const ttmPe = ttmEps && currentPrice ? currentPrice / ttmEps : null;
   const dynamicPe = em?.dynamicPe ?? (em?.latestQuarterEps && currentPrice
     ? computeDynamicPe(currentPrice, em.latestQuarterEps)
     : null);
   const staticPe = em?.staticPe ?? null;
-  // 由 ttmPe 反推 ttmEps
-  const ttmEps = ttmPe && currentPrice ? currentPrice / ttmPe : null;
   // 由 staticPe 反推去年全年 EPS
   const lastYearTotalEps = staticPe && currentPrice ? currentPrice / staticPe : null;
 
@@ -317,6 +311,7 @@ export async function buildValuationInputsCN(
   const sourceUrls: Record<string, string> = {
     quote: `internal:/api/stock/quote?symbol=${symbol}`,
     eastmoney: em?.sourceUrl ?? `https://quote.eastmoney.com/concept/${bare}.html`,
+    quarterlyHistory: `eastmoney:RPT_LICO_FN_CPD?SECURITY_CODE=${bare}`,
   };
 
   return {

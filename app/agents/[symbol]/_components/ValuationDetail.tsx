@@ -5,7 +5,7 @@
  *
  * 6 個區塊：
  *   1. 基本資料卡（股價/TTM EPS/TTM PE/最新季 EPS/月營收/股數/PB/產業模板）
- *   2. TTM PE vs Forward PE 對比
+ *   2. TTM PE vs 本年度預估 PE / NTM PE 對比
  *   3. 月營收推估 EPS
  *   4. 三情境季度推估（Q2/Q3/Q4 EPS + 全年 + 合理 PE + 合理股價 + 現價差距）
  *   5. GDR/增資稀釋
@@ -33,7 +33,7 @@ export function ValuationDetail({ answer, question }: Props) {
   return (
     <section className="rounded-lg border border-amber-500/30 bg-amber-950/10 p-4 space-y-5">
       <div className="flex items-baseline justify-between flex-wrap gap-2">
-        <h3 className="text-sm font-semibold text-amber-200">估值分析 · TTM / Forward PE / 三情境</h3>
+        <h3 className="text-sm font-semibold text-amber-200">估值分析 · TTM / 本年度預估 / NTM PE</h3>
         {v?.conclusion && (
           <span className={
             'px-2 py-0.5 rounded text-xs font-semibold ' +
@@ -48,6 +48,7 @@ export function ValuationDetail({ answer, question }: Props) {
 
       {inputs && <BasicInfoCard inputs={inputs} />}
       {v && inputs && <PeComparison v={v} inputs={inputs} />}
+      {v?.peerComparison && <PeerComparisonDetail comparison={v.peerComparison} />}
       {/* 月營收推估 EPS 區塊只對台股顯示（陸股無月營收） */}
       {inputs?.market !== 'CN' && v?.monthlyEpsEstimate && <MonthlyEpsBlock m={v.monthlyEpsEstimate} />}
       {v && <ScenarioTable v={v} />}
@@ -114,7 +115,7 @@ function BasicInfoCard({
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// 區塊 2：TTM PE vs Forward PE
+// 區塊 2：TTM PE vs 本年度預估 PE / NTM PE
 // ────────────────────────────────────────────────────────────────────────────
 
 function PeComparison({
@@ -157,18 +158,25 @@ function PeComparison({
                 <td className="px-2 py-1 text-right text-slate-400">去年全年 EPS = {fmt(inputs.lastYearTotalEps, 2)}</td>
               </tr>
             )}
+            {v.ntmEstimate && (
+              <tr className="border-t border-slate-800">
+                <td className="px-2 py-1 text-sky-300">NTM PE</td>
+                <td className="px-2 py-1 text-right">{fmt(v.ntmEstimate.pe, 1)} 倍</td>
+                <td className="px-2 py-1 text-right text-slate-400">{v.ntmEstimate.period} EPS {fmt(v.ntmEstimate.eps, 2)}</td>
+              </tr>
+            )}
             <tr className="border-t border-slate-800">
-              <td className="px-2 py-1 text-rose-300">悲觀 Forward PE</td>
+              <td className="px-2 py-1 text-rose-300">悲觀本年度預估 PE</td>
               <td className="px-2 py-1 text-right">{fmt(v.scenarios.pessimistic.forwardPe, 1)} 倍</td>
               <td className="px-2 py-1 text-right text-slate-400">EPS {fmt(v.scenarios.pessimistic.fullYearEps, 2)}</td>
             </tr>
             <tr className="border-t border-slate-800">
-              <td className="px-2 py-1 text-amber-300">中性 Forward PE</td>
+              <td className="px-2 py-1 text-amber-300">中性本年度預估 PE</td>
               <td className="px-2 py-1 text-right">{fmt(v.scenarios.base.forwardPe, 1)} 倍</td>
               <td className="px-2 py-1 text-right text-slate-400">EPS {fmt(v.scenarios.base.fullYearEps, 2)}</td>
             </tr>
             <tr className="border-t border-slate-800">
-              <td className="px-2 py-1 text-emerald-300">樂觀 Forward PE</td>
+              <td className="px-2 py-1 text-emerald-300">樂觀本年度預估 PE</td>
               <td className="px-2 py-1 text-right">{fmt(v.scenarios.optimistic.forwardPe, 1)} 倍</td>
               <td className="px-2 py-1 text-right text-slate-400">EPS {fmt(v.scenarios.optimistic.fullYearEps, 2)}</td>
             </tr>
@@ -176,6 +184,48 @@ function PeComparison({
         </table>
       </div>
     </div>
+  );
+}
+
+function PeerComparisonDetail({
+  comparison,
+}: {
+  comparison: NonNullable<NonNullable<FundamentalAnswer['valuation']>['peerComparison']>;
+}) {
+  return (
+    <details className="rounded border border-amber-700/30 bg-amber-950/20 p-3">
+      <summary className="cursor-pointer select-none text-xs font-semibold text-amber-300">
+        同業 PE 校準 · 有效 {comparison.peers.filter(peer => !peer.excluded).length} 家
+      </summary>
+      <p className="mt-2 text-xs leading-relaxed text-slate-300">{comparison.selectionBasis}</p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="min-w-full text-xs">
+          <thead className="text-[10px] uppercase text-slate-400">
+            <tr>
+              <th className="px-2 py-1 text-left">同業</th>
+              <th className="px-2 py-1 text-right">TTM PE</th>
+              <th className="px-2 py-1 text-right">本年度預估 PE</th>
+              <th className="px-2 py-1 text-left">狀態／來源日</th>
+            </tr>
+          </thead>
+          <tbody>
+            {comparison.peers.map(peer => (
+              <tr key={`${peer.market}-${peer.symbol}`} className={`border-t border-slate-800 ${peer.excluded ? 'opacity-50' : ''}`}>
+                <td className="px-2 py-1">
+                  <a href={peer.sourceUrl} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline">
+                    {peer.name} {peer.symbol}
+                  </a>
+                </td>
+                <td className="px-2 py-1 text-right font-mono">{fmt(peer.ttmPe, 1)}</td>
+                <td className="px-2 py-1 text-right font-mono">{fmt(peer.currentYearPe, 1)}</td>
+                <td className="px-2 py-1 text-slate-400">{peer.excluded ? `排除：${peer.exclusionReason ?? '不具可比性'}` : peer.asOf}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-slate-300">{comparison.appliedPeRationale}</p>
+    </details>
   );
 }
 

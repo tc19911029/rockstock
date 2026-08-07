@@ -655,6 +655,38 @@ export interface FundamentalAnswer {
    *  ttmPe 由程式預算後 echo 回來，scenarios 由 skill 推算。 */
   valuation?: {
     ttmPe: number;
+    /** 本次估值涵蓋的會計年度與已公告進度；舊資料可能沒有。 */
+    fiscalYear?: number;
+    reportedThrough?: string;
+    actualEpsYtd?: number;
+    /** 真正未來 12 個月（NTM）估值；資料不足時應省略，不得用本年度 EPS 冒充。 */
+    ntmEstimate?: {
+      period: string;
+      eps: number;
+      pe: number;
+      method: string;
+    };
+    /** 合理 PE 的可比同業校準明細。 */
+    peerComparison?: {
+      asOf: string;
+      selectionBasis: string;
+      peers: Array<{
+        symbol: string;
+        name: string;
+        market: 'TW' | 'CN' | 'US' | 'OTHER';
+        ttmPe: number | null;
+        currentYearPe: number | null;
+        excluded: boolean;
+        exclusionReason?: string;
+        sourceUrl: string;
+        asOf: string;
+      }>;
+      medianTtmPe: number | null;
+      medianCurrentYearPe: number | null;
+      lowerQuartilePe: number | null;
+      upperQuartilePe: number | null;
+      appliedPeRationale: string;
+    };
     /** skill 推估的當月 EPS（用月營收 × 上一季淨利率 / 股數） */
     monthlyEpsEstimate?: {
       month: string;
