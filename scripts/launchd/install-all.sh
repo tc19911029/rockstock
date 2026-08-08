@@ -6,6 +6,30 @@ set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET="$HOME/Library/LaunchAgents"
+ROOT="$(cd "$DIR/../.." && pwd)"
+
+GLOBAL_NODE="$HOME/.local/node-22/bin/node"
+GLOBAL_TSX="$HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs"
+if [[ ! -x "$GLOBAL_NODE" || ! -r "$GLOBAL_TSX" ]]; then
+  echo "已停止：launchd 固定 runtime 不完整（需要 $GLOBAL_NODE + global tsx）。" >&2
+  echo "請執行：$HOME/.local/node-22/bin/npm install -g tsx@4.23.5" >&2
+  exit 1
+fi
+
+CRON_SECRET_VALUE="$(sed -n 's/^CRON_SECRET=//p' "$ROOT/.env.local" 2>/dev/null | head -1 | tr -d '\"' | tr -d "'" | xargs)"
+if [[ -z "$CRON_SECRET_VALUE" || "$CRON_SECRET_VALUE" == "CRON_SECRET" ]]; then
+  echo "已停止：.env.local 的 CRON_SECRET 未設定或仍是預設值。" >&2
+  exit 1
+fi
+
+SECRET_DIR="$HOME/.config/rockstock"
+SECRET_FILE="$SECRET_DIR/cron-secret"
+mkdir -p "$SECRET_DIR"
+chmod 700 "$SECRET_DIR"
+printf '%s\n' "$CRON_SECRET_VALUE" > "$SECRET_FILE"
+chmod 600 "$SECRET_FILE"
+
+bash "$DIR/sync-bin.sh"
 
 echo "==> 確保腳本可執行"
 chmod +x "$DIR"/_*.sh

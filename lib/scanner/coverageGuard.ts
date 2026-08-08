@@ -16,10 +16,14 @@
 import { loadVerifyReport } from '@/lib/datasource/DownloadVerifier';
 
 export type CoverageCheck =
-  | { ok: true; coverageRate: number; health: string }
-  | { ok: false; reason: string; coverageRate: number };
+  | { ok: true; coverageRate: number; health: string; totalStocks: number; stocksCurrent: number }
+  | { ok: false; reason: string; coverageRate: number; totalStocks: number; stocksCurrent: number };
 
 const DEFAULT_MIN_COVERAGE = 0.95; // 95% L1 覆蓋率
+export const MIN_VERIFY_UNIVERSE: Record<'TW' | 'CN', number> = {
+  TW: 1500,
+  CN: 2700,
+};
 
 export async function assertL1Coverage(
   market: 'TW' | 'CN',
@@ -32,15 +36,31 @@ export async function assertL1Coverage(
       ok: false,
       reason: `verify-${market}-${date}.json 不存在 — 表示 download cron 尚未完成或失敗`,
       coverageRate: 0,
+      totalStocks: 0,
+      stocksCurrent: 0,
     };
   }
   const cr = report.summary.coverageRate;
+  const totalStocks = report.summary.totalStocks;
+  const stocksCurrent = report.summary.stocksCurrent ?? Math.round(totalStocks * cr);
+  const minUniverse = MIN_VERIFY_UNIVERSE[market];
+  if (totalStocks < minUniverse) {
+    return {
+      ok: false,
+      reason: `L1 母體只有 ${totalStocks} 支 < 最低合理值 ${minUniverse}；${totalStocks}/${totalStocks} 不得冒充全市場 100% 覆蓋`,
+      coverageRate: cr,
+      totalStocks,
+      stocksCurrent,
+    };
+  }
   if (cr < minCoverage) {
     return {
       ok: false,
       reason: `L1 覆蓋率 ${(cr * 100).toFixed(1)}% < 門檻 ${(minCoverage * 100).toFixed(0)}% (health=${report.health})`,
       coverageRate: cr,
+      totalStocks,
+      stocksCurrent,
     };
   }
-  return { ok: true, coverageRate: cr, health: report.health };
+  return { ok: true, coverageRate: cr, health: report.health, totalStocks, stocksCurrent };
 }

@@ -6,6 +6,7 @@ import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { scanTwSanSe } from '@/lib/tw-sanse/scan';
 import { saveTwSanSeScan } from '@/lib/tw-sanse/scanStorage';
 import { degenerateScanReason } from '@/lib/cn-sanse/scanGuard';
+import { assertL1Coverage } from '@/lib/scanner/coverageGuard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -24,6 +25,11 @@ export async function GET(req: NextRequest) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
   }
 
+  const coverage = await assertL1Coverage('TW', date);
+  if (!coverage.ok) {
+    return apiError(`TW ${date} L1 coverage insufficient: ${coverage.reason}`, 503);
+  }
+
   try {
     const result = await scanTwSanSe(dateParam ? { asOfDate: dateParam } : undefined);
     // 退化掃描防呆：指數封存落後個股（早班 16:00 撞指數 ~16:39 才封）會讓全市場被判 stale、
@@ -31,10 +37,10 @@ export async function GET(req: NextRequest) {
     // 交給 18:35 最終版（資料齊全後）重產。見 lib/cn-sanse/scanGuard.ts。
     const degenerate = degenerateScanReason(result);
     if (degenerate) {
-      return apiOk({
-        skipped: true, reason: degenerate, date: result.lastDate,
-        evaluated: result.evaluated, staleSkipped: result.staleSkipped,
-      });
+      return apiError(
+        `TW SanSe ${result.lastDate} degenerate: ${degenerate}; evaluated=${result.evaluated}; stale=${result.staleSkipped}`,
+        503,
+      );
     }
     await saveTwSanSeScan(result);
     return apiOk({

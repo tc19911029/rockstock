@@ -6,6 +6,7 @@ import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { scanSanSe } from '@/lib/cn-sanse/scan';
 import { saveSanSeScan } from '@/lib/cn-sanse/scanStorage';
 import { degenerateScanReason } from '@/lib/cn-sanse/scanGuard';
+import { assertL1Coverage } from '@/lib/scanner/coverageGuard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -23,16 +24,21 @@ export async function GET(req: NextRequest) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
   }
 
+  const coverage = await assertL1Coverage('CN', date);
+  if (!coverage.ok) {
+    return apiError(`CN ${date} L1 coverage insufficient: ${coverage.reason}`, 503);
+  }
+
   try {
     const result = await scanSanSe(dateParam ? { asOfDate: dateParam } : undefined);
     // 退化掃描防呆（同 TW）：指數 L1 封存落後個股 / 全市場資料缺口時不存檔，
     // 避免覆蓋既有好紀錄；交給較晚那一輪重產。見 lib/cn-sanse/scanGuard.ts。
     const degenerate = degenerateScanReason(result);
     if (degenerate) {
-      return apiOk({
-        skipped: true, reason: degenerate, date: result.lastDate,
-        evaluated: result.evaluated, staleSkipped: result.staleSkipped,
-      });
+      return apiError(
+        `CN SanSe ${result.lastDate} degenerate: ${degenerate}; evaluated=${result.evaluated}; stale=${result.staleSkipped}`,
+        503,
+      );
     }
     await saveSanSeScan(result);
     return apiOk({

@@ -14,6 +14,7 @@ import type { ScanSession, MarketId, ScanDirection } from './types';
 import type { TaiwanScanner } from './TaiwanScanner';
 import type { ChinaScanner } from './ChinaScanner';
 import { BOOK_UNIVERSE_TOP_N, TURNOVER_INDEX_TOP_N } from './universeTopN';
+import { canInjectL2ForScan, usableIntradaySnapshot } from './l2ScanPolicy';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -90,7 +91,12 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
   const { triggerPreload: triggerL1 } = await import('@/lib/datasource/L1CandleCache');
   triggerL1(market as 'TW' | 'CN');
 
-  const l2Injected = await injectL2(scanner, market, date, readIntradaySnapshot);
+  const l2Injected = canInjectL2ForScan(sessionType)
+    ? await injectL2(scanner, market, date, readIntradaySnapshot)
+    : 0;
+  if (sessionType === 'post_close') {
+    console.info(`[ScanPipeline] ${market} post_close 禁用 L2，僅使用已封存 L1`);
+  }
 
   // ── Step 2: 取得股票清單（前 N 成交額過濾 + 批次切片） ──
   let stocks = await scanner.getStockList();
@@ -425,11 +431,11 @@ async function injectL2(
   scanner: TaiwanScanner | ChinaScanner,
   market: 'TW' | 'CN',
   date: string,
-  readIntradaySnapshot: (market: 'TW' | 'CN', date: string) => Promise<{ quotes: { symbol: string; open: number; high: number; low: number; close: number; volume: number }[]; date: string } | null>,
+  readIntradaySnapshot: typeof import('@/lib/datasource/IntradayCache').readIntradaySnapshot,
 ): Promise<number> {
   try {
     const snap = await readIntradaySnapshot(market, date);
-    if (!snap || snap.quotes.length === 0) return 0;
+    if (!usableIntradaySnapshot(snap, date)) return 0;
 
     const realtimeQuotes = new Map<string, {
       open: number; high: number; low: number; close: number; volume: number; date?: string;

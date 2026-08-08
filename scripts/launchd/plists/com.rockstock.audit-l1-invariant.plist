@@ -15,7 +15,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/npx tsx scripts/audit-l1-invariant.ts --json --write "data/health-snapshot/l1-invariant-$(/bin/date +%Y-%m-%d).json" &gt;&gt; /tmp/rockstock-audit-l1-invariant.log 2&gt;&amp;1</string>
+    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/audit-l1-invariant.ts --json --write "data/health-snapshot/l1-invariant-$(/bin/date +%Y-%m-%d).json" &gt;&gt; /tmp/rockstock-audit-l1-invariant.log 2&gt;&amp;1</string>
   </array>
 
   <key>StartCalendarInterval</key>

@@ -35,6 +35,7 @@ import {
   SYSTEM_TRACK_LETTERS,
   MECHANICAL_TRACK_LETTERS,
 } from '@/lib/scanner/buyMethodTracks';
+import { assertL1Coverage } from '@/lib/scanner/coverageGuard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -69,12 +70,16 @@ export async function GET(req: NextRequest) {
     return apiOk({ skipped: true, reason: 'non-trading day', market, track, date });
   }
 
+  const coverage = await assertL1Coverage(market, date);
+  if (!coverage.ok) {
+    return apiError(`${market} ${date} L1 coverage insufficient: ${coverage.reason}`, 503);
+  }
+
   const startTime = Date.now();
 
   try {
     // ── Imports ──────────────────────────────────────────────────────
     const { saveScanSession } = await import('@/lib/storage/scanStorage');
-    const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
     const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
     const { triggerPreload: triggerL1 } = await import('@/lib/datasource/L1CandleCache');
     const { appendLockWatchRecords } = await import('@/lib/storage/lockWatchStorage');
@@ -90,29 +95,9 @@ export async function GET(req: NextRequest) {
       scanner = new TaiwanScanner();
     }
 
-    // ── L2 inject（共用一次）──────────────────────────────────────
-    let l2Injected = 0;
-    try {
-      const snap = await readIntradaySnapshot(market, date);
-      if (snap && snap.quotes.length > 0) {
-        const suffix = market === 'TW' ? /\.(TW|TWO)$/i : /\.(SS|SZ)$/i;
-        const realtimeQuotes = new Map<string, {
-          open: number; high: number; low: number; close: number; volume: number; date?: string;
-        }>();
-        for (const q of snap.quotes) {
-          if (q.close > 0) {
-            realtimeQuotes.set(q.symbol.replace(suffix, ''), {
-              open: q.open, high: q.high, low: q.low,
-              close: q.close, volume: q.volume, date: snap.date,
-            });
-          }
-        }
-        if (realtimeQuotes.size > 0) {
-          scanner.setRealtimeQuotes(realtimeQuotes);
-          l2Injected = realtimeQuotes.size;
-        }
-      }
-    } catch { /* L2 fail OK，繼續用 L1 */ }
+    // 盤後正式策略只能讀已封存 L1。L2 可能停在午盤，不得覆寫正式 close/volume。
+    const l2Injected = 0;
+    console.info(`[scan-bm-batch] ${market} post_close 禁用 L2，僅使用已封存 L1`);
 
     // ── Stock list + TurnoverRank（共用一次）──────────────────────
     let stocks = await scanner.getStockList();
@@ -284,6 +269,13 @@ export async function GET(req: NextRequest) {
       l2Injected,
       marketTrend,
       elapsedMs,
+      dataFreshness: {
+        status: 'valid',
+        source: 'sealed-L1',
+        totalStocks: coverage.totalStocks,
+        stocksCurrent: coverage.stocksCurrent,
+        coverageRate: coverage.coverageRate,
+      },
     });
   } catch (err) {
     console.error(`[scan-bm-batch] ${market} ${track} 失敗:`, err);

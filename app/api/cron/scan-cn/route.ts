@@ -53,16 +53,7 @@ export async function GET(req: NextRequest) {
       // CN 走 batch 1（含大盤指數補漏 + 第一批個股）
       fetch(`${proto}://${host}/api/cron/download-candles-batch?market=CN&batch=1&totalBatches=8`, { headers: { authorization: auth } })
         .catch(err => console.error('[cron/scan-cn] auto-trigger download failed:', err));
-      return apiOk({
-        skipped: true,
-        alert: true,
-        alertLevel: 'high',
-        reason: 'l1-coverage-insufficient',
-        detail: coverage.reason,
-        coverageRate: coverage.coverageRate,
-        action: 'auto-recovery-triggered',
-        date,
-      });
+      return apiError(`CN ${date} L1 coverage insufficient: ${coverage.reason}; auto-recovery-triggered`, 503);
     }
     console.info(`[cron/scan-cn] L1 覆蓋率守門通過: ${(coverage.coverageRate * 100).toFixed(1)}% (health=${coverage.health})`);
   }

@@ -21,6 +21,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { checkCronAuth } from '@/lib/api/cronAuth';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { deriveOverallLevel } from '@/lib/health/overallLevel';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -49,7 +50,10 @@ interface HealthFetchResult {
   market: 'TW' | 'CN';
   health: string;
   reportDate: string | null;
+  expectedDate: string;
   coverageRate: number | null;
+  totalStocks: number | null;
+  stocksCurrent: number | null;
   stocksWithGaps: number | null;
   stocksStale: number | null;
   downloadFailed: number | null;
@@ -60,6 +64,11 @@ interface HealthFetchResult {
   l4Status: string;
   l4LastDate: string | null;
   l4ResultCount: number;
+  strategyStatus: string;
+  strategyReadyCount: number;
+  strategyRequiredCount: number;
+  strategyMissing: string[];
+  strategyInvalid: string[];
   /** Limit-up 一致性檢查：抓「假裝沒漲跌」的 quote */
   limitUpConsistencyLevel: string;
   limitUpConsistencySuspicious: number;
@@ -73,9 +82,13 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     return {
       ok: false, market,
       health: 'fetch_error',
-      reportDate: null, coverageRate: null, stocksWithGaps: null, stocksStale: null, downloadFailed: null,
+      reportDate: null, expectedDate: getLastTradingDay(market), coverageRate: null,
+      totalStocks: null, stocksCurrent: null,
+      stocksWithGaps: null, stocksStale: null, downloadFailed: null,
       l2Status: 'unknown', l2Count: null, l2AgeSec: null, l2AlertLevel: 'unknown',
       l4Status: 'unknown', l4LastDate: null, l4ResultCount: 0,
+      strategyStatus: 'unknown', strategyReadyCount: 0, strategyRequiredCount: 0,
+      strategyMissing: [], strategyInvalid: [],
       limitUpConsistencyLevel: 'unknown', limitUpConsistencySuspicious: 0,
       raw: { error: `HTTP ${res.status}` },
     };
@@ -85,6 +98,8 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     market?: 'TW' | 'CN';
     health?: string;
     reportDate?: string | null;
+    totalStocks?: number | null;
+    stocksCurrent?: number | null;
     coverageRate?: number | null;
     stocksWithGaps?: number | null;
     stocksStale?: number | null;
@@ -92,6 +107,10 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     l2?: { status?: string; quoteCount?: number | null; ageSeconds?: number | null };
     l2Sources?: { alertLevel?: string };
     l4?: { status?: string; lastScanDate?: string | null; lastScanCount?: number };
+    strategyReadiness?: {
+      status?: string; readyCount?: number; requiredCount?: number;
+      missing?: string[]; invalid?: string[];
+    };
     limitUpConsistency?: { level?: string; suspicious?: number };
   };
 
@@ -99,7 +118,10 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     ok: true, market,
     health: data.health ?? 'unknown',
     reportDate: data.reportDate ?? null,
+    expectedDate: getLastTradingDay(market),
     coverageRate: data.coverageRate ?? null,
+    totalStocks: data.totalStocks ?? null,
+    stocksCurrent: data.stocksCurrent ?? null,
     stocksWithGaps: data.stocksWithGaps ?? null,
     stocksStale: data.stocksStale ?? null,
     downloadFailed: data.downloadFailed ?? null,
@@ -110,41 +132,15 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     l4Status: data.l4?.status ?? 'unknown',
     l4LastDate: data.l4?.lastScanDate ?? null,
     l4ResultCount: data.l4?.lastScanCount ?? 0,
+    strategyStatus: data.strategyReadiness?.status ?? 'unknown',
+    strategyReadyCount: data.strategyReadiness?.readyCount ?? 0,
+    strategyRequiredCount: data.strategyReadiness?.requiredCount ?? 0,
+    strategyMissing: data.strategyReadiness?.missing ?? [],
+    strategyInvalid: data.strategyReadiness?.invalid ?? [],
     limitUpConsistencyLevel: data.limitUpConsistency?.level ?? 'ok',
     limitUpConsistencySuspicious: data.limitUpConsistency?.suspicious ?? 0,
     raw: data,
   };
-}
-
-/**
- * 把多個 health 信號折成一個總體燈號：
- *   green: 全部 fresh + 無 stale + 無 gap
- *   yellow: 部分 stale 或 partial（仍可用，但要盯）
- *   red: 報告 critical / coverage < 90% / 大量 stocksStale
- */
-function deriveOverallLevel(items: HealthFetchResult[]): 'green' | 'yellow' | 'red' {
-  let red = 0, yellow = 0;
-  for (const it of items) {
-    if (!it.ok) { red++; continue; }
-    // L1 verify report 等級
-    if (it.health === 'critical' || it.health === 'no_report') red++;
-    else if (it.health === 'warning') yellow++;
-    // coverage
-    if (it.coverageRate != null && it.coverageRate < 0.90) red++;
-    else if (it.coverageRate != null && it.coverageRate < 0.97) yellow++;
-    // stale 數量
-    if ((it.stocksStale ?? 0) > 200) red++;
-    else if ((it.stocksStale ?? 0) > 50) yellow++;
-    // L2 alert level
-    if (it.l2AlertLevel === 'critical') red++;
-    else if (it.l2AlertLevel === 'warning') yellow++;
-    // Limit-up 一致性：任何「假裝沒漲跌」都是嚴重訊號（資料源 close resolver 出包）
-    if (it.limitUpConsistencyLevel === 'critical') red++;
-    else if (it.limitUpConsistencyLevel === 'warning') yellow++;
-  }
-  if (red > 0) return 'red';
-  if (yellow > 0) return 'yellow';
-  return 'green';
 }
 
 export async function GET(req: NextRequest) {
@@ -159,8 +155,6 @@ export async function GET(req: NextRequest) {
 
     const targets: ('TW' | 'CN')[] = marketParam ? [marketParam] : ['TW', 'CN'];
     const results = await Promise.all(targets.map(m => fetchMarketHealth(baseUrl, m)));
-
-    const overall = deriveOverallLevel(results);
 
     // 用最早觸發的市場 lastTradingDay 當檔名 key（兩市場可能相差 1 天，取較早者較穩）
     const dateKey = getLastTradingDay(targets[0]);
@@ -183,6 +177,8 @@ export async function GET(req: NextRequest) {
     for (const old of (existing.markets ?? [])) {
       if (!seen.has(old.market)) mergedMarkets.push(old);
     }
+    // 單市場排程也必須把已保存的另一市場一起納入總燈號，不能只看本輪 target 假綠。
+    const overall = deriveOverallLevel(mergedMarkets);
 
     const snapshot = {
       version: 1,

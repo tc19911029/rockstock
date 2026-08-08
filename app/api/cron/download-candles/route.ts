@@ -17,7 +17,6 @@ import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { suspectsLimitOverwrite, suspectsGrossJump } from '@/lib/datasource/limitMoveGuard';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
-import { readIntradaySnapshot, IntradayQuote } from '@/lib/datasource/IntradayCache';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';
 import { verifyDownload } from '@/lib/datasource/DownloadVerifier';
@@ -153,11 +152,6 @@ export async function GET(req: NextRequest) {
 
   const lastTradingDate = getLastTradingDay(market);
 
-  // L1 被視為「近期」的門檻：7 日內 → L2 injection；更舊或缺失 → 全量 API 下載
-  const recentThreshold = new Date(lastTradingDate);
-  recentThreshold.setDate(recentThreshold.getDate() - 7);
-  const recentThresholdStr = recentThreshold.toISOString().split('T')[0];
-
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
@@ -255,29 +249,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── L2 快照（TWO 上櫃 fallback，或 TWSE 載入失敗時的備援）──
-    let l2Map: Map<string, IntradayQuote> | null = null;
-    let l2Injected = 0;
-    try {
-      const snap = await readIntradaySnapshot(market, lastTradingDate);
-      if (snap && snap.quotes.length > 0 && snap.date === lastTradingDate) {
-        l2Map = new Map();
-        for (const q of snap.quotes) {
-          // 跳過指數(snapshot 內帶 .SS/.SZ/^ 後綴；個股是裸碼)：否則去後綴後 000001.SS(上證指數)
-          // 會撞 000001(平安銀行) key、把指數值蓋進個股 → L1 污染(2026-06-02 實例)
-          if (/\.(SS|SZ)$/i.test(q.symbol) || q.symbol.startsWith('^')) continue;
-          if (q.close > 0) {
-            const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-            l2Map.set(code, q);
-          }
-        }
-        console.info(`[download-candles] ${market}: L2 快照已載入 ${l2Map.size} 支`);
-      }
-    } catch { /* L2 不可用，改走 API 模式 */ }
+    // 正式盤後下載禁用 L2。L2 沒有 sealed/final 標記，可能凍結在午盤；
+    // 官方 bulk 缺漏時必須走歷史日 K provider，不能用半根日 K 補正式 L1。
+    const l2Injected = 0;
 
     console.info(
       `[download-candles] ${market}: ${stocks.length} 支，` +
-      `TWSE=${twseMap?.size ?? 0}，TPEx=${tpexMap?.size ?? 0}，L2=${l2Map?.size ?? 0}`
+      `TWSE=${twseMap?.size ?? 0}，TPEx=${tpexMap?.size ?? 0}，L2=disabled(post_close)`
     );
 
     // 收集每支失敗的 symbol + 原因，供 manifest 寫入（2026-05-11：原本只記計數
@@ -297,7 +275,7 @@ export async function GET(req: NextRequest) {
           const hasAuthoritative =
             (symbol.endsWith('.TW') && !!twseMap?.has(code)) ||
             (symbol.endsWith('.TWO') && !!tpexMap?.has(code));
-          if (existing && existing.lastDate >= lastTradingDate && !hasAuthoritative) return -1;
+          if (existing && existing.lastDate > lastTradingDate && !hasAuthoritative) return -1;
 
           // ── 優先路徑 1：TWSE 官方日收盤（只對上市 .TW 股票）──
           // 用集合競價後的官方 OHLCV，不受盤中快照時序影響
@@ -330,33 +308,15 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          // ── 優先路徑 2：L2 快照（上櫃 TWO / CN，或 TWSE 無此股）──
-          if (existing && existing.lastDate >= recentThresholdStr && l2Map) {
-            const l2Quote = l2Map.get(code);
-            if (l2Quote) {
-              const prevBar = existing.candles[existing.candles.length - 1];
-              if (suspectsLimitOverwrite(prevBar?.close, l2Quote, market, code)
-                  || suspectsGrossJump(prevBar?.close, l2Quote)) {
-                console.warn(
-                  `[download-candles] ${symbol} ${lastTradingDate} L2 close 異常(漲跌停/單日>50%偏離=疑撞庫壞抓)，` +
-                  `跳過 L2 注入改走完整 API (prev=${prevBar.close} h=${l2Quote.high} c=${l2Quote.close})`
-                );
-              } else {
-                await saveLocalCandles(symbol, market, [
-                  { date: lastTradingDate, open: l2Quote.open, high: l2Quote.high, low: l2Quote.low, close: l2Quote.close, volume: l2Quote.volume },
-                ]);
-                l2Injected++;
-                return 1;
-              }
-            }
-          }
-
-          // ── 全量 API 下載（L1 缺失、太舊、或兩個快照都無此股）──
+          // ── 全量 API 下載（L1 缺失、官方 bulk 無此股，或需覆寫同日非正式資料）──
           try {
             const candles = await scanner.fetchCandles(symbol);
             if (candles.length > 0) {
               await saveLocalCandles(symbol, market, candles);
-              return candles.length;
+              const fetchedTargetDate = candles.some((c) => c.date >= lastTradingDate);
+              return fetchedTargetDate
+                ? candles.length
+                : { failed: true, reason: `provider-stale:${candles[candles.length - 1]?.date ?? 'unknown'}` };
             }
             // 拉到空陣列：所有 provider 都沒回 → 可能停牌或退市
             return { failed: true, reason: 'all-providers-empty' };

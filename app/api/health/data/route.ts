@@ -22,6 +22,7 @@ import { getLastTradingDay, isMarketOpen, isPostCloseWindow } from '@/lib/dataso
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { listScanDates } from '@/lib/storage/scanStorage';
 import { checkLimitUpConsistency, type ConsistencySample } from '@/lib/datasource/limitUpConsistency';
+import { loadStrategyReadiness, type StrategyReadiness } from '@/lib/health/strategyReadiness';
 
 export const runtime = 'nodejs';
 
@@ -76,6 +77,9 @@ interface MarketHealth {
   health: string;
   /** 覆蓋率 0-1 */
   coverageRate: number | null;
+  /** verify 報告實際母體；避免 30/30 冒充全市場 100%。 */
+  totalStocks: number | null;
+  stocksCurrent: number | null;
   /** 有 gap 的股票數 */
   stocksWithGaps: number | null;
   /** 數據過期的股票數 */
@@ -94,6 +98,8 @@ interface MarketHealth {
   limitUpConsistency: LimitUpConsistencyStatus;
   /** L1↔L2 一致性檢查（2026-05-21 加，8358 案發現問題） */
   l1l2Consistency: L1L2ConsistencyStatus;
+  /** 啟用中的正式策略是否都產出目標交易日結果。 */
+  strategyReadiness: StrategyReadiness;
   /** 完整報告（可選，?detail=1 時返回） */
   report?: VerifyReport;
 }
@@ -358,9 +364,10 @@ async function getMarketHealth(
   const l4Promise = getL4Status(market);
   const consistencyPromise = getLimitUpConsistency(market);
   const l1l2Promise = getL1L2Consistency(market);
+  const strategyPromise = loadStrategyReadiness(market, lastTrading);
 
   // 嘗試讀取最近 7 天的報告（可能假日/週末沒報告 — 週一要能回看到上週五）
-  let l1Result: Omit<MarketHealth, 'l2' | 'l2Sources' | 'l4' | 'limitUpConsistency' | 'l1l2Consistency'> | null = null;
+  let l1Result: Omit<MarketHealth, 'l2' | 'l2Sources' | 'l4' | 'limitUpConsistency' | 'l1l2Consistency' | 'strategyReadiness'> | null = null;
   for (let daysBack = 0; daysBack < 7; daysBack++) {
     const d = new Date(lastTrading + 'T12:00:00');
     d.setDate(d.getDate() - daysBack);
@@ -373,6 +380,8 @@ async function getMarketHealth(
         reportDate: dateStr,
         health: report.health,
         coverageRate: report.summary.coverageRate,
+        totalStocks: report.summary.totalStocks,
+        stocksCurrent: report.summary.stocksCurrent ?? null,
         stocksWithGaps: report.summary.stocksWithGaps,
         stocksStale: report.summary.stocksStale,
         downloadFailed: report.summary.downloadFailed,
@@ -383,7 +392,9 @@ async function getMarketHealth(
     }
   }
 
-  const [l2, l4, limitUpConsistency, l1l2Consistency] = await Promise.all([l2Promise, l4Promise, consistencyPromise, l1l2Promise]);
+  const [l2, l4, limitUpConsistency, l1l2Consistency, strategyReadiness] = await Promise.all([
+    l2Promise, l4Promise, consistencyPromise, l1l2Promise, strategyPromise,
+  ]);
 
   // L2 數據源狀態
   const today = getTodayDate(market);
@@ -401,7 +412,7 @@ async function getMarketHealth(
   };
 
   if (l1Result) {
-    return { ...l1Result, l2, l2Sources, l4, limitUpConsistency, l1l2Consistency };
+    return { ...l1Result, l2, l2Sources, l4, limitUpConsistency, l1l2Consistency, strategyReadiness };
   }
 
   return {
@@ -409,6 +420,8 @@ async function getMarketHealth(
     reportDate: null,
     health: 'no_report',
     coverageRate: null,
+    totalStocks: null,
+    stocksCurrent: null,
     stocksWithGaps: null,
     stocksStale: null,
     downloadFailed: null,
@@ -418,6 +431,7 @@ async function getMarketHealth(
     l4,
     limitUpConsistency,
     l1l2Consistency,
+    strategyReadiness,
   };
 }
 

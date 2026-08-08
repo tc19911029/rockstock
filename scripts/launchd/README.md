@@ -1,5 +1,20 @@
 # 本地 launchd 排程（補 instrumentation.ts 沒做的）
 
+## 正式盤後策略流水線
+
+`strategy-eod-tw/cn` 會先完成 A，再跑 B～R、SanSe、V（TW 另跑 Y），
+最後一定更新 health。A 若失敗會阻止依賴它的策略；其餘獨立策略會繼續執行，
+但任何失敗都會讓排程非零退出，避免 partial 結果被誤報為成功。
+
+盤後正式掃描只允許 sealed L1，不得用未標記 final 的 L2 快照覆寫收盤價。
+直接執行 TypeScript 的維護任務統一使用 `~/.local/node-22` 的固定 Node 與
+全域 `tsx`，禁止引用 Desktop 專案內的 `node_modules/.bin/tsx`，避免
+macOS launchd/TCC 權限造成靜默漏跑。安裝前請執行：
+
+```bash
+~/.local/node-22/bin/npm install -g tsx@4.23.5
+```
+
 ## 為什麼只有 4 個（不是 60 個）
 
 你的系統有兩層自動化：

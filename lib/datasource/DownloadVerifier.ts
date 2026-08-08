@@ -45,6 +45,10 @@ export interface VerifyReport {
     downloadFailed: number;
     downloadSkipped: number;
     coverageRate: number;
+    /** 真正含 targetDate K 棒的股票數；舊報告可能沒有此欄位 */
+    stocksCurrent?: number;
+    /** 有 L1、但最後一根早於 targetDate（不含永久停牌）的股票數 */
+    stocksMissingTargetDate?: number;
     stocksWithGaps: number;
     /** 近 180 天內的 gap（排除歷史結構性缺口） */
     stocksWithRecentGaps: number;
@@ -77,6 +81,19 @@ function classifyHealth(
   if (coverageRate < 0.80 || recentGapRate > 0.10 || staleRate > 0.10) return 'critical';
   if (coverageRate < 0.95 || recentGapRate > 0.02 || staleRate > 0.05) return 'warning';
   return 'good';
+}
+
+/**
+ * 策略可用覆蓋率：只計算真的含目標交易日 K 棒的活躍股票。
+ * 長期停牌／退市不放進分母，避免它們永久壓低市場覆蓋率。
+ */
+export function calculateTargetDateCoverage(
+  totalStocks: number,
+  stocksCurrent: number,
+  stocksPermanentStale: number,
+): number {
+  const activeStocks = Math.max(0, totalStocks - stocksPermanentStale);
+  return activeStocks > 0 ? stocksCurrent / activeStocks : 0;
 }
 
 /** 計算 180 天前的日期字串，用於排除歷史結構性缺口 */
@@ -180,6 +197,7 @@ export async function verifyDownload(
   const permanentStaleDetails: VerifyStaleDetail[] = [];
   const failedSymbols: string[] = [];
   let readFailed = 0;
+  let stocksCurrent = 0;
   const cutoff = recentCutoffDate(targetDate);
 
   // 批次讀取+校驗（避免一次讀太多 Blob）
@@ -202,6 +220,7 @@ export async function verifyDownload(
         // lastDate 檢查
         // 用交易日差距，避免跨連假誤判為 stale
         const behind = tradingDaysBetween(data.lastDate, targetDate, market);
+        if (data.lastDate >= targetDate) stocksCurrent++;
         if (behind >= permanentStaleDays) {
           // 落後超過 14 個交易日 → 推定永久停牌/退市
           permanentStaleDetails.push({
@@ -225,10 +244,19 @@ export async function verifyDownload(
   }
 
   const totalStocks = symbols.length;
-  // Coverage = 實際有 L1 數據的股票比例（不看今天下載是否成功）
-  // 避免 provider 配額爆/網路斷線時誤判 L1 本體異常
-  const stocksWithL1 = totalStocks - failedSymbols.length - readFailed;
-  const coverageRate = totalStocks > 0 ? stocksWithL1 / totalStocks : 0;
+  // Coverage 必須代表「策略今天實際能用的資料」，不能只算檔案存在。
+  // 舊算法讓昨天/前天的 K 線也算 covered，曾使 CN 僅約 76% 到最新日仍通過掃描守門。
+  // 已確認的長期停牌/退市不列入分母；其餘股票必須真的含 targetDate 才算 covered。
+  const activeStocks = totalStocks - permanentStaleDetails.length;
+  const coverageRate = calculateTargetDateCoverage(
+    totalStocks,
+    stocksCurrent,
+    permanentStaleDetails.length,
+  );
+  const stocksMissingTargetDate = Math.max(
+    0,
+    activeStocks - stocksCurrent - failedSymbols.length - readFailed,
+  );
 
   // 近期 gap：最後一個 gap 的 toDate >= cutoff（排除資料收集起始點的歷史結構性缺口）
   const recentGapDetails = gapDetails.filter(g => {
@@ -246,6 +274,8 @@ export async function verifyDownload(
       downloadFailed: stats.failed,
       downloadSkipped: stats.skipped,
       coverageRate: +coverageRate.toFixed(4),
+      stocksCurrent,
+      stocksMissingTargetDate,
       stocksWithGaps: gapDetails.length,
       stocksWithRecentGaps: recentGapDetails.length,
       stocksStale: staleDetails.length,

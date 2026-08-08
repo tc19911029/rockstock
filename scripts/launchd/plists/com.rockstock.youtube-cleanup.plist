@@ -9,7 +9,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <string>export PATH="$HOME/.local/node-22/bin:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; cd /Users/tc/Desktop/rockstock &amp;&amp; /Users/tc/.local/node-22/bin/npx tsx scripts/cleanup-old-data.ts</string>
+    <string>export PATH="$HOME/.local/node-22/bin:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; cd /Users/tc/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/cleanup-old-data.ts</string>
   </array>
 
   <!--

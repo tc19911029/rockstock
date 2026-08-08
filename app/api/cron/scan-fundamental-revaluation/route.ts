@@ -27,6 +27,7 @@ import {
   writeDecideQueue,
   type DecideQueueItem,
 } from '@/lib/strategy/fundamentalRevaluation/storage';
+import { validateFundamentalSession } from '@/lib/strategy/fundamentalRevaluation/validation';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -55,6 +56,15 @@ export async function GET(req: NextRequest) {
     console.info(`[cron/scan-fundamental-revaluation] start ${market} ${date}`);
 
     const session = await runFundamentalRevaluation({ market, date, topN });
+
+    const validation = validateFundamentalSession(session);
+    if (!validation.valid) {
+      console.error(`[cron/scan-fundamental-revaluation] ${market} ${date} invalid: ${validation.reason}`);
+      return apiError(
+        `fundamental-revaluation invalid: ${validation.reason}; 不寫入正式結果`,
+        503,
+      );
+    }
 
     // 寫盤
     await saveSession(session);

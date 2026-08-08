@@ -15,7 +15,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/npx tsx scripts/eod-settle.ts --market CN --date "$(/bin/date +%Y-%m-%d)" --apply --concurrency 10 &gt;&gt; /tmp/rockstock-eod-settle-CN.log 2&gt;&amp;1</string>
+    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/eod-settle.ts --market CN --date "$(/bin/date +%Y-%m-%d)" --apply --concurrency 10 &gt;&gt; /tmp/rockstock-eod-settle-CN.log 2&gt;&amp;1</string>
   </array>
 
   <key>StartCalendarInterval</key>

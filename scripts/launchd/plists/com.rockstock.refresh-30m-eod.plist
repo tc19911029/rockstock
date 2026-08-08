@@ -23,7 +23,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/npx tsx scripts/backfill-30m-warmup.ts --top 500 &gt;&gt; /tmp/rockstock-refresh-30m-eod.log 2&gt;&amp;1</string>
+    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/backfill-30m-warmup.ts --top 500 &gt;&gt; /tmp/rockstock-refresh-30m-eod.log 2&gt;&amp;1</string>
   </array>
 
   <key>StartCalendarInterval</key>

@@ -47,16 +47,7 @@ export async function GET(req: NextRequest) {
       const auth = req.headers.get('authorization') ?? '';
       fetch(`${proto}://${host}/api/cron/download-candles?market=TW`, { headers: { authorization: auth } })
         .catch(err => console.error('[cron/scan-tw] auto-trigger download failed:', err));
-      return apiOk({
-        skipped: true,
-        alert: true,
-        alertLevel: 'high',
-        reason: 'l1-coverage-insufficient',
-        detail: coverage.reason,
-        coverageRate: coverage.coverageRate,
-        action: 'auto-recovery-triggered',
-        date,
-      });
+      return apiError(`TW ${date} L1 coverage insufficient: ${coverage.reason}; auto-recovery-triggered`, 503);
     }
     console.info(`[cron/scan-tw] L1 覆蓋率守門通過: ${(coverage.coverageRate * 100).toFixed(1)}% (health=${coverage.health})`);
   }

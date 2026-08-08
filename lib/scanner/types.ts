@@ -616,7 +616,7 @@ export interface ScanSession {
    *
    * 未填 = A 六條件
    */
-  buyMethod?: 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R';
+  buyMethod?: 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'V' | 'W' | 'X' | 'Y';
   /** Schema 版本（議題 83）；未填視為 v11 */
   schemaVersion?: 'v11' | 'v12';
   /** 時間框架：'30m' = 六條件(30分K)盤中掃描；未填 = 日K。決定 sessionMtfMode → 'daily30' */
