@@ -95,7 +95,7 @@ export interface TwFundamentalBundle {
   todayPrice: number;
   priceDate: string;
 
-  // 月營收（FinMind TaiwanStockMonthRevenue）
+  // 月營收（本地歷史快照 + TWSE/TPEx 官方最新資料）
   monthlyRevenue: MonthlyRevenueRow[];
   latestMonthRevenueYoY: number | null;
   latestMonthRevenueMoM: number | null;
@@ -105,7 +105,7 @@ export interface TwFundamentalBundle {
   isLatest12mHigh: boolean;
   isAllTimeHigh: boolean;
 
-  // 季報（FinMind TaiwanStockFinancialStatements）
+  // 季報（本地歷史快照 + TWSE/TPEx 官方最新資料）
   quarters: QuarterRow[];
   latestQuarterEps: number | null;
   latestQuarterEpsYoY: number | null;
@@ -227,6 +227,8 @@ export interface FundamentalRevaluationSession {
   strategyVersion: string;
   computedAt: string;
   totalCandidates: number;
+  /** 實際完成 pipeline 評估的檔數；不能由截斷後的 Top 100／排除清單反推。 */
+  evaluatedCount?: number;
   top100: FundamentalRevaluationResult[];
   exclusionLists: {
     oneTimeGainExcluded: Array<{ symbol: string; name: string; reason: string }>;

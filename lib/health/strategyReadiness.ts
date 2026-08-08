@@ -5,6 +5,8 @@ export interface StrategyArtifactStatus {
   key: string;
   ready: boolean;
   reason?: string;
+  /** false = 已知尚未支援，顯示狀態但不納入每日 readiness 分母 */
+  required?: boolean;
 }
 
 export interface StrategyReadiness {
@@ -23,14 +25,15 @@ export function summarizeStrategyArtifacts(
   date: string,
   artifacts: StrategyArtifactStatus[],
 ): StrategyReadiness {
-  const missing = artifacts.filter((a) => !a.ready && a.reason === 'missing').map((a) => a.key);
-  const invalid = artifacts.filter((a) => !a.ready && a.reason !== 'missing').map((a) => a.key);
-  const readyCount = artifacts.filter((a) => a.ready).length;
+  const required = artifacts.filter((artifact) => artifact.required !== false);
+  const missing = required.filter((a) => !a.ready && a.reason === 'missing').map((a) => a.key);
+  const invalid = required.filter((a) => !a.ready && a.reason !== 'missing').map((a) => a.key);
+  const readyCount = required.filter((a) => a.ready).length;
   return {
     date,
-    status: readyCount === artifacts.length ? 'ready' : 'partial',
+    status: readyCount === required.length ? 'ready' : 'partial',
     readyCount,
-    requiredCount: artifacts.length,
+    requiredCount: required.length,
     missing,
     invalid,
     artifacts,
@@ -71,18 +74,22 @@ export async function loadStrategyReadiness(
     ...(!sanse ? { reason: 'missing' } : sanse.evaluated <= 0 ? { reason: 'evaluated=0' } : {}),
   });
 
-  const fundamental = await (await import('@/lib/strategy/fundamentalRevaluation/storage'))
-    .loadSession(market, date);
-  const fundamentalValidation = fundamental ? validateFundamentalSession(fundamental) : null;
-  artifacts.push({
-    key: 'V',
-    ready: fundamentalValidation?.valid === true,
-    ...(!fundamental
-      ? { reason: 'missing' }
-      : !fundamentalValidation?.valid
-        ? { reason: fundamentalValidation?.reason ?? 'invalid' }
-        : {}),
-  });
+  if (market === 'TW') {
+    const fundamental = await (await import('@/lib/strategy/fundamentalRevaluation/storage'))
+      .loadSession(market, date);
+    const fundamentalValidation = fundamental ? validateFundamentalSession(fundamental) : null;
+    artifacts.push({
+      key: 'V',
+      ready: fundamentalValidation?.valid === true,
+      ...(!fundamental
+        ? { reason: 'missing' }
+        : !fundamentalValidation?.valid
+          ? { reason: fundamentalValidation?.reason ?? 'invalid' }
+          : {}),
+    });
+  } else {
+    artifacts.push({ key: 'V', ready: false, required: false, reason: 'unsupported' });
+  }
 
   return summarizeStrategyArtifacts(date, artifacts.sort((a, b) => a.key.localeCompare(b.key)));
 }

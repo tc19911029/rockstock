@@ -7,8 +7,8 @@
  *             EastMoney push2 較鬆，concurrency=16 OK。
  *
  * Universe（粗篩）：
- *   - 從 Layer 2 取全市場快照，沒快照退化為 scanner.getStockList()
- *   - 用「今日成交額」取前 300（避免冷門股、且控制 API 用量）
+ *   - 從 sealed L1 計算指定日期的 20 日均成交額排名
+ *   - 取前 300（避免冷門股、且控制資料處理量）
  */
 
 import { runTwSingle, type TwPipelineInput } from './twPipeline';
@@ -28,7 +28,7 @@ const VERSION_TW = 'tw-fundamental-revaluation@1.0.0';
 const VERSION_CN = 'cn-fundamental-revaluation@1.0.0';
 
 // ────────────────────────────────────────────────────────────────────────────
-// Universe loader — 從 Layer 2 取「成交額排名前 N」
+// Universe loader — 從 sealed L1 取「成交額排名前 N」
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface UniverseEntry {
@@ -39,67 +39,38 @@ export interface UniverseEntry {
   industryCategory?: string | null;
 }
 
-async function loadSnapshotMap(market: 'TW' | 'CN', date: string): Promise<Map<string, { close: number; volume: number; name: string }>> {
-  const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
-  const snap = await readIntradaySnapshot(market, date).catch(() => null);
-  const map = new Map<string, { close: number; volume: number; name: string }>();
-  if (!snap) return map;
-  for (const q of snap.quotes) {
-    map.set(q.symbol, { close: q.close, volume: q.volume, name: q.name });
-  }
-  return map;
-}
-
-async function loadUniverseTw(date: string, topN: number): Promise<UniverseEntry[]> {
-  const { TaiwanScanner } = await import('@/lib/scanner/TaiwanScanner');
-  const scanner = new TaiwanScanner();
+async function loadUniverse(market: 'TW' | 'CN', date: string, topN: number): Promise<UniverseEntry[]> {
+  const [{ computeTurnoverRankAsOfDate }, { readCandleFile }] = await Promise.all([
+    import('@/lib/scanner/TurnoverRank'),
+    import('@/lib/datasource/CandleStorageAdapter'),
+  ]);
+  const scanner = market === 'TW'
+    ? new (await import('@/lib/scanner/TaiwanScanner')).TaiwanScanner()
+    : new (await import('@/lib/scanner/ChinaScanner')).ChinaScanner();
   const stockList = await scanner.getStockList();
-  const snapshot = await loadSnapshotMap('TW', date);
-
-  const items: Array<{ entry: UniverseEntry; turnover: number }> = [];
-  for (const s of stockList) {
-    const code = s.symbol.replace(/\.(TW|TWO)$/i, '');
-    const q = snapshot.get(code);
-    if (!q || q.close <= 0 || q.volume <= 0) continue;
-    const turnover = q.close * q.volume;
-    items.push({
-      entry: {
-        symbol: code,
-        name: s.name,
-        todayPrice: q.close,
-        averageTurnover20d: turnover,
-      },
-      turnover,
-    });
+  const ranks = await computeTurnoverRankAsOfDate(market, stockList, date, topN);
+  const selected = stockList
+    .filter((stock) => ranks.has(stock.symbol))
+    .sort((a, b) => (ranks.get(a.symbol) ?? Infinity) - (ranks.get(b.symbol) ?? Infinity));
+  const entries: UniverseEntry[] = [];
+  const concurrency = 30;
+  for (let i = 0; i < selected.length; i += concurrency) {
+    const batch = selected.slice(i, i + concurrency);
+    const settled = await Promise.all(batch.map(async (stock) => {
+      const file = await readCandleFile(stock.symbol, market);
+      const candle = file?.candles.find((row) => row.date.slice(0, 10) === date);
+      if (!candle || candle.close <= 0) return null;
+      return {
+        symbol: stock.symbol.replace(market === 'TW' ? /\.(TW|TWO)$/i : /\.(SS|SZ)$/i, ''),
+        name: stock.name,
+        todayPrice: candle.close,
+        // 已由 20 日均成交額排名選過；不再拿單日成交額冒充 20 日均值。
+        averageTurnover20d: null,
+      } satisfies UniverseEntry;
+    }));
+    for (const entry of settled) if (entry) entries.push(entry);
   }
-  items.sort((a, b) => b.turnover - a.turnover);
-  return items.slice(0, topN).map((x) => x.entry);
-}
-
-async function loadUniverseCn(date: string, topN: number): Promise<UniverseEntry[]> {
-  const { ChinaScanner } = await import('@/lib/scanner/ChinaScanner');
-  const scanner = new ChinaScanner();
-  const stockList = await scanner.getStockList();
-  const snapshot = await loadSnapshotMap('CN', date);
-
-  const items: Array<{ entry: UniverseEntry; turnover: number }> = [];
-  for (const s of stockList) {
-    const code = s.symbol.replace(/\.(SS|SZ)$/i, '');
-    const q = snapshot.get(code);
-    if (!q || q.close <= 0 || q.volume <= 0) continue;
-    const turnover = q.close * q.volume;
-    items.push({
-      entry: {
-        symbol: code,
-        name: s.name,
-        todayPrice: q.close,
-        averageTurnover20d: turnover,
-      },
-      turnover,
-    });
-  }
-  items.sort((a, b) => b.turnover - a.turnover);
-  return items.slice(0, topN).map((x) => x.entry);
+  return entries.slice(0, topN);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -150,7 +121,7 @@ export async function runFundamentalRevaluation(
   const minCompleteness = opt.minDataCompleteness ?? 0.5;
 
   const universe =
-    opt.market === 'TW' ? await loadUniverseTw(opt.date, topN) : await loadUniverseCn(opt.date, topN);
+    await loadUniverse(opt.market, opt.date, topN);
 
   console.info(`[fundamental-revaluation] ${opt.market} universe size: ${universe.length}`);
 
@@ -232,6 +203,7 @@ export async function runFundamentalRevaluation(
     strategyVersion: opt.market === 'TW' ? VERSION_TW : VERSION_CN,
     computedAt: new Date().toISOString(),
     totalCandidates: universe.length,
+    evaluatedCount: results.length,
     top100,
     exclusionLists: {
       oneTimeGainExcluded: oneTimeGainExcluded.slice(0, 50),

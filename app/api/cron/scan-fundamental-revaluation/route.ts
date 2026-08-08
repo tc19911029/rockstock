@@ -28,6 +28,7 @@ import {
   type DecideQueueItem,
 } from '@/lib/strategy/fundamentalRevaluation/storage';
 import { validateFundamentalSession } from '@/lib/strategy/fundamentalRevaluation/validation';
+import { assertL1Coverage } from '@/lib/scanner/coverageGuard';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -47,6 +48,23 @@ export async function GET(req: NextRequest) {
 
   if (!isTradingDay(date, market)) {
     return apiOk({ skipped: true, reason: 'non-trading day', date, market });
+  }
+
+  // CN V 尚未具備可持久化、可驗證的基本面快照來源；歷史正式輸出皆為空。
+  // 明確標成 unsupported，避免把「未實作」偽裝成成功或讓全站 health 永久紅燈。
+  if (market === 'CN') {
+    return apiOk({
+      skipped: true,
+      unsupported: true,
+      reason: 'CN fundamental-revaluation requires a persisted CN fundamentals snapshot source',
+      date,
+      market,
+    });
+  }
+
+  const coverage = await assertL1Coverage(market, date);
+  if (!coverage.ok) {
+    return apiError(`${market} ${date} L1 coverage insufficient: ${coverage.reason}`, 503);
   }
 
   const topNParam = req.nextUrl.searchParams.get('topN');
@@ -114,6 +132,7 @@ export async function GET(req: NextRequest) {
       queueDir: queue.dir,
       queueCount: queue.count,
       computedAt: session.computedAt,
+      dataSource: 'official-bulk+local-snapshot',
     });
   } catch (err) {
     console.error('[cron/scan-fundamental-revaluation] failed:', err);

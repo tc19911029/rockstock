@@ -3,7 +3,7 @@
  *
  * 流程：
  *   1. 硬條件過濾（早期淘汰）
- *   2. 並行取資料（FinMind 月營收/季報/股數/資產負債/產業 + MOPS 稀釋）
+ *   2. 取資料（TWSE/TPEx 官方 bulk + 本地歷史快照 + MOPS 稀釋）
  *   3. 推導旗（一次性收益 / 景氣高峰 / 增資稀釋 等）
  *   4. 推估 Forward EPS（保守/中性/樂觀三情境，reuse lib/valuation/scenario.ts）
  *   5. 評分（4 × 25）
@@ -15,15 +15,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import {
-  getMonthlyRevenue,
-  getQuarterlyHistory,
-  getSharesIssued,
-  getBalanceSheet,
-  getStockInfo,
-  type RevenueRow,
-  type QuarterlyHistoryRow,
-} from '@/lib/datasource/FinMindClient';
+import type { RevenueRow, QuarterlyHistoryRow } from '@/lib/datasource/FinMindClient';
+import { loadTwFundamentalSnapshot } from './twSnapshotSource';
 
 import { computeTTM, computeTTMPe } from '@/lib/valuation/ttm';
 import { computeAllScenarios } from '@/lib/valuation/scenario';
@@ -395,15 +388,12 @@ export async function runTwSingle(
   const filter = applyTwHardFilter(inp);
   if (!filter.passed) return null;
 
-  // 2. 並行取資料
-  const [revenueRows, quarterRows, sharesRaw, balance, info, dilution] = await Promise.all([
-    getMonthlyRevenue(inp.symbol, 24).catch(() => [] as RevenueRow[]),
-    getQuarterlyHistory(inp.symbol, 8).catch(() => [] as QuarterlyHistoryRow[]),
-    getSharesIssued(inp.symbol).catch(() => null),
-    getBalanceSheet(inp.symbol).catch(() => null),
-    getStockInfo(inp.symbol).catch(() => null),
+  // 2. 官方 bulk + 本地歷史快照。正常掃描不再逐檔呼叫 FinMind。
+  const [snapshot, dilution] = await Promise.all([
+    loadTwFundamentalSnapshot(inp.symbol),
     readDilution(inp.symbol),
   ]);
+  const { revenueRows, quarterRows, shares: sharesRaw, balance, info } = snapshot;
 
   // 3. 衍生
   const monthlyDerived = deriveMonthly(revenueRows);

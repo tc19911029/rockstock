@@ -15,7 +15,9 @@ export function validateFundamentalSession(
 ): FundamentalSessionValidation {
   const excluded = Object.values(session.exclusionLists)
     .reduce((sum, entries) => sum + entries.length, 0);
-  const evaluatedCount = session.top100.length + excluded;
+  // 新格式直接保存實際 pipeline 完成數；舊檔才使用歷史近似值相容讀取。
+  // 排除清單可能互相重疊且各自截斷 50，不能作為新結果的真實分母。
+  const evaluatedCount = session.evaluatedCount ?? session.top100.length + excluded;
   const evaluatedRatio = session.totalCandidates > 0
     ? evaluatedCount / session.totalCandidates
     : 0;

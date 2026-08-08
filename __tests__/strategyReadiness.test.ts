@@ -11,4 +11,14 @@ describe('strategy readiness summary', () => {
       missing: ['B'], invalid: ['V'],
     });
   });
+
+  test('unsupported artifact 保留顯示但不納入 readiness 分母', () => {
+    expect(summarizeStrategyArtifacts('2026-08-07', [
+      { key: 'A', ready: true },
+      { key: 'V', ready: false, required: false, reason: 'unsupported' },
+    ])).toMatchObject({
+      status: 'ready', readyCount: 1, requiredCount: 1,
+      missing: [], invalid: [],
+    });
+  });
 });

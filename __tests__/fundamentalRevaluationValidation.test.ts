@@ -1,12 +1,18 @@
 import { validateFundamentalSession } from '@/lib/strategy/fundamentalRevaluation/validation';
 
-function session(totalCandidates: number, topCount: number, insufficientCount: number) {
+function session(
+  totalCandidates: number,
+  topCount: number,
+  insufficientCount: number,
+  evaluatedCount?: number,
+) {
   return {
     market: 'TW' as const,
     date: '2026-08-07',
     strategyVersion: 'test',
     computedAt: '2026-08-07T10:00:00Z',
     totalCandidates,
+    evaluatedCount,
     top100: Array.from({ length: topCount }, () => ({})),
     exclusionLists: {
       oneTimeGainExcluded: [],
@@ -29,5 +35,13 @@ describe('validateFundamentalSession', () => {
 
   test('合理母體且過半完成評估才有效', () => {
     expect(validateFundamentalSession(session(300, 100, 80))).toMatchObject({ valid: true, evaluatedCount: 180 });
+  });
+
+  test('新格式以實際完成數為準，不重複計入截斷且可重疊的排除名單', () => {
+    expect(validateFundamentalSession(session(300, 100, 50, 240))).toMatchObject({
+      valid: true,
+      evaluatedCount: 240,
+      evaluatedRatio: 0.8,
+    });
   });
 });
