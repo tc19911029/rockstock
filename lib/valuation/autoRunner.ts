@@ -116,11 +116,15 @@ export function normalizeValuationOutput(value: unknown, publishedAt = new Date(
   const valuationMethod = source.valuationMethod;
   if (isMutableRecord(valuationMethod)) {
     const primary = isMutableRecord(valuationMethod.primary) ? valuationMethod.primary : null;
-    const crossValidation = isMutableRecord(valuationMethod.crossValidation) ? valuationMethod.crossValidation : null;
+    const crossValidation = isMutableRecord(valuationMethod.crossValidation)
+      ? valuationMethod.crossValidation
+      : isMutableRecord(valuationMethod.crossCheck)
+        ? valuationMethod.crossCheck
+        : null;
     normalized.valuationMethod = {
       ...valuationMethod,
-      ...(valuationMethod.primaryModel == null && typeof primary?.method === 'string'
-        ? { primaryModel: primary.method }
+      ...(valuationMethod.primaryModel == null && (typeof primary?.method === 'string' || typeof primary?.name === 'string')
+        ? { primaryModel: primary.method ?? primary.name }
         : {}),
       ...(!Array.isArray(valuationMethod.crossChecks) && crossValidation
         ? { crossChecks: [crossValidation] }
@@ -277,6 +281,7 @@ export async function startValuationAnalysis(options: {
   questionPath: string;
   outputPath: string;
   repoRoot?: string;
+  force?: boolean;
 }): Promise<ValuationJobResult> {
   const { symbol, date } = options;
   if (!/^\d{4,6}$/.test(symbol) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -308,8 +313,25 @@ export async function startValuationAnalysis(options: {
     };
   }
 
-  // Agent 已正常完成、但舊版格式閘門拒絕時，先用目前的正規化與驗證規則安全恢復，避免重跑昂貴查核。
-  if (previous?.status === 'failed' && previous.exitCode === 0) {
+  if (!options.force && previous?.status === 'completed') {
+    const raw = await fs.readFile(finalOutputPath, 'utf-8').catch(() => null);
+    if (raw) {
+      const quality = validateValuationOutput(JSON.parse(raw));
+      if (quality.valid) {
+        return {
+          ok: true,
+          status: 'completed',
+          detail: '深度估值已完成並可直接載入',
+          pid: previous.pid,
+          logPath,
+        };
+      }
+    }
+  }
+
+  // 舊工作已有 staged JSON、但曾被舊版格式閘門拒絕或程序中斷時，先重新嚴格驗證；
+  // 只有通過目前契約才安全恢復，避免把已完成的昂貴查核整份重跑。
+  if (previous?.status === 'failed' || (previous?.status === 'running' && !isProcessAlive(previous.pid))) {
     const recoverable = await findRecoverableOutput(jobBase, previous.stagedOutputPath);
     for (const stagedOutputPath of recoverable) {
       try {
@@ -416,4 +438,30 @@ export async function startValuationAnalysis(options: {
   } finally {
     closeSync(logFd);
   }
+}
+
+export async function getValuationAnalysisStatus(options: { symbol: string; date: string }): Promise<{
+  status: 'running' | 'completed' | 'failed';
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+} | null> {
+  if (!/^\d{4,6}$/.test(options.symbol) || !/^\d{4}-\d{2}-\d{2}$/.test(options.date)) return null;
+  const statusPath = path.join(JOB_DIR, `${options.symbol}-${options.date}.status.json`);
+  const status = await readJobStatus(statusPath);
+  if (!status) return null;
+  if (status.status === 'running' && !isProcessAlive(status.pid)) {
+    return {
+      status: 'failed',
+      startedAt: status.startedAt,
+      finishedAt: status.finishedAt,
+      error: '背景分析程序已停止，請重新執行',
+    };
+  }
+  return {
+    status: status.status,
+    startedAt: status.startedAt,
+    finishedAt: status.finishedAt,
+    error: status.error,
+  };
 }

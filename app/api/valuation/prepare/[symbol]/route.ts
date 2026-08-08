@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { buildValuationInputsCN, buildValuationInputsTW } from '@/lib/agents/agents/fundamentalAgent';
-import { startValuationAnalysis } from '@/lib/valuation/autoRunner';
+import { getValuationAnalysisStatus, startValuationAnalysis } from '@/lib/valuation/autoRunner';
 import { detectValuationMarket } from '@/lib/valuation/market';
 
 export const runtime = 'nodejs';
@@ -25,9 +25,24 @@ export const maxDuration = 60;
 const querySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   dryRun: z.enum(['0', '1']).default('0'),
+  force: z.enum(['0', '1']).default('0'),
 });
 
 const TMP_DIR = '/tmp/rockstock-valuation';
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ symbol: string }> },
+) {
+  const { symbol: rawSymbol } = await params;
+  const bareSymbol = rawSymbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const date = new URL(req.url).searchParams.get('date')
+    ?? new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+  if (!/^\d{4,6}$/.test(bareSymbol) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return apiError('股票代號或日期格式不合法', 400);
+  }
+  return apiOk({ job: await getValuationAnalysisStatus({ symbol: bareSymbol, date }) });
+}
 
 export async function POST(
   req: NextRequest,
@@ -151,6 +166,7 @@ export async function POST(
       date,
       questionPath,
       outputPath,
+      force: parsed.data.force === '1',
     });
     console.log(`[valuation/prepare] background valuation ${bareSymbol}: ${analysisJob.ok ? analysisJob.status : 'fail'} — ${analysisJob.detail}`);
 

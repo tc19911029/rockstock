@@ -28,8 +28,8 @@ function isRecord(value: unknown): value is Record<string, any> {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function closeEnough(actual: number, expected: number, relativeTolerance = 0.005): boolean {
-  return Math.abs(actual - expected) <= Math.max(0.02, Math.abs(expected) * relativeTolerance);
+function closeEnough(actual: number, expected: number, relativeTolerance = 0.005, absoluteTolerance = 0.02): boolean {
+  return Math.abs(actual - expected) <= Math.max(absoluteTolerance, Math.abs(expected) * relativeTolerance);
 }
 
 /**
@@ -62,8 +62,15 @@ export function validateValuationOutput(value: unknown, now = new Date()): Valua
     add('error', 'missing_price_date', '缺少報價真正所屬交易日', 'currentPriceContext.priceDate');
   }
 
+  const ttmEps = isRecord(priceContext) && Number.isFinite(priceContext.ttmEps)
+    ? Number(priceContext.ttmEps)
+    : null;
   if (!Number.isFinite(value.ttmPe) || value.ttmPe <= 0) {
-    add('error', 'invalid_ttm_pe', 'TTM PE 必須是正數', 'ttmPe');
+    if (ttmEps != null && ttmEps <= 0) {
+      add('warning', 'ttm_pe_not_applicable', 'TTM EPS 為負，歷史 PE 不適用；應使用正常化前瞻估值或非 PE 模型', 'ttmPe');
+    } else {
+      add('error', 'invalid_ttm_pe', 'TTM PE 必須是正數；若公司虧損，currentPriceContext.ttmEps 必須保留負值以標示不適用', 'ttmPe');
+    }
   }
 
   const scenarios = value.scenarios;
@@ -101,7 +108,8 @@ export function validateValuationOutput(value: unknown, now = new Date()): Valua
     }
     if (Number.isFinite(scenario.valuationEps) && Number.isFinite(scenario.fairPe) && Number.isFinite(scenario.fairPrice)) {
       const expected = scenario.valuationEps * scenario.fairPe;
-      if (!closeEnough(scenario.fairPrice, expected)) {
+      // 陸股合理價依 0.1 元呈現；半個 tick 的四捨五入差不應誤判為算術錯誤。
+      if (!closeEnough(scenario.fairPrice, expected, 0.005, 0.051)) {
         add('error', 'fair_price_mismatch', `${path} 合理價不等於估值 EPS × 合理 PE`, `${path}.fairPrice`);
       }
     }
@@ -129,10 +137,12 @@ export function validateValuationOutput(value: unknown, now = new Date()): Valua
   }
   const valuationMethod = value.valuationMethod;
   const hasPrimaryModel = isRecord(valuationMethod)
-    && (Boolean(valuationMethod.primaryModel) || (isRecord(valuationMethod.primary) && Boolean(valuationMethod.primary.method)));
+    && (Boolean(valuationMethod.primaryModel)
+      || (isRecord(valuationMethod.primary) && Boolean(valuationMethod.primary.method || valuationMethod.primary.name)));
   const hasCrossCheck = isRecord(valuationMethod)
     && ((Array.isArray(valuationMethod.crossChecks) && valuationMethod.crossChecks.length > 0)
-      || isRecord(valuationMethod.crossValidation));
+      || isRecord(valuationMethod.crossValidation)
+      || isRecord(valuationMethod.crossCheck));
   if (!hasPrimaryModel || !hasCrossCheck) {
     add('warning', 'missing_cross_check_model', '缺少產業適配的第二估值法交叉驗證', 'valuationMethod');
   }

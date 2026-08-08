@@ -195,7 +195,9 @@ function ValuationScenarios({
         <div className="grid grid-cols-2 gap-1.5 rounded border border-foreground/10 bg-background/20 p-2">
           <div>
             <div className="text-[9px] text-muted-foreground">TTM PE · 過去四季</div>
-            <div className="font-mono text-xs font-semibold text-foreground/90">{liveTtmPe.toFixed(2)} 倍</div>
+            <div className="font-mono text-xs font-semibold text-foreground/90">
+              {liveTtmPe > 0 ? `${liveTtmPe.toFixed(2)} 倍` : '不適用（TTM EPS≤0）'}
+            </div>
           </div>
           <div>
             <div className="text-[9px] text-muted-foreground">NTM PE · 未來十二月</div>
@@ -492,7 +494,8 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
     setPhase('preparing');
     setMessage(null);
     try {
-      const res = await fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}`, { method: 'POST' });
+      const force = currentValuation?.scenarios ? '1' : '0';
+      const res = await fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}?force=${force}`, { method: 'POST' });
       const j = await res.json();
       if (!j.ok) {
         setPhase('error');
@@ -518,7 +521,7 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
     stopPolling();
     const start = Date.now();
     const MAX_MS = 15 * 60 * 1000;  // 深度查核同業與公司行動時可能超過 5 分鐘
-    pollTimer.current = setInterval(async () => {
+    const poll = async () => {
       if (Date.now() - start > MAX_MS) {
         stopPolling();
         setPhase('error');
@@ -527,17 +530,28 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
       }
       try {
         const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-        const res = await fetch(`/api/valuation/${encodeURIComponent(symbol)}?date=${today}&_=${Date.now()}`, { cache: 'no-store' });
-        const j = await res.json();
+        const [valuationRes, statusRes] = await Promise.all([
+          fetch(`/api/valuation/${encodeURIComponent(symbol)}?date=${today}&_=${Date.now()}`, { cache: 'no-store' }),
+          fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}?date=${today}&_=${Date.now()}`, { cache: 'no-store' }),
+        ]);
+        const [j, statusJson] = await Promise.all([valuationRes.json(), statusRes.json()]);
         const isNewResult = j.ok && j.valuation && j.date === today && (!previousUpdatedAt || j.updatedAt !== previousUpdatedAt);
         if (isNewResult) {
           stopPolling();
           setPhase('idle');
           setMessage('估值已更新，下方情境已套用最新結果。');
           onValuationReady({ ...j.valuation, date: j.date, ageDays: j.ageDays, updatedAt: j.updatedAt, quality: j.quality });
+          return;
+        }
+        if (statusJson?.job?.status === 'failed') {
+          stopPolling();
+          setPhase('error');
+          setMessage(`背景估值未通過：${statusJson.job.error ?? '分析程序已停止'}。請重新執行。`);
         }
       } catch { /* 繼續 poll */ }
-    }, 5000);  // 每 5 秒 check 一次
+    };
+    pollTimer.current = setInterval(() => { void poll(); }, 5000);  // 每 5 秒 check 一次
+    void poll(); // 已完成或已有可用快照時立即套用，不必先空等 5 秒。
   };
 
   const busy = phase === 'preparing' || phase === 'waiting';
