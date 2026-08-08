@@ -4,7 +4,7 @@
  * 為單檔股票準備估值推估的 question payload：
  *   - 抓 TTM EPS / quarterly history / monthly revenue / shares / 產業模板 / 現價
  *   - 寫 /tmp/rockstock-valuation/{symbol}-{date}-question.json
- *   - 使用者在 Claude Code 對話內輸入 `/valuation {symbol}` → skill 讀檔上網查 → 寫 data/valuation/{date}/{symbol}.json
+ *   - 由 Rockstar 內建 Codex 背景工作執行 valuation skill → 寫 data/valuation/{date}/{symbol}.json
  *
  * 依市場走 buildValuationInputsTW / buildValuationInputsCN（fundamentalAgent 內既有）。
  */
@@ -14,8 +14,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { buildValuationInputsCN, buildValuationInputsTW } from '@/lib/agents/agents/fundamentalAgent';
-import { triggerSkillKeystroke } from '@/lib/ai/skillAutoTrigger';
+import { startValuationAnalysis } from '@/lib/valuation/autoRunner';
 import { detectValuationMarket } from '@/lib/valuation/market';
 
 export const runtime = 'nodejs';
@@ -32,6 +33,9 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ symbol: string }> },
 ) {
+  const authError = checkSameOriginOrCron(req);
+  if (authError) return authError;
+
   const { symbol: rawSymbol } = await params;
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
@@ -141,21 +145,27 @@ export async function POST(
     const questionPath = path.join(TMP_DIR, `${bareSymbol}-${date}-question.json`);
     await fs.writeFile(questionPath, JSON.stringify(question, null, 2), 'utf-8');
 
-    // 自動觸發 skill — 透過 macOS automation 切到 Terminal/iTerm 內任一 claude session 注入 /valuation {symbol}
-    const trigger = await triggerSkillKeystroke(`/valuation ${bareSymbol}`);
-    console.log(`[valuation/prepare] auto-trigger /valuation ${bareSymbol}: ${trigger.ok ? 'OK' : 'fail — ' + trigger.detail}`);
+    // 直接由 Rockstar 啟動 headless Codex；不依賴 Terminal/iTerm 視窗或人工輸入指令。
+    const analysisJob = await startValuationAnalysis({
+      symbol: bareSymbol,
+      date,
+      questionPath,
+      outputPath,
+    });
+    console.log(`[valuation/prepare] background valuation ${bareSymbol}: ${analysisJob.ok ? analysisJob.status : 'fail'} — ${analysisJob.detail}`);
 
     return apiOk({
       questionPath,
       outputPath,
-      skillInvocation: `/valuation ${bareSymbol}`,
       ttmEps: valuationInputs.ttmEps,
       ttmPe: valuationInputs.ttmPe,
       currentPrice: valuationInputs.currentPrice,
-      autoTrigger: trigger,
-      message: trigger.ok
-        ? `✓ 已自動觸發 /valuation ${bareSymbol}，請看 Claude session 內進度。`
-        : `Question 已寫 ${questionPath}。自動觸發失敗（${trigger.detail}）— 請手動在 Claude 對話內輸入 /valuation ${bareSymbol}`,
+      analysisJob,
+      // 保留舊欄位一版，避免尚未更新的前端把成功工作誤判成失敗。
+      autoTrigger: { ok: analysisJob.ok, detail: analysisJob.detail },
+      message: analysisJob.ok
+        ? `Rockstar 已在背景執行 ${bareSymbol} 深度估值，不需要開啟 Terminal。`
+        : `估值資料已整理，但內建分析引擎啟動失敗：${analysisJob.detail}`,
     });
   } catch (e) {
     return apiError((e as Error).message);

@@ -22,6 +22,8 @@ const REQUIRED_NUMBERS = [
   'valuationEps', 'forwardPe', 'fairPe', 'fairPrice', 'upside',
 ] as const;
 
+// Runtime validator intentionally narrows arbitrary JSON to an indexable record.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function isRecord(value: unknown): value is Record<string, any> {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -121,10 +123,17 @@ export function validateValuationOutput(value: unknown, now = new Date()): Valua
   if (includedPeers.length < 3) {
     add('warning', 'insufficient_peers', '未排除的真正可比同業少於三家', 'peerComparison.peers');
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (includedPeers.every((peer: Record<string, any>) => !Number.isFinite(peer.currentYearPe))) {
     add('warning', 'missing_forward_peer_pe', '同業缺少本年度預估 PE，只能用歷史 PE 交叉校準', 'peerComparison.peers');
   }
-  if (!isRecord(value.valuationMethod) || !value.valuationMethod.primaryModel || !Array.isArray(value.valuationMethod.crossChecks) || value.valuationMethod.crossChecks.length === 0) {
+  const valuationMethod = value.valuationMethod;
+  const hasPrimaryModel = isRecord(valuationMethod)
+    && (Boolean(valuationMethod.primaryModel) || (isRecord(valuationMethod.primary) && Boolean(valuationMethod.primary.method)));
+  const hasCrossCheck = isRecord(valuationMethod)
+    && ((Array.isArray(valuationMethod.crossChecks) && valuationMethod.crossChecks.length > 0)
+      || isRecord(valuationMethod.crossValidation));
+  if (!hasPrimaryModel || !hasCrossCheck) {
     add('warning', 'missing_cross_check_model', '缺少產業適配的第二估值法交叉驗證', 'valuationMethod');
   }
 

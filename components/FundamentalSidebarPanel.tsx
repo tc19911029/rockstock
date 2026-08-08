@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Calculator, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react';
 import type { FundamentalAnswer } from '@/lib/agents/types';
+import { mapCnFinancialsToSidebar } from '@/lib/valuation/cnSidebarFallback';
 import { detectValuationFreshness } from '@/lib/valuation/freshness';
 
 // 估值情境（悲觀/中性/樂觀）— 可來自 Multi-Agent 或獨立 valuation skill。
@@ -35,7 +36,10 @@ function ValuationScenarios({
   latestFundamentals?: RawFundamentals | null;
   quality?: ValuationOnly['quality'];
 }) {
-  const { ttmPe, monthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough, dilution, riskFlags } = valuation;
+  const { ttmPe, monthlyEpsEstimate: rawMonthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough, dilution, riskFlags } = valuation;
+  const monthlyEpsEstimate = rawMonthlyEpsEstimate && Number.isFinite(rawMonthlyEpsEstimate.estimatedEps)
+    ? rawMonthlyEpsEstimate
+    : null;
   const latestSelfReported = monthlyEpsActuals?.[0] ?? latestFundamentals?.selfReportedMonthlyActuals?.[0];
   const modelSuperseded = Boolean(
     monthlyEpsEstimate && latestSelfReported && monthlyEpsEstimate.month === latestSelfReported.period,
@@ -348,7 +352,7 @@ function PeerComparisonBlock({ comparison }: { comparison?: PeerComparison }) {
 function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, onValuationReady }: { raw: RawFundamentals; symbol: string; standaloneValuation: ValuationOnly | null; currentPrice?: number; onValuationReady: (valuation: ValuationOnly) => void }) {
   const fmt = (v: number | null | undefined, suffix = '', digits = 2) =>
     v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(digits)}${suffix}`;
-  const fmtRevenue = (v: number | undefined) => {
+  const fmtRevenue = (v: number | null | undefined) => {
     if (v == null) return '—';
     return v >= 1e8 ? `${(v / 1e8).toFixed(2)} 億` : `${(v / 1e4).toFixed(0)} 萬`;
   };
@@ -495,13 +499,14 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
         setMessage(j.error ?? '準備失敗');
         return;
       }
-      if (j.autoTrigger?.ok) {
+      const job = j.analysisJob ?? j.autoTrigger;
+      if (job?.ok) {
         setPhase('waiting');
-        setMessage('資料整理完成，深度估值運算中（通常約 1–2 分鐘）…');
+        setMessage('資料整理完成，Rockstar 正在背景執行深度估值（通常約 3–10 分鐘，不需要開啟終端）…');
         startPolling(currentValuation?.updatedAt);
       } else {
         setPhase('error');
-        setMessage(`估值工作已建立，但自動分析未啟動：${j.autoTrigger?.detail ?? '未知原因'}。可在分析終端輸入 ${j.skillInvocation}。`);
+        setMessage(`估值資料已整理，但 Rockstar 內建分析未啟動：${job?.detail ?? '未知原因'}。請稍後重試。`);
       }
     } catch (e) {
       setPhase('error');
@@ -512,12 +517,12 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
   const startPolling = (previousUpdatedAt?: string) => {
     stopPolling();
     const start = Date.now();
-    const MAX_MS = 5 * 60 * 1000;  // 5 分鐘 timeout
+    const MAX_MS = 15 * 60 * 1000;  // 深度查核同業與公司行動時可能超過 5 分鐘
     pollTimer.current = setInterval(async () => {
       if (Date.now() - start > MAX_MS) {
         stopPolling();
         setPhase('error');
-        setMessage('等待超過 5 分鐘。分析可能仍在背景進行，稍後可按「重新估算」再確認。');
+        setMessage('等待超過 15 分鐘。分析可能仍在背景進行，稍後可按「重新估算」再確認。');
         return;
       }
       try {
@@ -589,6 +594,7 @@ interface DecisionPayload {
 }
 
 interface RawFundamentals {
+  market?: 'TW' | 'CN';
   eps?: number;
   epsYtd?: number | null;
   epsYoY?: number;
@@ -750,17 +756,23 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
           }
           return json;
         });
-      // /api/fundamentals 是台股 FinMind fallback；陸股不可拿六位碼誤打台股資料源。
-      const rawRequest = isCnSymbol
-        ? Promise.resolve(null)
-        : safeJson(fetch(`/api/fundamentals/${encodeURIComponent(bareSymbol)}`, { signal: AbortSignal.timeout(8000) }))
-          .then(json => {
-            if (!cancelled && json?.ok && json.data) {
-              setRawData(json.data as RawFundamentals);
-              setLoading(false);
-            }
-            return json;
-          });
+      // 市場別原始財報 fallback：即使尚未跑過 Agent／深度估值，也要先顯示正式財報。
+      const rawUrl = isCnSymbol
+        ? `/api/cn/financials/${encodeURIComponent(bareSymbol)}`
+        : `/api/fundamentals/${encodeURIComponent(bareSymbol)}`;
+      const rawRequest = safeJson(fetch(rawUrl, { signal: AbortSignal.timeout(8000), cache: 'no-store' }))
+        .then(json => {
+          const mapped = isCnSymbol
+            ? mapCnFinancialsToSidebar(json)
+            : json?.ok && json.data
+              ? ({ ...json.data, market: 'TW' } as RawFundamentals)
+              : null;
+          if (!cancelled && mapped) {
+            setRawData(mapped as RawFundamentals);
+            setLoading(false);
+          }
+          return { json, data: mapped };
+        });
       const valuationRequest = safeJson(fetch(`/api/valuation/${encodeURIComponent(bareSymbol)}?date=${today}`, { signal: AbortSignal.timeout(8000), cache: 'no-store' }))
         .then(json => {
           if (!cancelled && json?.ok && json.valuation) {
@@ -775,12 +787,12 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
           }
           return json;
         });
-      const [decisionJson, rawJson, valuationJson] = await Promise.all([decisionRequest, rawRequest, valuationRequest]);
+      const [decisionJson, rawResult, valuationJson] = await Promise.all([decisionRequest, rawRequest, valuationRequest]);
       if (cancelled) return;
 
       const decision = decisionJson as DecisionPayload | null;
-      if (!decision?.fundamental && !rawJson?.data && !valuationJson?.valuation) {
-        setError(decision?.error ?? rawJson?.error ?? '目前找不到可用的基本面資料');
+      if (!decision?.fundamental && !rawResult?.data && !valuationJson?.valuation) {
+        setError(decision?.error ?? rawResult?.json?.error ?? '目前找不到可用的基本面資料');
       }
       setLoading(false);
     };
@@ -804,6 +816,34 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
       <div className="space-y-2 p-3 text-xs">
         <div className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-rose-300">資料載入不完整：{error}</div>
         <ValuationButton symbol={cleanSymbolEarly} currentValuation={null} onValuationReady={setStandaloneValuation} />
+      </div>
+    );
+  }
+
+  // 陸股正式財報已由外層 CnFundamentalPanel 顯示；這裡只補深度估值狀態，避免重複整份財報。
+  if (!data && rawData?.market === 'CN') {
+    return (
+      <div className="space-y-2 p-1 text-xs">
+        {!standaloneValuation && (
+          <div className="rounded border border-cyan-500/25 bg-cyan-500/10 px-2 py-1.5 text-cyan-800 dark:text-cyan-200">
+            正式財報已載入；深度估值尚未生成，可直接在 Rockstar 背景執行。
+          </div>
+        )}
+        {standaloneValuation && standaloneAsAgent && (
+          <ValuationScenarios
+            valuation={standaloneAsAgent}
+            currentPrice={currentPrice}
+            valuationDate={standaloneValuation.date}
+            ageDays={standaloneValuation.ageDays}
+            caveat={standaloneValuation.valuationCaveat ?? standaloneValuation.reasoning}
+            quality={standaloneValuation.quality}
+          />
+        )}
+        <ValuationButton
+          symbol={cleanSymbolEarly}
+          currentValuation={standaloneValuation}
+          onValuationReady={setStandaloneValuation}
+        />
       </div>
     );
   }
