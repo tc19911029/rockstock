@@ -82,6 +82,28 @@ describe('valuation refresh policy', () => {
     expect(result.mode).toBe('reuse');
   });
 
+  it('parses legacy reporting periods that include explanatory text', () => {
+    const result = decideValuationRefresh({
+      requestedMode: 'auto',
+      previousValuation: {
+        dataAsOf: {
+          ...previous.dataAsOf,
+          financialReportPeriod: '2026Q1 formal quarterly report, published 2026-04-28',
+        },
+      },
+      previousValuationDate: '2026-08-08',
+      previousAgeDays: 1,
+      previousValid: true,
+      currentSnapshot: {
+        ...current,
+        periods: { ...current.periods, financialReportDate: '2026Q1' },
+      },
+    });
+
+    expect(result.freshness?.hasNewFinancialReport).toBe(false);
+    expect(result.mode).toBe('reuse');
+  });
+
   it('requires deep analysis when shares change or the valuation is older than seven days', () => {
     const changedShares = decideValuationRefresh({
       requestedMode: 'auto',

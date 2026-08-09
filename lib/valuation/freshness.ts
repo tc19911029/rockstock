@@ -43,9 +43,11 @@ function monthKey(value: string | null | undefined): string | null {
 }
 
 function quarterKey(value: string | null | undefined): number | null {
-  const quarter = value?.match(/^(\d{4})Q([1-4])$/i);
+  // 舊估值可能把來源說明一起寫入（例："2026Q1 formal quarterly report"）；
+  // 只擷取其中的標準期別，避免同一季被誤判成新財報。
+  const quarter = value?.match(/(\d{4})Q([1-4])/i);
   if (quarter) return Number(quarter[1]) * 4 + Number(quarter[2]);
-  const half = value?.match(/^(\d{4})H([12])$/i);
+  const half = value?.match(/(\d{4})H([12])/i);
   if (half) return Number(half[1]) * 4 + Number(half[2]) * 2;
   const date = value?.match(/^(\d{4})-(\d{2})/);
   if (!date) return null;
