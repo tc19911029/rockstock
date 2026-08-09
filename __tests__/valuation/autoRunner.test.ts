@@ -28,6 +28,20 @@ describe('valuation auto runner', () => {
     expect(args.join(' ')).not.toMatch(/Terminal|iTerm|osascript/);
   });
 
+  it('增量模式只重查新公告並沿用未變的同業與估值模型', () => {
+    const args = buildValuationCodexArgs({
+      workDir: '/tmp/rockstock-valuation/runtime/3006-job',
+      questionPath: '/tmp/rockstock-valuation/runtime/3006-job/question.json',
+      symbol: '3006',
+      date: '2026-08-09',
+      outputPath: '/tmp/rockstock-valuation/runtime/3006-job/valuation.json',
+      mode: 'incremental',
+    });
+
+    expect(args.at(-1)).toContain('這是增量估值');
+    expect(args.at(-1)).toContain('不得把未變資料整份重新搜尋');
+  });
+
   it('只正規化 Agent 的格式差異，不改動估值數字', () => {
     const scenario = {
       probability: 25,
@@ -108,5 +122,22 @@ describe('valuation auto runner', () => {
       },
     });
     expect(validateValuationOutput(value, new Date('2026-08-08T14:48:00.000Z')).valid).toBe(true);
+  });
+
+  it('以 Rockstar 的結構化輸入覆蓋 Agent 自由描述的資料指紋', () => {
+    const expectedDataAsOf = {
+      financialReportPeriod: '2026Q2',
+      monthlyRevenuePeriod: '2026-07-01',
+      sharesOutstanding: 289_082_000,
+      dilutionSignature: '',
+    };
+    const value = normalizeValuationOutput({
+      dataAsOf: {
+        financialReportPeriod: '2026H1',
+        dilutionSignature: 'agent free-form description',
+      },
+    }, new Date('2026-08-09T01:00:00.000Z'), expectedDataAsOf);
+
+    expect(value).toMatchObject({ dataAsOf: expectedDataAsOf });
   });
 });

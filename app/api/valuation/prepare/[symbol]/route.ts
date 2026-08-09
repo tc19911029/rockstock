@@ -18,6 +18,12 @@ import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { buildValuationInputsCN, buildValuationInputsTW } from '@/lib/agents/agents/fundamentalAgent';
 import { getValuationAnalysisStatus, startValuationAnalysis } from '@/lib/valuation/autoRunner';
 import { detectValuationMarket } from '@/lib/valuation/market';
+import { readLatestValuation } from '@/lib/valuation/storage';
+import {
+  buildDilutionSignature,
+  decideValuationRefresh,
+  valuationInputsSnapshot,
+} from '@/lib/valuation/refreshPolicy';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -26,6 +32,7 @@ const querySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   dryRun: z.enum(['0', '1']).default('0'),
   force: z.enum(['0', '1']).default('0'),
+  mode: z.enum(['auto', 'incremental', 'deep']).default('auto'),
 });
 
 const TMP_DIR = '/tmp/rockstock-valuation';
@@ -85,6 +92,27 @@ export async function POST(
     }
 
     const outputPath = `data/valuation/${date}/${bareSymbol}.json`;
+    const previous = await readLatestValuation<Record<string, unknown>>({
+      symbol: bareSymbol,
+      targetDate: date,
+    });
+    const requestedMode = parsed.data.force === '1' ? 'deep' : parsed.data.mode;
+    const currentSnapshot = valuationInputsSnapshot(valuationInputs);
+    const refreshPlan = decideValuationRefresh({
+      requestedMode,
+      previousValuation: previous?.valuation ?? null,
+      previousValuationDate: previous?.date,
+      previousAgeDays: previous?.ageDays,
+      previousValid: previous?.quality.valid,
+      currentSnapshot,
+    });
+    const expectedDataAsOf = {
+      financialReportPeriod: currentSnapshot.periods?.financialReportDate ?? undefined,
+      monthlyRevenuePeriod: currentSnapshot.periods?.revenueMonth ?? undefined,
+      selfReportedPeriod: currentSnapshot.periods?.selfReportedPeriod ?? undefined,
+      sharesOutstanding: currentSnapshot.sharesOutstanding ?? undefined,
+      dilutionSignature: currentSnapshot.dilutionSignature ?? '',
+    };
 
     const question = {
       schemaVersion: 4,
@@ -94,6 +122,11 @@ export async function POST(
       market,
       outputPath,
       generatedAt: new Date().toISOString(),
+      refreshPlan,
+      expectedDataAsOf,
+      ...(refreshPlan.mode === 'incremental' && previous
+        ? { previousValuation: previous.valuation }
+        : {}),
       fetchErrors,
       groundTruth: {
         valuationInputs,
@@ -130,7 +163,7 @@ export async function POST(
         '三情境請給機率並計算機率加權合理價；機率總和必須為 100%，但中性合理價仍單獨保留。缺乏正式指引時應放寬區間並降低信心，不得用更多小數位假裝精確。',
         '輸出 peerComparison：至少 3 家未排除的真正可比同業（不足時如實說明），逐家列 TTM PE／本年度預估 PE／來源日期／URL／排除原因，並計算中位數與四分位。',
         '若能取得未來四季預估，輸出 ntmEstimate{period,eps,pe,method}；否則省略此欄位，不得以本年度 EPS 冒充 NTM。',
-        `輸出 dataAsOf{financialReportPeriod,monthlyRevenuePeriod,selfReportedPeriod,sharesOutstanding,dilutionSignature}；sharesOutstanding=${valuationInputs.sharesOutstanding ?? 'null'}，dilutionSignature=${JSON.stringify((valuationInputs.dilutionEvents ?? []).map(e => [e.type, e.status ?? '', e.newShares, e.expectedDate ?? '', e.announcedAt ?? '', e.sourceUrl ?? ''].join('|')).sort().join('||'))}。精確記錄本次實際納入的季報、月營收、自結、股數與稀釋事件，讓前端在公司行動後立即判定估值失效。`,
+        `輸出 dataAsOf{financialReportPeriod,monthlyRevenuePeriod,selfReportedPeriod,sharesOutstanding,dilutionSignature}；sharesOutstanding=${valuationInputs.sharesOutstanding ?? 'null'}，dilutionSignature=${JSON.stringify(buildDilutionSignature(valuationInputs.dilutionEvents ?? []))}。精確記錄本次實際納入的季報、月營收、自結、股數與稀釋事件，讓前端在公司行動後立即判定估值失效。`,
         '輸出格式對齊 lib/agents/types.ts 的 FundamentalAnswer.valuation 區塊，並包含 fiscalYear、reportedThrough、actualEpsYtd、dataAsOf、monthlyEpsActuals、peerComparison；所有舊欄位保持相容。',
       ],
     };
@@ -153,6 +186,19 @@ export async function POST(
         latestCumulativeActual: valuationInputs.latestCumulativeActual ?? null,
         latestSelfReportedActual: valuationInputs.selfReportedMonthlyActuals?.[0] ?? null,
         fetchErrors,
+        refreshPlan,
+      });
+    }
+
+    if (refreshPlan.mode === 'reuse' && previous) {
+      const detail = '正式資料未變；沿用已驗證的深度估值，價格衍生指標由畫面即時重算';
+      return apiOk({
+        outputPath: `data/valuation/${previous.date}/${bareSymbol}.json`,
+        updateMode: 'reuse',
+        refreshPlan,
+        analysisJob: { ok: true, status: 'completed', detail },
+        autoTrigger: { ok: true, detail },
+        message: '估值已是最新，不需要重新執行深度分析。',
       });
     }
 
@@ -161,12 +207,14 @@ export async function POST(
     await fs.writeFile(questionPath, JSON.stringify(question, null, 2), 'utf-8');
 
     // 直接由 Rockstar 啟動 headless Codex；不依賴 Terminal/iTerm 視窗或人工輸入指令。
+    const analysisMode = refreshPlan.mode === 'incremental' ? 'incremental' : 'deep';
     const analysisJob = await startValuationAnalysis({
       symbol: bareSymbol,
       date,
       questionPath,
       outputPath,
-      force: parsed.data.force === '1',
+      force: refreshPlan.mode !== 'reuse',
+      mode: analysisMode,
     });
     console.log(`[valuation/prepare] background valuation ${bareSymbol}: ${analysisJob.ok ? analysisJob.status : 'fail'} — ${analysisJob.detail}`);
 
@@ -177,10 +225,14 @@ export async function POST(
       ttmPe: valuationInputs.ttmPe,
       currentPrice: valuationInputs.currentPrice,
       analysisJob,
+      updateMode: refreshPlan.mode,
+      refreshPlan,
       // 保留舊欄位一版，避免尚未更新的前端把成功工作誤判成失敗。
       autoTrigger: { ok: analysisJob.ok, detail: analysisJob.detail },
       message: analysisJob.ok
-        ? `Rockstar 已在背景執行 ${bareSymbol} 深度估值，不需要開啟 Terminal。`
+        ? refreshPlan.mode === 'incremental'
+          ? `Rockstar 已在背景增量更新 ${bareSymbol} 估值，只查核最新公告。`
+          : `Rockstar 已在背景執行 ${bareSymbol} 深度估值，不需要開啟 Terminal。`
         : `估值資料已整理，但內建分析引擎啟動失敗：${analysisJob.detail}`,
     });
   } catch (e) {

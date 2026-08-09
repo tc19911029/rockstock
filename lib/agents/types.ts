@@ -702,6 +702,16 @@ export interface FundamentalAnswer {
    *  ttmPe 由程式預算後 echo 回來，scenarios 由 skill 推算。 */
   valuation?: {
     ttmPe: number;
+    /** 估值產生時的報價與 TTM EPS；畫面可用即時價重算價格衍生指標。 */
+    currentPriceContext?: {
+      currentPrice: number;
+      priceDate: string;
+      ttmEps?: number;
+      sharesOutstanding?: number;
+      fullyDilutedShares?: number;
+      currency?: string;
+      sourceUrl?: string;
+    };
     /** 本次估值涵蓋的會計年度與已公告進度；舊資料可能沒有。 */
     fiscalYear?: number;
     reportedThrough?: string;

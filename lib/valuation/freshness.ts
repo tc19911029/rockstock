@@ -45,6 +45,8 @@ function monthKey(value: string | null | undefined): string | null {
 function quarterKey(value: string | null | undefined): number | null {
   const quarter = value?.match(/^(\d{4})Q([1-4])$/i);
   if (quarter) return Number(quarter[1]) * 4 + Number(quarter[2]);
+  const half = value?.match(/^(\d{4})H([12])$/i);
+  if (half) return Number(half[1]) * 4 + Number(half[2]) * 2;
   const date = value?.match(/^(\d{4})-(\d{2})/);
   if (!date) return null;
   return Number(date[1]) * 4 + Math.ceil(Number(date[2]) / 3);

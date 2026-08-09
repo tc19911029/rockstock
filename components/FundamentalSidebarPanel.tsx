@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Calculator, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Calculator, CheckCircle2, ExternalLink, RefreshCw, Zap } from 'lucide-react';
 import type { FundamentalAnswer } from '@/lib/agents/types';
 import { mapCnFinancialsToSidebar } from '@/lib/valuation/cnSidebarFallback';
 import { detectValuationFreshness } from '@/lib/valuation/freshness';
@@ -36,7 +36,7 @@ function ValuationScenarios({
   latestFundamentals?: RawFundamentals | null;
   quality?: ValuationOnly['quality'];
 }) {
-  const { ttmPe, monthlyEpsEstimate: rawMonthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough, dilution, riskFlags } = valuation;
+  const { ttmPe, currentPriceContext, monthlyEpsEstimate: rawMonthlyEpsEstimate, monthlyEpsActuals, scenarios, ntmEstimate, peerComparison, actualEpsYtd, reportedThrough, dilution, riskFlags } = valuation;
   const monthlyEpsEstimate = rawMonthlyEpsEstimate && Number.isFinite(rawMonthlyEpsEstimate.estimatedEps)
     ? rawMonthlyEpsEstimate
     : null;
@@ -56,7 +56,8 @@ function ValuationScenarios({
     ? scenarios.base.fairPrice / (1 + scenarios.base.upside)
     : null;
   // 反推 TTM EPS（舊檔沒存）：ttmPe = basePrice / ttmEps → 再用即時價重算 TTM PE
-  const ttmEps = basePriceAtVal && ttmPe > 0 ? basePriceAtVal / ttmPe : null;
+  const ttmEps = currentPriceContext?.ttmEps
+    ?? (basePriceAtVal && ttmPe > 0 ? basePriceAtVal / ttmPe : null);
   const liveTtmPe = live && ttmEps ? live / ttmEps : ttmPe;
   const liveNtmPe = ntmEstimate && ntmEstimate.eps > 0
     ? (live ?? basePriceAtVal ?? ntmEstimate.pe * ntmEstimate.eps) / ntmEstimate.eps
@@ -443,6 +444,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
         <ValuationScenarios
           valuation={{
             ttmPe: standaloneValuation.ttmPe,
+            currentPriceContext: standaloneValuation.currentPriceContext,
             fiscalYear: standaloneValuation.fiscalYear,
             reportedThrough: standaloneValuation.reportedThrough,
             actualEpsYtd: standaloneValuation.actualEpsYtd,
@@ -470,14 +472,14 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
       <ValuationButton
         symbol={symbol}
         currentValuation={standaloneValuation}
-        hasNewData={standaloneValuation ? detectValuationFreshness(standaloneValuation, standaloneValuation.date, raw).hasNewData : false}
+        freshness={standaloneValuation ? detectValuationFreshness(standaloneValuation, standaloneValuation.date, raw) : null}
         onValuationReady={onValuationReady}
       />
     </div>
   );
 }
 
-function ValuationButton({ symbol, currentValuation, hasNewData = false, onValuationReady }: { symbol: string; currentValuation: ValuationOnly | null; hasNewData?: boolean; onValuationReady: (valuation: ValuationOnly) => void }) {
+function ValuationButton({ symbol, currentValuation, freshness, onValuationReady }: { symbol: string; currentValuation: ValuationOnly | null; freshness: ReturnType<typeof detectValuationFreshness> | null; onValuationReady: (valuation: ValuationOnly) => void }) {
   const [phase, setPhase] = useState<'idle' | 'preparing' | 'waiting' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -489,13 +491,27 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
 
   useEffect(() => stopPolling, [symbol]);
 
-  const onClick = async () => {
+  const onClick = async (requestedMode: 'auto' | 'deep' = 'auto') => {
     if (phase === 'preparing' || phase === 'waiting') return;
+    const valuationIsRecent = (currentValuation?.ageDays ?? Number.POSITIVE_INFINITY) <= 7;
+    const valuationIsValid = currentValuation?.quality?.valid !== false;
+    if (requestedMode === 'auto' && currentValuation?.scenarios && freshness && !freshness.hasNewData && valuationIsRecent && valuationIsValid) {
+      setPhase('idle');
+      setMessage('正式資料未變，已沿用驗證過的深度估值；PE、距合理價與現價位置會隨即時股價自動重算。');
+      return;
+    }
     setPhase('preparing');
     setMessage(null);
     try {
-      const force = currentValuation?.scenarios ? '1' : '0';
-      const res = await fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}?force=${force}`, { method: 'POST' });
+      const hasCriticalChange = Boolean(
+        freshness?.hasNewFinancialReport || freshness?.hasShareCountChange || freshness?.hasNewDilutionEvent,
+      );
+      const mode = requestedMode === 'deep'
+        ? 'deep'
+        : currentValuation?.scenarios && freshness?.hasNewData && !hasCriticalChange && valuationIsRecent
+          ? 'incremental'
+          : 'auto';
+      const res = await fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}?mode=${mode}`, { method: 'POST' });
       const j = await res.json();
       if (!j.ok) {
         setPhase('error');
@@ -504,8 +520,15 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
       }
       const job = j.analysisJob ?? j.autoTrigger;
       if (job?.ok) {
+        if (j.updateMode === 'reuse' || job.status === 'completed') {
+          setPhase('idle');
+          setMessage(j.message ?? job.detail ?? '估值已是最新。');
+          return;
+        }
         setPhase('waiting');
-        setMessage('資料整理完成，Rockstar 正在背景執行深度估值（通常約 3–10 分鐘，不需要開啟終端）…');
+        setMessage(j.updateMode === 'incremental'
+          ? '新資料已確認，正在增量更新情境與 EPS（通常約 1–4 分鐘）…'
+          : '資料整理完成，正在執行完整深度估值（通常約 3–10 分鐘）…');
         startPolling(currentValuation?.updatedAt);
       } else {
         setPhase('error');
@@ -525,7 +548,7 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
       if (Date.now() - start > MAX_MS) {
         stopPolling();
         setPhase('error');
-        setMessage('等待超過 15 分鐘。分析可能仍在背景進行，稍後可按「重新估算」再確認。');
+        setMessage('等待超過 15 分鐘。背景工作可能仍在進行，可稍後按「檢查估值更新」確認。');
         return;
       }
       try {
@@ -547,6 +570,12 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
           stopPolling();
           setPhase('error');
           setMessage(`背景估值未通過：${statusJson.job.error ?? '分析程序已停止'}。請重新執行。`);
+        } else if (statusJson?.job?.status === 'running') {
+          const elapsedMs = Date.now() - Date.parse(statusJson.job.startedAt);
+          const elapsedMinutes = Number.isFinite(elapsedMs) ? Math.max(0, Math.floor(elapsedMs / 60_000)) : 0;
+          setMessage(statusJson.job.mode === 'incremental'
+            ? `增量更新中：正在核對最新公告並重算情境 · 已執行 ${elapsedMinutes} 分鐘`
+            : `完整深度分析中：正在查核同業、股數與估值模型 · 已執行 ${elapsedMinutes} 分鐘`);
         }
       } catch { /* 繼續 poll */ }
     };
@@ -555,27 +584,49 @@ function ValuationButton({ symbol, currentValuation, hasNewData = false, onValua
   };
 
   const busy = phase === 'preparing' || phase === 'waiting';
+  const hasNewData = freshness?.hasNewData ?? false;
+  const isRecent = (currentValuation?.ageDays ?? Number.POSITIVE_INFINITY) <= 7;
+  const canReuseImmediately = Boolean(currentValuation?.scenarios && freshness && !hasNewData && isRecent);
   const label = phase === 'preparing'
     ? '準備中…'
     : phase === 'waiting'
     ? '朱老師估算中…'
     : currentValuation?.scenarios
-    ? hasNewData ? '納入新資料重新估算' : '重新估算股價'
-    : '預估股價';
+      ? hasNewData
+        ? '納入新資料更新估值'
+        : canReuseImmediately
+          ? '即時更新估值位置'
+          : isRecent
+            ? '檢查估值更新'
+            : '更新同業與深度估值'
+      : '建立深度估值';
 
   return (
     <div className="space-y-1">
       <button
         type="button"
-        onClick={onClick}
+        onClick={() => { void onClick('auto'); }}
         disabled={busy}
         className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-[12px] font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-wait disabled:opacity-60"
       >
-        {busy ? <RefreshCw aria-hidden="true" className="size-4 animate-spin" /> : <Calculator aria-hidden="true" className="size-4" />}
+        {busy
+          ? <RefreshCw aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
+          : canReuseImmediately
+            ? <Zap aria-hidden="true" className="size-4" />
+            : <Calculator aria-hidden="true" className="size-4" />}
         <span>{label} {symbol}</span>
       </button>
+      {currentValuation?.scenarios && !busy && (
+        <button
+          type="button"
+          onClick={() => { void onClick('deep'); }}
+          className="min-h-8 w-full cursor-pointer rounded px-2 text-[9px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        >
+          強制完整深度重算（約 3–10 分鐘）
+        </button>
+      )}
       {message && (
-        <div className={`text-[10px] leading-snug px-1 whitespace-pre-line ${
+        <div role={phase === 'error' ? 'alert' : 'status'} aria-live="polite" className={`text-[10px] leading-snug px-1 whitespace-pre-line ${
           phase === 'error' ? 'text-rose-400' : 'text-emerald-300/90'
         }`}>
           <span className="inline-flex gap-1.5">
@@ -677,6 +728,7 @@ interface Props {
 
 interface ValuationOnly {
   ttmPe?: number;
+  currentPriceContext?: NonNullable<FundamentalAnswer['valuation']>['currentPriceContext'];
   date?: string;
   ageDays?: number;
   updatedAt?: string;
@@ -705,6 +757,7 @@ function toAgentValuation(valuation: ValuationOnly | null): NonNullable<Fundamen
   if (valuation?.ttmPe == null || !valuation.scenarios) return null;
   return {
     ttmPe: valuation.ttmPe,
+    currentPriceContext: valuation.currentPriceContext,
     fiscalYear: valuation.fiscalYear,
     reportedThrough: valuation.reportedThrough,
     actualEpsYtd: valuation.actualEpsYtd,
@@ -829,7 +882,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
     return (
       <div className="space-y-2 p-3 text-xs">
         <div className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-rose-300">資料載入不完整：{error}</div>
-        <ValuationButton symbol={cleanSymbolEarly} currentValuation={null} onValuationReady={setStandaloneValuation} />
+        <ValuationButton symbol={cleanSymbolEarly} currentValuation={null} freshness={null} onValuationReady={setStandaloneValuation} />
       </div>
     );
   }
@@ -856,6 +909,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
         <ValuationButton
           symbol={cleanSymbolEarly}
           currentValuation={standaloneValuation}
+          freshness={standaloneValuation ? detectValuationFreshness(standaloneValuation, standaloneValuation.date, rawData) : null}
           onValuationReady={setStandaloneValuation}
         />
       </div>
@@ -893,7 +947,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
             quality={standaloneValuation?.quality}
           />
         )}
-        <ValuationButton symbol={cleanSymbolEarly} currentValuation={standaloneValuation} onValuationReady={setStandaloneValuation} />
+        <ValuationButton symbol={cleanSymbolEarly} currentValuation={standaloneValuation} freshness={null} onValuationReady={setStandaloneValuation} />
         <div className="text-[11px] text-muted-foreground/70">
           資料來源失敗（FinMind/EastMoney）。要看 AI 深度分析請到 <Link href={`/agents/${encodeURIComponent(cleanSymbolEarly)}`} className="text-sky-400 underline">/agents/{cleanSymbolEarly}</Link> 觸發 prepare。
         </div>
@@ -941,7 +995,7 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
       <ValuationButton
         symbol={cleanSymbol}
         currentValuation={standaloneValuation}
-        hasNewData={displayedFreshness?.hasNewData}
+        freshness={displayedFreshness}
         onValuationReady={setStandaloneValuation}
       />
 

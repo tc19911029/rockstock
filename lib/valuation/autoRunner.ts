@@ -17,6 +17,8 @@ export interface ValuationJobResult {
   logPath?: string;
 }
 
+export type ValuationAnalysisMode = 'incremental' | 'deep';
+
 interface JobStatus {
   symbol: string;
   date: string;
@@ -29,6 +31,8 @@ interface JobStatus {
   logPath: string;
   stagedOutputPath?: string;
   error?: string;
+  mode?: ValuationAnalysisMode;
+  expectedDataAsOf?: MutableRecord;
 }
 
 type MutableRecord = Record<string, unknown>;
@@ -50,7 +54,11 @@ function normalizeEpsBasis(value: unknown): 'reported' | 'latest_shares' | 'full
  * Agent 可用百分比或較具描述性的欄位名稱輸出；發布前只做可逆、確定性的格式正規化，
  * 不替它補估值假設或改動 EPS／PE／合理價。
  */
-export function normalizeValuationOutput(value: unknown, publishedAt = new Date()): unknown {
+export function normalizeValuationOutput(
+  value: unknown,
+  publishedAt = new Date(),
+  expectedDataAsOf?: MutableRecord,
+): unknown {
   if (!isMutableRecord(value)) return value;
   const source = value;
   const normalized: MutableRecord = { ...source, generatedAt: publishedAt.toISOString() };
@@ -59,6 +67,10 @@ export function normalizeValuationOutput(value: unknown, publishedAt = new Date(
   if (isMutableRecord(source.monthlyEpsEstimate) && !Number.isFinite(source.monthlyEpsEstimate.estimatedEps)) {
     normalized.monthlyEpsEstimate = null;
   }
+
+  // 資料指紋由 Rockstar 的結構化輸入決定，不能讓 Agent 自由改寫；否則同一份資料會被
+  // 誤判成新公告，造成不必要的完整重跑。
+  if (expectedDataAsOf) normalized.dataAsOf = expectedDataAsOf;
 
   if (isMutableRecord(source.scenarios)) {
     const normalizedScenarios: MutableRecord = { ...source.scenarios };
@@ -141,13 +153,18 @@ export function buildValuationCodexArgs(options: {
   symbol: string;
   date: string;
   outputPath: string;
+  mode?: ValuationAnalysisMode;
 }): string[] {
+  const refreshInstruction = options.mode === 'incremental'
+    ? '這是增量估值：question.json 內含 previousValuation 與 refreshPlan。保留未變的同業選擇、來源證據與估值模型，只查核 refreshPlan 指出的新公告並重算受影響情境；不得把未變資料整份重新搜尋。'
+    : '這是完整深度估值，需依技能逐項查核所有必要資料。';
   const prompt = [
     `使用 source-command-valuation skill 分析 ${options.symbol}（資料日 ${options.date}）的單股估值。`,
     `只讀取 ${options.questionPath}，完整執行技能要求，且只能把最終 JSON 寫入 ${options.outputPath}。`,
     '完成前必須驗證最新股數、公司行動、正式財報口徑、同業 PE 與所有情境算術；不要呼叫 Anthropic API。',
     'generatedAt 必須是寫檔當下的 ISO 時間且不得使用未來時間；scenario.probability 必須用 0–1；valuationEpsBasis 只能是 reported、latest_shares、fully_diluted、normalized。',
     '若 dilution 不為 null，必須包含 originalShares、newShares、ratio，以及三情境 dilutedEps 與 dilutedPrice 相容欄位。',
+    refreshInstruction,
     '這是隔離的唯讀分析工作：嚴禁修改其他檔案、修改程式碼、執行 git commit／push、部署、啟動服務或委派子代理；寫完指定 JSON 後立即結束。',
   ].join(' ');
 
@@ -202,9 +219,14 @@ async function publishStagedValuation(options: {
   symbol: string;
   date: string;
   pid?: number;
+  expectedDataAsOf?: MutableRecord;
 }): Promise<void> {
   const raw = await fs.readFile(options.stagedOutputPath, 'utf-8');
-  const valuation = normalizeValuationOutput(JSON.parse(raw)) as Record<string, unknown>;
+  const valuation = normalizeValuationOutput(
+    JSON.parse(raw),
+    new Date(),
+    options.expectedDataAsOf,
+  ) as Record<string, unknown>;
   if (valuation.symbol !== options.symbol || valuation.date !== options.date) {
     throw new Error('估值輸出的股票代號或資料日期不符');
   }
@@ -254,6 +276,7 @@ async function finalizeValuationJob(options: {
       symbol: runningStatus.symbol,
       date: runningStatus.date,
       pid: runningStatus.pid,
+      expectedDataAsOf: runningStatus.expectedDataAsOf,
     });
     await writeJobStatus(statusPath, {
       ...runningStatus,
@@ -282,6 +305,7 @@ export async function startValuationAnalysis(options: {
   outputPath: string;
   repoRoot?: string;
   force?: boolean;
+  mode?: ValuationAnalysisMode;
 }): Promise<ValuationJobResult> {
   const { symbol, date } = options;
   if (!/^\d{4,6}$/.test(symbol) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -367,6 +391,9 @@ export async function startValuationAnalysis(options: {
   const isolatedQuestionPath = path.join(workDir, 'question.json');
   const stagedOutputPath = path.join(workDir, 'valuation.json');
   const question = JSON.parse(await fs.readFile(options.questionPath, 'utf-8')) as Record<string, unknown>;
+  const expectedDataAsOf = isMutableRecord(question.expectedDataAsOf)
+    ? question.expectedDataAsOf
+    : undefined;
   await fs.writeFile(isolatedQuestionPath, JSON.stringify({ ...question, outputPath: stagedOutputPath }, null, 2), 'utf-8');
 
   const logFd = openSync(logPath, 'a');
@@ -376,6 +403,7 @@ export async function startValuationAnalysis(options: {
     symbol,
     date,
     outputPath: stagedOutputPath,
+    mode: options.mode,
   });
   const startedAt = new Date().toISOString();
 
@@ -401,6 +429,8 @@ export async function startValuationAnalysis(options: {
       outputPath: finalOutputPath,
       logPath,
       stagedOutputPath,
+      mode: options.mode,
+      expectedDataAsOf,
     };
     await writeJobStatus(statusPath, runningStatus);
 
@@ -445,6 +475,7 @@ export async function getValuationAnalysisStatus(options: { symbol: string; date
   startedAt: string;
   finishedAt?: string;
   error?: string;
+  mode?: ValuationAnalysisMode;
 } | null> {
   if (!/^\d{4,6}$/.test(options.symbol) || !/^\d{4}-\d{2}-\d{2}$/.test(options.date)) return null;
   const statusPath = path.join(JOB_DIR, `${options.symbol}-${options.date}.status.json`);
@@ -456,6 +487,7 @@ export async function getValuationAnalysisStatus(options: { symbol: string; date
       startedAt: status.startedAt,
       finishedAt: status.finishedAt,
       error: '背景分析程序已停止，請重新執行',
+      mode: status.mode,
     };
   }
   return {
@@ -463,5 +495,6 @@ export async function getValuationAnalysisStatus(options: { symbol: string; date
     startedAt: status.startedAt,
     finishedAt: status.finishedAt,
     error: status.error,
+    mode: status.mode,
   };
 }
