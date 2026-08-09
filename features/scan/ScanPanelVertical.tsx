@@ -8,6 +8,7 @@ import { DabanResultsCompact } from './components/DabanResultsCompact';
 import { ScanCoachDigest } from './components/ScanCoachDigest';
 import { LockWatchPanel } from './components/LockWatchPanel';
 import { SanSeScanCompact } from './components/SanSeScanCompact';
+import { StrategyEvidenceBadge } from './components/StrategyEvidenceBadge';
 // 2026-05-11 ReentryCandidatesPanel 移除：用戶反饋無實質用途（跟 B 回後買上漲重疊高、書本對齊度低）。檔案保留供日後重做
 import { SectionBoundary } from '@/components/ErrorBoundary';
 import type { SelectedStock } from './components/ScanChartPanel';
@@ -23,6 +24,13 @@ import {
   INSTSTEAL_TRACK_SET,
   LETTER_NAMES,
 } from '@/lib/scanner/buyMethodTracks';
+import {
+  formatStrategyEvidenceTooltip,
+  getBuyMethodEvidence,
+  getSanSeEvidence,
+  getStrategyEvidence,
+  STRATEGY_AUDIT_DATE,
+} from '@/lib/strategy/strategyEvidence';
 
 interface ScanPanelVerticalProps {
   onSelectStock?: (stock: SelectedStock) => void;
@@ -145,7 +153,11 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               className={`px-2 py-1 text-[11px] font-medium ${scanDirection === 'short' ? 'bg-green-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>空</button>
             {market === 'CN' && (
               <button onClick={() => { setScanDirection('daban'); }}
-                className={`px-2 py-1 text-[11px] font-medium ${scanDirection === 'daban' ? 'bg-amber-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>打板</button>
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${scanDirection === 'daban' ? 'bg-amber-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}
+                title={formatStrategyEvidenceTooltip(getStrategyEvidence('daban', market))}>
+                打板
+                <StrategyEvidenceBadge status={getStrategyEvidence('daban', market).status} compact />
+              </button>
             )}
           </div>
 
@@ -158,6 +170,17 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
           )}
           */}
 
+        </div>
+
+        <div className="rounded border border-border/80 bg-card/50 px-2 py-1.5 text-[9px] leading-relaxed text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-semibold text-foreground">策略證據分級</span>
+            <span>審計 {STRATEGY_AUDIT_DATE}</span>
+            <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1 text-emerald-200">可交易 0</span>
+            <StrategyEvidenceBadge status="paper" />
+            <StrategyEvidenceBadge status="research" />
+          </div>
+          <p className="mt-0.5">目前沒有策略通過實盤門檻；紙上觀察只代表特定切片值得續追，不是下單訊號。</p>
         </div>
 
         {/* 4 區塊策略選擇（書本五步法分層）— 只在做多時顯示
@@ -193,6 +216,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
           type M = 'A' | 'A30' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'W' | 'X' | 'Y';
           const renderBtn = (method: M, color: string) => {
             const m = META[method];
+            const evidence = getBuyMethodEvidence(method, market, 'long');
             const isBullish = BULLISH_TRACK_SET.has(method);
             const isReversal = REVERSAL_TRACK_SET.has(method);
             const isSystem = SYSTEM_TRACK_SET.has(method);
@@ -213,9 +237,9 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                     : isMechanical
                       ? `${method} · ${m.name} · ${m.track} · 守 ${m.ma}\n⚙ 純機械式排名 — 不過六條件、不過戒律、不過 Step 0 大盤過濾\n做多：成交額前500中乖離率最負 top10 / 做空：成交額前500中乖離率最正 top10`
                       : isSmartMoney
-                        ? `${method} · ${m.name}（籌碼集中度軌）\n🕵️ 成交額前500中：近5日股價在跌 + 三大法人逆勢買超集中度高，依集中度排序\n不過六條件、不過戒律、不過 Step 0（徐黎芳籌碼集中度法，已半年回測）`
+                        ? `${method} · ${m.name}（籌碼集中度軌）\n成交額前500中：近5日股價在跌 + 三大法人逆勢買超集中度高，依集中度排序\n不過六條件、不過戒律、不過 Step 0。歷史回測不等於目前有效。`
                         : isInstDip
-                          ? `${method} · ${m.name}（接刀軌，2026-06-14）\n🔪 成交額前500中：股價在跌/長黑 + 法人逆勢買，剔除大戶持股超高，依法人買超排序\n不過六條件/戒律/Step 0。grid 唯一兩年都正買方向（但贏大盤<50%，靠賠小賺大）`
+                          ? `${method} · ${m.name}（接刀軌，2026-06-14）\n成交額前500中：股價在跌/長黑 + 法人逆勢買，剔除大戶持股超高，依法人買超排序\n不過六條件/戒律/Step 0。僅台股 20 日切片列入紙上觀察，不能外推。`
                           : isInstSteal
                             ? `${method} · ${m.name}（最初版三條件，2026-06-14）\n🕵️ 股價在跌 + 5日籌碼集中度在增加 + 法人連續買，三個同時成立\n不過六條件/戒律/Step 0。⚠️ 回測扣成本後超額≈0、贏大盤<50%（train負test正、不穩）→ 觀察用非明牌`
                             : `${method} · ${m.name} · ${m.track} · 守 ${m.ma}`;
@@ -223,13 +247,14 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               <button key={method}
                 onClick={() => { setCnSanSeLevel(null); setActiveBuyMethod(method); }}
                 disabled={isLoadingBuyMethod}
-                className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                   activeBuyMethod === method && !sanSeMode
                     ? color
                     : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                 }`}
-                title={tooltip}>
-                {m.name}
+                title={`${formatStrategyEvidenceTooltip(evidence)}\n\n${tooltip}`}>
+                <span>{m.name}</span>
+                <StrategyEvidenceBadge status={evidence.status} compact />
               </button>
             );
           };
@@ -295,24 +320,26 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                     ['strict', '三色(嚴格)', '三色資金共振：短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位'],
                     ['medium', '三色(中等)', '更新版：短攻/中強/中控 三分數都 > 0'],
                     ['loose', '三色(寬鬆)', '游資資金翻正：短線動能今天剛由負轉正'],
-                    ['reversal', '🔥三色(底反)', '底反該買 = 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握（台股該買勝率 +7→+15pp、陸股空頭段 +9pp）'],
+                    ['reversal', '三色(底反)', '底反該買 = 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉。現行按鈕條件較廣，尚未證明穩定超額，只供型態研究'],
                     // 具名型態策略（從 records 衍生、掃全市場命中；判定 = lib/cn-sanse/namedStrategies）
                     ['resonance', '三色(全共振⭐)', '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同日（三組齊發）。回測漲幅最大但稀有；台股最強、陸股牛市那段被稀釋'],
-                    ['red_yellow_trigger', '三色(紅+黃+觸發)', '🔴紅(機構) ＋ 🟡黃(控盤) 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）。大樣本、最實用的中線進場'],
-                    ['red_dualb_gold', '三色(紅+雙B金叉)', '🔴紅(機構)在場 ＋ 主圖黃線穿紅線（雙B黃紅金叉、只認金叉、較乾淨）'],
+                    ['red_yellow_trigger', '三色(紅+黃+觸發)', '紅(機構) ＋ 黃(控盤) 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）。尚未證明穩定超額，需獨立看樣本與市場階段'],
+                    ['red_dualb_gold', '三色(紅+雙B金叉)', '紅(機構)在場 ＋ 主圖黃線穿紅線（雙B黃紅金叉、只認金叉）。訊號較窄不代表勝率較高'],
                     ['red_dualb_any', '三色(紅+雙B金叉/突破)', '🔴紅(機構)在場 ＋（黃紅金叉 或 收盤突破智能交易線）'],
-                  ] as const).map(([lv, label, tip]) => (
-                    <button key={lv}
+                  ] as const).map(([lv, label, tip]) => {
+                    const evidence = getSanSeEvidence(lv, market);
+                    return <button key={lv}
                       onClick={() => setCnSanSeLevel(lv)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400 ${
                         cnSanSeLevel === lv
                           ? 'bg-fuchsia-700/70 border-fuchsia-600 text-fuchsia-100'
                           : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                       }`}
-                      title={`${label} · ${market === 'TW' ? '台股' : '陸股'}自創策略\n${tip}`}>
-                      {label}
-                    </button>
-                  ))}
+                      title={`${formatStrategyEvidenceTooltip(evidence)}\n\n${label} · ${market === 'TW' ? '台股' : '陸股'}自創策略\n${tip}`}>
+                      <span>{label}</span>
+                      <StrategyEvidenceBadge status={evidence.status} compact />
+                    </button>;
+                  })}
                 </div>
               </div>
             </div>
@@ -331,13 +358,14 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               <button
                 onClick={() => setActiveBuyMethod('R')}
                 disabled={isLoadingBuyMethod}
-                className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   activeBuyMethod === 'R'
                     ? 'bg-cyan-700/70 border-cyan-600 text-cyan-100'
                     : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
                 }`}
-                title={`R · ${LETTER_NAMES.R} · 機械軌 · 守 MA20\n⚙ 不過六條件、不過 Step 0 大盤過濾\n做空：成交額前500中乖離率最正 top10`}>
-                {LETTER_NAMES.R}
+                title={`${formatStrategyEvidenceTooltip(getBuyMethodEvidence('R', market, 'short'))}\n\nR · ${LETTER_NAMES.R} · 機械軌 · 守 MA20\n不過六條件、不過 Step 0 大盤過濾\n做空：成交額前500中乖離率最正 top10`}>
+                <span>{LETTER_NAMES.R}</span>
+                <StrategyEvidenceBadge status={getBuyMethodEvidence('R', market, 'short').status} compact />
               </button>
             </div>
           </div>
