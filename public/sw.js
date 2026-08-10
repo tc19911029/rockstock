@@ -1,5 +1,5 @@
 // RockStock Service Worker — runtime caching only
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const RUNTIME_CACHE = `rockstock-runtime-${CACHE_VERSION}`;
 
 // Cache duration by category (milliseconds)
@@ -119,6 +119,11 @@ self.addEventListener("fetch", (event) => {
   // Skip non-GET requests
   if (request.method !== "GET") return;
 
+  // Next production assets already use content-hashed immutable filenames and
+  // browser caching. Let the browser fetch them directly so the Service Worker
+  // can never mix chunks from different builds.
+  if (url.pathname.startsWith("/_next/static/")) return;
+
   // Network-only routes (SSE streaming, heavy compute)
   if (matchesAny(url, NETWORK_ONLY)) return;
 
@@ -134,11 +139,8 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets (JS, CSS, images) — stale while revalidate with long TTL
-  if (
-    url.pathname.startsWith("/_next/static/") ||
-    url.pathname.match(/\.(js|css|png|jpg|svg|ico|woff2?)$/)
-  ) {
+  // Non-Next static assets — stale while revalidate with long TTL
+  if (url.pathname.match(/\.(js|css|png|jpg|svg|ico|woff2?)$/)) {
     event.respondWith(staleWhileRevalidate(request, TTL.static));
     return;
   }

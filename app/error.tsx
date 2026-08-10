@@ -2,6 +2,12 @@
 
 import { useEffect } from 'react';
 
+const CHUNK_RELOAD_PREFIX = 'rockstock:chunk-reload:';
+
+function isChunkLoadError(error: Error): boolean {
+  return error.name === 'ChunkLoadError' || /failed to load chunk/i.test(error.message);
+}
+
 export default function GlobalError({
   error,
   reset,
@@ -11,7 +17,20 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error('Global error:', error);
+
+    if (!isChunkLoadError(error)) return;
+    try {
+      const reloadKey = `${CHUNK_RELOAD_PREFIX}${error.message}`;
+      if (sessionStorage.getItem(reloadKey)) return;
+      sessionStorage.setItem(reloadKey, '1');
+      window.location.reload();
+    } catch {
+      // Storage may be disabled. Keep the error screen usable instead of
+      // risking an uncontrolled reload loop.
+    }
   }, [error]);
+
+  const chunkLoadError = isChunkLoadError(error);
 
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4">
@@ -22,10 +41,10 @@ export default function GlobalError({
         {error.digest && <p className="text-[10px] text-muted-foreground/60 font-mono">錯誤代碼：{error.digest}</p>}
         <div className="flex gap-2 justify-center">
           <button
-            onClick={reset}
+            onClick={() => chunkLoadError ? window.location.reload() : reset()}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-bold transition"
           >
-            重試
+            {chunkLoadError ? '重新載入' : '重試'}
           </button>
           <button
             onClick={() => window.location.href = '/'}
@@ -35,7 +54,9 @@ export default function GlobalError({
           </button>
         </div>
         <p className="text-[10px] text-muted-foreground/60">
-          若問題持續發生，請嘗試清除瀏覽器快取或更換瀏覽器
+          {chunkLoadError
+            ? '偵測到版本更新，系統會自動重新載入一次'
+            : '若問題持續發生，請嘗試重新整理頁面'}
         </p>
       </div>
     </div>

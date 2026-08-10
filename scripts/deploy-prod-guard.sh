@@ -95,7 +95,7 @@ SWAPPED=1
 echo "→ launchctl kickstart -k gui/$UID_/$LABEL ..."
 launchctl kickstart -k "gui/$UID_/$LABEL"
 
-# ── 健康檢查：等 server 回 200 ─────────────────────────────────────────────
+# ── 健康檢查：等 server 回 200，再逐一驗證首頁引用的 chunks ───────────────
 echo "→ 健康檢查（最多 90s）..."
 ok=0
 i=0
@@ -108,6 +108,12 @@ if [ "$ok" = "1" ]; then
   echo "✓ server 已起（HTTP 200）"
 else
   echo "✗ 90s 內沒等到 200（code=$code）— 將自動回復上一版"
+  exit 1
+fi
+
+echo "→ 驗證首頁引用的 Next.js 靜態資源 ..."
+if ! node "$ROOT/scripts/verify-next-assets.mjs" "http://localhost:3000"; then
+  echo "✗ 首頁雖回 200，但靜態資源不完整 — 將自動回復上一版"
   exit 1
 fi
 

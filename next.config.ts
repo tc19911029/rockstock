@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import fs from "fs";
 import path from "path";
+import { assertProductionBuildOutputIsSafe } from "./lib/deployment/productionBuildGuard";
 
 // Manually load .env.local from the project directory
 // (needed because Turbopack may detect a different workspace root)
@@ -22,14 +24,16 @@ function loadEnvLocal() {
 }
 loadEnvLocal();
 
+const distDir = process.env.NEXT_DEPLOY_BUILD === '1'
+  ? '.next-deploy'
+  : process.env.NEXT_PREVIEW === '1'
+    ? '.next-preview'
+    : '.next';
+
 const nextConfig: NextConfig = {
   // Production 部署先旁路建置到 .next-deploy，成功後才由 deploy guard 原子切換；
   // 避免 build 失敗時清掉正在服務中的 .next，造成靜態資源 404／黑頁。
-  ...(process.env.NEXT_DEPLOY_BUILD === '1'
-    ? { distDir: '.next-deploy' }
-    : process.env.NEXT_PREVIEW === '1'
-      ? { distDir: '.next-preview' }
-      : {}),
+  ...(distDir === '.next' ? {} : { distDir }),
   turbopack: {
     root: __dirname,
   },
@@ -42,4 +46,13 @@ const nextConfig: NextConfig = {
   } as NextConfig['experimental'],
 };
 
-export default nextConfig;
+const createNextConfig = (phase: string): NextConfig => {
+  assertProductionBuildOutputIsSafe({
+    isProductionBuild: phase === PHASE_PRODUCTION_BUILD,
+    distDir,
+    rootDir: __dirname,
+  });
+  return nextConfig;
+};
+
+export default createNextConfig;
