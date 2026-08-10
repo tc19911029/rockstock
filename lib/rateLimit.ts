@@ -96,3 +96,38 @@ export const scanLimiter = createRateLimit('scan', {
   maxRequests: 5,
   windowMs: 60_000,
 });
+
+/** Forward-performance analysis: isolated from homepage API bursts. */
+export const forwardLimiter = createRateLimit('forward', {
+  maxRequests: 30,
+  windowMs: 60_000,
+});
+
+/** Routes that use AI (expensive). */
+const AI_ROUTES = ['/api/chat', '/api/scanner/ai-rank'];
+
+/** Routes that trigger scans (heavy compute). */
+const SCAN_ROUTES = ['/api/scanner/run', '/api/scanner/chunk', '/api/backtest/scan'];
+
+/** Routes that calculate follow-up performance. */
+const FORWARD_ROUTES = ['/api/backtest/forward'];
+
+/**
+ * Apply the limiter assigned to an API route.
+ * Keeping this selection here makes bucket isolation explicit and testable.
+ */
+export function checkApiRateLimit(pathname: string, identifier: string) {
+  if (AI_ROUTES.some(route => pathname.startsWith(route))) {
+    return aiLimiter.check(identifier);
+  }
+
+  if (SCAN_ROUTES.some(route => pathname.startsWith(route))) {
+    return scanLimiter.check(identifier);
+  }
+
+  if (FORWARD_ROUTES.some(route => pathname.startsWith(route))) {
+    return forwardLimiter.check(identifier);
+  }
+
+  return generalLimiter.check(identifier);
+}

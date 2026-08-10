@@ -1,7 +1,7 @@
 // 2026-05-08：Next.js 16 把 middleware 改名 proxy（功能不變）。
 // 從 middleware.ts rename 過來，build warning 消除。
 import { NextRequest, NextResponse } from 'next/server';
-import { generalLimiter, aiLimiter, scanLimiter } from '@/lib/rateLimit';
+import { checkApiRateLimit } from '@/lib/rateLimit';
 
 /** Extract client IP from request headers */
 function getClientIp(req: NextRequest): string {
@@ -11,12 +11,6 @@ function getClientIp(req: NextRequest): string {
     'unknown'
   );
 }
-
-/** Routes that use AI (expensive) */
-const AI_ROUTES = ['/api/chat', '/api/scanner/ai-rank'];
-
-/** Routes that trigger scans (heavy compute) */
-const SCAN_ROUTES = ['/api/scanner/run', '/api/scanner/chunk', '/api/backtest/scan'];
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -33,15 +27,7 @@ export function proxy(req: NextRequest) {
 
   const ip = getClientIp(req);
 
-  // Choose appropriate limiter
-  let result;
-  if (AI_ROUTES.some(r => pathname.startsWith(r))) {
-    result = aiLimiter.check(ip);
-  } else if (SCAN_ROUTES.some(r => pathname.startsWith(r))) {
-    result = scanLimiter.check(ip);
-  } else {
-    result = generalLimiter.check(ip);
-  }
+  const result = checkApiRateLimit(pathname, ip);
 
   if (!result.success) {
     return NextResponse.json(
