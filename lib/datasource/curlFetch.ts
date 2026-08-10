@@ -15,6 +15,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { runWithCurlConcurrencyLimit } from './curlConcurrency';
 
 const execFileAsync = promisify(execFile);
 
@@ -40,7 +41,9 @@ async function execCurlWithProxyFallback(
   // -f：HTTP ≥400 讓 curl exit 22 而不是 0 — 否則 Cloudflare 403 challenge HTML 會被
   // 當成「成功」直接進 JSON.parse 炸掉，代理重試永遠不會觸發（2026-06-12 實測 TPEx openapi）
   baseArgs = ['-f', ...baseArgs];
-  const run = (args: string[]) => execFileAsync('curl', args, { encoding: 'utf-8', maxBuffer });
+  const run = (args: string[]) => runWithCurlConcurrencyLimit(
+    () => execFileAsync('curl', args, { encoding: 'utf-8', maxBuffer }),
+  );
   const cached = workingProxyCache && Date.now() - workingProxyCache.at < PROXY_CACHE_TTL_MS
     ? workingProxyCache.proxy : null;
   const proxies = cached
