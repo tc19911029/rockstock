@@ -28,17 +28,35 @@ run_endpoint() {
   echo "[$(date -Iseconds)] ${market} ${label} start"
   /usr/bin/curl -fsS --retry 2 --retry-delay 15 --retry-all-errors \
     --max-time 900 -H "Authorization: Bearer ${cron_secret}" "${base_url}${endpoint}"
-  status=$?
+  curl_status=$?
   echo
-  if [[ "$status" -ne 0 ]]; then
-    echo "[$(date -Iseconds)] ${market} ${label} failed status=${status}" >&2
-    return "$status"
+  if [[ "$curl_status" -ne 0 ]]; then
+    echo "[$(date -Iseconds)] ${market} ${label} failed status=${curl_status}" >&2
+    return "$curl_status"
   fi
   echo "[$(date -Iseconds)] ${market} ${label} done"
 }
 
+run_required_endpoint() {
+  label="$1"
+  endpoint="$2"
+  max_attempts=5
+  attempt=1
+  while [[ "$attempt" -le "$max_attempts" ]]; do
+    if run_endpoint "$label" "$endpoint"; then
+      return 0
+    fi
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      echo "[$(date -Iseconds)] ${market} ${label} not ready; retry $((attempt + 1))/${max_attempts} in 300s" >&2
+      /bin/sleep 300
+    fi
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
 # Fail closed: downstream strategies do not run until A has produced the Step 1 pool.
-run_endpoint "A" "/api/cron/scan-${(L)market}" || exit $?
+run_required_endpoint "A" "/api/cron/scan-${(L)market}" || exit $?
 failures=0
 for track in bullish reversal system mechanical; do
   run_endpoint "BM-${track}" "/api/cron/scan-bm-batch?market=${market}&track=${track}" || failures=$((failures + 1))

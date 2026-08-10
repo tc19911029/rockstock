@@ -17,6 +17,8 @@ import { eastMoneyHistProvider } from '@/lib/datasource/EastMoneyHistProvider';
 import { writeCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { verifyDownload } from '@/lib/datasource/DownloadVerifier';
+import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 
 const CONCURRENCY = 4;
 const DELAY_MS = 600;
@@ -50,6 +52,8 @@ async function main() {
     }
   }
   console.log(`📅 補抓目標日期：${targetDates.join(', ')}`);
+  const requiredLatestDate = [...targetDates].sort().at(-1);
+  if (!requiredLatestDate) throw new Error('target dates cannot be empty');
 
   const dir = path.join('data', 'candles', 'CN');
   const files = await fs.readdir(dir);
@@ -88,8 +92,9 @@ async function main() {
         candles = candles.filter((c) => c.date <= SEAL_CUTOFF);
         if (candles.length < MIN_CANDLES) { noNewData++; return; }
         const newDates = new Set(candles.map(c => c.date));
-        const stillMissing = targetDates.filter(d => !newDates.has(d));
-        if (stillMissing.length === targetDates.length) {
+        // 「成功」必須至少包含本輪最新目標日；舊邏輯只要補到近 12 日
+        // 任一天就算成功，曾回報 2,124 檔成功但當日 coverage 仍僅 79%。
+        if (!newDates.has(requiredLatestDate)) {
           noNewData++;
           return;
         }
@@ -103,6 +108,22 @@ async function main() {
     console.log(`  進度 ${Math.min(i + CONCURRENCY, candidates.length)}/${candidates.length}  ok=${ok} fail=${fail} noNewData=${noNewData}`);
   }
   console.log(`\n🎉 完成 ok=${ok} fail=${fail} noNewData=${noNewData}`);
+
+  // Catch-up is the final CN L1 writer before the evening scan. Rebuild the
+  // coverage report here so the scan guard does not keep reading the stale
+  // report generated before catch-up completed.
+  const scanner = new ChinaScanner();
+  const stocks = await scanner.getStockList();
+  const symbols = stocks.map((stock) => stock.symbol);
+  const report = await verifyDownload('CN', SEAL_CUTOFF, symbols, {
+    succeeded: ok,
+    failed: fail + noNewData,
+    skipped: Math.max(0, symbols.length - ok - fail - noNewData),
+  });
+  console.log(
+    `📋 verify ${SEAL_CUTOFF}: coverage=${(report.summary.coverageRate * 100).toFixed(1)}% ` +
+    `health=${report.health} current=${report.summary.stocksCurrent}/${report.summary.totalStocks}`,
+  );
 }
 
 main().catch(err => { console.error('❌:', err); process.exit(1); });

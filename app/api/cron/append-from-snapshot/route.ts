@@ -11,6 +11,7 @@ import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { suspectsLimitOverwrite, suspectsGrossJump } from '@/lib/datasource/limitMoveGuard';
 import { checkCronAuth } from '@/lib/api/cronAuth';
+import { isSnapshotTooOldForSeal } from '@/lib/datasource/snapshotFreshness';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -37,7 +38,7 @@ async function readSnapshotQuotes(market: 'TW' | 'CN', date: string): Promise<Ma
     //   (1) updatedAt 太舊：盤後封存必須讀「剛刷新」的快照；> 20 分鐘視為沒刷新成功。
     //   (2) 全市場「單點平棒」(O=H=L=C) 佔比 > 50%：盤前集合競價的指紋，絕非真實收盤分布。
     const ageMs = json.updatedAt ? Date.now() - new Date(json.updatedAt).getTime() : Infinity;
-    if (ageMs > 20 * 60_000) {
+    if (isSnapshotTooOldForSeal(market, date, json.updatedAt)) {
       console.warn(`[append-from-snapshot] ${market} L2 快照過舊 (age ${Math.round(ageMs / 60000)}min)，拒用避免封 stale → fallback 即時 API`);
       return out;
     }
