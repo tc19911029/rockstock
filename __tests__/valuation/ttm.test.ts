@@ -1,4 +1,4 @@
-import { computeLastYearEps, computeTTM, computeTTMPe } from '@/lib/valuation/ttm';
+import { computeLastYearEps, computeReportedTTMEps, computeTTM, computeTTMPe } from '@/lib/valuation/ttm';
 import type { QuarterRow } from '@/lib/valuation/types';
 
 describe('valuation/ttm', () => {
@@ -38,6 +38,29 @@ describe('valuation/ttm', () => {
 
   it('does not turn missing accounting data into zero', () => {
     expect(computeTTM([{ ...quarters[0], eps: Number.NaN }, ...quarters.slice(1)])).toBeNull();
+  });
+
+  it('computes reported TTM EPS even when non-EPS accounting fields are unavailable', () => {
+    expect(computeReportedTTMEps([
+      { quarter: '2025Q3', eps: 6.47 },
+      { quarter: '2026Q2', eps: 11.61 },
+      { quarter: '2025Q4', eps: 8.65 },
+      { quarter: '2026Q1', eps: 12.28 },
+    ])).toBeCloseTo(39.01, 2);
+  });
+
+  it('rejects missing or discontinuous EPS-only quarters', () => {
+    expect(computeReportedTTMEps([
+      { quarter: '2026Q2', eps: 11.61 },
+      { quarter: '2026Q1', eps: 12.28 },
+      { quarter: '2025Q4', eps: 8.65 },
+    ])).toBeNull();
+    expect(computeReportedTTMEps([
+      { quarter: '2026Q2', eps: 11.61 },
+      { quarter: '2026Q1', eps: 12.28 },
+      { quarter: '2025Q3', eps: 6.47 },
+      { quarter: '2025Q2', eps: 5.84 },
+    ])).toBeNull();
   });
 
   it('finds the latest complete prior fiscal year instead of relying on array offsets', () => {

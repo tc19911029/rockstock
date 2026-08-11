@@ -31,6 +31,7 @@ import {
   getStockInfo,
 } from '@/lib/datasource/FinMindClient';
 import { getMonthlyAny, getQuarterlyAny } from '@/lib/datasource/TwseOpenApiProvider';
+import { getTwseCompanyFinancials } from '@/lib/datasource/TwseCompanyFinancials';
 import { getEastMoneyFundamentals } from '@/lib/datasource/EastMoneyFundamentals';
 import { fetchCnFinancials } from '@/lib/datasource/EastMoneyFinancials';
 import { normalizeCnQuarterlyHistory, sumLatestFourQuarterEps } from '@/lib/valuation/cnQuarterly';
@@ -43,6 +44,7 @@ import {
 } from '@/lib/valuation/supplementalFundamentals';
 import {
   computeTTM,
+  computeReportedTTMEps,
   computeTTMPe,
   computeDynamicPe,
   computeStaticPe,
@@ -81,7 +83,7 @@ export async function buildFundamentalQuestion(
   const fundamentals = normaliseFundamentals(fundamentalsRaw);
   if (!fundamentals) fetchErrors.push('fundamentals api returned null');
 
-  // 估值分析輸入 — 台股走 FinMind，陸股走 EastMoney
+  // 估值分析輸入 — 台股走 TWSE 官方歷季資料（FinMind 備援），陸股走 EastMoney
   const valuationInputs = market === 'TW'
     ? await buildValuationInputsTW(symbol, industry, fetchErrors)
     : market === 'CN'
@@ -159,7 +161,7 @@ export async function buildValuationInputsTW(
 
   const [
     quoteRaw,
-    quarterly,
+    twseFinancials,
     monthlySource,
     officialMonthly,
     shares,
@@ -172,7 +174,8 @@ export async function buildValuationInputsTW(
   ] = await Promise.all([
     fetchJSON(internalUrl(`/api/stock/quote?symbol=${encodeURIComponent(symbol)}`))
       .catch((e) => { fetchErrors.push(`quote: ${e}`); return null; }),
-    getQuarterlyHistory(ticker, 8).catch((e) => { fetchErrors.push(`quarterly: ${e}`); return []; }),
+    getTwseCompanyFinancials(ticker)
+      .catch((e) => { fetchErrors.push(`twseFinancials: ${e}`); return null; }),
     // 需要 24 個月才能替畫面上的近 12 個月逐月計算去年同期 YoY。
     getMonthlyRevenue(ticker, 24).catch((e) => { fetchErrors.push(`monthly: ${e}`); return []; }),
     getMonthlyAny(ticker).catch((e) => { fetchErrors.push(`officialMonthly: ${e}`); return null; }),
@@ -191,8 +194,31 @@ export async function buildValuationInputsTW(
     }),
   ]);
 
+  // 上市股優先採 TWSE 官網歷季單季資料；上櫃或官方端點結構改變時才消耗 FinMind 額度。
+  const finmindQuarterly = twseFinancials
+    ? []
+    : await getQuarterlyHistory(ticker, 8)
+      .catch((e) => { fetchErrors.push(`quarterly: ${e}`); return []; });
+  const quarterly = twseFinancials?.quarterly.slice(0, 8) ?? finmindQuarterly;
+  const quarterlySourceUrl = twseFinancials?.sourceUrl
+    ?? `finmind:TaiwanStockFinancialStatements?data_id=${ticker}`;
+
+  // FinMind 月營收失敗時，TWSE 同一官方端點仍有最近 13 個月，可維持估值情境輸入。
+  const effectiveMonthlySource = monthlySource.length > 0
+    ? monthlySource
+    : (twseFinancials?.monthlyRevenue.map((row) => {
+      const [year, month] = row.month.split('-').map(Number);
+      return {
+        date: row.month,
+        stock_id: ticker,
+        revenue: row.revenue,
+        revenue_year: year,
+        revenue_month: month,
+      };
+    }) ?? []);
+
   if (quarterly.length === 0 && !supplement?.quarterlyActuals?.length) fetchErrors.push('quarterly: empty result');
-  if (monthlySource.length === 0 && !officialMonthly) fetchErrors.push('monthly: empty result from FinMind and exchange');
+  if (effectiveMonthlySource.length === 0 && !officialMonthly) fetchErrors.push('monthly: empty result from FinMind and exchange');
 
   const quarterlyHistory = mergeQuarterlyActuals(quarterly, supplement?.quarterlyActuals);
   const selfReportedMonthlyActuals = mergeSelfReportedActuals(
@@ -226,7 +252,10 @@ export async function buildValuationInputsTW(
     })),
     effectiveShares,
   );
-  const ttmEps = ttm?.ttmEps ?? null;
+  const reportedTtmEps = computeReportedTTMEps(
+    quarterlyHistory.map((q) => ({ quarter: q.quarter, eps: q.eps ?? Number.NaN })),
+  );
+  const ttmEps = ttm?.ttmEps ?? reportedTtmEps;
   const ttmPe = ttmEps && currentPrice ? computeTTMPe(currentPrice, ttmEps) : null;
   const proFormaTtmEps = ttm?.proFormaTtmEps ?? null;
   const proFormaTtmPe = proFormaTtmEps && currentPrice ? computeTTMPe(currentPrice, proFormaTtmEps) : null;
@@ -255,7 +284,7 @@ export async function buildValuationInputsTW(
   const peRange = getReasonablePeRange(template);
 
   // monthly normalisation（FinMind RevenueRow → 我們的 schema）
-  const mergedMonthlySource = [...monthlySource];
+  const mergedMonthlySource = [...effectiveMonthlySource];
   const officialYm = officialMonthly?.yearMonth.match(/^(\d{3})(\d{2})$/);
   if (officialMonthly && officialYm && officialMonthly.revenue != null) {
     const month = `${Number(officialYm[1]) + 1911}-${officialYm[2]}-01`;
@@ -289,10 +318,11 @@ export async function buildValuationInputsTW(
 
   const sourceUrls: Record<string, string> = {
     quote: `internal:/api/stock/quote?symbol=${symbol}`,
-    quarterlyHistory: `finmind:TaiwanStockFinancialStatements?data_id=${ticker}`,
-    monthlyRevenue: officialMonthly
-      ? 'https://openapi.twse.com.tw/v1/opendata/t187ap05_L / https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O'
-      : `finmind:TaiwanStockMonthRevenue?data_id=${ticker}`,
+    quarterlyHistory: quarterlySourceUrl,
+    monthlyRevenue: monthlySource.length > 0
+      ? `finmind:TaiwanStockMonthRevenue?data_id=${ticker}`
+      : twseFinancials?.sourceUrl
+        ?? 'https://openapi.twse.com.tw/v1/opendata/t187ap05_L / https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O',
     selfReportedMonthlyActuals: `https://tw.stock.yahoo.com/quote/${ticker}.TW/news`,
     sharesOutstanding: `finmind:TaiwanStockShareholding?data_id=${ticker}`,
     bookValuePerShare: `finmind:TaiwanStockBalanceSheet?data_id=${ticker}`,

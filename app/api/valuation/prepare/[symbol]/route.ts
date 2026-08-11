@@ -83,8 +83,8 @@ export async function POST(
       const cp = valuationInputs.currentPrice;
       const reason = market === 'TW'
         ? cp && !valuationInputs.ttmEps
-          ? 'FinMind 季財報請求可能被限流或近 4 季財報尚未齊全 — 請稍後重試'
-          : 'FinMind 可能尚未開放或股票代號錯誤'
+          ? 'TWSE／FinMind 季財報來源暫時無法取得，或近 4 季財報尚未齊全 — 請稍後重試'
+          : '台股行情來源暫時無法取得，或股票代號錯誤'
         : cp && !valuationInputs.ttmEps
           ? 'EastMoney 尚未提供可用的 TTM PE／EPS，可能為虧損股或資料尚未更新'
           : 'EastMoney 目前無法取得行情或股票代號錯誤';

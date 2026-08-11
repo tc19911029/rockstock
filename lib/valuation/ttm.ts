@@ -53,6 +53,28 @@ export function computeTTM(quarters: QuarterRow[], latestShares?: number | null)
   };
 }
 
+/**
+ * 只用正式單季 EPS 計算 TTM。
+ *
+ * 有些官方來源（例如 TWSE 投資資訊中心）提供完整歷季 EPS，但營收／淨利欄位
+ * 可能只有最近幾季。這時仍可精確計算報表口徑 TTM EPS，不應因其他欄位缺值
+ * 把 EPS 一併降成 null；季度連續性與四季完整性仍維持和 computeTTM 相同門檻。
+ */
+export function computeReportedTTMEps(
+  quarters: Array<Pick<QuarterRow, 'quarter' | 'eps'>>,
+): number | null {
+  const recent = [...quarters]
+    .map(row => ({ row, ordinal: quarterOrdinal(row.quarter) }))
+    .filter((item): item is { row: Pick<QuarterRow, 'quarter' | 'eps'>; ordinal: number } => item.ordinal != null)
+    .sort((a, b) => b.ordinal - a.ordinal)
+    .slice(0, 4);
+  if (recent.length !== 4) return null;
+  if (new Set(recent.map(item => item.ordinal)).size !== 4) return null;
+  if (recent.some((item, index) => index > 0 && recent[index - 1].ordinal - item.ordinal !== 1)) return null;
+  if (recent.some(({ row }) => !Number.isFinite(row.eps))) return null;
+  return recent.reduce((sum, { row }) => sum + row.eps, 0);
+}
+
 export function computeTTMPe(price: number, ttmEps: number): number {
   if (!ttmEps || ttmEps <= 0) return Number.POSITIVE_INFINITY;
   return price / ttmEps;
