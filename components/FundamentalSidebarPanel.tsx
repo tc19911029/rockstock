@@ -73,6 +73,17 @@ function ValuationScenarios({
           : { label: '高於樂觀合理價', cls: 'text-rose-300 bg-rose-500/10 border-rose-500/25' };
   const isStale = ageDays != null && ageDays > 30;
   const freshness = detectValuationFreshness(valuation, valuationDate, latestFundamentals);
+  const normalizedRiskFlags = riskFlags?.map((flag, index) => {
+    if (typeof flag === 'string') {
+      return { key: `${flag}-${index}`, code: flag, severity: null, detail: null };
+    }
+    return {
+      key: `${flag.code}-${index}`,
+      code: flag.code,
+      severity: flag.severity,
+      detail: flag.detail,
+    };
+  });
 
   return (
     <details className="overflow-hidden rounded-lg border border-cyan-500/20 bg-gradient-to-b from-cyan-950/20 to-card/50" open>
@@ -231,9 +242,17 @@ function ValuationScenarios({
           </div>
         )}
 
-        {riskFlags?.length ? (
-          <div className="flex flex-wrap gap-1">
-            {riskFlags.map(flag => <span key={flag} className="rounded border border-rose-500/25 bg-rose-500/10 px-1.5 py-0.5 text-[9px] text-rose-700 dark:text-rose-200">{flag}</span>)}
+        {normalizedRiskFlags?.length ? (
+          <div className="space-y-1">
+            {normalizedRiskFlags.map(flag => (
+              <div key={flag.key} className="rounded border border-rose-500/25 bg-rose-500/10 px-2 py-1 text-[9px] text-rose-800 dark:text-rose-200">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{flag.code}</span>
+                  {flag.severity && <span className="shrink-0 uppercase opacity-70">{flag.severity}</span>}
+                </div>
+                {flag.detail && <div className="mt-0.5 leading-snug text-foreground/70">{flag.detail}</div>}
+              </div>
+            ))}
           </div>
         ) : null}
 

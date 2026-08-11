@@ -512,18 +512,33 @@ const RISK_LABEL: Record<string, string> = {
   aggressive_scenario_assumption: '樂觀情境假設激進',
   foreign_currency_sensitive: '匯率敏感',
   customer_concentration: '客戶集中度高',
+  valuation_compression: '估值壓縮風險',
+  future_growth_already_priced: '未來成長已反映',
+  customer_and_application_concentration: '客戶與應用集中',
+  turnkey_margin_dilution: 'Turnkey 毛利稀釋',
+  guidance_precision: '財測精度限制',
+  dilution: '股本稀釋',
 };
 
-function RiskFlagChips({ flags }: { flags: string[] }) {
+function RiskFlagChips({ flags }: { flags: NonNullable<NonNullable<FundamentalAnswer['valuation']>['riskFlags']> }) {
   return (
     <div className="border border-amber-700/30 rounded p-3 bg-amber-950/20">
       <div className="text-xs font-semibold text-amber-300 mb-2">風險提示</div>
-      <div className="flex flex-wrap gap-1.5">
-        {flags.map((f) => (
-          <span key={f} className="px-2 py-0.5 rounded bg-amber-900/40 text-amber-200 text-[11px] border border-amber-700/40">
-            {RISK_LABEL[f] ?? f}
-          </span>
-        ))}
+      <div className="space-y-1.5">
+        {flags.map((flag, index) => {
+          const code = typeof flag === 'string' ? flag : flag.code;
+          const detail = typeof flag === 'string' ? null : flag.detail;
+          const severity = typeof flag === 'string' ? null : flag.severity;
+          return (
+            <div key={`${code}-${index}`} className="rounded border border-amber-700/40 bg-amber-900/40 px-2 py-1 text-[11px] text-amber-200">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{RISK_LABEL[code] ?? code}</span>
+                {severity && <span className="shrink-0 uppercase opacity-70">{severity}</span>}
+              </div>
+              {detail && <div className="mt-0.5 text-[10px] leading-relaxed text-slate-300">{detail}</div>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

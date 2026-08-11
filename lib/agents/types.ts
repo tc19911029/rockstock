@@ -807,6 +807,12 @@ export interface FundamentalAnswer {
       | 'aggressive_scenario_assumption'
       | 'foreign_currency_sensitive'
       | 'customer_concentration'
+      | {
+          /** 深度估值可輸出擴充風險代碼，UI 必須保留向前相容。 */
+          code: string;
+          severity: 'low' | 'medium' | 'high';
+          detail: string;
+        }
     >;
     conclusion: 'undervalued' | 'fair' | 'overvalued';
     reasoning: string;
