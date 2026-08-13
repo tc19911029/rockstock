@@ -141,6 +141,30 @@ function finalizeTwTick(q: VendorQuote, status: SettleStatus, market: Market, is
  */
 export function reconcile(quotes: VendorQuote[], market: Market, isEtf = false, isIndex = false): ReconcileResult {
   if (quotes.length === 0) return { status: 'pending-no-vendor-data' };
+
+  // 台股盤後官方日線是最終帳本；其他 vendor 只做可觀測性與備援，不能以兩票
+  // 盤中殘值／延遲值推翻 TWSE 或 TPEx。官方量也必須原樣採用，避免部分成交量封存。
+  if (market === 'TW') {
+    const official = quotes.find(q => q.vendor === 'TWSE' || q.vendor === 'TPEx');
+    if (official) {
+      const disagreeing = quotes.filter(q => q !== official && !isClose(q.close, official.close));
+      const result = finalizeTwTick(
+        official,
+        quotes.length > 1 ? 'settled-multi-source' : 'settled-single-source',
+        market,
+        isEtf,
+        isIndex,
+      );
+      if (disagreeing.length > 0) {
+        result.warning = [
+          result.warning,
+          `非官方來源與 ${official.vendor} 不一致，採官方值（${disagreeing.map(q => `${q.vendor}=${q.close}`).join(', ')}）`,
+        ].filter(Boolean).join('；');
+      }
+      return result;
+    }
+  }
+
   if (quotes.length === 1) {
     return finalizeTwTick(quotes[0], 'settled-single-source', market, isEtf, isIndex);
   }

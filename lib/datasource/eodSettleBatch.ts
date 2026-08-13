@@ -27,18 +27,33 @@ export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, Bu
   const url = `https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${d}&type=ALLBUT0999`;
   let map = new Map<string, BulkRow>();
   try {
-    const { data } = await fetchJsonWithCurlFallback<{ stat: string; tables: Array<{ data: string[][] }> }>(url, { timeoutMs: 30_000 });
+    const { data } = await fetchJsonWithCurlFallback<{ stat: string; tables: Array<{ fields?: string[]; data: string[][] }> }>(url, { timeoutMs: 30_000 });
     if (data.stat !== 'OK') { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} stat=${data.stat}（資料未發布或日期錯）`); }
     else {
-      const table = data.tables?.[8];
-      if (!table?.data?.length) { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} tables[8] 空`); }
+      const idxOf = (fields: string[], ...names: string[]) =>
+        fields.findIndex(f => names.includes(f.replace(/\s/g, '')));
+      const table = data.tables?.find(t => {
+        const fields = t.fields ?? [];
+        return idxOf(fields, '證券代號') >= 0 && idxOf(fields, '收盤價') >= 0 && t.data?.length > 100;
+      });
+      if (!table?.data?.length) { console.warn(`[eodSettleBatch] TWSE MI_INDEX ${date} 找不到每日收盤行情表`); }
       else {
         const num = (s: string) => { const n = parseFloat((s ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+        const fields = table.fields ?? [];
+        const cCode = idxOf(fields, '證券代號');
+        const cOpen = idxOf(fields, '開盤價');
+        const cHigh = idxOf(fields, '最高價');
+        const cLow = idxOf(fields, '最低價');
+        const cClose = idxOf(fields, '收盤價');
+        const cVolume = idxOf(fields, '成交股數');
+        if ([cCode, cOpen, cHigh, cLow, cClose, cVolume].some(i => i < 0)) {
+          throw new Error(`TWSE MI_INDEX 欄位缺失 fields=${JSON.stringify(fields)}`);
+        }
         for (const row of table.data) {
-          const code = row[0]?.trim();
+          const code = row[cCode]?.trim();
           if (!code || !/^\d{4,}[A-Z]?$/.test(code)) continue;
-          const open = num(row[5]), high = num(row[6]), low = num(row[7]), close = num(row[8]);
-          const volume = Math.round(num(row[2]) / 1000);
+          const open = num(row[cOpen]), high = num(row[cHigh]), low = num(row[cLow]), close = num(row[cClose]);
+          const volume = Math.round(num(row[cVolume]) / 1000);
           if (close > 0 && open > 0) map.set(code, { open, high, low, close, volume });
         }
       }
@@ -95,10 +110,10 @@ export async function fetchTWSEStockDayAll(date: string): Promise<Map<string, Bu
   }
 }
 
-/** 民國日期 "1150609" → 西元 "2026-06-09"（feed 的 Date 欄位格式） */
-function rocDateToAd(roc: string | undefined): string | null {
+/** 民國日期 "1150609" / "115/06/09" → 西元 "2026-06-09"。 */
+export function rocDateToAd(roc: string | undefined): string | null {
   if (!roc) return null;
-  const s = roc.trim();
+  const s = roc.trim().replaceAll('/', '');
   if (!/^\d{7}$/.test(s)) return null;
   const y = parseInt(s.slice(0, 3), 10) + 1911;
   return `${y}-${s.slice(3, 5)}-${s.slice(5, 7)}`;

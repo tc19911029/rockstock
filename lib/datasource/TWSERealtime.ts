@@ -10,6 +10,7 @@
 
 import { globalCache } from './MemoryCache';
 import { fetchJsonWithCurlFallback } from './curlFetch';
+import { isValidTwTick, snapTwTick } from './twTick';
 
 export interface TWSEQuote {
   code: string;       // 純數字代碼，如 "2330"
@@ -348,9 +349,16 @@ export function resolveMisClose(d: Record<string, string | undefined>): number {
     if (v < low) return low;
     return v;
   };
-  if (bestBid > 0 && bestAsk > 0) return clipToRange((bestBid + bestAsk) / 2);
-  if (bestBid > 0) return clipToRange(bestBid);
-  if (bestAsk > 0) return clipToRange(bestAsk);
+  // order book fallback 不是實際成交；至少不得製造 74.05 這類不存在的台股檔位。
+  // 這個值只供 provisional 盤中顯示，盤後封存已改為只吃交易所官方日線。
+  const legalIndicative = (v: number): number => {
+    const clipped = clipToRange(v);
+    if (clipped <= 0 || !d.c || isValidTwTick(clipped, d.c.startsWith('00'))) return clipped;
+    return clipToRange(snapTwTick(clipped, d.c.startsWith('00')));
+  };
+  if (bestBid > 0 && bestAsk > 0) return legalIndicative((bestBid + bestAsk) / 2);
+  if (bestBid > 0) return legalIndicative(bestBid);
+  if (bestAsk > 0) return legalIndicative(bestAsk);
   return high > 0 ? high : 0;
 }
 

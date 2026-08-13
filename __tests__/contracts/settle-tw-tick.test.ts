@@ -56,6 +56,20 @@ describe('twTick 工具', () => {
 });
 
 describe('settle reconcile — TW 檔位守衛', () => {
+  test('TWSE 官方值不會被兩個相近的非官方殘值推翻', () => {
+    const official = { ...q('TWSE', 73.7, 428615), open: 68, high: 73.7, low: 67.9 };
+    const r = reconcile([official, q('Yahoo', 73.3, 412474), q('L1-existing', 73.3, 412474)], 'TW');
+    expect(r.settled).toEqual(official);
+    expect(r.warning).toMatch(/採官方值/);
+  });
+
+  test('TPEx 官方單源仍可直接成為 settled 值', () => {
+    const official = q('TPEx', 28.85, 1234);
+    const r = reconcile([official], 'TW');
+    expect(r.settled).toEqual(official);
+    expect(r.status).toBe('settled-single-source');
+  });
+
   test('一致群優先挑檔位合法收盤（FinMind 159 勝中間價 Yahoo 158.75）', () => {
     const r = reconcile([q('FinMind', 159), q('Yahoo', 158.75)], 'TW');
     expect(r.settled?.close).toBe(159);

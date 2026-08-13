@@ -31,6 +31,7 @@ import {
 } from '@/lib/datasource/BackfillQueue';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import { fetchJsonWithCurlFallback } from '@/lib/datasource/curlFetch';
+import { rocDateToAd } from '@/lib/datasource/eodSettleBatch';
 
 // ── TWSE MI_INDEX 官方日收盤（上市，集合競價後才更新） ───────────────────────────
 
@@ -95,13 +96,6 @@ interface TPExRawRow {
   Open?: string; High?: string; Low?: string; Close?: string;
   TradingShares?: string;
 }
-function parseROCDateLocal(raw?: string): string | null {
-  if (!raw) return null;
-  const m = raw.trim().match(/^(\d{2,3})\/(\d{2})\/(\d{2})$/);
-  if (!m) return null;
-  const yyyy = String(parseInt(m[1], 10) + 1911);
-  return `${yyyy}-${m[2]}-${m[3]}`;
-}
 async function fetchTPExBulkClose(targetDate: string): Promise<Map<string, BulkOHLCV>> {
   const url = 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes';
   // 2026-05-11：Node fetch 對 TPEx 被 Cloudflare 擋（5/11 cron 漏 853 支上櫃的元兇），走 curl fallback
@@ -116,7 +110,7 @@ async function fetchTPExBulkClose(targetDate: string): Promise<Map<string, BulkO
     const code = row.SecuritiesCompanyCode?.trim();
     if (!code || !/^\d{4,5}[A-Z]?$/.test(code)) continue;
     // 只接受目標日的資料（避免跑在交易日 cron 太早撈到前一日 stale 結果）
-    const rowDate = parseROCDateLocal(row.Date);
+    const rowDate = rocDateToAd(row.Date);
     if (rowDate !== targetDate) continue;
     dateMatched++;
     const open = parseNum(row.Open);

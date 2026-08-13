@@ -29,7 +29,12 @@ function getTodayDate(market: 'TW' | 'CN'): string {
   return new Date().toLocaleString('sv-SE', { timeZone: tz }).split(' ')[0];
 }
 
-async function fetchTWQuotes(): Promise<Map<string, { open: number; high: number; low: number; close: number; volume: number }>> {
+async function fetchTWQuotes(date: string, forSeal: boolean): Promise<Map<string, { open: number; high: number; low: number; close: number; volume: number }>> {
+  if (forSeal) {
+    const { prefetchVendorBatch } = await import('../lib/datasource/eodSettleBatch');
+    const cache = await prefetchVendorBatch('TW', date);
+    return new Map([...cache.twseBulk, ...cache.tpexBulk]);
+  }
   const { getTWSERealtimeIntraday } = await import('../lib/datasource/TWSERealtime');
   const raw = await getTWSERealtimeIntraday();
   const out = new Map<string, { open: number; high: number; low: number; close: number; volume: number }>();
@@ -96,7 +101,9 @@ async function appendMarket(market: 'TW' | 'CN'): Promise<void> {
   // 原因：凌晨跑腳本時 TWSE API 會回傳昨日收盤數據，被誤標為「今天」寫入
   //       → 產生假 K 棒讓前端以為今日已開盤
   const { isMarketOpen, isPostCloseWindow } = await import('../lib/datasource/marketHours');
-  const inValidWindow = isMarketOpen(market) || isPostCloseWindow(market);
+  const marketOpen = isMarketOpen(market);
+  const postClose = isPostCloseWindow(market);
+  const inValidWindow = marketOpen || postClose;
   if (!inValidWindow) {
     console.log(`\n⏭️  [${market}] ${date} 非盤中/盤後窗口（目前為早盤前或深夜），跳過避免寫入假 K 棒`);
     return;
@@ -104,7 +111,7 @@ async function appendMarket(market: 'TW' | 'CN'): Promise<void> {
 
   console.log(`\n📡 [${market}] 抓全市場即時報價 (${date})...`);
   const t0 = Date.now();
-  const quotes = market === 'TW' ? await fetchTWQuotes() : await fetchCNQuotes();
+  const quotes = market === 'TW' ? await fetchTWQuotes(date, postClose && !marketOpen) : await fetchCNQuotes();
   console.log(`   拿到 ${quotes.size} 支報價 (${Date.now() - t0}ms)`);
 
   if (quotes.size === 0) {
@@ -128,6 +135,12 @@ async function appendMarket(market: 'TW' | 'CN'): Promise<void> {
     console.log(`   📸 L2 快照已寫 ${quotes.size} 筆 → data/intraday-${market}-${date}.json`);
   } catch (err) {
     console.warn('   ⚠️  L2 快照寫入失敗:', (err as Error).message?.slice(0, 80));
+  }
+
+  // 盤中快照只屬 provisional L2，絕不寫 sealed L1。
+  if (marketOpen) {
+    console.log(`   ⏳ ${market} 盤中資料僅寫 L2，不封存 L1`);
+    return;
   }
 
   const scanner = market === 'TW' ? new TaiwanScanner() : new ChinaScanner();

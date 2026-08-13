@@ -24,6 +24,7 @@ config();
 
 import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 import { fetchJsonWithCurlFallback } from '../lib/datasource/curlFetch';
+import { rocDateToAd } from '../lib/datasource/eodSettleBatch';
 
 interface BulkOHLCV { open: number; high: number; low: number; close: number; volume: number; }
 
@@ -53,12 +54,6 @@ async function fetchTWSEBulkClose(dateStr: string): Promise<Map<string, BulkOHLC
 }
 
 interface TPExRawRow { Date?: string; SecuritiesCompanyCode?: string; Open?: string; High?: string; Low?: string; Close?: string; TradingShares?: string; }
-function parseROCDateLocal(raw?: string): string | null {
-  if (!raw) return null;
-  const m = raw.trim().match(/^(\d{2,3})\/(\d{2})\/(\d{2})$/);
-  if (!m) return null;
-  return `${parseInt(m[1], 10) + 1911}-${m[2]}-${m[3]}`;
-}
 async function fetchTPExBulkClose(targetDate: string): Promise<Map<string, BulkOHLCV>> {
   const url = 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes';
   const { data: rows } = await fetchJsonWithCurlFallback<TPExRawRow[]>(url, { timeoutMs: 30_000 });
@@ -68,7 +63,7 @@ async function fetchTPExBulkClose(targetDate: string): Promise<Map<string, BulkO
   for (const row of rows) {
     const code = row.SecuritiesCompanyCode?.trim();
     if (!code || !/^\d{4,5}[A-Z]?$/.test(code)) continue;
-    const rowDate = parseROCDateLocal(row.Date);
+    const rowDate = rocDateToAd(row.Date);
     if (rowDate !== targetDate) continue;
     dateMatched++;
     const open = parseNum(row.Open), high = parseNum(row.High), low = parseNum(row.Low), close = parseNum(row.Close);

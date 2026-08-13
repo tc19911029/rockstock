@@ -61,18 +61,14 @@ async function readSnapshotQuotes(market: 'TW' | 'CN', date: string): Promise<Ma
 }
 
 async function fetchTWQuotes(date: string): Promise<Map<string, Quote>> {
-  const snap = await readSnapshotQuotes('TW', date);
-  if (snap.size > 500) {
-    console.log(`[append-from-snapshot] TW 用本地 L2 snapshot (${snap.size} 筆)`);
-    return snap;
-  }
-  console.log(`[append-from-snapshot] TW 本地 snapshot 不足 (${snap.size})，fallback 打 TWSE realtime`);
-  const { getTWSERealtimeIntraday } = await import('@/lib/datasource/TWSERealtime');
-  const raw = await getTWSERealtimeIntraday();
+  // 封存只讀交易所盤後日線。L2 與 mis.twse 在 z='-' 時可能只有買賣中價，
+  // 即使 OHLC 自洽也不是成交價，不能進 sealed L1。
+  const { prefetchVendorBatch } = await import('@/lib/datasource/eodSettleBatch');
+  const cache = await prefetchVendorBatch('TW', date);
   const out = new Map<string, Quote>();
-  for (const [code, q] of raw) {
-    if (q.close > 0) out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
-  }
+  for (const [code, q] of cache.twseBulk) out.set(code, q);
+  for (const [code, q] of cache.tpexBulk) out.set(code, q);
+  console.log(`[append-from-snapshot] TW 用官方盤後日線（TWSE ${cache.twseBulk.size} / TPEx ${cache.tpexBulk.size}）`);
   return out;
 }
 

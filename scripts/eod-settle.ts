@@ -46,12 +46,16 @@ function parseArgs(): Args {
   return a;
 }
 
-function listSymbols(market: Market): string[] {
+async function listSymbols(market: Market): Promise<string[]> {
   const dir = path.join(process.cwd(), 'data', 'candles', market);
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  const symbols = readdirSync(dir)
     .filter(f => f.endsWith('.json'))
     .map(f => f.replace('.json', ''));
+  if (market !== 'TW') return symbols;
+  const { expectedTwSymbol } = await import('../lib/datasource/twSymbolMarket');
+  const checked = await Promise.all(symbols.map(async symbol => ({ symbol, expected: await expectedTwSymbol(symbol) })));
+  return checked.filter(({ symbol, expected }) => !expected || expected === symbol.toUpperCase()).map(({ symbol }) => symbol);
 }
 
 function readExisting(market: Market, sym: string, date: string): VendorQuote | undefined {
@@ -76,7 +80,7 @@ async function main() {
   const { market, date, dry, limit, concurrency } = parseArgs();
   console.log(`EOD Settle: market=${market} date=${date} ${dry ? '(DRY)' : '★ APPLY'} concurrency=${concurrency}`);
 
-  const symbols = listSymbols(market).slice(0, limit);
+  const symbols = (await listSymbols(market)).slice(0, limit);
   console.log(`stocklist 共 ${symbols.length} 檔`);
 
   // Batch prefetch — TWSE/TPEx/EastMoney 全市場 table（避免 per-symbol 10s 拖死）
@@ -140,18 +144,29 @@ async function main() {
       //   settlement 必須用 vendor 覆寫，否則「填錯資料」永遠留著
       const existingBad = !readExisting(market, r.symbol, r.date);  // invariant-violated 視為 undefined
       const writable =
+        r.officialAnchor === true ||
         r.status === 'settled-multi-source' ||
         (r.status === 'settled-single-source' && existingBad);
       if (!dry && r.settled && writable) {
-        await saveLocalCandles(r.symbol, market, [{
-          date: r.date,
-          open: r.settled.open,
-          high: r.settled.high,
-          low: r.settled.low,
-          close: r.settled.close,
-          volume: r.settled.volume,
-        }]);
-        written++;
+        const originalStatus = r.status;
+        try {
+          await saveLocalCandles(r.symbol, market, [{
+            date: r.date,
+            open: r.settled.open,
+            high: r.settled.high,
+            low: r.settled.low,
+            close: r.settled.close,
+            volume: r.settled.volume,
+          }]);
+          written++;
+        } catch (err) {
+          // 單檔壞後綴／IO 問題不得中止全市場；留下 pending 證據後繼續。
+          r.status = 'pending-unverified';
+          r.warning = [r.warning, `寫入失敗: ${(err as Error).message}`].filter(Boolean).join('；');
+          stats['pending-unverified'] = (stats['pending-unverified'] ?? 0) + 1;
+          stats[originalStatus] = Math.max(0, (stats[originalStatus] ?? 0) - 1);
+          console.warn(`[eod-settle] ${r.symbol} 寫入失敗，已隔離並繼續: ${(err as Error).message}`);
+        }
       }
     }
     processed += batch.length;

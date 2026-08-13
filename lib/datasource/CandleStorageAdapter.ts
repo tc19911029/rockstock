@@ -211,61 +211,33 @@ const SINGLE_CANDLE_INCREMENT_THRESHOLD = 1;
  *   2. Yahoo 調整後 open vs raw H/L (2072.TW 110 筆歷史)
  *   3. 任何 vendor parse 錯亂
  *
- * 策略：
- *   - open 出界：一律 clip 回 [low, high]（多為 TWSE 競價/除權息參考價，非亂值；H/L/C 仍真實）
- *   - close 小幅破 (≤ 1%)：clip 回 [low, high]
- *   - close 大幅破 (> 1%)：log warn 並 drop 該 bar（close 是關鍵價，大破多為 vendor 亂值）
+ * 策略：任何 open/close 出界都拒寫，交由官方或第二來源重抓；不可用 clip 製造假值。
  *
  * 註：volume cliff / spike + limit-up close 守門仍在 LocalCandleStore（針對「最後一根」）
  * 此處只做純 OHLC 自洽（針對「全部 incoming bar」）。
  *
- * 2026-05-21 加。
+ * 2026-05-21 加；2026-08-13 改為 fail-closed（不再 clip）。
  */
-function sanitizeOHLC(symbol: string, market: 'TW' | 'CN', incoming: Candle[]): Candle[] {
+export function sanitizeOHLC(symbol: string, market: 'TW' | 'CN', incoming: Candle[]): Candle[] {
   const out: Candle[] = [];
   for (const c of incoming) {
     const { open, high, low, close, volume, date } = c;
     if (high <= 0 || low <= 0 || close <= 0 || low > high) {
-      out.push(c); // H/L/C 缺值 → 非 OHLC 自洽範疇（vendor 缺資料），留給其他 guard 處理
-      continue;
-    }
-    const fixed = { ...c };
-    let clipped = false;
-    let dropped = false;
-    // open ≤ 0（沒抓到開盤價，常見於上市首日/資料缺口）→ 用 close 填（在 [low,high] 內）
-    if (fixed.open <= 0) { fixed.open = close; clipped = true; }
-
-    // close 在 [low, high] 範圍外？
-    if (close > high) {
-      const breachPct = (close - high) / high;
-      if (breachPct <= 0.01) { fixed.close = high; clipped = true; }
-      else { dropped = true; }
-    } else if (close < low) {
-      const breachPct = (low - close) / low;
-      if (breachPct <= 0.01) { fixed.close = low; clipped = true; }
-      else { dropped = true; }
-    }
-    // open 在 [low, high] 範圍外 → 一律 clip 到範圍內（不 drop）。
-    // 理由：H/L/C 已驗證自洽（low≤high、close 已處理），open 出界幾乎都是 TWSE 開盤集合競價/
-    // 除權息參考價（創新板等高波動股常見，如 6908 宏碁遊戲-創 有 17% 交易日 open 出界、FinMind/
-    // Yahoo 等官方源頭都同值），非 vendor 亂值 → clip 保留該根真實 H/L/C/V，不可整根 drop。
-    if (!dropped) {
-      if (fixed.open > high) { fixed.open = high; clipped = true; }
-      else if (fixed.open < low) { fixed.open = low; clipped = true; }
-    }
-
-    if (dropped) {
+      // 非正價格與 high < low 都不是可用 K 棒；寫入會污染指標，也沒有可靠方式補造真值。
       console.warn(
-        `[sanitizeOHLC] ${market}:${symbol} ${date} 大幅破 OHLC 範圍 (O=${open} H=${high} L=${low} C=${close} V=${volume}) — drop 該 bar`,
+        `[sanitizeOHLC] ${market}:${symbol} ${date} 非法 OHLC (O=${open} H=${high} L=${low} C=${close} V=${volume}) — drop 該 bar`,
       );
       continue;
     }
-    if (clipped) {
+    // 任一 O/C 出界都代表來源欄位互相矛盾。不能 clip 成一根「看起來合法」的假 K：
+    // 2026-08-12 CN 有 51 檔錯 open 被 clip 到 high/low，事後失去原始錯誤訊號。
+    if (open <= 0 || open > high || open < low || close > high || close < low) {
       console.warn(
-        `[sanitizeOHLC] ${market}:${symbol} ${date} OHLC 微幅破範圍已 clip (O=${open}→${fixed.open} C=${close}→${fixed.close})`,
+        `[sanitizeOHLC] ${market}:${symbol} ${date} OHLC 出界 (O=${open} H=${high} L=${low} C=${close} V=${volume}) — drop 該 bar，等待可信來源重抓`,
       );
+      continue;
     }
-    out.push(fixed);
+    out.push({ ...c });
   }
   return out;
 }

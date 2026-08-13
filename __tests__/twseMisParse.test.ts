@@ -71,6 +71,14 @@ describe('resolveMisClose', () => {
     expect(resolveMisClose(d)).toBe(100.75);
   });
 
+  test('real stock order-book midpoint is snapped to a legal provisional tick', () => {
+    const d = {
+      c: '6770', z: '-', o: '75.0000', h: '77.4000', l: '72.7000',
+      b: '75.5000_', a: '75.6000_', u: '81.0000', w: '66.4000', y: '73.7000',
+    };
+    expect(resolveMisClose(d)).toBe(75.5);
+  });
+
   test('only one side has a quote → use whichever exists', () => {
     expect(resolveMisClose({
       z: '-', h: '102.0000', l: '99.0000',

@@ -14,6 +14,7 @@ import type { Candle, CandleWithIndicators } from '@/types';
 import { computeIndicators } from '@/lib/indicators';
 import { readCandleFile, writeCandleFile } from './CandleStorageAdapter';
 import { suspectsLimitOverwrite } from './limitMoveGuard';
+import { expectedTwSymbol } from './twSymbolMarket';
 
 /** 本地數據根目錄（getLocalCandleDir 等統計用途） */
 const DATA_ROOT = path.join(process.cwd(), 'data', 'candles');
@@ -149,25 +150,22 @@ function guardAgainstLimitOverwrite(symbol: string, market: 'TW' | 'CN', candles
 const _writeLocks = new Map<string, Promise<void>>();
 
 /**
- * Ghost .TW guard：阻止對 TPEx 上櫃股寫入 .TW 檔。
+ * 台股交易所後綴守衛：依官方 stock master 判定，不再靠「另一個檔案存在」猜市場。
  *
  * 背景：2026-05-26 抓到 20 對 ghost 檔（如 8358.TW + 8358.TWO 並存）。
  *   - download-candles cron 用 stocklist iterate（只給 .TWO），不會更新到 ghost .TW
  *   - verify-download 掃整個目錄，把 ghost .TW 列進 stale list
  *   - retry-failed cron 每天 14:45 用 stale list 重抓 → Yahoo .TW 對 TPEx 股回 stale data → 持續寫錯
  *
- * 判定：若同 code 的 .TWO 檔已存在 = 該 code 確定是 TPEx（台股 code 上市/上櫃不共用）
- * → 拒寫 .TW，從源頭阻擋 ghost 重生。
+ * 2026-08-13：5236 是 TWSE 真股，但殘留 5236.TWO 幽靈檔；舊規則因此反過來封鎖
+ * 5236.TW，且例外使整個盤後任務中止。現在只信交易所主檔；未知新股不臆測、不阻擋。
  */
 async function ghostSuffixGuard(symbol: string, market: 'TW' | 'CN'): Promise<void> {
-  if (market !== 'TW' || !symbol.endsWith('.TW')) return;
-  const code = symbol.slice(0, -3);
-  const { readCandleFile } = await import('./CandleStorageAdapter');
-  const twoData = await readCandleFile(`${code}.TWO`, market);
-  if (twoData) {
+  if (market !== 'TW') return;
+  const expected = await expectedTwSymbol(symbol);
+  if (expected && expected !== symbol.toUpperCase()) {
     throw new Error(
-      `[L1 guard] ghost write blocked: ${symbol} — ${code}.TWO already exists (TPEx 上櫃股). ` +
-      `用 ${code}.TWO 寫入；寫 .TW 會建 ghost 檔，被 retry-failed cron 每天 14:45 重抓變污染源。`
+      `[L1 guard] ghost write blocked: ${symbol} — stock master 指定 ${expected}.`
     );
   }
 }
