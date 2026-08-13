@@ -308,7 +308,16 @@ export class TencentHistProvider implements DataProvider {
 
     let result: Candle[];
     if (isCN) {
-      result = await fetchAllTencentKlines(cnTencentCode(cnCode!, extractCNSuffix(symbol)), startDate, endDate, true);
+      const code = cnTencentCode(cnCode!, extractCNSuffix(symbol));
+      const rangeDays = Math.ceil(
+        (new Date(`${endDate}T12:00:00Z`).getTime() - new Date(`${startDate}T12:00:00Z`).getTime()) / 86_400_000,
+      );
+      // Tencent 對部分上海代號存在 maxRecords 參數缺陷：同一個 3 日區間傳 640
+      // 只回到昨日，傳 4~20 才會包含今日。短區間按實際跨度給小上限；長區間仍走
+      // 原本的分段邏輯，避免影響完整歷史抓取。
+      result = rangeDays >= 0 && rangeDays <= 30
+        ? await fetchTencentKlines(code, startDate, endDate, true, Math.max(10, rangeDays + 7))
+        : await fetchAllTencentKlines(code, startDate, endDate, true);
     } else {
       result = await fetchUSKlinesFromTencent(usTicker!, startDate, endDate);
     }

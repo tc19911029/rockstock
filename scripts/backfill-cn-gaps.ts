@@ -19,6 +19,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { verifyDownload } from '@/lib/datasource/DownloadVerifier';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
+import { fetchCandlesContainingTarget } from '@/lib/datasource/fetchCandlesContainingTarget';
 
 const CONCURRENCY = 4;
 const DELAY_MS = 600;
@@ -86,19 +87,10 @@ async function main() {
     const batch = candidates.slice(i, i + CONCURRENCY);
     await Promise.allSettled(batch.map(async (symbol) => {
       try {
-        let candles = null;
-        // 試 Tencent
-        try {
-          candles = await tencentHistProvider.getHistoricalCandles(symbol, '3mo');
-          if (!candles || candles.length < MIN_CANDLES) candles = null;
-        } catch { /* fallthrough */ }
-        // 退到 EastMoney
-        if (!candles) {
-          try {
-            candles = await eastMoneyHistProvider.getHistoricalCandles(symbol, '3mo');
-            if (!candles || candles.length < MIN_CANDLES) candles = null;
-          } catch { /* fallthrough */ }
-        }
+        let candles = await fetchCandlesContainingTarget(symbol, requiredLatestDate, [
+          tencentHistProvider,
+          eastMoneyHistProvider,
+        ]);
         if (!candles) { noNewData++; return; }
         // 鐵則 #1 硬守門：剔除 > 最後已收盤日的盤中半根（provider 盤中會回今日進行中那根）。
         candles = candles.filter((c) => c.date <= SEAL_CUTOFF);
