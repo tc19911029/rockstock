@@ -15,11 +15,11 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { suspectsLimitOverwrite, suspectsGrossJump } from '@/lib/datasource/limitMoveGuard';
+import { suspectsLimitOverwrite, suspectsGrossJump, isTwListingTransition } from '@/lib/datasource/limitMoveGuard';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';
-import { verifyDownload } from '@/lib/datasource/DownloadVerifier';
+import { verifyDownload, MIN_VERIFY_UNIVERSE } from '@/lib/datasource/DownloadVerifier';
 import { spotCheckL1 } from '@/lib/datasource/L1SpotCheck';
 import { checkCronAuth } from '@/lib/api/cronAuth';
 import {
@@ -131,6 +131,12 @@ const CONCURRENCY = 8;
 const BATCH_DELAY_MS = 300;
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
+type DownloadGlobal = typeof globalThis & {
+  __rockstockDownloadInFlight?: Set<'TW' | 'CN'>;
+};
+const downloadGlobal = globalThis as DownloadGlobal;
+const downloadInFlight = downloadGlobal.__rockstockDownloadInFlight ??= new Set();
+
 export async function GET(req: NextRequest) {
   // 驗證 cron secret
   const authDenied = checkCronAuth(req);
@@ -140,6 +146,11 @@ export async function GET(req: NextRequest) {
   if (market !== 'TW' && market !== 'CN') {
     return apiError('market must be TW or CN', 400);
   }
+  if (downloadInFlight.size > 0) {
+    const activeMarket = [...downloadInFlight][0];
+    return apiError(`${activeMarket} download already in flight`, 409);
+  }
+  downloadInFlight.add(market);
 
   const startTime = Date.now();
   const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
@@ -153,19 +164,16 @@ export async function GET(req: NextRequest) {
   try {
     const stocks = await scanner.getStockList();
 
-    // Stocklist size sanity check：5/11 教訓 — cron 14:37 CST 跑時 TPEx openapi 暫時掛掉，
+    // Stocklist size hard guard：5/11 教訓 — cron 14:37 CST 跑時 TPEx openapi 暫時掛掉，
     // stocklist 只回上市 1077（少了 853 支上櫃），但 ScanPipeline 安全閘 (200) 沒擋住，
     // 結果 853 支上櫃股的 5/11 row 完全沒下載。這裡用近期 manifest 平均 vs 本次大小做監測。
-    try {
-      const expectedMin = market === 'TW' ? 1500 : 2700;
-      if (stocks.length < expectedMin) {
-        console.warn(
-          `[download-candles] ${market}: ⚠ stocklist=${stocks.length} 顯著小於預期 ≥${expectedMin}，` +
-          `可能 provider transient 失效（TPEx/EastMoney 階段性掛掉）。此次 cron 將只下載到的部分，` +
-          `下一輪 cron 或 BackfillQueue 會補。`
-        );
-      }
-    } catch { /* sanity check 失敗不擋主流程 */ }
+    const expectedMin = MIN_VERIFY_UNIVERSE[market];
+    if (stocks.length < expectedMin) {
+      throw new Error(
+        `${market} stocklist=${stocks.length} < ${expectedMin}; ` +
+        '拒絕執行部分市場下載，並保留既有完整 verify report',
+      );
+    }
 
     // ── Step -1: 消費 Backfill Queue（上輪 verify 發現缺棒的股票，針對性補拉） ──
     // 在主下載之前跑，補拉也會觸發 writeCandleFile merge，讓主下載看到已補齊狀態。
@@ -275,13 +283,14 @@ export async function GET(req: NextRequest) {
           // 用集合競價後的官方 OHLCV，不受盤中快照時序影響
           // 防呆：官方 bulk 若因來源改版錯位寫出「不可能跳動」(>50% 偏離前收)，跳過改走完整 API
           const prevClose = existing?.candles?.[existing.candles.length - 1]?.close;
+          const prevBar = existing?.candles?.[existing.candles.length - 1];
           if (symbol.endsWith('.TW') && twseMap) {
             const ohlcv = twseMap.get(code);
             if (ohlcv) {
-              if (suspectsGrossJump(prevClose, ohlcv)) {
+              if (suspectsGrossJump(prevClose, ohlcv) && !isTwListingTransition(symbol, prevBar, ohlcv)) {
                 console.warn(`[download-candles] ${symbol} ${lastTradingDate} TWSE bulk 異常跳動(prev=${prevClose}→${ohlcv.close})，跳過官方注入改走 API`);
               } else {
-                await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }]);
+                await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }], { trustedOfficial: true });
                 twseInjected++;
                 return 1;
               }
@@ -292,10 +301,10 @@ export async function GET(req: NextRequest) {
           if (symbol.endsWith('.TWO') && tpexMap) {
             const ohlcv = tpexMap.get(code);
             if (ohlcv) {
-              if (suspectsGrossJump(prevClose, ohlcv)) {
+              if (suspectsGrossJump(prevClose, ohlcv) && !isTwListingTransition(symbol, prevBar, ohlcv)) {
                 console.warn(`[download-candles] ${symbol} ${lastTradingDate} TPEx bulk 異常跳動(prev=${prevClose}→${ohlcv.close})，跳過官方注入改走 API`);
               } else {
-                await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }]);
+                await saveLocalCandles(symbol, market, [{ date: lastTradingDate, ...ohlcv }], { trustedOfficial: true });
                 tpexInjected++;
                 return 1;
               }
@@ -445,7 +454,7 @@ export async function GET(req: NextRequest) {
         const diffAbs = Math.abs(lastBar.close - official.close);
         const diffPct = diffAbs / official.close;
         if (diffAbs > 1 || diffPct > 0.005) {
-          await saveLocalCandles(stock.symbol, market, [{ date: lastTradingDate, ...official }]);
+          await saveLocalCandles(stock.symbol, market, [{ date: lastTradingDate, ...official }], { trustedOfficial: true });
           repaired++;
           if (samples.length < 5) {
             samples.push(`${stock.symbol}: L1=${lastBar.close} → TWSE=${official.close} (${(diffPct * 100).toFixed(2)}%)`);
@@ -488,7 +497,7 @@ export async function GET(req: NextRequest) {
         const diffAbs = Math.abs(lastBar.close - official.close);
         const diffPct = diffAbs / official.close;
         if (diffAbs > 1 || diffPct > 0.005) {
-          await saveLocalCandles(stock.symbol, market, [{ date: lastTradingDate, ...official }]);
+          await saveLocalCandles(stock.symbol, market, [{ date: lastTradingDate, ...official }], { trustedOfficial: true });
           repaired++;
           if (samples.length < 5) {
             samples.push(`${stock.symbol}: L1=${lastBar.close} → TPEx=${official.close} (${(diffPct * 100).toFixed(2)}%)`);
@@ -539,5 +548,7 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error(`[download-candles] ${market}: 錯誤`, err);
     return apiError(String(err));
+  } finally {
+    downloadInFlight.delete(market);
   }
 }

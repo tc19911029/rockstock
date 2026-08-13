@@ -29,7 +29,9 @@ function getTodayDate(market: 'TW' | 'CN'): string {
   return new Date().toLocaleString('sv-SE', { timeZone: tz }).split(' ')[0];
 }
 
-async function fetchTWQuotes(date: string, forSeal: boolean): Promise<Map<string, { open: number; high: number; low: number; close: number; volume: number }>> {
+type SnapshotQuote = { open: number; high: number; low: number; close: number; volume: number; isActualTrade?: boolean };
+
+async function fetchTWQuotes(date: string, forSeal: boolean): Promise<Map<string, SnapshotQuote>> {
   if (forSeal) {
     const { prefetchVendorBatch } = await import('../lib/datasource/eodSettleBatch');
     const cache = await prefetchVendorBatch('TW', date);
@@ -37,10 +39,10 @@ async function fetchTWQuotes(date: string, forSeal: boolean): Promise<Map<string
   }
   const { getTWSERealtimeIntraday } = await import('../lib/datasource/TWSERealtime');
   const raw = await getTWSERealtimeIntraday();
-  const out = new Map<string, { open: number; high: number; low: number; close: number; volume: number }>();
+  const out = new Map<string, SnapshotQuote>();
   for (const [code, q] of raw) {
     if (q.close > 0) {
-      out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume });
+      out.set(code, { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume, isActualTrade: q.isActualTrade });
     }
   }
   return out;
@@ -128,6 +130,7 @@ async function appendMarket(market: 'TW' | 'CN'): Promise<void> {
         symbol: code, name: '',
         open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume,
         prevClose: q.close, changePercent: 0,
+        isActualTrade: q.isActualTrade,
       })),
       count: quotes.size,
     };

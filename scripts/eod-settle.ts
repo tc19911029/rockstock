@@ -23,6 +23,7 @@ config();
 import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 import { settleSymbol, type SettleResult, type VendorQuote, type Market } from '../lib/datasource/eodSettle';
 import { prefetchVendorBatch } from '../lib/datasource/eodSettleBatch';
+import { verifyDownload } from '../lib/datasource/DownloadVerifier';
 
 interface Args {
   market: Market;
@@ -157,7 +158,7 @@ async function main() {
             low: r.settled.low,
             close: r.settled.close,
             volume: r.settled.volume,
-          }]);
+          }], r.officialAnchor ? { trustedOfficial: true } : undefined);
           written++;
         } catch (err) {
           // 單檔壞後綴／IO 問題不得中止全市場；留下 pending 證據後繼續。
@@ -200,13 +201,44 @@ async function main() {
   }, null, 2));
   console.log(`報告寫入 ${reportFile}`);
 
+  // Apply 結束後立即重建全市場 coverage report。策略閘門只信 verify report；若只寫
+  // settle report，另一條下載排程延遲／失敗時，策略會一直讀到昨天或殘缺的驗證狀態。
+  // scanner 有自己的完整靜態／本地主檔 fallback，且 DownloadVerifier 會拒絕小母體覆寫。
+  let verifyFailed = false;
+  if (!dry) {
+    try {
+      const Scanner = market === 'TW'
+        ? (await import('../lib/scanner/TaiwanScanner')).TaiwanScanner
+        : (await import('../lib/scanner/ChinaScanner')).ChinaScanner;
+      const canonicalSymbols = (await new Scanner().getStockList()).map((stock) => stock.symbol);
+      const pendingTotal = stats['pending-multi-disagree'] + stats['pending-no-vendor-data'] + stats['pending-unverified'];
+      const verify = await verifyDownload(market, date, canonicalSymbols, {
+        succeeded: written,
+        failed: pendingTotal,
+        skipped: stats['skipped-already-correct'],
+      });
+      console.log(
+        `Verify: ${verify.health} coverage=${(verify.summary.coverageRate * 100).toFixed(1)}% ` +
+        `current=${verify.summary.stocksCurrent}/${verify.summary.totalStocks}`,
+      );
+    } catch (error) {
+      verifyFailed = true;
+      console.error(`★ verify report 重建失敗: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
   // Invariant：pending 比例 >5% 視為 settlement 失敗
   const pendingTotal = stats['pending-multi-disagree'] + stats['pending-no-vendor-data'] + stats['pending-unverified'];
   const pendingRate = symbols.length > 0 ? pendingTotal / symbols.length : 0;
+  if (pendingRate > 0.05 || verifyFailed) {
+    if (verifyFailed && pendingRate <= 0.05) {
+      console.error('★ settlement 已完成但 verify report 未能安全重建 — exit 1');
+    }
+  }
   if (pendingRate > 0.05) {
     console.error(`★ pending ${(pendingRate * 100).toFixed(1)}% (${pendingTotal}/${symbols.length}) 超過 5%，settlement 視為部分失敗 — exit 1`);
-    process.exit(1);
   }
+  if (pendingRate > 0.05 || verifyFailed) process.exit(1);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

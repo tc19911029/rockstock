@@ -30,9 +30,14 @@
 
 import { isTradingDay } from '../lib/utils/tradingDay';
 import { runScanPipeline } from '../lib/scanner/ScanPipeline';
+import { computeTurnoverRankAsOfDate } from '../lib/scanner/TurnoverRank';
+import { TaiwanScanner } from '../lib/scanner/TaiwanScanner';
+import { ChinaScanner } from '../lib/scanner/ChinaScanner';
 import type { MarketId } from '../lib/scanner/types';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
-const ALL_BUY_METHODS = ['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'] as const;
+const ALL_BUY_METHODS = ['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'] as const;
 type BuyMethod = (typeof ALL_BUY_METHODS)[number];
 
 function getLastNTradingDays(n: number, market: MarketId): string[] {
@@ -60,6 +65,7 @@ function arg(name: string, fallback?: string): string | undefined {
 async function main() {
   const apply = process.argv.includes('--apply');
   const useBlob = process.argv.includes('--blob');
+  const existingOnly = process.argv.includes('--existing');
   const days = Number(arg('days', '20'));
   const marketArg = arg('market') as MarketId | undefined;
   const singleDate = arg('date');
@@ -74,9 +80,18 @@ async function main() {
 
   const markets: MarketId[] = marketArg ? [marketArg] : ['TW', 'CN'];
 
-  // 列出每個 market 要跑的日期
+  // 列出每個 market 要跑的日期。--existing 只重播已存在的正式 daily 日期，
+  // 不會憑空建立尚未收盤的 session，也不碰 intraday 稽核快照。
   const plan: Array<{ market: MarketId; date: string }> = [];
-  for (const market of markets) {
+  if (existingOnly) {
+    if (useBlob) throw new Error('--existing 目前只支援本機資料；Blob 請明確指定 --date/--days');
+    const entries = await fs.readdir(path.join(process.cwd(), 'data'));
+    for (const market of markets) {
+      const pattern = new RegExp(`^scan-${market}-long-daily-(\\d{4}-\\d{2}-\\d{2})\\.json$`);
+      const dates = entries.flatMap((name) => name.match(pattern)?.[1] ?? []).sort();
+      for (const date of dates) plan.push({ market, date });
+    }
+  } else for (const market of markets) {
     if (singleDate) {
       if (!isTradingDay(singleDate, market)) {
         console.warn(`[${market}] ${singleDate} 不是交易日，skip`);
@@ -98,13 +113,46 @@ async function main() {
     return;
   }
 
+  let backupDir = '';
+  if (!useBlob) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    backupDir = path.join(process.cwd(), 'data', `scan-history-backup-${stamp}`);
+    await fs.mkdir(backupDir, { recursive: true });
+    const targetKeys = new Set(plan.map((p) => `${p.market}|${p.date}`));
+    const dataDir = path.join(process.cwd(), 'data');
+    const entries = await fs.readdir(dataDir);
+    let copied = 0;
+    for (const name of entries) {
+      const match = name.match(/^scan-(TW|CN)-(?:long|short)-(?:[A-Z]|daily|mtf)-(\d{4}-\d{2}-\d{2})\.json$/);
+      if (!match || !targetKeys.has(`${match[1]}|${match[2]}`)) continue;
+      await fs.copyFile(path.join(dataDir, name), path.join(backupDir, name));
+      copied++;
+    }
+    for (const { market, date } of plan) {
+      const pool = path.join(dataDir, 'step1-pool', market, `${date}.json`);
+      try {
+        const poolBackup = path.join(backupDir, 'step1-pool', market, `${date}.json`);
+        await fs.mkdir(path.dirname(poolBackup), { recursive: true });
+        await fs.copyFile(pool, poolBackup);
+      } catch { /* 舊日期可能尚無 Step 1 池 */ }
+    }
+    console.log(`Backup: ${backupDir} (${copied} scan sessions)`);
+  }
+
   let ok = 0;
   let failed = 0;
   const startAll = Date.now();
+  const stockCache = new Map<MarketId, Array<{ symbol: string; name?: string }>>();
   for (const { market, date } of plan) {
     const start = Date.now();
     console.log(`\n--- ${market} ${date} ---`);
     try {
+      if (!stockCache.has(market)) {
+        const scanner = market === 'TW' ? new TaiwanScanner() : new ChinaScanner();
+        stockCache.set(market, await scanner.getStockList());
+      }
+      const historicalRank = await computeTurnoverRankAsOfDate(market, stockCache.get(market)!, date, 500);
+      if (historicalRank.size === 0) throw new Error(`${date} 歷史 top500 為空`);
       const result = await runScanPipeline({
         market,
         date,
@@ -113,8 +161,10 @@ async function main() {
         mtfModes: ['daily', 'mtf'],
         buyMethods: ALL_BUY_METHODS as unknown as BuyMethod[],
         force: true,
-        deadlineMs: 280_000, // 略低於 vercel 300s 上限
+        deadlineMs: useBlob ? 280_000 : 600_000,
+        turnoverRankOverride: historicalRank,
       });
+      if (result.timedOut) throw new Error('掃描逾時，只產生部分 session');
       const elapsed = ((Date.now() - start) / 1000).toFixed(1);
       const summary = Object.entries(result.counts).map(([k, v]) => `${k}=${v}`).join(' ');
       console.log(`✓ ${market} ${date} (${elapsed}s) ${summary}${result.timedOut ? ' ⚠ timed out' : ''}`);
@@ -128,6 +178,7 @@ async function main() {
 
   const totalMin = ((Date.now() - startAll) / 1000 / 60).toFixed(1);
   console.log(`\n=== Done · ${ok} ok / ${failed} failed · total ${totalMin} min ===`);
+  if (backupDir) console.log(`Backup: ${backupDir}`);
 }
 
 main().catch((err) => {

@@ -9,19 +9,32 @@
 // 用法：
 //   npx tsx scripts/repair-cn-unadjusted-splice.ts            # dry-run，只列出接合股
 //   npx tsx scripts/repair-cn-unadjusted-splice.ts --apply
+//   npx tsx scripts/repair-cn-unadjusted-splice.ts --apply --symbols 001237.SZ,603435.SS
 // ============================================================
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tencentHistProvider } from '@/lib/datasource/TencentHistProvider';
-import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { invalidateEntry } from '@/lib/datasource/L1CandleCache';
 import type { Candle } from '@/types';
 
 const APPLY = process.argv.includes('--apply');
 const VS_QFQ = process.argv.includes('--vs-qfq');
 const DAYS = Number(process.argv[process.argv.indexOf('--days') + 1]) || 40;
+const SYMBOL_ARG_INDEX = process.argv.indexOf('--symbols');
+const SYMBOLS = SYMBOL_ARG_INDEX >= 0
+  ? new Set((process.argv[SYMBOL_ARG_INDEX + 1] ?? '').split(',').map((s) => s.trim()).filter(Boolean))
+  : null;
 const DIR = path.join(process.cwd(), 'data/candles/CN');
+
+function isValidBar(c: Candle): boolean {
+  return c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0
+    && c.low <= c.open && c.open <= c.high
+    && c.low <= c.close && c.close <= c.high
+    && c.volume >= 0;
+}
+
+function round2(n: number): number { return Math.round(n * 100) / 100; }
 
 /** 逐日報酬與 qfq 差 > 這個值即判為接合點。0.8pp 遠大於浮點/四捨五入誤差，又抓得到最小的現金股利。 */
 const QFQ_RETURN_GAP = 0.008;
@@ -78,7 +91,10 @@ function detectSplices(cs: Candle[], sym: string): string[] {
 }
 
 async function main() {
-  const files = (await fs.readdir(DIR)).filter((f) => /\.(SS|SZ)\.json$/.test(f));
+  const files = (await fs.readdir(DIR)).filter((f) => {
+    if (!/\.(SS|SZ)\.json$/.test(f)) return false;
+    return !SYMBOLS || SYMBOLS.has(f.replace('.json', ''));
+  });
   const affected: { sym: string; dates: string[] }[] = [];
   let detectErr = 0;
 
@@ -130,17 +146,58 @@ async function main() {
     const batch = affected.slice(i, i + CONC);
     await Promise.all(batch.map(async ({ sym }) => {
       try {
-        await fs.copyFile(path.join(DIR, `${sym}.json`), path.join(backupDir, `${sym}.json`)).catch(() => {});
+        const target = path.join(DIR, `${sym}.json`);
+        const original = JSON.parse(await fs.readFile(target, 'utf8')) as {
+          symbol?: string; lastDate?: string; sealedDate?: string; updatedAt?: string; candles?: Candle[];
+        };
+        await fs.copyFile(target, path.join(backupDir, `${sym}.json`)).catch(() => {});
         const qfq = await tencentHistProvider.getHistoricalCandles(sym, '5y');
-        if (!qfq || qfq.length < 60) { fail++; console.warn(`  ✗ ${sym}: qfq n/a (${qfq?.length ?? 0})`); return; }
-        // 純 qfq（今日錨點）內部自洽；必須「整段取代」而非 merge —— merge 會把舊錨點殘 bar
-        // 混進來重新製造接合。刪原檔 + invalidateEntry 清 L1 記憶體快取（否則 bulk preload 的舊資料
-        // 會在 writeCandleFile 被當 existing merge 回來）→ saveLocalCandles 讀不到 existing、直接寫 qfq。
-        await fs.unlink(path.join(DIR, `${sym}.json`)).catch(() => {});
+        // 新上市股票本來可能不足 60 根；只要有足夠資料建立逐日序列就可安全整段取代。
+        if (!qfq || qfq.length < 5) { fail++; console.warn(`  ✗ ${sym}: qfq n/a (${qfq?.length ?? 0})`); return; }
+        // qfq 偶爾因高額配息算出單日負 low（600066 2022-04-27 實案）。不能讓一般
+        // sanitize 把該日直接刪掉；若原檔同日 OHLC 合法且 O/H/C 與新資料接近，保留原 bar。
+        const oldByDate = new Map((original.candles ?? []).map(c => [String(c.date), c]));
+        let fallbackBars = 0;
+        const cleanQfq: Candle[] = [];
+        for (const c of qfq.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }))) {
+          if (isValidBar(c)) { cleanQfq.push(c); continue; }
+          const old = oldByDate.get(String(c.date));
+          const closeNear = old && c.close > 0 && Math.abs(old.close / c.close - 1) < 0.05;
+          if (old && isValidBar(old) && closeNear) { cleanQfq.push(old); fallbackBars++; }
+          else console.warn(`  ⚠ ${sym} ${c.date}: qfq OHLC 非法且無可信舊 bar，略過`);
+        }
+        if (cleanQfq.length < 5) throw new Error(`clean qfq n/a (${cleanQfq.length})`);
+
+        // 5y 是滾動窗口。保留原檔較早的前綴，並用首個重疊日的 qfq/local 比率對齊價格，
+        // 避免每次修復白白少掉最早數個交易日，也不把舊還權錨點硬接到新錨點。
+        const firstDate = String(cleanQfq[0].date);
+        const oldAnchor = oldByDate.get(firstDate);
+        const ratio = oldAnchor?.close && oldAnchor.close > 0 ? cleanQfq[0].close / oldAnchor.close : 1;
+        const prefix = (original.candles ?? []).filter(c => String(c.date) < firstDate).map(c => ({
+          ...c,
+          open: round2(c.open * ratio), high: round2(c.high * ratio),
+          low: round2(c.low * ratio), close: round2(c.close * ratio),
+        })).filter(isValidBar);
+        const replacement = [...prefix, ...cleanQfq].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+        // 必須整段原子取代，不能走 merge（否則舊錨點會重新混回來）；但先在記憶體完成
+        // 全部驗證，且沿用 metadata。這也避開只適用「增量最後一根」的 limit/volume guard。
+        const payload = {
+          ...original,
+          symbol: sym,
+          lastDate: String(replacement.at(-1)?.date ?? original.lastDate ?? ''),
+          ...(original.sealedDate ? { sealedDate: String(replacement.at(-1)?.date ?? original.lastDate ?? '') } : {}),
+          updatedAt: new Date().toISOString(),
+          candles: replacement,
+        };
+        const tmp = `${target}.repair-${process.pid}.tmp`;
+        await fs.writeFile(tmp, JSON.stringify(payload));
+        await fs.rename(tmp, target);
         invalidateEntry(sym, 'CN');
-        await saveLocalCandles(sym, 'CN', qfq.map((c) => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })));
         // 重驗
-        const after = JSON.parse(await fs.readFile(path.join(DIR, `${sym}.json`), 'utf8')).candles as Candle[];
+        const after = JSON.parse(await fs.readFile(target, 'utf8')).candles as Candle[];
+        if (after.some(c => !isValidBar(c))) throw new Error('replace 後仍含非法 OHLC');
+        if (fallbackBars) console.warn(`  ↪ ${sym}: ${fallbackBars} 根非法 qfq 以可信舊 bar 補回`);
         // still>0 多為良性：qfq 序列「除權日撞漲停」報酬 11-13% 與復牌/新股無漲跌幅日是
         // 數學正確的真實事件（known-anomalies: cn-qfq-exdate-limit-move，2026-06-12 驗證
         // 350 檔殘留全屬此類）。refetch 冪等 — still 高不代表修復失敗。

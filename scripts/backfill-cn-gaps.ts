@@ -57,15 +57,27 @@ async function main() {
 
   const dir = path.join('data', 'candles', 'CN');
   const files = await fs.readdir(dir);
+  // 候選母體不能只靠既有檔案：動態股票清單新增的新股／遷移代號若尚未建檔，
+  // 舊邏輯永遠看不到它，verify 卻會把它算進分母，造成固定的 readFailed。
+  const scanner = new ChinaScanner();
+  const stocks = await scanner.getStockList();
+  // 只補目前 scanner 的活躍母體；歷史檔案可能仍保留已退市股票，若把整個目錄
+  // 併回來，prune 後下一輪仍會浪費數小時反覆請求死代號。指數另行明確加入。
+  const universe = new Set([
+    ...stocks.map((stock) => stock.symbol),
+    '000001.SS',
+  ]);
   const candidates: string[] = [];
-  for (const f of files) {
-    if (!f.endsWith('.json')) continue;
+  for (const symbol of universe) {
     try {
-      const j = JSON.parse(await fs.readFile(path.join(dir, f), 'utf8'));
+      const j = JSON.parse(await fs.readFile(path.join(dir, `${symbol}.json`), 'utf8'));
       const dates = new Set((j.candles ?? []).map((c: { date: string }) => c.date));
       const missing = targetDates.filter(d => !dates.has(d));
-      if (missing.length > 0) candidates.push(f.replace('.json', ''));
-    } catch { /* skip */ }
+      if (missing.length > 0) candidates.push(symbol);
+    } catch {
+      // 股票主檔有、L1 尚未建檔：必須列為候選，成功抓取後由 writeCandleFile 首次建立。
+      candidates.push(symbol);
+    }
   }
   console.log(`🔍 ${candidates.length} 支股票缺漏，開始補抓 (Tencent → EastMoney)...`);
 
@@ -112,8 +124,6 @@ async function main() {
   // Catch-up is the final CN L1 writer before the evening scan. Rebuild the
   // coverage report here so the scan guard does not keep reading the stale
   // report generated before catch-up completed.
-  const scanner = new ChinaScanner();
-  const stocks = await scanner.getStockList();
   const symbols = stocks.map((stock) => stock.symbol);
   const report = await verifyDownload('CN', SEAL_CUTOFF, symbols, {
     succeeded: ok,

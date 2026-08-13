@@ -22,6 +22,30 @@ import {
 
 const IS_VERCEL = !!process.env.VERCEL;
 
+/**
+ * 全市場驗證報告的最低合理母體。
+ *
+ * verify report 會被策略 coverage guard 當成是否可掃描的依據，因此小型 fallback
+ * 清單絕不能寫成「30/30 = 100%」覆蓋掉先前完整報告。
+ */
+export const MIN_VERIFY_UNIVERSE: Record<'TW' | 'CN', number> = {
+  TW: 1500,
+  CN: 2700,
+};
+
+export function assertCompleteVerifyUniverse(
+  market: 'TW' | 'CN',
+  symbolCount: number,
+): void {
+  const minimum = MIN_VERIFY_UNIVERSE[market];
+  if (symbolCount < minimum) {
+    throw new Error(
+      `[DownloadVerifier] ${market} universe=${symbolCount} < ${minimum}; ` +
+      '拒絕覆寫全市場 verify report',
+    );
+  }
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface VerifyGapDetail {
@@ -191,6 +215,12 @@ export async function verifyDownload(
   /** 落後 ≥ N 個交易日 → 推定永久停牌/退市，不算進 stale 警告 */
   permanentStaleDays = 14,
 ): Promise<VerifyReport> {
+  // 呼叫端可能合併多來源清單；先去重，避免重複代號把 30 檔灌成 1,500 筆繞過守門。
+  symbols = [...new Set(symbols)];
+  // 必須在任何讀檔、queue 更新或報告寫入前 fail closed。這可保證 provider 暫時
+  // 退化成少量 fallback 時，舊的完整報告仍被保留，策略也不會誤把小樣本當全市場。
+  assertCompleteVerifyUniverse(market, symbols.length);
+
   const CONCURRENCY = 20;
   const gapDetails: VerifyGapDetail[] = [];
   const staleDetails: VerifyStaleDetail[] = [];
@@ -299,7 +329,9 @@ export async function verifyDownload(
   // 針對性補拉缺棒股票（與主下載解耦，三層 fallback 失敗也能 retry）
   try {
     const queue = await loadBackfillQueue(market);
-    const gapSymbols = new Set(gapDetails.map((g) => g.symbol));
+    // 歷史 gap 多半是長期停牌，所有公開來源都會保留相同空窗；只把近 180 天
+    // 的缺口排入補拉，避免 2021–2025 的結構性空窗永遠佔住 queue。
+    const gapSymbols = new Set(recentGapDetails.map((g) => g.symbol));
 
     // 清掉已修復的（上次在 queue 但本次 gap=0）
     const before = queue.items.length;
@@ -307,7 +339,7 @@ export async function verifyDownload(
     const cleared = before - queue.items.length;
 
     // 合併本次發現的 gap
-    for (const gd of gapDetails) {
+    for (const gd of recentGapDetails) {
       mergeIntoQueue(queue, gd.symbol, gd.gaps);
     }
 

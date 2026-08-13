@@ -2,6 +2,7 @@ import { readFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { StockEntry } from './MarketScanner';
+import { CN_DELISTED_SYMBOLS } from './cnDelistedSymbols';
 
 const STOCKLIST_CACHE_PATH = path.join(process.cwd(), 'data', 'cn_stocklist.json');
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
@@ -9,6 +10,28 @@ const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
 interface StockListCache {
   updatedAt: string;
   stocks: StockEntry[];
+}
+
+/** 已經 Tencent 日K／名稱雙重確認的退市、吸收合併代號。 */
+export async function loadRemovedCNStockSymbols(): Promise<Set<string>> {
+  const removed = new Set<string>(CN_DELISTED_SYMBOLS);
+  try {
+    const raw = JSON.parse(await readFile(
+      path.join(process.cwd(), 'data', 'cn-delisted-removed.json'),
+      'utf8',
+    )) as Array<{ symbol?: string }>;
+    for (const symbol of raw.map((item) => item.symbol).filter((symbol): symbol is string => Boolean(symbol))) {
+      removed.add(symbol);
+    }
+    return removed;
+  } catch {
+    return removed;
+  }
+}
+
+async function withoutRemovedStocks(stocks: StockEntry[]): Promise<StockEntry[]> {
+  const removed = await loadRemovedCNStockSymbols();
+  return removed.size ? stocks.filter((stock) => !removed.has(stock.symbol)) : stocks;
 }
 
 /**
@@ -20,7 +43,7 @@ async function loadCachedStockList(): Promise<StockEntry[] | null> {
     const cache: StockListCache = JSON.parse(raw);
     const age = Date.now() - new Date(cache.updatedAt).getTime();
     if (age < CACHE_MAX_AGE_MS && cache.stocks.length > 500) {
-      return cache.stocks;
+      return withoutRemovedStocks(cache.stocks);
     }
   } catch { /* 快取不存在或格式錯誤 */ }
   return null;
@@ -105,13 +128,14 @@ export async function fetchEastMoneyStockList(): Promise<StockEntry[]> {
   }
 
   // 成功取得後存到本地快取
-  if (all.length > 500) {
-    saveCachedStockList(all).catch(() => {});
+  const active = await withoutRemovedStocks(all);
+  if (active.length > 500) {
+    saveCachedStockList(active).catch(() => {});
   }
 
-  if (all.length < 500) {
-    console.warn(`[eastMoneyApi] 股票清單異常偏少: ${all.length} 檔（預期 3000+），可能 API 暫時異常`);
+  if (active.length < 500) {
+    console.warn(`[eastMoneyApi] 股票清單異常偏少: ${active.length} 檔（預期 3000+），可能 API 暫時異常`);
   }
 
-  return all;
+  return active;
 }

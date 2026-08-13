@@ -25,6 +25,38 @@ const FALLBACK_TW_STOCKS: StockEntry[] = [
   { symbol: '2376.TW', name: '技嘉' },   { symbol: '2353.TW', name: '宏碁' },
 ];
 
+const MIN_FULL_TW_UNIVERSE = 1500;
+
+/**
+ * 交易所股票清單 API 短暫失效時，使用每日保存的交易所主檔當完整備援。
+ * 僅保留和正式 scanner 相同的 4 碼普通股，避免把 ETF／權證混進掃描母體。
+ */
+async function loadLocalTWStockMaster(): Promise<StockEntry[]> {
+  try {
+    const [{ readFile }, path] = await Promise.all([
+      import('node:fs/promises'),
+      import('node:path'),
+    ]);
+    const raw = JSON.parse(await readFile(
+      path.join(process.cwd(), 'data', 'youtube', 'stock-master.json'),
+      'utf8',
+    )) as { entries?: Array<{ code?: string; name?: string; market?: string }> };
+    const stocks = (raw.entries ?? [])
+      .filter((entry) =>
+        /^[1-9]\d{3}$/.test(entry.code ?? '') &&
+        (entry.market === 'TWSE' || entry.market === 'TPEx'),
+      )
+      .map((entry) => ({
+        symbol: `${entry.code}.${entry.market === 'TWSE' ? 'TW' : 'TWO'}`,
+        name: entry.name?.trim() || entry.code!,
+      }));
+    return Array.from(new Map(stocks.map((stock) => [stock.symbol, stock])).values());
+  } catch (error) {
+    console.warn('[TaiwanScanner] 本地主檔 fallback 載入失敗:', error);
+    return [];
+  }
+}
+
 type TWSERow = { Code: string; Name: string; TradeVolume?: string };
 type TPExRow = { SecuritiesCompanyCode: string; CompanyName: string; TradingShares?: string };
 
@@ -108,12 +140,32 @@ export class TaiwanScanner extends MarketScanner {
       fetchTWIndustryMap(),
     ]);
 
-    const withVol: (StockEntry & { vol: number })[] = [
+    let withVol: (StockEntry & { vol: number })[] = [
       ...(listed.status === 'fulfilled' ? listed.value : []),
       ...(otc.status    === 'fulfilled' ? otc.value    : []),
     ];
 
+    if (withVol.length < MIN_FULL_TW_UNIVERSE) {
+      const localMaster = await loadLocalTWStockMaster();
+      if (localMaster.length >= MIN_FULL_TW_UNIVERSE) {
+        // 交易所即時清單優先（保留成交量排序與最新名稱），本地主檔只補缺漏市場。
+        const merged = new Map<string, StockEntry & { vol: number }>(
+          withVol.map((stock) => [stock.symbol, stock]),
+        );
+        for (const stock of localMaster) {
+          if (!merged.has(stock.symbol)) merged.set(stock.symbol, { ...stock, vol: 0 });
+        }
+        console.warn(
+          `[TaiwanScanner] 交易所清單僅 ${withVol.length} 支，` +
+          `已用本地主檔補成 ${merged.size} 支`,
+        );
+        withVol = [...merged.values()];
+      }
+    }
+
     if (withVol.length === 0) {
+      // 僅保留給非全市場的互動式查詢；verifyDownload 另有硬性母體守門，
+      // 此 30 檔清單不可能再覆寫全市場驗證報告。
       return FALLBACK_TW_STOCKS;
     }
 

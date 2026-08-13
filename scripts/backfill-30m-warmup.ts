@@ -20,7 +20,13 @@ import type { Candle } from '../types/index';
 const TW_DIR = path.join(process.cwd(), 'data/candles/TW');
 const argTop = process.argv.indexOf('--top');
 const TOP_N = argTop >= 0 ? parseInt(process.argv[argTop + 1], 10) || 500 : 500;
-const CONCURRENCY = 6;
+const argSymbols = process.argv.indexOf('--symbols');
+const ONLY_SYMBOLS = argSymbols >= 0
+  ? (process.argv[argSymbols + 1] ?? '').split(',').map(s => s.replace(/\.TW$/i, '').trim()).filter(Boolean)
+  : [];
+// Fugle 在 6 併發下常 TLS reset，留下約 25% 30m 宇宙沒被準確版覆蓋；降到 3，
+// 讓 API 端限流與本機連線池都有餘裕。整體仍由 UnifiedRateLimiter 控速。
+const CONCURRENCY = 3;
 
 function todayTaipei(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
@@ -43,17 +49,17 @@ async function rankUniverse(): Promise<string[]> {
 }
 
 async function fetch30m(sym: string): Promise<Candle[]> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const cs = await getFugleHistoricalMinuteCandles(sym, '30m', '3mo'); // Fugle 要裸碼
     if (cs.length) return normalizeFugle30mToEndGrid(cs); // 降序→升序 + 結束時間9根/日網格 + 併收盤競價
-    if (attempt === 0) await new Promise(r => setTimeout(r, 1500)); // 退避重試
+    if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); // 1.5s / 3s 退避
   }
   return [];
 }
 
 async function main() {
   const date = todayTaipei();
-  const syms = await rankUniverse();
+  const syms = ONLY_SYMBOLS.length ? [...new Set(ONLY_SYMBOLS)] : await rankUniverse();
   console.log(`挑成交額前 ${syms.length} 大台股，逐檔抓 3 個月 30分K…\n`);
 
   const bars: Record<string, Candle[]> = {};

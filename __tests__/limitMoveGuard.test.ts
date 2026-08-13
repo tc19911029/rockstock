@@ -1,4 +1,4 @@
-import { suspectsLimitOverwrite, suspectsGrossJump, limitPctFor } from '@/lib/datasource/limitMoveGuard';
+import { suspectsLimitOverwrite, suspectsGrossJump, limitPctFor, isTwListingTransition } from '@/lib/datasource/limitMoveGuard';
 
 describe('limitMoveGuard', () => {
   describe('limitPctFor', () => {
@@ -102,6 +102,24 @@ describe('limitMoveGuard', () => {
       expect(suspectsGrossJump(0, q)).toBe(false);
       expect(suspectsGrossJump(undefined, q)).toBe(false);
       expect(suspectsGrossJump(100, { open: 0, high: 0, low: 0, close: 0 })).toBe(false);
+    });
+  });
+
+  describe('isTwListingTransition', () => {
+    it('放行興櫃轉上市首日的官方價量制度切換', () => {
+      expect(isTwListingTransition(
+        '7855.TW',
+        { open: 81.73, high: 85.5, low: 81.7, close: 82, volume: 73 },
+        { open: 44, high: 45, low: 42, close: 43.75, volume: 13129 },
+      )).toBe(true);
+    });
+
+    it('不因一般大跌爆量就放行 off-grid 官方候選', () => {
+      expect(isTwListingTransition(
+        '2330.TW',
+        { open: 1000, high: 1010, low: 990, close: 1000, volume: 1000 },
+        { open: 400.25, high: 410, low: 390, close: 400, volume: 100000 },
+      )).toBe(false);
     });
   });
 });

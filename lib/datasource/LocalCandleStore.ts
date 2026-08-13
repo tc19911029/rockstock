@@ -178,6 +178,7 @@ export async function saveLocalCandles(
   symbol: string,
   market: 'TW' | 'CN',
   candles: Candle[],
+  options: { trustedOfficial?: boolean; replaceExisting?: boolean } = {},
 ): Promise<void> {
   if (candles.length === 0) return;
   await ghostSuffixGuard(symbol, market);
@@ -185,11 +186,13 @@ export async function saveLocalCandles(
   const prev = _writeLocks.get(key) ?? Promise.resolve();
   // work：caller 看到的 promise，會 throw（讓 caller 知道寫失敗）
   const work = prev.then(async () => {
-    let safe = guardAgainstAnomalousLastBar(symbol, candles);
+    // 交易所官方盤後日線可跨越上市/減資等制度事件；volume/limit heuristic 只用來擋
+    // 即時與第三方來源，不能反過來誤殺官方真值（7855 興櫃轉上市即曾漏兩日）。
+    let safe = options.trustedOfficial ? candles : guardAgainstAnomalousLastBar(symbol, candles);
     if (safe.length === 0) return;
-    safe = guardAgainstLimitOverwrite(symbol, market, safe);
+    if (!options.trustedOfficial) safe = guardAgainstLimitOverwrite(symbol, market, safe);
     if (safe.length === 0) return;
-    await writeCandleFile(symbol, market, safe);
+    await writeCandleFile(symbol, market, safe, { replaceExisting: options.replaceExisting });
   });
   // swallowed：chain 用的 promise，吞 error 不阻擋下一個 caller
   // 2026-05-08：原本只用一個 next（catch 後）導致 caller 永遠不會 throw，fs 失敗無感

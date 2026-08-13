@@ -20,6 +20,7 @@
  */
 import type { Candle } from '@/types/index';
 import type { IntradayQuote } from '@/lib/datasource/IntradayCache';
+import { isTwEtf, isValidTwTick } from '@/lib/datasource/twTick';
 
 const IS_VERCEL = !!process.env.VERCEL;
 const RETENTION_DAYS = 15;         // 保留近 15 交易日(MA60 需 ≥60 根 ≈ 7 天，留餘裕)
@@ -168,14 +169,29 @@ export function mergePrune(existing: Candle[], incoming: Candle[]): Candle[] {
 }
 
 /**
+ * 30 分 K 只接受真實撮合檔位。Fugle/MIS 偶爾會回 bid/ask midpoint（如 213.75），
+ * 這種值不能 snap 成假成交；整根拒收，等下一次可信歷史回補。
+ */
+function validTw30mBar(symbol: string, c: Candle): boolean {
+  const etf = isTwEtf(symbol);
+  return c.open > 0 && c.low > 0 && c.high >= Math.max(c.open, c.close)
+    && c.low <= Math.min(c.open, c.close) && c.volume >= 0
+    && [c.open, c.high, c.low, c.close].every(v => isValidTwTick(v, etf));
+}
+
+/**
  * 用整批準確 30 分K 覆蓋宇宙(backfill / 盤後刷新用)。
  * @param bars symbol → 該檔完整 30 分K(升序)
  */
 export async function upsert30mUniverse(date: string, bars: Record<string, Candle[]>): Promise<void> {
   const u = (await read30mUniverse()) ?? { market: MARKET, date, updatedAt: '', data: {} };
   for (const [sym, cs] of Object.entries(bars)) {
-    if (!cs.length) continue;
-    u.data[sym] = mergePrune(u.data[sym] ?? [], cs);
+    const valid = cs.filter(c => validTw30mBar(sym, c));
+    if (!valid.length) continue;
+    // 準確歷史刷新覆蓋其日期範圍；同區間未被可信來源重給的舊近似 bar 不可殘留。
+    const from = valid[0].date;
+    const preserved = (u.data[sym] ?? []).filter(c => c.date < from);
+    u.data[sym] = mergePrune(preserved, valid);
   }
   u.date = date;
   u.updatedAt = new Date().toISOString();
@@ -210,6 +226,9 @@ export async function appendIntraday30mBar(
 
   for (const q of quotes) {
     if (!(q.close > 0)) continue;
+    // MIS 在當下沒有新撮合時，close 可能只是委買/委賣中價。它可供報價面板參考，
+    // 但不是成交價；若寫進 30 分 K，就會製造 40.175、105.175 這類不存在的價位。
+    if (q.isActualTrade === false) continue;
     // L2 symbol 是裸碼("2330")，宇宙 key 帶 .TW；且只堆疊「已在暖機宇宙(top500)」的股，
     // 避免把全市場 2000+ 檔灌進來無界膨脹(非暖機股只有近似 bar、無 Fugle 準確歷史)。
     const key = `${q.symbol}.TW`;
@@ -224,6 +243,7 @@ export async function appendIntraday30mBar(
     const low = Math.min(open, q.close, madeNewLow ? q.low : Math.min(open, q.close));
 
     const bar: Candle = { date: barDate, open, high, low, close: q.close, volume };
+    if (!validTw30mBar(key, bar)) continue;
     u.data[key] = mergePrune(u.data[key], [bar]);
     appended++;
     nextCursor.data[key] = { close: q.close, high: q.high, low: q.low, cumVolume: q.volume };

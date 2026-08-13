@@ -229,7 +229,9 @@ export async function GET(req: NextRequest) {
         if (!inLiveWindow) {
           try {
             const snap = await readIntradaySnapshot(marketKey, today);
-            l2HasToday = !!snap && snap.date === today && snap.quotes.some(q => q.symbol === l2LookupSymbol && q.close > 0);
+            l2HasToday = !!snap && snap.date === today && snap.quotes.some(q =>
+              q.symbol === l2LookupSymbol && q.close > 0 && (!isTW || q.isActualTrade !== false)
+            );
           } catch { /* ignore */ }
         }
         const shouldInjectToday = inLiveWindow || l2HasToday;
@@ -302,7 +304,7 @@ export async function GET(req: NextRequest) {
               const snapshot = await withTimeout(readIntradaySnapshot(market as 'TW' | 'CN', today), Math.max(500, injectDeadline - Date.now()), null);
               if (snapshot) {
                 const sq = snapshot.quotes.find(q => q.symbol === l2LookupSymbol);
-                if (sq && sq.close > 0) {
+                if (sq && sq.close > 0 && (!isTW || sq.isActualTrade !== false)) {
                   todayQuote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
                 } else {
                   console.warn(`[stock] L2快照找不到 ${symbol} (pureCode=${pureCode}), 快照有${snapshot.quotes.length}檔, 取樣: ${snapshot.quotes.slice(0, 3).map(q => q.symbol).join(',')}`);
@@ -371,7 +373,7 @@ export async function GET(req: NextRequest) {
               const scanSnapshot = await readIntradaySnapshot(market as 'TW' | 'CN', scanDate);
               if (scanSnapshot) {
                 const sq = scanSnapshot.quotes.find(q => q.symbol === l2LookupSymbol);
-                if (sq && sq.close > 0) {
+                if (sq && sq.close > 0 && (!isTW || sq.isActualTrade !== false)) {
                   // 插入 scanDate K 棒（按日期順序）
                   const scanCandle = {
                     date: scanDate,

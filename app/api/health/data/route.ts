@@ -400,9 +400,12 @@ async function getMarketHealth(
   const today = getTodayDate(market);
   const emptyCount = getConsecutiveEmptyCount(market);
   const trading = isTradingDay(today, market);
+  const l2ExpectedNow = isMarketOpen(market) || isPostCloseWindow(market);
   let alertLevel: L2SourceInfo['alertLevel'] = 'none';
-  if (trading && emptyCount >= 3) alertLevel = 'critical';
-  else if (trading && emptyCount >= 1) alertLevel = 'warning';
+  // 連續空快照只在盤中／收盤快照窗口有告警意義。盤後 L1 已封存且策略完整時，
+  // 將白天最後一次 provider 失敗整晚標 critical 會造成假紅燈；來源歷史仍保留供排查。
+  if (trading && l2ExpectedNow && emptyCount >= 3) alertLevel = 'critical';
+  else if (trading && l2ExpectedNow && emptyCount >= 1) alertLevel = 'warning';
 
   const l2Sources: L2SourceInfo = {
     sources: getDataSourceStatus(market),

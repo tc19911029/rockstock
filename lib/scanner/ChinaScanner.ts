@@ -5,7 +5,7 @@ import { MarketConfig } from './types';
 import { detectTrend, TrendState } from '@/lib/analysis/trendAnalysis';
 import { CN_STOCKS } from './cnStocks';
 import { CN_STOCKS_GEM_STAR } from './cnStocksGemStar';
-import { fetchEastMoneyStockList } from './eastMoneyApi';
+import { fetchEastMoneyStockList, loadRemovedCNStockSymbols } from './eastMoneyApi';
 
 /** 主板清單併入科創/創業（去重，主板優先保留原 entry）。 */
 function mergeGemStar(base: StockEntry[]): StockEntry[] {
@@ -34,7 +34,8 @@ export class ChinaScanner extends MarketScanner {
       // 東方財富 API 失敗，使用靜態名單
     }
     // 併入科創/創業（各成交額前 N 檔、已有日K）。去重，前端依代號掛板塊徽章。
-    return mergeGemStar(base);
+    const removed = await loadRemovedCNStockSymbols();
+    return mergeGemStar(base).filter((stock) => !removed.has(stock.symbol));
   }
 
   async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {

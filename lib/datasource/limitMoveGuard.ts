@@ -16,6 +16,7 @@
  */
 
 import { getLimitMovePct } from '@/lib/utils/limitRules';
+import { isTwEtf, isValidTwTick } from './twTick';
 
 export interface QuoteOHLC {
   open: number;
@@ -64,4 +65,32 @@ export function suspectsLimitOverwrite(
 export function suspectsGrossJump(prevClose: number | null | undefined, q: QuoteOHLC): boolean {
   if (!prevClose || prevClose <= 0 || !(q.close > 0)) return false;
   return Math.abs(q.close / prevClose - 1) > 0.5;
+}
+
+/**
+ * 興櫃轉上市／上櫃首日的制度切換辨識。
+ *
+ * 興櫃成交可出現 81.73 這類非集中市場檔位，轉上市首日則回到標準 tick；承銷價也可能
+ * 與前一日興櫃價差超過 50%，且成交量從數十張跳到上萬張。這不是撞庫錯價，官方日線
+ * 必須放行。三個條件同時成立，避免只靠「大跌＋爆量」誤放一般污染。
+ */
+export function isTwListingTransition(
+  symbol: string,
+  previous: (QuoteOHLC & { volume?: number }) | null | undefined,
+  official: QuoteOHLC & { volume?: number },
+): boolean {
+  if (!previous || !(previous.close > 0) || !(official.close > 0)) return false;
+  // 興櫃轉集中市場的承銷價差不一定超過一般 gross-jump 的嚴格 50% 門檻；
+  // 7855 實際為 82 → 43.75（-46.6%）。其餘 off-grid + 成交量制度切換條件仍需同時成立。
+  const priceRegimeChanged = Math.abs(official.close / previous.close - 1) >= 0.4;
+  const etf = isTwEtf(symbol);
+  const fields: Array<keyof QuoteOHLC> = ['open', 'high', 'low', 'close'];
+  const previousHasOffGridPrice = fields.some(k => !isValidTwTick(previous[k], etf));
+  const officialAllOnGrid = fields.every(k => isValidTwTick(official[k], etf));
+  const previousVolume = previous.volume ?? 0;
+  const officialVolume = official.volume ?? 0;
+  const volumeRegimeChanged = previousVolume >= 0
+    && officialVolume >= 1_000
+    && officialVolume >= Math.max(1, previousVolume) * 30;
+  return priceRegimeChanged && previousHasOffGridPrice && officialAllOnGrid && volumeRegimeChanged;
 }

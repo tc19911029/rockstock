@@ -8,6 +8,7 @@
  */
 
 import type { Candle } from '@/types';
+import { isZeroVolumeFlatBar } from './candleSanitizers';
 
 const IS_VERCEL = !!process.env.VERCEL;
 
@@ -22,6 +23,14 @@ export interface CandleFileData {
   candles: Candle[];
   /** 封存日期 — 收盤 cron 寫入時標記，表示此日期(含)之前的資料不可被盤中覆蓋 (Fundamental Rule R1) */
   sealedDate?: string;
+}
+
+/** 讀取邊界清除舊檔／舊快取中的非交易日占位 K。 */
+function withoutNonTradingPlaceholders(data: CandleFileData): CandleFileData | null {
+  const candles = data.candles.filter((c) => !isZeroVolumeFlatBar(c));
+  if (candles.length === 0) return null;
+  if (candles.length === data.candles.length) return data;
+  return { ...data, candles, lastDate: candles[candles.length - 1].date };
 }
 
 // ── Vercel Blob helpers ──────────────────────────────────────────────────────
@@ -91,7 +100,11 @@ export async function readCandleFile(
     // ── L1 記憶體快取（本地開發專用）────────────────────────────────────────
     if (!IS_VERCEL) {
       const cached = getFromCache(symbol, market);
-      if (cached) return cached;
+      if (cached) {
+        const cleaned = withoutNonTradingPlaceholders(cached);
+        if (cleaned && cleaned !== cached) updateCache(symbol, market, cleaned);
+        return cleaned;
+      }
 
       // Cache miss：觸發背景 bulk preload（冪等，第一次 miss 才會真正 spawn）
       triggerPreload(market);
@@ -118,6 +131,12 @@ export async function readCandleFile(
     for (const c of data.candles) {
       if (c.date.endsWith('*')) c.date = c.date.slice(0, -1);
     }
+    // 舊 L1 可能殘留 vendor 以昨收補出的停牌假 K；讀取時也清掉，避免在完成實體修復前
+    // 繼續污染 MA。真正有成交的單一價 K volume > 0，不受影響。
+    const cleaned = withoutNonTradingPlaceholders(data);
+    if (!cleaned) return null;
+    data.candles = cleaned.candles;
+    data.lastDate = cleaned.lastDate;
     if (data.lastDate.endsWith('*')) data.lastDate = data.lastDate.slice(0, -1);
 
     // 讀到後存入快取，下次直接命中
@@ -179,6 +198,7 @@ export async function writeCandleFile(
   symbol: string,
   market: 'TW' | 'CN',
   candles: Candle[],
+  options: { replaceExisting?: boolean } = {},
 ): Promise<void> {
   if (candles.length === 0) return;
   const key = `${market}:${symbol}`;
@@ -187,7 +207,7 @@ export async function writeCandleFile(
     if (prev) {
       try { await prev; } catch { /* 前一個失敗不影響後續，新寫入仍要做 */ }
     }
-    await _writeCandleFileImpl(symbol, market, candles);
+    await _writeCandleFileImpl(symbol, market, candles, options);
   })();
   _writeInflight.set(key, next);
   try {
@@ -252,7 +272,7 @@ export function sanitizeOHLC(symbol: string, market: 'TW' | 'CN', incoming: Cand
  *
  * 只擋「新增一個比現有最後一根更新的日期、卻整根複製它」這個已證實的向量：
  *   c.date > existing.last.date（純新增）+ O/H/L/C/volume 與 existing.last 全等
- *   + volume > 0（V0 是個股停牌平盤帶過，屬正常）
+ *   + volume > 0（V0 扁平停牌 bar 已在 sanitize 後排除）
  *   + high > low 且振幅 (high-low)/low >= 1%（濾掉薄量單一價股連兩日 byte 相同的
  *     真實巧合——全市場 951 件清一色 V1~6 的 H==L 單價日）。
  * 同日覆寫（盤中更新今日那根）、全量重灌的內部根不在此守，交由
@@ -288,12 +308,14 @@ async function _writeCandleFileImpl(
   symbol: string,
   market: 'TW' | 'CN',
   candles: Candle[],
+  options: { replaceExisting?: boolean } = {},
 ): Promise<void> {
   const rawIncoming: Candle[] = candles.map(c => ({
     date: c.date, open: c.open, high: c.high,
     low: c.low, close: c.close, volume: c.volume,
   }));
-  const incoming = sanitizeOHLC(symbol, market, rawIncoming);
+  const incoming = sanitizeOHLC(symbol, market, rawIncoming)
+    .filter((c) => !isZeroVolumeFlatBar(c));
   if (incoming.length === 0) {
     console.warn(`[writeCandleFile] ${market}:${symbol} 所有 incoming bar 都被 sanitize 砍掉，skip 寫入`);
     return;
@@ -303,18 +325,19 @@ async function _writeCandleFileImpl(
   const existing = await readCandleFile(symbol, market);
 
   // 整根複製前一交易日守衛（2026-06-02）：擋掉「新增日期卻整根複製現有最後一根」的壞 bar
-  const guarded = dupPrevDayGuard(symbol, market, incoming, existing);
+  const guarded = options.replaceExisting ? incoming : dupPrevDayGuard(symbol, market, incoming, existing);
   if (guarded.length === 0) {
     console.warn(`[writeCandleFile] ${market}:${symbol} 所有 incoming bar 都被 dupPrevDayGuard 擋下，skip 寫入`);
     return;
   }
 
   let stripped: Candle[];
-  if (existing && existing.candles.length > 0) {
+  if (options.replaceExisting) {
+    stripped = guarded.sort((a, b) => a.date.localeCompare(b.date));
+  } else if (existing && existing.candles.length > 0) {
     // 指數 V=0 防呆（2026-05-13）：Yahoo 對 ^TWII / 000001.SS 等指數的當日 volume
     // 同步慢（T+0 常回 0），若 incoming V=0 但 existing 同日 V>0 → 保留 existing volume、
-    // 僅覆蓋 OHLC，避免把已有的好值覆寫成 0。個股 V=0 是真實停牌（known-anomalies registry
-    // 認證過），不套用此規則。
+    // 僅覆蓋 OHLC，避免把已有的好值覆寫成 0。個股零量扁平 bar 已在上方排除。
     const isIndex = symbol.startsWith('^') || symbol === '000001.SS' || symbol === '000300.SS';
     const map = new Map<string, Candle>();
     for (const c of existing.candles) map.set(c.date, c);

@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     try {
       const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
       const sq = snapshot?.quotes.find(q => q.symbol === symbol);  // INDEX 用完整 symbol 比對（^TWII / 000001.SS）
-      if (sq && sq.close > 0) {
+      if (sq && sq.close > 0 && (market !== 'TW' || sq.isActualTrade !== false)) {
         quote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
       }
     } catch { /* fallthrough */ }
@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
     try {
       const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
       const sq = snapshot?.quotes.find(q => q.symbol === pureCode);
-      if (sq && sq.close > 0) {
+      if (sq && sq.close > 0 && (market !== 'TW' || sq.isActualTrade !== false)) {
         quote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
       }
     } catch { /* fallthrough */ }

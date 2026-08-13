@@ -76,7 +76,12 @@ async function main() {
     if (unionSyms.size === 0) { console.log(`  ${date} 0 命中`); continue; }
 
     // 一次抓 union 的 forward（避免重複），再分配給各策略
-    const { results } = await analyzeForwardBatch([...unionSyms.values()], date);
+    // 歷史統計必須可重現：只用本地已驗證 K 線，並封頂在本批最後掃描日，
+    // 避免資料尚未落盤的「今天」讓每檔誤觸發外部 API 補抓。
+    const { results } = await analyzeForwardBatch([...unionSyms.values()], date, {
+      localOnly: true,
+      dataEndDate: dates.at(-1),
+    });
     const perfMap = new Map(results.map((p) => [p.symbol, p]));
 
     const dayOut: Record<string, Hit[]> = {};

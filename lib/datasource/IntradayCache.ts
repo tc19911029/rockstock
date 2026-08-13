@@ -52,6 +52,8 @@ export interface IntradayQuote {
   prevClose: number;
   /** 漲跌幅 % */
   changePercent: number;
+  /** TW：false 代表 MIS 沒有成交價，close 僅為委託簿推估，禁止寫入任何 K 棒。 */
+  isActualTrade?: boolean;
 }
 
 export interface IntradaySnapshot {
@@ -543,7 +545,7 @@ export function getLastRefreshSummary(market: 'TW' | 'CN'): L2RefreshSummary {
 // ── 內部：TW 報價抓取（mis → OpenAPI 兩層 failover） ───────────────────────
 
 async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuote[]> {
-  const finalMap: Map<string, { code: string; name: string; open: number; high: number; low: number; close: number; volume: number; previousClose?: number; date?: string }> = new Map();
+  const finalMap: Map<string, { code: string; name: string; open: number; high: number; low: number; close: number; volume: number; previousClose?: number; date?: string; isActualTrade?: boolean }> = new Map();
 
   type TWProvider = { name: string; fetch: () => Promise<typeof finalMap> };
   const providers: TWProvider[] = [
@@ -647,6 +649,7 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
       volume: q.volume,
       prevClose,
       changePercent: Math.round(changePercent * 100) / 100,
+      isActualTrade: q.isActualTrade,
     });
   }
   if (staleSkipped > 0) {

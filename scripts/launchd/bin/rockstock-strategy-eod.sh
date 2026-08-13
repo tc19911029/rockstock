@@ -40,14 +40,21 @@ run_endpoint() {
 run_required_endpoint() {
   label="$1"
   endpoint="$2"
-  max_attempts=5
+  # CN 的全市場補檔在 20:00 啟動，實測可能需 2–4 小時；A 的 coverage guard
+  # 是真正的資料完成條件。讓策略低成本等待完整 verify report，而不是固定 25 分鐘
+  # 後失敗，或在 catch-up 尚未完成時產出半套結果。TW 正常流程維持 25 分鐘上限。
+  if [[ "$market" == "CN" ]]; then
+    max_attempts=48
+  else
+    max_attempts=5
+  fi
   attempt=1
   while [[ "$attempt" -le "$max_attempts" ]]; do
     if run_endpoint "$label" "$endpoint"; then
       return 0
     fi
     if [[ "$attempt" -lt "$max_attempts" ]]; then
-      echo "[$(date -Iseconds)] ${market} ${label} not ready; retry $((attempt + 1))/${max_attempts} in 300s" >&2
+      echo "[$(date -Iseconds)] ${market} ${label} not ready; waiting for complete L1 verify, retry $((attempt + 1))/${max_attempts} in 300s" >&2
       /bin/sleep 300
     fi
     attempt=$((attempt + 1))
@@ -63,6 +70,29 @@ for track in bullish reversal system mechanical; do
 done
 
 run_endpoint "SanSe" "/api/cron/scan-${(L)market}-sanse" || failures=$((failures + 1))
+
+# 每次盤後成功後重算最近 10 個交易日，會自動補回休眠／上游故障期間漏掉的日期；
+# 再由每日快照重建具名策略（底反、紅黃觸發等）日檔與統計。
+# 這兩類產物過去沒有掛在任何每日 pipeline 上，才會出現 scan 已更新但底反只停在 08/10。
+repo_root="$HOME/Desktop/rockstock"
+tsx_cli="$HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs"
+if [[ "$market" == "TW" ]]; then
+  sanse_backfill="scripts/backfill-tw-sanse-scan.ts"
+else
+  sanse_backfill="scripts/backfill-cn-sanse-scan.ts"
+fi
+echo "[$(date -Iseconds)] ${market} SanSe history catch-up start"
+if (
+  cd "$repo_root" &&
+  "$HOME/.local/node-22/bin/node" "$tsx_cli" "$sanse_backfill" 10 &&
+  "$HOME/.local/node-22/bin/node" "$tsx_cli" scripts/scan-strategy-history.ts "$market"
+); then
+  echo "[$(date -Iseconds)] ${market} SanSe history catch-up done"
+else
+  echo "[$(date -Iseconds)] ${market} SanSe history catch-up failed" >&2
+  failures=$((failures + 1))
+fi
+
 run_endpoint "V" "/api/cron/scan-fundamental-revaluation?market=${market}" || failures=$((failures + 1))
 if [[ "$market" == "TW" ]]; then
   run_endpoint "Y" "/api/cron/scan-inststeal-track" || failures=$((failures + 1))

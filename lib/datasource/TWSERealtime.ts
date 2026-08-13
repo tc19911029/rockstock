@@ -22,6 +22,8 @@ export interface TWSEQuote {
   volume: number;     // 成交量（張），統一以張存儲
   previousClose?: number; // 昨收（由 Change 欄位推算），可用於驗證資料是否為今日
   date?: string;      // 資料日期 YYYY-MM-DD（由 API 的民國日期欄位解析）
+  /** false 表示 close 只是委買/委賣推估價，不可拿來畫 K 棒或封存日線。 */
+  isActualTrade?: boolean;
 }
 
 const REALTIME_CACHE_KEY = 'twse:realtime:all';
@@ -482,7 +484,8 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
       for (const d of json?.msgArray ?? []) {
         const code = d.c;
         if (!code) continue;
-        const close = resolveMisClose(d);
+        const actualTrade = resolveMisTradePrice(d);
+        const close = actualTrade || resolveMisClose(d);
         if (close <= 0) continue; // 今日無交易
         const prevClose = parseMisPrice(d.y);
         map.set(code, {
@@ -495,6 +498,7 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
           volume: Math.round(parseInt((d.v || '0').replace(/,/g, ''), 10)), // mis.twse d.v 已是張（實測：2330 d.v=48544 === TWSE歷史÷1000=48544張）
           previousClose: prevClose > 0 ? prevClose : undefined,
           date: today, // 確實是今天的即時數據
+          isActualTrade: actualTrade > 0,
         });
       }
     } catch (err) {

@@ -67,7 +67,7 @@ async function repairTw(): Promise<Summary> {
     const actual = local?.candles.find(c => c.date === targetDate);
     if (sameBar(actual, expectedBar, true)) { alreadyExact++; continue; }
     if (apply) {
-      try { await saveLocalCandles(symbol, 'TW', [expectedBar]); }
+      try { await saveLocalCandles(symbol, 'TW', [expectedBar], { trustedOfficial: true }); }
       catch (err) { writeFailed++; console.warn(`[TW] ${symbol}: ${(err as Error).message}`); continue; }
     }
     repaired++;
@@ -86,7 +86,7 @@ async function repairTw(): Promise<Summary> {
   // 官方「全表」會保留零成交列；用它把缺棒分成 no-trade 與 not-in-daily-table，
   // 避免把停牌／下市誤報為漏抓，也避免用昨收製造零量假 K。
   const twseAll = new Set<string>();
-  const miUrl = `https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${targetDate.replaceAll('-', '')}&type=ALLBUT0999`;
+  const miUrl = `https://wwwc.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${targetDate.replaceAll('-', '')}&type=ALLBUT0999`;
   const { data: mi } = await fetchJsonWithCurlFallback<{ tables?: Array<{ fields?: string[]; data?: string[][] }> }>(miUrl, { timeoutMs: 30_000 });
   const miTable = mi.tables?.find(t => t.fields?.some(f => f.replace(/\s/g, '') === '證券代號') && t.fields?.some(f => f.replace(/\s/g, '') === '收盤價'));
   const codeIdx = miTable?.fields?.findIndex(f => f.replace(/\s/g, '') === '證券代號') ?? -1;
@@ -117,7 +117,7 @@ async function repairTw(): Promise<Summary> {
       low: Number(ir.LowestIndex), close: Number(ir.ClosingIndex), volume: Math.round(Number(vr.TradeVolume) / 1000) };
     const local = await readCandleFile('^TWII', 'TW');
     if (!sameBar(local?.candles.find(c => c.date === targetDate), bar, true)) {
-      if (apply) await saveLocalCandles('^TWII', 'TW', [bar]);
+      if (apply) await saveLocalCandles('^TWII', 'TW', [bar], { trustedOfficial: true });
       indexRepaired = 1;
     }
   } else {

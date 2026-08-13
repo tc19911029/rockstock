@@ -11,6 +11,7 @@ import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { suspectsLimitOverwrite, suspectsGrossJump } from '@/lib/datasource/limitMoveGuard';
 import { checkCronAuth } from '@/lib/api/cronAuth';
+import { verifyDownload } from '@/lib/datasource/DownloadVerifier';
 import { isSnapshotTooOldForSeal } from '@/lib/datasource/snapshotFreshness';
 
 export const runtime = 'nodejs';
@@ -175,7 +176,7 @@ export async function GET(req: NextRequest) {
     await saveLocalCandles(symbol, market, [
       ...existing.candles,
       { date, open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume },
-    ]);
+    ], market === 'TW' ? { trustedOfficial: true } : undefined);
     appended++;
   }));
 
@@ -200,5 +201,33 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return apiOk({ market, date, appended, already, skippedLimitUp, limitUpSkipped, total: stocks.length, indexAppended });
+  // 這是策略掃描前最後一次補寫；必須重建 coverage report。
+  // 否則 scan 讀到的是早一輪 download-batch 的舊報告，可能放行殘缺資料或誤擋已補齊資料。
+  const verification = await verifyDownload(
+    market,
+    date,
+    stocks.map((stock) => stock.symbol),
+    {
+      succeeded: appended,
+      skipped: already,
+      failed: Math.max(0, stocks.length - appended - already),
+    },
+  );
+
+  return apiOk({
+    market,
+    date,
+    appended,
+    already,
+    skippedLimitUp,
+    limitUpSkipped,
+    total: stocks.length,
+    indexAppended,
+    verify: {
+      health: verification.health,
+      coverageRate: verification.summary.coverageRate,
+      stocksCurrent: verification.summary.stocksCurrent,
+      stocksMissingTargetDate: verification.summary.stocksMissingTargetDate,
+    },
+  });
 }

@@ -24,7 +24,7 @@ interface BulkRow { open: number; high: number; low: number; close: number; volu
  */
 export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, BulkRow>> {
   const d = date.replace(/-/g, '');
-  const url = `https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${d}&type=ALLBUT0999`;
+  const url = `https://wwwc.twse.com.tw/exchangeReport/MI_INDEX?response=json&date=${d}&type=ALLBUT0999`;
   let map = new Map<string, BulkRow>();
   try {
     const { data } = await fetchJsonWithCurlFallback<{ stat: string; tables: Array<{ fields?: string[]; data: string[][] }> }>(url, { timeoutMs: 30_000 });
@@ -77,7 +77,7 @@ export async function fetchTWSEBulkForDate(date: string): Promise<Map<string, Bu
 export async function fetchTWSEStockDayAll(date: string): Promise<Map<string, BulkRow>> {
   const map = new Map<string, BulkRow>();
   try {
-    const url = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=json';
+    const url = 'https://wwwc.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=json';
     const { text } = await fetchTextWithCurlFallback(url, {
       timeoutMs: 20_000,
       proxyFirst: true, // TWSE 是台灣站，中國線路走代理優先

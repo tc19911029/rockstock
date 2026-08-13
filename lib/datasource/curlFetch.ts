@@ -155,7 +155,9 @@ export async function fetchJsonWithCurlFallback<T>(
     // -4 強制 IPv4：dev server child process 環境 IPv6 路由可能撞不同 Cloudflare edge
     // 被當 bot 擋（0514 實測：tpex_mainboard_quotes 從 shell curl 200，從 Node spawn curl
     // 回 HTML challenge page）。手動 shell 用 -i 觀察 cf-ray 看 edge 差異可確認。
-    const args = ['-s', '-4', '--max-time', String(Math.ceil(timeoutMs / 1000))];
+    // TWSE wwwc 會以 307 導到區域節點；curl 預設不跟 redirect，會把 HTML 當 JSON。
+    // -L 對一般 200 endpoint 無副作用，且讓 fallback 與 Node fetch 的 redirect 行為一致。
+    const args = ['-s', '-L', '-4', '--max-time', String(Math.ceil(timeoutMs / 1000))];
     for (const [k, v] of Object.entries(headers)) {
       args.push('-H', `${k}: ${v}`);
     }
@@ -220,7 +222,7 @@ export async function fetchTextWithCurlFallback(
 
   // ── 2) curl shell fallback（含本機代理 fallback） ─────────────────────
   try {
-    const args = ['-s', '-4', '--max-time', String(Math.ceil(timeoutMs / 1000))];
+    const args = ['-s', '-L', '-4', '--max-time', String(Math.ceil(timeoutMs / 1000))];
     for (const [k, v] of Object.entries(headers)) {
       args.push('-H', `${k}: ${v}`);
     }
@@ -265,7 +267,7 @@ export async function fetchBufferWithCurlFallback(
   // curl binary 走 --output 寫暫存檔再讀（直接 stdout 接 binary 在某些 Node 版會炸）
   const tmpPath = `/tmp/curl-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`;
   try {
-    const args = ['-s', '-4', '--max-time', String(Math.ceil(timeoutMs / 1000))];
+    const args = ['-s', '-L', '-4', '--max-time', String(Math.ceil(timeoutMs / 1000))];
     for (const [k, v] of Object.entries(headers)) {
       args.push('-H', `${k}: ${v}`);
     }

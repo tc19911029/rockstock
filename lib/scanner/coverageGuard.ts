@@ -13,18 +13,16 @@
  * 若報告不存在 OR coverageRate < threshold，回傳 ok:false。
  */
 
-import { loadVerifyReport } from '@/lib/datasource/DownloadVerifier';
+import { loadVerifyReport, MIN_VERIFY_UNIVERSE } from '@/lib/datasource/DownloadVerifier';
+
+// 保留原有 public import path，避免健康頁等既有 caller 因常數搬到寫入邊界而失效。
+export { MIN_VERIFY_UNIVERSE } from '@/lib/datasource/DownloadVerifier';
 
 export type CoverageCheck =
   | { ok: true; coverageRate: number; health: string; totalStocks: number; stocksCurrent: number }
   | { ok: false; reason: string; coverageRate: number; totalStocks: number; stocksCurrent: number };
 
 const DEFAULT_MIN_COVERAGE = 0.95; // 95% L1 覆蓋率
-export const MIN_VERIFY_UNIVERSE: Record<'TW' | 'CN', number> = {
-  TW: 1500,
-  CN: 2700,
-};
-
 export async function assertL1Coverage(
   market: 'TW' | 'CN',
   date: string,
@@ -43,7 +41,9 @@ export async function assertL1Coverage(
   const cr = report.summary.coverageRate;
   const totalStocks = report.summary.totalStocks;
   const stocksCurrent = report.summary.stocksCurrent ?? Math.round(totalStocks * cr);
-  const minUniverse = MIN_VERIFY_UNIVERSE[market];
+  // Jest／隔離環境可能只 mock loadVerifyReport；保留本地 fail-safe，避免完整性守門
+  // 因測試替身未匯出常數而失效。正式執行仍以寫入邊界的共用常數為準。
+  const minUniverse = MIN_VERIFY_UNIVERSE?.[market] ?? (market === 'TW' ? 1500 : 2700);
   if (totalStocks < minUniverse) {
     return {
       ok: false,
