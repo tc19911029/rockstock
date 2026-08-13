@@ -1,4 +1,4 @@
-import { parseMisPrice, parseMisBestPrice, resolveMisClose } from '@/lib/datasource/TWSERealtime';
+import { parseMisPrice, parseMisBestPrice, resolveMisClose, resolveMisTradePrice } from '@/lib/datasource/TWSERealtime';
 
 describe('parseMisPrice', () => {
   test('valid price', () => {
@@ -114,5 +114,28 @@ describe('resolveMisClose', () => {
     const close = resolveMisClose(d);
     expect(close).toBeGreaterThan(481); // 絕不可等於昨收
     expect(close).toBe(529);
+  });
+});
+
+describe('resolveMisTradePrice', () => {
+  test('uses z when the exchange reports an actual match', () => {
+    expect(resolveMisTradePrice({ z: '74.8000' })).toBe(74.8);
+  });
+
+  test('does not turn the order-book midpoint into a fake K-bar close', () => {
+    const d = {
+      c: '6770', z: '-', o: '75.0000', h: '77.4000', l: '72.7000',
+      b: '74.7000_74.6000_', a: '74.8000_74.9000_',
+      u: '81.0000', w: '66.4000', y: '73.7000',
+    };
+    expect(resolveMisClose(d)).toBe(74.8); // indicative snapshot may still use a legal tick
+    expect(resolveMisTradePrice(d)).toBe(0); // K bar must fall through to a real-trade provider
+  });
+
+  test('keeps locked limit prices as a reliable exception', () => {
+    expect(resolveMisTradePrice({
+      z: '-', h: '529.0000', l: '481.0000', a: '-', b: '529.0000_',
+      u: '529.0000', w: '433.0000',
+    })).toBe(529);
   });
 });

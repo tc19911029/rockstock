@@ -232,7 +232,9 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
     if (source === 'curl') console.info('[TWSERealtime] 單檔即時報價 經 curl fallback 成功');
     const d = json?.msgArray?.[0];
     if (!d) return null;
-    const close = resolveMisClose(d);
+    // 單股報價會進入 K 棒與持倉現價：只接受實際成交，不使用 b/a 中價。
+    // 若這批 z='-'，回 null 讓呼叫端改走 Fugle / L2，而不是製造假 close。
+    const close = resolveMisTradePrice(d);
     if (close <= 0) return null;
     const prevClose = parseMisPrice(d.y);
     // 使用 mis.twse 回傳的實際日期（d.d 格式 "20260416"），避免盤後硬編碼 today 產生假 K 棒
@@ -306,6 +308,29 @@ export function parseMisBestPrice(s: string | undefined): number {
 }
 
 /**
+ * 只解析「可當成 K 棒 close 的實際成交價」。
+ *
+ * mis.twse 的 z 在該批次沒有新撮合時會是 '-'；此時 b/a 僅是委買委賣，
+ * 中價不是成交價（例如力積電曾被組成 74.75），不可拿來畫 K 棒或計算持倉。
+ * 鎖漲跌停是唯一可從委託簿可靠判定目前成交價的例外。
+ */
+export function resolveMisTradePrice(d: Record<string, string | undefined>): number {
+  const z = parseMisPrice(d.z);
+  if (z > 0) return z;
+
+  const bestBid = parseMisBestPrice(d.b);
+  const bestAsk = parseMisBestPrice(d.a);
+  const high = parseMisPrice(d.h);
+  const low = parseMisPrice(d.l);
+  const upperLimit = parseMisPrice(d.u);
+  const lowerLimit = parseMisPrice(d.w);
+
+  if (upperLimit > 0 && high >= upperLimit && bestAsk <= 0) return upperLimit;
+  if (lowerLimit > 0 && low > 0 && low <= lowerLimit && bestBid <= 0) return lowerLimit;
+  return 0;
+}
+
+/**
  * 從 mis.twse 單檔回傳資料解析「最近成交價」當 close
  *
  * 為什麼不能只看 d.z：鎖漲停／鎖跌停時 mis 會把 d.z 寫成 '-'，
@@ -326,8 +351,8 @@ export function parseMisBestPrice(s: string | undefined): number {
  * 破 OHLC 自洽。全市場 44 檔被污染 (1233, 1240, 1742, 2740, 4419 等)。改加 clip。
  */
 export function resolveMisClose(d: Record<string, string | undefined>): number {
-  const z = parseMisPrice(d.z);
-  if (z > 0) return z;
+  const traded = resolveMisTradePrice(d);
+  if (traded > 0) return traded;
   const bestBid = parseMisBestPrice(d.b);
   const bestAsk = parseMisBestPrice(d.a);
   const high = parseMisPrice(d.h);
