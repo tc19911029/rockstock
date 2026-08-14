@@ -2,8 +2,7 @@ import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
-import { getLastTradingDay } from '@/lib/datasource/marketHours';
-import { isTradingDay } from '@/lib/utils/tradingDay';
+import { getQuoteSnapshotDate } from '@/lib/datasource/marketHours';
 import { apiOk, apiError } from '@/lib/api/response';
 import { resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
 
@@ -359,8 +358,7 @@ export async function GET(req: NextRequest) {
 
   const cnFallback = async () => {
     if (missingCN.length === 0) return [] as typeof quotes;
-    const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
-    const lookupCN = isTradingDay(todayCN, 'CN') ? todayCN : getLastTradingDay('CN');
+    const lookupCN = getQuoteSnapshotDate('CN');
     try {
       const cnSnap = await readIntradaySnapshot('CN', lookupCN);
       if (!cnSnap) return [] as typeof quotes;
@@ -378,8 +376,7 @@ export async function GET(req: NextRequest) {
 
   const twFallback = async () => {
     if (missingTW.length === 0) return [] as typeof quotes;
-    const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-    const lookupTW = isTradingDay(todayTW, 'TW') ? todayTW : getLastTradingDay('TW');
+    const lookupTW = getQuoteSnapshotDate('TW');
     try {
       const twSnap = await readIntradaySnapshot('TW', lookupTW);
       if (!twSnap) return [] as typeof quotes;

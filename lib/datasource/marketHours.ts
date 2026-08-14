@@ -64,6 +64,39 @@ export function isMarketOpen(market: 'TW' | 'CN'): boolean {
 }
 
 /**
+ * 取得報價 fallback 應讀的 L2 快照日期。
+ *
+ * 交易日開盤前，今天的 intraday snapshot 尚不存在，必須回退到上一交易日；
+ * 開盤後（含午休／盤後）則讀今天，避免把昨日收盤誤當成今日即時價。
+ */
+export function getQuoteSnapshotDate(market: 'TW' | 'CN', now = new Date()): string {
+  const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+  const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  }).format(now).replace(/\u202f/g, ' ').split(':');
+  const timeMin = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  const sessionStart = market === 'TW' ? 540 : 555; // TW 09:00；CN 09:15 集合競價
+
+  if (isTradingDay(localDate, market) && timeMin >= sessionStart) {
+    return localDate;
+  }
+
+  const cursor = new Date(`${localDate}T12:00:00`);
+  let safety = 10;
+  do {
+    cursor.setDate(cursor.getDate() - 1);
+    const candidate = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(cursor);
+    if (isTradingDay(candidate, market)) return candidate;
+  } while (safety-- > 0);
+
+  return localDate;
+}
+
+/**
  * 取得當前交易日
  * 盤中 → 今天（即使還沒收盤）；盤後 → 今天；休市 → 上一個交易日
  * 用於盤中掃描：L2 更新時需要以「今天」的日期存入 L4
