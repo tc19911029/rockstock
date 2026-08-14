@@ -1,7 +1,55 @@
-import { buildValuationCodexArgs, normalizeValuationOutput } from '@/lib/valuation/autoRunner';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { buildValuationCodexArgs, normalizeValuationOutput, resolveCodexBinary } from '@/lib/valuation/autoRunner';
 import { validateValuationOutput } from '@/lib/valuation/outputValidation';
 
 describe('valuation auto runner', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const directory of tempDirs.splice(0)) rmSync(directory, { recursive: true, force: true });
+  });
+
+  function executable(name = 'codex'): string {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'rockstock-codex-bin-'));
+    tempDirs.push(directory);
+    const filePath = path.join(directory, name);
+    writeFileSync(filePath, '#!/bin/sh\nexit 0\n', 'utf-8');
+    chmodSync(filePath, 0o755);
+    return filePath;
+  }
+
+  it('優先使用明確設定的 Rockstar Codex CLI', () => {
+    const rockstarBin = executable();
+    const genericBin = executable();
+
+    expect(resolveCodexBinary({
+      env: { ROCKSTOCK_CODEX_BIN: rockstarBin, CODEX_BIN: genericBin, PATH: '' },
+      fallbackCandidates: [],
+    })).toBe(rockstarBin);
+  });
+
+  it('可從 PATH 找到官方 codex 指令', () => {
+    const codexBin = executable();
+
+    expect(resolveCodexBinary({
+      env: { PATH: path.dirname(codexBin) },
+      fallbackCandidates: [],
+    })).toBe(codexBin);
+  });
+
+  it('PATH 沒有 codex 時會使用桌面 App 內建路徑，且拒絕不可執行檔', () => {
+    const notExecutable = executable('not-executable');
+    chmodSync(notExecutable, 0o644);
+    const appBin = executable('app-codex');
+
+    expect(resolveCodexBinary({
+      env: { PATH: '' },
+      fallbackCandidates: [notExecutable, appBin],
+    })).toBe(appBin);
+  });
+
   it('以 headless Codex 執行 valuation skill，不依賴 Terminal 或 AppleScript', () => {
     const args = buildValuationCodexArgs({
       workDir: '/tmp/rockstock-valuation/runtime/603268-job',

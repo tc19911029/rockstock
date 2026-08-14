@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync } from 'node:fs';
+import { accessSync, closeSync, constants, openSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -6,7 +6,14 @@ import { validateValuationOutput } from './outputValidation';
 
 const JOB_DIR = '/tmp/rockstock-valuation/jobs';
 const RUNTIME_DIR = '/tmp/rockstock-valuation/runtime';
-const DEFAULT_CODEX_BIN = '/Applications/Codex.app/Contents/Resources/codex';
+const DEFAULT_CODEX_BINS = [
+  // Codex is bundled in the current ChatGPT desktop app. Keep the legacy
+  // Codex.app path as a fallback for machines that have not migrated yet.
+  '/Applications/ChatGPT.app/Contents/Resources/codex',
+  '/Applications/Codex.app/Contents/Resources/codex',
+  '/opt/homebrew/bin/codex',
+  '/usr/local/bin/codex',
+] as const;
 const RUNNING_TTL_MS = 20 * 60 * 1000;
 
 export interface ValuationJobResult {
@@ -180,15 +187,40 @@ export function buildValuationCodexArgs(options: {
   ];
 }
 
-export function resolveCodexBinary(): string | null {
+interface CodexBinaryEnv {
+  ROCKSTOCK_CODEX_BIN?: string;
+  CODEX_BIN?: string;
+  PATH?: string;
+}
+
+interface ResolveCodexBinaryOptions {
+  env?: CodexBinaryEnv;
+  fallbackCandidates?: readonly string[];
+}
+
+function isExecutableFile(candidate: string): boolean {
+  try {
+    accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveCodexBinary(options: ResolveCodexBinaryOptions = {}): string | null {
+  const env = options.env ?? process.env;
+  const pathCandidates = (env.PATH ?? '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map(directory => path.join(directory, 'codex'));
   const candidates = [
-    process.env.ROCKSTOCK_CODEX_BIN,
-    process.env.CODEX_BIN,
-    DEFAULT_CODEX_BIN,
-    '/opt/homebrew/bin/codex',
-    '/usr/local/bin/codex',
+    env.ROCKSTOCK_CODEX_BIN,
+    env.CODEX_BIN,
+    ...pathCandidates,
+    ...(options.fallbackCandidates ?? DEFAULT_CODEX_BINS),
   ].filter((item): item is string => Boolean(item));
-  return candidates.find(candidate => existsSync(candidate)) ?? null;
+
+  return [...new Set(candidates)].find(isExecutableFile) ?? null;
 }
 
 function isProcessAlive(pid: number | undefined): boolean {
