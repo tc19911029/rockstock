@@ -14,6 +14,8 @@
  */
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { ChartNoAxesCombined } from 'lucide-react';
 import { YoutubeDailySummary } from './YoutubeDailySummary';
 import { YoutubeStocksPanel } from './YoutubeStocksPanel';
 import { TeacherLeaderboard } from './TeacherLeaderboard';
@@ -41,25 +43,35 @@ export function YoutubePanel({ date, onDateChange, onSelectStock, selectedCode }
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* 子分頁切換 */}
-      <div role="tablist" aria-label="YouTube 子分頁" className="shrink-0 flex items-stretch border-b border-border bg-secondary/20 whitespace-nowrap">
-        {SUBTABS.map(t => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={sub === t.key}
-            onClick={() => setSub(t.key)}
-            title={t.title}
-            className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
-              sub === t.key
-                ? 'text-foreground border-b-2 border-purple-500 -mb-px bg-card/60'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <span aria-hidden="true">{t.icon}</span>
-            <span>{t.label}</span>
-          </button>
-        ))}
+      <div className="shrink-0 flex items-stretch overflow-x-auto border-b border-border bg-secondary/20 whitespace-nowrap">
+        <div role="tablist" aria-label="YouTube 子分頁" className="flex items-stretch">
+          {SUBTABS.map(t => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={sub === t.key}
+              onClick={() => setSub(t.key)}
+              title={t.title}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
+                sub === t.key
+                  ? 'text-foreground border-b-2 border-purple-500 -mb-px bg-card/60'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <span aria-hidden="true">{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+        <Link
+          href="/cn-media"
+          title="開啟陸股財經節目共識分析"
+          className="ml-auto inline-flex min-h-11 items-center gap-1 border-l border-border px-2.5 text-[11px] font-semibold text-sky-400 transition-colors hover:bg-sky-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <ChartNoAxesCombined className="size-3.5" aria-hidden="true" />
+          陸股版
+        </Link>
       </div>
 
       {/* 子分頁內容 */}
