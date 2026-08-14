@@ -8,7 +8,7 @@ export default async function CnMediaPage({
 }) {
   const params = await searchParams;
   const requestedDate = typeof params.date === 'string' ? params.date : '';
-  const target = new URLSearchParams({ tab: 'youtube', ytSub: 'cn' });
+  const target = new URLSearchParams({ tab: 'youtube', ytMarket: 'cn', ytSub: 'summary' });
   if (validYmd(requestedDate)) target.set('date', requestedDate);
   redirect(`/?${target.toString()}`);
 }
