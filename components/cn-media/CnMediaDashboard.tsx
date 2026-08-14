@@ -105,10 +105,10 @@ function ratingClass(rating: string | undefined) {
   return 'border-rose-500/30 bg-rose-500/15 text-rose-400';
 }
 
-function EmptyState({ hasVideos }: { hasVideos: boolean }) {
+function EmptyState({ hasVideos, compact = false }: { hasVideos: boolean; compact?: boolean }) {
   return (
     <Card className="border-dashed bg-card/50">
-      <CardContent className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
+      <CardContent className={cn('flex flex-col items-center justify-center px-6 text-center', compact ? 'min-h-44' : 'min-h-64')}>
         <SearchX className="mb-4 size-10 text-muted-foreground" aria-hidden="true" />
         <h2 className="text-lg font-semibold">這天還沒有完成分析</h2>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
@@ -121,13 +121,27 @@ function EmptyState({ hasVideos }: { hasVideos: boolean }) {
   );
 }
 
-export function CnMediaDashboard({ initialDate }: { initialDate: string }) {
-  const [date, setDate] = useState(initialDate);
+export function CnMediaDashboard({
+  initialDate,
+  onDateChange,
+  compact = false,
+}: {
+  initialDate: string;
+  onDateChange?: (date: string) => void;
+  compact?: boolean;
+}) {
+  const [localDate, setLocalDate] = useState(initialDate);
+  const date = compact ? initialDate : localDate;
   const [tab, setTab] = useState<ViewKey>('summary');
   const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
   const [videosData, setVideosData] = useState<VideosResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const changeDate = (nextDate: string) => {
+    if (compact && onDateChange) onDateChange(nextDate);
+    else setLocalDate(nextDate);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -171,7 +185,10 @@ export function CnMediaDashboard({ initialDate }: { initialDate: string }) {
   const videos = videosData?.videos ?? [];
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] space-y-4 p-3 sm:p-4 lg:p-6">
+    <div className={cn(
+      'w-full',
+      compact ? 'h-full space-y-3 overflow-auto p-2' : 'mx-auto max-w-[1600px] space-y-4 p-3 sm:p-4 lg:p-6',
+    )}>
       <section className="flex flex-col gap-3 rounded-xl border border-border bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
           <CalendarDays className="size-4 shrink-0" aria-hidden="true" />
@@ -179,17 +196,17 @@ export function CnMediaDashboard({ initialDate }: { initialDate: string }) {
           <input
             type="date"
             value={date}
-            onChange={event => setDate(event.target.value)}
+            onChange={event => changeDate(event.target.value)}
             aria-label="選擇節目日期"
             className="min-h-11 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <Button variant="outline" size="lg" onClick={() => setDate(current => shiftDate(current, -1))} aria-label="前一天">
+          <Button variant="outline" size="lg" onClick={() => changeDate(shiftDate(date, -1))} aria-label="前一天">
             <ArrowLeft aria-hidden="true" />
             <span className="hidden sm:inline">前一天</span>
           </Button>
-          <Button variant="outline" size="lg" onClick={() => setDate(current => shiftDate(current, 1))} aria-label="後一天">
+          <Button variant="outline" size="lg" onClick={() => changeDate(shiftDate(date, 1))} aria-label="後一天">
             <span className="hidden sm:inline">後一天</span>
             <ArrowRight aria-hidden="true" />
           </Button>
@@ -245,7 +262,7 @@ export function CnMediaDashboard({ initialDate }: { initialDate: string }) {
           {tab === 'summary' && (
             analysis ? (
               <div className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className={cn('grid gap-3', compact ? 'grid-cols-2' : 'sm:grid-cols-2 xl:grid-cols-4')}>
                   {[
                     { label: '完成分析', value: analysis.stats.videos_analyzed, suffix: '集', icon: CirclePlay, tone: 'text-sky-400' },
                     { label: '提及股票', value: analysis.stats.unique_stocks_total, suffix: '檔', icon: Target, tone: 'text-violet-400' },
@@ -278,7 +295,7 @@ export function CnMediaDashboard({ initialDate }: { initialDate: string }) {
                   </CardContent>
                 </Card>
 
-                <div className="grid gap-4 xl:grid-cols-2">
+                <div className={cn('grid gap-4', !compact && 'xl:grid-cols-2')}>
                   {analysis.video_summaries.map(video => (
                     <Card key={video.video_id}>
                       <CardHeader>
@@ -306,20 +323,20 @@ export function CnMediaDashboard({ initialDate }: { initialDate: string }) {
                   ))}
                 </div>
               </div>
-            ) : <EmptyState hasVideos={videos.length > 0} />
+            ) : <EmptyState hasVideos={videos.length > 0} compact={compact} />
           )}
 
           {tab === 'stocks' && (
             stocks.length ? (
-              <div className="grid gap-3 lg:grid-cols-2">
+              <div className={cn('grid gap-3', !compact && 'lg:grid-cols-2')}>
                 {stocks.map(stock => <StockCard key={stock.code} stock={stock} />)}
               </div>
-            ) : <EmptyState hasVideos={videos.length > 0} />
+            ) : <EmptyState hasVideos={videos.length > 0} compact={compact} />
           )}
 
           {tab === 'sources' && (
             <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className={cn('grid gap-3', compact ? 'grid-cols-1 min-[480px]:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4')}>
                 {(videosData?.sources ?? []).map(source => {
                   const scan = scanBySource.get(source.source_id);
                   const sourceVideos = videos.filter(video => video.source_id === source.source_id);
