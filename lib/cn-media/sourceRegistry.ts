@@ -86,8 +86,9 @@ export const DEFAULT_CN_MEDIA_SOURCES: CnMediaSource[] = [
     active: true,
     default_analysts: ['貝侃'],
     source_tier: 'creator',
-    search_query: '贝侃 A股',
-    search_pages: 10,
+    include_title_keywords: ['A股', '大A', '股市', '股票', '盘后', '沪指', '创业板', '板块'],
+    search_queries: ['贝侃 A股', '贝侃-非典型政经 大A'],
+    search_pages: 5,
   },
   {
     source_id: 'bilibili-value-office',
@@ -98,8 +99,8 @@ export const DEFAULT_CN_MEDIA_SOURCES: CnMediaSource[] = [
     active: true,
     default_analysts: ['價值事務所'],
     source_tier: 'creator',
-    search_query: '价值事务所 {year}',
-    search_pages: 10,
+    search_queries: ['价值事务所 {year}', '价值事务所 股票'],
+    search_pages: 5,
   },
   {
     source_id: 'bilibili-dongge-market',
@@ -110,8 +111,8 @@ export const DEFAULT_CN_MEDIA_SOURCES: CnMediaSource[] = [
     active: true,
     default_analysts: ['冬哥'],
     source_tier: 'creator',
-    search_query: '冬哥论市 A股',
-    search_pages: 10,
+    search_queries: ['冬哥论市 A股', '冬哥论市 复盘'],
+    search_pages: 5,
   },
   {
     source_id: 'bilibili-laoke-review',
@@ -122,8 +123,8 @@ export const DEFAULT_CN_MEDIA_SOURCES: CnMediaSource[] = [
     active: true,
     default_analysts: ['老柯'],
     source_tier: 'creator',
-    search_query: '老柯复盘',
-    search_pages: 10,
+    search_queries: ['老柯复盘', 'A股复盘 老柯'],
+    search_pages: 5,
   },
 ];
 

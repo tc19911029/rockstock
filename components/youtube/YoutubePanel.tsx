@@ -29,6 +29,7 @@ import { YoutubeStocksPanel } from './YoutubeStocksPanel';
 import { TeacherLeaderboard } from './TeacherLeaderboard';
 import { YoutubeTab } from '@/app/health/tabs/YoutubeTab';
 import { CnMediaDashboard } from '@/components/cn-media/CnMediaDashboard';
+import { CnMediaPerformancePanel } from '@/components/cn-media/CnMediaPerformancePanel';
 
 type MediaMarket = 'tw' | 'cn';
 type SubTab = 'summary' | 'mentions' | 'teachers' | 'health';
@@ -47,11 +48,16 @@ const TW_SUBTABS: Array<{ key: SubTab; label: string; icon: LucideIcon; title: s
   { key: 'health',   label: '抓取狀態', icon: Activity,      title: 'YouTube 來源抓取／掃描健康狀態' },
 ];
 
-const CN_SUBTABS = TW_SUBTABS.filter(tab => tab.key !== 'teachers').map(tab => ({
+const CN_SUBTABS = TW_SUBTABS.map(tab => ({
   ...tab,
+  label: tab.key === 'teachers' ? '節目績效' : tab.label,
   title: tab.key === 'summary'
     ? '陸股每日節目總結報告'
-    : tab.key === 'mentions' ? '陸股節目提及股票' : '陸股節目來源與逐字稿狀態',
+    : tab.key === 'mentions'
+      ? '陸股節目提及股票'
+      : tab.key === 'teachers'
+        ? '陸股節目方向調整後的推薦績效'
+        : '陸股節目來源與逐字稿狀態',
 }));
 
 function isMediaMarket(value: string | null): value is MediaMarket {
@@ -170,7 +176,8 @@ export function YoutubePanel({ date, onDateChange, onSelectStock, selectedCode }
             <YoutubeTab />
           </div>
         )}
-        {mediaMarket === 'cn' && (
+        {mediaMarket === 'cn' && sub === 'teachers' && <CnMediaPerformancePanel />}
+        {mediaMarket === 'cn' && sub !== 'teachers' && (
           <CnMediaDashboard
             initialDate={date}
             onDateChange={onDateChange}

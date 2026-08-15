@@ -18,6 +18,8 @@ export interface CnMediaSource {
   include_title_keywords?: string[];
   /** B站手機搜尋使用的穩定關鍵字；可含 {year}，搜尋後仍會核對作者 ID。 */
   search_query?: string;
+  /** 可提供多組搜尋詞降低 B站搜尋排序波動；同樣支援 {year}。 */
+  search_queries?: string[];
   /** 搜尋結果頁數，預設 3 頁。 */
   search_pages?: number;
 }

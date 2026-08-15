@@ -56,7 +56,7 @@ curl -fsS --max-time 120 -H "$AUTH" -X POST "$BASE/cn-media-scan?date=$D" >/dev/
   && echo "[$(ts)] scan OK" \
   || { echo "[$(ts)] scan 失敗" >&2; exit 1; }
 
-# 四集約 3 小時內容，依序轉錄，避免記憶體尖峰。
+# 官方長節目與 B站短節目依序轉錄，避免多個 Whisper 模型同時造成記憶體尖峰。
 curl -fsS --max-time 10800 -H "$AUTH" -X POST "$BASE/cn-media-transcript?date=$D" >/dev/null \
   && echo "[$(ts)] transcript OK" \
   || { echo "[$(ts)] transcript 失敗" >&2; exit 1; }

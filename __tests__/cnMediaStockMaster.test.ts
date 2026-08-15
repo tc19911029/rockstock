@@ -5,6 +5,8 @@ const master: CnStockMasterEntry[] = [
   { code: '600519', symbol: '600519.SS', name: '贵州茅台', exchange: 'SSE', industry: '白酒', aliases: ['茅台'] },
   { code: '300750', symbol: '300750.SZ', name: '宁德时代', exchange: 'SZSE', industry: '電池', aliases: ['宁王', '寧王'] },
   { code: '688981', symbol: '688981.SS', name: '中芯国际', exchange: 'SSE', industry: '半導體', aliases: ['中芯'] },
+  { code: '600664', symbol: '600664.SS', name: '哈药股份', exchange: 'SSE', industry: '醫藥', aliases: ['哈药', '哈耀'] },
+  { code: '600721', symbol: '600721.SS', name: '百花医药', exchange: 'SSE', industry: '醫藥', aliases: ['百花'] },
 ];
 
 describe('陸股名稱與代號對照', () => {
@@ -17,6 +19,13 @@ describe('陸股名稱與代號對照', () => {
   test('支援常見簡稱與繁體別名', () => {
     expect(lookupCnStock('茅台', master)?.code).toBe('600519');
     expect(lookupCnStock('寧王', master)?.code).toBe('300750');
+    expect(lookupCnStock('哈耀', master)?.code).toBe('600664');
+    expect(lookupCnStock('百花', master)?.code).toBe('600721');
+  });
+
+  test('B站標題與語音辨識簡稱可進入候選', () => {
+    const result = collectCnStockCandidates(['哈药卡异动，百花能否穿越；转录读成哈耀。'], master);
+    expect(result.map(item => item.code).sort()).toEqual(['600664', '600721']);
   });
 
   test('從逐字稿同時抓名稱與六位代號並去重', () => {

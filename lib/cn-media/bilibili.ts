@@ -90,24 +90,27 @@ async function apiJson<T>(url: string): Promise<T> {
 }
 
 async function searchItems(source: CnMediaSource, targetDate: string): Promise<BilibiliSearchItem[]> {
-  const query = (source.search_query ?? source.display_name).replace('{year}', targetDate.slice(0, 4));
+  const queries = (source.search_queries?.length ? source.search_queries : [source.search_query ?? source.display_name])
+    .map(query => query.replace('{year}', targetDate.slice(0, 4)));
   const pages = source.search_pages ?? 3;
   const all: BilibiliSearchItem[] = [];
   const errors: string[] = [];
-  for (let page = 1; page <= pages; page += 1) {
-    try {
-      const params = new URLSearchParams({ keyword: query, order: 'pubdate', page: String(page) });
-      const response = await fetch(`${MOBILE_SEARCH}?${params}`, {
-        headers: { 'User-Agent': USER_AGENT },
-        cache: 'no-store',
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      all.push(...parseBilibiliSearchHtml(await response.text()));
-    } catch (error) {
-      errors.push(`page ${page}: ${error instanceof Error ? error.message : String(error)}`);
+  for (const query of queries) {
+    for (let page = 1; page <= pages; page += 1) {
+      try {
+        const params = new URLSearchParams({ keyword: query, order: 'pubdate', page: String(page) });
+        const response = await fetch(`${MOBILE_SEARCH}?${params}`, {
+          headers: { 'User-Agent': USER_AGENT },
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        all.push(...parseBilibiliSearchHtml(await response.text()));
+      } catch (error) {
+        errors.push(`${query} page ${page}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
-  if (errors.length === pages) throw new Error(`Bilibili search failed (${errors.join('; ')})`);
+  if (errors.length === pages * queries.length) throw new Error(`Bilibili search failed (${errors.join('; ')})`);
   const filtered = filterBilibiliSearchItems(source, all);
   return [...new Map(filtered.map(item => [item.bvid, item])).values()];
 }

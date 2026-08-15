@@ -390,7 +390,13 @@ export function CnMediaDashboard({
                           </a>
                           <span className={cn('mt-1 size-2.5 shrink-0 rounded-full', scan?.error ? 'bg-rose-400' : scan ? 'bg-emerald-400' : 'bg-muted-foreground')} aria-hidden="true" />
                         </CardTitle>
-                        <CardDescription>第一財經官方節目 · 工作日更新</CardDescription>
+                        <CardDescription>
+                          {source.source_tier === 'official_media' ? '官方媒體' : 'B站創作者'} · {
+                            source.expected_cadence === 'weekday' ? '工作日更新'
+                              : source.expected_cadence === 'weekly' ? '每週更新'
+                                : source.expected_cadence === 'daily' ? '每日更新' : '不定期更新'
+                          }
+                        </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-2 text-xs text-muted-foreground">
                         <div className="flex justify-between"><span>掃描結果</span><span>{scan?.error ? '失敗' : scan ? `${scan.found_count} 集` : '尚未執行'}</span></div>
@@ -433,7 +439,7 @@ export function CnMediaDashboard({
 
       <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
         <FileText className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-        現階段先收錄第一財經四檔官方節目，避免把匿名自媒體與官方媒體視為同等訊號；後續可再加入 Bilibili、雪球與財聯社的分層來源。
+        目前追蹤第一財經官方節目與已驗證的 B站 A 股創作者；分析與績效均保留來源層級，避免把創作者與官方媒體視為相同權重。
       </p>
     </div>
   );
