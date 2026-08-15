@@ -656,11 +656,15 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
     console.warn(`[IntradayCache] TW 丟棄 ${staleSkipped} 筆非 ${todayTW} 資料（多半是 STOCK_DAY_ALL 盤中昨日殘留）`);
   }
 
-  // 大盤指數 ^TWII — 跟個股共用同一個 L2 snapshot，下游 append-from-snapshot 會自動寫 L1。
+  // 台股兩個大盤指數 ^TWII / ^TWOII — 跟個股共用同一個 L2 snapshot，
+  // 下游 append-from-snapshot 會自動寫 L1。
   // 0518 修：原本 ^TWII 只能靠 Vercel cron `download-candles-batch?batch=1` 走 Yahoo 抓
   // (本地 launchd 沒涵蓋、Yahoo 當日 vol 還會回 0)，現在改從 mis.twse t00 一起進 L2。
-  const twIndex = await fetchTWIndexQuote(todayTW);
-  if (twIndex) quotes.push(twIndex);
+  const twIndices = await Promise.all([
+    fetchTWIndexQuote(todayTW, '^TWII'),
+    fetchTWIndexQuote(todayTW, '^TWOII'),
+  ]);
+  for (const indexQuote of twIndices) if (indexQuote) quotes.push(indexQuote);
 
   return quotes;
 }
@@ -675,9 +679,13 @@ const MIS_HEADERS_INDEX = {
   Referer: 'https://mis.twse.com.tw/stock/',
 };
 
-export async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote | null> {
+export async function fetchTWIndexQuote(
+  todayTW: string,
+  symbol: '^TWII' | '^TWOII' = '^TWII',
+): Promise<IntradayQuote | null> {
   try {
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0&_=${Date.now()}`;
+    const channel = symbol === '^TWII' ? 'tse_t00.tw' : 'otc_o00.tw';
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${channel}&json=1&delay=0&_=${Date.now()}`;
     const res = await fetch(url, { headers: MIS_HEADERS_INDEX, signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const json = await res.json() as { msgArray?: Array<Record<string, string>> };
@@ -695,22 +703,24 @@ export async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote 
     // （盤後定價交易沒算進去），而 append-from-snapshot 寫進 L1 後沒有人會再覆寫它
     //（download-candles-batch 看 lastDate 已是今天就 skip）→ 誤差會永久留在 L1。
     // 官方要收盤後才發，盤中查無 → 保留 mis 的 m。
-    try {
-      const { fetchTwseMarketStatsMonth } = await import('./TwseMarketStats');
-      const stats = await fetchTwseMarketStatsMonth(todayTW.slice(0, 4) + todayTW.slice(5, 7));
-      const official = stats.get(todayTW);
-      if (official && official.volume > 0) volume = official.volume;
-    } catch { /* fail-open：官方站掛掉就用 mis 的 m */ }
+    if (symbol === '^TWII') {
+      try {
+        const { fetchTwseMarketStatsMonth } = await import('./TwseMarketStats');
+        const stats = await fetchTwseMarketStatsMonth(todayTW.slice(0, 4) + todayTW.slice(5, 7));
+        const official = stats.get(todayTW);
+        if (official && official.volume > 0) volume = official.volume;
+      } catch { /* fail-open：官方站掛掉就用 mis 的 m */ }
+    }
     // 日期守門：mis d.d 是當前報價日期（盤前可能是上一交易日），不是 today 就丟
     const misDate = d.d ? `${d.d.slice(0, 4)}-${d.d.slice(4, 6)}-${d.d.slice(6, 8)}` : todayTW;
     if (misDate !== todayTW) {
-      console.warn(`[IntradayCache] ^TWII mis.twse 回 ${misDate} ≠ today ${todayTW}，丟棄`);
+      console.warn(`[IntradayCache] ${symbol} mis.twse 回 ${misDate} ≠ today ${todayTW}，丟棄`);
       return null;
     }
     const changePercent = prevClose > 0 ? Math.round(((close - prevClose) / prevClose) * 10000) / 100 : 0;
     return {
-      symbol: '^TWII',
-      name: d.n?.trim() || '發行量加權股價指數',
+      symbol,
+      name: d.n?.trim() || (symbol === '^TWII' ? '發行量加權股價指數' : '櫃買指數'),
       open,
       high,
       low,
@@ -720,7 +730,7 @@ export async function fetchTWIndexQuote(todayTW: string): Promise<IntradayQuote 
       changePercent,
     };
   } catch (err) {
-    console.warn('[IntradayCache] ^TWII fetch 失敗:', err instanceof Error ? err.message : err);
+    console.warn(`[IntradayCache] ${symbol} fetch 失敗:`, err instanceof Error ? err.message : err);
     return null;
   }
 }

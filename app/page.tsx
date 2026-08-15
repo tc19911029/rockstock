@@ -315,7 +315,7 @@ function HomePage() {
     // DU1：只有「當前走圖是大盤指數（或尚未載入）」時才跟著切到新市場指數；
     // 使用者已載入個股則保留個股圖、不覆蓋（切掃描市場 ≠ 丟失走圖）。
     // hydration 初始 chart 仍是指數，故 TW→CN 照常切到 000001.SS。
-    const INDEX_TICKERS = new Set(['^TWII', '000001.SS', '000300.SS']);
+    const INDEX_TICKERS = new Set(['^TWII', '^TWOII', '000001.SS', '000300.SS']);
     const cur = currentStock?.ticker ?? '';
     if (cur && !INDEX_TICKERS.has(cur)) return;
     const { symbol } = getMarketIndex(market);
@@ -521,8 +521,8 @@ function HomePage() {
   const ticker = currentStock?.ticker ?? '';
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
   const isCnTicker = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
-  // 三色資金（雙B/主力/捕撈）台股+陸股皆可；^TWII 加權指數比照陸股 000001.SS 也可（指數三色為退化值但版面一致）
-  const sanseEnabled = isCnTicker || isTwTicker || ticker === '^TWII';
+  // 三色資金（雙B/主力/捕撈）台股+陸股皆可；台股指數比照陸股指數也可（指數三色為退化值但版面一致）
+  const sanseEnabled = isCnTicker || isTwTicker || ticker === '^TWII' || ticker === '^TWOII';
   // 中間「條件/訊號」面板跟著掃描面板選的策略換：
   //   三色 level（CN 自創策略）被選中 → 顯示三色面板；否則 → 書本買法面板（含陸股）。
   // sanseLevel 為單一事實來源（store），由掃描面板「三色(嚴格/中等/寬鬆)」按鈕設定、選任何書本買法時自動清空。

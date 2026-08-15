@@ -122,17 +122,18 @@ const stockQuerySchema = z.object({
 
 const INDEX_NAMES: Record<string, string> = {
   '^TWII': '台灣加權指數',
+  '^TWOII': '櫃買指數',
   '^000001': '上證指數',
 };
 
 /** 解析 symbol 並加上交易所後綴 */
 function resolveSymbol(symbol: string): { ticker: string; candidates: string[]; isTW: boolean; isCN: boolean } {
   // 指數 symbols：走本地檔案路徑（與一般個股共用 loadLocalCandlesWithTolerance）
-  // TW 指數：^TWII（加權指數）
+  // TW 指數：^TWII（加權指數）、^TWOII（櫃買指數）
   // CN 指數：000001.SS（上證指數）、000300.SS（滬深 300）
   // 注意：000001.SS 必須優先匹配為 CN 指數，避免被 /^\d{6}\.(SZ|SS)$/ 一般 CN 路徑搶走後加錯 fallback
-  if (symbol === '^TWII') {
-    return { ticker: '^TWII', candidates: ['^TWII'], isTW: true, isCN: false };
+  if (symbol === '^TWII' || symbol === '^TWOII') {
+    return { ticker: symbol, candidates: [symbol], isTW: true, isCN: false };
   }
   if (/^\d{6}\.SS$/i.test(symbol) && (symbol.startsWith('000001') || symbol.startsWith('000300'))) {
     const upper = symbol.toUpperCase();
@@ -191,7 +192,7 @@ export async function GET(req: NextRequest) {
   // 平安銀行(000001.SZ) 等同碼個股 → L2 快照比對必須用完整 symbol，且不可走 EastMoney 個股報價
   // （它對指數會誤回平安銀行的價，~10.83）。對齊 /api/stock/quote 的指數處理。
   const isCnIndex = symbol === '000001.SS' || symbol === '000300.SS';
-  const isTwIndex = symbol === '^TWII';
+  const isTwIndex = symbol === '^TWII' || symbol === '^TWOII';
   const l2LookupSymbol = isCnIndex ? symbol : pureCode;
 
   const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
@@ -248,10 +249,10 @@ export async function GET(req: NextRequest) {
           const injectDeadline = Date.now() + INJECT_BUDGET_MS;
           try {
             if (isTW && isTwIndex) {
-              // 大盤指數(^TWII)：個股報價端點(getTWSEQuote)對指數無效 → 走專屬 t00 即時值。
+              // 大盤指數(^TWII/^TWOII)：個股報價端點對指數無效 → 走專屬 t00/o00 即時值。
               // 與 L2 snapshot 同源 fetchTWIndexQuote，確保走圖今日那根與掃描/快照一致；
               // L2 snapshot(l2LookupSymbol='^TWII') 仍當下方 fallback 3 的次要來源。
-              const iq = await withTimeout(fetchTWIndexQuote(today), INJECT_BUDGET_MS, null);
+              const iq = await withTimeout(fetchTWIndexQuote(today, symbol as '^TWII' | '^TWOII'), INJECT_BUDGET_MS, null);
               if (iq && iq.close > 0) {
                 todayQuote = { open: iq.open, high: iq.high, low: iq.low, close: iq.close, volume: iq.volume };
               }

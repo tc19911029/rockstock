@@ -69,6 +69,14 @@ async function fetchTWQuotes(date: string): Promise<Map<string, Quote>> {
   const out = new Map<string, Quote>();
   for (const [code, q] of cache.twseBulk) out.set(code, q);
   for (const [code, q] of cache.tpexBulk) out.set(code, q);
+  const { fetchTWIndexQuote } = await import('@/lib/datasource/IntradayCache');
+  const indexQuotes = await Promise.all([
+    fetchTWIndexQuote(date, '^TWII'),
+    fetchTWIndexQuote(date, '^TWOII'),
+  ]);
+  for (const q of indexQuotes) {
+    if (q) out.set(q.symbol, q);
+  }
   console.log(`[append-from-snapshot] TW 用官方盤後日線（TWSE ${cache.twseBulk.size} / TPEx ${cache.tpexBulk.size}）`);
   return out;
 }
@@ -180,15 +188,24 @@ export async function GET(req: NextRequest) {
     appended++;
   }));
 
-  // 大盤指數（^TWII / 000001.SS）— scanner.getStockList 不含指數，必須另外處理。
+  // 大盤指數（^TWII / ^TWOII / 000001.SS）— scanner.getStockList 不含指數，必須另外處理。
   // L2 snapshot 內 symbol 已帶 suffix（避 CN 個股 000001 撞 key），這裡直接 quotes.get(suffix 版)。
   // 0518 修：之前指數靠 Vercel cron download-candles-batch?batch=1 走 Yahoo 抓（vol 常 0），
   // 改成由 IntradayCache 從 mis.twse/Tencent 抓，append-from-snapshot 一併寫 L1，本地 cron 也涵蓋。
-  let indexAppended = false;
-  const indexSymbol = market === 'TW' ? '^TWII' : '000001.SS';
-  const indexQuote = quotes.get(indexSymbol);
-  if (indexQuote) {
-    const existing = await readCandleFile(indexSymbol, market);
+  const indexSymbols = market === 'TW' ? ['^TWII', '^TWOII'] : ['000001.SS'];
+  const indexAppended: string[] = [];
+  for (const indexSymbol of indexSymbols) {
+    const indexQuote = quotes.get(indexSymbol);
+    if (!indexQuote) continue;
+    let existing = await readCandleFile(indexSymbol, market);
+    // ^TWOII 第一次啟用時沒有 L1：先用官方 TPEx 歷史資料建檔，再追加當日即時值。
+    if (!existing && indexSymbol === '^TWOII') {
+      const idxCandles = await scanner.fetchCandles(indexSymbol);
+      if (idxCandles.length > 0) {
+        await saveLocalCandles(indexSymbol, market, idxCandles);
+        existing = await readCandleFile(indexSymbol, market);
+      }
+    }
     // 指數允許 same-day 覆寫（個股的 already 邏輯不適用）：
     // 多輪 refresh 後一次比前一次更接近收盤；下游 CandleStorageAdapter merge
     // 對指數有 isIndex+V=0 防呆（incoming vol=0 但 existing vol>0 → 保留 existing），
@@ -197,7 +214,7 @@ export async function GET(req: NextRequest) {
       const merged = existing.candles.filter(c => c.date !== date);
       merged.push({ date, open: indexQuote.open, high: indexQuote.high, low: indexQuote.low, close: indexQuote.close, volume: indexQuote.volume });
       await saveLocalCandles(indexSymbol, market, merged);
-      indexAppended = true;
+      indexAppended.push(indexSymbol);
     }
   }
 

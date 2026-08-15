@@ -117,7 +117,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                 // 如果當前走圖是市場指數（^TWII / 000001.SS），自動切到新市場的指數
                 // 個股 ticker 不動，避免使用者切市場意外失去當前看的股
                 const currentTicker = useReplayStore.getState().currentStock?.ticker;
-                const INDEX_TICKERS = new Set(['^TWII', '000001.SS', '000300.SS']);
+                const INDEX_TICKERS = new Set(['^TWII', '^TWOII', '000001.SS', '000300.SS']);
                 if (currentTicker && INDEX_TICKERS.has(currentTicker)) {
                   const newIndex = m === 'TW' ? '^TWII' : '000001.SS';
                   if (currentTicker !== newIndex) {

@@ -359,20 +359,22 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── 大盤指數（^TWII / 000001.SS）─ scanner.getStockList 不含指數，非 batch 路由也須補 ──
+    // ── 大盤指數（^TWII / ^TWOII / 000001.SS）─ scanner.getStockList 不含指數，非 batch 路由也須補 ──
     // 否則 TW 在 Vercel 只跑非 batch download-candles，^TWII 永不更新（停在舊日）→ 下游
     // 大盤趨勢 / regime / tw-sanse 掃描 frontier 全部落後（個股到當日、指數落後 → 全檔被當殭屍
     // staleSkip）。對齊 download-candles-batch 的 proxy 指數下載。
     try {
-      const indexSymbol = market === 'TW' ? '^TWII' : '000001.SS';
-      const idxExisting = await readCandleFile(indexSymbol, market);
-      if (!idxExisting || idxExisting.lastDate < lastTradingDate) {
-        const idxCandles = await scanner.fetchCandles(indexSymbol);
-        if (idxCandles.length > 0) {
-          await saveLocalCandles(indexSymbol, market, idxCandles);
-          console.info(`[download-candles] ${market} 指數 ${indexSymbol}: ${idxCandles.length} 根已更新到 ${idxCandles[idxCandles.length - 1]?.date}`);
-        } else {
-          console.warn(`[download-candles] ${market} 指數 ${indexSymbol}: 無資料（來源回空）`);
+      const indexSymbols = market === 'TW' ? ['^TWII', '^TWOII'] : ['000001.SS'];
+      for (const indexSymbol of indexSymbols) {
+        const idxExisting = await readCandleFile(indexSymbol, market);
+        if (!idxExisting || idxExisting.lastDate < lastTradingDate) {
+          const idxCandles = await scanner.fetchCandles(indexSymbol);
+          if (idxCandles.length > 0) {
+            await saveLocalCandles(indexSymbol, market, idxCandles);
+            console.info(`[download-candles] ${market} 指數 ${indexSymbol}: ${idxCandles.length} 根已更新到 ${idxCandles[idxCandles.length - 1]?.date}`);
+          } else {
+            console.warn(`[download-candles] ${market} 指數 ${indexSymbol}: 無資料（來源回空）`);
+          }
         }
       }
     } catch (err) {

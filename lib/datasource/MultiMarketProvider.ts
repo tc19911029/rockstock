@@ -422,14 +422,23 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else if (market === 'INDEX') {
-      // 指數（^TWII 等）直接走 Yahoo Finance
-      // YahooDataProvider 已從 meta.regularMarketVolume 補今日成交量
-      result = await tryProvidersWithRacing([
-        {
-          name: `Yahoo ${symbol}`,
-          fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
-        },
-      ]);
+      // 櫃買指數 ^TWOII：Yahoo feed 自 2024-10 後只回 null bar，改走 TPEx 官方月資料。
+      if (symbol === '^TWOII') {
+        const { fetchTpexIndexCandles } = await import('./TpexIndexProvider');
+        const end = asOfDate ?? today;
+        const startDate = new Date(`${end}T00:00:00Z`);
+        startDate.setUTCFullYear(startDate.getUTCFullYear() - 2);
+        result = await fetchTpexIndexCandles(startDate.toISOString().slice(0, 10), end);
+      } else {
+        // 其他指數（^TWII 等）直接走 Yahoo Finance
+        // YahooDataProvider 已從 meta.regularMarketVolume 補今日成交量
+        result = await tryProvidersWithRacing([
+          {
+            name: `Yahoo ${symbol}`,
+            fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
+          },
+        ]);
+      }
       // ^TWII 成交量改用 TWSE 官方（2026-07-23）：Yahoo 只給官方成交股數的 35~57%
       // 且比例逐日浮動（崩盤爆量日反而縮得最兇）→ 爆量/量縮判讀全錯。只換 volume，OHLC 留 Yahoo。
       if (symbol === '^TWII' && result.length > 0) {
@@ -439,7 +448,7 @@ export class MultiMarketProvider implements DataProvider {
         const last = result[result.length - 1];
         if (last.date === today) {
           const { fetchTWIndexQuote } = await import('./IntradayCache');
-          const q = await fetchTWIndexQuote(today).catch(() => null);
+          const q = await fetchTWIndexQuote(today, symbol).catch(() => null);
           if (q && q.volume > 0) last.volume = q.volume;
         }
       }

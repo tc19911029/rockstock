@@ -28,9 +28,9 @@ export async function GET(req: NextRequest) {
   // suffix 權威：.SS/.SZ → CN；.TW/.TWO → TW；無 suffix 用位數 fallback（4-5 位 TW、6 位 CN）
   const hasCnSuffix = /\.(SS|SZ)$/i.test(symbol);
   const hasTwSuffix = /\.(TW|TWO)$/i.test(symbol);
-  // 2026-05-07：加 INDEX 路徑 — ^TWII / 000001.SS / 000300.SS 等指數要走獨立路徑
+  // 2026-05-07：加 INDEX 路徑 — ^TWII / ^TWOII / 000001.SS / 000300.SS 等指數要走獨立路徑
   // 不能進 isCN（會被 EastMoney quote API 誤回平安銀行 000001.SZ 的價）
-  const isTwIndex = symbol === '^TWII';
+  const isTwIndex = symbol === '^TWII' || symbol === '^TWOII';
   const isCnIndex = symbol === '000001.SS' || symbol === '000300.SS';
   const isIndex = isTwIndex || isCnIndex;
   const isCN = !isIndex && (hasCnSuffix || (!hasTwSuffix && /^\d{6}$/.test(pureCode)));
@@ -54,6 +54,17 @@ export async function GET(req: NextRequest) {
       const sq = snapshot?.quotes.find(q => q.symbol === symbol);  // INDEX 用完整 symbol 比對（^TWII / 000001.SS）
       if (sq && sq.close > 0 && (market !== 'TW' || sq.isActualTrade !== false)) {
         quote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
+      }
+    } catch { /* fallthrough */ }
+  }
+
+  // TW 指數快照缺漏時直接補打 MIS（^TWII=t00、^TWOII=o00），再退 L1。
+  if (!quote && isTwIndex) {
+    try {
+      const { fetchTWIndexQuote } = await import('@/lib/datasource/IntradayCache');
+      const iq = await fetchTWIndexQuote(today, symbol as '^TWII' | '^TWOII');
+      if (iq && iq.close > 0) {
+        quote = { open: iq.open, high: iq.high, low: iq.low, close: iq.close, volume: iq.volume };
       }
     } catch { /* fallthrough */ }
   }
@@ -121,7 +132,7 @@ export async function GET(req: NextRequest) {
     } catch { /* fallthrough */ }
   }
 
-  // ── INDEX fallback：讀 L1 末根（L2 snapshot 沒抓到，給最後一個交易日的值墊著）
+  // ── INDEX fallback：讀 L1 末根（L2 / MIS 沒抓到，給最後一個交易日的值墊著）
   // 2026-05-07：原本指數走 quote API 永遠 404 → 走圖 polling 失敗，盤中不更新。
   // 2026-05-26：回傳真實 last.date 而不是強制 today，讓 polling 端能比對「這是舊資料」拒絕覆寫。
   if (!quote && (isTwIndex || isCnIndex)) {

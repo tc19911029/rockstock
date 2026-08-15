@@ -24,6 +24,14 @@ const T00_OK = {
   }],
 };
 
+const O00_OK = {
+  msgArray: [{
+    c: 'o00', n: '櫃買指數',
+    z: '400.95', y: '406.12', o: '406.45', h: '409.29', l: '399.48',
+    m: '2163390', d: '20260609', ex: 'otc', ch: 'o00.tw',
+  }],
+};
+
 function mockFetch(payload: unknown, ok = true) {
   global.fetch = jest.fn(async () =>
     new Response(JSON.stringify(payload), { status: ok ? 200 : 500 }),
@@ -66,5 +74,19 @@ describe('^TWII 指數今日 bar 來源 — fetchTWIndexQuote', () => {
     mockFetch({}, false);
     const q = await fetchTWIndexQuote('2026-06-09');
     expect(q).toBeNull();
+  });
+
+  test('解析 otc_o00 → 回 ^TWOII 櫃買指數 OHLCV', async () => {
+    mockFetch(O00_OK);
+    const q = await fetchTWIndexQuote('2026-06-09', '^TWOII');
+    expect(q).not.toBeNull();
+    expect(q!.symbol).toBe('^TWOII');
+    expect(q!.name).toBe('櫃買指數');
+    expect(q!.open).toBeCloseTo(406.45, 2);
+    expect(q!.high).toBeCloseTo(409.29, 2);
+    expect(q!.low).toBeCloseTo(399.48, 2);
+    expect(q!.close).toBeCloseTo(400.95, 2);
+    expect(q!.volume).toBe(2163390);
+    expect((global.fetch as jest.Mock).mock.calls[0][0]).toContain('otc_o00.tw');
   });
 });
