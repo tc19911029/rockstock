@@ -16,7 +16,7 @@ export interface CnMediaSource {
   source_tier: 'official_media' | 'creator';
   /** 創作者帳號可能混合其他題材，只收錄標題含任一關鍵字的內容。 */
   include_title_keywords?: string[];
-  /** B站手機搜尋使用的穩定關鍵字；搜尋後仍會核對作者 ID。 */
+  /** B站手機搜尋使用的穩定關鍵字；可含 {year}，搜尋後仍會核對作者 ID。 */
   search_query?: string;
   /** 搜尋結果頁數，預設 3 頁。 */
   search_pages?: number;

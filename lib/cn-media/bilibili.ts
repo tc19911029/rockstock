@@ -89,8 +89,8 @@ async function apiJson<T>(url: string): Promise<T> {
   return body.data;
 }
 
-async function searchItems(source: CnMediaSource): Promise<BilibiliSearchItem[]> {
-  const query = source.search_query ?? source.display_name;
+async function searchItems(source: CnMediaSource, targetDate: string): Promise<BilibiliSearchItem[]> {
+  const query = (source.search_query ?? source.display_name).replace('{year}', targetDate.slice(0, 4));
   const pages = source.search_pages ?? 3;
   const all: BilibiliSearchItem[] = [];
   const errors: string[] = [];
@@ -127,7 +127,7 @@ async function audioUrl(view: BilibiliViewData): Promise<string | null> {
 }
 
 export async function fetchBilibiliVideos(source: CnMediaSource, targetDate: string): Promise<CnMediaVideo[]> {
-  const items = await searchItems(source);
+  const items = await searchItems(source, targetDate);
   const mid = sourceMid(source);
   const now = new Date().toISOString();
   const videos: CnMediaVideo[] = [];
