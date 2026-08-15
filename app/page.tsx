@@ -56,6 +56,7 @@ import { SectorsPanel } from '@/components/sectors/SectorsPanel';
 import { ETFPanel } from '@/features/etf';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { getABCDisplayStructure } from '@/lib/analysis/abcBreakoutEntry';
+import { shouldFetchExactConcentration } from '@/lib/chips/concentrationFetchPolicy';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { ChevronDown, Search } from 'lucide-react';
@@ -570,15 +571,24 @@ function HomePage() {
   // 主力分點集中度「跟看盤 app 對齊版」（最近數日 5日/20日，HiStock 分點區間彙總算正式公式）。
   // 與 /api/stock/chips 分開 lazy fetch（HiStock 多視窗抓取較慢，不阻塞籌碼面板其餘三表）。
   const [concExact, setConcExact] = useState<Array<{ date: string; c5: number | null; c20: number | null; net: number | null }>>([]);
+  const concentrationBuyMethod = useBacktestStore(s => s.activeBuyMethod);
+  const needsExactConcentration = shouldFetchExactConcentration({
+    sideTab,
+    activeBuyMethod: concentrationBuyMethod,
+    ticker: chipFetchKey,
+  });
   useEffect(() => {
-    if (!chipFetchKey || !/^\d{4,5}(\.(TW|TWO))?$/i.test(chipFetchKey)) { setConcExact([]); return; }
+    if (!needsExactConcentration) {
+      setConcExact([]);
+      return;
+    }
     const ctrl = new AbortController();
     fetch(`/api/stock/concentration?symbol=${encodeURIComponent(chipFetchKey)}&recentN=10`, { signal: ctrl.signal })
       .then(r => r.json())
       .then(json => { if (json.ok) setConcExact(json.conc ?? []); })
       .catch(err => { if (err.name !== 'AbortError') console.warn('[concentration] load failed:', err); });
     return () => ctrl.abort();
-  }, [chipFetchKey]);
+  }, [chipFetchKey, needsExactConcentration]);
 
   // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
   // 陸股走 /cn-sanse、台股走 /tw-sanse（同一份 SanSeChartPayload 形狀）：圖層由各 toggle 控制。
@@ -1199,7 +1209,7 @@ function HomePage() {
         </div>
 
         {/* Middle: Sidebar */}
-        <div className="w-full md:w-64 shrink-0 flex flex-col min-h-0 gap-2">
+        <div className="w-full md:w-64 2xl:w-80 shrink-0 flex flex-col min-h-0 gap-2">
           {/* Mobile: Sheet drawer */}
           <div className="md:hidden">
             <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>

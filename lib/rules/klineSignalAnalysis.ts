@@ -101,6 +101,16 @@ const TRADING_CONFIRMATION = new Set([
   'kline-trading-bull-exit',
 ]);
 
+const BULLISH_TRADING_CONFIRMATION = new Set([
+  'smart-kline-buy',
+  'kline-trading-bull-entry',
+]);
+
+const BEARISH_TRADING_CONFIRMATION = new Set([
+  'smart-kline-sell',
+  'kline-trading-bull-exit',
+]);
+
 const FAMILY_BY_RULE_ID = new Map<string, KLinePatternFamily>([
   ...[...BULLISH_CONTINUATION].map(id => [id, '多方中繼'] as const),
   ...[...BEARISH_CONTINUATION].map(id => [id, '空方中繼'] as const),
@@ -112,8 +122,8 @@ const FAMILY_BY_RULE_ID = new Map<string, KLinePatternFamily>([
 ]);
 
 const FAMILY_INTERPRETATION: Record<KLinePatternFamily, string> = {
-  多方中繼: '多頭趨勢中的整理或換手，結構成立時偏向續攻；仍要確認位置不是高檔末升段。',
-  空方中繼: '空頭趨勢中的反彈或整理，結構成立時偏向續跌；低檔出現時要防止反轉。',
+  多方中繼: '最近數根 K 棒呈現短線回升後的整理或換手；仍須由大結構確認，不等同整體趨勢已翻多。',
+  空方中繼: '最近數根 K 棒呈現短線回落中的反彈或整理；仍須由大結構確認，不等同整體趨勢已翻空。',
   低檔反轉: '原本的下跌力道正在減弱，多方嘗試接手；位置、量能與後續過高決定是否完成反轉。',
   高檔反轉: '原本的上漲力道正在減弱，空方開始取得主控；後續破低會提高轉折向下的可信度。',
   缺口型態: '缺口代表供需突然失衡；方向與強弱要看缺口是否守住、回補，以及所在趨勢位置。',
@@ -128,6 +138,10 @@ export function isKLineSignal(signal: RuleSignal): boolean {
 function directionFor(family: KLinePatternFamily, signal: RuleSignal): KLinePatternDirection {
   if (family === '多方中繼' || family === '低檔反轉') return 'bullish';
   if (family === '空方中繼' || family === '高檔反轉') return 'bearish';
+  // WATCH 代表尚待確認，不代表方向中性；買進／賣出規則的意圖仍須保留，
+  // 否則風險優先畫面會把「智慧K線買進」誤列為中性背景。
+  if (BULLISH_TRADING_CONFIRMATION.has(signal.ruleId)) return 'bullish';
+  if (BEARISH_TRADING_CONFIRMATION.has(signal.ruleId)) return 'bearish';
   if (signal.type === 'BUY' || signal.type === 'ADD') return 'bullish';
   if (signal.type === 'SELL' || signal.type === 'REDUCE') return 'bearish';
   return 'neutral';

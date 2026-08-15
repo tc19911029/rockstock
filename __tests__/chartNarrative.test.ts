@@ -152,6 +152,30 @@ describe('走圖敘事建構器', () => {
     expect(result.evidenceLevel).toBe('medium');
   });
 
+  test('同日同方向的多個 K 線名稱只形成一個獨立證據群', () => {
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [
+        signal({ type: 'BUY', ruleId: 'kline-one-star-two-yang', label: '一星二陽續漲' }),
+        signal({ type: 'BUY', ruleId: 'kline-rising-three-methods', label: '上升三法續漲' }),
+        signal({ type: 'BUY', ruleId: 'kline-red-black-red', label: '紅黑紅中繼' }),
+      ],
+      hasPosition: true,
+      prohibitions: ['戒律8：空頭趨勢下紅K反彈，勿進場做多'],
+      operatingMA: 'MA5',
+    });
+
+    const bullishKlineGroup = result.evidenceGroups.find(group => group.key.includes('kline:') && group.direction === 'bullish');
+    expect(result.action).toBe('reduce');
+    expect(bullishKlineGroup).toMatchObject({
+      disposition: 'conflicting',
+      eventCount: 3,
+      label: '多方 K 線型態',
+    });
+    expect(result.evidenceGroups.filter(group => group.category === 'kline')).toHaveLength(1);
+  });
+
   test('持股續抱時以趨勢與操作均線為主依據，不借用買進型態的確認條件', () => {
     const result = buildChartNarrative({
       candles,
@@ -171,6 +195,44 @@ describe('走圖敘事建構器', () => {
     expect(result.primaryEvent.category).toBe('trend');
     expect(result.confirmation).toContain('MA20');
     expect(result.confirmation).not.toContain('突破高點');
+  });
+
+  test('戒律與軟出場同時存在時，優先採用可執行的減碼訊號', () => {
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [signal({
+        type: 'REDUCE',
+        subtype: 'exit_soft',
+        ruleId: 'soft-ma-break',
+        label: '短均線轉弱',
+      })],
+      hasPosition: true,
+      prohibitions: ['戒律8：空頭反彈風險'],
+      operatingMA: 'MA20',
+    });
+
+    expect(result.action).toBe('reduce');
+    expect(result.headline).toContain('評估減碼');
+    expect(result.actionLabel).toBe('減碼防守');
+    expect(result.primaryEvent.label).toBe('短均線轉弱');
+    expect(result.primaryEvent.category).toBe('exit');
+  });
+
+  test('只有持股戒律時不會誤寫成已出現軟出場訊號', () => {
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [],
+      hasPosition: true,
+      prohibitions: ['戒律8：空頭反彈風險'],
+      operatingMA: 'MA5',
+    });
+    expect(result.action).toBe('reduce');
+    expect(result.actionLabel).toBe('續抱警戒');
+    expect(result.headline).toContain('先保護部位');
+    expect(result.headline).not.toContain('評估減碼');
+    expect(result.primaryEvent.category).toBe('risk');
   });
 
   test('硬出場的重判條件不會被另一條進場戒律取代', () => {
@@ -223,6 +285,8 @@ describe('走圖敘事建構器', () => {
 
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.events)).toBe(true);
+    expect(Object.isFrozen(result.evidenceGroups)).toBe(true);
+    expect(Object.isFrozen(result.evidenceGroups[0])).toBe(true);
     expect(Object.isFrozen(result.primaryEvent)).toBe(true);
     expect(Object.isFrozen(result.primaryEvent.sourceRuleIds)).toBe(true);
   });

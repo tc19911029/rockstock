@@ -8,6 +8,7 @@ export type NarrativeDirection = 'bullish' | 'bearish' | 'neutral';
 export type NarrativeAction = 'exit' | 'reduce' | 'evaluate-entry' | 'hold' | 'wait' | 'avoid-entry';
 export type NarrativeTone = 'bullish' | 'bearish' | 'warning' | 'neutral';
 export type NarrativeEvidenceLevel = 'high' | 'medium' | 'low';
+export type NarrativeEvidenceDisposition = 'adopted' | 'conflicting' | 'background';
 
 export interface NarrativeClassifiedSignal {
   readonly sig: RuleSignal;
@@ -37,6 +38,21 @@ export interface ChartNarrativeEvent {
   readonly priority: number;
 }
 
+/**
+ * 同一根／同一方向 K 棒可能同時命中多個命名規則；群組用來避免把高度同源的
+ * 訊號誤算成多份獨立證據。eventLabels 仍保留可追溯性，但決策強度以群組計算。
+ */
+export interface NarrativeEvidenceGroup {
+  readonly key: string;
+  readonly disposition: NarrativeEvidenceDisposition;
+  readonly category: NarrativeEventCategory;
+  readonly direction: NarrativeDirection;
+  readonly label: string;
+  readonly eventCount: number;
+  readonly eventLabels: readonly string[];
+  readonly priority: number;
+}
+
 export interface ChartNarrative {
   readonly phase: string;
   readonly trendState: TrendState | '資料不足';
@@ -51,6 +67,7 @@ export interface ChartNarrative {
   readonly primaryEvent: ChartNarrativeEvent;
   readonly secondaryEvents: readonly ChartNarrativeEvent[];
   readonly events: readonly ChartNarrativeEvent[];
+  readonly evidenceGroups: readonly NarrativeEvidenceGroup[];
   readonly blockers: readonly string[];
   readonly evidenceLevel: NarrativeEvidenceLevel;
 }

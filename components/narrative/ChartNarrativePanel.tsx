@@ -1,4 +1,5 @@
 import type { ChartNarrative } from '@/lib/narrative/types';
+import type { SignalPanelActionPlan } from '@/lib/portfolio/signalPanelPlan';
 
 const TONE_STYLE: Record<ChartNarrative['tone'], {
   border: string;
@@ -27,41 +28,36 @@ const TONE_STYLE: Record<ChartNarrative['tone'], {
   },
 };
 
-const EVIDENCE_LABEL: Record<ChartNarrative['evidenceLevel'], string> = {
-  high: '多面向',
-  medium: '雙面向',
-  low: '單一面向',
+const ACTION_PLAN_STYLE: Record<SignalPanelActionPlan['tone'], string> = {
+  danger: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-100',
+  warning: 'border-amber-500/35 bg-amber-500/10 text-amber-100',
+  positive: 'border-rose-500/35 bg-rose-500/10 text-rose-100',
+  neutral: 'border-sky-500/30 bg-sky-500/10 text-sky-100',
 };
 
-const CONFIRMATION_LABEL: Record<ChartNarrative['action'], string> = {
-  exit: '現在處理',
-  reduce: '持續追蹤',
-  'evaluate-entry': '進場前確認',
-  hold: '續抱條件',
-  wait: '等待確認',
-  'avoid-entry': '目前處理',
+const DISPOSITION_LABEL: Record<ChartNarrative['evidenceGroups'][number]['disposition'], string> = {
+  adopted: '採納',
+  conflicting: '衝突未採納',
+  background: '背景',
 };
 
-const CATEGORY_LABEL: Record<ChartNarrative['events'][number]['category'], string> = {
-  risk: '風險',
-  exit: '出場',
-  entry: '進場',
-  kline: 'K線',
-  trend: '趨勢',
-  watch: '觀察',
+const DISPOSITION_STYLE: Record<ChartNarrative['evidenceGroups'][number]['disposition'], string> = {
+  adopted: 'text-sky-200',
+  conflicting: 'text-amber-200',
+  background: 'text-muted-foreground/75',
 };
 
-export default function ChartNarrativePanel({ narrative }: { narrative: ChartNarrative }) {
+export default function ChartNarrativePanel({
+  narrative,
+  actionPlan,
+}: {
+  narrative: ChartNarrative;
+  actionPlan: SignalPanelActionPlan;
+}) {
   const style = TONE_STYLE[narrative.tone];
-  const visibleEvents = [narrative.primaryEvent, ...narrative.secondaryEvents];
-  const categoryCounts = narrative.events.reduce<Partial<Record<keyof typeof CATEGORY_LABEL, number>>>((counts, event) => {
-    counts[event.category] = (counts[event.category] ?? 0) + 1;
-    return counts;
-  }, {});
-  const categorySummary = (Object.keys(CATEGORY_LABEL) as Array<keyof typeof CATEGORY_LABEL>)
-    .filter(category => (categoryCounts[category] ?? 0) > 0)
-    .map(category => `${CATEGORY_LABEL[category]} ${categoryCounts[category]}`)
-    .join(' · ');
+  const adoptedCount = narrative.evidenceGroups.filter(group => group.disposition === 'adopted').length;
+  const conflictingCount = narrative.evidenceGroups.filter(group => group.disposition === 'conflicting').length;
+  const backgroundCount = narrative.evidenceGroups.filter(group => group.disposition === 'background').length;
 
   return (
     <section
@@ -70,56 +66,61 @@ export default function ChartNarrativePanel({ narrative }: { narrative: ChartNar
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-xs font-semibold text-foreground/90">走圖解說</span>
-        <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[10px] font-medium text-foreground/70">
-          {narrative.phase}
+        <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[11px] font-medium text-foreground/75">
+          大結構：{narrative.phase}
         </span>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${style.badge}`}>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${style.badge}`}>
           {narrative.actionLabel}
         </span>
       </div>
 
-      <h2 className={`mt-2 text-sm font-bold leading-snug ${style.headline}`}>
+      <h2 className={`mt-2 text-base font-bold leading-snug ${style.headline}`}>
         {narrative.headline}
       </h2>
-      <p className="mt-1 text-[11px] leading-relaxed text-foreground/75">
+      <p className="mt-1 text-xs leading-relaxed text-foreground/80">
         {narrative.summary}
       </p>
 
-      <dl className="mt-2 grid gap-1.5 text-[11px] leading-relaxed">
-        <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 rounded-lg bg-background/25 px-2.5 py-2">
-          <dt className="font-semibold text-sky-200">{CONFIRMATION_LABEL[narrative.action]}</dt>
-          <dd className="text-foreground/75">{narrative.confirmation}</dd>
-        </div>
-        <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 rounded-lg bg-background/25 px-2.5 py-2">
-          <dt className="font-semibold text-amber-200">重判條件</dt>
-          <dd className="text-foreground/75">{narrative.invalidation}</dd>
+      <div className={`mt-2 rounded-lg border px-3 py-2.5 ${ACTION_PLAN_STYLE[actionPlan.tone]}`}>
+        <p className="text-sm font-bold">{actionPlan.label}</p>
+        <p className="mt-1 text-xs leading-relaxed text-foreground/85">{actionPlan.detail}</p>
+      </div>
+
+      <dl className="mt-2 text-xs leading-relaxed">
+        <div className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-2 rounded-lg bg-background/25 px-2.5 py-2">
+          <dt className="font-semibold text-amber-200">重新判讀</dt>
+          <dd className="text-foreground/80">{narrative.invalidation}</dd>
         </div>
       </dl>
 
       <details className="group mt-2 border-t border-border/35 pt-1.5">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-1 text-[11px] font-semibold text-foreground/70 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-sky-400/70 [&::-webkit-details-marker]:hidden">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-1 text-xs font-semibold text-foreground/75 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-sky-400/70 [&::-webkit-details-marker]:hidden">
           <span aria-hidden="true" className="text-muted-foreground transition-transform group-open:rotate-90">›</span>
           判讀依據
-          <span className="font-normal text-muted-foreground/70">
-            {EVIDENCE_LABEL[narrative.evidenceLevel]} · {narrative.events.length} 項依據
+          <span className="font-normal text-muted-foreground/75">
+            採納 {adoptedCount} 組
+            {conflictingCount > 0 ? ` · 衝突 ${conflictingCount} 組` : ''}
+            {backgroundCount > 0 ? ` · 背景 ${backgroundCount} 組` : ''}
           </span>
         </summary>
-        <ul className="space-y-1.5 pb-1 pl-4 text-[11px] leading-relaxed text-foreground/70">
-          <li className="text-muted-foreground/60">{categorySummary}</li>
-          {visibleEvents.map(event => (
-            <li key={event.id}>
-              <span className="font-semibold text-foreground/80">{event.label}</span>
-              <span className="text-muted-foreground/65"> · {event.sourceFamily}</span>
+        <ul className="space-y-2 pb-1 pl-4 text-xs leading-relaxed text-foreground/75">
+          {narrative.evidenceGroups.map(group => (
+            <li key={group.key}>
+              <span className={`font-semibold ${DISPOSITION_STYLE[group.disposition]}`}>
+                {DISPOSITION_LABEL[group.disposition]}
+              </span>
+              <span className="text-foreground/85"> · {group.label}</span>
+              {group.eventCount > 1 && (
+                <span className="text-muted-foreground/75"> · {group.eventCount} 個同源命中</span>
+              )}
+              {(group.eventCount > 1 || group.eventLabels[0] !== group.label) && (
+                <p className="mt-0.5 text-[11px] text-muted-foreground/75">
+                  {group.eventLabels.slice(0, 3).join('、')}
+                  {group.eventCount > 3 ? `，另 ${group.eventCount - 3} 個` : ''}
+                </p>
+              )}
             </li>
           ))}
-          {narrative.blockers.slice(1, 3).map(blocker => (
-            <li key={blocker} className="text-amber-200/80">{blocker}</li>
-          ))}
-          {narrative.events.length > visibleEvents.length && (
-            <li className="text-muted-foreground/60">
-              另有 {narrative.events.length - visibleEvents.length} 項較低優先依據
-            </li>
-          )}
         </ul>
       </details>
     </section>

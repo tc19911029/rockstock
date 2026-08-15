@@ -28,7 +28,9 @@ import { calcKLineStopLoss } from '@/lib/sell/v12StopLoss';
 import { computePartialExitState, type PartialExitState } from '@/lib/sell/v12PartialExit';
 import { sopFor } from '@/lib/portfolio/letterSOP';
 import {
+  resolvePartialExitDisplay,
   resolveHoldingProfitTarget,
+  resolveSignalPanelActionPlan,
   resolveSignalPanelOperatingMA,
 } from '@/lib/portfolio/signalPanelPlan';
 import { getTickSize } from '@/lib/utils/tickSize';
@@ -365,6 +367,18 @@ export default function SignalSummaryCard() {
       : [],
     operatingMA,
   });
+  const operatingMAValue = operatingMA
+    ? (candle as unknown as Record<string, number | undefined>)[operatingMA.toLowerCase()]
+    : undefined;
+  const actionPlan = resolveSignalPanelActionPlan({
+    action: chartNarrative.action,
+    primaryCategory: chartNarrative.primaryEvent.category,
+    hasPosition,
+    close: candle.close,
+    operatingMA,
+    operatingMAValue,
+    confirmation: chartNarrative.confirmation,
+  });
   // ── 停損 / 停利 ─────────────────────────────────────────────────────────
   // 持股中 vs 未持倉 兩條計算徹底分流，不再共用 entryPrice
   const currentPatternTarget = primaryV12?.patternTargetPrice;
@@ -420,7 +434,7 @@ export default function SignalSummaryCard() {
 
           {/* ── 0. 策略視角（跟著右側掃描面板選的策略換）──────────────── */}
           <div
-            className="flex items-center gap-2 text-[11px]"
+            className="flex items-center gap-2 text-xs"
             title={strategyContextTitle}
           >
             <span className="px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-200 font-semibold shrink-0">策略</span>
@@ -472,40 +486,41 @@ export default function SignalSummaryCard() {
           </div>
 
 
-          <ChartNarrativePanel narrative={chartNarrative} />
+          <ChartNarrativePanel narrative={chartNarrative} actionPlan={actionPlan} />
 
           {/* ── 3. 交易框架 + 風向 ──
                 持股中 → 持倉診斷（動態停損 + 10% 紀律停利）
                 未持倉 → 試算收進摺疊，避免「暫不進場」下方立刻叫人進場 */}
-          <div className="border-t border-border/40 pt-2 space-y-2">
-            {hasPosition ? (
-              <>
-                <HoldingDiscipline
-                  candle={candle}
-                  operatingMA={operatingMA}
-                  profitLine={profitLine}
-                  profitLineReached={profitLineReached}
-                  profitLineSource={profitLineSource}
-                />
-                {partialExitState && <PartialExitMini state={partialExitState} />}
-              </>
-            ) : (
-              <SignalDisclosure
-                title="交易計畫"
-                meta={chartNarrative.action === 'evaluate-entry' ? '進場條件成立' : '條件成立後試算'}
-              >
-                <EntryProjection
-                  projEntry={projEntry}
-                  projStopLoss={projStopLoss}
-                  projSlPct={projSlPct}
-                  projProfit={projProfit}
-                  projPtPct={projPtPct}
-                  projProfitSource={projProfitSource}
-                />
-              </SignalDisclosure>
-            )}
-
-          </div>
+          {!(hasPosition && chartNarrative.action === 'exit') && (
+            <div className="border-t border-border/40 pt-2 space-y-2">
+              {hasPosition ? (
+                <>
+                  <HoldingDiscipline
+                    candle={candle}
+                    operatingMA={operatingMA}
+                    profitLine={profitLine}
+                    profitLineReached={profitLineReached}
+                    profitLineSource={profitLineSource}
+                  />
+                  {partialExitState && <PartialExitMini state={partialExitState} />}
+                </>
+              ) : (
+                <SignalDisclosure
+                  title="交易計畫"
+                  meta={chartNarrative.action === 'evaluate-entry' ? '進場條件成立' : '條件成立後試算'}
+                >
+                  <EntryProjection
+                    projEntry={projEntry}
+                    projStopLoss={projStopLoss}
+                    projSlPct={projSlPct}
+                    projProfit={projProfit}
+                    projPtPct={projPtPct}
+                    projProfitSource={projProfitSource}
+                  />
+                </SignalDisclosure>
+              )}
+            </div>
+          )}
 
           <SignalDisclosure title="均線扣抵預測" meta="MA5 · 10 · 20 · 60">
             <MaDeductionForecast candles={allCandles} index={currentIndex} embedded />
@@ -522,11 +537,15 @@ export default function SignalSummaryCard() {
           >
             <div className="space-y-3">
               {klineConflict && (
-                <p className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-100/90">
+                <p className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-xs leading-relaxed text-amber-100/90">
                   {klineConflict}
                 </p>
               )}
-              <KLineSignalAnalysisPanel analyses={klineAnalyses} showHeader={false} />
+              <KLineSignalAnalysisPanel
+                analyses={klineAnalyses}
+                showHeader={false}
+                context={{ action: chartNarrative.action }}
+              />
               <WinnerPatternDetails
                 bullishPatterns={bullishWinnerPatterns}
                 bearishPatterns={bearishWinnerPatterns}
@@ -833,12 +852,18 @@ function PartialExitMini({ state }: { state: PartialExitState }) {
   const prevUnits = ladder.length >= 2 ? ladder[ladder.length - 2].unitsHeld : totalUnits;
   const deltaUnits = Math.abs(unitsHeld - prevUnits);
   const actionText = ended
-    ? `分批法已於 ${endEvent?.date ?? '—'} 建議全出（${endWhy}）— 之後續抱是你的選擇`
+    ? '模型已結束'
     : todayAction === 'sell-third' ? `跌破均線 → 賣 ${deltaUnits}/${totalUnits}（剩 ${unitsHeld}/${totalUnits}）`
     : todayAction === 'buy-third' ? `站回均線 → 買回 ${deltaUnits}/${totalUnits}（持有 ${unitsHeld}/${totalUnits}）`
     : todayAction === 'flat' ? '已空手'
     : `續抱 ${unitsHeld}/${totalUnits}`;
-  const tone = ended && endReason !== 'full-take-profit' ? 'text-rose-300'
+  const display = resolvePartialExitDisplay({
+    ended,
+    endDate: endEvent?.date,
+    endWhy,
+    currentAction: actionText,
+  });
+  const tone = display.historical ? 'text-amber-200'
     : todayAction === 'sell-third' ? 'text-amber-300'
     : todayAction === 'buy-third' ? 'text-emerald-300'
     : 'text-muted-foreground';
@@ -848,14 +873,16 @@ function PartialExitMini({ state }: { state: PartialExitState }) {
         <span
           className="text-[11px] font-bold text-sky-300"
           title="課程 CH8-5 三條均線分批法（選用）：部位拆 3 份，收盤跌破 MA5/10/20 各賣 1/3、站回各買回 1/3。回測顯示這是「少賠/控回撤」工具，不是賺最多的工具，僅供參考，不取代上面的動態停損。"
-        >分批出場 · 賠少模式</span>
+        >{display.title}</span>
         <span className="flex gap-0.5" title={`目前應持有 ${unitsHeld}/${totalUnits} 份`}>
           {Array.from({ length: totalUnits }).map((_, i) => (
             <span key={i} className={`inline-block w-2.5 h-2.5 rounded-sm ${i < unitsHeld ? 'bg-sky-400' : 'bg-foreground/15'}`} />
           ))}
         </span>
       </div>
-      <p className={tone}>今天：{actionText}</p>
+      <p className={tone}>
+        <span className="font-semibold">{display.prefix}：</span>{display.text}
+      </p>
     </div>
   );
 }

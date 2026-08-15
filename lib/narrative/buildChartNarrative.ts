@@ -6,6 +6,7 @@ import {
 } from '@/lib/rules/klineSignalAnalysis';
 import { classifySignal, type SignalSubtype } from '@/lib/rules/signalClassifier';
 import { pickHoldingRiskProhibitions } from '@/lib/rules/prohibitionRelevance';
+import { groupNarrativeEvidence } from './evidenceGroups';
 import type { RuleSignal } from '@/types';
 import type {
   BuildChartNarrativeInput,
@@ -19,7 +20,7 @@ import type {
 
 const ACTION_LABEL: Record<NarrativeAction, string> = {
   exit: '優先出場',
-  reduce: '保護部位',
+  reduce: '續抱警戒',
   'evaluate-entry': '評估進場',
   hold: '續抱觀察',
   wait: '等待確認',
@@ -143,13 +144,17 @@ function resolveAction(
   blockers: readonly string[],
 ): { action: NarrativeAction; tone: NarrativeTone; headline: string } {
   const hasHardExit = events.some(event => event.action === 'exit' && event.state === 'confirmed');
-  const hasSoftExit = events.some(event => event.action === 'reduce' && event.state === 'confirmed');
+  const hasSoftExit = events.some(event => (
+    event.action === 'reduce'
+    && event.category !== 'risk'
+    && event.state === 'confirmed'
+  ));
   const hasStrongEntry = events.some(event => event.action === 'evaluate-entry' && event.state === 'confirmed');
 
   if (hasPosition) {
     if (hasHardExit) return { action: 'exit', tone: 'bearish', headline: '硬出場訊號成立，先處理風險' };
-    if (blockers.length > 0) return { action: 'reduce', tone: 'warning', headline: '持股結構轉弱，先保護部位' };
     if (hasSoftExit) return { action: 'reduce', tone: 'warning', headline: '轉弱訊號出現，評估減碼並守停損' };
+    if (blockers.length > 0) return { action: 'reduce', tone: 'warning', headline: '持股結構轉弱，先保護部位' };
     return { action: 'hold', tone: 'bullish', headline: '尚無出場條件，依操作均線續抱' };
   }
 
@@ -295,21 +300,30 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
   ]));
   const decision = resolveAction(input.hasPosition, allEvents, relevantBlockers);
   // 主要依據必須和最終動作同一方向；避免「續抱」卻拿買進型態的確認條件當主文。
-  const primaryEvent = allEvents.find(event => isDecisionEvidence(event, decision.action)) ?? allEvents[0];
+  const decisionCandidates = allEvents.filter(event => isDecisionEvidence(event, decision.action));
+  const primaryEvent = decision.action === 'reduce'
+    ? decisionCandidates.find(event => event.action === 'reduce' && event.category !== 'risk')
+      ?? decisionCandidates[0]
+      ?? allEvents[0]
+    : decisionCandidates[0] ?? allEvents[0];
   const secondaryEvents = Object.freeze(allEvents.filter(event => event !== primaryEvent).slice(0, 3));
-  const evidenceFamilies = new Set(allEvents.map(event => event.sourceFamily));
-  const evidenceLevel = evidenceFamilies.size >= 3 ? 'high' : evidenceFamilies.size === 2 ? 'medium' : 'low';
+  const evidenceGroups = Object.freeze(groupNarrativeEvidence(allEvents, decision.action));
+  const nonConflictingGroupCount = evidenceGroups.filter(group => group.disposition !== 'conflicting').length;
+  const evidenceLevel = nonConflictingGroupCount >= 3 ? 'high' : nonConflictingGroupCount === 2 ? 'medium' : 'low';
   const confirmation = primaryEvent.confirmation
     ?? fallbackConfirmation(decision.action, input.operatingMA, relevantBlockers);
   const invalidation = primaryEvent.invalidation ?? fallbackInvalidation(decision.action, relevantBlockers, input.operatingMA);
   const blockers = Object.freeze([...relevantBlockers]);
+  const actionLabel = decision.action === 'reduce' && primaryEvent.category !== 'risk'
+    ? '減碼防守'
+    : ACTION_LABEL[decision.action];
 
   return Object.freeze({
     phase: `${trendState} · ${trendPosition}`,
     trendState,
     trendPosition,
     action: decision.action,
-    actionLabel: ACTION_LABEL[decision.action],
+    actionLabel,
     tone: decision.tone,
     headline: decision.headline,
     summary: `${primaryEvent.label}：${primaryEvent.description}`,
@@ -318,6 +332,7 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     primaryEvent,
     secondaryEvents,
     events: allEvents,
+    evidenceGroups,
     blockers,
     evidenceLevel,
   });
