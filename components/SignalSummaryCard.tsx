@@ -7,12 +7,11 @@
  *   ConclusionCard / V12SignalAlerts / ProhibitionAlerts / WinnerPatternAlerts / RuleAlerts
  *
  * 結構（由上而下）：
- *   1. 持倉狀態列（強度色條 + 持股中/未持倉 + 現價/成本/PnL）
- *   2. 一句話結論（大字 + 一行根據）
- *   3. 數字行（停損 · 停利 · 操作均線 · 走勢偏向 +/− N）
- *   4. 為什麼？（進場/出場/戒律/V12 字母 命中分組，每條補白話說明）
- *   5. 假設今日進場 Step 3-5（未持倉時）
- *   6. 朱老師深度分析（ChartCoachAdvice，預設摺疊只顯示 verdict）
+ *   1. 策略與持倉狀態
+ *   2. 走圖解說（唯一主結論 + 確認/失效）
+ *   3. 持倉守則或綜合風向
+ *   4. 分層明細（交易計畫 / 均線扣抵 / K 線型態 / 完整訊號）
+ *   5. 朱老師深度分析（預設摺疊）
  *
  * 設計原則（用戶 feedback）：
  *   - feedback_ui_text_concise_over_redundant：最多 3 種語意，不重複
@@ -46,6 +45,7 @@ import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
 import ChartCoachAdvice from './ChartCoachAdvice';
 import KLineSignalAnalysisPanel from './KLineSignalAnalysisPanel';
 import ChartNarrativePanel from './narrative/ChartNarrativePanel';
+import SignalDisclosure from './narrative/SignalDisclosure';
 
 // ── 訊號白話說明對照表 ────────────────────────────────────────────────────────
 //
@@ -137,13 +137,6 @@ interface Verdict {
   label: string;
   basis: string;
 }
-
-const STRENGTH_TEXT: Record<StrengthLevel, string> = {
-  good:    'text-emerald-300',
-  warn:    'text-amber-300',
-  bad:     'text-rose-300',
-  neutral: 'text-foreground/70',
-};
 
 const STRENGTH_BAR: Record<StrengthLevel, string> = {
   good:    'bg-emerald-500',
@@ -440,6 +433,11 @@ export default function SignalSummaryCard() {
   const reversalWatchSig = warnSigs.find(s => /變盤|次日確認|母子|遭遇|止漲|成形/.test(s.label));
 
   const criticalProhibitions = pickCriticalProhibitions(longProhibitions?.reasons ?? []);
+  const reasonDetailCount = (!hasPosition ? v12Hits.length + entryReasonSigs.length : 0)
+    + (hasPosition ? exitReasonSigs.length : 0)
+    + warnReasonSigs.length
+    + (topPatternHit ? 1 : 0)
+    + (hasPosition ? criticalProhibitions.length : 0);
   const chartNarrative = buildChartNarrative({
     candles: allCandles,
     currentIndex,
@@ -578,23 +576,12 @@ export default function SignalSummaryCard() {
           </div>
 
 
-          {/* ── 2. 一句話結論（Heading 級） ───────────────────────────── */}
-          <div>
-            <p className={`text-base font-bold leading-tight ${STRENGTH_TEXT[verdict.level]}`}>
-              {verdict.label}
-            </p>
-            {verdict.basis && (
-              <p className="text-xs text-muted-foreground mt-1 leading-snug">{verdict.basis}</p>
-            )}
-          </div>
-
           <ChartNarrativePanel narrative={chartNarrative} />
 
-          {/* ── 3. 金額區 + 風向 ──
+          {/* ── 3. 交易框架 + 風向 ──
                 持股中 → 持倉診斷（動態停損 + 10% 紀律停利）
-                未持倉 → 若今日進場（試算進場/停損/停利）
-                兩種模式互斥，避免持股者誤以為叫他加碼 */}
-          <div className="border-t border-border/40 pt-2 space-y-3">
+                未持倉 → 試算收進摺疊，避免「暫不進場」下方立刻叫人進場 */}
+          <div className="border-t border-border/40 pt-2 space-y-2">
             {hasPosition ? (
               <>
                 <HoldingDiscipline
@@ -607,14 +594,19 @@ export default function SignalSummaryCard() {
                 {partialExitState && <PartialExitMini state={partialExitState} />}
               </>
             ) : (
-              <EntryProjection
-                projEntry={projEntry}
-                projStopLoss={projStopLoss}
-                projSlPct={projSlPct}
-                projProfit={projProfit}
-                projPtPct={projPtPct}
-                projProfitSource={projProfitSource}
-              />
+              <SignalDisclosure
+                title="交易計畫"
+                meta={chartNarrative.action === 'evaluate-entry' ? '進場條件成立' : '條件成立後試算'}
+              >
+                <EntryProjection
+                  projEntry={projEntry}
+                  projStopLoss={projStopLoss}
+                  projSlPct={projSlPct}
+                  projProfit={projProfit}
+                  projPtPct={projPtPct}
+                  projProfitSource={projProfitSource}
+                />
+              </SignalDisclosure>
             )}
 
             {/* 風向（走勢偏向）— 主訊息一行、明細獨立下一行 */}
@@ -630,27 +622,39 @@ export default function SignalSummaryCard() {
               )}
             </div>
 
-            {/* 移動扣抵預測（W3c · 純顯示）— 用既有收盤序列推「均線下一步」，不發進出場訊號 */}
-            <MaDeductionForecast candles={allCandles} index={currentIndex} />
           </div>
 
-          <KLineSignalAnalysisPanel analyses={klineAnalyses} />
+          <SignalDisclosure title="均線扣抵預測" meta="MA5 · 10 · 20 · 60">
+            <MaDeductionForecast candles={allCandles} index={currentIndex} embedded />
+          </SignalDisclosure>
+
+          {klineAnalyses.length > 0 && (
+            <SignalDisclosure
+              title="K 線型態"
+              meta={`${klineAnalyses.length} 組 · ${klineAnalyses[0].signal.label}`}
+            >
+              <KLineSignalAnalysisPanel analyses={klineAnalyses} showHeader={false} />
+            </SignalDisclosure>
+          )}
 
           {/* ── 4. 為什麼？分組 ───────────────────────────── */}
           {/* topPatternHit 不論持倉都傳，跟 verdict 邏輯對稱（持股=該出場、未持倉=不要進場）
               hasPosition 決定要不要顯示「進場依據」（持股中隱藏，避免暗示加碼）*/}
-          <Reasons
-            hasPosition={hasPosition}
-            v12Hits={v12Hits}
-            topPatternHit={topPatternHit}
-            entrySigs={entryReasonSigs}
-            exitSigs={exitReasonSigs}
-            warnSigs={warnReasonSigs}
-            prohibitions={longProhibitions?.reasons ?? []}
-            criticalProhibitions={criticalProhibitions}
-            todayClose={candle.close}
-            showEmpty={klineAnalyses.length === 0}
-          />
+          {reasonDetailCount > 0 && (
+            <SignalDisclosure title="完整訊號明細" meta={`${reasonDetailCount} 項`}>
+              <Reasons
+                hasPosition={hasPosition}
+                v12Hits={v12Hits}
+                topPatternHit={topPatternHit}
+                entrySigs={entryReasonSigs}
+                exitSigs={exitReasonSigs}
+                warnSigs={warnReasonSigs}
+                criticalProhibitions={criticalProhibitions}
+                todayClose={candle.close}
+                embedded
+              />
+            </SignalDisclosure>
+          )}
         </div>
       </div>
 
@@ -682,10 +686,11 @@ const MA_FORECAST_SET: ReadonlyArray<{ n: number; label: string }> = [
 const MA_TURN_LOOKAHEAD = 10;
 
 function MaDeductionForecast({
-  candles, index,
+  candles, index, embedded = false,
 }: {
   candles: CandleWithIndicators[];
   index: number;
+  embedded?: boolean;
 }) {
   const view = useMemo(() => {
     if (!candles.length) return null;
@@ -722,14 +727,16 @@ function MaDeductionForecast({
   if (!view) return null;
 
   return (
-    <div className="pt-2 border-t border-border/20 space-y-1">
-      <p className="text-[11px] leading-relaxed">
-        <span
-          className="text-muted-foreground"
-          title="移動扣抵：N 日均線下一根會丟掉 N 天前的收盤（扣抵值）、補進今收。今收 > 扣抵值 → 均線往上；今收 < 扣抵值 → 往下。純預測提示、不發進出場訊號，未來假設價停在今收、越往後越粗估。"
-        >均線預測</span>
-        <span className="ml-2 text-muted-foreground/60">扣抵推估</span>
-      </p>
+    <div className={embedded ? 'space-y-1' : 'pt-2 border-t border-border/20 space-y-1'}>
+      {!embedded && (
+        <p className="text-[11px] leading-relaxed">
+          <span
+            className="text-muted-foreground"
+            title="移動扣抵：N 日均線下一根會丟掉 N 天前的收盤（扣抵值）、補進今收。今收 > 扣抵值 → 均線往上；今收 < 扣抵值 → 往下。純預測提示、不發進出場訊號，未來假設價停在今收、越往後越粗估。"
+          >均線預測</span>
+          <span className="ml-2 text-muted-foreground/60">扣抵推估</span>
+        </p>
+      )}
 
       <div className="space-y-0.5">
         {view.rows.map(r => {
@@ -934,7 +941,7 @@ function EntryProjection({
 // ── 子元件：為什麼？分組 ──────────────────────────────────────────────────
 
 function Reasons({
-  hasPosition, v12Hits, topPatternHit, entrySigs, exitSigs, warnSigs, prohibitions, criticalProhibitions, todayClose, showEmpty,
+  hasPosition, v12Hits, topPatternHit, entrySigs, exitSigs, warnSigs, criticalProhibitions, todayClose, embedded = false,
 }: {
   hasPosition: boolean;
   v12Hits: V12Hit[];
@@ -942,10 +949,9 @@ function Reasons({
   entrySigs: RuleSignal[];
   exitSigs: RuleSignal[];
   warnSigs: RuleSignal[];
-  prohibitions: string[];
   criticalProhibitions: string[];
   todayClose: number;
-  showEmpty: boolean;
+  embedded?: boolean;
 }) {
   // 持股中：不顯示「進場依據」（避免暗示加碼）；只顯示出場 + 注意事項 + 結構轉變戒律
   // 未持倉：不顯示「一般出場訊號」（沒倉位談何出場），但頂部型態仍顯示為「不要進場」依據
@@ -955,23 +961,16 @@ function Reasons({
   // 議題 C3：持股中露結構轉變戒律（戒律 6/7/8）— 趨勢已轉，再不謹慎會被套
   const showCriticalProhibitions = hasPosition && criticalProhibitions.length > 0;
 
-  const empty = !showEntry && !showExit && !showWarn && !showCriticalProhibitions && prohibitions.length === 0;
+  const empty = !showEntry && !showExit && !showWarn && !showCriticalProhibitions;
 
-  if (empty) {
-    if (!showEmpty) return null;
-    return (
-      <p className="text-xs text-muted-foreground/70 border-t border-border/40 pt-2">
-        分析 — 今日無觸發訊號
-      </p>
-    );
-  }
+  if (empty) return null;
 
   const hasEntry = showEntry;
   const hasExit = showExit;
 
   return (
-    <div className="border-t border-border/40 pt-2 space-y-2">
-      <p className="text-xs font-semibold text-foreground/80">分析</p>
+    <div className={embedded ? 'space-y-2' : 'border-t border-border/40 pt-2 space-y-2'}>
+      {!embedded && <p className="text-xs font-semibold text-foreground/80">分析</p>}
 
       {/* 進場依據（V12 字母 + 朱家泓書本規則合併）*/}
       {hasEntry && (
@@ -1113,7 +1112,7 @@ function ReasonRow({ signal: s, bgColor }: { signal: RuleSignal; bgColor: string
       )}
       {nextDayHint && (
         <p className="text-[11px] leading-snug mt-1 break-words px-1.5 py-1 rounded bg-amber-900/30 text-amber-200">
-          👀 {nextDayHint}
+          次日：{nextDayHint}
         </p>
       )}
       {operationHint && (

@@ -27,8 +27,10 @@ const DIRECTION_STYLE: Record<KLinePatternDirection, {
 
 export default function KLineSignalAnalysisPanel({
   analyses,
+  showHeader = true,
 }: {
   analyses: KLineSignalAnalysis[];
+  showHeader?: boolean;
 }) {
   const bullishCount = analyses.filter(item => item.direction === 'bullish').length;
   const bearishCount = analyses.filter(item => item.direction === 'bearish').length;
@@ -36,38 +38,41 @@ export default function KLineSignalAnalysisPanel({
 
   return (
     <section
-      aria-labelledby="kline-analysis-title"
-      className="border-t border-border/40 pt-2 space-y-2"
+      aria-label={showHeader ? undefined : 'K 線型態分析明細'}
+      aria-labelledby={showHeader ? 'kline-analysis-title' : undefined}
+      className={showHeader ? 'border-t border-border/40 pt-2 space-y-2' : 'space-y-2'}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 id="kline-analysis-title" className="text-xs font-semibold text-foreground/90">
-            K 線型態分析
-          </h2>
-          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground/70">
-            依趨勢、位置與確認條件解讀，不只看 K 棒外形。
-          </p>
-        </div>
-        {analyses.length > 0 && (
-          <div className="flex flex-wrap gap-1 text-[10px]" aria-label="K 線型態統計">
-            {bullishCount > 0 && (
-              <span className="rounded-full bg-rose-500/15 px-2 py-1 font-semibold text-rose-200">
-                多方 {bullishCount}
-              </span>
-            )}
-            {bearishCount > 0 && (
-              <span className="rounded-full bg-emerald-500/15 px-2 py-1 font-semibold text-emerald-200">
-                空方 {bearishCount}
-              </span>
-            )}
-            {formingCount > 0 && (
-              <span className="rounded-full bg-amber-500/15 px-2 py-1 font-semibold text-amber-200">
-                待確認 {formingCount}
-              </span>
-            )}
+      {showHeader && (
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 id="kline-analysis-title" className="text-xs font-semibold text-foreground/90">
+              K 線型態分析
+            </h2>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground/70">
+              依趨勢、位置與確認條件解讀，不只看 K 棒外形。
+            </p>
           </div>
-        )}
-      </div>
+          {analyses.length > 0 && (
+            <div className="flex flex-wrap gap-1 text-[10px]" aria-label="K 線型態統計">
+              {bullishCount > 0 && (
+                <span className="rounded-full bg-rose-500/15 px-2 py-1 font-semibold text-rose-200">
+                  多方 {bullishCount}
+                </span>
+              )}
+              {bearishCount > 0 && (
+                <span className="rounded-full bg-emerald-500/15 px-2 py-1 font-semibold text-emerald-200">
+                  空方 {bearishCount}
+                </span>
+              )}
+              {formingCount > 0 && (
+                <span className="rounded-full bg-amber-500/15 px-2 py-1 font-semibold text-amber-200">
+                  待確認 {formingCount}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {analyses.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-secondary/15 px-3 py-2.5">
