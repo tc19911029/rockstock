@@ -54,7 +54,11 @@ export async function GET(request: NextRequest) {
     const candidateByKey = new Map<string, { mention: CnMediaMention; date: string; conflicted: boolean }>();
 
     for (const day of daily) {
-      for (const video of day.videos) episodeCounts.set(video.source_id, (episodeCounts.get(video.source_id) ?? 0) + 1);
+      const analyzedVideoIds = new Set(day.analysis?.video_summaries.map(summary => summary.video_id) ?? []);
+      const eligibleVideos = day.analysis
+        ? day.videos.filter(video => analyzedVideoIds.has(video.video_id))
+        : day.videos;
+      for (const video of eligibleVideos) episodeCounts.set(video.source_id, (episodeCounts.get(video.source_id) ?? 0) + 1);
       if (!day.analysis) continue;
       const mentions = [...day.analysis.high_consensus_stocks, ...day.analysis.weak_signal_stocks];
       for (const mention of mentions) {
