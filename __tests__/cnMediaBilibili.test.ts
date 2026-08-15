@@ -73,6 +73,10 @@ describe('B站陸股節目解析', () => {
       'bilibili-xueliang-short-review': '345681438',
       'bilibili-zhujijiaoyiyuan-review': '497120492',
       'bilibili-guwangjinshi168-stock-review': '1252590958',
+      'bilibili-bibabu-review': '3546557003598528',
+      'bilibili-xiaohuoguai-review': '1856426471',
+      'bilibili-yidaizuoshou-deep-review': '3546980290661079',
+      'bilibili-jiucaizhou-review': '554414980',
     };
 
     for (const [sourceId, mid] of Object.entries(expectedMids)) {
