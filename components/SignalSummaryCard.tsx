@@ -42,8 +42,10 @@ import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 import { analyzeKLineSignals, isKLineSignal } from '@/lib/rules/klineSignalAnalysis';
+import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
 import ChartCoachAdvice from './ChartCoachAdvice';
 import KLineSignalAnalysisPanel from './KLineSignalAnalysisPanel';
+import ChartNarrativePanel from './narrative/ChartNarrativePanel';
 
 // ── 訊號白話說明對照表 ────────────────────────────────────────────────────────
 //
@@ -438,6 +440,18 @@ export default function SignalSummaryCard() {
   const reversalWatchSig = warnSigs.find(s => /變盤|次日確認|母子|遭遇|止漲|成形/.test(s.label));
 
   const criticalProhibitions = pickCriticalProhibitions(longProhibitions?.reasons ?? []);
+  const chartNarrative = buildChartNarrative({
+    candles: allCandles,
+    currentIndex,
+    signals: currentSignals,
+    classifiedSignals: classified,
+    hasPosition,
+    prohibitions: longProhibitions?.reasons ?? [],
+    hardRisks: topPatternHit
+      ? [`${getPatternDisplayName(topPatternHit.patternType)}跌破頸線：${topPatternHit.detail}`]
+      : [],
+    operatingMA,
+  });
   const verdict = getVerdict(
     hasPosition,
     subtypes,
@@ -573,6 +587,8 @@ export default function SignalSummaryCard() {
               <p className="text-xs text-muted-foreground mt-1 leading-snug">{verdict.basis}</p>
             )}
           </div>
+
+          <ChartNarrativePanel narrative={chartNarrative} />
 
           {/* ── 3. 金額區 + 風向 ──
                 持股中 → 持倉診斷（動態停損 + 10% 紀律停利）
