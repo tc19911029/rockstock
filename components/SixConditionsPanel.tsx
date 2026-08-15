@@ -14,6 +14,8 @@ import CourseTeachingBlock from './CourseTeachingBlock';
 import { detectShortEntries } from '@/lib/analysis/shortEntries';
 import { CORE_SCORE_MIN, BOOK_VOL_RATIO_MIN, BOOK_BODY_PCT_MIN } from '@/lib/analysis/bookThresholds';
 import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
+import { useBacktestStore } from '@/store/backtestStore';
+import type { ShortSixConditionsResult } from '@/lib/analysis/shortAnalysis';
 
 const HIGH_WIN_POS_NUM: Record<string, string> = {
   '🎯 打底趨勢確認': '①',
@@ -33,6 +35,15 @@ const CONDITION_LABELS = [
   { key: 'volume',    icon: '④', name: '成交量',   tip: `攻擊量 ≥ 前一日 × ${BASE_THRESHOLDS.volumeRatioMin}（課程 1-5「量增 20% 以上」，2 倍更強）`, required: true },
   { key: 'kbar',      icon: '⑤', name: '進場K線', tip: `價漲、量增、紅K實體棒 > ${BOOK_BODY_PCT_MIN}%`, required: true },
   { key: 'indicator', icon: '⑥', name: '指標參考', tip: 'MACD 綠柱縮短或紅柱延長；KD 黃金交叉向上多排', required: false },
+] as const;
+
+const SHORT_CONDITION_LABELS = [
+  { key: 'trend', icon: '①', name: '空頭趨勢', tip: '頭頭低、底底低的空頭架構', required: true },
+  { key: 'ma', icon: '②', name: '均線空排', tip: 'MA5<MA10<MA20，且短均線向下', required: true },
+  { key: 'position', icon: '③', name: '股價位置', tip: '收盤在 MA10、MA20 下方，且不可過度乖離', required: true },
+  { key: 'volume', icon: '④', name: '下跌帶量', tip: '黑 K 且成交量至少為前一日 1.3 倍', required: true },
+  { key: 'kbar', icon: '⑤', name: '進場黑K', tip: '黑 K 實體至少 2%', required: true },
+  { key: 'indicator', icon: '⑥', name: '空方指標', tip: 'MACD 綠柱或 KD 空排／死亡交叉', required: false },
 ] as const;
 
 type ConditionKey = typeof CONDITION_LABELS[number]['key'];
@@ -139,6 +150,8 @@ export default function SixConditionsPanel() {
   const allCandles    = useReplayStore(s => s.allCandles);
   const currentIndex  = useReplayStore(s => s.currentIndex);
   const ticker        = useReplayStore(s => s.currentStock?.ticker);
+  const shortConditions = useReplayStore(s => s.shortConditions);
+  const scanDirection = useBacktestStore(s => s.scanDirection);
   const market        = classifyMarket(ticker ?? '');
   const [expanded, setExpanded] = useState<ConditionKey | null>(null);
 
@@ -147,6 +160,10 @@ export default function SixConditionsPanel() {
     () => detectSellSignals(allCandles, currentIndex),
     [allCandles, currentIndex],
   );
+
+  if (scanDirection === 'short') {
+    return <ShortConditionsView conditions={shortConditions} />;
+  }
 
   if (!sixConditions) {
     return (
@@ -312,9 +329,12 @@ export default function SixConditionsPanel() {
       {/* Sell Signals */}
       {sellSignals.length > 0 && (
         <div className="mt-3 pt-3 border-t border-border">
-          <div className="text-[10px] font-bold text-muted-foreground mb-1.5">⚠ 出場警示</div>
+          <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-muted-foreground mb-1.5">
+            <span>出場警示</span>
+            <span className="font-normal">{sellSignals.length} 項 · 先看最重要 2 項</span>
+          </div>
           <div className="space-y-1">
-            {sellSignals.map(sig => (
+            {sellSignals.slice(0, 2).map(sig => (
               <div key={sig.type} className={`text-[11px] px-2 py-1.5 rounded ${
                 sig.severity === 'high' ? 'bg-red-900/40 text-red-300' :
                 sig.severity === 'medium' ? 'bg-orange-900/40 text-orange-300' :
@@ -327,6 +347,28 @@ export default function SixConditionsPanel() {
                 <div className="text-[10px] opacity-80 leading-relaxed mt-0.5">{sig.detail}</div>
               </div>
             ))}
+            {sellSignals.length > 2 && (
+              <details className="rounded border border-border/50 bg-card/30">
+                <summary className="min-h-11 cursor-pointer px-2 py-2 text-[10px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+                  展開其餘 {sellSignals.length - 2} 項出場警示
+                </summary>
+                <div className="space-y-1 border-t border-border/40 p-1.5">
+                  {sellSignals.slice(2).map(sig => (
+                    <div key={sig.type} className={`text-[11px] px-2 py-1.5 rounded ${
+                      sig.severity === 'high' ? 'bg-red-900/40 text-red-300' :
+                      sig.severity === 'medium' ? 'bg-orange-900/40 text-orange-300' :
+                      'bg-yellow-900/30 text-yellow-400'
+                    }`}>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold">{sig.label}</span>
+                        <HeavinessBadgeFor market={market} signalId={sig.type} className="shrink-0" />
+                      </div>
+                      <div className="text-[10px] opacity-80 leading-relaxed mt-0.5">{sig.detail}</div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         </div>
       )}
@@ -339,6 +381,41 @@ export default function SixConditionsPanel() {
 
       {/* 課程教學卡（2026-07-05 批次A）：五步驟＋口訣／趨勢全景圖／7 進場位置勝率（純教學） */}
       <CourseTeachingBlock candles={allCandles} index={currentIndex} />
+    </div>
+  );
+}
+
+function ShortConditionsView({ conditions }: { conditions: ShortSixConditionsResult | null }) {
+  const [expanded, setExpanded] = useState<ConditionKey | null>(null);
+  if (!conditions) {
+    return <EmptyState variant="compact" icon="📉" title="尚未載入股票" description="選擇股票後查看做空六條件" />;
+  }
+  const sc = conditions;
+  const rows = [sc.trend, sc.ma, sc.position, sc.volume, sc.kbar, sc.indicator];
+  return (
+    <div className="bg-secondary rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2.5 bg-secondary border-b border-border">
+        <span className="text-sm font-semibold text-foreground">做空六大進場條件</span>
+        <span className={`text-base font-bold tabular-nums ${sc.isCoreReady ? 'text-emerald-300' : 'text-amber-300'}`}>{sc.totalScore}/6</span>
+      </div>
+      <div>
+        {rows.map((row, i) => {
+          const label = SHORT_CONDITION_LABELS[i];
+          const key = label.key as ConditionKey;
+          const metric = key === 'volume' && 'ratio' in row && row.ratio != null ? `×${row.ratio}倍` : undefined;
+          return <ConditionRow key={key} label={label} pass={row.pass} detail={row.detail} metric={metric}
+            expanded={expanded === key} onToggle={() => setExpanded(v => v === key ? null : key)} />;
+        })}
+      </div>
+      <div className={`px-3 py-3 border-t border-border ${sc.isCoreReady ? 'bg-emerald-900/30' : 'bg-secondary/60'}`}>
+        <p className={`text-sm font-bold ${sc.isCoreReady ? 'text-emerald-300' : 'text-muted-foreground'}`}>
+          {sc.isCoreReady
+            ? sc.indicator.pass ? '✅ 空方核心 5 條全過，且指標確認' : '✅ 空方核心 5 條全過；指標為加分項'
+            : `🚫 空方核心 ${sc.coreScore}/5，未達進場條件`}
+        </p>
+        <p className="mt-1 text-[10px] text-muted-foreground">實際交易仍須確認借券來源、券量與融券限制。</p>
+      </div>
+      <ProhibitionsBlock direction="short" />
     </div>
   );
 }

@@ -43,12 +43,15 @@ import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
 import { STOP_LOSS_PRICE_MULT, PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/bookThresholds';
 import { deductPrice, daysUntilMaTurn, daysUntilGoldenCross, formatMaTurnLine, MA_PLAIN_LABEL } from '@/lib/analysis/maDeduction';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
+import type { ShortSixConditionsResult } from '@/lib/analysis/shortAnalysis';
+import type { ProhibitionResult } from '@/lib/rules/entryProhibitions';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 import { analyzeKLineSignals, isKLineSignal } from '@/lib/rules/klineSignalAnalysis';
 import { pickHoldingRiskProhibitions } from '@/lib/rules/prohibitionRelevance';
 import type { PatternSignal } from '@/lib/rules/winnerPatternRules';
 import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
+import { DEFAULT_STOP_LOSS_MULT, evaluateHolding } from '@/lib/agents/holdingsActionEngine';
 import type { NarrativeAction } from '@/lib/narrative/types';
 import ChartCoachAdvice from './ChartCoachAdvice';
 import KLineSignalAnalysisPanel from './KLineSignalAnalysisPanel';
@@ -88,52 +91,6 @@ const V12_TRACK_NAMES: Record<EntryLetter, string> = {
   O: '打底完成由空翻多',
   P: '高檔淺回 1-2 天後再上漲',
   Q: '三均線戰法（MA3+10+24）',
-};
-
-const V12_TRACK_BADGE: Record<EntryLetter, string> = {
-  M: 'bg-red-700/70 text-red-100',
-  N: 'bg-blue-700/70 text-blue-100',
-  O: 'bg-blue-700/70 text-blue-100',
-  P: 'bg-red-700/70 text-red-100',
-  Q: 'bg-purple-700/70 text-purple-100',
-};
-
-const TOP_PATTERN_LABEL: Record<TopPatternType, string> = {
-  'head-shoulder-top': '頭肩頂',
-  'triple-top': '三重頂',
-  'double-top': '雙重頂',
-  'complex-head-shoulder-top': '複式頭肩頂',
-  'inverted-n-top': '倒N字頂',
-  'long-double-top': '長雙頭頂',
-  'one-line-top': '一字頂',
-};
-
-/** V12 字母解釋（hover tooltip 顯示）— 用於「操作均線」行的字母 underline */
-const V12_LETTER_DESC: Record<string, string> = {
-  A: 'A 六條件 — 純結構過濾池',
-  B: 'B 回後買上漲 — 多頭回檔站回 MA5',
-  C: 'C 盤整突破',
-  D: 'D 一字底（均線糾結）',
-  E: 'E 跳空缺口進場',
-  F: 'F V 形反轉（變盤線止跌）',
-  G: 'G ABC 突破',
-  H: 'H 過大量黑K高',
-  I: 'I K 線橫盤突破',
-  J: 'J ABC 突破（v12 多頭軌）',
-  K: 'K K 線橫盤突破（v12 多頭軌）',
-  L: 'L 過大量黑K（v12 多頭軌）',
-  M: 'M 突破上升軌道線',
-  N: 'N 型態確認（書本 25 種型態）',
-  O: 'O 打底完成（空頭→多頭）',
-  P: 'P 高檔拉回（淺回 1-2 天）',
-  Q: 'Q 三條均線戰法（MA3+10+24）',
-};
-
-const PATTERN_LABEL: Record<string, string> = {
-  'head-shoulder': '頭肩底', 'complex-head-shoulder': '複式頭肩底',
-  'triple-bottom': '三重底', 'falling-diamond': '跌菱形',
-  'rounding-bottom': '圓弧底', 'descending-wedge': '下降楔形',
-  'double-bottom': '雙重底', 'n-shape': 'N 字底',
 };
 
 // ── 結論計算 ─────────────────────────────────────────────────────────────────
@@ -212,11 +169,12 @@ function klineConflictMessage(
 export default function SignalSummaryCard() {
   const {
     currentSignals, allCandles, currentIndex, currentStock,
-    longProhibitions, winnerPatterns,
+    longProhibitions, shortProhibitions, shortConditions, winnerPatterns,
   } = useReplayStore();
   const { holdings } = usePortfolioStore();
   // 掃描面板選的策略 — 讓訊號卡的操作 SOP（操作均線/停損停利框架）跟著換
   const activeBuyMethod = useBacktestStore(s => s.activeBuyMethod);
+  const scanDirection = useBacktestStore(s => s.scanDirection);
 
   const candle = allCandles[currentIndex];
   const ticker = currentStock?.ticker ?? '';
@@ -232,7 +190,6 @@ export default function SignalSummaryCard() {
 
   useEffect(() => {
     if (!ticker || allCandles.length < 30 || currentIndex < 25) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- 條件不足時 reset signals；非 cascading render
       setV12Hits([]);
       setTopPatternHit(null);
       return;
@@ -350,6 +307,36 @@ export default function SignalSummaryCard() {
   const warnReasonSigs = uniqueRuleSignals(warnSigs.filter(signal => !isKLineSignal(signal)));
 
   const criticalProhibitions = pickHoldingRiskProhibitions(longProhibitions?.reasons ?? []);
+  // 持倉主結論與每日持股風控共用同一套引擎，避免同一檔同時出現「續抱」與「停損」。
+  let formalExitRisk: string | null = null;
+  let formalExitReason: string | null = null;
+  if (heldPosition && allCandles.length > 0) {
+    try {
+      const holdingDecision = evaluateHolding({
+        symbol: ticker,
+        entryPrice: heldPosition.costPrice,
+        stopLoss: heldPosition.stopLoss
+          ?? +(heldPosition.costPrice * DEFAULT_STOP_LOSS_MULT).toFixed(2),
+        candles: allCandles.slice(0, currentIndex + 1),
+        todayClose: candle.close,
+        triggerSignal: heldPosition.triggerSignal,
+        operationMode: heldPosition.operationMode ?? 'short',
+        entryDate: heldPosition.buyDate,
+        positionSide: heldPosition.positionSide ?? 'long',
+        entryHigh: heldPosition.entryKbar?.high,
+        entryKlineLow: heldPosition.entryKbar?.low,
+      });
+      if (['stop_loss', 'exit_all', 'cover_all'].includes(holdingDecision.action)) {
+        const primarySignal = holdingDecision.signals[0];
+        formalExitReason = primarySignal?.label ?? holdingDecision.label;
+        formalExitRisk = primarySignal
+          ? `${formalExitReason}：${primarySignal.detail}`
+          : holdingDecision.label;
+      }
+    } catch (error) {
+      console.error('[SignalSummaryCard] holding action evaluation error', error);
+    }
+  }
   const reasonDetailCount = (!hasPosition ? v12Hits.length + entryReasonSigs.length : 0)
     + (hasPosition ? exitReasonSigs.length : 0)
     + warnReasonSigs.length
@@ -362,9 +349,12 @@ export default function SignalSummaryCard() {
     classifiedSignals: classified,
     hasPosition,
     prohibitions: longProhibitions?.reasons ?? [],
-    hardRisks: topPatternHit
-      ? [`${getPatternDisplayName(topPatternHit.patternType)}跌破頸線：${topPatternHit.detail}`]
-      : [],
+    hardRisks: [
+      ...(formalExitRisk ? [formalExitRisk] : []),
+      ...(topPatternHit
+        ? [`${getPatternDisplayName(topPatternHit.patternType)}跌破頸線：${topPatternHit.detail}`]
+        : []),
+    ],
     operatingMA,
   });
   const operatingMAValue = operatingMA
@@ -378,6 +368,7 @@ export default function SignalSummaryCard() {
     operatingMA,
     operatingMAValue,
     confirmation: chartNarrative.confirmation,
+    decisiveReason: formalExitReason,
   });
   // ── 停損 / 停利 ─────────────────────────────────────────────────────────
   // 持股中 vs 未持倉 兩條計算徹底分流，不再共用 entryPrice
@@ -423,6 +414,17 @@ export default function SignalSummaryCard() {
         partialExitState = computePartialExitState(upto, eIdx, heldPosition.costPrice, 'long');
       }
     }
+  }
+
+  if (scanDirection === 'short') {
+    return (
+      <ShortSignalSummary
+        candle={candle}
+        conditions={shortConditions}
+        prohibitions={shortProhibitions}
+        klineAnalyses={klineAnalyses}
+      />
+    );
   }
 
   return (
@@ -636,6 +638,57 @@ function WinnerPatternDetails({
         </div>
       )}
     </section>
+  );
+}
+
+function ShortSignalSummary({
+  candle,
+  conditions,
+  prohibitions,
+  klineAnalyses,
+}: {
+  candle: CandleWithIndicators;
+  conditions: ShortSixConditionsResult | null;
+  prohibitions: ProhibitionResult | null;
+  klineAnalyses: ReturnType<typeof analyzeKLineSignals>;
+}) {
+  const blocked = prohibitions?.prohibited === true;
+  const ready = conditions?.isCoreReady === true && !blocked;
+  return (
+    <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-hidden">
+      <div className="flex">
+        <div className={`w-1 shrink-0 ${ready ? 'bg-emerald-500' : blocked ? 'bg-rose-500' : 'bg-amber-500'}`} />
+        <div className="flex-1 p-3 space-y-3">
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="px-1.5 py-0.5 rounded bg-emerald-900/50 text-emerald-200 font-semibold">策略</span>
+            <span className="text-foreground/85 font-medium">做空六條件</span>
+            <span className="ml-auto font-mono text-muted-foreground">現價 {candle.close.toFixed(2)}</span>
+          </div>
+          <div>
+            <p className={`text-base font-bold ${ready ? 'text-emerald-300' : blocked ? 'text-rose-300' : 'text-amber-300'}`}>
+              {blocked ? '戒律觸發，不宜放空' : ready ? '空方核心條件成立' : '空方條件不足，先觀望'}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              核心 {conditions?.coreScore ?? 0}/5｜總分 {conditions?.totalScore ?? 0}/6
+            </p>
+          </div>
+          {blocked && (prohibitions?.reasons.length ?? 0) > 0 && (
+            <ul className="space-y-1 text-[11px] text-rose-200/90">
+              {prohibitions?.reasons.slice(0, 5).map((reason) => <li key={reason}>· {reason}</li>)}
+            </ul>
+          )}
+          <KLineSignalAnalysisPanel
+            analyses={klineAnalyses}
+            context={ready
+              ? { preferredDirection: 'bearish' }
+              : { suppressActionable: true }}
+          />
+          <div className="pt-2 border-t border-border/40 text-[10px] text-muted-foreground leading-relaxed">
+            做空結果只使用空方六條件與空方戒律；實際下單前另確認借券來源、券量與融券限制。
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

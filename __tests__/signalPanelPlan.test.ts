@@ -80,4 +80,30 @@ describe('訊號面板持倉計畫', () => {
     expect(result.detail).toBe('先觀察轉弱訊號是否繼續，不預判反轉；不預掛進場單。');
     expect(result.detail).not.toContain('維持空手');
   });
+
+  test('確認文字已有不預掛進場單時不重複附加', () => {
+    const result = resolveSignalPanelActionPlan({
+      action: 'avoid-entry',
+      primaryCategory: 'risk',
+      hasPosition: false,
+      close: 67,
+      confirmation: '下一根只檢查戒律是否仍存在，不預掛進場單。',
+    });
+    expect(result.detail).toBe('下一根只檢查戒律是否仍存在，不預掛進場單。');
+  });
+
+  test('正式風控原因優先於操作均線的通用出場文案', () => {
+    const result = resolveSignalPanelActionPlan({
+      action: 'exit',
+      primaryCategory: 'risk',
+      hasPosition: true,
+      close: 67,
+      operatingMA: 'MA5',
+      operatingMAValue: 72,
+      confirmation: '今日已觸發硬出場。',
+      decisiveReason: '趨勢已翻空頭（提早出場）',
+    });
+    expect(result.detail).toContain('趨勢已翻空頭（提早出場）');
+    expect(result.detail).not.toContain('已觸發 MA5');
+  });
 });

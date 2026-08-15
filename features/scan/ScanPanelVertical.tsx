@@ -132,7 +132,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                   useBacktestStore.getState().loadCronSession(m, bestDate, { scanOnly: true, direction: dir });
                 }
               }}
-                className={`px-2 py-1 text-[11px] font-medium ${market === m ? 'bg-blue-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>
+                className={`min-h-9 px-2 py-1 text-[11px] font-medium ${market === m ? 'bg-blue-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>
                 {m === 'TW' ? '台股' : '陸股'}
               </button>
             ))}
@@ -140,12 +140,12 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
           <div className="flex rounded overflow-hidden border border-border">
             <button onClick={() => { setScanDirection('long'); clearCurrent(); }}
-              className={`px-2 py-1 text-[11px] font-medium ${scanDirection === 'long' ? 'bg-red-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>多</button>
+              className={`min-h-9 px-2 py-1 text-[11px] font-medium ${scanDirection === 'long' ? 'bg-red-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>多</button>
             <button onClick={() => { setScanDirection('short'); clearCurrent(); }}
-              className={`px-2 py-1 text-[11px] font-medium ${scanDirection === 'short' ? 'bg-green-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>空</button>
+              className={`min-h-9 px-2 py-1 text-[11px] font-medium ${scanDirection === 'short' ? 'bg-green-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>空</button>
             {market === 'CN' && (
               <button onClick={() => { setScanDirection('daban'); }}
-                className={`cursor-pointer px-2 py-1 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${scanDirection === 'daban' ? 'bg-amber-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>打板</button>
+                className={`min-h-9 cursor-pointer px-2 py-1 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${scanDirection === 'daban' ? 'bg-amber-600 text-foreground' : 'bg-secondary text-muted-foreground hover:bg-muted'}`}>打板</button>
             )}
           </div>
 
@@ -227,7 +227,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               <button key={method}
                 onClick={() => { setCnSanSeLevel(null); setActiveBuyMethod(method); }}
                 disabled={isLoadingBuyMethod}
-                className={`cursor-pointer px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                className={`min-h-8 cursor-pointer px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                   activeBuyMethod === method && !sanSeMode
                     ? color
                     : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
@@ -301,14 +301,14 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                     ['loose', '三色(寬鬆)', '游資資金翻正：短線動能今天剛由負轉正'],
                     ['reversal', '三色(底反)', '底反該買 = 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉。現行按鈕條件較廣，尚未證明穩定超額，不可直接下單'],
                     // 具名型態策略（從 records 衍生、掃全市場命中；判定 = lib/cn-sanse/namedStrategies）
-                    ['resonance', '三色(全共振⭐)', '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同日（三組齊發）。回測漲幅最大但稀有；台股最強、陸股牛市那段被稀釋'],
+                    ['resonance', '三色(全共振⭐)', '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉同日。條件嚴格且稀有，應獨立看樣本數與市場階段'],
                     ['red_yellow_trigger', '三色(紅+黃+觸發)', '紅(機構) ＋ 黃(控盤) 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）。尚未證明穩定超額，需獨立看樣本與市場階段'],
                     ['red_dualb_gold', '三色(紅+雙B金叉)', '紅(機構)在場 ＋ 主圖黃線穿紅線（雙B黃紅金叉、只認金叉）。訊號較窄不代表勝率較高'],
                     ['red_dualb_any', '三色(紅+雙B金叉/突破)', '🔴紅(機構)在場 ＋（黃紅金叉 或 收盤突破智能交易線）'],
                   ] as const).map(([lv, label, tip]) => (
                     <button key={lv}
                       onClick={() => setCnSanSeLevel(lv)}
-                      className={`cursor-pointer px-2 py-0.5 rounded text-[10px] font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400 ${
+                      className={`min-h-8 cursor-pointer px-2 py-1 rounded text-[10px] font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400 ${
                         cnSanSeLevel === lv
                           ? 'bg-fuchsia-700/70 border-fuchsia-600 text-fuchsia-100'
                           : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
@@ -335,7 +335,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
               <button
                 onClick={() => setActiveBuyMethod('R')}
                 disabled={isLoadingBuyMethod}
-                className={`cursor-pointer px-2 py-0.5 rounded text-[10px] font-medium border transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                className={`min-h-8 cursor-pointer px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   activeBuyMethod === 'R'
                     ? 'bg-cyan-700/70 border-cyan-600 text-cyan-100'
                     : 'bg-secondary border-border text-muted-foreground hover:bg-muted'
@@ -388,6 +388,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                   direction={scanDirection === 'short' ? 'short' : 'long'}
                   marketTrend={String(marketTrend ?? '')}
                   results={scanResults}
+                  buyMethod={activeBuyMethod}
                 />
               </div>
             )}
@@ -415,7 +416,7 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
                       }
                     }}
                     disabled={isBusy || isLoadingCronSession}
-                    className={`text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate ${
+                    className={`min-h-8 text-center px-0.5 py-1 rounded text-[9px] font-mono truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
                       isActive ? 'bg-sky-700 text-sky-100 font-semibold' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
                     } ${isBusy || isLoadingCronSession ? 'opacity-50' : ''}`}
                     title={`${c.date}｜${c.resultCount >= 0 ? c.resultCount + ' 檔' : ''}`}

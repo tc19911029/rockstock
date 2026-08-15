@@ -33,6 +33,8 @@ export interface StorePortfolioHolding {
   market?: MarketId;
   notes?: string;
   triggerSignal?: string;
+  /** 使用者／server 已設定的停損價；缺值才套用成本價 7% 預設。 */
+  stopLoss?: number;
   /** 賠少-1：做空 live 風控。缺省=long；非 core key → 自動進 ui blob、hydration 展回頂層 */
   positionSide?: 'long' | 'short';
   // ... 其他 UI-only 欄位忽略
@@ -96,8 +98,10 @@ export function mapStoreToServerHolding(h: StorePortfolioHolding): MappingResult
       entryDate: h.buyDate,
       entryPrice: h.costPrice,
       shares: h.shares,
-      // 書本 7% 停損預設（與 holdingsImport.applyDefaults 對齊）
-      stopLoss: +(h.costPrice * (1 - STOP_LOSS_DEFAULT_PCT)).toFixed(2),
+      // server 既有停損不可在每次同步時被重設；舊資料缺值才套用書本 7% 預設。
+      stopLoss: Number.isFinite(h.stopLoss) && h.stopLoss! > 0
+        ? h.stopLoss
+        : +(h.costPrice * (1 - STOP_LOSS_DEFAULT_PCT)).toFixed(2),
       // target1/target2/industry UI 端沒存
       notes: h.notes,
     },
@@ -173,7 +177,7 @@ export function toUpsertApiBody(payload: ServerHoldingPayload): Record<string, u
 
 /** store 端核心欄位（其餘一律視為 UI-only，進 ui blob）*/
 const CORE_STORE_KEYS = new Set([
-  'id', 'symbol', 'name', 'shares', 'costPrice', 'buyDate', 'market', 'notes',
+  'id', 'symbol', 'name', 'shares', 'costPrice', 'buyDate', 'market', 'notes', 'stopLoss',
 ]);
 
 type FullStoreHolding = StorePortfolioHolding & Record<string, unknown>;
@@ -220,6 +224,9 @@ export function mapServerToStoreHolding(
     costPrice: Number(s.entryPrice) || 0,
     buyDate: typeof s.entryDate === 'string' ? s.entryDate : '',
     market: (s.market === 'CN' ? 'CN' : 'TW') as MarketId,
+    ...(Number.isFinite(Number(s.stopLoss)) && Number(s.stopLoss) > 0
+      ? { stopLoss: Number(s.stopLoss) }
+      : {}),
     ...(typeof s.notes === 'string' ? { notes: s.notes } : {}),
   };
 }

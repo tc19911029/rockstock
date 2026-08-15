@@ -53,6 +53,11 @@ describe('mapStoreToServerHolding', () => {
     expect(r.payload?.stopLoss).toBeCloseTo(930, 2);
   });
 
+  test('已有 stopLoss 時同步保留原值，不重設成成本價 7%', () => {
+    const r = mapStoreToServerHolding(makeHolding({ stopLoss: 188.5 }));
+    expect(r.payload?.stopLoss).toBe(188.5);
+  });
+
   test('market 缺失：從 .TW 後綴推導', () => {
     const r = mapStoreToServerHolding(makeHolding({ market: undefined, symbol: '3037.TW' }));
     expect(r.ok).toBe(true);
@@ -310,6 +315,14 @@ describe('mapServerToStoreHolding (hydration：server → store)', () => {
     expect(s.buyDate).toBe('2026-05-20');
     expect(s.id).toBe('srv-2408.TW');
     expect(s.market).toBe('TW');
+  });
+
+  test('server stopLoss hydration 回 store 頂層', () => {
+    const s = mapServerToStoreHolding({
+      symbol: '2408.TW', name: '南亞科', market: 'TW',
+      entryDate: '2026-05-20', entryPrice: 203.83, shares: 6000, stopLoss: 188.5,
+    })!;
+    expect(s.stopLoss).toBe(188.5);
   });
 
   test('ui blob 原樣展開回頂層', () => {

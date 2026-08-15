@@ -3,6 +3,7 @@ import {
   checkApiRateLimit,
   forwardLimiter,
   generalLimiter,
+  readLimiter,
   scanLimiter,
 } from '../lib/rateLimit';
 
@@ -33,17 +34,34 @@ describe('pre-configured limiters', () => {
     expect(result.remaining).toBeLessThanOrEqual(29);
   });
 
+  test('readLimiter allows normal dashboard bursts', () => {
+    const identifier = `read-burst-${Date.now()}`;
+    for (let request = 0; request < 120; request += 1) {
+      expect(checkApiRateLimit('/api/market-data', identifier, 'GET').success).toBe(true);
+    }
+    expect(readLimiter.check(`${identifier}-direct`).remaining).toBeLessThanOrEqual(239);
+  });
+
   test('forward-performance requests are isolated from the general API bucket', () => {
     const identifier = `forward-isolation-${Date.now()}`;
 
     for (let request = 0; request < 60; request += 1) {
-      expect(checkApiRateLimit('/api/health', identifier).success).toBe(true);
+      expect(checkApiRateLimit('/api/health', identifier, 'POST').success).toBe(true);
     }
-    expect(checkApiRateLimit('/api/health', identifier).success).toBe(false);
+    expect(checkApiRateLimit('/api/health', identifier, 'POST').success).toBe(false);
 
     const forwardResult = checkApiRateLimit('/api/backtest/forward', identifier);
     expect(forwardResult.success).toBe(true);
     expect(forwardResult.remaining).toBe(29);
+  });
+
+  test('read and write requests use isolated buckets', () => {
+    const identifier = `method-isolation-${Date.now()}`;
+    for (let request = 0; request < 60; request += 1) {
+      expect(checkApiRateLimit('/api/agents/portfolio', identifier, 'POST').success).toBe(true);
+    }
+    expect(checkApiRateLimit('/api/agents/portfolio', identifier, 'POST').success).toBe(false);
+    expect(checkApiRateLimit('/api/agents/portfolio', identifier, 'GET').success).toBe(true);
   });
 
   test('forward-performance requests retain their own rate limit', () => {

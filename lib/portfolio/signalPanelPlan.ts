@@ -34,6 +34,7 @@ export function resolveSignalPanelActionPlan({
   operatingMA,
   operatingMAValue,
   confirmation,
+  decisiveReason,
 }: {
   action: NarrativeAction;
   primaryCategory: NarrativeEventCategory;
@@ -42,15 +43,16 @@ export function resolveSignalPanelActionPlan({
   operatingMA?: string | null;
   operatingMAValue?: number | null;
   confirmation: string;
+  decisiveReason?: string | null;
 }): SignalPanelActionPlan {
   const line = operatingMA && operatingMAValue != null
     ? `${operatingMA} ${operatingMAValue.toFixed(2)}`
     : null;
 
   if (action === 'exit') {
-    const trigger = line
+    const trigger = decisiveReason ?? (line
       ? `收盤 ${close.toFixed(2)} 已觸發 ${line} 出場規則`
-      : '硬出場規則已成立';
+      : '硬出場規則已成立');
     return {
       label: '今日動作：全數出場',
       detail: `${trigger}；依既定紀律處理，今日不加碼。`,
@@ -92,9 +94,10 @@ export function resolveSignalPanelActionPlan({
     const nextCheck = confirmation
       .replace(/^目前維持空手[；，。\s]*/, '')
       .replace(/[。；\s]+$/, '');
+    const noPendingOrder = nextCheck.includes('不預掛進場單') ? '' : '；不預掛進場單';
     return {
       label: '今日動作：維持空手',
-      detail: `${nextCheck}；不預掛進場單。`,
+      detail: `${nextCheck}${noPendingOrder}。`,
       tone: 'danger',
     };
   }

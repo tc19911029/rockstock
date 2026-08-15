@@ -52,11 +52,11 @@ function conc(candles: CandlePt[], brokerByDate: Map<string, number>, endIdx: nu
   return vol > 0 ? (net / vol) * 100 : null;
 }
 
-const selCls = 'bg-card border border-border/60 rounded text-[10px] text-foreground/90 px-1 py-0.5 outline-none focus:border-primary/60';
+const selCls = 'min-h-8 bg-card border border-border/60 rounded text-[10px] text-foreground/90 px-1.5 py-1 outline-none focus:border-primary/60 focus-visible:ring-2 focus-visible:ring-primary/50';
 
-function PeriodSelect({ value, onChange, options }: { value: number; onChange: (v: number) => void; options: readonly number[] }) {
+function PeriodSelect({ value, onChange, options, ariaLabel }: { value: number; onChange: (v: number) => void; options: readonly number[]; ariaLabel: string }) {
   return (
-    <select className={selCls} value={value} onChange={e => onChange(Number(e.target.value))}>
+    <select aria-label={ariaLabel} className={selCls} value={value} onChange={e => onChange(Number(e.target.value))}>
       {options.map(o => <option key={o} value={o}>{o}日</option>)}
     </select>
   );
@@ -77,7 +77,15 @@ const thCls = () => 'px-0.5 py-1 font-medium whitespace-nowrap text-center overf
 const tdCls = (cls?: string) => `px-0.5 py-1 whitespace-nowrap text-center overflow-hidden text-ellipsis ${cls ?? 'text-foreground/85'}`;
 
 // ── 1. 主力分點集中度（逐日）──────────────────────────────────────────────
-function BrokerConcTable({ broker, candles, cursorDate, concExact }: { broker: BrokerPt[]; candles: CandlePt[]; cursorDate: string | null; concExact?: ConcPt[] }) {
+function BrokerConcTable({ broker, candles, cursorDate, concExact, concentrationStatus = 'idle', concentrationError, onRetryConcentration }: {
+  broker: BrokerPt[];
+  candles: CandlePt[];
+  cursorDate: string | null;
+  concExact?: ConcPt[];
+  concentrationStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  concentrationError?: string;
+  onRetryConcentration?: () => void;
+}) {
   const [periodA, setPeriodA] = useState(5);
   const [periodB, setPeriodB] = useState(20);
   const rows = useMemo(() => {
@@ -111,13 +119,31 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact }: { broker: B
     return out.reverse();
   }, [broker, candles, periodA, periodB, concExact]);
   const hiRef = useScrollToHighlight(cursorDate);
-  if (!rows.length) return null;
+  if (!rows.length) {
+    return concentrationStatus === 'loading'
+      ? <div role="status" className="mx-2 my-2 rounded border border-border/50 bg-secondary/30 px-3 py-2 text-[10px] text-muted-foreground">正式集中度計算中，完成後會自動顯示。</div>
+      : null;
+  }
   return (
     <div className="px-2 pt-1 pb-2">
       <div className="px-1 text-[11px] font-semibold text-foreground/80 mb-0.5">主力分點集中度</div>
+      {concentrationStatus === 'loading' && (
+        <div role="status" className="mb-1 rounded border border-sky-500/20 bg-sky-500/10 px-2 py-1.5 text-[9px] leading-snug text-sky-200">
+          正式 5／20 日分點集中度計算中；完成前先顯示可用的近似值。
+        </div>
+      )}
+      {concentrationStatus === 'ready' && (
+        <div className="mb-1 px-1 text-[9px] text-emerald-300/80">最近日期的 5／20 日欄位已採正式分點公式。</div>
+      )}
+      {concentrationStatus === 'error' && (
+        <div role="alert" className="mb-1 flex items-center justify-between gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[9px] leading-snug text-amber-200">
+          <span>{concentrationError ?? '正式集中度暫時無法載入，表格先用近似值。'}</span>
+          {onRetryConcentration && <button type="button" onClick={onRetryConcentration} className="min-h-8 shrink-0 rounded border border-amber-400/40 px-2 font-medium hover:bg-amber-500/15">重試</button>}
+        </div>
+      )}
       <div className="flex items-center justify-center gap-3 mb-1 text-[9px] text-muted-foreground/70">
-        <span className="flex items-center gap-1">集中度一 <PeriodSelect value={periodA} onChange={setPeriodA} options={CONC_PERIODS} /></span>
-        <span className="flex items-center gap-1">集中度二 <PeriodSelect value={periodB} onChange={setPeriodB} options={CONC_PERIODS} /></span>
+        <span className="flex items-center gap-1">集中度一 <PeriodSelect ariaLabel="集中度一計算週期" value={periodA} onChange={setPeriodA} options={CONC_PERIODS} /></span>
+        <span className="flex items-center gap-1">集中度二 <PeriodSelect ariaLabel="集中度二計算週期" value={periodB} onChange={setPeriodB} options={CONC_PERIODS} /></span>
       </div>
       <div className={wrapCls}>
         <table className={tblCls}>
@@ -192,7 +218,7 @@ function InstTable({ inst, cursorDate }: { inst: InstPt[]; cursorDate: string | 
             {sum && (
               <tr className="border-t border-border/20 bg-secondary/40 font-semibold">
                 <td className={tdCls('text-foreground/70')}>
-                  <PeriodSelect value={sumPeriod} onChange={setSumPeriod} options={INST_SUM_PERIODS} />
+                  <PeriodSelect ariaLabel="三大法人合計週期" value={sumPeriod} onChange={setSumPeriod} options={INST_SUM_PERIODS} />
                 </td>
                 <td className={tdCls(upDownCls(sum.foreign))}>{intStr(sum.foreign)}</td>
                 <td className={tdCls(upDownCls(sum.trust))}>{intStr(sum.trust)}</td>
@@ -286,8 +312,8 @@ function HolderDistTable({ tdcc, cursorDate }: { tdcc: TdccPt[]; cursorDate: str
         {tabWeeks.map(w => {
           const on = w.date === data.date;
           return (
-            <button key={w.date} onClick={() => setPicked(w.date)}
-              className={`px-1.5 py-0.5 rounded text-[9px] font-mono border transition-colors ${on ? 'bg-primary/20 border-primary/60 text-foreground' : 'bg-card border-border/50 text-muted-foreground/70 hover:border-border'}`}>
+            <button key={w.date} type="button" aria-label={`查看 ${w.date} 集保持股分布`} aria-pressed={on} onClick={() => setPicked(w.date)}
+              className={`min-h-8 px-1.5 py-1 rounded text-[9px] font-mono border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${on ? 'bg-primary/20 border-primary/60 text-foreground' : 'bg-card border-border/50 text-muted-foreground/70 hover:border-border'}`}>
               {w.date.slice(5)}
             </button>
           );
@@ -343,12 +369,23 @@ export interface ChipRawTablesProps {
   cursorDate: string | null;
   /** 跟看盤 app 對齊的正式集中度（HiStock 分點區間彙總，最近數日 5日/20日） */
   concExact?: ConcPt[];
+  concentrationStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  concentrationError?: string;
+  onRetryConcentration?: () => void;
 }
 
-export default function ChipRawTables({ broker, inst, tdcc, candles, cursorDate, concExact }: ChipRawTablesProps) {
+export default function ChipRawTables({ broker, inst, tdcc, candles, cursorDate, concExact, concentrationStatus, concentrationError, onRetryConcentration }: ChipRawTablesProps) {
   return (
     <div>
-      <BrokerConcTable broker={broker ?? []} candles={candles} cursorDate={cursorDate} concExact={concExact} />
+      <BrokerConcTable
+        broker={broker ?? []}
+        candles={candles}
+        cursorDate={cursorDate}
+        concExact={concExact}
+        concentrationStatus={concentrationStatus}
+        concentrationError={concentrationError}
+        onRetryConcentration={onRetryConcentration}
+      />
       <InstTable inst={inst ?? []} cursorDate={cursorDate} />
       <HolderDistTable tdcc={tdcc ?? []} cursorDate={cursorDate} />
     </div>

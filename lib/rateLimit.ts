@@ -85,6 +85,15 @@ export const generalLimiter = createRateLimit('general', {
   windowMs: 60_000,
 });
 
+/**
+ * Read-only API: dashboard 初次載入與切換股票會並行讀取多個面板。
+ * 與寫入操作分桶，避免正常巡覽耗盡 general bucket、連持倉 hydration 都被 429。
+ */
+export const readLimiter = createRateLimit('read', {
+  maxRequests: 240,
+  windowMs: 60_000,
+});
+
 /** AI/expensive endpoints: 10 requests per minute */
 export const aiLimiter = createRateLimit('ai', {
   maxRequests: 10,
@@ -116,7 +125,7 @@ const FORWARD_ROUTES = ['/api/backtest/forward'];
  * Apply the limiter assigned to an API route.
  * Keeping this selection here makes bucket isolation explicit and testable.
  */
-export function checkApiRateLimit(pathname: string, identifier: string) {
+export function checkApiRateLimit(pathname: string, identifier: string, method = 'GET') {
   if (AI_ROUTES.some(route => pathname.startsWith(route))) {
     return aiLimiter.check(identifier);
   }
@@ -127,6 +136,10 @@ export function checkApiRateLimit(pathname: string, identifier: string) {
 
   if (FORWARD_ROUTES.some(route => pathname.startsWith(route))) {
     return forwardLimiter.check(identifier);
+  }
+
+  if (method === 'GET' || method === 'HEAD') {
+    return readLimiter.check(identifier);
   }
 
   return generalLimiter.check(identifier);

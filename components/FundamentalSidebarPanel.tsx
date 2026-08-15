@@ -13,6 +13,60 @@ import type { FundamentalAnswer } from '@/lib/agents/types';
 import { mapCnFinancialsToSidebar } from '@/lib/valuation/cnSidebarFallback';
 import { detectValuationFreshness } from '@/lib/valuation/freshness';
 
+const RISK_FLAG_LABELS: Record<string, string> = {
+  one_time_gain: '一次性收益',
+  pb_overheated: '股價淨值比過熱',
+  cyclical_peak: '景氣循環高峰',
+  forward_pe_misleading: '前瞻本益比可能失真',
+  dilution_pending: '潛在稀釋尚未確定',
+  margin_declining_while_revenue_growing: '增收不增利',
+  monthly_revenue_pending: '最新月營收待確認',
+  aggressive_scenario_assumption: '樂觀情境假設偏積極',
+  foreign_currency_sensitive: '匯率敏感',
+  customer_concentration: '客戶集中',
+  valuation_extreme: '估值極端',
+  capacity_and_supply: '產能與供應風險',
+  margin_normalization: '高利潤率可能正常化',
+  peer_data_lag: '同業資料時間落差',
+};
+
+const DILUTION_EVENT_LABELS: Record<string, string> = {
+  stock_dividend: '股票股利',
+  private_placement: '私募增資',
+  restricted_employee_shares: '限制員工新股',
+  convertible_bond: '可轉換公司債',
+  convertible_bonds: '可轉換公司債',
+  rights_issue: '現金增資',
+  gdr: 'GDR',
+  employee_option: '員工認股',
+};
+
+const DILUTION_STATUS_LABELS: Record<string, string> = {
+  completed_and_included_in_latest_shares: '已完成並計入目前股數',
+  completed: '已完成',
+  approved_not_yet_issued: '已核准、尚未發行',
+  approved_or_planned_not_yet_in_latest_shares: '已核准或規劃、尚未計入目前股數',
+  first_issue_scheduled_2026_08_12_second_issue_authorized: '發行時程與轉換價仍待確認',
+  pending: '待確認',
+};
+
+function localizedCode(code: string, dictionary: Record<string, string>): string {
+  return dictionary[code] ?? code.replaceAll('_', ' ');
+}
+
+function localizedConfidence(value: string): string {
+  return ({ low: '低信心', medium: '中信心', high: '高信心' } as Record<string, string>)[value] ?? value;
+}
+
+function localizedSeverity(value: string): string {
+  return ({ low: '低', medium: '中', high: '高' } as Record<string, string>)[value] ?? value;
+}
+
+function positiveNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 // 估值情境（悲觀/中性/樂觀）— 可來自 Multi-Agent 或獨立 valuation skill。
 //
 // ⚠️ 距現價 / 本年度預估 PE / TTM PE 都是「價格衍生」欄位：估值產生當下（valuationDate）用當時
@@ -75,15 +129,54 @@ function ValuationScenarios({
   const freshness = detectValuationFreshness(valuation, valuationDate, latestFundamentals);
   const normalizedRiskFlags = riskFlags?.map((flag, index) => {
     if (typeof flag === 'string') {
-      return { key: `${flag}-${index}`, code: flag, severity: null, detail: null };
+      return { key: `${flag}-${index}`, code: localizedCode(flag, RISK_FLAG_LABELS), severity: null, detail: null };
     }
     return {
       key: `${flag.code}-${index}`,
-      code: flag.code,
-      severity: flag.severity,
+      code: localizedCode(flag.code, RISK_FLAG_LABELS),
+      severity: localizedSeverity(flag.severity),
       detail: flag.detail,
     };
   });
+  // 歷史估值檔曾出現 newShares=新增股數、newShares=稀釋後總股數兩種語意；
+  // 也有事件只提供 shares/proxyShares。先正規化再顯示，避免錯誤箭頭與 undefined crash。
+  const dilutionView = (() => {
+    if (!dilution) return null;
+    const record = dilution as unknown as Record<string, unknown>;
+    const originalShares = positiveNumber(record.originalShares);
+    const rawNewShares = positiveNumber(record.newShares);
+    const fullyDilutedShares = positiveNumber(record.fullyDilutedShares);
+    const endingShares = fullyDilutedShares
+      ?? (originalShares && rawNewShares
+        ? (rawNewShares > originalShares ? rawNewShares : originalShares + rawNewShares)
+        : rawNewShares);
+    const events = Array.isArray(record.events)
+      ? record.events.map((item, index) => {
+          const event = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+          const type = typeof event.type === 'string' ? event.type : 'unknown';
+          const status = typeof event.status === 'string' ? event.status : null;
+          const shares = positiveNumber(event.newShares)
+            ?? positiveNumber(event.shares)
+            ?? positiveNumber(event.proxyShares);
+          const statusLabel = status ? DILUTION_STATUS_LABELS[status] : null;
+          const generatedDescription = status === 'completed_and_included_in_latest_shares'
+            ? `${localizedCode(type, DILUTION_EVENT_LABELS)}：已完成並計入目前股數${shares ? `（${shares.toLocaleString()} 股）` : ''}`
+            : `${localizedCode(type, DILUTION_EVENT_LABELS)}${statusLabel ? `（${statusLabel}）` : ''}${shares ? `：預估新增 ${shares.toLocaleString()} 股` : '（股數待定）'}`;
+          return {
+            key: `${type}-${index}`,
+            description: typeof event.description === 'string' && event.description.trim()
+              ? event.description
+              : generatedDescription,
+          };
+        })
+      : [];
+    return {
+      originalShares,
+      endingShares,
+      ratio: Number.isFinite(Number(record.ratio)) ? Number(record.ratio) : 0,
+      events,
+    };
+  })();
 
   return (
     <details className="overflow-hidden rounded-lg border border-cyan-500/20 bg-gradient-to-b from-cyan-950/20 to-card/50" open>
@@ -225,18 +318,18 @@ function ValuationScenarios({
 
         <PeerComparisonBlock comparison={peerComparison} />
 
-        {dilution && (
+        {dilutionView && (
           <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[10px]">
             <div className="flex items-center justify-between gap-2 font-semibold text-amber-800 dark:text-amber-200">
               <span>股本／稀釋已納入</span>
-              <span className="font-mono">{dilution.ratio > 0 ? `${(dilution.ratio * 100).toFixed(1)}%` : '股數待定'}</span>
+              <span className="font-mono">{dilutionView.ratio > 0 ? `${(dilutionView.ratio * 100).toFixed(1)}%` : '股數待定'}</span>
             </div>
-            {dilution.originalShares > 0 && dilution.newShares > 0 && (
-              <div className="mt-1 text-foreground/70">{dilution.originalShares.toLocaleString()} → {dilution.newShares.toLocaleString()} 股</div>
+            {dilutionView.originalShares && dilutionView.endingShares && (
+              <div className="mt-1 text-foreground/70">{dilutionView.originalShares.toLocaleString()} → {dilutionView.endingShares.toLocaleString()} 股</div>
             )}
-            {dilution.events?.map((event, index) => (
-              <div key={`${event.type}-${index}`} className="mt-1 leading-snug text-foreground/70">
-                {event.description ?? `${event.type} 新增 ${event.newShares.toLocaleString()} 股`}
+            {dilutionView.events.map(event => (
+              <div key={event.key} className="mt-1 leading-snug text-foreground/70">
+                {event.description}
               </div>
             ))}
           </div>
@@ -248,7 +341,7 @@ function ValuationScenarios({
               <div key={flag.key} className="rounded border border-rose-500/25 bg-rose-500/10 px-2 py-1 text-[9px] text-rose-800 dark:text-rose-200">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">{flag.code}</span>
-                  {flag.severity && <span className="shrink-0 uppercase opacity-70">{flag.severity}</span>}
+                  {flag.severity && <span className="shrink-0 opacity-70">{flag.severity}風險</span>}
                 </div>
                 {flag.detail && <div className="mt-0.5 leading-snug text-foreground/70">{flag.detail}</div>}
               </div>
@@ -277,7 +370,7 @@ function ValuationScenarios({
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[11px] font-bold">{t.label}</span>
                   {s.confidenceLevel && (
-                    <span className="text-[9px] opacity-70 uppercase">{s.confidenceLevel}</span>
+                    <span className="text-[9px] opacity-70">{localizedConfidence(s.confidenceLevel)}</span>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
@@ -838,7 +931,6 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
           const decision = json as DecisionPayload | null;
           if (!cancelled && decision?.fundamental) {
             setData(decision.fundamental);
-            setLoading(false);
           }
           return json;
         });
@@ -855,7 +947,6 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
               : null;
           if (!cancelled && mapped) {
             setRawData(mapped as RawFundamentals);
-            setLoading(false);
           }
           return { json, data: mapped };
         });
@@ -869,7 +960,6 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
               updatedAt: json.updatedAt,
               quality: json.quality,
             });
-            setLoading(false);
           }
           return json;
         });

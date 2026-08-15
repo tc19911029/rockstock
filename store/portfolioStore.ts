@@ -23,6 +23,8 @@ export interface PortfolioHolding {
   /** 進場當日 OHLC 快照，停損計算用（朱 5 步驟 S1） */
   entryKbar?: Candle;
   notes?: string;
+  /** server 同步的實際停損價；缺值時才由風控引擎套用預設值。 */
+  stopLoss?: number;
 
   // ── v12 Phase 0.3 新增欄位（議題 92 進場價分流）──────────────────────────
 

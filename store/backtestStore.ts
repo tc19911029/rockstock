@@ -47,6 +47,7 @@ import {
 import { useSettingsStore } from './settingsStore';
 import { AI_CONFIDENCE_HIGH, AI_CONFIDENCE_MEDIUM } from '@/lib/analysis/bookThresholds';
 import { REVERSAL_OR_SYSTEM_SET, SMARTMONEY_TRACK_SET, INSTDIP_TRACK_SET, INSTSTEAL_TRACK_SET } from '@/lib/scanner/buyMethodTracks';
+import { isLegacyMechanicalDiscontinuity } from '@/lib/scanner/priceContinuityGuard';
 
 // Module-level abort controller for scan operations
 let scanAbortController: AbortController | null = null;
@@ -333,27 +334,35 @@ export const useBacktestStore = create<BacktestState>()(
       setSanseLevel:         (sanseLevel) => set({ sanseLevel }),
       setScanDirection:      (scanDirection) => {
         const prevDirection = get().scanDirection;
-        set({ scanDirection });
-        // R 機械軌：long ↔ short 切換時，自動重載對應 session（long/short 是兩份不同 session）
-        const { activeBuyMethod, market, scanDate, loadCronSession } = get();
+        const beforeMethod = get().activeBuyMethod;
+        // 空方目前只有 A 六條件與 R 機械軌有實際 scanner；切到空方時不能沿用 B~Y 的多方資料。
+        const activeBuyMethod = scanDirection === 'short' && beforeMethod !== 'R' ? 'A' : beforeMethod;
+        set({ scanDirection, activeBuyMethod, sanseLevel: scanDirection === 'short' ? null : get().sanseLevel });
+        const { market, scanDate, loadCronSession } = get();
         if (
-          activeBuyMethod === 'R' &&
           scanDate &&
           prevDirection !== scanDirection &&
           (scanDirection === 'long' || scanDirection === 'short')
         ) {
+          void get().fetchCronDates(market, scanDirection);
           void loadCronSession(market, scanDate, { scanOnly: true, direction: scanDirection });
         }
       },
       setActiveBuyMethod:    async (activeBuyMethod) => {
-        const { market, scanDate, loadCronSession, scanDirection } = get();
+        const { market, scanDate, loadCronSession } = get();
+        let scanDirection = get().scanDirection;
+        // 選到只有多方實作的策略時，自動回多方，避免畫面標「做空」卻載入 long session。
+        if (scanDirection === 'short' && activeBuyMethod !== 'A' && activeBuyMethod !== 'R') {
+          scanDirection = 'long';
+        }
         // 選任何書本買法 → 退出三色視角（中間面板「條件/訊號」改顯示該買法）
-        set({ activeBuyMethod, sanseLevel: null });
+        set({ activeBuyMethod, scanDirection, sanseLevel: null });
         // A = 既有六條件流程，走 loadCronSession；同時刷新 daily 日期列表
         if (activeBuyMethod === 'A') {
-          get().fetchCronDates(market, 'long'); // 切回 A 時刷新為 daily session 日期
-          if (scanDirection === 'long' && scanDate) {
-            await loadCronSession(market, scanDate, { scanOnly: true, direction: 'long' });
+          const direction = scanDirection === 'short' ? 'short' : 'long';
+          get().fetchCronDates(market, direction); // 切回 A 時刷新為對應方向 daily session 日期
+          if (scanDate) {
+            await loadCronSession(market, scanDate, { scanOnly: true, direction });
           }
           return;
         }
@@ -763,7 +772,7 @@ export const useBacktestStore = create<BacktestState>()(
           const fwdRes = await fetch('/api/backtest/forward', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ scanDate, stocks: forwardPayload }),
+            body:    JSON.stringify({ scanDate, direction: scanDirection === 'short' ? 'short' : 'long', stocks: forwardPayload }),
           });
           if (!fwdRes.ok) throw new Error('無法取得後續績效資料');
           const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[]; nullCount?: number; totalRequested?: number };
@@ -1010,7 +1019,9 @@ export const useBacktestStore = create<BacktestState>()(
               || INSTDIP_TRACK_SET.has(activeBuyMethod)
               || INSTSTEAL_TRACK_SET.has(activeBuyMethod);
             const scanResults = (session?.results ?? []).filter(r =>
-              (isChipObsTrack || !isDisposalVetoed(r)) && (!requireA || r.matchedMethods?.includes('A')),
+              (isChipObsTrack || !isDisposalVetoed(r))
+              && (!requireA || r.matchedMethods?.includes('A'))
+              && !(activeBuyMethod === 'R' && isLegacyMechanicalDiscontinuity(r)),
             );
             set({ scanResults, isLoadingBuyMethod: false, activeSessionScanTime: session?.scanTime ?? null });
 
@@ -1027,7 +1038,7 @@ export const useBacktestStore = create<BacktestState>()(
               const fwdRes = await fetch('/api/backtest/forward', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ scanDate: date, stocks: forwardPayload }),
+                body: JSON.stringify({ scanDate: date, direction: direction === 'short' ? 'short' : 'long', stocks: forwardPayload }),
               });
               if (fwdRes.ok) {
                 const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
@@ -1069,7 +1080,7 @@ export const useBacktestStore = create<BacktestState>()(
                 const fwdRes = await fetch('/api/backtest/forward', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ scanDate: date, stocks: forwardPayload }),
+                  body: JSON.stringify({ scanDate: date, direction: direction === 'short' ? 'short' : 'long', stocks: forwardPayload }),
                 });
                 if (!fwdRes.ok) return;
                 const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };
@@ -1184,7 +1195,7 @@ export const useBacktestStore = create<BacktestState>()(
             const fwdRes = await fetch('/api/backtest/forward', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ scanDate: date, stocks: forwardPayload }),
+              body: JSON.stringify({ scanDate: date, direction: direction === 'short' ? 'short' : 'long', stocks: forwardPayload }),
             });
             if (fwdRes.ok) {
               const fwdJson = await fwdRes.json() as { performance?: StockForwardPerformance[] };

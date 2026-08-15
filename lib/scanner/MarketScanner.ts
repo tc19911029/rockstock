@@ -9,11 +9,12 @@ import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
 import { evaluateHighWinRateEntry } from '@/lib/analysis/highWinRateEntry';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
-import { BULLISH_TRACK_SET_WITH_V11, SYSTEM_TRACK_SET } from '@/lib/scanner/buyMethodTracks';
+import { BULLISH_TRACK_SET_WITH_V11 } from '@/lib/scanner/buyMethodTracks';
 import { evaluateWinnerPatterns } from '@/lib/rules/winnerPatternRules';
 import { evaluateMultiTimeframe, MultiTimeframeResult } from '@/lib/analysis/multiTimeframeFilter';
 import { getScannerCache, setScannerCache, getScannerCacheStats } from '@/lib/datasource/ScannerCache';
 import { loadLocalCandlesWithTolerance, saveLocalCandles, batchCheckFreshness } from '@/lib/datasource/LocalCandleStore';
+import { hasRecentPriceDiscontinuity } from '@/lib/scanner/priceContinuityGuard';
 
 // 掃描以本地檔案為主（L1 記憶體 + L2 本地），L3 API 嚴格限制
 // 降低並發避免 API 限流（歷史掃描為 pure-local，今日掃描最多 20 次 API）
@@ -420,6 +421,7 @@ export abstract class MarketScanner {
         if (diag) diag.tooFewCandles++;
         return null;
       }
+      if (hasRecentPriceDiscontinuity(fetchResult.candles)) return null;
 
       // Fail-closed：掃描目標日 = 今日時，L1 末根必須 === 今日，否則跳過
       // 過去曾放寬到 staleDays > 5 才擋，結果 2026-04-17 因 L2 被 quarantine
@@ -866,6 +868,7 @@ export abstract class MarketScanner {
 
       const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate, diag);
       if (fetchResult.candles.length < 30) { if (diag) diag.tooFewCandles++; return null; }
+      if (hasRecentPriceDiscontinuity(fetchResult.candles)) return null;
 
       // DF4 修正：對齊多方 scanOne 的 fail-closed 守衛 —— 掃描目標日=今日時 L1 末根必須===今日，
       // 否則跳過，避免用昨日 bar 冒充今日結果寫進 L4（空方原本缺這道、post_close/intraday 會污染）。
@@ -1097,6 +1100,7 @@ export abstract class MarketScanner {
     asOfDate?: string,
     thresholds?: StrategyThresholds,
     rankBy: 'sixConditions' | 'histWinRate' = 'sixConditions',
+    savePool = true,
   ): Promise<{ results: StockScanResult[]; marketTrend: TrendState; diagnostics: ScanDiagnostics; sessionFreshness: SessionFreshness }> {
     // ── P1A: 移除掃描入口的 ensureFreshCandles ──
     // 掃描路徑已有 fetchCandlesForScan() 做 memory → local → API 三層快取，
@@ -1198,23 +1202,25 @@ export abstract class MarketScanner {
     // 概念：今日的池子今日用，明天會重新算
     const poolDate = asOfDate
       ?? new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone }).format(new Date());
-    try {
-      const { saveStep1Pool } = await import('./step1Pool');
-      await saveStep1Pool({
-        market: config.marketId,
-        date: poolDate,
-        symbols: sorted.map(r => r.symbol),
-        generatedAt: new Date().toISOString(),
-        stats: {
-          total: stocks.length,
-          passSixCond: sorted.length,
-          passProhib: sorted.length,
-          passElim: sorted.length,
-        },
-      });
-      console.info(`[ScanSOP] step1-pool 寫入：${config.marketId} ${poolDate} ${sorted.length} 支`);
-    } catch (err) {
-      console.warn('[ScanSOP] saveStep1Pool failed (non-critical):', err);
+    if (savePool) {
+      try {
+        const { saveStep1Pool } = await import('./step1Pool');
+        await saveStep1Pool({
+          market: config.marketId,
+          date: poolDate,
+          symbols: sorted.map(r => r.symbol),
+          generatedAt: new Date().toISOString(),
+          stats: {
+            total: stocks.length,
+            passSixCond: sorted.length,
+            passProhib: sorted.length,
+            passElim: sorted.length,
+          },
+        });
+        console.info(`[ScanSOP] step1-pool 寫入：${config.marketId} ${poolDate} ${sorted.length} 支`);
+      } catch (err) {
+        console.warn('[ScanSOP] saveStep1Pool failed (non-critical):', err);
+      }
     }
 
     return {
@@ -1361,8 +1367,6 @@ export abstract class MarketScanner {
     // 軌道分類讀 lib/scanner/buyMethodTracks.ts 單一事實來源
     // REVERSAL_TRACK = D/F/J/N/O — 不過 Step 1 + 不過戒律（隱含：fall-through to default behavior）
     const isBullish = BULLISH_TRACK_SET_WITH_V11.has(method);  // 含跟隨 v12 軌道的 v11 alias（H/I；G 隨 J 移反轉軌後除外）
-    const isSystem = SYSTEM_TRACK_SET.has(method);
-
     // 載入今日 Step 1 池子（兩個用途）：
     //   1. 多頭軌方法（B/C/E/K/L/M/P）：拿池子當候選來源（filter candidates）
     //   2. 反轉/戰法軌方法（D/F/J/N/O/Q）：cross-strategy 推**多頭軌字母**時當 gate
@@ -1394,6 +1398,7 @@ export abstract class MarketScanner {
         try {
           const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
           if (!fetchResult || fetchResult.candles.length < 30) return null;
+          if (hasRecentPriceDiscontinuity(fetchResult.candles)) return null;
           if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
             const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
             if (asOfDate === today) return null;
@@ -1564,8 +1569,8 @@ export abstract class MarketScanner {
 
           // ── 戒律檢查（書本 p.54 / p.82-85 進場 10 大戒律）─────────────
           // 軌道分類：
-          //   - 多頭軌（B/C/E/J/K/L/M/P）：已過 Step 1 池子（含戒律）→ longProhibitionsReasons 應該空
-          //   - 反轉軌（D/F/N/O）：書本本意「在底部抓」不套戒律 reject，但寫 reasons 給 UI 警示
+          //   - 多頭軌（B/C/E/K/L/M/P）：已過 Step 1 池子（含戒律）→ longProhibitionsReasons 應該空
+          //   - 反轉軌（D/F/J/N/O）：書本本意「在底部抓／短空修正突破」不套戒律 reject，但寫 reasons 給 UI 警示
           //   - 戰法軌（Q）：書本《抓住線圖》第 4 篇第 8 章 p.261-265 講三均線 SOP，
           //                 **沒明說 Q 過戒律**。原本程式「保守反推」加 reject 是自創邏輯，
           //                 2026-05-11 移除 reject 改 UI 警示（跟反轉軌一致，忠書本 + 用戶可判斷）
@@ -1574,7 +1579,7 @@ export abstract class MarketScanner {
             const { checkLongProhibitions } = await import('@/lib/rules/entryProhibitions');
             const prohib = checkLongProhibitions(candles, lastIdx);
             longProhibitionsReasons = prohib.reasons;
-            // 不再 reject — 任何軌道（D/F/N/O/Q）都讓 reason 寫入 result，UI 統一灰化警示
+            // 不再 reject — 反轉／戰法軌（D/F/J/N/O/Q）讓 reason 寫入 result，UI 顯示警示
           }
 
           const prev = candles[lastIdx - 1];
@@ -1591,8 +1596,8 @@ export abstract class MarketScanner {
           // 軌道規則（0512 用戶明確）：
           //   - 多頭軌字母 (B/C/E/J/K/L/M/P)：必須過 Step 1 才推 — 否則 UI 邏輯矛盾
           //     （不在 Step 1 池怎麼會「在 Step 2 裡命中」？）
-          //   - 反轉/戰法軌字母 (D/F/N/O/Q)：不過 Step 1 — 全市場掃，可以命中
-          //   - A 自己：用六條件 isCoreReady 判定，不用 Step 1 池（池子是六條件的「過濾後」）
+          //   - 反轉/戰法軌字母 (D/F/J/N/O/Q)：不過 Step 1 — 全市場掃，可以命中
+          //   - A 自己：代表完整 Step 1（六條件＋戒律＋淘汰法），不能只用六條件冒充
           const inStep1Pool = step1Symbols ? step1Symbols.has(symbol) : false;
           const matchedMethods: string[] = matched ? [method] : [];
           let sixCondsResult: ReturnType<typeof evaluateSixConditions> | null = null;
@@ -1601,7 +1606,7 @@ export abstract class MarketScanner {
             // 課程 CH1-5 裁決（2026-07-05）：④攻擊量=1.2。不帶 thresholds 會 fallback 書本 1.3，
             // 與主閘門（上方 evaluateSixConditions(candles, lastIdx, thresholds)）自打架。
             sixCondsResult = evaluateSixConditions(candles, lastIdx, BASE_THRESHOLDS);
-            if (sixCondsResult.isCoreReady) matchedMethods.push('A');
+            if (inStep1Pool) matchedMethods.push('A');
           } catch { /* non-critical */ }
           // ── 多頭軌字母（過 Step 1 gate）─────────────────────────
           if (method !== 'B' && inStep1Pool) {
@@ -1782,6 +1787,7 @@ export abstract class MarketScanner {
       const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
         const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
         if (!fetchResult || fetchResult.candles.length < 20) return null;
+        if (hasRecentPriceDiscontinuity(fetchResult.candles)) return null;
         if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
           const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
           if (asOfDate === today) return null;
@@ -1873,6 +1879,7 @@ export abstract class MarketScanner {
       const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
         const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
         if (!fetchResult || fetchResult.candles.length < minBars) return null;
+        if (hasRecentPriceDiscontinuity(fetchResult.candles)) return null;
         if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
           const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
           if (asOfDate === today) return null;
@@ -1972,6 +1979,7 @@ export abstract class MarketScanner {
       const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
         const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
         if (!fetchResult || fetchResult.candles.length < DEFAULT_PARAMS.lookback + 1) return null;
+        if (hasRecentPriceDiscontinuity(fetchResult.candles)) return null;
         if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
           const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
           if (asOfDate === today) return null;
@@ -2076,6 +2084,7 @@ export abstract class MarketScanner {
       const settled = await Promise.allSettled(batch.map(async ({ symbol, name, industry }) => {
         const fetchResult = await this.fetchCandlesForScan(symbol, asOfDate);
         if (!fetchResult || fetchResult.candles.length < minBars) return null;
+        if (hasRecentPriceDiscontinuity(fetchResult.candles)) return null;
         if (asOfDate && fetchResult.lastCandleDate !== asOfDate) {
           const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
           if (asOfDate === today) return null;

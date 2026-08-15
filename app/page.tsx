@@ -57,9 +57,10 @@ import { ETFPanel } from '@/features/etf';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { getABCDisplayStructure } from '@/lib/analysis/abcBreakoutEntry';
 import { shouldFetchExactConcentration } from '@/lib/chips/concentrationFetchPolicy';
+import { findRecentPriceDiscontinuity } from '@/lib/scanner/priceContinuityGuard';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Search, Video, Flame, Landmark, LineChart } from 'lucide-react';
 import { toast } from 'sonner';
 import ChartToolbar, { type ChartIndicatorPreset } from '@/components/ChartToolbar';
 
@@ -76,6 +77,8 @@ const CandleChart = nextDynamic(() => import('@/components/CandleChart'), {
 const IndicatorCharts = nextDynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
 
 type SideTab = 'conditions' | 'signals' | 'chip' | 'fundamental';
+type RightTab = 'scan' | 'youtube' | 'sectors' | 'broker' | 'etf';
+const RIGHT_TABS: RightTab[] = ['scan', 'youtube', 'sectors', 'broker', 'etf'];
 
 /** 像六條件那種「每條件一列、●綠紅燈 + 數值」的檢查清單（隨走圖游標跑）*/
 export type CondRow = { icon: string; name: string; value: string; pass: boolean; tip?: string };
@@ -243,6 +246,17 @@ function HomePage() {
   // ↑↓ 跳股票：記住「最後點到的股票」屬於哪個清單（題材/掃描/候選池），鍵盤上下鍵據此換股
   useChartListNavCapture();
 
+  // URL 與各資料面板共用狀態必須在讀取它們的 effects/callbacks 之前宣告。
+  const [rightTab, setRightTab] = useState<RightTab>('scan');
+  const [tabDate, setTabDate] = useState(lastBusinessDayYmd);
+  const [mobileChartFullscreen, setMobileChartFullscreen] = useState(false);
+  const selectRightTab = useCallback((nextTab: RightTab) => {
+    setRightTab(nextTab);
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', nextTab);
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  }, []);
+
   // 大盤指數預設：TW→加權指數 ^TWII，CN→上證指數 000001.SS
   const market = useBacktestStore(s => s.market);
   const scanDate = useBacktestStore(s => s.scanDate);
@@ -266,13 +280,6 @@ function HomePage() {
     const tfParam = searchParams.get('tf');
     if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'sectors' || urlTab === 'broker' || urlTab === 'etf') {
       setRightTab(urlTab);
-      // 套用後立刻把 ?tab= 從 URL 拿掉 — inbound link 進來會切 tab,但 reload 不會再套用,維持 default scan
-      // 保留其他 query param(?load / ?date / ?tf)
-      const sp = new URLSearchParams(window.location.search);
-      sp.delete('tab');
-      const qs = sp.toString();
-      const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-      window.history.replaceState(null, '', newUrl);
     }
     if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       setTabDate(date);
@@ -284,15 +291,6 @@ function HomePage() {
       const key = `${sym}|${tf}|${date ?? ''}`;
       if (lastLoadedRef.current === key) return;
       lastLoadedRef.current = key;
-      // inbound ?load 套用後把 load/date/tf 從網址移除（同 ?tab 的處理）：
-      // 否則網址卡在某檔（如 /?load=00991A），瀏覽器重開/重整會一直還原它 → 主畫面永遠停在該檔而非大盤。
-      // 移除後回到乾淨「/」，下次開啟走 default（大盤指數）；當前 session 的走圖仍在 currentStock 不受影響。
-      const sp2 = new URLSearchParams(window.location.search);
-      if (sp2.has('load') || sp2.has('symbol') || sp2.has('date') || sp2.has('tf')) {
-        sp2.delete('load'); sp2.delete('symbol'); sp2.delete('date'); sp2.delete('tf');
-        const qs2 = sp2.toString();
-        window.history.replaceState(null, '', qs2 ? `${window.location.pathname}?${qs2}` : window.location.pathname);
-      }
       loadStock(sym, tf, undefined, date ?? undefined)
         .then(() => setLoadError(null)) // 成功載入 → 清掉先前冷啟動 race 的失敗 banner
         .catch((e: Error) => {
@@ -339,13 +337,6 @@ function HomePage() {
   const [showHelp, setShowHelp] = useState(false);
   // Scanner bottom panel — v12 預設展開讓用戶一進來就看到新功能（14 字母 tabs/Step 0 banner/LockWatch panel/警示徽章）
   const [scannerOpen, setScannerOpen] = useState(true);
-  // 右側 panel tab — 策略掃描 / YouTube 提及 / 題材分類 / 法人報告 / ETF 追蹤（2026-06-21 ETF 併入，五入口）
-  type RightTab = 'scan' | 'youtube' | 'sectors' | 'broker' | 'etf';
-  const [rightTab, setRightTab] = useState<RightTab>('scan');
-  // Stage 16：3 tab 共用 date state（YouTube / Pool / Multi-Agent 都看同一天）
-  // 預設「最近工作日」，因為 today 的資料通常還沒跑完
-  // （user 仍可手動切日期；URL ?date= 也會 override）
-  const [tabDate, setTabDate] = useState(lastBusinessDayYmd);
   // YouTube tab 內點股票 → loadStock + 跳左側 K 線（mobile inline 切全螢幕，避免 hoisting）
   const handleYoutubeSelectStock = useCallback((code: string) => {
     setLoadError(null);
@@ -378,16 +369,15 @@ function HomePage() {
     }
   }, [loadStock]);
   // 手機點「走圖」→ 全螢幕 K 線視圖
-  const [mobileChartFullscreen, setMobileChartFullscreen] = useState(false);
   const openMobileChart = useCallback(() => {
     setMobileChartFullscreen(true);
     setScannerOpen(false);
     try { window.history.pushState({ chartFullscreen: true }, ''); } catch { /* noop */ }
-  }, []);
+  }, [setMobileChartFullscreen, setScannerOpen]);
   const closeMobileChart = useCallback(() => {
     setMobileChartFullscreen(false);
     setScannerOpen(true);
-  }, []);
+  }, [setMobileChartFullscreen, setScannerOpen]);
   useEffect(() => {
     if (!mobileChartFullscreen) return;
     const onPop = () => setMobileChartFullscreen(false);
@@ -520,6 +510,12 @@ function HomePage() {
     || indicators.retail || indicators.h400 || indicators.h1000 || showHolderLine;
   const anyCnChipOn = indicators.cnMain || indicators.cnRetail;
   const ticker = currentStock?.ticker ?? '';
+  const priceContinuityIssue = useMemo(
+    () => currentInterval === '1d'
+      ? findRecentPriceDiscontinuity(allCandles.slice(0, currentIndex + 1))
+      : null,
+    [allCandles, currentIndex, currentInterval],
+  );
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
   const isCnTicker = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
   // 三色資金（雙B/主力/捕撈）台股+陸股皆可；台股指數比照陸股指數也可（指數三色為退化值但版面一致）
@@ -534,61 +530,97 @@ function HomePage() {
   const wantChips = (isTwTicker && (anyTwChipOn || !!currentStock)) || (isCnTicker && anyCnChipOn);
   // 把 fetch trigger 編成單一 string key，dep 比較穩定
   const chipFetchKey = wantChips ? ticker : '';
-  const [chips, setChips] = useState<{
+  type ChipData = {
     inst: Array<{ date: string; foreign: number; trust: number; dealer: number; total: number }>;
     tdcc: Array<{ date: string; holder100Pct?: number; holder400Pct: number; holder1000Pct: number; holderCount?: number }>;
     broker?: Array<{ date: string; netDifference: number }>;
     cnFlow?: Array<{ date: string; mainNet: number; superLargeNet: number; largeNet: number; mediumNet: number; smallNet: number }>;
     divergence?: { type: 'bullish' | 'bearish'; priceChangePct: number; volumeChangePct: number; strength: 0|1|2|3; detail: string } | null;
-  } | null>(null);
+  };
+  const [chipsResult, setChipsResult] = useState<{ sourceSymbol: string; data: ChipData } | null>(null);
+  const chips = chipsResult?.sourceSymbol === chipFetchKey ? chipsResult.data : null;
   const [chipsLoading, setChipsLoading] = useState(false);
+  const [chipsError, setChipsError] = useState<string | null>(null);
+  const [chipsRetry, setChipsRetry] = useState(0);
   useEffect(() => {
-    if (!chipFetchKey) { return; }
+    if (!chipFetchKey) {
+      setChipsLoading(false);
+      setChipsError(null);
+      return;
+    }
     const ctrl = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 載入 flag，搭配下方 finally 清除
     setChipsLoading(true);
+    setChipsError(null);
     fetch(`/api/stock/chips?symbol=${encodeURIComponent(chipFetchKey)}&days=500`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then(json => {
-        if (json.ok) setChips({
-          inst: json.inst ?? [],
-          tdcc: json.tdcc ?? [],
-          broker: json.broker ?? [],
-          cnFlow: json.cnFlow ?? [],
-          divergence: json.divergence ?? null,
-        });
+      .then(async r => {
+        const json = await r.json();
+        if (!r.ok || !json.ok) throw new Error(json.error ?? `HTTP ${r.status}`);
+        return json;
       })
-      .catch(err => { if (err.name !== 'AbortError') console.warn('[chips] load failed:', err); })
-      .finally(() => setChipsLoading(false));
+      .then(json => {
+        setChipsResult({ sourceSymbol: chipFetchKey, data: {
+          inst: json.inst ?? [], tdcc: json.tdcc ?? [], broker: json.broker ?? [],
+          cnFlow: json.cnFlow ?? [], divergence: json.divergence ?? null,
+        } });
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          console.warn('[chips] load failed:', err);
+          setChipsError(err instanceof Error ? err.message : '籌碼資料載入失敗');
+        }
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setChipsLoading(false);
+      });
     return () => ctrl.abort();
-  }, [chipFetchKey]);
-  // 切到別的股 / 關掉所有 chip toggle → 清空 chips（不在主 effect 內，避免抖動）
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切股時清舊 chips
-    if (!ticker) setChips(null);
-  }, [ticker]);
+  }, [chipFetchKey, chipsRetry]);
 
   // 主力分點集中度「跟看盤 app 對齊版」（最近數日 5日/20日，HiStock 分點區間彙總算正式公式）。
   // 與 /api/stock/chips 分開 lazy fetch（HiStock 多視窗抓取較慢，不阻塞籌碼面板其餘三表）。
-  const [concExact, setConcExact] = useState<Array<{ date: string; c5: number | null; c20: number | null; net: number | null }>>([]);
+  type ConcRow = { date: string; c5: number | null; c20: number | null; net: number | null };
+  type ConcState = { sourceSymbol: string; status: 'loading' | 'ready' | 'error'; rows: ConcRow[]; error?: string };
+  const [concResult, setConcResult] = useState<ConcState | null>(null);
+  const [concRetry, setConcRetry] = useState(0);
   const concentrationBuyMethod = useBacktestStore(s => s.activeBuyMethod);
   const needsExactConcentration = shouldFetchExactConcentration({
     sideTab,
     activeBuyMethod: concentrationBuyMethod,
     ticker: chipFetchKey,
   });
+  const activeConcResult = concResult?.sourceSymbol === chipFetchKey ? concResult : null;
+  const concExact = useMemo(
+    () => activeConcResult?.status === 'ready' ? activeConcResult.rows : [],
+    [activeConcResult],
+  );
+  const concentrationStatus = !needsExactConcentration
+    ? 'idle' as const
+    : activeConcResult?.status ?? 'loading';
   useEffect(() => {
-    if (!needsExactConcentration) {
-      setConcExact([]);
-      return;
-    }
+    if (!needsExactConcentration || !chipFetchKey) return;
     const ctrl = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; ctrl.abort(); }, 35_000);
+    setConcResult({ sourceSymbol: chipFetchKey, status: 'loading', rows: [] });
     fetch(`/api/stock/concentration?symbol=${encodeURIComponent(chipFetchKey)}&recentN=10`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then(json => { if (json.ok) setConcExact(json.conc ?? []); })
-      .catch(err => { if (err.name !== 'AbortError') console.warn('[concentration] load failed:', err); });
-    return () => ctrl.abort();
-  }, [chipFetchKey, needsExactConcentration]);
+      .then(async r => {
+        const json = await r.json();
+        if (!r.ok || !json.ok) throw new Error(json.error ?? `HTTP ${r.status}`);
+        return json;
+      })
+      .then(json => setConcResult({ sourceSymbol: chipFetchKey, status: 'ready', rows: json.conc ?? [] }))
+      .catch(err => {
+        if (ctrl.signal.aborted && !timedOut) return;
+        console.warn('[concentration] load failed:', err);
+        setConcResult({
+          sourceSymbol: chipFetchKey,
+          status: 'error',
+          rows: [],
+          error: timedOut ? '正式集中度計算逾時，表格暫用近似值。' : (err instanceof Error ? err.message : '正式集中度載入失敗'),
+        });
+      })
+      .finally(() => clearTimeout(timeout));
+    return () => { clearTimeout(timeout); ctrl.abort(); };
+  }, [chipFetchKey, needsExactConcentration, concRetry]);
 
   // ── 三色資金圖層資料（雙B疊加 + 主力狀態/捕撈季節副圖 + 條件報告）──────────────
   // 陸股走 /cn-sanse、台股走 /tw-sanse（同一份 SanSeChartPayload 形狀）：圖層由各 toggle 控制。
@@ -717,7 +749,6 @@ function HomePage() {
   useEffect(() => {
     const saved = localStorage.getItem('chartSplit-v2');
     // 接受拖曳範圍內的值（0.2~0.85）；太極端才回新預設
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved && parseFloat(saved) >= 0.2 && parseFloat(saved) <= 0.85) setChartSplit(parseFloat(saved));
     else localStorage.removeItem('chartSplit-v2');
   }, []);
@@ -778,9 +809,19 @@ function HomePage() {
     <div className="shrink-0 flex items-center gap-1">
       <div role="tablist" aria-label="分析面板" className="flex flex-1 rounded-lg overflow-hidden border border-border/60 text-xs">
         {SIDE_TABS.map(t => (
-          <button key={t.key} role="tab" aria-selected={sideTab === t.key} aria-controls={`panel-${t.key}`}
+          <button key={t.key} role="tab" id={`tab-${t.key}`} aria-selected={sideTab === t.key} aria-controls={`panel-${t.key}`}
+            tabIndex={sideTab === t.key ? 0 : -1}
             onClick={() => setSideTab(t.key)}
-            className={`flex-1 py-2 font-medium transition-all ${
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+              event.preventDefault();
+              const current = SIDE_TABS.findIndex(item => item.key === t.key);
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? SIDE_TABS.length - 1 : event.key === 'ArrowRight'
+                ? (current + 1) % SIDE_TABS.length : (current - 1 + SIDE_TABS.length) % SIDE_TABS.length;
+              setSideTab(SIDE_TABS[next].key);
+              requestAnimationFrame(() => document.getElementById(`tab-${SIDE_TABS[next].key}`)?.focus());
+            }}
+            className={`flex-1 min-h-11 px-2 text-sm font-medium transition-colors ${
               sideTab === t.key ? 'bg-blue-600 text-foreground shadow-[0_0_8px_rgba(37,99,235,0.3)]' : 'bg-secondary/60 text-muted-foreground hover:bg-muted hover:text-foreground/80'
             }`}
           >
@@ -834,7 +875,7 @@ function HomePage() {
       { icon: '④', name: '不爆量', value: `${ev.volRatio.toFixed(2)}x`, pass: c4, tip: '量比<1.8' },
     ];
     return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 4, hit: ev.isHit };
-  }, [market, chips?.broker, currentIndex, allCandles]);
+  }, [market, chips, currentIndex, allCandles]);
 
   // X 法人接刀 3 道（隨走圖游標）— 委派 lib/instdip + 大戶超高避雷
   const xConds = useMemo<CondList>(() => {
@@ -862,7 +903,7 @@ function HomePage() {
       { icon: '③', name: '非大戶超高', value: hl != null ? `${tierName}${hl.toFixed(0)}%` : '—', pass: c3, tip: '大戶持股太高＝流通量少陷阱' },
     ];
     return { date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit && c3 };
-  }, [market, chips?.inst, chips?.tdcc, currentIndex, allCandles]);
+  }, [market, chips, currentIndex, allCandles]);
 
   // Y 法人偷買(原) 3 道（隨走圖游標）— 委派 lib/inststeal 單一事實：跌 + 5日集中度在爬 + 法人連買
   const yConds = useMemo<CondList>(() => {
@@ -880,7 +921,7 @@ function HomePage() {
       { icon: '③', name: '法人連買', value: `${ev.instConsecDays}天 ${ev.instSumK > 0 ? '+' : ''}${ev.instSumK.toLocaleString()}張`, pass: ev.isInstBuying, tip: '三大法人合計連買≥2天且近5日淨買超>0' },
     ];
     return { date: allCandles[idx].date, rows, passCount: rows.filter(r => r.pass).length, total: 3, hit: ev.isHit };
-  }, [market, chips?.broker, chips?.inst, currentIndex, allCandles, concExact]);
+  }, [market, chips, currentIndex, allCandles, concExact]);
 
   // 走圖游標當天日期（三張共用 CMoney 籌碼表的高亮基準 + 持股分布取週）
   const cursorDate = allCandles.length
@@ -894,6 +935,9 @@ function HomePage() {
     candles: allCandles,
     cursorDate,
     concExact,
+    concentrationStatus,
+    concentrationError: activeConcResult?.error,
+    onRetryConcentration: () => setConcRetry(value => value + 1),
   };
 
   const sidebarContent = (
@@ -904,12 +948,16 @@ function HomePage() {
     >
       {sideTab === 'conditions' && (
         <SectionBoundary section="買法條件">
-          {showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch wConds={wConds} xConds={xConds} yConds={yConds} chipTables={chipTables} />}
+          {priceContinuityIssue
+            ? <div role="alert" className="rounded border border-amber-500/35 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-100">近期價格序列在 {priceContinuityIssue.date} 出現 {(priceContinuityIssue.changeRatio * 100).toFixed(1)}% 斷層，可能是股票分割、面額變更或未還原公司行動。六條件暫停判讀，避免均線與型態產生假訊號。</div>
+            : showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch wConds={wConds} xConds={xConds} yConds={yConds} chipTables={chipTables} />}
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
         <SectionBoundary section="訊號分析">
-          {showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} catchTrigger={sanseCatchTrigger} /> : <SignalSummaryCard />}
+          {priceContinuityIssue
+            ? <div role="alert" className="rounded border border-amber-500/35 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-100">技術訊號已暫停：{priceContinuityIssue.date} 的價格斷層會污染 MA、K 線型態與趨勢。待資料完成還原或斷層離開近期技術視窗後再判讀。</div>
+            : showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} catchTrigger={sanseCatchTrigger} /> : <SignalSummaryCard />}
         </SectionBoundary>
       )}
       {sideTab === 'chip' && (
@@ -920,6 +968,15 @@ function HomePage() {
               : (
                   <>
                     <ChipDetailPanel symbol={currentStock.ticker} date={currentDate} />
+                    {chipsLoading && !chips && (
+                      <div role="status" className="mx-2 rounded border border-border/50 bg-secondary/30 px-3 py-2 text-[11px] text-muted-foreground animate-pulse">載入這檔股票的籌碼資料…</div>
+                    )}
+                    {chipsError && !chipsLoading && (
+                      <div role="alert" className="mx-2 flex items-center justify-between gap-2 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+                        <span>籌碼資料載入失敗：{chipsError}</span>
+                        <button type="button" onClick={() => setChipsRetry(value => value + 1)} className="min-h-9 shrink-0 rounded border border-rose-400/40 px-2 font-medium hover:bg-rose-500/15">重試</button>
+                      </div>
+                    )}
                     <ChipRawTables {...chipTables} />
                   </>
                 )}
@@ -940,8 +997,8 @@ function HomePage() {
               ? <CnFundamentalPanel symbol={currentStock.ticker} />
               : (
                 <>
-                  <FundamentalScoreSummary symbol={currentStock.ticker} currentPrice={allCandles[currentIndex]?.close} />
-                  <FundamentalSidebarPanel symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} isHistorical={currentIndex < allCandles.length - 1} />
+                  <FundamentalScoreSummary key={`fund-score-${currentStock.ticker}`} symbol={currentStock.ticker} currentPrice={allCandles[currentIndex]?.close} />
+                  <FundamentalSidebarPanel key={`fund-panel-${currentStock.ticker}`} symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} isHistorical={currentIndex < allCandles.length - 1} />
                 </>
               )}
           </SectionBoundary>
@@ -1028,11 +1085,12 @@ function HomePage() {
     // fullViewport=false 永遠允許整頁 vertical scroll（避免 ^TWII 時整頁鎖死無法捲動）
     // chart 區填滿到視窗底（header 49px + py-2 8px = 57px 上方位移 → 扣 58px 讓排底貼齊視窗底、今日簡報退到摺疊線下）
     <PageShell fullViewport={false} headerSlot={<StockSelector />}>
+      <h1 className="sr-only">Rockstock 股票決策工作台</h1>
       <div className="flex-1 flex flex-col px-3 py-2 gap-3">
-        <div className="flex flex-col md:flex-row gap-2 md:h-[calc(100vh-58px)] md:overflow-hidden">
+        <div className="flex flex-col xl:flex-row gap-3 xl:h-[calc(100vh-70px)] xl:overflow-hidden">
 
         {/* Left: Chart */}
-        <div className="w-full md:flex-1 md:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] md:min-h-0 gap-1.5">
+        <div className="w-full xl:flex-1 xl:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] xl:min-h-0 gap-1.5">
           <StockChartView
             isLoading={isLoadingStock}
             loadingOverlay={
@@ -1054,6 +1112,12 @@ function HomePage() {
             }
             topAlertSlot={
               <>
+                {priceContinuityIssue && (
+                  <div role="alert" className="shrink-0 border-b border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-100">
+                    <span className="font-semibold">價格連續性警示：</span>
+                    {priceContinuityIssue.date} 收盤由 {priceContinuityIssue.previousClose.toFixed(2)} 變為 {priceContinuityIssue.close.toFixed(2)}（{(priceContinuityIssue.changeRatio * 100).toFixed(1)}%）。技術條件與訊號已暫停，籌碼與基本面仍可查看。
+                  </div>
+                )}
                 {chipAvoid && currentInterval === '1d' && (
                   <div className="shrink-0 px-3 py-1.5 bg-red-900/25 border-b border-red-700/50 text-[11px]">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -1161,8 +1225,10 @@ function HomePage() {
             )}
             chartProps={{
               candles: visibleCandles,
-              signals: currentSignals,
-              chartMarkers: [...(showMarkers ? mergedMarkers : []), ...blowoffMarkers],
+              signals: priceContinuityIssue ? [] : currentSignals,
+              chartMarkers: priceContinuityIssue
+                ? []
+                : [...(showMarkers ? mergedMarkers : []), ...blowoffMarkers],
               avgCost: metrics.shares > 0 ? metrics.avgCost : undefined,
               stopLossPrice,
               onCrosshairMove: setHoverCandle,
@@ -1209,11 +1275,11 @@ function HomePage() {
         </div>
 
         {/* Middle: Sidebar */}
-        <div className="w-full md:w-64 2xl:w-80 shrink-0 flex flex-col min-h-0 gap-2">
+        <div className="w-full xl:w-72 2xl:w-80 shrink-0 flex flex-col min-h-0 gap-2">
           {/* Mobile: Sheet drawer */}
-          <div className="md:hidden">
+          <div className="xl:hidden">
             <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-              <SheetTrigger className="flex items-center justify-between w-full px-3 py-2 bg-secondary rounded-lg text-xs text-foreground/80 border border-border">
+              <SheetTrigger className="flex min-h-11 items-center justify-between w-full px-3 py-2 bg-secondary rounded-lg text-sm text-foreground/80 border border-border">
                 <span>分析面板</span>
                 <span className={`transition-transform ${mobileSheetOpen ? 'rotate-180' : ''}`}>&#9660;</span>
               </SheetTrigger>
@@ -1230,7 +1296,7 @@ function HomePage() {
           </div>
 
           {/* Desktop: inline sidebar */}
-          <div id="analysis-sidebar" className="hidden md:flex flex-col min-h-0 gap-2">
+          <div id="analysis-sidebar" className="hidden xl:flex flex-col min-h-0 gap-2">
             {sidebarTabs}
             {sidebarContent}
           </div>
@@ -1247,19 +1313,35 @@ function HomePage() {
         {/* ── Right: 多源候選 panel（tab：策略掃描 / YouTube 提及） ── */}
         <div className={`shrink-0 flex flex-col min-h-0 ring-1 ring-foreground/10 bg-card/80 rounded-xl overflow-hidden transition-all duration-300 ${
           scannerOpen
-            ? 'w-full md:w-[600px] min-h-[50vh] md:min-h-0'
-            : 'w-full md:w-8 h-10 md:h-auto'
+            ? 'w-full xl:w-[min(38vw,600px)] min-h-[50vh] xl:min-h-0'
+            : 'w-full xl:w-11 h-11 xl:h-auto'
         }`}>
           {scannerOpen ? (
             <>
               {/* Panel header：tab 切換 + close button（mobile 用 icon + 短名，desktop 用完整名）*/}
-              <div role="tablist" aria-label="右側資料來源" className="shrink-0 flex items-stretch border-b border-border bg-secondary/30 whitespace-nowrap">
+              <div
+                role="tablist"
+                aria-label="右側資料來源"
+                className="shrink-0 flex items-stretch overflow-x-auto border-b border-border bg-secondary/30 whitespace-nowrap"
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+                  const current = RIGHT_TABS.findIndex(key => key === rightTab);
+                  const next = event.key === 'Home' ? 0 : event.key === 'End' ? RIGHT_TABS.length - 1 : event.key === 'ArrowRight'
+                    ? (current + 1) % RIGHT_TABS.length : (current - 1 + RIGHT_TABS.length) % RIGHT_TABS.length;
+                  event.preventDefault();
+                  selectRightTab(RIGHT_TABS[next]);
+                  requestAnimationFrame(() => document.getElementById(`source-tab-${RIGHT_TABS[next]}`)?.focus());
+                }}
+              >
                 <button
                   type="button"
                   role="tab"
+                  id="source-tab-scan"
                   aria-selected={rightTab === 'scan'}
-                  onClick={() => setRightTab('scan')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                  aria-controls="source-panel-scan"
+                  tabIndex={rightTab === 'scan' ? 0 : -1}
+                  onClick={() => selectRightTab('scan')}
+                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'scan'
                       ? 'text-foreground border-b-2 border-sky-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -1267,76 +1349,83 @@ function HomePage() {
                   title="朱老師策略掃描"
                 >
                   <Search className="w-3 h-3" />
-                  <span className="hidden md:inline">策略掃描</span>
-                  <span className="md:hidden">掃描</span>
+                  <span>策略掃描</span>
                 </button>
                 <button
                   type="button"
                   role="tab"
+                  id="source-tab-youtube"
                   aria-selected={rightTab === 'youtube'}
-                  onClick={() => setRightTab('youtube')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                  aria-controls="source-panel-youtube"
+                  tabIndex={rightTab === 'youtube' ? 0 : -1}
+                  onClick={() => selectRightTab('youtube')}
+                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'youtube'
                       ? 'text-foreground border-b-2 border-purple-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                   title="YouTube 節目提及股票"
                 >
-                  <span aria-hidden="true">📺</span>
-                  <span className="hidden md:inline">YouTube 提及</span>
-                  <span className="md:hidden">節目</span>
+                  <Video className="size-4" aria-hidden="true" />
+                  <span>YouTube</span>
                 </button>
                 <button
                   type="button"
                   role="tab"
+                  id="source-tab-sectors"
                   aria-selected={rightTab === 'sectors'}
-                  onClick={() => setRightTab('sectors')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                  aria-controls="source-panel-sectors"
+                  tabIndex={rightTab === 'sectors' ? 0 : -1}
+                  onClick={() => selectRightTab('sectors')}
+                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'sectors'
                       ? 'text-foreground border-b-2 border-teal-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                   title="題材分類：題材熱度／資金流入／法人買賣超／排名變化"
                 >
-                  <span aria-hidden="true">🔥</span>
-                  <span className="hidden md:inline">題材分類</span>
-                  <span className="md:hidden">題材</span>
+                  <Flame className="size-4" aria-hidden="true" />
+                  <span>題材</span>
                 </button>
                 <button
                   type="button"
                   role="tab"
+                  id="source-tab-broker"
                   aria-selected={rightTab === 'broker'}
-                  onClick={() => setRightTab('broker')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                  aria-controls="source-panel-broker"
+                  tabIndex={rightTab === 'broker' ? 0 : -1}
+                  onClick={() => selectRightTab('broker')}
+                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'broker'
                       ? 'text-foreground border-b-2 border-rose-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                   title="法人報告：報告後漲跌幅 + 目標價達成度"
                 >
-                  <span aria-hidden="true">🏦</span>
-                  <span className="hidden md:inline">法人報告</span>
-                  <span className="md:hidden">法人</span>
+                  <Landmark className="size-4" aria-hidden="true" />
+                  <span>法人</span>
                 </button>
                 <button
                   type="button"
                   role="tab"
+                  id="source-tab-etf"
                   aria-selected={rightTab === 'etf'}
-                  onClick={() => setRightTab('etf')}
-                  className={`flex items-center gap-1 px-2 md:px-3 py-2 text-xs font-semibold transition-colors ${
+                  aria-controls="source-panel-etf"
+                  tabIndex={rightTab === 'etf' ? 0 : -1}
+                  onClick={() => selectRightTab('etf')}
+                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'etf'
                       ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                   title="ETF 追蹤：績效排行／持股異動／共識買榜／被納入後表現"
                 >
-                  <span aria-hidden="true">📈</span>
-                  <span className="hidden md:inline">ETF 追蹤</span>
-                  <span className="md:hidden">ETF</span>
+                  <LineChart className="size-4" aria-hidden="true" />
+                  <span>ETF</span>
                 </button>
                 <div className="flex-1" />
-                <button onClick={() => setScannerOpen(false)}
-                  className="px-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                <button onClick={() => setScannerOpen(false)} aria-label="收起研究面板"
+                  className="min-w-11 min-h-11 px-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                   title="收起面板"
                 >
                   <ChevronDown className="w-3.5 h-3.5 rotate-90" />
@@ -1344,7 +1433,7 @@ function HomePage() {
               </div>
 
               {/* Tab content */}
-              <div className="animate-fade-in flex-1 min-h-0">
+              <div id={`source-panel-${rightTab}`} role="tabpanel" aria-labelledby={`source-tab-${rightTab}`} className="animate-fade-in flex-1 min-h-0">
                 {rightTab === 'scan' && (
                   <ScanPanelVertical onSelectStock={handleScanSelectStock} />
                 )}
@@ -1380,11 +1469,11 @@ function HomePage() {
             /* Collapsed: horizontal bar on mobile, vertical label on desktop */
             <button
               onClick={() => setScannerOpen(true)}
-              className="flex-1 flex flex-row md:flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-colors group"
+              className="flex-1 min-h-11 flex flex-row xl:flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-colors group"
               title="掃描"
             >
               <Search className="w-3.5 h-3.5 text-muted-foreground group-hover:text-blue-400 transition-colors" />
-              <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors md:[writing-mode:vertical-rl]">掃描</span>
+              <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors xl:[writing-mode:vertical-rl]">研究工具</span>
             </button>
           )}
         </div>
@@ -1519,8 +1608,8 @@ function HomePage() {
                   <ErrorBoundary>
                     <CandleChart
                       candles={visibleCandles}
-                      signals={currentSignals}
-                      chartMarkers={showMarkers ? mergedMarkers : []}
+                      signals={priceContinuityIssue ? [] : currentSignals}
+                      chartMarkers={priceContinuityIssue ? [] : (showMarkers ? mergedMarkers : [])}
                       avgCost={metrics.shares > 0 ? metrics.avgCost : undefined}
                       stopLossPrice={stopLossPrice}
                       onCrosshairMove={setHoverCandle}

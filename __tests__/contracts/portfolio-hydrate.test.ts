@@ -52,7 +52,7 @@ describe('hydrateHoldingsFromServer', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ data: { holdings: [
-        serverRow(),
+        serverRow({ stopLoss: 188.5 }),
         serverRow({ symbol: '603986.SS', name: '兆易创新', market: 'CN', entryPrice: 302.95, shares: 3200 }),
       ] } }),
     }) as unknown as typeof fetch;
@@ -64,6 +64,7 @@ describe('hydrateHoldingsFromServer', () => {
     const tw = h.find(x => x.symbol === '2408.TW')!;
     expect(tw.costPrice).toBe(203.83);
     expect(tw.buyDate).toBe('2026-05-20');
+    expect(tw.stopLoss).toBe(188.5);
     expect(h.some(x => x.market === 'CN')).toBe(true);
   });
 

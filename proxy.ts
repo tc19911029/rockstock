@@ -27,7 +27,7 @@ export function proxy(req: NextRequest) {
 
   const ip = getClientIp(req);
 
-  const result = checkApiRateLimit(pathname, ip);
+  const result = checkApiRateLimit(pathname, ip, req.method);
 
   if (!result.success) {
     return NextResponse.json(
