@@ -1,4 +1,5 @@
 import { fetchYicaiVideos } from './yicai';
+import { fetchBilibiliVideos } from './bilibili';
 import {
   loadCnMediaSources,
   saveCnMediaScanResults,
@@ -17,10 +18,11 @@ export async function scanCnMedia(targetDate: string): Promise<{
   for (const source of sources) {
     const scannedAt = new Date().toISOString();
     try {
-      if (source.platform !== 'yicai') {
-        throw new Error(`unsupported active platform: ${source.platform}`);
-      }
-      const videos = await fetchYicaiVideos(source, targetDate);
+      const videos = source.platform === 'yicai'
+        ? await fetchYicaiVideos(source, targetDate)
+        : source.platform === 'bilibili'
+          ? await fetchBilibiliVideos(source, targetDate)
+          : (() => { throw new Error(`unsupported active platform: ${source.platform}`); })();
       allVideos.push(...videos);
       results.push({
         source_id: source.source_id,

@@ -13,6 +13,7 @@ const FFMPEG_BIN = process.env.FFMPEG_BIN || path.join(homedir(), '.local', 'bin
 const PYTHON_BIN = process.env.PYTHON_BIN || 'python3';
 const WHISPER_MODEL = process.env.CN_MEDIA_WHISPER_MODEL || process.env.WHISPER_MODEL || 'small';
 const WHISPER_SCRIPT = path.join(process.cwd(), 'scripts', 'whisper-transcribe.py');
+const BILIBILI_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36';
 
 interface ProcessResult {
   code: number | null;
@@ -75,8 +76,12 @@ export async function transcribeCnMediaVideo(video: CnMediaVideo): Promise<CnMed
   const vttPath = path.join(work, `${token}.vtt`);
   beginTranscription();
   try {
+    const inputHeaders = video.platform === 'bilibili'
+      ? ['-user_agent', BILIBILI_USER_AGENT, '-headers', 'Referer: https://www.bilibili.com/\r\n']
+      : [];
     const download = await runProcess(FFMPEG_BIN, [
       '-hide_banner', '-loglevel', 'error', '-y',
+      ...inputHeaders,
       '-i', video.media_url,
       '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'aac', '-b:a', '48k',
       audioPath,

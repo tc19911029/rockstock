@@ -27,10 +27,18 @@ async function putJson<T>(key: string, value: T): Promise<void> {
 
 export async function loadCnMediaSources(): Promise<CnMediaSource[]> {
   const existing = await getJson<CnMediaSource[]>('sources.json');
-  if (existing?.length) return existing;
-  const sources = defaultCnMediaSources();
-  await putJson('sources.json', sources);
-  return sources;
+  const defaults = defaultCnMediaSources();
+  if (!existing?.length) {
+    await putJson('sources.json', defaults);
+    return defaults;
+  }
+  const existingById = new Map(existing.map(source => [source.source_id, source]));
+  const merged = [
+    ...defaults.map(source => ({ ...source, ...existingById.get(source.source_id) })),
+    ...existing.filter(source => !defaults.some(item => item.source_id === source.source_id)),
+  ];
+  if (JSON.stringify(merged) !== JSON.stringify(existing)) await putJson('sources.json', merged);
+  return merged;
 }
 
 export async function loadCnMediaVideos(date: string): Promise<CnMediaVideo[]> {

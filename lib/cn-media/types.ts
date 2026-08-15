@@ -14,6 +14,12 @@ export interface CnMediaSource {
   default_analysts: string[];
   /** 官方媒體與個人創作者分層，分析時不可把兩者可信度視為相同。 */
   source_tier: 'official_media' | 'creator';
+  /** 創作者帳號可能混合其他題材，只收錄標題含任一關鍵字的內容。 */
+  include_title_keywords?: string[];
+  /** B站手機搜尋使用的穩定關鍵字；搜尋後仍會核對作者 ID。 */
+  search_query?: string;
+  /** 搜尋結果頁數，預設 3 頁。 */
+  search_pages?: number;
 }
 export interface CnMediaVideo {
   video_id: string;
