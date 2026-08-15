@@ -23,11 +23,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import { useBacktestStore } from '@/store/backtestStore';
-import { classifySignal, SignalSubtype } from '@/lib/rules/signalClassifier';
+import { classifySignal } from '@/lib/rules/signalClassifier';
 import { calcKLineStopLoss } from '@/lib/sell/v12StopLoss';
-import { getOperationMA } from '@/lib/sell/v12Operation';
 import { computePartialExitState, type PartialExitState } from '@/lib/sell/v12PartialExit';
 import { sopFor } from '@/lib/portfolio/letterSOP';
+import {
+  resolveHoldingProfitTarget,
+  resolveSignalPanelOperatingMA,
+} from '@/lib/portfolio/signalPanelPlan';
 import { getTickSize } from '@/lib/utils/tickSize';
 import { marketFromSymbol, formatSharesAsLots } from '@/lib/utils/shareUnits';
 import { detectLetterM } from '@/lib/analysis/v12LetterM';
@@ -41,6 +44,7 @@ import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 import { analyzeKLineSignals, isKLineSignal } from '@/lib/rules/klineSignalAnalysis';
+import { pickHoldingRiskProhibitions } from '@/lib/rules/prohibitionRelevance';
 import type { PatternSignal } from '@/lib/rules/winnerPatternRules';
 import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
 import type { NarrativeAction } from '@/lib/narrative/types';
@@ -132,143 +136,14 @@ const PATTERN_LABEL: Record<string, string> = {
 
 // ── 結論計算 ─────────────────────────────────────────────────────────────────
 
-type StrengthLevel = 'good' | 'warn' | 'bad' | 'neutral';
-
-interface Verdict {
-  level: StrengthLevel;
-  label: string;
-  basis: string;
-}
-
-const STRENGTH_BAR: Record<StrengthLevel, string> = {
-  good:    'bg-emerald-500',
-  warn:    'bg-amber-500',
-  bad:     'bg-rose-500',
-  neutral: 'bg-border',
+const NARRATIVE_BAR: Record<NarrativeAction, string> = {
+  exit: 'bg-emerald-500',
+  reduce: 'bg-amber-500',
+  'evaluate-entry': 'bg-rose-500',
+  hold: 'bg-rose-500',
+  wait: 'bg-sky-500',
+  'avoid-entry': 'bg-emerald-500',
 };
-
-/**
- * 議題 C3 + M8：判斷哪些戒律持股中也應該露。
- * 戒律 6 = 回檔底底低（多頭結構已破）
- * 戒律 7 = 趨勢轉盤整
- * 戒律 8 = 趨勢轉空頭
- * 戒律 9 = 連續急漲爆量長紅（高位過熱）— M8 補：持股中觸發 = 該停利
- * 其他戒律（量價背離/週線壓力等）持股中已不適用，照舊隱藏。
- *
- * 0513 ABCDE 整合：唯一定義在這（SignalSummaryCard）；如需跨檔共用搬到 lib/rules/criticalProhibitions.ts。
- */
-function pickCriticalProhibitions(prohibitions: string[]): string[] {
-  return prohibitions.filter((p) => /戒律[6789]/.test(p));
-}
-
-function getVerdict(
-  hasPosition: boolean,
-  subtypes: SignalSubtype[],
-  signalLabels: { entry: string[]; exit: string[] },
-  prohibitionCount: number,
-  hasTopPattern: boolean = false,
-  criticalProhibitions: string[] = [],
-  firstExitDesc?: string,
-  reversalWatch?: { label: string; description?: string } | null,
-): Verdict {
-  const counts: Record<SignalSubtype, number> = {
-    entry_strong: 0, entry_soft: 0, exit_strong: 0, exit_soft: 0, trend: 0, warn: 0,
-  };
-  for (const s of subtypes) counts[s]++;
-
-  if (hasPosition) {
-    // 2026-05-10 補：頂部型態觸發（三重頂/頭肩頂/雙重頂跌破頸線）= 硬出場警示
-    // 書本：見頂部型態跌破 = 立即出場，視同 exit_strong 級別
-    if (hasTopPattern) {
-      return {
-        level: 'bad',
-        label: '該出場',
-        basis: '頂部型態跌破頸線（書本：見頂部型態+跌破頸線即出場）',
-      };
-    }
-    if (counts.exit_strong > 0) {
-      // 2026-07-05 訊號教學化：結論列直接講「為什麼」（訊號內容），不再只丟訊號名
-      return {
-        level: 'bad',
-        label: '該出場',
-        basis: firstExitDesc
-          ? `${signalLabels.exit[0] ?? '硬出場'}：${firstExitDesc}`
-          : `出現硬出場訊號（${signalLabels.exit.slice(0, 2).join('、') || '硬出場'}），書本要求立即出場`,
-      };
-    }
-    if (counts.exit_soft >= 2) {
-      return {
-        level: 'warn',
-        label: '減碼或緊盯',
-        basis: `${counts.exit_soft} 條軟出場訊號（${signalLabels.exit.slice(0, 2).join('、')}），緊盯停損`,
-      };
-    }
-    if (counts.exit_soft === 1 && counts.entry_strong > 0) {
-      return { level: 'warn', label: '方向不明', basis: '進場+出場同時觸發，停損守好等明日確認' };
-    }
-    if (counts.exit_soft === 1) {
-      return { level: 'warn', label: '緊盯停損', basis: signalLabels.exit[0] ?? '輕微減碼警示' };
-    }
-    // 課程 CH2 變盤線（2026-07-05）：止漲變盤成形 → 結論=「看明日開盤確認」而非「繼續持有」
-    // 課程鐵律：變盤線出現當天不動作，次日開低+收黑=變盤確認才出場、開高續抱。
-    if (reversalWatch) {
-      return {
-        level: 'warn',
-        label: '變盤警示・看明日開盤',
-        basis: `${reversalWatch.label}${reversalWatch.description ? `：${reversalWatch.description}` : ''}（課程 CH2：明日開低收黑→出場；開高不破今低→續抱）`,
-      };
-    }
-    // 議題 C3：結構轉變戒律觸發 → 即使無出場訊號也要警示「持股風險升高」
-    if (criticalProhibitions.length > 0) {
-      return {
-        level: 'warn',
-        label: '風險升高',
-        basis: `結構轉變：${criticalProhibitions[0]}（多頭優勢縮減，緊盯停損）`,
-      };
-    }
-    return { level: 'good', label: '繼續持有', basis: '多頭延續、無出場訊號，續抱跟均線走' };
-  }
-
-  // 未持倉 — 戒律觸發為硬性禁忌，書本：「即使其他條件全過，戒律觸發即不進場」
-  if (prohibitionCount > 0) {
-    return {
-      level: 'bad',
-      label: '不要進場',
-      basis: `戒律觸發 ${prohibitionCount} 條 — 書本硬性禁忌，詳見「條件」分頁`,
-    };
-  }
-  // 2026-05-10 補：未持倉 + 頂部型態觸發 → 該檔股票正在下跌，禁止進場
-  // （對稱持股中頂部型態 = 出場警示；對未持倉就是「不要碰」）
-  if (hasTopPattern) {
-    return {
-      level: 'bad',
-      label: '不要進場',
-      basis: '頂部型態跌破頸線 — 股票方向轉空，書本：禁止做多',
-    };
-  }
-
-  if (counts.entry_strong > 0 && counts.exit_strong === 0 && counts.exit_soft === 0) {
-    return {
-      level: 'good',
-      label: '可進場',
-      basis: `進場訊號成立（${signalLabels.entry.slice(0, 2).join('、') || '硬進場'}），書本進場條件已過`,
-    };
-  }
-  if (counts.entry_strong > 0 && (counts.exit_strong > 0 || counts.exit_soft > 0)) {
-    return { level: 'warn', label: '不追高、等確認', basis: '進場+出場同時觸發，書本：方向不明先空手' };
-  }
-  if (counts.exit_strong > 0 || counts.exit_soft > 0) {
-    return {
-      level: 'bad',
-      label: '空手觀望',
-      basis: signalLabels.exit.slice(0, 2).join('、') || '轉弱訊號，勿逆勢進場',
-    };
-  }
-  if (counts.entry_soft > 0) {
-    return { level: 'warn', label: '觀察', basis: signalLabels.entry[0] ?? '軟進場訊號，等硬條件成立' };
-  }
-  return { level: 'neutral', label: '無明確訊號', basis: '今日無進出場訊號，續觀察' };
-}
 
 // ── V12 字母動態偵測 ──────────────────────────────────────────────────────────
 
@@ -425,23 +300,25 @@ export default function SignalSummaryCard() {
   const primaryLetter: V12Letter = hasPosition
     ? (heldLetter ?? 'B')
     : (strategyLetter ?? primaryV12?.letter ?? 'B');
+  const operationMode = hasPosition ? (heldPosition?.operationMode ?? 'short') : 'short';
+  const holdingModeLabel = operationMode === 'long' ? ' · 長線' : '';
   // 策略視角顯示名（持倉買法優先時標示來源；A/R 不是單一進場字母，特別標示）
-  const strategyName = heldLetter ? `${sopFor(primaryLetter).name}（持倉買法）`
-    : missingHoldingLetter ? `${sopFor(primaryLetter).name}（未記錄買法，預設 B）`
+  const strategyName = heldLetter ? `${sopFor(primaryLetter).name} · 持倉 ${primaryLetter}${holdingModeLabel}`
+    : missingHoldingLetter ? `${sopFor(primaryLetter).name} · 預設 B${holdingModeLabel}`
     : activeBuyMethod === 'A' ? '六條件（預選池）'
     : activeBuyMethod === 'R' ? '機械軌（乖離率）'
     : sopFor(primaryLetter).name;
-  // 0513 ABCDE C1：用 letterSOP 取代 getOperationMA 散落定義；對 'short' mode 兩者必須等價
-  // (cross-source consistency test 在 __tests__/letterSOP.test.ts 強制驗)
-  const operatingMA = sopFor(primaryLetter).operatingMA;
-  // 0513 ABCDE E：super-long / wave 已砍；getOperationMA 仍保留處理 'long' upgrade
-  void getOperationMA;
+  // 短線模式與 letterSOP 對齊；持倉升級長線後必須改用 MA20，和後端風控保持一致。
+  const operatingMA = resolveSignalPanelOperatingMA(primaryLetter, operationMode);
+  const strategyContextTitle = hasPosition
+    ? `此訊號卡依這筆持倉的進場買法與操作模式，固定套用「${strategyName}」 SOP（操作均線 ${operatingMA ?? '—'}），不會跟著右側掃描策略改變。`
+    : `此訊號卡套用「${strategyName}」 SOP（操作均線 ${operatingMA ?? '—'}）；在右側掃描面板換策略時會同步切換。`;
 
   // ── 訊號分類（出場訊號對齊操作均線）────────────────────────────────────
   // 持股中：比操作均線「短」的跌破均線出場訊號降級為軟出場（緊盯/減碼，不喊該出場）。
   // 例：J（ABC 突破）操作 MA20 — 破 MA5/MA10 只是減碼警示，收盤破 MA20 才是硬出場。
   const MA_RANK: Record<string, number> = { MA3: 1, MA5: 2, MA10: 3, MA20: 4, MA60: 5 };
-  const opRank = MA_RANK[operatingMA] ?? null;
+  const opRank = operatingMA ? (MA_RANK[operatingMA] ?? null) : null;
   const maRankOfSignal = (s: RuleSignal): number | null => {
     const hay = `${s.ruleId} ${s.label} ${s.description ?? ''}`;
     const hits = (['MA60', 'MA20', 'MA10', 'MA5', 'MA3'] as const)
@@ -456,11 +333,10 @@ export default function SignalSummaryCard() {
     }
     return { sig: s, subtype: t };
   });
-  const subtypes = classified.map(c => c.subtype);
   const entrySigs = classified
     .filter(c => c.subtype === 'entry_strong' || c.subtype === 'entry_soft' || c.subtype === 'trend')
     .map(c => c.sig);
-  // 硬出場排前面 — verdict 的 basis 引用 exitSigs[0]，要對到真正觸發「該出場」的那條
+  // 硬出場排前面，明細中依風險優先順序顯示。
   const exitSigs = [
     ...classified.filter(c => c.subtype === 'exit_strong'),
     ...classified.filter(c => c.subtype === 'exit_soft'),
@@ -471,11 +347,7 @@ export default function SignalSummaryCard() {
   const exitReasonSigs = uniqueRuleSignals(exitSigs.filter(signal => !isKLineSignal(signal)));
   const warnReasonSigs = uniqueRuleSignals(warnSigs.filter(signal => !isKLineSignal(signal)));
 
-  // 課程 CH2 變盤線家族（2026-07-05 訊號教學化）：母子/遭遇/晨星夜星成形/破實體未破底…
-  // 這類「止漲變盤、次日確認」訊號要影響結論列 — 不是硬出場、但也不是「繼續持有沒事」。
-  const reversalWatchSig = warnSigs.find(s => /變盤|次日確認|母子|遭遇|止漲|成形/.test(s.label));
-
-  const criticalProhibitions = pickCriticalProhibitions(longProhibitions?.reasons ?? []);
+  const criticalProhibitions = pickHoldingRiskProhibitions(longProhibitions?.reasons ?? []);
   const reasonDetailCount = (!hasPosition ? v12Hits.length + entryReasonSigs.length : 0)
     + (hasPosition ? exitReasonSigs.length : 0)
     + warnReasonSigs.length
@@ -493,28 +365,18 @@ export default function SignalSummaryCard() {
       : [],
     operatingMA,
   });
-  const verdict = getVerdict(
-    hasPosition,
-    subtypes,
-    { entry: entrySigs.map(s => s.label), exit: exitSigs.map(s => s.label) },
-    longProhibitions?.reasons?.length ?? 0,
-    topPatternHit !== null,  // 頂部型態觸發（持股 → 該出場；未持倉 → 不要進場）
-    criticalProhibitions,
-    exitSigs[0]?.description,  // 硬出場時把「為什麼」帶進結論（不再只給訊號名）
-    reversalWatchSig ? { label: reversalWatchSig.label, description: reversalWatchSig.description } : null,
-  );
-
   // ── 停損 / 停利 ─────────────────────────────────────────────────────────
   // 持股中 vs 未持倉 兩條計算徹底分流，不再共用 entryPrice
-  // 規避舊 V12SignalAlerts 把型態目標價納入 Step 5 預估的 regression
-  const patternTarget = primaryV12?.patternTargetPrice;
+  const currentPatternTarget = primaryV12?.patternTargetPrice;
+  const holdingPatternTarget = heldPosition?.entryPattern?.targetPrice;
 
-  // 持倉中（書本：跟著操作均線走 + 10% 紀律停利）
-  const profitLine = hasPosition && heldPosition?.costPrice != null
-    ? (patternTarget ?? heldPosition.costPrice * PROFIT_TARGET_PRICE_MULT)
+  // 持倉中只讀進場時凍結的型態快照，不得用今日新偵測的型態目標改寫持倉計畫。
+  const holdingProfitPlan = hasPosition && heldPosition?.costPrice != null
+    ? resolveHoldingProfitTarget(heldPosition.costPrice, holdingPatternTarget)
     : null;
+  const profitLine = holdingProfitPlan?.price ?? null;
   const profitLineReached = profitLine != null && candle.close >= profitLine;
-  const profitLineSource: 'pattern' | 'rule' = patternTarget != null ? 'pattern' : 'rule';
+  const profitLineSource = holdingProfitPlan?.source ?? 'rule';
 
   // 未持倉（若今日進場 試算）：進場=今收、停損=K線最低 vs 7% floor、停利=今收×1.10 或型態目標
   const projEntry = candle.close;
@@ -522,9 +384,9 @@ export default function SignalSummaryCard() {
   const projKlineStop = calcKLineStopLoss(candle, tickSize);
   const projStopLoss = Math.max(projKlineStop, projEntry * STOP_LOSS_PRICE_MULT);  // 書本守則：停損 7% 上限
   const projSlPct = ((projStopLoss - projEntry) / projEntry) * 100;
-  const projProfit = patternTarget ?? projEntry * PROFIT_TARGET_PRICE_MULT;
+  const projProfit = currentPatternTarget ?? projEntry * PROFIT_TARGET_PRICE_MULT;
   const projPtPct = ((projProfit - projEntry) / projEntry) * 100;
-  const projProfitSource: 'pattern' | 'rule' = patternTarget != null ? 'pattern' : 'rule';
+  const projProfitSource: 'pattern' | 'rule' = currentPatternTarget != null ? 'pattern' : 'rule';
 
   // ── 33 種贏家圖像（與當日 K 線訊號同區呈現，避免把局部圖像分數寫成全局趨勢）──
   const adjust = winnerPatterns?.compositeAdjust ?? 0;
@@ -553,13 +415,13 @@ export default function SignalSummaryCard() {
     <div className="bg-card ring-1 ring-foreground/10 rounded-xl overflow-hidden">
       <div className="flex">
         {/* 左邊強度色條 */}
-        <div className={`w-1 shrink-0 ${STRENGTH_BAR[verdict.level]}`} />
+        <div className={`w-1 shrink-0 ${NARRATIVE_BAR[chartNarrative.action]}`} />
         <div className="flex-1 p-3 space-y-3">
 
           {/* ── 0. 策略視角（跟著右側掃描面板選的策略換）──────────────── */}
           <div
             className="flex items-center gap-2 text-[11px]"
-            title={`此訊號卡套用「${strategyName}」的操作 SOP（操作均線 ${operatingMA ?? '—'}）。在右側掃描面板換策略即同步切換。`}
+            title={strategyContextTitle}
           >
             <span className="px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-200 font-semibold shrink-0">策略</span>
             <span className="text-foreground/85 font-medium truncate">{strategyName}</span>
@@ -674,7 +536,7 @@ export default function SignalSummaryCard() {
           </SignalDisclosure>
 
           {/* ── 4. 為什麼？分組 ───────────────────────────── */}
-          {/* topPatternHit 不論持倉都傳，跟 verdict 邏輯對稱（持股=該出場、未持倉=不要進場）
+          {/* topPatternHit 不論持倉都傳，持股時是出場警示，未持倉時是禁止做多依據。
               hasPosition 決定要不要顯示「進場依據」（持股中隱藏，避免暗示加碼）*/}
           {reasonDetailCount > 0 && (
             <SignalDisclosure title="其他規則明細" meta={`${reasonDetailCount} 項`}>
@@ -897,8 +759,13 @@ function HoldingDiscipline({
   operatingMA: string | null;
   profitLine: number | null;
   profitLineReached: boolean;
-  profitLineSource: 'pattern' | 'rule';
+  profitLineSource: 'entry-pattern' | 'rule';
 }) {
+  const formatDistance = (value: number) => {
+    const absolute = Math.abs(value);
+    return absolute > 0 && absolute < 0.1 ? absolute.toFixed(2) : absolute.toFixed(1);
+  };
+
   return (
     <div className="space-y-1 text-xs leading-relaxed">
       <p className="text-[11px] text-muted-foreground/80">持倉中守則：</p>
@@ -909,16 +776,20 @@ function HoldingDiscipline({
         const maVal = (candle as unknown as Record<string, number | undefined>)[maKey];
         if (maVal == null) return null;
         const maPct = ((maVal - candle.close) / candle.close) * 100;
+        const breached = candle.close < maVal;
         return (
-          <p className="text-emerald-300">
+          <p className={breached
+            ? 'rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1.5 text-emerald-200'
+            : 'text-foreground/80'}>
             <span
-              className="font-bold"
+              className={breached ? 'font-bold text-emerald-200' : 'font-bold text-foreground/85'}
               title="進場後持倉期間，跌破此均線才出場（書本：跟著均線走，動態跟蹤停損）"
-            >動態停損</span>
-            <span className="ml-2">跌破 {operatingMA}</span>
+            >{breached ? '已跌破' : '動態停損'}</span>
+            <span className="ml-2">{operatingMA}</span>
             <span className="ml-1.5 font-mono font-bold">{maVal.toFixed(2)}</span>
-            <span className="ml-1.5 font-mono text-muted-foreground/70">({maPct.toFixed(1)}%)</span>
-            <span className="ml-1.5 text-muted-foreground/70">出場</span>
+            <span className="ml-1.5 text-muted-foreground/75">
+              {breached ? `低於 ${formatDistance(maPct)}% · 出場` : `距停損 ${formatDistance(maPct)}%`}
+            </span>
           </p>
         );
       })()}
@@ -926,17 +797,19 @@ function HoldingDiscipline({
       {/* 10% 紀律停利線（或型態目標）*/}
       {profitLine != null && (
         <p className="text-rose-300">
-          <span className="font-bold">停利線</span>
+          <span className="font-bold">停利目標</span>
           <span className="ml-2 font-mono font-bold">{profitLine.toFixed(2)}</span>
-          <span className="ml-1.5 font-mono text-muted-foreground/70">
-            ({((profitLine - candle.close) / candle.close * 100).toFixed(1)}%)
+          <span className="ml-1.5 text-muted-foreground/70">
+            {profitLineReached
+              ? `已超過 ${formatDistance((candle.close - profitLine) / profitLine * 100)}%`
+              : `距目標 +${formatDistance((profitLine - candle.close) / candle.close * 100)}%`}
           </span>
           <span className="ml-2 text-[11px] text-muted-foreground/60">
-            {profitLineSource === 'pattern' ? '型態目標' : '10%紀律'}
+            {profitLineSource === 'entry-pattern' ? '進場型態快照' : '10%紀律'}
           </span>
           {profitLineReached && (
             <span className="ml-2 text-[11px] font-bold text-amber-300">
-              ✓ 已達 — 緊盯動態停損
+              改守動態停損
             </span>
           )}
         </p>

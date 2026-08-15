@@ -90,8 +90,8 @@ describe('走圖敘事建構器', () => {
     });
 
     expect(result.action).toBe('avoid-entry');
-    expect(result.confirmation).toContain('轉弱訊號解除');
-    expect(result.confirmation).not.toContain('戒律解除');
+    expect(result.confirmation).toContain('轉弱訊號是否繼續');
+    expect(result.confirmation).not.toContain('戒律');
   });
 
   test('K 線成形只給等待確認，並保留確認與失效條件', () => {
@@ -130,9 +130,10 @@ describe('走圖敘事建構器', () => {
       hasPosition: false,
     });
 
-    expect(result.events).toHaveLength(1);
-    expect(result.events[0].category).toBe('kline');
-    expect(result.evidenceLevel).toBe('low');
+    expect(result.events).toHaveLength(2);
+    expect(result.events.filter(event => event.category === 'kline')).toHaveLength(1);
+    expect(result.events.some(event => event.category === 'trend')).toBe(true);
+    expect(result.evidenceLevel).toBe('medium');
   });
 
   test('同一來源家族的多條訊號不會膨脹成多來源信心', () => {
@@ -146,8 +147,50 @@ describe('走圖敘事建構器', () => {
       hasPosition: false,
     });
 
-    expect(result.events).toHaveLength(2);
-    expect(result.evidenceLevel).toBe('low');
+    expect(result.events.filter(event => event.category === 'entry')).toHaveLength(2);
+    expect(result.events.filter(event => event.category === 'trend')).toHaveLength(1);
+    expect(result.evidenceLevel).toBe('medium');
+  });
+
+  test('持股續抱時以趨勢與操作均線為主依據，不借用買進型態的確認條件', () => {
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [signal({
+        type: 'BUY',
+        subtype: 'entry_strong',
+        ruleId: 'kline-rising-three-methods',
+        label: '上升三法',
+        reason: '次日突破高點才確認。',
+      })],
+      hasPosition: true,
+      operatingMA: 'MA20',
+    });
+
+    expect(result.action).toBe('hold');
+    expect(result.primaryEvent.category).toBe('trend');
+    expect(result.confirmation).toContain('MA20');
+    expect(result.confirmation).not.toContain('突破高點');
+  });
+
+  test('硬出場的重判條件不會被另一條進場戒律取代', () => {
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [signal({
+        type: 'SELL',
+        subtype: 'exit_strong',
+        ruleId: 'ma20-break',
+        label: '跌破 MA20',
+      })],
+      hasPosition: true,
+      prohibitions: ['戒律6：回檔底底低，多頭結構已破'],
+      operatingMA: 'MA20',
+    });
+
+    expect(result.action).toBe('exit');
+    expect(result.invalidation).toContain('站回 MA20');
+    expect(result.invalidation).not.toContain('戒律6');
   });
 
   test('追加未來 K 棒不會改寫當下敘事', () => {

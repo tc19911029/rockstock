@@ -5,6 +5,7 @@ import {
   type KLineSignalAnalysis,
 } from '@/lib/rules/klineSignalAnalysis';
 import { classifySignal, type SignalSubtype } from '@/lib/rules/signalClassifier';
+import { pickHoldingRiskProhibitions } from '@/lib/rules/prohibitionRelevance';
 import type { RuleSignal } from '@/types';
 import type {
   BuildChartNarrativeInput,
@@ -24,8 +25,6 @@ const ACTION_LABEL: Record<NarrativeAction, string> = {
   wait: '等待確認',
   'avoid-entry': '暫不進場',
 };
-
-const CRITICAL_PROHIBITION = /戒律[6789]|底底低|結構.*(?:轉弱|破壞)|趨勢.*(?:空頭|轉空)/;
 
 function compact(value: string, maxLength = 150): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -162,6 +161,15 @@ function resolveAction(
   return { action: 'wait', tone: 'neutral', headline: '條件尚未齊備，等待型態確認' };
 }
 
+function isDecisionEvidence(event: ChartNarrativeEvent, action: NarrativeAction): boolean {
+  if (action === 'hold') return event.category === 'trend';
+  if (action === 'wait') return event.state === 'forming' || event.category === 'trend';
+  if (action === 'avoid-entry') {
+    return event.action === 'avoid-entry' || event.action === 'exit' || event.action === 'reduce';
+  }
+  return event.action === action;
+}
+
 function fallbackConfirmation(
   action: NarrativeAction,
   operatingMA?: string | null,
@@ -172,16 +180,19 @@ function fallbackConfirmation(
   if (action === 'reduce') return '觀察下一根是否續弱，並同步檢查操作均線與前低。';
   if (action === 'evaluate-entry') return '收盤訊號維持成立，且戒律、位置與停損空間均可接受。';
   if (action === 'avoid-entry') return blockers.length > 0
-    ? '等待戒律解除，且結構重新轉強後再評估。'
-    : '等待轉弱訊號解除，且結構重新轉強後再評估。';
+    ? '目前維持空手；下一根只檢查戒律是否仍存在，不預掛進場單。'
+    : '目前維持空手；先觀察轉弱訊號是否繼續，不預判反轉。';
   return '等待下一根 K 棒完成型態或突破／跌破關鍵價。';
 }
 
 function fallbackInvalidation(action: NarrativeAction, blockers: readonly string[], operatingMA?: string | null): string {
+  if (action === 'exit') return operatingMA
+    ? `收盤重新站回 ${operatingMA} 且結構轉強後，才重新判讀；不回頭抵銷當日出場紀律。`
+    : '結構重新站回關鍵壓力且出現新確認訊號後，才重做判讀。';
   if (blockers[0]) return `若「${compact(blockers[0], 90)}」解除且結構重新轉強，本次風險判讀失效。`;
   if ((action === 'hold' || action === 'reduce') && operatingMA) return `收盤跌破 ${operatingMA} 時重新評估持股。`;
   if (action === 'evaluate-entry') return '確認前先跌破型態低點或原支撐，進場假設失效。';
-  if (action === 'exit' || action === 'avoid-entry') return '結構重新站回關鍵壓力並出現新的確認訊號，才重做判讀。';
+  if (action === 'avoid-entry') return '結構重新站回關鍵壓力並出現新的確認訊號，才重做判讀。';
   return '若型態未在後續 K 棒完成，維持觀望。';
 }
 
@@ -211,7 +222,7 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     .map(signal => eventForSignal(signal, classificationFor(signal, classifiedSignals), safeIndex, date));
 
   const prohibitionBlockers = input.hasPosition
-    ? (input.prohibitions ?? []).filter(reason => CRITICAL_PROHIBITION.test(reason))
+    ? pickHoldingRiskProhibitions(input.prohibitions ?? [])
     : [...(input.prohibitions ?? [])];
   const hardRisks = [...(input.hardRisks ?? [])];
   const relevantBlockers = [...hardRisks, ...prohibitionBlockers];
@@ -243,7 +254,9 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
         direction: 'bearish',
         action: input.hasPosition ? 'reduce' : 'avoid-entry',
         label: input.hasPosition ? '持股戒律警示' : '進場戒律未過',
-        description: compact(prohibitionBlockers[0]),
+        description: input.hasPosition
+          ? compact(`持倉進入「${prohibitionBlockers[0]}」所描述的風險環境；提高警戒，但是否出場仍以操作均線與硬出場訊號為準。`)
+          : compact(prohibitionBlockers[0]),
         sourceRuleIds: ['entry-prohibitions'],
         sourceFamily: '風險戒律',
         priority: 90,
@@ -257,7 +270,6 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     trendPosition = detectTrendPosition(prefix, prefix.length - 1);
   }
 
-  const events = mergeDuplicateEvents([...klineEvents, ...ruleEvents, ...hardRiskEvent, ...riskEvent]);
   const trendEvent = freezeEvent({
     id: `${date}:trend:${trendState}:${trendPosition}`,
     setupKey: 'trend:current',
@@ -273,10 +285,18 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     sourceFamily: '趨勢位置',
     priority: 20,
   } satisfies ChartNarrativeEvent);
-  const allEvents = Object.freeze(events.length > 0 ? events : [trendEvent]);
+  // 趨勢是 K 線與規則的解讀背景，每次都保留在證據鏈，不再只在「無訊號」時出現。
+  const allEvents = Object.freeze(mergeDuplicateEvents([
+    ...klineEvents,
+    ...ruleEvents,
+    ...hardRiskEvent,
+    ...riskEvent,
+    trendEvent,
+  ]));
   const decision = resolveAction(input.hasPosition, allEvents, relevantBlockers);
-  const primaryEvent = allEvents[0];
-  const secondaryEvents = Object.freeze(allEvents.slice(1, 4));
+  // 主要依據必須和最終動作同一方向；避免「續抱」卻拿買進型態的確認條件當主文。
+  const primaryEvent = allEvents.find(event => isDecisionEvidence(event, decision.action)) ?? allEvents[0];
+  const secondaryEvents = Object.freeze(allEvents.filter(event => event !== primaryEvent).slice(0, 3));
   const evidenceFamilies = new Set(allEvents.map(event => event.sourceFamily));
   const evidenceLevel = evidenceFamilies.size >= 3 ? 'high' : evidenceFamilies.size === 2 ? 'medium' : 'low';
   const confirmation = primaryEvent.confirmation
