@@ -41,7 +41,9 @@ import { deductPrice, daysUntilMaTurn, daysUntilGoldenCross, formatMaTurnLine, M
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
+import { analyzeKLineSignals, isKLineSignal } from '@/lib/rules/klineSignalAnalysis';
 import ChartCoachAdvice from './ChartCoachAdvice';
+import KLineSignalAnalysisPanel from './KLineSignalAnalysisPanel';
 
 // ── 訊號白話說明對照表 ────────────────────────────────────────────────────────
 //
@@ -426,6 +428,10 @@ export default function SignalSummaryCard() {
     ...classified.filter(c => c.subtype === 'exit_soft'),
   ].map(c => c.sig);
   const warnSigs = classified.filter(c => c.subtype === 'warn').map(c => c.sig);
+  const klineAnalyses = analyzeKLineSignals(currentSignals);
+  const entryReasonSigs = entrySigs.filter(signal => !isKLineSignal(signal));
+  const exitReasonSigs = exitSigs.filter(signal => !isKLineSignal(signal));
+  const warnReasonSigs = warnSigs.filter(signal => !isKLineSignal(signal));
 
   // 課程 CH2 變盤線家族（2026-07-05 訊號教學化）：母子/遭遇/晨星夜星成形/破實體未破底…
   // 這類「止漲變盤、次日確認」訊號要影響結論列 — 不是硬出場、但也不是「繼續持有沒事」。
@@ -612,6 +618,8 @@ export default function SignalSummaryCard() {
             <MaDeductionForecast candles={allCandles} index={currentIndex} />
           </div>
 
+          <KLineSignalAnalysisPanel analyses={klineAnalyses} />
+
           {/* ── 4. 為什麼？分組 ───────────────────────────── */}
           {/* topPatternHit 不論持倉都傳，跟 verdict 邏輯對稱（持股=該出場、未持倉=不要進場）
               hasPosition 決定要不要顯示「進場依據」（持股中隱藏，避免暗示加碼）*/}
@@ -619,12 +627,13 @@ export default function SignalSummaryCard() {
             hasPosition={hasPosition}
             v12Hits={v12Hits}
             topPatternHit={topPatternHit}
-            entrySigs={entrySigs}
-            exitSigs={exitSigs}
-            warnSigs={warnSigs}
+            entrySigs={entryReasonSigs}
+            exitSigs={exitReasonSigs}
+            warnSigs={warnReasonSigs}
             prohibitions={longProhibitions?.reasons ?? []}
             criticalProhibitions={criticalProhibitions}
             todayClose={candle.close}
+            showEmpty={klineAnalyses.length === 0}
           />
         </div>
       </div>
@@ -909,7 +918,7 @@ function EntryProjection({
 // ── 子元件：為什麼？分組 ──────────────────────────────────────────────────
 
 function Reasons({
-  hasPosition, v12Hits, topPatternHit, entrySigs, exitSigs, warnSigs, prohibitions, criticalProhibitions, todayClose,
+  hasPosition, v12Hits, topPatternHit, entrySigs, exitSigs, warnSigs, prohibitions, criticalProhibitions, todayClose, showEmpty,
 }: {
   hasPosition: boolean;
   v12Hits: V12Hit[];
@@ -920,6 +929,7 @@ function Reasons({
   prohibitions: string[];
   criticalProhibitions: string[];
   todayClose: number;
+  showEmpty: boolean;
 }) {
   // 持股中：不顯示「進場依據」（避免暗示加碼）；只顯示出場 + 注意事項 + 結構轉變戒律
   // 未持倉：不顯示「一般出場訊號」（沒倉位談何出場），但頂部型態仍顯示為「不要進場」依據
@@ -932,6 +942,7 @@ function Reasons({
   const empty = !showEntry && !showExit && !showWarn && !showCriticalProhibitions && prohibitions.length === 0;
 
   if (empty) {
+    if (!showEmpty) return null;
     return (
       <p className="text-xs text-muted-foreground/70 border-t border-border/40 pt-2">
         分析 — 今日無觸發訊號
