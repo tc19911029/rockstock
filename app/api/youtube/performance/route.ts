@@ -46,7 +46,7 @@ export interface PerformanceItemSource {
 export interface PerformanceItem {
   stock_code: string;
   stock_name: string;
-  market: 'TW';
+  market: 'TW' | 'CN';
   rating?: StockRating;
   composite_score?: number;
   mention_count: number;

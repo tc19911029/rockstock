@@ -28,8 +28,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DatePicker } from '@/components/ui/DatePicker';
+import { YoutubeStockCard } from '@/components/youtube/YoutubeStockCard';
+import { SortControl } from '@/components/shared';
 import { cn } from '@/lib/utils';
 import { fmtDateLabelTw } from '@/lib/dateDefaults';
+import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
+import type { SortDir } from '@/lib/sorting/registry';
+import type { PerformanceItem } from '@/app/api/youtube/performance/route';
+import type { NDayReturns } from '@/lib/youtube/performance';
 import type {
   CnMediaDailyAnalysis,
   CnMediaMention,
@@ -46,6 +52,7 @@ interface AggregatedStock {
   bullish: number;
   bearish: number;
   scoring: CnMediaStockScoring | null;
+  performance: NDayReturns;
 }
 
 interface AnalysisResponse {
@@ -79,6 +86,24 @@ const TABS: Array<{ key: ViewKey; label: string; icon: typeof Sparkles }> = [
   { key: 'stocks', label: '股票提及', icon: Target },
   { key: 'sources', label: '來源狀態', icon: Radio },
 ];
+
+const CN_MENTION_SORT_OPTIONS = [
+  'teacher.mentions', 'teacher.rating',
+  '|',
+  'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
+];
+
+const CN_FWD_FIELD: Record<string, keyof NDayReturns> = {
+  'fwd.open': 'openReturn',
+  'fwd.d1': 'd1Return',
+  'fwd.d5': 'd5Return',
+  'fwd.d10': 'd10Return',
+  'fwd.d20': 'd20Return',
+  'fwd.maxGain': 'maxGain',
+  'fwd.maxLoss': 'maxLoss',
+};
+
+const RATING_ORDER: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
 
 function shiftDate(date: string, amount: number): string {
   const parsed = new Date(`${date}T12:00:00+08:00`);
@@ -492,7 +517,7 @@ function CnMediaCompactDashboard({
         <DatePicker value={date} onChange={onDateChange} size="sm" />
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-2.5 pb-4">
+      <div className={cn('flex-1 min-h-0', view === 'stocks' ? '' : 'overflow-y-auto px-2.5 pb-4')}>
         {error && (
           <div className="mt-2 rounded border border-red-700/40 p-2.5 text-xs text-red-400">
             載入失敗：{error}
@@ -502,7 +527,14 @@ function CnMediaCompactDashboard({
           <CnCompactSummary analysis={analysis} videos={videos} loading={loading} onSelectStock={onSelectStock} selectedCode={selectedCode} />
         )}
         {!error && view === 'stocks' && (
-          <CnCompactStocks stocks={stocks} videos={videos} loading={loading} onSelectStock={onSelectStock} selectedCode={selectedCode} />
+          <CnCompactStocks
+            stocks={stocks}
+            sources={videosData?.sources ?? []}
+            videos={videos}
+            loading={loading}
+            onSelectStock={onSelectStock}
+            selectedCode={selectedCode}
+          />
         )}
         {!error && view === 'sources' && (
           <CnCompactSources
@@ -602,7 +634,7 @@ function CnCompactSummary({
 
       {groups.must.length > 0 && (
         <section className="space-y-2">
-          <SectionHeading tone="bg-red-400" label={`必看（${groups.must.length} 集）`} />
+          <h3 className="text-sm font-bold text-foreground">🔴 必看（{groups.must.length} 集）</h3>
           {groups.must.map(video => (
             <CnVideoSummaryCard key={video.video_id} video={video} openByDefault onSelectStock={onSelectStock} selectedCode={selectedCode} />
           ))}
@@ -610,7 +642,7 @@ function CnCompactSummary({
       )}
       {groups.skim.length > 0 && (
         <section className="space-y-1.5">
-          <SectionHeading tone="bg-amber-400" label={`看摘要就好（${groups.skim.length} 集）`} />
+          <h3 className="pt-1 text-sm font-bold text-foreground">🟡 看摘要就好（{groups.skim.length} 集）</h3>
           {groups.skim.map(video => (
             <CnVideoSummaryCard key={video.video_id} video={video} onSelectStock={onSelectStock} selectedCode={selectedCode} />
           ))}
@@ -618,7 +650,7 @@ function CnCompactSummary({
       )}
       {groups.skip.length > 0 && (
         <section className="space-y-1">
-          <SectionHeading tone="bg-muted-foreground" label={`可跳過（${groups.skip.length} 集）`} muted />
+          <h3 className="pt-1 text-sm font-bold text-muted-foreground">⚪ 可跳過（{groups.skip.length} 集）</h3>
           {groups.skip.map(video => (
             <p key={video.video_id} className="pl-1 text-xs leading-relaxed text-muted-foreground">
               <span className="font-semibold text-foreground/70">{video.source_name}</span>
@@ -628,15 +660,6 @@ function CnCompactSummary({
         </section>
       )}
     </div>
-  );
-}
-
-function SectionHeading({ tone, label, muted = false }: { tone: string; label: string; muted?: boolean }) {
-  return (
-    <h3 className={cn('flex items-center gap-1.5 pt-1 text-sm font-bold', muted ? 'text-muted-foreground' : 'text-foreground')}>
-      <span className={cn('size-2 rounded-full', tone)} aria-hidden="true" />
-      {label}
-    </h3>
   );
 }
 
@@ -669,6 +692,9 @@ function CnVideoSummaryCard({
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-center gap-1.5">
               <span className="text-sm font-bold text-foreground">{video.source_name}</span>
+              {openByDefault && video.analysts.length > 0 && (
+                <span className="truncate text-[11px] text-muted-foreground">{video.analysts.join('、')}</span>
+              )}
               <span className="text-[10px] text-muted-foreground">{formatDuration(video.duration_sec)}</span>
             </span>
             {!open && <span className="mt-1 block truncate text-xs leading-relaxed text-muted-foreground">{firstSentence}</span>}
@@ -679,9 +705,9 @@ function CnVideoSummaryCard({
           target="_blank"
           rel="noreferrer"
           aria-label={`開啟 ${video.source_name} 原始影片`}
-          className="flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-h-8 shrink-0 items-center gap-0.5 text-[11px] text-sky-400 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <ExternalLink className="size-3" aria-hidden="true" />
+          看影片 <ExternalLink className="size-3" aria-hidden="true" />
         </a>
       </div>
       {open && (
@@ -689,7 +715,7 @@ function CnVideoSummaryCard({
           <div className="space-y-1 text-[13px] leading-relaxed text-foreground/90">
             {sentences(video.summary).map((item, index) => <p key={`${item}-${index}`}>{item}</p>)}
           </div>
-          <p className="text-xs leading-relaxed text-muted-foreground">觀看理由：{video.watch_reason}</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">💡 {video.watch_reason}</p>
           <div className="flex flex-wrap gap-1.5">
             {video.key_stocks.map(stock => {
               const symbol = cnChartSymbol(stock.code);
@@ -718,31 +744,88 @@ function CnVideoSummaryCard({
 
 function CnCompactStocks({
   stocks,
+  sources,
   videos,
   loading,
   onSelectStock,
   selectedCode,
 }: {
   stocks: AggregatedStock[];
+  sources: CnMediaSource[];
   videos: CnMediaVideo[];
   loading: boolean;
   onSelectStock?: (code: string) => void;
   selectedCode?: string | null;
 }) {
   const [filter, setFilter] = useState<'all' | 'A' | 'B+'>('all');
+  const [sortBy, setSortBy] = useState('teacher.rating');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const distribution = stocks.reduce((counts, stock) => {
     const rating = stock.scoring?.rating;
     if (rating) counts[rating]++;
     else counts.none++;
     return counts;
   }, { A: 0, B: 0, C: 0, D: 0, none: 0 });
-  const filtered = stocks.filter(stock => filter === 'all'
+  const filtered = useMemo(() => stocks.filter(stock => filter === 'all'
     || (filter === 'A' && stock.scoring?.rating === 'A')
-    || (filter === 'B+' && (stock.scoring?.rating === 'A' || stock.scoring?.rating === 'B')));
+    || (filter === 'B+' && (stock.scoring?.rating === 'A' || stock.scoring?.rating === 'B'))), [filter, stocks]);
+  const sourceById = useMemo(() => new Map(sources.map(source => [source.source_id, source])), [sources]);
+  const videoById = useMemo(() => new Map(videos.map(video => [video.video_id, video])), [videos]);
+  const items = useMemo<PerformanceItem[]>(() => filtered.map(stock => ({
+    stock_code: stock.code,
+    stock_name: stock.name,
+    market: 'CN',
+    rating: stock.scoring?.rating,
+    composite_score: stock.scoring?.composite_score,
+    mention_count: stock.mentions.length,
+    bullish_count: stock.bullish,
+    bearish_count: stock.bearish,
+    best_confidence: Math.max(...stock.mentions.map(mention => mention.combined_confidence), 0),
+    sources: stock.mentions.map(mention => {
+      const source = sourceById.get(mention.source_id);
+      const video = videoById.get(mention.video_id);
+      return {
+        source_id: mention.source_id,
+        display_name: source?.display_name ?? mention.source_id,
+        video_id: mention.video_id,
+        video_title: video?.title ?? '(節目資料缺失)',
+        video_url: video?.url ?? source?.url ?? '#',
+        sentiment: mention.sentiment,
+        reason: mention.reason,
+        analysts: mention.analysts ?? video?.analysts ?? [],
+        context: mention.context || mention.reason || '',
+      };
+    }),
+    performance: stock.performance,
+  })), [filtered, sourceById, videoById]);
+  const sortValue = (item: PerformanceItem, id: string): SortValue => {
+    const performanceKey = CN_FWD_FIELD[id];
+    if (performanceKey) {
+      const value = item.performance[performanceKey];
+      return typeof value === 'number' ? value : null;
+    }
+    const rating = item.rating ? RATING_ORDER[item.rating] ?? 0 : 0;
+    if (id === 'teacher.mentions') return item.mention_count * 10 + rating;
+    if (id === 'teacher.rating') return rating * 1e6 + item.mention_count;
+    return null;
+  };
+  const sorted = useMemo(
+    () => applySort(items, sortBy, sortDir, sortValue),
+    [items, sortBy, sortDir],
+  );
+  const allEmptyForward = stocks.length > 0 && stocks.every(stock =>
+    Object.values(CN_FWD_FIELD).every(key => stock.performance[key] == null),
+  );
+  const selectedBareCode = selectedCode?.split('.')[0] ?? null;
 
   return (
-    <div className="space-y-2 pt-2">
-      <div className="space-y-1.5 border-b border-border/60 bg-card/40 px-2 py-1.5">
+    <div className="flex h-full min-h-0 flex-col">
+      {allEmptyForward && (
+        <div className="shrink-0 border-b border-amber-900/40 bg-amber-950/30 px-2 py-1 text-[10px] text-amber-400">
+          ⚠ 基準日後尚無交易日 K 線，N 日漲跌欄全為 —。切到較早日期可看實際走勢。
+        </div>
+      )}
+      <div className="shrink-0 space-y-1.5 border-b border-border/60 bg-card/40 px-2 py-1.5">
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <span className="font-bold text-foreground">{stocks.length} 檔</span>
           {(['A', 'B', 'C', 'D'] as const).map(rating => distribution[rating] > 0 && (
@@ -750,6 +833,12 @@ function CnCompactStocks({
           ))}
           {distribution.none > 0 && <span className="rounded bg-muted/50 px-1 py-0.5 text-[9px] text-muted-foreground">未評 {distribution.none}</span>}
         </div>
+        <SortControl
+          options={CN_MENTION_SORT_OPTIONS}
+          value={sortBy}
+          dir={sortDir}
+          onChange={(id, direction) => { setSortBy(id); setSortDir(direction); }}
+        />
         <div className="flex items-center gap-1">
           <span className="mr-0.5 text-[9px] text-muted-foreground/70">篩選</span>
           {([
@@ -769,47 +858,26 @@ function CnCompactStocks({
         </div>
       </div>
 
-      {!loading && stocks.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-10 text-center">
-          <Target className="mb-2 size-7 text-muted-foreground" aria-hidden="true" />
-          <p className="mb-1 text-xs text-muted-foreground">此日無陸股節目提及紀錄</p>
-          <p className="text-[10px] text-muted-foreground/70">{videos.length ? '逐字稿尚在分析中' : '請切換到有節目的工作日'}</p>
-        </div>
-      )}
-      {filtered.map(stock => {
-        const symbol = cnChartSymbol(stock.code);
-        return (
-          <div key={stock.code} className={cn('rounded-lg border bg-card/50 p-2.5', selectedCode === stock.code ? 'border-sky-500/60' : 'border-border/60')}>
-            <div className="flex items-start justify-between gap-2">
-              <button
-                type="button"
-                disabled={!symbol || !onSelectStock}
-                onClick={() => symbol && onSelectStock?.(symbol)}
-                className="min-w-0 cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
-              >
-                <span className="text-sm font-bold text-foreground">{stock.name}</span>
-                <span className="ml-1 font-mono text-[11px] text-muted-foreground">{stock.code}</span>
-                <span className="mt-0.5 block text-[10px] text-muted-foreground">{stock.mentions.length} 次提及 · {new Set(stock.mentions.map(item => item.source_id)).size} 個節目</span>
-              </button>
-              {stock.scoring && <span className={cn('rounded border px-2 py-0.5 text-xs font-bold', ratingClass(stock.scoring.rating))}>{stock.scoring.rating}</span>}
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
-              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-emerald-400">偏多 {stock.bullish}</span>
-              <span className="rounded bg-rose-500/10 px-1.5 py-0.5 text-rose-400">偏空／風險 {stock.bearish}</span>
-              {stock.scoring && <span className="ml-auto text-muted-foreground">綜合 {stock.scoring.composite_score}</span>}
-            </div>
-            {stock.scoring && (
-              <details className="mt-2 text-xs">
-                <summary className="min-h-8 cursor-pointer py-1 font-medium text-foreground/85">{stock.scoring.action}</summary>
-                <div className="space-y-1.5 border-t border-border/60 pt-2 leading-relaxed text-muted-foreground">
-                  <p>{stock.scoring.reasoning}</p>
-                  {stock.scoring.risk_flags.length > 0 && <p className="text-amber-300">風險：{stock.scoring.risk_flags.join('；')}</p>}
-                </div>
-              </details>
-            )}
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-2 py-1.5">
+        {!loading && stocks.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <Target className="mb-2 size-7 text-muted-foreground" aria-hidden="true" />
+            <p className="mb-1 text-xs text-muted-foreground">此日無陸股節目提及紀錄</p>
+            <p className="text-[10px] text-muted-foreground/70">{videos.length ? '逐字稿尚在分析中' : '請切換到有節目的工作日'}</p>
           </div>
-        );
-      })}
+        )}
+        {sorted.map(item => (
+          <YoutubeStockCard
+            key={item.stock_code}
+            item={item}
+            selected={selectedBareCode === item.stock_code}
+            onSelect={code => {
+              const symbol = cnChartSymbol(code);
+              if (symbol) onSelectStock?.(symbol);
+            }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
