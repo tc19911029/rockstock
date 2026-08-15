@@ -20,6 +20,53 @@ const SAFE_ALIASES: Record<string, string> = {
   '寒武紀': '688256',
   '工业富联': '601138',
   '工業富聯': '601138',
+  // 財經口語與 Whisper 常見、且可唯一對應的錯字／簡稱。
+  '风华': '000636',
+  '中期续创': '300308',
+  '中期创': '300308',
+  '新一胜': '300502',
+  '盛宏科技': '300476',
+  '云南者液': '002428',
+  '利通': '603629',
+  '逆通电子': '603629',
+  '虐通电子': '603629',
+  '网速科技': '300017',
+  '洪景科技': '301396',
+  '红景科技': '301396',
+  '安季食品': '603696',
+  '爱立家居': '603221',
+  '传制教育': '003032',
+  '船只教育': '003032',
+  '高增民报': '002827',
+  '高之民报': '002827',
+  '一名食品': '605179',
+  '医民食品': '605179',
+  '移民食品': '605179',
+  '通顶互联': '002491',
+  '通顶护年': '002491',
+  '长飞': '601869',
+  '风火通信': '600498',
+  '亨通光线': '600487',
+  '航电股份': '603618',
+  '洪景': '301396',
+  '红景': '301396',
+  '秦安': '603758',
+  '俊轮': '002031',
+  '成地相将': '603887',
+  '红薄': '002229',
+  '红博': '002229',
+  '神广': '002400',
+  '引力': '603598',
+  '天鱼': '002354',
+  '云塞': '600602',
+  '利欧': '002131',
+  '新网锐节': '002396',
+  '华琴': '603296',
+  '掌月': '603533',
+  '景望电子': '603228',
+  '蓝标': '300058',
+  '贡金': '603118',
+  '数据档': '603881',
 };
 
 let cached: CnStockMasterEntry[] | null = null;
@@ -59,10 +106,15 @@ export async function loadCnStockMaster(): Promise<CnStockMasterEntry[]> {
       if (!stock.symbol || !stock.name) continue;
       const code = stock.symbol.split('.')[0];
       const existing = entries.get(code);
+      const importedName = normalizeName(stock.name);
+      // 即時清單偶爾帶 XD／XR／DR 除權息前綴且截短公司名；正式靜態名稱更可靠。
+      const name = existing && /^(?:XD|XR|DR)/i.test(importedName)
+        ? existing.name
+        : importedName;
       entries.set(code, {
         code,
         symbol: stock.symbol,
-        name: normalizeName(stock.name),
+        name,
         exchange: exchangeOf(stock.symbol),
         industry: stock.industry || existing?.industry || null,
         aliases: existing?.aliases ?? [],

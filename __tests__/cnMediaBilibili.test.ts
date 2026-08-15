@@ -1,4 +1,5 @@
 import { filterBilibiliSearchItems, parseBilibiliSearchHtml } from '@/lib/cn-media/bilibili';
+import { DEFAULT_CN_MEDIA_SOURCES } from '@/lib/cn-media/sourceRegistry';
 import type { CnMediaSource } from '@/lib/cn-media/types';
 
 const source: CnMediaSource = {
@@ -48,5 +49,22 @@ describe('B站陸股節目解析', () => {
 
   test('頁面缺少初始資料時明確失敗', () => {
     expect(() => parseBilibiliSearchHtml('<html></html>')).toThrow('search state unavailable');
+  });
+
+  test('個股密集的新增來源使用固定作者 ID，避免抓到搬運帳號', () => {
+    const expectedMids: Record<string, string> = {
+      'bilibili-laicongxin-review': '11430504',
+      'bilibili-niusan-zhaoge': '1593359860',
+      'bilibili-xueliang-short-review': '345681438',
+      'bilibili-zhujijiaoyiyuan-review': '497120492',
+    };
+
+    for (const [sourceId, mid] of Object.entries(expectedMids)) {
+      const item = DEFAULT_CN_MEDIA_SOURCES.find(candidate => candidate.source_id === sourceId);
+      expect(item).toBeDefined();
+      expect(item?.active).toBe(true);
+      expect(item?.url).toContain(`space.bilibili.com/${mid}/video`);
+      expect(item?.search_query || item?.search_queries?.length).toBeTruthy();
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { collectCnStockCandidates, lookupCnStock } from '@/lib/cn-media/stockMaster';
+import { collectCnStockCandidates, loadCnStockMaster, lookupCnStock } from '@/lib/cn-media/stockMaster';
 import type { CnStockMasterEntry } from '@/lib/cn-media/types';
 
 const master: CnStockMasterEntry[] = [
@@ -38,5 +38,14 @@ describe('陸股名稱與代號對照', () => {
   test('過短或不存在的模糊名稱不猜測', () => {
     expect(lookupCnStock('中', master)).toBeNull();
     expect(lookupCnStock('999999', master)).toBeNull();
+  });
+
+  test('可唯一確認的節目口語錯字會映射正式股票', async () => {
+    const fullMaster = await loadCnStockMaster();
+    expect(lookupCnStock('中期续创', fullMaster)?.name).toBe('中际旭创');
+    expect(lookupCnStock('新一胜', fullMaster)?.name).toBe('新易盛');
+    expect(lookupCnStock('安季食品', fullMaster)?.name).toBe('安记食品');
+    expect(lookupCnStock('爱立家居', fullMaster)?.name).toBe('爱丽家居');
+    expect(lookupCnStock('亨通光线', fullMaster)?.name).toBe('亨通光电');
   });
 });
