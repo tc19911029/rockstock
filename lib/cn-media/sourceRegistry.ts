@@ -178,6 +178,19 @@ export const DEFAULT_CN_MEDIA_SOURCES: CnMediaSource[] = [
     search_queries: ['筑基交易员', '筑基交易员 复盘', '筑基交易员 A股'],
     search_pages: 8,
   },
+  {
+    source_id: 'bilibili-guwangjinshi168-stock-review',
+    display_name: 'B站・股往金事168',
+    platform: 'bilibili',
+    url: 'https://space.bilibili.com/1252590958/video',
+    expected_cadence: 'weekday',
+    active: true,
+    default_analysts: ['股往金事168'],
+    source_tier: 'creator',
+    include_title_keywords: ['人气股票分析思路'],
+    search_queries: ['股往金事168 {month_day} 人气股票分析思路', '股往金事168 人气股票分析思路'],
+    search_pages: 10,
+  },
 ];
 
 export function defaultCnMediaSources(): CnMediaSource[] {

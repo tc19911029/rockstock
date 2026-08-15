@@ -24,6 +24,19 @@ interface BilibiliPlayData {
   dash?: {
     audio?: Array<{ bandwidth: number; baseUrl?: string; base_url?: string }>;
   };
+  durl?: Array<{ url?: string }>;
+}
+
+export function selectBilibiliMediaUrl(play: BilibiliPlayData): string | null {
+  const audio = [...(play.dash?.audio ?? [])].sort((a, b) => b.bandwidth - a.bandwidth)[0];
+  return audio?.baseUrl ?? audio?.base_url ?? play.durl?.[0]?.url ?? null;
+}
+
+export function expandBilibiliSearchQuery(query: string, targetDate: string): string {
+  const [, month = '', day = ''] = targetDate.split('-');
+  return query
+    .replaceAll('{year}', targetDate.slice(0, 4))
+    .replaceAll('{month_day}', `${Number(month)}月${Number(day)}日`);
 }
 
 interface BilibiliApiResponse<T> {
@@ -91,7 +104,7 @@ async function apiJson<T>(url: string): Promise<T> {
 
 async function searchItems(source: CnMediaSource, targetDate: string): Promise<BilibiliSearchItem[]> {
   const queries = (source.search_queries?.length ? source.search_queries : [source.search_query ?? source.display_name])
-    .map(query => query.replace('{year}', targetDate.slice(0, 4)));
+    .map(query => expandBilibiliSearchQuery(query, targetDate));
   const pages = source.search_pages ?? 3;
   const all: BilibiliSearchItem[] = [];
   const errors: string[] = [];
@@ -125,8 +138,7 @@ async function audioUrl(view: BilibiliViewData): Promise<string | null> {
   const play = await apiJson<BilibiliPlayData>(
     `${API}/x/player/playurl?bvid=${encodeURIComponent(view.bvid)}&cid=${cid}&qn=64&fnval=16&fourk=0`,
   );
-  const audio = [...(play.dash?.audio ?? [])].sort((a, b) => b.bandwidth - a.bandwidth)[0];
-  return audio?.baseUrl ?? audio?.base_url ?? null;
+  return selectBilibiliMediaUrl(play);
 }
 
 export async function fetchBilibiliVideos(source: CnMediaSource, targetDate: string): Promise<CnMediaVideo[]> {

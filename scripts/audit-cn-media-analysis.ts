@@ -20,8 +20,13 @@ async function main() {
     fs.readFile(analysisFile, 'utf-8'), fs.readFile(questionFile, 'utf-8'), loadCnStockMaster(),
   ]);
   const analysis = JSON.parse(analysisRaw) as CnMediaDailyAnalysis;
-  const question = JSON.parse(questionRaw) as { videos?: Array<{ video_id: string; transcript_text: string }> };
-  const transcriptByVideo = new Map((question.videos ?? []).map(video => [video.video_id, compact(video.transcript_text)]));
+  const question = JSON.parse(questionRaw) as {
+    videos?: Array<{ video_id: string; title?: string; transcript_text: string }>;
+  };
+  const transcriptByVideo = new Map((question.videos ?? []).map(video => [
+    video.video_id,
+    compact(`${video.title ?? ''}\n${video.transcript_text}`),
+  ]));
   const masterByCode = new Map(master.map(entry => [entry.code, entry]));
   const failures: string[] = [];
   const warnings: string[] = [];
