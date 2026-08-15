@@ -28,9 +28,9 @@ const TONE_STYLE: Record<ChartNarrative['tone'], {
 };
 
 const EVIDENCE_LABEL: Record<ChartNarrative['evidenceLevel'], string> = {
-  high: '多來源',
-  medium: '雙來源',
-  low: '單一來源',
+  high: '多面向',
+  medium: '雙面向',
+  low: '單一面向',
 };
 
 export default function ChartNarrativePanel({ narrative }: { narrative: ChartNarrative }) {
@@ -74,7 +74,7 @@ export default function ChartNarrativePanel({ narrative }: { narrative: ChartNar
           <span aria-hidden="true" className="text-muted-foreground transition-transform group-open:rotate-90">›</span>
           判讀依據
           <span className="font-normal text-muted-foreground/70">
-            {EVIDENCE_LABEL[narrative.evidenceLevel]} · {narrative.events.length} 組事件
+            {EVIDENCE_LABEL[narrative.evidenceLevel]} · {narrative.events.length} 項訊號
           </span>
         </summary>
         <ul className="space-y-1.5 pb-1 pl-4 text-[11px] leading-relaxed text-foreground/70">
@@ -87,6 +87,11 @@ export default function ChartNarrativePanel({ narrative }: { narrative: ChartNar
           {narrative.blockers.slice(1, 3).map(blocker => (
             <li key={blocker} className="text-amber-200/80">{blocker}</li>
           ))}
+          {narrative.events.length > 4 && (
+            <li className="text-muted-foreground/60">
+              另有 {narrative.events.length - 4} 項較低優先訊號
+            </li>
+          )}
         </ul>
       </details>
     </section>

@@ -21,6 +21,7 @@ describe('K 線訊號分析', () => {
     expect(isKLineSignal(signal({ ruleId: 'kline-one-star-two-yang' }))).toBe(true);
     expect(isKLineSignal(signal({ ruleId: 'zhu-morning-star-low' }))).toBe(true);
     expect(isKLineSignal(signal({ ruleId: 'smart-kline-buy' }))).toBe(true);
+    expect(isKLineSignal(signal({ ruleId: 'gap-island-reversal' }))).toBe(true);
     expect(isKLineSignal(signal({ ruleId: 'zhu-bull-pullback-entry' }))).toBe(false);
   });
 
@@ -79,5 +80,46 @@ describe('K 線訊號分析', () => {
     expect(results).toHaveLength(2);
     expect(results[0].signal.label).toBe('上升三法');
     expect(results[1].signal.label).toBe('子母線');
+  });
+
+  test('缺口規則會依訊號方向判讀，並歸入缺口型態', () => {
+    const result = analyzeKLineSignal(signal({
+      type: 'SELL',
+      ruleId: 'gap-island-reversal',
+      label: '高檔島狀反轉',
+    }));
+
+    expect(result).toMatchObject({
+      family: '缺口型態',
+      direction: 'bearish',
+      state: 'confirmed',
+      stateLabel: '空方確認',
+    });
+  });
+
+  test('同一規則重複輸入不會膨脹型態數量', () => {
+    const duplicated = signal({
+      type: 'BUY',
+      ruleId: 'kline-rising-three-methods',
+      label: '上升三法',
+    });
+
+    expect(analyzeKLineSignals([duplicated, duplicated])).toHaveLength(1);
+  });
+
+  test('多單賣出不會把做空停損誤當成型態失效', () => {
+    const result = analyzeKLineSignal(signal({
+      type: 'SELL',
+      ruleId: 'smart-kline-sell',
+      label: '智慧K線賣出',
+      reason: [
+        '做多出場：收盤確認股價跌破前一日最低點，出場。',
+        '做空進場：收盤跌破前一日最低點時，也可做空。',
+        '停損（做空）：以進場當日K線最高點為停損點。',
+      ].join('\n'),
+    }));
+
+    expect(result?.confirmation).toContain('做多出場');
+    expect(result?.invalidation).toBeUndefined();
   });
 });

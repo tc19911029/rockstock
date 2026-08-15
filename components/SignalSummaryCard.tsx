@@ -10,7 +10,7 @@
  *   1. 策略與持倉狀態
  *   2. 走圖解說（唯一主結論 + 確認/失效）
  *   3. 持倉守則或綜合風向
- *   4. 分層明細（交易計畫 / 均線扣抵 / K 線型態 / 完整訊號）
+ *   4. 分層明細（交易計畫 / 均線扣抵 / K 線與贏家圖像 / 其他規則）
  *   5. 朱老師深度分析（預設摺疊）
  *
  * 設計原則（用戶 feedback）：
@@ -41,7 +41,9 @@ import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { RuleSignal, CandleWithIndicators } from '@/types';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 import { analyzeKLineSignals, isKLineSignal } from '@/lib/rules/klineSignalAnalysis';
+import type { PatternSignal } from '@/lib/rules/winnerPatternRules';
 import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
+import type { NarrativeAction } from '@/lib/narrative/types';
 import ChartCoachAdvice from './ChartCoachAdvice';
 import KLineSignalAnalysisPanel from './KLineSignalAnalysisPanel';
 import ChartNarrativePanel from './narrative/ChartNarrativePanel';
@@ -289,6 +291,45 @@ interface TopPatternHit {
   achievementRate?: number;
 }
 
+function uniqueRuleSignals(signals: RuleSignal[]): RuleSignal[] {
+  return [...new Map(
+    signals.map(signal => [`${signal.type}:${signal.ruleId}:${signal.label}`, signal] as const),
+  ).values()];
+}
+
+function klineDisclosureMeta(
+  analyses: ReturnType<typeof analyzeKLineSignals>,
+  bullishPatterns: PatternSignal[],
+  bearishPatterns: PatternSignal[],
+  action: NarrativeAction,
+): string {
+  const winnerCount = bullishPatterns.length + bearishPatterns.length;
+  const confirmedBullish = analyses.some(item => item.state === 'confirmed' && item.direction === 'bullish')
+    || bullishPatterns.length > 0;
+  const riskFirst = action === 'exit' || action === 'reduce' || action === 'avoid-entry';
+  if (riskFirst && confirmedBullish) return '多方型態，但風險優先';
+  if (analyses.length === 0 && winnerCount === 0) return '今日未命中';
+  if (analyses.length === 1 && winnerCount === 0) {
+    return `${analyses[0].stateLabel} · ${analyses[0].signal.label}`;
+  }
+  if (analyses.length === 0 && winnerCount === 1) {
+    return `贏家圖像 · ${(bullishPatterns[0] ?? bearishPatterns[0]).name}`;
+  }
+  return `K 線 ${analyses.length} · 圖像 ${winnerCount}`;
+}
+
+function klineConflictMessage(
+  analyses: ReturnType<typeof analyzeKLineSignals>,
+  bullishPatterns: PatternSignal[],
+  action: NarrativeAction,
+): string | null {
+  const confirmedBullish = analyses.some(item => item.state === 'confirmed' && item.direction === 'bullish')
+    || bullishPatterns.length > 0;
+  const riskFirst = action === 'exit' || action === 'reduce' || action === 'avoid-entry';
+  if (!riskFirst || !confirmedBullish) return null;
+  return '雖有多方 K 線或贏家圖像，但不會抵銷目前的風險結論；先依趨勢、戒律與操作均線處理。';
+}
+
 // ── 主元件 ──────────────────────────────────────────────────────────────────
 
 export default function SignalSummaryCard() {
@@ -366,7 +407,8 @@ export default function SignalSummaryCard() {
   const hasPosition = !!heldPosition;
 
   // ── 主訊號字母（2026-07-06 持倉買法優先）──────────────────────────────
-  //   持股中：這筆「怎麼買的」（triggerSignal）決定出場 SOP — 面板換策略不改持倉守則
+  //   持股中：這筆「怎麼買的」（triggerSignal）決定出場 SOP；舊資料缺字母固定預設 B，
+  //           不得退回右側掃描策略，避免切換瀏覽條件時改寫持倉守則。
   //   未持倉：跟掃描面板選的策略（讓訊號跟著策略換）→ V12 偵測 → 持倉字母 → 'B'
   const ENTRY_LETTERS = new Set(['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']);
   const V11_ALIAS_MAP: Record<string, string> = { G: 'J', H: 'L', I: 'K' };
@@ -379,12 +421,13 @@ export default function SignalSummaryCard() {
   const strategyLetter: V12Letter | null = ENTRY_LETTERS.has(normalizedActive) ? (normalizedActive as V12Letter) : null;
   const PRIORITY: EntryLetter[] = ['Q', 'N', 'M', 'P', 'O'];
   const primaryV12 = PRIORITY.map(l => v12Hits.find(h => h.letter === l)).find(Boolean);
-  const primaryLetter: V12Letter = heldLetter
-    ?? strategyLetter
-    ?? primaryV12?.letter
-    ?? 'B';
+  const missingHoldingLetter = hasPosition && heldLetter == null;
+  const primaryLetter: V12Letter = hasPosition
+    ? (heldLetter ?? 'B')
+    : (strategyLetter ?? primaryV12?.letter ?? 'B');
   // 策略視角顯示名（持倉買法優先時標示來源；A/R 不是單一進場字母，特別標示）
   const strategyName = heldLetter ? `${sopFor(primaryLetter).name}（持倉買法）`
+    : missingHoldingLetter ? `${sopFor(primaryLetter).name}（未記錄買法，預設 B）`
     : activeBuyMethod === 'A' ? '六條件（預選池）'
     : activeBuyMethod === 'R' ? '機械軌（乖離率）'
     : sopFor(primaryLetter).name;
@@ -424,9 +467,9 @@ export default function SignalSummaryCard() {
   ].map(c => c.sig);
   const warnSigs = classified.filter(c => c.subtype === 'warn').map(c => c.sig);
   const klineAnalyses = analyzeKLineSignals(currentSignals);
-  const entryReasonSigs = entrySigs.filter(signal => !isKLineSignal(signal));
-  const exitReasonSigs = exitSigs.filter(signal => !isKLineSignal(signal));
-  const warnReasonSigs = warnSigs.filter(signal => !isKLineSignal(signal));
+  const entryReasonSigs = uniqueRuleSignals(entrySigs.filter(signal => !isKLineSignal(signal)));
+  const exitReasonSigs = uniqueRuleSignals(exitSigs.filter(signal => !isKLineSignal(signal)));
+  const warnReasonSigs = uniqueRuleSignals(warnSigs.filter(signal => !isKLineSignal(signal)));
 
   // 課程 CH2 變盤線家族（2026-07-05 訊號教學化）：母子/遭遇/晨星夜星成形/破實體未破底…
   // 這類「止漲變盤、次日確認」訊號要影響結論列 — 不是硬出場、但也不是「繼續持有沒事」。
@@ -483,20 +526,11 @@ export default function SignalSummaryCard() {
   const projPtPct = ((projProfit - projEntry) / projEntry) * 100;
   const projProfitSource: 'pattern' | 'rule' = patternTarget != null ? 'pattern' : 'rule';
 
-  // ── 走勢偏向（33 圖像 compositeAdjust 抽成一行）────────────────────────────
+  // ── 33 種贏家圖像（與當日 K 線訊號同區呈現，避免把局部圖像分數寫成全局趨勢）──
   const adjust = winnerPatterns?.compositeAdjust ?? 0;
-  const bullCount = winnerPatterns?.bullishPatterns.length ?? 0;
-  const bearCount = winnerPatterns?.bearishPatterns.length ?? 0;
-  const trendBiasLabel = adjust > 0
-    ? `偏多 +${adjust}`
-    : adjust < 0
-      ? `偏空 ${adjust}`
-      : '中性';
-  const trendBiasColor = adjust > 0
-    ? 'text-rose-300'
-    : adjust < 0
-      ? 'text-emerald-300'
-      : 'text-muted-foreground';
+  const bullishWinnerPatterns = winnerPatterns?.bullishPatterns ?? [];
+  const bearishWinnerPatterns = winnerPatterns?.bearishPatterns ?? [];
+  const klineConflict = klineConflictMessage(klineAnalyses, bullishWinnerPatterns, chartNarrative.action);
 
   // ── 持倉損益 ────────────────────────────────────────────────────────────
   const pnlPct = (heldPosition?.costPrice && candle.close)
@@ -609,39 +643,41 @@ export default function SignalSummaryCard() {
               </SignalDisclosure>
             )}
 
-            {/* 風向（走勢偏向）— 主訊息一行、明細獨立下一行 */}
-            <div className="pt-2 border-t border-border/20 space-y-0.5">
-              <p className="text-[11px] leading-relaxed">
-                <span className="text-muted-foreground" title="33 種 K 棒型態（書本《抓住線圖》附錄）綜合得分。+ 偏多、− 偏空、0 中性">走勢偏向</span>
-                <span className={`ml-2 font-bold ${trendBiasColor}`}>{trendBiasLabel}</span>
-              </p>
-              {(bullCount > 0 || bearCount > 0) && (
-                <p className="text-[11px] text-muted-foreground/60 leading-relaxed">
-                  （33 種 K 棒型態：多頭 {bullCount}／空頭 {bearCount}）
-                </p>
-              )}
-            </div>
-
           </div>
 
           <SignalDisclosure title="均線扣抵預測" meta="MA5 · 10 · 20 · 60">
             <MaDeductionForecast candles={allCandles} index={currentIndex} embedded />
           </SignalDisclosure>
 
-          {klineAnalyses.length > 0 && (
-            <SignalDisclosure
-              title="K 線型態"
-              meta={`${klineAnalyses.length} 組 · ${klineAnalyses[0].signal.label}`}
-            >
+          <SignalDisclosure
+            title="K 線與贏家圖像"
+            meta={klineDisclosureMeta(
+              klineAnalyses,
+              bullishWinnerPatterns,
+              bearishWinnerPatterns,
+              chartNarrative.action,
+            )}
+          >
+            <div className="space-y-3">
+              {klineConflict && (
+                <p className="rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-100/90">
+                  {klineConflict}
+                </p>
+              )}
               <KLineSignalAnalysisPanel analyses={klineAnalyses} showHeader={false} />
-            </SignalDisclosure>
-          )}
+              <WinnerPatternDetails
+                bullishPatterns={bullishWinnerPatterns}
+                bearishPatterns={bearishWinnerPatterns}
+                compositeAdjust={adjust}
+              />
+            </div>
+          </SignalDisclosure>
 
           {/* ── 4. 為什麼？分組 ───────────────────────────── */}
           {/* topPatternHit 不論持倉都傳，跟 verdict 邏輯對稱（持股=該出場、未持倉=不要進場）
               hasPosition 決定要不要顯示「進場依據」（持股中隱藏，避免暗示加碼）*/}
           {reasonDetailCount > 0 && (
-            <SignalDisclosure title="完整訊號明細" meta={`${reasonDetailCount} 項`}>
+            <SignalDisclosure title="其他規則明細" meta={`${reasonDetailCount} 項`}>
               <Reasons
                 hasPosition={hasPosition}
                 v12Hits={v12Hits}
@@ -663,6 +699,62 @@ export default function SignalSummaryCard() {
         <ChartCoachAdvice defaultCollapsed />
       </div>
     </div>
+  );
+}
+
+function WinnerPatternDetails({
+  bullishPatterns,
+  bearishPatterns,
+  compositeAdjust,
+}: {
+  bullishPatterns: PatternSignal[];
+  bearishPatterns: PatternSignal[];
+  compositeAdjust: number;
+}) {
+  const patterns = [...bearishPatterns, ...bullishPatterns];
+  const scoreLabel = compositeAdjust > 0
+    ? `偏多 +${compositeAdjust}`
+    : compositeAdjust < 0
+      ? `偏空 ${compositeAdjust}`
+      : '多空相抵';
+
+  return (
+    <section aria-label="33 種贏家圖像" className="border-t border-border/35 pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold text-foreground/85">33 種贏家圖像</h3>
+        {patterns.length > 0 && (
+          <span className="text-[10px] text-muted-foreground/75">
+            多 {bullishPatterns.length} · 空 {bearishPatterns.length} · {scoreLabel}
+          </span>
+        )}
+      </div>
+
+      {patterns.length === 0 ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/70">
+          今日未命中書本 33 種贏家圖像；這不代表沒有其他進出場訊號。
+        </p>
+      ) : (
+        <div className="mt-2 space-y-1.5">
+          {patterns.map(pattern => (
+            <div key={pattern.id} className="rounded-md bg-secondary/25 px-2.5 py-2">
+              <div className="flex items-start justify-between gap-2">
+                <p className={`text-[11px] font-semibold ${
+                  pattern.direction === 'bullish' ? 'text-rose-200' : 'text-emerald-200'
+                }`}>
+                  {pattern.name}
+                </p>
+                <span className="shrink-0 text-[10px] text-muted-foreground/65">
+                  規則權重 {pattern.confidence}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-foreground/70">
+                {pattern.description}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1005,8 +1097,8 @@ function Reasons({
               </div>
             ))}
             {/* 朱家泓書本進場規則（朱SOP / 回檔再上漲 / 均線撐漲 / 下缺回補等）— 用戶 PS 喜好：暗紅紫底區分書本規則 */}
-            {entrySigs.slice(0, 4).map((s, i) => (
-              <ReasonRow key={`entry-${i}`} signal={s} bgColor="bg-rose-900/15" />
+            {entrySigs.map(s => (
+              <ReasonRow key={`entry-${s.type}-${s.ruleId}-${s.label}`} signal={s} bgColor="bg-rose-900/15" />
             ))}
           </div>
         </div>
@@ -1051,8 +1143,8 @@ function Reasons({
               </div>
             )}
             {/* 一般出場訊號 — 只在持股中顯示 */}
-            {hasPosition && exitSigs.slice(0, 4).map((s, i) => (
-              <ReasonRow key={`exit-${i}`} signal={s} bgColor="bg-emerald-900/15" />
+            {hasPosition && exitSigs.map(s => (
+              <ReasonRow key={`exit-${s.type}-${s.ruleId}-${s.label}`} signal={s} bgColor="bg-emerald-900/15" />
             ))}
           </div>
         </div>
@@ -1089,7 +1181,7 @@ function Reasons({
           title="注意事項"
           color="text-yellow-300"
           bgColor="bg-yellow-900/15"
-          signals={warnSigs.slice(0, 3)}
+          signals={warnSigs}
         />
       )}
     </div>
@@ -1141,7 +1233,9 @@ function ReasonGroup({
     <div>
       <p className={`text-[11px] font-bold mb-1 ${color}`}>{title}</p>
       <div className="space-y-1.5">
-        {signals.map((s, i) => <ReasonRow key={i} signal={s} bgColor={bgColor} />)}
+        {signals.map(s => (
+          <ReasonRow key={`${s.type}-${s.ruleId}-${s.label}`} signal={s} bgColor={bgColor} />
+        ))}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ export type KLinePatternFamily =
   | '空方中繼'
   | '低檔反轉'
   | '高檔反轉'
+  | '缺口型態'
   | '單根／合併'
   | '交易確認';
 
@@ -81,6 +82,14 @@ const HIGH_REVERSAL = new Set([
   'kline-major-resistance-ahead',
 ]);
 
+const GAP_PATTERNS = new Set([
+  'gap-up-long-red',
+  'gap-down-long-black',
+  'gap-three-day-two-gaps-up',
+  'gap-three-day-two-gaps-down',
+  'gap-island-reversal',
+]);
+
 const SINGLE_OR_MERGED = new Set([
   'candle-merge-signal',
 ]);
@@ -97,6 +106,7 @@ const FAMILY_BY_RULE_ID = new Map<string, KLinePatternFamily>([
   ...[...BEARISH_CONTINUATION].map(id => [id, '空方中繼'] as const),
   ...[...LOW_REVERSAL].map(id => [id, '低檔反轉'] as const),
   ...[...HIGH_REVERSAL].map(id => [id, '高檔反轉'] as const),
+  ...[...GAP_PATTERNS].map(id => [id, '缺口型態'] as const),
   ...[...SINGLE_OR_MERGED].map(id => [id, '單根／合併'] as const),
   ...[...TRADING_CONFIRMATION].map(id => [id, '交易確認'] as const),
 ]);
@@ -106,6 +116,7 @@ const FAMILY_INTERPRETATION: Record<KLinePatternFamily, string> = {
   空方中繼: '空頭趨勢中的反彈或整理，結構成立時偏向續跌；低檔出現時要防止反轉。',
   低檔反轉: '原本的下跌力道正在減弱，多方嘗試接手；位置、量能與後續過高決定是否完成反轉。',
   高檔反轉: '原本的上漲力道正在減弱，空方開始取得主控；後續破低會提高轉折向下的可信度。',
+  缺口型態: '缺口代表供需突然失衡；方向與強弱要看缺口是否守住、回補，以及所在趨勢位置。',
   '單根／合併': '單根或合併 K 棒只揭示當日多空變化，必須搭配趨勢、位置與下一根 K 棒確認。',
   交易確認: '這是 K 線交易條件的確認訊號，需同時遵守既有停損、位置與趨勢規則。',
 };
@@ -158,7 +169,7 @@ export function analyzeKLineSignal(signal: RuleSignal): KLineSignalAnalysis | nu
   );
   const invalidation = firstMatchingReason(
     signal.reason,
-    /(破壞|作廢|不能被|否則|停損|失效)/,
+    /(破壞|作廢|不能被|否則|失效)/,
   );
   const bookRef = signal.reason.match(/【[^】]+】/)?.[0];
 
@@ -176,7 +187,11 @@ export function analyzeKLineSignal(signal: RuleSignal): KLineSignalAnalysis | nu
 }
 
 export function analyzeKLineSignals(signals: RuleSignal[]): KLineSignalAnalysis[] {
-  return signals
+  const uniqueSignals = [...new Map(
+    signals.map(signal => [`${signal.type}:${signal.ruleId}`, signal] as const),
+  ).values()];
+
+  return uniqueSignals
     .map(analyzeKLineSignal)
     .filter((item): item is KLineSignalAnalysis => item !== null)
     .sort((a, b) => {
