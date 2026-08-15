@@ -9,7 +9,17 @@ REPO="/Users/tc/Desktop/rockstock"
 BASE="http://localhost:3000/api/cron"
 D=$(date -v-1d +%F)
 SECRET_FILE="${ROCKSTOCK_CRON_SECRET_FILE:-$HOME/.config/rockstock/cron-secret}"
-CODEX_BIN="/Applications/Codex.app/Contents/Resources/codex"
+CODEX_BIN="${ROCKSTOCK_CODEX_BIN:-}"
+if [[ -z "$CODEX_BIN" ]]; then
+  for candidate in \
+    /Applications/ChatGPT.app/Contents/Resources/codex \
+    /Applications/Codex.app/Contents/Resources/codex; do
+    if [[ -x "$candidate" ]]; then
+      CODEX_BIN="$candidate"
+      break
+    fi
+  done
+fi
 QUESTION_DIR="$TMPDIR/rockstock-cn-media"
 QUESTION_FILE="$QUESTION_DIR/$D-question.json"
 ANALYSIS_FILE="$REPO/data/cn-media/analysis/$D.json"
@@ -70,8 +80,8 @@ elif [[ "$VCOUNT" -eq 0 ]]; then
 fi
 
 cd "$REPO" || exit 1
-if [[ ! -x "$CODEX_BIN" ]]; then
-  echo "[$(ts)] 找不到 Codex CLI：$CODEX_BIN" >&2
+if [[ -z "$CODEX_BIN" || ! -x "$CODEX_BIN" ]]; then
+  echo "[$(ts)] 找不到 Codex CLI（已檢查 ChatGPT.app 與 Codex.app）" >&2
   exit 1
 fi
 
