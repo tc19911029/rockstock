@@ -5,6 +5,8 @@ import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider'
 import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 
 export const runtime = 'nodejs';
@@ -15,8 +17,9 @@ const schema = z.object({
 });
 
 /**
- * 輕量即時報價 endpoint — 走圖 polling 用，只回今日 OHLCV。
- * 不讀 L1（避免觸發 bulk preload + 2 年資料讀取），直接走 Fugle / MIS / L2。
+ * 輕量即時報價 endpoint — 走圖 polling 用，只回 OHLCV。
+ * 盤中／盤後定稿期走 Fugle / MIS / L2；其餘時段只讀 L1 末根，
+ * 即使舊版前台分頁還在 polling，也不會於週末／深夜空打 vendor。
  */
 export async function GET(req: NextRequest) {
   const params = Object.fromEntries(req.nextUrl.searchParams);
@@ -38,6 +41,30 @@ export async function GET(req: NextRequest) {
   const market = isCnIndex ? 'CN' : (isTwIndex ? 'TW' : (isCN ? 'CN' : (isTW ? 'TW' : null)));
 
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+
+  // Server-side defense in depth: 新版前台會在休市時停止 timer，但部署前已開啟的
+  // 舊分頁可能繼續每 30 秒呼叫。路由層仍要擋住，避免 MIS/Fugle 被無效輪詢放大。
+  if (market && !isMarketPollingWindow(market)) {
+    const suffix = market === 'TW'
+      ? (/\.TWO$/i.test(symbol) ? 'TWO' : 'TW')
+      : (/\.SS$/i.test(symbol) || (!/\.SZ$/i.test(symbol) && /^[69]/.test(pureCode)) ? 'SS' : 'SZ');
+    const candidates = isIndex
+      ? [symbol]
+      : market === 'TW'
+        ? [...new Set([symbol, `${pureCode}.${suffix}`, `${pureCode}.TW`, `${pureCode}.TWO`])]
+        : [...new Set([symbol, `${pureCode}.${suffix}`])];
+
+    for (const candidate of candidates) {
+      try {
+        const file = await readCandleFile(candidate, market);
+        const last = file?.candles.at(-1);
+        if (last && last.close > 0) {
+          return apiOk({ symbol, date: last.date, open: last.open, high: last.high, low: last.low, close: last.close, volume: last.volume });
+        }
+      } catch { /* try next suffix */ }
+    }
+    return apiError(`無法取得 ${symbol} 報價`, 404);
+  }
 
   let quote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
   let quoteDate: string = today;  // 預設 today（live quote 路徑）；L1 fallback 會改成真實 last.date
@@ -137,7 +164,6 @@ export async function GET(req: NextRequest) {
   // 2026-05-26：回傳真實 last.date 而不是強制 today，讓 polling 端能比對「這是舊資料」拒絕覆寫。
   if (!quote && (isTwIndex || isCnIndex)) {
     try {
-      const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
       const f = await readCandleFile(symbol, market as 'TW' | 'CN');
       const last = f?.candles[f.candles.length - 1];
       if (last && last.close > 0) {
