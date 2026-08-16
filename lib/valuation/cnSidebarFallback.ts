@@ -1,3 +1,5 @@
+import type { FundamentalTrendHistory } from '@/lib/fundamentals/trends';
+
 export interface CnFinancialRow {
   reportDate: string;
   noticeDate?: string | null;
@@ -24,6 +26,7 @@ export interface CnFinancialsPayload {
   error?: string;
   financials?: CnFinancialRow[];
   valuation?: CnValuationSummary | null;
+  history?: FundamentalTrendHistory;
 }
 
 export interface CnSidebarFundamentals {
@@ -41,6 +44,7 @@ export interface CnSidebarFundamentals {
   };
   cnFinancials: CnFinancialRow[];
   cnValuation: CnValuationSummary | null;
+  history?: FundamentalTrendHistory;
 }
 
 /**
@@ -79,5 +83,6 @@ export function mapCnFinancialsToSidebar(payload: CnFinancialsPayload | null | u
     },
     cnFinancials: financials,
     cnValuation: payload.valuation ?? null,
+    history: payload.history,
   };
 }

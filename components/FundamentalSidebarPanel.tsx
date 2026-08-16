@@ -12,6 +12,8 @@ import { AlertTriangle, Calculator, CheckCircle2, ExternalLink, RefreshCw, Zap }
 import type { FundamentalAnswer } from '@/lib/agents/types';
 import { mapCnFinancialsToSidebar } from '@/lib/valuation/cnSidebarFallback';
 import { detectValuationFreshness } from '@/lib/valuation/freshness';
+import { FundamentalTrendPanel } from '@/components/fundamentals/FundamentalTrendPanel';
+import type { FundamentalTrendHistory } from '@/lib/fundamentals/trends';
 
 const RISK_FLAG_LABELS: Record<string, string> = {
   one_time_gain: '一次性收益',
@@ -482,7 +484,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
   // 注意：FinMind getFundamentals 內 epsYoY 實際是「本季 vs 上一季」(QoQ)，不是真正 YoY
   // (FinancialStatements 是季資料、source code 用 prevDate = finDates[1] 上一筆)
   const sections = [
-    {
+    ...(!raw.history ? [{
       title: `獲利能力${quarter ? `（${quarter} 財報）` : '（最新季財報）'}`,
       rows: [
         { label: '單季 EPS', hint: '該季淨利 ÷ 該季加權平均股數', value: fmt(raw.eps, ' 元') },
@@ -491,15 +493,14 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
         { label: '毛利率', hint: '(營收−成本) ÷ 營收', value: fmt(raw.grossMargin, '%') },
         { label: '淨利率', hint: '稅後淨利 ÷ 營收', value: fmt(raw.netMargin, '%') },
       ],
-    },
-    {
+    }, {
       title: `月營收${month ? `（${month}）` : '（最新公布月）'}`,
       rows: [
         { label: '月營收', hint: '該月度合併營收', value: fmtRevenue(raw.revenueLatest) },
         { label: '月增率 MoM', hint: 'vs 上個月', value: fmt(raw.revenueMoM, '%'), cls: yoyColor(raw.revenueMoM) },
         { label: '年增率 YoY', hint: 'vs 去年同月', value: fmt(raw.revenueYoY, '%'), cls: yoyColor(raw.revenueYoY) },
       ],
-    },
+    }] : []),
     {
       title: `估值${valuationDate ? `（${valuationDate}）` : '（即時市價）'}`,
       rows: [
@@ -512,6 +513,7 @@ function RawFundamentalsView({ raw, symbol, standaloneValuation, currentPrice, o
 
   return (
     <div className="space-y-2 text-xs">
+      {raw.history && <FundamentalTrendPanel history={raw.history} />}
       {latestSelfReported && (
         <div className="overflow-hidden rounded border border-emerald-500/30 bg-emerald-500/10">
           <div className="flex items-center justify-between border-b border-emerald-500/20 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">
@@ -795,6 +797,7 @@ interface RawFundamentals {
   }>;
   sharesOutstanding?: number | null;
   dilutionSignature?: string | null;
+  history?: FundamentalTrendHistory;
   periods?: {
     financialReportDate?: string | null;
     revenueMonth?: string | null;
@@ -1088,6 +1091,8 @@ export function FundamentalSidebarPanel({ symbol, date, currentPrice, isHistoric
         </div>
         <div className="text-[11px] opacity-90 leading-snug">{data.overview}</div>
       </div>
+
+      {rawData?.market === 'TW' && rawData.history && <FundamentalTrendPanel history={rawData.history} />}
 
       {/* 估值情境（悲觀 / 中性 / 樂觀預估股價）*/}
       {displayedValuation && (

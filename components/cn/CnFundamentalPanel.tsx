@@ -1,11 +1,12 @@
 'use client';
 
 // 陸股基本面板（首頁「基本面」tab，當載入的是陸股時顯示）。
-// 逐季財報（营收/净利/ROE/毛利+YoY）+ 股價 + PB（price/每股净资产 自算，不用 EastMoney 已壞的 PE/PB 欄）。
+// 與台股共用歷史趨勢面板；A 股累計報表先在 API 還原為單季，再顯示 QoQ / YoY。
 
 import { useState, useEffect } from 'react';
-import { cn } from '@/lib/utils';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
+import { FundamentalTrendPanel } from '@/components/fundamentals/FundamentalTrendPanel';
+import type { FundamentalTrendHistory } from '@/lib/fundamentals/trends';
 
 interface Fin {
   reportDate: string; revenue: number | null; revenueYoY: number | null;
@@ -16,10 +17,8 @@ interface Val {
   name: string | null; price: number | null;
   dynamicPe?: number | null; ttmPe?: number | null; pbRatio?: number | null;
 }
-interface Resp { ok?: boolean; error?: string; financials?: Fin[]; valuation?: Val | null }
+interface Resp { ok?: boolean; error?: string; financials?: Fin[]; history?: FundamentalTrendHistory; valuation?: Val | null }
 
-const yi = (n: number | null) => (n == null ? '—' : `${(n / 1e8).toFixed(1)}億`);
-const pct = (n: number | null) => (n == null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(1)}%`);
 const f2 = (n: number | null) => (n == null ? '—' : n.toFixed(2));
 
 interface Props {
@@ -116,48 +115,15 @@ export default function CnFundamentalPanel({ symbol, currentPrice, date, isHisto
         </div>
       </section>
 
-      {/* 逐季財報趨勢 */}
-      <section>
-        <div className="flex items-center justify-center gap-1.5 mb-1.5">
-          <span className="font-semibold text-fuchsia-300">逐季財報</span>
-          <span className="text-[10px] text-muted-foreground">营收/净利/ROE/毛利（YoY=年增率）</span>
+      {extremeDrop && (
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-300">
+          ⚠ 部分期間累計淨利年減 &gt;50%；建議再查原始財報公告確認一次性損益。
         </div>
-        {extremeDrop && (
-          <div className="mb-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-300">
-            ⚠ 部分期間淨利年減 &gt;50%；數值已與東財/同花順/新浪核對一致，建議再查原始財報公告確認。
-          </div>
-        )}
-        {fin.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[9px] tracking-tight">
-              <thead>
-                <tr className="text-muted-foreground border-b border-border/40">
-                  <th className="text-center font-normal py-0.5 whitespace-nowrap">報告期</th>
-                  <th className="text-center font-normal whitespace-nowrap">营收(YoY)</th>
-                  <th className="text-center font-normal whitespace-nowrap">净利(YoY)</th>
-                  <th className="text-center font-normal whitespace-nowrap">ROE</th>
-                  <th className="text-center font-normal whitespace-nowrap">毛利</th>
-                </tr>
-              </thead>
-              <tbody className="font-mono">
-                {fin.map((q) => (
-                  <tr key={q.reportDate} className="border-b border-border/20">
-                    <td className="py-0.5 text-center whitespace-nowrap text-[8px] text-muted-foreground">{q.reportDate}</td>
-                    <td className="text-center whitespace-nowrap">
-                      {yi(q.revenue)}<span className={cn('ml-0.5 text-[8px]', (q.revenueYoY ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>{pct(q.revenueYoY)}</span>
-                    </td>
-                    <td className="text-center whitespace-nowrap">
-                      {yi(q.netProfit)}<span className={cn('ml-0.5 text-[8px]', (q.netProfitYoY ?? 0) >= 0 ? 'text-bull' : 'text-bear')}>{pct(q.netProfitYoY)}</span>
-                    </td>
-                    <td className="text-center whitespace-nowrap">{f2(q.roe)}%</td>
-                    <td className="text-center whitespace-nowrap">{q.grossMargin != null ? `${q.grossMargin.toFixed(1)}%` : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : <div className="text-muted-foreground">暂无財報</div>}
-      </section>
+      )}
+
+      {data?.history
+        ? <FundamentalTrendPanel history={data.history} />
+        : <div className="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-2 text-[10px] text-amber-200">目前未取得季度歷史，不以即時估值資料代替財報。</div>}
 
       {/* 陸股也共用單檔估值工作流：業績預告、同業 PE、稀釋與三情境不可只留在 API。 */}
       <section className="border-t border-border/40 pt-2">
