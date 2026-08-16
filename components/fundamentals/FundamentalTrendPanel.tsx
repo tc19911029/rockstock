@@ -23,20 +23,20 @@ function formatPeriod(period: string, monthly = false): string {
   return `${match[1].slice(-2)}Q${Math.ceil(Number(match[2]) / 3)}`;
 }
 
-function Change({ value, suffix = '%' }: { value: number | null; suffix?: '%' | 'pp' }) {
+function Change({ value }: { value: number | null }) {
   if (value == null || !Number.isFinite(value)) return <span className="text-muted-foreground/55">—</span>;
   return (
     <span className={cn('font-mono tabular-nums', value > 0 ? 'text-bull' : value < 0 ? 'text-bear' : 'text-muted-foreground')}>
-      {value > 0 ? '+' : ''}{value.toFixed(1)}{suffix}
+      {value > 0 ? '+' : ''}{value.toFixed(1)}%
     </span>
   );
 }
 
-function ChangePair({ label, value, suffix = '%' }: { label: string; value: number | null; suffix?: '%' | 'pp' }) {
+function ChangePair({ label, value }: { label: string; value: number | null }) {
   return (
     <span className="flex min-w-0 items-baseline gap-1 whitespace-nowrap">
       <span className="shrink-0 text-muted-foreground/65">{label}</span>
-      <span className="min-w-0 truncate"><Change value={value} suffix={suffix} /></span>
+      <span className="min-w-0 truncate"><Change value={value} /></span>
     </span>
   );
 }
@@ -75,8 +75,8 @@ function SnapshotCard({
       </div>
       <div className="mt-1 truncate font-mono text-sm font-bold tabular-nums text-foreground" title={value?.toString()}>{displayed}</div>
       <div className="mt-1 grid min-w-0 grid-cols-2 gap-1 text-[8px]">
-        <ChangePair label={primaryLabel} value={primaryChange} suffix={margin ? 'pp' : '%'} />
-        <ChangePair label={secondaryLabel} value={secondaryChange} suffix={margin ? 'pp' : '%'} />
+        <ChangePair label={primaryLabel} value={primaryChange} />
+        <ChangePair label={secondaryLabel} value={secondaryChange} />
       </div>
     </article>
   );
@@ -140,7 +140,7 @@ function QuarterValue({
       <div className="truncate font-mono text-[10px] font-semibold tabular-nums text-foreground" title={value?.toString()}>{displayed}</div>
       <div className="mt-0.5 flex items-baseline justify-end gap-0.5 whitespace-nowrap text-[7px] leading-none">
         <span className="text-muted-foreground/55">年</span>
-        <Change value={yoy} suffix={kind === 'margin' ? 'pp' : '%'} />
+        <Change value={yoy} />
       </div>
     </div>
   );
@@ -213,7 +213,7 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
         <div>
           <h3 className="font-semibold text-cyan-200">基本面歷史趨勢</h3>
           <p className="mt-0.5 text-[9px] leading-snug text-muted-foreground">
-            金額與 EPS 顯示季增／年增；毛利率、淨利率顯示季／年變動百分點。
+            金額、EPS、毛利率與淨利率的季／年變動統一以百分比顯示。
           </p>
         </div>
         {latestQuarter && <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-1 font-mono text-[9px] text-cyan-200">更新至 {formatPeriod(latestQuarter.period)}</span>}
