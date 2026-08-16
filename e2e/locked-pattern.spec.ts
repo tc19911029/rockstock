@@ -22,7 +22,7 @@ test.describe('走圖型態鎖定鏈路', () => {
   });
 
 
-  test('TW lockwatch 股 (4967.TW 複式頭肩底) → 顯示「鎖定」badge + 目標達成', async ({ page }) => {
+  test('TW lockwatch 有效 N 訊號股 (6446.TW 頭肩底) → 顯示「鎖定」badge', async ({ page }) => {
     // 收集 console errors
     const consoleErrors: string[] = [];
     page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
@@ -35,13 +35,13 @@ test.describe('走圖型態鎖定鏈路', () => {
       }
     });
 
-    await page.goto('/?load=4967.TW');
+    await page.goto('/?load=6446.TW');
     // 等股票名稱出現（loaded 完成）
-    await expect(page.getByText('十銓').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('藥華藥').first()).toBeVisible({ timeout: 15_000 });
 
-    // 開「形態」+「頸線」toggle
+    // 開「形態」+「型態價位」toggle
     const patternBtn = page.locator('button:text-is("形態")').first();
-    const necklineBtn = page.locator('button:text-is("頸線")').first();
+    const necklineBtn = page.locator('button:text-is("型態價位")').first();
     await patternBtn.waitFor({ state: 'visible', timeout: 15_000 });
     await patternBtn.click();
     await necklineBtn.click();
@@ -51,13 +51,13 @@ test.describe('走圖型態鎖定鏈路', () => {
     // 驗證沒 chart crash
     expect(consoleErrors, `走圖 crash: ${consoleErrors.join('\n')}`).toHaveLength(0);
 
-    // 鎖定 badge 應出現
-    await expect(page.getByText('鎖定', { exact: true }).first()).toBeVisible();
+    // 鎖定狀態應出現（目前完整文案為「觸發日鎖定」）
+    await expect(page.getByText('觸發日鎖定', { exact: true }).first()).toBeVisible();
     // 型態名稱應出現
     await expect(page.locator('text=/複式頭肩底|頭肩底|圓弧底|楔形|雙重底|三重底/').first()).toBeVisible();
   });
 
-  test('CN lockwatch 股 (601778.SS 圓弧底) → 鎖定 badge + 圓弧底', async ({ page }) => {
+  test('CN lockwatch 有效 N 訊號股 (000703.SZ 圓弧底) → 鎖定 badge + 圓弧底', async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
     page.on('console', (msg) => {
@@ -66,18 +66,18 @@ test.describe('走圖型態鎖定鏈路', () => {
       }
     });
 
-    await page.goto('/?load=601778.SS');
-    await page.waitForTimeout(3000);
+    await page.goto('/?load=000703.SZ');
+    await expect(page.getByText('恒逸石化').first()).toBeVisible({ timeout: 15_000 });
 
     const patternBtn = page.locator('button:text-is("形態")').first();
-    const necklineBtn = page.locator('button:text-is("頸線")').first();
+    const necklineBtn = page.locator('button:text-is("型態價位")').first();
     await patternBtn.waitFor({ state: 'visible', timeout: 15_000 });
     await patternBtn.click();
     await necklineBtn.click();
     await page.waitForTimeout(800);
 
     expect(consoleErrors).toHaveLength(0);
-    await expect(page.getByText('鎖定', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('觸發日鎖定', { exact: true }).first()).toBeVisible();
   });
 
   test('無 lockwatch 紀錄股 (2330.TW) → 顯示「即時」badge', async ({ page }) => {
@@ -85,14 +85,14 @@ test.describe('走圖型態鎖定鏈路', () => {
     await expect(page.getByText('台積電').first()).toBeVisible({ timeout: 15_000 });
 
     const patternBtn = page.locator('button:text-is("形態")').first();
-    const necklineBtn = page.locator('button:text-is("頸線")').first();
+    const necklineBtn = page.locator('button:text-is("型態價位")').first();
     await patternBtn.waitFor({ state: 'visible', timeout: 15_000 });
     await patternBtn.click();
     await necklineBtn.click();
     await page.waitForTimeout(800);
 
-    // 即時 badge 應出現（fresh detection mode）
-    await expect(page.getByText('即時', { exact: true }).first()).toBeVisible();
+    // 即時狀態應出現（fresh detection mode）
+    await expect(page.getByText('即時偵測', { exact: true }).first()).toBeVisible();
   });
 
   test('?symbol= 跟 ?load= 兩種 URL param 都接受', async ({ page }) => {

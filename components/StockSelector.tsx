@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
+import { buildStockLoadHref } from '@/lib/navigation/stockUrl';
 
 const DEFAULT_QUICK_STOCKS = [
   { symbol: 'mock',  name: '📊 範例資料（離線）' },
@@ -70,8 +71,15 @@ export default function StockSelector() {
     setShowDrop(false);
     stopPolling();
     try {
-      await loadStock(symbol, currentInterval ?? '1d');
+      const timeframe = currentInterval ?? '1d';
+      await loadStock(symbol, timeframe);
       startPolling();
+      const resolvedTicker = useReplayStore.getState().currentStock?.ticker ?? symbol;
+      window.history.replaceState(
+        null,
+        '',
+        buildStockLoadHref(window.location.pathname, window.location.search, resolvedTicker, timeframe),
+      );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '載入失敗');
     }

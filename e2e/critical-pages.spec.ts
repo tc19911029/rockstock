@@ -63,11 +63,11 @@ test.describe('critical pages hydration', () => {
   test('/health 顯示紅綠燈', async ({ page }) => {
     const errors = watchErrors(page);
     await page.goto('/health');
-    // 等資料載入完
-    await expect(page.getByText(/正常|需要處理/).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: '資料健康狀態' })).toBeVisible({ timeout: 15_000 });
     // L1 健康度、覆蓋率 marker 應出現
-    await expect(page.getByText('L1 歷史日K').first()).toBeVisible();
-    await expect(page.getByText('覆蓋率').first()).toBeVisible();
+    await expect(page.getByText('歷史日K（每日盤後封存）').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('覆蓋率').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/正常|需要處理/).first()).toBeVisible({ timeout: 15_000 });
     expect(errors, errors.join('\n')).toHaveLength(0);
   });
 

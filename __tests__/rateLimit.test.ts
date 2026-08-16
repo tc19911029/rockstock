@@ -3,6 +3,7 @@ import {
   checkApiRateLimit,
   forwardLimiter,
   generalLimiter,
+  READ_RATE_LIMIT_MAX,
   readLimiter,
   scanLimiter,
 } from '../lib/rateLimit';
@@ -34,12 +35,16 @@ describe('pre-configured limiters', () => {
     expect(result.remaining).toBeLessThanOrEqual(29);
   });
 
-  test('readLimiter allows normal dashboard bursts', () => {
+  test('readLimiter allows multi-panel and multi-tab dashboard bursts, then still limits', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-16T06:00:00.000Z'));
     const identifier = `read-burst-${Date.now()}`;
-    for (let request = 0; request < 120; request += 1) {
+    for (let request = 0; request < READ_RATE_LIMIT_MAX; request += 1) {
       expect(checkApiRateLimit('/api/market-data', identifier, 'GET').success).toBe(true);
     }
-    expect(readLimiter.check(`${identifier}-direct`).remaining).toBeLessThanOrEqual(239);
+    expect(checkApiRateLimit('/api/market-data', identifier, 'GET').success).toBe(false);
+    expect(readLimiter.check(`${identifier}-direct`).remaining).toBe(READ_RATE_LIMIT_MAX - 1);
+    jest.useRealTimers();
   });
 
   test('forward-performance requests are isolated from the general API bucket', () => {

@@ -17,6 +17,7 @@
 import { Suspense, useEffect, useCallback, useState, useRef, useMemo } from 'react';
 import nextDynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
+import { isSameStockSymbol } from '@/lib/navigation/stockUrl';
 import { useReplayStore } from '@/store/replayStore';
 import { findBuyPoints, prevBuyPointIndex, nextBuyPointIndex } from '@/lib/analysis/findBuyPoints';
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
@@ -291,6 +292,20 @@ function HomePage() {
       // dedup：同 sym+tf+date 不重 load（避免 searchParams 變化但內容相同）
       const key = `${sym}|${tf}|${date ?? ''}`;
       if (lastLoadedRef.current === key) return;
+      // StockSelector 已完成載入後才把 URL 正規化；若目前 store 就是同一檔、
+      // 同週期且沒有歷史日期，不要因 replaceState 再下載一次。
+      const loaded = useReplayStore.getState();
+      if (
+        !date
+        && loaded.currentStock?.ticker
+        && isSameStockSymbol(loaded.currentStock.ticker, sym)
+        && loaded.currentInterval === tf
+        && !loaded.targetDate
+      ) {
+        lastLoadedRef.current = key;
+        setLoadError(null);
+        return;
+      }
       lastLoadedRef.current = key;
       loadStock(sym, tf, undefined, date ?? undefined)
         .then(() => setLoadError(null)) // 成功載入 → 清掉先前冷啟動 race 的失敗 banner

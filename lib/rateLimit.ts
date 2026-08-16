@@ -89,8 +89,12 @@ export const generalLimiter = createRateLimit('general', {
  * Read-only API: dashboard 初次載入與切換股票會並行讀取多個面板。
  * 與寫入操作分桶，避免正常巡覽耗盡 general bucket、連持倉 hydration 都被 429。
  */
+export const READ_RATE_LIMIT_MAX = 600;
+
 export const readLimiter = createRateLimit('read', {
-  maxRequests: 240,
+  // 首頁一次會並行載入走圖、四大面板、持倉與掃描資料；多分頁或快速換股時
+  // 240/min 會讓正常唯讀巡覽互相擠出 429。寫入、掃描與 AI 仍由獨立低額度桶保護。
+  maxRequests: READ_RATE_LIMIT_MAX,
   windowMs: 60_000,
 });
 
