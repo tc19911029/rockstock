@@ -32,6 +32,15 @@ function Change({ value, suffix = '%' }: { value: number | null; suffix?: '%' | 
   );
 }
 
+function ChangePair({ label, value, suffix = '%' }: { label: string; value: number | null; suffix?: '%' | 'pp' }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-1 whitespace-nowrap">
+      <span className="shrink-0 text-muted-foreground/65">{label}</span>
+      <span className="min-w-0 truncate"><Change value={value} suffix={suffix} /></span>
+    </span>
+  );
+}
+
 function SnapshotCard({
   label,
   period,
@@ -65,11 +74,9 @@ function SnapshotCard({
         {period && <span className="shrink-0 font-mono text-[8px] text-muted-foreground/65">{period}</span>}
       </div>
       <div className="mt-1 truncate font-mono text-sm font-bold tabular-nums text-foreground" title={value?.toString()}>{displayed}</div>
-      <div className="mt-1 flex items-center gap-1 text-[8px]">
-        <span className="text-muted-foreground/65">{primaryLabel}</span>
-        <Change value={primaryChange} suffix={margin ? 'pp' : '%'} />
-        <span className="ml-1 text-muted-foreground/65">{secondaryLabel}</span>
-        <Change value={secondaryChange} suffix={margin ? 'pp' : '%'} />
+      <div className="mt-1 grid min-w-0 grid-cols-2 gap-1 text-[8px]">
+        <ChangePair label={primaryLabel} value={primaryChange} suffix={margin ? 'pp' : '%'} />
+        <ChangePair label={secondaryLabel} value={secondaryChange} suffix={margin ? 'pp' : '%'} />
       </div>
     </article>
   );
@@ -77,20 +84,33 @@ function SnapshotCard({
 
 function MonthlyTable({ rows }: { rows: MonthlyFundamentalTrend[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border/50">
-      <div className="grid grid-cols-[4.5rem_minmax(5.5rem,1fr)_4.25rem_4.25rem] gap-1 bg-secondary/45 px-2 py-1.5 text-[9px] text-muted-foreground">
-        <span>月份</span><span className="text-right">營收</span><span className="text-right">月增</span><span className="text-right">年增</span>
-      </div>
-      <div className="divide-y divide-border/30">
+    <div className="max-w-full overflow-hidden rounded-lg border border-border/50">
+      <table className="w-full table-fixed text-[10px]" aria-label="月營收歷史">
+        <colgroup>
+          <col className="w-[23%]" />
+          <col className="w-[31%]" />
+          <col className="w-[23%]" />
+          <col className="w-[23%]" />
+        </colgroup>
+        <thead className="bg-secondary/45 text-[9px] text-muted-foreground">
+          <tr>
+            <th scope="col" className="px-2 py-1.5 text-left font-normal">月份</th>
+            <th scope="col" className="px-1 py-1.5 text-right font-normal">營收</th>
+            <th scope="col" className="px-1 py-1.5 text-right font-normal">月增</th>
+            <th scope="col" className="px-2 py-1.5 text-right font-normal">年增</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/30">
         {rows.slice(0, 13).map(row => (
-          <div key={row.period} className="grid min-h-8 grid-cols-[4.5rem_minmax(5.5rem,1fr)_4.25rem_4.25rem] items-center gap-1 px-2 text-[10px] even:bg-foreground/[0.018]">
-            <span className="font-mono text-muted-foreground">{formatPeriod(row.period, true)}</span>
-            <span className="truncate text-right font-mono tabular-nums text-foreground/90" title={row.revenue?.toLocaleString()}>{formatAmount(row.revenue)}</span>
-            <span className="text-right"><Change value={row.revenueMoM} /></span>
-            <span className="text-right"><Change value={row.revenueYoY} /></span>
-          </div>
+          <tr key={row.period} className="h-8 even:bg-foreground/[0.018]">
+            <td className="truncate px-2 font-mono text-muted-foreground">{formatPeriod(row.period, true)}</td>
+            <td className="truncate px-1 text-right font-mono tabular-nums text-foreground/90" title={row.revenue?.toLocaleString()}>{formatAmount(row.revenue)}</td>
+            <td className="truncate px-1 text-right"><Change value={row.revenueMoM} /></td>
+            <td className="truncate px-2 text-right"><Change value={row.revenueYoY} /></td>
+          </tr>
         ))}
-      </div>
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -121,9 +141,9 @@ function MetricCell({
         <span className="text-[9px] text-muted-foreground">{label}</span>
         <span className="truncate font-mono text-[11px] font-semibold tabular-nums text-foreground" title={value?.toString()}>{displayed}</span>
       </div>
-      <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[8px]">
-        <span className="text-muted-foreground/65">季</span><Change value={qoq} suffix={margin ? 'pp' : '%'} />
-        <span className="text-muted-foreground/65">年</span><Change value={yoy} suffix={margin ? 'pp' : '%'} />
+      <div className="mt-0.5 grid min-w-0 grid-cols-2 gap-1 text-[8px]">
+        <ChangePair label="季" value={qoq} suffix={margin ? 'pp' : '%'} />
+        <ChangePair label="年" value={yoy} suffix={margin ? 'pp' : '%'} />
       </div>
     </div>
   );
@@ -230,8 +250,8 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
       {history.monthlyDisclosure === 'available' ? (
         <details className="group rounded-lg border border-border/40 bg-background/20">
           <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded px-2.5 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
-            <span>月營收歷史 <span className="text-[9px] font-normal text-muted-foreground">台股正式月公告</span></span>
-            <span className="shrink-0 text-[9px] font-normal text-cyan-200">近 {Math.min(13, history.monthly.length)}／共 {history.monthly.length} 期 · 展開</span>
+            <span className="min-w-0 truncate">月營收歷史 <span className="text-[9px] font-normal text-muted-foreground">台股正式月公告</span></span>
+            <span className="shrink-0 text-[9px] font-normal text-cyan-200">{Math.min(13, history.monthly.length)}/{history.monthly.length} · 展開</span>
           </summary>
           <div className="px-2 pb-2">
             {history.monthly.length > 0
@@ -247,8 +267,8 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
 
       <details className="group rounded-lg border border-border/40 bg-background/20">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded px-2.5 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
-          <span>季度獲利歷史 <span className="text-[9px] font-normal text-muted-foreground">營收／毛利率／淨利率／EPS</span></span>
-          <span className="shrink-0 text-[9px] font-normal text-cyan-200">近 {Math.min(8, history.quarterly.length)}／共 {history.quarterly.length} 期 · 展開</span>
+          <span className="min-w-0 truncate">季度獲利歷史 <span className="text-[9px] font-normal text-muted-foreground">營收／毛利率／淨利率／EPS</span></span>
+          <span className="shrink-0 text-[9px] font-normal text-cyan-200">{Math.min(8, history.quarterly.length)}/{history.quarterly.length} · 展開</span>
         </summary>
         <div className="px-2 pb-2">
           {history.quarterBasis === 'derived-from-cumulative' && (
@@ -263,10 +283,10 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
         </div>
       </details>
 
-      <div className="flex items-center justify-between gap-2 border-t border-border/35 pt-2 text-[8px] text-muted-foreground/75">
-        <span>缺值顯示「—」，不以 0 或推估值補寫</span>
+      <div className="flex min-w-0 items-center justify-between gap-2 border-t border-border/35 pt-2 text-[8px] text-muted-foreground/75">
+        <span className="min-w-0">缺值顯示「—」，不以 0 或推估值補寫</span>
         {history.sourceUrl ? (
-          <a href={history.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-6 shrink-0 items-center gap-1 text-sky-300 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+          <a href={history.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-6 min-w-0 items-center gap-1 text-right text-sky-300 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
             {history.sourceLabel}<ExternalLink aria-hidden="true" className="size-2.5" />
           </a>
         ) : <span className="shrink-0">{history.sourceLabel}</span>}
