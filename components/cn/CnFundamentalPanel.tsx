@@ -22,7 +22,16 @@ const yi = (n: number | null) => (n == null ? '—' : `${(n / 1e8).toFixed(1)}�
 const pct = (n: number | null) => (n == null ? '—' : `${n > 0 ? '+' : ''}${n.toFixed(1)}%`);
 const f2 = (n: number | null) => (n == null ? '—' : n.toFixed(2));
 
-export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
+interface Props {
+  symbol: string;
+  /** 走圖游標所在 K 棒收盤價；估值必須以這個價格重算，不能混用 API 快照價。 */
+  currentPrice?: number;
+  /** 歷史走圖的 as-of 日期。 */
+  date?: string;
+  isHistorical?: boolean;
+}
+
+export default function CnFundamentalPanel({ symbol, currentPrice, date, isHistorical }: Props) {
   const code = symbol.replace(/\.(SS|SZ)$/i, '');
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,7 +45,7 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
     // 逐季財報照常顯示、但估值整片空白，且早期只 fetch 一次 → 空到使用者手動重整才補回。
     // 故 valuation 為 null 時背景重試（最多 2 次）補回估值頭，財報已先行顯示不被阻塞。
     const load = (attempt: number) => {
-      fetch(`/api/cn/financials/${code}`)
+      fetch(`/api/cn/financials/${code}`, { signal: AbortSignal.timeout(10_000) })
         .then((r) => r.json())
         .then((j: Resp) => {
           if (!alive) return;
@@ -44,7 +53,9 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
           setData(j);
           if (!j.valuation && attempt < 2) timer = setTimeout(() => load(attempt + 1), 1800);
         })
-        .catch(() => { if (alive) setErr('讀取失敗'); })
+        .catch((error: Error) => {
+          if (alive && error.name !== 'AbortError') setErr(error.name === 'TimeoutError' ? '讀取逾時，請稍後重試' : '讀取失敗');
+        })
         .finally(() => { if (alive) setLoading(false); });
     };
     load(0);
@@ -52,12 +63,12 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
   }, [code]);
 
   if (loading) return <div className="p-4 text-sm text-muted-foreground">載入陸股基本面中…</div>;
-  if (err) return <div className="p-4 text-sm text-rose-400">⚠️ {err}</div>;
+  if (err) return <div role="alert" className="p-4 text-sm text-rose-400">⚠️ {err}</div>;
 
   const fin = data?.financials ?? [];
   const val = data?.valuation ?? null;
   const latest = fin[0];
-  const price = val?.price ?? null;
+  const price = currentPrice && currentPrice > 0 ? currentPrice : (val?.price ?? null);
   // PB：優先用 EastMoney 權威值（已修正欄位漂移），無則 price/每股淨值 自算
   const pb = val?.pbRatio ?? (price != null && latest?.bps ? price / latest.bps : null);
   const pe = val?.dynamicPe ?? null; // 本益比（動）＝年化最新季
@@ -71,6 +82,7 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
         <div className="text-center">
           <span className="font-semibold text-fuchsia-300">{val?.name ?? code}</span>
           {price != null && <span className="ml-2 font-mono text-base font-bold">{price}</span>}
+          {isHistorical && date && <span className="ml-2 text-[9px] text-amber-300">歷史價 {date}</span>}
         </div>
         <div className="mt-2 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[11px]">
           {pe != null && (
@@ -149,11 +161,16 @@ export default function CnFundamentalPanel({ symbol }: { symbol: string }) {
 
       {/* 陸股也共用單檔估值工作流：業績預告、同業 PE、稀釋與三情境不可只留在 API。 */}
       <section className="border-t border-border/40 pt-2">
-        <FundamentalSidebarPanel symbol={symbol} currentPrice={price ?? undefined} />
+        <FundamentalSidebarPanel
+          symbol={symbol}
+          currentPrice={price ?? undefined}
+          date={date}
+          isHistorical={isHistorical}
+        />
       </section>
 
       <div className="text-center text-[9px] text-muted-foreground/60 mt-1">
-        資料源：EastMoney（财报+估值）→ 新浪AkShare fallback · 本益比(動)=年化最新季
+        財報資料源：EastMoney → 新浪 AkShare fallback；價格與上漲空間以目前走圖 K 棒重算
       </div>
     </div>
   );

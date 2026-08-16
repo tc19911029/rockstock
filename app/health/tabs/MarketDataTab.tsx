@@ -23,6 +23,11 @@ interface MarketHealthLite {
   l4?: { status: string; lastScanDate: string | null; lastScanCount: number; lastScanTime: string | null; todayHasIntraday: boolean };
 }
 
+interface DependencyHealth {
+  finMindBranch: { kind: 'unknown' | 'ok' | 'permission_denied' | 'rate_limited' | 'unavailable'; message: string; checkedAt: string | null };
+  paperTrack: { level: 'ok' | 'warning' | 'stale' | 'missing'; ageDays: number | null; message: string; updatedAt: string | null };
+}
+
 type LightLevel = 'green' | 'yellow' | 'red';
 
 function deriveMarketLight(m: MarketHealthLite | null): LightLevel {
@@ -40,8 +45,14 @@ function deriveMarketLight(m: MarketHealthLite | null): LightLevel {
   return 'green';
 }
 
-function deriveOverallLight(markets: (MarketHealthLite | null)[]): LightLevel {
+function deriveOverallLight(markets: (MarketHealthLite | null)[], dependencies: DependencyHealth | null): LightLevel {
   const lights = markets.map(deriveMarketLight);
+  if (dependencies) {
+    if (dependencies.finMindBranch.kind === 'permission_denied' || dependencies.finMindBranch.kind === 'unavailable') lights.push('red');
+    else if (dependencies.finMindBranch.kind !== 'ok') lights.push('yellow');
+    if (dependencies.paperTrack.level === 'stale' || dependencies.paperTrack.level === 'missing') lights.push('red');
+    else if (dependencies.paperTrack.level === 'warning') lights.push('yellow');
+  }
   if (lights.includes('red')) return 'red';
   if (lights.includes('yellow')) return 'yellow';
   return 'green';
@@ -73,29 +84,35 @@ function isWeekendOrHoliday(): boolean {
 export function MarketDataTab() {
   const [tw, setTw] = useState<MarketHealthLite | null>(null);
   const [cn, setCn] = useState<MarketHealthLite | null>(null);
+  const [dependencies, setDependencies] = useState<DependencyHealth | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
-      try {
-        const [twRes, cnRes] = await Promise.all([
-          fetch('/api/health/data?market=TW').then(r => r.json()),
-          fetch('/api/health/data?market=CN').then(r => r.json()),
-        ]);
-        if (twRes.ok) setTw(twRes as MarketHealthLite);
-        if (cnRes.ok) setCn(cnRes as MarketHealthLite);
-      } catch (err) {
-        console.error('[/health > 行情] fetch failed', err);
-      } finally {
-        setLoading(false);
-      }
+      setFetchError(null);
+      const [twResult, cnResult, depResult] = await Promise.allSettled([
+        fetch('/api/health/data?market=TW').then(r => r.json()),
+        fetch('/api/health/data?market=CN').then(r => r.json()),
+        fetch('/api/health/dependencies', { signal: AbortSignal.timeout(25_000) }).then(r => r.json()),
+      ]);
+      const failures: string[] = [];
+      if (twResult.status === 'fulfilled' && twResult.value.ok) setTw(twResult.value as MarketHealthLite);
+      else failures.push('台股健康資料');
+      if (cnResult.status === 'fulfilled' && cnResult.value.ok) setCn(cnResult.value as MarketHealthLite);
+      else failures.push('陸股健康資料');
+      if (depResult.status === 'fulfilled' && depResult.value.ok && depResult.value.dependencies) {
+        setDependencies(depResult.value.dependencies as DependencyHealth);
+      } else failures.push('外部資料／排程檢查');
+      if (failures.length) setFetchError(`${failures.join('、')}讀取失敗`);
+      setLoading(false);
     };
     fetchAll();
     const t = setInterval(fetchAll, 60_000);
     return () => clearInterval(t);
   }, []);
 
-  const overall = deriveOverallLight([tw, cn]);
+  const overall = deriveOverallLight([tw, cn], dependencies);
   const lightConfig: Record<LightLevel, { bg: string; text: string; emoji: string; label: string; tip: string }> = {
     green: {
       bg: 'bg-green-950/60 border-green-700',
@@ -135,14 +152,33 @@ export function MarketDataTab() {
       </div>
 
       {loading && !tw && !cn && (
-        <div className="text-center py-12 text-muted-foreground">載入健康資料中…</div>
+        <div role="status" className="text-center py-12 text-muted-foreground">載入健康資料中…</div>
       )}
+      {fetchError && <div role="alert" className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">部分健康檢查失敗：{fetchError}</div>}
 
       {/* 兩市場詳情 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <MarketCard market="TW" data={tw} />
         <MarketCard market="CN" data={cn} />
       </div>
+
+      <section className="space-y-2" aria-labelledby="runtime-dependencies-title">
+        <h2 id="runtime-dependencies-title" className="text-sm font-semibold">外部資料與自動追蹤</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <DependencyCard
+            title="FinMind 主力分點"
+            level={dependencies?.finMindBranch.kind === 'ok' ? 'green' : dependencies?.finMindBranch.kind === 'permission_denied' || dependencies?.finMindBranch.kind === 'unavailable' ? 'red' : 'yellow'}
+            message={dependencies?.finMindBranch.message ?? '尚未完成檢查'}
+            detail="正式 5／20 日集中度資料源"
+          />
+          <DependencyCard
+            title="Paper-trade 每日追蹤"
+            level={dependencies?.paperTrack.level === 'ok' ? 'green' : dependencies?.paperTrack.level === 'warning' ? 'yellow' : 'red'}
+            message={dependencies?.paperTrack.message ?? '尚未完成檢查'}
+            detail={dependencies?.paperTrack.updatedAt ? `最後更新 ${fmtTime(dependencies.paperTrack.updatedAt)}` : '沒有更新紀錄'}
+          />
+        </div>
+      </section>
 
       {/* 操作提示 */}
       <div className="text-xs text-muted-foreground border-t border-border pt-3">
@@ -174,12 +210,28 @@ function CopyCode({ cmd }: { cmd: string }) {
         onClick={async () => {
           try { await navigator.clipboard.writeText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
         }}
-        className="opacity-50 hover:opacity-100 text-[10px] px-1 rounded hover:bg-secondary"
+        aria-label={`複製指令 ${cmd}`}
+        className="min-h-11 sm:min-h-8 opacity-50 hover:opacity-100 text-[10px] px-2 rounded hover:bg-secondary"
         title="複製"
       >
         {copied ? '✓' : '📋'}
       </button>
     </span>
+  );
+}
+
+function DependencyCard({ title, level, message, detail }: { title: string; level: LightLevel; message: string; detail: string }) {
+  const tone = level === 'green'
+    ? 'border-green-700/50 bg-green-950/30 text-green-300'
+    : level === 'yellow'
+      ? 'border-yellow-700/50 bg-yellow-950/30 text-yellow-300'
+      : 'border-red-700/50 bg-red-950/30 text-red-300';
+  return (
+    <div role={level === 'red' ? 'alert' : 'status'} className={`rounded-xl border p-4 ${tone}`}>
+      <div className="flex items-center gap-2 font-semibold"><span className="size-2.5 rounded-full bg-current" aria-hidden="true" />{title}</div>
+      <div className="mt-2 text-sm">{message}</div>
+      <div className="mt-1 text-[11px] text-muted-foreground">{detail}</div>
+    </div>
   );
 }
 

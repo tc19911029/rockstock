@@ -198,7 +198,7 @@ export default function HomePageWrapper() {
 
 function HomePage() {
   const {
-    initData, visibleCandles, currentSignals, chartMarkers,
+    visibleCandles, currentSignals, chartMarkers,
     isLoadingStock, allCandles, currentIndex, dataGaps,
     nextCandle, prevCandle, isPlaying, startPlay, stopPlay, metrics,
     loadStock, currentStock, currentInterval,
@@ -243,19 +243,37 @@ function HomePage() {
   // 鎖股觀察紀錄 → 走圖型態 chip 穩定來源（hooks/useLockedPattern）
   const { lockedPattern } = useLockedPattern(currentStock?.ticker);
 
-  useEffect(() => { initData(); }, [initData]);
-
   // ↑↓ 跳股票：記住「最後點到的股票」屬於哪個清單（題材/掃描/候選池），鍵盤上下鍵據此換股
   useChartListNavCapture();
 
   // URL 與各資料面板共用狀態必須在讀取它們的 effects/callbacks 之前宣告。
   const [rightTab, setRightTab] = useState<RightTab>('scan');
-  const [tabDate, setTabDate] = useState(lastBusinessDayYmd);
+  const [youtubeDate, setYoutubeDate] = useState(lastBusinessDayYmd);
+  const [brokerDate, setBrokerDate] = useState(lastBusinessDayYmd);
   const [mobileChartFullscreen, setMobileChartFullscreen] = useState(false);
   const selectRightTab = useCallback((nextTab: RightTab) => {
     setRightTab(nextTab);
     const params = new URLSearchParams(window.location.search);
     params.set('tab', nextTab);
+    // 面板日期各自保存，避免 YouTube / 法人互相改掉日期；舊的 `date` 只保留給
+    // `?load=...&date=...` 歷史走圖，不能再兼作研究面板日期。
+    if (nextTab === 'youtube') params.set('ytDate', youtubeDate);
+    if (nextTab === 'broker') params.set('brokerDate', brokerDate);
+    if (!params.has('load') && !params.has('symbol')) params.delete('date');
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  }, [youtubeDate, brokerDate]);
+  const changeYoutubeDate = useCallback((nextDate: string) => {
+    setYoutubeDate(nextDate);
+    const params = new URLSearchParams(window.location.search);
+    params.set('ytDate', nextDate);
+    if (!params.has('load') && !params.has('symbol')) params.delete('date');
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  }, []);
+  const changeBrokerDate = useCallback((nextDate: string) => {
+    setBrokerDate(nextDate);
+    const params = new URLSearchParams(window.location.search);
+    params.set('brokerDate', nextDate);
+    if (!params.has('load') && !params.has('symbol')) params.delete('date');
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
   }, []);
 
@@ -273,30 +291,36 @@ function HomePage() {
   // 用 useSearchParams 監聽 URL 變化（Link 點擊 / router.replace 都會 trigger）
   // 用 lastLoadedRef 防止重複 load 同一檔（避免 hydration race + market-change race）
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [failedLoadRequest, setFailedLoadRequest] = useState<{ symbol: string; tf: string; date?: string } | null>(null);
   const searchParams = useSearchParams();
   const lastLoadedRef = useRef<string>('');
   useEffect(() => {
     const sym = searchParams.get('load') ?? searchParams.get('symbol');
-    const date = searchParams.get('date');
+    const legacyDate = searchParams.get('date');
     const urlTab = searchParams.get('tab');
     const tfParam = searchParams.get('tf');
     if (urlTab === 'youtube' || urlTab === 'scan' || urlTab === 'sectors' || urlTab === 'broker' || urlTab === 'etf') {
       setRightTab(urlTab);
     }
-    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      setTabDate(date);
-    }
+    const validDate = (value: string | null): value is string => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+    const ytDate = searchParams.get('ytDate');
+    const reportDate = searchParams.get('brokerDate');
+    if (validDate(ytDate)) setYoutubeDate(ytDate);
+    else if (!sym && urlTab === 'youtube' && validDate(legacyDate)) setYoutubeDate(legacyDate);
+    if (validDate(reportDate)) setBrokerDate(reportDate);
+    else if (!sym && urlTab === 'broker' && validDate(legacyDate)) setBrokerDate(legacyDate);
+    const chartDate = sym && validDate(legacyDate) ? legacyDate : null;
     const validTfs = ['1m', '5m', '15m', '30m', '60m', '1d', '1wk', '1mo'];
     const tf = tfParam && validTfs.includes(tfParam) ? tfParam : '1d';
     if (sym) {
       // dedup：同 sym+tf+date 不重 load（避免 searchParams 變化但內容相同）
-      const key = `${sym}|${tf}|${date ?? ''}`;
+      const key = `${sym}|${tf}|${chartDate ?? ''}`;
       if (lastLoadedRef.current === key) return;
       // StockSelector 已完成載入後才把 URL 正規化；若目前 store 就是同一檔、
       // 同週期且沒有歷史日期，不要因 replaceState 再下載一次。
       const loaded = useReplayStore.getState();
       if (
-        !date
+        !chartDate
         && loaded.currentStock?.ticker
         && isSameStockSymbol(loaded.currentStock.ticker, sym)
         && loaded.currentInterval === tf
@@ -307,11 +331,12 @@ function HomePage() {
         return;
       }
       lastLoadedRef.current = key;
-      loadStock(sym, tf, undefined, date ?? undefined)
-        .then(() => setLoadError(null)) // 成功載入 → 清掉先前冷啟動 race 的失敗 banner
+      loadStock(sym, tf, undefined, chartDate ?? undefined)
+        .then(() => { setLoadError(null); setFailedLoadRequest(null); }) // 成功載入 → 清掉先前冷啟動 race 的失敗 banner
         .catch((e: Error) => {
           const msg = `載入 ${sym} 失敗：${e.message || '請稍後再試'}`;
           setLoadError(msg);
+          setFailedLoadRequest({ symbol: sym, tf, date: chartDate ?? undefined });
           toast.error(msg);
         });
     } else if (lastLoadedRef.current === '') {
@@ -622,7 +647,7 @@ function HomePage() {
     if (!needsExactConcentration || !chipFetchKey) return;
     const ctrl = new AbortController();
     let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; ctrl.abort(); }, 35_000);
+    const timeout = setTimeout(() => { timedOut = true; ctrl.abort(); }, 15_000);
     setConcResult({ sourceSymbol: chipFetchKey, status: 'loading', rows: [] });
     fetch(`/api/stock/concentration?symbol=${encodeURIComponent(chipFetchKey)}&recentN=10`, { signal: ctrl.signal })
       .then(async r => {
@@ -634,11 +659,15 @@ function HomePage() {
         const rows = (json.conc ?? []) as ConcRow[];
         const assessment = assessExactConcentration(rows);
         const coverage = `${assessment.exactDateCount}/${assessment.totalCount}`;
+        const sourceStatus = json.sourceStatus as { kind?: string; message?: string } | null | undefined;
+        const permissionDenied = sourceStatus?.kind === 'permission_denied';
         setConcResult({
           sourceSymbol: chipFetchKey,
-          status: assessment.status,
+          status: permissionDenied ? 'unavailable' : assessment.status,
           rows,
-          error: assessment.status === 'unavailable'
+          error: permissionDenied
+            ? `${sourceStatus?.message ?? 'FinMind 方案權限不足'}；正式集中度已停用無效重試，目前只顯示近似值。`
+            : assessment.status === 'unavailable'
             ? '正式分點來源本次未回傳可用的 5／20 日數值；目前顯示已儲存的近似值。'
             : assessment.status === 'partial'
               ? `正式分點僅覆蓋 ${coverage} 個日期，最新日期尚未完整；其餘顯示近似值。`
@@ -1031,11 +1060,27 @@ function HomePage() {
         currentStock ? (
           <SectionBoundary section="基本面分析" resetKey={`${currentStock.ticker}:fundamental`}>
             {isCnTicker
-              ? <CnFundamentalPanel symbol={currentStock.ticker} />
+              ? <CnFundamentalPanel
+                  symbol={currentStock.ticker}
+                  currentPrice={allCandles[currentIndex]?.close}
+                  date={currentIndex < allCandles.length - 1 ? (currentDate ?? undefined) : undefined}
+                  isHistorical={currentIndex < allCandles.length - 1}
+                />
               : (
                 <>
-                  <FundamentalScoreSummary key={`fund-score-${currentStock.ticker}`} symbol={currentStock.ticker} currentPrice={allCandles[currentIndex]?.close} />
-                  <FundamentalSidebarPanel key={`fund-panel-${currentStock.ticker}`} symbol={currentStock.ticker} date={targetDate ?? undefined} currentPrice={allCandles[currentIndex]?.close} isHistorical={currentIndex < allCandles.length - 1} />
+                  <FundamentalScoreSummary
+                    key={`fund-score-${currentStock.ticker}`}
+                    symbol={currentStock.ticker}
+                    currentPrice={allCandles[currentIndex]?.close}
+                    date={currentIndex < allCandles.length - 1 ? (currentDate ?? undefined) : undefined}
+                  />
+                  <FundamentalSidebarPanel
+                    key={`fund-panel-${currentStock.ticker}`}
+                    symbol={currentStock.ticker}
+                    date={currentIndex < allCandles.length - 1 ? (currentDate ?? undefined) : undefined}
+                    currentPrice={allCandles[currentIndex]?.close}
+                    isHistorical={currentIndex < allCandles.length - 1}
+                  />
                 </>
               )}
           </SectionBoundary>
@@ -1124,10 +1169,10 @@ function HomePage() {
     <PageShell fullViewport={false} headerSlot={<StockSelector />}>
       <h1 className="sr-only">Rockstock 股票決策工作台</h1>
       <div className="flex-1 flex flex-col px-3 py-2 gap-3">
-        <div className="flex flex-col xl:flex-row gap-3 xl:h-[calc(100vh-70px)] xl:overflow-hidden">
+        <div className="flex flex-col min-[1440px]:flex-row gap-3 min-[1440px]:h-[calc(100vh-70px)] min-[1440px]:overflow-hidden">
 
         {/* Left: Chart */}
-        <div className="w-full xl:flex-1 xl:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] xl:min-h-0 gap-1.5">
+        <div className="w-full min-[1440px]:flex-1 min-[1440px]:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] min-[1440px]:min-h-0 gap-1.5">
           <StockChartView
             isLoading={isLoadingStock}
             loadingOverlay={
@@ -1169,10 +1214,20 @@ function HomePage() {
                   </div>
                 )}
                 {loadError && (
-                  <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-red-900/30 border-b border-red-700/50 text-xs">
+                  <div role="alert" className="shrink-0 flex items-center gap-2 px-3 py-2 bg-red-900/30 border-b border-red-700/50 text-xs">
                     <span className="text-red-400">{loadError}</span>
-                    <button onClick={() => { setLoadError(null); loadStock('2330', '1d', '2y'); }}
-                      className="text-sky-400 hover:text-sky-300 underline">重試</button>
+                    {failedLoadRequest && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLoadError(null);
+                          loadStock(failedLoadRequest.symbol, failedLoadRequest.tf, undefined, failedLoadRequest.date)
+                            .then(() => { setLoadError(null); setFailedLoadRequest(null); })
+                            .catch((e: Error) => setLoadError(`載入 ${failedLoadRequest.symbol} 失敗：${e.message || '請稍後再試'}`));
+                        }}
+                        className="min-h-9 shrink-0 text-sky-400 hover:text-sky-300 underline"
+                      >重試同一檔</button>
+                    )}
                   </div>
                 )}
                 {dataGaps.length > 0 && currentInterval === '1d' && (() => {
@@ -1312,9 +1367,9 @@ function HomePage() {
         </div>
 
         {/* Middle: Sidebar */}
-        <div className="w-full xl:w-72 2xl:w-80 shrink-0 flex flex-col min-h-0 gap-2">
+        <div className="w-full min-[1440px]:w-72 2xl:w-80 shrink-0 flex flex-col min-h-0 gap-2">
           {/* Mobile: Sheet drawer */}
-          <div className="xl:hidden">
+          <div className="min-[1440px]:hidden">
             <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
               <SheetTrigger className="flex min-h-11 items-center justify-between w-full px-3 py-2 bg-secondary rounded-lg text-sm text-foreground/80 border border-border">
                 <span>分析面板</span>
@@ -1333,7 +1388,7 @@ function HomePage() {
           </div>
 
           {/* Desktop: inline sidebar */}
-          <div id="analysis-sidebar" className="hidden xl:flex flex-col min-h-0 gap-2">
+          <div id="analysis-sidebar" className="hidden min-[1440px]:flex flex-col min-h-0 gap-2">
             {sidebarTabs}
             {sidebarContent}
           </div>
@@ -1350,8 +1405,8 @@ function HomePage() {
         {/* ── Right: 多源候選 panel（tab：策略掃描 / YouTube 提及） ── */}
         <div className={`shrink-0 flex flex-col min-h-0 ring-1 ring-foreground/10 bg-card/80 rounded-xl overflow-hidden transition-all duration-300 ${
           scannerOpen
-            ? 'w-full xl:w-[min(38vw,600px)] min-h-[50vh] xl:min-h-0'
-            : 'w-full xl:w-11 h-11 xl:h-auto'
+            ? 'w-full min-[1440px]:w-[min(38vw,600px)] min-h-[50vh] min-[1440px]:min-h-0'
+            : 'w-full min-[1440px]:w-11 h-11 min-[1440px]:h-auto'
         }`}>
           {scannerOpen ? (
             <>
@@ -1378,7 +1433,7 @@ function HomePage() {
                   aria-controls="source-panel-scan"
                   tabIndex={rightTab === 'scan' ? 0 : -1}
                   onClick={() => selectRightTab('scan')}
-                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
+                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 2xl:px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'scan'
                       ? 'text-foreground border-b-2 border-sky-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -1396,7 +1451,7 @@ function HomePage() {
                   aria-controls="source-panel-youtube"
                   tabIndex={rightTab === 'youtube' ? 0 : -1}
                   onClick={() => selectRightTab('youtube')}
-                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
+                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 2xl:px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'youtube'
                       ? 'text-foreground border-b-2 border-purple-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -1414,7 +1469,7 @@ function HomePage() {
                   aria-controls="source-panel-sectors"
                   tabIndex={rightTab === 'sectors' ? 0 : -1}
                   onClick={() => selectRightTab('sectors')}
-                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
+                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 2xl:px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'sectors'
                       ? 'text-foreground border-b-2 border-teal-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -1432,7 +1487,7 @@ function HomePage() {
                   aria-controls="source-panel-broker"
                   tabIndex={rightTab === 'broker' ? 0 : -1}
                   onClick={() => selectRightTab('broker')}
-                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
+                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 2xl:px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'broker'
                       ? 'text-foreground border-b-2 border-rose-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -1450,7 +1505,7 @@ function HomePage() {
                   aria-controls="source-panel-etf"
                   tabIndex={rightTab === 'etf' ? 0 : -1}
                   onClick={() => selectRightTab('etf')}
-                  className={`flex min-h-11 items-center gap-1.5 px-3 text-sm font-semibold transition-colors ${
+                  className={`flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 px-1.5 2xl:px-3 text-sm font-semibold transition-colors ${
                     rightTab === 'etf'
                       ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
@@ -1460,7 +1515,6 @@ function HomePage() {
                   <LineChart className="size-4" aria-hidden="true" />
                   <span>台股 ETF</span>
                 </button>
-                <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)} aria-label="收起研究面板"
                   className="min-w-11 min-h-11 px-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                   title="收起面板"
@@ -1476,8 +1530,8 @@ function HomePage() {
                 )}
                 {rightTab === 'youtube' && (
                   <YoutubePanel
-                    date={tabDate}
-                    onDateChange={setTabDate}
+                    date={youtubeDate}
+                    onDateChange={changeYoutubeDate}
                     onSelectStock={handleYoutubeSelectStock}
                     // 統一以「現在看的股票」為準，4 個 tab 之間 highlight 同步
                     selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
@@ -1491,8 +1545,8 @@ function HomePage() {
                 )}
                 {rightTab === 'broker' && (
                   <BrokerReportsPanel
-                    date={tabDate}
-                    onDateChange={setTabDate}
+                    date={brokerDate}
+                    onDateChange={changeBrokerDate}
                     onSelectStock={handleYoutubeSelectStock}
                     selectedCode={currentStock?.ticker?.replace(/\.(TW|TWO|SS|SZ)$/i, '') ?? null}
                   />
@@ -1506,11 +1560,11 @@ function HomePage() {
             /* Collapsed: horizontal bar on mobile, vertical label on desktop */
             <button
               onClick={() => setScannerOpen(true)}
-              className="flex-1 min-h-11 flex flex-row xl:flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-colors group"
+              className="flex-1 min-h-11 flex flex-row min-[1440px]:flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-colors group"
               title="掃描"
             >
               <Search className="w-3.5 h-3.5 text-muted-foreground group-hover:text-blue-400 transition-colors" />
-              <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors xl:[writing-mode:vertical-rl]">研究工具</span>
+              <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors min-[1440px]:[writing-mode:vertical-rl]">研究工具</span>
             </button>
           )}
         </div>

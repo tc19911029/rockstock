@@ -89,7 +89,7 @@ export function BrokerReportsPanel({ date, onDateChange, onSelectStock, selected
       .catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [date]);
+  }, [date, onDateChange]);
 
   const datePickerMeta = useMemo<Record<string, DateMeta>>(() => {
     const m: Record<string, DateMeta> = {};
@@ -137,12 +137,19 @@ export function BrokerReportsPanel({ date, onDateChange, onSelectStock, selected
           {loading && <span className="text-rose-400 animate-pulse ml-auto">載入中…</span>}
         </div>
         {onDateChange && (
-          <DatePicker value={date} onChange={onDateChange} size="sm" meta={datePickerMeta} />
+          <DatePicker
+            value={date}
+            onChange={onDateChange}
+            dates={data?.availableDates}
+            size="sm"
+            meta={datePickerMeta}
+            ariaLabel="法人報告日期"
+          />
         )}
       </div>
 
-      {/* 今日消息面（晨報 × 持股/法人報告）*/}
-      <BrokerNewsSection onSelectStock={onSelectStock} />
+      {/* 同一法人報告日的消息面（不再靜默混入另一個「最新」日期）*/}
+      <BrokerNewsSection date={date} onSelectStock={onSelectStock} />
 
       {/* 跨券商共識 */}
       {data?.consensus && data.consensus.length > 0 && (
@@ -198,7 +205,7 @@ export function BrokerReportsPanel({ date, onDateChange, onSelectStock, selected
       {/* Card list */}
       <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1.5 space-y-1.5">
         {error && (
-          <div className="text-xs text-red-400 p-2 border border-red-700/40 rounded">載入失敗：{error}</div>
+          <div role="alert" className="text-xs text-red-400 p-2 border border-red-700/40 rounded">載入失敗：{error}</div>
         )}
         {!loading && !error && (data?.items.length ?? 0) === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">

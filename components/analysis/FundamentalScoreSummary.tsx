@@ -22,30 +22,54 @@ interface RawF {
 }
 interface ValJson { scenarios?: { base?: { fairPrice: number } } }
 
-export function FundamentalScoreSummary({ symbol, currentPrice }: { symbol: string; currentPrice?: number }) {
+export function FundamentalScoreSummary({
+  symbol,
+  currentPrice,
+  date,
+}: {
+  symbol: string;
+  currentPrice?: number;
+  /** 歷史走圖日期；估值檔也必須取同日或該日前最近一份，避免偷看未來。 */
+  date?: string;
+}) {
   const [raw, setRaw] = useState<RawF | null>(null);
   const [val, setVal] = useState<ValJson | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadWarning, setLoadWarning] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const bare = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-    setLoading(true); setRaw(null); setVal(null);
-    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-    Promise.all([
-      fetch(`/api/fundamentals/${encodeURIComponent(bare)}`).then(r => r.json()).catch(() => null),
-      fetch(`/api/valuation/${encodeURIComponent(bare)}?date=${today}`).then(r => r.json()).catch(() => null),
-    ]).then(([f, v]) => {
+    setLoading(true); setRaw(null); setVal(null); setLoadWarning(null);
+    const valuationDate = date ?? new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const fetchJson = async (url: string) => {
+      const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    };
+    Promise.allSettled([
+      fetchJson(`/api/fundamentals/${encodeURIComponent(bare)}`),
+      fetchJson(`/api/valuation/${encodeURIComponent(bare)}?date=${valuationDate}`),
+    ]).then(([fundamentalResult, valuationResult]) => {
       if (cancelled) return;
+      const f = fundamentalResult.status === 'fulfilled' ? fundamentalResult.value : null;
+      const v = valuationResult.status === 'fulfilled' ? valuationResult.value : null;
       if (f?.ok && f.data) setRaw(f.data as RawF);
       if (v?.ok && v.valuation) setVal(v.valuation as ValJson);
+      if (fundamentalResult.status === 'rejected' || valuationResult.status === 'rejected') {
+        setLoadWarning('部分資料逾時或暫時無法取得，評分僅使用已成功載入的資料。');
+      }
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [symbol]);
+  }, [symbol, date]);
 
   if (loading) return <div className="text-[11px] text-muted-foreground animate-pulse px-1 py-2">基本面 / 估值評分載入中…</div>;
-  if (!raw) return null; // 無基本面 raw → 不顯示摘要（下方 FundamentalSidebarPanel 會自行處理）
+  if (!raw) return loadWarning ? (
+    <div role="status" className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[10px] text-amber-200">
+      {loadWarning}
+    </div>
+  ) : null; // 無基本面 raw → 下方 FundamentalSidebarPanel 會自行處理
 
   const reasonablePeBase = getReasonablePeRange(detectIndustryTemplate(null, symbol)).base;
   const price = currentPrice && currentPrice > 0 ? currentPrice : null;
@@ -80,6 +104,7 @@ export function FundamentalScoreSummary({ symbol, currentPrice }: { symbol: stri
         </div>
       </div>
       <div className="text-[11px] text-foreground/85">{conclusion}</div>
+      {loadWarning && <div role="status" className="text-[10px] text-amber-300">{loadWarning}</div>}
       {(fund.note || val2.note) && (
         <div className="text-[10px] text-muted-foreground/80 leading-snug">
           {[fund.note, val2.note].filter(Boolean).join('｜')}

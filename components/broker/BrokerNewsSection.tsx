@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * BrokerNewsSection — 首頁法人報告面板的「📰 今日消息面」折疊區。
+ * BrokerNewsSection — 首頁法人報告面板的「📰 同日消息面」折疊區。
  *
  * 顯示當日晨報新聞點到、且與持股/法人報告交叉的個股 + 交叉訊號（印證/矛盾/觀察）。
  */
@@ -11,6 +11,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { NewsDigest, NewsMention } from '@/lib/broker/newsDigest';
 
 interface Props {
+  date: string;
   onSelectStock?: (code: string) => void;
 }
 
@@ -20,20 +21,33 @@ const SENT: Record<string, { label: string; cls: string }> = {
   neutral: { label: '中性', cls: 'text-muted-foreground' },
 };
 
-export function BrokerNewsSection({ onSelectStock }: Props) {
+export function BrokerNewsSection({ date, onSelectStock }: Props) {
   const [digest, setDigest] = useState<NewsDigest | null>(null);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/broker/news-digest/latest')
+    setLoading(true);
+    setDigest(null);
+    setMessage(null);
+    fetch(`/api/broker/news-digest/${encodeURIComponent(date)}`)
       .then(r => r.json())
-      .then((j: { digest: NewsDigest | null }) => { if (!cancelled) setDigest(j.digest); })
-      .catch(() => { /* ignore */ });
+      .then((j: { digest: NewsDigest | null; message?: string }) => {
+        if (!cancelled) { setDigest(j.digest); setMessage(j.message ?? null); }
+      })
+      .catch(() => { if (!cancelled) setMessage('消息面讀取失敗'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [date]);
 
-  if (!digest || digest.mentions.length === 0) return null;
+  if (loading) return <div role="status" className="shrink-0 border-b border-border/60 px-2 py-1.5 text-[10px] text-muted-foreground">讀取 {date} 消息面…</div>;
+  if (!digest || digest.mentions.length === 0) return (
+    <div className="shrink-0 border-b border-border/60 px-2 py-1.5 text-[10px] text-muted-foreground">
+      {date} {message ?? '無可交叉比對的消息面資料'}
+    </div>
+  );
 
   const holding = digest.mentions.filter(m => m.in_holdings);
   const broker = digest.mentions.filter(m => !m.in_holdings && m.in_broker_reports);
@@ -71,7 +85,7 @@ export function BrokerNewsSection({ onSelectStock }: Props) {
         aria-expanded={open}
       >
         {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-        <span>📰 {digest.date} 今日消息面</span>
+        <span>📰 {digest.date} 同日消息面</span>
         <span className="text-[9px] px-1 rounded bg-secondary text-muted-foreground font-normal">{digest.mentions.length} 檔</span>
         {holding.length > 0 && <span className="text-[9px] px-1 rounded bg-amber-900/50 text-amber-300 font-normal">持股 {holding.length}</span>}
         <span className="ml-auto text-[10px] font-normal text-muted-foreground">晨報 × 法人/持股</span>
@@ -80,12 +94,12 @@ export function BrokerNewsSection({ onSelectStock }: Props) {
         <div className="px-2 pb-2 space-y-1.5 text-[11px]">
           {holding.length > 0 && (
             <div>
-              <div className="text-[9px] text-amber-300 font-semibold mb-0.5">持股今日上新聞</div>
+              <div className="text-[9px] text-amber-300 font-semibold mb-0.5">持股同日上新聞</div>
               {holding.map(row)}
             </div>
           )}
           <div>
-            <div className="text-[9px] text-sky-300 font-semibold mb-0.5">法人報告股今日上新聞（{broker.length}）</div>
+            <div className="text-[9px] text-sky-300 font-semibold mb-0.5">法人報告股同日上新聞（{broker.length}）</div>
             {broker.length ? broker.map(row) : <div className="text-muted-foreground text-[10px]">無</div>}
           </div>
           {fresh.length > 0 && (

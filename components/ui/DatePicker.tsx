@@ -151,7 +151,8 @@ export function DatePicker({
             aria-pressed={isActive}
             title={titleParts.join('｜')}
             className={cn(
-              'min-h-8 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
+              // 手機保留 44px 點擊高度；桌面維持緊湊資料面板。
+              'min-h-11 sm:min-h-8 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
               pillBase,
               variantCls,
               disabled && 'cursor-not-allowed opacity-50',

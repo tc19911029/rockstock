@@ -6,6 +6,7 @@
  * 每晚 19:05 launchd 自動開單/補進場/書本規則出場；進場=隔日收盤（≈13:25 市價）。
  */
 import { useEffect, useState } from 'react';
+import { assessPaperTrackFreshness } from '@/lib/health/paperTrackFreshness';
 
 interface Summary {
   updatedAt: string;
@@ -39,10 +40,18 @@ export function PaperTrackCard() {
       </div>
     );
   }
+  const freshness = assessPaperTrackFreshness(s.updatedAt);
+  const isStale = freshness.level === 'stale' || freshness.level === 'missing';
   return (
     <div className="rounded-md border border-zinc-800 bg-zinc-900/50 p-3 text-xs space-y-2">
+      {isStale && (
+        <div role="alert" className="rounded border border-rose-500/40 bg-rose-500/10 px-2.5 py-2 text-rose-200">
+          <div className="font-semibold">自動追蹤已停止更新</div>
+          <div className="mt-0.5 text-[10px] text-rose-200/80">{freshness.message}；下列結果是歷史快照，不代表目前策略狀態。</div>
+        </div>
+      )}
       <div className="flex items-center justify-between">
-        <span className="font-semibold text-zinc-200">🧪 若照系統做（paper-trade live 追蹤）</span>
+        <span className="font-semibold text-zinc-200">🧪 若照系統做（paper-trade {isStale ? '歷史快照' : 'live 追蹤'}）</span>
         <span className="text-[10px] text-zinc-500">開倉 {s.open}・已平 {s.closed}・買不到 {s.unfillable}</span>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -66,14 +75,14 @@ export function PaperTrackCard() {
                 : t.status === 'open' ? 'text-zinc-300'
                 : 'text-zinc-600'
               }>
-                {t.status === 'pending_entry' ? '待進場' : t.status === 'unfillable' ? '買不到' : fmtPct(t.pnlPct)}
+                {t.status === 'pending_entry' ? (isStale ? '待處理（過期）' : '待進場') : t.status === 'unfillable' ? '買不到' : fmtPct(t.pnlPct)}
                 {t.status === 'closed' && t.exitReason ? `（${t.exitReason}）` : ''}
               </span>
             </div>
           ))}
         </div>
       )}
-      <p className="text-[10px] text-zinc-600">進場=掃描隔日收盤（≈朱書13:25市價）；出場=書本規則（停損7%/MA5減半/MA10·MA20全出）。模擬紀錄非建議。</p>
+      <p className="text-[10px] text-zinc-600">最後更新：{s.updatedAt ? new Date(s.updatedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '未知'}。進場=掃描隔日收盤（≈朱書13:25市價）；出場=書本規則（停損7%/MA5減半/MA10·MA20全出）。模擬紀錄非建議。</p>
     </div>
   );
 }

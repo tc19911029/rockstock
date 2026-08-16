@@ -11,6 +11,7 @@ import { apiOk, apiValidationError } from '@/lib/api/response';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { computeConcSeries } from '@/lib/chips/chipConcentration';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { getFinMindBranchSourceStatus } from '@/lib/datasource/FinMindBranchProvider';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -26,21 +27,21 @@ export async function GET(req: NextRequest) {
   const { symbol, recentN } = parsed.data;
 
   // 只支援台股（陸股/指數無主力分點）
-  if (!/^\d{4,5}(\.(TW|TWO))?$/i.test(symbol)) return apiOk({ symbol, conc: [] });
+  if (!/^\d{4,5}(\.(TW|TWO))?$/i.test(symbol)) return apiOk({ symbol, conc: [], sourceStatus: null });
   const code = symbol.replace(/\.(TW|TWO)$/i, '');
 
   try {
     const cf = (await readCandleFile(`${code}.TW`, 'TW')) ?? (await readCandleFile(`${code}.TWO`, 'TW'));
-    if (!cf?.candles?.length) return apiOk({ symbol, conc: [] });
+    if (!cf?.candles?.length) return apiOk({ symbol, conc: [], sourceStatus: getFinMindBranchSourceStatus() });
     const candles = cf.candles.map((c) => ({ date: c.date, volume: c.volume }));
     const conc = await computeConcSeries(code, candles, {
       periods: [5, 20],
       recentN,
       todayDate: getLastTradingDay('TW'),
     });
-    return apiOk({ symbol, conc });
+    return apiOk({ symbol, conc, sourceStatus: getFinMindBranchSourceStatus() });
   } catch (err) {
     console.warn('[concentration] error:', err instanceof Error ? err.message : err);
-    return apiOk({ symbol, conc: [] });
+    return apiOk({ symbol, conc: [], sourceStatus: getFinMindBranchSourceStatus() });
   }
 }

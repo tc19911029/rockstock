@@ -121,9 +121,18 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact, concentration
   }, [broker, candles, periodA, periodB, concExact]);
   const hiRef = useScrollToHighlight(cursorDate);
   if (!rows.length) {
-    return concentrationStatus === 'loading'
-      ? <div role="status" className="mx-2 my-2 rounded border border-border/50 bg-secondary/30 px-3 py-2 text-[10px] text-muted-foreground">正式集中度計算中，完成後會自動顯示。</div>
-      : null;
+    if (concentrationStatus === 'loading') {
+      return <div role="status" className="mx-2 my-2 rounded border border-border/50 bg-secondary/30 px-3 py-2 text-[10px] text-muted-foreground">正式集中度計算中，完成後會自動顯示。</div>;
+    }
+    if (concentrationStatus === 'unavailable' || concentrationStatus === 'error') {
+      return (
+        <div role="alert" className="mx-2 my-2 flex items-center justify-between gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[10px] text-amber-200">
+          <span>{concentrationError ?? '正式集中度暫時無法載入，目前只顯示近似值。'}</span>
+          {onRetryConcentration && <button type="button" onClick={onRetryConcentration} className="min-h-11 sm:min-h-9 shrink-0 rounded border border-amber-400/40 px-2 font-medium hover:bg-amber-500/15">重試</button>}
+        </div>
+      );
+    }
+    return null;
   }
   return (
     <div className="px-2 pt-1 pb-2">
@@ -144,7 +153,7 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact, concentration
       {(concentrationStatus === 'unavailable' || concentrationStatus === 'error') && (
         <div role="alert" className="mb-1 flex items-center justify-between gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[9px] leading-snug text-amber-200">
           <span>{concentrationError ?? '正式集中度暫時無法載入，表格先用近似值。'}</span>
-          {onRetryConcentration && <button type="button" onClick={onRetryConcentration} className="min-h-8 shrink-0 cursor-pointer rounded border border-amber-400/40 px-2 font-medium transition-colors hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70">重試</button>}
+          {onRetryConcentration && <button type="button" onClick={onRetryConcentration} className="min-h-11 sm:min-h-9 shrink-0 cursor-pointer rounded border border-amber-400/40 px-2 font-medium transition-colors hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70">重試</button>}
         </div>
       )}
       <div className="flex items-center justify-center gap-3 mb-1 text-[9px] text-muted-foreground/70">

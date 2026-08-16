@@ -363,7 +363,36 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       // 歷史回放（targetDate < today）由 startPolling 內部 guard 自動跳過
       get().startPolling();
     } catch (err) {
-      set({ isLoadingStock: false });
+      // 載入失敗時不可保留上一檔（或 DEMO）的分析結果。否則網址/搜尋框已是新代號，
+      // 畫面卻仍顯示舊 K 線與訊號，使用者會把兩檔資料誤認成同一檔。
+      if (myToken === _loadStockToken) {
+        const account = createAccount(INITIAL_CAPITAL);
+        set({
+          allCandles: [],
+          visibleCandles: [],
+          currentIndex: 0,
+          currentStock: null,
+          currentInterval: interval,
+          targetDate: targetDate ?? null,
+          dataGaps: [],
+          isLoadingStock: false,
+          isPolling: false,
+          isPlaying: false,
+          account,
+          metrics: computeMetrics(account, 0),
+          stats: EMPTY_STATS,
+          currentSignals: [],
+          chartMarkers: [],
+          trendState: '盤整',
+          trendPosition: '盤整觀望',
+          sixConditions: null,
+          prevSixConditions: null,
+          longProhibitions: null,
+          shortProhibitions: null,
+          shortConditions: null,
+          winnerPatterns: null,
+        });
+      }
       throw err;
     }
   },

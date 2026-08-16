@@ -237,7 +237,6 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
   const cleanSym = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   const isIndex = symbol.startsWith('^');  // ^TWII/^TWOII 等指數沒有籌碼資料
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!cleanSym) return;
     if (isIndex) { setLoading(false); setData(null); setError(null); return; }  // 指數短路，不打 chip API（否則卡載入）
@@ -256,7 +255,6 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       .catch(() => { setError('載入失敗'); toast.error('籌碼資料載入失敗', { id: 'chip-error', duration: 3000 }); })
       .finally(() => setLoading(false));
   }, [cleanSym, isIndex, date, retryCount]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (isIndex) return (
     <div className="text-xs text-muted-foreground/60 py-6 text-center">指數無籌碼資料</div>
@@ -277,9 +275,9 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
     </div>
   );
   if (error) return (
-    <div className="text-xs text-red-400/80 py-6 text-center">
+    <div role="alert" className="text-xs text-red-400/80 py-6 text-center">
       <p>{error}</p>
-      <button onClick={() => setRetryCount(c => c + 1)} className="mt-2 text-sky-400 hover:text-sky-300 transition-colors">重試</button>
+      <button onClick={() => setRetryCount(c => c + 1)} className="mt-2 min-h-11 sm:min-h-9 px-3 text-sky-400 hover:text-sky-300 transition-colors">重試</button>
     </div>
   );
   if (!data) return (
@@ -319,7 +317,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       trend: data.trends?.lending },
     // 借券餘額（累積借出股票總量，stock；張）— flow vs stock 分開
     { label: '借券餘額', value: data.lendingBalance > 0 ? data.lendingBalance : null,
-      signal: { label: '張', cls: 'text-muted-foreground' },
+      signal: { label: '累計', cls: 'text-muted-foreground' },
       range: 100000 },
     // 大戶 5 週累計變化（取代舊「當週變化」）
     { label: '大戶 5 週',
