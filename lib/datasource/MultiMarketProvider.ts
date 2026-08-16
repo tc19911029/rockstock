@@ -422,13 +422,29 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else if (market === 'INDEX') {
-      // 櫃買指數 ^TWOII：Yahoo feed 自 2024-10 後只回 null bar，改走 TPEx 官方月資料。
+      // 台灣兩個大盤指數都以交易所官方月資料為主；Yahoo 只當 ^TWII 備援。
       if (symbol === '^TWOII') {
         const { fetchTpexIndexCandles } = await import('./TpexIndexProvider');
         const end = asOfDate ?? today;
         const startDate = new Date(`${end}T00:00:00Z`);
         startDate.setUTCFullYear(startDate.getUTCFullYear() - 2);
         result = await fetchTpexIndexCandles(startDate.toISOString().slice(0, 10), end);
+      } else if (symbol === '^TWII') {
+        const { fetchTwseIndexCandles } = await import('./TwseIndexProvider');
+        const end = asOfDate ?? today;
+        const startDate = new Date(`${end}T00:00:00Z`);
+        const years = Number.parseInt(period, 10);
+        startDate.setUTCFullYear(startDate.getUTCFullYear() - (Number.isFinite(years) ? years : 2));
+        result = await tryProvidersWithRacing([
+          {
+            name: `TWSE index ${symbol}`,
+            fn: () => fetchTwseIndexCandles(startDate.toISOString().slice(0, 10), end),
+          },
+          {
+            name: `Yahoo ${symbol}`,
+            fn: () => yahooProvider.getHistoricalCandles(symbol, period, asOfDate),
+          },
+        ]);
       } else {
         // 其他指數（^TWII 等）直接走 Yahoo Finance
         // YahooDataProvider 已從 meta.regularMarketVolume 補今日成交量
@@ -545,12 +561,23 @@ export class MultiMarketProvider implements DataProvider {
         },
       ]);
     } else if (market === 'INDEX') {
-      result = await tryProvidersWithRacing([
-        {
-          name: `Yahoo range ${symbol}`,
-          fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate),
-        },
-      ]);
+      if (symbol === '^TWII') {
+        const { fetchTwseIndexCandles } = await import('./TwseIndexProvider');
+        result = await tryProvidersWithRacing([
+          { name: `TWSE index range ${symbol}`, fn: () => fetchTwseIndexCandles(startDate, endDate) },
+          { name: `Yahoo range ${symbol}`, fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate) },
+        ]);
+      } else if (symbol === '^TWOII') {
+        const { fetchTpexIndexCandles } = await import('./TpexIndexProvider');
+        result = await fetchTpexIndexCandles(startDate, endDate);
+      } else {
+        result = await tryProvidersWithRacing([
+          {
+            name: `Yahoo range ${symbol}`,
+            fn: () => yahooProvider.getCandlesRange(symbol, startDate, endDate),
+          },
+        ]);
+      }
     } else {
       // 2026-06-13：EODHD 不續訂移除，第三層改 Yahoo（.SS/.SZ Yahoo 可抓）
       result = await tryProvidersWithRacing([

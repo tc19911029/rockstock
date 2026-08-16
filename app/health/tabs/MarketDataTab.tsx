@@ -26,6 +26,7 @@ interface MarketHealthLite {
 interface DependencyHealth {
   finMindBranch: { kind: 'unknown' | 'ok' | 'permission_denied' | 'rate_limited' | 'unavailable'; message: string; checkedAt: string | null };
   paperTrack: { level: 'ok' | 'warning' | 'stale' | 'missing'; ageDays: number | null; message: string; updatedAt: string | null };
+  dataSourceResilience: { total: number; protected: number; degraded: number; unprotected: number };
 }
 
 type LightLevel = 'green' | 'yellow' | 'red';
@@ -48,8 +49,11 @@ function deriveMarketLight(m: MarketHealthLite | null): LightLevel {
 function deriveOverallLight(markets: (MarketHealthLite | null)[], dependencies: DependencyHealth | null): LightLevel {
   const lights = markets.map(deriveMarketLight);
   if (dependencies) {
-    if (dependencies.finMindBranch.kind === 'permission_denied' || dependencies.finMindBranch.kind === 'unavailable') lights.push('red');
+    // 精確全分點失效時仍有 Yahoo 估算＋本地快取，屬降級而非整體資料中斷。
+    if (dependencies.finMindBranch.kind === 'permission_denied' || dependencies.finMindBranch.kind === 'unavailable') lights.push('yellow');
     else if (dependencies.finMindBranch.kind !== 'ok') lights.push('yellow');
+    if (dependencies.dataSourceResilience.unprotected > 0) lights.push('red');
+    else if (dependencies.dataSourceResilience.degraded > 0) lights.push('yellow');
     if (dependencies.paperTrack.level === 'stale' || dependencies.paperTrack.level === 'missing') lights.push('red');
     else if (dependencies.paperTrack.level === 'warning') lights.push('yellow');
   }
@@ -164,18 +168,28 @@ export function MarketDataTab() {
 
       <section className="space-y-2" aria-labelledby="runtime-dependencies-title">
         <h2 id="runtime-dependencies-title" className="text-sm font-semibold">外部資料與自動追蹤</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <DependencyCard
             title="FinMind 主力分點"
-            level={dependencies?.finMindBranch.kind === 'ok' ? 'green' : dependencies?.finMindBranch.kind === 'permission_denied' || dependencies?.finMindBranch.kind === 'unavailable' ? 'red' : 'yellow'}
+            level={dependencies?.finMindBranch.kind === 'ok' ? 'green' : 'yellow'}
             message={dependencies?.finMindBranch.message ?? '尚未完成檢查'}
-            detail="正式 5／20 日集中度資料源"
+            detail="精確源失效時改用 Yahoo／本地快照估算；估算值不觸發交易訊號"
           />
           <DependencyCard
             title="Paper-trade 每日追蹤"
             level={dependencies?.paperTrack.level === 'ok' ? 'green' : dependencies?.paperTrack.level === 'warning' ? 'yellow' : 'red'}
             message={dependencies?.paperTrack.message ?? '尚未完成檢查'}
             detail={dependencies?.paperTrack.updatedAt ? `最後更新 ${fmtTime(dependencies.paperTrack.updatedAt)}` : '沒有更新紀錄'}
+          />
+          <DependencyCard
+            title="關鍵資料備援"
+            level={(dependencies?.dataSourceResilience.unprotected ?? 1) > 0 ? 'red' : (dependencies?.dataSourceResilience.degraded ?? 1) > 0 ? 'yellow' : 'green'}
+            message={dependencies?.dataSourceResilience
+              ? `${dependencies.dataSourceResilience.protected} 項完整備援、${dependencies.dataSourceResilience.degraded} 項安全降級`
+              : '尚未完成檢查'}
+            detail={dependencies?.dataSourceResilience
+              ? `共 ${dependencies.dataSourceResilience.total} 項關鍵資料；無備援 ${dependencies.dataSourceResilience.unprotected} 項`
+              : '檢查每一項關鍵資料是否具備替代來源'}
           />
         </div>
       </section>

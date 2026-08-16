@@ -6,7 +6,7 @@
  * 來源優先順序：
  *   1. FinMind（getFundamentals）— 完整資料：EPS / EPS YoY / 毛利率 / 月營收 / PER / PBR / 殖利率
  *   2. TWSE BWIBBU 公開 API — 只有估值面：PER / PBR / 殖利率（無 EPS / 營收）
- *   3. TPEx 同名 API（上櫃股）
+ *   3. TPEx OpenAPI（上櫃股 PER / PBR / 殖利率）
  *   4. TWSE OpenAPI t187ap14_L / t187ap05_L 補位 — EPS / 月營收 YoY / 淨利率
  *   5. 全 null（最後保底）
  *
@@ -208,12 +208,37 @@ async function tryTPEx(stockId: string): Promise<{
 }> {
   const started = Date.now();
   try {
-    // TPEx 上櫃個股本益比 / 殖利率（每日公布）
-    const url = `https://www.tpex.org.tw/web/stock/aftertrading/peratio_analysis/pera_print.php?l=zh-tw&stkno=${encodeURIComponent(stockId)}`;
-    // TPEx 沒提供 JSON，這只是 sketch — 改用 isin 公開資訊或 emerging
-    // 實際上對上櫃 PER/PBR 最穩定的 API 仍是 FinMind TaiwanStockPER
-    // 留 stub，未來補
-    throw new Error('TPEx 來源未實作（待補）');
+    // 官方 OpenAPI 單次回傳全部上櫃股票；依代號挑該檔。不能把 N/A 轉成 0，
+    // 否則負 EPS 股票會被誤判成極低本益比。
+    const url = 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis';
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+      cache: 'no-store',
+      headers: { 'User-Agent': 'Rockstock/1.0' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json() as Array<{
+      SecuritiesCompanyCode?: string;
+      PriceEarningRatio?: string | number;
+      YieldRatio?: string | number;
+      PriceBookRatio?: string | number;
+    }>;
+    const row = Array.isArray(rows)
+      ? rows.find((item) => String(item.SecuritiesCompanyCode ?? '').trim() === stockId)
+      : undefined;
+    if (!row) throw new Error(`TPEx 找不到 ${stockId}`);
+    const data: FundamentalsData = {
+      ...emptyFundamentals(),
+      per: toNum(row.PriceEarningRatio),
+      pbr: toNum(row.PriceBookRatio),
+      dividendYield: toNum(row.YieldRatio),
+    };
+    if (!hasUsefulData(data)) throw new Error(`TPEx ${stockId} 無可用估值欄位`);
+    return {
+      ok: true,
+      data,
+      attempt: { source: 'tpex', ok: true, latencyMs: Date.now() - started },
+    };
   } catch (err) {
     return {
       ok: false, data: null,

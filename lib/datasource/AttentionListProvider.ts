@@ -5,7 +5,7 @@
  *   - TWSE 處置：https://openapi.twse.com.tw/v1/announcement/punish
  *   - TWSE 注意：https://openapi.twse.com.tw/v1/announcement/notice（當日公布，無資料時回 placeholder 空列）
  *   - TPEx 處置：https://www.tpex.org.tw/openapi/v1/tpex_disposal_information
- *   - TPEx 注意：OpenAPI swagger 無對應端點（2026-06-12 確認過），v1 缺 — 上櫃注意股暫無來源
+ *   - TPEx 注意：https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information
  *
  * 注意：
  *   - punish 清單混雜大量權證（6 碼，如 050503 緯穎中信5A購05），必須過濾只留個股/ETF
@@ -18,6 +18,7 @@ import { fetchJsonWithCurlFallback } from './curlFetch';
 const TWSE_PUNISH_URL = 'https://openapi.twse.com.tw/v1/announcement/punish';
 const TWSE_NOTICE_URL = 'https://openapi.twse.com.tw/v1/announcement/notice';
 const TPEX_DISPOSAL_URL = 'https://www.tpex.org.tw/openapi/v1/tpex_disposal_information';
+const TPEX_NOTICE_URL = 'https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information';
 
 export interface AttentionEntry {
   /** 裸代號（4402，無 .TWO 後綴） */
@@ -59,6 +60,13 @@ interface TpexDisposalRow {
   CompanyName: string;
   DispositionPeriod?: string;     // "1150615~1150629"
   DispositionReasons?: string;
+}
+
+interface TpexNoticeRow {
+  Date: string;                    // "1150814"
+  SecuritiesCompanyCode: string;  // "3490"
+  CompanyName: string;
+  TradingInformation?: string;
 }
 
 /** 個股 4 碼、ETF/ETN 00 開頭 5-6 碼（可帶 L/R/U 等字尾）；權證 6 碼（050503）剔除 */
@@ -151,6 +159,33 @@ export async function fetchTpexDisposal(): Promise<AttentionEntry[]> {
       periodStart: period.start,
       periodEnd: period.end,
       reason: row.DispositionReasons?.trim(),
+    });
+  }
+  return out;
+}
+
+/** 上櫃注意股（只警示、不作處置硬排除）。 */
+export async function fetchTpexNotice(): Promise<AttentionEntry[]> {
+  const { data } = await fetchJsonWithCurlFallback<TpexNoticeRow[]>(TPEX_NOTICE_URL);
+  return parseTpexNoticeRows(data);
+}
+
+/** 純解析器：官方清單混有權證，僅保留股票／ETF。 */
+export function parseTpexNoticeRows(data: TpexNoticeRow[] | unknown): AttentionEntry[] {
+  if (!Array.isArray(data)) return [];
+  const out: AttentionEntry[] = [];
+  for (const row of data as TpexNoticeRow[]) {
+    const code = (row.SecuritiesCompanyCode ?? '').trim();
+    if (!isStockOrEtfCode(code)) continue;
+    const announceDate = rocToIso((row.Date ?? '').trim());
+    if (!announceDate) continue;
+    out.push({
+      code,
+      name: (row.CompanyName ?? '').trim(),
+      exchange: 'TPEX',
+      kind: 'notice',
+      announceDate,
+      reason: row.TradingInformation?.trim(),
     });
   }
   return out;

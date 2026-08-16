@@ -24,7 +24,7 @@ export interface AttentionListFile {
   fetchedAt: string;   // ISO（UTC，讀取時 +8h 才是台灣時間）
   fetchDate: string;   // 抓取當日 YYYY-MM-DD（CST）
   entries: AttentionEntry[];
-  sourceCounts: { twsePunish: number; twseNotice: number; tpexDisposal: number };
+  sourceCounts: { twsePunish: number; twseNotice: number; tpexDisposal: number; tpexNotice: number };
   /** 抓取失敗的來源（partial 成功仍寫檔，但記錄缺哪條） */
   sourceErrors?: string[];
 }

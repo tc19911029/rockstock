@@ -10,8 +10,6 @@
  * 這是純單元測試，mock fetch 而不打外部 API（避免 CI flaky）
  */
 
-import { FundamentalsData } from '@/lib/datasource/FinMindClient';
-
 const FINMIND_SUCCESS = {
   status: 200, msg: 'success',
   data: [
@@ -47,6 +45,11 @@ const TWSE_SUCCESS = {
 };
 
 const TWSE_EMPTY = { stat: 'NO DATA', data: [] };
+
+const TPEX_SUCCESS = [{
+  Date: '1150814', SecuritiesCompanyCode: '6488', CompanyName: '環球晶',
+  PriceEarningRatio: '18.52', YieldRatio: '3.14', PriceBookRatio: '2.76',
+}];
 
 describe('Fundamentals fallback chain — 解析邏輯', () => {
   test('FinMind 回 key-value rows 後正確解析 EPS', () => {
@@ -89,6 +92,7 @@ interface MockFetch {
   finmindPER?: typeof FINMIND_PER_SUCCESS;
   finmindRev?: typeof FINMIND_REVENUE_SUCCESS;
   twse?: typeof TWSE_SUCCESS | typeof TWSE_EMPTY;
+  tpex?: typeof TPEX_SUCCESS;
 }
 
 function installMockFetch(mocks: MockFetch): jest.Mock {
@@ -107,6 +111,9 @@ function installMockFetch(mocks: MockFetch): jest.Mock {
     }
     if (u.includes('twse.com.tw')) {
       return new Response(JSON.stringify(mocks.twse ?? TWSE_EMPTY));
+    }
+    if (u.includes('tpex.org.tw')) {
+      return new Response(JSON.stringify(mocks.tpex ?? []));
     }
     return new Response('{}', { status: 404 });
   }) as unknown as jest.Mock;
@@ -173,6 +180,23 @@ describe('Fundamentals fallback chain — 換源行為', () => {
     expect(r.sourceUsed).toBe('none');
     expect(r.eps).toBeNull();
     expect(r.per).toBeNull();
+  });
+
+  test('FinMind/TWSE 無資料的上櫃股 → TPEx 官方 OpenAPI 補 PER/PBR/殖利率', async () => {
+    installMockFetch({
+      finmindFin: FINMIND_EMPTY,
+      finmindPER: FINMIND_EMPTY,
+      finmindRev: FINMIND_EMPTY,
+      twse: TWSE_EMPTY,
+      tpex: TPEX_SUCCESS,
+    });
+    const { getFundamentalsWithFallback } = await import('@/lib/datasource/FundamentalsFallbackChain');
+    const r = await getFundamentalsWithFallback('6488.TWO');
+    expect(r.sourceUsed).toBe('tpex');
+    expect(r.per).toBe(18.52);
+    expect(r.pbr).toBe(2.76);
+    expect(r.dividendYield).toBe(3.14);
+    expect(r.sourceAttempts.some((attempt) => attempt.source === 'tpex' && attempt.ok)).toBe(true);
   });
 
   test('Merge — FinMind 部分有資料 + TWSE 補 → 合併', async () => {

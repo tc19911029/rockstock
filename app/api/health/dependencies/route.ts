@@ -7,6 +7,7 @@ import {
 } from '@/lib/datasource/FinMindBranchProvider';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { assessPaperTrackFreshness } from '@/lib/health/paperTrackFreshness';
+import { summarizeDataSourceResilience } from '@/lib/datasource/DataSourceResilience';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,6 +31,7 @@ export async function GET() {
     dependencies: {
       finMindBranch: finMind,
       paperTrack: { ...paper, updatedAt: paperUpdatedAt },
+      dataSourceResilience: summarizeDataSourceResilience(),
     },
   });
 }
