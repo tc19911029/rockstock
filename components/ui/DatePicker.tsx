@@ -3,7 +3,7 @@
 /**
  * 統一日期選擇器 — pill grid 樣式（仿首頁右側「策略掃描」tab 的設計）。
  *
- * 排版：grid-cols-11 × 2 列 = 22 個日期 pill，按日期由新到舊排序。
+ * 排版：預設依容器寬度自動換行，日期 pill 至少 44px；也可指定固定欄數。
  * 樣式：active 用 bg-sky-700 / text-sky-100 / font-semibold；
  *       inactive 用 bg-secondary/60 / text-muted-foreground。
  *
@@ -42,7 +42,7 @@ export interface DatePickerProps {
   size?: 'sm' | 'md';
   className?: string;
   disabled?: boolean;
-  /** 顯示為 grid-cols-N 的欄位數，預設 11（窄面板可用 4 欄避免日期互相擠壓）*/
+  /** 固定欄位數；未指定時依容器寬度自動換行（每格至少 44px） */
   cols?: number;
   /** 最多顯示幾個 pill，預設 22 */
   limit?: number;
@@ -81,7 +81,7 @@ export function DatePicker({
   size = 'md',
   className,
   disabled,
-  cols = 11,
+  cols,
   limit = 22,
   ariaLabel = '日期選擇',
 }: DatePickerProps) {
@@ -115,18 +115,23 @@ export function DatePicker({
     : cols === 11 ? 'grid-cols-11'
     : cols === 7 ? 'grid-cols-7'
     : cols === 14 ? 'grid-cols-14'
-    : 'grid-cols-11';
+    : undefined;
 
-  // 統一外觀：pill 寬度跟首頁右側「策略掃描」tab 一致（≈ 36-40px / pill）
-  // md 限 480px、sm 由 tab 容器自然撐
+  // 固定欄數只用在有明確週次版型的表格；其餘依容器寬度自動換行，
+  // 避免同一套 11 欄日期列放進較窄側欄時被壓成無法閱讀的細條。
   const maxWidth = isMd ? '480px' : undefined;
+  const gridStyle = {
+    ...(maxWidth ? { maxWidth } : {}),
+    ...(!cols ? { gridTemplateColumns: 'repeat(auto-fit, minmax(44px, 1fr))' } : {}),
+  };
 
   return (
     <div
       role="group"
       aria-label={ariaLabel}
+      data-date-picker-layout={cols ? `fixed-${cols}` : 'responsive'}
       className={cn('grid gap-1', gridColsCls, className)}
-      style={maxWidth ? { maxWidth } : undefined}
+      style={gridStyle}
     >
       {list.map((d) => {
         const isActive = d === value;

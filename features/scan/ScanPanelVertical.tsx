@@ -10,6 +10,7 @@ import { LockWatchPanel } from './components/LockWatchPanel';
 import { SanSeScanCompact } from './components/SanSeScanCompact';
 // 2026-05-11 ReentryCandidatesPanel 移除：用戶反饋無實質用途（跟 B 回後買上漲重疊高、書本對齊度低）。檔案保留供日後重做
 import { SectionBoundary } from '@/components/ErrorBoundary';
+import { DatePicker } from '@/components/ui/DatePicker';
 import type { SelectedStock } from './components/ScanChartPanel';
 import {
   BULLISH_TRACK_LETTERS,
@@ -399,33 +400,25 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
       {/* ── 日期導航：點哪天看哪天的結果（移到結果列表上方，對齊三色資金版型）── */}
       {cronDates.some(c => c.market === market) && (
         <div className="shrink-0 px-2.5 py-1.5 border-b border-border bg-card/40">
-          <div className="grid grid-cols-11 gap-1">
-            {cronDates.filter(c => c.market === market)
+          <DatePicker
+            value={scanDate}
+            onChange={(nextDate) => {
+              if (isBusy || isLoadingCronSession) return;
+              if (scanDirection === 'daban') {
+                useBacktestStore.setState({ scanDate: nextDate });
+              } else {
+                useBacktestStore.getState().loadCronSession(market, nextDate, { scanOnly: true, direction: scanDirection });
+              }
+            }}
+            dates={cronDates.filter(c => c.market === market)
               .filter((c, i, arr) => arr.findIndex(x => x.date === c.date) === i)
-              .slice(0, 22)
-              .map(c => {
-                const isActive = c.date === scanDate;
-                return (
-                  <button key={c.date}
-                    onClick={() => {
-                      if (isBusy || isLoadingCronSession) return;
-                      if (scanDirection === 'daban') {
-                        useBacktestStore.setState({ scanDate: c.date });
-                      } else {
-                        useBacktestStore.getState().loadCronSession(c.market, c.date, { scanOnly: true, direction: scanDirection });
-                      }
-                    }}
-                    disabled={isBusy || isLoadingCronSession}
-                    className={`min-h-8 text-center px-0.5 py-1 rounded text-[9px] font-mono truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
-                      isActive ? 'bg-sky-700 text-sky-100 font-semibold' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary'
-                    } ${isBusy || isLoadingCronSession ? 'opacity-50' : ''}`}
-                    title={`${c.date}｜${c.resultCount >= 0 ? c.resultCount + ' 檔' : ''}`}
-                  >
-                    {c.date.slice(5)}
-                  </button>
-                );
-              })}
-          </div>
+              .map(c => c.date)}
+            meta={Object.fromEntries(cronDates.filter(c => c.market === market)
+              .map(c => [c.date, { count: c.resultCount >= 0 ? c.resultCount : undefined }]))}
+            size="sm"
+            disabled={isBusy || isLoadingCronSession}
+            ariaLabel="策略掃描歷史日期"
+          />
         </div>
       )}
 

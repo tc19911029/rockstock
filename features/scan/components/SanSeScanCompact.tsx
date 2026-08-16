@@ -26,6 +26,7 @@ import { SortControl } from '@/components/shared';
 import { ThemeTag } from '@/components/ThemeTag';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 type ScanLevel = 'strict' | 'medium' | 'loose';       // 後端 results 的三個 level
 type Level = SanSeScanLevel;                            // 嚴/中/寬 + 具名策略 id（底反/全共振/紅+黃+觸發/紅+雙B…）；策略 = 從 records 衍生
@@ -504,26 +505,19 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
       {/* 日期 chip 列 */}
       {dates.length > 0 && (
         <div className="shrink-0 px-2 py-1.5 border-b border-border bg-card/40">
-          <div className="grid grid-cols-11 gap-1">
-            {dates.map((d) => {
-              const isActive = d.date === data?.lastDate;
-              return (
-                <button
-                  key={d.date}
-                  onClick={() => { if (!loading) { setSession('post_close'); loadDate(d.date, 'post_close'); } }}
-                  disabled={loading}
-                  className={cn(
-                    'text-center px-0.5 py-0.5 rounded text-[9px] font-mono truncate',
-                    isActive ? 'bg-sky-700 text-sky-100 font-semibold' : 'bg-secondary/60 text-muted-foreground hover:bg-secondary',
-                    loading && 'opacity-50',
-                  )}
-                  title={`${d.date}｜中 ${d.counts.medium} 檔`}
-                >
-                  {d.date.slice(5)}
-                </button>
-              );
-            })}
-          </div>
+          <DatePicker
+            value={data?.lastDate ?? ''}
+            onChange={(nextDate) => {
+              if (loading) return;
+              setSession('post_close');
+              loadDate(nextDate, 'post_close');
+            }}
+            dates={dates.map(d => d.date)}
+            meta={Object.fromEntries(dates.map(d => [d.date, { count: d.counts.medium }]))}
+            size="sm"
+            disabled={loading}
+            ariaLabel="三色資金歷史日期"
+          />
         </div>
       )}
 
