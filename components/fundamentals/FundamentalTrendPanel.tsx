@@ -32,6 +32,49 @@ function Change({ value, suffix = '%' }: { value: number | null; suffix?: '%' | 
   );
 }
 
+function SnapshotCard({
+  label,
+  period,
+  value,
+  primaryChange,
+  secondaryChange,
+  primaryLabel,
+  secondaryLabel,
+  margin = false,
+}: {
+  label: string;
+  period: string | null;
+  value: number | null;
+  primaryChange: number | null;
+  secondaryChange: number | null;
+  primaryLabel: string;
+  secondaryLabel: string;
+  margin?: boolean;
+}) {
+  const displayed = value == null
+    ? '—'
+    : margin
+      ? `${value.toFixed(1)}%`
+      : label === '單季 EPS'
+        ? value.toFixed(2)
+        : formatAmount(value);
+  return (
+    <article className="min-w-0 rounded-lg border border-border/45 bg-card/45 px-2.5 py-2">
+      <div className="flex items-center justify-between gap-1">
+        <span className="truncate text-[9px] text-muted-foreground">{label}</span>
+        {period && <span className="shrink-0 font-mono text-[8px] text-muted-foreground/65">{period}</span>}
+      </div>
+      <div className="mt-1 truncate font-mono text-sm font-bold tabular-nums text-foreground" title={value?.toString()}>{displayed}</div>
+      <div className="mt-1 flex items-center gap-1 text-[8px]">
+        <span className="text-muted-foreground/65">{primaryLabel}</span>
+        <Change value={primaryChange} suffix={margin ? 'pp' : '%'} />
+        <span className="ml-1 text-muted-foreground/65">{secondaryLabel}</span>
+        <Change value={secondaryChange} suffix={margin ? 'pp' : '%'} />
+      </div>
+    </article>
+  );
+}
+
 function MonthlyTable({ rows }: { rows: MonthlyFundamentalTrend[] }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border/50">
@@ -104,7 +147,27 @@ function QuarterCard({ row }: { row: QuarterlyFundamentalTrend }) {
 }
 
 export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHistory }) {
-  const latestQuarter = history.quarterly[0]?.period;
+  const latestMonth = history.monthly[0] ?? null;
+  const latestQuarter = history.quarterly[0] ?? null;
+  const primaryRevenue = history.monthlyDisclosure === 'available' && latestMonth
+    ? {
+        label: '最新月營收',
+        period: formatPeriod(latestMonth.period, true),
+        value: latestMonth.revenue,
+        first: latestMonth.revenueMoM,
+        second: latestMonth.revenueYoY,
+        firstLabel: '月',
+        secondLabel: '年',
+      }
+    : {
+        label: '最新單季營收',
+        period: latestQuarter ? formatPeriod(latestQuarter.period) : null,
+        value: latestQuarter?.revenue ?? null,
+        first: latestQuarter?.revenueQoQ ?? null,
+        second: latestQuarter?.revenueYoY ?? null,
+        firstLabel: '季',
+        secondLabel: '年',
+      };
   return (
     <section className="space-y-2 rounded-xl border border-cyan-500/20 bg-cyan-950/10 p-2.5 text-xs" aria-label="基本面歷史趨勢">
       <div className="flex items-start justify-between gap-2">
@@ -114,17 +177,67 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
             金額與 EPS 顯示季增／年增；毛利率、淨利率顯示季／年變動百分點。
           </p>
         </div>
-        {latestQuarter && <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-1 font-mono text-[9px] text-cyan-200">更新至 {formatPeriod(latestQuarter)}</span>}
+        {latestQuarter && <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-1 font-mono text-[9px] text-cyan-200">更新至 {formatPeriod(latestQuarter.period)}</span>}
+      </div>
+
+      <div aria-label="最新基本面摘要">
+        <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
+          <h4 className="text-[10px] font-semibold text-foreground/90">最新摘要</h4>
+          <span className="text-[8px] text-muted-foreground">先看變化，再展開歷史</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <SnapshotCard
+            label={primaryRevenue.label}
+            period={primaryRevenue.period}
+            value={primaryRevenue.value}
+            primaryChange={primaryRevenue.first}
+            secondaryChange={primaryRevenue.second}
+            primaryLabel={primaryRevenue.firstLabel}
+            secondaryLabel={primaryRevenue.secondLabel}
+          />
+          <SnapshotCard
+            label="單季 EPS"
+            period={latestQuarter ? formatPeriod(latestQuarter.period) : null}
+            value={latestQuarter?.eps ?? null}
+            primaryChange={latestQuarter?.epsQoQ ?? null}
+            secondaryChange={latestQuarter?.epsYoY ?? null}
+            primaryLabel="季"
+            secondaryLabel="年"
+          />
+          <SnapshotCard
+            label="毛利率"
+            period={latestQuarter ? formatPeriod(latestQuarter.period) : null}
+            value={latestQuarter?.grossMargin ?? null}
+            primaryChange={latestQuarter?.grossMarginQoQ ?? null}
+            secondaryChange={latestQuarter?.grossMarginYoY ?? null}
+            primaryLabel="季"
+            secondaryLabel="年"
+            margin
+          />
+          <SnapshotCard
+            label="淨利率"
+            period={latestQuarter ? formatPeriod(latestQuarter.period) : null}
+            value={latestQuarter?.netMargin ?? null}
+            primaryChange={latestQuarter?.netMarginQoQ ?? null}
+            secondaryChange={latestQuarter?.netMarginYoY ?? null}
+            primaryLabel="季"
+            secondaryLabel="年"
+            margin
+          />
+        </div>
       </div>
 
       {history.monthlyDisclosure === 'available' ? (
-        <details open className="group">
-          <summary className="min-h-9 cursor-pointer list-none rounded px-1 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
-            月營收（台股正式月公告） <span className="text-[9px] font-normal text-muted-foreground">近 {Math.min(13, history.monthly.length)}／共 {history.monthly.length} 期</span>
+        <details className="group rounded-lg border border-border/40 bg-background/20">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded px-2.5 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+            <span>月營收歷史 <span className="text-[9px] font-normal text-muted-foreground">台股正式月公告</span></span>
+            <span className="shrink-0 text-[9px] font-normal text-cyan-200">近 {Math.min(13, history.monthly.length)}／共 {history.monthly.length} 期 · 展開</span>
           </summary>
-          {history.monthly.length > 0
-            ? <MonthlyTable rows={history.monthly} />
-            : <div className="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-2 text-[10px] text-amber-200">目前資料源未回傳月營收歷史，不以季度資料猜測月數字。</div>}
+          <div className="px-2 pb-2">
+            {history.monthly.length > 0
+              ? <MonthlyTable rows={history.monthly} />
+              : <div className="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-2 text-[10px] text-amber-200">目前資料源未回傳月營收歷史，不以季度資料猜測月數字。</div>}
+          </div>
         </details>
       ) : (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-relaxed text-amber-100">
@@ -132,18 +245,21 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
         </div>
       )}
 
-      <details open className="group">
-        <summary className="min-h-9 cursor-pointer list-none rounded px-1 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
-          季度獲利（營收／毛利率／淨利率／EPS） <span className="text-[9px] font-normal text-muted-foreground">近 {Math.min(8, history.quarterly.length)}／共 {history.quarterly.length} 期</span>
+      <details className="group rounded-lg border border-border/40 bg-background/20">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded px-2.5 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+          <span>季度獲利歷史 <span className="text-[9px] font-normal text-muted-foreground">營收／毛利率／淨利率／EPS</span></span>
+          <span className="shrink-0 text-[9px] font-normal text-cyan-200">近 {Math.min(8, history.quarterly.length)}／共 {history.quarterly.length} 期 · 展開</span>
         </summary>
-        {history.quarterBasis === 'derived-from-cumulative' && (
-          <div className="mb-2 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-1.5 text-[9px] leading-snug text-sky-100">
-            A 股 Q2、Q3、年報原始值為年初至今累計；以下已先相減還原單季。若期間發生股本變動，單季 EPS 差額僅供趨勢參考。
+        <div className="px-2 pb-2">
+          {history.quarterBasis === 'derived-from-cumulative' && (
+            <div className="mb-2 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-1.5 text-[9px] leading-snug text-sky-100">
+              A 股 Q2、Q3、年報原始值為年初至今累計；以下已先相減還原單季。若期間發生股本變動，單季 EPS 差額僅供趨勢參考。
+            </div>
+          )}
+          <div className="space-y-2">
+            {history.quarterly.slice(0, 8).map(row => <QuarterCard key={row.period} row={row} />)}
+            {history.quarterly.length === 0 && <div className="text-[10px] text-muted-foreground">目前沒有可用的季度歷史。</div>}
           </div>
-        )}
-        <div className="space-y-2">
-          {history.quarterly.slice(0, 8).map(row => <QuarterCard key={row.period} row={row} />)}
-          {history.quarterly.length === 0 && <div className="text-[10px] text-muted-foreground">目前沒有可用的季度歷史。</div>}
         </div>
       </details>
 
