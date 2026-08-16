@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, RefreshCw, TrendingUp } from 'lucide-react';
-import { DatePicker } from '@/components/ui/DatePicker';
+import { Activity, ArrowRight, RefreshCw, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
   CnMediaHorizonSummary,
@@ -75,21 +74,52 @@ export function CnMediaPerformancePanel() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const changeFrom = (next: string) => {
+    setFrom(next);
+    if (next > to) setTo(next);
+  };
+
+  const changeTo = (next: string) => {
+    setTo(next);
+    if (next < from) setFrom(next);
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <section className="flex h-full min-h-0 flex-col" aria-labelledby="cn-media-performance-title">
       <div className="shrink-0 space-y-2 border-b border-border bg-secondary/30 px-2.5 py-2">
         <div className="flex items-center gap-2 text-xs">
           <TrendingUp className="size-3.5 text-sky-400" aria-hidden="true" />
-          <span className="font-bold text-foreground">陸股節目績效</span>
+          <h2 id="cn-media-performance-title" className="font-bold text-foreground">陸股節目績效</h2>
           {loading && <span className="ml-auto animate-pulse text-[10px] text-sky-400">計算中…</span>}
           <button type="button" onClick={() => void load()} disabled={loading} className="ml-auto flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50" aria-label="重新計算績效">
             <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} aria-hidden="true" />
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <DatePicker value={from} onChange={setFrom} size="sm" />
-          <DatePicker value={to} onChange={setTo} size="sm" />
-        </div>
+        <fieldset className="flex flex-wrap items-end gap-2" aria-label="績效統計區間">
+          <legend className="sr-only">績效統計區間</legend>
+          <label className="min-w-36 flex-1 space-y-1 text-[10px] font-medium text-muted-foreground">
+            <span>起日</span>
+            <input
+              type="date"
+              value={from}
+              max={to}
+              onChange={(event) => changeFrom(event.target.value)}
+              className="min-h-11 w-full cursor-pointer rounded border border-border bg-card px-2 font-mono text-xs tabular-nums text-foreground outline-none transition-colors [color-scheme:dark] hover:border-sky-500/50 focus-visible:border-sky-400 focus-visible:ring-2 focus-visible:ring-sky-400/30"
+            />
+          </label>
+          <ArrowRight className="mb-3 hidden size-4 shrink-0 text-muted-foreground sm:block" aria-hidden="true" />
+          <label className="min-w-36 flex-1 space-y-1 text-[10px] font-medium text-muted-foreground">
+            <span>迄日</span>
+            <input
+              type="date"
+              value={to}
+              min={from}
+              max={todayShanghai()}
+              onChange={(event) => changeTo(event.target.value)}
+              className="min-h-11 w-full cursor-pointer rounded border border-border bg-card px-2 font-mono text-xs tabular-nums text-foreground outline-none transition-colors [color-scheme:dark] hover:border-sky-500/50 focus-visible:border-sky-400 focus-visible:ring-2 focus-visible:ring-sky-400/30"
+            />
+          </label>
+        </fieldset>
       </div>
 
       <div className="flex-1 min-h-0 space-y-3 overflow-y-auto px-2.5 pb-4 pt-2">
@@ -165,6 +195,6 @@ export function CnMediaPerformancePanel() {
           </>
         )}
       </div>
-    </div>
+    </section>
   );
 }
