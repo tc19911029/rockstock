@@ -84,85 +84,104 @@ function SnapshotCard({
 
 function MonthlyTable({ rows }: { rows: MonthlyFundamentalTrend[] }) {
   return (
-    <div className="max-w-full overflow-hidden rounded-lg border border-border/50">
-      <table className="w-full table-fixed text-[10px]" aria-label="月營收歷史">
-        <colgroup>
-          <col className="w-[23%]" />
-          <col className="w-[31%]" />
-          <col className="w-[23%]" />
-          <col className="w-[23%]" />
-        </colgroup>
-        <thead className="bg-secondary/45 text-[9px] text-muted-foreground">
-          <tr>
-            <th scope="col" className="px-2 py-1.5 text-left font-normal">月份</th>
-            <th scope="col" className="px-1 py-1.5 text-right font-normal">營收</th>
-            <th scope="col" className="px-1 py-1.5 text-right font-normal">月增</th>
-            <th scope="col" className="px-2 py-1.5 text-right font-normal">年增</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/30">
-        {rows.slice(0, 13).map(row => (
-          <tr key={row.period} className="h-8 even:bg-foreground/[0.018]">
-            <td className="truncate px-2 font-mono text-muted-foreground">{formatPeriod(row.period, true)}</td>
-            <td className="truncate px-1 text-right font-mono tabular-nums text-foreground/90" title={row.revenue?.toLocaleString()}>{formatAmount(row.revenue)}</td>
-            <td className="truncate px-1 text-right"><Change value={row.revenueMoM} /></td>
-            <td className="truncate px-2 text-right"><Change value={row.revenueYoY} /></td>
-          </tr>
-        ))}
-        </tbody>
-      </table>
+    <div>
+      <div className="max-w-full overflow-hidden rounded-lg border border-border/50">
+        <table className="w-full table-fixed text-[9px]" aria-label="月營收歷史">
+          <colgroup>
+            <col className="w-[22%]" />
+            <col className="w-[25%]" />
+            <col className="w-[17%]" />
+            <col className="w-[17%]" />
+            <col className="w-[19%]" />
+          </colgroup>
+          <thead className="bg-secondary/45 text-[9px] text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-1.5 py-1.5 text-left font-normal">年月</th>
+              <th scope="col" className="px-1 py-1.5 text-right font-normal">營收</th>
+              <th scope="col" className="px-0.5 py-1.5 text-right font-normal">月增</th>
+              <th scope="col" className="px-0.5 py-1.5 text-right font-normal">年增</th>
+              <th scope="col" className="px-1.5 py-1.5 text-right font-normal">累計</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/30">
+          {rows.slice(0, 13).map(row => (
+            <tr key={row.period} className="h-8 even:bg-foreground/[0.018]">
+              <td className="truncate px-1.5 font-mono text-muted-foreground">{formatPeriod(row.period, true)}</td>
+              <td className="truncate px-1 text-right font-mono tabular-nums text-foreground/90" title={row.revenue?.toLocaleString()}>{formatAmount(row.revenue)}</td>
+              <td className="truncate px-0.5 text-right"><Change value={row.revenueMoM} /></td>
+              <td className="truncate px-0.5 text-right"><Change value={row.revenueYoY} /></td>
+              <td className="truncate px-1.5 text-right"><Change value={row.revenueYtdYoY} /></td>
+            </tr>
+          ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 px-0.5 text-[8px] text-muted-foreground/70">營收依資料源原始幣別；累計為同期間年增</p>
     </div>
   );
 }
 
-function MetricCell({
-  label,
+function QuarterValue({
   value,
-  qoq,
   yoy,
-  margin = false,
+  kind,
 }: {
-  label: string;
   value: number | null;
-  qoq: number | null;
   yoy: number | null;
-  margin?: boolean;
+  kind: 'amount' | 'margin' | 'eps';
 }) {
-  const displayed = value == null
-    ? '—'
-    : margin
-      ? `${value.toFixed(1)}%`
-      : label === 'EPS'
-        ? value.toFixed(2)
-        : formatAmount(value);
+  const displayed = value == null ? '—' : kind === 'margin'
+    ? `${value.toFixed(1)}%`
+    : kind === 'eps'
+      ? value.toFixed(2)
+      : formatAmount(value);
   return (
-    <div className="min-w-0 rounded-md bg-background/35 px-2 py-1.5">
-      <div className="flex items-baseline justify-between gap-1">
-        <span className="text-[9px] text-muted-foreground">{label}</span>
-        <span className="truncate font-mono text-[11px] font-semibold tabular-nums text-foreground" title={value?.toString()}>{displayed}</span>
-      </div>
-      <div className="mt-0.5 grid min-w-0 grid-cols-2 gap-1 text-[8px]">
-        <ChangePair label="季" value={qoq} suffix={margin ? 'pp' : '%'} />
-        <ChangePair label="年" value={yoy} suffix={margin ? 'pp' : '%'} />
+    <div className="min-w-0 text-right">
+      <div className="truncate font-mono text-[10px] font-semibold tabular-nums text-foreground" title={value?.toString()}>{displayed}</div>
+      <div className="mt-0.5 flex items-baseline justify-end gap-0.5 whitespace-nowrap text-[7px] leading-none">
+        <span className="text-muted-foreground/55">年</span>
+        <Change value={yoy} suffix={kind === 'margin' ? 'pp' : '%'} />
       </div>
     </div>
   );
 }
 
-function QuarterCard({ row }: { row: QuarterlyFundamentalTrend }) {
+function QuarterlyTable({ rows }: { rows: QuarterlyFundamentalTrend[] }) {
   return (
-    <article className="rounded-lg border border-border/45 bg-card/35 p-2">
-      <div className="mb-1.5 flex items-center justify-between">
-        <h4 className="font-mono text-[11px] font-semibold text-cyan-200">{formatPeriod(row.period)}</h4>
-        <span className="text-[8px] text-muted-foreground">單季</span>
+    <div>
+      <div className="max-w-full overflow-hidden rounded-lg border border-border/50">
+        <table className="w-full table-fixed" aria-label="季度獲利歷史">
+          <colgroup>
+            <col className="w-[18%]" />
+            <col className="w-[24%]" />
+            <col className="w-[20%]" />
+            <col className="w-[20%]" />
+            <col className="w-[18%]" />
+          </colgroup>
+          <thead className="bg-secondary/45 text-[9px] text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-1.5 py-1.5 text-left font-normal">季度</th>
+              <th scope="col" className="px-1 py-1.5 text-right font-normal">營收</th>
+              <th scope="col" className="px-0.5 py-1.5 text-right font-normal">毛利</th>
+              <th scope="col" className="px-0.5 py-1.5 text-right font-normal">淨利</th>
+              <th scope="col" className="px-1.5 py-1.5 text-right font-normal">EPS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/30">
+            {rows.slice(0, 8).map(row => (
+              <tr key={row.period} className="h-11 even:bg-foreground/[0.018]">
+                <td className="truncate px-1.5 font-mono text-[9px] font-semibold text-cyan-200">{formatPeriod(row.period)}</td>
+                <td className="px-1"><QuarterValue value={row.revenue} yoy={row.revenueYoY} kind="amount" /></td>
+                <td className="px-0.5"><QuarterValue value={row.grossMargin} yoy={row.grossMarginYoY} kind="margin" /></td>
+                <td className="px-0.5"><QuarterValue value={row.netMargin} yoy={row.netMarginYoY} kind="margin" /></td>
+                <td className="px-1.5"><QuarterValue value={row.eps} yoy={row.epsYoY} kind="eps" /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        <MetricCell label="營收" value={row.revenue} qoq={row.revenueQoQ} yoy={row.revenueYoY} />
-        <MetricCell label="EPS" value={row.eps} qoq={row.epsQoQ} yoy={row.epsYoY} />
-        <MetricCell label="毛利率" value={row.grossMargin} qoq={row.grossMarginQoQ} yoy={row.grossMarginYoY} margin />
-        <MetricCell label="淨利率" value={row.netMargin} qoq={row.netMarginQoQ} yoy={row.netMarginYoY} margin />
-      </div>
-    </article>
+      <p className="mt-1 px-0.5 text-[8px] text-muted-foreground/70">營收為單季；毛利、淨利為利率；各欄下排為年變動</p>
+    </div>
   );
 }
 
@@ -203,7 +222,7 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
       <div aria-label="最新基本面摘要">
         <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
           <h4 className="text-[10px] font-semibold text-foreground/90">最新摘要</h4>
-          <span className="text-[8px] text-muted-foreground">先看變化，再展開歷史</span>
+          <span className="text-[8px] text-muted-foreground">先看摘要，再查看歷史</span>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
           <SnapshotCard
@@ -248,10 +267,10 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
       </div>
 
       {history.monthlyDisclosure === 'available' ? (
-        <details className="group rounded-lg border border-border/40 bg-background/20">
+        <details open className="group rounded-lg border border-border/40 bg-background/20">
           <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded px-2.5 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
             <span className="min-w-0 truncate">月營收歷史 <span className="text-[9px] font-normal text-muted-foreground">台股正式月公告</span></span>
-            <span className="shrink-0 text-[9px] font-normal text-cyan-200">{Math.min(13, history.monthly.length)}/{history.monthly.length} · 展開</span>
+            <span className="shrink-0 text-[9px] font-normal text-cyan-200">近 {Math.min(13, history.monthly.length)} 期</span>
           </summary>
           <div className="px-2 pb-2">
             {history.monthly.length > 0
@@ -265,10 +284,10 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
         </div>
       )}
 
-      <details className="group rounded-lg border border-border/40 bg-background/20">
+      <details open={history.monthlyDisclosure !== 'available'} className="group rounded-lg border border-border/40 bg-background/20">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded px-2.5 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
           <span className="min-w-0 truncate">季度獲利歷史 <span className="text-[9px] font-normal text-muted-foreground">營收／毛利率／淨利率／EPS</span></span>
-          <span className="shrink-0 text-[9px] font-normal text-cyan-200">{Math.min(8, history.quarterly.length)}/{history.quarterly.length} · 展開</span>
+          <span className="shrink-0 text-[9px] font-normal text-cyan-200">近 {Math.min(8, history.quarterly.length)} 期</span>
         </summary>
         <div className="px-2 pb-2">
           {history.quarterBasis === 'derived-from-cumulative' && (
@@ -276,10 +295,9 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
               A 股 Q2、Q3、年報原始值為年初至今累計；以下已先相減還原單季。若期間發生股本變動，單季 EPS 差額僅供趨勢參考。
             </div>
           )}
-          <div className="space-y-2">
-            {history.quarterly.slice(0, 8).map(row => <QuarterCard key={row.period} row={row} />)}
-            {history.quarterly.length === 0 && <div className="text-[10px] text-muted-foreground">目前沒有可用的季度歷史。</div>}
-          </div>
+          {history.quarterly.length > 0
+            ? <QuarterlyTable rows={history.quarterly} />
+            : <div className="text-[10px] text-muted-foreground">目前沒有可用的季度歷史。</div>}
         </div>
       </details>
 

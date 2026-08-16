@@ -11,8 +11,24 @@ describe('fundamental trend normalization', () => {
       { period: '2026-01-01', revenue: 120 },
       { period: '2025-02-01', revenue: 110 },
     ]);
-    expect(result[0]).toMatchObject({ period: '2026-02', revenueMoM: 10, revenueYoY: 20 });
+    expect(result[0]).toMatchObject({
+      period: '2026-02',
+      revenueMoM: 10,
+      revenueYoY: 20,
+      revenueYtdYoY: null,
+    });
     expect(result[1].revenueMoM).toBeNull();
+  });
+
+  it('calculates cumulative revenue growth only when both years have every month', () => {
+    const result = buildMonthlyFundamentalTrends([
+      { period: '2026-02-01', revenue: 132 },
+      { period: '2026-01-01', revenue: 120 },
+      { period: '2025-02-01', revenue: 110 },
+      { period: '2025-01-01', revenue: 100 },
+    ]);
+    expect(result[0].revenueYtdYoY).toBeCloseTo(20, 8);
+    expect(result[1].revenueYtdYoY).toBeCloseTo(20, 8);
   });
 
   it('uses percent change for amounts and percentage-point change for margins', () => {

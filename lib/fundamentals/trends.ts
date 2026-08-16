@@ -3,6 +3,7 @@ export interface MonthlyFundamentalTrend {
   revenue: number | null;
   revenueMoM: number | null;
   revenueYoY: number | null;
+  revenueYtdYoY: number | null;
 }
 
 export interface QuarterlyFundamentalTrend {
@@ -100,11 +101,29 @@ export function buildMonthlyFundamentalTrends(
     .sort((a, b) => b.period.localeCompare(a.period));
   const byPeriod = new Map(normalized.map(row => [row.period, row.revenue]));
 
-  return normalized.map(row => ({
-    ...row,
-    revenueMoM: growth(row.revenue, byPeriod.get(previousMonth(row.period) ?? '') ?? null),
-    revenueYoY: growth(row.revenue, byPeriod.get(yearAgoPeriod(row.period) ?? '') ?? null),
-  }));
+  const sumYearThroughMonth = (year: number, month: number): number | null => {
+    let total = 0;
+    for (let currentMonth = 1; currentMonth <= month; currentMonth += 1) {
+      const key = `${year}-${String(currentMonth).padStart(2, '0')}`;
+      const revenue = byPeriod.get(key);
+      if (revenue == null) return null;
+      total += revenue;
+    }
+    return total;
+  };
+
+  return normalized.map(row => {
+    const [year, month] = row.period.split('-').map(Number);
+    const currentYtdRevenue = sumYearThroughMonth(year, month);
+    const previousYtdRevenue = sumYearThroughMonth(year - 1, month);
+
+    return {
+      ...row,
+      revenueMoM: growth(row.revenue, byPeriod.get(previousMonth(row.period) ?? '') ?? null),
+      revenueYoY: growth(row.revenue, byPeriod.get(yearAgoPeriod(row.period) ?? '') ?? null),
+      revenueYtdYoY: growth(currentYtdRevenue, previousYtdRevenue),
+    };
+  });
 }
 
 export function buildSingleQuarterTrends(
