@@ -18,7 +18,7 @@ type BrokerPt = { date: string; netDifference: number };
 type InstPt = { date: string } & InstDay;
 type TdccPt = { date: string } & TdccDay;
 type CandlePt = { date: string; close: number; volume: number };
-/** 跟看盤 app 對齊的「正式公式」集中度（HiStock 分點區間彙總算，見 /api/stock/concentration）。
+/** 跟看盤 app 對齊的「正式公式」集中度（FinMind 全分點區間彙總算，見 /api/stock/concentration）。
  *  只覆蓋最近數日的 5日(c5)/20日(c20)；其餘日期/週期 fallback 本檔自算近似值。 */
 type ConcPt = { date: string; c5: number | null; c20: number | null; net?: number | null };
 
@@ -83,7 +83,7 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact, concentration
   candles: CandlePt[];
   cursorDate: string | null;
   concExact?: ConcPt[];
-  concentrationStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  concentrationStatus?: 'idle' | 'loading' | 'ready' | 'partial' | 'unavailable' | 'error';
   concentrationError?: string;
   onRetryConcentration?: () => void;
 }) {
@@ -96,11 +96,11 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact, concentration
     // 跟看盤 app 對齊的正式集中度（5日/20日）；其餘日期/週期 fallback 本檔自算
     const exByDate = new Map((concExact ?? []).map(p => [p.date, p]));
     const pick = (i: number, period: number): number | null => {
-      // HiStock 有抓到的日期(在 exByDate)＋週期是 5/20 → 用正式公式值（含 null=當天分點未出「結算中」，
-      // 不退回舊式近似，免得跟看盤 app 對不上）。更早日期/其他週期 → 本檔自算。
+      // 正式值非空才採用；正式來源當天缺值時退回已儲存的近似值，
+      // 並由上方狀態列明確揭露 partial/unavailable，避免空值被誤標成「正式完成」。
       const ex = exByDate.get(candles[i].date);
-      if (ex && period === 5) return ex.c5;
-      if (ex && period === 20) return ex.c20;
+      if (ex && period === 5 && ex.c5 != null) return ex.c5;
+      if (ex && period === 20 && ex.c20 != null) return ex.c20;
       return conc(candles, byDate, i, period);
     };
     const start = Math.max(0, candles.length - 120);
@@ -136,10 +136,15 @@ function BrokerConcTable({ broker, candles, cursorDate, concExact, concentration
       {concentrationStatus === 'ready' && (
         <div className="mb-1 px-1 text-[9px] text-emerald-300/80">最近日期的 5／20 日欄位已採正式分點公式。</div>
       )}
-      {concentrationStatus === 'error' && (
+      {concentrationStatus === 'partial' && (
+        <div role="status" className="mb-1 rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[9px] leading-snug text-amber-200">
+          {concentrationError ?? '正式集中度僅部分日期可用；缺少的日期先顯示已儲存近似值。'}
+        </div>
+      )}
+      {(concentrationStatus === 'unavailable' || concentrationStatus === 'error') && (
         <div role="alert" className="mb-1 flex items-center justify-between gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[9px] leading-snug text-amber-200">
           <span>{concentrationError ?? '正式集中度暫時無法載入，表格先用近似值。'}</span>
-          {onRetryConcentration && <button type="button" onClick={onRetryConcentration} className="min-h-8 shrink-0 rounded border border-amber-400/40 px-2 font-medium hover:bg-amber-500/15">重試</button>}
+          {onRetryConcentration && <button type="button" onClick={onRetryConcentration} className="min-h-8 shrink-0 cursor-pointer rounded border border-amber-400/40 px-2 font-medium transition-colors hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70">重試</button>}
         </div>
       )}
       <div className="flex items-center justify-center gap-3 mb-1 text-[9px] text-muted-foreground/70">
@@ -371,9 +376,9 @@ export interface ChipRawTablesProps {
   tdcc?: TdccPt[];
   candles: CandlePt[];
   cursorDate: string | null;
-  /** 跟看盤 app 對齊的正式集中度（HiStock 分點區間彙總，最近數日 5日/20日） */
+  /** 跟看盤 app 對齊的正式集中度（FinMind 全分點區間彙總，最近數日 5日/20日） */
   concExact?: ConcPt[];
-  concentrationStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  concentrationStatus?: 'idle' | 'loading' | 'ready' | 'partial' | 'unavailable' | 'error';
   concentrationError?: string;
   onRetryConcentration?: () => void;
 }

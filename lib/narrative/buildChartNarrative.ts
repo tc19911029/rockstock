@@ -1,4 +1,8 @@
-import { detectTrend, detectTrendPosition } from '@/lib/analysis/trendAnalysis';
+import {
+  detectTrend,
+  detectTrendPosition,
+  detectTrendlineBreakout,
+} from '@/lib/analysis/trendAnalysis';
 import {
   analyzeKLineSignals,
   isKLineSignal,
@@ -275,6 +279,51 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     trendPosition = detectTrendPosition(prefix, prefix.length - 1);
   }
 
+  const trendline = prefix.length > 0
+    ? detectTrendlineBreakout(prefix, prefix.length - 1)
+    : null;
+  const trendlineEvents: ChartNarrativeEvent[] = [];
+  if (trendline?.breakoutBullish && trendline.descending) {
+    trendlineEvents.push(freezeEvent({
+      id: `${date}:trendline:descending-broken`,
+      setupKey: 'trendline:descending-broken',
+      observedAtIndex: safeIndex,
+      observedAtDate: date,
+      category: 'trend',
+      state: 'confirmed',
+      direction: 'bullish',
+      action: 'wait',
+      label: '下降切線已突破',
+      description: compact(
+        `收盤 ${current?.close.toFixed(2)} 高於下降切線 ${trendline.descending.todayValue.toFixed(2)}，`
+        + '代表空頭反彈轉強；這是結構進展，不等於完整 ABC 突破或多頭進場訊號。',
+      ),
+      sourceRuleIds: ['trendline-breakout-bullish'],
+      sourceFamily: '切線結構',
+      priority: 35,
+    }));
+  }
+  if (trendline?.breakoutBearish && trendline.ascending) {
+    trendlineEvents.push(freezeEvent({
+      id: `${date}:trendline:ascending-broken`,
+      setupKey: 'trendline:ascending-broken',
+      observedAtIndex: safeIndex,
+      observedAtDate: date,
+      category: 'trend',
+      state: 'confirmed',
+      direction: 'bearish',
+      action: 'wait',
+      label: '上升切線已跌破',
+      description: compact(
+        `收盤 ${current?.close.toFixed(2)} 低於上升切線 ${trendline.ascending.todayValue.toFixed(2)}，`
+        + '代表多頭回檔轉弱；這是結構警示，不等於完整空頭或放空進場訊號。',
+      ),
+      sourceRuleIds: ['trendline-breakout-bearish'],
+      sourceFamily: '切線結構',
+      priority: 35,
+    }));
+  }
+
   const trendEvent = freezeEvent({
     id: `${date}:trend:${trendState}:${trendPosition}`,
     setupKey: 'trend:current',
@@ -296,6 +345,7 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     ...ruleEvents,
     ...hardRiskEvent,
     ...riskEvent,
+    ...trendlineEvents,
     trendEvent,
   ]));
   const decision = resolveAction(input.hasPosition, allEvents, relevantBlockers);

@@ -57,6 +57,7 @@ import { ETFPanel } from '@/features/etf';
 import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { getABCDisplayStructure } from '@/lib/analysis/abcBreakoutEntry';
 import { shouldFetchExactConcentration } from '@/lib/chips/concentrationFetchPolicy';
+import { assessExactConcentration } from '@/lib/chips/concentrationAvailability';
 import { findRecentPriceDiscontinuity } from '@/lib/scanner/priceContinuityGuard';
 import { useBacktestStore } from '@/store/backtestStore';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -575,10 +576,15 @@ function HomePage() {
     return () => ctrl.abort();
   }, [chipFetchKey, chipsRetry]);
 
-  // 主力分點集中度「跟看盤 app 對齊版」（最近數日 5日/20日，HiStock 分點區間彙總算正式公式）。
-  // 與 /api/stock/chips 分開 lazy fetch（HiStock 多視窗抓取較慢，不阻塞籌碼面板其餘三表）。
+  // 主力分點集中度「跟看盤 app 對齊版」（最近數日 5日/20日，FinMind 全分點彙總算正式公式）。
+  // 與 /api/stock/chips 分開 lazy fetch（全分點多視窗抓取較慢，不阻塞籌碼面板其餘三表）。
   type ConcRow = { date: string; c5: number | null; c20: number | null; net: number | null };
-  type ConcState = { sourceSymbol: string; status: 'loading' | 'ready' | 'error'; rows: ConcRow[]; error?: string };
+  type ConcState = {
+    sourceSymbol: string;
+    status: 'loading' | 'ready' | 'partial' | 'unavailable' | 'error';
+    rows: ConcRow[];
+    error?: string;
+  };
   const [concResult, setConcResult] = useState<ConcState | null>(null);
   const [concRetry, setConcRetry] = useState(0);
   const concentrationBuyMethod = useBacktestStore(s => s.activeBuyMethod);
@@ -589,7 +595,9 @@ function HomePage() {
   });
   const activeConcResult = concResult?.sourceSymbol === chipFetchKey ? concResult : null;
   const concExact = useMemo(
-    () => activeConcResult?.status === 'ready' ? activeConcResult.rows : [],
+    () => activeConcResult?.status === 'ready' || activeConcResult?.status === 'partial'
+      ? activeConcResult.rows
+      : [],
     [activeConcResult],
   );
   const concentrationStatus = !needsExactConcentration
@@ -607,7 +615,21 @@ function HomePage() {
         if (!r.ok || !json.ok) throw new Error(json.error ?? `HTTP ${r.status}`);
         return json;
       })
-      .then(json => setConcResult({ sourceSymbol: chipFetchKey, status: 'ready', rows: json.conc ?? [] }))
+      .then(json => {
+        const rows = (json.conc ?? []) as ConcRow[];
+        const assessment = assessExactConcentration(rows);
+        const coverage = `${assessment.exactDateCount}/${assessment.totalCount}`;
+        setConcResult({
+          sourceSymbol: chipFetchKey,
+          status: assessment.status,
+          rows,
+          error: assessment.status === 'unavailable'
+            ? '正式分點來源本次未回傳可用的 5／20 日數值；目前顯示已儲存的近似值。'
+            : assessment.status === 'partial'
+              ? `正式分點僅覆蓋 ${coverage} 個日期，最新日期尚未完整；其餘顯示近似值。`
+              : undefined,
+        });
+      })
       .catch(err => {
         if (ctrl.signal.aborted && !timedOut) return;
         console.warn('[concentration] load failed:', err);

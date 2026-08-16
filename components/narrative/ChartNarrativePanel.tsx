@@ -58,6 +58,9 @@ export default function ChartNarrativePanel({
   const adoptedCount = narrative.evidenceGroups.filter(group => group.disposition === 'adopted').length;
   const conflictingCount = narrative.evidenceGroups.filter(group => group.disposition === 'conflicting').length;
   const backgroundCount = narrative.evidenceGroups.filter(group => group.disposition === 'background').length;
+  const trendlineEvents = narrative.events.filter(event => event.sourceRuleIds.some(ruleId => (
+    ruleId === 'trendline-breakout-bullish' || ruleId === 'trendline-breakout-bearish'
+  )));
 
   return (
     <section
@@ -80,6 +83,24 @@ export default function ChartNarrativePanel({
       <p className="mt-1 text-xs leading-relaxed text-foreground/80">
         {narrative.summary}
       </p>
+
+      {trendlineEvents.length > 0 && (
+        <aside aria-label="切線結構進展" className="mt-2 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="font-semibold text-sky-200">結構進展</span>
+            {trendlineEvents.map(event => (
+              <span key={event.id} className="rounded-full bg-sky-400/10 px-2 py-0.5 font-medium text-sky-100 ring-1 ring-sky-400/25">
+                {event.label}
+              </span>
+            ))}
+          </div>
+          {trendlineEvents.map(event => (
+            <p key={`${event.id}:detail`} className="mt-1 text-[11px] leading-relaxed text-foreground/75">
+              {event.description}
+            </p>
+          ))}
+        </aside>
+      )}
 
       <div className={`mt-2 rounded-lg border px-3 py-2.5 ${ACTION_PLAN_STYLE[actionPlan.tone]}`}>
         <p className="text-sm font-bold">{actionPlan.label}</p>

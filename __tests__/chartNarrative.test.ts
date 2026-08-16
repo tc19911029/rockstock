@@ -1,4 +1,7 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
+import ChartNarrativePanel from '@/components/narrative/ChartNarrativePanel';
 import type { CandleWithIndicators, RuleSignal } from '@/types';
 
 function candle(index: number, close = 100 + index): CandleWithIndicators {
@@ -28,6 +31,44 @@ function signal(overrides: Partial<RuleSignal>): RuleSignal {
 }
 
 const candles = Array.from({ length: 25 }, (_, index) => candle(index));
+
+function trendlineCandle(
+  index: number,
+  close: number,
+  ma5: number,
+  high: number,
+  low: number,
+): CandleWithIndicators {
+  return {
+    date: `2026-02-${String(index + 1).padStart(2, '0')}`,
+    open: close - 1,
+    high,
+    low,
+    close,
+    volume: 1_000,
+    ma5,
+    ma10: close,
+    ma20: close,
+    avgVol5: 1_000,
+  };
+}
+
+const descendingTrendlineBreakout = [
+  trendlineCandle(0, 112, 110, 120, 109),
+  trendlineCandle(1, 114, 112, 119, 111),
+  trendlineCandle(2, 115, 113, 118, 112),
+  trendlineCandle(3, 108, 110, 109, 104),
+  trendlineCandle(4, 102, 104, 105, 95),
+  trendlineCandle(5, 98, 100, 101, 90),
+  trendlineCandle(6, 101, 99, 104, 92),
+  trendlineCandle(7, 105, 103, 110, 101),
+  trendlineCandle(8, 107, 105, 109, 103),
+  trendlineCandle(9, 103, 105, 105, 99),
+  trendlineCandle(10, 99, 101, 102, 94),
+  trendlineCandle(11, 96, 98, 99, 93),
+  trendlineCandle(12, 99, 97, 102, 95),
+  trendlineCandle(13, 108, 106, 109, 100),
+];
 
 describe('走圖敘事建構器', () => {
   test('持股同時出現進場與硬出場時，硬出場永遠優先', () => {
@@ -150,6 +191,36 @@ describe('走圖敘事建構器', () => {
     expect(result.events.filter(event => event.category === 'entry')).toHaveLength(2);
     expect(result.events.filter(event => event.category === 'trend')).toHaveLength(1);
     expect(result.evidenceLevel).toBe('medium');
+  });
+
+  test('下降切線突破會進入敘事證據並在面板顯示為結構進展', () => {
+    const result = buildChartNarrative({
+      candles: descendingTrendlineBreakout,
+      currentIndex: descendingTrendlineBreakout.length - 1,
+      signals: [],
+      hasPosition: false,
+    });
+    const event = result.events.find(item => item.sourceRuleIds.includes('trendline-breakout-bullish'));
+
+    expect(event).toMatchObject({
+      label: '下降切線已突破',
+      category: 'trend',
+      direction: 'bullish',
+      action: 'wait',
+    });
+    expect(event?.description).toContain('不等於完整 ABC 突破');
+
+    const html = renderToStaticMarkup(createElement(ChartNarrativePanel, {
+      narrative: result,
+      actionPlan: {
+        label: '今日動作：保持觀望',
+        detail: '等待下一根確認。',
+        tone: 'neutral',
+      },
+    }));
+    expect(html).toContain('切線結構進展');
+    expect(html).toContain('下降切線已突破');
+    expect(html).toContain('不等於完整 ABC 突破');
   });
 
   test('同日同方向的多個 K 線名稱只形成一個獨立證據群', () => {
