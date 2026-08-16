@@ -324,6 +324,7 @@ function HolderDistTable({ tdcc, cursorDate }: { tdcc: TdccPt[]; cursorDate: str
         onChange={(date) => setSelection({ source: tdcc, date })}
         dates={tabWeekDates}
         size="sm"
+        cols={4}
         limit={8}
         ariaLabel="集保持股分布週次"
         className="mb-1 px-1"

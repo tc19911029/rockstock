@@ -42,7 +42,7 @@ export interface DatePickerProps {
   size?: 'sm' | 'md';
   className?: string;
   disabled?: boolean;
-  /** 顯示為 grid-cols-N 的欄位數，預設 11（對齊 ScanPanelVertical 設計）*/
+  /** 顯示為 grid-cols-N 的欄位數，預設 11（窄面板可用 4 欄避免日期互相擠壓）*/
   cols?: number;
   /** 最多顯示幾個 pill，預設 22 */
   limit?: number;
@@ -111,7 +111,8 @@ export function DatePicker({
   // dim: 已知該日無資料 — 用 strike-ish + 較暗底色
   const pillDim = 'bg-secondary/20 text-muted-foreground/40 hover:bg-secondary/40 hover:text-muted-foreground/60';
 
-  const gridColsCls = cols === 11 ? 'grid-cols-11'
+  const gridColsCls = cols === 4 ? 'grid-cols-4'
+    : cols === 11 ? 'grid-cols-11'
     : cols === 7 ? 'grid-cols-7'
     : cols === 14 ? 'grid-cols-14'
     : 'grid-cols-11';
