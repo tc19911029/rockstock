@@ -120,7 +120,7 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
       {history.monthlyDisclosure === 'available' ? (
         <details open className="group">
           <summary className="min-h-9 cursor-pointer list-none rounded px-1 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
-            月營收（台股正式月公告） <span className="text-[9px] font-normal text-muted-foreground">共 {history.monthly.length} 期</span>
+            月營收（台股正式月公告） <span className="text-[9px] font-normal text-muted-foreground">近 {Math.min(13, history.monthly.length)}／共 {history.monthly.length} 期</span>
           </summary>
           {history.monthly.length > 0
             ? <MonthlyTable rows={history.monthly} />
@@ -134,7 +134,7 @@ export function FundamentalTrendPanel({ history }: { history: FundamentalTrendHi
 
       <details open className="group">
         <summary className="min-h-9 cursor-pointer list-none rounded px-1 py-2 text-[11px] font-semibold text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
-          季度獲利（營收／毛利率／淨利率／EPS） <span className="text-[9px] font-normal text-muted-foreground">共 {history.quarterly.length} 期</span>
+          季度獲利（營收／毛利率／淨利率／EPS） <span className="text-[9px] font-normal text-muted-foreground">近 {Math.min(8, history.quarterly.length)}／共 {history.quarterly.length} 期</span>
         </summary>
         {history.quarterBasis === 'derived-from-cumulative' && (
           <div className="mb-2 rounded border border-sky-500/25 bg-sky-500/10 px-2 py-1.5 text-[9px] leading-snug text-sky-100">
