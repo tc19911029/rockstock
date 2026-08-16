@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 3 },
+    "overview": { "type": "string" },
+    "verdict": {
+      "type": "string",
+      "enum": ["進場", "持股", "觀望", "減碼", "出場"]
+    },
+    "verdictReason": { "type": "string" },
+    "caveat": { "type": ["string", "null"] },
+    "reasoning": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string",
+            "enum": ["trend", "kbar", "visual", "chip", "fundamental", "news", "macro", "action"]
+          },
+          "text": { "type": "string" }
+        },
+        "required": ["section", "text"],
+        "additionalProperties": false
+      }
+    },
+    "dataPoints": {
+      "type": "array",
+      "minItems": 30,
+      "maxItems": 180,
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": ["technical", "chip", "fundamental", "news", "macro", "valuation", "governance", "industry"]
+          },
+          "label": { "type": "string" },
+          "value": { "type": "string" },
+          "source": { "type": "string" },
+          "asOf": { "type": ["string", "null"] }
+        },
+        "required": ["category", "label", "value", "source", "asOf"],
+        "additionalProperties": false
+      }
+    },
+    "timestamp": { "type": "string" }
+  },
+  "required": ["schemaVersion", "overview", "verdict", "verdictReason", "caveat", "reasoning", "dataPoints", "timestamp"],
+  "additionalProperties": false
+}

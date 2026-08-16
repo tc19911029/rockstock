@@ -92,6 +92,8 @@ export async function hasValidSession(req: NextRequest): Promise<boolean> {
 export const PROTECTED_ROUTES = [
   '/api/ai/', // Claude API (costs money)
   '/api/chat', // Claude chat (costs money)
+  '/api/coach/chart-digest', // 本機 Codex 深度分析
+  '/api/coach/codex-followup', // 本機 Codex 追問
   '/api/notify/', // Email / LINE sending
   '/api/scanner/run', // Heavy compute
   '/api/scanner/chunk',

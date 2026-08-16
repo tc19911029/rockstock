@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 走圖頁單支股票朱老師分析 — schemaVersion=3
+ * 走圖頁單支股票 Codex 分析（朱老師體系）— schemaVersion=3
  *
  * v3 設計：
  *   - 拔掉 v2 的 ABCDE 徽章 + 5 燈號 chip 列
@@ -25,8 +25,9 @@ import type {
   ReasoningSection,
 } from '@/lib/ai/zhuTypes';
 
-const HISTORY_STORAGE_KEY_V2 = 'chart-coach-digest-v2';   // 舊版，mount 時清掉
-const HISTORY_STORAGE_KEY = 'chart-coach-digest-v3';
+const HISTORY_STORAGE_KEY_V2 = 'chart-coach-digest-v2';
+const HISTORY_STORAGE_KEY_V3 = 'chart-coach-digest-v3';
+const HISTORY_STORAGE_KEY = 'chart-coach-digest-codex-v4';
 const HISTORY_MAX_ENTRIES = 40;
 
 interface ChatMessage {
@@ -197,7 +198,7 @@ function buildFollowupContext(
   }
   if (digest.dataPoints.length > 0) {
     lines.push('');
-    lines.push(`## 朱老師找到的數值（${digest.dataPoints.length} 筆，列前 10）：`);
+    lines.push(`## Codex 查到的數值（${digest.dataPoints.length} 筆，列前 10）：`);
     for (const p of digest.dataPoints.slice(0, 10)) {
       const asOf = p.asOf ? ` · ${p.asOf}` : '';
       lines.push(`  · [${CATEGORY_LABELS[p.category]}] ${p.label}: ${p.value} (${p.source}${asOf})`);
@@ -252,10 +253,13 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
 
   const persistKey = (symbol && date) ? storageKey(market, bareSymbol, date) : '';
 
-  // v2 → v3 一次性遷移：mount 時清掉舊 key
+  // Claude 舊結果不能冒充 Codex 產物；只清除本面板自己的舊 storage key。
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try { window.localStorage.removeItem(HISTORY_STORAGE_KEY_V2); } catch { /* ignore */ }
+    try {
+      window.localStorage.removeItem(HISTORY_STORAGE_KEY_V2);
+      window.localStorage.removeItem(HISTORY_STORAGE_KEY_V3);
+    } catch { /* ignore */ }
   }, []);
 
   // 切股票/切日期：重設 state + 嘗試載入歷史
@@ -310,7 +314,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         subtype: s.subtype ?? classifySignal(s),
       }));
 
-      // 抓走圖視覺截圖 — 朱老師 session 是多模態 LLM，Read PNG 能直接「看」K 線型態
+      // 抓走圖視覺截圖 — Codex 以 image input 直接檢查 K 線型態
       let chartScreenshot: string | null = null;
       try {
         const w = window as unknown as { __rockstockChart?: { takeScreenshot: () => HTMLCanvasElement } };
@@ -324,8 +328,8 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         console.warn('[ChartCoachAdvice] screenshot failed:', err);
       }
 
-      // 帶 120 天完整歷史 K 線給朱老師（OHLCV + 所有指標）
-      // 朱老師能從這找出：前波頂底、盤整區間、過往爆量、KD/MACD 背離、均線糾結期等
+      // 帶 120 天完整歷史 K 線給 Codex（OHLCV + 所有指標）
+      // 用來找前波頂底、盤整區間、過往爆量、KD/MACD 背離、均線糾結期等
       const histStart = Math.max(0, currentIndex - 119);
       const recentCandles = allCandles.slice(histStart, currentIndex + 1).map(c => ({
         date: c.date,
@@ -380,7 +384,9 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
       const body = await res.json();
       if (aborted.current) return;
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-      if (!isValidV3(body)) throw new Error('朱老師回了舊版 schema，請再試一次（自動會強制重打）');
+      if (!isValidV3(body) || body.generatedBy !== 'codex') {
+        throw new Error('Codex 回覆格式不完整，請重新分析');
+      }
       setData(body);
       setChat([]);
       setChatError(null);
@@ -401,7 +407,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
     setChatLoading(true);
     setChatError(null);
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/coach/codex-followup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -443,7 +449,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         className="w-full mb-3 px-3 py-2 rounded-lg border border-purple-500/40 bg-gradient-to-r from-purple-500/15 to-indigo-500/15 hover:from-purple-500/25 hover:to-indigo-500/25 text-[12px] font-semibold text-purple-100 transition-all flex items-center justify-center gap-2"
       >
         <span>💬</span>
-        <span>問朱老師怎麼看 {bareSymbol} {name}</span>
+        <span>請 Codex 幫我分析 {bareSymbol} {name}</span>
       </button>
     );
   }
@@ -451,9 +457,9 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
   if (loading) {
     return (
       <div className="w-full mb-3 px-3 py-3 rounded-lg border border-purple-500/30 bg-purple-500/5 text-[11px] text-purple-200 space-y-1.5">
-        <div className="animate-pulse text-center">💬 朱老師正在查資料分析…</div>
+        <div className="animate-pulse text-center">💬 Codex 正在讀取課程、走圖與最新資料…</div>
         <div className="text-purple-200/70 leading-relaxed text-center">
-          已自動切到朱老師 Terminal 觸發分析。若一直沒回應，請確認名為 <code className="px-1 rounded bg-purple-500/20 text-purple-100 font-mono">Zhu</code> 的 Terminal 有開著、且 macOS 已授權自動化。
+          深度分析會查核八大面向，通常需要數分鐘；可以停留在本頁等待，不必開啟 Terminal。
         </div>
       </div>
     );
@@ -462,7 +468,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
   if (error) {
     return (
       <div className="w-full mb-3 px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/5 text-[11px] text-red-300 flex items-center justify-between gap-2">
-        <span>💬 老師回覆異常：{error}</span>
+        <span>💬 Codex 分析異常：{error}</span>
         <button
           onClick={() => ask({ forceRefresh: true })}
           className="text-[11px] text-red-200 hover:text-red-100 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30"
@@ -482,7 +488,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
       {/* 頂條（無 ABCDE 徽章） */}
       <div className="flex items-center justify-between gap-2">
         <div className="font-semibold text-purple-200 flex items-center gap-1.5 min-w-0 flex-1">
-          <span className="shrink-0">💬 朱老師的話</span>
+          <span className="shrink-0">💬 Codex · 朱老師體系</span>
           {savedAt && (
             <span className="text-[9px] text-muted-foreground font-normal truncate">
               · {formatSavedAt(savedAt)}
@@ -495,7 +501,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         <button
           onClick={() => ask({ forceRefresh: true })}
           className="text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted shrink-0"
-          title="重新分析（略過 server cache，強制重打朱老師）"
+          title="重新分析（略過快取，重新請 Codex 查核）"
         >🔄</button>
       </div>
 
@@ -523,11 +529,11 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         </button>
       )}
 
-      {/* 📊 朱老師找到的數值（折疊面板） */}
+      {/* 📊 Codex 查到的數值（折疊面板） */}
       {!collapsed && data.dataPoints.length > 0 && (
         <details className="rounded border border-emerald-500/30 bg-emerald-500/5">
           <summary className="cursor-pointer px-2 py-1.5 text-[11px] font-semibold text-emerald-200 select-none flex items-center justify-between">
-            <span>📊 朱老師找到的數值（{data.dataPoints.length} 筆）</span>
+            <span>📊 Codex 查到的數值（{data.dataPoints.length} 筆）</span>
             <span className="text-[9px] text-emerald-300/70">點擊展開</span>
           </summary>
           <div className="px-2 pb-2 pt-1 space-y-2">
@@ -591,11 +597,11 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
                 }`}
               >
                 <div className="text-[9px] text-muted-foreground mb-0.5">
-                  {m.role === 'user' ? '你' : '朱老師'}
+                  {m.role === 'user' ? '你' : 'Codex'}
                 </div>
                 <div className="text-[11px] leading-relaxed whitespace-pre-wrap">
                   {m.content || (chatLoading && i === chat.length - 1
-                    ? <span className="text-muted-foreground animate-pulse">老師思考中…</span>
+                    ? <span className="text-muted-foreground animate-pulse">Codex 思考中…</span>
                     : '')}
                 </div>
               </div>
@@ -619,7 +625,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
                 sendFollowup(input);
               }
             }}
-            placeholder={chatLoading ? '老師回覆中…' : '想追問？（Enter 送出，Shift+Enter 換行）'}
+            placeholder={chatLoading ? 'Codex 回覆中…' : '想追問 Codex？（Enter 送出，Shift+Enter 換行）'}
             disabled={chatLoading}
             rows={1}
             className="flex-1 min-w-0 px-2 py-1.5 bg-secondary/40 border border-border rounded text-[11px] text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:opacity-50"

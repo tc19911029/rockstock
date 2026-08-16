@@ -113,7 +113,12 @@ export const forwardLimiter = createRateLimit('forward', {
 });
 
 /** Routes that use AI (expensive). */
-const AI_ROUTES = ['/api/chat', '/api/scanner/ai-rank'];
+const AI_ROUTES = [
+  '/api/chat',
+  '/api/scanner/ai-rank',
+  '/api/coach/chart-digest',
+  '/api/coach/codex-followup',
+];
 
 /** Routes that trigger scans (heavy compute). */
 const SCAN_ROUTES = ['/api/scanner/run', '/api/scanner/chunk', '/api/backtest/scan'];

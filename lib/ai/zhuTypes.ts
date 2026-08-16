@@ -79,4 +79,8 @@ export interface DigestResponse {
   dataPoints: DataPoint[];
   /** server cache 命中標記 */
   cached?: boolean;
+  /** 分析完成時間；新 Codex 流程會填入。 */
+  timestamp?: string;
+  /** 避免把舊 Claude localStorage 結果誤標成 Codex。 */
+  generatedBy?: 'codex';
 }
