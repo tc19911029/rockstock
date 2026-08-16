@@ -11,6 +11,7 @@ import {
 import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { isFundSymbol } from '@/lib/market/classify';
 import { loadMockData } from '@/lib/data/mockData';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
@@ -370,25 +371,43 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
   // ── Polling（盤中自動刷新） ──────────────────────────────
   startPolling: () => {
     const { currentStock, currentInterval, targetDate } = get();
-    if (!currentStock || currentStock.ticker === 'DEMO') return;
+    // 任何新一輪判斷前先清掉舊 timer，避免切到休市市場後舊股票仍在背景輪詢。
+    if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
+    if (!currentStock || currentStock.ticker === 'DEMO') {
+      set({ isPolling: false });
+      return;
+    }
 
     // 場外基金：單位淨值一天才定盤一次，盤中沒有即時報價可 poll（且 /api/stock/quote
     // 是股票端點，對 .OF 無資料）→ 直接不啟動 polling。
-    if (isFundSymbol(currentStock.ticker)) return;
+    if (isFundSymbol(currentStock.ticker)) {
+      set({ isPolling: false });
+      return;
+    }
 
     // 歷史 scan 模式不要 poll：targetDate 是過去日，盤中報價跟它無關，
     // 而 polling 每 30s 重抓+全量 precomputeMarkers 很貴，純浪費
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-    if (targetDate && targetDate < today) return;
+    if (targetDate && targetDate < today) {
+      set({ isPolling: false });
+      return;
+    }
 
-    // 先清除舊 timer
-    if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
+    const ticker = currentStock.ticker;
+    const hasCnSuffix = /\.(SS|SZ)$/i.test(ticker);
+    const hasTwSuffix = /\.(TW|TWO)$/i.test(ticker);
+    const pureTicker = ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const market: 'TW' | 'CN' = hasCnSuffix || (!hasTwSuffix && /^\d{6}$/.test(pureTicker)) ? 'CN' : 'TW';
+    if (!isMarketPollingWindow(market)) {
+      set({ isPolling: false });
+      return;
+    }
 
     const intervalMs = getPollingInterval(currentInterval);
     if (intervalMs <= 0) return; // 未知 interval（getPollingInterval default = 0）才不 poll；日/週/月K 都 60s
 
     set({ isPolling: true });
-    const symbol = currentStock.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const symbol = pureTicker;
     // 指數(000001.SS)裸碼後會撞個股(000001=平安銀行)→日K 報價/今日 bar 注入一律用完整代號
     // （/api/stock/quote 是 suffix-aware：000001.SS→4083、000001→10.99；個股帶不帶後綴結果相同）
     const quoteSymbol = currentStock.ticker;

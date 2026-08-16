@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
-import { getQuoteSnapshotDate } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
 import { resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
 
@@ -35,9 +36,33 @@ export interface QuoteTick {
   name?: string;
 }
 
-function parsePrice(s: string): number {
-  const v = parseFloat(s);
-  return isNaN(v) ? 0 : v;
+type ResolvedEntry = {
+  original: string;
+  resolved: string;
+  market: 'TW' | 'CN' | 'FUND' | 'unknown';
+};
+
+/** 休市／深夜報價以正式 L1 日 K 為準；L2 可能只是盤中快照，不能冒充收盤價。 */
+export async function fetchFinalL1Quotes(entries: ResolvedEntry[], market: 'TW' | 'CN'): Promise<QuoteTick[]> {
+  const settled = await Promise.all(entries.map(async (entry): Promise<QuoteTick | null> => {
+    const code = entry.resolved.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const candidates = market === 'TW'
+      ? [...new Set([entry.resolved, `${code}.TW`, `${code}.TWO`])]
+      : [entry.resolved];
+
+    for (const candidate of candidates) {
+      const data = await readCandleFile(candidate, market);
+      const last = data?.candles.at(-1);
+      if (!last || !(last.close > 0)) continue;
+      const previous = data?.candles.at(-2)?.close ?? last.close;
+      const changePercent = previous > 0
+        ? +((last.close - previous) / previous * 100).toFixed(2)
+        : 0;
+      return { symbol: entry.original, price: last.close, changePercent };
+    }
+    return null;
+  }));
+  return settled.filter((quote): quote is QuoteTick => quote !== null);
 }
 
 // ── 台股即時報價（TWSE mis API）─────────────────────────────────────────────
@@ -304,7 +329,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 對沒有後綴的 symbol 依位數猜市場，並記住原始 key 以便回傳格式一致
-  type SymbolEntry = { original: string; resolved: string; market: 'TW' | 'CN' | 'FUND' | 'unknown' };
+  type SymbolEntry = ResolvedEntry;
   const entries: SymbolEntry[] = rawSymbols.map(s => {
     if (/\.(TW|TWO)$/i.test(s)) return { original: s, resolved: s, market: 'TW' };
     if (/\.(SS|SZ)$/i.test(s)) return { original: s, resolved: s, market: 'CN' };
@@ -327,16 +352,18 @@ export async function GET(req: NextRequest) {
   const twEntries = fetchable.filter(e => e.market === 'TW');
   const cnEntries = fetchable.filter(e => e.market === 'CN');
   const fundEntries = fetchable.filter(e => e.market === 'FUND');
+  const twLive = isMarketPollingWindow('TW');
+  const cnLive = isMarketPollingWindow('CN');
 
   // 並行抓取（傳入 resolved symbol，結果 symbol 改回 original）
   const [twQuotes, cnQuotes, fundQuotes] = await Promise.all([
-    fetchTWSEQuotes(twEntries.map(e => e.resolved)).then(qs =>
+    (twLive ? fetchTWSEQuotes(twEntries.map(e => e.resolved)) : fetchFinalL1Quotes(twEntries, 'TW')).then(qs =>
       qs.map(q => {
         const entry = twEntries.find(e => e.resolved.replace(/\.(TW|TWO)$/i, '') === q.symbol.replace(/\.(TW|TWO)$/i, ''));
         return entry ? { ...q, symbol: entry.original } : q;
       })
     ),
-    fetchCNQuotes(cnEntries.map(e => e.resolved)).then(qs =>
+    (cnLive ? fetchCNQuotes(cnEntries.map(e => e.resolved)) : fetchFinalL1Quotes(cnEntries, 'CN')).then(qs =>
       qs.map(q => {
         const entry = cnEntries.find(e => e.resolved.replace(/\.(SS|SZ)$/i, '') === q.symbol.replace(/\.(SS|SZ)$/i, ''));
         return entry ? { ...q, symbol: entry.original } : q;
@@ -357,7 +384,7 @@ export async function GET(req: NextRequest) {
   );
 
   const cnFallback = async () => {
-    if (missingCN.length === 0) return [] as typeof quotes;
+    if (!cnLive || missingCN.length === 0) return [] as typeof quotes;
     const lookupCN = getQuoteSnapshotDate('CN');
     try {
       const cnSnap = await readIntradaySnapshot('CN', lookupCN);
@@ -375,7 +402,7 @@ export async function GET(req: NextRequest) {
   };
 
   const twFallback = async () => {
-    if (missingTW.length === 0) return [] as typeof quotes;
+    if (!twLive || missingTW.length === 0) return [] as typeof quotes;
     const lookupTW = getQuoteSnapshotDate('TW');
     try {
       const twSnap = await readIntradaySnapshot('TW', lookupTW);

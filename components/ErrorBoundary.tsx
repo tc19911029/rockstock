@@ -10,6 +10,8 @@ interface Props {
   section?: string;
   /** Optional callback when error is caught */
   onError?: (error: Error, info: React.ErrorInfo) => void;
+  /** Changing this value clears a previously caught error (for example after switching stock). */
+  resetKey?: string;
 }
 
 interface State {
@@ -36,6 +38,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
     this.props.onError?.(error, info);
   }
 
+  componentDidUpdate(prevProps: Props): void {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null });
+    }
+  }
+
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
@@ -50,7 +58,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
-              className="mt-2 bg-muted hover:bg-muted/80 text-foreground px-4 py-1.5 rounded-md text-xs font-medium transition-colors"
+              className="mt-2 min-h-11 rounded-md bg-muted px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
               重試
             </button>
@@ -70,12 +78,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
 export function SectionBoundary({
   section,
   children,
+  resetKey,
 }: {
   section: string;
   children: React.ReactNode;
+  resetKey?: string;
 }) {
   return (
-    <ErrorBoundary section={section}>
+    <ErrorBoundary section={section} resetKey={resetKey}>
       {children}
     </ErrorBoundary>
   );

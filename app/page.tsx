@@ -947,14 +947,14 @@ function HomePage() {
       className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5"
     >
       {sideTab === 'conditions' && (
-        <SectionBoundary section="買法條件">
+        <SectionBoundary section="買法條件" resetKey={`${currentStock?.ticker ?? 'none'}:${currentDate ?? 'none'}:conditions`}>
           {priceContinuityIssue
             ? <div role="alert" className="rounded border border-amber-500/35 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-100">近期價格序列在 {priceContinuityIssue.date} 出現 {(priceContinuityIssue.changeRatio * 100).toFixed(1)}% 斷層，可能是股票分割、面額變更或未還原公司行動。六條件暫停判讀，避免均線與型態產生假訊號。</div>
             : showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch wConds={wConds} xConds={xConds} yConds={yConds} chipTables={chipTables} />}
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
-        <SectionBoundary section="訊號分析">
+        <SectionBoundary section="訊號分析" resetKey={`${currentStock?.ticker ?? 'none'}:${currentDate ?? 'none'}:signals`}>
           {priceContinuityIssue
             ? <div role="alert" className="rounded border border-amber-500/35 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-100">技術訊號已暫停：{priceContinuityIssue.date} 的價格斷層會污染 MA、K 線型態與趨勢。待資料完成還原或斷層離開近期技術視窗後再判讀。</div>
             : showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} catchTrigger={sanseCatchTrigger} /> : <SignalSummaryCard />}
@@ -962,7 +962,7 @@ function HomePage() {
       )}
       {sideTab === 'chip' && (
         currentStock ? (
-          <SectionBoundary section="籌碼分析">
+          <SectionBoundary section="籌碼分析" resetKey={`${currentStock.ticker}:chip`}>
             {isCnTicker
               ? <CnChipPanel symbol={currentStock.ticker} />
               : (
@@ -992,7 +992,7 @@ function HomePage() {
       )}
       {sideTab === 'fundamental' && (
         currentStock ? (
-          <SectionBoundary section="基本面分析">
+          <SectionBoundary section="基本面分析" resetKey={`${currentStock.ticker}:fundamental`}>
             {isCnTicker
               ? <CnFundamentalPanel symbol={currentStock.ticker} />
               : (
@@ -1418,10 +1418,10 @@ function HomePage() {
                       ? 'text-foreground border-b-2 border-emerald-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
-                  title="ETF 追蹤：績效排行／持股異動／共識買榜／被納入後表現"
+                  title="台股 ETF 追蹤：績效排行／持股異動／共識買榜／被納入後表現"
                 >
                   <LineChart className="size-4" aria-hidden="true" />
-                  <span>ETF</span>
+                  <span>台股 ETF</span>
                 </button>
                 <div className="flex-1" />
                 <button onClick={() => setScannerOpen(false)} aria-label="收起研究面板"
