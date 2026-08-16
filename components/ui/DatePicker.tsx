@@ -19,7 +19,7 @@
 
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { fmtDateLabelTw } from '@/lib/dateDefaults';
+import { fmtDateLabelTw, newestDatesIncludingSelection } from '@/lib/dateDefaults';
 
 export interface DateMeta {
   /** hover tooltip 顯示的檔數（"100 檔"），undefined 不顯示 */
@@ -46,6 +46,8 @@ export interface DatePickerProps {
   cols?: number;
   /** 最多顯示幾個 pill，預設 22 */
   limit?: number;
+  /** 日期列的無障礙名稱；同頁有多列日期時可覆寫 */
+  ariaLabel?: string;
 }
 
 /**
@@ -81,8 +83,9 @@ export function DatePicker({
   disabled,
   cols = 11,
   limit = 22,
+  ariaLabel = '日期選擇',
 }: DatePickerProps) {
-  // 純 client-side 算 date 列表，避開 SSR/client `new Date()` hydration mismatch
+  // 純 client-side 算 date 列表，避開 SSR/client `new Date()` hydration mismatch。
   const [list, setList] = useState<string[]>([]);
   useEffect(() => {
     // anchor 用 max(today, value) — 避免 value 落在過去（如 4/7）時整條 strip 跟著
@@ -94,17 +97,8 @@ export function DatePicker({
     const raw = dates && dates.length > 0
       ? [...dates]
       : lastNDays(limit, anchor as string);
-    const dedup = raw
-      .filter((d, i, arr) => arr.indexOf(d) === i)
-      .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
-      .slice(0, limit);
-    // 若 value 落在 strip 外（如 value=4/7、strip 為 5/24-5/03），保留 value
-    // 在最前面，user 可以清楚看到目前選的是 strip 外的日期
-    if (value && !dedup.includes(value)) {
-      dedup.unshift(value);
-      if (dedup.length > limit) dedup.length = limit;
-    }
-    setList(dedup);
+    // value 落在最近日期範圍外時仍保留，但維持新 → 舊，不把舊日期插到最左邊。
+    setList(newestDatesIncludingSelection(raw, value, limit));
   }, [dates, value, limit]);
 
   const isMd = size === 'md';
@@ -128,6 +122,8 @@ export function DatePicker({
 
   return (
     <div
+      role="group"
+      aria-label={ariaLabel}
       className={cn('grid gap-1', gridColsCls, className)}
       style={maxWidth ? { maxWidth } : undefined}
     >
@@ -145,11 +141,14 @@ export function DatePicker({
             type="button"
             disabled={disabled}
             onClick={() => onChange(d)}
+            aria-label={`查看 ${fmtDateLabelTw(d)}`}
+            aria-pressed={isActive}
             title={titleParts.join('｜')}
             className={cn(
+              'min-h-8 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400',
               pillBase,
               variantCls,
-              disabled && 'opacity-50 cursor-not-allowed',
+              disabled && 'cursor-not-allowed opacity-50',
             )}
           >
             {d.slice(5)}

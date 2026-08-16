@@ -50,3 +50,28 @@ export function fmtDateLabelTw(ymd: string): string {
     return ymd;
   }
 }
+
+/**
+ * 日期導覽統一規則：去重後由新到舊。
+ *
+ * 首頁策略掃描、YouTube／券商報告與籌碼週次都使用同一閱讀方向：
+ * 左上（或第一列）永遠是最新日期，避免同一畫面切換區塊後時間方向反轉。
+ */
+export function newestDatesFirst(dates: string[], limit = Number.POSITIVE_INFINITY): string[] {
+  return Array.from(new Set(dates))
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, limit);
+}
+
+/**
+ * 日期列需保留目前選取值時，仍維持新 → 舊順序。
+ * 若選取值早於最近 N 筆，就顯示「最近 N-1 筆 + 選取值」，選取值留在最右／最後。
+ */
+export function newestDatesIncludingSelection(dates: string[], selected: string, limit: number): string[] {
+  const ordered = newestDatesFirst(selected ? [...dates, selected] : dates);
+  if (ordered.length <= limit) return ordered;
+
+  const visible = ordered.slice(0, limit);
+  if (!selected || visible.includes(selected)) return visible;
+  return [...ordered.slice(0, Math.max(0, limit - 1)), selected];
+}

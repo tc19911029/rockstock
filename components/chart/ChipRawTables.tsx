@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InstDay, TdccDay } from '@/lib/chips/types';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 type BrokerPt = { date: string; netDifference: number };
 type InstPt = { date: string } & InstDay;
@@ -291,34 +292,37 @@ function buildDist(last: TdccPt, prev: TdccPt | null) {
 }
 
 function HolderDistTable({ tdcc, cursorDate }: { tdcc: TdccPt[]; cursorDate: string | null }) {
-  // 可選週次（升冪，≤ 游標日 — 不偷看未來）
+  // 計算仍維持升冪，方便取得前一週；日期導覽交給 DatePicker 統一顯示為最新在前。
+  // ≤ 游標日，避免走圖回看時偷看未來資料。
   const weeks = useMemo(() => {
     const sorted = tdcc.slice().sort((a, b) => a.date.localeCompare(b.date));
     return cursorDate ? sorted.filter(r => r.date <= cursorDate) : sorted;
   }, [tdcc, cursorDate]);
-  const [picked, setPicked] = useState<string | null>(null);
+  // 選取週次綁定目前 tdcc 資料陣列；切換股票後自動回到該股最新一週，
+  // 不把上一檔股票手動選過的舊週次帶過來。
+  const [selection, setSelection] = useState<{ source: TdccPt[]; date: string } | null>(null);
+  const picked = selection?.source === tdcc ? selection.date : null;
   if (!weeks.length) return null;
   // 預設選最新一週；picked 若不在可選範圍（游標退到更早）→ 退回最新
   const selIdx = (() => { const i = picked ? weeks.findIndex(w => w.date === picked) : -1; return i >= 0 ? i : weeks.length - 1; })();
   const data = buildDist(weeks[selIdx], weeks[selIdx - 1] ?? null);
-  const tabWeeks = weeks.slice(-8); // 最近 8 週可一鍵切換；更早用走圖游標退
+  const tabWeekDates = weeks.slice(-8).map(w => w.date); // DatePicker 會統一排成新 → 舊
 
   return (
     <div className="px-2 pt-1 pb-2">
-      <div className="mb-1 px-1">
+      <div className="mb-1 flex items-center justify-between gap-2 px-1">
         <span className="text-[11px] font-semibold text-foreground/80">集保持股分布</span>
+        <span className="shrink-0 font-mono text-[9px] text-muted-foreground/60">目前 {data.date} · 日期新→舊</span>
       </div>
-      <div className="flex flex-wrap justify-start gap-1 mb-1 px-1">
-        {tabWeeks.map(w => {
-          const on = w.date === data.date;
-          return (
-            <button key={w.date} type="button" aria-label={`查看 ${w.date} 集保持股分布`} aria-pressed={on} onClick={() => setPicked(w.date)}
-              className={`min-h-8 px-1.5 py-1 rounded text-[9px] font-mono border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${on ? 'bg-primary/20 border-primary/60 text-foreground' : 'bg-card border-border/50 text-muted-foreground/70 hover:border-border'}`}>
-              {w.date.slice(5)}
-            </button>
-          );
-        })}
-      </div>
+      <DatePicker
+        value={data.date}
+        onChange={(date) => setSelection({ source: tdcc, date })}
+        dates={tabWeekDates}
+        size="sm"
+        limit={8}
+        ariaLabel="集保持股分布週次"
+        className="mb-1 px-1"
+      />
       <div className={wrapCls}>
         <table className={tblCls}>
           <colgroup>
