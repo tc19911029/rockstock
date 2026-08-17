@@ -6,7 +6,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { parseVtt } from '@/lib/youtube/transcript';
 import { gradeTranscript } from '@/lib/youtube/transcriptQuality';
-import { beginTranscription, endTranscription } from '@/lib/youtube/transcriptionLock';
+import { withTranscriptionLock } from '@/lib/youtube/transcriptionLock';
 import type { CnMediaTranscript, CnMediaVideo } from './types';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || path.join(homedir(), '.local', 'bin', 'ffmpeg');
@@ -65,6 +65,10 @@ async function runProcess(
 }
 
 export async function transcribeCnMediaVideo(video: CnMediaVideo): Promise<CnMediaTranscript> {
+  return withTranscriptionLock(() => transcribeCnMediaVideoUnsafe(video));
+}
+
+async function transcribeCnMediaVideoUnsafe(video: CnMediaVideo): Promise<CnMediaTranscript> {
   const fetchedAt = new Date().toISOString();
   if (!video.media_url) {
     return failed(video, fetchedAt, 'missing media_url');
@@ -74,7 +78,6 @@ export async function transcribeCnMediaVideo(video: CnMediaVideo): Promise<CnMed
   const token = randomBytes(4).toString('hex');
   const audioPath = path.join(work, `${token}.m4a`);
   const vttPath = path.join(work, `${token}.vtt`);
-  beginTranscription();
   try {
     const inputHeaders = video.platform === 'bilibili'
       ? ['-user_agent', BILIBILI_USER_AGENT, '-headers', 'Referer: https://www.bilibili.com/\r\n']
@@ -129,7 +132,6 @@ export async function transcribeCnMediaVideo(video: CnMediaVideo): Promise<CnMed
   } catch (error) {
     return failed(video, fetchedAt, (error as Error).message);
   } finally {
-    endTranscription();
     await fs.rm(work, { recursive: true, force: true }).catch(() => undefined);
   }
 }

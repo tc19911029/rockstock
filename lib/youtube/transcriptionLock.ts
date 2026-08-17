@@ -10,10 +10,11 @@
  * 也整支跑完 829 句）。修法=Whisper 轉錄期間，讓 local-cron 的記憶體重活「讓路」跳過該輪。
  *
  * 兩邊共用同一份計數（同一個 next-server process 內的 module singleton）：
- *   - lib/youtube/whisper.ts：transcribeViaWhisper 進出時 begin/end
+ *   - 台股與陸股轉錄：透過 withTranscriptionLock 進出時 begin/end
  *   - instrumentation.ts：callRoute 對重活 label 檢查 isTranscriptionActive() → 跳過
  */
 let active = 0;
+let transcriptionQueue: Promise<void> = Promise.resolve();
 
 export function beginTranscription(): void {
   active += 1;
@@ -25,4 +26,24 @@ export function endTranscription(): void {
 
 export function isTranscriptionActive(): boolean {
   return active > 0;
+}
+
+/**
+ * 台股與陸股共用的 Whisper 互斥鎖。
+ *
+ * 兩條管線都在同一個 next-server process 內執行；共用佇列可避免各自
+ * 序列化成功、彼此卻仍同時載入模型而造成記憶體尖峰。
+ */
+export async function withTranscriptionLock<T>(work: () => Promise<T>): Promise<T> {
+  const previous = transcriptionQueue;
+  let release!: () => void;
+  transcriptionQueue = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  beginTranscription();
+  try {
+    return await work();
+  } finally {
+    endTranscription();
+    release();
+  }
 }

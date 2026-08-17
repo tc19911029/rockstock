@@ -24,7 +24,7 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { ytdlpProxyArgs } from './ytdlp';
-import { beginTranscription, endTranscription } from './transcriptionLock';
+import { withTranscriptionLock } from './transcriptionLock';
 
 const DEFAULT_YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 const DEFAULT_PYTHON = process.env.PYTHON_BIN || 'python3';
@@ -128,32 +128,14 @@ async function spawnAwait(
 
 // ── Mutex: 全程序內最多 1 個 Whisper instance ─────────────────────
 // 防 OOM：每個 Whisper 載 1.5 GB model + 500 MB audio buffer，N 並行直接爆系統記憶體
-let whisperLock: Promise<void> = Promise.resolve();
-async function acquireWhisperLock(): Promise<() => void> {
-  const prev = whisperLock;
-  let release!: () => void;
-  whisperLock = new Promise<void>((resolve) => { release = resolve; });
-  await prev;
-  return release;
-}
-
 /**
  * 對 video URL 跑「下載音訊 → Whisper 轉錄」，產出 VTT 檔到 work dir。
  * 不負責 parse VTT — 把 path 回給 caller，由 transcript.ts 的 parseVtt 處理。
  *
- * 受全程序 mutex 保護：同時只跑 1 個。多 caller 自動排隊。
+ * 受台股／陸股共用 mutex 保護：同時只跑 1 個。多 caller 自動排隊。
  */
 export async function transcribeViaWhisper(opts: WhisperOptions): Promise<WhisperResult> {
-  const release = await acquireWhisperLock();
-  // 轉錄期間標記 active → instrumentation.ts 的記憶體重活 cron 讓路，避免 jetsam 砍 Whisper
-  // 子程序（見 transcriptionLock.ts root-cause）。標在 mutex 內，整段下載+轉錄都算 active。
-  beginTranscription();
-  try {
-    return await transcribeViaWhisperUnsafe(opts);
-  } finally {
-    endTranscription();
-    release();
-  }
+  return withTranscriptionLock(() => transcribeViaWhisperUnsafe(opts));
 }
 
 async function transcribeViaWhisperUnsafe(opts: WhisperOptions): Promise<WhisperResult> {

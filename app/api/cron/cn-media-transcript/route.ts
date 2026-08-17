@@ -22,9 +22,12 @@ async function handle(request: NextRequest) {
   const date = request.nextUrl.searchParams.get('date') || todayYmdShanghai();
   const force = request.nextUrl.searchParams.get('force') === '1';
   const sourceId = request.nextUrl.searchParams.get('source_id');
+  const videoId = request.nextUrl.searchParams.get('video_id');
   if (!validYmd(date)) return apiError('date must be YYYY-MM-DD', 400);
 
-  const videos = (await loadCnMediaVideos(date)).filter(video => !sourceId || video.source_id === sourceId);
+  const videos = (await loadCnMediaVideos(date)).filter(video =>
+    (!sourceId || video.source_id === sourceId)
+    && (!videoId || video.video_id === videoId));
   const results = [];
   for (const video of videos) {
     const existing = await loadCnMediaTranscript(date, video.video_id);
