@@ -606,6 +606,8 @@ export type SessionType = 'intraday' | 'post_close';
 
 export interface ScanSession {
   id: string;
+  /** 產生這份 daily session 的策略；避免主掃描頁誤用另一策略的同日快取。 */
+  strategyId?: string;
   market: MarketId;
   date: string;
   direction?: ScanDirection;

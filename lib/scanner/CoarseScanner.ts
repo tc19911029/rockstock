@@ -61,6 +61,8 @@ export interface CoarseScanOptions {
   minPrice?: number;
   /** 最高價格（排除超高價股），預設 Infinity */
   maxPrice?: number;
+  /** 型態策略有自己的結構條件；粗掃不可用趨勢/漲幅/量比先誤殺。 */
+  bypassDirectionalFilters?: boolean;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ export function coarseScan(
     minVolumeRatio = 0.5,
     minPrice = snapshot.market === 'TW' ? 10 : 3,
     maxPrice = Infinity,
+    bypassDirectionalFilters = false,
   } = options;
 
   const candidates: CoarseCandidate[] = [];
@@ -110,11 +113,13 @@ export function coarseScan(
 
     // ── 基本過濾 ──
     if (q.close <= 0) continue;
-    if (q.close < minPrice || q.close > maxPrice) continue;
+    if (!bypassDirectionalFilters && (q.close < minPrice || q.close > maxPrice)) continue;
 
     // ── 漲跌幅過濾 ──
-    if (minChangePercent !== undefined && q.changePercent < minChangePercent) continue;
-    if (maxChangePercent !== undefined && q.changePercent > maxChangePercent) continue;
+    if (!bypassDirectionalFilters) {
+      if (minChangePercent !== undefined && q.changePercent < minChangePercent) continue;
+      if (maxChangePercent !== undefined && q.changePercent > maxChangePercent) continue;
+    }
 
     // ── 計算即時 MA ──
     const entry = maData[q.symbol];
@@ -132,7 +137,25 @@ export function coarseScan(
     const volumeRatio = avgVol5 > 0 ? q.volume / avgVol5 : 0;
 
     // ── 量比過濾 ──
-    if (volumeRatio < minVolumeRatio && avgVol5 > 0) continue;
+    if (!bypassDirectionalFilters && volumeRatio < minVolumeRatio && avgVol5 > 0) continue;
+
+    if (bypassDirectionalFilters) {
+      candidates.push({
+        symbol: q.symbol,
+        name: q.name,
+        market: snapshot.market,
+        close: q.close,
+        changePercent: q.changePercent,
+        volume: q.volume,
+        ma5: Math.round(ma5 * 100) / 100,
+        ma10: Math.round(ma10 * 100) / 100,
+        ma20: Math.round(ma20 * 100) / 100,
+        volumeRatio: Math.round(volumeRatio * 100) / 100,
+        coarseScore: 0,
+        coarseReasons: ['策略專屬全市場精掃'],
+      });
+      continue;
+    }
 
     // ── 做多粗篩條件 ──
     if (direction === 'long') {

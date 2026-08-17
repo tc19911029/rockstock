@@ -12,6 +12,7 @@ import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
 import { computeShadowLedger, type ShadowResult } from '@/lib/portfolio/shadowLedger';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
+import { resolveHoldingReferencePrice } from '@/lib/portfolio/holdingReferencePrice';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,14 +37,16 @@ export async function GET(req: NextRequest) {
       }
       candles = await injectL2TodayIfNeeded(candles, h.symbol, 'TW', today);
       if (!candles || candles.length === 0) continue;
+      const reference = resolveHoldingReferencePrice(h, candles);
+      if (reference.price == null) continue;
       const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
       const entryKbar = h.ui?.entryKbar as { high?: number } | undefined;
       const r = computeShadowLedger({
         symbol: h.symbol,
         entryDate: h.entryDate,
-        entryPrice: h.entryPrice,
+        entryPrice: reference.price,
         shares: h.shares,
-        stopLoss: h.stopLoss ?? h.entryPrice * 0.93,
+        stopLoss: h.stopLoss ?? reference.price * 0.93,
         candles,
         positionSide,
         entryHigh: typeof entryKbar?.high === 'number' ? entryKbar.high : undefined,

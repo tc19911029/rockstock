@@ -48,6 +48,7 @@ import { useSettingsStore } from './settingsStore';
 import { AI_CONFIDENCE_HIGH, AI_CONFIDENCE_MEDIUM } from '@/lib/analysis/bookThresholds';
 import { REVERSAL_OR_SYSTEM_SET, SMARTMONEY_TRACK_SET, INSTDIP_TRACK_SET, INSTSTEAL_TRACK_SET } from '@/lib/scanner/buyMethodTracks';
 import { isLegacyMechanicalDiscontinuity } from '@/lib/scanner/priceContinuityGuard';
+import { passesMtf } from '@/lib/scanner/mtfPass';
 
 // Module-level abort controller for scan operations
 let scanAbortController: AbortController | null = null;
@@ -403,9 +404,7 @@ export const useBacktestStore = create<BacktestState>()(
           // 寬容 `== null || === true` 是刻意的：UI 即時 toggle 不可把舊 session 整批清空。
           // lib/selection/applyPanelFilter.ts 的 oracle 版用嚴格 `=== true`（null 不該出現），
           // 兩處語意差異是設計而非 bug，改任一處前先看對方註解 + CLAUDE.md #10。
-          const filtered = scanResults.filter(r =>
-            r.mtfWeeklyPass == null || r.mtfWeeklyPass === true,
-          );
+          const filtered = scanResults.filter(r => passesMtf(r, true));
           const filteredSymbols = new Set(filtered.map(r => r.symbol));
           const filteredPerf = performance.filter(p => filteredSymbols.has(p.symbol));
 
@@ -734,9 +733,7 @@ export const useBacktestStore = create<BacktestState>()(
         if (useMultiTimeframe && combined.length > 0) {
           const cacheKey = `_unfilteredResults:${scanDate}`;
           get().scanCache.set(cacheKey, { scanResults: combined, performance: [], marketTrend });
-          const filtered = combined.filter(r =>
-            r.mtfWeeklyPass === true,
-          );
+          const filtered = combined.filter(r => passesMtf(r));
           set({ scanResults: filtered, scanningCount: `${filtered.length} 檔符合（MTF）` });
         }
 
@@ -1095,7 +1092,7 @@ export const useBacktestStore = create<BacktestState>()(
                   let displayPerf = performance;
                   if (useMultiTimeframe) {
                     const filteredSymbols = new Set(cached.scanResults.filter(r =>
-                      r.mtfWeeklyPass === true,
+                      passesMtf(r),
                     ).map(r => r.symbol));
                     displayPerf = performance.filter(p => filteredSymbols.has(p.symbol));
                   }
@@ -1172,9 +1169,7 @@ export const useBacktestStore = create<BacktestState>()(
           if (useMultiTimeframe) {
             const cacheKey = `_unfilteredResults:${date}`;
             scanCache.set(cacheKey, { scanResults, performance: [], marketTrend: sessionMarketTrend as TrendState | null });
-            displayResults = scanResults.filter(r =>
-              r.mtfWeeklyPass === true,
-            );
+            displayResults = scanResults.filter(r => passesMtf(r));
           }
 
           set({

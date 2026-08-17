@@ -15,6 +15,7 @@
  * 本函式只負責面板 UI 層追加的過濾 + 排序。改動前請先閱讀 `CLAUDE.md` 第 10 條。
  */
 import type { StockScanResult } from '@/lib/scanner/types';
+import { passesMtf } from '@/lib/scanner/mtfPass';
 
 export interface PanelFilterOptions {
   /** 是否開啟 MTF 長線保護（等同 App 面板「長線保護短線」toggle） */
@@ -58,7 +59,7 @@ export function applyPanelFilter(
   //   - backtestStore（UI 即時 toggle）：寬容，避免舊 session 被整批清空
   // 改動任一處前先讀 CLAUDE.md 第 10 條 + 對方註解。
   if (options.useMultiTimeframe) {
-    filtered = filtered.filter(r => r.mtfPass ?? (r.mtfWeeklyPass === true));
+    filtered = filtered.filter(r => passesMtf(r));
   }
 
   filtered.sort(panelSortCompare);

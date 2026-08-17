@@ -7,7 +7,7 @@ import { sendNtfy } from '@/lib/notify/ntfy';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { empiricalHeaviness, tierEmoji } from '@/lib/sell/sellHeavinessRank';
 import { loadProfiles } from '@/lib/portfolio/profiles';
-import { canPushPortfolioAction } from '@/lib/portfolio/notifyPolicy';
+import { canPushPortfolioAction, formatPortfolioProfitPct } from '@/lib/portfolio/notifyPolicy';
 import type { DailyActionItem, DailyActionResponse } from '@/app/api/portfolio/daily-action/route';
 
 export const runtime = 'nodejs';
@@ -56,23 +56,34 @@ function priorityOf(action: string): 1 | 2 | 3 | 4 | 5 {
   return 3; // watch_stop
 }
 
+function executionLabel(market: string): string {
+  return market === 'CN' ? '14:55' : '13:25';
+}
+
+function isExecutionWindow(market: string, hm: string): boolean {
+  return market === 'CN'
+    ? hm >= '14:48' && hm <= '15:00'
+    : hm >= '13:18' && hm <= '13:30';
+}
+
 function buildMessage(it: DailyActionItem, execWindow: boolean, profileName: string): { title: string; message: string } {
   const isShort = it.positionSide === 'short';
   const sideTag = isShort ? '🔻空 ' : '';
-  const head = execWindow ? '⏰ 13:25 執行窗 — ' : '';
+  const execAt = executionLabel(it.market);
+  const head = execWindow ? `⏰ ${execAt} 執行窗 — ` : '';
   const title = `${head}${profileName}｜${sideTag}${it.name} ${it.label}`;
   const lines: string[] = [];
   // 賠少-1：做空把「停損」字樣改成「回補停損」（站上進場黑K高點回補）。
   const stopLabel = isShort ? '回補停損' : '停損';
-  lines.push(`${it.symbol} 現價 ${it.todayClose ?? '?'}｜報酬 ${it.profitPct != null ? it.profitPct.toFixed(1) + '%' : '?'}｜${stopLabel} ${it.stopLoss}`);
+  lines.push(`${it.symbol} 現價 ${it.todayClose ?? '?'}｜報酬 ${formatPortfolioProfitPct(it.profitPct)}｜${stopLabel} ${it.stopLoss}`);
   for (const s of it.signals ?? []) {
     const h = empiricalHeaviness(s.type);
     lines.push(`${tierEmoji(h.tier)} ${s.label}${h.tier === 'heavy' ? '（實證重訊）' : h.tier === 'light' ? '（落後指標，參考）' : ''}`);
   }
   if (execWindow) {
-    lines.push('朱書時點：現在看 13:20 盤勢，13:25 掛市價單。');
+    lines.push(`課程尾盤時點：現在複核，${execAt} 依市場流動性執行。`);
   } else {
-    lines.push('書本規則：今日確認訊號 → 13:20 再看一次、13:25 掛市價（盤中假突破不算）。');
+    lines.push(`課程規則：盤中觸價風控即時提醒；收盤型訊號在尾盤再確認，${execAt} 執行（盤中假突破不算）。`);
   }
   return { title, message: lines.join('\n') };
 }
@@ -85,11 +96,11 @@ export async function GET(req: NextRequest) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
   const hm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
 
-  // 盤外廉價 no-op：交易日 09:05-13:35 才工作（09:05 起，避開開盤第一根雜訊）
-  if (!isTradingDay(today, 'TW') || hm < '09:05' || hm > '13:35') {
-    return apiOk({ skipped: true, reason: 'outside TW session window' });
+  // 涵蓋 TW 收盤確認與 CN 尾盤/收盤確認；各持倉再按自己的市場判斷。
+  const anyMarketOpenToday = isTradingDay(today, 'TW') || isTradingDay(today, 'CN');
+  if (!anyMarketOpenToday || hm < '09:05' || hm > '15:20') {
+    return apiOk({ skipped: true, reason: 'outside portfolio notification window' });
   }
-  const execWindow = hm >= '13:18' && hm <= '13:30';
 
   const proto = req.headers.get('x-forwarded-proto') ?? 'http';
   const host = req.headers.get('host') ?? 'localhost:3000';
@@ -123,11 +134,13 @@ export async function GET(req: NextRequest) {
     const items = r.data.items ?? [];
     checked += items.length;
     for (const it of items) {
-      if (!canPushPortfolioAction(it)) {
+      if (!isTradingDay(today, it.market === 'CN' ? 'CN' : 'TW')) continue;
+      const execWindow = isExecutionWindow(it.market, hm);
+      if (!canPushPortfolioAction({ ...it, expectedDate: today }, { executionWindow: execWindow })) {
         if (it.intradayProvisional === true) provisionalSkipped++;
         continue;
       }
-      const phase = execWindow ? 'exec' : 'intraday';
+      const phase = execWindow ? 'exec' : it.intradayProvisional ? 'intraday' : 'confirmed';
       const key = `${r.profile.id}:${it.symbol}:${it.action}:${phase}`;
       if (state.sent[key]) continue;
 
@@ -147,5 +160,5 @@ export async function GET(req: NextRequest) {
     }
   }
   saveState(state);
-  return apiOk({ pushed, execWindow, checked, provisionalSkipped });
+  return apiOk({ pushed, checked, provisionalSkipped, hm });
 }

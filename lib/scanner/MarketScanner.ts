@@ -476,7 +476,7 @@ export abstract class MarketScanner {
       // 但只在 multiTimeframeFilter=true 時才做前置過濾
       let mtfResult: MultiTimeframeResult | undefined;
       try {
-        mtfResult = evaluateMultiTimeframe(candles, thresholds);
+        mtfResult = evaluateMultiTimeframe(candles, thresholds, config.marketId);
       } catch { /* MTF 計算失敗不影響主流程 */ }
       if (thresholds.multiTimeframeFilter && mtfResult && !mtfResult.pass) {
         if (diag) diag.filteredOut++;
@@ -921,7 +921,7 @@ export abstract class MarketScanner {
       // ALWAYS 計算 MTF 分數（支援前端 client-side toggle）
       let mtfResult: MultiTimeframeResult | undefined;
       try {
-        mtfResult = evaluateMultiTimeframe(candles, thresholds);
+        mtfResult = evaluateMultiTimeframe(candles, thresholds, config.marketId);
       } catch { /* MTF 計算失敗不影響主流程 */ }
       if (thresholds.multiTimeframeFilter && mtfResult && !mtfResult.pass) {
         if (diag) diag.filteredOut++;
@@ -1127,6 +1127,7 @@ export abstract class MarketScanner {
     thresholds?: StrategyThresholds,
     rankBy: 'sixConditions' | 'histWinRate' = 'sixConditions',
     savePool = true,
+    direction: 'long' | 'short' = 'long',
   ): Promise<{ results: StockScanResult[]; marketTrend: TrendState; diagnostics: ScanDiagnostics; sessionFreshness: SessionFreshness }> {
     // ── P1A: 移除掃描入口的 ensureFreshCandles ──
     // 掃描路徑已有 fetchCandlesForScan() 做 memory → local → API 三層快取，
@@ -1139,21 +1140,14 @@ export abstract class MarketScanner {
     const diag = createEmptyDiagnostics();
     diag.totalStocks = stocks.length;
 
-    // 內建型態策略是獨立買法，不得先套 A 六條件。configureStrategy() 讓
-    // 同一個 scanSOP API 依策略型態正確分流，不再讓 strategyType/buyMethod 成為死設定。
-    if (this._activeStrategy?.strategyType === 'kline-pattern' && this._activeStrategy.buyMethod) {
-      const method = normalizeLetter(this._activeStrategy.buyMethod) as BuyMethodLetter;
-      const results = await this.scanBuyMethod(method, stocks, asOfDate, {
-        skipStep1Gate: true,
-        thresholds: th,
-      });
-      const sorted = this.rankCandidates(results, rankBy);
+    const finalizeStandaloneScan = async (results: StockScanResult[], preserveOrder = false) => {
+      const sorted = preserveOrder ? results : this.rankCandidates(results, rankBy);
       diag.processedCount = stocks.length;
       diag.filteredOut = Math.max(0, stocks.length - sorted.length);
       diag.coverageRate = 100;
       diag.dataStatus = 'complete';
       let marketTrend: TrendState = '盤整';
-      try { marketTrend = await this.getMarketTrend(asOfDate); } catch { /* 顯示用，失敗不擋型態掃描 */ }
+      try { marketTrend = await this.getMarketTrend(asOfDate); } catch { /* 顯示用，不阻擋獨立策略 */ }
       const freshnessItems = sorted.filter(result => result.dataFreshness);
       const sessionFreshness: SessionFreshness = {
         avgStaleDays: freshnessItems.length > 0
@@ -1166,6 +1160,36 @@ export abstract class MarketScanner {
         dataStatus: diag.dataStatus,
       };
       return { results: sorted, marketTrend, diagnostics: diag, sessionFreshness };
+    };
+
+    // 內建型態策略是獨立買法，不得先套 A 六條件。configureStrategy() 讓
+    // 同一個 scanSOP API 依策略型態正確分流，不再讓 strategyType/buyMethod 成為死設定。
+    if (this._activeStrategy?.strategyType === 'kline-pattern' && this._activeStrategy.buyMethod) {
+      const method = normalizeLetter(this._activeStrategy.buyMethod) as BuyMethodLetter;
+      const results = await this.scanBuyMethod(method, stocks, asOfDate, {
+        skipStep1Gate: true,
+        thresholds: th,
+      });
+      return finalizeStandaloneScan(results);
+    }
+
+    // R/W/X/Y 是機械排名軌，各自有獨立選股與排序；不可誤走 A 軌六條件，
+    // 也不可在回傳前用六條件分數重新排序，否則 top-N 名次會被破壞。
+    if (this._activeStrategy?.strategyType === 'mechanical-rank' && this._activeStrategy.buyMethod) {
+      const method = this._activeStrategy.buyMethod.toUpperCase();
+      let results: StockScanResult[];
+      if (method === 'R') {
+        results = await this.scanDeviationExtreme(stocks, asOfDate, direction, 10);
+      } else if (method === 'W') {
+        results = await this.scanSmartMoneyDip(stocks, asOfDate, direction, 15);
+      } else if (method === 'X') {
+        results = await this.scanInstDip(stocks, asOfDate, direction, 15);
+      } else if (method === 'Y') {
+        results = await this.scanInstSteal(stocks, asOfDate, direction, 15);
+      } else {
+        throw new Error(`不支援的機械策略買法：${method}`);
+      }
+      return finalizeStandaloneScan(results, true);
     }
 
     let minScore = th.minScore;
@@ -1643,7 +1667,7 @@ export abstract class MarketScanner {
           const trendPosition = detectTrendPosition(candles, lastIdx);
 
           const effectiveThresholds = options.thresholds ?? BASE_THRESHOLDS;
-          const mtfResult = evaluateMultiTimeframe(candles, effectiveThresholds);
+          const mtfResult = evaluateMultiTimeframe(candles, effectiveThresholds, config.marketId);
 
           // 跨策略命中：A 六條件 + 其他 detector
           // 軌道規則（0512 用戶明確）：

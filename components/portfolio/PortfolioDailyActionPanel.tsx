@@ -123,13 +123,18 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
         </div>
         <span
           className={`text-[11px] px-1.5 py-0.5 rounded border font-bold ${cls}`}
-          title={item.signals.map(s => `${s.label}: ${s.detail}`).join('\n') || `成本 ${item.entryPrice}, 停損 ${item.stopLoss}`}
+          title={item.signals.map(s => `${s.label}: ${s.detail}`).join('\n') || `帳務成本 ${item.entryPrice}, 策略參考 ${item.strategyReferencePrice ?? item.entryPrice}, 停損 ${item.stopLoss}`}
         >
           {item.label}
         </span>
         {item.intradayProvisional && item.action !== 'hold' && item.action !== 'no_data' && (
           <span className="text-[9px] px-1 rounded bg-amber-950/50 text-amber-300 border border-amber-800" title="課程鐵律：均線/K線出場要「收盤確認」。現在是盤中半根K，尾盤可能拉回 — 13:20 再看一次收盤價確認（固定停損觸價除外）。">
             盤中預警·收盤確認
+          </span>
+        )}
+        {item.entryPrice === 0 && item.strategyReferencePrice != null && (
+          <span className="text-[9px] px-1 rounded bg-violet-950/50 text-violet-300 border border-violet-800" title="帳務成本維持 0；技術停損與報酬判定使用取得日附近市場價，不會改寫持倉成本。">
+            零成本·策略參考 {item.strategyReferencePrice.toFixed(2)}
           </span>
         )}
         <div className="flex-1" />

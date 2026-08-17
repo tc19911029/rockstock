@@ -15,8 +15,43 @@ const ACTIONABLE = new Set([
 export interface PortfolioNotifyCandidate {
   action: string;
   intradayProvisional?: boolean;
+  notificationBasis?: 'price' | 'close';
+  asOfDate?: string | null;
+  expectedDate?: string;
 }
 
-export function canPushPortfolioAction(item: PortfolioNotifyCandidate): boolean {
-  return ACTIONABLE.has(item.action) && item.intradayProvisional !== true;
+export interface PortfolioNotifyContext {
+  executionWindow?: boolean;
+}
+
+const INTRADAY_PRICE_SIGNAL_TYPES = new Set([
+  'absolute_stop',
+  'hard_stop_10pct',
+  'entry_kline_low_break',
+  'short_stop_cover',
+  'near_stop',
+  'short_near_cover_stop',
+  'loss_over_5pct',
+  'day_drop_over_5pct',
+]);
+
+export function classifyPortfolioNotificationBasis(
+  signals: ReadonlyArray<{ type: string }>,
+): 'price' | 'close' {
+  return signals.some(signal => INTRADAY_PRICE_SIGNAL_TYPES.has(signal.type)) ? 'price' : 'close';
+}
+
+export function formatPortfolioProfitPct(value: number | null | undefined): string {
+  return value != null && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '?';
+}
+
+export function canPushPortfolioAction(
+  item: PortfolioNotifyCandidate,
+  context: PortfolioNotifyContext = {},
+): boolean {
+  if (!ACTIONABLE.has(item.action)) return false;
+  if (item.expectedDate && item.asOfDate !== item.expectedDate) return false;
+  if (item.intradayProvisional !== true) return true;
+  if (item.notificationBasis === 'price') return true;
+  return context.executionWindow === true;
 }

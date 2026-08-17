@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { MarketId, MtfMode } from '@/lib/scanner/types';
 import { listScanDates, loadScanSession } from '@/lib/storage/scanStorage';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { passesMtf } from '@/lib/scanner/mtfPass';
 
 export const runtime = 'nodejs';
 
@@ -11,7 +12,17 @@ const querySchema = z.object({
   direction: z.enum(['long', 'short']).default('long'),
   mtf: z.enum(['daily', 'daily30', 'mtf', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'V', 'W', 'X', 'Y']).optional(),
   date: z.string().optional(),
+  strategyId: z.string().optional(),
 });
+
+type StrategyTaggedSession = { strategyId?: string };
+
+function sessionMatchesStrategy(session: StrategyTaggedSession, strategyId?: string): boolean {
+  if (!strategyId) return true;
+  if (session.strategyId) return session.strategyId === strategyId;
+  // 舊 session 沒 metadata；歷史 daily 檔只允許純書本策略沿用。
+  return strategyId === 'zhu-pure-book';
+}
 
 export async function GET(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
@@ -20,6 +31,7 @@ export async function GET(req: NextRequest) {
   const direction = parsed.data.direction;
   const mtfMode = parsed.data.mtf as MtfMode | undefined;
   const dateParam = parsed.data.date;
+  const strategyId = parsed.data.strategyId;
 
   // 2026-04-20 路由分流：
   //   - mtf=daily (default) → A 六條件 session
@@ -35,9 +47,11 @@ export async function GET(req: NextRequest) {
         return apiOk({ sessions: session ? [session] : [] });
       }
       const session = await loadScanSession(market, dateParam, direction, 'daily');
-      if (!session) return apiOk({ sessions: [] });
+      if (!session || !sessionMatchesStrategy(session as StrategyTaggedSession, strategyId)) {
+        return apiOk({ sessions: [] });
+      }
       if (wantMtf) {
-        const filtered = session.results.filter(r => r.mtfWeeklyPass === true);
+        const filtered = session.results.filter(r => passesMtf(r));
         return apiOk({ sessions: [{ ...session, results: filtered, resultCount: filtered.length, multiTimeframeEnabled: true }] });
       }
       return apiOk({ sessions: [session] });
@@ -59,7 +73,7 @@ export async function GET(req: NextRequest) {
 
     // Return all available dates — 統一讀 daily 清單，mtf 開時 resultCount 需重算
     const dates = await listScanDates(market, direction, 'daily');
-    const sessions = await Promise.all(dates.map(async d => {
+    const candidateSessions = await Promise.all(dates.map(async d => {
       const base = {
         id: `${d.market}-${d.direction ?? 'long'}-${wantMtf ? 'mtf' : 'daily'}-${d.date}`,
         market: d.market,
@@ -69,12 +83,13 @@ export async function GET(req: NextRequest) {
         scanTime: d.scanTime,
         resultCount: d.resultCount,
       };
-      if (!wantMtf) return base;
       const full = await loadScanSession(market, d.date, direction, 'daily');
-      if (!full) return { ...base, resultCount: 0 };
-      const filtered = full.results.filter(r => r.mtfWeeklyPass === true);
+      if (!full || !sessionMatchesStrategy(full, strategyId)) return null;
+      if (!wantMtf) return { ...base, resultCount: full.resultCount };
+      const filtered = full.results.filter(r => passesMtf(r));
       return { ...base, resultCount: filtered.length };
     }));
+    const sessions = candidateSessions.filter(session => session !== null);
 
     return apiOk({ sessions });
   } catch (err: unknown) {

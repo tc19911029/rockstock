@@ -26,6 +26,8 @@ import { detectMarketRegime, thresholdsForRegime, type RegimeDetectResult } from
 import { todayYmdTaipei } from '@/lib/youtube/classify';
 import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
 import type { OperationMode } from '@/lib/sell/v12Operation';
+import { classifyPortfolioNotificationBasis } from '@/lib/portfolio/notifyPolicy';
+import { resolveHoldingReferencePrice } from '@/lib/portfolio/holdingReferencePrice';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +38,8 @@ export interface DailyActionItem {
   market: string;
   entryDate: string;
   entryPrice: number;
+  /** 技術規則使用的正參考價；帳務 entryPrice=0（配股）時與帳務成本分離。 */
+  strategyReferencePrice?: number | null;
   stopLoss: number;
   shares: number;
   /** 賠少-1：部位方向（'short' = 做空回補語意）；缺省 = 'long' 做多。 */
@@ -58,6 +62,8 @@ export interface DailyActionItem {
    * 收盤級規則（均線/K線出場）只能當「盤中預警」，收盤才確認。true = 盤中暫定。
    */
   intradayProvisional?: boolean;
+  /** price=盤中觸價可即時提醒；close=只在尾盤執行窗或收盤後正式提醒。 */
+  notificationBasis?: 'price' | 'close';
 }
 
 export interface DailyActionResponse {
@@ -106,8 +112,8 @@ export async function GET(req: NextRequest) {
       activeHoldings.map(async (h: PortfolioHolding): Promise<DailyActionItem> => {
         const mkt = (h.market === 'CN' ? 'CN' : 'TW') as 'TW' | 'CN';
         const { thresholds } = await regimeFor(mkt);
-        const hasValidEntryPrice = Number.isFinite(h.entryPrice) && h.entryPrice > 0;
-        const stopLoss = h.stopLoss ?? (hasValidEntryPrice ? h.entryPrice * DEFAULT_STOP_LOSS_MULT : 0);
+        const hasAccountingEntryPrice = Number.isFinite(h.entryPrice) && h.entryPrice > 0;
+        const configuredStopLoss = h.stopLoss;
         // 賠少-1：做空 live 風控 — positionSide / 進場黑K最高點皆走 ui blob passthrough。
         // 缺省（既有持倉）= 做多，行為位元不變。
         const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
@@ -119,7 +125,7 @@ export async function GET(req: NextRequest) {
           market: h.market,
           entryDate: h.entryDate,
           entryPrice: h.entryPrice,
-          stopLoss,
+          stopLoss: configuredStopLoss ?? (hasAccountingEntryPrice ? h.entryPrice * DEFAULT_STOP_LOSS_MULT : 0),
           shares: h.shares,
           positionSide,
           operationMode,
@@ -142,19 +148,20 @@ export async function GET(req: NextRequest) {
 
         const lastCandle = candles[candles.length - 1];
         const todayClose = lastCandle.close;
-        if (!hasValidEntryPrice) {
+        const reference = resolveHoldingReferencePrice(h, candles);
+        if (reference.price == null) {
           return {
             ...base,
             todayClose,
             asOfDate: lastCandle.date,
             unrealizedAmount: null,
             action: 'no_data',
-            label: '⚠ 缺績效參考成本',
+            label: '⚠ 缺策略參考價',
             signals: [{
               type: 'invalid_entry_price',
-              label: '持股成本不可用',
+              label: '策略參考價不可用',
               severity: 'high',
-              detail: '此持股的 entryPrice 為 0、負數或非有限值；在補上績效參考成本前，不計算報酬率、停損與操作建議。',
+              detail: '帳務成本不是正數，且找不到明訂策略參考價或取得日附近 K 線；暫不計算停損與操作建議。',
             }],
             profitPct: null,
             suggestedStop: null,
@@ -162,6 +169,8 @@ export async function GET(req: NextRequest) {
             intradayProvisional: false,
           };
         }
+        const strategyReferencePrice = reference.price;
+        const stopLoss = configuredStopLoss ?? strategyReferencePrice * DEFAULT_STOP_LOSS_MULT;
         // 賠少-17：進場買法字母在 ui.triggerSignal（passthrough blob）→ 傳給 engine
         // 判斷是否為逆勢/搶反彈軌（反轉軌 D/F/N/O）以走專屬「翻黑就走」出場。
         const triggerSignal = typeof h.ui?.triggerSignal === 'string' ? h.ui.triggerSignal : undefined;
@@ -175,7 +184,7 @@ export async function GET(req: NextRequest) {
           : candles.find(c => c.date === h.entryDate)?.low;
         const result = evaluateHolding({
           symbol: h.symbol,
-          entryPrice: h.entryPrice,
+          entryPrice: strategyReferencePrice,
           stopLoss,
           candles,
           todayClose,
@@ -280,18 +289,20 @@ export async function GET(req: NextRequest) {
         // 與賠少-16「當日跌幅>5%」（單日）、watch_stop（距停損<3%）基準不同 —— 這是自進場價的累計跌幅。
         const fromEntryAdvisory = (() => {
           if (positionSide !== 'long') return null;
-          const dropFromEntry = (h.entryPrice - todayClose) / h.entryPrice;
+          const dropFromEntry = (strategyReferencePrice - todayClose) / strategyReferencePrice;
           if (dropFromEntry <= 0.05) return null;
           return {
             type: 'ch73_down_5pct_from_entry',
             label: '📗 自買價已跌逾5%（警示股）',
             severity: 'medium' as const,
-            detail: `自進場價 ${h.entryPrice} 跌 ${(dropFromEntry * 100).toFixed(1)}%（今收 ${todayClose.toFixed(2)}）。課程 CH7-3：每日檢視自買價跌幅 > 5% 應列警示股、準備賣出，別放任凹單。`,
+            detail: `自策略參考價 ${strategyReferencePrice} 跌 ${(dropFromEntry * 100).toFixed(1)}%（今收 ${todayClose.toFixed(2)}）。課程 CH7-3：每日檢視自買價跌幅 > 5% 應列警示股、準備賣出，別放任凹單。`,
           };
         })();
         const signals = [...disciplineSignals, ...(ch11ClimbExitAdvisory ? [ch11ClimbExitAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
         return {
           ...base,
+          stopLoss,
+          strategyReferencePrice,
           todayClose,
           asOfDate: lastCandle.date,
           // 賠少-1：做空未實現損益反向（放空後下跌才賺）；做多 / 缺省維持原算式。
@@ -307,6 +318,7 @@ export async function GET(req: NextRequest) {
           nearestTarget: profitTargets?.nearestAbove ?? null,
           // 盤中且今日 bar 已被 L2 半根覆蓋 → 收盤級動作標「盤中預警」
           intradayProvisional: lastCandle.date === today && isIntradayNow(mkt),
+          notificationBasis: classifyPortfolioNotificationBasis(signals),
         };
       }),
     );

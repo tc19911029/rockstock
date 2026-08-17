@@ -24,6 +24,7 @@ import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
 import { detectTrend, findPivots, TrendState } from '@/lib/analysis/trendAnalysis';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,65 @@ export interface MultiTimeframeResult {
 
 // ── Weekly checks ─────────────────────────────────────────────────────────────
 
+type MtfMarket = 'TW' | 'CN';
+
+function addCalendarDays(dateStr: string, days: number): string {
+  const date = new Date(`${dateStr}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function nextTradingDate(dateStr: string, market: MtfMarket): string {
+  let next = addCalendarDays(dateStr, 1);
+  for (let guard = 0; guard < 20; guard++) {
+    if (isTradingDay(next, market)) return next;
+    next = addCalendarDays(next, 1);
+  }
+  return next;
+}
+
+function taipeiClock(now: Date): { date: string; hm: number } {
+  const shifted = new Date(now.getTime() + 8 * 3600_000);
+  return {
+    date: shifted.toISOString().slice(0, 10),
+    hm: shifted.getUTCHours() * 100 + shifted.getUTCMinutes(),
+  };
+}
+
+/**
+ * 最後一根日 K 是否真的結束了所屬週／月。
+ * 用下一個交易日（含市場假日表）判斷週月邊界，再用收盤時間擋掉今日盤中半根 K。
+ */
+export function isHigherTimeframePeriodClosed(
+  lastDailyDate: string | undefined,
+  period: 'weekly' | 'monthly',
+  market: MtfMarket = 'TW',
+  now = new Date(),
+): boolean {
+  if (!lastDailyDate) return false;
+  const clock = taipeiClock(now);
+  if (lastDailyDate > clock.date) return false;
+  const closeHm = market === 'CN' ? 1510 : 1345;
+  if (lastDailyDate === clock.date && clock.hm <= closeHm) return false;
+
+  const next = nextTradingDate(lastDailyDate, market);
+  if (period === 'monthly') return next.slice(0, 7) !== lastDailyDate.slice(0, 7);
+
+  const currentMonday = (() => {
+    const date = new Date(`${lastDailyDate}T12:00:00Z`);
+    const dow = date.getUTCDay();
+    date.setUTCDate(date.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+    return date.toISOString().slice(0, 10);
+  })();
+  const nextMonday = (() => {
+    const date = new Date(`${next}T12:00:00Z`);
+    const dow = date.getUTCDay();
+    date.setUTCDate(date.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+    return date.toISOString().slice(0, 10);
+  })();
+  return nextMonday !== currentMonday;
+}
+
 /**
  * 同時計算兩組資料：4 項保護條件參與 MTF gate；6 項攻擊型態只供觀察。
  * ① 趨勢多頭（頭頭高底底高）
@@ -88,6 +148,7 @@ function checkWeekly(
   thresholds: StrategyThresholds,
   /** 最後一根日 K 的日期；用來判斷最新週是否已收盤完整 */
   lastDailyDate?: string,
+  market: MtfMarket = 'TW',
 ): {
   score: number;
   trend: TrendState;
@@ -97,13 +158,10 @@ function checkWeekly(
   checks: WeeklyChecks;
   protectionChecks: WeeklyProtectionChecks;
 } {
-  // 判斷最新週是否已收盤：最後 daily K 落在週五（含）以後 → 該週已收
-  // 否則最新週 bar 是「進行中」，只有 1-4 天資料，跳到上一週評估
+  // 判斷最新週是否已收盤：只有「週五且該交易日已結束」才使用本週。
+  // 盤中半根 K 一律退回上一個完整週，避免週五上午偷看未完成週線。
   const lastDaily = lastDailyDate ?? weeklyCandles[weeklyCandles.length - 1]?.date;
-  const dow = lastDaily ? new Date(lastDaily + 'T00:00:00').getDay() : 0;
-  // dow: 0=Sun, 1=Mon..5=Fri, 6=Sat
-  // 週五（5）之後 → 本週收盤完成（用 length-1）；否則仍進行中（用 length-2）
-  const isWeekClosed = dow === 0 || dow === 5 || dow === 6;
+  const isWeekClosed = isHigherTimeframePeriodClosed(lastDaily, 'weekly', market);
   const evalIdx = isWeekClosed ? weeklyCandles.length - 1 : weeklyCandles.length - 2;
   if (evalIdx < 20) {
     return {
@@ -243,15 +301,16 @@ function checkWeekly(
 function checkMonthly(
   monthlyCandles: CandleWithIndicators[],
   lastDailyDate?: string,
+  market: MtfMarket = 'TW',
 ): {
   score: number;
   trend: TrendState;
   detail: string;
 } {
-  // 月底（最後 daily 日 ≥ 25）→ 該月已基本收盤完成；否則用上個月
+  // 只有曆月最後一個工作日且交易日已結束才使用當月；不可把 25 日後仍
+  // 有數個交易日的半成品月 K 當成完整月線。
   const lastDaily = lastDailyDate ?? monthlyCandles[monthlyCandles.length - 1]?.date;
-  const dom = lastDaily ? parseInt(lastDaily.slice(8, 10), 10) : 0;
-  const isMonthClosed = dom >= 25;
+  const isMonthClosed = isHigherTimeframePeriodClosed(lastDaily, 'monthly', market);
   const evalIdx = isMonthClosed ? monthlyCandles.length - 1 : monthlyCandles.length - 2;
   if (evalIdx < 5) {
     return {
@@ -278,41 +337,29 @@ function checkMonthly(
   return { score, trend, detail: parts.join('，') };
 }
 
-// ── P2B: 聚合快取（同一掃描內，相同輸入直接返回）───────────────────────────
-// key = `${lastCandleDate}:${candleCount}:${interval}`
-// 聚合是確定性的（同輸入 → 同輸出），所以同一批掃描內可安全快取。
-// 用 WeakRef 或定期清除避免記憶體洩漏。
-
-const _aggregationCache = new Map<string, CandleWithIndicators[]>();
-let _aggregationCacheEpoch = Date.now();
+// ── 聚合快取（同一組陣列 reference 才可共用）───────────────────────────────
+// 不可用「最後日期＋根數」當 key：全市場股票通常兩者完全相同，會讓第二檔
+// 開始沿用第一檔的週線/月線。WeakMap 以輸入陣列 identity 隔離股票，也不會
+// 因長時間掃描持有已不用的 K 線陣列。
+type AggregationSlots = Partial<Record<'1wk' | '1mo', CandleWithIndicators[]>>;
+let _aggregationCache = new WeakMap<CandleWithIndicators[], AggregationSlots>();
 
 function getCachedAggregation(
   dailyCandles: CandleWithIndicators[],
   interval: '1wk' | '1mo',
 ): CandleWithIndicators[] {
-  // 每 5 分鐘清除快取，避免記憶體洩漏
-  const now = Date.now();
-  if (now - _aggregationCacheEpoch > 300_000) {
-    _aggregationCache.clear();
-    _aggregationCacheEpoch = now;
-  }
-
-  const last = dailyCandles[dailyCandles.length - 1];
-  if (!last) return computeIndicators(aggregateCandles(dailyCandles, interval));
-
-  const key = `${last.date}:${dailyCandles.length}:${interval}`;
-  const cached = _aggregationCache.get(key);
+  const slots = _aggregationCache.get(dailyCandles);
+  const cached = slots?.[interval];
   if (cached) return cached;
 
   const result = computeIndicators(aggregateCandles(dailyCandles, interval));
-  _aggregationCache.set(key, result);
+  _aggregationCache.set(dailyCandles, { ...slots, [interval]: result });
   return result;
 }
 
 /** 手動清除快取（掃描結束後呼叫） */
 export function clearAggregationCache(): void {
-  _aggregationCache.clear();
-  _aggregationCacheEpoch = Date.now();
+  _aggregationCache = new WeakMap<CandleWithIndicators[], AggregationSlots>();
 }
 
 /** 將 4 項週線保護條件套用使用者門檻；趨勢方向永遠是必要條件。 */
@@ -370,14 +417,15 @@ export function isNearWeeklyResistance(
 export function evaluateMultiTimeframe(
   dailyCandles: CandleWithIndicators[],
   thresholds: StrategyThresholds,
+  market: MtfMarket = 'TW',
 ): MultiTimeframeResult {
   // P2B: 使用快取的聚合結果（同一掃描內相同輸入直接返回）
   const weeklyCandles = getCachedAggregation(dailyCandles, '1wk');
   const monthlyCandles = getCachedAggregation(dailyCandles, '1mo');
 
   const lastDailyDate = dailyCandles[dailyCandles.length - 1]?.date;
-  const weekly = checkWeekly(weeklyCandles, thresholds, lastDailyDate);
-  const monthly = checkMonthly(monthlyCandles, lastDailyDate);
+  const weekly = checkWeekly(weeklyCandles, thresholds, lastDailyDate, market);
+  const monthly = checkMonthly(monthlyCandles, lastDailyDate, market);
 
   const mtfWeeklyStrict = thresholds.mtfWeeklyStrict ?? true;
   const mtfMonthlyStrict = thresholds.mtfMonthlyStrict ?? false;

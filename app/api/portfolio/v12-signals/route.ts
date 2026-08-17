@@ -35,7 +35,9 @@ export const dynamic = 'force-dynamic';
 const querySchema = z.object({
   symbol: z.string().min(1),
   market: z.enum(['TW', 'CN']).default('TW'),
-  entryPrice: z.coerce.number().positive(),
+  entryPrice: z.coerce.number().nonnegative(),
+  /** 帳務成本為 0（配股／贈與）時，技術規則改用此正參考價。 */
+  referencePrice: z.coerce.number().positive().optional(),
   buyDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   triggerSignal: z.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']).optional(),
   // 0513 ABCDE E：'wave' 跟 'super-long' 都已砍（書本沒寫、UI 無入口）
@@ -55,7 +57,11 @@ const querySchema = z.object({
 export async function GET(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
-  const { symbol, market, entryPrice, buyDate, triggerSignal, operationMode, patternTargetPrice, endPhaseTriggered, recentHigh, consolidationLow, vBottom, patternStopPrice } = parsed.data;
+  const { symbol, market, entryPrice, referencePrice, buyDate, triggerSignal, operationMode, patternTargetPrice, endPhaseTriggered, recentHigh, consolidationLow, vBottom, patternStopPrice } = parsed.data;
+  const effectiveEntryPrice = entryPrice > 0 ? entryPrice : referencePrice;
+  if (effectiveEntryPrice == null) {
+    return apiError('entryPrice=0 時必須提供正的 referencePrice', 400);
+  }
 
   try {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
@@ -82,6 +88,7 @@ export async function GET(req: NextRequest) {
       && entryBarFull.ma5 != null && entryBarFull.ma20 != null
       && entryBarFull.ma5 > entryBarFull.ma20;
 
+    const entryPrice = effectiveEntryPrice;
     const tickSize = getTickSize(entryPrice, market);
     const trendState = detectTrend(candles, lastIdx);
 

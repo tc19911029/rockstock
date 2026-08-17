@@ -15,6 +15,7 @@ import type { TaiwanScanner } from './TaiwanScanner';
 import type { ChinaScanner } from './ChinaScanner';
 import { BOOK_UNIVERSE_TOP_N, TURNOVER_INDEX_TOP_N } from './universeTopN';
 import { canInjectL2ForScan, usableIntradaySnapshot } from './l2ScanPolicy';
+import { passesMtf } from './mtfPass';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -75,6 +76,16 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
   // Server-side active strategy（UI 切策略時會同步寫入）
   const activeStrategy = options.strategy ?? await getActiveStrategyServer();
   const activeThresholds = activeStrategy.thresholds;
+  if (activeStrategy.strategyType === 'fundamental-revaluation') {
+    throw new Error(
+      `[ScanPipeline] ${activeStrategy.id} 是基本面專用軌，必須走 scan-fundamental-revaluation；` +
+      '拒絕以技術面 daily pipeline 冒充 V 軌結果',
+    );
+  }
+  const sessionMatchesActiveStrategy = (session: ScanSession | null): session is ScanSession => {
+    if (!session) return false;
+    return session.strategyId ? session.strategyId === activeStrategy.id : activeStrategy.id === 'zhu-pure-book';
+  };
   console.info(`[ScanPipeline] ${market} 使用策略: ${activeStrategy.id} (${activeStrategy.name})`);
 
   let scanner: TaiwanScanner | ChinaScanner;
@@ -188,8 +199,8 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
     if (!force && sessionType === 'post_close') {
       const existingDaily = wantDaily ? await loadScanSession(market as MarketId, date, direction, 'daily') : null;
       const existingMtf = wantMtf ? await loadScanSession(market as MarketId, date, direction, 'mtf') : null;
-      const dailyOk = !wantDaily || (existingDaily && existingDaily.resultCount >= 0);
-      const mtfOk = !wantMtf || (existingMtf && existingMtf.resultCount >= 0);
+      const dailyOk = !wantDaily || (sessionMatchesActiveStrategy(existingDaily) && existingDaily.resultCount >= 0);
+      const mtfOk = !wantMtf || (sessionMatchesActiveStrategy(existingMtf) && existingMtf.resultCount >= 0);
       if (dailyOk && mtfOk) {
         if (existingDaily) counts[`${direction}-daily`] = existingDaily.resultCount;
         if (existingMtf) counts[`${direction}-mtf`] = existingMtf.resultCount;
@@ -207,8 +218,9 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
       let results: import('./types').StockScanResult[];
       let sessionFreshness: ScanSession['dataFreshness'];
 
-      if (direction === 'long') {
-        const out = await scanner.scanSOP(stocks, date, activeThresholds);
+      if (direction === 'long' || activeStrategy.strategyType === 'mechanical-rank') {
+        const mechanicalDirection = direction === 'short' ? 'short' : 'long';
+        const out = await scanner.scanSOP(stocks, date, activeThresholds, 'sixConditions', true, mechanicalDirection);
         results = out.results as import('./types').StockScanResult[];
         sessionFreshness = out.sessionFreshness;
         if (!marketTrend) marketTrend = String(out.marketTrend ?? '');
@@ -274,6 +286,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
       if (wantDaily) {
         const dailySession: ScanSession = {
           id: `${prefix}-${direction}-daily-${date}-${batch ? `b${batch}-` : ''}${Date.now()}`,
+          strategyId: activeStrategy.id,
           market: market as MarketId,
           date,
           direction,
@@ -291,9 +304,10 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
       // ── Step 4b: 存 MTF session（4 項週線保護門檻 + 可選月線 strict）──
       if (wantMtf) {
-        const mtfResults = results.filter(r => r.mtfPass ?? (r.mtfWeeklyPass === true));
+        const mtfResults = results.filter(r => passesMtf(r));
         const mtfSession: ScanSession = {
           id: `${prefix}-${direction}-mtf-${date}-${batch ? `b${batch}-` : ''}${Date.now() + 1}`,
+          strategyId: activeStrategy.id,
           market: market as MarketId,
           date,
           direction,

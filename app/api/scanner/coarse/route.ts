@@ -27,6 +27,7 @@ export const maxDuration = 30; // 粗掃應 < 10 秒
 const schema = z.object({
   market: z.enum(['TW', 'CN']),
   direction: z.enum(['long', 'short']).default('long'),
+  strategyType: z.enum(['trend', 'kline-pattern', 'mechanical-rank', 'fundamental-revaluation']).optional(),
   /** 快照最大允許年齡（秒），超過就自動刷新。預設 180 (3 分鐘) */
   maxSnapshotAgeSec: z.number().optional().default(180),
 });
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
     return apiValidationError(parsed.error);
   }
 
-  const { market, direction, maxSnapshotAgeSec } = parsed.data;
+  const { market, direction, maxSnapshotAgeSec, strategyType } = parsed.data;
 
   try {
     // ── 判斷目標日期 ──
@@ -98,7 +99,10 @@ export async function POST(req: NextRequest) {
     // MA Base 可能不存在（第一次使用），粗掃仍可進行（只是沒有 MA 過濾）
 
     // ── 執行粗掃 ──
-    const result = coarseScan(snapshot, maBase, { direction });
+    const result = coarseScan(snapshot, maBase, {
+      direction,
+      bypassDirectionalFilters: strategyType === 'kline-pattern' || strategyType === 'mechanical-rank',
+    });
 
     const snapshotAgeSeconds = Math.round(
       (Date.now() - new Date(snapshot.updatedAt).getTime()) / 1000,

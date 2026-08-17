@@ -161,7 +161,7 @@ export const useScannerStore = create<ScannerStore>()(
           const targetDate = scanDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
           try {
             const savedRes = await fetch(
-              `/api/scanner/results?market=${market}&direction=long&date=${targetDate}`,
+              `/api/scanner/results?market=${market}&direction=long&date=${targetDate}&strategyId=${encodeURIComponent(activeStrategy.id)}`,
               { signal },
             );
             if (savedRes.ok) {
@@ -200,6 +200,64 @@ export const useScannerStore = create<ScannerStore>()(
             // Pre-computed results unavailable, fall back to real-time scan
           }
 
+          // V 軌已有專屬基本面 session；主掃描頁選到 V 時直接讀該 session，
+          // 不可悄悄降級成技術面 A 軌，否則畫面雖顯示 V、結果卻完全錯誤。
+          if (activeStrategy.strategyType === 'fundamental-revaluation') {
+            const expectedMarket = activeStrategy.id.startsWith('tw-') ? 'TW'
+              : activeStrategy.id.startsWith('cn-') ? 'CN'
+                : market;
+            if (expectedMarket !== market) {
+              throw new Error(`${activeStrategy.name}僅適用${expectedMarket === 'TW' ? '台股' : '陸股'}，請切換市場後再掃描`);
+            }
+            const fundamentalRes = await fetch(
+              `/api/strategies/fundamental-revaluation?market=${market}&date=${targetDate}`,
+              { signal },
+            );
+            if (!fundamentalRes.ok) throw new Error('基本面補漲結果讀取失敗');
+            const fundamentalJson = await fundamentalRes.json() as {
+              session?: {
+                computedAt: string;
+                top100: Array<{
+                  symbol: string; name: string; todayPrice: number;
+                  breakdown: { total: number; grade: string };
+                  baseUpside: number | null;
+                }>;
+              } | null;
+            };
+            if (!fundamentalJson.session) {
+              throw new Error(`${targetDate} 尚無基本面補漲結果，請先執行基本面補漲排程`);
+            }
+            const now = fundamentalJson.session.computedAt;
+            const results: StockScanResult[] = fundamentalJson.session.top100.map((row) => ({
+              symbol: row.symbol,
+              name: row.name,
+              market,
+              price: row.todayPrice,
+              changePercent: 0,
+              volume: 0,
+              triggeredRules: [{
+                ruleId: 'fundamental-revaluation',
+                ruleName: `基本面補漲 ${row.breakdown.grade}`,
+                signalType: 'BUY',
+                reason: `基本面評分 ${row.breakdown.total}；中性上漲空間 ${row.baseUpside == null ? '資料不足' : `${(row.baseUpside * 100).toFixed(1)}%`}`,
+              }],
+              matchedMethods: ['V'],
+              sixConditionsScore: row.breakdown.total,
+              sixConditionsBreakdown: { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false },
+              trendState: '盤整',
+              trendPosition: '盤整觀望',
+              scanTime: now,
+            }));
+            set(s => ({
+              [mKey]: {
+                ...s[mKey], isScanning: false, progress: 100, scanningStock: '',
+                results, lastScanTime: now, error: null, scanningTotal: results.length,
+              },
+            }));
+            abortControllers[market] = null;
+            return;
+          }
+
           // ── Step 1: 粗掃（全市場快照，< 3 秒） ─────────────────────────
           set(s => ({
             [mKey]: { ...s[mKey], progress: 5, scanningStock: `Step 1/3：讀取${market === 'TW' ? '台股' : '陸股'}全市場即時快照...` },
@@ -208,7 +266,7 @@ export const useScannerStore = create<ScannerStore>()(
           const coarseRes = await fetch('/api/scanner/coarse', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ market, direction: 'long' }),
+            body: JSON.stringify({ market, direction: 'long', strategyType: activeStrategy.strategyType }),
             signal,
           });
 
@@ -266,7 +324,13 @@ export const useScannerStore = create<ScannerStore>()(
             const res = await fetch('/api/scanner/chunk', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ market, stocks: chunk, ...strategyPayload, ...(scanDate ? { date: scanDate } : {}) }),
+              body: JSON.stringify({
+                market,
+                stocks: chunk,
+                ...strategyPayload,
+                mode: activeStrategy.strategyType === 'trend' ? 'full' : 'sop',
+                ...(scanDate ? { date: scanDate } : {}),
+              }),
               signal,
             });
             if (!res.ok) {

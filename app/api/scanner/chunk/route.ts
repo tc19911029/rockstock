@@ -29,6 +29,8 @@ const scannerChunkSchema = z.object({
   direction:  z.enum(['long', 'short']).default('long'),
   /** 長線保護短線：多時間框架前置過濾 */
   multiTimeframeFilter: z.boolean().default(false),
+  /** 舊版直呼 chunk 才可顯式要求 L2 粗掃；正式前端已先呼叫 /coarse，預設必須做精掃。 */
+  coarseOnly: z.boolean().default(false),
 });
 
 export async function POST(req: NextRequest) {
@@ -125,7 +127,7 @@ export async function POST(req: NextRequest) {
     // 盤中粗篩：直接用 IntradayCache 快照過濾候選股，不走昂貴的 scanSOP
     // 若快照存在且夠新（< 5 分鐘），用快照粗篩 → 立即回傳 → 前端再做精篩
     // 備註：cron 每 2 分鐘寫入，5 分鐘 threshold 確保快取有效同時容忍輕微延遲
-    if (marketOpen) {
+    if (marketOpen && parsed.data.coarseOnly) {
       const { readIntradaySnapshot, isSnapshotFresh } = await import('@/lib/datasource/IntradayCache');
       const snapshot = await readIntradaySnapshot(market, todayStr);
       if (snapshot && isSnapshotFresh(snapshot, 300_000)) {
@@ -202,13 +204,22 @@ export async function POST(req: NextRequest) {
     }
 
     let scanResult: { results: unknown[]; marketTrend: unknown; diagnostics?: ScanDiagnostics };
-    if (mode === 'sop' && parsed.data.direction === 'short') {
+    const isMechanicalStrategy = strategy?.strategyType === 'mechanical-rank'
+      || parsed.data.strategyType === 'mechanical-rank';
+    if (mode === 'sop' && parsed.data.direction === 'short' && !isMechanicalStrategy) {
       // V2 做空版：做空六條件 + 做空戒律
       const { candidates, marketTrend: mt, diagnostics } = await scanner.scanShortCandidates(stocks, effectiveDate, thresholds);
       scanResult = { results: candidates, marketTrend: mt, diagnostics };
     } else if (mode === 'sop') {
       // V2 做多版：六條件+戒律+淘汰法
-      scanResult = await scanner.scanSOP(stocks, effectiveDate, thresholds, parsed.data.rankBy as 'sixConditions' | 'histWinRate');
+      scanResult = await scanner.scanSOP(
+        stocks,
+        effectiveDate,
+        thresholds,
+        parsed.data.rankBy as 'sixConditions' | 'histWinRate',
+        true,
+        parsed.data.direction,
+      );
     } else if (mode === 'pure' && effectiveDate) {
       scanResult = await scanner.scanListAtDatePure(stocks, effectiveDate, thresholds);
     } else if (mode === 'pure') {

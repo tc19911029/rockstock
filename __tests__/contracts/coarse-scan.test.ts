@@ -112,6 +112,21 @@ describe('CoarseScanner contracts', () => {
     expect(result.candidateCount).toBeGreaterThanOrEqual(0);
   });
 
+  test('型態策略略過通用趨勢粗篩，避免 detector 前先漏股', () => {
+    const snapshot: IntradaySnapshot = {
+      market: 'TW', date: '2026-04-09', updatedAt: new Date().toISOString(), count: 1,
+      quotes: [{
+        symbol: '0001', name: '型態股', open: 5, high: 5.2, low: 4.7, close: 5,
+        volume: 1, prevClose: 5.2, changePercent: -3.8,
+      }],
+    };
+
+    expect(coarseScan(snapshot, null).candidates).toHaveLength(0);
+    const bypassed = coarseScan(snapshot, null, { bypassDirectionalFilters: true });
+    expect(bypassed.candidates).toHaveLength(1);
+    expect(bypassed.candidates[0].coarseReasons).toContain('策略專屬全市場精掃');
+  });
+
   test('空快照回傳 0 候選', () => {
     const snapshot: IntradaySnapshot = {
       market: 'TW',
