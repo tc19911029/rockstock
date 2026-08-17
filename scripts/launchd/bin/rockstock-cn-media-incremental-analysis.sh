@@ -45,7 +45,9 @@ if (( ${#CRON_SECRET_VALUE} < 32 )); then
   echo "[$(ts)] 密鑰檔無效（長度不足）" >&2
   exit 1
 fi
-AUTH="Authorization: Bearer $CRON_SECRET_VALUE"
+AUTH_CONFIG="$RUN_DIR/curl-auth.conf"
+umask 077
+printf 'header = "Authorization: Bearer %s"\n' "$CRON_SECRET_VALUE" > "$AUTH_CONFIG"
 unset CRON_SECRET_VALUE
 
 CODEX_BIN="${ROCKSTOCK_CODEX_BIN:-}"
@@ -63,7 +65,7 @@ fi
 echo "=== [$(ts)] 陸股節目增量檢查，date=$D ==="
 
 SCAN_JSON="$RUN_DIR/scan.json"
-curl -fsS --max-time 120 -H "$AUTH" -X POST \
+curl -fsS --config "$AUTH_CONFIG" --max-time 120 -X POST \
   "$BASE/api/cron/cn-media-scan?date=$D" -o "$SCAN_JSON" \
   || { echo "[$(ts)] scan 失敗" >&2; exit 1; }
 FOUND=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("videos_found",0))' "$SCAN_JSON" 2>/dev/null || echo 0)
@@ -96,7 +98,7 @@ if [[ -n "$VIDEO_ID" ]]; then
   fi
   TRANSCRIPT_JSON="$RUN_DIR/transcript.json"
   echo "[$(ts)] 轉錄最新待處理節目 $VIDEO_ID"
-  curl -fsS --max-time 3600 -H "$AUTH" -X POST \
+  curl -fsS --config "$AUTH_CONFIG" --max-time 3600 -X POST \
     "$BASE/api/cron/cn-media-transcript?date=$D&video_id=$VIDEO_ID" -o "$TRANSCRIPT_JSON" \
     || { echo "[$(ts)] transcript 失敗：$VIDEO_ID" >&2; exit 1; }
   TRANSCRIPT_STATUS=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])).get("results",[]); print(r[0].get("status","unknown") if r else "missing")' "$TRANSCRIPT_JSON" 2>/dev/null || echo unknown)
@@ -106,7 +108,7 @@ else
 fi
 
 PREPARE_JSON="$RUN_DIR/prepare.json"
-curl -fsS --max-time 600 -H "$AUTH" -X POST \
+curl -fsS --config "$AUTH_CONFIG" --max-time 600 -X POST \
   "$BASE/api/cron/cn-media-prepare-analysis?date=$D" -o "$PREPARE_JSON" \
   || { echo "[$(ts)] prepare 失敗" >&2; exit 1; }
 CURRENT_COUNT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("videos_with_transcript",0))' "$PREPARE_JSON" 2>/dev/null || echo 0)
