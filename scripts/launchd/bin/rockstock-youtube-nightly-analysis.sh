@@ -21,26 +21,55 @@
 # (若日後發現別的節目也常 23:00 後才上,把 source_id 加進 LATE_SRC 即可。)
 #
 # 日期 D 開頭鎖一次全程沿用 → 即使 Whisper 拖過午夜,分析的仍是「今日」交易日不漂。
-# 認證:claude 走 Keychain「Claude Code-credentials」(訂閱);plist 須給 HOME/USER/LOGNAME,
-#       絕不可設 ANTHROPIC_API_KEY(會改走 API 付費)。
+# 認證：Codex 使用本機 ChatGPT 登入；plist 須提供 HOME/USER/LOGNAME。
 set -u
 export PATH="/Users/tc/.local/node-22/bin:/Users/tc/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export TZ="Asia/Taipei"
 
 D=$(date +%F)
 BASE="http://localhost:3000/api/cron"
-AUTH="Authorization: Bearer CRON_SECRET"
+SECRET_FILE="${ROCKSTOCK_CRON_SECRET_FILE:-$HOME/.config/rockstock/cron-secret}"
+if [[ ! -r "$SECRET_FILE" ]]; then
+  echo "[$(date '+%H:%M:%S')] 缺少可讀密鑰檔：$SECRET_FILE" >&2
+  exit 1
+fi
+CRON_SECRET_VALUE="$(tr -d '\r\n' < "$SECRET_FILE")"
+if (( ${#CRON_SECRET_VALUE} < 32 )); then
+  echo "[$(date '+%H:%M:%S')] 密鑰檔無效（長度不足）" >&2
+  exit 1
+fi
+AUTH="Authorization: Bearer $CRON_SECRET_VALUE"
+unset CRON_SECRET_VALUE
 LATE_SRC="ustvmoney100"   # 錢線百分百:下集 23:30 才上
 ts() { date '+%H:%M:%S'; }
 echo "=== [$(ts)] youtube nightly analysis 開始, date=$D ==="
+
+# :20 transcript 偶爾因 Whisper/外部字幕延遲超過 23:55。先等它收尾，避免兩個
+# transcript request 同時搶 CPU/RAM；日期 D 已先鎖定，所以等過午夜也不會分析錯日。
+TRANSCRIPT_LABEL="com.rockstock.youtube-transcript"
+for (( wait_round=1; wait_round<=80; wait_round++ )); do
+  transcript_pid=$(launchctl list 2>/dev/null | awk -v label="$TRANSCRIPT_LABEL" '$3 == label {print $1}')
+  [[ -z "$transcript_pid" || "$transcript_pid" == "-" ]] && break
+  (( wait_round == 1 )) && echo "[$(ts)] transcript 排程仍在執行(pid=$transcript_pid)，先等它收尾"
+  sleep 15
+done
+transcript_pid=$(launchctl list 2>/dev/null | awk -v label="$TRANSCRIPT_LABEL" '$3 == label {print $1}')
+if [[ -n "$transcript_pid" && "$transcript_pid" != "-" ]]; then
+  echo "[$(ts)] transcript 等待 20 分鐘仍未結束，略過晚場 transcript 以避免重疊" >&2
+  SKIP_LATE_TRANSCRIPT=1
+else
+  SKIP_LATE_TRANSCRIPT=0
+fi
 
 # 1) 只 force 重掃晚場來源(撈 23:30 下集;單來源,快)
 curl -fsS --max-time 90 -H "$AUTH" -X POST "$BASE/youtube-scan?date=$D&force=1&source_id=$LATE_SRC" >/dev/null 2>&1 \
   && echo "[$(ts)] scan($LATE_SRC) OK" || echo "[$(ts)] scan 失敗(略過,繼續)"
 
 # 2) 抓該來源今日逐字稿(自動字幕優先;沒好才 Whisper,故 max-time 放寬到 15min)
-curl -fsS --max-time 900 -H "$AUTH" -X POST "$BASE/youtube-transcript?date=$D&source_id=$LATE_SRC&use_whisper=1" >/dev/null 2>&1 \
-  && echo "[$(ts)] transcript($LATE_SRC) OK" || echo "[$(ts)] transcript 失敗(略過,繼續)"
+if (( SKIP_LATE_TRANSCRIPT == 0 )); then
+  curl -fsS --max-time 900 -H "$AUTH" -X POST "$BASE/youtube-transcript?date=$D&source_id=$LATE_SRC&use_whisper=1" >/dev/null 2>&1 \
+    && echo "[$(ts)] transcript($LATE_SRC) OK" || echo "[$(ts)] transcript 失敗(略過,繼續)"
+fi
 
 # 2.5) 補抽晚場來源關鍵幀(錢線下集是 keyframe_enabled 來源;白天集數 hourly cron 已抽完。
 #      ~3min/支;失敗不致命,純逐字稿分析照常)
@@ -51,7 +80,7 @@ curl -fsS --max-time 600 -H "$AUTH" -X POST "$BASE/youtube-keyframes?date=$D&sou
 curl -fsS --max-time 120 -H "$AUTH" -X POST "$BASE/youtube-prepare-analysis?date=$D" >/dev/null 2>&1 \
   && echo "[$(ts)] prepare OK" || echo "[$(ts)] prepare 失敗(略過,繼續)"
 
-# 3b) 無可分析影片就乾淨跳過(週末/假日無節目 → 不必叫 claude 硬撐 3 次再報 ❌,純噪音)。I-3
+# 3b) 無可分析影片就乾淨跳過(週末/假日無節目 → 不必叫 Codex 硬撐 3 次再報 ❌,純噪音)。I-3
 #     ⚠️ 不可數 iCloud 上的 transcripts/$D：Desktop 閒置時檔案被 evict 成 .icloud 佔位檔
 #        → glob 抓空 → 假性「無逐字稿」誤跳過(2026-06-22/23 連兩晚中招、整天漏分析)。
 #        改讀剛 prepare 寫好的 question.json(在 $TMPDIR、不在 iCloud、必為最新、與後面排錯路徑同源):
@@ -70,23 +99,40 @@ done
 if [[ -z "$VCOUNT" ]]; then
   echo "=== [$(ts)] $D question.json 讀取失敗(非 0 支,是解析失敗),仍嘗試分析以免漏 ==="
 elif [[ "$VCOUNT" -eq 0 ]]; then
-  echo "=== [$(ts)] $D 無可分析影片(question videos=0),乾淨跳過、不叫 claude ==="
+  echo "=== [$(ts)] $D 無可分析影片(question videos=0),乾淨跳過、不叫 Codex ==="
   exit 0
 fi
 echo "[$(ts)] $D 有 $VCOUNT 支可分析影片,進入分析"
 
-# 4) headless claude 分析(讀剛寫好的當日 question.json → 寫 data/youtube/analysis/$D.json)
-#    ⚠️ 加重試(2026-06-08 教訓):headless claude 偶爾遇暫時性 API 斷線
+# 4) Codex CLI 分析(讀剛寫好的當日 question.json → 寫 data/youtube/analysis/$D.json)
+#    ⚠️ 加重試(2026-06-08 教訓):CLI 偶爾遇暫時性 API 斷線
 #    (`API Error: The socket connection was closed unexpectedly`)就死、整天沒產出。
-#    且 headless claude 即使 API Error 也可能 exit 0 → 不能只看 $?。
+#    且 CLI 即使 exit 0 也可能未寫檔 → 不能只看 $?。
 #    成功判準 = analysis 檔「在本次嘗試之後」才被寫出且 size > 1KB。
-#    不用 exec(exec 取代 shell 就無法包重試)。絕不可設 ANTHROPIC_API_KEY(會改走 API 付費)。
-echo "=== [$(ts)] 開始 claude 分析 ==="
+#    不用 exec(exec 取代 shell 就無法包重試)。
+echo "=== [$(ts)] 開始 Codex 分析 ==="
 cd /Users/tc/Desktop/rockstock || exit 1
 
 ANALYSIS_FILE="/Users/tc/Desktop/rockstock/data/youtube/analysis/$D.json"
-CLAUDE_BIN="/Users/tc/.local/node-22/bin/claude"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CODEX_HELPER="$SCRIPT_DIR/rockstock-codex-cli.sh"
+if [[ ! -r "$CODEX_HELPER" ]]; then
+  echo "[$(ts)] 缺少 Codex 共用檢查器：$CODEX_HELPER" >&2
+  exit 1
+fi
+source "$CODEX_HELPER"
+QUESTION_DIR="$TMPDIR/rockstock-youtube"
 MAX_TRIES=3
+
+if ! rockstock_codex_preflight; then
+  failure_kind="${ROCKSTOCK_CODEX_ERROR_KIND:-CLI_NOT_FOUND}"
+  failure_hint="$(rockstock_codex_error_hint "$failure_kind")"
+  echo "=== [$(ts)] ❌ Codex 預檢失敗 [$failure_kind]：$failure_hint ===" >&2
+  /Users/tc/.local/bin/rockstock-notify.sh \
+    "❌ YouTube 分析無法啟動 $D" "$failure_hint" high
+  exit 1
+fi
+echo "[$(ts)] Codex 預檢通過：${CODEX_BIN}（${ROCKSTOCK_CODEX_LOGIN_STATUS}）"
 
 # 成功 = 檔案存在、mtime >= 本次嘗試起點、size > 1024 bytes(macOS BSD stat)
 analysis_ok() {
@@ -106,28 +152,38 @@ for (( i=1; i<=MAX_TRIES; i++ )); do
     sleep "$sleep_s"
   fi
   attempt_start=$(date +%s)
-  echo "[$(ts)] claude 分析嘗試 $i/$MAX_TRIES ..."
-  "$CLAUDE_BIN" -p "/youtube-analysis" --model opus --permission-mode bypassPermissions
+  attempt_log="$(mktemp "${TMPDIR:-/tmp}/rockstock-youtube-codex.XXXXXX")"
+  echo "[$(ts)] Codex 分析嘗試 $i/$MAX_TRIES ..."
+  "$CODEX_BIN" exec --ephemeral --sandbox workspace-write \
+    --add-dir "$QUESTION_DIR" -C /Users/tc/Desktop/rockstock \
+    "使用 source-command-youtube-analysis skill 分析 $D 的 YouTube question payload，完整執行技能所有必要驗證並寫入指定 output_path。不要呼叫 Anthropic API。" \
+    >"$attempt_log" 2>&1
   rc=$?
+  tail -40 "$attempt_log"
   if analysis_ok "$attempt_start"; then
-    echo "=== [$(ts)] ✅ 分析成功(嘗試 $i, claude exit=$rc, 已產出 $ANALYSIS_FILE) ==="
+    unlink "$attempt_log" 2>/dev/null || true
+    echo "=== [$(ts)] ✅ 分析成功(嘗試 $i, Codex exit=$rc, 已產出 $ANALYSIS_FILE) ==="
     success=1
     break
   fi
-  echo "[$(ts)] ⚠️ 嘗試 $i 未產出 analysis(claude exit=$rc, $ANALYSIS_FILE 未更新)" >&2
+  failure_kind="$(rockstock_codex_classify_failure "$attempt_log" "$rc")"
+  failure_hint="$(rockstock_codex_error_hint "$failure_kind")"
+  unlink "$attempt_log" 2>/dev/null || true
+  echo "[$(ts)] ⚠️ 嘗試 $i 未產出 analysis [$failure_kind, Codex exit=$rc]：$failure_hint" >&2
+  rockstock_codex_retryable "$failure_kind" || break
 done
 
 if (( success == 0 )); then
-  echo "=== [$(ts)] ❌ claude 分析連 $MAX_TRIES 次都失敗, $D 無 analysis 產出 ===" >&2
+  echo "=== [$(ts)] ❌ Codex 分析連 $MAX_TRIES 次都失敗, $D 無 analysis 產出 ===" >&2
   echo "[$(ts)] 排錯:question 在 \$TMPDIR/rockstock-youtube/$D-question.json;可手動於對話跑 /youtube-analysis $D 補出" >&2
   /Users/tc/.local/bin/rockstock-notify.sh \
     "❌ YouTube 分析失敗 $D" \
-    "nightly 連 $MAX_TRIES 次都沒產出 analysis（$VCOUNT 支影片等分析）。早上補救網會再試；仍失敗會再吵你。手動:對話跑 /youtube-analysis $D" \
+    "${failure_hint:-Codex 已執行但未產出有效 analysis}（$VCOUNT 支影片待分析）。早上補救網會再試。" \
     high
   exit 1
 fi
 
-# 4.5) 確定性正規化(2026-06-13):headless claude 寫的 analysis 偶爾漂出三類違規
+# 4.5) 確定性正規化(2026-06-13):模型寫的 analysis 偶爾漂出三類違規
 #    (名稱異體字台→臺 / screenshot_ref 絕對路徑 / recommendation_type 自創枚舉)。
 #    skill 的「最後一步呼叫 normalize」是 LLM 自由裁量、會漏(2026-06-12 漏了整份)
 #    → 把保證從 LLM 移到這支確定性 wrapper。代號重查 + keyframe 欄位修正 + 大聲自查。

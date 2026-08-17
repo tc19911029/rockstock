@@ -1,7 +1,7 @@
 #!/bin/zsh
 # rockstock-analysis-catchup.sh — 補跑認證失效/故障期間漏掉的分析日
 # 用法: rockstock-analysis-catchup.sh 2026-06-12 2026-06-11 2026-06-10
-# 與 keyframe-backfill 的差別：不抽幀（已抽好）、claude stderr 留在 log。
+# 與 keyframe-backfill 的差別：不抽幀（已抽好）、Codex stderr 留在 log。
 #
 # 2026-07-15 三修（皆為與 nightly 的 parity 缺口）：
 #   1. 成功判準原為 size>1024 → 週末休播的 analysis 只有 ~700B 但完全正常，
@@ -12,8 +12,26 @@ set -u
 export PATH="/Users/tc/.local/node-22/bin:/Users/tc/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export TZ="Asia/Taipei"
 BASE="http://localhost:3000/api/cron"
-AUTH="Authorization: Bearer CRON_SECRET"
-CLAUDE_BIN="/Users/tc/.local/node-22/bin/claude"
+SECRET_FILE="${ROCKSTOCK_CRON_SECRET_FILE:-$HOME/.config/rockstock/cron-secret}"
+if [[ ! -r "$SECRET_FILE" ]]; then
+  echo "[$(date '+%H:%M:%S')] 缺少可讀密鑰檔：$SECRET_FILE" >&2
+  exit 1
+fi
+CRON_SECRET_VALUE="$(tr -d '\r\n' < "$SECRET_FILE")"
+if (( ${#CRON_SECRET_VALUE} < 32 )); then
+  echo "[$(date '+%H:%M:%S')] 密鑰檔無效（長度不足）" >&2
+  exit 1
+fi
+AUTH="Authorization: Bearer $CRON_SECRET_VALUE"
+unset CRON_SECRET_VALUE
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CODEX_HELPER="$SCRIPT_DIR/rockstock-codex-cli.sh"
+if [[ ! -r "$CODEX_HELPER" ]]; then
+  echo "[$(date '+%H:%M:%S')] 缺少 Codex 共用檢查器：$CODEX_HELPER" >&2
+  exit 1
+fi
+source "$CODEX_HELPER"
+QUESTION_DIR="$TMPDIR/rockstock-youtube"
 REPO="/Users/tc/Desktop/rockstock"
 ts() { date '+%m-%d %H:%M:%S'; }
 
@@ -51,32 +69,53 @@ for D in "$@"; do
   if [[ -z "$VCOUNT" ]]; then
     echo "[$(ts)] $D question.json 讀取失敗(非 0 支，是解析失敗)，仍嘗試分析以免漏"
   elif [[ "$VCOUNT" -eq 0 ]]; then
-    echo "[$(ts)] $D 無可分析影片(question videos=0)，乾淨跳過、不叫 claude"
+    echo "[$(ts)] $D 無可分析影片(question videos=0)，乾淨跳過、不叫 Codex"
     continue
   else
     echo "[$(ts)] $D 有 $VCOUNT 支可分析影片，進入分析"
   fi
 
   ANALYSIS_FILE="$REPO/data/youtube/analysis/$D.json"
+
   cd "$REPO" || exit 1
+  if ! rockstock_codex_preflight; then
+    failure_kind="${ROCKSTOCK_CODEX_ERROR_KIND:-CLI_NOT_FOUND}"
+    failure_hint="$(rockstock_codex_error_hint "$failure_kind")"
+    echo "[$(ts)] $D ❌ Codex 預檢失敗 [$failure_kind]：$failure_hint" >&2
+    /Users/tc/.local/bin/rockstock-notify.sh \
+      "❌ YouTube 補跑無法啟動 $D" "$failure_hint" urgent
+    continue
+  fi
+  echo "[$(ts)] Codex 預檢通過：${CODEX_BIN}（${ROCKSTOCK_CODEX_LOGIN_STATUS}）"
   success=0
   for i in 1 2 3; do
     [[ $i -gt 1 ]] && sleep $(( i * 120 ))
     attempt_start=$(date +%s)
-    echo "[$(ts)] $D claude 嘗試 $i/3"
-    "$CLAUDE_BIN" -p "/youtube-analysis $D" --model opus --permission-mode bypassPermissions 2>&1 | tail -3
+    attempt_log="$(mktemp "${TMPDIR:-/tmp}/rockstock-youtube-codex.XXXXXX")"
+    echo "[$(ts)] $D Codex 嘗試 $i/3"
+    "$CODEX_BIN" exec --ephemeral --sandbox workspace-write \
+      --add-dir "$QUESTION_DIR" -C "$REPO" \
+      "使用 source-command-youtube-analysis skill 分析 $D 的 YouTube question payload，完整執行技能所有必要驗證並寫入指定 output_path。不要呼叫 Anthropic API。" \
+      >"$attempt_log" 2>&1
+    rc=$?
+    tail -20 "$attempt_log"
     if analysis_ok "$ANALYSIS_FILE" "$attempt_start"; then
+      unlink "$attempt_log" 2>/dev/null || true
       success=1
       echo "[$(ts)] $D ✅ 分析完成 (size=$(stat -f %z "$ANALYSIS_FILE"))"
       break
     fi
-    echo "[$(ts)] $D ⚠️ 嘗試 $i 未產出"
+    failure_kind="$(rockstock_codex_classify_failure "$attempt_log" "$rc")"
+    failure_hint="$(rockstock_codex_error_hint "$failure_kind")"
+    unlink "$attempt_log" 2>/dev/null || true
+    echo "[$(ts)] $D ⚠️ 嘗試 $i 未產出 [$failure_kind, exit=$rc]：$failure_hint" >&2
+    rockstock_codex_retryable "$failure_kind" || break
   done
   if [[ $success -eq 0 ]]; then
     echo "[$(ts)] $D ❌ 仍失敗"
     /Users/tc/.local/bin/rockstock-notify.sh \
       "❌ YouTube 補跑失敗 $D" \
-      "早上補救網也補不回 $D 的 analysis（常見主因:headless claude OAuth 過期或 403 地區封鎖，需 /login 或把 claude/anthropic 網域釘美國節點）。手動:對話跑 /youtube-analysis $D" \
+      "${failure_hint:-Codex 已執行但未產出有效 analysis}。手動:對話跑 /youtube-analysis $D" \
       urgent
     continue
   fi

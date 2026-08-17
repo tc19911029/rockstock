@@ -67,17 +67,13 @@ umask 077
 printf 'header = "Authorization: Bearer %s"\n' "$CRON_SECRET_VALUE" > "$AUTH_CONFIG"
 unset CRON_SECRET_VALUE
 
-CODEX_BIN="${ROCKSTOCK_CODEX_BIN:-}"
-if [[ -z "$CODEX_BIN" ]]; then
-  for candidate in \
-    /Applications/ChatGPT.app/Contents/Resources/codex \
-    /Applications/Codex.app/Contents/Resources/codex; do
-    if [[ -x "$candidate" ]]; then
-      CODEX_BIN="$candidate"
-      break
-    fi
-  done
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CODEX_HELPER="$SCRIPT_DIR/rockstock-codex-cli.sh"
+if [[ ! -r "$CODEX_HELPER" ]]; then
+  echo "[$(ts)] 缺少 Codex 共用檢查器：$CODEX_HELPER" >&2
+  exit 1
 fi
+source "$CODEX_HELPER"
 
 echo "=== [$(ts)] 陸股節目增量檢查，date=$D ==="
 
@@ -149,10 +145,13 @@ if (( PREVIOUS_COUNT >= CURRENT_COUNT )); then
   echo "[$(ts)] 無新增可用逐字稿（$CURRENT_COUNT 支），跳過分析"
   exit 0
 fi
-if [[ -z "$CODEX_BIN" || ! -x "$CODEX_BIN" ]]; then
-  echo "[$(ts)] 找不到 Codex CLI（已檢查 ChatGPT.app 與 Codex.app）" >&2
+if ! rockstock_codex_preflight; then
+  failure_kind="${ROCKSTOCK_CODEX_ERROR_KIND:-CLI_NOT_FOUND}"
+  failure_hint="$(rockstock_codex_error_hint "$failure_kind")"
+  echo "[$(ts)] Codex 預檢失敗 [$failure_kind]：$failure_hint" >&2
   exit 1
 fi
+echo "[$(ts)] Codex 預檢通過：${CODEX_BIN}（${ROCKSTOCK_CODEX_LOGIN_STATUS}）"
 
 analysis_ok() {
   local check_json="$RUN_DIR/analysis-check.json"
@@ -169,23 +168,30 @@ cd "$REPO" || exit 1
 success=0
 for attempt in 1 2; do
   (( attempt == 2 )) && sleep 60
+  attempt_log="$RUN_DIR/codex-attempt-$attempt.log"
   echo "[$(ts)] 新增逐字稿 $PREVIOUS_COUNT → $CURRENT_COUNT，Codex 分析嘗試 $attempt/2"
   "$CODEX_BIN" exec --ephemeral --sandbox workspace-write \
     --add-dir "$QUESTION_DIR" \
     -C "$REPO" \
     "使用 cn-media-analysis skill 分析 $D 的陸股節目 question payload，完整執行技能的正規化與稽核，並寫入指定 output_path。" \
-    2>&1 | tail -5
+    >"$attempt_log" 2>&1
+  rc=$?
+  tail -20 "$attempt_log"
   if analysis_ok; then
     success=1
     break
   fi
+  failure_kind="$(rockstock_codex_classify_failure "$attempt_log" "$rc")"
+  failure_hint="$(rockstock_codex_error_hint "$failure_kind")"
+  echo "[$(ts)] Codex 未產出 [$failure_kind, exit=$rc]：$failure_hint" >&2
+  rockstock_codex_retryable "$failure_kind" || break
 done
 
 if (( success == 0 )); then
   echo "[$(ts)] Codex 未產出包含 $CURRENT_COUNT 支節目的有效分析" >&2
   [[ -x /Users/tc/.local/bin/rockstock-notify.sh ]] && \
     /Users/tc/.local/bin/rockstock-notify.sh \
-      "陸股節目增量分析失敗 $D" "$CURRENT_COUNT 支逐字稿待分析" high
+      "陸股節目增量分析失敗 $D" "${failure_hint:-Codex 未產出有效結果}；$CURRENT_COUNT 支逐字稿待分析" high
   exit 1
 fi
 

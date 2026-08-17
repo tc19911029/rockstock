@@ -45,8 +45,33 @@ for f in "$SRC"/*.sh; do
   fi
 done
 
+helper="$SRC/rockstock-codex-cli.sh"
+codex_health=0
+if [[ -r "$helper" ]]; then
+  source "$helper"
+  if rockstock_codex_preflight; then
+    echo "✔  Codex CLI 預檢通過：${CODEX_BIN}（${ROCKSTOCK_CODEX_LOGIN_STATUS}）"
+  else
+    echo "⚠️  Codex CLI 預檢失敗：${ROCKSTOCK_CODEX_ERROR_KIND:-UNKNOWN}（排程分析一定失敗）"
+    drift=1
+    codex_health=1
+  fi
+fi
+
 if (( CHECK )); then
+
+  for f in "$SRC"/*.sh; do
+    [[ "$(basename "$f")" == "rockstock-codex-cli.sh" ]] && continue
+    if grep -q '\$CODEX_BIN.*exec' "$f" && ! grep -q 'rockstock-codex-cli.sh' "$f"; then
+      echo "⚠️  $(basename "$f") 會執行 Codex，但未載入共用解析器"
+      drift=1
+    fi
+  done
+
   (( drift )) && { echo "→ 有漂移，repo 的改動可能沒在生產跑"; exit 1; }
   echo "→ 全部同步 ✅"
+elif (( codex_health )); then
+  echo "→ 腳本已同步，但 Codex 預檢失敗；停止後續排程安裝" >&2
+  exit 1
 fi
 exit 0
