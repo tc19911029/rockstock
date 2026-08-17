@@ -6,7 +6,6 @@ import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import {
-  CodexBusyError,
   CodexUnavailableError,
   runCodexAnalysis,
 } from '@/lib/ai/codexCliRunner';
@@ -61,21 +60,14 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
-    if (!(err instanceof CodexBusyError)) {
-      console.error('coach/codex-followup error:', err);
-    }
+    console.error('coach/codex-followup error:', err);
     const message = err instanceof Error ? err.message : 'Codex 追問失敗';
-    const status = err instanceof CodexBusyError
-      ? 409
-      : err instanceof CodexUnavailableError
-        ? 503
-        : req.signal.aborted
-          ? 499
-          : 500;
-    return Response.json(
-      { error: message },
-      { status, ...(status === 409 ? { headers: { 'Retry-After': '5' } } : {}) },
-    );
+    const status = err instanceof CodexUnavailableError
+      ? 503
+      : req.signal.aborted
+        ? 499
+        : 500;
+    return Response.json({ error: message }, { status });
   } finally {
     if (inputDir) await rm(inputDir, { recursive: true, force: true }).catch(() => {});
   }

@@ -41,6 +41,21 @@ interface HistoryEntry {
   savedAt: string;
 }
 
+type AnalysisJobState = 'preparing' | 'queued' | 'running' | 'completed' | 'failed';
+
+interface AnalysisJobStatus {
+  jobId: string;
+  state: AnalysisJobState;
+  queuePosition: number | null;
+  activeCount: number;
+  queuedCount: number;
+  maxConcurrent: number;
+  elapsedMs: number;
+  phaseElapsedMs: number;
+  result?: DigestResponse;
+  error?: string;
+}
+
 type HistoryMap = Record<string, HistoryEntry>;
 
 function storageKey(market: string, symbol: string, date: string): string {
@@ -112,6 +127,22 @@ function formatSavedAt(iso: string): string {
 
 function displaySymbol(s: string): string {
   return s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+}
+
+function isAnalysisJobStatus(value: unknown): value is AnalysisJobStatus {
+  if (!value || typeof value !== 'object') return false;
+  const job = value as Partial<AnalysisJobStatus>;
+  return typeof job.jobId === 'string'
+    && ['preparing', 'queued', 'running', 'completed', 'failed'].includes(job.state ?? '')
+    && typeof job.activeCount === 'number'
+    && typeof job.maxConcurrent === 'number';
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}分${String(seconds).padStart(2, '0')}秒` : `${seconds}秒`;
 }
 
 /** verdict -> 配色（單行 chip） */
@@ -241,6 +272,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
 
   const [data, setData] = useState<DigestResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<AnalysisJobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [chat, setChat] = useState<ChatMessage[]>([]);
@@ -250,6 +282,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
 
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const aborted = useRef(false);
+  const requestVersion = useRef(0);
 
   const persistKey = (symbol && date) ? storageKey(market, bareSymbol, date) : '';
 
@@ -264,9 +297,11 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
 
   // 切股票/切日期：重設 state + 嘗試載入歷史
   useEffect(() => {
+    requestVersion.current += 1;
     aborted.current = false;
     setError(null);
     setLoading(false);
+    setAnalysisProgress(null);
     setInput('');
     setChatError(null);
 
@@ -303,7 +338,10 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
 
   const ask = async (opts?: { forceRefresh?: boolean }) => {
     if (loading || !candle || !symbol) return;
+    const requestId = ++requestVersion.current;
+    const isStale = () => aborted.current || requestVersion.current !== requestId;
     setLoading(true);
+    setAnalysisProgress(null);
     setError(null);
     try {
       const changePercent = prev ? ((candle.close - prev.close) / prev.close) * 100 : undefined;
@@ -346,60 +384,83 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         symbol: bareSymbol,
         name,
         date,
-          ohlcv: {
-            open: candle.open, high: candle.high, low: candle.low, close: candle.close,
-            volume: candle.volume,
-            changePercent,
-          },
-          ma: { ma5: candle.ma5, ma10: candle.ma10, ma20: candle.ma20, ma60: candle.ma60 },
-          indicator: {
-            kdK: candle.kdK, kdD: candle.kdD,
-            macdDIF: candle.macdDIF, macdSignal: candle.macdSignal, macdOSC: candle.macdOSC,
-          },
-          trend: trendState ?? '',
-          trendPosition: trendPosition ?? '',
-          sixCond: sixConditions?.totalScore,
-          sixCondBreakdown: sixConditions ? {
-            trend:     sixConditions.trend.pass,
-            position:  sixConditions.position.pass,
-            kbar:      sixConditions.kbar.pass,
-            ma:        sixConditions.ma.pass,
-            volume:    sixConditions.volume.pass,
-            indicator: sixConditions.indicator.pass,
-          } : undefined,
-          signals,
-          prohibitions: longProhibitions?.reasons ?? [],
-          winnerBullishPatterns: winnerPatterns?.bullishPatterns.map(p => p.name) ?? [],
-          winnerBearishPatterns: winnerPatterns?.bearishPatterns.map(p => p.name) ?? [],
-          hasPosition,
-          positionCost: held?.costPrice ?? null,
-          recentCandles,
-          chartScreenshot,
+        ohlcv: {
+          open: candle.open, high: candle.high, low: candle.low, close: candle.close,
+          volume: candle.volume,
+          changePercent,
+        },
+        ma: { ma5: candle.ma5, ma10: candle.ma10, ma20: candle.ma20, ma60: candle.ma60 },
+        indicator: {
+          kdK: candle.kdK, kdD: candle.kdD,
+          macdDIF: candle.macdDIF, macdSignal: candle.macdSignal, macdOSC: candle.macdOSC,
+        },
+        trend: trendState ?? '',
+        trendPosition: trendPosition ?? '',
+        sixCond: sixConditions?.totalScore,
+        sixCondBreakdown: sixConditions ? {
+          trend:     sixConditions.trend.pass,
+          position:  sixConditions.position.pass,
+          kbar:      sixConditions.kbar.pass,
+          ma:        sixConditions.ma.pass,
+          volume:    sixConditions.volume.pass,
+          indicator: sixConditions.indicator.pass,
+        } : undefined,
+        signals,
+        prohibitions: longProhibitions?.reasons ?? [],
+        winnerBullishPatterns: winnerPatterns?.bullishPatterns.map(p => p.name) ?? [],
+        winnerBearishPatterns: winnerPatterns?.bearishPatterns.map(p => p.name) ?? [],
+        hasPosition,
+        positionCost: held?.costPrice ?? null,
+        recentCandles,
+        chartScreenshot,
         forceRefresh: opts?.forceRefresh ?? false,
+        asyncProgress: true,
       });
-      const waitStartedAt = Date.now();
-      let res: Response;
-      let body: unknown;
-      for (;;) {
-        res = await fetch('/api/coach/chart-digest', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: requestBody,
-        });
-        body = await res.json();
-        if (res.status !== 409) break;
-        if (aborted.current) return;
-        if (Date.now() - waitStartedAt > 13 * 60 * 1000) {
-          throw new Error('Codex 等候逾時，請稍後重試');
-        }
-        const retrySeconds = Number(res.headers.get('Retry-After')) || 5;
-        await new Promise(resolve => window.setTimeout(resolve, retrySeconds * 1000));
-      }
-      if (aborted.current) return;
+      const res = await fetch('/api/coach/chart-digest', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: requestBody,
+      });
+      let body: unknown = await res.json();
+      if (isStale()) return;
       if (!res.ok) {
         const errorBody = body as { error?: string };
         throw new Error(errorBody?.error ?? `HTTP ${res.status}`);
       }
+
+      if (res.status === 202) {
+        if (!isAnalysisJobStatus(body)) throw new Error('分析工作狀態格式錯誤');
+        let job = body;
+        for (;;) {
+          if (isStale()) return;
+          setAnalysisProgress(job);
+          if (job.state === 'completed') {
+            body = job.result;
+            break;
+          }
+          if (job.state === 'failed') {
+            throw new Error(job.error ?? 'Codex 分析失敗');
+          }
+          if (job.elapsedMs > 60 * 60 * 1000) {
+            throw new Error('Codex 排隊或分析超過 60 分鐘，請重新分析');
+          }
+          await new Promise(resolve => window.setTimeout(resolve, 1000));
+          if (isStale()) return;
+          const statusRes = await fetch(
+            `/api/coach/chart-digest?jobId=${encodeURIComponent(job.jobId)}`,
+            { cache: 'no-store' },
+          );
+          const statusBody: unknown = await statusRes.json();
+          if (!statusRes.ok) {
+            const errorBody = statusBody as { error?: string };
+            throw new Error(errorBody.error ?? `HTTP ${statusRes.status}`);
+          }
+          if (!isAnalysisJobStatus(statusBody)) throw new Error('分析進度格式錯誤');
+          job = statusBody;
+        }
+      }
+
+      if (isStale()) return;
       if (!isValidV3(body) || body.generatedBy !== 'codex') {
         throw new Error('Codex 回覆格式不完整，請重新分析');
       }
@@ -407,10 +468,13 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
       setChat([]);
       setChatError(null);
     } catch (err) {
-      if (aborted.current) return;
+      if (isStale()) return;
       setError(err instanceof Error ? err.message : 'digest failed');
     } finally {
-      if (!aborted.current) setLoading(false);
+      if (!isStale()) {
+        setAnalysisProgress(null);
+        setLoading(false);
+      }
     }
   };
 
@@ -427,23 +491,11 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         messages: nextMessages,
         context: buildFollowupContext(data, symbol, name, date, candle),
       });
-      const waitStartedAt = Date.now();
-      let res: Response;
-      for (;;) {
-        res = await fetch('/api/coach/codex-followup', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: requestBody,
-        });
-        if (res.status !== 409) break;
-        await res.body?.cancel();
-        if (aborted.current) return;
-        if (Date.now() - waitStartedAt > 13 * 60 * 1000) {
-          throw new Error('Codex 等候逾時，請稍後重試');
-        }
-        const retrySeconds = Number(res.headers.get('Retry-After')) || 5;
-        await new Promise(resolve => window.setTimeout(resolve, retrySeconds * 1000));
-      }
+      const res = await fetch('/api/coach/codex-followup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: requestBody,
+      });
       if (!res.ok) {
         const errorBody = await res.json().catch(() => null) as { error?: string } | null;
         throw new Error(errorBody?.error ?? `HTTP ${res.status}`);
@@ -488,11 +540,48 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
   }
 
   if (loading) {
+    const state = analysisProgress?.state ?? 'preparing';
+    const phaseIndex = state === 'preparing' ? 0 : state === 'queued' ? 1 : 2;
+    const title = state === 'queued'
+      ? `💬 排隊中 · 第 ${analysisProgress?.queuePosition ?? '—'} 位`
+      : state === 'running'
+        ? '💬 Codex 正在進行深度分析'
+        : '💬 正在整理走圖、課程與最新資料';
+    const detail = state === 'queued'
+      ? `目前 ${analysisProgress?.activeCount ?? 0}/${analysisProgress?.maxConcurrent ?? 3} 個分析槽使用中，輪到時會自動開始。`
+      : state === 'running'
+        ? `目前 ${analysisProgress?.activeCount ?? 1}/${analysisProgress?.maxConcurrent ?? 3} 個分析槽使用中；本階段已執行 ${formatElapsed(analysisProgress?.phaseElapsedMs ?? 0)}。`
+        : '完成資料準備後會自動取得分析槽；同一時間最多分析 3 檔股票。';
     return (
       <div className="w-full mb-3 px-3 py-3 rounded-lg border border-purple-500/30 bg-purple-500/5 text-[11px] text-purple-200 space-y-1.5">
-        <div className="animate-pulse text-center">💬 Codex 正在讀取課程、走圖與最新資料…</div>
+        <div className="animate-pulse text-center font-semibold">{title}</div>
+        <div className="grid grid-cols-4 gap-1" aria-label="分析階段進度">
+          {['準備資料', '排隊', '深度分析', '完成'].map((label, index) => (
+            <div
+              key={label}
+              className={`rounded px-1 py-1 text-center text-[9px] border ${
+                index < phaseIndex
+                  ? 'border-purple-400/40 bg-purple-500/25 text-purple-100'
+                  : index === phaseIndex
+                    ? 'border-purple-300/70 bg-purple-500/35 text-white'
+                    : 'border-purple-500/15 bg-purple-500/5 text-purple-200/45'
+              }`}
+            >
+              {index < phaseIndex ? '✓ ' : ''}{label}
+            </div>
+          ))}
+        </div>
         <div className="text-purple-200/70 leading-relaxed text-center">
-          深度分析會查核八大面向，通常需要數分鐘；若已有另一筆分析，本頁會自動等待，不必重複按。
+          {detail}
+        </div>
+        {analysisProgress && (
+          <div className="flex items-center justify-center gap-3 text-[10px] text-purple-200/55">
+            <span>總經過 {formatElapsed(analysisProgress.elapsedMs)}</span>
+            {state === 'queued' && <span>隊列共 {analysisProgress.queuedCount} 筆</span>}
+          </div>
+        )}
+        <div className="text-[9px] text-purple-200/45 text-center">
+          顯示真實階段、順位與時間；Codex CLI 不提供可靠百分比。
         </div>
       </div>
     );

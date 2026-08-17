@@ -7,19 +7,22 @@
  */
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import {
-  CodexBusyError,
   CodexUnavailableError,
   runCodexAnalysis,
 } from '@/lib/ai/codexCliRunner';
+import {
+  getCodexSchedulerSnapshot,
+  type CodexQueueProgress,
+} from '@/lib/ai/codexConcurrency';
 import { prefetchZhuChart } from '@/lib/ai/zhuPrefetch';
 import { parseZhuDigest } from '@/lib/ai/zhuDigestValidation';
 import type { DigestResponse } from '@/lib/ai/zhuTypes';
-import { InFlightDeduper } from '@/lib/ai/inFlightDeduper';
 
 export const runtime = 'nodejs';
 
@@ -92,14 +95,37 @@ const reqSchema = z.object({
   chartScreenshot: z.string().max(5_000_000).nullable().optional(),
   /** true = 略過 server cache，強制重新請 Codex 分析 */
   forceRefresh: z.boolean().optional(),
+  /** true = 立即回 jobId，client 以 GET 輪詢真實排隊與執行進度。 */
+  asyncProgress: z.boolean().optional(),
 });
 
 type DigestInput = z.infer<typeof reqSchema>;
 
 const cache = new Map<string, { value: DigestResponse; expires: number }>();
-const inFlight = new InFlightDeduper<string, DigestResponse>();
-let activeKey: string | null = null;
 const CACHE_TTL = 24 * 60 * 60 * 1000;
+const JOB_TTL = 60 * 60 * 1000;
+
+type ChartDigestJobState = 'preparing' | 'queued' | 'running' | 'completed' | 'failed';
+
+interface ChartDigestJob {
+  id: string;
+  key: string;
+  symbol: string;
+  name: string;
+  state: ChartDigestJobState;
+  createdAt: number;
+  phaseStartedAt: number;
+  updatedAt: number;
+  queuePosition: number | null;
+  activeCount: number;
+  maxConcurrent: number;
+  result?: DigestResponse;
+  error?: string;
+  promise?: Promise<DigestResponse>;
+}
+
+const jobs = new Map<string, ChartDigestJob>();
+const activeJobByKey = new Map<string, string>();
 
 /** v4 後綴：避免把舊 Claude 回覆標示成 Codex 產物。 */
 function cacheKey(input: DigestInput): string {
@@ -130,7 +156,10 @@ function buildCodexPrompt(questionFile: string, requestTimestamp: string, hasScr
 投資結論必須是教學與風險管理用途，不得把不完整資料包裝成保證獲利。`;
 }
 
-async function generateDigest(input: DigestInput): Promise<DigestResponse> {
+async function generateDigest(
+  input: DigestInput,
+  onProgress?: (progress: CodexQueueProgress) => void,
+): Promise<DigestResponse> {
   const prefetch = await prefetchZhuChart({
     market: input.market,
     symbol: input.symbol,
@@ -144,8 +173,15 @@ async function generateDigest(input: DigestInput): Promise<DigestResponse> {
     const screenshotPath = input.chartScreenshot
       ? path.join(requestDir, 'chart-screenshot.png')
       : null;
-    const { chartScreenshot: _omitted, ...inputWithoutScreenshot } = input;
-    void _omitted;
+    const {
+      chartScreenshot: _omittedScreenshot,
+      forceRefresh: _omittedForceRefresh,
+      asyncProgress: _omittedAsyncProgress,
+      ...inputWithoutScreenshot
+    } = input;
+    void _omittedScreenshot;
+    void _omittedForceRefresh;
+    void _omittedAsyncProgress;
     await writeFile(questionFile, JSON.stringify({
       ...inputWithoutScreenshot,
       requestTimestamp,
@@ -161,12 +197,116 @@ async function generateDigest(input: DigestInput): Promise<DigestResponse> {
       {
         outputSchema: CHART_OUTPUT_SCHEMA,
         imagePaths: screenshotPath ? [screenshotPath] : [],
+        onProgress,
       },
     );
     return parseZhuDigest(JSON.parse(raw), requestTimestamp);
   } finally {
     await rm(requestDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+function saveCache(key: string, answer: DigestResponse): void {
+  cache.set(key, { value: answer, expires: Date.now() + CACHE_TTL });
+  if (cache.size > 200) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey) cache.delete(firstKey);
+  }
+}
+
+function cleanupJobs(now = Date.now()): void {
+  for (const [jobId, job] of jobs) {
+    const finished = job.state === 'completed' || job.state === 'failed';
+    if (finished && now - job.updatedAt > JOB_TTL) jobs.delete(jobId);
+  }
+}
+
+function publicJobStatus(job: ChartDigestJob) {
+  const now = Date.now();
+  const scheduler = getCodexSchedulerSnapshot();
+  return {
+    jobId: job.id,
+    symbol: job.symbol,
+    name: job.name,
+    state: job.state,
+    queuePosition: job.queuePosition,
+    activeCount: scheduler.activeCount,
+    queuedCount: scheduler.queuedCount,
+    maxConcurrent: scheduler.maxConcurrent,
+    elapsedMs: Math.max(0, now - job.createdAt),
+    phaseElapsedMs: Math.max(0, now - job.phaseStartedAt),
+    result: job.result,
+    error: job.error,
+  };
+}
+
+function findActiveJob(key: string): ChartDigestJob | null {
+  const jobId = activeJobByKey.get(key);
+  if (!jobId) return null;
+  const job = jobs.get(jobId);
+  if (job && job.state !== 'completed' && job.state !== 'failed') return job;
+  activeJobByKey.delete(key);
+  return null;
+}
+
+function startJob(key: string, input: DigestInput): ChartDigestJob {
+  const now = Date.now();
+  const scheduler = getCodexSchedulerSnapshot();
+  const job: ChartDigestJob = {
+    id: randomUUID(),
+    key,
+    symbol: input.symbol,
+    name: input.name,
+    state: 'preparing',
+    createdAt: now,
+    phaseStartedAt: now,
+    updatedAt: now,
+    queuePosition: null,
+    activeCount: scheduler.activeCount,
+    maxConcurrent: scheduler.maxConcurrent,
+  };
+  jobs.set(job.id, job);
+  activeJobByKey.set(key, job.id);
+
+  job.promise = generateDigest(input, progress => {
+    const changedPhase = job.state !== progress.state;
+    job.state = progress.state;
+    job.queuePosition = progress.queuePosition;
+    job.activeCount = progress.activeCount;
+    job.maxConcurrent = progress.maxConcurrent;
+    job.updatedAt = Date.now();
+    if (changedPhase) job.phaseStartedAt = job.updatedAt;
+  }).then(answer => {
+    saveCache(key, answer);
+    job.state = 'completed';
+    job.queuePosition = null;
+    job.result = answer;
+    job.updatedAt = Date.now();
+    job.phaseStartedAt = job.updatedAt;
+    return answer;
+  }).catch(error => {
+    job.state = 'failed';
+    job.queuePosition = null;
+    job.error = error instanceof Error ? error.message : 'Codex 分析失敗';
+    job.updatedAt = Date.now();
+    job.phaseStartedAt = job.updatedAt;
+    throw error;
+  }).finally(() => {
+    if (activeJobByKey.get(key) === job.id) activeJobByKey.delete(key);
+  });
+  void job.promise.catch(() => {});
+  return job;
+}
+
+export async function GET(req: NextRequest) {
+  cleanupJobs();
+  const jobId = req.nextUrl.searchParams.get('jobId');
+  if (!jobId) return Response.json({ error: '缺少 jobId' }, { status: 400 });
+  const job = jobs.get(jobId);
+  if (!job) return Response.json({ error: '分析工作不存在或已過期' }, { status: 404 });
+  return Response.json(publicJobStatus(job), {
+    headers: { 'Cache-Control': 'no-store' },
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -180,6 +320,7 @@ export async function POST(req: NextRequest) {
       );
     }
     const input = parsed.data;
+    cleanupJobs();
 
     const key = cacheKey(input);
     if (!input.forceRefresh) {
@@ -189,45 +330,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 同股票、日期與訊號的重複點擊共用工作；不同股票先回 busy，client 會依 Retry-After 自動等候。
-    const existing = inFlight.get(key);
-    if (!existing && activeKey) throw new CodexBusyError();
-    let shared = !!existing;
-    let analysis = existing;
-    if (!analysis) {
-      activeKey = key;
-      const created = inFlight.run(key, () => generateDigest(input));
-      analysis = created.promise;
-      shared = created.shared;
-      void analysis.then(
-        () => { if (activeKey === key) activeKey = null; },
-        () => { if (activeKey === key) activeKey = null; },
-      );
-    }
-    const answer = await analysis;
-
-    cache.set(key, { value: answer, expires: Date.now() + CACHE_TTL });
-    if (cache.size > 200) {
-      const firstKey = cache.keys().next().value;
-      if (firstKey) cache.delete(firstKey);
+    const existing = findActiveJob(key);
+    const job = existing ?? startJob(key, input);
+    if (input.asyncProgress) {
+      return Response.json(publicJobStatus(job), {
+        status: 202,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Retry-After': '1',
+        },
+      });
     }
 
-    return Response.json({ ...answer, sharedInFlight: shared });
+    const answer = await job.promise;
+    return Response.json({ ...answer, sharedInFlight: !!existing });
   } catch (err) {
-    if (!(err instanceof CodexBusyError)) {
-      console.error('coach/chart-digest error:', err);
-    }
+    console.error('coach/chart-digest error:', err);
     const message = err instanceof Error ? err.message : 'digest 失敗';
-    const status = err instanceof CodexBusyError
-      ? 409
-      : err instanceof CodexUnavailableError
-        ? 503
-        : req.signal.aborted
-          ? 499
-          : 500;
-    return Response.json(
-      { error: message },
-      { status, ...(status === 409 ? { headers: { 'Retry-After': '5' } } : {}) },
-    );
+    const status = err instanceof CodexUnavailableError
+      ? 503
+      : req.signal.aborted
+        ? 499
+        : 500;
+    return Response.json({ error: message }, { status });
   }
 }

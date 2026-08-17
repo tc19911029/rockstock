@@ -3,19 +3,14 @@ import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  codexScheduler,
+  type CodexQueueProgress,
+} from '@/lib/ai/codexConcurrency';
 
 const DEFAULT_CODEX_PATH = '/Applications/ChatGPT.app/Contents/Resources/codex';
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
-
-let codexRunActive = false;
-
-export class CodexBusyError extends Error {
-  constructor() {
-    super('Codex 正在分析另一個問題，請稍後再試');
-    this.name = 'CodexBusyError';
-  }
-}
 
 export class CodexUnavailableError extends Error {
   constructor(message = '找不到 Codex CLI，請先開啟 Codex App 並確認已登入') {
@@ -118,26 +113,29 @@ export interface RunCodexOptions {
   imagePaths?: string[];
   timeoutMs?: number;
   signal?: AbortSignal;
+  onProgress?: (progress: CodexQueueProgress) => void;
 }
 
 /**
  * 以本機已登入的 Codex App 認證執行一次唯讀分析，回傳最後一則訊息。
- * 同一時間只允許一個分析，避免重複點擊耗盡本機與帳號資源。
+ * 全系統最多同時執行三個分析；超出的工作依 FIFO 排隊。
  */
 export async function runCodexAnalysis(
   prompt: string,
   options: RunCodexOptions = {},
 ): Promise<string> {
-  if (codexRunActive) throw new CodexBusyError();
-  codexRunActive = true;
-
   const projectRoot = options.projectRoot ?? process.cwd();
   let runDir: string | null = null;
+  let releaseSlot: (() => void) | null = null;
 
   try {
+    const executable = await resolveCodexExecutable();
+    releaseSlot = await codexScheduler.acquire({
+      signal: options.signal,
+      onProgress: options.onProgress,
+    });
     runDir = await mkdtemp(path.join(os.tmpdir(), 'rockstock-codex-'));
     const outputFile = path.join(runDir, 'last-message.txt');
-    const executable = await resolveCodexExecutable();
     const args = buildCodexExecArgs({
       projectRoot,
       prompt,
@@ -155,7 +153,7 @@ export async function runCodexAnalysis(
     if (!result) throw new Error('Codex 沒有回傳分析內容');
     return result;
   } catch (error) {
-    if (error instanceof CodexBusyError || error instanceof CodexUnavailableError) throw error;
+    if (error instanceof CodexUnavailableError) throw error;
     if (options.signal?.aborted) throw new Error('Codex 分析已取消');
     const message = error instanceof Error ? error.message : String(error);
     if (/ENOENT|not found/i.test(message)) throw new CodexUnavailableError();
@@ -164,7 +162,7 @@ export async function runCodexAnalysis(
     }
     throw new Error('Codex 分析失敗，請確認 Codex App 已登入後重試');
   } finally {
-    codexRunActive = false;
+    releaseSlot?.();
     if (runDir) await rm(runDir, { recursive: true, force: true }).catch(() => {});
   }
 }
