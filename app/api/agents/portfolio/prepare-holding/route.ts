@@ -15,6 +15,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { loadScanSession, listScanDates } from '@/lib/storage/scanStorage';
 import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import { buildTechnicalQuestion } from '@/lib/agents/agents/technicalAgent';
@@ -188,6 +189,9 @@ async function prepareSingle(
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date, symbol, all } = parsed.data;

@@ -13,6 +13,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import { loadScanSession } from '@/lib/storage/scanStorage';
 import {
@@ -44,6 +45,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   const parsed = dateSchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date } = parsed.data;

@@ -21,6 +21,9 @@ interface MarketHealthLite {
   l2: { status: string; quoteCount: number | null; ageSeconds: number | null; updatedAt: string | null };
   l2Sources?: { alertLevel: string; consecutiveEmptyCount: number; isTradingDay: boolean };
   l4?: { status: string; lastScanDate: string | null; lastScanCount: number; lastScanTime: string | null; todayHasIntraday: boolean };
+  limitUpConsistency?: { level: string; suspicious: number };
+  l1l2Consistency?: { level: string; diff1pct: number; diff5pct: number; total: number; reason?: string; snapshotUpdatedAt?: string };
+  strategyReadiness?: { status: string; readyCount: number; requiredCount: number; missing: string[]; invalid: string[] };
 }
 
 interface DependencyHealth {
@@ -37,11 +40,17 @@ function deriveMarketLight(m: MarketHealthLite | null): LightLevel {
   if (m.coverageRate != null && m.coverageRate < 0.90) return 'red';
   if ((m.stocksStale ?? 0) > 200) return 'red';
   if (m.l2Sources?.alertLevel === 'critical') return 'red';
+  if (m.l4?.status !== 'fresh') return 'red';
+  if (m.strategyReadiness && m.strategyReadiness.status !== 'ready') return 'red';
+  if (m.limitUpConsistency?.level === 'critical') return 'red';
+  if (m.l1l2Consistency?.level === 'critical') return 'red';
 
   if (m.health === 'warning') return 'yellow';
   if (m.coverageRate != null && m.coverageRate < 0.97) return 'yellow';
   if ((m.stocksStale ?? 0) > 50) return 'yellow';
   if (m.l2Sources?.alertLevel === 'warning') return 'yellow';
+  if (m.limitUpConsistency?.level === 'warning') return 'yellow';
+  if (m.l1l2Consistency?.level === 'warning' || m.l1l2Consistency?.level === 'unavailable') return 'yellow';
 
   return 'green';
 }
@@ -304,6 +313,21 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
               warn={data.l4 != null && !data.l4.todayHasIntraday && !isWeekendOrHoliday()}
               hint="今日盤中時段（09:00-13:30 CST）是否有產生 intraday 掃描；週末/國定假日為非交易日，顯示「—」屬正常" />
           </Section>
+
+          <Section title="跨層資料一致性">
+            <Row
+              label="L1 ↔ L2 收盤價"
+              value={zhStatus(data.l1l2Consistency?.level ?? 'unavailable')}
+              bold
+              warn={data.l1l2Consistency?.level === 'warning' || data.l1l2Consistency?.level === 'unavailable'}
+              hint={data.l1l2Consistency?.reason ?? '以同一交易日收盤後的 L2 最終快照，抽樣比對 L1 日 K 收盤價'}
+            />
+            <Row label="偏差 > 1%" value={`${data.l1l2Consistency?.diff1pct ?? 0} / ${data.l1l2Consistency?.total ?? 0} 檔`} />
+            <Row label="漲停價一致性" value={zhStatus(data.limitUpConsistency?.level ?? 'unknown')}
+              warn={data.limitUpConsistency?.level === 'warning'} />
+            <Row label="正式策略" value={zhStatus(data.strategyReadiness?.status ?? 'unknown')}
+              warn={data.strategyReadiness != null && data.strategyReadiness.status !== 'ready'} />
+          </Section>
         </>
       )}
     </div>
@@ -323,6 +347,10 @@ function zhStatus(s: string): string {
     unknown: '未知',
     missing: '無快照',
     'pre-market': '盤前（前一交易日）',
+    unavailable: '資料不足',
+    critical: '嚴重異常',
+    ready: '已就緒',
+    partial: '不完整',
   };
   return map[s?.toLowerCase()] ?? s;
 }

@@ -8,6 +8,7 @@
  */
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import type { MarketId } from '@/lib/scanner/types';
 
@@ -24,6 +25,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let bodyJson: { market?: MarketId; action?: string; symbol?: string; name?: string };
   try { bodyJson = await req.json(); } catch { return apiError('invalid json', 400); }
   const market = (bodyJson.market ?? 'TW') as MarketId;

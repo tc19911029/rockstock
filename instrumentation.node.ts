@@ -243,7 +243,7 @@ export async function register() {
     const data = await callRoute(
       `/api/cron/update-intraday?market=${market}`,
       `${market} update-intraday`,
-    ) as { data?: { count?: number; skipped?: boolean; reason?: string } } | null;
+    ) as { data?: { count?: number; skipped?: boolean; reason?: string; alert?: boolean; alertLevel?: string } } | null;
     const payload = data?.data ?? data ?? {};
     if ((payload as { skipped?: boolean }).skipped) {
       console.log(`[local-cron] ${market} L2 刷新跳過：${(payload as { reason?: string }).reason}`);
@@ -251,32 +251,25 @@ export async function register() {
       console.log(`[local-cron] ${market} L2 刷新 ${(payload as { count?: number }).count ?? -1} 支`);
     }
 
-    // Watchdog：盤中時 check L2 距上次成功 > 10 分鐘 → 異常
-    try {
-      const { checkL2PollingHealth } = await import('@/lib/datasource/IntradayCache');
-      const health = checkL2PollingHealth(market, 10);
-      if (health.stale) {
-        console.error(
-          `[L2-watchdog] ★ ${market} L2 polling 異常：盤中但上次成功刷新已 ${health.staleMin} 分鐘前 ` +
-          `(lastSuccess=${health.lastSuccessAt})`,
-        );
-        // 額外 fire webhook alert（如有設定）
-        const webhook = process.env.HEALTH_ALERT_WEBHOOK_URL;
-        if (webhook) {
-          fetch(webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text: `🚨 ${market} L2 polling stale: 上次成功 ${health.staleMin} 分鐘前`,
-              level: 'critical',
-              market,
-              staleMin: health.staleMin,
-            }),
-            signal: AbortSignal.timeout(5000),
-          }).catch(() => {});
-        }
+    // update-intraday route 已在 Node runtime 內完成 provider 健康判斷；instrumentation
+    // 只消費回應，避免直接 import IntradayCache 把整個 data/ 動態路徑拉進啟動 trace。
+    if ((payload as { alert?: boolean }).alert) {
+      const alertLevel = (payload as { alertLevel?: string }).alertLevel ?? 'critical';
+      console.error(`[L2-watchdog] ★ ${market} L2 刷新異常：alertLevel=${alertLevel}`);
+      const webhook = process.env.HEALTH_ALERT_WEBHOOK_URL;
+      if (webhook) {
+        fetch(webhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: `🚨 ${market} L2 polling 異常：本輪無有效快照`,
+            level: alertLevel,
+            market,
+          }),
+          signal: AbortSignal.timeout(5000),
+        }).catch(() => {});
       }
-    } catch { /* watchdog 失敗不影響主流程 */ }
+    }
   }
 
   // ── 盤後：買法 post_close 掃描（scan-bm-batch 3 track）──
@@ -381,7 +374,7 @@ export async function register() {
   // append 用到的 in-memory L2 可能是 13:55 的 stale 快照（還沒抓到 13:30 集合競價最終價）。
   // 結果 ~610 檔 L1 close 被寫成 stale 中間 tick，特別是 .TWO 上櫃股 (8358 金居 5/15+5/19+5/20
   // 即此 bug)。修法：(1) 觸發時間 → 14:15 / 15:45 (再給 L2 三輪 polling 抓收盤集合競價)；
-  // (2) 觸發前強制 call 一次 refreshIntradaySnapshot，確保用最新 L2 而非 in-memory stale。
+  // (2) 觸發前強制呼叫 update-intraday route，確保用最新 L2 而非 in-memory stale。
   const l1SnapshotDone = persistentState.l1SnapshotDone;
   async function appendL1FromSnapshot(market: 'TW' | 'CN') {
     if (deferForWhisper(`${market} append-from-snapshot`)) return;
@@ -404,15 +397,19 @@ export async function register() {
     // 先標記 flag 避免重入，但實際 await refresh 失敗時 reset 讓下一輪重試
     l1SnapshotDone[market] = lastTrading;
 
-    // 觸發前強制 refresh 一次 L2，保證下游 append-from-snapshot 拿到最新 L2 而非 stale。
-    try {
-      const { refreshIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
-      console.log(`[local-cron] ${market} append-from-snapshot 前強制 L2 refresh...`);
-      const snap = await refreshIntradaySnapshot(market);
-      console.log(`[local-cron] ${market} 強制 L2 refresh 完成: ${snap.count} 筆`);
-    } catch (err) {
-      console.warn(`[local-cron] ${market} 強制 L2 refresh 失敗 (繼續 append):`, err);
-      // 不 reset flag — refresh 失敗時 append-from-snapshot 內部會 fallback 打 TWSE realtime
+    // 觸發前透過 Node route 強制 refresh；不要從 instrumentation 直接 import
+    // IntradayCache，否則 Next.js output tracing 會把 18GB runtime data 全部納入。
+    console.log(`[local-cron] ${market} append-from-snapshot 前強制 L2 refresh...`);
+    const refresh = await callRoute(
+      `/api/cron/update-intraday?market=${market}&force=1`,
+      `${market} pre-append L2 refresh`,
+    ) as { data?: { count?: number }; count?: number } | null;
+    const refreshedCount = refresh?.data?.count ?? refresh?.count;
+    if (refresh) {
+      console.log(`[local-cron] ${market} 強制 L2 refresh 完成: ${refreshedCount ?? '?'} 筆`);
+    } else {
+      // 不 reset flag — append-from-snapshot 內部仍會 fallback 打官方盤後 API。
+      console.warn(`[local-cron] ${market} 強制 L2 refresh 失敗 (繼續 append)`);
     }
 
     console.log(`[local-cron] ${market} append-from-snapshot 觸發 (lastTrading=${lastTrading})...`);

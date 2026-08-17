@@ -12,6 +12,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import {
   loadProfiles,
   createProfile,
@@ -30,6 +31,9 @@ export async function GET() {
 const createSchema = z.object({ name: z.string().min(1).max(20) });
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }
   const parsed = createSchema.safeParse(body);
@@ -45,6 +49,9 @@ export async function POST(req: NextRequest) {
 const renameSchema = z.object({ id: z.string(), name: z.string().min(1).max(20) });
 
 export async function PATCH(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }
   const parsed = renameSchema.safeParse(body);
@@ -59,6 +66,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   const id = new URL(req.url).searchParams.get('id') ?? '';
   if (!isValidProfileId(id)) return apiError('invalid profile id', 400);
   try {

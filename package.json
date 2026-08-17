@@ -13,7 +13,8 @@
     "smoke": "npx tsx scripts/smoke-pages.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "check:edge-safe": "npx tsx scripts/check-instrumentation-edge-safe.ts"
+    "check:edge-safe": "npx tsx scripts/check-instrumentation-edge-safe.ts",
+    "check:traces": "npx tsx scripts/check-production-traces.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.138",

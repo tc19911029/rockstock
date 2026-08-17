@@ -50,6 +50,8 @@ export function useBlowoffMarkers(
   interval: string,
   isHolding: boolean,
 ): ChartSignalMarker[] {
+  const lastCandleDate = candles.at(-1)?.date;
+
   return useMemo(() => {
     if (!ticker) return [];
     if (!MINUTE_INTERVALS.has(interval)) return [];
@@ -80,5 +82,5 @@ export function useBlowoffMarkers(
     return markers;
     // 依賴用 lastDate + length 當版本指紋（避免每 render 重算）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker, interval, isHolding, candles.length, candles[candles.length - 1]?.date]);
+  }, [ticker, interval, isHolding, candles.length, lastCandleDate]);
 }

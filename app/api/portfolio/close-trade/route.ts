@@ -18,6 +18,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import {
   appendTrade,
   type TradeExitReason,
@@ -46,6 +47,9 @@ function todayCstDate(): string {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }
   const parsed = closeSchema.safeParse(body);

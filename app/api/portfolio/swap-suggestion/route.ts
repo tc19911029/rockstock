@@ -36,6 +36,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { listOpenHoldings } from '@/lib/agents/portfolio/storage';
 import {
   recommendSwap,
@@ -98,6 +99,9 @@ async function loadRecentReviewsBySymbol(
 
 /** 載入 candles 取最新 close */
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }
   const parsed = bodySchema.safeParse(body);

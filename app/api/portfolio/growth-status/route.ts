@@ -19,6 +19,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import {
   loadGrowthPath, regenGrowthPath, computeProgress, type GrowthPathFile,
 } from '@/lib/portfolio/growthPath';
@@ -86,6 +87,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }
   const parsed = postSchema.safeParse(body);

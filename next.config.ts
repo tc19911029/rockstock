@@ -44,6 +44,31 @@ const nextConfig: NextConfig = {
   experimental: {
     streamingMetadata: false,
   } as NextConfig['experimental'],
+  // Runtime data is read from disk locally and Blob on Vercel. Server bundles
+  // use compiled chunks, so source/test/mobile/temp trees must not be copied
+  // merely because a dynamic fs path caused an overly broad NFT trace.
+  // Python helpers and docs are intentionally left available: some Node routes
+  // execute/read them at runtime.
+  outputFileTracingExcludes: {
+    '/*': [
+      './data/**/*',
+      './app/**/*',
+      './components/**/*',
+      './features/**/*',
+      './lib/**/*',
+      './store/**/*',
+      './types/**/*',
+      './__tests__/**/*',
+      './e2e/**/*',
+      './android/**/*',
+      './ios/**/*',
+      './artifacts/**/*',
+      './tmp/**/*',
+      './coverage/**/*',
+      './public/**/*',
+      './scripts/**/*.{ts,tsx,js,mjs,cjs,sh}',
+    ],
+  },
 };
 
 const createNextConfig = (phase: string): NextConfig => {

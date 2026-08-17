@@ -23,6 +23,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { listScanDates } from '@/lib/storage/scanStorage';
 import { checkLimitUpConsistency, type ConsistencySample } from '@/lib/datasource/limitUpConsistency';
 import { loadStrategyReadiness, type StrategyReadiness } from '@/lib/health/strategyReadiness';
+import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
 
 export const runtime = 'nodejs';
 
@@ -123,7 +124,10 @@ interface L1L2ConsistencyStatus {
   /** 檢查總檔數 */
   total: number;
   /** alert 等級 */
-  level: 'ok' | 'warning' | 'critical';
+  level: 'ok' | 'warning' | 'critical' | 'unavailable';
+  /** 無法執行比較時的原因（例如只有盤中快照，沒有收盤快照）。 */
+  reason?: string;
+  snapshotUpdatedAt?: string;
   /** 樣本（最多 10 檔，偏差最大） */
   samples: Array<{ symbol: string; l1: number; l2: number; pct: number }>;
 }
@@ -306,7 +310,19 @@ async function getL1L2Consistency(market: 'TW' | 'CN'): Promise<L1L2ConsistencyS
   const lastTrading = getLastTradingDay(market);
   const snapshot = await readIntradaySnapshot(market, lastTrading);
   if (!snapshot || snapshot.quotes.length === 0) {
-    return { diff1pct: 0, diff5pct: 0, ohlcInconsistent: 0, total: 0, level: 'ok', samples: [] };
+    return {
+      diff1pct: 0, diff5pct: 0, ohlcInconsistent: 0, total: 0,
+      level: 'unavailable', reason: '找不到最近交易日的 L2 快照', samples: [],
+    };
+  }
+  if (!isFinalTradingSnapshot(market, lastTrading, snapshot.updatedAt)) {
+    return {
+      diff1pct: 0, diff5pct: 0, ohlcInconsistent: 0, total: 0,
+      level: 'unavailable',
+      reason: 'L2 快照早於收盤，不能與收盤日 K 比較',
+      snapshotUpdatedAt: snapshot.updatedAt,
+      samples: [],
+    };
   }
   const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
   const l2Map = new Map(snapshot.quotes.map(q => [q.symbol, q]));
@@ -350,7 +366,11 @@ async function getL1L2Consistency(market: 'TW' | 'CN'): Promise<L1L2ConsistencyS
     : (diff1pct > 10 || ohlcInconsistent > 0) ? 'warning'
     : 'ok';
 
-  return { diff1pct, diff5pct, ohlcInconsistent, total, level, samples };
+  return {
+    diff1pct, diff5pct, ohlcInconsistent, total, level,
+    snapshotUpdatedAt: snapshot.updatedAt,
+    samples,
+  };
 }
 
 async function getMarketHealth(

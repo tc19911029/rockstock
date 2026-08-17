@@ -72,6 +72,8 @@ interface HealthFetchResult {
   /** Limit-up 一致性檢查：抓「假裝沒漲跌」的 quote */
   limitUpConsistencyLevel: string;
   limitUpConsistencySuspicious: number;
+  l1l2ConsistencyLevel: string;
+  l1l2ConsistencyDiff1pct: number;
   raw: unknown;
 }
 
@@ -90,6 +92,7 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
       strategyStatus: 'unknown', strategyReadyCount: 0, strategyRequiredCount: 0,
       strategyMissing: [], strategyInvalid: [],
       limitUpConsistencyLevel: 'unknown', limitUpConsistencySuspicious: 0,
+      l1l2ConsistencyLevel: 'unknown', l1l2ConsistencyDiff1pct: 0,
       raw: { error: `HTTP ${res.status}` },
     };
   }
@@ -112,6 +115,7 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
       missing?: string[]; invalid?: string[];
     };
     limitUpConsistency?: { level?: string; suspicious?: number };
+    l1l2Consistency?: { level?: string; diff1pct?: number };
   };
 
   return {
@@ -139,6 +143,8 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     strategyInvalid: data.strategyReadiness?.invalid ?? [],
     limitUpConsistencyLevel: data.limitUpConsistency?.level ?? 'ok',
     limitUpConsistencySuspicious: data.limitUpConsistency?.suspicious ?? 0,
+    l1l2ConsistencyLevel: data.l1l2Consistency?.level ?? 'unavailable',
+    l1l2ConsistencyDiff1pct: data.l1l2Consistency?.diff1pct ?? 0,
     raw: data,
   };
 }
@@ -211,7 +217,8 @@ export async function GET(req: NextRequest) {
         lines.push(
           `${r.market}: L1=${r.health}/${coverPct} stale=${r.stocksStale ?? '?'} ` +
             `L2=${r.l2Status}/${r.l2AlertLevel} L4=${r.l4Status} ` +
-            `limitUp=${r.limitUpConsistencyLevel}(${r.limitUpConsistencySuspicious})`,
+            `limitUp=${r.limitUpConsistencyLevel}(${r.limitUpConsistencySuspicious}) ` +
+            `L1↔L2=${r.l1l2ConsistencyLevel}(${r.l1l2ConsistencyDiff1pct})`,
         );
       }
       const text = lines.join('\n');
@@ -247,6 +254,8 @@ export async function GET(req: NextRequest) {
         l2AlertLevel: r.l2AlertLevel,
         limitUpConsistencyLevel: r.limitUpConsistencyLevel,
         limitUpConsistencySuspicious: r.limitUpConsistencySuspicious,
+        l1l2ConsistencyLevel: r.l1l2ConsistencyLevel,
+        l1l2ConsistencyDiff1pct: r.l1l2ConsistencyDiff1pct,
       })),
     });
   } catch (err) {

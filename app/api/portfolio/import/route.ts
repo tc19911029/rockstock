@@ -18,6 +18,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { upsertHolding } from '@/lib/agents/portfolio/storage';
 import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
@@ -64,6 +65,9 @@ function todayCstDate(): string {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('invalid JSON body', 400); }
   const parsed = bodySchema.safeParse(body);

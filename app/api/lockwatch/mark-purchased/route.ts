@@ -8,6 +8,7 @@
  */
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
+import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import {
   loadLatestLockWatchSnapshot,
   saveLockWatchSnapshot,
@@ -24,6 +25,9 @@ interface Body {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+
   let body: Body;
   try {
     body = (await req.json()) as Body;

@@ -128,6 +128,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
   // Lightweight polling via /api/portfolio/quotes（穩定快路徑）
   // 改進：AbortController 卸載時取消 + 8s timeout + 連續失敗才提示
   const failureCountRef = useRef(0);
+  const uniqueSymbolsKey = uniqueSymbols.join(',');
   // 報價「拆批抓」，避免自選股拖垮持倉：
   // /api/portfolio/quotes 對無法解析的標的（指數 ^TWII、美股、已下市…）會把所有
   // fallback 來源都跑一輪才放棄，單一「冷」標的就要 3-4 秒。舊版把持倉＋自選股併成
@@ -207,7 +208,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         failureCountRef.current = 0;
       }
     }
-  }, [uniqueSymbols.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [uniqueSymbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch prices 只要有持倉/自選就抓，**不綁面板展開 open**。
   // 原本綁 open 會出事：硬刷新後 open 先 false、持倉又是非同步從 server hydrate，
@@ -226,7 +227,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     };
-  }, [uniqueSymbols.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refreshQuotes, uniqueSymbols.length]);
 
   // ── Portfolio summary ──────────────────────────────────────────────────────
 

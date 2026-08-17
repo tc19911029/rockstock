@@ -13,6 +13,7 @@ export interface OverallHealthSignal {
   l4Status: string;
   l4LastDate: string | null;
   limitUpConsistencyLevel: string;
+  l1l2ConsistencyLevel: string;
   strategyStatus: string;
 }
 
@@ -35,6 +36,8 @@ export function deriveOverallLevel(items: OverallHealthSignal[]): 'green' | 'yel
     if (it.strategyStatus !== 'ready') red++;
     if (it.limitUpConsistencyLevel === 'critical') red++;
     else if (it.limitUpConsistencyLevel === 'warning') yellow++;
+    if (it.l1l2ConsistencyLevel === 'critical') red++;
+    else if (it.l1l2ConsistencyLevel === 'warning' || it.l1l2ConsistencyLevel === 'unavailable') yellow++;
   }
   if (red > 0) return 'red';
   if (yellow > 0) return 'yellow';

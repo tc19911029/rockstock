@@ -34,6 +34,50 @@ interface ReviewResp {
   review: PortfolioReviewFile | null;
 }
 
+interface HoldingFormState {
+  symbol: string;
+  name: string;
+  market: 'TW' | 'CN';
+  entryDate: string;
+  entryPrice: string;
+  shares: string;
+  stopLoss: string;
+  target1: string;
+  target2: string;
+  notes: string;
+}
+
+function HoldingFormField({
+  label,
+  field,
+  value,
+  onChange,
+  type = 'text',
+  required = false,
+  placeholder = '',
+}: {
+  label: string;
+  field: keyof HoldingFormState;
+  value: string;
+  onChange: (field: keyof HoldingFormState, value: string) => void;
+  type?: string;
+  required?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <label className="space-y-1">
+      <span className="text-xs text-muted-foreground">{label}{required && ' *'}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(field, event.target.value)}
+        placeholder={placeholder}
+        className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full text-foreground placeholder-muted-foreground/60 focus:outline-none focus:border-sky-500"
+      />
+    </label>
+  );
+}
+
 function todayYmd(): string {
   const tpe = new Date(Date.now() + 8 * 3600_000);
   return tpe.toISOString().slice(0, 10);
@@ -203,7 +247,7 @@ function PortfolioPage() {
 }
 
 function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<HoldingFormState>({
     symbol: '', name: '', market: 'TW' as 'TW' | 'CN',
     entryDate: todayYmd(),
     entryPrice: '', shares: '',
@@ -212,6 +256,9 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [targetHint, setTargetHint] = useState<string | null>(null);
+  const updateField = useCallback((field: keyof HoldingFormState, value: string) => {
+    setForm(current => ({ ...current, [field]: value }));
+  }, []);
 
   // 課程 CH9-2（2026-07-04）：一鍵帶入六壓力位目標價（使用者按了才寫入，不自動覆寫）
   const fillCourseTargets = async () => {
@@ -268,27 +315,12 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
     }
   };
 
-  const Field = ({
-    label, k, type = 'text', required = false, placeholder = '',
-  }: { label: string; k: keyof typeof form; type?: string; required?: boolean; placeholder?: string }) => (
-    <label className="space-y-1">
-      <span className="text-xs text-muted-foreground">{label}{required && ' *'}</span>
-      <input
-        type={type}
-        value={form[k]}
-        onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-        placeholder={placeholder}
-        className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full text-foreground placeholder-muted-foreground/60 focus:outline-none focus:border-sky-500"
-      />
-    </label>
-  );
-
   return (
     <div className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 space-y-3">
       <h3 className="text-xs font-semibold tracking-wider text-foreground">▸ 新增持股</h3>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Field label="股票代號" k="symbol" required placeholder="2330.TW" />
-        <Field label="名稱" k="name" placeholder="台積電" />
+        <HoldingFormField label="股票代號" field="symbol" value={form.symbol} onChange={updateField} required placeholder="2330.TW" />
+        <HoldingFormField label="名稱" field="name" value={form.name} onChange={updateField} placeholder="台積電" />
         <label className="space-y-1">
           <span className="text-xs text-muted-foreground">市場</span>
           <select
@@ -300,12 +332,12 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
             <option value="CN">陸股</option>
           </select>
         </label>
-        <Field label="進場日期" k="entryDate" type="date" required />
-        <Field label="進場價" k="entryPrice" type="number" required placeholder="215" />
-        <Field label="張數 / 股數" k="shares" type="number" required placeholder="2" />
-        <Field label="停損價" k="stopLoss" type="number" placeholder="195" />
-        <Field label="目標 1" k="target1" type="number" placeholder="240" />
-        <Field label="目標 2" k="target2" type="number" placeholder="260" />
+        <HoldingFormField label="進場日期" field="entryDate" value={form.entryDate} onChange={updateField} type="date" required />
+        <HoldingFormField label="進場價" field="entryPrice" value={form.entryPrice} onChange={updateField} type="number" required placeholder="215" />
+        <HoldingFormField label="張數 / 股數" field="shares" value={form.shares} onChange={updateField} type="number" required placeholder="2" />
+        <HoldingFormField label="停損價" field="stopLoss" value={form.stopLoss} onChange={updateField} type="number" placeholder="195" />
+        <HoldingFormField label="目標 1" field="target1" value={form.target1} onChange={updateField} type="number" placeholder="240" />
+        <HoldingFormField label="目標 2" field="target2" value={form.target2} onChange={updateField} type="number" placeholder="260" />
         <div className="col-span-2 flex items-center gap-2">
           <button
             type="button"

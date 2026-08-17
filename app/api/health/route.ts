@@ -29,6 +29,9 @@ export async function GET() {
 
   return NextResponse.json({
     status: allOk ? 'healthy' : 'degraded',
+    scope: 'infrastructure',
+    note: '此端點只檢查部署環境與 Blob 連線；行情、策略與外部資料健康度請看 /api/health/data 與 /api/health/dependencies。',
+    dataHealthEndpoints: ['/api/health/data', '/api/health/dependencies'],
     env: process.env.VERCEL ? 'vercel' : 'local',
     checks,
   }, { status: allOk ? 200 : 503 });

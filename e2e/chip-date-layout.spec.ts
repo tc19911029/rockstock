@@ -10,7 +10,11 @@ test('集保持股分布週次在窄面板以四欄兩列顯示', async ({ page,
 
   await page.goto('/?load=6770.TW');
   await expect(page.getByText('力積電').first()).toBeVisible({ timeout: 20_000 });
-  await page.getByRole('tab', { name: '籌碼', exact: true }).click();
+  const analysisToggle = page.getByRole('button', { name: /分析面板/ });
+  if (await analysisToggle.isVisible()) await analysisToggle.click();
+  await page.getByRole('tablist', { name: '分析面板' })
+    .getByRole('tab', { name: '籌碼', exact: true })
+    .click();
 
   const weekPicker = page.getByRole('group', { name: '集保持股分布週次' });
   await expect(weekPicker).toBeVisible({ timeout: 20_000 });
