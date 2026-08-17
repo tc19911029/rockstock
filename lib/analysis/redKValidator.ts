@@ -6,9 +6,10 @@
  *
  * 例外處理（避免擋掉強勢飆股）：
  * - 漲停例外（議題 64）：close 達當日漲停 → 視為強紅 K
- * - 跳空高開例外（議題 89）：跳空缺口 ≥ 3% 且 close > open → 視為強紅 K
+ * - 跳空高開例外（議題 89）：紅 K 實體雖小，但相對昨收的當日總漲幅 ≥ 2%
  *
- * 跳空例外的 ≥ 3% 標準與「真突破 ×3%」（抓飆股 p.338）標準一致。
+ * 線上課 CH1-5 的跳空十字案例明確以「當日漲幅」判斷，不能把另一章的
+ * 「真突破 3%」門檻搬來覆蓋這個進場 K 線例外。
  */
 
 import type { MarketId } from '../scanner/types';
@@ -65,10 +66,9 @@ export function validateRedK(
     return { valid: true, reason: 'limit-up', bodyPct, gapPct };
   }
 
-  // 跳空高開例外（議題 89）：跳空 ≥ 3% 且 close > open
-  // ⚠️ 自創 padding（書本沒明寫量化）— 0513 ABCDE D 標自創
-  // 3% 是工程經驗值（≥ 漲停半幅算「強跳空」），未來搬到 bookThresholds.GAP_UP_STRONG_PCT
-  if (gapPct >= 0.03) {
+  // 跳空紅十字例外（線上課 CH1-5）：實體雖小，但相對昨收的總漲幅已達 2%。
+  const totalChangePct = prevClose > 0 ? (kbar.close - prevClose) / prevClose : 0;
+  if (gapPct > 0 && totalChangePct >= 0.02) {
     return { valid: true, reason: 'gap-up', bodyPct, gapPct };
   }
 

@@ -24,6 +24,17 @@ function makeCandles(closes: number[]): Candle[] {
 }
 
 describe('evaluateHolding', () => {
+  test('rejects a zero reference cost instead of returning Infinity', () => {
+    const candles = makeCandles(Array.from({ length: 30 }, (_, i) => 100 + i));
+    expect(() => evaluateHolding({
+      symbol: 'T',
+      entryPrice: 0,
+      stopLoss: 0,
+      candles,
+      todayClose: candles[candles.length - 1].close,
+    })).toThrow('entryPrice must be a finite number greater than 0');
+  });
+
   it('today ≤ stopLoss → stop_loss', () => {
     const candles = makeCandles(Array.from({ length: 30 }, () => 100));
     const r = evaluateHolding({ symbol: 'T', entryPrice: 100, stopLoss: 95, candles, todayClose: 94 });

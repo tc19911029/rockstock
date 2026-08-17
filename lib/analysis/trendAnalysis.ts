@@ -808,16 +808,22 @@ export function evaluateSixConditions(
   // 收盤在K棒上半段：(close - low)/(high - low) >= 0.5
   const closePos  = dayRange > 0 ? (c.close - c.low) / dayRange : 0.5;
 
-  const isLongRedK  = isRedK && bodyPct >= 0.02;
+  const kbarBodyThreshold = params?.kbarMinBodyPct ?? 0.02;
+  const dayChangePct = prev?.close && prev.close > 0 ? (c.close - prev.close) / prev.close : 0;
+  const gapPct = prev?.close && prev.close > 0 ? (c.open - prev.close) / prev.close : 0;
+  const isGapUpTotalGain = isRedK && gapPct > 0 && dayChangePct >= kbarBodyThreshold;
+  const isLongRedK  = isRedK && (bodyPct >= kbarBodyThreshold || isGapUpTotalGain);
   const isHighClose = closePos >= 0.5;
 
   const kbarPass = isLongRedK && isHighClose;
   const kbarType = isLongRedK
     ? kbarPass
-      ? `✅ 長紅K（實體${(bodyPct*100).toFixed(1)}%，高收盤 ${(closePos*100).toFixed(0)}%）`
+      ? isGapUpTotalGain && bodyPct < kbarBodyThreshold
+        ? `✅ 跳空紅K（實體${(bodyPct*100).toFixed(1)}%，當日總漲幅${(dayChangePct*100).toFixed(1)}%，高收盤 ${(closePos*100).toFixed(0)}%）`
+        : `✅ 長紅K（實體${(bodyPct*100).toFixed(1)}%，高收盤 ${(closePos*100).toFixed(0)}%）`
       : `⚠️ 長紅但收盤偏低/上影過長（實體${(bodyPct*100).toFixed(1)}%，收盤位置${(closePos*100).toFixed(0)}%）`
     : isRedK
-    ? `⚠️ 小紅K（實體${(bodyPct*100).toFixed(1)}%，未達2%）`
+    ? `⚠️ 小紅K（實體${(bodyPct*100).toFixed(1)}%，未達${(kbarBodyThreshold*100).toFixed(1)}%）`
     : `❌ 黑K / 不符合`;
 
   // ─────────────────────────────────────────────────────────────────────────

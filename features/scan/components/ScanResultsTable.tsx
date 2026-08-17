@@ -572,18 +572,15 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                               r.mtfScore >= 2 ? 'bg-amber-900/50 text-amber-300' :
                               'bg-red-900/50 text-red-300'
                             }`}>
-                              {r.mtfScore}/7
+                              {r.mtfScore}/4
                             </span>
                           </div>
                           <div className="text-[11px] space-y-1 mt-1">
                             {([
-                              { num: 1, label: '週①趨勢',  score: r.mtfWeeklyChecks?.trend     ?? (r.mtfWeeklyTrend !== '空頭'), desc: '週線頭頭高底底高' },
-                              { num: 2, label: '週②均線',  score: r.mtfWeeklyChecks?.ma        ?? false,                          desc: 'MA5/10/20 三線多排 + MA10/20 向上' },
-                              { num: 3, label: '週③位置',  score: r.mtfWeeklyChecks?.position  ?? false,                          desc: '收盤 > MA10 AND MA20' },
-                              { num: 4, label: '週④量',    score: r.mtfWeeklyChecks?.volume    ?? false,                          desc: '週量 ≥ 前週 × 1.3' },
-                              { num: 5, label: '週⑤紅K',   score: r.mtfWeeklyChecks?.kbar      ?? false,                          desc: '紅K實體≥2% + 高收盤 + 上影≤實體' },
-                              { num: 6, label: '週⑥指標',  score: r.mtfWeeklyChecks?.indicator ?? false,                          desc: 'MACD 綠縮/紅延 + KD 金叉向上' },
-                              { num: 7, label: '月線趨勢',  score: r.mtfMonthlyPass ?? false,                                     desc: '月線不是空頭' },
+                              { num: 1, label: '週①趨勢', score: r.mtfWeeklyProtectionChecks?.trend ?? r.mtfWeeklyChecks?.trend ?? false, desc: '週線頭頭高、底底高（必要）' },
+                              { num: 2, label: '週②方向', score: r.mtfWeeklyProtectionChecks?.maDirection ?? r.mtfWeeklyChecks?.ma ?? false, desc: '週 MA10、MA20 同步向上' },
+                              { num: 3, label: '週③位置', score: r.mtfWeeklyProtectionChecks?.position ?? r.mtfWeeklyChecks?.position ?? false, desc: '週收盤站上 MA20' },
+                              { num: 4, label: '週④壓力', score: r.mtfWeeklyProtectionChecks?.resistance ?? (!r.mtfWeeklyNearResistance || r.mtfWeeklyChecks?.volume === true), desc: '無近前高；接近壓力時必須帶量' },
                             ]).map(({ num, label, score, desc }) => (
                               <div key={num} className="flex items-center gap-2">
                                 <span className={`w-2 h-2 rounded-full shrink-0 ${score ? 'bg-green-400' : 'bg-red-500'}`} />

@@ -382,6 +382,10 @@ function evaluateShortHolding(input: HoldingActionInput): HoldingActionResult {
 }
 
 export function evaluateHolding(input: HoldingActionInput): HoldingActionResult {
+  if (!Number.isFinite(input.entryPrice) || input.entryPrice <= 0) {
+    throw new RangeError('entryPrice must be a finite number greater than 0');
+  }
+
   // 賠少-1：做空部位走完全獨立的分支（進場黑K高點停損 + 做空回補訊號）。
   // long / 缺省一律落到下面原本做多邏輯，行為位元不變、向下相容。
   if (input.positionSide === 'short') {

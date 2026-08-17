@@ -145,7 +145,12 @@ export const useScannerStore = create<ScannerStore>()(
         const activeStrategy = useSettingsStore.getState().getActiveStrategy();
         const strategyPayload = activeStrategy.isBuiltIn
           ? { strategyId: activeStrategy.id }
-          : { thresholds: activeStrategy.thresholds };
+          : {
+              thresholds: activeStrategy.thresholds,
+              ruleGroups: activeStrategy.ruleGroups,
+              strategyType: activeStrategy.strategyType,
+              buyMethod: activeStrategy.buyMethod,
+            };
 
         set(s => ({
           [mKey]: { ...s[mKey], isScanning: true, progress: 0, scanningStock: '正在檢查是否有收盤後掃描結果...', scanningIndex: 0, scanningTotal: 0, error: null },

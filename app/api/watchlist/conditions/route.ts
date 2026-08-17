@@ -105,17 +105,17 @@ export async function GET(req: NextRequest) {
     } catch { /* */ }
     try {
       const { detectABCBreakout } = await import('@/lib/analysis/abcBreakoutEntry');
-      if (detectABCBreakout(allCandles, lastIdx)?.isABCBreakout) matchedMethods.push('G');
+      if (detectABCBreakout(allCandles, lastIdx)?.isABCBreakout) matchedMethods.push('J');
     } catch { /* */ }
     try {
       const { detectBlackKBreakout } = await import('@/lib/analysis/blackKBreakoutEntry');
-      if (detectBlackKBreakout(allCandles, lastIdx)?.isBlackKBreakout) matchedMethods.push('H');
+      if (detectBlackKBreakout(allCandles, lastIdx)?.isBlackKBreakout) matchedMethods.push('L');
     } catch { /* */ }
     try {
       const { detectKlineConsolidationBreakout } = await import('@/lib/analysis/klineConsolidationBreakout');
-      if (detectKlineConsolidationBreakout(allCandles, lastIdx)?.isBreakout) matchedMethods.push('I');
+      if (detectKlineConsolidationBreakout(allCandles, lastIdx)?.isBreakout) matchedMethods.push('K');
     } catch { /* */ }
-    // v12 新字母 J-Q（J/K/L 是 G/I/H alias 跳過避免重複；M/N/O/P/Q 新訊號）
+    // v12 新字母 M-Q（J/K/L 已在共用 detector 直接寫入；不再產生 v11 G/H/I）
     try {
       const { detectLetterM } = await import('@/lib/analysis/v12LetterM');
       const sym = data.ticker || '';
@@ -146,7 +146,7 @@ export async function GET(req: NextRequest) {
       const market = /\.(SS|SZ)$/i.test(sym) ? 'CN' : 'TW';
       if (detectLetterQ(allCandles, lastIdx, market, sym).triggered) matchedMethods.push('Q');
     } catch { /* */ }
-    const sortedMatched = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'].filter(m => matchedMethods.includes(m));
+    const sortedMatched = ['A', 'B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'].filter(m => matchedMethods.includes(m));
     // 根據策略篩選規則群組
     const strategy = strategyId ? BUILT_IN_STRATEGIES.find(s => s.id === strategyId) : undefined;
     const engine = (strategy?.ruleGroups && strategy.ruleGroups.length > 0)

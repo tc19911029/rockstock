@@ -106,7 +106,8 @@ export async function GET(req: NextRequest) {
       activeHoldings.map(async (h: PortfolioHolding): Promise<DailyActionItem> => {
         const mkt = (h.market === 'CN' ? 'CN' : 'TW') as 'TW' | 'CN';
         const { thresholds } = await regimeFor(mkt);
-        const stopLoss = h.stopLoss ?? h.entryPrice * DEFAULT_STOP_LOSS_MULT;
+        const hasValidEntryPrice = Number.isFinite(h.entryPrice) && h.entryPrice > 0;
+        const stopLoss = h.stopLoss ?? (hasValidEntryPrice ? h.entryPrice * DEFAULT_STOP_LOSS_MULT : 0);
         // 賠少-1：做空 live 風控 — positionSide / 進場黑K最高點皆走 ui blob passthrough。
         // 缺省（既有持倉）= 做多，行為位元不變。
         const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
@@ -141,6 +142,26 @@ export async function GET(req: NextRequest) {
 
         const lastCandle = candles[candles.length - 1];
         const todayClose = lastCandle.close;
+        if (!hasValidEntryPrice) {
+          return {
+            ...base,
+            todayClose,
+            asOfDate: lastCandle.date,
+            unrealizedAmount: null,
+            action: 'no_data',
+            label: '⚠ 缺績效參考成本',
+            signals: [{
+              type: 'invalid_entry_price',
+              label: '持股成本不可用',
+              severity: 'high',
+              detail: '此持股的 entryPrice 為 0、負數或非有限值；在補上績效參考成本前，不計算報酬率、停損與操作建議。',
+            }],
+            profitPct: null,
+            suggestedStop: null,
+            metrics: null,
+            intradayProvisional: false,
+          };
+        }
         // 賠少-17：進場買法字母在 ui.triggerSignal（passthrough blob）→ 傳給 engine
         // 判斷是否為逆勢/搶反彈軌（反轉軌 D/F/N/O）以走專屬「翻黑就走」出場。
         const triggerSignal = typeof h.ui?.triggerSignal === 'string' ? h.ui.triggerSignal : undefined;

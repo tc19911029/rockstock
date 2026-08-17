@@ -34,7 +34,7 @@ describe('v12 合約測試 — 純書本數字（不可漂移）', () => {
     // 實體 1.99% 不過、2.5% 過
     expect(isValidRedK(
       { open: 100, high: 102, low: 99, close: 101.99 },
-      99, 'TW', '2330',
+      100, 'TW', '2330',
     )).toBe(false);
     expect(isValidRedK(
       { open: 100, high: 103, low: 99, close: 102.5 },

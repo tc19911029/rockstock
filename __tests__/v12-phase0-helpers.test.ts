@@ -141,7 +141,7 @@ describe('redKValidator - 一般紅 K（實體 ≥ 2%）', () => {
   it('實體 1.5% → 不過', () => {
     const result = validateRedK(
       { open: 100, high: 102, low: 99.5, close: 101.5 },
-      99,
+      100,
       'TW',
       '2330',
     );
@@ -214,15 +214,29 @@ describe('redKValidator - 跳空例外（議題 89）', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('跳空 +2% + 實體 < 2% → 不過（跳空不夠 3%）', () => {
-    // 昨收 100，open 102（跳空 2%），close 103，實體 0.98%
+  it('跳空 +2% + 實體 < 2%，但當日總漲幅達 2% → 過', () => {
+    // 昨收 100，open 102（跳空 2%），close 103，實體 0.98%、總漲幅 3%
     const result = validateRedK(
       { open: 102, high: 104, low: 101, close: 103 },
       100,
       'TW',
       '2330',
     );
-    expect(result.valid).toBe(false);
+    expect(result.valid).toBe(true);
+    expect(result.reason).toBe('gap-up');
+  });
+
+  it('教材反例：跳空 2.5% 十字紅 K、總漲幅 3% → 過', () => {
+    const result = validateRedK(
+      { open: 102.5, high: 103.5, low: 102, close: 103 },
+      100,
+      'TW',
+      '2330',
+    );
+    expect(result.bodyPct).toBeLessThan(0.01);
+    expect(result.gapPct).toBeCloseTo(0.025);
+    expect(result.valid).toBe(true);
+    expect(result.reason).toBe('gap-up');
   });
 });
 

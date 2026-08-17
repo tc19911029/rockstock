@@ -1,15 +1,15 @@
 import { CandleWithIndicators } from '@/types';
-import { ruleEngine } from '@/lib/rules/ruleEngine';
+import { RuleEngine, ruleEngine } from '@/lib/rules/ruleEngine';
 import { ma20Slope, isStrongInWeaknessAtBottom } from '@/lib/rules/ruleUtils';
 import { evaluateSixConditions, detectTrend, detectTrendPosition, TrendState } from '@/lib/analysis/trendAnalysis';
 import { checkLongProhibitions, checkShortProhibitions } from '@/lib/rules/entryProhibitions';
 import { evaluateShortCourseSetup } from '@/lib/analysis/shortCandidate';
 import { StockScanResult, MarketConfig, TriggeredRule, ScanDiagnostics, createEmptyDiagnostics } from './types';
-import type { StrategyThresholds } from '@/lib/strategy/StrategyConfig';
+import type { StrategyConfig, StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
 import { evaluateHighWinRateEntry } from '@/lib/analysis/highWinRateEntry';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
-import { BULLISH_TRACK_SET_WITH_V11 } from '@/lib/scanner/buyMethodTracks';
+import { BULLISH_TRACK_SET_WITH_V11, normalizeLetter } from '@/lib/scanner/buyMethodTracks';
 import { evaluateWinnerPatterns } from '@/lib/rules/winnerPatternRules';
 import { evaluateMultiTimeframe, MultiTimeframeResult } from '@/lib/analysis/multiTimeframeFilter';
 import { getScannerCache, setScannerCache, getScannerCacheStats } from '@/lib/datasource/ScannerCache';
@@ -24,6 +24,11 @@ const BATCH_DELAY_MS = 0;
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export type StockEntry = { symbol: string; name: string; industry?: string };
+
+export type BuyMethodLetter =
+  | 'B' | 'C' | 'D' | 'E' | 'F'
+  | 'G' | 'H' | 'I'
+  | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
 
 /** fetchCandlesForScan 回傳的帶新鮮度資訊結果 */
 interface CandleFetchResult {
@@ -77,6 +82,25 @@ export abstract class MarketScanner {
 
   /** L3 API fallback 預算（Vercel 用，每次 API 呼叫扣 1） */
   protected _l3Budget = 0;
+
+  private _activeStrategy: Pick<StrategyConfig, 'strategyType' | 'buyMethod' | 'ruleGroups'> | undefined;
+  private _activeRuleEngine: RuleEngine = ruleEngine;
+
+  /**
+   * 將掃描器綁定到同一個活動策略；掃描、單股技術資料與做空解釋都共用
+   * 相同規則群組，避免走圖已隔離但正式掃描仍混入其他體系。
+   */
+  configureStrategy(strategy: Pick<StrategyConfig, 'strategyType' | 'buyMethod' | 'ruleGroups'>): void {
+    this._activeStrategy = strategy;
+    this._activeRuleEngine = strategy.ruleGroups?.length
+      ? new RuleEngine(undefined, strategy.ruleGroups)
+      : ruleEngine;
+  }
+
+  /** 供診斷／契約測試確認實際載入的規則集合。 */
+  getConfiguredRuleIds(): string[] {
+    return this._activeRuleEngine.getRules().map(rule => rule.id);
+  }
 
   /** 設置全市場即時報價（今日掃描用） */
   setRealtimeQuotes(quotes: Map<string, RealtimeQuoteForScan>): void {
@@ -504,7 +528,7 @@ export abstract class MarketScanner {
 
       const trend = detectTrend(candles, lastIdx);
       const position = detectTrendPosition(candles, lastIdx);
-      const signals = ruleEngine.evaluate(candles, lastIdx);
+      const signals = this._activeRuleEngine.evaluate(candles, lastIdx);
 
       const triggeredRules: TriggeredRule[] = signals.map(s => ({
         ruleId: s.ruleId, ruleName: s.label, signalType: s.type, reason: s.description,
@@ -626,6 +650,7 @@ export abstract class MarketScanner {
         // ── 長線保護短線（多時間框架）──────────────────────────────────
         ...(mtfResult ? {
           mtfScore: mtfResult.totalScore,
+          mtfPass: mtfResult.pass,
           mtfWeeklyTrend: mtfResult.weekly.trend,
           mtfWeeklyPass: mtfResult.weekly.pass,
           mtfWeeklyDetail: mtfResult.weekly.detail,
@@ -634,6 +659,7 @@ export abstract class MarketScanner {
           mtfMonthlyDetail: mtfResult.monthly.detail,
           mtfWeeklyNearResistance: mtfResult.weeklyNearResistance,
           mtfWeeklyChecks: mtfResult.weeklyChecks,
+          mtfWeeklyProtectionChecks: mtfResult.weeklyProtectionChecks,
         } : {}),
         // ── 數據新鮮度 ──────────────────────────────────────────────────
         dataFreshness: {
@@ -745,7 +771,7 @@ export abstract class MarketScanner {
 
       const config = this.getMarketConfig();
       const thresholds = BASE_THRESHOLDS;
-      const signals  = ruleEngine.evaluate(candles, lastIdx);
+      const signals  = this._activeRuleEngine.evaluate(candles, lastIdx);
       const sixConds = evaluateSixConditions(candles, lastIdx, thresholds);
       const trend    = detectTrend(candles, lastIdx);
       const position = detectTrendPosition(candles, lastIdx);
@@ -921,7 +947,7 @@ export abstract class MarketScanner {
       // 第二層：排序資料收集（共振 + 高勝率進場）
       // ══════════════════════════════════════════════════════════════════
 
-      const signals = ruleEngine.evaluate(candles, lastIdx);
+      const signals = this._activeRuleEngine.evaluate(candles, lastIdx);
       const triggeredRules: TriggeredRule[] = signals.map(s => ({
         ruleId: s.ruleId, ruleName: s.label, signalType: s.type, reason: s.description,
       }));
@@ -1112,6 +1138,35 @@ export abstract class MarketScanner {
     const candidates: StockScanResult[] = [];
     const diag = createEmptyDiagnostics();
     diag.totalStocks = stocks.length;
+
+    // 內建型態策略是獨立買法，不得先套 A 六條件。configureStrategy() 讓
+    // 同一個 scanSOP API 依策略型態正確分流，不再讓 strategyType/buyMethod 成為死設定。
+    if (this._activeStrategy?.strategyType === 'kline-pattern' && this._activeStrategy.buyMethod) {
+      const method = normalizeLetter(this._activeStrategy.buyMethod) as BuyMethodLetter;
+      const results = await this.scanBuyMethod(method, stocks, asOfDate, {
+        skipStep1Gate: true,
+        thresholds: th,
+      });
+      const sorted = this.rankCandidates(results, rankBy);
+      diag.processedCount = stocks.length;
+      diag.filteredOut = Math.max(0, stocks.length - sorted.length);
+      diag.coverageRate = 100;
+      diag.dataStatus = 'complete';
+      let marketTrend: TrendState = '盤整';
+      try { marketTrend = await this.getMarketTrend(asOfDate); } catch { /* 顯示用，失敗不擋型態掃描 */ }
+      const freshnessItems = sorted.filter(result => result.dataFreshness);
+      const sessionFreshness: SessionFreshness = {
+        avgStaleDays: freshnessItems.length > 0
+          ? +(freshnessItems.reduce((sum, result) => sum + (result.dataFreshness?.daysStale ?? 0), 0) / freshnessItems.length).toFixed(1)
+          : 0,
+        maxStaleDays: Math.max(0, ...freshnessItems.map(result => result.dataFreshness?.daysStale ?? 0)),
+        staleCount: freshnessItems.filter(result => (result.dataFreshness?.daysStale ?? 0) > 0).length,
+        totalScanned: stocks.length,
+        coverageRate: diag.coverageRate,
+        dataStatus: diag.dataStatus,
+      };
+      return { results: sorted, marketTrend, diagnostics: diag, sessionFreshness };
+    }
 
     let minScore = th.minScore;
     let marketTrend: TrendState = '多頭';
@@ -1340,13 +1395,10 @@ export abstract class MarketScanner {
    *   I=K 線橫盤突破（寶典 Part 11-1 位置 3，2026-05-04 新增）
    */
   async scanBuyMethod(
-    method:
-      | 'B' | 'C' | 'D' | 'E' | 'F'
-      | 'G' | 'H' | 'I'   // v11 字母（v12 釋出但歷史 record 兼容）
-      | 'J' | 'K' | 'L'   // v12 新字母（J=ABC（=v11 G）、K=K線橫盤（=v11 I）、L=過大量黑K（=v11 H））
-      | 'M' | 'N' | 'O' | 'P' | 'Q',  // v12 新訊號
+    method: BuyMethodLetter,
     stocks: StockEntry[],
     asOfDate?: string,
+    options: { skipStep1Gate?: boolean; thresholds?: StrategyThresholds } = {},
   ): Promise<StockScanResult[]> {
     const config = this.getMarketConfig();
     const results: StockScanResult[] = [];
@@ -1366,7 +1418,7 @@ export abstract class MarketScanner {
     //   → 全市場掃描
     // 軌道分類讀 lib/scanner/buyMethodTracks.ts 單一事實來源
     // REVERSAL_TRACK = D/F/J/N/O — 不過 Step 1 + 不過戒律（隱含：fall-through to default behavior）
-    const isBullish = BULLISH_TRACK_SET_WITH_V11.has(method);  // 含跟隨 v12 軌道的 v11 alias（H/I；G 隨 J 移反轉軌後除外）
+    const isBullish = !options.skipStep1Gate && BULLISH_TRACK_SET_WITH_V11.has(method);
     // 載入今日 Step 1 池子（兩個用途）：
     //   1. 多頭軌方法（B/C/E/K/L/M/P）：拿池子當候選來源（filter candidates）
     //   2. 反轉/戰法軌方法（D/F/J/N/O/Q）：cross-strategy 推**多頭軌字母**時當 gate
@@ -1375,7 +1427,7 @@ export abstract class MarketScanner {
     //      → 多頭軌字母 (B/C/E/K/L/M/P) 在 cross-strategy badge 必須過 Step 1
     //      → 反轉/戰法軌字母 (D/F/J/N/O/Q) 在 cross-strategy badge 不過 Step 1
     let step1Symbols: Set<string> | null = null;
-    {
+    if (!options.skipStep1Gate) {
       const poolDate = asOfDate
         ?? new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone }).format(new Date());
       const { getStep1Symbols } = await import('./step1Pool');
@@ -1590,7 +1642,8 @@ export abstract class MarketScanner {
           const trendState = detectTrend(candles, lastIdx);
           const trendPosition = detectTrendPosition(candles, lastIdx);
 
-          const mtfResult = evaluateMultiTimeframe(candles, BASE_THRESHOLDS);
+          const effectiveThresholds = options.thresholds ?? BASE_THRESHOLDS;
+          const mtfResult = evaluateMultiTimeframe(candles, effectiveThresholds);
 
           // 跨策略命中：A 六條件 + 其他 detector
           // 軌道規則（0512 用戶明確）：
@@ -1605,7 +1658,7 @@ export abstract class MarketScanner {
             const { evaluateSixConditions } = await import('@/lib/analysis/trendAnalysis');
             // 課程 CH1-5 裁決（2026-07-05）：④攻擊量=1.2。不帶 thresholds 會 fallback 書本 1.3，
             // 與主閘門（上方 evaluateSixConditions(candles, lastIdx, thresholds)）自打架。
-            sixCondsResult = evaluateSixConditions(candles, lastIdx, BASE_THRESHOLDS);
+            sixCondsResult = evaluateSixConditions(candles, lastIdx, effectiveThresholds);
             if (inStep1Pool) matchedMethods.push('A');
           } catch { /* non-critical */ }
           // ── 多頭軌字母（過 Step 1 gate）─────────────────────────
@@ -1721,11 +1774,13 @@ export abstract class MarketScanner {
             scanTime: asOfDate ? `${asOfDate}T00:00:00.000Z` : new Date().toISOString(),
             ma20Slope: ma20Slope(candles, lastIdx) ?? undefined,
             mtfScore: mtfResult.totalScore,
+            mtfPass: mtfResult.pass,
             mtfWeeklyPass: mtfResult.weekly.pass,
             mtfWeeklyTrend: mtfResult.weekly.trend,
             mtfWeeklyDetail: mtfResult.weekly.detail,
             mtfMonthlyPass: mtfResult.monthly.pass,
             mtfMonthlyDetail: mtfResult.monthly.detail,
+            mtfWeeklyProtectionChecks: mtfResult.weeklyProtectionChecks,
             lockWatchPayload,
             provisional,
             longProhibitionsReasons: longProhibitionsReasons.length > 0 ? longProhibitionsReasons : undefined,

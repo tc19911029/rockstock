@@ -51,7 +51,7 @@ export interface StrategyThresholds {
   multiTimeframeFilter: boolean;  // 是否啟用（預設 false）
   mtfWeeklyStrict: boolean;       // 週線嚴格模式：不通過=拒絕（預設 true）
   mtfMonthlyStrict: boolean;      // 月線嚴格模式：不通過=拒絕（預設 false，只扣分）
-  mtfMinScore: number;            // MTF 最低通過分數 0-4（預設 2）
+  mtfMinScore: number;            // 週線保護最低通過分數 0-4（趨勢方向仍為必要）
 
   // 短線輔助過濾（朱老師短線操作10條規則）
   kdDecliningFilter: boolean;     // KD 向下警示（2026-05-20 起 flag 保留但不擋，UI 看 K 值自行判讀）
@@ -163,7 +163,7 @@ export const BASE_THRESHOLDS: StrategyThresholds = {
   multiTimeframeFilter: false,
   mtfWeeklyStrict:  true,   // 週線不通過=拒絕
   mtfMonthlyStrict: false,  // 月線不通過=只扣分
-  mtfMinScore:      3,      // 至少3/4分
+  mtfMinScore:      3,      // 週線趨勢必要，且保護條件至少3/4分
 
   // 短線輔助過濾（預設開啟，與書本一致）
   kdDecliningFilter: true,
@@ -374,7 +374,7 @@ export const ZHU_V_REVERSAL: StrategyConfig = {
 };
 
 /**
- * G ABC 突破策略（並列買法架構，2026-05-04）
+ * J ABC 突破策略（v12 正式字母；舊 G 僅讀取相容）
  *
  * 朱家泓《活用技術分析寶典》Part 11-1 8 種進場位置「位置 6：等 ABC 突破」（p.697）
  * + 寶典 Part 12-4 18 祕笈圖第 16 圖「突破 ABC 上漲圖」（p.815）
@@ -387,14 +387,14 @@ export const ZHU_V_REVERSAL: StrategyConfig = {
  */
 export const ZHU_ABC_BREAKOUT: StrategyConfig = {
   id:          'zhu-abc-breakout',
-  name:        'ABC 突破（G）',
+  name:        'ABC 突破（J）',
   description: '寶典 Part 11-1 位置 6：多頭一波後 ABC 修正→反彈大量紅 K 突破下降切線+站上 MA20',
   version:     '1.0.0',
   author:      '朱家泓',
   createdAt:   '2026-05-04T00:00:00.000Z',
   isBuiltIn:   true,
   strategyType: 'kline-pattern',
-  buyMethod:    'G',
+  buyMethod:    'J',
   conditions:  ALL_CONDITIONS_ON,
   thresholds:  {
     ...BASE_THRESHOLDS,
@@ -406,7 +406,7 @@ export const ZHU_ABC_BREAKOUT: StrategyConfig = {
 };
 
 /**
- * H 突破大量黑 K 策略（並列買法架構，2026-05-04）
+ * L 突破大量黑 K 策略（v12 正式字母；舊 H 僅讀取相容）
  *
  * 朱家泓《活用技術分析寶典》Part 11-1 8 種進場位置「位置 8：等突破大量黑 K」（p.699）
  * + 寶典 Part 12-4 18 祕笈圖第 9 圖「突破大量黑 K 買進」（p.806）
@@ -419,14 +419,14 @@ export const ZHU_ABC_BREAKOUT: StrategyConfig = {
  */
 export const ZHU_BLACK_K_BREAKOUT: StrategyConfig = {
   id:          'zhu-black-k-breakout',
-  name:        '突破大量黑 K（H）',
+  name:        '突破大量黑 K（L）',
   description: '寶典 Part 11-1 位置 8：多頭中大量黑 K 跌破前低/MA5，3 日內紅 K 突破黑 K 最高',
   version:     '1.0.0',
   author:      '朱家泓',
   createdAt:   '2026-05-04T00:00:00.000Z',
   isBuiltIn:   true,
   strategyType: 'kline-pattern',
-  buyMethod:    'H',
+  buyMethod:    'L',
   conditions:  ALL_CONDITIONS_ON,
   thresholds:  {
     ...BASE_THRESHOLDS,
@@ -438,7 +438,7 @@ export const ZHU_BLACK_K_BREAKOUT: StrategyConfig = {
 };
 
 /**
- * I K 線橫盤突破策略（並列買法架構，2026-05-04）
+ * K K 線橫盤突破策略（v12 正式字母；舊 I 僅讀取相容）
  *
  * 朱家泓《活用技術分析寶典》Part 11-1 8 種進場位置「位置 3：等 K 線橫盤突破」（p.694）
  * + 寶典 Part 12-4 18 祕笈圖第 5 圖「K 線橫盤突破」（p.802）
@@ -452,14 +452,14 @@ export const ZHU_BLACK_K_BREAKOUT: StrategyConfig = {
  */
 export const ZHU_KLINE_HSP_BREAKOUT: StrategyConfig = {
   id:          'zhu-kline-hsp-breakout',
-  name:        'K 線橫盤突破（I）',
+  name:        'K 線橫盤突破（K）',
   description: '寶典 Part 11-1 位置 3：中長紅 K 上方狹幅橫盤 5-15 天，紅 K 突破橫盤最高點',
   version:     '1.0.0',
   author:      '朱家泓',
   createdAt:   '2026-05-04T00:00:00.000Z',
   isBuiltIn:   true,
   strategyType: 'kline-pattern',
-  buyMethod:    'I',
+  buyMethod:    'K',
   conditions:  ALL_CONDITIONS_ON,
   thresholds:  {
     ...BASE_THRESHOLDS,
@@ -699,9 +699,9 @@ export const BUILT_IN_STRATEGIES: StrategyConfig[] = [
   ZHU_CONSOLIDATION_BREAKOUT, // C：盤整突破（2026-04-21 從 B 拆出）
   ZHU_BREAKOUT,               // B：回後買上漲（2026-04-21 rename）
   ZHU_V_REVERSAL,             // F：V 形反轉（2026-04-21 rename from C）
-  ZHU_ABC_BREAKOUT,           // G：ABC 突破（2026-05-04 新增，寶典 Part 11-1 位置 6）
-  ZHU_BLACK_K_BREAKOUT,       // H：突破大量黑 K（2026-05-04 新增，寶典 Part 11-1 位置 8）
-  ZHU_KLINE_HSP_BREAKOUT,     // I：K 線橫盤突破（2026-05-04 新增，寶典 Part 11-1 位置 3）
+  ZHU_ABC_BREAKOUT,           // J：ABC 突破（v12 正式字母；舊 G 僅讀取相容）
+  ZHU_BLACK_K_BREAKOUT,       // L：突破大量黑 K（v12 正式字母；舊 H 僅讀取相容）
+  ZHU_KLINE_HSP_BREAKOUT,     // K：K 線橫盤突破（v12 正式字母；舊 I 僅讀取相容）
   ZHU_DEVIATION_EXTREME,      // R：乖離率（2026-05-21 新增，機械軌純排名）
   TW_FUNDAMENTAL_REVALUATION, // V：台股基本面補漲（2026-05-27 新增，基本面軌）
   CN_FUNDAMENTAL_REVALUATION, // V：陸股基本面補漲（2026-05-27 新增，基本面軌）

@@ -9,12 +9,11 @@
  *
  * 2026-04-20 重寫為 checklist，對齊朱家泓原意
  *
- * 週線 5 項 checklist（朱家泓 MTF 共振條件）：
- *   #1 週線趨勢多頭（頭頭高底底高）
- *   #2 MA5/10/20 三線多排向上
- *   #3 收盤站上 MA60（對應朱家泓 MA65 季線）
- *   #4 MACD 紅柱延長
- *   #5 KD<50 金叉
+ * 週線保護 4 項（方向／位置／壓力，而不是要求本週再次出現攻擊 K）：
+ *   #1 週線趨勢多頭（必要）
+ *   #2 週 MA10/MA20 方向向上
+ *   #3 週收盤站上 MA20
+ *   #4 未接近週線前高；若接近，當週必須帶策略量能確認
  *
  * 月線 1 項：
  *   #1 月線趨勢不是空頭（寬鬆）
@@ -37,7 +36,7 @@ export interface TimeframeCheckResult {
 }
 
 /**
- * 週線 6 項 = 日線六條件完全複製到週線
+ * 週線攻擊型態 6 項觀察資料（不作 MTF gate）
  * ① 趨勢多頭 ② 均線多排+向上 ③ 股價位置>MA10/MA20 ④ 攻擊量 ⑤ 紅K實體+高收盤+上影 ⑥ MACD+KD
  */
 export interface WeeklyChecks {
@@ -49,12 +48,25 @@ export interface WeeklyChecks {
   indicator: boolean;   // ⑥ (MACD 綠柱縮小 OR 紅柱延長) AND KD 金叉向上
 }
 
+/** 真正參與「長線保護短線」gate 的 4 項。 */
+export interface WeeklyProtectionChecks {
+  trend: boolean;
+  maDirection: boolean;
+  position: boolean;
+  resistance: boolean;
+}
+
 export interface MultiTimeframeResult {
   weekly: TimeframeCheckResult;
   monthly: TimeframeCheckResult;
+  /** 週線攻擊型態觀察資料；不作 MTF gate。 */
   weeklyChecks: WeeklyChecks;
-  totalScore: number;              // 週0-6 + 月0-1 = 0-7
+  weeklyProtectionChecks: WeeklyProtectionChecks;
+  totalScore: number;              // 週線保護 0-4
   pass: boolean;
+  /** 向下相容舊回測腳本。 */
+  weeklyPass: boolean;
+  monthlyPass: boolean;
   weeklyNearResistance: boolean;   // 保留給戒律4使用
   weeklyResistanceDetail?: string;
 }
@@ -62,7 +74,7 @@ export interface MultiTimeframeResult {
 // ── Weekly checks ─────────────────────────────────────────────────────────────
 
 /**
- * 週線 6 項 checklist（= 日線六條件完全複製到週線）
+ * 同時計算兩組資料：4 項保護條件參與 MTF gate；6 項攻擊型態只供觀察。
  * ① 趨勢多頭（頭頭高底底高）
  * ② MA5/10/20 三線多排 + MA10/20 向上（1 根比較）
  * ③ 收盤 > MA10 AND MA20
@@ -70,10 +82,10 @@ export interface MultiTimeframeResult {
  * ⑤ 紅K實體 ≥ 2% + 高收盤 + 上影 ≤ 實體
  * ⑥ (MACD 綠縮 OR 紅延) AND KD 金叉向上
  *
- * 通過條件：①-⑤ 全過（⑥ 加分不當 gate）
  */
 function checkWeekly(
   weeklyCandles: CandleWithIndicators[],
+  thresholds: StrategyThresholds,
   /** 最後一根日 K 的日期；用來判斷最新週是否已收盤完整 */
   lastDailyDate?: string,
 ): {
@@ -83,6 +95,7 @@ function checkWeekly(
   resistanceDetail?: string;
   detail: string;
   checks: WeeklyChecks;
+  protectionChecks: WeeklyProtectionChecks;
 } {
   // 判斷最新週是否已收盤：最後 daily K 落在週五（含）以後 → 該週已收
   // 否則最新週 bar 是「進行中」，只有 1-4 天資料，跳到上一週評估
@@ -94,11 +107,12 @@ function checkWeekly(
   const evalIdx = isWeekClosed ? weeklyCandles.length - 1 : weeklyCandles.length - 2;
   if (evalIdx < 20) {
     return {
-      score: 6,
+      score: 4,
       trend: '盤整',
       nearResistance: false,
       detail: '週線數據不足，跳過檢查',
       checks: { trend: true, ma: true, position: true, volume: true, kbar: true, indicator: true },
+      protectionChecks: { trend: true, maDirection: true, position: true, resistance: true },
     };
   }
 
@@ -130,7 +144,7 @@ function checkWeekly(
 
   // ── ④ 攻擊量：週量 ≥ 前週 × 1.3 ──
   const volumePass = prev != null && prev.volume > 0
-    ? c.volume >= prev.volume * 1.3
+    ? c.volume >= prev.volume * thresholds.volumeRatioMin
     : true;
 
   // ── ⑤ 紅K實體 ≥ 2% + 高收盤 + 上影 ≤ 實體 ──
@@ -189,17 +203,25 @@ function checkWeekly(
     kbar: kbarPass,
     indicator: indicatorPass,
   };
-  const score = (trendPass ? 1 : 0) + (maPass ? 1 : 0) + (positionPass ? 1 : 0)
-    + (volumePass ? 1 : 0) + (kbarPass ? 1 : 0) + (indicatorPass ? 1 : 0);
+  const maDirectionPass = ma10 != null && ma20 != null && prevMa10 != null && prevMa20 != null
+    ? ma10 > prevMa10 && ma20 > prevMa20
+    : true;
+  const protectionPositionPass = ma20 != null ? c.close > ma20 : true;
+  // 教材語意是「接近壓力要帶量」，不是任何週都必須爆量。
+  const resistancePass = !nearResistance || volumePass;
+  const protectionChecks: WeeklyProtectionChecks = {
+    trend: trendPass,
+    maDirection: maDirectionPass,
+    position: protectionPositionPass,
+    resistance: resistancePass,
+  };
+  const score = Object.values(protectionChecks).filter(Boolean).length;
 
-  // 組裝 detail — 週線版六條件（完全對齊日線）
   const items: string[] = [];
-  items.push(`①趨勢${trend}${trendPass ? '✅' : '❌'}`);
-  items.push(`②均線${maPass ? '✅三線多排+向上' : '❌三線未多排或未向上'}`);
-  items.push(`③位置${positionPass ? '✅站上MA10/20' : '❌未站上MA10/20'}`);
-  items.push(`④量${volumePass ? '✅≥前週×1.3' : '❌未達前週×1.3'}`);
-  items.push(`⑤紅K${kbarPass ? '✅實體≥2%+高收+短上影' : '❌K線不符'}`);
-  items.push(`⑥指標${indicatorPass ? '✅MACD+KD齊備' : '❌MACD或KD未齊'}`);
+  items.push(`①週趨勢${trend}${trendPass ? '✅' : '❌'}`);
+  items.push(`②週均線方向${maDirectionPass ? '✅MA10/20向上' : '❌MA10/20未同步向上'}`);
+  items.push(`③週線位置${protectionPositionPass ? '✅站上MA20' : '❌跌破MA20'}`);
+  items.push(`④週線壓力${resistancePass ? (nearResistance ? '✅近壓帶量' : '✅無近壓') : '❌近前高但未帶量'}`);
 
   return {
     score,
@@ -208,6 +230,7 @@ function checkWeekly(
     resistanceDetail,
     detail: items.join('，'),
     checks,
+    protectionChecks,
   };
 }
 
@@ -292,6 +315,16 @@ export function clearAggregationCache(): void {
   _aggregationCacheEpoch = Date.now();
 }
 
+/** 將 4 項週線保護條件套用使用者門檻；趨勢方向永遠是必要條件。 */
+export function evaluateWeeklyProtectionGate(
+  checks: WeeklyProtectionChecks,
+  configuredMinScore: number,
+): { score: number; minScore: number; pass: boolean } {
+  const score = Object.values(checks).filter(Boolean).length;
+  const minScore = Math.max(0, Math.min(4, configuredMinScore));
+  return { score, minScore, pass: checks.trend && score >= minScore };
+}
+
 /**
  * 判斷今日收盤是否接近週線前高壓力（戒律 4 專用）
  * 聚合日 K → 週 K → 找 pivot high → 比較今日 close 距最近的前高
@@ -343,35 +376,25 @@ export function evaluateMultiTimeframe(
   const monthlyCandles = getCachedAggregation(dailyCandles, '1mo');
 
   const lastDailyDate = dailyCandles[dailyCandles.length - 1]?.date;
-  const weekly = checkWeekly(weeklyCandles, lastDailyDate);
+  const weekly = checkWeekly(weeklyCandles, thresholds, lastDailyDate);
   const monthly = checkMonthly(monthlyCandles, lastDailyDate);
-
-  // 通過條件（對齊日線六條件）：
-  //   週線前 5 項（①-⑤）全過 = gate
-  //   週線第 6 項（⑥ MACD+KD）= 加分非 gate
-  //   月線趨勢不空頭 = 加分非 gate（寬鬆模式保留）
-  const weeklyCore5Pass =
-    weekly.checks.trend &&
-    weekly.checks.ma &&
-    weekly.checks.position &&
-    weekly.checks.volume &&
-    weekly.checks.kbar;
 
   const mtfWeeklyStrict = thresholds.mtfWeeklyStrict ?? true;
   const mtfMonthlyStrict = thresholds.mtfMonthlyStrict ?? false;
-
-  const weeklyPass = mtfWeeklyStrict ? weeklyCore5Pass : true;
-  const monthlyPass = mtfMonthlyStrict ? monthly.score >= 1 : true;
-
-  const pass = weeklyPass && monthlyPass;
-
-  const totalScore = weekly.score + monthly.score; // 0-7 僅作 UI 顯示
+  const weeklyGate = evaluateWeeklyProtectionGate(
+    weekly.protectionChecks,
+    thresholds.mtfMinScore ?? 3,
+  );
+  const weeklyPass = weeklyGate.pass;
+  const monthlyPass = monthly.score >= 1;
+  const pass = (!mtfWeeklyStrict || weeklyPass) && (!mtfMonthlyStrict || monthlyPass);
+  const totalScore = weeklyGate.score;
 
   return {
     weekly: {
       timeframe: 'weekly',
       trend: weekly.trend,
-      pass: weeklyCore5Pass,
+      pass: weeklyPass,
       score: weekly.score,
       detail: weekly.detail,
     },
@@ -383,8 +406,11 @@ export function evaluateMultiTimeframe(
       detail: monthly.detail,
     },
     weeklyChecks: weekly.checks,
+    weeklyProtectionChecks: weekly.protectionChecks,
     totalScore,
     pass,
+    weeklyPass,
+    monthlyPass,
     weeklyNearResistance: weekly.nearResistance,
     weeklyResistanceDetail: weekly.resistanceDetail,
   };

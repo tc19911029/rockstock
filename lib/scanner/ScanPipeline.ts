@@ -85,6 +85,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
     const { TaiwanScanner: TS } = await import('./TaiwanScanner');
     scanner = new TS();
   }
+  scanner.configureStrategy(activeStrategy);
   // L1 記憶體快取預熱（fire-and-forget，本地開發用，Vercel 自動跳過）
   // 首掃時：在掃描期間背景讀進記憶體（後半段掃描命中快取）
   // 二掃起：全部命中快取，消除 disk I/O + JSON.parse（CN 省 ~16s）
@@ -288,9 +289,9 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
         counts[`${direction}-daily`] = results.length;
       }
 
-      // ── Step 4b: 存 mtf session（週線前5全過才算通過，用 mtfWeeklyPass 而非舊 4 分制 mtfScore）──
+      // ── Step 4b: 存 MTF session（4 項週線保護門檻 + 可選月線 strict）──
       if (wantMtf) {
-        const mtfResults = results.filter(r => r.mtfWeeklyPass === true);
+        const mtfResults = results.filter(r => r.mtfPass ?? (r.mtfWeeklyPass === true));
         const mtfSession: ScanSession = {
           id: `${prefix}-${direction}-mtf-${date}-${batch ? `b${batch}-` : ''}${Date.now() + 1}`,
           market: market as MarketId,

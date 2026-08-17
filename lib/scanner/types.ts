@@ -104,6 +104,7 @@ export interface StockScanResult {
   shortEntryStopLoss?: number;
   // ── 長線保護短線（多時間框架） ───────────────────────────────────────────
   mtfScore?: number;                          // 0-4 多時間框架總分
+  mtfPass?: boolean;                          // 已套用週/月 strict 設定的最終結果
   mtfWeeklyTrend?: string;                    // '多頭'/'空頭'/'盤整'
   mtfWeeklyPass?: boolean;
   mtfWeeklyDetail?: string;
@@ -111,7 +112,7 @@ export interface StockScanResult {
   mtfMonthlyPass?: boolean;
   mtfMonthlyDetail?: string;
   mtfWeeklyNearResistance?: boolean;          // 週線接近前高壓力區
-  // 週線 6 項 checklist（= 日線六條件套到週線，2026-04-20 重寫）
+  // 週線攻擊型態觀察資料（不作 MTF gate）
   mtfWeeklyChecks?: {
     trend: boolean;       // ① 趨勢多頭
     ma: boolean;          // ② MA5/10/20 三線多排+向上
@@ -119,6 +120,13 @@ export interface StockScanResult {
     volume: boolean;      // ④ 週量≥前週×1.3
     kbar: boolean;        // ⑤ 紅K實體≥2%+高收+短上影
     indicator: boolean;   // ⑥ MACD+KD
+  };
+  /** 長線保護短線真正採用的 4 項 gate。 */
+  mtfWeeklyProtectionChecks?: {
+    trend: boolean;
+    maDirection: boolean;
+    position: boolean;
+    resistance: boolean;
   };
   // ── 10大戒律 ──────────────────────────────────────────────────────────────
   entryProhibitionReasons?: string[];        // 觸發的戒律說明（有值代表被禁止）

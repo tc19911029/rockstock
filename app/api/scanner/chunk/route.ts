@@ -10,12 +10,16 @@ import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { MarketId, ScanDiagnostics } from '@/lib/scanner/types';
 import { resolveThresholds } from '@/lib/strategy/resolveThresholds';
 import type { RealtimeQuoteForScan } from '@/lib/scanner/MarketScanner';
+import { BUILT_IN_STRATEGIES } from '@/lib/strategy/StrategyConfig';
 
 const scannerChunkSchema = z.object({
   market:     z.enum(['TW', 'CN']).default('TW'),
   stocks:     z.array(z.object({ symbol: z.string(), name: z.string() })).default([]),
   strategyId: z.string().optional(),
   thresholds: z.record(z.string(), z.unknown()).optional(),
+  ruleGroups: z.array(z.string()).optional(),
+  strategyType: z.enum(['trend', 'kline-pattern', 'mechanical-rank', 'fundamental-revaluation']).optional(),
+  buyMethod: z.string().optional(),
   date:       z.string().optional(),
   /** 掃描模式：full=完整管線, pure=純朱家泓六大條件, sop=V2簡化版(六條件+戒律+淘汰法) */
   mode:       z.enum(['full', 'pure', 'sop']).default('full'),
@@ -52,6 +56,18 @@ export async function POST(req: NextRequest) {
 
   try {
     const scanner = market === 'CN' ? new ChinaScanner() : new TaiwanScanner();
+    const strategy = parsed.data.strategyId
+      ? BUILT_IN_STRATEGIES.find(candidate => candidate.id === parsed.data.strategyId)
+      : undefined;
+    if (strategy) {
+      scanner.configureStrategy(strategy);
+    } else if (parsed.data.ruleGroups || parsed.data.strategyType || parsed.data.buyMethod) {
+      scanner.configureStrategy({
+        ruleGroups: parsed.data.ruleGroups as import('@/lib/rules/ruleRegistry').RuleGroupId[] | undefined,
+        strategyType: parsed.data.strategyType,
+        buyMethod: parsed.data.buyMethod,
+      });
+    }
     const mode = parsed.data.mode;
 
     // 判斷是否為「今日掃描」：沒傳日期 或 傳的日期 >= 今天

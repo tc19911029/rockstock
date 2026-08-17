@@ -47,8 +47,7 @@ export function applyPanelFilter(
   // 處置股硬排除：不分 MTF on/off 一律剔除（見 isDisposalVetoed 註解）
   filtered = filtered.filter(r => !isDisposalVetoed(r));
 
-  // MTF gate：週線前5全過（①趨勢②均線③位置④量⑤K線）才算通過
-  // 使用 mtfWeeklyPass 而非舊 4 分制 mtfScore >= 3，避免只過①②⑥+月就誤入
+  // MTF gate：優先使用已套用週／月 strict 設定的 mtfPass；舊 session 才退回 mtfWeeklyPass。
   //
   // 嚴格 `=== true`：null（未計算 MTF）在此一律排除。本函式假設輸入的 results
   // 都來自「scan 時已 ALWAYS 計算 mtfWeeklyPass」的新 session。
@@ -59,7 +58,7 @@ export function applyPanelFilter(
   //   - backtestStore（UI 即時 toggle）：寬容，避免舊 session 被整批清空
   // 改動任一處前先讀 CLAUDE.md 第 10 條 + 對方註解。
   if (options.useMultiTimeframe) {
-    filtered = filtered.filter(r => r.mtfWeeklyPass === true);
+    filtered = filtered.filter(r => r.mtfPass ?? (r.mtfWeeklyPass === true));
   }
 
   filtered.sort(panelSortCompare);

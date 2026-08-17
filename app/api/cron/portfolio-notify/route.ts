@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
 import { apiOk } from '@/lib/api/response';
 import { checkCronAuth } from '@/lib/api/cronAuth';
@@ -7,6 +7,7 @@ import { sendNtfy } from '@/lib/notify/ntfy';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { empiricalHeaviness, tierEmoji } from '@/lib/sell/sellHeavinessRank';
 import { loadProfiles } from '@/lib/portfolio/profiles';
+import { canPushPortfolioAction } from '@/lib/portfolio/notifyPolicy';
 import type { DailyActionItem, DailyActionResponse } from '@/app/api/portfolio/daily-action/route';
 
 export const runtime = 'nodejs';
@@ -46,9 +47,6 @@ function saveState(s: NotifyState) {
   mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
-
-// 賠少-1：cover_all = 做空回補（全出），與 exit_all 同等緊急。
-const ACTIONABLE = new Set(['stop_loss', 'exit_all', 'reduce_half', 'watch_stop', 'cover_all']);
 
 function priorityOf(action: string): 1 | 2 | 3 | 4 | 5 {
   if (action === 'stop_loss') return 5;
@@ -119,12 +117,16 @@ export async function GET(req: NextRequest) {
   const state = loadState(today);
   const pushed: string[] = [];
   let checked = 0;
+  let provisionalSkipped = 0;
   for (const r of perProfile) {
     if (!r.data) continue;
     const items = r.data.items ?? [];
     checked += items.length;
     for (const it of items) {
-      if (!ACTIONABLE.has(it.action)) continue;
+      if (!canPushPortfolioAction(it)) {
+        if (it.intradayProvisional === true) provisionalSkipped++;
+        continue;
+      }
       const phase = execWindow ? 'exec' : 'intraday';
       const key = `${r.profile.id}:${it.symbol}:${it.action}:${phase}`;
       if (state.sent[key]) continue;
@@ -145,5 +147,5 @@ export async function GET(req: NextRequest) {
     }
   }
   saveState(state);
-  return apiOk({ pushed, execWindow, checked });
+  return apiOk({ pushed, execWindow, checked, provisionalSkipped });
 }

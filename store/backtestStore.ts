@@ -618,7 +618,12 @@ export const useBacktestStore = create<BacktestState>()(
         const activeStrategy = useSettingsStore.getState().getActiveStrategy();
         const strategyPayload = activeStrategy.isBuiltIn
           ? { strategyId: activeStrategy.id }
-          : { thresholds: activeStrategy.thresholds };
+          : {
+              thresholds: activeStrategy.thresholds,
+              ruleGroups: activeStrategy.ruleGroups,
+              strategyType: activeStrategy.strategyType,
+              buyMethod: activeStrategy.buyMethod,
+            };
 
         const { scanMode, scanDirection } = get();
         // 注意：歷史日期已在上方 return（走 loadCronSession），這裡只處理今日掃描
