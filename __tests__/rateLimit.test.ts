@@ -77,4 +77,17 @@ describe('pre-configured limiters', () => {
     }
     expect(checkApiRateLimit('/api/backtest/forward', identifier).success).toBe(false);
   });
+
+  test('chart-digest progress polling does not consume the AI submission bucket', () => {
+    const identifier = `chart-progress-${Date.now()}`;
+
+    for (let request = 0; request < 10; request += 1) {
+      expect(checkApiRateLimit('/api/coach/chart-digest', identifier, 'POST').success).toBe(true);
+    }
+    expect(checkApiRateLimit('/api/coach/chart-digest', identifier, 'POST').success).toBe(false);
+
+    const progress = checkApiRateLimit('/api/coach/chart-digest', identifier, 'GET');
+    expect(progress.success).toBe(true);
+    expect(progress.remaining).toBe(READ_RATE_LIMIT_MAX - 1);
+  });
 });

@@ -135,6 +135,15 @@ const FORWARD_ROUTES = ['/api/backtest/forward'];
  * Keeping this selection here makes bucket isolation explicit and testable.
  */
 export function checkApiRateLimit(pathname: string, identifier: string, method = 'GET') {
+  // chart-digest 的 GET 只查背景工作進度，不會啟動 Codex。每秒輪詢若和 POST
+  // 共用 10/min AI bucket，第二個分頁很快就會誤觸 429；進度查詢歸唯讀桶。
+  if (
+    pathname.startsWith('/api/coach/chart-digest')
+    && (method === 'GET' || method === 'HEAD')
+  ) {
+    return readLimiter.check(identifier);
+  }
+
   if (AI_ROUTES.some(route => pathname.startsWith(route))) {
     return aiLimiter.check(identifier);
   }
