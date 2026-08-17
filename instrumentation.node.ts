@@ -10,6 +10,7 @@ import { isMarketOpen, isPostCloseWindow, getLastTradingDay } from '@/lib/dataso
 import { isTradingDay } from '@/lib/utils/tradingDay';
 // ⚠️ 只 import 純狀態模組（無 fs/path）— 維持本檔 Edge-safe 邊界（見檔頭鐵律 4）。
 import { isTranscriptionActive } from '@/lib/youtube/transcriptionLock';
+import { createSingleFlightRunner } from '@/lib/scheduler/singleFlight';
 
 function localUrl(path: string): string {
   const port = process.env.PORT || '3000';
@@ -22,18 +23,32 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 
-async function callRoute(path: string, label: string): Promise<unknown> {
-  try {
-    const res = await fetch(localUrl(path), { headers: authHeaders() });
-    if (!res.ok) {
-      console.error(`[local-cron] ${label} HTTP ${res.status}`);
+const runRouteSingleFlight = createSingleFlightRunner(path => {
+  console.warn(`[local-cron] ${path} 上一輪尚未完成，共用既有請求`);
+});
+
+async function callRoute(
+  path: string,
+  label: string,
+  { timeoutMs = 10 * 60_000 }: { timeoutMs?: number } = {},
+): Promise<unknown> {
+  return runRouteSingleFlight(path, async () => {
+    try {
+      const res = await fetch(localUrl(path), {
+        headers: authHeaders(),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) {
+        console.error(`[local-cron] ${label} HTTP ${res.status}`);
+        return null;
+      }
+      return await res.json();
+    } catch (err) {
+      const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      console.error(`[local-cron] ${label} ${timedOut ? `${timeoutMs}ms timeout` : 'fetch failed'}:`, err);
       return null;
     }
-    return await res.json();
-  } catch (err) {
-    console.error(`[local-cron] ${label} fetch failed:`, err);
-    return null;
-  }
+  });
 }
 
 // Whisper 轉錄期間，記憶體重活 cron 讓路：跳過「本輪」（不設 done 旗標 → 下一輪 60s 後再來，
@@ -243,6 +258,7 @@ export async function register() {
     const data = await callRoute(
       `/api/cron/update-intraday?market=${market}`,
       `${market} update-intraday`,
+      { timeoutMs: 3 * 60_000 },
     ) as { data?: { count?: number; skipped?: boolean; reason?: string; alert?: boolean; alertLevel?: string } } | null;
     const payload = data?.data ?? data ?? {};
     if ((payload as { skipped?: boolean }).skipped) {
@@ -464,11 +480,19 @@ export async function register() {
 
   // 計時器
   setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, 5 * 60 * 1000);
-  setInterval(() => { refreshAndScan('CN').catch(err => console.error('[local-cron] CN refreshAndScan:', err)); }, 5 * 60 * 1000);
+  // 與 TW 錯開 30 秒，避免兩個全市場 provider 同時搶 curl slots / server connections。
+  setInterval(() => {
+    setTimeout(() => {
+      refreshAndScan('CN').catch(err => console.error('[local-cron] CN refreshAndScan:', err));
+    }, 30_000);
+  }, 5 * 60 * 1000);
 
   setInterval(() => {
-    scanIntradayDaily('TW').catch(err => console.error('[local-cron] TW scan-intraday:', err));
-    scanIntradayDaily('CN').catch(err => console.error('[local-cron] CN scan-intraday:', err));
+    // L2 也是從開機時間起算；延後一分鐘，避免每 10 分鐘固定撞上 L2 refresh。
+    setTimeout(() => {
+      scanIntradayDaily('TW').catch(err => console.error('[local-cron] TW scan-intraday:', err));
+      scanIntradayDaily('CN').catch(err => console.error('[local-cron] CN scan-intraday:', err));
+    }, 60_000);
   }, 10 * 60 * 1000);
 
   // 盤中買法批次：每 10 分鐘輪一個 track（bullish/reversal/system）
@@ -527,11 +551,16 @@ export async function register() {
   // ── 即時分鐘 K 爆量警示 (/realtime + ntfy)：每 30 秒 ──
   // route 內部判斷盤中時段 + 守門，盤外直接 return skip。
   // 第一次被呼叫時 lazy 跑 restoreFromDisk + startFlushLoop。
-  setInterval(() => {
-    callRoute('/api/cron/realtime-scan', 'realtime-scan').catch(err =>
+  const runRealtimeScan = () => {
+    callRoute('/api/cron/realtime-scan', 'realtime-scan', { timeoutMs: 25_000 }).catch(err =>
       console.error('[local-cron] realtime-scan:', err),
     );
-  }, 30 * 1000);
+  };
+  // 與 5 分鐘 L2 tick 錯開 15 秒；single-flight 再保證慢輪不會每 30 秒堆一條連線。
+  setTimeout(() => {
+    runRealtimeScan();
+    setInterval(runRealtimeScan, 30 * 1000);
+  }, 15_000);
 
   // ── 三色資金買賣推播 (/api/cron/sanse-notify → ntfy)：每 120 秒 ──
   // 取代舊爆量手機推播：盯「所有持倉人 open 持倉聯集」（2026-06-12 改，持倉派生，

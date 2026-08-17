@@ -35,6 +35,8 @@ const BACKFILL_TTL_MS = 30 * 60 * 1000; // 30 分鐘
 
 // 一次性 init flag（首次呼叫時 restore + 開 flush loop）
 let initialized = false;
+let scanInFlight = false;
+let scanStartedAt = 0;
 async function ensureInitialized(): Promise<void> {
   if (initialized) return;
   initialized = true;
@@ -61,6 +63,27 @@ export async function GET(req: NextRequest) {
     return apiOk({ skipped: true, reason: 'both markets closed' });
   }
 
+  // 外部 launchd、instrumentation 或人工呼叫可能重疊。這條 route 會抓全市場報價，
+  // 慢輪若被 30 秒排程持續疊加，會耗盡 localhost connections 並拖垮 L2 refresh。
+  if (scanInFlight) {
+    return apiOk({
+      skipped: true,
+      reason: 'previous realtime scan still running',
+      runningForMs: Date.now() - scanStartedAt,
+    });
+  }
+  scanInFlight = true;
+  scanStartedAt = Date.now();
+
+  try {
+    return await executeRealtimeScan(twOpen, cnOpen);
+  } finally {
+    scanInFlight = false;
+    scanStartedAt = 0;
+  }
+}
+
+async function executeRealtimeScan(twOpen: boolean, cnOpen: boolean) {
   const startMs = Date.now();
   const pool = await getActiveSymbols();
   if (pool.length === 0) {
@@ -228,4 +251,3 @@ async function fetchCNBatch(): Promise<Map<string, BatchQuote>> {
     return new Map();
   }
 }
-
