@@ -9,7 +9,7 @@ import {
 } from '@/lib/ai/codexConcurrency';
 
 const DEFAULT_CODEX_PATH = '/Applications/ChatGPT.app/Contents/Resources/codex';
-const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000;
+export const DEFAULT_CODEX_TIMEOUT_MS = 20 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
 export class CodexUnavailableError extends Error {
@@ -95,8 +95,17 @@ function runExecFile(
       signal,
     }, (error, stdout, stderr) => {
       if (error) {
+        const execError = error as NodeJS.ErrnoException & {
+          killed?: boolean;
+          signal?: NodeJS.Signals | null;
+        };
         const detail = stderr.trim().slice(-4_000);
-        console.error('[codex-runner] Codex exec failed:', detail || error.message);
+        console.error('[codex-runner] Codex exec failed:', {
+          code: execError.code,
+          signal: execError.signal,
+          killed: execError.killed,
+          detail: detail || error.message,
+        });
         reject(error);
         return;
       }
@@ -114,6 +123,48 @@ export interface RunCodexOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   onProgress?: (progress: CodexQueueProgress) => void;
+}
+
+interface CodexProcessError extends NodeJS.ErrnoException {
+  killed?: boolean;
+  signal?: NodeJS.Signals | null;
+  cause?: unknown;
+}
+
+function errorCode(error: unknown): string | number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  return (error as { code?: string | number }).code;
+}
+
+/**
+ * 只用 child_process 的結構化欄位判定 CLI 是否真的無法啟動。
+ * Codex 的 stderr 會包含網路搜尋、工具錯誤與分析原文；不能因文字裡出現
+ * `not found` 或 `ENOENT` 就把一個已經執行數分鐘的分析誤報成 CLI 不存在。
+ */
+export function normalizeCodexExecutionError(
+  error: unknown,
+  aborted = false,
+): Error {
+  if (error instanceof CodexUnavailableError) return error;
+  if (aborted) return new Error('Codex 分析已取消');
+
+  const processError = error && typeof error === 'object'
+    ? error as CodexProcessError
+    : null;
+  const code = errorCode(processError);
+  const causeCode = errorCode(processError?.cause);
+
+  if (code === 'ENOENT' || causeCode === 'ENOENT') {
+    return new CodexUnavailableError();
+  }
+  if (
+    processError?.killed === true
+    || processError?.signal === 'SIGTERM'
+    || code === 'ETIMEDOUT'
+  ) {
+    return new Error('Codex 分析逾時，請稍後重試');
+  }
+  return new Error('Codex 分析失敗，請稍後重試');
 }
 
 /**
@@ -146,21 +197,14 @@ export async function runCodexAnalysis(
     await runExecFile(
       executable,
       args,
-      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      options.timeoutMs ?? DEFAULT_CODEX_TIMEOUT_MS,
       options.signal,
     );
     const result = (await readFile(outputFile, 'utf8')).trim();
     if (!result) throw new Error('Codex 沒有回傳分析內容');
     return result;
   } catch (error) {
-    if (error instanceof CodexUnavailableError) throw error;
-    if (options.signal?.aborted) throw new Error('Codex 分析已取消');
-    const message = error instanceof Error ? error.message : String(error);
-    if (/ENOENT|not found/i.test(message)) throw new CodexUnavailableError();
-    if (/timed out|ETIMEDOUT|SIGTERM/i.test(message)) {
-      throw new Error('Codex 分析逾時，請稍後重試');
-    }
-    throw new Error('Codex 分析失敗，請確認 Codex App 已登入後重試');
+    throw normalizeCodexExecutionError(error, options.signal?.aborted);
   } finally {
     releaseSlot?.();
     if (runDir) await rm(runDir, { recursive: true, force: true }).catch(() => {});
