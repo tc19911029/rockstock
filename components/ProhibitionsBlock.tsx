@@ -18,15 +18,17 @@ import { useReplayStore } from '@/store/replayStore';
 interface Props {
   /** 是否要顯示「未觸發時的成功訊息」（預設 true）；false 時觸發才出現 */
   showWhenClean?: boolean;
+  direction?: 'long' | 'short';
 }
 
-export default function ProhibitionsBlock({ showWhenClean = true }: Props) {
-  const { longProhibitions } = useReplayStore();
+export default function ProhibitionsBlock({ showWhenClean = true, direction = 'long' }: Props) {
+  const { longProhibitions, shortProhibitions } = useReplayStore();
+  const prohibitions = direction === 'short' ? shortProhibitions : longProhibitions;
 
-  if (!longProhibitions) return null;
+  if (!prohibitions) return null;
 
-  const triggered = longProhibitions.prohibited;
-  const reasons = longProhibitions.reasons ?? [];
+  const triggered = prohibitions.prohibited;
+  const reasons = prohibitions.reasons ?? [];
 
   if (!triggered) {
     if (!showWhenClean) return null;

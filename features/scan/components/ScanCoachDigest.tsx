@@ -110,6 +110,7 @@ interface ScanCoachDigestProps {
   direction: 'long' | 'short' | 'daban';
   marketTrend: string;
   results: StockScanResult[];
+  buyMethod?: string;
 }
 
 /** LLM 可能會回傳 "2345" 或 "2345.TW"，兩種都能對上 results */

@@ -37,13 +37,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
-  // Next 16 default metadata streaming 在 client component page + Suspense 會出 hydration mismatch
-  // (Next.MetadataOutlet 內部 <script id="_R_"> SSR vs <Suspense> client 不 match)
-  // 關掉 streaming → metadata 直接 render 進 HTML,跳過 streaming placeholder
-  // (streamingMetadata 不在 Next 16.2.1 的 TS type 內但 runtime 認得,故 cast)
-  experimental: {
-    streamingMetadata: false,
-  } as NextConfig['experimental'],
   // Runtime data is read from disk locally and Blob on Vercel. Server bundles
   // use compiled chunks, so source/test/mobile/temp trees must not be copied
   // merely because a dynamic fs path caused an overly broad NFT trace.
