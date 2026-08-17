@@ -157,12 +157,12 @@ fi
 analysis_ok() {
   local check_json="$RUN_DIR/analysis-check.json"
   curl -fsS --max-time 60 "$BASE/api/cn-media/analysis/$D" -o "$check_json" || return 1
-  python3 - "$check_json" "$CURRENT_COUNT" <<'PY'
-import json, sys
-analysis = json.load(open(sys.argv[1])).get('analysis') or {}
-count = (analysis.get('stats') or {}).get('videos_analyzed', 0)
-raise SystemExit(0 if count >= int(sys.argv[2]) else 1)
-PY
+  "$NODE_BIN" -e '
+    const fs = require("fs");
+    const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const count = payload?.analysis?.stats?.videos_analyzed ?? 0;
+    process.exit(count >= Number(process.argv[2]) ? 0 : 1);
+  ' "$check_json" "$CURRENT_COUNT"
 }
 
 cd "$REPO" || exit 1
