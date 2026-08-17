@@ -72,9 +72,10 @@ export async function POST(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { market, date, top, minSourceCount } = parsed.data;
+  const strategy = await getActiveStrategyServer();
 
   // ── 1. 讀 Pool ──
-  const pool = await loadPool(market as MarketId, date);
+  const pool = await loadPool(market as MarketId, date, strategy.id);
   if (!pool) {
     return apiError(
       `Pool not found for ${market}/${date}. ` +
@@ -94,7 +95,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const strategy = await getActiveStrategyServer();
   const prepared: PreparedItem[] = [];
   const failed: FailedItem[] = [];
 
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
   for (const candidate of eligible) {
     try {
       // ── 2. 撈 candidateRow（沒 technical source 就跳過該檔）──
-      const found = await resolveCandidateRow(candidate, market as MarketId, date, sessionCache);
+      const found = await resolveCandidateRow(candidate, market as MarketId, date, sessionCache, strategy.id);
       if (!found) {
         failed.push({
           symbol: candidate.symbol,
@@ -156,6 +156,7 @@ export async function POST(req: NextRequest) {
         schemaVersion: AGENT_SCHEMA_VERSION,
         runId, date, symbol: candidate.symbol,
         market: candidateRow.market,
+        strategyId: strategy.id,
         startedAt: phase.startedAt,
       });
       prepared.push({
@@ -202,15 +203,16 @@ async function resolveCandidateRow(
   market: MarketId,
   date: string,
   cache: Map<string, ScanSession | null>,
+  strategyId: string,
 ): Promise<{ row: StockScanResult; session: ScanSession } | null> {
   const tech = candidate.sources.technical;
   if (!tech || tech.tracks.length === 0) return null;
 
   for (const track of tech.tracks) {
-    const cacheKey = `${market}|${track}|${date}`;
+    const cacheKey = `${market}|${track}|${date}|${strategyId}`;
     let session = cache.get(cacheKey);
     if (session === undefined) {
-      session = await loadScanSession(market, date, 'long', track as MtfMode);
+      session = await loadScanSession(market, date, 'long', track as MtfMode, strategyId);
       cache.set(cacheKey, session);
     }
     if (!session) continue;

@@ -14,6 +14,8 @@ import { agentsPut, agentsGet } from '@/lib/agents/persistStorage';
 import type { CandidatesPool } from './types';
 import type { MarketId } from '@/lib/scanner/types';
 
+const LEGACY_POOL_STRATEGY_ID = 'zhu-pure-book';
+
 function poolKey(market: MarketId, date: string): string {
   return `agents/pool/${market}/${date}.json`;
 }
@@ -29,7 +31,17 @@ export async function savePool(pool: CandidatesPool): Promise<string> {
 }
 
 export async function loadPool(
-  market: MarketId, date: string,
+  market: MarketId,
+  date: string,
+  expectedStrategyId?: string,
 ): Promise<CandidatesPool | null> {
-  return await agentsGet<CandidatesPool>(poolKey(market, date));
+  const pool = await agentsGet<CandidatesPool>(poolKey(market, date));
+  if (!pool) return null;
+  if (expectedStrategyId && !poolBelongsToStrategy(pool, expectedStrategyId)) return null;
+  return pool;
+}
+
+/** 舊版 pool 沒有 strategyId，只能安全歸到當時唯一的預設策略。 */
+export function poolBelongsToStrategy(pool: CandidatesPool, strategyId: string): boolean {
+  return (pool.strategyId ?? LEGACY_POOL_STRATEGY_ID) === strategyId;
 }

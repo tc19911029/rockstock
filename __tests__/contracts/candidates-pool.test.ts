@@ -9,6 +9,7 @@
  */
 
 import { mergeCandidates } from '@/lib/agents/candidates/merger';
+import { poolBelongsToStrategy } from '@/lib/agents/candidates/poolStorage';
 import { sliceSourcesForAgent, VISIBLE_SOURCE_BY_AGENT } from '@/lib/agents/candidates/types';
 import type {
   CandidateSources,
@@ -122,6 +123,19 @@ describe('Candidates Pool — mergeCandidates', () => {
     expect(pool.schemaVersion).toBe(1);
     expect(typeof pool.generatedAt).toBe('string');
     expect(pool.generatedAt.length).toBeGreaterThan(0);
+  });
+
+  test('pool 綁定建池策略，舊資料只歸屬預設策略', () => {
+    const customPool = mergeCandidates({
+      market: 'TW', date: '2026-05-22', strategyId: 'custom-growth-v2',
+      results: [],
+    });
+    expect(poolBelongsToStrategy(customPool, 'custom-growth-v2')).toBe(true);
+    expect(poolBelongsToStrategy(customPool, 'zhu-pure-book')).toBe(false);
+
+    const legacyPool = mergeCandidates({ market: 'TW', date: '2026-05-22', results: [] });
+    expect(poolBelongsToStrategy(legacyPool, 'zhu-pure-book')).toBe(true);
+    expect(poolBelongsToStrategy(legacyPool, 'custom-growth-v2')).toBe(false);
   });
 });
 

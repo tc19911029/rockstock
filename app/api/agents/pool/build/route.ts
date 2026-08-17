@@ -16,6 +16,7 @@ import { fundamentalSource } from '@/lib/agents/candidates/sources/fundamentalSo
 import { mergeCandidates } from '@/lib/agents/candidates/merger';
 import { savePool } from '@/lib/agents/candidates/poolStorage';
 import type { MarketId } from '@/lib/scanner/types';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 
 export const runtime = 'nodejs';
 
@@ -30,16 +31,17 @@ export async function POST(req: NextRequest) {
   const { market, date } = parsed.data;
 
   const startedAt = Date.now();
+  const strategy = await getActiveStrategyServer();
 
   // 並行跑 4 個 source（任一失敗不影響其他）
   const results = await Promise.all([
-    technicalSource.extract({ market: market as MarketId, date }),
+    technicalSource.extract({ market: market as MarketId, date, strategyId: strategy.id }),
     youtubeSource.extract({ market: market as MarketId, date }),
-    chipSource.extract({ market: market as MarketId, date }),
-    fundamentalSource.extract({ market: market as MarketId, date }),
+    chipSource.extract({ market: market as MarketId, date, strategyId: strategy.id }),
+    fundamentalSource.extract({ market: market as MarketId, date, strategyId: strategy.id }),
   ]);
 
-  const pool = mergeCandidates({ market: market as MarketId, date, results });
+  const pool = mergeCandidates({ market: market as MarketId, date, strategyId: strategy.id, results });
 
   // specScore 顯示層附掛（A3）：失敗不可擋 pool 落地，且不影響排序（合約守）
   try {

@@ -162,6 +162,8 @@ export interface CandidatesPool {
   schemaVersion: typeof POOL_SCHEMA_VERSION;
   date: string;
   market: MarketId;
+  /** 建池時使用的掃描策略；舊版 pool 缺省時視為 zhu-pure-book。 */
+  strategyId?: string;
   generatedAt: string;
   /** 各 source 是否跑成功（失敗的標 false）*/
   sourceStatus: Record<SourceName, { ran: boolean; error?: string; count: number }>;
@@ -193,7 +195,7 @@ export interface SourceResult {
 /** Source extractor 函式介面 */
 export interface SourceExtractor {
   source: SourceName;
-  extract(opts: { market: MarketId; date: string }): Promise<SourceResult>;
+  extract(opts: { market: MarketId; date: string; strategyId?: string }): Promise<SourceResult>;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

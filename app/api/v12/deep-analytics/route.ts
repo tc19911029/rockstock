@@ -19,6 +19,7 @@
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { listScanDates, loadScanSession } from '@/lib/storage/scanStorage';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import type { MarketId, MtfMode } from '@/lib/scanner/types';
 
@@ -88,6 +89,7 @@ export async function GET(req: NextRequest) {
   if (!['TW', 'CN'].includes(market)) return apiError('market must be TW or CN', 400);
 
   try {
+    const strategy = await getActiveStrategyServer();
     // ── 收集所有 (date, symbol, letter, marketTrend, industry) 觸發紀錄 ──
     interface Hit {
       date: string;
@@ -101,13 +103,13 @@ export async function GET(req: NextRequest) {
 
     // 並行展開所有 (letter, date) pairs；單一 await 拉 13 letters × ~20 dates → ~260 sessions
     const datesByLetter = await Promise.all(
-      LETTERS.map((letter) => listScanDates(market, 'long', letter).then((dates) => ({ letter, dates })))
+      LETTERS.map((letter) => listScanDates(market, 'long', letter, strategy.id).then((dates) => ({ letter, dates })))
     );
     const sessionTasks: Array<Promise<{ letter: string; date: string; sess: Awaited<ReturnType<typeof loadScanSession>> }>> = [];
     for (const { letter, dates } of datesByLetter) {
       for (const d of dates) {
         sessionTasks.push(
-          loadScanSession(market, d.date, 'long', letter).then((sess) => ({
+          loadScanSession(market, d.date, 'long', letter, strategy.id).then((sess) => ({
             letter: letter as string, date: d.date, sess,
           }))
         );
@@ -284,6 +286,7 @@ export async function GET(req: NextRequest) {
 
     return apiOk({
       market,
+      strategyId: strategy.id,
       generatedAt: new Date().toISOString(),
       sampleSize: { totalHits: allHits.length, uniqueStockDays: uniqKeys.length },
       ensemble,

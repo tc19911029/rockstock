@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
   if (!meta) return apiError(`run meta not found for ${date}/${symbol}`, 404);
   const market = meta.market as MarketId;
   const runId = meta.runId;
+  const strategyId = meta.strategyId ?? 'zhu-pure-book';
 
   const phaseState = await readPhaseState(date, symbol);
   if (!phaseState) return apiError(`phase state not found`, 404);
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
   switch (phase) {
     case '2': {
       // Risk Agent 需要 candidateRow — 從 L4 撈
-      const candidateRow = await findCandidateRow(market, date, symbol);
+      const candidateRow = await findCandidateRow(market, date, symbol, strategyId);
       if (!candidateRow) return apiError(`candidateRow not found in L4 for ${symbol}`, 404);
       const q = await buildRiskQuestion({ runId, date, symbol, market, candidateRow });
       const file = await writeRiskQuestion(q);
@@ -80,11 +81,11 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function findCandidateRow(market: MarketId, date: string, symbol: string) {
+async function findCandidateRow(market: MarketId, date: string, symbol: string, strategyId: string) {
   // 試 13 字母軌找到第一個含該 symbol 的 session
   const tracks = ['daily', 'mtf', 'B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'] as const;
   for (const t of tracks) {
-    const s = await loadScanSession(market, date, 'long', t);
+    const s = await loadScanSession(market, date, 'long', t, strategyId);
     const row = s?.results.find((r) => r.symbol === symbol);
     if (row) return row;
   }

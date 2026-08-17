@@ -17,6 +17,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { checkAdminAuth } from '@/lib/api/adminAuth';
 import { listScanDates } from '@/lib/storage/scanStorage';
 import { loadLatestLockWatchSnapshot } from '@/lib/storage/lockWatchStorage';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import type { MarketId, MtfMode } from '@/lib/scanner/types';
 
 export const runtime = 'nodejs';
@@ -38,13 +39,13 @@ interface MarketHealth {
   };
 }
 
-async function checkMarket(market: MarketId, today: string): Promise<MarketHealth> {
+async function checkMarket(market: MarketId, today: string, strategyId: string): Promise<MarketHealth> {
   const latestScans: Record<string, string | null> = {};
   const daysSinceLastScan: Record<string, number | null> = {};
   let lettersToday = 0;
 
   for (const letter of V12_LETTERS) {
-    const dates = await listScanDates(market, 'long', letter);
+    const dates = await listScanDates(market, 'long', letter, strategyId);
     const latest = dates.length > 0 ? dates[0].date : null;
     latestScans[letter] = latest;
     if (latest) {
@@ -92,9 +93,10 @@ export async function GET(req: NextRequest) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 
   try {
+    const strategy = await getActiveStrategyServer();
     const [tw, cn] = await Promise.all([
-      checkMarket('TW', today),
-      checkMarket('CN', today),
+      checkMarket('TW', today, strategy.id),
+      checkMarket('CN', today, strategy.id),
     ]);
 
     // Alert level
@@ -113,6 +115,7 @@ export async function GET(req: NextRequest) {
     return apiOk({
       generatedAt: new Date().toISOString(),
       today,
+      strategyId: strategy.id,
       isWeekend,
       alertLevel,
       markets: { TW: tw, CN: cn },

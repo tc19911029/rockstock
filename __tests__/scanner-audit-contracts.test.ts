@@ -1,6 +1,11 @@
 import { adaptFundamentalRows } from '@/lib/scanner/fundamentalScanAdapter';
 import { createEmptyDiagnostics, mergeDiagnostics, recordScanRejection } from '@/lib/scanner/types';
-import { scanPostCloseStorageLocation, scanStrategyNamespace } from '@/lib/storage/scanStorage';
+import {
+  directIntradayDate,
+  directPostCloseDate,
+  scanPostCloseStorageLocation,
+  scanStrategyNamespace,
+} from '@/lib/storage/scanStorage';
 
 describe('scanner audit contracts', () => {
   test('V 軌分數不污染 0–6 六條件欄位', () => {
@@ -27,14 +32,31 @@ describe('scanner audit contracts', () => {
 
   test('非預設策略取得獨立安全 namespace', () => {
     expect(scanStrategyNamespace('zhu-pure-book')).toBeNull();
-    expect(scanStrategyNamespace('custom growth / v2')).toBe('custom-growth-v2');
+    expect(scanStrategyNamespace('custom-growth-v2')).toBe('custom-growth-v2');
+    expect(scanStrategyNamespace('custom growth / v2')).not.toBe(scanStrategyNamespace('custom-growth-v2'));
+    expect(scanStrategyNamespace('策略甲')).toMatch(/^strategy-/);
     expect(scanPostCloseStorageLocation('TW', 'long', 'daily', '2026-08-17')).toEqual({
       blobPath: 'scans/TW/long/daily/2026-08-17.json',
       localName: 'scan-TW-long-daily-2026-08-17.json',
     });
+    const customNs = scanStrategyNamespace('custom growth / v2');
     expect(scanPostCloseStorageLocation('TW', 'long', 'daily', '2026-08-17', 'custom growth / v2')).toEqual({
-      blobPath: 'scans/TW/long/daily/strategies/custom-growth-v2/2026-08-17.json',
-      localName: 'scan-TW-long-daily-strategy-custom-growth-v2-2026-08-17.json',
+      blobPath: `scans/TW/long/daily/strategies/${customNs}/2026-08-17.json`,
+      localName: `scan-TW-long-daily-strategy-${customNs}-2026-08-17.json`,
     });
+  });
+
+  test('預設策略的直接檔案解析不會吃到 strategies 子樹', () => {
+    const blobPrefix = 'scans/TW/long/daily/';
+    expect(directPostCloseDate('scans/TW/long/daily/2026-08-17.json', blobPrefix)).toBe('2026-08-17');
+    expect(directPostCloseDate('scans/TW/long/daily/strategies/other/2026-08-17.json', blobPrefix)).toBeNull();
+    expect(directIntradayDate('scans/TW/long/daily/2026-08-17/intraday/132001.json', blobPrefix, '/')).toBe('2026-08-17');
+    expect(directIntradayDate('scans/TW/long/daily/strategies/other/2026-08-17/intraday/132001.json', blobPrefix, '/')).toBeNull();
+
+    const localPrefix = 'scan-TW-long-daily-';
+    expect(directPostCloseDate('scan-TW-long-daily-2026-08-17.json', localPrefix)).toBe('2026-08-17');
+    expect(directPostCloseDate('scan-TW-long-daily-strategy-other-2026-08-17.json', localPrefix)).toBeNull();
+    expect(directIntradayDate('scan-TW-long-daily-2026-08-17-intraday-132001.json', localPrefix, '-')).toBe('2026-08-17');
+    expect(directIntradayDate('scan-TW-long-daily-strategy-other-2026-08-17-intraday-132001.json', localPrefix, '-')).toBeNull();
   });
 });

@@ -35,11 +35,18 @@ export async function GET(req: NextRequest) {
 
   try {
     const { loadScanSession } = await import('@/lib/storage/scanStorage');
+    const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
     const { loadLockRoster, saveLockRoster, saveRosterReview } = await import('@/lib/storage/lockRosterStorage');
     const { evolveRoster } = await import('@/lib/scanner/lockRoster');
 
-    const prev = await loadLockRoster(market);
-    const session = await loadScanSession(market, date, 'long', 'daily');
+    const strategy = await getActiveStrategyServer();
+    const storedPrev = await loadLockRoster(market);
+    const storedStrategyId = storedPrev?.strategyId ?? 'zhu-pure-book';
+    // 切換策略時不能沿用舊策略的自動候選；手動鎖股是使用者意圖，保留。
+    const prev = storedPrev && storedStrategyId !== strategy.id
+      ? { ...storedPrev, strategyId: strategy.id, entries: storedPrev.entries.filter(e => e.source === 'manual') }
+      : storedPrev;
+    const session = await loadScanSession(market, date, 'long', 'daily', strategy.id);
     const results = session?.results ?? [];
 
     // 候選排序：六條件分數優先，成交額名次次之（掃描本身已過六條件+戒律+淘汰）
@@ -71,6 +78,8 @@ export async function GET(req: NextRequest) {
       market, date, prev, candidates,
       candlesOf: (s) => candleMap.get(s) ?? null,
     });
+    roster.strategyId = strategy.id;
+    review.strategyId = strategy.id;
 
     // ── 避雷紅旗（北極星＝賺多賠少）：Tier1 處置/注意股一定套；Tier2 籌碼避雷讀本地快取 best-effort ──
     if (market === 'TW') {

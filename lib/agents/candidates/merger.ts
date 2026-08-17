@@ -24,11 +24,12 @@ import { computeRedFlags } from '@/lib/redflags/compute';
 export interface MergeArgs {
   market: MarketId;
   date: string;
+  strategyId?: string;
   results: SourceResult[];
 }
 
 export function mergeCandidates(args: MergeArgs): CandidatesPool {
-  const { market, date, results } = args;
+  const { market, date, strategyId, results } = args;
 
   // symbol → 合併中的 Candidate
   const merged = new Map<string, Candidate>();
@@ -87,6 +88,7 @@ export function mergeCandidates(args: MergeArgs): CandidatesPool {
     schemaVersion: POOL_SCHEMA_VERSION,
     date,
     market,
+    ...(strategyId ? { strategyId } : {}),
     generatedAt: new Date().toISOString(),
     sourceStatus,
     candidates,

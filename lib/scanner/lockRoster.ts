@@ -67,12 +67,15 @@ export interface LockRosterEntry {
 
 export interface LockRoster {
   market: MarketId;
+  /** 自動候選所屬掃描策略；舊版缺省視為 zhu-pure-book。 */
+  strategyId?: string;
   updatedAt: string;
   entries: LockRosterEntry[];
 }
 
 export interface RosterReview {
   market: MarketId;
+  strategyId?: string;
   date: string;
   kept: number;
   added: { symbol: string; name: string; category: HuntCategory; detail: string }[];

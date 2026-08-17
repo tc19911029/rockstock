@@ -36,8 +36,11 @@ export async function POST(req: NextRequest) {
   const { market, date, direction, multiTimeframeEnabled, results, scanTime } = parsed.data;
 
   try {
+    const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
+    const strategy = await getActiveStrategyServer();
     const session: ScanSession = {
       id: `${market}-${direction}-${multiTimeframeEnabled ? 'mtf' : 'daily'}-${date}-manual`,
+      strategyId: strategy.id,
       market: market as MarketId,
       date,
       direction,

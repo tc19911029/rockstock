@@ -4,6 +4,25 @@ import type {
   PortfolioPartialExitExecution,
 } from '@/lib/agents/portfolio/types';
 
+export const PARTIAL_EXIT_SIGNAL_TYPES = [
+  'ch9_partial_tp_half',
+  'ch83_surge3_blowoff_reduce',
+  'ch8_climax_partial_tp',
+  'blowoff_black_reduce',
+  'blowoff_upper_shadow_reduce',
+  'break_ma5_short',
+] as const;
+
+export type PartialExitSignalType = typeof PARTIAL_EXIT_SIGNAL_TYPES[number];
+export const PARTIAL_EXIT_SIGNAL_TYPE_SET: ReadonlySet<string> = new Set(PARTIAL_EXIT_SIGNAL_TYPES);
+export const BLOWOFF_PARTIAL_EXIT_SIGNAL_TYPE_SET: ReadonlySet<string> = new Set(
+  PARTIAL_EXIT_SIGNAL_TYPES.filter(type => type !== 'break_ma5_short'),
+);
+
+export function isPartialExitSignalType(value: string): value is PartialExitSignalType {
+  return PARTIAL_EXIT_SIGNAL_TYPE_SET.has(value);
+}
+
 export interface ConfirmPartialExitInput {
   signalDate: string;
   signalType: string;
@@ -21,7 +40,7 @@ export function confirmPartialExit(
 ): { shares: number; executionState: PortfolioExecutionState; execution: PortfolioPartialExitExecution } {
   if (holding.status !== 'open') throw new Error('只有 open holding 可以確認分批賣出');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.signalDate)) throw new Error('signalDate 格式錯誤');
-  if (!input.signalType.trim()) throw new Error('signalType 不可空白');
+  if (!isPartialExitSignalType(input.signalType)) throw new Error(`不允許的分批出場 signalType: ${input.signalType}`);
   if (!Number.isInteger(holding.shares) || holding.shares < 2) throw new Error('持股少於 2 股，無法執行賣半');
 
   const previous = holding.executionState ?? {

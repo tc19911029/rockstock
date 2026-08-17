@@ -16,6 +16,7 @@ export async function verifyPostCloseScanCompletion(options: {
   directions: ScanDirection[];
   mtfModes: MtfMode[];
   startedAt?: number;
+  strategyId?: string;
 }): Promise<ScanCompletionCheck> {
   const { loadPostCloseScanSession } = await import('@/lib/storage/scanStorage');
   const missing: string[] = [];
@@ -29,6 +30,7 @@ export async function verifyPostCloseScanCompletion(options: {
         options.date,
         direction,
         mtfMode,
+        options.strategyId,
       );
       if (!session) {
         missing.push(key);

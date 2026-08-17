@@ -17,6 +17,7 @@ import { listScanDates, loadScanSession } from '@/lib/storage/scanStorage';
 import type { MarketId, MtfMode } from '@/lib/scanner/types';
 import type { CandleFileData } from '@/lib/datasource/CandleStorageAdapter';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,8 +40,8 @@ interface LetterStats {
   uniqueSymbols: number;
 }
 
-async function computeLetterStats(market: MarketId, letter: MtfMode): Promise<LetterStats> {
-  const dates = await listScanDates(market, 'long', letter);
+async function computeLetterStats(market: MarketId, letter: MtfMode, strategyId: string): Promise<LetterStats> {
+  const dates = await listScanDates(market, 'long', letter, strategyId);
   const stats: LetterStats = {
     letter: letter as string,
     hits: 0, days: 0, avgEntry: 0, avgRet5d: null, winRate5d: null,
@@ -56,7 +57,7 @@ async function computeLetterStats(market: MarketId, letter: MtfMode): Promise<Le
 
   // 先 load 所有 sessions
   for (const d of dates) {
-    const sess = await loadScanSession(market, d.date, 'long', letter);
+    const sess = await loadScanSession(market, d.date, 'long', letter, strategyId);
     if (!sess || !sess.results || sess.results.length === 0) continue;
     daysWithHits++;
     for (const r of sess.results) {
@@ -105,9 +106,11 @@ export async function GET(req: NextRequest) {
   if (!['TW', 'CN'].includes(market)) return apiError('market must be TW or CN', 400);
 
   try {
-    const allStats = await Promise.all(LETTERS.map((l) => computeLetterStats(market, l)));
+    const strategy = await getActiveStrategyServer();
+    const allStats = await Promise.all(LETTERS.map((l) => computeLetterStats(market, l, strategy.id)));
     return apiOk({
       market,
+      strategyId: strategy.id,
       generatedAt: new Date().toISOString(),
       stats: allStats,
     });

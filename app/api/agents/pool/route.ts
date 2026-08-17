@@ -18,6 +18,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiValidationError } from '@/lib/api/response';
 import { loadPool } from '@/lib/agents/candidates/poolStorage';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import {
   computeFacetScores,
   POOL_MIN_SOURCE_COUNT_DEFAULT,
@@ -43,7 +44,8 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
   const { market, date, minSourceCount, limit, sort } = parsed.data;
 
-  const pool = await loadPool(market as MarketId, date);
+  const strategy = await getActiveStrategyServer();
+  const pool = await loadPool(market as MarketId, date, strategy.id);
   if (!pool) {
     return apiOk({ date, market, exists: false, candidates: [], total: 0, weights: POOL_WEIGHTS });
   }
@@ -107,8 +109,10 @@ export async function GET(req: NextRequest) {
     market,
     exists: true,
     generatedAt: pool.generatedAt,
+    strategyId: pool.strategyId ?? 'zhu-pure-book',
     sourceStatus: pool.sourceStatus,
     total: pool.candidates.length,
+    eligibleTotal: passed.length,
     returned: slicedWithLastClose.length,
     minSourceCount,
     sort,

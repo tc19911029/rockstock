@@ -104,7 +104,9 @@ export async function GET(req: NextRequest) {
     // 為何累加不取代：早盤攻擊訊號最多、午後 30分K 幾乎不動(六條件⑤紅K實體 2% 是日K尺度)，
     // 取代會讓早上選到的一路掉光。
     const { loadScanSession } = await import('@/lib/storage/scanStorage');
-    const prior = await loadScanSession('TW', date, 'long', 'daily30' as never);
+    const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
+    const strategy = await getActiveStrategyServer();
+    const prior = await loadScanSession('TW', date, 'long', 'daily30' as never, strategy.id);
     const bySym = new Map<string, typeof results[number]>();
     for (const r of prior?.results ?? []) bySym.set(r.symbol, r as typeof results[number]);
     for (const r of results) bySym.set(r.symbol, r); // 重複命中 → 更新為最新一根資料
@@ -126,6 +128,7 @@ export async function GET(req: NextRequest) {
     await saveScanSession({
       ...baseSession,
       id: `TW-long-daily30-${date}-intraday-${Date.now()}`,
+      strategyId: strategy.id,
       sessionType: 'intraday' as const,
     });
 
@@ -135,6 +138,7 @@ export async function GET(req: NextRequest) {
       await saveScanSession({
         ...baseSession,
         id: `TW-long-daily30-${date}-postclose`,
+        strategyId: strategy.id,
         sessionType: 'post_close' as const,
       }, { allowOverwritePostClose: true });
     }

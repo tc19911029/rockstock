@@ -12,10 +12,11 @@ import { NextRequest } from 'next/server';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
-import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { apiOk, apiValidationError } from '@/lib/api/response';
 import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import { loadScanSession } from '@/lib/storage/scanStorage';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import {
   loadAllHoldings,
   loadReview,
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
   if (holdings.length === 0) {
     return apiOk({ message: '無持股需要 review', holdings: 0 });
   }
+  const strategy = await getActiveStrategyServer();
 
   // 報價不能依賴「剛好入選 L4」：未入選候選池的持股也必須有現價才能執行停損規則。
   const quoteRaw = await fetchJSON(internalUrl(
@@ -76,7 +78,7 @@ export async function POST(req: NextRequest) {
       const cacheKey = `${market}|daily|${date}`;
       let session = sessionCache.get(cacheKey);
       if (session === undefined) {
-        session = await loadScanSession(market, date, 'long', 'daily');
+        session = await loadScanSession(market, date, 'long', 'daily', strategy.id);
         sessionCache.set(cacheKey, session);
       }
       const candidateRow = session?.results.find(r => normalizedSymbol(r.symbol) === normalizedSymbol(h.symbol));

@@ -81,6 +81,8 @@ export interface AgentRunMeta {
   date: string;
   symbol: string;
   market: MarketId;
+  /** 建立這次分析時使用的策略；舊紀錄缺省時視為 zhu-pure-book。 */
+  strategyId?: string;
   startedAt: string;
   completedAt?: string;
   gitSha?: string;

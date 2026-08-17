@@ -76,6 +76,8 @@ export async function GET(req: NextRequest) {
     const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
     const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
     const { triggerPreload: triggerL1 } = await import('@/lib/datasource/L1CandleCache');
+    const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
+    const strategy = await getActiveStrategyServer();
     triggerL1(market);
 
     let scanner: import('@/lib/scanner/TaiwanScanner').TaiwanScanner | import('@/lib/scanner/ChinaScanner').ChinaScanner;
@@ -157,6 +159,7 @@ export async function GET(req: NextRequest) {
       const sessionResults = bmResults.filter(r => (r.matchedMethods?.length ?? 0) > 0);
       await saveScanSession({
         id: `${market}-long-${method}-${date}-intraday-${Date.now()}`,
+        strategyId: strategy.id,
         market: market as import('@/lib/scanner/types').MarketId,
         date,
         direction: 'long' as const,

@@ -14,6 +14,14 @@ export interface DerivedHoldingStop {
   source: 'configured' | 'strategy_dynamic';
 }
 
+const DEFAULT_LONG_MISSING_STOP_PCT = 0.05;
+const DEFAULT_SHORT_MISSING_STOP_PCT = 0.07;
+
+export function fallbackHoldingStop(entryPrice: number, side: 'long' | 'short'): number {
+  const pct = side === 'short' ? DEFAULT_SHORT_MISSING_STOP_PCT : DEFAULT_LONG_MISSING_STOP_PCT;
+  return entryPrice * (side === 'short' ? 1 + pct : 1 - pct);
+}
+
 /** 判斷停損變更是否往不利方向放寬；方向必須來自 server holding 狀態。 */
 export function doesStopChangeLoosen(
   existing: number,
@@ -37,7 +45,10 @@ export function deriveActiveLongStop(args: {
   candles: CandleWithIndicators[];
   ui?: Record<string, unknown>;
 }): DerivedHoldingStop {
-  const letter = normalizeLetter(args.triggerSignal ?? 'B') as V12Letter;
+  const normalizedLetter = normalizeLetter(args.triggerSignal ?? 'B');
+  const letter = Object.prototype.hasOwnProperty.call(SIGNAL_TO_FIXED_STOP_PCT, normalizedLetter)
+    ? normalizedLetter as V12Letter
+    : 'B';
   const fixedPct = SIGNAL_TO_FIXED_STOP_PCT[letter] ?? 0.05;
   const uiEntry = args.ui?.entryKbar as Record<string, unknown> | undefined;
   const sourceEntry = args.candles.find(c => c.date === args.entryDate);

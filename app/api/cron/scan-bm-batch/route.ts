@@ -84,6 +84,8 @@ export async function GET(req: NextRequest) {
     const { triggerPreload: triggerL1 } = await import('@/lib/datasource/L1CandleCache');
     const { appendLockWatchRecords } = await import('@/lib/storage/lockWatchStorage');
     const { createLockWatchFromF, createLockWatchFromN } = await import('@/lib/scanner/lockWatchManager');
+    const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
+    const strategy = await getActiveStrategyServer();
     triggerL1(market);
 
     let scanner: import('@/lib/scanner/TaiwanScanner').TaiwanScanner | import('@/lib/scanner/ChinaScanner').ChinaScanner;
@@ -152,6 +154,7 @@ export async function GET(req: NextRequest) {
           await injectForwardPerf(rResults, date, `scan-bm-batch:R-${direction}`);
           await saveScanSession({
             id: `${market}-${direction}-R-${date}-${Date.now()}`,
+            strategyId: strategy.id,
             market: market as import('@/lib/scanner/types').MarketId,
             date,
             direction,
@@ -196,6 +199,7 @@ export async function GET(req: NextRequest) {
       await injectForwardPerf(sessionResults, date, `scan-bm-batch:${m}`);
       await saveScanSession({
         id: `${market}-long-${m}-${date}-${Date.now()}`,
+        strategyId: strategy.id,
         market: market as import('@/lib/scanner/types').MarketId,
         date,
         direction: 'long' as const,

@@ -25,6 +25,7 @@ import { validateEntryPrice } from '@/lib/agents/portfolio/validateEntryPrice';
 import { detectAveragingDown, mergeAveragedDownFlag } from '@/lib/portfolio/averagingDownGuard';
 import { detectStopLossLowered, mergeStopLossLoweredFlag, type PositionSide } from '@/lib/portfolio/stopLossGuard';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
+import { PARTIAL_EXIT_SIGNAL_TYPES } from '@/lib/portfolio/holdingExecution';
 
 export const runtime = 'nodejs';
 
@@ -48,12 +49,6 @@ const upsertSchema = z.object({
   forcePrice: z.coerce.boolean().optional().default(false),
 });
 
-const closeSchema = z.object({
-  symbol: z.string().regex(/^[A-Za-z0-9._-]+$/),
-  closedPrice: z.coerce.number().positive(),
-  closeReason: z.string().min(1),
-});
-
 const deleteSchema = z.object({
   symbol: z.string().regex(/^[A-Za-z0-9._-]+$/),
   hard: z.enum(['0', '1']).default('0'),
@@ -66,7 +61,7 @@ const executionSchema = z.discriminatedUnion('action', [
     action: z.literal('confirm_partial_exit'),
     symbol: z.string().regex(/^[A-Za-z0-9._-]+$/),
     signalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    signalType: z.string().min(1),
+    signalType: z.enum(PARTIAL_EXIT_SIGNAL_TYPES),
     executionPrice: z.coerce.number().positive().optional(),
   }),
   z.object({

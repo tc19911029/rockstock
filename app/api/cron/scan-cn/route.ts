@@ -6,6 +6,7 @@ import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { runScanPipeline } from '@/lib/scanner/ScanPipeline';
 import { assertL1Coverage } from '@/lib/scanner/coverageGuard';
 import { verifyPostCloseScanCompletion } from '@/lib/scanner/scanCompletion';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
   const date = dateParam ?? getLastTradingDay('CN');
   const directions = ['long', 'short'] as const;
   const mtfModes = ['daily', 'mtf'] as const;
+  const strategy = await getActiveStrategyServer();
 
   if (!isTradingDay(date, 'CN')) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
@@ -33,6 +35,7 @@ export async function GET(req: NextRequest) {
       market: 'CN', date,
       directions: [...directions],
       mtfModes: [...mtfModes],
+      strategyId: strategy.id,
     });
     if (existing.completed && req.nextUrl.searchParams.get('force') !== '1') {
       return apiOk({ skipped: true, completed: true, reason: 'post_close already complete', market: 'CN', date });
@@ -70,6 +73,7 @@ export async function GET(req: NextRequest) {
       force: true,
       batch,
       totalBatches,
+      strategy,
     });
 
     const completion = await verifyPostCloseScanCompletion({
@@ -77,6 +81,7 @@ export async function GET(req: NextRequest) {
       directions: [...directions],
       mtfModes: [...mtfModes],
       startedAt,
+      strategyId: strategy.id,
     });
     if (result.timedOut || !completion.completed) {
       console.error('[cron/scan-cn] post_close incomplete', { date, batch, timedOut: result.timedOut, completion });

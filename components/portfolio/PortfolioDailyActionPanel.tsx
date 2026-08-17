@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { DailyActionResponse, DailyActionItem } from '@/app/api/portfolio/daily-action/route';
+import { PARTIAL_EXIT_SIGNAL_TYPE_SET } from '@/lib/portfolio/holdingExecution';
 import type { HoldingAction } from '@/lib/agents/holdingsActionEngine';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
@@ -132,11 +133,7 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
   };
 
   const confirmHalf = () => {
-    const partialTypes = new Set([
-      'ch9_partial_tp_half', 'ch83_surge3_blowoff_reduce', 'blowoff_black_reduce',
-      'blowoff_upper_shadow_reduce', 'ch8_climax_partial_tp', 'break_ma5_short',
-    ]);
-    const signal = item.signals.find(s => partialTypes.has(s.type));
+    const signal = item.signals.find(s => PARTIAL_EXIT_SIGNAL_TYPE_SET.has(s.type));
     if (!signal || !item.asOfDate) return;
     if (!window.confirm(`確認「${item.name}」已依 ${signal.label} 賣出一半？\n\n確認後會把 server 持股數更新為剩餘股數，並留下執行紀錄。`)) return;
     void patchHolding({

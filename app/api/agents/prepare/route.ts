@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { market, direction, mtf, date, symbol } = parsed.data;
+  const strategy = await getActiveStrategyServer();
 
   // ── 1. 從 L4 載入 session ──
   const session = await loadScanSession(
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
     date,
     direction as ScanDirection,
     mtf as MtfMode,
+    strategy.id,
   );
   if (!session) {
     return apiError(`L4 session not found: ${market}/${direction}/${mtf}/${date}`, 404);
@@ -79,10 +81,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── 3. 取 active strategy ──
-  const strategy = await getActiveStrategyServer();
-
-  // ── 4. 建構 4 個 Agent question 並行 prefetch ──
+  // ── 3. 建構 4 個 Agent question 並行 prefetch ──
   const runId = makeRunId(date, symbol, session.scanTime);
 
   const technicalQ = buildTechnicalQuestion({
@@ -125,6 +124,7 @@ export async function POST(req: NextRequest) {
     schemaVersion: AGENT_SCHEMA_VERSION,
     runId, date, symbol,
     market: candidateRow.market,
+    strategyId: strategy.id,
     startedAt: phase.startedAt,
   });
 

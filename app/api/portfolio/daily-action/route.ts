@@ -18,7 +18,7 @@ import { loadAllHoldings } from '@/lib/agents/portfolio/storage';
 import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
-import { evaluateHolding, DEFAULT_STOP_LOSS_MULT, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
+import { evaluateHolding, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
 import { readAveragedDownFlag } from '@/lib/portfolio/averagingDownGuard';
 import { readStopLossLoweredFlag } from '@/lib/portfolio/stopLossGuard';
 import { computeProfitTargets } from '@/lib/sell/profitTargets';
@@ -29,9 +29,13 @@ import type { OperationMode } from '@/lib/sell/v12Operation';
 import { classifyPortfolioNotificationBasis } from '@/lib/portfolio/notifyPolicy';
 import { resolveHoldingReferencePrice } from '@/lib/portfolio/holdingReferencePrice';
 import { computeIndicators } from '@/lib/indicators';
-import { deriveActiveLongStop } from '@/lib/portfolio/holdingRisk';
+import { deriveActiveLongStop, fallbackHoldingStop } from '@/lib/portfolio/holdingRisk';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
-import { partialExitForSignal } from '@/lib/portfolio/holdingExecution';
+import {
+  BLOWOFF_PARTIAL_EXIT_SIGNAL_TYPE_SET,
+  PARTIAL_EXIT_SIGNAL_TYPE_SET,
+  partialExitForSignal,
+} from '@/lib/portfolio/holdingExecution';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -134,7 +138,7 @@ export async function GET(req: NextRequest) {
           market: h.market,
           entryDate: h.entryDate,
           entryPrice: h.entryPrice,
-          stopLoss: configuredStopLoss ?? (hasAccountingEntryPrice ? h.entryPrice * DEFAULT_STOP_LOSS_MULT : 0),
+          stopLoss: configuredStopLoss ?? (hasAccountingEntryPrice ? fallbackHoldingStop(h.entryPrice, positionSide) : 0),
           shares: h.shares,
           positionSide,
           operationMode,
@@ -194,7 +198,7 @@ export async function GET(req: NextRequest) {
               ui: h.ui,
             })
           : {
-              price: configuredStopLoss ?? strategyReferencePrice / DEFAULT_STOP_LOSS_MULT,
+              price: configuredStopLoss ?? fallbackHoldingStop(strategyReferencePrice, 'short'),
               method: configuredStopLoss ? '使用者已設定回補停損' : '舊持倉 7% 回補 fallback',
               source: configuredStopLoss ? 'configured' as const : 'legacy_fallback' as const,
             };
@@ -208,11 +212,11 @@ export async function GET(req: NextRequest) {
           ? entryKbar.low
           : candles.find(c => c.date === h.entryDate)?.low;
         const yesterdayDate = candles.length >= 2 ? candles[candles.length - 2].date : '';
-        const priorPartialExecution = partialExitForSignal(h.executionState, yesterdayDate, new Set([
-          'ch9_partial_tp_half', 'ch83_surge3_blowoff_reduce',
-          'ch8_climax_partial_tp',
-          'blowoff_black_reduce', 'blowoff_upper_shadow_reduce',
-        ]));
+        const priorPartialExecution = partialExitForSignal(
+          h.executionState,
+          yesterdayDate,
+          BLOWOFF_PARTIAL_EXIT_SIGNAL_TYPE_SET,
+        );
         let result = evaluateHolding({
           symbol: h.symbol,
           entryPrice: strategyReferencePrice,
@@ -230,15 +234,7 @@ export async function GET(req: NextRequest) {
             ? { signalDate: priorPartialExecution.signalDate, sharesRemaining: priorPartialExecution.sharesRemaining }
             : undefined,
         });
-        const partialSignalTypes = new Set([
-          'ch9_partial_tp_half',
-          'ch83_surge3_blowoff_reduce',
-          'ch8_climax_partial_tp',
-          'blowoff_black_reduce',
-          'blowoff_upper_shadow_reduce',
-          'break_ma5_short',
-        ]);
-        const partialSignal = result.signals.find(signal => partialSignalTypes.has(signal.type));
+        const partialSignal = result.signals.find(signal => PARTIAL_EXIT_SIGNAL_TYPE_SET.has(signal.type));
         const partialExecution = partialSignal
           ? partialExitForSignal(h.executionState, lastCandle.date, new Set([partialSignal.type]))
           : null;

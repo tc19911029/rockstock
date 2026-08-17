@@ -150,12 +150,39 @@ function sessionMtfMode(session: ScanSession): MtfMode {
 
 const DEFAULT_SCAN_STRATEGY_ID = 'zhu-pure-book';
 
+function strategyIdHash(strategyId: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < strategyId.length; i++) {
+    hash ^= strategyId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36).padStart(7, '0');
+}
+
 /** 預設朱老師策略維持 legacy 路徑；其他策略取得安全且獨立的命名空間。 */
 export function scanStrategyNamespace(strategyId?: string): string | null {
   if (!strategyId || strategyId === DEFAULT_SCAN_STRATEGY_ID) return null;
   const safe = strategyId.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-  if (!safe) throw new Error(`unsafe strategyId: ${strategyId}`);
-  return safe.slice(0, 80);
+  if (safe === strategyId && safe.length <= 80) return safe;
+  return `${safe.slice(0, 68) || 'strategy'}-${strategyIdHash(strategyId)}`;
+}
+
+/** 只接受 prefix 正下方的正式檔，避免預設策略把 strategies/ 子樹混入。 */
+export function directPostCloseDate(pathname: string, prefix: string): string | null {
+  if (!pathname.startsWith(prefix)) return null;
+  return pathname.slice(prefix.length).match(/^(\d{4}-\d{2}-\d{2})\.json$/)?.[1] ?? null;
+}
+
+/** 只接受 prefix 正下方的盤中檔；separator 分別對應 Blob(/) 與本機檔名(-)。 */
+export function directIntradayDate(
+  pathname: string,
+  prefix: string,
+  separator: '/' | '-',
+): string | null {
+  if (!pathname.startsWith(prefix)) return null;
+  const escaped = separator === '/' ? '\\/' : '-';
+  const pattern = new RegExp(`^(\\d{4}-\\d{2}-\\d{2})${escaped}intraday${escaped}\\d{4,6}\\.json$`);
+  return pathname.slice(prefix.length).match(pattern)?.[1] ?? null;
 }
 
 export function scanPostCloseStorageLocation(
@@ -377,7 +404,7 @@ async function pruneOldScanSessions(
   if (IS_VERCEL) {
     const blobs = await blobListPrefix(prefix);
     // 只取 post_close 檔（直接在 prefix 下，形如 YYYY-MM-DD.json）
-    const postCloseBlobs = blobs.filter(b => /\d{4}-\d{2}-\d{2}\.json$/.test(b.pathname));
+    const postCloseBlobs = blobs.filter(b => directPostCloseDate(b.pathname, prefix) != null);
     // 依日期降序，保留前 keepDays 筆，刪除其餘
     const sorted = postCloseBlobs.sort((a, b) => b.pathname.localeCompare(a.pathname));
     const toDelete = sorted.slice(keepDays);
@@ -400,7 +427,7 @@ async function pruneOldScanSessions(
     try {
       const files = await fs.readdir(dir);
       const postCloseFiles = files
-        .filter(f => f.startsWith(prefix_local) && /\d{4}-\d{2}-\d{2}\.json$/.test(f));
+        .filter(f => directPostCloseDate(f, prefix_local) != null);
       const sorted = postCloseFiles.sort((a, b) => b.localeCompare(a));
       const toDelete = sorted.slice(keepDays);
       for (const f of toDelete) {
@@ -428,15 +455,16 @@ export async function listScanDates(
     try {
       for (const m of modes) {
         // New MTF-aware path
-        const blobs = await blobListPrefix(strategyNs
+        const scanPrefix = strategyNs
           ? `scans/${market}/${direction}/${m}/strategies/${strategyNs}/`
-          : `scans/${market}/${direction}/${m}/`);
+          : `scans/${market}/${direction}/${m}/`;
+        const blobs = await blobListPrefix(scanPrefix);
         for (const blob of blobs) {
-          const match = blob.pathname.match(/(\d{4}-\d{2}-\d{2})\.json$/);
-          if (!match) continue;
+          const date = directPostCloseDate(blob.pathname, scanPrefix);
+          if (!date) continue;
           entries.push({
             market, direction, mtfMode: m,
-            date: match[1], resultCount: -1,
+            date, resultCount: -1,
             scanTime: blob.uploadedAt.toISOString(),
           });
         }
@@ -479,19 +507,20 @@ export async function listScanDates(
   } else {
     // Local dev: read from data/ directory
     for (const m of modes) {
-      const files = await fsListPrefix(strategyNs
+      const scanPrefix = strategyNs
         ? `scan-${market}-${direction}-${m}-strategy-${strategyNs}-`
-        : `scan-${market}-${direction}-${m}-`);
+        : `scan-${market}-${direction}-${m}-`;
+      const files = await fsListPrefix(scanPrefix);
       for (const file of files) {
-        const match = file.match(/(\d{4}-\d{2}-\d{2})\.json$/);
-        if (!match) continue;
+        const date = directPostCloseDate(file, scanPrefix);
+        if (!date) continue;
         try {
           const raw = await fsGet(file);
           if (raw) {
             const session = JSON.parse(raw) as ScanSession;
             entries.push({
               market, direction, mtfMode: m,
-              date: match[1],
+              date,
               resultCount: session.resultCount,
               scanTime: session.scanTime,
             });
@@ -499,7 +528,7 @@ export async function listScanDates(
         } catch {
           entries.push({
             market, direction, mtfMode: m,
-            date: match[1], resultCount: -1, scanTime: '',
+            date, resultCount: -1, scanTime: '',
           });
         }
       }
@@ -548,15 +577,15 @@ export async function listScanDates(
   if (IS_VERCEL) {
     try {
       for (const m of modes) {
-        const blobs = await blobListPrefix(strategyNs
+        const scanPrefix = strategyNs
           ? `scans/${market}/${direction}/${m}/strategies/${strategyNs}/`
-          : `scans/${market}/${direction}/${m}/`);
+          : `scans/${market}/${direction}/${m}/`;
+        const blobs = await blobListPrefix(scanPrefix);
         for (const blob of blobs) {
           // 匹配 intraday 路徑: {date}/intraday/{HHMM 或 HHMMSS}.json
           // 2026-05-08：HHMM 4 碼 → HHMMSS 6 碼後相容兩種
-          const intradayMatch = blob.pathname.match(/(\d{4}-\d{2}-\d{2})\/intraday\/\d{4,6}\.json$/);
-          if (!intradayMatch) continue;
-          const dateStr = intradayMatch[1];
+          const dateStr = directIntradayDate(blob.pathname, scanPrefix, '/');
+          if (!dateStr) continue;
           if (dateStr !== marketToday) continue;
           // 不跳過：讓 intraday 與 post_close 共存，由 dedup 取最新 scanTime
           entries.push({
@@ -569,14 +598,14 @@ export async function listScanDates(
     } catch { /* non-critical */ }
   } else {
     for (const m of modes) {
-      const intradayFiles = await fsListPrefix(strategyNs
+      const scanPrefix = strategyNs
         ? `scan-${market}-${direction}-${m}-strategy-${strategyNs}-`
-        : `scan-${market}-${direction}-${m}-`);
+        : `scan-${market}-${direction}-${m}-`;
+      const intradayFiles = await fsListPrefix(scanPrefix);
       for (const file of intradayFiles) {
         // 2026-05-08：HHMM 4 碼 → HHMMSS 6 碼後相容兩種，避免新檔漏列
-        const intradayMatch = file.match(/(\d{4}-\d{2}-\d{2})-intraday-\d{4,6}\.json$/);
-        if (!intradayMatch) continue;
-        const dateStr = intradayMatch[1];
+        const dateStr = directIntradayDate(file, scanPrefix, '-');
+        if (!dateStr) continue;
         if (dateStr !== marketToday) continue;
         // 不跳過也不加入 existingDates，讓同日多筆 intraday 都進 entries，由 dedup 取最新
         try {

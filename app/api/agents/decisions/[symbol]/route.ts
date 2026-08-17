@@ -91,7 +91,7 @@ export async function GET(
   let candidate: Candidate | null = null;
   const market = (meta?.market ?? phase?.market) as MarketId | undefined;
   if (market) {
-    const pool = await loadPool(market, date);
+    const pool = await loadPool(market, date, meta?.strategyId ?? 'zhu-pure-book');
     candidate = pool?.candidates.find((c) => c.symbol === symbol) ?? null;
   }
 

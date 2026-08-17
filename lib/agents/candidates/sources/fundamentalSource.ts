@@ -25,7 +25,6 @@
 
 import { loadScanSession } from '@/lib/storage/scanStorage';
 import { fetchJSON, internalUrl } from '@/lib/agents/agents/_fetchHelper';
-import type { MarketId } from '@/lib/scanner/types';
 import type {
   CandidateSources,
   FundamentalSourceAttribution,
@@ -52,13 +51,13 @@ interface FundamentalsLite {
 
 export const fundamentalSource: SourceExtractor = {
   source: 'fundamental',
-  async extract({ market, date }): Promise<SourceResult> {
+  async extract({ market, date, strategyId }): Promise<SourceResult> {
     if (market !== 'TW') {
       return { source: 'fundamental', ran: true, candidates: [] };
     }
 
     try {
-      const session = await loadScanSession(market, date, 'long', 'daily');
+      const session = await loadScanSession(market, date, 'long', 'daily', strategyId);
       if (!session || !session.results) {
         return { source: 'fundamental', ran: true, candidates: [] };
       }

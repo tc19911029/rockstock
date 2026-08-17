@@ -83,17 +83,18 @@ async function findRecentCandidateRow(
   market: MarketId,
   symbol: string,
   date: string,
+  strategyId: string,
 ): Promise<{ row: StockScanResult; source: 'today' | 'recent'; foundAt: string } | null> {
   // 先試 today
   try {
-    const session = await loadScanSession(market, date, 'long', 'daily');
+    const session = await loadScanSession(market, date, 'long', 'daily', strategyId);
     const row = session?.results.find((r) => r.symbol === symbol);
     if (row) return { row, source: 'today', foundAt: date };
   } catch { /* ignore */ }
 
   // Fallback：近 14 天
   try {
-    const dates = await listScanDates(market, 'long', 'daily');
+    const dates = await listScanDates(market, 'long', 'daily', strategyId);
     const recentDates = dates
       .map((d) => d.date)
       .filter((d) => d < date)
@@ -102,7 +103,7 @@ async function findRecentCandidateRow(
 
     for (const d of recentDates) {
       try {
-        const session = await loadScanSession(market, d, 'long', 'daily');
+        const session = await loadScanSession(market, d, 'long', 'daily', strategyId);
         const row = session?.results.find((r) => r.symbol === symbol);
         if (row) return { row, source: 'recent', foundAt: d };
       } catch { /* skip */ }
@@ -120,16 +121,17 @@ async function prepareSingle(
   const market: MarketId = holding?.market ?? (symbol.match(/^\d{6}(\.SS|\.SZ)?$/) ? 'CN' : 'TW');
   const name = holding?.name ?? symbol;
 
-  const candidateInfo = await findRecentCandidateRow(market, symbol, date);
   const agentsPrepped: string[] = [];
+  let candidateInfo: Awaited<ReturnType<typeof findRecentCandidateRow>> = null;
 
   try {
     const runId = makeRunId(date, symbol, new Date().toISOString());
     const strategy = await getActiveStrategyServer();
+    candidateInfo = await findRecentCandidateRow(market, symbol, date, strategy.id);
 
     // Technical — 只有找到 candidateRow 才跑
     if (candidateInfo) {
-      const session = await loadScanSession(market, candidateInfo.foundAt, 'long', 'daily');
+      const session = await loadScanSession(market, candidateInfo.foundAt, 'long', 'daily', strategy.id);
       if (session) {
         const technicalQ = buildTechnicalQuestion({
           runId, date, symbol, session, candidateRow: candidateInfo.row, strategy,
@@ -166,6 +168,7 @@ async function prepareSingle(
     await writeRunMeta({
       schemaVersion: AGENT_SCHEMA_VERSION,
       runId, date, symbol, market,
+      strategyId: strategy.id,
       startedAt: phase.startedAt,
     });
 

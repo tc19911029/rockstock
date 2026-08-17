@@ -6,6 +6,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { runScanPipeline } from '@/lib/scanner/ScanPipeline';
 import { verifyPostCloseScanCompletion } from '@/lib/scanner/scanCompletion';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -22,16 +23,18 @@ export async function GET(req: NextRequest) {
   }
 
   const date = getLastTradingDay(market);
+  const strategy = await getActiveStrategyServer();
   if (!isTradingDay(date, market)) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
   }
 
   // 已有結果則跳過
-  const existing = await loadPostCloseScanSession(market, date, 'long', 'daily');
+  const existing = await loadPostCloseScanSession(market, date, 'long', 'daily', strategy.id);
   const existingCompletion = await verifyPostCloseScanCompletion({
     market, date,
     directions: ['long', 'short'],
     mtfModes: ['daily', 'mtf'],
+    strategyId: strategy.id,
   });
   if (existingCompletion.completed) {
     return apiOk({ skipped: true, completed: true, reason: 'post_close already complete', date, resultCount: existing?.resultCount ?? 0 });
@@ -48,6 +51,7 @@ export async function GET(req: NextRequest) {
       directions: ['long', 'short'],
       mtfModes: ['daily', 'mtf'],
       force: true,
+      strategy,
     });
 
     const completion = await verifyPostCloseScanCompletion({
@@ -55,6 +59,7 @@ export async function GET(req: NextRequest) {
       directions: ['long', 'short'],
       mtfModes: ['daily', 'mtf'],
       startedAt,
+      strategyId: strategy.id,
     });
     if (result.timedOut || !completion.completed) {
       return apiError(`${market} ${date} retry incomplete: missing=${completion.missing.join(',') || '-'} stale=${completion.stale.join(',') || '-'}`, 503);

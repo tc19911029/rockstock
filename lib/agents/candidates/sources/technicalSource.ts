@@ -16,12 +16,11 @@
  */
 
 import { loadScanSession } from '@/lib/storage/scanStorage';
-import type { MarketId, MtfMode, StockScanResult } from '@/lib/scanner/types';
+import type { MtfMode, StockScanResult } from '@/lib/scanner/types';
 import type {
   CandidateSources,
   SourceCandidate,
   SourceExtractor,
-  SourceResult,
   TechnicalSourceAttribution,
 } from '../types';
 
@@ -35,13 +34,13 @@ const TECHNICAL_TRACKS: MtfMode[] = [
 
 export const technicalSource: SourceExtractor = {
   source: 'technical',
-  async extract({ market, date }) {
+  async extract({ market, date, strategyId }) {
     try {
       // 並行載入所有軌
       const sessions = await Promise.all(
         TECHNICAL_TRACKS.map(async (mtf) => {
           try {
-            const s = await loadScanSession(market, date, 'long', mtf);
+            const s = await loadScanSession(market, date, 'long', mtf, strategyId);
             return { mtf, session: s };
           } catch (err) {
             return { mtf, session: null, error: err instanceof Error ? err.message : String(err) };

@@ -1,4 +1,9 @@
-import { confirmPartialExit, partialExitForSignal } from '@/lib/portfolio/holdingExecution';
+import {
+  BLOWOFF_PARTIAL_EXIT_SIGNAL_TYPE_SET,
+  PARTIAL_EXIT_SIGNAL_TYPE_SET,
+  confirmPartialExit,
+  partialExitForSignal,
+} from '@/lib/portfolio/holdingExecution';
 import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
 
 const holding = (shares = 9): PortfolioHolding => ({
@@ -36,5 +41,13 @@ describe('holding execution state', () => {
     });
     expect(second.shares).toBe(5);
     expect(second.executionState.partialExits).toHaveLength(1);
+  });
+
+  test('只接受正式減半訊號，且 MA5 減半不冒充隔日爆量反轉狀態', () => {
+    expect(PARTIAL_EXIT_SIGNAL_TYPE_SET.has('break_ma5_short')).toBe(true);
+    expect(BLOWOFF_PARTIAL_EXIT_SIGNAL_TYPE_SET.has('break_ma5_short')).toBe(false);
+    expect(() => confirmPartialExit(holding(10), {
+      signalDate: '2026-08-17', signalType: 'arbitrary_half', executedAt: '2026-08-17T05:25:00.000Z',
+    })).toThrow('不允許的分批出場');
   });
 });

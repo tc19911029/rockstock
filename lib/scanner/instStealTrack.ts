@@ -5,6 +5,8 @@ export async function runInstStealTrack(date: string) {
   const { computeTurnoverRankAsOfDate } = await import('./TurnoverRank');
   const { injectForwardPerf } = await import('@/lib/backtest/injectForwardPerf');
   const { saveScanSession } = await import('@/lib/storage/scanStorage');
+  const { getActiveStrategyServer } = await import('@/lib/strategy/activeStrategyServer');
+  const strategy = await getActiveStrategyServer();
 
   const scanner = new TaiwanScanner();
   const allStocks = await scanner.getStockList();
@@ -21,6 +23,7 @@ export async function runInstStealTrack(date: string) {
   await injectForwardPerf(results, date, `Y-track:${date}`);
   await saveScanSession({
     id: `TW-long-Y-${date}-${Date.now()}`,
+    strategyId: strategy.id,
     market: 'TW',
     date,
     direction: 'long',

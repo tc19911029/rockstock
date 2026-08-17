@@ -13,7 +13,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { listScanDates, loadScanSession } from '@/lib/storage/scanStorage';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { evaluateReentry } from '@/lib/backtest/reentryRules';
-import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import type { MarketId, ScanDirection, StockScanResult } from '@/lib/scanner/types';
 
 export const runtime = 'nodejs';
@@ -56,14 +56,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     excludeSymbols?.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean) ?? [],
   );
 
-  const reentryCfg = ZHU_PURE_BOOK.thresholds.reentry;
+  const strategy = await getActiveStrategyServer();
+  const reentryCfg = strategy.thresholds.reentry;
   if (!reentryCfg?.enabled) {
     return apiOk({ market, direction, lookbackDays, candidates: [] });
   }
 
   try {
     // 1. 蒐集 lookbackDays 內所有掃描日期
-    const dates = await listScanDates(market as MarketId, direction as ScanDirection);
+    const dates = await listScanDates(market as MarketId, direction as ScanDirection, 'daily', strategy.id);
     // CST 為主：UTC slice 在凌晨 00:00–08:00 CST 會回傳前一天，今日 scan 會被誤排除
     const tz = market === 'CN' ? 'Asia/Shanghai' : 'Asia/Taipei';
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     // 2. 蒐集出現過的 symbol（記錄第一次出現日期 + 出現次數）
     const seenSymbols = new Map<string, { name: string; firstSeenDate: string; appearances: number }>();
     for (const entry of recentDates) {
-      const session = await loadScanSession(market as MarketId, entry.date, direction as ScanDirection);
+      const session = await loadScanSession(market as MarketId, entry.date, direction as ScanDirection, 'daily', strategy.id);
       if (!session) continue;
       for (const r of session.results as StockScanResult[]) {
         const existing = seenSymbols.get(r.symbol);
@@ -108,8 +109,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       BUY_METHODS.map(async (m) => {
         try {
           const session = m === 'A'
-            ? await loadScanSession(market as MarketId, today, direction as ScanDirection)
-            : await loadScanSession(market as MarketId, today, direction as ScanDirection, m);
+            ? await loadScanSession(market as MarketId, today, direction as ScanDirection, 'daily', strategy.id)
+            : await loadScanSession(market as MarketId, today, direction as ScanDirection, m, strategy.id);
           if (!session) return;
           for (const r of session.results as StockScanResult[]) {
             const set = matchedMap.get(r.symbol) ?? new Set<string>();
