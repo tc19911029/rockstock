@@ -21,12 +21,29 @@ if [[ -z "${ROCKSTOCK_CN_MEDIA_DATE:-}" ]] && (( $(date +%u) > 5 )); then
   exit 0
 fi
 
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "$$" > "$LOCK_DIR/pid"
+    return 0
+  fi
+  local previous_pid=""
+  [[ -r "$LOCK_DIR/pid" ]] && previous_pid="$(<"$LOCK_DIR/pid")"
+  if [[ "$previous_pid" =~ ^[0-9]+$ ]] && kill -0 "$previous_pid" 2>/dev/null; then
+    return 1
+  fi
+  unlink "$LOCK_DIR/pid" 2>/dev/null || true
+  rmdir "$LOCK_DIR" 2>/dev/null || return 1
+  mkdir "$LOCK_DIR" 2>/dev/null || return 1
+  printf '%s\n' "$$" > "$LOCK_DIR/pid"
+  echo "[$(ts)] 已回收前次異常中止留下的 stale lock"
+}
+if ! acquire_lock; then
   echo "[$(ts)] 前一輪陸股增量管線仍在執行，本輪跳過"
   rm -rf "$RUN_DIR"
   exit 0
 fi
 cleanup() {
+  unlink "$LOCK_DIR/pid" 2>/dev/null || true
   rmdir "$LOCK_DIR" 2>/dev/null || true
   rm -rf "$RUN_DIR"
 }
