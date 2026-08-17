@@ -7,7 +7,7 @@ import { sendNtfy } from '@/lib/notify/ntfy';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { empiricalHeaviness, tierEmoji } from '@/lib/sell/sellHeavinessRank';
 import { loadProfiles } from '@/lib/portfolio/profiles';
-import { canPushPortfolioAction, formatPortfolioProfitPct } from '@/lib/portfolio/notifyPolicy';
+import { canPushPortfolioAction, formatPortfolioProfitPct, portfolioNotificationPhase } from '@/lib/portfolio/notifyPolicy';
 import type { DailyActionItem, DailyActionResponse } from '@/app/api/portfolio/daily-action/route';
 
 export const runtime = 'nodejs';
@@ -140,7 +140,7 @@ export async function GET(req: NextRequest) {
         if (it.intradayProvisional === true) provisionalSkipped++;
         continue;
       }
-      const phase = execWindow ? 'exec' : it.intradayProvisional ? 'intraday' : 'confirmed';
+      const phase = portfolioNotificationPhase(it.market, hm, execWindow);
       const key = `${r.profile.id}:${it.symbol}:${it.action}:${phase}`;
       if (state.sent[key]) continue;
 

@@ -197,8 +197,8 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
     // 跳過已存在的結果（除非 force）— 只對 post_close 做 dedup，
     // intraday 必須每次重跑（盤中即時刷新，不能因為昨日/凌晨已寫 post_close 就跳過）
     if (!force && sessionType === 'post_close') {
-      const existingDaily = wantDaily ? await loadScanSession(market as MarketId, date, direction, 'daily') : null;
-      const existingMtf = wantMtf ? await loadScanSession(market as MarketId, date, direction, 'mtf') : null;
+      const existingDaily = wantDaily ? await loadScanSession(market as MarketId, date, direction, 'daily', activeStrategy.id) : null;
+      const existingMtf = wantMtf ? await loadScanSession(market as MarketId, date, direction, 'mtf', activeStrategy.id) : null;
       const dailyOk = !wantDaily || (sessionMatchesActiveStrategy(existingDaily) && existingDaily.resultCount >= 0);
       const mtfOk = !wantMtf || (sessionMatchesActiveStrategy(existingMtf) && existingMtf.resultCount >= 0);
       if (dailyOk && mtfOk) {

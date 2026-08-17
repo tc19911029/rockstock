@@ -14,6 +14,30 @@ import type { MarketId } from '@/lib/scanner/types';
 
 export const PORTFOLIO_SCHEMA_VERSION = 1 as const;
 
+export interface PortfolioPartialExitExecution {
+  /** 建議減碼的訊號交易日（YYYY-MM-DD），用來避免把不同訊號誤當同一次執行。 */
+  signalDate: string;
+  signalType: string;
+  executedAt: string;
+  executionPrice?: number;
+  sharesBefore: number;
+  sharesSold: number;
+  sharesRemaining: number;
+}
+
+export interface PortfolioExecutionState {
+  /** 建倉時股數；舊資料第一次確認減碼時補建。 */
+  initialShares: number;
+  partialExits: PortfolioPartialExitExecution[];
+}
+
+export interface PortfolioRiskState {
+  activeStopLoss: number;
+  method: string;
+  sourceDate: string;
+  updatedAt: string;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 持股
 // ────────────────────────────────────────────────────────────────────────────
@@ -39,6 +63,11 @@ export interface PortfolioHolding {
   stopLoss?: number;
   target1?: number;
   target2?: number;
+
+  /** 使用者已確認執行的分批交易；不能只靠 K 線反推「昨天應該有賣」。 */
+  executionState?: PortfolioExecutionState;
+  /** 已套用的策略停損與來源，供每日建議、推播及稽核共用。 */
+  riskState?: PortfolioRiskState;
 
   /** 自訂備註 */
   notes?: string;

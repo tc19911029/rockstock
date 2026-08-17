@@ -148,11 +148,11 @@ describe('parseImportCsv (integration)', () => {
 });
 
 describe('applyDefaults', () => {
-  test('TW symbol 自動分類市場 + 預設 entryDate + 預設 stopLoss = avgCost × 0.93', () => {
+  test('TW symbol 自動分類市場 + 預設 entryDate + 預設 stopLoss = avgCost × 0.95', () => {
     const out = applyDefaults({ symbol: '3037.TW', name: '欣興', shares: 30, avgCost: 1000 }, '2026-05-23');
     expect(out.market).toBe('TW');
     expect(out.entryDate).toBe('2026-05-23');
-    expect(out.stopLoss).toBeCloseTo(930, 2); // 1000 × 0.93
+    expect(out.stopLoss).toBeCloseTo(950, 2); // 1000 × 0.95
     expect(out.status).toBe('open');
   });
 
@@ -168,8 +168,8 @@ describe('applyDefaults', () => {
     expect(() => applyDefaults({ symbol: 'AAPL', name: 'Apple', shares: 1, avgCost: 200 }, '2026-05-23')).toThrow();
   });
 
-  test('STOP_LOSS_DEFAULT_PCT = 7%（書本停損）', () => {
-    expect(STOP_LOSS_DEFAULT_PCT).toBeCloseTo(0.07, 4);
+  test('STOP_LOSS_DEFAULT_PCT = 5%（最新版課程常用缺值 fallback）', () => {
+    expect(STOP_LOSS_DEFAULT_PCT).toBeCloseTo(0.05, 4);
   });
 });
 

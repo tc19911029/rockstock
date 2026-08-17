@@ -72,6 +72,9 @@ export interface HoldingActionInput {
    * 呼叫端從 ui.entryKbar.low 或 candles 中 entryDate 那根的 low 取得；缺值不判（向下相容）。
    */
   entryKlineLow?: number;
+
+  /** 前一交易日的「賣半」是否已由使用者確認執行；只影響隔日出場語意，不自行推測成交。 */
+  priorPartialExit?: { signalDate: string; sharesRemaining: number };
 }
 
 export interface HoldingActionResult {
@@ -519,11 +522,14 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
     const kindYesterday = detectCh9BlowoffReversalBar(candles, last - 1);
     const profitAtSignal = (yestCandle.close - entryPrice) / entryPrice;
     if (kindYesterday && profitAtSignal > PROFIT_PARTIAL_TP_PCT && todayCandle.close < yestCandle.close) {
+      const priorExecuted = input.priorPartialExit?.signalDate === yestCandle.date;
       return finalize('exit_all', [{
         type: 'ch9_exit_remaining',
-        label: '爆量反轉次日下跌（剩餘全出）',
+        label: priorExecuted ? '爆量反轉次日下跌（剩餘全出）' : '爆量反轉次日下跌（現有部位全出）',
         severity: 'high',
-        detail: `昨日高檔爆量${CH9_KIND_LABEL_ENGINE[kindYesterday]}（獲利 ${(profitAtSignal * 100).toFixed(1)}% > 15% 應已停利），今日下跌 ${todayCandle.close.toFixed(2)} < ${yestCandle.close.toFixed(2)}，課程 CH9-3：剩餘全數賣出`,
+        detail: priorExecuted
+          ? `昨日高檔爆量${CH9_KIND_LABEL_ENGINE[kindYesterday]}已確認賣半、目前剩 ${input.priorPartialExit!.sharesRemaining} 股；今日下跌 ${todayCandle.close.toFixed(2)} < ${yestCandle.close.toFixed(2)}，課程 CH9-3：剩餘全數賣出`
+          : `昨日高檔爆量${CH9_KIND_LABEL_ENGINE[kindYesterday]}（獲利 ${(profitAtSignal * 100).toFixed(1)}% > 15%），但系統沒有「已賣半」執行紀錄；今日下跌 ${todayCandle.close.toFixed(2)} < ${yestCandle.close.toFixed(2)}，課程 CH9-3：以目前實際持股全數出場，不假設昨日已成交`,
       }]);
     }
     // 吞噬 → 當天全出（課程 CH8-3 講義「長黑吞噬當天全部停利」＋CH9-3 口述「主力今天跑光光，不用等明天」）

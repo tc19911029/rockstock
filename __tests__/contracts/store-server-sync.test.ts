@@ -48,12 +48,12 @@ describe('mapStoreToServerHolding', () => {
     });
   });
 
-  test('stopLoss 預設 = costPrice × 0.93（書本 7%）', () => {
+  test('stopLoss 缺值時預設 = costPrice × 0.95（最新版課程常用 5%）', () => {
     const r = mapStoreToServerHolding(makeHolding({ costPrice: 1000 }));
-    expect(r.payload?.stopLoss).toBeCloseTo(930, 2);
+    expect(r.payload?.stopLoss).toBeCloseTo(950, 2);
   });
 
-  test('已有 stopLoss 時同步保留原值，不重設成成本價 7%', () => {
+  test('已有 stopLoss 時同步保留原值，不重設成預設 5%', () => {
     const r = mapStoreToServerHolding(makeHolding({ stopLoss: 188.5 }));
     expect(r.payload?.stopLoss).toBe(188.5);
   });

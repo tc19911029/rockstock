@@ -28,6 +28,10 @@ export interface StockScanResult {
   volume: number;
   triggeredRules: TriggeredRule[];
   sixConditionsScore: number;   // 0–6
+  /** 非六條件策略的專用分數，禁止塞回 sixConditionsScore。 */
+  strategyScore?: number;
+  strategyScoreScale?: number;
+  strategyScoreLabel?: string;
   sixConditionsBreakdown: SixConditionsBreakdown;
   trendState: '多頭' | '空頭' | '盤整';
   trendPosition: string;
@@ -330,6 +334,7 @@ export function sanitizeScanResult(r: StockScanResult): StockScanResult {
     changePercent: num(r.changePercent),
     volume: num(r.volume),
     sixConditionsScore: num(r.sixConditionsScore),
+    strategyScore: r.strategyScore != null ? num(r.strategyScore) : undefined,
     histWinRate: r.histWinRate != null ? num(r.histWinRate) : undefined,
     chipScore: r.chipScore != null ? num(r.chipScore) : undefined,
     surgeScore: r.surgeScore != null ? num(r.surgeScore) : undefined,
@@ -361,6 +366,26 @@ export interface ScanDiagnostics {
   ingestFailed: number;       // 補缺失敗的股票數
   // ── Fail-closed 守門統計（2026-04-17 新增）──────────────────────────────
   skippedStaleL1?: number;    // L1 末根 ≠ 掃描目標日 被跳過的股票數（fail-closed）
+  /** 每個 early-return gate 的命中數，正式結果可追查「為何消失」。 */
+  rejectionCounts?: Record<string, number>;
+  /** 有上限的逐股拒絕帳本；避免全市場診斷無界膨脹。 */
+  rejectionSamples?: Array<{ symbol: string; stage: string; reasons: string[] }>;
+}
+
+export function recordScanRejection(
+  diagnostics: ScanDiagnostics | undefined,
+  symbol: string,
+  stage: string,
+  reasons: string[] = [],
+): void {
+  if (!diagnostics) return;
+  diagnostics.filteredOut++;
+  diagnostics.rejectionCounts ??= {};
+  diagnostics.rejectionCounts[stage] = (diagnostics.rejectionCounts[stage] ?? 0) + 1;
+  diagnostics.rejectionSamples ??= [];
+  if (diagnostics.rejectionSamples.length < 100) {
+    diagnostics.rejectionSamples.push({ symbol, stage, reasons: reasons.slice(0, 8) });
+  }
 }
 
 export function createEmptyDiagnostics(): ScanDiagnostics {
@@ -371,6 +396,7 @@ export function createEmptyDiagnostics(): ScanDiagnostics {
     dataMissing: 0, missingSymbols: [], coverageRate: 100,
     dataStatus: 'complete', ingestDownloaded: 0, ingestFailed: 0,
     skippedStaleL1: 0,
+    rejectionCounts: {}, rejectionSamples: [],
   };
 }
 
@@ -391,9 +417,17 @@ export function mergeDiagnostics(a: ScanDiagnostics, b: ScanDiagnostics): ScanDi
     ingestDownloaded: a.ingestDownloaded + b.ingestDownloaded,
     ingestFailed:     a.ingestFailed + b.ingestFailed,
     skippedStaleL1:   (a.skippedStaleL1 ?? 0) + (b.skippedStaleL1 ?? 0),
+    rejectionCounts:  {} as Record<string, number>,
+    rejectionSamples: [...(a.rejectionSamples ?? []), ...(b.rejectionSamples ?? [])].slice(0, 100),
     coverageRate: 100,
     dataStatus: 'complete' as ScanDiagnostics['dataStatus'],
   };
+  for (const [key, value] of Object.entries(a.rejectionCounts ?? {})) {
+    merged.rejectionCounts[key] = (merged.rejectionCounts[key] ?? 0) + value;
+  }
+  for (const [key, value] of Object.entries(b.rejectionCounts ?? {})) {
+    merged.rejectionCounts[key] = (merged.rejectionCounts[key] ?? 0) + value;
+  }
   // 計算合併後的覆蓋率與狀態
   if (merged.totalStocks > 0) {
     merged.coverageRate = Math.round((1 - merged.dataMissing / merged.totalStocks) * 100);

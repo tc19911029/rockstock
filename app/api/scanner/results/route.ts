@@ -43,10 +43,10 @@ export async function GET(req: NextRequest) {
   try {
     if (dateParam) {
       if (isBuyMethod) {
-        const session = await loadScanSession(market, dateParam, direction, mtfMode as MtfMode);
+        const session = await loadScanSession(market, dateParam, direction, mtfMode as MtfMode, strategyId);
         return apiOk({ sessions: session ? [session] : [] });
       }
-      const session = await loadScanSession(market, dateParam, direction, 'daily');
+      const session = await loadScanSession(market, dateParam, direction, 'daily', strategyId);
       if (!session || !sessionMatchesStrategy(session as StrategyTaggedSession, strategyId)) {
         return apiOk({ sessions: [] });
       }
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (isBuyMethod) {
-      const dates = await listScanDates(market, direction, mtfMode as MtfMode);
+      const dates = await listScanDates(market, direction, mtfMode as MtfMode, strategyId);
       const sessions = dates.map(d => ({
         id: `${d.market}-${d.direction ?? 'long'}-${mtfMode}-${d.date}`,
         market: d.market,
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Return all available dates — 統一讀 daily 清單，mtf 開時 resultCount 需重算
-    const dates = await listScanDates(market, direction, 'daily');
+    const dates = await listScanDates(market, direction, 'daily', strategyId);
     const candidateSessions = await Promise.all(dates.map(async d => {
       const base = {
         id: `${d.market}-${d.direction ?? 'long'}-${wantMtf ? 'mtf' : 'daily'}-${d.date}`,
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
         scanTime: d.scanTime,
         resultCount: d.resultCount,
       };
-      const full = await loadScanSession(market, d.date, direction, 'daily');
+      const full = await loadScanSession(market, d.date, direction, 'daily', strategyId);
       if (!full || !sessionMatchesStrategy(full, strategyId)) return null;
       if (!wantMtf) return { ...base, resultCount: full.resultCount };
       const filtered = full.results.filter(r => passesMtf(r));

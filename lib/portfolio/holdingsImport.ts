@@ -5,7 +5,7 @@
  *
  * CSV 規格（最小欄位 + 可選欄位）：
  *   必填：symbol, name, shares, avgCost
- *   選填：entryDate（預設 today CST）, stopLoss（預設 avgCost × 0.93）,
+ *   選填：entryDate（預設 today CST）, stopLoss（未提供時預設短線 5%，每日建議再依策略重算）,
  *         target1, target2, industry, notes
  *
  * 範例：
@@ -23,7 +23,7 @@ import { classifyMarket } from '@/lib/market/classify';
 import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
 import { PORTFOLIO_SCHEMA_VERSION } from '@/lib/agents/portfolio/types';
 
-export const STOP_LOSS_DEFAULT_PCT = 0.07; // 書本 7% 停損
+export const STOP_LOSS_DEFAULT_PCT = 0.05; // 最新課程短線／新手常用 5%；策略軌每日再依 5/7/10% 重算
 
 export interface ImportRow {
   symbol: string;

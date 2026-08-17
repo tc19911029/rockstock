@@ -4,7 +4,7 @@ import { ma20Slope, isStrongInWeaknessAtBottom } from '@/lib/rules/ruleUtils';
 import { evaluateSixConditions, detectTrend, detectTrendPosition, TrendState } from '@/lib/analysis/trendAnalysis';
 import { checkLongProhibitions, checkShortProhibitions } from '@/lib/rules/entryProhibitions';
 import { evaluateShortCourseSetup } from '@/lib/analysis/shortCandidate';
-import { StockScanResult, MarketConfig, TriggeredRule, ScanDiagnostics, createEmptyDiagnostics } from './types';
+import { StockScanResult, MarketConfig, TriggeredRule, ScanDiagnostics, createEmptyDiagnostics, recordScanRejection } from './types';
 import type { StrategyConfig, StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
 import { evaluateHighWinRateEntry } from '@/lib/analysis/highWinRateEntry';
@@ -479,7 +479,10 @@ export abstract class MarketScanner {
         mtfResult = evaluateMultiTimeframe(candles, thresholds, config.marketId);
       } catch { /* MTF 計算失敗不影響主流程 */ }
       if (thresholds.multiTimeframeFilter && mtfResult && !mtfResult.pass) {
-        if (diag) diag.filteredOut++;
+        recordScanRejection(diag, symbol, 'mtf', [
+          `週線: ${mtfResult.weekly.detail}`,
+          `月線: ${mtfResult.monthly.detail}`,
+        ]);
         return null;
       }
 
@@ -489,17 +492,31 @@ export abstract class MarketScanner {
 
       // ── 1. 六大條件（前5個=核心門檻，第6個 KD/MACD=候補加分）──────────
       const sixConds = evaluateSixConditions(candles, lastIdx, thresholds);
-      if (!sixConds.isCoreReady) { if (diag) diag.filteredOut++; return null; }
+      if (!sixConds.isCoreReady) {
+        const failed = [
+          ['trend', sixConds.trend], ['ma', sixConds.ma], ['position', sixConds.position],
+          ['volume', sixConds.volume], ['kbar', sixConds.kbar],
+        ].filter(([, condition]) => !(condition as { pass: boolean }).pass)
+          .map(([key, condition]) => `${key}: ${(condition as { detail: string }).detail}`);
+        recordScanRejection(diag, symbol, 'six_conditions_core', failed);
+        return null;
+      }
 
       // ── 1b. minScore 門檻（盤整/空頭市場可能要求 6/6 含指標條件）────────
-      if (sixConds.totalScore < minScore) { if (diag) diag.filteredOut++; return null; }
+      if (sixConds.totalScore < minScore) {
+        recordScanRejection(diag, symbol, 'minimum_score', [`${sixConds.totalScore}/${minScore}`]);
+        return null;
+      }
 
       // ── 2. 短線第9條：KD值向下時不買（可由 kdDecliningFilter 關閉）────
       // 書本：朱老師短線守則 #9。2026-05-22 回滾 2026-05-20 的「警示不擋」改動，
       // 恢復 hard gate 對齊書本（見 docs/audit/2026-05-22-knowledge-contamination-audit.md）
       if (thresholds.kdDecliningFilter !== false && last.kdK != null && lastIdx > 0) {
         const prevKdK = candles[lastIdx - 1]?.kdK;
-        if (prevKdK != null && last.kdK < prevKdK) { if (diag) diag.filteredOut++; return null; }
+        if (prevKdK != null && last.kdK < prevKdK) {
+          recordScanRejection(diag, symbol, 'kd_declining', [`K ${prevKdK.toFixed(2)} → ${last.kdK.toFixed(2)}`]);
+          return null;
+        }
       }
 
       // 短線第10條（上影線>50%不買）已由六條件⑤覆蓋（upperShadowMax 預設20%），不再重複檢查
@@ -514,13 +531,19 @@ export abstract class MarketScanner {
           }
         : undefined;
       const prohib = checkLongProhibitions(candles, lastIdx, prohibCtx);
-      if (prohib.prohibited) { if (diag) diag.filteredOut++; return null; }
+      if (prohib.prohibited) {
+        recordScanRejection(diag, symbol, 'entry_prohibitions', prohib.reasons);
+        return null;
+      }
 
       // ── 5. 淘汰法 R1-R11（寶典 p.659-662）─────────────────────────
       // 書本：任一條命中即淘汰、即出場。2026-05-22 回滾 2026-05-20 的「警示不擋」
       // 改動，恢復 hard gate 對齊書本（見 docs/audit/2026-05-22-knowledge-contamination-audit.md）
       const elimination = evaluateElimination(candles, lastIdx);
-      if (elimination.eliminated) { if (diag) diag.filteredOut++; return null; }
+      if (elimination.eliminated) {
+        recordScanRejection(diag, symbol, 'elimination', elimination.reasons);
+        return null;
+      }
 
       // ══════════════════════════════════════════════════════════════════
       // 第二層：排序資料收集（共振 + 高勝率進場）

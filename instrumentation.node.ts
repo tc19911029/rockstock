@@ -648,37 +648,10 @@ export async function register() {
     }
   }, 30 * 60 * 1000);
 
-  // 每日健康快照：盤後 30 分鐘各觸發一次（TW 14:30 / CN 16:30），
-  // 把 /api/health/data 兩市場結果固化到 data/health-snapshot/health-{date}.json
-  // UI /health 頁讀此快照顯示紅綠燈。一天各市場 1 次去重。
-  let lastDailyHealthDate = '';
-  setInterval(() => {
-    if (deferForWhisper('daily-health-snapshot')) return;
-    const now = new Date();
-    const tw = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit',
-    }).formatToParts(now);
-    const cn = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit',
-    }).formatToParts(now);
-    const get = (parts: Intl.DateTimeFormatPart[], t: string) => parts.find(p => p.type === t)?.value ?? '';
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
-    const twHHMM = parseInt(get(tw, 'hour'), 10) * 100 + parseInt(get(tw, 'minute'), 10);
-    const cnHHMM = parseInt(get(cn, 'hour'), 10) * 100 + parseInt(get(cn, 'minute'), 10);
-
-    // TW 14:30–14:35：抓 TW snapshot
-    // CN 16:30–16:35：抓 CN snapshot（也會合併進同一天的檔）
-    // 用 ≥ 比對讓中途啟動的 dev server 也能補跑當日；旗標避免重複觸發
-    const triggerTw = twHHMM >= 1430 && twHHMM < 1435;
-    const triggerCn = cnHHMM >= 1630 && cnHHMM < 1635;
-    if ((triggerTw || triggerCn) && today !== lastDailyHealthDate) {
-      lastDailyHealthDate = today;
-      console.log('[local-cron] daily-health-snapshot 觸發');
-      callRoute('/api/cron/daily-health-snapshot', 'daily-health-snapshot').catch(err =>
-        console.error('[local-cron] daily-health-snapshot failed:', err),
-      );
-    }
-  }, 60 * 1000);
+  // 每日健康快照不在這裡提前觸發。
+  // 正式 dependency-aware strategy-eod 流水線會在 A／各買法／SanSe／V／Y 全部完成後，
+  // 最後呼叫 daily-health-snapshot。舊版 14:30/16:30 先拍快照，早於 18:30/20:00
+  // 策略流水線，會固定產生「策略未就緒」假紅燈；且同日去重會讓第二市場無法補寫。
 
   // TDCC 大戶持股：每天傍晚 18:00 CST 後自動檢查、抓最新一週
   // 為什麼每天而非固定週四：TDCC 的「週五分散表」是週末才公布，固定週四永遠慢一週（2026-06-07 踩過）；

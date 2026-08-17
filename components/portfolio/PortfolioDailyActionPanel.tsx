@@ -111,6 +111,55 @@ export function PortfolioDailyActionPanel() {
 function DailyActionRow({ item }: { item: DailyActionItem }) {
   const cls = ACTION_CLASS[item.action];
   const isProfit = (item.profitPct ?? 0) >= 0;
+  const activeProfileId = usePortfolioProfileStore(s => s.activeProfileId);
+  const [saving, setSaving] = useState<'partial' | 'stop' | null>(null);
+
+  const patchHolding = async (body: Record<string, unknown>, kind: 'partial' | 'stop') => {
+    setSaving(kind);
+    try {
+      const res = await fetch(`/api/agents/portfolio?profile=${encodeURIComponent(activeProfileId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      window.location.reload();
+    } catch (error) {
+      window.alert(`保存失敗：${error instanceof Error ? error.message : String(error)}`);
+      setSaving(null);
+    }
+  };
+
+  const confirmHalf = () => {
+    const partialTypes = new Set([
+      'ch9_partial_tp_half', 'ch83_surge3_blowoff_reduce', 'blowoff_black_reduce',
+      'blowoff_upper_shadow_reduce', 'ch8_climax_partial_tp', 'break_ma5_short',
+    ]);
+    const signal = item.signals.find(s => partialTypes.has(s.type));
+    if (!signal || !item.asOfDate) return;
+    if (!window.confirm(`確認「${item.name}」已依 ${signal.label} 賣出一半？\n\n確認後會把 server 持股數更新為剩餘股數，並留下執行紀錄。`)) return;
+    void patchHolding({
+      action: 'confirm_partial_exit',
+      symbol: item.symbol,
+      signalDate: item.asOfDate,
+      signalType: signal.type,
+      executionPrice: item.todayClose ?? undefined,
+    }, 'partial');
+  };
+
+  const applyStop = () => {
+    if (!item.asOfDate || !item.stopLossMethod) return;
+    if (!window.confirm(`套用「${item.name}」策略停損 ${item.stopLoss.toFixed(2)}？\n\n停損只能往有利方向收緊，不能放寬。`)) return;
+    void patchHolding({
+      action: 'apply_stop_loss',
+      symbol: item.symbol,
+      price: item.stopLoss,
+      method: item.stopLossMethod,
+      sourceDate: item.asOfDate,
+      positionSide: item.positionSide,
+    }, 'stop');
+  };
   return (
     <div className="px-3 py-2 hover:bg-muted/30 transition-colors">
       <div className="flex items-center gap-2 flex-wrap">
@@ -172,6 +221,29 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
           <span className="text-cyan-300/80" title="建議把停損上移到此價（鎖獲利）">
             💡 停損上移 {item.stopLoss.toFixed(2)} → <span className="font-bold">{item.suggestedStop.toFixed(2)}</span>
           </span>
+        )}
+
+        {item.action === 'reduce_half' && !item.partialExitExecuted && item.asOfDate && (
+          <button
+            type="button"
+            onClick={confirmHalf}
+            disabled={saving != null}
+            className="min-h-8 rounded border border-amber-600 bg-amber-900/40 px-2 font-bold text-amber-100 disabled:opacity-50"
+          >
+            {saving === 'partial' ? '保存中…' : '確認已執行賣半'}
+          </button>
+        )}
+
+        {item.positionSide !== 'short' && item.stopLossSource === 'strategy_dynamic' && item.asOfDate && (
+          <button
+            type="button"
+            onClick={applyStop}
+            disabled={saving != null}
+            className="min-h-8 rounded border border-cyan-700 bg-cyan-950/40 px-2 font-bold text-cyan-200 disabled:opacity-50"
+            title={item.stopLossMethod}
+          >
+            {saving === 'stop' ? '保存中…' : `保存策略停損 ${item.stopLoss.toFixed(2)}`}
+          </button>
         )}
 
         {item.positionSide !== 'short' && item.nearestTarget != null && (

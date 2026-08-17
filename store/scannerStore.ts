@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { StockScanResult, ScanSession, MarketId, sanitizeScanResult, ScanDiagnostics, createEmptyDiagnostics, diagnosticsSummary } from '@/lib/scanner/types';
+import { StockScanResult, ScanSession, MarketId, sanitizeScanResult, ScanDiagnostics, createEmptyDiagnostics, diagnosticsSummary, mergeDiagnostics } from '@/lib/scanner/types';
 import { TrendState } from '@/lib/analysis/trendAnalysis';
 import { useSettingsStore } from './settingsStore';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { adaptFundamentalRows, type FundamentalScanRow } from '@/lib/scanner/fundamentalScanAdapter';
 
 const MAX_HISTORY = 10;
 
@@ -209,45 +211,23 @@ export const useScannerStore = create<ScannerStore>()(
             if (expectedMarket !== market) {
               throw new Error(`${activeStrategy.name}僅適用${expectedMarket === 'TW' ? '台股' : '陸股'}，請切換市場後再掃描`);
             }
+            const fundamentalDate = scanDate || getLastTradingDay(market);
             const fundamentalRes = await fetch(
-              `/api/strategies/fundamental-revaluation?market=${market}&date=${targetDate}`,
+              `/api/strategies/fundamental-revaluation?market=${market}&date=${fundamentalDate}`,
               { signal },
             );
             if (!fundamentalRes.ok) throw new Error('基本面補漲結果讀取失敗');
             const fundamentalJson = await fundamentalRes.json() as {
               session?: {
                 computedAt: string;
-                top100: Array<{
-                  symbol: string; name: string; todayPrice: number;
-                  breakdown: { total: number; grade: string };
-                  baseUpside: number | null;
-                }>;
+                top100: FundamentalScanRow[];
               } | null;
             };
             if (!fundamentalJson.session) {
-              throw new Error(`${targetDate} 尚無基本面補漲結果，請先執行基本面補漲排程`);
+              throw new Error(`${fundamentalDate} 尚無基本面補漲結果，請先執行基本面補漲排程`);
             }
             const now = fundamentalJson.session.computedAt;
-            const results: StockScanResult[] = fundamentalJson.session.top100.map((row) => ({
-              symbol: row.symbol,
-              name: row.name,
-              market,
-              price: row.todayPrice,
-              changePercent: 0,
-              volume: 0,
-              triggeredRules: [{
-                ruleId: 'fundamental-revaluation',
-                ruleName: `基本面補漲 ${row.breakdown.grade}`,
-                signalType: 'BUY',
-                reason: `基本面評分 ${row.breakdown.total}；中性上漲空間 ${row.baseUpside == null ? '資料不足' : `${(row.baseUpside * 100).toFixed(1)}%`}`,
-              }],
-              matchedMethods: ['V'],
-              sixConditionsScore: row.breakdown.total,
-              sixConditionsBreakdown: { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false },
-              trendState: '盤整',
-              trendPosition: '盤整觀望',
-              scanTime: now,
-            }));
+            const results = adaptFundamentalRows(fundamentalJson.session.top100, market, now);
             set(s => ({
               [mKey]: {
                 ...s[mKey], isScanning: false, progress: 100, scanningStock: '',
@@ -346,8 +326,36 @@ export const useScannerStore = create<ScannerStore>()(
             };
           };
 
-          // 候選池通常 30-100 檔，可以一次送（不需拆分）
-          const fineResult = await scanChunk(stocks);
+          // 型態／機械策略可能保留全市場；固定切批避免單一 2,000–5,000 檔 request 超時。
+          const chunkSize = 250;
+          const chunks: Array<Array<{ symbol: string; name: string }>> = [];
+          for (let i = 0; i < stocks.length; i += chunkSize) chunks.push(stocks.slice(i, i + chunkSize));
+          let combinedResults: StockScanResult[] = [];
+          let combinedDiagnostics = createEmptyDiagnostics();
+          let combinedTrend: TrendState | null = null;
+          let combinedDataDate: string | undefined;
+          for (let i = 0; i < chunks.length; i++) {
+            set(s => ({
+              [mKey]: {
+                ...s[mKey],
+                progress: 20 + Math.round((i / Math.max(1, chunks.length)) * 65),
+                scanningStock: `Step 2/3：精掃第 ${i + 1}/${chunks.length} 批（${chunks[i].length} 檔）...`,
+              },
+            }));
+            const batch = await scanChunk(chunks[i]);
+            const bySymbol = new Map(combinedResults.map(result => [result.symbol, result]));
+            for (const result of batch.results) bySymbol.set(result.symbol, result);
+            combinedResults = [...bySymbol.values()];
+            combinedDiagnostics = mergeDiagnostics(combinedDiagnostics, batch.diagnostics);
+            combinedTrend ??= batch.marketTrend;
+            combinedDataDate ??= batch.dataDate;
+          }
+          const fineResult = {
+            results: combinedResults,
+            diagnostics: combinedDiagnostics,
+            marketTrend: combinedTrend,
+            dataDate: combinedDataDate,
+          };
 
           const marketTrend: TrendState = fineResult.marketTrend ?? '多頭';
           const dataDate: string | undefined = fineResult.dataDate;

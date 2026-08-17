@@ -28,6 +28,10 @@ import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
 import type { OperationMode } from '@/lib/sell/v12Operation';
 import { classifyPortfolioNotificationBasis } from '@/lib/portfolio/notifyPolicy';
 import { resolveHoldingReferencePrice } from '@/lib/portfolio/holdingReferencePrice';
+import { computeIndicators } from '@/lib/indicators';
+import { deriveActiveLongStop } from '@/lib/portfolio/holdingRisk';
+import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
+import { partialExitForSignal } from '@/lib/portfolio/holdingExecution';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,6 +68,11 @@ export interface DailyActionItem {
   intradayProvisional?: boolean;
   /** price=盤中觸價可即時提醒；close=只在尾盤執行窗或收盤後正式提醒。 */
   notificationBasis?: 'price' | 'close';
+  /** active stop 的來源；避免把策略計算值誤認為使用者原始輸入。 */
+  stopLossSource?: 'configured' | 'strategy_dynamic' | 'legacy_fallback';
+  stopLossMethod?: string;
+  /** 今日減半訊號是否已由使用者確認執行。 */
+  partialExitExecuted?: boolean;
 }
 
 export interface DailyActionResponse {
@@ -170,10 +179,26 @@ export async function GET(req: NextRequest) {
           };
         }
         const strategyReferencePrice = reference.price;
-        const stopLoss = configuredStopLoss ?? strategyReferencePrice * DEFAULT_STOP_LOSS_MULT;
+        const withIndicators = computeIndicators(candles);
         // 賠少-17：進場買法字母在 ui.triggerSignal（passthrough blob）→ 傳給 engine
         // 判斷是否為逆勢/搶反彈軌（反轉軌 D/F/N/O）以走專屬「翻黑就走」出場。
         const triggerSignal = typeof h.ui?.triggerSignal === 'string' ? h.ui.triggerSignal : undefined;
+        const activeStop = positionSide === 'long'
+          ? deriveActiveLongStop({
+              entryPrice: strategyReferencePrice,
+              configuredStopLoss,
+              entryDate: h.entryDate,
+              triggerSignal,
+              market: mkt,
+              candles: withIndicators,
+              ui: h.ui,
+            })
+          : {
+              price: configuredStopLoss ?? strategyReferencePrice / DEFAULT_STOP_LOSS_MULT,
+              method: configuredStopLoss ? '使用者已設定回補停損' : '舊持倉 7% 回補 fallback',
+              source: configuredStopLoss ? 'configured' as const : 'legacy_fallback' as const,
+            };
+        const stopLoss = activeStop.price;
         // 賠少-1：做空進場黑K最高點（停損價）走 ui.entryKbar.high。
         const entryKbar = h.ui?.entryKbar as { high?: number; low?: number } | undefined;
         const entryHigh = typeof entryKbar?.high === 'number' ? entryKbar.high : undefined;
@@ -182,7 +207,13 @@ export async function GET(req: NextRequest) {
         const entryKlineLow = typeof entryKbar?.low === 'number'
           ? entryKbar.low
           : candles.find(c => c.date === h.entryDate)?.low;
-        const result = evaluateHolding({
+        const yesterdayDate = candles.length >= 2 ? candles[candles.length - 2].date : '';
+        const priorPartialExecution = partialExitForSignal(h.executionState, yesterdayDate, new Set([
+          'ch9_partial_tp_half', 'ch83_surge3_blowoff_reduce',
+          'ch8_climax_partial_tp',
+          'blowoff_black_reduce', 'blowoff_upper_shadow_reduce',
+        ]));
+        let result = evaluateHolding({
           symbol: h.symbol,
           entryPrice: strategyReferencePrice,
           stopLoss,
@@ -195,7 +226,35 @@ export async function GET(req: NextRequest) {
           positionSide,
           entryHigh,
           entryKlineLow,
+          priorPartialExit: priorPartialExecution
+            ? { signalDate: priorPartialExecution.signalDate, sharesRemaining: priorPartialExecution.sharesRemaining }
+            : undefined,
         });
+        const partialSignalTypes = new Set([
+          'ch9_partial_tp_half',
+          'ch83_surge3_blowoff_reduce',
+          'ch8_climax_partial_tp',
+          'blowoff_black_reduce',
+          'blowoff_upper_shadow_reduce',
+          'break_ma5_short',
+        ]);
+        const partialSignal = result.signals.find(signal => partialSignalTypes.has(signal.type));
+        const partialExecution = partialSignal
+          ? partialExitForSignal(h.executionState, lastCandle.date, new Set([partialSignal.type]))
+          : null;
+        if (result.action === 'reduce_half' && partialExecution) {
+          result = {
+            ...result,
+            action: 'hold',
+            label: '✅ 今日減半已執行',
+            signals: [{
+              type: 'partial_exit_confirmed',
+              label: `已賣 ${partialExecution.sharesSold}，剩 ${partialExecution.sharesRemaining}`,
+              severity: 'low',
+              detail: `${partialExecution.executedAt} 已確認執行 ${partialExecution.signalType}，不再重複提示賣半。`,
+            }, ...result.signals],
+          };
+        }
         // 課程 CH9-2（2026-07-04）：六壓力位最近上方壓力價（純顯示）
         const profitTargets = positionSide === 'long' ? computeProfitTargets(candles, 'short') : null;
         // 課程 CH10-2（2026-07-04）：向下攤平紅旗（upsert 咽喉寫入 ui.disciplineFlags）→ 常駐透出到平倉
@@ -298,7 +357,16 @@ export async function GET(req: NextRequest) {
             detail: `自策略參考價 ${strategyReferencePrice} 跌 ${(dropFromEntry * 100).toFixed(1)}%（今收 ${todayClose.toFixed(2)}）。課程 CH7-3：每日檢視自買價跌幅 > 5% 應列警示股、準備賣出，別放任凹單。`,
           };
         })();
-        const signals = [...disciplineSignals, ...(ch11ClimbExitAdvisory ? [ch11ClimbExitAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
+        const elimination = positionSide === 'long'
+          ? evaluateElimination(withIndicators, withIndicators.length - 1)
+          : { eliminated: false, reasons: [], penalty: 0 };
+        const eliminationSignals = elimination.reasons.map((reason, index) => ({
+          type: `position_elimination_${index + 1}`,
+          label: `持股淘汰警示：${reason.replace(/^淘汰\d+:\s*/, '')}`,
+          severity: 'high' as const,
+          detail: `${reason}。這是 position_exit_warning，與選股 selection_reject 分開記錄；請依實際操作模式確認是否退出。`,
+        }));
+        const signals = [...eliminationSignals, ...disciplineSignals, ...(ch11ClimbExitAdvisory ? [ch11ClimbExitAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
         return {
           ...base,
           stopLoss,
@@ -319,6 +387,9 @@ export async function GET(req: NextRequest) {
           // 盤中且今日 bar 已被 L2 半根覆蓋 → 收盤級動作標「盤中預警」
           intradayProvisional: lastCandle.date === today && isIntradayNow(mkt),
           notificationBasis: classifyPortfolioNotificationBasis(signals),
+          stopLossSource: activeStop.source,
+          stopLossMethod: activeStop.method,
+          partialExitExecuted: partialExecution != null,
         };
       }),
     );

@@ -54,15 +54,15 @@ const SCAN_SESSION_CACHE = new Map<string, ScanSessionCacheEntry>();
 const SCAN_SESSION_INFLIGHT = new Map<string, Promise<ScanSession | null>>();
 
 function scanSessionCacheKey(
-  market: MarketId, direction: ScanDirection, mtfMode: MtfMode, date: string,
+  market: MarketId, direction: ScanDirection, mtfMode: MtfMode, date: string, strategyId?: string,
 ): string {
-  return `${market}|${direction}|${mtfMode}|${date}`;
+  return `${market}|${direction}|${mtfMode}|${date}|${strategyId ?? 'zhu-pure-book'}`;
 }
 
 function invalidateScanSessionCache(
-  market: MarketId, direction: ScanDirection, mtfMode: MtfMode, date: string,
+  market: MarketId, direction: ScanDirection, mtfMode: MtfMode, date: string, strategyId?: string,
 ): void {
-  SCAN_SESSION_CACHE.delete(scanSessionCacheKey(market, direction, mtfMode, date));
+  SCAN_SESSION_CACHE.delete(scanSessionCacheKey(market, direction, mtfMode, date, strategyId));
 }
 
 // ── Vercel Blob helpers ──────────────────────────────────────────────────────
@@ -148,6 +148,35 @@ function sessionMtfMode(session: ScanSession): MtfMode {
   return session.multiTimeframeEnabled ? 'mtf' : 'daily';
 }
 
+const DEFAULT_SCAN_STRATEGY_ID = 'zhu-pure-book';
+
+/** 預設朱老師策略維持 legacy 路徑；其他策略取得安全且獨立的命名空間。 */
+export function scanStrategyNamespace(strategyId?: string): string | null {
+  if (!strategyId || strategyId === DEFAULT_SCAN_STRATEGY_ID) return null;
+  const safe = strategyId.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!safe) throw new Error(`unsafe strategyId: ${strategyId}`);
+  return safe.slice(0, 80);
+}
+
+export function scanPostCloseStorageLocation(
+  market: MarketId,
+  direction: ScanDirection,
+  mtfMode: MtfMode,
+  date: string,
+  strategyId?: string,
+): { blobPath: string; localName: string } {
+  const ns = scanStrategyNamespace(strategyId);
+  return ns
+    ? {
+        blobPath: `scans/${market}/${direction}/${mtfMode}/strategies/${ns}/${date}.json`,
+        localName: `scan-${market}-${direction}-${mtfMode}-strategy-${ns}-${date}.json`,
+      }
+    : {
+        blobPath: `scans/${market}/${direction}/${mtfMode}/${date}.json`,
+        localName: `scan-${market}-${direction}-${mtfMode}-${date}.json`,
+      };
+}
+
 /** 盤中快照只屬於市場「今天」；歷史日期必須以正式 post_close 為準。 */
 export function isCurrentMarketDate(
   date: string,
@@ -176,18 +205,20 @@ async function loadPostCloseRaw(
   date: string,
   direction: ScanDirection,
   mtfMode: MtfMode,
+  strategyId?: string,
 ): Promise<string | null> {
   let raw: string | null = null;
+  const location = scanPostCloseStorageLocation(market, direction, mtfMode, date, strategyId);
   if (IS_VERCEL) {
     try {
-      raw = await blobGet(`scans/${market}/${direction}/${mtfMode}/${date}.json`);
-      if (!raw && mtfMode === 'daily') raw = await blobGet(`scans/${market}/${direction}/${date}.json`);
-      if (!raw && mtfMode === 'daily' && direction === 'long') raw = await blobGet(`scans/${market}/${date}.json`);
+      raw = await blobGet(location.blobPath);
+      if (!raw && !scanStrategyNamespace(strategyId) && mtfMode === 'daily') raw = await blobGet(`scans/${market}/${direction}/${date}.json`);
+      if (!raw && !scanStrategyNamespace(strategyId) && mtfMode === 'daily' && direction === 'long') raw = await blobGet(`scans/${market}/${date}.json`);
     } catch { /* local fallback below */ }
   }
-  if (!raw) raw = await fsGet(`scan-${market}-${direction}-${mtfMode}-${date}.json`);
-  if (!raw && mtfMode === 'daily') raw = await fsGet(`scan-${market}-${direction}-${date}.json`);
-  if (!raw && mtfMode === 'daily' && direction === 'long') raw = await fsGet(`scan-${market}-${date}.json`);
+  if (!raw) raw = await fsGet(location.localName);
+  if (!raw && !scanStrategyNamespace(strategyId) && mtfMode === 'daily') raw = await fsGet(`scan-${market}-${direction}-${date}.json`);
+  if (!raw && !scanStrategyNamespace(strategyId) && mtfMode === 'daily' && direction === 'long') raw = await fsGet(`scan-${market}-${date}.json`);
   return raw;
 }
 
@@ -196,8 +227,9 @@ export async function loadPostCloseScanSession(
   date: string,
   direction: ScanDirection = 'long',
   mtfMode: MtfMode = 'daily',
+  strategyId?: string,
 ): Promise<ScanSession | null> {
-  const raw = await loadPostCloseRaw(market, date, direction, mtfMode);
+  const raw = await loadPostCloseRaw(market, date, direction, mtfMode, strategyId);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw) as ScanSession;
@@ -205,6 +237,7 @@ export async function loadPostCloseScanSession(
     if (session.market !== market || session.date !== date) return null;
     if ((session.direction ?? 'long') !== direction) return null;
     if (sessionMtfMode(session) !== mtfMode) return null;
+    if (strategyId && (session.strategyId ?? DEFAULT_SCAN_STRATEGY_ID) !== strategyId) return null;
     return session;
   } catch {
     return null;
@@ -236,10 +269,9 @@ interface SaveScanOptions {
  * 原因：歷史回填產生的空 session 會永久 lock 該日，正式 cron 重跑被靜默擋。
  */
 async function isPostCloseSealed(
-  market: MarketId, direction: string, mtfMode: string, date: string,
+  market: MarketId, direction: ScanDirection, mtfMode: MtfMode, date: string, strategyId?: string,
 ): Promise<boolean> {
-  const blobPath = `scans/${market}/${direction}/${mtfMode}/${date}.json`;
-  const localName = `scan-${market}-${direction}-${mtfMode}-${date}.json`;
+  const { blobPath, localName } = scanPostCloseStorageLocation(market, direction, mtfMode, date, strategyId);
 
   const raw = IS_VERCEL ? await blobGet(blobPath).catch(() => null) : await fsGet(localName);
   if (raw === null) return false;
@@ -274,25 +306,30 @@ export async function saveScanSession(
   const dir = session.direction ?? 'long';
   const mtf = sessionMtfMode(session);
   const sessionType = session.sessionType ?? 'post_close';
+  const strategyNs = scanStrategyNamespace(session.strategyId);
 
   if (sessionType === 'intraday') {
     // 盤中快照：帶時間戳，不覆蓋正式結果
     // 2026-05-07 修：HHMM (4 碼) → HHMMSS (6 碼)，避免同分鐘多 cron 並發互蓋
     // （原 :08/:00 兩個 method cron 重啟後可能疊到同分鐘觸發）
     const hhmmss = new Date(session.scanTime).toISOString().slice(11, 19).replace(/:/g, '');
-    const blobPath = `scans/${session.market}/${dir}/${mtf}/${session.date}/intraday/${hhmmss}.json`;
-    const localName = `scan-${session.market}-${dir}-${mtf}-${session.date}-intraday-${hhmmss}.json`;
+    const blobPath = strategyNs
+      ? `scans/${session.market}/${dir}/${mtf}/strategies/${strategyNs}/${session.date}/intraday/${hhmmss}.json`
+      : `scans/${session.market}/${dir}/${mtf}/${session.date}/intraday/${hhmmss}.json`;
+    const localName = strategyNs
+      ? `scan-${session.market}-${dir}-${mtf}-strategy-${strategyNs}-${session.date}-intraday-${hhmmss}.json`
+      : `scan-${session.market}-${dir}-${mtf}-${session.date}-intraday-${hhmmss}.json`;
 
     if (IS_VERCEL) {
       await blobPut(blobPath, data);
     } else {
       await fsPut(localName, data);
     }
-    invalidateScanSessionCache(session.market, dir as ScanDirection, mtf, session.date);
+    invalidateScanSessionCache(session.market, dir as ScanDirection, mtf, session.date, session.strategyId);
   } else {
     // ── 封存保護：post_close 已存在時，非官方來源不可覆蓋 ──
     if (!opts?.allowOverwritePostClose) {
-      const sealed = await isPostCloseSealed(session.market, dir, mtf, session.date);
+      const sealed = await isPostCloseSealed(session.market, dir as ScanDirection, mtf, session.date, session.strategyId);
       if (sealed) {
         console.warn(
           `[scanStorage] ⛔ 拒絕覆蓋已封存的 post_close: ${session.market}/${dir}/${mtf}/${session.date}` +
@@ -303,20 +340,19 @@ export async function saveScanSession(
     }
 
     // 收盤後正式結果：唯一
-    const blobPath = `scans/${session.market}/${dir}/${mtf}/${session.date}.json`;
-    const localName = `scan-${session.market}-${dir}-${mtf}-${session.date}.json`;
+    const { blobPath, localName } = scanPostCloseStorageLocation(session.market, dir as ScanDirection, mtf, session.date, session.strategyId);
 
     if (IS_VERCEL) {
       await blobPut(blobPath, data);
     } else {
       await fsPut(localName, data);
     }
-    invalidateScanSessionCache(session.market, dir as ScanDirection, mtf, session.date);
+    invalidateScanSessionCache(session.market, dir as ScanDirection, mtf, session.date, session.strategyId);
 
     console.log(`[scanStorage] ✅ post_close 已儲存: ${session.market}/${dir}/${mtf}/${session.date} (${session.resultCount} 檔)`);
 
     // 儲存完畢後非同步清理舊檔（不阻塞回傳）
-    pruneOldScanSessions(session.market, dir as ScanDirection, mtf, KEEP_SCAN_DAYS).catch(
+    pruneOldScanSessions(session.market, dir as ScanDirection, mtf, KEEP_SCAN_DAYS, session.strategyId).catch(
       err => console.warn('[scanStorage] prune failed (non-critical):', err)
     );
   }
@@ -331,8 +367,12 @@ async function pruneOldScanSessions(
   direction: ScanDirection,
   mtfMode: MtfMode,
   keepDays: number,
+  strategyId?: string,
 ): Promise<void> {
-  const prefix = `scans/${market}/${direction}/${mtfMode}/`;
+  const strategyNs = scanStrategyNamespace(strategyId);
+  const prefix = strategyNs
+    ? `scans/${market}/${direction}/${mtfMode}/strategies/${strategyNs}/`
+    : `scans/${market}/${direction}/${mtfMode}/`;
 
   if (IS_VERCEL) {
     const blobs = await blobListPrefix(prefix);
@@ -354,7 +394,9 @@ async function pruneOldScanSessions(
     const { promises: fs } = await import('fs');
     const path = await import('path');
     const dir = path.join(process.cwd(), 'data');
-    const prefix_local = `scan-${market}-${direction}-${mtfMode}-`;
+    const prefix_local = strategyNs
+      ? `scan-${market}-${direction}-${mtfMode}-strategy-${strategyNs}-`
+      : `scan-${market}-${direction}-${mtfMode}-`;
     try {
       const files = await fs.readdir(dir);
       const postCloseFiles = files
@@ -376,15 +418,19 @@ export async function listScanDates(
   market: MarketId,
   direction: ScanDirection = 'long',
   mtfMode?: MtfMode,
+  strategyId?: string,
 ): Promise<ScanDateEntry[]> {
   const entries: ScanDateEntry[] = [];
   const modes: MtfMode[] = mtfMode ? [mtfMode] : ['daily', 'mtf'];
+  const strategyNs = scanStrategyNamespace(strategyId);
 
   if (IS_VERCEL) {
     try {
       for (const m of modes) {
         // New MTF-aware path
-        const blobs = await blobListPrefix(`scans/${market}/${direction}/${m}/`);
+        const blobs = await blobListPrefix(strategyNs
+          ? `scans/${market}/${direction}/${m}/strategies/${strategyNs}/`
+          : `scans/${market}/${direction}/${m}/`);
         for (const blob of blobs) {
           const match = blob.pathname.match(/(\d{4}-\d{2}-\d{2})\.json$/);
           if (!match) continue;
@@ -397,7 +443,7 @@ export async function listScanDates(
       }
 
       // Fallback: check old direction-aware path (no mtf subfolder)
-      if (entries.length === 0) {
+      if (!strategyNs && entries.length === 0) {
         const blobs = await blobListPrefix(`scans/${market}/${direction}/`);
         for (const blob of blobs) {
           // Skip mtf subfolders
@@ -413,7 +459,7 @@ export async function listScanDates(
       }
 
       // Fallback: legacy path (no direction, no mtf)
-      if (entries.length === 0 && direction === 'long') {
+      if (!strategyNs && entries.length === 0 && direction === 'long') {
         const legacyBlobs = await blobListPrefix(`scans/${market}/`);
         for (const blob of legacyBlobs) {
           if (blob.pathname.includes('/long/') || blob.pathname.includes('/short/')) continue;
@@ -433,7 +479,9 @@ export async function listScanDates(
   } else {
     // Local dev: read from data/ directory
     for (const m of modes) {
-      const files = await fsListPrefix(`scan-${market}-${direction}-${m}-`);
+      const files = await fsListPrefix(strategyNs
+        ? `scan-${market}-${direction}-${m}-strategy-${strategyNs}-`
+        : `scan-${market}-${direction}-${m}-`);
       for (const file of files) {
         const match = file.match(/(\d{4}-\d{2}-\d{2})\.json$/);
         if (!match) continue;
@@ -459,7 +507,7 @@ export async function listScanDates(
 
     // Always merge legacy format files (old format without direction/mtf dimension)
     // so that new-format and old-format records coexist seamlessly.
-    {
+    if (!strategyNs) {
       let files = (await fsListPrefix(`scan-${market}-${direction}-`))
         .filter(f => isLegacyDailyScanFilename(f, market, direction));
       // Legacy fallback (no direction prefix)
@@ -500,7 +548,9 @@ export async function listScanDates(
   if (IS_VERCEL) {
     try {
       for (const m of modes) {
-        const blobs = await blobListPrefix(`scans/${market}/${direction}/${m}/`);
+        const blobs = await blobListPrefix(strategyNs
+          ? `scans/${market}/${direction}/${m}/strategies/${strategyNs}/`
+          : `scans/${market}/${direction}/${m}/`);
         for (const blob of blobs) {
           // 匹配 intraday 路徑: {date}/intraday/{HHMM 或 HHMMSS}.json
           // 2026-05-08：HHMM 4 碼 → HHMMSS 6 碼後相容兩種
@@ -519,7 +569,9 @@ export async function listScanDates(
     } catch { /* non-critical */ }
   } else {
     for (const m of modes) {
-      const intradayFiles = await fsListPrefix(`scan-${market}-${direction}-${m}-`);
+      const intradayFiles = await fsListPrefix(strategyNs
+        ? `scan-${market}-${direction}-${m}-strategy-${strategyNs}-`
+        : `scan-${market}-${direction}-${m}-`);
       for (const file of intradayFiles) {
         // 2026-05-08：HHMM 4 碼 → HHMMSS 6 碼後相容兩種，避免新檔漏列
         const intradayMatch = file.match(/(\d{4}-\d{2}-\d{2})-intraday-\d{4,6}\.json$/);
@@ -594,7 +646,7 @@ export async function listScanDates(
       const mode = e.mtfMode ?? 'daily';
       if (mode === 'B' || mode === 'C' || mode === 'D' || mode === 'E' || mode === 'F' || mode === 'G' || mode === 'H' || mode === 'I') return; // 不套 filter
       try {
-        const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', mode);
+        const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', mode, strategyId);
         if (session && session.results) {
           const realCount = session.results.filter(r =>
             r.turnoverRank != null || (rankIdx!.ranks.get(r.symbol) ?? Infinity) <= BOOK_UNIVERSE_TOP_N
@@ -614,12 +666,13 @@ async function loadScanSessionRaw(
   date: string,
   direction: ScanDirection,
   mtfMode: MtfMode,
+  strategyId?: string,
 ): Promise<ScanSession | null> {
-  let raw = await loadPostCloseRaw(market, date, direction, mtfMode);
+  let raw = await loadPostCloseRaw(market, date, direction, mtfMode, strategyId);
   const allowIntraday = isCurrentMarketDate(date, market);
 
   if (raw && allowIntraday) {
-    const intradayRaw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
+    const intradayRaw = await loadLatestIntradayRaw(market, date, direction, mtfMode, strategyId);
     if (intradayRaw) {
       try {
         const postClose = JSON.parse(raw) as ScanSession;
@@ -630,7 +683,7 @@ async function loadScanSessionRaw(
       } catch { /* use post_close */ }
     }
   }
-  if (!raw && allowIntraday) raw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
+  if (!raw && allowIntraday) raw = await loadLatestIntradayRaw(market, date, direction, mtfMode, strategyId);
   if (!raw) return null;
   try { return JSON.parse(raw) as ScanSession; } catch { return null; }
 }
@@ -645,8 +698,9 @@ export async function loadScanSession(
   date: string,
   direction: ScanDirection = 'long',
   mtfMode: MtfMode = 'daily',
+  strategyId?: string,
 ): Promise<ScanSession | null> {
-  const cacheKey = scanSessionCacheKey(market, direction, mtfMode, date);
+  const cacheKey = scanSessionCacheKey(market, direction, mtfMode, date, strategyId);
 
   // 1) Cache hit → deep clone 後回（避免下游 mutation 污染 cache）
   const cached = SCAN_SESSION_CACHE.get(cacheKey);
@@ -663,7 +717,7 @@ export async function loadScanSession(
   }
 
   // 3) Cold call
-  const promise = loadScanSessionUncached(market, date, direction, mtfMode);
+  const promise = loadScanSessionUncached(market, date, direction, mtfMode, strategyId);
   SCAN_SESSION_INFLIGHT.set(cacheKey, promise);
   try {
     const result = await promise;
@@ -687,8 +741,9 @@ async function loadScanSessionUncached(
   date: string,
   direction: ScanDirection,
   mtfMode: MtfMode,
+  strategyId?: string,
 ): Promise<ScanSession | null> {
-  let raw = await loadPostCloseRaw(market, date, direction, mtfMode);
+  let raw = await loadPostCloseRaw(market, date, direction, mtfMode, strategyId);
   const allowIntraday = isCurrentMarketDate(date, market);
 
   // 市場今天若有 post_close，決定是否改用較新的 intraday：
@@ -696,7 +751,7 @@ async function loadScanSessionUncached(
   //      （只限今天；歷史日期永遠以正式 post_close 為準）
   //   2) intraday 比 post_close 新且有結果 → 優先 intraday（盤中即時覆蓋）
   if (raw && allowIntraday) {
-    const intradayRaw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
+    const intradayRaw = await loadLatestIntradayRaw(market, date, direction, mtfMode, strategyId);
     if (intradayRaw) {
       try {
         const postClose = JSON.parse(raw) as ScanSession;
@@ -714,7 +769,7 @@ async function loadScanSessionUncached(
 
   // 市場今天若無 post_close session，才回退到最新 intraday。
   if (!raw && allowIntraday) {
-    raw = await loadLatestIntradayRaw(market, date, direction, mtfMode);
+    raw = await loadLatestIntradayRaw(market, date, direction, mtfMode, strategyId);
   }
 
   if (!raw) return null;
@@ -923,10 +978,14 @@ async function loadLatestIntradayRaw(
   date: string,
   direction: ScanDirection,
   mtfMode: MtfMode,
+  strategyId?: string,
 ): Promise<string | null> {
+  const strategyNs = scanStrategyNamespace(strategyId);
   if (IS_VERCEL) {
     try {
-      const prefix = `scans/${market}/${direction}/${mtfMode}/${date}/intraday/`;
+      const prefix = strategyNs
+        ? `scans/${market}/${direction}/${mtfMode}/strategies/${strategyNs}/${date}/intraday/`
+        : `scans/${market}/${direction}/${mtfMode}/${date}/intraday/`;
       const blobs = await blobListPrefix(prefix);
       if (blobs.length === 0) return null;
       // 從最新往回找，優先返回有結果 + 資料新鮮的 intraday
@@ -948,7 +1007,9 @@ async function loadLatestIntradayRaw(
   }
 
   // Local dev: 從最新往回找有結果 + 資料新鮮的 intraday
-  const prefix = `scan-${market}-${direction}-${mtfMode}-${date}-intraday-`;
+  const prefix = strategyNs
+    ? `scan-${market}-${direction}-${mtfMode}-strategy-${strategyNs}-${date}-intraday-`
+    : `scan-${market}-${direction}-${mtfMode}-${date}-intraday-`;
   const files = await fsListPrefix(prefix);
   if (files.length === 0) return null;
   const sorted = files.sort((a, b) => b.localeCompare(a));

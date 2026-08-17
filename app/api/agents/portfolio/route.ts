@@ -16,6 +16,8 @@ import {
   closeHolding,
   deleteHolding,
   loadAllHoldings,
+  applyHoldingStopLoss,
+  recordPartialExit,
   upsertHolding,
 } from '@/lib/agents/portfolio/storage';
 import { resolveProfileId } from '@/lib/portfolio/profiles';
@@ -58,6 +60,24 @@ const deleteSchema = z.object({
   closedPrice: z.coerce.number().positive().optional(),
   closeReason: z.string().optional(),
 });
+
+const executionSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('confirm_partial_exit'),
+    symbol: z.string().regex(/^[A-Za-z0-9._-]+$/),
+    signalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    signalType: z.string().min(1),
+    executionPrice: z.coerce.number().positive().optional(),
+  }),
+  z.object({
+    action: z.literal('apply_stop_loss'),
+    symbol: z.string().regex(/^[A-Za-z0-9._-]+$/),
+    price: z.coerce.number().positive(),
+    method: z.string().min(1),
+    sourceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    positionSide: z.enum(['long', 'short']).optional(),
+  }),
+]);
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -140,6 +160,37 @@ export async function POST(req: NextRequest) {
 
   const holding = await upsertHolding(holdingData, profileId);
   return apiOk({ holding });
+}
+
+export async function PATCH(req: NextRequest) {
+  const denied = checkSameOriginOrCron(req);
+  if (denied) return denied;
+  const body = await req.json().catch(() => null);
+  const parsed = executionSchema.safeParse(body);
+  if (!parsed.success) return apiValidationError(parsed.error);
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
+  try {
+    if (parsed.data.action === 'confirm_partial_exit') {
+      const holding = await recordPartialExit(parsed.data.symbol, {
+        signalDate: parsed.data.signalDate,
+        signalType: parsed.data.signalType,
+        executedAt: new Date().toISOString(),
+        executionPrice: parsed.data.executionPrice,
+      }, profileId);
+      if (!holding) return apiError(`open holding ${parsed.data.symbol} not found`, 404);
+      return apiOk({ holding, action: parsed.data.action });
+    }
+    const holding = await applyHoldingStopLoss(parsed.data.symbol, {
+      price: parsed.data.price,
+      method: parsed.data.method,
+      sourceDate: parsed.data.sourceDate,
+      positionSide: parsed.data.positionSide,
+    }, profileId);
+    if (!holding) return apiError(`open holding ${parsed.data.symbol} not found`, 404);
+    return apiOk({ holding, action: parsed.data.action });
+  } catch (error) {
+    return apiError(error instanceof Error ? error.message : String(error), 409);
+  }
 }
 
 export async function DELETE(req: NextRequest) {

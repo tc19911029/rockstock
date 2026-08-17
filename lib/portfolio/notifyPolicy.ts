@@ -24,6 +24,21 @@ export interface PortfolioNotifyContext {
   executionWindow?: boolean;
 }
 
+export type PortfolioNotificationPhase = 'initial' | 'exec';
+
+/**
+ * 每日最多兩個去重槽：首次提醒 + 尾盤執行提醒。
+ * 執行窗之後出現的收盤確認仍沿用 exec，避免再長出第三個 confirmed 通知。
+ */
+export function portfolioNotificationPhase(
+  market: string,
+  hm: string,
+  executionWindow = false,
+): PortfolioNotificationPhase {
+  const executionPassed = market === 'CN' ? hm > '15:00' : hm > '13:30';
+  return executionWindow || executionPassed ? 'exec' : 'initial';
+}
+
 const INTRADAY_PRICE_SIGNAL_TYPES = new Set([
   'absolute_stop',
   'hard_stop_10pct',

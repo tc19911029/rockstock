@@ -9,7 +9,7 @@
  *
  * 邊界：
  *   - market 缺失（舊資料）→ 從 symbol 後綴推導
- *   - stopLoss 缺失 → 預設 costPrice × 0.93（書本 7% 停損，與 holdingsImport 一致）
+ *   - stopLoss 缺失 → 預設短線 5%（與 holdingsImport 一致；daily-action 再依進場字母重算）
  *   - industry / target1 / target2 → UI 端沒存，server 端標 undefined
  *
  * 反向不需要做：server → UI 同步不在 Phase 0.4 範圍（UI 是事實源）
@@ -33,7 +33,7 @@ export interface StorePortfolioHolding {
   market?: MarketId;
   notes?: string;
   triggerSignal?: string;
-  /** 使用者／server 已設定的停損價；缺值才套用成本價 7% 預設。 */
+  /** 使用者／server 已設定的停損價；缺值才套用短線 5% 預設。 */
   stopLoss?: number;
   /** 賠少-1：做空 live 風控。缺省=long；非 core key → 自動進 ui blob、hydration 展回頂層 */
   positionSide?: 'long' | 'short';
@@ -65,7 +65,7 @@ export interface MappingResult {
  * Zustand holding → server payload（純函式）
  *
  * 驗證失敗：缺 symbol / shares / costPrice / buyDate → ok=false
- * 容錯：market 缺失走 marketFromSymbol；stopLoss 缺失走預設 7%
+ * 容錯：market 缺失走 marketFromSymbol；stopLoss 缺失走最新課程短線 5%
  */
 export function mapStoreToServerHolding(h: StorePortfolioHolding): MappingResult {
   if (!h.symbol || !/^[A-Za-z0-9._-]+$/.test(h.symbol)) {
@@ -98,7 +98,7 @@ export function mapStoreToServerHolding(h: StorePortfolioHolding): MappingResult
       entryDate: h.buyDate,
       entryPrice: h.costPrice,
       shares: h.shares,
-      // server 既有停損不可在每次同步時被重設；舊資料缺值才套用書本 7% 預設。
+      // server 既有停損不可在每次同步時被重設；舊資料缺值才套用短線 5% 預設。
       stopLoss: Number.isFinite(h.stopLoss) && h.stopLoss! > 0
         ? h.stopLoss
         : +(h.costPrice * (1 - STOP_LOSS_DEFAULT_PCT)).toFixed(2),

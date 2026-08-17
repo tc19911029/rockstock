@@ -219,6 +219,64 @@ function rule12_baseUnderPressure(candles: CandleWithIndicators[], idx: number):
   return null;
 }
 
+/** 課程 ZH-ELIM-006：高檔爆量後連續三根長黑下跌（投影片明確條件）。 */
+function courseRule06_threeConsecutiveLongBlacks(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 3) return null;
+  const bars = candles.slice(idx - 2, idx + 1);
+  const allLongBlack = bars.every(bar =>
+    bar.open > 0 && bar.close < bar.open && (bar.open - bar.close) / bar.open >= 0.02,
+  );
+  if (!allLongBlack) return null;
+  const highVolume = bars.some(bar =>
+    bar.avgVol5 != null && bar.avgVol5 > 0 && bar.volume >= bar.avgVol5 * 1.5,
+  );
+  const highLevel = bars[0].ma20 != null && bars[0].close > bars[0].ma20;
+  return highVolume && highLevel ? '淘汰6: 高檔爆量後連續三根長黑下跌' : null;
+}
+
+/** 課程 ZH-ELIM-008：單根高檔爆大量長黑，不要求 10 日內出現兩次。 */
+function courseRule08_highVolumeLongBlack(candles: CandleWithIndicators[], idx: number): string | null {
+  const c = candles[idx];
+  if (!c || c.open <= 0 || c.avgVol5 == null || c.avgVol5 <= 0 || c.ma20 == null) return null;
+  const longBlack = c.close < c.open && (c.open - c.close) / c.open >= 0.02;
+  return longBlack && c.volume >= c.avgVol5 * 1.5 && c.close > c.ma20
+    ? '淘汰8: 高檔爆大量長黑'
+    : null;
+}
+
+/** 課程 ZH-ELIM-009：回檔收盤跌破下彎 MA20。 */
+function courseRule09_breakFallingMa20(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 1) return null;
+  const c = candles[idx];
+  const prev = candles[idx - 1];
+  if (c.ma20 == null || prev.ma20 == null) return null;
+  return prev.close >= prev.ma20 && c.close < c.ma20 && c.ma20 < prev.ma20
+    ? '淘汰9: 回檔跌破 MA20 且 MA20 下彎'
+    : null;
+}
+
+/** 課程 ZH-ELIM-010：回檔收盤跌破最近已確認 pivot low。 */
+function courseRule10_breakPriorLow(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 8) return null;
+  const lows = findPivots(candles, idx - 1, 5, false).filter(pivot => pivot.type === 'low');
+  const priorLow = lows[0];
+  if (!priorLow) return null;
+  return candles[idx].close < priorLow.price
+    ? `淘汰10: 回檔跌破前低 ${priorLow.price.toFixed(2)}`
+    : null;
+}
+
+/** 課程 ZH-ELIM-011：已翻倍後出現頭頭低，不必等待盤整趨勢分類。 */
+function courseRule11_doubledWithLowerHighs(candles: CandleWithIndicators[], idx: number): string | null {
+  if (idx < 60) return null;
+  const low60 = Math.min(...candles.slice(idx - 60, idx).map(c => c.low));
+  if (low60 <= 0 || candles[idx].close < low60 * 2) return null;
+  const highs = findPivots(candles, idx, 8, false).filter(pivot => pivot.type === 'high');
+  return highs.length >= 2 && highs[0].price < highs[1].price
+    ? '淘汰11: 漲幅超過一倍且趨勢頭頭低'
+    : null;
+}
+
 const ELIMINATION_RULES = [
   rule01_notOutOfBottom,
   rule02_resistanceBlockBreakMA5,
@@ -228,6 +286,11 @@ const ELIMINATION_RULES = [
   rule07_indicatorDivergence,
   rule09_highVolNoRise,
   rule12_baseUnderPressure,
+  courseRule06_threeConsecutiveLongBlacks,
+  courseRule08_highVolumeLongBlack,
+  courseRule09_breakFallingMa20,
+  courseRule10_breakPriorLow,
+  courseRule11_doubledWithLowerHighs,
   // 2026-04-20 用戶決議移除以下三條：
   // R8 法人連續賣超 — 當年無法人資料（2026-07-05 已復活於 lib/avoidance/chipAvoidSignals ④⑤ 避雷標示層）
   // R10 看不懂（長期盤整）— 30/8%/2% 完全自創

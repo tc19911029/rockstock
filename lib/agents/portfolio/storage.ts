@@ -16,6 +16,8 @@ import {
   PortfolioHolding,
   PortfolioReviewFile,
 } from './types';
+import { confirmPartialExit, type ConfirmPartialExitInput } from '@/lib/portfolio/holdingExecution';
+import { doesStopChangeLoosen } from '@/lib/portfolio/holdingRisk';
 
 const PORTFOLIO_DIR = path.join(process.cwd(), 'data', 'agents', 'portfolio');
 const HOLDINGS_FILE = path.join(PORTFOLIO_DIR, 'holdings.json');
@@ -173,6 +175,65 @@ export async function deleteHolding(symbol: string, profileId: string = DEFAULT_
 export async function listOpenHoldings(profileId: string = DEFAULT_PROFILE_ID): Promise<PortfolioHolding[]> {
   const file = await loadHoldings('TW', profileId);
   return file.holdings.filter(h => h.status === 'open');
+}
+
+/** 使用者確認已賣半後，原子更新剩餘股數與執行紀錄。 */
+export async function recordPartialExit(
+  symbol: string,
+  input: ConfirmPartialExitInput,
+  profileId: string = DEFAULT_PROFILE_ID,
+): Promise<PortfolioHolding | null> {
+  const market = marketOfSymbol(symbol);
+  const file = await loadHoldings(market, profileId);
+  const idx = file.holdings.findIndex(h => h.symbol === symbol && h.status === 'open');
+  if (idx < 0) return null;
+  const current = file.holdings[idx];
+  const next = confirmPartialExit(current, input);
+  file.holdings[idx] = {
+    ...current,
+    shares: next.shares,
+    executionState: next.executionState,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveHoldings(file, market, profileId);
+  return file.holdings[idx];
+}
+
+/** 套用經使用者確認的策略停損；做多只允許收緊、做空只允許下移。 */
+export async function applyHoldingStopLoss(
+  symbol: string,
+  input: { price: number; method: string; sourceDate: string; positionSide?: 'long' | 'short' },
+  profileId: string = DEFAULT_PROFILE_ID,
+): Promise<PortfolioHolding | null> {
+  const market = marketOfSymbol(symbol);
+  const file = await loadHoldings(market, profileId);
+  const idx = file.holdings.findIndex(h => h.symbol === symbol && h.status === 'open');
+  if (idx < 0) return null;
+  const current = file.holdings[idx];
+  const old = current.stopLoss;
+  const side = current.ui?.positionSide === 'short' ? 'short' : 'long';
+  if (input.positionSide != null && input.positionSide !== side) {
+    throw new Error(`positionSide 與 server holding 不一致（request=${input.positionSide}, holding=${side}）`);
+  }
+  if (old != null) {
+    if (doesStopChangeLoosen(old, input.price, side)) {
+      throw new Error(`新停損 ${input.price} 比現有停損 ${old} 更寬，依課程不可往不利方向放寬`);
+    }
+  }
+  const now = new Date().toISOString();
+  file.holdings[idx] = {
+    ...current,
+    stopLoss: input.price,
+    riskState: {
+      activeStopLoss: input.price,
+      method: input.method,
+      sourceDate: input.sourceDate,
+      updatedAt: now,
+    },
+    updatedAt: now,
+  };
+  await saveHoldings(file, market, profileId);
+  return file.holdings[idx];
 }
 
 // ────────────────────────────────────────────────────────────────────────────

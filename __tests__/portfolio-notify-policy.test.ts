@@ -2,6 +2,7 @@ import {
   canPushPortfolioAction,
   classifyPortfolioNotificationBasis,
   formatPortfolioProfitPct,
+  portfolioNotificationPhase,
 } from '@/lib/portfolio/notifyPolicy';
 
 describe('portfolio notify policy', () => {
@@ -39,5 +40,12 @@ describe('portfolio notify policy', () => {
     expect(classifyPortfolioNotificationBasis([{ type: 'absolute_stop' }])).toBe('price');
     expect(classifyPortfolioNotificationBasis([{ type: 'break_ma5_high_profit' }])).toBe('close');
     expect(formatPortfolioProfitPct(0.13)).toBe('13.0%');
+  });
+
+  test('dedup phase never creates a third post-close notification', () => {
+    expect(portfolioNotificationPhase('TW', '09:30')).toBe('initial');
+    expect(portfolioNotificationPhase('TW', '13:20', true)).toBe('exec');
+    expect(portfolioNotificationPhase('TW', '13:45')).toBe('exec');
+    expect(portfolioNotificationPhase('CN', '15:10')).toBe('exec');
   });
 });
