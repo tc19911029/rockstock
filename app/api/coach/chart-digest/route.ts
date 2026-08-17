@@ -214,7 +214,9 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ ...answer, sharedInFlight: shared });
   } catch (err) {
-    console.error('coach/chart-digest error:', err);
+    if (!(err instanceof CodexBusyError)) {
+      console.error('coach/chart-digest error:', err);
+    }
     const message = err instanceof Error ? err.message : 'digest 失敗';
     const status = err instanceof CodexBusyError
       ? 409

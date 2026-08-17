@@ -61,7 +61,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
-    console.error('coach/codex-followup error:', err);
+    if (!(err instanceof CodexBusyError)) {
+      console.error('coach/codex-followup error:', err);
+    }
     const message = err instanceof Error ? err.message : 'Codex 追問失敗';
     const status = err instanceof CodexBusyError
       ? 409
