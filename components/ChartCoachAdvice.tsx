@@ -341,14 +341,11 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
         macdDIF: c.macdDIF ?? null, macdOSC: c.macdOSC ?? null,
       }));
 
-      const res = await fetch('/api/coach/chart-digest', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          market,
-          symbol: bareSymbol,
-          name,
-          date,
+      const requestBody = JSON.stringify({
+        market,
+        symbol: bareSymbol,
+        name,
+        date,
           ohlcv: {
             open: candle.open, high: candle.high, low: candle.low, close: candle.close,
             volume: candle.volume,
@@ -378,12 +375,31 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
           positionCost: held?.costPrice ?? null,
           recentCandles,
           chartScreenshot,
-          forceRefresh: opts?.forceRefresh ?? false,
-        }),
+        forceRefresh: opts?.forceRefresh ?? false,
       });
-      const body = await res.json();
+      const waitStartedAt = Date.now();
+      let res: Response;
+      let body: unknown;
+      for (;;) {
+        res = await fetch('/api/coach/chart-digest', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: requestBody,
+        });
+        body = await res.json();
+        if (res.status !== 409) break;
+        if (aborted.current) return;
+        if (Date.now() - waitStartedAt > 13 * 60 * 1000) {
+          throw new Error('Codex 等候逾時，請稍後重試');
+        }
+        const retrySeconds = Number(res.headers.get('Retry-After')) || 5;
+        await new Promise(resolve => window.setTimeout(resolve, retrySeconds * 1000));
+      }
       if (aborted.current) return;
-      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        const errorBody = body as { error?: string };
+        throw new Error(errorBody?.error ?? `HTTP ${res.status}`);
+      }
       if (!isValidV3(body) || body.generatedBy !== 'codex') {
         throw new Error('Codex 回覆格式不完整，請重新分析');
       }
@@ -407,15 +423,32 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
     setChatLoading(true);
     setChatError(null);
     try {
-      const res = await fetch('/api/coach/codex-followup', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          messages: nextMessages,
-          context: buildFollowupContext(data, symbol, name, date, candle),
-        }),
+      const requestBody = JSON.stringify({
+        messages: nextMessages,
+        context: buildFollowupContext(data, symbol, name, date, candle),
       });
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const waitStartedAt = Date.now();
+      let res: Response;
+      for (;;) {
+        res = await fetch('/api/coach/codex-followup', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: requestBody,
+        });
+        if (res.status !== 409) break;
+        await res.body?.cancel();
+        if (aborted.current) return;
+        if (Date.now() - waitStartedAt > 13 * 60 * 1000) {
+          throw new Error('Codex 等候逾時，請稍後重試');
+        }
+        const retrySeconds = Number(res.headers.get('Retry-After')) || 5;
+        await new Promise(resolve => window.setTimeout(resolve, retrySeconds * 1000));
+      }
+      if (!res.ok) {
+        const errorBody = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(errorBody?.error ?? `HTTP ${res.status}`);
+      }
+      if (!res.body) throw new Error('Codex 沒有回傳內容');
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let assistantText = '';
@@ -459,7 +492,7 @@ export default function ChartCoachAdvice({ defaultCollapsed = false }: ChartCoac
       <div className="w-full mb-3 px-3 py-3 rounded-lg border border-purple-500/30 bg-purple-500/5 text-[11px] text-purple-200 space-y-1.5">
         <div className="animate-pulse text-center">💬 Codex 正在讀取課程、走圖與最新資料…</div>
         <div className="text-purple-200/70 leading-relaxed text-center">
-          深度分析會查核八大面向，通常需要數分鐘；可以停留在本頁等待，不必開啟 Terminal。
+          深度分析會查核八大面向，通常需要數分鐘；若已有另一筆分析，本頁會自動等待，不必重複按。
         </div>
       </div>
     );

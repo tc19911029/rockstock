@@ -70,7 +70,10 @@ export async function POST(req: NextRequest) {
         : req.signal.aborted
           ? 499
           : 500;
-    return Response.json({ error: message }, { status });
+    return Response.json(
+      { error: message },
+      { status, ...(status === 409 ? { headers: { 'Retry-After': '5' } } : {}) },
+    );
   } finally {
     if (inputDir) await rm(inputDir, { recursive: true, force: true }).catch(() => {});
   }

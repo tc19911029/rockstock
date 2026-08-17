@@ -19,6 +19,7 @@ import {
 import { prefetchZhuChart } from '@/lib/ai/zhuPrefetch';
 import { parseZhuDigest } from '@/lib/ai/zhuDigestValidation';
 import type { DigestResponse } from '@/lib/ai/zhuTypes';
+import { InFlightDeduper } from '@/lib/ai/inFlightDeduper';
 
 export const runtime = 'nodejs';
 
@@ -96,6 +97,8 @@ const reqSchema = z.object({
 type DigestInput = z.infer<typeof reqSchema>;
 
 const cache = new Map<string, { value: DigestResponse; expires: number }>();
+const inFlight = new InFlightDeduper<string, DigestResponse>();
+let activeKey: string | null = null;
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 /** v4 後綴：避免把舊 Claude 回覆標示成 Codex 產物。 */
@@ -127,6 +130,45 @@ function buildCodexPrompt(questionFile: string, requestTimestamp: string, hasScr
 投資結論必須是教學與風險管理用途，不得把不完整資料包裝成保證獲利。`;
 }
 
+async function generateDigest(input: DigestInput): Promise<DigestResponse> {
+  const prefetch = await prefetchZhuChart({
+    market: input.market,
+    symbol: input.symbol,
+    date: input.date,
+  });
+
+  const requestTimestamp = new Date().toISOString();
+  const requestDir = await mkdtemp(path.join(os.tmpdir(), 'rockstock-zhu-codex-'));
+  try {
+    const questionFile = path.join(requestDir, 'chart-question.json');
+    const screenshotPath = input.chartScreenshot
+      ? path.join(requestDir, 'chart-screenshot.png')
+      : null;
+    const { chartScreenshot: _omitted, ...inputWithoutScreenshot } = input;
+    void _omitted;
+    await writeFile(questionFile, JSON.stringify({
+      ...inputWithoutScreenshot,
+      requestTimestamp,
+      prefetch,
+      screenshotPath,
+    }, null, 2), 'utf8');
+    if (screenshotPath && input.chartScreenshot) {
+      await writeFile(screenshotPath, Buffer.from(input.chartScreenshot, 'base64'));
+    }
+
+    const raw = await runCodexAnalysis(
+      buildCodexPrompt(questionFile, requestTimestamp, !!screenshotPath),
+      {
+        outputSchema: CHART_OUTPUT_SCHEMA,
+        imagePaths: screenshotPath ? [screenshotPath] : [],
+      },
+    );
+    return parseZhuDigest(JSON.parse(raw), requestTimestamp);
+  } finally {
+    await rm(requestDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -147,47 +189,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Server-side prefetch — 把 Codex 會用到的籌碼/ETF/同業/基本面/大盤/新聞先撈起來
-    // 平行打 8 條請求 + ETF 檔案 grep，總時間 ~5s 內
-    // v3 不再算 suggestedLights/Grade（拔 ABCDE）— prefetch 只給朱老師當素材
-    const prefetch = await prefetchZhuChart({
-      market: input.market,
-      symbol: input.symbol,
-      date: input.date,
-    });
-
-    const requestTimestamp = new Date().toISOString();
-    const requestDir = await mkdtemp(path.join(os.tmpdir(), 'rockstock-zhu-codex-'));
-    let answer: DigestResponse;
-    try {
-      const questionFile = path.join(requestDir, 'chart-question.json');
-      const screenshotPath = input.chartScreenshot
-        ? path.join(requestDir, 'chart-screenshot.png')
-        : null;
-      const { chartScreenshot: _omitted, ...inputWithoutScreenshot } = input;
-      void _omitted;
-      await writeFile(questionFile, JSON.stringify({
-        ...inputWithoutScreenshot,
-        requestTimestamp,
-        prefetch,
-        screenshotPath,
-      }, null, 2), 'utf8');
-      if (screenshotPath && input.chartScreenshot) {
-        await writeFile(screenshotPath, Buffer.from(input.chartScreenshot, 'base64'));
-      }
-
-      const raw = await runCodexAnalysis(
-        buildCodexPrompt(questionFile, requestTimestamp, !!screenshotPath),
-        {
-          outputSchema: CHART_OUTPUT_SCHEMA,
-          imagePaths: screenshotPath ? [screenshotPath] : [],
-          signal: req.signal,
-        },
+    // 同股票、日期與訊號的重複點擊共用工作；不同股票先回 busy，client 會依 Retry-After 自動等候。
+    const existing = inFlight.get(key);
+    if (!existing && activeKey) throw new CodexBusyError();
+    let shared = !!existing;
+    let analysis = existing;
+    if (!analysis) {
+      activeKey = key;
+      const created = inFlight.run(key, () => generateDigest(input));
+      analysis = created.promise;
+      shared = created.shared;
+      void analysis.then(
+        () => { if (activeKey === key) activeKey = null; },
+        () => { if (activeKey === key) activeKey = null; },
       );
-      answer = parseZhuDigest(JSON.parse(raw), requestTimestamp);
-    } finally {
-      await rm(requestDir, { recursive: true, force: true }).catch(() => {});
     }
+    const answer = await analysis;
 
     cache.set(key, { value: answer, expires: Date.now() + CACHE_TTL });
     if (cache.size > 200) {
@@ -195,7 +212,7 @@ export async function POST(req: NextRequest) {
       if (firstKey) cache.delete(firstKey);
     }
 
-    return Response.json(answer);
+    return Response.json({ ...answer, sharedInFlight: shared });
   } catch (err) {
     console.error('coach/chart-digest error:', err);
     const message = err instanceof Error ? err.message : 'digest 失敗';
@@ -206,6 +223,9 @@ export async function POST(req: NextRequest) {
         : req.signal.aborted
           ? 499
           : 500;
-    return Response.json({ error: message }, { status });
+    return Response.json(
+      { error: message },
+      { status, ...(status === 409 ? { headers: { 'Retry-After': '5' } } : {}) },
+    );
   }
 }
