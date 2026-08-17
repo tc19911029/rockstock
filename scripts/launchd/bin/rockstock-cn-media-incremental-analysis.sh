@@ -112,6 +112,12 @@ curl -fsS --config "$AUTH_CONFIG" --max-time 600 -X POST \
   "$BASE/api/cron/cn-media-prepare-analysis?date=$D" -o "$PREPARE_JSON" \
   || { echo "[$(ts)] prepare 失敗" >&2; exit 1; }
 CURRENT_COUNT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("videos_with_transcript",0))' "$PREPARE_JSON" 2>/dev/null || echo 0)
+QUESTION_PATH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("question_path",""))' "$PREPARE_JSON" 2>/dev/null || echo "")
+QUESTION_DIR="${QUESTION_PATH:h}"
+if [[ -z "$QUESTION_PATH" || ! -r "$QUESTION_PATH" ]]; then
+  echo "[$(ts)] question payload 路徑無效：${QUESTION_PATH:-missing}" >&2
+  exit 1
+fi
 
 ANALYSIS_JSON="$RUN_DIR/analysis-before.json"
 curl -fsS --max-time 60 "$BASE/api/cn-media/analysis/$D" -o "$ANALYSIS_JSON" \
@@ -148,7 +154,7 @@ for attempt in 1 2; do
   (( attempt == 2 )) && sleep 60
   echo "[$(ts)] 新增逐字稿 $PREVIOUS_COUNT → $CURRENT_COUNT，Codex 分析嘗試 $attempt/2"
   "$CODEX_BIN" exec --ephemeral --sandbox workspace-write \
-    --add-dir "$(python3 -c 'import tempfile; print(tempfile.gettempdir())')/rockstock-cn-media" \
+    --add-dir "$QUESTION_DIR" \
     -C "$REPO" \
     "使用 cn-media-analysis skill 分析 $D 的陸股節目 question payload，完整執行技能的正規化與稽核，並寫入指定 output_path。" \
     2>&1 | tail -5
