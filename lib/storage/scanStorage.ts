@@ -10,6 +10,7 @@ import {
 // 書本池深度（500）。CN 成交額索引收錄 800（給三色），書本 session 的過濾/補 rank
 // 一律以名次 ≤ BOOK_UNIVERSE_TOP_N 判定，不可用「索引成員身分」。
 import { BOOK_UNIVERSE_TOP_N } from '@/lib/scanner/universeTopN';
+import { storedStrategyMatches, strategyStorageNamespace } from '@/lib/strategy/storageNamespace';
 
 // ── Storage abstraction for scan sessions ────────────────────────────────────
 // Production (Vercel): uses Vercel Blob for durable persistence
@@ -148,23 +149,9 @@ function sessionMtfMode(session: ScanSession): MtfMode {
   return session.multiTimeframeEnabled ? 'mtf' : 'daily';
 }
 
-const DEFAULT_SCAN_STRATEGY_ID = 'zhu-pure-book';
-
-function strategyIdHash(strategyId: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < strategyId.length; i++) {
-    hash ^= strategyId.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(36).padStart(7, '0');
-}
-
 /** 預設朱老師策略維持 legacy 路徑；其他策略取得安全且獨立的命名空間。 */
 export function scanStrategyNamespace(strategyId?: string): string | null {
-  if (!strategyId || strategyId === DEFAULT_SCAN_STRATEGY_ID) return null;
-  const safe = strategyId.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-  if (safe === strategyId && safe.length <= 80) return safe;
-  return `${safe.slice(0, 68) || 'strategy'}-${strategyIdHash(strategyId)}`;
+  return strategyStorageNamespace(strategyId);
 }
 
 /** 只接受 prefix 正下方的正式檔，避免預設策略把 strategies/ 子樹混入。 */
@@ -264,7 +251,7 @@ export async function loadPostCloseScanSession(
     if (session.market !== market || session.date !== date) return null;
     if ((session.direction ?? 'long') !== direction) return null;
     if (sessionMtfMode(session) !== mtfMode) return null;
-    if (strategyId && (session.strategyId ?? DEFAULT_SCAN_STRATEGY_ID) !== strategyId) return null;
+    if (strategyId && !storedStrategyMatches(session.strategyId, strategyId)) return null;
     return session;
   } catch {
     return null;
@@ -805,6 +792,7 @@ async function loadScanSessionUncached(
 
   try {
     const session = JSON.parse(raw) as ScanSession;
+    if (strategyId && !storedStrategyMatches(session.strategyId, strategyId)) return null;
     // 0512：載入後先 normalize matchedMethods（v11 G/H/I → v12 J/L/K）— 統一全 UI 只看 v12
     if (Array.isArray(session.results)) {
       for (const r of session.results) {
@@ -866,14 +854,14 @@ async function loadScanSessionUncached(
  * 反轉/戰法軌 session 載入時，把每筆 result 的 matchedMethods 中**不在當日 Step 1 池**的
  * 多頭軌字母剝掉 — 對齊「多頭軌 = Step 1 ∩ detector 觸發」語意。
  *
- * 不剝反轉/戰法軌字母（D/F/N/O/Q）— 那些 by design 全市場掃。
+ * 不剝反轉/戰法軌字母（D/F/J/N/O/Q）— 那些 by design 全市場掃。
  */
 async function stripMultiTrackLeakFromMatched(session: ScanSession): Promise<void> {
   if (!session.results || session.results.length === 0) return;
   try {
     const { loadStep1Pool } = await import('@/lib/scanner/step1Pool');
-    const pool = await loadStep1Pool(session.market, session.date);
-    if (!pool || pool.symbols.length === 0) return; // 池子缺漏 — 不剝，等池子回來再處理
+    const pool = await loadStep1Pool(session.market, session.date, session.strategyId);
+    if (!pool) return; // 只有「檔案不存在」才是缺漏；存在但 0 檔是有效的空集合
     const allowed = new Set(pool.symbols);
     const bullishSet = BULLISH_TRACK_SET_WITH_V11;
     for (const r of session.results) {
@@ -903,7 +891,7 @@ const BULLISH_LETTERS: ReadonlySet<string> = BULLISH_TRACK_SET_WITH_V11;
  *
  * 池子缺漏處理（修訂 2026-05-10）：
  *   - 池子不存在 → 不過濾，但設 session.step1Filter='missing' 讓 UI 顯示警告
- *   - 池子存在但空 → 視為異常狀態，等同不存在
+ *   - 池子存在但空 → 有效結果為 0 檔，過濾全部並標 step1Filter='applied'
  *   - 池子存在且非空 → 過濾掉池子外股票，設 step1Filter='applied'
  *
  * 之前的設計：silent fallback 不過濾、不告知 → 用戶看到「漏跑 Step 1」幻覺
@@ -918,8 +906,8 @@ async function applyStep1Filter(session: ScanSession): Promise<void> {
   }
   try {
     const { loadStep1Pool } = await import('@/lib/scanner/step1Pool');
-    const pool = await loadStep1Pool(session.market, session.date);
-    if (!pool || pool.symbols.length === 0) {
+    const pool = await loadStep1Pool(session.market, session.date, session.strategyId);
+    if (!pool) {
       // 池子缺漏 — 不過濾但明確標 'missing' 讓 UI 顯示警告
       if (!session.step1Filter) session.step1Filter = 'missing';
       console.warn(

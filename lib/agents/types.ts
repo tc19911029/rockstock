@@ -67,6 +67,8 @@ export interface AgentPhaseState {
   date: string;
   symbol: string;
   market: MarketId;
+  /** 建立本輪問題時的策略；供 meta/phase 任一半寫失敗時仍可正確隔離。 */
+  strategyId?: string;
   startedAt: string;
   /** 目前進行到哪個 phase（1-4），4 = 完成 */
   currentPhase: AgentPhase | 'completed';

@@ -148,6 +148,7 @@ export const useScannerStore = create<ScannerStore>()(
         const strategyPayload = activeStrategy.isBuiltIn
           ? { strategyId: activeStrategy.id }
           : {
+              strategyId: activeStrategy.id,
               thresholds: activeStrategy.thresholds,
               ruleGroups: activeStrategy.ruleGroups,
               strategyType: activeStrategy.strategyType,

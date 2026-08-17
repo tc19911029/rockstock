@@ -15,7 +15,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiValidationError } from '@/lib/api/response';
-import { readPhaseState } from '@/lib/agents/orchestrator';
+import { answerBelongsToRun, readPhaseState, selectCurrentRunContext } from '@/lib/agents/orchestrator';
 import { agentsGet, agentsListChildDirs } from '@/lib/agents/persistStorage';
 import { loadStockMaster, lookupStock } from '@/lib/youtube/stockMaster';
 import { loadLocalCandlesForDate } from '@/lib/datasource/LocalCandleStore';
@@ -147,13 +147,22 @@ export async function GET(req: NextRequest) {
         agentsGet<FinalDecision>(k('decision.json')),
         readPhaseState(date, symbol),
       ]);
+      const runId = selectCurrentRunContext(meta, phase).runId;
+      const currentTechnical = answerBelongsToRun(technical, runId) ? technical : null;
+      const currentNews = answerBelongsToRun(news, runId) ? news : null;
+      const currentChip = answerBelongsToRun(chip, runId) ? chip : null;
+      const currentFundamental = answerBelongsToRun(fundamental, runId) ? fundamental : null;
+      const currentRisk = answerBelongsToRun(risk, runId) ? risk : null;
+      const currentBull = answerBelongsToRun(bull, runId) ? bull : null;
+      const currentBear = answerBelongsToRun(bear, runId) ? bear : null;
+      const currentDecision = answerBelongsToRun(decision, runId) ? decision : null;
       // Phase 4 完成（有 decision）才算 fully completed
-      const completed = !!decision;
+      const completed = !!currentDecision;
       const phaseStatus = {
-        phase1Done: !!(technical && news && chip && fundamental),
-        phase2Done: !!risk,
-        phase3Done: !!(bull && bear),
-        phase4Done: !!decision,
+        phase1Done: !!(currentTechnical && currentNews && currentChip && currentFundamental),
+        phase2Done: !!currentRisk,
+        phase3Done: !!(currentBull && currentBear),
+        phase4Done: !!currentDecision,
       };
       const lookupKey = symbol.replace(/\.(TW|TWO)$/i, '');
       const name = master ? lookupStock(lookupKey, master)?.name ?? null : null;
@@ -162,28 +171,28 @@ export async function GET(req: NextRequest) {
         name,
         status: completed ? 'completed' : 'pending',
         phaseStatus,
-        runId: meta?.runId ?? phase?.runId ?? null,
+        runId: runId ?? null,
         market: meta?.market ?? phase?.market ?? null,
         startedAt: meta?.startedAt ?? phase?.startedAt ?? null,
         verdicts: {
-          technical:   summarise(technical),
-          news:        summarise(news),
-          chip:        summarise(chip),
-          fundamental: summarise(fundamental),
+          technical:   summarise(currentTechnical),
+          news:        summarise(currentNews),
+          chip:        summarise(currentChip),
+          fundamental: summarise(currentFundamental),
         },
-        risk: risk ? { verdict: risk.verdict, overview: risk.overview } : null,
-        decision: decision ? {
-          action: decision.action,
-          decisionPath: decision.decisionPath,
-          overview: decision.overview,
-          bullScore: decision.bullScore,
-          bearScore: decision.bearScore,
-          sizeHint: decision.sizeHint,
-          ...(decision.gradeBlock ? {
-            totalScore: decision.gradeBlock.totalScore,
-            grade: decision.gradeBlock.grade,
-            suitableFor: decision.gradeBlock.suitableFor,
-            gradeReason: decision.gradeBlock.gradeReason,
+        risk: currentRisk ? { verdict: currentRisk.verdict, overview: currentRisk.overview } : null,
+        decision: currentDecision ? {
+          action: currentDecision.action,
+          decisionPath: currentDecision.decisionPath,
+          overview: currentDecision.overview,
+          bullScore: currentDecision.bullScore,
+          bearScore: currentDecision.bearScore,
+          sizeHint: currentDecision.sizeHint,
+          ...(currentDecision.gradeBlock ? {
+            totalScore: currentDecision.gradeBlock.totalScore,
+            grade: currentDecision.gradeBlock.grade,
+            suitableFor: currentDecision.gradeBlock.suitableFor,
+            gradeReason: currentDecision.gradeBlock.gradeReason,
           } : {}),
         } : null,
       };

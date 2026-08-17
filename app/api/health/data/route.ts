@@ -24,6 +24,7 @@ import { listScanDates } from '@/lib/storage/scanStorage';
 import { checkLimitUpConsistency, type ConsistencySample } from '@/lib/datasource/limitUpConsistency';
 import { loadStrategyReadiness, type StrategyReadiness } from '@/lib/health/strategyReadiness';
 import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 
 export const runtime = 'nodejs';
 
@@ -219,13 +220,13 @@ async function getL2Status(market: 'TW' | 'CN'): Promise<L2Status> {
   };
 }
 
-async function getL4Status(market: 'TW' | 'CN'): Promise<L4Status> {
+async function getL4Status(market: 'TW' | 'CN', strategyId: string): Promise<L4Status> {
   const today = getTodayDate(market);
   const marketOpen = isMarketOpen(market);
   const postClose = isPostCloseWindow(market);
 
   try {
-    const entries = await listScanDates(market, 'long', 'daily');
+    const entries = await listScanDates(market, 'long', 'daily', strategyId);
     const totalDatesAvailable = entries.length;
     const latest = entries[0] ?? null;
     const todayHasIntraday = entries.some(e => e.date === today);
@@ -376,15 +377,16 @@ async function getL1L2Consistency(market: 'TW' | 'CN'): Promise<L1L2ConsistencyS
 async function getMarketHealth(
   market: 'TW' | 'CN',
   includeDetail: boolean,
+  strategyId: string,
 ): Promise<MarketHealth> {
   const lastTrading = getLastTradingDay(market);
 
   // L2 + L4 + 一致性檢查 並行讀取
   const l2Promise = getL2Status(market);
-  const l4Promise = getL4Status(market);
+  const l4Promise = getL4Status(market, strategyId);
   const consistencyPromise = getLimitUpConsistency(market);
   const l1l2Promise = getL1L2Consistency(market);
-  const strategyPromise = loadStrategyReadiness(market, lastTrading);
+  const strategyPromise = loadStrategyReadiness(market, lastTrading, strategyId);
 
   // 嘗試讀取最近 7 天的報告（可能假日/週末沒報告 — 週一要能回看到上週五）
   let l1Result: Omit<MarketHealth, 'l2' | 'l2Sources' | 'l4' | 'limitUpConsistency' | 'l1l2Consistency' | 'strategyReadiness'> | null = null;
@@ -463,15 +465,16 @@ export async function GET(req: NextRequest) {
   const detail = req.nextUrl.searchParams.get('detail') === '1';
 
   try {
+    const strategyId = (await getActiveStrategyServer()).id;
     if (market === 'TW' || market === 'CN') {
-      const health = await getMarketHealth(market, detail);
+      const health = await getMarketHealth(market, detail, strategyId);
       return apiOk(health);
     }
 
     // 不指定市場：返回兩個市場
     const [tw, cn] = await Promise.all([
-      getMarketHealth('TW', detail),
-      getMarketHealth('CN', detail),
+      getMarketHealth('TW', detail, strategyId),
+      getMarketHealth('CN', detail, strategyId),
     ]);
 
     return apiOk({ markets: [tw, cn] });

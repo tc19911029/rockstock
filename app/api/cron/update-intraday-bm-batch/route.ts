@@ -137,14 +137,14 @@ export async function GET(req: NextRequest) {
 
     // ── Step 1 池子狀態（盤中：14:02 後才有；'missing' 是常見狀態） ──
     const { loadStep1Pool, deriveStep1FilterState } = await import('@/lib/scanner/step1Pool');
-    const step1Pool = await loadStep1Pool(market, date);
+    const step1Pool = await loadStep1Pool(market, date, strategy.id);
     const poolExists = !!step1Pool && step1Pool.symbols.length > 0;
 
     // ── Sequential per-method scan ─────────────────────────────────
     const summary: Record<string, { count: number; step1Filter: string }> = {};
     for (const m of methods) {
       const method = m as 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
-      const bmResults = await scanner.scanBuyMethod(method, stocks, date);
+      const bmResults = await scanner.scanBuyMethod(method, stocks, date, { strategyId: strategy.id });
 
       if (turnoverRanks) {
         for (const r of bmResults) {

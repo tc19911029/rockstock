@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
         writeFundamentalQuestion(fundamentalQ),
       ]);
 
-      const phase = makeInitialPhaseState({ runId, date, symbol: candidate.symbol, market: row.market });
+      const phase = makeInitialPhaseState({ runId, date, symbol: candidate.symbol, market: row.market, strategyId: strategy.id });
       await writePhaseState(date, candidate.symbol, phase);
       await writeRunMeta({ schemaVersion: AGENT_SCHEMA_VERSION, runId, date, symbol: candidate.symbol, market: row.market, strategyId: strategy.id, startedAt: phase.startedAt });
 

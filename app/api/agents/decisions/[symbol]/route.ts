@@ -13,7 +13,12 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { isIndexSymbol } from '@/lib/utils/symbols';
-import { readPhaseState, readFundamentalQuestion } from '@/lib/agents/orchestrator';
+import {
+  answerBelongsToRun,
+  readPhaseState,
+  readFundamentalQuestion,
+  selectCurrentRunContext,
+} from '@/lib/agents/orchestrator';
 import { agentsGet } from '@/lib/agents/persistStorage';
 import { loadPool } from '@/lib/agents/candidates/poolStorage';
 import type {
@@ -86,12 +91,17 @@ export async function GET(
     agentsGet<BearThesis>(k('bear.json')),
     agentsGet<FinalDecision>(k('decision.json')),
   ]);
+  const currentRun = selectCurrentRunContext(meta, phase);
+  const runId = currentRun.runId;
+  const sameRun = <T,>(value: T | null): T | null => (
+    answerBelongsToRun(value, runId) ? value : null
+  );
 
   // 從 Pool 撈該檔的 source attribution（meta 中拿 market）
   let candidate: Candidate | null = null;
   const market = (meta?.market ?? phase?.market) as MarketId | undefined;
   if (market) {
-    const pool = await loadPool(market, date, meta?.strategyId ?? 'zhu-pure-book');
+    const pool = await loadPool(market, date, currentRun.strategyId ?? 'zhu-pure-book');
     candidate = pool?.candidates.find((c) => c.symbol === symbol) ?? null;
   }
 
@@ -101,15 +111,15 @@ export async function GET(
     meta,
     phase,
     candidate,
-    technical,
-    news,
-    chip,
-    fundamental,
-    fundamentalQuestion,
-    risk,
-    bull,
-    bear,
-    decision,
+    technical: sameRun(technical),
+    news: sameRun(news),
+    chip: sameRun(chip),
+    fundamental: sameRun(fundamental),
+    fundamentalQuestion: sameRun(fundamentalQuestion),
+    risk: sameRun(risk),
+    bull: sameRun(bull),
+    bear: sameRun(bear),
+    decision: sameRun(decision),
   };
 
   return apiOk(payload);

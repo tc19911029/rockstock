@@ -44,10 +44,10 @@ export async function buildRiskQuestion(args: BuildRiskQuestionArgs): Promise<Ri
 
   // 讀已完成的 4 個 analyst answer（Risk 必須在 Phase 1 後跑）
   const [tech, news, chip, fundamental, marketTrendRaw] = await Promise.all([
-    readTechnicalAnswer(date, symbol),
-    readNewsAnswer(date, symbol),
-    readChipAnswer(date, symbol),
-    readFundamentalAnswer(date, symbol),
+    readTechnicalAnswer(date, symbol, runId),
+    readNewsAnswer(date, symbol, runId),
+    readChipAnswer(date, symbol, runId),
+    readFundamentalAnswer(date, symbol, runId),
     fetchJSON(internalUrl(`/api/scanner/market-trend?market=${market}&date=${date}`))
       .catch((e) => { fetchErrors.push(`market-trend: ${e}`); return null; }),
   ]);

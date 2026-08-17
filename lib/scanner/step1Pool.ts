@@ -17,12 +17,18 @@
 
 import type { MarketId } from './types';
 import { requiresStep1Pool } from './buyMethodTracks';
+import {
+  storedStrategyMatches,
+  strategyStorageNamespace,
+} from '@/lib/strategy/storageNamespace';
 
 const IS_VERCEL = !!process.env.VERCEL;
 
 export interface Step1Pool {
   market: MarketId;
   date: string;        // YYYY-MM-DD（生成時的 asOfDate）
+  /** 建池使用的策略；舊資料缺省時視為 zhu-pure-book。 */
+  strategyId?: string;
   symbols: string[];   // 過 A 六條件 + 戒律 + 淘汰法 的股票代號清單
   generatedAt: string; // ISO timestamp
   /** 各層過濾後人數（除錯+UI 顯示）*/
@@ -65,24 +71,31 @@ async function blobGet(pathname: string): Promise<string | null> {
 
 // ── Filesystem helpers ──────────────────────────────────────────
 
-async function fsPath(market: MarketId, date: string): Promise<string> {
-  const path = await import('path');
-  return path.join(process.cwd(), 'data', 'step1-pool', market, `${date}.json`);
+export function step1PoolStorageKey(market: MarketId, date: string, strategyId?: string): string {
+  const strategyNs = strategyStorageNamespace(strategyId);
+  return strategyNs
+    ? `step1-pool/${market}/strategies/${strategyNs}/${date}.json`
+    : `step1-pool/${market}/${date}.json`;
 }
 
-async function fsPut(market: MarketId, date: string, data: string): Promise<void> {
+async function fsPath(market: MarketId, date: string, strategyId?: string): Promise<string> {
+  const path = await import('path');
+  return path.join(process.cwd(), 'data', step1PoolStorageKey(market, date, strategyId));
+}
+
+async function fsPut(market: MarketId, date: string, strategyId: string | undefined, data: string): Promise<void> {
   const { promises: fs } = await import('fs');
   const path = await import('path');
   const { atomicFsPut } = await import('@/lib/storage/atomicFsPut');
-  const fullPath = await fsPath(market, date);
+  const fullPath = await fsPath(market, date, strategyId);
   await fs.mkdir(path.dirname(fullPath), { recursive: true });
   await atomicFsPut(fullPath, data);
 }
 
-async function fsGet(market: MarketId, date: string): Promise<string | null> {
+async function fsGet(market: MarketId, date: string, strategyId?: string): Promise<string | null> {
   const { promises: fs } = await import('fs');
   try {
-    return await fs.readFile(await fsPath(market, date), 'utf-8');
+    return await fs.readFile(await fsPath(market, date, strategyId), 'utf-8');
   } catch {
     return null;
   }
@@ -93,10 +106,11 @@ async function fsGet(market: MarketId, date: string): Promise<string | null> {
 /** 寫入指定日的 Step 1 池子 cache */
 export async function saveStep1Pool(pool: Step1Pool): Promise<void> {
   const data = JSON.stringify(pool);
+  const key = step1PoolStorageKey(pool.market, pool.date, pool.strategyId);
   if (IS_VERCEL) {
-    await blobPut(`step1-pool/${pool.market}/${pool.date}.json`, data);
+    await blobPut(key, data);
   } else {
-    await fsPut(pool.market, pool.date, data);
+    await fsPut(pool.market, pool.date, pool.strategyId, data);
   }
 }
 
@@ -104,10 +118,12 @@ export async function saveStep1Pool(pool: Step1Pool): Promise<void> {
 export async function loadStep1Pool(
   market: MarketId,
   date: string,
+  strategyId?: string,
 ): Promise<Step1Pool | null> {
+  const key = step1PoolStorageKey(market, date, strategyId);
   const raw = IS_VERCEL
-    ? await blobGet(`step1-pool/${market}/${date}.json`)
-    : await fsGet(market, date);
+    ? await blobGet(key)
+    : await fsGet(market, date, strategyId);
   if (!raw) return null;
   try {
     const pool = JSON.parse(raw) as Step1Pool;
@@ -115,6 +131,7 @@ export async function loadStep1Pool(
       console.warn(`[step1Pool] cache key mismatch: requested ${market}/${date}, got ${pool.market}/${pool.date}`);
       return null;
     }
+    if (strategyId && !storedStrategyMatches(pool.strategyId, strategyId)) return null;
     return pool;
   } catch {
     return null;
@@ -128,8 +145,9 @@ export async function loadStep1Pool(
 export async function getStep1Symbols(
   market: MarketId,
   date: string,
+  strategyId?: string,
 ): Promise<Set<string> | null> {
-  const pool = await loadStep1Pool(market, date);
+  const pool = await loadStep1Pool(market, date, strategyId);
   if (!pool) return null;
   return new Set(pool.symbols);
 }

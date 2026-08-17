@@ -162,7 +162,7 @@ async function prepareSingle(
     ]);
     agentsPrepped.push('news', 'chip', 'fundamental');
 
-    const phase = makeInitialPhaseState({ runId, date, symbol, market });
+    const phase = makeInitialPhaseState({ runId, date, symbol, market, strategyId: strategy.id });
     await writePhaseState(date, symbol, phase);
 
     await writeRunMeta({

@@ -117,6 +117,7 @@ export async function POST(req: NextRequest) {
   const phase = makeInitialPhaseState({
     runId, date, symbol,
     market: candidateRow.market,
+    strategyId: strategy.id,
   });
   await writePhaseState(date, symbol, phase);
 

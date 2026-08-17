@@ -35,11 +35,11 @@ export async function buildDebateQuestion(args: BuildDebateQuestionArgs): Promis
 
   // 讀 A-E 5 個 answer（並行）
   const [tech, news, chip, fundamental, risk] = await Promise.all([
-    readTechnicalAnswer(date, symbol),
-    readNewsAnswer(date, symbol),
-    readChipAnswer(date, symbol),
-    readFundamentalAnswer(date, symbol),
-    readRiskAnswer(date, symbol),
+    readTechnicalAnswer(date, symbol, runId),
+    readNewsAnswer(date, symbol, runId),
+    readChipAnswer(date, symbol, runId),
+    readFundamentalAnswer(date, symbol, runId),
+    readRiskAnswer(date, symbol, runId),
   ]);
 
   const question: DebateQuestion = {
@@ -60,7 +60,7 @@ export async function buildDebateQuestion(args: BuildDebateQuestionArgs): Promis
 
   // Bear 強制讀 bull-answer
   if (side === 'bear') {
-    const bull = await readBullThesis(date, symbol);
+    const bull = await readBullThesis(date, symbol, runId);
     if (bull) question.bullAnswer = bull;
   }
 

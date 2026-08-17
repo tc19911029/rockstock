@@ -22,6 +22,7 @@
  */
 
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import { agentsPut, agentsPutRaw, agentsGet, agentsGetRaw } from '@/lib/agents/persistStorage';
@@ -100,10 +101,12 @@ function runKey(date: string, symbol: string, filename: string): string {
 // ────────────────────────────────────────────────────────────────────────────
 
 export function makeRunId(date: string, symbol: string, scanTime?: string): string {
-  const ts = scanTime
-    ? new Date(scanTime).toISOString().replace(/[-:.]/g, '').slice(0, 14)
-    : new Date().toISOString().replace(/[-:.]/g, '').slice(0, 14);
-  return `${date}-${symbol}-${ts}`;
+  const sourceTs = scanTime
+    ? new Date(scanTime).toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+    : 'manual';
+  const runTs = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 17);
+  // scanTime 是來源版本，不是執行版本；相同掃描重新 prepare 也必須建立新 run。
+  return `${date}-${symbol}-${sourceTs}-${runTs}-${randomUUID().slice(0, 8)}`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -145,6 +148,7 @@ export function makeInitialPhaseState(args: {
   date: string;
   symbol: string;
   market: MarketId;
+  strategyId?: string;
 }): AgentPhaseState {
   return {
     schemaVersion: AGENT_SCHEMA_VERSION,
@@ -152,10 +156,30 @@ export function makeInitialPhaseState(args: {
     date: args.date,
     symbol: args.symbol,
     market: args.market,
+    strategyId: args.strategyId,
     startedAt: new Date().toISOString(),
     currentPhase: 1,
     completed: {},
   };
+}
+
+export function selectCurrentRunContext(
+  meta: AgentRunMeta | null,
+  phase: AgentPhaseState | null,
+): { runId?: string; strategyId?: string } {
+  if (!meta && !phase) return {};
+  if (!meta) return { runId: phase!.runId, strategyId: phase!.strategyId };
+  if (!phase) return { runId: meta.runId, strategyId: meta.strategyId };
+  if (meta.runId === phase.runId) {
+    return { runId: meta.runId, strategyId: phase.strategyId ?? meta.strategyId };
+  }
+  const metaStarted = Date.parse(meta.startedAt);
+  const phaseStarted = Date.parse(phase.startedAt);
+  const phaseIsNewer = !Number.isFinite(metaStarted)
+    || (Number.isFinite(phaseStarted) && phaseStarted >= metaStarted);
+  return phaseIsNewer
+    ? { runId: phase.runId, strategyId: phase.strategyId }
+    : { runId: meta.runId, strategyId: meta.strategyId };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -174,16 +198,25 @@ export async function writeQuestion(
 }
 
 /** 讀 answer.json（驗證前用）*/
+export function answerBelongsToRun(answer: unknown, expectedRunId?: string): boolean {
+  if (!expectedRunId) return true;
+  return !!answer
+    && typeof answer === 'object'
+    && 'runId' in answer
+    && (answer as { runId?: unknown }).runId === expectedRunId;
+}
+
 export async function readAnswer<T>(
-  date: string, symbol: string, agent: AgentId,
+  date: string, symbol: string, agent: AgentId, expectedRunId?: string,
 ): Promise<T | null> {
   // 先看 persist 區（已完成，dual-storage），再看 tmp（進行中）
   const persisted = await agentsGet<T>(runKey(date, symbol, `${agent}.json`));
-  if (persisted) return persisted;
+  if (persisted && answerBelongsToRun(persisted, expectedRunId)) return persisted;
   const { tmpDir } = getRunPaths(date, symbol);
   try {
     const raw = await fs.readFile(path.join(tmpDir, `${agent}-answer.json`), 'utf-8');
-    return JSON.parse(raw) as T;
+    const answer = JSON.parse(raw) as T;
+    return answerBelongsToRun(answer, expectedRunId) ? answer : null;
   } catch { return null; }
 }
 
@@ -198,9 +231,9 @@ export async function writeTechnicalQuestion(
 }
 
 export async function readTechnicalAnswer(
-  date: string, symbol: string,
+  date: string, symbol: string, expectedRunId?: string,
 ): Promise<TechnicalAnswer | null> {
-  return readAnswer<TechnicalAnswer>(date, symbol, 'technical');
+  return readAnswer<TechnicalAnswer>(date, symbol, 'technical', expectedRunId);
 }
 
 // ── P3：News / Chip / Fundamental Agent ──────────────────────────────────────
@@ -208,30 +241,35 @@ export async function readTechnicalAnswer(
 export async function writeNewsQuestion(question: NewsQuestion): Promise<string> {
   return writeQuestion(question.date, question.symbol, 'news', question);
 }
-export async function readNewsAnswer(date: string, symbol: string): Promise<NewsAnswer | null> {
-  return readAnswer<NewsAnswer>(date, symbol, 'news');
+export async function readNewsAnswer(date: string, symbol: string, expectedRunId?: string): Promise<NewsAnswer | null> {
+  return readAnswer<NewsAnswer>(date, symbol, 'news', expectedRunId);
 }
 
 export async function writeChipQuestion(question: ChipQuestion): Promise<string> {
   return writeQuestion(question.date, question.symbol, 'chip', question);
 }
-export async function readChipAnswer(date: string, symbol: string): Promise<ChipAnswer | null> {
-  return readAnswer<ChipAnswer>(date, symbol, 'chip');
+export async function readChipAnswer(date: string, symbol: string, expectedRunId?: string): Promise<ChipAnswer | null> {
+  return readAnswer<ChipAnswer>(date, symbol, 'chip', expectedRunId);
 }
 
 export async function writeFundamentalQuestion(question: FundamentalQuestion): Promise<string> {
   return writeQuestion(question.date, question.symbol, 'fundamental', question);
 }
-export async function readFundamentalAnswer(date: string, symbol: string): Promise<FundamentalAnswer | null> {
-  return readAnswer<FundamentalAnswer>(date, symbol, 'fundamental');
+export async function readFundamentalAnswer(date: string, symbol: string, expectedRunId?: string): Promise<FundamentalAnswer | null> {
+  return readAnswer<FundamentalAnswer>(date, symbol, 'fundamental', expectedRunId);
 }
 
 /** 讀 fundamental-question.json（tmp 區）— 給 UI 顯示估值分析輸入用 */
-export async function readFundamentalQuestion(date: string, symbol: string): Promise<FundamentalQuestion | null> {
+export async function readFundamentalQuestion(
+  date: string,
+  symbol: string,
+  expectedRunId?: string,
+): Promise<FundamentalQuestion | null> {
   const { tmpDir } = getRunPaths(date, symbol);
   try {
     const raw = await fs.readFile(path.join(tmpDir, 'fundamental-question.json'), 'utf-8');
-    return JSON.parse(raw) as FundamentalQuestion;
+    const question = JSON.parse(raw) as FundamentalQuestion;
+    return answerBelongsToRun(question, expectedRunId) ? question : null;
   } catch { return null; }
 }
 
@@ -240,29 +278,29 @@ export async function readFundamentalQuestion(date: string, symbol: string): Pro
 export async function writeRiskQuestion(question: RiskQuestion): Promise<string> {
   return writeQuestion(question.date, question.symbol, 'risk', question);
 }
-export async function readRiskAnswer(date: string, symbol: string): Promise<RiskAnswer | null> {
-  return readAnswer<RiskAnswer>(date, symbol, 'risk');
+export async function readRiskAnswer(date: string, symbol: string, expectedRunId?: string): Promise<RiskAnswer | null> {
+  return readAnswer<RiskAnswer>(date, symbol, 'risk', expectedRunId);
 }
 
 export async function writeBullQuestion(question: DebateQuestion): Promise<string> {
   return writeQuestion(question.date, question.symbol, 'bull', question);
 }
-export async function readBullThesis(date: string, symbol: string): Promise<BullThesis | null> {
-  return readAnswer<BullThesis>(date, symbol, 'bull');
+export async function readBullThesis(date: string, symbol: string, expectedRunId?: string): Promise<BullThesis | null> {
+  return readAnswer<BullThesis>(date, symbol, 'bull', expectedRunId);
 }
 
 export async function writeBearQuestion(question: DebateQuestion): Promise<string> {
   return writeQuestion(question.date, question.symbol, 'bear', question);
 }
-export async function readBearThesis(date: string, symbol: string): Promise<BearThesis | null> {
-  return readAnswer<BearThesis>(date, symbol, 'bear');
+export async function readBearThesis(date: string, symbol: string, expectedRunId?: string): Promise<BearThesis | null> {
+  return readAnswer<BearThesis>(date, symbol, 'bear', expectedRunId);
 }
 
 export async function writeDecisionQuestion(question: DecisionQuestion): Promise<string> {
   return writeQuestion(question.date, question.symbol, 'decision', question);
 }
-export async function readFinalDecision(date: string, symbol: string): Promise<FinalDecision | null> {
-  return readAnswer<FinalDecision>(date, symbol, 'decision');
+export async function readFinalDecision(date: string, symbol: string, expectedRunId?: string): Promise<FinalDecision | null> {
+  return readAnswer<FinalDecision>(date, symbol, 'decision', expectedRunId);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -289,6 +327,16 @@ export async function persistAgentAnswer(args: {
 
   const src = path.join(tmpDir, `${agent}-answer.json`);
   const rawOriginal = await fs.readFile(src, 'utf-8');
+  const phase = await readPhaseState(date, symbol);
+  let rawRunId: unknown;
+  try {
+    rawRunId = (JSON.parse(rawOriginal) as { runId?: unknown }).runId;
+  } catch {
+    // 讓既有 schema/JSON 驗證流程處理格式錯誤；此處只阻止明確的跨 run 污染。
+  }
+  if (phase && rawRunId !== phase.runId) {
+    throw new Error(`拒絕保存跨 run answer：expected ${phase.runId}, got ${String(rawRunId)}`);
+  }
   const enriched = await enrichAnswerForPersist({ date, symbol, agent, raw: rawOriginal });
   const raw = enriched ?? rawOriginal;
   // enriched 才回寫 tmp（給 phase 3/4 讀到 score）
@@ -302,7 +350,6 @@ export async function persistAgentAnswer(args: {
   const persistedAt = new Date().toISOString();
 
   // 更新 phase state
-  const phase = await readPhaseState(date, symbol);
   if (phase) {
     phase.completed[agent] = { at: persistedAt, answerPath: dst };
     // P1：completed 後 phase → 'completed'（之後 P2+ 改成 next phase 編號）
@@ -352,12 +399,13 @@ async function enrichAnswerForPersist(args: {
 
   // Decision 的 gradeBlock + scoresByAgent enrich
   if (agent === 'decision') {
+    const expectedRunId = typeof parsed.runId === 'string' ? parsed.runId : undefined;
     const [tech, chip, fund, news, risk] = await Promise.all([
-      readAnswer<TechnicalAnswer>(date, symbol, 'technical'),
-      readAnswer<ChipAnswer>(date, symbol, 'chip'),
-      readAnswer<FundamentalAnswer>(date, symbol, 'fundamental'),
-      readAnswer<NewsAnswer>(date, symbol, 'news'),
-      readAnswer<RiskAnswer>(date, symbol, 'risk'),
+      readAnswer<TechnicalAnswer>(date, symbol, 'technical', expectedRunId),
+      readAnswer<ChipAnswer>(date, symbol, 'chip', expectedRunId),
+      readAnswer<FundamentalAnswer>(date, symbol, 'fundamental', expectedRunId),
+      readAnswer<NewsAnswer>(date, symbol, 'news', expectedRunId),
+      readAnswer<RiskAnswer>(date, symbol, 'risk', expectedRunId),
     ]);
     const gradeInput: GradeInput = {
       technical: tech?.scoreBlock ?? null,

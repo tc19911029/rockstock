@@ -11,6 +11,7 @@ export interface StrategyArtifactStatus {
 
 export interface StrategyReadiness {
   date: string;
+  strategyId?: string;
   status: 'ready' | 'partial';
   readyCount: number;
   requiredCount: number;
@@ -43,12 +44,13 @@ export function summarizeStrategyArtifacts(
 export async function loadStrategyReadiness(
   market: MarketId,
   date: string,
+  strategyId?: string,
 ): Promise<StrategyReadiness> {
   const { loadPostCloseScanSession } = await import('@/lib/storage/scanStorage');
   const artifacts: StrategyArtifactStatus[] = [];
 
   const addScan = async (key: string, direction: ScanDirection, mode: MtfMode) => {
-    const session = await loadPostCloseScanSession(market, date, direction, mode);
+    const session = await loadPostCloseScanSession(market, date, direction, mode, strategyId);
     artifacts.push({ key, ready: session !== null, ...(!session && { reason: 'missing' }) });
   };
 
@@ -91,5 +93,8 @@ export async function loadStrategyReadiness(
     artifacts.push({ key: 'V', ready: false, required: false, reason: 'unsupported' });
   }
 
-  return summarizeStrategyArtifacts(date, artifacts.sort((a, b) => a.key.localeCompare(b.key)));
+  return {
+    ...summarizeStrategyArtifacts(date, artifacts.sort((a, b) => a.key.localeCompare(b.key))),
+    strategyId,
+  };
 }

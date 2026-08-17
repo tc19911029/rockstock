@@ -141,7 +141,7 @@ async function findETFHoldings(symbol: string): Promise<ZhuPrefetchData['etfHold
 }
 
 async function fetchSectorPeers(market: 'TW' | 'CN', scanDate: string): Promise<unknown> {
-  return fetchJSON(`${SELF_BASE}/api/scanner/results?market=${market}&date=${scanDate}&direction=long&mtf=daily`);
+  return fetchJSON(`${SELF_BASE}/api/scanner/results?market=${market}&date=${scanDate}&direction=long&mtf=daily&strategyId=zhu-pure-book`);
 }
 
 async function fetchFundamentals(symbol: string): Promise<ZhuFundamentalsLite | null> {

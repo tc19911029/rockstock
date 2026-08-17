@@ -9,7 +9,7 @@
  */
 
 import { mergeCandidates } from '@/lib/agents/candidates/merger';
-import { poolBelongsToStrategy } from '@/lib/agents/candidates/poolStorage';
+import { candidatePoolStorageKey, poolBelongsToStrategy } from '@/lib/agents/candidates/poolStorage';
 import { sliceSourcesForAgent, VISIBLE_SOURCE_BY_AGENT } from '@/lib/agents/candidates/types';
 import type {
   CandidateSources,
@@ -136,6 +136,15 @@ describe('Candidates Pool — mergeCandidates', () => {
     const legacyPool = mergeCandidates({ market: 'TW', date: '2026-05-22', results: [] });
     expect(poolBelongsToStrategy(legacyPool, 'zhu-pure-book')).toBe(true);
     expect(poolBelongsToStrategy(legacyPool, 'custom-growth-v2')).toBe(false);
+  });
+
+  test('同市場同日期的候選池依策略隔離儲存', () => {
+    expect(candidatePoolStorageKey('TW', '2026-05-22', 'zhu-pure-book'))
+      .toBe('agents/pool/TW/2026-05-22.json');
+    expect(candidatePoolStorageKey('TW', '2026-05-22', 'custom-growth-v2'))
+      .toBe('agents/pool/TW/strategies/custom-growth-v2/2026-05-22.json');
+    expect(candidatePoolStorageKey('TW', '2026-05-22', 'custom growth / v2'))
+      .not.toBe(candidatePoolStorageKey('TW', '2026-05-22', 'custom-growth-v2'));
   });
 });
 

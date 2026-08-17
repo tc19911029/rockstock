@@ -4,6 +4,7 @@ import { MarketId, MtfMode } from '@/lib/scanner/types';
 import { listScanDates, loadScanSession } from '@/lib/storage/scanStorage';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { passesMtf } from '@/lib/scanner/mtfPass';
+import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +32,6 @@ export async function GET(req: NextRequest) {
   const direction = parsed.data.direction;
   const mtfMode = parsed.data.mtf as MtfMode | undefined;
   const dateParam = parsed.data.date;
-  const strategyId = parsed.data.strategyId;
 
   // 2026-04-20 路由分流：
   //   - mtf=daily (default) → A 六條件 session
@@ -41,6 +41,8 @@ export async function GET(req: NextRequest) {
   const isBuyMethod = mtfMode !== undefined && mtfMode !== 'daily' && mtfMode !== 'mtf';
 
   try {
+    // 未指定時必須跟目前啟用策略一致；否則 UI 會在切換策略後默默讀回 legacy pool。
+    const strategyId = parsed.data.strategyId ?? (await getActiveStrategyServer()).id;
     if (dateParam) {
       if (isBuyMethod) {
         const session = await loadScanSession(market, dateParam, direction, mtfMode as MtfMode, strategyId);

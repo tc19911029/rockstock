@@ -721,6 +721,7 @@ export abstract class MarketScanner {
   async scanPure(
     thresholds?: StrategyThresholds,
     asOfDate?: string,
+    strategyId?: string,
   ): Promise<{ results: StockScanResult[]; marketTrend?: TrendState }> {
     const config = this.getMarketConfig();
     const th = thresholds ?? BASE_THRESHOLDS;
@@ -763,6 +764,7 @@ export abstract class MarketScanner {
       await saveStep1Pool({
         market: config.marketId,
         date: poolDate,
+        strategyId,
         symbols: results.map(r => r.symbol),
         generatedAt: new Date().toISOString(),
         stats: {
@@ -1151,6 +1153,7 @@ export abstract class MarketScanner {
     rankBy: 'sixConditions' | 'histWinRate' = 'sixConditions',
     savePool = true,
     direction: 'long' | 'short' = 'long',
+    strategyId?: string,
   ): Promise<{ results: StockScanResult[]; marketTrend: TrendState; diagnostics: ScanDiagnostics; sessionFreshness: SessionFreshness }> {
     // ── P1A: 移除掃描入口的 ensureFreshCandles ──
     // 掃描路徑已有 fetchCandlesForScan() 做 memory → local → API 三層快取，
@@ -1192,6 +1195,7 @@ export abstract class MarketScanner {
       const results = await this.scanBuyMethod(method, stocks, asOfDate, {
         skipStep1Gate: true,
         thresholds: th,
+        strategyId,
       });
       return finalizeStandaloneScan(results);
     }
@@ -1310,6 +1314,7 @@ export abstract class MarketScanner {
         await saveStep1Pool({
           market: config.marketId,
           date: poolDate,
+          strategyId,
           symbols: sorted.map(r => r.symbol),
           generatedAt: new Date().toISOString(),
           stats: {
@@ -1445,7 +1450,7 @@ export abstract class MarketScanner {
     method: BuyMethodLetter,
     stocks: StockEntry[],
     asOfDate?: string,
-    options: { skipStep1Gate?: boolean; thresholds?: StrategyThresholds } = {},
+    options: { skipStep1Gate?: boolean; thresholds?: StrategyThresholds; strategyId?: string } = {},
   ): Promise<StockScanResult[]> {
     const config = this.getMarketConfig();
     const results: StockScanResult[] = [];
@@ -1478,7 +1483,7 @@ export abstract class MarketScanner {
       const poolDate = asOfDate
         ?? new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone }).format(new Date());
       const { getStep1Symbols } = await import('./step1Pool');
-      step1Symbols = await getStep1Symbols(config.marketId, poolDate);
+      step1Symbols = await getStep1Symbols(config.marketId, poolDate, options.strategyId);
     }
     if (isBullish && !step1Symbols) {
       console.warn(`[scanBuyMethod] ${method} ${config.marketId} Step 1 池子未準備好 — 多頭軌應等 A 預選池跑完再啟動。本輪結果將為空。`);

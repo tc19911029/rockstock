@@ -220,7 +220,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
       if (direction === 'long' || activeStrategy.strategyType === 'mechanical-rank') {
         const mechanicalDirection = direction === 'short' ? 'short' : 'long';
-        const out = await scanner.scanSOP(stocks, date, activeThresholds, 'sixConditions', true, mechanicalDirection);
+        const out = await scanner.scanSOP(stocks, date, activeThresholds, 'sixConditions', true, mechanicalDirection, activeStrategy.id);
         results = out.results as import('./types').StockScanResult[];
         sessionFreshness = out.sessionFreshness;
         if (!marketTrend) marketTrend = String(out.marketTrend ?? '');
@@ -336,8 +336,8 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
     const bmStocks = allStocks; // 全量，不受批次切片影響
     // Step 1 池子狀態（共用一次給整批 method 用）
     const { loadStep1Pool: loadPool, deriveStep1FilterState } = await import('@/lib/scanner/step1Pool');
-    const step1Pool = await loadPool(market, date);
-    const poolExists = !!step1Pool && step1Pool.symbols.length > 0;
+    const step1Pool = await loadPool(market, date, activeStrategy.id);
+    const poolExists = step1Pool !== null;
     for (const method of options.buyMethods) {
       if (Date.now() > deadline) {
         console.warn(`[ScanPipeline] ${market} 超時，跳過買法 ${method}`);
@@ -361,6 +361,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
             await injectForwardPerf(rResults, date, `ScanPipeline:R-${direction}`);
             const rSession: ScanSession = {
               id: `${market}-${direction}-R-${date}-${Date.now()}`,
+              strategyId: activeStrategy.id,
               market: market as MarketId,
               date,
               direction,
@@ -386,7 +387,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
       }
 
       try {
-        const bmResults = await scanner.scanBuyMethod(method, bmStocks, date);
+        const bmResults = await scanner.scanBuyMethod(method, bmStocks, date, { strategyId: activeStrategy.id });
 
         if (turnoverRanks) {
           for (const r of bmResults) {
@@ -407,6 +408,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
         }
         const bmSession: ScanSession = {
           id: `${market}-long-${method}-${date}-${Date.now()}`,
+          strategyId: activeStrategy.id,
           market: market as MarketId,
           date,
           direction: 'long',

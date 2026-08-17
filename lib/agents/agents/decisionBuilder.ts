@@ -62,13 +62,13 @@ export async function buildDecisionQuestion(args: BuildDecisionQuestionArgs): Pr
   const { runId, date, symbol, market } = args;
 
   const [tech, news, chip, fundamental, risk, bull, bear] = await Promise.all([
-    readTechnicalAnswer(date, symbol),
-    readNewsAnswer(date, symbol),
-    readChipAnswer(date, symbol),
-    readFundamentalAnswer(date, symbol),
-    readRiskAnswer(date, symbol),
-    readBullThesis(date, symbol),
-    readBearThesis(date, symbol),
+    readTechnicalAnswer(date, symbol, runId),
+    readNewsAnswer(date, symbol, runId),
+    readChipAnswer(date, symbol, runId),
+    readFundamentalAnswer(date, symbol, runId),
+    readRiskAnswer(date, symbol, runId),
+    readBullThesis(date, symbol, runId),
+    readBearThesis(date, symbol, runId),
   ]);
 
   return {

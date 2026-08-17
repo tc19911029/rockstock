@@ -6,6 +6,7 @@ import {
   scanPostCloseStorageLocation,
   scanStrategyNamespace,
 } from '@/lib/storage/scanStorage';
+import { step1PoolStorageKey } from '@/lib/scanner/step1Pool';
 
 describe('scanner audit contracts', () => {
   test('V 軌分數不污染 0–6 六條件欄位', () => {
@@ -44,6 +45,14 @@ describe('scanner audit contracts', () => {
       blobPath: `scans/TW/long/daily/strategies/${customNs}/2026-08-17.json`,
       localName: `scan-TW-long-daily-strategy-${customNs}-2026-08-17.json`,
     });
+  });
+
+  test('Step1 pool 也使用策略 namespace，不會被同日其他策略覆蓋', () => {
+    expect(step1PoolStorageKey('TW', '2026-08-17', 'zhu-pure-book'))
+      .toBe('step1-pool/TW/2026-08-17.json');
+    const custom = step1PoolStorageKey('TW', '2026-08-17', 'custom growth / v2');
+    expect(custom).toMatch(/^step1-pool\/TW\/strategies\/custom-growth-v2-[a-z0-9]+\/2026-08-17\.json$/);
+    expect(custom).not.toBe(step1PoolStorageKey('TW', '2026-08-17', 'custom-growth-v2'));
   });
 
   test('預設策略的直接檔案解析不會吃到 strategies 子樹', () => {

@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
 
     // ── Step 1 池子狀態（共用一次給整批 method 用）─────────────────────
     const { loadStep1Pool, deriveStep1FilterState } = await import('@/lib/scanner/step1Pool');
-    const step1Pool = await loadStep1Pool(market, date);
+    const step1Pool = await loadStep1Pool(market, date, strategy.id);
     const poolExists = !!step1Pool && step1Pool.symbols.length > 0;
 
     // ── Sequential per-method scan（避免並行重複算 L1 cache 預熱）──
@@ -176,7 +176,7 @@ export async function GET(req: NextRequest) {
       }
 
       const m = method as 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q';
-      const bmResults = await scanner.scanBuyMethod(m, stocks, date);
+      const bmResults = await scanner.scanBuyMethod(m, stocks, date, { strategyId: strategy.id });
 
       if (turnoverRanks) {
         for (const r of bmResults) {

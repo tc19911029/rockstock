@@ -219,6 +219,7 @@ export async function POST(req: NextRequest) {
         parsed.data.rankBy as 'sixConditions' | 'histWinRate',
         true,
         parsed.data.direction,
+        parsed.data.strategyId,
       );
     } else if (mode === 'pure' && effectiveDate) {
       scanResult = await scanner.scanListAtDatePure(stocks, effectiveDate, thresholds);
