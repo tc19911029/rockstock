@@ -65,7 +65,7 @@ fi
 echo "=== [$(ts)] 陸股節目增量檢查，date=$D ==="
 
 SCAN_JSON="$RUN_DIR/scan.json"
-curl -fsS --config "$AUTH_CONFIG" --max-time 120 -X POST \
+curl -fsS --config "$AUTH_CONFIG" --max-time 240 -X POST \
   "$BASE/api/cron/cn-media-scan?date=$D" -o "$SCAN_JSON" \
   || { echo "[$(ts)] scan 失敗" >&2; exit 1; }
 FOUND=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("videos_found",0))' "$SCAN_JSON" 2>/dev/null || echo 0)

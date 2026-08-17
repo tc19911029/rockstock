@@ -5,7 +5,7 @@ import { todayYmdShanghai, validYmd } from '@/lib/cn-media/date';
 import { scanCnMedia } from '@/lib/cn-media/scan';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 180;
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) { return handle(request); }
