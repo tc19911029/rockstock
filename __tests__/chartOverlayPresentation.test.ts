@@ -2,6 +2,7 @@ import {
   getCandleRangeLabels,
   getPatternDirectionLabels,
   getPatternLevelVisibility,
+  getTargetDistanceText,
   selectActionableSupportResistanceLevels,
   shouldShowPatternGeometry,
 } from '@/lib/chart/overlayPresentation';
@@ -57,5 +58,10 @@ describe('chart overlay presentation', () => {
     expect(shouldShowPatternGeometry('retest')).toBe(true);
     expect(shouldShowPatternGeometry('target')).toBe(false);
     expect(shouldShowPatternGeometry('breakout-failed')).toBe(false);
+  });
+
+  it('目標價顯示相對現價的百分比距離', () => {
+    expect(getTargetDistanceText(248, 326)).toBe('距現價 +31.5%');
+    expect(getTargetDistanceText(248, 220)).toBe('距現價 -11.3%');
   });
 });

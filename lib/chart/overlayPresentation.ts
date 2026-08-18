@@ -119,6 +119,14 @@ export function shouldShowPatternGeometry(status: PatternLifecycleStatus | null)
   return status === 'pending' || status === 'confirmed' || status === 'retest';
 }
 
+/** 以目前價格為分母，顯示到目標價還差多少；正值代表目標在現價上方。 */
+export function getTargetDistanceText(currentPrice: number, targetPrice: number): string | null {
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0 || !Number.isFinite(targetPrice)) return null;
+  const distancePct = (targetPrice - currentPrice) / currentPrice * 100;
+  const signedPct = `${distancePct > 0 ? '+' : ''}${distancePct.toFixed(1)}%`;
+  return `距現價 ${signedPct}`;
+}
+
 export function getPatternDirectionLabels(kind: 'bottom' | 'top') {
   return kind === 'bottom'
     ? {

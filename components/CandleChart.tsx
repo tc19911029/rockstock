@@ -41,6 +41,7 @@ import {
   getCandleRangeLabels,
   getPatternDirectionLabels,
   getPatternLevelVisibility,
+  getTargetDistanceText,
   selectActionableSupportResistanceLevels,
   shouldShowPatternGeometry,
 } from '@/lib/chart/overlayPresentation';
@@ -1445,6 +1446,9 @@ export default function CandleChart({
 
   const patternDirectionLabels = activePattern ? getPatternDirectionLabels(activePattern.kind) : null;
   const patternLevelVisibility = getPatternLevelVisibility(patternStatus);
+  const targetDistanceText = activePattern
+    ? getTargetDistanceText(candles[candles.length - 1]?.close ?? 0, activePattern.targetPrice)
+    : null;
   const statusLabel: Record<PatternLifecycleStatus, { text: string; cls: string }> = {
     pending: { text: '待確認', cls: 'bg-amber-900/80 text-amber-100 border-amber-700' },
     confirmed: { text: patternDirectionLabels?.confirmed ?? '型態成立', cls: 'bg-emerald-900/80 text-emerald-100 border-emerald-700' },
@@ -1541,18 +1545,12 @@ export default function CandleChart({
               const close = candles[candles.length - 1]?.close ?? 0;
               const target = activePattern.targetPrice;
               const confirmationPrice = getPatternConfirmationPrice(activePattern.kind, activePattern.necklinePrice);
-              const gapPct = close > 0 ? ((target - close) / close * 100) : 0;
-              // 預估目標價：所有狀態都顯示，並標明距現價爬升空間 %
-              // bottom 型態：target > close 為正向（爬升）
-              // top 型態：target < close 為正向（下跌目標）
-              const gapText = activePattern.kind === 'bottom'
-                ? (gapPct > 0 ? `+${gapPct.toFixed(1)}%` : `${gapPct.toFixed(1)}%`)
-                : (gapPct < 0 ? `${gapPct.toFixed(1)}%` : `+${gapPct.toFixed(1)}%`);
+              const distanceText = getTargetDistanceText(close, target);
               const labels = getPatternDirectionLabels(activePattern.kind);
               const detail = patternStatus === 'pending'
                 ? `收盤 ${labels.pendingOperator} ${confirmationPrice.toFixed(2)} 才確認`
                 : patternStatus === 'confirmed'
-                  ? `下一步看 ${labels.target} ${target.toFixed(2)}（${gapText}）`
+                  ? `下一步看 ${labels.target} ${target.toFixed(2)}${distanceText ? `（${distanceText}）` : ''}`
                   : patternStatus === 'retest'
                     ? `${labels.stop} ${activePattern.stopPrice.toFixed(2)}｜重新通過 ${confirmationPrice.toFixed(2)}`
                     : patternStatus === 'breakout-failed'
@@ -1583,6 +1581,7 @@ export default function CandleChart({
                 {patternLevelVisibility.target && <span className="flex items-center gap-1" style={{ color: '#86efac' }}>
                   <span className="inline-block w-3 h-[2px] border-t border-dashed" style={{ borderColor: '#86efac' }} />
                   {patternDirectionLabels?.target} {activePattern.targetPrice.toFixed(2)}
+                  {targetDistanceText && `｜${targetDistanceText}`}
                 </span>}
                 {patternLevelVisibility.stop && <span className="flex items-center gap-1" style={{ color: '#fdba74' }}>
                   <span className="inline-block w-3 h-[2px] border-t border-dashed" style={{ borderColor: '#fdba74' }} />
