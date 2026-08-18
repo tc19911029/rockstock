@@ -648,6 +648,32 @@ function detectRoundingBottom(
   const arcDepth = necklinePrice - arcLow;
   if (arcDepth <= 0) return null;
 
+  // ⚠️ 自創防誤判條件：舊版只要「30 根內中央有最低點、前後各有高點」就成立，
+  // 幾乎每次急跌 V 轉都會被標成圓弧底。圓弧底至少還要具備左右杯緣接近、
+  // 底部有停留時間，且右側回升後沒有再次明顯跌離頸線。
+  const rimDiffRatio = Math.abs(beforeHigh - afterHigh) / necklinePrice;
+  if (rimDiffRatio > 0.15) return null;
+
+  // 底部帶取弧深下方 25%；至少連續橫跨 5 根且有 5 根收盤落在帶內，
+  // 排除只有 1～3 根低點的尖銳 V 形反轉。
+  const bottomBand = arcLow + arcDepth * 0.25;
+  const bottomIndices: number[] = [];
+  for (let i = start; i <= idx; i++) {
+    if (candles[i].close <= bottomBand) bottomIndices.push(i);
+  }
+  if (bottomIndices.length < 5) return null;
+  let longestBottomRun = 1;
+  let currentBottomRun = 1;
+  for (let i = 1; i < bottomIndices.length; i++) {
+    currentBottomRun = bottomIndices[i] === bottomIndices[i - 1] + 1 ? currentBottomRun + 1 : 1;
+    longestBottomRun = Math.max(longestBottomRun, currentBottomRun);
+  }
+  if (longestBottomRun < 5) return null;
+
+  // 右側曾回到杯緣後又跌離頸線超過 10%，視為這一組腳位已陳舊，不繼續顯示
+  // 尚未確認的遠端目標與「回測防守」。
+  if (candles[idx].close < necklinePrice * 0.90) return null;
+
   // 目標價 = 頸線 + 弧底深度
   // 書本《抓飆股》Part 7：圓弧底測量幅度為「頸線 + 弧底到頸線的高度」（不額外乘 1.5）
   const patternTargetPrice = necklinePrice + arcDepth;

@@ -37,6 +37,13 @@ import { isLegacyBookObservationOnly } from '@/lib/analysis/patternCatalog';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import { detectLetterNStructure, detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
 import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
+import {
+  getCandleRangeLabels,
+  getPatternDirectionLabels,
+  getPatternLevelVisibility,
+  selectActionableSupportResistanceLevels,
+  shouldShowPatternGeometry,
+} from '@/lib/chart/overlayPresentation';
 
 const MA_COLORS = {
   ma5:   '#facc15', // 黃
@@ -178,14 +185,13 @@ interface CandleChartProps {
   showConsolidationLines?: boolean;
   /** 顯示 MA5 分段頭底標記（寶典 p.21-22），預設關 */
   showPivots?: boolean;
-  /** 顯示前高壓/前低撐/大量撐壓線，預設關 */
+  /** 顯示現價上下最近有效壓撐與大量價，預設關 */
   showSupportResistance?: boolean;
   /**
-   * 顯示最近一根長紅/長黑 K 的三層支撐/壓力標線（書本 CH2-04 最高=最強、1/2=平均成本、最低=最弱），
-   * 純顯示的階梯式出場框架，不接 gate。預設關。
+   * 顯示最近一根長紅/長黑 K 的高、1/2、低三價位，使用中性名稱，純顯示、不接 gate。
    */
   showCandleSR?: boolean;
-  /** 顯示型態頸線、真突破、突破後目標與回測防守，預設關 */
+  /** 顯示型態生命週期當下有用的頸線、確認、目標或失效價，預設關 */
   showNeckline?: boolean;
   /** 顯示形態關鍵點（ABCDE / L1L2L3 + H1H2 等）與連線，預設關 */
   showPattern?: boolean;
@@ -440,6 +446,40 @@ export default function CandleChart({
       : bottomCandidate;
   }, [candles, showNeckline, showPattern, lockedPattern]);
 
+  /**
+   * 型態狀態必須遵守生命週期：形成 → 真突破／跌破 → 回測／失效。
+   * 尚未曾通過 3% 確認門檻時，不得啟用目標價與突破後防守價。
+   */
+  const patternStatus = useMemo<PatternLifecycleStatus | null>(() => {
+    if (!activePattern || candles.length === 0) return null;
+    const last = candles[candles.length - 1];
+    const formationIndex = activePattern.pivots.length > 0
+      ? Math.max(...activePattern.pivots.map(pivot => pivot.index))
+      : 0;
+    const relevantBoundaryPivots = activePattern.pivots.filter(pivot =>
+      activePattern.kind === 'bottom' ? pivot.type === 'low' : pivot.type === 'high',
+    );
+    const formationBoundaryPrice = relevantBoundaryPivots.length > 0
+      ? activePattern.kind === 'bottom'
+        ? Math.min(...relevantBoundaryPivots.map(pivot => pivot.price))
+        : Math.max(...relevantBoundaryPivots.map(pivot => pivot.price))
+      : undefined;
+    return getPatternLifecycleStatus({
+      kind: activePattern.kind,
+      currentClose: last.close,
+      necklinePrice: activePattern.necklinePrice,
+      targetPrice: activePattern.targetPrice,
+      stopPrice: activePattern.stopPrice,
+      candlesSinceFormation: candles.slice(formationIndex).map(candle => ({
+        close: candle.close,
+        high: candle.high,
+        low: candle.low,
+      })),
+      formationBoundaryPrice,
+      assumeConfirmed: activePattern.isLocked,
+    });
+  }, [activePattern, candles]);
+
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
@@ -525,22 +565,22 @@ export default function CandleChart({
     necklineRef.current = chart.addSeries(LineSeries, {
       color: '#22d3ee',   // 青：頸線（實線）
       lineWidth: 2, priceLineVisible: false, lastValueVisible: true, lineStyle: 0,
-      title: '頸線',
+      title: '結構頸線',
     });
     confirmationRef.current = chart.addSeries(LineSeries, {
       color: '#67e8f9',   // 淺青：頸線 ±3% 真突破門檻（點線）
       lineWidth: 1, priceLineVisible: false, lastValueVisible: true, lineStyle: 1,
-      title: '真突破',
+      title: '確認價',
     });
     targetRef.current = chart.addSeries(LineSeries, {
       color: '#86efac',   // 淡綠：目標價（虛線）
       lineWidth: 1, priceLineVisible: false, lastValueVisible: true, lineStyle: 2,
-      title: '突破後目標',
+      title: '測量目標',
     });
     stopRef.current = chart.addSeries(LineSeries, {
       color: '#fdba74',   // 淡橘：突破後回測防守（虛線）
       lineWidth: 1, priceLineVisible: false, lastValueVisible: true, lineStyle: 2,
-      title: '回測防守',
+      title: '型態失效',
     });
     patternConnectorRef.current = chart.addSeries(LineSeries, {
       color: '#e879f9',   // 紫桃：形態連線
@@ -1045,7 +1085,9 @@ export default function CandleChart({
     // 只顯示已確認 pivot（不含 provisional），進行中段不算頭/底
     if (showPivots && candles.length >= 20) {
       const patternPivotIndices = new Set(
-        showPattern && activePattern ? activePattern.pivots.map(p => p.index) : [],
+        showPattern && activePattern && shouldShowPatternGeometry(patternStatus)
+          ? activePattern.pivots.map(p => p.index)
+          : [],
       );
       for (const p of confirmedPivots) {
         // 同一轉折已由型態腳位（如 H1/L1/頭/肩）標示時，不再疊一層「頭/底」。
@@ -1064,7 +1106,7 @@ export default function CandleChart({
       }
     }
     // 加入形態 ABCDE 關鍵點標籤（showPattern toggle）
-    if (showPattern && activePattern) {
+    if (showPattern && activePattern && shouldShowPatternGeometry(patternStatus)) {
       const pivotLabels = getPivotLabels(activePattern.patternType, activePattern.pivots);
       for (let i = 0; i < activePattern.pivots.length; i++) {
         const p = activePattern.pivots[i];
@@ -1121,7 +1163,7 @@ export default function CandleChart({
       return ta < tb ? -1 : ta > tb ? 1 : 0;
     });
     markersPlugRef.current.setMarkers(converted);
-  }, [chartMarkers, highlightDate, candles, showPivots, confirmedPivots, showPattern, activePattern, shuangB, abcOverlay, showYangEma]);
+  }, [chartMarkers, highlightDate, candles, showPivots, confirmedPivots, showPattern, activePattern, patternStatus, shuangB, abcOverlay, showYangEma]);
 
   // ── 均線移動扣抵三角標：算各 MA「下一根要丟掉」那根 K 棒的 x 像素，貼在圖最底一排 ──
   // 扣抵棒索引 = 最新一根 − N + 1（今收高於該根收盤 → 均線下一步往上，見 lib/analysis/maDeduction）。
@@ -1165,7 +1207,7 @@ export default function CandleChart({
     };
   }, [candles, maToggles, showMaDeduction]);
 
-  // ── Support/resistance price lines (前高壓 / 前低撐 / 大量撐壓) ──────────
+  // ── Support/resistance price lines（最近有效壓 / 撐 / 大量價）──────────
   useEffect(() => {
     if (!candleRef.current) return;
     // 清除舊線
@@ -1179,26 +1221,9 @@ export default function CandleChart({
     const lastIdx = candles.length - 1;
     const currClose = candles[lastIdx].close;
 
-    // 1. 前高壓 / 前低撐 — 取最近 pivots 中的極值
+    // 轉折只取離現價最近的可執行價位，不再把整段最高頭／最低底塞進同一張圖。
     const pivots = findPivots(candles, lastIdx, 12);
-    const highs = pivots.filter(p => p.type === 'high').map(p => p.price);
-    const lows  = pivots.filter(p => p.type === 'low').map(p => p.price);
-    if (highs.length) {
-      const prevHigh = Math.max(...highs);
-      srLineRefs.current.push(candleRef.current.createPriceLine({
-        price: prevHigh, color: '#ec4899', lineWidth: 1, lineStyle: 2,
-        axisLabelVisible: true, title: '前高壓',
-      }));
-    }
-    if (lows.length) {
-      const prevLow = Math.min(...lows);
-      srLineRefs.current.push(candleRef.current.createPriceLine({
-        price: prevLow, color: '#10b981', lineWidth: 1, lineStyle: 2,
-        axisLabelVisible: true, title: '前低撐',
-      }));
-    }
-
-    // 2. 大量撐/壓 — 最近 60 根 K 棒中最大量的收盤價
+    // 大量撐/壓 — 最近 60 根 K 棒中最大量的收盤價
     const lookback = 60;
     const start = Math.max(0, lastIdx - lookback + 1);
     let maxVol = -Infinity;
@@ -1209,20 +1234,20 @@ export default function CandleChart({
         maxVolIdx = i;
       }
     }
-    if (maxVolIdx >= 0) {
-      const bigVolPrice = candles[maxVolIdx].close;
-      const isSupport = bigVolPrice <= currClose;
+    const bigVolPrice = maxVolIdx >= 0 ? candles[maxVolIdx].close : undefined;
+    const levels = selectActionableSupportResistanceLevels(pivots, currClose, bigVolPrice);
+    for (const level of levels) {
       srLineRefs.current.push(candleRef.current.createPriceLine({
-        price: bigVolPrice,
-        color: isSupport ? '#10b981' : '#ec4899',
+        price: level.price,
+        color: level.role === 'support' ? '#10b981' : '#ec4899',
         lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
-        title: isSupport ? '大量撐' : '大量壓',
+        title: level.label,
       }));
     }
   }, [showSupportResistance, candles]);
 
-  // ── K 棒三層支撐/壓力標線（書本 CH2-04：最高=最強、1/2=平均成本、最低=最弱）──
-  // 錨定「最近一根長紅/長黑 K」，畫 3 條水平線；純顯示的階梯式出場框架，不接 gate。
+  // ── 最近長紅／長黑 K 棒高、½、低三價位 ──────────────────────────────
+  // 使用中性名稱；在價格尚未站穩／跌破前，不先把 K 棒高低宣告成已成立的支撐或壓力。
   useEffect(() => {
     if (!candleRef.current) return;
     for (const line of candleSRLineRefs.current) {
@@ -1244,11 +1269,11 @@ export default function CandleChart({
     // 多方三層支撐用綠、空方三層壓力用紅；中線（平均成本）一律 amber 虛線
     const strongColor = isUp ? '#10b981' : '#ec4899';
     const weakColor   = isUp ? '#10b981' : '#ec4899';
-    const prefix = isUp ? '撐' : '壓';
+    const labels = getCandleRangeLabels(lv.direction);
     const lines: Array<{ price: number; color: string; title: string; width: 1 | 2 }> = [
-      { price: lv.strong, color: strongColor, title: `最強${prefix}`,    width: 2 },
-      { price: lv.mid,    color: '#f59e0b',   title: '½平均成本',          width: 1 },
-      { price: lv.weak,   color: weakColor,   title: `最弱${prefix}`,    width: 1 },
+      { price: lv.strong, color: strongColor, title: labels.strong, width: 2 },
+      { price: lv.mid,    color: '#f59e0b', title: labels.mid, width: 1 },
+      { price: lv.weak,   color: weakColor, title: labels.weak, width: 1 },
     ];
     for (const ln of lines) {
       candleSRLineRefs.current.push(candleRef.current.createPriceLine({
@@ -1274,8 +1299,26 @@ export default function CandleChart({
     stopSeries.setData([]);
     connSeries.setData([]);
 
-    if (!activePattern) return;
+    if (!activePattern || !patternStatus) return;
     const { pivots, necklinePrice, targetPrice, stopPrice } = activePattern;
+    const directionLabels = getPatternDirectionLabels(activePattern.kind);
+    const levelVisibility = getPatternLevelVisibility(patternStatus);
+    neckSeries.applyOptions({
+      title: '結構頸線',
+      lastValueVisible: levelVisibility.necklineAxisLabel,
+    });
+    confirmationSeries.applyOptions({
+      title: directionLabels.confirmation,
+      lastValueVisible: levelVisibility.confirmationAxisLabel,
+    });
+    tgtSeries.applyOptions({
+      title: directionLabels.target,
+      lastValueVisible: levelVisibility.targetAxisLabel,
+    });
+    stopSeries.applyOptions({
+      title: directionLabels.stop,
+      lastValueVisible: levelVisibility.stopAxisLabel,
+    });
 
     // lockedPattern 路徑 pivots 可能為空（fresh detection 失敗時 pivots = []）
     // 此時頸線/目標仍用第一根 K → 最後一根 K，避免 undefined.index crash
@@ -1287,7 +1330,7 @@ export default function CandleChart({
     const t0 = toTime(candles[firstIdx].date);
     const t1 = toTime(candles[lastIdx].date);
 
-    if (showNeckline) {
+    if (showNeckline && levelVisibility.neckline) {
       // descending-wedge / falling-diamond 的頸線是「兩高點延伸線」，本質上是斜線
       // detectDescendingWedge 回傳 necklinePrice = upperToday（今日延伸值），需要從較舊 high 連到 upperToday
       // 其他底/頂部型態的頸線是水平線（兩內部 pivot 連線取較高/較低，水平延伸）
@@ -1303,14 +1346,20 @@ export default function CandleChart({
       } else {
         neckSeries.setData([{ time: t0, value: necklinePrice }, { time: t1, value: necklinePrice }]);
       }
+    }
+    if (showNeckline && levelVisibility.confirmation) {
       const confirmationPrice = getPatternConfirmationPrice(activePattern.kind, necklinePrice);
       confirmationSeries.setData([{ time: t0, value: confirmationPrice }, { time: t1, value: confirmationPrice }]);
+    }
+    if (showNeckline && levelVisibility.target) {
       tgtSeries.setData([{ time: t0, value: targetPrice }, { time: t1, value: targetPrice }]);
+    }
+    if (showNeckline && levelVisibility.stop) {
       stopSeries.setData([{ time: t0, value: stopPrice }, { time: t1, value: stopPrice }]);
     }
 
     // 形態連線：依時間順序連接 pivots（去重 time，lightweight-charts 要求嚴格升序）
-    if (showPattern) {
+    if (showPattern && shouldShowPatternGeometry(patternStatus)) {
       const seen = new Set<string>();
       const points = sortedByIndex
         .map(p => ({ time: toTime(candles[p.index].date), value: p.price }))
@@ -1322,7 +1371,7 @@ export default function CandleChart({
         });
       connSeries.setData(points);
     }
-  }, [activePattern, showNeckline, showPattern, candles]);
+  }, [activePattern, patternStatus, showNeckline, showPattern, candles]);
 
   // MA legend: show hovered candle's values if hovering, else last candle
   const last = candles[candles.length - 1];
@@ -1338,42 +1387,10 @@ export default function CandleChart({
   const bestSignal = filteredSignals.length > 0
     ? filteredSignals.reduce((a, b) => (PRIORITY[b.type] ?? 0) > (PRIORITY[a.type] ?? 0) ? b : a)
     : null;
-  const showPatternChip = (showNeckline || showPattern) && activePattern;
-  const hasInfoRow = showPatternChip;  // 信號移到右上，不算左側 row 2
-  /**
-   * 形態狀態必須遵守生命週期：形成 → 真突破 → 回測／失效。
-   * 尚未曾真突破的型態不能只因位於頸線下方就被倒推為「結構失效」。
-   */
-  const patternStatus = useMemo<PatternLifecycleStatus | null>(() => {
-    if (!activePattern || candles.length === 0) return null;
-    const last = candles[candles.length - 1];
-    const formationIndex = activePattern.pivots.length > 0
-      ? Math.max(...activePattern.pivots.map(pivot => pivot.index))
-      : 0;
-    const relevantBoundaryPivots = activePattern.pivots.filter(pivot =>
-      activePattern.kind === 'bottom' ? pivot.type === 'low' : pivot.type === 'high',
-    );
-    const formationBoundaryPrice = relevantBoundaryPivots.length > 0
-      ? activePattern.kind === 'bottom'
-        ? Math.min(...relevantBoundaryPivots.map(pivot => pivot.price))
-        : Math.max(...relevantBoundaryPivots.map(pivot => pivot.price))
-      : undefined;
-    return getPatternLifecycleStatus({
-      kind: activePattern.kind,
-      currentClose: last.close,
-      necklinePrice: activePattern.necklinePrice,
-      targetPrice: activePattern.targetPrice,
-      stopPrice: activePattern.stopPrice,
-      candlesSinceFormation: candles.slice(formationIndex).map(candle => ({
-        close: candle.close,
-        high: candle.high,
-        low: candle.low,
-      })),
-      formationBoundaryPrice,
-      assumeConfirmed: activePattern.isLocked,
-    });
-  }, [activePattern, candles]);
-
+  const patternAnalysisRequested = showNeckline || showPattern;
+  const showPatternChip = patternAnalysisRequested && activePattern;
+  // 即使目前沒有合格型態，也要回應使用者已開啟型態分析，避免按鈕像失效。
+  const hasInfoRow = patternAnalysisRequested;  // 信號移到右上，不算左側 row 2
   // 雙B 線（智能交易線/黃線/紅線/多空線）在 hover（或最新）K 棒的數值 —
   // 比照 MA 圖例：疊圖開啟時把線值標出來，游標移動時跟著變。
   const shuangBMaps = useMemo(() => {
@@ -1426,11 +1443,13 @@ export default function CandleChart({
     return { e23, up1: e23 * 1.01, up3: e23 * 1.03, dn1: e23 * 0.99, dn3: e23 * 0.97, e60, a23: arr(e23, p23), a60: arr(e60, p60) };
   })();
 
+  const patternDirectionLabels = activePattern ? getPatternDirectionLabels(activePattern.kind) : null;
+  const patternLevelVisibility = getPatternLevelVisibility(patternStatus);
   const statusLabel: Record<PatternLifecycleStatus, { text: string; cls: string }> = {
-    pending: { text: '待真突破',  cls: 'bg-amber-900/80 text-amber-100 border-amber-700' },
-    confirmed: { text: '真突破成立',  cls: 'bg-emerald-900/80 text-emerald-100 border-emerald-700' },
-    retest:  { text: '突破後回測', cls: 'bg-sky-900/80 text-sky-100 border-sky-700' },
-    'breakout-failed':  { text: '突破失敗', cls: 'bg-red-900/80 text-red-100 border-red-700' },
+    pending: { text: '待確認', cls: 'bg-amber-900/80 text-amber-100 border-amber-700' },
+    confirmed: { text: patternDirectionLabels?.confirmed ?? '型態成立', cls: 'bg-emerald-900/80 text-emerald-100 border-emerald-700' },
+    retest: { text: patternDirectionLabels?.retest ?? '確認後回測', cls: 'bg-sky-900/80 text-sky-100 border-sky-700' },
+    'breakout-failed': { text: patternDirectionLabels?.failed ?? '型態失敗', cls: 'bg-red-900/80 text-red-100 border-red-700' },
     'formation-broken': { text: '原型態已破壞', cls: 'bg-red-900/80 text-red-100 border-red-700' },
     target:  { text: '測量目標達成', cls: 'bg-blue-900/80 text-blue-100 border-blue-700' },
   };
@@ -1493,29 +1512,22 @@ export default function CandleChart({
         {/* Row 2: 圖表型態來源 + 生命週期 + 關鍵價位（信號 badge 在右上獨立）*/}
         {hasInfoRow && (
           <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-mono">
-            {showPatternChip && (
-              <span className="px-1.5 py-0.5 rounded bg-fuchsia-900/80 text-fuchsia-100">
-                圖表型態：{getPatternDisplayName(activePattern.patternType)}
-                {activePattern.achievementRate != null && `｜舊書達標統計 ${activePattern.achievementRate}%`}
-                {isLegacyBookObservationOnly(activePattern.patternType) && '｜低達標統計，僅觀察'}
+            {patternAnalysisRequested && !activePattern && (
+              <span className="px-2 py-1 rounded bg-slate-900/85 text-slate-300 border border-slate-600">
+                目前沒有通過條件的型態
               </span>
             )}
             {showPatternChip && (
-              activePattern.isLocked ? (
-                <span
-                  className="px-1.5 py-0.5 rounded border border-zinc-500 text-zinc-300 text-[10px] font-normal"
-                  title="型態取自訊號觸發日的凍結紀錄，拖時間軸或新增 K 棒不會改抓另一組腳位"
-                >
-                  觸發日鎖定
-                </span>
-              ) : (
-                <span
-                  className="px-1.5 py-0.5 rounded border border-amber-500/70 text-amber-300 text-[10px] font-normal"
-                  title="此檔尚未鎖股，型態為走圖即時偵測；新增 K 棒後可能重組成不同型態"
-                >
-                  即時偵測
-                </span>
-              )
+              <span
+                className="px-2 py-1 rounded bg-fuchsia-900/80 text-fuchsia-100 border border-fuchsia-700"
+                title={activePattern.achievementRate != null
+                  ? `舊書達標統計 ${activePattern.achievementRate}% 是教材歷史統計，不是本次偵測勝率`
+                  : undefined}
+              >
+                {getPatternDisplayName(activePattern.patternType)} · {activePattern.isLocked ? '觸發日鎖定' : '即時候選'}
+                {activePattern.achievementRate != null && `｜舊書統計 ${activePattern.achievementRate}%≠本次勝率`}
+                {isLegacyBookObservationOnly(activePattern.patternType) && '｜低達標統計，僅觀察'}
+              </span>
             )}
             {showPatternChip && activePattern.isLocked && !activePattern.pivotsVerified && showPattern && (
               <span
@@ -1528,7 +1540,6 @@ export default function CandleChart({
             {showPatternChip && patternStatus && activePattern && (() => {
               const close = candles[candles.length - 1]?.close ?? 0;
               const target = activePattern.targetPrice;
-              const patternName = getPatternDisplayName(activePattern.patternType);
               const confirmationPrice = getPatternConfirmationPrice(activePattern.kind, activePattern.necklinePrice);
               const gapPct = close > 0 ? ((target - close) / close * 100) : 0;
               // 預估目標價：所有狀態都顯示，並標明距現價爬升空間 %
@@ -1537,45 +1548,46 @@ export default function CandleChart({
               const gapText = activePattern.kind === 'bottom'
                 ? (gapPct > 0 ? `+${gapPct.toFixed(1)}%` : `${gapPct.toFixed(1)}%`)
                 : (gapPct < 0 ? `${gapPct.toFixed(1)}%` : `+${gapPct.toFixed(1)}%`);
+              const labels = getPatternDirectionLabels(activePattern.kind);
               const detail = patternStatus === 'pending'
-                ? `真突破 ${confirmationPrice.toFixed(2)}｜突破後目標 ${target.toFixed(2)}（${gapText}）`
+                ? `收盤 ${labels.pendingOperator} ${confirmationPrice.toFixed(2)} 才確認`
                 : patternStatus === 'confirmed'
-                  ? `測量目標 ${target.toFixed(2)}（${gapText}）`
+                  ? `下一步看 ${labels.target} ${target.toFixed(2)}（${gapText}）`
                   : patternStatus === 'retest'
-                    ? `回測防守 ${activePattern.stopPrice.toFixed(2)}｜目標 ${target.toFixed(2)}`
+                    ? `${labels.stop} ${activePattern.stopPrice.toFixed(2)}｜重新通過 ${confirmationPrice.toFixed(2)}`
                     : patternStatus === 'breakout-failed'
-                      ? `已跌破回測防守 ${activePattern.stopPrice.toFixed(2)}｜原目標取消`
+                      ? `已越過 ${labels.stop} ${activePattern.stopPrice.toFixed(2)}｜原目標取消`
                       : patternStatus === 'formation-broken'
-                        ? '未完成真突破，原型態腳位已被破壞'
-                        : `✓ ${target.toFixed(2)}`;
+                        ? `尚未完成${labels.confirmation}，原型態腳位已被破壞`
+                        : `${labels.target} ${target.toFixed(2)} 已達成`;
               return (
                 <span
-                  className={`px-1.5 py-0.5 rounded border text-[11px] font-bold ${statusLabel[patternStatus].cls}`}
-                  title={`${patternName}：${statusLabel[patternStatus].text}｜${detail}`}
+                  className={`px-2 py-1 rounded border text-[11px] font-bold ${statusLabel[patternStatus].cls}`}
+                  title={`${statusLabel[patternStatus].text}｜${detail}`}
                 >
-                  {patternName}｜{statusLabel[patternStatus].text}
+                  {statusLabel[patternStatus].text}
                   <span className="ml-1 opacity-80 font-normal">{detail}</span>
                 </span>
               );
             })()}
             {showPatternChip && showNeckline && (
               <>
-                <span className="flex items-center gap-1" style={{ color: '#22d3ee' }}>
+                {patternLevelVisibility.neckline && <span className="flex items-center gap-1" style={{ color: '#22d3ee' }}>
                   <span className="inline-block w-3 h-[2px]" style={{ background: '#22d3ee' }} />
-                  頸線 {activePattern.necklinePrice.toFixed(2)}
-                </span>
-                <span className="flex items-center gap-1" style={{ color: '#67e8f9' }}>
+                  結構頸線 {activePattern.necklinePrice.toFixed(2)}
+                </span>}
+                {patternLevelVisibility.confirmation && <span className="flex items-center gap-1" style={{ color: '#67e8f9' }}>
                   <span className="inline-block w-3 h-[2px] border-t border-dotted" style={{ borderColor: '#67e8f9' }} />
-                  真突破 {getPatternConfirmationPrice(activePattern.kind, activePattern.necklinePrice).toFixed(2)}
-                </span>
-                <span className="flex items-center gap-1" style={{ color: '#86efac' }}>
+                  {patternDirectionLabels?.confirmation} {getPatternConfirmationPrice(activePattern.kind, activePattern.necklinePrice).toFixed(2)}
+                </span>}
+                {patternLevelVisibility.target && <span className="flex items-center gap-1" style={{ color: '#86efac' }}>
                   <span className="inline-block w-3 h-[2px] border-t border-dashed" style={{ borderColor: '#86efac' }} />
-                  突破後目標 {activePattern.targetPrice.toFixed(2)}
-                </span>
-                <span className="flex items-center gap-1" style={{ color: '#fdba74' }}>
+                  {patternDirectionLabels?.target} {activePattern.targetPrice.toFixed(2)}
+                </span>}
+                {patternLevelVisibility.stop && <span className="flex items-center gap-1" style={{ color: '#fdba74' }}>
                   <span className="inline-block w-3 h-[2px] border-t border-dashed" style={{ borderColor: '#fdba74' }} />
-                  回測防守 {activePattern.stopPrice.toFixed(2)}
-                </span>
+                  {patternDirectionLabels?.stop} {activePattern.stopPrice.toFixed(2)}
+                </span>}
               </>
             )}
           </div>

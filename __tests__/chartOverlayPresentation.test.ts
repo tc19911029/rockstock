@@ -1,0 +1,61 @@
+import {
+  getCandleRangeLabels,
+  getPatternDirectionLabels,
+  getPatternLevelVisibility,
+  selectActionableSupportResistanceLevels,
+  shouldShowPatternGeometry,
+} from '@/lib/chart/overlayPresentation';
+import type { Pivot } from '@/lib/analysis/trendAnalysis';
+
+describe('chart overlay presentation', () => {
+  const pivots: Pivot[] = [
+    { index: 9, price: 120, type: 'high' },
+    { index: 8, price: 95, type: 'low' },
+    { index: 7, price: 110, type: 'high' },
+    { index: 6, price: 70, type: 'low' },
+  ];
+
+  it('壓撐只取現價上下最近價位，並合併 1% 內的大量價', () => {
+    expect(selectActionableSupportResistanceLevels(pivots, 100, 110.5)).toEqual([
+      { price: 110, label: '最近壓', role: 'resistance' },
+      { price: 95, label: '最近撐', role: 'support' },
+    ]);
+  });
+
+  it('所有前高都已突破時改標前高轉撐', () => {
+    expect(selectActionableSupportResistanceLevels(pivots, 130)).toEqual([
+      { price: 120, label: '前高轉撐', role: 'support' },
+      { price: 95, label: '最近撐', role: 'support' },
+    ]);
+  });
+
+  it('K棒三價位使用中性名稱，不預先宣告最強撐壓', () => {
+    expect(getCandleRangeLabels('up')).toEqual({ strong: '長紅高', mid: 'K棒½', weak: '長紅低' });
+    expect(getCandleRangeLabels('down')).toEqual({ strong: '長黑低', mid: 'K棒½', weak: '長黑高' });
+  });
+
+  it('待確認只顯示頸線與確認價，未啟用目標及失效價', () => {
+    expect(getPatternLevelVisibility('pending')).toMatchObject({
+      neckline: true,
+      confirmation: true,
+      target: false,
+      stop: false,
+    });
+  });
+
+  it('頂部型態使用跌破／反彈語意', () => {
+    expect(getPatternDirectionLabels('top')).toMatchObject({
+      confirmation: '確認跌破',
+      target: '下跌目標',
+      stop: '反彈失效',
+      pendingOperator: '≤',
+    });
+  });
+
+  it('型態達標或失敗後不再顯示整組歷史腳位', () => {
+    expect(shouldShowPatternGeometry('pending')).toBe(true);
+    expect(shouldShowPatternGeometry('retest')).toBe(true);
+    expect(shouldShowPatternGeometry('target')).toBe(false);
+    expect(shouldShowPatternGeometry('breakout-failed')).toBe(false);
+  });
+});

@@ -76,7 +76,7 @@ interface ChartToolbarProps {
   onPivotsToggle?: () => void;
   showSupportResistance?: boolean;
   onSupportResistanceToggle?: () => void;
-  /** K 棒三層支撐/壓力標線（最近長紅/長黑：最高=最強、1/2=平均成本、最低=最弱）*/
+  /** 最近長紅／長黑 K 棒的高、1/2、低三個中性價位標線 */
   showCandleSR?: boolean;
   onCandleSRToggle?: () => void;
   showNeckline?: boolean;
@@ -221,6 +221,46 @@ export default function ChartToolbar({
   const unrealizedPct = shares && shares > 0 && avgCost && avgCost > 0
     ? ((candle.close - avgCost) / avgCost) * 100
     : null;
+
+  const patternAnalysisOn = showNeckline || showPattern;
+  const turnOffPatternAnalysis = () => {
+    if (showNeckline) onNecklineToggle?.();
+    if (showPattern) onPatternToggle?.();
+  };
+  const prepareFocusedOverlay = () => {
+    if (showPivots) onPivotsToggle?.();
+  };
+  const toggleSupportResistance = () => {
+    if (showSupportResistance) {
+      onSupportResistanceToggle?.();
+      return;
+    }
+    if (showCandleSR) onCandleSRToggle?.();
+    turnOffPatternAnalysis();
+    prepareFocusedOverlay();
+    onSupportResistanceToggle?.();
+  };
+  const toggleCandleRange = () => {
+    if (showCandleSR) {
+      onCandleSRToggle?.();
+      return;
+    }
+    if (showSupportResistance) onSupportResistanceToggle?.();
+    turnOffPatternAnalysis();
+    prepareFocusedOverlay();
+    onCandleSRToggle?.();
+  };
+  const togglePatternAnalysis = () => {
+    if (patternAnalysisOn) {
+      turnOffPatternAnalysis();
+      return;
+    }
+    if (showSupportResistance) onSupportResistanceToggle?.();
+    if (showCandleSR) onCandleSRToggle?.();
+    prepareFocusedOverlay();
+    if (!showNeckline) onNecklineToggle?.();
+    if (!showPattern) onPatternToggle?.();
+  };
 
   return (
     <div className="shrink-0 border-b border-border">
@@ -445,47 +485,39 @@ export default function ChartToolbar({
         )}
         {onSupportResistanceToggle && (
           <button
-            onClick={onSupportResistanceToggle}
+            type="button"
+            onClick={toggleSupportResistance}
             aria-pressed={showSupportResistance}
-            aria-label={`${showSupportResistance ? '隱藏' : '顯示'}壓力支撐線`}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+            aria-label={`${showSupportResistance ? '隱藏' : '顯示'}最近有效壓力支撐`}
+            className={`min-h-7 px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
               showSupportResistance ? 'bg-amber-600/60 text-amber-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="找壓力與支撐線（突破壓力買、跌破支撐賣）"
-          >壓撐</button>
+            title="只顯示現價上下最近的有效壓撐與大量價；會關閉其他價位疊圖"
+          >關鍵壓撐</button>
         )}
         {onCandleSRToggle && (
           <button
-            onClick={onCandleSRToggle}
+            type="button"
+            onClick={toggleCandleRange}
             aria-pressed={showCandleSR}
-            aria-label={`${showCandleSR ? '隱藏' : '顯示'}K棒三層支撐壓力`}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+            aria-label={`${showCandleSR ? '隱藏' : '顯示'}最近長紅長黑K棒價位`}
+            className={`min-h-7 px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
               showCandleSR ? 'bg-amber-600/60 text-amber-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="K 棒三層支撐/壓力（最近長紅/長黑：最高=最強、½=平均成本、最低=最弱）｜書本 CH2-04 階梯式出場框架"
-          >三層撐壓</button>
+            title="最近長紅／長黑 K 的高、½、低三個價位；會關閉其他價位疊圖"
+          >K棒價位</button>
         )}
-        {onNecklineToggle && (
+        {(onNecklineToggle || onPatternToggle) && (
           <button
-            onClick={onNecklineToggle}
-            aria-pressed={showNeckline}
-            aria-label={`${showNeckline ? '隱藏' : '顯示'}型態關鍵價位`}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              showNeckline ? 'bg-cyan-600/60 text-cyan-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
+            type="button"
+            onClick={togglePatternAnalysis}
+            aria-pressed={patternAnalysisOn}
+            aria-label={`${patternAnalysisOn ? '隱藏' : '顯示'}型態分析與關鍵價位`}
+            className={`min-h-7 px-2 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-300 ${
+              patternAnalysisOn ? 'bg-fuchsia-600/60 text-fuchsia-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
             }`}
-            title="型態頸線、±3% 真突破門檻、突破後測量目標與回測防守價"
-          >型態價位</button>
-        )}
-        {onPatternToggle && (
-          <button
-            onClick={onPatternToggle}
-            aria-pressed={showPattern}
-            aria-label={`${showPattern ? '隱藏' : '顯示'}形態關鍵點`}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-              showPattern ? 'bg-fuchsia-600/60 text-fuchsia-100' : 'bg-secondary text-muted-foreground/50 hover:text-muted-foreground'
-            }`}
-            title="型態關鍵點（紫色圈圈是系統判斷型態的依據點）"
-          >形態</button>
+            title="顯示型態腳位與目前生命週期有用的價位；會關閉頭底與其他價位疊圖"
+          >型態分析</button>
         )}
         {onAscendingLineToggle && (
           <button

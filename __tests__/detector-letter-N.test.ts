@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { detectLetterN } from '../lib/analysis/v12LetterN';
+import { detectLetterN, detectLetterNStructure } from '../lib/analysis/v12LetterN';
 import { computeIndicators } from '../lib/indicators';
 import triggeredFixture from './fixtures/candles/2467-N-head-shoulder-2026-05-12.json';
 import boundaryFixture from './fixtures/candles/3036-N-rounding-bottom-2026-05-11.json';
@@ -57,5 +57,30 @@ describe('detectLetterN — 真實 fixture', () => {
 
     // 但結構檢測仍能找到型態（給 lockwatch 用）— production lockwatch 5/12 對 3036 5/11 的紀錄
     // 用的是另一條路徑（lockwatch 寫入時 daily-writer 或前一日預掃時觸發），不是這天的 detectLetterN
+  });
+
+  it('真實圓弧底 fixture 仍通過收緊後的杯緣、底部停留與新鮮度檢查', () => {
+    const candles = computeIndicators(boundaryFixture.candles);
+    const result = detectLetterNStructure(candles, candles.length - 1);
+
+    expect(result.patternType).toBe('rounding-bottom');
+  });
+
+  it('只有單日尖底的 V 轉不再誤標為圓弧底', () => {
+    const raw = Array.from({ length: 70 }, (_, index) => {
+      const close = index === 54 ? 55 : index === 53 || index === 55 ? 80 : 100;
+      return {
+        date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10),
+        open: close,
+        high: close + 2,
+        low: close - 2,
+        close,
+        volume: 1_000,
+      };
+    });
+    const candles = computeIndicators(raw);
+    const result = detectLetterNStructure(candles, candles.length - 1);
+
+    expect(result.patternType).not.toBe('rounding-bottom');
   });
 });

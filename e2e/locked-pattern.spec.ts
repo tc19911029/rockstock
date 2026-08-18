@@ -39,12 +39,10 @@ test.describe('走圖型態鎖定鏈路', () => {
     // 等股票名稱出現（loaded 完成）
     await expect(page.getByText('藥華藥').first()).toBeVisible({ timeout: 15_000 });
 
-    // 開「形態」+「型態價位」toggle
-    const patternBtn = page.locator('button:text-is("形態")').first();
-    const necklineBtn = page.locator('button:text-is("型態價位")').first();
+    // 開「型態分析」：腳位與生命週期價位改由單一控制一起顯示
+    const patternBtn = page.locator('button:text-is("型態分析")').first();
     await patternBtn.waitFor({ state: 'visible', timeout: 15_000 });
     await patternBtn.click();
-    await necklineBtn.click();
     // 等 chart 重渲染
     await page.waitForTimeout(800);
 
@@ -52,7 +50,7 @@ test.describe('走圖型態鎖定鏈路', () => {
     expect(consoleErrors, `走圖 crash: ${consoleErrors.join('\n')}`).toHaveLength(0);
 
     // 鎖定狀態應出現（目前完整文案為「觸發日鎖定」）
-    await expect(page.getByText('觸發日鎖定', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/觸發日鎖定/).first()).toBeVisible();
     // 型態名稱應出現
     await expect(page.locator('text=/複式頭肩底|頭肩底|圓弧底|楔形|雙重底|三重底/').first()).toBeVisible();
   });
@@ -69,30 +67,44 @@ test.describe('走圖型態鎖定鏈路', () => {
     await page.goto('/?load=000703.SZ');
     await expect(page.getByText('恒逸石化').first()).toBeVisible({ timeout: 15_000 });
 
-    const patternBtn = page.locator('button:text-is("形態")').first();
-    const necklineBtn = page.locator('button:text-is("型態價位")').first();
+    const patternBtn = page.locator('button:text-is("型態分析")').first();
     await patternBtn.waitFor({ state: 'visible', timeout: 15_000 });
     await patternBtn.click();
-    await necklineBtn.click();
     await page.waitForTimeout(800);
 
     expect(consoleErrors).toHaveLength(0);
-    await expect(page.getByText('觸發日鎖定', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/觸發日鎖定/).first()).toBeVisible();
   });
 
   test('無 lockwatch 紀錄股 (2330.TW) → 顯示「即時」badge', async ({ page }) => {
     await page.goto('/?load=2330.TW');
     await expect(page.getByText('台積電').first()).toBeVisible({ timeout: 15_000 });
 
-    const patternBtn = page.locator('button:text-is("形態")').first();
-    const necklineBtn = page.locator('button:text-is("型態價位")').first();
+    const patternBtn = page.locator('button:text-is("型態分析")').first();
     await patternBtn.waitFor({ state: 'visible', timeout: 15_000 });
     await patternBtn.click();
-    await necklineBtn.click();
     await page.waitForTimeout(800);
 
     // 即時狀態應出現（fresh detection mode）
-    await expect(page.getByText('即時偵測', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/即時候選/).first()).toBeVisible();
+  });
+
+  test('價位疊圖互斥：型態分析會關閉頭底與關鍵壓撐', async ({ page }) => {
+    await page.goto('/?load=2330.TW');
+    await expect(page.getByText('台積電').first()).toBeVisible({ timeout: 15_000 });
+
+    const pivotsBtn = page.locator('button:text-is("頭底")').first();
+    const supportBtn = page.locator('button:text-is("關鍵壓撐")').first();
+    const patternBtn = page.locator('button:text-is("型態分析")').first();
+    await expect(pivotsBtn).toHaveAttribute('aria-pressed', 'true');
+
+    await supportBtn.click();
+    await expect(supportBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(pivotsBtn).toHaveAttribute('aria-pressed', 'false');
+
+    await patternBtn.click();
+    await expect(patternBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(supportBtn).toHaveAttribute('aria-pressed', 'false');
   });
 
   test('?symbol= 跟 ?load= 兩種 URL param 都接受', async ({ page }) => {
