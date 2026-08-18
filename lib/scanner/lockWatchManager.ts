@@ -16,7 +16,7 @@
  * 純書本邏輯：
  * - 結構失效（議題 49 各型態）→ 自動移除
  * - 趨勢翻空頭 → 撤銷
- * - close < triggerPrice → 撤銷
+ * - N 收盤跌破頸線 3% → 結構失效（與圖表生命週期一致）
  * - 趨勢確認 + SOP 過 → 升級 entry-signal
  */
 
@@ -117,7 +117,7 @@ export interface LockWatchUpdateResult {
  *
  * 對每個 record 檢查：
  * 1. 議題 94 撤銷三條件：
- *    - close < triggerPrice
+ *    - N 收盤跌破頸線 3%
  *    - detectTrend 翻空頭
  *    - 結構失效（議題 49）
  * 2. 議題 71 升級條件：
@@ -166,12 +166,12 @@ export function updateLockWatch(
     updatedRecord.currentStage = 'observation';
   }
 
-  // ── 1. 撤銷條件：close < triggerPrice ──
-  // F 訊號的 triggerPrice 是 rebound close（鎖定價），不是 V 底；不該因 close 跌破鎖定價就撤銷
-  // F 的結構失效已由 checkStructureBroken（用 vBottom 判 low）處理
-  if (record.triggerSignal !== 'F' && c.close < record.triggerPrice) {
-    updatedRecord.currentStage = 'revoked';
-    addEvent(updatedRecord, today, 'provisional-revoke', `close=${c.close.toFixed(2)} < triggerPrice=${record.triggerPrice.toFixed(2)}`);
+  // ── 1. 結構失效：與圖表共用同一套邊界 ──
+  // 舊版 N 一跌破頸線就 revoked，但圖表允許頸線下 3% 的正常回測，造成同一檔兩種狀態。
+  const structureCheck = checkStructureBroken(record, candles);
+  if (structureCheck.broken) {
+    updatedRecord.currentStage = 'structure-broken';
+    addEvent(updatedRecord, today, 'structure-broken', structureCheck.reason);
     return { changed: true, record: updatedRecord };
   }
 

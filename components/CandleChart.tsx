@@ -32,10 +32,15 @@ import {
   getPatternLifecycleStatus,
   type PatternLifecycleStatus,
 } from '@/lib/chart/patternLifecycle';
+import { choosePatternCandidate } from '@/lib/chart/patternSelection';
 import type { PatternPivotSnapshot } from '@/lib/analysis/patternCatalog';
 import { isLegacyBookObservationOnly } from '@/lib/analysis/patternCatalog';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
-import { detectLetterNStructure, detectTopPatternsStructure } from '@/lib/analysis/v12LetterN';
+import {
+  detectLetterNStructure,
+  detectTopPatternsStructure,
+  PATTERN_DISPLAY_MIN_QUALITY_SCORE,
+} from '@/lib/analysis/v12LetterN';
 import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
 import {
   getCandleRangeLabels,
@@ -212,6 +217,7 @@ interface CandleChartProps {
     achievementRate?: number;
     kind: 'bottom' | 'top';
     pivots?: PatternPivotSnapshot[];
+    triggeredDate?: string;
   } | null;
   /**
    * 雙B戰法主圖疊加（三色資金，陸股自創）— 像 MA/BB 一樣疊在 K 線主圖上。
@@ -359,6 +365,9 @@ export default function CandleChart({
     stopPrice: number;
     patternType: string;
     achievementRate?: number;
+    qualityScore?: number;
+    qualityReasons?: string[];
+    triggeredDate?: string;
     isLocked?: boolean;  // 來自鎖股觀察的旗標
     /** 鎖定型態與即時 detector 型態一致時才允許畫腳位，避免用另一種型態的 pivots 冒充。 */
     pivotsVerified: boolean;
@@ -366,8 +375,8 @@ export default function CandleChart({
     if (!showNeckline && !showPattern) return null;
     if (candles.length < 30) return null;
     const lastIdx = candles.length - 1;
-    const bottom = detectLetterNStructure(candles, lastIdx);
-    const top = detectTopPatternsStructure(candles, lastIdx);
+    const bottom = detectLetterNStructure(candles, lastIdx, PATTERN_DISPLAY_MIN_QUALITY_SCORE);
+    const top = detectTopPatternsStructure(candles, lastIdx, PATTERN_DISPLAY_MIN_QUALITY_SCORE);
 
     // 優先用 lockedPattern（穩定 — 跟鎖股觀察一致）
     if (
@@ -406,6 +415,9 @@ export default function CandleChart({
         stopPrice: lockedPattern.stopPrice ?? lockedPattern.necklinePrice * (lockedPattern.kind === 'bottom' ? 0.97 : 1.03),
         patternType: lockedPattern.patternType,
         achievementRate: lockedPattern.achievementRate ?? (pivotsVerified ? freshSource.achievementRate : undefined),
+        qualityScore: pivotsVerified ? freshSource.qualityScore : undefined,
+        qualityReasons: pivotsVerified ? freshSource.qualityReasons : undefined,
+        triggeredDate: lockedPattern.triggeredDate,
         isLocked: true,
         pivotsVerified,
       };
@@ -420,6 +432,8 @@ export default function CandleChart({
         stopPrice: bottom.structureBrokenPrice,
         patternType: bottom.patternType ?? '',
         achievementRate: bottom.achievementRate,
+        qualityScore: bottom.qualityScore,
+        qualityReasons: bottom.qualityReasons,
         pivotsVerified: true,
       } as const
       : null;
@@ -432,19 +446,13 @@ export default function CandleChart({
         stopPrice: top.structureBrokenPrice,
         patternType: top.patternType ?? '',
         achievementRate: top.achievementRate,
+        qualityScore: top.qualityScore,
+        qualityReasons: top.qualityReasons,
         pivotsVerified: true,
       } as const
       : null;
 
-    if (!bottomCandidate) return topCandidate;
-    if (!topCandidate) return bottomCandidate;
-
-    // 同一視窗可能殘留舊底部與新頂部結構；以最近完成的 pivot 決定顯示，
-    // 不再無條件讓底部型態遮掉較新的頂部警示。若同日則維持原本底部優先。
-    const latestPivot = (ps: Pivot[]) => Math.max(...ps.map(p => p.index));
-    return latestPivot(topCandidate.pivots) > latestPivot(bottomCandidate.pivots)
-      ? topCandidate
-      : bottomCandidate;
+    return choosePatternCandidate(bottomCandidate, topCandidate);
   }, [candles, showNeckline, showPattern, lockedPattern]);
 
   /**
@@ -457,6 +465,10 @@ export default function CandleChart({
     const formationIndex = activePattern.pivots.length > 0
       ? Math.max(...activePattern.pivots.map(pivot => pivot.index))
       : 0;
+    const triggeredIndex = activePattern.isLocked && activePattern.triggeredDate
+      ? candles.findIndex(candle => candle.date.replace(/\*$/, '') >= activePattern.triggeredDate!)
+      : -1;
+    const lifecycleStartIndex = triggeredIndex >= 0 ? triggeredIndex : formationIndex;
     const relevantBoundaryPivots = activePattern.pivots.filter(pivot =>
       activePattern.kind === 'bottom' ? pivot.type === 'low' : pivot.type === 'high',
     );
@@ -471,7 +483,7 @@ export default function CandleChart({
       necklinePrice: activePattern.necklinePrice,
       targetPrice: activePattern.targetPrice,
       stopPrice: activePattern.stopPrice,
-      candlesSinceFormation: candles.slice(formationIndex).map(candle => ({
+      candlesSinceFormation: candles.slice(lifecycleStartIndex).map(candle => ({
         close: candle.close,
         high: candle.high,
         low: candle.low,
@@ -1524,11 +1536,17 @@ export default function CandleChart({
             {showPatternChip && (
               <span
                 className="px-2 py-1 rounded bg-fuchsia-900/80 text-fuchsia-100 border border-fuchsia-700"
-                title={activePattern.achievementRate != null
-                  ? `舊書達標統計 ${activePattern.achievementRate}% 是教材歷史統計，不是本次偵測勝率`
-                  : undefined}
+                title={[
+                  activePattern.qualityScore != null
+                    ? `結構品質 ${activePattern.qualityScore}/100（候選排序分數，不是勝率）${activePattern.qualityReasons?.length ? `：${activePattern.qualityReasons.join('、')}` : ''}`
+                    : null,
+                  activePattern.achievementRate != null
+                    ? `舊書達標統計 ${activePattern.achievementRate}% 是教材歷史統計，不是本次偵測勝率`
+                    : null,
+                ].filter(Boolean).join('｜') || undefined}
               >
                 {getPatternDisplayName(activePattern.patternType)} · {activePattern.isLocked ? '觸發日鎖定' : '即時候選'}
+                {activePattern.qualityScore != null && `｜結構品質 ${activePattern.qualityScore}/100（非勝率）`}
                 {activePattern.achievementRate != null && `｜舊書統計 ${activePattern.achievementRate}%≠本次勝率`}
                 {isLegacyBookObservationOnly(activePattern.patternType) && '｜低達標統計，僅觀察'}
               </span>

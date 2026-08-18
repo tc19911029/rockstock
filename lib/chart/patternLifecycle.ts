@@ -44,9 +44,11 @@ export function getPatternLifecycleStatus({
   assumeConfirmed = false,
 }: PatternLifecycleInput): PatternLifecycleStatus {
   const confirmationPrice = getPatternConfirmationPrice(kind, necklinePrice);
-  const wasConfirmed = assumeConfirmed || candlesSinceFormation.some(candle =>
+  const detectedConfirmationIndex = candlesSinceFormation.findIndex(candle =>
     kind === 'bottom' ? candle.close >= confirmationPrice : candle.close <= confirmationPrice,
   );
+  const confirmationIndex = assumeConfirmed ? 0 : detectedConfirmationIndex;
+  const wasConfirmed = confirmationIndex >= 0;
 
   if (!wasConfirmed) {
     const formationBroken = formationBoundaryPrice != null && candlesSinceFormation.some(candle =>
@@ -57,15 +59,24 @@ export function getPatternLifecycleStatus({
     return formationBroken ? 'formation-broken' : 'pending';
   }
 
+  // 目標達成／突破失敗都是不可逆的終結事件。舊版只看目前收盤，導致達標後
+  // 拉回或停損後反彈時又顯示「已確認」。依時間順序掃描並鎖定第一個終結事件。
+  for (let i = confirmationIndex; i < candlesSinceFormation.length; i++) {
+    const close = candlesSinceFormation[i].close;
+    if (kind === 'bottom') {
+      if (close >= targetPrice) return 'target';
+      if (close <= stopPrice) return 'breakout-failed';
+    } else {
+      if (close <= targetPrice) return 'target';
+      if (close >= stopPrice) return 'breakout-failed';
+    }
+  }
+
   if (kind === 'bottom') {
-    if (currentClose >= targetPrice) return 'target';
-    if (currentClose <= stopPrice) return 'breakout-failed';
     if (currentClose >= confirmationPrice) return 'confirmed';
     return 'retest';
   }
 
-  if (currentClose <= targetPrice) return 'target';
-  if (currentClose >= stopPrice) return 'breakout-failed';
   if (currentClose <= confirmationPrice) return 'confirmed';
   return 'retest';
 }

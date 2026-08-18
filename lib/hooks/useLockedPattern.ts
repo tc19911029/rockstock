@@ -20,6 +20,7 @@ export interface LockedPattern {
   achievementRate?: number;
   kind: 'bottom' | 'top';
   pivots?: PatternPivotSnapshot[];
+  triggeredDate?: string;
 }
 
 interface LockwatchRecordShape {
@@ -88,6 +89,7 @@ export function useLockedPattern(symbol: string | null | undefined, marketHint?:
           achievementRate: getLegacyBookAchievementRate(rec.patternType),
           kind: isTopPatternType(rec.patternType) ? 'top' : 'bottom',
           pivots: rec.patternPivots,
+          triggeredDate: rec.triggeredDate,
         });
       })
       .catch(() => {

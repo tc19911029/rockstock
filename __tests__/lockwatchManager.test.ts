@@ -8,7 +8,7 @@
  * 鎖死的 invariant：
  *   1. 已結束 stage（purchased/revoked/manually-removed/structure-broken）→ unchanged，
  *      不可被新一日 K 線覆寫
- *   2. observation 紀錄 close < triggerPrice → revoked（非 F）
+ *   2. N 跌破頸線但未達 3% → 保留；達 3% → structure-broken
  *   3. F observation close < triggerPrice → 不撤銷（triggerPrice 是反彈鎖定價）
  *   4. detectTrend 翻空頭 → revoked
  *   5. observation 沒命中撤銷 → 維持 observation，daysObserved 累加
@@ -126,12 +126,19 @@ describe('updateLockWatch — carry-forward invariants', () => {
   });
 
   describe('撤銷條件', () => {
-    it('observation N close < triggerPrice → revoked', () => {
+    it('observation N 跌破頸線超過 3% → structure-broken', () => {
       const original = makeNRecord({ triggerPrice: 612 });
       const candles = bullishCandles('2026-05-13', 580); // 580 < 612
       const result = updateLockWatch(original, candles, [], '2026-05-13');
       expect(result.changed).toBe(true);
-      expect(result.record.currentStage).toBe('revoked');
+      expect(result.record.currentStage).toBe('structure-broken');
+    });
+
+    it('observation N 小幅跌破頸線但未達 3% → 保留 observation', () => {
+      const original = makeNRecord({ triggerPrice: 612 });
+      const candles = bullishCandles('2026-05-13', 600); // -1.96%，屬正常回測帶
+      const result = updateLockWatch(original, candles, [], '2026-05-13');
+      expect(result.record.currentStage).toBe('observation');
     });
 
     it('observation F close < triggerPrice → NOT revoked（triggerPrice 是反彈鎖定價）', () => {

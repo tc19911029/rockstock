@@ -57,6 +57,30 @@ describe('getPatternLifecycleStatus', () => {
     })).toBe('target');
   });
 
+  it('曾達目標後即使拉回，也維持目標達成', () => {
+    expect(getPatternLifecycleStatus({
+      ...DEMINGLI_DOUBLE_BOTTOM,
+      currentClose: 460,
+      candlesSinceFormation: [450, 530, 460].map(close => ({ close, high: close + 5, low: close - 5 })),
+    })).toBe('target');
+  });
+
+  it('曾跌破防守價後即使反彈，也維持突破失敗', () => {
+    expect(getPatternLifecycleStatus({
+      ...DEMINGLI_DOUBLE_BOTTOM,
+      currentClose: 460,
+      candlesSinceFormation: [450, 400, 460].map(close => ({ close, high: close + 5, low: close - 5 })),
+    })).toBe('breakout-failed');
+  });
+
+  it('先失敗後才碰目標時，以先發生的失敗為準', () => {
+    expect(getPatternLifecycleStatus({
+      ...DEMINGLI_DOUBLE_BOTTOM,
+      currentClose: 530,
+      candlesSinceFormation: [450, 400, 530].map(close => ({ close, high: close + 5, low: close - 5 })),
+    })).toBe('breakout-failed');
+  });
+
   it('頂部型態套用對稱的先確認、後失效順序', () => {
     expect(getPatternLifecycleStatus({
       kind: 'top',
