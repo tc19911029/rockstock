@@ -1,5 +1,5 @@
 /**
- * YouTube source registry — 18 個追蹤的理財節目來源（2026-05-22 v2 改版）。
+ * YouTube source registry — 19 個追蹤的理財節目來源（2026-05-22 v2 改版）。
  *
  * 設計：seed-or-load
  *   - 首次呼叫 loadSources() 時若 sources.json 不存在 → 寫入 DEFAULT_SOURCES 並回傳
@@ -228,6 +228,19 @@ export const DEFAULT_SOURCES: YouTubeSource[] = [
     active: true,
     created_at: '2026-06-18T00:00:00.000Z',
     default_analysts: ['紀緯明'],
+  },
+  {
+    source_id: 'jiang-guo-zhong',
+    display_name: '盤後精彩解盤（江國中）',
+    kind: 'playlist',
+    url: 'https://www.youtube.com/playlist?list=PLxOaTzXFQQklambFPaY6jyBrs-jcN5-MH',
+    expected_cadence: 'daily',
+    market_type: 'TW_STOCK',
+    first_scan_done: false,
+    active: true,
+    created_at: '2026-08-18T00:00:00.000Z',
+    default_analysts: ['江國中'],
+    keyframe_enabled: true,
   },
 ];
 
