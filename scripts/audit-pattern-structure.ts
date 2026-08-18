@@ -10,7 +10,8 @@ import { computeIndicators } from '@/lib/indicators';
 import {
   detectLetterNStructure,
   detectTopPatternsStructure,
-  PATTERN_DISPLAY_MIN_QUALITY_SCORE,
+  BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
+  TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
 } from '@/lib/analysis/v12LetterN';
 import type { Candle } from '@/types';
 
@@ -38,26 +39,30 @@ async function main() {
       const candles = computeIndicators(raw.slice(0, dateIndex + 1));
       const idx = candles.length - 1;
       const symbol = file.replace(/\.json$/, '');
-      const b = detectLetterNStructure(candles, idx, PATTERN_DISPLAY_MIN_QUALITY_SCORE);
-      const t = detectTopPatternsStructure(candles, idx, PATTERN_DISPLAY_MIN_QUALITY_SCORE);
-      const hasBottom = Boolean(b.patternType);
-      const hasTop = Boolean(t.patternType);
+      // 先取得未套顯示門檻的最高分候選，所有分桶才能使用同一份原始結果。
+      // 舊版先以 94 分呼叫 detector，導致 80/85/90/92 分桶其實也全是 94 分資料。
+      const rawBottom = detectLetterNStructure(candles, idx, 0);
+      const rawTop = detectTopPatternsStructure(candles, idx, 0);
+      const hasBottom = rawBottom.displayReady === true && (rawBottom.qualityScore ?? 0) >= BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE;
+      const hasTop = rawTop.displayReady === true && (rawTop.qualityScore ?? 0) >= TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE;
+      const b = hasBottom ? rawBottom : null;
+      const t = hasTop ? rawTop : null;
       processed++;
       if (hasBottom) {
         bottom++;
-        bottomCounts[b.patternType!] = (bottomCounts[b.patternType!] ?? 0) + 1;
-        (examples[b.patternType!] ??= []).push(symbol);
+        bottomCounts[b!.patternType!] = (bottomCounts[b!.patternType!] ?? 0) + 1;
+        (examples[b!.patternType!] ??= []).push(symbol);
       }
       if (hasTop) {
         top++;
-        topCounts[t.patternType!] = (topCounts[t.patternType!] ?? 0) + 1;
-        (examples[t.patternType!] ??= []).push(symbol);
+        topCounts[t!.patternType!] = (topCounts[t!.patternType!] ?? 0) + 1;
+        (examples[t!.patternType!] ??= []).push(symbol);
       }
       if (hasBottom && hasTop) overlap++;
       if (hasBottom || hasTop) union++;
       for (const bucket of scoreBuckets) {
-        const scoredBottom = (b.qualityScore ?? 0) >= bucket.min;
-        const scoredTop = (t.qualityScore ?? 0) >= bucket.min;
+        const scoredBottom = rawBottom.displayReady === true && (rawBottom.qualityScore ?? 0) >= bucket.min;
+        const scoredTop = rawTop.displayReady === true && (rawTop.qualityScore ?? 0) >= bucket.min;
         if (scoredBottom) bucket.bottom++;
         if (scoredTop) bucket.top++;
         if (scoredBottom && scoredTop) bucket.overlap++;

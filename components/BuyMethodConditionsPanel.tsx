@@ -26,7 +26,11 @@ import { detectBlackKBreakout } from '@/lib/analysis/blackKBreakoutEntry';
 import { detectKlineConsolidationBreakout } from '@/lib/analysis/klineConsolidationBreakout';
 // v12 新訊號 detectors
 import { detectLetterM } from '@/lib/analysis/v12LetterM';
-import { detectLetterN, detectLetterNStructure } from '@/lib/analysis/v12LetterN';
+import {
+  BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
+  detectLetterN,
+  detectLetterNStructure,
+} from '@/lib/analysis/v12LetterN';
 import { detectLetterO } from '@/lib/analysis/v12LetterO';
 import { detectLetterP } from '@/lib/analysis/v12LetterP';
 import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
@@ -418,7 +422,7 @@ function evaluateMethod(
       //   - detectLetterNStructure：只看「結構成立」（pivots + 達成率）— 給 pending-breakout 顯示
       // 跟 lockwatch 寫入邏輯（MarketScanner.ts:1483）對齊，避免「鎖股顯示圓弧底 85% 但條件面板說未識別」的矛盾
       const r = detectLetterN(candles, idx);
-      const struct = detectLetterNStructure(candles, idx);
+      const struct = detectLetterNStructure(candles, idx, BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE);
       // 結構成立但未過真突破：條件面板顯示「結構成立（待突破）」而不是「未識別」
       const hasStructure: boolean = !r.triggered && !!struct.patternType && Array.isArray(struct.pivots) && struct.pivots.length > 0;
       const patternName = (r.patternType ?? struct.patternType)

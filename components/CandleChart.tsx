@@ -39,7 +39,9 @@ import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import {
   detectLetterNStructure,
   detectTopPatternsStructure,
-  PATTERN_DISPLAY_MIN_QUALITY_SCORE,
+  getPatternFormationBoundaryPrice,
+  BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
+  TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
 } from '@/lib/analysis/v12LetterN';
 import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
 import {
@@ -375,8 +377,8 @@ export default function CandleChart({
     if (!showNeckline && !showPattern) return null;
     if (candles.length < 30) return null;
     const lastIdx = candles.length - 1;
-    const bottom = detectLetterNStructure(candles, lastIdx, PATTERN_DISPLAY_MIN_QUALITY_SCORE);
-    const top = detectTopPatternsStructure(candles, lastIdx, PATTERN_DISPLAY_MIN_QUALITY_SCORE);
+    const bottom = detectLetterNStructure(candles, lastIdx, BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE);
+    const top = detectTopPatternsStructure(candles, lastIdx, TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE);
 
     // 優先用 lockedPattern（穩定 — 跟鎖股觀察一致）
     if (
@@ -414,16 +416,18 @@ export default function CandleChart({
         targetPrice: lockedPattern.targetPrice,
         stopPrice: lockedPattern.stopPrice ?? lockedPattern.necklinePrice * (lockedPattern.kind === 'bottom' ? 0.97 : 1.03),
         patternType: lockedPattern.patternType,
-        achievementRate: lockedPattern.achievementRate ?? (pivotsVerified ? freshSource.achievementRate : undefined),
-        qualityScore: pivotsVerified ? freshSource.qualityScore : undefined,
-        qualityReasons: pivotsVerified ? freshSource.qualityReasons : undefined,
+        achievementRate: lockedPattern.achievementRate ?? (freshPivotsVerified ? freshSource.achievementRate : undefined),
+        // 凍結腳位只證明鎖定型態可畫，不代表目前 top-ranked detector 是同一型態；
+        // 分數與理由只有同型、頸線也對齊時才能借用，避免圓弧底旁顯示 N 字「回檔比例」。
+        qualityScore: freshPivotsVerified ? freshSource.qualityScore : undefined,
+        qualityReasons: freshPivotsVerified ? freshSource.qualityReasons : undefined,
         triggeredDate: lockedPattern.triggeredDate,
         isLocked: true,
         pivotsVerified,
       };
     }
 
-    const bottomCandidate = bottom.pivots && bottom.necklinePrice != null && bottom.patternTargetPrice != null && bottom.structureBrokenPrice != null
+    const bottomCandidate = bottom.displayReady && bottom.pivots && bottom.necklinePrice != null && bottom.patternTargetPrice != null && bottom.structureBrokenPrice != null
       ? {
         kind: 'bottom',
         pivots: bottom.pivots,
@@ -437,7 +441,7 @@ export default function CandleChart({
         pivotsVerified: true,
       } as const
       : null;
-    const topCandidate = top.pivots && top.necklinePrice != null && top.patternTargetPrice != null && top.structureBrokenPrice != null
+    const topCandidate = top.displayReady && top.pivots && top.necklinePrice != null && top.patternTargetPrice != null && top.structureBrokenPrice != null
       ? {
         kind: 'top',
         pivots: top.pivots,
@@ -469,14 +473,11 @@ export default function CandleChart({
       ? candles.findIndex(candle => candle.date.replace(/\*$/, '') >= activePattern.triggeredDate!)
       : -1;
     const lifecycleStartIndex = triggeredIndex >= 0 ? triggeredIndex : formationIndex;
-    const relevantBoundaryPivots = activePattern.pivots.filter(pivot =>
-      activePattern.kind === 'bottom' ? pivot.type === 'low' : pivot.type === 'high',
+    const formationBoundaryPrice = getPatternFormationBoundaryPrice(
+      activePattern.patternType,
+      activePattern.pivots,
+      activePattern.kind,
     );
-    const formationBoundaryPrice = relevantBoundaryPivots.length > 0
-      ? activePattern.kind === 'bottom'
-        ? Math.min(...relevantBoundaryPivots.map(pivot => pivot.price))
-        : Math.max(...relevantBoundaryPivots.map(pivot => pivot.price))
-      : undefined;
     return getPatternLifecycleStatus({
       kind: activePattern.kind,
       currentClose: last.close,
@@ -1343,17 +1344,20 @@ export default function CandleChart({
     const t0 = toTime(candles[firstIdx].date);
     const t1 = toTime(candles[lastIdx].date);
 
+    const slopedPatterns = new Set(['descending-wedge', 'falling-diamond']);
+    const slopedOlderHigh = slopedPatterns.has(activePattern.patternType) && activePattern.pivots.length >= 2
+      ? activePattern.pivots[1]
+      : null;
+
     if (showNeckline && levelVisibility.neckline) {
       // descending-wedge / falling-diamond 的頸線是「兩高點延伸線」，本質上是斜線
       // detectDescendingWedge 回傳 necklinePrice = upperToday（今日延伸值），需要從較舊 high 連到 upperToday
       // 其他底/頂部型態的頸線是水平線（兩內部 pivot 連線取較高/較低，水平延伸）
-      const slopedPatterns = new Set(['descending-wedge']);
-      if (slopedPatterns.has(activePattern.patternType) && activePattern.pivots.length >= 2) {
+      if (slopedOlderHigh) {
         // pivots[1] = highs[1]（較舊 high），detector 順序：[highs[0], highs[1], lows[0], lows[1]]
-        const olderHigh = activePattern.pivots[1];
-        const olderTime = toTime(candles[olderHigh.index].date);
+        const olderTime = toTime(candles[slopedOlderHigh.index].date);
         neckSeries.setData([
-          { time: olderTime, value: olderHigh.price },
+          { time: olderTime, value: slopedOlderHigh.price },
           { time: t1, value: necklinePrice },
         ]);
       } else {
@@ -1362,13 +1366,27 @@ export default function CandleChart({
     }
     if (showNeckline && levelVisibility.confirmation) {
       const confirmationPrice = getPatternConfirmationPrice(activePattern.kind, necklinePrice);
-      confirmationSeries.setData([{ time: t0, value: confirmationPrice }, { time: t1, value: confirmationPrice }]);
+      if (slopedOlderHigh) {
+        confirmationSeries.setData([
+          { time: toTime(candles[slopedOlderHigh.index].date), value: getPatternConfirmationPrice(activePattern.kind, slopedOlderHigh.price) },
+          { time: t1, value: confirmationPrice },
+        ]);
+      } else {
+        confirmationSeries.setData([{ time: t0, value: confirmationPrice }, { time: t1, value: confirmationPrice }]);
+      }
     }
     if (showNeckline && levelVisibility.target) {
       tgtSeries.setData([{ time: t0, value: targetPrice }, { time: t1, value: targetPrice }]);
     }
     if (showNeckline && levelVisibility.stop) {
-      stopSeries.setData([{ time: t0, value: stopPrice }, { time: t1, value: stopPrice }]);
+      if (slopedOlderHigh) {
+        stopSeries.setData([
+          { time: toTime(candles[slopedOlderHigh.index].date), value: slopedOlderHigh.price * 0.97 },
+          { time: t1, value: stopPrice },
+        ]);
+      } else {
+        stopSeries.setData([{ time: t0, value: stopPrice }, { time: t1, value: stopPrice }]);
+      }
     }
 
     // 形態連線：依時間順序連接 pivots（去重 time，lightweight-charts 要求嚴格升序）
@@ -1538,7 +1556,7 @@ export default function CandleChart({
                 className="px-2 py-1 rounded bg-fuchsia-900/80 text-fuchsia-100 border border-fuchsia-700"
                 title={[
                   activePattern.qualityScore != null
-                    ? `結構品質 ${activePattern.qualityScore}/100（候選排序分數，不是勝率）${activePattern.qualityReasons?.length ? `：${activePattern.qualityReasons.join('、')}` : ''}`
+                    ? `形狀吻合 ${activePattern.qualityScore}/100（只評腳位幾何，不是勝率）${activePattern.qualityReasons?.length ? `：${activePattern.qualityReasons.join('、')}` : ''}`
                     : null,
                   activePattern.achievementRate != null
                     ? `舊書達標統計 ${activePattern.achievementRate}% 是教材歷史統計，不是本次偵測勝率`
@@ -1546,7 +1564,7 @@ export default function CandleChart({
                 ].filter(Boolean).join('｜') || undefined}
               >
                 {getPatternDisplayName(activePattern.patternType)} · {activePattern.isLocked ? '觸發日鎖定' : '即時候選'}
-                {activePattern.qualityScore != null && `｜結構品質 ${activePattern.qualityScore}/100（非勝率）`}
+                {activePattern.qualityScore != null && `｜形狀吻合 ${activePattern.qualityScore}/100（非勝率）`}
                 {activePattern.achievementRate != null && `｜舊書統計 ${activePattern.achievementRate}%≠本次勝率`}
                 {isLegacyBookObservationOnly(activePattern.patternType) && '｜低達標統計，僅觀察'}
               </span>

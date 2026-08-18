@@ -18,7 +18,10 @@
 
 import type { CandleWithIndicators } from '@/types';
 import { detectTrend, classifyConsolidationShape, findPivots } from '@/lib/analysis/trendAnalysis';
-import { detectLetterNStructure } from '@/lib/analysis/v12LetterN';
+import {
+  BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
+  detectLetterNStructure,
+} from '@/lib/analysis/v12LetterN';
 import { getABCDisplayStructure } from '@/lib/analysis/abcBreakoutEntry';
 import type { MarketId } from './types';
 
@@ -166,8 +169,8 @@ export function classifyHuntCategory(
   }
 
   // ⑦ 等型態：底部型態結構成立、未過真突破
-  const n = detectLetterNStructure(candles, idx);
-  if (n.patternType && n.necklinePrice != null && c.close <= n.necklinePrice * 1.0) {
+  const n = detectLetterNStructure(candles, idx, BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE);
+  if (n.displayReady && n.patternType && n.necklinePrice != null && c.close <= n.necklinePrice * 1.0) {
     const dist = (n.necklinePrice - c.close) / c.close;
     return {
       category: 7, label: HUNT_LABELS[7],

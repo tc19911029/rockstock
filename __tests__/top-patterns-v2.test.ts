@@ -23,7 +23,7 @@ describe('一字頂（課程 6-11：高檔窄幅橫盤 + 均線靠攏）detectTo
     // 均線帶：全部靠攏在 100 附近（三線 <3%、MA20 vs MA60 <5%）
     const ma = { ma5: 100.5, ma10: 100.2, ma20: 100.0, ma60: 98.5 };
     // 前段鋪滿歷史（過 N_MIN_HISTORY=30、且 idx >= MAX_DAYS+2）
-    for (let i = 0; i < 30; i++) candles.push(bar(`d${i}`, 100, 100.5, 99.5, 100, ma));
+    for (let i = 0; i < 30; i++) candles.push(bar(`d${i}`, 90, 91, 89.5, 90, ma));
     // 高檔窄幅橫盤 5 根：收盤區間 <10%，且橫盤高點在 MA20 之上（排除一字底）
     for (let i = 30; i < 35; i++) candles.push(bar(`d${i}`, 105, 106, 104.5, 105, ma));
     // 今日大量長黑跌破橫盤支撐
@@ -37,10 +37,21 @@ describe('一字頂（課程 6-11：高檔窄幅橫盤 + 均線靠攏）detectTo
     expect(r.achievementRate).toBeUndefined();
   });
 
+  test('只有均線附近普通橫盤、前段沒有明顯漲幅 → 不誤叫一字頂', () => {
+    const candles: CandleWithIndicators[] = [];
+    const ma = { ma5: 100.5, ma10: 100.2, ma20: 100.0, ma60: 98.5 };
+    for (let i = 0; i < 30; i++) candles.push(bar(`d${i}`, 100, 100.5, 99.5, 100, ma));
+    for (let i = 30; i < 35; i++) candles.push(bar(`d${i}`, 105, 106, 104.5, 105, ma));
+    candles.push(bar('d35', 105, 105.2, 100, 100.5, ma));
+
+    const r = detectTopPatternsStructure(candles, candles.length - 1);
+    expect(r.patternType).not.toBe('one-line-top');
+  });
+
   test('均線沒靠攏（MA20 遠離 MA60）→ 不算一字頂', () => {
     const candles: CandleWithIndicators[] = [];
     const maApart = { ma5: 100.5, ma10: 100.2, ma20: 100.0, ma60: 80.0 }; // MA20 vs MA60 差 25%
-    for (let i = 0; i < 30; i++) candles.push(bar(`d${i}`, 100, 100.5, 99.5, 100, maApart));
+    for (let i = 0; i < 30; i++) candles.push(bar(`d${i}`, 90, 91, 89.5, 90, maApart));
     for (let i = 30; i < 35; i++) candles.push(bar(`d${i}`, 105, 106, 104.5, 105, maApart));
     candles.push(bar('d35', 105, 105.2, 100, 100.5, maApart));
 

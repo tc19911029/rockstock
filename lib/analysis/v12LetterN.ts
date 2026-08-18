@@ -65,10 +65,12 @@ export interface LetterNResult {
   pivots?: Pivot[];
   bodyPct?: number;
   volumeRatio?: number;
-  /** 結構幾何品質（0-100，僅供候選排序；不是勝率）。 */
+  /** 腳位形狀吻合度（0-100；不含現價距頸線，不是勝率）。 */
   qualityScore?: number;
   /** 品質分數的可解釋摘要，避免 UI 把分數誤認成黑盒機率。 */
   qualityReasons?: string[];
+  /** 是否已接近到適合放上主圖（比分析層 current relevance 更嚴格）。 */
+  displayReady?: boolean;
   detail: string;
 }
 
@@ -102,7 +104,8 @@ export function detectLetterN(
 
   // 同一段 K 線常同時符合三重底／頭肩底／雙重底。舊版回傳固定順序第一個，
   // 分類會隨 detector 排列而非結構吻合度改變。現在先收集全部候選，再以品質排序。
-  const candidates = getRankedBottomMatches(candles, idx, true);
+  const candidates = getRankedBottomMatches(candles, idx, true)
+    .filter(candidate => candidate.quality.score >= BOTTOM_PATTERN_TRIGGER_MIN_QUALITY_SCORE);
   if (candidates.length === 0) return empty;
   const evaluated = candidates.map(candidate =>
     makeResult(candidate.match, c.close, bodyPct, volumeRatio, candidate.quality),
@@ -138,7 +141,8 @@ export function detectLetterNStructure(
       pivots: m.pivots,
       qualityScore: quality.score,
       qualityReasons: quality.reasons,
-      detail: `結構偵測：${getPatternName(m.patternType)}（結構品質 ${quality.score}/100，非勝率）`,
+      displayReady: quality.displayReady,
+      detail: `結構偵測：${getPatternName(m.patternType)}（形狀吻合 ${quality.score}/100，非勝率）`,
     };
   }
   return { triggered: false, detail: '無底部型態結構' };
@@ -157,8 +161,10 @@ type PatternKind = 'bottom' | 'top';
 
 interface PatternQuality {
   score: number;
+  timingScore: number;
   reasons: string[];
   relevant: boolean;
+  displayReady: boolean;
 }
 
 interface RankedMatch<TMatch> {
@@ -168,28 +174,17 @@ interface RankedMatch<TMatch> {
 
 const MIN_MEASURED_MOVE_PCT = 0.03;
 const MAX_MEASURED_MOVE_PCT = 0.50;
-const MAX_PENDING_NECKLINE_DISTANCE_PCT = 0.15;
-const MAX_STRUCTURE_EVENT_AGE_BARS = 40;
+const MAX_PENDING_NECKLINE_DISTANCE_PCT = 0.08;
+const MAX_STRUCTURE_EVENT_AGE_BARS = 20;
 const MAX_TERMINAL_EVENT_AGE_BARS = 10;
-export const PATTERN_DISPLAY_MIN_QUALITY_SCORE = 94;
-
-const PATTERN_SPECIFICITY: Record<BottomPatternType | TopPatternType, number> = {
-  'triple-bottom': 15,
-  'head-shoulder': 14,
-  'complex-head-shoulder': 15,
-  'rounding-bottom': 14,
-  'falling-diamond': 13,
-  'descending-wedge': 12,
-  'n-shape': 13,
-  'double-bottom': 10,
-  'triple-top': 15,
-  'head-shoulder-top': 14,
-  'complex-head-shoulder-top': 15,
-  'inverted-n-top': 13,
-  'long-double-top': 12,
-  'one-line-top': 12,
-  'double-top': 10,
-};
+const DISPLAY_MAX_PENDING_NECKLINE_DISTANCE_PCT = 0.03;
+const DISPLAY_MAX_EVENT_AGE_BARS = 10;
+/** 形狀吻合門檻；距頸線與事件新舊只負責 current relevance，不再灌進形狀分數。 */
+export const BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE = 90;
+export const TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE = 90;
+const BOTTOM_PATTERN_TRIGGER_MIN_QUALITY_SCORE = 80;
+const TOP_PATTERN_TRIGGER_MIN_QUALITY_SCORE = 85;
+const SUBPATTERN_SUPPRESSION_MIN_QUALITY_SCORE = 75;
 
 /** 複式頭肩的肩帶驗證；公開為純函式，讓真實誤判案例可以鎖成回歸測試。 */
 export function hasCoherentComplexShoulders(
@@ -231,6 +226,189 @@ function isValidPatternMatch(match: PatternMatch): boolean {
   return hasValidPatternGeometry(match) && match.patternTargetPrice > match.necklinePrice;
 }
 
+/** 未確認前的原始型態邊界；N／倒 N 要看右腳，不可被更早、較遠的前低／前高取代。 */
+export function getPatternFormationBoundaryPrice(
+  patternType: string,
+  pivots: readonly Pivot[],
+  kind: PatternKind,
+): number | undefined {
+  if (patternType === 'n-shape') return pivots[1]?.price;
+  if (patternType === 'inverted-n-top') return pivots[0]?.price;
+  const boundaryPivots = pivots.filter(pivot => kind === 'bottom' ? pivot.type === 'low' : pivot.type === 'high');
+  if (boundaryPivots.length === 0) return undefined;
+  return kind === 'bottom'
+    ? Math.min(...boundaryPivots.map(pivot => pivot.price))
+    : Math.max(...boundaryPivots.map(pivot => pivot.price));
+}
+
+type GeometryScorableMatch = Pick<PatternMatch, 'patternType' | 'necklinePrice' | 'patternTargetPrice' | 'pivots'> | Pick<TopPatternMatch, 'patternType' | 'necklinePrice' | 'patternTargetPrice' | 'pivots'>;
+
+const clampScore = (value: number) => Math.max(0, Math.min(100, value));
+const averageScore = (values: number[]) => Math.round(values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length));
+const levelFitScore = (values: number[], tolerance: number): number => {
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  if (!Number.isFinite(minimum) || minimum <= 0) return 0;
+  return clampScore(100 - 40 * ((maximum - minimum) / minimum) / tolerance);
+};
+const balanceFitScore = (leftSpan: number, rightSpan: number): number => {
+  if (leftSpan <= 0 || rightSpan <= 0) return 0;
+  return 60 + 40 * Math.min(leftSpan, rightSpan) / Math.max(leftSpan, rightSpan);
+};
+
+/** 以兩個已確認腳位投射指定 K 棒的切線價；避免斜頸線各 detector 各算一套。 */
+export function projectPivotLinePrice(older: Pivot, newer: Pivot, index: number): number | undefined {
+  const span = newer.index - older.index;
+  if (span <= 0) return undefined;
+  const slope = (newer.price - older.price) / span;
+  const projected = newer.price + slope * (index - newer.index);
+  return Number.isFinite(projected) && projected > 0 ? projected : undefined;
+}
+const prominenceFitScore = (prominence: number, minimum = 0.03, ideal = 0.10): number =>
+  clampScore(60 + 40 * (prominence - minimum) / Math.max(0.001, ideal - minimum));
+const boundedIdealScore = (value: number, minimum: number, idealLow: number, idealHigh: number, maximum: number): number => {
+  if (value < minimum || value > maximum) return 0;
+  if (value >= idealLow && value <= idealHigh) return 100;
+  if (value < idealLow) return 60 + 40 * (value - minimum) / Math.max(0.001, idealLow - minimum);
+  return 60 + 40 * (maximum - value) / Math.max(0.001, maximum - idealHigh);
+};
+
+/**
+ * 只衡量 detector 已選腳位的幾何吻合度；不讀現價、不看未來，也不把離頸線近當成形狀好。
+ * 回傳的分數供畫面候選篩選與多空衝突排序，不代表達成率或交易勝率。
+ */
+export function scorePatternGeometry(match: GeometryScorableMatch): { score: number; reasons: string[] } {
+  const pivots = match.pivots;
+  const measuredMove = Math.abs(match.patternTargetPrice - match.necklinePrice) / match.necklinePrice;
+  let components: Array<{ label: string; score: number }> = [];
+
+  switch (match.patternType) {
+    case 'triple-bottom':
+    case 'triple-top': {
+      const levels = pivots.slice(0, 3);
+      const necks = pivots.slice(3, 5);
+      components = [
+        { label: '三點齊度', score: levelFitScore(levels.map(p => p.price), 0.05) },
+        { label: '兩段時間', score: balanceFitScore(levels[0].index - levels[1].index, levels[1].index - levels[2].index) },
+        { label: '頸線齊度', score: levelFitScore(necks.map(p => p.price), 0.15) },
+      ];
+      break;
+    }
+    case 'head-shoulder':
+    case 'head-shoulder-top': {
+      const [rightShoulder, head, leftShoulder, rightNeck, leftNeck] = pivots;
+      const shoulderAverage = (rightShoulder.price + leftShoulder.price) / 2;
+      const prominence = Math.abs(head.price - shoulderAverage) / shoulderAverage;
+      components = [
+        { label: '肩線齊度', score: levelFitScore([rightShoulder.price, leftShoulder.price], 0.10) },
+        { label: '頭部突出', score: prominenceFitScore(prominence) },
+        { label: '左右時間', score: balanceFitScore(rightShoulder.index - head.index, head.index - leftShoulder.index) },
+        { label: '頸線齊度', score: levelFitScore([rightNeck.price, leftNeck.price], 0.15) },
+      ];
+      break;
+    }
+    case 'complex-head-shoulder':
+    case 'complex-head-shoulder-top': {
+      const structureType = match.patternType === 'complex-head-shoulder' ? 'low' : 'high';
+      const structure = pivots.filter(p => p.type === structureType).slice(0, 5);
+      const head = match.patternType === 'complex-head-shoulder'
+        ? structure.reduce((best, pivot) => pivot.price < best.price ? pivot : best)
+        : structure.reduce((best, pivot) => pivot.price > best.price ? pivot : best);
+      const shoulders = structure.filter(pivot => pivot !== head);
+      const shoulderAverage = shoulders.reduce((sum, pivot) => sum + pivot.price, 0) / shoulders.length;
+      const prominence = Math.abs(head.price - shoulderAverage) / shoulderAverage;
+      components = [
+        { label: '肩帶齊度', score: levelFitScore(shoulders.map(p => p.price), 0.12) },
+        { label: '頭部突出', score: prominenceFitScore(prominence, 0.05, 0.12) },
+        { label: '左右時間', score: balanceFitScore(Math.max(...shoulders.map(p => p.index)) - head.index, head.index - Math.min(...shoulders.map(p => p.index))) },
+      ];
+      break;
+    }
+    case 'double-bottom':
+    case 'double-top':
+    case 'long-double-top': {
+      components = [
+        { label: '雙點齊度', score: levelFitScore(pivots.slice(0, 2).map(p => p.price), 0.05) },
+        { label: '型態深度', score: boundedIdealScore(measuredMove, 0.03, 0.08, 0.20, 0.35) },
+      ];
+      if (match.patternType === 'long-double-top') {
+        components.push({ label: '長週期間距', score: clampScore(60 + Math.min(40, (pivots[0].index - pivots[1].index - LONG_DOUBLE_MIN_GAP) * 2)) });
+      }
+      break;
+    }
+    case 'rounding-bottom': {
+      const [rightRim, bottom, leftRim] = pivots;
+      components = [
+        { label: '杯緣齊度', score: levelFitScore([rightRim.price, leftRim.price], 0.15) },
+        { label: '左右弧長', score: balanceFitScore(rightRim.index - bottom.index, bottom.index - leftRim.index) },
+        { label: '弧底深度', score: boundedIdealScore(measuredMove, 0.03, 0.10, 0.30, 0.50) },
+      ];
+      break;
+    }
+    case 'descending-wedge': {
+      const [newHigh, oldHigh, newLow, oldLow] = pivots;
+      const highSlope = Math.abs(oldHigh.price - newHigh.price) / (newHigh.index - oldHigh.index);
+      const lowSlope = Math.abs(oldLow.price - newLow.price) / (newLow.index - oldLow.index);
+      const oldWidth = oldHigh.price - oldLow.price;
+      const newWidth = newHigh.price - newLow.price;
+      const convergence = lowSlope > 0 ? highSlope / lowSlope : 4;
+      const contraction = oldWidth > 0 ? 1 - newWidth / oldWidth : 0;
+      components = [
+        { label: '切線收斂', score: boundedIdealScore(convergence, 1.2, 1.5, 3.0, 6.0) },
+        { label: '寬度縮小', score: boundedIdealScore(contraction, 0.05, 0.20, 0.60, 0.90) },
+        { label: '兩線跨度', score: balanceFitScore(newHigh.index - oldHigh.index, newLow.index - oldLow.index) },
+      ];
+      break;
+    }
+    case 'falling-diamond': {
+      const [h0, h1, h2, h3, l0, l1, l2, l3] = pivots;
+      const upperBalance = Math.min(h2.price - h3.price, h1.price - h0.price) / Math.max(h2.price - h3.price, h1.price - h0.price);
+      const lowerBalance = Math.min(l3.price - l2.price, l0.price - l1.price) / Math.max(l3.price - l2.price, l0.price - l1.price);
+      components = [
+        { label: '上緣開收', score: clampScore(60 + 40 * upperBalance) },
+        { label: '下緣開收', score: clampScore(60 + 40 * lowerBalance) },
+        { label: '菱形深度', score: boundedIdealScore(measuredMove, 0.05, 0.12, 0.30, 0.50) },
+      ];
+      break;
+    }
+    case 'n-shape': {
+      const [a, b, previousLow] = pivots;
+      const leg = a.price - previousLow.price;
+      const retracement = leg > 0 ? (a.price - b.price) / leg : 1;
+      components = [
+        { label: '回檔比例', score: boundedIdealScore(retracement, 0.10, 0.30, 0.65, 0.90) },
+        { label: '兩段時間', score: balanceFitScore(b.index - a.index, a.index - previousLow.index) },
+      ];
+      break;
+    }
+    case 'inverted-n-top': {
+      const [c, a, b] = pivots;
+      const leg = a.price - b.price;
+      const retracement = leg > 0 ? (c.price - b.price) / leg : 1;
+      components = [
+        { label: '反彈比例', score: boundedIdealScore(retracement, 0.10, 0.30, 0.65, 0.90) },
+        { label: '兩段時間', score: balanceFitScore(c.index - b.index, b.index - a.index) },
+      ];
+      break;
+    }
+    case 'one-line-top': {
+      const [boxHigh, support] = pivots;
+      const range = (boxHigh.price - support.price) / support.price;
+      components = [
+        { label: '箱型窄幅', score: boundedIdealScore(range, 0.005, 0.02, 0.06, 0.10) },
+      ];
+      break;
+    }
+  }
+
+  const valid = components.filter(component => Number.isFinite(component.score));
+  const score = averageScore(valid.map(component => clampScore(component.score)));
+  return {
+    score,
+    reasons: valid.map(component => `${component.label} ${Math.round(component.score)}`),
+  };
+}
+
 function evaluatePatternQuality(
   match: PatternMatch | TopPatternMatch,
   candles: CandleWithIndicators[],
@@ -246,9 +424,7 @@ function evaluatePatternQuality(
   // 一字頂本來就是 ≤10% 窄幅箱型，允許較淺的 0.5% 結構；其他型態至少 3%。
   const minimumMeasuredMovePct = match.patternType === 'one-line-top' ? 0.005 : MIN_MEASURED_MOVE_PCT;
   const latestPivotIndex = Math.max(...match.pivots.map(pivot => pivot.index));
-  const formationBoundary = kind === 'bottom'
-    ? Math.min(...match.pivots.filter(pivot => pivot.type === 'low').map(pivot => pivot.price))
-    : Math.max(...match.pivots.filter(pivot => pivot.type === 'high').map(pivot => pivot.price));
+  const formationBoundary = getPatternFormationBoundaryPrice(match.patternType, match.pivots, kind);
   const sinceFormation = candles.slice(latestPivotIndex, idx + 1);
   const confirmationOffset = sinceFormation.findIndex(candle =>
     kind === 'bottom' ? candle.close >= confirmation : candle.close <= confirmation,
@@ -273,7 +449,7 @@ function evaluatePatternQuality(
   const confirmedOvershoot = kind === 'bottom'
     ? Math.max(0, (currentClose - neckline) / neckline)
     : Math.max(0, (neckline - currentClose) / neckline);
-  const formationBroken = confirmationIndex < 0 && Number.isFinite(formationBoundary) && sinceFormation.some(candle =>
+  const formationBroken = confirmationIndex < 0 && formationBoundary != null && Number.isFinite(formationBoundary) && sinceFormation.some(candle =>
     kind === 'bottom'
       ? candle.close < formationBoundary
       : candle.close > formationBoundary,
@@ -290,27 +466,21 @@ function evaluatePatternQuality(
     (terminalIndex >= 0 || confirmedOvershoot <= 0.20) &&
     !formationBroken &&
     eventAge <= (terminalIndex >= 0 ? MAX_TERMINAL_EVENT_AGE_BARS : MAX_STRUCTURE_EVENT_AGE_BARS);
+  const displayReady = relevant &&
+    pendingDistance <= DISPLAY_MAX_PENDING_NECKLINE_DISTANCE_PCT &&
+    eventAge <= DISPLAY_MAX_EVENT_AGE_BARS;
 
-  const proximityScore = Math.max(0, 25 * (1 - pendingDistance / MAX_PENDING_NECKLINE_DISTANCE_PCT));
+  const proximityScore = Math.max(0, 60 * (1 - pendingDistance / MAX_PENDING_NECKLINE_DISTANCE_PCT));
   const recencyLimit = terminalIndex >= 0 ? MAX_TERMINAL_EVENT_AGE_BARS : MAX_STRUCTURE_EVENT_AGE_BARS;
-  const recencyScore = Math.max(0, 20 * (1 - eventAge / recencyLimit));
-  // 量測幅度 10%~30% 得滿分；太淺容易是雜訊，太深則等距投射失真。
-  const depthScore = measuredMovePct <= 0.10
-    ? 15 * (measuredMovePct - minimumMeasuredMovePct) / (0.10 - minimumMeasuredMovePct)
-    : measuredMovePct <= 0.30
-      ? 15
-      : 15 * (MAX_MEASURED_MOVE_PCT - measuredMovePct) / (MAX_MEASURED_MOVE_PCT - 0.30);
-  const score = Math.max(0, Math.min(100, Math.round(
-    25 + PATTERN_SPECIFICITY[match.patternType] + proximityScore + recencyScore + Math.max(0, depthScore),
-  )));
-  const reasons = [
-    `距頸線 ${Math.round(pendingDistance * 1000) / 10}%`,
-    `量測幅度 ${Math.round(measuredMovePct * 1000) / 10}%`,
-    `最近事件 ${eventAge} 根`,
-  ];
-  if (formationBroken) reasons.push('確認前已破原型態邊界');
-  if (terminalIndex >= 0) reasons.push('已發生終結事件');
-  return { score, reasons, relevant };
+  const recencyScore = Math.max(0, 40 * (1 - eventAge / recencyLimit));
+  const geometry = scorePatternGeometry(match);
+  return {
+    score: geometry.score,
+    timingScore: Math.round(proximityScore + recencyScore),
+    reasons: geometry.reasons,
+    relevant,
+    displayReady,
+  };
 }
 
 const BOTTOM_DETECTORS = [
@@ -329,7 +499,7 @@ function getRankedBottomMatches(
   idx: number,
   requireCurrentRelevance: boolean,
 ): RankedMatch<PatternMatch>[] {
-  return BOTTOM_DETECTORS
+  const ranked = BOTTOM_DETECTORS
     .flatMap(detector => {
       const match = detector(candles, idx);
       if (!match || !isValidPatternMatch(match)) return [];
@@ -339,8 +509,13 @@ function getRankedBottomMatches(
     })
     .sort((a, b) =>
       b.quality.score - a.quality.score ||
+      b.quality.timingScore - a.quality.timingScore ||
       Math.max(...b.match.pivots.map(pivot => pivot.index)) - Math.max(...a.match.pivots.map(pivot => pivot.index)),
     );
+  // 雙重底是多數多腳型態的子集合；已有合格的完整型態時，不用子集合覆蓋分類。
+  return ranked.some(candidate => candidate.match.patternType !== 'double-bottom' && candidate.quality.score >= SUBPATTERN_SUPPRESSION_MIN_QUALITY_SCORE)
+    ? ranked.filter(candidate => candidate.match.patternType !== 'double-bottom')
+    : ranked;
 }
 
 function makeResult(
@@ -366,6 +541,7 @@ function makeResult(
     pivots: match.pivots,
     qualityScore: quality.score,
     qualityReasons: quality.reasons,
+    displayReady: quality.displayReady,
     detail,
   });
 
@@ -410,6 +586,7 @@ function makeResult(
     volumeRatio,
     qualityScore: quality.score,
     qualityReasons: quality.reasons,
+    displayReady: quality.displayReady,
     detail: `N ${getPatternName(match.patternType)}（${achievementRate != null ? `書本達成率 ${achievementRate}%+` : ''}突破頸線 ${match.necklinePrice.toFixed(2)}×3%+紅K${bodyPct.toFixed(2)}%）`,
   };
 }
@@ -588,13 +765,15 @@ function detectDescendingWedge(
 
   // 高點降速 > 低點降速 × 1.2 = 收斂
   if (highSlope <= lowSlope * WEDGE_CONVERGENCE_RATIO) return null;
+  const oldWidth = highs[1].price - lows[1].price;
+  const newWidth = highs[0].price - lows[0].price;
+  if (oldWidth <= 0 || newWidth <= 0 || newWidth >= oldWidth) return null;
 
   // 兩高點延伸線今日值（hNew + 斜率 × (今日 - hNew.index)）
   // 注意：highs[0] 比較新（index 較大），slope 為正（後高 > 前高的方向，但這裡前高>後高所以 slope 為負）
   // 重新計算：用 highs[1] (older) → highs[0] (newer)
-  const slopeForLine = (highs[0].price - highs[1].price) / (highs[0].index - highs[1].index); // 負值
-  const upperToday = highs[0].price + slopeForLine * (idx - highs[0].index);
-  if (upperToday <= 0) return null;
+  const upperToday = projectPivotLinePrice(highs[1], highs[0], idx);
+  if (upperToday == null) return null;
 
   // 楔形目標 = 突破點 + 楔形最大寬度（書本未明寫公式，採保守值：頸線+楔形入口寬度）
   const wedgeWidth = highs[1].price - lows[1].price;
@@ -713,17 +892,24 @@ function detectFallingDiamond(
   // 菱形最高 = h1 或 h2 中較高（菱形頂點附近）
   const peakHigh = Math.max(h1.price, h2.price);
 
+  // 突破線應是右半邊「下降上緣」的今日延伸值，不是整顆菱形的歷史最高點。
+  // 舊版直接拿 peakHigh 當水平頸線，會把確認門檻與目標整體抬高，造成長期不可能確認。
+  const upperSpan = h0.index - h1.index;
+  if (upperSpan < 3) return null;
+  const necklinePrice = projectPivotLinePrice(h1, h0, idx);
+  if (necklinePrice == null) return null;
+
   // 目標價 = 突破點 + 菱形高度（最高 - 最低）
   const peakLow = Math.min(l0.price, l1.price, l2.price, l3.price);
   const diamondHeight = peakHigh - peakLow;
-  const patternTargetPrice = peakHigh + diamondHeight;
+  const patternTargetPrice = necklinePrice + diamondHeight;
 
   // pivots 順序：4 highs (新→舊) + 4 lows (新→舊)（標籤 H1-H4 + L1-L4）
   return {
     patternType: 'falling-diamond',
-    necklinePrice: peakHigh,
+    necklinePrice,
     patternTargetPrice,
-    structureBrokenPrice: peakHigh,  // 跌破頸線（菱形上頸線=peakHigh）
+    structureBrokenPrice: necklinePrice,
     pivots: [...highs, ...lows],
   };
 }
@@ -897,7 +1083,7 @@ function detectRoundingBottom(
 // 書本《抓飆股》Part 7：上漲中的回測再攻
 //   結構：A（高）→ B（低，不破前低）→ C（紅K收盤過 A 高）
 //   目標 = C 突破點 + (A 高 − B 低)
-//   結構失效 = 跌破 B 低
+  //   原始型態失效 = 確認前跌破 B 低；突破後回測失敗則看 A 頸線 ×0.97。
 //
 // 與其他底部型態不同：N 字底前提是「已在上漲」，B 不創新低，
 // 是回檔後再攻創新高的延續型態（接近 P 高檔拉回但有頭部突破要件）
@@ -934,15 +1120,19 @@ function detectNShape(
   //   （量初升腿 prevLow→A 的長度，從右腳 B 投射，= 教科書量測移動；非退化成 A）
   const patternHeight = a.price - prevLow.price;
   if (patternHeight <= 0) return null;
+  // B 必須是可辨識的回檔，不可高於 A，也不可幾乎跌回前低；否則只是雜訊或已破壞初升段。
+  const retracement = (a.price - b.price) / patternHeight;
+  if (retracement < 0.10 || retracement > 0.90) return null;
   const patternTargetPrice = b.price + patternHeight;
 
-  // pivots 順序：A 高（突破點）+ B 低（標籤 A/B）
+  // pivots 順序：A 高（突破點）+ B 低（右腳）+ 前低（初升腿起點）。
+  // 目標公式實際使用前低，圖上也必須畫出，否則使用者無法核對投射距離。
   return {
     patternType: 'n-shape',
     necklinePrice: a.price,           // A 高 = 突破點
     patternTargetPrice,
     structureBrokenPrice: a.price,    // 跌破頸線（A 高 = 突破點 = 頸線）；書本標準
-    pivots: [a, b],
+    pivots: [a, b, prevLow],
   };
 }
 
@@ -976,9 +1166,10 @@ export interface TopPatternResult {
   structureBrokenPrice?: number;
   /** 構成形態的關鍵 pivot 點（走圖視覺化用）*/
   pivots?: Pivot[];
-  /** 結構幾何品質（0-100，僅供候選排序；不是勝率）。 */
+  /** 腳位形狀吻合度（0-100；不含現價距頸線，不是勝率）。 */
   qualityScore?: number;
   qualityReasons?: string[];
+  displayReady?: boolean;
   detail: string;
 }
 
@@ -1008,7 +1199,8 @@ export function detectTopPatterns(
   const volumeRatio = c.volume / prev.volume;
   if (volumeRatio < BOOK_VOL_RATIO_MIN) return empty;
 
-  const candidates = getRankedTopMatches(candles, idx, true);
+  const candidates = getRankedTopMatches(candles, idx, true)
+    .filter(candidate => candidate.quality.score >= TOP_PATTERN_TRIGGER_MIN_QUALITY_SCORE);
   if (candidates.length === 0) return empty;
   const evaluated = candidates.map(candidate => makeTopResult(candidate.match, c.close, candidate.quality));
   return evaluated.find(result => result.triggered) ?? evaluated[0];
@@ -1040,7 +1232,8 @@ export function detectTopPatternsStructure(
       pivots: m.pivots,
       qualityScore: quality.score,
       qualityReasons: quality.reasons,
-      detail: `結構偵測：${getTopPatternName(m.patternType)}（結構品質 ${quality.score}/100，非勝率）`,
+      displayReady: quality.displayReady,
+      detail: `結構偵測：${getTopPatternName(m.patternType)}（形狀吻合 ${quality.score}/100，非勝率）`,
     };
   }
   return { triggered: false, detail: '無頂部型態結構' };
@@ -1061,7 +1254,7 @@ function getRankedTopMatches(
   idx: number,
   requireCurrentRelevance: boolean,
 ): RankedMatch<TopPatternMatch>[] {
-  return TOP_DETECTORS
+  const ranked = TOP_DETECTORS
     .flatMap(detector => {
       const match = detector(candles, idx);
       if (!match || !isValidTopPatternMatch(match)) return [];
@@ -1071,8 +1264,13 @@ function getRankedTopMatches(
     })
     .sort((a, b) =>
       b.quality.score - a.quality.score ||
+      b.quality.timingScore - a.quality.timingScore ||
       Math.max(...b.match.pivots.map(pivot => pivot.index)) - Math.max(...a.match.pivots.map(pivot => pivot.index)),
     );
+  // 一般雙頂是其他多腳頂部型態的子集合；完整型態合格時只留完整分類。
+  return ranked.some(candidate => candidate.match.patternType !== 'double-top' && candidate.quality.score >= SUBPATTERN_SUPPRESSION_MIN_QUALITY_SCORE)
+    ? ranked.filter(candidate => candidate.match.patternType !== 'double-top')
+    : ranked;
 }
 
 function makeTopResult(match: TopPatternMatch, closePrice: number, quality: PatternQuality): TopPatternResult {
@@ -1092,6 +1290,7 @@ function makeTopResult(match: TopPatternMatch, closePrice: number, quality: Patt
     pivots: match.pivots,
     qualityScore: quality.score,
     qualityReasons: quality.reasons,
+    displayReady: quality.displayReady,
     detail,
   });
 
@@ -1124,6 +1323,7 @@ function makeTopResult(match: TopPatternMatch, closePrice: number, quality: Patt
     pivots: match.pivots,
     qualityScore: quality.score,
     qualityReasons: quality.reasons,
+    displayReady: quality.displayReady,
     detail: `${getTopPatternName(match.patternType)}（跌破頸線 ${match.necklinePrice.toFixed(2)}×3%；教材未提供本型態精確達成率）`,
   };
 }
@@ -1350,12 +1550,16 @@ function detectInvertedNTop(candles: CandleWithIndicators[], idx: number): TopPa
   // 舊條件方向顛倒，形成不可能區間，導致倒 N 字頂永遠偵測不到。
   const lowB = lows.find(l => l.index > highA.index && l.index < highC.index);
   if (!lowB) return null;
+  const downLeg = highA.price - lowB.price;
+  if (downLeg <= 0) return null;
+  const retracement = (highC.price - lowB.price) / downLeg;
+  if (retracement < 0.10 || retracement > 0.90) return null;
   const necklinePrice = lowB.price;                 // 跌破 B = 倒N確認（makeTopResult 判 close ≤ B×0.97）
   // 目標價 = 正波段算法（課程 6-11：倒 N 與 N 字底一樣，是 6 頭部型態裡唯一例外）
   // 2026-07-12 修：課程明訂倒 N「不是從跌破點往下減，而是從轉折高往下算」。鏡像 N 字底
   //   （target = 右腳 + (前高 − 深腳)）：型態距離 = 高峰 highA − 頸線 lowB；
   //   從「跌破點往前找的轉折高」（右肩 highC）往下算 = highC − (highA − lowB)。
-  const patternHeight = highA.price - lowB.price;
+  const patternHeight = downLeg;
   const patternTargetPrice = highC.price - patternHeight;
   return { patternType: 'inverted-n-top', necklinePrice, patternTargetPrice, structureBrokenPrice: necklinePrice, pivots: [highC, highA, lowB] };
 }
@@ -1369,6 +1573,9 @@ function detectOneLineTop(candles: CandleWithIndicators[], idx: number): TopPatt
   const MIN_DAYS = 3;          // 課程：一字頂「盤頭時間不會很久」
   const MAX_DAYS = 20;
   const MAX_RANGE_PCT = 0.10;  // 高檔窄幅（區間 ≤10%，鏡像一字底課程 6-4「區間範圍 10%」）
+  // ⚠️ 系統防誤判門檻（非教材統計）：一字「頂」前必須已有可辨識漲幅。
+  // 若只判箱頂略高於 MA20，任何均線附近的普通橫盤都會被叫成頭部。
+  const MIN_PRIOR_RUNUP_PCT = 0.15;
   if (idx < MAX_DAYS + 2) return null;
 
   // 橫盤窗＝往前擴到最長的窄幅收盤區間（含納 idx-1，不含今日突破 K）
@@ -1405,6 +1612,11 @@ function detectOneLineTop(candles: CandleWithIndicators[], idx: number): TopPatt
 
   // 高檔盤頭（排除低檔一字＝一字底）：橫盤高點在均線帶之上
   if (boxHigh <= ma20) return null;
+  const priorStart = Math.max(0, start - 60);
+  const priorBars = candles.slice(priorStart, start);
+  if (priorBars.length < 20) return null;
+  const priorLow = Math.min(...priorBars.map(candle => candle.low));
+  if (!Number.isFinite(priorLow) || priorLow <= 0 || (boxHigh - priorLow) / priorLow < MIN_PRIOR_RUNUP_PCT) return null;
 
   const necklinePrice = supportLow;                        // 跌破此支撐＝一字頂確認
   const patternTargetPrice = necklinePrice - (boxHigh - necklinePrice);

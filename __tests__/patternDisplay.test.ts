@@ -18,6 +18,11 @@ describe('patternDisplay', () => {
     expect(getPivotLabels('inverted-n-top', pivots)).toEqual(['C', 'A', 'B']);
   });
 
+  it('N 字底把目標公式使用的前低一併標出', () => {
+    const pivots = [pivot('high', 120, 20), pivot('low', 100, 26), pivot('low', 80, 10)];
+    expect(getPivotLabels('n-shape', pivots)).toEqual(['A', 'B', '前低']);
+  });
+
   it('一字頂使用箱頂／支撐語意，不再沿用島狀反轉標籤', () => {
     const labels = getPivotLabels('one-line-top', [pivot('high', 100), pivot('low', 95)]);
     expect(labels).toEqual(['箱頂', '支撐']);

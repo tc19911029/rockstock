@@ -32,7 +32,7 @@ export function getPivotLabels(patternType: string, pivots: Pivot[]): string[] {
     case 'falling-diamond':     return ['H1', 'H2', 'H3', 'H4', 'L1', 'L2', 'L3', 'L4'];
     case 'double-bottom':       return ['L1', 'L2', 'H'];
     case 'rounding-bottom':     return ['H1', '弧底', 'H2'];
-    case 'n-shape':             return ['A', 'B'];
+    case 'n-shape':             return ['A', 'B', '前低'];
     case 'triple-top':          return ['H1', 'H2', 'H3', 'L1', 'L2'];
     case 'head-shoulder-top':   return ['RS', '頂', 'LS', 'RN', 'LN'];
     case 'double-top':          return ['H1', 'H2', 'L'];

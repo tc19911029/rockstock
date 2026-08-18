@@ -1,4 +1,9 @@
-import { hasCoherentComplexShoulders } from '@/lib/analysis/v12LetterN';
+import {
+  getPatternFormationBoundaryPrice,
+  hasCoherentComplexShoulders,
+  projectPivotLinePrice,
+  scorePatternGeometry,
+} from '@/lib/analysis/v12LetterN';
 import { choosePatternCandidate } from '@/lib/chart/patternSelection';
 
 describe('型態品質與衝突選擇', () => {
@@ -30,5 +35,40 @@ describe('型態品質與衝突選擇', () => {
     const bottom = { qualityScore: 96, pivots: [{ index: 10, price: 90, type: 'low' as const }] };
     const top = { qualityScore: 96, pivots: [{ index: 20, price: 110, type: 'high' as const }] };
     expect(choosePatternCandidate(bottom, top)).toBe(top);
+  });
+
+  it('形狀分只看腳位幾何，三底越整齊且時間越對稱分數越高', () => {
+    const match = (prices: number[], indices: number[]) => ({
+      patternType: 'triple-bottom' as const,
+      necklinePrice: 120,
+      patternTargetPrice: 140,
+      pivots: [
+        { type: 'low' as const, price: prices[0], index: indices[0] },
+        { type: 'low' as const, price: prices[1], index: indices[1] },
+        { type: 'low' as const, price: prices[2], index: indices[2] },
+        { type: 'high' as const, price: 120, index: 25 },
+        { type: 'high' as const, price: 119, index: 15 },
+      ],
+    });
+    const symmetric = scorePatternGeometry(match([100, 100.5, 99.5], [30, 20, 10]));
+    const edgeCase = scorePatternGeometry(match([100, 104.5, 99.5], [30, 27, 10]));
+    expect(symmetric.score).toBeGreaterThan(edgeCase.score);
+    expect(symmetric.reasons).toEqual(expect.arrayContaining([expect.stringContaining('三點齊度')]));
+  });
+
+  it('N 字確認前以右腳 B 為失效邊界，不被更早前低放寬', () => {
+    expect(getPatternFormationBoundaryPrice('n-shape', [
+      { type: 'high', price: 120, index: 20 },
+      { type: 'low', price: 100, index: 26 },
+      { type: 'low', price: 80, index: 10 },
+    ], 'bottom')).toBe(100);
+  });
+
+  it('下降頸線用兩個高點延伸到今日，不誤用歷史最高點當水平線', () => {
+    expect(projectPivotLinePrice(
+      { type: 'high', price: 120, index: 10 },
+      { type: 'high', price: 100, index: 20 },
+      25,
+    )).toBe(90);
   });
 });
