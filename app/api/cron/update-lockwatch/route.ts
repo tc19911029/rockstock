@@ -52,9 +52,9 @@ export async function GET(req: NextRequest) {
     } = await import('@/lib/storage/lockWatchStorage');
     const {
       updateLockWatch,
-      checkStructureBroken,
-      markStructureBroken,
+      migrateNLockWatchDetector,
     } = await import('@/lib/scanner/lockWatchManager');
+    const { mergeLockWatchRecord } = await import('@/lib/scanner/lockWatchMerge');
 
     // 包整段 evolve 在 lockwatch 鎖內 — 避免跟並發 scan-bm appendLockWatchRecords race
     return await withLockWatchLock(market, today, async () => {
@@ -110,6 +110,7 @@ export async function GET(req: NextRequest) {
       structureBroken: 0,
       purchased: 0,
       manuallyRemoved: 0,
+      targetReached: 0,
       changed: 0,
     };
     const newRecords = [];
@@ -120,11 +121,13 @@ export async function GET(req: NextRequest) {
         r.currentStage === 'purchased' ||
         r.currentStage === 'revoked' ||
         r.currentStage === 'manually-removed' ||
-        r.currentStage === 'structure-broken'
+        r.currentStage === 'structure-broken' ||
+        r.currentStage === 'target-reached'
       ) {
         if (r.currentStage === 'purchased') summary.purchased++;
         else if (r.currentStage === 'revoked') summary.revoked++;
         else if (r.currentStage === 'manually-removed') summary.manuallyRemoved++;
+        else if (r.currentStage === 'target-reached') summary.targetReached++;
         else summary.structureBroken++;
         newRecords.push(r);
         continue;
@@ -138,23 +141,15 @@ export async function GET(req: NextRequest) {
           continue;
         }
 
-        // 結構失效優先（議題 49）
-        const structCheck = checkStructureBroken(r, candles);
-        if (structCheck.broken) {
-          const broken = markStructureBroken(r, today, structCheck.reason ?? '結構失效');
-          newRecords.push(broken);
-          summary.structureBroken++;
-          summary.changed++;
-          continue;
-        }
-
-        // 一般 updateLockWatch（撤銷 / 升級 / 維持）
+        // updateLockWatch 內部順序固定為：舊 detector 重播 → 結構失效 → 達標 → 趨勢撤銷。
         const { changed, record: updated } = updateLockWatch(r, candles, indexCandles, today);
         newRecords.push(updated);
         if (changed) summary.changed++;
         if (updated.currentStage === 'observation') summary.observation++;
         else if (updated.currentStage === 'entry-signal') summary.entrySignal++;
         else if (updated.currentStage === 'revoked') summary.revoked++;
+        else if (updated.currentStage === 'structure-broken') summary.structureBroken++;
+        else if (updated.currentStage === 'target-reached') summary.targetReached++;
       } catch (err) {
         console.warn(`[update-lockwatch] ${market} ${r.symbol} update 失敗（保留原狀）:`, err);
         newRecords.push(r);
@@ -163,15 +158,49 @@ export async function GET(req: NextRequest) {
 
     // ── Step 4: 合併今日新觸發 records（scan-bm 已寫入）──
     // 用 (symbol, triggerSignal) 當 key；evolved 為主，今日新 records 補不衝突的
-    const evolvedKeys = new Set(newRecords.map((r) => `${r.symbol}-${r.triggerSignal}`));
+    const evolvedIndex = new Map(newRecords.map((r, index) => [`${r.symbol}-${r.triggerSignal}`, index]));
     let newToday = 0;
     for (const r of todayNewRecords) {
-      const key = `${r.symbol}-${r.triggerSignal}`;
-      if (!evolvedKeys.has(key)) {
-        newRecords.push(r);
+      let incoming = r;
+      if (r.triggerSignal === 'N') {
+        const candles = await scanner.fetchCandles(r.symbol, today).catch(() => []);
+        if (candles.length > 0) {
+          const migrated = migrateNLockWatchDetector(r, candles, today);
+          incoming = migrated.record;
+          if (migrated.changed) summary.changed++;
+        }
+      }
+      const key = `${incoming.symbol}-${incoming.triggerSignal}`;
+      const existingIndex = evolvedIndex.get(key);
+      if (existingIndex == null) {
+        newRecords.push(incoming);
+        evolvedIndex.set(key, newRecords.length - 1);
         newToday++;
         summary.observation++;
+      } else {
+        const before = newRecords[existingIndex];
+        const merged = mergeLockWatchRecord(before, incoming);
+        newRecords[existingIndex] = merged;
+        if (merged.triggeredDate > before.triggeredDate) newToday++;
       }
+    }
+
+    // 合併時可能由「昨日已結束」切成「今日重新觸發」，最後再依實際 records 重算分桶。
+    summary.observation = 0;
+    summary.entrySignal = 0;
+    summary.revoked = 0;
+    summary.structureBroken = 0;
+    summary.purchased = 0;
+    summary.manuallyRemoved = 0;
+    summary.targetReached = 0;
+    for (const record of newRecords) {
+      if (record.currentStage === 'observation' || record.currentStage === 'pending-breakout') summary.observation++;
+      else if (record.currentStage === 'entry-signal') summary.entrySignal++;
+      else if (record.currentStage === 'revoked') summary.revoked++;
+      else if (record.currentStage === 'structure-broken') summary.structureBroken++;
+      else if (record.currentStage === 'purchased') summary.purchased++;
+      else if (record.currentStage === 'manually-removed') summary.manuallyRemoved++;
+      else if (record.currentStage === 'target-reached') summary.targetReached++;
     }
 
     // ── Step 5: 寫入今日 snapshot ──────────────────────────────────

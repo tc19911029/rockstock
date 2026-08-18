@@ -209,6 +209,7 @@ export function hasCoherentComplexShoulders(
 }
 
 function hasValidPatternGeometry(match: {
+  patternType: string;
   necklinePrice: number;
   patternTargetPrice: number;
   structureBrokenPrice: number;
@@ -217,6 +218,9 @@ function hasValidPatternGeometry(match: {
   return [match.necklinePrice, match.patternTargetPrice, match.structureBrokenPrice]
     .every(price => Number.isFinite(price) && price > 0) &&
     match.pivots.length > 0 &&
+    // 轉折型態的腳位不可由同一根 K 棒重複擔任；一字頂的兩點是箱體價帶端點，並非相鄰 swing。
+    (match.patternType === 'one-line-top' ||
+      new Set(match.pivots.map(pivot => pivot.index)).size === match.pivots.length) &&
     match.pivots.every(pivot =>
       Number.isInteger(pivot.index) && pivot.index >= 0 &&
       Number.isFinite(pivot.price) && pivot.price > 0,

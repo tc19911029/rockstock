@@ -241,6 +241,7 @@ export async function GET(req: NextRequest) {
                 triggerPrice: p.triggerPrice,
                 currentClose: r.price,  // Phase C：依 close 跟 neckline×1.03 比較決定 stage
                 patternTargetPrice: p.patternTargetPrice,
+                structureBrokenPrice: p.structureBrokenPrice,
                 patternAchievementRate: p.patternAchievementRate,
                 patternPivots: p.patternPivots,
               });

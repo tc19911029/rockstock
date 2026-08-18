@@ -42,6 +42,7 @@ const EMPTY_STAGE: Record<LockWatchRecord['currentStage'], number> = {
   revoked: 0,
   'manually-removed': 0,
   'structure-broken': 0,
+  'target-reached': 0,
 };
 
 async function statsFor(market: MarketId): Promise<MarketStats> {

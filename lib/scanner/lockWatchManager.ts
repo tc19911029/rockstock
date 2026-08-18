@@ -23,7 +23,16 @@
 import type { CandleWithIndicators } from '../../types';
 
 import { detectTrend } from '../analysis/trendAnalysis';
+import { detectLetterN, type LetterNResult } from '../analysis/v12LetterN';
 import { tradingDaysBetween } from '../utils/tradingDay';
+import {
+  assessLockedPatternReplay,
+  type LockedPatternReplayAssessment,
+} from './lockedPatternSelection';
+import {
+  CURRENT_N_PATTERN_DETECTOR_VERSION,
+  hasReachedLockWatchTarget,
+} from './lockWatchEligibility';
 import type {
   LockWatchDailySnapshot,
   LockWatchEvent,
@@ -46,6 +55,7 @@ export function createLockWatchFromN(args: {
   triggerPrice: number;  // 頸線價
   currentClose: number;
   patternTargetPrice?: number;
+  structureBrokenPrice?: number;
   patternAchievementRate?: number;
   patternPivots?: LockWatchRecord['patternPivots'];
 }): LockWatchRecord {
@@ -57,6 +67,8 @@ export function createLockWatchFromN(args: {
     patternType: args.patternType,
     triggerPrice: args.triggerPrice,
     patternTargetPrice: args.patternTargetPrice,
+    structureBrokenPrice: args.structureBrokenPrice,
+    detectorVersion: CURRENT_N_PATTERN_DETECTOR_VERSION,
     patternAchievementRate: args.patternAchievementRate,
     patternPivots: args.patternPivots,
     currentStage: 'observation',
@@ -140,6 +152,7 @@ export function updateLockWatch(
     record.currentStage === 'revoked' ||
     record.currentStage === 'manually-removed' ||
     record.currentStage === 'structure-broken' ||
+    record.currentStage === 'target-reached' ||
     record.currentStage === 'purchased'
   ) {
     return { changed: false, record };
@@ -153,29 +166,62 @@ export function updateLockWatch(
   const c = candles[lastIdx];
   // daysObserved 用交易日計（書本「停留 N 天」一律指交易日；calendar days 會被週末/假日污染）
   const newDaysObserved = tradingDaysBetween(record.triggeredDate, today, record.market);
-  const updatedRecord: LockWatchRecord = {
+  let updatedRecord: LockWatchRecord = {
     ...record,
     daysObserved: Math.max(0, newDaysObserved),
     currentClose: c.close,  // Phase D：每天 update 都重新抓 close，UI 顯示「現價」用
     history: [...record.history],
   };
+  let metadataChanged = false;
 
   // 2026-05-13 對齊書本：移除 pending-breakout 升級邏輯（書本沒有兩段觀察流程）
   // 舊資料若仍含 pending-breakout，視同 observation 處理（向下相容，不會誤撤銷）
   if (record.currentStage === 'pending-breakout') {
     updatedRecord.currentStage = 'observation';
+    metadataChanged = true;
+  }
+
+  // ── 0. 舊 N 型態重播驗證 ──
+  // detector 規則有不相容更新時，舊頸線／目標不能只靠 close 或趨勢繼續存活。
+  // 使用原觸發日的 K 線重跑目前 detector；通過才升級版本，失敗直接撤銷。
+  if (
+    record.triggerSignal === 'N' &&
+    record.detectorVersion !== CURRENT_N_PATTERN_DETECTOR_VERSION
+  ) {
+    const migration = migrateNLockWatchDetector(updatedRecord, candles, today);
+    updatedRecord = {
+      ...migration.record,
+      daysObserved: updatedRecord.daysObserved,
+      currentClose: updatedRecord.currentClose,
+      history: migration.record.history,
+    };
+    metadataChanged ||= migration.changed;
+    if (updatedRecord.currentStage === 'revoked') return { changed: true, record: updatedRecord };
+    // unavailable 代表本次 candles 沒涵蓋觸發日；保留紀錄但不補版本，UI/API 仍會禁止買入。
   }
 
   // ── 1. 結構失效：與圖表共用同一套邊界 ──
   // 舊版 N 一跌破頸線就 revoked，但圖表允許頸線下 3% 的正常回測，造成同一檔兩種狀態。
-  const structureCheck = checkStructureBroken(record, candles);
+  const structureCheck = checkStructureBroken(updatedRecord, candles);
   if (structureCheck.broken) {
     updatedRecord.currentStage = 'structure-broken';
     addEvent(updatedRecord, today, 'structure-broken', structureCheck.reason);
     return { changed: true, record: updatedRecord };
   }
 
-  // ── 2. 撤銷條件：detectTrend 翻空頭 ──
+  // ── 2. 已進入型態目標價緩衝區：保留歷史，但不再作為新進場 ──
+  if (record.triggerSignal === 'N' && hasReachedLockWatchTarget(updatedRecord, c.close)) {
+    updatedRecord.currentStage = 'target-reached';
+    addEvent(
+      updatedRecord,
+      today,
+      'target-reached',
+      `收盤 ${c.close.toFixed(2)} 已接近或到達型態目標 ${updatedRecord.patternTargetPrice?.toFixed(2) ?? '—'}`,
+    );
+    return { changed: true, record: updatedRecord };
+  }
+
+  // ── 3. 撤銷條件：detectTrend 翻空頭 ──
   const stockTrend = detectTrend(candles as CandleWithIndicators[], lastIdx);
   if (stockTrend === '空頭') {
     updatedRecord.currentStage = 'revoked';
@@ -186,7 +232,7 @@ export function updateLockWatch(
   // 2026-05-13 對齊書本：移除「等個股趨勢翻多 + 大盤過 Step 0 才升 entry-signal」自創邏輯
   // 書本（寶典 Part 11-1 #7、抓住K線 V 反轉戰法）：型態確認/V 反轉成立當天就是進場訊號
   // 紀錄留為 observation 即可（observation = 已觸發書本進場條件）
-  return { changed: false, record: updatedRecord };
+  return { changed: metadataChanged, record: updatedRecord };
 }
 
 /**
@@ -241,17 +287,19 @@ export function checkStructureBroken(
     // F V 反轉：跌破真正 V 底（變盤線 low）→ 結構失效
     // vBottom 是實際 V 底（lockWatchProducer 從 vReversalDetector.stopBarLow 抽取）
     // triggerPrice 是 rebound close，比 vBottom 高得多，不可用來判結構失效
-    const vBottom = record.vBottom ?? record.triggerPrice;  // 舊資料 fallback（可能 false positive）
-    if (c.low < vBottom) {
+    const vBottom = record.vBottom;
+    if (typeof vBottom === 'number' && Number.isFinite(vBottom) && vBottom > 0 && c.low < vBottom) {
       return { broken: true, reason: 'F 跌破 V 底' };
     }
   }
 
   if (record.triggerSignal === 'N') {
-    // N 各型態：用 patternType 對應的「結構失效點」（記錄在 meta，但 LockWatchRecord 沒存）
-    // 簡化版：跌破 triggerPrice（頸線價）即失效
-    if (c.close < record.triggerPrice * 0.97) {
-      return { broken: true, reason: 'N 跌破型態關鍵支撐（< 頸線 -3%）' };
+    const structureBrokenPrice = record.structureBrokenPrice ?? record.triggerPrice * 0.97;
+    if (c.close < structureBrokenPrice) {
+      return {
+        broken: true,
+        reason: `N 跌破型態結構失效價 ${structureBrokenPrice.toFixed(2)}`,
+      };
     }
   }
 
@@ -273,6 +321,83 @@ export function markStructureBroken(
   };
   addEvent(updated, today, 'structure-broken', reason);
   return updated;
+}
+
+export interface LockWatchNReplayResult {
+  assessment: LockedPatternReplayAssessment;
+  result?: LetterNResult;
+}
+
+/**
+ * 只執行 detector migration，不跑當日趨勢／達標生命週期。
+ * 供盤中已先寫入「今日新訊號」的紀錄在盤後合併前補版本。
+ */
+export function migrateNLockWatchDetector(
+  record: LockWatchRecord,
+  candles: ReadonlyArray<CandleWithIndicators>,
+  today: string,
+): LockWatchUpdateResult {
+  if (
+    record.triggerSignal !== 'N' ||
+    record.detectorVersion === CURRENT_N_PATTERN_DETECTOR_VERSION
+  ) {
+    return { changed: false, record };
+  }
+
+  const replay = replayLockWatchNPattern(record, candles);
+  if (replay.assessment.status === 'unavailable') return { changed: false, record };
+
+  const updated: LockWatchRecord = { ...record, history: [...record.history] };
+  if (replay.assessment.status === 'rejected') {
+    updated.currentStage = 'revoked';
+    addEvent(
+      updated,
+      today,
+      'provisional-revoke',
+      `現行 N 型態偵測器重播失敗（${replay.assessment.reason}）`,
+    );
+    return { changed: true, record: updated };
+  }
+
+  updated.detectorVersion = CURRENT_N_PATTERN_DETECTOR_VERSION;
+  if (replay.result?.structureBrokenPrice != null) {
+    updated.structureBrokenPrice = replay.result.structureBrokenPrice;
+  }
+  if ((!updated.patternPivots || updated.patternPivots.length === 0) && replay.result?.pivots) {
+    updated.patternPivots = replay.result.pivots.flatMap(pivot => {
+      const pivotCandle = candles[pivot.index];
+      return pivotCandle
+        ? [{
+            date: pivotCandle.date.replace(/\*$/, ''),
+            price: pivot.price,
+            type: pivot.type,
+          }]
+        : [];
+    });
+  }
+  return { changed: true, record: updated };
+}
+
+/** 用原觸發日回放現行 N detector；不讀未來 K 棒。 */
+export function replayLockWatchNPattern(
+  record: LockWatchRecord,
+  candles: ReadonlyArray<CandleWithIndicators>,
+): LockWatchNReplayResult {
+  if (record.triggerSignal !== 'N') {
+    return { assessment: { status: 'unavailable', reason: 'missing-replay-data' } };
+  }
+  const triggerIndex = candles.findIndex(
+    candle => candle.date.replace(/\*$/, '') === record.triggeredDate,
+  );
+  if (triggerIndex < 0) {
+    return { assessment: { status: 'unavailable', reason: 'missing-replay-data' } };
+  }
+  const replayCandles = candles.slice(0, triggerIndex + 1);
+  const result = detectLetterN(replayCandles, triggerIndex, record.market, record.symbol);
+  return {
+    assessment: assessLockedPatternReplay(record, result),
+    result,
+  };
 }
 
 // ── 內部 helper ──────────────────────────────────────────────────────────

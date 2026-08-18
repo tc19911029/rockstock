@@ -88,6 +88,7 @@ export default function PortfolioPage() {
   }, [symbolListForSummary]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formLoading, setFormLoading] = useState(false);
+  const [formError, setFormError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   // 議題 C2：LockWatchPanel 帶來的 entryPattern 暫存；add() 時寫入 holding
@@ -97,6 +98,12 @@ export default function PortfolioPage() {
     targetPrice: number;
     stopPrice?: number;
     kind: 'bottom' | 'top';
+  } | null>(null);
+  const [prefilledLockWatch, setPrefilledLockWatch] = useState<{
+    market: 'TW' | 'CN';
+    symbol: string;
+    triggerSignal: 'F' | 'N';
+    triggeredDate: string;
   } | null>(null);
 
   // ── LockWatch → Portfolio prefill 整合（議題 62 + C2）─────────────────
@@ -119,6 +126,23 @@ export default function PortfolioPage() {
       const neckline = params.get('neckline');
       const target = params.get('target');
       const stop = params.get('stop');
+      const source = params.get('source');
+      const sourceMarket = params.get('market');
+      const triggeredDate = params.get('triggeredDate');
+      if (
+        source === 'lockwatch' &&
+        (sourceMarket === 'TW' || sourceMarket === 'CN') &&
+        (trigger === 'F' || trigger === 'N') &&
+        triggeredDate &&
+        /^\d{4}-\d{2}-\d{2}$/.test(triggeredDate)
+      ) {
+        setPrefilledLockWatch({
+          market: sourceMarket,
+          symbol: prefill,
+          triggerSignal: trigger,
+          triggeredDate,
+        });
+      }
       if (patternType && neckline && target) {
         setPrefilledEntryPattern({
           patternType,
@@ -196,6 +220,8 @@ export default function PortfolioPage() {
   }, [symbolsKey]);
 
   function openEdit(h: PortfolioHolding) {
+    setPrefilledEntryPattern(null);
+    setPrefilledLockWatch(null);
     setEditId(h.id);
     setForm({
       symbol: h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, ''),
@@ -213,6 +239,9 @@ export default function PortfolioPage() {
     setShowForm(false);
     setEditId(null);
     setForm({ ...EMPTY_FORM, buyDate: todayCST() });
+    setFormError('');
+    setPrefilledEntryPattern(null);
+    setPrefilledLockWatch(null);
   }
 
   async function autoFillCostPrice() {
@@ -244,14 +273,20 @@ export default function PortfolioPage() {
   }
 
   async function handleAdd() {
-    if (!form.symbol || !form.shares || !form.costPrice) return;
+    const shares = Number(form.shares);
+    const costPrice = Number(form.costPrice);
+    if (!form.symbol.trim() || !Number.isFinite(shares) || shares <= 0 || !Number.isFinite(costPrice) || costPrice <= 0) {
+      setFormError('請輸入股票代號，以及大於 0 的持股數與成本價。');
+      return;
+    }
+    setFormError('');
     setFormLoading(true);
     try {
       if (editId) {
         // Edit existing holding
         update(editId, {
-          shares: Number(form.shares),
-          costPrice: Number(form.costPrice),
+          shares,
+          costPrice,
           buyDate: form.buyDate,
           name: form.name || undefined,
           triggerSignal: form.triggerSignal === '' ? undefined : form.triggerSignal,
@@ -298,34 +333,48 @@ export default function PortfolioPage() {
         } catch { continue; }
       }
 
+      let validatedEntryPattern = prefilledEntryPattern;
+      if (prefilledLockWatch) {
+        const markResponse = await fetch('/api/lockwatch/mark-purchased', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            market: prefilledLockWatch.market,
+            symbol: prefilledLockWatch.symbol,
+            triggerSignal: prefilledLockWatch.triggerSignal,
+            triggeredDate: prefilledLockWatch.triggeredDate,
+            entryPrice: costPrice,
+          }),
+        });
+        const markJson = await markResponse.json().catch(() => ({})) as {
+          ok?: boolean;
+          error?: string;
+          entryPattern?: NonNullable<PortfolioHolding['entryPattern']>;
+        };
+        if (!markResponse.ok || !markJson.ok) {
+          setFormError(markJson.error ?? '訊號重新驗證失敗，本次沒有新增持倉。');
+          return;
+        }
+        if (prefilledLockWatch.triggerSignal === 'N' && !markJson.entryPattern) {
+          setFormError('伺服器沒有回傳已驗證的型態價位，本次沒有新增持倉。');
+          return;
+        }
+        validatedEntryPattern = markJson.entryPattern ?? null;
+      }
+
       add({
         symbol: resolvedSymbol,
         name: resolvedName,
-        shares: Number(form.shares),
-        costPrice: Number(form.costPrice),
+        shares,
+        costPrice,
         buyDate: form.buyDate,
         triggerSignal: form.triggerSignal === '' ? undefined : form.triggerSignal,
         operationMode: form.operationMode,
         // 議題 C2：凍結進場時的型態 → Step 5 停利目標日後不重算
-        ...(prefilledEntryPattern ? { entryPattern: prefilledEntryPattern } : {}),
+        ...(validatedEntryPattern ? { entryPattern: validatedEntryPattern } : {}),
       });
       setPrefilledEntryPattern(null);
-      // v12 議題 62：若進場訊號為 F/N，呼叫 LockWatch mark-purchased 標 stage='purchased'
-      if (form.triggerSignal === 'F' || form.triggerSignal === 'N') {
-        const market = /\.(SS|SZ)$/i.test(resolvedSymbol) ? 'CN' : 'TW';
-        try {
-          await fetch('/api/lockwatch/mark-purchased', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              market,
-              symbol: resolvedSymbol,
-              triggerSignal: form.triggerSignal,
-              entryPrice: Number(form.costPrice),
-            }),
-          });
-        } catch { /* non-blocking */ }
-      }
+      setPrefilledLockWatch(null);
       if (resolvedPrice > 0) setPrices(prev => ({ ...prev, [resolvedSymbol]: { price: resolvedPrice, changePercent: resolvedChangePct, loading: false } }));
       setForm({ ...EMPTY_FORM, buyDate: todayCST() });
       setShowForm(false);
@@ -462,7 +511,7 @@ export default function PortfolioPage() {
                 <label className="text-xs text-muted-foreground mb-1 block">股票代號</label>
                 <Input value={form.symbol} onChange={e => setForm(f => ({ ...f, symbol: e.target.value }))}
                   placeholder="2330 / AAPL"
-                  disabled={!!editId}
+                  disabled={!!editId || !!prefilledLockWatch}
                   className="bg-muted border-border focus:border-blue-500 disabled:opacity-60" />
               </div>
               <div>
@@ -505,6 +554,7 @@ export default function PortfolioPage() {
                   <label className="text-xs text-muted-foreground mb-1 block">進場訊號字母</label>
                   <select
                     value={form.triggerSignal}
+                    disabled={!!prefilledLockWatch}
                     onChange={e => setForm(f => ({ ...f, triggerSignal: e.target.value as typeof EMPTY_FORM.triggerSignal }))}
                     className="w-full bg-muted border border-border rounded-md px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                   >
@@ -548,6 +598,7 @@ export default function PortfolioPage() {
               </div>
             </details>
 
+            {formError && <p role="alert" className="text-sm text-red-400">{formError}</p>}
             <div className="flex gap-2">
               <Button onClick={handleAdd} disabled={formLoading || !form.symbol || !form.shares || !form.costPrice}
                 className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 font-bold">

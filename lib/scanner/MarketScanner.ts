@@ -1635,6 +1635,7 @@ export abstract class MarketScanner {
                   triggerPrice: r.necklinePrice,
                   patternType: r.patternType,
                   patternTargetPrice: r.patternTargetPrice,
+                  structureBrokenPrice: r.structureBrokenPrice,
                   patternAchievementRate:
                     typeof r.achievementRate === 'number' ? r.achievementRate / 100 : undefined,
                   patternPivots: r.pivots?.flatMap((pivot) => {

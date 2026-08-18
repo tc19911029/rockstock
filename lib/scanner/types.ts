@@ -286,6 +286,8 @@ export interface StockScanResult {
       | 'long-double-top'
       | 'one-line-top';
     patternTargetPrice?: number;
+    /** N 型態真正的結構失效門檻（已含 3% 確認緩衝）。 */
+    structureBrokenPrice?: number;
     patternAchievementRate?: number;
     /** N 觸發當下凍結的腳位（日期／價格／頭底方向）。 */
     patternPivots?: PatternPivotSnapshot[];

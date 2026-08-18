@@ -28,6 +28,8 @@ async function main() {
   let top = 0;
   let overlap = 0;
   let union = 0;
+  let geometryIssues = 0;
+  let duplicatePivotIssues = 0;
   const scoreBuckets = [80, 85, 90, 92, 94, 96, 98].map(min => ({ min, bottom: 0, top: 0, overlap: 0, union: 0 }));
 
   for (const file of files) {
@@ -43,6 +45,20 @@ async function main() {
       // 舊版先以 94 分呼叫 detector，導致 80/85/90/92 分桶其實也全是 94 分資料。
       const rawBottom = detectLetterNStructure(candles, idx, 0);
       const rawTop = detectTopPatternsStructure(candles, idx, 0);
+      for (const candidate of [rawBottom, rawTop]) {
+        if (!candidate.patternType) continue;
+        const prices = [candidate.necklinePrice, candidate.patternTargetPrice, candidate.structureBrokenPrice];
+        if (prices.some(price => typeof price !== 'number' || !Number.isFinite(price) || price <= 0)) {
+          geometryIssues++;
+        }
+        if (
+          candidate.patternType !== 'one-line-top' &&
+          candidate.pivots &&
+          new Set(candidate.pivots.map(pivot => pivot.index)).size !== candidate.pivots.length
+        ) {
+          duplicatePivotIssues++;
+        }
+      }
       const hasBottom = rawBottom.displayReady === true && (rawBottom.qualityScore ?? 0) >= BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE;
       const hasTop = rawTop.displayReady === true && (rawTop.qualityScore ?? 0) >= TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE;
       const b = hasBottom ? rawBottom : null;
@@ -84,6 +100,7 @@ async function main() {
   const pct = (count: number) => processed === 0 ? '0.0%' : `${(count / processed * 100).toFixed(1)}%`;
   console.log(`\n${market} ${date} processed=${processed}`);
   console.log(`bottom=${bottom} (${pct(bottom)}) top=${top} (${pct(top)}) overlap=${overlap} (${pct(overlap)}) union=${union} (${pct(union)})`);
+  console.log(`geometryIssues=${geometryIssues} duplicatePivotIssues=${duplicatePivotIssues}`);
   for (const bucket of scoreBuckets) {
     console.log(`score>=${bucket.min}: bottom=${pct(bucket.bottom)} top=${pct(bucket.top)} overlap=${pct(bucket.overlap)} union=${pct(bucket.union)}`);
   }

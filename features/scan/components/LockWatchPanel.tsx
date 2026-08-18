@@ -18,6 +18,11 @@ import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
 import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
+import {
+  getLockWatchPurchaseBlockReason,
+  isLockWatchPurchaseEligible,
+  lockWatchPurchaseBlockMessage,
+} from '@/lib/scanner/lockWatchEligibility';
 
 interface LockWatchPanelProps {
   market: 'TW' | 'CN';
@@ -58,6 +63,7 @@ const STAGE_STYLE: Record<LockWatchRecord['currentStage'], { label: string; colo
   revoked: { label: '已撤銷', color: 'text-muted-foreground/60 line-through' },
   'manually-removed': { label: '手動移除', color: 'text-muted-foreground/60 line-through' },
   'structure-broken': { label: '訊號失效', color: 'text-rose-400/70 line-through' },
+  'target-reached': { label: '目標已達', color: 'text-amber-300/80' },
 };
 
 export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
@@ -135,6 +141,7 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
     'manually-removed': 3,
     revoked: 4,
     'structure-broken': 5,
+    'target-reached': 6,
   };
 
   // 排序值取法（id 走中央清單；accessor 完全照舊邏輯回值，缺值沿用舊的 -Infinity/0/99 不改成 null）
@@ -360,6 +367,11 @@ function LockWatchTableRow({
   // 2026-05-13 對齊書本：pending-breakout 不再 active，移除按鈕只對 observation/entry-signal 顯示
   const canRemove =
     record.currentStage === 'observation' || record.currentStage === 'entry-signal';
+  const purchaseBlockReason = getLockWatchPurchaseBlockReason(record);
+  const canPurchase = isLockWatchPurchaseEligible(record);
+  const displayedStage = purchaseBlockReason === 'legacy-pattern-unverified'
+    ? { label: '待新版重驗', color: 'text-amber-300 font-bold' }
+    : stage;
   const symbolBare = record.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   // Phase D：用最近收盤計算到測量目標的理論距離（不是即時報酬預測）
   const refPrice = record.currentClose ?? record.triggerPrice;
@@ -461,8 +473,11 @@ function LockWatchTableRow({
           ? `${getLegacyBookAchievementRate(record.patternType)}%`
           : '—'}
       </td>
-      <td className={`whitespace-nowrap py-1.5 px-2 text-center ${stage.color}`}>
-        {stage.label}
+      <td
+        className={`whitespace-nowrap py-1.5 px-2 text-center ${displayedStage.color}`}
+        title={purchaseBlockReason ? lockWatchPurchaseBlockMessage(purchaseBlockReason) : undefined}
+      >
+        {displayedStage.label}
       </td>
       <td className="whitespace-nowrap py-1.5 px-2 text-center font-mono text-muted-foreground/80 text-[10px]">
         {record.triggeredDate.slice(5)}
@@ -475,7 +490,9 @@ function LockWatchTableRow({
         <div className="flex items-center justify-center gap-1 min-w-[100px]">
           {canRemove ? (
             <button
+              disabled={!canPurchase}
               onClick={() => {
+                if (!canPurchase) return;
                 // 帶上鎖股的型態 + 頸線 + 目標價 + 結構失效價 → /portfolio 寫入 holding.entryPattern
                 // 議題 C2：避免 Step 5 停利目標每日重算跳動
                 const entryReferencePrice = record.currentClose ?? record.triggerPrice;
@@ -483,19 +500,25 @@ function LockWatchTableRow({
                   prefill: symbolBare,
                   trigger: record.triggerSignal,
                   price: String(entryReferencePrice),
+                  source: 'lockwatch',
+                  market,
+                  triggeredDate: record.triggeredDate,
                 });
                 if (record.patternType) ep.set('patternType', record.patternType);
                 // N 訊號：triggerPrice = 頸線價（書本撤銷判定基準）
                 if (record.triggerSignal === 'N') ep.set('neckline', String(record.triggerPrice));
                 if (record.patternTargetPrice != null) ep.set('target', String(record.patternTargetPrice));
                 // F 訊號：vBottom = 結構失效價（跌破即出場）
-                if (record.vBottom != null) ep.set('stop', String(record.vBottom));
+                const stopPrice = record.structureBrokenPrice ?? record.vBottom;
+                if (stopPrice != null) ep.set('stop', String(stopPrice));
                 window.open(`/portfolio?${ep.toString()}`, '_self');
               }}
-              className="shrink-0 px-2 py-0.5 rounded border border-emerald-700/50 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 font-bold"
-              title={`開啟持倉表單，預填最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}（可修改）；不會送出券商委託`}
+              className="shrink-0 px-2 py-0.5 rounded border border-emerald-700/50 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 font-bold disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground disabled:hover:bg-transparent"
+              title={purchaseBlockReason
+                ? lockWatchPurchaseBlockMessage(purchaseBlockReason)
+                : `開啟持倉表單，預填最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}（可修改）；儲存前會由伺服器再次驗證訊號`}
             >
-              記錄買入
+              {purchaseBlockReason === 'legacy-pattern-unverified' ? '待重驗' : '記錄買入'}
             </button>
           ) : <span className="w-[42px]" />}
           {/* 自選 toggle — 加入/移除自選股；不可動的記錄佔位保持等寬 */}

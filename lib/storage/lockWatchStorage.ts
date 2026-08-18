@@ -15,6 +15,7 @@
 import type { LockWatchDailySnapshot, LockWatchRecord } from '@/lib/scanner/lockWatchTypes';
 import type { MarketId } from '@/lib/scanner/types';
 import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
+import { mergeLockWatchRecord } from '@/lib/scanner/lockWatchMerge';
 
 const IS_VERCEL = !!process.env.VERCEL;
 
@@ -217,7 +218,11 @@ export async function appendLockWatchRecords(
     if (existing) {
       for (const r of existing.records) merged.set(`${r.symbol}-${r.triggerSignal}`, r);
     }
-    for (const r of newRecords) merged.set(`${r.symbol}-${r.triggerSignal}`, r);
+    for (const r of newRecords) {
+      const key = `${r.symbol}-${r.triggerSignal}`;
+      const previousRecord = merged.get(key);
+      merged.set(key, previousRecord ? mergeLockWatchRecord(previousRecord, r) : r);
+    }
     const snapshot: LockWatchDailySnapshot = {
       market,
       date,

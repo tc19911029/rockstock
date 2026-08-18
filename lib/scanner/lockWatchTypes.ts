@@ -107,6 +107,15 @@ export interface LockWatchRecord {
    */
   patternTargetPrice?: number;
 
+  /**
+   * N 型態真正的結構失效門檻（已包含 detector 的 3% 確認緩衝）。
+   * 舊紀錄缺值時才回退到 triggerPrice × 0.97。
+   */
+  structureBrokenPrice?: number;
+
+  /** 建立／最近一次重驗這筆 N 型態時使用的 detector 契約版本。 */
+  detectorVersion?: number;
+
   /** 觸發日凍結的型態腳位；避免日後 pivot 重組後，圖上冒用另一組同名型態。 */
   patternPivots?: PatternPivotSnapshot[];
 
@@ -136,6 +145,7 @@ export interface LockWatchRecord {
     | 'revoked'
     | 'manually-removed'
     | 'structure-broken'
+    | 'target-reached'
     /** @deprecated 0513 ABCDE 對齊書本後不再寫入，僅相容舊資料 */
     | 'pending-breakout'
     /** @deprecated 0513 ABCDE 對齊書本後不再寫入，僅相容舊資料 */
@@ -169,7 +179,8 @@ export interface LockWatchEvent {
     | 'sop-passed'           // 進場 SOP 通過
     | 'purchased'            // 用戶買進
     | 'manual-remove'        // 用戶手動移除
-    | 'structure-broken';    // 結構失效自動移除
+    | 'structure-broken'     // 結構失效自動移除
+    | 'target-reached';      // 已進入型態目標價緩衝區，不再提供新進場
   detail?: string;
 }
 

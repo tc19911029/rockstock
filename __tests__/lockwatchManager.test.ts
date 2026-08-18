@@ -17,9 +17,12 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { updateLockWatch } from '../lib/scanner/lockWatchManager';
+import { migrateNLockWatchDetector, updateLockWatch } from '../lib/scanner/lockWatchManager';
+import { CURRENT_N_PATTERN_DETECTOR_VERSION } from '../lib/scanner/lockWatchEligibility';
+import { computeIndicators } from '../lib/indicators';
 import type { LockWatchRecord } from '../lib/scanner/lockWatchTypes';
 import type { CandleWithIndicators } from '../types';
+import staleRoundingBottomFixture from './fixtures/candles/3036-N-rounding-bottom-2026-05-11.json';
 
 function mockCandle(overrides: Partial<CandleWithIndicators> & { date: string; close: number }): CandleWithIndicators {
   const base: CandleWithIndicators = {
@@ -77,6 +80,7 @@ function makeNRecord(overrides: Partial<LockWatchRecord> = {}): LockWatchRecord 
     currentStage: 'observation',
     daysObserved: 0,
     currentClose: 620,
+    detectorVersion: CURRENT_N_PATTERN_DETECTOR_VERSION,
     history: [
       { date: '2026-05-12', event: 'triggered', detail: 'N 型態確認' },
     ],
@@ -103,6 +107,38 @@ function makeFRecord(overrides: Partial<LockWatchRecord> = {}): LockWatchRecord 
 }
 
 describe('updateLockWatch — carry-forward invariants', () => {
+  it('今日新寫入的舊版 N 可只補 detectorVersion 與真正失效價，不提前跑趨勢生命週期', () => {
+    const candles: CandleWithIndicators[] = [];
+    const make = (index: number, close: number, high: number, low: number) => mockCandle({
+      date: `d${index}`,
+      open: close,
+      high,
+      low,
+      close,
+      volume: 1000,
+      ma5: 100,
+    });
+    for (let i = 0; i <= 12; i++) candles.push(make(i, 95, 97, i === 10 ? 80 : 93));
+    for (let i = 13; i <= 22; i++) candles.push(make(i, 105, i === 20 ? 120 : 108, 103));
+    for (let i = 23; i <= 28; i++) candles.push(make(i, 95, 97, i === 26 ? 100 : 101));
+    for (let i = 29; i <= 39; i++) candles.push(make(i, i === 39 ? 124 : 105, i === 39 ? 125 : 108, 103));
+    candles[39] = { ...candles[39], open: 119, volume: 2000 };
+
+    const legacy = makeNRecord({
+      symbol: '2330.TW',
+      triggeredDate: 'd39',
+      patternType: 'n-shape',
+      triggerPrice: 120,
+      patternTargetPrice: 140,
+      detectorVersion: undefined,
+    });
+    const migrated = migrateNLockWatchDetector(legacy, candles, '2026-08-18');
+    expect(migrated.changed).toBe(true);
+    expect(migrated.record.currentStage).toBe('observation');
+    expect(migrated.record.detectorVersion).toBe(CURRENT_N_PATTERN_DETECTOR_VERSION);
+    expect(migrated.record.structureBrokenPrice).toBeCloseTo(116.4);
+  });
+
   describe('已結束 stage 不被覆寫', () => {
     it.each(['purchased', 'revoked', 'manually-removed', 'structure-broken'] as const)(
       'stage=%s → changed=false 且 record 不變',
@@ -146,6 +182,40 @@ describe('updateLockWatch — carry-forward invariants', () => {
       const candles = bullishCandles('2026-04-24', 130); // 130 < 140 但 F 不撤銷
       const result = updateLockWatch(original, candles, [], '2026-04-24');
       expect(result.record.currentStage).not.toBe('revoked');
+    });
+
+    it('N 優先使用 detector 保存的真正結構失效價，不再固定套頸線 -3%', () => {
+      const original = makeNRecord({ triggerPrice: 612, structureBrokenPrice: 560 });
+      const candles = bullishCandles('2026-05-13', 570);
+      const result = updateLockWatch(original, candles, [], '2026-05-13');
+      expect(result.record.currentStage).toBe('observation');
+    });
+
+    it('舊 N 型態無法由現行 detector 重播時自動撤銷', () => {
+      const candles = computeIndicators(staleRoundingBottomFixture.candles);
+      const original = makeNRecord({
+        symbol: staleRoundingBottomFixture.symbol,
+        triggeredDate: staleRoundingBottomFixture.triggerDate,
+        patternType: 'rounding-bottom',
+        triggerPrice: staleRoundingBottomFixture.expected.necklinePrice,
+        patternTargetPrice: staleRoundingBottomFixture.expected.patternTargetPrice,
+        detectorVersion: undefined,
+      });
+      const result = updateLockWatch(original, candles, [], staleRoundingBottomFixture.triggerDate);
+      expect(result.changed).toBe(true);
+      expect(result.record.currentStage).toBe('revoked');
+      expect(result.record.history.at(-1)?.detail).toContain('重播失敗');
+    });
+  });
+
+  describe('型態目標生命週期', () => {
+    it('進入目標價 3% 緩衝區後標成 target-reached，不再保持可買狀態', () => {
+      const original = makeNRecord({ patternTargetPrice: 640 });
+      const candles = bullishCandles('2026-05-13', 625); // 625 >= 640 × 0.97
+      const result = updateLockWatch(original, candles, [], '2026-05-13');
+      expect(result.changed).toBe(true);
+      expect(result.record.currentStage).toBe('target-reached');
+      expect(result.record.history.at(-1)?.event).toBe('target-reached');
     });
   });
 

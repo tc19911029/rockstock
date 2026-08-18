@@ -32,13 +32,13 @@ import {
   listLockWatchDates,
 } from '@/lib/storage/lockWatchStorage';
 import {
+  migrateNLockWatchDetector,
   updateLockWatch,
-  checkStructureBroken,
-  markStructureBroken,
 } from '@/lib/scanner/lockWatchManager';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import type { MarketId } from '@/lib/scanner/types';
+import { mergeLockWatchRecord } from '@/lib/scanner/lockWatchMerge';
 
 const INDEX_SYMBOL: Record<MarketId, string> = {
   TW: '^TWII',
@@ -83,7 +83,8 @@ async function evolveDay(market: MarketId, prevDate: string, today: string): Pro
       r.currentStage === 'purchased' ||
       r.currentStage === 'revoked' ||
       r.currentStage === 'manually-removed' ||
-      r.currentStage === 'structure-broken'
+      r.currentStage === 'structure-broken' ||
+      r.currentStage === 'target-reached'
     ) {
       newRecords.push(r);
       continue;
@@ -93,13 +94,6 @@ async function evolveDay(market: MarketId, prevDate: string, today: string): Pro
       const candles = result?.candles ?? [];
       if (candles.length === 0) {
         newRecords.push(r);
-        continue;
-      }
-      const structCheck = checkStructureBroken(r, candles);
-      if (structCheck.broken) {
-        const broken = markStructureBroken(r, today, structCheck.reason ?? '結構失效');
-        newRecords.push(broken);
-        changed++;
         continue;
       }
       const { changed: c, record: updated } = updateLockWatch(r, candles, indexCandles, today);
@@ -112,13 +106,30 @@ async function evolveDay(market: MarketId, prevDate: string, today: string): Pro
   }
 
   // 合併今日新觸發（scan-bm 已寫的不重複）
-  const evolvedKeys = new Set(newRecords.map((r) => `${r.symbol}-${r.triggerSignal}`));
+  const evolvedIndex = new Map(newRecords.map((r, index) => [`${r.symbol}-${r.triggerSignal}`, index]));
   let todayNew = 0;
   for (const r of todayNewRecords) {
-    const key = `${r.symbol}-${r.triggerSignal}`;
-    if (!evolvedKeys.has(key)) {
-      newRecords.push(r);
+    let incoming = r;
+    if (r.triggerSignal === 'N') {
+      const loaded = await loadLocalCandlesWithTolerance(r.symbol, market, today, 5).catch(() => null);
+      const candles = loaded?.candles ?? [];
+      if (candles.length > 0) {
+        const migrated = migrateNLockWatchDetector(r, candles, today);
+        incoming = migrated.record;
+        if (migrated.changed) changed++;
+      }
+    }
+    const key = `${incoming.symbol}-${incoming.triggerSignal}`;
+    const existingIndex = evolvedIndex.get(key);
+    if (existingIndex == null) {
+      newRecords.push(incoming);
+      evolvedIndex.set(key, newRecords.length - 1);
       todayNew++;
+    } else {
+      const before = newRecords[existingIndex];
+      const merged = mergeLockWatchRecord(before, incoming);
+      newRecords[existingIndex] = merged;
+      if (merged.triggeredDate > before.triggeredDate) todayNew++;
     }
   }
 

@@ -31,6 +31,7 @@ interface LockwatchRecordShape {
   /** N 訊號：頸線價（即 LockWatchRecord.triggerPrice） */
   triggerPrice?: number;
   patternTargetPrice?: number;
+  structureBrokenPrice?: number;
   /** F 訊號：V 底，可作為結構失效價 */
   vBottom?: number;
   patternAchievementRate?: number;
@@ -88,7 +89,7 @@ export function useLockedPattern(symbol: string | null | undefined, marketHint?:
           patternType: rec.patternType,
           necklinePrice: rec.triggerPrice,
           targetPrice: rec.patternTargetPrice,
-          stopPrice: rec.vBottom,  // F 才有；N 由 CandleChart 依底/頂方向套用頸線 ±3% fallback
+          stopPrice: rec.structureBrokenPrice ?? rec.vBottom,
           // 舊資料可能存過自行估算的 N=75% 或頂部對稱值；只從 canonical 舊書表取可核對數字。
           achievementRate: getLegacyBookAchievementRate(rec.patternType),
           kind: isTopPatternType(rec.patternType) ? 'top' : 'bottom',
