@@ -1,5 +1,7 @@
 import {
+  getConservativeHorizontalNeckline,
   getPatternFormationBoundaryPrice,
+  hasAlternatingDistinctPivots,
   hasCoherentComplexShoulders,
   projectPivotLinePrice,
   scorePatternGeometry,
@@ -70,5 +72,29 @@ describe('型態品質與衝突選擇', () => {
       { type: 'high', price: 100, index: 20 },
       25,
     )).toBe(90);
+  });
+
+  it('水平化底部頸線取最高壓力，必須站上全部內部高點', () => {
+    expect(getConservativeHorizontalNeckline([108, 112], 'bottom')).toBe(112);
+  });
+
+  it('水平化頂部頸線取最低支撐，必須跌破全部內部低點', () => {
+    expect(getConservativeHorizontalNeckline([92, 88], 'top')).toBe(88);
+  });
+
+  it('楔形／鑽石拒絕同一根 K 同時充當高低腳位', () => {
+    expect(hasAlternatingDistinctPivots([
+      { type: 'high', price: 110, index: 10 },
+      { type: 'low', price: 90, index: 10 },
+    ])).toBe(false);
+  });
+
+  it('楔形／鑽石接受不同 K 棒的高低交替腳位', () => {
+    expect(hasAlternatingDistinctPivots([
+      { type: 'high', price: 110, index: 10 },
+      { type: 'low', price: 92, index: 12 },
+      { type: 'high', price: 105, index: 15 },
+      { type: 'low', price: 95, index: 18 },
+    ])).toBe(true);
   });
 });

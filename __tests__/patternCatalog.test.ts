@@ -1,7 +1,9 @@
 import {
   BOTTOM_PATTERN_TYPES,
   getLegacyBookAchievementRate,
+  isCrossMarketObservationOnly,
   isLegacyBookObservationOnly,
+  isPatternObservationOnly,
   isPatternType,
   isTopPatternType,
   TOP_PATTERN_TYPES,
@@ -38,5 +40,14 @@ describe('patternCatalog', () => {
     expect(isLegacyBookObservationOnly('double-bottom')).toBe(true);
     expect(isLegacyBookObservationOnly('head-shoulder')).toBe(false);
     expect(isLegacyBookObservationOnly('n-shape')).toBe(false);
+  });
+
+  it('跨台股陸股未通過執行門檻的型態只畫圖、不發觸發', () => {
+    expect(isCrossMarketObservationOnly('head-shoulder-top')).toBe(true);
+    expect(isCrossMarketObservationOnly('complex-head-shoulder-top')).toBe(true);
+    expect(isCrossMarketObservationOnly('falling-diamond')).toBe(true);
+    expect(isCrossMarketObservationOnly('n-shape')).toBe(false);
+    expect(isPatternObservationOnly('double-bottom')).toBe(true);
+    expect(isPatternObservationOnly('falling-diamond')).toBe(true);
   });
 });

@@ -79,3 +79,21 @@ export function isLegacyBookObservationOnly(patternType: string): boolean {
   const rate = getLegacyBookAchievementRate(patternType);
   return rate != null && rate < LEGACY_BOOK_ENTRY_RATE_MIN;
 }
+
+/**
+ * 2026-08-18 台股 2,007 檔、陸股 4,006 檔的畫面首次顯示事件回測中，
+ * 這些型態確認後「理論目標先於防守」未通過 50% 基準；保留畫圖，但不發交易觸發。
+ */
+const CROSS_MARKET_OBSERVATION_ONLY_PATTERN_SET: ReadonlySet<string> = new Set([
+  'head-shoulder-top',
+  'complex-head-shoulder-top',
+  'falling-diamond',
+]);
+
+export function isCrossMarketObservationOnly(patternType: string): boolean {
+  return CROSS_MARKET_OBSERVATION_ONLY_PATTERN_SET.has(patternType);
+}
+
+export function isPatternObservationOnly(patternType: string): boolean {
+  return isLegacyBookObservationOnly(patternType) || isCrossMarketObservationOnly(patternType);
+}

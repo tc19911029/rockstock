@@ -32,6 +32,7 @@ import { BOOK_BODY_PCT_MIN, BOOK_VOL_RATIO_MIN } from './bookThresholds';
 import { N_MIN_HISTORY } from './historyMinimums';
 import {
   getLegacyBookAchievementRate,
+  isCrossMarketObservationOnly,
   isLegacyBookObservationOnly,
   type BottomPatternType,
   type TopPatternType,
@@ -263,6 +264,25 @@ export function projectPivotLinePrice(older: Pivot, newer: Pivot, index: number)
   const slope = (newer.price - older.price) / span;
   const projected = newer.price + slope * (index - newer.index);
   return Number.isFinite(projected) && projected > 0 ? projected : undefined;
+}
+
+/**
+ * 水平化頸線必須等價格穿越所有內部轉折點才算完整突破：
+ * 底部型態取最高壓力，頂部型態取最低支撐。
+ */
+export function getConservativeHorizontalNeckline(
+  prices: readonly number[],
+  kind: PatternKind,
+): number | undefined {
+  if (prices.length === 0 || prices.some(price => !Number.isFinite(price) || price <= 0)) return undefined;
+  return kind === 'bottom' ? Math.max(...prices) : Math.min(...prices);
+}
+
+/** 收斂／擴張線型必須由不同 K 棒的高低轉折交替構成，不能一根 K 同時冒充兩個腳位。 */
+export function hasAlternatingDistinctPivots(pivots: readonly Pivot[]): boolean {
+  if (new Set(pivots.map(pivot => pivot.index)).size !== pivots.length) return false;
+  const ordered = [...pivots].sort((a, b) => a.index - b.index);
+  return ordered.every((pivot, index) => index === 0 || pivot.type !== ordered[index - 1].type);
 }
 const prominenceFitScore = (prominence: number, minimum = 0.03, ideal = 0.10): number =>
   clampScore(60 + 40 * (prominence - minimum) / Math.max(0.001, ideal - minimum));
@@ -572,6 +592,9 @@ function makeResult(
   if (isLegacyBookObservationOnly(match.patternType)) {
     return structureOnly(`N ${getPatternName(match.patternType)} 達成率僅 ${achievementRate}%（課程只收高勝率型態）— 僅顯示不進場`);
   }
+  if (isCrossMarketObservationOnly(match.patternType)) {
+    return structureOnly(`N ${getPatternName(match.patternType)} 跨市場回測未通過執行門檻—僅顯示不進場`);
+  }
 
   return {
     triggered: true,
@@ -649,8 +672,9 @@ function detectTripleBottom(
   if (!olderPeak || !newerPeak) return null;
   const interiorHighs = [newerPeak, olderPeak];
 
-  // 頸線 = 兩內部高點連線中較低（保守取較低 — 突破時需要過此價）
-  const necklinePrice = Math.min(interiorHighs[0].price, interiorHighs[1].price);
+  // 水平化頸線需站上兩個內部高點，故取較高者；取低點會在只過第一道壓力時提早確認。
+  const necklinePrice = getConservativeHorizontalNeckline(interiorHighs.map(high => high.price), 'bottom');
+  if (necklinePrice == null) return null;
 
   // 三重底目標價 = 頸線 + (頸線 - 三底最低點)
   // 書本《抓飆股》Part 7：用最低點測量幅度，不用平均
@@ -708,8 +732,9 @@ function detectHeadShoulder(
   if (!leftNeck || !rightNeck) return null;
   const interiorHighs = [rightNeck, leftNeck];
 
-  // 頸線 = 兩內部高點連線中較低
-  const necklinePrice = Math.min(interiorHighs[0].price, interiorHighs[1].price);
+  // 水平化頸線需站上兩個頸線高點，故取較高者。
+  const necklinePrice = getConservativeHorizontalNeckline(interiorHighs.map(high => high.price), 'bottom');
+  if (necklinePrice == null) return null;
 
   // 目標價 = 頸線 + (頸線 - 頭部最低)（書本明寫公式）
   const patternTargetPrice = necklinePrice + (necklinePrice - head.price);
@@ -746,6 +771,7 @@ function detectDescendingWedge(
   const highs = pivots.filter(p => p.type === 'high').slice(0, 2);
   const lows  = pivots.filter(p => p.type === 'low').slice(0, 2);
   if (highs.length < 2 || lows.length < 2) return null;
+  if (!hasAlternatingDistinctPivots([...highs, ...lows])) return null;
 
   // 高點 + 低點都要下降
   if (highs[0].price >= highs[1].price) return null;
@@ -842,7 +868,8 @@ function detectComplexHeadShoulder(
     return peak ? [peak] : [];
   });
   if (interiorHighs.length < orderedLows.length - 1) return null;
-  const necklinePrice = Math.min(...interiorHighs.map(h => h.price));
+  const necklinePrice = getConservativeHorizontalNeckline(interiorHighs.map(high => high.price), 'bottom');
+  if (necklinePrice == null) return null;
 
   // 目標價 = 頸線 + (頸線 - 頭部最低)
   const patternTargetPrice = necklinePrice + (necklinePrice - head.price);
@@ -875,6 +902,8 @@ function detectFallingDiamond(
   const highs = pivots.filter(p => p.type === 'high').slice(0, 4);
   const lows  = pivots.filter(p => p.type === 'low').slice(0, 4);
   if (highs.length < 4 || lows.length < 4) return null;
+  const diamondPivots = [...highs, ...lows];
+  if (!hasAlternatingDistinctPivots(diamondPivots)) return null;
 
   // highs 由新→舊：[h0, h1, h2, h3]
   // 較舊 2 高擴張：h3 < h2（後高 > 前高）
@@ -910,7 +939,7 @@ function detectFallingDiamond(
     necklinePrice,
     patternTargetPrice,
     structureBrokenPrice: necklinePrice,
-    pivots: [...highs, ...lows],
+    pivots: diamondPivots,
   };
 }
 
@@ -1312,6 +1341,10 @@ function makeTopResult(match: TopPatternMatch, closePrice: number, quality: Patt
     return structureOnly('頂部型態已接近/超過目標價，視為已達標非新警示');
   }
 
+  if (isCrossMarketObservationOnly(match.patternType)) {
+    return structureOnly(`${getTopPatternName(match.patternType)}跨市場回測未通過執行門檻—僅顯示不觸發`);
+  }
+
   return {
     triggered: true,
     patternType: match.patternType,
@@ -1356,8 +1389,9 @@ function detectTripleTop(
   if (!olderValley || !newerValley) return null;
   const interiorLows = [newerValley, olderValley];
 
-  // 頸線 = 兩內部低點中較高（保守取較高 — 跌破時需要破此價）
-  const necklinePrice = Math.max(interiorLows[0].price, interiorLows[1].price);
+  // 水平化頸線需跌破兩個內部低點，故取較低者；取高點會在只破第一道支撐時提早確認。
+  const necklinePrice = getConservativeHorizontalNeckline(interiorLows.map(low => low.price), 'top');
+  if (necklinePrice == null) return null;
 
   // 目標價 = 頸線 - (最高點 - 頸線)
   const highestHigh = Math.max(high1.price, high2.price, high3.price);
@@ -1410,8 +1444,9 @@ function detectHeadShoulderTop(
   if (!leftNeck || !rightNeck) return null;
   const interiorLows = [rightNeck, leftNeck];
 
-  // 頸線 = 兩內部低點中較高（跌破時需要破此價）
-  const necklinePrice = Math.max(interiorLows[0].price, interiorLows[1].price);
+  // 水平化頸線需跌破兩個頸線低點，故取較低者。
+  const necklinePrice = getConservativeHorizontalNeckline(interiorLows.map(low => low.price), 'top');
+  if (necklinePrice == null) return null;
 
   // 目標價 = 頸線 - (頭部最高 - 頸線)
   const patternTargetPrice = necklinePrice - (head.price - necklinePrice);
@@ -1524,7 +1559,8 @@ function detectComplexHeadShoulderTop(candles: CandleWithIndicators[], idx: numb
     return valley ? [valley] : [];
   });
   if (interiorLows.length < orderedHighs.length - 1) return null;
-  const necklinePrice = Math.max(...interiorLows.map(l => l.price));
+  const necklinePrice = getConservativeHorizontalNeckline(interiorLows.map(low => low.price), 'top');
+  if (necklinePrice == null) return null;
   const patternTargetPrice = necklinePrice - (head.price - necklinePrice);
   // 同底部複式型態，保留所有頸線低點，否則圖上只有肩與頭、沒有實際頸線腳位。
   return {

@@ -2,10 +2,10 @@
   "symbol": "2467.TW",
   "triggerDate": "2026-05-12",
   "expected": {
-    "triggered": true,
+    "triggered": false,
     "patternType": "head-shoulder",
-    "necklinePrice": 612,
-    "patternTargetPrice": 739
+    "necklinePrice": 649,
+    "patternTargetPrice": 813
   },
   "candles": [
     {

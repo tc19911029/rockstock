@@ -34,7 +34,10 @@ import {
 } from '@/lib/chart/patternLifecycle';
 import { choosePatternCandidate } from '@/lib/chart/patternSelection';
 import type { PatternPivotSnapshot } from '@/lib/analysis/patternCatalog';
-import { isLegacyBookObservationOnly } from '@/lib/analysis/patternCatalog';
+import {
+  isCrossMarketObservationOnly,
+  isLegacyBookObservationOnly,
+} from '@/lib/analysis/patternCatalog';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import {
   detectLetterNStructure,
@@ -1567,6 +1570,7 @@ export default function CandleChart({
                 {activePattern.qualityScore != null && `｜形狀吻合 ${activePattern.qualityScore}/100（非勝率）`}
                 {activePattern.achievementRate != null && `｜舊書統計 ${activePattern.achievementRate}%≠本次勝率`}
                 {isLegacyBookObservationOnly(activePattern.patternType) && '｜低達標統計，僅觀察'}
+                {isCrossMarketObservationOnly(activePattern.patternType) && '｜跨市場回測未過，僅觀察'}
               </span>
             )}
             {showPatternChip && activePattern.isLocked && !activePattern.pivotsVerified && showPattern && (

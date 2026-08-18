@@ -1,18 +1,24 @@
 /**
  * 個股型態探針 — 印出每個 detector 對單一股票的回應
  * Usage: npx tsx scripts/probe-pattern.ts <SYMBOL> [date]
+ * Omit date to inspect the latest local candle.
  */
 
 import path from 'path';
 import { promises as fs } from 'fs';
-import { detectLetterN, detectTopPatterns } from '../lib/analysis/v12LetterN';
+import {
+  detectLetterN,
+  detectLetterNStructure,
+  detectTopPatterns,
+  detectTopPatternsStructure,
+} from '../lib/analysis/v12LetterN';
 import { findPivots } from '../lib/analysis/trendAnalysis';
 import { computeIndicators } from '../lib/indicators';
 import type { Candle, CandleWithIndicators } from '../types';
 
 async function main() {
   const symbol = process.argv[2];
-  const asOfDate = process.argv[3] || '2026-05-08';
+  const requestedDate = process.argv[3];
   if (!symbol) { console.error('usage: probe-pattern <SYMBOL> [date]'); return; }
 
   const market: 'TW' | 'CN' = /\.(SS|SZ)$/.test(symbol) ? 'CN' : 'TW';
@@ -21,8 +27,11 @@ async function main() {
   const parsed = JSON.parse(raw);
   const candles: Candle[] = Array.isArray(parsed) ? parsed : (parsed.candles || []);
 
-  const idx = candles.findIndex(c => c.date === asOfDate);
-  if (idx < 0) { console.error(`date ${asOfDate} not found`); return; }
+  const idx = requestedDate
+    ? candles.findIndex(c => c.date.replace(/\*$/, '') === requestedDate)
+    : candles.length - 1;
+  if (idx < 0) { console.error(`date ${requestedDate} not found`); return; }
+  const asOfDate = candles[idx].date.replace(/\*$/, '');
   const sliced = candles.slice(0, idx + 1);
   const withInd: CandleWithIndicators[] = computeIndicators(sliced);
   const lastIdx = withInd.length - 1;
@@ -37,6 +46,25 @@ async function main() {
   for (const p of pivots) {
     console.log(`  ${p.type === 'high' ? '頭' : '底'} idx=${p.index} price=${p.price.toFixed(2)} date=${withInd[p.index].date}`);
   }
+
+  const summarizeStructure = (result: ReturnType<typeof detectLetterNStructure> | ReturnType<typeof detectTopPatternsStructure>) => ({
+    patternType: result.patternType,
+    necklinePrice: result.necklinePrice,
+    confirmPrice: result.breakoutThreshold ?? result.breakdownThreshold,
+    patternTargetPrice: result.patternTargetPrice,
+    structureBrokenPrice: result.structureBrokenPrice,
+    qualityScore: result.qualityScore,
+    qualityReasons: result.qualityReasons,
+    displayReady: result.displayReady,
+    pivots: result.pivots?.map(pivot => ({
+      ...pivot,
+      date: withInd[pivot.index]?.date,
+    })),
+  });
+  console.log('\n底部型態候選：');
+  console.log(JSON.stringify(summarizeStructure(detectLetterNStructure(withInd, lastIdx, 0)), null, 2));
+  console.log('\n頂部型態候選：');
+  console.log(JSON.stringify(summarizeStructure(detectTopPatternsStructure(withInd, lastIdx, 0)), null, 2));
 
   // 跑 detectLetterN
   const n = detectLetterN(withInd, lastIdx, market, symbol);

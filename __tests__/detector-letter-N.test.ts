@@ -23,7 +23,7 @@ import triggeredFixture from './fixtures/candles/2467-N-head-shoulder-2026-05-12
 import boundaryFixture from './fixtures/candles/3036-N-rounding-bottom-2026-05-11.json';
 
 describe('detectLetterN — 真實 fixture', () => {
-  it(`${triggeredFixture.symbol} @ ${triggeredFixture.triggerDate} → 頭肩底真突破觸發`, () => {
+  it(`${triggeredFixture.symbol} @ ${triggeredFixture.triggerDate} → 只過較低頸線時不可提早觸發`, () => {
     const candles = computeIndicators(triggeredFixture.candles);
     const lastIdx = candles.length - 1;
     expect(candles[lastIdx].date).toBe(triggeredFixture.triggerDate);
@@ -32,7 +32,7 @@ describe('detectLetterN — 真實 fixture', () => {
 
     expect(result.triggered).toBe(triggeredFixture.expected.triggered);
     expect(result.patternType).toBe(triggeredFixture.expected.patternType);
-    // 頸線/目標價跟 lockwatch 紀錄一致
+    // 兩個內部高點是 612 / 649；水平化頸線必須取 649，不能沿用舊 lockwatch 的 612。
     expect(result.necklinePrice).toBeCloseTo(triggeredFixture.expected.necklinePrice, 0);
     expect(result.patternTargetPrice).toBeCloseTo(triggeredFixture.expected.patternTargetPrice, 0);
   });
