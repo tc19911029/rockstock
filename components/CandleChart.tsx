@@ -1633,7 +1633,7 @@ export default function CandleChart({
                 : patternStatus === 'confirmed'
                   ? `下一步看 ${labels.target} ${target.toFixed(2)}${distanceText ? `（${distanceText}）` : ''}`
                   : patternStatus === 'retest'
-                    ? `${labels.stop} ${activePattern.stopPrice.toFixed(2)}｜重新通過 ${confirmationPrice.toFixed(2)}`
+                    ? `${labels.stop} ${activePattern.stopPrice.toFixed(2)}｜${labels.target} ${target.toFixed(2)}${distanceText ? `（${distanceText}）` : ''}｜重新通過 ${confirmationPrice.toFixed(2)}`
                     : patternStatus === 'breakout-failed'
                       ? `已越過 ${labels.stop} ${activePattern.stopPrice.toFixed(2)}｜原目標取消`
                       : patternStatus === 'formation-broken'
