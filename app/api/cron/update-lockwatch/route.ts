@@ -55,6 +55,7 @@ export async function GET(req: NextRequest) {
       migrateNLockWatchDetector,
     } = await import('@/lib/scanner/lockWatchManager');
     const { mergeLockWatchRecord } = await import('@/lib/scanner/lockWatchMerge');
+    const { loadLocalCandlesWithTolerance } = await import('@/lib/datasource/LocalCandleStore');
 
     // 包整段 evolve 在 lockwatch 鎖內 — 避免跟並發 scan-bm appendLockWatchRecords race
     return await withLockWatchLock(market, today, async () => {
@@ -97,7 +98,15 @@ export async function GET(req: NextRequest) {
         ? new (await import('@/lib/scanner/TaiwanScanner')).TaiwanScanner()
         : new (await import('@/lib/scanner/ChinaScanner')).ChinaScanner();
 
-    const indexCandles = await scanner.fetchCandles(INDEX_SYMBOL[market], today).catch(() => []);
+    // 盤後 L1 已封存到本機。優先讀本機可避免逐檔打 FinMind/Yahoo，
+    // 尤其大量歷史 LockWatch 演進時，外部限流會讓整個 cron 超過 120 秒。
+    const fetchEvolutionCandles = async (symbol: string) => {
+      const local = await loadLocalCandlesWithTolerance(symbol, market, today, 5).catch(() => null);
+      if (local?.candles?.length) return local.candles;
+      return scanner.fetchCandles(symbol, today).catch(() => []);
+    };
+
+    const indexCandles = await fetchEvolutionCandles(INDEX_SYMBOL[market]);
     if (indexCandles.length === 0) {
       console.warn(`[update-lockwatch] ${market} 指數 ${INDEX_SYMBOL[market]} candles 取得失敗`);
     }
@@ -134,7 +143,7 @@ export async function GET(req: NextRequest) {
       }
 
       try {
-        const candles = await scanner.fetchCandles(r.symbol, today);
+        const candles = await fetchEvolutionCandles(r.symbol);
         if (!candles || candles.length === 0) {
           newRecords.push(r);
           summary.observation++;
@@ -163,7 +172,7 @@ export async function GET(req: NextRequest) {
     for (const r of todayNewRecords) {
       let incoming = r;
       if (r.triggerSignal === 'N') {
-        const candles = await scanner.fetchCandles(r.symbol, today).catch(() => []);
+        const candles = await fetchEvolutionCandles(r.symbol);
         if (candles.length > 0) {
           const migrated = migrateNLockWatchDetector(r, candles, today);
           incoming = migrated.record;

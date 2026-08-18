@@ -23,6 +23,7 @@ import {
 import { normalizePatternSymbol } from '@/lib/scanner/lockedPatternSelection';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { isTopPatternType } from '@/lib/analysis/patternCatalog';
+import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
 
 export const runtime = 'nodejs';
 
@@ -76,7 +77,11 @@ export async function POST(req: NextRequest) {
         ? new (await import('@/lib/scanner/TaiwanScanner')).TaiwanScanner()
         : new (await import('@/lib/scanner/ChinaScanner')).ChinaScanner();
       const today = getLastTradingDay(market);
-      const candles = await scanner.fetchCandles(snapshot.records[idx].symbol, today).catch(() => []);
+      const recordSymbol = snapshot.records[idx].symbol;
+      const local = await loadLocalCandlesWithTolerance(recordSymbol, market, today, 5).catch(() => null);
+      const candles = local?.candles?.length
+        ? local.candles
+        : await scanner.fetchCandles(recordSymbol, today).catch(() => []);
       if (!candles || candles.length === 0) {
         return apiError('最新 K 線暫時無法取得，為避免使用過期型態，本次不寫入持倉。', 503);
       }
