@@ -13,6 +13,8 @@ import {
 import type { MarketId } from '@/lib/scanner/types';
 
 export interface LockedPattern {
+  symbol: string;
+  market: MarketId;
   patternType: string;
   necklinePrice: number;
   targetPrice: number;
@@ -81,6 +83,8 @@ export function useLockedPattern(symbol: string | null | undefined, marketHint?:
           return;
         }
         setLockedPattern({
+          symbol: rec.symbol,
+          market: rec.market ?? market,
           patternType: rec.patternType,
           necklinePrice: rec.triggerPrice,
           targetPrice: rec.patternTargetPrice,

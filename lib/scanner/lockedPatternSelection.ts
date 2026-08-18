@@ -12,6 +12,20 @@ export interface LockwatchPatternRecordLike {
   currentStage?: string;
 }
 
+export interface LockedPatternReplayResultLike {
+  triggered: boolean;
+  patternType?: string;
+  necklinePrice?: number;
+  patternTargetPrice?: number;
+}
+
+export type LockedPatternReplayAssessment =
+  | { status: 'verified' }
+  | { status: 'rejected'; reason: 'not-triggered' | 'pattern-mismatch' | 'neckline-mismatch' | 'target-mismatch' }
+  | { status: 'unavailable'; reason: 'missing-replay-data' };
+
+const LOCKED_LEVEL_REPLAY_TOLERANCE = 0.03;
+
 const ACTIVE_PATTERN_STAGES = new Set([
   'observation',
   'entry-signal',
@@ -31,6 +45,45 @@ export function inferPatternMarket(symbol: string, hint?: MarketId): MarketId {
 
 function isFinitePositive(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function relativeDifference(a: number, b: number): number {
+  return Math.abs(a - b) / Math.max(Math.abs(b), Number.EPSILON);
+}
+
+/**
+ * 用目前 detector 回放原觸發日，避免修正前留下的舊型態／舊頸線永遠壓過新版結果。
+ * 3% 只作為歷史浮點與斜頸線的小幅容忍；超過即不能再把舊目標當成目前有效價位。
+ */
+export function assessLockedPatternReplay(
+  locked: Pick<LockwatchPatternRecordLike, 'patternType' | 'triggerPrice' | 'patternTargetPrice'>,
+  replay: LockedPatternReplayResultLike | null | undefined,
+): LockedPatternReplayAssessment {
+  if (
+    !replay ||
+    !locked.patternType ||
+    !isFinitePositive(locked.triggerPrice) ||
+    !isFinitePositive(locked.patternTargetPrice)
+  ) {
+    return { status: 'unavailable', reason: 'missing-replay-data' };
+  }
+  if (!replay.triggered) return { status: 'rejected', reason: 'not-triggered' };
+  if (replay.patternType !== locked.patternType) {
+    return { status: 'rejected', reason: 'pattern-mismatch' };
+  }
+  if (
+    !isFinitePositive(replay.necklinePrice) ||
+    relativeDifference(replay.necklinePrice, locked.triggerPrice) > LOCKED_LEVEL_REPLAY_TOLERANCE
+  ) {
+    return { status: 'rejected', reason: 'neckline-mismatch' };
+  }
+  if (
+    !isFinitePositive(replay.patternTargetPrice) ||
+    relativeDifference(replay.patternTargetPrice, locked.patternTargetPrice) > LOCKED_LEVEL_REPLAY_TOLERANCE
+  ) {
+    return { status: 'rejected', reason: 'target-mismatch' };
+  }
+  return { status: 'verified' };
 }
 
 /**

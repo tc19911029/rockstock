@@ -1,10 +1,40 @@
 import {
+  assessLockedPatternReplay,
   inferPatternMarket,
   normalizePatternSymbol,
   selectLatestLockedPattern,
 } from '@/lib/scanner/lockedPatternSelection';
 
 describe('lockedPatternSelection', () => {
+  it('舊鎖定必須在觸發日仍命中同型態與相近價位', () => {
+    const locked = {
+      patternType: 'rounding-bottom',
+      triggerPrice: 100,
+      patternTargetPrice: 130,
+    };
+    expect(assessLockedPatternReplay(locked, {
+      triggered: true,
+      patternType: 'rounding-bottom',
+      necklinePrice: 101,
+      patternTargetPrice: 132,
+    })).toEqual({ status: 'verified' });
+    expect(assessLockedPatternReplay(locked, {
+      triggered: true,
+      patternType: 'n-shape',
+      necklinePrice: 100,
+      patternTargetPrice: 130,
+    })).toEqual({ status: 'rejected', reason: 'pattern-mismatch' });
+    expect(assessLockedPatternReplay(locked, {
+      triggered: false,
+    })).toEqual({ status: 'rejected', reason: 'not-triggered' });
+    expect(assessLockedPatternReplay(locked, {
+      triggered: true,
+      patternType: 'rounding-bottom',
+      necklinePrice: 104,
+      patternTargetPrice: 130,
+    })).toEqual({ status: 'rejected', reason: 'neckline-mismatch' });
+  });
+
   it('台陸後綴都能正規化，market hint 優先於裸代號猜測', () => {
     expect(normalizePatternSymbol('000988.SZ')).toBe('000988');
     expect(normalizePatternSymbol('2330.TW')).toBe('2330');

@@ -40,12 +40,16 @@ import {
 } from '@/lib/analysis/patternCatalog';
 import { findPivots, type Pivot } from '@/lib/analysis/trendAnalysis';
 import {
+  detectLetterN,
   detectLetterNStructure,
   detectTopPatternsStructure,
   getPatternFormationBoundaryPrice,
   BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
   TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE,
 } from '@/lib/analysis/v12LetterN';
+import { N_MIN_HISTORY } from '@/lib/analysis/historyMinimums';
+import { assessLockedPatternReplay } from '@/lib/scanner/lockedPatternSelection';
+import type { MarketId } from '@/lib/scanner/types';
 import { candleSRLevels, isLongRedCandle, isLongBlackCandle } from '@/lib/rules/ruleUtils';
 import {
   getCandleRangeLabels,
@@ -215,6 +219,8 @@ interface CandleChartProps {
    * 解 0512 bug：5/5 鎖圓弧底 5/6 chart 卻偵測成頭肩底（pivot 重組）→ 用戶覺得型態跳動怪怪
    */
   lockedPattern?: {
+    symbol?: string;
+    market?: MarketId;
     patternType: string;
     necklinePrice: number;
     targetPrice: number;
@@ -358,10 +364,36 @@ export default function CandleChart({
   useEffect(() => { onDoubleClickRef.current = onDoubleClick; }, [onDoubleClick]);
 
   // ── 形態結構偵測（最新 K 棒，跳過紅K/量比 gate；toggle 開啟時用） ──
-  // 優先順序：lockedPattern（鎖股觀察紀錄）> fresh detection
+  // 優先順序：通過新版觸發日回放的 lockedPattern > fresh detection。
   //   解 0512 bug：5/5 鎖圓弧底（目標 320）5/6 chart detector 卻偵測成頭肩底（目標 261）
   //   → 兩個資料源不一致，用戶看到型態跳動 + 目標縮水
-  //   修法：有 lockedPattern 直接用；只有 fresh detection 型態相同時才借用 pivots。
+  // 修正前 detector 留下的舊鎖定不能永遠壓過新版結果；歷史紀錄仍保留，但顯示前要重驗。
+  const lockedPatternReplay = useMemo(() => {
+    if (!lockedPattern) return null;
+    if (!lockedPattern.triggeredDate || lockedPattern.kind !== 'bottom') {
+      return { status: 'unavailable', reason: 'missing-replay-data' } as const;
+    }
+    const triggerIndex = candles.findIndex(
+      candle => candle.date.replace(/\*$/, '') === lockedPattern.triggeredDate,
+    );
+    // 圖表資料若沒有涵蓋原觸發日，或觸發日前歷史不足，不能把「無法重驗」誤判成失效。
+    if (triggerIndex < N_MIN_HISTORY) {
+      return { status: 'unavailable', reason: 'missing-replay-data' } as const;
+    }
+    const replayCandles = candles.slice(0, triggerIndex + 1);
+    const replay = detectLetterN(
+      replayCandles,
+      triggerIndex,
+      lockedPattern.market ?? 'TW',
+      lockedPattern.symbol ?? '',
+    );
+    return assessLockedPatternReplay({
+      patternType: lockedPattern.patternType,
+      triggerPrice: lockedPattern.necklinePrice,
+      patternTargetPrice: lockedPattern.targetPrice,
+    }, replay);
+  }, [candles, lockedPattern]);
+
   const activePattern = useMemo<{
     kind: 'bottom' | 'top';
     pivots: Pivot[];
@@ -383,9 +415,39 @@ export default function CandleChart({
     const bottom = detectLetterNStructure(candles, lastIdx, BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE);
     const top = detectTopPatternsStructure(candles, lastIdx, TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE);
 
-    // 優先用 lockedPattern（穩定 — 跟鎖股觀察一致）
+    const bottomCandidate = bottom.displayReady && bottom.pivots && bottom.necklinePrice != null && bottom.patternTargetPrice != null && bottom.structureBrokenPrice != null
+      ? {
+        kind: 'bottom',
+        pivots: bottom.pivots,
+        necklinePrice: bottom.necklinePrice,
+        targetPrice: bottom.patternTargetPrice,
+        stopPrice: bottom.structureBrokenPrice,
+        patternType: bottom.patternType ?? '',
+        achievementRate: bottom.achievementRate,
+        qualityScore: bottom.qualityScore,
+        qualityReasons: bottom.qualityReasons,
+        pivotsVerified: true,
+      } as const
+      : null;
+    const topCandidate = top.displayReady && top.pivots && top.necklinePrice != null && top.patternTargetPrice != null && top.structureBrokenPrice != null
+      ? {
+        kind: 'top',
+        pivots: top.pivots,
+        necklinePrice: top.necklinePrice,
+        targetPrice: top.patternTargetPrice,
+        stopPrice: top.structureBrokenPrice,
+        patternType: top.patternType ?? '',
+        achievementRate: top.achievementRate,
+        qualityScore: top.qualityScore,
+        qualityReasons: top.qualityReasons,
+        pivotsVerified: true,
+      } as const
+      : null;
+
+    // 可回放的紀錄必須通過新版 detector；無法回放的舊資料暫時保留相容性。
     if (
       lockedPattern &&
+      lockedPatternReplay?.status !== 'rejected' &&
       Number.isFinite(lockedPattern.necklinePrice) && lockedPattern.necklinePrice > 0 &&
       Number.isFinite(lockedPattern.targetPrice) && lockedPattern.targetPrice > 0
     ) {
@@ -430,37 +492,8 @@ export default function CandleChart({
       };
     }
 
-    const bottomCandidate = bottom.displayReady && bottom.pivots && bottom.necklinePrice != null && bottom.patternTargetPrice != null && bottom.structureBrokenPrice != null
-      ? {
-        kind: 'bottom',
-        pivots: bottom.pivots,
-        necklinePrice: bottom.necklinePrice,
-        targetPrice: bottom.patternTargetPrice,
-        stopPrice: bottom.structureBrokenPrice,
-        patternType: bottom.patternType ?? '',
-        achievementRate: bottom.achievementRate,
-        qualityScore: bottom.qualityScore,
-        qualityReasons: bottom.qualityReasons,
-        pivotsVerified: true,
-      } as const
-      : null;
-    const topCandidate = top.displayReady && top.pivots && top.necklinePrice != null && top.patternTargetPrice != null && top.structureBrokenPrice != null
-      ? {
-        kind: 'top',
-        pivots: top.pivots,
-        necklinePrice: top.necklinePrice,
-        targetPrice: top.patternTargetPrice,
-        stopPrice: top.structureBrokenPrice,
-        patternType: top.patternType ?? '',
-        achievementRate: top.achievementRate,
-        qualityScore: top.qualityScore,
-        qualityReasons: top.qualityReasons,
-        pivotsVerified: true,
-      } as const
-      : null;
-
     return choosePatternCandidate(bottomCandidate, topCandidate);
-  }, [candles, showNeckline, showPattern, lockedPattern]);
+  }, [candles, showNeckline, showPattern, lockedPattern, lockedPatternReplay]);
 
   /**
    * 型態狀態必須遵守生命週期：形成 → 真突破／跌破 → 回測／失效。
@@ -1552,6 +1585,14 @@ export default function CandleChart({
             {patternAnalysisRequested && !activePattern && (
               <span className="px-2 py-1 rounded bg-slate-900/85 text-slate-300 border border-slate-600">
                 目前沒有通過條件的型態
+              </span>
+            )}
+            {patternAnalysisRequested && lockedPatternReplay?.status === 'rejected' && (
+              <span
+                className="px-2 py-1 rounded bg-amber-950/90 text-amber-100 border border-amber-500/80"
+                title={`舊鎖定未通過目前版本的觸發日回放（${lockedPatternReplay.reason}）；歷史紀錄保留，但不再沿用它的頸線與目標。`}
+              >
+                舊鎖定已停用｜{activePattern ? '顯示新版型態' : '目前無合格型態'}
               </span>
             )}
             {showPatternChip && (
