@@ -55,6 +55,8 @@ export interface CnBoardRankingFile {
   date: string;
   /** 算輪動用的前一檔日期（約 5 交易日前）；無 = null */
   priorDate: string | null;
+  /** 原始東財板塊快照抓取時間；不可用排行重算時間冒充。 */
+  snapshotUpdatedAt: string;
   generatedAt: string;
   concepts: CnRankedBoard[];
   industries: CnRankedBoard[];
@@ -307,6 +309,7 @@ export async function buildCnBoardRanking(date: string): Promise<CnBoardRankingF
   return {
     date,
     priorDate: prior ? priorDate : null,
+    snapshotUpdatedAt: today.fetchedAt,
     generatedAt: new Date().toISOString(),
     concepts: enrich(todayConcepts, conceptRot, conceptWin),
     industries: enrich(today.industries, industryRot, industryWin),

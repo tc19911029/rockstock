@@ -4,12 +4,13 @@
  *
  * 盤中/盤後窗口 → 直接打東財 push2 clist 即時板塊行情（fetchBoardSnapshot，含主站/鏡像
  * host failover + curl fallback），排名即時跳動。收盤或抓取全失敗 → 退回最後一日存檔
- * （buildLatestCnBoardRanking），標 stale=true。概念排行濾掉風格/大盤/寬基指數大指數
+ * （buildLatestCnBoardRanking），並用原始 fetchedAt 判斷是否為有效收盤快照。概念排行濾掉風格/大盤/寬基指數大指數
  * （filterRealConcepts，對齊東財 App）。純顯示層、不參與選股（鐵則 #5）。記憶體快取 40s。
  */
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { globalCache } from '@/lib/datasource/MemoryCache';
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { fetchBoardSnapshot } from '@/lib/cn-agents/datasource/emBoards';
 import { filterThemeConcepts, isBehavioralBoard, classifyBoardStage, buildLatestCnBoardRanking } from '@/lib/cn-agents/boardRanking';
@@ -26,7 +27,10 @@ interface LiveBoard extends BoardEntry {
 interface CnLivePayload {
   marketOpen: boolean;
   stale: boolean;
+  staleReason: string | null;
   updatedAt: string;
+  snapshotUpdatedAt: string;
+  generatedAt: string;
   date: string | null;
   industries: LiveBoard[];
   concepts: LiveBoard[];
@@ -49,11 +53,15 @@ export async function GET(_req: NextRequest) {
         fetchBoardSnapshot('industry'),
         fetchBoardSnapshot('concept'),
       ]);
+      const fetchedAt = new Date().toISOString();
       const payload: CnLivePayload = {
         marketOpen: open,
         stale: false,
-        updatedAt: new Date().toISOString(),
-        date: null,
+        staleReason: null,
+        updatedAt: fetchedAt,
+        snapshotUpdatedAt: fetchedAt,
+        generatedAt: fetchedAt,
+        date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()),
         industries: withStage(ind.entries),
         concepts: withStage(filterThemeConcepts(con.entries)),
       };
@@ -67,10 +75,18 @@ export async function GET(_req: NextRequest) {
   // 收盤 / 即時抓取失敗 → 最後一日存檔
   const file = await buildLatestCnBoardRanking();
   if (!file) return apiError('no CN board snapshot available', 404);
+  const freshness = assessIntradayFreshness('CN', {
+    date: file.date,
+    updatedAt: file.snapshotUpdatedAt,
+    count: file.industries.length + file.concepts.length,
+  });
   const payload: CnLivePayload = {
     marketOpen: open,
-    stale: true,
-    updatedAt: file.generatedAt,
+    stale: freshness.stale,
+    staleReason: freshness.reason,
+    updatedAt: file.snapshotUpdatedAt,
+    snapshotUpdatedAt: file.snapshotUpdatedAt,
+    generatedAt: file.generatedAt,
     date: file.date,
     industries: file.industries.map((b) => ({ ...b, stage: b.stage })),
     // 純題材：存檔的 concepts 已過 filterRealConcepts，這裡再濾盤口/行為/財務/指數型

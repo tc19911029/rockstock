@@ -38,4 +38,22 @@ describe('assessIntradayFreshness', () => {
     expect(result.stale).toBe(true);
     expect(result.reason).toMatch(/不是今天/);
   });
+
+  test('陸股盤後 15:00 後的板塊快照視為 fresh', () => {
+    const result = assessIntradayFreshness('CN', {
+      date: '2026-08-20',
+      updatedAt: '2026-08-20T08:30:07.949Z', // 上海 16:30
+      count: 1000,
+    }, new Date('2026-08-20T11:20:00.000Z'));
+    expect(result).toMatchObject({ stale: false, reason: null });
+  });
+
+  test('陸股盤後拒絕停在 15:00 以前的板塊快照', () => {
+    const result = assessIntradayFreshness('CN', {
+      date: '2026-08-20',
+      updatedAt: '2026-08-20T06:58:00.000Z', // 上海 14:58
+      count: 1000,
+    }, new Date('2026-08-20T11:20:00.000Z'));
+    expect(result).toMatchObject({ stale: true, reason: '今日快照停在收盤 15:00 以前' });
+  });
 });

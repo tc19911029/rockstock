@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
-import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { readIntradaySnapshot, type IntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { getQuoteSnapshotDate, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
@@ -41,6 +42,39 @@ type ResolvedEntry = {
   resolved: string;
   market: 'TW' | 'CN' | 'FUND' | 'unknown';
 };
+
+/**
+ * 只用通過新鮮度檢查的 L2 補 L1／即時來源缺口。
+ *
+ * CN 盤後有一段時間日 K provider 尚未全數定稿，但 15:45 強制刷新後的全市場 L2
+ * 已是收盤值；若完全禁用 L2，昨天的掃描卡會有數百檔繼續顯示昨天漲幅。
+ * 反過來也不能無條件相信 L2，因此統一套用盤中 6 分鐘／盤後收盤時間守門。
+ */
+export function buildFreshSnapshotFallback(
+  entries: ResolvedEntry[],
+  market: 'TW' | 'CN',
+  snapshot: IntradaySnapshot,
+  now = new Date(),
+): QuoteTick[] {
+  const freshness = assessIntradayFreshness(market, snapshot, now);
+  if (freshness.stale) return [];
+
+  const byCode = new Map(snapshot.quotes.map((quote) => [quote.symbol, quote]));
+  const out: QuoteTick[] = [];
+  for (const entry of entries) {
+    const code = entry.resolved.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const quote = byCode.get(code);
+    if (!quote || quote.close <= 0) continue;
+    if (market === 'TW' && quote.isActualTrade === false) continue;
+    out.push({
+      symbol: entry.original,
+      price: quote.close,
+      changePercent: quote.changePercent ?? 0,
+      name: quote.name || undefined,
+    });
+  }
+  return out;
+}
 
 /** 休市／深夜報價以正式 L1 日 K 為準；L2 可能只是盤中快照，不能冒充收盤價。 */
 export async function fetchFinalL1Quotes(entries: ResolvedEntry[], market: 'TW' | 'CN'): Promise<QuoteTick[]> {
@@ -384,20 +418,12 @@ export async function GET(req: NextRequest) {
   );
 
   const cnFallback = async () => {
-    if (!cnLive || missingCN.length === 0) return [] as typeof quotes;
+    if (missingCN.length === 0) return [] as typeof quotes;
     const lookupCN = getQuoteSnapshotDate('CN');
     try {
       const cnSnap = await readIntradaySnapshot('CN', lookupCN);
       if (!cnSnap) return [] as typeof quotes;
-      const out: typeof quotes = [];
-      for (const e of missingCN) {
-        const code = e.resolved.replace(/\.(SS|SZ)$/i, '');
-        const q = cnSnap.quotes.find(qq => qq.symbol === code);
-        if (q && q.close > 0) {
-          out.push({ symbol: e.original, price: q.close, changePercent: q.changePercent ?? 0, name: q.name || undefined });
-        }
-      }
-      return out;
+      return buildFreshSnapshotFallback(missingCN, 'CN', cnSnap);
     } catch { return [] as typeof quotes; }
   };
 
@@ -407,15 +433,7 @@ export async function GET(req: NextRequest) {
     try {
       const twSnap = await readIntradaySnapshot('TW', lookupTW);
       if (!twSnap) return [] as typeof quotes;
-      const out: typeof quotes = [];
-      for (const e of missingTW) {
-        const code = e.resolved.replace(/\.(TW|TWO)$/i, '');
-        const q = twSnap.quotes.find(qq => qq.symbol === code);
-        if (q && q.close > 0) {
-          out.push({ symbol: e.original, price: q.close, changePercent: q.changePercent ?? 0, name: q.name || undefined });
-        }
-      }
-      return out;
+      return buildFreshSnapshotFallback(missingTW, 'TW', twSnap);
     } catch { return [] as typeof quotes; }
   };
 

@@ -46,7 +46,8 @@ interface LiveBoard {
   limitUpCount: number | null; rank: number; stage: string;
 }
 interface CnLivePayload {
-  marketOpen: boolean; stale: boolean; updatedAt: string; date: string | null;
+  marketOpen: boolean; stale: boolean; staleReason: string | null;
+  updatedAt: string; snapshotUpdatedAt: string; generatedAt: string; date: string | null;
   industries: LiveBoard[]; concepts: LiveBoard[];
 }
 
@@ -427,9 +428,13 @@ export function LiveThemesView({ market }: { market: Market }) {
   const payload = market === 'TW' ? tw : cn;
   const marketOpen = payload?.marketOpen ?? false;
   const stale = market === 'TW' ? (tw?.stale ?? false) : (cn?.stale ?? false);
-  const staleReason = market === 'TW' ? tw?.staleReason : undefined;
+  const staleReason = market === 'TW' ? tw?.staleReason : cn?.staleReason;
   const updatedAt = payload?.updatedAt ?? null;
-  const note = market === 'TW' && tw ? `資料日 ${tw.date} · ${tw.themeCount} 個題材（完整成分）` : undefined;
+  const note = market === 'TW' && tw
+    ? `資料日 ${tw.date} · ${tw.themeCount} 個題材（完整成分）`
+    : market === 'CN' && cn?.date
+      ? `資料日 ${cn.date}`
+      : undefined;
 
   return (
     <div className="space-y-3">
