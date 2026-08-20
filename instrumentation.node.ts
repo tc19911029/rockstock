@@ -434,15 +434,25 @@ export async function register() {
 
     console.log(`[local-cron] ${market} append-from-snapshot 觸發 (lastTrading=${lastTrading})...`);
     const json = await callRoute(
-      `/api/cron/append-from-snapshot?market=${market}`,
+      // 排程刻意等到 TW 14:15 / CN 15:45 才封存，但 route 的一般盤後窗口只到
+      // TW 14:30 / CN 15:30。CN 若不帶 force 會每天回「非盤後窗口」並被誤記完成。
+      // force 只略過窗口檢查，route 內的 isMarketOpen 守門仍然有效。
+      `/api/cron/append-from-snapshot?market=${market}&force=1`,
       `${market} append-from-snapshot`,
-    ) as { appended?: number; already?: number } | null;
+    ) as { data?: { appended?: number; already?: number; skipped?: boolean; reason?: string }; appended?: number; already?: number; skipped?: boolean; reason?: string } | null;
     if (!json) {
       l1SnapshotDone[market] = '';
       return;
     }
+    const payload = json.data ?? json;
+    if (payload.skipped) {
+      // 跳過不是完成；清旗標讓下一個 5 分鐘 tick 重試，避免把 8/19 永久當 8/20。
+      l1SnapshotDone[market] = '';
+      console.warn(`[local-cron] ${market} append-from-snapshot 跳過：${payload.reason ?? 'unknown'}`);
+      return;
+    }
     await persistCronState();
-    console.log(`[local-cron] ${market} append-from-snapshot 完成: appended=${(json as { appended?: number })?.appended ?? '?'}`);
+    console.log(`[local-cron] ${market} append-from-snapshot 完成: appended=${payload.appended ?? '?'}`);
 
     // append 完成後 15 分鐘跑 L1↔L2 一致性 audit（給 download-candles 也跑完）
     // 2026-05-21 加。這個跟 append 同個 daily flag 走，append 跑完才會走到這。
