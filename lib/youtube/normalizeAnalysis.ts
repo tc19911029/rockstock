@@ -9,12 +9,14 @@
  *
  * 本模組是純函式 (不碰 IO)，由 scripts/normalize-youtube-analysis.ts 與 cron 餵入資料。
  *
- * 做兩件事：
+ * 做三件事：
  *  1. **代號重查 (確定性、自動修)**：對每筆 raw_query / stock_name 跑 lookupStock(全量 master)，
  *     覆寫 matched.code/name/market/confidence，並重算 combined_confidence。模型永不決定代號。
  *  2. **逐字稿 grounding (僅報告、不自動刪)**：搜「代號(阿拉伯+中文數字) / 名稱 / master alias /
  *     已知 Whisper 同音」是否真出現在逐字稿。查無 → ungrounded；只在別支出現 → videoMismatch。
  *     **絕不自動刪除或搬移**(2026-05-30 凱美誤刪教訓：name-grep 查無常是 Whisper 亂碼，不是幻覺)。
+ *  3. **節目重點股校正**：video_summaries[].key_stocks 同樣以全量 master 重查；
+ *     查無者移除，避免空代號或模型臆測代號流入每日報告與資料契約。
  */
 
 import type {
@@ -266,6 +268,45 @@ export function normalizeAnalysis(
         s.stock_code = resolved.code;
         s.stock_name = resolved.name;
       }
+    });
+  }
+
+  // video_summaries：模型常能辨識名稱，卻會把 code 留空或憑印象填錯。
+  // 名稱優先、代號退路；全量 master 都查不到就不保留，避免持久化無法 join 的重點股。
+  if (analysis.video_summaries) {
+    analysis.video_summaries.forEach((summary, videoIndex) => {
+      const normalized: typeof summary.key_stocks = [];
+      const seenCodes = new Set<string>();
+
+      (summary.key_stocks ?? []).forEach((stock, stockIndex) => {
+        const where = `video_summaries[${videoIndex}].key_stocks[${stockIndex}]`;
+        const resolved = lookupStock(stock.name, master) ?? lookupStock(stock.code, master);
+        if (!resolved) {
+          report.codeFixes.push({
+            where,
+            raw_query: stock.name || stock.code,
+            oldCode: stock.code || null,
+            newCode: null,
+            via: 'unresolved',
+          });
+          return;
+        }
+
+        if (stock.code !== resolved.code || stock.name !== resolved.name) {
+          report.codeFixes.push({
+            where,
+            raw_query: stock.name || stock.code,
+            oldCode: stock.code || null,
+            newCode: resolved.code,
+            via: resolved.match_via,
+          });
+        }
+        if (seenCodes.has(resolved.code)) return;
+        seenCodes.add(resolved.code);
+        normalized.push({ code: resolved.code, name: resolved.name });
+      });
+
+      summary.key_stocks = normalized;
     });
   }
 

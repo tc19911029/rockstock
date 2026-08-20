@@ -87,6 +87,50 @@ describe('normalizeAnalysis — 代號重查（確定性自動修）', () => {
     const { analysis: out } = normalizeAnalysis(a, master, {});
     expect(out.stock_scoring![0].stock_code).toBe('3624');
   });
+
+  it('video_summaries.key_stocks 空白／錯誤代號會依名稱校正，查無者移除', () => {
+    const a = analysis({
+      video_summaries: [{
+        video_id: 'v1', source_id: 's1', source_name: '測試節目', title: '今日盤勢',
+        summary: '這是一段長度足夠的測試節目摘要，用來驗證股票代號校正。',
+        watch_priority: 'must_watch', watch_reason: '有具體個股分析',
+        key_stocks: [
+          { code: '', name: '光頡' },
+          { code: '9999', name: '凱美' },
+          { code: '', name: '查無此股' },
+        ],
+      }],
+    });
+
+    const { analysis: out, report } = normalizeAnalysis(a, master, {});
+    expect(out.video_summaries![0].key_stocks).toEqual([
+      { code: '3624', name: '光頡' },
+      { code: '2375', name: '凱美' },
+    ]);
+    expect(report.codeFixes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ oldCode: null, newCode: '3624' }),
+      expect.objectContaining({ oldCode: '9999', newCode: '2375' }),
+      expect.objectContaining({ oldCode: null, newCode: null, via: 'unresolved' }),
+    ]));
+  });
+
+  it('video_summaries.key_stocks 校正具冪等性，重跑不會再產生修正', () => {
+    const a = analysis({
+      video_summaries: [{
+        video_id: 'v1', source_id: 's1', source_name: '測試節目', title: '今日盤勢',
+        summary: '這是一段長度足夠的測試節目摘要，用來驗證重跑結果一致。',
+        watch_priority: 'skim', watch_reason: '個股內容可快速瀏覽',
+        key_stocks: [{ code: '', name: '光頡' }, { code: '3624', name: '光頡' }],
+      }],
+    });
+
+    const first = normalizeAnalysis(a, master, {});
+    const snapshot = JSON.stringify(first.analysis.video_summaries);
+    const second = normalizeAnalysis(first.analysis, master, {});
+    expect(second.analysis.video_summaries![0].key_stocks).toEqual([{ code: '3624', name: '光頡' }]);
+    expect(JSON.stringify(second.analysis.video_summaries)).toBe(snapshot);
+    expect(second.report.codeFixes).toHaveLength(0);
+  });
 });
 
 describe('normalizeAnalysis — grounding（只報告不刪）', () => {
