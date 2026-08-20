@@ -1628,8 +1628,18 @@ export default function CandleChart({
               const confirmationPrice = getPatternConfirmationPrice(activePattern.kind, activePattern.necklinePrice);
               const distanceText = getTargetDistanceText(close, target);
               const labels = getPatternDirectionLabels(activePattern.kind);
+              const isBeforeNeckline = activePattern.kind === 'bottom'
+                ? close < activePattern.necklinePrice
+                : close > activePattern.necklinePrice;
+              const necklineDistancePct = Math.abs(close - activePattern.necklinePrice) /
+                Math.max(activePattern.necklinePrice, Number.EPSILON) * 100;
+              const displayStatusText = patternStatus === 'pending'
+                ? isBeforeNeckline ? '形成中' : '接近確認'
+                : statusLabel[patternStatus].text;
               const detail = patternStatus === 'pending'
-                ? `收盤 ${labels.pendingOperator} ${confirmationPrice.toFixed(2)} 才確認`
+                ? isBeforeNeckline
+                  ? `距頸線 ${necklineDistancePct.toFixed(1)}%｜收盤 ${labels.pendingOperator} ${confirmationPrice.toFixed(2)} 才確認`
+                  : `已過頸線｜收盤 ${labels.pendingOperator} ${confirmationPrice.toFixed(2)} 才確認`
                 : patternStatus === 'confirmed'
                   ? `下一步看 ${labels.target} ${target.toFixed(2)}${distanceText ? `（${distanceText}）` : ''}`
                   : patternStatus === 'retest'
@@ -1642,9 +1652,9 @@ export default function CandleChart({
               return (
                 <span
                   className={`px-2 py-1 rounded border text-[11px] font-bold ${statusLabel[patternStatus].cls}`}
-                  title={`${statusLabel[patternStatus].text}｜${detail}`}
+                  title={`${displayStatusText}｜${detail}`}
                 >
-                  {statusLabel[patternStatus].text}
+                  {displayStatusText}
                   <span className="ml-1 opacity-80 font-normal">{detail}</span>
                 </span>
               );

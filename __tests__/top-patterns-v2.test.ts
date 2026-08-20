@@ -66,4 +66,17 @@ describe('S4 v2 型別完整性', () => {
     const empty = detectTopPatternsStructure([bar('d0', 100, 101, 99, 100)], 0);
     expect(empty.triggered).toBe(false);
   });
+
+  test('間隔超過 20 根的兩個相近高點可偵測長雙頭頂', () => {
+    const candles: CandleWithIndicators[] = [];
+    const ma = { ma5: 110, ma10: 110, ma20: 110, ma60: 110 };
+    for (let i = 0; i <= 22; i++) candles.push(bar(`d${i}`, 115, i === 20 ? 120 : 118, 112, 115, ma));
+    for (let i = 23; i <= 32; i++) candles.push(bar(`d${i}`, 105, 107, i === 26 ? 100 : 103, 105, ma));
+    for (let i = 33; i <= 62; i++) candles.push(bar(`d${i}`, 115, i === 60 ? 120 : 118, 112, 115, ma));
+    for (let i = 63; i <= 70; i++) candles.push(bar(`d${i}`, 105, 107, 103, 105, ma));
+
+    const result = detectTopPatternsStructure(candles, candles.length - 1, 90);
+    expect(result.patternType).toBe('long-double-top');
+    expect(result.displayReady).toBe(true);
+  });
 });

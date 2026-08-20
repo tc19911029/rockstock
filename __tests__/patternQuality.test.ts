@@ -3,6 +3,7 @@ import {
   getPatternFormationBoundaryPrice,
   hasAlternatingDistinctPivots,
   hasCoherentComplexShoulders,
+  hasPatternConfirmationRoom,
   projectPivotLinePrice,
   scorePatternGeometry,
 } from '@/lib/analysis/v12LetterN';
@@ -96,5 +97,12 @@ describe('型態品質與衝突選擇', () => {
       { type: 'high', price: 105, index: 15 },
       { type: 'low', price: 95, index: 18 },
     ])).toBe(true);
+  });
+
+  it('確認價與目標價之間必須有真實可執行空間', () => {
+    expect(hasPatternConfirmationRoom('bottom', 100, 106)).toBe(true);
+    expect(hasPatternConfirmationRoom('bottom', 100, 103)).toBe(false);
+    expect(hasPatternConfirmationRoom('top', 100, 94)).toBe(true);
+    expect(hasPatternConfirmationRoom('top', 100, 97)).toBe(false);
   });
 });

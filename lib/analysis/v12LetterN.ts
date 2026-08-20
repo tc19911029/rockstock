@@ -106,6 +106,9 @@ export function detectLetterN(
   // 同一段 K 線常同時符合三重底／頭肩底／雙重底。舊版回傳固定順序第一個，
   // 分類會隨 detector 排列而非結構吻合度改變。現在先收集全部候選，再以品質排序。
   const candidates = getRankedBottomMatches(candles, idx, true)
+    // N 字形成中只供圖表預覽，不參與正式訊號分類，避免尚未過 A 的 N 候選
+    // 蓋掉同一根 K 棒已成立的其他底部型態。
+    .filter(candidate => candidate.match.patternType !== 'n-shape' || c.close > candidate.match.necklinePrice)
     .filter(candidate => candidate.quality.score >= BOTTOM_PATTERN_TRIGGER_MIN_QUALITY_SCORE);
   if (candidates.length === 0) return empty;
   const evaluated = candidates.map(candidate =>
@@ -126,8 +129,11 @@ export function detectLetterNStructure(
 ): LetterNResult {
   if (idx < N_MIN_HISTORY || candles.length === 0) return { triggered: false, detail: '' };
 
-  const candidate = getRankedBottomMatches(candles, idx, true)
-    .find(item => item.quality.score >= minimumQualityScore);
+  const eligible = getRankedBottomMatches(candles, idx, true)
+    .filter(item => item.quality.score >= minimumQualityScore);
+  // 圖表指定品質門檻時，優先挑真正可顯示的候選。舊版只取形狀分最高者，
+  // 若它離頸線較遠，會遮掉同一檔另一個已進入預覽範圍的型態。
+  const candidate = eligible.find(item => item.quality.displayReady) ?? eligible[0];
   if (candidate) {
     const { match: m, quality } = candidate;
     return {
@@ -175,10 +181,12 @@ interface RankedMatch<TMatch> {
 
 const MIN_MEASURED_MOVE_PCT = 0.03;
 const MAX_MEASURED_MOVE_PCT = 0.50;
-const MAX_PENDING_NECKLINE_DISTANCE_PCT = 0.08;
+// 結構預覽和交易觸發分層：開啟型態分析時，應能在接近頸線但尚未突破前
+// 看見形成中的腳位。這裡只影響候選時效；正式訊號仍由 ×3% + K 棒/量能 gate 控制。
+const MAX_PENDING_NECKLINE_DISTANCE_PCT = 0.12;
 const MAX_STRUCTURE_EVENT_AGE_BARS = 20;
 const MAX_TERMINAL_EVENT_AGE_BARS = 10;
-const DISPLAY_MAX_PENDING_NECKLINE_DISTANCE_PCT = 0.03;
+const DISPLAY_MAX_PENDING_NECKLINE_DISTANCE_PCT = 0.10;
 const DISPLAY_MAX_EVENT_AGE_BARS = 10;
 /** 形狀吻合門檻；距頸線與事件新舊只負責 current relevance，不再灌進形狀分數。 */
 export const BOTTOM_PATTERN_DISPLAY_MIN_QUALITY_SCORE = 90;
@@ -186,6 +194,18 @@ export const TOP_PATTERN_DISPLAY_MIN_QUALITY_SCORE = 90;
 const BOTTOM_PATTERN_TRIGGER_MIN_QUALITY_SCORE = 80;
 const TOP_PATTERN_TRIGGER_MIN_QUALITY_SCORE = 85;
 const SUBPATTERN_SUPPRESSION_MIN_QUALITY_SCORE = 75;
+
+/** 確認價與測量目標之間必須保留可執行區間；否則型態只供觀察，不發交易訊號。 */
+export function hasPatternConfirmationRoom(
+  kind: PatternKind,
+  necklinePrice: number,
+  targetPrice: number,
+): boolean {
+  if (![necklinePrice, targetPrice].every(price => Number.isFinite(price) && price > 0)) return false;
+  return kind === 'bottom'
+    ? targetPrice > necklinePrice * (1 + TRUE_BREAKOUT_PCT)
+    : targetPrice < necklinePrice * (1 - TRUE_BREAKOUT_PCT);
+}
 
 /** 複式頭肩的肩帶驗證；公開為純函式，讓真實誤判案例可以鎖成回歸測試。 */
 export function hasCoherentComplexShoulders(
@@ -582,11 +602,14 @@ function makeResult(
     return structureOnly('N 型態 close 已遠超頸線（>+20%），突破已發生很久非進場時機');
   }
 
-  // ⚠️ 自創 padding（書本沒明寫量化）— 2026-05-10
-  // 防 detector 抓到「已達目標型態」誤觸發進場（如 4722.TW close=236 / target=193）
-  // 書本本意支持：型態突破達目標即啟動停利，不會再被視為新進場（《抓飆股》Part 7）
-  // 0513 ABCDE D：標自創 — ×0.97 是業界慣例緩衝，可未來改用 ATR-based
-  if (closePrice >= match.patternTargetPrice * 0.97) {
+  // 測量目標若不高於 ×3% 確認價，沒有可執行空間；保留結構圖，但不發進場訊號。
+  if (!hasPatternConfirmationRoom('bottom', match.necklinePrice, match.patternTargetPrice)) {
+    return structureOnly('N 型態目標價未高於 ×3% 確認價，僅顯示觀察');
+  }
+
+  // 已真正到達目標才視為完成。舊版用 target×0.97，會讓正常型態在
+  // 突破確認價時立刻被「接近目標」拒絕，造成數學上沒有任何可觸發價位。
+  if (closePrice >= match.patternTargetPrice) {
     return structureOnly('N 型態已接近/超過目標價，視為已達標非進場時機');
   }
 
@@ -1018,7 +1041,7 @@ function detectRoundingBottom(
   if (beforeLen < 5 || afterLen < 5) return null;
   if (beforeLen > afterLen * 3 || afterLen > beforeLen * 3) return null;
 
-  // 弧底前最高 + 弧底後最高（取較低者作頸線）
+  // 弧底前最高 + 弧底後最高；要站上兩側杯緣才算完整突破，故取較高者。
   let beforeHigh = -Infinity;
   let beforeHighIdx = start;
   let afterHigh = -Infinity;
@@ -1029,7 +1052,8 @@ function detectRoundingBottom(
   for (let i = arcLowIdx; i <= idx; i++) {
     if (candles[i].high > afterHigh) { afterHigh = candles[i].high; afterHighIdx = i; }
   }
-  const necklinePrice = Math.min(beforeHigh, afterHigh);
+  const necklinePrice = getConservativeHorizontalNeckline([beforeHigh, afterHigh], 'bottom');
+  if (necklinePrice == null) return null;
 
   // 弧底深度
   const arcDepth = necklinePrice - arcLow;
@@ -1138,8 +1162,8 @@ function detectNShape(
   // B 必須晚於 A（A→B 順序）— 回檔型態才合理
   if (b.index <= a.index) return null;
 
-  // 收盤要過 A 高（×3% 真突破由 makeResult 統一檢查；這裡先確保結構）
-  if (candles[idx].close <= a.price) return null;
+  // A→B 且 B 不破前低後，結構已進入形成階段；是否過 A、是否完成 ×3% 真突破
+  // 分別交給顯示品質與 makeResult。舊版要求先過 A，導致形成中的 N 字永遠無法畫出。
 
   // B 不破前低：必須有更早的低點作為比較基準，且 B 嚴格高於它
   // 若無更早 pivot，無從判斷「不破底」結構是否成立 → reject（避免 vacuous pass）
@@ -1249,8 +1273,9 @@ export function detectTopPatternsStructure(
 ): TopPatternResult {
   if (idx < N_MIN_HISTORY || candles.length === 0) return { triggered: false, detail: '' };
 
-  const candidate = getRankedTopMatches(candles, idx, true)
-    .find(item => item.quality.score >= minimumQualityScore);
+  const eligible = getRankedTopMatches(candles, idx, true)
+    .filter(item => item.quality.score >= minimumQualityScore);
+  const candidate = eligible.find(item => item.quality.displayReady) ?? eligible[0];
   if (candidate) {
     const { match: m, quality } = candidate;
     return {
@@ -1337,11 +1362,13 @@ function makeTopResult(match: TopPatternMatch, closePrice: number, quality: Patt
     return structureOnly('頂部型態 close 已遠低於頸線（>-20%），跌破已發生很久非新警示');
   }
 
-  // ⚠️ 自創 padding（書本沒明寫量化）— 2026-05-10
-  // 對稱底部邏輯：close 已下到 target × 1.03 視為「型態已達目標」，避免重複警示
-  // 案例：1301.TW close=48.55 / target=48.6 已達標仍警示
-  // 0513 ABCDE D：標自創 — ×1.03 對稱 v12LetterN.ts:230 的 ×0.97
-  if (closePrice <= match.patternTargetPrice * 1.03) {
+  if (!hasPatternConfirmationRoom('top', match.necklinePrice, match.patternTargetPrice)) {
+    return structureOnly('頂部型態目標價未低於 ×3% 確認價，僅顯示觀察');
+  }
+
+  // 與底部一致：真正到達測量目標後才停止發新警示，不再用 target×1.03
+  // 吃掉確認價與目標價之間的正常觸發區間。
+  if (closePrice <= match.patternTargetPrice) {
     return structureOnly('頂部型態已接近/超過目標價，視為已達標非新警示');
   }
 
