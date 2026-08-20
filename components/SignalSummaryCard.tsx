@@ -41,7 +41,15 @@ import { detectLetterO } from '@/lib/analysis/v12LetterO';
 import { detectLetterP } from '@/lib/analysis/v12LetterP';
 import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
 import { STOP_LOSS_PRICE_MULT, PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/bookThresholds';
-import { deductPrice, daysUntilMaTurn, daysUntilGoldenCross, formatMaTurnLine, MA_PLAIN_LABEL } from '@/lib/analysis/maDeduction';
+import {
+  deductPrice,
+  daysUntilBullishAlignment,
+  daysUntilGoldenCross,
+  daysUntilMaRises,
+  daysUntilMaTurn,
+  formatMaTurnLine,
+  MA_PLAIN_LABEL,
+} from '@/lib/analysis/maDeduction';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { ShortSixConditionsResult } from '@/lib/analysis/shortAnalysis';
 import type { ProhibitionResult } from '@/lib/rules/entryProhibitions';
@@ -743,11 +751,16 @@ function MaDeductionForecast({
       }))
       .filter((l): l is NonNullable<typeof l> => l != null);
 
+    // 使用者指定的兩個重點：季線何時開始向上、MA5/10/20 何時三線多排。
+    // 完整扣抵窗仍只是假設「未來收盤維持今收」的情境，不是行情預測。
+    const ma60Rise = daysUntilMaRises(closes, 60, asOf, 60);
+    const tripleAlignment = daysUntilBullishAlignment(closes, [5, 10, 20], asOf, 20);
+
     // 黃金交叉只估近窗 5 根（凍結價假設往後不可靠）
     const gc5x20 = daysUntilGoldenCross(closes, 5, 20, asOf, 5);
 
     if (rows.length === 0) return null;
-    return { today, rows, turnLines, gc5x20 };
+    return { today, rows, turnLines, ma60Rise, tripleAlignment, gc5x20 };
   }, [candles, index]);
 
   if (!view) return null;
@@ -792,6 +805,36 @@ function MaDeductionForecast({
           </p>
         ))}
 
+        {/* 使用者指定重點：MA60 翻揚與 MA5/10/20 三線多排的完整扣抵窗推估 */}
+        <div className="mt-1.5 space-y-0.5 border-t border-border/25 pt-1.5">
+          <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+            <span className="text-foreground/70">MA60 翻揚</span>
+            {view.ma60Rise.alreadyRising ? (
+              <span className="ml-1.5 text-rose-300/90">目前已向上</span>
+            ) : view.ma60Rise.days != null ? (
+              <>
+                <span className="ml-1.5 text-amber-300/90">約 {view.ma60Rise.days} 個交易日後開始向上</span>
+                {view.ma60Rise.deductPrice != null && (
+                  <span className="ml-1.5 text-muted-foreground/45">（屆時扣抵 {view.ma60Rise.deductPrice.toFixed(2)}）</span>
+                )}
+              </>
+            ) : (
+              <span className="ml-1.5 text-muted-foreground/55">依今收情境，60 個交易日內未見向上</span>
+            )}
+          </p>
+
+          <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+            <span className="text-foreground/70">MA5/10/20</span>
+            {view.tripleAlignment.alreadyAligned ? (
+              <span className="ml-1.5 text-rose-300/90">目前已三線多排</span>
+            ) : view.tripleAlignment.days != null ? (
+              <span className="ml-1.5 text-amber-300/90">約 {view.tripleAlignment.days} 個交易日後形成三線多排</span>
+            ) : (
+              <span className="ml-1.5 text-muted-foreground/55">依今收情境，20 個交易日內未形成三線多排</span>
+            )}
+          </p>
+        </div>
+
         {/* 5×20 黃金交叉預測（近窗）*/}
         {view.gc5x20.alreadyAbove ? (
           <p className="text-[11px] leading-relaxed text-muted-foreground/70">
@@ -814,7 +857,7 @@ function MaDeductionForecast({
       </div>
 
       <p className="text-[10px] text-muted-foreground/45 leading-relaxed">
-        粗估提示，假設未來價停在今收；非進出場訊號。
+        以交易日計；假設未來收盤維持今收，越遠誤差越大，非進出場訊號。
       </p>
     </div>
   );

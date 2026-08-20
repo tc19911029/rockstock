@@ -8,7 +8,9 @@
 import {
   deductPrice,
   deductSeries,
+  daysUntilBullishAlignment,
   daysUntilMaTurn,
+  daysUntilMaRises,
   daysUntilGoldenCross,
   formatMaTurnLine,
 } from '@/lib/analysis/maDeduction';
@@ -221,5 +223,74 @@ describe('daysUntilGoldenCross — 短均線何時黃金交叉長均線', () => 
     const snapshot = [...closes];
     daysUntilGoldenCross(closes, 5, 10);
     expect(closes).toEqual(snapshot);
+  });
+});
+
+describe('daysUntilMaRises — 單一均線何時開始向上', () => {
+  it('MA60 目前下彎，3 個交易日後扣到低價才開始向上', () => {
+    const closes = Array.from({ length: 65 }, () => 30);
+    closes[5] = 29;
+    closes[6] = 28;
+    closes[7] = 10;
+    closes[64] = 20;
+
+    const r = daysUntilMaRises(closes, 60);
+    expect(r.currentDirection).toBe('down');
+    expect(r.alreadyRising).toBe(false);
+    expect(r.days).toBe(3);
+    expect(r.deductIndex).toBe(7);
+    expect(r.deductPrice).toBe(10);
+  });
+
+  it('目前已向上 → days=0', () => {
+    const closes = Array.from({ length: 61 }, (_, i) => 10 + i);
+    const r = daysUntilMaRises(closes, 60);
+    expect(r.currentDirection).toBe('up');
+    expect(r.alreadyRising).toBe(true);
+    expect(r.days).toBe(0);
+  });
+
+  it('會略過走平，繼續找第一個真正向上的交易日', () => {
+    const closes = [30, 29, 20, 10, 20, 20, 20];
+    // MA5：今天扣 29 → 下；明天扣 20 → 平；後天扣 10 → 上。
+    const r = daysUntilMaRises(closes, 5);
+    expect(r.currentDirection).toBe('down');
+    expect(r.days).toBe(2);
+  });
+
+  it('資料不足或情境窗內沒有向上 → null', () => {
+    expect(daysUntilMaRises([1, 2, 3], 60).days).toBeNull();
+    expect(daysUntilMaRises(Array.from({ length: 61 }, () => 20), 60).days).toBeNull();
+  });
+});
+
+describe('daysUntilBullishAlignment — MA5/10/20 三線多排', () => {
+  it('目前已是 MA5 > MA10 > MA20 → days=0', () => {
+    const closes = Array.from({ length: 30 }, (_, i) => 10 + i);
+    const r = daysUntilBullishAlignment(closes, [5, 10, 20]);
+    expect(r.alreadyAligned).toBe(true);
+    expect(r.days).toBe(0);
+    expect(r.values?.[0]).toBeGreaterThan(r.values?.[1] ?? Infinity);
+    expect(r.values?.[1]).toBeGreaterThan(r.values?.[2] ?? Infinity);
+  });
+
+  it('依今收凍結情境找出第一個三線嚴格多排日', () => {
+    const closes = [
+      30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
+      20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
+      20, 20, 20, 20, 40,
+    ];
+    const r = daysUntilBullishAlignment(closes, [5, 10, 20]);
+    expect(r.alreadyAligned).toBe(false);
+    expect(r.days).toBe(2);
+    expect(r.values?.[0]).toBeGreaterThan(r.values?.[1] ?? Infinity);
+    expect(r.values?.[1]).toBeGreaterThan(r.values?.[2] ?? Infinity);
+  });
+
+  it('20 日內未形成或參數／資料不足 → null', () => {
+    const falling = Array.from({ length: 30 }, (_, i) => 100 - i);
+    expect(daysUntilBullishAlignment(falling, [5, 10, 20]).days).toBeNull();
+    expect(daysUntilBullishAlignment([1, 2, 3], [5, 10, 20]).days).toBeNull();
+    expect(daysUntilBullishAlignment(Array.from({ length: 30 }, () => 10), [10, 5, 20]).days).toBeNull();
   });
 });

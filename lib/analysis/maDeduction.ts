@@ -147,6 +147,125 @@ export interface GoldenCrossForecast {
   trend: 'converging' | 'diverging' | 'flat';
 }
 
+export interface MaRiseForecast {
+  /** 幾個交易日後開始向上；目前已向上 = 0，情境內估不到 = null */
+  days: number | null;
+  /** 今天實際均線已向上（需有前一根均線可比較） */
+  alreadyRising: boolean;
+  /** 今天實際方向；資料不足以算前一根均線時為 null */
+  currentDirection: 'up' | 'down' | 'flat' | null;
+  /** 開始向上時扣掉的歷史 K 棒索引；已在向上或估不到時為 null */
+  deductIndex: number | null;
+  /** 開始向上時的扣抵價；已在向上或估不到時為 null */
+  deductPrice: number | null;
+}
+
+/**
+ * 依移動扣抵估「N 日線何時開始向上」。
+ *
+ * 今天的實際方向用 close[asOf] − close[asOf−N]；未來第 step 根則假設
+ * 收盤維持今收，方向由今收 − close[asOf−N+step] 決定。與 daysUntilMaTurn
+ * 不同，本函式會略過中間的走平，繼續找第一個真正向上的交易日。
+ */
+export function daysUntilMaRises(
+  closes: ReadonlyArray<number>,
+  maN: number,
+  asOf: number = closes.length - 1,
+  maxLookahead: number = maN,
+): MaRiseForecast {
+  const none: MaRiseForecast = {
+    days: null,
+    alreadyRising: false,
+    currentDirection: null,
+    deductIndex: null,
+    deductPrice: null,
+  };
+  if (maN <= 1 || asOf < maN - 1 || asOf >= closes.length) return none;
+
+  const todayClose = closes[asOf];
+  const directionFromDiff = (diff: number): 'up' | 'down' | 'flat' => {
+    if (Math.abs(diff) < 1e-9) return 'flat';
+    return diff > 0 ? 'up' : 'down';
+  };
+  const currentDirection = asOf - maN >= 0
+    ? directionFromDiff(todayClose - closes[asOf - maN])
+    : null;
+
+  if (currentDirection === 'up') {
+    return { ...none, days: 0, alreadyRising: true, currentDirection };
+  }
+
+  const cap = Math.max(1, Math.min(Math.floor(maxLookahead), maN));
+  for (let step = 1; step <= cap; step++) {
+    const deductIndex = asOf - maN + step;
+    const deduct = closes[deductIndex];
+    if (directionFromDiff(todayClose - deduct) === 'up') {
+      return {
+        days: step,
+        alreadyRising: false,
+        currentDirection,
+        deductIndex,
+        deductPrice: deduct,
+      };
+    }
+  }
+
+  return { ...none, currentDirection };
+}
+
+export interface BullishAlignmentForecast {
+  /** 幾個交易日後形成嚴格多排；目前已多排 = 0，情境內估不到 = null */
+  days: number | null;
+  /** 今天是否已是短至長嚴格遞減（例 MA5 > MA10 > MA20） */
+  alreadyAligned: boolean;
+  /** 成立當下各均線模擬值，順序與 periods 相同；估不到時為 null */
+  values: number[] | null;
+}
+
+/** 第 step 個未來交易日的模擬均線；未來收盤一律以今收補入。 */
+function simulatedMa(
+  closes: ReadonlyArray<number>,
+  period: number,
+  asOf: number,
+  step: number,
+): number {
+  const todayClose = closes[asOf];
+  let sum = 0;
+  for (let k = 0; k < period; k++) {
+    const idx = asOf - k + step;
+    sum += idx <= asOf ? closes[idx] : todayClose;
+  }
+  return sum / period;
+}
+
+/**
+ * 依扣抵情境估短／中／長均線何時形成嚴格多頭排列。
+ * 例 periods=[5,10,20] 時，判準是 MA5 > MA10 > MA20。
+ */
+export function daysUntilBullishAlignment(
+  closes: ReadonlyArray<number>,
+  periods: ReadonlyArray<number> = [5, 10, 20],
+  asOf: number = closes.length - 1,
+  maxLookahead: number = Math.max(...periods),
+): BullishAlignmentForecast {
+  const none: BullishAlignmentForecast = { days: null, alreadyAligned: false, values: null };
+  if (periods.length < 2 || periods.some((n, i) => n <= 0 || (i > 0 && n <= periods[i - 1]))) return none;
+  const longest = periods[periods.length - 1];
+  if (asOf < longest - 1 || asOf >= closes.length) return none;
+
+  const valuesAt = (step: number) => periods.map(period => simulatedMa(closes, period, asOf, step));
+  const isAligned = (values: ReadonlyArray<number>) => values.every((value, i) => i === 0 || values[i - 1] > value);
+  const now = valuesAt(0);
+  if (isAligned(now)) return { days: 0, alreadyAligned: true, values: now };
+
+  const cap = Math.max(1, Math.min(Math.floor(maxLookahead), longest));
+  for (let step = 1; step <= cap; step++) {
+    const values = valuesAt(step);
+    if (isAligned(values)) return { days: step, alreadyAligned: false, values };
+  }
+  return none;
+}
+
 /**
  * 依移動扣抵估「幾天後短均線黃金交叉長均線」。
  *
@@ -171,28 +290,14 @@ export function daysUntilGoldenCross(
   if (shortN <= 0 || longN <= 0 || shortN >= longN) return none;
   if (asOf < longN - 1 || asOf >= closes.length) return none;
 
-  const todayClose = closes[asOf];
-
-  // 模擬第 step 根的短/長均線值（step=0 表示今天）。
-  // 第 step 根的窗口 = 原序列尾端，其餘空位用今收補。
-  const simMA = (period: number, step: number): number => {
-    let sum = 0;
-    for (let k = 0; k < period; k++) {
-      // 該根（從新到舊第 k 個）對應的原序列索引
-      const idx = asOf - k + step;
-      sum += idx <= asOf ? closes[idx] : todayClose;
-    }
-    return sum / period;
-  };
-
-  const shortNow = simMA(shortN, 0);
-  const longNow = simMA(longN, 0);
+  const shortNow = simulatedMa(closes, shortN, asOf, 0);
+  const longNow = simulatedMa(closes, longN, asOf, 0);
   const diffNow = shortNow - longNow;
   const alreadyAbove = diffNow >= 0;
 
   // 趨勢：比較今天與下一根的差距絕對值
-  const shortNext = simMA(shortN, 1);
-  const longNext = simMA(longN, 1);
+  const shortNext = simulatedMa(closes, shortN, asOf, 1);
+  const longNext = simulatedMa(closes, longN, asOf, 1);
   const diffNext = shortNext - longNext;
   const trend: GoldenCrossForecast['trend'] =
     Math.abs(diffNext) < Math.abs(diffNow) - 1e-9 ? 'converging'
@@ -205,8 +310,8 @@ export function daysUntilGoldenCross(
 
   const cap = Math.max(1, Math.min(maxLookahead ?? longN, longN));
   for (let step = 1; step <= cap; step++) {
-    const s = simMA(shortN, step);
-    const l = simMA(longN, step);
+    const s = simulatedMa(closes, shortN, asOf, step);
+    const l = simulatedMa(closes, longN, asOf, step);
     if (s - l >= 0) {
       return { days: step, alreadyAbove: false, trend };
     }
