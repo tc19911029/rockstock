@@ -17,7 +17,7 @@ export const runtime = 'nodejs';
 
 const CACHE_TTL = 40 * 1000;
 
-type LivePayload = LiveThemeRosterFile & { marketOpen: boolean; updatedAt: string };
+type LivePayload = LiveThemeRosterFile & { marketOpen: boolean; stale: boolean; updatedAt: string };
 
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
@@ -35,7 +35,8 @@ export async function GET(req: NextRequest) {
   const payload: LivePayload = {
     ...file,
     marketOpen: isMarketOpen('TW'),
-    updatedAt: file.generatedAt,
+    stale: file.date !== new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()),
+    updatedAt: file.snapshotUpdatedAt,
   };
   globalCache.set(cacheKey, payload, CACHE_TTL);
   return apiOk(payload);

@@ -25,6 +25,7 @@ import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { RefreshCw } from 'lucide-react';
 import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
+import { useQuotePoller } from '@/lib/hooks/useQuotePoller';
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單）：
 // 該頁專屬（六條件/今日熱點/YouTube 提及）+ '|' 分隔線 + 共用區（全 UNIVERSAL_SORT_OPTIONS）。
@@ -164,10 +165,26 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     return map;
   }, [performance]);
 
+  // 掃描日期保留「當時為何入選」；卡片現價與今日漲幅改由即時報價覆蓋，避免隔日仍顯示前一天紅綠。
+  const quoteSymbols = useMemo(
+    () => scanResults.slice(0, 50).map((r) => r.symbol),
+    [scanResults],
+  );
+  const { prices: livePrices, updatedAt: quoteUpdatedAt } = useQuotePoller(quoteSymbols, {
+    intervalMs: 30_000,
+    enabled: scanOnly,
+  });
+  const displayResults = useMemo(
+    () => scanResults.map((r) => {
+      const live = livePrices[r.symbol];
+      return live ? { ...r, price: live.price, changePercent: live.changePercent } : r;
+    }),
+    [scanResults, livePrices],
+  );
 
-  const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
+  const availableConcepts = [...new Set(displayResults.map(r => r.industry).filter(Boolean))] as string[];
 
-  const filtered = scanResults
+  const filtered = displayResults
     .filter(r => conceptFilter === 'all' || r.industry === conceptFilter)
     .filter(r => !ytRecentOnly || (ytMap.get(bareCode(r.symbol))?.count7d ?? 0) > 0);
 
@@ -209,6 +226,11 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
       <div className="flex items-center gap-1.5 text-xs flex-wrap">
         <span className="font-bold text-foreground">{scanResults.length} 檔</span>
         <span className="text-[10px] text-muted-foreground/60">{scanDate}</span>
+        {quoteUpdatedAt && (
+          <span className="text-[9px] text-emerald-400" title={`即時報價更新 ${new Date(quoteUpdatedAt).toLocaleString('zh-TW')}`}>
+            ⚡ 今日即時漲跌
+          </span>
+        )}
         {marketTrend && (
           <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${
             marketTrend === '多頭' ? 'bg-red-900/50 text-red-300' :

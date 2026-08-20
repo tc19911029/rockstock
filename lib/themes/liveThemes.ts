@@ -46,6 +46,8 @@ export interface LiveTheme {
 export interface LiveThemeRosterFile {
   date: string;
   generatedAt: string;
+  /** 來源 L2 真正的更新時間；generatedAt 只代表本次重新聚合時間。 */
+  snapshotUpdatedAt: string;
   market: 'TW';
   themeCount: number;
   themes: LiveTheme[];
@@ -111,6 +113,7 @@ export async function buildLiveThemeRoster(date: string): Promise<LiveThemeRoste
   return {
     date: snap.date,
     generatedAt: new Date().toISOString(),
+    snapshotUpdatedAt: snap.updatedAt,
     market: 'TW',
     themeCount: themes.length,
     themes,

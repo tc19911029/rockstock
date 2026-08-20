@@ -35,7 +35,7 @@ interface LiveTheme {
 }
 interface TwLivePayload {
   date: string; themeCount: number; themes: LiveTheme[];
-  marketOpen: boolean; updatedAt: string;
+  marketOpen: boolean; stale: boolean; updatedAt: string;
 }
 
 interface LiveBoard {
@@ -130,13 +130,18 @@ function LiveBar({ market, marketOpen, stale, updatedAt, refreshing, onRefresh, 
   return (
     <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card/40 px-3 py-1.5">
       <div className="flex items-center gap-2 text-xs">
-        {marketOpen ? (
+        {marketOpen && !stale ? (
           <span className="inline-flex items-center gap-1.5 text-red-400 font-medium">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
             </span>
             盤中即時
+          </span>
+        ) : marketOpen && stale ? (
+          <span className="inline-flex items-center gap-1.5 text-yellow-500 font-medium">
+            <span className="inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+            即時資料中斷
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -421,9 +426,9 @@ export function LiveThemesView({ market }: { market: Market }) {
 
   const payload = market === 'TW' ? tw : cn;
   const marketOpen = payload?.marketOpen ?? false;
-  const stale = market === 'CN' ? (cn?.stale ?? false) : false;
+  const stale = market === 'TW' ? (tw?.stale ?? false) : (cn?.stale ?? false);
   const updatedAt = payload?.updatedAt ?? null;
-  const note = market === 'TW' && tw ? `${tw.themeCount} 個題材（完整成分）` : undefined;
+  const note = market === 'TW' && tw ? `資料日 ${tw.date} · ${tw.themeCount} 個題材（完整成分）` : undefined;
 
   return (
     <div className="space-y-3">

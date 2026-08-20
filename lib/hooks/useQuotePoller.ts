@@ -5,7 +5,7 @@
  * Usage:
  *   const { prices, refresh, isRefreshing } = useQuotePoller(symbols, { intervalMs: 30_000 });
  */
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 
 export interface QuoteData {
   price: number;
@@ -21,10 +21,29 @@ interface UseQuotePollerOptions {
   enabled?: boolean;
 }
 
-// Module-level inflight guard — prevents duplicate fetches when
-// multiple components subscribe to the same symbols within the same tick.
-let inflightPromise: Promise<void> | null = null;
-let inflightSymbols = '';
+type QuoteResponse = Array<{ symbol: string; price: number; changePercent: number }>;
+
+// 同一批 symbols 共用網路請求，但每個 hook 都要拿到結果並更新自己的 state。
+// 舊版共用的是「包含第一個元件 setState 的 Promise」，第二個元件雖 await 完卻收不到資料。
+const inflightRequests = new Map<string, Promise<QuoteResponse>>();
+
+async function fetchQuoteBatch(symbols: string[], key: string): Promise<QuoteResponse> {
+  const existing = inflightRequests.get(key);
+  if (existing) return existing;
+
+  const request = fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(symbols.join(','))}`, {
+    cache: 'no-store',
+  })
+    .then(async (res) => {
+      if (!res.ok) return [];
+      const json = await res.json();
+      return (json.quotes ?? []) as QuoteResponse;
+    })
+    .finally(() => inflightRequests.delete(key));
+
+  inflightRequests.set(key, request);
+  return request;
+}
 
 export function useQuotePoller(
   symbols: string[],
@@ -32,25 +51,21 @@ export function useQuotePoller(
 ) {
   const [prices, setPrices] = useState<Record<string, QuoteData>>({});
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const symbolsKey = [...new Set(symbols.filter(Boolean))].sort().slice(0, 50).join(',');
+  const normalizedSymbols = useMemo(
+    () => symbolsKey ? symbolsKey.split(',') : [],
+    [symbolsKey],
+  );
 
   const refresh = useCallback(async () => {
-    if (symbols.length === 0) return;
-
-    // Dedup: if the same symbols are already being fetched, reuse that promise
-    const key = [...symbols].sort().join(',');
-    if (inflightPromise && inflightSymbols === key) {
-      await inflightPromise;
-      return;
-    }
+    if (normalizedSymbols.length === 0) return;
 
     setIsRefreshing(true);
-    const doFetch = async () => {
-      try {
-        const res = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(symbols.join(','))}`);
-        if (!res.ok) return;
-        const json = await res.json();
-        const quotes: Array<{ symbol: string; price: number; changePercent: number }> = json.quotes ?? [];
+    try {
+      const quotes = await fetchQuoteBatch(normalizedSymbols, symbolsKey);
+      if (quotes.length > 0) {
         setPrices(prev => {
           const next = { ...prev };
           for (const q of quotes) {
@@ -60,23 +75,18 @@ export function useQuotePoller(
           }
           return next;
         });
-      } catch {
-        // Ignore polling errors
-      } finally {
-        setIsRefreshing(false);
-        inflightPromise = null;
-        inflightSymbols = '';
+        setUpdatedAt(new Date().toISOString());
       }
-    };
-
-    inflightSymbols = key;
-    inflightPromise = doFetch();
-    await inflightPromise;
-  }, [symbols]);
+    } catch {
+      // Ignore polling errors and retain the last successful quote.
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [normalizedSymbols, symbolsKey]);
 
   // Auto-poll with visibility pause
   useEffect(() => {
-    if (!enabled || symbols.length === 0) return;
+    if (!enabled || !symbolsKey) return;
 
     const start = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -86,6 +96,7 @@ export function useQuotePoller(
       if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     };
 
+    void refresh();
     start();
 
     const handleVisibility = () => {
@@ -98,7 +109,7 @@ export function useQuotePoller(
       stop();
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [refresh, intervalMs, enabled, symbols]);
+  }, [refresh, intervalMs, enabled, symbolsKey]);
 
-  return { prices, refresh, isRefreshing };
+  return { prices, refresh, isRefreshing, updatedAt };
 }

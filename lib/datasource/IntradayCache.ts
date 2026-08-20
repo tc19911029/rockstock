@@ -161,10 +161,29 @@ export function checkL2PollingHealth(
   };
 }
 
-/** 計時工具 */
+const PROVIDER_TIMEOUT_MS = 12_000;
+const REFRESH_HARD_TIMEOUT_MS = 45_000;
+const CROSS_VALIDATE_TIMEOUT_MS = 6_000;
+
+/**
+ * 保證上游 Promise 一定會在期限內回到 caller。
+ * 部分 vendor SDK 自己的 timeout 曾失效，若它被 single-flight 保留，後續所有 cron 都會永遠共用同一個 pending Promise。
+ */
+export function withIntradayTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/** 計時工具；每個 provider 都有獨立上限，避免 fallback chain 卡住。 */
 function timedFetch<T>(fn: () => Promise<T>): Promise<{ result: T; elapsedMs: number }> {
   const start = Date.now();
-  return fn().then(result => ({ result, elapsedMs: Date.now() - start }));
+  return withIntradayTimeout(fn(), PROVIDER_TIMEOUT_MS, 'intraday provider')
+    .then(result => ({ result, elapsedMs: Date.now() - start }));
 }
 
 // ── Blob / FS helpers ───────────────────────────────────────────────────────
@@ -344,7 +363,12 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
   // 同一 (market) inflight 中時，後到的 caller 等同一個 promise。
   const existing = _refreshInflight.get(market);
   if (existing) return existing;
-  const promise = _refreshIntradaySnapshotImpl(market);
+  // 最外層再設硬期限：即使未來新增的 provider 忘了設 timeout，single-flight 也不會永久中毒。
+  const promise = withIntradayTimeout(
+    _refreshIntradaySnapshotImpl(market),
+    REFRESH_HARD_TIMEOUT_MS,
+    `${market} intraday refresh`,
+  );
   _refreshInflight.set(market, promise);
   try {
     return await promise;
@@ -511,7 +535,11 @@ async function _refreshIntradaySnapshotImpl(market: 'TW' | 'CN'): Promise<Intrad
 
   // ── L2 交叉核驗：抽樣 50 支比對備用源 ──
   try {
-    await crossValidateL2(market, quotes, sources);
+    await withIntradayTimeout(
+      crossValidateL2(market, quotes, sources),
+      CROSS_VALIDATE_TIMEOUT_MS,
+      `${market} L2 cross validation`,
+    );
   } catch (err) {
     console.warn(`[IntradayCache] ${market} 交叉核驗失敗 (non-fatal):`, err);
   }

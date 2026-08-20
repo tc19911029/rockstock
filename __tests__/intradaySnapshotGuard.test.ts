@@ -1,10 +1,23 @@
 // degenerateSnapshotReason — 盤中三色防呆：偵測「扁平根」退化快照（盤前競價 / 刷新凍結）。
 // 背景：2026-06-09 早盤 DNS 斷線 → L2 快照凍在 09:17 盤前、3064 檔全扁平（O=H=L=C、量=0），
 // 盤中三色用扁平根算捕撈動能憑空生假金叉 → 誤標 37 檔底反（走圖用即時報價卻無金叉）。
-import { degenerateSnapshotReason, type IntradaySnapshot, type IntradayQuote } from '@/lib/datasource/IntradayCache';
+import { degenerateSnapshotReason, withIntradayTimeout, type IntradaySnapshot, type IntradayQuote } from '@/lib/datasource/IntradayCache';
 
 const q = (over: Partial<IntradayQuote>): IntradayQuote => ({
   symbol: '000001', name: 't', open: 10, high: 11, low: 9, close: 10.5, volume: 1000, prevClose: 10, changePercent: 5, ...over,
+});
+
+describe('withIntradayTimeout', () => {
+  it('保留期限內完成的結果', async () => {
+    await expect(withIntradayTimeout(Promise.resolve('ok'), 100, 'test')).resolves.toBe('ok');
+  });
+
+  it('上游永久 pending 時會拒絕，讓 single-flight 得以釋放', async () => {
+    const never = new Promise<string>(() => undefined);
+    await expect(withIntradayTimeout(never, 10, 'stuck provider')).rejects.toThrow(
+      'stuck provider timeout after 10ms',
+    );
+  });
 });
 const flat = (close: number): Partial<IntradayQuote> => ({ open: close, high: close, low: close, close, volume: 0 });
 const snap = (quotes: IntradayQuote[]): IntradaySnapshot => ({ market: 'CN', date: '2026-06-09', updatedAt: '2026-06-09T01:17:00Z', count: quotes.length, quotes });
