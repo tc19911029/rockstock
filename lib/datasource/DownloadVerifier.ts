@@ -13,6 +13,8 @@
 import { readCandleFile } from './CandleStorageAdapter';
 import { detectCandleGaps, type CandleGap } from './validateCandles';
 import { tradingDaysBetween } from '@/lib/utils/tradingDay';
+import { readIntradaySnapshot, type IntradayQuote } from './IntradayCache';
+import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
 import {
   loadBackfillQueue,
   saveBackfillQueue,
@@ -59,6 +61,11 @@ export interface VerifyStaleDetail {
   daysBehind: number;
 }
 
+export interface VerifyNonTradingDetail {
+  symbol: string;
+  reason: 'no_trade' | 'no_history_or_final_quote';
+}
+
 export interface VerifyReport {
   market: 'TW' | 'CN';
   date: string;
@@ -79,6 +86,10 @@ export interface VerifyReport {
     stocksStale: number;
     /** 落後 ≥ permanentStaleDays 個交易日（推定永久停牌/退市，不計入 health 警告）— 舊報告可能無此欄位 */
     stocksPermanentStale?: number;
+    /** 最終 L2 明確顯示停牌／當日無成交，不應偽造日 K，也不計入活躍分母。 */
+    stocksNoTrade?: number;
+    /** 全市場最終快照正常，但該代碼尚無歷史檔與即時報價（通常為待上市代碼）。 */
+    stocksNotTrading?: number;
     stocksClean: number;
     stocksReadFailed: number;
   };
@@ -87,6 +98,8 @@ export interface VerifyReport {
   staleDetails: VerifyStaleDetail[];
   /** 永久 stale 的股票清單（retry-failed 應略過）— 舊報告可能無此欄位 */
   permanentStaleDetails?: VerifyStaleDetail[];
+  noTradeDetails?: VerifyNonTradingDetail[];
+  notTradingDetails?: VerifyNonTradingDetail[];
   health: 'good' | 'warning' | 'critical';
 }
 
@@ -115,9 +128,42 @@ export function calculateTargetDateCoverage(
   totalStocks: number,
   stocksCurrent: number,
   stocksPermanentStale: number,
+  stocksNonTrading = 0,
 ): number {
-  const activeStocks = Math.max(0, totalStocks - stocksPermanentStale);
+  const activeStocks = Math.max(0, totalStocks - stocksPermanentStale - stocksNonTrading);
   return activeStocks > 0 ? stocksCurrent / activeStocks : 0;
+}
+
+/**
+ * 只有最終全市場快照能證明「今天沒有成交」。盤中零量、殘缺快照或單一供應商
+ * 查無資料都不能拿來排除，否則真實漏抓會被誤報成正常。
+ */
+export function isConfirmedNoTradeQuote(
+  market: 'TW' | 'CN',
+  quote: IntradayQuote,
+): boolean {
+  if (market === 'TW') {
+    return quote.isActualTrade === false && quote.volume === 0;
+  }
+  const flat = quote.open === quote.high
+    && quote.high === quote.low
+    && quote.low === quote.close;
+  const unchanged = Math.abs(quote.close - quote.prevClose) < 1e-8
+    && Math.abs(quote.changePercent) < 1e-8;
+  return quote.close > 0 && quote.volume === 0 && flat && unchanged;
+}
+
+async function loadFinalSnapshotContext(
+  market: 'TW' | 'CN',
+  targetDate: string,
+): Promise<{ quotes: Map<string, IntradayQuote>; broad: boolean } | null> {
+  const snapshot = await readIntradaySnapshot(market, targetDate);
+  if (!snapshot || !isFinalTradingSnapshot(market, targetDate, snapshot.updatedAt)) return null;
+  const minimum = market === 'TW' ? MIN_VERIFY_UNIVERSE.TW : MIN_VERIFY_UNIVERSE.CN;
+  return {
+    quotes: new Map(snapshot.quotes.map(quote => [quote.symbol, quote])),
+    broad: snapshot.count >= minimum,
+  };
 }
 
 /** 計算 180 天前的日期字串，用於排除歷史結構性缺口 */
@@ -225,10 +271,13 @@ export async function verifyDownload(
   const gapDetails: VerifyGapDetail[] = [];
   const staleDetails: VerifyStaleDetail[] = [];
   const permanentStaleDetails: VerifyStaleDetail[] = [];
+  const noTradeDetails: VerifyNonTradingDetail[] = [];
+  const notTradingDetails: VerifyNonTradingDetail[] = [];
   const failedSymbols: string[] = [];
   let readFailed = 0;
   let stocksCurrent = 0;
   const cutoff = recentCutoffDate(targetDate);
+  const finalSnapshot = await loadFinalSnapshotContext(market, targetDate);
 
   // 批次讀取+校驗（避免一次讀太多 Blob）
   for (let i = 0; i < symbols.length; i += CONCURRENCY) {
@@ -236,7 +285,20 @@ export async function verifyDownload(
     const results = await Promise.allSettled(
       batch.map(async (symbol) => {
         const data = await readCandleFile(symbol, market);
+        const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        const finalQuote = finalSnapshot?.quotes.get(code);
+        const confirmedNoTrade = finalQuote
+          ? isConfirmedNoTradeQuote(market, finalQuote)
+          : false;
         if (!data) {
+          if (confirmedNoTrade) {
+            noTradeDetails.push({ symbol, reason: 'no_trade' });
+            return;
+          }
+          if (finalSnapshot?.broad && !finalQuote) {
+            notTradingDetails.push({ symbol, reason: 'no_history_or_final_quote' });
+            return;
+          }
           failedSymbols.push(symbol);
           return;
         }
@@ -251,7 +313,13 @@ export async function verifyDownload(
         // 用交易日差距，避免跨連假誤判為 stale
         const behind = tradingDaysBetween(data.lastDate, targetDate, market);
         if (data.lastDate >= targetDate) stocksCurrent++;
-        if (behind >= permanentStaleDays) {
+        if (data.lastDate < targetDate && confirmedNoTrade) {
+          noTradeDetails.push({ symbol, reason: 'no_trade' });
+        } else if (data.lastDate < targetDate && finalSnapshot?.broad && !finalQuote) {
+          // 完整收盤快照沒有該代碼：可能為停止買賣、終止上市或待上市。
+          // 這類股票沒有真實當日 K 棒，必須分流，不能靠昨收偽造平棒補齊。
+          notTradingDetails.push({ symbol, reason: 'no_history_or_final_quote' });
+        } else if (behind >= permanentStaleDays) {
           // 落後超過 14 個交易日 → 推定永久停牌/退市
           permanentStaleDetails.push({
             symbol,
@@ -277,11 +345,13 @@ export async function verifyDownload(
   // Coverage 必須代表「策略今天實際能用的資料」，不能只算檔案存在。
   // 舊算法讓昨天/前天的 K 線也算 covered，曾使 CN 僅約 76% 到最新日仍通過掃描守門。
   // 已確認的長期停牌/退市不列入分母；其餘股票必須真的含 targetDate 才算 covered。
-  const activeStocks = totalStocks - permanentStaleDetails.length;
+  const stocksNonTrading = noTradeDetails.length + notTradingDetails.length;
+  const activeStocks = totalStocks - permanentStaleDetails.length - stocksNonTrading;
   const coverageRate = calculateTargetDateCoverage(
     totalStocks,
     stocksCurrent,
     permanentStaleDetails.length,
+    stocksNonTrading,
   );
   const stocksMissingTargetDate = Math.max(
     0,
@@ -301,7 +371,7 @@ export async function verifyDownload(
     summary: {
       totalStocks,
       downloadSuccess: stats.succeeded,
-      downloadFailed: stats.failed,
+      downloadFailed: Math.max(0, stats.failed - stocksNonTrading),
       downloadSkipped: stats.skipped,
       coverageRate: +coverageRate.toFixed(4),
       stocksCurrent,
@@ -310,13 +380,17 @@ export async function verifyDownload(
       stocksWithRecentGaps: recentGapDetails.length,
       stocksStale: staleDetails.length,
       stocksPermanentStale: permanentStaleDetails.length,
-      stocksClean: totalStocks - gapDetails.length - staleDetails.length - permanentStaleDetails.length - failedSymbols.length - readFailed,
+      stocksNoTrade: noTradeDetails.length,
+      stocksNotTrading: notTradingDetails.length,
+      stocksClean: totalStocks - gapDetails.length - staleDetails.length - permanentStaleDetails.length - stocksNonTrading - failedSymbols.length - readFailed,
       stocksReadFailed: readFailed + failedSymbols.length,
     },
     failedSymbols,
     gapDetails: gapDetails.slice(0, 50), // 最多記 50 筆 gap detail（避免報告太大）
     staleDetails: staleDetails.slice(0, 50),
     permanentStaleDetails: permanentStaleDetails.slice(0, 100),
+    noTradeDetails: noTradeDetails.slice(0, 100),
+    notTradingDetails: notTradingDetails.slice(0, 100),
     // 永久 stale 不計入 health 警告（這些是真實停牌/退市）
     health: classifyHealth(coverageRate, recentGapDetails.length, staleDetails.length, totalStocks),
   };
@@ -356,7 +430,8 @@ export async function verifyDownload(
   console.info(
     `[DownloadVerifier] ${market} ${targetDate}: ` +
     `health=${report.health} coverage=${(coverageRate * 100).toFixed(1)}% ` +
-    `gaps=${gapDetails.length}(recent=${recentGapDetails.length}) stale=${staleDetails.length} readFail=${readFailed + failedSymbols.length}`,
+    `gaps=${gapDetails.length}(recent=${recentGapDetails.length}) stale=${staleDetails.length} ` +
+    `noTrade=${stocksNonTrading} readFail=${readFailed + failedSymbols.length}`,
   );
 
   return report;

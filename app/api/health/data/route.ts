@@ -83,6 +83,10 @@ interface MarketHealth {
   /** verify 報告實際母體；避免 30/30 冒充全市場 100%。 */
   totalStocks: number | null;
   stocksCurrent: number | null;
+  /** 已由最終快照確認停牌／當日無成交，不需要日 K。 */
+  stocksNoTrade: number | null;
+  /** 最終快照無該代碼：停止買賣、終止上市流程或尚未開始交易。 */
+  stocksNotTrading: number | null;
   /** 有 gap 的股票數 */
   stocksWithGaps: number | null;
   /** 數據過期的股票數 */
@@ -417,6 +421,8 @@ async function getMarketHealth(
         coverageRate: report.summary.coverageRate,
         totalStocks: report.summary.totalStocks,
         stocksCurrent: report.summary.stocksCurrent ?? null,
+        stocksNoTrade: report.summary.stocksNoTrade ?? 0,
+        stocksNotTrading: report.summary.stocksNotTrading ?? 0,
         stocksWithGaps: report.summary.stocksWithGaps,
         stocksStale: report.summary.stocksStale,
         downloadFailed: report.summary.downloadFailed,
@@ -460,6 +466,8 @@ async function getMarketHealth(
     coverageRate: null,
     totalStocks: null,
     stocksCurrent: null,
+    stocksNoTrade: null,
+    stocksNotTrading: null,
     stocksWithGaps: null,
     stocksStale: null,
     downloadFailed: null,

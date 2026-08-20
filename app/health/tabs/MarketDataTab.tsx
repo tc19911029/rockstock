@@ -15,6 +15,8 @@ interface MarketHealthLite {
   health: string;
   reportDate: string | null;
   coverageRate: number | null;
+  stocksNoTrade: number | null;
+  stocksNotTrading: number | null;
   stocksWithGaps: number | null;
   stocksStale: number | null;
   downloadFailed: number | null;
@@ -285,7 +287,11 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
             <Row label="健康度" value={zhStatus(data.health)} bold
               hint="健康度 = 覆蓋率 + 近 3 日落後支數綜合判定；歷史 gap（容忍範圍內缺日）不會把健康度拉到非正常" />
             <Row label="覆蓋率" value={fmtPct(data.coverageRate)}
-              hint="今日有 K 線資料的股票數 / 應有的股票數" />
+              hint="今日有 K 線資料的股票數 / 今日實際交易股票數；已確認停牌、無成交或尚未開始交易者不列入分母" />
+            <Row label="停牌／當日無成交" value={`${data.stocksNoTrade ?? 0} 支`}
+              hint="最終全市場快照已確認成交量為 0，因此不偽造平盤日 K，也不算資料落後" />
+            <Row label="停止／尚未開始交易" value={`${data.stocksNotTrading ?? 0} 支`}
+              hint="包含停止買賣、終止上市流程或代碼已進清單但尚未開始交易者；沒有真實當日 K 棒，不列入活躍股票覆蓋率" />
             <Row label="近 3 日落後" value={`${data.stocksStale ?? '?'} 支`}
               warn={(data.stocksStale ?? 0) > 50}
               hint="近 3 日該收盤但未封存的股票數；> 50 觸發黃燈，> 100 觸發紅燈並 webhook" />
