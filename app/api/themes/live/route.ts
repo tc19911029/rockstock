@@ -12,12 +12,13 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { buildLiveThemeRoster, buildLatestLiveThemeRoster, type LiveThemeRosterFile } from '@/lib/themes/liveThemes';
 import { globalCache } from '@/lib/datasource/MemoryCache';
 import { isMarketOpen } from '@/lib/datasource/marketHours';
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 
 export const runtime = 'nodejs';
 
 const CACHE_TTL = 40 * 1000;
 
-type LivePayload = LiveThemeRosterFile & { marketOpen: boolean; stale: boolean; updatedAt: string };
+type LivePayload = LiveThemeRosterFile & { marketOpen: boolean; stale: boolean; staleReason: string | null; updatedAt: string };
 
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
@@ -32,10 +33,16 @@ export async function GET(req: NextRequest) {
     return apiError(date ? `no L2 snapshot for ${date}` : 'no L2 snapshot available', 404);
   }
 
+  const freshness = assessIntradayFreshness('TW', {
+    date: file.date,
+    updatedAt: file.snapshotUpdatedAt,
+    count: file.themes.reduce((sum, theme) => sum + theme.quotedCount, 0),
+  });
   const payload: LivePayload = {
     ...file,
     marketOpen: isMarketOpen('TW'),
-    stale: file.date !== new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()),
+    stale: freshness.stale,
+    staleReason: freshness.reason,
     updatedAt: file.snapshotUpdatedAt,
   };
   globalCache.set(cacheKey, payload, CACHE_TTL);

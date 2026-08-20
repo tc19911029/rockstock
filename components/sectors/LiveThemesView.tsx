@@ -35,7 +35,7 @@ interface LiveTheme {
 }
 interface TwLivePayload {
   date: string; themeCount: number; themes: LiveTheme[];
-  marketOpen: boolean; stale: boolean; updatedAt: string;
+  marketOpen: boolean; stale: boolean; staleReason: string | null; updatedAt: string;
 }
 
 interface LiveBoard {
@@ -119,9 +119,9 @@ function SortBar({ sorts, sortId, dir, onSort, hint }: {
 
 // ── LIVE 狀態列（紅點 + 更新時間 + 手動刷新）──────────────────────────────────────
 
-function LiveBar({ market, marketOpen, stale, updatedAt, refreshing, onRefresh, note }: {
+function LiveBar({ market, marketOpen, stale, staleReason, updatedAt, refreshing, onRefresh, note }: {
   market: Market; marketOpen: boolean; stale?: boolean; updatedAt: string | null;
-  refreshing: boolean; onRefresh: () => void; note?: string;
+  staleReason?: string | null; refreshing: boolean; onRefresh: () => void; note?: string;
 }) {
   const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
   const timeStr = updatedAt
@@ -150,7 +150,7 @@ function LiveBar({ market, marketOpen, stale, updatedAt, refreshing, onRefresh, 
           </span>
         )}
         <span className="text-muted-foreground/60">更新 {timeStr}</span>
-        {stale && <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">最後存檔</span>}
+        {stale && <span title={staleReason ?? undefined} className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">行情快照過期</span>}
         {note && <span className="text-muted-foreground/40">{note}</span>}
       </div>
       <button type="button" onClick={onRefresh} disabled={refreshing}
@@ -427,12 +427,13 @@ export function LiveThemesView({ market }: { market: Market }) {
   const payload = market === 'TW' ? tw : cn;
   const marketOpen = payload?.marketOpen ?? false;
   const stale = market === 'TW' ? (tw?.stale ?? false) : (cn?.stale ?? false);
+  const staleReason = market === 'TW' ? tw?.staleReason : undefined;
   const updatedAt = payload?.updatedAt ?? null;
   const note = market === 'TW' && tw ? `資料日 ${tw.date} · ${tw.themeCount} 個題材（完整成分）` : undefined;
 
   return (
     <div className="space-y-3">
-      <LiveBar market={market} marketOpen={marketOpen} stale={stale} updatedAt={updatedAt}
+      <LiveBar market={market} marketOpen={marketOpen} stale={stale} staleReason={staleReason} updatedAt={updatedAt}
         refreshing={refreshing} onRefresh={refresh} note={note} />
 
       {error && !payload && (

@@ -25,6 +25,7 @@ import { checkLimitUpConsistency, type ConsistencySample } from '@/lib/datasourc
 import { loadStrategyReadiness, type StrategyReadiness } from '@/lib/health/strategyReadiness';
 import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
 import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 
 export const runtime = 'nodejs';
 
@@ -182,12 +183,24 @@ async function getL2Status(market: 'TW' | 'CN'): Promise<L2Status> {
   const ageMs = Date.now() - new Date(snapshot.updatedAt).getTime();
   const ageSeconds = Math.round(ageMs / 1000);
 
-  // 盤後且有今天的快照 → 視為 fresh（那是當天收盤的最終數據）
+  // 非交易日沿用最近交易日的收盤快照；交易日必須進一步防「日期是今天、內容停在早盤」。
   const marketOpen = isMarketOpen(market);
   const postCloseWin = isPostCloseWindow(market);
-  if (!marketOpen && !postCloseWin && snapshot.count > 0) {
+  if (!trading && snapshot.count > 0) {
     return {
       status: 'fresh',
+      quoteCount: snapshot.count,
+      ageSeconds,
+      updatedAt: snapshot.updatedAt,
+      lastCheckedAt,
+      lastCheckedAgeSeconds,
+    };
+  }
+
+  const freshness = assessIntradayFreshness(market, snapshot);
+  if (!marketOpen && !postCloseWin) {
+    return {
+      status: freshness.stale ? 'stale' : 'fresh',
       quoteCount: snapshot.count,
       ageSeconds,
       updatedAt: snapshot.updatedAt,

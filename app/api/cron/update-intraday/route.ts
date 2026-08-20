@@ -10,6 +10,7 @@ import { checkCronAuth } from '@/lib/api/cronAuth';
 import { refreshIntradaySnapshot, getLastRefreshSummary } from '@/lib/datasource/IntradayCache';
 import { isMarketOpen, isPostCloseWindow, getCurrentTradingDay } from '@/lib/datasource/marketHours';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30; // L2 刷新只需 < 10s
@@ -33,6 +34,7 @@ export async function GET(req: NextRequest) {
     const snapshot = await refreshIntradaySnapshot(market);
     const date = getCurrentTradingDay(market);
     const summary = getLastRefreshSummary(market);
+    const freshness = assessIntradayFreshness(market, snapshot);
 
     if (snapshot.count === 0 && isTradingDay(date, market)) {
       console.error(
@@ -47,6 +49,20 @@ export async function GET(req: NextRequest) {
         alert: true,
         alertLevel: summary.alertLevel,
         warning: `交易日 ${date} 所有數據源失敗`,
+        dataSourceStatus: summary.sources,
+      });
+    }
+
+    if (freshness.stale && isTradingDay(date, market)) {
+      console.error(`[cron/update-intraday] ★★ ${market} L2 快照過期：${freshness.reason}`);
+      return apiOk({
+        market,
+        date: snapshot.date,
+        count: snapshot.count,
+        updatedAt: snapshot.updatedAt,
+        alert: true,
+        alertLevel: 'critical',
+        warning: freshness.reason,
         dataSourceStatus: summary.sources,
       });
     }

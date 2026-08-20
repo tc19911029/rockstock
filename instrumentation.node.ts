@@ -260,6 +260,10 @@ export async function register() {
       `${market} update-intraday`,
       { timeoutMs: 3 * 60_000 },
     ) as { data?: { count?: number; skipped?: boolean; reason?: string; alert?: boolean; alertLevel?: string } } | null;
+    if (!data) {
+      console.error(`[L2-watchdog] ★ ${market} L2 刷新 route 無回應；下一輪會重試`);
+      return;
+    }
     const payload = data?.data ?? data ?? {};
     if ((payload as { skipped?: boolean }).skipped) {
       console.log(`[local-cron] ${market} L2 刷新跳過：${(payload as { reason?: string }).reason}`);
