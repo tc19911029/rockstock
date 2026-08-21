@@ -31,6 +31,7 @@ import { sendNtfy, type NtfyPayload } from '@/lib/notify/ntfy';
 import { tradeVerdict, type ConditionReport } from '@/lib/cn-sanse/conditions';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { listAllProfilesOpenStockHoldings } from '@/lib/agents/portfolio/storage';
+import { dedupeSanseWatch, sanseAlertKey } from '@/lib/cn-sanse/alertIdentity';
 
 export const runtime = 'nodejs';
 
@@ -77,7 +78,7 @@ async function ensureFiredKeysLoaded(date: string): Promise<void> {
       if (!line) continue;
       try {
         const r = JSON.parse(line) as SanseAlertRecord;
-        firedKeys.add(`${r.date}:${r.symbol}:${r.tone}`);
+        firedKeys.add(sanseAlertKey(r.date, r.symbol, r.tone, r.reversal));
       } catch { /* skip 壞行 */ }
     }
   } catch { /* 今日尚無檔 */ }
@@ -141,7 +142,9 @@ export async function GET(req: NextRequest) {
   const dry = url.searchParams.get('dry') === '1';
 
   const date = todayUtc8();
-  const watch = await loadWatch();
+  // 同一檔可能在不同 profile 以 3081.TW / 3081.TWO 儲存；三色 route 最後都解析成同一裸碼。
+  // 評估前先合併，避免重複打 chart route，也避免並行 request 放大任何盤中快取競態。
+  const watch = dedupeSanseWatch(await loadWatch());
   const port = process.env.PORT || '3000';
   const base = `http://localhost:${port}`;
 
@@ -206,7 +209,7 @@ export async function GET(req: NextRequest) {
     if (e.tone !== 'buy' && e.tone !== 'sell') continue;
 
     // 底反該買用獨立 dedup 後綴 → 即使先前已推過普通「該買」，升級成底反時仍會再推一次最高把握
-    const key = `${date}:${e.symbol}:${e.tone}${e.reversal ? ':rev' : ''}`;
+    const key = sanseAlertKey(date, e.symbol, e.tone, e.reversal);
     if (!dry && firedKeys.has(key)) { d.deduped = true; continue; }
 
     const rec: SanseAlertRecord = {

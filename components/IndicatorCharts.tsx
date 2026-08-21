@@ -16,7 +16,13 @@ import {
   SeriesMarker,
 } from 'lightweight-charts';
 import { CandleWithIndicators } from '@/types';
-import { subscribeRangeSync, getLastRange, LogicalRange, subscribeCrosshairSync } from './CandleChart';
+import {
+  broadcastCrosshairTime,
+  subscribeRangeSync,
+  getLastRange,
+  LogicalRange,
+  subscribeCrosshairSync,
+} from './CandleChart';
 import type { ZhuliSeries, XysTiers, LinePoint, BarPoint, ChartMarker } from '@/lib/cn-sanse/indicators';
 
 /** Convert date string to lightweight-charts Time.
@@ -797,8 +803,25 @@ export interface SanSeXysData {
 
 /** 把 {date→value} 系列對齊到 candle 序列（缺值補 0）*/
 function alignToCandles(candles: CandleWithIndicators[], pts: { time: string; value: number }[] | undefined): { time: Time; value: number }[] {
-  const m = new Map((pts ?? []).map(p => [p.time, p.value]));
-  return candles.map(c => ({ time: toTime(c.date), value: m.get(c.date) ?? 0 }));
+  const m = new Map(
+    (pts ?? [])
+      .filter((p) => Number.isFinite(p.value))
+      .map((p) => [p.time.replace(/\*$/, ''), p.value]),
+  );
+  return candles.map((c) => {
+    const value = m.get(c.date.replace(/\*$/, ''));
+    return { time: toTime(c.date), value: value != null && Number.isFinite(value) ? value : 0 };
+  });
+}
+
+/**
+ * lightweight-charts <= 5.2.0 有已知的 time-scale compaction bug：多序列資料縮短時，
+ * 若 crosshair 仍指向舊 logical index，下一次 removeSeries/setData 可能拋出
+ * `Value is null`。在任何三色多序列重建前，先讓本圖與同步圖全部離開 hover 狀態。
+ */
+function prepareMultiSeriesRebuild(chart: IChartApi): void {
+  chart.clearCrosshairPosition();
+  broadcastCrosshairTime(null);
 }
 
 function setLastRange(chart: IChartApi | null) {
@@ -826,12 +849,20 @@ function MainForceChart({ candles, zhuli, hoverCandle }: { candles: CandleWithIn
     });
     const ro = new ResizeObserver(() => { if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight || 80 }); });
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); chartRef.current = null; seriesRef.current = []; };
+    return () => {
+      ro.disconnect(); unsub(); unsubCrosshair();
+      primaryRef.current = null; valMapRef.current.clear();
+      chart.remove(); chartRef.current = null; seriesRef.current = [];
+    };
   }, []);
 
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || candles.length === 0) return;
+    // primaryRef 若仍指向即將移除的 series，同步 crosshair callback 會使用失效物件。
+    primaryRef.current = null;
+    valMapRef.current.clear();
+    prepareMultiSeriesRebuild(chart);
     // 清掉上一輪 series（避免換股/replay 時疊加）
     for (const s of seriesRef.current) { try { chart.removeSeries(s); } catch { /* noop */ } }
     seriesRef.current = [];
@@ -894,29 +925,47 @@ function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicat
     });
     const ro = new ResizeObserver(() => { if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth, height: containerRef.current.clientHeight || 80 }); });
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); unsub(); unsubCrosshair(); chart.remove(); chartRef.current = null; seriesRef.current = []; };
+    return () => {
+      ro.disconnect(); unsub(); unsubCrosshair();
+      primaryRef.current = null; valMapRef.current.clear();
+      chart.remove(); chartRef.current = null; seriesRef.current = [];
+    };
   }, []);
 
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || candles.length === 0) return;
+    primaryRef.current = null;
+    valMapRef.current.clear();
+    prepareMultiSeriesRebuild(chart);
     for (const s of seriesRef.current) { try { chart.removeSeries(s); } catch { /* noop */ } }
     seriesRef.current = [];
     // 動能柱（紫>0 / 綠<0）；對齊 candle，缺值補 0
-    const xys0Map = new Map(xys.xys0.map(b => [b.time, b]));
+    const candleDateSet = new Set(candles.map((c) => c.date.replace(/\*$/, '')));
+    const xys0Map = new Map(
+      xys.xys0
+        .filter((b) => Number.isFinite(b.value))
+        .map((b) => [b.time.replace(/\*$/, ''), b]),
+    );
     const hist = chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: false, base: 0 });
     hist.setData(candles.map(c => {
-      const b = xys0Map.get(c.date);
+      const b = xys0Map.get(c.date.replace(/\*$/, ''));
       return { time: toTime(c.date), value: b?.value ?? 0, color: b?.color ?? '#475569' };
     }));
     seriesRef.current.push(hist);
     primaryRef.current = hist;
-    valMapRef.current = new Map(xys.xys0.map((b) => [b.time, b.value]));
+    valMapRef.current = new Map(
+      xys.xys0.filter((b) => Number.isFinite(b.value)).map((b) => [b.time, b.value]),
+    );
     // 4 級量能彩柱（稀疏，只在符合的日期出現）
     const tierBar = (pts: LinePoint[] | undefined, color: string) => {
       if (!pts?.length) return;
       const s = chart.addSeries(HistogramSeries, { color, base: 0, priceLineVisible: false, lastValueVisible: false });
-      s.setData(pts.map(p => ({ time: toTime(p.time), value: p.value })));
+      s.setData(
+        pts
+          .filter((p) => candleDateSet.has(p.time.replace(/\*$/, '')) && Number.isFinite(p.value))
+          .map((p) => ({ time: toTime(p.time), value: p.value })),
+      );
       seriesRef.current.push(s);
     };
     if (xys.xysTiers) {
@@ -929,7 +978,13 @@ function SeasonChart({ candles, xys, hoverCandle }: { candles: CandleWithIndicat
     const slow = chart.addSeries(LineSeries, { color: '#F59E0B', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerRadius: 2 });
     slow.setData(alignToCandles(candles, xys.xys2));
     seriesRef.current.push(slow);
-    createSeriesMarkers(slow, xys.subMarkers.map(m => ({ time: toTime(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text, size: m.size })));
+    createSeriesMarkers(
+      slow,
+      xys.subMarkers
+        // 歷史走圖縮短後，不可把未來日期 marker 交給目前 time scale。
+        .filter((m) => candleDateSet.has(m.time.replace(/\*$/, '')))
+        .map((m) => ({ time: toTime(m.time), position: m.position, shape: m.shape, color: m.color, text: m.text, size: m.size })),
+    );
     setLastRange(chart);
   }, [candles, xys]);
 

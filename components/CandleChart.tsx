@@ -323,6 +323,7 @@ export default function CandleChart({
   const holderLineRef     = useRef<ISeriesApi<'Line'> | null>(null);
   // Keep latest candles accessible inside event closures without re-subscribing
   const candlesRef     = useRef<CandleWithIndicators[]>(candles);
+  const previousCandleRangeRef = useRef<{ first: string; last: string; length: number } | null>(null);
   const timeMapRef     = useRef<Map<string | number, CandleWithIndicators>>(new Map());
   // 記住上次「自動套用可視範圍」的視窗身分 — 只有換股/換週期/換中心日才重置，
   // 盤中輪詢換新 candles reference 不重置（否則使用者拖動的視窗每 ~30s 被打回原樣）
@@ -740,6 +741,26 @@ export default function CandleChart({
   // ── Load candle / MA data ────────────────────────────────────────────────
   useEffect(() => {
     if (!candleRef.current || candles.length === 0) return;
+
+    const nextRange = {
+      first: candles[0].date,
+      last: candles[candles.length - 1].date,
+      length: candles.length,
+    };
+    const previousRange = previousCandleRangeRef.current;
+    const compactsTimeScale = previousRange != null && (
+      nextRange.length < previousRange.length ||
+      nextRange.first !== previousRange.first ||
+      nextRange.last < previousRange.last
+    );
+    if (compactsTimeScale) {
+      // lightweight-charts <= 5.2.0：縮短多序列資料時若仍 hover 舊 index，會拋 `Value is null`。
+      chartRef.current?.clearCrosshairPosition();
+      broadcastCrosshairTime(null);
+      setHoverCandle(null);
+      onCrosshairRef.current?.(null);
+    }
+    previousCandleRangeRef.current = nextRange;
 
     // 進場/訊號日那根 K 棒維持原本紅綠顏色；改在 K 棒下方加黃圓點標記（見下方 markers effect）
     candleRef.current.setData(candles.map(c => ({

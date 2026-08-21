@@ -1099,17 +1099,23 @@ function HomePage() {
   // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫。
   // 三色 overlay/副圖只有日線版本 → 加 currentInterval==='1d' 閘，分鐘線一律不渲染
   //（否則日線 sanse 資料疊到分鐘線會把主圖帶歪、副圖空白錯位）。
-  const shuangBOverlay = showShuangB && sanseEnabled && sanse && currentInterval === '1d' ? {
-    zhineng: sanse.zhineng, zb4: sanse.zb4, zb5: sanse.zb5, duokong: sanse.duokong,
-    markers: sanse.mainMarkers,
+  // 歷史走圖換日後，新的 sanse request 回來前不可沿用上一個日期的 payload。
+  // 舊 payload 的未來 markers/series 配上已縮短的 candles，會踩 lightweight-charts 的
+  // time-scale compaction bug（`Value is null`）。
+  const sansePayloadDate = sanse?.candles.at(-1)?.time ?? '';
+  const visibleSanse = sanse && (!sanseAsOf || sansePayloadDate === sanseAsOf) ? sanse : null;
+  const shuangBOverlay = showShuangB && sanseEnabled && visibleSanse && currentInterval === '1d' ? {
+    zhineng: visibleSanse.zhineng, zb4: visibleSanse.zb4, zb5: visibleSanse.zb5, duokong: visibleSanse.duokong,
+    markers: visibleSanse.mainMarkers,
   } : null;
   // 副圖（主力狀態F / 捕撈季節）資料 — 對齊主圖 candle 由 IndicatorCharts 自行 map
   // 台股無換手率 → xysTiers 為 undefined（4 級彩柱不畫），金叉/動能柱照常
-  const sanseZhuli = sanseEnabled && indicators.mainForce && currentInterval === '1d' ? sanse?.zhuli ?? null : null;
-  const sanseXys = sanseEnabled && indicators.season && sanse && currentInterval === '1d' ? {
-    xys0: sanse.xys0, xys1: sanse.xys1, xys2: sanse.xys2,
-    subMarkers: sanse.subMarkers, xysTiers: sanse.xysTiers ?? null,
+  const sanseZhuli = sanseEnabled && indicators.mainForce && currentInterval === '1d' ? visibleSanse?.zhuli ?? null : null;
+  const sanseXys = sanseEnabled && indicators.season && visibleSanse && currentInterval === '1d' ? {
+    xys0: visibleSanse.xys0, xys1: visibleSanse.xys1, xys2: visibleSanse.xys2,
+    subMarkers: visibleSanse.subMarkers, xysTiers: visibleSanse.xysTiers ?? null,
   } : null;
+  const chartResetKey = `${currentStock?.ticker ?? 'empty'}:${currentInterval}:${visibleCandles.length}:${sanseAsOf}:${sansePayloadDate}`;
 
   // ABC 偵測器腳位疊加（除錯/驗證）— 選「ABC 突破」買法(J，舊代號 G)且非三色視圖時，
   // 把 detectABCBreakout 實際選的 A/B/C 腳 + 它的下降切線畫到走圖（用走圖游標 currentIndex 對齊面板）。
@@ -1174,6 +1180,7 @@ function HomePage() {
         {/* Left: Chart */}
         <div className="w-full min-[1440px]:flex-1 min-[1440px]:min-w-[480px] flex flex-col min-w-0 min-h-[60vh] min-[1440px]:min-h-0 gap-1.5">
           <StockChartView
+            resetKey={chartResetKey}
             isLoading={isLoadingStock}
             loadingOverlay={
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card/90">
@@ -1696,7 +1703,7 @@ function HomePage() {
             ) : (
               <>
                 <div className="flex-[3] min-h-0">
-                  <ErrorBoundary>
+                  <ErrorBoundary section="K線圖" resetKey={`${chartResetKey}:mobile-main`}>
                     <CandleChart
                       candles={visibleCandles}
                       signals={priceContinuityIssue ? [] : currentSignals}
@@ -1729,7 +1736,7 @@ function HomePage() {
                 </div>
                 {showIndicators && (
                   <div className="flex-[2] min-h-0 border-t border-border">
-                    <ErrorBoundary>
+                    <ErrorBoundary section="副圖" resetKey={`${chartResetKey}:mobile-indicators`}>
                       <IndicatorCharts candles={visibleCandles} hoverCandle={hoverCandle} indicators={indicators} ticker={currentStock?.ticker} chips={chips} chipsLoading={chipsLoading} sanseZhuli={sanseZhuli} sanseXys={sanseXys} />
                     </ErrorBoundary>
                   </div>

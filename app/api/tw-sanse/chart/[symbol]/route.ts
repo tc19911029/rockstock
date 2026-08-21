@@ -4,6 +4,7 @@ import { computeSanSeChart, TW_TIER_THRESHOLDS } from '@/lib/cn-sanse/indicators
 import { fetchTwDayExtras } from '@/lib/cn-sanse/twDayExtras';
 import { evalConditions } from '@/lib/cn-sanse/conditions';
 import { computeCatchCrossTrigger } from '@/lib/cn-sanse/crossTrigger';
+import { isolateSanseCandles } from '@/lib/cn-sanse/chartCandles';
 import type { Candle } from '@/types';
 
 export const runtime = 'nodejs';
@@ -61,7 +62,10 @@ export async function GET(
   try {
     const loaded = await loadTwCandles(raw);
     if (!loaded) return apiError('本地K線不足', 404);
-    let allCandles = loaded.candles;
+    // readCandleFile 在本機可能回傳共享 L1 memory-cache reference。盤中 append 前必須隔離：
+    // 同一股票被兩個 profile 以 .TW/.TWO 並行請求時，直接 push 會產生同日雙 K，
+    // 造成 changePct=0 且 XYS 多算一根、誤觸發動能死叉。
+    let allCandles = isolateSanseCandles(loaded.candles);
     let candles = asOf ? allCandles.filter((c) => c.date <= asOf) : allCandles;
     // 深度走圖：asOf 早於本地 L1 最早一根 → 截斷後 < 60。部分台股本地 L1 偏淺（如 6415 只到 2024、1264 到 2021-04），
     // 退過它就報「本地K線不足截斷後」。補抓 'max'（provider 可回到 2020-01）再 filter，讓深度回放不報錯。
@@ -71,8 +75,8 @@ export async function GET(
         const { dataProvider } = await import('@/lib/datasource/MultiMarketProvider');
         const deeper = await dataProvider.getHistoricalCandles(loaded.key, 'max', undefined, '1d');
         if (Array.isArray(deeper) && deeper.length > allCandles.length) {
-          allCandles = deeper;
-          candles = deeper.filter((c) => c.date <= asOf);
+          allCandles = isolateSanseCandles(deeper);
+          candles = allCandles.filter((c) => c.date <= asOf);
         }
       } catch { /* 抓不到就維持原樣 → 下面回 404 */ }
     }
