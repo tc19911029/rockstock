@@ -1018,8 +1018,12 @@ function MaDeductionForecast({
               <span className="text-muted-foreground/70">明天扣</span>
               <span className="font-mono text-foreground/80">{(r.deduct as number).toFixed(2)}</span>
               <span className={`font-bold ${dirColor}`}>{dirText}</span>
-              {pressureChange && <span className="text-amber-300/85">扣抵明顯升高</span>}
-              {reliefChange && <span className="text-rose-300/80">扣抵明顯降低</span>}
+              {pressureChange && (
+                <span className="text-amber-300/85">明天移除的舊股價較高，所以均線比較難上彎</span>
+              )}
+              {reliefChange && (
+                <span className="text-rose-300/80">明天移除的舊股價較低，所以均線比較容易上彎</span>
+              )}
               <span className="text-muted-foreground/45">（{cmp}）</span>
             </p>
           );
