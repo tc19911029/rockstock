@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { PHASE_PRODUCTION_BUILD } from "next/constants";
+import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
 import fs from "fs";
 import path from "path";
 import { assertProductionBuildOutputIsSafe } from "./lib/deployment/productionBuildGuard";
@@ -24,53 +24,54 @@ function loadEnvLocal() {
 }
 loadEnvLocal();
 
-const distDir = process.env.NEXT_DEPLOY_BUILD === '1'
-  ? '.next-deploy'
-  : process.env.NEXT_PREVIEW === '1'
-    ? '.next-preview'
-    : '.next';
-
-const nextConfig: NextConfig = {
-  // Production 部署先旁路建置到 .next-deploy，成功後才由 deploy guard 原子切換；
-  // 避免 build 失敗時清掉正在服務中的 .next，造成靜態資源 404／黑頁。
-  ...(distDir === '.next' ? {} : { distDir }),
-  turbopack: {
-    root: __dirname,
-  },
-  // Runtime data is read from disk locally and Blob on Vercel. Server bundles
-  // use compiled chunks, so source/test/mobile/temp trees must not be copied
-  // merely because a dynamic fs path caused an overly broad NFT trace.
-  // Python helpers and docs are intentionally left available: some Node routes
-  // execute/read them at runtime.
-  outputFileTracingExcludes: {
-    '/*': [
-      './data/**/*',
-      './app/**/*',
-      './components/**/*',
-      './features/**/*',
-      './lib/**/*',
-      './store/**/*',
-      './types/**/*',
-      './__tests__/**/*',
-      './e2e/**/*',
-      './android/**/*',
-      './ios/**/*',
-      './artifacts/**/*',
-      './tmp/**/*',
-      './coverage/**/*',
-      './public/**/*',
-      './scripts/**/*.{ts,tsx,js,mjs,cjs,sh}',
-    ],
-  },
-};
-
 const createNextConfig = (phase: string): NextConfig => {
+  const distDir = process.env.NEXT_DEPLOY_BUILD === '1'
+    ? '.next-deploy'
+    : process.env.NEXT_PREVIEW === '1'
+      ? '.next-preview'
+      : phase === PHASE_DEVELOPMENT_SERVER
+        ? '.next-dev'
+        : '.next';
+
   assertProductionBuildOutputIsSafe({
     isProductionBuild: phase === PHASE_PRODUCTION_BUILD,
     distDir,
     rootDir: __dirname,
   });
-  return nextConfig;
+
+  return {
+    // Dev 與 production 必須使用不同輸出目錄。deploy guard 會原子替換 .next；
+    // 若 next dev 也使用 .next，存活中的 Turbopack 會失去 cache/index 而全站 API 500。
+    ...(distDir === '.next' ? {} : { distDir }),
+    turbopack: {
+      root: __dirname,
+    },
+    // Runtime data is read from disk locally and Blob on Vercel. Server bundles
+    // use compiled chunks, so source/test/mobile/temp trees must not be copied
+    // merely because a dynamic fs path caused an overly broad NFT trace.
+    // Python helpers and docs are intentionally left available: some Node routes
+    // execute/read them at runtime.
+    outputFileTracingExcludes: {
+      '/*': [
+        './data/**/*',
+        './app/**/*',
+        './components/**/*',
+        './features/**/*',
+        './lib/**/*',
+        './store/**/*',
+        './types/**/*',
+        './__tests__/**/*',
+        './e2e/**/*',
+        './android/**/*',
+        './ios/**/*',
+        './artifacts/**/*',
+        './tmp/**/*',
+        './coverage/**/*',
+        './public/**/*',
+        './scripts/**/*.{ts,tsx,js,mjs,cjs,sh}',
+      ],
+    },
+  };
 };
 
 export default createNextConfig;

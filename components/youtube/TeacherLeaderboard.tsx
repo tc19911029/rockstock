@@ -16,6 +16,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { bullBearClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { readJsonResponse } from '@/lib/api/clientResponse';
 import type {
   ExtremeEvent, ProgramRow, RecoEventWithReturns, RecoHorizon, RecoHorizonStats,
   StockAggRow, TeacherLeaderboardResponse, TeacherRow,
@@ -247,7 +248,7 @@ export function TeacherLeaderboard({ compact = false }: { compact?: boolean } = 
     setError(null);
     const qs = timeMachine ? `asOf=${asOf}&days=90` : `days=${days}`;
     fetch(`/api/youtube/teacher-leaderboard?${qs}`)
-      .then(r => r.json())
+      .then(r => readJsonResponse<TeacherLeaderboardResponse & { ok?: boolean; error?: string }>(r))
       .then((json: TeacherLeaderboardResponse & { ok?: boolean; error?: string }) => {
         if (cancelled) return;
         if (json.error) { setError(json.error); setData(null); return; }

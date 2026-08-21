@@ -47,6 +47,7 @@ __pycache__/
 /.next/
 /.next-preview/
 /.next-deploy/
+/.next-dev/
 /.next-before-deploy/
 /out/
 

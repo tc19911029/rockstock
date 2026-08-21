@@ -8,8 +8,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { cn } from '@/lib/utils';
 import { bullBearClass } from '@/lib/format';
+import { readJsonResponse } from '@/lib/api/clientResponse';
 
 interface SelStatsLite { n: number; avgPct: number; medianPct: number; winRatePct: number }
 interface StatBlock {
@@ -51,7 +51,7 @@ export function TimeMachinePanel({ asOf, topK, selectBy }: Props) {
     setLoading(true);
     setError(null);
     fetch(`/api/youtube/teacher-walkforward?asOf=${asOf}&topK=${topK}&selectBy=${selectBy}`)
-      .then(r => r.json())
+      .then(r => readJsonResponse<WalkforwardResponse>(r))
       .then((j: WalkforwardResponse) => {
         if (cancelled) return;
         if (j.error) { setError(j.error); setData(null); } else setData(j);
