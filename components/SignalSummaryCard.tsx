@@ -254,6 +254,16 @@ export default function SignalSummaryCard() {
   if (!candle || !ticker) return null;
 
   const currentSymbol = ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const maPreviewStates = multiMaDeductionStates(
+    allCandles.map(item => item.close),
+    MA_FORECAST_SET.map(item => item.n),
+    currentIndex,
+  );
+  const maPreviewUp = maPreviewStates.filter(state => state.nextDirection === 'up').length;
+  const maPreviewDown = maPreviewStates.filter(state => state.nextDirection === 'down').length;
+  const maForecastMeta = maPreviewStates.length > 0
+    ? `明天 ${maPreviewUp} 上彎 · ${maPreviewDown} 下彎`
+    : '5 · 10 · 20 · 60 日線';
   const heldPosition = holdings.find(h => h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === currentSymbol);
   const hasPosition = !!heldPosition;
 
@@ -541,7 +551,7 @@ export default function SignalSummaryCard() {
             </div>
           )}
 
-          <SignalDisclosure title="均線扣抵預測" meta="MA5 · 10 · 20 · 60">
+          <SignalDisclosure title="均線扣抵預測" meta={maForecastMeta}>
             <MaDeductionForecast
               candles={allCandles}
               index={currentIndex}
@@ -920,6 +930,32 @@ function MaDeductionForecast({
   const nextAllRiseLeader = view.allRise.nextDay?.limitingPeriods
     .map(period => `${MA_PLAIN_LABEL[period] ?? `MA${period}`}（MA${period}）`)
     .join('、') ?? '';
+  const allRiseCard = view.allRise.nextDay
+    && nextAllRiseThreshold != null
+    && nextAllRiseRawThreshold != null
+    && nextAllRiseGap != null
+    && nextAllRiseGapPct != null ? (
+      <div className="rounded-md border border-amber-400/25 bg-amber-400/5 px-2 py-1.5 space-y-0.5">
+        <p className="text-[11px] leading-relaxed text-foreground/85">
+          <span className="font-bold">明天能否四線一起上彎？</span>
+        </p>
+        {nextAllRiseGap < 0 ? (
+          <p className="text-[11px] leading-relaxed text-rose-300/90">
+            可以。今收 {view.today.toFixed(2)} 已高於門檻 {nextAllRiseThreshold.toFixed(2)}，明天守住即可。
+          </p>
+        ) : (
+          <p className="text-[11px] leading-relaxed text-amber-200/90">
+            要收過 {nextAllRiseThreshold.toFixed(2)}；比今收還差 {nextAllRiseGap.toFixed(2)}（{(nextAllRiseGapPct * 100).toFixed(1)}%）。
+            {nextAllRiseGapPct > 0.1 ? '短期很難。' : nextAllRiseGapPct > 0.03 ? '門檻偏高。' : '已經接近。'}
+          </p>
+        )}
+        <p className="text-[10px] leading-relaxed text-muted-foreground/75">
+          主因：{nextAllRiseLeader}明天拿掉舊價 {nextAllRiseRawThreshold.toFixed(2)}。
+          這是均線轉向門檻，不是股價壓力位。
+          {dividendForForecastDay(view.allRise.nextDay.daysAhead) > 0 && ` 除息後門檻為 ${nextAllRiseThreshold.toFixed(2)}。`}
+        </p>
+      </div>
+    ) : null;
 
   return (
     <div className={embedded ? 'space-y-1' : 'pt-2 border-t border-border/20 space-y-1'}>
@@ -992,6 +1028,10 @@ function MaDeductionForecast({
           )}
         </div>
 
+        {allRiseCard}
+
+        <p className="pt-1 text-[10px] font-semibold text-muted-foreground/75">各線明天方向</p>
+
         {view.rows.map(r => {
           const dir = r.turn.direction;
           const dirText = dir === 'up' ? '明天上彎' : dir === 'down' ? '明天下彎' : '明天走平';
@@ -1038,39 +1078,22 @@ function MaDeductionForecast({
 
         {/* 使用者指定重點：助漲門檻、MA60 翻揚，以及三線／四線多排的完整情境推估 */}
         <div className="mt-1.5 space-y-0.5 border-t border-border/25 pt-1.5">
-          {view.allRise.nextDay && nextAllRiseThreshold != null && nextAllRiseRawThreshold != null && nextAllRiseGap != null && nextAllRiseGapPct != null && (
-            <div className="mb-1 rounded-md border border-amber-400/25 bg-amber-400/5 px-2 py-1.5 space-y-0.5">
-              <p className="text-[11px] leading-relaxed text-foreground/85">
-                <span className="font-bold">明天能否四線一起上彎？</span>
-              </p>
-              {nextAllRiseGap < 0 ? (
-                <p className="text-[11px] leading-relaxed text-rose-300/90">
-                  可以。今收 {view.today.toFixed(2)} 已高於門檻 {nextAllRiseThreshold.toFixed(2)}，明天守住即可。
-                </p>
-              ) : (
-                <p className="text-[11px] leading-relaxed text-amber-200/90">
-                  要收過 {nextAllRiseThreshold.toFixed(2)}；比今收還差 {nextAllRiseGap.toFixed(2)}（{(nextAllRiseGapPct * 100).toFixed(1)}%）。
-                  {nextAllRiseGapPct > 0.1 ? '短期很難。' : nextAllRiseGapPct > 0.03 ? '門檻偏高。' : '已經接近。'}
-                </p>
-              )}
-              <p className="text-[10px] leading-relaxed text-muted-foreground/65">
-                主因：{nextAllRiseLeader}明天拿掉舊價 {nextAllRiseRawThreshold.toFixed(2)}。
-                這是均線轉向門檻，不是股價壓力位。
-                {dividendForForecastDay(view.allRise.nextDay.daysAhead) > 0 && ` 除息後門檻為 ${nextAllRiseThreshold.toFixed(2)}。`}
-              </p>
-            </div>
-          )}
-
           {view.allRise.exactDays.length > 1 && (
-            <p className="text-[10px] leading-relaxed text-muted-foreground/60">
-              未來 {view.allRise.exactDays.length} 日四線上彎門檻：
-              {view.allRise.exactDays.map(day => {
-                const date = shortDate(view.forecastDates.get(day.daysAhead) ?? null);
-                const dividend = dividendForForecastDay(day.daysAhead);
-                const threshold = thresholdForForecastDay(day);
-                return `${date ?? `${day.daysAhead}日後`} >${threshold.toFixed(2)}${dividend > 0 ? '（除息等值）' : ''}`;
-              }).join(' · ')}
-            </p>
+            <details className="group/future rounded-md border border-border/25 bg-muted/5">
+              <summary className="cursor-pointer list-none px-2 py-1 text-[10px] font-medium text-muted-foreground/75 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-sky-400/70 [&::-webkit-details-marker]:hidden">
+                查看未來 {view.allRise.exactDays.length} 日門檻
+                <span className="ml-1 text-muted-foreground/55 group-open/future:hidden">＋</span>
+                <span className="ml-1 hidden text-muted-foreground/55 group-open/future:inline">－</span>
+              </summary>
+              <p className="border-t border-border/20 px-2 py-1 text-[10px] leading-relaxed text-muted-foreground/70">
+                {view.allRise.exactDays.map(day => {
+                  const date = shortDate(view.forecastDates.get(day.daysAhead) ?? null);
+                  const dividend = dividendForForecastDay(day.daysAhead);
+                  const threshold = thresholdForForecastDay(day);
+                  return `${date ?? `${day.daysAhead}日後`} >${threshold.toFixed(2)}${dividend > 0 ? '（除息後）' : ''}`;
+                }).join(' · ')}
+              </p>
+            </details>
           )}
 
           {firstExactAtAdjustedPrice ? (
@@ -1144,15 +1167,22 @@ function MaDeductionForecast({
                 若維持今收，20 日內無法穩定 3 日。
               </p>
             )}
-            <p className="text-[10px] leading-relaxed text-sky-300/75">
-              若每天上漲：{view.fourLineScenarios.map(({ dailyReturn, forecast }) => {
-                const date = forecast.firstDurableDay == null
-                  ? null
-                  : shortDate(view.forecastDates.get(forecast.firstDurableDay) ?? null);
-                return `日漲 ${(dailyReturn * 100).toFixed(2)}% ${forecast.firstDurableDay === 0 ? '目前可維持' : date ?? (forecast.firstDurableDay == null ? '20日內無' : `${forecast.firstDurableDay}日後`)}`;
-              }).join(' · ')}
-            </p>
-            <p className="text-[10px] leading-relaxed text-muted-foreground/45">
+            <details className="group/scenario">
+              <summary className="cursor-pointer list-none text-[10px] text-sky-300/80 outline-none hover:text-sky-200 focus-visible:ring-2 focus-visible:ring-sky-400/70 [&::-webkit-details-marker]:hidden">
+                查看不同漲幅情境
+                <span className="ml-1 group-open/scenario:hidden">＋</span>
+                <span className="ml-1 hidden group-open/scenario:inline">－</span>
+              </summary>
+              <p className="pt-0.5 text-[10px] leading-relaxed text-sky-300/75">
+                {view.fourLineScenarios.map(({ dailyReturn, forecast }) => {
+                  const date = forecast.firstDurableDay == null
+                    ? null
+                    : shortDate(view.forecastDates.get(forecast.firstDurableDay) ?? null);
+                  return `日漲 ${(dailyReturn * 100).toFixed(2)}%：${forecast.firstDurableDay === 0 ? '目前可維持' : date ?? (forecast.firstDurableDay == null ? '20日內無' : `${forecast.firstDurableDay}日後`)}`;
+                }).join(' · ')}
+              </p>
+            </details>
+            <p className="text-[10px] leading-relaxed text-muted-foreground/65">
               多排＝位置排好；一起上彎＝方向向上。兩者不同。
             </p>
           </div>
@@ -1189,7 +1219,7 @@ function MaDeductionForecast({
         )}
       </div>
 
-      <p className="text-[10px] text-muted-foreground/45 leading-relaxed">
+      <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
         假設股價維持今收；越往後越不準，不能單獨當買賣訊號。
       </p>
     </div>
