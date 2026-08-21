@@ -11,7 +11,8 @@
  *   取回傳的 conditions(ConditionReport) → 跑純函式 tradeVerdict() → buy/sell 才推。
  *
  * 去重（鏡像 lib/realtime/alertDispatcher 的 jsonl 帳本 idiom）：
- *   key = `${tradingDay}:${symbol}:${tone}`，同一交易日同檔同方向只推一次；
+ *   key = `${tradingDay}:${canonicalInstrument}:${tone}`，同一交易日同檔同方向只推一次；
+ *   台股 canonicalInstrument 以裸碼統一 .TW/.TWO，陸股保留 .SS/.SZ；
  *   帳本＝當日 data/realtime/sanse-alerts/{date}.jsonl，啟動/HMR 後 reload，重啟不重推。
  *   （台北 / 上海 同為 UTC+8，交易日字串一致 → 兩市場共用單一日期。）
  *
@@ -57,6 +58,21 @@ interface SanseAlertRecord {
 // ── 去重帳本（module state，鏡像 alertDispatcher.firedKeys）─────────────────
 const firedKeys = new Set<string>();
 let firedKeysLoadedForDate: string | null = null;
+
+// cron / 手動觸發若重疊，兩個 request 不能同時讀取同一份 firedKeys 後一起送推。
+// 用 module-level FIFO mutex 把「載帳本→判斷→送推→寫帳本」整段序列化。
+let notifyRunTail: Promise<void> = Promise.resolve();
+async function withNotifyRunLock<T>(work: () => Promise<T>): Promise<T> {
+  const previous = notifyRunTail;
+  let release!: () => void;
+  notifyRunTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
 
 function todayUtc8(): string {
   // 台北/上海同為 UTC+8 → 兩市場交易日字串一致，用單一日期當帳本檔名與去重前綴
@@ -133,7 +149,7 @@ interface EvalResult {
   comboLabel?: string;
 }
 
-export async function GET(req: NextRequest) {
+async function run(req: NextRequest) {
   const denied = checkCronAuth(req);
   if (denied) return denied;
 
@@ -249,4 +265,8 @@ export async function GET(req: NextRequest) {
   }
 
   return apiOk({ date, watch: watch.length, evaluated, fired, skipped, dry, force, details });
+}
+
+export async function GET(req: NextRequest) {
+  return withNotifyRunLock(() => run(req));
 }

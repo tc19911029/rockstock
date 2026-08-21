@@ -10,6 +10,7 @@
  *   close > high (差 > 0.1%) → 違反
  *   close < low (差 > 0.1%) → 違反
  *   open > high / open < low (差 > 0.1%) → 違反（2026-05-31 加；寫入層已 clip，殘留代表繞過）
+ *   同一股票同一日期出現超過一根 → duplicateDateRows（任何一筆即告警）
  *   整根複製前一交易日 (封存 bug) → dupBars（2026-06-02 加；見下方常數註解）
  *   違反 > 100 筆 或 dupBars > 0 → 觸發 HEALTH_ALERT_WEBHOOK_URL + exit 1（給 cron 看）
  */
@@ -64,6 +65,8 @@ interface MarketAudit {
   violations: number;
   byBucket: { '0.1-1%': number; '1-5%': number; '>5%': number };
   samples: Array<{ symbol: string; date: string; type: 'close>high' | 'close<low' | 'open>high' | 'open<low'; diffPct: number }>;
+  duplicateDateRows: number;
+  duplicateDateSamples: Array<{ symbol: string; date: string; occurrences: number }>;
   dupBars: number;
   dupSamples: Array<{ symbol: string; prevDate: string; date: string; close: number; volume: number; rangePct: number }>;
   subTickCloses: number;
@@ -76,6 +79,7 @@ function auditMarket(market: Market): MarketAudit {
     market, totalCandles: 0, violations: 0,
     byBucket: { '0.1-1%': 0, '1-5%': 0, '>5%': 0 },
     samples: [],
+    duplicateDateRows: 0, duplicateDateSamples: [],
     dupBars: 0, dupSamples: [],
     subTickCloses: 0, subTickSamples: [],
   };
@@ -91,6 +95,15 @@ function auditMarket(market: Market): MarketAudit {
       sealedDate = Array.isArray(raw) ? undefined : raw.sealedDate;
     } catch { continue; }
     const sym = f.replace('.json', '');
+    const dateCounts = new Map<string, number>();
+    for (const c of candles) dateCounts.set(c.date, (dateCounts.get(c.date) ?? 0) + 1);
+    for (const [date, occurrences] of dateCounts) {
+      if (occurrences <= 1) continue;
+      out.duplicateDateRows += occurrences - 1;
+      if (out.duplicateDateSamples.length < 20) {
+        out.duplicateDateSamples.push({ symbol: sym, date, occurrences });
+      }
+    }
     for (const c of candles) {
       out.totalCandles++;
       let violation: 'close>high' | 'close<low' | 'open>high' | 'open<low' | null = null;
@@ -181,6 +194,9 @@ function printSummary(r: MarketAudit) {
     r.samples.slice(0, 5).forEach(s =>
       console.log(`    ${s.symbol} ${s.date} ${s.type} ${(s.diffPct * 100).toFixed(2)}%`));
   }
+  console.log(`  同日重複 K 棒: ${r.duplicateDateRows}`);
+  r.duplicateDateSamples.slice(0, 5).forEach(s =>
+    console.log(`    ⚠ ${s.symbol} ${s.date} 共 ${s.occurrences} 根`));
   console.log(`  整根複製前一日 (封存 bug): ${r.dupBars}`);
   if (r.dupSamples.length > 0) {
     r.dupSamples.slice(0, 5).forEach(s =>
@@ -229,12 +245,17 @@ async function main() {
   }
 
   const totalViolations = results.reduce((s, r) => s + r.violations, 0);
+  const totalDuplicateDateRows = results.reduce((s, r) => s + r.duplicateDateRows, 0);
   const totalDupBars = results.reduce((s, r) => s + r.dupBars, 0);
   const totalSubTick = results.reduce((s, r) => s + r.subTickCloses, 0);
 
   const alertMsgs: string[] = [];
   if (totalViolations > ALERT_LIMIT) {
     alertMsgs.push(`OHLC invariant 違反 ${totalViolations} 筆 (>${ALERT_LIMIT})`);
+  }
+  if (totalDuplicateDateRows > 0) {
+    const ex = results.flatMap(r => r.duplicateDateSamples).slice(0, 8).map(s => `${s.symbol} ${s.date}×${s.occurrences}`).join(', ');
+    alertMsgs.push(`同一日期重複 K 棒 ${totalDuplicateDateRows} 筆: ${ex}`);
   }
   if (totalDupBars > DUP_ALERT_LIMIT) {
     const ex = results.flatMap(r => r.dupSamples).slice(0, 8).map(s => `${s.symbol} ${s.date}`).join(', ');

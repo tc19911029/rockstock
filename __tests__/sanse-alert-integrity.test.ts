@@ -1,6 +1,7 @@
 import type { Candle } from '@/types';
 import { isolateSanseCandles } from '@/lib/cn-sanse/chartCandles';
 import { canonicalSanseInstrument, dedupeSanseWatch, sanseAlertKey } from '@/lib/cn-sanse/alertIdentity';
+import { clearCache, getFromCache, updateCache } from '@/lib/datasource/L1CandleCache';
 
 describe('三色盤中 K 棒完整性', () => {
   it('複製共享 L1 陣列，盤中 append 不會回寫 cache', () => {
@@ -24,6 +25,35 @@ describe('三色盤中 K 棒完整性', () => {
 
     expect(isolated.map((c) => c.date)).toEqual(['2026-08-20', '2026-08-21']);
     expect(isolated.at(-1)?.open).toBe(2845);
+  });
+});
+
+describe('L1 記憶體快取隔離', () => {
+  afterEach(() => clearCache());
+
+  it('caller 修改 array、metadata 或 candle object 都不會污染下一個 reader', () => {
+    const source = {
+      symbol: '3081.TWO',
+      lastDate: '2026-08-20',
+      updatedAt: '2026-08-20T08:00:00.000Z',
+      candles: [
+        { date: '2026-08-20', open: 2765, high: 2830, low: 2635, close: 2780, volume: 4519 },
+      ],
+    };
+    updateCache(source.symbol, 'TW', source);
+
+    // updateCache 也不能保留 caller 的 reference。
+    source.candles.push({ date: '2026-08-21', open: 1, high: 1, low: 1, close: 1, volume: 1 });
+    const first = getFromCache('3081.TWO', 'TW')!;
+    first.lastDate = '2099-01-01';
+    first.candles.push({ date: '2099-01-01', open: 1, high: 1, low: 1, close: 1, volume: 1 });
+    try { first.candles[0].close = 999; } catch { /* frozen cache candle：預期可能 throw */ }
+
+    const second = getFromCache('3081.TWO', 'TW')!;
+    expect(second.lastDate).toBe('2026-08-20');
+    expect(second.candles).toHaveLength(1);
+    expect(second.candles[0].close).toBe(2780);
+    expect(Object.isFrozen(second.candles[0])).toBe(true);
   });
 });
 

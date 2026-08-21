@@ -7,6 +7,7 @@ import { computeCatchCrossTrigger } from '@/lib/cn-sanse/crossTrigger';
 import { fetchDayExtrasCached } from '@/lib/cn-sanse/cnDayExtras';
 import { fetchQuote, buildTodayBarFromQuote } from '@/lib/cn-sanse/cnQuote';
 import { getLimitMovePct } from '@/lib/utils/limitRules';
+import { isolateSanseCandles } from '@/lib/cn-sanse/chartCandles';
 import type { Candle } from '@/types';
 
 export const runtime = 'nodejs';
@@ -34,14 +35,14 @@ export async function GET(
     // K 線走 Blob-aware adapter（本地讀 data/candles/CN，Vercel 讀 Blob），不再直接 fs 讀本地檔
     let allCandles: Candle[] | undefined;
     const file = await readCandleFile(symbol, 'CN');
-    if (file?.candles) allCandles = file.candles;
+    if (file?.candles) allCandles = isolateSanseCandles(file.candles);
     // 不在掃描宇宙（無本地 L1，如 301205）→ 用與 /api/stock 同款 pipeline 線上抓，讓任何股票都能看三色
     // （單檔 walk-the-chart，非全市場掃描，不違反鐵則 #3；dataProvider 會順手快取進 L1，下次就走本地）
     if (!Array.isArray(allCandles) || allCandles.length < 60) {
       try {
         const { dataProvider } = await import('@/lib/datasource/MultiMarketProvider');
         const fetched = await dataProvider.getHistoricalCandles(symbol, '3y', undefined, '1d');
-        if (Array.isArray(fetched) && fetched.length >= 60) allCandles = fetched;
+        if (Array.isArray(fetched) && fetched.length >= 60) allCandles = isolateSanseCandles(fetched);
       } catch { /* 線上抓也失敗 → 下面回 404 */ }
     }
     if (!Array.isArray(allCandles) || allCandles.length < 60) {
@@ -56,8 +57,8 @@ export async function GET(
         const { dataProvider } = await import('@/lib/datasource/MultiMarketProvider');
         const deeper = await dataProvider.getHistoricalCandles(symbol, 'max', undefined, '1d');
         if (Array.isArray(deeper) && deeper.length > allCandles.length) {
-          allCandles = deeper;
-          candles = deeper.filter((c) => c.date <= asOf);
+          allCandles = isolateSanseCandles(deeper);
+          candles = allCandles.filter((c) => c.date <= asOf);
         }
       } catch { /* 抓不到就維持原樣 → 下面回 404 */ }
     }

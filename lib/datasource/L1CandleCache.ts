@@ -35,6 +35,22 @@ if (!g._l1Store) g._l1Store = new Map();
 
 const _store = g._l1Store;
 
+/**
+ * Cache 內部永遠保存自己的不可變 snapshot；不能保留 caller 傳入的可變 reference。
+ * candle objects 只在寫入 cache 時複製／freeze 一次，讀取時僅複製 array container，
+ * 避免全市場掃描每次讀取都深拷貝數百萬個物件。
+ */
+function immutableCacheSnapshot(data: CandleFileData): CandleFileData {
+  const candles = data.candles.map((c) => Object.freeze({ ...c })) as CandleFileData['candles'];
+  Object.freeze(candles);
+  return Object.freeze({ ...data, candles }) as CandleFileData;
+}
+
+/** 每個 reader 拿獨立 array container；push/splice/sort 不可能污染 cache。 */
+function readerSnapshot(data: CandleFileData): CandleFileData {
+  return { ...data, candles: [...data.candles] };
+}
+
 // ── 公開 API ────────────────────────────────────────────────────────────────────
 
 /**
@@ -48,7 +64,11 @@ export function getFromCache(symbol: string, market: 'TW' | 'CN'): CandleFileDat
     _store.delete(`${market}/${symbol}`);
     return null;
   }
-  return entry.data;
+  // HMR 後 global cache 可能仍是舊版建立的可變 entry；命中時順手升級成不可變 snapshot。
+  if (!Object.isFrozen(entry.data) || !Object.isFrozen(entry.data.candles)) {
+    entry.data = immutableCacheSnapshot(entry.data);
+  }
+  return readerSnapshot(entry.data);
 }
 
 /**
@@ -61,7 +81,10 @@ export function getFromCache(symbol: string, market: 'TW' | 'CN'): CandleFileDat
 let _updateCounter = 0;
 export function updateCache(symbol: string, market: 'TW' | 'CN', data: CandleFileData): void {
   if (IS_VERCEL) return;
-  _store.set(`${market}/${symbol}`, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+  _store.set(`${market}/${symbol}`, {
+    data: immutableCacheSnapshot(data),
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  });
   if (++_updateCounter % 200 === 0) evictExpired();
   // Hard cap：超過上限刪掉最舊的 N 筆（Map 保 insertion order）
   if (_store.size > MAX_ENTRIES) {
