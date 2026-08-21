@@ -736,9 +736,9 @@ export function formatMaTurnLine(opts: {
   const asOf = opts.asOf ?? closes.length - 1;
   const turn = daysUntilMaTurn(closes, maN, asOf, opts.maxLookahead ?? maN);
 
-  const priceAt = (idx: number, price: number, kind: '高價' | '低價'): string => {
+  const priceAt = (idx: number, price: number): string => {
     const d = fmtDate(dates, idx);
-    return d ? `${d} 的${kind} ${fmtPrice(price)}` : `${kind} ${fmtPrice(price)}`;
+    return d ? ` ${d} 收盤 ${fmtPrice(price)}` : `舊價 ${fmtPrice(price)}`;
   };
 
   // 情境一（課程加權指數 2022/11/7 例）：今天實際還下彎、明天就翻 → 明天的扣抵價
@@ -751,8 +751,8 @@ export function formatMaTurnLine(opts: {
     if (dp != null) {
       const idx = asOf - maN + 1;
       return turn.direction === 'up'
-        ? { tone: 'good', text: `${label}明天改扣 ${priceAt(idx, dp, '低價')} → 股價不跌就上彎` }
-        : { tone: 'warn', text: `${label}明天要扣 ${priceAt(idx, dp, '高價')} → 股價不漲就下彎（警覺）` };
+        ? { tone: 'good', text: `${label}明天拿掉${priceAt(idx, dp)}；收盤高於 ${fmtPrice(dp)} 就會上彎` }
+        : { tone: 'warn', text: `${label}明天拿掉${priceAt(idx, dp)}；收盤低於 ${fmtPrice(dp)} 就會下彎` };
     }
   }
 
@@ -765,8 +765,8 @@ export function formatMaTurnLine(opts: {
     turn.turnTo !== turn.direction
   ) {
     return turn.turnTo === 'down'
-      ? { tone: 'warn', text: `${label} ${turn.days} 天後要扣 ${priceAt(turn.turnDeductIdx, turn.turnDeductPrice, '高價')} → 股價不漲將下彎（警覺）` }
-      : { tone: 'good', text: `${label} ${turn.days} 天後改扣 ${priceAt(turn.turnDeductIdx, turn.turnDeductPrice, '低價')} → 股價不跌將上彎` };
+      ? { tone: 'warn', text: `${label} ${turn.days} 天後拿掉${priceAt(turn.turnDeductIdx, turn.turnDeductPrice)}；收盤低於 ${fmtPrice(turn.turnDeductPrice)} 就會下彎` }
+      : { tone: 'good', text: `${label} ${turn.days} 天後拿掉${priceAt(turn.turnDeductIdx, turn.turnDeductPrice)}；收盤高於 ${fmtPrice(turn.turnDeductPrice)} 就會上彎` };
   }
 
   return null;

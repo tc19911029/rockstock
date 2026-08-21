@@ -204,7 +204,7 @@ describe('formatMaTurnLine — 一行白話結論（課程 CH3-2）', () => {
     const line = formatMaTurnLine({ label: '月線', closes, maN: 5, dates });
     expect(line).toEqual({
       tone: 'warn',
-      text: '月線 3 天後要扣 6/12 的高價 30 → 股價不漲將下彎（警覺）',
+      text: '月線 3 天後拿掉 6/12 收盤 30；收盤低於 30 就會下彎',
     });
   });
 
@@ -212,14 +212,14 @@ describe('formatMaTurnLine — 一行白話結論（課程 CH3-2）', () => {
     const closes = [30, 29, 28, 27, 26, 20, 21, 22];
     const line = formatMaTurnLine({ label: '10日線', closes, maN: 5 });
     expect(line?.tone).toBe('good');
-    expect(line?.text).toBe('10日線 3 天後改扣 低價 20 → 股價不跌將上彎');
+    expect(line?.text).toBe('10日線 3 天後拿掉舊價 20；收盤高於 20 就會上彎');
   });
 
   it('課程 11/7 情境：明天就翻上 → 用明天的扣抵價講', () => {
     const closes = [9, 30, 20, 21, 22, 23, 24];
     const line = formatMaTurnLine({ label: '月線', closes, maN: 5 });
     expect(line?.tone).toBe('good');
-    expect(line?.text).toBe('月線明天改扣 低價 20 → 股價不跌就上彎');
+    expect(line?.text).toBe('月線明天拿掉舊價 20；收盤高於 20 就會上彎');
   });
 
   it('方向不變（近窗只剩凍結價走平）→ null，面板保持安靜', () => {
