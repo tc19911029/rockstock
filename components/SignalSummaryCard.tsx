@@ -36,6 +36,11 @@ import {
 import { getTickSize } from '@/lib/utils/tickSize';
 import { marketFromSymbol, formatSharesAsLots } from '@/lib/utils/shareUnits';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import {
+  cashDividendAdjustedThreshold,
+  cumulativeCashDividend,
+  type CashDividendEvent,
+} from '@/lib/analysis/dividendEvents';
 import { detectLetterM } from '@/lib/analysis/v12LetterM';
 import { detectLetterN, detectTopPatterns, type TopPatternType } from '@/lib/analysis/v12LetterN';
 import { detectLetterO } from '@/lib/analysis/v12LetterO';
@@ -539,6 +544,7 @@ export default function SignalSummaryCard() {
             <MaDeductionForecast
               candles={allCandles}
               index={currentIndex}
+              symbol={currentSymbol}
               market={market === 'CN' ? 'CN' : 'TW'}
               embedded
             />
@@ -739,6 +745,17 @@ function tradingDateAfter(dateStr: string, daysAhead: number, market: 'TW' | 'CN
   return remaining === 0 ? cursor.toISOString().slice(0, 10) : null;
 }
 
+function tradingDateBefore(dateStr: string, market: 'TW' | 'CN'): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return null;
+  const cursor = new Date(`${dateStr.slice(0, 10)}T12:00:00Z`);
+  for (let guard = 0; guard < 14; guard++) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    const candidate = cursor.toISOString().slice(0, 10);
+    if (isTradingDay(candidate, market)) return candidate;
+  }
+  return null;
+}
+
 function shortDate(dateStr: string | null): string | null {
   if (!dateStr) return null;
   const match = /^\d{4}-(\d{2})-(\d{2})/.exec(dateStr);
@@ -746,13 +763,35 @@ function shortDate(dateStr: string | null): string | null {
 }
 
 function MaDeductionForecast({
-  candles, index, market, embedded = false,
+  candles, index, symbol, market, embedded = false,
 }: {
   candles: CandleWithIndicators[];
   index: number;
+  symbol: string;
   market: 'TW' | 'CN';
   embedded?: boolean;
 }) {
+  const asOfDate = candles[index]?.date?.slice(0, 10) ?? '';
+  const [dividendEvents, setDividendEvents] = useState<CashDividendEvent[]>([]);
+
+  useEffect(() => {
+    setDividendEvents([]);
+    if (market !== 'TW' || !/^\d{4}$/.test(symbol) || !/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) return;
+    const controller = new AbortController();
+    void fetch(`/api/dividend-events?symbol=${encodeURIComponent(symbol)}&asOf=${encodeURIComponent(asOfDate)}`, {
+      signal: controller.signal,
+    })
+      .then(response => response.ok ? response.json() : null)
+      .then((payload: { events?: CashDividendEvent[] } | null) => {
+        if (payload?.events && !controller.signal.aborted) setDividendEvents(payload.events);
+      })
+      .catch(error => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        console.error('[MaDeductionForecast] dividend events fetch failed', error);
+      });
+    return () => controller.abort();
+  }, [asOfDate, market, symbol]);
+
   const view = useMemo(() => {
     if (!candles.length) return null;
     const asOf = Math.min(Math.max(index, 0), candles.length - 1);
@@ -831,6 +870,23 @@ function MaDeductionForecast({
 
   if (!view) return null;
 
+  // asOf 當天若已除息，今收已是除息後價格，不能再重複扣一次；只調整尚未發生的事件。
+  const futureDividendEvents = dividendEvents.filter(event => event.exDate > asOfDate);
+  const thresholdForForecastDay = (day: { daysAhead: number; knownThreshold: number }) => {
+    const date = view.forecastDates.get(day.daysAhead);
+    return date
+      ? cashDividendAdjustedThreshold(day.knownThreshold, futureDividendEvents, date)
+      : day.knownThreshold;
+  };
+  const dividendForForecastDay = (daysAhead: number) => {
+    const date = view.forecastDates.get(daysAhead);
+    return date ? cumulativeCashDividend(futureDividendEvents, date) : 0;
+  };
+  const firstExactAtAdjustedPrice = view.allRise.exactDays.find(
+    day => view.today > thresholdForForecastDay(day),
+  ) ?? null;
+  const conditionalDay = view.allRise.firstConditionalNearCurrentPrice;
+
   return (
     <div className={embedded ? 'space-y-1' : 'pt-2 border-t border-border/20 space-y-1'}>
       {!embedded && (
@@ -844,6 +900,30 @@ function MaDeductionForecast({
       )}
 
       <div className="space-y-0.5">
+        {dividendEvents.length > 0 && (
+          <div className="mb-1.5 rounded-md border border-amber-400/25 bg-amber-400/5 px-2.5 py-2 space-y-0.5">
+            {dividendEvents.map(event => (
+              <div key={event.exDate}>
+                <p className="text-[11px] leading-relaxed text-amber-200/90">
+                  <span className="font-bold">事件提醒</span>
+                  <span className="ml-1.5">
+                    {shortDate(event.exDate)} 除息 {event.cashDividend.toFixed(2)} 元
+                    {event.paymentDate ? ` · ${shortDate(event.paymentDate)} 發放` : ''}
+                  </span>
+                </p>
+                <p className="text-[10px] leading-relaxed text-muted-foreground/65">
+                  除息參考價約前收減 {event.cashDividend.toFixed(2)}；這是機械性下調，不等於賣壓，也不是免費報酬。
+                </p>
+                {tradingDateBefore(event.exDate, market) && (
+                  <p className="text-[10px] leading-relaxed text-muted-foreground/65">
+                    若要參與股息，須在 {shortDate(tradingDateBefore(event.exDate, market))} 收盤前持有。
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="mb-1.5 rounded-md border border-border/35 bg-muted/15 px-2.5 py-2 space-y-1">
           <p className="text-[11px] leading-relaxed text-foreground/85">
             <span className="font-bold">綜合判讀</span>
@@ -915,8 +995,11 @@ function MaDeductionForecast({
             <p className="text-[11px] leading-relaxed text-muted-foreground/70">
               <span className="text-foreground/70">下次四線全助漲</span>
               <span className="ml-1.5 text-amber-300/90">
-                收盤須高於 {view.allRise.nextDay.knownThreshold.toFixed(2)}
+                收盤須高於 {thresholdForForecastDay(view.allRise.nextDay).toFixed(2)}
               </span>
+              {dividendForForecastDay(view.allRise.nextDay.daysAhead) > 0 && (
+                <span className="ml-1.5 text-muted-foreground/45">（除息等值門檻）</span>
+              )}
               <span className="ml-1.5 text-muted-foreground/45">
                 （{view.allRise.nextDay.limitingPeriods.map(n => `MA${n}`).join('、')} 主導）
               </span>
@@ -928,24 +1011,26 @@ function MaDeductionForecast({
               近 {view.allRise.exactDays.length} 日全助漲門檻：
               {view.allRise.exactDays.map(day => {
                 const date = shortDate(view.forecastDates.get(day.daysAhead) ?? null);
-                return `${date ?? `${day.daysAhead}日後`} >${day.knownThreshold.toFixed(2)}`;
+                const dividend = dividendForForecastDay(day.daysAhead);
+                const threshold = thresholdForForecastDay(day);
+                return `${date ?? `${day.daysAhead}日後`} >${threshold.toFixed(2)}${dividend > 0 ? '（除息等值）' : ''}`;
               }).join(' · ')}
             </p>
           )}
 
-          {view.allRise.firstExactAtCurrentPrice ? (
+          {firstExactAtAdjustedPrice ? (
             <p className="text-[11px] leading-relaxed text-rose-300/85">
-              依今收情境，約 {view.allRise.firstExactAtCurrentPrice.daysAhead} 個交易日後可四線同步助漲。
+              依今收情境，約 {firstExactAtAdjustedPrice.daysAhead} 個交易日後可四線同步助漲。
             </p>
-          ) : view.allRise.firstConditionalNearCurrentPrice ? (
+          ) : conditionalDay ? (
             <p className="text-[11px] leading-relaxed text-sky-300/85">
               第一個近價條件窗口約
-              {shortDate(view.forecastDates.get(view.allRise.firstConditionalNearCurrentPrice.daysAhead) ?? null)
-                ? ` ${shortDate(view.forecastDates.get(view.allRise.firstConditionalNearCurrentPrice.daysAhead) ?? null)}`
-                : ` ${view.allRise.firstConditionalNearCurrentPrice.daysAhead} 個交易日後`}
+              {shortDate(view.forecastDates.get(conditionalDay.daysAhead) ?? null)
+                ? ` ${shortDate(view.forecastDates.get(conditionalDay.daysAhead) ?? null)}`
+                : ` ${conditionalDay.daysAhead} 個交易日後`}
               ：
-              屆時收盤須高於 {view.allRise.firstConditionalNearCurrentPrice.knownThreshold.toFixed(2)}，
-              並高於{view.allRise.firstConditionalNearCurrentPrice.unknownPeriods.map(n => `${n}日前收盤`).join('、')}。
+              屆時收盤須高於 {thresholdForForecastDay(conditionalDay).toFixed(2)}，
+              並高於{conditionalDay.unknownPeriods.map(n => `${n}日前收盤`).join('、')}。
             </p>
           ) : (
             <p className="text-[11px] leading-relaxed text-muted-foreground/55">
