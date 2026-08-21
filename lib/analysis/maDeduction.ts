@@ -350,6 +350,204 @@ export function deductSeries(
   return out;
 }
 
+// ── 多週期扣抵狀態與「四線同步助漲」窗口 ───────────────────────────────
+
+export type MaDeductionDirection = 'up' | 'down' | 'flat';
+
+export interface MaDeductionState {
+  period: number;
+  /** 今天這根均線實際扣掉的價格（close[asOf-period]）。 */
+  currentDeductPrice: number | null;
+  /** 下一交易日將扣掉的價格（close[asOf-period+1]）。 */
+  nextDeductPrice: number;
+  /** 今天均線的實際方向。資料剛好只夠一個窗口時為 null。 */
+  currentDirection: MaDeductionDirection | null;
+  /** 假設下一交易日收盤維持今收時，均線下一步的方向。 */
+  nextDirection: MaDeductionDirection;
+  /** 下一扣抵價相較今日扣抵價的變化；正值代表扣抵壓力升高。 */
+  deductChange: number | null;
+  /** 扣抵變化相對自身過去 lookback 次的百分位（0~1）；資料不足為 null。 */
+  changePercentile: number | null;
+}
+
+const deductionDirection = (diff: number): MaDeductionDirection => {
+  if (Math.abs(diff) < 1e-9) return 'flat';
+  return diff > 0 ? 'up' : 'down';
+};
+
+/**
+ * 同時整理 MA5/10/20/60 的「今日」與「下一交易日」扣抵狀態。
+ *
+ * 百分位只衡量扣抵價是否突然跳高／轉低，不把它冒充成股價漲跌勝率：
+ * 每個歷史樣本都用當時收盤正規化，再和目前的扣抵變化比較。
+ */
+export function multiMaDeductionStates(
+  closes: ReadonlyArray<number>,
+  periods: ReadonlyArray<number> = [5, 10, 20, 60],
+  asOf: number = closes.length - 1,
+  lookback: number = 120,
+): MaDeductionState[] {
+  if (asOf < 0 || asOf >= closes.length) return [];
+  const todayClose = closes[asOf];
+  if (!Number.isFinite(todayClose) || todayClose <= 0) return [];
+
+  return periods.flatMap((period): MaDeductionState[] => {
+    if (!Number.isInteger(period) || period <= 1 || asOf < period - 1) return [];
+
+    const nextIdx = asOf - period + 1;
+    const currentIdx = asOf - period;
+    const nextDeductPrice = closes[nextIdx];
+    if (!Number.isFinite(nextDeductPrice)) return [];
+
+    const currentDeductPrice = currentIdx >= 0 && Number.isFinite(closes[currentIdx])
+      ? closes[currentIdx]
+      : null;
+    const deductChange = currentDeductPrice == null ? null : nextDeductPrice - currentDeductPrice;
+
+    let changePercentile: number | null = null;
+    if (deductChange != null) {
+      const currentNormalized = deductChange / todayClose;
+      const samples: number[] = [];
+      const firstAnchor = Math.max(period, asOf - Math.max(1, Math.floor(lookback)));
+      for (let anchor = firstAnchor; anchor < asOf; anchor++) {
+        const historicalClose = closes[anchor];
+        const older = closes[anchor - period];
+        const newer = closes[anchor - period + 1];
+        if (
+          Number.isFinite(historicalClose) && historicalClose > 0 &&
+          Number.isFinite(older) && Number.isFinite(newer)
+        ) {
+          samples.push((newer - older) / historicalClose);
+        }
+      }
+      if (samples.length >= Math.min(20, lookback)) {
+        let less = 0;
+        let equal = 0;
+        for (const sample of samples) {
+          if (sample < currentNormalized) less++;
+          else if (Math.abs(sample - currentNormalized) < 1e-12) equal++;
+        }
+        changePercentile = (less + equal * 0.5) / samples.length;
+      }
+    }
+
+    return [{
+      period,
+      currentDeductPrice,
+      nextDeductPrice,
+      currentDirection: currentDeductPrice == null
+        ? null
+        : deductionDirection(todayClose - currentDeductPrice),
+      nextDirection: deductionDirection(todayClose - nextDeductPrice),
+      deductChange,
+      changePercentile,
+    }];
+  });
+}
+
+export interface AllMaRiseDay {
+  /** 未來第幾個交易日（1 = 下一交易日）。 */
+  daysAhead: number;
+  /** 仍可由既有歷史價格確定的各期扣抵價。 */
+  knownDeductions: Record<number, number>;
+  /** 因已超過該均線週期、必須等待未來收盤才能知道的扣抵週期。 */
+  unknownPeriods: number[];
+  /** 已知扣抵價中的最高值；當日收盤必須高於它。 */
+  knownThreshold: number;
+  /** 目前由哪些均線主導最高門檻。 */
+  limitingPeriods: number[];
+  /** 若未來收盤維持今收，已知部分是否已滿足助漲門檻。 */
+  nearCurrentPrice: boolean;
+}
+
+export interface AllMaRiseForecast {
+  periods: number[];
+  /** 今天四條均線是否已全部實際向上。 */
+  currentlyAllRising: boolean;
+  /** 下一交易日的完整已知門檻。 */
+  nextDay: AllMaRiseDay | null;
+  /** 所有扣抵價都已知的近窗（四線時天然最多精確到5個交易日）。 */
+  exactDays: AllMaRiseDay[];
+  /** 依今收凍結情境，近窗第一個可確定四線全助漲的日子。 */
+  firstExactAtCurrentPrice: AllMaRiseDay | null;
+  /** 超出短均線已知窗後，第一個接近今收的條件窗口。 */
+  firstConditionalNearCurrentPrice: AllMaRiseDay | null;
+}
+
+/**
+ * 推估「四線何時可同步助漲」。某日成立的必要且充分條件是：
+ * 當日收盤 > max(該日 D5, D10, D20, D60)。
+ *
+ * step <= 最短週期時四個扣抵價全為已知歷史資料，可給完整門檻；超出後短線
+ * 扣抵會落在尚未發生的收盤，只能列條件窗口，不能宣稱確定日期。
+ */
+export function forecastAllMaRising(
+  closes: ReadonlyArray<number>,
+  periods: ReadonlyArray<number> = [5, 10, 20, 60],
+  asOf: number = closes.length - 1,
+  maxLookahead: number = 10,
+): AllMaRiseForecast {
+  const cleanPeriods = [...new Set(periods)]
+    .filter(period => Number.isInteger(period) && period > 1)
+    .sort((a, b) => a - b);
+  const empty: AllMaRiseForecast = {
+    periods: cleanPeriods,
+    currentlyAllRising: false,
+    nextDay: null,
+    exactDays: [],
+    firstExactAtCurrentPrice: null,
+    firstConditionalNearCurrentPrice: null,
+  };
+  if (
+    cleanPeriods.length < 2 || asOf < Math.max(...cleanPeriods) ||
+    asOf >= closes.length || !Number.isFinite(closes[asOf])
+  ) return empty;
+
+  const todayClose = closes[asOf];
+  const currentlyAllRising = cleanPeriods.every(period =>
+    deductionDirection(todayClose - closes[asOf - period]) === 'up');
+  const days: AllMaRiseDay[] = [];
+  const cap = Math.max(1, Math.floor(maxLookahead));
+
+  for (let step = 1; step <= cap; step++) {
+    const knownDeductions: Record<number, number> = {};
+    const unknownPeriods: number[] = [];
+    for (const period of cleanPeriods) {
+      const idx = asOf - period + step;
+      if (idx >= 0 && idx <= asOf && Number.isFinite(closes[idx])) {
+        knownDeductions[period] = closes[idx];
+      } else {
+        unknownPeriods.push(period);
+      }
+    }
+    const knownValues = Object.values(knownDeductions);
+    if (knownValues.length === 0) continue;
+    const knownThreshold = Math.max(...knownValues);
+    const limitingPeriods = Object.entries(knownDeductions)
+      .filter(([, price]) => Math.abs(price - knownThreshold) < 1e-9)
+      .map(([period]) => Number(period));
+    days.push({
+      daysAhead: step,
+      knownDeductions,
+      unknownPeriods,
+      knownThreshold,
+      limitingPeriods,
+      nearCurrentPrice: todayClose > knownThreshold,
+    });
+  }
+
+  const exactDays = days.filter(day => day.unknownPeriods.length === 0);
+  return {
+    periods: cleanPeriods,
+    currentlyAllRising,
+    nextDay: days[0] ?? null,
+    exactDays,
+    firstExactAtCurrentPrice: exactDays.find(day => day.nearCurrentPrice) ?? null,
+    firstConditionalNearCurrentPrice: days.find(day =>
+      day.unknownPeriods.length > 0 && day.nearCurrentPrice) ?? null,
+  };
+}
+
 // ── 白話結論句（顯示層文案，先結論、短句）────────────────────────────────
 
 /** 白話均線名（課程慣用），結論句用 */

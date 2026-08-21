@@ -35,6 +35,7 @@ import {
 } from '@/lib/portfolio/signalPanelPlan';
 import { getTickSize } from '@/lib/utils/tickSize';
 import { marketFromSymbol, formatSharesAsLots } from '@/lib/utils/shareUnits';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 import { detectLetterM } from '@/lib/analysis/v12LetterM';
 import { detectLetterN, detectTopPatterns, type TopPatternType } from '@/lib/analysis/v12LetterN';
 import { detectLetterO } from '@/lib/analysis/v12LetterO';
@@ -43,12 +44,14 @@ import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
 import { STOP_LOSS_PRICE_MULT, PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/bookThresholds';
 import {
   deductPrice,
+  forecastAllMaRising,
   daysUntilBullishAlignment,
   daysUntilGoldenCross,
   daysUntilMaRises,
   daysUntilMaTurn,
   formatMaTurnLine,
   MA_PLAIN_LABEL,
+  multiMaDeductionStates,
 } from '@/lib/analysis/maDeduction';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import type { ShortSixConditionsResult } from '@/lib/analysis/shortAnalysis';
@@ -533,7 +536,12 @@ export default function SignalSummaryCard() {
           )}
 
           <SignalDisclosure title="均線扣抵預測" meta="MA5 · 10 · 20 · 60">
-            <MaDeductionForecast candles={allCandles} index={currentIndex} embedded />
+            <MaDeductionForecast
+              candles={allCandles}
+              index={currentIndex}
+              market={market === 'CN' ? 'CN' : 'TW'}
+              embedded
+            />
           </SignalDisclosure>
 
           <SignalDisclosure
@@ -719,11 +727,30 @@ const MA_FORECAST_SET: ReadonlyArray<{ n: number; label: string }> = [
 /** 翻向結論句最多往前看幾根（課程 CH3-2：7~8 天前未卜先知，再遠凍結價假設不可靠） */
 const MA_TURN_LOOKAHEAD = 10;
 
+function tradingDateAfter(dateStr: string, daysAhead: number, market: 'TW' | 'CN'): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(dateStr) || daysAhead < 1) return null;
+  const cursor = new Date(`${dateStr.slice(0, 10)}T12:00:00Z`);
+  let remaining = Math.floor(daysAhead);
+  for (let guard = 0; guard < 45 && remaining > 0; guard++) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const candidate = cursor.toISOString().slice(0, 10);
+    if (isTradingDay(candidate, market)) remaining--;
+  }
+  return remaining === 0 ? cursor.toISOString().slice(0, 10) : null;
+}
+
+function shortDate(dateStr: string | null): string | null {
+  if (!dateStr) return null;
+  const match = /^\d{4}-(\d{2})-(\d{2})/.exec(dateStr);
+  return match ? `${Number(match[1])}/${Number(match[2])}` : null;
+}
+
 function MaDeductionForecast({
-  candles, index, embedded = false,
+  candles, index, market, embedded = false,
 }: {
   candles: CandleWithIndicators[];
   index: number;
+  market: 'TW' | 'CN';
   embedded?: boolean;
 }) {
   const view = useMemo(() => {
@@ -734,10 +761,12 @@ function MaDeductionForecast({
     if (today == null) return null;
 
     const dates = candles.map(c => c.date);
+    const states = multiMaDeductionStates(closes, MA_FORECAST_SET.map(row => row.n), asOf);
+    const stateByPeriod = new Map(states.map(state => [state.period, state]));
     const rows = MA_FORECAST_SET.map(({ n, label }) => {
       const dp = deductPrice(closes, n, asOf);
       const turn = daysUntilMaTurn(closes, n, asOf, Math.min(n, MA_TURN_LOOKAHEAD));
-      return { n, label, deduct: dp, turn };
+      return { n, label, deduct: dp, turn, state: stateByPeriod.get(n) };
     }).filter(r => r.deduct != null);
 
     // 白話結論句（課程 CH3-2）：只對有翻向結論的均線出一行，例
@@ -755,13 +784,50 @@ function MaDeductionForecast({
     // 完整扣抵窗仍只是假設「未來收盤維持今收」的情境，不是行情預測。
     const ma60Rise = daysUntilMaRises(closes, 60, asOf, 60);
     const tripleAlignment = daysUntilBullishAlignment(closes, [5, 10, 20], asOf, 20);
+    const allRise = forecastAllMaRising(closes, [5, 10, 20, 60], asOf, 10);
+    const forecastDates = new Map<number, string>();
+    for (let day = 1; day <= 10; day++) {
+      const knownReplayDate = candles[asOf + day]?.date?.slice(0, 10);
+      const estimatedDate = knownReplayDate ?? tradingDateAfter(dates[asOf], day, market);
+      if (estimatedDate) forecastDates.set(day, estimatedDate);
+    }
+
+    const nextUp = states.filter(state => state.nextDirection === 'up').length;
+    const nextDown = states.filter(state => state.nextDirection === 'down').length;
+    const ma20State = stateByPeriod.get(20);
+    const ma60State = stateByPeriod.get(60);
+    const ma60PressureJump = ma60State?.nextDirection === 'down'
+      && (ma60State.changePercentile ?? 0) >= 0.75;
+    const deductionSummary = nextUp === states.length
+      ? '四線同步助漲，扣抵環境偏多'
+      : nextDown === states.length
+        ? '四線同步助跌，扣抵環境偏空'
+        : ma20State?.nextDirection === 'up' && ma60State?.nextDirection === 'down'
+          ? `月線助漲、季線助跌${ma60PressureJump ? '；季線扣抵跳高，長週期壓力偏重' : '；長短週期互相抵消'}`
+          : ma20State?.nextDirection === 'down' && ma60State?.nextDirection === 'up'
+            ? '月線助跌、季線助漲；短中期仍有壓力'
+            : nextUp > nextDown
+              ? '助漲線數較多，但仍是混合扣抵'
+              : nextDown > nextUp
+                ? '助跌線數較多，上漲機率傾向下修'
+                : '助漲、助跌各半，方向互相抵消';
+
+    const maLevels = MA_FORECAST_SET.flatMap(({ n, label }) => {
+      const value = candles[asOf]?.[`ma${n}` as keyof CandleWithIndicators];
+      return typeof value === 'number' && Number.isFinite(value) ? [{ n, label, value }] : [];
+    });
+    const supports = maLevels.filter(level => level.value <= today).sort((a, b) => b.value - a.value);
+    const pressures = maLevels.filter(level => level.value > today).sort((a, b) => a.value - b.value);
 
     // 黃金交叉只估近窗 5 根（凍結價假設往後不可靠）
     const gc5x20 = daysUntilGoldenCross(closes, 5, 20, asOf, 5);
 
     if (rows.length === 0) return null;
-    return { today, rows, turnLines, ma60Rise, tripleAlignment, gc5x20 };
-  }, [candles, index]);
+    return {
+      today, rows, turnLines, ma60Rise, tripleAlignment, allRise, gc5x20,
+      nextUp, nextDown, deductionSummary, supports, pressures, forecastDates,
+    };
+  }, [candles, index, market]);
 
   if (!view) return null;
 
@@ -778,18 +844,56 @@ function MaDeductionForecast({
       )}
 
       <div className="space-y-0.5">
+        <div className="mb-1.5 rounded-md border border-border/35 bg-muted/15 px-2.5 py-2 space-y-1">
+          <p className="text-[11px] leading-relaxed text-foreground/85">
+            <span className="font-bold">綜合判讀</span>
+            <span className="ml-1.5">{view.deductionSummary}</span>
+          </p>
+          <p className="text-[10px] leading-relaxed text-muted-foreground/65">
+            下一交易日：助漲 {view.nextUp}/4 · 助跌 {view.nextDown}/4；這是機率傾向，不是必漲必跌。
+          </p>
+          {(view.supports.length > 0 || view.pressures.length > 0) && (
+            <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+              {view.supports.length > 0 && (
+                <span>
+                  均線支撐 {view.supports.map(level => `${level.label} ${level.value.toFixed(2)}`).join(' · ')}
+                </span>
+              )}
+              {view.supports.length > 0 && view.pressures.length > 0 && <span className="mx-1.5">｜</span>}
+              {view.pressures.length > 0 && (
+                <span>
+                  均線壓力 {view.pressures.map(level => `${level.label} ${level.value.toFixed(2)}`).join(' · ')}
+                </span>
+              )}
+            </p>
+          )}
+        </div>
+
         {view.rows.map(r => {
           const dir = r.turn.direction;
-          const dirText = dir === 'up' ? '將上揚' : dir === 'down' ? '將下彎' : '走平';
+          const dirText = dir === 'up' ? '助漲' : dir === 'down' ? '助跌' : '走平';
           // 紅漲綠跌（台股慣例）：上揚紅、下彎綠
           const dirColor = dir === 'up' ? 'text-rose-300' : dir === 'down' ? 'text-emerald-300' : 'text-muted-foreground';
           const cmp = view.today > (r.deduct as number) ? '今收高於扣抵' : view.today < (r.deduct as number) ? '今收低於扣抵' : '今收等於扣抵';
+          const pressureChange = r.state?.deductChange != null && r.state.deductChange > 0
+            && (r.state.changePercentile ?? 0) >= 0.75;
+          const reliefChange = r.state?.deductChange != null && r.state.deductChange < 0
+            && (r.state.changePercentile ?? 1) <= 0.25;
           return (
-            <p key={r.n} className="text-[11px] leading-relaxed flex items-baseline gap-1.5 flex-wrap">
+            <p key={r.n} className="text-[11px] leading-relaxed flex items-baseline gap-x-1.5 flex-wrap">
               <span className="text-foreground/70 font-mono w-9 shrink-0">{r.label}</span>
-              <span className="text-muted-foreground/70">扣抵</span>
+              {r.state?.currentDeductPrice != null && (
+                <>
+                  <span className="text-muted-foreground/55">今日扣</span>
+                  <span className="font-mono text-foreground/65">{r.state.currentDeductPrice.toFixed(2)}</span>
+                  <span className="text-muted-foreground/35">→</span>
+                </>
+              )}
+              <span className="text-muted-foreground/70">下次扣</span>
               <span className="font-mono text-foreground/80">{(r.deduct as number).toFixed(2)}</span>
               <span className={`font-bold ${dirColor}`}>{dirText}</span>
+              {pressureChange && <span className="text-amber-300/85">壓力增強</span>}
+              {reliefChange && <span className="text-rose-300/80">扣抵轉低</span>}
               <span className="text-muted-foreground/45">（{cmp}）</span>
             </p>
           );
@@ -807,6 +911,48 @@ function MaDeductionForecast({
 
         {/* 使用者指定重點：MA60 翻揚與 MA5/10/20 三線多排的完整扣抵窗推估 */}
         <div className="mt-1.5 space-y-0.5 border-t border-border/25 pt-1.5">
+          {view.allRise.nextDay && (
+            <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+              <span className="text-foreground/70">下次四線全助漲</span>
+              <span className="ml-1.5 text-amber-300/90">
+                收盤須高於 {view.allRise.nextDay.knownThreshold.toFixed(2)}
+              </span>
+              <span className="ml-1.5 text-muted-foreground/45">
+                （{view.allRise.nextDay.limitingPeriods.map(n => `MA${n}`).join('、')} 主導）
+              </span>
+            </p>
+          )}
+
+          {view.allRise.exactDays.length > 1 && (
+            <p className="text-[10px] leading-relaxed text-muted-foreground/60">
+              近 {view.allRise.exactDays.length} 日全助漲門檻：
+              {view.allRise.exactDays.map(day => {
+                const date = shortDate(view.forecastDates.get(day.daysAhead) ?? null);
+                return `${date ?? `${day.daysAhead}日後`} >${day.knownThreshold.toFixed(2)}`;
+              }).join(' · ')}
+            </p>
+          )}
+
+          {view.allRise.firstExactAtCurrentPrice ? (
+            <p className="text-[11px] leading-relaxed text-rose-300/85">
+              依今收情境，約 {view.allRise.firstExactAtCurrentPrice.daysAhead} 個交易日後可四線同步助漲。
+            </p>
+          ) : view.allRise.firstConditionalNearCurrentPrice ? (
+            <p className="text-[11px] leading-relaxed text-sky-300/85">
+              第一個近價條件窗口約
+              {shortDate(view.forecastDates.get(view.allRise.firstConditionalNearCurrentPrice.daysAhead) ?? null)
+                ? ` ${shortDate(view.forecastDates.get(view.allRise.firstConditionalNearCurrentPrice.daysAhead) ?? null)}`
+                : ` ${view.allRise.firstConditionalNearCurrentPrice.daysAhead} 個交易日後`}
+              ：
+              屆時收盤須高於 {view.allRise.firstConditionalNearCurrentPrice.knownThreshold.toFixed(2)}，
+              並高於{view.allRise.firstConditionalNearCurrentPrice.unknownPeriods.map(n => `${n}日前收盤`).join('、')}。
+            </p>
+          ) : (
+            <p className="text-[11px] leading-relaxed text-muted-foreground/55">
+              近 10 個交易日依今收情境，尚無接近現價的四線同步助漲窗口。
+            </p>
+          )}
+
           <p className="text-[11px] leading-relaxed text-muted-foreground/70">
             <span className="text-foreground/70">MA60 翻揚</span>
             {view.ma60Rise.alreadyRising ? (

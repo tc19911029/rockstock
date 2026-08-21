@@ -13,6 +13,8 @@ import {
   daysUntilMaRises,
   daysUntilGoldenCross,
   formatMaTurnLine,
+  forecastAllMaRising,
+  multiMaDeductionStates,
 } from '@/lib/analysis/maDeduction';
 
 describe('deductPrice — N 日均線下一根要丟掉的扣抵價', () => {
@@ -62,6 +64,67 @@ describe('deductSeries — 未來 k 天扣抵價序列（課程 CH3-2：全是�
   it('窗口沒滿 / 非法參數 → 空陣列', () => {
     expect(deductSeries([1, 2, 3], 5)).toEqual([]);
     expect(deductSeries(closes, 0)).toEqual([]);
+  });
+});
+
+describe('multiMaDeductionStates — 今日／下次扣抵與多週期方向', () => {
+  it('明確分開今日扣抵與下一交易日扣抵，避免 off-by-one', () => {
+    const closes = Array.from({ length: 70 }, (_, i) => i + 1);
+    const state = multiMaDeductionStates(closes, [5], closes.length - 1, 20)[0];
+
+    expect(state.currentDeductPrice).toBe(65); // asOf-period
+    expect(state.nextDeductPrice).toBe(66);    // asOf-period+1
+    expect(state.currentDirection).toBe('up');
+    expect(state.nextDirection).toBe('up');
+    expect(state.deductChange).toBe(1);
+  });
+
+  it('可辨識月線助漲、季線助跌的衝突狀態', () => {
+    const closes = Array.from({ length: 80 }, () => 50);
+    closes[19] = 80; // 今日 MA60 扣高 → 助跌
+    closes[20] = 75; // 下一日 MA60 仍扣高 → 助跌
+    closes[59] = 30; // 今日 MA20 扣低 → 助漲
+    closes[60] = 35; // 下一日 MA20 仍扣低 → 助漲
+    closes[79] = 50;
+
+    const states = multiMaDeductionStates(closes, [20, 60]);
+    expect(states.find(state => state.period === 20)?.nextDirection).toBe('up');
+    expect(states.find(state => state.period === 60)?.nextDirection).toBe('down');
+  });
+});
+
+describe('forecastAllMaRising — 四線同步助漲門檻與條件窗口', () => {
+  it('完整已知近窗用四個扣抵價最高值作門檻', () => {
+    const closes = Array.from({ length: 70 }, () => 50);
+    const asOf = closes.length - 1;
+    closes[asOf - 5 + 1] = 60;
+    closes[asOf - 10 + 1] = 65;
+    closes[asOf - 20 + 1] = 55;
+    for (let step = 1; step <= 5; step++) closes[asOf - 60 + step] = 80;
+    closes[asOf] = 70;
+
+    const result = forecastAllMaRising(closes, [5, 10, 20, 60], asOf, 10);
+    expect(result.nextDay?.knownThreshold).toBe(80);
+    expect(result.nextDay?.limitingPeriods).toEqual([60]);
+    expect(result.nextDay?.unknownPeriods).toEqual([]);
+    expect(result.firstExactAtCurrentPrice).toBeNull();
+    expect(result.exactDays).toHaveLength(5);
+  });
+
+  it('第6日起短線扣抵未知，只能標成條件窗口', () => {
+    const closes = Array.from({ length: 80 }, () => 40);
+    const asOf = closes.length - 1;
+    closes[asOf] = 50;
+    // 前5日的已知四線門檻都故意高於今收；第6日已知 MA10/20/60 都低於今收。
+    for (let step = 1; step <= 5; step++) closes[asOf - 60 + step] = 70;
+    closes[asOf - 60 + 6] = 45;
+    closes[asOf - 20 + 6] = 44;
+    closes[asOf - 10 + 6] = 43;
+
+    const result = forecastAllMaRising(closes, [5, 10, 20, 60], asOf, 10);
+    expect(result.firstConditionalNearCurrentPrice?.daysAhead).toBe(6);
+    expect(result.firstConditionalNearCurrentPrice?.knownThreshold).toBe(45);
+    expect(result.firstConditionalNearCurrentPrice?.unknownPeriods).toEqual([5]);
   });
 });
 
