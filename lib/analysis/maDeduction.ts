@@ -222,6 +222,29 @@ export interface BullishAlignmentForecast {
   values: number[] | null;
 }
 
+export interface BullishAlignmentDurabilityForecast {
+  /** 由短至長的均線週期；嚴格多排要求前一條均線 > 後一條均線。 */
+  periods: number[];
+  /** 情境中的每日報酬率；0 代表未來收盤維持今收。 */
+  dailyReturn: number;
+  /** 要連續成立幾個交易日才視為穩定。 */
+  requiredConsecutiveDays: number;
+  /** 今天是否已形成嚴格多排。 */
+  alreadyAligned: boolean;
+  /** 第一次形成多排的交易日；今天已成立為 0，情境窗內未成立為 null。 */
+  firstAlignedDay: number | null;
+  /** 第一次形成多排時的各均線值。 */
+  firstAlignedValues: number[] | null;
+  /** 第一次多排從成立日起連續維持的日數（只計算到情境窗上限）。 */
+  firstRunLength: number;
+  /** 第一次多排失效日；情境窗內未失效為 null。 */
+  firstBreakDay: number | null;
+  /** 首次達到 requiredConsecutiveDays 連續多排的起始日。 */
+  firstDurableDay: number | null;
+  /** 穩定多排起始日的各均線值。 */
+  firstDurableValues: number[] | null;
+}
+
 /** 第 step 個未來交易日的模擬均線；未來收盤一律以今收補入。 */
 function simulatedMa(
   closes: ReadonlyArray<number>,
@@ -234,6 +257,32 @@ function simulatedMa(
   for (let k = 0; k < period; k++) {
     const idx = asOf - k + step;
     sum += idx <= asOf ? closes[idx] : todayClose;
+  }
+  return sum / period;
+}
+
+/** 第 step 個未來交易日的模擬均線；可傳入逐日情境收盤，未傳則依固定日報酬推估。 */
+function simulatedMaByScenario(
+  closes: ReadonlyArray<number>,
+  period: number,
+  asOf: number,
+  step: number,
+  dailyReturn: number,
+  futureCloses?: ReadonlyArray<number>,
+): number {
+  const todayClose = closes[asOf];
+  let sum = 0;
+  for (let k = 0; k < period; k++) {
+    const idx = asOf - k + step;
+    if (idx <= asOf) {
+      sum += closes[idx];
+      continue;
+    }
+    const futureStep = idx - asOf;
+    const provided = futureCloses?.[futureStep - 1];
+    sum += Number.isFinite(provided)
+      ? provided as number
+      : todayClose * ((1 + dailyReturn) ** futureStep);
   }
   return sum / period;
 }
@@ -264,6 +313,97 @@ export function daysUntilBullishAlignment(
     if (isAligned(values)) return { days: step, alreadyAligned: false, values };
   }
   return none;
+}
+
+/**
+ * 推估「四線多排」第一次出現與是否能穩定維持。
+ *
+ * 這和「四線同步助漲」是兩個不同概念：
+ * - 多排看均線位置：MA5 > MA10 > MA20 > MA60。
+ * - 全助漲看均線方向：當日收盤同時高於四條線各自的扣抵價。
+ *
+ * `futureCloses` 可覆蓋固定日報酬情境，供顯示層納入已知除息等機械調整。
+ */
+export function forecastBullishAlignmentDurability(
+  closes: ReadonlyArray<number>,
+  periods: ReadonlyArray<number> = [5, 10, 20, 60],
+  asOf: number = closes.length - 1,
+  options: {
+    maxLookahead?: number;
+    dailyReturn?: number;
+    requiredConsecutiveDays?: number;
+    futureCloses?: ReadonlyArray<number>;
+  } = {},
+): BullishAlignmentDurabilityForecast {
+  const dailyReturn = options.dailyReturn ?? 0;
+  const requiredConsecutiveDays = Math.max(1, Math.floor(options.requiredConsecutiveDays ?? 3));
+  const cleanPeriods = [...periods];
+  const empty: BullishAlignmentDurabilityForecast = {
+    periods: cleanPeriods,
+    dailyReturn,
+    requiredConsecutiveDays,
+    alreadyAligned: false,
+    firstAlignedDay: null,
+    firstAlignedValues: null,
+    firstRunLength: 0,
+    firstBreakDay: null,
+    firstDurableDay: null,
+    firstDurableValues: null,
+  };
+  if (
+    cleanPeriods.length < 2 ||
+    cleanPeriods.some((period, i) => !Number.isInteger(period) || period <= 1 || (i > 0 && period <= cleanPeriods[i - 1])) ||
+    asOf < cleanPeriods[cleanPeriods.length - 1] - 1 || asOf >= closes.length ||
+    !Number.isFinite(closes[asOf]) || closes[asOf] <= 0 ||
+    !Number.isFinite(dailyReturn) || dailyReturn <= -1
+  ) return empty;
+
+  const cap = Math.max(0, Math.floor(options.maxLookahead ?? 20));
+  const valuesAt = (step: number) => cleanPeriods.map(period =>
+    simulatedMaByScenario(closes, period, asOf, step, dailyReturn, options.futureCloses));
+  const alignedAt = (values: ReadonlyArray<number>) =>
+    values.every((value, i) => i === 0 || values[i - 1] > value + 1e-9);
+
+  const valuesByDay = Array.from({ length: cap + 1 }, (_, step) => valuesAt(step));
+  const alignedByDay = valuesByDay.map(alignedAt);
+  const firstAlignedDay = alignedByDay.findIndex(Boolean);
+  if (firstAlignedDay < 0) return empty;
+
+  let firstRunLength = 0;
+  while (firstAlignedDay + firstRunLength <= cap && alignedByDay[firstAlignedDay + firstRunLength]) {
+    firstRunLength++;
+  }
+  const firstBreakDay = firstAlignedDay + firstRunLength <= cap
+    ? firstAlignedDay + firstRunLength
+    : null;
+
+  let firstDurableDay: number | null = null;
+  for (let start = firstAlignedDay; start + requiredConsecutiveDays - 1 <= cap; start++) {
+    let durable = true;
+    for (let offset = 0; offset < requiredConsecutiveDays; offset++) {
+      if (!alignedByDay[start + offset]) {
+        durable = false;
+        break;
+      }
+    }
+    if (durable) {
+      firstDurableDay = start;
+      break;
+    }
+  }
+
+  return {
+    periods: cleanPeriods,
+    dailyReturn,
+    requiredConsecutiveDays,
+    alreadyAligned: alignedByDay[0],
+    firstAlignedDay,
+    firstAlignedValues: valuesByDay[firstAlignedDay],
+    firstRunLength,
+    firstBreakDay,
+    firstDurableDay,
+    firstDurableValues: firstDurableDay == null ? null : valuesByDay[firstDurableDay],
+  };
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   daysUntilMaRises,
   daysUntilGoldenCross,
   formatMaTurnLine,
+  forecastBullishAlignmentDurability,
   forecastAllMaRising,
   multiMaDeductionStates,
 } from '@/lib/analysis/maDeduction';
@@ -355,5 +356,51 @@ describe('daysUntilBullishAlignment — MA5/10/20 三線多排', () => {
     expect(daysUntilBullishAlignment(falling, [5, 10, 20]).days).toBeNull();
     expect(daysUntilBullishAlignment([1, 2, 3], [5, 10, 20]).days).toBeNull();
     expect(daysUntilBullishAlignment(Array.from({ length: 30 }, () => 10), [10, 5, 20]).days).toBeNull();
+  });
+});
+
+describe('forecastBullishAlignmentDurability — 四線多排首次與穩定性', () => {
+  const jingHaoRecentCloses = [
+    196.5, 202, 222, 220, 216.5, 238, 251, 252, 236, 222.5,
+    222, 237.5, 229, 231.5, 241, 242.5, 246.5, 250, 267.5, 259.5,
+    245, 222.5, 207, 214.5, 202, 204.5, 217, 222.5, 224.5, 225,
+    237.5, 254, 245, 246.5, 240, 227, 223.5, 226, 213, 218,
+    211.5, 219, 219, 215.5, 237, 228, 217.5, 239, 220, 198,
+    188.5, 199.5, 217.5, 212.5, 206, 212, 191, 172, 164, 180,
+    198, 217.5, 239, 258, 256.5, 275.5, 267.5, 274, 277.5, 273.5,
+    273, 248, 245.5, 250.5, 256.5,
+  ];
+
+  it('晶豪科 2026-08-21：今收凍結時第5日僅短暫多排，20日內無穩定3日', () => {
+    const result = forecastBullishAlignmentDurability(jingHaoRecentCloses, [5, 10, 20, 60]);
+
+    expect(result.firstAlignedDay).toBe(5);
+    expect(result.firstRunLength).toBe(1);
+    expect(result.firstBreakDay).toBe(6);
+    expect(result.firstDurableDay).toBeNull();
+    expect(result.firstAlignedValues).toEqual([
+      256.5, 255.6, 254.65, 229.25833333333333,
+    ]);
+  });
+
+  it('晶豪科日漲1%情境：第4日先多排，第8日起可連續至少3日', () => {
+    const result = forecastBullishAlignmentDurability(
+      jingHaoRecentCloses, [5, 10, 20, 60], jingHaoRecentCloses.length - 1,
+      { dailyReturn: 0.01, maxLookahead: 20, requiredConsecutiveDays: 3 },
+    );
+
+    expect(result.firstAlignedDay).toBe(4);
+    expect(result.firstDurableDay).toBe(8);
+  });
+
+  it('可用逐日收盤覆蓋固定報酬情境，且不接受未排序週期', () => {
+    const rising = Array.from({ length: 70 }, (_, i) => 10 + i);
+    const overridden = forecastBullishAlignmentDurability(
+      rising, [5, 10, 20, 60], rising.length - 1,
+      { maxLookahead: 5, dailyReturn: -0.5, futureCloses: [100, 101, 102, 103, 104] },
+    );
+    expect(overridden.alreadyAligned).toBe(true);
+    expect(overridden.firstDurableDay).toBe(0);
+    expect(forecastBullishAlignmentDurability(rising, [10, 5, 20, 60]).firstAlignedDay).toBeNull();
   });
 });

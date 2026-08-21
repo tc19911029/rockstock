@@ -49,6 +49,7 @@ import { detectLetterQ } from '@/lib/analysis/v12LetterQ';
 import { STOP_LOSS_PRICE_MULT, PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/bookThresholds';
 import {
   deductPrice,
+  forecastBullishAlignmentDurability,
   forecastAllMaRising,
   daysUntilBullishAlignment,
   daysUntilGoldenCross,
@@ -819,17 +820,35 @@ function MaDeductionForecast({
       }))
       .filter((l): l is NonNullable<typeof l> => l != null);
 
-    // 使用者指定的兩個重點：季線何時開始向上、MA5/10/20 何時三線多排。
+    // 使用者指定重點：季線何時開始向上、短中線三線多排、四線多排是否能穩定維持。
     // 完整扣抵窗仍只是假設「未來收盤維持今收」的情境，不是行情預測。
     const ma60Rise = daysUntilMaRises(closes, 60, asOf, 60);
     const tripleAlignment = daysUntilBullishAlignment(closes, [5, 10, 20], asOf, 20);
     const allRise = forecastAllMaRising(closes, [5, 10, 20, 60], asOf, 10);
     const forecastDates = new Map<number, string>();
-    for (let day = 1; day <= 10; day++) {
+    for (let day = 1; day <= 20; day++) {
       const knownReplayDate = candles[asOf + day]?.date?.slice(0, 10);
       const estimatedDate = knownReplayDate ?? tradingDateAfter(dates[asOf], day, market);
       if (estimatedDate) forecastDates.set(day, estimatedDate);
     }
+    const futureDividendEvents = dividendEvents.filter(event => event.exDate > asOfDate);
+    const scenarioFutureCloses = (dailyReturn: number) => Array.from({ length: 20 }, (_, offset) => {
+      const day = offset + 1;
+      const date = forecastDates.get(day);
+      const dividend = date ? cumulativeCashDividend(futureDividendEvents, date) : 0;
+      return Math.max(0.01, today * ((1 + dailyReturn) ** day) - dividend);
+    });
+    const fourLineAlignment = forecastBullishAlignmentDurability(
+      closes, [5, 10, 20, 60], asOf,
+      { maxLookahead: 20, requiredConsecutiveDays: 3, futureCloses: scenarioFutureCloses(0) },
+    );
+    const fourLineScenarios = [0.0025, 0.005, 0.01].map(dailyReturn => ({
+      dailyReturn,
+      forecast: forecastBullishAlignmentDurability(
+        closes, [5, 10, 20, 60], asOf,
+        { maxLookahead: 20, dailyReturn, requiredConsecutiveDays: 3, futureCloses: scenarioFutureCloses(dailyReturn) },
+      ),
+    }));
 
     const nextUp = states.filter(state => state.nextDirection === 'up').length;
     const nextDown = states.filter(state => state.nextDirection === 'down').length;
@@ -857,16 +876,22 @@ function MaDeductionForecast({
     });
     const supports = maLevels.filter(level => level.value <= today).sort((a, b) => b.value - a.value);
     const pressures = maLevels.filter(level => level.value > today).sort((a, b) => a.value - b.value);
+    const averageSupport = supports.length > 0
+      ? supports.reduce((sum, level) => sum + level.value, 0) / supports.length
+      : null;
+    const averagePressure = pressures.length > 0
+      ? pressures.reduce((sum, level) => sum + level.value, 0) / pressures.length
+      : null;
 
     // 黃金交叉只估近窗 5 根（凍結價假設往後不可靠）
     const gc5x20 = daysUntilGoldenCross(closes, 5, 20, asOf, 5);
 
     if (rows.length === 0) return null;
     return {
-      today, rows, turnLines, ma60Rise, tripleAlignment, allRise, gc5x20,
-      nextUp, nextDown, deductionSummary, supports, pressures, forecastDates,
+      today, rows, turnLines, ma60Rise, tripleAlignment, fourLineAlignment, fourLineScenarios, allRise, gc5x20,
+      nextUp, nextDown, deductionSummary, supports, pressures, averageSupport, averagePressure, forecastDates,
     };
-  }, [candles, index, market]);
+  }, [asOfDate, candles, dividendEvents, index, market]);
 
   if (!view) return null;
 
@@ -947,6 +972,15 @@ function MaDeductionForecast({
               )}
             </p>
           )}
+          {(view.averageSupport != null || view.averagePressure != null) && (
+            <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+              均線群平均：
+              {view.averageSupport != null && <span> 支撐 {view.averageSupport.toFixed(2)}</span>}
+              {view.averageSupport != null && view.averagePressure != null && <span className="mx-1.5">｜</span>}
+              {view.averagePressure != null && <span>壓力 {view.averagePressure.toFixed(2)}</span>}
+              <span className="ml-1.5 text-muted-foreground/45">（5／10／20／60 日線依今收上下分組等權平均）</span>
+            </p>
+          )}
         </div>
 
         {view.rows.map(r => {
@@ -989,7 +1023,7 @@ function MaDeductionForecast({
           </p>
         ))}
 
-        {/* 使用者指定重點：MA60 翻揚與 MA5/10/20 三線多排的完整扣抵窗推估 */}
+        {/* 使用者指定重點：助漲門檻、MA60 翻揚，以及三線／四線多排的完整情境推估 */}
         <div className="mt-1.5 space-y-0.5 border-t border-border/25 pt-1.5">
           {view.allRise.nextDay && (
             <p className="text-[11px] leading-relaxed text-muted-foreground/70">
@@ -1053,6 +1087,57 @@ function MaDeductionForecast({
               <span className="ml-1.5 text-muted-foreground/55">依今收情境，60 個交易日內未見向上</span>
             )}
           </p>
+
+          <div className="rounded-md border border-border/30 bg-muted/10 px-2 py-1.5 space-y-0.5">
+            <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+              <span className="text-foreground/75">四線多排（5&gt;10&gt;20&gt;60）</span>
+              {view.fourLineAlignment.alreadyAligned ? (
+                <span className="ml-1.5 text-rose-300/90">目前已成立</span>
+              ) : view.fourLineAlignment.firstAlignedDay != null ? (
+                <span className="ml-1.5 text-amber-300/90">
+                  依今收基準，約 {shortDate(view.forecastDates.get(view.fourLineAlignment.firstAlignedDay) ?? null)
+                    ?? `${view.fourLineAlignment.firstAlignedDay} 個交易日後`} 首次出現
+                </span>
+              ) : (
+                <span className="ml-1.5 text-muted-foreground/55">依今收基準，20 個交易日內未形成</span>
+              )}
+            </p>
+            {view.fourLineAlignment.firstAlignedValues && (
+              <p className="text-[10px] leading-relaxed text-muted-foreground/55">
+                首次排列值：{view.fourLineAlignment.periods.map((period, i) =>
+                  `MA${period} ${view.fourLineAlignment.firstAlignedValues?.[i].toFixed(2)}`).join(' ＞ ')}
+              </p>
+            )}
+            {view.fourLineAlignment.firstAlignedDay != null && view.fourLineAlignment.firstRunLength < 3 && (
+              <p className="text-[10px] leading-relaxed text-amber-300/80">
+                僅連續 {view.fourLineAlignment.firstRunLength} 日，屬短暫多排
+                {view.fourLineAlignment.firstBreakDay != null
+                  ? `；${shortDate(view.forecastDates.get(view.fourLineAlignment.firstBreakDay) ?? null) ?? `${view.fourLineAlignment.firstBreakDay} 日後`}失效`
+                  : ''}。
+              </p>
+            )}
+            {view.fourLineAlignment.firstDurableDay != null ? (
+              <p className="text-[10px] leading-relaxed text-rose-300/80">
+                依今收基準，約 {shortDate(view.forecastDates.get(view.fourLineAlignment.firstDurableDay) ?? null)
+                  ?? `${view.fourLineAlignment.firstDurableDay} 個交易日後`} 起可連續至少 3 日多排。
+              </p>
+            ) : (
+              <p className="text-[10px] leading-relaxed text-muted-foreground/60">
+                依今收基準，20 個交易日內未形成連續 3 日的穩定多排。
+              </p>
+            )}
+            <p className="text-[10px] leading-relaxed text-sky-300/75">
+              穩定 3 日情境：{view.fourLineScenarios.map(({ dailyReturn, forecast }) => {
+                const date = forecast.firstDurableDay == null
+                  ? null
+                  : shortDate(view.forecastDates.get(forecast.firstDurableDay) ?? null);
+                return `日漲 ${(dailyReturn * 100).toFixed(2)}% ${date ?? (forecast.firstDurableDay == null ? '20日內無' : `${forecast.firstDurableDay}日後`)}`;
+              }).join(' · ')}
+            </p>
+            <p className="text-[10px] leading-relaxed text-muted-foreground/45">
+              多排看均線位置；四線全助漲看扣抵方向，兩者不同。情境已納入已知除息的機械調整。
+            </p>
+          </div>
 
           <p className="text-[11px] leading-relaxed text-muted-foreground/70">
             <span className="text-foreground/70">MA5/10/20</span>
