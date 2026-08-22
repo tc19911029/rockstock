@@ -12,6 +12,7 @@ import { AlertTriangle, Calculator, CheckCircle2, ExternalLink, RefreshCw, Zap }
 import type { FundamentalAnswer } from '@/lib/agents/types';
 import { mapCnFinancialsToSidebar } from '@/lib/valuation/cnSidebarFallback';
 import { detectValuationFreshness } from '@/lib/valuation/freshness';
+import { buildValuationPollingUrls } from '@/lib/valuation/polling';
 import { FundamentalTrendPanel } from '@/components/fundamentals/FundamentalTrendPanel';
 import type { FundamentalTrendHistory } from '@/lib/fundamentals/trends';
 
@@ -672,9 +673,10 @@ function ValuationButton({ symbol, currentValuation, freshness, onValuationReady
         return;
       }
       try {
+        const pollUrls = buildValuationPollingUrls(symbol, jobDate, Date.now());
         const [valuationRes, statusRes] = await Promise.all([
-          fetch(`/api/valuation/${encodeURIComponent(symbol)}?date=${jobDate}&_=${Date.now()}`, { cache: 'no-store' }),
-          fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}?date=${jobDate}&_=${Date.now()}`, { cache: 'no-store' }),
+          fetch(pollUrls.valuationUrl, { cache: 'no-store' }),
+          fetch(pollUrls.statusUrl, { cache: 'no-store' }),
         ]);
         const [j, statusJson] = await Promise.all([valuationRes.json(), statusRes.json()]);
         const isNewResult = j.ok && j.valuation && j.date === jobDate && (!previousUpdatedAt || j.updatedAt !== previousUpdatedAt);

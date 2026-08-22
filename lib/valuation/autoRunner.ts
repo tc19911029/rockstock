@@ -14,7 +14,8 @@ const DEFAULT_CODEX_BINS = [
   '/opt/homebrew/bin/codex',
   '/usr/local/bin/codex',
 ] as const;
-const RUNNING_TTL_MS = 20 * 60 * 1000;
+const RUNNING_TTL_MS = 15 * 60 * 1000;
+const STALLED_JOB_MS = 5 * 60 * 1000;
 
 export interface ValuationJobResult {
   ok: boolean;
@@ -245,6 +246,60 @@ async function writeJobStatus(statusPath: string, status: JobStatus): Promise<vo
   await fs.writeFile(statusPath, JSON.stringify(status, null, 2), 'utf-8');
 }
 
+export function valuationJobStopReason(options: {
+  startedAt: string;
+  lastActivityAt: number;
+  now?: number;
+}): 'stalled' | 'timeout' | null {
+  const now = options.now ?? Date.now();
+  const startedAt = Date.parse(options.startedAt);
+  if (Number.isFinite(startedAt) && now - startedAt >= RUNNING_TTL_MS) return 'timeout';
+  if (Number.isFinite(options.lastActivityAt) && now - options.lastActivityAt >= STALLED_JOB_MS) return 'stalled';
+  return null;
+}
+
+async function getLastJobActivity(status: JobStatus): Promise<number> {
+  const startedAt = Date.parse(status.startedAt);
+  const stats = await Promise.all([
+    fs.stat(status.logPath).catch(() => null),
+    status.stagedOutputPath ? fs.stat(status.stagedOutputPath).catch(() => null) : null,
+  ]);
+  return Math.max(Number.isFinite(startedAt) ? startedAt : 0, ...stats.map(stat => stat?.mtimeMs ?? 0));
+}
+
+function sameDataSnapshot(left: MutableRecord | undefined, right: MutableRecord | undefined): boolean {
+  if (!left || !right) return left === right;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && JSON.stringify(left[key]) === JSON.stringify(right[key]));
+}
+
+async function stagedOutputMatchesJob(stagedOutputPath: string, expectedDataAsOf?: MutableRecord): Promise<boolean> {
+  if (!expectedDataAsOf) return true;
+  const questionPath = path.join(path.dirname(stagedOutputPath), 'question.json');
+  const question = JSON.parse(await fs.readFile(questionPath, 'utf-8')) as MutableRecord;
+  return sameDataSnapshot(
+    isMutableRecord(question.expectedDataAsOf) ? question.expectedDataAsOf : undefined,
+    expectedDataAsOf,
+  );
+}
+
+function stopJobProcess(pid: number | undefined): void {
+  if (!pid || !isProcessAlive(pid)) return;
+  try { process.kill(pid, 'SIGTERM'); } catch { /* process already exited */ }
+}
+
+async function hasValidPublishedValuation(finalOutputPath: string, expectedDataAsOf?: MutableRecord): Promise<boolean> {
+  try {
+    const valuation = JSON.parse(await fs.readFile(finalOutputPath, 'utf-8')) as MutableRecord;
+    const actualDataAsOf = isMutableRecord(valuation.dataAsOf) ? valuation.dataAsOf : undefined;
+    return validateValuationOutput(valuation).valid && sameDataSnapshot(actualDataAsOf, expectedDataAsOf);
+  } catch {
+    return false;
+  }
+}
+
 async function publishStagedValuation(options: {
   stagedOutputPath: string;
   finalOutputPath: string;
@@ -300,6 +355,10 @@ async function finalizeValuationJob(options: {
 }): Promise<void> {
   const { statusPath, runningStatus, exitCode, stagedOutputPath, finalOutputPath } = options;
   try {
+    const latest = await readJobStatus(statusPath);
+    // A poller may have recovered an earlier valid result or replaced a stalled process.
+    // Never let the superseded child overwrite that authoritative status/output.
+    if (latest?.pid !== runningStatus.pid || latest.status !== 'running') return;
     if (exitCode !== 0) throw new Error(`內建分析引擎結束碼 ${exitCode ?? 'signal'}`);
 
     await publishStagedValuation({
@@ -328,6 +387,40 @@ async function finalizeValuationJob(options: {
       error: detail,
     });
   }
+}
+
+async function recoverValuationJob(options: {
+  jobBase: string;
+  statusPath: string;
+  status: JobStatus;
+  finalOutputPath: string;
+}): Promise<string | null> {
+  const candidates = await findRecoverableOutput(options.jobBase, options.status.stagedOutputPath);
+  for (const stagedOutputPath of candidates) {
+    try {
+      if (!await stagedOutputMatchesJob(stagedOutputPath, options.status.expectedDataAsOf)) continue;
+      await publishStagedValuation({
+        stagedOutputPath,
+        finalOutputPath: options.finalOutputPath,
+        symbol: options.status.symbol,
+        date: options.status.date,
+        pid: options.status.pid,
+        expectedDataAsOf: options.status.expectedDataAsOf,
+      });
+      await writeJobStatus(options.statusPath, {
+        ...options.status,
+        status: 'completed',
+        finishedAt: new Date().toISOString(),
+        outputPath: options.finalOutputPath,
+        stagedOutputPath,
+        error: undefined,
+      });
+      return stagedOutputPath;
+    } catch {
+      // Candidate is incomplete, belongs to different inputs, or fails the current contract.
+    }
+  }
+  return null;
 }
 
 export async function startValuationAnalysis(options: {
@@ -359,14 +452,35 @@ export async function startValuationAnalysis(options: {
 
   const previous = await readJobStatus(statusPath);
   const previousAge = previous ? Date.now() - Date.parse(previous.startedAt) : Number.POSITIVE_INFINITY;
-  if (previous?.status === 'running' && previousAge < RUNNING_TTL_MS && isProcessAlive(previous.pid)) {
-    return {
-      ok: true,
-      status: 'already_running',
-      detail: '內建深度估值已在背景執行',
-      pid: previous.pid,
-      logPath: previous.logPath,
-    };
+  if (previous?.status === 'running' && isProcessAlive(previous.pid)) {
+    const alreadyPublished = await hasValidPublishedValuation(finalOutputPath, previous.expectedDataAsOf);
+    const recovered = alreadyPublished
+      ? null
+      : await recoverValuationJob({ jobBase, statusPath, status: previous, finalOutputPath });
+    if (recovered) {
+      stopJobProcess(previous.pid);
+      return { ok: true, status: 'completed', detail: '已自動恢復並發布完成的背景估值', pid: previous.pid, logPath };
+    }
+    const stopReason = valuationJobStopReason({
+      startedAt: previous.startedAt,
+      lastActivityAt: await getLastJobActivity(previous),
+    });
+    if (!stopReason && previousAge < RUNNING_TTL_MS) {
+      return {
+        ok: true,
+        status: 'already_running',
+        detail: '內建深度估值已在背景執行',
+        pid: previous.pid,
+        logPath: previous.logPath,
+      };
+    }
+    stopJobProcess(previous.pid);
+    await writeJobStatus(statusPath, {
+      ...previous,
+      status: 'failed',
+      finishedAt: new Date().toISOString(),
+      error: stopReason === 'stalled' ? '背景分析超過 5 分鐘沒有進度，已自動停止' : '背景分析超過 15 分鐘，已自動停止',
+    });
   }
 
   if (!options.force && previous?.status === 'completed') {
@@ -388,28 +502,15 @@ export async function startValuationAnalysis(options: {
   // 舊工作已有 staged JSON、但曾被舊版格式閘門拒絕或程序中斷時，先重新嚴格驗證；
   // 只有通過目前契約才安全恢復，避免把已完成的昂貴查核整份重跑。
   if (previous?.status === 'failed' || (previous?.status === 'running' && !isProcessAlive(previous.pid))) {
-    const recoverable = await findRecoverableOutput(jobBase, previous.stagedOutputPath);
-    for (const stagedOutputPath of recoverable) {
-      try {
-        await publishStagedValuation({ stagedOutputPath, finalOutputPath, symbol, date, pid: previous.pid });
-        await writeJobStatus(statusPath, {
-          ...previous,
-          status: 'completed',
-          finishedAt: new Date().toISOString(),
-          outputPath: finalOutputPath,
-          stagedOutputPath,
-          error: undefined,
-        });
-        return {
-          ok: true,
-          status: 'completed',
-          detail: '已驗證並發布完成的背景估值',
-          pid: previous.pid,
-          logPath,
-        };
-      } catch {
-        // 仍不符合目前契約就正常重跑，不繞過驗證。
-      }
+    const recovered = await recoverValuationJob({ jobBase, statusPath, status: previous, finalOutputPath });
+    if (recovered) {
+      return {
+        ok: true,
+        status: 'completed',
+        detail: '已驗證並發布完成的背景估值',
+        pid: previous.pid,
+        logPath,
+      };
     }
   }
 
@@ -511,16 +612,49 @@ export async function getValuationAnalysisStatus(options: { symbol: string; date
 } | null> {
   if (!/^\d{4,6}$/.test(options.symbol) || !/^\d{4}-\d{2}-\d{2}$/.test(options.date)) return null;
   const statusPath = path.join(JOB_DIR, `${options.symbol}-${options.date}.status.json`);
-  const status = await readJobStatus(statusPath);
+  let status = await readJobStatus(statusPath);
   if (!status) return null;
-  if (status.status === 'running' && !isProcessAlive(status.pid)) {
-    return {
-      status: 'failed',
-      startedAt: status.startedAt,
-      finishedAt: status.finishedAt,
-      error: '背景分析程序已停止，請重新執行',
-      mode: status.mode,
-    };
+  if (status.status === 'running') {
+    const repoRoot = process.cwd();
+    const finalOutputPath = path.join(repoRoot, 'data', 'valuation', options.date, `${options.symbol}.json`);
+    const alreadyPublished = await hasValidPublishedValuation(finalOutputPath, status.expectedDataAsOf);
+    const recovered = alreadyPublished
+      ? null
+      : await recoverValuationJob({
+          jobBase: `${options.symbol}-${options.date}`,
+          statusPath,
+          status,
+          finalOutputPath,
+        });
+    if (recovered) {
+      stopJobProcess(status.pid);
+      status = (await readJobStatus(statusPath))!;
+    } else if (!isProcessAlive(status.pid)) {
+      status = {
+        ...status,
+        status: 'failed',
+        finishedAt: new Date().toISOString(),
+        error: '背景分析程序已停止，且沒有可恢復的完整結果',
+      };
+      await writeJobStatus(statusPath, status);
+    } else {
+      const stopReason = valuationJobStopReason({
+        startedAt: status.startedAt,
+        lastActivityAt: await getLastJobActivity(status),
+      });
+      if (stopReason) {
+        stopJobProcess(status.pid);
+        status = {
+          ...status,
+          status: 'failed',
+          finishedAt: new Date().toISOString(),
+          error: stopReason === 'stalled'
+            ? '背景分析超過 5 分鐘沒有進度，已自動停止；請重新執行'
+            : '背景分析超過 15 分鐘，已自動停止；請重新執行',
+        };
+        await writeJobStatus(statusPath, status);
+      }
+    }
   }
   return {
     status: status.status,

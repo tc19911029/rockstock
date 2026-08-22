@@ -1,7 +1,12 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildValuationCodexArgs, normalizeValuationOutput, resolveCodexBinary } from '@/lib/valuation/autoRunner';
+import {
+  buildValuationCodexArgs,
+  normalizeValuationOutput,
+  resolveCodexBinary,
+  valuationJobStopReason,
+} from '@/lib/valuation/autoRunner';
 import { validateValuationOutput } from '@/lib/valuation/outputValidation';
 
 describe('valuation auto runner', () => {
@@ -187,5 +192,24 @@ describe('valuation auto runner', () => {
     }, new Date('2026-08-09T01:00:00.000Z'), expectedDataAsOf);
 
     expect(value).toMatchObject({ dataAsOf: expectedDataAsOf });
+  });
+
+  it('五分鐘無輸出會判定卡死，十五分鐘一定硬逾時', () => {
+    const now = Date.parse('2026-08-23T00:00:00.000Z');
+    expect(valuationJobStopReason({
+      startedAt: '2026-08-22T23:55:01.000Z',
+      lastActivityAt: now - 4 * 60_000 - 59_000,
+      now,
+    })).toBeNull();
+    expect(valuationJobStopReason({
+      startedAt: '2026-08-22T23:54:00.000Z',
+      lastActivityAt: now - 5 * 60_000,
+      now,
+    })).toBe('stalled');
+    expect(valuationJobStopReason({
+      startedAt: '2026-08-22T23:45:00.000Z',
+      lastActivityAt: now,
+      now,
+    })).toBe('timeout');
   });
 });
