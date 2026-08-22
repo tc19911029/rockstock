@@ -148,7 +148,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
     for (let i = 0; i < watchSyms.length; i += 6) groups.push(watchSyms.slice(i, i + 6)); // 自選股：小批
 
     // 一批報價回來就「立刻」併入畫面：持倉那批最快、先亮，不必等慢批（自選股冷標的）跑完
-    const applyQuotes = (quotes: Array<{ symbol: string; price: number; changePercent: number; name?: string }>) => {
+    const applyQuotes = (quotes: Array<{ symbol: string; canonicalSymbol?: string; price: number; changePercent: number; name?: string }>) => {
       if (quotes.length === 0) return;
       failureCountRef.current = 0; // 成功 reset 失敗計數
       setPrices(prev => {
@@ -189,7 +189,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         );
         if (!res.ok) return 0;
         const json = await res.json();
-        const quotes = (json.quotes ?? []) as Array<{ symbol: string; price: number; changePercent: number; name?: string }>;
+        const quotes = (json.quotes ?? []) as Array<{ symbol: string; canonicalSymbol?: string; price: number; changePercent: number; name?: string }>;
         applyQuotes(quotes); // 一回來就上畫面
         return quotes.length;
       } catch {
@@ -678,8 +678,12 @@ function PortfolioAddBar() {
           const qRes = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(candidate)}`);
           if (!qRes.ok) continue;
           const qJson = await qRes.json();
-          const q = (qJson.quotes ?? []).find((x: { symbol: string; price: number; name?: string }) => x.price > 0);
-          if (q) { resolvedSymbol = q.symbol ?? candidate; resolvedName = q.name ?? ''; break; }
+          const q = (qJson.quotes ?? []).find((x: { symbol: string; canonicalSymbol?: string; price: number; name?: string }) => x.price > 0);
+          if (q) {
+            resolvedSymbol = q.canonicalSymbol ?? q.symbol ?? candidate;
+            resolvedName = q.name ?? '';
+            break;
+          }
         } catch { continue; }
       }
       if (!resolvedSymbol) throw new Error('找不到股票，請確認代號是否正確');

@@ -7,6 +7,8 @@ import { getQuoteSnapshotDate, isMarketPollingWindow } from '@/lib/datasource/ma
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
 import { resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
+import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
+import { expectedTwSymbol } from '@/lib/datasource/twSymbolMarket';
 
 // mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
 const MIS_HEADERS: Record<string, string> = {
@@ -31,17 +33,59 @@ const noDataUntil = new Map<string, number>(); // resolved symbol → 略過到�
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface QuoteTick {
+  /** 原始請求代號，供既有持倉／自選股以相同 key 套用報價。 */
   symbol: string;
+  /** 股票主檔校正後的交易所代號；新增持倉時應優先採用。 */
+  canonicalSymbol?: string;
   price: number;
   changePercent: number;
   name?: string;
 }
 
-type ResolvedEntry = {
+export type ResolvedEntry = {
   original: string;
   resolved: string;
   market: 'TW' | 'CN' | 'FUND' | 'unknown';
 };
+
+/**
+ * 解析報價請求並以本地股票主檔校正台股上市／上櫃後綴。
+ *
+ * `original` 必須保留，否則持倉輪詢用 `3081.TW` 發問、API 回 `3081.TWO` 時，
+ * React 端會找不到原 key；校正值另放在 `resolved/canonicalSymbol` 給新增持倉使用。
+ */
+export async function resolveQuoteEntries(rawSymbols: string[]): Promise<ResolvedEntry[]> {
+  const entries: ResolvedEntry[] = rawSymbols.map(s => {
+    if (/\.(TW|TWO)$/i.test(s)) return { original: s, resolved: s.toUpperCase(), market: 'TW' };
+    if (/\.(SS|SZ)$/i.test(s)) return { original: s, resolved: s.toUpperCase(), market: 'CN' };
+    if (/\.OF$/i.test(s)) return { original: s, resolved: s.toUpperCase(), market: 'FUND' };
+    const digits = s.replace(/\D/g, '');
+    if (/^\d{6}$/.test(digits)) {
+      const suffix = digits[0] === '6' || digits[0] === '9' ? 'SS' : 'SZ';
+      return { original: s, resolved: `${digits}.${suffix}`, market: 'CN' };
+    }
+    if (/^\d{4,5}$/.test(digits)) {
+      return { original: s, resolved: `${digits}.TWO`, market: 'TW' };
+    }
+    return { original: s, resolved: s.toUpperCase(), market: 'unknown' };
+  });
+
+  return Promise.all(entries.map(async entry => {
+    if (entry.market !== 'TW') return entry;
+    const canonical = await expectedTwSymbol(entry.resolved);
+    return canonical ? { ...entry, resolved: canonical } : entry;
+  }));
+}
+
+async function resolveEntryName(entry: ResolvedEntry): Promise<string | undefined> {
+  const code = entry.resolved.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  if (entry.market === 'TW') return (await getTWChineseName(code)) ?? undefined;
+  if (entry.market === 'CN') {
+    const suffix = /\.SS$/i.test(entry.resolved) ? 'SS' : /\.SZ$/i.test(entry.resolved) ? 'SZ' : undefined;
+    return (await getCNChineseName(code, suffix)) ?? undefined;
+  }
+  return undefined;
+}
 
 /**
  * 只用通過新鮮度檢查的 L2 補 L1／即時來源缺口。
@@ -68,6 +112,7 @@ export function buildFreshSnapshotFallback(
     if (market === 'TW' && quote.isActualTrade === false) continue;
     out.push({
       symbol: entry.original,
+      canonicalSymbol: entry.resolved,
       price: quote.close,
       changePercent: quote.changePercent ?? 0,
       name: quote.name || undefined,
@@ -92,7 +137,13 @@ export async function fetchFinalL1Quotes(entries: ResolvedEntry[], market: 'TW' 
       const changePercent = previous > 0
         ? +((last.close - previous) / previous * 100).toFixed(2)
         : 0;
-      return { symbol: entry.original, price: last.close, changePercent };
+      return {
+        symbol: entry.original,
+        canonicalSymbol: candidate,
+        price: last.close,
+        changePercent,
+        name: await resolveEntryName({ ...entry, resolved: candidate }),
+      };
     }
     return null;
   }));
@@ -362,22 +413,8 @@ export async function GET(req: NextRequest) {
     return apiError('no valid symbols', 400);
   }
 
-  // 對沒有後綴的 symbol 依位數猜市場，並記住原始 key 以便回傳格式一致
-  type SymbolEntry = ResolvedEntry;
-  const entries: SymbolEntry[] = rawSymbols.map(s => {
-    if (/\.(TW|TWO)$/i.test(s)) return { original: s, resolved: s, market: 'TW' };
-    if (/\.(SS|SZ)$/i.test(s)) return { original: s, resolved: s, market: 'CN' };
-    if (/\.OF$/i.test(s)) return { original: s, resolved: s, market: 'FUND' }; // 場外基金 → 天天基金淨值
-    const digits = s.replace(/\D/g, '');
-    if (/^\d{6}$/.test(digits)) {
-      const suffix = digits[0] === '6' || digits[0] === '9' ? 'SS' : 'SZ';
-      return { original: s, resolved: `${digits}.${suffix}`, market: 'CN' };
-    }
-    if (/^\d{4,5}$/.test(digits)) {
-      return { original: s, resolved: `${digits}.TWO`, market: 'TW' };
-    }
-    return { original: s, resolved: s, market: 'unknown' };
-  });
+  // 記住原始 key 供持倉輪詢套價，同時以股票主檔校正上市／上櫃後綴。
+  const entries = await resolveQuoteEntries(rawSymbols);
 
   // 負快取：略過近期確認「無資料」的代號，避免每次 polling 重跑整條 fallback chain。
   // 有效/命中過的代號不在內，照常即時查；market='unknown' 本來就不查（已 fail-fast）。
@@ -394,13 +431,13 @@ export async function GET(req: NextRequest) {
     (twLive ? fetchTWSEQuotes(twEntries.map(e => e.resolved)) : fetchFinalL1Quotes(twEntries, 'TW')).then(qs =>
       qs.map(q => {
         const entry = twEntries.find(e => e.resolved.replace(/\.(TW|TWO)$/i, '') === q.symbol.replace(/\.(TW|TWO)$/i, ''));
-        return entry ? { ...q, symbol: entry.original } : q;
+        return entry ? { ...q, symbol: entry.original, canonicalSymbol: q.canonicalSymbol ?? entry.resolved } : q;
       })
     ),
     (cnLive ? fetchCNQuotes(cnEntries.map(e => e.resolved)) : fetchFinalL1Quotes(cnEntries, 'CN')).then(qs =>
       qs.map(q => {
         const entry = cnEntries.find(e => e.resolved.replace(/\.(SS|SZ)$/i, '') === q.symbol.replace(/\.(SS|SZ)$/i, ''));
-        return entry ? { ...q, symbol: entry.original } : q;
+        return entry ? { ...q, symbol: entry.original, canonicalSymbol: q.canonicalSymbol ?? entry.resolved } : q;
       })
     ),
     fetchFundQuotes(fundEntries.map(e => e.resolved)),
