@@ -358,7 +358,7 @@ async function finalizeValuationJob(options: {
     const latest = await readJobStatus(statusPath);
     // A poller may have recovered an earlier valid result or replaced a stalled process.
     // Never let the superseded child overwrite that authoritative status/output.
-    if (latest?.pid !== runningStatus.pid || latest.status !== 'running') return;
+    if (!latest || latest.pid !== runningStatus.pid || latest.status !== 'running') return;
     if (exitCode !== 0) throw new Error(`內建分析引擎結束碼 ${exitCode ?? 'signal'}`);
 
     await publishStagedValuation({
