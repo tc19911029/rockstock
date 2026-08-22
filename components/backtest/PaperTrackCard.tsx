@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from 'react';
 import { assessPaperTrackFreshness } from '@/lib/health/paperTrackFreshness';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Summary {
   updatedAt: string;
@@ -67,7 +68,7 @@ export function PaperTrackCard() {
           {s.trades.map(t => (
             <div key={t.id} className="flex items-center justify-between text-[11px] text-zinc-400">
               <span className="truncate">
-                {t.scanDate} {STRAT_LABEL[t.strategy] ?? t.strategy}｜{t.name}
+                {t.scanDate} {STRAT_LABEL[t.strategy] ?? t.strategy}｜{stockDisplayName(t.name, t.symbol)}
                 <span className="text-zinc-600 ml-1">{t.symbol.replace(/\.(TW|TWO|SS|SZ)$/, '')}</span>
               </span>
               <span className={

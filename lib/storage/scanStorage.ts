@@ -303,6 +303,11 @@ export async function saveScanSession(
   session: ScanSession,
   opts?: SaveScanOptions,
 ): Promise<void> {
+  const { stockDisplayName } = await import('@/lib/stocks/stockIdentity');
+  session.results = (session.results ?? []).map(result => ({
+    ...result,
+    name: stockDisplayName(result.name, result.symbol),
+  }));
   // ── 處置股/注意股蓋章（2026-06-12 B1）──
   // 所有掃描路徑（六條件/買法軌/R 軌/盤中）的 L4 寫入都經過這裡，蓋章只做一處。
   // 只標記不剔除（L4 保留完整紀錄）；硬排除在 applyPanelFilter.isDisposalVetoed。

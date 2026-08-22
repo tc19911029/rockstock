@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageShell, PageHeader, Panel } from '@/components/shared';
 import { bullBearClass } from '@/lib/format';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Hit {
   code: string; name: string; price: number;
@@ -40,8 +41,8 @@ function StockCard({ h }: { h: Hit }) {
     <Panel className="p-3 hover:ring-sky-500/40 transition-shadow">
       <div className="flex items-baseline justify-between gap-2">
         <Link href={`/?load=${h.code}.TW`} className="min-w-0 group">
-          <span className="font-mono text-sky-400 group-hover:underline">{h.code}</span>{' '}
-          <span className="font-medium group-hover:underline">{h.name}</span>
+          <span className="font-medium group-hover:underline">{stockDisplayName(h.name, h.code)}</span>{' '}
+          <span className="font-mono text-xs text-sky-400 group-hover:underline">{h.code}</span>
         </Link>
         <div className="text-right shrink-0">
           <div className="font-mono tabular-nums text-sm">{h.price}</div>

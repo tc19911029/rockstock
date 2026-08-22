@@ -5,6 +5,7 @@ import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
 import { getTWSEQuote, type TWSEQuote } from './TWSERealtime';
 import { getEastMoneyQuote, getUSStockQuote } from './EastMoneyRealtime';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 /** 從 symbol 提取台股純數字代碼，非台股回傳 null */
 function extractTWCode(symbol: string): string | null {
@@ -390,7 +391,7 @@ export async function getYahooTWRealtime(): Promise<Map<string, TWSEQuote>> {
           : undefined;
         out.set(code, {
           code,
-          name: q.longName || q.shortName || code,
+          name: q.longName || q.shortName || UNRESOLVED_STOCK_NAME,
           open: q.regularMarketOpen ?? 0,
           high: q.regularMarketDayHigh ?? 0,
           low: q.regularMarketDayLow ?? 0,
@@ -481,7 +482,7 @@ export async function getYahooTWRealtimeViaChart(): Promise<Map<string, TWSEQuot
         : todayTW;
       out.set(code, {
         code,
-        name: code, // Yahoo v8 meta 沒有 name，用代號當占位（L2 寫入時不依賴 name）
+        name: UNRESOLVED_STOCK_NAME, // Yahoo v8 meta 沒有名稱；禁止以代號冒充名稱
         open: meta.regularMarketOpen ?? 0,
         high: meta.regularMarketDayHigh ?? 0,
         low: meta.regularMarketDayLow ?? 0,

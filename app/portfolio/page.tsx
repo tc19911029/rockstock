@@ -6,6 +6,8 @@ import { usePortfolioStore, PortfolioHolding } from '@/store/portfolioStore';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
+import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { classifyMarket } from '@/lib/market/classify';
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatHoldingQty } from '@/lib/utils/shareUnits';
@@ -297,41 +299,13 @@ export default function PortfolioPage() {
         setShowForm(false);
         return;
       }
-      // Fast path: lightweight quotes API resolves symbol + name without 1-year candle fetch
-      // (avoids timeout when providers are down)
       const sym = form.symbol.trim();
-      const isBareDigits = /^\d+$/.test(sym);
-      const candidates = isBareDigits ? [sym] : [sym.toUpperCase()];
-      let resolvedSymbol = sym.toUpperCase();
-      let resolvedName = sym;
-      let resolvedPrice = 0;
-      let resolvedChangePct = 0;
-
-      for (const candidate of candidates) {
-        try {
-          const qRes = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(candidate)}`);
-          if (!qRes.ok) continue;
-          const qJson = await qRes.json();
-          const q = (qJson.quotes ?? []).find((x: { price: number }) => x.price > 0);
-          if (q) {
-            // Quote endpoint preserves original input as `symbol`, but we want the resolved (with suffix) form
-            // for storage consistency — re-derive it
-            const code = candidate.replace(/\D/g, '');
-            if (/^\d{6}$/.test(code)) {
-              resolvedSymbol = `${code}.${code[0] === '6' || code[0] === '9' ? 'SS' : 'SZ'}`;
-            } else if (/^\d{4,5}$/.test(code)) {
-              // Try .TW first, retry as .TWO is handled inside quotes route — assume .TW
-              resolvedSymbol = `${code}.TW`;
-            } else {
-              resolvedSymbol = q.symbol ?? candidate;
-            }
-            resolvedName = q.name || sym;
-            resolvedPrice = q.price;
-            resolvedChangePct = q.changePercent ?? 0;
-            break;
-          }
-        } catch { continue; }
-      }
+      // 單一入口保證 canonical symbol + 正式名稱；查無名稱時不允許把代號寫進 name。
+      const resolved = await fetchResolvedStockQuote(sym);
+      const resolvedSymbol = resolved.canonicalSymbol;
+      const resolvedName = resolved.name;
+      const resolvedPrice = resolved.price;
+      const resolvedChangePct = resolved.changePercent;
 
       let validatedEntryPattern = prefilledEntryPattern;
       if (prefilledLockWatch) {
@@ -653,8 +627,8 @@ export default function PortfolioPage() {
                 <div className="flex items-center gap-3 px-4 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-foreground">{h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}</span>
-                      <span className="text-xs text-muted-foreground truncate" title={p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}>{p?.name || h.name || h.symbol.replace(/\.(TW|TWO|SS|SZ|OF)$/i, '')}</span>
+                      <span className="font-bold text-foreground truncate" title={stockDisplayName(p?.name ?? h.name, h.symbol)}>{stockDisplayName(p?.name ?? h.name, h.symbol)}</span>
+                      <span className="text-xs font-mono text-muted-foreground shrink-0">{stockCodeOf(h.symbol)}</span>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
                       {formatHoldingQty(h.shares, h.symbol)} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>

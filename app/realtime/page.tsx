@@ -37,8 +37,9 @@ interface MinuteBarLike {
 
 interface PoolItem {
   symbol: string;
+  name?: string;
   market: 'TW' | 'CN';
-  source: 'holding' | 'watchlist' | 'scan';
+  source: 'holding' | 'manual' | 'watchlist' | 'scan' | 'lockroster';
   isHolding: boolean;
 }
 
@@ -144,14 +145,14 @@ export default function RealtimePage() {
             {grouped.holding.length > 0 && (
               <optgroup label="持股">
                 {grouped.holding.map(p => (
-                  <option key={p.symbol} value={p.symbol}>{p.symbol}</option>
+                  <option key={p.symbol} value={p.symbol}>{p.name ?? '名稱待補'} · {p.symbol}</option>
                 ))}
               </optgroup>
             )}
             {grouped.scan.length > 0 && (
               <optgroup label="當日候選">
                 {grouped.scan.map(p => (
-                  <option key={p.symbol} value={p.symbol}>{p.symbol}</option>
+                  <option key={p.symbol} value={p.symbol}>{p.name ?? '名稱待補'} · {p.symbol}</option>
                 ))}
               </optgroup>
             )}

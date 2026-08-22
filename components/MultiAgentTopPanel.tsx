@@ -21,6 +21,7 @@ import type { ScoreLight, StockGrade, SuitableFor } from '@/lib/agents/scoringTy
 import { SortControl, type SortControlOption } from '@/components/shared';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 type Verdict = 'pass' | 'watch' | 'fail';
 type FinalAction = 'buy' | 'watch' | 'skip';
@@ -193,7 +194,7 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
     }
     const stocks = data.runs
       .filter((r): r is RunListItem & { lastClose: number } => typeof r.lastClose === 'number')
-      .map(r => ({ symbol: r.symbol, name: r.name ?? r.symbol, scanPrice: r.lastClose }));
+      .map(r => ({ symbol: r.symbol, name: stockDisplayName(r.name, r.symbol), scanPrice: r.lastClose }));
     if (stocks.length === 0) {
       setForwardMap(new Map());
       return;

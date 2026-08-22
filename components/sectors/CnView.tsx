@@ -19,6 +19,7 @@ import { useIsChartCurrent } from '@/lib/chartListNav';
 import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
 import { StockLink, AddWatchBtn } from './StockLink';
 import { CnBoardBadges } from './CnBoardBadges';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 // ── 型別（對齊 /api/cn-sectors/* 回傳）─────────────────────────────────────────
 
@@ -374,7 +375,7 @@ function HotView({ hot }: { hot: CnHotFile }) {
                       <td className="py-1.5 pl-3 pr-1"><RankBadge rank={e.rank} /></td>
                       <td className="py-1.5 pr-3">
                         <StockLink code={toFullSymbol(e.symbol)} className="hover:text-sky-400 whitespace-nowrap inline-flex items-center gap-1.5">
-                          <span className="text-foreground/90">{e.name ?? e.symbol}</span>
+                          <span className="text-foreground/90">{stockDisplayName(e.name, e.symbol)}</span>
                           <span className="text-muted-foreground/50 text-xs">{e.symbol}</span>
                         </StockLink>
                       </td>
@@ -413,7 +414,7 @@ function HotView({ hot }: { hot: CnHotFile }) {
                     <tr key={e.symbol} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
                       <td className="py-1.5 pl-3 pr-3">
                         <StockLink code={toFullSymbol(e.symbol, e.board)} className="hover:text-sky-400 whitespace-nowrap inline-flex items-center gap-1.5">
-                          <span className="text-foreground/90">{e.name}</span>
+                          <span className="text-foreground/90">{stockDisplayName(e.name, toFullSymbol(e.symbol, e.board))}</span>
                           <span className="text-muted-foreground/50 text-xs">{e.symbol}</span>
                           {e.isOneWord && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">一字</span>}
                           {e.isST && <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500">ST</span>}
@@ -459,7 +460,7 @@ function HotView({ hot }: { hot: CnHotFile }) {
                       <tr key={e.symbol} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
                         <td className="py-1.5 pl-3 pr-3">
                           <StockLink code={toFullSymbol(e.symbol, e.board)} className="hover:text-sky-400 whitespace-nowrap inline-flex items-center gap-1.5">
-                            <span className="text-foreground/90">{e.name}</span>
+                            <span className="text-foreground/90">{stockDisplayName(e.name, toFullSymbol(e.symbol, e.board))}</span>
                             <span className="text-muted-foreground/50 text-xs">{e.symbol}</span>
                           </StockLink>
                         </td>

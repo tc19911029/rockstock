@@ -57,6 +57,8 @@ export interface AlertRecord {
   firedAt: number;
   rule: AlertRuleId;
   symbol: string;
+  /** 正式名稱另存頂層，讓 UI 不必理解各類 signal 的 meta 差異。 */
+  name?: string;
   market: 'TW' | 'CN';
   /** Bar 觸發的 ts */
   barTs: number;
@@ -159,10 +161,12 @@ export async function dispatch(
       }
     }
 
+    const signalName = isGuardSignal(sig) ? sig.meta.name : sig.name;
     records.push({
       firedAt: now,
       rule: sig.rule,
       symbol: sig.symbol,
+      name: signalName,
       market: sig.market,
       barTs: sig.ts,
       tfMin: sig.tfMin,

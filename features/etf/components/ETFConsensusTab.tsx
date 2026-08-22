@@ -7,6 +7,7 @@ import { findETF, chartLoadSymbol } from '@/lib/etf/etfList';
 import type { ETFConsensusEntry } from '@/lib/etf/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatWeight } from '../utils/format';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface ConsensusData {
   key: number;
@@ -106,8 +107,8 @@ export function ETFConsensusTab() {
                     {(() => {
                       const ls = chartLoadSymbol(e.symbol);
                       return ls
-                        ? <Link href={`/?load=${ls}`} className="hover:text-sky-400">{e.stockName}</Link>
-                        : <span>{e.stockName}</span>;
+                        ? <Link href={`/?load=${ls}`} className="hover:text-sky-400">{stockDisplayName(e.stockName, e.symbol)}</Link>
+                        : <span>{stockDisplayName(e.stockName, e.symbol)}</span>;
                     })()}
                   </td>
                   <td className="px-3 py-2 text-center">

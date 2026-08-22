@@ -6,6 +6,7 @@
  */
 
 import { cn } from '@/lib/utils';
+import { stockDisplayName, stockCodeOf } from '@/lib/stocks/stockIdentity';
 
 const RULE_LABEL: Record<string, string> = {
   'blowoff-bearish': '爆量長黑',
@@ -31,12 +32,14 @@ export interface AlertItem {
   firedAt: number;
   rule: string;
   symbol: string;
+  name?: string;
   market: 'TW' | 'CN';
   barTs: number;
   tfMin: 1 | 5;
   isHolding: boolean;
   /** 形態訊號帶 open/close/volume…；持倉保命訊號（guard）帶 price/stopLoss… — 欄位全 optional */
   meta: {
+    name?: string;
     close?: number;
     open?: number;
     volume?: number;
@@ -93,6 +96,7 @@ export default function AlertTimeline({ alerts, onSelectSymbol, emptyHint }: Ale
         const time = new Date(a.firedAt);
         const hh = String(time.getHours()).padStart(2, '0');
         const mm = String(time.getMinutes()).padStart(2, '0');
+        const displayName = stockDisplayName(a.name ?? a.meta.name, a.symbol);
         return (
           <li key={`${a.firedAt}-${a.symbol}-${a.rule}-${idx}`}>
             <button
@@ -107,7 +111,8 @@ export default function AlertTimeline({ alerts, onSelectSymbol, emptyHint }: Ale
                 )}>
                   {RULE_LABEL[a.rule] ?? a.rule}
                 </span>
-                <span className="font-mono text-sm">{a.symbol}</span>
+                <span className="text-sm font-medium">{displayName}</span>
+                <span className="font-mono text-[10px] text-muted-foreground">{stockCodeOf(a.symbol)}</span>
                 {a.isHolding && (
                   <span className="text-[10px] text-sky-400 bg-sky-500/10 px-1 rounded">持股</span>
                 )}

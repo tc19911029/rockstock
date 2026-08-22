@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import type { VideoBreakdownResponse } from '@/app/api/youtube/video-breakdown/route';
 import type { StockSentiment } from '@/lib/youtube/analysisStorage';
 import { SENTIMENT_LABEL } from './sentimentLabels';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Props { date: string }
 
@@ -28,7 +29,7 @@ function StockChips({ stocks }: { stocks: Array<{ code: string; name: string; se
             className="text-[10px] px-1 py-0.5 rounded bg-secondary/40 border border-border/40 hover:border-sky-600 whitespace-nowrap"
             title={lbl.text}
           >
-            <span className="font-mono text-sky-300">{s.code}</span> {s.name}
+            {stockDisplayName(s.name, s.code)} <span className="font-mono text-sky-300">{s.code}</span>
             <span className={cn('ml-0.5', lbl.cls)}>·{lbl.text}</span>
           </a>
         );

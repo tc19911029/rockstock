@@ -19,6 +19,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { PageShell, PageHeader } from '@/components/shared';
 import { useTotalCapital, formatNT } from '@/lib/portfolio/useTotalCapital';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Holding {
   symbol: string; name: string; market: 'TW' | 'CN';
@@ -205,7 +206,7 @@ export default function RiskDashboardPage() {
                 <div>
                   <div className="text-muted-foreground mb-1">單檔最大</div>
                   <div className="font-mono">
-                    <span className="font-bold text-base">{analysis.topPos.name}</span>
+                    <span className="font-bold text-base">{stockDisplayName(analysis.topPos.name, analysis.topPos.symbol)}</span>
                     <span className="text-muted-foreground ml-2">{analysis.topPos.symbol}</span>
                   </div>
                   <div className={`text-2xl font-bold font-mono mt-0.5 ${
@@ -290,7 +291,7 @@ export default function RiskDashboardPage() {
                       return (
                         <tr key={r.symbol} className="border-b border-border/40 align-middle">
                           <td className="px-2 py-1.5">
-                            <span className="font-medium">{r.name}</span>
+                            <span className="font-medium">{stockDisplayName(r.name, r.symbol)}</span>
                             <span className="font-mono text-muted-foreground ml-1.5 text-[10px]">{r.symbol}</span>
                             <span className="text-muted-foreground/70 ml-1.5 text-[10px]">{r.industry}</span>
                           </td>

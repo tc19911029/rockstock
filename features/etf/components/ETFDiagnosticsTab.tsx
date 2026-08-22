@@ -15,6 +15,7 @@ import {
   type OverlapPair,
 } from '@/lib/etf/ch12Diagnostics';
 import { Skeleton } from '@/components/ui/skeleton';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface DiagData {
   asOfDate: string | null;
@@ -34,7 +35,7 @@ const OVERLAP_BADGE: Record<string, string> = {
 
 function StockLink({ symbol, name }: { symbol: string; name?: string }) {
   const ls = chartLoadSymbol(symbol);
-  const label = name ?? symbol;
+  const label = stockDisplayName(name, symbol);
   return ls
     ? <Link href={`/?load=${ls}`} className="hover:text-sky-400">{label}</Link>
     : <span>{label}</span>;

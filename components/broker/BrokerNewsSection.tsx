@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { NewsDigest, NewsMention } from '@/lib/broker/newsDigest';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Props {
   date: string;
@@ -60,8 +61,8 @@ export function BrokerNewsSection({ date, onSelectStock }: Props) {
       onClick={() => m.market === 'TW' && onSelectStock?.(m.code)}
     >
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="font-mono text-[11px] text-foreground/90">{m.code}</span>
-        <span className="text-[11px] text-foreground/80">{m.name}</span>
+        <span className="text-[11px] text-foreground/80">{stockDisplayName(m.name, m.code)}</span>
+        <span className="font-mono text-[11px] text-foreground/60">{m.code}</span>
         <span className={`text-[9px] font-bold ${SENT[m.sentiment]?.cls}`}>{SENT[m.sentiment]?.label}</span>
         {m.in_holdings && <span className="text-[9px] px-1 rounded bg-amber-900/50 text-amber-300">持股</span>}
         {m.broker_view && <span className="text-[9px] text-muted-foreground ml-auto truncate max-w-[150px]" title={m.broker_view}>法人：{m.broker_view}</span>}

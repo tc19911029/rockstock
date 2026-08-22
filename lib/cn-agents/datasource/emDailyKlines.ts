@@ -27,6 +27,7 @@
 
 import { fetchJsonWithCurlFallback } from '@/lib/datasource/curlFetch';
 import { TENCENT_FQKLINE_BASES } from '@/lib/datasource/tencentKlineHosts';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 import type { BackfillSeriesBar, BackfillSymbolMeta } from '../backfillPools';
 
 const EM_REFERER = 'https://quote.eastmoney.com/';
@@ -86,7 +87,7 @@ async function fetchGrowthBoard(board: GrowthBoard): Promise<BackfillSymbolMeta[
       if (!/^\d{6}$/.test(code)) continue;
       out.push({
         symbol: `${code}.${suffix}`,
-        name: r.f14 ?? code,
+        name: r.f14?.trim() || UNRESOLVED_STOCK_NAME,
         industry: r.f100 ?? null,
       });
     }

@@ -7,6 +7,7 @@ import path from 'path';
 import type { SmartMoneyParams, SmartMoneyHit, SmartMoneyDay } from './types';
 import { DEFAULT_PARAMS } from './types';
 import { evaluateLatest, type Candle } from './signal';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 const BROKER_DIR = path.join(process.cwd(), 'data/chips/TW/broker');
 const CANDLE_DIR = path.join(process.cwd(), 'data/candles/TW');
@@ -65,7 +66,7 @@ export async function runScan(params: SmartMoneyParams = DEFAULT_PARAMS): Promis
 
     hits.push({
       code,
-      name: names.get(code) || code,
+      name: names.get(code) || UNRESOLVED_STOCK_NAME,
       price: ev.price,
       conc20: ev.conc20,
       conc20prev: ev.conc20prev,

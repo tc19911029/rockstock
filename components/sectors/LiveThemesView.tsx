@@ -18,6 +18,7 @@ import { bullBearClass } from '@/lib/format';
 import { useIsChartCurrent } from '@/lib/chartListNav';
 import { StockLink } from './StockLink';
 import { CnBoardBadges } from './CnBoardBadges';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 type Market = 'TW' | 'CN';
 
@@ -171,7 +172,7 @@ function TwLiveMemberRow({ m }: { m: LiveThemeMember }) {
     <div className={`flex items-center justify-between gap-2 rounded border bg-card/40 px-2.5 py-1.5 ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/15'}`}>
       <div className="flex items-center gap-1.5 flex-wrap min-w-0">
         <StockLink code={m.code} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
-          <span className="font-medium text-foreground text-sm">{m.name}</span>
+          <span className="font-medium text-foreground text-sm">{stockDisplayName(m.name, m.code)}</span>
           <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
         </StockLink>
         {m.isLimitUp && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400">漲停</span>}
@@ -205,7 +206,7 @@ function TwThemeCard({ t, rank, expanded, onToggle }: {
           <span className="font-mono tabular-nums text-muted-foreground/55">最強 <Pct v={t.maxChange} /></span>
           {t.topStock && (
             <span className="text-muted-foreground/55 inline-flex items-center gap-0.5">領漲
-              <StockLink code={t.topStock.code} className="hover:text-sky-400 font-mono tabular-nums">{t.topStock.name} <Pct v={t.topStock.changePercent} /></StockLink>
+              <StockLink code={t.topStock.code} className="hover:text-sky-400 tabular-nums">{stockDisplayName(t.topStock.name, t.topStock.code)} <Pct v={t.topStock.changePercent} /></StockLink>
             </span>
           )}
         </div>
@@ -269,7 +270,7 @@ function CnLiveMemberRow({ m }: { m: CnLiveMember }) {
     <div className={`flex items-center justify-between gap-2 rounded border bg-card/40 px-2.5 py-1.5 ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/15'}`}>
       <div className="flex items-center gap-1.5 flex-wrap min-w-0">
         <StockLink code={m.symbol} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
-          <span className="font-medium text-foreground text-sm">{m.name}</span>
+          <span className="font-medium text-foreground text-sm">{stockDisplayName(m.name, m.symbol)}</span>
           <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
         </StockLink>
         <CnBoardBadges code={m.code} name={m.name} />

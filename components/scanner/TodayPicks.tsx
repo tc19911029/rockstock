@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { StockScanResult } from '@/lib/scanner/types';
 import { useWatchlistStore } from '@/store/watchlistStore';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const FLAG_LABELS: Record<string, string> = {
   BB_SQUEEZE_BREAKOUT: 'BB壓縮突破',
@@ -92,8 +93,8 @@ export default function TodayPicks({ results, isLoading }: Props) {
                 <span className="text-xs font-black w-6 h-6 flex items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-blue-600 text-foreground">
                   {idx + 1}
                 </span>
-                <span className="text-sm font-bold text-foreground">{sym}</span>
-                <span className="text-xs text-muted-foreground">{r.name}</span>
+                <span className="text-sm font-bold text-foreground">{stockDisplayName(r.name, r.symbol)}</span>
+                <span className="text-xs font-mono text-muted-foreground">{sym}</span>
               </div>
 
               {/* Price + change */}

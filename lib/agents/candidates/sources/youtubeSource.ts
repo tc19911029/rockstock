@@ -20,6 +20,7 @@ import type {
   SourceResult,
   YouTubeSourceAttribution,
 } from '../types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 export const youtubeSource: SourceExtractor = {
   source: 'youtube',
@@ -127,7 +128,7 @@ export const youtubeSource: SourceExtractor = {
 
         candidates.push({
           symbol,
-          name: first.matched.name ?? code,
+          name: stockDisplayName(first.matched.name, code),
           market,
           attribution: attribution as CandidateSources['youtube'],
         });

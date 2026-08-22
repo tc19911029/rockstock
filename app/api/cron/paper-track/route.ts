@@ -8,6 +8,7 @@ import { matchedStrategies } from '@/lib/cn-sanse/namedStrategies';
 import { computeShadowLedger } from '@/lib/portfolio/shadowLedger';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import type { Candle } from '@/types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -84,7 +85,7 @@ async function collectPicks(base: string, market: 'TW' | 'CN'): Promise<Array<{ 
   for (const rec of j.records) {
     try {
       if (matchedStrategies(rec.report).some(s => s.id === 'resonance')) {
-        out.push({ symbol: rec.symbol, name: rec.name ?? rec.symbol, strategy: 'resonance', scanDate: j.lastDate });
+        out.push({ symbol: rec.symbol, name: stockDisplayName(rec.name, rec.symbol), strategy: 'resonance', scanDate: j.lastDate });
       }
     } catch { /* report 異形跳過 */ }
   }
@@ -94,7 +95,7 @@ async function collectPicks(base: string, market: 'TW' | 'CN'): Promise<Array<{ 
     .slice(0, 3);
   for (const rec of top) {
     if (buyScore(rec.report) < 0) continue;
-    out.push({ symbol: rec.symbol, name: rec.name ?? rec.symbol, strategy: 'buytop', scanDate: j.lastDate });
+    out.push({ symbol: rec.symbol, name: stockDisplayName(rec.name, rec.symbol), strategy: 'buytop', scanDate: j.lastDate });
   }
   return out;
 }

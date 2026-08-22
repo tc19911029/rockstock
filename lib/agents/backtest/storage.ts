@@ -7,6 +7,7 @@ import { promises as fs } from 'node:fs';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import type { BacktestReport } from './types';
 import type { MarketId } from '@/lib/scanner/types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 function getBacktestPath(market: MarketId, date: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`unsafe date: ${date}`);
@@ -14,6 +15,10 @@ function getBacktestPath(market: MarketId, date: string): string {
 }
 
 export async function saveBacktest(report: BacktestReport): Promise<string> {
+  report.entries = report.entries.map(entry => ({
+    ...entry,
+    name: stockDisplayName(entry.name, entry.symbol),
+  }));
   const file = getBacktestPath(report.market, report.date);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await atomicFsPut(file, JSON.stringify(report, null, 2));

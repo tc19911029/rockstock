@@ -9,6 +9,7 @@ import { fetchQuote, buildTodayBarFromQuote } from '@/lib/cn-sanse/cnQuote';
 import { getLimitMovePct } from '@/lib/utils/limitRules';
 import { isolateSanseCandles } from '@/lib/cn-sanse/chartCandles';
 import type { Candle } from '@/types';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 export const runtime = 'nodejs';
 
@@ -18,7 +19,7 @@ function lookupStock(symbol: string): { name: string; industry: string } {
   if (!nameMap) {
     nameMap = new Map(CN_STOCKS.map((s) => [s.symbol, { name: s.name, industry: '' }]));
   }
-  return nameMap.get(symbol) ?? { name: symbol, industry: '' };
+  return nameMap.get(symbol) ?? { name: UNRESOLVED_STOCK_NAME, industry: '' };
 }
 
 export async function GET(

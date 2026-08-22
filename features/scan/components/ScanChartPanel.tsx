@@ -10,6 +10,7 @@ import { type ScanInterval, MINUTE_INTERVALS, DEFAULT_PERIODS } from '@/lib/data
 import { useScanTimeframe } from '../hooks/useScanTimeframe';
 import { useLockedPattern } from '@/lib/hooks/useLockedPattern';
 import { IntervalSwitcher } from './IntervalSwitcher';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const CandleChart = dynamic(() => import('@/components/CandleChart'), { ssr: false });
 const IndicatorCharts = dynamic(() => import('@/components/IndicatorCharts'), { ssr: false });
@@ -160,7 +161,7 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
             <span className={`text-[11px] font-mono ${stockPerf.openReturn >= 0 ? 'text-red-400' : 'text-green-400'}`}
               title="隔日開盤價相對掃描日收盤價的漲跌幅"
             >
-              隔日開 {stockPerf.nextOpenPrice.toFixed(2)} ({stockPerf.openReturn >= 0 ? '+' : ''}{stockPerf.openReturn.toFixed(2)}%)
+              隔日開 {stockPerf.nextOpenPrice.toFixed(2)}（缺口 {stockPerf.openReturn >= 0 ? '+' : ''}{stockPerf.openReturn.toFixed(2)}%）
             </span>
           )}
           {isLoadingStock && (
@@ -246,7 +247,7 @@ export function ScanChartPanel({ selectedStock, scanDate }: ScanChartPanelProps)
 
       {!collapsed && loadError && !isLoadingStock && displayCandles.length === 0 && (
         <div className="flex flex-col items-center justify-center h-[200px] text-red-400 text-sm gap-1">
-          <div>載入 {selectedStock?.name || selectedStock?.symbol} 的數據失敗</div>
+          <div>載入 {selectedStock ? stockDisplayName(selectedStock.name, selectedStock.symbol) : '這檔股票'} 的數據失敗</div>
           <div className="text-xs text-red-400/70 max-w-md text-center">{loadError}</div>
         </div>
       )}

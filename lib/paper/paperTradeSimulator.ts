@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { runSingleBacktest, scanResultToSignal, DEFAULT_STRATEGY, type BacktestStrategyParams } from '@/lib/backtest/BacktestEngine';
 import type { StockScanResult, ForwardCandle } from '@/lib/scanner/types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 // ════════════════════════════════════════════════════════════════
 // Types & config
@@ -290,7 +291,7 @@ export function simulate(cfg: SimConfig = DEFAULT_SIM_CONFIG, opts: { verbose?: 
 
       picksDetail.push({
         symbol: r.symbol,
-        name: r.name,
+        name: stockDisplayName(r.name, r.symbol),
         entryPrice: trade.entryPrice,
         exitPrice: trade.exitPrice,
         netReturnPct: +(netPnL * 100).toFixed(2),

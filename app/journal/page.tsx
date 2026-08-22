@@ -17,6 +17,7 @@ import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { formatNT } from '@/lib/portfolio/useTotalCapital';
 import { gradeTrade, summarizeTradeGrades, TRADE_GRADE_LABEL } from '@/lib/portfolio/perfMetrics';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface ClosedTrade {
   tradeId: string;
@@ -254,7 +255,7 @@ function TradeCard({ item, onSaved }: { item: ItemJoin; onSaved: () => void }) {
       {/* Header */}
       <header className="flex items-baseline justify-between flex-wrap gap-2">
         <div>
-          <span className="font-bold text-base">{trade.name}</span>
+          <span className="font-bold text-base">{stockDisplayName(trade.name, trade.symbol)}</span>
           <span className="font-mono text-xs text-muted-foreground ml-2">{trade.symbol}</span>
           {trade.industry && <span className="text-xs text-muted-foreground ml-2">· {trade.industry}</span>}
         </div>

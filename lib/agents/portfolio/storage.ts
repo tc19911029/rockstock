@@ -18,6 +18,7 @@ import {
 } from './types';
 import { confirmPartialExit, type ConfirmPartialExitInput } from '@/lib/portfolio/holdingExecution';
 import { doesStopChangeLoosen } from '@/lib/portfolio/holdingRisk';
+import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 
 const PORTFOLIO_DIR = path.join(process.cwd(), 'data', 'agents', 'portfolio');
 const HOLDINGS_FILE = path.join(PORTFOLIO_DIR, 'holdings.json');
@@ -68,6 +69,10 @@ export async function loadHoldings(market: MarketId = 'TW', profileId: string = 
 }
 
 export async function saveHoldings(file: PortfolioFile, market: MarketId = 'TW', profileId: string = DEFAULT_PROFILE_ID): Promise<void> {
+  const invalid = file.holdings.find(holding => isPlaceholderStockName(holding.name, holding.symbol));
+  if (invalid) {
+    throw new Error(`拒絕儲存未解析股名：${invalid.symbol}`);
+  }
   const target = holdingsFileFor(market, profileId);
   await fs.mkdir(path.dirname(target), { recursive: true });
   file.updatedAt = new Date().toISOString();

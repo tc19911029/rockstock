@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { bullBearClass } from '@/lib/format';
 import type { LeaderboardRow } from '@/lib/backtest/leaderboardTypes';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const fmt = (v: number | null): string => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 
@@ -44,7 +45,7 @@ export function SamplePicksPanel({ row }: { row: LeaderboardRow }) {
                       {p.symbol}
                     </Link>
                   </td>
-                  <td className="pr-3 whitespace-nowrap">{p.name && p.name !== p.symbol ? p.name : '—'}</td>
+                  <td className="pr-3 whitespace-nowrap">{stockDisplayName(p.name, p.symbol)}</td>
                   <td className="text-right pr-3 font-mono">{p.entryOpen.toFixed(2)}</td>
                   <td className={`text-right pr-3 font-mono ${bullBearClass(p.d1)}`}>{fmt(p.d1)}</td>
                   <td className={`text-right pr-3 font-mono ${bullBearClass(p.d3)}`}>{fmt(p.d3)}</td>

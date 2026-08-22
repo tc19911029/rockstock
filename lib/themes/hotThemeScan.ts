@@ -25,6 +25,8 @@ import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
 import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
 import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
+import { getTWChineseName } from '@/lib/datasource/TWSENames';
+import { isPlaceholderStockName, stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 export type ThemeLabelSource = 'concept' | 'industry' | 'other';
 
@@ -162,7 +164,7 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
     const { theme, source } = labelOf(code, industryOf);
     hot.push({
       code,
-      name: q.name,
+      name: stockDisplayName(q.name, q.symbol),
       changePercent: q.changePercent,
       volume: q.volume,
       volRatio,
@@ -306,6 +308,17 @@ export async function buildHotThemeScan(
   const snapshot = await readIntradaySnapshot('TW', date);
   if (!snapshot || snapshot.quotes.length === 0) return null;
 
+  // 行情 provider 可能在降級時把代號塞進 name；只補這些占位名稱，正常快照零額外成本。
+  const placeholderCodes = [...new Set(snapshot.quotes
+    .filter(q => isPlaceholderStockName(q.name, q.symbol))
+    .map(q => q.symbol.replace(/\.(TW|TWO)$/i, ''))
+    .filter(isRealStock))];
+  const resolvedNames = new Map<string, string>();
+  await Promise.all(placeholderCodes.map(async code => {
+    const name = await getTWChineseName(code);
+    if (name) resolvedNames.set(code, name);
+  }));
+
   // 量比：MA base（最近 N 根收/量）。前 5 日均量為基準，今日量 = 快照量。
   const maBase = await readMABase('TW', snapshot.date);
   const volRatioOf = (code: string): number | null => {
@@ -361,7 +374,7 @@ export async function buildHotThemeScan(
     date: snapshot.date,
     quotes: snapshot.quotes.map((q) => ({
       symbol: q.symbol,
-      name: q.name,
+      name: resolvedNames.get(q.symbol.replace(/\.(TW|TWO)$/i, '')) ?? q.name,
       changePercent: q.changePercent,
       volume: q.volume,
       close: q.close,

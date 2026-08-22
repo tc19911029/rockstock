@@ -5,6 +5,7 @@ import { useBacktestStore } from '@/store/backtestStore';
 import { usePortfolioStore } from '@/store/portfolioStore';
 import type { SelectedStock } from './ScanChartPanel';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface ReentryCandidate {
   symbol: string;
@@ -158,7 +159,7 @@ export function ReentryCandidatesPanel({ onSelectStock }: ReentryCandidatesPanel
                       onClick={() => onSelectStock?.({ symbol: c.symbol, name: c.name, market })}
                     >
                       <td className="py-1 px-2 font-mono">{c.symbol}</td>
-                      <td className="py-1 px-2">{c.name}</td>
+                      <td className="py-1 px-2">{stockDisplayName(c.name, c.symbol)}</td>
                       <td className="py-1 px-2 text-right tabular-nums">{c.price.toFixed(2)}</td>
                       <td className="py-1 px-2 text-right tabular-nums text-bull">
                         +{c.ma5Distance.toFixed(2)}%

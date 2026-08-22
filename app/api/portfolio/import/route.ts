@@ -28,6 +28,7 @@ import {
   applyDefaults,
   type ParsedImportRow,
 } from '@/lib/portfolio/holdingsImport';
+import { resolveStockIdentity } from '@/lib/stocks/resolveStockIdentity';
 
 export const runtime = 'nodejs';
 
@@ -105,7 +106,18 @@ export async function POST(req: NextRequest) {
 
     let holdingData: ReturnType<typeof applyDefaults>;
     try {
-      holdingData = applyDefaults(p.row, today);
+      const identity = await resolveStockIdentity({
+        symbol: p.row.symbol,
+        providedName: p.row.name,
+      });
+      if (!identity.name || identity.market === 'unknown') {
+        throw new Error('中文名稱尚未解析，已拒絕匯入，請確認股票代號');
+      }
+      holdingData = applyDefaults({
+        ...p.row,
+        symbol: identity.canonicalSymbol,
+        name: identity.name,
+      }, today);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       results.push({ rowNumber: p.rowNumber, symbol: p.row.symbol, status: 'rejected', reason: msg });

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 import type { ShadowResponse } from '@/app/api/portfolio/shadow/route';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 function fmtNT(n: number): string {
   const sign = n < 0 ? '−' : '';
@@ -56,7 +57,7 @@ export function DisciplineShadowCard() {
         {data.items.map(it => (
           <div key={it.symbol} className="text-xs text-zinc-400 border-t border-zinc-800/60 pt-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-zinc-300 font-medium">{it.name} <span className="text-zinc-500">{it.symbol}</span></span>
+              <span className="text-zinc-300 font-medium">{stockDisplayName(it.name, it.symbol)} <span className="text-zinc-500">{it.symbol}</span></span>
               <span className={it.disciplineGap > 0 ? 'text-red-400' : 'text-zinc-400'}>
                 差額 {it.disciplineGap > 0 ? '+' : ''}{fmtNT(it.disciplineGap)}
               </span>

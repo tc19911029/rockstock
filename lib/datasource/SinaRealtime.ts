@@ -13,6 +13,7 @@
  */
 
 import type { EastMoneyQuote } from './EastMoneyRealtime';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 const BATCH_SIZE = 80;
 const TIMEOUT_MS = 8_000;
@@ -49,7 +50,7 @@ function parseSinaLine(line: string): EastMoneyQuote | null {
 
   return {
     code,
-    name: name || code,
+    name: name || UNRESOLVED_STOCK_NAME,
     open: open > 0 ? open : close,
     high: high > 0 ? high : close,
     low: low > 0 ? low : close,

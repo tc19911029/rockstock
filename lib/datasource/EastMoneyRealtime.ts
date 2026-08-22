@@ -14,6 +14,7 @@
  */
 
 import { globalCache } from './MemoryCache';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 export interface EastMoneyQuote {
   code: string;       // A股: "600519", 美股: "AAPL"
@@ -133,7 +134,7 @@ export async function getEastMoneySingleQuote(code: string, suffix?: 'SS' | 'SZ'
 
     return {
       code: item.f12 || code,
-      name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
+      name: (item.f14 && item.f14 !== '-') ? item.f14 : UNRESOLVED_STOCK_NAME,
       open,
       high,
       low,
@@ -215,7 +216,7 @@ function parseItem(item: EastMoneyItem, market: 'cn' | 'us'): EastMoneyQuote | n
 
     return {
       code,
-      name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
+      name: (item.f14 && item.f14 !== '-') ? item.f14 : UNRESOLVED_STOCK_NAME,
       open:   (item.f17 != null && item.f17 > 0) ? item.f17 : close,
       high:   (item.f15 != null && item.f15 > 0) ? item.f15 : close,
       low:    (item.f16 != null && item.f16 > 0) ? item.f16 : close,
@@ -228,7 +229,7 @@ function parseItem(item: EastMoneyItem, market: 'cn' | 'us'): EastMoneyQuote | n
   // 美股
   return {
     code: code.toUpperCase(),
-    name: (item.f14 && item.f14 !== '-') ? item.f14 : code,
+    name: (item.f14 && item.f14 !== '-') ? item.f14 : UNRESOLVED_STOCK_NAME,
     open:   (item.f17 != null && item.f17 > 0) ? item.f17 : close,
     high:   (item.f15 != null && item.f15 > 0) ? item.f15 : close,
     low:    (item.f16 != null && item.f16 > 0) ? item.f16 : close,

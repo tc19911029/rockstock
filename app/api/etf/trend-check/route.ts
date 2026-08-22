@@ -3,6 +3,7 @@ import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
 import { detectTrend } from '@/lib/analysis/trendAnalysis';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 export const runtime = 'nodejs';
 
@@ -67,7 +68,7 @@ export async function GET() {
         }
         items.push({
           symbol: sym,
-          name: (file as { name?: string } | null)?.name ?? sym,
+          name: stockDisplayName((file as { name?: string } | null)?.name, sym),
           dailyTrend, weeklyTrend, verdict, tone,
         });
       } catch { /* 單檔失敗跳過 */ }

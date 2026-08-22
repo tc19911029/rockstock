@@ -14,6 +14,8 @@ import { computeShortCosts } from './costEstimator';
 import { computeSqueezeScore } from './squeezeScorer';
 import { marginCallPrice } from './marginCallPrice';
 import { buildInterpretation, buildWarnings } from './narrator';
+import { resolveStockIdentity } from '@/lib/stocks/resolveStockIdentity';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 // 抓 90 個交易日（covers 60d window + buffer）
 const LOOKBACK_CALENDAR_DAYS = 130;
@@ -25,14 +27,8 @@ function ymdDaysAgo(end: string, days: number): string {
 }
 
 async function loadStockName(symbol: string): Promise<string> {
-  try {
-    // Blob-aware：本地讀檔、Vercel 讀 Blob（stock-master 已 dual-store 於 youtube/ prefix）
-    const { loadStockMaster } = await import('@/lib/youtube/stockMaster');
-    const master = await loadStockMaster();
-    return master.entries.find(e => e.code === symbol)?.name ?? symbol;
-  } catch {
-    return symbol;
-  }
+  const identity = await resolveStockIdentity({ symbol, marketHint: 'TW' });
+  return identity.name ?? UNRESOLVED_STOCK_NAME;
 }
 
 function balChange(arr: number[], n: number): number {

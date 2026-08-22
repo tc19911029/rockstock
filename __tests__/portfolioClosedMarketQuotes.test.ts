@@ -16,7 +16,7 @@ jest.mock('@/lib/datasource/TWSENames', () => ({
   getCNChineseName: (...args: unknown[]) => getCNChineseName(...args),
 }));
 
-import { buildFreshSnapshotFallback, fetchFinalL1Quotes, resolveQuoteEntries } from '@/app/api/portfolio/quotes/route';
+import { buildFreshSnapshotFallback, enrichQuoteNames, fetchFinalL1Quotes, resolveQuoteEntries } from '@/app/api/portfolio/quotes/route';
 
 describe('休市持倉報價', () => {
   beforeEach(() => {
@@ -94,5 +94,16 @@ describe('休市持倉報價', () => {
     }, new Date('2026-08-20T11:20:00.000Z'));
 
     expect(quotes).toEqual([]);
+  });
+
+  test('任何行情來源回 name=代號，都由最後出口補成正式中文名稱', async () => {
+    getTWChineseName.mockResolvedValue('聯亞');
+    await expect(enrichQuoteNames([
+      { symbol: '3081.TW', canonicalSymbol: '3081.TWO', name: '3081', price: 2920, changePercent: 5.04 },
+    ], [
+      { original: '3081.TW', resolved: '3081.TWO', market: 'TW' },
+    ])).resolves.toEqual([
+      { symbol: '3081.TW', canonicalSymbol: '3081.TWO', name: '聯亞', price: 2920, changePercent: 5.04 },
+    ]);
   });
 });

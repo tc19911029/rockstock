@@ -13,6 +13,8 @@
  */
 
 // 局部型別 — 只取需要的欄位，避免跨 module 強耦合
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
+
 export interface DecisionRunForSuggestion {
   symbol: string;
   name?: string;
@@ -128,7 +130,7 @@ export function composeOperationSuggestion(input: ComposeInput): string {
   if (buys.length > 0) {
     const phrase = buys
       .map((r) => {
-        const label = r.name ?? r.symbol;
+        const label = stockDisplayName(r.name, r.symbol);
         const size = r.decision?.sizeHint ?? 0;
         return `${label}${size > 0 ? `(${size}%倉位)` : ''}`;
       })
@@ -148,7 +150,7 @@ export function composeOperationSuggestion(input: ComposeInput): string {
   if (sortedReviews.length > 0) {
     const phrase = sortedReviews
       .map((r) => {
-        const label = r.name ?? r.symbol;
+        const label = stockDisplayName(r.name, r.symbol);
         const ret = typeof r.returnPct === 'number' ? `(${r.returnPct >= 0 ? '+' : ''}${r.returnPct.toFixed(1)}%)` : '';
         return `${label}${ret}${REVIEW_LABEL[r.action]}`;
       })

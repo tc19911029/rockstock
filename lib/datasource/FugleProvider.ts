@@ -17,6 +17,7 @@
 import { globalCache } from './MemoryCache';
 import { rateLimiter } from './UnifiedRateLimiter';
 import type { Candle } from '@/types';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 const FUGLE_BASE = 'https://api.fugle.tw/marketdata/v1.0/stock';
 const INTRADAY_TTL = 10 * 1000;   // 10 秒快取（5m polling 60s 期間至少能拉到 1 次新資料）
@@ -306,7 +307,7 @@ export async function getFugleQuote(symbol: string): Promise<FugleQuote | null> 
 
     const quote: FugleQuote = {
       code: json.symbol,
-      name: json.name ?? json.symbol,
+      name: json.name?.trim() || UNRESOLVED_STOCK_NAME,
       open: json.openPrice ?? 0,
       high: json.highPrice ?? 0,
       low: json.lowPrice ?? 0,

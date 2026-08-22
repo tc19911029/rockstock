@@ -5,6 +5,7 @@ import { listAllProfilesOpenStockHoldings } from '@/lib/agents/portfolio/storage
 import { checkChipFreshness } from '@/lib/health/chipFreshness';
 import { snapshotBrokerDayFromFinMind } from '@/lib/chips/brokerSnapshotFinMind';
 import { sendNtfy } from '@/lib/notify/ntfy';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -79,7 +80,7 @@ export async function GET(req: NextRequest) {
     let pushed = false;
     if (chip.level === 'red' && chip.stale.length > 0) {
       const detail = chip.stale
-        .map(s => `${s.name || s.symbol}（最後${s.chipLast ?? '無'}／應到${s.expected ?? '?'}）`)
+        .map(s => `${stockDisplayName(s.name, s.symbol)}（${s.symbol}；最後${s.chipLast ?? '無'}／應到${s.expected ?? '?'}）`)
         .join('\n');
       const sent = await sendNtfy({
         title: `📉 籌碼資料過期 — ${chip.stale.length} 檔持倉買賣超/集中度沒更新`,

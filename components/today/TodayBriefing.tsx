@@ -23,6 +23,7 @@ import {
   type ReviewAction,
 } from '@/lib/today/composeOperationSuggestion';
 import { computeHoldingAction, type HoldingActionRule } from '@/lib/today/computeHoldingAction';
+import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 type Trend = '多頭' | '空頭' | '盤整';
 
@@ -60,6 +61,8 @@ interface YoutubeTopStock { code: string; name: string; rating?: string; mention
 
 interface AlertItem {
   symbol: string;
+  name?: string;
+  meta?: { name?: string };
   rule: 'blowoff-bearish' | 'blowoff-bullish' | 'terminal-rally' | 'ma5-breakdown'
     | 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop';
   firedAt: number;
@@ -340,7 +343,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
                   return (
                     <Link key={r.symbol} href={`/?load=${encodeURIComponent(r.symbol)}&date=${today}&tab=agent`}
                       className={`block text-xs hover:bg-slate-800 rounded px-1.5 py-1 transition ${isBuy ? 'hover:bg-emerald-900/30' : ''}`}>
-                      <span className={`font-medium ${isBuy ? 'text-emerald-300' : 'text-amber-200'}`}>{r.name ?? r.symbol}</span>
+                      <span className={`font-medium ${isBuy ? 'text-emerald-300' : 'text-amber-200'}`}>{stockDisplayName(r.name, r.symbol)}</span>
                       {isBuy && (
                         <>
                           <span className="text-slate-400 ml-1.5">{r.decision?.sizeHint}%</span>
@@ -468,7 +471,10 @@ export function TodayBriefing({ market = 'TW' }: Props) {
                 <li key={`${a.symbol}-${a.firedAt}-${i}`} className="flex items-center gap-2 text-xs">
                   <span className="font-mono text-rose-400 text-[10px]">{hhmm(a.firedAt)}</span>
                   <Link href={`/?load=${encodeURIComponent(a.symbol)}&tf=5m`}
-                    className="text-slate-300 hover:text-rose-300 hover:underline font-mono">{a.symbol}</Link>
+                    className="text-slate-300 hover:text-rose-300 hover:underline">
+                    <span className="font-medium">{stockDisplayName(a.name ?? a.meta?.name, a.symbol)}</span>
+                    <span className="ml-1 font-mono text-[10px] text-slate-500">{stockCodeOf(a.symbol)}</span>
+                  </Link>
                   <span className="text-rose-300">{RULE_LABEL[a.rule]}</span>
                   <span className="text-slate-500 text-[10px]">tf={a.tfMin}m</span>
                   {a.isHolding && <span className="text-amber-400 text-[10px]">持股中</span>}

@@ -14,6 +14,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { navKey } from '@/lib/chartListNav';
+import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 
 export type SectorSelectStock = (code: string) => void;
 
@@ -108,11 +109,12 @@ export function StockLink({ code, className, title, children }: {
 /** 加入自選鈕（reactive：加入後即時顯示 ✓）。台股傳裸碼、陸股傳帶後綴 symbol。 */
 export function AddWatchBtn({ code, name }: { code: string; name: string }) {
   const has = useWatchlistStore((s) => s.items.some((i) => i.symbol === code));
+  const unresolved = isPlaceholderStockName(name, code);
   return (
-    <button type="button" title={has ? '已在自選' : '加入自選'}
+    <button type="button" disabled={unresolved} title={unresolved ? '中文名稱尚未解析，暫時不能加入自選' : has ? '已在自選' : '加入自選'}
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); useWatchlistStore.getState().add(code, name); }}
-      className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${has ? 'border-emerald-500/40 text-emerald-400' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
-      {has ? '✓' : '＋'}
+      className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 ${has ? 'border-emerald-500/40 text-emerald-400' : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
+      {has ? '✓' : unresolved ? '待補' : '＋'}
     </button>
   );
 }

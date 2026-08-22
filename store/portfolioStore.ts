@@ -9,6 +9,7 @@ import {
   type StorePortfolioHolding,
 } from '../lib/portfolio/storeToHoldingsMapping';
 import { getActiveProfileId } from './portfolioProfileStore';
+import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 
 export interface PortfolioHolding {
   id: string;
@@ -300,6 +301,10 @@ export const usePortfolioStore = create<PortfolioStore>()(
       cashBalance: { TW: 1_000_000, CN: 1_000_000 },
       cashReservePct: 0,
       add: (h) => {
+        if (isPlaceholderStockName(h.name, h.symbol)) {
+          console.warn('[portfolioStore] 拒絕新增未解析股名:', h.symbol);
+          return;
+        }
         const id = Date.now().toString();
         const newH: PortfolioHolding = { ...h, id };
         set(s => ({ holdings: [...s.holdings, newH] }));
@@ -311,6 +316,11 @@ export const usePortfolioStore = create<PortfolioStore>()(
         if (target) void unsyncHoldingFromServer(target.symbol);  // Phase 0.4
       },
       update: (id, partial) => {
+        const current = usePortfolioStore.getState().holdings.find(h => h.id === id);
+        if (partial.name !== undefined && current && isPlaceholderStockName(partial.name, current.symbol)) {
+          console.warn('[portfolioStore] 拒絕更新為未解析股名:', current.symbol);
+          return;
+        }
         set(s => ({
           holdings: s.holdings.map(h => h.id === id ? { ...h, ...partial } : h),
         }));
@@ -396,7 +406,10 @@ export const usePortfolioStore = create<PortfolioStore>()(
           if (!Array.isArray(imported)) return false;
           // 基本驗證
           const valid = imported.every(h =>
-            typeof h.symbol === 'string' && typeof h.shares === 'number' && typeof h.costPrice === 'number'
+            typeof h.symbol === 'string'
+            && !isPlaceholderStockName(h.name, h.symbol)
+            && typeof h.shares === 'number'
+            && typeof h.costPrice === 'number'
           );
           if (!valid) return false;
           set(s => {

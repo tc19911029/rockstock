@@ -26,12 +26,13 @@ import { detectAveragingDown, mergeAveragedDownFlag } from '@/lib/portfolio/aver
 import { detectStopLossLowered, mergeStopLossLoweredFlag, type PositionSide } from '@/lib/portfolio/stopLossGuard';
 import { todayYmdTaipei } from '@/lib/youtube/classify';
 import { PARTIAL_EXIT_SIGNAL_TYPES } from '@/lib/portfolio/holdingExecution';
+import { resolveStockIdentity } from '@/lib/stocks/resolveStockIdentity';
 
 export const runtime = 'nodejs';
 
 const upsertSchema = z.object({
   symbol: z.string().min(1).regex(/^[A-Za-z0-9._-]+$/),
-  name: z.string().min(1),
+  name: z.string().min(1).optional(),
   market: z.enum(['TW', 'CN']),
   industry: z.string().optional(),
   entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -107,7 +108,23 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return apiValidationError(parsed.error);
 
   const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
-  const { forcePrice, ...holdingData } = parsed.data;
+  const { forcePrice, ...rawHoldingData } = parsed.data;
+  const identity = await resolveStockIdentity({
+    symbol: rawHoldingData.symbol,
+    marketHint: rawHoldingData.market,
+    providedName: rawHoldingData.name,
+  });
+  if (!identity.name || identity.market === 'unknown') {
+    return apiError(`查不到 ${rawHoldingData.symbol} 的正式股票名稱，未寫入持股`, 422);
+  }
+  if (identity.market !== rawHoldingData.market) {
+    return apiError(`代號 ${rawHoldingData.symbol} 與市場 ${rawHoldingData.market} 不一致`, 422);
+  }
+  const holdingData = {
+    ...rawHoldingData,
+    symbol: identity.canonicalSymbol,
+    name: identity.name,
+  };
 
   // entryPrice 合理性檢查（除非 forcePrice=true 顯式略過）
   if (!forcePrice) {

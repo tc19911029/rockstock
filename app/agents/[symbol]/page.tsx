@@ -23,6 +23,7 @@ import { DatePicker } from '@/components/ui/DatePicker';
 import { AgentChartSection } from './_components/AgentChartSection';
 import { SellHeavinessReference } from '@/components/shared/SellHeavinessReference';
 import { classifyMarket } from '@/lib/market/classify';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { TrustMomentumPanel } from './_components/TrustMomentumPanel';
 import { SqueezeDetail } from './_components/SqueezeDetail';
 import { CostBasisPanel } from './_components/CostBasisPanel';
@@ -465,7 +466,7 @@ function AgentDetailPage() {
 
   const symbolPageHeader = (
     <PageHeader
-      title={data?.candidate?.name ?? fallbackName ?? symbol}
+      title={stockDisplayName(data?.candidate?.name ?? fallbackName, symbol)}
       backButton={`/agents?date=${date}`}
       subtitle={
         <span className="font-mono">

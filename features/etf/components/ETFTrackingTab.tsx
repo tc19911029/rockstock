@@ -7,6 +7,7 @@ import { TW_ETF_LIST, isGlobalETF, chartLoadSymbol, shortETFName } from '@/lib/e
 import type { ETFTrackingEntry } from '@/lib/etf/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatPct } from '../utils/format';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface TrackingData {
   key: string;
@@ -115,13 +116,13 @@ export function ETFTrackingTab() {
                 >
                   <td className="px-2 py-2 font-mono">{e.etfCode}</td>
                   <td className="px-2 py-2">
+                    <span className="font-medium">{stockDisplayName(e.stockName, e.symbol)}</span>{' '}
                     {(() => {
                       const ls = chartLoadSymbol(e.symbol);
                       return ls
                         ? <Link href={`/?load=${ls}`} className="font-mono hover:text-sky-400">{e.symbol}</Link>
                         : <span className="font-mono text-muted-foreground">{e.symbol}</span>;
-                    })()}{' '}
-                    <span className="text-muted-foreground">{e.stockName}</span>
+                    })()}
                   </td>
                   <td className="px-2 py-2">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] ${

@@ -17,6 +17,7 @@ import { matchedStrategies } from '@/lib/cn-sanse/namedStrategies';
 import { buyScore } from '@/lib/cn-sanse/buyScore';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
 import type { LeaderboardRow } from '@/lib/backtest/leaderboardTypes';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Props { market: 'TW' | 'CN' }
 
@@ -119,7 +120,7 @@ export function TodayTopPriorityCard({ market }: Props) {
           {picks.map((p, i) => (
             <div key={p.symbol} className="flex items-center justify-between gap-2">
               <a href={`/?load=${encodeURIComponent(p.symbol)}`} className="text-zinc-200 hover:text-amber-300 truncate">
-                <span className="text-zinc-500 mr-1">{i + 1}.</span>{p.name} <span className="text-zinc-500">{p.symbol.replace(/\.(TW|TWO|SS|SZ)$/, '')}</span>
+                <span className="text-zinc-500 mr-1">{i + 1}.</span>{stockDisplayName(p.name, p.symbol)} <span className="text-zinc-500">{p.symbol.replace(/\.(TW|TWO|SS|SZ)$/, '')}</span>
                 {p.price != null && <span className="ml-1 text-zinc-400">{p.price}</span>}
                 <span className="ml-1 text-[10px] text-zinc-500">{p.note}</span>
               </a>
@@ -153,7 +154,7 @@ async function resolvePicks(row: LeaderboardRow, market: 'TW' | 'CN', sanse: San
     const recs = (sanse.records ?? []).filter(r => {
       try { return matchedStrategies(r.report).some(s => s.id === row.strategyId); } catch { return false; }
     });
-    return sortByBuyScore(recs.map(r => ({ symbol: r.symbol, name: r.name ?? r.symbol, price: r.price ?? null })), sanse);
+    return sortByBuyScore(recs.map(r => ({ symbol: r.symbol, name: stockDisplayName(r.name, r.symbol), price: r.price ?? null })), sanse);
   }
   // 買法字母：L4 現成紀錄（latest 有結果的 session）
   try {

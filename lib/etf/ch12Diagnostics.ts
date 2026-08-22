@@ -10,6 +10,7 @@
  * 課程權威原文照抄進常數，不自創門檻。
  */
 import type { ETFHolding } from './types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 // ────────────────────────────────────────────────────────────────────────────
 // 一、成分股重疊度（誤區三，可從現有持股快照計算的真數字）
@@ -85,7 +86,7 @@ export function computeSharedHoldings(
     const totalWeight = v.weights.reduce((s, w) => s + w, 0);
     out.push({
       symbol,
-      name: v.name || symbol,
+      name: stockDisplayName(v.name, symbol),
       etfCodes: v.codes,
       count: v.codes.length,
       totalWeight: +totalWeight.toFixed(2),
@@ -130,7 +131,7 @@ export function computeOverlapPairs(
         bName: B.etfName,
         sharedCount,
         overlapPct,
-        sharedNames: sharedHoldings.map((h) => h.name || h.symbol),
+        sharedNames: sharedHoldings.map((h) => stockDisplayName(h.name, h.symbol)),
       });
     }
   }

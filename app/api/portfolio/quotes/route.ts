@@ -9,6 +9,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
 import { expectedTwSymbol } from '@/lib/datasource/twSymbolMarket';
+import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 
 // mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
 const MIS_HEADERS: Record<string, string> = {
@@ -85,6 +86,32 @@ async function resolveEntryName(entry: ResolvedEntry): Promise<string | undefine
     return (await getCNChineseName(code, suffix)) ?? undefined;
   }
   return undefined;
+}
+
+/**
+ * 所有 provider/fallback 最後都過這個出口：清掉「name=代號」占位，並用股票主檔補正式名稱。
+ * 這可避免任何單一行情來源降級時，把裸代號傳進持股／自選股／題材等持久化流程。
+ */
+export async function enrichQuoteNames(
+  quotes: QuoteTick[],
+  entries: ResolvedEntry[],
+): Promise<QuoteTick[]> {
+  return Promise.all(quotes.map(async quote => {
+    const entry = entries.find(candidate => candidate.original === quote.symbol)
+      ?? entries.find(candidate => candidate.resolved === quote.canonicalSymbol)
+      ?? entries.find(candidate => candidate.resolved.replace(/\.(TW|TWO|SS|SZ)$/i, '') === quote.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, ''));
+    if (!entry) return quote;
+    const canonicalSymbol = quote.canonicalSymbol ?? entry.resolved;
+    if (!isPlaceholderStockName(quote.name, canonicalSymbol)) {
+      return { ...quote, canonicalSymbol, name: quote.name!.trim() };
+    }
+    const resolvedName = await resolveEntryName({ ...entry, resolved: canonicalSymbol });
+    return {
+      ...quote,
+      canonicalSymbol,
+      ...(resolvedName ? { name: resolvedName } : { name: undefined }),
+    };
+  }));
 }
 
 /**
@@ -486,8 +513,10 @@ export async function GET(req: NextRequest) {
     for (const [k, exp] of noDataUntil) if (exp <= now) noDataUntil.delete(k);
   }
 
+  const namedQuotes = await enrichQuoteNames(quotes, entries);
+
   return apiOk(
-    { quotes },
+    { quotes: namedQuotes },
     { headers: { 'Cache-Control': 'max-age=15, stale-while-revalidate=30' } },
   );
 }

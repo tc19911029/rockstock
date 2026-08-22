@@ -12,6 +12,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { formatWeight } from '../utils/format';
 import { formatPercent } from '@/lib/format';
 import type { StrategySignals, HoldingWithStrategies } from '@/lib/etf/strategySignals';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 // ── 策略 A-Q 標籤（v12 14 軌制，無 v11 G/H/I）────────────────────────────
 const STRAT_KEYS: (keyof StrategySignals)[] = ['A', 'B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q'];
@@ -202,7 +203,7 @@ function ChangeCard({ change }: { change: ETFChange }) {
           const loadSym = chartLoadSymbol(row.symbol);
           const stockBlock = (
             <>
-              <div className="text-xs text-foreground/90 truncate group-hover:underline">{row.name}</div>
+              <div className="text-xs text-foreground/90 truncate group-hover:underline">{stockDisplayName(row.name, row.symbol)}</div>
               <div className={`text-[10px] font-mono ${meta.textColor}`}>{row.symbol}</div>
             </>
           );
@@ -293,12 +294,12 @@ function HoldingsTable({
         {holdings.map((h, i) => {
           const data = strategyMap?.[h.symbol];
           const loadSym = chartLoadSymbol(h.symbol);
+          const nameNode = loadSym
+            ? <Link href={`/?load=${loadSym}`} className="flex-1 truncate min-w-0 text-foreground/80 hover:text-sky-400 hover:underline transition-colors">{stockDisplayName(data?.name ?? h.name, h.symbol)}</Link>
+            : <span className="flex-1 truncate min-w-0 text-foreground/80">{stockDisplayName(data?.name ?? h.name, h.symbol)}</span>;
           const codeNode = loadSym
             ? <Link href={`/?load=${loadSym}`} className="font-mono text-sky-400 hover:underline shrink-0">{h.symbol}</Link>
             : <span className="font-mono text-muted-foreground shrink-0">{h.symbol}</span>;
-          const nameNode = loadSym
-            ? <Link href={`/?load=${loadSym}`} className="flex-1 truncate min-w-0 text-foreground/80 hover:text-sky-400 hover:underline transition-colors">{data?.name ?? h.name}</Link>
-            : <span className="flex-1 truncate min-w-0 text-foreground/80">{data?.name ?? h.name}</span>;
           return (
             <li key={h.symbol} className="px-3 py-2 border-b border-border/30 hover:bg-muted/20">
               {/* line 1: rank · code · name · weight */}

@@ -5,6 +5,7 @@ import { MarketScanner, StockEntry } from './MarketScanner';
 import { MarketConfig } from './types';
 import { detectTrend, TrendState } from '@/lib/analysis/trendAnalysis';
 import { getTWConcept, fetchTWIndustryMap } from './conceptMap';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 // Fallback list if exchange APIs are unavailable
 const FALLBACK_TW_STOCKS: StockEntry[] = [
@@ -48,7 +49,7 @@ async function loadLocalTWStockMaster(): Promise<StockEntry[]> {
       )
       .map((entry) => ({
         symbol: `${entry.code}.${entry.market === 'TWSE' ? 'TW' : 'TWO'}`,
-        name: entry.name?.trim() || entry.code!,
+        name: entry.name?.trim() || UNRESOLVED_STOCK_NAME,
       }));
     return Array.from(new Map(stocks.map((stock) => [stock.symbol, stock])).values());
   } catch (error) {

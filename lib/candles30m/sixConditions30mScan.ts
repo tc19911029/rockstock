@@ -9,6 +9,7 @@ import type { StockScanResult, MarketId } from '@/lib/scanner/types';
 import { computeIndicators } from '@/lib/indicators';
 import { evaluateSixConditions, detectTrend, detectTrendPosition } from '@/lib/analysis/trendAnalysis';
 import { ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const MIN_BARS = 60; // MA60 暖機需 ≥60 根 30分K
 
@@ -72,7 +73,7 @@ export function scanSixConditions30m(
 
     results.push({
       symbol: sym,
-      name: meta?.name ?? sym,
+      name: stockDisplayName(meta?.name, sym),
       market: 'TW' as MarketId,
       industry: meta?.industry,
       price: last.close,

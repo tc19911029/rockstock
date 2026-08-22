@@ -24,6 +24,7 @@ import {
   darkCloudCover, bearishEngulfingHigh, bearishHaramiHigh,
   bearishPiercingHigh, bearishEncounterHigh, standardRedBlackHigh,
 } from '@/lib/rules/twoBarReversalRules';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 /**
  * 持倉保命警報層（holdingsGuard）需要的持倉資訊。
@@ -231,7 +232,7 @@ function toHoldingInfo(h: RawHolding): MonitoredHoldingInfo | undefined {
   const entryKbar = h.ui?.entryKbar as { high?: number } | undefined;
   const entryHigh = typeof entryKbar?.high === 'number' ? entryKbar.high : undefined;
   return {
-    name: h.name ?? h.symbol,
+    name: stockDisplayName(h.name, h.symbol),
     entryPrice: h.entryPrice,
     stopLoss: typeof h.stopLoss === 'number' && h.stopLoss > 0 ? h.stopLoss : undefined,
     positionSide,

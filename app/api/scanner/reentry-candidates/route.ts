@@ -15,6 +15,7 @@ import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { evaluateReentry } from '@/lib/backtest/reentryRules';
 import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import type { MarketId, ScanDirection, StockScanResult } from '@/lib/scanner/types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -88,7 +89,7 @@ export async function GET(req: NextRequest): Promise<Response> {
           existing.appearances += 1;
         } else {
           seenSymbols.set(r.symbol, {
-            name: r.name || r.symbol,
+            name: stockDisplayName(r.name, r.symbol),
             firstSeenDate: entry.date,
             appearances: 1,
           });

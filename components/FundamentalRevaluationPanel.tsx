@@ -17,6 +17,7 @@ import type {
   FundamentalRevaluationSession,
   FundamentalRevaluationResult,
 } from '@/lib/strategy/fundamentalRevaluation/types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Props {
   date: string;
@@ -147,7 +148,7 @@ export function FundamentalRevaluationPanel({ date, onDateChange: _onDateChange,
                   >
                     <td className="py-1 px-2 font-mono tabular-nums text-muted-foreground">{r.rank}</td>
                     <td className="py-1 px-2 font-mono text-primary">{r.symbol}</td>
-                    <td className="py-1 px-2 truncate max-w-[90px]" title={r.name}>{r.name}</td>
+                    <td className="py-1 px-2 truncate max-w-[90px]" title={stockDisplayName(r.name, r.symbol)}>{stockDisplayName(r.name, r.symbol)}</td>
                     <td className="py-1 px-2 text-right font-mono tabular-nums font-medium">
                       {r.breakdown.total}
                     </td>

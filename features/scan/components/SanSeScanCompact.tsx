@@ -26,6 +26,7 @@ import { SortControl } from '@/components/shared';
 import { ThemeTag } from '@/components/ThemeTag';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
 import { UNIVERSAL_SORT_OPTIONS, type SortDir } from '@/lib/sorting/registry';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { DatePicker } from '@/components/ui/DatePicker';
 
 type ScanLevel = 'strict' | 'medium' | 'loose';       // 後端 results 的三個 level
@@ -59,7 +60,7 @@ interface ScanResp {
 /** records 列 → 畫面 Hit（底反/具名策略衍生清單共用，避免欄位漂移）。 */
 function recToHit(r: RecordRow): Hit {
   return {
-    symbol: r.symbol, name: r.name ?? r.symbol, industry: r.industry ?? '',
+    symbol: r.symbol, name: stockDisplayName(r.name, r.symbol), industry: r.industry ?? '',
     price: r.price ?? 0, changePct: r.changePct ?? 0,
     shortAttack: r.report.scores.shortAttack, midStrength: r.report.scores.midStrength,
     midControl: r.report.scores.midControl, kongPan: r.report.scores.kongPan,

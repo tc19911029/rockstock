@@ -13,10 +13,11 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import type { LockWatchRecord } from '@/lib/scanner/lockWatchTypes';
 import type { SelectedStock } from './ScanChartPanel';
 import { useWatchlistStore } from '@/store/watchlistStore';
+import { isPlaceholderStockName, stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
 import { applySort, type SortValue } from '@/lib/sorting/sortEngine';
-import type { SortDir } from '@/lib/sorting/registry';
+import { isSortId, sortOption, type SortDir } from '@/lib/sorting/registry';
 import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
 import {
   getLockWatchPurchaseBlockReason,
@@ -80,7 +81,11 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
   const inWatchlistSet = useMemo(() => new Set(watchlistItems.map(i => i.symbol)), [watchlistItems]);
   const toggleSort = (k: string) => {
     if (sortKey === k) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(k); setSortDir('desc'); }
+    else {
+      const inlineAsc = new Set(['signal', 'symbol', 'name', 'pattern']);
+      setSortKey(k);
+      setSortDir(isSortId(k) ? sortOption(k).defaultDir : inlineAsc.has(k) ? 'asc' : 'desc');
+    }
   };
   const sortIndicator = (k: string) => sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
@@ -144,7 +149,7 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
     'target-reached': 6,
   };
 
-  // 排序值取法（id 走中央清單；accessor 完全照舊邏輯回值，缺值沿用舊的 -Infinity/0/99 不改成 null）
+  // 排序值取法：未知值回 null，由 sortEngine 永遠墊底，不冒充 0 或極小值。
   const lockWatchSortValue = (r: LockWatchRecord, id: string): SortValue => {
     switch (id) {
       case 'signal': return r.triggerSignal;
@@ -152,11 +157,11 @@ export function LockWatchPanel({ market, onSelectStock }: LockWatchPanelProps) {
       case 'name': return nameMap[r.symbol] ?? '';
       case 'pattern': return r.patternType ?? '';
       case 'triggerPrice': return r.triggerPrice;
-      case 'currentClose': return r.currentClose ?? -Infinity;
+      case 'currentClose': return r.currentClose ?? null;
       case 'trust.upside': {
         // Phase D：用現價算到目標的爬升空間（跟 UI 顯示一致）
         const ref = r.currentClose ?? r.triggerPrice;
-        return r.patternTargetPrice && ref > 0 ? (r.patternTargetPrice - ref) / ref : -Infinity;
+        return r.patternTargetPrice && ref > 0 ? (r.patternTargetPrice - ref) / ref : null;
       }
       case 'trust.achievement': return r.patternType != null
         ? (getLegacyBookAchievementRate(r.patternType) ?? null)
@@ -373,6 +378,8 @@ function LockWatchTableRow({
     ? { label: '待新版重驗', color: 'text-amber-300 font-bold' }
     : stage;
   const symbolBare = record.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+  const displayName = stockDisplayName(name, record.symbol);
+  const hasResolvedName = !isPlaceholderStockName(name, record.symbol);
   // Phase D：用最近收盤計算到測量目標的理論距離（不是即時報酬預測）
   const refPrice = record.currentClose ?? record.triggerPrice;
   const upsidePct =
@@ -387,7 +394,7 @@ function LockWatchTableRow({
 
   // 點代號 / 名稱 → 切到走圖
   const handleSelect = () => {
-    onSelect?.({ symbol: record.symbol, name: name || symbolBare, market });
+    onSelect?.({ symbol: record.symbol, name: displayName, market });
   };
 
   return (
@@ -533,11 +540,12 @@ function LockWatchTableRow({
               </button>
             ) : (
               <button
+                disabled={!hasResolvedName}
                 onClick={() =>
-                  useWatchlistStore.getState().add(record.symbol, name || record.symbol, record.currentClose ?? record.triggerPrice)
+                  useWatchlistStore.getState().add(record.symbol, displayName, record.currentClose ?? record.triggerPrice)
                 }
-                className="shrink-0 px-2 py-0.5 rounded border border-amber-700/50 text-amber-400 hover:text-amber-300 hover:bg-amber-900/30 font-bold"
-                title={`加入自選股（${symbolBare}，參考最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}）`}
+                className="shrink-0 px-2 py-0.5 rounded border border-amber-700/50 text-amber-400 hover:text-amber-300 hover:bg-amber-900/30 font-bold disabled:cursor-not-allowed disabled:opacity-40"
+                title={hasResolvedName ? `加入自選股（${symbolBare}，參考最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}）` : '中文名稱尚未解析，暫不允許加入'}
               >
                 自選
               </button>

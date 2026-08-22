@@ -14,6 +14,8 @@ import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfil
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatHoldingQty, marketFromSymbol, sharesToLots, unitLabelOf } from '@/lib/utils/shareUnits';
 import { formatPercent, bullBearClass } from '@/lib/format';
+import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
+import { isPlaceholderStockName, stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -166,8 +168,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         if (!q.name || q.price <= 0) continue;
         const holding = portfolioState.holdings.find(h => h.symbol === q.symbol);
         if (!holding) continue;
-        const codeOnly = stripSuffix(holding.symbol);
-        const namePlaceholder = !holding.name || holding.name === holding.symbol || holding.name === codeOnly;
+        const namePlaceholder = isPlaceholderStockName(holding.name, holding.symbol);
         const marketMissing = !holding.market;
         if (namePlaceholder || marketMissing) {
           const market: 'TW' | 'CN' = classifyMarket(holding.symbol) === 'CN' ? 'CN' : 'TW';
@@ -446,7 +447,7 @@ function PortfolioContent({ holdings, prices, summary, totalReturnPct, marketTab
               onSelectHolding={onSelectHolding}
               onEdit={() => setEditingId(h.id)}
               onDelete={() => {
-                if (window.confirm(`刪除「${h.name || stripSuffix(h.symbol)}」這筆持倉？\n會永久移除、不留交易紀錄、無法復原。`)) {
+                if (window.confirm(`刪除「${stockDisplayName(h.name, h.symbol)}」這筆持倉？\n會永久移除、不留交易紀錄、無法復原。`)) {
                   remove(h.id);
                 }
               }}
@@ -491,8 +492,8 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
         {/* Row 1: Name/Code/張數 ── Price + Change% */}
         <div className="flex items-baseline justify-between">
           <div className="flex items-baseline gap-1.5 min-w-0">
-            <span className="text-xs font-bold text-foreground truncate">{price?.name || h.name || stripSuffix(h.symbol)}</span>
-            <span className="text-[10px] text-muted-foreground shrink-0">{stripSuffix(h.symbol)}</span>
+            <span className="text-xs font-bold text-foreground truncate">{stockDisplayName(price?.name ?? h.name, h.symbol)}</span>
+            <span className="text-[10px] font-mono text-muted-foreground shrink-0">{stockCodeOf(h.symbol)}</span>
             <span className="text-[9px] text-muted-foreground/60 shrink-0">{formatHoldingQty(h.shares, h.symbol)}</span>
           </div>
           <div className="text-right shrink-0 ml-2">
@@ -574,7 +575,7 @@ function HoldingEditForm({ holding, onDone }: { holding: PortfolioHolding; onDon
   function save() {
     if (!shares || !cost) return;
     update(holding.id, { shares: Number(shares), costPrice: Number(cost), buyDate: date });
-    toast.success(`已更新 ${holding.name || stripSuffix(holding.symbol)}`);
+    toast.success(`已更新 ${stockDisplayName(holding.name, holding.symbol)}`);
     onDone();
   }
 
@@ -589,7 +590,7 @@ function HoldingEditForm({ holding, onDone }: { holding: PortfolioHolding; onDon
   return (
     <div className="px-3 py-2 bg-muted/30 space-y-1.5">
       <div className="text-[11px] font-bold text-foreground">
-        編輯 {holding.name || stripSuffix(holding.symbol)}{' '}
+        編輯 {stockDisplayName(holding.name, holding.symbol)}{' '}
         <span className="text-muted-foreground font-normal">{stripSuffix(holding.symbol)}</span>
       </div>
       <div className="grid grid-cols-2 gap-1.5">
@@ -659,45 +660,20 @@ function PortfolioAddBar() {
     if (!sym || !shares || !cost) return;
     setLoading(true);
     try {
-      const upper = sym.toUpperCase();
-      let candidates: string[];
-      if (/\.(TW|TWO|SS|SZ)$/i.test(upper)) {
-        candidates = [upper];
-      } else if (/^\d{6}$/.test(sym)) {
-        candidates = (sym[0] === '6' || sym[0] === '9') ? [`${sym}.SS`, `${sym}.SZ`] : [`${sym}.SZ`, `${sym}.SS`];
-      } else if (/^\d{4,5}$/.test(sym)) {
-        candidates = [`${sym}.TW`, `${sym}.TWO`];
-      } else {
-        candidates = [upper];
-      }
-
-      let resolvedSymbol = '';
-      let resolvedName = '';
-      for (const candidate of candidates) {
-        try {
-          const qRes = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(candidate)}`);
-          if (!qRes.ok) continue;
-          const qJson = await qRes.json();
-          const q = (qJson.quotes ?? []).find((x: { symbol: string; canonicalSymbol?: string; price: number; name?: string }) => x.price > 0);
-          if (q) {
-            resolvedSymbol = q.canonicalSymbol ?? q.symbol ?? candidate;
-            resolvedName = q.name ?? '';
-            break;
-          }
-        } catch { continue; }
-      }
-      if (!resolvedSymbol) throw new Error('找不到股票，請確認代號是否正確');
+      const resolved = await fetchResolvedStockQuote(sym);
+      const resolvedSymbol = resolved.canonicalSymbol;
+      const resolvedName = resolved.name;
 
       const mkt: 'TW' | 'CN' = classifyMarket(resolvedSymbol) === 'CN' ? 'CN' : 'TW';
       add({
         symbol: resolvedSymbol,
-        name: resolvedName || resolvedSymbol,
+        name: resolvedName,
         shares: Number(shares),
         costPrice: Number(cost),
         buyDate: date,
         market: mkt,
       });
-      toast.success(`已新增 ${resolvedName || resolvedSymbol}`);
+      toast.success(`已新增 ${resolvedName}`);
       setSymbol(''); setShares(''); setCost(''); setDate(todayCST()); setOpen(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '新增失敗，請確認代號');
@@ -845,7 +821,7 @@ function WatchlistItemRow({ item, prices }: { item: ReturnType<typeof useWatchli
         {/* Row 1: 名稱+代號 | 現價+今日% */}
         <div className="flex items-baseline justify-between">
           <div className="flex items-baseline gap-1.5 min-w-0">
-            <span className="text-xs font-bold text-foreground truncate">{p?.name ?? item.name}</span>
+            <span className="text-xs font-bold text-foreground truncate">{stockDisplayName(p?.name ?? item.name, item.symbol)}</span>
             <span className="text-[10px] text-muted-foreground shrink-0">{stripSuffix(item.symbol)}</span>
           </div>
           <div className="text-right shrink-0 ml-2">
@@ -909,38 +885,10 @@ function WatchlistAddBar() {
     if (!sym) return;
     setLoading(true);
     try {
-      const upper = sym.toUpperCase();
-      let candidates: string[];
-      if (/\.(TW|TWO|SS|SZ)$/i.test(upper)) {
-        candidates = [upper];
-      } else if (/^\d{6}$/.test(sym)) {
-        candidates = (sym[0] === '6' || sym[0] === '9')
-          ? [`${sym}.SS`, `${sym}.SZ`]
-          : [`${sym}.SZ`, `${sym}.SS`];
-      } else if (/^\d{4,5}$/.test(sym)) {
-        candidates = [`${sym}.TW`, `${sym}.TWO`];
-      } else {
-        candidates = [upper];
-      }
-
-      let resolvedSymbol = '';
-      let resolvedName = '';
-      let resolvedPrice = 0;
-      for (const candidate of candidates) {
-        try {
-          const qRes = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(candidate)}`);
-          if (!qRes.ok) continue;
-          const qJson = await qRes.json();
-          const q = (qJson.quotes ?? []).find((x: { symbol: string; price: number }) => x.price > 0);
-          if (q) {
-            resolvedSymbol = q.symbol ?? candidate;
-            resolvedName = q.name ?? '';
-            resolvedPrice = q.price;
-            break;
-          }
-        } catch { continue; }
-      }
-      if (!resolvedSymbol) throw new Error('找不到股票，請確認代號是否正確');
+      const resolved = await fetchResolvedStockQuote(sym);
+      const resolvedSymbol = resolved.canonicalSymbol;
+      const resolvedName = resolved.name;
+      const resolvedPrice = resolved.price;
 
       let addedPrice: number | undefined;
       if (addDate === today()) {
@@ -955,9 +903,9 @@ function WatchlistAddBar() {
         } catch { /* ignore */ }
       }
 
-      add(resolvedSymbol, resolvedName || resolvedSymbol, addedPrice, addDate + 'T00:00:00.000Z');
+      add(resolvedSymbol, resolvedName, addedPrice, addDate + 'T00:00:00.000Z');
       setAddInput('');
-      toast.success(`已加入 ${resolvedName || resolvedSymbol}${addedPrice ? `（基準 ${addedPrice}）` : ''}`);
+      toast.success(`已加入 ${resolvedName}${addedPrice ? `（基準 ${addedPrice}）` : ''}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '找不到股票，請確認代號是否正確');
     } finally {

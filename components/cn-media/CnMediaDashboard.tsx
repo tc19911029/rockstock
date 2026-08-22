@@ -42,6 +42,7 @@ import type {
   CnMediaStockScoring,
 } from '@/lib/cn-media/analysisStorage';
 import type { CnMediaScanResult, CnMediaSource, CnMediaVideo } from '@/lib/cn-media/types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 type ViewKey = 'summary' | 'stocks' | 'sources';
 
@@ -967,7 +968,7 @@ function StockCard({ stock }: { stock: AggregatedStock }) {
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle>{stock.name} <span className="ml-1 font-mono text-sm text-muted-foreground">{stock.code}</span></CardTitle>
+            <CardTitle>{stockDisplayName(stock.name, stock.code)} <span className="ml-1 font-mono text-sm text-muted-foreground">{stock.code}</span></CardTitle>
             <CardDescription className="mt-1">{stock.mentions.length} 次提及 · {sourceCount} 個節目來源</CardDescription>
           </div>
           {scoring && <Badge variant="outline" className={cn('h-8 min-w-12 text-base', ratingClass(scoring.rating))}>{scoring.rating}</Badge>}

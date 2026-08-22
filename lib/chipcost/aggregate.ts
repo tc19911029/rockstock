@@ -8,8 +8,6 @@
  *   #9 融資追繳價（130%）            ← marginLiquidationPrice
  */
 
-import path from 'path';
-import { promises as fs } from 'fs';
 import { getMarginSeries, getSblSeries, getPriceSeries } from '@/lib/squeeze/dataLoader';
 import { computeShortCosts } from '@/lib/squeeze/costEstimator';
 import { marginCallPrice } from '@/lib/squeeze/marginCallPrice';
@@ -30,6 +28,8 @@ import { adjustMarginNetForExRights, fetchExRightsEvents } from './exRightsAdjus
 import { buildMarginInterpretation, buildMarginWarnings } from './narrator';
 import type { CostBasisBundle, CostBucket, CostBasisSummary } from './types';
 import { EMPTY_BUCKET } from './types';
+import { resolveStockIdentity } from '@/lib/stocks/resolveStockIdentity';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 // 抓 ~90 交易日（covers 60d window + buffer）
 const LOOKBACK_CALENDAR_DAYS = 130;
@@ -41,13 +41,8 @@ function ymdDaysAgo(end: string, days: number): string {
 }
 
 async function loadStockName(code: string): Promise<string> {
-  try {
-    const p = path.join(process.cwd(), 'data', 'youtube', 'stock-master.json');
-    const d = JSON.parse(await fs.readFile(p, 'utf8')) as { entries: Array<{ code: string; name: string }> };
-    return d.entries.find(e => e.code === code)?.name ?? code;
-  } catch {
-    return code;
-  }
+  const identity = await resolveStockIdentity({ symbol: code, marketHint: 'TW' });
+  return identity.name ?? UNRESOLVED_STOCK_NAME;
 }
 
 function balChange(arr: number[], n: number): number {

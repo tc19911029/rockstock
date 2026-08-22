@@ -21,6 +21,7 @@
 import { marketFromSymbol } from '@/lib/utils/shareUnits';
 import { STOP_LOSS_DEFAULT_PCT } from '@/lib/portfolio/holdingsImport';
 import type { MarketId } from '@/lib/scanner/types';
+import { isPlaceholderStockName, stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 /** 與 store/portfolioStore.ts PortfolioHolding 同欄位（避免循環 import） */
 export interface StorePortfolioHolding {
@@ -71,8 +72,8 @@ export function mapStoreToServerHolding(h: StorePortfolioHolding): MappingResult
   if (!h.symbol || !/^[A-Za-z0-9._-]+$/.test(h.symbol)) {
     return { ok: false, reason: `symbol 格式錯 (${h.symbol})` };
   }
-  if (!h.name || h.name.trim() === '') {
-    return { ok: false, reason: 'name 為空' };
+  if (isPlaceholderStockName(h.name, h.symbol)) {
+    return { ok: false, reason: 'name 尚未解析，禁止以股票代號代替名稱' };
   }
   if (!Number.isFinite(h.shares) || h.shares <= 0 || !Number.isInteger(h.shares)) {
     return { ok: false, reason: `shares 必須為正整數 (got ${h.shares})` };
@@ -219,7 +220,7 @@ export function mapServerToStoreHolding(
     ...ui,                                 // 先展開 UI 富欄位（會被下面核心欄位覆蓋）
     id: `srv-${symbol}`,
     symbol,
-    name: typeof s.name === 'string' ? s.name : symbol,
+    name: stockDisplayName(s.name, symbol),
     shares: Number(s.shares) || 0,
     costPrice: Number(s.entryPrice) || 0,
     buyDate: typeof s.entryDate === 'string' ? s.entryDate : '',

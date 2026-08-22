@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 
 export interface WatchlistItem {
   symbol: string;
@@ -26,6 +27,10 @@ export const useWatchlistStore = create<WatchlistStore>()(
     (set, get) => ({
       items: [],
       add: (symbol, name, addedPrice, addedAt) => {
+        if (isPlaceholderStockName(name, symbol)) {
+          console.warn('[watchlistStore] 拒絕寫入未解析股名:', symbol);
+          return;
+        }
         if (!get().has(symbol)) {
           set(s => ({
             items: [...s.items, {

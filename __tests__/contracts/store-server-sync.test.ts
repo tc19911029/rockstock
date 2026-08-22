@@ -102,6 +102,12 @@ describe('mapStoreToServerHolding', () => {
     expect(r.reason).toContain('name');
   });
 
+  test.each(['2408', '2408.TW'])('name=%s（代號占位）→ reject', (name) => {
+    const r = mapStoreToServerHolding(makeHolding({ name }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('name');
+  });
+
   test('UI-only 欄位（triggerPrice / entryKbar / recentHigh 等）不會洩漏到 server payload', () => {
     const h: StorePortfolioHolding & Record<string, unknown> = {
       ...makeHolding(),

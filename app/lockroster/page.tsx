@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { PageShell, PageHeader, StatsCard, EmptyState } from '@/components/shared';
 import type { LockRoster, LockRosterEntry, RosterReview } from '@/lib/scanner/lockRoster';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 type Market = 'TW' | 'CN';
 
@@ -171,7 +172,7 @@ export default function LockRosterBoardPage() {
                     >
                       <div className="flex items-center justify-between gap-1">
                         <Link href={`/?load=${e.symbol}`} className="font-bold hover:underline truncate">
-                          {e.name} <span className="font-mono text-muted-foreground text-xs">{e.symbol}</span>
+                          {stockDisplayName(e.name, e.symbol)} <span className="font-mono text-muted-foreground text-xs">{e.symbol}</span>
                         </Link>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
                           r.tone === 'hot' ? 'bg-bull/15 text-bull' : r.tone === 'warm' ? 'bg-amber-400/15 text-amber-400' : 'bg-secondary text-muted-foreground'
@@ -214,7 +215,7 @@ export default function LockRosterBoardPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Link href={`/?load=${e.symbol}`} className="font-bold hover:underline text-sm">
-                              {e.name} <span className="font-mono text-muted-foreground text-xs">{e.symbol}</span>
+                              {stockDisplayName(e.name, e.symbol)} <span className="font-mono text-muted-foreground text-xs">{e.symbol}</span>
                             </Link>
                             <span className="px-1.5 py-0.5 rounded bg-secondary text-[10px]">{CAT_EMOJI[e.category]} {e.label}</span>
                             <span className={`text-[10px] px-1.5 py-0.5 rounded ${

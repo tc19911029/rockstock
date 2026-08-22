@@ -145,8 +145,13 @@ export async function loadCnStockBundles(
 }
 
 async function loadIndex(symbol: string): Promise<Record<string, unknown> | null> {
+  const indexNames: Record<string, string> = {
+    '000001.SS': '上證指數',
+    '399001.SZ': '深證成指',
+    '399006.SZ': '創業板指',
+  };
   const entry: CnStockMasterEntry = {
-    code: symbol.split('.')[0], symbol, name: symbol, exchange: symbol.endsWith('.SS') ? 'SSE' : 'SZSE',
+    code: symbol.split('.')[0], symbol, name: indexNames[symbol] ?? '指數名稱待補', exchange: symbol.endsWith('.SS') ? 'SSE' : 'SZSE',
     industry: null, aliases: [],
   };
   const result = await loadTechnical(entry);

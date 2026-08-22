@@ -18,6 +18,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import { loadScanSession, listScanDates } from '@/lib/storage/scanStorage';
 import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
+import { resolveStockIdentity } from '@/lib/stocks/resolveStockIdentity';
 import { buildTechnicalQuestion } from '@/lib/agents/agents/technicalAgent';
 import { buildNewsQuestion } from '@/lib/agents/agents/newsAgent';
 import { buildChipQuestion } from '@/lib/agents/agents/chipAgent';
@@ -119,7 +120,9 @@ async function prepareSingle(
   holding: HoldingEntry | null,
 ): Promise<PrepareResult> {
   const market: MarketId = holding?.market ?? (symbol.match(/^\d{6}(\.SS|\.SZ)?$/) ? 'CN' : 'TW');
-  const name = holding?.name ?? symbol;
+  const identity = await resolveStockIdentity({ symbol, marketHint: market, providedName: holding?.name });
+  if (!identity.name) throw new Error(`查不到 ${symbol} 的正式股票名稱，未準備持股分析`);
+  const name = identity.name;
 
   const agentsPrepped: string[] = [];
   let candidateInfo: Awaited<ReturnType<typeof findRecentCandidateRow>> = null;

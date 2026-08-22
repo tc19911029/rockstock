@@ -139,4 +139,11 @@ describe('aggregateHotThemes', () => {
   it('門檻常數保持一致（避免誤改）', () => {
     expect(HOT_MIN_HEAT).toBe(25);
   });
+
+  it('行情缺名稱時顯示待補狀態，不把代號當作股名', () => {
+    const r = aggregateHotThemes(makeParams([
+      { symbol: '2330', name: '2330', changePercent: 8, volume: 1 },
+    ]));
+    expect(r.themes[0].members[0].name).toBe('名稱待補');
+  });
 });

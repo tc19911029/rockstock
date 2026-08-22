@@ -14,6 +14,8 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
+import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
+import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 import type {
   PortfolioAction,
   PortfolioHolding,
@@ -288,9 +290,11 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
     setBusy(true);
     setErr(null);
     try {
+      const resolved = await fetchResolvedStockQuote(form.symbol);
+      setForm(current => ({ ...current, symbol: resolved.canonicalSymbol, name: resolved.name }));
       const payload = {
-        symbol: form.symbol,
-        name: form.name || form.symbol,
+        symbol: resolved.canonicalSymbol,
+        name: resolved.name,
         market: form.market,
         entryDate: form.entryDate,
         entryPrice: Number(form.entryPrice),
@@ -407,8 +411,8 @@ function HoldingCard({
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
           <div>
-            <div className="font-mono font-semibold text-foreground">{holding.symbol}</div>
-            <div className="text-xs text-muted-foreground">{holding.name}</div>
+            <div className="font-semibold text-foreground">{stockDisplayName(holding.name, holding.symbol)}</div>
+            <div className="text-xs font-mono text-muted-foreground">{stockCodeOf(holding.symbol)}</div>
           </div>
           {actionCfg && (
             <span className={`inline-flex items-center px-3 py-1 rounded-lg border text-xs font-semibold ${actionCfg.cls}`}>

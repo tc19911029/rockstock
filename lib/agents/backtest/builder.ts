@@ -20,6 +20,8 @@ import {
 import type { FinalDecision, TechnicalAnswer } from '@/lib/agents/types';
 import type { AgentRunMeta } from '@/lib/agents/types';
 import type { MarketId, StockForwardPerformance } from '@/lib/scanner/types';
+import { resolveStockIdentity } from '@/lib/stocks/resolveStockIdentity';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 export interface BuildBacktestArgs {
   market: MarketId;
@@ -74,10 +76,23 @@ export async function buildBacktest(args: BuildBacktestArgs): Promise<BacktestRe
 
   if (targets.length === 0) return emptyReport(market, date);
 
+  const identities = await Promise.all(targets.map(t => resolveStockIdentity({
+    symbol: t.meta.symbol,
+    marketHint: t.meta.market,
+  })));
+  const nameBySymbol = new Map(identities.map(identity => [
+    identity.requestedSymbol,
+    identity.name ?? UNRESOLVED_STOCK_NAME,
+  ]));
+
   // 3. ForwardAnalyzer
   const batchInput = targets
     .filter(t => t.entryPrice != null)
-    .map(t => ({ symbol: t.meta.symbol, name: t.meta.symbol, scanPrice: t.entryPrice! }));
+    .map(t => ({
+      symbol: t.meta.symbol,
+      name: nameBySymbol.get(t.meta.symbol) ?? UNRESOLVED_STOCK_NAME,
+      scanPrice: t.entryPrice!,
+    }));
 
   let forwardResults: StockForwardPerformance[] = [];
   if (batchInput.length > 0) {
@@ -131,7 +146,7 @@ export async function buildBacktest(args: BuildBacktestArgs): Promise<BacktestRe
 
     return {
       symbol: t.meta.symbol,
-      name: t.meta.symbol,
+      name: nameBySymbol.get(t.meta.symbol) ?? UNRESOLVED_STOCK_NAME,
       market: t.meta.market,
       action: t.decision.action,
       decisionPath: t.decision.decisionPath,

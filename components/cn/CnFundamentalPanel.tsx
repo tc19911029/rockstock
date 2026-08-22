@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react';
 import { FundamentalSidebarPanel } from '@/components/FundamentalSidebarPanel';
 import { FundamentalTrendPanel } from '@/components/fundamentals/FundamentalTrendPanel';
 import type { FundamentalTrendHistory } from '@/lib/fundamentals/trends';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Fin {
   reportDate: string; revenue: number | null; revenueYoY: number | null;
@@ -79,7 +80,8 @@ export default function CnFundamentalPanel({ symbol, currentPrice, date, isHisto
       {/* 估值頭 */}
       <section className="rounded-xl ring-1 ring-foreground/10 bg-card px-2.5 py-2.5">
         <div className="text-center">
-          <span className="font-semibold text-fuchsia-300">{val?.name ?? code}</span>
+          <span className="font-semibold text-fuchsia-300">{stockDisplayName(val?.name, symbol)}</span>
+          <span className="ml-1 font-mono text-[10px] text-muted-foreground">{code}</span>
           {price != null && <span className="ml-2 font-mono text-base font-bold">{price}</span>}
           {isHistorical && date && <span className="ml-2 text-[9px] text-amber-300">歷史價 {date}</span>}
         </div>

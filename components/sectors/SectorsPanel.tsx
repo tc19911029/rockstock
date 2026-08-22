@@ -20,6 +20,7 @@ import { useIsChartCurrent } from '@/lib/chartListNav';
 import { SectorsNavContext, SectorsBadgesContext, useSectorBadges, StockLink, StockBadges, AddWatchBtn, type SectorSelectStock, type SectorBadgeSets, type ScanSig, type SixCondSig } from './StockLink';
 import { CnView } from './CnView';
 import { LiveThemesView } from './LiveThemesView';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 // ── 型別 ──────────────────────────────────────────────────────────────────────
 
@@ -154,7 +155,7 @@ function StockCard({ m }: { m: PerfMember }) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
           <StockLink code={m.code} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
-            <span className="font-semibold text-foreground text-sm">{m.name}</span>
+            <span className="font-semibold text-foreground text-sm">{stockDisplayName(m.name, m.code)}</span>
             <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
           </StockLink>
           <StockLink code={m.code} title="走圖"

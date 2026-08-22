@@ -11,6 +11,7 @@ import type {
   FundamentalRevaluationDeepSession,
   FundamentalRevaluationResult,
 } from '@/lib/strategy/fundamentalRevaluation/types';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 type Market = 'TW' | 'CN';
 type ViewKey = 'top20' | 'top100' | 'one_time_gain' | 'stretched' | 'cyclical_peak' | 'insufficient';
@@ -232,7 +233,7 @@ function FundamentalRevaluationInner() {
                 {exclusionRows.map((r, i) => (
                   <li key={i} className="flex items-baseline gap-2 border-b border-border/50 py-1.5">
                     <span className="font-mono text-primary">{r.symbol}</span>
-                    <span>{r.name}</span>
+                    <span>{stockDisplayName(r.name, r.symbol)}</span>
                     <span className="text-muted-foreground ml-auto">{r.reason}</span>
                   </li>
                 ))}

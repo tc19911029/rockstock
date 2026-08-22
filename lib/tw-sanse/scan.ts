@@ -24,6 +24,7 @@ import type {
   SanSeHit, ResonanceRecord, ResonanceCounts, SanSeScanResult, SanSeIntradayInput,
 } from '@/lib/cn-sanse/scan';
 import { SANSE_TURNOVER_TOP_N, topTurnoverRanks, appendTodayBar, computeZhuSix } from '@/lib/cn-sanse/scan';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 const INDEX_SYMBOL = '^TWII';   // 加權指數（RS 基準 + 行情日曆）
 const MIN_BARS = 250;
@@ -65,7 +66,7 @@ async function loadTwUniverse(): Promise<StockEntry[]> {
   for (const symbol of symbols) {
     if (!isCommonStock(symbol)) continue;
     const code = symbol.replace(/\.(TW|TWO)$/i, '');
-    const name = nameMap.get(code) ?? symbol;
+    const name = nameMap.get(code) ?? UNRESOLVED_STOCK_NAME;
     // 排除存託憑證（外國企業 TDR，名稱含「DR」，非台股普通股；如 9103 美德醫DR）
     if (/DR$/.test(name) || name.includes('-DR')) continue;
     // 產業題材：題材對照優先（蘋果供應鏈/AI伺服器/記憶體…），沒命中退回 TWSE 產業別（金融保險/航運…）。
@@ -176,7 +177,8 @@ export async function scanTwSanSe(opts?: { asOfDate?: string; topN?: number; int
       const report = evalConditions(candles, indexClose, series);
       if (report.selected) {
         records.push({
-          symbol: s.symbol, name: s.name, industry: s.industry ?? '', price: lastClose, changePct, report,
+          symbol: s.symbol, name: s.name, industry: s.industry ?? '', price: lastClose, changePct,
+          shortOversold: evalLatest(series, 'medium').shortOversold, report,
           zhuSix: computeZhuSix(candles), // 六條件確認欄（只對入選紀錄算；台股交集回測有效）
         });
       }

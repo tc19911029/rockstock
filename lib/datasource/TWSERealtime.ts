@@ -11,6 +11,7 @@
 import { globalCache } from './MemoryCache';
 import { fetchJsonWithCurlFallback } from './curlFetch';
 import { isValidTwTick, snapTwTick } from './twTick';
+import { UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 export interface TWSEQuote {
   code: string;       // 純數字代碼，如 "2330"
@@ -180,7 +181,7 @@ async function fetchAllQuotes(): Promise<Map<string, TWSEQuote>> {
         const previousClose = change !== null ? +(close - change).toFixed(2) : undefined;
         map.set(code, {
           code,
-          name: row.CompanyName?.trim() ?? code,
+          name: row.CompanyName?.trim() || UNRESOLVED_STOCK_NAME,
           open: parseNum(row.Open),
           high: parseNum(row.High),
           low: parseNum(row.Low),
@@ -243,7 +244,7 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
     const misDate = d.d ? `${d.d.slice(0, 4)}-${d.d.slice(4, 6)}-${d.d.slice(6, 8)}` : today;
     return {
       code: d.c || code,
-      name: d.n?.trim() || code,
+      name: d.n?.trim() || UNRESOLVED_STOCK_NAME,
       open: parseMisPrice(d.o) || close,
       high: parseMisPrice(d.h) || close,
       low: parseMisPrice(d.l) || close,
@@ -490,7 +491,7 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
         const prevClose = parseMisPrice(d.y);
         map.set(code, {
           code,
-          name: d.n?.trim() || code,
+          name: d.n?.trim() || UNRESOLVED_STOCK_NAME,
           open:  parseMisPrice(d.o) || close,
           high:  parseMisPrice(d.h) || close,
           low:   parseMisPrice(d.l) || close,

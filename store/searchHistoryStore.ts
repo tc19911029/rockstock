@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { isPlaceholderStockName, UNRESOLVED_STOCK_NAME } from '@/lib/stocks/stockIdentity';
 
 export interface SearchHistoryItem {
   symbol: string;
@@ -25,14 +26,19 @@ export const useSearchHistoryStore = create<SearchHistoryStore>()(
         const sym = symbol.trim();
         if (!sym || sym === 'mock') return;
         set(s => {
-          // 已是最新一筆 → 不動（避免 polling 刷新時每個 tick 重寫 localStorage）
-          if (s.items[0]?.symbol === sym) return s;
           const rest = s.items.filter(i => i.symbol !== sym);
-          // 沒帶 name 時沿用舊紀錄的 name，避免覆蓋成空字串
           const prevName = s.items.find(i => i.symbol === sym)?.name;
+          // 正式名稱可以修復舊的空白／代號紀錄；占位輸入不得洗掉既有正式名稱。
+          const nextName = !isPlaceholderStockName(name, sym)
+            ? name!.trim()
+            : !isPlaceholderStockName(prevName, sym)
+              ? prevName!
+              : UNRESOLVED_STOCK_NAME;
+          // 已是最新且名稱也相同 → 不動，避免 polling 每個 tick 重寫 localStorage。
+          if (s.items[0]?.symbol === sym && s.items[0].name === nextName) return s;
           return {
             items: [
-              { symbol: sym, name: name?.trim() || prevName || '', searchedAt: new Date().toISOString() },
+              { symbol: sym, name: nextName, searchedAt: new Date().toISOString() },
               ...rest,
             ].slice(0, MAX_HISTORY),
           };

@@ -5,6 +5,7 @@ import { useReplayStore } from '@/store/replayStore';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
 import { buildStockLoadHref } from '@/lib/navigation/stockUrl';
+import { isPlaceholderStockName, stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const DEFAULT_QUICK_STOCKS = [
   { symbol: 'mock',  name: '📊 範例資料（離線）' },
@@ -94,7 +95,9 @@ export default function StockSelector() {
   const toggleWatch = useCallback(() => {
     if (!currentStock?.ticker) return;
     if (inWatchlist) removeWatch(currentStock.ticker);
-    else addWatch(currentStock.ticker, currentStock.name || rawSymbol(currentStock.ticker));
+    else if (isPlaceholderStockName(currentStock.name, currentStock.ticker)) {
+      setError('中文名稱尚未解析完成，請稍後再加入自選股');
+    } else addWatch(currentStock.ticker, currentStock.name);
   }, [currentStock, inWatchlist, addWatch, removeWatch]);
 
   const filtered = input.length > 0
@@ -140,8 +143,8 @@ export default function StockSelector() {
                     className="w-full text-left px-2 py-1.5 text-xs flex gap-2 items-center min-w-0 hover:bg-background/40"
                   >
                     <span className="text-muted-foreground shrink-0">🕘</span>
-                    <span className="font-mono text-yellow-400 w-12 shrink-0">{s.symbol}</span>
-                    <span className="text-foreground/80 truncate">{s.name}</span>
+                    <span className="text-foreground/80 truncate flex-1">{stockDisplayName(s.name, s.symbol)}</span>
+                    <span className="font-mono text-yellow-400 shrink-0">{stockCodeOf(s.symbol)}</span>
                   </button>
                 ))}
                 {filtered.length > 0 && (
@@ -156,8 +159,8 @@ export default function StockSelector() {
                 onClick={() => { setInput(s.symbol === 'mock' ? '' : s.symbol); handleLoad(s.symbol); }}
                 className="w-full text-left px-2 py-1.5 text-xs flex gap-2 items-center min-w-0 hover:bg-background/40"
               >
-                <span className="font-mono text-yellow-400 w-10 shrink-0">{s.symbol === 'mock' ? '---' : s.symbol}</span>
-                <span className="text-foreground/80 truncate">{s.name}</span>
+                <span className="text-foreground/80 truncate flex-1">{s.symbol === 'mock' ? s.name : stockDisplayName(s.name, s.symbol)}</span>
+                <span className="font-mono text-yellow-400 shrink-0">{s.symbol === 'mock' ? '---' : stockCodeOf(s.symbol)}</span>
               </button>
             ))}
           </div>

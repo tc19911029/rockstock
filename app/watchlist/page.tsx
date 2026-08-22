@@ -11,6 +11,8 @@ import LockRosterPanel from '@/components/LockRosterPanel';
 import { Button } from '@/components/ui/button';
 import { formatPrice, formatPercent, formatDate, formatTime, bullBearClass } from '@/lib/format';
 import { classifyMarket, filterByMarket, type MarketTab } from '@/lib/market/classify';
+import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
+import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface ConditionData {
   symbol: string;
@@ -92,44 +94,10 @@ export default function WatchlistPage() {
     if (!sym) return;
     setAddLoading(true);
     try {
-      // Fast path: resolve symbol + get current price via lightweight quotes endpoint.
-      // This avoids the heavy 1-year candle fetch that times out when providers are down.
-      // 代號→候選後綴：台股 4-5 碼(.TW/.TWO)、陸股 6 碼(6/9 開頭=上海 .SS，其餘=深圳 .SZ)。
-      // 已帶後綴的直接用。曾因 6 碼陸股(如 600707)被硬塞 .TW/.TWO 而搜不到。
-      const upper = sym.toUpperCase();
-      let candidates: string[];
-      if (/\.(TW|TWO|SS|SZ)$/i.test(upper)) {
-        candidates = [upper];
-      } else if (/^\d{6}$/.test(sym)) {
-        candidates = (sym[0] === '6' || sym[0] === '9')
-          ? [`${sym}.SS`, `${sym}.SZ`]
-          : [`${sym}.SZ`, `${sym}.SS`];
-      } else if (/^\d{4,5}$/.test(sym)) {
-        candidates = [`${sym}.TW`, `${sym}.TWO`];
-      } else {
-        candidates = [upper];
-      }
-
-      let resolvedSymbol = '';
-      let resolvedName = '';
-      let resolvedPrice = 0;
-
-      for (const candidate of candidates) {
-        try {
-          const qRes = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(candidate)}`);
-          if (!qRes.ok) continue;
-          const qJson = await qRes.json();
-          const q = (qJson.quotes ?? []).find((x: { symbol: string; price: number }) => x.price > 0);
-          if (q) {
-            resolvedSymbol = q.symbol ?? candidate;
-            resolvedName = q.name ?? '';
-            resolvedPrice = q.price;
-            break;
-          }
-        } catch { continue; }
-      }
-
-      if (!resolvedSymbol) throw new Error('找不到股票，請確認代號是否正確');
+      const resolved = await fetchResolvedStockQuote(sym);
+      const resolvedSymbol = resolved.canonicalSymbol;
+      const resolvedName = resolved.name;
+      const resolvedPrice = resolved.price;
 
       // 查詢加入日期的收盤價，用於計算加入至今漲幅
       let addedPrice: number | undefined;
@@ -146,9 +114,9 @@ export default function WatchlistPage() {
         } catch { /* ignore */ }
       }
 
-      add(resolvedSymbol, resolvedName || resolvedSymbol, addedPrice, addDate + 'T00:00:00.000Z');
+      add(resolvedSymbol, resolvedName, addedPrice, addDate + 'T00:00:00.000Z');
       setAddInput('');
-      toast.success(`已加入 ${resolvedName || resolvedSymbol}${addedPrice ? `（基準 ${addedPrice}）` : ''}`);
+      toast.success(`已加入 ${resolvedName}${addedPrice ? `（基準 ${addedPrice}）` : ''}`);
 
       // Load full conditions in background (may fail gracefully)
       fetchConditions(resolvedSymbol);
@@ -274,8 +242,8 @@ export default function WatchlistPage() {
                 <div className="flex items-center gap-3 px-4 py-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-foreground">{item.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '')}</span>
-                      <span className="text-xs text-muted-foreground truncate" title={d?.name ?? item.name}>{d?.name ?? item.name}</span>
+                      <span className="font-bold text-foreground truncate" title={stockDisplayName(d?.name ?? item.name, item.symbol)}>{stockDisplayName(d?.name ?? item.name, item.symbol)}</span>
+                      <span className="text-xs font-mono text-muted-foreground shrink-0">{stockCodeOf(item.symbol)}</span>
                     </div>
                     {/* Strategy chips：只顯示有命中的買法 */}
                     {d && !d.loading && !d.error && (d.matchedMethods?.length ?? 0) > 0 && (

@@ -6,6 +6,7 @@ import { PARTIAL_EXIT_SIGNAL_TYPE_SET } from '@/lib/portfolio/holdingExecution';
 import type { HoldingAction } from '@/lib/agents/holdingsActionEngine';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   stop_loss:   'bg-red-900/60 text-red-100 border-red-500',
@@ -164,8 +165,8 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
           {item.positionSide === 'short' && (
             <span className="text-[9px] px-1 rounded bg-rose-900/50 text-rose-200 border border-rose-700" title="做空（放空）部位">🔻空</span>
           )}
+          <span className="text-xs font-medium text-foreground truncate">{stockDisplayName(item.name, item.symbol)}</span>
           <span className="font-mono text-[11px] text-foreground/80">{item.symbol.replace(/\.(TW|TWO)$/, '')}</span>
-          <span className="text-xs font-medium text-foreground truncate">{item.name}</span>
         </div>
         <span
           className={`text-[11px] px-1.5 py-0.5 rounded border font-bold ${cls}`}

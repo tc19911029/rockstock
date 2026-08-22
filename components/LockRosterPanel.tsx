@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { LockRoster, RosterReview } from '@/lib/scanner/lockRoster';
+import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const CAT_EMOJI: Record<number, string> = {
   1: '🏗', 2: '📦', 3: '🎢', 4: '🔁', 5: '➖', 6: '📐', 7: '🧩', 8: '⬛',
@@ -79,7 +80,7 @@ export default function LockRosterPanel({ market = 'TW' }: { market?: 'TW' | 'CN
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <Link href={`/?load=${e.symbol}`} className="font-bold hover:underline">
-                    {e.name} <span className="font-mono text-muted-foreground">{e.symbol}</span>
+                    {stockDisplayName(e.name, e.symbol)} <span className="font-mono text-muted-foreground">{e.symbol}</span>
                   </Link>
                   <span className="px-1.5 py-0.5 rounded bg-secondary text-[10px]">
                     {CAT_EMOJI[e.category]} {e.label}
