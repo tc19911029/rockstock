@@ -643,7 +643,13 @@ function ValuationButton({ symbol, currentValuation, freshness, onValuationReady
         setMessage(j.updateMode === 'incremental'
           ? '新資料已確認，正在增量更新情境與 EPS（通常約 1–4 分鐘）…'
           : '資料整理完成，正在執行完整深度估值（通常約 3–10 分鐘）…');
-        startPolling(currentValuation?.updatedAt);
+        if (typeof j.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(j.date)) {
+          setPhase('error');
+          setMessage('背景工作未回傳有效資料日期，無法安全追蹤估值結果。');
+          return;
+        }
+        const jobDate = j.date;
+        startPolling(currentValuation?.updatedAt, jobDate);
       } else {
         setPhase('error');
         setMessage(`估值資料已整理，但 Rockstar 內建分析未啟動：${job?.detail ?? '未知原因'}。請稍後重試。`);
@@ -654,7 +660,7 @@ function ValuationButton({ symbol, currentValuation, freshness, onValuationReady
     }
   };
 
-  const startPolling = (previousUpdatedAt?: string) => {
+  const startPolling = (previousUpdatedAt: string | undefined, jobDate: string) => {
     stopPolling();
     const start = Date.now();
     const MAX_MS = 15 * 60 * 1000;  // 深度查核同業與公司行動時可能超過 5 分鐘
@@ -666,13 +672,12 @@ function ValuationButton({ symbol, currentValuation, freshness, onValuationReady
         return;
       }
       try {
-        const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
         const [valuationRes, statusRes] = await Promise.all([
-          fetch(`/api/valuation/${encodeURIComponent(symbol)}?date=${today}&_=${Date.now()}`, { cache: 'no-store' }),
-          fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}?date=${today}&_=${Date.now()}`, { cache: 'no-store' }),
+          fetch(`/api/valuation/${encodeURIComponent(symbol)}?date=${jobDate}&_=${Date.now()}`, { cache: 'no-store' }),
+          fetch(`/api/valuation/prepare/${encodeURIComponent(symbol)}?date=${jobDate}&_=${Date.now()}`, { cache: 'no-store' }),
         ]);
         const [j, statusJson] = await Promise.all([valuationRes.json(), statusRes.json()]);
-        const isNewResult = j.ok && j.valuation && j.date === today && (!previousUpdatedAt || j.updatedAt !== previousUpdatedAt);
+        const isNewResult = j.ok && j.valuation && j.date === jobDate && (!previousUpdatedAt || j.updatedAt !== previousUpdatedAt);
         if (isNewResult) {
           stopPolling();
           setPhase('idle');

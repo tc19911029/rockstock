@@ -73,4 +73,22 @@ describe('valuation output validation', () => {
     expect(report.valid).toBe(true);
     expect(report.warnings.map(warning => warning.code)).toContain('ttm_pe_not_applicable');
   });
+
+  it('allows whole-dollar fair-price rounding without hiding larger arithmetic errors', () => {
+    const output = validOutput();
+    output.scenarios.pessimistic = {
+      ...scenario(2.4967185202, 25),
+      fairPrice: 62,
+    };
+    output.scenarios.optimistic = {
+      ...scenario(4.1757597663, 50),
+      fairPrice: 209,
+    };
+
+    expect(validateValuationOutput(output, now).valid).toBe(true);
+
+    output.scenarios.pessimistic.fairPrice = 61;
+    const report = validateValuationOutput(output, now);
+    expect(report.errors.map(error => error.code)).toContain('fair_price_mismatch');
+  });
 });

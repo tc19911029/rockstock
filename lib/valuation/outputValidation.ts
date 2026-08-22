@@ -33,6 +33,16 @@ function closeEnough(actual: number, expected: number, relativeTolerance = 0.005
 }
 
 /**
+ * Agent 可能依畫面精度把合理價輸出成整數或一位小數。驗證時只容許該顯示精度
+ * 所造成的半個最小單位誤差；超出四捨五入範圍仍視為公式錯誤。
+ */
+function fairPriceRoundingTolerance(fairPrice: number): number {
+  if (Number.isInteger(fairPrice)) return 0.501;
+  if (Number.isInteger(fairPrice * 10)) return 0.051;
+  return 0.02;
+}
+
+/**
  * 驗證 skill 產出的估值快照。這是讀取時的最後一道防線：不替缺值猜數字，
  * 也不允許顯示 EPS、Forward PE 與合理價採不同口徑。
  */
@@ -108,8 +118,8 @@ export function validateValuationOutput(value: unknown, now = new Date()): Valua
     }
     if (Number.isFinite(scenario.valuationEps) && Number.isFinite(scenario.fairPe) && Number.isFinite(scenario.fairPrice)) {
       const expected = scenario.valuationEps * scenario.fairPe;
-      // 陸股合理價依 0.1 元呈現；半個 tick 的四捨五入差不應誤判為算術錯誤。
-      if (!closeEnough(scenario.fairPrice, expected, 0.005, 0.051)) {
+      const roundingTolerance = fairPriceRoundingTolerance(scenario.fairPrice);
+      if (!closeEnough(scenario.fairPrice, expected, 0.005, roundingTolerance)) {
         add('error', 'fair_price_mismatch', `${path} 合理價不等於估值 EPS × 合理 PE`, `${path}.fairPrice`);
       }
     }

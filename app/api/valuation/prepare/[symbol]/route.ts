@@ -171,6 +171,7 @@ export async function POST(
     if (parsed.data.dryRun === '1') {
       return apiOk({
         dryRun: true,
+        date,
         market,
         outputPath,
         ttmEps: valuationInputs.ttmEps,
@@ -193,6 +194,7 @@ export async function POST(
     if (refreshPlan.mode === 'reuse' && previous) {
       const detail = '正式資料未變；沿用已驗證的深度估值，價格衍生指標由畫面即時重算';
       return apiOk({
+        date,
         outputPath: `data/valuation/${previous.date}/${bareSymbol}.json`,
         updateMode: 'reuse',
         refreshPlan,
@@ -219,6 +221,7 @@ export async function POST(
     console.log(`[valuation/prepare] background valuation ${bareSymbol}: ${analysisJob.ok ? analysisJob.status : 'fail'} — ${analysisJob.detail}`);
 
     return apiOk({
+      date,
       questionPath,
       outputPath,
       ttmEps: valuationInputs.ttmEps,
