@@ -35,13 +35,25 @@ describe('chart overlay presentation', () => {
     expect(getCandleRangeLabels('down')).toEqual({ strong: '長黑低', mid: 'K棒½', weak: '長黑高' });
   });
 
-  it('待確認只顯示頸線與確認價，未啟用目標及失效價', () => {
+  it('待確認顯示頸線、確認價與形成後目標預覽，但不顯示失效價', () => {
     expect(getPatternLevelVisibility('pending')).toMatchObject({
       neckline: true,
       confirmation: true,
-      target: false,
+      target: true,
       stop: false,
     });
+  });
+
+  it('型態價位只在走圖圖例標示，不在價格軸重複顯示', () => {
+    const statuses = ['pending', 'confirmed', 'retest', 'breakout-failed', 'formation-broken', 'target'] as const;
+    for (const status of statuses) {
+      expect(getPatternLevelVisibility(status)).toMatchObject({
+        necklineAxisLabel: false,
+        confirmationAxisLabel: false,
+        targetAxisLabel: false,
+        stopAxisLabel: false,
+      });
+    }
   });
 
   it('頂部型態使用跌破／反彈語意', () => {

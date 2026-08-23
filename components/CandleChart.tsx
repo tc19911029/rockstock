@@ -498,7 +498,8 @@ export default function CandleChart({
 
   /**
    * 型態狀態必須遵守生命週期：形成 → 真突破／跌破 → 回測／失效。
-   * 尚未曾通過 3% 確認門檻時，不得啟用目標價與突破後防守價。
+   * 尚未曾通過 3% 確認門檻時，目標價只供形成完成後的投射預覽，
+   * 不得視為停利條件已啟用，也不顯示突破後防守價。
    */
   const patternStatus = useMemo<PatternLifecycleStatus | null>(() => {
     if (!activePattern || candles.length === 0) return null;
@@ -615,23 +616,23 @@ export default function CandleChart({
     // ── 型態頸線 / 真突破 / 突破後目標 / 回測防守 / 型態連線（toggle 控制） ──
     necklineRef.current = chart.addSeries(LineSeries, {
       color: '#22d3ee',   // 青：頸線（實線）
-      lineWidth: 2, priceLineVisible: false, lastValueVisible: true, lineStyle: 0,
-      title: '結構頸線',
+      lineWidth: 2, priceLineVisible: false, lastValueVisible: false, lineStyle: 0,
+      title: '',
     });
     confirmationRef.current = chart.addSeries(LineSeries, {
       color: '#67e8f9',   // 淺青：頸線 ±3% 真突破門檻（點線）
-      lineWidth: 1, priceLineVisible: false, lastValueVisible: true, lineStyle: 1,
-      title: '確認價',
+      lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 1,
+      title: '',
     });
     targetRef.current = chart.addSeries(LineSeries, {
       color: '#86efac',   // 淡綠：目標價（虛線）
-      lineWidth: 1, priceLineVisible: false, lastValueVisible: true, lineStyle: 2,
-      title: '測量目標',
+      lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2,
+      title: '',
     });
     stopRef.current = chart.addSeries(LineSeries, {
       color: '#fdba74',   // 淡橘：突破後回測防守（虛線）
-      lineWidth: 1, priceLineVisible: false, lastValueVisible: true, lineStyle: 2,
-      title: '型態失效',
+      lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 2,
+      title: '',
     });
     patternConnectorRef.current = chart.addSeries(LineSeries, {
       color: '#e879f9',   // 紫桃：形態連線
@@ -1372,22 +1373,23 @@ export default function CandleChart({
 
     if (!activePattern || !patternStatus) return;
     const { pivots, necklinePrice, targetPrice, stopPrice } = activePattern;
-    const directionLabels = getPatternDirectionLabels(activePattern.kind);
     const levelVisibility = getPatternLevelVisibility(patternStatus);
+    // 系列 title 即使 lastValueVisible=false，lightweight-charts 仍會在資料末端
+    // 畫出文字方塊；價位名稱與數值已在左上圖例顯示，因此保持空字串。
     neckSeries.applyOptions({
-      title: '結構頸線',
+      title: '',
       lastValueVisible: levelVisibility.necklineAxisLabel,
     });
     confirmationSeries.applyOptions({
-      title: directionLabels.confirmation,
+      title: '',
       lastValueVisible: levelVisibility.confirmationAxisLabel,
     });
     tgtSeries.applyOptions({
-      title: directionLabels.target,
+      title: '',
       lastValueVisible: levelVisibility.targetAxisLabel,
     });
     stopSeries.applyOptions({
-      title: directionLabels.stop,
+      title: '',
       lastValueVisible: levelVisibility.stopAxisLabel,
     });
 
@@ -1692,7 +1694,7 @@ export default function CandleChart({
                 </span>}
                 {patternLevelVisibility.target && <span className="flex items-center gap-1" style={{ color: '#86efac' }}>
                   <span className="inline-block w-3 h-[2px] border-t border-dashed" style={{ borderColor: '#86efac' }} />
-                  {patternDirectionLabels?.target} {activePattern.targetPrice.toFixed(2)}
+                  {patternStatus === 'pending' ? '形成後目標' : patternDirectionLabels?.target} {activePattern.targetPrice.toFixed(2)}
                   {targetDistanceText && `｜${targetDistanceText}`}
                 </span>}
                 {patternLevelVisibility.stop && <span className="flex items-center gap-1" style={{ color: '#fdba74' }}>

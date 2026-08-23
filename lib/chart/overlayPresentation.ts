@@ -73,38 +73,43 @@ export interface PatternLevelVisibility {
   stopAxisLabel: boolean;
 }
 
-/** 依型態生命週期只留下當下有決策意義的價位，避免四條線永久同時顯示。 */
+/**
+ * 依型態生命週期只留下當下有決策意義的價位，避免四條線永久同時顯示。
+ *
+ * 型態價位已在主圖左上圖例完整標示，價格軸不再重複顯示，以免擋住最新 K 棒。
+ * pending 的目標線只是「形成完成後」的測量預覽，不代表突破已確認或停利條件已啟用。
+ */
 export function getPatternLevelVisibility(status: PatternLifecycleStatus | null): PatternLevelVisibility {
   switch (status) {
     case 'pending':
       return {
-        neckline: true, confirmation: true, target: false, stop: false,
-        necklineAxisLabel: true, confirmationAxisLabel: true, targetAxisLabel: false, stopAxisLabel: false,
+        neckline: true, confirmation: true, target: true, stop: false,
+        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: false,
       };
     case 'confirmed':
       return {
         neckline: true, confirmation: false, target: true, stop: true,
-        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: true, stopAxisLabel: true,
+        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: false,
       };
     case 'retest':
       return {
         neckline: false, confirmation: true, target: true, stop: true,
-        necklineAxisLabel: false, confirmationAxisLabel: true, targetAxisLabel: true, stopAxisLabel: true,
+        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: false,
       };
     case 'breakout-failed':
       return {
         neckline: false, confirmation: false, target: false, stop: true,
-        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: true,
+        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: false,
       };
     case 'formation-broken':
       return {
         neckline: true, confirmation: false, target: false, stop: false,
-        necklineAxisLabel: true, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: false,
+        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: false,
       };
     case 'target':
       return {
         neckline: false, confirmation: false, target: true, stop: false,
-        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: true, stopAxisLabel: false,
+        necklineAxisLabel: false, confirmationAxisLabel: false, targetAxisLabel: false, stopAxisLabel: false,
       };
     default:
       return {
