@@ -700,8 +700,11 @@ function HomePage() {
   // 今日價一動就連帶重抓三色（後端 tw-/cn-sanse/chart 讀最新 L2 快照重算雙B/主力狀態/捕撈季節）；
   // 否則 key 只看 ticker@date、盤中永遠不變 → 三色凍在載入當下。收盤後主圖停輪詢→close 不再變→自動停抓；
   // 歷史步進時 asOf 本來就會變，不受影響。
+  // sourceKey 不含 close：盤中 close 更新時可沿用同股同日的上一份資料，等新回應無縫替換；
+  // 換股／走圖換日則 key 立即不符，舊 payload 不會誤畫到新 K 線。
+  const sanseSourceKey = sanseEnabled ? `${ticker}@${sanseAsOf}` : '';
   const sanseFetchKey = sanseEnabled ? `${ticker}@${sanseAsOf}@${sanseLastBar?.close ?? ''}` : '';
-  const [sanse, setSanse] = useState<SanSeChartPayload | null>(null);
+  const [sanseResult, setSanseResult] = useState<{ sourceKey: string; payload: SanSeChartPayload } | null>(null);
   const [sanseConditions, setSanseConditions] = useState<ConditionReport | null>(null);
   const [sanseCatchTrigger, setSanseCatchTrigger] = useState<CatchCrossTrigger | null>(null);
   // 暫時性失敗自動重試計數。為什麼非要不可：sanse fetch 只在 sanseFetchKey(=ticker@asOf@close) 變動時才重發，
@@ -711,7 +714,7 @@ function HomePage() {
   const [sanseRetry, setSanseRetry] = useState(0);
   useEffect(() => { setSanseRetry(0); }, [sanseFetchKey]);
   useEffect(() => {
-    if (!sanseEnabled || !ticker) { setSanse(null); setSanseConditions(null); setSanseCatchTrigger(null); return; }
+    if (!sanseEnabled || !ticker) { setSanseResult(null); setSanseConditions(null); setSanseCatchTrigger(null); return; }
     const ctrl = new AbortController();
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const base = isCnTicker ? '/api/cn-sanse/chart' : '/api/tw-sanse/chart';
@@ -724,10 +727,10 @@ function HomePage() {
     fetch(url, { signal: ctrl.signal })
       .then(r => r.json())
       .then(j => {
-        if (j.ok && j.chart) setSanse(j.chart as SanSeChartPayload);
+        if (j.ok && j.chart) setSanseResult({ sourceKey: sanseSourceKey, payload: j.chart as SanSeChartPayload });
         // 失敗/無 chart 要清掉，否則上一檔的三色疊圖會殘留、畫在新股票 K 線上
         // （如 301205 不在掃描宇宙、無本地 L1 → cn-sanse/chart 404 → 智能/黃/紅/多空線停在前一檔 ~4000）
-        else setSanse(null);
+        else setSanseResult(null);
         // 條件報告兩市場都寫（三色模式時中間條件/訊號 tab 用）
         if (j.ok && j.conditions) setSanseConditions(j.conditions as ConditionReport);
         else { setSanseConditions(null); if (!j.ok) scheduleRetry(); }  // ok:false=暫時性失敗 → 重試
@@ -1099,11 +1102,11 @@ function HomePage() {
   // 雙B戰法主圖疊加資料（價格線 + 買賣點）— 只有開關開 + 陸股/台股 + 抓到資料才畫。
   // 三色 overlay/副圖只有日線版本 → 加 currentInterval==='1d' 閘，分鐘線一律不渲染
   //（否則日線 sanse 資料疊到分鐘線會把主圖帶歪、副圖空白錯位）。
-  // 歷史走圖換日後，新的 sanse request 回來前不可沿用上一個日期的 payload。
-  // 舊 payload 的未來 markers/series 配上已縮短的 candles，會踩 lightweight-charts 的
-  // time-scale compaction bug（`Value is null`）。
-  const sansePayloadDate = sanse?.candles.at(-1)?.time ?? '';
-  const visibleSanse = sanse && (!sanseAsOf || sansePayloadDate === sanseAsOf) ? sanse : null;
+  // 只用同一股票＋同一 asOf 請求取得的 payload，避免換股／走圖換日短暫沿用舊資料。
+  // 不再要求 payload 最後一根日期必須等於 asOf：盤中主圖可能已有今日即時 K，三色資料源卻只到
+  // 上一封存交易日；兩者日期不相等仍是有效資料，IndicatorCharts 會依日期對齊並保留今日空點。
+  const visibleSanse = sanseResult?.sourceKey === sanseSourceKey ? sanseResult.payload : null;
+  const sansePayloadDate = visibleSanse?.candles.at(-1)?.time ?? '';
   const shuangBOverlay = showShuangB && sanseEnabled && visibleSanse && currentInterval === '1d' ? {
     zhineng: visibleSanse.zhineng, zb4: visibleSanse.zb4, zb5: visibleSanse.zb5, duokong: visibleSanse.duokong,
     markers: visibleSanse.mainMarkers,
