@@ -21,6 +21,7 @@ import {
 } from '@/lib/practice/calcPractice';
 import { formatNumber, formatPercent, bullBearClass } from '@/lib/format';
 import { lotSizeOf, unitLabelOf, marketFromSymbol } from '@/lib/utils/shareUnits';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 import type { MarketId } from '@/lib/scanner/types';
 
 function stripSuffix(symbol: string): string {
@@ -52,7 +53,7 @@ export function ChartPracticeLedger() {
 
   const tickerRaw = currentStock?.ticker ?? '';
   // 排除：未載入 / 範例資料 / 大盤指數（^TWII、000001.SS、^GSPC…）
-  const isIndex = tickerRaw.startsWith('^') || /^(000001|399001)\.S[SZ]$/i.test(tickerRaw);
+  const isIndex = isIndexSymbol(tickerRaw);
   const isReady = !!currentStock && currentStock.ticker !== 'DEMO' && !isIndex;
   const market: MarketId = isReady ? marketFromSymbol(tickerRaw) : 'TW';
   const code = isReady ? stripSuffix(tickerRaw) : '';

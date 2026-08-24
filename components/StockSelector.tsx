@@ -32,6 +32,13 @@ const DEFAULT_QUICK_STOCKS = [
   { symbol: '000333', name: '美的集團' },
 ];
 
+const INDEX_SHORTCUTS = [
+  { symbol: '^TWII', label: '台灣加權指數', title: '台灣加權指數' },
+  { symbol: 'TXF', label: '台灣加權期貨指數', title: '臺股期貨（TX 近月連續）' },
+  { symbol: '^TWOII', label: '台灣上櫃指數', title: '台灣上櫃指數' },
+  { symbol: '000001.SS', label: '大 A 指數', title: 'A 股大盤（上證指數）' },
+] as const;
+
 
 
 // Extract raw symbol from ticker (e.g. "2330.TW" → "2330", "AAPL" → "AAPL")
@@ -108,7 +115,7 @@ export default function StockSelector() {
   const showRecents = input.length === 0 && recentItems.length > 0;
 
   return (
-    <div className="flex items-center gap-1.5 min-w-0 flex-1" onClick={closeOnOutside}>
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 xl:flex-nowrap" onClick={closeOnOutside}>
       {/* Search input + dropdown */}
       <div ref={wrapRef} className="relative shrink-0">
         <div className="flex items-center bg-muted rounded border border-border focus-within:border-blue-500 overflow-hidden">
@@ -184,6 +191,35 @@ export default function StockSelector() {
         }`}>
         {inWatchlist ? '★ 已自選' : '☆ 加自選'}
       </button>
+      <div
+        role="group"
+        aria-label="常用市場指數"
+        className="flex w-full min-w-0 items-center gap-1 overflow-x-auto pb-0.5 xl:w-auto xl:pb-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {INDEX_SHORTCUTS.map((shortcut) => {
+          const active = currentStock?.ticker.toUpperCase() === shortcut.symbol.toUpperCase();
+          return (
+            <button
+              key={shortcut.symbol}
+              type="button"
+              aria-pressed={active}
+              title={shortcut.title}
+              disabled={isLoadingStock}
+              onClick={() => {
+                setInput(shortcut.symbol);
+                handleLoad(shortcut.symbol);
+              }}
+              className={`min-h-11 shrink-0 cursor-pointer whitespace-nowrap rounded-lg border px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-wait disabled:opacity-50 ${
+                active
+                  ? 'border-sky-400 bg-sky-500/15 text-sky-300'
+                  : 'border-border bg-secondary text-muted-foreground hover:border-sky-500/60 hover:bg-sky-500/10 hover:text-foreground'
+              }`}
+            >
+              {shortcut.label}
+            </button>
+          );
+        })}
+      </div>
       {/* timeframe pills 已移至 ChartToolbar（緊鄰走圖區） */}
 
       {error && <span className="text-xs text-red-400 truncate">{error}</span>}

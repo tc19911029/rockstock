@@ -186,6 +186,30 @@ export async function GET(req: NextRequest) {
     return handleFundChart(symbol, interval, period);
   }
 
+  // 臺股期貨近月連續線：使用期交所官方 TX 日行情，不把 TXF 誤當成美股代號。
+  if (symbol.toUpperCase() === 'TXF') {
+    if (['1m', '5m', '15m', '30m', '60m'].includes(interval)) {
+      return apiError('臺股期貨 TXF 暫無分鐘 K 資料', 404);
+    }
+    try {
+      const { fetchTaifexTxFuturesCandles } = await import('@/lib/datasource/TaifexFuturesProvider');
+      const daily = await fetchTaifexTxFuturesCandles(scanDate);
+      const candles = interval === '1d' ? daily : aggregateCandles(daily, interval);
+      return apiOk({
+        ticker: 'TXF',
+        name: '臺灣加權期貨',
+        currency: 'TWD',
+        interval,
+        candles,
+        totalBars: candles.length,
+        source: 'taifex',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '期交所資料載入失敗';
+      return apiError(message, 502);
+    }
+  }
+
   const { candidates, isTW, isCN } = resolveSymbol(symbol);
   const pureCode = symbol.replace(/\.(SZ|SS|TW|TWO)$/i, '');
   // CN 指數（000001.SS 上證 / 000300.SS 滬深300）：pureCode='000001'/'000300' 會撞到深市

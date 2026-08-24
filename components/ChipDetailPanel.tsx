@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { toast } from 'sonner';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 import { DAY_TRADE_RATIO_HIGH, DAY_TRADE_RATIO_WARN } from '@/lib/analysis/bookThresholds';
 import type { CostBasisSummary } from '@/lib/chipcost/types';
 
@@ -235,7 +236,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
   const [retryCount, setRetryCount] = useState(0);
 
   const cleanSym = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-  const isIndex = symbol.startsWith('^');  // ^TWII/^TWOII 等指數沒有籌碼資料
+  const isIndex = isIndexSymbol(symbol);
 
   useEffect(() => {
     if (!cleanSym) return;

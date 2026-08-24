@@ -355,7 +355,7 @@ function HomePage() {
     // DU1：只有「當前走圖是大盤指數（或尚未載入）」時才跟著切到新市場指數；
     // 使用者已載入個股則保留個股圖、不覆蓋（切掃描市場 ≠ 丟失走圖）。
     // hydration 初始 chart 仍是指數，故 TW→CN 照常切到 000001.SS。
-    const INDEX_TICKERS = new Set(['^TWII', '^TWOII', '000001.SS', '000300.SS']);
+    const INDEX_TICKERS = new Set(['^TWII', 'TXF', '^TWOII', '000001.SS', '000300.SS']);
     const cur = currentStock?.ticker ?? '';
     if (cur && !INDEX_TICKERS.has(cur)) return;
     const { symbol } = getMarketIndex(market);

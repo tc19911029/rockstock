@@ -26,6 +26,8 @@ const CN_INDEX_SYMBOLS = new Set<string>([
 
 export function isIndexSymbol(symbol: string | null | undefined): boolean {
   if (!symbol) return false;
+  // 臺股期貨近月連續線：和大盤指數一樣沒有個股籌碼／基本面資料。
+  if (symbol.toUpperCase() === 'TXF') return true;
   // 台股 / 美股指數：^ 前綴（^TWII、^TWOII、^IXIC…）
   if (symbol.startsWith('^')) return true;
   // 陸股指數：完整代號 + 正確後綴（大小寫不敏感）

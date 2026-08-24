@@ -13,6 +13,7 @@ import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { isFundSymbol } from '@/lib/market/classify';
+import { isIndexSymbol } from '@/lib/utils/symbols';
 import { loadMockData } from '@/lib/data/mockData';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 import {
@@ -290,7 +291,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       });
       // 記錄到「最近搜尋」：不論從搜尋框、掃描清單、候選池或 URL 進來都留紀錄；
       // 排除指數（^TWII / ^IXIC / 000001.SS 等），代號去掉市場後綴讓清單乾淨
-      const isIndex = /^\^|^000001\.SS$/.test(json.ticker);
+      const isIndex = isIndexSymbol(json.ticker);
       if (!isIndex) {
         const cleanSymbol = json.ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
         useSearchHistoryStore.getState().record(cleanSymbol, keptName);
@@ -410,6 +411,12 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     // 場外基金：單位淨值一天才定盤一次，盤中沒有即時報價可 poll（且 /api/stock/quote
     // 是股票端點，對 .OF 無資料）→ 直接不啟動 polling。
     if (isFundSymbol(currentStock.ticker)) {
+      set({ isPolling: false });
+      return;
+    }
+
+    // TXF 由期交所日行情提供，沒有可供 60 秒輪詢的即時 quote endpoint。
+    if (currentStock.ticker === 'TXF') {
       set({ isPolling: false });
       return;
     }
