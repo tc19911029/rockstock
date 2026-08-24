@@ -36,6 +36,7 @@ import {
 import { getTickSize } from '@/lib/utils/tickSize';
 import { marketFromSymbol, formatSharesAsLots } from '@/lib/utils/shareUnits';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { resolveSignalEvaluationPhase } from '@/lib/portfolio/signalEvaluationPhase';
 import {
   cashDividendAdjustedThreshold,
   cumulativeCashDividend,
@@ -186,7 +187,7 @@ function klineConflictMessage(
 export default function SignalSummaryCard() {
   const {
     currentSignals, allCandles, currentIndex, currentStock,
-    longProhibitions, shortProhibitions, shortConditions, winnerPatterns,
+    currentInterval, longProhibitions, shortProhibitions, shortConditions, winnerPatterns,
   } = useReplayStore();
   const { holdings } = usePortfolioStore();
   // 掃描面板選的策略 — 讓訊號卡的操作 SOP（操作均線/停損停利框架）跟著換
@@ -196,6 +197,25 @@ export default function SignalSummaryCard() {
   const candle = allCandles[currentIndex];
   const ticker = currentStock?.ticker ?? '';
   const market = marketFromSymbol(ticker);
+  // 避免 SSR / hydration 直接讀取不同時間；掛載後每 30 秒更新一次盤中／收盤階段，
+  // 即使報價剛好沒有變動，收盤後也能把「盤中預警」切成正式判讀。
+  const [signalClock, setSignalClock] = useState<Date | null>(null);
+  useEffect(() => {
+    const updateClock = () => setSignalClock(new Date());
+    updateClock();
+    const timer = window.setInterval(updateClock, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const evaluationPhase = signalClock
+    ? resolveSignalEvaluationPhase({
+        interval: currentInterval,
+        currentIndex,
+        candleCount: allCandles.length,
+        candleDate: candle?.date,
+        market,
+        now: signalClock,
+      })
+    : 'closed';
 
   // V12 字母偵測（M/N/O/P/Q）+ 頂部型態（持股中才顯示）
   const [v12Hits, setV12Hits] = useState<V12Hit[]>([]);
@@ -383,6 +403,7 @@ export default function SignalSummaryCard() {
         : []),
     ],
     operatingMA,
+    evaluationPhase,
   });
   const operatingMAValue = operatingMA
     ? (candle as unknown as Record<string, number | undefined>)[operatingMA.toLowerCase()]
@@ -395,7 +416,10 @@ export default function SignalSummaryCard() {
     operatingMA,
     operatingMAValue,
     confirmation: chartNarrative.confirmation,
-    decisiveReason: formalExitReason,
+    decisiveReason: chartNarrative.action === 'exit'
+      ? (formalExitReason ?? chartNarrative.summary)
+      : formalExitReason,
+    evaluationPhase,
   });
   // ── 停損 / 停利 ─────────────────────────────────────────────────────────
   // 持股中 vs 未持倉 兩條計算徹底分流，不再共用 entryPrice

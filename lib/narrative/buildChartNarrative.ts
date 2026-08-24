@@ -21,6 +21,7 @@ import type {
   NarrativeDirection,
   NarrativeTone,
 } from './types';
+import type { SignalEvaluationPhase } from '@/lib/portfolio/signalEvaluationPhase';
 
 const ACTION_LABEL: Record<NarrativeAction, string> = {
   exit: '優先出場',
@@ -146,6 +147,7 @@ function resolveAction(
   hasPosition: boolean,
   events: readonly ChartNarrativeEvent[],
   blockers: readonly string[],
+  evaluationPhase: SignalEvaluationPhase,
 ): { action: NarrativeAction; tone: NarrativeTone; headline: string } {
   const hasHardExit = events.some(event => event.action === 'exit' && event.state === 'confirmed');
   const hasSoftExit = events.some(event => (
@@ -156,8 +158,12 @@ function resolveAction(
   const hasStrongEntry = events.some(event => event.action === 'evaluate-entry' && event.state === 'confirmed');
 
   if (hasPosition) {
-    if (hasHardExit) return { action: 'exit', tone: 'bearish', headline: '硬出場訊號成立，先處理風險' };
-    if (hasSoftExit) return { action: 'reduce', tone: 'warning', headline: '轉弱訊號出現，評估減碼並守停損' };
+    if (hasHardExit) return evaluationPhase === 'intraday'
+      ? { action: 'exit', tone: 'warning', headline: '盤中出場條件目前成立，系統持續即時重算' }
+      : { action: 'exit', tone: 'bearish', headline: '硬出場訊號成立，先處理風險' };
+    if (hasSoftExit) return evaluationPhase === 'intraday'
+      ? { action: 'reduce', tone: 'warning', headline: '盤中轉弱條件目前成立，等待日 K 定稿' }
+      : { action: 'reduce', tone: 'warning', headline: '轉弱訊號出現，評估減碼並守停損' };
     if (blockers.length > 0) return { action: 'reduce', tone: 'warning', headline: '持股結構轉弱，先保護部位' };
     return { action: 'hold', tone: 'bullish', headline: '尚無出場條件，依操作均線續抱' };
   }
@@ -183,7 +189,14 @@ function fallbackConfirmation(
   action: NarrativeAction,
   operatingMA?: string | null,
   blockers: readonly string[] = [],
+  evaluationPhase: SignalEvaluationPhase = 'closed',
 ): string {
+  if (evaluationPhase === 'intraday' && action === 'exit') {
+    return '盤中條件目前成立；每次報價更新都會重新計算，收盤後才確認日 K 出場訊號。';
+  }
+  if (evaluationPhase === 'intraday' && action === 'reduce') {
+    return '盤中轉弱條件目前成立；每次報價更新都會重新計算，收盤後才確認。';
+  }
   if (action === 'hold' && operatingMA) return `後續收盤持續守住 ${operatingMA}。`;
   if (action === 'exit') return '依既定出場紀律執行，不等待另一個多方訊號抵銷。';
   if (action === 'reduce') return '觀察下一根是否續弱，並同步檢查操作均線與前低。';
@@ -194,7 +207,16 @@ function fallbackConfirmation(
   return '等待下一根 K 棒完成型態或突破／跌破關鍵價。';
 }
 
-function fallbackInvalidation(action: NarrativeAction, blockers: readonly string[], operatingMA?: string | null): string {
+function fallbackInvalidation(
+  action: NarrativeAction,
+  blockers: readonly string[],
+  operatingMA?: string | null,
+  evaluationPhase: SignalEvaluationPhase = 'closed',
+): string {
+  if (evaluationPhase === 'intraday' && (action === 'exit' || action === 'reduce')) {
+    const maNote = operatingMA ? `；${operatingMA} 也會隨現價同步重算` : '';
+    return `盤中每次報價更新都會重新判讀；若觸發條件解除，本預警會自動消失${maNote}，收盤後才定案。`;
+  }
   if (action === 'exit') return operatingMA
     ? `收盤重新站回 ${operatingMA} 且結構轉強後，才重新判讀；不回頭抵銷當日出場紀律。`
     : '結構重新站回關鍵壓力且出現新確認訊號後，才重做判讀。';
@@ -213,6 +235,7 @@ function classificationFor(
 }
 
 export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarrative {
+  const evaluationPhase = input.evaluationPhase ?? 'closed';
   const safeIndex = Math.min(input.currentIndex, input.candles.length - 1);
   const current = safeIndex >= 0 ? input.candles[safeIndex] : undefined;
   const date = current?.date ?? 'unknown';
@@ -348,7 +371,7 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     ...trendlineEvents,
     trendEvent,
   ]));
-  const decision = resolveAction(input.hasPosition, allEvents, relevantBlockers);
+  const decision = resolveAction(input.hasPosition, allEvents, relevantBlockers, evaluationPhase);
   // 主要依據必須和最終動作同一方向；避免「續抱」卻拿買進型態的確認條件當主文。
   const decisionCandidates = allEvents.filter(event => isDecisionEvidence(event, decision.action));
   const primaryEvent = decision.action === 'reduce'
@@ -361,10 +384,15 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
   const nonConflictingGroupCount = evidenceGroups.filter(group => group.disposition !== 'conflicting').length;
   const evidenceLevel = nonConflictingGroupCount >= 3 ? 'high' : nonConflictingGroupCount === 2 ? 'medium' : 'low';
   const confirmation = primaryEvent.confirmation
-    ?? fallbackConfirmation(decision.action, input.operatingMA, relevantBlockers);
-  const invalidation = primaryEvent.invalidation ?? fallbackInvalidation(decision.action, relevantBlockers, input.operatingMA);
+    ?? fallbackConfirmation(decision.action, input.operatingMA, relevantBlockers, evaluationPhase);
+  const invalidation = primaryEvent.invalidation
+    ?? fallbackInvalidation(decision.action, relevantBlockers, input.operatingMA, evaluationPhase);
   const blockers = Object.freeze([...relevantBlockers]);
-  const actionLabel = decision.action === 'reduce' && primaryEvent.category !== 'risk'
+  const actionLabel = evaluationPhase === 'intraday' && decision.action === 'exit'
+    ? '盤中出場預警'
+    : evaluationPhase === 'intraday' && decision.action === 'reduce' && primaryEvent.category !== 'risk'
+      ? '盤中減碼預警'
+      : decision.action === 'reduce' && primaryEvent.category !== 'risk'
     ? '減碼防守'
     : ACTION_LABEL[decision.action];
 
@@ -376,7 +404,9 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     actionLabel,
     tone: decision.tone,
     headline: decision.headline,
-    summary: `${primaryEvent.label}：${primaryEvent.description}`,
+    summary: evaluationPhase === 'intraday'
+      ? `盤中暫定（現價代入未完成日 K）｜${primaryEvent.label}：${primaryEvent.description}`
+      : `${primaryEvent.label}：${primaryEvent.description}`,
     confirmation,
     invalidation,
     primaryEvent,

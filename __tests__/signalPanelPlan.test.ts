@@ -106,4 +106,54 @@ describe('訊號面板持倉計畫', () => {
     expect(result.detail).toContain('趨勢已翻空頭（提早出場）');
     expect(result.detail).not.toContain('已觸發 MA5');
   });
+
+  test('盤中出場是可逆預警，不會冒充收盤定案', () => {
+    const result = resolveSignalPanelActionPlan({
+      action: 'exit',
+      primaryCategory: 'exit',
+      hasPosition: true,
+      close: 2835,
+      operatingMA: 'MA5',
+      operatingMAValue: 2828,
+      confirmation: '等待收盤確認。',
+      decisiveReason: '飆股出場：現價跌破前日低點',
+      evaluationPhase: 'intraday',
+    });
+    expect(result.label).toBe('盤中預警：出場條件目前成立');
+    expect(result.detail).toContain('飆股出場');
+    expect(result.detail).toContain('條件解除，預警會自動消失');
+    expect(result.detail).not.toContain('已觸發 MA5');
+    expect(result.detail).not.toContain('今日動作：全數出場');
+    expect(result.tone).toBe('warning');
+  });
+
+  test('盤中站回操作均線後顯示續抱觀察並持續重算', () => {
+    const result = resolveSignalPanelActionPlan({
+      action: 'hold',
+      primaryCategory: 'trend',
+      hasPosition: true,
+      close: 2835,
+      operatingMA: 'MA5',
+      operatingMAValue: 2828,
+      confirmation: '守住 MA5。',
+      evaluationPhase: 'intraday',
+    });
+    expect(result.label).toBe('盤中狀態：續抱觀察');
+    expect(result.detail).toContain('現價 2835.00 目前守住 MA5 2828.00');
+    expect(result.detail).toContain('持續重算');
+  });
+
+  test('缺少真正原因時不會拿 MA5 捏造硬出場原因', () => {
+    const result = resolveSignalPanelActionPlan({
+      action: 'exit',
+      primaryCategory: 'exit',
+      hasPosition: true,
+      close: 2835,
+      operatingMA: 'MA5',
+      operatingMAValue: 2828,
+      confirmation: '依紀律執行。',
+    });
+    expect(result.detail).toContain('硬出場規則目前成立');
+    expect(result.detail).not.toContain('2835.00 已觸發 MA5 2828.00');
+  });
 });

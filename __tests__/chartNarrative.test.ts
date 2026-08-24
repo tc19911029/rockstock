@@ -326,6 +326,30 @@ describe('走圖敘事建構器', () => {
     expect(result.invalidation).not.toContain('戒律6');
   });
 
+  test('盤中日 K 的硬出場保持可逆預警，收盤前不冒充定案', () => {
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [signal({
+        type: 'SELL',
+        subtype: 'exit_strong',
+        ruleId: 'surge-stock-exit',
+        label: '飆股出場',
+        description: '現價跌破前日低點',
+      })],
+      hasPosition: true,
+      operatingMA: 'MA5',
+      evaluationPhase: 'intraday',
+    });
+
+    expect(result.action).toBe('exit');
+    expect(result.actionLabel).toBe('盤中出場預警');
+    expect(result.headline).toContain('持續即時重算');
+    expect(result.summary).toContain('盤中暫定');
+    expect(result.invalidation).toContain('預警會自動消失');
+    expect(result.invalidation).not.toContain('不回頭抵銷');
+  });
+
   test('追加未來 K 棒不會改寫當下敘事', () => {
     const input = {
       currentIndex: 20,

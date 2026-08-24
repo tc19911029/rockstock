@@ -1,5 +1,6 @@
 import type { TrendPosition, TrendState } from '@/lib/analysis/trendAnalysis';
 import type { SignalSubtype } from '@/lib/rules/signalClassifier';
+import type { SignalEvaluationPhase } from '@/lib/portfolio/signalEvaluationPhase';
 import type { CandleWithIndicators, RuleSignal } from '@/types';
 
 export type NarrativeEventCategory = 'risk' | 'exit' | 'entry' | 'kline' | 'trend' | 'watch';
@@ -82,4 +83,6 @@ export interface BuildChartNarrativeInput {
   /** 已確認的結構性硬風險，例如頂部型態跌破頸線。 */
   readonly hardRisks?: readonly string[];
   readonly operatingMA?: string | null;
+  /** 盤中日 K 尚未定稿；規則會隨即時報價反覆成立／解除。 */
+  readonly evaluationPhase?: SignalEvaluationPhase;
 }

@@ -2,6 +2,7 @@ import { PROFIT_TARGET_PRICE_MULT } from '@/lib/analysis/bookThresholds';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import { getOperationMA, type OperationMode } from '@/lib/sell/v12Operation';
 import type { NarrativeAction, NarrativeEventCategory } from '@/lib/narrative/types';
+import type { SignalEvaluationPhase } from './signalEvaluationPhase';
 
 export interface SignalPanelActionPlan {
   readonly label: string;
@@ -35,6 +36,7 @@ export function resolveSignalPanelActionPlan({
   operatingMAValue,
   confirmation,
   decisiveReason,
+  evaluationPhase = 'closed',
 }: {
   action: NarrativeAction;
   primaryCategory: NarrativeEventCategory;
@@ -44,15 +46,23 @@ export function resolveSignalPanelActionPlan({
   operatingMAValue?: number | null;
   confirmation: string;
   decisiveReason?: string | null;
+  evaluationPhase?: SignalEvaluationPhase;
 }): SignalPanelActionPlan {
   const line = operatingMA && operatingMAValue != null
     ? `${operatingMA} ${operatingMAValue.toFixed(2)}`
     : null;
 
   if (action === 'exit') {
-    const trigger = decisiveReason ?? (line
-      ? `收盤 ${close.toFixed(2)} 已觸發 ${line} 出場規則`
-      : '硬出場規則已成立');
+    // 不得用「持倉操作均線」代替真正的出場原因：跌破前低／頂部型態等硬訊號
+    // 也可能在現價仍高於 MA5 時成立。缺明確原因時寧可顯示通用文案，不捏造 MA5 觸發。
+    const trigger = decisiveReason ?? '硬出場規則目前成立';
+    if (evaluationPhase === 'intraday') {
+      return {
+        label: '盤中預警：出場條件目前成立',
+        detail: `${trigger}；盤中日 K 尚未定稿，系統會隨每次即時報價重新計算。若條件解除，預警會自動消失；收盤後才確認。`,
+        tone: 'warning',
+      };
+    }
     return {
       label: '今日動作：全數出場',
       detail: `${trigger}；依既定紀律處理，今日不加碼。`,
@@ -71,6 +81,13 @@ export function resolveSignalPanelActionPlan({
   }
 
   if (action === 'reduce') {
+    if (evaluationPhase === 'intraday') {
+      return {
+        label: '盤中預警：減碼條件目前成立',
+        detail: '盤中日 K 尚未定稿，系統會隨每次即時報價重新計算；條件解除時預警會自動消失，收盤後才確認。',
+        tone: 'warning',
+      };
+    }
     return {
       label: '今日動作：先減碼 1/3',
       detail: line
@@ -81,6 +98,15 @@ export function resolveSignalPanelActionPlan({
   }
 
   if (action === 'hold' && hasPosition) {
+    if (evaluationPhase === 'intraday') {
+      return {
+        label: '盤中狀態：續抱觀察',
+        detail: line
+          ? `現價 ${close.toFixed(2)} 目前守住 ${line}，該均線出場條件未成立；系統會隨即時報價持續重算，收盤後才定案。`
+          : '目前沒有出場條件；系統會隨即時報價持續重算，收盤後才定案。',
+        tone: 'positive',
+      };
+    }
     return {
       label: '今日動作：續抱',
       detail: line
