@@ -1,7 +1,25 @@
-import { parseTaifexFuturesCsv } from '@/lib/datasource/TaifexFuturesProvider';
+import {
+  buildTaifexTxFuturesQuote,
+  parseTaifexFuturesCsv,
+  type TaifexQuoteRow,
+} from '@/lib/datasource/TaifexFuturesProvider';
 import { isIndexSymbol } from '@/lib/utils/symbols';
 
 const HEADER = '交易日期,契約,到期月份(週別),開盤價,最高價,最低價,收盤價,漲跌價,漲跌%,成交量,結算價,未沖銷契約數,最後最佳買價,最後最佳賣價,歷史最高價,歷史最低價,是否因訊息面暫停交易,交易時段,價差對單式委託成交量';
+
+function quoteRow(overrides: Partial<TaifexQuoteRow> = {}): TaifexQuoteRow {
+  return {
+    SymbolID: 'TXFI6-F',
+    CDate: '20260825',
+    CTime: '101500',
+    COpenPrice: '44800.00',
+    CHighPrice: '45100.00',
+    CLowPrice: '44750.00',
+    CLastPrice: '45050.00',
+    CTotalVolume: '50000',
+    ...overrides,
+  };
+}
 
 describe('TAIFEX 臺股期貨連續線', () => {
   it('合併夜盤與日盤，並選擇最近的月契約', () => {
@@ -36,5 +54,55 @@ describe('TAIFEX 臺股期貨連續線', () => {
   it('將 TXF 視為市場指數類商品', () => {
     expect(isIndexSymbol('TXF')).toBe(true);
     expect(isIndexSymbol('txf')).toBe(true);
+  });
+
+  it('夜盤 snapshot 寫入次一交易日並挑選成交量最大的 TX 月契約', () => {
+    const quote = buildTaifexTxFuturesQuote([], [
+      quoteRow({ SymbolID: 'TXFI6-M', CDate: '20260824', CTotalVolume: '4415', CLastPrice: '44772.00' }),
+      quoteRow({ SymbolID: 'TXFJ6-M', CDate: '20260824', CTotalVolume: '19', CLastPrice: '44878.00' }),
+    ], new Date('2026-08-24T08:53:00.000Z')); // 臺北 16:53
+
+    expect(quote).toMatchObject({
+      date: '2026-08-25',
+      close: 44772,
+      volume: 4415,
+      session: 'after-hours',
+    });
+  });
+
+  it('日盤 snapshot 合併前一晚的開高低與成交量', () => {
+    const quote = buildTaifexTxFuturesQuote(
+      [quoteRow()],
+      [quoteRow({
+        SymbolID: 'TXFI6-M',
+        CDate: '20260824',
+        CTime: '045959',
+        COpenPrice: '44658.00',
+        CHighPrice: '44900.00',
+        CLowPrice: '44533.00',
+        CLastPrice: '44820.00',
+        CTotalVolume: '12000',
+      })],
+      new Date('2026-08-25T02:15:00.000Z'), // 臺北 10:15
+    );
+
+    expect(quote).toEqual({
+      date: '2026-08-25',
+      open: 44658,
+      high: 45100,
+      low: 44533,
+      close: 45050,
+      volume: 62000,
+      session: 'day',
+      quoteTime: '101500',
+    });
+  });
+
+  it('拒絕把上一交易時段的 stale 夜盤 quote 當成目前行情', () => {
+    const quote = buildTaifexTxFuturesQuote([], [
+      quoteRow({ SymbolID: 'TXFI6-M', CDate: '20260821' }),
+    ], new Date('2026-08-24T08:53:00.000Z'));
+
+    expect(quote).toBeNull();
   });
 });

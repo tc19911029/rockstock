@@ -1,6 +1,9 @@
 import type { Candle } from '@/types';
+import { isTaifexPollingWindow } from '@/lib/datasource/marketHours';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 
 const TAIFEX_DAILY_URL = 'https://www.taifex.com.tw/cht/3/futDataDown';
+const TAIFEX_QUOTE_URL = 'https://mis.taifex.com.tw/futures/api/getQuoteList';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_MONTHS = 24;
 const FETCH_CONCURRENCY = 6;
@@ -10,6 +13,22 @@ type FuturesRow = Candle & {
   session: 'day' | 'after-hours';
 };
 
+export interface TaifexQuoteRow {
+  SymbolID: string;
+  CDate: string;
+  CTime: string;
+  COpenPrice: string;
+  CHighPrice: string;
+  CLowPrice: string;
+  CLastPrice: string;
+  CTotalVolume: string;
+}
+
+export interface TaifexFuturesQuote extends Candle {
+  session: 'day' | 'after-hours';
+  quoteTime: string;
+}
+
 const cache = new Map<string, { expiresAt: number; candles: Candle[] }>();
 
 function toNumber(value: string): number | null {
@@ -17,6 +36,148 @@ function toNumber(value: string): number | null {
   if (!normalized || normalized === '-') return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compactDateToIso(value: string): string | null {
+  if (!/^\d{8}$/.test(value)) return null;
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+}
+
+function nextTradingDate(date: string): string {
+  const cursor = new Date(`${date}T12:00:00Z`);
+  for (let i = 0; i < 14; i++) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const candidate = cursor.toISOString().slice(0, 10);
+    if (isTradingDay(candidate, 'TW')) return candidate;
+  }
+  return date;
+}
+
+function selectActiveTxContract(rows: TaifexQuoteRow[], suffix: 'F' | 'M'): TaifexQuoteRow | null {
+  return rows
+    .filter((row) => new RegExp(`^TXF[A-L]\\d-${suffix}$`).test(row.SymbolID) && (toNumber(row.CLastPrice) ?? 0) > 0)
+    .sort((a, b) => (toNumber(b.CTotalVolume) ?? 0) - (toNumber(a.CTotalVolume) ?? 0))[0] ?? null;
+}
+
+function rowToQuote(row: TaifexQuoteRow, date: string, session: TaifexFuturesQuote['session']): TaifexFuturesQuote | null {
+  const open = toNumber(row.COpenPrice);
+  const high = toNumber(row.CHighPrice);
+  const low = toNumber(row.CLowPrice);
+  const close = toNumber(row.CLastPrice);
+  if (open == null || high == null || low == null || close == null || Math.min(open, high, low, close) <= 0) return null;
+  return {
+    date,
+    open,
+    high,
+    low,
+    close,
+    volume: toNumber(row.CTotalVolume) ?? 0,
+    session,
+    quoteTime: row.CTime,
+  };
+}
+
+function taipeiClock(now: Date): { date: string; minutes: number } {
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+  const [hour, minute] = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(now).split(':').map(Number);
+  return { date, minutes: hour * 60 + minute };
+}
+
+/** 將期交所即時網站的日盤／夜盤 snapshot 合成目前的 TX 近月日 K。 */
+export function buildTaifexTxFuturesQuote(
+  dayRows: TaifexQuoteRow[],
+  afterHoursRows: TaifexQuoteRow[],
+  now = new Date(),
+): TaifexFuturesQuote | null {
+  if (!isTaifexPollingWindow(now)) return null;
+  const clock = taipeiClock(now);
+  const isDaySession = clock.minutes >= 525 && clock.minutes <= 825;
+
+  if (!isDaySession) {
+    const night = selectActiveTxContract(afterHoursRows, 'M');
+    const sessionDate = night ? compactDateToIso(night.CDate) : null;
+    const previousDate = new Date(`${clock.date}T12:00:00Z`);
+    previousDate.setUTCDate(previousDate.getUTCDate() - 1);
+    const expectedSessionDate = clock.minutes >= 900 ? clock.date : previousDate.toISOString().slice(0, 10);
+    if (!night || !sessionDate || sessionDate !== expectedSessionDate) return null;
+    return rowToQuote(night, nextTradingDate(sessionDate), 'after-hours');
+  }
+
+  const day = selectActiveTxContract(dayRows, 'F');
+  const tradingDate = day ? compactDateToIso(day.CDate) : null;
+  if (!day || !tradingDate || tradingDate !== clock.date) return null;
+  const dayQuote = rowToQuote(day, tradingDate, 'day');
+  if (!dayQuote) return null;
+
+  // 日盤 K 的開盤要沿用前一晚；高低與量也合併。不同到期契約（換月日）不可混用。
+  const night = selectActiveTxContract(afterHoursRows, 'M');
+  const nightDate = night ? compactDateToIso(night.CDate) : null;
+  const sameContract = night?.SymbolID.replace(/-M$/, '') === day.SymbolID.replace(/-F$/, '');
+  const belongsToTradingDate = nightDate ? nextTradingDate(nightDate) === tradingDate : false;
+  const nightQuote = night && nightDate && sameContract && belongsToTradingDate
+    ? rowToQuote(night, tradingDate, 'after-hours')
+    : null;
+  if (!nightQuote) return dayQuote;
+
+  return {
+    date: tradingDate,
+    open: nightQuote.open,
+    high: Math.max(nightQuote.high, dayQuote.high),
+    low: Math.min(nightQuote.low, dayQuote.low),
+    close: dayQuote.close,
+    volume: nightQuote.volume + dayQuote.volume,
+    session: 'day',
+    quoteTime: dayQuote.quoteTime,
+  };
+}
+
+async function fetchQuoteRows(marketType: '0' | '1'): Promise<TaifexQuoteRow[]> {
+  const response = await fetch(TAIFEX_QUOTE_URL, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Referer': 'https://mis.taifex.com.tw/futures/',
+      'User-Agent': 'Mozilla/5.0 Rockstock/1.0',
+    },
+    body: JSON.stringify({
+      MarketType: marketType,
+      SymbolType: 'F',
+      KindID: '1',
+      CID: '',
+      ExpireMonth: '',
+      RowSize: '全部',
+      PageNo: '',
+      SortColumn: '',
+      AscDesc: 'A',
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`TAIFEX quote ${response.status}`);
+  const json = await response.json() as {
+    RtCode?: string;
+    RtMsg?: string;
+    RtData?: { QuoteList?: TaifexQuoteRow[] };
+  };
+  if (json.RtCode !== '0' || !Array.isArray(json.RtData?.QuoteList)) {
+    throw new Error(json.RtMsg || '期交所即時報價暫無資料');
+  }
+  return json.RtData.QuoteList;
+}
+
+/** 取得目前 TX 近月盤中 snapshot；日盤會連同前一夜合成完整交易日 OHLCV。 */
+export async function fetchTaifexTxFuturesQuote(now = new Date()): Promise<TaifexFuturesQuote | null> {
+  if (!isTaifexPollingWindow(now)) return null;
+  const { minutes } = taipeiClock(now);
+  if (minutes >= 525 && minutes <= 825) {
+    const [dayRows, afterHoursRows] = await Promise.all([fetchQuoteRows('0'), fetchQuoteRows('1')]);
+    return buildTaifexTxFuturesQuote(dayRows, afterHoursRows, now);
+  }
+  const afterHoursRows = await fetchQuoteRows('1');
+  return buildTaifexTxFuturesQuote([], afterHoursRows, now);
 }
 
 function combineContractRows(rows: FuturesRow[]): Candle | null {

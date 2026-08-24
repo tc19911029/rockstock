@@ -27,6 +27,21 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) return apiError('symbol 必填', 400);
 
   const { symbol } = parsed.data;
+
+  // TXF 使用期交所行情資訊網的近月即時 snapshot（日盤 08:45–13:45、夜盤 15:00–05:00）。
+  // 必須早於股票市場分類；否則 TXF 既不是 4–5 位臺股代號，也不會進任何 quote provider。
+  if (symbol.toUpperCase() === 'TXF') {
+    try {
+      const { fetchTaifexTxFuturesQuote } = await import('@/lib/datasource/TaifexFuturesProvider');
+      const quote = await fetchTaifexTxFuturesQuote();
+      if (!quote) return apiError('臺股期貨目前非交易時段', 404);
+      return apiOk({ symbol: 'TXF', ...quote });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '期交所即時報價載入失敗';
+      return apiError(message, 502);
+    }
+  }
+
   const pureCode = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   // suffix 權威：.SS/.SZ → CN；.TW/.TWO → TW；無 suffix 用位數 fallback（4-5 位 TW、6 位 CN）
   const hasCnSuffix = /\.(SS|SZ)$/i.test(symbol);

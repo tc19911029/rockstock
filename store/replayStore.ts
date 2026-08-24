@@ -11,7 +11,8 @@ import {
 import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
-import { isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { isMarketPollingWindow, isTaifexPollingWindow } from '@/lib/datasource/marketHours';
+import { getMonthKey, getWeekMonday } from '@/lib/datasource/aggregateCandles';
 import { isFundSymbol } from '@/lib/market/classify';
 import { isIndexSymbol } from '@/lib/utils/symbols';
 import { loadMockData } from '@/lib/data/mockData';
@@ -415,12 +416,6 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       return;
     }
 
-    // TXF 由期交所日行情提供，沒有可供 60 秒輪詢的即時 quote endpoint。
-    if (currentStock.ticker === 'TXF') {
-      set({ isPolling: false });
-      return;
-    }
-
     // 歷史 scan 模式不要 poll：targetDate 是過去日，盤中報價跟它無關，
     // 而 polling 每 30s 重抓+全量 precomputeMarkers 很貴，純浪費
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
@@ -434,7 +429,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     const hasTwSuffix = /\.(TW|TWO)$/i.test(ticker);
     const pureTicker = ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const market: 'TW' | 'CN' = hasCnSuffix || (!hasTwSuffix && /^\d{6}$/.test(pureTicker)) ? 'CN' : 'TW';
-    if (!isMarketPollingWindow(market)) {
+    const isTaifex = ticker.toUpperCase() === 'TXF';
+    if (isTaifex ? !isTaifexPollingWindow() : !isMarketPollingWindow(market)) {
       set({ isPolling: false });
       return;
     }
@@ -480,6 +476,52 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
 
           const { currentIndex, allCandles, account, targetDate } = get();
           if (allCandles.length === 0) return;
+
+          if (isTaifex) {
+            const quoteDate = typeof q.date === 'string' ? q.date : '';
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(quoteDate)) return;
+            const candleDate = interval === '1wk'
+              ? getWeekMonday(quoteDate)
+              : interval === '1mo'
+                ? `${getMonthKey(quoteDate)}-01`
+                : quoteDate;
+            const lastCandle = allCandles[allCandles.length - 1];
+            const updatedCandles = [...allCandles];
+            const liveBar = {
+              date: candleDate,
+              open: q.open || q.close,
+              high: q.high || q.close,
+              low: q.low || q.close,
+              close: q.close,
+              volume: q.volume || 0,
+            };
+
+            if (lastCandle.date === candleDate) {
+              updatedCandles[updatedCandles.length - 1] = interval === '1d'
+                ? { ...lastCandle, ...liveBar }
+                : {
+                    ...lastCandle,
+                    high: Math.max(lastCandle.high, liveBar.high),
+                    low: Math.min(lastCandle.low, liveBar.low),
+                    close: liveBar.close,
+                    // 週／月 K 缺少逐日明細，至少維持成交量單調不倒退；日 K 則使用官方合併量。
+                    volume: Math.max(lastCandle.volume, liveBar.volume),
+                  };
+            } else if (lastCandle.date < candleDate) {
+              updatedCandles.push(liveBar);
+            } else {
+              return;
+            }
+
+            const candles = computeIndicators(updatedCandles.map(c => ({
+              date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
+            })));
+            const wasAtEnd = currentIndex >= allCandles.length - 1;
+            const newIndex = wasAtEnd ? candles.length - 1 : currentIndex;
+            precomputeMarkers(candles);
+            set({ allCandles: candles, currentIndex: newIndex, ...buildState(candles, newIndex, account) });
+            return;
+          }
 
           const ticker = currentStock?.ticker ?? symbol;
           // suffix 權威：.SS/.SZ → CN；.TW/.TWO → TW；無 suffix 用位數判斷（4-5 位 TW、6 位 CN）

@@ -71,6 +71,33 @@ export function isMarketPollingWindow(market: 'TW' | 'CN', now = new Date()): bo
 }
 
 /**
+ * 臺股期貨盤中輪詢窗口。
+ *
+ * TX 日盤為交易日 08:45–13:45；夜盤為交易日 15:00–次日 05:00。
+ * 夜盤跨午夜，因此週六凌晨仍可能是週五開始的有效交易時段。實際報價端仍會
+ * 驗證行情日期，避免連假前最後一個交易日下午拿舊 quote 建立未來 K 棒。
+ */
+export function isTaifexPollingWindow(now = new Date()): boolean {
+  const { hour, min, dow } = getLocalTime('Asia/Taipei', now);
+  const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+  const timeMin = hour * 60 + min;
+
+  if (timeMin >= 525 && timeMin <= 825) { // 08:45 ~ 13:45
+    return isTradingDay(localDate, 'TW');
+  }
+  if (timeMin >= 900) { // 15:00 ~ 23:59
+    return isTradingDay(localDate, 'TW');
+  }
+  if (timeMin <= 300) { // 00:00 ~ 05:00：檢查前一日是否為夜盤起始交易日
+    const previous = new Date(`${localDate}T12:00:00Z`);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    const previousDate = previous.toISOString().slice(0, 10);
+    return dow !== 0 && isTradingDay(previousDate, 'TW');
+  }
+  return false;
+}
+
+/**
  * 取得報價 fallback 應讀的 L2 快照日期。
  *
  * 交易日開盤前，今天的 intraday snapshot 尚不存在，必須回退到上一交易日；

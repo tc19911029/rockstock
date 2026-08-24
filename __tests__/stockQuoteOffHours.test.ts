@@ -4,6 +4,7 @@ const getTWSESingleIntraday = jest.fn();
 const getFugleQuote = jest.fn();
 const getEastMoneySingleQuote = jest.fn();
 const fetchQuote = jest.fn();
+const fetchTaifexTxFuturesQuote = jest.fn();
 
 jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
   readCandleFile: (...args: unknown[]) => readCandleFile(...args),
@@ -27,6 +28,9 @@ jest.mock('@/lib/datasource/EastMoneyRealtime', () => ({
 jest.mock('@/lib/cn-sanse/cnQuote', () => ({
   fetchQuote: (...args: unknown[]) => fetchQuote(...args),
 }));
+jest.mock('@/lib/datasource/TaifexFuturesProvider', () => ({
+  fetchTaifexTxFuturesQuote: (...args: unknown[]) => fetchTaifexTxFuturesQuote(...args),
+}));
 
 import { NextRequest } from 'next/server';
 import { GET } from '@/app/api/stock/quote/route';
@@ -35,6 +39,7 @@ describe('GET /api/stock/quote 休市防護', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     readCandleFile.mockResolvedValue(null);
+    fetchTaifexTxFuturesQuote.mockResolvedValue(null);
   });
 
   test('舊分頁輪詢台股指數時只讀 L1，不空打 MIS/Fugle/L2', async () => {
@@ -67,5 +72,32 @@ describe('GET /api/stock/quote 休市防護', () => {
     expect(readCandleFile).toHaveBeenCalledWith('6770.TW', 'TW');
     expect(getEastMoneySingleQuote).not.toHaveBeenCalled();
     expect(fetchQuote).not.toHaveBeenCalled();
+  });
+
+  test('TXF 直接回傳期交所盤中近月 quote，不進股票 provider', async () => {
+    fetchTaifexTxFuturesQuote.mockResolvedValue({
+      date: '2026-08-25',
+      open: 44658,
+      high: 44800,
+      low: 44533,
+      close: 44782,
+      volume: 4703,
+      session: 'after-hours',
+      quoteTime: '170435',
+    });
+
+    const response = await GET(new NextRequest('http://localhost/api/stock/quote?symbol=TXF'));
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      symbol: 'TXF',
+      date: '2026-08-25',
+      close: 44782,
+      session: 'after-hours',
+    });
+    expect(fetchTaifexTxFuturesQuote).toHaveBeenCalledTimes(1);
+    expect(readCandleFile).not.toHaveBeenCalled();
+    expect(getTWSESingleIntraday).not.toHaveBeenCalled();
+    expect(getFugleQuote).not.toHaveBeenCalled();
   });
 });
