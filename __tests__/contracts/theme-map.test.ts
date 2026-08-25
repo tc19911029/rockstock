@@ -56,7 +56,7 @@ describe('themeMap contracts', () => {
     expect(missing).toEqual([]);
   });
 
-  test('2026-08-25 CPO／矽光子／光通訊稽核名單完整且維持子集合關係', () => {
+  test('2026-08-26 CPO／矽光子／光通訊稽核名單完整且維持子集合關係', () => {
     const codes = (theme: string) => new Set(THEME_MAP[theme].map(stock => stock.code));
     const cpo = codes('CPO');
     const siliconPhotonics = codes('矽光子');
@@ -64,7 +64,7 @@ describe('themeMap contracts', () => {
 
     const auditedCpo = [
       '2330', '2345', '2409', '2426', '3008', '3264', '3711',
-      '3714', '4971', '4991', '6223', '6257', '6426',
+      '3714', '4971', '4991', '6223', '6257', '6426', '2489',
     ];
     const auditedSiliconPhotonics = [
       '2330', '2345', '3008', '3264', '3711', '3714',
