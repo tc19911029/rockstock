@@ -500,6 +500,14 @@ export async function register() {
   setTimeout(() => {
     refreshAndScan('CN').catch(err => console.error('[local-cron] CN initial refreshAndScan:', err));
   }, 45_000);
+  // 部署／重啟後若只等 10 分鐘 interval + 1 分鐘 offset，L4 會長達 11 分鐘顯示過期。
+  // 保留 90 秒 boot grace，待 L2 首輪完成後錯開兩市場首掃，避免與開機重活同時搶資源。
+  setTimeout(() => {
+    scanIntradayDaily('TW').catch(err => console.error('[local-cron] TW initial scan-intraday:', err));
+  }, 120_000);
+  setTimeout(() => {
+    scanIntradayDaily('CN').catch(err => console.error('[local-cron] CN initial scan-intraday:', err));
+  }, 150_000);
   setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, 5 * 60 * 1000);
   // 與 TW 錯開 30 秒，避免兩個全市場 provider 同時搶 curl slots / server connections。
   setInterval(() => {

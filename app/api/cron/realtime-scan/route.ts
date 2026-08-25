@@ -5,7 +5,7 @@
  * 流程：
  *   1. 盤中時段判斷（TW 09:00-13:30 / CN 09:30-15:00），盤外 return skip
  *   2. monitorPool.getActiveSymbols() — holdings + 當日 pool
- *   3. 取 vendor quote (TWSE intraday batch / EastMoney CN batch)
+ *   3. 取 vendor quote (TWSE intraday batch / Tencent + Sina + L2 CN failover)
  *   4. pushTick → minuteBarStore（自動 close 跨分鐘 bar）
  *   5. 若 buffer 過淺 → backfillFromVendor 補當日歷史
  *   6. detector(1m) + detector(5m aggregate) → Signal[]
@@ -25,6 +25,7 @@ import { detect } from '@/lib/realtime/blowoffDetector';
 import { detectGuardSignals } from '@/lib/realtime/holdingsGuard';
 import { dispatch, type AlertSignal } from '@/lib/realtime/alertDispatcher';
 import { REALTIME_RULES } from '@/lib/config';
+import { fetchCNRealtimeQuoteBatch } from '@/lib/realtime/CNRealtimeQuoteSource';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -99,7 +100,7 @@ async function executeRealtimeScan(twOpen: boolean, cnOpen: boolean) {
     ? await fetchTWBatch()
     : null;
   const cnQuoteMap = cnOpen && cnSymbols.length > 0
-    ? await fetchCNBatch()
+    ? await fetchCNBatch(cnSymbols.map(item => item.symbol))
     : null;
 
   // ── pushTick + backfill ──
@@ -237,17 +238,12 @@ async function fetchTWBatch(): Promise<Map<string, BatchQuote>> {
   }
 }
 
-async function fetchCNBatch(): Promise<Map<string, BatchQuote>> {
-  try {
-    const { getEastMoneyRealtime } = await import('@/lib/datasource/EastMoneyRealtime');
-    const map = await getEastMoneyRealtime();
-    const out = new Map<string, BatchQuote>();
-    for (const [code, q] of map) {
-      out.set(code, { close: q.close, volume: q.volume, high: q.high, prevClose: q.prevClose });
-    }
-    return out;
-  } catch (err) {
-    console.warn('[realtime-scan] fetchCNBatch failed:', err);
-    return new Map();
+let lastCNQuoteSource = '';
+async function fetchCNBatch(symbols: string[]): Promise<Map<string, BatchQuote>> {
+  const result = await fetchCNRealtimeQuoteBatch(symbols);
+  if (result.source !== lastCNQuoteSource) {
+    console.info(`[realtime-scan] CN quote source=${result.source} count=${result.quotes.size}`);
+    lastCNQuoteSource = result.source;
   }
+  return result.quotes;
 }
