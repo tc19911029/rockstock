@@ -86,6 +86,21 @@ describe('themeMap contracts', () => {
     expect(['4903', '6271', '6526', '6530', '8011'].filter(code => cpo.has(code))).toEqual([]);
   });
 
+  test('2026-08-26 全題材稽核的核心修正不回歸', () => {
+    const codes = (theme: string) => new Set(THEME_MAP[theme].map(stock => stock.code));
+
+    expect([...codes('ASIC')].filter(code => ['5269'].includes(code))).toEqual(['5269']);
+    expect(codes('ASIC').has('2379')).toBe(false);
+    expect(['2330', '3481'].filter(code => !codes('先進封裝').has(code))).toEqual([]);
+    expect(codes('CoWoS').has('2330')).toBe(true);
+    expect(codes('玻璃基板').has('3481')).toBe(true);
+    expect(codes('AI伺服器').has('5274')).toBe(true);
+    expect(['2308', '2317'].filter(code => !codes('機器人').has(code))).toEqual([]);
+    expect(['2360', '6706', '7728', '7769'].filter(code => !codes('半導體設備').has(code))).toEqual([]);
+    expect(['2409', '2454', '2457'].filter(code => !codes('低軌衛星').has(code))).toEqual([]);
+    expect(codes('伺服器電源').has('3665')).toBe(true);
+  });
+
   test('每個題材內沒有重複代號', () => {
     for (const [theme, stocks] of Object.entries(THEME_MAP)) {
       const codes = stocks.map(stock => stock.code);

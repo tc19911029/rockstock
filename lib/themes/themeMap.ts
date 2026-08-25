@@ -5,7 +5,8 @@
  *  + IC設計/矽晶圓/第三代半導體/網通/半導體通路/工具機/自行車 七題材；
  *  2026-08-25 依公司官網/法說/年報重查 CPO、矽光子、光通訊供應鏈；
  *  2026-08-26 補瑞軒 CPO Shuffle Box 周邊代工題材，並依 2026 公司公告／法說
- *  重建 CPO、矽光子、光通訊三個集合）
+ *  重建 CPO、矽光子、光通訊三個集合；同日全 38 題材複核，校正 ASIC 並補齊
+ *  CoWoS／先進封裝／玻璃基板核心業者）
  *
  * 來源：使用者選股規格書 Step 4 的 25 題材 + Step 3/5 點名股 + 2026-06 市場概念股審查補強，
  * 成分沿用/校正 lib/scanner/conceptMap.ts 的概念分類。
@@ -31,6 +32,8 @@ export interface ThemeStock {
 
 export const THEME_MAP: Record<string, ThemeStock[]> = {
   'AI伺服器': [
+    // 2026-08-26 全題材稽核：AI 伺服器遠端管理的 BMC SoC
+    { code: '5274', name: '信驊' },
     { code: '2382', name: '廣達' }, { code: '3231', name: '緯創' },
     { code: '6669', name: '緯穎' }, { code: '2376', name: '技嘉' },
     { code: '2324', name: '仁寶' }, { code: '3706', name: '神達' },
@@ -55,7 +58,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   'ASIC': [
     { code: '3661', name: '世芯-KY' }, { code: '3443', name: '創意' },
     { code: '3035', name: '智原' }, { code: '2454', name: '聯發科' },
-    { code: '2379', name: '瑞昱' }, { code: '3529', name: '力旺' },
+    // 2026-08-26 全題材稽核：祥碩官網／年報明列客製 ASIC；瑞昱屬標準型 IC 設計，移回 IC設計
+    { code: '5269', name: '祥碩' }, { code: '3529', name: '力旺' },
     { code: '6533', name: '晶心科' },
     // 2026-06-20 補：矽智財（IP）
     { code: '6643', name: 'M31' },
@@ -215,6 +219,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '8358', name: '金居' }, { code: '1815', name: '富喬' },
   ],
   '先進封裝': [
+    // 2026-08-26 全題材稽核：3DFabric/CoWoS/SoIC 核心，以及已量產 FOPLP 的面板級封裝
+    { code: '2330', name: '台積電' }, { code: '3481', name: '群創' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '6515', name: '穎崴' },
     { code: '6223', name: '旺矽' },
@@ -230,6 +236,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2329', name: '華泰' }, { code: '6257', name: '矽格' },
   ],
   'CoWoS': [
+    // CoWoS 為台積電註冊並量產的先進封裝平台，核心廠不可只列周邊設備供應鏈
+    { code: '2330', name: '台積電' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '3680', name: '家登' },
     { code: '6223', name: '旺矽' },
@@ -239,6 +247,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2467', name: '志聖' }, { code: '5443', name: '均豪' },
   ],
   '半導體設備': [
+    // 2026-08-26 全題材稽核：半導體／矽光子晶片與光電元件量測、分選設備
+    { code: '2360', name: '致茂' }, { code: '6706', name: '惠特' },
+    { code: '7728', name: '光焱科技' }, { code: '7769', name: '鴻勁' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '6223', name: '旺矽' },
     { code: '6515', name: '穎崴' },
@@ -260,6 +271,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     // 載板廠轉玻璃核心載板（欣興＝Intel R&D 夥伴；南電/景碩同步切入）
     { code: '3037', name: '欣興' }, { code: '8046', name: '南電' },
     { code: '3189', name: '景碩' },
+    // 群創 FOPLP 已量產，TGV 玻璃基板已進客戶驗證
+    { code: '3481', name: '群創' },
     // 玻璃加工（正達熱成型 TGV、TPK-KY 觸控玻璃轉 TGV 試產）
     { code: '3149', name: '正達' }, { code: '3673', name: 'TPK-KY' },
     // TGV 雷射鑽孔 / 封裝設備
@@ -269,6 +282,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '1809', name: '中釉' }, { code: '4768', name: '晶呈科技' },
   ],
   '機器人': [
+    // 2026-08-26 全題材稽核：自有工業機器人產品，以及 AI 人形機器人系統整合
+    { code: '2308', name: '台達電' }, { code: '2317', name: '鴻海' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '4585', name: '達明' },
     { code: '7750', name: '新代' },
@@ -372,6 +387,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2889', name: '國票金' },
   ],
   '低軌衛星': [
+    // 2026-08-26 全題材稽核：NR-NTN 晶片、玻璃基板衛星天線與低軌通訊電源
+    { code: '2454', name: '聯發科' }, { code: '2409', name: '友達' },
+    { code: '2457', name: '飛宏' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '5222', name: '全訊' },
     { code: '3481', name: '群創' },
@@ -412,6 +430,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
   ],
   // 2026-06-20 新增：伺服器電源/BBU（電源供應器 + 電池備援模組/超級電容）
   '伺服器電源': [
+    // 2026-08-26 全題材稽核：AI 資料中心 power shelf／BBU／機櫃匯流排與電源線束
+    { code: '3665', name: '貿聯-KY' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '2457', name: '飛宏' },
     { code: '2308', name: '台達電' }, { code: '2301', name: '光寶科' },
