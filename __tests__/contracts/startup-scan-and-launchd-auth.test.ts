@@ -11,6 +11,13 @@ describe('部署後排程防回歸', () => {
     expect(source).toContain('}, 150_000);');
   });
 
+  test('L2 預設每分鐘刷新，避免題材 API 的 40 秒快取反覆回舊快照', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'instrumentation.node.ts'), 'utf8');
+    expect(source).toContain('LOCAL_L2_REFRESH_INTERVAL_MS');
+    expect(source).toMatch(/setInterval\(\(\) => \{ refreshAndScan\('TW'\).*L2_REFRESH_INTERVAL_MS\);/);
+    expect(source).not.toMatch(/refreshAndScan\('TW'\).*5 \* 60 \* 1000/);
+  });
+
   test.each(['com.rockstock.paper-track.plist', 'com.rockstock.prewarm-chip.plist'])(
     '%s 使用 curl argv，不經 shell 拆 Authorization header',
     fileName => {

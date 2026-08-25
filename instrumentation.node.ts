@@ -82,7 +82,11 @@ export async function register() {
   }
 
   console.log('[local-cron] 本地開發模式：定期呼叫 API route 模擬 Vercel Cron');
-  console.log('[local-cron] L2：每 5 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5 | 三色推播：每 2 分鐘');
+  const L2_REFRESH_INTERVAL_MS = Math.max(
+    60_000,
+    Number(process.env.LOCAL_L2_REFRESH_INTERVAL_MS) || 60_000,
+  );
+  console.log(`[local-cron] L2：每 ${Math.round(L2_REFRESH_INTERVAL_MS / 60_000)} 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5 | 三色推播：每 2 分鐘`);
 
   // 重活完成帳本必須跨 process restart 保留。過去只存在記憶體，
   // 盤後每次 kickstart 都會再跑全市場 download/append/scan。
@@ -508,13 +512,15 @@ export async function register() {
   setTimeout(() => {
     scanIntradayDaily('CN').catch(err => console.error('[local-cron] CN initial scan-intraday:', err));
   }, 150_000);
-  setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, 5 * 60 * 1000);
+  // 題材 API 快取只有 40 秒；L2 若仍每 5 分鐘刷新，畫面再勤勞 polling 也只會重複舊快照。
+  // 一分鐘是供應商負載與盤中體感的折衷，下限固定 60 秒並由 route single-flight 防止重入。
+  setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, L2_REFRESH_INTERVAL_MS);
   // 與 TW 錯開 30 秒，避免兩個全市場 provider 同時搶 curl slots / server connections。
   setInterval(() => {
     setTimeout(() => {
       refreshAndScan('CN').catch(err => console.error('[local-cron] CN refreshAndScan:', err));
     }, 30_000);
-  }, 5 * 60 * 1000);
+  }, L2_REFRESH_INTERVAL_MS);
 
   setInterval(() => {
     // L2 也是從開機時間起算；延後一分鐘，避免每 10 分鐘固定撞上 L2 refresh。
