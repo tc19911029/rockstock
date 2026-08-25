@@ -69,6 +69,7 @@ export interface ResonanceRecord {
   industry: string;
   price: number;      // 掃描當日收盤
   changePct: number;
+  shortOversold?: number;
   report: ConditionReport;
   /** 當日成交額名次（1 = 成交額最大；舊固化資料無此欄 → undefined）。 */
   turnoverRank?: number;
