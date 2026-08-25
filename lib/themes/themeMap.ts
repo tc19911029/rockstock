@@ -4,7 +4,8 @@
  *  + 新增 綠能/伺服器電源/高速連接 三題材；2026-06-22 加 成熟製程
  *  + IC設計/矽晶圓/第三代半導體/網通/半導體通路/工具機/自行車 七題材；
  *  2026-08-25 依公司官網/法說/年報重查 CPO、矽光子、光通訊供應鏈；
- *  2026-08-26 補瑞軒 CPO Shuffle Box 周邊代工題材）
+ *  2026-08-26 補瑞軒 CPO Shuffle Box 周邊代工題材，並依 2026 公司公告／法說
+ *  重建 CPO、矽光子、光通訊三個集合）
  *
  * 來源：使用者選股規格書 Step 4 的 25 題材 + Step 3/5 點名股 + 2026-06 市場概念股審查補強，
  * 成分沿用/校正 lib/scanner/conceptMap.ts 的概念分類。
@@ -60,6 +61,21 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '6643', name: 'M31' },
   ],
   'CPO': [
+    // 2026-08-26 稽核補：晶圓平台、ASIC/CPO 系統與整機整合（公司正式揭露或合作公告）
+    { code: '2303', name: '聯電' }, { code: '2317', name: '鴻海' },
+    { code: '2382', name: '廣達' }, { code: '2454', name: '聯發科' },
+    { code: '3443', name: '創意' }, { code: '6669', name: '緯穎' },
+    // 2026-08-26 稽核補：PIC/EIC、矽光封裝、連接與 Micro LED 光互連
+    { code: '2458', name: '義隆' }, { code: '3265', name: '台星科' },
+    { code: '6147', name: '頎邦' }, { code: '6197', name: '佳必琪' },
+    { code: '6854', name: '錼創科技-KY創' },
+    // 2026-08-26 稽核補：CPO 光電測試、驗證、分析與 FAU/OE 耦合設備
+    { code: '2360', name: '致茂' }, { code: '2449', name: '京元電子' },
+    { code: '3289', name: '宜特' }, { code: '3587', name: '閎康' },
+    { code: '6187', name: '萬潤' }, { code: '6510', name: '精測' },
+    { code: '6515', name: '穎崴' }, { code: '6706', name: '惠特' },
+    { code: '6830', name: '汎銓' }, { code: '7728', name: '光焱科技' },
+    { code: '7769', name: '鴻勁' },
     // 2026-08-26 補：市場供應鏈資訊指向波若威 Shuffle Box 代工；屬 CPO 周邊製造，非矽光子核心元件
     { code: '2489', name: '瑞軒' },
     // 2026-08-25 稽核補：平台/交換器/光學/封裝測試/光源與材料（均有公司級產品或量產證據）
@@ -82,6 +98,18 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3234', name: '光環' }, { code: '4908', name: '前鼎' },
   ],
   '矽光子': [
+    // 2026-08-26 稽核補：SiPh 晶圓平台、ASIC/PIC/EIC、封裝與光電連接
+    { code: '2303', name: '聯電' }, { code: '2454', name: '聯發科' },
+    { code: '2458', name: '義隆' }, { code: '3265', name: '台星科' },
+    { code: '3443', name: '創意' }, { code: '6147', name: '頎邦' },
+    { code: '6197', name: '佳必琪' }, { code: '6271', name: '同欣電' },
+    // 2026-08-26 稽核補：SiPh/CPO 光電測試、驗證、分析與自動化設備
+    { code: '2360', name: '致茂' }, { code: '2449', name: '京元電子' },
+    { code: '3289', name: '宜特' }, { code: '3587', name: '閎康' },
+    { code: '6187', name: '萬潤' }, { code: '6510', name: '精測' },
+    { code: '6515', name: '穎崴' }, { code: '6706', name: '惠特' },
+    { code: '6830', name: '汎銓' }, { code: '7728', name: '光焱科技' },
+    { code: '7769', name: '鴻勁' },
     // 2026-08-25 稽核補：COUPE/交換器、耦光、異質整合封裝、SiPh 測試與外部光源
     { code: '2330', name: '台積電' }, { code: '2345', name: '智邦' },
     { code: '3008', name: '大立光' }, { code: '3264', name: '欣銓' },
@@ -99,6 +127,22 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2455', name: '全新' },
   ],
   '光通訊': [
+    // 2026-08-26 稽核補：CPO 新增成員；CPO 維持為光通訊子集合
+    { code: '2303', name: '聯電' }, { code: '2317', name: '鴻海' },
+    { code: '2360', name: '致茂' }, { code: '2382', name: '廣達' },
+    { code: '2449', name: '京元電子' }, { code: '2454', name: '聯發科' },
+    { code: '2458', name: '義隆' }, { code: '3265', name: '台星科' },
+    { code: '3289', name: '宜特' }, { code: '3443', name: '創意' },
+    { code: '3587', name: '閎康' }, { code: '6147', name: '頎邦' },
+    { code: '6187', name: '萬潤' }, { code: '6197', name: '佳必琪' },
+    { code: '6510', name: '精測' }, { code: '6515', name: '穎崴' },
+    { code: '6669', name: '緯穎' }, { code: '6706', name: '惠特' },
+    { code: '6830', name: '汎銓' }, { code: '6854', name: '錼創科技-KY創' },
+    { code: '7728', name: '光焱科技' }, { code: '7769', name: '鴻勁' },
+    // 2026-08-26 稽核補：SiPh 光模組封裝，以及非 CPO 的光收發／光纖電纜業者
+    { code: '6271', name: '同欣電' }, { code: '6526', name: '達發' },
+    { code: '6530', name: '創威' }, { code: '8011', name: '台通' },
+    { code: '4903', name: '聯光通' },
     // 2026-08-26 補：CPO Shuffle Box（光纖跳線盒）周邊代工題材
     { code: '2489', name: '瑞軒' },
     // 2026-08-25 稽核補：CPO 是光通訊子集合，維持 CPO 新增股在此完整覆蓋

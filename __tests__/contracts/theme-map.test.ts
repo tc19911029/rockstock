@@ -63,17 +63,33 @@ describe('themeMap contracts', () => {
     const opticalComms = codes('光通訊');
 
     const auditedCpo = [
-      '2330', '2345', '2409', '2426', '3008', '3264', '3711',
-      '3714', '4971', '4991', '6223', '6257', '6426', '2489',
+      '2303', '2317', '2330', '2345', '2360', '2382', '2409',
+      '2426', '2449', '2454', '2458', '2489', '3008', '3264',
+      '3265', '3289', '3443', '3587', '3711', '3714', '4971',
+      '4991', '6147', '6187', '6197', '6223', '6257', '6426',
+      '6510', '6515', '6669', '6706', '6830', '6854', '7728', '7769',
     ];
     const auditedSiliconPhotonics = [
-      '2330', '2345', '3008', '3264', '3711', '3714',
-      '4971', '4991', '6223', '6257', '6426',
+      '2303', '2330', '2345', '2360', '2449', '2454', '2458',
+      '3008', '3264', '3265', '3289', '3443', '3587', '3711',
+      '3714', '4971', '4991', '6147', '6187', '6197', '6223',
+      '6257', '6271', '6426', '6510', '6515', '6706', '6830',
+      '7728', '7769',
     ];
 
     expect(auditedCpo.filter(code => !cpo.has(code))).toEqual([]);
     expect(auditedSiliconPhotonics.filter(code => !siliconPhotonics.has(code))).toEqual([]);
     expect([...cpo].filter(code => !opticalComms.has(code))).toEqual([]);
+    expect(['2409', '2426', '2489', '6854'].filter(code => siliconPhotonics.has(code))).toEqual([]);
+    expect(['4903', '6271', '6526', '6530', '8011'].filter(code => cpo.has(code))).toEqual([]);
+  });
+
+  test('每個題材內沒有重複代號', () => {
+    for (const [theme, stocks] of Object.entries(THEME_MAP)) {
+      const codes = stocks.map(stock => stock.code);
+      expect({ theme, duplicates: codes.filter((code, i) => codes.indexOf(code) !== i) })
+        .toEqual({ theme, duplicates: [] });
+    }
   });
 
   test('每個題材至少 3 檔成分（排名聚合的最低樣本）', () => {
