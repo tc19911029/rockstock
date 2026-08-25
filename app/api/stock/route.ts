@@ -9,7 +9,8 @@ import { computeIndicators } from '@/lib/indicators';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
-import { readIntradaySnapshot, fetchTWIndexQuote } from '@/lib/datasource/IntradayCache';
+import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
 import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { isFundSymbol } from '@/lib/market/classify';
@@ -192,8 +193,25 @@ export async function GET(req: NextRequest) {
       return apiError('臺股期貨 TXF 暫無分鐘 K 資料', 404);
     }
     try {
-      const { fetchTaifexTxFuturesCandles } = await import('@/lib/datasource/TaifexFuturesProvider');
-      const daily = await fetchTaifexTxFuturesCandles(scanDate);
+      const { fetchTaifexTxFuturesCandles, fetchTaifexTxFuturesQuote } = await import('@/lib/datasource/TaifexFuturesProvider');
+      const [history, liveQuote] = await Promise.all([
+        fetchTaifexTxFuturesCandles(scanDate),
+        scanDate ? Promise.resolve(null) : withTimeout(fetchTaifexTxFuturesQuote(), 3500, null),
+      ]);
+      const daily = history.map((candle) => ({ ...candle }));
+      if (liveQuote) {
+        const last = daily.at(-1);
+        const liveBar = {
+          date: liveQuote.date,
+          open: liveQuote.open,
+          high: liveQuote.high,
+          low: liveQuote.low,
+          close: liveQuote.close,
+          volume: liveQuote.volume,
+        };
+        if (last?.date === liveBar.date) daily[daily.length - 1] = liveBar;
+        else if (!last || last.date < liveBar.date) daily.push(liveBar);
+      }
       const candles = interval === '1d' ? daily : aggregateCandles(daily, interval);
       return apiOk({
         ticker: 'TXF',
@@ -202,7 +220,7 @@ export async function GET(req: NextRequest) {
         interval,
         candles,
         totalBars: candles.length,
-        source: 'taifex',
+        source: liveQuote ? 'taifex-live' : 'taifex',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : '期交所資料載入失敗';
@@ -272,11 +290,14 @@ export async function GET(req: NextRequest) {
           const INJECT_BUDGET_MS = Number(process.env.STOCK_INJECT_BUDGET_MS) || 3500;
           const injectDeadline = Date.now() + INJECT_BUDGET_MS;
           try {
-            if (isTW && isTwIndex) {
-              // 大盤指數(^TWII/^TWOII)：個股報價端點對指數無效 → 走專屬 t00/o00 即時值。
-              // 與 L2 snapshot 同源 fetchTWIndexQuote，確保走圖今日那根與掃描/快照一致；
-              // L2 snapshot(l2LookupSymbol='^TWII') 仍當下方 fallback 3 的次要來源。
-              const iq = await withTimeout(fetchTWIndexQuote(today, symbol as '^TWII' | '^TWOII'), INJECT_BUDGET_MS, null);
+            if (isTwIndex || isCnIndex) {
+              // 指數用獨立單檔即時鏈；不讓 5 分鐘 L2 先攔截 30 秒走圖 polling。
+              // helper 已自帶「只有新鮮 L2 才可 fallback」的守門。
+              const iq = await withTimeout(
+                fetchLiveIndexQuote(symbol as LiveIndexSymbol, today),
+                INJECT_BUDGET_MS,
+                null,
+              );
               if (iq && iq.close > 0) {
                 todayQuote = { open: iq.open, high: iq.high, low: iq.low, close: iq.close, volume: iq.volume };
               }
@@ -324,7 +345,7 @@ export async function GET(req: NextRequest) {
           }
 
           // fallback 3: 從 L2 全市場快照中找該股報價
-          if (!todayQuote && Date.now() < injectDeadline) {
+          if (!todayQuote && !isTwIndex && !isCnIndex && Date.now() < injectDeadline) {
             try {
               const snapshot = await withTimeout(readIntradaySnapshot(market as 'TW' | 'CN', today), Math.max(500, injectDeadline - Date.now()), null);
               if (snapshot) {

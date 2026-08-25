@@ -228,6 +228,8 @@ export interface FugleQuote {
   date?: string;
   prevClose?: number;
   changePercent?: number;
+  /** 行情來源最後更新時間（ISO）；不可用請求完成時間冒充。 */
+  updatedAt?: string;
 }
 
 interface FugleQuoteResponse {
@@ -255,7 +257,16 @@ interface FugleQuoteResponse {
   };
   change: number;
   changePercent: number;
-  lastUpdated: string;
+  lastUpdated: string | number;
+}
+
+function fugleTimestampToIso(value: string | number | undefined): string | undefined {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return undefined;
+  // Fugle 文件／實際回應可能是微秒；亦容忍毫秒與秒 timestamp。
+  const millis = raw >= 1e15 ? raw / 1000 : raw >= 1e12 ? raw : raw * 1000;
+  const date = new Date(millis);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
 /**
@@ -316,6 +327,7 @@ export async function getFugleQuote(symbol: string): Promise<FugleQuote | null> 
       date: json.date,
       prevClose: prev > 0 ? prev : undefined,
       changePercent: json.changePercent,
+      updatedAt: fugleTimestampToIso(json.total?.time ?? json.lastUpdated),
     };
 
     if (quote.close > 0) {

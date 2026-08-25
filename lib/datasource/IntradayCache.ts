@@ -357,7 +357,10 @@ export function degenerateSnapshotReason(snapshot: IntradaySnapshot | null): str
  */
 const _refreshInflight = new Map<string, Promise<IntradaySnapshot>>();
 
-export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<IntradaySnapshot> {
+export async function refreshIntradaySnapshot(
+  market: 'TW' | 'CN',
+  options: { retryOnEmpty?: boolean } = {},
+): Promise<IntradaySnapshot> {
   // Inflight 保護：避免 cron + scanner/coarse + DabanScanner 併發呼叫時
   // 並行 fetch 全市場 + 並行寫同一檔案（0424 L2 JSON 尾巴重複根因之一）。
   // 同一 (market) inflight 中時，後到的 caller 等同一個 promise。
@@ -365,7 +368,7 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
   if (existing) return existing;
   // 最外層再設硬期限：即使未來新增的 provider 忘了設 timeout，single-flight 也不會永久中毒。
   const promise = withIntradayTimeout(
-    _refreshIntradaySnapshotImpl(market),
+    _refreshIntradaySnapshotImpl(market, options.retryOnEmpty !== false),
     REFRESH_HARD_TIMEOUT_MS,
     `${market} intraday refresh`,
   );
@@ -377,7 +380,7 @@ export async function refreshIntradaySnapshot(market: 'TW' | 'CN'): Promise<Intr
   }
 }
 
-async function _refreshIntradaySnapshotImpl(market: 'TW' | 'CN'): Promise<IntradaySnapshot> {
+async function _refreshIntradaySnapshotImpl(market: 'TW' | 'CN', retryOnEmpty: boolean): Promise<IntradaySnapshot> {
   // 記錄嘗試時間（不論成功或失敗），讓 health API 區分 cron 沒跑 vs API 掛了
   _lastRefreshAttempt[market] = new Date().toISOString();
 
@@ -418,7 +421,7 @@ async function _refreshIntradaySnapshotImpl(market: 'TW' | 'CN'): Promise<Intrad
         `數據源狀態: ${JSON.stringify(sources.map(s => `${s.source}:${s.success}/${s.quoteCount}`))}`
       );
 
-      if (currentEmpty < 2) {
+      if (currentEmpty < 2 && retryOnEmpty) {
         // 第一輪失敗：指數退避（10s, 30s）
         const backoffMs = currentEmpty === 0 ? 10_000 : 30_000;
         console.info(`[IntradayCache] ${market} 退避 ${backoffMs / 1000}s 後重試（consecutive=${currentEmpty}）`);
@@ -447,10 +450,10 @@ async function _refreshIntradaySnapshotImpl(market: 'TW' | 'CN'): Promise<Intrad
           );
         }
       } else {
-        // 連續失敗 ≥ 2 次：跳過重試，讓 existing L2 fallback 接手，避免觸發更嚴 WAF
+        // 連續失敗 ≥ 2 次，或互動式快速刷新：不做退避重試，讓 existing L2 fallback 接手。
         _consecutiveEmptyCount[market]++;
         console.warn(
-          `[IntradayCache] ${market} 連續空 ${_consecutiveEmptyCount[market]} 次，跳過重試避免 WAF 升級，` +
+          `[IntradayCache] ${market} 連續空 ${_consecutiveEmptyCount[market]} 次，${retryOnEmpty ? '跳過重試避免 WAF 升級' : '互動刷新採快速失敗、不做退避重試'}，` +
           `改由 existing L2 fallback 處理`
         );
       }

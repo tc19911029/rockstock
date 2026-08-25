@@ -10,7 +10,7 @@
  * 純顯示／觀察層，不參與選股（鐵則 #5）；只讀單一快照／板塊聚合端點（鐵則 #3）。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/shared';
 import { applySort } from '@/lib/sorting/sortEngine';
 import type { SortDir } from '@/lib/sorting/registry';
@@ -397,6 +397,7 @@ export function LiveThemesView({ market }: { market: Market }) {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const manualRefreshRef = useRef(false);
 
   // 切市場 → 清掉上一個市場的資料（避免閃舊）
   useEffect(() => { setTw(null); setCn(null); setError(null); }, [endpoint]);
@@ -406,7 +407,11 @@ export function LiveThemesView({ market }: { market: Market }) {
     let timer: ReturnType<typeof setInterval> | null = null;
     const load = async () => {
       try {
-        const j = await fetch(endpoint).then((r) => r.json());
+        const manual = manualRefreshRef.current;
+        manualRefreshRef.current = false;
+        const separator = endpoint.includes('?') ? '&' : '?';
+        const url = manual ? `${endpoint}${separator}refresh=1&_=${Date.now()}` : endpoint;
+        const j = await fetch(url, { cache: 'no-store' }).then((r) => r.json());
         if (cancelled) return;
         if (j.ok === false || j.error) { setError(j.error ?? '載入失敗'); return; }
         setError(null);
@@ -424,7 +429,11 @@ export function LiveThemesView({ market }: { market: Market }) {
     return () => { cancelled = true; if (timer) clearInterval(timer); };
   }, [endpoint, market, reloadKey]);
 
-  const refresh = () => { setRefreshing(true); setReloadKey((k) => k + 1); };
+  const refresh = () => {
+    manualRefreshRef.current = true;
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  };
 
   const payload = market === 'TW' ? tw : cn;
   const marketOpen = payload?.marketOpen ?? false;

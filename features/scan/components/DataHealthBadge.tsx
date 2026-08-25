@@ -137,16 +137,42 @@ export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
   }, [expanded, forceDown]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切換 market 時切換 loading + 清舊 health
     setLoading(true);
     setHealth(null); // 清除舊市場資料，避免顯示上個市場的 badge
     const controller = new AbortController();
-    fetch(`/api/health/data?market=${market}`, { signal: controller.signal })
-      .then(r => r.json())
-      .then(data => { if (data.ok) setHealth(data as MarketHealth); })
-      .catch(err => { if (err.name !== 'AbortError') {} })
-      .finally(() => setLoading(false));
-    return () => controller.abort(); // 切換市場時取消上一次的 fetch
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
+      try {
+        const response = await fetch(`/api/health/data?market=${market}`, {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (data.ok) setHealth(data as MarketHealth);
+      } catch (err) {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+          // 保留上一筆健康狀態；下一輪自動重試。
+        }
+      } finally {
+        inFlight = false;
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 60_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [market]);
 
   if (loading || !health) return null;

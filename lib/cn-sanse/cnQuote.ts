@@ -27,6 +27,8 @@ export interface SanSeQuote {
   peTTM: number;        // 市盈率(動)
   totalCap: number;     // 總市值（元）
   floatCap: number;     // 流通市值（元）
+  /** 騰訊報價本身的最後更新時間（ISO）。 */
+  updatedAt?: string;
 }
 
 /** symbol 如 603986.SS / 000001.SZ → 騰訊 code（sh/sz 前綴） */
@@ -62,6 +64,11 @@ export async function fetchQuote(symbol: string): Promise<SanSeQuote | null> {
     const price = num(p[3]);
     if (!(price > 0)) return null; // 停牌/無報價
 
+    const compactTime = p[30] ?? '';
+    const updatedAt = /^\d{14}/.test(compactTime)
+      ? `${compactTime.slice(0, 4)}-${compactTime.slice(4, 6)}-${compactTime.slice(6, 8)}T${compactTime.slice(8, 10)}:${compactTime.slice(10, 12)}:${compactTime.slice(12, 14)}+08:00`
+      : undefined;
+
     return {
       date: /^\d{8}/.test(p[30] ?? '')
         ? `${p[30].slice(0, 4)}-${p[30].slice(4, 6)}-${p[30].slice(6, 8)}`
@@ -81,6 +88,7 @@ export async function fetchQuote(symbol: string): Promise<SanSeQuote | null> {
       peTTM: num(p[52]),          // 市盈率(動)
       totalCap: num(p[45]) * 1e8, // 總市值：億 → 元
       floatCap: num(p[44]) * 1e8, // 流通市值：億 → 元
+      updatedAt,
     };
   } catch {
     return null;

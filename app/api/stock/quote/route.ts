@@ -8,6 +8,7 @@ import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
+import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,30 +84,21 @@ export async function GET(req: NextRequest) {
 
   let quote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
   let quoteDate: string = today;  // 預設 today（live quote 路徑）；L1 fallback 會改成真實 last.date
+  let quoteSource: string | undefined;
+  let quoteUpdatedAt: string | undefined;
+  let stale = false;
 
-  // ── INDEX 優先走 L2 snapshot（mis.twse 抓的 ^TWII / 000001.SS 真實當日 quote）──
-  // 個股不能進這條（pureCode='000001' 會撞到深圳平安銀行 SZ），但 INDEX 在 snapshot
-  // 內 symbol 帶 '^' / '.SS' 前後綴，不會與個股相撞。
-  // 修這條的原因：原本 INDEX 直接走最下面「L1 末根」fallback，回的是「昨天的 K + 強制 today 的 date」，
-  // polling 端拿到後會用 Math.max(high)/Math.min(low) 把已經正確的今日 bar 蓋成「昨天 OHLCV + 今日 high」
-  // 詭異混合（chg 變 0%）。L2 snapshot 內已有 INDEX 即時 quote，優先用它。
-  if (isIndex && market) {
+  // ── INDEX 走獨立即時鏈，最後才接受通過新鮮度檢查的 L2 ──
+  // 過去每 30 秒 polling 都先命中 5 分鐘 L2，造成「前端很勤、數字仍慢 2–5 分鐘」；
+  // L2 凍結時更會一直回同一筆舊數字。現在 TW 走 Fugle/MIS、CN 走 Tencent 單檔。
+  if (isIndex) {
     try {
-      const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
-      const sq = snapshot?.quotes.find(q => q.symbol === symbol);  // INDEX 用完整 symbol 比對（^TWII / 000001.SS）
-      if (sq && sq.close > 0 && (market !== 'TW' || sq.isActualTrade !== false)) {
-        quote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
-      }
-    } catch { /* fallthrough */ }
-  }
-
-  // TW 指數快照缺漏時直接補打 MIS（^TWII=t00、^TWOII=o00），再退 L1。
-  if (!quote && isTwIndex) {
-    try {
-      const { fetchTWIndexQuote } = await import('@/lib/datasource/IntradayCache');
-      const iq = await fetchTWIndexQuote(today, symbol as '^TWII' | '^TWOII');
+      const iq = await fetchLiveIndexQuote(symbol as LiveIndexSymbol, today);
       if (iq && iq.close > 0) {
         quote = { open: iq.open, high: iq.high, low: iq.low, close: iq.close, volume: iq.volume };
+        quoteDate = iq.date;
+        quoteSource = iq.source;
+        quoteUpdatedAt = iq.updatedAt;
       }
     } catch { /* fallthrough */ }
   }
@@ -184,11 +176,13 @@ export async function GET(req: NextRequest) {
       if (last && last.close > 0) {
         quote = { open: last.open, high: last.high, low: last.low, close: last.close, volume: last.volume };
         quoteDate = last.date;
+        quoteSource = 'l1';
+        stale = true;
       }
     } catch { /* fallthrough */ }
   }
 
   if (!quote) return apiError(`無法取得 ${symbol} 報價`, 404);
 
-  return apiOk({ symbol, date: quoteDate, ...quote });
+  return apiOk({ symbol, date: quoteDate, ...quote, source: quoteSource, updatedAt: quoteUpdatedAt, stale });
 }

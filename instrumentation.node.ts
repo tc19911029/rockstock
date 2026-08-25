@@ -493,6 +493,13 @@ export async function register() {
   }
 
   // 計時器
+  // 開機後先補一輪；舊版要等滿 5 分鐘才有第一筆 L2，部署／重啟後題材必然先顯示舊快照。
+  setTimeout(() => {
+    refreshAndScan('TW').catch(err => console.error('[local-cron] TW initial refreshAndScan:', err));
+  }, 15_000);
+  setTimeout(() => {
+    refreshAndScan('CN').catch(err => console.error('[local-cron] CN initial refreshAndScan:', err));
+  }, 45_000);
   setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, 5 * 60 * 1000);
   // 與 TW 錯開 30 秒，避免兩個全市場 provider 同時搶 curl slots / server connections。
   setInterval(() => {

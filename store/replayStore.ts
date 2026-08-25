@@ -473,6 +473,9 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           if (!res.ok) return;
           const q = await res.json();
           if (!q.close || q.close <= 0) return;
+          // 指數獨立即時源全失效時，quote API 只會把 L1 標成 stale 作為診斷資訊。
+          // polling 不得把這筆舊值覆寫到目前 bar，否則畫面看起來仍在刷新但數字其實凍結。
+          if (q.stale === true) return;
 
           const { currentIndex, allCandles, account, targetDate } = get();
           if (allCandles.length === 0) return;

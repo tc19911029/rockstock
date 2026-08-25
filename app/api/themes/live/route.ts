@@ -13,18 +13,35 @@ import { buildLiveThemeRoster, buildLatestLiveThemeRoster, type LiveThemeRosterF
 import { globalCache } from '@/lib/datasource/MemoryCache';
 import { isMarketOpen } from '@/lib/datasource/marketHours';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
+import { refreshIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const CACHE_TTL = 40 * 1000;
 
-type LivePayload = LiveThemeRosterFile & { marketOpen: boolean; stale: boolean; staleReason: string | null; updatedAt: string };
+type LivePayload = LiveThemeRosterFile & {
+  marketOpen: boolean;
+  stale: boolean;
+  staleReason: string | null;
+  updatedAt: string;
+  refreshAttempted?: boolean;
+};
 
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
+  const forceRefresh = req.nextUrl.searchParams.get('refresh') === '1' && !date;
   const cacheKey = `live-themes:TW:${date ?? 'latest'}`;
-  const cached = globalCache.get<LivePayload>(cacheKey);
+  const cached = forceRefresh ? null : globalCache.get<LivePayload>(cacheKey);
   if (cached) return apiOk(cached);
+
+  // 手動刷新必須真的重抓 L2，而不是只清 React state 後又命中同一份 40 秒快取。
+  // refreshIntradaySnapshot 本身有 single-flight、來源冷卻與空快照保護，不會覆寫好資料。
+  if (forceRefresh) {
+    await refreshIntradaySnapshot('TW', { retryOnEmpty: false }).catch((error) => {
+      console.warn('[themes/live] 手動刷新 L2 失敗:', error instanceof Error ? error.message : error);
+    });
+  }
 
   const file = date
     ? await buildLiveThemeRoster(date)
@@ -44,7 +61,8 @@ export async function GET(req: NextRequest) {
     stale: freshness.stale,
     staleReason: freshness.reason,
     updatedAt: file.snapshotUpdatedAt,
+    refreshAttempted: forceRefresh,
   };
   globalCache.set(cacheKey, payload, CACHE_TTL);
-  return apiOk(payload);
+  return apiOk(payload, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }
