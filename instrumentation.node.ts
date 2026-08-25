@@ -514,13 +514,19 @@ export async function register() {
   }, 150_000);
   // 題材 API 快取只有 40 秒；L2 若仍每 5 分鐘刷新，畫面再勤勞 polling 也只會重複舊快照。
   // 一分鐘是供應商負載與盤中體感的折衷，下限固定 60 秒並由 route single-flight 防止重入。
-  setInterval(() => { refreshAndScan('TW').catch(err => console.error('[local-cron] TW refreshAndScan:', err)); }, L2_REFRESH_INTERVAL_MS);
-  // 與 TW 錯開 30 秒，避免兩個全市場 provider 同時搶 curl slots / server connections。
-  setInterval(() => {
+  // 週期必須從首刷後再起算：若直接從 process boot 起算，第 60 秒會距 TW 15 秒首刷僅約
+  // 45 秒，撞上供應商／失敗冷卻窗口後，後續每輪可能一直卡在冷卻邊界。
+  function startL2RefreshLoop(market: 'TW' | 'CN', firstRepeatDelayMs: number) {
     setTimeout(() => {
-      refreshAndScan('CN').catch(err => console.error('[local-cron] CN refreshAndScan:', err));
-    }, 30_000);
-  }, L2_REFRESH_INTERVAL_MS);
+      refreshAndScan(market).catch(err => console.error(`[local-cron] ${market} refreshAndScan:`, err));
+      setInterval(() => {
+        refreshAndScan(market).catch(err => console.error(`[local-cron] ${market} refreshAndScan:`, err));
+      }, L2_REFRESH_INTERVAL_MS);
+    }, firstRepeatDelayMs);
+  }
+  // 與各自首刷相隔完整 1 分鐘，TW/CN 仍保持 30 秒錯峰。
+  startL2RefreshLoop('TW', 15_000 + L2_REFRESH_INTERVAL_MS);
+  startL2RefreshLoop('CN', 45_000 + L2_REFRESH_INTERVAL_MS);
 
   setInterval(() => {
     // L2 也是從開機時間起算；延後一分鐘，避免每 10 分鐘固定撞上 L2 refresh。
