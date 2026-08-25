@@ -2,7 +2,8 @@
  * 38 題材清單 × 成分股（2026-06-12 A2 起；2026-06-19 加玻璃基板 + 補各題材漏網龍頭；
  *  2026-06-20 補各題材二線/上下游 ~60 檔（含 PCB 鏈尖點/富喬/金居）
  *  + 新增 綠能/伺服器電源/高速連接 三題材；2026-06-22 加 成熟製程
- *  + IC設計/矽晶圓/第三代半導體/網通/半導體通路/工具機/自行車 七題材，單一事實）
+ *  + IC設計/矽晶圓/第三代半導體/網通/半導體通路/工具機/自行車 七題材；
+ *  2026-08-25 依公司官網/法說/年報重查 CPO、矽光子、光通訊供應鏈）
  *
  * 來源：使用者選股規格書 Step 4 的 25 題材 + Step 3/5 點名股 + 2026-06 市場概念股審查補強，
  * 成分沿用/校正 lib/scanner/conceptMap.ts 的概念分類。
@@ -58,6 +59,14 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '6643', name: 'M31' },
   ],
   'CPO': [
+    // 2026-08-25 稽核補：平台/交換器/光學/封裝測試/光源與材料（均有公司級產品或量產證據）
+    { code: '2330', name: '台積電' }, { code: '2345', name: '智邦' },
+    { code: '2409', name: '友達' }, { code: '2426', name: '鼎元' },
+    { code: '3008', name: '大立光' }, { code: '3264', name: '欣銓' },
+    { code: '3711', name: '日月光投控' }, { code: '3714', name: '富采' },
+    { code: '4971', name: 'IET-KY' }, { code: '4991', name: '環宇-KY' },
+    { code: '6223', name: '旺矽' }, { code: '6257', name: '矽格' },
+    { code: '6426', name: '統新' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '3665', name: '貿聯-KY' },
     { code: '6715', name: '嘉基' },
@@ -70,6 +79,13 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3234', name: '光環' }, { code: '4908', name: '前鼎' },
   ],
   '矽光子': [
+    // 2026-08-25 稽核補：COUPE/交換器、耦光、異質整合封裝、SiPh 測試與外部光源
+    { code: '2330', name: '台積電' }, { code: '2345', name: '智邦' },
+    { code: '3008', name: '大立光' }, { code: '3264', name: '欣銓' },
+    { code: '3711', name: '日月光投控' }, { code: '3714', name: '富采' },
+    { code: '4971', name: 'IET-KY' }, { code: '4991', name: '環宇-KY' },
+    { code: '6223', name: '旺矽' }, { code: '6257', name: '矽格' },
+    { code: '6426', name: '統新' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '3450', name: '聯鈞' },
     { code: '3163', name: '波若威' },
@@ -80,6 +96,13 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '2455', name: '全新' },
   ],
   '光通訊': [
+    // 2026-08-25 稽核補：CPO 是光通訊子集合，維持 CPO 新增股在此完整覆蓋
+    { code: '2330', name: '台積電' }, { code: '2409', name: '友達' },
+    { code: '2426', name: '鼎元' }, { code: '3008', name: '大立光' },
+    { code: '3264', name: '欣銓' }, { code: '3711', name: '日月光投控' },
+    { code: '3714', name: '富采' }, { code: '4971', name: 'IET-KY' },
+    { code: '4991', name: '環宇-KY' }, { code: '6223', name: '旺矽' },
+    { code: '6257', name: '矽格' }, { code: '6426', name: '統新' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '3665', name: '貿聯-KY' },
     { code: '6715', name: '嘉基' },

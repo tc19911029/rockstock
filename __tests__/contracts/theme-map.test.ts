@@ -56,6 +56,26 @@ describe('themeMap contracts', () => {
     expect(missing).toEqual([]);
   });
 
+  test('2026-08-25 CPO／矽光子／光通訊稽核名單完整且維持子集合關係', () => {
+    const codes = (theme: string) => new Set(THEME_MAP[theme].map(stock => stock.code));
+    const cpo = codes('CPO');
+    const siliconPhotonics = codes('矽光子');
+    const opticalComms = codes('光通訊');
+
+    const auditedCpo = [
+      '2330', '2345', '2409', '2426', '3008', '3264', '3711',
+      '3714', '4971', '4991', '6223', '6257', '6426',
+    ];
+    const auditedSiliconPhotonics = [
+      '2330', '2345', '3008', '3264', '3711', '3714',
+      '4971', '4991', '6223', '6257', '6426',
+    ];
+
+    expect(auditedCpo.filter(code => !cpo.has(code))).toEqual([]);
+    expect(auditedSiliconPhotonics.filter(code => !siliconPhotonics.has(code))).toEqual([]);
+    expect([...cpo].filter(code => !opticalComms.has(code))).toEqual([]);
+  });
+
   test('每個題材至少 3 檔成分（排名聚合的最低樣本）', () => {
     for (const [theme, stocks] of Object.entries(THEME_MAP)) {
       expect({ theme, n: stocks.length }).toEqual({ theme, n: expect.any(Number) });
