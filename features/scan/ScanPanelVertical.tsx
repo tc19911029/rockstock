@@ -161,10 +161,6 @@ export function ScanPanelVertical({ onSelectStock }: ScanPanelVerticalProps) {
 
         </div>
 
-        <div role="note" className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-[9px] leading-relaxed text-amber-100/80">
-          策略訊號尚未依單檔持倉與市場交易規則完成驗證，請勿直接據此下單。
-        </div>
-
         {/* 4 區塊策略選擇（書本五步法分層）— 只在做多時顯示
             ┌─ Step 1 池子 ─ A
             ├─ Step 2 多頭進場 ─ B/C/E/K/L/M/P（從 Step 1 挑）
