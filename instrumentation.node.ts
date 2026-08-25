@@ -256,8 +256,8 @@ export async function register() {
   // ── 盤中：L2 刷新（update-intraday） + watchdog ──
   // 2026-05-21 加 watchdog：每輪刷新後 check L2 距上次成功 > 10 分鐘就 console.error
   // 背景：新 Mac 5/20 12:10 L2 polling 突然停 80 分鐘沒人發現 → L1 ~180 檔錯
-  async function refreshAndScan(market: 'TW' | 'CN') {
-    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return;
+  async function refreshAndScan(market: 'TW' | 'CN'): Promise<boolean> {
+    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return false;
 
     const data = await callRoute(
       `/api/cron/update-intraday?market=${market}`,
@@ -266,11 +266,12 @@ export async function register() {
     ) as { data?: { count?: number; skipped?: boolean; reason?: string; alert?: boolean; alertLevel?: string } } | null;
     if (!data) {
       console.error(`[L2-watchdog] ★ ${market} L2 刷新 route 無回應；下一輪會重試`);
-      return;
+      return false;
     }
     const payload = data?.data ?? data ?? {};
     if ((payload as { skipped?: boolean }).skipped) {
       console.log(`[local-cron] ${market} L2 刷新跳過：${(payload as { reason?: string }).reason}`);
+      return false;
     } else {
       console.log(`[local-cron] ${market} L2 刷新 ${(payload as { count?: number }).count ?? -1} 支`);
     }
@@ -294,6 +295,8 @@ export async function register() {
         }).catch(() => {});
       }
     }
+    return !(payload as { alert?: boolean }).alert
+      && ((payload as { alertLevel?: string }).alertLevel ?? 'none') === 'none';
   }
 
   // ── 盤後：買法 post_close 掃描（scan-bm-batch 3 track）──
@@ -517,12 +520,21 @@ export async function register() {
   // 週期必須從首刷後再起算：若直接從 process boot 起算，第 60 秒會距 TW 15 秒首刷僅約
   // 45 秒，撞上供應商／失敗冷卻窗口後，後續每輪可能一直卡在冷卻邊界。
   function startL2RefreshLoop(market: 'TW' | 'CN', firstRepeatDelayMs: number) {
-    setTimeout(() => {
-      refreshAndScan(market).catch(err => console.error(`[local-cron] ${market} refreshAndScan:`, err));
-      setInterval(() => {
-        refreshAndScan(market).catch(err => console.error(`[local-cron] ${market} refreshAndScan:`, err));
-      }, L2_REFRESH_INTERVAL_MS);
-    }, firstRepeatDelayMs);
+    const degradedIntervalMs = Math.max(5 * 60_000, L2_REFRESH_INTERVAL_MS);
+    const runAndSchedule = async () => {
+      let healthy = false;
+      try {
+        healthy = await refreshAndScan(market);
+      } catch (err) {
+        console.error(`[local-cron] ${market} refreshAndScan:`, err);
+      }
+      const nextDelay = healthy ? L2_REFRESH_INTERVAL_MS : degradedIntervalMs;
+      if (!healthy) {
+        console.warn(`[local-cron] ${market} L2 降級，下一輪 ${Math.round(nextDelay / 60_000)} 分鐘後重試`);
+      }
+      setTimeout(runAndSchedule, nextDelay);
+    };
+    setTimeout(runAndSchedule, firstRepeatDelayMs);
   }
   // 與各自首刷相隔完整 1 分鐘，TW/CN 仍保持 30 秒錯峰。
   startL2RefreshLoop('TW', 15_000 + L2_REFRESH_INTERVAL_MS);
