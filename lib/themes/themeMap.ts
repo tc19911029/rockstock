@@ -98,8 +98,9 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '3234', name: '光環' }, { code: '4908', name: '前鼎' },
   ],
   '矽光子': [
-    // 2026-08-26 稽核補：SiPh 晶圓平台、ASIC/PIC/EIC、封裝與光電連接
-    { code: '2303', name: '聯電' }, { code: '2454', name: '聯發科' },
+    // 2026-08-26 稽核補：SiPh 晶圓平台、ASIC/PIC/EIC、封裝、系統整合與光電連接
+    { code: '2303', name: '聯電' }, { code: '2317', name: '鴻海' },
+    { code: '2454', name: '聯發科' }, { code: '6669', name: '緯穎' },
     { code: '2458', name: '義隆' }, { code: '3265', name: '台星科' },
     { code: '3443', name: '創意' }, { code: '6147', name: '頎邦' },
     { code: '6197', name: '佳必琪' }, { code: '6271', name: '同欣電' },
@@ -117,6 +118,8 @@ export const THEME_MAP: Record<string, ThemeStock[]> = {
     { code: '4971', name: 'IET-KY' }, { code: '4991', name: '環宇-KY' },
     { code: '6223', name: '旺矽' }, { code: '6257', name: '矽格' },
     { code: '6426', name: '統新' },
+    // 2026-08-26 稽核補：官方揭露 SiPh 光互連能力，以及供 SiPh/CPO 使用的外置光源
+    { code: '3665', name: '貿聯-KY' }, { code: '4908', name: '前鼎' },
     // 2026-06-22 稽核補（分身研究+master 驗證）
     { code: '3450', name: '聯鈞' },
     { code: '3163', name: '波若威' },
