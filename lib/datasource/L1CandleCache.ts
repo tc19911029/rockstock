@@ -24,7 +24,12 @@ const IS_VERCEL = !!process.env.VERCEL;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 分鐘，確保修復磁碟後自動過期
 const MAX_ENTRIES = 6000; // 全市場 TW (1956) + CN (3088) = ~5044，多留 buffer
 
-type CacheEntry = { data: CandleFileData; expiresAt: number };
+type CacheEntry = {
+  data: CandleFileData;
+  expiresAt: number;
+  /** 本地檔案版本（inode:mtimeMs:size）。外部 process 改檔後用它淘汰舊記憶體值。 */
+  sourceVersion?: string;
+};
 
 type L1GlobalCache = {
   _l1Store: Map<string, CacheEntry>;
@@ -56,12 +61,23 @@ function readerSnapshot(data: CandleFileData): CandleFileData {
 /**
  * 取快取資料。未命中或已過期回傳 null（呼叫方負責從磁碟讀，再呼叫 updateCache）。
  */
-export function getFromCache(symbol: string, market: 'TW' | 'CN'): CandleFileData | null {
+export function getFromCache(
+  symbol: string,
+  market: 'TW' | 'CN',
+  sourceVersion?: string | null,
+): CandleFileData | null {
   if (IS_VERCEL) return null;
-  const entry = _store.get(`${market}/${symbol}`);
+  const key = `${market}/${symbol}`;
+  const entry = _store.get(key);
   if (!entry) return null;
+  // sourceVersion === undefined 代表直接使用 cache API 的純記憶體 caller（含單元測試）；
+  // null 代表磁碟檔已不存在；字串不一致代表外部 process 已原子換檔。
+  if (sourceVersion !== undefined && entry.sourceVersion !== sourceVersion) {
+    _store.delete(key);
+    return null;
+  }
   if (Date.now() > entry.expiresAt) {
-    _store.delete(`${market}/${symbol}`);
+    _store.delete(key);
     return null;
   }
   // HMR 後 global cache 可能仍是舊版建立的可變 entry；命中時順手升級成不可變 snapshot。
@@ -79,11 +95,17 @@ export function getFromCache(symbol: string, market: 'TW' | 'CN'): CandleFileDat
  * 記憶體持續膨脹（早上看到 next-server 5.3GB，主因之一）。
  */
 let _updateCounter = 0;
-export function updateCache(symbol: string, market: 'TW' | 'CN', data: CandleFileData): void {
+export function updateCache(
+  symbol: string,
+  market: 'TW' | 'CN',
+  data: CandleFileData,
+  sourceVersion?: string,
+): void {
   if (IS_VERCEL) return;
   _store.set(`${market}/${symbol}`, {
     data: immutableCacheSnapshot(data),
     expiresAt: Date.now() + CACHE_TTL_MS,
+    sourceVersion,
   });
   if (++_updateCounter % 200 === 0) evictExpired();
   // Hard cap：超過上限刪掉最舊的 N 筆（Map 保 insertion order）

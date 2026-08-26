@@ -14,7 +14,7 @@
  *   5. 輸出 data/settle-report-{market}-{date}.json 供 T+1 fill 用
  */
 import { config } from 'dotenv';
-import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import path from 'path';
 
 if (existsSync('.env.local')) config({ path: '.env.local' });
@@ -23,6 +23,7 @@ config();
 import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 import { settleSymbol, type SettleResult, type VendorQuote, type Market } from '../lib/datasource/eodSettle';
 import { prefetchVendorBatch } from '../lib/datasource/eodSettleBatch';
+import { assessTwOfficialReadiness, canWriteSettlement } from '../lib/datasource/eodSettlePolicy';
 import { verifyDownload } from '../lib/datasource/DownloadVerifier';
 
 interface Args {
@@ -119,6 +120,38 @@ async function main() {
   const bulkN = (batchCache.twseBulk.size + batchCache.tpexBulk.size + batchCache.eastMoneyBulk.size);
   console.log(`  batch cache 完成 (${Date.now()-t0}ms, bulk size=${bulkN})`);
 
+  const officialReadiness = assessTwOfficialReadiness({
+    market,
+    targetDate: date,
+    twseRows: batchCache.twseBulk.size,
+    tpexRows: batchCache.tpexBulk.size,
+  });
+  if (officialReadiness.defer) {
+    if (dry) {
+      console.warn(`[eod-settle] DRY-DEFER：${officialReadiness.reason}；正式執行會停止封存，但 dry run 繼續供診斷`);
+    } else {
+      const reportPath = path.join(process.cwd(), 'data', 'settle-reports');
+      mkdirSync(reportPath, { recursive: true });
+      writeFileSync(path.join(reportPath, `settle-${market}-${date}.deferred.json`), JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        market,
+        date,
+        status: 'deferred-official-bulk-incomplete',
+        reason: officialReadiness.reason,
+        officialRows: {
+          twse: batchCache.twseBulk.size,
+          tpex: batchCache.tpexBulk.size,
+        },
+        retryAt: `${date}T16:30:00+08:00`,
+      }, null, 2));
+      console.error(`[eod-settle] DEFER：${officialReadiness.reason}；16:30 retry 再封存，禁止以單一備援源搶先寫正式 L1`);
+      process.exit(75);
+    }
+  }
+  if (!officialReadiness.ready && market === 'TW') {
+    console.warn(`[eod-settle] DEGRADED：${officialReadiness.reason}；只允許官方錨或兩個獨立來源一致時寫入`);
+  }
+
   const results: SettleResult[] = [];
   const stats: Record<string, number> = {
     'settled-multi-source': 0,
@@ -140,14 +173,14 @@ async function main() {
       // 盤中殘值同源互證，1649 檔誤標 already-correct 且 T+1 不複驗 → 833 檔上櫃假收盤）：
       //   1. 既有 bar 存在但 settled 無官方 bulk 源、也無 ≥2 獨立 vendor 背書
       //      → pending-unverified，不寫不跳過，留給 T+1（08:00 官方 feed 可用、額度重置）。
-      //      existing 缺的 gap-fill 路徑保持原行為（單源可寫，tick 守衛仍在）。
+      //      existing 缺的 gap-fill 也必須有官方錨或獨立雙源，不再讓單一 Yahoo 寫正式 L1。
       //   2. already-correct 改精確比對 close（原 0.5% 容差讓 58.3 vs 58.4 永久留存），
       //      並加驗 volume（過去 volume 從不對賬 → 盤中部分量永久殘留，污染三色換手率）。
       // CN 維持原規則：CN 無官方 bulk（stub）、實務常只剩騰訊一源，套雙源背書會
       // 整市場 pending（2026-06-12 dry 實測 57/60）、宇宙外補 bar 機制全斷。
       if (market === 'TW') {
         const verified = result.officialAnchor || (result.independentAgree ?? 0) >= 2;
-        if (result.settled && existing && !verified) {
+        if (result.settled && !verified) {
           result.status = 'pending-unverified';
         } else if (result.settled && existing) {
           const closeSame = Math.abs(result.settled.close - existing.close) <= 0.001;
@@ -166,16 +199,9 @@ async function main() {
       results.push(r);
       stats[r.status] = (stats[r.status] ?? 0) + 1;
 
-      // Apply 規則（保守 + 自癒）：
-      //   1. settled-multi-source: 兩源以上一致，直接寫
-      //   2. settled-single-source + existing 缺/壞: 至少有一個 vendor 比 L1 既有壞掉好，寫
-      //   原因：盤中 scan pipeline 偶會寫進 OHLC 內部矛盾的 K（close > high 等），
-      //   settlement 必須用 vendor 覆寫，否則「填錯資料」永遠留著
-      const existingBad = !readExisting(market, r.symbol, r.date);  // invariant-violated 視為 undefined
-      const writable =
-        r.officialAnchor === true ||
-        r.status === 'settled-multi-source' ||
-        (r.status === 'settled-single-source' && existingBad);
+      // Apply 規則：TW 必須有官方錨或兩個獨立來源；CN 維持多源，缺檔時允許單源自癒。
+      const existingBad = !r.existing; // invariant-violated 在 settleSymbol 前已被 readExisting 分流為 undefined
+      const writable = canWriteSettlement(r, market, existingBad);
       if (!dry && r.settled && writable) {
         const originalStatus = r.status;
         try {
@@ -231,6 +257,13 @@ async function main() {
       disagreements: r.disagreements,
     })),
   }, null, 2));
+  if (!dry) {
+    const deferredReport = path.join(reportPath, `settle-${market}-${date}.deferred.json`);
+    if (existsSync(deferredReport)) {
+      try { unlinkSync(deferredReport); }
+      catch (error) { console.warn(`[eod-settle] 無法清除舊 defer report: ${error instanceof Error ? error.message : error}`); }
+    }
+  }
   console.log(`報告寫入 ${reportFile}`);
 
   // Apply 結束後立即重建全市場 coverage report。策略閘門只信 verify report；若只寫

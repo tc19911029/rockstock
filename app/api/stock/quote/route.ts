@@ -9,6 +9,7 @@ import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
+import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -70,14 +71,66 @@ export async function GET(req: NextRequest) {
         ? [...new Set([symbol, `${pureCode}.${suffix}`, `${pureCode}.TW`, `${pureCode}.TWO`])]
         : [...new Set([symbol, `${pureCode}.${suffix}`])];
 
+    let l1Fallback: { date: string; open: number; high: number; low: number; close: number; volume: number } | null = null;
     for (const candidate of candidates) {
       try {
         const file = await readCandleFile(candidate, market);
         const last = file?.candles.at(-1);
         if (last && last.close > 0) {
-          return apiOk({ symbol, date: last.date, open: last.open, high: last.high, low: last.low, close: last.close, volume: last.volume });
+          l1Fallback ??= {
+            date: last.date,
+            open: last.open,
+            high: last.high,
+            low: last.low,
+            close: last.close,
+            volume: last.volume,
+          };
+          // 正式日線已到今天就直接採用；不用再讀 L2。
+          if (last.date >= today) {
+            return apiOk({
+              symbol,
+              date: last.date,
+              open: last.open,
+              high: last.high,
+              low: last.low,
+              close: last.close,
+              volume: last.volume,
+              source: 'l1',
+              stale: false,
+            });
+          }
         }
       } catch { /* try next suffix */ }
+    }
+
+    // 盤後官方日線可能延遲發布。在 L1 仍停在前一日的空窗，只允許「收盤後寫入、
+    // 且確有成交」的今日 L2 最終快照墊檔。委託簿推估價不得冒充今日收盤價。
+    if (!isIndex) {
+      try {
+        const snapshot = await readIntradaySnapshot(market, today);
+        const sq = snapshot?.quotes.find(q => q.symbol === pureCode);
+        const isFinal = snapshot?.date === today
+          && isFinalTradingSnapshot(market, today, snapshot.updatedAt);
+        const isConfirmedTrade = market !== 'TW' || sq?.isActualTrade === true;
+        if (isFinal && isConfirmedTrade && sq && sq.close > 0) {
+          return apiOk({
+            symbol,
+            date: today,
+            open: sq.open,
+            high: sq.high,
+            low: sq.low,
+            close: sq.close,
+            volume: sq.volume,
+            source: 'l2-final',
+            updatedAt: snapshot.updatedAt,
+            stale: false,
+          });
+        }
+      } catch { /* 保留可信的前一交易日 L1 */ }
+    }
+
+    if (l1Fallback) {
+      return apiOk({ symbol, ...l1Fallback, source: 'l1', stale: true });
     }
     return apiError(`無法取得 ${symbol} 報價`, 404);
   }

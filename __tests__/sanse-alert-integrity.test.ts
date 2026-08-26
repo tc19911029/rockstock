@@ -55,6 +55,21 @@ describe('L1 記憶體快取隔離', () => {
     expect(second.candles[0].close).toBe(2780);
     expect(Object.isFrozen(second.candles[0])).toBe(true);
   });
+
+  it('磁碟版本改變時立即淘汰跨 process 留下的舊 cache', () => {
+    const source = {
+      symbol: '3081.TWO',
+      lastDate: '2026-08-25',
+      updatedAt: '2026-08-25T08:00:00.000Z',
+      candles: [
+        { date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 },
+      ],
+    };
+    updateCache(source.symbol, 'TW', source, 'old-version');
+
+    expect(getFromCache(source.symbol, 'TW', 'old-version')?.lastDate).toBe('2026-08-25');
+    expect(getFromCache(source.symbol, 'TW', 'new-version')).toBeNull();
+  });
 });
 
 describe('三色推播標的去重', () => {

@@ -60,7 +60,7 @@ import { getFromCache, updateCache, triggerPreload } from './L1CandleCache';
 
 // ── Filesystem helpers ───────────────────────────────────────────────────────
 
-import { readFile, mkdir, readdir } from 'fs/promises';
+import { readFile, mkdir, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
@@ -87,6 +87,35 @@ function blobKey(symbol: string, market: 'TW' | 'CN'): string {
   return `candles/${market}/${symbol}.json`;
 }
 
+function statVersion(value: { mtimeMs: number; size: number; ino: number | bigint }): string {
+  // atomicFsPut 以 rename 換檔；inode 是最可靠的跨 process 版本訊號。
+  // mtime+size 則涵蓋少數直接原地寫入的維護工具。
+  return `${value.ino}:${value.mtimeMs}:${value.size}`;
+}
+
+async function localFileVersion(symbol: string, market: 'TW' | 'CN'): Promise<string | null> {
+  try {
+    return statVersion(await stat(localPath(symbol, market)));
+  } catch {
+    return null;
+  }
+}
+
+/** 原子 rename 前後若剛好撞到 reader，有限次重讀，避免把舊內容配上新檔案版本存進 cache。 */
+async function readStableLocalFile(
+  symbol: string,
+  market: 'TW' | 'CN',
+): Promise<{ raw: string; version: string }> {
+  const file = localPath(symbol, market);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const before = statVersion(await stat(file));
+    const raw = await readFile(file, 'utf-8');
+    const after = statVersion(await stat(file));
+    if (before === after) return { raw, version: after };
+  }
+  throw new Error(`L1 file kept changing while reading: ${market}/${symbol}`);
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -97,12 +126,16 @@ export async function readCandleFile(
   market: 'TW' | 'CN',
 ): Promise<CandleFileData | null> {
   try {
+    let sourceVersion: string | undefined;
     // ── L1 記憶體快取（本地開發專用）────────────────────────────────────────
     if (!IS_VERCEL) {
-      const cached = getFromCache(symbol, market);
+      // 每次 hit 只做一次 stat（不重讀/parse JSON）。外部 launchd process 原子換檔後，
+      // inode/mtime/size 立刻不同，舊 cache 當次請求就失效；不再等 10 分鐘 TTL 或人工清除。
+      const diskVersion = await localFileVersion(symbol, market);
+      const cached = getFromCache(symbol, market, diskVersion);
       if (cached) {
         const cleaned = withoutNonTradingPlaceholders(cached);
-        if (cleaned && cleaned !== cached) updateCache(symbol, market, cleaned);
+        if (cleaned && cleaned !== cached) updateCache(symbol, market, cleaned, diskVersion ?? undefined);
         return cleaned;
       }
 
@@ -121,7 +154,9 @@ export async function readCandleFile(
         } catch { /* 沒有就算了 */ }
       }
     } else {
-      raw = await readFile(localPath(symbol, market), 'utf-8');
+      const local = await readStableLocalFile(symbol, market);
+      raw = local.raw;
+      sourceVersion = local.version;
     }
 
     if (!raw) return null;
@@ -140,7 +175,7 @@ export async function readCandleFile(
     if (data.lastDate.endsWith('*')) data.lastDate = data.lastDate.slice(0, -1);
 
     // 讀到後存入快取，下次直接命中
-    if (!IS_VERCEL) updateCache(symbol, market, data);
+    if (!IS_VERCEL) updateCache(symbol, market, data, sourceVersion);
 
     return data;
   } catch {
@@ -416,7 +451,10 @@ async function _writeCandleFileImpl(
   }
 
   // 更新 L1 記憶體快取（本地開發），讓下次掃描立即拿到新資料
-  if (!IS_VERCEL) updateCache(symbol, market, data);
+  if (!IS_VERCEL) {
+    const sourceVersion = await localFileVersion(symbol, market);
+    updateCache(symbol, market, data, sourceVersion ?? undefined);
+  }
 }
 
 /**
