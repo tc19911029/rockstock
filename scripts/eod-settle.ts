@@ -77,6 +77,34 @@ function readExisting(market: Market, sym: string, date: string): VendorQuote | 
   } catch { return undefined; }
 }
 
+/**
+ * eod-settle 由 launchd 的獨立 Node process 寫 L1；常駐 Next server 不會知道磁碟已變更，
+ * 可能繼續從記憶體回傳前一交易日（2026-08-26 聯亞 3081 即因此停在 08-25）。
+ * 寫入完成後主動通知 server 清 cache。server 沒啟動不影響 settlement 本身。
+ */
+async function clearServerL1Cache(): Promise<void> {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    console.warn('[eod-settle] CRON_SECRET 未設定，略過常駐服務 L1 cache 失效通知');
+    return;
+  }
+
+  try {
+    const response = await fetch('http://localhost:3000/api/admin/clear-l1-cache', {
+      headers: { Authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      console.warn(`[eod-settle] 常駐服務 L1 cache 清除失敗: HTTP ${response.status}`);
+      return;
+    }
+    const payload = await response.json() as { before?: number; after?: number };
+    console.log(`[eod-settle] 常駐服務 L1 cache 已清除: ${payload.before ?? '?'} → ${payload.after ?? '?'}`);
+  } catch (error) {
+    console.warn(`[eod-settle] 常駐服務 L1 cache 失效通知失敗（不影響封存）: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
 async function main() {
   const { market, date, dry, limit, concurrency } = parseArgs();
   console.log(`EOD Settle: market=${market} date=${date} ${dry ? '(DRY)' : '★ APPLY'} concurrency=${concurrency}`);
@@ -182,6 +210,10 @@ async function main() {
     console.log(`  ${k}: ${v}`);
   }
   console.log(`寫入 L1: ${written}`);
+
+  if (!dry && written > 0) {
+    await clearServerL1Cache();
+  }
 
   // 輸出 settle report 供 T+1 fill 用（dry 模式不覆寫，避免 dry 測試把真實 cron 的
   // pending 清單蓋掉 → T+1 會漏補。2026-06-12 修）
