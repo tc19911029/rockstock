@@ -22,6 +22,7 @@ import type {
   NarrativeTone,
 } from './types';
 import type { SignalEvaluationPhase } from '@/lib/portfolio/signalEvaluationPhase';
+import { movingAverageRank, movingAverageRankFromText } from '@/lib/portfolio/holdingSignalPolicy';
 
 const ACTION_LABEL: Record<NarrativeAction, string> = {
   exit: '優先出場',
@@ -212,14 +213,18 @@ function fallbackInvalidation(
   blockers: readonly string[],
   operatingMA?: string | null,
   evaluationPhase: SignalEvaluationPhase = 'closed',
+  primaryEvent?: ChartNarrativeEvent,
 ): string {
+  const eventText = primaryEvent ? `${primaryEvent.label} ${primaryEvent.description}` : '';
+  const eventMatchesOperatingMA = movingAverageRank(operatingMA) != null
+    && movingAverageRankFromText(eventText) === movingAverageRank(operatingMA);
   if (evaluationPhase === 'intraday' && (action === 'exit' || action === 'reduce')) {
-    const maNote = operatingMA ? `；${operatingMA} 也會隨現價同步重算` : '';
+    const maNote = eventMatchesOperatingMA ? `；${operatingMA} 也會隨現價同步重算` : '';
     return `盤中每次報價更新都會重新判讀；若觸發條件解除，本預警會自動消失${maNote}，收盤後才定案。`;
   }
-  if (action === 'exit') return operatingMA
+  if (action === 'exit') return eventMatchesOperatingMA && operatingMA
     ? `收盤重新站回 ${operatingMA} 且結構轉強後，才重新判讀；不回頭抵銷當日出場紀律。`
-    : '結構重新站回關鍵壓力且出現新確認訊號後，才重做判讀。';
+    : '之後若觸發的硬出場條件解除且結構重新轉強，才建立新的判讀；不回頭抵銷本次已確認的出場紀律。';
   if (blockers[0]) return `若「${compact(blockers[0], 90)}」解除且結構重新轉強，本次風險判讀失效。`;
   if ((action === 'hold' || action === 'reduce') && operatingMA) return `收盤跌破 ${operatingMA} 時重新評估持股。`;
   if (action === 'evaluate-entry') return '確認前先跌破型態低點或原支撐，進場假設失效。';
@@ -386,7 +391,7 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
   const confirmation = primaryEvent.confirmation
     ?? fallbackConfirmation(decision.action, input.operatingMA, relevantBlockers, evaluationPhase);
   const invalidation = primaryEvent.invalidation
-    ?? fallbackInvalidation(decision.action, relevantBlockers, input.operatingMA, evaluationPhase);
+    ?? fallbackInvalidation(decision.action, relevantBlockers, input.operatingMA, evaluationPhase, primaryEvent);
   const blockers = Object.freeze([...relevantBlockers]);
   const actionLabel = evaluationPhase === 'intraday' && decision.action === 'exit'
     ? '盤中出場預警'

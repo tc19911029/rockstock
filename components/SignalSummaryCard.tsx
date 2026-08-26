@@ -37,6 +37,7 @@ import { getTickSize } from '@/lib/utils/tickSize';
 import { marketFromSymbol, formatSharesAsLots } from '@/lib/utils/shareUnits';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { resolveSignalEvaluationPhase } from '@/lib/portfolio/signalEvaluationPhase';
+import { resolveHoldingSignalSubtype } from '@/lib/portfolio/holdingSignalPolicy';
 import {
   cashDividendAdjustedThreshold,
   cumulativeCashDividend,
@@ -321,23 +322,17 @@ export default function SignalSummaryCard() {
     : `此訊號卡套用「${strategyName}」 SOP（操作均線 ${operatingMA ?? '—'}）；在右側掃描面板換策略時會同步切換。`;
 
   // ── 訊號分類（出場訊號對齊操作均線）────────────────────────────────────
+  // 全市場的飆股走圖規則在持倉中只保留資訊；正式交易動作由下方持倉引擎確認。
   // 持股中：比操作均線「短」的跌破均線出場訊號降級為軟出場（緊盯/減碼，不喊該出場）。
   // 例：J（ABC 突破）操作 MA20 — 破 MA5/MA10 只是減碼警示，收盤破 MA20 才是硬出場。
-  const MA_RANK: Record<string, number> = { MA3: 1, MA5: 2, MA10: 3, MA20: 4, MA60: 5 };
-  const opRank = operatingMA ? (MA_RANK[operatingMA] ?? null) : null;
-  const maRankOfSignal = (s: RuleSignal): number | null => {
-    const hay = `${s.ruleId} ${s.label} ${s.description ?? ''}`;
-    const hits = (['MA60', 'MA20', 'MA10', 'MA5', 'MA3'] as const)
-      .filter(m => new RegExp(`${m}(?![0-9])`, 'i').test(hay));
-    return hits.length === 1 ? MA_RANK[hits[0]] : null;  // 一次講多條均線的訊號不動
-  };
   const classified = currentSignals.map(s => {
-    let t = s.subtype ?? classifySignal(s);
-    if (hasPosition && opRank != null && t === 'exit_strong') {
-      const r = maRankOfSignal(s);
-      if (r != null && r < opRank) t = 'exit_soft';
-    }
-    return { sig: s, subtype: t };
+    const subtype = resolveHoldingSignalSubtype({
+      signal: s,
+      subtype: s.subtype ?? classifySignal(s),
+      hasPosition,
+      operatingMA,
+    });
+    return { sig: s, subtype };
   });
   const entrySigs = classified
     .filter(c => c.subtype === 'entry_strong' || c.subtype === 'entry_soft' || c.subtype === 'trend')

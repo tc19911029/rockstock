@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
+import { resolveHoldingSignalSubtype } from '@/lib/portfolio/holdingSignalPolicy';
 import ChartNarrativePanel from '@/components/narrative/ChartNarrativePanel';
 import type { CandleWithIndicators, RuleSignal } from '@/types';
 
@@ -96,6 +97,63 @@ describe('走圖敘事建構器', () => {
     expect(result.action).toBe('exit');
     expect(result.primaryEvent.label).toBe('跌破前低');
     expect(result.headline).toContain('先處理風險');
+  });
+
+  test('B／MA5 持倉的飆股 MA3 顯示規則不會再越權產生全數出場', () => {
+    const surge = signal({
+      type: 'SELL',
+      ruleId: 'zhu-surge-hold-or-sell',
+      label: '飆股出場',
+      description: '破3日均線，1項條件違反',
+    });
+    const subtype = resolveHoldingSignalSubtype({
+      signal: surge,
+      subtype: 'exit_strong',
+      hasPosition: true,
+      operatingMA: 'MA5',
+    });
+
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [surge],
+      classifiedSignals: [{ sig: surge, subtype }],
+      hasPosition: true,
+      operatingMA: 'MA5',
+    });
+
+    expect(subtype).toBe('warn');
+    expect(result.action).toBe('hold');
+    expect(result.headline).toContain('尚無出場條件');
+  });
+
+  test('正式持倉引擎確認操作均線出場時，仍會壓過飆股資訊規則', () => {
+    const surge = signal({
+      type: 'SELL',
+      ruleId: 'zhu-surge-hold-or-sell',
+      label: '飆股出場',
+      description: '破3日均線，1項條件違反',
+    });
+    const subtype = resolveHoldingSignalSubtype({
+      signal: surge,
+      subtype: 'exit_strong',
+      hasPosition: true,
+      operatingMA: 'MA5',
+    });
+
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [surge],
+      classifiedSignals: [{ sig: surge, subtype }],
+      hasPosition: true,
+      hardRisks: ['跌破 MA5（短線操作出場）：正式持倉引擎已確認'],
+      operatingMA: 'MA5',
+    });
+
+    expect(result.action).toBe('exit');
+    expect(result.primaryEvent.category).toBe('risk');
+    expect(result.invalidation).toContain('站回 MA5');
   });
 
   test('未持倉時戒律可否決已成立的強進場訊號', () => {
@@ -324,6 +382,26 @@ describe('走圖敘事建構器', () => {
     expect(result.action).toBe('exit');
     expect(result.invalidation).toContain('站回 MA20');
     expect(result.invalidation).not.toContain('戒律6');
+  });
+
+  test('非操作均線造成的硬出場，不會捏造站回操作均線就能重判', () => {
+    const result = buildChartNarrative({
+      candles,
+      currentIndex: 20,
+      signals: [signal({
+        type: 'SELL',
+        subtype: 'exit_strong',
+        ruleId: 'previous-low-break',
+        label: '跌破前低',
+        description: '收盤跌破前一日最低點',
+      })],
+      hasPosition: true,
+      operatingMA: 'MA5',
+    });
+
+    expect(result.action).toBe('exit');
+    expect(result.invalidation).toContain('硬出場條件解除');
+    expect(result.invalidation).not.toContain('站回 MA5');
   });
 
   test('盤中日 K 的硬出場保持可逆預警，收盤前不冒充定案', () => {
