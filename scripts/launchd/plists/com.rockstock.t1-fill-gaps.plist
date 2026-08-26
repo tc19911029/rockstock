@@ -15,7 +15,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>cd $HOME/Desktop/rockstock &amp;&amp; YESTERDAY=$(/bin/date -v-1d +%Y-%m-%d) &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market TW --date "$YESTERDAY" --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-TW.log 2&gt;&amp;1 &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market CN --date "$YESTERDAY" --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-CN.log 2&gt;&amp;1</string>
+    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market TW --date auto --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-TW.log 2&gt;&amp;1 &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market CN --date auto --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-CN.log 2&gt;&amp;1</string>
   </array>
 
   <key>StartCalendarInterval</key>

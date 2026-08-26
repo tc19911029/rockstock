@@ -24,7 +24,9 @@ import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 import { settleSymbol, type SettleResult, type VendorQuote, type Market } from '../lib/datasource/eodSettle';
 import { prefetchVendorBatch } from '../lib/datasource/eodSettleBatch';
 import { assessTwOfficialReadiness, canWriteSettlement } from '../lib/datasource/eodSettlePolicy';
+import { ensureServerL1Visibility, type VisibilityCandidate } from '../lib/datasource/eodSettlementVisibility';
 import { verifyDownload } from '../lib/datasource/DownloadVerifier';
+import { sendNtfy } from '../lib/notify/ntfy';
 
 interface Args {
   market: Market;
@@ -78,32 +80,52 @@ function readExisting(market: Market, sym: string, date: string): VendorQuote | 
   } catch { return undefined; }
 }
 
-/**
- * eod-settle 由 launchd 的獨立 Node process 寫 L1；常駐 Next server 不會知道磁碟已變更，
- * 可能繼續從記憶體回傳前一交易日（2026-08-26 聯亞 3081 即因此停在 08-25）。
- * 寫入完成後主動通知 server 清 cache。server 沒啟動不影響 settlement 本身。
- */
-async function clearServerL1Cache(): Promise<void> {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    console.warn('[eod-settle] CRON_SECRET 未設定，略過常駐服務 L1 cache 失效通知');
-    return;
-  }
+interface SettlementState {
+  version: 1;
+  market: Market;
+  date: string;
+  status: 'complete' | 'failed' | 'deferred';
+  updatedAt: string;
+  sentinel?: VisibilityCandidate;
+  reason?: string;
+}
 
+function settlementStateFile(market: Market, date: string): string {
+  return path.join(process.cwd(), 'data', 'settle-reports', `settle-${market}-${date}.state.json`);
+}
+
+function readSettlementState(market: Market, date: string): SettlementState | null {
   try {
-    const response = await fetch('http://localhost:3000/api/admin/clear-l1-cache', {
-      headers: { Authorization: `Bearer ${secret}` },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) {
-      console.warn(`[eod-settle] 常駐服務 L1 cache 清除失敗: HTTP ${response.status}`);
-      return;
-    }
-    const payload = await response.json() as { before?: number; after?: number };
-    console.log(`[eod-settle] 常駐服務 L1 cache 已清除: ${payload.before ?? '?'} → ${payload.after ?? '?'}`);
-  } catch (error) {
-    console.warn(`[eod-settle] 常駐服務 L1 cache 失效通知失敗（不影響封存）: ${error instanceof Error ? error.message : error}`);
+    const state = JSON.parse(readFileSync(settlementStateFile(market, date), 'utf8')) as SettlementState;
+    return state.version === 1 && state.market === market && state.date === date ? state : null;
+  } catch { return null; }
+}
+
+function writeSettlementState(state: SettlementState): void {
+  const file = settlementStateFile(state.market, state.date);
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(state, null, 2));
+}
+
+function visibilityCandidate(market: Market, date: string, symbols: string[]): VisibilityCandidate | null {
+  const preferred = market === 'TW' && symbols.includes('3081.TWO')
+    ? ['3081.TWO', ...symbols.filter(symbol => symbol !== '3081.TWO')]
+    : symbols;
+  for (const symbol of preferred) {
+    const quote = readExisting(market, symbol, date);
+    if (quote?.close && quote.close > 0) return { symbol, date, close: quote.close };
   }
+  return null;
+}
+
+async function notifySettlementFailure(market: Market, date: string, message: string): Promise<void> {
+  const result = await sendNtfy({
+    title: `RockStock ${market} 封存失敗`,
+    message: `${date} ${message}`,
+    tags: ['warning', 'chart_with_downwards_trend'],
+    priority: 5,
+  });
+  if (!result.ok) console.warn(`[eod-settle] ntfy 告警未送達: ${result.reason ?? result.error ?? 'unknown'}`);
 }
 
 async function main() {
@@ -112,6 +134,24 @@ async function main() {
 
   const symbols = (await listSymbols(market)).slice(0, limit);
   console.log(`stocklist 共 ${symbols.length} 檔`);
+
+  // 多個 calendar retry 共用完成狀態。已成功的輪次仍會清 cache＋讀回 sentinel，
+  // 確認常駐 API 沒有再退回昨天；驗證通過才 cheap exit，避免重打 2000 檔 vendor。
+  const previousState = !dry ? readSettlementState(market, date) : null;
+  if (previousState?.status === 'complete' && previousState.sentinel) {
+    const visibility = await ensureServerL1Visibility({
+      secret: process.env.CRON_SECRET,
+      candidate: previousState.sentinel,
+    });
+    if (visibility.ok) {
+      console.log(
+        `[eod-settle] 已完成且 API 可見：${previousState.sentinel.symbol} `
+        + `${previousState.sentinel.date}/${previousState.sentinel.close}（visibility attempt=${visibility.attempts}）`,
+      );
+      return;
+    }
+    console.warn(`[eod-settle] 完成狀態存在但 API postcondition 失敗，重新跑全市場：${visibility.error}`);
+  }
 
   // Batch prefetch — TWSE/TPEx/EastMoney 全市場 table（避免 per-symbol 10s 拖死）
   process.stdout.write(`prefetch vendor batch...\n`);
@@ -144,6 +184,14 @@ async function main() {
         },
         retryAt: `${date}T16:30:00+08:00`,
       }, null, 2));
+      writeSettlementState({
+        version: 1,
+        market,
+        date,
+        status: 'deferred',
+        updatedAt: new Date().toISOString(),
+        reason: officialReadiness.reason,
+      });
       console.error(`[eod-settle] DEFER：${officialReadiness.reason}；16:30 retry 再封存，禁止以單一備援源搶先寫正式 L1`);
       process.exit(75);
     }
@@ -237,10 +285,6 @@ async function main() {
   }
   console.log(`寫入 L1: ${written}`);
 
-  if (!dry && written > 0) {
-    await clearServerL1Cache();
-  }
-
   // 輸出 settle report 供 T+1 fill 用（dry 模式不覆寫，避免 dry 測試把真實 cron 的
   // pending 清單蓋掉 → T+1 會漏補。2026-06-12 修）
   const reportPath = path.join(process.cwd(), 'data', 'settle-reports');
@@ -270,6 +314,8 @@ async function main() {
   // settle report，另一條下載排程延遲／失敗時，策略會一直讀到昨天或殘缺的驗證狀態。
   // scanner 有自己的完整靜態／本地主檔 fallback，且 DownloadVerifier 會拒絕小母體覆寫。
   let verifyFailed = false;
+  let verifyHealth: 'good' | 'warning' | 'critical' | null = null;
+  let verifyCoverage: number | null = null;
   if (!dry) {
     try {
       const Scanner = market === 'TW'
@@ -282,6 +328,8 @@ async function main() {
         failed: pendingTotal,
         skipped: stats['skipped-already-correct'],
       });
+      verifyHealth = verify.health;
+      verifyCoverage = verify.summary.coverageRate;
       console.log(
         `Verify: ${verify.health} coverage=${(verify.summary.coverageRate * 100).toFixed(1)}% ` +
         `current=${verify.summary.stocksCurrent}/${verify.summary.totalStocks}`,
@@ -292,10 +340,36 @@ async function main() {
     }
   }
 
+  // 寫磁碟不是完成；常駐 API 必須能讀回相同日期＋收盤價才算完成。
+  // 這個 postcondition 直接覆蓋 2026-08-26「聯亞磁碟已是今日、API 還在昨日」事故向量。
+  let visibilityFailed = false;
+  let sentinel: VisibilityCandidate | null = null;
+  if (!dry) {
+    sentinel = visibilityCandidate(market, date, symbols);
+    if (!sentinel) {
+      visibilityFailed = true;
+      console.error('★ 找不到可供 API visibility 驗證的當日 L1 sentinel');
+    } else {
+      const visibility = await ensureServerL1Visibility({
+        secret: process.env.CRON_SECRET,
+        candidate: sentinel,
+      });
+      visibilityFailed = !visibility.ok;
+      if (visibility.ok) {
+        console.log(
+          `API visibility: ok ${sentinel.symbol} ${sentinel.date}/${sentinel.close} `
+          + `(attempt=${visibility.attempts})`,
+        );
+      } else {
+        console.error(`★ API visibility 驗證失敗: ${visibility.error}`);
+      }
+    }
+  }
+
   // Invariant：pending 比例 >5% 視為 settlement 失敗
   const pendingTotal = stats['pending-multi-disagree'] + stats['pending-no-vendor-data'] + stats['pending-unverified'];
   const pendingRate = symbols.length > 0 ? pendingTotal / symbols.length : 0;
-  if (pendingRate > 0.05 || verifyFailed) {
+  if (pendingRate > 0.05 || verifyFailed || visibilityFailed) {
     if (verifyFailed && pendingRate <= 0.05) {
       console.error('★ settlement 已完成但 verify report 未能安全重建 — exit 1');
     }
@@ -303,7 +377,32 @@ async function main() {
   if (pendingRate > 0.05) {
     console.error(`★ pending ${(pendingRate * 100).toFixed(1)}% (${pendingTotal}/${symbols.length}) 超過 5%，settlement 視為部分失敗 — exit 1`);
   }
-  if (pendingRate > 0.05 || verifyFailed) process.exit(1);
+  if (!dry) {
+    const complete = pendingRate <= 0.05
+      && !verifyFailed
+      && !visibilityFailed
+      && verifyHealth === 'good'
+      && (verifyCoverage ?? 0) >= 0.98
+      && sentinel !== null;
+    const reason = [
+      pendingRate > 0.05 ? `pending=${(pendingRate * 100).toFixed(1)}%` : null,
+      verifyFailed ? 'verify rebuild failed' : null,
+      verifyHealth && verifyHealth !== 'good' ? `verify=${verifyHealth}` : null,
+      verifyCoverage !== null && verifyCoverage < 0.98 ? `coverage=${(verifyCoverage * 100).toFixed(1)}%` : null,
+      visibilityFailed ? 'API visibility failed' : null,
+    ].filter(Boolean).join(', ');
+    writeSettlementState({
+      version: 1,
+      market,
+      date,
+      status: complete ? 'complete' : 'failed',
+      updatedAt: new Date().toISOString(),
+      sentinel: sentinel ?? undefined,
+      reason: reason || undefined,
+    });
+    if (!complete) await notifySettlementFailure(market, date, reason || 'unknown settlement failure');
+    if (!complete) process.exit(1);
+  }
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
