@@ -24,8 +24,9 @@ describe('影子帳本操作均線', () => {
       candles: bars,
       triggerSignal: 'B',
       operationMode: 'long',
+      managementStrategy: 'ma20',
     });
-    expect(result?.events.at(-1)?.action).toBe('exit_all_operation_ma');
+    expect(result?.events.at(-1)?.action).toBe('stop_loss');
     expect(result?.events.at(-1)?.label).toContain('MA20');
     expect(result?.remainingShares).toBe(0);
   });

@@ -2,7 +2,7 @@
  * 合約測試 — 持倉保命警報層（holdingsGuard + alertDispatcher 泛化）
  *
  * 鎖定行為：
- *   1. stop-loss-breach：做多 price ≤ stopLoss / 缺 stopLoss 用 DEFAULT_STOP_LOSS_MULT
+ *   1. stop-loss-breach：做多 price ≤ stopLoss / 缺 stopLoss 用方向正確的 5% fallback
  *      （單一事實）/ 做空 price ≥ entryHigh（fallback 明示 stopLoss）/ 無 holding 不觸發
  *   2. pump-reversal：當日漲 ≥4% + 自高點回檔 ≥3%；缺 dayHigh/prevClose skip；
  *      short skip；開盤暖機 skip
@@ -22,7 +22,7 @@ import {
   type GuardContext, type GuardSignal,
 } from '@/lib/realtime/holdingsGuard';
 import { dispatch, decideNotify, _resetDebounceForTest } from '@/lib/realtime/alertDispatcher';
-import { DEFAULT_STOP_LOSS_MULT } from '@/lib/agents/holdingsActionEngine';
+import { fallbackHoldingStop } from '@/lib/portfolio/holdingRisk';
 import { sendNtfy } from '@/lib/notify/ntfy';
 import type { MinuteBar } from '@/lib/realtime/minuteBarStore';
 import type { Signal } from '@/lib/realtime/blowoffDetector';
@@ -71,9 +71,9 @@ describe('holdingsGuard — 規則1 stop-loss-breach', () => {
     expect(sigs.find(s => s.rule === 'stop-loss-breach')).toBeUndefined();
   });
 
-  test('缺 stopLoss → 用 entryPrice × DEFAULT_STOP_LOSS_MULT（單一事實）', () => {
+  test('缺 stopLoss → 用做多 5% fallback（單一事實）', () => {
     const ctx = longCtx({ stopLoss: undefined });
-    const stop = 100 * DEFAULT_STOP_LOSS_MULT; // 93
+    const stop = fallbackHoldingStop(100, 'long');
     const hit = detectGuardSignals({ price: stop - 0.1 }, [], ctx, NOW)
       .find(s => s.rule === 'stop-loss-breach');
     expect(hit).toBeDefined();

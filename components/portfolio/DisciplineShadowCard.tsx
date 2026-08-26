@@ -39,7 +39,7 @@ export function DisciplineShadowCard() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   if (error) return null; // 影子帳本是輔助資訊，失敗不佔版面
-  if (!data || data.items.length === 0) return null;
+  if (!data || (data.items.length === 0 && data.unresolved.length === 0)) return null;
 
   const gap = data.totalDisciplineGap;
   const gapColor = gap > 1000 ? 'text-red-400' : gap < -1000 ? 'text-emerald-400' : 'text-zinc-400';
@@ -54,6 +54,11 @@ export function DisciplineShadowCard() {
         </div>
       </div>
       <div className="space-y-1.5">
+        {data.unresolved.map(it => (
+          <div key={`unresolved-${it.symbol}`} className="text-xs text-amber-300 border-t border-amber-900/40 pt-1.5">
+            {stockDisplayName(it.name, it.symbol)} {it.symbol}：策略待補，暫不倒推紀律差額
+          </div>
+        ))}
         {data.items.map(it => (
           <div key={it.symbol} className="text-xs text-zinc-400 border-t border-zinc-800/60 pt-1.5">
             <div className="flex items-center justify-between">
@@ -75,8 +80,7 @@ export function DisciplineShadowCard() {
         ))}
       </div>
       <p className="text-[10px] text-zinc-600">
-        影子帳本 = 停損守 stopLoss、漲≥10% 破 MA5 減半 / 破 MA10 全出、漲≥20% 破 MA20 全出，當日收盤價成交。
-        僅供紀律對照，非投資建議。
+        影子帳本與今日建議共用同一決策引擎及單向上移停損；缺策略的舊持股不猜測、不計差額。僅供紀律對照，非投資建議。
       </p>
     </div>
   );

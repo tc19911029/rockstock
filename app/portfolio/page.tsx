@@ -15,6 +15,7 @@ import { POLLING } from '@/lib/config';
 import { PortfolioDailyActionPanel } from '@/components/portfolio/PortfolioDailyActionPanel';
 import { DisciplineShadowCard } from '@/components/portfolio/DisciplineShadowCard';
 import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
+import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 import type { MarginPressure } from '@/lib/chipcost/marginPressure';
 import { isTopPatternType } from '@/lib/analysis/patternCatalog';
 
@@ -41,7 +42,8 @@ const EMPTY_FORM = {
   buyDate: todayCST(),
   // v12 Step 3-5 訊號計算需要的欄位
   triggerSignal: '' as '' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'J' | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q',
-  operationMode: 'short' as 'short' | 'long',
+  operationMode: '' as '' | 'short' | 'long',
+  managementStrategy: '' as '' | 'kline' | 'short-ma' | 'ma20' | 'triple-ma',
 };
 
 
@@ -232,7 +234,8 @@ export default function PortfolioPage() {
       costPrice: String(h.costPrice),
       buyDate: h.buyDate,
       triggerSignal: (h.triggerSignal as typeof EMPTY_FORM.triggerSignal) ?? '',
-      operationMode: h.operationMode ?? 'short',
+      operationMode: h.operationMode ?? '',
+      managementStrategy: h.managementStrategy ?? '',
     });
     setShowForm(true);
   }
@@ -281,6 +284,10 @@ export default function PortfolioPage() {
       setFormError('請輸入股票代號，以及大於 0 的持股數與成本價。');
       return;
     }
+    if (!form.triggerSignal || !form.operationMode || !form.managementStrategy) {
+      setFormError('請選擇進場字母、操作週期與唯一持股管理法；系統不會替持股猜成 B／短線。');
+      return;
+    }
     setFormError('');
     setFormLoading(true);
     try {
@@ -291,8 +298,9 @@ export default function PortfolioPage() {
           costPrice,
           buyDate: form.buyDate,
           name: form.name || undefined,
-          triggerSignal: form.triggerSignal === '' ? undefined : form.triggerSignal,
+          triggerSignal: form.triggerSignal,
           operationMode: form.operationMode,
+          managementStrategy: form.managementStrategy,
         });
         setEditId(null);
         setForm({ ...EMPTY_FORM, buyDate: todayCST() });
@@ -342,8 +350,9 @@ export default function PortfolioPage() {
         shares,
         costPrice,
         buyDate: form.buyDate,
-        triggerSignal: form.triggerSignal === '' ? undefined : form.triggerSignal,
+        triggerSignal: form.triggerSignal,
         operationMode: form.operationMode,
+        managementStrategy: form.managementStrategy,
         // 議題 C2：凍結進場時的型態 → Step 5 停利目標日後不重算
         ...(validatedEntryPattern ? { entryPattern: validatedEntryPattern } : {}),
       });
@@ -517,7 +526,7 @@ export default function PortfolioPage() {
               </div>
             </div>
 
-            {/* v12 Step 3-5 訊號計算用欄位（選填） */}
+            {/* v12 Step 3-5 訊號計算用欄位（必填，避免舊版默認 B／短線） */}
             <details className="bg-muted/30 border border-border rounded-lg" open>
               <summary className="px-3 py-2 cursor-pointer text-xs font-bold text-foreground/90 select-none">
                 <span className="text-[9px] font-bold uppercase tracking-wider opacity-70">v12</span>
@@ -532,7 +541,7 @@ export default function PortfolioPage() {
                     onChange={e => setForm(f => ({ ...f, triggerSignal: e.target.value as typeof EMPTY_FORM.triggerSignal }))}
                     className="w-full bg-muted border border-border rounded-md px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                   >
-                    <option value="">— 不指定（系統預設用 B 邏輯）—</option>
+                    <option value="">— 請選擇，不會自動猜 B —</option>
                     <optgroup label="預選池">
                       <option value="A">A 六條件</option>
                     </optgroup>
@@ -564,10 +573,33 @@ export default function PortfolioPage() {
                     onChange={e => setForm(f => ({ ...f, operationMode: e.target.value as typeof EMPTY_FORM.operationMode }))}
                     className="w-full bg-muted border border-border rounded-md px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                   >
+                    <option value="">— 請選擇 —</option>
                     <option value="short">短線（依字母對應均線）</option>
                     <option value="long">長線（統一 MA20）</option>
                   </select>
                   <p className="text-[10px] text-muted-foreground/70 mt-1">獲利 ≥10% 後可手動切長線</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label htmlFor="holding-management" className="text-sm text-muted-foreground mb-1 block">唯一持股管理法</label>
+                  <select
+                    id="holding-management"
+                    value={form.managementStrategy}
+                    onChange={e => {
+                      const managementStrategy = e.target.value as typeof EMPTY_FORM.managementStrategy;
+                      setForm(f => ({
+                        ...f,
+                        managementStrategy,
+                        operationMode: managementStrategy === 'short-ma' ? 'short' : managementStrategy === 'ma20' ? 'long' : f.operationMode,
+                      }));
+                    }}
+                    className="w-full bg-muted border border-border rounded-md px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="">— 請選一套，不可同時混用 —</option>
+                    <option value="short-ma">短線訊號均線（B=MA5、F=MA3，其餘依字母）</option>
+                    <option value="ma20">MA20 長線法</option>
+                    <option value="kline">智慧 K 線法</option>
+                    <option value="triple-ma" disabled>MA5／MA10／MA20 分批法（需先補 1/3 執行紀錄）</option>
+                  </select>
                 </div>
               </div>
             </details>
@@ -617,10 +649,6 @@ export default function PortfolioPage() {
             const currentPrice = p?.price ?? 0;
             const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice);
             const pnlPos = pnl >= 0;
-            const ma5StopLoss = currentPrice * 0.95; // simplified
-            const costStopLoss = h.costPrice * 0.93;
-            // Use the tighter (higher) stop, but never above current price
-            const stopLoss = Math.min(Math.max(ma5StopLoss, costStopLoss), currentPrice * 0.999);
 
             return (
               <div key={h.id} className="bg-secondary border border-border rounded-xl overflow-hidden">
@@ -669,55 +697,9 @@ export default function PortfolioPage() {
                   </div>
                 </div>
 
-                {/* Sell signal alerts */}
-                {currentPrice > 0 && (() => {
-                  const alerts: Array<{ level: 'danger' | 'warning' | 'profit'; text: string }> = [];
-
-                  // 止損警報（含具體建議動作）
-                  if (pnlPct <= -7) alerts.push({ level: 'danger', text: `虧損 ${pnlPct.toFixed(1)}% — 已達止損線！建議：13:20 確認跌破、13:25 掛市價單全數賣出，嚴守紀律不凹單（書本時點，非開盤）` });
-                  else if (pnlPct <= -5) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 接近止損，建議：明日 13:20 觀察，若收盤前確認跌破成本價×0.93 即 13:25 掛市價出場` });
-                  else if (pnlPct <= -3) alerts.push({ level: 'warning', text: `虧損 ${pnlPct.toFixed(1)}% — 留意：觀察是否跌破 MA5 或支撐位` });
-
-                  // 止盈提醒（含具體建議動作）
-                  if (pnlPct >= 20) alerts.push({ level: 'profit', text: `獲利 ${pnlPct.toFixed(1)}% — 建議：至少減碼 1/2 鎖住利潤，剩餘以 MA5 為移動停利` });
-                  else if (pnlPct >= 15) alerts.push({ level: 'profit', text: `獲利 ${pnlPct.toFixed(1)}% — 建議：可分批停利 1/3，剩餘持股上移停損至成本價（保本出場）` });
-                  else if (pnlPct >= 10) alerts.push({ level: 'profit', text: `獲利 ${pnlPct.toFixed(1)}% — 可考慮將停損上移至成本價，確保不虧損` });
-
-                  // 持有天數
-                  const buyDateObj = new Date(h.buyDate);
-                  const holdDays = Math.floor((Date.now() - buyDateObj.getTime()) / 86400000);
-                  if (holdDays >= 20 && pnlPct < 5) {
-                    alerts.push({ level: 'warning', text: `持有已 ${holdDays} 天且獲利不足 5%，考慮換股` });
-                  }
-
-                  // surgeGrade from API data
-                  const sg = p?.surgeGrade;
-                  if (sg && (sg === 'D' || sg === 'C')) {
-                    alerts.push({ level: 'warning', text: `飆股潛力已降至 ${sg} 級，動能減弱` });
-                  }
-
-                  return (
-                    <div className="px-4 pb-2 space-y-1">
-                      {alerts.map((a, ai) => (
-                        <div key={ai} className={`text-[10px] px-2 py-1 rounded ${
-                          a.level === 'danger' ? 'bg-red-900/60 text-red-300 font-bold' :
-                          a.level === 'profit' ? 'bg-green-900/40 text-green-300' :
-                          'bg-yellow-900/40 text-yellow-300'
-                        }`}>
-                          {a.text}
-                        </div>
-                      ))}
-                      <div className="flex items-center gap-4 text-[10px] text-muted-foreground pt-1">
-                        <span>建議停損 <span className="text-red-400 font-mono font-bold">${stopLoss.toFixed(2)}</span></span>
-                        <span>成本 -7% <span className="font-mono">${costStopLoss.toFixed(2)}</span></span>
-                        <span>持有 {holdDays} 天</span>
-                        <span className="ml-auto">
-                          成本 <span className="font-mono">${(h.costPrice * h.shares).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}</span>
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })()}
+                <div className="px-4 pb-2 text-xs text-muted-foreground">
+                  出場與停損以頁首「今日持股操作」的正式策略判讀為準；本列不另算固定 MA5／7% 建議。
+                </div>
 
                 {/* 融資追繳壓力（估算，純顯示） */}
                 <MarginPressureRow pressure={marginPressures[h.symbol]} />
@@ -798,6 +780,7 @@ function MarginPressureRow({ pressure }: { pressure?: MarginPressure | null }) {
 function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: AnalysisSummary }) {
   const [loading, setLoading] = useState(false);
   const hasAnalysis = summary?.hasAnalysis;
+  const activeProfileId = usePortfolioProfileStore(s => s.activeProfileId);
   // /agents/[symbol] 接受 bare 代號（3661 而非 3661.TW）
   const bareSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
@@ -814,7 +797,7 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/agents/portfolio/prepare-holding?symbol=${encodeURIComponent(symbol)}&date=${date}`,
+        `/api/agents/portfolio/prepare-holding?symbol=${encodeURIComponent(symbol)}&date=${date}&profile=${encodeURIComponent(activeProfileId)}`,
         { method: 'POST' },
       );
       const json = await res.json();
@@ -883,6 +866,7 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
 function BatchAnalyzeButton({ holdings }: { holdings: Array<{ symbol: string }> }) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  const activeProfileId = usePortfolioProfileStore(s => s.activeProfileId);
 
   const onClick = async () => {
     if (loading) return;
@@ -897,7 +881,7 @@ function BatchAnalyzeButton({ holdings }: { holdings: Array<{ symbol: string }> 
     try {
       const date = todayCST();
       const res = await fetch(
-        `/api/agents/portfolio/prepare-holding?date=${date}&all=1`,
+        `/api/agents/portfolio/prepare-holding?date=${date}&all=1&profile=${encodeURIComponent(activeProfileId)}`,
         { method: 'POST' },
       );
       const json = await res.json();

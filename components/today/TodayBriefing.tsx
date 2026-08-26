@@ -24,6 +24,7 @@ import {
 } from '@/lib/today/composeOperationSuggestion';
 import { computeHoldingAction, type HoldingActionRule } from '@/lib/today/computeHoldingAction';
 import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
+import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 
 type Trend = '多頭' | '空頭' | '盤整';
 
@@ -112,12 +113,14 @@ interface Props {
 export function TodayBriefing({ market = 'TW' }: Props) {
   const today = useMemo(() => lastBusinessDayYmd(), []);
   const totalCapital = useTotalCapital();
+  const activeProfileId = usePortfolioProfileStore(s => s.activeProfileId);
 
   const [loading, setLoading] = useState(true);
   const [trend, setTrend] = useState<Trend | null>(null);
   const [decisions, setDecisions] = useState<DecisionItem[]>([]);
   const [holdings, setHoldings] = useState<{ symbol: string; name: string; entryPrice: number; shares: number; stopLoss?: number }[]>([]);
   const [holdingPrices, setHoldingPrices] = useState<Record<string, number>>({});
+  const [formalHoldingActions, setFormalHoldingActions] = useState<Record<string, { action: string; hint: string; returnPct?: number }>>({});
   const [reviews, setReviews] = useState<PortfolioReviewItem[]>([]);
   const [pool, setPool] = useState<PoolCandidate[]>([]);
   const [growth, setGrowth] = useState<GrowthState | null>(null);
@@ -132,15 +135,16 @@ export function TodayBriefing({ market = 'TW' }: Props) {
     (async () => {
       // 用 dedupedFetch：DecisionPanel / portfolio page / risk page 也會 fetch portfolio + alerts，
       // 短時間共用 in-flight 避免重複打 server
-      const [trendRes, decisionsRes, holdingsRes, reviewRes, poolRes, growthRes, ytRes, alertsRes] = await Promise.allSettled([
+      const [trendRes, decisionsRes, holdingsRes, reviewRes, poolRes, growthRes, ytRes, alertsRes, dailyActionRes] = await Promise.allSettled([
         fetch(`/api/scanner/market-trend?market=${market}&date=${today}`).then(r => r.ok ? r.json() : null),
         fetch(`/api/agents/decisions?date=${today}`).then(r => r.ok ? r.json() : null),
-        dedupedFetch(`/api/agents/portfolio?status=open`).then(r => r.ok ? r.json() : null),
-        fetch(`/api/agents/portfolio/review?date=${today}`).then(r => r.ok ? r.json() : null),
+        dedupedFetch(`/api/agents/portfolio?status=open&profile=${encodeURIComponent(activeProfileId)}`).then(r => r.ok ? r.json() : null),
+        fetch(`/api/agents/portfolio/review?date=${today}&profile=${encodeURIComponent(activeProfileId)}`).then(r => r.ok ? r.json() : null),
         dedupedFetch(`/api/agents/pool?market=${market}&date=${today}&minSourceCount=3&limit=10&sort=weighted`).then(r => r.ok ? r.json() : null),
         fetch(`/api/portfolio/growth-status`).then(r => r.ok ? r.json() : null),
         fetch(`/api/youtube/analysis/${today}`).then(r => r.ok ? r.json() : null),
         dedupedFetch(`/api/realtime/alerts/today`).then(r => r.ok ? r.json() : null),
+        fetch(`/api/portfolio/daily-action?profile=${encodeURIComponent(activeProfileId)}`).then(r => r.ok ? r.json() : null),
       ]);
       if (canceled) return;
 
@@ -203,10 +207,17 @@ export function TodayBriefing({ market = 'TW' }: Props) {
       setAlerts(a?.alerts ?? []);
       setAlertTotalCount(a?.count ?? a?.alerts?.length ?? 0);
 
+      const daily = pick<{ items?: Array<{ symbol: string; action: string; label: string; profitPct?: number; signals?: Array<{ detail: string }> }> }>(dailyActionRes);
+      setFormalHoldingActions(Object.fromEntries((daily?.items ?? []).map(item => [item.symbol, {
+        action: item.action,
+        hint: item.signals?.[0]?.detail ?? item.label,
+        returnPct: item.profitPct == null ? undefined : item.profitPct * 100,
+      }])));
+
       setLoading(false);
     })();
     return () => { canceled = true; };
-  }, [today, market]);
+  }, [today, market, activeProfileId]);
 
   // 組「今日操作建議」一句話
   const operationSuggestion = useMemo(() => {
@@ -259,6 +270,15 @@ export function TodayBriefing({ market = 'TW' }: Props) {
 
   // 規則式 holding action（review 沒當天時 fallback）
   const holdingActions = useMemo(() => holdings.map(h => {
+    const formal = formalHoldingActions[h.symbol];
+    if (formal) {
+      const action: HoldingActionRule = ['stop_loss', 'exit_all', 'cover_all'].includes(formal.action)
+        ? 'stop_loss'
+        : formal.action === 'reduce_half'
+          ? 'take_profit'
+          : 'hold_observe';
+      return { symbol: h.symbol, name: h.name, action, source: 'rule' as const, hint: formal.hint, returnPct: formal.returnPct ?? null };
+    }
     const reviewMatch = reviews.find(r => r.symbol === h.symbol);
     if (reviewMatch?.action) {
       return { symbol: h.symbol, name: h.name, action: reviewMatch.action as HoldingActionRule | ReviewAction, source: 'review' as const, hint: reviewMatch.reasoning?.slice(0, 30) ?? '' };
@@ -266,13 +286,9 @@ export function TodayBriefing({ market = 'TW' }: Props) {
     const close = holdingPrices[h.symbol] ?? null;
     const result = computeHoldingAction({ entryPrice: h.entryPrice, currentPrice: close, stopLoss: h.stopLoss });
     return { symbol: h.symbol, name: h.name, action: result.action, source: 'rule' as const, hint: result.hint, returnPct: result.returnPct };
-  }), [holdings, reviews, holdingPrices]);
+  }), [holdings, reviews, holdingPrices, formalHoldingActions]);
 
   const holdingAlertsCount = holdingActions.filter(a => a.action === 'stop_loss' || a.action === 'reduce' || a.action === 'take_profit').length;
-  // 同樣只算還在持倉中的 review action（避免已賣股票還在計數）
-  const holdingSetForAlerts = new Set(holdings.map(h => h.symbol));
-  const reviewAlertsCount = reviews.filter(r => holdingSetForAlerts.has(r.symbol) && (r.action === 'stop_loss' || r.action === 'reduce' || r.action === 'take_profit')).length;
-
   return (
     <section id="today-briefing" className="border border-slate-700/50 rounded-lg bg-slate-900/40 overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-900/60 border-b border-slate-700/50">

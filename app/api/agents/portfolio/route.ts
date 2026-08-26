@@ -30,6 +30,19 @@ import { resolveStockIdentity } from '@/lib/stocks/resolveStockIdentity';
 
 export const runtime = 'nodejs';
 
+const holdingUiSchema = z.object({
+  triggerSignal: z.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']).optional(),
+  operationMode: z.enum(['short', 'long']).optional(),
+  managementStrategy: z.enum(['kline', 'short-ma', 'ma20', 'triple-ma', 'ma5']).optional(),
+}).passthrough().superRefine((ui, ctx) => {
+  if (ui.managementStrategy === 'short-ma' && ui.operationMode && ui.operationMode !== 'short') {
+    ctx.addIssue({ code: 'custom', path: ['operationMode'], message: 'short-ma 必須搭配 short 操作週期' });
+  }
+  if (ui.managementStrategy === 'ma20' && ui.operationMode && ui.operationMode !== 'long') {
+    ctx.addIssue({ code: 'custom', path: ['operationMode'], message: 'ma20 必須搭配 long 操作週期' });
+  }
+});
+
 const upsertSchema = z.object({
   symbol: z.string().min(1).regex(/^[A-Za-z0-9._-]+$/),
   name: z.string().min(1).optional(),
@@ -44,7 +57,7 @@ const upsertSchema = z.object({
   target2: z.coerce.number().positive().optional(),
   notes: z.string().optional(),
   /** UI-only 富欄位 passthrough（entryKbar / triggerPrice / operationMode 等）*/
-  ui: z.record(z.string(), z.unknown()).optional(),
+  ui: holdingUiSchema.optional(),
   status: z.enum(['open', 'closed']).default('open'),
   /** 跳過 entryPrice 合理性驗證（極少數合理 case 如多筆平均成本）*/
   forcePrice: z.coerce.boolean().optional().default(false),

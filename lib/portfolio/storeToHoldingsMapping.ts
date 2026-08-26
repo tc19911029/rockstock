@@ -34,6 +34,8 @@ export interface StorePortfolioHolding {
   market?: MarketId;
   notes?: string;
   triggerSignal?: string;
+  operationMode?: 'short' | 'long';
+  managementStrategy?: 'kline' | 'short-ma' | 'ma20' | 'triple-ma';
   /** 使用者／server 已設定的停損價；缺值才套用短線 5% 預設。 */
   stopLoss?: number;
   /** 賠少-1：做空 live 風控。缺省=long；非 core key → 自動進 ui blob、hydration 展回頂層 */
@@ -122,6 +124,8 @@ export function mapStoreHoldingsToImportRows(
   rows: Array<{
     symbol: string; name: string; shares: number; avgCost: number;
     entryDate: string; stopLoss: number; notes?: string;
+    triggerSignal?: string; operationMode?: 'short' | 'long';
+    managementStrategy?: 'kline' | 'short-ma' | 'ma20' | 'triple-ma';
   }>;
   rejections: Array<{ id: string; symbol: string; reason: string }>;
   skipped: Array<{ id: string; symbol: string; reason: string }>;
@@ -148,6 +152,9 @@ export function mapStoreHoldingsToImportRows(
       entryDate: r.payload.entryDate,
       stopLoss: r.payload.stopLoss!,
       ...(r.payload.notes ? { notes: r.payload.notes } : {}),
+      ...(h.triggerSignal ? { triggerSignal: h.triggerSignal } : {}),
+      ...(h.operationMode ? { operationMode: h.operationMode } : {}),
+      ...(h.managementStrategy ? { managementStrategy: h.managementStrategy } : {}),
     });
   }
   return { rows, rejections, skipped };

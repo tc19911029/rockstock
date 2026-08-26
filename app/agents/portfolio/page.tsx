@@ -47,6 +47,9 @@ interface HoldingFormState {
   target1: string;
   target2: string;
   notes: string;
+  triggerSignal: string;
+  operationMode: '' | 'short' | 'long';
+  managementStrategy: '' | 'kline' | 'short-ma' | 'ma20' | 'triple-ma';
 }
 
 function HoldingFormField({
@@ -254,6 +257,7 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
     entryDate: todayYmd(),
     entryPrice: '', shares: '',
     stopLoss: '', target1: '', target2: '', notes: '',
+    triggerSignal: '', operationMode: '', managementStrategy: '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -287,6 +291,10 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
   };
 
   const submit = async () => {
+    if (!form.triggerSignal || !form.operationMode || !form.managementStrategy) {
+      setErr('請選擇進場字母、操作週期與唯一管理法；系統不會猜測舊預設。');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -303,6 +311,11 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
         target1: form.target1 ? Number(form.target1) : undefined,
         target2: form.target2 ? Number(form.target2) : undefined,
         notes: form.notes || undefined,
+        ui: {
+          triggerSignal: form.triggerSignal,
+          operationMode: form.operationMode,
+          managementStrategy: form.managementStrategy,
+        },
       };
       const res = await fetch('/api/agents/portfolio', {
         method: 'POST',
@@ -342,6 +355,25 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
         <HoldingFormField label="停損價" field="stopLoss" value={form.stopLoss} onChange={updateField} type="number" placeholder="195" />
         <HoldingFormField label="目標 1" field="target1" value={form.target1} onChange={updateField} type="number" placeholder="240" />
         <HoldingFormField label="目標 2" field="target2" value={form.target2} onChange={updateField} type="number" placeholder="260" />
+        <label className="space-y-1">
+          <span className="text-xs text-muted-foreground">進場字母 *</span>
+          <select value={form.triggerSignal} onChange={e => updateField('triggerSignal', e.target.value)} className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full">
+            <option value="">請選擇</option>
+            {'ABCDEFGHIJKLM NOPQ'.replace(/\s/g, '').split('').filter(x => !['G','H','I'].includes(x)).map(letter => <option key={letter} value={letter}>{letter}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="text-xs text-muted-foreground">操作週期 *</span>
+          <select value={form.operationMode} onChange={e => updateField('operationMode', e.target.value)} className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full">
+            <option value="">請選擇</option><option value="short">短線</option><option value="long">長線</option>
+          </select>
+        </label>
+        <label className="space-y-1 md:col-span-2">
+          <span className="text-xs text-muted-foreground">唯一管理法 *</span>
+          <select value={form.managementStrategy} onChange={e => { const value = e.target.value; setForm(current => ({ ...current, managementStrategy: value as HoldingFormState['managementStrategy'], operationMode: value === 'short-ma' ? 'short' : value === 'ma20' ? 'long' : current.operationMode })); }} className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full">
+            <option value="">請選擇</option><option value="short-ma">短線訊號均線</option><option value="ma20">MA20 長線</option><option value="kline">智慧 K 線</option><option value="triple-ma" disabled>三均線分批（待補執行狀態）</option>
+          </select>
+        </label>
         <div className="col-span-2 flex items-center gap-2">
           <button
             type="button"
@@ -369,7 +401,7 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
       )}
       <Button
         onClick={submit}
-        disabled={busy || !form.symbol || !form.entryPrice || !form.shares}
+        disabled={busy || !form.symbol || !form.entryPrice || !form.shares || !form.triggerSignal || !form.operationMode || !form.managementStrategy}
         size="sm"
       >
         {busy ? '建立中…' : '建立'}

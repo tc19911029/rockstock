@@ -640,6 +640,9 @@ function PortfolioAddBar() {
   const [shares, setShares] = useState('');
   const [cost, setCost] = useState('');
   const [date, setDate] = useState(todayCST);
+  const [triggerSignal, setTriggerSignal] = useState('');
+  const [operationMode, setOperationMode] = useState('');
+  const [managementStrategy, setManagementStrategy] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingClose, setLoadingClose] = useState(false);
 
@@ -658,6 +661,10 @@ function PortfolioAddBar() {
   async function handleAdd() {
     const sym = symbol.trim();
     if (!sym || !shares || !cost) return;
+    if (!triggerSignal || !operationMode || !managementStrategy) {
+      toast.error('請先選進場字母、操作週期與唯一管理法');
+      return;
+    }
     setLoading(true);
     try {
       const resolved = await fetchResolvedStockQuote(sym);
@@ -672,9 +679,13 @@ function PortfolioAddBar() {
         costPrice: Number(cost),
         buyDate: date,
         market: mkt,
+        triggerSignal: triggerSignal as PortfolioHolding['triggerSignal'],
+        operationMode: operationMode as NonNullable<PortfolioHolding['operationMode']>,
+        managementStrategy: managementStrategy as NonNullable<PortfolioHolding['managementStrategy']>,
       });
       toast.success(`已新增 ${resolvedName}`);
-      setSymbol(''); setShares(''); setCost(''); setDate(todayCST()); setOpen(false);
+      setSymbol(''); setShares(''); setCost(''); setDate(todayCST());
+      setTriggerSignal(''); setOperationMode(''); setManagementStrategy(''); setOpen(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '新增失敗，請確認代號');
     } finally {
@@ -701,6 +712,18 @@ function PortfolioAddBar() {
         placeholder="代號（如 2330、600707）"
         className="w-full text-[11px] bg-muted/40 border border-border rounded px-2 py-1 text-foreground placeholder-muted-foreground outline-none focus:border-blue-500"
       />
+      <div className="grid grid-cols-3 gap-1.5">
+        <select value={triggerSignal} onChange={e => setTriggerSignal(e.target.value)} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
+          <option value="">進場字母</option>
+          {'AB CDEFJKLM NOPQ'.replace(/\s/g, '').split('').map(letter => <option key={letter} value={letter}>{letter}</option>)}
+        </select>
+        <select value={operationMode} onChange={e => setOperationMode(e.target.value)} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
+          <option value="">操作週期</option><option value="short">短線</option><option value="long">長線</option>
+        </select>
+        <select value={managementStrategy} onChange={e => { const value = e.target.value; setManagementStrategy(value); if (value === 'short-ma') setOperationMode('short'); if (value === 'ma20') setOperationMode('long'); }} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
+          <option value="">管理法</option><option value="short-ma">訊號均線</option><option value="ma20">MA20</option><option value="kline">K線</option><option value="triple-ma" disabled>三均線（待補執行狀態）</option>
+        </select>
+      </div>
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <input

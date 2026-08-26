@@ -19,7 +19,7 @@
 import type { MinuteBar } from './minuteBarStore';
 import type { MonitoredHoldingInfo, MonitoredSymbol } from './monitorPool';
 import { HOLDINGS_GUARD, type GuardScope } from '@/lib/config';
-import { DEFAULT_STOP_LOSS_MULT } from '@/lib/agents/holdingsActionEngine';
+import { fallbackHoldingStop } from '@/lib/portfolio/holdingRisk';
 
 export type GuardRuleId = 'stop-loss-breach' | 'pump-reversal' | 'rapid-drop' | 'reversal-open-low' | 'gap-open-buffer' | 'key-level-breakout';
 
@@ -149,9 +149,9 @@ export function detectGuardSignals(
         }));
       }
     } else {
-      // fallback 衍生值過 round2（232.5×0.93=216.22500000000002 不能上推播文字）；
+      // fallback 衍生值過 round2，避免浮點尾數直接上推播文字；
       // 使用者明示的 stopLoss 保持原樣
-      const stop = h.stopLoss ?? round2(h.entryPrice * DEFAULT_STOP_LOSS_MULT);
+      const stop = h.stopLoss ?? round2(fallbackHoldingStop(h.entryPrice, 'long'));
       if (quote.price <= stop) {
         signals.push(makeSignal('stop-loss-breach', ctx, now, {
           price: quote.price, stopLoss: stop, entryPrice: h.entryPrice, positionSide: 'long',

@@ -25,6 +25,11 @@ import {
   bearishPiercingHigh, bearishEncounterHigh, standardRedBlackHigh,
 } from '@/lib/rules/twoBarReversalRules';
 import { stockDisplayName } from '@/lib/stocks/stockIdentity';
+import { loadAllHoldings } from '@/lib/agents/portfolio/storage';
+import { loadProfiles } from '@/lib/portfolio/profiles';
+import { resolveHoldingReferencePrice } from '@/lib/portfolio/holdingReferencePrice';
+import { evaluateHoldingDecision } from '@/lib/portfolio/evaluateHoldingDecision';
+import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
 
 /**
  * 持倉保命警報層（holdingsGuard）需要的持倉資訊。
@@ -33,7 +38,7 @@ import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 export interface MonitoredHoldingInfo {
   name: string;
   entryPrice: number;
-  /** 缺省時由 guard 用 DEFAULT_STOP_LOSS_MULT 補（單一事實在 holdingsActionEngine） */
+  /** active stop 由正式持股決策入口派生；極端缺值才由 guard 套方向正確的保命線。 */
   stopLoss?: number;
   positionSide: 'long' | 'short';
   /** 做空回補停損 = ui.entryKbar.high（進場黑K最高點） */
@@ -43,6 +48,8 @@ export interface MonitoredHoldingInfo {
    * 有 → guard 規則5 在開盤窗監看「開低=變盤確認」。每日快取、long 持倉才算。
    */
   reversalWatch?: { label: string; yLow: number; yClose: number };
+  /** 同一股票若存在多個持股人，使用最嚴格保命線並保留來源供訊息辨識。 */
+  profileNames?: string[];
 }
 
 export interface MonitoredSymbol {
@@ -184,57 +191,77 @@ async function detectYesterdayReversalWatch(
 
 // ── readers ──────────────────────────────────────────────────────────────
 
-interface RawHolding {
-  symbol: string;
-  market?: 'TW' | 'CN';
-  status?: string;
-  name?: string;
-  entryPrice?: number;
-  stopLoss?: number;
-  ui?: Record<string, unknown>;
-}
-
 async function readHoldings(): Promise<Array<{ symbol: string; market: 'TW' | 'CN'; holding?: MonitoredHoldingInfo }>> {
-  const result: Array<{ symbol: string; market: 'TW' | 'CN'; holding?: MonitoredHoldingInfo }> = [];
-  // TW：data/agents/portfolio/holdings.json（業務邏輯 legacy 路徑）
-  await pushHoldings(path.join(process.cwd(), 'data', 'agents', 'portfolio', 'holdings.json'), result);
-  // CN：data/portfolio/holdings-cn.json（鐵則：陸股持倉不放 agents/portfolio）。
-  //     F5 修正：原本沒讀 CN 持倉 → realtime 漏盯現持陸股、只能靠 stale 的 extra-symbols.json。
-  await pushHoldings(path.join(process.cwd(), 'data', 'portfolio', 'holdings-cn.json'), result);
-  return result;
-}
-
-async function pushHoldings(
-  p: string,
-  out: Array<{ symbol: string; market: 'TW' | 'CN'; holding?: MonitoredHoldingInfo }>,
-): Promise<void> {
-  try {
-    const raw = await fs.readFile(p, 'utf-8');
-    const parsed = JSON.parse(raw) as { holdings?: RawHolding[] };
-    for (const h of parsed.holdings ?? []) {
-      if (!h.symbol || h.status === 'closed') continue;
-      // 場外基金（.OF）無盤中 K 線，且 6 位裸碼與 A 股撞號（000001 基金 vs 平安銀行）
-      // → 入池會拿錯標的的 quote 發保命警報，一律排除
-      if (/\.OF$/i.test(h.symbol)) continue;
-      out.push({
-        symbol: h.symbol,
-        market: h.market ?? inferMarketFromSymbol(h.symbol),
-        holding: toHoldingInfo(h),
-      });
+  const { profiles } = await loadProfiles();
+  const grouped = new Map<string, {
+    symbol: string;
+    market: 'TW' | 'CN';
+    variants: Array<{ info: MonitoredHoldingInfo; profileName: string }>;
+  }>();
+  await Promise.all(profiles.map(async profile => {
+    const holdings = await loadAllHoldings(profile.id).catch(() => [] as PortfolioHolding[]);
+    for (const h of holdings) {
+      if (!h.symbol || h.status === 'closed' || /\.OF$/i.test(h.symbol)) continue;
+      const market = h.market === 'CN' ? 'CN' : 'TW';
+      const info = await toHoldingInfo(h, market);
+      if (!info) continue;
+      const key = `${market}:${h.symbol}`;
+      const group = grouped.get(key) ?? { symbol: h.symbol, market, variants: [] };
+      group.variants.push({ info, profileName: profile.name });
+      grouped.set(key, group);
     }
-  } catch { /* 檔案不存在 / parse 失敗 → skip */ }
+  }));
+
+  return [...grouped.values()].map(group => {
+    // 多帳號同檔只抓一次報價。做多取最高停損、做空取最低回補線，確保不漏最早的保命觸發。
+    const side = group.variants[0].info.positionSide;
+    const sameSide = group.variants.filter(v => v.info.positionSide === side);
+    const strictest = sameSide.reduce((best, candidate) => {
+      const a = best.info.stopLoss;
+      const b = candidate.info.stopLoss;
+      if (a == null) return candidate;
+      if (b == null) return best;
+      return side === 'short' ? (b < a ? candidate : best) : (b > a ? candidate : best);
+    });
+    return {
+      symbol: group.symbol,
+      market: group.market,
+      holding: {
+        ...strictest.info,
+        name: stockDisplayName(strictest.info.name, group.symbol),
+        profileNames: group.variants.map(v => v.profileName),
+      },
+    };
+  });
 }
 
-/** 派生做空語意 — 逐字對齊 daily-action route（ui.positionSide / ui.entryKbar.high） */
-function toHoldingInfo(h: RawHolding): MonitoredHoldingInfo | undefined {
-  if (typeof h.entryPrice !== 'number' || h.entryPrice <= 0) return undefined;
+/** 派生停損與 daily-action 共用同一決策入口，不再只讀資料庫中的舊停損。 */
+async function toHoldingInfo(h: PortfolioHolding, market: 'TW' | 'CN'): Promise<MonitoredHoldingInfo | undefined> {
   const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
   const entryKbar = h.ui?.entryKbar as { high?: number } | undefined;
   const entryHigh = typeof entryKbar?.high === 'number' ? entryKbar.high : undefined;
+  let candles = await loadLocalCandles(h.symbol, market) ?? [];
+  if ((!candles || candles.length === 0) && market === 'TW') {
+    candles = await loadLocalCandles(h.symbol.replace(/\.TW$/, '.TWO'), market) ?? [];
+  }
+  const reference = resolveHoldingReferencePrice(h, candles);
+  if (reference.price == null) return undefined;
+  const activeStop = candles.length > 0
+    ? evaluateHoldingDecision({
+        symbol: h.symbol,
+        market,
+        entryDate: h.entryDate,
+        entryPrice: reference.price,
+        configuredStopLoss: h.stopLoss,
+        previousActiveStop: h.riskState?.activeStopLoss,
+        candles,
+        ui: h.ui,
+      }).activeStop.price
+    : h.stopLoss;
   return {
     name: stockDisplayName(h.name, h.symbol),
-    entryPrice: h.entryPrice,
-    stopLoss: typeof h.stopLoss === 'number' && h.stopLoss > 0 ? h.stopLoss : undefined,
+    entryPrice: reference.price,
+    stopLoss: typeof activeStop === 'number' && activeStop > 0 ? activeStop : undefined,
     positionSide,
     entryHigh,
   };
@@ -274,12 +301,6 @@ async function readPoolCandidates(market: 'TW' | 'CN'): Promise<Array<{ symbol: 
   } catch {
     return [];
   }
-}
-
-function inferMarketFromSymbol(symbol: string): 'TW' | 'CN' {
-  if (/\.(TW|TWO)$/i.test(symbol)) return 'TW';
-  if (/\.(SS|SZ)$/i.test(symbol)) return 'CN';
-  return 'TW';
 }
 
 function todayInMarket(market: 'TW' | 'CN'): string {

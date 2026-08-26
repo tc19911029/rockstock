@@ -27,6 +27,7 @@ import {
 } from '@/lib/agents/portfolio/types';
 import { fetchJSON, internalUrl, bareTicker } from '@/lib/agents/agents/_fetchHelper';
 import type { MarketId } from '@/lib/scanner/types';
+import { profileDir, resolveProfileId } from '@/lib/portfolio/profiles';
 
 export const runtime = 'nodejs';
 
@@ -37,7 +38,8 @@ const dateSchema = z.object({
 export async function GET(req: NextRequest) {
   const parsed = dateSchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
-  const review = await loadReview(parsed.data.date);
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
+  const review = await loadReview(parsed.data.date, profileId);
   return apiOk({
     date: parsed.data.date,
     exists: !!review,
@@ -52,8 +54,9 @@ export async function POST(req: NextRequest) {
   const parsed = dateSchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date } = parsed.data;
+  const profileId = resolveProfileId(new URL(req.url).searchParams.get('profile'));
 
-  const holdings = (await loadAllHoldings()).filter(h => h.status === 'open');
+  const holdings = (await loadAllHoldings(profileId)).filter(h => h.status === 'open');
   if (holdings.length === 0) {
     return apiOk({ message: '無持股需要 review', holdings: 0 });
   }
@@ -103,6 +106,11 @@ export async function POST(req: NextRequest) {
         stopLoss: h.stopLoss,
         target1: h.target1,
         target2: h.target2,
+        strategyContext: {
+          triggerSignal: h.ui?.triggerSignal,
+          operationMode: h.ui?.operationMode,
+          managementStrategy: h.ui?.managementStrategy,
+        },
         context: {
           currentPrice,
           candidateRow,
@@ -113,11 +121,9 @@ export async function POST(req: NextRequest) {
     }),
   );
 
-  const outputPath = path.join(
-    process.cwd(),
-    'data', 'agents', 'portfolio', 'reviews',
-    `${date}.json`,
-  );
+  const outputPath = profileDir(profileId)
+    ? path.join(profileDir(profileId)!, 'reviews', `${date}.json`)
+    : path.join(process.cwd(), 'data', 'agents', 'portfolio', 'reviews', `${date}.json`);
 
   const question: PortfolioReviewQuestion = {
     schemaVersion: PORTFOLIO_SCHEMA_VERSION,
@@ -129,7 +135,7 @@ export async function POST(req: NextRequest) {
   // 寫到 /tmp（同 multi-agent-decide 範式）
   const tmpDir = `/tmp/rockstock-agents/portfolio-review`;
   await fs.mkdir(tmpDir, { recursive: true });
-  const tmpFile = path.join(tmpDir, `${date}-question.json`);
+  const tmpFile = path.join(tmpDir, profileId === 'me' ? `${date}-question.json` : `${date}-${profileId}-question.json`);
   await atomicFsPut(tmpFile, JSON.stringify(question, null, 2));
 
   return apiOk({

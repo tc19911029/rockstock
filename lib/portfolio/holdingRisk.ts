@@ -7,11 +7,18 @@ import {
 } from '@/lib/sell/v12StopLoss';
 import { getTickSize } from '@/lib/utils/tickSize';
 import type { MarketId } from '@/lib/scanner/types';
+import { getOperationMA, type OperationMode } from '@/lib/sell/v12Operation';
+import {
+  parseHoldingManagementStrategy,
+  parseHoldingOperationMode,
+  parseHoldingTriggerSignal,
+  type HoldingManagementStrategy,
+} from '@/lib/portfolio/holdingStrategyContext';
 
 export interface DerivedHoldingStop {
   price: number;
   method: string;
-  source: 'configured' | 'strategy_dynamic';
+  source: 'configured' | 'strategy_dynamic' | 'legacy_fallback';
 }
 
 const DEFAULT_LONG_MISSING_STOP_PCT = 0.05;
@@ -41,17 +48,35 @@ export function deriveActiveLongStop(args: {
   configuredStopLoss?: number;
   entryDate: string;
   triggerSignal?: string;
+  operationMode?: OperationMode;
+  managementStrategy?: HoldingManagementStrategy;
+  previousActiveStop?: number;
   market: MarketId;
   candles: CandleWithIndicators[];
   ui?: Record<string, unknown>;
 }): DerivedHoldingStop {
-  const normalizedLetter = normalizeLetter(args.triggerSignal ?? 'B');
-  const letter = Object.prototype.hasOwnProperty.call(SIGNAL_TO_FIXED_STOP_PCT, normalizedLetter)
-    ? normalizedLetter as V12Letter
-    : 'B';
+  const parsedLetter = parseHoldingTriggerSignal(args.triggerSignal ?? args.ui?.triggerSignal);
+  const operationMode = args.operationMode ?? parseHoldingOperationMode(args.ui?.operationMode);
+  const managementStrategy = args.managementStrategy ?? parseHoldingManagementStrategy(args.ui?.managementStrategy);
+  const configured = finiteNumber(args.configuredStopLoss);
+  const persisted = finiteNumber(args.previousActiveStop);
+  if (!parsedLetter || !operationMode || !managementStrategy) {
+    const price = Math.max(configured ?? 0, persisted ?? 0, fallbackHoldingStop(args.entryPrice, 'long'));
+    return {
+      price,
+      method: configured != null || persisted != null
+        ? '策略資料待補；只沿用既有停損'
+        : '策略資料待補；暫用做多 5% 保命線',
+      source: configured != null || persisted != null ? 'configured' : 'legacy_fallback',
+    };
+  }
+  const normalizedLetter = normalizeLetter(parsedLetter);
+  const letter = normalizedLetter as V12Letter;
   const fixedPct = SIGNAL_TO_FIXED_STOP_PCT[letter] ?? 0.05;
   const uiEntry = args.ui?.entryKbar as Record<string, unknown> | undefined;
-  const sourceEntry = args.candles.find(c => c.date === args.entryDate);
+  const entryIndexFound = args.candles.findIndex(c => c.date >= args.entryDate);
+  const entryIndex = entryIndexFound >= 0 ? entryIndexFound : 0;
+  const sourceEntry = args.candles[entryIndex];
   const fallbackLow = args.entryPrice * (1 - fixedPct);
   const entryKbar = {
     open: finiteNumber(uiEntry?.open) ?? sourceEntry?.open ?? args.entryPrice,
@@ -61,12 +86,10 @@ export function deriveActiveLongStop(args: {
   };
   const current = args.candles[args.candles.length - 1];
   if (!current) {
-    const price = args.configuredStopLoss ?? fallbackLow;
-    return { price, method: `固定 ${(fixedPct * 100).toFixed(0)}%（K線不足）`, source: args.configuredStopLoss ? 'configured' : 'strategy_dynamic' };
+    const price = Math.max(configured ?? 0, persisted ?? 0, fallbackLow);
+    return { price, method: `固定 ${(fixedPct * 100).toFixed(0)}%（K線不足）`, source: configured != null || persisted != null ? 'configured' : 'strategy_dynamic' };
   }
-  const entryIndex = Math.max(0, args.candles.findIndex(c => c.date >= args.entryDate));
   const recent = args.candles.slice(entryIndex);
-  const recentHigh = finiteNumber(args.ui?.recentHigh) ?? Math.max(...recent.map(c => c.high));
   const supportLevel = finiteNumber(args.ui?.patternStopPrice)
     ?? finiteNumber(args.ui?.consolidationLow)
     ?? entryKbar.low;
@@ -75,21 +98,45 @@ export function deriveActiveLongStop(args: {
     && sourceEntry.volume >= sourceEntry.avgVol5 * 1.5
     && sourceEntry.ma5 != null && sourceEntry.ma20 != null
     && sourceEntry.ma5 > sourceEntry.ma20;
-  const dynamic = updateStopLossDaily({
-    letter,
-    entryPrice: args.entryPrice,
-    entryKbar,
-    tickSize: getTickSize(args.entryPrice, args.market),
-    pivotLow: finiteNumber(args.ui?.vBottom) ?? entryKbar.low,
-    supportLevel,
-    triggerKLow: entryKbar.low,
-    isEndPhase: args.ui?.endPhaseTriggered === true,
-    recentHigh,
-    highLevelBlowoff,
-  }, current);
-  const configured = args.configuredStopLoss;
-  if (configured != null && configured >= dynamic.stopLossPrice) {
-    return { price: configured, method: '使用者已設定停損（較緊）', source: 'configured' };
+  let activePrice = Math.max(configured ?? 0, persisted ?? 0, fallbackLow);
+  let activeMethod = configured != null || persisted != null ? '沿用既有停損' : `固定 ${(fixedPct * 100).toFixed(0)}%`;
+  const explicitRecentHigh = finiteNumber(args.ui?.recentHigh);
+  let highestClose = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < recent.length; i++) {
+    const candle = recent[i];
+    highestClose = Math.max(highestClose, candle.close);
+    const profitPct = (candle.close - args.entryPrice) / args.entryPrice;
+    const endPhase = args.ui?.endPhaseTriggered === true && i === recent.length - 1;
+    const modeForStrategy: OperationMode = managementStrategy === 'ma20' ? 'long' : 'short';
+    const strategyMa = managementStrategy === 'kline' || managementStrategy === 'triple-ma'
+      ? null
+      : getOperationMA(letter, modeForStrategy);
+    // 長線已賺逾 20% 或明確進入末升段，才收緊到 MA5；平常長線仍守 MA20。
+    const trailingMA = managementStrategy === 'ma20' && (profitPct >= 0.20 || endPhase)
+      ? 'MA5' as const
+      : strategyMa;
+    const dynamic = updateStopLossDaily({
+      letter,
+      entryPrice: args.entryPrice,
+      entryKbar,
+      tickSize: getTickSize(args.entryPrice, args.market),
+      pivotLow: finiteNumber(args.ui?.vBottom) ?? entryKbar.low,
+      supportLevel,
+      triggerKLow: entryKbar.low,
+      isEndPhase: endPhase,
+      recentHigh: Math.max(highestClose, explicitRecentHigh ?? Number.NEGATIVE_INFINITY),
+      highLevelBlowoff,
+      trailingMAOverride: trailingMA,
+      trailingBufferMult: 0.995,
+    }, candle);
+    if (dynamic.stopLossPrice > activePrice) {
+      activePrice = dynamic.stopLossPrice;
+      activeMethod = dynamic.detail;
+    }
   }
-  return { price: dynamic.stopLossPrice, method: dynamic.detail, source: 'strategy_dynamic' };
+  return {
+    price: activePrice,
+    method: activeMethod,
+    source: activePrice === configured || activePrice === persisted ? 'configured' : 'strategy_dynamic',
+  };
 }

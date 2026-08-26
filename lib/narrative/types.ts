@@ -85,4 +85,10 @@ export interface BuildChartNarrativeInput {
   readonly operatingMA?: string | null;
   /** 盤中日 K 尚未定稿；規則會隨即時報價反覆成立／解除。 */
   readonly evaluationPhase?: SignalEvaluationPhase;
+  /** 持股正式引擎的單一結論；有值時主卡動作不得被掃描規則覆寫。 */
+  readonly holdingDecision?: {
+    readonly action: 'exit' | 'reduce' | 'watch' | 'hold' | 'strategy_required';
+    readonly label: string;
+    readonly detail: string;
+  };
 }

@@ -10,6 +10,7 @@ import {
 } from '../lib/portfolio/storeToHoldingsMapping';
 import { getActiveProfileId } from './portfolioProfileStore';
 import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
+import type { HoldingManagementStrategy } from '@/lib/portfolio/holdingStrategyContext';
 
 export interface PortfolioHolding {
   id: string;
@@ -55,6 +56,9 @@ export interface PortfolioHolding {
    * 0513 ABCDE E：'wave' 已砍（fall-through 跟 short 一樣，誤導用戶）
    */
   operationMode?: 'short' | 'long';
+
+  /** 建倉後固定的唯一管理法；舊資料缺值會在所有決策面標示待補。 */
+  managementStrategy?: HoldingManagementStrategy;
 
   /**
    * 部位方向（賠少-1 做空 live 風控，2026-06-19）

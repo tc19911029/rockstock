@@ -26,6 +26,8 @@ import { getTickSize } from '@/lib/utils/tickSize';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
 import { normalizeLetter } from '@/lib/scanner/buyMethodTracks';
 import { createLogger } from '@/lib/logger';
+import { deriveActiveLongStop } from '@/lib/portfolio/holdingRisk';
+import type { HoldingManagementStrategy } from '@/lib/portfolio/holdingStrategyContext';
 
 const logger = createLogger('portfolio/v12-signals');
 
@@ -39,9 +41,10 @@ const querySchema = z.object({
   /** 帳務成本為 0（配股／贈與）時，技術規則改用此正參考價。 */
   referencePrice: z.coerce.number().positive().optional(),
   buyDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  triggerSignal: z.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']).optional(),
+  triggerSignal: z.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']),
   // 0513 ABCDE E：'wave' 跟 'super-long' 都已砍（書本沒寫、UI 無入口）
-  operationMode: z.enum(['short', 'long']).default('short'),
+  operationMode: z.enum(['short', 'long']),
+  managementStrategy: z.enum(['kline', 'short-ma', 'ma20', 'triple-ma']),
   patternTargetPrice: z.coerce.number().optional(),
   // v12 議題 13 / S3-3 末升段 trailing
   endPhaseTriggered: z.coerce.boolean().optional(),
@@ -57,7 +60,7 @@ const querySchema = z.object({
 export async function GET(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(req.nextUrl.searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
-  const { symbol, market, entryPrice, referencePrice, buyDate, triggerSignal, operationMode, patternTargetPrice, endPhaseTriggered, recentHigh, consolidationLow, vBottom, patternStopPrice } = parsed.data;
+  const { symbol, market, entryPrice, referencePrice, buyDate, triggerSignal, operationMode, managementStrategy, patternTargetPrice, endPhaseTriggered, recentHigh, consolidationLow, vBottom, patternStopPrice } = parsed.data;
   const effectiveEntryPrice = entryPrice > 0 ? entryPrice : referencePrice;
   if (effectiveEntryPrice == null) {
     return apiError('entryPrice=0 時必須提供正的 referencePrice', 400);
@@ -78,7 +81,7 @@ export async function GET(req: NextRequest) {
     }
 
     // 找到買進日 K 棒（用於 Step 3 K 線三段式）
-    const entryIdx = candles.findIndex((c) => c.date === buyDate);
+    const entryIdx = candles.findIndex((c) => c.date >= buyDate);
     const entryKbar = entryIdx >= 0 ? candles[entryIdx] : today_c;
     // 2026-07-05 忠實度修：進場K「高檔＋大量」才啟用 ≥5% 守 1/2 嚴控特例（書本原文前提）
     const entryBarFull = entryIdx >= 0 ? candles[entryIdx] : undefined;
@@ -92,10 +95,8 @@ export async function GET(req: NextRequest) {
     const tickSize = getTickSize(entryPrice, market);
     const trendState = detectTrend(candles, lastIdx);
 
-    // 視為 v11 資料的 holding 沒有 triggerSignal，預設用 'B'（最常見）
-    // 0513 C1 fix：v11 G/H/I 持倉透過 normalizeLetter 轉成 v12 J/L/K，
-    // 避免 SIGNAL_TO_PRIMARY_STOP / SIGNAL_TO_FIXED_STOP_PCT / SIGNAL_TO_TRAILING_MA 查不到。
-    const rawLetter = triggerSignal ?? 'B';
+    // G/H/I 舊字母只做明確 alias 轉換；缺字母由 query schema 擋下，不再默認 B。
+    const rawLetter = triggerSignal;
     const letter = normalizeLetter(rawLetter) as V12Letter;
 
     // ── Step 3 停損 — 持倉中用 updateStopLossDaily 走完整書本邏輯 ──
@@ -118,7 +119,17 @@ export async function GET(req: NextRequest) {
     };
     const slResult = updateStopLossDaily(slInputs, today_c);
     const klineStop = calcKLineStopLoss(entryKbar, tickSize, { highLevelBlowoff });
-    const stopLossPrice = slResult.stopLossPrice;
+    const activeStop = deriveActiveLongStop({
+      entryPrice,
+      entryDate: buyDate,
+      triggerSignal: letter,
+      operationMode,
+      managementStrategy: managementStrategy as HoldingManagementStrategy,
+      market,
+      candles,
+      ui: { endPhaseTriggered, recentHigh, consolidationLow, vBottom, patternStopPrice },
+    });
+    const stopLossPrice = activeStop.price;
     const profitPct = (today_c.close - entryPrice) / entryPrice;
 
     // ── Step 3 ⑥ 5 條絕對停損（議題 Step 3 ⑥）──
@@ -140,12 +151,15 @@ export async function GET(req: NextRequest) {
     //   1. 只對 B/P 訊號生效（寶典「回後買上漲」「高檔拉回」進階紀律 #5/#6）
     //   2. operationMode=long 時不覆寫（升級長線統一 MA20）
     //   3. Q/D/J/O 等有獨立 SOP 的字母不受影響
-    let operatingMA = getOperationMA(letter, operationMode);
+    const effectiveMode = managementStrategy === 'ma20' ? 'long' : 'short';
+    let operatingMA = managementStrategy === 'kline' || managementStrategy === 'triple-ma'
+      ? null
+      : getOperationMA(letter, effectiveMode);
     let highDeviationOverride = false;
     const isAdvancedDisciplineLetter = letter === 'B' || letter === 'P';
     if (
       isAdvancedDisciplineLetter &&
-      operationMode !== 'long' &&
+      effectiveMode !== 'long' && managementStrategy === 'short-ma' &&
       today_c.ma20 != null &&
       today_c.ma20 > 0
     ) {
@@ -235,7 +249,7 @@ export async function GET(req: NextRequest) {
       trendState,
       step3: {
         stopLossPrice: +stopLossPrice.toFixed(2),
-        method: slResult.detail,
+        method: activeStop.method,
         primaryMethod: slResult.primaryMethod,
         absoluteFloor: +slResult.absoluteFloor.toFixed(2),
         klineStop: +klineStop.toFixed(2),

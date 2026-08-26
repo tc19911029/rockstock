@@ -199,6 +199,11 @@ export interface PortfolioReviewQuestion {
     stopLoss?: number;
     target1?: number;
     target2?: number;
+    strategyContext?: {
+      triggerSignal?: unknown;
+      operationMode?: unknown;
+      managementStrategy?: unknown;
+    };
     /** 當日相關資料（從 prepare 時 fetch 好）*/
     context: {
       currentPrice: number | null;

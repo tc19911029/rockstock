@@ -11,8 +11,6 @@
  */
 
 import { NextRequest } from 'next/server';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
@@ -36,6 +34,8 @@ import {
 } from '@/lib/agents/orchestrator';
 import { AGENT_SCHEMA_VERSION } from '@/lib/agents/types';
 import type { MarketId, StockScanResult } from '@/lib/scanner/types';
+import { loadAllHoldings } from '@/lib/agents/portfolio/storage';
+import { resolveProfileId } from '@/lib/portfolio/profiles';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -44,6 +44,7 @@ const querySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   symbol: z.string().min(1).optional(),
   all: z.enum(['1', 'true']).optional(),
+  profile: z.string().optional(),
 });
 
 interface HoldingEntry {
@@ -62,19 +63,6 @@ interface PrepareResult {
   skippedTechnical: boolean;
   candidateRowSource: 'today' | 'recent' | 'fallback' | null;
   error?: string;
-}
-
-async function loadHoldings(): Promise<HoldingEntry[]> {
-  const filePath = path.join(process.cwd(), 'data', 'agents', 'portfolio', 'holdings.json');
-  try {
-    const raw = await fs.readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && Array.isArray(parsed.holdings)) return parsed.holdings;
-    return [];
-  } catch {
-    return [];
-  }
 }
 
 /**
@@ -201,12 +189,13 @@ export async function POST(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date, symbol, all } = parsed.data;
+  const profileId = resolveProfileId(parsed.data.profile);
 
   if (!symbol && !all) {
     return apiError('必須指定 symbol 或加 all=1', 400);
   }
 
-  const holdings = await loadHoldings();
+  const holdings = await loadAllHoldings(profileId);
 
   // 批量模式
   if (all) {

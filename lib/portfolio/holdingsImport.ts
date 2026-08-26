@@ -22,6 +22,9 @@
 import { classifyMarket } from '@/lib/market/classify';
 import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
 import { PORTFOLIO_SCHEMA_VERSION } from '@/lib/agents/portfolio/types';
+import type { HoldingManagementStrategy } from '@/lib/portfolio/holdingStrategyContext';
+import type { OperationMode } from '@/lib/sell/v12Operation';
+import type { V12Letter } from '@/lib/analysis/v12Signals';
 
 export const STOP_LOSS_DEFAULT_PCT = 0.05; // 最新課程短線／新手常用 5%；策略軌每日再依 5/7/10% 重算
 
@@ -36,6 +39,9 @@ export interface ImportRow {
   target2?: number;
   industry?: string;
   notes?: string;
+  triggerSignal?: V12Letter;
+  operationMode?: OperationMode;
+  managementStrategy?: HoldingManagementStrategy;
 }
 
 export interface ParsedImportRow {
@@ -47,7 +53,7 @@ export interface ParsedImportRow {
 }
 
 const REQUIRED_HEADERS = ['symbol', 'name', 'shares', 'avgCost'] as const;
-const OPTIONAL_HEADERS = ['entryDate', 'stopLoss', 'target1', 'target2', 'industry', 'notes'] as const;
+const OPTIONAL_HEADERS = ['entryDate', 'stopLoss', 'target1', 'target2', 'industry', 'notes', 'triggerSignal', 'operationMode', 'managementStrategy'] as const;
 const ALL_HEADERS = [...REQUIRED_HEADERS, ...OPTIONAL_HEADERS];
 
 /**
@@ -147,6 +153,18 @@ export function parseRow(
   if (entryDate && !/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) {
     return { ok: false, rowNumber, raw, reason: `entryDate 格式錯，應為 YYYY-MM-DD (got ${entryDate})` };
   }
+  const triggerSignal = (raw.triggerSignal ?? '').trim().toUpperCase();
+  const operationMode = (raw.operationMode ?? '').trim();
+  const managementStrategy = (raw.managementStrategy ?? '').trim();
+  if (triggerSignal && !['A','B','C','D','E','F','J','K','L','M','N','O','P','Q'].includes(triggerSignal)) {
+    return { ok: false, rowNumber, raw, reason: `triggerSignal 無效 (${triggerSignal})` };
+  }
+  if (operationMode && operationMode !== 'short' && operationMode !== 'long') {
+    return { ok: false, rowNumber, raw, reason: `operationMode 無效 (${operationMode})` };
+  }
+  if (managementStrategy && !['kline','short-ma','ma20','triple-ma'].includes(managementStrategy)) {
+    return { ok: false, rowNumber, raw, reason: `managementStrategy 無效 (${managementStrategy})` };
+  }
 
   return {
     ok: true,
@@ -163,6 +181,9 @@ export function parseRow(
       ...(target2 !== undefined ? { target2 } : {}),
       ...((raw.industry ?? '').trim() ? { industry: raw.industry.trim() } : {}),
       ...((raw.notes ?? '').trim() ? { notes: raw.notes.trim() } : {}),
+      ...(triggerSignal ? { triggerSignal: triggerSignal as V12Letter } : {}),
+      ...(operationMode ? { operationMode: operationMode as OperationMode } : {}),
+      ...(managementStrategy ? { managementStrategy: managementStrategy as HoldingManagementStrategy } : {}),
     },
   };
 }
@@ -206,6 +227,13 @@ export function applyDefaults(
     target1: row.target1,
     target2: row.target2,
     notes: row.notes,
+    ...((row.triggerSignal || row.operationMode || row.managementStrategy) ? {
+      ui: {
+        ...(row.triggerSignal ? { triggerSignal: row.triggerSignal } : {}),
+        ...(row.operationMode ? { operationMode: row.operationMode } : {}),
+        ...(row.managementStrategy ? { managementStrategy: row.managementStrategy } : {}),
+      },
+    } : {}),
     status: 'open',
   };
 }

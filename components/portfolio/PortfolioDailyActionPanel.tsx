@@ -13,6 +13,7 @@ const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   exit_all:    'bg-orange-900/60 text-orange-100 border-orange-500',
   reduce_half: 'bg-amber-900/60 text-amber-100 border-amber-500',
   watch_stop:  'bg-yellow-900/40 text-yellow-200 border-yellow-700',
+  strategy_required: 'bg-amber-950/60 text-amber-100 border-amber-600',
   can_add:     'bg-cyan-900/50 text-cyan-100 border-cyan-500',
   hold:        'bg-slate-800/60 text-slate-200 border-slate-600',
   cover_all:   'bg-orange-900/60 text-orange-100 border-orange-500', // 賠少-1：做空回補

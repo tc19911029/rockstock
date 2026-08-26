@@ -149,7 +149,23 @@ function resolveAction(
   events: readonly ChartNarrativeEvent[],
   blockers: readonly string[],
   evaluationPhase: SignalEvaluationPhase,
+  holdingDecision?: BuildChartNarrativeInput['holdingDecision'],
 ): { action: NarrativeAction; tone: NarrativeTone; headline: string } {
+  if (hasPosition && holdingDecision) {
+    if (holdingDecision.action === 'exit') return evaluationPhase === 'intraday'
+      ? { action: 'exit', tone: 'warning', headline: '盤中出場條件目前成立，系統持續即時重算' }
+      : { action: 'exit', tone: 'bearish', headline: '正式持股引擎判定出場，先處理風險' };
+    if (holdingDecision.action === 'reduce') return {
+      action: 'reduce', tone: 'warning', headline: '正式持股引擎判定減碼，依既定紀律處理',
+    };
+    if (holdingDecision.action === 'watch') return {
+      action: 'reduce', tone: 'warning', headline: '正式持股引擎要求緊盯停損',
+    };
+    if (holdingDecision.action === 'strategy_required') return {
+      action: 'hold', tone: 'warning', headline: '持股策略資料待補，暫不猜測均線出場',
+    };
+    return { action: 'hold', tone: 'bullish', headline: '正式持股引擎尚無出場條件' };
+  }
   const hasHardExit = events.some(event => event.action === 'exit' && event.state === 'confirmed');
   const hasSoftExit = events.some(event => (
     event.action === 'reduce'
@@ -257,6 +273,28 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
   const ruleEvents = input.signals
     .filter(signal => !isKLineSignal(signal))
     .map(signal => eventForSignal(signal, classificationFor(signal, classifiedSignals), safeIndex, date));
+
+  const holdingDecisionEvent = input.holdingDecision
+    ? [freezeEvent({
+        id: `${date}:holding-decision`,
+        setupKey: 'holding-decision',
+        observedAtIndex: safeIndex,
+        observedAtDate: date,
+        category: input.holdingDecision.action === 'exit' ? 'risk' : 'watch',
+        state: 'confirmed',
+        direction: input.holdingDecision.action === 'hold' ? 'neutral' : 'bearish',
+        action: input.holdingDecision.action === 'exit'
+          ? 'exit'
+          : input.holdingDecision.action === 'reduce' || input.holdingDecision.action === 'watch'
+            ? 'reduce'
+            : 'hold',
+        label: input.holdingDecision.label,
+        description: compact(input.holdingDecision.detail),
+        sourceRuleIds: ['holding-decision'],
+        sourceFamily: '正式持股引擎',
+        priority: 120,
+      })]
+    : [];
 
   const prohibitionBlockers = input.hasPosition
     ? pickHoldingRiskProhibitions(input.prohibitions ?? [])
@@ -369,6 +407,7 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
   } satisfies ChartNarrativeEvent);
   // 趨勢是 K 線與規則的解讀背景，每次都保留在證據鏈，不再只在「無訊號」時出現。
   const allEvents = Object.freeze(mergeDuplicateEvents([
+    ...holdingDecisionEvent,
     ...klineEvents,
     ...ruleEvents,
     ...hardRiskEvent,
@@ -376,14 +415,14 @@ export function buildChartNarrative(input: BuildChartNarrativeInput): ChartNarra
     ...trendlineEvents,
     trendEvent,
   ]));
-  const decision = resolveAction(input.hasPosition, allEvents, relevantBlockers, evaluationPhase);
+  const decision = resolveAction(input.hasPosition, allEvents, relevantBlockers, evaluationPhase, input.holdingDecision);
   // 主要依據必須和最終動作同一方向；避免「續抱」卻拿買進型態的確認條件當主文。
   const decisionCandidates = allEvents.filter(event => isDecisionEvidence(event, decision.action));
-  const primaryEvent = decision.action === 'reduce'
+  const primaryEvent = holdingDecisionEvent[0] ?? (decision.action === 'reduce'
     ? decisionCandidates.find(event => event.action === 'reduce' && event.category !== 'risk')
       ?? decisionCandidates[0]
       ?? allEvents[0]
-    : decisionCandidates[0] ?? allEvents[0];
+    : decisionCandidates[0] ?? allEvents[0]);
   const secondaryEvents = Object.freeze(allEvents.filter(event => event !== primaryEvent).slice(0, 3));
   const evidenceGroups = Object.freeze(groupNarrativeEvidence(allEvents, decision.action));
   const nonConflictingGroupCount = evidenceGroups.filter(group => group.disposition !== 'conflicting').length;

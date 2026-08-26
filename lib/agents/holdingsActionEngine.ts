@@ -8,8 +8,9 @@ import { COUNTER_TREND_SET, normalizeLetter } from '@/lib/scanner/buyMethodTrack
 import { computeIndicators } from '@/lib/indicators';
 import { detectShortExitSignals } from '@/lib/analysis/shortAnalysis';
 import { detectSellSignals, type SellSignalType } from '@/lib/analysis/sellSignals';
-import { getOperationMA, type OperationMode } from '@/lib/sell/v12Operation';
+import { checkKLineExit, getOperationMA, type OperationMode } from '@/lib/sell/v12Operation';
 import type { V12Letter } from '@/lib/analysis/v12Signals';
+import type { HoldingManagementStrategy } from '@/lib/portfolio/holdingStrategyContext';
 
 export type HoldingAction =
   | 'stop_loss'
@@ -17,6 +18,7 @@ export type HoldingAction =
   | 'reduce_half'
   | 'can_add'
   | 'watch_stop'
+  | 'strategy_required'
   | 'hold'
   // ── 賠少-1：做空 live 風控動作（只在 positionSide==='short' 出現）──
   | 'cover_all';   // 回補（做空版「全出」）
@@ -49,6 +51,11 @@ export interface HoldingActionInput {
    * 缺值保留 2026-08-06 以前的 legacy 獲利分層行為，供舊呼叫端向下相容。
    */
   operationMode?: OperationMode;
+
+  /** 持股唯一管理法；缺資料時不得由呼叫端猜 B／短線。 */
+  managementStrategy?: HoldingManagementStrategy;
+  /** false 代表舊持股資料不完整，只跑不依賴策略選擇的保命規則。 */
+  strategyContextKnown?: boolean;
 
   /** 進場日期，用來判斷「進場後盤中曾觸及 +10%」事件。 */
   entryDate?: string;
@@ -100,12 +107,6 @@ export const PROFIT_SHORT_RULE = 0.10;
 export const PROFIT_MID_RULE = 0.10;
 export const PROFIT_LONG_RULE = 0.20;
 
-/**
- * 持倉缺 stopLoss 時的預設停損價係數（entryPrice × 0.93 = 書本 7% 停損）。
- * 單一事實：daily-action route 與 realtime holdingsGuard 皆 import 此值。
- */
-export const DEFAULT_STOP_LOSS_MULT = 0.93;
-
 export interface OperationMaExitDecision {
   shouldExit: boolean;
   maName: 'MA3' | 'MA5' | 'MA10' | 'MA20';
@@ -134,13 +135,21 @@ export function evaluateOperationMaExit(args: {
   entryDate?: string;
   triggerSignal?: string;
   operationMode?: OperationMode;
+  managementStrategy?: HoldingManagementStrategy;
 }): OperationMaExitDecision | null {
-  if (args.operationMode == null) return null;
+  if (args.managementStrategy === 'kline' || args.managementStrategy === 'triple-ma') return null;
+  if (args.operationMode == null && args.managementStrategy == null) return null;
   const c = args.candles[args.index];
   if (!c || args.entryPrice <= 0) return null;
 
-  const rawLetter = normalizeLetter(args.triggerSignal ?? 'B') as V12Letter;
-  const maName = getOperationMA(rawLetter, args.operationMode);
+  if (!args.triggerSignal) return null;
+  const rawLetter = normalizeLetter(args.triggerSignal) as V12Letter;
+  const effectiveMode: OperationMode = args.managementStrategy === 'ma20'
+    ? 'long'
+    : args.managementStrategy === 'short-ma'
+      ? 'short'
+      : args.operationMode!;
+  const maName = getOperationMA(rawLetter, effectiveMode);
   if (maName == null) return null;
 
   const period = maName === 'MA3' ? 3 : maName === 'MA5' ? 5 : maName === 'MA10' ? 10 : 20;
@@ -171,7 +180,7 @@ export function evaluateOperationMaExit(args: {
     touchedTenPct,
     signal: {
       type: `break_operation_${maName.toLowerCase()}`,
-      label: `跌破 ${maName}（${args.operationMode === 'long' ? '長線' : '短線'}操作出場）`,
+      label: `跌破 ${maName}（${effectiveMode === 'long' ? '長線' : '短線'}操作出場）`,
       severity: 'high',
       detail: `收盤 ${c.close.toFixed(2)} 跌破操作均線 ${maName} ${maValue.toFixed(2)}${touchedNote}，依課程 CH8 全數出場`,
     },
@@ -297,6 +306,7 @@ const ACTION_LABEL: Record<HoldingAction, string> = {
   reduce_half: '✂️ 減半',
   can_add:     '➕ 可加碼',
   watch_stop:  '⚠️ 緊盯停損',
+  strategy_required: '🟠 策略待補',
   hold:        '✓ 續抱',
   cover_all:   '⛔ 回補', // 賠少-1：做空回補（全出）
 };
@@ -478,6 +488,60 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
     }
   }
 
+  // 舊持股若沒有完整策略上下文，不得再默認 B／短線或混用所有出場法。
+  // 絕對停損、進場 K 生死線與趨勢翻空已在上方判完；其餘等使用者補齊策略。
+  if (input.strategyContextKnown === false) {
+    return finalize('strategy_required', [{
+      type: 'strategy_context_missing',
+      label: '持股管理策略待補',
+      severity: 'medium',
+      detail: '缺少進場字母、操作週期或唯一管理法；系統不會猜成 B／短線，也不會用猜出的均線要求出場。',
+    }, ...trappedSigs]);
+  }
+
+  // 三均線分批法必須知道「實際已執行到第幾份」；舊 executionState 只記賣半，
+  // 無法安全反推 1/3。先明確要求補執行狀態，絕不假裝已賣過前一份。
+  if (input.managementStrategy === 'triple-ma') {
+    return finalize('strategy_required', [{
+      type: 'triple_ma_execution_state_required',
+      label: '三均線分批執行狀態待補',
+      severity: 'medium',
+      detail: 'MA5／MA10／MA20 分批法需要記錄實際已持有 3/3、2/3 或 1/3；目前資料沒有此欄位，暫不反推成交或發出錯誤減碼。',
+    }]);
+  }
+
+  // 智慧 K 線法是獨立管理法：只跑本法的跌破昨低規則，不再同時套操作均線。
+  if (input.managementStrategy === 'kline') {
+    const todayBar = withInd?.[last];
+    const yesterdayBar = withInd?.[last - 1];
+    if (todayBar && yesterdayBar) {
+      const klineExit = checkKLineExit(todayBar, yesterdayBar, detectTrend(withInd, last));
+      if (klineExit.shouldExit) {
+        return finalize('exit_all', [{
+          type: 'kline_management_exit',
+          label: '智慧 K 線法跌破昨低',
+          severity: 'high',
+          detail: klineExit.reason ?? '收盤跌破前一日最低，依智慧 K 線法全數出場',
+        }, ...trappedSigs]);
+      }
+    }
+    const prevClose = last >= 1 ? closes[last - 1] : null;
+    const dayChangePct = prevClose != null && prevClose > 0 ? (todayClose - prevClose) / prevClose : null;
+    const klineWatch: HoldingActionSignal[] = [];
+    if (profitPct <= -LOSS_WATCH_PCT) klineWatch.push({
+      type: 'loss_over_5pct', label: '當日帳上虧損 >5%', severity: 'medium',
+      detail: `跌幅 ${(profitPct * 100).toFixed(1)}%，列警示股準備賣`,
+    });
+    if (dayChangePct != null && dayChangePct <= -DAY_DROP_WATCH_PCT) klineWatch.push({
+      type: 'day_drop_over_5pct', label: '當日跌幅 >5%（警示股）', severity: 'medium',
+      detail: `今日跌幅 ${(dayChangePct * 100).toFixed(1)}%，列警示股準備賣`,
+    });
+    if (distToStopPct > 0 && distToStopPct < 0.03) klineWatch.push({
+      type: 'near_stop', label: '距停損 < 3%', severity: 'medium', detail: `距停損僅 ${(distToStopPct * 100).toFixed(1)}%`,
+    });
+    return finalize(klineWatch.length ? 'watch_stop' : 'hold', klineWatch);
+  }
+
   // 課程 CH8：有明確操作模式時，只守該部位一開始選定的操作均線。
   // 這條是正式出場，不再只在 daily-action 額外掛 advisory。
   const operationMaExit = evaluateOperationMaExit({
@@ -487,6 +551,7 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
     entryDate: input.entryDate,
     triggerSignal: input.triggerSignal,
     operationMode: input.operationMode,
+    managementStrategy: input.managementStrategy,
   });
   if (operationMaExit?.shouldExit && operationMaExit.signal) {
     return finalize('exit_all', [operationMaExit.signal, ...trappedSigs]);
@@ -730,8 +795,9 @@ export function evaluateHolding(input: HoldingActionInput): HoldingActionResult 
           entryDate: input.entryDate,
           triggerSignal: input.triggerSignal,
           operationMode: input.operationMode,
+          managementStrategy: input.managementStrategy,
         });
-        const activeLetter = normalizeLetter(input.triggerSignal ?? 'B');
+        const activeLetter = input.triggerSignal ? normalizeLetter(input.triggerSignal) : null;
         const abpNotArmed = active?.maName === 'MA5'
           && (activeLetter === 'A' || activeLetter === 'B' || activeLetter === 'P')
           && !active.touchedTenPct

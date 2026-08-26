@@ -70,7 +70,8 @@ import { analyzeKLineSignals, isKLineSignal } from '@/lib/rules/klineSignalAnaly
 import { pickHoldingRiskProhibitions } from '@/lib/rules/prohibitionRelevance';
 import type { PatternSignal } from '@/lib/rules/winnerPatternRules';
 import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
-import { DEFAULT_STOP_LOSS_MULT, evaluateHolding } from '@/lib/agents/holdingsActionEngine';
+import { evaluateHoldingDecision } from '@/lib/portfolio/evaluateHoldingDecision';
+import { resolveHoldingStrategyContext } from '@/lib/portfolio/holdingStrategyContext';
 import type { NarrativeAction } from '@/lib/narrative/types';
 import ChartCoachAdvice from './ChartCoachAdvice';
 import KLineSignalAnalysisPanel from './KLineSignalAnalysisPanel';
@@ -289,8 +290,7 @@ export default function SignalSummaryCard() {
   const hasPosition = !!heldPosition;
 
   // ── 主訊號字母（2026-07-06 持倉買法優先）──────────────────────────────
-  //   持股中：這筆「怎麼買的」（triggerSignal）決定出場 SOP；舊資料缺字母固定預設 B，
-  //           不得退回右側掃描策略，避免切換瀏覽條件時改寫持倉守則。
+  //   持股中：這筆「怎麼買的」與唯一管理法決定出場 SOP；缺資料就明示待補，絕不猜 B。
   //   未持倉：跟掃描面板選的策略（讓訊號跟著策略換）→ V12 偵測 → 持倉字母 → 'B'
   const ENTRY_LETTERS = new Set(['B', 'C', 'D', 'E', 'F', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q']);
   const V11_ALIAS_MAP: Record<string, string> = { G: 'J', H: 'L', I: 'K' };
@@ -304,22 +304,47 @@ export default function SignalSummaryCard() {
   const PRIORITY: EntryLetter[] = ['Q', 'N', 'M', 'P', 'O'];
   const primaryV12 = PRIORITY.map(l => v12Hits.find(h => h.letter === l)).find(Boolean);
   const missingHoldingLetter = hasPosition && heldLetter == null;
+  const holdingStrategyContext = heldPosition
+    ? resolveHoldingStrategyContext(heldPosition as unknown as Record<string, unknown>)
+    : null;
   const primaryLetter: V12Letter = hasPosition
     ? (heldLetter ?? 'B')
     : (strategyLetter ?? primaryV12?.letter ?? 'B');
-  const operationMode = hasPosition ? (heldPosition?.operationMode ?? 'short') : 'short';
+  const operationMode = hasPosition ? holdingStrategyContext?.operationMode : 'short';
   const holdingModeLabel = operationMode === 'long' ? ' · 長線' : '';
   // 策略視角顯示名（持倉買法優先時標示來源；A/R 不是單一進場字母，特別標示）
-  const strategyName = heldLetter ? `${sopFor(primaryLetter).name} · 持倉 ${primaryLetter}${holdingModeLabel}`
-    : missingHoldingLetter ? `${sopFor(primaryLetter).name} · 預設 B${holdingModeLabel}`
+  const strategyName = holdingStrategyContext?.status === 'unknown' ? '策略待補（不預設 B／短線）'
+    : heldLetter ? `${sopFor(primaryLetter).name} · 持倉 ${primaryLetter}${holdingModeLabel}`
+    : missingHoldingLetter ? '策略待補（不預設 B／短線）'
     : activeBuyMethod === 'A' ? '六條件（預選池）'
     : activeBuyMethod === 'R' ? '機械軌（乖離率）'
     : sopFor(primaryLetter).name;
   // 短線模式與 letterSOP 對齊；持倉升級長線後必須改用 MA20，和後端風控保持一致。
-  const operatingMA = resolveSignalPanelOperatingMA(primaryLetter, operationMode);
+  const operatingMA = hasPosition && holdingStrategyContext?.status !== 'known'
+    ? null
+    : resolveSignalPanelOperatingMA(primaryLetter, operationMode ?? 'short');
   const strategyContextTitle = hasPosition
-    ? `此訊號卡依這筆持倉的進場買法與操作模式，固定套用「${strategyName}」 SOP（操作均線 ${operatingMA ?? '—'}），不會跟著右側掃描策略改變。`
+    ? holdingStrategyContext?.status === 'known'
+      ? `此訊號卡依這筆持倉的進場買法與唯一管理法，固定套用「${strategyName}」 SOP（操作均線 ${operatingMA ?? '—'}），不會跟著右側掃描策略改變。`
+      : `這筆舊持股缺少 ${holdingStrategyContext?.missing.join('、') ?? '策略資料'}；補齊前只顯示保命風控，不以掃描策略猜測出場。`
     : `此訊號卡套用「${strategyName}」 SOP（操作均線 ${operatingMA ?? '—'}）；在右側掃描面板換策略時會同步切換。`;
+
+  let formalHoldingDecision: ReturnType<typeof evaluateHoldingDecision>['result'] | null = null;
+  if (heldPosition && allCandles.length > 0) {
+    try {
+      formalHoldingDecision = evaluateHoldingDecision({
+        symbol: ticker,
+        market: heldPosition.market ?? marketFromSymbol(ticker),
+        entryDate: heldPosition.buyDate,
+        entryPrice: heldPosition.costPrice,
+        configuredStopLoss: heldPosition.stopLoss,
+        candles: allCandles.slice(0, currentIndex + 1),
+        ui: heldPosition as unknown as Record<string, unknown>,
+      }).result;
+    } catch (error) {
+      console.error('[SignalSummaryCard] holding action evaluation error', error);
+    }
+  }
 
   // ── 訊號分類（出場訊號對齊操作均線）────────────────────────────────────
   // 全市場的飆股走圖規則在持倉中只保留資訊；正式交易動作由下方持倉引擎確認。
@@ -349,35 +374,15 @@ export default function SignalSummaryCard() {
   const warnReasonSigs = uniqueRuleSignals(warnSigs.filter(signal => !isKLineSignal(signal)));
 
   const criticalProhibitions = pickHoldingRiskProhibitions(longProhibitions?.reasons ?? []);
-  // 持倉主結論與每日持股風控共用同一套引擎，避免同一檔同時出現「續抱」與「停損」。
+  // 持倉主結論與每日持股風控共用同一入口，掃描訊號只能當證據、不能覆寫正式動作。
   let formalExitRisk: string | null = null;
   let formalExitReason: string | null = null;
-  if (heldPosition && allCandles.length > 0) {
-    try {
-      const holdingDecision = evaluateHolding({
-        symbol: ticker,
-        entryPrice: heldPosition.costPrice,
-        stopLoss: heldPosition.stopLoss
-          ?? +(heldPosition.costPrice * DEFAULT_STOP_LOSS_MULT).toFixed(2),
-        candles: allCandles.slice(0, currentIndex + 1),
-        todayClose: candle.close,
-        triggerSignal: heldPosition.triggerSignal,
-        operationMode: heldPosition.operationMode ?? 'short',
-        entryDate: heldPosition.buyDate,
-        positionSide: heldPosition.positionSide ?? 'long',
-        entryHigh: heldPosition.entryKbar?.high,
-        entryKlineLow: heldPosition.entryKbar?.low,
-      });
-      if (['stop_loss', 'exit_all', 'cover_all'].includes(holdingDecision.action)) {
-        const primarySignal = holdingDecision.signals[0];
-        formalExitReason = primarySignal?.label ?? holdingDecision.label;
+  if (formalHoldingDecision && ['stop_loss', 'exit_all', 'cover_all'].includes(formalHoldingDecision.action)) {
+        const primarySignal = formalHoldingDecision.signals[0];
+        formalExitReason = primarySignal?.label ?? formalHoldingDecision.label;
         formalExitRisk = primarySignal
           ? `${formalExitReason}：${primarySignal.detail}`
-          : holdingDecision.label;
-      }
-    } catch (error) {
-      console.error('[SignalSummaryCard] holding action evaluation error', error);
-    }
+          : formalHoldingDecision.label;
   }
   const reasonDetailCount = (!hasPosition ? v12Hits.length + entryReasonSigs.length : 0)
     + (hasPosition ? exitReasonSigs.length : 0)
@@ -393,12 +398,25 @@ export default function SignalSummaryCard() {
     prohibitions: longProhibitions?.reasons ?? [],
     hardRisks: [
       ...(formalExitRisk ? [formalExitRisk] : []),
-      ...(topPatternHit
+      ...(!hasPosition && topPatternHit
         ? [`${getPatternDisplayName(topPatternHit.patternType)}跌破頸線：${topPatternHit.detail}`]
         : []),
     ],
     operatingMA,
     evaluationPhase,
+    holdingDecision: formalHoldingDecision ? {
+      action: ['stop_loss', 'exit_all', 'cover_all'].includes(formalHoldingDecision.action)
+        ? 'exit'
+        : formalHoldingDecision.action === 'reduce_half'
+          ? 'reduce'
+          : formalHoldingDecision.action === 'watch_stop'
+            ? 'watch'
+            : formalHoldingDecision.action === 'strategy_required'
+              ? 'strategy_required'
+              : 'hold',
+      label: formalHoldingDecision.signals[0]?.label ?? formalHoldingDecision.label,
+      detail: formalHoldingDecision.signals[0]?.detail ?? formalHoldingDecision.label,
+    } : undefined,
   });
   const operatingMAValue = operatingMA
     ? (candle as unknown as Record<string, number | undefined>)[operatingMA.toLowerCase()]

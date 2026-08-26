@@ -44,11 +44,14 @@ function holdingsFileFor(market: MarketId, profileId: string = DEFAULT_PROFILE_I
   return market === 'CN' ? CN_HOLDINGS_FILE : HOLDINGS_FILE;
 }
 
-function reviewFilePath(date: string): string {
+function reviewFilePath(date: string, profileId: string = DEFAULT_PROFILE_ID): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error(`unsafe date: ${date}`);
   }
-  return path.join(PORTFOLIO_DIR, 'reviews', `${date}.json`);
+  const dir = profileDir(profileId);
+  return dir
+    ? path.join(dir, 'reviews', `${date}.json`)
+    : path.join(PORTFOLIO_DIR, 'reviews', `${date}.json`);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -245,17 +248,17 @@ export async function applyHoldingStopLoss(
 // Daily reviews
 // ────────────────────────────────────────────────────────────────────────────
 
-export async function loadReview(date: string): Promise<PortfolioReviewFile | null> {
+export async function loadReview(date: string, profileId: string = DEFAULT_PROFILE_ID): Promise<PortfolioReviewFile | null> {
   try {
-    const raw = await fs.readFile(reviewFilePath(date), 'utf-8');
+    const raw = await fs.readFile(reviewFilePath(date, profileId), 'utf-8');
     return JSON.parse(raw) as PortfolioReviewFile;
   } catch {
     return null;
   }
 }
 
-export async function saveReview(review: PortfolioReviewFile): Promise<string> {
-  const file = reviewFilePath(review.date);
+export async function saveReview(review: PortfolioReviewFile, profileId: string = DEFAULT_PROFILE_ID): Promise<string> {
+  const file = reviewFilePath(review.date, profileId);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await atomicFsPut(file, JSON.stringify(review, null, 2));
   return file;

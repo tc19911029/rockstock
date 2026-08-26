@@ -18,7 +18,7 @@ import { loadAllHoldings } from '@/lib/agents/portfolio/storage';
 import { resolveProfileId } from '@/lib/portfolio/profiles';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
 import { injectL2TodayIfNeeded } from '@/lib/datasource/injectL2Today';
-import { evaluateHolding, type HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
+import type { HoldingActionResult } from '@/lib/agents/holdingsActionEngine';
 import { readAveragedDownFlag } from '@/lib/portfolio/averagingDownGuard';
 import { readStopLossLoweredFlag } from '@/lib/portfolio/stopLossGuard';
 import { computeProfitTargets } from '@/lib/sell/profitTargets';
@@ -28,8 +28,9 @@ import type { PortfolioHolding } from '@/lib/agents/portfolio/types';
 import type { OperationMode } from '@/lib/sell/v12Operation';
 import { classifyPortfolioNotificationBasis } from '@/lib/portfolio/notifyPolicy';
 import { resolveHoldingReferencePrice } from '@/lib/portfolio/holdingReferencePrice';
-import { computeIndicators } from '@/lib/indicators';
-import { deriveActiveLongStop, fallbackHoldingStop } from '@/lib/portfolio/holdingRisk';
+import { fallbackHoldingStop } from '@/lib/portfolio/holdingRisk';
+import { evaluateHoldingDecision } from '@/lib/portfolio/evaluateHoldingDecision';
+import type { HoldingManagementStrategy } from '@/lib/portfolio/holdingStrategyContext';
 import { evaluateElimination } from '@/lib/scanner/eliminationFilter';
 import {
   BLOWOFF_PARTIAL_EXIT_SIGNAL_TYPE_SET,
@@ -54,6 +55,9 @@ export interface DailyActionItem {
   positionSide?: 'long' | 'short';
   /** 課程 CH8：此持倉實際採用的短線／長線操作模式。 */
   operationMode?: OperationMode;
+  managementStrategy?: HoldingManagementStrategy;
+  strategyContextStatus?: 'known' | 'unknown';
+  strategyContextMissing?: string[];
   todayClose: number | null;
   asOfDate: string | null;
   unrealizedAmount: number | null;
@@ -130,8 +134,9 @@ export async function GET(req: NextRequest) {
         // 賠少-1：做空 live 風控 — positionSide / 進場黑K最高點皆走 ui blob passthrough。
         // 缺省（既有持倉）= 做多，行為位元不變。
         const positionSide: 'long' | 'short' = h.ui?.positionSide === 'short' ? 'short' : 'long';
-        // UI 建倉預設就是 short；舊資料缺欄位時沿用同一預設，避免 daily-action 落回另一套 legacy 均線。
-        const operationMode: OperationMode = h.ui?.operationMode === 'long' ? 'long' : 'short';
+        const operationMode: OperationMode | undefined = h.ui?.operationMode === 'long' || h.ui?.operationMode === 'short'
+          ? h.ui.operationMode
+          : undefined;
         const base: Omit<DailyActionItem, 'todayClose' | 'asOfDate' | 'unrealizedAmount' | 'action' | 'label' | 'signals' | 'profitPct' | 'suggestedStop' | 'metrics'> = {
           symbol: h.symbol,
           name: h.name,
@@ -183,57 +188,29 @@ export async function GET(req: NextRequest) {
           };
         }
         const strategyReferencePrice = reference.price;
-        const withIndicators = computeIndicators(candles);
-        // 賠少-17：進場買法字母在 ui.triggerSignal（passthrough blob）→ 傳給 engine
-        // 判斷是否為逆勢/搶反彈軌（反轉軌 D/F/N/O）以走專屬「翻黑就走」出場。
-        const triggerSignal = typeof h.ui?.triggerSignal === 'string' ? h.ui.triggerSignal : undefined;
-        const activeStop = positionSide === 'long'
-          ? deriveActiveLongStop({
-              entryPrice: strategyReferencePrice,
-              configuredStopLoss,
-              entryDate: h.entryDate,
-              triggerSignal,
-              market: mkt,
-              candles: withIndicators,
-              ui: h.ui,
-            })
-          : {
-              price: configuredStopLoss ?? fallbackHoldingStop(strategyReferencePrice, 'short'),
-              method: configuredStopLoss ? '使用者已設定回補停損' : '舊持倉 7% 回補 fallback',
-              source: configuredStopLoss ? 'configured' as const : 'legacy_fallback' as const,
-            };
-        const stopLoss = activeStop.price;
-        // 賠少-1：做空進場黑K最高點（停損價）走 ui.entryKbar.high。
-        const entryKbar = h.ui?.entryKbar as { high?: number; low?: number } | undefined;
-        const entryHigh = typeof entryKbar?.high === 'number' ? entryKbar.high : undefined;
-        // 賠少-10（2026-07-04）：做多生死線=進場K線低點。優先 ui.entryKbar.low，
-        // 缺值 fallback 用 candles 裡 entryDate 那根的 low（找不到該日就不判）。
-        const entryKlineLow = typeof entryKbar?.low === 'number'
-          ? entryKbar.low
-          : candles.find(c => c.date === h.entryDate)?.low;
         const yesterdayDate = candles.length >= 2 ? candles[candles.length - 2].date : '';
         const priorPartialExecution = partialExitForSignal(
           h.executionState,
           yesterdayDate,
           BLOWOFF_PARTIAL_EXIT_SIGNAL_TYPE_SET,
         );
-        let result = evaluateHolding({
+        const decision = evaluateHoldingDecision({
           symbol: h.symbol,
           entryPrice: strategyReferencePrice,
-          stopLoss,
-          candles,
-          todayClose,
-          thresholds,
-          triggerSignal,
-          operationMode,
+          configuredStopLoss,
+          previousActiveStop: h.riskState?.activeStopLoss,
           entryDate: h.entryDate,
-          positionSide,
-          entryHigh,
-          entryKlineLow,
+          market: mkt,
+          candles,
+          ui: h.ui,
+          thresholds,
           priorPartialExit: priorPartialExecution
             ? { signalDate: priorPartialExecution.signalDate, sharesRemaining: priorPartialExecution.sharesRemaining }
             : undefined,
         });
+        const { activeStop, context, candles: withIndicators } = decision;
+        const stopLoss = activeStop.price;
+        let result = decision.result;
         const partialSignal = result.signals.find(signal => PARTIAL_EXIT_SIGNAL_TYPE_SET.has(signal.type));
         const partialExecution = partialSignal
           ? partialExitForSignal(h.executionState, lastCandle.date, new Set([partialSignal.type]))
@@ -366,6 +343,10 @@ export async function GET(req: NextRequest) {
         return {
           ...base,
           stopLoss,
+          operationMode: context.operationMode,
+          managementStrategy: context.managementStrategy,
+          strategyContextStatus: context.status,
+          strategyContextMissing: context.status === 'unknown' ? context.missing : undefined,
           strategyReferencePrice,
           todayClose,
           asOfDate: lastCandle.date,

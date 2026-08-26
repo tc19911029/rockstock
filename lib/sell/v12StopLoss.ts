@@ -169,6 +169,12 @@ export interface StopLossInputs {
   recentHigh?: number;
   /** 2026-07-05：進場K是否「高檔＋大量」（決定 ≥5% 強紅K 是否守 1/2 嚴控特例）*/
   highLevelBlowoff?: boolean;
+  /**
+   * 持股管理法明訂的跟隨均線。undefined=沿用字母預設；null=本管理法不使用單一均線跟隨。
+   */
+  trailingMAOverride?: 'MA3' | 'MA5' | 'MA10' | 'MA20' | null;
+  /** 收盤跌破均線才算失守；正式持股預設可傳 0.995，避免等於均線就誤觸。 */
+  trailingBufferMult?: number;
 }
 
 export interface StopLossResult {
@@ -289,15 +295,18 @@ export function updateStopLossDaily(
   // 2026-07-05 忠實度修：課程 CH7-3「獲利已達 7% 以上……才放棄原停損改設停利（均線跟隨）」。
   // 之前無獲利門檻，進場第 2-3 天獲利 0-2% 就把停損抬到均線 → 停損變「跌破 MA5 就觸發」，
   // 與 checkMAExit（<10% 續抱）自相矛盾。現在獲利 ≥7% 才啟動均線跟隨。
-  const trailingMA = SIGNAL_TO_TRAILING_MA[letter];
+  const trailingMA = inputs.trailingMAOverride === undefined
+    ? SIGNAL_TO_TRAILING_MA[letter]
+    : inputs.trailingMAOverride;
   const profitForTrailing = entryPrice > 0 ? (today.close - entryPrice) / entryPrice : 0;
   if (trailingMA && profitForTrailing >= 0.07) {
     const maValue = today[trailingMA.toLowerCase() as 'ma5' | 'ma10' | 'ma20' | 'ma3'];
-    if (maValue != null && maValue > initial.stopLossPrice) {
+    const bufferedMa = maValue != null ? maValue * (inputs.trailingBufferMult ?? 1) : null;
+    if (bufferedMa != null && bufferedMa > initial.stopLossPrice) {
       return {
         ...initial,
-        stopLossPrice: Math.max(maValue, entryPrice * ABSOLUTE_STOP_LOSS_PRICE_MULT),  // 仍套 10% 絕對下限
-        detail: `${trailingMA} 跟隨上揚: ${maValue.toFixed(2)}`,
+        stopLossPrice: Math.max(bufferedMa, entryPrice * ABSOLUTE_STOP_LOSS_PRICE_MULT),  // 仍套 10% 絕對下限
+        detail: `${trailingMA} 跟隨上揚: ${maValue!.toFixed(2)}（跌破確認線 ${bufferedMa.toFixed(2)}）`,
       };
     }
   }

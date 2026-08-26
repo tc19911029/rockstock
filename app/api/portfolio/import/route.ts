@@ -43,6 +43,9 @@ const rowSchema = z.object({
   target2: z.coerce.number().positive().optional(),
   industry: z.string().optional(),
   notes: z.string().optional(),
+  triggerSignal: z.enum(['A','B','C','D','E','F','J','K','L','M','N','O','P','Q']).optional(),
+  operationMode: z.enum(['short', 'long']).optional(),
+  managementStrategy: z.enum(['kline', 'short-ma', 'ma20', 'triple-ma']).optional(),
 });
 
 const bodySchema = z.object({
