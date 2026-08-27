@@ -1,17 +1,12 @@
 /**
- * 今日全市場熱門題材分類（2026-06-19）
+ * 今日全市場官方產業熱點。
  *
  * 與 sectorRanking 的差別：
- *   - sectorRanking =「正著算」：只看寫死的 25 題材，把各自成分股報酬平均起來。
- *     新冒出來的熱點抓不到（不在 25 題材成分裡就看不見）。
+ *   - sectorRanking =「正著算」：依 TWSE／TPEx 官方產業完整母體計算多日表現。
  *   - hotThemeScan =「反著做」：先掃全市場 L2 快照（~2000 檔）找出今天在熱的股
- *     （漲幅 + 爆量 + 法人買超），再把每檔自動歸到題材標籤，哪個題材聚最多/最強
- *     熱門股就排最前面。
+ *     （漲幅 + 爆量 + 法人買超），再依官方產業別分組。
  *
- * 題材標籤來源（單一事實沿用 conceptMap）：
- *   1. lib/scanner/conceptMap.ts 的 TW_CONCEPT_MAP（細概念，如「記憶體」「光通訊/CPO」）
- *   2. 沒命中 → TWSE/TPEx 產業別（粗分類，如「半導體」「電子零組件」）
- *   3. 都沒有 → 「其他」
+ * 分類來源：TWSE／TPEx 公司基本資料 OpenAPI；官方資料缺漏時才落到「未分類」。
  *
  * 紅線：純顯示/排序參考，不接選股 gate、不入 pool 分數（鐵則 #5）。
  * 熱度公式 + 排名分是顯示用 heuristic（門檻寫死在此檔，未經回測）。
@@ -20,7 +15,8 @@
 
 import { readIntradaySnapshot, readMABase } from '@/lib/datasource/IntradayCache';
 import { isLimitUp as isLimitUpPrice } from '@/lib/utils/limitRules';
-import { TW_CONCEPT_MAP, fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
+import { fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
+import { TW_OFFICIAL_CLASSIFICATION } from '@/lib/datasource/TWOfficialIndustry';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
 import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
@@ -81,6 +77,7 @@ export interface HotThemeScanFile {
   date: string;
   generatedAt: string;
   market: 'TW';
+  classification: typeof TW_OFFICIAL_CLASSIFICATION;
   /** 快照總檔數（含被濾掉的指數/ETF） */
   totalScanned: number;
   /** 通過熱度門檻的個股數 */
@@ -115,11 +112,9 @@ function labelOf(
   code: string,
   industryOf: (code: string) => string | undefined,
 ): { theme: string; source: ThemeLabelSource } {
-  const concept = TW_CONCEPT_MAP[code];
-  if (concept) return { theme: concept, source: 'concept' };
   const ind = industryOf(code);
   if (ind) return { theme: ind, source: 'industry' };
-  return { theme: '其他', source: 'other' };
+  return { theme: '未分類', source: 'other' };
 }
 
 /** 只看真正的個股 4 碼（1xxx-9xxx）：自動排除指數(^)、ETF/權證(00xxxx/5-6 碼) */
@@ -216,6 +211,7 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
     date,
     generatedAt: new Date().toISOString(),
     market: 'TW',
+    classification: TW_OFFICIAL_CLASSIFICATION,
     totalScanned: quotes.length,
     hotStockCount: hot.length,
     uncategorizedCount: hot.filter((s) => s.themeSource === 'other').length,
@@ -331,12 +327,12 @@ export async function buildHotThemeScan(
     return +(today / avg).toFixed(2);
   };
 
-  // 產業別 fallback（TWSE/TPEx openapi，24h cache，失敗回空 → 那些股落「其他」）
+  // 官方產業別（TWSE/TPEx OpenAPI，24h cache；失敗時誠實落「未分類」）
   let industryMap = new Map<string, string>();
   try {
     industryMap = await fetchTWIndustryMap();
   } catch {
-    /* 網路失敗不影響核心（細概念仍在） */
+    /* 網路失敗不以人工題材替代官方分類 */
   }
   const industryOf = (code: string) => industryMap.get(code);
 

@@ -1,19 +1,23 @@
 /**
- * 盤中即時「完整題材名單」（2026-06-22）
+ * 盤中即時「官方產業完整名單」。
  *
  * 與 hotThemeScan 的差別：
  *   - hotThemeScan =「反著做」：全市場掃熱門股 → 反推題材，一個題材只列「今天在熱」那幾檔
  *     （記憶體常只剩 4 檔），看不到完整成分。
- *   - liveThemes  =「正著列」：用 THEME_MAP 的 29 個策劃題材完整名單，每檔配 L2 即時快照的
+ *   - liveThemes  =「正著列」：用 TWSE／TPEx 官方產業完整名單，每檔配 L2 即時快照的
  *     當日漲跌，全部成分股都列（今天沒成交/停牌 → changePercent=null 顯示「—」）。
  *
- * 與 sectorRanking（盤後多日排行）共用同一份 THEME_MAP → 盤中即時與盤後排行的題材/成分一致，
+ * 與 sectorRanking（盤後多日排行）共用同一份官方產業母體 → 盤中即時與盤後排行一致，
  * 只差「即時當日」vs「盤後多日」。純顯示層，不參與選股（鐵則 #5）；只讀單一 L2 快照（鐵則 #3）。
  */
 
 import { readIntradaySnapshot, readMABase } from '@/lib/datasource/IntradayCache';
 import { isLimitUp as calcLimitUp } from '@/lib/utils/limitRules';
-import { THEME_MAP } from './themeMap';
+import {
+  TW_OFFICIAL_CLASSIFICATION,
+  fetchTwOfficialIndustryRoster,
+  groupOfficialIndustryStocks,
+} from '@/lib/datasource/TWOfficialIndustry';
 
 export interface LiveThemeMember {
   code: string;
@@ -49,13 +53,14 @@ export interface LiveThemeRosterFile {
   /** 來源 L2 真正的更新時間；generatedAt 只代表本次重新聚合時間。 */
   snapshotUpdatedAt: string;
   market: 'TW';
+  classification: typeof TW_OFFICIAL_CLASSIFICATION;
   themeCount: number;
   themes: LiveTheme[];
 }
 
 const bareCode = (s: string) => s.replace(/\.(TW|TWO)$/i, '');
 
-/** 用 THEME_MAP 完整名單 + L2 即時快照算每個題材的全成分股當日漲跌。無快照回 null。 */
+/** 用官方產業完整名單 + L2 即時快照算每個產業的全成分股當日漲跌。無快照回 null。 */
 export async function buildLiveThemeRoster(date: string): Promise<LiveThemeRosterFile | null> {
   const snap = await readIntradaySnapshot('TW', date);
   if (!snap || snap.quotes.length === 0) return null;
@@ -74,9 +79,11 @@ export async function buildLiveThemeRoster(date: string): Promise<LiveThemeRoste
     return +(today / avg).toFixed(2);
   };
 
+  const roster = await fetchTwOfficialIndustryRoster();
+  const industryGroups = groupOfficialIndustryStocks(roster);
   const themes: LiveTheme[] = [];
-  for (const [theme, roster] of Object.entries(THEME_MAP)) {
-    const members: LiveThemeMember[] = roster.map((s) => {
+  for (const { industry: theme, stocks } of industryGroups) {
+    const members: LiveThemeMember[] = stocks.map((s) => {
       const q = qmap.get(s.code);
       const cp = q?.changePercent ?? null;
       const vol = q?.volume ?? null;
@@ -115,6 +122,7 @@ export async function buildLiveThemeRoster(date: string): Promise<LiveThemeRoste
     generatedAt: new Date().toISOString(),
     snapshotUpdatedAt: snap.updatedAt,
     market: 'TW',
+    classification: TW_OFFICIAL_CLASSIFICATION,
     themeCount: themes.length,
     themes,
   };

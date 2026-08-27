@@ -13,7 +13,7 @@ import { computeFacetScores } from '@/lib/agents/candidates/poolWeights';
 import { detectMarketRegime, regimeLabel, type MarketRegime } from '@/lib/agents/marketRegime';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readLatestSectorRanking, type ThemeStage } from '@/lib/themes/sectorRanking';
-import { classifyStockType, themesOfCode } from './stockType';
+import { classifyStockType } from './stockType';
 import { computeSpecScore, type SpecScoreInputs } from './compute';
 
 // ── 維度分數對照（顯示用 heuristic，非書本規則；升級成排序權重須先回測）─────────
@@ -110,10 +110,10 @@ async function buildOne(
   const stockType = classifyStockType(code);
   const facets = computeFacetScores(c);
 
-  // 題材/板塊：取該股所屬題材中「最強」者（多題材股看最有利的歸屬）
+  // 產業強弱：只對齊 candidate 上的 TWSE／TPEx 官方產業別（一檔一類）。
   let themeInput: SpecScoreInputs['theme'];
   let sectorInput: SpecScoreInputs['sector'];
-  const themes = themesOfCode(code);
+  const themes = c.industry && themeInfo.has(c.industry) ? [c.industry] : [];
   let bestStage: { score: number; note: string } | null = null;
   let bestSector: { score: number; note: string } | null = null;
   for (const t of themes) {

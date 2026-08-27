@@ -6,7 +6,7 @@
 // 那條留給已回測的 cross-selection 事件流，這裡不動它）。
 //
 // 兩市場單一事實：
-//   TW：reuse buildSectorRanking 的 38 題材，按 avgD1（今日題材平均漲幅）排名。
+//   TW：reuse buildSectorRanking 的 TWSE／TPEx 官方產業，按 avgD1（今日產業平均漲幅）排名。
 //   CN：reuse cn-agents 概念板塊（data/cn-agents/boards/{date}.json），filterThemeConcepts 濾掉
 //       風格/大盤/盤口板塊後按今日 pct 排，取前 N 個概念，即時 fetchBoardMembers 抓成分股反查。
 //       ⚠️ 陸股「最熱概念」回測是反指標（最熱之後反而最弱）→ 顯示層標清楚「只供觀察別追高」。
@@ -46,7 +46,7 @@ interface TodayThemeLite {
   memberCodes: string[];
 }
 
-/** TW：把 38 題材反推成 code → ThemeRef[]（依 heatRank 升冪，refs[0]=今日最熱題材）。 */
+/** TW：把官方產業反推成 code → ThemeRef[]（依 heatRank 升冪，refs[0]=今日最熱產業）。 */
 function invertTw(themes: TodayThemeLite[]): Map<string, ThemeRef[]> {
   const map = new Map<string, ThemeRef[]>();
   for (const t of themes) {
@@ -81,7 +81,7 @@ function invertCn(themes: TodayThemeLite[]): Map<string, ThemeRef[]> {
   return out;
 }
 
-// ── TW：38 題材按 avgD1（今日題材平均漲幅）排 ───────────────────────────────────
+// ── TW：官方產業按 avgD1（今日產業平均漲幅）排 ─────────────────────────────────
 async function twTodayThemes(date: string): Promise<TodayThemeLite[]> {
   const file = (await readSectorRanking(date)) ?? (await buildSectorRanking(date));
   const todayRet = (t: ThemeRank) => t.avgD1 ?? null;
@@ -150,7 +150,7 @@ const memCache = new Map<string, Map<string, ThemeRef[]>>();
 
 /**
  * 裸碼 → 所屬題材/概念 refs（供「今日題材熱度」排序 + 個股題材標注）。
- * TW：refs 依今日漲幅名次升冪（refs[0]=今日最熱題材）。
+ * TW：refs 依今日漲幅名次升冪（refs[0]=今日最熱官方產業）。
  * CN：refs[0]=最具代表性（最專一）概念；集合內含今日最熱者（bestHeatRank 取 min 找得到）。
  * 陸股題材分類已於 2026-06-21 從 hotThemes 移除（5 日合成路線）；此處改走 cn-agents 概念板塊
  * 即時反查全部概念（一檔都標得到本來的概念），其中「今天哪個概念在燒」當排序＝反指標、僅觀察。

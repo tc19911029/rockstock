@@ -1,10 +1,10 @@
 /**
- * 台股盤中即時「完整題材」排行
+ * 台股盤中即時「官方產業」排行
  * GET /api/themes/live[?date=YYYY-MM-DD]
  *
- * 用 THEME_MAP 29 個策劃題材的完整成分股名單（與盤後 sectorRanking 同一份），逐檔配 L2 全市場
+ * 用 TWSE／TPEx 官方產業完整成分股名單（與盤後 sectorRanking 同一份），逐檔配 L2 全市場
  * 即時快照的當日漲跌（鐵則 #3 的快照粗掃，不逐檔讀 Blob）→ 每個題材的全部成分股都列、不靠熱度
- * 過濾（記憶體 14 檔全列，不再只剩在漲的 4 檔）。回傳加 marketOpen + updatedAt。純顯示層、不參與
+ * 過濾。回傳加 marketOpen + updatedAt。純顯示層、不參與
  * 選股（鐵則 #5）。記憶體快取 40s。
  */
 import { NextRequest } from 'next/server';

@@ -78,48 +78,49 @@ describe('aggregateHotThemes', () => {
     expect(r.hotStockCount).toBe(0);
   });
 
-  it('細概念優先於產業別標籤', () => {
+  it('只使用交易所官方產業別，不讓人工概念覆蓋', () => {
     const r = aggregateHotThemes(makeParams(
       [{ symbol: '2330', name: '台積電', changePercent: 8, volume: 1 }],
-      { industryOf: () => '半導體' },
+      { industryOf: () => '半導體業' },
     ));
-    // 2330 在 TW_CONCEPT_MAP = 晶圓代工，應優先於產業「半導體」
-    expect(r.themes[0].theme).toBe('晶圓代工');
-    expect(r.themes[0].source).toBe('concept');
+    expect(r.themes[0].theme).toBe('半導體業');
+    expect(r.themes[0].source).toBe('industry');
   });
 
-  it('概念表沒命中時 fallback 到產業別，標 source=industry', () => {
+  it('官方產業別標示 source=industry', () => {
     const r = aggregateHotThemes(makeParams(
       [{ symbol: '9999', name: '某新股', changePercent: 8, volume: 1 }],
-      { industryOf: (c) => (c === '9999' ? '航運' : undefined) },
+      { industryOf: (c) => (c === '9999' ? '航運業' : undefined) },
     ));
-    expect(r.themes[0].theme).toBe('航運');
+    expect(r.themes[0].theme).toBe('航運業');
     expect(r.themes[0].source).toBe('industry');
     expect(r.uncategorizedCount).toBe(0);
   });
 
-  it('產業也沒有 → 其他，計入 uncategorizedCount', () => {
+  it('官方產業沒有 → 未分類，計入 uncategorizedCount', () => {
     const r = aggregateHotThemes(makeParams(
       [{ symbol: '9998', name: '無分類股', changePercent: 8, volume: 1 }],
     ));
-    expect(r.themes[0].theme).toBe('其他');
+    expect(r.themes[0].theme).toBe('未分類');
     expect(r.uncategorizedCount).toBe(1);
   });
 
-  it('同題材多檔熱門股 → 聚合 + 排名分含廣度 bonus', () => {
-    // 記憶體：2408 南亞科 / 2344 華邦電 / 8299 群聯（皆 TW_CONCEPT_MAP=記憶體）
-    const r = aggregateHotThemes(makeParams([
-      { symbol: '2408', name: '南亞科', changePercent: 9, volume: 1 },
-      { symbol: '2344', name: '華邦電', changePercent: 6, volume: 1 },
-      { symbol: '8299', name: '群聯', changePercent: 7, volume: 1 },
-    ]));
-    const mem = r.themes.find((t) => t.theme === '記憶體');
-    expect(mem).toBeDefined();
-    expect(mem!.hotCount).toBe(3);
-    expect(mem!.maxChange).toBe(9);
+  it('同官方產業多檔熱門股 → 聚合 + 排名分含廣度 bonus', () => {
+    const r = aggregateHotThemes(makeParams(
+      [
+        { symbol: '2408', name: '南亞科', changePercent: 9, volume: 1 },
+        { symbol: '2344', name: '華邦電', changePercent: 6, volume: 1 },
+        { symbol: '8299', name: '群聯', changePercent: 7, volume: 1 },
+      ],
+      { industryOf: () => '半導體業' },
+    ));
+    const semiconductor = r.themes.find((t) => t.theme === '半導體業');
+    expect(semiconductor).toBeDefined();
+    expect(semiconductor!.hotCount).toBe(3);
+    expect(semiconductor!.maxChange).toBe(9);
     // members 按熱度 desc → 第一個是漲最多的 2408
-    expect(mem!.members[0].code).toBe('2408');
-    expect(mem!.topStock?.code).toBe('2408');
+    expect(semiconductor!.members[0].code).toBe('2408');
+    expect(semiconductor!.topStock?.code).toBe('2408');
   });
 
   it('漲停旗標用真實漲停價（前收×1.10），非寬估 9.5%', () => {

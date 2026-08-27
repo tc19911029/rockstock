@@ -1,8 +1,8 @@
 /**
- * 板塊（題材）強弱排名 + 題材 6 階段顯示分類（2026-06-12 A2）
+ * TWSE／TPEx 官方產業強弱排名 + 6 階段顯示分類。
  *
- * 資料來源：themeMap 成分股（~120 檔去重）逐檔讀本地 L1 日K + chips inst 日序列。
- * 不掃全市場（成分股清單固定且小），跑在盤後 cron（17:10 CST，L1 14:30 已封）。
+ * 產業母體只使用兩交易所的公司基本資料 OpenAPI；逐檔讀本地 L1 日K + chips inst 日序列。
+ * 不混入手工 AI、CPO、CoWoS 等市場題材，跑在盤後 cron（17:10 CST，L1 14:30 已封）。
  *
  * 紅線：輸出是「顯示/排序參考」，不接選股 gate、不入 pool 分數（鐵則 #5）。
  * 6 階段分類是顯示用 heuristic（門檻寫死在 classifyStage，非書本規則、未經回測）—
@@ -12,7 +12,12 @@
  */
 import fs from 'fs/promises';
 import path from 'path';
-import { THEME_MAP, type ThemeStock } from './themeMap';
+import {
+  TW_OFFICIAL_CLASSIFICATION,
+  fetchTwOfficialIndustryRoster,
+  groupOfficialIndustryStocks,
+  type TwOfficialIndustryStock,
+} from '@/lib/datasource/TWOfficialIndustry';
 import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
@@ -68,12 +73,13 @@ export interface ThemeRank {
 export interface SectorRankingFile {
   date: string;
   generatedAt: string;
+  classification: typeof TW_OFFICIAL_CLASSIFICATION;
   themes: ThemeRank[];
 }
 
 // ── 個股報酬計算 ──────────────────────────────────────────────────────────────
 
-async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStockPerf> {
+async function loadStockPerf(stock: TwOfficialIndustryStock, date: string): Promise<ThemeStockPerf> {
   const empty: ThemeStockPerf = {
     code: stock.code, name: stock.name,
     d1: null, d5: null, d20: null, d60: null, volRatio: null, turnover: null, instNet5: null,
@@ -81,9 +87,9 @@ async function loadStockPerf(stock: ThemeStock, date: string): Promise<ThemeStoc
     instAmt: INST_PERIODS.map(() => null),
     retailAmt: INST_PERIODS.map(() => null),
   };
-  // 檔名格式 {code}.TW.json / {code}.TWO.json
-  const file = (await readCandleFile(`${stock.code}.TW`, 'TW'))
-    ?? (await readCandleFile(`${stock.code}.TWO`, 'TW'));
+  // 官方市場別已知，直接讀正確後綴，避免全市場逐檔試兩次。
+  const suffix = stock.market === 'TWSE' ? 'TW' : 'TWO';
+  const file = await readCandleFile(`${stock.code}.${suffix}`, 'TW');
   if (!file?.candles?.length) return empty;
 
   const candles = file.candles;
@@ -193,21 +199,20 @@ function avg(values: Array<number | null>): number | null {
 }
 
 export async function buildSectorRanking(date: string): Promise<SectorRankingFile> {
-  // 全題材去重股票先各算一次，再按題材聚合（同股多題材不重算）
+  const roster = await fetchTwOfficialIndustryRoster();
+  const industryGroups = groupOfficialIndustryStocks(roster);
+
+  // 官方分類一檔只屬一個產業；先算全市場個股績效，再按產業聚合。
   const perfCache = new Map<string, ThemeStockPerf>();
-  const allStocks = new Map<string, ThemeStock>();
-  for (const stocks of Object.values(THEME_MAP)) {
-    for (const s of stocks) allStocks.set(s.code, s);
-  }
   const CONCURRENCY = 16;
-  const entries = [...allStocks.values()];
+  const entries = roster;
   for (let i = 0; i < entries.length; i += CONCURRENCY) {
     const batch = entries.slice(i, i + CONCURRENCY);
     const results = await Promise.all(batch.map(s => loadStockPerf(s, date)));
     for (const p of results) perfCache.set(p.code, p);
   }
 
-  const themes: ThemeRank[] = Object.entries(THEME_MAP).map(([theme, stocks]) => {
+  const themes: ThemeRank[] = industryGroups.map(({ industry: theme, stocks }) => {
     const members = stocks.map(s => perfCache.get(s.code)!).filter(Boolean);
     const avgD1 = avg(members.map(m => m.d1));
     const avgD5 = avg(members.map(m => m.d5));
@@ -239,7 +244,12 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
   // 預設排序：5 日平均報酬 desc（資金近期流向），null 沉底
   themes.sort((a, b) => (b.avgD5 ?? -Infinity) - (a.avgD5 ?? -Infinity));
 
-  return { date, generatedAt: new Date().toISOString(), themes };
+  return {
+    date,
+    generatedAt: new Date().toISOString(),
+    classification: TW_OFFICIAL_CLASSIFICATION,
+    themes,
+  };
 }
 
 // ── 儲存 ─────────────────────────────────────────────────────────────────────
@@ -253,7 +263,14 @@ export async function saveSectorRanking(file: SectorRankingFile): Promise<void> 
 export async function readSectorRanking(date: string): Promise<SectorRankingFile | null> {
   try {
     const raw = await fs.readFile(path.join(SECTORS_DIR, `${date}.json`), 'utf-8');
-    return JSON.parse(raw) as SectorRankingFile;
+    const parsed = JSON.parse(raw) as Partial<SectorRankingFile>;
+    // 舊檔是手工題材分類；不可在新 UI 冒充官方產業資料。
+    if (
+      parsed.classification?.kind !== TW_OFFICIAL_CLASSIFICATION.kind
+      || parsed.classification?.version !== TW_OFFICIAL_CLASSIFICATION.version
+      || !Array.isArray(parsed.themes)
+    ) return null;
+    return parsed as SectorRankingFile;
   } catch {
     return null;
   }

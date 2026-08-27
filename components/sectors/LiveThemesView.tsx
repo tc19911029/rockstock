@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 盤中即時題材／板塊（2026-06-22）— 首頁「題材分類」分頁的第三個模式「🔴 盤中即時」。
+ * 盤中即時產業／板塊 — 台股使用官方產業，陸股使用行業／概念板塊。
  *
  * 與既有兩個模式（盤後完整熱掃 / 盤後固定題材）分開：本模式盤中每 60s 自動刷新，給「正在動」的盯盤感。
  *   - 台股：/api/themes/live（讀全市場 L2 即時快照聚合，輕量版、不逐檔讀 L1）
@@ -163,7 +163,7 @@ function LiveBar({ market, marketOpen, stale, staleReason, updatedAt, refreshing
   );
 }
 
-// ── 台股：題材卡（完整成分股，可展開）──────────────────────────────────────────
+// ── 台股：官方產業卡（完整成分股，可展開）──────────────────────────────────────
 
 // 成分股一列（抽成元件才能用 useIsChartCurrent 高亮目前走圖那檔）
 function TwLiveMemberRow({ m }: { m: LiveThemeMember }) {
@@ -236,11 +236,11 @@ function TwLive({ data }: { data: TwLivePayload }) {
     { missingLast: true });
 
   if (themes.length === 0) {
-    return <EmptyState icon="😴" title="沒有題材資料" description="需要當日 L2 全市場快照" />;
+    return <EmptyState icon="😴" title="沒有官方產業資料" description="需要 TWSE／TPEx 公司基本資料與當日 L2 全市場快照" />;
   }
   return (
     <div className="rounded-xl ring-1 ring-foreground/10 bg-card/60 overflow-hidden">
-      <SortBar sorts={TW_SORTS} sortId={sortId} dir={dir} onSort={sortBy} hint="點題材看完整成分股" />
+      <SortBar sorts={TW_SORTS} sortId={sortId} dir={dir} onSort={sortBy} hint="點產業看完整成分股" />
       <div className="p-1.5 space-y-1.5">
         {themes.map((t, i) => (
           <TwThemeCard key={t.theme} t={t} rank={i + 1} expanded={expanded === t.theme}
@@ -441,7 +441,7 @@ export function LiveThemesView({ market }: { market: Market }) {
   const staleReason = market === 'TW' ? tw?.staleReason : cn?.staleReason;
   const updatedAt = payload?.updatedAt ?? null;
   const note = market === 'TW' && tw
-    ? `資料日 ${tw.date} · ${tw.themeCount} 個題材（完整成分）`
+    ? `資料日 ${tw.date} · ${tw.themeCount} 個官方產業（完整成分）`
     : market === 'CN' && cn?.date
       ? `資料日 ${cn.date}`
       : undefined;

@@ -1484,10 +1484,10 @@ function HomePage() {
                       ? 'text-foreground border-b-2 border-teal-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
-                  title="題材分類：題材熱度／資金流入／法人買賣超／排名變化"
+                  title="台股依 TWSE／TPEx 官方產業分類；陸股顯示行業／概念板塊"
                 >
                   <Flame className="size-4" aria-hidden="true" />
-                  <span>題材</span>
+                  <span>產業</span>
                 </button>
                 <button
                   type="button"

@@ -3,9 +3,9 @@
 /**
  * useThemeHeatMap — 前端 display-layer join：把「今日最熱題材」拉成
  * `Map<裸碼, ThemeRef[]>`（refs[0] = 今日最熱），給各策略掃描頁的
- * 「🔥今日題材熱度」排序 + 卡片題材標籤用。
+ * 台股「🔥今日官方產業熱度」／陸股題材熱度排序 + 卡片標籤用。
  *
- * 走既有 `/api/theme-sanse/hot?market=&date=`（TW=38 題材按今日漲幅；CN=概念板塊按今日 pct）。
+ * 走既有 `/api/theme-sanse/hot?market=&date=`（TW=官方產業按今日漲幅；CN=概念板塊按今日 pct）。
  * 只在 market/date 變時抓一次（route 端按 (market,date) 快取，反覆切頁不重算）。
  *
  * ⚠ 純展示/排序用途：不灌進掃描資料流、不改選股分數（§0 隔離、鐵則 #5）。

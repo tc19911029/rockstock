@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 題材分類面板（2026-06-19）— 首頁右側「題材分類」分頁 + 整頁 /sectors 共用（單一事實）。
+ * 產業／板塊面板 — 台股採 TWSE／TPEx 官方產業分類；陸股沿用交易所板塊資料。
  *
  * 從 app/sectors/page.tsx 抽出內層內容（不含 PageShell/PageHeader）。台股兩視角 + 陸股 <CnView/>。
  * 純顯示層，不參與選股（鐵則 #5）。
@@ -232,7 +232,7 @@ function PerfGrid({ members }: { members: PerfMember[] }) {
       <div className="p-1.5 space-y-1.5" data-navlist="sector-members">
         {shown.map((m) => <StockCard key={m.code} m={m} />)}
         {onlyBull && shown.length === 0 && (
-          <div className="px-2 py-3 text-center text-[11px] text-muted-foreground/55">此題材沒有趨勢為多頭的成分股（或六條件判讀中…）</div>
+          <div className="px-2 py-3 text-center text-[11px] text-muted-foreground/55">此產業沒有趨勢為多頭的成分股（或六條件判讀中…）</div>
         )}
       </div>
     </div>
@@ -242,8 +242,7 @@ function PerfGrid({ members }: { members: PerfMember[] }) {
 // ── 今日全市場熱點 ────────────────────────────────────────────────────────────
 
 function SourceTag({ source }: { source: HotTheme['source'] }) {
-  if (source === 'concept') return null;
-  const label = source === 'industry' ? '產業' : '未分類';
+  const label = source === 'industry' ? '官方' : source === 'other' ? '未分類' : '舊題材';
   return <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-muted text-muted-foreground/70 align-middle">{label}</span>;
 }
 
@@ -269,16 +268,16 @@ function HotView({ hot, error, expanded, setExpanded }: {
 }) {
   const [sortId, setSortId] = useState('score');
   const [dir, setDir] = useState<SortDir>('desc');
-  const [showCoarse, setShowCoarse] = useState(false);
+  const [showUnclassified, setShowUnclassified] = useState(false);
   const sortBy = (id: string) => { if (sortId === id) setDir(dir === 'desc' ? 'asc' : 'desc'); else { setSortId(id); setDir('desc'); } };
   const themes = hot?.themes
     ? applySort(hot.themes, sortId, dir,
         (t, id) => id === 'score' ? t.score : id === 'count' ? t.hotCount : id === 'avg' ? t.avgChange : id === 'max' ? t.maxChange : null,
         { missingLast: true })
     : [];
-  const concept = themes.filter((t) => t.source === 'concept');
-  const coarse = themes.filter((t) => t.source !== 'concept');
-  const coarseHot = coarse.reduce((a, t) => a + t.hotCount, 0);
+  const official = themes.filter((t) => t.source === 'industry');
+  const unclassified = themes.filter((t) => t.source !== 'industry');
+  const unclassifiedHot = unclassified.reduce((a, t) => a + t.hotCount, 0);
 
   return (
     <div className="space-y-3">
@@ -292,22 +291,22 @@ function HotView({ hot, error, expanded, setExpanded }: {
       {hot && hot.themes.length > 0 && (
         <>
           <div className="rounded-lg ring-1 ring-foreground/10 bg-card/40 overflow-hidden">
-            <SortBar sorts={HOT_SORTS} sortId={sortId} dir={dir} onSort={sortBy} hint="點題材看成分股" />
+            <SortBar sorts={HOT_SORTS} sortId={sortId} dir={dir} onSort={sortBy} hint="點產業看成分股" />
           </div>
-          {concept.length > 0 ? (
-            <HotThemeList rows={concept} rankBase={0} expanded={expanded} setExpanded={setExpanded} />
+          {official.length > 0 ? (
+            <HotThemeList rows={official} rankBase={0} expanded={expanded} setExpanded={setExpanded} />
           ) : (
-            <EmptyState icon="🔍" title="今天沒有明確的細題材在熱" description="熱門股都落在廣義產業（見下方展開）" />
+            <EmptyState icon="🔍" title="今天沒有官方產業熱點" description="目前熱門個股沒有取得 TWSE／TPEx 官方產業別" />
           )}
 
-          {coarse.length > 0 && (
+          {unclassified.length > 0 && (
             <div className="space-y-2">
-              <button type="button" onClick={() => setShowCoarse((s) => !s)}
+              <button type="button" onClick={() => setShowUnclassified((s) => !s)}
                 className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                <span className={`transition-transform ${showCoarse ? 'rotate-90' : ''}`}>›</span>
-                廣義分類（產業別／未分類）· {coarse.length} 群 · {coarseHot} 檔
+                <span className={`transition-transform ${showUnclassified ? 'rotate-90' : ''}`}>›</span>
+                官方資料待補 · {unclassified.length} 群 · {unclassifiedHot} 檔
               </button>
-              {showCoarse && <HotThemeList rows={coarse} rankBase={concept.length} expanded={expanded} setExpanded={setExpanded} />}
+              {showUnclassified && <HotThemeList rows={unclassified} rankBase={official.length} expanded={expanded} setExpanded={setExpanded} />}
             </div>
           )}
         </>
@@ -376,7 +375,7 @@ const HOT_SORTS = [
   { id: 'score', label: '熱度' }, { id: 'count', label: '熱門數' }, { id: 'avg', label: '平均漲' }, { id: 'max', label: '最強漲' },
 ];
 
-// ── 固定 25 題材 ──────────────────────────────────────────────────────────────
+// ── 官方產業盤後排行 ──────────────────────────────────────────────────────────
 
 // 題材級法人買超金額 = 成分股 instAmt[該天數] 加總
 function instSum(t: ThemeRank, win: number): number | null {
@@ -513,8 +512,6 @@ export function SectorsPanel({ onSelectStock, selectedCode: _selectedCode }: {
   const [hotError, setHotError] = useState<string | null>(null);
   const [hotExpanded, setHotExpanded] = useState<string | null>(null);
 
-  const isPanel = !!onSelectStock; // 首頁分頁情境（有 callback）：不碰 URL，避免干擾首頁 ?tab/?load
-
   useEffect(() => {
     if (market !== 'TW') return;
     // 盤後多日排行只有在「熱門題材 → 盤後排行」子視角才需要（盤中即時走 LiveThemesView 自己抓）
@@ -599,8 +596,8 @@ export function SectorsPanel({ onSelectStock, selectedCode: _selectedCode }: {
     return () => { cancelled = true; };
   }, [market, hot, data, badgeDate]);
 
-  const hotLabel = market === 'CN' ? '🔥 今日熱點（人氣／漲停）' : '🔥 今日全市場熱點';
-  const fixedLabel = market === 'CN' ? '📋 熱門板塊' : '📋 熱門題材';
+  const hotLabel = market === 'CN' ? '🔥 今日熱點（人氣／漲停）' : '🔥 今日產業熱點';
+  const fixedLabel = market === 'CN' ? '📋 熱門板塊' : '📋 官方產業';
 
   return (
     <SectorsNavContext.Provider value={onSelectStock ?? null}>
@@ -631,6 +628,12 @@ export function SectorsPanel({ onSelectStock, selectedCode: _selectedCode }: {
             </div>
           )}
         </div>
+
+        {market === 'TW' && (
+          <div className="rounded-lg border border-teal-500/20 bg-teal-500/5 px-3 py-2 text-[11px] text-muted-foreground">
+            分類依據：TWSE／TPEx 公司基本資料正式產業別；一家公司只歸入一個官方產業，不混入 CPO、AI、CoWoS 等市場題材。
+          </div>
+        )}
 
         {mode === 'fixed' ? (
           liveMode ? (

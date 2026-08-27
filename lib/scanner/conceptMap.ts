@@ -1,8 +1,10 @@
 /**
- * 台股概念股對照表
- * 優先顯示概念標籤（如「記憶體」），比 TWSE 產業分類（如「半導體」）更精確
- * 若股票不在此表中，fallback 到 TWSE 產業別
+ * 台股市場題材對照表。
+ *
+ * 只保留給需要研究市場題材的舊功能使用；正式產業分類一律走
+ * TWSE／TPEx OpenAPI，不再讓這份人工表覆蓋官方產業別。
  */
+import { fetchTwOfficialIndustryMap } from '@/lib/datasource/TWOfficialIndustry';
 export const TW_CONCEPT_MAP: Record<string, string> = {
   // ── AI / 伺服器 ──────────────────────────────────────────────────────────
   '2382': 'AI伺服器',  '2353': 'AI伺服器',  '3231': 'AI伺服器',
@@ -133,30 +135,16 @@ export const TW_CONCEPT_MAP: Record<string, string> = {
 };
 
 /**
- * 取得台股概念標籤
- * 優先用概念表，沒有則 fallback 到 TWSE 產業名稱
+ * 相容舊呼叫名稱；現在只回傳交易所官方產業別。
+ * code 保留在簽名中，避免既有掃描呼叫端產生破壞性變更。
  */
-export function getTWConcept(code: string, twseIndustry?: string): string | undefined {
-  return TW_CONCEPT_MAP[code] ?? twseIndustry;
+export function getTWConcept(_code: string, twseIndustry?: string): string | undefined {
+  return twseIndustry;
 }
 
 // ── TWSE/TPEx 產業分類（題材對照沒命中時的 fallback）──────────────────────────
 // 2026-06-01：從 TaiwanScanner 移來，讓「TW 題材/產業解析」單一事實在 conceptMap，
 // 書本掃描(TaiwanScanner)與三色掃描(tw-sanse) 共用同一份來源（避免各掃各的、標籤不一致）。
-
-/** TWSE 產業代碼 → 中文名稱 */
-const TWSE_INDUSTRY_MAP: Record<string, string> = {
-  '01': '水泥', '02': '食品', '03': '塑膠', '04': '紡織',
-  '05': '電機機械', '06': '電器電纜', '08': '玻璃陶瓷', '09': '造紙',
-  '10': '鋼鐵', '11': '橡膠', '12': '汽車', '14': '營建',
-  '15': '航運', '16': '觀光', '17': '金融保險', '18': '貿易百貨',
-  '20': '其他', '21': '化學', '22': '生技醫療', '23': '油電燃氣',
-  '24': '半導體', '25': '電腦週邊', '26': '光電', '27': '通信網路',
-  '28': '電子零組件', '29': '電子通路', '30': '資訊服務', '31': '其他電子',
-  '32': '文化創意', '33': '農業科技', '34': '電子商務', '35': '綠能環保',
-  '36': '數位雲端', '37': '運動休閒', '38': '居家生活',
-  '91': '存託憑證',
-};
 
 let industryCache: Map<string, string> | null = null;
 let industryCacheTime = 0;
@@ -164,55 +152,18 @@ const INDUSTRY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24小時
 
 /**
  * 從 TWSE/TPEx 取得全部上市櫃公司產業分類（code → 中文產業別）。
- * 24h in-memory cache；網路失敗回空 Map（caller 用 getTWConcept 的題材對照墊底）。
+ * 24h in-memory cache；網路失敗回空 Map，不以人工題材冒充官方分類。
  */
 export async function fetchTWIndustryMap(): Promise<Map<string, string>> {
   if (industryCache && Date.now() - industryCacheTime < INDUSTRY_CACHE_TTL) {
     return industryCache;
   }
 
-  const map = new Map<string, string>();
+  let map = new Map<string, string>();
   try {
-    // TWSE 上市公司基本資料
-    const res = await fetch(
-      'https://openapi.twse.com.tw/v1/opendata/t187ap03_L',
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (res.ok) {
-      const data = await res.json() as Array<{
-        公司代號: string;
-        產業別: string;
-      }>;
-      for (const row of data) {
-        const code = row.公司代號?.trim();
-        const indCode = row.產業別?.trim();
-        if (code && indCode) {
-          map.set(code, TWSE_INDUSTRY_MAP[indCode] ?? indCode);
-        }
-      }
-    }
+    map = await fetchTwOfficialIndustryMap();
   } catch {
-    // 取得上市產業分類失敗，忽略
-  }
-
-  try {
-    // TPEx 上櫃公司基本資料（欄位名稱與上市不同）
-    const res2 = await fetch(
-      'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O',
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (res2.ok) {
-      const data2 = await res2.json() as Array<Record<string, string>>;
-      for (const row of data2) {
-        const code = (row['SecuritiesCompanyCode'] || '').trim();
-        const indCode = (row['SecuritiesIndustryCode'] || '').trim();
-        if (code && indCode) {
-          map.set(code, TWSE_INDUSTRY_MAP[indCode] ?? indCode);
-        }
-      }
-    }
-  } catch {
-    // 取得上櫃產業分類失敗，忽略
+    // 兩個官方來源任一失敗即回空，避免半套分類污染掃描結果。
   }
 
   if (map.size > 0) {
