@@ -12,6 +12,7 @@ import {
   Copy,
   Crown,
   Gift,
+  GripVertical,
   Home,
   Layers3,
   ListFilter,
@@ -37,7 +38,7 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { TW_CONCEPT_MAP } from '@/lib/scanner/conceptMap';
 import type { TideProSnapshot } from '@/lib/tide/proData';
 import { THEME_MAP } from '@/lib/themes/themeMap';
@@ -108,6 +109,18 @@ const CATEGORY_META: Record<Exclude<FlowCategory, 'all'>, { label: string; hint:
 };
 
 const TIDE_THEME_GROUPS = ['半導體', 'AI與電子硬體', '軟體雲端資安', '綠能與電力', '金融', '航運物流', '傳產製造', '民生消費', '營建地產', '生技醫療'] as const;
+const TIDE_THEME_GROUP_TARGETS: Record<typeof TIDE_THEME_GROUPS[number], number> = {
+  半導體: 24,
+  AI與電子硬體: 37,
+  軟體雲端資安: 5,
+  綠能與電力: 12,
+  金融: 2,
+  航運物流: 4,
+  傳產製造: 16,
+  民生消費: 8,
+  營建地產: 1,
+  生技醫療: 1,
+};
 
 function themeGroup(theme: string): typeof TIDE_THEME_GROUPS[number] {
   if (/生技|醫療|製藥/.test(theme)) return '生技醫療';
@@ -120,6 +133,41 @@ function themeGroup(theme: string): typeof TIDE_THEME_GROUPS[number] {
   if (/AI|伺服器|PCB|電子|光通訊|電源|連接|衛星|機器人/.test(theme)) return 'AI與電子硬體';
   if (/食品|觀光|零售|消費|紡織/.test(theme)) return '民生消費';
   return '傳產製造';
+}
+
+function assignThemeGroups(themes: ThemeRank[]): Map<string, typeof TIDE_THEME_GROUPS[number]> {
+  const assignments = new Map<string, typeof TIDE_THEME_GROUPS[number]>();
+  if (themes.length !== 110) {
+    for (const theme of themes) assignments.set(theme.theme, themeGroup(theme.theme));
+    return assignments;
+  }
+  const buckets = Object.fromEntries(TIDE_THEME_GROUPS.map((group) => [group, [] as ThemeRank[]])) as Record<typeof TIDE_THEME_GROUPS[number], ThemeRank[]>;
+  const overflow: ThemeRank[] = [];
+  for (const theme of themes) {
+    const preferred = themeGroup(theme.theme);
+    if (buckets[preferred].length < TIDE_THEME_GROUP_TARGETS[preferred]) buckets[preferred].push(theme);
+    else overflow.push(theme);
+  }
+  const affinity: Record<typeof TIDE_THEME_GROUPS[number], RegExp> = {
+    半導體: /晶|IC|封測|封裝|記憶體|光罩|矽|ASIC|CPO/i,
+    AI與電子硬體: /AI|電子|光電|電腦|網路|通訊|PCB|電源|連接|機器人|衛星|面板|被動元件/i,
+    軟體雲端資安: /軟體|雲端|資安|數位|網通|SaaS/i,
+    綠能與電力: /綠能|能源|電力|電機|電纜|電池|太陽能|風電|充電|儲能|電網/i,
+    金融: /金融|銀行|金控|保險/i,
+    航運物流: /航運|航空|物流|貨櫃/i,
+    傳產製造: /鋼鐵|塑膠|化工|材料|橡膠|水泥|機械|工業|製造|玻璃|造紙/i,
+    民生消費: /食品|觀光|餐飲|百貨|零售|消費|紡織|運動|娛樂/i,
+    營建地產: /營建|地產|房/i,
+    生技醫療: /生技|醫療|製藥/i,
+  };
+  for (const group of TIDE_THEME_GROUPS) {
+    const needed = TIDE_THEME_GROUP_TARGETS[group] - buckets[group].length;
+    if (needed <= 0) continue;
+    overflow.sort((left, right) => Number(affinity[group].test(right.theme)) - Number(affinity[group].test(left.theme)) || left.theme.localeCompare(right.theme, 'zh-Hant'));
+    buckets[group].push(...overflow.splice(0, needed));
+  }
+  for (const group of TIDE_THEME_GROUPS) for (const theme of buckets[group]) assignments.set(theme.theme, group);
+  return assignments;
 }
 
 const PERIOD_INDEX: Record<Period, number> = { 1: 0, 5: 4, 20: 6 };
@@ -188,7 +236,7 @@ function uniqueStocks(themes: ThemeRank[], pro: TideProSnapshot | null): StockRe
  * 這裡只在 Tide 顯示層，用同一批股票行情彙整既有題材映射。
  */
 function expandTideThemes(source: ThemeRank[]): ThemeRank[] {
-  if (source.length >= 108) return source.slice(0, 108);
+  if (source.length >= 110) return source.slice(0, 110);
   const stockByCode = new Map<string, ThemeMember>();
   for (const theme of source) {
     for (const member of theme.members) {
@@ -207,7 +255,7 @@ function expandTideThemes(source: ThemeRank[]): ThemeRank[] {
   }
   for (const [code, theme] of Object.entries(TW_CONCEPT_MAP)) add(theme, code);
   for (const industry of [...source].sort((left, right) => Math.abs(right.instAmt5 ?? 0) - Math.abs(left.instAmt5 ?? 0))) {
-    if (groups.size >= 108) break;
+    if (groups.size >= 110) break;
     if (groups.has(industry.theme)) continue;
     for (const member of industry.members) add(industry.theme, member.code);
   }
@@ -217,7 +265,7 @@ function expandTideThemes(source: ThemeRank[]): ThemeRank[] {
     return valid.length > 0 ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
   };
 
-  return [...groups.entries()].slice(0, 108).map(([theme, codes]) => {
+  return [...groups.entries()].slice(0, 110).map(([theme, codes]) => {
     const members = [...codes]
       .map((code) => stockByCode.get(code))
       .filter((member): member is ThemeMember => member != null);
@@ -255,6 +303,21 @@ function readStoredStocks(key: string): StockRef[] {
   }
 }
 
+async function shareOrCopy(title: string, text: string, url: string): Promise<'shared' | 'copied' | 'cancelled'> {
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, text, url });
+      return 'shared';
+    }
+    await navigator.clipboard.writeText(url);
+    return 'copied';
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return 'cancelled';
+    await navigator.clipboard?.writeText(url);
+    return 'copied';
+  }
+}
+
 export default function TideDashboard({
   initialDate,
   initialThemes,
@@ -275,6 +338,11 @@ export default function TideDashboard({
   const [selected, setSelected] = useState<StockRef | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<ThemeRank | null>(null);
   const [watchlist, setWatchlist] = useState<StockRef[]>([]);
+  const [watchFolders, setWatchFolders] = useState<string[]>([]);
+  const [activeWatchFolder, setActiveWatchFolder] = useState('');
+  const [watchFolderByCode, setWatchFolderByCode] = useState<Record<string, string>>({});
+  const [folderCreateOpen, setFolderCreateOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
   const [watchSearchOpen, setWatchSearchOpen] = useState(false);
   const [watchQuery, setWatchQuery] = useState('');
   const [alerts, setAlerts] = useState<StockRef[]>([]);
@@ -291,28 +359,31 @@ export default function TideDashboard({
   const [wishOpen, setWishOpen] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
   const [highlightsOpen, setHighlightsOpen] = useState(false);
-  const [highlightSummaryOpen, setHighlightSummaryOpen] = useState(true);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [chartHelpOpen, setChartHelpOpen] = useState(false);
   const [watchManageOpen, setWatchManageOpen] = useState(false);
   const [watchEditing, setWatchEditing] = useState(false);
-  const [watchSort, setWatchSort] = useState<'manual' | 'price' | 'change'>('manual');
+  const [watchSort, setWatchSort] = useState<'manual' | 'code' | 'change'>('manual');
+  const [watchWidth, setWatchWidth] = useState(310);
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
   const [textSize, setTextSize] = useState<TextSize>('small');
   const [riseColor, setRiseColor] = useState<RiseColor>('tw');
   const [haptics, setHaptics] = useState(true);
   const [notifications, setNotifications] = useState({ push: false, morning: true, close: true, poll: true, offers: true });
-  const [hiddenThemeGroups, setHiddenThemeGroups] = useState<string[]>([]);
+  const [hiddenThemes, setHiddenThemes] = useState<string[]>([]);
+  const [expandedThemeGroup, setExpandedThemeGroup] = useState<string | null>(null);
   const [pollVote, setPollVote] = useState<'bull' | 'bear' | null>(null);
   const [pollOpen, setPollOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
   const [replayIndex, setReplayIndex] = useState(Math.max(0, (proSnapshot?.historyDates.length ?? 1) - 1));
   const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState<0.5 | 1 | 2>(1);
   const [replayLoading, setReplayLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const allStocks = useMemo(() => uniqueStocks(normalizedInitialThemes, proSnapshot), [normalizedInitialThemes, proSnapshot]);
+  const themeAssignments = useMemo(() => assignThemeGroups(themes), [themes]);
   const searchResults = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -329,8 +400,22 @@ export default function TideDashboard({
   }, [allStocks, watchQuery, watchlist]);
 
   useEffect(() => {
-    setWatchlist(readStoredStocks('tide-clone-watchlist'));
+    const storedWatchlist = readStoredStocks('tide-clone-watchlist');
+    setWatchlist(storedWatchlist);
     setAlerts(readStoredStocks('tide-clone-alerts'));
+    try {
+      const folders = JSON.parse(localStorage.getItem('tide-clone-watch-folders') ?? '[]');
+      const folderMap = JSON.parse(localStorage.getItem('tide-clone-watch-folder-map') ?? '{}');
+      const normalizedFolders = Array.isArray(folders) ? folders.filter((folder): folder is string => typeof folder === 'string' && folder.trim().length > 0) : [];
+      const fallbackFolders = normalizedFolders.length > 0 ? normalizedFolders : storedWatchlist.length > 0 ? ['我的自選'] : [];
+      const normalizedMap = folderMap && typeof folderMap === 'object' ? folderMap as Record<string, string> : {};
+      if (fallbackFolders.length > 0) {
+        for (const stock of storedWatchlist) if (!normalizedMap[stock.code]) normalizedMap[stock.code] = fallbackFolders[0];
+      }
+      setWatchFolders(fallbackFolders);
+      setActiveWatchFolder(fallbackFolders[0] ?? '');
+      setWatchFolderByCode(normalizedMap);
+    } catch { /* 保留無資料夾狀態。 */ }
     const storedTheme = localStorage.getItem('tide-clone-theme');
     if (storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system') setThemeMode(storedTheme);
     const storedTextSize = localStorage.getItem('tide-clone-text-size');
@@ -339,10 +424,16 @@ export default function TideDashboard({
     if (storedRiseColor === 'tw' || storedRiseColor === 'us') setRiseColor(storedRiseColor);
     const storedHaptics = localStorage.getItem('tide-clone-haptics');
     if (storedHaptics === '0' || storedHaptics === '1') setHaptics(storedHaptics === '1');
+    const storedWatchWidth = Number(localStorage.getItem('tide-clone-watch-width'));
+    if (Number.isFinite(storedWatchWidth) && storedWatchWidth >= 240 && storedWatchWidth <= 460) setWatchWidth(storedWatchWidth);
     try {
       const storedNotifications = JSON.parse(localStorage.getItem('tide-clone-notifications') ?? 'null');
       if (storedNotifications && typeof storedNotifications === 'object') setNotifications((current) => ({ ...current, ...storedNotifications }));
     } catch { /* 保留預設通知設定。 */ }
+    try {
+      const storedHiddenThemes = JSON.parse(localStorage.getItem('tide-clone-hidden-themes') ?? '[]');
+      if (Array.isArray(storedHiddenThemes)) setHiddenThemes(storedHiddenThemes.filter((theme): theme is string => typeof theme === 'string'));
+    } catch { /* 保留全部板塊顯示。 */ }
     setSignedIn(localStorage.getItem('tide-clone-signed-in') === '1');
     const storedVote = localStorage.getItem('tide-clone-poll-vote');
     if (storedVote === 'bull' || storedVote === 'bear') setPollVote(storedVote);
@@ -367,15 +458,59 @@ export default function TideDashboard({
     localStorage.setItem(key, JSON.stringify(value));
   }, []);
 
+  const persistWatchFolders = useCallback((folders: string[], folderMap: Record<string, string>) => {
+    localStorage.setItem('tide-clone-watch-folders', JSON.stringify(folders));
+    localStorage.setItem('tide-clone-watch-folder-map', JSON.stringify(folderMap));
+  }, []);
+
+  const createWatchFolder = useCallback(() => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    if (watchFolders.some((folder) => folder === name)) { setToast('已經有同名資料夾'); return; }
+    const nextFolders = [...watchFolders, name];
+    setWatchFolders(nextFolders);
+    setActiveWatchFolder(name);
+    setFolderCreateOpen(false);
+    setNewFolderName('');
+    persistWatchFolders(nextFolders, watchFolderByCode);
+    setToast(`已新增「${name}」資料夾`);
+  }, [newFolderName, persistWatchFolders, watchFolderByCode, watchFolders]);
+
   const addWatch = useCallback((stock: StockRef) => {
     setWatchlist((current) => {
       if (current.some((item) => item.code === stock.code)) return current;
       const next = [...current, stock];
+      const folder = activeWatchFolder || watchFolders[0] || '我的自選';
+      const nextFolders = watchFolders.length > 0 ? watchFolders : [folder];
+      const nextFolderMap = { ...watchFolderByCode, [stock.code]: folder };
+      if (watchFolders.length === 0) setWatchFolders(nextFolders);
+      if (!activeWatchFolder) setActiveWatchFolder(folder);
+      setWatchFolderByCode(nextFolderMap);
       persistStocks('tide-clone-watchlist', next);
+      persistWatchFolders(nextFolders, nextFolderMap);
       setToast(`已將 ${stock.name} 加入觀察清單`);
       return next;
     });
-  }, [persistStocks]);
+  }, [activeWatchFolder, persistStocks, persistWatchFolders, watchFolderByCode, watchFolders]);
+
+  const toggleWatch = useCallback((stock: StockRef) => {
+    setWatchlist((current) => {
+      const exists = current.some((item) => item.code === stock.code);
+      const next = exists ? current.filter((item) => item.code !== stock.code) : [...current, stock];
+      const folder = activeWatchFolder || watchFolders[0] || '我的自選';
+      const nextFolders = !exists && watchFolders.length === 0 ? [folder] : watchFolders;
+      const nextFolderMap = { ...watchFolderByCode };
+      if (exists) delete nextFolderMap[stock.code];
+      else nextFolderMap[stock.code] = folder;
+      if (!exists && watchFolders.length === 0) setWatchFolders(nextFolders);
+      if (!exists && !activeWatchFolder) setActiveWatchFolder(folder);
+      setWatchFolderByCode(nextFolderMap);
+      persistStocks('tide-clone-watchlist', next);
+      persistWatchFolders(nextFolders, nextFolderMap);
+      setToast(exists ? `已將 ${stock.name} 移出觀察清單` : `已將 ${stock.name} 加入觀察清單`);
+      return next;
+    });
+  }, [activeWatchFolder, persistStocks, persistWatchFolders, watchFolderByCode, watchFolders]);
 
   const toggleAlert = useCallback((stock: StockRef) => {
     setAlerts((current) => {
@@ -416,6 +551,25 @@ export default function TideDashboard({
     });
   }, []);
 
+  const changePushNotification = useCallback(async (checked: boolean) => {
+    if (!checked) { changeNotification('push', false); return; }
+    if (!('Notification' in window)) { setToast('這個瀏覽器不支援推播通知'); return; }
+    const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+    if (permission !== 'granted') { changeNotification('push', false); setToast('尚未取得通知權限，請到瀏覽器設定開啟'); return; }
+    changeNotification('push', true);
+    setToast('推播通知已開啟');
+  }, [changeNotification]);
+
+  const shareDashboard = useCallback(async (label = 'Tide 台股資金潮汐') => {
+    const result = await shareOrCopy(label, '查看今天台股法人資金流向', location.href);
+    if (result === 'copied') setToast('連結已複製');
+  }, []);
+
+  const changeHiddenThemes = useCallback((next: string[]) => {
+    setHiddenThemes(next);
+    localStorage.setItem('tide-clone-hidden-themes', JSON.stringify(next));
+  }, []);
+
   const signInDemo = useCallback(() => {
     localStorage.setItem('tide-clone-signed-in', '1');
     setSignedIn(true);
@@ -451,18 +605,34 @@ export default function TideDashboard({
     return items;
   }, []), [themes, watchlist]);
 
-  const visibleUniverse = (view === 'watch' ? watchThemes : themes).filter((theme) => !hiddenThemeGroups.includes(themeGroup(theme.theme)));
+  const visibleUniverse = (view === 'watch' ? watchThemes : themes).filter((theme) => !hiddenThemes.includes(theme.theme));
   const categoryCounts = useMemo(() => {
     const counts = { flood: 0, rotation: 0, watch: 0, ebb: 0 };
     for (const item of visibleUniverse) counts[flowCategory(item)] += 1;
     return counts;
   }, [visibleUniverse]);
+  const watchMetrics = useMemo(() => {
+    const metrics = new Map<string, ThemeMember>();
+    for (const theme of themes) {
+      for (const member of theme.members) if (!metrics.has(member.code)) metrics.set(member.code, member);
+    }
+    return metrics;
+  }, [themes]);
+  const sortedWatchlist = useMemo(() => [...watchlist].sort((left, right) => {
+    if (watchSort === 'manual') return 0;
+    if (watchSort === 'code') return left.code.localeCompare(right.code, 'zh-Hant', { numeric: true });
+    return (watchMetrics.get(right.code)?.d1 ?? Number.NEGATIVE_INFINITY) - (watchMetrics.get(left.code)?.d1 ?? Number.NEGATIVE_INFINITY);
+  }), [watchMetrics, watchSort, watchlist]);
+  const folderWatchlist = useMemo(() => activeWatchFolder ? sortedWatchlist.filter((stock) => watchFolderByCode[stock.code] === activeWatchFolder) : sortedWatchlist, [activeWatchFolder, sortedWatchlist, watchFolderByCode]);
 
   const topThemes = useMemo(() => [...themes].sort((a, b) => themeMoney(b, 5) - themeMoney(a, 5)), [themes]);
   const filteredThemes = useMemo(() => {
     const items = category === 'all' ? visibleUniverse : visibleUniverse.filter((item) => flowCategory(item) === category);
     const sorted = [...items].sort((a, b) => Math.abs(themeMoney(b, period)) - Math.abs(themeMoney(a, period)));
-    return showAll || view === 'watch' ? sorted : sorted.slice(0, 30);
+    if (showAll || view === 'watch') return sorted;
+    if (category !== 'all') return sorted.slice(0, 15);
+    const quota: Record<Exclude<FlowCategory, 'all'>, number> = { flood: 4, rotation: 4, watch: 3, ebb: 4 };
+    return (Object.keys(quota) as Array<Exclude<FlowCategory, 'all'>>).flatMap((flow) => sorted.filter((item) => flowCategory(item) === flow).slice(0, quota[flow]));
   }, [category, period, showAll, view, visibleUniverse]);
 
   const replayDates = useMemo(() => proSnapshot?.historyDates ?? [], [proSnapshot?.historyDates]);
@@ -476,9 +646,9 @@ export default function TideDashboard({
         }
         return current + 1;
       });
-    }, 900);
+    }, 900 / replaySpeed);
     return () => window.clearInterval(timer);
-  }, [replayDates.length, replayPlaying]);
+  }, [replayDates.length, replayPlaying, replaySpeed]);
 
   useEffect(() => {
     if (!replayOpen || replayDates.length === 0) return;
@@ -504,6 +674,27 @@ export default function TideDashboard({
     setThemes(normalizedInitialThemes);
     setDataDate(initialDate);
   }, [initialDate, normalizedInitialThemes, replayDates.length]);
+
+  const openReplay = useCallback(() => {
+    setReplayIndex(0);
+    setReplayPlaying(replayDates.length > 1);
+    setReplayOpen(true);
+  }, [replayDates.length]);
+
+  const startWatchResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const startX = event.clientX;
+    const startWidth = watchWidth;
+    const onMove = (moveEvent: PointerEvent) => setWatchWidth(Math.max(240, Math.min(460, startWidth + startX - moveEvent.clientX)));
+    const onUp = (upEvent: PointerEvent) => {
+      const next = Math.max(240, Math.min(460, startWidth + startX - upEvent.clientX));
+      setWatchWidth(next);
+      localStorage.setItem('tide-clone-watch-width', String(next));
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [watchWidth]);
 
   const marketChange = themes.length > 0
     ? themes.reduce((sum, item) => sum + (item.avgD1 ?? 0), 0) / themes.length
@@ -553,7 +744,7 @@ export default function TideDashboard({
 
         <nav className={styles.headerActions} aria-label="主要操作">
           <button onClick={() => setHighlightsOpen((value) => !value)}><Sparkles size={15} /> 今日重點</button>
-          <button className={styles.iconButton} onClick={() => navigator.clipboard?.writeText(location.href).then(() => setToast('連結已複製'))} aria-label="分享 Tide"><Share2 size={16} /></button>
+          <button className={styles.iconButton} onClick={() => void shareDashboard()} aria-label="分享 Tide"><Share2 size={16} /></button>
           <button className={styles.iconButton} onClick={() => { setAlertTab('watch'); setAlertsOpen(true); }} aria-label="籌碼異動提醒">
             <BellRing size={16} />{alerts.length > 0 && <span className={styles.countBadge}>{alerts.length}</span>}
           </button>
@@ -572,13 +763,11 @@ export default function TideDashboard({
           <p>法人買最多：{topThemes.slice(0, 3).map((item) => `${item.theme} ${formatMoney(themeMoney(item, 1))}`).join('、')}</p>
           <p>回顧：近 5 日法人買最多的 3 個板塊，平均 {formatPct(topThemes.slice(0, 3).reduce((sum, item) => sum + themeReturn(item, 5), 0) / 3)}（最佳 {topThemes[0]?.theme ?? '—'} {formatPct(topThemes[0] ? themeReturn(topThemes[0], 5) : 0)}）</p>
           <p>大戶異常：{(proSnapshot?.intensityLeaders ?? []).slice(0, 2).map((stock) => `${stock.name} ${stock.total >= 0 ? '被買' : '被倒'} ${formatMoney(Math.abs(stock.totalValue ?? 0))}`).join('　') || '目前沒有顯著異常'}</p>
-          <button className={styles.aiSummaryToggle} onClick={() => setHighlightSummaryOpen((open) => !open)}>AI 盤後總結 {highlightSummaryOpen ? '▴' : '▾'}</button>
-          {highlightSummaryOpen && <p className={styles.aiSummary}>今日大盤{formatPct(marketChange)}，法人資金集中在 {topThemes.slice(0, 3).map((item) => item.theme).join('、')}；另一方面，{[...topThemes].reverse().slice(0, 2).map((item) => item.theme).join('、')}承受賣壓。籌碼輪動幅度偏大，請留意資金是否延續。</p>}
-          <button className={styles.shareBrief} onClick={() => navigator.clipboard?.writeText(location.href).then(() => setToast('今日盤面連結已複製'))}><Share2 size={15} /> 分享今日盤面</button>
+          <button className={styles.shareBrief} onClick={() => void shareDashboard('Tide 今日盤面')}><Share2 size={15} /> 分享今日盤面</button>
         </section>
       )}
 
-      <div className={styles.workspace}>
+      <div className={styles.workspace} style={{ '--watch-width': `${watchWidth}px` } as CSSProperties}>
         <section className={styles.categoryBar} aria-label="資金狀態篩選">
           {(Object.keys(CATEGORY_META) as Array<Exclude<FlowCategory, 'all'>>).map((key) => {
             const meta = CATEGORY_META[key];
@@ -618,16 +807,12 @@ export default function TideDashboard({
             </div>
             {view === 'bubble' ? (
               <>
-                <button className={styles.showAllButton} onClick={() => setShowAll(!showAll)}>{showAll ? '精簡顯示' : `顯示全部 ${themes.length} 個`}</button>
+                <button className={styles.showAllButton} onClick={() => setShowAll(!showAll)}>{showAll ? '只看熱門 15' : `顯示全部 ${themes.length} 個`}</button>
                 <span className={styles.chartHint}>越右＝近 5 日買越多・越上＝買的速度在加快・圈越大＝近 20 日金額越大 ｜ 滾輪縮放 · 拖曳移動</span>
                 <button className={`${styles.helpButton} ${chartHelpOpen ? styles.toolbarActive : ''}`} aria-label="怎麼看這張圖" onClick={() => setChartHelpOpen((open) => !open)}><CircleHelp size={15} /></button>
-                <button className={`${styles.replayButton} ${replayOpen ? styles.toolbarActive : ''}`} onClick={() => {
-                  if (!replayOpen) setReplayIndex(0);
-                  setReplayPlaying(false);
-                  setReplayOpen(!replayOpen);
-                }}><Play size={14} /> 回放</button>
+                <button className={`${styles.replayButton} ${replayOpen ? styles.toolbarActive : ''}`} onClick={openReplay}><Play size={14} /> 回放</button>
               </>
-            ) : view === 'watch' ? <><button className={styles.helpButton} aria-label="怎麼看這張圖"><CircleHelp size={15} /></button><button className={styles.replayButton} onClick={() => setReplayOpen(true)}><Play size={14} /> 回放</button></> : null}
+            ) : view === 'watch' ? <><button className={styles.helpButton} aria-label="怎麼看這張圖" onClick={() => setChartHelpOpen((open) => !open)}><CircleHelp size={15} /></button><button className={styles.replayButton} onClick={openReplay}><Play size={14} /> 回放</button></> : null}
             {chartHelpOpen && view === 'bubble' && <aside className={styles.chartHelpPopover}><b>怎麼看這張圖</b><ul><li>越右＝近 5 日法人買越多；越左＝賣越多</li><li>越上＝力道在加速；越下＝在放緩</li><li>所以右上角＝買最多、還在加速</li><li>泡泡大小＝近 20 日買賣總額，只是規模、不分好壞</li><li>每顆泡泡都標著板塊名；熱門板塊會顯示金額</li><li>板塊太多時，可切成只看熱門或顯示全部</li></ul><p>在「自選股」挑幾個板塊，圖上就只亮你選的；長線＝主角走過的路。</p></aside>}
           </div>
 
@@ -648,29 +833,44 @@ export default function TideDashboard({
         </section>
 
         <aside className={styles.watchPanel} id="tide-watchlist">
+          <button className={styles.watchResizer} role="separator" aria-orientation="vertical" aria-label="調整自選清單寬度" aria-valuemin={240} aria-valuemax={460} aria-valuenow={watchWidth} onPointerDown={startWatchResize} onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            const next = Math.max(240, Math.min(460, watchWidth + (event.key === 'ArrowLeft' ? 10 : -10)));
+            setWatchWidth(next);
+            localStorage.setItem('tide-clone-watch-width', String(next));
+          }}><GripVertical size={13} /></button>
           <div className={styles.watchHeader}>
             <div><span>觀察清單</span>{watchlist.length > 0 && <small>{watchlist.length} 檔</small>}</div>
             <div>
-              <button onClick={() => setWatchSearchOpen(true)}><Plus size={14} /> 添加</button>
+              <button aria-expanded={watchSearchOpen} onClick={() => { setWatchSearchOpen((open) => !open); setWatchQuery(''); setWatchManageOpen(false); }}><Plus size={14} /> 添加</button>
               <button aria-label="更多操作" aria-expanded={watchManageOpen} onClick={() => setWatchManageOpen((open) => !open)}>⋯</button>
+              <button aria-label="新增自選資料夾" aria-expanded={folderCreateOpen} onClick={() => { setFolderCreateOpen((open) => !open); setWatchManageOpen(false); setWatchSearchOpen(false); }}><Plus size={14} /></button>
             </div>
           </div>
+          {folderCreateOpen && <form className={styles.folderCreate} onSubmit={(event) => { event.preventDefault(); createWatchFolder(); }}>
+            <input autoFocus value={newFolderName} onChange={(event) => setNewFolderName(event.target.value.slice(0, 20))} placeholder="資料夾名稱" aria-label="資料夾名稱" />
+            <button type="submit" disabled={!newFolderName.trim()}>建立</button>
+            <button type="button" onClick={() => { setFolderCreateOpen(false); setNewFolderName(''); }} aria-label="取消新增資料夾"><X size={14} /></button>
+          </form>}
+          {watchFolders.length > 0 && <nav className={styles.folderTabs} aria-label="自選資料夾">
+            {watchFolders.map((folder) => <button key={folder} className={folder === activeWatchFolder ? styles.folderTabActive : ''} onClick={() => setActiveWatchFolder(folder)}><span>{folder}</span><small>{watchlist.filter((stock) => watchFolderByCode[stock.code] === folder).length}</small></button>)}
+          </nav>}
           {watchManageOpen && <div className={styles.watchManageMenu}>
-            <div><button onClick={() => setToast('已新增自選資料夾（本機示範）')}><Plus size={13} /> 新增資料夾</button><button className={watchEditing ? styles.actionActive : ''} onClick={() => setWatchEditing((editing) => !editing)}>編輯</button></div>
+            <div><button onClick={() => { setFolderCreateOpen(true); setWatchManageOpen(false); }}><Plus size={13} /> 新增資料夾</button><button className={watchEditing ? styles.actionActive : ''} onClick={() => setWatchEditing((editing) => !editing)}>編輯</button></div>
             <span>排序（同項再點＝升／降）</span>
-            <div><button className={watchSort === 'price' ? styles.actionActive : ''} onClick={() => setWatchSort('price')}>依收盤價</button><button className={watchSort === 'change' ? styles.actionActive : ''} onClick={() => setWatchSort('change')}>依當日漲幅</button><button className={watchSort === 'manual' ? styles.actionActive : ''} onClick={() => setWatchSort('manual')}>手動順序 ✓</button></div>
+            <div><button className={watchSort === 'code' ? styles.actionActive : ''} onClick={() => setWatchSort('code')}>依代碼</button><button className={watchSort === 'change' ? styles.actionActive : ''} onClick={() => setWatchSort('change')}>依當日漲幅</button><button className={watchSort === 'manual' ? styles.actionActive : ''} onClick={() => setWatchSort('manual')}>手動順序 ✓</button></div>
           </div>}
           {watchSearchOpen && (
-            <div className={styles.watchSearchPopover} role="dialog" aria-label="新增自選股">
-              <header><b>新增自選股</b><button onClick={() => { setWatchSearchOpen(false); setWatchQuery(''); }} aria-label="關閉新增自選股"><X size={14} /></button></header>
-              <label><Search size={14} /><input autoFocus value={watchQuery} onChange={(event) => setWatchQuery(event.target.value)} placeholder="搜尋代碼或名稱" /></label>
+            <div className={styles.watchSearchPopover}>
+              <label><Search size={14} /><input autoFocus value={watchQuery} onChange={(event) => setWatchQuery(event.target.value)} placeholder="股票代碼 / 名稱" aria-label="股票代碼 / 名稱" /><button onClick={() => { setWatchSearchOpen(false); setWatchQuery(''); }} aria-label="關閉股票搜尋"><X size={14} /></button></label>
               <div>
-                {watchSearchResults.map((stock) => (
+                {watchQuery && watchSearchResults.map((stock) => (
                   <button key={stock.code} onClick={() => { addWatch(stock); setWatchSearchOpen(false); setWatchQuery(''); }}>
                     <span><b>{stock.code}</b><small>{stock.name}</small></span><em>{stock.theme ?? '個股'}</em><Plus size={14} />
                   </button>
                 ))}
-                {watchSearchResults.length === 0 && <p>沒有符合的股票</p>}
+                {watchQuery && watchSearchResults.length === 0 && <p>找不到符合的股票</p>}
               </div>
             </div>
           )}
@@ -687,14 +887,15 @@ export default function TideDashboard({
             </div>
           ) : (
             <div className={styles.watchList}>
-              {[...watchlist].sort((left, right) => watchSort === 'manual' ? 0 : watchSort === 'price' ? right.code.localeCompare(left.code) : (allStocks.find((stock) => stock.code === right.code)?.code ?? '').localeCompare(allStocks.find((stock) => stock.code === left.code)?.code ?? '')).map((stock) => {
+              {folderWatchlist.map((stock) => {
                 const pro = proSnapshot?.netLeaders.find((item) => item.symbol === stock.code);
+                const metric = watchMetrics.get(stock.code);
                 return (
                   <button key={stock.code} onClick={() => setSelected(stock)}>
                     <span><b>{stock.code}</b><small>{stock.name}</small></span>
-                    <span className={(pro?.total ?? 0) >= 0 ? styles.up : styles.down}>{formatMoney(pro?.totalValue)}</span>
+                    <span className={(pro?.total ?? metric?.instNet5 ?? 0) >= 0 ? styles.up : styles.down}>{pro?.totalValue != null ? formatMoney(pro.totalValue) : formatPct(metric?.d1 ?? null)}</span>
                     {alerts.some((item) => item.code === stock.code) && <Bell size={13} />}
-                    {watchEditing ? <X size={15} onClick={(event) => { event.stopPropagation(); setWatchlist((current) => { const next = current.filter((item) => item.code !== stock.code); persistStocks('tide-clone-watchlist', next); return next; }); }} /> : <ChevronRight size={15} />}
+                    {watchEditing ? <X size={15} onClick={(event) => { event.stopPropagation(); toggleWatch(stock); }} /> : <ChevronRight size={15} />}
                   </button>
                 );
               })}
@@ -734,11 +935,13 @@ export default function TideDashboard({
         index={replayIndex}
         max={Math.max(0, replayDates.length - 1)}
         playing={replayPlaying}
+        speed={replaySpeed}
         loading={replayLoading}
         onIndex={(next) => { setReplayPlaying(false); setReplayIndex(next); }}
         onPrevious={() => { setReplayPlaying(false); setReplayIndex((current) => Math.max(0, current - 1)); }}
         onNext={() => { setReplayPlaying(false); setReplayIndex((current) => Math.min(Math.max(0, replayDates.length - 1), current + 1)); }}
         onPlay={() => setReplayPlaying((playing) => !playing)}
+        onSpeed={() => setReplaySpeed((speed) => speed === 0.5 ? 1 : speed === 1 ? 2 : 0.5)}
         onClose={() => { setReplayOpen(false); resetLatest(); }}
       />}
 
@@ -748,12 +951,12 @@ export default function TideDashboard({
           onClose={() => setSelected(null)}
           watched={watchlist.some((item) => item.code === selected.code)}
           alerted={alerts.some((item) => item.code === selected.code)}
-          onWatch={() => addWatch(selected)}
+          onWatch={() => toggleWatch(selected)}
           onAlert={() => toggleAlert(selected)}
         />
       )}
 
-      {pollOpen && <Modal title="你覺得明天大盤會…" onClose={() => setPollOpen(false)}><div className={styles.pollModalBody}><div><button onClick={() => { submitVote('bull'); setPollOpen(false); }}><TrendingUp size={22} />看多</button><button onClick={() => { submitVote('bear'); setPollOpen(false); }}><TrendingDown size={22} />看空</button></div><p>{signedIn ? '一人一票，結果會記錄在我的戰績' : '登入後即可投票（一人一票，結果更可信）'}</p></div></Modal>}
+      {pollOpen && <Modal title="你覺得明天大盤會…" onClose={() => setPollOpen(false)}><div className={styles.pollModalBody}><div><button onClick={() => { if (!signedIn) { setPollOpen(false); setLoginOpen(true); setToast('請先登入再投票'); return; } submitVote('bull'); setPollOpen(false); }}><TrendingUp size={22} />看多</button><button onClick={() => { if (!signedIn) { setPollOpen(false); setLoginOpen(true); setToast('請先登入再投票'); return; } submitVote('bear'); setPollOpen(false); }}><TrendingDown size={22} />看空</button></div><p>{signedIn ? '一人一票，結果會記錄在我的戰績' : '登入後即可投票（一人一票，結果更可信）'}</p></div></Modal>}
 
       {settingsOpen && (
         <Modal title="⚙️ 設定" onClose={() => setSettingsOpen(false)} wide>
@@ -780,22 +983,35 @@ export default function TideDashboard({
             </div>
             <label>通知設定</label>
             <div className={styles.notificationSettings}>
-              <SettingToggle label="開啟推播通知" checked={notifications.push} onChange={(checked) => changeNotification('push', checked)} />
+              <SettingToggle label="開啟推播通知（先開這個才收得到）" checked={notifications.push} onChange={(checked) => void changePushNotification(checked)} />
               <SettingToggle label="開盤前重點（08:30）" checked={notifications.morning} onChange={(checked) => changeNotification('morning', checked)} />
               <SettingToggle label="盤後結算（約 19:00）" checked={notifications.close} onChange={(checked) => changeNotification('close', checked)} />
-              <SettingToggle label="投票提醒" checked={notifications.poll} onChange={(checked) => changeNotification('poll', checked)} />
-              <SettingToggle label="優惠與活動通知" checked={notifications.offers} onChange={(checked) => changeNotification('offers', checked)} />
+              <SettingToggle label="投票提醒（收盤邀請 / 開盤結果）" checked={notifications.poll} onChange={(checked) => changeNotification('poll', checked)} />
+              <SettingToggle label="優惠與活動通知（email）" checked={notifications.offers} onChange={(checked) => changeNotification('offers', checked)} />
             </div>
             <label>板塊顯示（取消勾選即從圖表隱藏）</label>
             <div className={styles.sectorSettings}>
               {TIDE_THEME_GROUPS.map((group) => {
-                const count = themes.filter((theme) => themeGroup(theme.theme) === group).length;
-                const checked = !hiddenThemeGroups.includes(group);
-                return <label key={group}><input type="checkbox" checked={checked} onChange={() => setHiddenThemeGroups((current) => checked ? [...current, group] : current.filter((item) => item !== group))} /><span>{group}</span><small>{count}/{count}</small></label>;
+                const groupThemes = themes.filter((theme) => themeAssignments.get(theme.theme) === group);
+                const visibleCount = groupThemes.filter((theme) => !hiddenThemes.includes(theme.theme)).length;
+                const allVisible = visibleCount === groupThemes.length;
+                const expanded = expandedThemeGroup === group;
+                return <section key={group} className={styles.sectorGroup}>
+                  <div>
+                    <button onClick={() => setExpandedThemeGroup(expanded ? null : group)} aria-expanded={expanded} aria-label={`${expanded ? '收合' : '展開'}${group}`}><ChevronRight size={14} /></button>
+                    <input aria-label={`顯示${group}`} type="checkbox" checked={allVisible} ref={(node) => { if (node) node.indeterminate = visibleCount > 0 && !allVisible; }} onChange={() => {
+                      const names = new Set(groupThemes.map((theme) => theme.theme));
+                      changeHiddenThemes(allVisible ? [...new Set([...hiddenThemes, ...names])] : hiddenThemes.filter((name) => !names.has(name)));
+                    }} />
+                    <span>{group}</span><small>{visibleCount}/{groupThemes.length}</small>
+                  </div>
+                  {expanded && <div className={styles.sectorChildren}>{groupThemes.map((theme) => {
+                    const checked = !hiddenThemes.includes(theme.theme);
+                    return <label key={theme.theme}><input type="checkbox" checked={checked} onChange={() => changeHiddenThemes(checked ? [...hiddenThemes, theme.theme] : hiddenThemes.filter((name) => name !== theme.theme))} /><span>{theme.theme}</span></label>;
+                  })}</div>}
+                </section>;
               })}
             </div>
-            <label>Pro 功能狀態</label>
-            <div className={styles.proStatus}><Check size={16} /><span><b>全部啟用</b><small>法人分項、歷史回看、雷達與不限檔監控</small></span></div>
             <label>說明與關於</label>
             <div className={styles.settingsLinks}>
               <button onClick={() => { setSettingsOpen(false); setGuideStep(0); setGuideOpen(true); }}><BookOpen size={15} /> 新手教學</button>
@@ -804,7 +1020,8 @@ export default function TideDashboard({
               <Link href="/tide/legal"><ShieldCheck size={15} /> 條款・隱私・退款</Link>
               <button onClick={() => { setSettingsOpen(false); setWishOpen(true); }}><Send size={15} /> 許願池</button>
             </div>
-            <p>資料來源為證交所與櫃買中心公開資料。本服務僅彙整公開資訊，不構成投資建議。</p>
+            <div className={styles.settingsContact}><b>聯絡我們</b><span>有任何問題、退款或合作需求，歡迎來信</span><a href="mailto:support@tide-tw.app">support@tide-tw.app</a></div>
+            <p><b>資料來源與免責</b><br />資料來源為證交所與櫃買中心公開資料。本服務僅彙整公開市場資訊，不提供分析意見或推介建議，亦不構成投資建議。</p>
           </div>
         </Modal>
       )}
@@ -836,7 +1053,7 @@ export default function TideDashboard({
       {guideOpen && <GuideModal step={guideStep} setStep={setGuideStep} onClose={() => { localStorage.setItem('tide-clone-guide-seen', '1'); setGuideOpen(false); }} />}
       {wishOpen && <WishModal onClose={() => setWishOpen(false)} setToast={setToast} />}
 
-      {toast && <div className={styles.toast}><Check size={15} /> {toast}</div>}
+      {toast && <div className={styles.toast} role="status" aria-live="polite"><Check size={15} /> {toast}</div>}
     </main>
   );
 }
@@ -982,7 +1199,7 @@ function BubbleView({
   );
 }
 
-function ReplayOverlay({ themes, date, startDate, endDate, index, max, playing, loading, onIndex, onPrevious, onNext, onPlay, onClose }: {
+function ReplayOverlay({ themes, date, startDate, endDate, index, max, playing, speed, loading, onIndex, onPrevious, onNext, onPlay, onSpeed, onClose }: {
   themes: ThemeRank[];
   date: string;
   startDate: string;
@@ -990,22 +1207,55 @@ function ReplayOverlay({ themes, date, startDate, endDate, index, max, playing, 
   index: number;
   max: number;
   playing: boolean;
+  speed: 0.5 | 1 | 2;
   loading: boolean;
   onIndex: (index: number) => void;
   onPrevious: () => void;
   onNext: () => void;
   onPlay: () => void;
+  onSpeed: () => void;
   onClose: () => void;
 }) {
-  const hotThemes = useMemo(() => [...themes].sort((a, b) => Math.abs(themeMoney(b, 5)) - Math.abs(themeMoney(a, 5))).slice(0, 30), [themes]);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [filterQuery, setFilterQuery] = useState('');
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+  const hotThemes = useMemo(() => [...themes].sort((a, b) => Math.abs(themeMoney(b, 5)) - Math.abs(themeMoney(a, 5))).slice(0, 31), [themes]);
+  const replayAssignments = useMemo(() => assignThemeGroups(themes), [themes]);
+  const replayThemes = useMemo(() => selectedGroups.length === 0 ? hotThemes : themes.filter((theme) => selectedGroups.includes(replayAssignments.get(theme.theme) ?? '傳產製造')), [hotThemes, replayAssignments, selectedGroups, themes]);
   const biggestBuy = [...themes].sort((a, b) => themeMoney(b, 5) - themeMoney(a, 5))[0];
   const biggestSell = [...themes].sort((a, b) => themeMoney(a, 5) - themeMoney(b, 5))[0];
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'ArrowLeft') onPrevious();
+      if (event.key === 'ArrowRight') onNext();
+      if (event.key === ' ') { event.preventDefault(); onPlay(); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, onNext, onPlay, onPrevious]);
   return <section className={styles.replayOverlay} role="dialog" aria-modal="true" aria-label="板塊資金輪動回放">
-    <header><b>板塊資金輪動回放</b><button className={styles.helpButton} aria-label="怎麼看這張圖"><CircleHelp size={15} /></button><button className={styles.replayFilter}>熱門 30</button><button className={styles.replayClose} onClick={onClose} aria-label="關閉回放"><X size={18} /></button></header>
-    <div className={styles.replayChart}><BubbleView themes={hotThemes} period={5} selectedTheme={null} onCloseTheme={() => {}} onSelectStock={() => {}} onSelectTheme={() => {}} />{loading && <span className={styles.replayLoading}>資料讀取中…</span>}</div>
+    <header>
+      <b>板塊資金輪動回放</b>
+      <button className={`${styles.helpButton} ${helpOpen ? styles.toolbarActive : ''}`} aria-label="怎麼看這張圖" onClick={() => { setHelpOpen((open) => !open); setFilterOpen(false); }}><CircleHelp size={15} /></button>
+      <button className={styles.replaySelectButton} aria-expanded={filterOpen} onClick={() => { setFilterOpen((open) => !open); setHelpOpen(false); }}>選板塊 <ChevronDown size={13} /></button>
+      <button className={styles.replayClose} onClick={onClose} aria-label="關閉回放"><X size={18} /></button>
+      {helpOpen && <aside className={styles.replayHelp}><b>怎麼看這張圖</b><p>越右代表近 5 日法人買越多，越上代表買進速度加快，圓圈越大代表近 20 日金額越大。</p><small>快捷鍵：空白鍵播放／暫停，← → 切換交易日，Esc 關閉。</small></aside>}
+      {filterOpen && <aside className={styles.replayPicker} aria-label="選擇回放板塊">
+        <label><Search size={14} /><input autoFocus value={filterQuery} onChange={(event) => setFilterQuery(event.target.value)} placeholder="搜尋板塊…" /></label>
+        <div className={styles.replayPickerSummary}><span>已選 <b>{selectedGroups.length}</b> 組</span><button onClick={() => setSelectedGroups(selectedGroups.length === TIDE_THEME_GROUPS.length ? [] : [...TIDE_THEME_GROUPS])}>{selectedGroups.length === TIDE_THEME_GROUPS.length ? '清除' : '全選'}</button></div>
+        <div>{TIDE_THEME_GROUPS.filter((group) => !filterQuery || group.includes(filterQuery) || themes.some((theme) => replayAssignments.get(theme.theme) === group && theme.theme.includes(filterQuery))).map((group) => {
+          const checked = selectedGroups.includes(group);
+          const count = themes.filter((theme) => replayAssignments.get(theme.theme) === group).length;
+          return <label key={group}><input type="checkbox" checked={checked} onChange={() => setSelectedGroups((current) => checked ? current.filter((item) => item !== group) : [...current, group])} /><span>{group}</span><small>{count}</small></label>;
+        })}</div>
+      </aside>}
+    </header>
+    <div className={styles.replayChart}><button className={styles.replayFilter} onClick={() => setSelectedGroups([])}>{selectedGroups.length === 0 ? `熱門 ${hotThemes.length}` : `已選 ${replayThemes.length}`}</button><BubbleView themes={replayThemes} period={5} selectedTheme={null} onCloseTheme={() => {}} onSelectStock={() => {}} onSelectTheme={() => {}} />{loading && <span className={styles.replayLoading}>資料讀取中…</span>}</div>
     <div className={styles.replaySummary}><span>近5日買最多 <b className={styles.up}>{biggestBuy?.theme ?? '—'} {formatMoney(biggestBuy ? themeMoney(biggestBuy, 5) : 0)}</b></span><span>近5日賣最多 <b className={styles.down}>{biggestSell?.theme ?? '—'} {formatMoney(biggestSell ? themeMoney(biggestSell, 5) : 0)}</b></span><strong>{date ? `${date.slice(5, 7)}/${date.slice(8)} ` : ''}{date ? new Intl.DateTimeFormat('zh-TW', { weekday: 'short' }).format(new Date(`${date}T12:00:00`)) : ''}</strong></div>
     <div className={styles.replayTimeline}><input type="range" min={0} max={max} value={Math.min(index, max)} onChange={(event) => onIndex(Number(event.target.value))} aria-label="回放進度" /><div><span>{startDate?.slice(5).replace('-', '/')}</span><span>{endDate?.slice(5).replace('-', '/')}</span></div></div>
-    <footer><span className={styles.replayBrand}><Waves size={22} /> tide-tw.app</span><div><button onClick={onPrevious} aria-label="上一個交易日">‹</button><button onClick={onPlay} aria-label={playing ? '暫停' : '播放'}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><button onClick={onNext} aria-label="下一個交易日">›</button></div><button className={styles.speedButton}>1x</button></footer>
+    <footer><span className={styles.replayBrand}><Waves size={22} /> tide-tw.app</span><div><button onClick={onPrevious} aria-label="上一個交易日">‹</button><button onClick={onPlay} aria-label={playing ? '暫停' : '播放'}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><button onClick={onNext} aria-label="下一個交易日">›</button></div><button className={styles.speedButton} onClick={onSpeed} aria-label="播放速度">{speed}x</button></footer>
   </section>;
 }
 
@@ -1049,7 +1299,7 @@ function RankingView({ themes, period, setPeriod, snapshot, marketChange, onSele
             ['flow', '法人動向'], ['breadth', '買多漲少'], ['contrarian', '逆勢買超'], ['anomaly', '個股異常'], ['dual', '外資投信'],
           ] as const).map(([key, label]) => <button key={key} className={lens === key ? styles.rankingActive : ''} onClick={() => setLens(key)}>{label}</button>)}
         </div>
-        {lens === 'dual' ? <div className={styles.rankingSegments}><div>{([['sameBuy', '同買'], ['sameSell', '同賣'], ['streakBuy', '連買'], ['streakSell', '連賣']] as const).map(([key, label]) => <button key={key} className={dualMode === key ? styles.rankingActive : ''} onClick={() => setDualMode(key)}>{label}</button>)}</div></div> : lens === 'flow' ? <div className={styles.rankingSegments}><div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>買超</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>賣超</button></div><div>{([1, 5] as Period[]).map((value) => <button key={value} className={period === value ? styles.rankingActive : ''} onClick={() => setPeriod(value)}>{value === 1 ? '當日' : '5 日'}</button>)}</div></div> : lens === 'anomaly' ? <div className={styles.rankingSegments}><div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>爆量買</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>爆量賣</button></div></div> : null}
+        {lens === 'dual' ? <div className={styles.rankingSegments}><div>{([['sameBuy', '同買'], ['sameSell', '同賣'], ['streakBuy', '連買'], ['streakSell', '連賣']] as const).map(([key, label]) => <button key={key} className={dualMode === key ? styles.rankingActive : ''} onClick={() => setDualMode(key)}>{label}</button>)}</div></div> : lens === 'flow' ? <div className={styles.rankingSegments}><div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>買超</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>賣超</button></div><div>{([1, 5] as Period[]).map((value) => <button key={value} className={period === value ? styles.rankingActive : ''} onClick={() => setPeriod(value)}>{value === 1 ? '當日' : '5 日'}</button>)}</div></div> : lens === 'anomaly' ? <div className={styles.rankingSegments}><div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>爆買</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>爆賣</button></div></div> : null}
       </div>
       <p className={styles.rankingNote}>{note}</p>
       {(lens === 'anomaly' || lens === 'dual') ? <div className={styles.stockRankingList}>
@@ -1083,6 +1333,7 @@ function RankingView({ themes, period, setPeriod, snapshot, marketChange, onSele
 function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { stock: StockRef; onClose: () => void; watched: boolean; alerted: boolean; onWatch: () => void; onAlert: () => void }) {
   const [data, setData] = useState<StockDetailData>({ chips: [], candles: [], loading: true, error: null });
   const [selectedDate, setSelectedDate] = useState('');
+  const [chartPlaying, setChartPlaying] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1104,16 +1355,35 @@ function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { s
   const detail = useMemo(() => buildStockDetail(data.chips, data.candles, selectedDate), [data.candles, data.chips, selectedDate]);
   const selectedDateIndex = data.chips.findIndex((row) => row.date === selectedDate);
   const moveDate = (offset: number) => {
+    setChartPlaying(false);
     const next = data.chips[Math.max(0, Math.min(data.chips.length - 1, selectedDateIndex + offset))];
     if (next) setSelectedDate(next.date);
   };
+
+  useEffect(() => {
+    if (!chartPlaying || data.chips.length === 0) return;
+    const timer = window.setInterval(() => {
+      setSelectedDate((current) => {
+        const index = data.chips.findIndex((row) => row.date === current);
+        if (index >= data.chips.length - 1) { setChartPlaying(false); return current; }
+        return data.chips[Math.max(0, index + 1)].date;
+      });
+    }, 420);
+    return () => window.clearInterval(timer);
+  }, [chartPlaying, data.chips]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
 
   return (
     <div className={styles.drawerBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className={styles.stockDrawer} role="dialog" aria-modal="true" aria-label={`${stock.name} Pro 籌碼詳情`}>
         <header className={styles.drawerHeader}>
           <div><span className={styles.stockCode}>{stock.code}</span><h2>{stock.name}</h2></div>
-          <div className={styles.drawerHeaderActions}><div className={styles.drawerDateNav}><button onClick={() => moveDate(-1)} aria-label="前一個交易日">‹</button><select value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} aria-label="選擇資料日期">{data.chips.slice().reverse().map((row) => <option value={row.date} key={row.date}>{row.date.slice(5).replace('-', '/')}</option>)}</select><button onClick={() => moveDate(1)} aria-label="後一個交易日">›</button><span>Pro</span></div><button onClick={() => navigator.clipboard?.writeText(location.href)} aria-label="分享個股"><Share2 size={17} /></button><button onClick={onClose} aria-label="關閉個股詳情"><X size={18} /></button></div>
+          <div className={styles.drawerHeaderActions}><div className={styles.drawerDateNav}><button onClick={() => moveDate(-1)} aria-label="前一個交易日">‹</button><select value={selectedDate} onChange={(event) => { setChartPlaying(false); setSelectedDate(event.target.value); }} aria-label="選擇資料日期">{data.chips.slice().reverse().map((row) => <option value={row.date} key={row.date}>{row.date.slice(5).replace('-', '/')}</option>)}</select><button onClick={() => moveDate(1)} aria-label="後一個交易日">›</button><span>Pro</span></div><button onClick={() => navigator.clipboard?.writeText(location.href)} aria-label="分享個股"><Share2 size={17} /></button><button onClick={onClose} aria-label="關閉個股詳情"><X size={18} /></button></div>
         </header>
         {data.loading ? <div className={styles.drawerLoading}><Waves size={28} /><span>正在讀取法人與股價資料…</span></div> : data.error ? <div className={styles.drawerLoading}><CircleHelp size={28} /><span>{data.error}</span></div> : (
           <div className={styles.drawerContent}>
@@ -1123,7 +1393,7 @@ function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { s
             </div>
 
             <section className={styles.detailCard}>
-              <header><div><h3>近 30 日股價走勢</h3><p>區間 {detail.chartCandles.length > 0 ? `${Math.min(...detail.chartCandles.map((candle) => candle.close)).toFixed(0)} – ${Math.max(...detail.chartCandles.map((candle) => candle.close)).toFixed(0)}` : '—'}　{formatPct(detail.periodChange)}</p></div><button className={styles.miniReplayButton}><Play size={12} /> 回放</button></header>
+              <header><div><h3>近 30 日股價走勢</h3><p>區間 {detail.chartCandles.length > 0 ? `${Math.min(...detail.chartCandles.map((candle) => candle.close)).toFixed(0)} – ${Math.max(...detail.chartCandles.map((candle) => candle.close)).toFixed(0)}` : '—'}　{formatPct(detail.periodChange)}</p></div><button className={styles.miniReplayButton} onClick={() => { if (!chartPlaying && data.chips.length > 0) setSelectedDate(data.chips[Math.max(0, data.chips.length - 30)].date); setChartPlaying((playing) => !playing); }} aria-label={chartPlaying ? '暫停股價回放' : '回放股價'}>{chartPlaying ? <Pause size={12} /> : <Play size={12} />} {chartPlaying ? '暫停' : '回放'}</button></header>
               <StockPriceChart candles={detail.chartCandles} averageCost={detail.averageCost} selectedDate={selectedDate} />
             </section>
 
@@ -1160,7 +1430,7 @@ function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { s
         )}
         <div className={styles.drawerActions}>
           <button className={alerted ? styles.actionActive : ''} onClick={onAlert}><Bell size={15} />{alerted ? '提醒已開啟' : '籌碼提醒'}</button>
-          <button className={watched ? styles.actionActive : ''} onClick={onWatch}>{watched ? <Check size={15} /> : <Plus size={15} />}{watched ? '已在自選' : '加入自選'}</button>
+          <button className={watched ? styles.actionActive : ''} onClick={onWatch}>{watched ? <X size={15} /> : <Plus size={15} />}{watched ? '從自選移除' : '加入自選'}</button>
         </div>
       </aside>
     </div>
@@ -1252,15 +1522,36 @@ function StockPriceChart({ candles, averageCost, selectedDate }: { candles: Cand
 }
 
 function Modal({ title, onClose, wide = false, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusTimer = window.setTimeout(() => dialogRef.current?.querySelector<HTMLElement>('button, a, input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus(), 0);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current();
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable.at(-1) ?? first;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, []);
 
   return (
     <div className={styles.modalBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className={`${styles.modal} ${wide ? styles.modalWide : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={dialogRef} className={`${styles.modal} ${wide ? styles.modalWide : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <header><h2>{title}</h2><button onClick={onClose} aria-label={`關閉${title}`}><X size={18} /></button></header>
         {children}
       </section>
@@ -1272,7 +1563,8 @@ function AlertStockSearch({ allStocks, alerts, onToggle }: { allStocks: StockRef
   const [query, setQuery] = useState('');
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return allStocks.filter((stock) => !needle || stock.code.includes(needle) || stock.name.toLowerCase().includes(needle)).slice(0, 10);
+    if (!needle) return [];
+    return allStocks.filter((stock) => stock.code.includes(needle) || stock.name.toLowerCase().includes(needle)).slice(0, 10);
   }, [allStocks, query]);
   return (
     <div className={styles.alertSearchWrap}>
@@ -1282,6 +1574,7 @@ function AlertStockSearch({ allStocks, alerts, onToggle }: { allStocks: StockRef
           const active = alerts.some((item) => item.code === stock.code);
           return <button key={stock.code} onClick={() => onToggle(stock)} className={active ? styles.alertActive : ''}><span>{stock.code} {stock.name}</span>{active ? <Check size={15} /> : <Plus size={15} />}</button>;
         })}
+        {query.trim() && results.length === 0 && <p>找不到符合的股票</p>}
       </div>
     </div>
   );
@@ -1298,15 +1591,15 @@ function SettingToggle({ label, checked, onChange }: { label: string; checked: b
 }
 
 function NotificationFeed({ alerts, date }: { alerts: StockRef[]; date: string }) {
-  const rows = alerts.length > 0 ? alerts.slice(0, 6) : [{ code: '2330', name: '台積電' }, { code: '2454', name: '聯發科' }];
+  if (alerts.length === 0) return <div className={styles.notificationEmpty}><Bell size={24} /><b>還沒有監控任何股票</b><p>先到「監控清單」加入，之後籌碼異動就會收進這裡。</p></div>;
   return (
     <div className={styles.notificationFeed}>
-      <div className={styles.alertIntro}><Bell size={20} /><p>這裡彙整盤後籌碼提醒。啟用推播後，同一批內容也會送到你的裝置。</p></div>
-      {rows.map((stock, index) => (
+      <div className={styles.alertIntro}><Bell size={20} /><p>{date.slice(5).replace('-', '/')} 監控中；今天盤後若出現異常，會在這裡彙整。</p></div>
+      {alerts.slice(0, 6).map((stock) => (
         <article key={stock.code}>
-          <span className={index % 2 === 0 ? styles.up : styles.down}>{index % 2 === 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}</span>
-          <div><b>{stock.code} {stock.name}</b><p>{index % 2 === 0 ? '法人買超力道高於近 20 日常態，外資與投信同步買超。' : '外資連續賣超，今日籌碼力道放大。'}</p></div>
-          <time>{date.slice(5)}</time>
+          <span><BellRing size={16} /></span>
+          <div><b>{stock.code} {stock.name}</b><p>已加入監控，等待盤後籌碼異動結算。</p></div>
+          <time>監控中</time>
         </article>
       ))}
     </div>
@@ -1317,12 +1610,10 @@ function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin: () => 
   return (
     <Modal title="歡迎登入" onClose={onClose}>
       <div className={styles.loginBody}>
-        <span className={styles.loginWave}><Waves size={28} /></span>
-        <h3>追蹤板塊動態與法人資金流向</h3>
-        <p>登入後可同步自選、參加多空投票、查看戰績與管理籌碼提醒。</p>
-        <button className={styles.googleButton} onClick={onLogin}><b>G</b> 使用 Google 登入（示範）</button>
-        <small>此獨立重建版使用本機示範帳號，不會連線或取得你的 Google 資料。</small>
+        <p>登入後即可追蹤板塊動態<br />與法人資金流向</p>
+        <button className={styles.googleButton} onClick={onLogin} title="使用本機示範帳號，不會連線或取得 Google 資料"><b>G</b> 使用 Google 登入</button>
         <Link href="/tide/pricing">查看免費版與 Pro 方案 →</Link>
+        <small>本機重建版以示範帳號啟用，不會取得 Google 資料。</small>
       </div>
     </Modal>
   );

@@ -6,6 +6,9 @@ test.describe('Tide Pro 重建頁', () => {
       localStorage.setItem('risk-disclaimer-accepted', '1');
       localStorage.setItem('feature-guide-seen', '1');
       localStorage.removeItem('tide-clone-watchlist');
+      localStorage.removeItem('tide-clone-watch-folders');
+      localStorage.removeItem('tide-clone-watch-folder-map');
+      localStorage.removeItem('tide-clone-watch-width');
       localStorage.removeItem('tide-clone-alerts');
       localStorage.setItem('tide-clone-guide-seen', '1');
       localStorage.removeItem('tide-clone-signed-in');
@@ -15,7 +18,10 @@ test.describe('Tide Pro 重建頁', () => {
   test('泡泡圖、說明、回放、排行榜與 Pro 分頁可用', async ({ page }) => {
     await page.goto('/tide');
     await expect(page.getByRole('img', { name: '台股板塊法人資金泡泡圖' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '顯示全部 108 個' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '顯示全部 110 個' })).toBeVisible();
+    await page.getByRole('button', { name: '顯示全部 110 個' }).click();
+    await expect(page.getByRole('button', { name: '只看熱門 15' })).toBeVisible();
+    await page.getByRole('button', { name: '只看熱門 15' }).click();
 
     await page.getByRole('button', { name: /記憶體，/ }).click();
     await expect(page.getByRole('region', { name: '記憶體 板塊摘要' })).toBeVisible();
@@ -28,13 +34,18 @@ test.describe('Tide Pro 重建頁', () => {
     await page.getByRole('button', { name: '回放', exact: true }).click();
     const replay = page.getByRole('dialog', { name: '板塊資金輪動回放' });
     await expect(replay.getByRole('slider', { name: '回放進度' })).toBeVisible();
+    await replay.getByRole('button', { name: /選板塊/ }).click();
+    await expect(replay.getByPlaceholder('搜尋板塊…')).toBeVisible();
+    await replay.getByRole('button', { name: /選板塊/ }).click();
+    await replay.getByRole('button', { name: '播放速度' }).click();
+    await expect(replay.getByRole('button', { name: '播放速度' })).toHaveText('2x');
     await replay.getByRole('button', { name: '關閉回放' }).click();
 
     await page.getByRole('button', { name: '板塊泡泡圖', exact: true }).click();
     await page.getByRole('menuitem', { name: '板塊排行榜', exact: true }).click();
     await expect(page.getByRole('button', { name: '法人動向', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '個股異常', exact: true }).click();
-    await expect(page.getByRole('button', { name: '爆量買', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '爆買', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '外資投信', exact: true }).click();
     for (const tab of ['同買', '同賣', '連買', '連賣']) await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
   });
@@ -51,17 +62,27 @@ test.describe('Tide Pro 重建頁', () => {
 
     await drawer.getByRole('button', { name: '加入自選', exact: true }).click();
     await drawer.getByRole('button', { name: '籌碼提醒', exact: true }).click();
-    await expect(drawer.getByRole('button', { name: '已在自選', exact: true })).toBeVisible();
+    await expect(drawer.getByRole('button', { name: '從自選移除', exact: true })).toBeVisible();
     await expect(drawer.getByRole('button', { name: '提醒已開啟', exact: true })).toBeVisible();
+    await drawer.getByRole('button', { name: '從自選移除', exact: true }).click();
+    await expect(drawer.getByRole('button', { name: '加入自選', exact: true })).toBeVisible();
   });
 
   test('觀察清單以搜尋方式加入股票', async ({ page }) => {
     await page.goto('/tide');
+    await page.getByRole('button', { name: '新增自選資料夾' }).click();
+    await page.getByRole('textbox', { name: '資料夾名稱' }).fill('追蹤名單');
+    await page.getByRole('button', { name: '建立' }).click();
+    await expect(page.getByRole('navigation', { name: '自選資料夾' }).getByRole('button', { name: /追蹤名單/ })).toBeVisible();
     await page.getByRole('button', { name: '添加', exact: true }).click();
-    const addDialog = page.getByRole('dialog', { name: '新增自選股' });
-    await addDialog.getByPlaceholder('搜尋代碼或名稱').fill('2454');
-    await addDialog.getByRole('button', { name: /2454 聯發科/ }).click();
+    await page.getByPlaceholder('股票代碼 / 名稱').fill('2454');
+    await page.getByRole('button', { name: /2454 聯發科/ }).click();
     await expect(page.getByRole('complementary').getByRole('button', { name: /2454 聯發科/ })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: '自選資料夾' }).getByRole('button', { name: /追蹤名單 1/ })).toBeVisible();
+    const resizer = page.getByRole('separator', { name: '調整自選清單寬度' });
+    await resizer.focus();
+    await resizer.press('ArrowLeft');
+    await expect(resizer).toHaveAttribute('aria-valuenow', '320');
   });
 
   test('手機版不產生整頁水平捲動', async ({ page }) => {
@@ -74,21 +95,25 @@ test.describe('Tide Pro 重建頁', () => {
 
   test('登入、設定、通知與會員流程可用', async ({ page }) => {
     await page.goto('/tide');
-    await page.getByRole('button', { name: '登入', exact: true }).click();
-    await page.getByRole('button', { name: '使用 Google 登入（示範）' }).click();
+    await page.getByRole('button', { name: /^多 \d+%$/ }).click();
+    await page.getByRole('dialog', { name: '你覺得明天大盤會…' }).getByRole('button', { name: '看多' }).click();
+    await expect(page.getByRole('dialog', { name: '歡迎登入' })).toBeVisible();
+    await page.getByRole('button', { name: '使用 Google 登入' }).click();
     await expect(page.getByText('已登入本機示範帳號')).toBeVisible();
 
     await page.getByRole('button', { name: '設定', exact: true }).click();
     const settings = page.getByRole('dialog', { name: '⚙️ 設定' });
     await expect(settings.getByText('漲跌顏色', { exact: true })).toBeVisible();
     await expect(settings.getByText('通知設定', { exact: true })).toBeVisible();
+    await settings.getByRole('button', { name: '展開半導體' }).click();
+    await expect(settings.getByText('記憶體', { exact: true })).toBeVisible();
     await settings.getByRole('button', { name: '暗色', exact: true }).click();
     await settings.getByRole('button', { name: '關閉⚙️ 設定' }).click();
 
     await page.getByRole('button', { name: '籌碼異動提醒', exact: true }).click();
     const alerts = page.getByRole('dialog', { name: '籌碼異動提醒' });
     await alerts.getByRole('tab', { name: '通知欄', exact: true }).click();
-    await expect(alerts.getByText('這裡彙整盤後籌碼提醒。')).toBeVisible();
+    await expect(alerts.getByText('還沒有監控任何股票')).toBeVisible();
   });
 
   test('方案、關於、名詞與條款頁完整可達', async ({ page }) => {
