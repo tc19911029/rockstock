@@ -233,7 +233,7 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
       { headers: MIS_HEADERS, timeoutMs: 3500 },
     );
     if (source === 'curl') console.info('[TWSERealtime] 單檔即時報價 經 curl fallback 成功');
-    const d = json?.msgArray?.[0];
+    const d = findMisQuoteRow(json?.msgArray, code);
     if (!d) return null;
     // 單股報價會進入 K 棒與持倉現價：只接受實際成交，不使用 b/a 中價。
     // 若這批 z='-'，回 null 讓呼叫端改走 Fugle / L2，而不是製造假 close。
@@ -295,6 +295,17 @@ export function parseMisPrice(s: string | undefined): number {
   if (!s || s === '-') return 0;
   const v = parseFloat(s);
   return isNaN(v) ? 0 : v;
+}
+
+/**
+ * 單股 MIS 同時查 tse/otc 時，不存在的交易所會先回一筆 c="" 空殼。
+ * 不可固定取 msgArray[0]；必須以請求代號找到真正的上市或上櫃列。
+ */
+export function findMisQuoteRow(
+  rows: Array<Record<string, string | undefined>> | undefined,
+  code: string,
+): Record<string, string | undefined> | undefined {
+  return rows?.find(row => row.c === code);
 }
 
 /**

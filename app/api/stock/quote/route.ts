@@ -6,7 +6,7 @@ import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
-import { isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { isAfterMarketClose, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
@@ -101,6 +101,28 @@ export async function GET(req: NextRequest) {
           }
         }
       } catch { /* try next suffix */ }
+    }
+
+    // TPEx 官方日 K 常在 16:30 後才發布；若全市場 L2 又於早盤凍結，舊邏輯會在
+    // 14:30 停止 MIS polling 後一路顯示昨日 L1。盤後只查「這一檔」MIS，且嚴格要求
+    // 回傳日期就是今天；getTWSESingleIntraday 只接受實際成交價，不會採委買/委賣中價。
+    if (market === 'TW' && !isIndex && isAfterMarketClose('TW')) {
+      try {
+        const finalQuote = await getTWSESingleIntraday(pureCode);
+        if (finalQuote && finalQuote.close > 0 && finalQuote.date === today) {
+          return apiOk({
+            symbol,
+            date: today,
+            open: finalQuote.open || finalQuote.close,
+            high: finalQuote.high || finalQuote.close,
+            low: finalQuote.low || finalQuote.close,
+            close: finalQuote.close,
+            volume: finalQuote.volume,
+            source: 'mis-final',
+            stale: false,
+          });
+        }
+      } catch { /* 再退回可信的最終 L2／舊 L1 */ }
     }
 
     // 盤後官方日線可能延遲發布。在 L1 仍停在前一日的空窗，只允許「收盤後寫入、

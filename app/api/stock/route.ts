@@ -12,7 +12,7 @@ import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
-import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { isAfterMarketClose, isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { isFundSymbol } from '@/lib/market/classify';
 import type { Candle } from '@/types';
 import { promises as fsp } from 'node:fs';
@@ -277,8 +277,15 @@ export async function GET(req: NextRequest) {
             );
           } catch { /* ignore */ }
         }
-        const shouldInjectToday = inLiveWindow || l2HasToday;
         const lastCandle = result.candles[result.candles.length - 1];
+        // 14:30 後若正式 L1 還停在昨天，仍允許單檔 MIS 取今天最後實際成交價。
+        // 這不會重新打全市場 provider，也不會在週末／假日／盤前拿昨收造假今日 K。
+        const sameDayCloseFallback = isTW
+          && !isTwIndex
+          && !!lastCandle
+          && lastCandle.date < today
+          && isAfterMarketClose('TW');
+        const shouldInjectToday = inLiveWindow || l2HasToday || sameDayCloseFallback;
         // 注入條件：
         //   a) lastCandle.date < today → append 今日 K（正常路徑）
         //   b) lastCandle.date === today → 覆蓋（append-today 腳本寫進 L1 的盤中快照價，需用即時報價刷新）

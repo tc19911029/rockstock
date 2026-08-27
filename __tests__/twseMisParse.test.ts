@@ -1,4 +1,19 @@
-import { parseMisPrice, parseMisBestPrice, resolveMisClose, resolveMisTradePrice } from '@/lib/datasource/TWSERealtime';
+import { findMisQuoteRow, parseMisPrice, parseMisBestPrice, resolveMisClose, resolveMisTradePrice } from '@/lib/datasource/TWSERealtime';
+
+describe('findMisQuoteRow', () => {
+  test('同時查上市與上櫃時跳過第一筆上市空殼，選到 3081 上櫃實際列', () => {
+    const rows = [
+      { c: '', z: '-', s: '-' },
+      { c: '3081', ex: 'otc', d: '20260827', z: '3370.0000' },
+    ];
+
+    expect(findMisQuoteRow(rows, '3081')).toEqual(rows[1]);
+  });
+
+  test('兩個交易所都沒有該代號時回 undefined', () => {
+    expect(findMisQuoteRow([{ c: '', z: '-' }], '3081')).toBeUndefined();
+  });
+});
 
 describe('parseMisPrice', () => {
   test('valid price', () => {

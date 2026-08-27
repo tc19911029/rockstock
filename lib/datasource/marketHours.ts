@@ -57,6 +57,23 @@ export function isPostCloseWindow(market: 'TW' | 'CN', now = new Date()): boolea
   return timeMin > 900 && timeMin <= 930; // 15:01 ~ 15:30
 }
 
+/**
+ * 是否為「同一交易日已收盤」。
+ *
+ * 與 isPostCloseWindow 不同，這個判斷在盤後不設截止時間：官方日 K 尚未發布時，
+ * 單股報價 API 仍可用當日最後成交價補上 14:30～EOD 封存完成前的顯示盲區。
+ * 週末、假日與盤前一律為 false，避免把上一交易日殘值偽裝成今天收盤。
+ */
+export function isAfterMarketClose(market: 'TW' | 'CN', now = new Date()): boolean {
+  const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
+  const { hour, min, dow } = getLocalTime(tz, now);
+  if (dow === 0 || dow === 6) return false;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+  if (!isTradingDay(today, market)) return false;
+  const closeMinute = market === 'TW' ? 13 * 60 + 30 : 15 * 60;
+  return hour * 60 + min >= closeMinute;
+}
+
 /** 根據市場代碼判斷是否開盤 */
 export function isMarketOpen(market: 'TW' | 'CN', now = new Date()): boolean {
   return market === 'TW' ? isTWMarketOpen(now) : isCNMarketOpen(now);

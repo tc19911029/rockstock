@@ -11,6 +11,7 @@ jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
 }));
 jest.mock('@/lib/datasource/marketHours', () => ({
   isMarketPollingWindow: () => false,
+  isAfterMarketClose: () => true,
 }));
 jest.mock('@/lib/datasource/IntradayCache', () => ({
   readIntradaySnapshot: (...args: unknown[]) => readIntradaySnapshot(...args),
@@ -42,6 +43,7 @@ describe('GET /api/stock/quote 休市防護', () => {
     jest.clearAllMocks();
     readCandleFile.mockResolvedValue(null);
     readIntradaySnapshot.mockResolvedValue(null);
+    getTWSESingleIntraday.mockResolvedValue(null);
     fetchTaifexTxFuturesQuote.mockResolvedValue(null);
   });
 
@@ -130,6 +132,48 @@ describe('GET /api/stock/quote 休市防護', () => {
       close: 3255,
       source: 'l2-final',
       stale: false,
+    });
+  });
+
+  test('正式 L1 與全市場 L2 都過期時，以同日 MIS 最後成交價補上盤後盲區', async () => {
+    readCandleFile.mockResolvedValue({
+      candles: [{ date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 }],
+    });
+    getTWSESingleIntraday.mockResolvedValue({
+      code: '3081', name: '聯亞', date: '2026-08-26', open: 3010, high: 3255,
+      low: 2940, close: 3255, volume: 7470, previousClose: 2960,
+    });
+
+    const response = await GET(new NextRequest('http://localhost/api/stock/quote?symbol=3081.TWO'));
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      symbol: '3081.TWO',
+      date: '2026-08-26',
+      close: 3255,
+      source: 'mis-final',
+      stale: false,
+    });
+    expect(readIntradaySnapshot).not.toHaveBeenCalled();
+  });
+
+  test('MIS 回傳前一交易日殘值時拒絕補成今日價', async () => {
+    readCandleFile.mockResolvedValue({
+      candles: [{ date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 }],
+    });
+    getTWSESingleIntraday.mockResolvedValue({
+      code: '3081', name: '聯亞', date: '2026-08-25', open: 2860, high: 2995,
+      low: 2840, close: 2960, volume: 6075, previousClose: 2800,
+    });
+
+    const response = await GET(new NextRequest('http://localhost/api/stock/quote?symbol=3081.TWO'));
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      date: '2026-08-25',
+      close: 2960,
+      source: 'l1',
+      stale: true,
     });
   });
 

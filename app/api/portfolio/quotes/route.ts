@@ -3,10 +3,10 @@ import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { readIntradaySnapshot, type IntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { getQuoteSnapshotDate, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isAfterMarketClose, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
-import { resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
+import { getTWSESingleIntraday, resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
 import { expectedTwSymbol } from '@/lib/datasource/twSymbolMarket';
 import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
@@ -173,6 +173,41 @@ export async function fetchFinalL1Quotes(entries: ResolvedEntry[], market: 'TW' 
       };
     }
     return null;
+  }));
+  return settled.filter((quote): quote is QuoteTick => quote !== null);
+}
+
+/**
+ * 台股同交易日盤後補價：正式 L1 尚未發布時，以 MIS 的最後實際成交價覆蓋昨日 L1。
+ *
+ * 只在交易日收盤後執行，並要求 provider 回傳日期等於今天；任一檔失敗都保留原 L1，
+ * 不讓單一外部請求拖垮整批持倉報價。
+ */
+export async function fetchSameDayTWCloseQuotes(
+  entries: ResolvedEntry[],
+  now = new Date(),
+): Promise<QuoteTick[]> {
+  if (entries.length === 0 || !isAfterMarketClose('TW', now)) return [];
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+  const settled = await Promise.all(entries.map(async (entry): Promise<QuoteTick | null> => {
+    const code = entry.resolved.replace(/\.(TW|TWO)$/i, '');
+    try {
+      const quote = await getTWSESingleIntraday(code);
+      if (!quote || quote.date !== today || !(quote.close > 0)) return null;
+      const previous = quote.previousClose ?? quote.close;
+      const changePercent = previous > 0
+        ? +((quote.close - previous) / previous * 100).toFixed(2)
+        : 0;
+      return {
+        symbol: entry.original,
+        canonicalSymbol: entry.resolved,
+        price: quote.close,
+        changePercent,
+        name: quote.name || undefined,
+      };
+    } catch {
+      return null;
+    }
   }));
   return settled.filter((quote): quote is QuoteTick => quote !== null);
 }
@@ -455,7 +490,16 @@ export async function GET(req: NextRequest) {
 
   // 並行抓取（傳入 resolved symbol，結果 symbol 改回 original）
   const [twQuotes, cnQuotes, fundQuotes] = await Promise.all([
-    (twLive ? fetchTWSEQuotes(twEntries.map(e => e.resolved)) : fetchFinalL1Quotes(twEntries, 'TW')).then(qs =>
+    (twLive
+      ? fetchTWSEQuotes(twEntries.map(e => e.resolved))
+      : Promise.all([
+          fetchFinalL1Quotes(twEntries, 'TW'),
+          fetchSameDayTWCloseQuotes(twEntries),
+        ]).then(([l1Quotes, sameDayQuotes]) => {
+          const replaced = new Set(sameDayQuotes.map(quote => quote.symbol));
+          return [...l1Quotes.filter(quote => !replaced.has(quote.symbol)), ...sameDayQuotes];
+        })
+    ).then(qs =>
       qs.map(q => {
         const entry = twEntries.find(e => e.resolved.replace(/\.(TW|TWO)$/i, '') === q.symbol.replace(/\.(TW|TWO)$/i, ''));
         return entry ? { ...q, symbol: entry.original, canonicalSymbol: q.canonicalSymbol ?? entry.resolved } : q;
