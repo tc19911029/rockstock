@@ -2,8 +2,8 @@ import { buildMarketThemeRanking, marketThemeNamesForCode } from '@/lib/themes/m
 import type { SectorRankingFile } from '@/lib/themes/sectorRanking';
 import { TW_OFFICIAL_CLASSIFICATION } from '@/lib/datasource/TWOfficialIndustry';
 import { INST_PERIODS, PERF_PERIODS } from '@/lib/themes/perfPeriods';
-import { THEME_MAP, THEME_NAMES } from '@/lib/themes/themeMap';
-import { TIDE_MARKET_THEME_GROUPS, groupTideMarketThemes } from '@/lib/tide/themeGroups';
+import { THEME_MAP } from '@/lib/themes/themeMap';
+import { TIDE_MARKET_THEME_GROUPS } from '@/lib/tide/themeGroups';
 
 describe('台股市場題材顯示契約', () => {
   const officialMembers = [...new Map(
@@ -76,10 +76,11 @@ describe('台股市場題材顯示契約', () => {
     expect(market.universe.overlapping).toBe(true);
   });
 
-  test('Tide 的視覺分組完整涵蓋 38 題材且不重複', () => {
+  test('Tide 的視覺分組固定為原站 10 大類、110 題材且不重複', () => {
     const configured = TIDE_MARKET_THEME_GROUPS.flatMap((group) => group.names);
+    expect(TIDE_MARKET_THEME_GROUPS).toHaveLength(10);
+    expect(configured).toHaveLength(110);
     expect(new Set(configured).size).toBe(configured.length);
-    expect([...configured].sort()).toEqual([...THEME_NAMES].sort());
-    expect(groupTideMarketThemes(market.themes).flatMap((group) => group.themes)).toHaveLength(38);
+    expect(configured).toEqual(expect.arrayContaining(['HBM 高頻寬記憶體', 'Edge AI AIoT', '銀行金融', '生技醫療']));
   });
 });

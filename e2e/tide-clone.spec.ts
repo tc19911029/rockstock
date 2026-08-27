@@ -18,13 +18,13 @@ test.describe('Tide Pro 重建頁', () => {
   test('泡泡圖、說明、回放、排行榜與 Pro 分頁可用', async ({ page }) => {
     await page.goto('/tide');
     await expect(page.getByRole('img', { name: '台股市場題材法人資金泡泡圖' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '顯示全部 38 個' })).toBeVisible();
-    await page.getByRole('button', { name: '顯示全部 38 個' }).click();
+    await expect(page.getByRole('button', { name: '顯示全部 110 個' })).toBeVisible();
+    await page.getByRole('button', { name: '顯示全部 110 個' }).click();
     await expect(page.getByRole('button', { name: '只看熱門 15' })).toBeVisible();
     await page.getByRole('button', { name: '只看熱門 15' }).click();
 
-    await page.getByRole('button', { name: /記憶體，/ }).click();
-    await expect(page.getByRole('region', { name: '記憶體 題材摘要' })).toBeVisible();
+    await page.getByRole('button', { name: /HBM 高頻寬記憶體，/ }).click();
+    await expect(page.getByRole('region', { name: 'HBM 高頻寬記憶體 題材摘要' })).toBeVisible();
     await page.getByRole('button', { name: '關閉題材摘要' }).click();
 
     await page.getByRole('button', { name: '怎麼看這張圖' }).click();
@@ -66,7 +66,7 @@ test.describe('Tide Pro 重建頁', () => {
 
   test('個股 Pro 深度、自選與不限檔提醒可互動', async ({ page }) => {
     await page.goto('/tide');
-    await page.getByPlaceholder('搜尋股票或板塊...').fill('2330');
+    await page.getByPlaceholder('搜尋股票或市場題材...').fill('2330');
     await page.getByRole('listbox').getByRole('button').first().click();
 
     const drawer = page.getByRole('dialog', { name: /台積電 Pro 籌碼詳情/ });
@@ -108,7 +108,7 @@ test.describe('Tide Pro 重建頁', () => {
     await page.getByRole('button', { name: '設定', exact: true }).click();
     const settings = page.getByRole('dialog', { name: '⚙️ 設定' });
     await expect(settings).toBeVisible();
-    await expect(settings.getByRole('button', { name: '展開半導體供應鏈' })).toBeVisible();
+    await expect(settings.getByRole('button', { name: '展開半導體' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   });
 
@@ -124,12 +124,12 @@ test.describe('Tide Pro 重建頁', () => {
     const settings = page.getByRole('dialog', { name: '⚙️ 設定' });
     await expect(settings.getByText('漲跌顏色', { exact: true })).toBeVisible();
     await expect(settings.getByText('通知設定', { exact: true })).toBeVisible();
-    await settings.getByRole('button', { name: '展開半導體供應鏈' }).click();
-    await expect(settings.getByText('記憶體', { exact: true })).toBeVisible();
-    await settings.getByRole('checkbox', { name: /記憶體 \d+ 檔/ }).uncheck();
-    await expect(settings.getByText('9/10', { exact: true })).toBeVisible();
-    await settings.getByRole('checkbox', { name: '半導體供應鏈全部顯示' }).check();
-    await expect(settings.getByRole('checkbox', { name: /記憶體 \d+ 檔/ })).toBeChecked();
+    await settings.getByRole('button', { name: '展開半導體' }).click();
+    await expect(settings.getByText('記憶體模組', { exact: true })).toBeVisible();
+    await settings.getByRole('checkbox', { name: /記憶體模組 \d+ 檔/ }).uncheck();
+    await expect(settings.getByText('23/24', { exact: true })).toBeVisible();
+    await settings.getByRole('checkbox', { name: '半導體全部顯示' }).check();
+    await expect(settings.getByRole('checkbox', { name: /記憶體模組 \d+ 檔/ })).toBeChecked();
     await settings.getByRole('button', { name: '暗色', exact: true }).click();
     await settings.getByRole('button', { name: '許願池', exact: true }).click();
     const wish = page.getByRole('dialog', { name: '許願池' });

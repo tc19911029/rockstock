@@ -575,7 +575,7 @@ export default function TideDashboard({
     if (!date || date === dataDate) return;
     const controller = new AbortController();
     setReplayLoading(true);
-    fetch(`/api/themes/market-ranking?date=${date}`, { signal: controller.signal })
+    fetch(`/api/themes/tide-ranking?date=${date}`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
         if (payload?.themes) {
@@ -584,7 +584,12 @@ export default function TideDashboard({
           setUniverseMeta(payload.universe ?? null);
         }
       })
-      .finally(() => setReplayLoading(false));
+      .catch((error: unknown) => {
+        if (!(error instanceof Error) || error.name !== 'AbortError') console.error('Tide replay request failed', error);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setReplayLoading(false);
+      });
     return () => controller.abort();
   }, [dataDate, replayDates, replayIndex, replayOpen]);
 

@@ -21,7 +21,7 @@ export type TideHighlightTheme = {
   avgD1: number | null;
 };
 
-const HIGHLIGHT_THEME_CODES: ReadonlyArray<readonly [string, readonly string[]]> = [
+const TIDE_EXACT_THEME_ENTRIES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['HBM 高頻寬記憶體', ['2408', '2344', '5269', '5388', '2330', '3711', '6515']],
   ['記憶體模組', ['2408', '5269', '5388', '2344', '3260', '2451', '3661', '5289', '4967', '4973', '5469', '8271', '3317', '3265']],
   ['CXL 技術', ['2454', '2344', '8261', '5269', '2408', '5388', '6515', '3035']],
@@ -29,7 +29,22 @@ const HIGHLIGHT_THEME_CODES: ReadonlyArray<readonly [string, readonly string[]]>
   ['封測代工', ['3711', '2449', '6147', '8150', '3680', '2369', '2329', '6271', '6435', '6205', '6278', '6261', '6409', '6291', '6257', '6239', '2441', '3583']],
   ['Edge AI AIoT', ['2454', '3443', '6669', '2345', '3014', '2379', '3661', '6515', '6579', '6414', '8234', '3227']],
   ['被動元件 MLCC', ['2327', '2492', '2375', '2438', '6112', '4999', '5222', '6194', '6126', '6173', '6158', '6259', '6266', '5328', '6210', '3026']],
-] as const;
+  ['CPU 與 Agentic AI', ['2330', '2454', '3443', '3661', '5347', '3035', '2379', '6515']],
+  ['NOR Flash 利基記憶體', ['2344', '5351', '2337', '8261', '3014', '8104', '8054', '8299', '3006']],
+  ['晶圓代工', ['2330', '2303', '5347', '6770', '3707', '3035', '6515', '7828', '2323', '3372', '3059']],
+  ['矽光子與 CPO', ['3105', '3081', '8121', '4979', '3450', '6243', '2454', '3037', '3363']],
+  ['AI PC 筆電與平板', ['2357', '2376', '4938', '2353', '2454', '2382', '3017', '2356', '2474', '3706', '2324', '2377', '2425', '2301', '2364', '2365', '2352', '3673', '3611', '3625']],
+  ['銀行金融', ['2881', '2882', '2891', '2880', '2884', '2885', '2886', '2887', '2890', '2892', '2883', '2889', '2801', '2812', '5876', '5880']],
+  ['EMS 電子代工', ['2317', '2354', '2382', '4938', '3231', '2356', '2308', '6285', '3706', '2429', '2459', '2340', '4994']],
+  ['智慧型手機', ['2317', '2354', '2392', '4938', '3231', '3008', '3406', '2474', '2356']],
+  ['PCB 載板', ['3037', '8046', '3189', '6213', '3149', '8213', '2367', '3044', '6201', '6155', '6141', '6224', '3294', '3021']],
+];
+
+export const TIDE_EXACT_THEME_CODES = Object.freeze(
+  Object.fromEntries(TIDE_EXACT_THEME_ENTRIES),
+) as Readonly<Record<string, readonly string[]>>;
+
+const TIDE_HIGHLIGHT_THEME_NAMES = new Set(TIDE_EXACT_THEME_ENTRIES.slice(0, 7).map(([theme]) => theme));
 
 export function buildTideHighlightThemes(source: TideHighlightSourceTheme[]): TideHighlightTheme[] {
   const memberByCode = new Map<string, TideHighlightMember>();
@@ -37,7 +52,7 @@ export function buildTideHighlightThemes(source: TideHighlightSourceTheme[]): Ti
     for (const member of theme.members) if (!memberByCode.has(member.code)) memberByCode.set(member.code, member);
   }
 
-  return HIGHLIGHT_THEME_CODES.map(([theme, codes]) => {
+  return TIDE_EXACT_THEME_ENTRIES.filter(([theme]) => TIDE_HIGHLIGHT_THEME_NAMES.has(theme)).map(([theme, codes]) => {
     const members = codes
       .map((code) => memberByCode.get(code))
       .filter((member): member is TideHighlightMember => member != null);

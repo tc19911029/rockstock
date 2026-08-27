@@ -1,7 +1,7 @@
 import { readLatestSectorRanking, readPriorSectorRanking } from '@/lib/themes/sectorRanking';
-import { buildMarketThemeRanking } from '@/lib/themes/marketThemes';
 import { buildTideHighlightThemes, type TideHighlightTheme } from './highlights';
 import { buildTideThemeRanking, type TideThemeRanking } from './themeData';
+import { buildTideMarketThemeRanking } from './themeUniverse';
 
 export type TideMarketThemeRanking = TideThemeRanking;
 
@@ -17,7 +17,7 @@ export type TideMarketThemeContext = {
  */
 export async function loadLatestTideMarketThemes(): Promise<TideMarketThemeRanking | null> {
   const official = await readLatestSectorRanking();
-  return buildTideThemeRanking(official ? buildMarketThemeRanking(official) : null);
+  return buildTideThemeRanking(official ? buildTideMarketThemeRanking(official) : null);
 }
 
 /** 同時載入最新與前一交易日題材，讓「回顧」使用真正的前一日排名。 */
@@ -26,8 +26,8 @@ export async function loadTideMarketThemeContext(): Promise<TideMarketThemeConte
   if (!official) return { latest: null, prior: null, latestHighlights: [], priorHighlights: [] };
   const priorOfficial = await readPriorSectorRanking(official.date);
   return {
-    latest: buildTideThemeRanking(buildMarketThemeRanking(official)),
-    prior: buildTideThemeRanking(priorOfficial ? buildMarketThemeRanking(priorOfficial) : null),
+    latest: buildTideThemeRanking(buildTideMarketThemeRanking(official)),
+    prior: buildTideThemeRanking(priorOfficial ? buildTideMarketThemeRanking(priorOfficial) : null),
     latestHighlights: buildTideHighlightThemes(official.themes),
     priorHighlights: buildTideHighlightThemes(priorOfficial?.themes ?? []),
   };
