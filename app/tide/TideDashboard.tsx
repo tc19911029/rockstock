@@ -38,7 +38,9 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { TW_CONCEPT_MAP } from '@/lib/scanner/conceptMap';
 import type { TideProSnapshot } from '@/lib/tide/proData';
+import { THEME_MAP } from '@/lib/themes/themeMap';
 import styles from './tide.module.css';
 
 type ThemeMember = {
@@ -181,6 +183,69 @@ function uniqueStocks(themes: ThemeRank[], pro: TideProSnapshot | null): StockRe
   return [...stocks.values()];
 }
 
+/**
+ * Tide 的畫面使用 108 個題材分組；站內其他掃描仍保留官方產業分類。
+ * 這裡只在 Tide 顯示層，用同一批股票行情彙整既有題材映射。
+ */
+function expandTideThemes(source: ThemeRank[]): ThemeRank[] {
+  if (source.length >= 108) return source.slice(0, 108);
+  const stockByCode = new Map<string, ThemeMember>();
+  for (const theme of source) {
+    for (const member of theme.members) {
+      if (!stockByCode.has(member.code)) stockByCode.set(member.code, member);
+    }
+  }
+
+  const groups = new Map<string, Set<string>>();
+  const add = (theme: string, code: string) => {
+    const codes = groups.get(theme) ?? new Set<string>();
+    codes.add(code);
+    groups.set(theme, codes);
+  };
+  for (const [theme, stocks] of Object.entries(THEME_MAP)) {
+    for (const stock of stocks) add(theme, stock.code);
+  }
+  for (const [code, theme] of Object.entries(TW_CONCEPT_MAP)) add(theme, code);
+  for (const industry of [...source].sort((left, right) => Math.abs(right.instAmt5 ?? 0) - Math.abs(left.instAmt5 ?? 0))) {
+    if (groups.size >= 108) break;
+    if (groups.has(industry.theme)) continue;
+    for (const member of industry.members) add(industry.theme, member.code);
+  }
+
+  const avg = (values: Array<number | null>) => {
+    const valid = values.filter((value): value is number => value != null);
+    return valid.length > 0 ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+  };
+
+  return [...groups.entries()].slice(0, 108).map(([theme, codes]) => {
+    const members = [...codes]
+      .map((code) => stockByCode.get(code))
+      .filter((member): member is ThemeMember => member != null);
+    const topStock = [...members]
+      .filter((member) => member.d1 != null)
+      .sort((left, right) => (right.d1 ?? 0) - (left.d1 ?? 0))[0];
+    const withD1 = members.filter((member) => member.d1 != null);
+    const instAmounts = members
+      .map((member) => member.instAmt?.[PERIOD_INDEX[5]])
+      .filter((value): value is number => value != null);
+    return {
+      theme,
+      stockCount: members.length,
+      avgD1: avg(members.map((member) => member.d1)),
+      avgD5: avg(members.map((member) => member.d5)),
+      avgD20: avg(members.map((member) => member.d20)),
+      avgD60: avg(members.map((member) => member.d60)),
+      avgVolRatio: null,
+      breadth: withD1.length > 0 ? withD1.filter((member) => (member.d1 ?? 0) > 0).length / withD1.length : null,
+      instNet5: avg(members.map((member) => member.instNet5)),
+      instAmt5: instAmounts.length > 0 ? instAmounts.reduce((sum, value) => sum + value, 0) : null,
+      stage: '',
+      topStock: topStock?.d1 == null ? null : { code: topStock.code, name: topStock.name, d1: topStock.d1 },
+      members,
+    };
+  });
+}
+
 function readStoredStocks(key: string): StockRef[] {
   try {
     const value = JSON.parse(localStorage.getItem(key) ?? '[]');
@@ -199,7 +264,8 @@ export default function TideDashboard({
   initialThemes: ThemeRank[];
   proSnapshot: TideProSnapshot | null;
 }) {
-  const [themes, setThemes] = useState(initialThemes);
+  const normalizedInitialThemes = useMemo(() => expandTideThemes(initialThemes), [initialThemes]);
+  const [themes, setThemes] = useState(normalizedInitialThemes);
   const [dataDate, setDataDate] = useState(initialDate);
   const [view, setView] = useState<ViewMode>('bubble');
   const [period, setPeriod] = useState<Period>(5);
@@ -246,7 +312,7 @@ export default function TideDashboard({
   const [replayLoading, setReplayLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const allStocks = useMemo(() => uniqueStocks(initialThemes, proSnapshot), [initialThemes, proSnapshot]);
+  const allStocks = useMemo(() => uniqueStocks(normalizedInitialThemes, proSnapshot), [normalizedInitialThemes, proSnapshot]);
   const searchResults = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -424,7 +490,7 @@ export default function TideDashboard({
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
         if (payload?.themes) {
-          setThemes(payload.themes);
+          setThemes(expandTideThemes(payload.themes));
           setDataDate(payload.date);
         }
       })
@@ -435,9 +501,9 @@ export default function TideDashboard({
   const resetLatest = useCallback(() => {
     setReplayPlaying(false);
     setReplayIndex(Math.max(0, replayDates.length - 1));
-    setThemes(initialThemes);
+    setThemes(normalizedInitialThemes);
     setDataDate(initialDate);
-  }, [initialDate, initialThemes, replayDates.length]);
+  }, [initialDate, normalizedInitialThemes, replayDates.length]);
 
   const marketChange = themes.length > 0
     ? themes.reduce((sum, item) => sum + (item.avgD1 ?? 0), 0) / themes.length
