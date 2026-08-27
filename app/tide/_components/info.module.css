@@ -6,13 +6,10 @@
 }
 .page *, .page *::before, .page *::after { box-sizing: border-box; }
 .page a { color: inherit; }
-.header, .content, .footer { width: min(920px, 100%); margin-inline: auto; }
+.header, .content, .footer { width: min(728px, 100%); margin-inline: auto; }
 .header { padding-bottom: 22px; border-bottom: 1px solid var(--border); }
 .back { display: inline-flex; min-height: 38px; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 99px; background: var(--panel); color: var(--muted) !important; font-size: 12px; text-decoration: none; }
-.brand { display: flex; align-items: center; gap: 9px; width: max-content; margin-top: 25px; text-decoration: none; }
-.brand span { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 50%; background: linear-gradient(145deg, #6cc1b8, #2c7770); color: white; }
-.brand b { font-size: 16px; }
-.header h1 { margin: 20px 0 5px; font-size: clamp(28px, 5vw, 42px); line-height: 1.25; }
+.header h1 { margin: 17px 0 4px; font-size: clamp(28px, 4vw, 32px); line-height: 1.25; }
 .header > p { max-width: 720px; margin: 0; color: var(--muted); font-size: 14px; }
 .header nav { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
 .header nav a { display: inline-flex; min-height: 38px; align-items: center; padding: 6px 12px; border: 1px solid var(--border); border-radius: 99px; background: var(--panel); color: var(--muted); font-size: 11px; text-decoration: none; }
@@ -24,7 +21,8 @@
 .content ul, .content ol { padding-left: 21px; }
 .content strong { color: var(--text); }
 .content a { color: var(--primary); }
-.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+.subscribeCard { margin-top: 14px; padding: 18px; border: 2px solid color-mix(in srgb, var(--gold) 70%, var(--border)); border-radius: 14px; background: var(--panel); }.subscribeCard h2 { margin: 10px 0 0; padding: 0; border: 0; font-size: 20px; }.subscribeCard > p { margin: 2px 0 14px; color: var(--muted); font-size: 11px; }.subscribeActions { display: grid; gap: 8px; }.subscribeActions a { display: flex; min-height: 58px; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); color: var(--text); font-size: 17px; font-weight: 850; text-decoration: none; }.subscribeActions a:first-child { border-color: #92771c; background: #92771c; color: white; }.subscribeNote { display: block; margin-top: 9px; color: var(--muted); font-size: 9px; text-align: center; }
 .planCard { position: relative; overflow: hidden; padding: 21px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); }
 .planCard[data-featured='true'] { border-color: color-mix(in srgb, var(--gold) 55%, var(--border)); box-shadow: 0 16px 55px rgb(0 0 0 / 22%); }
 .badge { display: inline-flex; padding: 3px 8px; border-radius: 99px; background: color-mix(in srgb, var(--gold) 13%, transparent); color: var(--gold); font-size: 10px; font-weight: 800; }

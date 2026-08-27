@@ -12,7 +12,7 @@ test.describe('Tide Pro 重建頁', () => {
     });
   });
 
-  test('泡泡圖、板塊摘要與 Pro 功能選單可用', async ({ page }) => {
+  test('泡泡圖、說明、回放、排行榜與 Pro 分頁可用', async ({ page }) => {
     await page.goto('/tide');
     await expect(page.getByRole('img', { name: '台股板塊法人資金泡泡圖' })).toBeVisible();
     await expect(page.getByRole('button', { name: '顯示全部 108 個' })).toBeVisible();
@@ -21,25 +21,28 @@ test.describe('Tide Pro 重建頁', () => {
     await expect(page.getByRole('region', { name: '記憶體 板塊摘要' })).toBeVisible();
     await page.getByRole('button', { name: '關閉板塊摘要' }).click();
 
+    await page.getByRole('button', { name: '怎麼看這張圖' }).click();
+    await expect(page.getByText('所以右上角＝買最多、還在加速')).toBeVisible();
+    await page.getByRole('button', { name: '怎麼看這張圖' }).click();
+
+    await page.getByRole('button', { name: '回放', exact: true }).click();
+    const replay = page.getByRole('dialog', { name: '板塊資金輪動回放' });
+    await expect(replay.getByRole('slider', { name: '回放進度' })).toBeVisible();
+    await replay.getByRole('button', { name: '關閉回放' }).click();
+
     await page.getByRole('button', { name: '板塊泡泡圖', exact: true }).click();
     await page.getByRole('menuitem', { name: '板塊排行榜', exact: true }).click();
     await expect(page.getByRole('button', { name: '法人動向', exact: true })).toBeVisible();
-
-    for (const [menu, heading] of [
-      ['外資投信同買賣', '外資投信同買／同賣榜'],
-      ['外資連買賣', '外資連續買／賣榜'],
-      ['籌碼雷達', '籌碼雷達'],
-    ] as const) {
-      await page.getByRole('button', { name: /板塊排行榜|外資投信同買賣|外資連買賣|籌碼雷達/, exact: true }).click();
-      await page.getByRole('menuitem', { name: menu, exact: true }).click();
-      await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-    }
+    await page.getByRole('button', { name: '個股異常', exact: true }).click();
+    await expect(page.getByRole('button', { name: '爆量買', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '外資投信', exact: true }).click();
+    for (const tab of ['同買', '同賣', '連買', '連賣']) await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
   });
 
   test('個股 Pro 深度、自選與不限檔提醒可互動', async ({ page }) => {
     await page.goto('/tide');
     await page.getByPlaceholder('搜尋股票或板塊...').fill('2330');
-    await page.getByRole('button', { name: /2330 台積電/ }).click();
+    await page.getByRole('listbox').getByRole('button').first().click();
 
     const drawer = page.getByRole('dialog', { name: /台積電 Pro 籌碼詳情/ });
     await expect(drawer.getByText('法人分項深度', { exact: true })).toBeVisible();
@@ -98,7 +101,7 @@ test.describe('Tide Pro 重建頁', () => {
     for (const [url, title] of pages) {
       await page.goto(url);
       await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
-      await expect(page.getByRole('link', { name: '回潮汐儀表板' })).toBeVisible();
+      await expect(page.getByRole('link', { name: '回 Tide 台股資金潮汐' })).toBeVisible();
     }
   });
 });

@@ -1,4 +1,4 @@
-import { ArrowLeft, Waves } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import styles from './info.module.css';
 
@@ -6,16 +6,9 @@ export function TideInfoShell({ title, description, children }: { title: string;
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <Link className={styles.back} href="/tide"><ArrowLeft size={15} /> 回潮汐儀表板</Link>
-        <Link className={styles.brand} href="/tide"><span><Waves size={22} /></span><b>潮汐 Pro</b></Link>
+        <Link className={styles.back} href="/tide"><ArrowLeft size={15} /> 回 Tide 台股資金潮汐</Link>
         <h1>{title}</h1>
         <p>{description}</p>
-        <nav aria-label="潮汐說明頁">
-          <Link href="/tide/pricing">方案與定價</Link>
-          <Link href="/tide/about">關於本站</Link>
-          <Link href="/tide/glossary">名詞小百科</Link>
-          <Link href="/tide/legal">條款・隱私・退款</Link>
-        </nav>
       </header>
       <div className={styles.content}>{children}</div>
       <footer className={styles.footer}>

@@ -4,17 +4,14 @@ import {
   BarChart3,
   Bell,
   BellRing,
-  Bot,
   BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
   CircleHelp,
-  Clock3,
   Copy,
   Crown,
   Gift,
-  Gauge,
   Home,
   Layers3,
   ListFilter,
@@ -24,8 +21,6 @@ import {
   Pause,
   Play,
   Plus,
-  Radar,
-  RotateCcw,
   Search,
   Send,
   Settings,
@@ -38,13 +33,14 @@ import {
   TrendingUp,
   Trophy,
   UserRound,
-  Vibrate,
   Waves,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import type { TideProSnapshot, TideProStock } from '@/lib/tide/proData';
+import { TW_CONCEPT_MAP } from '@/lib/scanner/conceptMap';
+import type { TideProSnapshot } from '@/lib/tide/proData';
+import { THEME_MAP } from '@/lib/themes/themeMap';
 import styles from './tide.module.css';
 
 type ThemeMember = {
@@ -75,7 +71,7 @@ type ThemeRank = {
 };
 
 type StockRef = { code: string; name: string; theme?: string };
-type ViewMode = 'bubble' | 'ranking' | 'dual' | 'streak' | 'radar';
+type ViewMode = 'bubble' | 'watch' | 'ranking';
 type FlowCategory = 'all' | 'flood' | 'rotation' | 'watch' | 'ebb';
 type Period = 1 | 5 | 20;
 type ThemeMode = 'light' | 'dark' | 'system';
@@ -94,6 +90,7 @@ type ChipDay = {
 type Candle = {
   date: string;
   close: number;
+  volume?: number;
 };
 
 type StockDetailData = {
@@ -109,6 +106,21 @@ const CATEGORY_META: Record<Exclude<FlowCategory, 'all'>, { label: string; hint:
   watch: { label: '觀望', hint: '資金流出但放緩', color: '#85a69d' },
   ebb: { label: '退潮', hint: '資金流出', color: '#68ad9c' },
 };
+
+const TIDE_THEME_GROUPS = ['半導體', 'AI與電子硬體', '軟體雲端資安', '綠能與電力', '金融', '航運物流', '傳產製造', '民生消費', '營建地產', '生技醫療'] as const;
+
+function themeGroup(theme: string): typeof TIDE_THEME_GROUPS[number] {
+  if (/生技|醫療|製藥/.test(theme)) return '生技醫療';
+  if (/營建|地產|房/.test(theme)) return '營建地產';
+  if (/金融|銀行|金控|保險/.test(theme)) return '金融';
+  if (/航運|航空|物流/.test(theme)) return '航運物流';
+  if (/綠能|太陽能|風電|電力|儲能|電網/.test(theme)) return '綠能與電力';
+  if (/軟體|雲端|資安|SaaS/.test(theme)) return '軟體雲端資安';
+  if (/半導體|晶圓|封裝|記憶體|IC|CPO|矽光|CoWoS|HBM/.test(theme)) return '半導體';
+  if (/AI|伺服器|PCB|電子|光通訊|電源|連接|衛星|機器人/.test(theme)) return 'AI與電子硬體';
+  if (/食品|觀光|零售|消費|紡織/.test(theme)) return '民生消費';
+  return '傳產製造';
+}
 
 const PERIOD_INDEX: Record<Period, number> = { 1: 0, 5: 4, 20: 6 };
 
@@ -171,6 +183,50 @@ function uniqueStocks(themes: ThemeRank[], pro: TideProSnapshot | null): StockRe
   return [...stocks.values()];
 }
 
+function expandTideThemes(source: ThemeRank[]): ThemeRank[] {
+  if (source.length >= 108) return source.slice(0, 108);
+  const stockByCode = new Map<string, ThemeMember>();
+  for (const theme of source) for (const member of theme.members) if (!stockByCode.has(member.code)) stockByCode.set(member.code, member);
+  const groups = new Map<string, Set<string>>();
+  const add = (theme: string, code: string) => {
+    const codes = groups.get(theme) ?? new Set<string>();
+    codes.add(code);
+    groups.set(theme, codes);
+  };
+  for (const [theme, stocks] of Object.entries(THEME_MAP)) for (const stock of stocks) add(theme, stock.code);
+  for (const [code, theme] of Object.entries(TW_CONCEPT_MAP)) add(theme, code);
+  for (const industry of [...source].sort((left, right) => Math.abs(right.instAmt5 ?? 0) - Math.abs(left.instAmt5 ?? 0))) {
+    if (groups.size >= 108) break;
+    if (groups.has(industry.theme)) continue;
+    for (const member of industry.members) add(industry.theme, member.code);
+  }
+  const avg = (values: Array<number | null>) => {
+    const valid = values.filter((value): value is number => value != null);
+    return valid.length > 0 ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+  };
+  return [...groups.entries()].slice(0, 108).map(([theme, codes]) => {
+    const members = [...codes].map((code) => stockByCode.get(code)).filter((member): member is ThemeMember => member != null);
+    const topStock = [...members].filter((member) => member.d1 != null).sort((left, right) => (right.d1 ?? 0) - (left.d1 ?? 0))[0];
+    const withD1 = members.filter((member) => member.d1 != null);
+    const instAmounts = members.map((member) => member.instAmt?.[PERIOD_INDEX[5]]).filter((value): value is number => value != null);
+    return {
+      theme,
+      stockCount: members.length,
+      avgD1: avg(members.map((member) => member.d1)),
+      avgD5: avg(members.map((member) => member.d5)),
+      avgD20: avg(members.map((member) => member.d20)),
+      avgD60: avg(members.map((member) => member.d60)),
+      avgVolRatio: null,
+      breadth: withD1.length > 0 ? withD1.filter((member) => (member.d1 ?? 0) > 0).length / withD1.length : null,
+      instNet5: avg(members.map((member) => member.instNet5)),
+      instAmt5: instAmounts.length > 0 ? instAmounts.reduce((sum, value) => sum + value, 0) : null,
+      stage: '',
+      topStock: topStock?.d1 == null ? null : { code: topStock.code, name: topStock.name, d1: topStock.d1 },
+      members,
+    };
+  });
+}
+
 function readStoredStocks(key: string): StockRef[] {
   try {
     const value = JSON.parse(localStorage.getItem(key) ?? '[]');
@@ -189,7 +245,8 @@ export default function TideDashboard({
   initialThemes: ThemeRank[];
   proSnapshot: TideProSnapshot | null;
 }) {
-  const [themes, setThemes] = useState(initialThemes);
+  const normalizedInitialThemes = useMemo(() => expandTideThemes(initialThemes), [initialThemes]);
+  const [themes, setThemes] = useState(normalizedInitialThemes);
   const [dataDate, setDataDate] = useState(initialDate);
   const [view, setView] = useState<ViewMode>('bubble');
   const [period, setPeriod] = useState<Period>(5);
@@ -215,21 +272,28 @@ export default function TideDashboard({
   const [wishOpen, setWishOpen] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
   const [highlightsOpen, setHighlightsOpen] = useState(false);
+  const [highlightSummaryOpen, setHighlightSummaryOpen] = useState(true);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [chartHelpOpen, setChartHelpOpen] = useState(false);
+  const [watchManageOpen, setWatchManageOpen] = useState(false);
+  const [watchEditing, setWatchEditing] = useState(false);
+  const [watchSort, setWatchSort] = useState<'manual' | 'price' | 'change'>('manual');
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
   const [textSize, setTextSize] = useState<TextSize>('small');
   const [riseColor, setRiseColor] = useState<RiseColor>('tw');
   const [haptics, setHaptics] = useState(true);
   const [notifications, setNotifications] = useState({ push: false, morning: true, close: true, poll: true, offers: true });
+  const [hiddenThemeGroups, setHiddenThemeGroups] = useState<string[]>([]);
   const [pollVote, setPollVote] = useState<'bull' | 'bear' | null>(null);
+  const [pollOpen, setPollOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
   const [replayIndex, setReplayIndex] = useState(Math.max(0, (proSnapshot?.historyDates.length ?? 1) - 1));
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayLoading, setReplayLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const allStocks = useMemo(() => uniqueStocks(initialThemes, proSnapshot), [initialThemes, proSnapshot]);
+  const allStocks = useMemo(() => uniqueStocks(normalizedInitialThemes, proSnapshot), [normalizedInitialThemes, proSnapshot]);
   const searchResults = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -346,18 +410,41 @@ export default function TideDashboard({
     setToast(`已投票：明日看${vote === 'bull' ? '多' : '空'}`);
   }, []);
 
+  const watchThemes = useMemo<ThemeRank[]>(() => watchlist.reduce<ThemeRank[]>((items, stock) => {
+    const sourceTheme = themes.find((theme) => theme.members.some((member) => member.code === stock.code));
+    const member = sourceTheme?.members.find((item) => item.code === stock.code);
+    if (!member) return items;
+    items.push({
+      theme: `${stock.code} ${stock.name}`,
+      stockCount: 1,
+      avgD1: member.d1,
+      avgD5: member.d5,
+      avgD20: member.d20,
+      avgD60: member.d60,
+      avgVolRatio: null,
+      breadth: (member.d1 ?? 0) > 0 ? 1 : 0,
+      instNet5: member.instNet5,
+      instAmt5: member.instAmt?.[PERIOD_INDEX[5]] ?? null,
+      stage: sourceTheme?.stage ?? '',
+      topStock: member.d1 == null ? null : { code: member.code, name: member.name, d1: member.d1 },
+      members: [member],
+    });
+    return items;
+  }, []), [themes, watchlist]);
+
+  const visibleUniverse = (view === 'watch' ? watchThemes : themes).filter((theme) => !hiddenThemeGroups.includes(themeGroup(theme.theme)));
   const categoryCounts = useMemo(() => {
     const counts = { flood: 0, rotation: 0, watch: 0, ebb: 0 };
-    for (const item of themes) counts[flowCategory(item)] += 1;
+    for (const item of visibleUniverse) counts[flowCategory(item)] += 1;
     return counts;
-  }, [themes]);
+  }, [visibleUniverse]);
 
   const topThemes = useMemo(() => [...themes].sort((a, b) => themeMoney(b, 5) - themeMoney(a, 5)), [themes]);
   const filteredThemes = useMemo(() => {
-    const items = category === 'all' ? themes : themes.filter((item) => flowCategory(item) === category);
+    const items = category === 'all' ? visibleUniverse : visibleUniverse.filter((item) => flowCategory(item) === category);
     const sorted = [...items].sort((a, b) => Math.abs(themeMoney(b, period)) - Math.abs(themeMoney(a, period)));
-    return showAll ? sorted : sorted.slice(0, 26);
-  }, [category, period, showAll, themes]);
+    return showAll || view === 'watch' ? sorted : sorted.slice(0, 30);
+  }, [category, period, showAll, view, visibleUniverse]);
 
   const replayDates = useMemo(() => proSnapshot?.historyDates ?? [], [proSnapshot?.historyDates]);
   useEffect(() => {
@@ -384,7 +471,7 @@ export default function TideDashboard({
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
         if (payload?.themes) {
-          setThemes(payload.themes);
+          setThemes(expandTideThemes(payload.themes));
           setDataDate(payload.date);
         }
       })
@@ -395,9 +482,9 @@ export default function TideDashboard({
   const resetLatest = useCallback(() => {
     setReplayPlaying(false);
     setReplayIndex(Math.max(0, replayDates.length - 1));
-    setThemes(initialThemes);
+    setThemes(normalizedInitialThemes);
     setDataDate(initialDate);
-  }, [initialDate, initialThemes, replayDates.length]);
+  }, [initialDate, normalizedInitialThemes, replayDates.length]);
 
   const marketChange = themes.length > 0
     ? themes.reduce((sum, item) => sum + (item.avgD1 ?? 0), 0) / themes.length
@@ -417,9 +504,9 @@ export default function TideDashboard({
 
       <header className={styles.header}>
         <div className={styles.sentiment} aria-label={`明日多方 ${bullishPct}%`}>
-          <button className={pollVote === 'bull' ? styles.pollSelected : ''} onClick={() => submitVote('bull')}>多 {bullishPct}%</button>
+          <button className={pollVote === 'bull' ? styles.pollSelected : ''} onClick={() => setPollOpen(true)}>多 {bullishPct}%</button>
           <div><i style={{ width: `${bullishPct}%` }} /></div>
-          <button className={pollVote === 'bear' ? styles.pollSelected : ''} onClick={() => submitVote('bear')}>{100 - bullishPct}% 空</button>
+          <button className={pollVote === 'bear' ? styles.pollSelected : ''} onClick={() => setPollOpen(true)}>{100 - bullishPct}% 空</button>
         </div>
 
         <div className={styles.searchWrap}>
@@ -447,10 +534,10 @@ export default function TideDashboard({
 
         <nav className={styles.headerActions} aria-label="主要操作">
           <button onClick={() => setHighlightsOpen((value) => !value)}><Sparkles size={15} /> 今日重點</button>
-          <button className={styles.iconButton} onClick={() => { setAlertTab('watch'); setAlertsOpen(true); }} aria-label="籌碼異動提醒">
-            <BellRing size={16} /><span className={styles.countBadge}>{alerts.length}</span>
-          </button>
           <button className={styles.iconButton} onClick={() => navigator.clipboard?.writeText(location.href).then(() => setToast('連結已複製'))} aria-label="分享 Tide"><Share2 size={16} /></button>
+          <button className={styles.iconButton} onClick={() => { setAlertTab('watch'); setAlertsOpen(true); }} aria-label="籌碼異動提醒">
+            <BellRing size={16} />{alerts.length > 0 && <span className={styles.countBadge}>{alerts.length}</span>}
+          </button>
           <button className={styles.iconButton} onClick={() => changeTheme(themeMode === 'light' ? 'dark' : 'light')} aria-label="切換明暗主題">
             {themeMode === 'light' ? <Moon size={16} /> : <Sun size={16} />}
           </button>
@@ -461,18 +548,14 @@ export default function TideDashboard({
 
       {highlightsOpen && (
         <section className={styles.highlights} aria-label="今日盤面重點">
-          <div className={styles.highlightTitle}>
-            <span className={styles.aiIcon}><Bot size={17} /></span>
-            <div><b>今日重點（{dataDate.slice(5).replace('-', '/')}）</b><small>AI 盤後摘要</small></div>
-          </div>
-          <div className={styles.moodGauge}>
-            <span>今日情緒</span><b>{bullishPct}</b><em>{bullishPct >= 55 ? '樂觀' : bullishPct <= 40 ? '保守' : '中性'}</em>
-          </div>
-          <p>
-            法人買最多：{topThemes.slice(0, 3).map((item) => `${item.theme} ${formatMoney(themeMoney(item, 5))}`).join('、')}。
-            {topThemes[0]?.topStock ? `領漲個股為 ${topThemes[0].topStock.name} ${formatPct(topThemes[0].topStock.d1)}。` : ''}
-          </p>
-          <button onClick={() => setHighlightsOpen(false)} aria-label="收起今日重點"><X size={16} /></button>
+          <header><b>今日重點（{dataDate.slice(5).replace('-', '/')}）</b><button onClick={() => setHighlightsOpen(false)} aria-label="收起今日重點"><X size={16} /></button></header>
+          <div className={styles.moodSummary}><span>今日情緒 <b>{bullishPct}</b> {bullishPct >= 55 ? '樂觀' : bullishPct <= 40 ? '保守' : '中性'}</span><small>樂觀</small><i><em style={{ left: `${Math.max(4, Math.min(96, bullishPct))}%` }} /></i><small>恐慌</small></div>
+          <p>法人買最多：{topThemes.slice(0, 3).map((item) => `${item.theme} ${formatMoney(themeMoney(item, 1))}`).join('、')}</p>
+          <p>回顧：近 5 日法人買最多的 3 個板塊，平均 {formatPct(topThemes.slice(0, 3).reduce((sum, item) => sum + themeReturn(item, 5), 0) / 3)}（最佳 {topThemes[0]?.theme ?? '—'} {formatPct(topThemes[0] ? themeReturn(topThemes[0], 5) : 0)}）</p>
+          <p>大戶異常：{(proSnapshot?.intensityLeaders ?? []).slice(0, 2).map((stock) => `${stock.name} ${stock.total >= 0 ? '被買' : '被倒'} ${formatMoney(Math.abs(stock.totalValue ?? 0))}`).join('　') || '目前沒有顯著異常'}</p>
+          <button className={styles.aiSummaryToggle} onClick={() => setHighlightSummaryOpen((open) => !open)}>AI 盤後總結 {highlightSummaryOpen ? '▴' : '▾'}</button>
+          {highlightSummaryOpen && <p className={styles.aiSummary}>今日大盤{formatPct(marketChange)}，法人資金集中在 {topThemes.slice(0, 3).map((item) => item.theme).join('、')}；另一方面，{[...topThemes].reverse().slice(0, 2).map((item) => item.theme).join('、')}承受賣壓。籌碼輪動幅度偏大，請留意資金是否延續。</p>}
+          <button className={styles.shareBrief} onClick={() => navigator.clipboard?.writeText(location.href).then(() => setToast('今日盤面連結已複製'))}><Share2 size={15} /> 分享今日盤面</button>
         </section>
       )}
 
@@ -503,33 +586,30 @@ export default function TideDashboard({
                 aria-haspopup="menu"
                 aria-expanded={viewMenuOpen}
               >
-                {view === 'bubble' ? '板塊泡泡圖' : view === 'ranking' ? '板塊排行榜' : view === 'dual' ? '外資投信同買賣' : view === 'streak' ? '外資連買賣' : '籌碼雷達'}
+                {view === 'bubble' ? '板塊泡泡圖' : view === 'watch' ? '自選股' : '板塊排行榜'}
                 <ChevronDown size={14} />
               </button>
               {viewMenuOpen && (
                 <div className={styles.viewMenu} role="menu">
-                  <button role="menuitem" onClick={() => { setViewMenuOpen(false); document.getElementById('tide-watchlist')?.scrollIntoView({ behavior: 'smooth' }); }}><Home size={15} /> 自選股</button>
+                  <button role="menuitem" aria-current={view === 'watch'} onClick={() => { setView('watch'); setViewMenuOpen(false); setCategory('all'); }}><Home size={15} /> 自選股</button>
                   <button role="menuitem" aria-current={view === 'bubble'} onClick={() => { setView('bubble'); setViewMenuOpen(false); }}><Layers3 size={15} /> 板塊泡泡圖</button>
                   <button role="menuitem" aria-current={view === 'ranking'} onClick={() => { setView('ranking'); setViewMenuOpen(false); }}><ListFilter size={15} /> 板塊排行榜</button>
-                  <span>Pro 籌碼工具</span>
-                  <button role="menuitem" aria-current={view === 'dual'} onClick={() => { setView('dual'); setViewMenuOpen(false); }}><TrendingUp size={15} /> 外資投信同買賣</button>
-                  <button role="menuitem" aria-current={view === 'streak'} onClick={() => { setView('streak'); setViewMenuOpen(false); }}><Clock3 size={15} /> 外資連買賣</button>
-                  <button role="menuitem" aria-current={view === 'radar'} onClick={() => { setView('radar'); setViewMenuOpen(false); }}><Radar size={15} /> 籌碼雷達</button>
                 </div>
               )}
             </div>
             {view === 'bubble' ? (
               <>
                 <button className={styles.showAllButton} onClick={() => setShowAll(!showAll)}>{showAll ? '精簡顯示' : `顯示全部 ${themes.length} 個`}</button>
-                <span className={styles.chartHint}>越右＝近 5 日買越多・越上＝買的速度在加快・圈越大＝近 20 日金額越大</span>
-                <button className={styles.helpButton} aria-label="怎麼看這張圖" title="越右法人買越多、越上資金加速、圈越大代表規模"><CircleHelp size={15} /></button>
+                <span className={styles.chartHint}>越右＝近 5 日買越多・越上＝買的速度在加快・圈越大＝近 20 日金額越大 ｜ 滾輪縮放 · 拖曳移動</span>
+                <button className={`${styles.helpButton} ${chartHelpOpen ? styles.toolbarActive : ''}`} aria-label="怎麼看這張圖" onClick={() => setChartHelpOpen((open) => !open)}><CircleHelp size={15} /></button>
                 <button className={`${styles.replayButton} ${replayOpen ? styles.toolbarActive : ''}`} onClick={() => {
                   if (!replayOpen) setReplayIndex(0);
                   setReplayPlaying(false);
                   setReplayOpen(!replayOpen);
                 }}><Play size={14} /> 回放</button>
               </>
-            ) : <span className={styles.proToolbarLabel}><ShieldCheck size={13} /> Pro 全功能已啟用</span>}
+            ) : view === 'watch' ? <><button className={styles.helpButton} aria-label="怎麼看這張圖"><CircleHelp size={15} /></button><button className={styles.replayButton} onClick={() => setReplayOpen(true)}><Play size={14} /> 回放</button></> : null}
+            {chartHelpOpen && view === 'bubble' && <aside className={styles.chartHelpPopover}><b>怎麼看這張圖</b><ul><li>越右＝近 5 日法人買越多；越左＝賣越多</li><li>越上＝力道在加速；越下＝在放緩</li><li>所以右上角＝買最多、還在加速</li><li>泡泡大小＝近 20 日買賣總額，只是規模、不分好壞</li><li>每顆泡泡都標著板塊名；熱門板塊會顯示金額</li><li>板塊太多時，可切成只看熱門或顯示全部</li></ul><p>在「自選股」挑幾個板塊，圖上就只亮你選的；長線＝主角走過的路。</p></aside>}
           </div>
 
           {view === 'bubble' && (
@@ -543,31 +623,9 @@ export default function TideDashboard({
             />
           )}
 
-          {view === 'ranking' && <RankingView themes={themes} period={period} setPeriod={setPeriod} snapshot={proSnapshot} onSelect={setSelected} />}
-          {view === 'dual' && <DualView snapshot={proSnapshot} onSelect={setSelected} />}
-          {view === 'streak' && <StreakView snapshot={proSnapshot} onSelect={setSelected} />}
-          {view === 'radar' && <RadarView snapshot={proSnapshot} onSelect={setSelected} onAlert={toggleAlert} alerts={alerts} />}
+          {view === 'watch' && (watchThemes.length > 0 ? <BubbleView themes={filteredThemes} period={period} selectedTheme={selectedTheme} onCloseTheme={() => setSelectedTheme(null)} onSelectStock={setSelected} onSelectTheme={setSelectedTheme} /> : <div className={styles.watchModeEmpty}><span>還沒有自選股</span><button onClick={() => setWatchSearchOpen(true)}><Plus size={16} /> 到「自選」加入個股</button><p>加進資料夾後，這裡就會畫出你的個股泡泡</p><div className={styles.chartBrand}><Waves size={30} /><span>tide-tw.app</span></div></div>)}
 
-          {replayOpen && (
-            <div className={styles.replayBar}>
-              <button className={styles.roundButton} onClick={() => setReplayPlaying((value) => !value)} aria-label={replayPlaying ? '暫停回放' : '播放回放'}>
-                {replayPlaying ? <Pause size={16} /> : <Play size={16} />}
-              </button>
-              <span>資金輪動回放</span>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(0, replayDates.length - 1)}
-                value={replayIndex}
-                onChange={(event) => { setReplayPlaying(false); setReplayIndex(Number(event.target.value)); }}
-                aria-label="回放日期"
-              />
-              <b>{replayDates[replayIndex] ?? dataDate}</b>
-              {replayLoading && <small>讀取中…</small>}
-              <button className={styles.roundButton} onClick={resetLatest} aria-label="回到最新資料"><RotateCcw size={15} /></button>
-              <button className={styles.roundButton} onClick={() => setReplayOpen(false)} aria-label="關閉回放"><X size={15} /></button>
-            </div>
-          )}
+          {view === 'ranking' && <RankingView themes={themes} period={period} setPeriod={setPeriod} snapshot={proSnapshot} marketChange={marketChange} onSelect={setSelected} />}
         </section>
 
         <aside className={styles.watchPanel} id="tide-watchlist">
@@ -575,9 +633,14 @@ export default function TideDashboard({
             <div><span>觀察清單</span>{watchlist.length > 0 && <small>{watchlist.length} 檔</small>}</div>
             <div>
               <button onClick={() => setWatchSearchOpen(true)}><Plus size={14} /> 添加</button>
-              <button aria-label="更多操作">⋯</button>
+              <button aria-label="更多操作" aria-expanded={watchManageOpen} onClick={() => setWatchManageOpen((open) => !open)}>⋯</button>
             </div>
           </div>
+          {watchManageOpen && <div className={styles.watchManageMenu}>
+            <div><button onClick={() => setToast('已新增自選資料夾（本機示範）')}><Plus size={13} /> 新增資料夾</button><button className={watchEditing ? styles.actionActive : ''} onClick={() => setWatchEditing((editing) => !editing)}>編輯</button></div>
+            <span>排序（同項再點＝升／降）</span>
+            <div><button className={watchSort === 'price' ? styles.actionActive : ''} onClick={() => setWatchSort('price')}>依收盤價</button><button className={watchSort === 'change' ? styles.actionActive : ''} onClick={() => setWatchSort('change')}>依當日漲幅</button><button className={watchSort === 'manual' ? styles.actionActive : ''} onClick={() => setWatchSort('manual')}>手動順序 ✓</button></div>
+          </div>}
           {watchSearchOpen && (
             <div className={styles.watchSearchPopover} role="dialog" aria-label="新增自選股">
               <header><b>新增自選股</b><button onClick={() => { setWatchSearchOpen(false); setWatchQuery(''); }} aria-label="關閉新增自選股"><X size={14} /></button></header>
@@ -594,26 +657,25 @@ export default function TideDashboard({
           )}
           {watchlist.length === 0 ? (
             <div className={styles.emptyWatch}>
-              <Waves size={28} />
               <b>尚無清單</b>
-              <p>從搜尋結果或個股詳情加入自選股，資料會保留在這台裝置。</p>
-              <span>今日法人買最多</span>
-              {topThemes.slice(0, 4).map((theme) => theme.topStock && (
-                <button key={`${theme.theme}-${theme.topStock.code}`} onClick={() => addWatch({ code: theme.topStock!.code, name: theme.topStock!.name, theme: theme.theme })}>
-                  <span><b>{theme.topStock.code}</b> {theme.topStock.name}</span><em>{formatMoney(theme.instAmt5)}</em><Plus size={14} />
+              <p>點右上 ＋ 新增大分類清單，或「＋ 添加」直接搜尋個股</p>
+              <span>還沒有自選股？這幾檔今天法人買最多，點 ＋ 一鍵追蹤</span>
+              {(proSnapshot?.netLeaders ?? []).slice(0, 5).map((stock) => (
+                <button key={stock.symbol} onClick={() => addWatch({ code: stock.symbol, name: stock.name })}>
+                  <span><b>{stock.symbol}</b> {stock.name}</span><em>{formatMoney(stock.totalValue)}</em><Plus size={14} />
                 </button>
               ))}
             </div>
           ) : (
             <div className={styles.watchList}>
-              {watchlist.map((stock) => {
+              {[...watchlist].sort((left, right) => watchSort === 'manual' ? 0 : watchSort === 'price' ? right.code.localeCompare(left.code) : (allStocks.find((stock) => stock.code === right.code)?.code ?? '').localeCompare(allStocks.find((stock) => stock.code === left.code)?.code ?? '')).map((stock) => {
                 const pro = proSnapshot?.netLeaders.find((item) => item.symbol === stock.code);
                 return (
                   <button key={stock.code} onClick={() => setSelected(stock)}>
                     <span><b>{stock.code}</b><small>{stock.name}</small></span>
                     <span className={(pro?.total ?? 0) >= 0 ? styles.up : styles.down}>{formatMoney(pro?.totalValue)}</span>
                     {alerts.some((item) => item.code === stock.code) && <Bell size={13} />}
-                    <ChevronRight size={15} />
+                    {watchEditing ? <X size={15} onClick={(event) => { event.stopPropagation(); setWatchlist((current) => { const next = current.filter((item) => item.code !== stock.code); persistStocks('tide-clone-watchlist', next); return next; }); }} /> : <ChevronRight size={15} />}
                   </button>
                 );
               })}
@@ -645,6 +707,22 @@ export default function TideDashboard({
         <button onClick={() => signedIn ? setPerformanceOpen(true) : setLoginOpen(true)}><UserRound size={19} /><span>我的</span></button>
       </nav>
 
+      {replayOpen && <ReplayOverlay
+        themes={themes}
+        date={replayDates[replayIndex] ?? dataDate}
+        startDate={replayDates[0] ?? dataDate}
+        endDate={replayDates.at(-1) ?? dataDate}
+        index={replayIndex}
+        max={Math.max(0, replayDates.length - 1)}
+        playing={replayPlaying}
+        loading={replayLoading}
+        onIndex={(next) => { setReplayPlaying(false); setReplayIndex(next); }}
+        onPrevious={() => { setReplayPlaying(false); setReplayIndex((current) => Math.max(0, current - 1)); }}
+        onNext={() => { setReplayPlaying(false); setReplayIndex((current) => Math.min(Math.max(0, replayDates.length - 1), current + 1)); }}
+        onPlay={() => setReplayPlaying((playing) => !playing)}
+        onClose={() => { setReplayOpen(false); resetLatest(); }}
+      />}
+
       {selected && (
         <StockDrawer
           stock={selected}
@@ -656,13 +734,15 @@ export default function TideDashboard({
         />
       )}
 
+      {pollOpen && <Modal title="你覺得明天大盤會…" onClose={() => setPollOpen(false)}><div className={styles.pollModalBody}><div><button onClick={() => { submitVote('bull'); setPollOpen(false); }}><TrendingUp size={22} />看多</button><button onClick={() => { submitVote('bear'); setPollOpen(false); }}><TrendingDown size={22} />看空</button></div><p>{signedIn ? '一人一票，結果會記錄在我的戰績' : '登入後即可投票（一人一票，結果更可信）'}</p></div></Modal>}
+
       {settingsOpen && (
         <Modal title="⚙️ 設定" onClose={() => setSettingsOpen(false)} wide>
           <div className={styles.settingsBody}>
             <label>漲跌顏色</label>
             <div className={styles.optionButtons}>
-              <button className={riseColor === 'tw' ? styles.selectedOption : ''} onClick={() => changeRiseColor('tw')}><TrendingUp size={16} /> 紅漲綠跌</button>
-              <button className={riseColor === 'us' ? styles.selectedOption : ''} onClick={() => changeRiseColor('us')}><TrendingUp size={16} /> 綠漲紅跌</button>
+              <button className={riseColor === 'tw' ? styles.selectedOption : ''} onClick={() => changeRiseColor('tw')}>🇹🇼 紅漲綠跌</button>
+              <button className={riseColor === 'us' ? styles.selectedOption : ''} onClick={() => changeRiseColor('us')}>🇺🇸 綠漲紅跌</button>
             </div>
             <label>字幕大小</label>
             <div className={`${styles.optionButtons} ${styles.threeOptions}`}>
@@ -670,14 +750,14 @@ export default function TideDashboard({
             </div>
             <label>觸覺回饋</label>
             <div className={styles.optionButtons}>
-              <button className={haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(true)}><Vibrate size={16} /> 開</button>
+              <button className={haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(true)}>開</button>
               <button className={!haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(false)}>關</button>
             </div>
             <label>畫面主題</label>
             <div className={`${styles.optionButtons} ${styles.threeOptions}`}>
-              <button className={themeMode === 'light' ? styles.selectedOption : ''} onClick={() => changeTheme('light')}><Sun size={16} /> 亮色</button>
               <button className={themeMode === 'dark' ? styles.selectedOption : ''} onClick={() => changeTheme('dark')}><Moon size={16} /> 暗色</button>
-              <button className={themeMode === 'system' ? styles.selectedOption : ''} onClick={() => changeTheme('system')}><SlidersHorizontal size={16} /> 系統</button>
+              <button className={themeMode === 'light' ? styles.selectedOption : ''} onClick={() => changeTheme('light')}><Sun size={16} /> 亮色</button>
+              <button className={themeMode === 'system' ? styles.selectedOption : ''} onClick={() => changeTheme('system')}><SlidersHorizontal size={16} /> 跟隨系統</button>
             </div>
             <label>通知設定</label>
             <div className={styles.notificationSettings}>
@@ -686,6 +766,14 @@ export default function TideDashboard({
               <SettingToggle label="盤後結算（約 19:00）" checked={notifications.close} onChange={(checked) => changeNotification('close', checked)} />
               <SettingToggle label="投票提醒" checked={notifications.poll} onChange={(checked) => changeNotification('poll', checked)} />
               <SettingToggle label="優惠與活動通知" checked={notifications.offers} onChange={(checked) => changeNotification('offers', checked)} />
+            </div>
+            <label>板塊顯示（取消勾選即從圖表隱藏）</label>
+            <div className={styles.sectorSettings}>
+              {TIDE_THEME_GROUPS.map((group) => {
+                const count = themes.filter((theme) => themeGroup(theme.theme) === group).length;
+                const checked = !hiddenThemeGroups.includes(group);
+                return <label key={group}><input type="checkbox" checked={checked} onChange={() => setHiddenThemeGroups((current) => checked ? [...current, group] : current.filter((item) => item !== group))} /><span>{group}</span><small>{count}/{count}</small></label>;
+              })}
             </div>
             <label>Pro 功能狀態</label>
             <div className={styles.proStatus}><Check size={16} /><span><b>全部啟用</b><small>法人分項、歷史回看、雷達與不限檔監控</small></span></div>
@@ -762,9 +850,9 @@ function BubbleView({
     const placed = raw.map((item) => ({
       ...item,
       // 固定 SVG 座標精度，避免 Node 與瀏覽器浮點字串最後一位不同造成 hydration mismatch。
-      cx: Number((520 + (item.x / maxX) * 390).toFixed(3)),
-      cy: Number((250 - (item.y / maxY) * 180).toFixed(3)),
-      radius: Number((20 + (item.size / maxSize) * 34).toFixed(3)),
+      cx: Number((470 + (item.x / maxX) * (item.x >= 0 ? 420 : 340)).toFixed(3)),
+      cy: Number((360 - (item.y / maxY) * 290).toFixed(3)),
+      radius: Number((24 + (item.size / maxSize) * 42).toFixed(3)),
     }));
     // 原站以力導向避免同象限的泡泡完全疊在一起；固定迭代確保 SSR/瀏覽器結果一致。
     for (let pass = 0; pass < 70; pass += 1) {
@@ -789,7 +877,7 @@ function BubbleView({
       }
       for (const point of placed) {
         point.cx = Math.max(108 + point.radius, Math.min(917 - point.radius, point.cx));
-        point.cy = Math.max(31 + point.radius, Math.min(445 - point.radius, point.cy));
+        point.cy = Math.max(38 + point.radius, Math.min(700 - point.radius, point.cy));
       }
     }
     return placed.map((point) => ({ ...point, cx: Number(point.cx.toFixed(3)), cy: Number(point.cy.toFixed(3)) }));
@@ -798,7 +886,7 @@ function BubbleView({
   return (
     <div className={styles.bubbleView}>
       <div className={styles.chartWrap}>
-        <svg viewBox="0 0 1000 530" role="img" aria-label="台股板塊法人資金泡泡圖">
+        <svg viewBox="0 0 1000 760" role="img" aria-label="台股板塊法人資金泡泡圖">
           <defs>
             <pattern id="tide-grid" width="50" height="50" patternUnits="userSpaceOnUse">
               <path d="M 50 0 L 0 0 0 50" className={styles.gridLine} fill="none" />
@@ -807,23 +895,23 @@ function BubbleView({
               <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" />
             </filter>
           </defs>
-          <rect x="105" y="28" width="815" height="420" fill="url(#tide-grid)" className={styles.chartBg} />
-          <line x1="520" y1="28" x2="520" y2="448" className={styles.axisLine} />
-          <line x1="105" y1="250" x2="920" y2="250" className={styles.axisLine} />
-          <text x="520" y="476" textAnchor="middle" className={styles.axisLabel}>0</text>
-          <text x="110" y="476" textAnchor="middle" className={styles.axisLabel}>−500</text>
-          <text x="270" y="476" textAnchor="middle" className={styles.axisLabel}>−100</text>
-          <text x="390" y="476" textAnchor="middle" className={styles.axisLabel}>−20</text>
-          <text x="650" y="476" textAnchor="middle" className={styles.axisLabel}>+20</text>
-          <text x="790" y="476" textAnchor="middle" className={styles.axisLabel}>+100</text>
-          <text x="915" y="476" textAnchor="middle" className={styles.axisLabel}>+500</text>
-          <text x="91" y="37" textAnchor="end" className={styles.axisLabel}>+50億/天</text>
-          <text x="91" y="128" textAnchor="end" className={styles.axisLabel}>+20億/天</text>
-          <text x="91" y="254" textAnchor="end" className={styles.axisLabel}>0億/天</text>
-          <text x="91" y="372" textAnchor="end" className={styles.axisLabel}>−20億/天</text>
-          <text x="91" y="444" textAnchor="end" className={styles.axisLabel}>−50億/天</text>
-          <text x="107" y="507" textAnchor="start" className={styles.axisTitle}>← 資金流出（億）</text>
-          <text x="917" y="507" textAnchor="end" className={styles.axisTitle}>資金流入（億） →</text>
+          <rect x="105" y="28" width="815" height="680" fill="url(#tide-grid)" className={styles.chartBg} />
+          <line x1="470" y1="28" x2="470" y2="708" className={styles.axisLine} />
+          <line x1="105" y1="360" x2="920" y2="360" className={styles.axisLine} />
+          <text x="470" y="728" textAnchor="middle" className={styles.axisLabel}>0</text>
+          <text x="110" y="728" textAnchor="middle" className={styles.axisLabel}>−500</text>
+          <text x="270" y="728" textAnchor="middle" className={styles.axisLabel}>−100</text>
+          <text x="390" y="728" textAnchor="middle" className={styles.axisLabel}>−20</text>
+          <text x="620" y="728" textAnchor="middle" className={styles.axisLabel}>+20</text>
+          <text x="780" y="728" textAnchor="middle" className={styles.axisLabel}>+100</text>
+          <text x="915" y="728" textAnchor="middle" className={styles.axisLabel}>+500</text>
+          <text x="91" y="50" textAnchor="end" className={styles.axisLabel}>+50億/天</text>
+          <text x="91" y="170" textAnchor="end" className={styles.axisLabel}>+20億/天</text>
+          <text x="91" y="364" textAnchor="end" className={styles.axisLabel}>0億/天</text>
+          <text x="91" y="560" textAnchor="end" className={styles.axisLabel}>−20億/天</text>
+          <text x="91" y="700" textAnchor="end" className={styles.axisLabel}>−50億/天</text>
+          <text x="107" y="750" textAnchor="start" className={styles.axisTitle}>← 資金流出（億）</text>
+          <text x="917" y="750" textAnchor="end" className={styles.axisTitle}>資金流入（億） →</text>
           {points.map((point) => {
             const category = flowCategory(point.theme);
             const color = CATEGORY_META[category].color;
@@ -875,25 +963,65 @@ function BubbleView({
   );
 }
 
-function RankingView({ themes, period, setPeriod, snapshot, onSelect }: { themes: ThemeRank[]; period: Period; setPeriod: (period: Period) => void; snapshot: TideProSnapshot | null; onSelect: (stock: StockRef) => void }) {
+function ReplayOverlay({ themes, date, startDate, endDate, index, max, playing, loading, onIndex, onPrevious, onNext, onPlay, onClose }: {
+  themes: ThemeRank[];
+  date: string;
+  startDate: string;
+  endDate: string;
+  index: number;
+  max: number;
+  playing: boolean;
+  loading: boolean;
+  onIndex: (index: number) => void;
+  onPrevious: () => void;
+  onNext: () => void;
+  onPlay: () => void;
+  onClose: () => void;
+}) {
+  const hotThemes = useMemo(() => [...themes].sort((a, b) => Math.abs(themeMoney(b, 5)) - Math.abs(themeMoney(a, 5))).slice(0, 30), [themes]);
+  const biggestBuy = [...themes].sort((a, b) => themeMoney(b, 5) - themeMoney(a, 5))[0];
+  const biggestSell = [...themes].sort((a, b) => themeMoney(a, 5) - themeMoney(b, 5))[0];
+  return <section className={styles.replayOverlay} role="dialog" aria-modal="true" aria-label="板塊資金輪動回放">
+    <header><b>板塊資金輪動回放</b><button className={styles.helpButton} aria-label="怎麼看這張圖"><CircleHelp size={15} /></button><button className={styles.replayFilter}>熱門 30</button><button className={styles.replayClose} onClick={onClose} aria-label="關閉回放"><X size={18} /></button></header>
+    <div className={styles.replayChart}><BubbleView themes={hotThemes} period={5} selectedTheme={null} onCloseTheme={() => {}} onSelectStock={() => {}} onSelectTheme={() => {}} />{loading && <span className={styles.replayLoading}>資料讀取中…</span>}</div>
+    <div className={styles.replaySummary}><span>近5日買最多 <b className={styles.up}>{biggestBuy?.theme ?? '—'} {formatMoney(biggestBuy ? themeMoney(biggestBuy, 5) : 0)}</b></span><span>近5日賣最多 <b className={styles.down}>{biggestSell?.theme ?? '—'} {formatMoney(biggestSell ? themeMoney(biggestSell, 5) : 0)}</b></span><strong>{date ? `${date.slice(5, 7)}/${date.slice(8)} ` : ''}{date ? new Intl.DateTimeFormat('zh-TW', { weekday: 'short' }).format(new Date(`${date}T12:00:00`)) : ''}</strong></div>
+    <div className={styles.replayTimeline}><input type="range" min={0} max={max} value={Math.min(index, max)} onChange={(event) => onIndex(Number(event.target.value))} aria-label="回放進度" /><div><span>{startDate?.slice(5).replace('-', '/')}</span><span>{endDate?.slice(5).replace('-', '/')}</span></div></div>
+    <footer><span className={styles.replayBrand}><Waves size={22} /> tide-tw.app</span><div><button onClick={onPrevious} aria-label="上一個交易日">‹</button><button onClick={onPlay} aria-label={playing ? '暫停' : '播放'}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><button onClick={onNext} aria-label="下一個交易日">›</button></div><button className={styles.speedButton}>1x</button></footer>
+  </section>;
+}
+
+function RankingView({ themes, period, setPeriod, snapshot, marketChange, onSelect }: { themes: ThemeRank[]; period: Period; setPeriod: (period: Period) => void; snapshot: TideProSnapshot | null; marketChange: number; onSelect: (stock: StockRef) => void }) {
   const [lens, setLens] = useState<'flow' | 'breadth' | 'contrarian' | 'anomaly' | 'dual'>('flow');
   const [direction, setDirection] = useState<'buy' | 'sell'>('buy');
-  const dualCodes = useMemo(() => new Set([
-    ...(direction === 'buy' ? snapshot?.simultaneousBuy ?? [] : snapshot?.simultaneousSell ?? []),
-  ].map((stock) => stock.symbol)), [direction, snapshot]);
+  const [dualMode, setDualMode] = useState<'sameBuy' | 'sameSell' | 'streakBuy' | 'streakSell'>('sameBuy');
   const rows = useMemo(() => {
     let items = [...themes];
-    if (lens === 'breadth') items = items.filter((theme) => (theme.breadth ?? 0) >= .55);
-    if (lens === 'contrarian') items = items.filter((theme) => themeMoney(theme, period) > 0 && themeReturn(theme, period) < 0);
-    if (lens === 'dual') items = items.filter((theme) => theme.members.some((member) => dualCodes.has(member.code)));
+    if (lens === 'contrarian') items = marketChange <= -1 ? items.filter((theme) => themeMoney(theme, 1) > 0) : [];
     items.sort((a, b) => {
-      if (lens === 'breadth') return direction === 'buy' ? (b.breadth ?? 0) - (a.breadth ?? 0) : (a.breadth ?? 1) - (b.breadth ?? 1);
-      if (lens === 'anomaly') return Math.abs(themeMoney(b, period)) / Math.max(1, b.stockCount) - Math.abs(themeMoney(a, period)) / Math.max(1, a.stockCount);
+      if (lens === 'breadth') return (themeMoney(b, 5) / Math.max(1, 1 + Math.max(0, themeReturn(b, 5)))) - (themeMoney(a, 5) / Math.max(1, 1 + Math.max(0, themeReturn(a, 5))));
       return direction === 'buy' ? themeMoney(b, period) - themeMoney(a, period) : themeMoney(a, period) - themeMoney(b, period);
     });
     return items;
-  }, [direction, dualCodes, lens, period, themes]);
+  }, [direction, lens, marketChange, period, themes]);
+  const stockRows = useMemo(() => {
+    const result = lens === 'anomaly'
+      ? (snapshot?.intensityLeaders ?? []).filter((stock) => direction === 'buy' ? stock.total >= 0 : stock.total < 0)
+      : lens !== 'dual' ? []
+        : dualMode === 'sameBuy' ? snapshot?.simultaneousBuy ?? []
+          : dualMode === 'sameSell' ? snapshot?.simultaneousSell ?? []
+            : (snapshot?.foreignStreaks ?? []).filter((stock) => dualMode === 'streakBuy' ? stock.streakDirection === 'buy' : stock.streakDirection === 'sell');
+    return [...result].sort((left, right) => Math.abs(right.totalValue ?? 0) - Math.abs(left.totalValue ?? 0));
+  }, [direction, dualMode, lens, snapshot]);
   const largest = Math.max(1, ...rows.map((theme) => Math.abs(themeMoney(theme, period))));
+  const note = lens === 'flow'
+    ? `近 ${period} 日法人${direction === 'buy' ? '買' : '賣'}最多的板塊（近 ${period} 個交易日累計，只呈現事實、不構成投資建議）`
+    : lens === 'breadth'
+      ? '依「近 5 日資金流入高、同期漲幅相對低」排序；僅呈現籌碼與股價的落差，不代表未來漲跌'
+      : lens === 'contrarian'
+        ? marketChange <= -1 ? `今天大盤 ${formatPct(marketChange)}，以下是逆勢獲法人買超的板塊` : `☀️ 今天大盤 ${formatPct(marketChange)}，沒有顯著下跌，逆勢買超偵測沒有啟動`
+        : lens === 'anomaly'
+          ? `今天突然被法人${direction === 'buy' ? '大買' : '大賣'}的個股（相對它近 20 日的平常，買賣力道大到異常；只呈現事實、不構成投資建議）`
+          : dualMode === 'sameBuy' ? `今天有 ${stockRows.length} 檔外資與投信同日各買超 0.5 億以上` : dualMode === 'sameSell' ? `今天有 ${stockRows.length} 檔外資與投信同日各賣超 0.5 億以上` : `外資連續${dualMode === 'streakBuy' ? '買超' : '賣超'} 3 天以上的個股`;
   return (
     <div className={styles.themeRanking}>
       <div className={styles.rankingFilters}>
@@ -902,14 +1030,15 @@ function RankingView({ themes, period, setPeriod, snapshot, onSelect }: { themes
             ['flow', '法人動向'], ['breadth', '買多漲少'], ['contrarian', '逆勢買超'], ['anomaly', '個股異常'], ['dual', '外資投信'],
           ] as const).map(([key, label]) => <button key={key} className={lens === key ? styles.rankingActive : ''} onClick={() => setLens(key)}>{label}</button>)}
         </div>
-        <div className={styles.rankingSegments}>
-          <div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>買超</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>賣超</button></div>
-          <div>{([1, 5] as Period[]).map((value) => <button key={value} className={period === value ? styles.rankingActive : ''} onClick={() => setPeriod(value)}>{value === 1 ? '當日' : '5 日'}</button>)}</div>
-        </div>
+        {lens === 'dual' ? <div className={styles.rankingSegments}><div>{([['sameBuy', '同買'], ['sameSell', '同賣'], ['streakBuy', '連買'], ['streakSell', '連賣']] as const).map(([key, label]) => <button key={key} className={dualMode === key ? styles.rankingActive : ''} onClick={() => setDualMode(key)}>{label}</button>)}</div></div> : lens === 'flow' ? <div className={styles.rankingSegments}><div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>買超</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>賣超</button></div><div>{([1, 5] as Period[]).map((value) => <button key={value} className={period === value ? styles.rankingActive : ''} onClick={() => setPeriod(value)}>{value === 1 ? '當日' : '5 日'}</button>)}</div></div> : lens === 'anomaly' ? <div className={styles.rankingSegments}><div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>爆量買</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>爆量賣</button></div></div> : null}
       </div>
-      <p className={styles.rankingNote}>近 {period} 日法人{direction === 'buy' ? '買' : '賣'}最多的板塊（只呈現公開資料事實，不構成投資建議）</p>
-      <div className={styles.rankingColumns}><span>{period} 日漲跌</span><span>{period} 日淨買超(億)</span></div>
-      <div className={styles.themeRankingList}>
+      <p className={styles.rankingNote}>{note}</p>
+      {(lens === 'anomaly' || lens === 'dual') ? <div className={styles.stockRankingList}>
+        {stockRows.map((stock, index) => <button key={stock.symbol} onClick={() => onSelect({ code: stock.symbol, name: stock.name })}><span className={styles.rankingNumber}>{index + 1}</span><span className={styles.rankingTheme}><b><i style={{ background: stock.total >= 0 ? CATEGORY_META.flood.color : CATEGORY_META.ebb.color }} />{stock.name} <small>{stock.symbol}</small></b><small>{lens === 'anomaly' ? `${stock.intensity.toFixed(1)}× 平常力道` : dualMode.startsWith('same') ? `外資 ${formatMoney(stock.foreignValue)} · 投信 ${formatMoney(stock.trustValue)}` : `外資${stock.streakDirection === 'buy' ? '連買' : '連賣'} ${stock.streak} 天`}</small></span><strong className={stock.total >= 0 ? styles.up : styles.down}>{formatMoney(stock.totalValue)}</strong><span className={styles.rankingBar}><i style={{ width: `${Math.min(100, Math.max(5, (stock.intensity ?? 1) * 18))}%` }} /></span></button>)}
+        {stockRows.length === 0 && <p className={styles.emptyText}>目前沒有符合條件的個股。</p>}
+      </div> : <>
+        {lens !== 'contrarian' || rows.length > 0 ? <div className={styles.rankingColumns}><span>5 日漲跌</span><span>{lens === 'flow' ? `${period} 日` : '5 日'}淨買超(億)</span></div> : null}
+        <div className={styles.themeRankingList}>
         {rows.map((theme, index) => {
           const amount = themeMoney(theme, period);
           const positiveMembers = theme.members.filter((member) => (member.instAmt?.[PERIOD_INDEX[period]] ?? 0) > 0).length;
@@ -926,77 +1055,10 @@ function RankingView({ themes, period, setPeriod, snapshot, onSelect }: { themes
             </button>
           );
         })}
-        {rows.length === 0 && <p className={styles.emptyText}>目前沒有符合條件的板塊。</p>}
-      </div>
+        {rows.length === 0 && <p className={styles.emptyText}>{lens === 'contrarian' ? '大盤跌幅超過 1% 時才會啟動逆勢買超偵測' : '目前沒有符合條件的板塊。'}</p>}
+      </div></>}
     </div>
   );
-}
-
-function DualView({ snapshot, onSelect }: { snapshot: TideProSnapshot | null; onSelect: (stock: StockRef) => void }) {
-  return (
-    <DataSection title="外資投信同買／同賣榜" subtitle="外資與投信今天各自買超或賣超 0.5 億元以上；以官方法人資料乘當日收盤價計算。">
-      <div className={styles.splitLists}>
-        <ProStockList title="同買" icon={<TrendingUp size={17} />} rows={snapshot?.simultaneousBuy ?? []} onSelect={onSelect} positive />
-        <ProStockList title="同賣" icon={<TrendingDown size={17} />} rows={snapshot?.simultaneousSell ?? []} onSelect={onSelect} />
-      </div>
-    </DataSection>
-  );
-}
-
-function StreakView({ snapshot, onSelect }: { snapshot: TideProSnapshot | null; onSelect: (stock: StockRef) => void }) {
-  return (
-    <DataSection title="外資連續買／賣榜" subtitle="從最新交易日往回計算，連續 3 天以上完整列出。">
-      <div className={styles.cardGrid}>
-        {(snapshot?.foreignStreaks ?? []).map((stock) => (
-          <button className={styles.metricCard} key={stock.symbol} onClick={() => onSelect({ code: stock.symbol, name: stock.name })}>
-            <div><span><b>{stock.symbol}</b> {stock.name}</span><em className={stock.streakDirection === 'buy' ? styles.up : styles.down}>{stock.streakDirection === 'buy' ? '連買' : '連賣'} {stock.streak} 天</em></div>
-            <strong className={stock.foreign >= 0 ? styles.up : styles.down}>{formatMoney(stock.foreignValue)}</strong>
-            <small>今日外資 {formatLots(stock.foreign)}</small>
-          </button>
-        ))}
-      </div>
-    </DataSection>
-  );
-}
-
-function RadarView({ snapshot, onSelect, onAlert, alerts }: { snapshot: TideProSnapshot | null; onSelect: (stock: StockRef) => void; onAlert: (stock: StockRef) => void; alerts: StockRef[] }) {
-  return (
-    <DataSection title="籌碼雷達" subtitle="依力道倍數、多法人同步與連續天數篩選；點鈴鐺即可加入不限檔監控。">
-      <div className={styles.radarFilters}><span><Gauge size={15} /> 力道 ≥ 1 倍</span><span><ShieldCheck size={15} /> 具名異動</span><span><Clock3 size={15} /> 歷史 20 日基準</span></div>
-      <div className={styles.radarList}>
-        {(snapshot?.intensityLeaders ?? []).map((stock, index) => {
-          const ref = { code: stock.symbol, name: stock.name };
-          const active = alerts.some((item) => item.code === stock.symbol);
-          return (
-            <div key={stock.symbol}>
-              <button onClick={() => onSelect(ref)}><span className={styles.radarRank}>{index + 1}</span><span><b>{stock.symbol} {stock.name}</b><small>{stock.badge ?? '法人力道放大'}</small></span></button>
-              <strong className={stock.total >= 0 ? styles.up : styles.down}>{stock.intensity.toFixed(1)}×</strong>
-              <em>{formatMoney(stock.totalValue)}</em>
-              <button className={active ? styles.alertActiveButton : styles.alertButton} onClick={() => onAlert(ref)} aria-label={`${active ? '關閉' : '開啟'} ${stock.name} 提醒`}><Bell size={15} /></button>
-            </div>
-          );
-        })}
-      </div>
-    </DataSection>
-  );
-}
-
-function ProStockList({ title, icon, rows, onSelect, positive = false }: { title: string; icon: React.ReactNode; rows: TideProStock[]; onSelect: (stock: StockRef) => void; positive?: boolean }) {
-  return (
-    <section className={styles.proList}>
-      <h3 className={positive ? styles.up : styles.down}>{icon}{title}<span>{rows.length} 檔</span></h3>
-      {rows.length === 0 ? <p className={styles.emptyText}>本日沒有達門檻股票。</p> : rows.map((stock, index) => (
-        <button key={stock.symbol} onClick={() => onSelect({ code: stock.symbol, name: stock.name })}>
-          <span className={styles.listRank}>{index + 1}</span><span><b>{stock.symbol} {stock.name}</b><small>外資 {formatMoney(stock.foreignValue)}・投信 {formatMoney(stock.trustValue)}</small></span>
-          <strong className={positive ? styles.up : styles.down}>{formatMoney(stock.totalValue)}</strong><ChevronRight size={15} />
-        </button>
-      ))}
-    </section>
-  );
-}
-
-function DataSection({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  return <div className={styles.dataSection}><header><div><h2>{title}<span>PRO</span></h2><p>{subtitle}</p></div><ShieldCheck size={20} /></header>{children}</div>;
 }
 
 function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { stock: StockRef; onClose: () => void; watched: boolean; alerted: boolean; onWatch: () => void; onAlert: () => void }) {
@@ -1021,30 +1083,36 @@ function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { s
   }, [stock.code]);
 
   const detail = useMemo(() => buildStockDetail(data.chips, data.candles, selectedDate), [data.candles, data.chips, selectedDate]);
+  const selectedDateIndex = data.chips.findIndex((row) => row.date === selectedDate);
+  const moveDate = (offset: number) => {
+    const next = data.chips[Math.max(0, Math.min(data.chips.length - 1, selectedDateIndex + offset))];
+    if (next) setSelectedDate(next.date);
+  };
 
   return (
     <div className={styles.drawerBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className={styles.stockDrawer} role="dialog" aria-modal="true" aria-label={`${stock.name} Pro 籌碼詳情`}>
         <header className={styles.drawerHeader}>
-          <div><span className={styles.stockCode}>{stock.code}</span><h2>{stock.name}</h2>{stock.theme && <small>{stock.theme}</small>}</div>
-          <button onClick={onClose} aria-label="關閉個股詳情"><X size={18} /></button>
+          <div><span className={styles.stockCode}>{stock.code}</span><h2>{stock.name}</h2></div>
+          <div className={styles.drawerHeaderActions}><div className={styles.drawerDateNav}><button onClick={() => moveDate(-1)} aria-label="前一個交易日">‹</button><select value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} aria-label="選擇資料日期">{data.chips.slice().reverse().map((row) => <option value={row.date} key={row.date}>{row.date.slice(5).replace('-', '/')}</option>)}</select><button onClick={() => moveDate(1)} aria-label="後一個交易日">›</button><span>Pro</span></div><button onClick={() => navigator.clipboard?.writeText(location.href)} aria-label="分享個股"><Share2 size={17} /></button><button onClick={onClose} aria-label="關閉個股詳情"><X size={18} /></button></div>
         </header>
-        <div className={styles.drawerActions}>
-          <button className={watched ? styles.actionActive : ''} onClick={onWatch}>{watched ? <Check size={15} /> : <Plus size={15} />}{watched ? '已在自選' : '加入自選'}</button>
-          <button className={alerted ? styles.actionActive : ''} onClick={onAlert}><Bell size={15} />{alerted ? '提醒已開啟' : '籌碼提醒'}</button>
-          <span className={styles.proPill}><ShieldCheck size={12} /> Pro 深度</span>
-        </div>
         {data.loading ? <div className={styles.drawerLoading}><Waves size={28} /><span>正在讀取法人與股價資料…</span></div> : data.error ? <div className={styles.drawerLoading}><CircleHelp size={28} /><span>{data.error}</span></div> : (
           <div className={styles.drawerContent}>
             <div className={styles.namedBadges}>
+              {stock.theme && <span>{stock.theme}</span>}
               {detail.badges.map((badge) => <span key={badge}><Sparkles size={13} />{badge}</span>)}
-              {detail.badges.length === 0 && <span><ShieldCheck size={13} />一般籌碼變動</span>}
             </div>
+
+            <section className={styles.detailCard}>
+              <header><div><h3>近 30 日股價走勢</h3><p>區間 {detail.chartCandles.length > 0 ? `${Math.min(...detail.chartCandles.map((candle) => candle.close)).toFixed(0)} – ${Math.max(...detail.chartCandles.map((candle) => candle.close)).toFixed(0)}` : '—'}　{formatPct(detail.periodChange)}</p></div><button className={styles.miniReplayButton}><Play size={12} /> 回放</button></header>
+              <StockPriceChart candles={detail.chartCandles} averageCost={detail.averageCost} selectedDate={selectedDate} />
+            </section>
+
             <section className={styles.stockSummary}>
-              <div><small>三大法人當日</small><b className={detail.latest.total >= 0 ? styles.up : styles.down}>{formatLots(detail.latest.total, false)}</b></div>
-              <div><small>近 5 日</small><b className={detail.sum5 >= 0 ? styles.up : styles.down}>{formatLots(detail.sum5, false)}</b></div>
-              <div><small>近 20 日</small><b className={detail.sum20 >= 0 ? styles.up : styles.down}>{formatLots(detail.sum20, false)}</b></div>
-              <div><small>力道標</small><b>{detail.intensity.toFixed(1)}×</b></div>
+              <div><small>當日漲跌</small><b>{detail.previousClose?.toFixed(2) ?? '—'} → {detail.selectedClose?.toFixed(2) ?? '—'}</b><strong className={detail.dailyChange >= 0 ? styles.up : styles.down}>{formatPct(detail.dailyChange)}</strong></div>
+              <div><small>法人當日買賣超</small><b className={detail.latest.total >= 0 ? styles.up : styles.down}>{formatMoney(detail.latest.total * (detail.selectedClose ?? 0) * 1000)}</b></div>
+              <div><small>近 5 日買賣超</small><b className={detail.sum5 >= 0 ? styles.up : styles.down}>{formatMoney(detail.sum5 * (detail.selectedClose ?? 0) * 1000)}</b></div>
+              <div><small>近 20 日累計</small><b className={detail.sum20 >= 0 ? styles.up : styles.down}>{formatMoney(detail.sum20 * (detail.selectedClose ?? 0) * 1000)}</b></div>
             </section>
 
             <section className={styles.detailCard}>
@@ -1057,12 +1125,11 @@ function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { s
             </section>
 
             <section className={styles.detailCard}>
-              <header><div><h3>近 30 日股價走勢</h3><p>虛線＝法人 20 日買進均價</p></div><span className={styles.costBadge}>均價 {detail.averageCost ? `$${detail.averageCost.toFixed(1)}` : '—'}</span></header>
-              <StockPriceChart candles={detail.chartCandles} averageCost={detail.averageCost} selectedDate={selectedDate} />
+              <header><div><h3>法人 20 日均價</h3><p>法人近 20 日買超日的加權平均價位</p></div><span className={styles.costBadge}>{detail.averageCost ? `$${detail.averageCost.toFixed(1)}` : '—'}</span></header>
             </section>
 
             <section className={styles.detailCard}>
-              <header><div><h3>外資停留</h3><p>從所選日期往回連續買賣天數</p></div><strong className={detail.foreignDirection === '買超' ? styles.up : styles.down}>{detail.foreignDirection} {detail.foreignStreak} 天</strong></header>
+              <header><div><h3>外資停留</h3><p>從所選日期往回連續買賣天數</p></div><strong className={detail.foreignDirection === '買超' ? styles.up : styles.down}>{detail.foreignDirection} {detail.foreignStreak} 天　{detail.intensity.toFixed(1)}× 力道</strong></header>
               <div className={styles.streakTrack}>{Array.from({ length: Math.min(20, Math.max(1, detail.foreignStreak)) }, (_, index) => <i key={index} className={detail.foreignDirection === '買超' ? styles.streakBuy : styles.streakSell} />)}</div>
             </section>
 
@@ -1072,6 +1139,10 @@ function StockDrawer({ stock, onClose, watched, alerted, onWatch, onAlert }: { s
             </section>
           </div>
         )}
+        <div className={styles.drawerActions}>
+          <button className={alerted ? styles.actionActive : ''} onClick={onAlert}><Bell size={15} />{alerted ? '提醒已開啟' : '籌碼提醒'}</button>
+          <button className={watched ? styles.actionActive : ''} onClick={onWatch}>{watched ? <Check size={15} /> : <Plus size={15} />}{watched ? '已在自選' : '加入自選'}</button>
+        </div>
       </aside>
     </div>
   );
@@ -1092,6 +1163,10 @@ function buildStockDetail(chips: ChipDay[], candles: Candle[], selectedDate: str
     foreignStreak += 1;
   }
   const candleMap = new Map(candles.map((candle) => [candle.date, candle.close]));
+  const candleIndex = Math.max(0, candles.findIndex((candle) => candle.date === selectedDate));
+  const selectedClose = candleMap.get(selectedDate) ?? candles.at(-1)?.close ?? null;
+  const previousClose = candles[Math.max(0, candleIndex - 1)]?.close ?? null;
+  const dailyChange = selectedClose != null && previousClose ? (selectedClose / previousClose - 1) * 100 : 0;
   let weightedValue = 0;
   let weightedShares = 0;
   for (const row of history.slice(-20)) {
@@ -1106,6 +1181,8 @@ function buildStockDetail(chips: ChipDay[], candles: Candle[], selectedDate: str
   if (latest.foreign < 0 && latest.trust < 0) badges.push('土洋同賣');
   if (latest.foreign * latest.trust < 0) badges.push('土洋對作');
   if (intensity >= 2.5) badges.push(latest.total >= 0 ? '異常大買' : '異常大賣');
+  const chartCandles = candles.filter((candle) => candle.date <= selectedDate).slice(-30);
+  const periodChange = chartCandles.length > 1 ? ((chartCandles.at(-1)?.close ?? 0) / chartCandles[0].close - 1) * 100 : 0;
   return {
     latest,
     sum5: sum('total', 5), sum20: sum('total', 20),
@@ -1116,7 +1193,11 @@ function buildStockDetail(chips: ChipDay[], candles: Candle[], selectedDate: str
     foreignDirection,
     foreignStreak,
     averageCost: weightedShares > 0 ? weightedValue / weightedShares : null,
-    chartCandles: candles.filter((candle) => candle.date <= selectedDate).slice(-30),
+    chartCandles,
+    selectedClose,
+    previousClose,
+    dailyChange,
+    periodChange,
     badges,
   };
 }
@@ -1135,15 +1216,18 @@ function StockPriceChart({ candles, averageCost, selectedDate }: { candles: Cand
   const y = (value: number) => 155 - ((value - min) / range) * 120;
   const path = candles.map((candle, index) => `${index === 0 ? 'M' : 'L'} ${x(index)} ${y(candle.close)}`).join(' ');
   const selectedIndex = candles.findIndex((candle) => candle.date === selectedDate);
+  const maxVolume = Math.max(1, ...candles.map((candle) => candle.volume ?? 0));
   return (
-    <svg className={styles.priceChart} viewBox="0 0 580 180" role="img" aria-label="近 30 日股價與法人均價走勢">
+    <svg className={styles.priceChart} viewBox="0 0 580 230" role="img" aria-label="近 30 日股價與成交量走勢">
       <defs><linearGradient id="price-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#3e8f88" stopOpacity=".32" /><stop offset="1" stopColor="#3e8f88" stopOpacity="0" /></linearGradient></defs>
       {[0, 1, 2, 3].map((line) => <line key={line} x1="24" x2="556" y1={35 + line * 40} y2={35 + line * 40} className={styles.priceGrid} />)}
       <path d={`${path} L ${x(candles.length - 1)} 165 L 24 165 Z`} fill="url(#price-fill)" />
       <path d={path} className={styles.pricePath} />
       {averageCost != null && <line x1="24" x2="556" y1={y(averageCost)} y2={y(averageCost)} className={styles.costLine} />}
       {selectedIndex >= 0 && <><line x1={x(selectedIndex)} x2={x(selectedIndex)} y1="25" y2="165" className={styles.selectedLine} /><circle cx={x(selectedIndex)} cy={y(candles[selectedIndex].close)} r="4" className={styles.selectedPoint} /></>}
-      <text x="24" y="176" className={styles.chartText}>{candles[0].date.slice(5)}</text><text x="556" y="176" textAnchor="end" className={styles.chartText}>{candles.at(-1)?.date.slice(5)}</text>
+      <text x="24" y="178" className={styles.chartText}>成交量（張）</text>
+      {candles.map((candle, index) => <rect key={candle.date} x={x(index) - 4} y={218 - ((candle.volume ?? 0) / maxVolume) * 28} width="8" height={Math.max(2, ((candle.volume ?? 0) / maxVolume) * 28)} className={index > 0 && candle.close < candles[index - 1].close ? styles.volumeDown : styles.volumeUp} />)}
+      <text x="24" y="229" className={styles.chartText}>{candles[0].date.slice(5)}</text><text x="556" y="229" textAnchor="end" className={styles.chartText}>{candles.at(-1)?.date.slice(5)}</text>
     </svg>
   );
 }
