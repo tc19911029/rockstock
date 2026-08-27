@@ -26,17 +26,16 @@ export interface InstStealEval {
 }
 
 /** 在 candles 第 t 根算「結束於 t、長度 w」的主力分點集中度%。
- *  容許視窗內少數天缺 broker：只加總「有 broker 的天」的淨額÷量，需至少 60% 的天在場
- *  （w=5 → ≥3 天）才回值，否則資料太稀不可信 → null。
+ *  舊回測/走圖可用 minCoverage=0.6 容許少數歷史缺日；正式近似掃描傳 1，任一日缺失即 null。
  *  為何容缺（2026-07-24）：Yahoo 券商分點只給當天、無歷史，某天 snapshot cron 漏跑就是永久洞
  *  （如 07-14/15、07-23）。舊版「缺一天整段回 null」會讓那個洞污染之後 concWin+concRiseBack≈10 個
- *  交易日的掃描（每個含洞的視窗都 null → 靜默漏股）。缺 1 天改用其餘 4 天的淨額÷量仍是合法集中度、
- *  非 fabricate，且對未來任何單日漏跑自動免疫。 */
+ *  交易日的掃描（每個含洞的視窗都 null → 靜默漏股）。現在由呼叫端明確選擇呈現容缺或策略 fail closed。 */
 function concentration(
   candles: Candle[],
   brokerByDate: Map<string, number>,
   t: number,
   w: number,
+  minCoverage: number,
 ): number | null {
   if (t - w + 1 < 0) return null;
   let net = 0, vol = 0, present = 0;
@@ -47,7 +46,7 @@ function concentration(
     vol += candles[k].volume || 0;
     present++;
   }
-  if (present < Math.ceil(w * 0.6)) return null; // 在場天數太少 → 不可信
+  if (present < Math.ceil(w * minCoverage)) return null; // 在場天數太少 → 不可信
   if (vol <= 0) return null;
   return (net / vol) * 100; // 兩者皆「張」，不可再 ×1000
 }
@@ -71,6 +70,8 @@ export function evaluateAt(
   /** 嚴格模式（掃描用）：conc5ByDate 該日缺 FinMind 值 → 直接略過該股（回 null），
    *  不退回簡化版（避免「FinMind 限流時靜默選到舊公式的股」）。條件面板走圖往回看用 false。 */
   strictConc = false,
+  /** Yahoo 近似模式的最小日窗覆蓋；正式掃描傳 1，舊回測/走圖預設維持 0.6。 */
+  brokerMinCoverage = 0.6,
 ): InstStealEval | null {
   const { dropWin, dropMax, concWin, concRiseBack, concCap, volRatioMax, instWin, instConsecMin, concRequirePositive } = params;
   // 往回需要：concWin + concRiseBack（算 concRiseBack 日前的集中度）、20（量比）、dropWin、instWin
@@ -82,8 +83,8 @@ export function evaluateAt(
   const fmConc5 = conc5ByDate?.get(candles[t].date);
   const fmConc5prev = conc5ByDate?.get(candles[t - concRiseBack].date);
   const noFallback = strictConc && !!conc5ByDate;
-  const conc5 = fmConc5 != null ? fmConc5 : (noFallback ? null : concentration(candles, brokerByDate, t, concWin));
-  const conc5prev = fmConc5prev != null ? fmConc5prev : (noFallback ? null : concentration(candles, brokerByDate, t - concRiseBack, concWin));
+  const conc5 = fmConc5 != null ? fmConc5 : (noFallback ? null : concentration(candles, brokerByDate, t, concWin, brokerMinCoverage));
+  const conc5prev = fmConc5prev != null ? fmConc5prev : (noFallback ? null : concentration(candles, brokerByDate, t - concRiseBack, concWin, brokerMinCoverage));
   if (conc5 == null || conc5prev == null) return null;
 
   // 法人 instWin 日合計淨買超 + 連買天數（資料任一日缺 → 不評估）
@@ -140,6 +141,7 @@ export function evaluateLatest(
   params: InstStealParams = DEFAULT_PARAMS,
   conc5ByDate?: Map<string, number | null>,
   strictConc = false,
+  brokerMinCoverage = 0.6,
 ): InstStealEval | null {
   const need = Math.max(params.concWin + params.concRiseBack, 20, params.dropWin, params.instWin);
   // strict：該日有集中度 = FinMind 有；非 strict：FinMind 有 或 broker 有（會退回 broker）
@@ -147,7 +149,7 @@ export function evaluateLatest(
     strictConc && conc5ByDate ? conc5ByDate.get(d) != null : (conc5ByDate?.get(d) != null) || brokerByDate.has(d);
   for (let t = candles.length - 1; t >= need; t--) {
     if (hasConc(candles[t].date) && instByDate.has(candles[t].date)) {
-      return evaluateAt(candles, brokerByDate, instByDate, t, params, conc5ByDate, strictConc);
+      return evaluateAt(candles, brokerByDate, instByDate, t, params, conc5ByDate, strictConc, brokerMinCoverage);
     }
   }
   return null;

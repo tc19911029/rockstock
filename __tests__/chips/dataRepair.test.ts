@@ -4,6 +4,7 @@ import { calculateDayTradeRatio } from '@/lib/datasource/FinmindChipExtras';
 import { parseTpexInstitutionalRows } from '@/lib/datasource/TpexInstitutional';
 import { normaliseChipResponse } from '@/lib/agents/agents/chipAgent';
 import { assessChipCoverageLevel } from '@/lib/health/chipCoverage';
+import { redactSensitiveText } from '@/lib/datasource/curlFetch';
 
 describe('籌碼資料修復契約', () => {
   test('TPEx 法人欄位映射使用外資/投信/自營合計欄', () => {
@@ -70,5 +71,15 @@ describe('籌碼資料修復契約', () => {
     expect(assessChipCoverageLevel(0.92, 0.99)).toBe('yellow');
     expect(assessChipCoverageLevel(0.89, 0.99)).toBe('red');
     expect(assessChipCoverageLevel(1, 1, 0.93)).toBe('yellow');
+  });
+
+  test('curl 錯誤訊息不會洩漏 query token 或 Bearer credential', () => {
+    const redacted = redactSensitiveText(
+      'curl https://example.test/data?dataset=x&token=secret-123&api_key=also-secret -H Authorization: Bearer abc.def',
+    );
+    expect(redacted).not.toContain('secret-123');
+    expect(redacted).not.toContain('also-secret');
+    expect(redacted).not.toContain('abc.def');
+    expect(redacted.match(/\[REDACTED\]/g)?.length).toBe(3);
   });
 });

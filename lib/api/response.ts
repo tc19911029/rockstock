@@ -34,6 +34,18 @@ export function apiError(
   );
 }
 
+/** Return a structured non-success response while preserving machine-readable diagnostics. */
+export function apiFailure<T extends object>(
+  message: string,
+  details: T,
+  status = 503,
+): NextResponse {
+  return NextResponse.json(
+    { ok: false, error: message, ...details },
+    { status },
+  );
+}
+
 /** Return a validation error from Zod */
 export function apiValidationError(
   error: ZodError,

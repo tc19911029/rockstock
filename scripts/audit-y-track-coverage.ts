@@ -91,6 +91,8 @@ async function main() {
     if (file?.candles.some(candle => candle.date === date)) pool.push(symbol);
   }
   const codes = pool.map(s => s.split('.')[0]);
+  const { assessYTrackReadiness } = await import('@/lib/chips/yTrackReadiness');
+  const readiness = await assessYTrackReadiness(date, pool);
 
   // 索引健康
   const two = pool.filter(s => s.endsWith('.TWO')).length;
@@ -114,20 +116,22 @@ async function main() {
   console.log(`  法人     ${i}/${n} (${(iPct * 100).toFixed(0)}%)`);
   console.log(`  ${concLabel}   ${NO_FINMIND ? b : c}/${n} (${(concPct * 100).toFixed(0)}%)`);
   console.log(`  索引健康：2330在前500=${has2330}，.TWO=${two}（正常80~280）`);
+  console.log(`  策略完整10日窗 ${readiness.strategyWindow.count}/${readiness.tradedPool} (${(readiness.strategyWindow.coverage * 100).toFixed(1)}%)；模式=${readiness.mode}`);
 
   const problems: string[] = [];
   if (indexBad) problems.push(`turnover索引異常(2330在前=${has2330}, .TWO=${two})`);
   if (bPct < THRESHOLD) problems.push(`主力分點覆蓋 ${(bPct * 100).toFixed(0)}%`);
   if (iPct < THRESHOLD) problems.push(`法人覆蓋 ${(iPct * 100).toFixed(0)}%`);
   if (concPct < THRESHOLD) problems.push(`${concLabel}覆蓋 ${(concPct * 100).toFixed(0)}%`);
+  if (!readiness.ready) problems.push(...readiness.reasons);
 
   if (problems.length) {
-    const text = `🚨 Y軌資料不齊 @${date}：${problems.join('；')} — 法人偷買掃描會 silent 漏股。修：npx tsx scripts/backfill-inst-top500.ts + node scripts/run-broker-bulk.ts`;
+    const text = `🚨 Y軌資料不齊 @${date}：${Array.from(new Set(problems)).join('；')} — 掃描已 fail closed，不會用殘缺資料產生訊號。修復：重跑 /api/cron/fetch-institutional 與 /api/cron/snapshot-broker-tw，再看 /health。`;
     console.error('\n' + text);
     await alert(text);
     process.exit(1);
   }
-  const okText = `Y軌資料齊全 @${date}：主力分點/法人/${concLabel} 各 ${(bPct * 100).toFixed(0)}/${(iPct * 100).toFixed(0)}/${(concPct * 100).toFixed(0)}%，索引健康（2330在前、.TWO ${two}）。即時掃描池子完整覆蓋。`;
+  const okText = `Y軌資料齊全 @${date}：主力分點/法人/${concLabel} 各 ${(bPct * 100).toFixed(0)}/${(iPct * 100).toFixed(0)}/${(concPct * 100).toFixed(0)}%，策略完整10日窗 ${(readiness.strategyWindow.coverage * 100).toFixed(1)}%，索引健康（2330在前、.TWO ${two}）。`;
   console.log('\n✅ ' + okText);
   await confirmOnceIfFlagged(okText);
 }

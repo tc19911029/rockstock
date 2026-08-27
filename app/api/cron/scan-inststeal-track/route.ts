@@ -23,13 +23,16 @@ export async function GET(req: NextRequest) {
   try {
     const result = await runInstStealTrack(date);
     return apiOk({
-      market: 'TW', date, universe: result.universe, resultCount: result.resultCount,
+      market: 'TW', date, universe: result.universe, requestedUniverse: result.requestedUniverse,
+      resultCount: result.resultCount, yTrackReadiness: result.readiness, repair: result.repair,
       dataFreshness: {
-        status: 'valid', source: 'sealed-L1', coverageRate: coverage.coverageRate,
+        status: result.readiness.strategyWindow.coverage === 1 ? 'valid' : 'degraded',
+        source: result.readiness.mode,
+        coverageRate: result.readiness.strategyWindow.coverage,
         totalStocks: coverage.totalStocks, stocksCurrent: coverage.stocksCurrent,
       },
     });
   } catch (error) {
-    return apiError(`Y track failed: ${String(error)}`, 500);
+    return apiError(`Y track failed closed: ${String(error)}`, 503);
   }
 }

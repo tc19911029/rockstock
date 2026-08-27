@@ -119,4 +119,13 @@ describe('Y 法人偷買(原) — 訊號邏輯（lib/inststeal 單一事實）',
     expect(ev?.isDropping).toBe(false);
     expect(ev?.isHit).toBe(false);
   });
+
+  it('正式 Yahoo 近似模式任一視窗缺日就不評估，走圖容缺模式仍可呈現', () => {
+    const cs = candlesFalling();
+    const inst = new Map(cs.map(c => [c.date, 100]));
+    const broker = brokerRising(cs);
+    broker.delete(cs[18].date);
+    expect(evaluateAt(cs, broker, inst, t(cs), DEFAULT_PARAMS)).not.toBeNull();
+    expect(evaluateAt(cs, broker, inst, t(cs), DEFAULT_PARAMS, undefined, false, 1)).toBeNull();
+  });
 });

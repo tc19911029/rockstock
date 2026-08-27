@@ -2215,13 +2215,22 @@ export abstract class MarketScanner {
         } catch { return null; }
 
         // 兩階段（省 FinMind 配額）：先用便宜條件(在跌+法人連買)粗篩，過了才抓 FinMind 集中度精算。
-        const cheap = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS);
-        if (!cheap || !cheap.isDropping || !cheap.isInstBuying) return null;
+        const cheap = evaluateLatest(
+          candles,
+          brokerByDate,
+          instByDate,
+          DEFAULT_PARAMS,
+          undefined,
+          false,
+          noFinmind ? 1 : 0.6,
+        );
+        // evaluateLatest 會往前找最近可評估日；正式日掃描不得把前一日訊號冒充今天。
+        if (!cheap || (asOfDate && cheap.date !== asOfDate) || !cheap.isDropping || !cheap.isInstBuying) return null;
         let ev;
         if (noFinmind) {
-          // FinMind 失效：退回 broker(Yahoo 前15大)「淨額÷量」集中度。broker 檔齊到今天無缺口，
-          // 與 FinMind 同用前15大資料，差別僅「區間排名 vs 每日加總」，資訊等價。
-          ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS);
+          // Yahoo 只能提供「每日前15大」；這是獨立的近似觀察模式，不等於 FinMind 區間重排。
+          // 正式掃描要求兩個 5 日窗共 10 日全數存在，禁止用殘窗改變訊號語意。
+          ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS, undefined, false, 1);
         } else {
           // 通過粗篩 → FinMind 正式集中度（跟看盤 app + 顯示表同一套公式）重評「集中度在爬」
           const conc5Map = await computeConc5Map(code, candles, {
@@ -2231,7 +2240,7 @@ export abstract class MarketScanner {
           });
           ev = evaluateLatest(candles, brokerByDate, instByDate, DEFAULT_PARAMS, conc5Map, true /* strict: FinMind 缺就略過、不用舊公式 */);
         }
-        if (!ev || !ev.isHit) return null;
+        if (!ev || (asOfDate && ev.date !== asOfDate) || !ev.isHit) return null;
 
         const lastIdx = candles.length - 1;
         const last = candles[lastIdx];
@@ -2241,7 +2250,13 @@ export abstract class MarketScanner {
         const result: StockScanResult = {
           symbol, name, market: config.marketId, industry,
           price: last.close, changePercent, volume: last.volume,
-          triggeredRules: [], matchedMethods: ['Y'], sixConditionsScore: 0,
+          triggeredRules: noFinmind ? [{
+            ruleId: 'Y_APPROX_CONCENTRATION',
+            ruleName: 'Y 軌近似集中度來源',
+            signalType: 'WATCH',
+            reason: 'Yahoo 每日前15大近似；非 FinMind 全分點區間重排正式值',
+          }] : [],
+          matchedMethods: ['Y'], sixConditionsScore: 0,
           sixConditionsBreakdown: { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false },
           trendState: detectTrend(candles, lastIdx),
           trendPosition: detectTrendPosition(candles, lastIdx),
@@ -2254,6 +2269,9 @@ export abstract class MarketScanner {
           instStealConsec: ev.instConsecDays,
           instStealVolumeWarn: ev.volumeWarn,
           instStealConcHighWarn: ev.concHighWarn,
+          chipDetail: noFinmind
+            ? 'Y 軌集中度：Yahoo 每日前15大近似（完整10日窗）'
+            : 'Y 軌集中度：FinMind 全分點區間重排正式值',
           dataFreshness: { lastCandleDate: fetchResult.lastCandleDate, daysStale: fetchResult.staleDays, source: fetchResult.source },
         };
         return { result, consec: ev.instConsecDays, conc5: ev.conc5 };

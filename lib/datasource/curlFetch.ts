@@ -21,6 +21,14 @@ const execFileAsync = promisify(execFile);
 
 const DEFAULT_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+/** 防止 child_process/curl 錯誤把帶憑證的完整 command 寫進 cron log。 */
+export function redactSensitiveText(input: unknown): string {
+  return String(input)
+    .replace(/([?&](?:token|api_token|access_token|key|api_key)=)[^&\s)'\"]+/gi, '$1[REDACTED]')
+    .replace(/(authorization\s*:\s*bearer\s+)[^\s)'\"]+/gi, '$1[REDACTED]')
+    .replace(/(\bbearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[REDACTED]');
+}
+
 // ── 本機代理 fallback（2026-06-12）────────────────────────────────────────────
 // 本機直連對部分站（CMoney / MoneyDJ / TPEx / TWSE bulk）會被網路層 TLS reset
 //（curl exit 35 / Node fetch ECONNRESET，中國線路時段性干擾），但本機 Clash/Verge
@@ -173,8 +181,8 @@ export async function fetchJsonWithCurlFallback<T>(
     return { data, source: 'curl' };
   } catch (err) {
     // 兩條都掛 → throw 最後錯誤（包含 fetch 與 curl 兩條都的 trace）
-    const fetchMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    const curlMsg = err instanceof Error ? err.message : String(err);
+    const fetchMsg = redactSensitiveText(lastErr instanceof Error ? lastErr.message : lastErr);
+    const curlMsg = redactSensitiveText(err instanceof Error ? err.message : err);
     throw new Error(`fetch failed (${fetchMsg}); curl fallback also failed (${curlMsg})`);
   }
 }
@@ -232,8 +240,8 @@ export async function fetchTextWithCurlFallback(
     if (!validate(stdout)) throw new Error(`curl content failed validation (${stdout.length}B)`);
     return { text: stdout, source: 'curl' };
   } catch (err) {
-    const fetchMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    const curlMsg = err instanceof Error ? err.message : String(err);
+    const fetchMsg = redactSensitiveText(lastErr instanceof Error ? lastErr.message : lastErr);
+    const curlMsg = redactSensitiveText(err instanceof Error ? err.message : err);
     throw new Error(`text fetch failed (${fetchMsg}); curl fallback also failed (${curlMsg})`);
   }
 }
@@ -280,8 +288,8 @@ export async function fetchBufferWithCurlFallback(
     return { buffer: buf, source: 'curl' };
   } catch (err) {
     try { (await import('node:fs')).unlinkSync(tmpPath); } catch { /* file may not exist */ }
-    const fetchMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    const curlMsg = err instanceof Error ? err.message : String(err);
+    const fetchMsg = redactSensitiveText(lastErr instanceof Error ? lastErr.message : lastErr);
+    const curlMsg = redactSensitiveText(err instanceof Error ? err.message : err);
     throw new Error(`fetch buffer failed (${fetchMsg}); curl fallback also failed (${curlMsg})`);
   }
 }

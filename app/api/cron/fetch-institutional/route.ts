@@ -3,7 +3,7 @@
  * 收盤後 15:30 CST (UTC 07:30) 資料公開後觸發
  */
 import { NextRequest } from 'next/server';
-import { apiOk, apiError } from '@/lib/api/response';
+import { apiOk, apiError, apiFailure } from '@/lib/api/response';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { fetchTWSEInstitutional } from '@/lib/datasource/TWSEInstitutional';
@@ -13,9 +13,31 @@ import { checkCronAuth } from '@/lib/api/cronAuth';
 import { readTurnoverRank } from '@/lib/scanner/TurnoverRank';
 import { syncInstitutionalDailyToStockCache } from '@/lib/chips/institutionalDailySync';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { redactSensitiveText } from '@/lib/datasource/curlFetch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+function syncCoverage(sync: { requested: number; written: number }): number {
+  return sync.requested > 0 ? +(sync.written / sync.requested).toFixed(4) : 0;
+}
+
+function institutionalResponse(
+  date: string,
+  count: number,
+  sync: Awaited<ReturnType<typeof syncCurrentUniverse>>,
+  extra: Record<string, unknown> = {},
+) {
+  const coverage = syncCoverage(sync);
+  const details = { date, count, sync, coverage, ...extra };
+  if (sync.requested === 0 || coverage < 0.98 || sync.missing > 0) {
+    return apiFailure('institutional stock-cache sync incomplete', {
+      dataStatus: 'degraded',
+      ...details,
+    });
+  }
+  return apiOk({ dataStatus: 'complete', ...details });
+}
 
 function mergeInstitutionalRecords(
   ...sources: Array<ReadonlyArray<Awaited<ReturnType<typeof fetchTWSEInstitutional>>[number]>>
@@ -62,13 +84,9 @@ export async function GET(req: NextRequest) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
   }
 
-  // 避免重複抓
+  // 日檔存在不代表兩個官方來源都完整；每次重跑都重新抓 TWSE + TPEx，讓部分成功可自癒。
+  // existing 只作「本次某來源失敗時不倒退覆蓋」的保底，不能短路重試。
   const existing = await readInstitutionalTW(date);
-  if (existing && existing.length > 0 && !dateParam) {
-    // 舊快取可能只含 TWSE，無來源 metadata；只同步確實存在的列，不把未知的 TPEx 值補成 0。
-    const sync = await syncCurrentUniverse(date, existing, { twse: false, tpex: false });
-    return apiOk({ skipped: true, reason: 'already cached; stock cache re-synced', date, count: existing.length, sync });
-  }
 
   try {
     const [twseResult, tpexResult] = await Promise.allSettled([
@@ -81,18 +99,24 @@ export async function GET(req: NextRequest) {
     // 不允許「部分成功」把完整日檔降級覆蓋成半份資料。
     const records = mergeInstitutionalRecords(existing ?? [], twse, tpex);
     if (records.length === 0) {
-      return apiOk({ skipped: true, reason: 'empty response (non-trading or not yet published)', date });
+      return apiOk({
+        skipped: true,
+        dataStatus: 'pending',
+        reason: 'empty response (non-trading or not yet published)',
+        date,
+      }, { status: 202 });
     }
     await saveInstitutionalTW(date, records);
     const sync = await syncCurrentUniverse(date, records, {
       twse: twseResult.status === 'fulfilled' && twse.length > 0,
       tpex: tpexResult.status === 'fulfilled' && tpex.length > 0,
     });
-    return apiOk({
-      date,
-      count: records.length,
+    return institutionalResponse(date, records.length, sync, {
       sources: { twse: twse.length, tpex: tpex.length },
-      sync,
+      sourceErrors: {
+        twse: twseResult.status === 'rejected' ? redactSensitiveText(twseResult.reason) : null,
+        tpex: tpexResult.status === 'rejected' ? redactSensitiveText(tpexResult.reason) : null,
+      },
     });
   } catch (err) {
     return apiError(err instanceof Error ? err.message : String(err), 500);

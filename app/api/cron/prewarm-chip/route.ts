@@ -59,23 +59,32 @@ export async function GET(req: NextRequest) {
   const warmed = results.filter(r => r.chipMs !== null || r.costMs !== null).length;
   if (warmed === 0) return apiError('prewarm 全部失敗', 500);
 
+  const noFinmind = process.env.INSTSTEAL_NO_FINMIND === '1';
+
   // ── 主力分點補寫（2026-06-19，取代會漏的 Yahoo 250 檔 cron）─────────────────
   // 用 FinMind 分點（同源、無 250 上限、有歷史）逐檔補寫 broker 檔最新一筆，讓
   // 主力成本(brokerCost)/掃描/chip 集中度欄持續累積。best-effort，失敗不擋。
   let brokerSnap = 0;
-  for (const sym of symbols) {
-    const code = sym.replace(/\.(TW|TWO)$/i, '');
-    try {
-      if (await snapshotBrokerDayFromFinMind(code)) brokerSnap++;
-    } catch { /* 單檔失敗不擋整批 */ }
+  if (!noFinmind) {
+    for (const sym of symbols) {
+      const code = sym.replace(/\.(TW|TWO)$/i, '');
+      try {
+        if (await snapshotBrokerDayFromFinMind(code)) brokerSnap++;
+      } catch { /* 單檔失敗不擋整批 */ }
+    }
   }
 
   // ── 籌碼資料體檢（2026-06-19）─────────────────────────────────────────────
   // 暖完順手體檢：持倉股「買賣超/集中度」(FinMind 分點同源) 有沒有變空/過期。
   // 紅了走 ntfy 推手機 → 系統先叫、不用使用者眼睛掃到才發現（買賣超原靠 Yahoo 250 檔
   // 上限的 cron 靜默漏，就是這樣才沒人知道）。best-effort，失敗不擋 prewarm。
-  let chipAlarm: { level: string; checked: number; staleCount: number; pushed: boolean } | null = null;
+  let chipAlarm: { level: string; checked: number; staleCount: number; pushed: boolean; note?: string } | null = noFinmind
+    ? { level: 'degraded', checked: 0, staleCount: 0, pushed: false, note: 'FinMind exact source disabled; Y-track readiness is checked separately' }
+    : null;
   try {
+    if (noFinmind) {
+      return apiOk({ warmed, total: symbols.length, results, brokerSnap, brokerSnapSkipped: true, chipAlarm });
+    }
     const chip = await checkChipFreshness();
     let pushed = false;
     if (chip.level === 'red' && chip.stale.length > 0) {

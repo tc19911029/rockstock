@@ -7,34 +7,37 @@
  *
  * 純顯示資料流，不進選股 gate（鐵則 #5）。
  *
- * 宇宙（2026-06-19 修）：預設＝成交額前 500（readTurnoverRank，與 Y/X 軌掃描池子同一份）。
+ * 宇宙：預設＝成交額前 800 緩衝池（Y/X 軌使用前 500，新進股票先累積歷史）。
  * 舊版用 `slice(0,250)` 取「代號最小 250 檔」（00403A~1907，全是 ETF＋1字頭），熱門股與
  * 整個成交額前 500 幾乎都不在名單裡 → 主力分點卡好幾天不更新 → Y軌（法人偷買）最近掃出 0。
  * 改讀 turnover-rank 索引根治；索引缺/壞 → fallback 舊的 inst∪broker cache slice。
  *
  * 用法：
- *   /api/cron/snapshot-broker-tw                  # 預設宇宙＝成交額前 500（turnover-rank 索引）
+ *   /api/cron/snapshot-broker-tw                  # 預設宇宙＝成交額前 800 緩衝池
  *   /api/cron/snapshot-broker-tw?codes=3661,2330  # 指定清單
  *   /api/cron/snapshot-broker-tw?limit=300        # 調整上限
  */
 import { NextRequest } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { apiOk } from '@/lib/api/response';
+import { apiOk, apiFailure } from '@/lib/api/response';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { checkCronAuth } from '@/lib/api/cronAuth';
 import { fetchYahooBrokerTrades } from '@/lib/datasource/YahooBrokerScraper';
 import { appendBrokerDay } from '@/lib/chips/BrokerStorage';
 import { readTurnoverRank } from '@/lib/scanner/TurnoverRank';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const INST_DIR = path.join(process.cwd(), 'data', 'chips', 'TW', 'inst');
 const BROKER_DIR = path.join(process.cwd(), 'data', 'chips', 'TW', 'broker');
-const DEFAULT_LIMIT = 500;
+// 抓大於策略前500的緩衝池，讓新進前500股票已累積足夠的10/20日歷史。
+const DEFAULT_LIMIT = 800;
 const CONCURRENCY = 6;
+const MIN_COVERAGE = 0.98;
 
 async function listCodes(dir: string): Promise<string[]> {
   try {
@@ -67,8 +70,22 @@ export async function GET(req: NextRequest) {
     // 預設＝成交額前 500（與 Y/X 軌掃描池子同一份索引）→ 被掃的股票每日都有新鮮主力分點
     const rank = await readTurnoverRank('TW');
     if (rank && rank.symbols.size > 0) {
-      codes = Array.from(rank.symbols).map(s => s.replace(/\.(TW|TWO)$/i, '').trim()).filter(Boolean).slice(0, limit);
-      universe = `turnover-top${rank.topN}@${rank.date}`;
+      let rankedSymbols = Array.from(rank.symbols);
+      if (limit > rankedSymbols.length) {
+        const { TaiwanScanner } = await import('@/lib/scanner/TaiwanScanner');
+        const { computeTurnoverRankAsOfDate } = await import('@/lib/scanner/TurnoverRank');
+        const all = await new TaiwanScanner().getStockList();
+        rankedSymbols = Array.from((await computeTurnoverRankAsOfDate('TW', all, date, limit)).keys());
+      }
+      // 停牌／當日無成交不算缺漏，也不浪費 Yahoo 請求。
+      const traded = await Promise.all(rankedSymbols.slice(0, limit).map(async symbol => {
+        const file = await readCandleFile(symbol, 'TW').catch(() => null);
+        return file?.candles.some(candle => candle.date === date) ? symbol : null;
+      }));
+      codes = traded
+        .filter((symbol): symbol is string => !!symbol)
+        .map(symbol => symbol.replace(/\.(TW|TWO)$/i, '').trim());
+      universe = `turnover-top${limit}-traded@${date}`;
     } else {
       // fallback：索引缺/壞 → 舊行為（inst∪broker cache）
       const [brokerCodes, instCodes] = await Promise.all([listCodes(BROKER_DIR), listCodes(INST_DIR)]);
@@ -83,23 +100,36 @@ export async function GET(req: NextRequest) {
 
   let written = 0;
   let missed = 0;
-  for (let i = 0; i < codes.length; i += CONCURRENCY) {
-    const chunk = codes.slice(i, i + CONCURRENCY);
-    await Promise.all(chunk.map(async code => {
+  let stale = 0;
+  let pending = Array.from(new Set(codes));
+  for (let attempt = 1; attempt <= 2 && pending.length > 0; attempt++) {
+    const failed: string[] = [];
+    for (let i = 0; i < pending.length; i += CONCURRENCY) {
+      const chunk = pending.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(async code => {
       try {
         const t = await fetchYahooBrokerTrades(code);
-        if (!t) { missed++; return; }
-        const d = /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : date;
-        await appendBrokerDay(code, d, {
+        if (!t) { failed.push(code); return; }
+        if (t.date !== date) { stale++; return; }
+        await appendBrokerDay(code, date, {
           netDifference: t.totalDifferenceVolK,
           concentration: +(t.concentration * 100).toFixed(2),
         });
         written++;
       } catch {
-        missed++;
+        failed.push(code);
       }
-    }));
+      }));
+    }
+    pending = failed;
   }
+  missed = pending.length;
 
-  return apiOk({ date, universe, requested: codes.length, written, missed });
+  // Yahoo 回傳別的日期只能標成 stale，不能假裝今天已有資料。
+  const coverage = codes.length > 0 ? +(written / codes.length).toFixed(4) : 0;
+  const details = { date, universe, requested: codes.length, written, stale, missed, coverage };
+  if (coverage < MIN_COVERAGE || missed > 0 || stale > 0) {
+    return apiFailure('broker snapshot incomplete after retry', { dataStatus: 'degraded', ...details });
+  }
+  return apiOk({ dataStatus: 'complete', ...details });
 }

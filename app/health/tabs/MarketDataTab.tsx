@@ -42,6 +42,16 @@ interface DependencyHealth {
     };
     level: 'green' | 'yellow' | 'red';
   };
+  yTrackReadiness?: {
+    date: string;
+    mode: 'finmind_exact' | 'yahoo_daily_approximate';
+    tradedPool: number;
+    institutionalCurrent: { count: number; coverage: number };
+    brokerCurrent: { count: number; coverage: number };
+    strategyWindow: { count: number; coverage: number; requiredDays: number };
+    ready: boolean;
+    reasons: string[];
+  };
   paperTrack: { level: 'ok' | 'warning' | 'stale' | 'missing'; ageDays: number | null; message: string; updatedAt: string | null };
   dataSourceResilience: { total: number; protected: number; degraded: number; unprotected: number };
 }
@@ -76,6 +86,9 @@ function deriveOverallLight(markets: (MarketHealthLite | null)[], dependencies: 
     if (dependencies.finMindBranch.kind === 'permission_denied' || dependencies.finMindBranch.kind === 'unavailable') lights.push('yellow');
     else if (dependencies.finMindBranch.kind !== 'ok') lights.push('yellow');
     lights.push(dependencies.chipCoverage.level);
+    if (!dependencies.yTrackReadiness?.ready) lights.push('red');
+    else if (dependencies.yTrackReadiness.mode === 'yahoo_daily_approximate'
+      || dependencies.yTrackReadiness.strategyWindow.coverage < 1) lights.push('yellow');
     if (dependencies.dataSourceResilience.unprotected > 0) lights.push('red');
     else if (dependencies.dataSourceResilience.degraded > 0) lights.push('yellow');
     if (dependencies.paperTrack.level === 'stale' || dependencies.paperTrack.level === 'missing') lights.push('red');
@@ -197,7 +210,7 @@ export function MarketDataTab() {
             title="FinMind 主力分點"
             level={dependencies?.finMindBranch.kind === 'ok' ? 'green' : 'yellow'}
             message={dependencies?.finMindBranch.message ?? '尚未完成檢查'}
-            detail="精確源失效時改用 Yahoo／本地快照估算；估算值不觸發交易訊號"
+            detail="精確源失效時使用獨立標示的 Yahoo 每日前15大近似模式；只在完整10日窗達標時評估訊號"
           />
           <DependencyCard
             title="籌碼前 500 可交易股覆蓋"
@@ -206,7 +219,7 @@ export function MarketDataTab() {
               ? `法人 ${fmtPct(dependencies.chipCoverage.institutional.coverage)} · 主力 ${fmtPct(dependencies.chipCoverage.broker.coverage)}`
               : '尚未完成檢查'}
             detail={dependencies?.chipCoverage
-              ? `${dependencies.chipCoverage.date}；${dependencies.chipCoverage.concentration.label}：當日 ${fmtPct(dependencies.chipCoverage.concentration.coverage)}、5日 ${fmtPct(dependencies.chipCoverage.concentration.window5d.coverage)}、20日 ${fmtPct(dependencies.chipCoverage.concentration.window20d.coverage)}`
+              ? `${dependencies.chipCoverage.date}；${dependencies.chipCoverage.concentration.label}：當日 ${fmtPct(dependencies.chipCoverage.concentration.coverage)}、5日 ${fmtPct(dependencies.chipCoverage.concentration.window5d.coverage)}、20日 ${fmtPct(dependencies.chipCoverage.concentration.window20d.coverage)}；Y軌完整10日窗 ${fmtPct(dependencies.yTrackReadiness?.strategyWindow.coverage ?? null)}`
               : '檢查成交額前 500 的逐股法人與主力分點'}
           />
           <DependencyCard
