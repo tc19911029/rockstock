@@ -661,11 +661,12 @@ function HomePage() {
         const coverage = `${assessment.exactDateCount}/${assessment.totalCount}`;
         const sourceStatus = json.sourceStatus as { kind?: string; message?: string } | null | undefined;
         const permissionDenied = sourceStatus?.kind === 'permission_denied';
+        const sourceUnavailable = sourceStatus?.kind === 'unavailable';
         setConcResult({
           sourceSymbol: chipFetchKey,
-          status: permissionDenied ? 'unavailable' : assessment.status,
+          status: permissionDenied || sourceUnavailable ? 'unavailable' : assessment.status,
           rows,
-          error: permissionDenied
+          error: permissionDenied || sourceUnavailable
             ? `${sourceStatus?.message ?? 'FinMind 方案權限不足'}；正式集中度已停用無效重試，目前只顯示近似值。`
             : assessment.status === 'unavailable'
             ? '正式分點來源本次未回傳可用的 5／20 日數值；目前顯示已儲存的近似值。'

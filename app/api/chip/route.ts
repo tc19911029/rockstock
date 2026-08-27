@@ -25,6 +25,7 @@ export interface ChipData {
   // 當沖
   dayTradeVolume: number;   // 當沖成交量
   dayTradeRatio: number;    // 當沖比例 %
+  dayTradeDate?: string;    // 當沖資料基準日（可能 fallback 到前一交易日）
   // 大額交易人
   largeTraderBuy: number;   // 大額交易人買超
   largeTraderSell: number;  // 大額交易人賣超
@@ -102,6 +103,13 @@ export interface ChipData {
   brokerNetBuy?: number;
   /** 主力集中度（%，正值；方向看 brokerNetBuy 符號）*/
   brokerConcentration?: number;
+  /** Yahoo 每日前15大快照累計的 5/20 日近似集中度（不是全分點區間重排正式值） */
+  brokerConcentration5d?: number | null;
+  brokerConcentration20d?: number | null;
+  brokerConcentrationCoverage5d?: number;
+  brokerConcentrationCoverage20d?: number;
+  brokerDataDate?: string;
+  brokerConcentrationSource?: 'yahoo_daily_approximate';
   /** 前 15 大買進券商 */
   topBuyers?: BrokerRankRow[];
   /** 前 15 大賣出券商 */
@@ -318,7 +326,7 @@ import { getSharesIssued } from '@/lib/datasource/FinMindClient';
 import { detectTrend, rollingChange } from '@/lib/chips/trends';
 import { fetchYahooBrokerTrades, type BrokerRankRow } from '@/lib/datasource/YahooBrokerScraper';
 import { readBrokerStock } from '@/lib/chips/BrokerStorage';
-import { readMarginStock, readSblStock } from '@/lib/chips/ChipExtrasStorage';
+import { readMarginStock, readSblStock, readDayTradeStock } from '@/lib/chips/ChipExtrasStorage';
 import { fetchTwseSblForStock, fetchTwseSblHistory } from '@/lib/datasource/TwseSblProvider';
 import { fetchTpexSblForStock, fetchTpexSblHistory } from '@/lib/datasource/TpexSblProvider';
 import { fetchTwseMarginForStock } from '@/lib/datasource/TwseMarginProvider';
@@ -328,6 +336,7 @@ import type { CostBasisSummary } from '@/lib/chipcost/types';
 import { computeInstDerived } from '@/lib/chips/instDerived';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { globalCache } from '@/lib/datasource/MemoryCache';
+import { calculateApproxBrokerConcentration } from '@/lib/chips/approxConcentration';
 
 // 籌碼回應快取：中國線路抓多個台站來源慢，成功一次後 10 分鐘內(prewarm/重複載入/集中度切窗)秒回。
 const CHIP_CACHE_TTL = 10 * 60 * 1000;
@@ -458,6 +467,7 @@ export async function GET(req: NextRequest) {
       const v = <T,>(r: PromiseSettledResult<T>): T | null => (r.status === 'fulfilled' ? r.value : null);
       return norm(v(tw)) ?? norm(v(tpex)) ?? v(fm);
     })();
+    const queryDateVolumeLots = await loadVolumeLotsOnDate(code, date);
 
     // 每個來源包 8s 上限：中國線路某些台站來源(Yahoo 主力分點多頁/SBL fallback)會 hang 很久，
     // 拖垮整個 /api/chip(曾卡 60s 載入失敗)。超時當 null 優雅降級 → 面板照載、缺的欄位顯示「—」。2026-06-22 修。
@@ -466,7 +476,7 @@ export async function GET(req: NextRequest) {
     const settled = await Promise.allSettled([
       cap(readTdccStock(code)),
       cap(marginPromise),
-      cap(fetchDayTradeForStock(code, date)),
+      cap(fetchDayTradeForStock(code, date, queryDateVolumeLots != null ? queryDateVolumeLots * 1000 : undefined)),
       // v3: SBL — TWSE（上市）→ TPEX（上櫃）fallback；全免費無 quota
       cap(fetchTwseSblForStock(code, date).then(r => r ?? fetchTpexSblForStock(code, date)).catch(() => null)),
       cap(getSharesIssued(code)),
@@ -501,7 +511,24 @@ export async function GET(req: NextRequest) {
         };
       }
     }
-    const dayTradeInfo = pickFulfilled<Awaited<ReturnType<typeof fetchDayTradeForStock>>>(2);
+    let dayTradeInfo = pickFulfilled<Awaited<ReturnType<typeof fetchDayTradeForStock>>>(2);
+    let dayTradeDate = dayTradeInfo ? date : undefined;
+    // FinMind 當沖單檔失效／當日尚未揭露時，改讀官方 bulk 本地快照；比例用同日 L1 成交量重算。
+    if (!dayTradeInfo) {
+      const stored = await readDayTradeStock(code).catch(() => null);
+      const prior = (stored?.data ?? []).filter(row => row.date <= date);
+      const last = prior[prior.length - 1];
+      if (last) {
+        const totalVolumeLots = await loadVolumeLotsOnDate(code, last.date);
+        dayTradeInfo = {
+          dayTradeVolume: last.dayTradeLots,
+          dayTradeRatio: totalVolumeLots && totalVolumeLots > 0
+            ? +((last.dayTradeLots / totalVolumeLots) * 100).toFixed(2)
+            : 0,
+        };
+        dayTradeDate = last.date;
+      }
+    }
     let sblToday = pickFulfilled<Awaited<ReturnType<typeof fetchTwseSblForStock>>>(3);
     // 借券同融資：TWSE/TPEx 只查當日、盤中必然沒有 → fallback 本地 chip-extras 最新一筆（≤查詢日）
     if (!sblToday) {
@@ -523,6 +550,11 @@ export async function GET(req: NextRequest) {
     // 主力券商分點「歷史」：Yahoo 只給當日，走圖看過去要讀回填的 BrokerStorage（FinMind Sponsor 灌的正版集中度）
     const brokerHist = await readBrokerStock(code).catch(() => null);
     const brokerStored = brokerHist?.data.find(d => d.date === date) ?? null;
+    const candleFile = (await readCandleFile(`${code}.TW`, 'TW').catch(() => null))
+      ?? (await readCandleFile(`${code}.TWO`, 'TW').catch(() => null));
+    const brokerRows = brokerHist?.data ?? [];
+    const brokerApprox5 = calculateApproxBrokerConcentration(candleFile?.candles ?? [], brokerRows, date, 5);
+    const brokerApprox20 = calculateApproxBrokerConcentration(candleFile?.candles ?? [], brokerRows, date, 20);
     // 把 sblToday 轉成 lendingInfo shape 給後面 code 用（向下相容）
     const lendingInfo = sblToday ? {
       lendingBalance: sblToday.lendingBalance,
@@ -706,6 +738,7 @@ export async function GET(req: NextRequest) {
       marginUtilRate: marginInfo?.marginUtilRate ?? 0,
       dayTradeVolume: dayTradeInfo?.dayTradeVolume ?? 0,
       dayTradeRatio: dayTradeInfo?.dayTradeRatio ?? 0,
+      dayTradeDate,
       largeTraderBuy: 0, largeTraderSell: 0, largeTraderNet: 0,
       lendingBalance: lendingInfo?.lendingBalance ?? 0,
       lendingNet: lendingInfo?.lendingNet ?? 0,
@@ -758,6 +791,12 @@ export async function GET(req: NextRequest) {
         : brokerTrades
           ? (brokerTrades.concentration * 100 * (brokerTrades.totalDifferenceVolK >= 0 ? 1 : -1))
           : undefined,
+      brokerConcentration5d: brokerApprox5.value,
+      brokerConcentration20d: brokerApprox20.value,
+      brokerConcentrationCoverage5d: brokerApprox5.coverage,
+      brokerConcentrationCoverage20d: brokerApprox20.coverage,
+      brokerDataDate: brokerStored?.date ?? brokerTrades?.date ?? brokerHist?.lastDate,
+      brokerConcentrationSource: 'yahoo_daily_approximate',
       topBuyers: brokerTrades?.buyerRankList,
       topSellers: brokerTrades?.sellerRankList,
       // v5 三大法人衍生欄位（純顯示）

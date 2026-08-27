@@ -28,6 +28,7 @@ interface ChipInfo {
   marginUtilRate: number;
   dayTradeVolume: number;
   dayTradeRatio: number;
+  dayTradeDate?: string;
   largeTraderBuy: number;
   largeTraderSell: number;
   largeTraderNet: number;
@@ -74,6 +75,12 @@ interface ChipInfo {
   // v3 主力券商分點
   brokerNetBuy?: number;
   brokerConcentration?: number;
+  brokerConcentration5d?: number | null;
+  brokerConcentration20d?: number | null;
+  brokerConcentrationCoverage5d?: number;
+  brokerConcentrationCoverage20d?: number;
+  brokerDataDate?: string;
+  brokerConcentrationSource?: 'yahoo_daily_approximate';
   topBuyers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
   topSellers?: Array<{ rank: number; name: string; buyVolK: number; sellVolK: number; netVolK: number }>;
   // v5 三大法人衍生欄位（連買天數 / 占量 / 同步買）
@@ -383,6 +390,17 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
       {/* ── Margin detail ── */}
       <div className="grid grid-cols-2 gap-1.5 text-[9px] text-muted-foreground">
         <div className="bg-secondary/40 rounded px-2 py-1 border border-border/30">
+          <span>主力集中度（近似）</span>
+          <span className="float-right font-mono text-foreground/80">
+            5日 {data.brokerConcentration5d == null ? '—' : `${data.brokerConcentration5d.toFixed(2)}%`}
+            <span className="mx-1 text-muted-foreground/50">/</span>
+            20日 {data.brokerConcentration20d == null ? '—' : `${data.brokerConcentration20d.toFixed(2)}%`}
+          </span>
+          <div className="clear-both text-[8px] text-muted-foreground/70">
+            Yahoo 每日前15大快照 · {data.brokerDataDate ?? '無日期'}
+          </div>
+        </div>
+        <div className="bg-secondary/40 rounded px-2 py-1 border border-border/30">
           <span>融資餘額</span>
           <span className="float-right text-muted-foreground font-mono">{data.marginBalance.toLocaleString()}張</span>
           <div className="clear-both" />
@@ -405,6 +423,7 @@ export default function ChipDetailPanel({ symbol, date }: { symbol: string; date
           <span className={`float-right font-mono ${data.dayTradeRatio > DAY_TRADE_RATIO_HIGH ? 'text-bull' : data.dayTradeRatio > DAY_TRADE_RATIO_WARN ? 'text-yellow-400' : 'text-muted-foreground'}`}>
             {data.dayTradeRatio}%
           </span>
+          {data.dayTradeDate && <div className="clear-both text-[8px] text-muted-foreground/70">資料日 {data.dayTradeDate}</div>}
         </div>
       </div>
 

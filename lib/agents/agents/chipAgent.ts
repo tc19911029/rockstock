@@ -79,7 +79,7 @@ async function fetchInstitutional(symbol: string): Promise<unknown> {
   return fetchJSON(internalUrl(`/api/institutional/${encodeURIComponent(ticker)}?mode=summary`));
 }
 
-function normaliseChipResponse(raw: unknown): ChipGroundTruth['chip'] {
+export function normaliseChipResponse(raw: unknown): ChipGroundTruth['chip'] {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   const numOrNull = (k: string): number | null => {
@@ -107,6 +107,7 @@ function normaliseChipResponse(raw: unknown): ChipGroundTruth['chip'] {
     marginUtilRate:      numOrNull('marginUtilRate'),
     dayTradeVolume:      numOrNull('dayTradeVolume'),
     dayTradeRatio:       numOrNull('dayTradeRatio'),
+    dayTradeDate:        strOrNull('dayTradeDate'),
     largeTraderBuy:      numOrNull('largeTraderBuy'),
     largeTraderSell:     numOrNull('largeTraderSell'),
     largeTraderNet:      numOrNull('largeTraderNet'),
@@ -114,5 +115,13 @@ function normaliseChipResponse(raw: unknown): ChipGroundTruth['chip'] {
     lendingNet:          numOrNull('lendingNet'),
     largeHolderPct:      numOrNull('largeHolderPct'),
     largeHolderChange:   numOrNull('largeHolderChange'),
+    brokerNetBuy:        numOrNull('brokerNetBuy'),
+    brokerConcentration: numOrNull('brokerConcentration'),
+    brokerConcentration5d: numOrNull('brokerConcentration5d'),
+    brokerConcentration20d: numOrNull('brokerConcentration20d'),
+    brokerConcentrationCoverage5d: numOrNull('brokerConcentrationCoverage5d'),
+    brokerConcentrationCoverage20d: numOrNull('brokerConcentrationCoverage20d'),
+    brokerDataDate:      strOrNull('brokerDataDate'),
+    brokerConcentrationSource: strOrNull('brokerConcentrationSource'),
   };
 }

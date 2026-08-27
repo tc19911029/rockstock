@@ -8,6 +8,7 @@ import {
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { assessPaperTrackFreshness } from '@/lib/health/paperTrackFreshness';
 import { summarizeDataSourceResilience } from '@/lib/datasource/DataSourceResilience';
+import { getChipCoverageSnapshot } from '@/lib/health/chipCoverage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,7 @@ export async function GET() {
   // 健康頁每分鐘刷新也不會反覆打外部 API。
   await fetchFinMindBranchDay('2330', getLastTradingDay('TW')).catch(() => new Map());
   const finMind = getFinMindBranchSourceStatus();
+  const chipCoverage = await getChipCoverageSnapshot(getLastTradingDay('TW'));
 
   let paperUpdatedAt: string | null = null;
   try {
@@ -30,6 +32,7 @@ export async function GET() {
     checkedAt: new Date().toISOString(),
     dependencies: {
       finMindBranch: finMind,
+      chipCoverage,
       paperTrack: { ...paper, updatedAt: paperUpdatedAt },
       dataSourceResilience: summarizeDataSourceResilience(),
     },

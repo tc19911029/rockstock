@@ -37,6 +37,7 @@ export const FIELD_LABEL_ZH: Record<string, string> = {
   shortNet: '融券增減',
   dayTradeVolume: '當沖量',
   dayTradeRatio: '當沖比',
+  dayTradeDate: '當沖資料日',
   largeHolderPct: '大戶持股 %',
   largeHolderChange: '大戶持股變化',
   lendingBalance: '借券餘額',
@@ -44,6 +45,14 @@ export const FIELD_LABEL_ZH: Record<string, string> = {
   largeTraderBuy: '大戶買',
   largeTraderSell: '大戶賣',
   largeTraderNet: '大戶買賣超',
+  brokerNetBuy: '主力分點買賣超',
+  brokerConcentration: '單日主力集中度',
+  brokerConcentration5d: '5 日主力集中度（近似）',
+  brokerConcentration20d: '20 日主力集中度（近似）',
+  brokerConcentrationCoverage5d: '5 日集中度覆蓋率',
+  brokerConcentrationCoverage20d: '20 日集中度覆蓋率',
+  brokerDataDate: '主力分點資料日',
+  brokerConcentrationSource: '主力集中度來源',
 
   // — Fundamental —
   EPS: 'EPS（每股盈餘）',

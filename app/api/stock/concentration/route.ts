@@ -30,6 +30,19 @@ export async function GET(req: NextRequest) {
   if (!/^\d{4,5}(\.(TW|TWO))?$/i.test(symbol)) return apiOk({ symbol, conc: [], sourceStatus: null });
   const code = symbol.replace(/\.(TW|TWO)$/i, '');
 
+  // Sponsor／全分點權限停用時不要每次開籌碼頁再做數十次必敗請求；近似值由 broker 本地快照顯示。
+  if (process.env.INSTSTEAL_NO_FINMIND === '1') {
+    return apiOk({
+      symbol,
+      conc: [],
+      sourceStatus: {
+        kind: 'unavailable',
+        message: 'FinMind 全分點正式值已停用；目前使用 Yahoo 每日前 15 大快照近似值',
+        checkedAt: null,
+      },
+    });
+  }
+
   try {
     const cf = (await readCandleFile(`${code}.TW`, 'TW')) ?? (await readCandleFile(`${code}.TWO`, 'TW'));
     if (!cf?.candles?.length) return apiOk({ symbol, conc: [], sourceStatus: getFinMindBranchSourceStatus() });

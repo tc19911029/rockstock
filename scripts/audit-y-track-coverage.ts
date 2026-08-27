@@ -83,7 +83,13 @@ async function main() {
   const sc = new TaiwanScanner();
   const all = await sc.getStockList();
   const rank = await computeTurnoverRankAsOfDate('TW', all, date, 500);
-  const pool = Array.from(rank.keys());
+  const rankedPool = Array.from(rank.keys());
+  const { readCandleFile } = await import('@/lib/datasource/CandleStorageAdapter');
+  const pool: string[] = [];
+  for (const symbol of rankedPool) {
+    const file = await readCandleFile(symbol, 'TW').catch(() => null);
+    if (file?.candles.some(candle => candle.date === date)) pool.push(symbol);
+  }
   const codes = pool.map(s => s.split('.')[0]);
 
   // 索引健康

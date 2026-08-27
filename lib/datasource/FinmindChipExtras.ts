@@ -72,6 +72,11 @@ export interface DayTradeInfo {
   dayTradeRatio: number;
 }
 
+export function calculateDayTradeRatio(dayTradeShares: number, totalVolumeShares?: number): number {
+  if (!(totalVolumeShares && totalVolumeShares > 0)) return 0;
+  return +((dayTradeShares / totalVolumeShares) * 100).toFixed(2);
+}
+
 interface FmDayTradeRow {
   Volume: number;
   BuyAmount: number;
@@ -83,9 +88,7 @@ export async function fetchDayTradeForStock(code: string, date: string, totalVol
   const r = rows[0];
   if (!r) return null;
   const volume = Math.round((r.Volume ?? 0) / 1000); // 股 → 張
-  const ratio = totalVolumeShares && totalVolumeShares > 0
-    ? +((r.Volume / totalVolumeShares) * 100).toFixed(2)
-    : 0;
+  const ratio = calculateDayTradeRatio(r.Volume ?? 0, totalVolumeShares);
   return { dayTradeVolume: volume, dayTradeRatio: ratio };
 }
 

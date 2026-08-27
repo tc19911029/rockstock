@@ -452,6 +452,7 @@ export interface ChipGroundTruth {
     marginUtilRate: number | null;
     dayTradeVolume: number | null;
     dayTradeRatio: number | null;
+    dayTradeDate: string | null;
     largeTraderBuy: number | null;
     largeTraderSell: number | null;
     largeTraderNet: number | null;
@@ -459,6 +460,14 @@ export interface ChipGroundTruth {
     lendingNet: number | null;
     largeHolderPct: number | null;
     largeHolderChange: number | null;
+    brokerNetBuy: number | null;
+    brokerConcentration: number | null;
+    brokerConcentration5d: number | null;
+    brokerConcentration20d: number | null;
+    brokerConcentrationCoverage5d: number | null;
+    brokerConcentrationCoverage20d: number | null;
+    brokerDataDate: string | null;
+    brokerConcentrationSource: string | null;
   } | null;
   /** /api/institutional/[symbol]?mode=summary 取連續買賣超天數等 */
   institutionalHistory: unknown | null;

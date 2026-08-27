@@ -30,6 +30,18 @@ interface MarketHealthLite {
 
 interface DependencyHealth {
   finMindBranch: { kind: 'unknown' | 'ok' | 'permission_denied' | 'rate_limited' | 'unavailable'; message: string; checkedAt: string | null };
+  chipCoverage: {
+    date: string;
+    poolSize: number;
+    institutional: { count: number; coverage: number };
+    broker: { count: number; coverage: number };
+    concentration: {
+      mode: 'exact' | 'approximate'; count: number; coverage: number; label: string;
+      window5d: { count: number; coverage: number };
+      window20d: { count: number; coverage: number };
+    };
+    level: 'green' | 'yellow' | 'red';
+  };
   paperTrack: { level: 'ok' | 'warning' | 'stale' | 'missing'; ageDays: number | null; message: string; updatedAt: string | null };
   dataSourceResilience: { total: number; protected: number; degraded: number; unprotected: number };
 }
@@ -63,6 +75,7 @@ function deriveOverallLight(markets: (MarketHealthLite | null)[], dependencies: 
     // 精確全分點失效時仍有 Yahoo 估算＋本地快取，屬降級而非整體資料中斷。
     if (dependencies.finMindBranch.kind === 'permission_denied' || dependencies.finMindBranch.kind === 'unavailable') lights.push('yellow');
     else if (dependencies.finMindBranch.kind !== 'ok') lights.push('yellow');
+    lights.push(dependencies.chipCoverage.level);
     if (dependencies.dataSourceResilience.unprotected > 0) lights.push('red');
     else if (dependencies.dataSourceResilience.degraded > 0) lights.push('yellow');
     if (dependencies.paperTrack.level === 'stale' || dependencies.paperTrack.level === 'missing') lights.push('red');
@@ -179,12 +192,22 @@ export function MarketDataTab() {
 
       <section className="space-y-2" aria-labelledby="runtime-dependencies-title">
         <h2 id="runtime-dependencies-title" className="text-sm font-semibold">外部資料與自動追蹤</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           <DependencyCard
             title="FinMind 主力分點"
             level={dependencies?.finMindBranch.kind === 'ok' ? 'green' : 'yellow'}
             message={dependencies?.finMindBranch.message ?? '尚未完成檢查'}
             detail="精確源失效時改用 Yahoo／本地快照估算；估算值不觸發交易訊號"
+          />
+          <DependencyCard
+            title="籌碼前 500 可交易股覆蓋"
+            level={dependencies?.chipCoverage.level ?? 'red'}
+            message={dependencies?.chipCoverage
+              ? `法人 ${fmtPct(dependencies.chipCoverage.institutional.coverage)} · 主力 ${fmtPct(dependencies.chipCoverage.broker.coverage)}`
+              : '尚未完成檢查'}
+            detail={dependencies?.chipCoverage
+              ? `${dependencies.chipCoverage.date}；${dependencies.chipCoverage.concentration.label}：當日 ${fmtPct(dependencies.chipCoverage.concentration.coverage)}、5日 ${fmtPct(dependencies.chipCoverage.concentration.window5d.coverage)}、20日 ${fmtPct(dependencies.chipCoverage.concentration.window20d.coverage)}`
+              : '檢查成交額前 500 的逐股法人與主力分點'}
           />
           <DependencyCard
             title="Paper-trade 每日追蹤"
