@@ -66,17 +66,19 @@ test.describe('Tide Pro 重建頁', () => {
 
   test('個股 Pro 深度、自選與不限檔提醒可互動', async ({ page }) => {
     await page.goto('/tide');
-    await page.getByPlaceholder('搜尋股票或市場題材...').fill('2330');
-    await page.getByRole('listbox').getByRole('button').first().click();
+    const watch = page.getByRole('complementary');
+    const stock = watch.getByRole('button', { name: /2330 台積電/ });
+    await stock.click();
+    await expect(watch.getByText('1 檔', { exact: true })).toBeVisible();
+    await stock.click();
 
     const drawer = page.getByRole('dialog', { name: /台積電 Pro 籌碼詳情/ });
     await expect(drawer.getByText('法人分項深度', { exact: true })).toBeVisible();
     await expect(drawer.getByText('近 30 日股價走勢', { exact: true })).toBeVisible();
     await expect(drawer.getByText('個股歷史回看', { exact: true })).toBeVisible();
 
-    await drawer.getByRole('button', { name: '加入自選', exact: true }).click();
-    await drawer.getByRole('button', { name: '籌碼提醒', exact: true }).click();
     await expect(drawer.getByRole('button', { name: '從自選移除', exact: true })).toBeVisible();
+    await drawer.getByRole('button', { name: '籌碼提醒', exact: true }).click();
     await expect(drawer.getByRole('button', { name: '提醒已開啟', exact: true })).toBeVisible();
     await drawer.getByRole('button', { name: '從自選移除', exact: true }).click();
     await expect(drawer.getByRole('button', { name: '加入自選', exact: true })).toBeVisible();

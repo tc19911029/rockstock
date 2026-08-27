@@ -7,6 +7,7 @@ import {
 import { THEME_MAP } from '@/lib/themes/themeMap';
 import { classifyStage, type SectorRankingFile, type ThemeStockPerf } from '@/lib/themes/sectorRanking';
 import { TIDE_EXACT_THEME_CODES } from './highlights';
+import { TIDE_ORIGINAL_THEME_CODES } from './originalThemeCodes';
 import { TIDE_MARKET_THEME_GROUPS, TIDE_THEME_NAMES } from './themeGroups';
 
 /**
@@ -130,6 +131,8 @@ function stableSlice(theme: string, members: ThemeStockPerf[], size = 8): ThemeS
 function codesForTheme(theme: string): string[] {
   const exact = TIDE_EXACT_THEME_CODES[theme];
   if (exact) return [...exact];
+  const original = TIDE_ORIGINAL_THEME_CODES[theme];
+  if (original) return [...original];
   const codes = new Set<string>();
   for (const alias of SOURCE_ALIASES[theme] ?? []) {
     for (const stock of THEME_MAP[alias] ?? []) codes.add(stock.code);
@@ -148,7 +151,7 @@ export function buildTideMarketThemeRanking(source: SectorRankingFile): MarketTh
     const configuredCodes = codesForTheme(theme);
     let members = configuredCodes.map((code) => memberByCode.get(code)).filter((member): member is ThemeStockPerf => member != null);
     const officialMatcher = OFFICIAL_MATCHERS[theme];
-    if (officialMatcher) {
+    if (members.length === 0 && officialMatcher) {
       const officialMembers = source.themes.filter((item) => officialMatcher.test(item.theme)).flatMap((item) => item.members);
       members = [...new Map([...members, ...stableSlice(theme, officialMembers)].map((member) => [member.code, member])).values()];
     }

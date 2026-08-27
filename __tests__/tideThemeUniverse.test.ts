@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildTideMarketThemeRanking } from '@/lib/tide/themeUniverse';
 import { TIDE_THEME_NAMES } from '@/lib/tide/themeGroups';
+import { TIDE_EXACT_THEME_CODES } from '@/lib/tide/highlights';
+import { TIDE_ORIGINAL_THEME_CODES } from '@/lib/tide/originalThemeCodes';
 import type { SectorRankingFile } from '@/lib/themes/sectorRanking';
 
 describe('Tide 110 題材母體', () => {
@@ -14,6 +16,17 @@ describe('Tide 110 題材母體', () => {
     expect(tide.themes).toHaveLength(110);
     expect(tide.themes.map((theme) => theme.theme)).toEqual(TIDE_THEME_NAMES);
     expect(new Set(tide.themes.map((theme) => theme.industryId)).size).toBe(110);
+  });
+
+  test('76 個公開成分題材優先使用原站清單', () => {
+    const mapped = new Set([...Object.keys(TIDE_EXACT_THEME_CODES), ...Object.keys(TIDE_ORIGINAL_THEME_CODES)]);
+    expect(mapped.size).toBe(76);
+    for (const theme of tide.themes.filter((item) => mapped.has(item.theme))) {
+      const codes = TIDE_EXACT_THEME_CODES[theme.theme] ?? TIDE_ORIGINAL_THEME_CODES[theme.theme];
+      expect(theme.members.map((member) => member.code)).toEqual(codes.filter((code) =>
+        official.themes.some((officialTheme) => officialTheme.members.some((member) => member.code === code)),
+      ));
+    }
   });
 
   test('每個題材都有官方快照可驗證的成分', () => {
