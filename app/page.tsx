@@ -1488,7 +1488,7 @@ function HomePage() {
                   title="台股顯示 CPO、ASIC、AI 伺服器等可重疊市場題材；陸股顯示行業／概念板塊"
                 >
                   <Flame className="size-4" aria-hidden="true" />
-                  <span>產業</span>
+                  <span>題材</span>
                 </button>
                 <button
                   type="button"

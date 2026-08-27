@@ -234,7 +234,7 @@ function PerfGrid({ members }: { members: PerfMember[] }) {
       <div className="p-1.5 space-y-1.5" data-navlist="sector-members">
         {shown.map((m) => <StockCard key={m.code} m={m} />)}
         {onlyBull && shown.length === 0 && (
-          <div className="px-2 py-3 text-center text-[11px] text-muted-foreground/55">此產業沒有趨勢為多頭的成分股（或六條件判讀中…）</div>
+          <div className="px-2 py-3 text-center text-[11px] text-muted-foreground/55">此題材沒有趨勢為多頭的成分股（或六條件判讀中…）</div>
         )}
       </div>
     </div>
