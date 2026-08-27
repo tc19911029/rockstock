@@ -56,34 +56,43 @@ describe('themeMap contracts', () => {
     expect(missing).toEqual([]);
   });
 
-  test('2026-08-26 CPO／矽光子／光通訊稽核名單完整且維持子集合關係', () => {
+  test('2026-08-27 CPO／矽光子／光通訊只保留直接產品核心名單', () => {
     const codes = (theme: string) => new Set(THEME_MAP[theme].map(stock => stock.code));
     const cpo = codes('CPO');
     const siliconPhotonics = codes('矽光子');
     const opticalComms = codes('光通訊');
 
-    const auditedCpo = [
-      '2303', '2317', '2330', '2345', '2360', '2382', '2409',
-      '2426', '2449', '2454', '2458', '2489', '3008', '3264',
-      '3265', '3289', '3443', '3587', '3711', '3714', '4971',
-      '4991', '6147', '6187', '6197', '6223', '6257', '6426',
-      '6510', '6515', '6669', '6706', '6830', '6854', '7728', '7769',
-    ];
-    const auditedSiliconPhotonics = [
-      '2303', '2317', '2330', '2345', '2360', '2449', '2454', '2458',
-      '3008', '3264', '3265', '3289', '3443', '3587', '3711',
-      '3665', '3714', '4908', '4971', '4991', '6147', '6187',
-      '6197', '6223', '6257', '6271', '6426', '6510', '6515',
-      '6669', '6706', '6830',
-      '7728', '7769',
-    ];
+    expect([...cpo].sort()).toEqual([
+      '2330', '2345', '3163', '3363', '3711',
+      '4908', '4971', '6442', '6451',
+    ]);
+    expect([...siliconPhotonics].sort()).toEqual([
+      '2330', '2345', '3081', '3163', '3363',
+      '3711', '4971', '6442', '6451',
+    ]);
+    expect([...opticalComms].sort()).toEqual([
+      '2345', '2455', '3081', '3163', '3234', '3363',
+      '3450', '4903', '4908', '4971', '4977', '4979',
+      '4991', '6426', '6442', '6451', '6530', '8011',
+    ]);
 
-    expect(auditedCpo.filter(code => !cpo.has(code))).toEqual([]);
-    expect(auditedSiliconPhotonics.filter(code => !siliconPhotonics.has(code))).toEqual([]);
-    expect([...cpo].filter(code => !opticalComms.has(code))).toEqual([]);
-    expect([...siliconPhotonics].filter(code => !opticalComms.has(code))).toEqual([]);
-    expect(['2409', '2426', '2489', '6854'].filter(code => siliconPhotonics.has(code))).toEqual([]);
-    expect(['4903', '6271', '6526', '6530', '8011'].filter(code => cpo.has(code))).toEqual([]);
+    // 技術平台／封裝廠可直接屬於 CPO 或矽光子，但不是光通訊產品供應商；不再硬湊子集合。
+    expect(opticalComms.has('2330')).toBe(false);
+    expect(opticalComms.has('3711')).toBe(false);
+    expect(cpo.has('3081')).toBe(false);
+    expect(cpo.has('4977')).toBe(false);
+    expect(siliconPhotonics.has('4977')).toBe(false);
+
+    // 通用代工、設備、測試、ODM 與周邊製造不得回流核心名單。
+    const peripheral = [
+      '2303', '2317', '2360', '2382', '2449', '2454', '2458', '2489',
+      '3008', '3264', '3265', '3289', '3443', '3587', '6147', '6187',
+      '6197', '6223', '6257', '6510', '6515', '6669', '6706', '6830',
+      '6854', '7728', '7769',
+    ];
+    expect(peripheral.filter(code => cpo.has(code))).toEqual([]);
+    expect(peripheral.filter(code => siliconPhotonics.has(code))).toEqual([]);
+    expect(peripheral.filter(code => opticalComms.has(code))).toEqual([]);
   });
 
   test('2026-08-26 全題材稽核的核心修正不回歸', () => {
