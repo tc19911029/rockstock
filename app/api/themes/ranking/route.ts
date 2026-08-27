@@ -1,31 +1,29 @@
 /**
  * TWSE／TPEx 官方產業強弱排名查詢（附描述性輪動標籤）
  * GET /api/themes/ranking[?date=YYYY-MM-DD]
- * 不帶 date：回最近 7 天內最新一份；帶 date：回該日。
+ * 不帶 date：回最近一份有效官方快照；帶 date：回該日。
  * 新版官方檔不存在但 L1 足夠時會即時重算並儲存；完全無資料才回 404。
  * 附 rotation（每題材 今日漲幅名次 vs 昨天 + 🟢🟡🔴 桶）— 純描述非訊號。
  */
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
-import { buildSectorRanking, readSectorRanking, readLatestSectorRanking, listSectorDates, saveSectorRanking } from '@/lib/themes/sectorRanking';
+import { buildSectorRanking, readSectorRanking, readLatestSectorRanking, readPriorSectorRanking, saveSectorRanking } from '@/lib/themes/sectorRanking';
 import { computeRotation } from '@/lib/themes/themeRotation';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { isValidYmd } from '@/lib/utils/ymd';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-const ROTATION_LOOKBACK = 1; // 前一交易日（昨天）— 2026-06-19 改日線，原本 5 反應太慢
-
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
-  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (date && !isValidYmd(date)) {
     return apiError(`invalid date: ${date}`, 400);
   }
   let file = date ? await readSectorRanking(date) : await readLatestSectorRanking();
   if (!file) {
     // 舊的手工題材檔會被 readSectorRanking 拒絕；第一次部署時即時重算，毋須等隔日 cron。
-    const dates = await listSectorDates();
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-    const buildDate = date ?? dates.at(-1) ?? today;
+    const buildDate = date ?? getLastTradingDay('TW');
     try {
       file = await buildSectorRanking(buildDate);
       if (!file.themes.some((theme) => theme.avgD1 != null)) {
@@ -38,13 +36,10 @@ export async function GET(req: NextRequest) {
   }
 
   // 找前一交易日的檔，算日輪動（資料不足則 rotation 為 mid/null，UI 自會淡化）
-  let priorDate: string | null = null;
-  const dates = await listSectorDates();
-  const idx = dates.indexOf(file.date);
-  if (idx >= 0) priorDate = dates[Math.max(0, idx - ROTATION_LOOKBACK)];
-  const prior = priorDate && priorDate !== file.date ? await readSectorRanking(priorDate) : null;
+  const prior = await readPriorSectorRanking(file.date);
+  const priorDate = prior?.date ?? null;
   const rotation = computeRotation(file, prior);
 
-  const themes = file.themes.map((t) => ({ ...t, rotation: rotation.get(t.theme) ?? null }));
+  const themes = file.themes.map((t) => ({ ...t, rotation: rotation.get(t.industryId) ?? null }));
   return apiOk({ ...file, priorDate, themes });
 }

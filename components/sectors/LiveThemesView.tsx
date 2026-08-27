@@ -29,6 +29,7 @@ interface LiveThemeMember {
   changePercent: number | null; volume: number | null; volRatio: number | null; isLimitUp: boolean;
 }
 interface LiveTheme {
+  industryId: string;
   theme: string; memberCount: number; quotedCount: number; upCount: number;
   avgChange: number | null; maxChange: number | null;
   topStock: { code: string; name: string; symbol: string; changePercent: number } | null;
@@ -243,8 +244,8 @@ function TwLive({ data }: { data: TwLivePayload }) {
       <SortBar sorts={TW_SORTS} sortId={sortId} dir={dir} onSort={sortBy} hint="點產業看完整成分股" />
       <div className="p-1.5 space-y-1.5">
         {themes.map((t, i) => (
-          <TwThemeCard key={t.theme} t={t} rank={i + 1} expanded={expanded === t.theme}
-            onToggle={() => setExpanded(expanded === t.theme ? null : t.theme)} />
+          <TwThemeCard key={t.industryId} t={t} rank={i + 1} expanded={expanded === t.industryId}
+            onToggle={() => setExpanded(expanded === t.industryId ? null : t.industryId)} />
         ))}
       </div>
     </div>

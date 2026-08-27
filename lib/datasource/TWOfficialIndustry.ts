@@ -13,7 +13,7 @@ export const TPEX_COMPANY_INFO_URL = 'https://www.tpex.org.tw/openapi/v1/mopsfin
 
 export const TW_OFFICIAL_CLASSIFICATION = {
   kind: 'official_industry',
-  version: 2,
+  version: 3,
   label: 'TWSE／TPEx 官方產業別',
   sources: ['TWSE', 'TPEx'] as const,
 } as const;
@@ -22,8 +22,8 @@ export const TW_OFFICIAL_CLASSIFICATION = {
  * 交易所產業代碼 → 正式顯示名稱。
  *
  * 同一代碼在兩個市場未必同名（例如 17：TWSE「金融保險」、TPEx「金融業」），
- * 因此不可再用一張跨市場名稱表硬併。34「電子商務」與 80「管理股票」目前可能
- * 沒有成分股，仍保留正式代碼，避免未來新增時被靜默丟棄。
+ * 因此不可再用一張跨市場名稱表硬併。TPEx 18「貿易百貨」與 34「電子商務」已於
+ * 2023 年分別併入 38「居家生活」與 36「數位雲端」，不可再列為現行分類。
  */
 export const TWSE_OFFICIAL_INDUSTRY_NAMES: Readonly<Record<string, string>> = {
   '01': '水泥工業',
@@ -74,10 +74,9 @@ export const TPEX_OFFICIAL_INDUSTRY_NAMES: Readonly<Record<string, string>> = {
   '15': '航運業',
   '16': '觀光餐旅',
   '17': '金融業',
-  '18': '貿易百貨',
   '20': '其他',
   '21': '化學工業',
-  '22': '生技醫療業',
+  '22': '生技醫療',
   '23': '油電燃氣業',
   '24': '半導體業',
   '25': '電腦及週邊設備業',
@@ -88,8 +87,7 @@ export const TPEX_OFFICIAL_INDUSTRY_NAMES: Readonly<Record<string, string>> = {
   '30': '資訊服務業',
   '31': '其他電子業',
   '32': '文化創意業',
-  '33': '農業科技',
-  '34': '電子商務',
+  '33': '農業科技業',
   '35': '綠能環保',
   '36': '數位雲端',
   '37': '運動休閒',
@@ -131,6 +129,8 @@ export interface TpexCompanyInfoRow {
 }
 
 const CACHE_TTL = 24 * 60 * 60 * 1000;
+const MIN_TWSE_COMMON_STOCKS = 900;
+const MIN_TPEX_COMMON_STOCKS = 700;
 let rosterCache: { fetchedAt: number; stocks: TwOfficialIndustryStock[] } | null = null;
 
 function clean(value: string | undefined): string {
@@ -145,6 +145,68 @@ export function officialIndustryName(market: TwOfficialMarket, industryCode: str
   return market === 'TWSE'
     ? TWSE_OFFICIAL_INDUSTRY_NAMES[industryCode]
     : TPEX_OFFICIAL_INDUSTRY_NAMES[industryCode];
+}
+
+function officialNamesForCode(industryCode: string): Set<string> {
+  return new Set([
+    TWSE_OFFICIAL_INDUSTRY_NAMES[industryCode],
+    TPEX_OFFICIAL_INDUSTRY_NAMES[industryCode],
+  ].filter((name): name is string => !!name));
+}
+
+/** 穩定的官方產業主鍵；同代碼跨市場正式名稱不同時，以市場拆開。 */
+export function officialIndustryGroupId(
+  industryCode: string,
+  industry: string,
+  markets: TwOfficialMarket[],
+): string {
+  const names = officialNamesForCode(industryCode);
+  if (!names.has(industry)) throw new Error(`未知官方產業名稱：${industryCode} ${industry}`);
+  return names.size > 1 ? `${[...markets].sort().join('+')}:${industryCode}` : industryCode;
+}
+
+/**
+ * 官方端新增代碼時不可靜默略過，否則總檔數仍可能超過門檻、卻漏掉整個新產業。
+ * TWSE 91 是臺灣存託憑證，不是上市普通股產業，明確排除而非視為未知。
+ */
+export function unknownOfficialIndustryCodes(
+  twseRows: TwseCompanyInfoRow[],
+  tpexRows: TpexCompanyInfoRow[],
+): { TWSE: string[]; TPEx: string[] } {
+  const twse = new Set<string>();
+  const tpex = new Set<string>();
+  for (const row of twseRows) {
+    const code = clean(row.公司代號);
+    const industryCode = clean(row.產業別);
+    if (validCommonStockCode(code) && industryCode !== '91' && !officialIndustryName('TWSE', industryCode)) {
+      twse.add(industryCode || '(空白)');
+    }
+  }
+  for (const row of tpexRows) {
+    const code = clean(row.SecuritiesCompanyCode);
+    const industryCode = clean(row.SecuritiesIndustryCode);
+    if (validCommonStockCode(code) && !officialIndustryName('TPEx', industryCode)) {
+      tpex.add(industryCode || '(空白)');
+    }
+  }
+  return { TWSE: [...twse].sort(), TPEx: [...tpex].sort() };
+}
+
+export function duplicateOfficialStockCodes(
+  twseRows: TwseCompanyInfoRow[],
+  tpexRows: TpexCompanyInfoRow[],
+): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  const codes = [
+    ...twseRows.map((row) => clean(row.公司代號)),
+    ...tpexRows.map((row) => clean(row.SecuritiesCompanyCode)),
+  ].filter(validCommonStockCode);
+  for (const code of codes) {
+    if (seen.has(code)) duplicates.add(code);
+    seen.add(code);
+  }
+  return [...duplicates].sort();
 }
 
 /** 純解析函式；輸入由測試或兩個官方 OpenAPI 提供。 */
@@ -179,13 +241,6 @@ export function parseOfficialIndustryRows(
 export function groupOfficialIndustryStocks(
   stocks: TwOfficialIndustryStock[],
 ): TwOfficialIndustryGroup[] {
-  const namesByCode = new Map<string, Set<string>>();
-  for (const stock of stocks) {
-    const names = namesByCode.get(stock.industryCode) ?? new Set<string>();
-    names.add(stock.industry);
-    namesByCode.set(stock.industryCode, names);
-  }
-
   const groups = new Map<string, TwOfficialIndustryStock[]>();
   for (const stock of stocks) {
     // 大多數代碼跨市場同名，可合併；正式名稱不同時必須分組，不能用其中一方覆蓋另一方。
@@ -200,9 +255,8 @@ export function groupOfficialIndustryStocks(
     .map(([, members]) => {
       const { industryCode, industry } = members[0];
       const markets = [...new Set(members.map((stock) => stock.market))].sort() as TwOfficialMarket[];
-      const hasNameVariants = (namesByCode.get(industryCode)?.size ?? 0) > 1;
       return {
-        id: hasNameVariants ? `${markets.join('+')}:${industryCode}` : industryCode,
+        id: officialIndustryGroupId(industryCode, industry, markets),
         industryCode,
         industry,
         markets,
@@ -246,9 +300,18 @@ export async function fetchTwOfficialIndustryRoster(): Promise<TwOfficialIndustr
     fetchRows<TwseCompanyInfoRow>(TWSE_COMPANY_INFO_URL),
     fetchRows<TpexCompanyInfoRow>(TPEX_COMPANY_INFO_URL),
   ]);
+  const unknown = unknownOfficialIndustryCodes(twseRows, tpexRows);
+  if (unknown.TWSE.length > 0 || unknown.TPEx.length > 0) {
+    throw new Error(`官方產業出現未支援代碼：TWSE=${unknown.TWSE.join(',') || '無'}；TPEx=${unknown.TPEx.join(',') || '無'}`);
+  }
+  const duplicateCodes = duplicateOfficialStockCodes(twseRows, tpexRows);
   const stocks = parseOfficialIndustryRows(twseRows, tpexRows);
-  if (stocks.length < 1_000) {
-    throw new Error(`官方產業母體異常：僅 ${stocks.length} 檔，拒絕產生不完整排行`);
+  const twseCount = stocks.filter((stock) => stock.market === 'TWSE').length;
+  const tpexCount = stocks.filter((stock) => stock.market === 'TPEx').length;
+  if (twseCount < MIN_TWSE_COMMON_STOCKS || tpexCount < MIN_TPEX_COMMON_STOCKS || duplicateCodes.length > 0) {
+    throw new Error(
+      `官方產業母體異常：TWSE=${twseCount}、TPEx=${tpexCount}、重複代碼=${duplicateCodes.join(',') || '無'}，拒絕產生不完整排行`,
+    );
   }
   rosterCache = { fetchedAt: Date.now(), stocks };
   return stocks;

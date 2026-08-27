@@ -9,11 +9,42 @@ const PRODUCT_PATHS = [
   'app/api/youtube/teacher-leaderboard/route.ts',
 ];
 
+function productSourceFiles(root: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(path.join(process.cwd(), root), { withFileTypes: true })) {
+    const relativePath = path.join(root, entry.name);
+    if (entry.isDirectory()) out.push(...productSourceFiles(relativePath));
+    else if (/\.(ts|tsx)$/.test(entry.name)) out.push(relativePath);
+  }
+  return out;
+}
+
 describe('台股產品路徑只使用官方產業分類', () => {
   it.each(PRODUCT_PATHS)('%s 不可重新引用人工題材表', (relativePath) => {
     const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
     expect(source).not.toContain("themes/themeMap");
     expect(source).not.toContain('TW_CONCEPT_MAP');
+  });
+
+  it('全部產品程式不可引用人工台股題材表', () => {
+    const allowedDefinitions = new Set([
+      'lib/themes/themeMap.ts',
+      'lib/scanner/conceptMap.ts',
+    ]);
+    const offenders = ['app', 'components', 'features', 'lib']
+      .flatMap(productSourceFiles)
+      .filter((relativePath) => !allowedDefinitions.has(relativePath))
+      .filter((relativePath) => {
+        const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+        return source.includes('themes/themeMap') || source.includes('TW_CONCEPT_MAP');
+      });
+    expect(offenders).toEqual([]);
+  });
+
+  it('官方產業熱點補歷史資料時使用快照的完整 symbol', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'lib/themes/hotThemeScan.ts'), 'utf8');
+    expect(source).toContain('memberPerfTW(symbol');
+    expect(source).not.toContain('readCandleFile(`${code}.TW`');
   });
 
   it('舊的 38 題材績效宣稱不可出現在目前掃描 UI', () => {

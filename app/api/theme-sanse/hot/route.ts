@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { rankCodeToThemesToday } from '@/lib/theme-sanse/todayHot';
 import { TW_OFFICIAL_CLASSIFICATION } from '@/lib/datasource/TWOfficialIndustry';
 import type { ThemeRef, TsMarket } from '@/lib/theme-sanse/types';
+import { isValidYmd } from '@/lib/utils/ymd';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
   }
   const market = marketRaw as TsMarket;
   const date = req.nextUrl.searchParams.get('date');
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!isValidYmd(date)) {
     return NextResponse.json({ ok: false, error: `需要合法 date（YYYY-MM-DD），得到 '${date}'` }, { status: 400 });
   }
   try {
@@ -39,6 +40,6 @@ export async function GET(req: NextRequest) {
       themeCount: themeIds.size,
     });
   } catch (err) {
-    return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : 'hot 失敗' }, { status: 500 });
+    return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : 'hot 失敗' }, { status: 503 });
   }
 }

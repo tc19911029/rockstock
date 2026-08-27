@@ -1,8 +1,11 @@
 import {
   buildOfficialIndustryPeerMap,
+  duplicateOfficialStockCodes,
   groupOfficialIndustryStocks,
+  officialIndustryGroupId,
   officialIndustryName,
   parseOfficialIndustryRows,
+  unknownOfficialIndustryCodes,
 } from '@/lib/datasource/TWOfficialIndustry';
 import { getTWConcept } from '@/lib/scanner/conceptMap';
 
@@ -60,9 +63,25 @@ describe('TWSE／TPEx 官方產業分類', () => {
     ]);
   });
 
-  it('涵蓋 TPEx 正式電子商務與管理股票代碼', () => {
-    expect(officialIndustryName('TPEx', '34')).toBe('電子商務');
+  it('使用 TPEx 現行正式名稱，並移除已併入新產業的舊代碼', () => {
+    expect(officialIndustryName('TPEx', '22')).toBe('生技醫療');
+    expect(officialIndustryName('TPEx', '33')).toBe('農業科技業');
     expect(officialIndustryName('TPEx', '80')).toBe('管理股票');
+    expect(officialIndustryName('TPEx', '18')).toBeUndefined();
+    expect(officialIndustryName('TPEx', '34')).toBeUndefined();
+  });
+
+  it('市場正式名稱不同時，即使只收到單一市場，industryId 仍保持穩定', () => {
+    expect(officialIndustryGroupId('17', '金融保險', ['TWSE'])).toBe('TWSE:17');
+    expect(officialIndustryGroupId('22', '生技醫療', ['TPEx'])).toBe('TPEx:22');
+    expect(officialIndustryGroupId('24', '半導體業', ['TPEx'])).toBe('24');
+  });
+
+  it('可偵測官方新增未知代碼與跨來源重複股票代碼', () => {
+    const twse = [{ 公司代號: '2330', 公司簡稱: '台積電', 產業別: '99' }];
+    const tpex = [{ SecuritiesCompanyCode: '2330', CompanyAbbreviation: '重複', SecuritiesIndustryCode: '24' }];
+    expect(unknownOfficialIndustryCodes(twse, tpex)).toEqual({ TWSE: ['99'], TPEx: [] });
+    expect(duplicateOfficialStockCodes(twse, tpex)).toEqual(['2330']);
   });
 
   it('相容函式不再以人工晶圓代工題材覆蓋官方半導體業', () => {

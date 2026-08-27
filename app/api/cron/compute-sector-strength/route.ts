@@ -11,6 +11,7 @@ import { checkCronAuth } from '@/lib/api/cronAuth';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { buildSectorRanking, saveSectorRanking } from '@/lib/themes/sectorRanking';
+import { isValidYmd } from '@/lib/utils/ymd';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
 
   const dateParam = req.nextUrl.searchParams.get('date');
   const date = dateParam ?? getLastTradingDay('TW');
+  if (!isValidYmd(date)) return apiError(`invalid date: ${date}`, 400);
   if (!isTradingDay(date, 'TW')) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
   }

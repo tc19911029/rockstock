@@ -6,7 +6,8 @@
  *   - hotThemeScan =「反著做」：先掃全市場 L2 快照（~2000 檔）找出今天在熱的股
  *     （漲幅 + 爆量 + 法人買超），再依官方產業別分組。
  *
- * 分類來源：TWSE／TPEx 公司基本資料 OpenAPI；官方資料缺漏時才落到「未分類」。
+ * 分類來源：TWSE／TPEx 公司基本資料 OpenAPI；官方來源不可用時整體失敗，避免以大量
+ * 「未分類」資料冒充官方產業排行。只有官方母體確實沒有的報價才落到「未分類」。
  *
  * 紅線：純顯示/排序參考，不接選股 gate、不入 pool 分數（鐵則 #5）。
  * 熱度公式 + 排名分是顯示用 heuristic（門檻寫死在此檔，未經回測）。
@@ -15,8 +16,7 @@
 
 import { readIntradaySnapshot, readMABase } from '@/lib/datasource/IntradayCache';
 import { isLimitUp as isLimitUpPrice } from '@/lib/utils/limitRules';
-import { fetchTWIndustryMap } from '@/lib/scanner/conceptMap';
-import { TW_OFFICIAL_CLASSIFICATION } from '@/lib/datasource/TWOfficialIndustry';
+import { fetchTwOfficialIndustryMap, TW_OFFICIAL_CLASSIFICATION } from '@/lib/datasource/TWOfficialIndustry';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
 import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
@@ -40,7 +40,7 @@ export interface HotStock {
   turnover?: number | null;
   /** 三大法人淨買賣（有當日全市場資料才有，否則 null） */
   instNet: number | null;
-  /** 漲停（TW ±10%，≥9.5% 視為漲停） */
+  /** 漲停（依台股 tick 與實際漲停價判定） */
   isLimitUp: boolean;
   /** 注意股（警示，不剔除） */
   isNotice: boolean;
@@ -225,11 +225,11 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
 // ── 載入 + 建構（IO）─────────────────────────────────────────────────────────
 
 /** 過去 N 日漲幅 %（對齊 PERF_PERIODS），讀 L1 日K；與 sectorRanking 同公式（trailing）。 */
-async function memberPerfTW(code: string, date: string): Promise<{ rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[]; turnover: number | null }> {
+async function memberPerfTW(symbol: string, date: string): Promise<{ rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[]; turnover: number | null }> {
+  const code = symbol.replace(/\.(TW|TWO)$/i, '');
   const noRets = PERF_PERIODS.map(() => null);
   const noAmt: (number | null)[] = INST_PERIODS.map(() => null);
-  const file = (await readCandleFile(`${code}.TW`, 'TW'))
-    ?? (await readCandleFile(`${code}.TWO`, 'TW'));
+  const file = await readCandleFile(symbol, 'TW');
   if (!file?.candles?.length) return { rets: noRets, instAmt: noAmt, retailAmt: noAmt, turnover: null };
   const candles = file.candles;
   let idx = -1;
@@ -329,13 +329,8 @@ export async function buildHotThemeScan(
     return +(today / avg).toFixed(2);
   };
 
-  // 官方產業別（TWSE/TPEx OpenAPI，24h cache；失敗時誠實落「未分類」）
-  let industryMap = new Map<string, string>();
-  try {
-    industryMap = await fetchTWIndustryMap();
-  } catch {
-    /* 網路失敗不以人工題材替代官方分類 */
-  }
+  // 官方產業別（TWSE/TPEx OpenAPI，24h cache）；來源失敗就停止，不能回傳假的官方分類。
+  const industryMap = await fetchTwOfficialIndustryMap();
   const industryOf = (code: string) => industryMap.get(code);
 
   // 法人買超（全市場單檔，可能過期）— 有資料且日期吻合才當熱度加分
@@ -390,16 +385,16 @@ export async function buildHotThemeScan(
   // 即時輕量版（enrich=false）跳過這段重活，只回純聚合結果。
   if (enrich) {
     const members = result.themes.flatMap((t) => t.members);
-    const uniqCodes = [...new Set(members.map((m) => m.code))];
+    const uniqSymbols = [...new Set(members.map((m) => m.symbol))];
     const perfMap = new Map<string, { rets: (number | null)[]; instAmt: (number | null)[]; retailAmt: (number | null)[]; turnover: number | null }>();
     const CONC = 16;
-    for (let i = 0; i < uniqCodes.length; i += CONC) {
-      const batch = uniqCodes.slice(i, i + CONC);
-      const rows = await Promise.all(batch.map((c) => memberPerfTW(c, snapshot.date)));
-      batch.forEach((c, j) => perfMap.set(c, rows[j]));
+    for (let i = 0; i < uniqSymbols.length; i += CONC) {
+      const batch = uniqSymbols.slice(i, i + CONC);
+      const rows = await Promise.all(batch.map((symbol) => memberPerfTW(symbol, snapshot.date)));
+      batch.forEach((symbol, j) => perfMap.set(symbol, rows[j]));
     }
     for (const m of members) {
-      const p = perfMap.get(m.code);
+      const p = perfMap.get(m.symbol);
       m.rets = p?.rets;
       m.instAmt = p?.instAmt;
       m.retailAmt = p?.retailAmt;

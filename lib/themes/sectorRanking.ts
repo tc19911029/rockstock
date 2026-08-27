@@ -16,9 +16,13 @@ import {
   TW_OFFICIAL_CLASSIFICATION,
   fetchTwOfficialIndustryRoster,
   groupOfficialIndustryStocks,
+  officialIndustryGroupId,
+  officialIndustryName,
   type TwOfficialMarket,
   type TwOfficialIndustryStock,
 } from '@/lib/datasource/TWOfficialIndustry';
+import { isValidYmd } from '@/lib/utils/ymd';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
@@ -205,6 +209,8 @@ function avg(values: Array<number | null>): number | null {
 }
 
 export async function buildSectorRanking(date: string): Promise<SectorRankingFile> {
+  if (!isValidYmd(date)) throw new Error(`invalid sector ranking date: ${date}`);
+  if (!isTradingDay(date, 'TW')) throw new Error(`not a TW trading day: ${date}`);
   const roster = await fetchTwOfficialIndustryRoster();
   const industryGroups = groupOfficialIndustryStocks(roster);
 
@@ -263,23 +269,88 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
 
 // ── 儲存 ─────────────────────────────────────────────────────────────────────
 
+const isNullableFiniteNumber = (value: unknown): value is number | null =>
+  value === null || (typeof value === 'number' && Number.isFinite(value));
+
+/** 防止只改 classification 標頭的舊人工檔或半寫入檔冒充官方產業快照。 */
+export function isSectorRankingFile(value: unknown, expectedDate?: string): value is SectorRankingFile {
+  if (!value || typeof value !== 'object') return false;
+  const file = value as Partial<SectorRankingFile>;
+  if (!isValidYmd(file.date) || !isTradingDay(file.date, 'TW') || (expectedDate != null && file.date !== expectedDate)) return false;
+  if (typeof file.generatedAt !== 'string' || Number.isNaN(Date.parse(file.generatedAt))) return false;
+  if (
+    file.classification?.kind !== TW_OFFICIAL_CLASSIFICATION.kind
+    || file.classification?.version !== TW_OFFICIAL_CLASSIFICATION.version
+    || file.classification?.label !== TW_OFFICIAL_CLASSIFICATION.label
+    || file.classification?.sources?.length !== TW_OFFICIAL_CLASSIFICATION.sources.length
+    || !file.classification.sources.every((source, index) => source === TW_OFFICIAL_CLASSIFICATION.sources[index])
+    || !Array.isArray(file.themes)
+    || file.themes.length === 0
+  ) return false;
+
+  const industryIds = new Set<string>();
+  const symbols = new Set<string>();
+  for (const theme of file.themes) {
+    if (!theme || typeof theme !== 'object') return false;
+    if (!theme.industryCode || !theme.theme || !Array.isArray(theme.markets) || theme.markets.length === 0) return false;
+    if (!theme.markets.every((market) => market === 'TWSE' || market === 'TPEx')) return false;
+    const markets = [...new Set(theme.markets)].sort() as TwOfficialMarket[];
+    if (markets.length !== theme.markets.length) return false;
+    if (!markets.every((market) => officialIndustryName(market, theme.industryCode) === theme.theme)) return false;
+    let expectedId: string;
+    try {
+      expectedId = officialIndustryGroupId(theme.industryCode, theme.theme, markets);
+    } catch {
+      return false;
+    }
+    if (theme.industryId !== expectedId || industryIds.has(theme.industryId)) return false;
+    industryIds.add(theme.industryId);
+    if (!Array.isArray(theme.members) || theme.stockCount !== theme.members.length || theme.members.length === 0) return false;
+    if (![theme.avgD1, theme.avgD5, theme.avgD20, theme.avgD60, theme.avgVolRatio, theme.breadth, theme.instNet5, theme.instAmt5]
+      .every(isNullableFiniteNumber)) return false;
+    if (!['剛啟動', '主升段', '高潮噴出', '震盪換手', '退潮', '補跌', '盤整'].includes(theme.stage)) return false;
+
+    const memberSymbols = new Set<string>();
+    for (const member of theme.members) {
+      if (!member || typeof member !== 'object' || !/^[1-9]\d{3}$/.test(member.code) || !member.name) return false;
+      if (member.market !== 'TWSE' && member.market !== 'TPEx') return false;
+      const expectedSymbol = `${member.code}.${member.market === 'TWSE' ? 'TW' : 'TWO'}`;
+      if (member.symbol !== expectedSymbol || !markets.includes(member.market)) return false;
+      if (symbols.has(member.symbol) || memberSymbols.has(member.symbol)) return false;
+      symbols.add(member.symbol);
+      memberSymbols.add(member.symbol);
+      if (![member.d1, member.d5, member.d20, member.d60, member.volRatio, member.turnover, member.instNet5]
+        .every(isNullableFiniteNumber)) return false;
+      if (
+        !Array.isArray(member.rets) || member.rets.length !== PERF_PERIODS.length || !member.rets.every(isNullableFiniteNumber)
+        || !Array.isArray(member.instAmt) || member.instAmt.length !== INST_PERIODS.length || !member.instAmt.every(isNullableFiniteNumber)
+        || !Array.isArray(member.retailAmt) || member.retailAmt.length !== INST_PERIODS.length || !member.retailAmt.every(isNullableFiniteNumber)
+      ) return false;
+    }
+    if (theme.topStock != null && (
+      !memberSymbols.has(theme.topStock.symbol)
+      || !/^[1-9]\d{3}$/.test(theme.topStock.code)
+      || !theme.topStock.name
+      || !Number.isFinite(theme.topStock.d1)
+    )) return false;
+  }
+  return true;
+}
+
 export async function saveSectorRanking(file: SectorRankingFile): Promise<void> {
+  const date = file.date;
+  if (!isSectorRankingFile(file, date)) throw new Error(`refuse invalid official industry ranking: ${date}`);
   const { atomicFsPut } = await import('@/lib/storage/atomicFsPut');
   await fs.mkdir(SECTORS_DIR, { recursive: true });
   await atomicFsPut(path.join(SECTORS_DIR, `${file.date}.json`), JSON.stringify(file));
 }
 
 export async function readSectorRanking(date: string): Promise<SectorRankingFile | null> {
+  if (!isValidYmd(date)) return null;
   try {
     const raw = await fs.readFile(path.join(SECTORS_DIR, `${date}.json`), 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<SectorRankingFile>;
-    // 舊檔是手工題材分類；不可在新 UI 冒充官方產業資料。
-    if (
-      parsed.classification?.kind !== TW_OFFICIAL_CLASSIFICATION.kind
-      || parsed.classification?.version !== TW_OFFICIAL_CLASSIFICATION.version
-      || !Array.isArray(parsed.themes)
-    ) return null;
-    return parsed as SectorRankingFile;
+    const parsed = JSON.parse(raw) as unknown;
+    return isSectorRankingFile(parsed, date) ? parsed : null;
   } catch {
     return null;
   }
@@ -295,13 +366,23 @@ export async function listSectorDates(): Promise<string[]> {
   }
 }
 
-/** 最近一個有檔的日期（往回找 maxBack 個日曆日） */
-export async function readLatestSectorRanking(maxBack = 7): Promise<SectorRankingFile | null> {
+/** 最近一個有效官方產業檔；跳過未來日期、舊 schema 與半寫入檔。 */
+export async function readLatestSectorRanking(maxCandidates = 30): Promise<SectorRankingFile | null> {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-  const d = new Date(`${today}T00:00:00Z`);
-  for (let i = 0; i <= maxBack; i++) {
-    const iso = new Date(d.getTime() - i * 86400_000).toISOString().slice(0, 10);
-    const file = await readSectorRanking(iso);
+  const dates = (await listSectorDates()).filter((date) => date <= today).reverse().slice(0, maxCandidates);
+  for (const date of dates) {
+    const file = await readSectorRanking(date);
+    if (file) return file;
+  }
+  return null;
+}
+
+/** 指定日期之前最近一個有效官方產業檔。 */
+export async function readPriorSectorRanking(date: string): Promise<SectorRankingFile | null> {
+  if (!isValidYmd(date)) return null;
+  const dates = (await listSectorDates()).filter((candidate) => candidate < date).reverse();
+  for (const candidate of dates) {
+    const file = await readSectorRanking(candidate);
     if (file) return file;
   }
   return null;

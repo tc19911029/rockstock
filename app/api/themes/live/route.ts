@@ -14,6 +14,7 @@ import { globalCache } from '@/lib/datasource/MemoryCache';
 import { isMarketOpen } from '@/lib/datasource/marketHours';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { refreshIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { isValidYmd } from '@/lib/utils/ymd';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,6 +31,7 @@ type LivePayload = LiveThemeRosterFile & {
 
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
+  if (date && !isValidYmd(date)) return apiError(`invalid date: ${date}`, 400);
   const forceRefresh = req.nextUrl.searchParams.get('refresh') === '1' && !date;
   const cacheKey = `live-themes:TW:${date ?? 'latest'}`;
   const cached = forceRefresh ? null : globalCache.get<LivePayload>(cacheKey);
@@ -43,9 +45,14 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const file = date
-    ? await buildLiveThemeRoster(date)
-    : await buildLatestLiveThemeRoster();
+  let file: LiveThemeRosterFile | null;
+  try {
+    file = date
+      ? await buildLiveThemeRoster(date)
+      : await buildLatestLiveThemeRoster();
+  } catch (error) {
+    return apiError(error instanceof Error ? error.message : 'official industry unavailable', 503);
+  }
   if (!file) {
     return apiError(date ? `no L2 snapshot for ${date}` : 'no L2 snapshot available', 404);
   }

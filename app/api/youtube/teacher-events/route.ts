@@ -11,7 +11,8 @@ import { loadRecoEventsInRange } from '@/lib/youtube/recoStorage';
 import { computeEventReturns, evalTargetStop, indexReturnBetween, type TargetStopEval } from '@/lib/youtube/recoPerformance';
 import { loadSources, loadVideosForDate } from '@/lib/youtube/videoStorage';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { buildOfficialIndustryPeerMap, fetchTwOfficialIndustryRoster } from '@/lib/datasource/TWOfficialIndustry';
+import { loadOfficialIndustryContext, OfficialIndustryUnavailableError } from '@/lib/themes/officialIndustryContext';
+import { isValidYmd } from '@/lib/utils/ymd';
 import type { BaselineCandle } from '@/lib/youtube/recoBaseline';
 import type { RecoEventWithReturns } from '@/lib/youtube/recoTypes';
 
@@ -29,6 +30,7 @@ export const dynamic = 'force-dynamic';
 export interface TeacherEventsResponse {
   teacher: string;
   window: { start: string; end: string; days: number };
+  officialIndustry: { source: 'openapi' | 'persisted_snapshot'; asOf: string | null };
   events: Array<RecoEventWithReturns & {
     video_titles: Record<string, string>;  // video_id → title（前端連結用）
     display_names: Record<string, string>; // source_id → display_name
@@ -44,17 +46,15 @@ export async function GET(req: NextRequest) {
   const end = url.searchParams.get('end') || todayYmdTaipei(new Date());
   if (!teacher) return apiError('teacher is required', 400);
   if (!Number.isFinite(days) || days < 1 || days > 365) return apiError('days must be 1-365', 400);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return apiError('end must be YYYY-MM-DD', 400);
+  if (!isValidYmd(end)) return apiError('end must be YYYY-MM-DD', 400);
 
   try {
-    const [files, sources, officialRoster] = await Promise.all([
+    const [files, sources, officialIndustry] = await Promise.all([
       loadRecoEventsInRange(end, days),
       loadSources(),
-      fetchTwOfficialIndustryRoster().catch(() => []),
+      loadOfficialIndustryContext(),
     ]);
     const displayById = new Map(sources.map(s => [s.source_id, s.display_name]));
-    const industryByCode = new Map(officialRoster.map((stock) => [stock.code, stock.industry]));
-    const peersByCode = buildOfficialIndustryPeerMap(officialRoster);
 
     const candleCache = new Map<string, BaselineCandle[] | null>();
     const getCandles = async (symbol: string): Promise<BaselineCandle[] | null> => {
@@ -73,11 +73,12 @@ export async function GET(req: NextRequest) {
       for (const v of await loadVideosForDate(d)) titleByVideo.set(v.video_id, v.title);
     }
 
-    // 同題材成分股 .TW/.TWO 自動試後綴載 K 線（memo）
-    const getCandlesAnySuffix = async (code: string): Promise<BaselineCandle[] | null> => {
-      let c = await getCandles(`${code}.TW`);
-      if (!c || c.length === 0) c = await getCandles(`${code}.TWO`);
-      return c && c.length > 0 ? c : null;
+    // 同官方產業成分股直接使用交易所市場後綴，不先猜 .TW。
+    const getOfficialPeerCandles = async (code: string): Promise<BaselineCandle[] | null> => {
+      const symbol = officialIndustry.symbolByCode.get(code);
+      if (!symbol) return null;
+      const candles = await getCandles(symbol);
+      return candles && candles.length > 0 ? candles : null;
     };
 
     const events = [] as TeacherEventsResponse['events'];
@@ -93,12 +94,12 @@ export async function GET(req: NextRequest) {
 
       // 相對族群：個股持有至今 vs 同官方產業成分股同期平均
       let sector: SectorExcess | null = null;
-      const industry = industryByCode.get(ev.stock_code);
+      const industry = officialIndustry.industryByCode.get(ev.stock_code);
       const themes = industry ? [industry] : [];
       if (themes.length > 0 && returns?.holdReturn != null && ev.baseline.base_date && returns.lastTrackedDate) {
         const peerRets: number[] = [];
-        for (const peer of peersByCode.get(ev.stock_code) ?? []) {
-          const pc = await getCandlesAnySuffix(peer);
+        for (const peer of officialIndustry.peersByCode.get(ev.stock_code) ?? []) {
+          const pc = await getOfficialPeerCandles(peer);
           if (!pc) continue;
           const r = indexReturnBetween(pc, ev.baseline.base_date, returns.lastTrackedDate);
           if (r != null) peerRets.push(r);
@@ -123,8 +124,16 @@ export async function GET(req: NextRequest) {
     }
 
     const start = files.length > 0 ? files[0].date : end;
-    return apiOk<TeacherEventsResponse>({ teacher, window: { start, end, days }, events });
+    return apiOk<TeacherEventsResponse>({
+      teacher,
+      window: { start, end, days },
+      officialIndustry: { source: officialIndustry.source, asOf: officialIndustry.asOf },
+      events,
+    });
   } catch (err) {
-    return apiError(`teacher-events failed: ${(err as Error).message}`, 500);
+    return apiError(
+      `teacher-events failed: ${(err as Error).message}`,
+      err instanceof OfficialIndustryUnavailableError ? 503 : 500,
+    );
   }
 }

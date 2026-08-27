@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { buildHotThemeScan, buildLatestHotThemeScan } from '@/lib/themes/hotThemeScan';
 import { globalCache } from '@/lib/datasource/MemoryCache';
+import { isValidYmd } from '@/lib/utils/ymd';
 
 export const runtime = 'nodejs';
 
@@ -16,14 +17,19 @@ const CACHE_TTL = 5 * 60 * 1000;
 
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
+  if (date && !isValidYmd(date)) return apiError(`invalid date: ${date}`, 400);
   const cacheKey = `hot-themes:TW:${date ?? 'latest'}`;
   const cached = globalCache.get<Awaited<ReturnType<typeof buildHotThemeScan>>>(cacheKey);
   if (cached) return apiOk(cached);
 
-  const file = date ? await buildHotThemeScan(date) : await buildLatestHotThemeScan();
-  if (!file) {
-    return apiError(date ? `no L2 snapshot for ${date}` : 'no L2 snapshot available', 404);
+  try {
+    const file = date ? await buildHotThemeScan(date) : await buildLatestHotThemeScan();
+    if (!file) {
+      return apiError(date ? `no L2 snapshot for ${date}` : 'no L2 snapshot available', 404);
+    }
+    globalCache.set(cacheKey, file, CACHE_TTL);
+    return apiOk(file);
+  } catch (error) {
+    return apiError(error instanceof Error ? error.message : 'official industry unavailable', 503);
   }
-  globalCache.set(cacheKey, file, CACHE_TTL);
-  return apiOk(file);
 }

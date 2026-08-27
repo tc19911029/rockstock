@@ -2,11 +2,11 @@
  * 題材輪動「描述性」標籤（2026-06-19）
  *
  * ⚠️ 這是**描述性情境感知**，不是買賣訊號。回測（scripts/backtest-theme-rotation.ts，
- * 隔離 beta 後）證實：輪入🟢只贏全題材平均 ~0.15%/d10、勝率<50%；避退潮🔴無 edge
+ * 隔離 beta 後）證實：輪入🟢只贏全產業平均 ~0.15%/d10、勝率<50%；避退潮🔴無 edge
  * （退潮會均值回歸）。詳見記憶 theme_rotation_no_edge。
  * 因此：只標「錢在進/出哪個題材」供盯盤參考，**不排序成該買、不做避雷名單、不進選股 gate**（鐵則 #5）。
  *
- * 算法：今日 vs 約 5 個交易日前的題材排名（兩份都按「法人資金流入5日」排，見 rankByMoneyIn）：
+ * 算法：今日 vs 前一個有效交易日的產業排名（兩份都按「法人資金流入5日」排，見 rankByMoneyIn）：
  *   rankDelta = 前次名次 − 今日名次（正 = 名次爬升 = 資金轉入）
  *   accel     = 今日 avgD5 − 前次 avgD5（顯示用：近段動能變化）
  *
@@ -36,7 +36,7 @@ export interface ThemeRotation {
 
 const RANK_DELTA_TH = 3;
 
-/** 依「資金流入5日」（近 5 日三大法人買超金額，成分股加總）排名次（缺值沉底）：theme → 1-based 名次。
+/** 依「資金流入5日」（近 5 日三大法人買超金額，成分股加總）排名次（缺值沉底）：industryId → 1-based 名次。
  *  2026-06-19 改：原本按今日漲幅 → 改按「資金流入」。
  *  2026-06-20 改：原本看 1 日，法人一天一個樣、名次暴跳（記憶體一天 25→1）→ 改看 5 日累計，比較穩、看「這一週法人在累積哪個題材」。 */
 function rankByMoneyIn(themes: SectorRankingFile['themes']): Map<string, number> {
@@ -47,7 +47,7 @@ function rankByMoneyIn(themes: SectorRankingFile['themes']): Map<string, number>
   };
   const sorted = [...themes].sort((a, b) => (moneyOf(b) ?? -Infinity) - (moneyOf(a) ?? -Infinity));
   const m = new Map<string, number>();
-  sorted.forEach((t, i) => m.set(t.theme, i + 1));
+  sorted.forEach((t, i) => m.set(t.industryId, i + 1));
   return m;
 }
 
@@ -63,21 +63,21 @@ export function computeRotation(
   const nowRank = rankByMoneyIn(today.themes);
   const prevRank = prior ? rankByMoneyIn(prior.themes) : null;
   const priorD1 = new Map<string, number | null>();
-  prior?.themes.forEach((t) => priorD1.set(t.theme, t.avgD1));
+  prior?.themes.forEach((t) => priorD1.set(t.industryId, t.avgD1));
 
   const out = new Map<string, ThemeRotation>();
   for (const t of today.themes) {
-    const rankNow = nowRank.get(t.theme)!;
-    const rankPrev = prevRank?.get(t.theme) ?? null;
+    const rankNow = nowRank.get(t.industryId)!;
+    const rankPrev = prevRank?.get(t.industryId) ?? null;
     const rankDelta = rankPrev != null ? rankPrev - rankNow : null;
-    const ap = priorD1.get(t.theme);
+    const ap = priorD1.get(t.industryId);
     const accel = t.avgD1 != null && ap != null ? +(t.avgD1 - ap).toFixed(1) : null;
     let bucket: RotationBucket = 'mid';
     if (rankDelta != null) {
       if (rankDelta >= RANK_DELTA_TH) bucket = 'in';
       else if (rankDelta <= -RANK_DELTA_TH) bucket = 'out';
     }
-    out.set(t.theme, { rankNow, rankPrev, rankDelta, accel, bucket });
+    out.set(t.industryId, { rankNow, rankPrev, rankDelta, accel, bucket });
   }
   return out;
 }

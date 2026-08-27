@@ -15,7 +15,8 @@ import { computeEventReturns } from '@/lib/youtube/recoPerformance';
 import { buildExtremes, buildProgramRows, buildStockAggRows, buildTeacherRows } from '@/lib/youtube/recoLeaderboard';
 import { loadSources } from '@/lib/youtube/videoStorage';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { fetchTwOfficialIndustryRoster } from '@/lib/datasource/TWOfficialIndustry';
+import { loadOfficialIndustryContext, OfficialIndustryUnavailableError } from '@/lib/themes/officialIndustryContext';
+import { isValidYmd } from '@/lib/utils/ymd';
 import type { BaselineCandle } from '@/lib/youtube/recoBaseline';
 import type { RecoEventWithReturns, TeacherLeaderboardResponse } from '@/lib/youtube/recoTypes';
 
@@ -35,22 +36,21 @@ export async function GET(req: NextRequest) {
   const asOf = url.searchParams.get('asOf') || null;
   const end = asOf || url.searchParams.get('end') || todayYmdTaipei(new Date());
   if (!ALLOWED_DAYS.has(days)) return apiError('days must be 30|60|90', 400);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return apiError('end must be YYYY-MM-DD', 400);
-  if (asOf && !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return apiError('asOf must be YYYY-MM-DD', 400);
+  if (!isValidYmd(end)) return apiError('end must be YYYY-MM-DD', 400);
+  if (asOf && !isValidYmd(asOf)) return apiError('asOf must be YYYY-MM-DD', 400);
 
   try {
-    const [allFiles, sources, officialRoster] = await Promise.all([
+    const [allFiles, sources, officialIndustry] = await Promise.all([
       loadRecoEventsInRange(end, days),
       loadSources(),
-      fetchTwOfficialIndustryRoster().catch(() => []),
+      loadOfficialIndustryContext(),
     ]);
     // asOf 模式：去掉 asOf 當天（含）之後的分析 — 那天晚上才會產出，當下看不到
     const files = asOf ? allFiles.filter(f => f.date < asOf) : allFiles;
     const displayById = new Map(sources.map(s => [s.source_id, s.display_name]));
     const resolveDisplayName = (id: string) => displayById.get(id) ?? id;
-    const industryByCode = new Map(officialRoster.map((stock) => [stock.code, stock.industry]));
     const resolveIndustries = (code: string): string[] => {
-      const industry = industryByCode.get(code);
+      const industry = officialIndustry.industryByCode.get(code);
       return industry ? [industry] : [];
     };
 
@@ -117,12 +117,16 @@ export async function GET(req: NextRequest) {
       losers,
       meta: {
         minScored: MIN_SCORED,
+        officialIndustry: { source: officialIndustry.source, asOf: officialIndustry.asOf },
         survivorshipNote:
           '進場價＝提及隔日開盤；一字鎖死(no_fill)/無K線(no_data)不計入勝率但列入覆蓋統計；D+60 未走完的事件僅計入已到期的橫斷。',
       },
     };
     return apiOk(response);
   } catch (err) {
-    return apiError(`teacher-leaderboard failed: ${(err as Error).message}`, 500);
+    return apiError(
+      `teacher-leaderboard failed: ${(err as Error).message}`,
+      err instanceof OfficialIndustryUnavailableError ? 503 : 500,
+    );
   }
 }

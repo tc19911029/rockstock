@@ -211,6 +211,8 @@ export interface TeacherLeaderboardResponse {
   meta: {
     /** 正式榜門檻：scored_events ≥ 此數才進正式榜，否則潛力觀察榜 */
     minScored: number;
+    /** 官方 OpenAPI 優先；短暫故障時揭露所用官方快照日期。 */
+    officialIndustry: { source: 'openapi' | 'persisted_snapshot'; asOf: string | null };
     survivorshipNote: string;
   };
 }

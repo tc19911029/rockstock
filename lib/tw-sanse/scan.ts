@@ -69,8 +69,7 @@ async function loadTwUniverse(): Promise<StockEntry[]> {
     const name = nameMap.get(code) ?? UNRESOLVED_STOCK_NAME;
     // 排除存託憑證（外國企業 TDR，名稱含「DR」，非台股普通股；如 9103 美德醫DR）
     if (/DR$/.test(name) || name.includes('-DR')) continue;
-    // 產業題材：題材對照優先（蘋果供應鏈/AI伺服器/記憶體…），沒命中退回 TWSE 產業別（金融保險/航運…）。
-    // 與書本掃描同一份來源（conceptMap）；fetchTWIndustryMap 網路失敗只少了產業別 fallback，不中斷掃描。
+    // 分類只採 TWSE／TPEx 官方產業；官方來源失敗時留空，不以人工題材冒充。
     const industry = getTWConcept(code, industryMap.get(code)) ?? '';
     out.push({ symbol, name, industry });
   }

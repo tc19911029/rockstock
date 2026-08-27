@@ -16,7 +16,7 @@
 
 import path from 'path';
 import { promises as fs } from 'fs';
-import { readSectorRanking, buildSectorRanking, type ThemeRank } from '@/lib/themes/sectorRanking';
+import { readSectorRanking, buildSectorRanking, saveSectorRanking, type ThemeRank } from '@/lib/themes/sectorRanking';
 import { readBoardsDay } from '@/lib/cn-agents/storage';
 import { filterThemeConcepts } from '@/lib/cn-agents/boardRanking';
 import { fetchBoardMembers } from '@/lib/cn-agents/datasource/emBoards';
@@ -83,11 +83,18 @@ function invertCn(themes: TodayThemeLite[]): Map<string, ThemeRef[]> {
 
 // ── TW：官方產業按 avgD1（今日產業平均漲幅）排 ─────────────────────────────────
 async function twTodayThemes(date: string): Promise<TodayThemeLite[]> {
-  const file = (await readSectorRanking(date)) ?? (await buildSectorRanking(date));
+  let file = await readSectorRanking(date);
+  if (!file) {
+    file = await buildSectorRanking(date);
+    if (!file.themes.some((theme) => theme.avgD1 != null)) {
+      throw new Error(`no L1 data for ${date}`);
+    }
+    await saveSectorRanking(file);
+  }
   const todayRet = (t: ThemeRank) => t.avgD1 ?? null;
   const ranked = [...file.themes].sort((a, b) => (todayRet(b) ?? -Infinity) - (todayRet(a) ?? -Infinity));
   return ranked.map((t, i) => ({
-    id: t.theme,
+    id: t.industryId,
     name: t.theme,
     heatRank: i + 1,
     memberCodes: t.members.map((m) => m.code),

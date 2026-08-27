@@ -37,6 +37,7 @@ interface ThemeRotation {
   rankDelta: number | null; accel: number | null; bucket: 'in' | 'mid' | 'out';
 }
 interface ThemeRank {
+  industryId: string;
   theme: string; stockCount: number;
   avgD1: number | null; avgD5: number | null; avgD20: number | null; avgD60: number | null;
   avgVolRatio: number | null; breadth: number | null; instNet5: number | null; instAmt5?: number | null;
@@ -433,7 +434,7 @@ function FixedView({ data, error, expanded, setExpanded }: {
           <SortBar sorts={FIXED_SORTS} sortId={sortId} dir={dir} onSort={sortBy} hint="法人=三大法人買超、融資=融資增減（皆成分股加總金額）" />
           <div className="p-1.5 space-y-1.5">
             {themes.map((t, i) => (
-              <FixedThemeCard key={t.theme} t={t} rank={i + 1}
+              <FixedThemeCard key={t.industryId} t={t} rank={i + 1}
                 expanded={expanded === t.theme}
                 onToggle={() => setExpanded(expanded === t.theme ? null : t.theme)} />
             ))}
