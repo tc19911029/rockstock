@@ -7,6 +7,7 @@ import {
   Bot,
   BookOpen,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleHelp,
   Clock3,
@@ -42,7 +43,7 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { TideProSnapshot, TideProStock } from '@/lib/tide/proData';
 import styles from './tide.module.css';
 
@@ -103,10 +104,10 @@ type StockDetailData = {
 };
 
 const CATEGORY_META: Record<Exclude<FlowCategory, 'all'>, { label: string; hint: string; color: string }> = {
-  flood: { label: '漲潮', hint: '資金加速流入', color: '#e45b61' },
-  rotation: { label: '輪動', hint: '資金流入但放緩', color: '#e7a33e' },
-  watch: { label: '觀望', hint: '資金流出但放緩', color: '#4aa6a0' },
-  ebb: { label: '退潮', hint: '資金加速流出', color: '#5d87c7' },
+  flood: { label: '漲潮', hint: '資金加速流入', color: '#e7795d' },
+  rotation: { label: '輪動', hint: '資金流入但放緩', color: '#e7c361' },
+  watch: { label: '觀望', hint: '資金流出但放緩', color: '#85a69d' },
+  ebb: { label: '退潮', hint: '資金流出', color: '#68ad9c' },
 };
 
 const PERIOD_INDEX: Record<Period, number> = { 1: 0, 5: 4, 20: 6 };
@@ -135,7 +136,7 @@ function formatPct(value: number | null | undefined): string {
 
 function flowCategory(theme: ThemeRank): Exclude<FlowCategory, 'all'> {
   const money = theme.instAmt5 ?? 0;
-  const speed = (theme.avgD1 ?? 0) - (theme.avgD5 ?? 0) / 5;
+  const speed = themeMoney(theme, 1) - money / 5;
   if (money >= 0 && speed >= 0) return 'flood';
   if (money >= 0) return 'rotation';
   if (speed >= 0) return 'watch';
@@ -196,7 +197,10 @@ export default function TideDashboard({
   const [showAll, setShowAll] = useState(false);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<StockRef | null>(null);
+  const [selectedTheme, setSelectedTheme] = useState<ThemeRank | null>(null);
   const [watchlist, setWatchlist] = useState<StockRef[]>([]);
+  const [watchSearchOpen, setWatchSearchOpen] = useState(false);
+  const [watchQuery, setWatchQuery] = useState('');
   const [alerts, setAlerts] = useState<StockRef[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -210,7 +214,8 @@ export default function TideDashboard({
   const [guideOpen, setGuideOpen] = useState(false);
   const [wishOpen, setWishOpen] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
-  const [highlightsOpen, setHighlightsOpen] = useState(true);
+  const [highlightsOpen, setHighlightsOpen] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
   const [textSize, setTextSize] = useState<TextSize>('small');
@@ -232,6 +237,13 @@ export default function TideDashboard({
       .filter((stock) => stock.code.includes(needle) || stock.name.toLowerCase().includes(needle) || stock.theme?.toLowerCase().includes(needle))
       .slice(0, 8);
   }, [allStocks, query]);
+  const watchSearchResults = useMemo(() => {
+    const needle = watchQuery.trim().toLowerCase();
+    const candidates = needle
+      ? allStocks.filter((stock) => stock.code.includes(needle) || stock.name.toLowerCase().includes(needle) || stock.theme?.toLowerCase().includes(needle))
+      : allStocks;
+    return candidates.filter((stock) => !watchlist.some((watched) => watched.code === stock.code)).slice(0, 8);
+  }, [allStocks, watchQuery, watchlist]);
 
   useEffect(() => {
     setWatchlist(readStoredStocks('tide-clone-watchlist'));
@@ -399,25 +411,15 @@ export default function TideDashboard({
         <span className={styles.stripDivider}>｜</span>
         <span>資料日期 {dataDate || '—'}</span>
         <Link className={styles.planLink} href="/tide/pricing">方案</Link>
-        <span className={styles.proPill}><ShieldCheck size={12} /> Pro 全功能</span>
-        <span className={styles.updateNote}>盤後資料約 18:30 前更新</span>
-        <div className={styles.pollCompact} aria-label="明日多空投票">
-          <span>明日多空</span>
-          <button className={pollVote === 'bull' ? styles.pollSelected : ''} onClick={() => submitVote('bull')}>多 {bullishPct}%</button>
-          <button className={pollVote === 'bear' ? styles.pollSelected : ''} onClick={() => submitVote('bear')}>{100 - bullishPct}% 空</button>
-        </div>
+        <span className={styles.updateNote}>⏳ 今日資料約 18:30 前更新</span>
+        <span className={styles.sourceNote}>資料來源：證交所、櫃買中心公開資料｜僅彙整公開資訊，不構成投資建議</span>
       </div>
 
       <header className={styles.header}>
-        <button className={styles.brand} onClick={() => setView('bubble')} aria-label="回到潮汐泡泡圖">
-          <span className={styles.logoMark}><Waves size={20} /></span>
-          <span><strong>Tide</strong><small>台股資金潮汐</small></span>
-        </button>
-
-        <div className={styles.sentiment} aria-label={`今日多方 ${bullishPct}%`}>
-          <span>多 {bullishPct}%</span>
+        <div className={styles.sentiment} aria-label={`明日多方 ${bullishPct}%`}>
+          <button className={pollVote === 'bull' ? styles.pollSelected : ''} onClick={() => submitVote('bull')}>多 {bullishPct}%</button>
           <div><i style={{ width: `${bullishPct}%` }} /></div>
-          <span>{100 - bullishPct}% 空</span>
+          <button className={pollVote === 'bear' ? styles.pollSelected : ''} onClick={() => submitVote('bear')}>{100 - bullishPct}% 空</button>
         </div>
 
         <div className={styles.searchWrap}>
@@ -474,51 +476,74 @@ export default function TideDashboard({
         </section>
       )}
 
-      <section className={styles.categoryBar} aria-label="資金狀態篩選">
-        {(Object.keys(CATEGORY_META) as Array<Exclude<FlowCategory, 'all'>>).map((key) => {
-          const meta = CATEGORY_META[key];
-          return (
-            <button key={key} className={category === key ? styles.activeCategory : ''} onClick={() => setCategory(category === key ? 'all' : key)}>
-              <span className={styles.categoryDot} style={{ background: meta.color }} />
-              <b>{meta.label}</b><strong>{categoryCounts[key]}</strong><small>{meta.hint}</small>
-            </button>
-          );
-        })}
-      </section>
-
       <div className={styles.workspace}>
+        <section className={styles.categoryBar} aria-label="資金狀態篩選">
+          {(Object.keys(CATEGORY_META) as Array<Exclude<FlowCategory, 'all'>>).map((key) => {
+            const meta = CATEGORY_META[key];
+            return (
+              <button
+                key={key}
+                className={category === key ? styles.activeCategory : ''}
+                onClick={() => setCategory(category === key ? 'all' : key)}
+                aria-pressed={category === key}
+                style={{ '--category-color': meta.color } as CSSProperties}
+              >
+                <b>{meta.label}</b><strong>{categoryCounts[key]}</strong><small>{meta.hint}</small>
+              </button>
+            );
+          })}
+        </section>
+
         <section className={styles.mainPanel}>
-          <div className={styles.viewTabs} role="tablist" aria-label="分析功能">
-            <button role="tab" aria-selected={view === 'bubble'} onClick={() => setView('bubble')}><Layers3 size={15} /> 板塊泡泡圖</button>
-            <button role="tab" aria-selected={view === 'ranking'} onClick={() => setView('ranking')}><ListFilter size={15} /> 完整籌碼排行</button>
-            <button role="tab" aria-selected={view === 'dual'} onClick={() => setView('dual')}><TrendingUp size={15} /> 外資投信同買賣</button>
-            <button role="tab" aria-selected={view === 'streak'} onClick={() => setView('streak')}><Clock3 size={15} /> 外資連買賣</button>
-            <button role="tab" aria-selected={view === 'radar'} onClick={() => setView('radar')}><Radar size={15} /> 籌碼雷達</button>
+          <div className={styles.panelToolbar}>
+            <div className={styles.viewMenuWrap}>
+              <button
+                className={styles.viewMenuButton}
+                onClick={() => setViewMenuOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={viewMenuOpen}
+              >
+                {view === 'bubble' ? '板塊泡泡圖' : view === 'ranking' ? '板塊排行榜' : view === 'dual' ? '外資投信同買賣' : view === 'streak' ? '外資連買賣' : '籌碼雷達'}
+                <ChevronDown size={14} />
+              </button>
+              {viewMenuOpen && (
+                <div className={styles.viewMenu} role="menu">
+                  <button role="menuitem" onClick={() => { setViewMenuOpen(false); document.getElementById('tide-watchlist')?.scrollIntoView({ behavior: 'smooth' }); }}><Home size={15} /> 自選股</button>
+                  <button role="menuitem" aria-current={view === 'bubble'} onClick={() => { setView('bubble'); setViewMenuOpen(false); }}><Layers3 size={15} /> 板塊泡泡圖</button>
+                  <button role="menuitem" aria-current={view === 'ranking'} onClick={() => { setView('ranking'); setViewMenuOpen(false); }}><ListFilter size={15} /> 板塊排行榜</button>
+                  <span>Pro 籌碼工具</span>
+                  <button role="menuitem" aria-current={view === 'dual'} onClick={() => { setView('dual'); setViewMenuOpen(false); }}><TrendingUp size={15} /> 外資投信同買賣</button>
+                  <button role="menuitem" aria-current={view === 'streak'} onClick={() => { setView('streak'); setViewMenuOpen(false); }}><Clock3 size={15} /> 外資連買賣</button>
+                  <button role="menuitem" aria-current={view === 'radar'} onClick={() => { setView('radar'); setViewMenuOpen(false); }}><Radar size={15} /> 籌碼雷達</button>
+                </div>
+              )}
+            </div>
+            {view === 'bubble' ? (
+              <>
+                <button className={styles.showAllButton} onClick={() => setShowAll(!showAll)}>{showAll ? '精簡顯示' : `顯示全部 ${themes.length} 個`}</button>
+                <span className={styles.chartHint}>越右＝近 5 日買越多・越上＝買的速度在加快・圈越大＝近 20 日金額越大</span>
+                <button className={styles.helpButton} aria-label="怎麼看這張圖" title="越右法人買越多、越上資金加速、圈越大代表規模"><CircleHelp size={15} /></button>
+                <button className={`${styles.replayButton} ${replayOpen ? styles.toolbarActive : ''}`} onClick={() => {
+                  if (!replayOpen) setReplayIndex(0);
+                  setReplayPlaying(false);
+                  setReplayOpen(!replayOpen);
+                }}><Play size={14} /> 回放</button>
+              </>
+            ) : <span className={styles.proToolbarLabel}><ShieldCheck size={13} /> Pro 全功能已啟用</span>}
           </div>
 
           {view === 'bubble' && (
             <BubbleView
               themes={filteredThemes}
-              totalCount={themes.length}
               period={period}
-              setPeriod={setPeriod}
-              showAll={showAll}
-              setShowAll={setShowAll}
-              replayOpen={replayOpen}
-              setReplayOpen={(value) => {
-                if (value) setReplayIndex(0);
-                setReplayPlaying(false);
-                setReplayOpen(value);
-              }}
+              selectedTheme={selectedTheme}
+              onCloseTheme={() => setSelectedTheme(null)}
               onSelectStock={setSelected}
-              onSelectTheme={(theme) => {
-                const stock = theme.topStock ?? theme.members[0];
-                if (stock) setSelected({ code: stock.code, name: stock.name, theme: theme.theme });
-              }}
+              onSelectTheme={setSelectedTheme}
             />
           )}
 
-          {view === 'ranking' && <RankingView themes={themes} period={period} setPeriod={setPeriod} onSelect={setSelected} />}
+          {view === 'ranking' && <RankingView themes={themes} period={period} setPeriod={setPeriod} snapshot={proSnapshot} onSelect={setSelected} />}
           {view === 'dual' && <DualView snapshot={proSnapshot} onSelect={setSelected} />}
           {view === 'streak' && <StreakView snapshot={proSnapshot} onSelect={setSelected} />}
           {view === 'radar' && <RadarView snapshot={proSnapshot} onSelect={setSelected} onAlert={toggleAlert} alerts={alerts} />}
@@ -545,11 +570,28 @@ export default function TideDashboard({
           )}
         </section>
 
-        <aside className={styles.watchPanel}>
+        <aside className={styles.watchPanel} id="tide-watchlist">
           <div className={styles.watchHeader}>
-            <div><span>觀察清單</span><small>{watchlist.length} 檔</small></div>
-            <button onClick={() => { const first = searchResults[0] ?? allStocks[0]; if (first) addWatch(first); }}><Plus size={14} /> 添加</button>
+            <div><span>觀察清單</span>{watchlist.length > 0 && <small>{watchlist.length} 檔</small>}</div>
+            <div>
+              <button onClick={() => setWatchSearchOpen(true)}><Plus size={14} /> 添加</button>
+              <button aria-label="更多操作">⋯</button>
+            </div>
           </div>
+          {watchSearchOpen && (
+            <div className={styles.watchSearchPopover} role="dialog" aria-label="新增自選股">
+              <header><b>新增自選股</b><button onClick={() => { setWatchSearchOpen(false); setWatchQuery(''); }} aria-label="關閉新增自選股"><X size={14} /></button></header>
+              <label><Search size={14} /><input autoFocus value={watchQuery} onChange={(event) => setWatchQuery(event.target.value)} placeholder="搜尋代碼或名稱" /></label>
+              <div>
+                {watchSearchResults.map((stock) => (
+                  <button key={stock.code} onClick={() => { addWatch(stock); setWatchSearchOpen(false); setWatchQuery(''); }}>
+                    <span><b>{stock.code}</b><small>{stock.name}</small></span><em>{stock.theme ?? '個股'}</em><Plus size={14} />
+                  </button>
+                ))}
+                {watchSearchResults.length === 0 && <p>沒有符合的股票</p>}
+              </div>
+            </div>
+          )}
           {watchlist.length === 0 ? (
             <div className={styles.emptyWatch}>
               <Waves size={28} />
@@ -596,9 +638,10 @@ export default function TideDashboard({
       </footer>
 
       <nav className={styles.mobileNav} aria-label="手機版主要導覽">
-        <button className={view === 'bubble' ? styles.mobileNavActive : ''} onClick={() => { setView('bubble'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><Home size={19} /><span>首頁</span></button>
-        <button onClick={() => setHighlightsOpen(true)}><BarChart3 size={19} /><span>重點</span></button>
-        <button onClick={() => { setAlertTab('watch'); setAlertsOpen(true); }}><BellRing size={19} /><span>提醒</span>{alerts.length > 0 && <b>{alerts.length}</b>}</button>
+        <button onClick={() => setHighlightsOpen(true)}><BarChart3 size={19} /><span>今日</span></button>
+        <button className={view === 'bubble' ? styles.mobileNavActive : ''} onClick={() => { setView('bubble'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><Layers3 size={19} /><span>泡泡圖</span></button>
+        <button className={view === 'ranking' ? styles.mobileNavActive : ''} onClick={() => { setView('ranking'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><ListFilter size={19} /><span>排行</span></button>
+        <button onClick={() => document.getElementById('tide-watchlist')?.scrollIntoView({ behavior: 'smooth' })}><Home size={19} /><span>自選</span>{watchlist.length > 0 && <b>{watchlist.length}</b>}</button>
         <button onClick={() => signedIn ? setPerformanceOpen(true) : setLoginOpen(true)}><UserRound size={19} /><span>我的</span></button>
       </nav>
 
@@ -693,23 +736,16 @@ export default function TideDashboard({
 
 function BubbleView({
   themes,
-  totalCount,
   period,
-  setPeriod,
-  showAll,
-  setShowAll,
-  replayOpen,
-  setReplayOpen,
+  selectedTheme,
+  onCloseTheme,
+  onSelectStock,
   onSelectTheme,
 }: {
   themes: ThemeRank[];
-  totalCount: number;
   period: Period;
-  setPeriod: (period: Period) => void;
-  showAll: boolean;
-  setShowAll: (value: boolean) => void;
-  replayOpen: boolean;
-  setReplayOpen: (value: boolean) => void;
+  selectedTheme: ThemeRank | null;
+  onCloseTheme: () => void;
   onSelectStock: (stock: StockRef) => void;
   onSelectTheme: (theme: ThemeRank) => void;
 }) {
@@ -717,37 +753,50 @@ function BubbleView({
     const raw = themes.map((theme) => ({
       theme,
       x: signedLog(themeMoney(theme, period)),
-      y: (theme.avgD1 ?? 0) - (theme.avgD5 ?? 0) / 5,
+      y: signedLog(themeMoney(theme, 1) - themeMoney(theme, 5) / 5),
       size: Math.log10(1 + Math.abs(themeMoney(theme, 20)) / 100_000_000),
     }));
     const maxX = Math.max(1, ...raw.map((item) => Math.abs(item.x)));
     const maxY = Math.max(1, ...raw.map((item) => Math.abs(item.y)));
     const maxSize = Math.max(1, ...raw.map((item) => item.size));
-    return raw.map((item) => ({
+    const placed = raw.map((item) => ({
       ...item,
       // 固定 SVG 座標精度，避免 Node 與瀏覽器浮點字串最後一位不同造成 hydration mismatch。
-      cx: Number((500 + (item.x / maxX) * 410).toFixed(3)),
-      cy: Number((260 - (item.y / maxY) * 195).toFixed(3)),
-      radius: Number((18 + (item.size / maxSize) * 32).toFixed(3)),
+      cx: Number((520 + (item.x / maxX) * 390).toFixed(3)),
+      cy: Number((250 - (item.y / maxY) * 180).toFixed(3)),
+      radius: Number((20 + (item.size / maxSize) * 34).toFixed(3)),
     }));
+    // 原站以力導向避免同象限的泡泡完全疊在一起；固定迭代確保 SSR/瀏覽器結果一致。
+    for (let pass = 0; pass < 70; pass += 1) {
+      for (let i = 0; i < placed.length; i += 1) {
+        for (let j = i + 1; j < placed.length; j += 1) {
+          const left = placed[i];
+          const right = placed[j];
+          let dx = right.cx - left.cx;
+          let dy = right.cy - left.cy;
+          if (dx === 0 && dy === 0) { dx = (j % 3) - 1 || 1; dy = (i % 3) - 1 || -1; }
+          const distance = Math.max(1, Math.hypot(dx, dy));
+          const minimum = (left.radius + right.radius) * 0.72;
+          if (distance >= minimum) continue;
+          const shift = (minimum - distance) * 0.28;
+          const ux = dx / distance;
+          const uy = dy / distance;
+          left.cx -= ux * shift;
+          left.cy -= uy * shift;
+          right.cx += ux * shift;
+          right.cy += uy * shift;
+        }
+      }
+      for (const point of placed) {
+        point.cx = Math.max(108 + point.radius, Math.min(917 - point.radius, point.cx));
+        point.cy = Math.max(31 + point.radius, Math.min(445 - point.radius, point.cy));
+      }
+    }
+    return placed.map((point) => ({ ...point, cx: Number(point.cx.toFixed(3)), cy: Number(point.cy.toFixed(3)) }));
   }, [period, themes]);
 
   return (
     <div className={styles.bubbleView}>
-      <div className={styles.panelToolbar}>
-        <div>
-          <b>板塊泡泡圖</b>
-          <span>越右＝法人買越多・越上＝買的速度加快・圈越大＝近 20 日金額越大</span>
-        </div>
-        <div className={styles.toolbarControls}>
-          <div className={styles.segmented} aria-label="法人資金週期">
-            {([1, 5, 20] as Period[]).map((value) => <button key={value} className={period === value ? styles.segmentActive : ''} onClick={() => setPeriod(value)}>{value} 日</button>)}
-          </div>
-          <button onClick={() => setShowAll(!showAll)}>{showAll ? '精簡顯示' : `顯示全部 ${totalCount} 個`}</button>
-          <button className={replayOpen ? styles.toolbarActive : ''} onClick={() => setReplayOpen(!replayOpen)}><Play size={14} /> 回放</button>
-          <button aria-label="泡泡圖說明" title="越右法人買越多、越上資金加速、圈越大代表規模"><CircleHelp size={15} /></button>
-        </div>
-      </div>
       <div className={styles.chartWrap}>
         <svg viewBox="0 0 1000 530" role="img" aria-label="台股板塊法人資金泡泡圖">
           <defs>
@@ -758,11 +807,23 @@ function BubbleView({
               <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" />
             </filter>
           </defs>
-          <rect x="55" y="35" width="890" height="445" rx="12" fill="url(#tide-grid)" className={styles.chartBg} />
-          <line x1="500" y1="35" x2="500" y2="480" className={styles.axisLine} />
-          <line x1="55" y1="260" x2="945" y2="260" className={styles.axisLine} />
-          <text x="500" y="510" textAnchor="middle" className={styles.axisLabel}>← 法人資金流出　　近 {period} 日資金方向　　法人資金流入 →</text>
-          <text x="22" y="260" textAnchor="middle" transform="rotate(-90 22 260)" className={styles.axisLabel}>資金速度　放緩 ←　→ 加速</text>
+          <rect x="105" y="28" width="815" height="420" fill="url(#tide-grid)" className={styles.chartBg} />
+          <line x1="520" y1="28" x2="520" y2="448" className={styles.axisLine} />
+          <line x1="105" y1="250" x2="920" y2="250" className={styles.axisLine} />
+          <text x="520" y="476" textAnchor="middle" className={styles.axisLabel}>0</text>
+          <text x="110" y="476" textAnchor="middle" className={styles.axisLabel}>−500</text>
+          <text x="270" y="476" textAnchor="middle" className={styles.axisLabel}>−100</text>
+          <text x="390" y="476" textAnchor="middle" className={styles.axisLabel}>−20</text>
+          <text x="650" y="476" textAnchor="middle" className={styles.axisLabel}>+20</text>
+          <text x="790" y="476" textAnchor="middle" className={styles.axisLabel}>+100</text>
+          <text x="915" y="476" textAnchor="middle" className={styles.axisLabel}>+500</text>
+          <text x="91" y="37" textAnchor="end" className={styles.axisLabel}>+50億/天</text>
+          <text x="91" y="128" textAnchor="end" className={styles.axisLabel}>+20億/天</text>
+          <text x="91" y="254" textAnchor="end" className={styles.axisLabel}>0億/天</text>
+          <text x="91" y="372" textAnchor="end" className={styles.axisLabel}>−20億/天</text>
+          <text x="91" y="444" textAnchor="end" className={styles.axisLabel}>−50億/天</text>
+          <text x="107" y="507" textAnchor="start" className={styles.axisTitle}>← 資金流出（億）</text>
+          <text x="917" y="507" textAnchor="end" className={styles.axisTitle}>資金流入（億） →</text>
           {points.map((point) => {
             const category = flowCategory(point.theme);
             const color = CATEGORY_META[category].color;
@@ -777,8 +838,7 @@ function BubbleView({
                 aria-label={`${point.theme.theme}，${formatMoney(themeMoney(point.theme, period))}`}
                 onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onSelectTheme(point.theme); }}
               >
-                <circle r={point.radius} fill={color} filter="url(#bubble-shadow)" />
-                <circle r={Math.max(5, point.radius - 5)} fill="none" stroke="rgba(255,255,255,.32)" strokeWidth="1" />
+                <circle r={point.radius} fill={color} stroke={color} filter="url(#bubble-shadow)" />
                 <text textAnchor="middle" y={-3} className={styles.bubbleName}>{point.theme.theme}</text>
                 <text textAnchor="middle" y={14} className={styles.bubbleValue}>{formatMoney(themeMoney(point.theme, period))}</text>
                 <title>{`${point.theme.theme}｜法人 ${formatMoney(themeMoney(point.theme, period))}｜漲跌 ${formatPct(themeReturn(point.theme, period))}`}</title>
@@ -786,47 +846,89 @@ function BubbleView({
             );
           })}
         </svg>
-      </div>
-      <div className={styles.chartLegend}>
-        {(Object.keys(CATEGORY_META) as Array<Exclude<FlowCategory, 'all'>>).map((key) => <span key={key}><i style={{ background: CATEGORY_META[key].color }} />{CATEGORY_META[key].label}</span>)}
-        <small>點選泡泡可查看該板塊主力個股的 Pro 籌碼明細</small>
+        <div className={styles.chartBrand} aria-hidden="true"><Waves size={30} /><span>tide-tw.app</span></div>
+        {selectedTheme && (
+          <section className={styles.themePopover} aria-label={`${selectedTheme.theme} 板塊摘要`}>
+            <header>
+              <div><b>{selectedTheme.theme}</b><span style={{ color: CATEGORY_META[flowCategory(selectedTheme)].color }}>{CATEGORY_META[flowCategory(selectedTheme)].label}</span></div>
+              <button onClick={onCloseTheme} aria-label="關閉板塊摘要"><X size={15} /></button>
+            </header>
+            <div className={styles.themeMetrics}>
+              <span>當日法人淨買超<strong className={themeMoney(selectedTheme, 1) >= 0 ? styles.up : styles.down}>{formatMoney(themeMoney(selectedTheme, 1))}</strong></span>
+              <span>近 5 日法人淨買超<strong className={themeMoney(selectedTheme, 5) >= 0 ? styles.up : styles.down}>{formatMoney(themeMoney(selectedTheme, 5))}</strong></span>
+              <span>近 20 日累計<strong className={themeMoney(selectedTheme, 20) >= 0 ? styles.up : styles.down}>{formatMoney(themeMoney(selectedTheme, 20))}</strong></span>
+              <span>近 5 日漲跌<strong className={themeReturn(selectedTheme, 5) >= 0 ? styles.up : styles.down}>{formatPct(themeReturn(selectedTheme, 5))}</strong></span>
+            </div>
+            <p>代表股：點選可查看完整 Pro 法人籌碼</p>
+            <div className={styles.themeStocks}>
+              {selectedTheme.members.slice(0, 8).map((stock) => (
+                <button key={stock.code} onClick={() => onSelectStock({ code: stock.code, name: stock.name, theme: selectedTheme.theme })}>
+                  <b>{stock.code}</b><span>{stock.name}</span>
+                </button>
+              ))}
+            </div>
+            <small>金額以各交易日收盤價估算</small>
+          </section>
+        )}
       </div>
     </div>
   );
 }
 
-function RankingView({ themes, period, setPeriod, onSelect }: { themes: ThemeRank[]; period: Period; setPeriod: (period: Period) => void; onSelect: (stock: StockRef) => void }) {
+function RankingView({ themes, period, setPeriod, snapshot, onSelect }: { themes: ThemeRank[]; period: Period; setPeriod: (period: Period) => void; snapshot: TideProSnapshot | null; onSelect: (stock: StockRef) => void }) {
+  const [lens, setLens] = useState<'flow' | 'breadth' | 'contrarian' | 'anomaly' | 'dual'>('flow');
+  const [direction, setDirection] = useState<'buy' | 'sell'>('buy');
+  const dualCodes = useMemo(() => new Set([
+    ...(direction === 'buy' ? snapshot?.simultaneousBuy ?? [] : snapshot?.simultaneousSell ?? []),
+  ].map((stock) => stock.symbol)), [direction, snapshot]);
   const rows = useMemo(() => {
-    const stocks = new Map<string, { stock: StockRef; value: number; d1: number | null; theme: string }>();
-    for (const theme of themes) {
-      for (const member of theme.members) {
-        const value = member.instAmt?.[PERIOD_INDEX[period]] ?? 0;
-        const current = stocks.get(member.code);
-        if (!current || Math.abs(value) > Math.abs(current.value)) stocks.set(member.code, { stock: { code: member.code, name: member.name, theme: theme.theme }, value, d1: member.d1, theme: theme.theme });
-      }
-    }
-    return [...stocks.values()].sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).slice(0, 60);
-  }, [period, themes]);
+    let items = [...themes];
+    if (lens === 'breadth') items = items.filter((theme) => (theme.breadth ?? 0) >= .55);
+    if (lens === 'contrarian') items = items.filter((theme) => themeMoney(theme, period) > 0 && themeReturn(theme, period) < 0);
+    if (lens === 'dual') items = items.filter((theme) => theme.members.some((member) => dualCodes.has(member.code)));
+    items.sort((a, b) => {
+      if (lens === 'breadth') return direction === 'buy' ? (b.breadth ?? 0) - (a.breadth ?? 0) : (a.breadth ?? 1) - (b.breadth ?? 1);
+      if (lens === 'anomaly') return Math.abs(themeMoney(b, period)) / Math.max(1, b.stockCount) - Math.abs(themeMoney(a, period)) / Math.max(1, a.stockCount);
+      return direction === 'buy' ? themeMoney(b, period) - themeMoney(a, period) : themeMoney(a, period) - themeMoney(b, period);
+    });
+    return items;
+  }, [direction, dualCodes, lens, period, themes]);
+  const largest = Math.max(1, ...rows.map((theme) => Math.abs(themeMoney(theme, period))));
   return (
-    <DataSection title="完整籌碼排行" subtitle="不截斷榜單；依法人買賣超金額絕對值排序。">
-      <div className={styles.tableToolbar}>
-        <div className={styles.segmented}>{([1, 5, 20] as Period[]).map((value) => <button key={value} className={period === value ? styles.segmentActive : ''} onClick={() => setPeriod(value)}>{value} 日</button>)}</div>
-        <span>共 {rows.length} 檔</span>
+    <div className={styles.themeRanking}>
+      <div className={styles.rankingFilters}>
+        <div className={styles.rankingLenses}>
+          {([
+            ['flow', '法人動向'], ['breadth', '買多漲少'], ['contrarian', '逆勢買超'], ['anomaly', '個股異常'], ['dual', '外資投信'],
+          ] as const).map(([key, label]) => <button key={key} className={lens === key ? styles.rankingActive : ''} onClick={() => setLens(key)}>{label}</button>)}
+        </div>
+        <div className={styles.rankingSegments}>
+          <div><button className={direction === 'buy' ? styles.rankingActive : ''} onClick={() => setDirection('buy')}>買超</button><button className={direction === 'sell' ? styles.rankingActive : ''} onClick={() => setDirection('sell')}>賣超</button></div>
+          <div>{([1, 5] as Period[]).map((value) => <button key={value} className={period === value ? styles.rankingActive : ''} onClick={() => setPeriod(value)}>{value === 1 ? '當日' : '5 日'}</button>)}</div>
+        </div>
       </div>
-      <div className={styles.dataTableWrap}>
-        <table className={styles.dataTable}>
-          <thead><tr><th>排名</th><th>股票</th><th>主要板塊</th><th>今日漲跌</th><th>法人金額</th><th>方向</th></tr></thead>
-          <tbody>{rows.map((row, index) => (
-            <tr key={row.stock.code} onClick={() => onSelect(row.stock)}>
-              <td>{index + 1}</td><td><b>{row.stock.code}</b> {row.stock.name}</td><td>{row.theme}</td>
-              <td className={(row.d1 ?? 0) >= 0 ? styles.up : styles.down}>{formatPct(row.d1)}</td>
-              <td className={row.value >= 0 ? styles.up : styles.down}>{formatMoney(row.value, false)}</td>
-              <td><span className={row.value >= 0 ? styles.buyChip : styles.sellChip}>{row.value >= 0 ? '買超' : '賣超'}</span></td>
-            </tr>
-          ))}</tbody>
-        </table>
+      <p className={styles.rankingNote}>近 {period} 日法人{direction === 'buy' ? '買' : '賣'}最多的板塊（只呈現公開資料事實，不構成投資建議）</p>
+      <div className={styles.rankingColumns}><span>{period} 日漲跌</span><span>{period} 日淨買超(億)</span></div>
+      <div className={styles.themeRankingList}>
+        {rows.map((theme, index) => {
+          const amount = themeMoney(theme, period);
+          const positiveMembers = theme.members.filter((member) => (member.instAmt?.[PERIOD_INDEX[period]] ?? 0) > 0).length;
+          return (
+            <button key={theme.theme} onClick={() => {
+              const stock = theme.topStock ?? theme.members[0];
+              if (stock) onSelect({ code: stock.code, name: stock.name, theme: theme.theme });
+            }}>
+              <span className={styles.rankingNumber}>{index + 1}</span>
+              <span className={styles.rankingTheme}><b><i style={{ background: CATEGORY_META[flowCategory(theme)].color }} />{theme.theme}</b><small>今日 {formatMoney(themeMoney(theme, 1))} · {positiveMembers}/{theme.stockCount} 檔在買 · 主力 {theme.topStock?.name ?? '—'}</small></span>
+              <strong className={themeReturn(theme, period) >= 0 ? styles.up : styles.down}>{formatPct(themeReturn(theme, period))}</strong>
+              <strong className={amount >= 0 ? styles.up : styles.down}>{formatMoney(amount)}</strong>
+              <span className={styles.rankingBar}><i style={{ width: `${Math.max(4, Math.abs(amount) / largest * 100)}%` }} /></span>
+            </button>
+          );
+        })}
+        {rows.length === 0 && <p className={styles.emptyText}>目前沒有符合條件的板塊。</p>}
       </div>
-    </DataSection>
+    </div>
   );
 }
 

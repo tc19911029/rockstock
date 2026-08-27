@@ -12,14 +12,27 @@ test.describe('Tide Pro 重建頁', () => {
     });
   });
 
-  test('泡泡圖與 Pro 分頁可用', async ({ page }) => {
+  test('泡泡圖、板塊摘要與 Pro 功能選單可用', async ({ page }) => {
     await page.goto('/tide');
     await expect(page.getByRole('img', { name: '台股板塊法人資金泡泡圖' })).toBeVisible();
-    await expect(page.getByText('Pro 全功能')).toBeVisible();
+    await expect(page.getByRole('button', { name: '顯示全部 108 個' })).toBeVisible();
 
-    for (const tab of ['完整籌碼排行', '外資投信同買賣', '外資連買賣', '籌碼雷達']) {
-      await page.getByRole('tab', { name: tab, exact: true }).click();
-      await expect(page.getByRole('tab', { name: tab, exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('button', { name: /記憶體，/ }).click();
+    await expect(page.getByRole('region', { name: '記憶體 板塊摘要' })).toBeVisible();
+    await page.getByRole('button', { name: '關閉板塊摘要' }).click();
+
+    await page.getByRole('button', { name: '板塊泡泡圖', exact: true }).click();
+    await page.getByRole('menuitem', { name: '板塊排行榜', exact: true }).click();
+    await expect(page.getByRole('button', { name: '法人動向', exact: true })).toBeVisible();
+
+    for (const [menu, heading] of [
+      ['外資投信同買賣', '外資投信同買／同賣榜'],
+      ['外資連買賣', '外資連續買／賣榜'],
+      ['籌碼雷達', '籌碼雷達'],
+    ] as const) {
+      await page.getByRole('button', { name: /板塊排行榜|外資投信同買賣|外資連買賣|籌碼雷達/, exact: true }).click();
+      await page.getByRole('menuitem', { name: menu, exact: true }).click();
+      await expect(page.getByRole('heading', { name: heading })).toBeVisible();
     }
   });
 
@@ -37,6 +50,15 @@ test.describe('Tide Pro 重建頁', () => {
     await drawer.getByRole('button', { name: '籌碼提醒', exact: true }).click();
     await expect(drawer.getByRole('button', { name: '已在自選', exact: true })).toBeVisible();
     await expect(drawer.getByRole('button', { name: '提醒已開啟', exact: true })).toBeVisible();
+  });
+
+  test('觀察清單以搜尋方式加入股票', async ({ page }) => {
+    await page.goto('/tide');
+    await page.getByRole('button', { name: '添加', exact: true }).click();
+    const addDialog = page.getByRole('dialog', { name: '新增自選股' });
+    await addDialog.getByPlaceholder('搜尋代碼或名稱').fill('2454');
+    await addDialog.getByRole('button', { name: /2454 聯發科/ }).click();
+    await expect(page.getByRole('complementary').getByRole('button', { name: /2454 聯發科/ })).toBeVisible();
   });
 
   test('手機版不產生整頁水平捲動', async ({ page }) => {

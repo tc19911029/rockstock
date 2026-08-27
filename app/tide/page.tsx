@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
-import { readLatestSectorRanking } from '@/lib/themes/sectorRanking';
 import { loadTideProSnapshot } from '@/lib/tide/proData';
+import { loadLatestTideMarketThemes } from '@/lib/tide/marketThemeData';
 import TideDashboard from './TideDashboard';
 
 export const metadata: Metadata = {
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function TidePage() {
   const [ranking, pro] = await Promise.all([
-    readLatestSectorRanking(),
+    loadLatestTideMarketThemes(),
     loadTideProSnapshot(),
   ]);
 
