@@ -1,16 +1,24 @@
 'use client';
 
 import {
+  BarChart3,
   Bell,
   BellRing,
   Bot,
+  BookOpen,
   Check,
   ChevronRight,
   CircleHelp,
   Clock3,
+  Copy,
+  Crown,
+  Gift,
   Gauge,
+  Home,
   Layers3,
   ListFilter,
+  LogOut,
+  Mail,
   Moon,
   Pause,
   Play,
@@ -18,17 +26,22 @@ import {
   Radar,
   RotateCcw,
   Search,
+  Send,
   Settings,
   Share2,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Sun,
   TrendingDown,
   TrendingUp,
+  Trophy,
   UserRound,
+  Vibrate,
   Waves,
   X,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TideProSnapshot, TideProStock } from '@/lib/tide/proData';
 import styles from './tide.module.css';
@@ -64,7 +77,10 @@ type StockRef = { code: string; name: string; theme?: string };
 type ViewMode = 'bubble' | 'ranking' | 'dual' | 'streak' | 'radar';
 type FlowCategory = 'all' | 'flood' | 'rotation' | 'watch' | 'ebb';
 type Period = 1 | 5 | 20;
-type ThemeMode = 'light' | 'dark';
+type ThemeMode = 'light' | 'dark' | 'system';
+type TextSize = 'small' | 'medium' | 'large';
+type RiseColor = 'tw' | 'us';
+type AlertTab = 'watch' | 'notifications';
 
 type ChipDay = {
   date: string;
@@ -184,8 +200,24 @@ export default function TideDashboard({
   const [alerts, setAlerts] = useState<StockRef[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [alertTab, setAlertTab] = useState<AlertTab>('watch');
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [redeemOpen, setRedeemOpen] = useState(false);
+  const [performanceOpen, setPerformanceOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [wishOpen, setWishOpen] = useState(false);
+  const [guideStep, setGuideStep] = useState(0);
   const [highlightsOpen, setHighlightsOpen] = useState(true);
-  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
+  const [themeMode, setThemeMode] = useState<ThemeMode>('system');
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
+  const [textSize, setTextSize] = useState<TextSize>('small');
+  const [riseColor, setRiseColor] = useState<RiseColor>('tw');
+  const [haptics, setHaptics] = useState(true);
+  const [notifications, setNotifications] = useState({ push: false, morning: true, close: true, poll: true, offers: true });
+  const [pollVote, setPollVote] = useState<'bull' | 'bear' | null>(null);
   const [replayOpen, setReplayOpen] = useState(false);
   const [replayIndex, setReplayIndex] = useState(Math.max(0, (proSnapshot?.historyDates.length ?? 1) - 1));
   const [replayPlaying, setReplayPlaying] = useState(false);
@@ -205,8 +237,30 @@ export default function TideDashboard({
     setWatchlist(readStoredStocks('tide-clone-watchlist'));
     setAlerts(readStoredStocks('tide-clone-alerts'));
     const storedTheme = localStorage.getItem('tide-clone-theme');
-    if (storedTheme === 'dark' || storedTheme === 'light') setThemeMode(storedTheme);
+    if (storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system') setThemeMode(storedTheme);
+    const storedTextSize = localStorage.getItem('tide-clone-text-size');
+    if (storedTextSize === 'small' || storedTextSize === 'medium' || storedTextSize === 'large') setTextSize(storedTextSize);
+    const storedRiseColor = localStorage.getItem('tide-clone-rise-color');
+    if (storedRiseColor === 'tw' || storedRiseColor === 'us') setRiseColor(storedRiseColor);
+    const storedHaptics = localStorage.getItem('tide-clone-haptics');
+    if (storedHaptics === '0' || storedHaptics === '1') setHaptics(storedHaptics === '1');
+    try {
+      const storedNotifications = JSON.parse(localStorage.getItem('tide-clone-notifications') ?? 'null');
+      if (storedNotifications && typeof storedNotifications === 'object') setNotifications((current) => ({ ...current, ...storedNotifications }));
+    } catch { /* 保留預設通知設定。 */ }
+    setSignedIn(localStorage.getItem('tide-clone-signed-in') === '1');
+    const storedVote = localStorage.getItem('tide-clone-poll-vote');
+    if (storedVote === 'bull' || storedVote === 'bear') setPollVote(storedVote);
+    if (localStorage.getItem('tide-clone-guide-seen') !== '1') setGuideOpen(true);
   }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const sync = () => setResolvedTheme(themeMode === 'system' ? (media.matches ? 'dark' : 'light') : themeMode);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, [themeMode]);
 
   useEffect(() => {
     if (!toast) return;
@@ -241,6 +295,43 @@ export default function TideDashboard({
   const changeTheme = useCallback((next: ThemeMode) => {
     setThemeMode(next);
     localStorage.setItem('tide-clone-theme', next);
+  }, []);
+
+  const changeTextSize = useCallback((next: TextSize) => {
+    setTextSize(next);
+    localStorage.setItem('tide-clone-text-size', next);
+  }, []);
+
+  const changeRiseColor = useCallback((next: RiseColor) => {
+    setRiseColor(next);
+    localStorage.setItem('tide-clone-rise-color', next);
+  }, []);
+
+  const changeHaptics = useCallback((next: boolean) => {
+    setHaptics(next);
+    localStorage.setItem('tide-clone-haptics', next ? '1' : '0');
+    if (next) navigator.vibrate?.(20);
+  }, []);
+
+  const changeNotification = useCallback((key: keyof typeof notifications, checked: boolean) => {
+    setNotifications((current) => {
+      const next = { ...current, [key]: checked };
+      localStorage.setItem('tide-clone-notifications', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const signInDemo = useCallback(() => {
+    localStorage.setItem('tide-clone-signed-in', '1');
+    setSignedIn(true);
+    setLoginOpen(false);
+    setToast('已登入本機示範帳號，Pro 功能全部啟用');
+  }, []);
+
+  const submitVote = useCallback((vote: 'bull' | 'bear') => {
+    setPollVote(vote);
+    localStorage.setItem('tide-clone-poll-vote', vote);
+    setToast(`已投票：明日看${vote === 'bull' ? '多' : '空'}`);
   }, []);
 
   const categoryCounts = useMemo(() => {
@@ -302,13 +393,19 @@ export default function TideDashboard({
   const bullishPct = Math.round((themes.filter((item) => (item.avgD1 ?? 0) > 0).length / Math.max(1, themes.length)) * 100);
 
   return (
-    <main className={styles.app} data-theme={themeMode} id="main-content">
+    <main className={styles.app} data-theme={resolvedTheme} data-text-size={textSize} data-rise-color={riseColor} id="main-content">
       <div className={styles.marketStrip}>
         <span>大盤 <b className={marketChange >= 0 ? styles.up : styles.down}>{formatPct(marketChange)}</b></span>
         <span className={styles.stripDivider}>｜</span>
         <span>資料日期 {dataDate || '—'}</span>
+        <Link className={styles.planLink} href="/tide/pricing">方案</Link>
         <span className={styles.proPill}><ShieldCheck size={12} /> Pro 全功能</span>
         <span className={styles.updateNote}>盤後資料約 18:30 前更新</span>
+        <div className={styles.pollCompact} aria-label="明日多空投票">
+          <span>明日多空</span>
+          <button className={pollVote === 'bull' ? styles.pollSelected : ''} onClick={() => submitVote('bull')}>多 {bullishPct}%</button>
+          <button className={pollVote === 'bear' ? styles.pollSelected : ''} onClick={() => submitVote('bear')}>{100 - bullishPct}% 空</button>
+        </div>
       </div>
 
       <header className={styles.header}>
@@ -348,7 +445,7 @@ export default function TideDashboard({
 
         <nav className={styles.headerActions} aria-label="主要操作">
           <button onClick={() => setHighlightsOpen((value) => !value)}><Sparkles size={15} /> 今日重點</button>
-          <button className={styles.iconButton} onClick={() => setAlertsOpen(true)} aria-label="籌碼異動提醒">
+          <button className={styles.iconButton} onClick={() => { setAlertTab('watch'); setAlertsOpen(true); }} aria-label="籌碼異動提醒">
             <BellRing size={16} /><span className={styles.countBadge}>{alerts.length}</span>
           </button>
           <button className={styles.iconButton} onClick={() => navigator.clipboard?.writeText(location.href).then(() => setToast('連結已複製'))} aria-label="分享 Tide"><Share2 size={16} /></button>
@@ -356,7 +453,7 @@ export default function TideDashboard({
             {themeMode === 'light' ? <Moon size={16} /> : <Sun size={16} />}
           </button>
           <button className={styles.iconButton} onClick={() => setSettingsOpen(true)} aria-label="設定"><Settings size={16} /></button>
-          <button className={styles.loginButton}><UserRound size={15} /> 登入</button>
+          <button className={styles.loginButton} onClick={() => signedIn ? setPerformanceOpen(true) : setLoginOpen(true)}><UserRound size={15} /> {signedIn ? '我的' : '登入'}</button>
         </nav>
       </header>
 
@@ -489,8 +586,21 @@ export default function TideDashboard({
 
       <footer className={styles.footer}>
         <span>資料來源：臺灣證券交易所、證券櫃檯買賣中心公開資料。</span>
+        <nav aria-label="頁尾連結">
+          <Link href="/tide/pricing">方案與定價</Link>
+          <Link href="/tide/about">關於本站</Link>
+          <Link href="/tide/glossary">名詞小百科</Link>
+          <Link href="/tide/legal">條款・隱私・退款</Link>
+        </nav>
         <span>本頁為獨立重建介面，非 tide-tw.app 官方服務；僅做資訊整理，不構成投資建議。</span>
       </footer>
+
+      <nav className={styles.mobileNav} aria-label="手機版主要導覽">
+        <button className={view === 'bubble' ? styles.mobileNavActive : ''} onClick={() => { setView('bubble'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><Home size={19} /><span>首頁</span></button>
+        <button onClick={() => setHighlightsOpen(true)}><BarChart3 size={19} /><span>重點</span></button>
+        <button onClick={() => { setAlertTab('watch'); setAlertsOpen(true); }}><BellRing size={19} /><span>提醒</span>{alerts.length > 0 && <b>{alerts.length}</b>}</button>
+        <button onClick={() => signedIn ? setPerformanceOpen(true) : setLoginOpen(true)}><UserRound size={19} /><span>我的</span></button>
+      </nav>
 
       {selected && (
         <StockDrawer
@@ -504,17 +614,47 @@ export default function TideDashboard({
       )}
 
       {settingsOpen && (
-        <Modal title="設定" onClose={() => setSettingsOpen(false)}>
+        <Modal title="⚙️ 設定" onClose={() => setSettingsOpen(false)} wide>
           <div className={styles.settingsBody}>
-            <label>畫面主題</label>
+            <label>漲跌顏色</label>
             <div className={styles.optionButtons}>
+              <button className={riseColor === 'tw' ? styles.selectedOption : ''} onClick={() => changeRiseColor('tw')}><TrendingUp size={16} /> 紅漲綠跌</button>
+              <button className={riseColor === 'us' ? styles.selectedOption : ''} onClick={() => changeRiseColor('us')}><TrendingUp size={16} /> 綠漲紅跌</button>
+            </div>
+            <label>字幕大小</label>
+            <div className={`${styles.optionButtons} ${styles.threeOptions}`}>
+              {(['small', 'medium', 'large'] as TextSize[]).map((size) => <button key={size} className={textSize === size ? styles.selectedOption : ''} onClick={() => changeTextSize(size)}>{size === 'small' ? '小' : size === 'medium' ? '中' : '大'}</button>)}
+            </div>
+            <label>觸覺回饋</label>
+            <div className={styles.optionButtons}>
+              <button className={haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(true)}><Vibrate size={16} /> 開</button>
+              <button className={!haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(false)}>關</button>
+            </div>
+            <label>畫面主題</label>
+            <div className={`${styles.optionButtons} ${styles.threeOptions}`}>
               <button className={themeMode === 'light' ? styles.selectedOption : ''} onClick={() => changeTheme('light')}><Sun size={16} /> 亮色</button>
               <button className={themeMode === 'dark' ? styles.selectedOption : ''} onClick={() => changeTheme('dark')}><Moon size={16} /> 暗色</button>
+              <button className={themeMode === 'system' ? styles.selectedOption : ''} onClick={() => changeTheme('system')}><SlidersHorizontal size={16} /> 系統</button>
+            </div>
+            <label>通知設定</label>
+            <div className={styles.notificationSettings}>
+              <SettingToggle label="開啟推播通知" checked={notifications.push} onChange={(checked) => changeNotification('push', checked)} />
+              <SettingToggle label="開盤前重點（08:30）" checked={notifications.morning} onChange={(checked) => changeNotification('morning', checked)} />
+              <SettingToggle label="盤後結算（約 19:00）" checked={notifications.close} onChange={(checked) => changeNotification('close', checked)} />
+              <SettingToggle label="投票提醒" checked={notifications.poll} onChange={(checked) => changeNotification('poll', checked)} />
+              <SettingToggle label="優惠與活動通知" checked={notifications.offers} onChange={(checked) => changeNotification('offers', checked)} />
             </div>
             <label>Pro 功能狀態</label>
             <div className={styles.proStatus}><Check size={16} /><span><b>全部啟用</b><small>法人分項、歷史回看、雷達與不限檔監控</small></span></div>
-            <label>圖表說明</label>
-            <p>越右代表法人買越多，越上代表資金速度加快，圓圈越大代表資金規模越大。顏色同上方四種潮汐狀態。</p>
+            <label>說明與關於</label>
+            <div className={styles.settingsLinks}>
+              <button onClick={() => { setSettingsOpen(false); setGuideStep(0); setGuideOpen(true); }}><BookOpen size={15} /> 新手教學</button>
+              <Link href="/tide/pricing"><Crown size={15} /> 方案與定價</Link>
+              <Link href="/tide/glossary"><CircleHelp size={15} /> 名詞小百科</Link>
+              <Link href="/tide/legal"><ShieldCheck size={15} /> 條款・隱私・退款</Link>
+              <button onClick={() => { setSettingsOpen(false); setWishOpen(true); }}><Send size={15} /> 許願池</button>
+            </div>
+            <p>資料來源為證交所與櫃買中心公開資料。本服務僅彙整公開資訊，不構成投資建議。</p>
           </div>
         </Modal>
       )}
@@ -522,20 +662,29 @@ export default function TideDashboard({
       {alertsOpen && (
         <Modal title="籌碼異動提醒" onClose={() => setAlertsOpen(false)} wide>
           <div className={styles.alertBody}>
-            <div className={styles.alertIntro}><BellRing size={20} /><p>監控異常大買／大賣、法人連買連賣與土洋同買／對作。Pro 清單不限檔數。</p></div>
-            <div className={styles.alertSearch}>
-              {allStocks.slice(0, 8).map((stock) => {
-                const active = alerts.some((item) => item.code === stock.code);
-                return <button key={stock.code} onClick={() => toggleAlert(stock)} className={active ? styles.alertActive : ''}><span>{stock.code} {stock.name}</span>{active ? <Check size={15} /> : <Plus size={15} />}</button>;
-              })}
+            <div className={styles.modalTabs} role="tablist">
+              <button role="tab" aria-selected={alertTab === 'watch'} onClick={() => setAlertTab('watch')}>監控清單</button>
+              <button role="tab" aria-selected={alertTab === 'notifications'} onClick={() => setAlertTab('notifications')}>通知欄</button>
             </div>
-            <h3>監控清單</h3>
-            {alerts.length === 0 ? <p className={styles.emptyText}>尚未加入監控股票。</p> : alerts.map((stock) => (
-              <div key={stock.code} className={styles.alertRow}><span><b>{stock.code}</b> {stock.name}</span><small>異常力道・連買賣・具名徽章</small><button onClick={() => toggleAlert(stock)} aria-label={`移除 ${stock.name}`}><X size={15} /></button></div>
-            ))}
+            {alertTab === 'watch' ? <>
+              <div className={styles.alertIntro}><BellRing size={20} /><p>盯著你選的股票，出現異常大買／大賣、法人連買連賣或土洋同買／對作時，盤後彙整提醒。Pro 清單不限檔數。</p></div>
+              <AlertStockSearch allStocks={allStocks} alerts={alerts} onToggle={toggleAlert} />
+              <h3>監控清單</h3>
+              {alerts.length === 0 ? <p className={styles.emptyText}>尚未加入監控股票。</p> : alerts.map((stock) => (
+                <div key={stock.code} className={styles.alertRow}><span><b>{stock.code}</b> {stock.name}</span><small>異常力道・連買賣・具名徽章</small><button onClick={() => toggleAlert(stock)} aria-label={`移除 ${stock.name}`}><X size={15} /></button></div>
+              ))}
+            </> : <NotificationFeed alerts={alerts} date={dataDate} />}
           </div>
         </Modal>
       )}
+
+      {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} onLogin={signInDemo} />}
+      {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} onRedeem={() => { setInviteOpen(false); setRedeemOpen(true); }} setToast={setToast} />}
+      {redeemOpen && <RedeemModal onClose={() => setRedeemOpen(false)} setToast={setToast} />}
+      {performanceOpen && <PerformanceModal onClose={() => setPerformanceOpen(false)} vote={pollVote} onLeaderboard={() => { setPerformanceOpen(false); setLeaderboardOpen(true); }} onInvite={() => { setPerformanceOpen(false); setInviteOpen(true); }} onSignOut={() => { localStorage.removeItem('tide-clone-signed-in'); setSignedIn(false); setPerformanceOpen(false); setToast('已登出示範帳號'); }} />}
+      {leaderboardOpen && <LeaderboardModal onClose={() => setLeaderboardOpen(false)} />}
+      {guideOpen && <GuideModal step={guideStep} setStep={setGuideStep} onClose={() => { localStorage.setItem('tide-clone-guide-seen', '1'); setGuideOpen(false); }} />}
+      {wishOpen && <WishModal onClose={() => setWishOpen(false)} setToast={setToast} />}
 
       {toast && <div className={styles.toast}><Check size={15} /> {toast}</div>}
     </main>
@@ -898,6 +1047,12 @@ function StockPriceChart({ candles, averageCost, selectedDate }: { candles: Cand
 }
 
 function Modal({ title, onClose, wide = false, children }: { title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   return (
     <div className={styles.modalBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className={`${styles.modal} ${wide ? styles.modalWide : ''}`} role="dialog" aria-modal="true" aria-label={title}>
@@ -905,5 +1060,164 @@ function Modal({ title, onClose, wide = false, children }: { title: string; onCl
         {children}
       </section>
     </div>
+  );
+}
+
+function AlertStockSearch({ allStocks, alerts, onToggle }: { allStocks: StockRef[]; alerts: StockRef[]; onToggle: (stock: StockRef) => void }) {
+  const [query, setQuery] = useState('');
+  const results = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return allStocks.filter((stock) => !needle || stock.code.includes(needle) || stock.name.toLowerCase().includes(needle)).slice(0, 10);
+  }, [allStocks, query]);
+  return (
+    <div className={styles.alertSearchWrap}>
+      <label><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="輸入代碼 / 名稱加入監控" aria-label="搜尋監控股票" /></label>
+      <div className={styles.alertSearch}>
+        {results.map((stock) => {
+          const active = alerts.some((item) => item.code === stock.code);
+          return <button key={stock.code} onClick={() => onToggle(stock)} className={active ? styles.alertActive : ''}><span>{stock.code} {stock.name}</span>{active ? <Check size={15} /> : <Plus size={15} />}</button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SettingToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className={styles.settingToggle}>
+      <span>{label}</span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <i aria-hidden="true" />
+    </label>
+  );
+}
+
+function NotificationFeed({ alerts, date }: { alerts: StockRef[]; date: string }) {
+  const rows = alerts.length > 0 ? alerts.slice(0, 6) : [{ code: '2330', name: '台積電' }, { code: '2454', name: '聯發科' }];
+  return (
+    <div className={styles.notificationFeed}>
+      <div className={styles.alertIntro}><Bell size={20} /><p>這裡彙整盤後籌碼提醒。啟用推播後，同一批內容也會送到你的裝置。</p></div>
+      {rows.map((stock, index) => (
+        <article key={stock.code}>
+          <span className={index % 2 === 0 ? styles.up : styles.down}>{index % 2 === 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}</span>
+          <div><b>{stock.code} {stock.name}</b><p>{index % 2 === 0 ? '法人買超力道高於近 20 日常態，外資與投信同步買超。' : '外資連續賣超，今日籌碼力道放大。'}</p></div>
+          <time>{date.slice(5)}</time>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin: () => void }) {
+  return (
+    <Modal title="歡迎登入" onClose={onClose}>
+      <div className={styles.loginBody}>
+        <span className={styles.loginWave}><Waves size={28} /></span>
+        <h3>追蹤板塊動態與法人資金流向</h3>
+        <p>登入後可同步自選、參加多空投票、查看戰績與管理籌碼提醒。</p>
+        <button className={styles.googleButton} onClick={onLogin}><b>G</b> 使用 Google 登入（示範）</button>
+        <small>此獨立重建版使用本機示範帳號，不會連線或取得你的 Google 資料。</small>
+        <Link href="/tide/pricing">查看免費版與 Pro 方案 →</Link>
+      </div>
+    </Modal>
+  );
+}
+
+function InviteModal({ onClose, onRedeem, setToast }: { onClose: () => void; onRedeem: () => void; setToast: (message: string) => void }) {
+  const code = 'ROCKPRO7';
+  const copy = () => navigator.clipboard?.writeText(`${location.origin}/tide?ref=${code}`).then(() => setToast('邀請連結已複製'));
+  return (
+    <Modal title="邀請好友賺 Pro" onClose={onClose}>
+      <div className={styles.inviteBody}>
+        <span className={styles.giftIcon}><Gift size={25} /></span>
+        <p>把你的邀請碼給朋友，他拿 7 天 Pro，你也能累積 Pro 天數。</p>
+        <label>你的專屬邀請碼</label>
+        <button className={styles.referralCode} onClick={copy}>{code}<Copy size={16} /></button>
+        <button className={styles.primaryButton} onClick={copy}><Copy size={15} /> 複製邀請連結</button>
+        <div className={styles.inviteStats}><div><b>0</b><span>已邀請</span></div><div><b>0</b><span>賺到天數</span></div></div>
+        <ul><li>朋友使用邀請碼 → 他獲得 7 天 Pro</li><li>朋友累計使用 7 天 → 你獲得 7 天 Pro</li><li>邀請獎勵最高可累計 90 天</li></ul>
+        <button className={styles.textButton} onClick={onRedeem}>我有邀請碼</button>
+      </div>
+    </Modal>
+  );
+}
+
+function RedeemModal({ onClose, setToast }: { onClose: () => void; setToast: (message: string) => void }) {
+  const [code, setCode] = useState('');
+  return (
+    <Modal title="輸入邀請碼" onClose={onClose}>
+      <form className={styles.formBody} onSubmit={(event) => { event.preventDefault(); setToast(code.trim().length === 8 ? '邀請碼已兌換：Pro 功能已全部開啟' : '請輸入 8 碼邀請碼'); if (code.trim().length === 8) onClose(); }}>
+        <p>輸入朋友給你的 8 碼邀請碼。這個獨立版的 Pro 已全部開啟，兌換流程僅做互動示範。</p>
+        <label htmlFor="referral-code">邀請碼</label>
+        <input id="referral-code" value={code} onChange={(event) => setCode(event.target.value.toUpperCase().slice(0, 8))} placeholder="例：ABCD2345" />
+        <button className={styles.primaryButton} type="submit" disabled={code.length !== 8}>兌換</button>
+      </form>
+    </Modal>
+  );
+}
+
+function PerformanceModal({ onClose, vote, onLeaderboard, onInvite, onSignOut }: { onClose: () => void; vote: 'bull' | 'bear' | null; onLeaderboard: () => void; onInvite: () => void; onSignOut: () => void }) {
+  return (
+    <Modal title="我的" onClose={onClose}>
+      <div className={styles.accountBody}>
+        <div className={styles.memberCard}><span><Crown size={18} /></span><div><b>Pro 全功能會員</b><small>獨立重建版永久啟用</small></div><Check size={18} /></div>
+        <h3>我的戰績</h3>
+        <div className={styles.scoreGrid}><div><b>{vote ? '100%' : '—'}</b><span>預測準確率</span></div><div><b>{vote ? '1' : '0'}</b><span>連續看盤</span></div><div><b>{vote ? '1' : '0'}</b><span>目前連對</span></div></div>
+        <button className={styles.menuButton} onClick={onLeaderboard}><Trophy size={16} /> 猜勝率排行榜 <ChevronRight size={16} /></button>
+        <button className={styles.menuButton} onClick={onInvite}><Gift size={16} /> 邀請好友賺 Pro <ChevronRight size={16} /></button>
+        <button className={styles.menuButton} onClick={() => navigator.clipboard?.writeText(location.href)}><Share2 size={16} /> 分享我的戰績 <ChevronRight size={16} /></button>
+        <button className={`${styles.menuButton} ${styles.dangerButton}`} onClick={onSignOut}><LogOut size={16} /> 登出示範帳號</button>
+      </div>
+    </Modal>
+  );
+}
+
+function LeaderboardModal({ onClose }: { onClose: () => void }) {
+  const leaders = [['海風投資人', '83%', '48'], ['資金小偵探', '78%', '37'], ['看盤阿明', '75%', '32'], ['Rockstock 使用者', '—', '0']];
+  return (
+    <Modal title="猜勝率排行榜" onClose={onClose} wide>
+      <div className={styles.leaderboardBody}>
+        <p>依最近公開投票紀錄排序；下列為本機展示資料。</p>
+        {leaders.map((leader, index) => <div key={leader[0]}><span>{index + 1}</span><b>{leader[0]}</b><strong>{leader[1]}</strong><small>{leader[2]} 天</small></div>)}
+      </div>
+    </Modal>
+  );
+}
+
+const GUIDE_STEPS = [
+  { title: '歡迎使用潮汐', text: '每天收盤後，幫你看懂法人把錢搬去哪個產業，又重押了哪些股票。', icon: <Waves size={34} /> },
+  { title: '先看四種潮汐', text: '漲潮代表資金加速流入；輪動、觀望與退潮描述資金方向與速度。', icon: <BarChart3 size={34} /> },
+  { title: '泡泡圖三個方向', text: '越右買得越多、越上速度越快、圓越大代表近 20 日金額越大。', icon: <Layers3 size={34} /> },
+  { title: '點進個股看 Pro 深度', text: '法人分項、20 日均價、外資停留、力道與歷史回看都已完整啟用。', icon: <Crown size={34} /> },
+];
+
+function GuideModal({ step, setStep, onClose }: { step: number; setStep: (step: number) => void; onClose: () => void }) {
+  const item = GUIDE_STEPS[step];
+  return (
+    <Modal title="新手教學" onClose={onClose}>
+      <div className={styles.guideBody}>
+        <span>{item.icon}</span><h3>{item.title}</h3><p>{item.text}</p>
+        <div className={styles.guideDots}>{GUIDE_STEPS.map((_, index) => <i className={index === step ? styles.guideDotActive : ''} key={index} />)}</div>
+        <div className={styles.guideActions}><button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>上一步</button><button className={styles.primaryButton} onClick={() => step === GUIDE_STEPS.length - 1 ? onClose() : setStep(step + 1)}>{step === GUIDE_STEPS.length - 1 ? '開始使用' : '下一步'}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+function WishModal({ onClose, setToast }: { onClose: () => void; setToast: (message: string) => void }) {
+  const [message, setMessage] = useState('');
+  return (
+    <Modal title="許願池" onClose={onClose} wide>
+      <form className={styles.formBody} onSubmit={(event) => { event.preventDefault(); localStorage.setItem(`tide-clone-wish-${Date.now()}`, message); setToast('已把想法保存在這台裝置'); onClose(); }}>
+        <p>想要什麼功能、哪裡用起來卡卡的，都可以告訴我們。</p>
+        <label htmlFor="wish-type">類型</label>
+        <select id="wish-type"><option>功能許願</option><option>介面 / 操作問題</option><option>資料 / 數字問題</option><option>其他</option></select>
+        <label htmlFor="wish-message">你的想法</label>
+        <textarea id="wish-message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="例如：希望可以追蹤自選股的大戶持股變化…" rows={5} />
+        <label htmlFor="wish-email">聯絡方式（選填）</label>
+        <input id="wish-email" type="email" placeholder="你的 Email" />
+        <button className={styles.primaryButton} type="submit" disabled={!message.trim()}><Mail size={15} /> 送出</button>
+      </form>
+    </Modal>
   );
 }

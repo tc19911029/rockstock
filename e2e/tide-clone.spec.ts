@@ -7,6 +7,8 @@ test.describe('Tide Pro 重建頁', () => {
       localStorage.setItem('feature-guide-seen', '1');
       localStorage.removeItem('tide-clone-watchlist');
       localStorage.removeItem('tide-clone-alerts');
+      localStorage.setItem('tide-clone-guide-seen', '1');
+      localStorage.removeItem('tide-clone-signed-in');
     });
   });
 
@@ -42,5 +44,39 @@ test.describe('Tide Pro 重建頁', () => {
     await page.goto('/tide');
     const hasOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(hasOverflow).toBe(false);
+    await expect(page.getByRole('navigation', { name: '手機版主要導覽' })).toBeVisible();
+  });
+
+  test('登入、設定、通知與會員流程可用', async ({ page }) => {
+    await page.goto('/tide');
+    await page.getByRole('button', { name: '登入', exact: true }).click();
+    await page.getByRole('button', { name: '使用 Google 登入（示範）' }).click();
+    await expect(page.getByText('已登入本機示範帳號')).toBeVisible();
+
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: '⚙️ 設定' });
+    await expect(settings.getByText('漲跌顏色', { exact: true })).toBeVisible();
+    await expect(settings.getByText('通知設定', { exact: true })).toBeVisible();
+    await settings.getByRole('button', { name: '暗色', exact: true }).click();
+    await settings.getByRole('button', { name: '關閉⚙️ 設定' }).click();
+
+    await page.getByRole('button', { name: '籌碼異動提醒', exact: true }).click();
+    const alerts = page.getByRole('dialog', { name: '籌碼異動提醒' });
+    await alerts.getByRole('tab', { name: '通知欄', exact: true }).click();
+    await expect(alerts.getByText('這裡彙整盤後籌碼提醒。')).toBeVisible();
+  });
+
+  test('方案、關於、名詞與條款頁完整可達', async ({ page }) => {
+    const pages = [
+      ['/tide/pricing', '方案與定價'],
+      ['/tide/about', '關於本站'],
+      ['/tide/glossary', '名詞小百科'],
+      ['/tide/legal', '服務條款・隱私權・退款說明'],
+    ] as const;
+    for (const [url, title] of pages) {
+      await page.goto(url);
+      await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
+      await expect(page.getByRole('link', { name: '回潮汐儀表板' })).toBeVisible();
+    }
   });
 });
