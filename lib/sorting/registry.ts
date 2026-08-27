@@ -97,7 +97,7 @@ export const SORT_OPTIONS: Record<string, SortOptionDef> = {
   'sanse.expGain10': { id: 'sanse.expGain10', label: '期望漲幅·10日', family: 'sanse', defaultDir: 'desc', missingLast: true, tip: '同型態歷史 10 日期望漲幅（Bayesian 平滑）' },
 
   // ── 5. 人氣熱度 ──────────────────────────────────────────────────────────
-  'heat.theme': { id: 'heat.theme', label: '今日產業／題材熱度', family: 'heat', defaultDir: 'desc', missingLast: true, tip: '台股按 TWSE／TPEx 官方產業今日平均漲幅排序；陸股按概念板塊今日漲幅排序。僅供盤面觀察，不作買賣訊號。' },
+  'heat.theme': { id: 'heat.theme', label: '今日市場題材熱度', family: 'heat', defaultDir: 'desc', missingLast: true, tip: '台股按可重疊市場題材今日平均漲幅排序；陸股按概念板塊今日漲幅排序。僅供盤面觀察，不作買賣訊號。' },
   'heat.youtube': { id: 'heat.youtube', label: 'YouTube 提及', family: 'heat', defaultDir: 'desc', missingLast: true, tip: '依近 30 天 YouTube 節目提及次數排序（未提及排最後）' },
   'heat.sector': { id: 'heat.sector', label: '板塊強弱', family: 'heat', defaultDir: 'desc', missingLast: true, tip: '所屬板塊近 5 日平均報酬' },
 

@@ -38,7 +38,8 @@ import {
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { TideProSnapshot } from '@/lib/tide/proData';
-import type { SectorRankingFile } from '@/lib/themes/sectorRanking';
+import type { MarketThemeRankingFile } from '@/lib/themes/marketThemes';
+import { groupTideMarketThemes } from '@/lib/tide/themeGroups';
 import styles from './tide.module.css';
 
 type ThemeMember = {
@@ -104,36 +105,6 @@ const CATEGORY_META: Record<Exclude<FlowCategory, 'all'>, { label: string; hint:
   watch: { label: '觀望', hint: '資金流出但放緩', color: '#85a69d' },
   ebb: { label: '退潮', hint: '資金流出', color: '#68ad9c' },
 };
-
-type IndustryGroup = {
-  id: string;
-  label: string;
-  themes: ThemeRank[];
-};
-
-const INDUSTRY_GROUPS = [
-  { id: 'semiconductor', label: '半導體', match: /半導體/ },
-  { id: 'ai-hardware', label: 'AI 與電子硬體', match: /電子零組件|電腦及週邊|通信網路|光電|電子通路|其他電子/ },
-  { id: 'software-cloud', label: '軟體・雲端・資安', match: /資訊服務|數位雲端|文化創意/ },
-  { id: 'green-energy', label: '綠能與電力', match: /綠能環保|油電燃氣/ },
-  { id: 'finance', label: '金融', match: /金融|保險/ },
-  { id: 'shipping', label: '航運物流', match: /航運/ },
-  { id: 'traditional', label: '傳產製造', match: /水泥|塑膠|電機|電器電纜|化學|玻璃|造紙|鋼鐵|橡膠|汽車|其他|綜合|農業科技/ },
-  { id: 'consumer', label: '民生消費', match: /食品|紡織|貿易百貨|觀光餐旅|運動休閒|居家生活/ },
-  { id: 'construction', label: '營建地產', match: /建材營造/ },
-  { id: 'biotech', label: '生技醫療', match: /生技醫療/ },
-] as const;
-
-function groupIndustries(themes: ThemeRank[]): IndustryGroup[] {
-  const remaining = [...themes].sort((left, right) => left.theme.localeCompare(right.theme, 'zh-Hant'));
-  const groups = INDUSTRY_GROUPS.map((group) => {
-    const matched = remaining.filter((theme) => group.match.test(theme.theme));
-    for (const theme of matched) remaining.splice(remaining.indexOf(theme), 1);
-    return { id: group.id, label: group.label, themes: matched };
-  });
-  if (remaining.length > 0) groups.find((group) => group.id === 'traditional')?.themes.push(...remaining);
-  return groups.filter((group) => group.themes.length > 0);
-}
 
 const PERIOD_INDEX: Record<Period, number> = { 1: 0, 5: 4, 20: 6 };
 
@@ -227,7 +198,7 @@ export default function TideDashboard({
   proSnapshot,
 }: {
   initialDate: string;
-  initialUniverse: SectorRankingFile['universe'] | null;
+  initialUniverse: MarketThemeRankingFile['universe'] | null;
   initialThemes: ThemeRank[];
   proSnapshot: TideProSnapshot | null;
 }) {
@@ -289,7 +260,7 @@ export default function TideDashboard({
   const [toast, setToast] = useState<string | null>(null);
 
   const allStocks = useMemo(() => uniqueStocks(initialThemes, proSnapshot), [initialThemes, proSnapshot]);
-  const industryGroups = useMemo(() => groupIndustries(themes), [themes]);
+  const industryGroups = useMemo(() => groupTideMarketThemes(themes), [themes]);
   const searchResults = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -564,7 +535,7 @@ export default function TideDashboard({
     if (!date || date === dataDate) return;
     const controller = new AbortController();
     setReplayLoading(true);
-    fetch(`/api/themes/ranking?date=${date}`, { signal: controller.signal })
+    fetch(`/api/themes/market-ranking?date=${date}`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
         if (payload?.themes) {
@@ -606,7 +577,9 @@ export default function TideDashboard({
     window.addEventListener('pointerup', onUp);
   }, [watchWidth]);
 
-  const marketMembers = themes.flatMap((theme) => theme.members).filter((member) => member.d1 != null);
+  const marketMembers = [...new Map(
+    themes.flatMap((theme) => theme.members).filter((member) => member.d1 != null).map((member) => [member.code, member]),
+  ).values()];
   const marketChange = marketMembers.length > 0
     ? marketMembers.reduce((sum, member) => sum + (member.d1 ?? 0), 0) / marketMembers.length
     : 0;
@@ -621,7 +594,7 @@ export default function TideDashboard({
         <Link className={styles.planLink} href="/tide/pricing">方案</Link>
         <span className={styles.updateNote}>⏳ 今日資料約 18:30 前更新</span>
         <span className={styles.sourceNote}>
-          分類：TWSE／TPEx 官方產業
+          分類：Rockstock 市場題材（非交易所官方分類）
           {universeMeta && !universeMeta.pointInTime ? `（歷史回放沿用 ${universeMeta.rosterAsOf} 名單）` : ''}
           ｜僅彙整公開資訊，不構成投資建議
         </span>
@@ -639,8 +612,8 @@ export default function TideDashboard({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜尋股票或板塊..."
-            aria-label="搜尋股票或板塊"
+            placeholder="搜尋股票或市場題材..."
+            aria-label="搜尋股票或市場題材"
           />
           {query && (
             <button className={styles.clearSearch} onClick={() => setQuery('')} aria-label="清除搜尋"><X size={14} /></button>
@@ -676,7 +649,7 @@ export default function TideDashboard({
           <header><b>今日重點（{dataDate.slice(5).replace('-', '/')}）</b><button onClick={() => setHighlightsOpen(false)} aria-label="收起今日重點"><X size={16} /></button></header>
           <div className={styles.moodSummary}><span>今日情緒 <b>{bullishPct}</b> {bullishPct >= 55 ? '樂觀' : bullishPct <= 40 ? '保守' : '中性'}</span><small>樂觀</small><i><em style={{ left: `${Math.max(4, Math.min(96, bullishPct))}%` }} /></i><small>恐慌</small></div>
           <p>法人買最多：{topThemes.slice(0, 3).map((item) => `${item.theme} ${formatMoney(themeMoney(item, 1))}`).join('、')}</p>
-          <p>回顧：近 5 日法人買最多的 3 個板塊，平均 {formatPct(topThemes.slice(0, 3).reduce((sum, item) => sum + themeReturn(item, 5), 0) / 3)}（最佳 {topThemes[0]?.theme ?? '—'} {formatPct(topThemes[0] ? themeReturn(topThemes[0], 5) : 0)}）</p>
+          <p>回顧：近 5 日法人買最多的 3 個市場題材，平均 {formatPct(topThemes.slice(0, 3).reduce((sum, item) => sum + themeReturn(item, 5), 0) / 3)}（最佳 {topThemes[0]?.theme ?? '—'} {formatPct(topThemes[0] ? themeReturn(topThemes[0], 5) : 0)}）</p>
           <p>大戶異常：{(proSnapshot?.intensityLeaders ?? []).slice(0, 2).map((stock) => `${stock.name} ${stock.total >= 0 ? '被買' : '被倒'} ${formatMoney(Math.abs(stock.totalValue ?? 0))}`).join('　') || '目前沒有顯著異常'}</p>
           <button className={styles.shareBrief} onClick={() => void shareDashboard('Tide 今日盤面')}><Share2 size={15} /> 分享今日盤面</button>
         </section>
@@ -709,14 +682,14 @@ export default function TideDashboard({
                 aria-haspopup="menu"
                 aria-expanded={viewMenuOpen}
               >
-                {view === 'bubble' ? '板塊泡泡圖' : view === 'watch' ? '自選股' : '板塊排行榜'}
+                {view === 'bubble' ? '題材泡泡圖' : view === 'watch' ? '自選股' : '題材排行榜'}
                 <ChevronDown size={14} />
               </button>
               {viewMenuOpen && (
                 <div className={styles.viewMenu} role="menu">
                   <button role="menuitem" aria-current={view === 'watch'} onClick={() => { setView('watch'); setViewMenuOpen(false); setCategory('all'); }}><Home size={15} /> 自選股</button>
-                  <button role="menuitem" aria-current={view === 'bubble'} onClick={() => { setView('bubble'); setViewMenuOpen(false); }}><Layers3 size={15} /> 板塊泡泡圖</button>
-                  <button role="menuitem" aria-current={view === 'ranking'} onClick={() => { setView('ranking'); setViewMenuOpen(false); }}><ListFilter size={15} /> 板塊排行榜</button>
+                  <button role="menuitem" aria-current={view === 'bubble'} onClick={() => { setView('bubble'); setViewMenuOpen(false); }}><Layers3 size={15} /> 題材泡泡圖</button>
+                  <button role="menuitem" aria-current={view === 'ranking'} onClick={() => { setView('ranking'); setViewMenuOpen(false); }}><ListFilter size={15} /> 題材排行榜</button>
                 </div>
               )}
             </div>
@@ -728,7 +701,7 @@ export default function TideDashboard({
                 <button className={`${styles.replayButton} ${replayOpen ? styles.toolbarActive : ''}`} onClick={openReplay}><Play size={14} /> 回放</button>
               </>
             ) : view === 'watch' ? <><button className={styles.helpButton} aria-label="怎麼看這張圖" onClick={() => setChartHelpOpen((open) => !open)}><CircleHelp size={15} /></button><button className={styles.replayButton} onClick={openReplay}><Play size={14} /> 回放</button></> : null}
-            {chartHelpOpen && view === 'bubble' && <aside className={styles.chartHelpPopover}><b>怎麼看這張圖</b><ul><li>越右＝近 5 日法人買越多；越左＝賣越多</li><li>越上＝力道在加速；越下＝在放緩</li><li>所以右上角＝買最多、還在加速</li><li>泡泡大小＝近 20 日買賣總額，只是規模、不分好壞</li><li>每顆泡泡都標著板塊名；熱門板塊會顯示金額</li><li>板塊太多時，可切成只看熱門或顯示全部</li></ul><p>在「自選股」挑幾個板塊，圖上就只亮你選的；長線＝主角走過的路。</p></aside>}
+            {chartHelpOpen && view === 'bubble' && <aside className={styles.chartHelpPopover}><b>怎麼看這張圖</b><ul><li>越右＝近 5 日法人買越多；越左＝賣越多</li><li>越上＝力道在加速；越下＝在放緩</li><li>所以右上角＝買最多、還在加速</li><li>泡泡大小＝近 20 日買賣總額，只是規模、不分好壞</li><li>每顆泡泡都標著題材名；熱門題材會顯示金額</li><li>題材太多時，可切成只看熱門或顯示全部</li></ul><p>在「自選股」挑幾個題材，圖上就只亮你選的；長線＝主角走過的路。</p></aside>}
           </div>
 
           {view === 'bubble' && (
@@ -914,7 +887,7 @@ export default function TideDashboard({
                 <p>之後有訂閱優惠，第一時間通知你。<br />關掉不影響交易與續約通知。</p>
               </div>
             </div>
-            <label>板塊顯示（取消勾選即從圖表隱藏）</label>
+            <label>市場題材顯示（取消勾選即從圖表隱藏）</label>
             <div className={styles.sectorSettings}>
               {industryGroups.map((group) => {
                 const visibleCount = group.themes.filter((theme) => !hiddenThemes.includes(theme.theme)).length;
@@ -946,7 +919,7 @@ export default function TideDashboard({
                   </div>}
                 </section>;
               })}
-              {industryGroups.length === 0 && <p className={styles.sectorEmpty}>目前沒有可用的產業資料</p>}
+              {industryGroups.length === 0 && <p className={styles.sectorEmpty}>目前沒有可用的市場題材資料</p>}
             </div>
             <label>說明與關於</label>
             <div className={styles.settingsLinks}>
@@ -1058,7 +1031,7 @@ function BubbleView({
   return (
     <div className={styles.bubbleView}>
       <div className={styles.chartWrap}>
-        <svg viewBox="0 0 1000 760" role="img" aria-label="台股板塊法人資金泡泡圖">
+        <svg viewBox="0 0 1000 760" role="img" aria-label="台股市場題材法人資金泡泡圖">
           <defs>
             <pattern id="tide-grid" width="50" height="50" patternUnits="userSpaceOnUse">
               <path d="M 50 0 L 0 0 0 50" className={styles.gridLine} fill="none" />
@@ -1108,10 +1081,10 @@ function BubbleView({
         </svg>
         <div className={styles.chartBrand} aria-hidden="true"><Waves size={30} /><span>tide-tw.app</span></div>
         {selectedTheme && (
-          <section className={styles.themePopover} aria-label={`${selectedTheme.theme} 板塊摘要`}>
+          <section className={styles.themePopover} aria-label={`${selectedTheme.theme} 題材摘要`}>
             <header>
               <div><b>{selectedTheme.theme}</b><span style={{ color: CATEGORY_META[flowCategory(selectedTheme)].color }}>{CATEGORY_META[flowCategory(selectedTheme)].label}</span></div>
-              <button onClick={onCloseTheme} aria-label="關閉板塊摘要"><X size={15} /></button>
+              <button onClick={onCloseTheme} aria-label="關閉題材摘要"><X size={15} /></button>
             </header>
             <div className={styles.themeMetrics}>
               <span>當日法人淨買超<strong className={themeMoney(selectedTheme, 1) >= 0 ? styles.up : styles.down}>{formatMoney(themeMoney(selectedTheme, 1))}</strong></span>
@@ -1170,16 +1143,16 @@ function ReplayOverlay({ themes, date, startDate, endDate, index, max, playing, 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose, onNext, onPlay, onPrevious]);
-  return <section className={styles.replayOverlay} role="dialog" aria-modal="true" aria-label="板塊資金輪動回放">
+  return <section className={styles.replayOverlay} role="dialog" aria-modal="true" aria-label="市場題材資金輪動回放">
     <header>
-      <b>板塊資金輪動回放</b>
+      <b>市場題材資金輪動回放</b>
       <button className={`${styles.helpButton} ${helpOpen ? styles.toolbarActive : ''}`} aria-label="怎麼看這張圖" onClick={() => { setHelpOpen((open) => !open); setFilterOpen(false); }}><CircleHelp size={15} /></button>
-      <button className={styles.replaySelectButton} aria-expanded={filterOpen} onClick={() => { setFilterOpen((open) => !open); setHelpOpen(false); }}>選板塊 <ChevronDown size={13} /></button>
+      <button className={styles.replaySelectButton} aria-expanded={filterOpen} onClick={() => { setFilterOpen((open) => !open); setHelpOpen(false); }}>選題材 <ChevronDown size={13} /></button>
       <button className={styles.replayClose} onClick={onClose} aria-label="關閉回放"><X size={18} /></button>
       {helpOpen && <aside className={styles.replayHelp}><b>怎麼看這張圖</b><p>越右代表近 5 日法人買越多，越上代表買進速度加快，圓圈越大代表近 20 日金額越大。</p><small>快捷鍵：空白鍵播放／暫停，← → 切換交易日，Esc 關閉。</small></aside>}
-      {filterOpen && <aside className={styles.replayPicker} aria-label="選擇回放板塊">
-        <label><Search size={14} /><input autoFocus value={filterQuery} onChange={(event) => setFilterQuery(event.target.value)} placeholder="搜尋板塊…" /></label>
-        <div className={styles.replayPickerSummary}><span>已選 <b>{selectedThemes.length}</b> 個官方產業</span><button onClick={() => setSelectedThemes(selectedThemes.length === themes.length ? [] : themes.map((theme) => theme.theme))}>{selectedThemes.length === themes.length ? '清除' : '全選'}</button></div>
+      {filterOpen && <aside className={styles.replayPicker} aria-label="選擇回放題材">
+        <label><Search size={14} /><input autoFocus value={filterQuery} onChange={(event) => setFilterQuery(event.target.value)} placeholder="搜尋題材…" /></label>
+        <div className={styles.replayPickerSummary}><span>已選 <b>{selectedThemes.length}</b> 個市場題材</span><button onClick={() => setSelectedThemes(selectedThemes.length === themes.length ? [] : themes.map((theme) => theme.theme))}>{selectedThemes.length === themes.length ? '清除' : '全選'}</button></div>
         <div>{themes.filter((theme) => !filterQuery || theme.theme.includes(filterQuery)).map((theme) => {
           const checked = selectedThemes.includes(theme.theme);
           return <label key={theme.theme}><input type="checkbox" checked={checked} onChange={() => setSelectedThemes((current) => checked ? current.filter((item) => item !== theme.theme) : [...current, theme.theme])} /><span>{theme.theme}</span><small>{theme.stockCount}</small></label>;
@@ -1217,11 +1190,11 @@ function RankingView({ themes, period, setPeriod, snapshot, marketChange, onSele
   }, [direction, dualMode, lens, snapshot]);
   const largest = Math.max(1, ...rows.map((theme) => Math.abs(themeMoney(theme, period))));
   const note = lens === 'flow'
-    ? `近 ${period} 日法人${direction === 'buy' ? '買' : '賣'}最多的板塊（近 ${period} 個交易日累計，只呈現事實、不構成投資建議）`
+    ? `近 ${period} 日法人${direction === 'buy' ? '買' : '賣'}最多的市場題材（近 ${period} 個交易日累計，只呈現事實、不構成投資建議）`
     : lens === 'breadth'
       ? '依「近 5 日資金流入高、同期漲幅相對低」排序；僅呈現籌碼與股價的落差，不代表未來漲跌'
       : lens === 'contrarian'
-        ? marketChange <= -1 ? `今天大盤 ${formatPct(marketChange)}，以下是逆勢獲法人買超的板塊` : `☀️ 今天大盤 ${formatPct(marketChange)}，沒有顯著下跌，逆勢買超偵測沒有啟動`
+        ? marketChange <= -1 ? `今天大盤 ${formatPct(marketChange)}，以下是逆勢獲法人買超的市場題材` : `☀️ 今天大盤 ${formatPct(marketChange)}，沒有顯著下跌，逆勢買超偵測沒有啟動`
         : lens === 'anomaly'
           ? `今天突然被法人${direction === 'buy' ? '大買' : '大賣'}的個股（相對它近 20 日的平常，買賣力道大到異常；只呈現事實、不構成投資建議）`
           : dualMode === 'sameBuy' ? `今天有 ${stockRows.length} 檔外資與投信同日各買超 0.5 億以上` : dualMode === 'sameSell' ? `今天有 ${stockRows.length} 檔外資與投信同日各賣超 0.5 億以上` : `外資連續${dualMode === 'streakBuy' ? '買超' : '賣超'} 3 天以上的個股`;
@@ -1258,7 +1231,7 @@ function RankingView({ themes, period, setPeriod, snapshot, marketChange, onSele
             </button>
           );
         })}
-        {rows.length === 0 && <p className={styles.emptyText}>{lens === 'contrarian' ? '大盤跌幅超過 1% 時才會啟動逆勢買超偵測' : '目前沒有符合條件的板塊。'}</p>}
+        {rows.length === 0 && <p className={styles.emptyText}>{lens === 'contrarian' ? '大盤跌幅超過 1% 時才會啟動逆勢買超偵測' : '目前沒有符合條件的市場題材。'}</p>}
       </div></>}
     </div>
   );
@@ -1550,7 +1523,7 @@ function LoginModal({ onClose, onLogin }: { onClose: () => void; onLogin: () => 
   return (
     <Modal title="歡迎登入" onClose={onClose}>
       <div className={styles.loginBody}>
-        <p>登入後即可追蹤板塊動態<br />與法人資金流向</p>
+        <p>登入後即可追蹤題材動態<br />與法人資金流向</p>
         <button className={styles.googleButton} onClick={onLogin} title="使用本機示範帳號，不會連線或取得 Google 資料"><b>G</b> 使用 Google 登入</button>
         <Link href="/tide/pricing">查看免費版與 Pro 方案 →</Link>
         <small>本機重建版以示範帳號啟用，不會取得 Google 資料。</small>
@@ -1621,7 +1594,7 @@ function LeaderboardModal({ onClose }: { onClose: () => void }) {
 }
 
 const GUIDE_STEPS = [
-  { title: '歡迎使用潮汐', text: '每天收盤後，幫你看懂法人把錢搬去哪個產業，又重押了哪些股票。', icon: <Waves size={34} /> },
+  { title: '歡迎使用潮汐', text: '每天收盤後，幫你看懂法人把錢搬去哪個市場題材，又重押了哪些股票。', icon: <Waves size={34} /> },
   { title: '先看四種潮汐', text: '漲潮代表資金加速流入；輪動、觀望與退潮描述資金方向與速度。', icon: <BarChart3 size={34} /> },
   { title: '泡泡圖三個方向', text: '越右買得越多、越上速度越快、圓越大代表近 20 日金額越大。', icon: <Layers3 size={34} /> },
   { title: '點進個股看 Pro 深度', text: '法人分項、20 日均價、外資停留、力道與歷史回看都已完整啟用。', icon: <Crown size={34} /> },

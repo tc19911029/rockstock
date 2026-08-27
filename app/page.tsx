@@ -1485,7 +1485,7 @@ function HomePage() {
                       ? 'text-foreground border-b-2 border-teal-500 -mb-px bg-card/60'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
-                  title="台股依 TWSE／TPEx 官方產業分類；陸股顯示行業／概念板塊"
+                  title="台股顯示 CPO、ASIC、AI 伺服器等可重疊市場題材；陸股顯示行業／概念板塊"
                 >
                   <Flame className="size-4" aria-hidden="true" />
                   <span>產業</span>

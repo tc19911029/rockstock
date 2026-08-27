@@ -1,18 +1,15 @@
 // ============================================================
 // 題材×三色 — 熱門題材排名（台股）。Server-only（讀本地檔）。
 //
-// TW：reuse buildSectorRanking（TWSE／TPEx 官方產業，由 L1 重算，回測可深）。
+// TW：用官方快照數值聚合 Rockstock 市場題材（CPO、ASIC、CoWoS…）。
 // （陸股題材分類已於 2026-06-21 移除 → CN 一律回空陣列，三色掃描退回無題材排序。）
 //
 // 熱度合成 HEAT_WEIGHTS 單一事實：各分項做當日 rank-percentile，只對「有值的權重」
 // 重正規化（缺項不歸零）。
 // ============================================================
 
-import {
-  buildSectorRanking,
-  readSectorRanking,
-  type ThemeRank,
-} from '@/lib/themes/sectorRanking';
+import { readSectorRanking } from '@/lib/themes/sectorRanking';
+import { buildMarketThemeRanking, type MarketThemeRank } from '@/lib/themes/marketThemes';
 import {
   HEAT_WEIGHTS,
   type HeatSignalKey,
@@ -93,7 +90,7 @@ function finalize(raws: RawTheme[]): HotTheme[] {
 
 // ── TW ──────────────────────────────────────────────────────────────────────
 
-function twRawFromThemeRank(tr: ThemeRank): RawTheme {
+function twRawFromThemeRank(tr: MarketThemeRank): RawTheme {
   const members: HotThemeMember[] = tr.members
     .map((m) => ({
       code: m.code,
@@ -126,7 +123,9 @@ function twRawFromThemeRank(tr: ThemeRank): RawTheme {
 }
 
 async function rankTwHotThemes(date: string): Promise<HotTheme[]> {
-  const file = (await readSectorRanking(date)) ?? (await buildSectorRanking(date));
+  const official = await readSectorRanking(date);
+  if (!official) throw new Error(`no market theme basis for ${date}`);
+  const file = buildMarketThemeRanking(official);
   return finalize(file.themes.map(twRawFromThemeRank));
 }
 

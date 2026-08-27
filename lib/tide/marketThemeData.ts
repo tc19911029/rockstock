@@ -1,12 +1,13 @@
 import { readLatestSectorRanking } from '@/lib/themes/sectorRanking';
+import { buildMarketThemeRanking } from '@/lib/themes/marketThemes';
 import { buildTideThemeRanking, type TideThemeRanking } from './themeData';
 
 export type TideMarketThemeRanking = TideThemeRanking;
 
 /**
- * Tide 直接沿用全站最新一份已驗證 TWSE／TPEx 官方產業排行。
- * 顯示層不重新混入人工題材，避免與掃描、三色及產業頁出現不同分類。
+ * Tide 使用市場題材；底層成分身分、名稱、後綴與數值仍由官方產業快照提供。
  */
 export async function loadLatestTideMarketThemes(): Promise<TideMarketThemeRanking | null> {
-  return buildTideThemeRanking(await readLatestSectorRanking());
+  const official = await readLatestSectorRanking();
+  return buildTideThemeRanking(official ? buildMarketThemeRanking(official) : null);
 }

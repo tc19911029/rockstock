@@ -280,7 +280,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
       {scanSort === 'heat.theme' && (
         <p className="text-[9px] leading-snug text-amber-400/90">
           {market === 'TW'
-            ? '🔥 按今日平均漲幅最強的 TWSE／TPEx 官方產業排序；僅供觀察產業相對強弱，不直接進選股分數。'
+            ? '🔥 按今日平均漲幅最強的市場題材排序（可一股多題材）；僅供觀察題材相對強弱，不直接進選股分數。'
             : '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'}
         </p>
       )}

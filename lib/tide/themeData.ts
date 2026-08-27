@@ -1,15 +1,15 @@
-import type { SectorRankingFile, ThemeRank } from '@/lib/themes/sectorRanking';
+import type { MarketThemeRankingFile, MarketThemeRank } from '@/lib/themes/marketThemes';
 
 export type TideThemeRanking = {
   date: string;
-  universe: SectorRankingFile['universe'];
-  themes: ThemeRank[];
+  universe: MarketThemeRankingFile['universe'];
+  themes: MarketThemeRank[];
 };
 
 /**
- * Tide 與全站共用同一份 TWSE／TPEx 官方產業排行，不在顯示層重新混入人工題材。
+ * Tide 顯示市場題材；股票身分與數值已由 buildMarketThemeRanking 以官方快照校驗。
  */
-export function buildTideThemeRanking(source: SectorRankingFile | null): TideThemeRanking | null {
+export function buildTideThemeRanking(source: MarketThemeRankingFile | null): TideThemeRanking | null {
   if (!source) return null;
   return { date: source.date, universe: source.universe, themes: source.themes };
 }

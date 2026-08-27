@@ -13,8 +13,8 @@
  * 所有代號↔名稱已逐一對 data/youtube/stock-master.json 驗證
  * （合約測試 __tests__/contracts/theme-map.test.ts 持續守護）。
  *
- * @deprecated 僅保留給歷史研究與舊契約；正式產品分類、Tide 與 scanner 一律使用
- * TWSE／TPEx 官方產業別。不得再接回 sectorRanking 或產品顯示層。
+ * 產品定位：這是 Rockstock 維護的「市場題材」名單，不是 TWSE／TPEx 官方產業分類。
+ * 顯示層允許一股多題材；股票身分、上市櫃市場及數值仍須由官方基礎資料校驗。
  *
  * 設計註記：
  * - 同一檔股票可屬多個題材（CPO ⊂ 光通訊、CoWoS設備 ≈ 半導體設備）— 刻意保留，

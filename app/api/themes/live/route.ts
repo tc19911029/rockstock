@@ -1,5 +1,5 @@
 /**
- * 台股盤中即時「官方產業」排行
+ * 台股盤中即時「市場題材」排行
  * GET /api/themes/live[?date=YYYY-MM-DD]
  *
  * 用 TWSE／TPEx 官方產業完整成分股名單（與盤後 sectorRanking 同一份），逐檔配 L2 全市場
@@ -10,6 +10,7 @@
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { buildLiveThemeRoster, buildLatestLiveThemeRoster, type LiveThemeRosterFile } from '@/lib/themes/liveThemes';
+import { buildMarketLiveThemeRoster, type MarketLiveThemeRosterFile } from '@/lib/themes/marketThemes';
 import { globalCache } from '@/lib/datasource/MemoryCache';
 import { isMarketOpen } from '@/lib/datasource/marketHours';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
@@ -21,7 +22,7 @@ export const dynamic = 'force-dynamic';
 
 const CACHE_TTL = 40 * 1000;
 
-type LivePayload = LiveThemeRosterFile & {
+type LivePayload = MarketLiveThemeRosterFile & {
   marketOpen: boolean;
   stale: boolean;
   staleReason: string | null;
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
       ? await buildLiveThemeRoster(date)
       : await buildLatestLiveThemeRoster();
   } catch (error) {
-    return apiError(error instanceof Error ? error.message : 'official industry unavailable', 503);
+    return apiError(error instanceof Error ? error.message : 'market theme basis unavailable', 503);
   }
   if (!file) {
     return apiError(date ? `no L2 snapshot for ${date}` : 'no L2 snapshot available', 404);
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
     count: file.themes.reduce((sum, theme) => sum + theme.quotedCount, 0),
   });
   const payload: LivePayload = {
-    ...file,
+    ...buildMarketLiveThemeRoster(file),
     marketOpen: isMarketOpen('TW'),
     stale: freshness.stale,
     staleReason: freshness.reason,
