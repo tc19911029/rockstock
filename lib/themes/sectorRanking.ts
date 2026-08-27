@@ -23,10 +23,12 @@ import {
 } from '@/lib/datasource/TWOfficialIndustry';
 import { isValidYmd } from '@/lib/utils/ymd';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { readInstStock } from '@/lib/chips/ChipStorage';
 import { readMarginStock } from '@/lib/chips/ChipExtrasStorage';
+import { readRecentInstitutionalDaysTW } from '@/lib/storage/institutionalStorage';
 
 const SECTORS_DIR = path.join(process.cwd(), 'data', 'sectors', 'TW');
 
@@ -37,6 +39,7 @@ export interface ThemeStockPerf {
   name: string;
   symbol: string;
   market: TwOfficialMarket;
+  industryCode: string;
   /** % 報酬（最新收盤 vs N 根前收盤；資料不足 = null） */
   d1: number | null;
   d5: number | null;
@@ -74,6 +77,8 @@ export interface ThemeRank {
   instNet5: number | null;
   /** 外資+投信近 5 日買超金額合計（元；成分股加總） */
   instAmt5: number | null;
+  /** 具備完整近 5 日法人資料的成分股比例（0-1） */
+  instCoverage: number;
   stage: ThemeStage;
   /** 當日最強成分股（d1 最大） */
   topStock: { code: string; name: string; symbol: string; d1: number } | null;
@@ -84,14 +89,56 @@ export interface SectorRankingFile {
   date: string;
   generatedAt: string;
   classification: typeof TW_OFFICIAL_CLASSIFICATION;
+  universe: {
+    source: 'TWSE_TPEx_company_info';
+    rosterAsOf: string;
+    pointInTime: boolean;
+    stockCount: number;
+  };
   themes: ThemeRank[];
 }
 
 // ── 個股報酬計算 ──────────────────────────────────────────────────────────────
 
-async function loadStockPerf(stock: TwOfficialIndustryStock, date: string): Promise<ThemeStockPerf> {
+interface InstitutionalFallbackDay {
+  date: string;
+  sharesByCode: Map<string, number>;
+  readyMarkets: Set<TwOfficialMarket>;
+}
+
+async function loadInstitutionalFallback(
+  roster: TwOfficialIndustryStock[],
+  date: string,
+): Promise<InstitutionalFallbackDay[]> {
+  const days = await readRecentInstitutionalDaysTW(date, Math.max(...INST_PERIODS));
+  const rosterByMarket = {
+    TWSE: new Set(roster.filter((stock) => stock.market === 'TWSE').map((stock) => stock.code)),
+    TPEx: new Set(roster.filter((stock) => stock.market === 'TPEx').map((stock) => stock.code)),
+  };
+  return days.map((day) => {
+    const sharesByCode = new Map<string, number>();
+    for (const record of day.records) {
+      const code = record.symbol.trim();
+      if (/^[1-9]\d{3}$/.test(code) && Number.isFinite(record.total)) sharesByCode.set(code, record.total);
+    }
+    const readyMarkets = new Set<TwOfficialMarket>();
+    for (const market of ['TWSE', 'TPEx'] as const) {
+      const universe = rosterByMarket[market];
+      let covered = 0;
+      for (const code of universe) if (sharesByCode.has(code)) covered++;
+      if (universe.size > 0 && covered / universe.size >= 0.75) readyMarkets.add(market);
+    }
+    return { date: day.date, sharesByCode, readyMarkets };
+  });
+}
+
+async function loadStockPerf(
+  stock: TwOfficialIndustryStock,
+  date: string,
+  institutionalDays: InstitutionalFallbackDay[],
+): Promise<ThemeStockPerf> {
   const empty: ThemeStockPerf = {
-    code: stock.code, name: stock.name, symbol: stock.symbol, market: stock.market,
+    code: stock.code, name: stock.name, symbol: stock.symbol, market: stock.market, industryCode: stock.industryCode,
     d1: null, d5: null, d20: null, d60: null, volRatio: null, turnover: null, instNet5: null,
     rets: PERF_PERIODS.map(() => null),
     instAmt: INST_PERIODS.map(() => null),
@@ -126,31 +173,46 @@ async function loadStockPerf(stock: TwOfficialIndustryStock, date: string): Prom
   // 今日成交金額（元）= 量(張)×1000×收盤
   const turnover = candles[idx].volume > 0 ? Math.round(candles[idx].volume * 1000 * close) : null;
 
-  // 外資+投信近 5 日合計（張）+ 過去 1/3/5/10 日買超「金額」(逐日張×1000×當日收盤)
+  // 三大法人近 5 日合計（張）+ 過去 1/2/3/4/5/10/20 日買超金額。
+  // 優先採官方全市場日檔（股），逐股 ChipStorage（張）只補來源未就緒的日期。
   let instNet5: number | null = null;
   let instAmt: (number | null)[] = INST_PERIODS.map(() => null);
   try {
     const inst = await readInstStock(stock.code);
-    if (inst?.data?.length) {
-      const past = inst.data.filter(r => r.date <= date);
-      const rows5 = past.slice(-5);
-      if (rows5.length > 0) {
-        instNet5 = rows5.reduce((acc, r) => acc + (r.foreign ?? 0) + (r.trust ?? 0) + (r.dealer ?? 0), 0);
+    const chipByDate = new Map((inst?.data ?? []).filter((row) => row.date <= date).map((row) => [
+      row.date,
+      ((row.foreign ?? 0) + (row.trust ?? 0) + (row.dealer ?? 0)) * 1000,
+    ]));
+    const rows: Array<{ date: string; netShares: number }> = [];
+    for (const day of institutionalDays) {
+      const officialShares = day.sharesByCode.get(stock.code);
+      if (officialShares != null) rows.push({ date: day.date, netShares: officialShares });
+      else if (day.readyMarkets.has(stock.market)) rows.push({ date: day.date, netShares: 0 });
+      else {
+        const chipShares = chipByDate.get(day.date);
+        if (chipShares != null) rows.push({ date: day.date, netShares: chipShares });
       }
-      const closeByDate = new Map(candles.map(c => [c.date, c.close]));
-      instAmt = INST_PERIODS.map((n) => {
-        const rows = past.slice(-n);
-        if (rows.length === 0) return null;
-        let amt = 0; let any = false;
-        for (const r of rows) {
-          const c = closeByDate.get(r.date);
-          if (c == null) continue;
-          amt += ((r.foreign ?? 0) + (r.trust ?? 0) + (r.dealer ?? 0)) * 1000 * c; // 三大法人 張×1000股×元 = 元
-          any = true;
-        }
-        return any ? Math.round(amt) : null;
-      });
     }
+    if (rows.length === 0) {
+      for (const [rowDate, netShares] of [...chipByDate].sort(([a], [b]) => a.localeCompare(b))) {
+        rows.push({ date: rowDate, netShares });
+      }
+    }
+    const rows5 = rows.slice(-5);
+    if (rows5.length === 5) instNet5 = rows5.reduce((sum, row) => sum + row.netShares, 0) / 1000;
+    const closeByDate = new Map(candles.map(c => [c.date, c.close]));
+    instAmt = INST_PERIODS.map((n) => {
+      const window = rows.slice(-n);
+      if (window.length !== n) return null;
+      let amount = 0;
+      for (const row of window) {
+        if (row.netShares === 0) continue;
+        const rowClose = closeByDate.get(row.date);
+        if (rowClose == null) return null;
+        amount += row.netShares * rowClose;
+      }
+      return Math.round(amount);
+    });
   } catch { /* 無籌碼資料不影響報酬欄 */ }
 
   // 融資過去 N 日淨變化「金額」（逐日 張×1000股×當日收盤＝元；正=融資加碼、負=融資減）
@@ -177,7 +239,7 @@ async function loadStockPerf(stock: TwOfficialIndustryStock, date: string): Prom
   } catch { /* 無融資資料不影響其他欄 */ }
 
   return {
-    code: stock.code, name: stock.name, symbol: stock.symbol, market: stock.market,
+    code: stock.code, name: stock.name, symbol: stock.symbol, market: stock.market, industryCode: stock.industryCode,
     d1: ret(1), d5: ret(5), d20: ret(20), d60: ret(60), volRatio, turnover, instNet5,
     rets: PERF_PERIODS.map((n) => ret(n)),
     instAmt, retailAmt,
@@ -211,8 +273,11 @@ function avg(values: Array<number | null>): number | null {
 export async function buildSectorRanking(date: string): Promise<SectorRankingFile> {
   if (!isValidYmd(date)) throw new Error(`invalid sector ranking date: ${date}`);
   if (!isTradingDay(date, 'TW')) throw new Error(`not a TW trading day: ${date}`);
+  const lastClosedDate = getLastTradingDay('TW');
+  if (date > lastClosedDate) throw new Error(`sector ranking date is not closed yet: ${date}`);
   const roster = await fetchTwOfficialIndustryRoster();
   const industryGroups = groupOfficialIndustryStocks(roster);
+  const institutionalDays = await loadInstitutionalFallback(roster, date);
 
   // 官方分類一檔只屬一個產業；先算全市場個股績效，再按產業聚合。
   const perfCache = new Map<string, ThemeStockPerf>();
@@ -220,7 +285,7 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
   const entries = roster;
   for (let i = 0; i < entries.length; i += CONCURRENCY) {
     const batch = entries.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(batch.map(s => loadStockPerf(s, date)));
+    const results = await Promise.all(batch.map(s => loadStockPerf(s, date, institutionalDays)));
     for (const p of results) perfCache.set(p.code, p);
   }
 
@@ -235,11 +300,13 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
     const breadth = withD1.length > 0
       ? +(withD1.filter(m => (m.d1 ?? 0) > 0).length / withD1.length).toFixed(2)
       : null;
-    const instVals = members.map(m => m.instNet5).filter((x): x is number => x != null);
-    const instNet5 = instVals.length > 0 ? instVals.reduce((a, b) => a + b, 0) : null;
+    const instCovered = members.filter((member) => member.instNet5 != null && member.instAmt[INST_PERIODS.indexOf(5)] != null);
+    const instVals = instCovered.map((member) => member.instNet5 as number);
+    const instCoverage = members.length > 0 ? +(instCovered.length / members.length).toFixed(4) : 0;
+    const instNet5 = instCoverage >= 0.8 ? instVals.reduce((a, b) => a + b, 0) : null;
     // 5 日買超金額 = 成分股 instAmt[5日] 加總（INST_PERIODS 索引 2 = 5 日）
-    const amtVals = members.map(m => m.instAmt?.[INST_PERIODS.indexOf(5)]).filter((x): x is number => x != null);
-    const instAmt5 = amtVals.length > 0 ? amtVals.reduce((a, b) => a + b, 0) : null;
+    const amtVals = instCovered.map((member) => member.instAmt[INST_PERIODS.indexOf(5)] as number);
+    const instAmt5 = instCoverage >= 0.8 ? amtVals.reduce((a, b) => a + b, 0) : null;
     const top = withD1.length > 0
       ? withD1.reduce((best, m) => ((m.d1 ?? -Infinity) > (best.d1 ?? -Infinity) ? m : best))
       : null;
@@ -249,7 +316,7 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
       markets,
       theme,
       stockCount: members.length,
-      avgD1, avgD5, avgD20, avgD60, avgVolRatio, breadth, instNet5, instAmt5,
+      avgD1, avgD5, avgD20, avgD60, avgVolRatio, breadth, instNet5, instAmt5, instCoverage,
       stage: classifyStage({ avgD5, avgD20, avgVolRatio }),
       topStock: top && top.d1 != null ? { code: top.code, name: top.name, symbol: top.symbol, d1: top.d1 } : null,
       members,
@@ -259,10 +326,19 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
   // 預設排序：5 日平均報酬 desc（資金近期流向），null 沉底
   themes.sort((a, b) => (b.avgD5 ?? -Infinity) - (a.avgD5 ?? -Infinity));
 
+  const generatedAtDate = new Date();
+  const generatedAt = generatedAtDate.toISOString();
+  const rosterAsOf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(generatedAtDate);
   return {
     date,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     classification: TW_OFFICIAL_CLASSIFICATION,
+    universe: {
+      source: 'TWSE_TPEx_company_info',
+      rosterAsOf,
+      pointInTime: date === rosterAsOf,
+      stockCount: roster.length,
+    },
     themes,
   };
 }
@@ -277,7 +353,10 @@ export function isSectorRankingFile(value: unknown, expectedDate?: string): valu
   if (!value || typeof value !== 'object') return false;
   const file = value as Partial<SectorRankingFile>;
   if (!isValidYmd(file.date) || !isTradingDay(file.date, 'TW') || (expectedDate != null && file.date !== expectedDate)) return false;
+  if (file.date > getLastTradingDay('TW')) return false;
   if (typeof file.generatedAt !== 'string' || Number.isNaN(Date.parse(file.generatedAt))) return false;
+  const generatedDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date(file.generatedAt));
+  if (generatedDate < file.date) return false;
   if (
     file.classification?.kind !== TW_OFFICIAL_CLASSIFICATION.kind
     || file.classification?.version !== TW_OFFICIAL_CLASSIFICATION.version
@@ -286,6 +365,14 @@ export function isSectorRankingFile(value: unknown, expectedDate?: string): valu
     || !file.classification.sources.every((source, index) => source === TW_OFFICIAL_CLASSIFICATION.sources[index])
     || !Array.isArray(file.themes)
     || file.themes.length === 0
+  ) return false;
+  if (
+    file.universe?.source !== 'TWSE_TPEx_company_info'
+    || !isValidYmd(file.universe.rosterAsOf)
+    || file.universe.rosterAsOf !== generatedDate
+    || file.universe.pointInTime !== (file.universe.rosterAsOf === file.date)
+    || !Number.isInteger(file.universe.stockCount)
+    || file.universe.stockCount <= 0
   ) return false;
 
   const industryIds = new Set<string>();
@@ -306,14 +393,16 @@ export function isSectorRankingFile(value: unknown, expectedDate?: string): valu
     if (theme.industryId !== expectedId || industryIds.has(theme.industryId)) return false;
     industryIds.add(theme.industryId);
     if (!Array.isArray(theme.members) || theme.stockCount !== theme.members.length || theme.members.length === 0) return false;
-    if (![theme.avgD1, theme.avgD5, theme.avgD20, theme.avgD60, theme.avgVolRatio, theme.breadth, theme.instNet5, theme.instAmt5]
+    if (![theme.avgD1, theme.avgD5, theme.avgD20, theme.avgD60, theme.avgVolRatio, theme.breadth, theme.instNet5, theme.instAmt5, theme.instCoverage]
       .every(isNullableFiniteNumber)) return false;
+    if (theme.instCoverage < 0 || theme.instCoverage > 1) return false;
     if (!['剛啟動', '主升段', '高潮噴出', '震盪換手', '退潮', '補跌', '盤整'].includes(theme.stage)) return false;
 
     const memberSymbols = new Set<string>();
     for (const member of theme.members) {
       if (!member || typeof member !== 'object' || !/^[1-9]\d{3}$/.test(member.code) || !member.name) return false;
       if (member.market !== 'TWSE' && member.market !== 'TPEx') return false;
+      if (member.industryCode !== theme.industryCode || officialIndustryName(member.market, member.industryCode) !== theme.theme) return false;
       const expectedSymbol = `${member.code}.${member.market === 'TWSE' ? 'TW' : 'TWO'}`;
       if (member.symbol !== expectedSymbol || !markets.includes(member.market)) return false;
       if (symbols.has(member.symbol) || memberSymbols.has(member.symbol)) return false;
@@ -327,14 +416,28 @@ export function isSectorRankingFile(value: unknown, expectedDate?: string): valu
         || !Array.isArray(member.retailAmt) || member.retailAmt.length !== INST_PERIODS.length || !member.retailAmt.every(isNullableFiniteNumber)
       ) return false;
     }
-    if (theme.topStock != null && (
-      !memberSymbols.has(theme.topStock.symbol)
-      || !/^[1-9]\d{3}$/.test(theme.topStock.code)
-      || !theme.topStock.name
-      || !Number.isFinite(theme.topStock.d1)
-    )) return false;
+    const instMembers = theme.members.filter((member) => member.instNet5 != null && member.instAmt[INST_PERIODS.indexOf(5)] != null);
+    const expectedCoverage = +(instMembers.length / theme.members.length).toFixed(4);
+    if (theme.instCoverage !== expectedCoverage) return false;
+    if (expectedCoverage >= 0.8) {
+      const expectedNet = instMembers.reduce((sum, member) => sum + (member.instNet5 ?? 0), 0);
+      const expectedAmount = instMembers.reduce((sum, member) => sum + (member.instAmt[INST_PERIODS.indexOf(5)] ?? 0), 0);
+      if (theme.instNet5 !== expectedNet || theme.instAmt5 !== expectedAmount) return false;
+    } else if (theme.instNet5 !== null || theme.instAmt5 !== null) return false;
+
+    if (theme.topStock != null) {
+      const topMember = theme.members.find((member) => member.symbol === theme.topStock?.symbol);
+      const maxD1 = Math.max(...theme.members.map((member) => member.d1 ?? -Infinity));
+      if (
+        !topMember
+        || topMember.code !== theme.topStock.code
+        || topMember.name !== theme.topStock.name
+        || topMember.d1 !== theme.topStock.d1
+        || theme.topStock.d1 !== maxD1
+      ) return false;
+    } else if (theme.members.some((member) => member.d1 != null)) return false;
   }
-  return true;
+  return symbols.size === file.universe.stockCount;
 }
 
 export async function saveSectorRanking(file: SectorRankingFile): Promise<void> {
@@ -367,9 +470,9 @@ export async function listSectorDates(): Promise<string[]> {
 }
 
 /** 最近一個有效官方產業檔；跳過未來日期、舊 schema 與半寫入檔。 */
-export async function readLatestSectorRanking(maxCandidates = 30): Promise<SectorRankingFile | null> {
+export async function readLatestSectorRanking(): Promise<SectorRankingFile | null> {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-  const dates = (await listSectorDates()).filter((date) => date <= today).reverse().slice(0, maxCandidates);
+  const dates = (await listSectorDates()).filter((date) => date <= today).reverse();
   for (const date of dates) {
     const file = await readSectorRanking(date);
     if (file) return file;

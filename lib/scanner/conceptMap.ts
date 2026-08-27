@@ -4,7 +4,7 @@
  * 只保留給需要研究市場題材的舊功能使用；正式產業分類一律走
  * TWSE／TPEx OpenAPI，不再讓這份人工表覆蓋官方產業別。
  */
-import { fetchTwOfficialIndustryMap } from '@/lib/datasource/TWOfficialIndustry';
+import { loadOfficialIndustryContext } from '@/lib/themes/officialIndustryContext';
 export const TW_CONCEPT_MAP: Record<string, string> = {
   // ── AI / 伺服器 ──────────────────────────────────────────────────────────
   '2382': 'AI伺服器',  '2353': 'AI伺服器',  '3231': 'AI伺服器',
@@ -152,19 +152,15 @@ const INDUSTRY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24小時
 
 /**
  * 從 TWSE/TPEx 取得全部上市櫃公司產業分類（code → 中文產業別）。
- * 24h in-memory cache；網路失敗回空 Map，不以人工題材冒充官方分類。
+ * 24h in-memory cache；OpenAPI 失敗時只退到 7 日內已驗證官方快照，兩者皆不可用就失敗。
  */
 export async function fetchTWIndustryMap(): Promise<Map<string, string>> {
   if (industryCache && Date.now() - industryCacheTime < INDUSTRY_CACHE_TTL) {
     return industryCache;
   }
 
-  let map = new Map<string, string>();
-  try {
-    map = await fetchTwOfficialIndustryMap();
-  } catch {
-    // 兩個官方來源任一失敗即回空，避免半套分類污染掃描結果。
-  }
+  const map = (await loadOfficialIndustryContext()).industryByCode;
+  if (map.size < 1500) throw new Error(`官方產業分類母體不完整：${map.size}`);
 
   if (map.size > 0) {
     industryCache = map;

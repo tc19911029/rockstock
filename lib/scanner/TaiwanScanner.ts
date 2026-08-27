@@ -170,7 +170,10 @@ export class TaiwanScanner extends MarketScanner {
       return FALLBACK_TW_STOCKS;
     }
 
-    const indMap = industryMap.status === 'fulfilled' ? industryMap.value : new Map<string, string>();
+    if (industryMap.status === 'rejected') {
+      throw new Error(`TWSE／TPEx 官方產業分類不可用：${industryMap.reason instanceof Error ? industryMap.reason.message : String(industryMap.reason)}`);
+    }
+    const indMap = industryMap.value;
 
     // Deduplicate, sort by volume (highest first) — 全部台股不設上限
     const deduped = Array.from(new Map(withVol.map(s => [s.symbol, s])).values());

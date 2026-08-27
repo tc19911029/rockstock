@@ -8,6 +8,12 @@ function ranking(): SectorRankingFile {
     date: '2026-08-27',
     generatedAt: '2026-08-27T10:00:00.000Z',
     classification: TW_OFFICIAL_CLASSIFICATION,
+    universe: {
+      source: 'TWSE_TPEx_company_info',
+      rosterAsOf: '2026-08-27',
+      pointInTime: true,
+      stockCount: 2,
+    },
     themes: [{
       industryId: 'TPEx:22',
       industryCode: '22',
@@ -22,11 +28,12 @@ function ranking(): SectorRankingFile {
       breadth: 0.5,
       instNet5: 10,
       instAmt5: 1000,
+      instCoverage: 1,
       stage: '主升段',
       topStock: { code: '4162', name: '智擎', symbol: '4162.TWO', d1: 2 },
       members: [
-        { code: '4162', name: '智擎', symbol: '4162.TWO', market: 'TPEx', d1: 2, d5: 3, d20: 4, d60: 5, volRatio: 1.2, turnover: 100, instNet5: 10, rets: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], instAmt: [1000, 1000, 1000, 1000, 1000, 1000, 1000], retailAmt: [0, 0, 0, 0, 0, 0, 0] },
-        { code: '4743', name: '合一', symbol: '4743.TWO', market: 'TPEx', d1: 0, d5: 1, d20: 2, d60: 3, volRatio: 1, turnover: 80, instNet5: 0, rets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], instAmt: [0, 0, 0, 0, 0, 0, 0], retailAmt: [0, 0, 0, 0, 0, 0, 0] },
+        { code: '4162', name: '智擎', symbol: '4162.TWO', market: 'TPEx', industryCode: '22', d1: 2, d5: 3, d20: 4, d60: 5, volRatio: 1.2, turnover: 100, instNet5: 10, rets: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2], instAmt: [1000, 1000, 1000, 1000, 1000, 1000, 1000], retailAmt: [0, 0, 0, 0, 0, 0, 0] },
+        { code: '4743', name: '合一', symbol: '4743.TWO', market: 'TPEx', industryCode: '22', d1: 0, d5: 1, d20: 2, d60: 3, volRatio: 1, turnover: 80, instNet5: 0, rets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], instAmt: [0, 0, 0, 0, 0, 0, 0], retailAmt: [0, 0, 0, 0, 0, 0, 0] },
       ],
     }],
   };
@@ -48,6 +55,20 @@ describe('官方產業快照契約', () => {
     const incompleteSeries = structuredClone(valid);
     incompleteSeries.themes[0].members[0].rets.pop();
     expect(isSectorRankingFile(incompleteSeries, incompleteSeries.date)).toBe(false);
+
+    const fakeTopStock = structuredClone(valid);
+    fakeTopStock.themes[0].topStock = { code: '9999', name: '假資料', symbol: '9999.TWO', d1: 99 };
+    expect(isSectorRankingFile(fakeTopStock, fakeTopStock.date)).toBe(false);
+
+    const wrongIndustry = structuredClone(valid);
+    wrongIndustry.themes[0].members[0].industryCode = '24';
+    expect(isSectorRankingFile(wrongIndustry, wrongIndustry.date)).toBe(false);
+
+    const generatedBeforeDataDate = structuredClone(valid);
+    generatedBeforeDataDate.generatedAt = '2026-08-26T10:00:00.000Z';
+    generatedBeforeDataDate.universe.rosterAsOf = '2026-08-26';
+    generatedBeforeDataDate.universe.pointInTime = false;
+    expect(isSectorRankingFile(generatedBeforeDataDate, generatedBeforeDataDate.date)).toBe(false);
 
     const weekend = structuredClone(valid);
     weekend.date = '2026-08-29';

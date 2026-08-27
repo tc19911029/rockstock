@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { loadOfficialIndustryContext } from '@/lib/themes/officialIndustryContext';
 
 type InstitutionalRecord = {
   symbol: string;
@@ -69,9 +70,8 @@ function chipBadge(row: InstitutionalRecord, intensity: number): TideProStock['b
   return null;
 }
 
-async function latestClose(symbol: string, date: string): Promise<number | null> {
-  const file = (await readCandleFile(`${symbol}.TW`, 'TW'))
-    ?? (await readCandleFile(`${symbol}.TWO`, 'TW'));
+async function latestClose(fullSymbol: string, date: string): Promise<number | null> {
+  const file = await readCandleFile(fullSymbol, 'TW');
   if (!file?.candles?.length) return null;
   for (let i = file.candles.length - 1; i >= 0; i -= 1) {
     if (file.candles[i].date <= date) return file.candles[i].close;
@@ -80,6 +80,8 @@ async function latestClose(symbol: string, date: string): Promise<number | null>
 }
 
 export async function loadTideProSnapshot(): Promise<TideProSnapshot | null> {
+  const officialContext = await loadOfficialIndustryContext().catch(() => null);
+  if (!officialContext) return null;
   let filenames: string[];
   try {
     filenames = (await fs.readdir(DATA_DIR))
@@ -110,7 +112,7 @@ export async function loadTideProSnapshot(): Promise<TideProSnapshot | null> {
   // 先以籌碼規模縮小需要讀 K 線的範圍，避免一次掃全市場檔案。
   const candidates = latest.records
     // Tide 的個股榜單排除 ETF、權證、牛熊證與可轉債；四碼普通股才進榜。
-    .filter((row) => /^\d{4}$/.test(row.symbol) && !row.symbol.startsWith('0'))
+    .filter((row) => /^\d{4}$/.test(row.symbol) && !row.symbol.startsWith('0') && officialContext.symbolByCode.has(row.symbol))
     .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
     .slice(0, 180);
 
@@ -121,7 +123,8 @@ export async function loadTideProSnapshot(): Promise<TideProSnapshot | null> {
       ? previous.reduce((sum, item) => sum + Math.abs(item.total), 0) / previous.length
       : 0;
     const intensity = baseline > 0 ? Math.abs(row.total) / baseline : 0;
-    const close = await latestClose(row.symbol, latest.date);
+    const fullSymbol = officialContext.symbolByCode.get(row.symbol);
+    const close = fullSymbol ? await latestClose(fullSymbol, latest.date) : null;
     return {
       symbol: row.symbol,
       name: row.name,

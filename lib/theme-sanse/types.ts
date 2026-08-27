@@ -84,7 +84,7 @@ export interface HotThemeMember {
 }
 
 export interface HotTheme {
-  id: string;                   // TW: 題材中文名；CN-analysis: analysis id；CN-industry: 'industry:<名>'；CN-concept: 'BKxxxx'
+  id: string;                   // TW: 官方 industryId；CN-analysis: analysis id；CN-industry: 'industry:<名>'；CN-concept: 'BKxxxx'
   name: string;
   kind: HotThemeKind;
   heatScore: number;            // 0-100 合成（同 market+date 內可比）

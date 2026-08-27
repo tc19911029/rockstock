@@ -13,7 +13,7 @@ export const TPEX_COMPANY_INFO_URL = 'https://www.tpex.org.tw/openapi/v1/mopsfin
 
 export const TW_OFFICIAL_CLASSIFICATION = {
   kind: 'official_industry',
-  version: 3,
+  version: 4,
   label: 'TWSE／TPEx 官方產業別',
   sources: ['TWSE', 'TPEx'] as const,
 } as const;

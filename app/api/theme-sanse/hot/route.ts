@@ -3,6 +3,8 @@ import { rankCodeToThemesToday } from '@/lib/theme-sanse/todayHot';
 import { TW_OFFICIAL_CLASSIFICATION } from '@/lib/datasource/TWOfficialIndustry';
 import type { ThemeRef, TsMarket } from '@/lib/theme-sanse/types';
 import { isValidYmd } from '@/lib/utils/ymd';
+import { isTradingDay } from '@/lib/utils/tradingDay';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +26,12 @@ export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
   if (!isValidYmd(date)) {
     return NextResponse.json({ ok: false, error: `需要合法 date（YYYY-MM-DD），得到 '${date}'` }, { status: 400 });
+  }
+  if (!isTradingDay(date, market)) {
+    return NextResponse.json({ ok: false, error: `非交易日：${date}` }, { status: 400 });
+  }
+  if (date > getLastTradingDay(market)) {
+    return NextResponse.json({ ok: false, error: `日期尚未收盤：${date}` }, { status: 400 });
   }
   try {
     const byCodeMap = await rankCodeToThemesToday(market, date);

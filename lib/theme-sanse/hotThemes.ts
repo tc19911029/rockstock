@@ -103,7 +103,7 @@ function twRawFromThemeRank(tr: ThemeRank): RawTheme {
     }))
     .sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));
   return {
-    id: tr.theme,
+    id: tr.industryId,
     name: tr.theme,
     kind: 'tw_theme',
     source: 'tw_sector',

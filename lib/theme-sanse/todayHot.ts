@@ -6,7 +6,7 @@
 // 那條留給已回測的 cross-selection 事件流，這裡不動它）。
 //
 // 兩市場單一事實：
-//   TW：reuse buildSectorRanking 的 TWSE／TPEx 官方產業，按 avgD1（今日產業平均漲幅）排名。
+//   TW：只讀盤後 cron 已封存的 TWSE／TPEx 官方產業快照，按 avgD1（今日產業平均漲幅）排名。
 //   CN：reuse cn-agents 概念板塊（data/cn-agents/boards/{date}.json），filterThemeConcepts 濾掉
 //       風格/大盤/盤口板塊後按今日 pct 排，取前 N 個概念，即時 fetchBoardMembers 抓成分股反查。
 //       ⚠️ 陸股「最熱概念」回測是反指標（最熱之後反而最弱）→ 顯示層標清楚「只供觀察別追高」。
@@ -16,7 +16,7 @@
 
 import path from 'path';
 import { promises as fs } from 'fs';
-import { readSectorRanking, buildSectorRanking, saveSectorRanking, type ThemeRank } from '@/lib/themes/sectorRanking';
+import { readSectorRanking, type ThemeRank } from '@/lib/themes/sectorRanking';
 import { readBoardsDay } from '@/lib/cn-agents/storage';
 import { filterThemeConcepts } from '@/lib/cn-agents/boardRanking';
 import { fetchBoardMembers } from '@/lib/cn-agents/datasource/emBoards';
@@ -83,14 +83,8 @@ function invertCn(themes: TodayThemeLite[]): Map<string, ThemeRef[]> {
 
 // ── TW：官方產業按 avgD1（今日產業平均漲幅）排 ─────────────────────────────────
 async function twTodayThemes(date: string): Promise<TodayThemeLite[]> {
-  let file = await readSectorRanking(date);
-  if (!file) {
-    file = await buildSectorRanking(date);
-    if (!file.themes.some((theme) => theme.avgD1 != null)) {
-      throw new Error(`no L1 data for ${date}`);
-    }
-    await saveSectorRanking(file);
-  }
+  const file = await readSectorRanking(date);
+  if (!file) throw new Error(`no official industry ranking for ${date}`);
   const todayRet = (t: ThemeRank) => t.avgD1 ?? null;
   const ranked = [...file.themes].sort((a, b) => (todayRet(b) ?? -Infinity) - (todayRet(a) ?? -Infinity));
   return ranked.map((t, i) => ({

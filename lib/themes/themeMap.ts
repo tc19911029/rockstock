@@ -13,12 +13,12 @@
  * 所有代號↔名稱已逐一對 data/youtube/stock-master.json 驗證
  * （合約測試 __tests__/contracts/theme-map.test.ts 持續守護）。
  *
- * 用途 = 板塊強弱排名（sectorRanking）與題材階段「顯示層」分類。
- * 紅線：不參與選股 gate、不入 pool 計分（鐵則 #5）。
+ * @deprecated 僅保留給歷史研究與舊契約；正式產品分類、Tide 與 scanner 一律使用
+ * TWSE／TPEx 官方產業別。不得再接回 sectorRanking 或產品顯示層。
  *
  * 設計註記：
  * - 同一檔股票可屬多個題材（CPO ⊂ 光通訊、CoWoS設備 ≈ 半導體設備）— 刻意保留，
- *   排名是 per-theme 聚合不互斥
+ *   因此不可當作全市場互斥分類或拿來計算市場廣度
  * - 「電力」與「重電」v1 成分相同（規格書分列、台股實際是同一族群）
  * - 「中國政策受惠」成分最弱（內需收成股 proxy），排名參考價值低 — 顯示時敬陪末座可接受
  */

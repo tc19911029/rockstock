@@ -19,6 +19,7 @@ export default async function TidePage() {
   return (
     <TideDashboard
       initialDate={ranking?.date ?? pro?.date ?? ''}
+      initialUniverse={ranking?.universe ?? null}
       initialThemes={ranking?.themes ?? []}
       proSnapshot={pro}
     />

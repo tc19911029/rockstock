@@ -56,7 +56,10 @@ export async function loadOfficialIndustryContext(): Promise<OfficialIndustryCon
     return buildOfficialIndustryContextFromRoster(await fetchTwOfficialIndustryRoster());
   } catch (openApiError) {
     const snapshot = await readLatestSectorRanking();
-    if (snapshot) return buildOfficialIndustryContextFromRanking(snapshot);
+    if (snapshot) {
+      const ageDays = Math.floor((Date.now() - new Date(`${snapshot.date}T00:00:00+08:00`).getTime()) / 86_400_000);
+      if (ageDays <= 7 && snapshot.universe.pointInTime) return buildOfficialIndustryContextFromRanking(snapshot);
+    }
     throw new OfficialIndustryUnavailableError(openApiError);
   }
 }

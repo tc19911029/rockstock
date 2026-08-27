@@ -61,4 +61,29 @@ describe('台股產品路徑只使用官方產業分類', () => {
     expect(source).not.toContain('面板/網通/生技/被動元件');
     expect(source).not.toContain('最熱題材那段報酬約是後段 2 倍');
   });
+
+  it('Tide 不得重組官方產業或保留人工十大群組', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'app/tide/TideDashboard.tsx'), 'utf8');
+    expect(source).not.toContain('expandTideThemes');
+    expect(source).not.toContain('TIDE_THEME_GROUPS');
+    expect(source).not.toContain('assignThemeGroups');
+    expect(source).not.toContain('THEME_MAP');
+    expect(source).not.toContain('TW_CONCEPT_MAP');
+  });
+
+  it('公開排行與台股熱門產業查詢保持唯讀', () => {
+    const routeSource = fs.readFileSync(path.join(process.cwd(), 'app/api/themes/ranking/route.ts'), 'utf8');
+    const hotSource = fs.readFileSync(path.join(process.cwd(), 'lib/theme-sanse/todayHot.ts'), 'utf8');
+    expect(routeSource).not.toContain('buildSectorRanking');
+    expect(routeSource).not.toContain('saveSectorRanking');
+    expect(hotSource).not.toContain('buildSectorRanking');
+    expect(hotSource).not.toContain('saveSectorRanking');
+  });
+
+  it('Tide Pro 用官方市場後綴讀 K 線，不試猜 .TW/.TWO', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'lib/tide/proData.ts'), 'utf8');
+    expect(source).toContain('officialContext.symbolByCode.get');
+    expect(source).not.toContain('`${symbol}.TW`');
+    expect(source).not.toContain('`${symbol}.TWO`');
+  });
 });

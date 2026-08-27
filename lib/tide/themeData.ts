@@ -2,6 +2,7 @@ import type { SectorRankingFile, ThemeRank } from '@/lib/themes/sectorRanking';
 
 export type TideThemeRanking = {
   date: string;
+  universe: SectorRankingFile['universe'];
   themes: ThemeRank[];
 };
 
@@ -10,5 +11,5 @@ export type TideThemeRanking = {
  */
 export function buildTideThemeRanking(source: SectorRankingFile | null): TideThemeRanking | null {
   if (!source) return null;
-  return { date: source.date, themes: source.themes };
+  return { date: source.date, universe: source.universe, themes: source.themes };
 }

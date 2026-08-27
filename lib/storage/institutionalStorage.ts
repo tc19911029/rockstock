@@ -10,6 +10,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { InstitutionalRecord } from '@/lib/datasource/TWSEInstitutional';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 
 const IS_VERCEL = process.env.VERCEL === '1';
 const DATA_DIR = path.join(process.cwd(), 'data', 'institutional');
@@ -73,6 +74,41 @@ export async function readInstitutionalTW(date: string): Promise<InstitutionalRe
   } catch {
     return null;
   }
+}
+
+export interface InstitutionalMarketDay {
+  date: string;
+  records: InstitutionalRecord[];
+}
+
+/**
+ * 批次讀最近 N 個有完整日檔的台股交易日（升冪）。
+ * 多取 10 個候選交易日容忍單日來源缺檔；分批併發避免 Vercel Blob 串行讀取過慢。
+ */
+export async function readRecentInstitutionalDaysTW(
+  endDate: string,
+  lookbackDays: number,
+): Promise<InstitutionalMarketDay[]> {
+  const candidates: string[] = [];
+  const cursor = new Date(`${endDate}T12:00:00Z`);
+  let safety = 60;
+  while (candidates.length < lookbackDays + 10 && safety-- > 0) {
+    const date = cursor.toISOString().slice(0, 10);
+    if (isTradingDay(date, 'TW')) candidates.push(date);
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+
+  const days: InstitutionalMarketDay[] = [];
+  const concurrency = 6;
+  for (let i = 0; i < candidates.length && days.length < lookbackDays; i += concurrency) {
+    const batch = candidates.slice(i, i + concurrency);
+    const rows = await Promise.all(batch.map(async (date) => ({ date, records: await readInstitutionalTW(date) })));
+    for (const row of rows) {
+      if (row.records && row.records.length > 0) days.push({ date: row.date, records: row.records });
+      if (days.length >= lookbackDays) break;
+    }
+  }
+  return days.slice(0, lookbackDays).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**

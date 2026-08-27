@@ -2,15 +2,16 @@
  * TWSE／TPEx 官方產業強弱排名查詢（附描述性輪動標籤）
  * GET /api/themes/ranking[?date=YYYY-MM-DD]
  * 不帶 date：回最近一份有效官方快照；帶 date：回該日。
- * 新版官方檔不存在但 L1 足夠時會即時重算並儲存；完全無資料才回 404。
+ * 查詢端唯讀；快照只允許由已授權的盤後 cron 建立，避免 GET 汙染歷史資料。
  * 附 rotation（每題材 今日漲幅名次 vs 昨天 + 🟢🟡🔴 桶）— 純描述非訊號。
  */
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
-import { buildSectorRanking, readSectorRanking, readLatestSectorRanking, readPriorSectorRanking, saveSectorRanking } from '@/lib/themes/sectorRanking';
+import { readSectorRanking, readLatestSectorRanking, readPriorSectorRanking } from '@/lib/themes/sectorRanking';
 import { computeRotation } from '@/lib/themes/themeRotation';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { isValidYmd } from '@/lib/utils/ymd';
+import { isTradingDay } from '@/lib/utils/tradingDay';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -20,19 +21,11 @@ export async function GET(req: NextRequest) {
   if (date && !isValidYmd(date)) {
     return apiError(`invalid date: ${date}`, 400);
   }
-  let file = date ? await readSectorRanking(date) : await readLatestSectorRanking();
+  if (date && !isTradingDay(date, 'TW')) return apiError(`not a TW trading day: ${date}`, 400);
+  if (date && date > getLastTradingDay('TW')) return apiError(`date is not closed yet: ${date}`, 400);
+  const file = date ? await readSectorRanking(date) : await readLatestSectorRanking();
   if (!file) {
-    // 舊的手工題材檔會被 readSectorRanking 拒絕；第一次部署時即時重算，毋須等隔日 cron。
-    const buildDate = date ?? getLastTradingDay('TW');
-    try {
-      file = await buildSectorRanking(buildDate);
-      if (!file.themes.some((theme) => theme.avgD1 != null)) {
-        return apiError(`no L1 data for ${buildDate}`, 404);
-      }
-      await saveSectorRanking(file);
-    } catch (error) {
-      return apiError(error instanceof Error ? error.message : 'official industry ranking unavailable', 503);
-    }
+    return apiError(date ? `no official industry ranking for ${date}` : 'no valid official industry ranking available', date ? 404 : 503);
   }
 
   // 找前一交易日的檔，算日輪動（資料不足則 rotation 為 mid/null，UI 自會淡化）

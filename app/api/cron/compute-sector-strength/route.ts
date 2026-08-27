@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
   const dateParam = req.nextUrl.searchParams.get('date');
   const date = dateParam ?? getLastTradingDay('TW');
   if (!isValidYmd(date)) return apiError(`invalid date: ${date}`, 400);
+  if (date > getLastTradingDay('TW')) return apiError(`date is not closed yet: ${date}`, 400);
   if (!isTradingDay(date, 'TW')) {
     return apiOk({ skipped: true, reason: 'non-trading day', date });
   }

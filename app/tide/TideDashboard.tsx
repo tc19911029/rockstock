@@ -39,9 +39,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { TW_CONCEPT_MAP } from '@/lib/scanner/conceptMap';
 import type { TideProSnapshot } from '@/lib/tide/proData';
-import { THEME_MAP } from '@/lib/themes/themeMap';
+import type { SectorRankingFile } from '@/lib/themes/sectorRanking';
 import styles from './tide.module.css';
 
 type ThemeMember = {
@@ -108,68 +107,6 @@ const CATEGORY_META: Record<Exclude<FlowCategory, 'all'>, { label: string; hint:
   ebb: { label: '退潮', hint: '資金流出', color: '#68ad9c' },
 };
 
-const TIDE_THEME_GROUPS = ['半導體', 'AI與電子硬體', '軟體雲端資安', '綠能與電力', '金融', '航運物流', '傳產製造', '民生消費', '營建地產', '生技醫療'] as const;
-const TIDE_THEME_GROUP_TARGETS: Record<typeof TIDE_THEME_GROUPS[number], number> = {
-  半導體: 24,
-  AI與電子硬體: 37,
-  軟體雲端資安: 5,
-  綠能與電力: 12,
-  金融: 2,
-  航運物流: 4,
-  傳產製造: 16,
-  民生消費: 8,
-  營建地產: 1,
-  生技醫療: 1,
-};
-
-function themeGroup(theme: string): typeof TIDE_THEME_GROUPS[number] {
-  if (/生技|醫療|製藥/.test(theme)) return '生技醫療';
-  if (/營建|地產|房/.test(theme)) return '營建地產';
-  if (/金融|銀行|金控|保險/.test(theme)) return '金融';
-  if (/航運|航空|物流/.test(theme)) return '航運物流';
-  if (/綠能|太陽能|風電|電力|儲能|電網/.test(theme)) return '綠能與電力';
-  if (/軟體|雲端|資安|SaaS/.test(theme)) return '軟體雲端資安';
-  if (/半導體|晶圓|封裝|記憶體|IC|CPO|矽光|CoWoS|HBM/.test(theme)) return '半導體';
-  if (/AI|伺服器|PCB|電子|光通訊|電源|連接|衛星|機器人/.test(theme)) return 'AI與電子硬體';
-  if (/食品|觀光|零售|消費|紡織/.test(theme)) return '民生消費';
-  return '傳產製造';
-}
-
-function assignThemeGroups(themes: ThemeRank[]): Map<string, typeof TIDE_THEME_GROUPS[number]> {
-  const assignments = new Map<string, typeof TIDE_THEME_GROUPS[number]>();
-  if (themes.length !== 110) {
-    for (const theme of themes) assignments.set(theme.theme, themeGroup(theme.theme));
-    return assignments;
-  }
-  const buckets = Object.fromEntries(TIDE_THEME_GROUPS.map((group) => [group, [] as ThemeRank[]])) as Record<typeof TIDE_THEME_GROUPS[number], ThemeRank[]>;
-  const overflow: ThemeRank[] = [];
-  for (const theme of themes) {
-    const preferred = themeGroup(theme.theme);
-    if (buckets[preferred].length < TIDE_THEME_GROUP_TARGETS[preferred]) buckets[preferred].push(theme);
-    else overflow.push(theme);
-  }
-  const affinity: Record<typeof TIDE_THEME_GROUPS[number], RegExp> = {
-    半導體: /晶|IC|封測|封裝|記憶體|光罩|矽|ASIC|CPO/i,
-    AI與電子硬體: /AI|電子|光電|電腦|網路|通訊|PCB|電源|連接|機器人|衛星|面板|被動元件/i,
-    軟體雲端資安: /軟體|雲端|資安|數位|網通|SaaS/i,
-    綠能與電力: /綠能|能源|電力|電機|電纜|電池|太陽能|風電|充電|儲能|電網/i,
-    金融: /金融|銀行|金控|保險/i,
-    航運物流: /航運|航空|物流|貨櫃/i,
-    傳產製造: /鋼鐵|塑膠|化工|材料|橡膠|水泥|機械|工業|製造|玻璃|造紙/i,
-    民生消費: /食品|觀光|餐飲|百貨|零售|消費|紡織|運動|娛樂/i,
-    營建地產: /營建|地產|房/i,
-    生技醫療: /生技|醫療|製藥/i,
-  };
-  for (const group of TIDE_THEME_GROUPS) {
-    const needed = TIDE_THEME_GROUP_TARGETS[group] - buckets[group].length;
-    if (needed <= 0) continue;
-    overflow.sort((left, right) => Number(affinity[group].test(right.theme)) - Number(affinity[group].test(left.theme)) || left.theme.localeCompare(right.theme, 'zh-Hant'));
-    buckets[group].push(...overflow.splice(0, needed));
-  }
-  for (const group of TIDE_THEME_GROUPS) for (const theme of buckets[group]) assignments.set(theme.theme, group);
-  return assignments;
-}
-
 const PERIOD_INDEX: Record<Period, number> = { 1: 0, 5: 4, 20: 6 };
 
 function formatMoney(value: number | null | undefined, compact = true): string {
@@ -231,69 +168,6 @@ function uniqueStocks(themes: ThemeRank[], pro: TideProSnapshot | null): StockRe
   return [...stocks.values()];
 }
 
-/**
- * Tide 的畫面使用 108 個題材分組；站內其他掃描仍保留官方產業分類。
- * 這裡只在 Tide 顯示層，用同一批股票行情彙整既有題材映射。
- */
-function expandTideThemes(source: ThemeRank[]): ThemeRank[] {
-  if (source.length >= 110) return source.slice(0, 110);
-  const stockByCode = new Map<string, ThemeMember>();
-  for (const theme of source) {
-    for (const member of theme.members) {
-      if (!stockByCode.has(member.code)) stockByCode.set(member.code, member);
-    }
-  }
-
-  const groups = new Map<string, Set<string>>();
-  const add = (theme: string, code: string) => {
-    const codes = groups.get(theme) ?? new Set<string>();
-    codes.add(code);
-    groups.set(theme, codes);
-  };
-  for (const [theme, stocks] of Object.entries(THEME_MAP)) {
-    for (const stock of stocks) add(theme, stock.code);
-  }
-  for (const [code, theme] of Object.entries(TW_CONCEPT_MAP)) add(theme, code);
-  for (const industry of [...source].sort((left, right) => Math.abs(right.instAmt5 ?? 0) - Math.abs(left.instAmt5 ?? 0))) {
-    if (groups.size >= 110) break;
-    if (groups.has(industry.theme)) continue;
-    for (const member of industry.members) add(industry.theme, member.code);
-  }
-
-  const avg = (values: Array<number | null>) => {
-    const valid = values.filter((value): value is number => value != null);
-    return valid.length > 0 ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
-  };
-
-  return [...groups.entries()].slice(0, 110).map(([theme, codes]) => {
-    const members = [...codes]
-      .map((code) => stockByCode.get(code))
-      .filter((member): member is ThemeMember => member != null);
-    const topStock = [...members]
-      .filter((member) => member.d1 != null)
-      .sort((left, right) => (right.d1 ?? 0) - (left.d1 ?? 0))[0];
-    const withD1 = members.filter((member) => member.d1 != null);
-    const instAmounts = members
-      .map((member) => member.instAmt?.[PERIOD_INDEX[5]])
-      .filter((value): value is number => value != null);
-    return {
-      theme,
-      stockCount: members.length,
-      avgD1: avg(members.map((member) => member.d1)),
-      avgD5: avg(members.map((member) => member.d5)),
-      avgD20: avg(members.map((member) => member.d20)),
-      avgD60: avg(members.map((member) => member.d60)),
-      avgVolRatio: null,
-      breadth: withD1.length > 0 ? withD1.filter((member) => (member.d1 ?? 0) > 0).length / withD1.length : null,
-      instNet5: avg(members.map((member) => member.instNet5)),
-      instAmt5: instAmounts.length > 0 ? instAmounts.reduce((sum, value) => sum + value, 0) : null,
-      stage: '',
-      topStock: topStock?.d1 == null ? null : { code: topStock.code, name: topStock.name, d1: topStock.d1 },
-      members,
-    };
-  });
-}
-
 function readStoredStocks(key: string): StockRef[] {
   try {
     const value = JSON.parse(localStorage.getItem(key) ?? '[]');
@@ -320,16 +194,18 @@ async function shareOrCopy(title: string, text: string, url: string): Promise<'s
 
 export default function TideDashboard({
   initialDate,
+  initialUniverse,
   initialThemes,
   proSnapshot,
 }: {
   initialDate: string;
+  initialUniverse: SectorRankingFile['universe'] | null;
   initialThemes: ThemeRank[];
   proSnapshot: TideProSnapshot | null;
 }) {
-  const normalizedInitialThemes = useMemo(() => expandTideThemes(initialThemes), [initialThemes]);
-  const [themes, setThemes] = useState(normalizedInitialThemes);
+  const [themes, setThemes] = useState(initialThemes);
   const [dataDate, setDataDate] = useState(initialDate);
+  const [universeMeta, setUniverseMeta] = useState(initialUniverse);
   const [view, setView] = useState<ViewMode>('bubble');
   const [period, setPeriod] = useState<Period>(5);
   const [category, setCategory] = useState<FlowCategory>('all');
@@ -372,7 +248,6 @@ export default function TideDashboard({
   const [haptics, setHaptics] = useState(true);
   const [notifications, setNotifications] = useState({ push: false, morning: true, close: true, poll: true, offers: true });
   const [hiddenThemes, setHiddenThemes] = useState<string[]>([]);
-  const [expandedThemeGroup, setExpandedThemeGroup] = useState<string | null>(null);
   const [pollVote, setPollVote] = useState<'bull' | 'bear' | null>(null);
   const [pollOpen, setPollOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
@@ -382,8 +257,7 @@ export default function TideDashboard({
   const [replayLoading, setReplayLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const allStocks = useMemo(() => uniqueStocks(normalizedInitialThemes, proSnapshot), [normalizedInitialThemes, proSnapshot]);
-  const themeAssignments = useMemo(() => assignThemeGroups(themes), [themes]);
+  const allStocks = useMemo(() => uniqueStocks(initialThemes, proSnapshot), [initialThemes, proSnapshot]);
   const searchResults = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -660,8 +534,9 @@ export default function TideDashboard({
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
         if (payload?.themes) {
-          setThemes(expandTideThemes(payload.themes));
+          setThemes(payload.themes);
           setDataDate(payload.date);
+          setUniverseMeta(payload.universe ?? null);
         }
       })
       .finally(() => setReplayLoading(false));
@@ -671,9 +546,10 @@ export default function TideDashboard({
   const resetLatest = useCallback(() => {
     setReplayPlaying(false);
     setReplayIndex(Math.max(0, replayDates.length - 1));
-    setThemes(normalizedInitialThemes);
+    setThemes(initialThemes);
     setDataDate(initialDate);
-  }, [initialDate, normalizedInitialThemes, replayDates.length]);
+    setUniverseMeta(initialUniverse);
+  }, [initialDate, initialThemes, initialUniverse, replayDates.length]);
 
   const openReplay = useCallback(() => {
     setReplayIndex(0);
@@ -696,20 +572,25 @@ export default function TideDashboard({
     window.addEventListener('pointerup', onUp);
   }, [watchWidth]);
 
-  const marketChange = themes.length > 0
-    ? themes.reduce((sum, item) => sum + (item.avgD1 ?? 0), 0) / themes.length
+  const marketMembers = themes.flatMap((theme) => theme.members).filter((member) => member.d1 != null);
+  const marketChange = marketMembers.length > 0
+    ? marketMembers.reduce((sum, member) => sum + (member.d1 ?? 0), 0) / marketMembers.length
     : 0;
-  const bullishPct = Math.round((themes.filter((item) => (item.avgD1 ?? 0) > 0).length / Math.max(1, themes.length)) * 100);
+  const bullishPct = Math.round((marketMembers.filter((member) => (member.d1 ?? 0) > 0).length / Math.max(1, marketMembers.length)) * 100);
 
   return (
-    <main className={styles.app} data-theme={resolvedTheme} data-text-size={textSize} data-rise-color={riseColor} id="main-content">
+    <div className={styles.app} data-theme={resolvedTheme} data-text-size={textSize} data-rise-color={riseColor}>
       <div className={styles.marketStrip}>
-        <span>大盤 <b className={marketChange >= 0 ? styles.up : styles.down}>{formatPct(marketChange)}</b></span>
+        <span>全市場等權 <b className={marketChange >= 0 ? styles.up : styles.down}>{formatPct(marketChange)}</b></span>
         <span className={styles.stripDivider}>｜</span>
         <span>資料日期 {dataDate || '—'}</span>
         <Link className={styles.planLink} href="/tide/pricing">方案</Link>
         <span className={styles.updateNote}>⏳ 今日資料約 18:30 前更新</span>
-        <span className={styles.sourceNote}>資料來源：證交所、櫃買中心公開資料｜僅彙整公開資訊，不構成投資建議</span>
+        <span className={styles.sourceNote}>
+          分類：TWSE／TPEx 官方產業
+          {universeMeta && !universeMeta.pointInTime ? `（歷史回放沿用 ${universeMeta.rosterAsOf} 名單）` : ''}
+          ｜僅彙整公開資訊，不構成投資建議
+        </span>
       </div>
 
       <header className={styles.header}>
@@ -989,27 +870,14 @@ export default function TideDashboard({
               <SettingToggle label="投票提醒（收盤邀請 / 開盤結果）" checked={notifications.poll} onChange={(checked) => changeNotification('poll', checked)} />
               <SettingToggle label="優惠與活動通知（email）" checked={notifications.offers} onChange={(checked) => changeNotification('offers', checked)} />
             </div>
-            <label>板塊顯示（取消勾選即從圖表隱藏）</label>
+            <label>官方產業顯示（取消勾選即從圖表隱藏）</label>
             <div className={styles.sectorSettings}>
-              {TIDE_THEME_GROUPS.map((group) => {
-                const groupThemes = themes.filter((theme) => themeAssignments.get(theme.theme) === group);
-                const visibleCount = groupThemes.filter((theme) => !hiddenThemes.includes(theme.theme)).length;
-                const allVisible = visibleCount === groupThemes.length;
-                const expanded = expandedThemeGroup === group;
-                return <section key={group} className={styles.sectorGroup}>
-                  <div>
-                    <button onClick={() => setExpandedThemeGroup(expanded ? null : group)} aria-expanded={expanded} aria-label={`${expanded ? '收合' : '展開'}${group}`}><ChevronRight size={14} /></button>
-                    <input aria-label={`顯示${group}`} type="checkbox" checked={allVisible} ref={(node) => { if (node) node.indeterminate = visibleCount > 0 && !allVisible; }} onChange={() => {
-                      const names = new Set(groupThemes.map((theme) => theme.theme));
-                      changeHiddenThemes(allVisible ? [...new Set([...hiddenThemes, ...names])] : hiddenThemes.filter((name) => !names.has(name)));
-                    }} />
-                    <span>{group}</span><small>{visibleCount}/{groupThemes.length}</small>
-                  </div>
-                  {expanded && <div className={styles.sectorChildren}>{groupThemes.map((theme) => {
-                    const checked = !hiddenThemes.includes(theme.theme);
-                    return <label key={theme.theme}><input type="checkbox" checked={checked} onChange={() => changeHiddenThemes(checked ? [...hiddenThemes, theme.theme] : hiddenThemes.filter((name) => name !== theme.theme))} /><span>{theme.theme}</span></label>;
-                  })}</div>}
-                </section>;
+              {[...themes].sort((left, right) => left.theme.localeCompare(right.theme, 'zh-Hant')).map((theme) => {
+                const checked = !hiddenThemes.includes(theme.theme);
+                return <label key={theme.theme} className={styles.sectorGroup}>
+                  <input type="checkbox" checked={checked} onChange={() => changeHiddenThemes(checked ? [...hiddenThemes, theme.theme] : hiddenThemes.filter((name) => name !== theme.theme))} />
+                  <span>{theme.theme}</span><small>{theme.stockCount} 檔</small>
+                </label>;
               })}
             </div>
             <label>說明與關於</label>
@@ -1054,7 +922,7 @@ export default function TideDashboard({
       {wishOpen && <WishModal onClose={() => setWishOpen(false)} setToast={setToast} />}
 
       {toast && <div className={styles.toast} role="status" aria-live="polite"><Check size={15} /> {toast}</div>}
-    </main>
+    </div>
   );
 }
 
@@ -1219,10 +1087,9 @@ function ReplayOverlay({ themes, date, startDate, endDate, index, max, playing, 
   const [filterOpen, setFilterOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
-  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+  const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
   const hotThemes = useMemo(() => [...themes].sort((a, b) => Math.abs(themeMoney(b, 5)) - Math.abs(themeMoney(a, 5))).slice(0, 31), [themes]);
-  const replayAssignments = useMemo(() => assignThemeGroups(themes), [themes]);
-  const replayThemes = useMemo(() => selectedGroups.length === 0 ? hotThemes : themes.filter((theme) => selectedGroups.includes(replayAssignments.get(theme.theme) ?? '傳產製造')), [hotThemes, replayAssignments, selectedGroups, themes]);
+  const replayThemes = useMemo(() => selectedThemes.length === 0 ? hotThemes : themes.filter((theme) => selectedThemes.includes(theme.theme)), [hotThemes, selectedThemes, themes]);
   const biggestBuy = [...themes].sort((a, b) => themeMoney(b, 5) - themeMoney(a, 5))[0];
   const biggestSell = [...themes].sort((a, b) => themeMoney(a, 5) - themeMoney(b, 5))[0];
   useEffect(() => {
@@ -1244,15 +1111,14 @@ function ReplayOverlay({ themes, date, startDate, endDate, index, max, playing, 
       {helpOpen && <aside className={styles.replayHelp}><b>怎麼看這張圖</b><p>越右代表近 5 日法人買越多，越上代表買進速度加快，圓圈越大代表近 20 日金額越大。</p><small>快捷鍵：空白鍵播放／暫停，← → 切換交易日，Esc 關閉。</small></aside>}
       {filterOpen && <aside className={styles.replayPicker} aria-label="選擇回放板塊">
         <label><Search size={14} /><input autoFocus value={filterQuery} onChange={(event) => setFilterQuery(event.target.value)} placeholder="搜尋板塊…" /></label>
-        <div className={styles.replayPickerSummary}><span>已選 <b>{selectedGroups.length}</b> 組</span><button onClick={() => setSelectedGroups(selectedGroups.length === TIDE_THEME_GROUPS.length ? [] : [...TIDE_THEME_GROUPS])}>{selectedGroups.length === TIDE_THEME_GROUPS.length ? '清除' : '全選'}</button></div>
-        <div>{TIDE_THEME_GROUPS.filter((group) => !filterQuery || group.includes(filterQuery) || themes.some((theme) => replayAssignments.get(theme.theme) === group && theme.theme.includes(filterQuery))).map((group) => {
-          const checked = selectedGroups.includes(group);
-          const count = themes.filter((theme) => replayAssignments.get(theme.theme) === group).length;
-          return <label key={group}><input type="checkbox" checked={checked} onChange={() => setSelectedGroups((current) => checked ? current.filter((item) => item !== group) : [...current, group])} /><span>{group}</span><small>{count}</small></label>;
+        <div className={styles.replayPickerSummary}><span>已選 <b>{selectedThemes.length}</b> 個官方產業</span><button onClick={() => setSelectedThemes(selectedThemes.length === themes.length ? [] : themes.map((theme) => theme.theme))}>{selectedThemes.length === themes.length ? '清除' : '全選'}</button></div>
+        <div>{themes.filter((theme) => !filterQuery || theme.theme.includes(filterQuery)).map((theme) => {
+          const checked = selectedThemes.includes(theme.theme);
+          return <label key={theme.theme}><input type="checkbox" checked={checked} onChange={() => setSelectedThemes((current) => checked ? current.filter((item) => item !== theme.theme) : [...current, theme.theme])} /><span>{theme.theme}</span><small>{theme.stockCount}</small></label>;
         })}</div>
       </aside>}
     </header>
-    <div className={styles.replayChart}><button className={styles.replayFilter} onClick={() => setSelectedGroups([])}>{selectedGroups.length === 0 ? `熱門 ${hotThemes.length}` : `已選 ${replayThemes.length}`}</button><BubbleView themes={replayThemes} period={5} selectedTheme={null} onCloseTheme={() => {}} onSelectStock={() => {}} onSelectTheme={() => {}} />{loading && <span className={styles.replayLoading}>資料讀取中…</span>}</div>
+    <div className={styles.replayChart}><button className={styles.replayFilter} onClick={() => setSelectedThemes([])}>{selectedThemes.length === 0 ? `熱門 ${hotThemes.length}` : `已選 ${replayThemes.length}`}</button><BubbleView themes={replayThemes} period={5} selectedTheme={null} onCloseTheme={() => {}} onSelectStock={() => {}} onSelectTheme={() => {}} />{loading && <span className={styles.replayLoading}>資料讀取中…</span>}</div>
     <div className={styles.replaySummary}><span>近5日買最多 <b className={styles.up}>{biggestBuy?.theme ?? '—'} {formatMoney(biggestBuy ? themeMoney(biggestBuy, 5) : 0)}</b></span><span>近5日賣最多 <b className={styles.down}>{biggestSell?.theme ?? '—'} {formatMoney(biggestSell ? themeMoney(biggestSell, 5) : 0)}</b></span><strong>{date ? `${date.slice(5, 7)}/${date.slice(8)} ` : ''}{date ? new Intl.DateTimeFormat('zh-TW', { weekday: 'short' }).format(new Date(`${date}T12:00:00`)) : ''}</strong></div>
     <div className={styles.replayTimeline}><input type="range" min={0} max={max} value={Math.min(index, max)} onChange={(event) => onIndex(Number(event.target.value))} aria-label="回放進度" /><div><span>{startDate?.slice(5).replace('-', '/')}</span><span>{endDate?.slice(5).replace('-', '/')}</span></div></div>
     <footer><span className={styles.replayBrand}><Waves size={22} /> tide-tw.app</span><div><button onClick={onPrevious} aria-label="上一個交易日">‹</button><button onClick={onPlay} aria-label={playing ? '暫停' : '播放'}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><button onClick={onNext} aria-label="下一個交易日">›</button></div><button className={styles.speedButton} onClick={onSpeed} aria-label="播放速度">{speed}x</button></footer>

@@ -50,6 +50,17 @@ function findPages(dir: string, base = ''): string[] {
 const isStub = (content: string) =>
   /redirect\(|router\.(replace|push)/.test(content) && !content.includes('PageShell');
 
+/** App Router 允許 route layout 統一套殼；頁面本身不應再重複巢狀 PageShell。 */
+function ancestorLayoutUsesPageShell(page: string): boolean {
+  const parts = page.split('/').slice(0, -1);
+  while (parts.length > 0) {
+    const layout = path.join(APP_DIR, ...parts, 'layout.tsx');
+    if (fs.existsSync(layout) && fs.readFileSync(layout, 'utf8').includes('PageShell')) return true;
+    parts.pop();
+  }
+  return false;
+}
+
 describe('頁面版面一致性 guardrail', () => {
   const pages = findPages(APP_DIR);
 
@@ -63,7 +74,7 @@ describe('頁面版面一致性 guardrail', () => {
       if (REDIRECT_STUBS.has(rel) || ALLOWLIST.has(rel) || EXCLUDE.has(rel)) continue;
       const content = fs.readFileSync(path.join(APP_DIR, rel), 'utf-8');
       if (isStub(content)) continue;
-      if (!content.includes('PageShell')) offenders.push(rel);
+      if (!content.includes('PageShell') && !ancestorLayoutUsesPageShell(rel)) offenders.push(rel);
     }
     expect(offenders).toEqual([]);
   });

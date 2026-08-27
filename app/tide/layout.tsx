@@ -1,3 +1,5 @@
+import { PageShell } from '@/components/shared/PageShell';
+
 export default function TideLayout({ children }: { children: React.ReactNode }) {
-  return <div data-tide-route>{children}</div>;
+  return <PageShell>{children}</PageShell>;
 }
