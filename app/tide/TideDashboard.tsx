@@ -3,8 +3,8 @@
 import {
   BarChart3,
   Bell,
+  BellOff,
   BellRing,
-  BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
@@ -23,10 +23,8 @@ import {
   Play,
   Plus,
   Search,
-  Send,
   Settings,
   Share2,
-  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Sun,
@@ -106,6 +104,36 @@ const CATEGORY_META: Record<Exclude<FlowCategory, 'all'>, { label: string; hint:
   watch: { label: '觀望', hint: '資金流出但放緩', color: '#85a69d' },
   ebb: { label: '退潮', hint: '資金流出', color: '#68ad9c' },
 };
+
+type IndustryGroup = {
+  id: string;
+  label: string;
+  themes: ThemeRank[];
+};
+
+const INDUSTRY_GROUPS = [
+  { id: 'semiconductor', label: '半導體', match: /半導體/ },
+  { id: 'ai-hardware', label: 'AI 與電子硬體', match: /電子零組件|電腦及週邊|通信網路|光電|電子通路|其他電子/ },
+  { id: 'software-cloud', label: '軟體・雲端・資安', match: /資訊服務|數位雲端|文化創意/ },
+  { id: 'green-energy', label: '綠能與電力', match: /綠能環保|油電燃氣/ },
+  { id: 'finance', label: '金融', match: /金融|保險/ },
+  { id: 'shipping', label: '航運物流', match: /航運/ },
+  { id: 'traditional', label: '傳產製造', match: /水泥|塑膠|電機|電器電纜|化學|玻璃|造紙|鋼鐵|橡膠|汽車|其他|綜合|農業科技/ },
+  { id: 'consumer', label: '民生消費', match: /食品|紡織|貿易百貨|觀光餐旅|運動休閒|居家生活/ },
+  { id: 'construction', label: '營建地產', match: /建材營造/ },
+  { id: 'biotech', label: '生技醫療', match: /生技醫療/ },
+] as const;
+
+function groupIndustries(themes: ThemeRank[]): IndustryGroup[] {
+  const remaining = [...themes].sort((left, right) => left.theme.localeCompare(right.theme, 'zh-Hant'));
+  const groups = INDUSTRY_GROUPS.map((group) => {
+    const matched = remaining.filter((theme) => group.match.test(theme.theme));
+    for (const theme of matched) remaining.splice(remaining.indexOf(theme), 1);
+    return { id: group.id, label: group.label, themes: matched };
+  });
+  if (remaining.length > 0) groups.find((group) => group.id === 'traditional')?.themes.push(...remaining);
+  return groups.filter((group) => group.themes.length > 0);
+}
 
 const PERIOD_INDEX: Record<Period, number> = { 1: 0, 5: 4, 20: 6 };
 
@@ -246,8 +274,11 @@ export default function TideDashboard({
   const [textSize, setTextSize] = useState<TextSize>('small');
   const [riseColor, setRiseColor] = useState<RiseColor>('tw');
   const [haptics, setHaptics] = useState(true);
+  const [supportsHaptics, setSupportsHaptics] = useState(false);
+  const [supportsPush, setSupportsPush] = useState(false);
   const [notifications, setNotifications] = useState({ push: false, morning: true, close: true, poll: true, offers: true });
   const [hiddenThemes, setHiddenThemes] = useState<string[]>([]);
+  const [expandedThemeGroups, setExpandedThemeGroups] = useState<string[]>([]);
   const [pollVote, setPollVote] = useState<'bull' | 'bear' | null>(null);
   const [pollOpen, setPollOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
@@ -258,6 +289,7 @@ export default function TideDashboard({
   const [toast, setToast] = useState<string | null>(null);
 
   const allStocks = useMemo(() => uniqueStocks(initialThemes, proSnapshot), [initialThemes, proSnapshot]);
+  const industryGroups = useMemo(() => groupIndustries(themes), [themes]);
   const searchResults = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
@@ -298,6 +330,8 @@ export default function TideDashboard({
     if (storedRiseColor === 'tw' || storedRiseColor === 'us') setRiseColor(storedRiseColor);
     const storedHaptics = localStorage.getItem('tide-clone-haptics');
     if (storedHaptics === '0' || storedHaptics === '1') setHaptics(storedHaptics === '1');
+    setSupportsHaptics('vibrate' in navigator);
+    setSupportsPush('Notification' in window && 'serviceWorker' in navigator);
     const storedWatchWidth = Number(localStorage.getItem('tide-clone-watch-width'));
     if (Number.isFinite(storedWatchWidth) && storedWatchWidth >= 240 && storedWatchWidth <= 460) setWatchWidth(storedWatchWidth);
     try {
@@ -414,7 +448,7 @@ export default function TideDashboard({
   const changeHaptics = useCallback((next: boolean) => {
     setHaptics(next);
     localStorage.setItem('tide-clone-haptics', next ? '1' : '0');
-    if (next) navigator.vibrate?.(20);
+    if (next) navigator.vibrate?.(12);
   }, []);
 
   const changeNotification = useCallback((key: keyof typeof notifications, checked: boolean) => {
@@ -851,11 +885,13 @@ export default function TideDashboard({
             <div className={`${styles.optionButtons} ${styles.threeOptions}`}>
               {(['small', 'medium', 'large'] as TextSize[]).map((size) => <button key={size} className={textSize === size ? styles.selectedOption : ''} onClick={() => changeTextSize(size)}>{size === 'small' ? '小' : size === 'medium' ? '中' : '大'}</button>)}
             </div>
-            <label>觸覺回饋</label>
-            <div className={styles.optionButtons}>
-              <button className={haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(true)}>開</button>
-              <button className={!haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(false)}>關</button>
-            </div>
+            {supportsHaptics && <>
+              <label>觸覺回饋</label>
+              <div className={styles.optionButtons}>
+                <button className={haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(true)}>開</button>
+                <button className={!haptics ? styles.selectedOption : ''} onClick={() => changeHaptics(false)}>關</button>
+              </div>
+            </>}
             <label>畫面主題</label>
             <div className={`${styles.optionButtons} ${styles.threeOptions}`}>
               <button className={themeMode === 'dark' ? styles.selectedOption : ''} onClick={() => changeTheme('dark')}><Moon size={16} /> 暗色</button>
@@ -864,29 +900,61 @@ export default function TideDashboard({
             </div>
             <label>通知設定</label>
             <div className={styles.notificationSettings}>
-              <SettingToggle label="開啟推播通知（先開這個才收得到）" checked={notifications.push} onChange={(checked) => void changePushNotification(checked)} />
+              {supportsPush && <div className={styles.pushSetting}>
+                <span>開啟推播通知（先開這個才收得到）</span>
+                <button aria-label={notifications.push ? '關閉推播通知' : '開啟推播通知'} aria-pressed={notifications.push} onClick={() => void changePushNotification(!notifications.push)}>
+                  {notifications.push ? <Bell size={17} /> : <BellOff size={17} />}
+                </button>
+              </div>}
               <SettingToggle label="開盤前重點（08:30）" checked={notifications.morning} onChange={(checked) => changeNotification('morning', checked)} />
               <SettingToggle label="盤後結算（約 19:00）" checked={notifications.close} onChange={(checked) => changeNotification('close', checked)} />
               <SettingToggle label="投票提醒（收盤邀請 / 開盤結果）" checked={notifications.poll} onChange={(checked) => changeNotification('poll', checked)} />
-              <SettingToggle label="優惠與活動通知（email）" checked={notifications.offers} onChange={(checked) => changeNotification('offers', checked)} />
+              <div className={styles.emailNotification}>
+                <SettingToggle label="優惠與活動通知（email）" checked={notifications.offers} onChange={(checked) => changeNotification('offers', checked)} />
+                <p>之後有訂閱優惠，第一時間通知你。<br />關掉不影響交易與續約通知。</p>
+              </div>
             </div>
-            <label>官方產業顯示（取消勾選即從圖表隱藏）</label>
+            <label>板塊顯示（取消勾選即從圖表隱藏）</label>
             <div className={styles.sectorSettings}>
-              {[...themes].sort((left, right) => left.theme.localeCompare(right.theme, 'zh-Hant')).map((theme) => {
-                const checked = !hiddenThemes.includes(theme.theme);
-                return <label key={theme.theme} className={styles.sectorGroup}>
-                  <input type="checkbox" checked={checked} onChange={() => changeHiddenThemes(checked ? [...hiddenThemes, theme.theme] : hiddenThemes.filter((name) => name !== theme.theme))} />
-                  <span>{theme.theme}</span><small>{theme.stockCount} 檔</small>
-                </label>;
+              {industryGroups.map((group) => {
+                const visibleCount = group.themes.filter((theme) => !hiddenThemes.includes(theme.theme)).length;
+                const expanded = expandedThemeGroups.includes(group.id);
+                return <section className={styles.sectorGroup} key={group.id}>
+                  <div className={styles.sectorGroupHeader}>
+                    <button aria-expanded={expanded} aria-controls={`sector-group-${group.id}`} aria-label={`${expanded ? '收合' : '展開'}${group.label}`} onClick={() => setExpandedThemeGroups((current) => current.includes(group.id) ? current.filter((id) => id !== group.id) : [...current, group.id])}>
+                      <ChevronRight size={15} aria-hidden="true" /><span>{group.label}</span>
+                    </button>
+                    <GroupVisibilityCheckbox
+                      label={`${group.label}全部顯示`}
+                      checked={visibleCount === group.themes.length}
+                      indeterminate={visibleCount > 0 && visibleCount < group.themes.length}
+                      onChange={(checked) => {
+                        const names = group.themes.map((theme) => theme.theme);
+                        changeHiddenThemes(checked ? hiddenThemes.filter((name) => !names.includes(name)) : [...new Set([...hiddenThemes, ...names])]);
+                      }}
+                    />
+                    <small>{visibleCount}/{group.themes.length}</small>
+                  </div>
+                  {expanded && <div className={styles.sectorGroupItems} id={`sector-group-${group.id}`}>
+                    {group.themes.map((theme) => {
+                      const checked = !hiddenThemes.includes(theme.theme);
+                      return <label key={theme.theme}>
+                        <input type="checkbox" checked={checked} onChange={() => changeHiddenThemes(checked ? [...hiddenThemes, theme.theme] : hiddenThemes.filter((name) => name !== theme.theme))} />
+                        <span>{theme.theme}</span><small>{theme.stockCount} 檔</small>
+                      </label>;
+                    })}
+                  </div>}
+                </section>;
               })}
+              {industryGroups.length === 0 && <p className={styles.sectorEmpty}>目前沒有可用的產業資料</p>}
             </div>
             <label>說明與關於</label>
             <div className={styles.settingsLinks}>
-              <button onClick={() => { setSettingsOpen(false); setGuideStep(0); setGuideOpen(true); }}><BookOpen size={15} /> 新手教學</button>
-              <Link href="/tide/pricing"><Crown size={15} /> 方案與定價</Link>
-              <Link href="/tide/glossary"><CircleHelp size={15} /> 名詞小百科</Link>
-              <Link href="/tide/legal"><ShieldCheck size={15} /> 條款・隱私・退款</Link>
-              <button onClick={() => { setSettingsOpen(false); setWishOpen(true); }}><Send size={15} /> 許願池</button>
+              <button onClick={() => { setSettingsOpen(false); setGuideStep(0); setGuideOpen(true); }}>新手教學</button>
+              <Link href="/tide/pricing">方案與定價</Link>
+              <Link href="/tide/glossary">名詞小百科</Link>
+              <Link href="/tide/legal">條款・隱私・退款</Link>
+              <button onClick={() => { setSettingsOpen(false); setWishOpen(true); }}>許願池</button>
             </div>
             <div className={styles.settingsContact}><b>聯絡我們</b><span>有任何問題、退款或合作需求，歡迎來信</span><a href="mailto:support@tide-tw.app">support@tide-tw.app</a></div>
             <p><b>資料來源與免責</b><br />資料來源為證交所與櫃買中心公開資料。本服務僅彙整公開市場資訊，不提供分析意見或推介建議，亦不構成投資建議。</p>
@@ -1456,6 +1524,12 @@ function SettingToggle({ label, checked, onChange }: { label: string; checked: b
   );
 }
 
+function GroupVisibilityCheckbox({ label, checked, indeterminate, onChange }: { label: string; checked: boolean; indeterminate: boolean; onChange: (checked: boolean) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (inputRef.current) inputRef.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <label className={styles.groupVisibility}><input ref={inputRef} type="checkbox" aria-label={label} checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>;
+}
+
 function NotificationFeed({ alerts, date }: { alerts: StockRef[]; date: string }) {
   if (alerts.length === 0) return <div className={styles.notificationEmpty}><Bell size={24} /><b>還沒有監控任何股票</b><p>先到「監控清單」加入，之後籌碼異動就會收進這裡。</p></div>;
   return (
@@ -1567,17 +1641,45 @@ function GuideModal({ step, setStep, onClose }: { step: number; setStep: (step: 
 }
 
 function WishModal({ onClose, setToast }: { onClose: () => void; setToast: (message: string) => void }) {
+  const [type, setType] = useState('功能許願');
   const [message, setMessage] = useState('');
+  const [email, setEmail] = useState('');
+  const [screenshot, setScreenshot] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+
+  const selectScreenshot = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setToast('請選擇圖片檔'); return; }
+    if (file.size > 8 * 1024 * 1024) { setToast('截圖需小於 8 MB'); return; }
+    setScreenshot(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
+
   return (
     <Modal title="許願池" onClose={onClose} wide>
-      <form className={styles.formBody} onSubmit={(event) => { event.preventDefault(); localStorage.setItem(`tide-clone-wish-${Date.now()}`, message); setToast('已把想法保存在這台裝置'); onClose(); }}>
-        <p>想要什麼功能、哪裡用起來卡卡的，都可以告訴我們。</p>
+      <form className={styles.formBody} onSubmit={(event) => {
+        event.preventDefault();
+        localStorage.setItem(`tide-clone-wish-${Date.now()}`, JSON.stringify({ type, message: message.trim(), email: email.trim(), screenshot: screenshot?.name ?? null }));
+        setToast('已把想法保存在這台裝置');
+        onClose();
+      }}>
+        <p>想要什麼功能、哪裡用起來卡卡的、任何想法都可以告訴我們，每一則我都會看。</p>
         <label htmlFor="wish-type">類型</label>
-        <select id="wish-type"><option>功能許願</option><option>介面 / 操作問題</option><option>資料 / 數字問題</option><option>其他</option></select>
+        <select id="wish-type" value={type} onChange={(event) => setType(event.target.value)}><option>功能許願</option><option>介面 / 操作問題</option><option>資料 / 數字問題</option><option>其他</option></select>
         <label htmlFor="wish-message">你的想法</label>
-        <textarea id="wish-message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="例如：希望可以追蹤自選股的大戶持股變化…" rows={5} />
-        <label htmlFor="wish-email">聯絡方式（選填）</label>
-        <input id="wish-email" type="email" placeholder="你的 Email" />
+        <textarea id="wish-message" value={message} maxLength={1000} onChange={(event) => setMessage(event.target.value)} placeholder="例如：希望可以追蹤自選股的大戶 / 散戶集保戶數每週增減…" rows={5} />
+        <small className={styles.characterCount}>{message.length}/1000</small>
+        <label htmlFor="wish-screenshot">截圖（選填，1 張）</label>
+        <input ref={fileRef} className={styles.wishFileInput} id="wish-screenshot" data-testid="wish-screenshot-input" type="file" accept="image/*" aria-hidden="true" tabIndex={-1} onChange={(event) => selectScreenshot(event.target.files?.[0])} />
+        {previewUrl ? <div className={styles.wishPreview}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={previewUrl} alt="截圖預覽" />
+          <button type="button" aria-label="移除截圖" onClick={() => { setScreenshot(null); setPreviewUrl(''); if (fileRef.current) fileRef.current.value = ''; }}><X size={15} /></button>
+        </div> : <button className={styles.screenshotPicker} type="button" onClick={() => fileRef.current?.click()}><Plus size={16} /> 選一張截圖</button>}
+        <label htmlFor="wish-email">聯絡方式（選填，想收到回覆再填）</label>
+        <input id="wish-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="你的 Email" />
         <button className={styles.primaryButton} type="submit" disabled={!message.trim()}><Mail size={15} /> 送出</button>
       </form>
     </Modal>

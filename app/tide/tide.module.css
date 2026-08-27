@@ -427,16 +427,16 @@
 
 .modalBackdrop { display: grid; place-items: center; padding: 16px; }
 .modal { width: min(430px, 96vw); max-height: min(720px, 92vh); overflow-y: auto; border: 1px solid var(--border); border-radius: 15px; background: var(--panel); box-shadow: 0 22px 70px rgb(0 0 0 / 25%); animation: modalIn 180ms ease-out; }
-.modalWide { width: min(440px, 96vw); }
+.modalWide { width: min(400px, calc(100vw - 24px)); max-height: 82vh; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .modal > header { position: sticky; top: 0; z-index: 3; display: flex; min-height: 55px; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--border-soft); background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(12px); }
 .modal > header h2 { margin: 0; font-size: 15px; }
 .pollModalBody { padding: 4px 22px 16px; }.pollModalBody > div { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.pollModalBody button { display: flex; min-height: 84px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--up); border-radius: 12px; background: var(--up-soft); color: var(--up); font-weight: 750; }.pollModalBody button:last-child { border-color: var(--down); background: var(--down-soft); color: var(--down); }.pollModalBody p { margin: 12px 0 0; color: var(--muted); font-size: 10px; text-align: center; }
-.settingsBody { display: flex; flex-direction: column; gap: 9px; padding: 15px; }
-.settingsBody > label { margin-top: 5px; color: var(--muted); font-size: 10px; font-weight: 750; }
-.settingsBody > p { margin: 0; padding: 10px; border-radius: 9px; background: var(--panel-soft); color: var(--muted); font-size: 11px; line-height: 1.65; }
+.settingsBody { display: flex; flex-direction: column; gap: 8px; padding: 17px 22px 18px; }
+.settingsBody > label { margin-top: 7px; color: var(--muted); font-size: 11px; font-weight: 750; }
+.settingsBody > p { margin: 1px 0 0; padding: 11px 12px; border-radius: 9px; background: var(--panel-soft); color: var(--muted); font-size: 10px; line-height: 1.65; }
 .optionButtons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
-.optionButtons button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); color: var(--muted); font-size: 11px; }
+.optionButtons button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-soft); color: var(--muted); font-size: 11px; }
 .optionButtons .selectedOption { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-strong); font-weight: 750; }
 .proStatus { display: flex; align-items: center; gap: 9px; padding: 10px; border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--amber) 8%, var(--panel)); color: var(--amber); }
 .proStatus span { display: flex; flex-direction: column; }
@@ -458,9 +458,27 @@
 
 .threeOptions { grid-template-columns: repeat(3, 1fr); }
 .notificationSettings { overflow: hidden; border: 1px solid var(--border-soft); border-radius: 10px; }
-.sectorSettings { max-height: 330px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 10px; }
-.sectorGroup { display: grid; min-height: 39px; grid-template-columns: auto 1fr auto; align-items: center; gap: 7px; padding: 5px 9px; border-bottom: 1px solid var(--border-soft); font-size: 10px; }.sectorGroup:last-child { border-bottom: 0; }
-.sectorGroup input { width: 15px; height: 15px; accent-color: var(--primary); }.sectorGroup small { color: var(--muted); font-size: 8px; }
+.pushSetting { display: flex; min-height: 50px; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 12px; border-bottom: 1px solid var(--border-soft); background: var(--panel-soft); font-size: 11px; }
+.pushSetting button { display: grid; width: 38px; height: 30px; flex: 0 0 38px; place-items: center; border: 1px solid var(--border); border-radius: 99px; background: var(--panel); color: var(--muted); }
+.pushSetting button[aria-pressed='true'] { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-strong); }
+.emailNotification { padding-top: 3px; border-top: 1px solid var(--border-soft); }
+.emailNotification .settingToggle { border-bottom: 0; }
+.emailNotification p { margin: -4px 12px 10px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.sectorSettings { overflow: hidden; border: 1px solid var(--border-soft); border-radius: 10px; }
+.sectorGroup { border-bottom: 1px solid var(--border-soft); }.sectorGroup:last-child { border-bottom: 0; }
+.sectorGroupHeader { display: grid; min-height: 45px; grid-template-columns: minmax(0, 1fr) 28px 36px; align-items: center; padding: 0 8px 0 3px; background: var(--panel-soft); }
+.sectorGroupHeader > button { display: flex; min-width: 0; min-height: 44px; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--text); font-size: 11px; text-align: left; }
+.sectorGroupHeader > button svg { flex: 0 0 auto; color: var(--muted); transition: transform 160ms ease; }
+.sectorGroupHeader > button[aria-expanded='true'] svg { transform: rotate(90deg); }
+.groupVisibility { display: grid; width: 28px; min-height: 44px; place-items: center; cursor: pointer; }
+.groupVisibility input { width: 17px; height: 17px; accent-color: var(--primary); }
+.sectorGroupHeader > small { color: var(--muted); font-size: 9px; text-align: right; }
+.sectorGroupItems { border-top: 1px solid var(--border-soft); background: var(--panel); }
+.sectorGroupItems > label { display: grid; min-height: 42px; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 10px 5px 28px; border-bottom: 1px solid var(--border-soft); font-size: 10px; cursor: pointer; }
+.sectorGroupItems > label:last-child { border-bottom: 0; }
+.sectorGroupItems input { width: 16px; height: 16px; accent-color: var(--primary); }
+.sectorGroupItems small { color: var(--muted); font-size: 8px; }
+.sectorEmpty { margin: 0; padding: 18px 12px; color: var(--muted); font-size: 10px; text-align: center; }
 .settingToggle { position: relative; display: flex; min-height: 45px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); font-size: 11px; }
 .settingToggle:last-child { border-bottom: 0; }
 .settingToggle input { position: absolute; width: 1px; height: 1px; opacity: 0; }
@@ -469,9 +487,11 @@
 .settingToggle input:checked + i { background: var(--primary); }
 .settingToggle input:checked + i::after { transform: translateX(16px); }
 .settingToggle input:focus-visible + i { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 2px; }
-.settingsLinks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.settingsLinks button, .settingsLinks a { display: inline-flex; min-height: 42px; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel-raised); color: var(--text); font-size: 11px; text-decoration: none; }
-.settingsLinks button:hover, .settingsLinks a:hover { border-color: var(--primary); color: var(--primary-strong); }
+.settingsLinks { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
+.settingsLinks button, .settingsLinks a { position: relative; display: inline-flex; min-height: 30px; align-items: center; padding: 4px 10px; border: 0; background: transparent; color: var(--primary-strong); font-size: 10px; text-decoration: none; }
+.settingsLinks button::after, .settingsLinks a::after { position: absolute; right: 0; width: 1px; height: 11px; background: var(--border); content: ''; }
+.settingsLinks > :last-child::after { display: none; }
+.settingsLinks button:hover, .settingsLinks a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .settingsContact { display: flex; flex-direction: column; gap: 3px; padding: 10px 2px; color: var(--muted); font-size: 10px; }.settingsContact b { color: var(--text); font-size: 11px; }.settingsContact a { color: var(--primary-strong); text-decoration: none; }
 .modalTabs { display: grid; grid-template-columns: repeat(2, 1fr); margin: -2px 0 13px; border-bottom: 1px solid var(--border-soft); }
 .modalTabs button { min-height: 42px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 11px; }
@@ -512,6 +532,13 @@
 .formBody input, .formBody select, .formBody textarea { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; outline: 0; background: var(--panel-raised); color: var(--text); font-size: 11px; resize: vertical; }
 .formBody input:focus, .formBody select:focus, .formBody textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent); }
 .formBody .primaryButton { align-self: flex-end; margin-top: 7px; }
+.formBody .wishFileInput { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.characterCount { align-self: flex-end; margin-top: -5px; color: var(--muted); font-size: 9px; }
+.screenshotPicker { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--border); border-radius: 9px; background: var(--panel-soft); color: var(--muted); font-size: 10px; }
+.screenshotPicker:hover { border-color: var(--primary); color: var(--primary-strong); }
+.wishPreview { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-soft); }
+.wishPreview img { display: block; width: 100%; max-height: 180px; object-fit: contain; }
+.wishPreview button { position: absolute; top: 7px; right: 7px; display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); box-shadow: 0 3px 10px rgb(0 0 0 / 15%); }
 .memberCard { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border)); border-radius: 11px; background: color-mix(in srgb, var(--amber) 8%, var(--panel)); }
 .memberCard > span { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
 .memberCard > div { display: flex; flex-direction: column; }
@@ -633,9 +660,12 @@
   .mobileNav button { position: relative; display: flex; min-height: 50px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; background: transparent; color: var(--muted); font-size: 9px; }
   .mobileNav .mobileNavActive { color: var(--primary-strong); }
   .mobileNav b { position: absolute; top: 1px; left: calc(50% + 7px); display: grid; min-width: 16px; height: 16px; place-items: center; border-radius: 99px; background: var(--up); color: white; font-size: 8px; }
-  .settingsLinks { grid-template-columns: 1fr; }
+  .settingsBody { padding-inline: 16px; }
+  .optionButtons button { min-height: 44px; }
+  .settingsLinks button, .settingsLinks a { min-height: 44px; }
   .modalBackdrop { align-items: end; padding: 0; }
   .modal { width: 100%; max-height: min(760px, 94vh); border-right: 0; border-bottom: 0; border-left: 0; border-radius: 18px 18px 0 0; }
+  .modal > header button { width: 44px; height: 44px; }
   .stockDrawer { top: 10px; bottom: 10px; width: calc(100vw - 20px); border-radius: 14px; }.drawerHeader { padding-inline: 10px; }.drawerHeader h2 { font-size: 14px; }.drawerDateNav span { display: none; }.drawerContent { padding-inline: 10px; }
   .replayOverlay { grid-template-rows: 52px minmax(0, 1fr) auto auto 60px; }.replayOverlay > header { padding: 8px 10px; }.replayOverlay > header b { font-size: 12px; }.replayChart { padding-inline: 0; }.replaySummary { font-size: 9px; }.replayOverlay .chartBrand { display: none; }.replayBrand { font-size: 0; }
   .toast { right: 10px; bottom: 68px; left: 10px; justify-content: center; }

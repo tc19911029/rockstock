@@ -18,13 +18,13 @@ test.describe('Tide Pro 重建頁', () => {
   test('泡泡圖、說明、回放、排行榜與 Pro 分頁可用', async ({ page }) => {
     await page.goto('/tide');
     await expect(page.getByRole('img', { name: '台股板塊法人資金泡泡圖' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '顯示全部 110 個' })).toBeVisible();
-    await page.getByRole('button', { name: '顯示全部 110 個' }).click();
+    await expect(page.getByRole('button', { name: '顯示全部 36 個' })).toBeVisible();
+    await page.getByRole('button', { name: '顯示全部 36 個' }).click();
     await expect(page.getByRole('button', { name: '只看熱門 15' })).toBeVisible();
     await page.getByRole('button', { name: '只看熱門 15' }).click();
 
-    await page.getByRole('button', { name: /記憶體，/ }).click();
-    await expect(page.getByRole('region', { name: '記憶體 板塊摘要' })).toBeVisible();
+    await page.getByRole('button', { name: /半導體業，/ }).click();
+    await expect(page.getByRole('region', { name: '半導體業 板塊摘要' })).toBeVisible();
     await page.getByRole('button', { name: '關閉板塊摘要' }).click();
 
     await page.getByRole('button', { name: '怎麼看這張圖' }).click();
@@ -91,6 +91,11 @@ test.describe('Tide Pro 重建頁', () => {
     const hasOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(hasOverflow).toBe(false);
     await expect(page.getByRole('navigation', { name: '手機版主要導覽' })).toBeVisible();
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: '⚙️ 設定' });
+    await expect(settings).toBeVisible();
+    await expect(settings.getByRole('button', { name: '展開半導體' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   });
 
   test('登入、設定、通知與會員流程可用', async ({ page }) => {
@@ -106,9 +111,20 @@ test.describe('Tide Pro 重建頁', () => {
     await expect(settings.getByText('漲跌顏色', { exact: true })).toBeVisible();
     await expect(settings.getByText('通知設定', { exact: true })).toBeVisible();
     await settings.getByRole('button', { name: '展開半導體' }).click();
-    await expect(settings.getByText('記憶體', { exact: true })).toBeVisible();
+    await expect(settings.getByText('半導體業', { exact: true })).toBeVisible();
+    await settings.getByRole('checkbox', { name: /半導體業 \d+ 檔/ }).uncheck();
+    await expect(settings.getByText('0/1', { exact: true })).toBeVisible();
+    await settings.getByRole('checkbox', { name: '半導體全部顯示' }).check();
+    await expect(settings.getByRole('checkbox', { name: /半導體業 \d+ 檔/ })).toBeChecked();
     await settings.getByRole('button', { name: '暗色', exact: true }).click();
-    await settings.getByRole('button', { name: '關閉⚙️ 設定' }).click();
+    await settings.getByRole('button', { name: '許願池', exact: true }).click();
+    const wish = page.getByRole('dialog', { name: '許願池' });
+    await expect(wish.getByRole('button', { name: '選一張截圖' })).toBeVisible();
+    await wish.getByTestId('wish-screenshot-input').setInputFiles({ name: 'feedback.png', mimeType: 'image/png', buffer: Buffer.from('feedback') });
+    await expect(wish.getByRole('img', { name: '截圖預覽' })).toBeVisible();
+    await wish.getByRole('button', { name: '移除截圖' }).click();
+    await expect(wish.getByRole('button', { name: '選一張截圖' })).toBeVisible();
+    await wish.getByRole('button', { name: '關閉許願池' }).click();
 
     await page.getByRole('button', { name: '籌碼異動提醒', exact: true }).click();
     const alerts = page.getByRole('dialog', { name: '籌碼異動提醒' });
