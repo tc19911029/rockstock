@@ -2,7 +2,7 @@
  * 盤後板塊（題材）強弱排名 — 每日 cron 腳本（2026-06-22）
  *
  * 對應 /api/cron/compute-sector-strength 的 standalone 版，給 launchd 每天盤後跑：
- *   讀 themeMap 成分股 L1 + inst 序列 → data/sectors/TW/{date}.json
+ *   讀 TWSE／TPEx 官方產業成分股 L1 + inst 序列 → data/sectors/TW/{date}.json
  *
  * 為什麼要這支：原本只有 route、沒排程（launchd 無 plist），所以盤後存檔一直停在舊日，
  * 跟「盤中即時」（現算）的題材成分/排名對不上。改成每天自動重建即一致。
@@ -29,7 +29,7 @@ import { buildSectorRanking, saveSectorRanking } from '../lib/themes/sectorRanki
     return;
   }
   await saveSectorRanking(file);
-  console.log('[sector-strength] saved', date, file.themes.length, '題材,', covered, '有資料');
+  console.log('[sector-strength] saved', date, file.themes.length, '官方產業,', covered, '有資料');
 })().catch((e) => {
   console.error('[sector-strength] error', e instanceof Error ? e.message : e);
   process.exit(1);

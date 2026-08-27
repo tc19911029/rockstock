@@ -15,7 +15,7 @@ import { computeEventReturns } from '@/lib/youtube/recoPerformance';
 import { buildExtremes, buildProgramRows, buildStockAggRows, buildTeacherRows } from '@/lib/youtube/recoLeaderboard';
 import { loadSources } from '@/lib/youtube/videoStorage';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { themesOf } from '@/lib/themes/themeMap';
+import { fetchTwOfficialIndustryRoster } from '@/lib/datasource/TWOfficialIndustry';
 import type { BaselineCandle } from '@/lib/youtube/recoBaseline';
 import type { RecoEventWithReturns, TeacherLeaderboardResponse } from '@/lib/youtube/recoTypes';
 
@@ -39,12 +39,20 @@ export async function GET(req: NextRequest) {
   if (asOf && !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return apiError('asOf must be YYYY-MM-DD', 400);
 
   try {
-    const allFiles = await loadRecoEventsInRange(end, days);
+    const [allFiles, sources, officialRoster] = await Promise.all([
+      loadRecoEventsInRange(end, days),
+      loadSources(),
+      fetchTwOfficialIndustryRoster().catch(() => []),
+    ]);
     // asOf 模式：去掉 asOf 當天（含）之後的分析 — 那天晚上才會產出，當下看不到
     const files = asOf ? allFiles.filter(f => f.date < asOf) : allFiles;
-    const sources = await loadSources();
     const displayById = new Map(sources.map(s => [s.source_id, s.display_name]));
     const resolveDisplayName = (id: string) => displayById.get(id) ?? id;
+    const industryByCode = new Map(officialRoster.map((stock) => [stock.code, stock.industry]));
+    const resolveIndustries = (code: string): string[] => {
+      const industry = industryByCode.get(code);
+      return industry ? [industry] : [];
+    };
 
     // request 內 memo：同 symbol 只載一次；^TWII 載一次
     const candleCache = new Map<string, BaselineCandle[] | null>();
@@ -74,7 +82,7 @@ export async function GET(req: NextRequest) {
     const startDate = files.length > 0 ? files[0].date : end;
 
     // 按股票聚合一次，共識股 / 最多節目 / 共識地雷股 都從這份切
-    const stockRows = buildStockAggRows(events, resolveDisplayName, themesOf);
+    const stockRows = buildStockAggRows(events, resolveDisplayName, resolveIndustries);
     const consensusStocks = [...stockRows]
       .sort((a, b) => b.teacherCount - a.teacherCount || b.totalMentions - a.totalMentions)
       .slice(0, TOP_N);
@@ -86,8 +94,8 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => (a.avgHold ?? 0) - (b.avgHold ?? 0))
       .slice(0, TOP_N);
 
-    const gainers = buildExtremes(events, resolveDisplayName, themesOf, 'gain', TOP_N);
-    const losers = buildExtremes(events, resolveDisplayName, themesOf, 'loss', TOP_N);
+    const gainers = buildExtremes(events, resolveDisplayName, resolveIndustries, 'gain', TOP_N);
+    const losers = buildExtremes(events, resolveDisplayName, resolveIndustries, 'loss', TOP_N);
 
     const response: TeacherLeaderboardResponse = {
       window: { start: startDate, end, days, eventDates, ...(asOf ? { asOf } : {}) },

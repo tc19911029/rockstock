@@ -87,6 +87,15 @@ describe('aggregateHotThemes', () => {
     expect(r.themes[0].source).toBe('industry');
   });
 
+  it('保留上櫃股票完整 .TWO symbol', () => {
+    const r = aggregateHotThemes(makeParams(
+      [{ symbol: '3081.TWO', name: '聯亞', changePercent: 8, volume: 1 }],
+      { industryOf: () => '通信網路業' },
+    ));
+    expect(r.themes[0].members[0].symbol).toBe('3081.TWO');
+    expect(r.themes[0].topStock?.symbol).toBe('3081.TWO');
+  });
+
   it('官方產業別標示 source=industry', () => {
     const r = aggregateHotThemes(makeParams(
       [{ symbol: '9999', name: '某新股', changePercent: 8, volume: 1 }],

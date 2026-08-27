@@ -28,6 +28,7 @@ export type ThemeLabelSource = 'concept' | 'industry' | 'other';
 
 export interface HotStock {
   code: string;
+  symbol: string;
   name: string;
   /** 漲跌幅 % */
   changePercent: number;
@@ -68,7 +69,7 @@ export interface HotTheme {
   avgHeat: number;
   /** 排名分（avgHeat + 參與廣度 bonus） */
   score: number;
-  topStock: { code: string; name: string; changePercent: number } | null;
+  topStock: { code: string; symbol: string; name: string; changePercent: number } | null;
   /** 該題材的熱門股（按熱度 desc） */
   members: HotStock[];
 }
@@ -159,6 +160,7 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
     const { theme, source } = labelOf(code, industryOf);
     hot.push({
       code,
+      symbol: q.symbol,
       name: stockDisplayName(q.name, q.symbol),
       changePercent: q.changePercent,
       volume: q.volume,
@@ -200,7 +202,7 @@ export function aggregateHotThemes(params: AggregateParams): HotThemeScanFile {
       maxChange,
       avgHeat,
       score,
-      topStock: { code: top.code, name: top.name, changePercent: top.changePercent },
+      topStock: { code: top.code, symbol: top.symbol, name: top.name, changePercent: top.changePercent },
       members,
     });
   }

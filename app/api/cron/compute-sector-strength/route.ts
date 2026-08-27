@@ -1,5 +1,5 @@
 /**
- * Daily cron：板塊（題材）強弱排名（2026-06-12 A2）
+ * Daily cron：官方產業強弱排名（2026-06-12 A2）
  * 盤後 17:10 CST（TW L1 14:30 eod-settle 已封）。
  * 讀 TWSE／TPEx 官方產業成分股 L1 + inst 序列 → data/sectors/TW/{date}.json。
  *

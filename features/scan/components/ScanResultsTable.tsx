@@ -93,7 +93,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   const [scanSort, setScanSort] = useState<string>('mkt.turnover');
   const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
 
-  // 今日題材熱度 map（裸碼 → 所屬最熱題材）— 「🔥今日題材熱度」排序用；純展示/排序不進選股 gate
+  // 今日產業／題材熱度 map（裸碼 → 所屬最熱分類）— 純展示/排序，不進選股 gate
   const themeHeatMap = useThemeHeatMap(market, scanDate ?? undefined);
 
   // Build performance lookup map
@@ -264,7 +264,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
       {scanSort === 'heat.theme' && (
         <p className="text-[10px] leading-snug text-amber-400/90 px-1">
           {market === 'TW'
-            ? '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+            ? '🔥 按今日平均漲幅最強的 TWSE／TPEx 官方產業排序；僅供觀察產業相對強弱，不直接進選股分數。'
             : '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'}
         </p>
       )}
@@ -401,7 +401,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                     )}
                   </div>
                 </td>
-                {/* 概念：所屬題材/概念（台股38題材／陸股今日熱門概念）；無命中退回產業別 */}
+                {/* 分類：台股 TWSE／TPEx 官方產業；陸股今日熱門概念；無命中退回產業別 */}
                 <td className="py-1.5 px-1 text-[10px] max-w-[90px]">
                   <ThemeTag market={market} code={bareCode(r.symbol)} hotMap={themeHeatMap} fallback={r.industry ?? '—'} className="inline-block max-w-[90px] align-bottom" />
                 </td>

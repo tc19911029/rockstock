@@ -25,13 +25,13 @@ type Market = 'TW' | 'CN';
 // ── API 回傳型別 ───────────────────────────────────────────────────────────────
 
 interface LiveThemeMember {
-  code: string; name: string;
+  code: string; symbol: string; name: string;
   changePercent: number | null; volume: number | null; volRatio: number | null; isLimitUp: boolean;
 }
 interface LiveTheme {
   theme: string; memberCount: number; quotedCount: number; upCount: number;
   avgChange: number | null; maxChange: number | null;
-  topStock: { code: string; name: string; changePercent: number } | null;
+  topStock: { code: string; name: string; symbol: string; changePercent: number } | null;
   members: LiveThemeMember[];
 }
 interface TwLivePayload {
@@ -171,7 +171,7 @@ function TwLiveMemberRow({ m }: { m: LiveThemeMember }) {
   return (
     <div className={`flex items-center justify-between gap-2 rounded border bg-card/40 px-2.5 py-1.5 ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/15'}`}>
       <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-        <StockLink code={m.code} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
+        <StockLink code={m.symbol} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
           <span className="font-medium text-foreground text-sm">{stockDisplayName(m.name, m.code)}</span>
           <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
         </StockLink>
@@ -206,7 +206,7 @@ function TwThemeCard({ t, rank, expanded, onToggle }: {
           <span className="font-mono tabular-nums text-muted-foreground/55">最強 <Pct v={t.maxChange} /></span>
           {t.topStock && (
             <span className="text-muted-foreground/55 inline-flex items-center gap-0.5">領漲
-              <StockLink code={t.topStock.code} className="hover:text-sky-400 tabular-nums">{stockDisplayName(t.topStock.name, t.topStock.code)} <Pct v={t.topStock.changePercent} /></StockLink>
+              <StockLink code={t.topStock.symbol} className="hover:text-sky-400 tabular-nums">{stockDisplayName(t.topStock.name, t.topStock.code)} <Pct v={t.topStock.changePercent} /></StockLink>
             </span>
           )}
         </div>

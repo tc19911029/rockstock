@@ -1,6 +1,7 @@
 import {
-  OFFICIAL_INDUSTRY_NAMES,
+  buildOfficialIndustryPeerMap,
   groupOfficialIndustryStocks,
+  officialIndustryName,
   parseOfficialIndustryRows,
 } from '@/lib/datasource/TWOfficialIndustry';
 import { getTWConcept } from '@/lib/scanner/conceptMap';
@@ -20,9 +21,9 @@ describe('TWSE／TPEx 官方產業分類', () => {
     );
 
     expect(stocks).toEqual([
-      { code: '2330', name: '台積電', market: 'TWSE', industryCode: '24', industry: '半導體業' },
-      { code: '2409', name: '友達', market: 'TWSE', industryCode: '26', industry: '光電業' },
-      { code: '3081', name: '聯亞', market: 'TPEx', industryCode: '27', industry: '通信網路業' },
+      { code: '2330', name: '台積電', market: 'TWSE', symbol: '2330.TW', industryCode: '24', industry: '半導體業' },
+      { code: '2409', name: '友達', market: 'TWSE', symbol: '2409.TW', industryCode: '26', industry: '光電業' },
+      { code: '3081', name: '聯亞', market: 'TPEx', symbol: '3081.TWO', industryCode: '27', industry: '通信網路業' },
     ]);
   });
 
@@ -43,10 +44,29 @@ describe('TWSE／TPEx 官方產業分類', () => {
       ['26', '光電業', ['2409']],
     ]);
     expect(groups.flatMap((group) => group.stocks)).toHaveLength(stocks.length);
+    expect(buildOfficialIndustryPeerMap(stocks).get('2330')).toEqual(['8299']);
+  });
+
+  it('保留逐市場正式名稱；同代碼不同名稱不硬併', () => {
+    const stocks = parseOfficialIndustryRows(
+      [{ 公司代號: '2881', 公司簡稱: '富邦金', 產業別: '17' }],
+      [{ SecuritiesCompanyCode: '6015', CompanyAbbreviation: '宏遠證', SecuritiesIndustryCode: '17' }],
+    );
+    const groups = groupOfficialIndustryStocks(stocks);
+
+    expect(groups.map((group) => [group.id, group.industry, group.stocks.map((stock) => stock.symbol)])).toEqual([
+      ['TWSE:17', '金融保險', ['2881.TW']],
+      ['TPEx:17', '金融業', ['6015.TWO']],
+    ]);
+  });
+
+  it('涵蓋 TPEx 正式電子商務與管理股票代碼', () => {
+    expect(officialIndustryName('TPEx', '34')).toBe('電子商務');
+    expect(officialIndustryName('TPEx', '80')).toBe('管理股票');
   });
 
   it('相容函式不再以人工晶圓代工題材覆蓋官方半導體業', () => {
-    expect(getTWConcept('2330', OFFICIAL_INDUSTRY_NAMES['24'])).toBe('半導體業');
+    expect(getTWConcept('2330', officialIndustryName('TWSE', '24'))).toBe('半導體業');
     expect(getTWConcept('2330')).toBeUndefined();
   });
 });

@@ -117,8 +117,8 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   // 只台股有對應；陸股代號不重疊，傳 undefined 不發請求（與三色掃描一致）
   const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? (scanDate ?? undefined) : undefined);
 
-  // 今日題材熱度 map（裸碼 → 所屬最熱題材；refs[0]=今日最熱）— 「🔥今日題材熱度」排序 + 卡片標籤用
-  // TW=38 題材按今日漲幅；CN=概念板塊按今日 pct（即時抓成分股）。純展示/排序，不進選股 gate。
+  // 今日產業／題材熱度 map（裸碼 → 所屬最熱分類；refs[0]=今日最熱）— 排序 + 卡片標籤用
+  // TW=TWSE／TPEx 官方產業；CN=概念板塊。純展示/排序，不進選股 gate。
   const themeHeatMap = useThemeHeatMap(market, scanDate ?? undefined);
 
   // 即時 raw trend（跟 banner 同源）— saved session 的 marketTrend 是舊邏輯（含降級）
@@ -280,7 +280,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
       {scanSort === 'heat.theme' && (
         <p className="text-[9px] leading-snug text-amber-400/90">
           {market === 'TW'
-            ? '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+            ? '🔥 按今日平均漲幅最強的 TWSE／TPEx 官方產業排序；僅供觀察產業相對強弱，不直接進選股分數。'
             : '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'}
         </p>
       )}

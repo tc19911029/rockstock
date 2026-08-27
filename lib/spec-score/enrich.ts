@@ -107,7 +107,7 @@ async function buildOne(
   date: string,
 ): Promise<Candidate['specScore']> {
   const code = c.symbol.split('.')[0];
-  const stockType = classifyStockType(code);
+  const stockType = classifyStockType(c.industry);
   const facets = computeFacetScores(c);
 
   // 產業強弱：只對齊 candidate 上的 TWSE／TPEx 官方產業別（一檔一類）。

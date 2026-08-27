@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rankCodeToThemesToday } from '@/lib/theme-sanse/todayHot';
+import { TW_OFFICIAL_CLASSIFICATION } from '@/lib/datasource/TWOfficialIndustry';
 import type { ThemeRef, TsMarket } from '@/lib/theme-sanse/types';
 
 export const runtime = 'nodejs';
@@ -8,8 +9,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 /**
- * 輕量題材熱度查詢（給全站策略掃描頁的「🔥今日題材熱度」排序用）。
- * 回 byCode = 裸碼 → 所屬熱門題材 refs（已按「今日漲幅」名次升冪，refs[0]=最熱）。
+ * 輕量產業／題材熱度查詢（給全站策略掃描頁排序用）。
+ * 回 byCode = 裸碼 → 所屬熱門分類 refs（已按「今日漲幅」名次升冪，refs[0]=最熱）。
  * 兩市場：TW=TWSE／TPEx 官方產業按 avgD1；CN=概念板塊按今日 pct（即時抓成分股，反指標僅觀察）。
  * 掃描頁只在封存日（lastDate）變時抓一次（非每次盤中輪詢）；結果在 todayHot 內按 (market,date) 快取。
  */
@@ -29,7 +30,14 @@ export async function GET(req: NextRequest) {
     // 不同題材數＝byCode 內出現過的 themeId 去重
     const themeIds = new Set<string>();
     for (const refs of byCodeMap.values()) for (const r of refs) themeIds.add(r.themeId);
-    return NextResponse.json({ ok: true, market, date, byCode, themeCount: themeIds.size });
+    return NextResponse.json({
+      ok: true,
+      market,
+      date,
+      classification: market === 'TW' ? TW_OFFICIAL_CLASSIFICATION : null,
+      byCode,
+      themeCount: themeIds.size,
+    });
   } catch (err) {
     return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : 'hot 失敗' }, { status: 500 });
   }

@@ -13,17 +13,19 @@ export const TPEX_COMPANY_INFO_URL = 'https://www.tpex.org.tw/openapi/v1/mopsfin
 
 export const TW_OFFICIAL_CLASSIFICATION = {
   kind: 'official_industry',
-  version: 1,
+  version: 2,
   label: 'TWSE／TPEx 官方產業別',
   sources: ['TWSE', 'TPEx'] as const,
 } as const;
 
 /**
- * 交易所產業代碼 → 對外顯示名稱。
- * 01、09、11、12、18、19 為 TWSE 類別；32、33 為 TPEx 類別，其餘可跨市場共用。
- * 19「綜合」目前可能沒有成分股，仍保留正式代碼以免未來新增公司時落成未分類。
+ * 交易所產業代碼 → 正式顯示名稱。
+ *
+ * 同一代碼在兩個市場未必同名（例如 17：TWSE「金融保險」、TPEx「金融業」），
+ * 因此不可再用一張跨市場名稱表硬併。34「電子商務」與 80「管理股票」目前可能
+ * 沒有成分股，仍保留正式代碼，避免未來新增時被靜默丟棄。
  */
-export const OFFICIAL_INDUSTRY_NAMES: Readonly<Record<string, string>> = {
+export const TWSE_OFFICIAL_INDUSTRY_NAMES: Readonly<Record<string, string>> = {
   '01': '水泥工業',
   '02': '食品工業',
   '03': '塑膠工業',
@@ -53,12 +55,46 @@ export const OFFICIAL_INDUSTRY_NAMES: Readonly<Record<string, string>> = {
   '29': '電子通路業',
   '30': '資訊服務業',
   '31': '其他電子業',
-  '32': '文化創意業',
-  '33': '農業科技業',
   '35': '綠能環保',
   '36': '數位雲端',
   '37': '運動休閒',
   '38': '居家生活',
+};
+
+export const TPEX_OFFICIAL_INDUSTRY_NAMES: Readonly<Record<string, string>> = {
+  '02': '食品工業',
+  '03': '塑膠工業',
+  '04': '紡織纖維',
+  '05': '電機機械',
+  '06': '電器電纜',
+  '08': '玻璃陶瓷',
+  '10': '鋼鐵工業',
+  '11': '橡膠工業',
+  '14': '建材營造',
+  '15': '航運業',
+  '16': '觀光餐旅',
+  '17': '金融業',
+  '18': '貿易百貨',
+  '20': '其他',
+  '21': '化學工業',
+  '22': '生技醫療業',
+  '23': '油電燃氣業',
+  '24': '半導體業',
+  '25': '電腦及週邊設備業',
+  '26': '光電業',
+  '27': '通信網路業',
+  '28': '電子零組件業',
+  '29': '電子通路業',
+  '30': '資訊服務業',
+  '31': '其他電子業',
+  '32': '文化創意業',
+  '33': '農業科技',
+  '34': '電子商務',
+  '35': '綠能環保',
+  '36': '數位雲端',
+  '37': '運動休閒',
+  '38': '居家生活',
+  '80': '管理股票',
 };
 
 export type TwOfficialMarket = 'TWSE' | 'TPEx';
@@ -67,13 +103,16 @@ export interface TwOfficialIndustryStock {
   code: string;
   name: string;
   market: TwOfficialMarket;
+  symbol: string;
   industryCode: string;
   industry: string;
 }
 
 export interface TwOfficialIndustryGroup {
+  id: string;
   industryCode: string;
   industry: string;
+  markets: TwOfficialMarket[];
   stocks: TwOfficialIndustryStock[];
 }
 
@@ -102,6 +141,12 @@ function validCommonStockCode(code: string): boolean {
   return /^[1-9]\d{3}$/.test(code);
 }
 
+export function officialIndustryName(market: TwOfficialMarket, industryCode: string): string | undefined {
+  return market === 'TWSE'
+    ? TWSE_OFFICIAL_INDUSTRY_NAMES[industryCode]
+    : TPEX_OFFICIAL_INDUSTRY_NAMES[industryCode];
+}
+
 /** 純解析函式；輸入由測試或兩個官方 OpenAPI 提供。 */
 export function parseOfficialIndustryRows(
   twseRows: TwseCompanyInfoRow[],
@@ -112,20 +157,20 @@ export function parseOfficialIndustryRows(
   for (const row of twseRows) {
     const code = clean(row.公司代號);
     const industryCode = clean(row.產業別);
-    const industry = OFFICIAL_INDUSTRY_NAMES[industryCode];
+    const industry = officialIndustryName('TWSE', industryCode);
     const name = clean(row.公司簡稱) || clean(row.公司名稱);
     // 排除 ETF、權證與 91 存託憑證；只收交易所正式產業代碼下的普通公司股票。
     if (!validCommonStockCode(code) || !industry || !name) continue;
-    stocks.set(code, { code, name, market: 'TWSE', industryCode, industry });
+    stocks.set(code, { code, name, market: 'TWSE', symbol: `${code}.TW`, industryCode, industry });
   }
 
   for (const row of tpexRows) {
     const code = clean(row.SecuritiesCompanyCode);
     const industryCode = clean(row.SecuritiesIndustryCode);
-    const industry = OFFICIAL_INDUSTRY_NAMES[industryCode];
+    const industry = officialIndustryName('TPEx', industryCode);
     const name = clean(row.CompanyAbbreviation) || clean(row.CompanyName);
     if (!validCommonStockCode(code) || !industry || !name) continue;
-    stocks.set(code, { code, name, market: 'TPEx', industryCode, industry });
+    stocks.set(code, { code, name, market: 'TPEx', symbol: `${code}.TWO`, industryCode, industry });
   }
 
   return [...stocks.values()].sort((a, b) => a.code.localeCompare(b.code));
@@ -134,20 +179,47 @@ export function parseOfficialIndustryRows(
 export function groupOfficialIndustryStocks(
   stocks: TwOfficialIndustryStock[],
 ): TwOfficialIndustryGroup[] {
+  const namesByCode = new Map<string, Set<string>>();
+  for (const stock of stocks) {
+    const names = namesByCode.get(stock.industryCode) ?? new Set<string>();
+    names.add(stock.industry);
+    namesByCode.set(stock.industryCode, names);
+  }
+
   const groups = new Map<string, TwOfficialIndustryStock[]>();
   for (const stock of stocks) {
-    const list = groups.get(stock.industryCode);
+    // 大多數代碼跨市場同名，可合併；正式名稱不同時必須分組，不能用其中一方覆蓋另一方。
+    const key = `${stock.industryCode}:${stock.industry}`;
+    const list = groups.get(key);
     if (list) list.push(stock);
-    else groups.set(stock.industryCode, [stock]);
+    else groups.set(key, [stock]);
   }
 
   return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([industryCode, members]) => ({
-      industryCode,
-      industry: OFFICIAL_INDUSTRY_NAMES[industryCode],
-      stocks: members,
-    }));
+    .sort(([, a], [, b]) => a[0].industryCode.localeCompare(b[0].industryCode) || a[0].industry.localeCompare(b[0].industry))
+    .map(([, members]) => {
+      const { industryCode, industry } = members[0];
+      const markets = [...new Set(members.map((stock) => stock.market))].sort() as TwOfficialMarket[];
+      const hasNameVariants = (namesByCode.get(industryCode)?.size ?? 0) > 1;
+      return {
+        id: hasNameVariants ? `${markets.join('+')}:${industryCode}` : industryCode,
+        industryCode,
+        industry,
+        markets,
+        stocks: members,
+      };
+    });
+}
+
+export function buildOfficialIndustryPeerMap(
+  stocks: TwOfficialIndustryStock[],
+): Map<string, string[]> {
+  const peers = new Map<string, string[]>();
+  for (const group of groupOfficialIndustryStocks(stocks)) {
+    const codes = group.stocks.map((stock) => stock.code);
+    for (const code of codes) peers.set(code, codes.filter((peer) => peer !== code));
+  }
+  return peers;
 }
 
 async function fetchRows<T>(url: string): Promise<T[]> {

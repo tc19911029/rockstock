@@ -573,7 +573,7 @@ function TeacherEvents({ teacher, days }: { teacher: string; days: WindowDays })
           <tr className="[&>th]:px-1.5 [&>th]:py-1 [&>th]:text-right [&>th:nth-child(-n+4)]:text-left">
             <th>日期</th><th>股票</th><th>型態</th><th>原話</th><th>進場價</th>
             {horizons.map(h => <th key={h}>{h === 'd1' ? '隔日' : h.toUpperCase()}</th>)}
-            <th>贏大盤</th><th title="持有至今 vs 同題材成分股同期平均 — 正=贏過同族群">贏同類</th><th>最賺/最賠</th><th title="老師簡報喊的目標價/停損價有沒有打到">目標/停損</th><th>狀態</th><th>影片</th>
+            <th>贏大盤</th><th title="持有至今 vs 同官方產業成分股同期平均 — 正=贏過同產業">贏同類</th><th>最賺/最賠</th><th title="老師簡報喊的目標價/停損價有沒有打到">目標/停損</th><th>狀態</th><th>影片</th>
           </tr>
         </thead>
         <tbody>
@@ -857,7 +857,7 @@ function WorstStocksSection({ rows, horizons }: { rows: StockAggRow[]; horizons:
                         <div className="max-w-md"><MiniHeat byHorizon={s.byHorizon} horizons={horizons} /></div>
                         <p className="text-[10.5px] text-muted-foreground">
                           被這些節目提到：{s.programs.join('、') || '—'}　·　{s.firstDate} ~ {s.lastDate} 期間
-                          {s.themes.length > 0 && <>　·　題材：{s.themes.join('、')}</>}
+                          {s.themes.length > 0 && <>　·　官方產業：{s.themes.join('、')}</>}
                         </p>
                       </td>
                     </tr>

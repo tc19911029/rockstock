@@ -25,7 +25,7 @@ import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 // ── 型別 ──────────────────────────────────────────────────────────────────────
 
 interface ThemeStockPerf {
-  code: string; name: string;
+  code: string; name: string; symbol: string;
   d1: number | null; d5: number | null; d20: number | null; d60: number | null;
   volRatio: number | null; turnover?: number | null; instNet5: number | null;
   rets?: (number | null)[];
@@ -41,14 +41,14 @@ interface ThemeRank {
   avgD1: number | null; avgD5: number | null; avgD20: number | null; avgD60: number | null;
   avgVolRatio: number | null; breadth: number | null; instNet5: number | null; instAmt5?: number | null;
   stage: string;
-  topStock: { code: string; name: string; d1: number } | null;
+  topStock: { code: string; name: string; symbol: string; d1: number } | null;
   members: ThemeStockPerf[];
   rotation?: ThemeRotation | null;
 }
 interface RankingFile { date: string; generatedAt: string; themes: ThemeRank[] }
 
 interface HotStock {
-  code: string; name: string; changePercent: number; volume: number;
+  code: string; symbol: string; name: string; changePercent: number; volume: number;
   volRatio: number | null; turnover?: number | null; instNet: number | null;
   isLimitUp: boolean; isNotice: boolean; heat: number;
   theme: string; themeSource: 'concept' | 'industry' | 'other';
@@ -59,7 +59,7 @@ interface HotStock {
 interface HotTheme {
   theme: string; source: 'concept' | 'industry' | 'other';
   hotCount: number; avgChange: number; maxChange: number; avgHeat: number; score: number;
-  topStock: { code: string; name: string; changePercent: number } | null;
+  topStock: { code: string; symbol: string; name: string; changePercent: number } | null;
   members: HotStock[];
 }
 interface HotFile {
@@ -127,7 +127,7 @@ function RotationCell({ r }: { r?: ThemeRotation | null }) {
 
 // ── 成分股績效表（漲幅格子 / 籌碼法人vs散戶；上方只留視角切換，排序交給欄位標題）──
 
-type PerfMember = { code: string; name: string; rets?: (number | null)[]; instAmt?: (number | null)[]; retailAmt?: (number | null)[]; volRatio?: number | null; turnover?: number | null; isLimitUp?: boolean; isNotice?: boolean };
+type PerfMember = { code: string; symbol?: string; name: string; rets?: (number | null)[]; instAmt?: (number | null)[]; retailAmt?: (number | null)[]; volRatio?: number | null; turnover?: number | null; isLimitUp?: boolean; isNotice?: boolean };
 
 // 展開卡片的日報酬週期：今日/2/3/4/5/10/20 日
 const RET_COLS = [1, 2, 3, 4, 5, 10, 20];
@@ -150,15 +150,16 @@ function StockCard({ m }: { m: PerfMember }) {
   const badges = useSectorBadges();
   const sc = badges?.scan.get(m.code);
   const isCur = useIsChartCurrent(m.code);
+  const symbol = m.symbol ?? m.code;
   return (
     <div className={`rounded-lg border bg-card/40 px-3 py-2 hover:border-foreground/40 hover:bg-muted/30 transition-colors ${isCur ? 'border-sky-400/70 ring-1 ring-sky-400/50 bg-sky-500/5' : 'border-foreground/20'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-          <StockLink code={m.code} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
+          <StockLink code={symbol} className="hover:text-sky-400 inline-flex items-baseline gap-1.5">
             <span className="font-semibold text-foreground text-sm">{stockDisplayName(m.name, m.code)}</span>
             <span className="text-muted-foreground/45 text-[11px]">{m.code}</span>
           </StockLink>
-          <StockLink code={m.code} title="走圖"
+          <StockLink code={symbol} title="走圖"
             className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-sky-400 hover:border-sky-400/40">走圖</StockLink>
           <AddWatchBtn code={m.code} name={m.name} />
           <StockBadges code={m.code} />
@@ -338,7 +339,7 @@ function HotThemeCard({ t, rank, expanded, onToggle }: {
           <span className="font-mono tabular-nums text-muted-foreground/55">最強漲 <Pct v={t.maxChange} /></span>
           {t.topStock && (
             <span className="text-muted-foreground/55 inline-flex items-center gap-0.5">代表
-              <StockLink code={t.topStock.code} className="hover:text-sky-400 font-mono tabular-nums">{t.topStock.name} <Pct v={t.topStock.changePercent} /></StockLink>
+              <StockLink code={t.topStock.symbol} className="hover:text-sky-400 font-mono tabular-nums">{t.topStock.name} <Pct v={t.topStock.changePercent} /></StockLink>
             </span>
           )}
         </div>
@@ -462,7 +463,7 @@ function FixedThemeCard({ t, rank, expanded, onToggle }: {
             <span className="text-[10px] text-muted-foreground/55">量能 {t.avgVolRatio != null ? `${t.avgVolRatio.toFixed(1)}×` : '—'}</span>
             {t.topStock && (
               <span className="text-[10px] text-muted-foreground/55 inline-flex items-center gap-0.5">最強
-                <StockLink code={t.topStock.code} className="hover:text-sky-400 font-mono tabular-nums">{t.topStock.name} <Pct v={t.topStock.d1} /></StockLink>
+                <StockLink code={t.topStock.symbol} className="hover:text-sky-400 font-mono tabular-nums">{t.topStock.name} <Pct v={t.topStock.d1} /></StockLink>
               </span>
             )}
           </div>

@@ -17,11 +17,14 @@ import {
   TW_OFFICIAL_CLASSIFICATION,
   fetchTwOfficialIndustryRoster,
   groupOfficialIndustryStocks,
+  type TwOfficialMarket,
 } from '@/lib/datasource/TWOfficialIndustry';
 
 export interface LiveThemeMember {
   code: string;
   name: string;
+  symbol: string;
+  market: TwOfficialMarket;
   /** 當日漲跌幅 %（L2 快照；今天沒成交/停牌 = null） */
   changePercent: number | null;
   /** 當日成交量（張） */
@@ -32,6 +35,9 @@ export interface LiveThemeMember {
 }
 
 export interface LiveTheme {
+  industryId: string;
+  industryCode: string;
+  markets: TwOfficialMarket[];
   theme: string;
   /** 題材完整成分股數 */
   memberCount: number;
@@ -43,7 +49,7 @@ export interface LiveTheme {
   avgChange: number | null;
   /** 最強成分漲跌 % */
   maxChange: number | null;
-  topStock: { code: string; name: string; changePercent: number } | null;
+  topStock: { code: string; name: string; symbol: string; changePercent: number } | null;
   members: LiveThemeMember[];
 }
 
@@ -82,7 +88,7 @@ export async function buildLiveThemeRoster(date: string): Promise<LiveThemeRoste
   const roster = await fetchTwOfficialIndustryRoster();
   const industryGroups = groupOfficialIndustryStocks(roster);
   const themes: LiveTheme[] = [];
-  for (const { industry: theme, stocks } of industryGroups) {
+  for (const { id: industryId, industryCode, industry: theme, markets, stocks } of industryGroups) {
     const members: LiveThemeMember[] = stocks.map((s) => {
       const q = qmap.get(s.code);
       const cp = q?.changePercent ?? null;
@@ -90,6 +96,8 @@ export async function buildLiveThemeRoster(date: string): Promise<LiveThemeRoste
       return {
         code: s.code,
         name: s.name,
+        symbol: s.symbol,
+        market: s.market,
         changePercent: cp,
         volume: vol,
         volRatio: volRatioOf(s.code, vol),
@@ -103,13 +111,16 @@ export async function buildLiveThemeRoster(date: string): Promise<LiveThemeRoste
     const up = quoted.filter((m) => m.changePercent > 0).length;
     const top = quoted.length ? quoted.reduce((b, m) => (m.changePercent > b.changePercent ? m : b)) : null;
     themes.push({
+      industryId,
+      industryCode,
+      markets,
       theme,
       memberCount: members.length,
       quotedCount: quoted.length,
       upCount: up,
       avgChange,
       maxChange,
-      topStock: top ? { code: top.code, name: top.name, changePercent: top.changePercent } : null,
+      topStock: top ? { code: top.code, name: top.name, symbol: top.symbol, changePercent: top.changePercent } : null,
       members,
     });
   }

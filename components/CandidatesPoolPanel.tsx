@@ -150,7 +150,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 今日題材熱度 map（裸碼 → 所屬最熱題材）— 「🔥今日題材熱度」排序用；純展示/排序不進選股分數
+  // 今日產業／題材熱度 map（裸碼 → 所屬最熱分類）— 純展示/排序，不進選股分數
   const themeHeatMap = useThemeHeatMap(data?.market, date);
   const [banner, setBanner] = useState<string | null>(null);
   // forward perf — 跟策略掃描走同 endpoint(POST /api/backtest/forward,有 10min cache)
@@ -417,7 +417,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           <p className="mx-2 mt-2 text-[10px] leading-snug text-amber-400/90">
             {data?.market === 'CN'
               ? '⚠ 按今日漲幅最強的概念排（中芯/HBM/存儲/CRO…）。陸股回測這樣排「反而把較差的排前面」— 只供觀察哪個概念在燒，別照此追高。'
-              : '🔥 按今日漲幅最強的題材排（面板/網通/生技/被動元件…）。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'}
+              : '🔥 按今日平均漲幅最強的 TWSE／TPEx 官方產業排序；僅供觀察產業相對強弱，不直接進選股分數。'}
           </p>
         )}
         {loading && !data && !error && (

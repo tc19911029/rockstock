@@ -16,6 +16,7 @@ import {
   TW_OFFICIAL_CLASSIFICATION,
   fetchTwOfficialIndustryRoster,
   groupOfficialIndustryStocks,
+  type TwOfficialMarket,
   type TwOfficialIndustryStock,
 } from '@/lib/datasource/TWOfficialIndustry';
 import { PERF_PERIODS, INST_PERIODS } from './perfPeriods';
@@ -30,6 +31,8 @@ export type ThemeStage = '剛啟動' | '主升段' | '高潮噴出' | '震盪換
 export interface ThemeStockPerf {
   code: string;
   name: string;
+  symbol: string;
+  market: TwOfficialMarket;
   /** % 報酬（最新收盤 vs N 根前收盤；資料不足 = null） */
   d1: number | null;
   d5: number | null;
@@ -50,6 +53,9 @@ export interface ThemeStockPerf {
 }
 
 export interface ThemeRank {
+  industryId: string;
+  industryCode: string;
+  markets: TwOfficialMarket[];
   theme: string;
   stockCount: number;
   /** 成分股平均（缺資料股跳過） */
@@ -66,7 +72,7 @@ export interface ThemeRank {
   instAmt5: number | null;
   stage: ThemeStage;
   /** 當日最強成分股（d1 最大） */
-  topStock: { code: string; name: string; d1: number } | null;
+  topStock: { code: string; name: string; symbol: string; d1: number } | null;
   members: ThemeStockPerf[];
 }
 
@@ -81,7 +87,7 @@ export interface SectorRankingFile {
 
 async function loadStockPerf(stock: TwOfficialIndustryStock, date: string): Promise<ThemeStockPerf> {
   const empty: ThemeStockPerf = {
-    code: stock.code, name: stock.name,
+    code: stock.code, name: stock.name, symbol: stock.symbol, market: stock.market,
     d1: null, d5: null, d20: null, d60: null, volRatio: null, turnover: null, instNet5: null,
     rets: PERF_PERIODS.map(() => null),
     instAmt: INST_PERIODS.map(() => null),
@@ -167,14 +173,14 @@ async function loadStockPerf(stock: TwOfficialIndustryStock, date: string): Prom
   } catch { /* 無融資資料不影響其他欄 */ }
 
   return {
-    code: stock.code, name: stock.name,
+    code: stock.code, name: stock.name, symbol: stock.symbol, market: stock.market,
     d1: ret(1), d5: ret(5), d20: ret(20), d60: ret(60), volRatio, turnover, instNet5,
     rets: PERF_PERIODS.map((n) => ret(n)),
     instAmt, retailAmt,
   };
 }
 
-// ── 題材 6 階段（顯示用 heuristic，門檻單一事實在此）────────────────────────────
+// ── 產業 6 階段（顯示用 heuristic，門檻單一事實在此）────────────────────────────
 
 export function classifyStage(r: { avgD5: number | null; avgD20: number | null; avgVolRatio: number | null }): ThemeStage {
   const d5 = r.avgD5;
@@ -212,7 +218,7 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
     for (const p of results) perfCache.set(p.code, p);
   }
 
-  const themes: ThemeRank[] = industryGroups.map(({ industry: theme, stocks }) => {
+  const themes: ThemeRank[] = industryGroups.map(({ id: industryId, industryCode, industry: theme, markets, stocks }) => {
     const members = stocks.map(s => perfCache.get(s.code)!).filter(Boolean);
     const avgD1 = avg(members.map(m => m.d1));
     const avgD5 = avg(members.map(m => m.d5));
@@ -232,11 +238,14 @@ export async function buildSectorRanking(date: string): Promise<SectorRankingFil
       ? withD1.reduce((best, m) => ((m.d1 ?? -Infinity) > (best.d1 ?? -Infinity) ? m : best))
       : null;
     return {
+      industryId,
+      industryCode,
+      markets,
       theme,
       stockCount: members.length,
       avgD1, avgD5, avgD20, avgD60, avgVolRatio, breadth, instNet5, instAmt5,
       stage: classifyStage({ avgD5, avgD20, avgVolRatio }),
-      topStock: top && top.d1 != null ? { code: top.code, name: top.name, d1: top.d1 } : null,
+      topStock: top && top.d1 != null ? { code: top.code, name: top.name, symbol: top.symbol, d1: top.d1 } : null,
       members,
     };
   });
@@ -276,7 +285,7 @@ export async function readSectorRanking(date: string): Promise<SectorRankingFile
   }
 }
 
-/** 列出所有已產生的題材排名日期（升冪） */
+/** 列出所有已產生的產業排名日期（升冪） */
 export async function listSectorDates(): Promise<string[]> {
   try {
     const files = await fs.readdir(SECTORS_DIR);

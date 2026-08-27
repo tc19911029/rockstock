@@ -11,11 +11,11 @@ import { loadRecoEventsInRange } from '@/lib/youtube/recoStorage';
 import { computeEventReturns, evalTargetStop, indexReturnBetween, type TargetStopEval } from '@/lib/youtube/recoPerformance';
 import { loadSources, loadVideosForDate } from '@/lib/youtube/videoStorage';
 import { loadLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { peersOf, themesOf } from '@/lib/themes/themeMap';
+import { buildOfficialIndustryPeerMap, fetchTwOfficialIndustryRoster } from '@/lib/datasource/TWOfficialIndustry';
 import type { BaselineCandle } from '@/lib/youtube/recoBaseline';
 import type { RecoEventWithReturns } from '@/lib/youtube/recoTypes';
 
-/** 相對族群報酬：個股「持有至今」vs 同題材成分股同期平均 */
+/** 相對族群報酬：個股「持有至今」vs 同官方產業成分股同期平均 */
 export interface SectorExcess {
   themes: string[];
   peerAvg: number | null;  // 同題材成分股同期平均報酬 %
@@ -47,9 +47,14 @@ export async function GET(req: NextRequest) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return apiError('end must be YYYY-MM-DD', 400);
 
   try {
-    const files = await loadRecoEventsInRange(end, days);
-    const sources = await loadSources();
+    const [files, sources, officialRoster] = await Promise.all([
+      loadRecoEventsInRange(end, days),
+      loadSources(),
+      fetchTwOfficialIndustryRoster().catch(() => []),
+    ]);
     const displayById = new Map(sources.map(s => [s.source_id, s.display_name]));
+    const industryByCode = new Map(officialRoster.map((stock) => [stock.code, stock.industry]));
+    const peersByCode = buildOfficialIndustryPeerMap(officialRoster);
 
     const candleCache = new Map<string, BaselineCandle[] | null>();
     const getCandles = async (symbol: string): Promise<BaselineCandle[] | null> => {
@@ -86,12 +91,13 @@ export async function GET(req: NextRequest) {
         displayNames[v.source_id] = displayById.get(v.source_id) ?? v.source_id;
       }
 
-      // 相對族群：個股持有至今 vs 同題材成分股同期平均
+      // 相對族群：個股持有至今 vs 同官方產業成分股同期平均
       let sector: SectorExcess | null = null;
-      const themes = themesOf(ev.stock_code);
+      const industry = industryByCode.get(ev.stock_code);
+      const themes = industry ? [industry] : [];
       if (themes.length > 0 && returns?.holdReturn != null && ev.baseline.base_date && returns.lastTrackedDate) {
         const peerRets: number[] = [];
-        for (const peer of peersOf(ev.stock_code)) {
+        for (const peer of peersByCode.get(ev.stock_code) ?? []) {
           const pc = await getCandlesAnySuffix(peer);
           if (!pc) continue;
           const r = indexReturnBetween(pc, ev.baseline.base_date, returns.lastTrackedDate);

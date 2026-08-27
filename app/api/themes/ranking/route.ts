@@ -1,20 +1,25 @@
 /**
  * TWSE／TPEx 官方產業強弱排名查詢（附描述性輪動標籤）
  * GET /api/themes/ranking[?date=YYYY-MM-DD]
- * 不帶 date：回最近 7 天內最新一份；帶 date：回該日（無檔 404）。
+ * 不帶 date：回最近 7 天內最新一份；帶 date：回該日。
+ * 新版官方檔不存在但 L1 足夠時會即時重算並儲存；完全無資料才回 404。
  * 附 rotation（每題材 今日漲幅名次 vs 昨天 + 🟢🟡🔴 桶）— 純描述非訊號。
  */
 import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
-import { buildSectorRanking, readSectorRanking, readLatestSectorRanking, listSectorDates } from '@/lib/themes/sectorRanking';
+import { buildSectorRanking, readSectorRanking, readLatestSectorRanking, listSectorDates, saveSectorRanking } from '@/lib/themes/sectorRanking';
 import { computeRotation } from '@/lib/themes/themeRotation';
 
 export const runtime = 'nodejs';
+export const maxDuration = 120;
 
 const ROTATION_LOOKBACK = 1; // 前一交易日（昨天）— 2026-06-19 改日線，原本 5 反應太慢
 
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get('date');
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return apiError(`invalid date: ${date}`, 400);
+  }
   let file = date ? await readSectorRanking(date) : await readLatestSectorRanking();
   if (!file) {
     // 舊的手工題材檔會被 readSectorRanking 拒絕；第一次部署時即時重算，毋須等隔日 cron。
@@ -23,6 +28,10 @@ export async function GET(req: NextRequest) {
     const buildDate = date ?? dates.at(-1) ?? today;
     try {
       file = await buildSectorRanking(buildDate);
+      if (!file.themes.some((theme) => theme.avgD1 != null)) {
+        return apiError(`no L1 data for ${buildDate}`, 404);
+      }
+      await saveSectorRanking(file);
     } catch (error) {
       return apiError(error instanceof Error ? error.message : 'official industry ranking unavailable', 503);
     }

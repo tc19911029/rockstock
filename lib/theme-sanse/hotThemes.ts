@@ -1,7 +1,7 @@
 // ============================================================
 // 題材×三色 — 熱門題材排名（台股）。Server-only（讀本地檔）。
 //
-// TW：reuse buildSectorRanking（25 題材，由 L1 重算，回測可深）。
+// TW：reuse buildSectorRanking（TWSE／TPEx 官方產業，由 L1 重算，回測可深）。
 // （陸股題材分類已於 2026-06-21 移除 → CN 一律回空陣列，三色掃描退回無題材排序。）
 //
 // 熱度合成 HEAT_WEIGHTS 單一事實：各分項做當日 rank-percentile，只對「有值的權重」
@@ -98,7 +98,7 @@ function twRawFromThemeRank(tr: ThemeRank): RawTheme {
     .map((m) => ({
       code: m.code,
       name: m.name,
-      symbol: `${m.code}.TW`, // loader 缺檔 fallback .TWO
+      symbol: m.symbol,
       score: m.d5 ?? m.d1 ?? null,
     }))
     .sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));

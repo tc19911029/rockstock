@@ -2,7 +2,7 @@
 // 題材×三色 — 裸碼 → 所屬熱門題材 refs。
 //
 // 由 rankHotThemes 反推（單一成分來源 → heatRank 與 hotThemes 一致，交叉 join 不會錯位）。
-// 同股可屬多題材（TW 一檔多題材、CN 行業∪概念）。
+// TW 一檔只屬一個官方產業；CN 可同時屬於多個行業／概念。
 // ============================================================
 
 import { rankHotThemes } from './hotThemes';

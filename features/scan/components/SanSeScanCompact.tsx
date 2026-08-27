@@ -557,7 +557,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
         {sortKey === 'heat.theme' && (
           <span className="basis-full text-[9px] leading-snug mt-0.5 text-amber-400/90">
             {market === 'TW'
-              ? '🔥 三色票按今日最熱題材排序。回測：最熱題材那段報酬約是後段 2 倍（台股有效）。'
+              ? '🔥 三色票按 TWSE／TPEx 官方產業今日平均漲幅排序；僅供觀察，不直接改變三色訊號。'
               : '⚠ 陸股回測顯示這樣排「反而把較差的排前面」（最熱題材那段報酬最差）— 不建議用此排序選股，僅供觀察。'}
           </span>
         )}

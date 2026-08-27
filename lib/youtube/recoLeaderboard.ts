@@ -142,7 +142,7 @@ export function buildTeacherRows(
   );
 }
 
-/** 題材查詢函式（route 注入 themeMap.themesOf，保持本檔 pure 可測） */
+/** 產業查詢函式（route 注入 TWSE／TPEx 官方產業，保持本檔 pure 可測） */
 export type ThemesResolver = (stockCode: string) => string[];
 
 /**
