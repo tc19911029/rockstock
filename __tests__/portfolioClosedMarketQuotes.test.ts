@@ -51,6 +51,10 @@ describe('休市持倉報價', () => {
       name: '聯亞',
       price: 3255,
       changePercent: 9.97,
+      asOf: '2026-08-26',
+      source: 'mis-final',
+      stale: false,
+      status: 'final',
     }]);
   });
 
@@ -91,7 +95,10 @@ describe('休市持倉報價', () => {
     await expect(fetchFinalL1Quotes([
       { original: '6770', resolved: '6770.TWO', market: 'TW' },
     ], 'TW')).resolves.toEqual([
-      { symbol: '6770', canonicalSymbol: '6770.TW', name: '力積電', price: 78.4, changePercent: 4.67 },
+      {
+        symbol: '6770', canonicalSymbol: '6770.TW', name: '力積電', price: 78.4, changePercent: 4.67,
+        asOf: '2026-08-14', source: 'l1',
+      },
     ]);
 
     expect(readCandleFile).toHaveBeenCalledWith('6770.TWO', 'TW');
@@ -112,7 +119,10 @@ describe('休市持倉報價', () => {
       }],
     }, new Date('2026-08-20T11:20:00.000Z'));
 
-    expect(quotes).toEqual([{ symbol: '002821.SZ', canonicalSymbol: '002821.SZ', name: '凱萊英', price: 182.4, changePercent: 6.92 }]);
+    expect(quotes).toEqual([{
+      symbol: '002821.SZ', canonicalSymbol: '002821.SZ', name: '凱萊英', price: 182.4, changePercent: 6.92,
+      asOf: '2026-08-20', source: 'l2', stale: false, status: 'final', updatedAt: '2026-08-20T07:47:17.256Z',
+    }]);
   });
 
   test('陸股收盤前凍結的 L2 不得補進盤後報價', () => {

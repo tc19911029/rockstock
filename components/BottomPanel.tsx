@@ -16,6 +16,7 @@ import { formatHoldingQty, marketFromSymbol, sharesToLots, unitLabelOf } from '@
 import { formatPercent, bullBearClass } from '@/lib/format';
 import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
 import { isPlaceholderStockName, stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
+import { QuoteFreshnessBadge } from '@/components/shared/QuoteFreshnessBadge';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,20 @@ interface PriceInfo {
   name?: string;
   loading?: boolean;
   error?: string;
+  asOf?: string | null;
+  stale?: boolean;
+  staleReason?: string;
+}
+
+interface QuoteWire {
+  symbol: string;
+  canonicalSymbol?: string;
+  price: number;
+  changePercent: number;
+  name?: string;
+  asOf?: string | null;
+  stale?: boolean;
+  staleReason?: string;
 }
 
 type PanelTab = 'watchlist' | 'portfolio';
@@ -150,14 +165,23 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
     for (let i = 0; i < watchSyms.length; i += 6) groups.push(watchSyms.slice(i, i + 6)); // 自選股：小批
 
     // 一批報價回來就「立刻」併入畫面：持倉那批最快、先亮，不必等慢批（自選股冷標的）跑完
-    const applyQuotes = (quotes: Array<{ symbol: string; canonicalSymbol?: string; price: number; changePercent: number; name?: string }>) => {
+    const applyQuotes = (quotes: QuoteWire[]) => {
       if (quotes.length === 0) return;
       failureCountRef.current = 0; // 成功 reset 失敗計數
       setPrices(prev => {
         const next = { ...prev };
         for (const q of quotes) {
           if (q.price > 0) {
-            next[q.symbol] = { ...next[q.symbol], price: q.price, changePercent: q.changePercent, loading: false, ...(q.name ? { name: q.name } : {}) };
+            next[q.symbol] = {
+              ...next[q.symbol],
+              price: q.price,
+              changePercent: q.changePercent,
+              loading: false,
+              asOf: q.asOf,
+              stale: q.stale,
+              staleReason: q.staleReason,
+              ...(q.name ? { name: q.name } : {}),
+            };
           }
         }
         return next;
@@ -190,7 +214,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         );
         if (!res.ok) return 0;
         const json = await res.json();
-        const quotes = (json.quotes ?? []) as Array<{ symbol: string; canonicalSymbol?: string; price: number; changePercent: number; name?: string }>;
+        const quotes = (json.quotes ?? []) as QuoteWire[];
         applyQuotes(quotes); // 一回來就上畫面
         return quotes.length;
       } catch {
@@ -239,7 +263,7 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
         const cur = p?.price ?? 0;
         const costVal = h.shares * h.costPrice;
         const mktVal = cur > 0 ? h.shares * cur : costVal;
-        const dailyChange = dayPnL(h.shares, cur, p?.changePercent ?? 0);
+        const dailyChange = p?.stale ? 0 : dayPnL(h.shares, cur, p?.changePercent ?? 0);
         const { pnl } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
         acc.totalCost += costVal;
         acc.totalValue += mktVal;
@@ -472,7 +496,7 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
 }) {
   const cur = price?.price ?? 0;
   const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
-  const dailyPnL = dayPnL(h.shares, cur, price?.changePercent ?? 0);
+  const dailyPnL = price?.stale ? 0 : dayPnL(h.shares, cur, price?.changePercent ?? 0);
   // 陸股股價一律顯示小數點兩位；台股維持 ≥100 取整、<100 兩位
   const isCN = classifyMarket(h.symbol) === 'CN';
   // 本金（成本）= 股數 × 均價；現值（市值）= 股數 × 現價（shares 為股、價為每股，直接相乘）
@@ -509,6 +533,7 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
             ) : (
               <span className="text-[10px] text-muted-foreground">—</span>
             )}
+            <div><QuoteFreshnessBadge stale={price?.stale} asOf={price?.asOf} reason={price?.staleReason} compact /></div>
           </div>
         </div>
 
@@ -860,6 +885,7 @@ function WatchlistItemRow({ item, prices }: { item: ReturnType<typeof useWatchli
             ) : (
               <span className="text-[10px] text-muted-foreground">—</span>
             )}
+            <div><QuoteFreshnessBadge stale={p?.stale} asOf={p?.asOf} reason={p?.staleReason} compact /></div>
           </div>
         </div>
 

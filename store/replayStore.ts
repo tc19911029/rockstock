@@ -11,7 +11,7 @@ import {
 import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
-import { isMarketPollingWindow, isTaifexPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isMarketPollingWindow, isTaifexPollingWindow } from '@/lib/datasource/marketHours';
 import { getMonthKey, getWeekMonday } from '@/lib/datasource/aggregateCandles';
 import { isFundSymbol } from '@/lib/market/classify';
 import { isIndexSymbol } from '@/lib/utils/symbols';
@@ -261,13 +261,22 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         interval === '1d'
           ? detectCandleGaps(allCandles, 15).map((g) => ({ ...g, kind: 'halt' as const }))
           : [];
-      // 末端斷層：最後一根 K 棒距今超過 15 天（資料過舊未更新，可重新下載；容忍農曆新年/國慶等長假）
+      // 末端斷層：以市場交易日守門，不再容忍「今天應有資料但仍停在昨天」。
+      // 假日／盤前 getQuoteSnapshotDate 會回上一交易日，因此不會誤報長假。
       if (interval === '1d' && allCandles.length > 0) {
         const lastDate = allCandles[allCandles.length - 1].date;
         const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
         const diffMs = new Date(todayStr + 'T12:00:00').getTime() - new Date(lastDate + 'T12:00:00').getTime();
         const diffDays = Math.round(diffMs / 86400000);
-        if (diffDays > 15) {
+        const ticker = String(json.ticker ?? symbol);
+        const pureCode = ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+        const quoteMarket: 'TW' | 'CN' | null = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}[A-Za-z]?$/.test(pureCode)
+          ? 'TW'
+          : /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(pureCode)
+            ? 'CN'
+            : null;
+        const expectedDate = quoteMarket ? getQuoteSnapshotDate(quoteMarket) : null;
+        if ((expectedDate && lastDate < expectedDate) || (!quoteMarket && diffDays > 15)) {
           gaps.push({ fromDate: lastDate, toDate: todayStr, calendarDays: diffDays, kind: 'stale' });
         }
       }

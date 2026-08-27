@@ -12,6 +12,9 @@ export interface QuoteData {
   changePercent: number;
   loading: boolean;
   error?: string;
+  asOf?: string | null;
+  stale?: boolean;
+  staleReason?: string;
 }
 
 interface UseQuotePollerOptions {
@@ -21,7 +24,14 @@ interface UseQuotePollerOptions {
   enabled?: boolean;
 }
 
-type QuoteResponse = Array<{ symbol: string; price: number; changePercent: number }>;
+type QuoteResponse = Array<{
+  symbol: string;
+  price: number;
+  changePercent: number;
+  asOf?: string | null;
+  stale?: boolean;
+  staleReason?: string;
+}>;
 
 // 同一批 symbols 共用網路請求，但每個 hook 都要拿到結果並更新自己的 state。
 // 舊版共用的是「包含第一個元件 setState 的 Promise」，第二個元件雖 await 完卻收不到資料。
@@ -70,7 +80,14 @@ export function useQuotePoller(
           const next = { ...prev };
           for (const q of quotes) {
             if (q.price > 0) {
-              next[q.symbol] = { price: q.price, changePercent: q.changePercent, loading: false };
+              next[q.symbol] = {
+                price: q.price,
+                changePercent: q.changePercent,
+                loading: false,
+                asOf: q.asOf,
+                stale: q.stale,
+                staleReason: q.staleReason,
+              };
             }
           }
           return next;

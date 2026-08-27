@@ -18,6 +18,7 @@ import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfil
 import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 import type { MarginPressure } from '@/lib/chipcost/marginPressure';
 import { isTopPatternType } from '@/lib/analysis/patternCatalog';
+import { QuoteFreshnessBadge } from '@/components/shared/QuoteFreshnessBadge';
 
 /** 取得 CST (Asia/Taipei) 今天日期字串 YYYY-MM-DD — 避免 toISOString() 在 UTC 凌晨回退前一天 */
 function todayCST(): string {
@@ -32,6 +33,9 @@ interface PriceData {
   surgeGrade?: string;
   loading?: boolean;
   error?: string;
+  asOf?: string | null;
+  stale?: boolean;
+  staleReason?: string;
 }
 
 const EMPTY_FORM = {
@@ -175,13 +179,24 @@ export default function PortfolioPage() {
       const res = await fetch(`/api/portfolio/quotes?symbols=${encodeURIComponent(symbols.join(','))}`);
       if (!res.ok) throw new Error('quotes failed');
       const json = await res.json();
-      const quotes: Array<{ symbol: string; price: number; changePercent: number; name?: string }> = json.quotes ?? [];
+      const quotes: Array<{
+        symbol: string; price: number; changePercent: number; name?: string;
+        asOf?: string | null; stale?: boolean; staleReason?: string;
+      }> = json.quotes ?? [];
       setPrices(prev => {
         const next = { ...prev };
         for (const s of symbols) {
           const q = quotes.find(q => q.symbol === s);
           if (q && q.price > 0) {
-            next[s] = { price: q.price, changePercent: q.changePercent, loading: false, ...(q.name ? { name: q.name } : {}) };
+            next[s] = {
+              price: q.price,
+              changePercent: q.changePercent,
+              loading: false,
+              asOf: q.asOf,
+              stale: q.stale,
+              staleReason: q.staleReason,
+              ...(q.name ? { name: q.name } : {}),
+            };
           } else {
             next[s] = { price: 0, changePercent: 0, loading: false, error: '無報價' };
           }
@@ -676,6 +691,7 @@ export default function PortfolioPage() {
                         <div className={`text-xs font-mono ${p?.changePercent >= 0 ? 'text-bull' : 'text-bear'}`}>
                           {(p?.changePercent ?? 0) >= 0 ? '+' : ''}{(p?.changePercent ?? 0).toFixed(2)}%
                         </div>
+                        <QuoteFreshnessBadge stale={p?.stale} asOf={p?.asOf} reason={p?.staleReason} />
                       </>
                     ) : null}
                   </div>

@@ -3,13 +3,14 @@ import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { readIntradaySnapshot, type IntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { getQuoteSnapshotDate, isAfterMarketClose, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isAfterMarketClose, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
 import { getTWSESingleIntraday, resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
 import { expectedTwSymbol } from '@/lib/datasource/twSymbolMarket';
 import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
+import { assessQuoteFreshness, type QuoteFreshnessStatus } from '@/lib/datasource/quoteFreshness';
 
 // mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
 const MIS_HEADERS: Record<string, string> = {
@@ -41,6 +42,15 @@ export interface QuoteTick {
   price: number;
   changePercent: number;
   name?: string;
+  /** 行情所屬交易日；前端不得只靠 request 時間假定是今天。 */
+  asOf?: string | null;
+  /** 實際採用的來源，供健康檢查與事故排查。 */
+  source?: string;
+  /** true 時價格可供參考，但不可冒充最新行情。 */
+  stale?: boolean;
+  status?: QuoteFreshnessStatus;
+  staleReason?: string;
+  updatedAt?: string;
 }
 
 export type ResolvedEntry = {
@@ -143,6 +153,11 @@ export function buildFreshSnapshotFallback(
       price: quote.close,
       changePercent: quote.changePercent ?? 0,
       name: quote.name || undefined,
+      asOf: snapshot.date,
+      source: 'l2',
+      stale: false,
+      status: isMarketOpen(market, now) ? 'live' : 'final',
+      updatedAt: snapshot.updatedAt,
     });
   }
   return out;
@@ -170,6 +185,8 @@ export async function fetchFinalL1Quotes(entries: ResolvedEntry[], market: 'TW' 
         price: last.close,
         changePercent,
         name: await resolveEntryName({ ...entry, resolved: candidate }),
+        asOf: last.date,
+        source: 'l1',
       };
     }
     return null;
@@ -204,6 +221,10 @@ export async function fetchSameDayTWCloseQuotes(
         price: quote.close,
         changePercent,
         name: quote.name || undefined,
+        asOf: quote.date,
+        source: 'mis-final',
+        stale: false,
+        status: 'final',
       };
     } catch {
       return null;
@@ -492,10 +513,14 @@ export async function GET(req: NextRequest) {
   const [twQuotes, cnQuotes, fundQuotes] = await Promise.all([
     (twLive
       ? fetchTWSEQuotes(twEntries.map(e => e.resolved))
-      : Promise.all([
-          fetchFinalL1Quotes(twEntries, 'TW'),
-          fetchSameDayTWCloseQuotes(twEntries),
-        ]).then(([l1Quotes, sameDayQuotes]) => {
+      : fetchFinalL1Quotes(twEntries, 'TW').then(async l1Quotes => {
+          const expectedDate = getQuoteSnapshotDate('TW');
+          const unsettledEntries = twEntries.filter(entry => {
+            const l1 = l1Quotes.find(quote => quote.symbol === entry.original);
+            return !l1?.asOf || l1.asOf < expectedDate;
+          });
+          // 正式 L1 已到預期交易日就完成對帳，不再用暫時 MIS 覆蓋；只替仍落後的檔案補價。
+          const sameDayQuotes = await fetchSameDayTWCloseQuotes(unsettledEntries);
           const replaced = new Set(sameDayQuotes.map(quote => quote.symbol));
           return [...l1Quotes.filter(quote => !replaced.has(quote.symbol)), ...sameDayQuotes];
         })
@@ -536,7 +561,7 @@ export async function GET(req: NextRequest) {
   };
 
   const twFallback = async () => {
-    if (!twLive || missingTW.length === 0) return [] as typeof quotes;
+    if ((!twLive && !isAfterMarketClose('TW')) || missingTW.length === 0) return [] as typeof quotes;
     const lookupTW = getQuoteSnapshotDate('TW');
     try {
       const twSnap = await readIntradaySnapshot('TW', lookupTW);
@@ -558,9 +583,40 @@ export async function GET(req: NextRequest) {
   }
 
   const namedQuotes = await enrichQuoteNames(quotes, entries);
+  const checkedAt = new Date().toISOString();
+  const annotatedQuotes = namedQuotes.map(quote => {
+    const entry = entries.find(candidate => candidate.original === quote.symbol);
+    if (!entry || (entry.market !== 'TW' && entry.market !== 'CN')) return quote;
+
+    // 即時 provider 成功時，該路徑已驗證為目前 session；休市 L1/MIS/L2 則在上方帶入真實日期。
+    const asOf = quote.asOf ?? getQuoteSnapshotDate(entry.market);
+    const freshness = assessQuoteFreshness(entry.market, asOf);
+    return {
+      ...quote,
+      asOf: freshness.asOf,
+      source: quote.source ?? (isMarketPollingWindow(entry.market) ? 'realtime' : 'l1'),
+      stale: quote.stale ?? freshness.stale,
+      status: quote.status ?? freshness.status,
+      ...(quote.staleReason || freshness.staleReason
+        ? { staleReason: quote.staleReason ?? freshness.staleReason }
+        : {}),
+      updatedAt: quote.updatedAt ?? checkedAt,
+    };
+  });
+
+  const missingSymbols = entries
+    .filter(entry => !annotatedQuotes.some(quote => quote.symbol === entry.original))
+    .map(entry => entry.original);
+  const staleSymbols = annotatedQuotes.filter(quote => quote.stale).map(quote => quote.symbol);
 
   return apiOk(
-    { quotes: namedQuotes },
+    {
+      quotes: annotatedQuotes,
+      checkedAt,
+      status: missingSymbols.length > 0 || staleSymbols.length > 0 ? 'degraded' : 'fresh',
+      staleSymbols,
+      missingSymbols,
+    },
     { headers: { 'Cache-Control': 'max-age=15, stale-while-revalidate=30' } },
   );
 }

@@ -644,6 +644,13 @@ export async function register() {
       .catch(err => console.error('[local-cron] CN watchdog:', err));
   }, 30 * 60 * 1000);
 
+  // 使用者出口行情 watchdog：台股收盤後每 5 分鐘實測持股批次、單股與 K 線三個 API。
+  // route 自帶 13:30–18:30 交易日 gate；異常會先強制刷新 L2，再複測與推播。
+  setInterval(() => {
+    callRoute('/api/cron/quote-freshness-watchdog', 'TW quote freshness watchdog', { timeoutMs: 60_000 })
+      .catch(err => console.error('[local-cron] TW quote freshness watchdog:', err));
+  }, 5 * 60 * 1000);
+
   // ETF 主動式持股：每週一至五 18:00 / 23:00 CST 自動跑（鏡像 vercel.json 排程）
   // 18:00 fetch-etf-holdings、23:00 update-etf-tracking；用旗標避免同一天重跑
   let lastEtfFetchDate = '';
