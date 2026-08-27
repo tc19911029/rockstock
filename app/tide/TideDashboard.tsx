@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import type { TideHighlightTheme } from '@/lib/tide/highlights';
 import type { TideProSnapshot } from '@/lib/tide/proData';
 import type { MarketThemeRankingFile } from '@/lib/themes/marketThemes';
 import { groupTideMarketThemes } from '@/lib/tide/themeGroups';
@@ -195,11 +196,17 @@ export default function TideDashboard({
   initialDate,
   initialUniverse,
   initialThemes,
+  initialHighlights,
+  priorDate,
+  priorHighlights,
   proSnapshot,
 }: {
   initialDate: string;
   initialUniverse: MarketThemeRankingFile['universe'] | null;
   initialThemes: ThemeRank[];
+  initialHighlights: TideHighlightTheme[];
+  priorDate: string | null;
+  priorHighlights: TideHighlightTheme[];
   proSnapshot: TideProSnapshot | null;
 }) {
   const [themes, setThemes] = useState(initialThemes);
@@ -234,6 +241,7 @@ export default function TideDashboard({
   const [wishOpen, setWishOpen] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
   const [highlightsOpen, setHighlightsOpen] = useState(false);
+  const [highlightSummaryOpen, setHighlightSummaryOpen] = useState(true);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [chartHelpOpen, setChartHelpOpen] = useState(false);
   const [watchManageOpen, setWatchManageOpen] = useState(false);
@@ -504,7 +512,39 @@ export default function TideDashboard({
   }), [watchMetrics, watchSort, watchlist]);
   const folderWatchlist = useMemo(() => activeWatchFolder ? sortedWatchlist.filter((stock) => watchFolderByCode[stock.code] === activeWatchFolder) : sortedWatchlist, [activeWatchFolder, sortedWatchlist, watchFolderByCode]);
 
-  const topThemes = useMemo(() => [...themes].sort((a, b) => themeMoney(b, 5) - themeMoney(a, 5)), [themes]);
+  const topHighlightThemes = useMemo(
+    () => [...initialHighlights].sort((left, right) => right.day1Amount - left.day1Amount).slice(0, 3),
+    [initialHighlights],
+  );
+  const sellHighlightThemes = useMemo(
+    () => [...initialHighlights].sort((left, right) => left.day1Amount - right.day1Amount).slice(0, 3),
+    [initialHighlights],
+  );
+  const priorTopHighlightThemes = useMemo(
+    () => [...priorHighlights].sort((left, right) => right.day1Amount - left.day1Amount).slice(0, 3),
+    [priorHighlights],
+  );
+  const highlightReview = useMemo(() => {
+    const todayByName = new Map(initialHighlights.map((theme) => [theme.theme, theme]));
+    const today = priorTopHighlightThemes
+      .map((theme) => todayByName.get(theme.theme))
+      .filter((theme): theme is NonNullable<typeof theme> => theme?.avgD1 != null);
+    if (today.length === 0) return null;
+    const best = [...today].sort((left, right) => (right.avgD1 ?? -Infinity) - (left.avgD1 ?? -Infinity))[0];
+    return {
+      average: today.reduce((sum, theme) => sum + (theme.avgD1 ?? 0), 0) / today.length,
+      best,
+    };
+  }, [initialHighlights, priorTopHighlightThemes]);
+  const abnormalHighlights = useMemo(() => {
+    const candidates = (proSnapshot?.intensityLeaders ?? []).filter(
+      (stock) => stock.intensity >= 4 && Math.abs(stock.totalValue ?? 0) >= 100_000_000,
+    );
+    return {
+      buy: candidates.filter((stock) => (stock.totalValue ?? 0) > 0).sort((a, b) => (b.totalValue ?? 0) - (a.totalValue ?? 0))[0],
+      sell: candidates.filter((stock) => (stock.totalValue ?? 0) < 0).sort((a, b) => (a.totalValue ?? 0) - (b.totalValue ?? 0))[0],
+    };
+  }, [proSnapshot]);
   const filteredThemes = useMemo(() => {
     const items = category === 'all' ? visibleUniverse : visibleUniverse.filter((item) => flowCategory(item) === category);
     const sorted = [...items].sort((a, b) => Math.abs(themeMoney(b, period)) - Math.abs(themeMoney(a, period)));
@@ -648,9 +688,13 @@ export default function TideDashboard({
         <section className={styles.highlights} aria-label="今日盤面重點">
           <header><b>今日重點（{dataDate.slice(5).replace('-', '/')}）</b><button onClick={() => setHighlightsOpen(false)} aria-label="收起今日重點"><X size={16} /></button></header>
           <div className={styles.moodSummary}><span>今日情緒 <b>{bullishPct}</b> {bullishPct >= 55 ? '樂觀' : bullishPct <= 40 ? '保守' : '中性'}</span><small>樂觀</small><i><em style={{ left: `${Math.max(4, Math.min(96, bullishPct))}%` }} /></i><small>恐慌</small></div>
-          <p>法人買最多：{topThemes.slice(0, 3).map((item) => `${item.theme} ${formatMoney(themeMoney(item, 1))}`).join('、')}</p>
-          <p>回顧：近 5 日法人買最多的 3 個市場題材，平均 {formatPct(topThemes.slice(0, 3).reduce((sum, item) => sum + themeReturn(item, 5), 0) / 3)}（最佳 {topThemes[0]?.theme ?? '—'} {formatPct(topThemes[0] ? themeReturn(topThemes[0], 5) : 0)}）</p>
-          <p>大戶異常：{(proSnapshot?.intensityLeaders ?? []).slice(0, 2).map((stock) => `${stock.name} ${stock.total >= 0 ? '被買' : '被倒'} ${formatMoney(Math.abs(stock.totalValue ?? 0))}`).join('　') || '目前沒有顯著異常'}</p>
+          <p>法人買最多：{topHighlightThemes.map((item) => `${item.theme} ${formatMoney(item.day1Amount)}`).join('、')}</p>
+          <p>回顧：{priorDate ? `${priorDate.slice(5).replace('-', '/')} 法人買最多的 3 個板塊` : '前一交易日法人買最多的 3 個板塊'}，{highlightReview ? `今日平均 ${formatPct(highlightReview.average)}（最佳 ${highlightReview.best.theme} ${formatPct(highlightReview.best.avgD1)}）` : '尚無足夠資料'}</p>
+          <p>大戶異常：{[abnormalHighlights.buy, abnormalHighlights.sell].filter(Boolean).map((stock) => `${stock!.name} ${stock!.total >= 0 ? '被買' : '被倒'} ${formatMoney(Math.abs(stock!.totalValue ?? 0)).replace(/^\+/, '')}`).join('　') || '目前沒有顯著異常'}</p>
+          <button className={styles.aiSummaryToggle} onClick={() => setHighlightSummaryOpen((open) => !open)} aria-expanded={highlightSummaryOpen}>AI 盤後總結 {highlightSummaryOpen ? '▴' : '▾'}</button>
+          {highlightSummaryOpen && (
+            <p className={styles.aiSummary}>法人買盤集中在 {topHighlightThemes.map((theme) => theme.theme).join('、')}；賣壓集中在 {sellHighlightThemes.map((theme) => theme.theme).join('、')}。當日籌碼異常檔數達 {proSnapshot?.abnormalCount ?? 0} 檔。</p>
+          )}
           <button className={styles.shareBrief} onClick={() => void shareDashboard('Tide 今日盤面')}><Share2 size={15} /> 分享今日盤面</button>
         </section>
       )}

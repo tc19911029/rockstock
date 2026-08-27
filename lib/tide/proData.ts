@@ -37,6 +37,8 @@ export type TideProStock = {
 export type TideProSnapshot = {
   date: string;
   historyDates: string[];
+  /** 當日籌碼力道高於個股自身近期基準的檔數（未受榜單顯示筆數限制）。 */
+  abnormalCount: number;
   simultaneousBuy: TideProStock[];
   simultaneousSell: TideProStock[];
   foreignStreaks: TideProStock[];
@@ -153,6 +155,7 @@ export async function loadTideProSnapshot(): Promise<TideProSnapshot | null> {
   return {
     date: latest.date,
     historyDates: days.map((day) => day.date),
+    abnormalCount: stocks.filter((stock) => stock.intensity >= 1).length,
     simultaneousBuy: simultaneousBuy.slice(0, 30),
     simultaneousSell: simultaneousSell.slice(0, 30),
     foreignStreaks: stocks

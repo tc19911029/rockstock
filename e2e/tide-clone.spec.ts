@@ -17,37 +17,51 @@ test.describe('Tide Pro 重建頁', () => {
 
   test('泡泡圖、說明、回放、排行榜與 Pro 分頁可用', async ({ page }) => {
     await page.goto('/tide');
-    await expect(page.getByRole('img', { name: '台股板塊法人資金泡泡圖' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '顯示全部 36 個' })).toBeVisible();
-    await page.getByRole('button', { name: '顯示全部 36 個' }).click();
+    await expect(page.getByRole('img', { name: '台股市場題材法人資金泡泡圖' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '顯示全部 38 個' })).toBeVisible();
+    await page.getByRole('button', { name: '顯示全部 38 個' }).click();
     await expect(page.getByRole('button', { name: '只看熱門 15' })).toBeVisible();
     await page.getByRole('button', { name: '只看熱門 15' }).click();
 
-    await page.getByRole('button', { name: /半導體業，/ }).click();
-    await expect(page.getByRole('region', { name: '半導體業 板塊摘要' })).toBeVisible();
-    await page.getByRole('button', { name: '關閉板塊摘要' }).click();
+    await page.getByRole('button', { name: /記憶體，/ }).click();
+    await expect(page.getByRole('region', { name: '記憶體 題材摘要' })).toBeVisible();
+    await page.getByRole('button', { name: '關閉題材摘要' }).click();
 
     await page.getByRole('button', { name: '怎麼看這張圖' }).click();
     await expect(page.getByText('所以右上角＝買最多、還在加速')).toBeVisible();
     await page.getByRole('button', { name: '怎麼看這張圖' }).click();
 
     await page.getByRole('button', { name: '回放', exact: true }).click();
-    const replay = page.getByRole('dialog', { name: '板塊資金輪動回放' });
+    const replay = page.getByRole('dialog', { name: '市場題材資金輪動回放' });
     await expect(replay.getByRole('slider', { name: '回放進度' })).toBeVisible();
-    await replay.getByRole('button', { name: /選板塊/ }).click();
-    await expect(replay.getByPlaceholder('搜尋板塊…')).toBeVisible();
-    await replay.getByRole('button', { name: /選板塊/ }).click();
+    await replay.getByRole('button', { name: /選題材/ }).click();
+    await expect(replay.getByPlaceholder('搜尋題材…')).toBeVisible();
+    await replay.getByRole('button', { name: /選題材/ }).click();
     await replay.getByRole('button', { name: '播放速度' }).click();
     await expect(replay.getByRole('button', { name: '播放速度' })).toHaveText('2x');
     await replay.getByRole('button', { name: '關閉回放' }).click();
 
-    await page.getByRole('button', { name: '板塊泡泡圖', exact: true }).click();
-    await page.getByRole('menuitem', { name: '板塊排行榜', exact: true }).click();
+    await page.getByRole('button', { name: '題材泡泡圖', exact: true }).click();
+    await page.getByRole('menuitem', { name: '題材排行榜', exact: true }).click();
     await expect(page.getByRole('button', { name: '法人動向', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '個股異常', exact: true }).click();
     await expect(page.getByRole('button', { name: '爆買', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '外資投信', exact: true }).click();
     for (const tab of ['同買', '同賣', '連買', '連賣']) await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
+  });
+
+  test('今日重點使用當日題材、前一交易日回顧與大戶異常規則', async ({ page }) => {
+    await page.goto('/tide');
+    await page.getByRole('button', { name: '今日重點', exact: true }).click();
+    const highlights = page.getByRole('region', { name: '今日盤面重點' });
+    await expect(highlights).toContainText('HBM 高頻寬記憶體 +348億');
+    await expect(highlights).toContainText('記憶體模組 +228億');
+    await expect(highlights).toContainText('CXL 技術 +227億');
+    await expect(highlights).toContainText('回顧：08/26 法人買最多的 3 個板塊');
+    await expect(highlights).toContainText('景碩 被買 44億');
+    await expect(highlights).toContainText('力成 被倒 40億');
+    await expect(highlights.getByRole('button', { name: /AI 盤後總結/ })).toHaveAttribute('aria-expanded', 'true');
+    await expect(highlights).toContainText('賣壓集中在 封測代工、Edge AI AIoT、被動元件 MLCC');
   });
 
   test('個股 Pro 深度、自選與不限檔提醒可互動', async ({ page }) => {
@@ -94,7 +108,7 @@ test.describe('Tide Pro 重建頁', () => {
     await page.getByRole('button', { name: '設定', exact: true }).click();
     const settings = page.getByRole('dialog', { name: '⚙️ 設定' });
     await expect(settings).toBeVisible();
-    await expect(settings.getByRole('button', { name: '展開半導體' })).toBeVisible();
+    await expect(settings.getByRole('button', { name: '展開半導體供應鏈' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   });
 
@@ -110,12 +124,12 @@ test.describe('Tide Pro 重建頁', () => {
     const settings = page.getByRole('dialog', { name: '⚙️ 設定' });
     await expect(settings.getByText('漲跌顏色', { exact: true })).toBeVisible();
     await expect(settings.getByText('通知設定', { exact: true })).toBeVisible();
-    await settings.getByRole('button', { name: '展開半導體' }).click();
-    await expect(settings.getByText('半導體業', { exact: true })).toBeVisible();
-    await settings.getByRole('checkbox', { name: /半導體業 \d+ 檔/ }).uncheck();
-    await expect(settings.getByText('0/1', { exact: true })).toBeVisible();
-    await settings.getByRole('checkbox', { name: '半導體全部顯示' }).check();
-    await expect(settings.getByRole('checkbox', { name: /半導體業 \d+ 檔/ })).toBeChecked();
+    await settings.getByRole('button', { name: '展開半導體供應鏈' }).click();
+    await expect(settings.getByText('記憶體', { exact: true })).toBeVisible();
+    await settings.getByRole('checkbox', { name: /記憶體 \d+ 檔/ }).uncheck();
+    await expect(settings.getByText('9/10', { exact: true })).toBeVisible();
+    await settings.getByRole('checkbox', { name: '半導體供應鏈全部顯示' }).check();
+    await expect(settings.getByRole('checkbox', { name: /記憶體 \d+ 檔/ })).toBeChecked();
     await settings.getByRole('button', { name: '暗色', exact: true }).click();
     await settings.getByRole('button', { name: '許願池', exact: true }).click();
     const wish = page.getByRole('dialog', { name: '許願池' });

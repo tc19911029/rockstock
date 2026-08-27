@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { loadTideProSnapshot } from '@/lib/tide/proData';
-import { loadLatestTideMarketThemes } from '@/lib/tide/marketThemeData';
+import { loadTideMarketThemeContext } from '@/lib/tide/marketThemeData';
 import TideDashboard from './TideDashboard';
 
 export const metadata: Metadata = {
@@ -11,16 +11,20 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function TidePage() {
-  const [ranking, pro] = await Promise.all([
-    loadLatestTideMarketThemes(),
+  const [context, pro] = await Promise.all([
+    loadTideMarketThemeContext(),
     loadTideProSnapshot(),
   ]);
+  const ranking = context.latest;
 
   return (
     <TideDashboard
       initialDate={ranking?.date ?? pro?.date ?? ''}
       initialUniverse={ranking?.universe ?? null}
       initialThemes={ranking?.themes ?? []}
+      initialHighlights={context.latestHighlights}
+      priorDate={context.prior?.date ?? null}
+      priorHighlights={context.priorHighlights}
       proSnapshot={pro}
     />
   );
