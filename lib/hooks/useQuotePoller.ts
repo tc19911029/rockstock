@@ -32,12 +32,13 @@ type QuoteResponse = Array<{
   stale?: boolean;
   staleReason?: string;
 }>;
+type QuoteBatchResponse = { quotes: QuoteResponse; missingSymbols: string[] };
 
 // 同一批 symbols 共用網路請求，但每個 hook 都要拿到結果並更新自己的 state。
 // 舊版共用的是「包含第一個元件 setState 的 Promise」，第二個元件雖 await 完卻收不到資料。
-const inflightRequests = new Map<string, Promise<QuoteResponse>>();
+const inflightRequests = new Map<string, Promise<QuoteBatchResponse>>();
 
-async function fetchQuoteBatch(symbols: string[], key: string): Promise<QuoteResponse> {
+async function fetchQuoteBatch(symbols: string[], key: string): Promise<QuoteBatchResponse> {
   const existing = inflightRequests.get(key);
   if (existing) return existing;
 
@@ -45,9 +46,12 @@ async function fetchQuoteBatch(symbols: string[], key: string): Promise<QuoteRes
     cache: 'no-store',
   })
     .then(async (res) => {
-      if (!res.ok) return [];
+      if (!res.ok) throw new Error(`quote HTTP ${res.status}`);
       const json = await res.json();
-      return (json.quotes ?? []) as QuoteResponse;
+      return {
+        quotes: (json.quotes ?? []) as QuoteResponse,
+        missingSymbols: Array.isArray(json.missingSymbols) ? json.missingSymbols : [],
+      };
     })
     .finally(() => inflightRequests.delete(key));
 
@@ -74,28 +78,48 @@ export function useQuotePoller(
 
     setIsRefreshing(true);
     try {
-      const quotes = await fetchQuoteBatch(normalizedSymbols, symbolsKey);
-      if (quotes.length > 0) {
-        setPrices(prev => {
-          const next = { ...prev };
-          for (const q of quotes) {
-            if (q.price > 0) {
-              next[q.symbol] = {
-                price: q.price,
-                changePercent: q.changePercent,
-                loading: false,
-                asOf: q.asOf,
-                stale: q.stale,
-                staleReason: q.staleReason,
-              };
-            }
+      const { quotes, missingSymbols } = await fetchQuoteBatch(normalizedSymbols, symbolsKey);
+      const missing = new Set(missingSymbols);
+      setPrices(prev => {
+        const next = { ...prev };
+        for (const symbol of normalizedSymbols) {
+          const q = quotes.find(item => item.symbol === symbol);
+          if (q && q.price > 0) {
+            next[symbol] = {
+              price: q.price,
+              changePercent: q.changePercent,
+              loading: false,
+              asOf: q.asOf,
+              stale: q.stale,
+              staleReason: q.staleReason,
+            };
+          } else {
+            next[symbol] = {
+              ...(next[symbol] ?? { price: 0, changePercent: 0 }),
+              loading: false,
+              stale: true,
+              error: '報價暫時缺失',
+              staleReason: missing.has(symbol) ? '本輪報價來源沒有回傳此股票' : '本輪報價無有效價格',
+            };
           }
-          return next;
-        });
-        setUpdatedAt(new Date().toISOString());
-      }
+        }
+        return next;
+      });
+      setUpdatedAt(new Date().toISOString());
     } catch {
-      // Ignore polling errors and retain the last successful quote.
+      setPrices(prev => {
+        const next = { ...prev };
+        for (const symbol of normalizedSymbols) {
+          next[symbol] = {
+            ...(next[symbol] ?? { price: 0, changePercent: 0 }),
+            loading: false,
+            stale: true,
+            error: '更新失敗',
+            staleReason: '報價 API 無法連線；顯示值是上次成功資料',
+          };
+        }
+        return next;
+      });
     } finally {
       setIsRefreshing(false);
     }

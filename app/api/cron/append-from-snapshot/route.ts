@@ -168,10 +168,10 @@ export async function GET(req: NextRequest) {
     const q = quotes.get(code);
     if (!q) return;
 
-    // Limit-up close-overwrite guard（lib/datasource/limitMoveGuard.ts）：
-    // 漲跌停股 close 在收盤集合競價，盤中 snapshot tick 可能不是真正收盤。
+    // TW 來源是交易所官方盤後日線，漲跌停本來就是合法收盤，不可再套用只適合
+    // 盤中 snapshot tick 的 limit-overwrite heuristic。CN 仍走 snapshot/provider chain，保留守門。
     const prev = existing.candles[existing.candles.length - 1];
-    if (suspectsLimitOverwrite(prev?.close, q, market, code) || suspectsGrossJump(prev?.close, q)) {
+    if ((market === 'CN' && suspectsLimitOverwrite(prev?.close, q, market, code)) || suspectsGrossJump(prev?.close, q)) {
       console.warn(
         `[append-from-snapshot] ${symbol} ${date} close 異常(漲跌停/單日>50%偏離=疑撞庫壞抓) ` +
         `(prev=${prev.close} h=${q.high} l=${q.low} c=${q.close})，skip 寫入避免 L1 污染`

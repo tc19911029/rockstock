@@ -66,8 +66,8 @@ export async function POST(req: NextRequest) {
   const quoteRaw = await fetchJSON(internalUrl(
     `/api/portfolio/quotes?symbols=${encodeURIComponent(holdings.map(h => h.symbol).join(','))}`,
   )).catch(() => null) as {
-    quotes?: Array<{ symbol: string; price: number }>;
-    data?: { quotes?: Array<{ symbol: string; price: number }> };
+    quotes?: Array<{ symbol: string; price: number; stale?: boolean }>;
+    data?: { quotes?: Array<{ symbol: string; price: number; stale?: boolean }> };
   } | null;
   const quotes = quoteRaw?.quotes ?? quoteRaw?.data?.quotes ?? [];
   const normalizedSymbol = (value: string) => value.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -94,7 +94,8 @@ export async function POST(req: NextRequest) {
       ]);
 
       const directQuote = quotes.find(q => normalizedSymbol(q.symbol) === normalizedSymbol(h.symbol));
-      const currentPrice = directQuote?.price ?? candidateRow?.price ?? null;
+      // 停損/減碼決策不可吃 delayed quote；缺新價時明確留 null，交由 review 標資料不足。
+      const currentPrice = directQuote && !directQuote.stale ? directQuote.price : null;
 
       return {
         symbol: h.symbol,

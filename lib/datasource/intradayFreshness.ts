@@ -1,4 +1,4 @@
-import { isMarketOpen, isPostCloseWindow } from './marketHours';
+import { isMarketOpen } from './marketHours';
 
 export interface IntradaySnapshotMeta {
   date: string;
@@ -38,7 +38,7 @@ export function assessIntradayFreshness(
   }
   if (!Number.isFinite(updatedMs)) return { stale: true, ageSeconds, reason: '快照更新時間無效' };
 
-  if (isMarketOpen(market, now) || isPostCloseWindow(market, now)) {
+  if (isMarketOpen(market, now)) {
     if (now.getTime() - updatedMs > INTRADAY_MAX_AGE_MS) {
       return { stale: true, ageSeconds, reason: `盤中快照已 ${Math.round(ageSeconds / 60)} 分鐘未更新` };
     }

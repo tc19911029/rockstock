@@ -28,6 +28,8 @@ export interface EastMoneyQuote {
   prevClose?: number;
   /** 報價所屬交易日（YYYY-MM-DD）；避免週末把週五收盤誤標成今天。 */
   date?: string;
+  /** 行情來源最後更新時間（ISO）。 */
+  updatedAt?: string;
 }
 
 // ── A 股 ──────────────────────────────────────────────────────────────────────
@@ -128,8 +130,11 @@ export async function getEastMoneySingleQuote(code: string, suffix?: 'SS' | 'SZ'
       : (item.f45 != null && item.f45 > 0 ? item.f45 / 100 : close);
     const volume = (hasLive ? (item.f5 ?? 0) : (item.f47 ?? 0)) * 100; // f5/f47 單位為「手」；×100 轉為「股」與 L1 歷史一致
     const prevClose = item.f60 != null && item.f60 > 0 ? (hasLive ? item.f60 : item.f60 / 100) : undefined;
-    const quoteDate = typeof item.f124 === 'number' && item.f124 > 0
-      ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date(item.f124 * 1000))
+    const providerTime = typeof item.f124 === 'number' && item.f124 > 0
+      ? new Date(item.f124 * 1000)
+      : null;
+    const quoteDate = providerTime
+      ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(providerTime)
       : undefined;
 
     return {
@@ -142,6 +147,7 @@ export async function getEastMoneySingleQuote(code: string, suffix?: 'SS' | 'SZ'
       volume,
       prevClose,
       date: quoteDate,
+      updatedAt: providerTime && Number.isFinite(providerTime.getTime()) ? providerTime.toISOString() : undefined,
     };
   } catch {
     return null;

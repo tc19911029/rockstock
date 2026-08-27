@@ -13,6 +13,7 @@ import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
 import { isAfterMarketClose, isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { isFundSymbol } from '@/lib/market/classify';
 import type { Candle } from '@/types';
 import { promises as fsp } from 'node:fs';
@@ -42,6 +43,15 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
       () => { if (!settled) { settled = true; clearTimeout(timer); resolve(fallback); } },
     );
   });
+}
+
+function isFreshProviderQuote(
+  market: 'TW' | 'CN',
+  date: string | undefined,
+  updatedAt: string | undefined,
+): boolean {
+  if (!date || !updatedAt) return false;
+  return !assessIntradayFreshness(market, { date, updatedAt, count: 1 }).stale;
 }
 
 // ── 中文名稱查詢（local 與 API 兩條路徑共用唯一一份，防 timeout 包覆 drift）──────────
@@ -272,7 +282,7 @@ export async function GET(req: NextRequest) {
         if (!inLiveWindow) {
           try {
             const snap = await readIntradaySnapshot(marketKey, today);
-            l2HasToday = !!snap && snap.date === today && snap.quotes.some(q =>
+            l2HasToday = !!snap && !assessIntradayFreshness(marketKey, snap).stale && snap.quotes.some(q =>
               q.symbol === l2LookupSymbol && q.close > 0 && (!isTW || q.isActualTrade !== false)
             );
           } catch { /* ignore */ }
@@ -320,7 +330,7 @@ export async function GET(req: NextRequest) {
                 Math.min(INJECT_BUDGET_MS, 1500),
                 null,
               );
-              if (q && q.close > 0 && (!q.date || q.date === today)) {
+              if (q && q.close > 0 && q.date === today && isFreshProviderQuote('TW', q.date, q.updatedAt)) {
                 todayQuote = q;
               } else if (q) {
                 console.warn(`[stock] 即時報價跳過 ${symbol}: close=${q.close}, date=${(q as { date?: string }).date}, today=${today}`);
@@ -329,7 +339,7 @@ export async function GET(req: NextRequest) {
               // 指數不走 EastMoney 個股報價（會誤回平安銀行）→ 落到下方 L2 fallback 取指數即時值
               const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
               const q = await withTimeout(getEastMoneySingleQuote(pureCode, cnSuffix), INJECT_BUDGET_MS, null);
-              if (q && q.close > 0) {
+              if (q && q.close > 0 && q.date === today && isFreshProviderQuote('CN', q.date, q.updatedAt)) {
                 todayQuote = q;
               } else if (q) {
                 console.warn(`[stock] CN即時報價跳過 ${symbol}: close=${q.close}`);
@@ -343,7 +353,7 @@ export async function GET(req: NextRequest) {
           if (!todayQuote && isTW && !isTwIndex && isFugleAvailable() && Date.now() < injectDeadline) {
             try {
               const fq = await withTimeout(getFugleQuote(pureCode), Math.max(500, injectDeadline - Date.now()), null);
-              if (fq && fq.close > 0 && (!fq.date || fq.date === today)) {
+              if (fq && fq.close > 0 && fq.date === today && isFreshProviderQuote('TW', fq.date, fq.updatedAt)) {
                 todayQuote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
               }
             } catch (err) {
@@ -355,7 +365,7 @@ export async function GET(req: NextRequest) {
           if (!todayQuote && !isTwIndex && !isCnIndex && Date.now() < injectDeadline) {
             try {
               const snapshot = await withTimeout(readIntradaySnapshot(market as 'TW' | 'CN', today), Math.max(500, injectDeadline - Date.now()), null);
-              if (snapshot) {
+              if (snapshot && !assessIntradayFreshness(market as 'TW' | 'CN', snapshot).stale) {
                 const sq = snapshot.quotes.find(q => q.symbol === l2LookupSymbol);
                 if (sq && sq.close > 0 && (!isTW || sq.isActualTrade !== false)) {
                   todayQuote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
@@ -486,7 +496,7 @@ export async function GET(req: NextRequest) {
           totalBars: withIndicators.length,
           source: 'local',
           staleDays: result.staleDays,
-        });
+        }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
       }
     } catch (localErr) {
       // 本地讀取失敗，fallthrough 到正常 API 路徑
@@ -610,7 +620,10 @@ export async function GET(req: NextRequest) {
     const indexName = INDEX_NAMES[ticker.toUpperCase()];
     if (indexName) name = indexName;
 
-    return apiOk({ ticker, name, currency: '', interval, candles, totalBars: candles.length });
+    return apiOk(
+      { ticker, name, currency: '', interval, candles, totalBars: candles.length },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } },
+    );
   } catch (err: unknown) {
     console.error('[stock] error:', err);
     const msg = err instanceof Error ? err.message : String(err);

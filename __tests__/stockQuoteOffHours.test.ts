@@ -12,6 +12,8 @@ jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
 jest.mock('@/lib/datasource/marketHours', () => ({
   isMarketPollingWindow: () => false,
   isAfterMarketClose: () => true,
+  isMarketOpen: () => false,
+  getQuoteSnapshotDate: () => '2026-08-26',
 }));
 jest.mock('@/lib/datasource/IntradayCache', () => ({
   readIntradaySnapshot: (...args: unknown[]) => readIntradaySnapshot(...args),
@@ -142,6 +144,7 @@ describe('GET /api/stock/quote 休市防護', () => {
     getTWSESingleIntraday.mockResolvedValue({
       code: '3081', name: '聯亞', date: '2026-08-26', open: 3010, high: 3255,
       low: 2940, close: 3255, volume: 7470, previousClose: 2960,
+      updatedAt: '2026-08-26T05:30:00.000Z',
     });
 
     const response = await GET(new NextRequest('http://localhost/api/stock/quote?symbol=3081.TWO'));

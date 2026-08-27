@@ -168,7 +168,7 @@ export function TodayBriefing({ market = 'TW' }: Props) {
           const raw = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const r = await fetch(`/api/stock/quote?symbol=${encodeURIComponent(raw)}`)
             .then(rr => rr.ok ? rr.json() : null).catch(() => null);
-          return [h.symbol, typeof r?.close === 'number' ? r.close : 0] as const;
+          return [h.symbol, r?.stale !== true && typeof r?.close === 'number' ? r.close : 0] as const;
         }));
         if (!canceled) setHoldingPrices(Object.fromEntries(prices.filter(([, p]) => p > 0)));
       }

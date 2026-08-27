@@ -19,4 +19,17 @@ describe('Next.js deployment asset safety', () => {
     expect(serviceWorker.slice(bypassIndex, bypassIndex + 80)).toMatch(/return/);
     expect(bypassIndex).toBeLessThan(runtimeCacheIndex);
   });
+
+  test('service worker never caches user-visible quote APIs', () => {
+    const serviceWorker = fs.readFileSync(path.join(root, 'public/sw.js'), 'utf8');
+    const networkOnly = serviceWorker.slice(
+      serviceWorker.indexOf('const NETWORK_ONLY'),
+      serviceWorker.indexOf('const MEDIUM_TTL'),
+    );
+    expect(networkOnly).toContain('"/api/realtime"');
+    expect(networkOnly).toContain('"/api/stock"');
+    expect(networkOnly).toContain('"/api/portfolio/quotes"');
+    expect(serviceWorker).not.toContain('async function networkFirst');
+    expect(serviceWorker).toContain('CACHE_VERSION = "v4"');
+  });
 });

@@ -26,4 +26,14 @@ describe('使用者報價新鮮度契約', () => {
       status: 'final',
     });
   });
+
+  test.each(['2026-99-99', '2026-02-30', '2026-08-28'])(
+    '無效或未來日期 %s 不得通過新鮮度檢查',
+    asOf => {
+      expect(assessQuoteFreshness('TW', asOf, new Date('2026-08-27T07:00:00.000Z'))).toMatchObject({
+        stale: true,
+        status: 'delayed',
+      });
+    },
+  );
 });

@@ -10,6 +10,9 @@ import { isAfterMarketClose, isMarketPollingWindow } from '@/lib/datasource/mark
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
+import { assessQuoteFreshness } from '@/lib/datasource/quoteFreshness';
+import { getQuoteSnapshotDate } from '@/lib/datasource/marketHours';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,6 +20,16 @@ export const dynamic = 'force-dynamic';
 const schema = z.object({
   symbol: z.string().min(1),
 });
+
+function isFreshProviderQuote(
+  market: 'TW' | 'CN',
+  date: string | undefined,
+  updatedAt: string | undefined,
+  now = new Date(),
+): boolean {
+  if (!date || !updatedAt) return false;
+  return !assessIntradayFreshness(market, { date, updatedAt, count: 1 }, now).stale;
+}
 
 /**
  * 輕量即時報價 endpoint — 走圖 polling 用，只回 OHLCV。
@@ -62,6 +75,7 @@ export async function GET(req: NextRequest) {
   // Server-side defense in depth: 新版前台會在休市時停止 timer，但部署前已開啟的
   // 舊分頁可能繼續每 30 秒呼叫。路由層仍要擋住，避免 MIS/Fugle 被無效輪詢放大。
   if (market && !isMarketPollingWindow(market)) {
+    const expectedDate = getQuoteSnapshotDate(market);
     const suffix = market === 'TW'
       ? (/\.TWO$/i.test(symbol) ? 'TWO' : 'TW')
       : (/\.SS$/i.test(symbol) || (!/\.SZ$/i.test(symbol) && /^[69]/.test(pureCode)) ? 'SS' : 'SZ');
@@ -86,7 +100,7 @@ export async function GET(req: NextRequest) {
             volume: last.volume,
           };
           // 正式日線已到今天就直接採用；不用再讀 L2。
-          if (last.date >= today) {
+          if (last.date === expectedDate) {
             return apiOk({
               symbol,
               date: last.date,
@@ -97,7 +111,7 @@ export async function GET(req: NextRequest) {
               volume: last.volume,
               source: 'l1',
               stale: false,
-            });
+            }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
           }
         }
       } catch { /* try next suffix */ }
@@ -109,7 +123,12 @@ export async function GET(req: NextRequest) {
     if (market === 'TW' && !isIndex && isAfterMarketClose('TW')) {
       try {
         const finalQuote = await getTWSESingleIntraday(pureCode);
-        if (finalQuote && finalQuote.close > 0 && finalQuote.date === today) {
+        if (
+          finalQuote
+          && finalQuote.close > 0
+          && finalQuote.date === expectedDate
+          && isFreshProviderQuote('TW', finalQuote.date, finalQuote.updatedAt)
+        ) {
           return apiOk({
             symbol,
             date: today,
@@ -119,8 +138,9 @@ export async function GET(req: NextRequest) {
             close: finalQuote.close,
             volume: finalQuote.volume,
             source: 'mis-final',
+            updatedAt: finalQuote.updatedAt,
             stale: false,
-          });
+          }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
         }
       } catch { /* 再退回可信的最終 L2／舊 L1 */ }
     }
@@ -129,15 +149,15 @@ export async function GET(req: NextRequest) {
     // 且確有成交」的今日 L2 最終快照墊檔。委託簿推估價不得冒充今日收盤價。
     if (!isIndex) {
       try {
-        const snapshot = await readIntradaySnapshot(market, today);
+        const snapshot = await readIntradaySnapshot(market, expectedDate);
         const sq = snapshot?.quotes.find(q => q.symbol === pureCode);
-        const isFinal = snapshot?.date === today
-          && isFinalTradingSnapshot(market, today, snapshot.updatedAt);
+        const isFinal = snapshot?.date === expectedDate
+          && isFinalTradingSnapshot(market, expectedDate, snapshot.updatedAt);
         const isConfirmedTrade = market !== 'TW' || sq?.isActualTrade === true;
         if (isFinal && isConfirmedTrade && sq && sq.close > 0) {
           return apiOk({
             symbol,
-            date: today,
+            date: expectedDate,
             open: sq.open,
             high: sq.high,
             low: sq.low,
@@ -146,19 +166,27 @@ export async function GET(req: NextRequest) {
             source: 'l2-final',
             updatedAt: snapshot.updatedAt,
             stale: false,
-          });
+          }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
         }
       } catch { /* 保留可信的前一交易日 L1 */ }
     }
 
     if (l1Fallback) {
-      return apiOk({ symbol, ...l1Fallback, source: 'l1', stale: true });
+      const freshness = assessQuoteFreshness(market, l1Fallback.date);
+      return apiOk({
+        symbol,
+        ...l1Fallback,
+        source: 'l1',
+        stale: freshness.stale,
+        status: freshness.status,
+        ...(freshness.staleReason ? { staleReason: freshness.staleReason } : {}),
+      }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
     }
     return apiError(`無法取得 ${symbol} 報價`, 404);
   }
 
   let quote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
-  let quoteDate: string = today;  // 預設 today（live quote 路徑）；L1 fallback 會改成真實 last.date
+  let quoteDate: string | null = null;
   let quoteSource: string | undefined;
   let quoteUpdatedAt: string | undefined;
   let stale = false;
@@ -183,9 +211,11 @@ export async function GET(req: NextRequest) {
     // 1) MIS 單股即時
     try {
       const q = await getTWSESingleIntraday(pureCode);
-      if (q && q.close > 0 && (!q.date || q.date === today)) {
+      if (q && q.close > 0 && q.date === today && isFreshProviderQuote('TW', q.date, q.updatedAt)) {
         quote = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
-        quoteDate = q.date ?? today;
+        quoteDate = q.date;
+        quoteSource = 'mis';
+        quoteUpdatedAt = q.updatedAt;
       }
     } catch { /* fallthrough */ }
 
@@ -193,9 +223,11 @@ export async function GET(req: NextRequest) {
     if (!quote && isFugleAvailable()) {
       try {
         const fq = await getFugleQuote(pureCode);
-        if (fq && fq.close > 0) {
+        if (fq && fq.close > 0 && fq.date === today && isFreshProviderQuote('TW', fq.date, fq.updatedAt)) {
           quote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
-          quoteDate = fq.date ?? today;
+          quoteDate = fq.date;
+          quoteSource = 'fugle';
+          quoteUpdatedAt = fq.updatedAt;
         }
       } catch { /* fallthrough */ }
     }
@@ -211,10 +243,15 @@ export async function GET(req: NextRequest) {
     //    F2 修正：原本只走 EastMoney 單次、無重試/fallback → 間歇 404「無法取得報價」。
     try {
       const tq = await fetchQuote(`${pureCode}.${cnSuffix}`);
-      if (tq && tq.price > 0 && tq.open > 0 && tq.high > 0 && tq.low > 0) {
+      if (
+        tq && tq.price > 0 && tq.open > 0 && tq.high > 0 && tq.low > 0
+        && tq.date === today && isFreshProviderQuote('CN', tq.date, tq.updatedAt)
+      ) {
         // 騰訊量單位「手」、CN L1 基準「股」→ ×100 對齊
         quote = { open: tq.open, high: tq.high, low: tq.low, close: tq.price, volume: tq.volumeLots * 100 };
-        quoteDate = tq.date ?? today;
+        quoteDate = tq.date;
+        quoteSource = 'tencent';
+        quoteUpdatedAt = tq.updatedAt;
       }
     } catch { /* fallthrough */ }
 
@@ -222,9 +259,11 @@ export async function GET(req: NextRequest) {
     if (!quote) {
       try {
         const q = await getEastMoneySingleQuote(pureCode, cnSuffix);
-        if (q && q.close > 0) {
+        if (q && q.close > 0 && q.date === today && isFreshProviderQuote('CN', q.date, q.updatedAt)) {
           quote = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
-          quoteDate = q.date ?? today;
+          quoteDate = q.date;
+          quoteSource = 'eastmoney';
+          quoteUpdatedAt = q.updatedAt;
         }
       } catch { /* fallthrough */ }
     }
@@ -235,8 +274,14 @@ export async function GET(req: NextRequest) {
     try {
       const snapshot = await readIntradaySnapshot(market as 'TW' | 'CN', today);
       const sq = snapshot?.quotes.find(q => q.symbol === pureCode);
-      if (sq && sq.close > 0 && (market !== 'TW' || sq.isActualTrade !== false)) {
+      const freshSnapshot = snapshot
+        ? !assessIntradayFreshness(market, snapshot).stale
+        : false;
+      if (freshSnapshot && sq && sq.close > 0 && (market !== 'TW' || sq.isActualTrade !== false)) {
         quote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
+        quoteDate = snapshot!.date;
+        quoteSource = 'l2';
+        quoteUpdatedAt = snapshot!.updatedAt;
       }
     } catch { /* fallthrough */ }
   }
@@ -259,5 +304,16 @@ export async function GET(req: NextRequest) {
 
   if (!quote) return apiError(`無法取得 ${symbol} 報價`, 404);
 
-  return apiOk({ symbol, date: quoteDate, ...quote, source: quoteSource, updatedAt: quoteUpdatedAt, stale });
+  const freshness = market ? assessQuoteFreshness(market, quoteDate) : null;
+  stale ||= freshness?.stale ?? false;
+  return apiOk({
+    symbol,
+    date: quoteDate,
+    ...quote,
+    source: quoteSource,
+    updatedAt: quoteUpdatedAt,
+    stale,
+    status: freshness?.status,
+    ...(freshness?.staleReason ? { staleReason: freshness.staleReason } : {}),
+  }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
 }

@@ -74,9 +74,9 @@ export default function RiskDashboardPage() {
           .then(r => (r.ok ? r.json() : null))
           .then(json => {
             if (canceled || !json) return;
-            const quotes = (json.quotes ?? []) as Array<{ symbol: string; price: number }>;
+            const quotes = (json.quotes ?? []) as Array<{ symbol: string; price: number; stale?: boolean }>;
             const priceMap: Record<string, number> = {};
-            for (const q of quotes) if (q.price > 0) priceMap[q.symbol] = q.price;
+            for (const q of quotes) if (q.price > 0 && !q.stale) priceMap[q.symbol] = q.price;
             setPrices(priceMap);
           })
           .catch(() => {});

@@ -6,11 +6,12 @@ import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { getQuoteSnapshotDate, isAfterMarketClose, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
-import { getTWSESingleIntraday, resolveMisTradePrice, parseMisPrice } from '@/lib/datasource/TWSERealtime';
+import { getTWSESingleIntraday, resolveMisTradePrice, parseMisPrice, parseMisDate, parseMisUpdatedAt } from '@/lib/datasource/TWSERealtime';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
 import { expectedTwSymbol } from '@/lib/datasource/twSymbolMarket';
 import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 import { assessQuoteFreshness, type QuoteFreshnessStatus } from '@/lib/datasource/quoteFreshness';
+import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 
 // mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
 const MIS_HEADERS: Record<string, string> = {
@@ -20,15 +21,8 @@ const MIS_HEADERS: Record<string, string> = {
   'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
 };
 
-// ── 無資料負快取（避免 polling 對已下市/打錯代號重跑整條 fallback chain）──────────────
-// 已下市 / 打錯 / 暫時無報價的代號，冷查詢會把 TWSE(10s)→Fugle→L2 或 騰訊(5s)→EastMoney→L2
-// 全跑一輪才放棄；前台每 30s polling 重來一次很浪費（重啟後上游冷時單一冷標的就要 3-4 秒）。
-// 命中報價的代號永遠即時、會清掉負快取，不影響有效標的（合約 #6：不改有效標的的 provider 路由，
-// 只是「確認過這輪沒資料」的代號短期略過）。指數(^TWII)/純英文(NVDA) market='unknown' 本來就
-// 不進 tw/cn、不打上游，已是 fail-fast；負快取補的是「數字格式正確但其實查不到」的代號。
-const NO_DATA_TTL_MS = 90_000;
-const noDataUntil = new Map<string, number>(); // resolved symbol → 略過到期的 epoch ms
-
+// 暫時無報價不能做負快取：上游恢復後下一輪必須立刻重試，否則 30 秒 polling
+// 會被 90 秒「無資料」記憶擋住，使用者仍看到舊價。
 // ═══════════════════════════════════════════════════════════════════════════════
 // 輕量即時報價 API — 只回傳 price + changePercent，用於持倉 polling
 // 支援台股（TWSE mis）+ 陸股（騰訊/東方財富）批次查詢
@@ -206,16 +200,20 @@ export async function fetchSameDayTWCloseQuotes(
 ): Promise<QuoteTick[]> {
   if (entries.length === 0 || !isAfterMarketClose('TW', now)) return [];
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
-  const settled = await Promise.all(entries.map(async (entry): Promise<QuoteTick | null> => {
+  const out: QuoteTick[] = [];
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < entries.length) {
+      const entry = entries[cursor++];
     const code = entry.resolved.replace(/\.(TW|TWO)$/i, '');
     try {
       const quote = await getTWSESingleIntraday(code);
-      if (!quote || quote.date !== today || !(quote.close > 0)) return null;
+      if (!quote || quote.date !== today || !(quote.close > 0)) continue;
       const previous = quote.previousClose ?? quote.close;
       const changePercent = previous > 0
         ? +((quote.close - previous) / previous * 100).toFixed(2)
         : 0;
-      return {
+      out.push({
         symbol: entry.original,
         canonicalSymbol: entry.resolved,
         price: quote.close,
@@ -225,12 +223,15 @@ export async function fetchSameDayTWCloseQuotes(
         source: 'mis-final',
         stale: false,
         status: 'final',
-      };
+        updatedAt: quote.updatedAt,
+      });
     } catch {
-      return null;
+      // 單檔失敗交給 L2/final L1，不阻斷其他持股。
     }
-  }));
-  return settled.filter((quote): quote is QuoteTick => quote !== null);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, entries.length) }, () => worker()));
+  return out;
 }
 
 // ── 台股即時報價（TWSE mis API）─────────────────────────────────────────────
@@ -266,7 +267,23 @@ async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
 
       // mis 對不存在的 channel（例如 6187 上櫃但被送 tse_）會回 d.c="" + 全 0 的空殼，
       // 直接跳過避免產生 ".TW" / ".TWO" 空殼結果
-      if (!sym || actualPrice <= 0) continue;
+      if (!sym) continue;
+      const asOf = parseMisDate(d.d as string | undefined) ?? null;
+      const updatedAt = parseMisUpdatedAt(d as Record<string, string | undefined>);
+      const volume = parseInt(String(d.v ?? '0').replace(/,/g, ''), 10) || 0;
+      if (actualPrice <= 0) {
+        // 今日尚無成交／停牌：昨收是合法參考價，但必須明確標 no-trade，不能冒充 live trade。
+        if (asOf && volume === 0 && prevClose > 0) {
+          found.add(sym);
+          const original = symbols.find(s => s.replace(/\.(TW|TWO)$/i, '') === sym);
+          results.push({
+            symbol: original ?? `${sym}.TW`, price: prevClose, changePercent: 0,
+            name: d.n as string || undefined, asOf, source: 'mis-no-trade', updatedAt,
+            stale: false, status: 'no-trade',
+          });
+        }
+        continue;
+      }
 
       const changePct = prevClose > 0
         ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2)
@@ -281,6 +298,9 @@ async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
         price: actualPrice,
         changePercent: changePct,
         name: d.n as string || undefined,
+        asOf,
+        source: 'mis',
+        updatedAt,
       });
     }
 
@@ -298,7 +318,21 @@ async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
           const sym = (d.c as string) || '';
           const prevClose = parseMisPrice(d.y);
           const actualPrice = resolveMisTradePrice(d as Record<string, string | undefined>);
-          if (!sym || actualPrice <= 0) continue;
+          if (!sym) continue;
+          const asOf = parseMisDate(d.d as string | undefined) ?? null;
+          const updatedAt = parseMisUpdatedAt(d as Record<string, string | undefined>);
+          const volume = parseInt(String(d.v ?? '0').replace(/,/g, ''), 10) || 0;
+          if (actualPrice <= 0) {
+            if (asOf && volume === 0 && prevClose > 0) {
+              const original = missing.find(s => s.replace(/\.(TW|TWO)$/i, '') === sym);
+              results.push({
+                symbol: original ?? `${sym}.TWO`, price: prevClose, changePercent: 0,
+                name: d.n as string || undefined, asOf, source: 'mis-no-trade', updatedAt,
+                stale: false, status: 'no-trade',
+              });
+            }
+            continue;
+          }
           const changePct = prevClose > 0
             ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2)
             : 0;
@@ -308,6 +342,9 @@ async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
             price: actualPrice,
             changePercent: changePct,
             name: d.n as string || undefined,
+            asOf,
+            source: 'mis',
+            updatedAt,
           });
         }
       } catch { /* OTC retry failed */ }
@@ -329,60 +366,24 @@ async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
               ? +((fq.close - fq.prevClose) / fq.prevClose * 100).toFixed(2)
               : 0
           );
-          results.push({ symbol: sym, price: fq.close, changePercent: changePct, name: fq.name || undefined });
+          results.push({
+            symbol: sym,
+            price: fq.close,
+            changePercent: changePct,
+            name: fq.name || undefined,
+            asOf: fq.date ?? null,
+            source: 'fugle',
+            updatedAt: fq.updatedAt,
+          });
         }
       } catch { /* Fugle fallback failed */ }
     }));
-  }
-
-  // Fallback 2: L2 快照（Fugle 也失敗時用盤中快照）
-  const afterFugle = symbols.filter(
-    s => !results.some(r => r.symbol.replace(/\.(TW|TWO)$/i, '') === s.replace(/\.(TW|TWO)$/i, '')),
-  );
-  if (afterFugle.length > 0) {
-    try {
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
-      const snap = await readIntradaySnapshot('TW', today);
-      if (snap) {
-        for (const sym of afterFugle) {
-          const code = sym.replace(/\.(TW|TWO)$/i, '');
-          const q = snap.quotes.find(qq => qq.symbol === code);
-          if (q && q.close > 0) {
-            results.push({ symbol: sym, price: q.close, changePercent: q.changePercent ?? 0, name: q.name || undefined });
-          }
-        }
-      }
-    } catch { /* L2 fallback failed */ }
   }
 
   return results;
 }
 
 // ── 陸股即時報價（騰訊 → 東方財富 fallback）────────────────────────────────
-
-/** 騰訊一次拿 close+prevClose+name；EastMoney clist 收盤後 f2 不等於日K收盤（疑似盤後參考價），改 fallback */
-async function fetchCNTencentQuote(code: string, suffix?: 'SS' | 'SZ'): Promise<{ close: number; prevClose: number; name: string } | null> {
-  try {
-    // suffix 權威：避免 000001.SS 上證指數誤路由到 sz000001 平安銀行
-    const prefix = suffix === 'SS' ? 'sh'
-      : suffix === 'SZ' ? 'sz'
-      : code[0] === '6' || code[0] === '9' ? 'sh' : 'sz';
-    const url = `https://qt.gtimg.cn/q=${prefix}${code}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    const buf = await res.arrayBuffer();
-    const text = new TextDecoder('gbk').decode(buf);
-    const match = text.match(/="(.+)"/);
-    if (!match) return null;
-    const f = match[1].split('~');
-    const close = parseFloat(f[3]) || 0;
-    const prevClose = parseFloat(f[4]) || 0;
-    const name = f[1] || '';
-    if (close <= 0) return null;
-    return { close, prevClose, name };
-  } catch {
-    return null;
-  }
-}
 
 async function fetchCNQuotes(symbols: string[]): Promise<QuoteTick[]> {
   if (symbols.length === 0) return [];
@@ -394,16 +395,18 @@ async function fetchCNQuotes(symbols: string[]): Promise<QuoteTick[]> {
     const cnSuffix = /\.SS$/i.test(sym) ? 'SS' : /\.SZ$/i.test(sym) ? 'SZ' : undefined;
 
     // Tencent 優先：close 與日K收盤一致
-    const tencent = await fetchCNTencentQuote(code, cnSuffix);
-    if (tencent && tencent.close > 0) {
+    const tencent = await fetchQuote(sym);
+    if (tencent && tencent.price > 0) {
       const changePct = tencent.prevClose > 0
-        ? +((tencent.close - tencent.prevClose) / tencent.prevClose * 100).toFixed(2)
+        ? +((tencent.price - tencent.prevClose) / tencent.prevClose * 100).toFixed(2)
         : 0;
       results.push({
         symbol: sym,
-        price: tencent.close,
+        price: tencent.price,
         changePercent: changePct,
-        name: tencent.name || undefined,
+        asOf: tencent.date ?? null,
+        source: 'tencent',
+        updatedAt: tencent.updatedAt,
       });
       return;
     }
@@ -421,6 +424,9 @@ async function fetchCNQuotes(symbols: string[]): Promise<QuoteTick[]> {
           price: quote.close,
           changePercent: changePct,
           name: quote.name || undefined,
+          asOf: quote.date ?? null,
+          source: 'eastmoney',
+          updatedAt: quote.updatedAt,
         });
       }
     } catch { /* skip failed symbol */ }
@@ -439,16 +445,16 @@ async function fetchCNQuotes(symbols: string[]): Promise<QuoteTick[]> {
  *      fundgz 仍回 06-04=1.3956 → 必須以 lsjz 為準才不會抓到過期淨值。）
  * 2) fundgz.1234567.com.cn fallback：lsjz 掛掉時救場（dwjz + 估算漲跌 gszzl + name）。
  */
-async function fetchFundNav(code: string): Promise<{ nav: number; changePercent: number; name: string } | null> {
+async function fetchFundNav(code: string): Promise<{ nav: number; changePercent: number; name: string; asOf: string | null; source: string } | null> {
   try {
     const res = await fetch(
       `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`,
       { headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fundf10.eastmoney.com/' }, signal: AbortSignal.timeout(6000) },
     );
-    const json = await res.json() as { Data?: { LSJZList?: Array<{ DWJZ?: string; JZZZL?: string }> } };
+    const json = await res.json() as { Data?: { LSJZList?: Array<{ DWJZ?: string; JZZZL?: string; FSRQ?: string }> } };
     const row = json?.Data?.LSJZList?.[0];
     const nav = parseFloat(row?.DWJZ ?? '');
-    if (nav > 0) return { nav, changePercent: parseFloat(row?.JZZZL ?? '0') || 0, name: '' };
+    if (nav > 0) return { nav, changePercent: parseFloat(row?.JZZZL ?? '0') || 0, name: '', asOf: row?.FSRQ ?? null, source: 'eastmoney-nav' };
   } catch { /* try fundgz fallback */ }
 
   try {
@@ -459,9 +465,9 @@ async function fetchFundNav(code: string): Promise<{ nav: number; changePercent:
     const text = await res.text();
     const m = text.match(/jsonpgz\((\{.+?\})\)/);
     if (m) {
-      const d = JSON.parse(m[1]) as { dwjz?: string; gszzl?: string; name?: string };
+      const d = JSON.parse(m[1]) as { dwjz?: string; gszzl?: string; name?: string; jzrq?: string };
       const nav = parseFloat(d.dwjz ?? '');
-      if (nav > 0) return { nav, changePercent: parseFloat(d.gszzl ?? '0') || 0, name: d.name ?? '' };
+      if (nav > 0) return { nav, changePercent: parseFloat(d.gszzl ?? '0') || 0, name: d.name ?? '', asOf: d.jzrq ?? null, source: 'eastmoney-fundgz' };
     }
   } catch { /* give up */ }
 
@@ -475,7 +481,7 @@ async function fetchFundQuotes(symbols: string[]): Promise<QuoteTick[]> {
     const code = sym.replace(/\.OF$/i, '');
     const r = await fetchFundNav(code);
     if (r && r.nav > 0) {
-      results.push({ symbol: sym, price: r.nav, changePercent: r.changePercent, name: r.name || undefined });
+      results.push({ symbol: sym, price: r.nav, changePercent: r.changePercent, name: r.name || undefined, asOf: r.asOf, source: r.source });
     }
   }));
   return results;
@@ -499,10 +505,8 @@ export async function GET(req: NextRequest) {
   // 記住原始 key 供持倉輪詢套價，同時以股票主檔校正上市／上櫃後綴。
   const entries = await resolveQuoteEntries(rawSymbols);
 
-  // 負快取：略過近期確認「無資料」的代號，避免每次 polling 重跑整條 fallback chain。
-  // 有效/命中過的代號不在內，照常即時查；market='unknown' 本來就不查（已 fail-fast）。
-  const now = Date.now();
-  const fetchable = entries.filter(e => e.market !== 'unknown' && (noDataUntil.get(e.resolved) ?? 0) <= now);
+  // 每輪都重試有效市場代號；unknown 仍 fail-fast。
+  const fetchable = entries.filter(e => e.market !== 'unknown');
   const twEntries = fetchable.filter(e => e.market === 'TW');
   const cnEntries = fetchable.filter(e => e.market === 'CN');
   const fundEntries = fetchable.filter(e => e.market === 'FUND');
@@ -573,34 +577,50 @@ export async function GET(req: NextRequest) {
   const [cnFilled, twFilled] = await Promise.all([cnFallback(), twFallback()]);
   quotes.push(...cnFilled, ...twFilled);
 
-  // 更新負快取：這次有去抓的代號 —— 命中清除、仍缺則標記略過 NO_DATA_TTL_MS
-  for (const e of fetchable) {
-    if (quotes.some(q => q.symbol === e.original)) noDataUntil.delete(e.resolved);
-    else noDataUntil.set(e.resolved, now + NO_DATA_TTL_MS);
-  }
-  if (noDataUntil.size > 2000) { // 防無界成長：清掉過期項
-    for (const [k, exp] of noDataUntil) if (exp <= now) noDataUntil.delete(k);
-  }
-
   const namedQuotes = await enrichQuoteNames(quotes, entries);
   const checkedAt = new Date().toISOString();
   const annotatedQuotes = namedQuotes.map(quote => {
     const entry = entries.find(candidate => candidate.original === quote.symbol);
-    if (!entry || (entry.market !== 'TW' && entry.market !== 'CN')) return quote;
+    if (!entry) return quote;
+    if (entry.market === 'FUND') {
+      const validNavDate = typeof quote.asOf === 'string'
+        && /^\d{4}-\d{2}-\d{2}$/.test(quote.asOf)
+        && Number.isFinite(new Date(`${quote.asOf}T00:00:00Z`).getTime());
+      return {
+        ...quote,
+        stale: !validNavDate,
+        status: validNavDate ? 'final' as const : 'delayed' as const,
+        ...(!validNavDate ? { staleReason: '基金來源未提供有效淨值日期' } : {}),
+      };
+    }
+    if (entry.market !== 'TW' && entry.market !== 'CN') return quote;
 
     // 即時 provider 成功時，該路徑已驗證為目前 session；休市 L1/MIS/L2 則在上方帶入真實日期。
-    const asOf = quote.asOf ?? getQuoteSnapshotDate(entry.market);
+    const asOf = quote.asOf ?? null;
     const freshness = assessQuoteFreshness(entry.market, asOf);
+    const sourceFreshness = isMarketPollingWindow(entry.market)
+      && quote.source !== 'l1'
+      && quote.status !== 'no-trade'
+      ? assessIntradayFreshness(entry.market, {
+          date: asOf ?? '',
+          updatedAt: quote.updatedAt ?? '',
+          count: quote.price > 0 ? 1 : 0,
+        })
+      : null;
+    const sourceStale = sourceFreshness?.stale ?? false;
+    const staleReason = quote.staleReason
+      ?? freshness.staleReason
+      ?? (sourceStale ? sourceFreshness?.reason ?? '行情來源時間無效' : undefined);
     return {
       ...quote,
       asOf: freshness.asOf,
-      source: quote.source ?? (isMarketPollingWindow(entry.market) ? 'realtime' : 'l1'),
-      stale: quote.stale ?? freshness.stale,
-      status: quote.status ?? freshness.status,
-      ...(quote.staleReason || freshness.staleReason
-        ? { staleReason: quote.staleReason ?? freshness.staleReason }
-        : {}),
-      updatedAt: quote.updatedAt ?? checkedAt,
+      source: quote.source ?? 'unknown',
+      stale: quote.stale === true || freshness.stale || sourceStale,
+      status: quote.stale === true || freshness.stale || sourceStale
+        ? 'delayed'
+        : (quote.status ?? freshness.status),
+      ...(staleReason ? { staleReason } : {}),
+      ...(quote.updatedAt ? { updatedAt: quote.updatedAt } : {}),
     };
   });
 
@@ -617,6 +637,6 @@ export async function GET(req: NextRequest) {
       staleSymbols,
       missingSymbols,
     },
-    { headers: { 'Cache-Control': 'max-age=15, stale-while-revalidate=30' } },
+    { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } },
   );
 }

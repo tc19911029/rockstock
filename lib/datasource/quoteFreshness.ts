@@ -1,6 +1,6 @@
 import { getQuoteSnapshotDate, isMarketOpen } from '@/lib/datasource/marketHours';
 
-export type QuoteFreshnessStatus = 'live' | 'final' | 'delayed';
+export type QuoteFreshnessStatus = 'live' | 'final' | 'delayed' | 'no-trade';
 
 export interface QuoteFreshnessAssessment {
   asOf: string | null;
@@ -22,8 +22,9 @@ export function assessQuoteFreshness(
   now = new Date(),
 ): QuoteFreshnessAssessment {
   const expectedDate = getQuoteSnapshotDate(market, now);
-  const normalized = asOf && /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf : null;
-  const stale = normalized === null || normalized < expectedDate;
+  const normalized = normalizeCalendarDate(asOf);
+  // Future dates are provider corruption/clock errors, not fresh data.
+  const stale = normalized === null || normalized !== expectedDate;
 
   if (stale) {
     return {
@@ -43,4 +44,16 @@ export function assessQuoteFreshness(
     stale: false,
     status: isMarketOpen(market, now) ? 'live' : 'final',
   };
+}
+
+function normalizeCalendarDate(value: string | null | undefined): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) return null;
+  return value;
 }

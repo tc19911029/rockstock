@@ -11,6 +11,7 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 // ⚠️ 只 import 純狀態模組（無 fs/path）— 維持本檔 Edge-safe 邊界（見檔頭鐵律 4）。
 import { isTranscriptionActive } from '@/lib/youtube/transcriptionLock';
 import { createSingleFlightRunner } from '@/lib/scheduler/singleFlight';
+import { sendNtfy } from '@/lib/notify/ntfy';
 
 function localUrl(path: string): string {
   const port = process.env.PORT || '3000';
@@ -256,8 +257,9 @@ export async function register() {
   // ── 盤中：L2 刷新（update-intraday） + watchdog ──
   // 2026-05-21 加 watchdog：每輪刷新後 check L2 距上次成功 > 10 分鐘就 console.error
   // 背景：新 Mac 5/20 12:10 L2 polling 突然停 80 分鐘沒人發現 → L1 ~180 檔錯
+  const lastL2AlertAt: Record<'TW' | 'CN', number> = { TW: 0, CN: 0 };
   async function refreshAndScan(market: 'TW' | 'CN'): Promise<boolean> {
-    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return false;
+    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return true;
 
     const data = await callRoute(
       `/api/cron/update-intraday?market=${market}`,
@@ -293,6 +295,15 @@ export async function register() {
           }),
           signal: AbortSignal.timeout(5000),
         }).catch(() => {});
+      }
+      if (Date.now() - lastL2AlertAt[market] >= 30 * 60_000) {
+        const notify = await sendNtfy({
+          title: `RockStock ${market} L2 行情異常`,
+          message: `${market} 全市場行情刷新沒有產生有效快照，alertLevel=${alertLevel}。系統將繼續重試。`,
+          tags: ['rotating_light', 'chart_with_downwards_trend'],
+          priority: 5,
+        });
+        if (notify.ok) lastL2AlertAt[market] = Date.now();
       }
     }
     return !(payload as { alert?: boolean }).alert

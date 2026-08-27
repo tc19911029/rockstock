@@ -161,6 +161,17 @@ export async function GET(req: NextRequest) {
 
     const targets: ('TW' | 'CN')[] = marketParam ? [marketParam] : ['TW', 'CN'];
     const results = await Promise.all(targets.map(m => fetchMarketHealth(baseUrl, m)));
+    let quoteEndToEnd: { ok: boolean; checkedAt?: string; issues?: unknown[] } = { ok: false, issues: [{ reason: 'quote health 未執行' }] };
+    try {
+      const quoteResponse = await fetch(`${baseUrl}/api/health/quotes`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(30_000),
+      });
+      quoteEndToEnd = await quoteResponse.json() as typeof quoteEndToEnd;
+      if (!quoteResponse.ok) quoteEndToEnd.ok = false;
+    } catch (error) {
+      quoteEndToEnd = { ok: false, issues: [{ reason: error instanceof Error ? error.message : String(error) }] };
+    }
 
     // 用最早觸發的市場 lastTradingDay 當檔名 key（兩市場可能相差 1 天，取較早者較穩）
     const dateKey = getLastTradingDay(targets[0]);
@@ -184,14 +195,16 @@ export async function GET(req: NextRequest) {
       if (!seen.has(old.market)) mergedMarkets.push(old);
     }
     // 單市場排程也必須把已保存的另一市場一起納入總燈號，不能只看本輪 target 假綠。
-    const overall = deriveOverallLevel(mergedMarkets);
+    const marketOverall = deriveOverallLevel(mergedMarkets);
+    const overall = quoteEndToEnd.ok ? marketOverall : 'red';
 
     const snapshot = {
-      version: 1,
+      version: 2,
       dateKey,
       generatedAt: new Date().toISOString(),
       overall,
       markets: mergedMarkets,
+      quoteEndToEnd,
     };
 
     await atomicFsPut(fullPath, JSON.stringify(snapshot, null, 2));
@@ -212,6 +225,9 @@ export async function GET(req: NextRequest) {
       const lines: string[] = [
         `🚨 RockStock 資料健康警示 — ${dateKey} ${overall.toUpperCase()}`,
       ];
+      if (!quoteEndToEnd.ok) {
+        lines.push(`使用者行情出口不一致：${(quoteEndToEnd.issues ?? []).length} 個問題`);
+      }
       for (const r of results) {
         const coverPct = r.coverageRate != null ? `${(r.coverageRate * 100).toFixed(1)}%` : 'n/a';
         lines.push(

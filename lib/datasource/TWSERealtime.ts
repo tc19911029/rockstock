@@ -25,6 +25,8 @@ export interface TWSEQuote {
   date?: string;      // 資料日期 YYYY-MM-DD（由 API 的民國日期欄位解析）
   /** false 表示 close 只是委買/委賣推估價，不可拿來畫 K 棒或封存日線。 */
   isActualTrade?: boolean;
+  /** 行情來源本身的最後更新時間；不可用 API request 完成時間代替。 */
+  updatedAt?: string;
 }
 
 const REALTIME_CACHE_KEY = 'twse:realtime:all';
@@ -220,7 +222,6 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
   if (cached) return cached.get(code) ?? null;
 
   // 快取 miss：只查這一檔，不拉全市場
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
   try {
     // 嘗試上市(tse)和上櫃(otc)兩種
     const exCh = `tse_${code}.tw|otc_${code}.tw`;
@@ -241,7 +242,8 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
     if (close <= 0) return null;
     const prevClose = parseMisPrice(d.y);
     // 使用 mis.twse 回傳的實際日期（d.d 格式 "20260416"），避免盤後硬編碼 today 產生假 K 棒
-    const misDate = d.d ? `${d.d.slice(0, 4)}-${d.d.slice(4, 6)}-${d.d.slice(6, 8)}` : today;
+    const misDate = parseMisDate(d.d);
+    if (!misDate) return null;
     return {
       code: d.c || code,
       name: d.n?.trim() || UNRESOLVED_STOCK_NAME,
@@ -252,6 +254,7 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
       volume: Math.round(parseInt((d.v || '0').replace(/,/g, ''), 10)), // mis.twse d.v 已是張（對齊 TWSE OpenAPI / TPEx），實測 2330 d.v=48544 === TWSE歷史÷1000後=48544
       previousClose: prevClose > 0 ? prevClose : undefined,
       date: misDate,
+      updatedAt: parseMisUpdatedAt(d),
     };
   } catch {
     return null;
@@ -295,6 +298,33 @@ export function parseMisPrice(s: string | undefined): number {
   if (!s || s === '-') return 0;
   const v = parseFloat(s);
   return isNaN(v) ? 0 : v;
+}
+
+export function parseMisDate(value: string | undefined): string | undefined {
+  if (!value || !/^\d{8}$/.test(value)) return undefined;
+  const formatted = `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+  const [year, month, day] = formatted.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day
+    ? formatted
+    : undefined;
+}
+
+/** 解析 MIS 自帶時間戳；若 tlong 缺失，才使用 d.d + d.t（台北時區）。 */
+export function parseMisUpdatedAt(d: Record<string, string | undefined>): string | undefined {
+  const raw = Number(d.tlong);
+  if (Number.isFinite(raw) && raw > 0) {
+    const millis = raw >= 1e12 ? raw : raw * 1000;
+    const date = new Date(millis);
+    if (Number.isFinite(date.getTime())) return date.toISOString();
+  }
+  const date = parseMisDate(d.d);
+  const time = d.t && /^\d{2}:\d{2}:\d{2}$/.test(d.t) ? d.t : undefined;
+  if (!date || !time) return undefined;
+  const parsed = new Date(`${date}T${time}+08:00`);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
 }
 
 /**
@@ -511,6 +541,7 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
           previousClose: prevClose > 0 ? prevClose : undefined,
           date: today, // 確實是今天的即時數據
           isActualTrade: actualTrade > 0,
+          updatedAt: parseMisUpdatedAt(d),
         });
       }
     } catch (err) {

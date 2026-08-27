@@ -14,6 +14,7 @@ export const maxDuration = 60;
 
 let lastAlertFingerprint = '';
 let lastAlertAt = 0;
+let hadActiveFailure = false;
 const ALERT_DEDUPE_MS = 30 * 60_000;
 
 function baseUrl(req: NextRequest): string {
@@ -43,7 +44,19 @@ async function monitoredSymbols(): Promise<string[]> {
   return [...out].slice(0, 50);
 }
 
-async function triggerL2Recovery(req: NextRequest): Promise<boolean> {
+export function isRecoveryPayloadHealthy(
+  responseOk: boolean,
+  body: { ok?: boolean; alert?: boolean; alertLevel?: string; count?: number; skipped?: boolean } | null,
+): boolean {
+  return responseOk
+    && body?.ok === true
+    && body.alert !== true
+    && body.alertLevel !== 'critical'
+    && body.skipped !== true
+    && (body.count ?? 0) > 0;
+}
+
+export async function triggerL2Recovery(req: NextRequest): Promise<boolean> {
   const headers: Record<string, string> = {};
   if (process.env.CRON_SECRET) headers.authorization = `Bearer ${process.env.CRON_SECRET}`;
   try {
@@ -51,7 +64,14 @@ async function triggerL2Recovery(req: NextRequest): Promise<boolean> {
       headers,
       signal: AbortSignal.timeout(25_000),
     });
-    return response.ok;
+    const body = await response.json().catch(() => null) as {
+      ok?: boolean;
+      alert?: boolean;
+      alertLevel?: string;
+      count?: number;
+      skipped?: boolean;
+    } | null;
+    return isRecoveryPayloadHealthy(response.ok, body);
   } catch {
     return false;
   }
@@ -70,18 +90,19 @@ export async function GET(req: NextRequest) {
     let recoveryAttempted = false;
     let recoverySucceeded = false;
 
-    if (!result.ok) {
+    const initiallyFailed = !result.ok;
+    if (initiallyFailed) {
       recoveryAttempted = true;
       recoverySucceeded = await triggerL2Recovery(req);
       result = await runQuoteEndToEndProbe(args);
     }
 
     let alertSent = false;
+    let recoveryAlertSent = false;
     if (!result.ok) {
+      hadActiveFailure = true;
       const fingerprint = result.issues.map(issue => `${issue.surface}:${issue.symbol}`).sort().join('|');
       if (fingerprint !== lastAlertFingerprint || Date.now() - lastAlertAt >= ALERT_DEDUPE_MS) {
-        lastAlertFingerprint = fingerprint;
-        lastAlertAt = Date.now();
         const detail = result.issues.slice(0, 8).map(issue => `${issue.surface}/${issue.symbol}: ${issue.reason}`).join('\n');
         const notify = await sendNtfy({
           title: 'RockStock 行情延遲警示',
@@ -90,6 +111,10 @@ export async function GET(req: NextRequest) {
           priority: 4,
         });
         alertSent = notify.ok;
+        if (notify.ok) {
+          lastAlertFingerprint = fingerprint;
+          lastAlertAt = Date.now();
+        }
 
         const webhook = process.env.HEALTH_ALERT_WEBHOOK_URL;
         if (webhook) {
@@ -103,9 +128,22 @@ export async function GET(req: NextRequest) {
         }
       }
       console.error('[quote-watchdog] end-to-end quote invariant failed', result.issues);
+    } else if (initiallyFailed || hadActiveFailure) {
+      const notify = await sendNtfy({
+        title: 'RockStock 行情已恢復',
+        message: `交易日 ${expectedDate} 的持股、單股、主圖與即時表格價格已重新一致。`,
+        tags: ['white_check_mark', 'chart_with_upwards_trend'],
+        priority: 3,
+      });
+      recoveryAlertSent = notify.ok;
+      if (notify.ok) {
+        hadActiveFailure = false;
+        lastAlertFingerprint = '';
+        lastAlertAt = 0;
+      }
     }
 
-    return apiOk({ result, recoveryAttempted, recoverySucceeded, alertSent }, { status: result.ok ? 200 : 503 });
+    return apiOk({ result, recoveryAttempted, recoverySucceeded, alertSent, recoveryAlertSent }, { status: result.ok ? 200 : 503 });
   } catch (error) {
     return apiError(error instanceof Error ? error.message : String(error), 503);
   }

@@ -165,14 +165,15 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
     for (let i = 0; i < watchSyms.length; i += 6) groups.push(watchSyms.slice(i, i + 6)); // 自選股：小批
 
     // 一批報價回來就「立刻」併入畫面：持倉那批最快、先亮，不必等慢批（自選股冷標的）跑完
-    const applyQuotes = (quotes: QuoteWire[]) => {
-      if (quotes.length === 0) return;
-      failureCountRef.current = 0; // 成功 reset 失敗計數
+    const applyQuotes = (quotes: QuoteWire[], requested: string[], missingSymbols: string[]) => {
+      failureCountRef.current = 0; // API 有回應就 reset；個別缺價會在該股票上明確標示
+      const missing = new Set(missingSymbols);
       setPrices(prev => {
         const next = { ...prev };
-        for (const q of quotes) {
-          if (q.price > 0) {
-            next[q.symbol] = {
+        for (const symbol of requested) {
+          const q = quotes.find(item => item.symbol === symbol);
+          if (q && q.price > 0) {
+            next[symbol] = {
               ...next[q.symbol],
               price: q.price,
               changePercent: q.changePercent,
@@ -181,6 +182,14 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
               stale: q.stale,
               staleReason: q.staleReason,
               ...(q.name ? { name: q.name } : {}),
+            };
+          } else {
+            next[symbol] = {
+              ...(next[symbol] ?? { price: 0, changePercent: 0 }),
+              loading: false,
+              stale: true,
+              error: '報價暫時缺失',
+              staleReason: missing.has(symbol) ? '本輪報價來源沒有回傳此股票' : '本輪報價無有效價格',
             };
           }
         }
@@ -210,14 +219,28 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
       try {
         const res = await fetch(
           `/api/portfolio/quotes?symbols=${encodeURIComponent(syms.join(','))}`,
-          { signal: ctrl.signal },
+          { signal: ctrl.signal, cache: 'no-store' },
         );
         if (!res.ok) return 0;
         const json = await res.json();
         const quotes = (json.quotes ?? []) as QuoteWire[];
-        applyQuotes(quotes); // 一回來就上畫面
+        const missingSymbols = Array.isArray(json.missingSymbols) ? json.missingSymbols as string[] : [];
+        applyQuotes(quotes, syms, missingSymbols); // 一回來就上畫面；缺的股票也會被標成 stale
         return quotes.length;
       } catch {
+        setPrices(prev => {
+          const next = { ...prev };
+          for (const symbol of syms) {
+            next[symbol] = {
+              ...(next[symbol] ?? { price: 0, changePercent: 0 }),
+              loading: false,
+              stale: true,
+              error: '更新失敗',
+              staleReason: '報價 API 無法連線；顯示值是上次成功資料',
+            };
+          }
+          return next;
+        });
         return 0; // 逾時/abort：放棄這批，不影響其他批，也不清空畫面上已有報價
       } finally {
         clearTimeout(timer);

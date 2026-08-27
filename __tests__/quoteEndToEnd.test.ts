@@ -11,10 +11,13 @@ describe('端到端報價 invariant', () => {
     jest.spyOn(global, 'fetch').mockImplementation(async input => {
       const url = String(input);
       if (url.includes('/api/portfolio/quotes')) {
-        return jsonResponse({ quotes: [{ symbol: '3081.TWO', asOf: '2026-08-27', stale: false }] });
+        return jsonResponse({ quotes: [{ symbol: '3081.TWO', price: 3370, asOf: '2026-08-27', stale: false }] });
       }
       if (url.includes('/api/stock/quote')) {
-        return jsonResponse({ date: '2026-08-27', stale: false });
+        return jsonResponse({ date: '2026-08-27', close: 3370, stale: false });
+      }
+      if (url.includes('/api/realtime')) {
+        return jsonResponse({ quotes: [{ symbol: '3081', price: 3370, date: '2026-08-27', stale: false }] });
       }
       return jsonResponse({ candles: [{ date: '2026-08-27', close: 3370 }] });
     });
@@ -30,10 +33,13 @@ describe('端到端報價 invariant', () => {
     jest.spyOn(global, 'fetch').mockImplementation(async input => {
       const url = String(input);
       if (url.includes('/api/portfolio/quotes')) {
-        return jsonResponse({ quotes: [{ symbol: '3081.TWO', asOf: '2026-08-26', stale: true }] });
+        return jsonResponse({ quotes: [{ symbol: '3081.TWO', price: 3255, asOf: '2026-08-26', stale: true }] });
       }
       if (url.includes('/api/stock/quote')) {
-        return jsonResponse({ date: '2026-08-27', stale: false });
+        return jsonResponse({ date: '2026-08-27', close: 3370, stale: false });
+      }
+      if (url.includes('/api/realtime')) {
+        return jsonResponse({ quotes: [{ symbol: '3081', price: 3370, date: '2026-08-27', stale: false }] });
       }
       return jsonResponse({ candles: [{ date: '2026-08-26', close: 3255 }] });
     });
@@ -48,5 +54,32 @@ describe('端到端報價 invariant', () => {
       expect.objectContaining({ surface: 'portfolio', symbol: '3081.TWO' }),
       expect.objectContaining({ surface: 'chart', symbol: '3081.TWO' }),
     ]));
+  });
+
+  test('日期相同但任一出口價格不同仍判定失敗，且健康檢查走使用者實際 local 圖表', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async input => {
+      const url = String(input);
+      if (url.includes('/api/portfolio/quotes')) {
+        return jsonResponse({ quotes: [{ symbol: '3081.TWO', price: 3370, asOf: '2026-08-27', stale: false }] });
+      }
+      if (url.includes('/api/stock/quote')) {
+        return jsonResponse({ date: '2026-08-27', close: 3500, stale: false });
+      }
+      if (url.includes('/api/realtime')) {
+        return jsonResponse({ quotes: [{ symbol: '3081', price: 3370, date: '2026-08-27', stale: false }] });
+      }
+      return jsonResponse({ candles: [{ date: '2026-08-27', close: 3370 }] });
+    });
+
+    const result = await runQuoteEndToEndProbe({
+      baseUrl: 'http://localhost:3000',
+      symbols: ['3081.TWO'],
+      expectedDate: '2026-08-27',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ surface: 'single', symbol: '3081.TWO' }),
+    ]));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('&local=1'))).toBe(true);
   });
 });

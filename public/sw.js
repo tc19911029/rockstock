@@ -1,5 +1,5 @@
 // RockStock Service Worker — runtime caching only
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const RUNTIME_CACHE = `rockstock-runtime-${CACHE_VERSION}`;
 
 // Cache duration by category (milliseconds)
@@ -18,10 +18,8 @@ const NETWORK_ONLY = [
   "/api/daytrade/",
   "/api/notify/",
   "/api/cron/",
-];
-
-// Routes with short TTL (realtime stock data)
-const SHORT_TTL = [
+  // User-visible prices must never fall back to Cache API data. A network
+  // failure must be visible as a failure so stale prices cannot look live.
   "/api/realtime",
   "/api/stock",
   "/api/portfolio/quotes",
@@ -60,29 +58,6 @@ function isExpired(response, maxAge) {
   const date = response.headers.get("sw-cache-time");
   if (!date) return true;
   return Date.now() - Number(date) > maxAge;
-}
-
-async function networkFirst(request, _maxAge) {
-  try {
-    const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(RUNTIME_CACHE);
-      const clone = response.clone();
-      const headers = new Headers(clone.headers);
-      headers.set("sw-cache-time", String(Date.now()));
-      const cached = new Response(clone.body, {
-        status: clone.status,
-        statusText: clone.statusText,
-        headers,
-      });
-      cache.put(request, cached);
-    }
-    return response;
-  } catch {
-    const cached = await caches.match(request);
-    if (cached) return cached;
-    return new Response("Network error", { status: 503 });
-  }
 }
 
 async function staleWhileRevalidate(request, maxAge) {
@@ -126,12 +101,6 @@ self.addEventListener("fetch", (event) => {
 
   // Network-only routes (SSE streaming, heavy compute)
   if (matchesAny(url, NETWORK_ONLY)) return;
-
-  // Short TTL routes (realtime stock data) — network first
-  if (matchesAny(url, SHORT_TTL)) {
-    event.respondWith(networkFirst(request, TTL.realtime));
-    return;
-  }
 
   // Medium TTL routes (fundamentals, chip) — stale while revalidate
   if (matchesAny(url, MEDIUM_TTL)) {

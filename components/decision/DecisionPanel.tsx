@@ -336,7 +336,7 @@ function HoldingBadge({ symbol }: { symbol: string }) {
       const list: MinimalHolding[] = p?.holdings ?? [];
       const h = list.find(it => it.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === raw);
       setHolding(h ?? null);
-      setCurrentPrice(typeof q?.close === 'number' && q.close > 0 ? q.close : null);
+      setCurrentPrice(q?.stale !== true && typeof q?.close === 'number' && q.close > 0 ? q.close : null);
       const bySymbol: Record<string, MinimalAlert> = a?.bySymbol ?? {};
       // a.bySymbol 帶 suffix key（'3661.TW'），直接 lookup
       setLatestAlert(bySymbol[symbol] ?? null);

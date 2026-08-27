@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { parseMisDate, parseMisPrice, parseMisUpdatedAt, resolveMisTradePrice } from '@/lib/datasource/TWSERealtime';
+import { assessQuoteFreshness, type QuoteFreshnessStatus } from '@/lib/datasource/quoteFreshness';
 
 // mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
 const MIS_HEADERS: Record<string, string> = {
@@ -27,15 +29,52 @@ export interface RealtimeQuote {
   changePct: number;   // 漲跌幅 %
   volume: number;      // 成交量（張，mis.twse.com.tw d.v 單位為張=1000股）
   time: string;        // 成交時間 HH:MM:SS
+  date: string | null;
+  updatedAt?: string;
+  source: 'mis';
+  stale: boolean;
+  status: QuoteFreshnessStatus;
+  staleReason?: string;
 }
 
 const realtimeQuerySchema = z.object({
   symbols: z.string().min(1),
 });
 
-function parsePrice(s: string): number {
-  const v = parseFloat(s);
-  return isNaN(v) ? 0 : v;
+export function parseRealtimeQuote(d: Record<string, string | undefined>, now = new Date()): RealtimeQuote | null {
+  const symbol = d.c ?? '';
+  const actualPrice = resolveMisTradePrice(d);
+  const prevClose = parseMisPrice(d.y);
+  const volume = parseInt(d.v?.replace(/,/g, '') || '0', 10);
+  const noTrade = actualPrice <= 0
+    && prevClose > 0
+    && volume === 0
+    && parseMisPrice(d.o) === 0
+    && parseMisPrice(d.h) === 0
+    && parseMisPrice(d.l) === 0;
+  if (!symbol || (actualPrice <= 0 && !noTrade)) return null;
+  const displayPrice = noTrade ? prevClose : actualPrice;
+  const date = parseMisDate(d.d) ?? null;
+  const freshness = assessQuoteFreshness('TW', date, now);
+  return {
+    symbol,
+    name: d.n?.trim() || '',
+    price: displayPrice,
+    open: parseMisPrice(d.o),
+    high: parseMisPrice(d.h),
+    low: parseMisPrice(d.l),
+    prevClose,
+    change: noTrade ? 0 : (prevClose > 0 ? +(actualPrice - prevClose).toFixed(2) : 0),
+    changePct: noTrade ? 0 : (prevClose > 0 ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2) : 0),
+    volume,
+    time: d.t || '',
+    date: freshness.asOf,
+    updatedAt: parseMisUpdatedAt(d),
+    source: 'mis',
+    stale: freshness.stale,
+    status: noTrade && !freshness.stale ? 'no-trade' : freshness.status,
+    ...(freshness.staleReason ? { staleReason: freshness.staleReason } : {}),
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -73,23 +112,8 @@ export async function GET(req: NextRequest) {
 
     const quotes: RealtimeQuote[] = [];
     for (const d of json?.msgArray ?? []) {
-      const price = parsePrice(d.z);  // 最新成交價（盤中可能是 '-'）
-      const prevClose = parsePrice(d.y);
-      const actualPrice = price > 0 ? price : parsePrice(d.l) || prevClose; // fallback
-
-      quotes.push({
-        symbol: d.c,
-        name: d.n?.trim() || '',
-        price: actualPrice,
-        open: parsePrice(d.o),
-        high: parsePrice(d.h),
-        low: parsePrice(d.l),
-        prevClose,
-        change: actualPrice > 0 && prevClose > 0 ? +(actualPrice - prevClose).toFixed(2) : 0,
-        changePct: actualPrice > 0 && prevClose > 0 ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2) : 0,
-        volume: parseInt(d.v?.replace(/,/g, '') || '0', 10),
-        time: d.t || '',
-      });
+      const quote = parseRealtimeQuote(d);
+      if (quote) quotes.push(quote);
     }
 
     // 如果有些股票用 tse_ 查不到，可能是上櫃股，用 otc_ 重試
@@ -105,27 +129,17 @@ export async function GET(req: NextRequest) {
         });
         const otcJson = await otcRes.json();
         for (const d of otcJson?.msgArray ?? []) {
-          const price = parsePrice(d.z);
-          const prevClose = parsePrice(d.y);
-          const actualPrice = price > 0 ? price : parsePrice(d.l) || prevClose;
-          quotes.push({
-            symbol: d.c,
-            name: d.n?.trim() || '',
-            price: actualPrice,
-            open: parsePrice(d.o),
-            high: parsePrice(d.h),
-            low: parsePrice(d.l),
-            prevClose,
-            change: actualPrice > 0 && prevClose > 0 ? +(actualPrice - prevClose).toFixed(2) : 0,
-            changePct: actualPrice > 0 && prevClose > 0 ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2) : 0,
-            volume: parseInt(d.v?.replace(/,/g, '') || '0', 10),
-            time: d.t || '',
-          });
+          const quote = parseRealtimeQuote(d);
+          if (quote && !quotes.some(item => item.symbol === quote.symbol)) quotes.push(quote);
         }
       } catch { /* OTC retry failed, skip */ }
     }
 
-    return apiOk({ count: quotes.length, quotes });
+    const missingSymbols = codes.filter(code => !quotes.some(quote => quote.symbol === code.replace(/\.(TW|TWO)$/i, '')));
+    return apiOk(
+      { count: quotes.length, quotes, missingSymbols, status: missingSymbols.length > 0 || quotes.some(q => q.stale) ? 'degraded' : 'fresh' },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } },
+    );
   } catch (e) {
     return apiError(String(e));
   }
