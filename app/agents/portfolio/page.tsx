@@ -16,6 +16,10 @@ import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
 import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
+import {
+  managementStrategyLabel,
+  resolveHoldingStrategyContext,
+} from '@/lib/portfolio/holdingStrategyContext';
 import type {
   PortfolioAction,
   PortfolioHolding,
@@ -291,15 +295,16 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
   };
 
   const submit = async () => {
-    if (!form.triggerSignal || !form.operationMode || !form.managementStrategy) {
-      setErr('請選擇進場字母、操作週期與唯一管理法；系統不會猜測舊預設。');
-      return;
-    }
     setBusy(true);
     setErr(null);
     try {
       const resolved = await fetchResolvedStockQuote(form.symbol);
       setForm(current => ({ ...current, symbol: resolved.canonicalSymbol, name: resolved.name }));
+      const ui = {
+        ...(form.triggerSignal ? { triggerSignal: form.triggerSignal } : {}),
+        ...(form.operationMode ? { operationMode: form.operationMode } : {}),
+        ...(form.managementStrategy ? { managementStrategy: form.managementStrategy } : {}),
+      };
       const payload = {
         symbol: resolved.canonicalSymbol,
         name: resolved.name,
@@ -311,11 +316,7 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
         target1: form.target1 ? Number(form.target1) : undefined,
         target2: form.target2 ? Number(form.target2) : undefined,
         notes: form.notes || undefined,
-        ui: {
-          triggerSignal: form.triggerSignal,
-          operationMode: form.operationMode,
-          managementStrategy: form.managementStrategy,
-        },
+        ...(Object.keys(ui).length > 0 ? { ui } : {}),
       };
       const res = await fetch('/api/agents/portfolio', {
         method: 'POST',
@@ -356,24 +357,27 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
         <HoldingFormField label="目標 1" field="target1" value={form.target1} onChange={updateField} type="number" placeholder="240" />
         <HoldingFormField label="目標 2" field="target2" value={form.target2} onChange={updateField} type="number" placeholder="260" />
         <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">進場字母 *</span>
+          <span className="text-xs text-muted-foreground">進場字母（選填）</span>
           <select value={form.triggerSignal} onChange={e => updateField('triggerSignal', e.target.value)} className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full">
-            <option value="">請選擇</option>
+            <option value="">尚未設定</option>
             {'ABCDEFGHIJKLM NOPQ'.replace(/\s/g, '').split('').filter(x => !['G','H','I'].includes(x)).map(letter => <option key={letter} value={letter}>{letter}</option>)}
           </select>
         </label>
         <label className="space-y-1">
-          <span className="text-xs text-muted-foreground">操作週期 *</span>
+          <span className="text-xs text-muted-foreground">操作週期（選填）</span>
           <select value={form.operationMode} onChange={e => updateField('operationMode', e.target.value)} className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full">
-            <option value="">請選擇</option><option value="short">短線</option><option value="long">長線</option>
+            <option value="">尚未設定</option><option value="short">短線</option><option value="long">長線</option>
           </select>
         </label>
         <label className="space-y-1 md:col-span-2">
-          <span className="text-xs text-muted-foreground">唯一管理法 *</span>
+          <span className="text-xs text-muted-foreground">持股管理法（選填）</span>
           <select value={form.managementStrategy} onChange={e => { const value = e.target.value; setForm(current => ({ ...current, managementStrategy: value as HoldingFormState['managementStrategy'], operationMode: value === 'short-ma' ? 'short' : value === 'ma20' ? 'long' : current.operationMode })); }} className="bg-secondary border border-border rounded px-2 py-1 text-sm w-full">
-            <option value="">請選擇</option><option value="short-ma">短線訊號均線</option><option value="ma20">MA20 長線</option><option value="kline">智慧 K 線</option><option value="triple-ma" disabled>三均線分批（待補執行狀態）</option>
+            <option value="">尚未設定</option><option value="short-ma">短線訊號均線</option><option value="ma20">MA20 長線</option><option value="kline">智慧 K 線</option><option value="triple-ma" disabled>三均線分批（待補執行狀態）</option>
           </select>
         </label>
+        <p className="col-span-2 md:col-span-4 text-xs text-muted-foreground">
+          策略可全部留空，之後再補；未設定時不會自動套用 B、短線或任何出場法。
+        </p>
         <div className="col-span-2 flex items-center gap-2">
           <button
             type="button"
@@ -401,7 +405,7 @@ function AddHoldingForm({ onAdded }: { onAdded: () => void }) {
       )}
       <Button
         onClick={submit}
-        disabled={busy || !form.symbol || !form.entryPrice || !form.shares || !form.triggerSignal || !form.operationMode || !form.managementStrategy}
+        disabled={busy || !form.symbol || !form.entryPrice || !form.shares}
         size="sm"
       >
         {busy ? '建立中…' : '建立'}
@@ -437,6 +441,7 @@ function HoldingCard({
   const currentPrice = reviewedPrice;
   const returnPct = hasPrice ? ((reviewedPrice - holding.entryPrice) / holding.entryPrice) * 100 : null;
   const actionCfg = review ? ACTION_CFG[review.action] : null;
+  const strategyContext = resolveHoldingStrategyContext(holding.ui);
 
   return (
     <div className="bg-card ring-1 ring-foreground/10 rounded-xl p-4 space-y-3">
@@ -482,6 +487,12 @@ function HoldingCard({
           <div className="font-mono text-foreground">{holding.target1 ?? '—'} / {holding.target2 ?? '—'}</div>
         </div>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        策略：{strategyContext.status === 'known'
+          ? `${strategyContext.triggerSignal} · ${strategyContext.operationMode === 'short' ? '短線' : '長線'} · ${managementStrategyLabel(strategyContext.managementStrategy)}`
+          : '尚未設定（只提供基本風險提醒）'}
+      </p>
 
       {/* Mini-Agent 判定 */}
       {review && (

@@ -709,10 +709,6 @@ function PortfolioAddBar() {
   async function handleAdd() {
     const sym = symbol.trim();
     if (!sym || !shares || !cost) return;
-    if (!triggerSignal || !operationMode || !managementStrategy) {
-      toast.error('請先選進場字母、操作週期與唯一管理法');
-      return;
-    }
     setLoading(true);
     try {
       const resolved = await fetchResolvedStockQuote(sym);
@@ -727,9 +723,9 @@ function PortfolioAddBar() {
         costPrice: Number(cost),
         buyDate: date,
         market: mkt,
-        triggerSignal: triggerSignal as PortfolioHolding['triggerSignal'],
-        operationMode: operationMode as NonNullable<PortfolioHolding['operationMode']>,
-        managementStrategy: managementStrategy as NonNullable<PortfolioHolding['managementStrategy']>,
+        ...(triggerSignal ? { triggerSignal: triggerSignal as PortfolioHolding['triggerSignal'] } : {}),
+        ...(operationMode ? { operationMode: operationMode as NonNullable<PortfolioHolding['operationMode']> } : {}),
+        ...(managementStrategy ? { managementStrategy: managementStrategy as NonNullable<PortfolioHolding['managementStrategy']> } : {}),
       });
       toast.success(`已新增 ${resolvedName}`);
       setSymbol(''); setShares(''); setCost(''); setDate(todayCST());
@@ -761,17 +757,18 @@ function PortfolioAddBar() {
         className="w-full text-[11px] bg-muted/40 border border-border rounded px-2 py-1 text-foreground placeholder-muted-foreground outline-none focus:border-blue-500"
       />
       <div className="grid grid-cols-3 gap-1.5">
-        <select value={triggerSignal} onChange={e => setTriggerSignal(e.target.value)} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
-          <option value="">進場字母</option>
+        <select aria-label="進場策略（選填）" value={triggerSignal} onChange={e => setTriggerSignal(e.target.value)} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
+          <option value="">策略未設定</option>
           {'AB CDEFJKLM NOPQ'.replace(/\s/g, '').split('').map(letter => <option key={letter} value={letter}>{letter}</option>)}
         </select>
-        <select value={operationMode} onChange={e => setOperationMode(e.target.value)} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
-          <option value="">操作週期</option><option value="short">短線</option><option value="long">長線</option>
+        <select aria-label="操作週期（選填）" value={operationMode} onChange={e => setOperationMode(e.target.value)} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
+          <option value="">週期未設定</option><option value="short">短線</option><option value="long">長線</option>
         </select>
-        <select value={managementStrategy} onChange={e => { const value = e.target.value; setManagementStrategy(value); if (value === 'short-ma') setOperationMode('short'); if (value === 'ma20') setOperationMode('long'); }} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
-          <option value="">管理法</option><option value="short-ma">訊號均線</option><option value="ma20">MA20</option><option value="kline">K線</option><option value="triple-ma" disabled>三均線（待補執行狀態）</option>
+        <select aria-label="持股管理法（選填）" value={managementStrategy} onChange={e => { const value = e.target.value; setManagementStrategy(value); if (value === 'short-ma') setOperationMode('short'); if (value === 'ma20') setOperationMode('long'); }} className="text-[10px] bg-muted/40 border border-border rounded px-1 py-1 text-foreground">
+          <option value="">管理法未設定</option><option value="short-ma">訊號均線</option><option value="ma20">MA20</option><option value="kline">K線</option><option value="triple-ma" disabled>三均線（待補執行狀態）</option>
         </select>
       </div>
+      <p className="text-[9px] text-muted-foreground">策略可留空，之後到持股頁補上。</p>
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <input
