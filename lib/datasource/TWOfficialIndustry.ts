@@ -129,6 +129,8 @@ export interface TpexCompanyInfoRow {
 }
 
 const CACHE_TTL = 24 * 60 * 60 * 1000;
+const LOCAL_FALLBACK_TTL = 60 * 60 * 1000;
+const OFFICIAL_FETCH_TIMEOUT_MS = 8_000;
 const MIN_TWSE_COMMON_STOCKS = 900;
 const MIN_TPEX_COMMON_STOCKS = 700;
 let rosterCache: { fetchedAt: number; stocks: TwOfficialIndustryStock[] } | null = null;
@@ -238,6 +240,87 @@ export function parseOfficialIndustryRows(
   return [...stocks.values()].sort((a, b) => a.code.localeCompare(b.code));
 }
 
+/**
+ * 從已封存且通過契約檢查的官方產業排行還原名單，供交易所 OpenAPI 429／斷線時冷啟動。
+ * 這不是另一套分類來源；檔案本身必須是相同 official_industry v4、完整雙市場母體。
+ */
+export function parseOfficialIndustrySectorFallback(input: unknown): TwOfficialIndustryStock[] | null {
+  if (!input || typeof input !== 'object') return null;
+  const file = input as {
+    classification?: { kind?: string; version?: number };
+    universe?: { stockCount?: number };
+    themes?: Array<{
+      industryCode?: string;
+      theme?: string;
+      members?: Array<{
+        code?: string;
+        name?: string;
+        symbol?: string;
+        market?: string;
+        industryCode?: string;
+      }>;
+    }>;
+  };
+  if (
+    file.classification?.kind !== TW_OFFICIAL_CLASSIFICATION.kind
+    || file.classification.version !== TW_OFFICIAL_CLASSIFICATION.version
+    || !Array.isArray(file.themes)
+  ) return null;
+
+  const byCode = new Map<string, TwOfficialIndustryStock>();
+  for (const theme of file.themes) {
+    const industryCode = clean(theme.industryCode);
+    if (!industryCode || !Array.isArray(theme.members)) return null;
+    for (const member of theme.members) {
+      const code = clean(member.code);
+      const name = clean(member.name);
+      const market = member.market === 'TWSE' || member.market === 'TPEx' ? member.market : null;
+      if (!validCommonStockCode(code) || !name || !market || clean(member.industryCode) !== industryCode) return null;
+      const industry = officialIndustryName(market, industryCode);
+      const expectedSymbol = `${code}.${market === 'TWSE' ? 'TW' : 'TWO'}`;
+      if (!industry || industry !== clean(theme.theme) || clean(member.symbol) !== expectedSymbol || byCode.has(code)) return null;
+      byCode.set(code, { code, name, market, symbol: expectedSymbol, industryCode, industry });
+    }
+  }
+
+  const stocks = [...byCode.values()].sort((left, right) => left.code.localeCompare(right.code));
+  const twseCount = stocks.filter((stock) => stock.market === 'TWSE').length;
+  const tpexCount = stocks.filter((stock) => stock.market === 'TPEx').length;
+  if (
+    stocks.length !== file.universe?.stockCount
+    || twseCount < MIN_TWSE_COMMON_STOCKS
+    || tpexCount < MIN_TPEX_COMMON_STOCKS
+  ) return null;
+  return stocks;
+}
+
+async function readLatestLocalOfficialRoster(): Promise<TwOfficialIndustryStock[] | null> {
+  try {
+    const [{ readdir, readFile }, path] = await Promise.all([
+      import('node:fs/promises'),
+      import('node:path'),
+    ]);
+    const directory = path.join(process.cwd(), 'data', 'sectors', 'TW');
+    const files = (await readdir(directory))
+      .filter((file) => /^\d{4}-\d{2}-\d{2}\.json$/.test(file))
+      .sort()
+      .reverse()
+      .slice(0, 10);
+    for (const file of files) {
+      try {
+        const parsed = JSON.parse(await readFile(path.join(directory, file), 'utf8')) as unknown;
+        const stocks = parseOfficialIndustrySectorFallback(parsed);
+        if (stocks) return stocks;
+      } catch {
+        // 單一封存檔破損就試前一個交易日；不可用半套名單。
+      }
+    }
+  } catch {
+    // 本地封存不存在（例如尚未產生資料的新環境）時維持官方來源錯誤。
+  }
+  return null;
+}
+
 export function groupOfficialIndustryStocks(
   stocks: TwOfficialIndustryStock[],
 ): TwOfficialIndustryGroup[] {
@@ -280,13 +363,19 @@ async function fetchRows<T>(url: string): Promise<T[]> {
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
-      if (!response.ok) throw new Error(`官方產業資料 HTTP ${response.status}: ${url}`);
+      const response = await fetch(url, { signal: AbortSignal.timeout(OFFICIAL_FETCH_TIMEOUT_MS) });
+      if (!response.ok) {
+        const error = new Error(`官方產業資料 HTTP ${response.status}: ${url}`) as Error & { status?: number };
+        error.status = response.status;
+        throw error;
+      }
       const rows = await response.json() as unknown;
       if (!Array.isArray(rows) || rows.length === 0) throw new Error(`官方產業資料為空: ${url}`);
       return rows as T[];
     } catch (error) {
       lastError = error;
+      // 限流時立即改用已驗證封存，避免無意義重試加重交易所壓力。
+      if ((error as { status?: number } | null)?.status === 429) break;
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`官方產業資料讀取失敗: ${url}`);
@@ -296,10 +385,24 @@ async function fetchRows<T>(url: string): Promise<T[]> {
 export async function fetchTwOfficialIndustryRoster(): Promise<TwOfficialIndustryStock[]> {
   if (rosterCache && Date.now() - rosterCache.fetchedAt < CACHE_TTL) return rosterCache.stocks;
 
-  const [twseRows, tpexRows] = await Promise.all([
-    fetchRows<TwseCompanyInfoRow>(TWSE_COMPANY_INFO_URL),
-    fetchRows<TpexCompanyInfoRow>(TPEX_COMPANY_INFO_URL),
-  ]);
+  let twseRows: TwseCompanyInfoRow[];
+  let tpexRows: TpexCompanyInfoRow[];
+  try {
+    [twseRows, tpexRows] = await Promise.all([
+      fetchRows<TwseCompanyInfoRow>(TWSE_COMPANY_INFO_URL),
+      fetchRows<TpexCompanyInfoRow>(TPEX_COMPANY_INFO_URL),
+    ]);
+  } catch (error) {
+    const fallback = await readLatestLocalOfficialRoster();
+    if (!fallback) throw error;
+    // 本地名單只快取 1 小時，之後會再嘗試官方 OpenAPI，避免長期停在舊母體。
+    rosterCache = { fetchedAt: Date.now() - CACHE_TTL + LOCAL_FALLBACK_TTL, stocks: fallback };
+    console.warn(
+      `[TWOfficialIndustry] 官方 OpenAPI 暫時失敗，沿用最近已驗證本地母體 ${fallback.length} 檔：`,
+      error instanceof Error ? error.message : error,
+    );
+    return fallback;
+  }
   const unknown = unknownOfficialIndustryCodes(twseRows, tpexRows);
   if (unknown.TWSE.length > 0 || unknown.TPEx.length > 0) {
     throw new Error(`官方產業出現未支援代碼：TWSE=${unknown.TWSE.join(',') || '無'}；TPEx=${unknown.TPEx.join(',') || '無'}`);

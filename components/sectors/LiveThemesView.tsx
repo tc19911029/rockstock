@@ -20,7 +20,12 @@ import { StockLink } from './StockLink';
 import { CnBoardBadges } from './CnBoardBadges';
 import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { POLLING } from '@/lib/config';
-import { overlayLiveThemeQuotes, type LiveQuoteOverride } from '@/lib/themes/liveQuoteOverlay';
+import {
+  overlayLiveThemeQuotes,
+  quoteOverrideFromCandles,
+  type LiveQuoteCandle,
+  type LiveQuoteOverride,
+} from '@/lib/themes/liveQuoteOverlay';
 import { useReplayStore } from '@/store/replayStore';
 
 type Market = 'TW' | 'CN';
@@ -58,7 +63,19 @@ interface UnifiedQuoteState {
 }
 
 interface ChartQuoteWire {
-  candles?: Array<{ date: string; close: number }>;
+  candles?: LiveQuoteCandle[];
+}
+
+interface PriorityQuoteState {
+  quote: LiveQuoteOverride | null;
+  checkedAt: string | null;
+  loading: boolean;
+}
+
+interface CachedLiveQuote {
+  quote: LiveQuoteOverride;
+  date: string;
+  seenAt: number;
 }
 
 interface LiveBoard {
@@ -220,6 +237,14 @@ function TwThemeCard({ t, rank, expanded, onToggle }: {
             <span className={`text-muted-foreground/40 transition-transform ${expanded ? 'rotate-90' : ''}`}>›</span>
             <span className="font-semibold text-foreground text-sm">{t.theme}</span>
             <span className="text-[11px] text-muted-foreground/50">{t.memberCount}檔</span>
+            {t.quotedCount < t.memberCount && (
+              <span
+                title="部分成分股本輪沒有當日有效報價，題材平均只用已確認報價計算"
+                className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/15 text-yellow-500"
+              >
+                報價 {t.quotedCount}/{t.memberCount}
+              </span>
+            )}
             <span className="text-[10px] text-muted-foreground/55">{t.upCount}↑</span>
           </div>
           <span className="shrink-0"><Pct v={t.avgChange} big /></span>
@@ -414,6 +439,8 @@ function CnLive({ data }: { data: CnLivePayload }) {
 
 const QUOTE_BATCH_SIZE = 40; // /api/portfolio/quotes 上限 50；保留 URL 與未來欄位餘裕
 const QUOTE_BATCH_CONCURRENCY = 3;
+const QUOTE_CYCLE_BUDGET_MS = 20_000; // 必須短於 30 秒輪詢，避免來源卡住後請求堆疊
+const LIVE_QUOTE_RETENTION_MS = 90_000; // 盤中短斷線最多沿用三輪；盤後保留當日最後確認價
 
 function uniqueThemeSymbols(data: TwLivePayload | null): string[] {
   if (!data) return [];
@@ -427,14 +454,13 @@ function uniqueThemeSymbols(data: TwLivePayload | null): string[] {
 function useUnifiedTwThemeQuotes(
   data: TwLivePayload | null,
   reloadKey: number,
-  prioritySymbol: string | null,
 ): UnifiedQuoteState {
   const symbols = useMemo(() => uniqueThemeSymbols(data), [data]);
   const symbolsKey = symbols.join(',');
   const [state, setState] = useState<UnifiedQuoteState>({
     quotes: [], checkedAt: null, count: 0, total: 0, loading: false,
   });
-  const inflight = useRef(false);
+  const quoteCacheRef = useRef(new Map<string, CachedLiveQuote>());
 
   useEffect(() => {
     if (!data || symbols.length === 0) {
@@ -444,10 +470,23 @@ function useUnifiedTwThemeQuotes(
 
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
+    let inflight = false;
+    const activeControllers = new Set<AbortController>();
+
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const start = () => {
+      if (!data.marketOpen || timer) return;
+      timer = setInterval(() => { void load(); }, POLLING.QUOTE_INTERVAL);
+    };
 
     const load = async () => {
-      if (inflight.current) return;
-      inflight.current = true;
+      if (inflight || document.hidden) return;
+      inflight = true;
       if (!cancelled) setState((previous) => ({ ...previous, total: symbols.length, loading: true }));
 
       const chunks: string[][] = [];
@@ -458,57 +497,17 @@ function useUnifiedTwThemeQuotes(
       const freshByCode = new Map<string, LiveQuoteOverride>();
       let checkedAt: string | null = null;
       let cursor = 0;
-
-      // 目前主圖股票必須與題材列完全一致。批次行情在盤後 TPEx 日線尚未發布時
-      // 可能只回昨日價，因此另外沿用主圖 /api/stock 的今日 K，且最後覆蓋批次結果。
-      const priorityThemeSymbol = prioritySymbol
-        ? symbols.find((symbol) => symbol.replace(/\.(TW|TWO)$/i, '') === prioritySymbol.replace(/\.(TW|TWO)$/i, '')) ?? null
-        : null;
-      const priorityQuotePromise = (async (): Promise<LiveQuoteOverride | null> => {
-        if (!priorityThemeSymbol) return null;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6_000);
-        try {
-          const response = await fetch(
-            `/api/stock?symbol=${encodeURIComponent(priorityThemeSymbol)}&interval=1d&local=1`,
-            { cache: 'no-store', signal: controller.signal },
-          );
-          if (!response.ok) return null;
-          const json = await response.json() as ChartQuoteWire;
-          const candles = json.candles ?? [];
-          let latestIndex = -1;
-          for (let i = candles.length - 1; i >= 0; i -= 1) {
-            if (candles[i]?.date === data.date && candles[i]!.close > 0) {
-              latestIndex = i;
-              break;
-            }
-          }
-          if (latestIndex <= 0) return null;
-          const latest = candles[latestIndex]!;
-          let previousClose: number | null = null;
-          for (let i = latestIndex - 1; i >= 0; i -= 1) {
-            const candle = candles[i];
-            if (candle && candle.date < latest.date && candle.close > 0) {
-              previousClose = candle.close;
-              break;
-            }
-          }
-          if (!previousClose) return null;
-          return {
-            symbol: priorityThemeSymbol,
-            changePercent: +(((latest.close - previousClose) / previousClose) * 100).toFixed(2),
-          };
-        } catch {
-          return null;
-        } finally {
-          clearTimeout(timeout);
-        }
-      })();
+      let cycleExpired = false;
+      const cycleTimer = setTimeout(() => {
+        cycleExpired = true;
+        for (const controller of activeControllers) controller.abort();
+      }, QUOTE_CYCLE_BUDGET_MS);
 
       const worker = async () => {
-        while (!cancelled && cursor < chunks.length) {
+        while (!cancelled && !cycleExpired && cursor < chunks.length) {
           const chunk = chunks[cursor++];
           const controller = new AbortController();
+          activeControllers.add(controller);
           const timeout = setTimeout(() => controller.abort(), 12_000);
           try {
             const response = await fetch(
@@ -533,6 +532,7 @@ function useUnifiedTwThemeQuotes(
             // 這批保留缺價；原 L2 已過期時 overlay 會清成「—」，不再顯示舊漲跌。
           } finally {
             clearTimeout(timeout);
+            activeControllers.delete(controller);
           }
         }
       };
@@ -541,33 +541,166 @@ function useUnifiedTwThemeQuotes(
         await Promise.all(
           Array.from({ length: Math.min(QUOTE_BATCH_CONCURRENCY, chunks.length) }, () => worker()),
         );
-        const priorityQuote = await priorityQuotePromise;
-        if (priorityQuote) {
-          freshByCode.set(priorityQuote.symbol.replace(/\.(TW|TWO)$/i, ''), priorityQuote);
-          checkedAt = new Date().toISOString();
-        }
         if (!cancelled) {
+          const observedAt = Date.now();
+          for (const [code, quote] of freshByCode) {
+            quoteCacheRef.current.set(code, { quote, date: data.date, seenAt: observedAt });
+          }
+          const activeCodes = new Set(symbols.map((symbol) => symbol.replace(/\.(TW|TWO)$/i, '')));
+          for (const [code, cached] of quoteCacheRef.current) {
+            const expired = data.marketOpen && observedAt - cached.seenAt > LIVE_QUOTE_RETENTION_MS;
+            if (!activeCodes.has(code) || cached.date !== data.date || expired) quoteCacheRef.current.delete(code);
+          }
+          const retained = [...quoteCacheRef.current.values()];
+          const lastConfirmedAt = retained.length > 0
+            ? new Date(Math.max(...retained.map((cached) => cached.seenAt))).toISOString()
+            : null;
           setState({
-            quotes: [...freshByCode.values()],
-            checkedAt: checkedAt ?? new Date().toISOString(),
-            count: freshByCode.size,
+            quotes: retained.map((cached) => cached.quote),
+            checkedAt: checkedAt ?? lastConfirmedAt ?? new Date().toISOString(),
+            count: retained.length,
             total: symbols.length,
             loading: false,
           });
         }
       } finally {
-        inflight.current = false;
+        clearTimeout(cycleTimer);
+        inflight = false;
       }
     };
 
     void load();
-    if (data.marketOpen) timer = setInterval(() => { void load(); }, POLLING.QUOTE_INTERVAL);
+    start();
+
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        void load();
+        start();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      stop();
+      for (const controller of activeControllers) controller.abort();
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [data?.date, data?.marketOpen, prioritySymbol, reloadKey, symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data?.date, data?.marketOpen, reloadKey, symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return state;
+}
+
+/**
+ * 目前主圖股票獨立對齊 /api/stock；切股只重抓這一檔，不可連帶重抓全部題材股。
+ */
+function usePriorityTwThemeQuote(
+  data: TwLivePayload | null,
+  prioritySymbol: string | null,
+  reloadKey: number,
+): PriorityQuoteState {
+  const priorityThemeSymbol = useMemo(() => {
+    if (!data || !prioritySymbol) return null;
+    const code = prioritySymbol.replace(/\.(TW|TWO)$/i, '');
+    return uniqueThemeSymbols(data).find((symbol) => symbol.replace(/\.(TW|TWO)$/i, '') === code) ?? null;
+  }, [data, prioritySymbol]);
+  const [state, setState] = useState<PriorityQuoteState>({ quote: null, checkedAt: null, loading: false });
+  const quoteCacheRef = useRef<CachedLiveQuote | null>(null);
+
+  useEffect(() => {
+    if (!data || !priorityThemeSymbol) {
+      setState({ quote: null, checkedAt: null, loading: false });
+      return;
+    }
+
+    let cancelled = false;
+    let inflight = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let controller: AbortController | null = null;
+
+    const readCached = (): CachedLiveQuote | null => {
+      const cached = quoteCacheRef.current;
+      if (!cached || cached.date !== data.date || cached.quote.symbol !== priorityThemeSymbol) return null;
+      if (data.marketOpen && Date.now() - cached.seenAt > LIVE_QUOTE_RETENTION_MS) return null;
+      return cached;
+    };
+
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const start = () => {
+      if (!data.marketOpen || timer) return;
+      timer = setInterval(() => { void load(); }, POLLING.QUOTE_INTERVAL);
+    };
+    const load = async () => {
+      if (inflight || document.hidden) return;
+      inflight = true;
+      if (!cancelled) {
+        const cached = readCached();
+        setState({
+          quote: cached?.quote ?? null,
+          checkedAt: cached ? new Date(cached.seenAt).toISOString() : null,
+          loading: true,
+        });
+      }
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller?.abort(), 6_000);
+      try {
+        const response = await fetch(
+          `/api/stock?symbol=${encodeURIComponent(priorityThemeSymbol)}&interval=1d&local=1`,
+          { cache: 'no-store', signal: controller.signal },
+        );
+        if (!response.ok) throw new Error(`chart quote HTTP ${response.status}`);
+        const json = await response.json() as ChartQuoteWire;
+        const quote = quoteOverrideFromCandles(priorityThemeSymbol, data.date, json.candles ?? []);
+        if (!cancelled) {
+          const seenAt = Date.now();
+          if (quote) quoteCacheRef.current = { quote, date: data.date, seenAt };
+          const cached = quote ? quoteCacheRef.current : readCached();
+          setState({
+            quote: cached?.quote ?? null,
+            checkedAt: cached ? new Date(cached.seenAt).toISOString() : null,
+            loading: false,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          const cached = readCached();
+          setState({
+            quote: cached?.quote ?? null,
+            checkedAt: cached ? new Date(cached.seenAt).toISOString() : null,
+            loading: false,
+          });
+        }
+      } finally {
+        clearTimeout(timeout);
+        controller = null;
+        inflight = false;
+      }
+    };
+
+    void load();
+    start();
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        void load();
+        start();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      cancelled = true;
+      stop();
+      controller?.abort();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [data?.date, data?.marketOpen, priorityThemeSymbol, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return state;
 }
@@ -583,7 +716,27 @@ export function LiveThemesView({ market }: { market: Market }) {
   const [reloadKey, setReloadKey] = useState(0);
   const manualRefreshRef = useRef(false);
   const currentTicker = useReplayStore((state) => state.currentStock?.ticker ?? null);
-  const unifiedTwQuotes = useUnifiedTwThemeQuotes(market === 'TW' ? tw : null, reloadKey, currentTicker);
+  const batchTwQuotes = useUnifiedTwThemeQuotes(market === 'TW' ? tw : null, reloadKey);
+  const priorityTwQuote = usePriorityTwThemeQuote(market === 'TW' ? tw : null, currentTicker, reloadKey);
+  const unifiedTwQuotes = useMemo<UnifiedQuoteState>(() => {
+    const byCode = new Map(
+      batchTwQuotes.quotes.map((quote) => [quote.symbol.replace(/\.(TW|TWO)$/i, ''), quote] as const),
+    );
+    if (priorityTwQuote.quote) {
+      byCode.set(priorityTwQuote.quote.symbol.replace(/\.(TW|TWO)$/i, ''), priorityTwQuote.quote);
+    }
+    const checkedAt = [batchTwQuotes.checkedAt, priorityTwQuote.checkedAt]
+      .filter((value): value is string => !!value)
+      .sort()
+      .at(-1) ?? null;
+    return {
+      quotes: [...byCode.values()],
+      checkedAt,
+      count: byCode.size,
+      total: batchTwQuotes.total,
+      loading: batchTwQuotes.loading || priorityTwQuote.loading,
+    };
+  }, [batchTwQuotes, priorityTwQuote]);
 
   // 切市場 → 清掉上一個市場的資料（避免閃舊）
   useEffect(() => { setTw(null); setCn(null); setError(null); }, [endpoint]);
@@ -591,28 +744,64 @@ export function LiveThemesView({ market }: { market: Market }) {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | null = null;
+    let inflight = false;
+    let controller: AbortController | null = null;
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const start = () => {
+      if (timer) return;
+      timer = setInterval(() => { void load(); }, 60_000);
+    };
     const load = async () => {
+      if (inflight || document.hidden) return;
+      inflight = true;
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller?.abort(), POLLING.API_TIMEOUT);
       try {
         const manual = manualRefreshRef.current;
         manualRefreshRef.current = false;
         const separator = endpoint.includes('?') ? '&' : '?';
         const url = manual ? `${endpoint}${separator}refresh=1&_=${Date.now()}` : endpoint;
-        const j = await fetch(url, { cache: 'no-store' }).then((r) => r.json());
+        const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
+        const j = await response.json();
         if (cancelled) return;
+        if (!response.ok) throw new Error(j.error ?? `HTTP ${response.status}`);
         if (j.ok === false || j.error) { setError(j.error ?? '載入失敗'); return; }
         setError(null);
         if (market === 'TW') setTw(j as TwLivePayload); else setCn(j as CnLivePayload);
         // 收盤 → 停止輪詢（保留最後一筆顯示）
-        if (!j.marketOpen && timer) { clearInterval(timer); timer = null; }
+        if (!j.marketOpen) stop();
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
+        clearTimeout(timeout);
+        controller = null;
+        inflight = false;
         if (!cancelled) setRefreshing(false);
       }
     };
-    load();
-    timer = setInterval(load, 60_000);
-    return () => { cancelled = true; if (timer) clearInterval(timer); };
+
+    start();
+    void load();
+    const handleVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        start();
+        void load();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      cancelled = true;
+      stop();
+      controller?.abort();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [endpoint, market, reloadKey]);
 
   const refresh = () => {

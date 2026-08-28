@@ -1,4 +1,4 @@
-import { overlayLiveThemeQuotes } from '@/lib/themes/liveQuoteOverlay';
+import { overlayLiveThemeQuotes, quoteOverrideFromCandles } from '@/lib/themes/liveQuoteOverlay';
 
 describe('題材統一股價覆蓋', () => {
   const data = {
@@ -65,5 +65,23 @@ describe('題材統一股價覆蓋', () => {
 
     expect(result.themes[0].members[1].changePercent).toBe(2.01);
     expect(result.themes[0].avgChange).toBe(0.04);
+  });
+
+  test('目前主圖以指定交易日和前一交易日收盤計算漲跌', () => {
+    expect(quoteOverrideFromCandles('3081.TWO', '2026-08-28', [
+      { date: '2026-08-26', close: 3255 },
+      { date: '2026-08-27', close: 3370 },
+      { date: '2026-08-28', close: 3305 },
+    ])).toEqual({ symbol: '3081.TWO', changePercent: -1.93 });
+  });
+
+  test('主圖沒有指定交易日或前一日有效收盤時不覆蓋題材', () => {
+    expect(quoteOverrideFromCandles('3081.TWO', '2026-08-28', [
+      { date: '2026-08-27', close: 3370 },
+    ])).toBeNull();
+    expect(quoteOverrideFromCandles('3081.TWO', '2026-08-28', [
+      { date: '2026-08-27', close: 0 },
+      { date: '2026-08-28', close: 3305 },
+    ])).toBeNull();
   });
 });

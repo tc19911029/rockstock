@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   buildOfficialIndustryPeerMap,
   duplicateOfficialStockCodes,
@@ -5,6 +7,7 @@ import {
   officialIndustryGroupId,
   officialIndustryName,
   parseOfficialIndustryRows,
+  parseOfficialIndustrySectorFallback,
   unknownOfficialIndustryCodes,
 } from '@/lib/datasource/TWOfficialIndustry';
 import { getTWConcept } from '@/lib/scanner/conceptMap';
@@ -87,5 +90,33 @@ describe('TWSE／TPEx 官方產業分類', () => {
   it('相容函式不再以人工晶圓代工題材覆蓋官方半導體業', () => {
     expect(getTWConcept('2330', officialIndustryName('TWSE', '24'))).toBe('半導體業');
     expect(getTWConcept('2330')).toBeUndefined();
+  });
+
+  it('官方 OpenAPI 忙線時可從最近的完整官方產業封存還原名單', () => {
+    const file = JSON.parse(readFileSync(
+      path.join(process.cwd(), 'data', 'sectors', 'TW', '2026-08-27.json'),
+      'utf8',
+    )) as unknown;
+    const stocks = parseOfficialIndustrySectorFallback(file);
+
+    expect(stocks).toHaveLength(1975);
+    expect(stocks?.find((stock) => stock.code === '3081')).toEqual({
+      code: '3081',
+      name: '聯亞',
+      market: 'TPEx',
+      symbol: '3081.TWO',
+      industryCode: '27',
+      industry: '通信網路業',
+    });
+  });
+
+  it('本地官方產業封存若代號後綴遭竄改就拒絕降級', () => {
+    const file = JSON.parse(readFileSync(
+      path.join(process.cwd(), 'data', 'sectors', 'TW', '2026-08-27.json'),
+      'utf8',
+    )) as { themes: Array<{ members: Array<{ symbol: string }> }> };
+    file.themes[0].members[0].symbol = '0000.TW';
+
+    expect(parseOfficialIndustrySectorFallback(file)).toBeNull();
   });
 });

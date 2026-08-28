@@ -11,6 +11,11 @@ export interface LiveQuoteOverride {
   changePercent: number;
 }
 
+export interface LiveQuoteCandle {
+  date: string;
+  close: number;
+}
+
 interface OverlayMember {
   code: string;
   symbol: string;
@@ -32,6 +37,44 @@ interface OverlayTheme {
 }
 
 const bareCode = (symbol: string): string => symbol.replace(/\.(TW|TWO)$/i, '');
+
+/** 從主圖日 K 取指定交易日與前一交易日收盤，算出和主圖一致的漲跌幅。 */
+export function quoteOverrideFromCandles(
+  symbol: string,
+  date: string,
+  candles: LiveQuoteCandle[],
+): LiveQuoteOverride | null {
+  let latestIndex = -1;
+  for (let i = candles.length - 1; i >= 0; i -= 1) {
+    const candle = candles[i];
+    if (candle?.date === date && Number.isFinite(candle.close) && candle.close > 0) {
+      latestIndex = i;
+      break;
+    }
+  }
+  if (latestIndex <= 0) return null;
+
+  const latest = candles[latestIndex]!;
+  let previousClose: number | null = null;
+  for (let i = latestIndex - 1; i >= 0; i -= 1) {
+    const candle = candles[i];
+    if (
+      candle
+      && candle.date < latest.date
+      && Number.isFinite(candle.close)
+      && candle.close > 0
+    ) {
+      previousClose = candle.close;
+      break;
+    }
+  }
+  if (!previousClose) return null;
+
+  return {
+    symbol,
+    changePercent: +(((latest.close - previousClose) / previousClose) * 100).toFixed(2),
+  };
+}
 
 /**
  * 用統一行情覆蓋成分股並重算題材。
