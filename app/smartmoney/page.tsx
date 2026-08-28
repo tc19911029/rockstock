@@ -13,6 +13,7 @@
  */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { ChartScatter } from 'lucide-react';
 import { PageShell, PageHeader, Panel } from '@/components/shared';
 import { bullBearClass } from '@/lib/format';
 import { stockDisplayName } from '@/lib/stocks/stockIdentity';
@@ -88,6 +89,15 @@ export default function SmartMoneyPage() {
           title="🕵️ 大戶偷買清單"
           subtitle={day ? `資料日 ${day.date} · 未驗證·僅觀察` : '未驗證·僅觀察'}
           backButton="/health?tab=market"
+          actions={
+            <Link
+              href="/smartmoney/rotation"
+              className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 text-sm font-medium text-sky-300 transition-colors hover:bg-sky-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            >
+              <ChartScatter className="size-4" aria-hidden="true" />
+              大戶輪動圖
+            </Link>
+          }
         />
       }
     >
