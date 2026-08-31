@@ -1,4 +1,4 @@
-import { isMarketOpen } from './marketHours';
+import { isCNMarketLunchBreak, isMarketOpen } from './marketHours';
 
 export interface IntradaySnapshotMeta {
   date: string;
@@ -38,13 +38,6 @@ export function assessIntradayFreshness(
   }
   if (!Number.isFinite(updatedMs)) return { stale: true, ageSeconds, reason: '快照更新時間無效' };
 
-  if (isMarketOpen(market, now)) {
-    if (now.getTime() - updatedMs > INTRADAY_MAX_AGE_MS) {
-      return { stale: true, ageSeconds, reason: `盤中快照已 ${Math.round(ageSeconds / 60)} 分鐘未更新` };
-    }
-    return { stale: false, ageSeconds, reason: null };
-  }
-
   const updatedDate = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(updatedMs));
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
@@ -53,6 +46,24 @@ export function assessIntradayFreshness(
     hour12: false,
   }).format(new Date(updatedMs)).replace(/\u202f/g, ' ').split(':');
   const updatedMinute = Number(parts[0]) * 60 + Number(parts[1]);
+
+  // A 股午休是正常交易中斷：11:30 的上午收盤快照可一路使用到 12:59，
+  // 不因自然老化超過 6 分鐘而顯示「無法更新」。13:00 後 isMarketOpen 重新生效，
+  // 若尚未拿到下午新行情，舊 11:30 快照會立刻被判 stale，直到下一輪刷新成功。
+  if (market === 'CN' && isCNMarketLunchBreak(now)) {
+    if (updatedDate !== today || updatedMinute < 11 * 60 + 30) {
+      return { stale: true, ageSeconds, reason: '午間快照未包含上午 11:30 收盤價' };
+    }
+    return { stale: false, ageSeconds, reason: null };
+  }
+
+  if (isMarketOpen(market, now)) {
+    if (now.getTime() - updatedMs > INTRADAY_MAX_AGE_MS) {
+      return { stale: true, ageSeconds, reason: `盤中快照已 ${Math.round(ageSeconds / 60)} 分鐘未更新` };
+    }
+    return { stale: false, ageSeconds, reason: null };
+  }
+
   const closeMinute = market === 'TW' ? 13 * 60 + 30 : 15 * 60;
 
   if (updatedDate !== today || updatedMinute < closeMinute) {

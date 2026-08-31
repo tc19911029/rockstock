@@ -29,14 +29,26 @@ export function isTWMarketOpen(now = new Date()): boolean {
   return timeMin >= 540 && timeMin <= 810; // 09:00 ~ 13:30
 }
 
-/** A 股是否在盤中（09:15–15:00，週一～五，且非假日） */
+/** A 股是否正在交易（09:15–11:30、13:00–15:00，週一～五，且非假日） */
 export function isCNMarketOpen(now = new Date()): boolean {
   const { hour, min, dow } = getLocalTime('Asia/Shanghai', now);
   if (dow === 0 || dow === 6) return false;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(now);
   if (!isTradingDay(today, 'CN')) return false;
   const timeMin = hour * 60 + min;
-  return timeMin >= 555 && timeMin <= 900; // 09:15 ~ 15:00
+  return (timeMin >= 555 && timeMin <= 690) // 09:15 ~ 11:30
+    || (timeMin >= 780 && timeMin <= 900); // 13:00 ~ 15:00
+}
+
+/** A 股午間休市（11:30 收盤完成後至 13:00 重開前）。 */
+export function isCNMarketLunchBreak(now = new Date()): boolean {
+  const { hour, min, dow } = getLocalTime('Asia/Shanghai', now);
+  if (dow === 0 || dow === 6) return false;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(now);
+  if (!isTradingDay(today, 'CN')) return false;
+  const timeMin = hour * 60 + min;
+  // 11:30 仍保留最後一輪取價；13:00 立即恢復正常輪詢。
+  return timeMin > 690 && timeMin < 780;
 }
 
 /**
@@ -80,11 +92,15 @@ export function isMarketOpen(market: 'TW' | 'CN', now = new Date()): boolean {
 }
 
 /**
- * 前台即時報價允許輪詢的窗口：盤中 + 收盤後資料定稿期。
+ * 前台即時報價允許輪詢的窗口：實際交易時段 + 收盤後資料定稿期。
+ * A 股午休仍允許前端讀中央 11:30 快照，讓既有 timer 在 13:00 自動恢復；
+ * vendor 全市場抓取另以 isMarketOpen 守門，因此午休不會增加外部 API 呼叫。
  * 其餘時間直接使用最後交易日的 L1/L2，避免週末、假日與深夜每 30 秒空打 vendor。
  */
 export function isMarketPollingWindow(market: 'TW' | 'CN', now = new Date()): boolean {
-  return isMarketOpen(market, now) || isPostCloseWindow(market, now);
+  return isMarketOpen(market, now)
+    || (market === 'CN' && isCNMarketLunchBreak(now))
+    || isPostCloseWindow(market, now);
 }
 
 /**

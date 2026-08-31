@@ -4,7 +4,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
-import { isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
@@ -71,7 +71,10 @@ export async function GET(req: NextRequest) {
 
   // Server-side defense in depth: 新版前台會在休市時停止 timer，但部署前已開啟的
   // 舊分頁可能繼續每 30 秒呼叫。路由層仍要擋住，避免 MIS/Fugle 被無效輪詢放大。
-  const liveQuoteWindow = market === 'TW' ? isMarketOpen('TW') : (market ? isMarketPollingWindow(market) : false);
+  const cnLunchBreak = market === 'CN' && isCNMarketLunchBreak();
+  const liveQuoteWindow = market === 'TW'
+    ? isMarketOpen('TW')
+    : (market ? isMarketPollingWindow(market) || cnLunchBreak : false);
   if (market && !liveQuoteWindow) {
     const expectedDate = getQuoteSnapshotDate(market);
     const suffix = market === 'TW'
@@ -170,7 +173,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── CN ──
-  if (isCN) {
+  if (isCN && !cnLunchBreak) {
     // suffix：明示優先；裸碼用首位推（6/9→上海 SS、其餘→深圳 SZ）。
     const cnSuffix: 'SS' | 'SZ' = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ'
       : (/^[69]/.test(pureCode) ? 'SS' : 'SZ');
@@ -252,6 +255,7 @@ export async function GET(req: NextRequest) {
     updatedAt: quoteUpdatedAt,
     priceKind: quotePriceKind,
     provisional,
+    ...(cnLunchBreak ? { marketSession: 'lunch_break' as const } : {}),
     stale,
     status: freshness?.status,
     ...(freshness?.staleReason ? { staleReason: freshness.staleReason } : {}),

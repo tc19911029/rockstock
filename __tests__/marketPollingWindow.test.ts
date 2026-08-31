@@ -1,4 +1,9 @@
-import { isMarketPollingWindow, isTaifexPollingWindow } from '@/lib/datasource/marketHours';
+import {
+  isCNMarketLunchBreak,
+  isCNMarketOpen,
+  isMarketPollingWindow,
+  isTaifexPollingWindow,
+} from '@/lib/datasource/marketHours';
 
 describe('isMarketPollingWindow', () => {
   test('台股盤中與盤後定稿窗口允許輪詢', () => {
@@ -8,7 +13,23 @@ describe('isMarketPollingWindow', () => {
 
   test('陸股盤中與盤後定稿窗口允許輪詢', () => {
     expect(isMarketPollingWindow('CN', new Date('2026-08-14T01:15:00.000Z'))).toBe(true); // 09:15
+    expect(isMarketPollingWindow('CN', new Date('2026-08-14T05:00:00.000Z'))).toBe(true); // 13:00
     expect(isMarketPollingWindow('CN', new Date('2026-08-14T07:20:00.000Z'))).toBe(true); // 15:20
+  });
+
+  test('陸股 11:30 保留上午最後刷新，午休前端只讀快照，13:00 恢復交易', () => {
+    const morningClose = new Date('2026-08-14T03:30:00.000Z');
+    const lunch = new Date('2026-08-14T04:15:00.000Z');
+    const afternoonOpen = new Date('2026-08-14T05:00:00.000Z');
+
+    expect(isCNMarketOpen(morningClose)).toBe(true);
+    expect(isCNMarketLunchBreak(morningClose)).toBe(false);
+    expect(isCNMarketOpen(lunch)).toBe(false);
+    expect(isCNMarketLunchBreak(lunch)).toBe(true);
+    // 前端 timer 保留，才能在 13:00 自動恢復；後端 vendor 抓取只看 isCNMarketOpen。
+    expect(isMarketPollingWindow('CN', lunch)).toBe(true);
+    expect(isCNMarketOpen(afternoonOpen)).toBe(true);
+    expect(isCNMarketLunchBreak(afternoonOpen)).toBe(false);
   });
 
   test('週末、假日、盤前與深夜不輪詢', () => {

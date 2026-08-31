@@ -2,6 +2,7 @@ import type { Candle } from '@/types';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import { readIntradaySnapshot } from './IntradayCache';
 import { assessIntradayFreshness } from './intradayFreshness';
+import { isCNMarketLunchBreak } from './marketHours';
 
 export type LiveIndexSymbol = '^TWII' | '^TWOII' | '000001.SS' | '000300.SS';
 
@@ -36,7 +37,7 @@ export async function fetchLiveIndexQuote(symbol: LiveIndexSymbol, today: string
     return quote && quote.close > 0
       ? { ...asCandle(quote, snapshot.date), source: 'l2', updatedAt: quote.observedAt ?? snapshot.updatedAt }
       : null;
-  } else {
+  } else if (!isCNMarketLunchBreak()) {
     const tencent = await fetchQuote(symbol);
     if (tencent && tencent.price > 0 && tencent.date === today) {
       return {

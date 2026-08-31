@@ -11,7 +11,7 @@ import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
-import { isMarketOpen } from '@/lib/datasource/marketHours';
+import { isCNMarketLunchBreak, isMarketOpen } from '@/lib/datasource/marketHours';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { isFundSymbol } from '@/lib/market/classify';
 import type { Candle } from '@/types';
@@ -244,6 +244,7 @@ export async function GET(req: NextRequest) {
   // （它對指數會誤回平安銀行的價，~10.83）。對齊 /api/stock/quote 的指數處理。
   const isCnIndex = symbol === '000001.SS' || symbol === '000300.SS';
   const isTwIndex = symbol === '^TWII' || symbol === '^TWOII';
+  const cnLunchBreak = (isCN || isCnIndex) && isCNMarketLunchBreak();
   const l2LookupSymbol = isCnIndex ? symbol : pureCode;
 
   const isMinuteInterval = ['1m', '5m', '15m', '30m', '60m'].includes(interval);
@@ -313,7 +314,7 @@ export async function GET(req: NextRequest) {
               }
             } else if (isTW) {
               // 台股個股由下方中央 L2 一次讀取；這裡不另打單股 MIS/Fugle。
-            } else if (isCN && !isCnIndex) {
+            } else if (isCN && !isCnIndex && !cnLunchBreak) {
               // 指數不走 EastMoney 個股報價（會誤回平安銀行）→ 落到下方 L2 fallback 取指數即時值
               const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
               const q = await withTimeout(getEastMoneySingleQuote(pureCode, cnSuffix), INJECT_BUDGET_MS, null);

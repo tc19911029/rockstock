@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot, type IntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { getQuoteSnapshotDate, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
@@ -38,6 +38,8 @@ export interface QuoteTick {
   /** true 代表盤中暫時顯示價，收盤封存絕不採用。 */
   provisional?: boolean;
   priceKind?: string;
+  /** A 股午休時明確標示目前是上午收盤價，不是資料故障。 */
+  marketSession?: 'open' | 'lunch_break' | 'closed';
 }
 
 export type ResolvedEntry = {
@@ -143,6 +145,7 @@ export function buildFreshSnapshotFallback(
       source: quote.priceKind === 'indicative' ? 'l2-indicative' : 'l2',
       stale: false,
       status: isMarketOpen(market, now) ? 'live' : 'final',
+      ...(market === 'CN' && isCNMarketLunchBreak(now) ? { marketSession: 'lunch_break' as const } : {}),
       updatedAt: quote.observedAt ?? snapshot.updatedAt,
       ...(market === 'TW' ? {
         provisional: quote.priceKind === 'indicative',
@@ -347,6 +350,7 @@ export async function GET(req: NextRequest) {
   const fundEntries = fetchable.filter(e => e.market === 'FUND');
   const twLive = isMarketOpen('TW');
   const cnLive = isMarketPollingWindow('CN');
+  const cnLunchBreak = isCNMarketLunchBreak();
 
   // 並行抓取（傳入 resolved symbol，結果 symbol 改回 original）
   const [twQuotes, cnQuotes, fundQuotes] = await Promise.all([
@@ -359,7 +363,12 @@ export async function GET(req: NextRequest) {
         return entry ? { ...q, symbol: entry.original, canonicalSymbol: q.canonicalSymbol ?? entry.resolved } : q;
       })
     ),
-    (cnLive ? fetchCNQuotes(cnEntries.map(e => e.resolved)) : fetchFinalL1Quotes(cnEntries, 'CN')).then(qs =>
+    (cnLunchBreak
+      ? readIntradaySnapshot('CN', getQuoteSnapshotDate('CN')).then(snapshot =>
+          snapshot ? buildFreshSnapshotFallback(cnEntries, 'CN', snapshot) : []
+        )
+      : cnLive ? fetchCNQuotes(cnEntries.map(e => e.resolved)) : fetchFinalL1Quotes(cnEntries, 'CN')
+    ).then(qs =>
       qs.map(q => {
         const entry = cnEntries.find(e => e.resolved.replace(/\.(SS|SZ)$/i, '') === q.symbol.replace(/\.(SS|SZ)$/i, ''));
         return entry ? { ...q, symbol: entry.original, canonicalSymbol: q.canonicalSymbol ?? entry.resolved } : q;
@@ -423,7 +432,7 @@ export async function GET(req: NextRequest) {
     // 即時 provider 成功時，該路徑已驗證為目前 session；休市 L1/MIS/L2 則在上方帶入真實日期。
     const asOf = quote.asOf ?? null;
     const freshness = assessQuoteFreshness(entry.market, asOf);
-    const sourceFreshness = isMarketPollingWindow(entry.market)
+    const sourceFreshness = (isMarketPollingWindow(entry.market) || (entry.market === 'CN' && cnLunchBreak))
       && quote.source !== 'l1'
       && quote.status !== 'no-trade'
       ? assessIntradayFreshness(entry.market, {

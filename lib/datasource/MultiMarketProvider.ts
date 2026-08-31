@@ -100,12 +100,12 @@ function isTWMarketOpen(): boolean {
   return timeMin >= 540 && timeMin <= 810; // 09:00 ~ 13:30
 }
 
-/** A 股是否在盤中（09:15–15:00，週一～五） */
+/** A 股是否正在交易（午休 11:31–12:59 排除） */
 function isCNMarketOpen(): boolean {
   const { hour, min, dow } = getLocalTime('Asia/Shanghai');
   if (dow === 0 || dow === 6) return false;
   const timeMin = hour * 60 + min;
-  return timeMin >= 555 && timeMin <= 900; // 09:15 ~ 15:00
+  return (timeMin >= 555 && timeMin <= 690) || (timeMin >= 780 && timeMin <= 900);
 }
 
 /** 美股是否在盤中（09:30–16:00 ET，週一～五） */

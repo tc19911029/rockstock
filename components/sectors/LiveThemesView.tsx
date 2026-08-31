@@ -86,7 +86,7 @@ interface LiveBoard {
   limitUpCount: number | null; rank: number; stage: string;
 }
 interface CnLivePayload {
-  marketOpen: boolean; stale: boolean; staleReason: string | null;
+  marketOpen: boolean; lunchBreak: boolean; stale: boolean; staleReason: string | null;
   updatedAt: string; snapshotUpdatedAt: string; generatedAt: string; date: string | null;
   industries: LiveBoard[]; concepts: LiveBoard[];
 }
@@ -160,8 +160,8 @@ function SortBar({ sorts, sortId, dir, onSort, hint }: {
 
 // ── LIVE 狀態列（紅點 + 更新時間 + 手動刷新）──────────────────────────────────────
 
-function LiveBar({ market, marketOpen, stale, staleReason, updatedAt, refreshing, onRefresh, note }: {
-  market: Market; marketOpen: boolean; stale?: boolean; updatedAt: string | null;
+function LiveBar({ market, marketOpen, lunchBreak, stale, staleReason, updatedAt, refreshing, onRefresh, note }: {
+  market: Market; marketOpen: boolean; lunchBreak?: boolean; stale?: boolean; updatedAt: string | null;
   staleReason?: string | null; refreshing: boolean; onRefresh: () => void; note?: string;
 }) {
   const tz = market === 'TW' ? 'Asia/Taipei' : 'Asia/Shanghai';
@@ -171,7 +171,12 @@ function LiveBar({ market, marketOpen, stale, staleReason, updatedAt, refreshing
   return (
     <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card/40 px-3 py-1.5">
       <div className="flex items-center gap-2 text-xs">
-        {marketOpen && !stale ? (
+        {lunchBreak && !stale ? (
+          <span className="inline-flex items-center gap-1.5 text-amber-500 font-medium">
+            <span className="inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            午間休市 · 上午收盤價
+          </span>
+        ) : marketOpen && !stale ? (
           <span className="inline-flex items-center gap-1.5 text-red-400 font-medium">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
@@ -773,8 +778,8 @@ export function LiveThemesView({ market }: { market: Market }) {
         if (j.ok === false || j.error) { setError(j.error ?? '載入失敗'); return; }
         setError(null);
         if (market === 'TW') setTw(j as TwLivePayload); else setCn(j as CnLivePayload);
-        // 收盤 → 停止輪詢（保留最後一筆顯示）
-        if (!j.marketOpen) stop();
+        // 正式收盤才停止；A 股午休保留本地快照輪詢，13:00 可自動恢復即時行情。
+        if (!j.marketOpen && !j.lunchBreak) stop();
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -829,6 +834,7 @@ export function LiveThemesView({ market }: { market: Market }) {
 
   const payload = market === 'TW' ? displayTw : cn;
   const marketOpen = payload?.marketOpen ?? false;
+  const lunchBreak = market === 'CN' && (cn?.lunchBreak ?? false);
   const stale = market === 'TW' ? (displayTw?.stale ?? false) : (cn?.stale ?? false);
   const staleReason = market === 'TW' ? displayTw?.staleReason : cn?.staleReason;
   const updatedAt = payload?.updatedAt ?? null;
@@ -840,7 +846,7 @@ export function LiveThemesView({ market }: { market: Market }) {
 
   return (
     <div className="space-y-3">
-      <LiveBar market={market} marketOpen={marketOpen} stale={stale} staleReason={staleReason} updatedAt={updatedAt}
+      <LiveBar market={market} marketOpen={marketOpen} lunchBreak={lunchBreak} stale={stale} staleReason={staleReason} updatedAt={updatedAt}
         refreshing={refreshing || unifiedTwQuotes.loading} onRefresh={refresh} note={note} />
 
       {error && !payload && (
@@ -854,7 +860,11 @@ export function LiveThemesView({ market }: { market: Market }) {
       {market === 'CN' && cn && <CnLive data={cn} />}
 
       {!marketOpen && payload && (
-        <p className="text-[11px] text-muted-foreground/45 text-center">收盤了，顯示最後確認價；盤中題材成分股每 30 秒與持倉／主圖共用同一套報價更新。</p>
+        <p className="text-[11px] text-muted-foreground/45 text-center">
+          {lunchBreak
+            ? 'A 股午間休市，顯示上午 11:30 最後確認價；13:00 開盤後自動恢復更新。'
+            : '收盤了，顯示最後確認價；盤中題材成分股每 30 秒與持倉／主圖共用同一套報價更新。'}
+        </p>
       )}
     </div>
   );

@@ -11,7 +11,7 @@ import { NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/api/response';
 import { globalCache } from '@/lib/datasource/MemoryCache';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { isCNMarketLunchBreak, isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
 import { fetchBoardSnapshot } from '@/lib/cn-agents/datasource/emBoards';
 import { filterThemeConcepts, isBehavioralBoard, classifyBoardStage, buildLatestCnBoardRanking } from '@/lib/cn-agents/boardRanking';
 import type { BoardEntry } from '@/lib/cn-agents/types';
@@ -26,6 +26,7 @@ interface LiveBoard extends BoardEntry {
 }
 interface CnLivePayload {
   marketOpen: boolean;
+  lunchBreak: boolean;
   stale: boolean;
   staleReason: string | null;
   updatedAt: string;
@@ -41,8 +42,9 @@ const withStage = (arr: BoardEntry[]): LiveBoard[] =>
 
 export async function GET(_req: NextRequest) {
   const open = isMarketOpen('CN');
+  const lunchBreak = isCNMarketLunchBreak();
   const liveWindow = open || isPostCloseWindow('CN');
-  const cacheKey = `live-cn-sectors:${liveWindow ? 'live' : 'stale'}`;
+  const cacheKey = `live-cn-sectors:${liveWindow ? 'live' : lunchBreak ? 'lunch' : 'stale'}`;
   const cached = globalCache.get<CnLivePayload>(cacheKey);
   if (cached) return apiOk(cached);
 
@@ -56,6 +58,7 @@ export async function GET(_req: NextRequest) {
       const fetchedAt = new Date().toISOString();
       const payload: CnLivePayload = {
         marketOpen: open,
+        lunchBreak,
         stale: false,
         staleReason: null,
         updatedAt: fetchedAt,
@@ -82,6 +85,7 @@ export async function GET(_req: NextRequest) {
   });
   const payload: CnLivePayload = {
     marketOpen: open,
+    lunchBreak,
     stale: freshness.stale,
     staleReason: freshness.reason,
     updatedAt: file.snapshotUpdatedAt,

@@ -133,6 +133,29 @@ describe('休市持倉報價', () => {
     expect(quotes).toEqual([]);
   });
 
+  test('陸股午休顯示 11:30 上午收盤快照，不標示為 stale', () => {
+    const quotes = buildFreshSnapshotFallback([
+      { original: '002821.SZ', resolved: '002821.SZ', market: 'CN' },
+    ], 'CN', {
+      market: 'CN',
+      date: '2026-08-20',
+      updatedAt: '2026-08-20T03:30:12.000Z', // 上海 11:30
+      count: 1,
+      quotes: [{
+        symbol: '002821', name: '凱萊英', open: 171, high: 184, low: 170,
+        close: 182.4, volume: 123, prevClose: 170.59, changePercent: 6.92,
+      }],
+    }, new Date('2026-08-20T04:20:00.000Z')); // 上海 12:20
+
+    expect(quotes).toEqual([expect.objectContaining({
+      symbol: '002821.SZ',
+      price: 182.4,
+      stale: false,
+      status: 'final',
+      marketSession: 'lunch_break',
+    })]);
+  });
+
   test('任何行情來源回 name=代號，都由最後出口補成正式中文名稱', async () => {
     getTWChineseName.mockResolvedValue('聯亞');
     await expect(enrichQuoteNames([

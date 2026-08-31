@@ -1,4 +1,4 @@
-import { isMarketOpen } from '@/lib/datasource/marketHours';
+import { isCNMarketLunchBreak, isMarketOpen } from '@/lib/datasource/marketHours';
 import type { Market } from '@/lib/utils/shareUnits';
 
 export type SignalEvaluationPhase = 'intraday' | 'closed';
@@ -33,5 +33,8 @@ export function resolveSignalEvaluationPhase({
   if (interval !== '1d') return 'closed';
   if (candleCount <= 0 || currentIndex !== candleCount - 1) return 'closed';
   if (!candleDate || candleDate.slice(0, 10) !== marketDate(market, now)) return 'closed';
-  return isMarketOpen(market, now) ? 'intraday' : 'closed';
+  // 午休只代表暫停成交，不代表當日 K 已收盤；下午開盤後數值仍會變動。
+  return isMarketOpen(market, now) || (market === 'CN' && isCNMarketLunchBreak(now))
+    ? 'intraday'
+    : 'closed';
 }
