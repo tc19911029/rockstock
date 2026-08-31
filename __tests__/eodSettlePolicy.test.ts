@@ -18,28 +18,28 @@ describe('EOD settlement fail-closed policy', () => {
     expect(assessTwOfficialReadiness({
       market: 'TW',
       targetDate: '2026-08-26',
-      twseRows: 1_000,
+      twseRows: 1_400,
       tpexRows: 0,
       now: new Date('2026-08-26T07:30:00.000Z'),
     })).toMatchObject({ ready: false, defer: true });
   });
 
-  test('16:00 後不再整批 defer，但仍維持 degraded 寫入門檻', () => {
+  test('16:00 後官方仍未到齊也繼續 defer，不用非官方來源定稿', () => {
     expect(assessTwOfficialReadiness({
       market: 'TW',
       targetDate: '2026-08-26',
-      twseRows: 1_000,
+      twseRows: 1_400,
       tpexRows: 0,
       now: new Date('2026-08-26T08:30:00.000Z'),
-    })).toMatchObject({ ready: false, defer: false });
+    })).toMatchObject({ ready: false, defer: true });
   });
 
   test('TWSE 與 TPEx 都到齊才視為官方批次 ready', () => {
     expect(assessTwOfficialReadiness({
       market: 'TW',
       targetDate: '2026-08-26',
-      twseRows: 1_000,
-      tpexRows: 700,
+      twseRows: 1_400,
+      tpexRows: 1_000,
       now: new Date('2026-08-26T07:30:00.000Z'),
     })).toEqual({ ready: true, defer: false, reason: undefined });
   });
@@ -54,12 +54,12 @@ describe('EOD settlement fail-closed policy', () => {
     })).toEqual({ ready: true, defer: false });
   });
 
-  test('TW 只接受官方錨或至少兩個獨立來源，Yahoo 單源一律拒寫', () => {
+  test('TW 只接受官方錨，兩個非官方獨立來源一致也不得寫正式 L1', () => {
     expect(canWriteSettlement(result({ officialAnchor: true }), 'TW', false)).toBe(true);
     expect(canWriteSettlement(result({
       status: 'settled-multi-source',
       independentAgree: 2,
-    }), 'TW', false)).toBe(true);
+    }), 'TW', false)).toBe(false);
     expect(canWriteSettlement(result({ independentAgree: 1 }), 'TW', true)).toBe(false);
     expect(canWriteSettlement(result({
       status: 'pending-unverified',

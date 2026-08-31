@@ -61,24 +61,39 @@ async function readSnapshotQuotes(market: 'TW' | 'CN', date: string): Promise<Ma
   return out;
 }
 
-async function fetchTWQuotes(date: string): Promise<Map<string, Quote>> {
+async function fetchTWQuotes(date: string): Promise<{
+  quotes: Map<string, Quote>;
+  ready: boolean;
+  reason?: string;
+}> {
   // 封存只讀交易所盤後日線。L2 與 mis.twse 在 z='-' 時可能只有買賣中價，
   // 即使 OHLC 自洽也不是成交價，不能進 sealed L1。
   const { prefetchVendorBatch } = await import('@/lib/datasource/eodSettleBatch');
   const cache = await prefetchVendorBatch('TW', date);
+  const { assessTwOfficialReadiness } = await import('@/lib/datasource/eodSettlePolicy');
+  const readiness = assessTwOfficialReadiness({
+    market: 'TW',
+    targetDate: date,
+    twseRows: cache.twseBulk.size,
+    tpexRows: cache.tpexBulk.size,
+  });
   const out = new Map<string, Quote>();
   for (const [code, q] of cache.twseBulk) out.set(code, q);
   for (const [code, q] of cache.tpexBulk) out.set(code, q);
-  const { fetchTWIndexQuote } = await import('@/lib/datasource/IntradayCache');
-  const indexQuotes = await Promise.all([
-    fetchTWIndexQuote(date, '^TWII'),
-    fetchTWIndexQuote(date, '^TWOII'),
-  ]);
-  for (const q of indexQuotes) {
-    if (q) out.set(q.symbol, q);
+  if (readiness.ready) {
+    const [{ fetchTwseIndexCandles }, { fetchTpexIndexCandles }] = await Promise.all([
+      import('@/lib/datasource/TwseIndexProvider'),
+      import('@/lib/datasource/TpexIndexProvider'),
+    ]);
+    const [twseIndex, tpexIndex] = await Promise.all([
+      fetchTwseIndexCandles(date, date).then(rows => rows.find(row => row.date === date) ?? null),
+      fetchTpexIndexCandles(date, date).then(rows => rows.find(row => row.date === date) ?? null),
+    ]);
+    if (twseIndex) out.set('^TWII', twseIndex);
+    if (tpexIndex) out.set('^TWOII', tpexIndex);
   }
   console.log(`[append-from-snapshot] TW 用官方盤後日線（TWSE ${cache.twseBulk.size} / TPEx ${cache.tpexBulk.size}）`);
-  return out;
+  return { quotes: out, ready: readiness.ready, reason: readiness.reason };
 }
 
 const bareCode = (symbol: string) => symbol.replace(/\.(SS|SZ)$/i, '');
@@ -148,12 +163,25 @@ export async function GET(req: NextRequest) {
   const stocks = await scanner.getStockList();
 
   // CN 走「本地快照 → 東財即時 → 騰訊即時」三層 fallback（東財 push2 常掛時靠騰訊補當日 bar）。
-  const quotes = market === 'TW'
-    ? await fetchTWQuotes(date)
-    : await fetchCNQuotes(date, stocks.map((s) => s.symbol));
+  let quotes: Map<string, Quote>;
+  if (market === 'TW') {
+    const official = await fetchTWQuotes(date);
+    if (!official.ready) {
+      return apiOk({
+        skipped: true,
+        reason: `${official.reason ?? '官方盤後日線未到齊'}；不封存，下一輪重試`,
+        market,
+        date,
+      });
+    }
+    quotes = official.quotes;
+  } else {
+    quotes = await fetchCNQuotes(date, stocks.map((s) => s.symbol));
+  }
   if (quotes.size === 0) return apiOk({ skipped: true, reason: '0 筆報價' });
 
   let appended = 0;
+  let corrected = 0;
   let already = 0;
   let skippedLimitUp = 0;
   const limitUpSkipped: string[] = [];
@@ -162,10 +190,28 @@ export async function GET(req: NextRequest) {
     const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const existing = await readCandleFile(symbol, market);
     if (!existing) return;
-    // DF3 修正：>= 確保 L1 已封今日 bar 時不被 L2 snapshot 蓋（個股 already 邏輯；
-    // same-day 覆寫只允許指數，見下方指數分支）。原 `> date` 只擋未來日、形同沒擋。
-    if (existing.lastDate >= date) { already++; return; }
     const q = quotes.get(code);
+    if (existing.lastDate > date) { already++; return; }
+    if (existing.lastDate === date) {
+      // TW 的當日 bar 可能是舊流程留下的 MIS/L2 暫時價；只要官方值不同就必須覆寫。
+      // 沒有官方 row 時不把它算成 already，留給正式 settlement 判斷停牌或繼續補抓。
+      if (market !== 'TW') { already++; return; }
+      if (!q) return;
+      const current = existing.candles.at(-1)!;
+      const officialSame = current.open === q.open
+        && current.high === q.high
+        && current.low === q.low
+        && current.close === q.close
+        && current.volume === q.volume;
+      if (officialSame) { already++; return; }
+      await saveLocalCandles(symbol, market, [
+        ...existing.candles.filter(candle => candle.date !== date),
+        { date, open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume },
+      ], { trustedOfficial: true });
+      appended++;
+      corrected++;
+      return;
+    }
     if (!q) return;
 
     // TW 來源是交易所官方盤後日線，漲跌停本來就是合法收盤，不可再套用只適合
@@ -191,7 +237,7 @@ export async function GET(req: NextRequest) {
   // 大盤指數（^TWII / ^TWOII / 000001.SS）— scanner.getStockList 不含指數，必須另外處理。
   // L2 snapshot 內 symbol 已帶 suffix（避 CN 個股 000001 撞 key），這裡直接 quotes.get(suffix 版)。
   // 0518 修：之前指數靠 Vercel cron download-candles-batch?batch=1 走 Yahoo 抓（vol 常 0），
-  // 改成由 IntradayCache 從 mis.twse/Tencent 抓，append-from-snapshot 一併寫 L1，本地 cron 也涵蓋。
+  // TW 改用交易所官方指數日線；CN 才沿用收盤快照。
   const indexSymbols = market === 'TW' ? ['^TWII', '^TWOII'] : ['000001.SS'];
   const indexAppended: string[] = [];
   for (const indexSymbol of indexSymbols) {
@@ -235,6 +281,7 @@ export async function GET(req: NextRequest) {
     market,
     date,
     appended,
+    corrected,
     already,
     skippedLimitUp,
     limitUpSkipped,

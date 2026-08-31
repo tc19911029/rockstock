@@ -1,15 +1,12 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError } from '@/lib/api/response';
-import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
-import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
-import { isAfterMarketClose, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
-import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { assessQuoteFreshness } from '@/lib/datasource/quoteFreshness';
 import { getQuoteSnapshotDate } from '@/lib/datasource/marketHours';
@@ -74,7 +71,8 @@ export async function GET(req: NextRequest) {
 
   // Server-side defense in depth: 新版前台會在休市時停止 timer，但部署前已開啟的
   // 舊分頁可能繼續每 30 秒呼叫。路由層仍要擋住，避免 MIS/Fugle 被無效輪詢放大。
-  if (market && !isMarketPollingWindow(market)) {
+  const liveQuoteWindow = market === 'TW' ? isMarketOpen('TW') : (market ? isMarketPollingWindow(market) : false);
+  if (market && !liveQuoteWindow) {
     const expectedDate = getQuoteSnapshotDate(market);
     const suffix = market === 'TW'
       ? (/\.TWO$/i.test(symbol) ? 'TWO' : 'TW')
@@ -117,60 +115,6 @@ export async function GET(req: NextRequest) {
       } catch { /* try next suffix */ }
     }
 
-    // TPEx 官方日 K 常在 16:30 後才發布；若全市場 L2 又於早盤凍結，舊邏輯會在
-    // 14:30 停止 MIS polling 後一路顯示昨日 L1。盤後只查「這一檔」MIS，且嚴格要求
-    // 回傳日期就是今天；getTWSESingleIntraday 只接受實際成交價，不會採委買/委賣中價。
-    if (market === 'TW' && !isIndex && isAfterMarketClose('TW')) {
-      try {
-        const finalQuote = await getTWSESingleIntraday(pureCode);
-        if (
-          finalQuote
-          && finalQuote.close > 0
-          && finalQuote.date === expectedDate
-          && isFreshProviderQuote('TW', finalQuote.date, finalQuote.updatedAt)
-        ) {
-          return apiOk({
-            symbol,
-            date: today,
-            open: finalQuote.open || finalQuote.close,
-            high: finalQuote.high || finalQuote.close,
-            low: finalQuote.low || finalQuote.close,
-            close: finalQuote.close,
-            volume: finalQuote.volume,
-            source: 'mis-final',
-            updatedAt: finalQuote.updatedAt,
-            stale: false,
-          }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-        }
-      } catch { /* 再退回可信的最終 L2／舊 L1 */ }
-    }
-
-    // 盤後官方日線可能延遲發布。在 L1 仍停在前一日的空窗，只允許「收盤後寫入、
-    // 且確有成交」的今日 L2 最終快照墊檔。委託簿推估價不得冒充今日收盤價。
-    if (!isIndex) {
-      try {
-        const snapshot = await readIntradaySnapshot(market, expectedDate);
-        const sq = snapshot?.quotes.find(q => q.symbol === pureCode);
-        const isFinal = snapshot?.date === expectedDate
-          && isFinalTradingSnapshot(market, expectedDate, snapshot.updatedAt);
-        const isConfirmedTrade = market !== 'TW' || sq?.isActualTrade === true;
-        if (isFinal && isConfirmedTrade && sq && sq.close > 0) {
-          return apiOk({
-            symbol,
-            date: expectedDate,
-            open: sq.open,
-            high: sq.high,
-            low: sq.low,
-            close: sq.close,
-            volume: sq.volume,
-            source: 'l2-final',
-            updatedAt: snapshot.updatedAt,
-            stale: false,
-          }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-        }
-      } catch { /* 保留可信的前一交易日 L1 */ }
-    }
-
     if (l1Fallback) {
       const freshness = assessQuoteFreshness(market, l1Fallback.date);
       return apiOk({
@@ -189,6 +133,8 @@ export async function GET(req: NextRequest) {
   let quoteDate: string | null = null;
   let quoteSource: string | undefined;
   let quoteUpdatedAt: string | undefined;
+  let quotePriceKind: string | undefined;
+  let provisional = false;
   let stale = false;
 
   // ── INDEX 走獨立即時鏈，最後才接受通過新鮮度檢查的 L2 ──
@@ -208,29 +154,19 @@ export async function GET(req: NextRequest) {
 
   // ── TW ──
   if (isTW) {
-    // 1) MIS 單股即時
+    // 所有台股盤中畫面只讀每分鐘中央快照，不另打 MIS／Fugle。
     try {
-      const q = await getTWSESingleIntraday(pureCode);
-      if (q && q.close > 0 && q.date === today && isFreshProviderQuote('TW', q.date, q.updatedAt)) {
+      const snapshot = await readIntradaySnapshot('TW', today);
+      const q = snapshot?.quotes.find(item => item.symbol === pureCode);
+      if (snapshot && q && q.close > 0 && !assessIntradayFreshness('TW', snapshot).stale) {
         quote = { open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume };
-        quoteDate = q.date;
-        quoteSource = 'mis';
-        quoteUpdatedAt = q.updatedAt;
+        quoteDate = snapshot.date;
+        quoteSource = q.priceKind === 'indicative' ? 'l2-indicative' : 'l2';
+        quoteUpdatedAt = q.observedAt ?? snapshot.updatedAt;
+        quotePriceKind = q.priceKind;
+        provisional = q.priceKind === 'indicative';
       }
     } catch { /* fallthrough */ }
-
-    // 2) Fugle
-    if (!quote && isFugleAvailable()) {
-      try {
-        const fq = await getFugleQuote(pureCode);
-        if (fq && fq.close > 0 && fq.date === today && isFreshProviderQuote('TW', fq.date, fq.updatedAt)) {
-          quote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
-          quoteDate = fq.date;
-          quoteSource = 'fugle';
-          quoteUpdatedAt = fq.updatedAt;
-        }
-      } catch { /* fallthrough */ }
-    }
   }
 
   // ── CN ──
@@ -277,11 +213,13 @@ export async function GET(req: NextRequest) {
       const freshSnapshot = snapshot
         ? !assessIntradayFreshness(market, snapshot).stale
         : false;
-      if (freshSnapshot && sq && sq.close > 0 && (market !== 'TW' || sq.isActualTrade !== false)) {
+      if (freshSnapshot && sq && sq.close > 0) {
         quote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
         quoteDate = snapshot!.date;
-        quoteSource = 'l2';
-        quoteUpdatedAt = snapshot!.updatedAt;
+        quoteSource = sq.priceKind === 'indicative' ? 'l2-indicative' : 'l2';
+        quoteUpdatedAt = sq.observedAt ?? snapshot!.updatedAt;
+        quotePriceKind = sq.priceKind;
+        provisional = market === 'TW' && sq.priceKind === 'indicative';
       }
     } catch { /* fallthrough */ }
   }
@@ -312,6 +250,8 @@ export async function GET(req: NextRequest) {
     ...quote,
     source: quoteSource,
     updatedAt: quoteUpdatedAt,
+    priceKind: quotePriceKind,
+    provisional,
     stale,
     status: freshness?.status,
     ...(freshness?.staleReason ? { staleReason: freshness.staleReason } : {}),

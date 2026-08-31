@@ -16,8 +16,8 @@ describe('部署後排程防回歸', () => {
     expect(source).toContain('LOCAL_L2_REFRESH_INTERVAL_MS');
     expect(source).toContain("startL2RefreshLoop('TW', 15_000 + L2_REFRESH_INTERVAL_MS)");
     expect(source).toContain("startL2RefreshLoop('CN', 45_000 + L2_REFRESH_INTERVAL_MS)");
-    expect(source).toContain('const degradedIntervalMs = Math.max(5 * 60_000, L2_REFRESH_INTERVAL_MS)');
-    expect(source).toContain('const nextDelay = healthy ? L2_REFRESH_INTERVAL_MS : degradedIntervalMs');
+    expect(source).toContain('const nextDelay = L2_REFRESH_INTERVAL_MS');
+    expect(source).not.toContain('const degradedIntervalMs = Math.max(5 * 60_000, L2_REFRESH_INTERVAL_MS)');
     expect(source).toContain('setTimeout(runAndSchedule, nextDelay)');
     expect(source).not.toMatch(/refreshAndScan\('TW'\).*5 \* 60 \* 1000/);
   });

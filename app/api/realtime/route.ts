@@ -3,14 +3,10 @@ import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { parseMisDate, parseMisPrice, parseMisUpdatedAt, resolveMisTradePrice } from '@/lib/datasource/TWSERealtime';
 import { assessQuoteFreshness, type QuoteFreshnessStatus } from '@/lib/datasource/quoteFreshness';
-
-// mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
-const MIS_HEADERS: Record<string, string> = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Referer': 'https://mis.twse.com.tw/stock/fibest.jsp',
-  'Accept': 'application/json, text/javascript, */*; q=0.01',
-  'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
-};
+import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
+import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { isMarketOpen } from '@/lib/datasource/marketHours';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TWSE 即時報價 API — 延遲約 5-15 秒（盤中）
@@ -31,12 +27,13 @@ export interface RealtimeQuote {
   time: string;        // 成交時間 HH:MM:SS
   date: string | null;
   updatedAt?: string;
-  source: 'mis';
+  source: 'mis' | 'l2' | 'l2-indicative' | 'l1';
+  provisional?: boolean;
+  priceKind?: string;
   stale: boolean;
   status: QuoteFreshnessStatus;
   staleReason?: string;
 }
-
 const realtimeQuerySchema = z.object({
   symbols: z.string().min(1),
 });
@@ -90,57 +87,83 @@ export async function GET(req: NextRequest) {
     return apiError('no valid symbols', 400);
   }
 
-  // TWSE 格式：tse_2330.tw|tse_2317.tw|otc_6770.tw
-  // 上市用 tse_，上櫃用 otc_
-  // 簡單判斷：4位數字通常是上市，但也有例外。先全用 tse_ 試，失敗再用 otc_
-  const exCh = codes.map(c => {
-    const clean = c.replace(/\.(TW|TWO)$/i, '');
-    // 如果原始 symbol 有 .TWO 後綴，用 otc
-    if (c.toUpperCase().includes('.TWO') || c.toUpperCase().includes('TWO')) {
-      return `otc_${clean}.tw`;
+  // 舊即時表格也只讀中央 L2；收盤後改讀已封存官方 L1，禁止再打單股 MIS。
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+  const quotes: RealtimeQuote[] = [];
+  if (isMarketOpen('TW')) {
+    const snapshot = await readIntradaySnapshot('TW', today).catch(() => null);
+    const snapshotFreshness = snapshot ? assessIntradayFreshness('TW', snapshot) : null;
+    const byCode = new Map(snapshot?.quotes.map(quote => [quote.symbol, quote]) ?? []);
+    for (const requested of codes) {
+      const code = requested.replace(/\.(TW|TWO)$/i, '');
+      const quote = byCode.get(code);
+      if (!snapshot || !quote || quote.close <= 0) continue;
+      const updatedAt = quote.observedAt ?? snapshot.updatedAt;
+      const updated = updatedAt ? new Date(updatedAt) : null;
+      quotes.push({
+        symbol: code,
+        name: quote.name,
+        price: quote.close,
+        open: quote.open,
+        high: quote.high,
+        low: quote.low,
+        prevClose: quote.prevClose,
+        change: +(quote.close - quote.prevClose).toFixed(2),
+        changePct: quote.changePercent,
+        volume: quote.volume,
+        time: updated && Number.isFinite(updated.getTime())
+          ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(updated)
+          : '',
+        date: snapshot.date,
+        updatedAt,
+        source: quote.priceKind === 'indicative' ? 'l2-indicative' : 'l2',
+        stale: snapshotFreshness?.stale ?? true,
+        status: snapshotFreshness?.stale ? 'delayed' : 'live',
+        ...(snapshotFreshness?.reason ? { staleReason: snapshotFreshness.reason } : {}),
+        provisional: quote.priceKind === 'indicative',
+        priceKind: quote.priceKind,
+      });
     }
-    return `tse_${clean}.tw`;
-  }).join('|');
-
-  try {
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
-    const res = await fetch(url, {
-      headers: MIS_HEADERS,
-      signal: AbortSignal.timeout(10000),
-    });
-    const json = await res.json();
-
-    const quotes: RealtimeQuote[] = [];
-    for (const d of json?.msgArray ?? []) {
-      const quote = parseRealtimeQuote(d);
-      if (quote) quotes.push(quote);
-    }
-
-    // 如果有些股票用 tse_ 查不到，可能是上櫃股，用 otc_ 重試
-    const found = new Set(quotes.map(q => q.symbol));
-    const missing = codes.filter(c => !found.has(c.replace(/\.(TW|TWO)$/i, '')));
-
-    if (missing.length > 0) {
-      const otcExCh = missing.map(c => `otc_${c.replace(/\.(TW|TWO)$/i, '')}.tw`).join('|');
-      try {
-        const otcRes = await fetch(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${otcExCh}&json=1&delay=0&_=${Date.now()}`, {
-          headers: MIS_HEADERS,
-          signal: AbortSignal.timeout(8000),
+  } else {
+    for (const requested of codes) {
+      const code = requested.replace(/\.(TW|TWO)$/i, '');
+      const candidates = [...new Set([requested, `${code}.TW`, `${code}.TWO`])];
+      for (const candidate of candidates) {
+        const file = await readCandleFile(candidate, 'TW').catch(() => null);
+        const last = file?.candles.at(-1);
+        if (!last || last.close <= 0) continue;
+        const freshness = assessQuoteFreshness('TW', last.date);
+        quotes.push({
+          symbol: code,
+          name: '',
+          price: last.close,
+          open: last.open,
+          high: last.high,
+          low: last.low,
+          prevClose: file?.candles.at(-2)?.close ?? last.close,
+          change: +((last.close) - (file?.candles.at(-2)?.close ?? last.close)).toFixed(2),
+          changePct: file?.candles.at(-2)?.close
+            ? +((last.close - file.candles.at(-2)!.close) / file.candles.at(-2)!.close * 100).toFixed(2)
+            : 0,
+          volume: last.volume,
+          time: '',
+          date: last.date,
+          source: 'l1',
+          stale: freshness.stale,
+          status: freshness.status,
+          ...(freshness.staleReason ? { staleReason: freshness.staleReason } : {}),
+          provisional: false,
         });
-        const otcJson = await otcRes.json();
-        for (const d of otcJson?.msgArray ?? []) {
-          const quote = parseRealtimeQuote(d);
-          if (quote && !quotes.some(item => item.symbol === quote.symbol)) quotes.push(quote);
-        }
-      } catch { /* OTC retry failed, skip */ }
+        break;
+      }
     }
-
-    const missingSymbols = codes.filter(code => !quotes.some(quote => quote.symbol === code.replace(/\.(TW|TWO)$/i, '')));
-    return apiOk(
-      { count: quotes.length, quotes, missingSymbols, status: missingSymbols.length > 0 || quotes.some(q => q.stale) ? 'degraded' : 'fresh' },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } },
-    );
-  } catch (e) {
-    return apiError(String(e));
   }
+
+  const missingSymbols = codes.filter(code => !quotes.some(quote => quote.symbol === code.replace(/\.(TW|TWO)$/i, '')));
+  return apiOk(
+    { count: quotes.length, quotes, missingSymbols, status: missingSymbols.length > 0 || quotes.some(q => q.stale) ? 'degraded' : 'fresh' },
+    { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } },
+  );
+
+
 }

@@ -18,6 +18,7 @@
 
 import { globalCache } from './MemoryCache';
 import { isTradingDay } from '@/lib/utils/tradingDay';
+import { resolveTwIntradayPriceState, type TwIntradayPriceKind } from './twIntradayPriceState';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -52,8 +53,17 @@ export interface IntradayQuote {
   prevClose: number;
   /** 漲跌幅 % */
   changePercent: number;
-  /** TW：false 代表 MIS 沒有成交價，close 僅為委託簿推估，禁止寫入任何 K 棒。 */
+  /** TW：false 代表 close 是盤中暫時委託簿中價，絕不可封存成正式日 K。 */
   isActualTrade?: boolean;
+  /** TW 盤中顯示價的性質；last_actual 是沿用最後一筆真實成交。 */
+  priceKind?: TwIntradayPriceKind;
+  /** 今日最後一筆已確認成交價；indicative 顯示時也保留，不被推估價覆寫。 */
+  lastActualPrice?: number;
+  lastActualAt?: string;
+  /** 連續成功收到該股票 row、但沒有真實成交價的刷新次數。 */
+  consecutiveMissingActual?: number;
+  /** 該股票最後一次實際出現在上游回應的時間；批次漏回時沿用、不假裝更新。 */
+  observedAt?: string;
 }
 
 export interface IntradaySnapshot {
@@ -576,7 +586,20 @@ export function getLastRefreshSummary(market: 'TW' | 'CN'): L2RefreshSummary {
 // ── 內部：TW 報價抓取（mis → OpenAPI 兩層 failover） ───────────────────────
 
 async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuote[]> {
-  const finalMap: Map<string, { code: string; name: string; open: number; high: number; low: number; close: number; volume: number; previousClose?: number; date?: string; isActualTrade?: boolean }> = new Map();
+  const finalMap: Map<string, {
+    code: string;
+    name: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    previousClose?: number;
+    date?: string;
+    isActualTrade?: boolean;
+    indicativePrice?: number;
+    updatedAt?: string;
+  }> = new Map();
 
   type TWProvider = { name: string; fetch: () => Promise<typeof finalMap> };
   const providers: TWProvider[] = [
@@ -661,41 +684,60 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
   // 若不檢查就會把昨日 OHLC 當成今日報價寫入 L2，污染所有下游掃描。
   // 盤後（15:00+）STOCK_DAY_ALL 填入當日收盤（q.date=今天），正常放行。
   const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+  const previousSnapshot = await readIntradaySnapshot('TW', todayTW).catch(() => null);
+  const previousBySymbol = new Map(previousSnapshot?.quotes.map(q => [q.symbol, q]) ?? []);
   let staleSkipped = 0;
   const quotes: IntradayQuote[] = [];
+  const observedSymbols = new Set<string>();
   for (const [, q] of finalMap) {
     if (q.date && q.date !== todayTW) {
       staleSkipped++;
       continue; // 丟掉非今日資料（STOCK_DAY_ALL 盤中回傳的昨日殘留）
     }
-    const prevClose = q.previousClose ?? q.close;
-    const changePercent = prevClose > 0 ? ((q.close - prevClose) / prevClose) * 100 : 0;
+    observedSymbols.add(q.code);
+    const previous = previousBySymbol.get(q.code);
+    const priceState = resolveTwIntradayPriceState({
+      close: q.close,
+      previousClose: q.previousClose,
+      indicativePrice: q.indicativePrice,
+      isActualTrade: q.isActualTrade,
+      updatedAt: q.updatedAt,
+    }, previous);
+    const close = priceState.close;
+    const rawOpen = q.open > 0 ? q.open : close;
+    const rawHigh = q.high > 0 ? q.high : Math.max(rawOpen, close);
+    const rawLow = q.low > 0 ? q.low : Math.min(rawOpen, close);
+    // L2 是暫時顯示層；沿用昨收／最後成交時仍維持 OHLC 自洽，正式日 K 只走官方 EOD。
+    const open = rawOpen > 0 ? rawOpen : close;
+    const high = close > 0 ? Math.max(rawHigh, open, close) : rawHigh;
+    const low = close > 0 ? Math.min(rawLow || close, open || close, close) : rawLow;
+    const prevClose = q.previousClose ?? previous?.prevClose ?? close;
+    const changePercent = prevClose > 0 && close > 0 ? ((close - prevClose) / prevClose) * 100 : 0;
     quotes.push({
+      ...priceState,
       symbol: q.code,
       name: q.name,
-      open: q.open,
-      high: q.high,
-      low: q.low,
-      close: q.close,
+      open,
+      high,
+      low,
+      close,
       volume: q.volume,
       prevClose,
       changePercent: Math.round(changePercent * 100) / 100,
-      isActualTrade: q.isActualTrade,
     });
+  }
+
+  // 某一批 API 失敗或 row 漏回，不等於該股票「本分鐘沒有成交」。原樣保留上一輪，
+  // 不增加 consecutiveMissingActual，也不讓畫面因單批失敗突然少一批股票。
+  if (finalMap.size > 0 && previousSnapshot?.date === todayTW) {
+    for (const previous of previousSnapshot.quotes) {
+      if (observedSymbols.has(previous.symbol)) continue;
+      quotes.push(previous);
+    }
   }
   if (staleSkipped > 0) {
     console.warn(`[IntradayCache] TW 丟棄 ${staleSkipped} 筆非 ${todayTW} 資料（多半是 STOCK_DAY_ALL 盤中昨日殘留）`);
   }
-
-  // 台股兩個大盤指數 ^TWII / ^TWOII — 跟個股共用同一個 L2 snapshot，
-  // 下游 append-from-snapshot 會自動寫 L1。
-  // 0518 修：原本 ^TWII 只能靠 Vercel cron `download-candles-batch?batch=1` 走 Yahoo 抓
-  // (本地 launchd 沒涵蓋、Yahoo 當日 vol 還會回 0)，現在改從 mis.twse t00 一起進 L2。
-  const twIndices = await Promise.all([
-    fetchTWIndexQuote(todayTW, '^TWII'),
-    fetchTWIndexQuote(todayTW, '^TWOII'),
-  ]);
-  for (const indexQuote of twIndices) if (indexQuote) quotes.push(indexQuote);
 
   return quotes;
 }

@@ -37,7 +37,7 @@ describe('休市持倉報價', () => {
     getCNChineseName.mockResolvedValue(null);
   });
 
-  test('同交易日盤後以 MIS 最後成交價覆蓋尚未定稿的 L1', async () => {
+  test('同交易日盤後不以 MIS 冒充正式收盤價', async () => {
     getTWSESingleIntraday.mockResolvedValue({
       code: '3081', name: '聯亞', date: '2026-08-26', open: 3010, high: 3255,
       low: 2940, close: 3255, volume: 7470, previousClose: 2960,
@@ -45,17 +45,8 @@ describe('休市持倉報價', () => {
 
     await expect(fetchSameDayTWCloseQuotes([
       { original: '3081.TW', resolved: '3081.TWO', market: 'TW' },
-    ], new Date('2026-08-26T08:00:00.000Z'))).resolves.toEqual([{
-      symbol: '3081.TW',
-      canonicalSymbol: '3081.TWO',
-      name: '聯亞',
-      price: 3255,
-      changePercent: 9.97,
-      asOf: '2026-08-26',
-      source: 'mis-final',
-      stale: false,
-      status: 'final',
-    }]);
+    ], new Date('2026-08-26T08:00:00.000Z'))).resolves.toEqual([]);
+    expect(getTWSESingleIntraday).not.toHaveBeenCalled();
   });
 
   test('盤後 MIS 日期不是今天時不覆蓋正式 L1', async () => {

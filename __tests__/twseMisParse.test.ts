@@ -1,4 +1,4 @@
-import { findMisQuoteRow, parseMisPrice, parseMisBestPrice, resolveMisClose, resolveMisTradePrice } from '@/lib/datasource/TWSERealtime';
+import { findMisQuoteRow, parseMisPrice, parseMisBestPrice, resolveMisClose, resolveMisIndicativePrice, resolveMisTradePrice } from '@/lib/datasource/TWSERealtime';
 
 describe('findMisQuoteRow', () => {
   test('同時查上市與上櫃時跳過第一筆上市空殼，選到 3081 上櫃實際列', () => {
@@ -152,5 +152,17 @@ describe('resolveMisTradePrice', () => {
       z: '-', h: '529.0000', l: '481.0000', a: '-', b: '529.0000_',
       u: '529.0000', w: '433.0000',
     })).toBe(529);
+  });
+});
+
+describe('resolveMisIndicativePrice', () => {
+  test('只有委買委賣雙邊都有價才產生合法檔位中價', () => {
+    expect(resolveMisIndicativePrice({ c: '2330', b: '100.0000_', a: '101.0000_' })).toBe(100.5);
+    expect(resolveMisIndicativePrice({ c: '2330', b: '100.0000_', a: '-' })).toBe(0);
+    expect(resolveMisIndicativePrice({ c: '2330', b: '-', a: '101.0000_' })).toBe(0);
+  });
+
+  test('中價落在次檔位時會 snap 到台股合法檔位', () => {
+    expect(resolveMisIndicativePrice({ c: '2330', b: '100.5000_', a: '101.0000_' })).toBe(101);
   });
 });

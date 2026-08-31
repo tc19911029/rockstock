@@ -1,8 +1,9 @@
 import type { SettleResult } from './eodSettle';
 
-export const TW_MIN_TWSE_OFFICIAL_ROWS = 800;
-export const TW_MIN_TPEX_OFFICIAL_ROWS = 500;
-export const TW_OFFICIAL_DEFER_CUTOFF_MINUTES = 16 * 60;
+// 近期完整官方批次約 TWSE 1,360+ / TPEx 990+；門檻保留少量停牌與商品異動空間，
+// 但不能讓半套官方表（舊門檻 800/500）被誤認為完整。
+export const TW_MIN_TWSE_OFFICIAL_ROWS = 1300;
+export const TW_MIN_TPEX_OFFICIAL_ROWS = 900;
 
 interface TwOfficialReadinessInput {
   market: 'TW' | 'CN';
@@ -19,8 +20,8 @@ export interface TwOfficialReadiness {
 }
 
 /**
- * 台股 T+0 第一輪只在 TWSE、TPEx 兩邊官方批次都到齊時才繼續。
- * 16:00 後仍允許進入多來源 reconciliation，但寫入政策仍要求官方錨或兩個獨立來源。
+ * 台股 T+0 只有在 TWSE、TPEx 兩邊官方批次都到齊時才繼續。
+ * 官方尚未發布完整資料就 fail closed，交給後續排程重試，不因時間晚了而放寬來源。
  */
 export function assessTwOfficialReadiness({
   market,
@@ -43,13 +44,11 @@ export function assessTwOfficialReadiness({
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find(part => part.type === type)?.value ?? '';
   const localDate = `${value('year')}-${value('month')}-${value('day')}`;
-  const localMinutes = Number(value('hour')) * 60 + Number(value('minute'));
 
   const twseReady = twseRows >= TW_MIN_TWSE_OFFICIAL_ROWS;
   const tpexReady = tpexRows >= TW_MIN_TPEX_OFFICIAL_ROWS;
   const ready = twseReady && tpexReady;
   const defer = targetDate === localDate
-    && localMinutes < TW_OFFICIAL_DEFER_CUTOFF_MINUTES
     && !ready;
 
   return {
@@ -63,7 +62,7 @@ export function assessTwOfficialReadiness({
 }
 
 /**
- * TW fail-closed：正式 L1 只能由官方錨，或至少兩個「不含 L1-existing」的獨立來源背書。
+ * TW fail-closed：正式 L1 只能由 TWSE／TPEx 官方錨寫入。
  * CN 暫無完整官方 bulk，維持既有多源／缺檔單源自癒政策。
  */
 export function canWriteSettlement(
@@ -73,7 +72,7 @@ export function canWriteSettlement(
 ): boolean {
   if (!result.settled || result.status.startsWith('pending')) return false;
   if (market === 'TW') {
-    return result.officialAnchor === true || (result.independentAgree ?? 0) >= 2;
+    return result.officialAnchor === true;
   }
   return result.status === 'settled-multi-source'
     || (result.status === 'settled-single-source' && existingBad);

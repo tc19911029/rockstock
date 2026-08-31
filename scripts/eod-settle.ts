@@ -197,7 +197,7 @@ async function main() {
     }
   }
   if (!officialReadiness.ready && market === 'TW') {
-    console.warn(`[eod-settle] DEGRADED：${officialReadiness.reason}；只允許官方錨或兩個獨立來源一致時寫入`);
+    console.warn(`[eod-settle] DEGRADED：${officialReadiness.reason}；台股只允許已取得官方錨的個股寫入`);
   }
 
   const results: SettleResult[] = [];
@@ -219,15 +219,15 @@ async function main() {
 
       // 2026-06-12 收緊，TW only（06-11 事故：bulk=0 + FinMind 402 → Yahoo 殘值跟 L1
       // 盤中殘值同源互證，1649 檔誤標 already-correct 且 T+1 不複驗 → 833 檔上櫃假收盤）：
-      //   1. 既有 bar 存在但 settled 無官方 bulk 源、也無 ≥2 獨立 vendor 背書
-      //      → pending-unverified，不寫不跳過，留給 T+1（08:00 官方 feed 可用、額度重置）。
-      //      existing 缺的 gap-fill 也必須有官方錨或獨立雙源，不再讓單一 Yahoo 寫正式 L1。
+      //   1. 既有 bar 存在但 settled 無官方 bulk 源
+      //      → pending-unverified，不寫不跳過，留給下一輪官方 feed 補齊。
+      //      備援來源即使彼此一致，也只能協助診斷，不能寫成台股正式收盤價。
       //   2. already-correct 改精確比對 close（原 0.5% 容差讓 58.3 vs 58.4 永久留存），
       //      並加驗 volume（過去 volume 從不對賬 → 盤中部分量永久殘留，污染三色換手率）。
       // CN 維持原規則：CN 無官方 bulk（stub）、實務常只剩騰訊一源，套雙源背書會
       // 整市場 pending（2026-06-12 dry 實測 57/60）、宇宙外補 bar 機制全斷。
       if (market === 'TW') {
-        const verified = result.officialAnchor || (result.independentAgree ?? 0) >= 2;
+        const verified = result.officialAnchor === true;
         if (result.settled && !verified) {
           result.status = 'pending-unverified';
         } else if (result.settled && existing) {
@@ -247,7 +247,7 @@ async function main() {
       results.push(r);
       stats[r.status] = (stats[r.status] ?? 0) + 1;
 
-      // Apply 規則：TW 必須有官方錨或兩個獨立來源；CN 維持多源，缺檔時允許單源自癒。
+      // Apply 規則：TW 必須有官方錨；CN 維持多源，缺檔時允許單源自癒。
       const existingBad = !r.existing; // invariant-violated 在 settleSymbol 前已被 readExisting 分流為 undefined
       const writable = canWriteSettlement(r, market, existingBad);
       if (!dry && r.settled && writable) {
@@ -316,6 +316,9 @@ async function main() {
   let verifyFailed = false;
   let verifyHealth: 'good' | 'warning' | 'critical' | null = null;
   let verifyCoverage: number | null = null;
+  let verifyMissingTargetDate: number | null = null;
+  let verifyReadFailed: number | null = null;
+  let verifyPendingActive: number | null = null;
   if (!dry) {
     try {
       const Scanner = market === 'TW'
@@ -330,6 +333,16 @@ async function main() {
       });
       verifyHealth = verify.health;
       verifyCoverage = verify.summary.coverageRate;
+      verifyMissingTargetDate = verify.summary.stocksMissingTargetDate ?? 0;
+      verifyReadFailed = verify.summary.stocksReadFailed;
+      const nonTradingSymbols = new Set([
+        ...(verify.noTradeDetails ?? []).map(item => item.symbol),
+        ...(verify.notTradingDetails ?? []).map(item => item.symbol),
+        ...(verify.permanentStaleDetails ?? []).map(item => item.symbol),
+      ]);
+      verifyPendingActive = results.filter(result =>
+        result.status.startsWith('pending') && !nonTradingSymbols.has(result.symbol)
+      ).length;
       console.log(
         `Verify: ${verify.health} coverage=${(verify.summary.coverageRate * 100).toFixed(1)}% ` +
         `current=${verify.summary.stocksCurrent}/${verify.summary.totalStocks}`,
@@ -383,12 +396,18 @@ async function main() {
       && !visibilityFailed
       && verifyHealth === 'good'
       && (verifyCoverage ?? 0) >= 0.98
+      && verifyMissingTargetDate === 0
+      && verifyReadFailed === 0
+      && verifyPendingActive === 0
       && sentinel !== null;
     const reason = [
       pendingRate > 0.05 ? `pending=${(pendingRate * 100).toFixed(1)}%` : null,
       verifyFailed ? 'verify rebuild failed' : null,
       verifyHealth && verifyHealth !== 'good' ? `verify=${verifyHealth}` : null,
       verifyCoverage !== null && verifyCoverage < 0.98 ? `coverage=${(verifyCoverage * 100).toFixed(1)}%` : null,
+      verifyMissingTargetDate !== null && verifyMissingTargetDate > 0 ? `missingTargetDate=${verifyMissingTargetDate}` : null,
+      verifyReadFailed !== null && verifyReadFailed > 0 ? `readFailed=${verifyReadFailed}` : null,
+      verifyPendingActive !== null && verifyPendingActive > 0 ? `activeWithoutOfficial=${verifyPendingActive}` : null,
       visibilityFailed ? 'API visibility failed' : null,
     ].filter(Boolean).join(', ');
     writeSettlementState({

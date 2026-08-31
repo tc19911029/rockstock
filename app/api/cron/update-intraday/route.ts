@@ -1,6 +1,6 @@
 // GET /api/cron/update-intraday — 盤中 L2 快照刷新（只做刷新，不掃描）
 //
-// 由 Vercel Cron 每 5 分鐘觸發
+// 由本地中央排程每分鐘觸發
 // - 將全市場即時報價寫入 Layer 2 快照（單一 JSON 檔）
 // - L4 掃描改由 scan-intraday route 獨立觸發，避免 route 時間爆掉
 
@@ -23,15 +23,18 @@ export async function GET(req: NextRequest) {
   const market = (req.nextUrl.searchParams.get('market') ?? 'TW') as 'TW' | 'CN';
   const force = req.nextUrl.searchParams.get('force') === '1';
 
-  // 盤中 + 盤後窗口（TW 13:31~14:30 / CN 15:01~15:30）都跑：
-  // 收盤後還需要一輪來抓最終收盤資料 + 跑盤後掃描，對齊 instrumentation.ts 的條件
-  // ?force=1 跳過時間 gate，給人工修復用（盤後窗口已過但 L2 還缺東西）
-  if (!force && !isMarketOpen(market) && !isPostCloseWindow(market)) {
-    return apiOk({ skipped: true, reason: `${market} 非開盤時段也非盤後窗口`, market });
+  // TW 收盤後只走官方日線，不再打 MIS；CN 暫時保留既有盤後窗口。
+  // ?force=1 只留給人工診斷，不是正常排程路徑。
+  const pollingWindow = market === 'TW'
+    ? isMarketOpen('TW')
+    : isMarketOpen('CN') || isPostCloseWindow('CN');
+  if (!force && !pollingWindow) {
+    return apiOk({ skipped: true, reason: `${market} 非 L2 輪詢時段`, market });
   }
 
   try {
-    const snapshot = await refreshIntradaySnapshot(market);
+    // 一輪只抓一次；失敗沿用既有快照，下一個分鐘排程再試，避免 10s/30s 內部重試放大流量。
+    const snapshot = await refreshIntradaySnapshot(market, { retryOnEmpty: false });
     const date = getCurrentTradingDay(market);
     const summary = getLastRefreshSummary(market);
     const freshness = assessIntradayFreshness(market, snapshot);

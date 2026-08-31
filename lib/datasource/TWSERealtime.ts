@@ -25,6 +25,8 @@ export interface TWSEQuote {
   date?: string;      // 資料日期 YYYY-MM-DD（由 API 的民國日期欄位解析）
   /** false 表示 close 只是委買/委賣推估價，不可拿來畫 K 棒或封存日線。 */
   isActualTrade?: boolean;
+  /** 只有委買、委賣兩邊都存在時才會提供的合法檔位中價；只供盤中暫時顯示。 */
+  indicativePrice?: number;
   /** 行情來源本身的最後更新時間；不可用 API request 完成時間代替。 */
   updatedAt?: string;
 }
@@ -32,6 +34,9 @@ export interface TWSEQuote {
 const REALTIME_CACHE_KEY = 'twse:realtime:all';
 const INTRADAY_CACHE_KEY = 'twse:realtime:intraday';
 const REALTIME_TTL = 30 * 1000; // 30 秒
+const CODE_UNIVERSE_TTL = 6 * 60 * 60 * 1000;
+
+let codeUniverseCache: { tseCodes: string[]; otcCodes: string[]; expiresAt: number } | null = null;
 
 /** 正在進行中的 fetch promise（避免同時多次請求） */
 let inflightPromise: Promise<Map<string, TWSEQuote>> | null = null;
@@ -375,6 +380,19 @@ export function resolveMisTradePrice(d: Record<string, string | undefined>): num
 }
 
 /**
+ * 只在委買與委賣最優一檔都存在時產生暫時中價。
+ * 單邊委託、高低價或昨收都不是「目前雙邊市場的估計」，不得冒充中價。
+ */
+export function resolveMisIndicativePrice(d: Record<string, string | undefined>): number {
+  const bestBid = parseMisBestPrice(d.b);
+  const bestAsk = parseMisBestPrice(d.a);
+  if (bestBid <= 0 || bestAsk <= 0) return 0;
+  const midpoint = (bestBid + bestAsk) / 2;
+  if (!d.c || isValidTwTick(midpoint, d.c.startsWith('00'))) return midpoint;
+  return snapTwTick(midpoint, d.c.startsWith('00'));
+}
+
+/**
  * 從 mis.twse 單檔回傳資料解析「最近成交價」當 close
  *
  * 為什麼不能只看 d.z：鎖漲停／鎖跌停時 mis 會把 d.z 寫成 '-'，
@@ -432,7 +450,7 @@ export function resolveMisClose(d: Record<string, string | undefined>): number {
 }
 
 const MIS_BATCH_SIZE = 80;     // 每次查詢的股票數量上限（mis.twse 實測 100 可用、200 失敗）
-const MIS_CONCURRENCY = 4;     // 並行請求數（避免 rate limit）
+const MIS_CONCURRENCY = 1;     // TSE/OTC 各自串行（兩市場合計最多 2 個同時請求，降低 WAF 壓力）
 
 /**
  * mis.twse 必要 headers — 缺 Referer 會被 WAF 當爬蟲回空 msgArray（2026-04-21 實測）
@@ -450,41 +468,49 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
   const map = new Map<string, TWSEQuote>();
 
   // ── Step 1: 取全市場代碼清單（區分上市/上櫃）──
-  // 2026-05-11：Node fetch 對 TPEx 越來越常被 Cloudflare TLS 阻擋；改走 curl fallback
-  const [twseRes, tpexRes] = await Promise.allSettled([
-    fetchJsonWithCurlFallback<TWSERawRow[]>(
-      'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
-      { timeoutMs: 10000 },
-    ),
-    fetchJsonWithCurlFallback<TPExRawRow[]>(
-      'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes',
-      { timeoutMs: 10000 },
-    ),
-  ]);
+  // 代碼清單盤中極少變動，快取 6 小時；不必每分鐘在 27 批 MIS 之外再打兩個 OpenAPI。
+  let tseCodes: string[] = [];
+  let otcCodes: string[] = [];
+  if (codeUniverseCache && codeUniverseCache.expiresAt > Date.now()) {
+    tseCodes = [...codeUniverseCache.tseCodes];
+    otcCodes = [...codeUniverseCache.otcCodes];
+  } else {
+    const staleUniverse = codeUniverseCache;
+    // 2026-05-11：Node fetch 對 TPEx 越來越常被 Cloudflare TLS 阻擋；改走 curl fallback
+    const [twseRes, tpexRes] = await Promise.allSettled([
+      fetchJsonWithCurlFallback<TWSERawRow[]>(
+        'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
+        { timeoutMs: 10000 },
+      ),
+      fetchJsonWithCurlFallback<TPExRawRow[]>(
+        'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes',
+        { timeoutMs: 10000 },
+      ),
+    ]);
 
-  const tseCodes: string[] = [];
-  const otcCodes: string[] = [];
-
-  if (twseRes.status === 'fulfilled') {
-    if (twseRes.value.source === 'curl') {
-      console.info('[TWSERealtimeIntraday] STOCK_DAY_ALL 經 curl fallback 成功');
-    }
-    try {
-      for (const row of twseRes.value.data) {
-        if (/^\d{4,5}$/.test(row.Code)) tseCodes.push(row.Code);
+    if (twseRes.status === 'fulfilled') {
+      if (twseRes.value.source === 'curl') {
+        console.info('[TWSERealtimeIntraday] STOCK_DAY_ALL 經 curl fallback 成功');
       }
-    } catch { /* parse error */ }
-  }
-
-  if (tpexRes.status === 'fulfilled') {
-    if (tpexRes.value.source === 'curl') {
-      console.info('[TWSERealtimeIntraday] TPEx tpex_mainboard_quotes 經 curl fallback 成功');
+      try {
+        for (const row of twseRes.value.data) {
+          if (/^\d{4,5}$/.test(row.Code)) tseCodes.push(row.Code);
+        }
+      } catch { /* parse error */ }
     }
-    try {
-      for (const row of tpexRes.value.data) {
-        if (/^\d{4,5}$/.test(row.SecuritiesCompanyCode)) otcCodes.push(row.SecuritiesCompanyCode);
+
+    if (tpexRes.status === 'fulfilled') {
+      if (tpexRes.value.source === 'curl') {
+        console.info('[TWSERealtimeIntraday] TPEx tpex_mainboard_quotes 經 curl fallback 成功');
       }
-    } catch { /* parse error */ }
+      try {
+        for (const row of tpexRes.value.data) {
+          if (/^\d{4,5}$/.test(row.SecuritiesCompanyCode)) otcCodes.push(row.SecuritiesCompanyCode);
+        }
+      } catch { /* parse error */ }
+    }
+    if (tseCodes.length === 0 && staleUniverse) tseCodes = [...staleUniverse.tseCodes];
+    if (otcCodes.length === 0 && staleUniverse) otcCodes = [...staleUniverse.otcCodes];
   }
 
   // 2026-06-30：TPEx OpenAPI（tpex_mainboard_quotes）被 Cloudflare 403 擋時 otcCodes 整批掉光
@@ -506,15 +532,27 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
     }
   }
 
+  if (tseCodes.length > 0 && otcCodes.length > 0) {
+    codeUniverseCache = {
+      tseCodes: [...new Set(tseCodes)],
+      otcCodes: [...new Set(otcCodes)],
+      expiresAt: Date.now() + CODE_UNIVERSE_TTL,
+    };
+    tseCodes = codeUniverseCache.tseCodes;
+    otcCodes = codeUniverseCache.otcCodes;
+  }
+
   if (tseCodes.length === 0 && otcCodes.length === 0) {
     console.warn('[TWSERealtimeIntraday] 無法取得代碼清單，fallback 到 STOCK_DAY_ALL');
     return fetchAllQuotes(); // 降級回 STOCK_DAY_ALL
   }
 
   // ── Step 2: 批量查詢 mis.twse.com.tw ──
-  async function fetchMisBatch(codes: string[], exchange: 'tse' | 'otc'): Promise<void> {
+  async function fetchMisBatch(codes: string[], exchange: 'tse' | 'otc', includeIndex: boolean): Promise<void> {
     try {
-      const exCh = codes.map(c => `${exchange}_${c}.tw`).join('|');
+      const channels = codes.map(c => `${exchange}_${c}.tw`);
+      if (includeIndex) channels.push(exchange === 'tse' ? 'tse_t00.tw' : 'otc_o00.tw');
+      const exCh = channels.join('|');
       const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
       // 2026-06-15：mis.twse 盤中 Node fetch 常整批逾時（"批次失敗"）→ 80 檔即時報價漏抓。
       // 與大批量端點一致改走 curl fallback（curl 穩定 + 本機代理 fallback）。
@@ -524,23 +562,33 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
       );
       if (source === 'curl') console.info(`[TWSERealtimeIntraday] ${exchange} 批次經 curl fallback 成功`);
       for (const d of json?.msgArray ?? []) {
-        const code = d.c;
+        const channel = d.ch ?? '';
+        const indexSymbol = channel.includes('tse_t00') || d.c === 't00'
+          ? '^TWII'
+          : channel.includes('otc_o00') || d.c === 'o00'
+            ? '^TWOII'
+            : undefined;
+        const code = indexSymbol ?? d.c;
         if (!code) continue;
         const actualTrade = resolveMisTradePrice(d);
-        const close = actualTrade || resolveMisClose(d);
-        if (close <= 0) continue; // 今日無交易
+        const indicativePrice = indexSymbol ? 0 : resolveMisIndicativePrice(d);
+        const close = actualTrade || indicativePrice;
         const prevClose = parseMisPrice(d.y);
+        const base = close || prevClose || parseMisPrice(d.h) || parseMisPrice(d.l);
+        if (base <= 0) continue;
         map.set(code, {
           code,
-          name: d.n?.trim() || UNRESOLVED_STOCK_NAME,
-          open:  parseMisPrice(d.o) || close,
-          high:  parseMisPrice(d.h) || close,
-          low:   parseMisPrice(d.l) || close,
+          name: d.n?.trim() || (indexSymbol === '^TWII' ? '加權指數' : indexSymbol === '^TWOII' ? '櫃買指數' : UNRESOLVED_STOCK_NAME),
+          open:  parseMisPrice(d.o) || base,
+          high:  parseMisPrice(d.h) || base,
+          low:   parseMisPrice(d.l) || base,
           close,
-          volume: Math.round(parseInt((d.v || '0').replace(/,/g, ''), 10)), // mis.twse d.v 已是張（實測：2330 d.v=48544 === TWSE歷史÷1000=48544張）
+          // t00/o00 指數只有 m；個股則使用 v，兩者單位皆為張。
+          volume: Math.round(parseInt(((indexSymbol ? d.m : d.v) || '0').replace(/,/g, ''), 10)),
           previousClose: prevClose > 0 ? prevClose : undefined,
           date: today, // 確實是今天的即時數據
           isActualTrade: actualTrade > 0,
+          indicativePrice: indicativePrice > 0 ? indicativePrice : undefined,
           updatedAt: parseMisUpdatedAt(d),
         });
       }
@@ -551,10 +599,12 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
   }
 
   async function batchFetch(codes: string[], exchange: 'tse' | 'otc'): Promise<void> {
+    let includeIndex = true;
     for (let i = 0; i < codes.length; i += MIS_BATCH_SIZE * MIS_CONCURRENCY) {
       const promises: Promise<void>[] = [];
       for (let j = i; j < Math.min(i + MIS_BATCH_SIZE * MIS_CONCURRENCY, codes.length); j += MIS_BATCH_SIZE) {
-        promises.push(fetchMisBatch(codes.slice(j, j + MIS_BATCH_SIZE), exchange));
+        promises.push(fetchMisBatch(codes.slice(j, j + MIS_BATCH_SIZE), exchange, includeIndex));
+        includeIndex = false;
       }
       await Promise.allSettled(promises);
     }

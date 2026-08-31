@@ -2,17 +2,16 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { twNameWithTimeout, cnNameWithTimeout } from '@/lib/datasource/nameWithTimeout';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
-import { getFugleIntradayCandles, getFugleHistoricalMinuteCandles, getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
+import { getFugleIntradayCandles, getFugleHistoricalMinuteCandles, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { loadLocalCandlesWithTolerance } from '@/lib/datasource/LocalCandleStore';
 import { aggregateCandles } from '@/lib/datasource/aggregateCandles';
 import { computeIndicators } from '@/lib/indicators';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
-import { getTWSESingleIntraday } from '@/lib/datasource/TWSERealtime';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
-import { isAfterMarketClose, isMarketOpen, isPostCloseWindow } from '@/lib/datasource/marketHours';
+import { isMarketOpen } from '@/lib/datasource/marketHours';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { isFundSymbol } from '@/lib/market/classify';
 import type { Candle } from '@/types';
@@ -277,25 +276,19 @@ export async function GET(req: NextRequest) {
         // 盤中/盤後窗口：可用即時 API 拉；窗口外（晚上/凌晨）：只靠 L2 快照（若有今日數據也允許注入）
         // 避免凌晨用舊 API 產生假的今日 K 棒，但 L2 有當日 snapshot 時就允許
         const marketKey = isTW ? 'TW' as const : 'CN' as const;
-        const inLiveWindow = isMarketOpen(marketKey) || isPostCloseWindow(marketKey);
+        // 台股只有盤中才注入 L2 暫時價；收盤後必須等待官方 L1，不能再把 MIS/L2 冒充收盤。
+        const inLiveWindow = isMarketOpen(marketKey);
         let l2HasToday = false;
-        if (!inLiveWindow) {
+        if (!inLiveWindow && !isTW) {
           try {
             const snap = await readIntradaySnapshot(marketKey, today);
             l2HasToday = !!snap && !assessIntradayFreshness(marketKey, snap).stale && snap.quotes.some(q =>
-              q.symbol === l2LookupSymbol && q.close > 0 && (!isTW || q.isActualTrade !== false)
+              q.symbol === l2LookupSymbol && q.close > 0
             );
           } catch { /* ignore */ }
         }
         const lastCandle = result.candles[result.candles.length - 1];
-        // 14:30 後若正式 L1 還停在昨天，仍允許單檔 MIS 取今天最後實際成交價。
-        // 這不會重新打全市場 provider，也不會在週末／假日／盤前拿昨收造假今日 K。
-        const sameDayCloseFallback = isTW
-          && !isTwIndex
-          && !!lastCandle
-          && lastCandle.date < today
-          && isAfterMarketClose('TW');
-        const shouldInjectToday = inLiveWindow || l2HasToday || sameDayCloseFallback;
+        const shouldInjectToday = inLiveWindow || (!isTW && l2HasToday);
         // 注入條件：
         //   a) lastCandle.date < today → append 今日 K（正常路徑）
         //   b) lastCandle.date === today → 覆蓋（append-today 腳本寫進 L1 的盤中快照價，需用即時報價刷新）
@@ -319,22 +312,7 @@ export async function GET(req: NextRequest) {
                 todayQuote = { open: iq.open, high: iq.high, low: iq.low, close: iq.close, volume: iq.volume };
               }
             } else if (isTW) {
-              const twCode = pureCode;
-              // 只用 mis.twse 盤中即時報價（getTWSESingleIntraday）；不再 fallback getTWSEQuote。
-              // getTWSEQuote 走 openapi 收盤端點（STOCK_DAY_ALL / TPEx），盤中只回「昨日收盤」，
-              // 會以「非 null 的舊價」佔住注入鏈、被 date!==today 擋掉又吃掉注入預算，
-              // 害真正抓得到今日的 Fugle（fallback 2）來不及跑 → 上櫃股走圖今日那根補不上。
-              // 限時 1500ms，留足預算給下方 Fugle / L2 fallback（對齊可用的 /api/stock/quote 取價順序）。
-              const q = await withTimeout(
-                getTWSESingleIntraday(twCode),
-                Math.min(INJECT_BUDGET_MS, 1500),
-                null,
-              );
-              if (q && q.close > 0 && q.date === today && isFreshProviderQuote('TW', q.date, q.updatedAt)) {
-                todayQuote = q;
-              } else if (q) {
-                console.warn(`[stock] 即時報價跳過 ${symbol}: close=${q.close}, date=${(q as { date?: string }).date}, today=${today}`);
-              }
+              // 台股個股由下方中央 L2 一次讀取；這裡不另打單股 MIS/Fugle。
             } else if (isCN && !isCnIndex) {
               // 指數不走 EastMoney 個股報價（會誤回平安銀行）→ 落到下方 L2 fallback 取指數即時值
               const cnSuffix = /\.SS$/i.test(symbol) ? 'SS' : /\.SZ$/i.test(symbol) ? 'SZ' : undefined;
@@ -349,25 +327,13 @@ export async function GET(req: NextRequest) {
             console.warn(`[stock] 即時報價失敗 ${symbol}:`, err instanceof Error ? err.message : err);
           }
 
-          // fallback 2: Fugle 即時報價（分鐘K已驗證可用，比 mis.twse 穩定）
-          if (!todayQuote && isTW && !isTwIndex && isFugleAvailable() && Date.now() < injectDeadline) {
-            try {
-              const fq = await withTimeout(getFugleQuote(pureCode), Math.max(500, injectDeadline - Date.now()), null);
-              if (fq && fq.close > 0 && fq.date === today && isFreshProviderQuote('TW', fq.date, fq.updatedAt)) {
-                todayQuote = { open: fq.open || fq.close, high: fq.high || fq.close, low: fq.low || fq.close, close: fq.close, volume: fq.volume };
-              }
-            } catch (err) {
-              console.warn(`[stock] Fugle 報價失敗 ${symbol}:`, err instanceof Error ? err.message : err);
-            }
-          }
-
-          // fallback 3: 從 L2 全市場快照中找該股報價
+          // 從中央 L2 全市場快照中找該股報價
           if (!todayQuote && !isTwIndex && !isCnIndex && Date.now() < injectDeadline) {
             try {
               const snapshot = await withTimeout(readIntradaySnapshot(market as 'TW' | 'CN', today), Math.max(500, injectDeadline - Date.now()), null);
               if (snapshot && !assessIntradayFreshness(market as 'TW' | 'CN', snapshot).stale) {
                 const sq = snapshot.quotes.find(q => q.symbol === l2LookupSymbol);
-                if (sq && sq.close > 0 && (!isTW || sq.isActualTrade !== false)) {
+                if (sq && sq.close > 0) {
                   todayQuote = { open: sq.open, high: sq.high, low: sq.low, close: sq.close, volume: sq.volume };
                 } else {
                   console.warn(`[stock] L2快照找不到 ${symbol} (pureCode=${pureCode}), 快照有${snapshot.quotes.length}檔, 取樣: ${snapshot.quotes.slice(0, 3).map(q => q.symbol).join(',')}`);

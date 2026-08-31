@@ -225,11 +225,12 @@ interface BatchQuote {
 
 async function fetchTWBatch(): Promise<Map<string, BatchQuote>> {
   try {
-    const { getTWSERealtimeIntraday } = await import('@/lib/datasource/TWSERealtime');
-    const map = await getTWSERealtimeIntraday();
+    const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+    const snapshot = await readIntradaySnapshot('TW', today);
     const out = new Map<string, BatchQuote>();
-    for (const [code, q] of map) {
-      out.set(code, { close: q.close, volume: q.volume, high: q.high, prevClose: q.previousClose });
+    for (const q of snapshot?.quotes ?? []) {
+      out.set(q.symbol, { close: q.close, volume: q.volume, high: q.high, prevClose: q.prevClose });
     }
     return out;
   } catch (err) {

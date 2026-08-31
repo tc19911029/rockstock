@@ -46,29 +46,33 @@ async function monitoredSymbols(): Promise<string[]> {
 
 export function isRecoveryPayloadHealthy(
   responseOk: boolean,
-  body: { ok?: boolean; alert?: boolean; alertLevel?: string; count?: number; skipped?: boolean } | null,
+  body: { ok?: boolean; alert?: boolean; alertLevel?: string; count?: number; appended?: number; already?: number; skipped?: boolean } | null,
 ): boolean {
+  const recoveredRows = body?.count ?? ((body?.appended ?? 0) + (body?.already ?? 0));
   return responseOk
     && body?.ok === true
     && body.alert !== true
     && body.alertLevel !== 'critical'
     && body.skipped !== true
-    && (body.count ?? 0) > 0;
+    && recoveredRows > 0;
 }
 
-export async function triggerL2Recovery(req: NextRequest): Promise<boolean> {
+export async function triggerOfficialCloseRecovery(req: NextRequest): Promise<boolean> {
   const headers: Record<string, string> = {};
   if (process.env.CRON_SECRET) headers.authorization = `Bearer ${process.env.CRON_SECRET}`;
   try {
-    const response = await fetch(`${baseUrl(req)}/api/cron/update-intraday?market=TW&force=1`, {
+    // 收盤後畫面只信官方 L1；若偵測落後，重跑官方封存，而不是重打 MIS/L2。
+    const response = await fetch(`${baseUrl(req)}/api/cron/append-from-snapshot?market=TW&force=1`, {
       headers,
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(60_000),
     });
     const body = await response.json().catch(() => null) as {
       ok?: boolean;
       alert?: boolean;
       alertLevel?: string;
       count?: number;
+      appended?: number;
+      already?: number;
       skipped?: boolean;
     } | null;
     return isRecoveryPayloadHealthy(response.ok, body);
@@ -93,7 +97,7 @@ export async function GET(req: NextRequest) {
     const initiallyFailed = !result.ok;
     if (initiallyFailed) {
       recoveryAttempted = true;
-      recoverySucceeded = await triggerL2Recovery(req);
+      recoverySucceeded = await triggerOfficialCloseRecovery(req);
       result = await runQuoteEndToEndProbe(args);
     }
 

@@ -259,7 +259,9 @@ export async function register() {
   // 背景：新 Mac 5/20 12:10 L2 polling 突然停 80 分鐘沒人發現 → L1 ~180 檔錯
   const lastL2AlertAt: Record<'TW' | 'CN', number> = { TW: 0, CN: 0 };
   async function refreshAndScan(market: 'TW' | 'CN'): Promise<boolean> {
-    if (!isMarketOpen(market) && !isPostCloseWindow(market)) return true;
+    // 台股收盤後改由官方 TWSE／TPEx 日線定稿，不再持續打 MIS 全市場行情。
+    // CN 仍保留既有盤後窗口，供其非官方收盤鏈收斂。
+    if (market === 'TW' ? !isMarketOpen('TW') : (!isMarketOpen('CN') && !isPostCloseWindow('CN'))) return true;
 
     const data = await callRoute(
       `/api/cron/update-intraday?market=${market}`,
@@ -412,7 +414,7 @@ export async function register() {
   // append 用到的 in-memory L2 可能是 13:55 的 stale 快照（還沒抓到 13:30 集合競價最終價）。
   // 結果 ~610 檔 L1 close 被寫成 stale 中間 tick，特別是 .TWO 上櫃股 (8358 金居 5/15+5/19+5/20
   // 即此 bug)。修法：(1) 觸發時間 → 14:15 / 15:45 (再給 L2 三輪 polling 抓收盤集合競價)；
-  // (2) 觸發前強制呼叫 update-intraday route，確保用最新 L2 而非 in-memory stale。
+  // (2) CN 觸發前仍刷新 L2；TW 已改由官方盤後日線定稿，不需多打一輪 MIS。
   const l1SnapshotDone = persistentState.l1SnapshotDone;
   async function appendL1FromSnapshot(market: 'TW' | 'CN') {
     if (deferForWhisper(`${market} append-from-snapshot`)) return;
@@ -435,19 +437,20 @@ export async function register() {
     // 先標記 flag 避免重入，但實際 await refresh 失敗時 reset 讓下一輪重試
     l1SnapshotDone[market] = lastTrading;
 
-    // 觸發前透過 Node route 強制 refresh；不要從 instrumentation 直接 import
-    // IntradayCache，否則 Next.js output tracing 會把 18GB runtime data 全部納入。
-    console.log(`[local-cron] ${market} append-from-snapshot 前強制 L2 refresh...`);
-    const refresh = await callRoute(
-      `/api/cron/update-intraday?market=${market}&force=1`,
-      `${market} pre-append L2 refresh`,
-    ) as { data?: { count?: number }; count?: number } | null;
-    const refreshedCount = refresh?.data?.count ?? refresh?.count;
-    if (refresh) {
-      console.log(`[local-cron] ${market} 強制 L2 refresh 完成: ${refreshedCount ?? '?'} 筆`);
-    } else {
-      // 不 reset flag — append-from-snapshot 內部仍會 fallback 打官方盤後 API。
-      console.warn(`[local-cron] ${market} 強制 L2 refresh 失敗 (繼續 append)`);
+    if (market === 'CN') {
+      // CN 觸發前透過 Node route 強制 refresh；不要從 instrumentation 直接 import
+      // IntradayCache，否則 Next.js output tracing 會把 runtime data 全部納入。
+      console.log('[local-cron] CN append-from-snapshot 前強制 L2 refresh...');
+      const refresh = await callRoute(
+        '/api/cron/update-intraday?market=CN&force=1',
+        'CN pre-append L2 refresh',
+      ) as { data?: { count?: number }; count?: number } | null;
+      const refreshedCount = refresh?.data?.count ?? refresh?.count;
+      if (refresh) {
+        console.log(`[local-cron] CN 強制 L2 refresh 完成: ${refreshedCount ?? '?'} 筆`);
+      } else {
+        console.warn('[local-cron] CN 強制 L2 refresh 失敗 (繼續 append)');
+      }
     }
 
     console.log(`[local-cron] ${market} append-from-snapshot 觸發 (lastTrading=${lastTrading})...`);
@@ -531,7 +534,6 @@ export async function register() {
   // 週期必須從首刷後再起算：若直接從 process boot 起算，第 60 秒會距 TW 15 秒首刷僅約
   // 45 秒，撞上供應商／失敗冷卻窗口後，後續每輪可能一直卡在冷卻邊界。
   function startL2RefreshLoop(market: 'TW' | 'CN', firstRepeatDelayMs: number) {
-    const degradedIntervalMs = Math.max(5 * 60_000, L2_REFRESH_INTERVAL_MS);
     const runAndSchedule = async () => {
       let healthy = false;
       try {
@@ -539,9 +541,11 @@ export async function register() {
       } catch (err) {
         console.error(`[local-cron] ${market} refreshAndScan:`, err);
       }
-      const nextDelay = healthy ? L2_REFRESH_INTERVAL_MS : degradedIntervalMs;
+      // 本輪失敗就跳過，不在同一分鐘追加重試；固定下一分鐘再跑一次。
+      // 這同時避免 5 分鐘凍結，也不會因錯誤而放大 API 呼叫量。
+      const nextDelay = L2_REFRESH_INTERVAL_MS;
       if (!healthy) {
-        console.warn(`[local-cron] ${market} L2 降級，下一輪 ${Math.round(nextDelay / 60_000)} 分鐘後重試`);
+        console.warn(`[local-cron] ${market} L2 降級，本輪沿用快照，下一分鐘正常重試`);
       }
       setTimeout(runAndSchedule, nextDelay);
     };

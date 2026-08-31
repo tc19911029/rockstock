@@ -25,7 +25,7 @@ import { eastMoneyHistProvider, getSinaMinuteCandles } from './EastMoneyHistProv
 import { tencentHistProvider } from './TencentHistProvider';
 import { baiduHistProvider } from './BaiduHistProvider';
 import { yahooProvider } from './YahooDataProvider';
-import { getTWSEQuote, getTWSERealtimeIntraday } from './TWSERealtime';
+import { isSnapshotFresh, readIntradaySnapshot } from './IntradayCache';
 import { getEastMoneyQuote, getUSStockQuote } from './EastMoneyRealtime';
 
 // ── 市場判斷 ──────────────────────────────────────────────────────────────────
@@ -116,6 +116,22 @@ function isUSMarketOpen(): boolean {
   return timeMin >= 570 && timeMin <= 960; // 09:30 ~ 16:00
 }
 
+async function getTwCentralIntradayQuote(code: string): Promise<QuoteResult | null> {
+  const today = getAsiaDateStr();
+  const snapshot = await readIntradaySnapshot('TW', today);
+  if (!snapshot || !isSnapshotFresh(snapshot, 6 * 60_000)) return null;
+  const quote = snapshot.quotes.find(item => item.symbol === code);
+  if (!quote || quote.close <= 0) return null;
+  return {
+    open: quote.open,
+    high: quote.high,
+    low: quote.low,
+    close: quote.close,
+    volume: quote.volume,
+    date: snapshot.date,
+  };
+}
+
 // ── 即時報價覆蓋（僅盤中） ──────────────────────────────────────────────────
 
 export async function overlayRealtimeQuote(
@@ -136,7 +152,7 @@ export async function overlayRealtimeQuote(
 
   try {
     const quote = twCode
-      ? ((await getTWSERealtimeIntraday()).get(twCode) ?? await getTWSEQuote(twCode))
+      ? await getTwCentralIntradayQuote(twCode)
       : cnCode
         ? await getEastMoneyQuote(cnCode, extractCNSuffix(symbol))
         : await getUSStockQuote(usTicker!);
@@ -199,9 +215,7 @@ function prefetchRealtimeQuote(
   const usTicker = extractUSTicker(symbol);
 
   if (twCode && isTWMarketOpen()) {
-    return getTWSERealtimeIntraday()
-      .then((map) => (map.get(twCode) as QuoteResult | undefined) ?? getTWSEQuote(twCode))
-      .catch(() => null);
+    return getTwCentralIntradayQuote(twCode).catch(() => null);
   }
   if (cnCode && isCNMarketOpen()) {
     return getEastMoneyQuote(cnCode, extractCNSuffix(symbol)).catch(() => null);
@@ -460,11 +474,11 @@ export class MultiMarketProvider implements DataProvider {
       if (symbol === '^TWII' && result.length > 0) {
         const { applyTwseIndexVolume } = await import('./TwseMarketStats');
         result = await applyTwseIndexVolume(result);
-        // 今日那根官方 FMTQIK 要收盤後才發 → 盤中改用 mis.twse t00 的 m（累計成交張數，同單位）
+        // 今日那根官方 FMTQIK 要收盤後才發；盤中直接沿用中央 L2 快照內
+        // 已隨個股批次帶回的 t00 累計成交量，不再額外呼叫 MIS。
         const last = result[result.length - 1];
-        if (last.date === today) {
-          const { fetchTWIndexQuote } = await import('./IntradayCache');
-          const q = await fetchTWIndexQuote(today, symbol).catch(() => null);
+        if (last.date === today && isTWMarketOpen()) {
+          const q = await getTwCentralIntradayQuote(symbol).catch(() => null);
           if (q && q.volume > 0) last.volume = q.volume;
         }
       }

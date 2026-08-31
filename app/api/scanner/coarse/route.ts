@@ -14,7 +14,6 @@ import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import {
   readIntradaySnapshot,
-  refreshIntradaySnapshot,
   isSnapshotFresh,
   readMABase,
 } from '@/lib/datasource/IntradayCache';
@@ -56,17 +55,9 @@ export async function POST(req: NextRequest) {
 
     let snapshotFresh = true;
     if (!isSnapshotFresh(snapshot, maxSnapshotAgeSec * 1000)) {
-      // 快照太舊或不存在，嘗試刷新
-      // 只在盤中才刷新（盤後用已存的快照）
-      if (marketOpen) {
-        try {
-          snapshot = await refreshIntradaySnapshot(market);
-        } catch {
-          // 刷新失敗：用舊的 snapshot（帶 staleness warning）
-          // 不要因為 snapshot 不夠新就阻擋整個掃描
-          snapshotFresh = false;
-        }
-      } else if (!snapshot) {
+      // 互動掃描只讀中央快照，不另打全市場 API；下一分鐘排程統一刷新。
+      snapshotFresh = false;
+      if (!marketOpen && !snapshot) {
         // 盤後且無快照：嘗試用收盤資料生成
         // 先嘗試讀取，如果沒有就直接回傳空
         // 盤後且無快照：給出具體原因和預估恢復時間

@@ -14,7 +14,6 @@ import { buildMarketLiveThemeRoster, type MarketLiveThemeRosterFile } from '@/li
 import { globalCache } from '@/lib/datasource/MemoryCache';
 import { isMarketOpen } from '@/lib/datasource/marketHours';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { refreshIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { isValidYmd } from '@/lib/utils/ymd';
 
 export const runtime = 'nodejs';
@@ -38,13 +37,8 @@ export async function GET(req: NextRequest) {
   const cached = forceRefresh ? null : globalCache.get<LivePayload>(cacheKey);
   if (cached) return apiOk(cached);
 
-  // 手動刷新必須真的重抓 L2，而不是只清 React state 後又命中同一份 40 秒快取。
-  // refreshIntradaySnapshot 本身有 single-flight、來源冷卻與空快照保護，不會覆寫好資料。
-  if (forceRefresh) {
-    await refreshIntradaySnapshot('TW', { retryOnEmpty: false }).catch((error) => {
-      console.warn('[themes/live] 手動刷新 L2 失敗:', error instanceof Error ? error.message : error);
-    });
-  }
+  // 所有畫面只讀中央 L2；前端 refresh 僅略過本 route 的 40 秒結果快取，
+  // 不得另起一輪全市場 API，下一個一分鐘排程會統一更新。
 
   let file: LiveThemeRosterFile | null;
   try {
@@ -69,7 +63,7 @@ export async function GET(req: NextRequest) {
     stale: freshness.stale,
     staleReason: freshness.reason,
     updatedAt: file.snapshotUpdatedAt,
-    refreshAttempted: forceRefresh,
+    refreshAttempted: false,
   };
   globalCache.set(cacheKey, payload, CACHE_TTL);
   return apiOk(payload, { headers: { 'Cache-Control': 'no-store, max-age=0' } });

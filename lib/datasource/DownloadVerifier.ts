@@ -143,7 +143,13 @@ export function isConfirmedNoTradeQuote(
   quote: IntradayQuote,
 ): boolean {
   if (market === 'TW') {
-    return quote.isActualTrade === false && quote.volume === 0;
+    // 新快照的 last_actual 可能是沿用昨收／最後成交；只要全日累計量仍為 0，
+    // 且本輪不是 actual，就代表官方沒有一根可封的當日 K。舊快照則沿用 false 語意。
+    return quote.volume === 0
+      && (quote.priceKind === 'last_actual'
+        || quote.priceKind === 'indicative'
+        || quote.priceKind === 'unavailable'
+        || quote.isActualTrade === false);
   }
   const flat = quote.open === quote.high
     && quote.high === quote.low

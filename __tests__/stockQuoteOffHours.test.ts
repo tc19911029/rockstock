@@ -110,7 +110,7 @@ describe('GET /api/stock/quote 休市防護', () => {
     expect(getFugleQuote).not.toHaveBeenCalled();
   });
 
-  test('正式 L1 尚未封存時，以已確認成交的收盤 L2 回傳今日報價', async () => {
+  test('正式 L1 尚未封存時，不以收盤 L2 冒充官方收盤價', async () => {
     readCandleFile.mockResolvedValue({
       candles: [{ date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 }],
     });
@@ -130,14 +130,15 @@ describe('GET /api/stock/quote 休市防護', () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       symbol: '3081.TWO',
-      date: '2026-08-26',
-      close: 3255,
-      source: 'l2-final',
-      stale: false,
+      date: '2026-08-25',
+      close: 2960,
+      source: 'l1',
+      stale: true,
     });
+    expect(readIntradaySnapshot).not.toHaveBeenCalled();
   });
 
-  test('正式 L1 與全市場 L2 都過期時，以同日 MIS 最後成交價補上盤後盲區', async () => {
+  test('正式 L1 尚未封存時，不以同日 MIS 最後成交價補盤後盲區', async () => {
     readCandleFile.mockResolvedValue({
       candles: [{ date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 }],
     });
@@ -152,12 +153,13 @@ describe('GET /api/stock/quote 休市防護', () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       symbol: '3081.TWO',
-      date: '2026-08-26',
-      close: 3255,
-      source: 'mis-final',
-      stale: false,
+      date: '2026-08-25',
+      close: 2960,
+      source: 'l1',
+      stale: true,
     });
     expect(readIntradaySnapshot).not.toHaveBeenCalled();
+    expect(getTWSESingleIntraday).not.toHaveBeenCalled();
   });
 
   test('MIS 回傳前一交易日殘值時拒絕補成今日價', async () => {

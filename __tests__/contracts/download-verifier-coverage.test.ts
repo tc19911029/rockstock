@@ -28,6 +28,11 @@ describe('DownloadVerifier target-date coverage', () => {
   test('TW 只接受交易所明確標記的零量無成交', () => {
     expect(isConfirmedNoTradeQuote('TW', quote({ isActualTrade: false }))).toBe(true);
     expect(isConfirmedNoTradeQuote('TW', quote({ isActualTrade: true }))).toBe(false);
+    expect(isConfirmedNoTradeQuote('TW', quote({
+      isActualTrade: true,
+      priceKind: 'last_actual',
+      volume: 0,
+    }))).toBe(true);
   });
 
   test('CN 只接受零量、平棒且等於昨收的停牌型態', () => {

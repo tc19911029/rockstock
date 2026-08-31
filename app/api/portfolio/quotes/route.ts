@@ -1,25 +1,15 @@
 import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
-import { getFugleQuote, isFugleAvailable } from '@/lib/datasource/FugleProvider';
 import { readIntradaySnapshot, type IntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { getQuoteSnapshotDate, isAfterMarketClose, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
-import { getTWSESingleIntraday, resolveMisTradePrice, parseMisPrice, parseMisDate, parseMisUpdatedAt } from '@/lib/datasource/TWSERealtime';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
 import { expectedTwSymbol } from '@/lib/datasource/twSymbolMarket';
 import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 import { assessQuoteFreshness, type QuoteFreshnessStatus } from '@/lib/datasource/quoteFreshness';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
-
-// mis.twse 需要 Referer=fibest.jsp，否則 WAF 回空 msgArray（2026-04-21）
-const MIS_HEADERS: Record<string, string> = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Referer': 'https://mis.twse.com.tw/stock/fibest.jsp',
-  'Accept': 'application/json, text/javascript, */*; q=0.01',
-  'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
-};
 
 // 暫時無報價不能做負快取：上游恢復後下一輪必須立刻重試，否則 30 秒 polling
 // 會被 90 秒「無資料」記憶擋住，使用者仍看到舊價。
@@ -45,6 +35,9 @@ export interface QuoteTick {
   status?: QuoteFreshnessStatus;
   staleReason?: string;
   updatedAt?: string;
+  /** true 代表盤中暫時顯示價，收盤封存絕不採用。 */
+  provisional?: boolean;
+  priceKind?: string;
 }
 
 export type ResolvedEntry = {
@@ -140,7 +133,6 @@ export function buildFreshSnapshotFallback(
     const code = entry.resolved.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const quote = byCode.get(code);
     if (!quote || quote.close <= 0) continue;
-    if (market === 'TW' && quote.isActualTrade === false) continue;
     out.push({
       symbol: entry.original,
       canonicalSymbol: entry.resolved,
@@ -148,10 +140,14 @@ export function buildFreshSnapshotFallback(
       changePercent: quote.changePercent ?? 0,
       name: quote.name || undefined,
       asOf: snapshot.date,
-      source: 'l2',
+      source: quote.priceKind === 'indicative' ? 'l2-indicative' : 'l2',
       stale: false,
       status: isMarketOpen(market, now) ? 'live' : 'final',
-      updatedAt: snapshot.updatedAt,
+      updatedAt: quote.observedAt ?? snapshot.updatedAt,
+      ...(market === 'TW' ? {
+        provisional: quote.priceKind === 'indicative',
+        priceKind: quote.priceKind,
+      } : {}),
     });
   }
   return out;
@@ -198,40 +194,11 @@ export async function fetchSameDayTWCloseQuotes(
   entries: ResolvedEntry[],
   now = new Date(),
 ): Promise<QuoteTick[]> {
-  if (entries.length === 0 || !isAfterMarketClose('TW', now)) return [];
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
-  const out: QuoteTick[] = [];
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < entries.length) {
-      const entry = entries[cursor++];
-    const code = entry.resolved.replace(/\.(TW|TWO)$/i, '');
-    try {
-      const quote = await getTWSESingleIntraday(code);
-      if (!quote || quote.date !== today || !(quote.close > 0)) continue;
-      const previous = quote.previousClose ?? quote.close;
-      const changePercent = previous > 0
-        ? +((quote.close - previous) / previous * 100).toFixed(2)
-        : 0;
-      out.push({
-        symbol: entry.original,
-        canonicalSymbol: entry.resolved,
-        price: quote.close,
-        changePercent,
-        name: quote.name || undefined,
-        asOf: quote.date,
-        source: 'mis-final',
-        stale: false,
-        status: 'final',
-        updatedAt: quote.updatedAt,
-      });
-    } catch {
-      // 單檔失敗交給 L2/final L1，不阻斷其他持股。
-    }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(6, entries.length) }, () => worker()));
-  return out;
+  // 台股收盤後只顯示已封存的官方 L1；MIS/L2 都只能是盤中暫時值。
+  // 保留此 export 供舊 caller 相容，但不再產生任何外部請求或非官方「final」。
+  void entries;
+  void now;
+  return [];
 }
 
 // ── 台股即時報價（TWSE mis API）─────────────────────────────────────────────
@@ -239,148 +206,16 @@ export async function fetchSameDayTWCloseQuotes(
 async function fetchTWSEQuotes(symbols: string[]): Promise<QuoteTick[]> {
   if (symbols.length === 0) return [];
 
-  const exCh = symbols.map(s => {
-    const clean = s.replace(/\.(TW|TWO)$/i, '');
-    if (s.toUpperCase().includes('.TWO') || s.toUpperCase().includes('TWO')) {
-      return `otc_${clean}.tw`;
-    }
-    return `tse_${clean}.tw`;
-  }).join('|');
-
-  const results: QuoteTick[] = [];
-
-  try {
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
-    const res = await fetch(url, {
-      headers: MIS_HEADERS,
-      signal: AbortSignal.timeout(10000),
-    });
-    const json = await res.json();
-
-    const found = new Set<string>();
-    for (const d of json?.msgArray ?? []) {
-      const sym = (d.c as string) || '';
-      const prevClose = parseMisPrice(d.y);
-      // z='-' 代表這批沒有實際撮合；b/a 中價不是成交價，不能當現價。
-      // 留在 missing 清單，交由下方 Fugle / L2 補實際成交價。
-      const actualPrice = resolveMisTradePrice(d as Record<string, string | undefined>);
-
-      // mis 對不存在的 channel（例如 6187 上櫃但被送 tse_）會回 d.c="" + 全 0 的空殼，
-      // 直接跳過避免產生 ".TW" / ".TWO" 空殼結果
-      if (!sym) continue;
-      const asOf = parseMisDate(d.d as string | undefined) ?? null;
-      const updatedAt = parseMisUpdatedAt(d as Record<string, string | undefined>);
-      const volume = parseInt(String(d.v ?? '0').replace(/,/g, ''), 10) || 0;
-      if (actualPrice <= 0) {
-        // 今日尚無成交／停牌：昨收是合法參考價，但必須明確標 no-trade，不能冒充 live trade。
-        if (asOf && volume === 0 && prevClose > 0) {
-          found.add(sym);
-          const original = symbols.find(s => s.replace(/\.(TW|TWO)$/i, '') === sym);
-          results.push({
-            symbol: original ?? `${sym}.TW`, price: prevClose, changePercent: 0,
-            name: d.n as string || undefined, asOf, source: 'mis-no-trade', updatedAt,
-            stale: false, status: 'no-trade',
-          });
-        }
-        continue;
-      }
-
-      const changePct = prevClose > 0
-        ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2)
-        : 0;
-
-      found.add(sym);
-
-      // Find the original symbol with suffix
-      const original = symbols.find(s => s.replace(/\.(TW|TWO)$/i, '') === sym);
-      results.push({
-        symbol: original ?? `${sym}.TW`,
-        price: actualPrice,
-        changePercent: changePct,
-        name: d.n as string || undefined,
-        asOf,
-        source: 'mis',
-        updatedAt,
-      });
-    }
-
-    // Retry missing as OTC
-    const missing = symbols.filter(s => !found.has(s.replace(/\.(TW|TWO)$/i, '')));
-    if (missing.length > 0) {
-      const otcExCh = missing.map(c => `otc_${c.replace(/\.(TW|TWO)$/i, '')}.tw`).join('|');
-      try {
-        const otcRes = await fetch(
-          `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${otcExCh}&json=1&delay=0&_=${Date.now()}`,
-          { headers: MIS_HEADERS, signal: AbortSignal.timeout(8000) },
-        );
-        const otcJson = await otcRes.json();
-        for (const d of otcJson?.msgArray ?? []) {
-          const sym = (d.c as string) || '';
-          const prevClose = parseMisPrice(d.y);
-          const actualPrice = resolveMisTradePrice(d as Record<string, string | undefined>);
-          if (!sym) continue;
-          const asOf = parseMisDate(d.d as string | undefined) ?? null;
-          const updatedAt = parseMisUpdatedAt(d as Record<string, string | undefined>);
-          const volume = parseInt(String(d.v ?? '0').replace(/,/g, ''), 10) || 0;
-          if (actualPrice <= 0) {
-            if (asOf && volume === 0 && prevClose > 0) {
-              const original = missing.find(s => s.replace(/\.(TW|TWO)$/i, '') === sym);
-              results.push({
-                symbol: original ?? `${sym}.TWO`, price: prevClose, changePercent: 0,
-                name: d.n as string || undefined, asOf, source: 'mis-no-trade', updatedAt,
-                stale: false, status: 'no-trade',
-              });
-            }
-            continue;
-          }
-          const changePct = prevClose > 0
-            ? +((actualPrice - prevClose) / prevClose * 100).toFixed(2)
-            : 0;
-          const original = missing.find(s => s.replace(/\.(TW|TWO)$/i, '') === sym);
-          results.push({
-            symbol: original ?? `${sym}.TWO`,
-            price: actualPrice,
-            changePercent: changePct,
-            name: d.n as string || undefined,
-            asOf,
-            source: 'mis',
-            updatedAt,
-          });
-        }
-      } catch { /* OTC retry failed */ }
-    }
-  } catch { /* TWSE failed */ }
-
-  // Fallback 1: Fugle（mis.twse 空回應時救場）
-  const stillMissing = symbols.filter(
-    s => !results.some(r => r.symbol.replace(/\.(TW|TWO)$/i, '') === s.replace(/\.(TW|TWO)$/i, '')),
-  );
-  if (stillMissing.length > 0 && isFugleAvailable()) {
-    await Promise.allSettled(stillMissing.map(async (sym) => {
-      const code = sym.replace(/\.(TW|TWO)$/i, '');
-      try {
-        const fq = await getFugleQuote(code);
-        if (fq && fq.close > 0) {
-          const changePct = fq.changePercent ?? (
-            fq.prevClose && fq.prevClose > 0
-              ? +((fq.close - fq.prevClose) / fq.prevClose * 100).toFixed(2)
-              : 0
-          );
-          results.push({
-            symbol: sym,
-            price: fq.close,
-            changePercent: changePct,
-            name: fq.name || undefined,
-            asOf: fq.date ?? null,
-            source: 'fugle',
-            updatedAt: fq.updatedAt,
-          });
-        }
-      } catch { /* Fugle fallback failed */ }
-    }));
-  }
-
-  return results;
+  // 持倉與所有盤中畫面共用中央快照；不得因持倉 polling 再打 MIS/Fugle。
+  const today = getQuoteSnapshotDate('TW');
+  const snapshot = await readIntradaySnapshot('TW', today).catch(() => null);
+  if (!snapshot) return [];
+  const entries: ResolvedEntry[] = symbols.map(symbol => ({
+    original: symbol,
+    resolved: symbol,
+    market: 'TW',
+  }));
+  return buildFreshSnapshotFallback(entries, 'TW', snapshot);
 }
 
 // ── 陸股即時報價（騰訊 → 東方財富 fallback）────────────────────────────────
@@ -510,24 +345,14 @@ export async function GET(req: NextRequest) {
   const twEntries = fetchable.filter(e => e.market === 'TW');
   const cnEntries = fetchable.filter(e => e.market === 'CN');
   const fundEntries = fetchable.filter(e => e.market === 'FUND');
-  const twLive = isMarketPollingWindow('TW');
+  const twLive = isMarketOpen('TW');
   const cnLive = isMarketPollingWindow('CN');
 
   // 並行抓取（傳入 resolved symbol，結果 symbol 改回 original）
   const [twQuotes, cnQuotes, fundQuotes] = await Promise.all([
     (twLive
       ? fetchTWSEQuotes(twEntries.map(e => e.resolved))
-      : fetchFinalL1Quotes(twEntries, 'TW').then(async l1Quotes => {
-          const expectedDate = getQuoteSnapshotDate('TW');
-          const unsettledEntries = twEntries.filter(entry => {
-            const l1 = l1Quotes.find(quote => quote.symbol === entry.original);
-            return !l1?.asOf || l1.asOf < expectedDate;
-          });
-          // 正式 L1 已到預期交易日就完成對帳，不再用暫時 MIS 覆蓋；只替仍落後的檔案補價。
-          const sameDayQuotes = await fetchSameDayTWCloseQuotes(unsettledEntries);
-          const replaced = new Set(sameDayQuotes.map(quote => quote.symbol));
-          return [...l1Quotes.filter(quote => !replaced.has(quote.symbol)), ...sameDayQuotes];
-        })
+      : fetchFinalL1Quotes(twEntries, 'TW')
     ).then(qs =>
       qs.map(q => {
         const entry = twEntries.find(e => e.resolved.replace(/\.(TW|TWO)$/i, '') === q.symbol.replace(/\.(TW|TWO)$/i, ''));
@@ -565,7 +390,7 @@ export async function GET(req: NextRequest) {
   };
 
   const twFallback = async () => {
-    if ((!twLive && !isAfterMarketClose('TW')) || missingTW.length === 0) return [] as typeof quotes;
+    if (!twLive || missingTW.length === 0) return [] as typeof quotes;
     const lookupTW = getQuoteSnapshotDate('TW');
     try {
       const twSnap = await readIntradaySnapshot('TW', lookupTW);
