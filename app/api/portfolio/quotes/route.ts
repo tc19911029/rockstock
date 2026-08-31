@@ -10,6 +10,7 @@ import { expectedTwSymbol } from '@/lib/datasource/twSymbolMarket';
 import { isPlaceholderStockName } from '@/lib/stocks/stockIdentity';
 import { assessQuoteFreshness, type QuoteFreshnessStatus } from '@/lib/datasource/quoteFreshness';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
+import { readTWOfficialCloseState } from '@/lib/datasource/twOfficialCloseState';
 
 // 暫時無報價不能做負快取：上游恢復後下一輪必須立刻重試，否則 30 秒 polling
 // 會被 90 秒「無資料」記憶擋住，使用者仍看到舊價。
@@ -209,8 +210,28 @@ export async function fetchTWDisplayQuotes(
 
   const expectedDate = getQuoteSnapshotDate('TW', now);
   const l1ByOriginal = new Map(l1Quotes.map(quote => [quote.symbol, quote]));
-  const pendingEntries = entries.filter(entry => l1ByOriginal.get(entry.original)?.asOf !== expectedDate);
-  if (pendingEntries.length === 0) return l1Quotes;
+  const officialClose = await readTWOfficialCloseState(expectedDate);
+  const officialNoTrade = new Set(officialClose?.noTradeSymbols ?? []);
+  const pendingEntries = entries.filter(entry => {
+    const code = entry.resolved.replace(/\.(TW|TWO)$/i, '');
+    return l1ByOriginal.get(entry.original)?.asOf !== expectedDate && !officialNoTrade.has(code);
+  });
+  if (pendingEntries.length === 0) {
+    return entries.flatMap(entry => {
+      const l1 = l1ByOriginal.get(entry.original);
+      const code = entry.resolved.replace(/\.(TW|TWO)$/i, '');
+      return l1 && officialNoTrade.has(code)
+        ? [{
+            ...l1,
+            source: 'l1-no-trade',
+            stale: false,
+            status: 'no-trade' as const,
+            provisional: false,
+            marketSession: 'closed' as const,
+          }]
+        : l1 ? [l1] : [];
+    });
+  }
 
   const snapshot = await readIntradaySnapshot('TW', expectedDate).catch(() => null);
   const provisional = snapshot
@@ -221,6 +242,17 @@ export async function fetchTWDisplayQuotes(
   return entries.flatMap(entry => {
     const l1 = l1ByOriginal.get(entry.original);
     if (l1?.asOf === expectedDate) return [l1];
+    const code = entry.resolved.replace(/\.(TW|TWO)$/i, '');
+    if (l1 && officialNoTrade.has(code)) {
+      return [{
+        ...l1,
+        source: 'l1-no-trade',
+        stale: false,
+        status: 'no-trade' as const,
+        provisional: false,
+        marketSession: 'closed' as const,
+      }];
+    }
     const l2 = provisionalByOriginal.get(entry.original);
     if (l2) return [l2];
     return l1 ? [l1] : [];
@@ -468,6 +500,12 @@ export async function GET(req: NextRequest) {
       };
     }
     if (entry.market !== 'TW' && entry.market !== 'CN') return quote;
+
+    // 官方完整收盤表確認今日無成交：保留最近一次真實 L1 日期與價格，不把日期改成今天，
+    // 也不讓一般「日期不是今天」規則把正確的 no-trade 狀態誤標成 delayed。
+    if (entry.market === 'TW' && quote.status === 'no-trade' && quote.source === 'l1-no-trade') {
+      return { ...quote, stale: false, status: 'no-trade' as const };
+    }
 
     // 即時 provider 成功時，該路徑已驗證為目前 session；休市 L1/MIS/L2 則在上方帶入真實日期。
     const asOf = quote.asOf ?? null;

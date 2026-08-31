@@ -7,6 +7,7 @@ import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { getQuoteSnapshotDate, isAfterMarketClose, isMarketOpen } from '@/lib/datasource/marketHours';
+import { readTWOfficialCloseState } from '@/lib/datasource/twOfficialCloseState';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TWSE 即時報價 API — 延遲約 5-15 秒（盤中）
@@ -27,7 +28,7 @@ export interface RealtimeQuote {
   time: string;        // 成交時間 HH:MM:SS
   date: string | null;
   updatedAt?: string;
-  source: 'mis' | 'l2' | 'l2-indicative' | 'l2-provisional-close' | 'l1';
+  source: 'mis' | 'l2' | 'l2-indicative' | 'l2-provisional-close' | 'l1' | 'l1-no-trade';
   provisional?: boolean;
   priceKind?: string;
   stale: boolean;
@@ -126,6 +127,8 @@ export async function GET(req: NextRequest) {
     }
   } else {
     const expectedDate = getQuoteSnapshotDate('TW');
+    const officialClose = await readTWOfficialCloseState(expectedDate);
+    const officialNoTrade = new Set(officialClose?.noTradeSymbols ?? []);
     const postCloseSnapshot = isAfterMarketClose('TW')
       ? await readIntradaySnapshot('TW', expectedDate).catch(() => null)
       : null;
@@ -173,6 +176,17 @@ export async function GET(req: NextRequest) {
 
       if (l1Fallback?.date === expectedDate) {
         quotes.push(l1Fallback);
+        continue;
+      }
+
+      if (l1Fallback && officialNoTrade.has(code)) {
+        quotes.push({
+          ...l1Fallback,
+          source: 'l1-no-trade',
+          stale: false,
+          status: 'no-trade',
+          provisional: false,
+        });
         continue;
       }
 

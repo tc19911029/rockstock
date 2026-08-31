@@ -10,6 +10,7 @@ import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/Inde
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { assessQuoteFreshness } from '@/lib/datasource/quoteFreshness';
 import { getQuoteSnapshotDate } from '@/lib/datasource/marketHours';
+import { readTWOfficialCloseState } from '@/lib/datasource/twOfficialCloseState';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -116,6 +117,22 @@ export async function GET(req: NextRequest) {
           }
         }
       } catch { /* try next suffix */ }
+    }
+
+    if (market === 'TW' && isAfterMarketClose('TW') && l1Fallback) {
+      const officialClose = await readTWOfficialCloseState(expectedDate);
+      if (officialClose?.noTradeSymbols.includes(pureCode)) {
+        return apiOk({
+          symbol,
+          ...l1Fallback,
+          source: 'l1-no-trade',
+          status: 'no-trade',
+          provisional: false,
+          stale: false,
+          marketSession: 'closed',
+          noTradeReason: '官方收盤表確認今日無成交，顯示最近一次真實成交價',
+        }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+      }
     }
 
     // 台股收盤後、官方 L1 尚未發布的過渡期，先顯示中央 L2 收盤定格值。

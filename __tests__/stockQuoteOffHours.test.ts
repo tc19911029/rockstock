@@ -5,6 +5,7 @@ const getFugleQuote = jest.fn();
 const getEastMoneySingleQuote = jest.fn();
 const fetchQuote = jest.fn();
 const fetchTaifexTxFuturesQuote = jest.fn();
+const readTWOfficialCloseState = jest.fn();
 
 jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
   readCandleFile: (...args: unknown[]) => readCandleFile(...args),
@@ -34,6 +35,9 @@ jest.mock('@/lib/cn-sanse/cnQuote', () => ({
 jest.mock('@/lib/datasource/TaifexFuturesProvider', () => ({
   fetchTaifexTxFuturesQuote: (...args: unknown[]) => fetchTaifexTxFuturesQuote(...args),
 }));
+jest.mock('@/lib/datasource/twOfficialCloseState', () => ({
+  readTWOfficialCloseState: (...args: unknown[]) => readTWOfficialCloseState(...args),
+}));
 
 import { NextRequest } from 'next/server';
 import { GET } from '@/app/api/stock/quote/route';
@@ -47,6 +51,7 @@ describe('GET /api/stock/quote 休市防護', () => {
     readIntradaySnapshot.mockResolvedValue(null);
     getTWSESingleIntraday.mockResolvedValue(null);
     fetchTaifexTxFuturesQuote.mockResolvedValue(null);
+    readTWOfficialCloseState.mockResolvedValue(null);
   });
 
   afterEach(() => jest.useRealTimers());
@@ -212,6 +217,46 @@ describe('GET /api/stock/quote 休市防護', () => {
       provisional: true,
       stale: false,
     });
+  });
+
+  test('官方確認今日無成交後，回到上一筆真實 L1 而不是保留委託簿中價', async () => {
+    readCandleFile.mockResolvedValue({
+      candles: [
+        { date: '2026-08-24', open: 12.05, high: 12.15, low: 12, close: 12.1, volume: 3 },
+        { date: '2026-08-25', open: 12.2, high: 12.3, low: 12.2, close: 12.25, volume: 2 },
+      ],
+    });
+    readTWOfficialCloseState.mockResolvedValue({
+      market: 'TW',
+      date: '2026-08-26',
+      settledAt: '2026-08-26T06:20:00.000Z',
+      twseRows: 1364,
+      tpexRows: 981,
+      noTradeSymbols: ['2064'],
+    });
+    readIntradaySnapshot.mockResolvedValue({
+      market: 'TW',
+      date: '2026-08-26',
+      updatedAt: '2026-08-26T06:35:00.000Z',
+      count: 1,
+      quotes: [{
+        symbol: '2064', name: '晉椿', open: 12.2, high: 12.2, low: 12.2, close: 12.2,
+        volume: 0, prevClose: 12.25, changePercent: -0.41, priceKind: 'indicative',
+      }],
+    });
+
+    const response = await GET(new NextRequest('http://localhost/api/stock/quote?symbol=2064.TWO'));
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      date: '2026-08-25',
+      close: 12.25,
+      source: 'l1-no-trade',
+      status: 'no-trade',
+      provisional: false,
+      stale: false,
+    });
+    expect(readIntradaySnapshot).not.toHaveBeenCalled();
   });
 
   test('L1 已有今日資料時直接回傳，不再讀 L2', async () => {

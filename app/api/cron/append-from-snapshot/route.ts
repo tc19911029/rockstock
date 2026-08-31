@@ -65,6 +65,8 @@ async function fetchTWQuotes(date: string): Promise<{
   quotes: Map<string, Quote>;
   ready: boolean;
   reason?: string;
+  twseRows: number;
+  tpexRows: number;
 }> {
   // 封存只讀交易所盤後日線。L2 與 mis.twse 在 z='-' 時可能只有買賣中價，
   // 即使 OHLC 自洽也不是成交價，不能進 sealed L1。
@@ -93,7 +95,13 @@ async function fetchTWQuotes(date: string): Promise<{
     if (tpexIndex) out.set('^TWOII', tpexIndex);
   }
   console.log(`[append-from-snapshot] TW 用官方盤後日線（TWSE ${cache.twseBulk.size} / TPEx ${cache.tpexBulk.size}）`);
-  return { quotes: out, ready: readiness.ready, reason: readiness.reason };
+  return {
+    quotes: out,
+    ready: readiness.ready,
+    reason: readiness.reason,
+    twseRows: cache.twseBulk.size,
+    tpexRows: cache.tpexBulk.size,
+  };
 }
 
 const bareCode = (symbol: string) => symbol.replace(/\.(SS|SZ)$/i, '');
@@ -164,6 +172,7 @@ export async function GET(req: NextRequest) {
 
   // CN 走「本地快照 → 東財即時 → 騰訊即時」三層 fallback（東財 push2 常掛時靠騰訊補當日 bar）。
   let quotes: Map<string, Quote>;
+  let twOfficialRows: { twseRows: number; tpexRows: number } | null = null;
   if (market === 'TW') {
     const official = await fetchTWQuotes(date);
     if (!official.ready) {
@@ -175,6 +184,7 @@ export async function GET(req: NextRequest) {
       });
     }
     quotes = official.quotes;
+    twOfficialRows = { twseRows: official.twseRows, tpexRows: official.tpexRows };
   } else {
     quotes = await fetchCNQuotes(date, stocks.map((s) => s.symbol));
   }
@@ -277,6 +287,20 @@ export async function GET(req: NextRequest) {
     },
   );
 
+  if (market === 'TW' && twOfficialRows) {
+    const noTradeSymbols = stocks
+      .map(stock => stock.symbol.replace(/\.(TW|TWO)$/i, ''))
+      .filter(code => !quotes.has(code));
+    const { saveTWOfficialCloseState } = await import('@/lib/datasource/twOfficialCloseState');
+    await saveTWOfficialCloseState({
+      market: 'TW',
+      date,
+      settledAt: new Date().toISOString(),
+      ...twOfficialRows,
+      noTradeSymbols,
+    });
+  }
+
   return apiOk({
     market,
     date,
@@ -287,6 +311,7 @@ export async function GET(req: NextRequest) {
     limitUpSkipped,
     total: stocks.length,
     indexAppended,
+    ...(twOfficialRows ? { officialRows: twOfficialRows } : {}),
     verify: {
       health: verification.health,
       coverageRate: verification.summary.coverageRate,

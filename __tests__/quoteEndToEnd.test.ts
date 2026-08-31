@@ -82,4 +82,42 @@ describe('端到端報價 invariant', () => {
     ]));
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('&local=1'))).toBe(true);
   });
+
+  test('官方確認零成交時，四個出口保留上一個真實交易日且一致標示 no-trade', async () => {
+    jest.spyOn(global, 'fetch').mockImplementation(async input => {
+      const url = String(input);
+      if (url.includes('/api/portfolio/quotes')) {
+        return jsonResponse({ quotes: [{
+          symbol: '2064.TWO', price: 12.25, asOf: '2026-08-28',
+          source: 'l1-no-trade', status: 'no-trade', stale: false,
+        }] });
+      }
+      if (url.includes('/api/stock/quote')) {
+        return jsonResponse({
+          date: '2026-08-28', close: 12.25, source: 'l1-no-trade',
+          status: 'no-trade', stale: false,
+        });
+      }
+      if (url.includes('/api/realtime')) {
+        return jsonResponse({ quotes: [{
+          symbol: '2064', price: 12.25, date: '2026-08-28',
+          source: 'l1-no-trade', status: 'no-trade', stale: false,
+        }] });
+      }
+      return jsonResponse({
+        candles: [{ date: '2026-08-28', close: 12.25 }],
+        quoteStatus: 'no-trade',
+      });
+    });
+
+    await expect(runQuoteEndToEndProbe({
+      baseUrl: 'http://localhost:3000',
+      symbols: ['2064.TWO'],
+      expectedDate: '2026-08-31',
+    })).resolves.toMatchObject({
+      ok: true,
+      issues: [],
+      surfaces: { portfolio: true, single: true, chart: true, realtime: true },
+    });
+  });
 });

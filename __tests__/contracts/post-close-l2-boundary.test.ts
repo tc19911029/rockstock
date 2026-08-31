@@ -36,6 +36,10 @@ describe('post-close L2 boundary', () => {
     expect(portfolio).toContain("const twLive = isMarketOpen('TW')");
     expect(portfolio).toContain('fetchTWDisplayQuotes(twEntries)');
     expect(portfolio).toContain("l1?.asOf === expectedDate");
+    expect(single).toContain("source: 'l1-no-trade'");
+    expect(portfolio).toContain("source: 'l1-no-trade'");
+    expect(realtime).toContain("source: 'l1-no-trade'");
+    expect(chart).toContain("quoteStatus: 'no-trade'");
   });
 
   test('TW 排程只在 13:30／13:35 定格 L2，14:15 起每五分鐘重試官方 L1', () => {
@@ -63,6 +67,7 @@ describe('post-close L2 boundary', () => {
     expect(append).toContain("{ trustedOfficial: true }");
     expect(append).toContain('fetchTwseIndexCandles');
     expect(append).toContain('fetchTpexIndexCandles');
+    expect(append).toContain('saveTWOfficialCloseState');
     expect(append).not.toContain('fetchTWIndexQuote');
   });
 });

@@ -17,6 +17,7 @@ import { isFundSymbol } from '@/lib/market/classify';
 import type { Candle } from '@/types';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
+import { readTWOfficialCloseState } from '@/lib/datasource/twOfficialCloseState';
 
 // ── Route segment config（2026-06-08 冷啟動止血）─────────────────────────────
 // 走圖主資料路由：用 fs/Blob → 必須 Node runtime；force-dynamic 確保永遠讀即時資料、
@@ -274,6 +275,7 @@ export async function GET(req: NextRequest) {
       }
       if (result && result.candles.length > 0) {
         let injectedTWProvisionalClose = false;
+        let twOfficialNoTrade = false;
         // ── 盤中即時覆蓋：若 lastDate < today，主動拉即時報價湊今日 K 棒 ──
         // 盤中/盤後窗口：可用即時 API 拉；窗口外（晚上/凌晨）：只靠 L2 快照（若有今日數據也允許注入）
         // 避免凌晨用舊 API 產生假的今日 K 棒，但 L2 有當日 snapshot 時就允許
@@ -282,7 +284,14 @@ export async function GET(req: NextRequest) {
         const inLiveWindow = isMarketOpen(marketKey);
         const lastCandle = result.candles[result.candles.length - 1];
         const lastIsToday = !!lastCandle && lastCandle.date === today;
-        const twNeedsProvisionalClose = isTW && isAfterMarketClose('TW') && !lastIsToday;
+        if (isTW && isAfterMarketClose('TW') && !lastIsToday) {
+          const officialClose = await readTWOfficialCloseState(today);
+          twOfficialNoTrade = officialClose?.noTradeSymbols.includes(pureCode) ?? false;
+        }
+        const twNeedsProvisionalClose = isTW
+          && isAfterMarketClose('TW')
+          && !lastIsToday
+          && !twOfficialNoTrade;
         let l2HasToday = false;
         if (!inLiveWindow && (!isTW || twNeedsProvisionalClose)) {
           try {
@@ -470,6 +479,10 @@ export async function GET(req: NextRequest) {
           ...(injectedTWProvisionalClose ? {
             provisional: true,
             quoteStatus: 'provisional-close' as const,
+          } : {}),
+          ...(twOfficialNoTrade ? {
+            provisional: false,
+            quoteStatus: 'no-trade' as const,
           } : {}),
           staleDays: result.staleDays,
         }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });

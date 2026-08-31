@@ -4,6 +4,7 @@ const getTWChineseName = jest.fn();
 const getCNChineseName = jest.fn();
 const getTWSESingleIntraday = jest.fn();
 const readIntradaySnapshot = jest.fn();
+const readTWOfficialCloseState = jest.fn();
 
 jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
   readCandleFile: (...args: unknown[]) => readCandleFile(...args),
@@ -28,6 +29,10 @@ jest.mock('@/lib/datasource/IntradayCache', () => ({
   readIntradaySnapshot: (...args: unknown[]) => readIntradaySnapshot(...args),
 }));
 
+jest.mock('@/lib/datasource/twOfficialCloseState', () => ({
+  readTWOfficialCloseState: (...args: unknown[]) => readTWOfficialCloseState(...args),
+}));
+
 import { buildFreshSnapshotFallback, enrichQuoteNames, fetchFinalL1Quotes, fetchSameDayTWCloseQuotes, fetchTWDisplayQuotes, resolveQuoteEntries } from '@/app/api/portfolio/quotes/route';
 
 describe('休市持倉報價', () => {
@@ -38,10 +43,12 @@ describe('休市持倉報價', () => {
     getCNChineseName.mockReset();
     getTWSESingleIntraday.mockReset();
     readIntradaySnapshot.mockReset();
+    readTWOfficialCloseState.mockReset();
     expectedTwSymbol.mockResolvedValue(null);
     getTWChineseName.mockResolvedValue(null);
     getCNChineseName.mockResolvedValue(null);
     readIntradaySnapshot.mockResolvedValue(null);
+    readTWOfficialCloseState.mockResolvedValue(null);
   });
 
   test('同交易日盤後不以 MIS 冒充正式收盤價', async () => {
@@ -202,6 +209,49 @@ describe('休市持倉報價', () => {
       expect.objectContaining({ symbol: '2330.TW', price: 1210, asOf: '2026-08-26', source: 'l1' }),
       expect.objectContaining({ symbol: '3081.TWO', price: 3255, asOf: '2026-08-26', source: 'l2-provisional-close', provisional: true }),
     ]);
+  });
+
+  test('官方完整收盤表確認今日無成交後，保留上一筆真實 L1 並停用 L2 推估價', async () => {
+    readCandleFile.mockImplementation(async (symbol: string) => symbol.startsWith('2064.') ? {
+      candles: [
+        { date: '2026-08-27', close: 12.1 },
+        { date: '2026-08-28', close: 12.25 },
+      ],
+    } : null);
+    readTWOfficialCloseState.mockResolvedValue({
+      market: 'TW',
+      date: '2026-08-31',
+      settledAt: '2026-08-31T06:52:37.539Z',
+      twseRows: 1364,
+      tpexRows: 981,
+      noTradeSymbols: ['2064'],
+    });
+    readIntradaySnapshot.mockResolvedValue({
+      market: 'TW',
+      date: '2026-08-31',
+      updatedAt: '2026-08-31T05:35:20.000Z',
+      count: 1,
+      quotes: [{
+        symbol: '2064', name: '晉椿', open: 12.2, high: 12.2, low: 12.2,
+        close: 12.2, volume: 0, prevClose: 12.25, changePercent: -0.41,
+        priceKind: 'indicative', isActualTrade: false,
+      }],
+    });
+
+    await expect(fetchTWDisplayQuotes([
+      { original: '2064.TWO', resolved: '2064.TWO', market: 'TW' },
+    ], new Date('2026-08-31T07:00:00.000Z'))).resolves.toEqual([
+      expect.objectContaining({
+        symbol: '2064.TWO',
+        price: 12.25,
+        asOf: '2026-08-28',
+        source: 'l1-no-trade',
+        status: 'no-trade',
+        provisional: false,
+        stale: false,
+      }),
+    ]);
+    expect(readIntradaySnapshot).not.toHaveBeenCalled();
   });
 
   test('陸股午休顯示 11:30 上午收盤快照，不標示為 stale', () => {

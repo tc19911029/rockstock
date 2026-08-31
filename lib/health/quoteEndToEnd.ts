@@ -24,6 +24,7 @@ type BatchQuote = {
   asOf?: string | null;
   stale?: boolean;
   staleReason?: string;
+  status?: string;
 };
 
 function samePrice(left: number | undefined, right: number | undefined): boolean {
@@ -61,6 +62,8 @@ export async function runQuoteEndToEndProbe(args: {
       const quote = quotes.find(item => item.symbol === symbol);
       if (!quote) {
         issues.push({ surface: 'portfolio', symbol, reason: '批次報價缺少此股票' });
+      } else if (quote.status === 'no-trade' && quote.stale !== true && quote.price && quote.price > 0) {
+        // 官方確認無成交時，asOf 應保留最近一次真實成交日，不可偽造成今天。
       } else if (quote.stale || quote.asOf !== args.expectedDate) {
         issues.push({
           surface: 'portfolio',
@@ -82,9 +85,11 @@ export async function runQuoteEndToEndProbe(args: {
       const json = await fetchJson(`${origin}/api/stock/quote?symbol=${encodeURIComponent(symbol)}`);
       const date = typeof json.date === 'string' ? json.date : null;
       const price = typeof json.close === 'number' ? json.close : undefined;
-      const batchPrice = batchBySymbol.get(symbol)?.price;
-      if (json.stale === true || date !== args.expectedDate) {
-        issues.push({ surface: 'single', symbol, reason: `單股報價日期 ${date ?? '未知'}，預期 ${args.expectedDate}` });
+      const batch = batchBySymbol.get(symbol);
+      const batchPrice = batch?.price;
+      const expectedQuoteDate = batch?.status === 'no-trade' ? batch.asOf : args.expectedDate;
+      if (json.stale === true || date !== expectedQuoteDate || (batch?.status === 'no-trade' && json.status !== 'no-trade')) {
+        issues.push({ surface: 'single', symbol, reason: `單股報價日期 ${date ?? '未知'}，預期 ${expectedQuoteDate ?? '有效真實交易日'}` });
       } else if (!samePrice(price, batchPrice)) {
         issues.push({ surface: 'single', symbol, reason: `單股價 ${price ?? '無'} 與持股價 ${batchPrice ?? '無'} 不一致` });
       }
@@ -102,9 +107,11 @@ export async function runQuoteEndToEndProbe(args: {
       const candles = Array.isArray(json.candles) ? json.candles as Array<{ date?: string; close?: number }> : [];
       const last = candles.at(-1);
       const date = last?.date ?? null;
-      const batchPrice = batchBySymbol.get(symbol)?.price;
-      if (date !== args.expectedDate) {
-        issues.push({ surface: 'chart', symbol, reason: `K 線最後日期 ${date ?? '未知'}，預期 ${args.expectedDate}` });
+      const batch = batchBySymbol.get(symbol);
+      const batchPrice = batch?.price;
+      const expectedQuoteDate = batch?.status === 'no-trade' ? batch.asOf : args.expectedDate;
+      if (date !== expectedQuoteDate || (batch?.status === 'no-trade' && json.quoteStatus !== 'no-trade')) {
+        issues.push({ surface: 'chart', symbol, reason: `K 線最後日期 ${date ?? '未知'}，預期 ${expectedQuoteDate ?? '有效真實交易日'}` });
       } else if (!samePrice(last?.close, batchPrice)) {
         issues.push({ surface: 'chart', symbol, reason: `主圖價 ${last?.close ?? '無'} 與持股價 ${batchPrice ?? '無'} 不一致` });
       }
@@ -119,16 +126,18 @@ export async function runQuoteEndToEndProbe(args: {
     try {
       const json = await fetchJson(`${origin}/api/realtime?symbols=${encodeURIComponent(sentinels.join(','))}`);
       const quotes = Array.isArray(json.quotes)
-        ? json.quotes as Array<{ symbol?: string; price?: number; date?: string | null; stale?: boolean }>
+        ? json.quotes as Array<{ symbol?: string; price?: number; date?: string | null; stale?: boolean; status?: string }>
         : [];
       for (const symbol of sentinels) {
         const code = symbol.replace(/\.(TW|TWO)$/i, '');
         const quote = quotes.find(item => item.symbol === code);
-        const batchPrice = batchBySymbol.get(symbol)?.price;
+        const batch = batchBySymbol.get(symbol);
+        const batchPrice = batch?.price;
+        const expectedQuoteDate = batch?.status === 'no-trade' ? batch.asOf : args.expectedDate;
         if (!quote) {
           issues.push({ surface: 'realtime', symbol, reason: '舊即時表格出口缺少此股票' });
-        } else if (quote.stale || quote.date !== args.expectedDate) {
-          issues.push({ surface: 'realtime', symbol, reason: `即時表格日期 ${quote.date ?? '未知'}，預期 ${args.expectedDate}` });
+        } else if (quote.stale || quote.date !== expectedQuoteDate || (batch?.status === 'no-trade' && quote.status !== 'no-trade')) {
+          issues.push({ surface: 'realtime', symbol, reason: `即時表格日期 ${quote.date ?? '未知'}，預期 ${expectedQuoteDate ?? '有效真實交易日'}` });
         } else if (!samePrice(quote.price, batchPrice)) {
           issues.push({ surface: 'realtime', symbol, reason: `即時表格價 ${quote.price ?? '無'} 與持股價 ${batchPrice ?? '無'} 不一致` });
         }
