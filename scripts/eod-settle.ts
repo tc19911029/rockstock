@@ -23,7 +23,11 @@ config();
 import { saveLocalCandles } from '../lib/datasource/LocalCandleStore';
 import { settleSymbol, type SettleResult, type VendorQuote, type Market } from '../lib/datasource/eodSettle';
 import { prefetchVendorBatch } from '../lib/datasource/eodSettleBatch';
-import { assessTwOfficialReadiness, canWriteSettlement } from '../lib/datasource/eodSettlePolicy';
+import {
+  assessTwOfficialReadiness,
+  canWriteSettlement,
+  findConfirmedActivePendingSymbols,
+} from '../lib/datasource/eodSettlePolicy';
 import { ensureServerL1Visibility, type VisibilityCandidate } from '../lib/datasource/eodSettlementVisibility';
 import { verifyDownload } from '../lib/datasource/DownloadVerifier';
 import { sendNtfy } from '../lib/notify/ntfy';
@@ -340,9 +344,27 @@ async function main() {
         ...(verify.notTradingDetails ?? []).map(item => item.symbol),
         ...(verify.permanentStaleDetails ?? []).map(item => item.symbol),
       ]);
-      verifyPendingActive = results.filter(result =>
-        result.status.startsWith('pending') && !nonTradingSymbols.has(result.symbol)
+      const confirmedActivePending = findConfirmedActivePendingSymbols(
+        results,
+        canonicalSymbols,
+        nonTradingSymbols,
+      );
+      verifyPendingActive = confirmedActivePending.length;
+      const pendingOutsideCanonical = results.filter(result =>
+        result.status.startsWith('pending') && !canonicalSymbols.includes(result.symbol)
       ).length;
+      if (pendingOutsideCanonical > 0) {
+        console.log(
+          `Verify: 已排除 ${pendingOutsideCanonical} 個不在當日官方交易母體的 pending `
+          + '（停止交易／退市／指數／歷史殘留）',
+        );
+      }
+      if (confirmedActivePending.length > 0) {
+        console.warn(
+          `Verify: 確認仍在官方交易母體但未完成封存 ${confirmedActivePending.length} 檔：`
+          + confirmedActivePending.slice(0, 20).join(', '),
+        );
+      }
       console.log(
         `Verify: ${verify.health} coverage=${(verify.summary.coverageRate * 100).toFixed(1)}% ` +
         `current=${verify.summary.stocksCurrent}/${verify.summary.totalStocks}`,

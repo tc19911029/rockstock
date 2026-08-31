@@ -77,3 +77,27 @@ export function canWriteSettlement(
   return result.status === 'settled-multi-source'
     || (result.status === 'settled-single-source' && existingBad);
 }
+
+/**
+ * 只把「仍在當日官方交易母體、且最終快照未確認為停牌／無交易」的 pending
+ * 視為真正的 active settlement failure。
+ *
+ * settle 會掃 data/candles 下的歷史檔，因此退市、停止交易與指數仍可能產生
+ * pending；verify 則只驗證當日官方交易母體。若只用 nonTradingSymbols 做反向排除，
+ * 根本未進 verify 母體的歷史殘留會被誤標成 activeWithoutOfficial。
+ */
+export function findConfirmedActivePendingSymbols(
+  results: ReadonlyArray<Pick<SettleResult, 'symbol' | 'status'>>,
+  canonicalSymbols: Iterable<string>,
+  confirmedNonTradingSymbols: Iterable<string>,
+): string[] {
+  const canonical = new Set(canonicalSymbols);
+  const nonTrading = new Set(confirmedNonTradingSymbols);
+  return results
+    .filter(result =>
+      result.status.startsWith('pending')
+      && canonical.has(result.symbol)
+      && !nonTrading.has(result.symbol),
+    )
+    .map(result => result.symbol);
+}

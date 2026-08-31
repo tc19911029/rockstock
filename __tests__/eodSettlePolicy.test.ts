@@ -1,4 +1,8 @@
-import { assessTwOfficialReadiness, canWriteSettlement } from '@/lib/datasource/eodSettlePolicy';
+import {
+  assessTwOfficialReadiness,
+  canWriteSettlement,
+  findConfirmedActivePendingSymbols,
+} from '@/lib/datasource/eodSettlePolicy';
 import type { SettleResult } from '@/lib/datasource/eodSettle';
 
 function result(overrides: Partial<SettleResult> = {}): SettleResult {
@@ -71,5 +75,34 @@ describe('EOD settlement fail-closed policy', () => {
     const cn = result({ market: 'CN' });
     expect(canWriteSettlement(cn, 'CN', true)).toBe(true);
     expect(canWriteSettlement(cn, 'CN', false)).toBe(false);
+  });
+
+  test('告警只計算官方當日交易母體內且未確認停牌的 pending', () => {
+    const results: SettleResult[] = [
+      result({ symbol: '2330.TW', status: 'pending-no-vendor-data', settled: undefined }),
+      result({ symbol: '1563.TW', status: 'pending-no-vendor-data', settled: undefined }),
+      result({ symbol: '^TWII', status: 'pending-unverified' }),
+      result({ symbol: '2317.TW', status: 'pending-no-vendor-data', settled: undefined }),
+      result({ symbol: '2454.TW', status: 'skipped-already-correct' }),
+    ];
+
+    expect(findConfirmedActivePendingSymbols(
+      results,
+      ['2330.TW', '2317.TW', '2454.TW'],
+      ['2317.TW'],
+    )).toEqual(['2330.TW']);
+  });
+
+  test('陸股歷史殘留不在官方交易母體時不觸發 activeWithoutOfficial', () => {
+    const results: SettleResult[] = [
+      result({ market: 'CN', symbol: '000004.SZ', status: 'pending-no-vendor-data', settled: undefined }),
+      result({ market: 'CN', symbol: '600929.SS', status: 'pending-no-vendor-data', settled: undefined }),
+    ];
+
+    expect(findConfirmedActivePendingSymbols(
+      results,
+      ['600929.SS'],
+      ['600929.SS'],
+    )).toEqual([]);
   });
 });
