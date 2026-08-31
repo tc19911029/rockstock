@@ -68,6 +68,8 @@ describe('post-close L2 boundary', () => {
     expect(append).toContain('fetchTwseIndexCandles');
     expect(append).toContain('fetchTpexIndexCandles');
     expect(append).toContain('saveTWOfficialCloseState');
+    expect(append).toContain('confirmCNSuspiciousCloses');
+    expect(append).toContain('limitOverwriteConfirmed: true');
     expect(append).not.toContain('fetchTWIndexQuote');
   });
 });

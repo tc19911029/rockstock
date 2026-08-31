@@ -1,4 +1,10 @@
-import { suspectsLimitOverwrite, suspectsGrossJump, limitPctFor, isTwListingTransition } from '@/lib/datasource/limitMoveGuard';
+import {
+  independentlyConfirmsCnClose,
+  suspectsLimitOverwrite,
+  suspectsGrossJump,
+  limitPctFor,
+  isTwListingTransition,
+} from '@/lib/datasource/limitMoveGuard';
 
 describe('limitMoveGuard', () => {
   describe('limitPctFor', () => {
@@ -120,6 +126,29 @@ describe('limitMoveGuard', () => {
         { open: 1000, high: 1010, low: 990, close: 1000, volume: 1000 },
         { open: 400.25, high: 410, low: 390, close: 400, volume: 100000 },
       )).toBe(false);
+    });
+  });
+
+  describe('independentlyConfirmsCnClose', () => {
+    const primary = { open: 10.5, high: 10.86, low: 10.49, close: 10.84 };
+
+    test('同一交易日且 OHLC 完全一致才確認', () => {
+      expect(independentlyConfirmsCnClose(primary, {
+        ...primary,
+        date: '2026-08-31',
+      }, '2026-08-31')).toBe(true);
+    });
+
+    test('別日資料或任一價格不同都 fail closed', () => {
+      expect(independentlyConfirmsCnClose(primary, {
+        ...primary,
+        date: '2026-08-28',
+      }, '2026-08-31')).toBe(false);
+      expect(independentlyConfirmsCnClose(primary, {
+        ...primary,
+        close: 10.83,
+        date: '2026-08-31',
+      }, '2026-08-31')).toBe(false);
     });
   });
 });

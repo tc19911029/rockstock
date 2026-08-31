@@ -178,7 +178,12 @@ export async function saveLocalCandles(
   symbol: string,
   market: 'TW' | 'CN',
   candles: Candle[],
-  options: { trustedOfficial?: boolean; replaceExisting?: boolean } = {},
+  options: {
+    trustedOfficial?: boolean;
+    replaceExisting?: boolean;
+    /** 第二個同日獨立來源已確認 OHLC；只略過漲跌停盤中殘值 heuristic。 */
+    limitOverwriteConfirmed?: boolean;
+  } = {},
 ): Promise<void> {
   if (candles.length === 0) return;
   await ghostSuffixGuard(symbol, market);
@@ -190,7 +195,9 @@ export async function saveLocalCandles(
     // 即時與第三方來源，不能反過來誤殺官方真值（7855 興櫃轉上市即曾漏兩日）。
     let safe = options.trustedOfficial ? candles : guardAgainstAnomalousLastBar(symbol, candles);
     if (safe.length === 0) return;
-    if (!options.trustedOfficial) safe = guardAgainstLimitOverwrite(symbol, market, safe);
+    if (!options.trustedOfficial && !options.limitOverwriteConfirmed) {
+      safe = guardAgainstLimitOverwrite(symbol, market, safe);
+    }
     if (safe.length === 0) return;
     await writeCandleFile(symbol, market, safe, { replaceExisting: options.replaceExisting });
   });

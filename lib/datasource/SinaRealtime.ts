@@ -23,7 +23,7 @@ function toSinaCode(symbol: string): string {
   return (code[0] === '6' || code[0] === '9') ? `sh${code}` : `sz${code}`;
 }
 
-function parseSinaLine(line: string): EastMoneyQuote | null {
+export function parseSinaLine(line: string): EastMoneyQuote | null {
   // var hq_str_sh600519="贵州茅台,1415.000,...";
   const codeMatch = line.match(/hq_str_(sh|sz)(\d{6})="([^"]*)"/);
   if (!codeMatch) return null;
@@ -43,10 +43,12 @@ function parseSinaLine(line: string): EastMoneyQuote | null {
   // 新浪成交量單位為「股」，直接存儲（東財/騰訊已各自 ×100 轉為「股」）
   const volumeShares = parseFloat(parts[8]);
   const volume = volumeShares > 0 ? Math.round(volumeShares) : 0;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(parts[30] ?? '') ? parts[30] : undefined;
+  const time = /^\d{2}:\d{2}:\d{2}$/.test(parts[31] ?? '') ? parts[31] : undefined;
 
   if (!close || close <= 0) return null;
-  // 只保留主板
-  if (!/^(00[0-3]|60[0135])\d{3}$/.test(code)) return null;
+  // 主板 + 創業板 + 科創板；與 scanner/Tencent 的 A 股母體一致。
+  if (!/^(00[0-3]|60[0135]|30[0-2]|68[89])\d{3}$/.test(code)) return null;
 
   return {
     code,
@@ -57,6 +59,8 @@ function parseSinaLine(line: string): EastMoneyQuote | null {
     close,
     volume,
     prevClose: prevClose > 0 ? prevClose : undefined,
+    date,
+    ...(date && time ? { updatedAt: new Date(`${date}T${time}+08:00`).toISOString() } : {}),
   };
 }
 

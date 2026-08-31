@@ -25,6 +25,10 @@ export interface QuoteOHLC {
   close: number;
 }
 
+export interface DatedQuoteOHLC extends QuoteOHLC {
+  date?: string;
+}
+
 export type Market = 'TW' | 'CN';
 
 export function limitPctFor(market: Market, code: string): number {
@@ -65,6 +69,23 @@ export function suspectsLimitOverwrite(
 export function suspectsGrossJump(prevClose: number | null | undefined, q: QuoteOHLC): boolean {
   if (!prevClose || prevClose <= 0 || !(q.close > 0)) return false;
   return Math.abs(q.close / prevClose - 1) > 0.5;
+}
+
+/**
+ * A 股盤後的「曾碰漲跌停、最後打開」可能是真實收盤，也可能是盤中殘值。
+ * 只有第二個獨立來源回傳同一交易日、四價完全一致時，才允許繞過 limit-overwrite heuristic。
+ */
+export function independentlyConfirmsCnClose(
+  primary: QuoteOHLC,
+  secondary: DatedQuoteOHLC | null | undefined,
+  targetDate: string,
+): boolean {
+  if (!secondary || secondary.date !== targetDate) return false;
+  return (['open', 'high', 'low', 'close'] as const).every(field =>
+    Number.isFinite(primary[field])
+    && Number.isFinite(secondary[field])
+    && Math.abs(primary[field] - secondary[field]) < 1e-8
+  );
 }
 
 /**

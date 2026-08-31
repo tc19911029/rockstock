@@ -19,6 +19,55 @@ export const maxDuration = 120;
 
 type Quote = { open: number; high: number; low: number; close: number; volume: number };
 
+async function confirmCNSuspiciousCloses(
+  date: string,
+  stocks: Array<{ symbol: string }>,
+  quotes: Map<string, Quote>,
+): Promise<Set<string>> {
+  const { independentlyConfirmsCnClose } = await import('@/lib/datasource/limitMoveGuard');
+  const suspects: string[] = [];
+  const CONCURRENCY = 50;
+
+  for (let index = 0; index < stocks.length; index += CONCURRENCY) {
+    const batch = stocks.slice(index, index + CONCURRENCY);
+    const rows = await Promise.all(batch.map(async stock => ({
+      symbol: stock.symbol,
+      existing: await readCandleFile(stock.symbol, 'CN').catch(() => null),
+    })));
+    for (const { symbol, existing } of rows) {
+      const code = symbol.replace(/\.(SS|SZ)$/i, '');
+      const quote = quotes.get(code);
+      const previous = existing?.candles.at(-1);
+      if (
+        quote
+        && quote.volume > 0
+        && existing
+        && previous
+        && existing.lastDate < date
+        && suspectsLimitOverwrite(previous.close, quote, 'CN', code)
+      ) {
+        suspects.push(symbol);
+      }
+    }
+  }
+
+  if (suspects.length === 0) return new Set();
+  const { getSinaRealtime } = await import('@/lib/datasource/SinaRealtime');
+  const secondary = await getSinaRealtime(suspects);
+  const confirmed = new Set<string>();
+  for (const symbol of suspects) {
+    const code = symbol.replace(/\.(SS|SZ)$/i, '');
+    if (independentlyConfirmsCnClose(quotes.get(code)!, secondary.get(code), date)) {
+      confirmed.add(code);
+    }
+  }
+  console.log(
+    `[append-from-snapshot] CN 漲跌停打開候選 ${suspects.length} 檔，`
+    + `Sina 同日 OHLC 獨立確認 ${confirmed.size} 檔`,
+  );
+  return confirmed;
+}
+
 // 優先從本地 L2 snapshot 讀（dev server 盤中已累積完整 OHLC，比重打 API 可靠）。
 // L2 檔由 update-intraday cron 定期刷新到 data/intraday-{market}-{date}.json，
 // 結構：{ quotes: [{symbol (bare), open, high, low, close, volume, ... }] }
@@ -189,6 +238,9 @@ export async function GET(req: NextRequest) {
     quotes = await fetchCNQuotes(date, stocks.map((s) => s.symbol));
   }
   if (quotes.size === 0) return apiOk({ skipped: true, reason: '0 筆報價' });
+  const cnLimitConfirmations = market === 'CN'
+    ? await confirmCNSuspiciousCloses(date, stocks, quotes)
+    : new Set<string>();
 
   let appended = 0;
   let corrected = 0;
@@ -223,11 +275,18 @@ export async function GET(req: NextRequest) {
       return;
     }
     if (!q) return;
+    // 當日零成交沒有真實 K 棒：保留上一筆 L1，交給 verifier 標 no_trade。
+    if (market === 'CN' && q.volume <= 0) return;
 
     // TW 來源是交易所官方盤後日線，漲跌停本來就是合法收盤，不可再套用只適合
     // 盤中 snapshot tick 的 limit-overwrite heuristic。CN 仍走 snapshot/provider chain，保留守門。
     const prev = existing.candles[existing.candles.length - 1];
-    if ((market === 'CN' && suspectsLimitOverwrite(prev?.close, q, market, code)) || suspectsGrossJump(prev?.close, q)) {
+    const suspectedLimitOverwrite = market === 'CN'
+      && suspectsLimitOverwrite(prev?.close, q, market, code);
+    if (
+      (suspectedLimitOverwrite && !cnLimitConfirmations.has(code))
+      || suspectsGrossJump(prev?.close, q)
+    ) {
       console.warn(
         `[append-from-snapshot] ${symbol} ${date} close 異常(漲跌停/單日>50%偏離=疑撞庫壞抓) ` +
         `(prev=${prev.close} h=${q.high} l=${q.low} c=${q.close})，skip 寫入避免 L1 污染`
@@ -240,7 +299,11 @@ export async function GET(req: NextRequest) {
     await saveLocalCandles(symbol, market, [
       ...existing.candles,
       { date, open: q.open, high: q.high, low: q.low, close: q.close, volume: q.volume },
-    ], market === 'TW' ? { trustedOfficial: true } : undefined);
+    ], market === 'TW'
+      ? { trustedOfficial: true }
+      : cnLimitConfirmations.has(code)
+        ? { limitOverwriteConfirmed: true }
+        : undefined);
     appended++;
   }));
 
