@@ -119,6 +119,74 @@ export function rocDateToAd(roc: string | undefined): string | null {
   return `${y}-${s.slice(3, 5)}-${s.slice(5, 7)}`;
 }
 
+type TPExDatedCloseResponse = {
+  stat?: string;
+  tables?: Array<{ date?: string; fields?: string[]; data?: string[][] }>;
+};
+
+/** 解析 TPEx 可指定日期的「上櫃股票每日收盤行情」官方表。 */
+export function parseTPExDatedCloseResponse(
+  payload: TPExDatedCloseResponse,
+  date: string,
+): Map<string, BulkRow> {
+  const out = new Map<string, BulkRow>();
+  const normalizeField = (value: string) => value.replace(/<[^>]*>/g, '').replace(/\s/g, '');
+  const table = payload.tables?.find(candidate => {
+    const fields = candidate.fields?.map(normalizeField) ?? [];
+    return fields.includes('代號') && fields.includes('收盤') && (candidate.data?.length ?? 0) > 100;
+  });
+  if (!table || rocDateToAd(table.date) !== date) return out;
+
+  const fields = (table.fields ?? []).map(normalizeField);
+  const index = (name: string) => fields.indexOf(name);
+  const cCode = index('代號');
+  const cClose = index('收盤');
+  const cOpen = index('開盤');
+  const cHigh = index('最高');
+  const cLow = index('最低');
+  const cVolume = index('成交股數');
+  if ([cCode, cClose, cOpen, cHigh, cLow, cVolume].some(value => value < 0)) return out;
+
+  const num = (value: string | undefined) => {
+    const parsed = parseFloat((value ?? '').replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  for (const row of table.data ?? []) {
+    const code = row[cCode]?.trim();
+    if (!code || !/^\d{4,6}[A-Z]?$/.test(code)) continue;
+    const open = num(row[cOpen]);
+    const high = num(row[cHigh]);
+    const low = num(row[cLow]);
+    const close = num(row[cClose]);
+    const volume = Math.round(num(row[cVolume]) / 1000);
+    if (open > 0 && high > 0 && low > 0 && close > 0) {
+      out.set(code, { open, high, low, close, volume });
+    }
+  }
+  return out;
+}
+
+/**
+ * TPEx latest OpenAPI 常比收盤表晚更新；指定日期的官方表已到時可立即定稿，
+ * 不必因 latest feed 仍停在上一交易日而延後全市場 L1。
+ */
+async function fetchTPExDatedBulkForDate(date: string): Promise<Map<string, BulkRow>> {
+  try {
+    const formattedDate = encodeURIComponent(date.replaceAll('-', '/'));
+    const url = `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date=${formattedDate}&type=EW&response=json`;
+    const { data } = await fetchJsonWithCurlFallback<TPExDatedCloseResponse>(url, {
+      timeoutMs: 30_000,
+      proxyFirst: true,
+    });
+    const parsed = parseTPExDatedCloseResponse(data, date);
+    console.log(`[eodSettleBatch] TPEx 指定日期官方收盤表 ${date}: ${parsed.size} 筆`);
+    return parsed;
+  } catch (error) {
+    console.warn(`[eodSettleBatch] TPEx 指定日期官方收盤表 ${date} 抓取失敗: ${(error as Error).message}`);
+    return new Map();
+  }
+}
+
 /** TPEx 上櫃 OpenAPI 全市場 OHLCV — 一次拉 1000+ 檔（上櫃官方權威源）
  *
  * 2026-05-21：原 stub return new Map() 讓上櫃 EOD settle 完全沒 TPEx 權威源。
@@ -138,36 +206,46 @@ export async function fetchTPExBulkForDate(date: string): Promise<Map<string, Bu
       Open?: string; High?: string; Low?: string; Close?: string;
       TradingShares?: string;
     }>>(url, { timeoutMs: 15_000 });
-    if (!Array.isArray(data) || data.length === 0) { console.warn(`[eodSettleBatch] TPEx quotes ${date} 回空陣列 → bulk 空`); return map; }
-    // feed 帶自己的交易日；只在 feed 日 === 要封的 date 時採用（避免盤中跑、或拿錯日資料）
-    const feedDate = rocDateToAd(data.find(r => r.Date)?.Date);
-    if (!feedDate || feedDate !== date) { console.warn(`[eodSettleBatch] TPEx quotes feed 日=${feedDate} ≠ 要封 ${date}（資料未更新）→ bulk 空`); return map; }
-    const num = (s: string | undefined) => {
-      if (!s) return 0;
-      const n = parseFloat(String(s).replace(/,/g, ''));
-      return isNaN(n) ? 0 : n;
-    };
-    for (const row of data) {
-      const code = row.SecuritiesCompanyCode?.trim();
-      if (!code || !/^\d{4,6}[A-Z]?$/.test(code)) continue;
-      const open = num(row.Open), high = num(row.High), low = num(row.Low), close = num(row.Close);
-      // TradingShares 是「股」，/1000 變張
-      const volume = Math.round(num(row.TradingShares) / 1000);
-      if (close > 0 && open > 0 && high > 0 && low > 0) {
-        map.set(code, { open, high, low, close, volume });
+    if (!Array.isArray(data) || data.length === 0) {
+      console.warn(`[eodSettleBatch] TPEx quotes ${date} 回空陣列 → 改讀指定日期官方收盤表`);
+    } else {
+      // feed 帶自己的交易日；只在 feed 日 === 要封的 date 時採用（避免盤中跑、或拿錯日資料）
+      const feedDate = rocDateToAd(data.find(r => r.Date)?.Date);
+      if (!feedDate || feedDate !== date) {
+        console.warn(`[eodSettleBatch] TPEx quotes feed 日=${feedDate} ≠ 要封 ${date}（資料未更新）→ 改讀指定日期官方收盤表`);
+      } else {
+        const num = (s: string | undefined) => {
+          if (!s) return 0;
+          const n = parseFloat(String(s).replace(/,/g, ''));
+          return isNaN(n) ? 0 : n;
+        };
+        for (const row of data) {
+          const code = row.SecuritiesCompanyCode?.trim();
+          if (!code || !/^\d{4,6}[A-Z]?$/.test(code)) continue;
+          const open = num(row.Open);
+          const high = num(row.High);
+          const low = num(row.Low);
+          const close = num(row.Close);
+          // TradingShares 是「股」，/1000 變張
+          const volume = Math.round(num(row.TradingShares) / 1000);
+          if (close > 0 && open > 0 && high > 0 && low > 0) {
+            map.set(code, { open, high, low, close, volume });
+          }
+        }
       }
     }
-    return map;
   } catch (e) {
-    console.warn(`[eodSettleBatch] TPEx quotes ${date} 抓取失敗: ${(e as Error).message} → bulk 空`);
-    return map;
+    console.warn(`[eodSettleBatch] TPEx quotes ${date} 抓取失敗: ${(e as Error).message} → 改讀指定日期官方收盤表`);
   }
+  if (map.size >= 900) return map;
+  const dated = await fetchTPExDatedBulkForDate(date);
+  return dated.size > map.size ? dated : map;
 }
 
 // ── CN bulk fetchers ─────────────────────────────────────────────────────────
 
 /** EastMoney 全市場一日 OHLCV — push2his/get_klines */
-export async function fetchEastMoneyBulkForDate(date: string): Promise<Map<string, BulkRow>> {
+export async function fetchEastMoneyBulkForDate(_date: string): Promise<Map<string, BulkRow>> {
   // EastMoney 沒有「全市場某日」端點，每檔要單拉。
   // 此處 stub 留 future：可改用清華 stock list + 並行拉，但比 per-symbol 慢
   return new Map();
