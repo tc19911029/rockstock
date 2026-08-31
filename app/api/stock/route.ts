@@ -11,7 +11,7 @@ import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { checkQuoteSanity } from '@/lib/datasource/QuoteSanityCheck';
-import { isCNMarketLunchBreak, isMarketOpen } from '@/lib/datasource/marketHours';
+import { isAfterMarketClose, isCNMarketLunchBreak, isMarketOpen } from '@/lib/datasource/marketHours';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { isFundSymbol } from '@/lib/market/classify';
 import type { Candle } from '@/types';
@@ -273,14 +273,18 @@ export async function GET(req: NextRequest) {
         if (result && result.candles.length > 0) { loadedTicker = candidate; break; }
       }
       if (result && result.candles.length > 0) {
+        let injectedTWProvisionalClose = false;
         // ── 盤中即時覆蓋：若 lastDate < today，主動拉即時報價湊今日 K 棒 ──
         // 盤中/盤後窗口：可用即時 API 拉；窗口外（晚上/凌晨）：只靠 L2 快照（若有今日數據也允許注入）
         // 避免凌晨用舊 API 產生假的今日 K 棒，但 L2 有當日 snapshot 時就允許
         const marketKey = isTW ? 'TW' as const : 'CN' as const;
-        // 台股只有盤中才注入 L2 暫時價；收盤後必須等待官方 L1，不能再把 MIS/L2 冒充收盤。
+        // 台股收盤後若官方 L1 尚未到，先注入中央 L2 暫定收盤 K；今日 L1 一到就不再覆蓋。
         const inLiveWindow = isMarketOpen(marketKey);
+        const lastCandle = result.candles[result.candles.length - 1];
+        const lastIsToday = !!lastCandle && lastCandle.date === today;
+        const twNeedsProvisionalClose = isTW && isAfterMarketClose('TW') && !lastIsToday;
         let l2HasToday = false;
-        if (!inLiveWindow && !isTW) {
+        if (!inLiveWindow && (!isTW || twNeedsProvisionalClose)) {
           try {
             const snap = await readIntradaySnapshot(marketKey, today);
             l2HasToday = !!snap && !assessIntradayFreshness(marketKey, snap).stale && snap.quotes.some(q =>
@@ -288,12 +292,12 @@ export async function GET(req: NextRequest) {
             );
           } catch { /* ignore */ }
         }
-        const lastCandle = result.candles[result.candles.length - 1];
-        const shouldInjectToday = inLiveWindow || (!isTW && l2HasToday);
+        const shouldInjectToday = inLiveWindow
+          || (!isTW && l2HasToday)
+          || (twNeedsProvisionalClose && l2HasToday);
         // 注入條件：
         //   a) lastCandle.date < today → append 今日 K（正常路徑）
         //   b) lastCandle.date === today → 覆蓋（append-today 腳本寫進 L1 的盤中快照價，需用即時報價刷新）
-        const lastIsToday = !!lastCandle && lastCandle.date === today;
         if (shouldInjectToday && lastCandle && (lastCandle.date < today || lastIsToday)) {
           let todayQuote: { open: number; high: number; low: number; close: number; volume: number } | null = null;
           // 冷啟動止血（2026-06-08）：今日即時報價整條外部 fallback 鏈設總時間預算，
@@ -301,7 +305,7 @@ export async function GET(req: NextRequest) {
           const INJECT_BUDGET_MS = Number(process.env.STOCK_INJECT_BUDGET_MS) || 3500;
           const injectDeadline = Date.now() + INJECT_BUDGET_MS;
           try {
-            if (isTwIndex || isCnIndex) {
+            if ((isTwIndex || isCnIndex) && inLiveWindow) {
               // 指數用獨立單檔即時鏈；不讓 5 分鐘 L2 先攔截 30 秒走圖 polling。
               // helper 已自帶「只有新鮮 L2 才可 fallback」的守門。
               const iq = await withTimeout(
@@ -329,7 +333,7 @@ export async function GET(req: NextRequest) {
           }
 
           // 從中央 L2 全市場快照中找該股報價
-          if (!todayQuote && !isTwIndex && !isCnIndex && Date.now() < injectDeadline) {
+          if (!todayQuote && !isCnIndex && Date.now() < injectDeadline) {
             try {
               const snapshot = await withTimeout(readIntradaySnapshot(market as 'TW' | 'CN', today), Math.max(500, injectDeadline - Date.now()), null);
               if (snapshot && !assessIntradayFreshness(market as 'TW' | 'CN', snapshot).stale) {
@@ -390,6 +394,7 @@ export async function GET(req: NextRequest) {
             } else {
               result.candles.push(todayBar);
             }
+            injectedTWProvisionalClose = twNeedsProvisionalClose;
           }
         }
 
@@ -462,6 +467,10 @@ export async function GET(req: NextRequest) {
           candles: withIndicators.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
           totalBars: withIndicators.length,
           source: 'local',
+          ...(injectedTWProvisionalClose ? {
+            provisional: true,
+            quoteStatus: 'provisional-close' as const,
+          } : {}),
           staleDays: result.staleDays,
         }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
       }

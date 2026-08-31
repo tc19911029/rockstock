@@ -1,6 +1,6 @@
 import { getQuoteSnapshotDate, isMarketOpen } from '@/lib/datasource/marketHours';
 
-export type QuoteFreshnessStatus = 'live' | 'final' | 'delayed' | 'no-trade';
+export type QuoteFreshnessStatus = 'live' | 'provisional-close' | 'final' | 'delayed' | 'no-trade';
 
 export interface QuoteFreshnessAssessment {
   asOf: string | null;

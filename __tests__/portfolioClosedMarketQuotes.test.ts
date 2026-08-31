@@ -3,6 +3,7 @@ const expectedTwSymbol = jest.fn();
 const getTWChineseName = jest.fn();
 const getCNChineseName = jest.fn();
 const getTWSESingleIntraday = jest.fn();
+const readIntradaySnapshot = jest.fn();
 
 jest.mock('@/lib/datasource/CandleStorageAdapter', () => ({
   readCandleFile: (...args: unknown[]) => readCandleFile(...args),
@@ -23,7 +24,11 @@ jest.mock('@/lib/datasource/TWSERealtime', () => ({
   parseMisPrice: jest.fn(),
 }));
 
-import { buildFreshSnapshotFallback, enrichQuoteNames, fetchFinalL1Quotes, fetchSameDayTWCloseQuotes, resolveQuoteEntries } from '@/app/api/portfolio/quotes/route';
+jest.mock('@/lib/datasource/IntradayCache', () => ({
+  readIntradaySnapshot: (...args: unknown[]) => readIntradaySnapshot(...args),
+}));
+
+import { buildFreshSnapshotFallback, enrichQuoteNames, fetchFinalL1Quotes, fetchSameDayTWCloseQuotes, fetchTWDisplayQuotes, resolveQuoteEntries } from '@/app/api/portfolio/quotes/route';
 
 describe('休市持倉報價', () => {
   beforeEach(() => {
@@ -32,9 +37,11 @@ describe('休市持倉報價', () => {
     getTWChineseName.mockReset();
     getCNChineseName.mockReset();
     getTWSESingleIntraday.mockReset();
+    readIntradaySnapshot.mockReset();
     expectedTwSymbol.mockResolvedValue(null);
     getTWChineseName.mockResolvedValue(null);
     getCNChineseName.mockResolvedValue(null);
+    readIntradaySnapshot.mockResolvedValue(null);
   });
 
   test('同交易日盤後不以 MIS 冒充正式收盤價', async () => {
@@ -131,6 +138,70 @@ describe('休市持倉報價', () => {
     }, new Date('2026-08-20T11:20:00.000Z'));
 
     expect(quotes).toEqual([]);
+  });
+
+  test('台股收盤後官方 L1 未到時，L2 只作暫定收盤顯示', () => {
+    const quotes = buildFreshSnapshotFallback([
+      { original: '3081.TWO', resolved: '3081.TWO', market: 'TW' },
+    ], 'TW', {
+      market: 'TW',
+      date: '2026-08-26',
+      updatedAt: '2026-08-26T05:35:20.000Z',
+      count: 1,
+      quotes: [{
+        symbol: '3081', name: '聯亞', open: 3010, high: 3255, low: 2940,
+        close: 3255, volume: 7470, prevClose: 2960, changePercent: 9.97,
+        priceKind: 'last_actual', isActualTrade: true,
+      }],
+    }, new Date('2026-08-26T05:40:00.000Z'));
+
+    expect(quotes).toEqual([expect.objectContaining({
+      symbol: '3081.TWO',
+      price: 3255,
+      asOf: '2026-08-26',
+      source: 'l2-provisional-close',
+      status: 'provisional-close',
+      provisional: true,
+      stale: false,
+      marketSession: 'post_close_pending_official',
+    })]);
+  });
+
+  test('同日官方 L1 優先；只有仍停在昨日的股票才由 L2 暫時補上', async () => {
+    readCandleFile.mockImplementation(async (symbol: string) => {
+      if (symbol.startsWith('2330.')) return {
+        candles: [
+          { date: '2026-08-25', close: 1200 },
+          { date: '2026-08-26', close: 1210 },
+        ],
+      };
+      if (symbol.startsWith('3081.')) return {
+        candles: [
+          { date: '2026-08-25', close: 2960 },
+        ],
+      };
+      return null;
+    });
+    readIntradaySnapshot.mockResolvedValue({
+      market: 'TW',
+      date: '2026-08-26',
+      updatedAt: '2026-08-26T05:35:20.000Z',
+      count: 2,
+      quotes: [
+        { symbol: '2330', name: '台積電', open: 1205, high: 1215, low: 1200, close: 1211, volume: 1, prevClose: 1200, changePercent: 0.92, priceKind: 'last_actual' },
+        { symbol: '3081', name: '聯亞', open: 3010, high: 3255, low: 2940, close: 3255, volume: 7470, prevClose: 2960, changePercent: 9.97, priceKind: 'last_actual' },
+      ],
+    });
+
+    const quotes = await fetchTWDisplayQuotes([
+      { original: '2330.TW', resolved: '2330.TW', market: 'TW' },
+      { original: '3081.TWO', resolved: '3081.TWO', market: 'TW' },
+    ], new Date('2026-08-26T05:40:00.000Z'));
+
+    expect(quotes).toEqual([
+      expect.objectContaining({ symbol: '2330.TW', price: 1210, asOf: '2026-08-26', source: 'l1' }),
+      expect.objectContaining({ symbol: '3081.TWO', price: 3255, asOf: '2026-08-26', source: 'l2-provisional-close', provisional: true }),
+    ]);
   });
 
   test('陸股午休顯示 11:30 上午收盤快照，不標示為 stale', () => {

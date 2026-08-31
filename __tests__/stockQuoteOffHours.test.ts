@@ -51,7 +51,7 @@ describe('GET /api/stock/quote 休市防護', () => {
 
   afterEach(() => jest.useRealTimers());
 
-  test('舊分頁輪詢台股指數時只讀 L1，不空打 MIS/Fugle/L2', async () => {
+  test('舊分頁輪詢台股指數時先看中央 L2，沒有才回 L1，且不空打 MIS/Fugle', async () => {
     readCandleFile.mockResolvedValue({
       candles: [{ date: '2026-08-14', open: 24180, high: 24320, low: 24100, close: 24260, volume: 4_321_000 }],
     });
@@ -65,7 +65,7 @@ describe('GET /api/stock/quote 休市防護', () => {
       close: 24260,
     });
     expect(readCandleFile).toHaveBeenCalledWith('^TWII', 'TW');
-    expect(readIntradaySnapshot).not.toHaveBeenCalled();
+    expect(readIntradaySnapshot).toHaveBeenCalledTimes(1);
     expect(getTWSESingleIntraday).not.toHaveBeenCalled();
     expect(getFugleQuote).not.toHaveBeenCalled();
   });
@@ -110,7 +110,7 @@ describe('GET /api/stock/quote 休市防護', () => {
     expect(getFugleQuote).not.toHaveBeenCalled();
   });
 
-  test('正式 L1 尚未封存時，不以收盤 L2 冒充官方收盤價', async () => {
+  test('正式 L1 尚未封存時，以收盤 L2 暫時顯示但不冒充官方收盤價', async () => {
     readCandleFile.mockResolvedValue({
       candles: [{ date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 }],
     });
@@ -130,12 +130,14 @@ describe('GET /api/stock/quote 休市防護', () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       symbol: '3081.TWO',
-      date: '2026-08-25',
-      close: 2960,
-      source: 'l1',
-      stale: true,
+      date: '2026-08-26',
+      close: 3255,
+      source: 'l2-provisional-close',
+      status: 'provisional-close',
+      provisional: true,
+      stale: false,
     });
-    expect(readIntradaySnapshot).not.toHaveBeenCalled();
+    expect(readIntradaySnapshot).toHaveBeenCalledTimes(1);
   });
 
   test('正式 L1 尚未封存時，不以同日 MIS 最後成交價補盤後盲區', async () => {
@@ -158,7 +160,7 @@ describe('GET /api/stock/quote 休市防護', () => {
       source: 'l1',
       stale: true,
     });
-    expect(readIntradaySnapshot).not.toHaveBeenCalled();
+    expect(readIntradaySnapshot).toHaveBeenCalledTimes(1);
     expect(getTWSESingleIntraday).not.toHaveBeenCalled();
   });
 
@@ -182,7 +184,7 @@ describe('GET /api/stock/quote 休市防護', () => {
     });
   });
 
-  test('無實際成交的委託簿推估價不得冒充今日收盤，保留舊 L1 並標 stale', async () => {
+  test('連續無成交後的委託簿推估價只作暫定收盤顯示，不寫成官方 L1', async () => {
     readCandleFile.mockResolvedValue({
       candles: [{ date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 }],
     });
@@ -194,6 +196,7 @@ describe('GET /api/stock/quote 休市防護', () => {
       quotes: [{
         symbol: '3081', name: '聯亞', open: 3010, high: 3255, low: 2940, close: 3255,
         volume: 0, prevClose: 2960, changePercent: 9.97, isActualTrade: false,
+        priceKind: 'indicative',
       }],
     });
 
@@ -201,10 +204,13 @@ describe('GET /api/stock/quote 休市防護', () => {
 
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      date: '2026-08-25',
-      close: 2960,
-      source: 'l1',
-      stale: true,
+      date: '2026-08-26',
+      close: 3255,
+      source: 'l2-provisional-close',
+      status: 'provisional-close',
+      priceKind: 'indicative',
+      provisional: true,
+      stale: false,
     });
   });
 

@@ -6,7 +6,7 @@ import { assessQuoteFreshness, type QuoteFreshnessStatus } from '@/lib/datasourc
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
-import { isMarketOpen } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isAfterMarketClose, isMarketOpen } from '@/lib/datasource/marketHours';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TWSE 即時報價 API — 延遲約 5-15 秒（盤中）
@@ -27,7 +27,7 @@ export interface RealtimeQuote {
   time: string;        // 成交時間 HH:MM:SS
   date: string | null;
   updatedAt?: string;
-  source: 'mis' | 'l2' | 'l2-indicative' | 'l1';
+  source: 'mis' | 'l2' | 'l2-indicative' | 'l2-provisional-close' | 'l1';
   provisional?: boolean;
   priceKind?: string;
   stale: boolean;
@@ -125,15 +125,25 @@ export async function GET(req: NextRequest) {
       });
     }
   } else {
+    const expectedDate = getQuoteSnapshotDate('TW');
+    const postCloseSnapshot = isAfterMarketClose('TW')
+      ? await readIntradaySnapshot('TW', expectedDate).catch(() => null)
+      : null;
+    const postCloseSnapshotFresh = postCloseSnapshot
+      ? !assessIntradayFreshness('TW', postCloseSnapshot).stale
+      : false;
+    const byCode = new Map(postCloseSnapshot?.quotes.map(quote => [quote.symbol, quote]) ?? []);
+
     for (const requested of codes) {
       const code = requested.replace(/\.(TW|TWO)$/i, '');
       const candidates = [...new Set([requested, `${code}.TW`, `${code}.TWO`])];
+      let l1Fallback: RealtimeQuote | null = null;
       for (const candidate of candidates) {
         const file = await readCandleFile(candidate, 'TW').catch(() => null);
         const last = file?.candles.at(-1);
         if (!last || last.close <= 0) continue;
         const freshness = assessQuoteFreshness('TW', last.date);
-        quotes.push({
+        const l1Quote: RealtimeQuote = {
           symbol: code,
           name: '',
           price: last.close,
@@ -153,9 +163,49 @@ export async function GET(req: NextRequest) {
           status: freshness.status,
           ...(freshness.staleReason ? { staleReason: freshness.staleReason } : {}),
           provisional: false,
-        });
-        break;
+        };
+        l1Fallback ??= l1Quote;
+        if (last.date === expectedDate) {
+          l1Fallback = l1Quote;
+          break;
+        }
       }
+
+      if (l1Fallback?.date === expectedDate) {
+        quotes.push(l1Fallback);
+        continue;
+      }
+
+      const l2 = byCode.get(code);
+      if (postCloseSnapshot && postCloseSnapshotFresh && l2 && l2.close > 0) {
+        const updatedAt = l2.observedAt ?? postCloseSnapshot.updatedAt;
+        const updated = updatedAt ? new Date(updatedAt) : null;
+        quotes.push({
+          symbol: code,
+          name: l2.name,
+          price: l2.close,
+          open: l2.open,
+          high: l2.high,
+          low: l2.low,
+          prevClose: l2.prevClose,
+          change: +(l2.close - l2.prevClose).toFixed(2),
+          changePct: l2.changePercent,
+          volume: l2.volume,
+          time: updated && Number.isFinite(updated.getTime())
+            ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(updated)
+            : '',
+          date: postCloseSnapshot.date,
+          updatedAt,
+          source: 'l2-provisional-close',
+          provisional: true,
+          priceKind: l2.priceKind,
+          stale: false,
+          status: 'provisional-close',
+        });
+        continue;
+      }
+
+      if (l1Fallback) quotes.push(l1Fallback);
     }
   }
 

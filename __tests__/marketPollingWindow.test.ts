@@ -1,9 +1,24 @@
 import {
+  getTWClosingL2Slot,
   isCNMarketLunchBreak,
   isCNMarketOpen,
   isMarketPollingWindow,
   isTaifexPollingWindow,
 } from '@/lib/datasource/marketHours';
+
+describe('台股收盤 L2 定格時間槽', () => {
+  test('交易日只在 13:30 與 13:35 各開一個時間槽', () => {
+    expect(getTWClosingL2Slot(new Date('2026-08-14T05:30:05.000Z'))).toBe('13:30');
+    expect(getTWClosingL2Slot(new Date('2026-08-14T05:35:55.000Z'))).toBe('13:35');
+    expect(getTWClosingL2Slot(new Date('2026-08-14T05:34:59.000Z'))).toBeNull();
+    expect(getTWClosingL2Slot(new Date('2026-08-14T05:36:00.000Z'))).toBeNull();
+  });
+
+  test('週末與休市日不開收盤定格時間槽', () => {
+    expect(getTWClosingL2Slot(new Date('2026-08-16T05:35:00.000Z'))).toBeNull();
+    expect(getTWClosingL2Slot(new Date('2026-10-09T05:35:00.000Z'))).toBeNull();
+  });
+});
 
 describe('isMarketPollingWindow', () => {
   test('台股盤中與盤後定稿窗口允許輪詢', () => {

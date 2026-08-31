@@ -4,7 +4,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { getEastMoneySingleQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
-import { isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { isAfterMarketClose, isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { fetchQuote } from '@/lib/cn-sanse/cnQuote';
 import { fetchLiveIndexQuote, type LiveIndexSymbol } from '@/lib/datasource/IndexRealtime';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
@@ -116,6 +116,34 @@ export async function GET(req: NextRequest) {
           }
         }
       } catch { /* try next suffix */ }
+    }
+
+    // 台股收盤後、官方 L1 尚未發布的過渡期，先顯示中央 L2 收盤定格值。
+    // 這個值只標 provisional-close、不寫入 L1；一旦上方找到今日 L1，永遠由 L1 優先返回。
+    if (market === 'TW' && isAfterMarketClose('TW')) {
+      try {
+        const snapshot = await readIntradaySnapshot('TW', expectedDate);
+        const snapshotFreshness = snapshot ? assessIntradayFreshness('TW', snapshot) : null;
+        const l2 = snapshot?.quotes.find(item => item.symbol === pureCode);
+        if (snapshot && !snapshotFreshness?.stale && l2 && l2.close > 0) {
+          return apiOk({
+            symbol,
+            date: snapshot.date,
+            open: l2.open,
+            high: l2.high,
+            low: l2.low,
+            close: l2.close,
+            volume: l2.volume,
+            source: 'l2-provisional-close',
+            updatedAt: l2.observedAt ?? snapshot.updatedAt,
+            priceKind: l2.priceKind,
+            provisional: true,
+            marketSession: 'post_close_pending_official',
+            stale: false,
+            status: 'provisional-close',
+          }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+        }
+      } catch { /* L2 不可用時保留下方舊 L1 delayed fallback */ }
     }
 
     if (l1Fallback) {

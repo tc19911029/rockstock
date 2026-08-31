@@ -6,7 +6,13 @@
 //   實際做事交給宣告 runtime='nodejs' 的 API route。
 //   這樣 Edge bundler 才不會在 HMR 後把 fs 依賴拉進來炸掉（歷史傷疤：DabanScanner 2026-04-17）。
 
-import { isMarketOpen, isPostCloseWindow, getLastTradingDay } from '@/lib/datasource/marketHours';
+import {
+  getLastTradingDay,
+  getTWClosingL2Slot,
+  isMarketOpen,
+  isPostCloseWindow,
+  type TWClosingL2Slot,
+} from '@/lib/datasource/marketHours';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 // ⚠️ 只 import 純狀態模組（無 fs/path）— 維持本檔 Edge-safe 邊界（見檔頭鐵律 4）。
 import { isTranscriptionActive } from '@/lib/youtube/transcriptionLock';
@@ -87,7 +93,7 @@ export async function register() {
     60_000,
     Number(process.env.LOCAL_L2_REFRESH_INTERVAL_MS) || 60_000,
   );
-  console.log(`[local-cron] L2：每 ${Math.round(L2_REFRESH_INTERVAL_MS / 60_000)} 分鐘 | 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | 盤後：L1+scan 14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5 | 三色推播：每 2 分鐘`);
+  console.log(`[local-cron] L2：每 ${Math.round(L2_REFRESH_INTERVAL_MS / 60_000)} 分鐘（TW 另定格 13:30/13:35）| 六條件盤中：每 10 分鐘 | 買法 BCDEF：每 10 分鐘 | TW 官方 L1：14:15 起重試 | 盤後 scan：14:10 TW / 16:10 CN | ETF：18:00/23:00 CST 1-5 | 三色推播：每 2 分鐘`);
 
   // 重活完成帳本必須跨 process restart 保留。過去只存在記憶體，
   // 盤後每次 kickstart 都會再跑全市場 download/append/scan。
@@ -95,6 +101,7 @@ export async function register() {
     l1Downloaded: Record<'TW' | 'CN', string[]>;
     l1SnapshotDone: Record<'TW' | 'CN', string>;
     postCloseDailyDone: Record<'TW' | 'CN', string>;
+    twClosingL2Attempted: Record<TWClosingL2Slot, string>;
   };
   const stateDir = `${process.env.HOME ?? '/tmp'}/.local/state/rockstock`;
   const stateFile = `${stateDir}/local-cron-state.json`;
@@ -102,6 +109,7 @@ export async function register() {
     l1Downloaded: { TW: [], CN: [] },
     l1SnapshotDone: { TW: '', CN: '' },
     postCloseDailyDone: { TW: '', CN: '' },
+    twClosingL2Attempted: { '13:30': '', '13:35': '' },
   });
   let persistentState = emptyState();
   try {
@@ -119,6 +127,10 @@ export async function register() {
       postCloseDailyDone: {
         TW: parsed.postCloseDailyDone?.TW ?? '',
         CN: parsed.postCloseDailyDone?.CN ?? '',
+      },
+      twClosingL2Attempted: {
+        '13:30': parsed.twClosingL2Attempted?.['13:30'] ?? '',
+        '13:35': parsed.twClosingL2Attempted?.['13:35'] ?? '',
       },
     };
     console.log('[local-cron] 已載入跨重啟完成帳本');
@@ -312,6 +324,38 @@ export async function register() {
       && ((payload as { alertLevel?: string }).alertLevel ?? 'none') === 'none';
   }
 
+  // ── 台股收盤 L2 定格：13:30 與 13:35 各一輪 ──
+  // 每個時間槽一天最多一次；跨重啟帳本避免 13:35 部署／重啟時重複打交易所 API。
+  // route 內另有 market single-flight，若 13:30 與正常分鐘輪詢重疊，只會共用同一輪上游請求。
+  const twClosingL2Attempted = persistentState.twClosingL2Attempted;
+  async function maybeCaptureTWClosingL2() {
+    const now = new Date();
+    const slot = getTWClosingL2Slot(now);
+    if (!slot) return;
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+    if (twClosingL2Attempted[slot] === today) return;
+
+    twClosingL2Attempted[slot] = today;
+    await persistCronState();
+    console.log(`[local-cron] TW ${slot} 收盤 L2 定格啟動...`);
+    const json = await callRoute(
+      '/api/cron/update-intraday?market=TW&force=1',
+      `TW ${slot} closing L2 capture`,
+      { timeoutMs: 90_000 },
+    ) as { data?: { count?: number; alert?: boolean; alertLevel?: string }; count?: number; alert?: boolean; alertLevel?: string } | null;
+    const payload = json?.data ?? json;
+    const count = payload?.count ?? 0;
+    const healthy = !!payload
+      && payload.alert !== true
+      && payload.alertLevel !== 'critical'
+      && count >= 1_700;
+    if (!healthy) {
+      console.error(`[local-cron] TW ${slot} 收盤 L2 定格未達完整門檻: count=${count}；不追加密集重試，${slot === '13:30' ? '13:35 再抓一次' : '等待官方 L1 定稿'}`);
+      return;
+    }
+    console.log(`[local-cron] TW ${slot} 收盤 L2 定格完成: ${count} 支`);
+  }
+
   // ── 盤後：買法 post_close 掃描（scan-bm-batch 3 track）──
   // 0513 ABCDE E：原本一字母一 cron 共 16 次 → 改成一 track 一 cron 共 3 次，
   // 同 track 內字母共用 stockList / L2 / TurnoverRank / marketTrend / L1 cache，
@@ -416,6 +460,7 @@ export async function register() {
   // 即此 bug)。修法：(1) 觸發時間 → 14:15 / 15:45 (再給 L2 三輪 polling 抓收盤集合競價)；
   // (2) CN 觸發前仍刷新 L2；TW 已改由官方盤後日線定稿，不需多打一輪 MIS。
   const l1SnapshotDone = persistentState.l1SnapshotDone;
+  const lastL1SnapshotAttemptAt: Record<'TW' | 'CN', number> = { TW: 0, CN: 0 };
   async function appendL1FromSnapshot(market: 'TW' | 'CN') {
     if (deferForWhisper(`${market} append-from-snapshot`)) return;
     if (bootCoolingDown(`${market} append-from-snapshot`, 45_000)) return;
@@ -433,6 +478,9 @@ export async function register() {
     );
     const triggerMin = market === 'TW' ? 1415 : 1545; // 14:15 CST / 15:45 CST
     if (hhmm < triggerMin) return;
+    // 高頻時間檢查只為了準時命中 14:15；真正官方 API 最多每 5 分鐘嘗試一次。
+    if (Date.now() - lastL1SnapshotAttemptAt[market] < 4 * 60_000 + 45_000) return;
+    lastL1SnapshotAttemptAt[market] = Date.now();
 
     // 先標記 flag 避免重入，但實際 await refresh 失敗時 reset 讓下一輪重試
     l1SnapshotDone[market] = lastTrading;
@@ -475,21 +523,19 @@ export async function register() {
     await persistCronState();
     console.log(`[local-cron] ${market} append-from-snapshot 完成: appended=${payload.appended ?? '?'}`);
 
-    // append 完成後 15 分鐘跑 L1↔L2 一致性 audit（給 download-candles 也跑完）
-    // 2026-05-21 加。這個跟 append 同個 daily flag 走，append 跑完才會走到這。
-    setTimeout(() => {
-      callRoute(`/api/cron/audit-l1-l2-consistency?market=${market}`, `${market} L1↔L2 audit`)
-        .then(r => {
-          const d = (r as { data?: unknown } | null)?.data ?? r ?? {};
-          const { diff1pct, diff5pct, ohlcInconsistent, total, alertFired } = d as { diff1pct?: number; diff5pct?: number; ohlcInconsistent?: number; total?: number; alertFired?: boolean };
-          console.log(
-            `[local-cron] ${market} L1↔L2 audit: ` +
-            `diff>1%=${diff1pct ?? '?'}/${total ?? '?'}, diff>5%=${diff5pct ?? '?'}, OHLC 不自洽=${ohlcInconsistent ?? '?'}` +
-            (alertFired ? ' 🚨 ALERT' : ''),
-          );
-        })
-        .catch(err => console.error(`[local-cron] ${market} L1↔L2 audit 失敗:`, err));
-    }, 15 * 60 * 1000);
+    // 官方 L1 寫入完成後立即與 13:35 L2 核對；顯示層已由同日 L1 優先，因此核對後
+    // 不論兩者是否有差異，正式收盤價都以官方 L1 為準。
+    const audit = await callRoute(
+      `/api/cron/audit-l1-l2-consistency?market=${market}`,
+      `${market} L1↔L2 audit`,
+    );
+    const d = (audit as { data?: unknown } | null)?.data ?? audit ?? {};
+    const { diff1pct, diff5pct, ohlcInconsistent, total, alertFired } = d as { diff1pct?: number; diff5pct?: number; ohlcInconsistent?: number; total?: number; alertFired?: boolean };
+    console.log(
+      `[local-cron] ${market} L1↔L2 audit: ` +
+      `diff>1%=${diff1pct ?? '?'}/${total ?? '?'}, diff>5%=${diff5pct ?? '?'}, OHLC 不自洽=${ohlcInconsistent ?? '?'}` +
+      (alertFired ? ' 🚨 ALERT' : ''),
+    );
   }
 
   // ── 打板開盤確認（CN 9:25–9:35 CST，每日一次） ──
@@ -555,6 +601,12 @@ export async function register() {
   startL2RefreshLoop('TW', 15_000 + L2_REFRESH_INTERVAL_MS);
   startL2RefreshLoop('CN', 45_000 + L2_REFRESH_INTERVAL_MS);
 
+  // 用短週期只檢查本機時鐘；真正 vendor 呼叫由兩個精準 slot + 永久帳本限制為每日最多兩輪。
+  maybeCaptureTWClosingL2().catch(err => console.error('[local-cron] TW closing L2 capture:', err));
+  setInterval(() => {
+    maybeCaptureTWClosingL2().catch(err => console.error('[local-cron] TW closing L2 capture:', err));
+  }, 10_000);
+
   setInterval(() => {
     // L2 也是從開機時間起算；延後一分鐘，避免每 10 分鐘固定撞上 L2 refresh。
     setTimeout(() => {
@@ -600,6 +652,11 @@ export async function register() {
     appendL1FromSnapshot('TW').catch(err => console.error('[local-cron] TW appendL1FromSnapshot:', err));
     appendL1FromSnapshot('CN').catch(err => console.error('[local-cron] CN appendL1FromSnapshot:', err));
   }, 5 * 60 * 1000);
+  // TW 每 15 秒只做時間檢查，14:15 首個 tick 立即嘗試；函式內節流保證官方 API
+  // 未發布時仍只會每 5 分鐘重試。CN 保留上方既有 5 分鐘排程。
+  setInterval(() => {
+    appendL1FromSnapshot('TW').catch(err => console.error('[local-cron] TW precise appendL1FromSnapshot:', err));
+  }, 15_000);
 
   // 盤後買法掃描：每分鐘檢查，時間窗口內對 3 個 track（bullish/reversal/system）各觸發一次
   // 0513 ABCDE E：從一字母一 cron（16 calls）改成一 track 一 cron（3 calls），

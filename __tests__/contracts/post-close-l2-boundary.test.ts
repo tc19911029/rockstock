@@ -22,13 +22,29 @@ describe('post-close L2 boundary', () => {
     expect(pipeline).toContain('canInjectL2ForScan(sessionType)');
   });
 
-  test('台股收盤顯示不得用 MIS/L2 冒充 official final', () => {
+  test('台股收盤顯示可用暫定 L2，但不得冒充 official final', () => {
     const single = source('app/api/stock/quote/route.ts');
     const portfolio = source('app/api/portfolio/quotes/route.ts');
+    const realtime = source('app/api/realtime/route.ts');
+    const chart = source('app/api/stock/route.ts');
     expect(single).not.toContain("source: 'mis-final'");
     expect(single).not.toContain("source: 'l2-final'");
+    expect(single).toContain("source: 'l2-provisional-close'");
+    expect(portfolio).toContain("'l2-provisional-close'");
+    expect(realtime).toContain("source: 'l2-provisional-close'");
+    expect(chart).toContain("twNeedsProvisionalClose");
     expect(portfolio).toContain("const twLive = isMarketOpen('TW')");
-    expect(portfolio).toContain("fetchFinalL1Quotes(twEntries, 'TW')");
+    expect(portfolio).toContain('fetchTWDisplayQuotes(twEntries)');
+    expect(portfolio).toContain("l1?.asOf === expectedDate");
+  });
+
+  test('TW 排程只在 13:30／13:35 定格 L2，14:15 起每五分鐘重試官方 L1', () => {
+    const scheduler = source('instrumentation.node.ts');
+    expect(scheduler).toContain("twClosingL2Attempted: { '13:30': '', '13:35': '' }");
+    expect(scheduler).toContain("'/api/cron/update-intraday?market=TW&force=1'");
+    expect(scheduler).toContain("const triggerMin = market === 'TW' ? 1415 : 1545");
+    expect(scheduler).toContain('lastL1SnapshotAttemptAt');
+    expect(scheduler).toContain('/api/cron/audit-l1-l2-consistency?market=${market}');
   });
 
   test('TW 正式 settlement 只能由官方錨寫入', () => {

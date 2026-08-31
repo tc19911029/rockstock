@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot, type IntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { getQuoteSnapshotDate, isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isAfterMarketClose, isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
@@ -39,7 +39,7 @@ export interface QuoteTick {
   provisional?: boolean;
   priceKind?: string;
   /** A 股午休時明確標示目前是上午收盤價，不是資料故障。 */
-  marketSession?: 'open' | 'lunch_break' | 'closed';
+  marketSession?: 'open' | 'lunch_break' | 'post_close_pending_official' | 'closed';
 }
 
 export type ResolvedEntry = {
@@ -128,6 +128,7 @@ export function buildFreshSnapshotFallback(
 ): QuoteTick[] {
   const freshness = assessIntradayFreshness(market, snapshot, now);
   if (freshness.stale) return [];
+  const twPostClosePendingOfficial = market === 'TW' && isAfterMarketClose('TW', now);
 
   const byCode = new Map(snapshot.quotes.map((quote) => [quote.symbol, quote]));
   const out: QuoteTick[] = [];
@@ -142,13 +143,18 @@ export function buildFreshSnapshotFallback(
       changePercent: quote.changePercent ?? 0,
       name: quote.name || undefined,
       asOf: snapshot.date,
-      source: quote.priceKind === 'indicative' ? 'l2-indicative' : 'l2',
+      source: twPostClosePendingOfficial
+        ? 'l2-provisional-close'
+        : quote.priceKind === 'indicative' ? 'l2-indicative' : 'l2',
       stale: false,
-      status: isMarketOpen(market, now) ? 'live' : 'final',
+      status: twPostClosePendingOfficial
+        ? 'provisional-close'
+        : isMarketOpen(market, now) ? 'live' : 'final',
       ...(market === 'CN' && isCNMarketLunchBreak(now) ? { marketSession: 'lunch_break' as const } : {}),
+      ...(twPostClosePendingOfficial ? { marketSession: 'post_close_pending_official' as const } : {}),
       updatedAt: quote.observedAt ?? snapshot.updatedAt,
       ...(market === 'TW' ? {
-        provisional: quote.priceKind === 'indicative',
+        provisional: twPostClosePendingOfficial || quote.priceKind === 'indicative',
         priceKind: quote.priceKind,
       } : {}),
     });
@@ -185,6 +191,40 @@ export async function fetchFinalL1Quotes(entries: ResolvedEntry[], market: 'TW' 
     return null;
   }));
   return settled.filter((quote): quote is QuoteTick => quote !== null);
+}
+
+/**
+ * 台股收盤後顯示採兩階段：
+ * 1. 官方 L1 已有今日資料：立即以 L1 為準。
+ * 2. 官方 L1 尚未發布：顯示 13:35 定格後的中央 L2，明確標為 provisional-close。
+ *
+ * L2 只供畫面暫時顯示，不會寫入 L1；若 L2 也不可用，才保留舊 L1 並標 delayed。
+ */
+export async function fetchTWDisplayQuotes(
+  entries: ResolvedEntry[],
+  now = new Date(),
+): Promise<QuoteTick[]> {
+  const l1Quotes = await fetchFinalL1Quotes(entries, 'TW');
+  if (!isAfterMarketClose('TW', now)) return l1Quotes;
+
+  const expectedDate = getQuoteSnapshotDate('TW', now);
+  const l1ByOriginal = new Map(l1Quotes.map(quote => [quote.symbol, quote]));
+  const pendingEntries = entries.filter(entry => l1ByOriginal.get(entry.original)?.asOf !== expectedDate);
+  if (pendingEntries.length === 0) return l1Quotes;
+
+  const snapshot = await readIntradaySnapshot('TW', expectedDate).catch(() => null);
+  const provisional = snapshot
+    ? buildFreshSnapshotFallback(pendingEntries, 'TW', snapshot, now)
+    : [];
+  const provisionalByOriginal = new Map(provisional.map(quote => [quote.symbol, quote]));
+
+  return entries.flatMap(entry => {
+    const l1 = l1ByOriginal.get(entry.original);
+    if (l1?.asOf === expectedDate) return [l1];
+    const l2 = provisionalByOriginal.get(entry.original);
+    if (l2) return [l2];
+    return l1 ? [l1] : [];
+  });
 }
 
 /**
@@ -356,7 +396,7 @@ export async function GET(req: NextRequest) {
   const [twQuotes, cnQuotes, fundQuotes] = await Promise.all([
     (twLive
       ? fetchTWSEQuotes(twEntries.map(e => e.resolved))
-      : fetchFinalL1Quotes(twEntries, 'TW')
+      : fetchTWDisplayQuotes(twEntries)
     ).then(qs =>
       qs.map(q => {
         const entry = twEntries.find(e => e.resolved.replace(/\.(TW|TWO)$/i, '') === q.symbol.replace(/\.(TW|TWO)$/i, ''));
@@ -399,7 +439,7 @@ export async function GET(req: NextRequest) {
   };
 
   const twFallback = async () => {
-    if (!twLive || missingTW.length === 0) return [] as typeof quotes;
+    if ((!twLive && !isAfterMarketClose('TW')) || missingTW.length === 0) return [] as typeof quotes;
     const lookupTW = getQuoteSnapshotDate('TW');
     try {
       const twSnap = await readIntradaySnapshot('TW', lookupTW);

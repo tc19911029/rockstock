@@ -86,6 +86,24 @@ export function isAfterMarketClose(market: 'TW' | 'CN', now = new Date()): boole
   return hour * 60 + min >= closeMinute;
 }
 
+export type TWClosingL2Slot = '13:30' | '13:35';
+
+/**
+ * 台股收盤定格 L2 的兩個精準時間槽。
+ *
+ * 13:30 保留收盤當下的一輪，13:35 再抓一次，吸收交易所收盤撮合結果較晚出現在
+ * 全市場端點的情況。只回傳兩個指定分鐘，避免把盤後定格誤做成持續輪詢。
+ */
+export function getTWClosingL2Slot(now = new Date()): TWClosingL2Slot | null {
+  const { hour, min, dow } = getLocalTime('Asia/Taipei', now);
+  if (dow === 0 || dow === 6) return null;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+  if (!isTradingDay(today, 'TW')) return null;
+  if (hour === 13 && min === 30) return '13:30';
+  if (hour === 13 && min === 35) return '13:35';
+  return null;
+}
+
 /** 根據市場代碼判斷是否開盤 */
 export function isMarketOpen(market: 'TW' | 'CN', now = new Date()): boolean {
   return market === 'TW' ? isTWMarketOpen(now) : isCNMarketOpen(now);
