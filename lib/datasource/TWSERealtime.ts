@@ -134,11 +134,11 @@ async function fetchAllQuotes(): Promise<Map<string, TWSEQuote>> {
   const [twseRes, tpexRes] = await Promise.allSettled([
     fetchJsonWithCurlFallback<TWSERawRow[]>(
       'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
-      { timeoutMs: 15000 },
+      { timeoutMs: 15000, proxyFirst: true },
     ),
     fetchJsonWithCurlFallback<TPExRawRow[]>(
       'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes',
-      { timeoutMs: 15000 },
+      { timeoutMs: 15000, proxyFirst: true },
     ),
   ]);
 
@@ -236,7 +236,7 @@ export async function getTWSESingleIntraday(code: string): Promise<TWSEQuote | n
     // timeoutMs 收到 3500ms：Node fetch 不通時快速落到 curl，避免走圖第一次載入卡 8 秒。
     const { data: json, source } = await fetchJsonWithCurlFallback<{ msgArray?: Array<Record<string, string | undefined>> }>(
       url,
-      { headers: MIS_HEADERS, timeoutMs: 3500 },
+      { headers: MIS_HEADERS, timeoutMs: 3500, proxyFirst: true },
     );
     if (source === 'curl') console.info('[TWSERealtime] 單檔即時報價 經 curl fallback 成功');
     const d = findMisQuoteRow(json?.msgArray, code);
@@ -449,7 +449,7 @@ export function resolveMisClose(d: Record<string, string | undefined>): number {
   return high > 0 ? high : 0;
 }
 
-const MIS_BATCH_SIZE = 80;     // 每次查詢的股票數量上限（mis.twse 實測 100 可用、200 失敗）
+const MIS_BATCH_SIZE = 100;    // 實測 100 可用、200 失敗；100 可把全市場由約 27 calls 降到約 22 calls
 const MIS_CONCURRENCY = 1;     // TSE/OTC 各自串行（兩市場合計最多 2 個同時請求，降低 WAF 壓力）
 
 /**
@@ -480,11 +480,11 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
     const [twseRes, tpexRes] = await Promise.allSettled([
       fetchJsonWithCurlFallback<TWSERawRow[]>(
         'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
-        { timeoutMs: 10000 },
+        { timeoutMs: 10000, proxyFirst: true },
       ),
       fetchJsonWithCurlFallback<TPExRawRow[]>(
         'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes',
-        { timeoutMs: 10000 },
+        { timeoutMs: 10000, proxyFirst: true },
       ),
     ]);
 
@@ -554,11 +554,12 @@ async function fetchIntradayQuotes(): Promise<Map<string, TWSEQuote>> {
       if (includeIndex) channels.push(exchange === 'tse' ? 'tse_t00.tw' : 'otc_o00.tw');
       const exCh = channels.join('|');
       const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}`;
-      // 2026-06-15：mis.twse 盤中 Node fetch 常整批逾時（"批次失敗"）→ 80 檔即時報價漏抓。
-      // 與大批量端點一致改走 curl fallback（curl 穩定 + 本機代理 fallback）。
+      // 2026-08-31：這台機器直連 MIS 會先空等約 5 秒，完整市場因而永遠超過外層 12 秒。
+      // 已確認本機代理約 1–2 秒可穩定回 100 檔，因此代理優先；代理不可用才退回直連。
+      // 仍維持 TSE/OTC 各自串行，不提高併發，也不增加每輪 API 呼叫量。
       const { data: json, source } = await fetchJsonWithCurlFallback<{ msgArray?: Array<Record<string, string | undefined>> }>(
         url,
-        { headers: MIS_HEADERS, timeoutMs: 12000 },
+        { headers: MIS_HEADERS, timeoutMs: 12000, proxyFirst: true },
       );
       if (source === 'curl') console.info(`[TWSERealtimeIntraday] ${exchange} 批次經 curl fallback 成功`);
       for (const d of json?.msgArray ?? []) {

@@ -172,7 +172,10 @@ export function checkL2PollingHealth(
 }
 
 const PROVIDER_TIMEOUT_MS = 12_000;
-const REFRESH_HARD_TIMEOUT_MS = 45_000;
+// TW 全市場約 22 個保守串行批次（TSE/OTC 兩路並行），代理實測需約 20–25 秒。
+// 只放寬完整 MIS provider 的時間，不改 CN provider，也不增加 TW API 呼叫頻率。
+const TW_MIS_PROVIDER_TIMEOUT_MS = 35_000;
+const REFRESH_HARD_TIMEOUT_MS = 60_000;
 const CROSS_VALIDATE_TIMEOUT_MS = 6_000;
 
 /**
@@ -190,9 +193,13 @@ export function withIntradayTimeout<T>(promise: Promise<T>, timeoutMs: number, l
 }
 
 /** 計時工具；每個 provider 都有獨立上限，避免 fallback chain 卡住。 */
-function timedFetch<T>(fn: () => Promise<T>): Promise<{ result: T; elapsedMs: number }> {
+function timedFetch<T>(
+  fn: () => Promise<T>,
+  timeoutMs = PROVIDER_TIMEOUT_MS,
+  label = 'intraday provider',
+): Promise<{ result: T; elapsedMs: number }> {
   const start = Date.now();
-  return withIntradayTimeout(fn(), PROVIDER_TIMEOUT_MS, 'intraday provider')
+  return withIntradayTimeout(fn(), timeoutMs, label)
     .then(result => ({ result, elapsedMs: Date.now() - start }));
 }
 
@@ -586,6 +593,7 @@ export function getLastRefreshSummary(market: 'TW' | 'CN'): L2RefreshSummary {
 // ── 內部：TW 報價抓取（mis → OpenAPI 兩層 failover） ───────────────────────
 
 async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuote[]> {
+  const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
   const finalMap: Map<string, {
     code: string;
     name: string;
@@ -601,10 +609,11 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
     updatedAt?: string;
   }> = new Map();
 
-  type TWProvider = { name: string; fetch: () => Promise<typeof finalMap> };
+  type TWProvider = { name: string; timeoutMs: number; fetch: () => Promise<typeof finalMap> };
   const providers: TWProvider[] = [
     {
       name: 'TWSE+TPEx(mis)',
+      timeoutMs: TW_MIS_PROVIDER_TIMEOUT_MS,
       fetch: async () => {
         const { getTWSERealtimeIntraday } = await import('./TWSERealtime');
         return getTWSERealtimeIntraday();
@@ -612,6 +621,7 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
     },
     {
       name: 'TWSE+TPEx(OpenAPI)',
+      timeoutMs: PROVIDER_TIMEOUT_MS,
       fetch: async () => {
         const { getTWSEDailyAll } = await import('./TWSERealtime');
         return getTWSEDailyAll();
@@ -619,6 +629,7 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
     },
   ];
 
+  let staleSkipped = 0;
   for (const p of providers) {
     if (finalMap.size >= TW_SUCCESS_MIN) break;
 
@@ -638,9 +649,16 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
     }
 
     try {
-      const { result: newMap, elapsedMs } = await timedFetch(p.fetch);
+      const { result: newMap, elapsedMs } = await timedFetch(p.fetch, p.timeoutMs, p.name);
       let added = 0;
+      let validCount = 0;
       for (const [code, q] of newMap) {
+        // OpenAPI 盤中常回昨日收盤；日期缺失也不能冒充今天的即時價。
+        if (q.date !== todayTW) {
+          staleSkipped++;
+          continue;
+        }
+        validCount++;
         if (!finalMap.has(code)) {
           finalMap.set(code, q);
           added++;
@@ -648,11 +666,12 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
       }
       // 2026-05-07：對齊 CN 修正 — partial 不算 failed
       // 避免 OpenAPI 拿 1900 筆（< 1916）就標 failed 進冷卻、第二輪只剩 mis 一條備援
-      const success = newMap.size > 0;
+      const success = validCount > 0;
       sources.push({
         source: p.name,
         success,
-        quoteCount: newMap.size,
+        quoteCount: validCount,
+        ...(success ? {} : newMap.size > 0 ? { errorMessage: `沒有 ${todayTW} 的有效報價` } : {}),
         responseTimeMs: elapsedMs,
         timestamp: new Date().toISOString(),
       });
@@ -661,7 +680,7 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
       } else {
         markSourceFailed(p.name);
       }
-      console.info(`[IntradayCache] TW ${p.name}: ${newMap.size} 筆（新增 ${added}，累計 ${finalMap.size}, ${elapsedMs}ms）`);
+      console.info(`[IntradayCache] TW ${p.name}: ${validCount}/${newMap.size} 筆今日有效（新增 ${added}，累計 ${finalMap.size}, ${elapsedMs}ms）`);
     } catch (err) {
       markSourceFailed(p.name);
       sources.push({
@@ -680,20 +699,19 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
     console.warn(`[IntradayCache] TW 兩層 provider 後仍 ${finalMap.size} 筆 (< ${TW_SUCCESS_MIN})，回傳部分資料`);
   }
 
-  // 日期守門：STOCK_DAY_ALL 盤中會回傳昨日收盤統計（q.date=昨天），
-  // 若不檢查就會把昨日 OHLC 當成今日報價寫入 L2，污染所有下游掃描。
-  // 盤後（15:00+）STOCK_DAY_ALL 填入當日收盤（q.date=今天），正常放行。
-  const todayTW = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+  if (staleSkipped > 0) {
+    console.warn(`[IntradayCache] TW 丟棄 ${staleSkipped} 筆非 ${todayTW} 資料（多半是 OpenAPI 盤中昨日殘留）`);
+  }
+
+  // 本輪一筆今日資料都沒拿到時必須回空，讓外層保留舊快照原本的 updatedAt。
+  // 不可把整份舊 quotes 搬進新容器，否則 health 與畫面會把舊價格誤標成「剛更新」。
+  if (finalMap.size === 0) return [];
+
   const previousSnapshot = await readIntradaySnapshot('TW', todayTW).catch(() => null);
   const previousBySymbol = new Map(previousSnapshot?.quotes.map(q => [q.symbol, q]) ?? []);
-  let staleSkipped = 0;
   const quotes: IntradayQuote[] = [];
   const observedSymbols = new Set<string>();
   for (const [, q] of finalMap) {
-    if (q.date && q.date !== todayTW) {
-      staleSkipped++;
-      continue; // 丟掉非今日資料（STOCK_DAY_ALL 盤中回傳的昨日殘留）
-    }
     observedSymbols.add(q.code);
     const previous = previousBySymbol.get(q.code);
     const priceState = resolveTwIntradayPriceState({
@@ -735,10 +753,6 @@ async function _fetchTWQuotes(sources: DataSourceStatus[]): Promise<IntradayQuot
       quotes.push(previous);
     }
   }
-  if (staleSkipped > 0) {
-    console.warn(`[IntradayCache] TW 丟棄 ${staleSkipped} 筆非 ${todayTW} 資料（多半是 STOCK_DAY_ALL 盤中昨日殘留）`);
-  }
-
   return quotes;
 }
 

@@ -13,7 +13,8 @@ import { isTradingDay } from '@/lib/utils/tradingDay';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30; // L2 刷新只需 < 10s
+// TW 全市場維持低併發串行抓取，正常約 20–25 秒；保留故障 fallback 與寫檔餘裕。
+export const maxDuration = 90;
 
 export async function GET(req: NextRequest) {
   // Verify Vercel cron secret
