@@ -27,7 +27,9 @@ import {
   assessTwOfficialReadiness,
   canWriteSettlement,
   findConfirmedActivePendingSymbols,
+  findTwOfficialNoTradeSymbols,
 } from '../lib/datasource/eodSettlePolicy';
+import { readIntradaySnapshot } from '../lib/datasource/IntradayCache';
 import { ensureServerL1Visibility, type VisibilityCandidate } from '../lib/datasource/eodSettlementVisibility';
 import { verifyDownload } from '../lib/datasource/DownloadVerifier';
 import { sendNtfy } from '../lib/notify/ntfy';
@@ -330,10 +332,26 @@ async function main() {
         : (await import('../lib/scanner/ChinaScanner')).ChinaScanner;
       const canonicalSymbols = (await new Scanner().getStockList()).map((stock) => stock.symbol);
       const pendingTotal = stats['pending-multi-disagree'] + stats['pending-no-vendor-data'] + stats['pending-unverified'];
+      const officialNoTradeSymbols = market === 'TW'
+        ? findTwOfficialNoTradeSymbols({
+          targetDate: date,
+          officialReady: officialReadiness.ready,
+          results,
+          canonicalSymbols,
+          snapshot: await readIntradaySnapshot('TW', date),
+        })
+        : [];
+      if (officialNoTradeSymbols.length > 0) {
+        console.log(
+          `Verify: 完整官方日線 + 近收盤零量快照確認 ${officialNoTradeSymbols.length} 檔當日無成交`,
+        );
+      }
       const verify = await verifyDownload(market, date, canonicalSymbols, {
         succeeded: written,
         failed: pendingTotal,
         skipped: stats['skipped-already-correct'],
+      }, {
+        confirmedNoTradeSymbols: officialNoTradeSymbols,
       });
       verifyHealth = verify.health;
       verifyCoverage = verify.summary.coverageRate;

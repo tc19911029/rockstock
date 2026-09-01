@@ -219,6 +219,29 @@ export async function settleSymbol(
     if (bulkQ) quotes.push(bulkQ);
   }
 
+  // TW retry 快速路徑：L1 的 close + volume 已與本輪完整官方表精確一致時，
+  // 不必再逐檔打 Fugle/Yahoo，也不必重寫同一根 K。舊流程每個 calendar retry
+  // 都重打 2,000 檔並重寫約 1,950 檔，既延長補救時間也放大供應商斷線／限流。
+  const official = market === 'TW'
+    ? quotes.find(q => q.vendor === 'TWSE' || q.vendor === 'TPEx')
+    : undefined;
+  if (official && existing
+    && Math.abs(official.close - existing.close) <= 0.001
+    && official.volume === existing.volume
+    && existing.volume > 0) {
+    return {
+      symbol,
+      market,
+      date,
+      status: 'skipped-already-correct',
+      vendors: [official, { ...existing, vendor: 'L1-existing' }],
+      settled: official,
+      existing,
+      independentAgree: 1,
+      officialAnchor: true,
+    };
+  }
+
   // 2. Per-symbol providers — TW: FinMind + EODHD + Yahoo  | CN: 4 源
   //    TWSE provider 走 batch cache（不在這裡）
   //    EastMoney provider for CN 也已被 batch 取代（雖然 batch 目前 stub）

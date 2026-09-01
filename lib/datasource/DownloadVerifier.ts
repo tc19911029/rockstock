@@ -247,6 +247,14 @@ interface DownloadStats {
   skipped: number;
 }
 
+export interface VerifyDownloadOptions {
+  maxGapDays?: number;
+  staleDays?: number;
+  permanentStaleDays?: number;
+  /** 完整官方日線缺席 + 近收盤零量快照共同確認的無成交代號。 */
+  confirmedNoTradeSymbols?: Iterable<string>;
+}
+
 /**
  * 對已下載的 K 線進行校驗，生成報告並存儲。
  *
@@ -262,11 +270,15 @@ export async function verifyDownload(
   targetDate: string,
   symbols: string[],
   stats: DownloadStats,
-  maxGapDays = 10,
-  staleDays = 3,
-  /** 落後 ≥ N 個交易日 → 推定永久停牌/退市，不算進 stale 警告 */
-  permanentStaleDays = 14,
+  options: VerifyDownloadOptions = {},
 ): Promise<VerifyReport> {
+  const {
+    maxGapDays = 10,
+    staleDays = 3,
+    // 落後 ≥ N 個交易日 → 推定永久停牌/退市，不算進 stale 警告
+    permanentStaleDays = 14,
+  } = options;
+  const externallyConfirmedNoTrade = new Set(options.confirmedNoTradeSymbols ?? []);
   // 呼叫端可能合併多來源清單；先去重，避免重複代號把 30 檔灌成 1,500 筆繞過守門。
   symbols = [...new Set(symbols)];
   // 必須在任何讀檔、queue 更新或報告寫入前 fail closed。這可保證 provider 暫時
@@ -293,9 +305,8 @@ export async function verifyDownload(
         const data = await readCandleFile(symbol, market);
         const code = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
         const finalQuote = finalSnapshot?.quotes.get(code);
-        const confirmedNoTrade = finalQuote
-          ? isConfirmedNoTradeQuote(market, finalQuote)
-          : false;
+        const confirmedNoTrade = externallyConfirmedNoTrade.has(symbol)
+          || (finalQuote ? isConfirmedNoTradeQuote(market, finalQuote) : false);
         if (!data) {
           if (confirmedNoTrade) {
             noTradeDetails.push({ symbol, reason: 'no_trade' });
