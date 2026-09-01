@@ -29,6 +29,38 @@ export function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString('zh-TW');
 }
 
+/**
+ * 向零截斷到指定小數位，不做四捨五入。
+ *
+ * 小幅度的 tolerance 只用來抵銷 IEEE-754 在整數邊界的表示誤差，
+ * 例如避免 1.15 放大 100 倍後被表示成 114.99999999999999。
+ */
+export function truncateToDecimals(value: number, digits = 2): number {
+  if (!Number.isFinite(value)) return value;
+  if (!Number.isInteger(digits) || digits < 0 || digits > 10) {
+    throw new RangeError('digits must be an integer between 0 and 10');
+  }
+
+  const factor = 10 ** digits;
+  const scaled = value * factor;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(scaled)) * 4;
+  const truncated = Math.trunc(scaled + Math.sign(scaled) * tolerance) / factor;
+  return Object.is(truncated, -0) ? 0 : truncated;
+}
+
+/** 固定小數位並加千分位；數值先向零截斷，永不四捨五入。 */
+export function formatTruncatedDecimal(
+  value: number | null | undefined,
+  digits = 2,
+): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const truncated = truncateToDecimals(value, digits);
+  return truncated.toLocaleString('zh-TW', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
 /** 日期：`YYYY/M/D`（zh-TW 慣例）。輸入接受 ISO 字串或 Date。 */
 export function formatDate(input: string | Date | null | undefined): string {
   if (!input) return '—';

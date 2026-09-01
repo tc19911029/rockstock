@@ -13,7 +13,7 @@ import { ChartPracticeLedger } from '@/components/ChartPracticeLedger';
 import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
 import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatHoldingQty, marketFromSymbol, sharesToLots, unitLabelOf } from '@/lib/utils/shareUnits';
-import { formatPercent, bullBearClass } from '@/lib/format';
+import { formatPercent, formatTruncatedDecimal, bullBearClass } from '@/lib/format';
 import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
 import { isPlaceholderStockName, stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { QuoteFreshnessBadge } from '@/components/shared/QuoteFreshnessBadge';
@@ -55,6 +55,14 @@ function formatMoney(n: number) {
   if (abs >= 1e8) return `${(n / 1e8).toFixed(1)}億`;
   if (abs >= 1e4) return `${(n / 1e4).toFixed(1)}萬`;
   return n.toLocaleString('zh-TW', { maximumFractionDigits: 0 });
+}
+
+function formatPnL(n: number) {
+  return formatTruncatedDecimal(n);
+}
+
+function formatPnLPct(n: number) {
+  return `${n > 0 ? '+' : ''}${formatTruncatedDecimal(n)}%`;
 }
 
 /**
@@ -422,16 +430,16 @@ function SummaryRow({ label, summary, returnPct, currency }: { label?: string; s
         {label && <div className="text-[9px] text-sky-400 font-bold">{label}</div>}
         <div className="text-muted-foreground">今日損益</div>
         <div className={`font-mono font-bold text-xs ${summary.todayPnL >= 0 ? 'text-bull' : 'text-bear'}`}>
-          {summary.todayPnL >= 0 ? '+' : ''}{formatMoney(summary.todayPnL)}
+          {summary.todayPnL >= 0 ? '+' : ''}{formatPnL(summary.todayPnL)}
         </div>
       </div>
       <div className="bg-card py-1 px-1">
         <div className="text-muted-foreground">累積損益</div>
         <div className={`font-mono font-bold text-xs ${summary.totalPnL >= 0 ? 'text-bull' : 'text-bear'}`}>
-          {summary.totalPnL >= 0 ? '+' : ''}{formatMoney(summary.totalPnL)}
+          {summary.totalPnL >= 0 ? '+' : ''}{formatPnL(summary.totalPnL)}
         </div>
         <div className={`text-[9px] ${returnPct >= 0 ? 'text-bull/70' : 'text-bear/70'}`}>
-          {formatPercent(returnPct)}
+          {formatPnLPct(returnPct)}
         </div>
       </div>
       <div className="bg-card py-1 px-1">
@@ -565,15 +573,15 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
           <span className="text-[9px] text-muted-foreground">
             今日
             <span className={`ml-1 font-mono ${dailyPnL >= 0 ? 'text-bull' : 'text-bear'}`}>
-              {price?.loading ? '...' : dailyPnL !== 0 ? `${dailyPnL >= 0 ? '+' : ''}${formatMoney(dailyPnL)}` : '—'}
+              {price?.loading ? '...' : dailyPnL !== 0 ? `${dailyPnL >= 0 ? '+' : ''}${formatPnL(dailyPnL)}` : '—'}
             </span>
           </span>
           <span className="text-[9px] text-muted-foreground">
             累積
             {cur > 0 ? (
               <span className={`ml-1 font-mono font-bold ${pnl >= 0 ? 'text-bull' : 'text-bear'}`}>
-                {pnl >= 0 ? '+' : ''}{formatMoney(pnl)}
-                <span className="font-normal ml-1">({formatPercent(pnlPct, 1)})</span>
+                {pnl >= 0 ? '+' : ''}{formatPnL(pnl)}
+                <span className="font-normal ml-1">({formatPnLPct(pnlPct)})</span>
               </span>
             ) : <span className="ml-1 text-muted-foreground">—</span>}
           </span>

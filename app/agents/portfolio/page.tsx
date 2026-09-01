@@ -16,6 +16,7 @@ import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
 import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
+import { formatTruncatedDecimal } from '@/lib/format';
 import {
   managementStrategyLabel,
   resolveHoldingStrategyContext,
@@ -475,7 +476,7 @@ function HoldingCard({
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">損益</div>
           <div className={`font-mono font-semibold ${returnPct == null ? 'text-muted-foreground/50' : returnPct > 0 ? 'text-rose-400' : returnPct < 0 ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-            {returnPct == null ? '—' : `${returnPct > 0 ? '+' : ''}${returnPct.toFixed(2)}%`}
+            {returnPct == null ? '—' : `${returnPct > 0 ? '+' : ''}${formatTruncatedDecimal(returnPct)}%`}
           </div>
         </div>
         <div>

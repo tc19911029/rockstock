@@ -20,6 +20,12 @@ import Link from 'next/link';
 import { PageShell, PageHeader } from '@/components/shared';
 import { useTotalCapital, formatNT } from '@/lib/portfolio/useTotalCapital';
 import { stockDisplayName } from '@/lib/stocks/stockIdentity';
+import { formatTruncatedDecimal } from '@/lib/format';
+
+function formatPnL(amount: number): string {
+  const sign = amount > 0 ? '+' : amount < 0 ? '−' : '';
+  return `${sign}NT$${formatTruncatedDecimal(Math.abs(amount))}`;
+}
 
 interface Holding {
   symbol: string; name: string; market: 'TW' | 'CN';
@@ -187,8 +193,8 @@ export default function RiskDashboardPage() {
               />
               <BigStat
                 label="未實現損益"
-                value={formatNT(analysis.totalUnrealized)}
-                sub={`${(analysis.totalUnrealized / analysis.rows.reduce((s, r) => s + r.cost, 0) * 100).toFixed(2)}% 平均`}
+                value={formatPnL(analysis.totalUnrealized)}
+                sub={`${formatTruncatedDecimal(analysis.totalUnrealized / analysis.rows.reduce((s, r) => s + r.cost, 0) * 100)}% 平均`}
                 tone={analysis.totalUnrealized >= 0 ? 'green' : 'red'}
               />
               <BigStat
@@ -305,8 +311,8 @@ export default function RiskDashboardPage() {
                           <td className={`px-2 py-1.5 text-right font-mono ${
                             r.unrealizedPnL >= 0 ? 'text-bull' : 'text-bear'
                           }`}>
-                            {r.unrealizedPnL >= 0 ? '+' : ''}{formatNT(r.unrealizedPnL)}
-                            <span className="text-muted-foreground/70 ml-1 text-[10px]">({r.unrealizedPct.toFixed(1)}%)</span>
+                            {formatPnL(r.unrealizedPnL)}
+                            <span className="text-muted-foreground/70 ml-1 text-[10px]">({formatTruncatedDecimal(r.unrealizedPct)}%)</span>
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono">
                             {r.stopLoss ? formatNT(r.riskAmount) : '—'}

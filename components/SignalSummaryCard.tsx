@@ -72,6 +72,7 @@ import type { PatternSignal } from '@/lib/rules/winnerPatternRules';
 import { buildChartNarrative } from '@/lib/narrative/buildChartNarrative';
 import { evaluateHoldingDecision } from '@/lib/portfolio/evaluateHoldingDecision';
 import { resolveHoldingStrategyContext } from '@/lib/portfolio/holdingStrategyContext';
+import { formatTruncatedDecimal } from '@/lib/format';
 import type { NarrativeAction } from '@/lib/narrative/types';
 import ChartCoachAdvice from './ChartCoachAdvice';
 import KLineSignalAnalysisPanel from './KLineSignalAnalysisPanel';
@@ -543,7 +544,7 @@ export default function SignalSummaryCard() {
                   <span className="ml-1 text-foreground/80">{heldPosition.costPrice.toFixed(2)}</span>
                   {pnlPct != null && (
                     <span className={`ml-1.5 font-bold ${pnlPct >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                      {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+                      {pnlPct >= 0 ? '+' : ''}{formatTruncatedDecimal(pnlPct)}%
                     </span>
                   )}
                 </span>

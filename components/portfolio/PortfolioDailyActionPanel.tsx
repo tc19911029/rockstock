@@ -7,6 +7,7 @@ import type { HoldingAction } from '@/lib/agents/holdingsActionEngine';
 import { MarketRegimeFlag } from '@/components/MarketRegimeFlag';
 import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 import { stockDisplayName } from '@/lib/stocks/stockIdentity';
+import { formatTruncatedDecimal } from '@/lib/format';
 
 const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   stop_loss:   'bg-red-900/60 text-red-100 border-red-500',
@@ -23,13 +24,12 @@ const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
 function fmtCurrency(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   const sign = n >= 0 ? '+' : '−';
-  const abs = Math.abs(Math.round(n));
-  return `${sign}NT$${abs.toLocaleString()}`;
+  return `${sign}NT$${formatTruncatedDecimal(Math.abs(n))}`;
 }
 
 function fmtPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
-  return `${n >= 0 ? '+' : ''}${(n * 100).toFixed(1)}%`;
+  return `${n >= 0 ? '+' : ''}${formatTruncatedDecimal(n * 100)}%`;
 }
 
 export function PortfolioDailyActionPanel() {

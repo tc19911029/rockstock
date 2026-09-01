@@ -18,6 +18,12 @@ import { Button } from '@/components/ui/button';
 import { formatNT } from '@/lib/portfolio/useTotalCapital';
 import { gradeTrade, summarizeTradeGrades, TRADE_GRADE_LABEL } from '@/lib/portfolio/perfMetrics';
 import { stockDisplayName } from '@/lib/stocks/stockIdentity';
+import { formatTruncatedDecimal } from '@/lib/format';
+
+function formatPnL(amount: number): string {
+  const sign = amount > 0 ? '+' : amount < 0 ? '−' : '';
+  return `${sign}NT$${formatTruncatedDecimal(Math.abs(amount))}`;
+}
 
 interface ClosedTrade {
   tradeId: string;
@@ -128,7 +134,7 @@ export default function JournalPage() {
           <section className="grid grid-cols-2 md:grid-cols-5 gap-2">
             <StatCard label="累計" value={`${stats.total} 筆`} />
             <StatCard label="勝率" value={`${stats.winRate.toFixed(1)}%`} tone={stats.winRate >= 50 ? 'good' : 'warn'} />
-            <StatCard label="累計損益" value={formatNT(stats.totalPnL)} tone={stats.totalPnL >= 0 ? 'good' : 'bad'} />
+            <StatCard label="累計損益" value={formatPnL(stats.totalPnL)} tone={stats.totalPnL >= 0 ? 'good' : 'bad'} />
             <StatCard label="平均持有" value={`${stats.avgHold.toFixed(1)} 天`} />
             <StatCard label="盈虧比"
               value={stats.payoffRatio == null ? (stats.wins > 0 ? '∞' : '—') : stats.payoffRatio.toFixed(2)}
@@ -263,7 +269,7 @@ function TradeCard({ item, onSaved }: { item: ItemJoin; onSaved: () => void }) {
           <span className={`mr-2 px-1.5 py-0.5 rounded text-[10px] font-sans border ${
             gradeTrade(trade.netReturnPct) === 'big_loss' ? 'border-bear text-bear' : 'border-border text-muted-foreground'
           }`}>{TRADE_GRADE_LABEL[gradeTrade(trade.netReturnPct)]}</span>
-          {win ? '+' : ''}{formatNT(trade.netPnL)} ({trade.netReturnPct >= 0 ? '+' : ''}{trade.netReturnPct.toFixed(2)}%)
+          {formatPnL(trade.netPnL)} ({trade.netReturnPct >= 0 ? '+' : ''}{formatTruncatedDecimal(trade.netReturnPct)}%)
         </div>
       </header>
 

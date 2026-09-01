@@ -19,6 +19,7 @@ import { usePortfolioProfileStore } from '@/store/portfolioProfileStore';
 import type { MarginPressure } from '@/lib/chipcost/marginPressure';
 import { isTopPatternType } from '@/lib/analysis/patternCatalog';
 import { QuoteFreshnessBadge } from '@/components/shared/QuoteFreshnessBadge';
+import { formatTruncatedDecimal } from '@/lib/format';
 import {
   managementStrategyLabel,
   resolveHoldingStrategyContext,
@@ -418,8 +419,8 @@ export default function PortfolioPage() {
           h.costPrice.toFixed(4),
           h.buyDate,
           currentPrice > 0 ? currentPrice.toFixed(2) : '',
-          currentPrice > 0 ? pnl.toFixed(0) : '',
-          currentPrice > 0 ? pnlPct.toFixed(2) + '%' : '',
+          currentPrice > 0 ? formatTruncatedDecimal(pnl) : '',
+          currentPrice > 0 ? formatTruncatedDecimal(pnlPct) + '%' : '',
         ];
       }),
     ];
@@ -704,8 +705,8 @@ export default function PortfolioPage() {
                   {/* P&L */}
                   {currentPrice > 0 && (
                     <div className={`text-right shrink-0 text-xs font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
-                      <div>{pnlPos ? '+' : '-'}${Math.abs(pnl).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}</div>
-                      <div>{pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%</div>
+                      <div>{pnlPos ? '+' : '-'}${formatTruncatedDecimal(Math.abs(pnl))}</div>
+                      <div>{pnlPos ? '+' : ''}{formatTruncatedDecimal(pnlPct)}%</div>
                     </div>
                   )}
 
@@ -968,13 +969,13 @@ function MarketSummaryRow({ label, currency, summary, returnPct }:
         <div>
           <p className="text-[10px] text-muted-foreground mb-0.5">損益</p>
           <p className={`text-sm font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
-            {pnlPos ? '+' : '-'}{symbol}{Math.abs(summary.totalPnL).toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
+            {pnlPos ? '+' : '-'}{symbol}{formatTruncatedDecimal(Math.abs(summary.totalPnL))}
           </p>
         </div>
         <div>
           <p className="text-[10px] text-muted-foreground mb-0.5">報酬率</p>
           <p className={`text-sm font-bold font-mono ${returnPct >= 0 ? 'text-bull' : 'text-bear'}`}>
-            {returnPct >= 0 ? '+' : ''}{returnPct.toFixed(2)}%
+            {returnPct >= 0 ? '+' : ''}{formatTruncatedDecimal(returnPct)}%
           </p>
         </div>
       </div>
