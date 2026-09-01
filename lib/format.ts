@@ -43,7 +43,7 @@ export function truncateToDecimals(value: number, digits = 2): number {
 
   const factor = 10 ** digits;
   const scaled = value * factor;
-  const tolerance = Number.EPSILON * Math.max(1, Math.abs(scaled)) * 4;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(scaled)) * 8;
   const truncated = Math.trunc(scaled + Math.sign(scaled) * tolerance) / factor;
   return Object.is(truncated, -0) ? 0 : truncated;
 }

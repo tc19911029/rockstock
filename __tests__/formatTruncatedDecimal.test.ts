@@ -19,6 +19,7 @@ describe('投資損益與報酬的截斷格式', () => {
   test('不被浮點數的整數邊界誤差多截一分', () => {
     expect(formatTruncatedDecimal(1.15)).toBe('1.15');
     expect(formatTruncatedDecimal(-1.15)).toBe('-1.15');
+    expect(formatTruncatedDecimal(1874.9999999999977)).toBe('1,875.00');
   });
 
   test('非有限數使用缺值符號', () => {

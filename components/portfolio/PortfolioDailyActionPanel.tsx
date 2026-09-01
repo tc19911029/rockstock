@@ -21,10 +21,10 @@ const ACTION_CLASS: Record<HoldingAction | 'no_data', string> = {
   no_data:     'bg-secondary text-muted-foreground border-border',
 };
 
-function fmtCurrency(n: number | null | undefined): string {
+function fmtCurrency(n: number | null | undefined, currency: 'TWD' | 'CNY'): string {
   if (n == null || !Number.isFinite(n)) return '—';
   const sign = n >= 0 ? '+' : '−';
-  return `${sign}NT$${formatTruncatedDecimal(Math.abs(n))}`;
+  return `${sign}${currency === 'CNY' ? '¥' : 'NT$'}${formatTruncatedDecimal(Math.abs(n))}`;
 }
 
 function fmtPct(n: number | null | undefined): string {
@@ -87,7 +87,12 @@ export function PortfolioDailyActionPanel() {
           <MarketRegimeFlag regime={data.marketRegime} size="xs" />
         </div>
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <span>帳上 <span className={`font-mono font-bold ${data.totalUnrealized >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{fmtCurrency(data.totalUnrealized)}</span></span>
+          {(['TWD', 'CNY'] as const).map(currency => {
+            const amount = data.totalUnrealizedByCurrency[currency];
+            return amount == null ? null : (
+              <span key={currency}>未實現 <span className={`font-mono font-bold ${amount >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{fmtCurrency(amount, currency)}</span></span>
+            );
+          })}
           <button type="button" onClick={fetchData} className="text-sky-400 hover:underline" title="重新抓即時報價">↻</button>
         </div>
       </div>
@@ -113,7 +118,7 @@ export function PortfolioDailyActionPanel() {
 
 function DailyActionRow({ item }: { item: DailyActionItem }) {
   const cls = ACTION_CLASS[item.action];
-  const isProfit = (item.profitPct ?? 0) >= 0;
+  const isProfit = (item.unrealizedAmount ?? 0) >= 0;
   const activeProfileId = usePortfolioProfileStore(s => s.activeProfileId);
   const [saving, setSaving] = useState<'partial' | 'stop' | null>(null);
 
@@ -189,11 +194,11 @@ function DailyActionRow({ item }: { item: DailyActionItem }) {
         <span className="text-[11px] font-mono">
           today <span className="text-foreground font-bold">{item.todayClose?.toFixed(2) ?? '—'}</span>
         </span>
-        <span className={`text-[11px] font-mono font-bold ${isProfit ? 'text-emerald-300' : 'text-rose-300'}`} title="總報酬（買進至今未實現），非今日漲跌幅">
-          總 {fmtPct(item.profitPct)}
+        <span className={`text-[11px] font-mono font-bold ${item.accountingReturnPct == null ? 'text-muted-foreground' : isProfit ? 'text-emerald-300' : 'text-rose-300'}`} title="目前持倉的含費未實現報酬率；零成本部位不可計算百分比">
+          未實現 {fmtPct(item.accountingReturnPct)}
         </span>
         <span className={`text-[10px] font-mono ${isProfit ? 'text-emerald-400/70' : 'text-rose-400/70'}`}>
-          {fmtCurrency(item.unrealizedAmount)}
+          {fmtCurrency(item.unrealizedAmount, item.currency)}
         </span>
       </div>
 

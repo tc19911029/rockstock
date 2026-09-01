@@ -17,6 +17,7 @@ import { formatPercent, formatTruncatedDecimal, bullBearClass } from '@/lib/form
 import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
 import { isPlaceholderStockName, stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { QuoteFreshnessBadge } from '@/components/shared/QuoteFreshnessBadge';
+import { calculateUnrealizedSummary } from '@/lib/portfolio/unrealizedSummary';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -288,35 +289,25 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
   // ── Portfolio summary ──────────────────────────────────────────────────────
 
   function calcSummary(list: typeof holdings) {
-    return list.reduce(
-      (acc, h) => {
-        const p = prices[h.symbol];
-        const cur = p?.price ?? 0;
-        const costVal = h.shares * h.costPrice;
-        const mktVal = cur > 0 ? h.shares * cur : costVal;
-        const dailyChange = p?.stale ? 0 : dayPnL(h.shares, cur, p?.changePercent ?? 0);
-        const { pnl } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
-        acc.totalCost += costVal;
-        acc.totalValue += mktVal;
-        acc.totalPnL += pnl;
-        acc.todayPnL += dailyChange;
-        return acc;
-      },
-      { totalCost: 0, totalValue: 0, totalPnL: 0, todayPnL: 0 },
-    );
+    const unrealized = calculateUnrealizedSummary(list, symbol => prices[symbol]?.price);
+    const todayPnL = list.reduce((sum, h) => {
+      const p = prices[h.symbol];
+      return sum + (p?.stale ? 0 : dayPnL(h.shares, p?.price ?? 0, p?.changePercent ?? 0));
+    }, 0);
+    return { ...unrealized, todayPnL };
   }
 
   const filteredHoldings = filterByMarket(holdings, marketTab);
   const filteredWatchlist = filterByMarket(watchlist, marketTab);
 
   const filteredSummary = calcSummary(filteredHoldings);
-  const filteredReturnPct = filteredSummary.totalCost > 0 ? (filteredSummary.totalPnL / filteredSummary.totalCost) * 100 : 0;
+  const filteredReturnPct = filteredSummary.returnPct;
 
   // 分市場 summary（全部 tab 時顯示 TWD / CNY 分開）
   const twSummary = calcSummary(filterByMarket(filteredHoldings, 'TW'));
   const cnSummary = calcSummary(filterByMarket(filteredHoldings, 'CN'));
-  const twReturnPct = twSummary.totalCost > 0 ? (twSummary.totalPnL / twSummary.totalCost) * 100 : 0;
-  const cnReturnPct = cnSummary.totalCost > 0 ? (cnSummary.totalPnL / cnSummary.totalCost) * 100 : 0;
+  const twReturnPct = twSummary.returnPct;
+  const cnReturnPct = cnSummary.returnPct;
 
   const itemCount = tab === 'watchlist' ? filteredWatchlist.length : filteredHoldings.length;
 
@@ -408,22 +399,29 @@ export default function BottomPanel({ onSelectHolding }: BottomPanelProps = {}) 
 
 // ── Portfolio Sub-component ──────────────────────────────────────────────────
 
-type SummaryData = { totalCost: number; totalValue: number; totalPnL: number; todayPnL: number };
+type SummaryData = {
+  totalCost: number;
+  totalValue: number;
+  totalPnL: number;
+  todayPnL: number;
+  missingPriceCount: number;
+  hasZeroCostHolding: boolean;
+};
 
 interface PortfolioContentProps {
   holdings: ReturnType<typeof usePortfolioStore.getState>['holdings'];
   prices: Record<string, PriceInfo>;
   summary: SummaryData;
-  totalReturnPct: number;
+  totalReturnPct: number | null;
   marketTab: MarketTab;
   twSummary: SummaryData;
   cnSummary: SummaryData;
-  twReturnPct: number;
-  cnReturnPct: number;
+  twReturnPct: number | null;
+  cnReturnPct: number | null;
   onSelectHolding?: () => void;
 }
 
-function SummaryRow({ label, summary, returnPct, currency }: { label?: string; summary: SummaryData; returnPct: number; currency: string }) {
+function SummaryRow({ label, summary, returnPct, currency }: { label?: string; summary: SummaryData; returnPct: number | null; currency: string }) {
   return (
     <div className="grid grid-cols-3 gap-px bg-muted text-center text-[10px]">
       <div className="bg-card py-1 px-1">
@@ -434,18 +432,20 @@ function SummaryRow({ label, summary, returnPct, currency }: { label?: string; s
         </div>
       </div>
       <div className="bg-card py-1 px-1">
-        <div className="text-muted-foreground">累積損益</div>
+        <div className="text-muted-foreground">未實現損益</div>
         <div className={`font-mono font-bold text-xs ${summary.totalPnL >= 0 ? 'text-bull' : 'text-bear'}`}>
           {summary.totalPnL >= 0 ? '+' : ''}{formatPnL(summary.totalPnL)}
         </div>
-        <div className={`text-[9px] ${returnPct >= 0 ? 'text-bull/70' : 'text-bear/70'}`}>
-          {formatPnLPct(returnPct)}
+        <div className={`text-[9px] ${returnPct == null ? 'text-muted-foreground' : returnPct >= 0 ? 'text-bull/70' : 'text-bear/70'}`}>
+          {returnPct == null ? '報酬率 —' : formatPnLPct(returnPct)}
         </div>
+        {summary.hasZeroCostHolding && <div className="text-[9px] text-muted-foreground">含零成本部位</div>}
       </div>
       <div className="bg-card py-1 px-1">
         <div className="text-muted-foreground">市值 <span className="text-[9px] text-muted-foreground/60">{currency}</span></div>
         <div className="font-mono font-bold text-xs text-foreground">{formatMoney(summary.totalValue)}</div>
         <div className="text-[9px] text-muted-foreground">成本 {formatMoney(summary.totalCost)}</div>
+        {summary.missingPriceCount > 0 && <div className="text-[9px] text-amber-400">缺 {summary.missingPriceCount} 筆報價</div>}
       </div>
     </div>
   );
@@ -568,7 +568,7 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
           </div>
         </div>
 
-        {/* Row 2: 今日損益 ── 累積損益 */}
+        {/* Row 2: 今日損益 ── 未實現損益 */}
         <div className="flex items-baseline justify-between mt-0.5">
           <span className="text-[9px] text-muted-foreground">
             今日
@@ -577,11 +577,11 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
             </span>
           </span>
           <span className="text-[9px] text-muted-foreground">
-            累積
+            未實現
             {cur > 0 ? (
               <span className={`ml-1 font-mono font-bold ${pnl >= 0 ? 'text-bull' : 'text-bear'}`}>
                 {pnl >= 0 ? '+' : ''}{formatPnL(pnl)}
-                <span className="font-normal ml-1">({formatPnLPct(pnlPct)})</span>
+                <span className="font-normal ml-1">({h.costPrice > 0 ? formatPnLPct(pnlPct) : '報酬率 —'})</span>
               </span>
             ) : <span className="ml-1 text-muted-foreground">—</span>}
           </span>

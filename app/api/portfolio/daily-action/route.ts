@@ -37,6 +37,7 @@ import {
   PARTIAL_EXIT_SIGNAL_TYPE_SET,
   partialExitForSignal,
 } from '@/lib/portfolio/holdingExecution';
+import { calcNetPnL } from '@/lib/portfolio/fees';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,6 +46,7 @@ export interface DailyActionItem {
   symbol: string;
   name: string;
   market: string;
+  currency: 'TWD' | 'CNY';
   entryDate: string;
   entryPrice: number;
   /** 技術規則使用的正參考價；帳務 entryPrice=0（配股）時與帳務成本分離。 */
@@ -61,6 +63,8 @@ export interface DailyActionItem {
   todayClose: number | null;
   asOfDate: string | null;
   unrealizedAmount: number | null;
+  /** 帳務未實現報酬率；零成本部位沒有合法分母，故為 null。 */
+  accountingReturnPct: number | null;
   action: HoldingActionResult['action'] | 'no_data';
   label: string;
   signals: HoldingActionResult['signals'];
@@ -87,7 +91,8 @@ export interface DailyActionResponse {
   generatedAt: string;
   date: string;
   marketRegime: RegimeDetectResult;
-  totalUnrealized: number;
+  /** 目前持倉未實現損益按幣別分開，絕不把 TWD/CNY 直接相加。 */
+  totalUnrealizedByCurrency: Partial<Record<'TWD' | 'CNY', number>>;
   items: DailyActionItem[];
 }
 
@@ -137,10 +142,11 @@ export async function GET(req: NextRequest) {
         const operationMode: OperationMode | undefined = h.ui?.operationMode === 'long' || h.ui?.operationMode === 'short'
           ? h.ui.operationMode
           : undefined;
-        const base: Omit<DailyActionItem, 'todayClose' | 'asOfDate' | 'unrealizedAmount' | 'action' | 'label' | 'signals' | 'profitPct' | 'suggestedStop' | 'metrics'> = {
+        const base: Omit<DailyActionItem, 'todayClose' | 'asOfDate' | 'unrealizedAmount' | 'accountingReturnPct' | 'action' | 'label' | 'signals' | 'profitPct' | 'suggestedStop' | 'metrics'> = {
           symbol: h.symbol,
           name: h.name,
           market: h.market,
+          currency: mkt === 'CN' ? 'CNY' : 'TWD',
           entryDate: h.entryDate,
           entryPrice: h.entryPrice,
           stopLoss: configuredStopLoss ?? (hasAccountingEntryPrice ? fallbackHoldingStop(h.entryPrice, positionSide) : 0),
@@ -158,7 +164,7 @@ export async function GET(req: NextRequest) {
         if (!candles || candles.length === 0) {
           return {
             ...base,
-            todayClose: null, asOfDate: null, unrealizedAmount: null,
+            todayClose: null, asOfDate: null, unrealizedAmount: null, accountingReturnPct: null,
             action: 'no_data', label: '⚠ 無 K 線',
             signals: [], profitPct: null, suggestedStop: null, metrics: null,
           };
@@ -173,6 +179,7 @@ export async function GET(req: NextRequest) {
             todayClose,
             asOfDate: lastCandle.date,
             unrealizedAmount: null,
+            accountingReturnPct: null,
             action: 'no_data',
             label: '⚠ 缺策略參考價',
             signals: [{
@@ -340,6 +347,12 @@ export async function GET(req: NextRequest) {
           detail: `${reason}。這是 position_exit_warning，與選股 selection_reject 分開記錄；請依實際操作模式確認是否退出。`,
         }));
         const signals = [...eliminationSignals, ...disciplineSignals, ...(ch11ClimbExitAdvisory ? [ch11ClimbExitAdvisory] : []), ...(srNoRegainAdvisory ? [srNoRegainAdvisory] : []), ...(fromEntryAdvisory ? [fromEntryAdvisory] : []), ...result.signals];
+        const accounting = positionSide === 'short'
+          ? {
+              pnl: (h.entryPrice - todayClose) * h.shares,
+              pnlPct: h.entryPrice > 0 ? (h.entryPrice - todayClose) / h.entryPrice * 100 : 0,
+            }
+          : calcNetPnL(h.symbol, h.shares, h.entryPrice, todayClose);
         return {
           ...base,
           stopLoss,
@@ -350,10 +363,9 @@ export async function GET(req: NextRequest) {
           strategyReferencePrice,
           todayClose,
           asOfDate: lastCandle.date,
-          // 賠少-1：做空未實現損益反向（放空後下跌才賺）；做多 / 缺省維持原算式。
-          unrealizedAmount: positionSide === 'short'
-            ? (h.entryPrice - todayClose) * h.shares
-            : (todayClose - h.entryPrice) * h.shares,
+          // 與投資組合摘要同一含費口徑；做空仍維持原本反向毛額模型。
+          unrealizedAmount: accounting.pnl,
+          accountingReturnPct: h.entryPrice > 0 ? accounting.pnlPct / 100 : null,
           action: result.action,
           label: result.label,
           signals,
@@ -371,13 +383,17 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-    const totalUnrealized = items.reduce((sum, it) => sum + (it.unrealizedAmount ?? 0), 0);
+    const totalUnrealizedByCurrency = items.reduce<Partial<Record<'TWD' | 'CNY', number>>>((totals, item) => {
+      if (item.unrealizedAmount == null) return totals;
+      totals[item.currency] = (totals[item.currency] ?? 0) + item.unrealizedAmount;
+      return totals;
+    }, {});
 
     return apiOk<DailyActionResponse>({
       generatedAt: new Date().toISOString(),
       date: today,
       marketRegime,
-      totalUnrealized,
+      totalUnrealizedByCurrency,
       items,
     });
   } catch (err) {

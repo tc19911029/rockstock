@@ -20,6 +20,7 @@ import type { MarginPressure } from '@/lib/chipcost/marginPressure';
 import { isTopPatternType } from '@/lib/analysis/patternCatalog';
 import { QuoteFreshnessBadge } from '@/components/shared/QuoteFreshnessBadge';
 import { formatTruncatedDecimal } from '@/lib/format';
+import { calculateUnrealizedSummary } from '@/lib/portfolio/unrealizedSummary';
 import {
   managementStrategyLabel,
   resolveHoldingStrategyContext,
@@ -382,27 +383,17 @@ export default function PortfolioPage() {
     }
   }
 
-  // Portfolio summary — 台股 (TWD) 與陸股 (CNY) 分開，各自扣本市場手續費+稅
+  // 只彙總目前持倉的未實現損益；不讀取任何已賣出交易。
   function calcSummary(list: typeof holdings) {
-    return list.reduce((acc, h) => {
-      const p = prices[h.symbol];
-      const currentPrice = p?.price ?? 0;
-      const currentValue = h.shares * currentPrice;
-      const costValue = h.shares * h.costPrice;
-      const { pnl } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice);
-      acc.totalCost += costValue;
-      acc.totalValue += currentPrice > 0 ? currentValue : costValue;
-      acc.totalPnL += pnl;
-      return acc;
-    }, { totalCost: 0, totalValue: 0, totalPnL: 0 });
+    return calculateUnrealizedSummary(list, symbol => prices[symbol]?.price);
   }
 
   const twHoldings = holdings.filter(h => classifyMarket(h.symbol) === 'TW');
   const cnHoldings = holdings.filter(h => classifyMarket(h.symbol) === 'CN');
   const twSummary = calcSummary(twHoldings);
   const cnSummary = calcSummary(cnHoldings);
-  const twReturn = twSummary.totalCost > 0 ? (twSummary.totalPnL / twSummary.totalCost) * 100 : 0;
-  const cnReturn = cnSummary.totalCost > 0 ? (cnSummary.totalPnL / cnSummary.totalCost) * 100 : 0;
+  const twReturn = twSummary.returnPct;
+  const cnReturn = cnSummary.returnPct;
 
   function exportCSV() {
     if (holdings.length === 0) return;
@@ -420,7 +411,7 @@ export default function PortfolioPage() {
           h.buyDate,
           currentPrice > 0 ? currentPrice.toFixed(2) : '',
           currentPrice > 0 ? formatTruncatedDecimal(pnl) : '',
-          currentPrice > 0 ? formatTruncatedDecimal(pnlPct) + '%' : '',
+          currentPrice > 0 && h.costPrice > 0 ? formatTruncatedDecimal(pnlPct) + '%' : '',
         ];
       }),
     ];
@@ -486,7 +477,7 @@ export default function PortfolioPage() {
         {/* 📐 紀律影子帳本（A2 2026-06-12）— 書本規則嚴格執行版 vs 實際抱單的差額 */}
         <DisciplineShadowCard />
 
-        {/* Summary — TWD / CNY 分開顯示，損益已扣買賣手續費+交易稅 */}
+        {/* Summary — TWD / CNY 分開顯示，只含目前持倉的未實現損益 */}
         {holdings.length > 0 && (
           <div className="space-y-3">
             {twHoldings.length > 0 && (
@@ -496,7 +487,7 @@ export default function PortfolioPage() {
               <MarketSummaryRow label="陸股" currency="CNY" summary={cnSummary} returnPct={cnReturn} />
             )}
             <p className="text-[9px] text-muted-foreground/60 text-center">
-              損益已扣手續費+交易稅（台股 0.1425%×2 + 0.3% / 陸股 0.03%×2 + 0.05%）
+              只含目前持倉，不含已賣出；未實現損益已扣預估買賣費稅
             </p>
           </div>
         )}
@@ -706,7 +697,7 @@ export default function PortfolioPage() {
                   {currentPrice > 0 && (
                     <div className={`text-right shrink-0 text-xs font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
                       <div>{pnlPos ? '+' : '-'}${formatTruncatedDecimal(Math.abs(pnl))}</div>
-                      <div>{pnlPos ? '+' : ''}{formatTruncatedDecimal(pnlPct)}%</div>
+                      <div>{h.costPrice > 0 ? `${pnlPos ? '+' : ''}${formatTruncatedDecimal(pnlPct)}%` : '報酬率 —'}</div>
                     </div>
                   )}
 
@@ -747,7 +738,13 @@ export default function PortfolioPage() {
   );
 }
 
-interface SummaryData { totalCost: number; totalValue: number; totalPnL: number }
+interface SummaryData {
+  totalCost: number;
+  totalValue: number;
+  totalPnL: number;
+  missingPriceCount: number;
+  hasZeroCostHolding: boolean;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // 融資追繳壓力（估算，純顯示層，不進選股）
@@ -950,7 +947,7 @@ function BatchAnalyzeButton({ holdings }: { holdings: Array<{ symbol: string }> 
 }
 
 function MarketSummaryRow({ label, currency, summary, returnPct }:
-  { label: string; currency: 'TWD' | 'CNY'; summary: SummaryData; returnPct: number }) {
+  { label: string; currency: 'TWD' | 'CNY'; summary: SummaryData; returnPct: number | null }) {
   const symbol = currency === 'TWD' ? 'NT$' : '¥';
   const pnlPos = summary.totalPnL >= 0;
   return (
@@ -967,16 +964,18 @@ function MarketSummaryRow({ label, currency, summary, returnPct }:
           </p>
         </div>
         <div>
-          <p className="text-[10px] text-muted-foreground mb-0.5">損益</p>
+          <p className="text-[10px] text-muted-foreground mb-0.5">未實現損益</p>
           <p className={`text-sm font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
             {pnlPos ? '+' : '-'}{symbol}{formatTruncatedDecimal(Math.abs(summary.totalPnL))}
           </p>
         </div>
         <div>
           <p className="text-[10px] text-muted-foreground mb-0.5">報酬率</p>
-          <p className={`text-sm font-bold font-mono ${returnPct >= 0 ? 'text-bull' : 'text-bear'}`}>
-            {returnPct >= 0 ? '+' : ''}{formatTruncatedDecimal(returnPct)}%
+          <p className={`text-sm font-bold font-mono ${returnPct == null ? 'text-muted-foreground' : returnPct >= 0 ? 'text-bull' : 'text-bear'}`}>
+            {returnPct == null ? '—' : `${returnPct >= 0 ? '+' : ''}${formatTruncatedDecimal(returnPct)}%`}
           </p>
+          {summary.hasZeroCostHolding && <p className="text-[9px] text-muted-foreground">含零成本部位</p>}
+          {summary.missingPriceCount > 0 && <p className="text-[9px] text-amber-400">缺 {summary.missingPriceCount} 筆報價</p>}
         </div>
       </div>
     </div>
