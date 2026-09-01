@@ -19,6 +19,8 @@ export interface PortfolioHolding {
   shares: number;
   /** 用戶實際進場成本價（議題 92：用戶實際買進價 = entryPrice）*/
   costPrice: number;
+  /** 券商顯示的投入成本（已含實際買進費用）；缺值時才由均價估算。 */
+  investedCost?: number;
   buyDate: string;
   /** 市場（舊資料缺值時預設視為 TW） */
   market?: MarketId;

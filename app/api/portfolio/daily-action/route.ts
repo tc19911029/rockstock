@@ -352,7 +352,13 @@ export async function GET(req: NextRequest) {
               pnl: (h.entryPrice - todayClose) * h.shares,
               pnlPct: h.entryPrice > 0 ? (h.entryPrice - todayClose) / h.entryPrice * 100 : 0,
             }
-          : calcNetPnL(h.symbol, h.shares, h.entryPrice, todayClose);
+          : calcNetPnL(
+              h.symbol,
+              h.shares,
+              h.entryPrice,
+              todayClose,
+              typeof h.ui?.investedCost === 'number' ? h.ui.investedCost : undefined,
+            );
         return {
           ...base,
           stopLoss,

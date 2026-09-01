@@ -90,6 +90,19 @@ describe('mapStoreToServerHolding', () => {
     expect(r.reason).toContain('costPrice');
   });
 
+  test('零成本配股可同步，且不偽造 0 元停損價', () => {
+    const r = mapStoreToServerHolding(makeHolding({
+      symbol: '2330.TW',
+      name: '台積電',
+      shares: 18,
+      costPrice: 0,
+      investedCost: 0,
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.payload?.entryPrice).toBe(0);
+    expect(r.payload?.stopLoss).toBeUndefined();
+  });
+
   test('buyDate 格式錯 → reject', () => {
     const r = mapStoreToServerHolding(makeHolding({ buyDate: '5/20/2026' }));
     expect(r.ok).toBe(false);
@@ -305,6 +318,15 @@ describe('toFullUpsertApiBody (全保真：核心欄位 + ui blob)', () => {
     expect(body.ui).toBeUndefined();
   });
 
+  test('券商實際投入成本保留在 ui blob', () => {
+    const body = toFullUpsertApiBody({
+      ...makeHolding({ symbol: '2330.TW', name: '台積電', shares: 18, costPrice: 0, investedCost: 0 }),
+    })!;
+    expect(body.entryPrice).toBe(0);
+    expect(body.stopLoss).toBeUndefined();
+    expect(body.ui).toMatchObject({ investedCost: 0 });
+  });
+
   test('缺核心欄位（costPrice 無效）→ 回 null', () => {
     expect(toFullUpsertApiBody({ ...makeHolding({ costPrice: -1 }) })).toBeNull();
   });
@@ -339,6 +361,15 @@ describe('mapServerToStoreHolding (hydration：server → store)', () => {
     })! as Record<string, unknown>;
     expect(s.triggerPrice).toBe(200);
     expect(s.operationMode).toBe('short');
+  });
+
+  test('券商實際投入成本從 ui blob hydration 回頂層', () => {
+    const s = mapServerToStoreHolding({
+      symbol: '2330.TW', name: '台積電', entryPrice: 0, shares: 18,
+      entryDate: '2026-09-01', ui: { investedCost: 0 },
+    })!;
+    expect(s.costPrice).toBe(0);
+    expect(s.investedCost).toBe(0);
   });
 
   test('核心欄位覆蓋 ui 同名欄位（ui 不可污染核心）', () => {

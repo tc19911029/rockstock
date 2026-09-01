@@ -9,7 +9,7 @@
  *
  * 邊界：
  *   - market 缺失（舊資料）→ 從 symbol 後綴推導
- *   - stopLoss 缺失 → 預設短線 5%（與 holdingsImport 一致；daily-action 再依進場字母重算）
+ *   - stopLoss 缺失 → 有成本部位預設短線 5%；零成本配股不偽造停損價
  *   - industry / target1 / target2 → UI 端沒存，server 端標 undefined
  *
  * 反向不需要做：server → UI 同步不在 Phase 0.4 範圍（UI 是事實源）
@@ -30,6 +30,7 @@ export interface StorePortfolioHolding {
   name: string;
   shares: number;
   costPrice: number;
+  investedCost?: number;
   buyDate: string;
   market?: MarketId;
   notes?: string;
@@ -68,7 +69,7 @@ export interface MappingResult {
  * Zustand holding → server payload（純函式）
  *
  * 驗證失敗：缺 symbol / shares / costPrice / buyDate → ok=false
- * 容錯：market 缺失走 marketFromSymbol；stopLoss 缺失走最新課程短線 5%
+ * 容錯：market 缺失走 marketFromSymbol；正成本部位的 stopLoss 缺失走最新課程短線 5%
  */
 export function mapStoreToServerHolding(h: StorePortfolioHolding): MappingResult {
   if (!h.symbol || !/^[A-Za-z0-9._-]+$/.test(h.symbol)) {
@@ -80,8 +81,8 @@ export function mapStoreToServerHolding(h: StorePortfolioHolding): MappingResult
   if (!Number.isFinite(h.shares) || h.shares <= 0 || !Number.isInteger(h.shares)) {
     return { ok: false, reason: `shares 必須為正整數 (got ${h.shares})` };
   }
-  if (!Number.isFinite(h.costPrice) || h.costPrice <= 0) {
-    return { ok: false, reason: `costPrice 必須為正數 (got ${h.costPrice})` };
+  if (!Number.isFinite(h.costPrice) || h.costPrice < 0) {
+    return { ok: false, reason: `costPrice 必須為非負數 (got ${h.costPrice})` };
   }
   if (!h.buyDate || !/^\d{4}-\d{2}-\d{2}$/.test(h.buyDate)) {
     return { ok: false, reason: `buyDate 格式錯，應為 YYYY-MM-DD (got ${h.buyDate})` };
@@ -102,9 +103,11 @@ export function mapStoreToServerHolding(h: StorePortfolioHolding): MappingResult
       entryPrice: h.costPrice,
       shares: h.shares,
       // server 既有停損不可在每次同步時被重設；舊資料缺值才套用短線 5% 預設。
-      stopLoss: Number.isFinite(h.stopLoss) && h.stopLoss! > 0
-        ? h.stopLoss
-        : +(h.costPrice * (1 - STOP_LOSS_DEFAULT_PCT)).toFixed(2),
+      ...(Number.isFinite(h.stopLoss) && h.stopLoss! > 0
+        ? { stopLoss: h.stopLoss }
+        : h.costPrice > 0
+          ? { stopLoss: +(h.costPrice * (1 - STOP_LOSS_DEFAULT_PCT)).toFixed(2) }
+          : {}),
       // target1/target2/industry UI 端沒存
       notes: h.notes,
     },
@@ -123,7 +126,7 @@ export function mapStoreHoldingsToImportRows(
 ): {
   rows: Array<{
     symbol: string; name: string; shares: number; avgCost: number;
-    entryDate: string; stopLoss: number; notes?: string;
+    entryDate: string; stopLoss?: number; notes?: string;
     triggerSignal?: string; operationMode?: 'short' | 'long';
     managementStrategy?: 'kline' | 'short-ma' | 'ma20' | 'triple-ma';
   }>;
@@ -150,7 +153,7 @@ export function mapStoreHoldingsToImportRows(
       shares: r.payload.shares,
       avgCost: r.payload.entryPrice,
       entryDate: r.payload.entryDate,
-      stopLoss: r.payload.stopLoss!,
+      ...(r.payload.stopLoss != null ? { stopLoss: r.payload.stopLoss } : {}),
       ...(r.payload.notes ? { notes: r.payload.notes } : {}),
       ...(h.triggerSignal ? { triggerSignal: h.triggerSignal } : {}),
       ...(h.operationMode ? { operationMode: h.operationMode } : {}),

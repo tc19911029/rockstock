@@ -1,9 +1,11 @@
-import { calcNetPnL } from '@/lib/portfolio/fees';
+import { calcInvestedCost, calcNetPnL } from '@/lib/portfolio/fees';
 
 export interface UnrealizedHoldingInput {
   symbol: string;
   shares: number;
   costPrice: number;
+  /** 券商「投入成本」（含實際買進手續費／拆單最低費），有值時優先於均價估算。 */
+  investedCost?: number;
 }
 
 export interface UnrealizedSummary {
@@ -34,7 +36,12 @@ export function calculateUnrealizedSummary(
   let hasZeroCostHolding = false;
 
   for (const holding of holdings) {
-    const cost = holding.shares * holding.costPrice;
+    const cost = calcInvestedCost(
+      holding.symbol,
+      holding.shares,
+      holding.costPrice,
+      holding.investedCost,
+    );
     totalCost += cost;
     if (holding.costPrice <= 0) hasZeroCostHolding = true;
 
@@ -51,6 +58,7 @@ export function calculateUnrealizedSummary(
       holding.shares,
       holding.costPrice,
       currentPrice,
+      holding.investedCost,
     ).pnl;
   }
 

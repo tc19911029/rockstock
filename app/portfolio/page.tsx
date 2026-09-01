@@ -301,8 +301,8 @@ export default function PortfolioPage() {
   async function handleAdd() {
     const shares = Number(form.shares);
     const costPrice = Number(form.costPrice);
-    if (!form.symbol.trim() || !Number.isFinite(shares) || shares <= 0 || !Number.isFinite(costPrice) || costPrice <= 0) {
-      setFormError('請輸入股票代號，以及大於 0 的持股數與成本價。');
+    if (!form.symbol.trim() || !Number.isFinite(shares) || shares <= 0 || !Number.isFinite(costPrice) || costPrice < 0) {
+      setFormError('請輸入股票代號與大於 0 的持股數；贈與或配股可填 0 成本。');
       return;
     }
     setFormError('');
@@ -398,16 +398,17 @@ export default function PortfolioPage() {
   function exportCSV() {
     if (holdings.length === 0) return;
     const rows = [
-      ['股票代號', '名稱', '股數', '成本價', '買入日期', '現價', '損益(元)', '損益(%)'],
+      ['股票代號', '名稱', '股數', '成本價', '投入成本', '買入日期', '現價', '未實現損益(元)', '報酬率(%)'],
       ...holdings.map(h => {
         const p = prices[h.symbol];
         const currentPrice = p?.price ?? 0;
-        const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice);
+        const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice, h.investedCost);
         return [
           h.symbol,
           h.name,
           h.shares,
           h.costPrice.toFixed(4),
+          h.investedCost != null ? formatTruncatedDecimal(h.investedCost) : '',
           h.buyDate,
           currentPrice > 0 ? currentPrice.toFixed(2) : '',
           currentPrice > 0 ? formatTruncatedDecimal(pnl) : '',
@@ -613,7 +614,7 @@ export default function PortfolioPage() {
 
             {formError && <p role="alert" className="text-sm text-red-400">{formError}</p>}
             <div className="flex gap-2">
-              <Button onClick={handleAdd} disabled={formLoading || !form.symbol || !form.shares || !form.costPrice}
+              <Button onClick={handleAdd} disabled={formLoading || !form.symbol || !form.shares || form.costPrice === ''}
                 className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 font-bold">
                 {formLoading ? '載入中...' : editId ? '儲存變更' : '確認新增'}
               </Button>
@@ -654,7 +655,7 @@ export default function PortfolioPage() {
           {holdings.map(h => {
             const p = prices[h.symbol];
             const currentPrice = p?.price ?? 0;
-            const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice);
+            const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, currentPrice, h.investedCost);
             const pnlPos = pnl >= 0;
             const strategyContext = resolveHoldingStrategyContext({
               triggerSignal: h.triggerSignal,
@@ -672,6 +673,7 @@ export default function PortfolioPage() {
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
                       {formatHoldingQty(h.shares, h.symbol)} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
+                      {h.investedCost != null && <> · 投入 <span className="font-mono">${formatTruncatedDecimal(h.investedCost)}</span></>}
                       · 買進 {h.buyDate}
                     </div>
                   </div>

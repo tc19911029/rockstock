@@ -11,7 +11,7 @@ import { useReplayStore } from '@/store/replayStore';
 import { type MarketTab, filterByMarket, classifyMarket, isFundSymbol } from '@/lib/market/classify';
 import { ChartPracticeLedger } from '@/components/ChartPracticeLedger';
 import { PortfolioProfileSwitcher } from '@/components/portfolio/PortfolioProfileSwitcher';
-import { calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
+import { calcInvestedCost, calcNetPnL, formatPrice } from '@/lib/portfolio/fees';
 import { formatHoldingQty, marketFromSymbol, sharesToLots, unitLabelOf } from '@/lib/utils/shareUnits';
 import { formatPercent, formatTruncatedDecimal, bullBearClass } from '@/lib/format';
 import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
@@ -526,12 +526,12 @@ function HoldingRow({ h, price, onSelectHolding, onEdit, onDelete }: {
   onDelete: () => void;
 }) {
   const cur = price?.price ?? 0;
-  const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur);
+  const { pnl, pnlPct } = calcNetPnL(h.symbol, h.shares, h.costPrice, cur, h.investedCost);
   const dailyPnL = price?.stale ? 0 : dayPnL(h.shares, cur, price?.changePercent ?? 0);
   // 陸股股價一律顯示小數點兩位；台股維持 ≥100 取整、<100 兩位
   const isCN = classifyMarket(h.symbol) === 'CN';
   // 本金（成本）= 股數 × 均價；現值（市值）= 股數 × 現價（shares 為股、價為每股，直接相乘）
-  const costTotal = h.shares * h.costPrice;
+  const costTotal = calcInvestedCost(h.symbol, h.shares, h.costPrice, h.investedCost);
   const marketTotal = cur > 0 ? h.shares * cur : 0;
 
   return (

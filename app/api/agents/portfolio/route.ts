@@ -49,7 +49,8 @@ const upsertSchema = z.object({
   market: z.enum(['TW', 'CN']),
   industry: z.string().optional(),
   entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  entryPrice: z.coerce.number().positive(),
+  // 允許贈與／配股等券商成本為 0 的持倉；負成本仍拒絕。
+  entryPrice: z.coerce.number().nonnegative(),
   shares: z.coerce.number().int().positive(),
   entryDecisionRunId: z.string().optional(),
   stopLoss: z.coerce.number().positive().optional(),
