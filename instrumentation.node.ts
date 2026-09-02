@@ -673,18 +673,18 @@ export async function register() {
     scanPostCloseDaily('CN').catch(err => console.error('[local-cron] CN scan post_close:', err));
   }, 60 * 1000);
 
-  // ── 即時分鐘 K 爆量警示 (/realtime + ntfy)：每 30 秒 ──
+  // ── 即時分鐘 K 爆量警示 (/realtime + ntfy)：每 10 秒 ──
   // route 內部判斷盤中時段 + 守門，盤外直接 return skip。
   // 第一次被呼叫時 lazy 跑 restoreFromDisk + startFlushLoop。
   const runRealtimeScan = () => {
-    callRoute('/api/cron/realtime-scan', 'realtime-scan', { timeoutMs: 25_000 }).catch(err =>
+    callRoute('/api/cron/realtime-scan', 'realtime-scan', { timeoutMs: 15_000 }).catch(err =>
       console.error('[local-cron] realtime-scan:', err),
     );
   };
-  // 與 5 分鐘 L2 tick 錯開 15 秒；single-flight 再保證慢輪不會每 30 秒堆一條連線。
+  // 與 L2 tick 錯開；single-flight 保證 backfill / 驗證慢輪不會堆連線。
   setTimeout(() => {
     runRealtimeScan();
-    setInterval(runRealtimeScan, 30 * 1000);
+    setInterval(runRealtimeScan, 10 * 1000);
   }, 15_000);
 
   // ── 三色資金買賣推播 (/api/cron/sanse-notify → ntfy)：每 120 秒 ──

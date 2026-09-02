@@ -14,7 +14,7 @@
  *   8. 同 symbol+rule 在 30 分 debounce 內不重發
  */
 
-import { detect, type DetectorContext } from '@/lib/realtime/blowoffDetector';
+import { detect, _resetDetectorMemoryForTest, type DetectorContext } from '@/lib/realtime/blowoffDetector';
 import { dispatch, _resetDebounceForTest } from '@/lib/realtime/alertDispatcher';
 import type { MinuteBar } from '@/lib/realtime/minuteBarStore';
 
@@ -88,6 +88,17 @@ describe('blowoffDetector — 通用排除', () => {
 });
 
 describe('blowoffDetector — Rule: blowoff-bearish', () => {
+  test('dedupe=false 的預篩不會吃掉精準驗證後的正式訊號', () => {
+    _resetDetectorMemoryForTest();
+    const bars = makeFlatBars(20, 9, 30, 100, 100);
+    bars[bars.length - 1] = bar(9, 49, 100, 101, 94, 95, 1000);
+
+    expect(detect(bars, ctxNonHolding, 1, { dedupe: false })).toHaveLength(1);
+    expect(detect(bars, ctxNonHolding, 1)).toHaveLength(1);
+    expect(detect(bars, ctxNonHolding, 1)).toHaveLength(0);
+    _resetDetectorMemoryForTest();
+  });
+
   test('爆量 (2x) + 長黑實體 (>60%) 觸發', () => {
     const bars = makeFlatBars(20, 9, 30, 100, 100); // 20 根平淡
     // 最後一根爆量長黑

@@ -128,12 +128,12 @@ export const REALTIME_RULES = {
   RING_BUFFER_CAPACITY: 270,
   /** disk flush 間隔（毫秒） */
   FLUSH_INTERVAL_MS: 60 * 1000,
-  /** scan 觸發週期（毫秒，launchd plist 對齊） */
-  SCAN_INTERVAL_MS: 30 * 1000,
+  /** scan 觸發週期（毫秒）— 目標池 MIS 批次很輕，10 秒輪詢。 */
+  SCAN_INTERVAL_MS: 10 * 1000,
 } as const;
 
 // ── 持倉保命警報層（holdings guard）─────────────────────────────────────
-// 掛在 realtime-scan 30s 迴圈內的「即時提醒」層；正式操作建議仍由
+// 掛在 realtime-scan 10s 迴圈內的「即時提醒」層；正式操作建議仍由
 // portfolio-notify（120s）負責。純警報：不下單、不改持倉檔、不進選股鏈路。
 // 緊急滅音：env HOLDINGS_GUARD_NTFY_DISABLED=true（不用 rebuild；jsonl 照記）。
 export type GuardScope = 'off' | 'holding' | 'holding_manual' | 'all';

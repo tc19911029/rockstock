@@ -81,6 +81,11 @@ export interface Signal {
   name?: string;
 }
 
+export interface DetectOptions {
+  /** false = 只算候選、不消耗 per-bar dedup；供外部精準行情二次驗證。 */
+  dedupe?: boolean;
+}
+
 /**
  * 偵測 — 對最新一根 bar 跑 4 規則
  *
@@ -92,12 +97,12 @@ export function detect(
   bars: MinuteBar[],
   ctx: DetectorContext,
   tfMin: 1 | 5 = 1,
+  options: DetectOptions = {},
 ): Signal[] {
   if (bars.length < REALTIME_RULES.MIN_BARS_FOR_DETECT) return [];
   const last = bars[bars.length - 1];
   if (isFirstBarOfSession(last)) return [];
 
-  const signals: Signal[] = [];
   const ma20Vol = sma(bars.slice(-20).map(b => b.volume));
   const ma20Close = sma(bars.slice(-20).map(b => b.close));
   if (ma20Vol <= 0) return [];
@@ -170,14 +175,23 @@ export function detect(
     }
   }
 
-  for (const { rule, sig } of candidates) {
-    const key = makeFiredKey(ctx.symbol, rule, tfMin);
-    if (lastFiredBarTs.get(key) === last.ts) continue; // 同一根 bar 已 fire 過
-    lastFiredBarTs.set(key, last.ts);
-    signals.push(sig);
-  }
+  const candidateSignals = candidates.map(candidate => candidate.sig);
+  return options.dedupe === false ? candidateSignals : dedupeSignals(candidateSignals);
+}
 
-  return signals;
+/**
+ * 對已經過外部行情驗證的訊號套用 detector 的 per-bar dedup。
+ * 拆成公開 helper，避免快速預篩階段先把 key 吃掉，導致精準驗證後反而不能推播。
+ */
+export function dedupeSignals(signals: Signal[]): Signal[] {
+  const out: Signal[] = [];
+  for (const sig of signals) {
+    const key = makeFiredKey(sig.symbol, sig.rule, sig.tfMin);
+    if (lastFiredBarTs.get(key) === sig.ts) continue;
+    lastFiredBarTs.set(key, sig.ts);
+    out.push(sig);
+  }
+  return out;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────

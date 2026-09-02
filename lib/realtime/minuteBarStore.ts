@@ -103,7 +103,13 @@ export function pushTick(
   ensureSymbol(symbol, market);
   const entry = buffers.get(symbol)!;
   const ts = floorMinute(tickMs);
-  const delta = Math.max(0, snap.cumulativeVolume - entry.lastSeenCumVol);
+  // 冷啟動若尚無任何歷史 bar，只把第一個累積量當 baseline，不把「今天截至目前」
+  // 全灌進當前分鐘。後續 backfill 會補齊先前分鐘；即使 vendor 暫時失敗，也寧可
+  // 少算第一個取樣區間，不能製造一根假的巨量 K。
+  const establishingBaseline = entry.bars.length === 0 && entry.lastSeenCumVol === 0;
+  const delta = establishingBaseline
+    ? 0
+    : Math.max(0, snap.cumulativeVolume - entry.lastSeenCumVol);
   entry.lastSeenCumVol = snap.cumulativeVolume;
 
   const last = entry.bars[entry.bars.length - 1];
@@ -157,8 +163,12 @@ export function ingestHistoricalBars(
   if (entry.bars.length > REALTIME_RULES.RING_BUFFER_CAPACITY) {
     entry.bars.splice(0, entry.bars.length - REALTIME_RULES.RING_BUFFER_CAPACITY);
   }
-  // lastSeenCumVol：抓最後一根 bar 假定上游累積（不精確但 backfill 後第一個 live tick 會自我修正）
-  entry.lastSeenCumVol = bars[bars.length - 1].volume;
+  // Live quote 的 volume 是「當日累積量」，歷史 bar 的 volume 則是「單分鐘量」。
+  // 不能把最後一根分鐘量直接塞進 lastSeenCumVol；否則下一個 live tick 會把
+  // 幾乎整天的累積量灌進單根 K，製造假的爆量訊號。若 live tick 已先抵達，
+  // 也不可讓較慢完成的 backfill 把它的基準倒退。
+  const historicalCumVol = bars.reduce((sum, bar) => sum + Math.max(0, bar.volume), 0);
+  entry.lastSeenCumVol = Math.max(entry.lastSeenCumVol, historicalCumVol);
   entry.dirty = true;
 }
 
@@ -461,7 +471,7 @@ export function _resetForTest(): void {
 export function _injectBarsForTest(symbol: string, market: 'TW' | 'CN', bars: MinuteBar[]): void {
   buffers.set(symbol, {
     bars: bars.slice().sort((a, b) => a.ts - b.ts),
-    lastSeenCumVol: bars[bars.length - 1]?.volume ?? 0,
+    lastSeenCumVol: bars.reduce((sum, bar) => sum + Math.max(0, bar.volume), 0),
     dirty: false,
   });
 }

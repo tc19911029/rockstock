@@ -340,6 +340,27 @@ describe('alertDispatcher — day-level dedup', () => {
     expect(r1.fired).toBe(1);
     expect(r2.debounced).toBe(1);
   });
+
+  test('爆量群聚最多四路同時派送，後續訊號不必逐筆等待 RTT', async () => {
+    const resolvers: Array<(value: { ok: true; status: number }) => void> = [];
+    mockSendNtfy.mockImplementation(() => new Promise(resolve => resolvers.push(resolve)));
+    const signals = Array.from({ length: 5 }, (_, index) => patternSig({ symbol: `99${index}9.TW` }));
+
+    const dispatchPromise = dispatch(signals, { logToDisk: false });
+    for (let i = 0; i < 20 && mockSendNtfy.mock.calls.length < 4; i++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    expect(mockSendNtfy).toHaveBeenCalledTimes(4);
+
+    resolvers.slice(0, 4).forEach(resolve => resolve({ ok: true, status: 200 }));
+    for (let i = 0; i < 20 && mockSendNtfy.mock.calls.length < 5; i++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    expect(mockSendNtfy).toHaveBeenCalledTimes(5);
+    resolvers[4]({ ok: true, status: 200 });
+
+    await expect(dispatchPromise).resolves.toMatchObject({ fired: 5, notifyOk: 5 });
+  });
 });
 
 describe('alertDispatcher — decideNotify gate', () => {

@@ -78,6 +78,8 @@ export interface AlertRecord {
    * 'disabled'/'no-url'（刻意關閉）與舊行（缺此欄）視為已消耗（向下相容）。
    */
   notifyReason?: string;
+  /** 從開始派送到 NTFY 回應的耗時；用於區分偵測慢與推送端慢。 */
+  notifyElapsedMs?: number;
 }
 
 export interface DispatchResult {
@@ -128,6 +130,13 @@ export async function dispatch(
   const todayTW = dateKeyOf('TW', now);
   await ensureFiredKeysLoaded(todayTW);
 
+  const pending: Array<{
+    sig: AlertSignal;
+    key: string;
+    dedupScope: 'day' | undefined;
+    payload: ReturnType<typeof formatPayload>;
+  }> = [];
+
   for (const sig of signals) {
     const dateKey = dateKeyOf(sig.market, now);
     const dedupScope = isGuardSignal(sig) ? sig.dedupScope : undefined;
@@ -142,42 +151,53 @@ export async function dispatch(
     }
     firedKeys.add(key);
     result.fired++;
+    pending.push({ sig, key, dedupScope, payload: formatPayload(sig) });
+  }
 
-    const { title, message, tags, priority } = formatPayload(sig);
-    const sendResult: NtfyResult = decideNotify(sig)
-      ? await sendNtfy({ title, message, tags, priority })
-      : { ok: false, reason: 'disabled' };
-    if (sendResult.ok) {
-      result.notifyOk++;
-      notifyRetryCount.delete(key);
-    } else {
-      result.notifyFail++;
-      // 瞬時失敗（http/fetch）→ 放回 dedup key，下一輪（30s）自然重試。
-      // 對 day 型（停損等保命警報）尤其關鍵：不這樣做，一次網路抖動 = 整天不再推。
-      if (sendResult.reason === 'http' || sendResult.reason === 'fetch') {
-        const n = (notifyRetryCount.get(key) ?? 0) + 1;
-        notifyRetryCount.set(key, n);
-        if (n < NOTIFY_MAX_RETRY) firedKeys.delete(key);
+  // 爆量群聚時若逐筆 await，後面的手機通知會排在前面每筆網路 RTT 之後。
+  // 四路小併發兼顧速度與 ntfy burst 壓力；每批仍保持輸入順序寫 log。
+  const NOTIFY_CONCURRENCY = 4;
+  for (let i = 0; i < pending.length; i += NOTIFY_CONCURRENCY) {
+    const batch = pending.slice(i, i + NOTIFY_CONCURRENCY);
+    const batchRecords = await Promise.all(batch.map(async ({ sig, key, dedupScope, payload }) => {
+      const notifyStartedAt = Date.now();
+      const sendResult: NtfyResult = decideNotify(sig)
+        ? await sendNtfy(payload)
+        : { ok: false, reason: 'disabled' };
+      const notifyElapsedMs = Date.now() - notifyStartedAt;
+      if (sendResult.ok) {
+        result.notifyOk++;
+        notifyRetryCount.delete(key);
+      } else {
+        result.notifyFail++;
+        // 瞬時失敗（http/fetch）→ 放回 dedup key，下一輪（10s）自然重試。
+        if (sendResult.reason === 'http' || sendResult.reason === 'fetch') {
+          const n = (notifyRetryCount.get(key) ?? 0) + 1;
+          notifyRetryCount.set(key, n);
+          if (n < NOTIFY_MAX_RETRY) firedKeys.delete(key);
+        }
       }
-    }
 
-    const signalName = isGuardSignal(sig) ? sig.meta.name : sig.name;
-    records.push({
-      firedAt: now,
-      rule: sig.rule,
-      symbol: sig.symbol,
-      name: signalName,
-      market: sig.market,
-      barTs: sig.ts,
-      tfMin: sig.tfMin,
-      isHolding: sig.isHolding,
-      meta: sig.meta,
-      dedupScope,
-      source: sig.source,
-      notified: sendResult.ok,
-      notifyError: sendResult.ok ? undefined : (sendResult.error ?? sendResult.reason),
-      notifyReason: sendResult.ok ? undefined : sendResult.reason,
-    });
+      const signalName = isGuardSignal(sig) ? sig.meta.name : sig.name;
+      return {
+        firedAt: now,
+        rule: sig.rule,
+        symbol: sig.symbol,
+        name: signalName,
+        market: sig.market,
+        barTs: sig.ts,
+        tfMin: sig.tfMin,
+        isHolding: sig.isHolding,
+        meta: sig.meta,
+        dedupScope,
+        source: sig.source,
+        notified: sendResult.ok,
+        notifyError: sendResult.ok ? undefined : (sendResult.error ?? sendResult.reason),
+        notifyReason: sendResult.ok ? undefined : sendResult.reason,
+        notifyElapsedMs,
+      } satisfies AlertRecord;
+    }));
+    records.push(...batchRecords);
   }
 
   if (options.logToDisk !== false && records.length > 0) {
