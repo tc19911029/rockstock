@@ -18,7 +18,7 @@ import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
 import {
   loadBackfillQueue,
   saveBackfillQueue,
-  mergeIntoQueue,
+  reconcileBackfillQueue,
   MAX_ATTEMPTS,
 } from './BackfillQueue';
 
@@ -378,11 +378,15 @@ export async function verifyDownload(
     activeStocks - stocksCurrent - failedSymbols.length - readFailed,
   );
 
-  // 近期 gap：最後一個 gap 的 toDate >= cutoff（排除資料收集起始點的歷史結構性缺口）
-  const recentGapDetails = gapDetails.filter(g => {
-    const lastGap = g.gaps[g.gaps.length - 1];
-    return lastGap.toDate >= cutoff;
-  });
+  // 近期 gap：只保留 toDate >= cutoff 的區間（排除歷史結構性缺口）
+  // 必須逐 range 過濾；只篩 symbol 會讓「同時有近期 gap 的股票」把 2021–2025
+  // 的歷史停牌空窗也塞進 queue，白白消耗 provider 與重試額度。
+  const recentGapDetails = gapDetails
+    .map(detail => ({
+      symbol: detail.symbol,
+      gaps: detail.gaps.filter(gap => gap.toDate >= cutoff),
+    }))
+    .filter(detail => detail.gaps.length > 0);
 
   const report: VerifyReport = {
     market,
@@ -426,23 +430,14 @@ export async function verifyDownload(
     const queue = await loadBackfillQueue(market);
     // 歷史 gap 多半是長期停牌，所有公開來源都會保留相同空窗；只把近 180 天
     // 的缺口排入補拉，避免 2021–2025 的結構性空窗永遠佔住 queue。
-    const gapSymbols = new Set(recentGapDetails.map((g) => g.symbol));
-
-    // 清掉已修復的（上次在 queue 但本次 gap=0）
-    const before = queue.items.length;
-    queue.items = queue.items.filter((it) => gapSymbols.has(it.symbol));
-    const cleared = before - queue.items.length;
-
-    // 合併本次發現的 gap
-    for (const gd of recentGapDetails) {
-      mergeIntoQueue(queue, gd.symbol, gd.gaps);
-    }
+    const reconciliation = reconcileBackfillQueue(queue, recentGapDetails);
 
     await saveBackfillQueue(queue);
     const abandoned = queue.items.filter((it) => it.attempts >= MAX_ATTEMPTS).length;
     console.info(
       `[DownloadVerifier] ${market} ${targetDate}: backfill queue = ${queue.items.length} items ` +
-      `(cleared ${cleared}, abandoned ${abandoned})`,
+      `(added ${reconciliation.added}, reset ${reconciliation.reset}, ` +
+      `cleared ${reconciliation.cleared}, abandoned ${abandoned})`,
     );
   } catch (err) {
     console.warn('[DownloadVerifier] backfill queue update failed:', err);

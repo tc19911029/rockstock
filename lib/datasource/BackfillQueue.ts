@@ -166,6 +166,57 @@ export function mergeIntoQueue(
 }
 
 /**
+ * 讓 queue 精確反映本輪 verifier 判定仍需補拉的 gap。
+ *
+ * - 完全相同的 ranges 保留 attempts，避免每次 verify 都把失敗計數歸零
+ * - ranges 有變化代表舊缺口已部分修復或出現新缺口，重設嘗試狀態
+ * - 本輪不存在的 symbol 直接移除
+ */
+export function reconcileBackfillQueue(
+  queue: BackfillQueue,
+  details: Array<{ symbol: string; gaps: CandleGap[] }>,
+  now = new Date().toISOString(),
+): { queue: BackfillQueue; added: number; reset: number; cleared: number } {
+  const existingBySymbol = new Map(queue.items.map(item => [item.symbol, item]));
+  const desiredSymbols = new Set(details.map(detail => detail.symbol));
+  const nextItems: BackfillItem[] = [];
+  let added = 0;
+  let reset = 0;
+
+  for (const detail of details) {
+    const ranges = [...new Map(
+      detail.gaps.map(gap => {
+        const range = { from: gap.fromDate, to: gap.toDate };
+        return [`${range.from}_${range.to}`, range] as const;
+      }),
+    ).values()].sort((a, b) => `${a.from}_${a.to}`.localeCompare(`${b.from}_${b.to}`));
+    if (ranges.length === 0) continue;
+
+    const existing = existingBySymbol.get(detail.symbol);
+    if (!existing) {
+      nextItems.push({ symbol: detail.symbol, ranges, detectedAt: now, attempts: 0 });
+      added++;
+      continue;
+    }
+
+    const oldKeys = [...new Set(existing.ranges.map(range => `${range.from}_${range.to}`))].sort();
+    const newKeys = ranges.map(range => `${range.from}_${range.to}`);
+    const unchanged = oldKeys.length === newKeys.length
+      && oldKeys.every((key, index) => key === newKeys[index]);
+    if (unchanged) {
+      nextItems.push({ ...existing, ranges });
+    } else {
+      nextItems.push({ symbol: detail.symbol, ranges, detectedAt: now, attempts: 0 });
+      reset++;
+    }
+  }
+
+  const cleared = queue.items.filter(item => !desiredSymbols.has(item.symbol)).length;
+  queue.items = nextItems;
+  return { queue, added, reset, cleared };
+}
+
+/**
  * 從 queue 移除 symbol（成功補齊後呼叫）。
  */
 export function removeFromQueue(queue: BackfillQueue, symbol: string): BackfillQueue {
