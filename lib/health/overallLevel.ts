@@ -32,7 +32,9 @@ export function deriveOverallLevel(items: OverallHealthSignal[]): 'green' | 'yel
     else if ((it.stocksStale ?? 0) > 50) yellow++;
     if (it.l2AlertLevel === 'critical') red++;
     else if (it.l2AlertLevel === 'warning') yellow++;
-    if (it.l4Status !== 'fresh' || it.l4LastDate !== it.expectedDate) red++;
+    // 盤中掃描可能已經有今天的 L4，而盤後基準仍是前一交易日；較新的 fresh
+    // 資料不應因日期「不相等」被誤判紅燈。只有缺少或落後 expectedDate 才算異常。
+    if (it.l4Status !== 'fresh' || !it.l4LastDate || it.l4LastDate < it.expectedDate) red++;
     if (it.strategyStatus !== 'ready') red++;
     if (it.limitUpConsistencyLevel === 'critical') red++;
     else if (it.limitUpConsistencyLevel === 'warning') yellow++;

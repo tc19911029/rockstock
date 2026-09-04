@@ -27,4 +27,8 @@ describe('deriveOverallLevel', () => {
   test('全部通過才顯示綠燈', () => {
     expect(deriveOverallLevel([healthy()])).toBe('green');
   });
+
+  test('盤中 L4 日期比盤後基準新時不誤判紅燈', () => {
+    expect(deriveOverallLevel([healthy({ l4LastDate: '2026-08-08' })])).toBe('green');
+  });
 });
