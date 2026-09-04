@@ -18,8 +18,27 @@
  *   - 想要更強保護應上 Vercel Project Password Protection
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { apiError } from './response';
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  try {
+    const hostname = new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, '');
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
 
 /**
  * 檢查請求是否來自同源 browser fetch。
@@ -62,4 +81,54 @@ export function checkSameOriginOrCron(req: NextRequest): NextResponse | null {
   }
 
   return apiError('Forbidden: same-origin or cron token required', 403);
+}
+
+/**
+ * Guard for endpoints that can spend paid API quota, start expensive local work,
+ * or mutate durable data.
+ *
+ * Production access is deliberately narrower than the legacy same-origin guard:
+ *   1. local browser requests must be both loopback-hosted and same-origin;
+ *   2. automation may use CRON_SECRET as a bearer token;
+ *   3. operators may use ADMIN_SECRET / UPLOAD_SECRET headers.
+ *
+ * A public reverse tunnel therefore cannot turn an Origin header into authority.
+ */
+export function checkSensitiveMutationAuth(req: Request): NextResponse | null {
+  const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+  if (!isProd) return null;
+
+  const authHeader = req.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && authHeader?.startsWith('Bearer ')) {
+    const supplied = authHeader.slice('Bearer '.length);
+    if (safeEqual(supplied, cronSecret)) return null;
+  }
+
+  const adminSecret = process.env.ADMIN_SECRET;
+  const suppliedAdmin = req.headers.get('x-admin-secret');
+  if (adminSecret && suppliedAdmin && safeEqual(suppliedAdmin, adminSecret)) return null;
+
+  const uploadSecret = process.env.UPLOAD_SECRET;
+  const suppliedUpload = req.headers.get('x-upload-secret');
+  if (uploadSecret && suppliedUpload && safeEqual(suppliedUpload, uploadSecret)) return null;
+
+  const host = req.headers.get('host');
+  if (!host) return apiError('Bad request: missing host', 400);
+  if (!isLoopbackHost(host)) {
+    return apiError('Unauthorized: sensitive mutations require a local browser or operator token', 401);
+  }
+
+  const origin = req.headers.get('origin');
+  const referer = req.headers.get('referer');
+  for (const candidate of [origin, referer]) {
+    if (!candidate) continue;
+    try {
+      if (new URL(candidate).host === host) return null;
+    } catch {
+      // Try the other browser header, then reject below.
+    }
+  }
+
+  return apiError('Forbidden: local same-origin request required', 403);
 }

@@ -310,6 +310,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json();
     const parsed = reqSchema.safeParse(body);

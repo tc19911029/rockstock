@@ -106,6 +106,24 @@ rotate_log() {
 rotate_log /tmp/rockstock-prod.log
 rotate_log /tmp/rockstock-prod.err.log
 
+# Keep deployment rotations bounded. The timestamp suffix is created only by
+# rotate_log above; retain the five newest files for incident review.
+prune_rotated_logs() {
+  file="$1"
+  dir="$(dirname "$file")"
+  base="$(basename "$file")"
+  find "$dir" -maxdepth 1 -type f -name "${base}.20????????-??????" -print 2>/dev/null \
+    | sort -r \
+    | awk 'NR > 5' \
+    | while IFS= read -r old_log; do
+        [ -n "$old_log" ] || continue
+        rm -f -- "$old_log"
+        echo "→ 已清除過期輪替 ${old_log}"
+      done
+}
+prune_rotated_logs /tmp/rockstock-prod.log
+prune_rotated_logs /tmp/rockstock-prod.err.log
+
 # ── 重啟 ───────────────────────────────────────────────────────────────────
 echo "→ launchctl kickstart -k gui/$UID_/$LABEL ..."
 launchctl kickstart -k "gui/$UID_/$LABEL"

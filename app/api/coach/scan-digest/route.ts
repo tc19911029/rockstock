@@ -127,6 +127,10 @@ async function pollAnswer(requestTimestamp: string, timeoutMs: number, signal?: 
 }
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json();
     const parsed = reqSchema.safeParse(body);

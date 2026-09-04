@@ -9,6 +9,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiValidationError } from '@/lib/api/response';
+import { checkSensitiveMutationAuth } from '@/lib/api/sameOriginAuth';
 import { technicalSource } from '@/lib/agents/candidates/sources/technicalSource';
 import { youtubeSource }   from '@/lib/agents/candidates/sources/youtubeSource';
 import { chipSource }      from '@/lib/agents/candidates/sources/chipSource';
@@ -26,6 +27,9 @@ const querySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { market, date } = parsed.data;

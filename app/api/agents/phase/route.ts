@@ -13,6 +13,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
+import { checkSensitiveMutationAuth } from '@/lib/api/sameOriginAuth';
 import { loadScanSession } from '@/lib/storage/scanStorage';
 import { agentsGet } from '@/lib/agents/persistStorage';
 import { buildRiskQuestion } from '@/lib/agents/agents/riskAgent';
@@ -37,6 +38,9 @@ const querySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { date, symbol, phase } = parsed.data;

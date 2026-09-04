@@ -4,7 +4,7 @@ import { ma20Slope, isStrongInWeaknessAtBottom } from '@/lib/rules/ruleUtils';
 import { evaluateSixConditions, detectTrend, detectTrendPosition, TrendState } from '@/lib/analysis/trendAnalysis';
 import { checkLongProhibitions, checkShortProhibitions } from '@/lib/rules/entryProhibitions';
 import { evaluateShortCourseSetup } from '@/lib/analysis/shortCandidate';
-import { StockScanResult, MarketConfig, TriggeredRule, ScanDiagnostics, createEmptyDiagnostics, recordScanRejection } from './types';
+import { StockScanResult, MarketConfig, TriggeredRule, ScanDiagnostics, createEmptyDiagnostics, diagnosticsSummary, recordScanRejection } from './types';
 import type { StrategyConfig, StrategyThresholds } from '@/lib/strategy/StrategyConfig';
 import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
 import { evaluateHighWinRateEntry } from '@/lib/analysis/highWinRateEntry';
@@ -22,6 +22,17 @@ const CONCURRENCY = 30;
 const BATCH_DELAY_MS = 0;
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+function logScanDiagnostics(label: string, diagnostics: ScanDiagnostics): void {
+  console.info(label, diagnosticsSummary(diagnostics), JSON.stringify({
+    rejectionCounts: diagnostics.rejectionCounts ?? {},
+    rejectionSampleCount: diagnostics.rejectionSamples?.length ?? 0,
+  }));
+
+  if (process.env.ROCKSTOCK_DEBUG_SCAN_DIAGNOSTICS === '1') {
+    console.info(`${label} Full`, JSON.stringify(diagnostics));
+  }
+}
 
 export type StockEntry = { symbol: string; name: string; industry?: string };
 
@@ -1086,7 +1097,7 @@ export abstract class MarketScanner {
       dataStatus: diag.dataStatus,
     };
 
-    console.info('[ScanShort Diagnostics]', JSON.stringify(diag));
+    logScanDiagnostics('[ScanShort Diagnostics]', diag);
     return { candidates, marketTrend, diagnostics: diag, sessionFreshness };
   }
 
@@ -1296,7 +1307,7 @@ export abstract class MarketScanner {
       dataStatus: diag.dataStatus,
     };
 
-    console.info('[ScanSOP Diagnostics]', JSON.stringify(diag));
+    logScanDiagnostics('[ScanSOP Diagnostics]', diag);
     if (sessionFreshness.staleCount > 0) {
       console.warn(`[ScanSOP Freshness] ${sessionFreshness.staleCount} 支股票使用過期數據（最大落後 ${sessionFreshness.maxStaleDays} 天）`);
     }
@@ -1383,7 +1394,7 @@ export abstract class MarketScanner {
       );
 
     console.info('[ScannerCache]', getScannerCacheStats());
-    console.info('[ScanDiagnostics]', JSON.stringify(diag));
+    logScanDiagnostics('[ScanDiagnostics]', diag);
     return { results: sortedResults, marketTrend, diagnostics: diag };
   }
 

@@ -14,6 +14,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { apiOk, apiValidationError } from '@/lib/api/response';
+import { checkSensitiveMutationAuth } from '@/lib/api/sameOriginAuth';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
 import { agentsListChildDirs } from '@/lib/agents/persistStorage';
 import { listBacktestDates, loadBacktest } from '@/lib/agents/backtest/storage';
@@ -33,6 +34,9 @@ const querySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(req.url).searchParams));
   if (!parsed.success) return apiValidationError(parsed.error);
   const { market, from, to } = parsed.data;

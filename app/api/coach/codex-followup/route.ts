@@ -33,6 +33,10 @@ function buildPrompt(inputFile: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   let inputDir: string | null = null;
   try {
     const parsed = reqSchema.safeParse(await req.json());

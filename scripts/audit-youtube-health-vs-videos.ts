@@ -59,6 +59,13 @@ async function main() {
     console.error('❌ data/youtube/health.json 不存在 — health cron 從未跑過?');
     process.exit(1);
   }
+  if (health.scan_date !== targetDate) {
+    console.error(
+      `❌ health snapshot 日期不符：要求 ${targetDate}，但 data/youtube/health.json 是 ${health.scan_date}。` +
+      '目前只保留最新 health snapshot，無法用它稽核歷史日期。',
+    );
+    process.exit(2);
+  }
 
   const videos = await loadJson<YouTubeVideo[]>(path.join(VIDEOS_DIR, `${targetDate}.json`));
   const videosBySource = new Map<string, YouTubeVideo[]>();

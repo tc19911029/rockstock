@@ -34,6 +34,10 @@ const scannerChunkSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   const body = await req.json().catch(() => ({}));
   const parsed = scannerChunkSchema.safeParse(body);
   if (!parsed.success) {

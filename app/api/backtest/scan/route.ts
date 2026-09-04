@@ -27,6 +27,10 @@ export const maxDuration = 120;
  * mode=compare: 同時跑兩套，返回 A/B 比較結果
  */
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   const body = await req.json().catch(() => ({}));
   const parsed = backtestScanSchema.safeParse(body);
   if (!parsed.success) {

@@ -15,7 +15,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>cd $HOME/Desktop/rockstock &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market TW --date auto --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-TW.log 2&gt;&amp;1 &amp;&amp; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market CN --date auto --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-CN.log 2&gt;&amp;1</string>
+    <string>cd $HOME/Desktop/rockstock || exit 1; tw_status=0; cn_status=0; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market TW --date auto --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-TW.log 2&gt;&amp;1 || tw_status=$?; $HOME/.local/node-22/bin/node $HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs scripts/t1-fill-gaps.ts --market CN --date auto --apply --concurrency 4 &gt;&gt; /tmp/rockstock-t1-fill-CN.log 2&gt;&amp;1 || cn_status=$?; [ "$tw_status" -eq 0 ] &amp;&amp; [ "$cn_status" -eq 0 ]</string>
   </array>
 
   <key>StartCalendarInterval</key>

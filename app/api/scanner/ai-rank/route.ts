@@ -26,6 +26,10 @@ interface StockForAI {
 }
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return apiError('未設定 ANTHROPIC_API_KEY');

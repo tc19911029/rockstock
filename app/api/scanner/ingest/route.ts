@@ -21,6 +21,10 @@ export const runtime = 'nodejs';
 export const maxDuration = 180; // 3 分鐘（補缺可能需要時間）
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json() as {
       market: 'TW' | 'CN';

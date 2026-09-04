@@ -173,6 +173,10 @@ const SYSTEM_PROMPT = `你是一位精通朱家泓老師與林穎《學會走圖
 - 保持教學態度，協助使用者學習辨別訊號`;
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   try {
     const body = await req.json();
     const parsed = chatBodySchema.safeParse(body);

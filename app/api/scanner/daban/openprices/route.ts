@@ -13,6 +13,10 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const parsed = requestSchema.safeParse(body);

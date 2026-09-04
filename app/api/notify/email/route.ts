@@ -95,6 +95,10 @@ function generateEmailHtml(results: StockScanResult[], market: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const { checkSensitiveMutationAuth } = await import('@/lib/api/sameOriginAuth');
+  const denied = checkSensitiveMutationAuth(req);
+  if (denied) return denied;
+
   try {
     const raw = await req.json().catch(() => ({}));
     const parsed = emailBodySchema.safeParse(raw);
