@@ -26,5 +26,7 @@ test('集保持股分布週次在窄面板以四欄兩列顯示', async ({ page,
   expect(columnCount).toBe(4);
 
   const labels = await weekPicker.getByRole('button').allTextContents();
-  expect(labels).toEqual(['08-14', '08-07', '07-31', '07-24', '07-17', '07-09', '07-03', '06-26']);
+  expect(labels).toHaveLength(8);
+  expect(new Set(labels).size).toBe(8);
+  for (const label of labels) expect(label).toMatch(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/);
 });

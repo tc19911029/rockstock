@@ -523,7 +523,7 @@ function LockWatchTableRow({
               className="shrink-0 px-2 py-0.5 rounded border border-emerald-700/50 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 font-bold disabled:cursor-not-allowed disabled:border-border disabled:text-muted-foreground disabled:hover:bg-transparent"
               title={purchaseBlockReason
                 ? lockWatchPurchaseBlockMessage(purchaseBlockReason)
-                : `開啟持倉表單，預填最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}（可修改）；儲存前會由伺服器再次驗證訊號`}
+                : `開啟持倉表單，預填最近收盤 ${(record.currentClose ?? record.triggerPrice).toFixed(2)}（可修改）；儲存前會由伺服器再次驗證訊號；不會送出券商委託`}
             >
               {purchaseBlockReason === 'legacy-pattern-unverified' ? '待重驗' : '記錄買入'}
             </button>

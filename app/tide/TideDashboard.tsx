@@ -803,7 +803,11 @@ export default function TideDashboard({
               <label><Search size={14} /><input autoFocus value={watchQuery} onChange={(event) => setWatchQuery(event.target.value)} placeholder="股票代碼 / 名稱" aria-label="股票代碼 / 名稱" /><button onClick={() => { setWatchSearchOpen(false); setWatchQuery(''); }} aria-label="關閉股票搜尋"><X size={14} /></button></label>
               <div>
                 {watchQuery && watchSearchResults.map((stock) => (
-                  <button key={stock.code} onClick={() => { addWatch(stock); setWatchSearchOpen(false); setWatchQuery(''); }}>
+                  <button
+                    key={stock.code}
+                    aria-label={`將 ${stock.code} ${stock.name} 加入自選`}
+                    onClick={() => { addWatch(stock); setWatchSearchOpen(false); setWatchQuery(''); }}
+                  >
                     <span><b>{stock.code}</b><small>{stock.name}</small></span><em>{stock.theme ?? '個股'}</em><Plus size={14} />
                   </button>
                 ))}

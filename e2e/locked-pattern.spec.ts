@@ -8,7 +8,39 @@
  * 這層 Jest + jsdom 抓不到（lightweight-charts Canvas 渲染要真瀏覽器）。
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+async function mockActiveLockedPattern(
+  page: Page,
+  market: 'TW' | 'CN',
+  record: { symbol: string; patternType: string; triggerPrice: number; patternTargetPrice: number },
+) {
+  await page.route(`**/api/lockwatch?market=${market}`, async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    const records = Array.isArray(payload?.snapshot?.records)
+      ? payload.snapshot.records.filter((item: { symbol?: string }) => item.symbol !== record.symbol)
+      : [];
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        ok: true,
+        snapshot: {
+          ...(payload.snapshot ?? {}),
+          records: [{
+            ...record,
+            market,
+            triggerSignal: 'N',
+            currentStage: 'observation',
+            // 直接覆蓋當初造成 Canvas crash 的空腳位案例。
+            patternPivots: [],
+          }, ...records],
+        },
+      },
+    });
+  });
+}
 
 test.describe('走圖型態鎖定鏈路', () => {
   test.beforeEach(async ({ context }) => {
@@ -22,7 +54,7 @@ test.describe('走圖型態鎖定鏈路', () => {
   });
 
 
-  test('TW lockwatch 有效 N 訊號股 (6446.TW 頭肩底) → 顯示「鎖定」badge', async ({ page }) => {
+  test('TW lockwatch 有效 N 訊號且腳位為空 → 顯示「鎖定」badge、不 crash', async ({ page }) => {
     // 收集 console errors
     const consoleErrors: string[] = [];
     page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
@@ -35,9 +67,15 @@ test.describe('走圖型態鎖定鏈路', () => {
       }
     });
 
-    await page.goto('/?load=6446.TW');
+    await mockActiveLockedPattern(page, 'TW', {
+      symbol: '2330.TW',
+      patternType: 'head-shoulder',
+      triggerPrice: 1000,
+      patternTargetPrice: 1200,
+    });
+    await page.goto('/?load=2330.TW');
     // 等股票名稱出現（loaded 完成）
-    await expect(page.getByText('藥華藥').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('台積電').first()).toBeVisible({ timeout: 15_000 });
 
     // 開「型態分析」：腳位與生命週期價位改由單一控制一起顯示
     const patternBtn = page.locator('button:text-is("型態分析")').first();
@@ -55,7 +93,7 @@ test.describe('走圖型態鎖定鏈路', () => {
     await expect(page.locator('text=/複式頭肩底|頭肩底|圓弧底|楔形|雙重底|三重底/').first()).toBeVisible();
   });
 
-  test('CN lockwatch 有效 N 訊號股 (000703.SZ 圓弧底) → 鎖定 badge + 圓弧底', async ({ page }) => {
+  test('CN lockwatch 有效 N 訊號且腳位為空 → 顯示「鎖定」badge、不 crash', async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
     page.on('console', (msg) => {
@@ -64,6 +102,12 @@ test.describe('走圖型態鎖定鏈路', () => {
       }
     });
 
+    await mockActiveLockedPattern(page, 'CN', {
+      symbol: '000703.SZ',
+      patternType: 'rounding-bottom',
+      triggerPrice: 12,
+      patternTargetPrice: 15,
+    });
     await page.goto('/?load=000703.SZ');
     await expect(page.getByText('恒逸石化').first()).toBeVisible({ timeout: 15_000 });
 

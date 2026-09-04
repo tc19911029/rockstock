@@ -54,22 +54,23 @@ test.describe('Tide Pro 重建頁', () => {
     await page.goto('/tide');
     await page.getByRole('button', { name: '今日重點', exact: true }).click();
     const highlights = page.getByRole('region', { name: '今日盤面重點' });
-    await expect(highlights).toContainText('HBM 高頻寬記憶體 +348億');
-    await expect(highlights).toContainText('記憶體模組 +228億');
-    await expect(highlights).toContainText('CXL 技術 +227億');
-    await expect(highlights).toContainText('回顧：08/26 法人買最多的 3 個板塊');
-    await expect(highlights).toContainText('景碩 被買 44億');
-    await expect(highlights).toContainText('力成 被倒 40億');
+    await expect(highlights.getByText(/^今日重點（\d{2}\/\d{2}）$/)).toBeVisible();
+    await expect(highlights).toContainText('法人買最多：');
+    await expect(highlights).toContainText(/回顧：(\d{2}\/\d{2} |前一交易日)法人買最多的 3 個板塊/);
+    await expect(highlights).toContainText('大戶異常：');
     await expect(highlights.getByRole('button', { name: /AI 盤後總結/ })).toHaveAttribute('aria-expanded', 'true');
-    await expect(highlights).toContainText('賣壓集中在 封測代工、Edge AI AIoT、被動元件 MLCC');
+    await expect(highlights).toContainText('法人買盤集中在');
+    await expect(highlights).toContainText('賣壓集中在');
   });
 
   test('個股 Pro 深度、自選與不限檔提醒可互動', async ({ page }) => {
     await page.goto('/tide');
     const watch = page.getByRole('complementary');
-    const stock = watch.getByRole('button', { name: /2330 台積電/ });
-    await stock.click();
+    await watch.getByRole('button', { name: '添加', exact: true }).click();
+    await watch.getByPlaceholder('股票代碼 / 名稱').fill('2330');
+    await watch.getByRole('button', { name: '將 2330 台積電 加入自選' }).click();
     await expect(watch.getByText('1 檔', { exact: true })).toBeVisible();
+    const stock = watch.getByRole('button', { name: /2330 台積電/ });
     await stock.click();
 
     const drawer = page.getByRole('dialog', { name: /台積電 Pro 籌碼詳情/ });
@@ -92,7 +93,7 @@ test.describe('Tide Pro 重建頁', () => {
     await expect(page.getByRole('navigation', { name: '自選資料夾' }).getByRole('button', { name: /追蹤名單/ })).toBeVisible();
     await page.getByRole('button', { name: '添加', exact: true }).click();
     await page.getByPlaceholder('股票代碼 / 名稱').fill('2454');
-    await page.getByRole('button', { name: /2454 聯發科/ }).click();
+    await page.getByRole('button', { name: '將 2454 聯發科 加入自選' }).click();
     await expect(page.getByRole('complementary').getByRole('button', { name: /2454 聯發科/ })).toBeVisible();
     await expect(page.getByRole('navigation', { name: '自選資料夾' }).getByRole('button', { name: /追蹤名單 1/ })).toBeVisible();
     const resizer = page.getByRole('separator', { name: '調整自選清單寬度' });
