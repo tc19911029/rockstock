@@ -83,6 +83,26 @@ describe('端到端報價 invariant', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('&local=1'))).toBe(true);
   });
 
+  test('盤中不同請求的一個 tick 微幅價差不會誤報，但仍會攔截明顯錯價', async () => {
+    jest.spyOn(global, 'fetch').mockImplementation(async input => {
+      const url = String(input);
+      if (url.includes('/api/portfolio/quotes')) {
+        return jsonResponse({ quotes: [{ symbol: '000001.SZ', price: 11.90, asOf: '2026-09-04', stale: false }] });
+      }
+      if (url.includes('/api/stock/quote')) {
+        return jsonResponse({ date: '2026-09-04', close: 11.89, stale: false });
+      }
+      return jsonResponse({ candles: [{ date: '2026-09-04', close: 11.89 }] });
+    });
+
+    await expect(runQuoteEndToEndProbe({
+      baseUrl: 'http://localhost:3000',
+      symbols: ['000001.SZ'],
+      expectedDate: '2026-09-04',
+      includeRealtime: false,
+    })).resolves.toMatchObject({ ok: true, issues: [] });
+  });
+
   test('官方確認零成交時，四個出口保留上一個真實交易日且一致標示 no-trade', async () => {
     jest.spyOn(global, 'fetch').mockImplementation(async input => {
       const url = String(input);

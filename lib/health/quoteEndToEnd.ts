@@ -28,9 +28,16 @@ type BatchQuote = {
   status?: string;
 };
 
+/**
+ * Live quote surfaces are fetched by separate requests, so their snapshots can
+ * legitimately be one or two ticks apart while the market is moving. Keep the
+ * tolerance narrow enough to catch a wrong/stale value; date freshness is
+ * validated separately above.
+ */
 function samePrice(left: number | undefined, right: number | undefined): boolean {
   if (!(left && left > 0) || !(right && right > 0)) return false;
-  return Math.abs(left - right) <= Math.max(0.0001, Math.abs(left) * 1e-8);
+  const reference = Math.max(Math.abs(left), Math.abs(right));
+  return Math.abs(left - right) <= Math.max(0.0001, reference * 0.001);
 }
 
 async function fetchJson(url: string): Promise<Record<string, unknown>> {
