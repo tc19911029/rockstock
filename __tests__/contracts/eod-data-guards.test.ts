@@ -1,6 +1,9 @@
 import { parseTPExDatedCloseResponse, rocDateToAd } from '@/lib/datasource/eodSettleBatch';
 import { expectedTwSymbolFromEntries } from '@/lib/datasource/twSymbolMarket';
-import { sanitizeOHLC } from '@/lib/datasource/CandleStorageAdapter';
+import {
+  sanitizeOHLC,
+  shouldBlockSingleCandleInitialization,
+} from '@/lib/datasource/CandleStorageAdapter';
 
 describe('EOD data guards', () => {
   test.each([
@@ -39,5 +42,11 @@ describe('EOD data guards', () => {
       date: '2026-08-12', open: 16.64, high: 15.4, low: 14.51, close: 15.26, volume: 21383509,
     }]);
     expect(bars).toEqual([]);
+  });
+
+  test('單根官方 K 可建立真正不存在的新股檔，但不得截斷讀壞的既有檔', () => {
+    expect(shouldBlockSingleCandleInitialization(null, false, 1)).toBe(false);
+    expect(shouldBlockSingleCandleInitialization(null, true, 1)).toBe(true);
+    expect(shouldBlockSingleCandleInitialization(null, true, 2)).toBe(false);
   });
 });

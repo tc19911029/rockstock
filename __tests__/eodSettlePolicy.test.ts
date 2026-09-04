@@ -3,6 +3,8 @@ import {
   canWriteSettlement,
   findConfirmedActivePendingSymbols,
   findTwOfficialNoTradeSymbols,
+  mergeTwSettlementSymbols,
+  shouldNotifySettlementFailure,
 } from '@/lib/datasource/eodSettlePolicy';
 import { settleSymbol, type SettleResult } from '@/lib/datasource/eodSettle';
 
@@ -19,6 +21,21 @@ function result(overrides: Partial<SettleResult> = {}): SettleResult {
 }
 
 describe('EOD settlement fail-closed policy', () => {
+  test('當日官方表的新代號會補進既有 L1 封存母體', () => {
+    expect(mergeTwSettlementSymbols(
+      ['2330.TW', '3081.TWO', '^TWII'],
+      ['2330', '3711', '0050', '03001P'],
+      ['3081', '3718', '00980A'],
+    )).toEqual(['2330.TW', '3081.TWO', '^TWII', '3711.TW', '3718.TWO']);
+  });
+
+  test('同日相同 settlement 失敗原因不重複推播', () => {
+    expect(shouldNotifySettlementFailure(null, 'readFailed=1')).toBe(true);
+    expect(shouldNotifySettlementFailure({ status: 'complete' }, 'readFailed=1')).toBe(true);
+    expect(shouldNotifySettlementFailure({ status: 'failed', reason: 'readFailed=2' }, 'readFailed=1')).toBe(true);
+    expect(shouldNotifySettlementFailure({ status: 'failed', reason: 'readFailed=1' }, 'readFailed=1')).toBe(false);
+  });
+
   test('16:00 前官方批次未到齊會 defer', () => {
     expect(assessTwOfficialReadiness({
       market: 'TW',

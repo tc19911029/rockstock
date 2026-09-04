@@ -60,6 +60,14 @@ describe('post-close L2 boundary', () => {
     expect(settleScript).not.toContain('result.officialAnchor || (result.independentAgree ?? 0) >= 2');
   });
 
+  test('TW settlement 會把官方收盤表的新代號納入，且相同失敗不重複推播', () => {
+    const settleScript = source('scripts/eod-settle.ts');
+    expect(settleScript).toContain('mergeTwSettlementSymbols(');
+    expect(settleScript).toContain('batchCache.twseBulk.keys()');
+    expect(settleScript).toContain('batchCache.tpexBulk.keys()');
+    expect(settleScript).toContain('shouldNotifySettlementFailure(previousState');
+  });
+
   test('官方收盤價可修正同日既有的暫時價', () => {
     const append = source('app/api/cron/append-from-snapshot/route.ts');
     expect(append).toContain("if (existing.lastDate === date)");

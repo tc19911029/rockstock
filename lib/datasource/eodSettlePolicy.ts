@@ -7,6 +7,35 @@ export const TW_MIN_TWSE_OFFICIAL_ROWS = 1300;
 export const TW_MIN_TPEX_OFFICIAL_ROWS = 900;
 const TW_MIN_NEAR_CLOSE_SNAPSHOT_ROWS = 1500;
 
+/**
+ * 收盤官方表是當日實際有交易的最新母體；把它合併進既有 L1 檔名清單，避免新上市／
+ * 新代號因為尚未有 candles 檔而永遠不會進入 eod-settle。
+ *
+ * 既有檔案仍完整保留，因為其中包含當日零成交、暫停交易與指數等官方收盤表不會列出的標的。
+ */
+export function mergeTwSettlementSymbols(
+  existingSymbols: Iterable<string>,
+  twseCodes: Iterable<string>,
+  tpexCodes: Iterable<string>,
+): string[] {
+  const merged = new Set(existingSymbols);
+  for (const code of twseCodes) {
+    if (/^[1-9]\d{3}$/.test(code)) merged.add(`${code}.TW`);
+  }
+  for (const code of tpexCodes) {
+    if (/^[1-9]\d{3,4}$/.test(code)) merged.add(`${code}.TWO`);
+  }
+  return [...merged];
+}
+
+/** 同一交易日、同一失敗原因只推播一次；狀態恢復後再失敗或原因改變時才重新告警。 */
+export function shouldNotifySettlementFailure(
+  previous: { status: string; reason?: string } | null,
+  reason: string,
+): boolean {
+  return previous?.status !== 'failed' || previous.reason !== reason;
+}
+
 function isTwConfirmedNoTradeQuote(quote: IntradayQuote): boolean {
   return quote.volume === 0
     && (quote.priceKind === 'last_actual'

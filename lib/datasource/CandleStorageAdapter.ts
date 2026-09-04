@@ -259,6 +259,20 @@ export async function writeCandleFile(
 const SINGLE_CANDLE_INCREMENT_THRESHOLD = 1;
 
 /**
+ * 單根寫入只有在底層舊檔確實存在、但內容讀不出來時才需要阻擋。
+ * 底層檔案根本不存在代表新股初始化；拒絕它會讓新代號永遠無法建立第一根 K。
+ */
+export function shouldBlockSingleCandleInitialization(
+  existing: CandleFileData | null,
+  backingFileExists: boolean,
+  incomingCount: number,
+): boolean {
+  return existing === null
+    && backingFileExists
+    && incomingCount <= SINGLE_CANDLE_INCREMENT_THRESHOLD;
+}
+
+/**
  * OHLC 自洽守門：對 incoming 每根 bar 確保 low ≤ {open, close} ≤ high。
  *
  * 來源情境：
@@ -386,11 +400,11 @@ async function _writeCandleFileImpl(
     }
     stripped = [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
   } else {
-    // existing === null 或空：可能是真的沒檔案（新股第一次下載），也可能是 race / IO 錯誤
-    // 安全規則（2026-05-09）：若 incoming 是「單根增量」（fast-path L2/TWSE 注入）且 existing 讀不到，
-    // 視為高機率讀失敗（race / cache miss / IO 錯誤）→ abort，避免把好好的 L1 截斷成 1 根。
-    // 完整下載（candles.length > 1）的情境可信度高，允許覆寫（新股初始化 / 全量重灌）。
-    if (guarded.length <= SINGLE_CANDLE_INCREMENT_THRESHOLD) {
+    // existing === null 或空：先用底層檔案是否存在區分「新股第一次建立」與
+    // 「既有檔 race / IO / parse 失敗」。只有後者的單根增量要 abort，避免把完整 L1 截斷。
+    // Vercel Blob 無廉價 exists probe，維持 fail-closed；本地正式 eod-settle 可精確判斷新檔。
+    const backingFileExists = IS_VERCEL || existsSync(localPath(symbol, market));
+    if (shouldBlockSingleCandleInitialization(existing, backingFileExists, guarded.length)) {
       console.warn(
         `[writeCandleFile] ${market}:${symbol} skipped: existing read failed and incoming is single-candle increment (避免 L1 被截斷成 1 根的安全機制)`,
       );

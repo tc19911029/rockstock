@@ -7,7 +7,7 @@
  *   npx tsx scripts/eod-settle.ts --market TW --date 2026-05-12 --concurrency 6 --apply
  *
  * 流程：
- *   1. 掃 L1 找出該日 stocklist（從 L1 檔名列表）
+ *   1. 掃 L1 檔名並合併當日官方收盤表，建立完整 stocklist
  *   2. 對每檔並行打多 vendor、reconcile、產生 SettleResult
  *   3. 報告 status 分佈（settled-multi/single/pending-*）
  *   4. --apply 才寫進 L1
@@ -28,6 +28,8 @@ import {
   canWriteSettlement,
   findConfirmedActivePendingSymbols,
   findTwOfficialNoTradeSymbols,
+  mergeTwSettlementSymbols,
+  shouldNotifySettlementFailure,
 } from '../lib/datasource/eodSettlePolicy';
 import { readIntradaySnapshot } from '../lib/datasource/IntradayCache';
 import { ensureServerL1Visibility, type VisibilityCandidate } from '../lib/datasource/eodSettlementVisibility';
@@ -139,7 +141,8 @@ async function main() {
   const { market, date, dry, limit, concurrency } = parseArgs();
   console.log(`EOD Settle: market=${market} date=${date} ${dry ? '(DRY)' : '★ APPLY'} concurrency=${concurrency}`);
 
-  const symbols = (await listSymbols(market)).slice(0, limit);
+  const fileSymbols = await listSymbols(market);
+  let symbols = fileSymbols.slice(0, limit);
   console.log(`stocklist 共 ${symbols.length} 檔`);
 
   // 常駐 Production 以 eod-settle 取代 download-candles；因此歷史 gap queue
@@ -183,6 +186,19 @@ async function main() {
   const batchCache = await prefetchVendorBatch(market, date);
   const bulkN = (batchCache.twseBulk.size + batchCache.tpexBulk.size + batchCache.eastMoneyBulk.size);
   console.log(`  batch cache 完成 (${Date.now()-t0}ms, bulk size=${bulkN})`);
+
+  if (market === 'TW') {
+    const mergedSymbols = mergeTwSettlementSymbols(
+      fileSymbols,
+      batchCache.twseBulk.keys(),
+      batchCache.tpexBulk.keys(),
+    );
+    const added = mergedSymbols.length - fileSymbols.length;
+    symbols = mergedSymbols.slice(0, limit);
+    if (added > 0) {
+      console.log(`[eod-settle] 官方收盤表補入 ${added} 個尚無 L1 檔的新代號（合計 ${symbols.length} 檔）`);
+    }
+  }
 
   const officialReadiness = assessTwOfficialReadiness({
     market,
@@ -468,6 +484,7 @@ async function main() {
       verifyPendingActive !== null && verifyPendingActive > 0 ? `activeWithoutOfficial=${verifyPendingActive}` : null,
       visibilityFailed ? 'API visibility failed' : null,
     ].filter(Boolean).join(', ');
+    const notifyFailure = !complete && shouldNotifySettlementFailure(previousState, reason || 'unknown settlement failure');
     writeSettlementState({
       version: 1,
       market,
@@ -477,7 +494,11 @@ async function main() {
       sentinel: sentinel ?? undefined,
       reason: reason || undefined,
     });
-    if (!complete) await notifySettlementFailure(market, date, reason || 'unknown settlement failure');
+    if (notifyFailure) {
+      await notifySettlementFailure(market, date, reason || 'unknown settlement failure');
+    } else if (!complete) {
+      console.warn(`[eod-settle] 同日相同失敗原因已通知，略過重複 ntfy：${reason || 'unknown settlement failure'}`);
+    }
     if (!complete) process.exit(1);
   }
 }
