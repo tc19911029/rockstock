@@ -21,7 +21,6 @@ import {
   parseProgramDate,
   clampProgramDateToPublish,
   todayYmdTaipei,
-  ymdTaipei,
   videoConfidenceScore,
 } from './classify';
 import { resolveAnalystsForVideo } from './analystParser';

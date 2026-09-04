@@ -19,17 +19,14 @@
 
 import {
   scoreTwGrowth,
-  scoreTwProfitability,
-  scoreCnGrowth,
   scoreCnProfitability,
   scoreValuation,
-  scoreRisk,
   buildBreakdown,
   gradeFromTotal,
 } from '@/lib/strategy/fundamentalRevaluation/scoring';
 
 import { deriveTwFlags, deriveCnFlags } from '@/lib/strategy/fundamentalRevaluation/recommendationGrade';
-import { detectIndustryTemplateFor, getReasonablePe } from '@/lib/strategy/fundamentalRevaluation/industryReasonablePe';
+import { detectIndustryTemplateFor } from '@/lib/strategy/fundamentalRevaluation/industryReasonablePe';
 import { inferRiskFlags } from '@/lib/strategy/fundamentalRevaluation/twPipeline';
 import { inferCnRiskFlags, buildCnScenarios } from '@/lib/strategy/fundamentalRevaluation/cnPipeline';
 

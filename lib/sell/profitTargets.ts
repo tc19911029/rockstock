@@ -65,8 +65,6 @@ export const CONSOL_BOX_MAX_RANGE = 0.08;
 /** 缺口「大量」門檻 vs avgVol5 */
 export const GAP_VOL_RATIO = 1.5;
 
-function last<T>(arr: T[]): T { return arr[arr.length - 1]; }
-
 /** ① 長均線壓力：價上方最近的 MA60/120/240（月線 MA20 由操作線負責，不列目標） */
 function longMaTarget(c: CandleWithIndicators): ProfitTarget {
   const cands: Array<{ name: string; v: number }> = [];

@@ -18,7 +18,6 @@ import {
   suggestPositionSize,
   applyRiskGuards,
   regimeExposureCap,
-  loadSizingConfig,
   DEFAULT_SIZING_CONFIG,
   DEFAULT_LETTER_WEIGHTS,
   DEFAULT_RESONANCE_BONUS,
@@ -312,7 +311,7 @@ describe('default config invariants', () => {
   });
 
   test('letterWeights 範圍 [0.3, 1.0]', () => {
-    for (const [letter, w] of Object.entries(DEFAULT_LETTER_WEIGHTS)) {
+    for (const w of Object.values(DEFAULT_LETTER_WEIGHTS)) {
       expect(w).toBeGreaterThanOrEqual(0.3);
       expect(w).toBeLessThanOrEqual(1.0);
     }
@@ -334,7 +333,7 @@ describe('default config invariants', () => {
   });
 
   test('resonanceBonus 範圍 [1.0, 1.5]', () => {
-    for (const [k, v] of Object.entries(DEFAULT_RESONANCE_BONUS)) {
+    for (const v of Object.values(DEFAULT_RESONANCE_BONUS)) {
       expect(v).toBeGreaterThanOrEqual(1.0);
       expect(v).toBeLessThanOrEqual(1.5);
     }

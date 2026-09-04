@@ -98,15 +98,6 @@ async function fsGet(relPath: string): Promise<string | null> {
   }
 }
 
-async function fsListDir(relPath: string): Promise<string[]> {
-  try {
-    const entries = await fs.readdir(path.join(FS_ROOT, relPath), { withFileTypes: true });
-    return entries.map(e => e.name);
-  } catch {
-    return [];
-  }
-}
-
 async function fsListSubdirs(relPath: string): Promise<string[]> {
   try {
     const entries = await fs.readdir(path.join(FS_ROOT, relPath), { withFileTypes: true });

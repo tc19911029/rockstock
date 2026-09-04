@@ -273,7 +273,6 @@ export function detectKBarExitSignal(inputs: KBarSignalInputs): KBarSignalResult
   // 條件：今日 K 線上影線比例 > 50% K 線全長 + 末升段或高檔
   const todayHigh = todayCandle.high;
   const todayLow = todayCandle.low;
-  const todayClose = todayCandle.close;
   const todayBodyTop = Math.max(todayCandle.open, todayCandle.close);
   const upperShadowLen = todayHigh - todayBodyTop;
   const fullLen = todayHigh - todayLow;

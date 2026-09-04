@@ -28,11 +28,6 @@ function changeOverWindow(arr: number[], n: number): number {
   return arr[arr.length - 1] - arr[arr.length - 1 - n];
 }
 
-function nDaysMin(prices: PriceDay[], n: number): number | null {
-  if (prices.length < n) return null;
-  return Math.min(...prices.slice(-n).map(p => p.low));
-}
-
 function sma(arr: number[], n: number): number | null {
   if (arr.length < n) return null;
   return arr.slice(-n).reduce((s, x) => s + x, 0) / n;

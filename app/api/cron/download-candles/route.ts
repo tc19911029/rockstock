@@ -15,7 +15,7 @@ import { apiOk, apiError } from '@/lib/api/response';
 import { TaiwanScanner } from '@/lib/scanner/TaiwanScanner';
 import { ChinaScanner } from '@/lib/scanner/ChinaScanner';
 import { saveLocalCandles } from '@/lib/datasource/LocalCandleStore';
-import { suspectsLimitOverwrite, suspectsGrossJump, isTwListingTransition } from '@/lib/datasource/limitMoveGuard';
+import { suspectsGrossJump, isTwListingTransition } from '@/lib/datasource/limitMoveGuard';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { getLastTradingDay } from '@/lib/datasource/marketHours';
 import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';

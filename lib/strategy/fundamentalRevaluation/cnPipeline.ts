@@ -23,14 +23,12 @@ import {
   getEastMoneyFinancialDetail,
   deductedNetProfitRatio,
   latestQuarter,
-  type EastMoneyFinancialDetail,
 } from '@/lib/datasource/EastMoneyFinancialDetail';
 
 import { detectIndustryTemplateFor, getReasonablePe } from './industryReasonablePe';
 import { computeTTMPe } from '@/lib/valuation/ttm';
 
 import type {
-  QuarterRow,
   ScenarioKey,
   ScenarioResult,
   RiskFlag,

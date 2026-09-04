@@ -25,7 +25,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { atomicFsPut } from '@/lib/storage/atomicFsPut';
-import { agentsPut, agentsPutRaw, agentsGet, agentsGetRaw } from '@/lib/agents/persistStorage';
+import { agentsPut, agentsPutRaw, agentsGet } from '@/lib/agents/persistStorage';
 import {
   AGENT_SCHEMA_VERSION,
   AgentId,

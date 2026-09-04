@@ -33,7 +33,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 import { checkSameOriginOrCron } from '@/lib/api/sameOriginAuth';
 import {
   suggestPositionSize, loadSizingConfig, INDEX_NEAR_ATH_RATIO, regimeExposureCap,
-  type SizingMode, type ExistingHolding,
+  type ExistingHolding,
 } from '@/lib/portfolio/positionSizer';
 import { detectMarketRegime } from '@/lib/agents/marketRegime';
 import type { Candle } from '@/types';

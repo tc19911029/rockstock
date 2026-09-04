@@ -71,7 +71,6 @@ export function ChartPracticeLedger() {
 
   // 切換股票時，把手動成交欄位 reset 回「跟隨游標」
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切股 reset 表單，刻意 effect 內 reset
     setCustomDate('');
     setCustomPrice('');
   }, [tickerRaw]);

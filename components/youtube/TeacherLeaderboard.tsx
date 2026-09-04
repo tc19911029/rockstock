@@ -60,7 +60,6 @@ const fmtPct = (v: number | null | undefined): string =>
   v == null || !Number.isFinite(v) ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
 const fmtPct2 = (v: number | null | undefined): string =>
   v == null || !Number.isFinite(v) ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
-const fmtWin = (n: number, win: number): string => (n === 0 ? '—' : `${win.toFixed(0)}%`);
 
 /**
  * 熱力色：跟 bullBearClass 同步走主題變數（台股預設 紅=漲 綠=跌；.western 自動互換）。
@@ -187,9 +186,9 @@ function HeatHeaders({ horizons, onSort, sortKey }: { horizons: RecoHorizon[]; o
 }
 
 /** 最佳(▲綠)/最雷(▼紅)一檔一行 */
-function PickLine({ pick, dir, date }: {
+function PickLine({ pick, dir }: {
   pick: { date: string; stock_code: string; stock_name: string; d20: number | null; d5: number | null } | null;
-  dir: 'best' | 'worst'; date?: string;
+  dir: 'best' | 'worst';
 }) {
   if (!pick) return null;
   const href = `/?load=${pick.stock_code}${pick.date ? `&asOf=${pick.date}` : ''}`;

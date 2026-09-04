@@ -33,7 +33,7 @@ export function canonicalNameFor(code: string, idx: CodeNameIndex): string | nul
   return idx.get(code)?.name ?? null;
 }
 
-/** name 是否為 code 的可接受名稱（master 名 / 別名 / 已知變體，抹平 */-/空白）。code 不存在回 null */
+/** name 是否為 code 的可接受名稱（master 名、別名、已知變體，抹平星號、連字號與空白）。code 不存在回 null */
 export function isAcceptableName(code: string, name: string, idx: CodeNameIndex): boolean | null {
   const real = idx.get(code);
   if (real === undefined) return null;

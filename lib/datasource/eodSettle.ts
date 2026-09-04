@@ -300,7 +300,7 @@ export async function settleSymbol(
 }
 
 /** Volume 單位換算：TW 寫入 L1 用「張」，CN 用「股」 */
-export function normalizeVolumeForL1(quote: VendorQuote, market: Market, vendorName?: string): number {
+export function normalizeVolumeForL1(quote: VendorQuote, _market: Market, _vendorName?: string): number {
   // 各 vendor 的 volume 單位（已在 provider 內部統一處理）：
   //   TWSE openapi: 已為「股」(stored in raw API)，我們的 provider 換算為「張」
   //   EODHD: 「股」

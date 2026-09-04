@@ -24,7 +24,7 @@ import {
   saveTranscript,
   saveTranscriptIndex,
 } from '@/lib/youtube/transcriptStorage';
-import type { TranscriptIndex, TranscriptRecord } from '@/lib/youtube/transcriptStorage';
+import type { TranscriptRecord } from '@/lib/youtube/transcriptStorage';
 import { readVttAndCleanup, transcribeViaWhisper } from '@/lib/youtube/whisper';
 // 2026-05-22 15:38 — touched to force Next.js HMR pickup of whisper.ts DEFAULT_WHISPER_MODEL change
 

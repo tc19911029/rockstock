@@ -321,9 +321,9 @@ const chipQuerySchema = z.object({
 import { fetchT86ForStock } from '@/lib/datasource/TwseT86Provider';
 import { readTdccStock, readInstStock, writeInstStock } from '@/lib/chips/ChipStorage';
 import type { TdccDay } from '@/lib/chips/types';
-import { fetchMarginForStock, fetchDayTradeForStock, fetchLendingForStock, fetchLendingHistoryForStock } from '@/lib/datasource/FinmindChipExtras';
+import { fetchMarginForStock, fetchDayTradeForStock } from '@/lib/datasource/FinmindChipExtras';
 import { getSharesIssued } from '@/lib/datasource/FinMindClient';
-import { detectTrend, rollingChange } from '@/lib/chips/trends';
+import { detectTrend } from '@/lib/chips/trends';
 import { fetchYahooBrokerTrades, type BrokerRankRow } from '@/lib/datasource/YahooBrokerScraper';
 import { readBrokerStock } from '@/lib/chips/BrokerStorage';
 import { readMarginStock, readSblStock, readDayTradeStock } from '@/lib/chips/ChipExtrasStorage';

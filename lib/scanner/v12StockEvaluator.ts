@@ -25,7 +25,6 @@
 
 import type { CandleWithIndicators } from '../../types';
 
-import { detectTrend } from '../analysis/trendAnalysis';
 import {
   detectV12J,
   detectV12K,
@@ -40,7 +39,7 @@ import {
 } from '../analysis/v12Signals';
 import { evaluateIndicatorV12, evaluateVolumeV12 } from '../analysis/v12Conditions';
 import { evaluateMarketGate, type MarketGateResult } from './marketTrendGate';
-import { REVERSAL_TRACK_LETTERS, BULLISH_TRACK_LETTERS } from './buyMethodTracks';
+import { BULLISH_TRACK_LETTERS } from './buyMethodTracks';
 import { detectTrendWithHistory } from '../analysis/detectTrendWithHistory';
 import { checkPivotPairGate } from '../analysis/v12SignalGates';
 import { detectEndPhase, detectSeasonLineResistance } from '../analysis/v12Conditions';
@@ -103,7 +102,6 @@ const ALL_LETTERS: V12Letter[] = [
 
 // DF6：LONG_TREND 從單一事實 BULLISH_TRACK_LETTERS 派生（新增 bullish 字母自動流過來）。
 const LONG_TREND_LETTERS = new Set<V12Letter>(BULLISH_TRACK_LETTERS as readonly V12Letter[]);
-const REVERSAL_LETTERS = new Set<V12Letter>(REVERSAL_TRACK_LETTERS as readonly V12Letter[]);
 // PIVOT_GATE 是 bullish 的「需過 Step1 樞紐 gate」精選子集（排除 E 缺口 + J/K 自帶結構）；
 // 刻意保留 literal（非單純 BULLISH 衍生）；加新 bullish 字母時自行決定是否納入。
 const PIVOT_GATE_LETTERS = new Set<V12Letter>(['B', 'P', 'C', 'L', 'M']);
@@ -149,8 +147,6 @@ export function evaluateStockV12(inputs: V12EvalInputs): V12EvalResult {
     // ── 軌道判定：不過 Step 0 → 多頭軌 + 戰法軌 全部不掃 ──
     const isLongTrend = LONG_TREND_LETTERS.has(letter);
     const isQ = letter === 'Q';
-    const isReversal = REVERSAL_LETTERS.has(letter);
-
     // 多頭軌與戰法軌都需 Step 0 過
     if ((isLongTrend || isQ) && !marketGate.passed) {
       continue;

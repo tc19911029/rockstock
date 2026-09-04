@@ -13,8 +13,6 @@ import type {
   BacktestSummary,
 } from './types';
 import { BACKTEST_SCHEMA_VERSION } from './types';
-import type { FinalAction } from '@/lib/agents/types';
-
 const AGENT_KEYS = ['technical', 'news', 'chip', 'fundamental', 'risk'] as const;
 
 export function aggregateBacktestSummary(

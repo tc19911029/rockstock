@@ -82,13 +82,6 @@ export function solveMonthlyRate(startCapital: number, targetCapital: number, mo
   return Math.pow(targetCapital / startCapital, 1 / months) - 1;
 }
 
-/** 每月最後一天 'YYYY-MM-DD'（不含跨月） */
-function endOfMonth(yearMonth: string): string {
-  const [y, m] = yearMonth.split('-').map(Number);
-  const last = new Date(y, m, 0).getDate();
-  return `${yearMonth}-${String(last).padStart(2, '0')}`;
-}
-
 /** 產生月度 milestones（startDate 所在月起算到 targetDate 所在月）
  *
  * Convention：

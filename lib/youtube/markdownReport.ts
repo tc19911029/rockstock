@@ -5,7 +5,7 @@
  * 也可被 server-side 寫成 .md 檔備存。
  */
 
-import type { DailyAnalysis, AnalyzedStockMention, StockScoring } from './analysisStorage';
+import type { DailyAnalysis, AnalyzedStockMention } from './analysisStorage';
 import { deriveStockMentions } from './analysisStorage';
 
 function sourceLabel(id: string): string {
@@ -26,11 +26,6 @@ function sourceLabel(id: string): string {
     'gumin-kaijiang': '股民開講',
   };
   return map[id] ?? id;
-}
-
-function fmtScoring(s: StockScoring | undefined): string {
-  if (!s) return '—';
-  return `**${s.rating}** ${s.composite_score.toFixed(1)}`;
 }
 
 function fmtSentimentCount(b: number, br: number): string {

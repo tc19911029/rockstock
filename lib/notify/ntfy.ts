@@ -76,7 +76,6 @@ export async function sendNtfy(p: NtfyPayload): Promise<NtfyResult> {
  * 用最簡單 base64 encoded-word，保證 ntfy app 端會解碼回中文。
  */
 function encodeRfc2047(s: string): string {
-  // eslint-disable-next-line no-control-regex
   if (/^[\x00-\x7F]*$/.test(s)) return s;
   const b64 = Buffer.from(s, 'utf-8').toString('base64');
   return `=?utf-8?B?${b64}?=`;

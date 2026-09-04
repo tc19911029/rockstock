@@ -29,7 +29,7 @@ interface ThemeTagProps {
   className?: string;
 }
 
-export function ThemeTag({ market, code, hotMap, fallback, className }: ThemeTagProps) {
+export function ThemeTag({ market: _market, code, hotMap, fallback, className }: ThemeTagProps) {
   const refs = hotMap.get(code) ?? [];
 
   // 台股 hotMap 是市場題材；未命中時才退回掃描結果內的官方產業。

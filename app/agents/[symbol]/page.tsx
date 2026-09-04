@@ -367,11 +367,6 @@ function VerdictBadge({ verdict, size = 'md' }: { verdict: Verdict; size?: 'sm' 
   );
 }
 
-function todayYmd(): string {
-  const tpe = new Date(Date.now() + 8 * 3600_000);
-  return tpe.toISOString().slice(0, 10);
-}
-
 /** 最近一個工作日（不含今天）— 週末/週一早上打開時，今天通常還沒有資料 */
 function lastBusinessDay(): string {
   const tpe = new Date(Date.now() + 8 * 3600_000);

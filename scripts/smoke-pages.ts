@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
   console.log('[smoke] ⚠️ 限制：本 script 只驗 server-side response，client-side hydration crash');
   console.log('         (例如 0513 chart pivots-empty Canvas crash) 抓不到。要完整覆蓋');
-  console.log('         需 Playwright 真瀏覽器環境，待後續加裝。');
+  console.log('         請另跑 npm run test:e2e，以 Playwright 真瀏覽器環境驗證。');
 }
 
 main().catch((e) => {

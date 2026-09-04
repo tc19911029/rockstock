@@ -3,7 +3,7 @@
  *
  * isHit = 股價沒大漲 + 融資大減 + 法人大買
  */
-import { InstAccumParams, DEFAULT_PARAMS, InstBuyMode } from './types';
+import { InstAccumParams, DEFAULT_PARAMS } from './types';
 
 export interface Candle { date: string; close: number; volume: number }
 

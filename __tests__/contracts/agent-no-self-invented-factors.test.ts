@@ -221,15 +221,10 @@ describe('Technical Agent — 禁止自創技術指標關鍵字', () => {
   test('合法 KD/MACD 複合句子通過（無誤判）', () => {
     const answer = makeValidAnswer({
       reasoning: makeCleanReasoning('kd',
-        'KD 由低檔 30 以下黃金死亡交叉以外的位置向上反彈（本句測試：「死亡」兩字只有在「死亡交叉」合在一起才違規）',
+        'KD 由低檔 30 以下向上反彈，MACD 柱狀體同步翻正，c-indicator 成立',
       ),
     });
-    // 「死亡」單字不在禁詞，只有「死亡交叉」完整詞組才違規
-    // 此測試句子含有「死亡交叉以外」——實際上 includes('死亡交叉') 仍為 true，
-    // 但業務邏輯上是在說「非黃金死亡交叉」，屬邊界 case。
-    // 此 test 故意標為通過 → 若未來要精確化可用詞邊界正則
-    // 目前接受工具不夠精確的保守限制（不允許任何含該詞句子）
-    // 此 test 主要驗證 KNOWN_BOOK_RULE_IDS 白名單正確
+    expect(validateNoSelfInventedFactors(answer)).toEqual({ ok: true });
     for (const id of ['c-trend', 'c-kbar', 'c-ma', 'c-position', 'c-volume', 'c-indicator']) {
       expect(KNOWN_BOOK_RULE_IDS.has(id)).toBe(true);
     }

@@ -20,7 +20,7 @@ import { fetchCapitalFlow, type CapitalFlowDay } from '@/lib/datasource/EastMone
 import { fetchCnMarginHistory, type CnMarginDay } from './datasource/emMarginBalance';
 import { PERF_PERIODS, INST_PERIODS } from '@/lib/themes/perfPeriods';
 import { shiftDateYmd } from '@/lib/dateDefaults';
-import { evaluateStockSignal, type StockSignal } from '@/lib/analysis/stockSignal';
+import type { StockSignal } from '@/lib/analysis/stockSignal';
 
 /** 一檔成分股的當日狀態 + 1~10/20 日滾動報酬（rets 對齊 PERF_PERIODS） */
 export interface CnMemberPerf {

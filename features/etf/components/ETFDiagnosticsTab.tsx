@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { findETF, chartLoadSymbol, shortETFName } from '@/lib/etf/etfList';
+import { chartLoadSymbol, shortETFName } from '@/lib/etf/etfList';
 import {
   ETF_FOUR_PITFALLS,
   ETF_SCREENING_POINTS,

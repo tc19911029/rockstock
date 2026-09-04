@@ -74,7 +74,6 @@ export function calcTradeCost(
   feeDiscount = 1.0,
 ): TradeCost {
   const amount = price * shares;
-  const cnSide = side === 'BUY' ? 'buy' : 'sell';
 
   if (market === 'TW') {
     // calcTWCost 回傳 fee + tax 合併，拆開：

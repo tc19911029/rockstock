@@ -16,7 +16,7 @@ import type { CandleWithIndicators, Candle } from '@/types';
  * 產生「多頭趨勢」K 線序列：價格從 80 階梯上漲到 100
  * 含 MA5/10/20/60 indicator（簡單算術平均）
  */
-export function makeBullishCandles(n: number, startPrice = 80, endPrice = 100, symbol = 'TEST.TW'): CandleWithIndicators[] {
+export function makeBullishCandles(n: number, startPrice = 80, endPrice = 100, _symbol = 'TEST.TW'): CandleWithIndicators[] {
   const out: CandleWithIndicators[] = [];
   const step = (endPrice - startPrice) / Math.max(1, n - 1);
 

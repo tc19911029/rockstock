@@ -26,8 +26,6 @@ import {
   calculateInitialStopLoss,
   checkAbsoluteStopLoss,
 } from '../lib/sell/v12StopLoss';
-import type { V12Letter } from '../lib/analysis/v12Signals';
-
 // ── Phase 1.6 LockWatch ──────────────────────────────────────────────────
 
 describe('v12 Phase 1.6 — LockWatch 機制', () => {

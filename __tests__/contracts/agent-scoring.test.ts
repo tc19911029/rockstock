@@ -45,7 +45,7 @@ import type {
 
 describe('SIGNAL_SPECS_BY_AGENT 完整性', () => {
   it('4 個 agent 的非 penalty weight 加總 = 1.0(誤差 < 0.01)', () => {
-    for (const [agent, specs] of Object.entries(SIGNAL_SPECS_BY_AGENT)) {
+    for (const specs of Object.values(SIGNAL_SPECS_BY_AGENT)) {
       const sum = specs
         .filter((s) => !s.penalty)
         .reduce((a, s) => a + s.weight, 0);
