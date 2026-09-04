@@ -57,7 +57,7 @@ const PROBES: Probe[] = [
   },
   {
     name: 'api/portfolio/v12-signals N letter',
-    url: '/api/portfolio/v12-signals?symbol=4967.TW&market=TW&entryPrice=200&buyDate=2026-04-25&triggerSignal=N&operationMode=short&patternTargetPrice=267.5&patternStopPrice=203.67',
+    url: '/api/portfolio/v12-signals?symbol=4967.TW&market=TW&entryPrice=200&buyDate=2026-04-25&triggerSignal=N&operationMode=short&managementStrategy=short-ma&patternTargetPrice=267.5&patternStopPrice=203.67',
     expect: (j) => {
       const body = j as {
         letter?: string;
