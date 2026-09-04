@@ -28,6 +28,7 @@ import { fetchYahooBrokerTrades } from '@/lib/datasource/YahooBrokerScraper';
 import { appendBrokerDay } from '@/lib/chips/BrokerStorage';
 import { readTurnoverRank } from '@/lib/scanner/TurnoverRank';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import { Y_TRACK_WARMING_TOP_N } from '@/lib/chips/yTrackReadiness';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -35,7 +36,7 @@ export const maxDuration = 300;
 const INST_DIR = path.join(process.cwd(), 'data', 'chips', 'TW', 'inst');
 const BROKER_DIR = path.join(process.cwd(), 'data', 'chips', 'TW', 'broker');
 // 抓大於策略前500的緩衝池，讓新進前500股票已累積足夠的10/20日歷史。
-const DEFAULT_LIMIT = 800;
+const DEFAULT_LIMIT = Y_TRACK_WARMING_TOP_N;
 const CONCURRENCY = 6;
 const MIN_COVERAGE = 0.98;
 

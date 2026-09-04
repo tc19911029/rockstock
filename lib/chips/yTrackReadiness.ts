@@ -13,7 +13,11 @@ const BROKER_DIR = path.join(process.cwd(), 'data', 'chips', 'TW', 'broker');
 const EXACT_DIR = path.join(process.cwd(), 'data', 'chips', 'TW', 'finmind-branch');
 
 export const Y_TRACK_CURRENT_MIN_COVERAGE = 0.98;
-export const Y_TRACK_STRATEGY_MIN_COVERAGE = 0.94;
+// 逐股仍要求完整 10 日窗，缺任一天的股票不會進策略；這個門檻只控制整批是否可跑。
+// 維持至少 465/500 檔可評估，容忍成交額前 500 每日換股造成的短期 warming 缺口。
+// 主力／法人日常預熱前 800 後，這些新進股票會在進入前 500 前先累積歷史。
+export const Y_TRACK_STRATEGY_MIN_COVERAGE = 0.93;
+export const Y_TRACK_WARMING_TOP_N = 800;
 
 export type YTrackConcentrationMode = 'finmind_exact' | 'yahoo_daily_approximate';
 

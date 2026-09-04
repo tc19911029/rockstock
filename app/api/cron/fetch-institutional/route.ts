@@ -14,6 +14,7 @@ import { readTurnoverRank } from '@/lib/scanner/TurnoverRank';
 import { syncInstitutionalDailyToStockCache } from '@/lib/chips/institutionalDailySync';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { redactSensitiveText } from '@/lib/datasource/curlFetch';
+import { Y_TRACK_WARMING_TOP_N } from '@/lib/chips/yTrackReadiness';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -55,7 +56,18 @@ async function syncCurrentUniverse(
   sourceReady: { twse: boolean; tpex: boolean },
 ) {
   const rank = await readTurnoverRank('TW');
-  const ranked = rank ? Array.from(rank.symbols).slice(0, rank.topN) : [];
+  let ranked = rank ? Array.from(rank.symbols) : [];
+  // Y 軌用成交額前 500；法人和主力都預熱前 800，避免新進前 500 的股票
+  // 因過去 5/10 日沒有逐股快取而讓整條 Y 軌 fail closed。
+  if (ranked.length < Y_TRACK_WARMING_TOP_N) {
+    const { TaiwanScanner } = await import('@/lib/scanner/TaiwanScanner');
+    const { computeTurnoverRankAsOfDate } = await import('@/lib/scanner/TurnoverRank');
+    const all = await new TaiwanScanner().getStockList();
+    ranked = Array.from((await computeTurnoverRankAsOfDate(
+      'TW', all, date, Y_TRACK_WARMING_TOP_N,
+    )).keys());
+  }
+  ranked = ranked.slice(0, Y_TRACK_WARMING_TOP_N);
   // 停牌／當日無成交股沒有法人列是正確狀態，不應補成 0 或列為缺資料。
   const universe: string[] = [];
   const concurrency = 40;

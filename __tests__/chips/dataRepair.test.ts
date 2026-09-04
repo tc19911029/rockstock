@@ -5,8 +5,17 @@ import { parseTpexInstitutionalRows } from '@/lib/datasource/TpexInstitutional';
 import { normaliseChipResponse } from '@/lib/agents/agents/chipAgent';
 import { assessChipCoverageLevel } from '@/lib/health/chipCoverage';
 import { redactSensitiveText } from '@/lib/datasource/curlFetch';
+import {
+  Y_TRACK_STRATEGY_MIN_COVERAGE,
+  Y_TRACK_WARMING_TOP_N,
+} from '@/lib/chips/yTrackReadiness';
 
 describe('籌碼資料修復契約', () => {
+  test('Y 軌逐股完整窗至少保留 93%，並用前 800 預熱新進前 500', () => {
+    expect(Y_TRACK_STRATEGY_MIN_COVERAGE).toBe(0.93);
+    expect(Y_TRACK_WARMING_TOP_N).toBe(800);
+  });
+
   test('TPEx 法人欄位映射使用外資/投信/自營合計欄', () => {
     const row = Array.from({ length: 24 }, () => '0');
     row[0] = '6488';
