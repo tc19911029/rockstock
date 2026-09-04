@@ -9,6 +9,7 @@
 
 import type { Candle } from '@/types';
 import { isZeroVolumeFlatBar } from './candleSanitizers';
+import { filterIncompleteMarketIndexCandles, isTrackedMarketIndex } from './marketIndexQuality';
 
 const IS_VERCEL = !!process.env.VERCEL;
 
@@ -363,8 +364,14 @@ async function _writeCandleFileImpl(
     date: c.date, open: c.open, high: c.high,
     low: c.low, close: c.close, volume: c.volume,
   }));
-  const incoming = sanitizeOHLC(symbol, market, rawIncoming)
+  const sanitized = sanitizeOHLC(symbol, market, rawIncoming)
     .filter((c) => !isZeroVolumeFlatBar(c));
+  const incoming = filterIncompleteMarketIndexCandles(symbol, sanitized);
+  if (isTrackedMarketIndex(symbol) && incoming.length < sanitized.length) {
+    console.warn(
+      `[writeCandleFile] ${market}:${symbol} 拒寫 ${sanitized.length - incoming.length} 根不完整指數 OHLCV（volume 必須 > 0）`,
+    );
+  }
   if (incoming.length === 0) {
     console.warn(`[writeCandleFile] ${market}:${symbol} 所有 incoming bar 都被 sanitize 砍掉，skip 寫入`);
     return;

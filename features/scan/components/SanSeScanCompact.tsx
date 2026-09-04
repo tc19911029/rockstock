@@ -749,7 +749,7 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                         className="text-[9px] font-mono text-amber-400/80 bg-amber-900/20 px-1 py-px rounded"
                         title={data?.turnoverCap && data.turnoverCap < 10000 ? `當日成交額排名（全市場前 ${data.turnoverCap} 內）` : '當日成交額排名（全市場）'}
                       >
-                        成交量第{h.turnoverRank}名
+                        成交額第{h.turnoverRank}名
                       </span>
                     )}
                   </div>

@@ -21,11 +21,9 @@ describe('TPEx ^TWOII 官方月資料', () => {
     }]);
   });
 
-  test('成交量端點失敗時仍保留可用 OHLC', () => {
+  test('成交量端點失敗時不輸出會被封存的零量 K 棒', () => {
     expect(mergeTpexIndexTables({ tables: [{ data: [
       ['2026/08/13', '391.82', '408.21', '390.71', '406.12', '4.10'],
-    ] }] })).toEqual([{
-      date: '2026-08-13', open: 391.82, high: 408.21, low: 390.71, close: 406.12, volume: 0,
-    }]);
+    ] }] })).toEqual([]);
   });
 });

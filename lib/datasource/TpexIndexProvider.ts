@@ -84,7 +84,7 @@ export async function fetchTpexIndexMonth(yyyymm: string): Promise<Candle[]> {
 
   const volumeResponse = volumeResult.status === 'fulfilled' ? volumeResult.value.data : undefined;
   if (volumeResult.status !== 'fulfilled') {
-    console.warn(`[TpexIndexProvider] ${yyyymm} 成交量抓取失敗，OHLC 仍可用:`, volumeResult.reason);
+    console.warn(`[TpexIndexProvider] ${yyyymm} 成交量抓取失敗，拒絕輸出不完整 OHLCV:`, volumeResult.reason);
   }
   const candles = mergeTpexIndexTables(ohlcResult.value.data, volumeResponse);
   if (candles.length > 0) monthCache.set(yyyymm, { at: Date.now(), candles });
@@ -113,7 +113,9 @@ export function mergeTpexIndexTables(
     const low = toNum(row[3]);
     const close = toNum(row[4]);
     if (!rowDate || open <= 0 || high <= 0 || low <= 0 || close <= 0) continue;
-    candles.push({ date: rowDate, open, high, low, close, volume: volumes.get(rowDate) ?? 0 });
+    const volume = volumes.get(rowDate);
+    if (!volume || volume <= 0) continue;
+    candles.push({ date: rowDate, open, high, low, close, volume });
   }
   candles.sort((a, b) => a.date.localeCompare(b.date));
   return candles;

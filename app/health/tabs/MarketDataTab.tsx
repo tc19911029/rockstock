@@ -27,6 +27,11 @@ interface MarketHealthLite {
   limitUpConsistency?: { level: string; suspicious: number };
   l1l2Consistency?: { level: string; diff1pct: number; diff5pct: number; total: number; reason?: string; snapshotUpdatedAt?: string };
   strategyReadiness?: { status: string; readyCount: number; requiredCount: number; missing: string[]; invalid: string[] };
+  indexDataQuality?: {
+    level: 'ok' | 'critical';
+    expectedDate: string;
+    indexes: Array<{ symbol: string; lastDate: string | null; volume: number | null; complete: boolean; reason?: string }>;
+  };
 }
 
 interface DependencyHealth {
@@ -69,6 +74,7 @@ function deriveMarketLight(m: MarketHealthLite | null): LightLevel {
   if (m.strategyReadiness && m.strategyReadiness.status !== 'ready') return 'red';
   if (m.limitUpConsistency?.level === 'critical') return 'red';
   if (m.l1l2Consistency?.level === 'critical') return 'red';
+  if (m.indexDataQuality?.level === 'critical') return 'red';
 
   if (m.health === 'warning') return 'yellow';
   if (m.coverageRate != null && m.coverageRate < 0.97) return 'yellow';
@@ -322,7 +328,16 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
           {/* L1 歷史K */}
           <Section title="歷史日K（每日盤後封存）">
             <Row label="健康度" value={zhStatus(data.health)} bold
-              hint="健康度 = 覆蓋率 + 近 3 日落後支數綜合判定；歷史 gap（容忍範圍內缺日）不會把健康度拉到非正常" />
+              hint="健康度 = 個股覆蓋率 + 近 3 日落後支數 + 關鍵大盤指數 OHLCV 完整性；歷史 gap（容忍範圍內缺日）不會把健康度拉到非正常" />
+            <Row
+              label="大盤指數 OHLCV"
+              value={zhStatus(data.indexDataQuality?.level ?? 'unknown')}
+              bold
+              warn={data.indexDataQuality?.level === 'critical'}
+              hint={data.indexDataQuality?.indexes.map((item) =>
+                `${item.symbol}: ${item.complete ? `${item.lastDate} V=${item.volume}` : `${item.reason ?? 'incomplete'}（last=${item.lastDate ?? 'none'}）`}`
+              ).join('｜') ?? '檢查關鍵大盤指數的指定交易日價格與成交量是否完整'}
+            />
             <Row label="覆蓋率" value={fmtPct(data.coverageRate)}
               hint="今日有 K 線資料的股票數 / 今日實際交易股票數；已確認停牌、無成交或尚未開始交易者不列入分母" />
             <Row label="停牌／當日無成交" value={`${data.stocksNoTrade ?? 0} 支`}

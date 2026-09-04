@@ -25,6 +25,7 @@ import { checkCronAuth } from '@/lib/api/cronAuth';
 import { consumeBackfillQueue } from '@/lib/datasource/BackfillConsumer';
 import { fetchJsonWithCurlFallback } from '@/lib/datasource/curlFetch';
 import { rocDateToAd } from '@/lib/datasource/eodSettleBatch';
+import { isCompleteMarketIndexCandle, shouldRefreshMarketIndex } from '@/lib/datasource/marketIndexQuality';
 
 // ── TWSE MI_INDEX 官方日收盤（上市，集合競價後才更新） ───────────────────────────
 
@@ -333,13 +334,16 @@ export async function GET(req: NextRequest) {
       const indexSymbols = market === 'TW' ? ['^TWII', '^TWOII'] : ['000001.SS'];
       for (const indexSymbol of indexSymbols) {
         const idxExisting = await readCandleFile(indexSymbol, market);
-        if (!idxExisting || idxExisting.lastDate < lastTradingDate) {
+        if (shouldRefreshMarketIndex(indexSymbol, idxExisting, lastTradingDate)) {
           const idxCandles = await scanner.fetchCandles(indexSymbol);
-          if (idxCandles.length > 0) {
+          const hasCompleteTarget = idxCandles.some(
+            (candle) => candle.date === lastTradingDate && isCompleteMarketIndexCandle(candle),
+          );
+          if (idxCandles.length > 0 && hasCompleteTarget) {
             await saveLocalCandles(indexSymbol, market, idxCandles);
             console.info(`[download-candles] ${market} 指數 ${indexSymbol}: ${idxCandles.length} 根已更新到 ${idxCandles[idxCandles.length - 1]?.date}`);
           } else {
-            console.warn(`[download-candles] ${market} 指數 ${indexSymbol}: 無資料（來源回空）`);
+            console.warn(`[download-candles] ${market} 指數 ${indexSymbol}: 目標日 ${lastTradingDate} OHLCV 不完整，保留待下輪重試`);
           }
         }
       }

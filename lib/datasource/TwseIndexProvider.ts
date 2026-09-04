@@ -50,7 +50,11 @@ function listMonths(startDate: string, endDate: string): string[] {
   return out;
 }
 
-/** 純解析器：無效 OHLC 不進圖，成交量以官方 FMTQIK 為準。 */
+/**
+ * 純解析器：無效 OHLC 或缺少官方成交量都不進圖。
+ * 缺量代表 FMTQIK 尚未公布／抓取失敗，不可偽裝成合法的 volume=0；
+ * 少掉的日期會令排程保持 stale，待下輪來源恢復後自動補回。
+ */
 export function mergeTwseIndexMonth(
   response: TwseIndexResponse,
   volumes: Map<string, { volume: number }>,
@@ -63,13 +67,15 @@ export function mergeTwseIndexMonth(
     const low = toNum(row[3]);
     const close = toNum(row[4]);
     if (!date || open <= 0 || high <= 0 || low <= 0 || close <= 0) continue;
+    const volume = volumes.get(date)?.volume;
+    if (!volume || volume <= 0) continue;
     candles.push({
       date,
       open,
       high,
       low,
       close,
-      volume: volumes.get(date)?.volume ?? 0,
+      volume,
     });
   }
   return candles.sort((a, b) => a.date.localeCompare(b.date));
@@ -99,7 +105,7 @@ export async function fetchTwseIndexMonth(yyyymm: string): Promise<Candle[]> {
   }
   const volumes = volumeResult.status === 'fulfilled' ? volumeResult.value : new Map();
   if (volumeResult.status !== 'fulfilled') {
-    console.warn(`[TwseIndexProvider] ${yyyymm} 成交量抓取失敗，OHLC 仍可用:`, volumeResult.reason);
+    console.warn(`[TwseIndexProvider] ${yyyymm} 成交量抓取失敗，拒絕輸出不完整 OHLCV:`, volumeResult.reason);
   }
   const candles = mergeTwseIndexMonth(ohlcResult.value.data, volumes);
   if (candles.length > 0) monthCache.set(yyyymm, { at: Date.now(), candles });

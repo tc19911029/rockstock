@@ -30,4 +30,13 @@ describe('TWSE 加權指數官方月資料', () => {
     }, new Map());
     expect(rows).toEqual([]);
   });
+
+  test('官方成交量尚未公布時不會把缺值寫成零量 K 棒', () => {
+    const rows = mergeTwseIndexMonth({
+      data: [
+        ['115/09/04', '45,991.28', '46,620.96', '45,966.86', '46,551.13'],
+      ],
+    }, new Map());
+    expect(rows).toEqual([]);
+  });
 });

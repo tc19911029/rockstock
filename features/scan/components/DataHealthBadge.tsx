@@ -47,6 +47,10 @@ interface MarketHealth {
   l2: L2Status;
   l2Sources?: L2SourceInfo;
   l4?: L4Status;
+  indexDataQuality?: {
+    level: 'ok' | 'critical';
+    indexes: Array<{ symbol: string; lastDate: string | null; volume: number | null; complete: boolean; reason?: string }>;
+  };
 }
 
 interface DataHealthProps {
@@ -261,6 +265,11 @@ export function DataHealthBadge({ market, forceDown }: DataHealthProps) {
             <div className="font-medium text-foreground mb-1">L1 歷史K線</div>
             <div className="space-y-0.5 pl-2">
               <Row label="狀態"><StatusSpan status={health.health}>{l1Label}</StatusSpan></Row>
+              <Row label="大盤指數">
+                <StatusSpan status={health.indexDataQuality?.level ?? 'missing'}>
+                  {health.indexDataQuality?.level === 'ok' ? '完整' : '異常'}
+                </StatusSpan>
+              </Row>
               <Row label="L1 覆蓋率">
                 <span className={health.coverageRate != null && health.coverageRate >= 0.99 ? 'text-green-400 font-medium' : 'text-yellow-400'}>
                   {coverage}

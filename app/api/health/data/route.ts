@@ -26,6 +26,12 @@ import { loadStrategyReadiness, type StrategyReadiness } from '@/lib/health/stra
 import { isFinalTradingSnapshot } from '@/lib/health/l1l2Snapshot';
 import { getActiveStrategyServer } from '@/lib/strategy/activeStrategyServer';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
+import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
+import {
+  evaluateMarketIndexQuality,
+  MARKET_INDEX_SYMBOLS,
+  type MarketIndexQualityStatus,
+} from '@/lib/datasource/marketIndexQuality';
 
 export const runtime = 'nodejs';
 
@@ -109,6 +115,8 @@ interface MarketHealth {
   l1l2Consistency: L1L2ConsistencyStatus;
   /** 啟用中的正式策略是否都產出目標交易日結果。 */
   strategyReadiness: StrategyReadiness;
+  /** 關鍵大盤指數指定交易日是否具備完整 OHLCV。 */
+  indexDataQuality: MarketIndexQualityStatus;
   /** 完整報告（可選，?detail=1 時返回） */
   report?: VerifyReport;
 }
@@ -138,6 +146,26 @@ interface L1L2ConsistencyStatus {
   snapshotUpdatedAt?: string;
   /** 樣本（最多 10 檔，偏差最大） */
   samples: Array<{ symbol: string; l1: number; l2: number; pct: number }>;
+}
+
+async function getIndexDataQuality(
+  market: 'TW' | 'CN',
+  expectedDate: string,
+): Promise<MarketIndexQualityStatus> {
+  const symbols = MARKET_INDEX_SYMBOLS[market];
+  const indexes = await Promise.all(symbols.map(async (symbol) =>
+    evaluateMarketIndexQuality(symbol, await readCandleFile(symbol, market), expectedDate)));
+  return {
+    level: indexes.every((item) => item.complete) ? 'ok' : 'critical',
+    expectedDate,
+    indexes,
+  };
+}
+
+function mergeHealthWithIndexQuality(base: string, indexLevel: MarketIndexQualityStatus['level']): string {
+  if (base === 'no_report') return base;
+  if (indexLevel === 'critical') return 'critical';
+  return base;
 }
 
 function getTodayDate(market: 'TW' | 'CN'): string {
@@ -408,9 +436,10 @@ async function getMarketHealth(
   const consistencyPromise = getLimitUpConsistency(market);
   const l1l2Promise = getL1L2Consistency(market);
   const strategyPromise = loadStrategyReadiness(market, lastTrading, strategyId);
+  const indexDataQualityPromise = getIndexDataQuality(market, lastTrading);
 
   // 嘗試讀取最近 7 天的報告（可能假日/週末沒報告 — 週一要能回看到上週五）
-  let l1Result: Omit<MarketHealth, 'l2' | 'l2Sources' | 'l4' | 'limitUpConsistency' | 'l1l2Consistency' | 'strategyReadiness'> | null = null;
+  let l1Result: Omit<MarketHealth, 'l2' | 'l2Sources' | 'l4' | 'limitUpConsistency' | 'l1l2Consistency' | 'strategyReadiness' | 'indexDataQuality'> | null = null;
   for (let daysBack = 0; daysBack < 7; daysBack++) {
     const d = new Date(lastTrading + 'T12:00:00');
     d.setDate(d.getDate() - daysBack);
@@ -438,8 +467,8 @@ async function getMarketHealth(
     }
   }
 
-  const [l2, l4, limitUpConsistency, l1l2Consistency, strategyReadiness] = await Promise.all([
-    l2Promise, l4Promise, consistencyPromise, l1l2Promise, strategyPromise,
+  const [l2, l4, limitUpConsistency, l1l2Consistency, strategyReadiness, indexDataQuality] = await Promise.all([
+    l2Promise, l4Promise, consistencyPromise, l1l2Promise, strategyPromise, indexDataQualityPromise,
   ]);
 
   // L2 數據源狀態
@@ -461,7 +490,17 @@ async function getMarketHealth(
   };
 
   if (l1Result) {
-    return { ...l1Result, l2, l2Sources, l4, limitUpConsistency, l1l2Consistency, strategyReadiness };
+    return {
+      ...l1Result,
+      health: mergeHealthWithIndexQuality(l1Result.health, indexDataQuality.level),
+      l2,
+      l2Sources,
+      l4,
+      limitUpConsistency,
+      l1l2Consistency,
+      strategyReadiness,
+      indexDataQuality,
+    };
   }
 
   return {
@@ -484,6 +523,7 @@ async function getMarketHealth(
     limitUpConsistency,
     l1l2Consistency,
     strategyReadiness,
+    indexDataQuality,
   };
 }
 

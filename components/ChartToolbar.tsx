@@ -210,8 +210,9 @@ export default function ChartToolbar({
   const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
   const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
   // 台股指數（^TWII / ^TWOII）：三色套組 tab + 主力/捕撈獨立開關比照台股顯示；
-  // 不併進 isTW，避免動到量(張)標籤、籌碼/大戶副圖判斷。CN 指數 000001.SS 已由 isCN(.SS) 涵蓋。
+  // 不併進 isTW，避免錯開籌碼/大戶副圖；成交量單位另外用 usesTwVolumeUnit 判斷。
   const isTwIndex = ticker ? /^\^TW/i.test(ticker) : false;
+  const usesTwVolumeUnit = isTW || isTwIndex;
   // 指標套組 tab 目前選中誰（從 toggle 反推；僅在三色可用市場 TW/CN 才顯示）
   const activePreset = activeChartPreset(maToggles, showBollinger, showShuangB, indicators, showPivots);
   // 「籌碼」合併鈕亮燈狀態：該市場的法人/主力散戶副圖任一開啟即亮
@@ -292,7 +293,7 @@ export default function ChartToolbar({
           <span className="text-muted-foreground/70">開<span className="text-foreground/90 ml-0.5 tabular-nums">{candle.open.toFixed(2)}</span></span>
           <span className="text-muted-foreground/70">高<span className="text-bull ml-0.5 tabular-nums">{candle.high.toFixed(2)}</span></span>
           <span className="text-muted-foreground/70">低<span className="text-bear ml-0.5 tabular-nums">{candle.low.toFixed(2)}</span></span>
-          <span className="text-muted-foreground/70">量{isTW ? '(張)' : isCN ? '(手)' : ''}<span className="text-foreground/70 ml-0.5 tabular-nums">{(isCN ? Math.round(candle.volume / 100) : candle.volume).toLocaleString()}</span></span>
+          <span className="text-muted-foreground/70">量{usesTwVolumeUnit ? '(張)' : isCN ? '(手)' : ''}<span className="text-foreground/70 ml-0.5 tabular-nums">{(isCN ? Math.round(candle.volume / 100) : candle.volume).toLocaleString()}</span></span>
         </div>
         {unrealizedPct !== null && (
           <span className="ml-auto flex items-center gap-2 text-xs">

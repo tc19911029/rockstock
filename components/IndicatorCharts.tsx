@@ -1052,11 +1052,11 @@ export default function IndicatorCharts({ candles, hoverCandle, indicators, tick
   const isTW = ticker ? (/\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker)) : false;
   const isCN = ticker ? (/\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker)) : false;
   // 台股指數（^TWII 加權 / ^TWOII 櫃買）：三色副圖（主力狀態/捕撈季節）比照台股放行；
-  // 不併進 isTW，避免動到量(張)標籤與籌碼副圖的判斷。CN 指數 000001.SS 已由 isCN(.SS) 涵蓋。
+  // 不併進 isTW，避免錯開籌碼副圖；成交量副圖則明確傳入 isTW || isTwIndex。
   const isTwIndex = ticker ? /^\^TW/i.test(ticker) : false;
   const show = indicators ?? { macd: true, kd: true, volume: true, rsi: false };
   const panels = [
-    show.volume && <div key="vol" className="flex-1 min-h-0 bg-card"><VolumeChart candles={candles} hoverCandle={hoverCandle} isTW={isTW} isCN={isCN} /></div>,
+    show.volume && <div key="vol" className="flex-1 min-h-0 bg-card"><VolumeChart candles={candles} hoverCandle={hoverCandle} isTW={isTW || isTwIndex} isCN={isCN} /></div>,
     show.kd && <div key="kd" className="flex-1 min-h-0 bg-card"><KDChart candles={candles} hoverCandle={hoverCandle} /></div>,
     show.rsi && <div key="rsi" className="flex-1 min-h-0 bg-card"><RSIChart candles={candles} hoverCandle={hoverCandle} /></div>,
     show.macd && <div key="macd" className="flex-1 min-h-0 bg-card"><MACDChart candles={candles} hoverCandle={hoverCandle} /></div>,

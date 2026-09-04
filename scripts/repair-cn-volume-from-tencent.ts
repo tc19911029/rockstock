@@ -44,12 +44,14 @@ function hasUnitStep(c: Candle[]): boolean {
   let files = (await fs.readdir(dir)).filter((f) => /^\d{6}\.(SS|SZ)\.json$/.test(f) && f !== '000001.SS.json');
   if (ONLY) files = files.filter((f) => f === `${ONLY}.json`);
 
-  // 先篩出「有內部量階」的目標檔
+  // 先篩出「有內部量階」的目標檔；短歷史／退市檔也必須納入，不能用固定 bars 門檻漏掉。
   const targets: string[] = [];
   for (const f of files) {
     try {
       const c = JSON.parse(await fs.readFile(path.join(dir, f), 'utf8')).candles as Candle[];
-      if (Array.isArray(c) && c.length >= 60 && (ONLY || hasUnitStep(c))) targets.push(f);
+      if (!Array.isArray(c)) continue;
+      const isTarget = ONLY ? c.length > 0 : c.length >= 2 && hasUnitStep(c);
+      if (isTarget) targets.push(f);
     } catch { /* skip */ }
   }
   console.log(`目標(有內部量階的混用檔): ${targets.length} 檔  ${APPLY ? '【--apply 覆蓋】' : '(dry-run)'}`);

@@ -4,6 +4,7 @@ import {
   sanitizeOHLC,
   shouldBlockSingleCandleInitialization,
 } from '@/lib/datasource/CandleStorageAdapter';
+import { filterIncompleteMarketIndexCandles } from '@/lib/datasource/marketIndexQuality';
 
 describe('EOD data guards', () => {
   test.each([
@@ -48,5 +49,13 @@ describe('EOD data guards', () => {
     expect(shouldBlockSingleCandleInitialization(null, false, 1)).toBe(false);
     expect(shouldBlockSingleCandleInitialization(null, true, 1)).toBe(true);
     expect(shouldBlockSingleCandleInitialization(null, true, 2)).toBe(false);
+  });
+
+  test('共用寫入邊界會拒絕零成交量的大盤指數，但不誤殺一般股票', () => {
+    const zeroVolume = [{
+      date: '2026-09-04', open: 45991.28, high: 46620.96, low: 45966.86, close: 46551.13, volume: 0,
+    }];
+    expect(filterIncompleteMarketIndexCandles('^TWII', zeroVolume)).toEqual([]);
+    expect(filterIncompleteMarketIndexCandles('2330.TW', zeroVolume)).toEqual(zeroVolume);
   });
 });

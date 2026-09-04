@@ -27,6 +27,11 @@ import { spotCheckL1 } from '@/lib/datasource/L1SpotCheck';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { ACTIVE_ETF_LIST } from '@/lib/etf/etfList';
 import { checkCronAuth } from '@/lib/api/cronAuth';
+import {
+  isCompleteMarketIndexCandle,
+  isTrackedMarketIndex,
+  shouldRefreshMarketIndex,
+} from '@/lib/datasource/marketIndexQuality';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -187,7 +192,10 @@ export async function GET(req: NextRequest) {
       for (const proxy of proxySymbols) {
         try {
           const proxyExisting = await readCandleFile(proxy, market);
-          if (proxyExisting && proxyExisting.lastDate >= lastTradingDate) continue;
+          const isMarketIndex = isTrackedMarketIndex(proxy);
+          if (isMarketIndex
+            ? !shouldRefreshMarketIndex(proxy, proxyExisting, lastTradingDate)
+            : !!proxyExisting && proxyExisting.lastDate >= lastTradingDate) continue;
           let candles = await scanner.fetchCandles(proxy);
           // scanner 內 ≥30 根才回傳；對新 ETF 落 fallback：直接打 TWSE STOCK_DAY 官方 API
           if (candles.length === 0 && fetchCandlesTWSE && /\.TW$/i.test(proxy)) {
@@ -195,11 +203,14 @@ export async function GET(req: NextRequest) {
             const direct = await fetchCandlesTWSE(code).catch(() => []);
             candles = direct as typeof candles;
           }
-          if (candles.length > 0) {
+          const hasCompleteTarget = !isMarketIndex || candles.some(
+            (candle) => candle.date === lastTradingDate && isCompleteMarketIndexCandle(candle),
+          );
+          if (candles.length > 0 && hasCompleteTarget) {
             await saveLocalCandles(proxy, market, candles);
             console.info(`[download-batch] ${market} proxy ${proxy}: ${candles.length} candles saved`);
           } else {
-            console.warn(`[download-batch] ${market} proxy ${proxy}: no candles from any source (likely too new)`);
+            console.warn(`[download-batch] ${market} proxy ${proxy}: target ${lastTradingDate} OHLCV incomplete; retry next run`);
           }
         } catch (err) {
           console.warn(`[download-batch] ${market} proxy ${proxy} failed:`, err);
