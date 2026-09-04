@@ -2,8 +2,8 @@
 
 ## 管理邊界（2026-08-03 稽核）
 
-`scripts/launchd/plists/` 目前管理 21 個啟用中 plist；此機器實際安裝 49 個
-`com.rockstock.*` 任務，其中 28 個是機器限定或選用、尚未收進啟用清單的排程。
+`scripts/launchd/plists/` 管理版控內的啟用清單；此機器另有機器限定或選用、
+未收進啟用清單的 `com.rockstock.*` 排程。實際數量一律以當下稽核結果為準。
 
 先執行只讀稽核：
 
@@ -13,7 +13,7 @@ zsh scripts/launchd/audit.sh
 
 輸出會標示 repo/安裝/載入狀態、漂移、Desktop 依賴、`npx` 與弱密鑰。
 `install-all.sh` 與 `uninstall-all.sh` 只會異動 repo 管理的清單，不會再觸碰
-額外 28 個機器限定任務。若已安裝版與 repo 不同，安裝器預設會停止；
+額外的機器限定任務。若已安裝版與 repo 不同，安裝器預設會停止；
 只有確定要以 repo 覆蓋時才使用 `--force`。
 
 `scripts/launchd/plists-disabled/` 保留已確認由 `instrumentation.node.ts` 覆蓋的舊排程，
