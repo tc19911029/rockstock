@@ -226,12 +226,15 @@ export async function register() {
     const data = await callRoute(
       `/api/cron/scan-intraday?market=${market}`,
       `${market} scan-intraday`,
-    ) as { data?: { resultCount?: number; skipped?: boolean; reason?: string } } | null;
+    ) as { data?: { resultCount?: number; counts?: Record<string, number>; skipped?: boolean; reason?: string } } | null;
     const payload = data?.data ?? data ?? {};
     if ((payload as { skipped?: boolean }).skipped) {
       console.log(`[local-cron] ${market} scan-intraday 跳過：${(payload as { reason?: string }).reason}`);
     } else {
-      console.log(`[local-cron] ${market} scan-intraday: ${(payload as { resultCount?: number }).resultCount ?? -1} 檔`);
+      const resultCount = (payload as { resultCount?: number; counts?: Record<string, number> }).resultCount
+        ?? (payload as { counts?: Record<string, number> }).counts?.['long-daily']
+        ?? -1;
+      console.log(`[local-cron] ${market} scan-intraday: ${resultCount} 檔`);
     }
   }
 
