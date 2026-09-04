@@ -30,6 +30,48 @@ export interface ScanDateEntry {
   mtfMode?: MtfMode;
   resultCount: number;
   scanTime: string;
+  /** 同日保留非空結果供畫面讀取時，另外記錄真正最新一次掃描嘗試。 */
+  latestAttemptCount?: number;
+  latestAttemptTime?: string;
+}
+
+/**
+ * 同一天可能同時有盤後結果與多筆盤中結果。畫面仍優先顯示非空結果，
+ * 但健康檢查必須看到真正最新一次嘗試（即使該輪為 0 檔），否則會誤報 L4 stale。
+ */
+export function deduplicateScanDateEntries(entries: readonly ScanDateEntry[]): ScanDateEntry[] {
+  const seen = new Map<string, ScanDateEntry>();
+  for (const entry of entries) {
+    const key = `${entry.date}-${entry.mtfMode}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, {
+        ...entry,
+        latestAttemptCount: entry.latestAttemptCount ?? entry.resultCount,
+        latestAttemptTime: entry.latestAttemptTime ?? entry.scanTime,
+      });
+      continue;
+    }
+
+    const entryHasResults = entry.resultCount > 0;
+    const existingHasResults = existing.resultCount > 0;
+    let selected = existing;
+    if (entryHasResults && !existingHasResults) selected = entry;
+    else if (entryHasResults === existingHasResults && entry.scanTime > existing.scanTime) selected = entry;
+
+    const existingAttemptTime = existing.latestAttemptTime ?? existing.scanTime;
+    const entryAttemptTime = entry.latestAttemptTime ?? entry.scanTime;
+    const latestAttempt = entryAttemptTime > existingAttemptTime
+      ? { count: entry.latestAttemptCount ?? entry.resultCount, time: entryAttemptTime }
+      : { count: existing.latestAttemptCount ?? existing.resultCount, time: existingAttemptTime };
+
+    seen.set(key, {
+      ...selected,
+      latestAttemptCount: latestAttempt.count,
+      latestAttemptTime: latestAttempt.time,
+    });
+  }
+  return [...seen.values()];
 }
 
 // ── loadScanSession in-memory cache ──────────────────────────────────────────
@@ -631,23 +673,9 @@ export async function listScanDates(
   // 1) 優先選 resultCount > 0 的 entry
   // 2) 同是有結果（或同為 0） → 取最新 scanTime
   // 這樣空 post_close（歷史日期 backfill 重跑變 0）不會遮蓋有結果的 intraday
-  const seen = new Map<string, ScanDateEntry>();
-  for (const e of entries) {
-    const key = `${e.date}-${e.mtfMode}`;
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, e);
-      continue;
-    }
-    const eHas = e.resultCount > 0;
-    const oHas = existing.resultCount > 0;
-    if (eHas && !oHas) seen.set(key, e);
-    else if (!eHas && oHas) { /* keep existing */ }
-    else {
-      // 兩邊同有結果或同為 0 → 取最新 scanTime
-      if (e.scanTime > existing.scanTime) seen.set(key, e);
-    }
-  }
+  const seen = new Map(
+    deduplicateScanDateEntries(entries).map(entry => [`${entry.date}-${entry.mtfMode}`, entry]),
+  );
 
   // 只允許「市場今天」用目前的成交額索引補算 count。
   // 歷史日期的成交額名次是當日截面；拿今天的 Top500 回頭重算會產生時點污染。

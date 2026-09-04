@@ -256,8 +256,10 @@ async function getL4Status(market: 'TW' | 'CN', strategyId: string): Promise<L4S
       };
     }
 
-    const ageSeconds = latest.scanTime
-      ? Math.round((Date.now() - new Date(latest.scanTime).getTime()) / 1000)
+    const lastAttemptTime = latest.latestAttemptTime ?? latest.scanTime;
+    const lastAttemptCount = latest.latestAttemptCount ?? latest.resultCount;
+    const ageSeconds = lastAttemptTime
+      ? Math.round((Date.now() - new Date(lastAttemptTime).getTime()) / 1000)
       : null;
 
     // 新鮮度判斷
@@ -270,8 +272,8 @@ async function getL4Status(market: 'TW' | 'CN', strategyId: string): Promise<L4S
       const lastTrading = getLastTradingDay(market);
       status = latest.date >= lastTrading ? 'fresh' : 'stale';
     } else if (ageSeconds != null) {
-      // 盤中：<10 分鐘 = fresh, 10-30 分鐘 = stale, >30 分鐘 = missing
-      if (ageSeconds < 10 * 60) status = 'fresh';
+      // 掃描每 10 分鐘排程一次；保留 2 分鐘執行／排程抖動緩衝，避免邊界假警報。
+      if (ageSeconds < 12 * 60) status = 'fresh';
       else if (ageSeconds < 30 * 60) status = 'stale';
       else status = 'missing';
     }
@@ -284,8 +286,8 @@ async function getL4Status(market: 'TW' | 'CN', strategyId: string): Promise<L4S
 
     return {
       lastScanDate: latest.date,
-      lastScanCount: latest.resultCount,
-      lastScanTime: latest.scanTime ?? null,
+      lastScanCount: lastAttemptCount,
+      lastScanTime: lastAttemptTime || null,
       totalDatesAvailable,
       todayHasIntraday,
       ageSeconds,
