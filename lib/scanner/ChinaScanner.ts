@@ -5,13 +5,13 @@ import { MarketConfig } from './types';
 import { detectTrend, TrendState } from '@/lib/analysis/trendAnalysis';
 import { CN_STOCKS } from './cnStocks';
 import { CN_STOCKS_GEM_STAR } from './cnStocksGemStar';
-import { fetchEastMoneyStockList, loadRemovedCNStockSymbols } from './eastMoneyApi';
+import { dedupeStockEntries, fetchEastMoneyStockList, loadRemovedCNStockSymbols } from './eastMoneyApi';
 
 /** 主板清單併入科創/創業（去重，主板優先保留原 entry）。 */
 function mergeGemStar(base: StockEntry[]): StockEntry[] {
   const seen = new Set(base.map((s) => s.symbol));
   const extra = CN_STOCKS_GEM_STAR.filter((s) => !seen.has(s.symbol));
-  return [...base, ...extra];
+  return dedupeStockEntries([...base, ...extra]);
 }
 
 export class ChinaScanner extends MarketScanner {

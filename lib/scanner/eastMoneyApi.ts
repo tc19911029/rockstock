@@ -12,6 +12,28 @@ interface StockListCache {
   stocks: StockEntry[];
 }
 
+/**
+ * 東方財富以分頁回傳即時清單；若排序欄位在翻頁期間變動，同一代號可能跨頁重複。
+ * 以 symbol 去重，並優先保留名稱／產業資訊較完整的版本。
+ */
+export function dedupeStockEntries(stocks: readonly StockEntry[]): StockEntry[] {
+  const unique = new Map<string, StockEntry>();
+  for (const stock of stocks) {
+    const previous = unique.get(stock.symbol);
+    if (!previous) {
+      unique.set(stock.symbol, stock);
+      continue;
+    }
+    unique.set(stock.symbol, {
+      ...previous,
+      ...stock,
+      name: stock.name || previous.name,
+      industry: stock.industry || previous.industry,
+    });
+  }
+  return [...unique.values()];
+}
+
 /** 已經 Tencent 日K／名稱雙重確認的退市、吸收合併代號。 */
 export async function loadRemovedCNStockSymbols(): Promise<Set<string>> {
   const removed = new Set<string>(CN_DELISTED_SYMBOLS);
@@ -43,7 +65,7 @@ async function loadCachedStockList(): Promise<StockEntry[] | null> {
     const cache: StockListCache = JSON.parse(raw);
     const age = Date.now() - new Date(cache.updatedAt).getTime();
     if (age < CACHE_MAX_AGE_MS && cache.stocks.length > 500) {
-      return withoutRemovedStocks(cache.stocks);
+      return dedupeStockEntries(await withoutRemovedStocks(cache.stocks));
     }
   } catch { /* 快取不存在或格式錯誤 */ }
   return null;
@@ -56,7 +78,10 @@ async function saveCachedStockList(stocks: StockEntry[]): Promise<void> {
   try {
     const dir = path.dirname(STOCKLIST_CACHE_PATH);
     if (!existsSync(dir)) await mkdir(dir, { recursive: true });
-    const cache: StockListCache = { updatedAt: new Date().toISOString(), stocks };
+    const cache: StockListCache = {
+      updatedAt: new Date().toISOString(),
+      stocks: dedupeStockEntries(stocks),
+    };
     const { atomicFsPut } = await import('@/lib/storage/atomicFsPut');
     await atomicFsPut(STOCKLIST_CACHE_PATH, JSON.stringify(cache));
   } catch { /* 寫入失敗不影響主流程 */ }
@@ -82,7 +107,9 @@ export async function fetchEastMoneyStockList(): Promise<StockEntry[]> {
 
   while (page <= maxPages) {
     const url = 'https://push2.eastmoney.com/api/qt/clist/get?' +
-      `pn=${page}&pz=${pageSize}&po=1&np=1&fltt=2&invt=2&fid=f6` +
+      // 股票代碼是穩定排序鍵；成交額 f6 在翻頁時持續變動，曾讓 9 檔跨頁重複，
+      // 同時也可能把其他代號擠出完整母體。
+      `pn=${page}&pz=${pageSize}&po=1&np=1&fltt=2&invt=2&fid=f12` +
       '&fs=m:0+t:6,m:1+t:2' +
       '&fields=f12,f14,f3,f100';
 
@@ -128,7 +155,7 @@ export async function fetchEastMoneyStockList(): Promise<StockEntry[]> {
   }
 
   // 成功取得後存到本地快取
-  const active = await withoutRemovedStocks(all);
+  const active = dedupeStockEntries(await withoutRemovedStocks(all));
   if (active.length > 500) {
     saveCachedStockList(active).catch(() => {});
   }
