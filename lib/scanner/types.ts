@@ -202,8 +202,8 @@ export interface StockScanResult {
   d9ReturnFromOpen?: number | null;
   d10ReturnFromOpen?: number | null;
   d20ReturnFromOpen?: number | null;
-  maxGain?: number;
-  maxLoss?: number;
+  maxGain?: number | null;
+  maxLoss?: number | null;
 
   // ── v12 Phase 0.3 新增欄位（向後相容；未填欄位預設視為 v11 行為）─────────
 
@@ -511,8 +511,8 @@ export interface StockForwardPerformance {
   ret10d?: number | null;
   ret20d?: number | null;
   maxDrawdown?: number;
-  maxGain?: number;
-  maxLoss?: number;
+  maxGain?: number | null;
+  maxLoss?: number | null;
   forwardCandles?: ForwardCandle[];
   candles?: ForwardCandle[];
 }

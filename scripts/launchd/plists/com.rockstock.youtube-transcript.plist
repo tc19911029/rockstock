@@ -10,7 +10,7 @@
     <string>/bin/zsh</string>
     <string>-c</string>
     <!-- yt-dlp 在 ~/.local/bin；export PATH 給 curl 觸發的 API 用不到，但維持與 youtube-scan plist 一致 -->
-    <string>export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; D=$(TZ=Asia/Taipei date +%F); /usr/bin/curl -fsS --max-time 1800 -H "Authorization: Bearer CRON_SECRET" -X POST "http://localhost:3000/api/cron/youtube-transcript?use_whisper=1&date=$D"</string>
+    <string>export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"; D=$(TZ=Asia/Taipei date +%F); /usr/bin/curl -fsS --max-time 2700 -H "Authorization: Bearer CRON_SECRET" -X POST "http://localhost:3000/api/cron/youtube-transcript?use_whisper=1&amp;date=$D"</string>
   </array>
 
   <!--
@@ -30,6 +30,8 @@
     <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>20</integer></dict>
     <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>20</integer></dict>
     <dict><key>Hour</key><integer>23</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Hour</key><integer>1</integer><key>Minute</key><integer>20</integer></dict>
   </array>
 
   <key>StandardOutPath</key>

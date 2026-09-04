@@ -1,5 +1,6 @@
 // lib/datasource/YahooDataProvider.ts
 import { Candle, CandleWithIndicators } from '@/types';
+import { isZeroVolumeFlatBar } from './candleSanitizers';
 import { computeIndicators } from '@/lib/indicators';
 import { DataProvider } from './DataProvider';
 import { globalCache } from './MemoryCache';
@@ -56,12 +57,26 @@ const HISTORICAL_TTL = 24 * 60 * 60 * 1000;
 // 近期資料 TTL：5 分鐘（當天資料可能更新）
 const RECENT_TTL = 1 * 60 * 1000;  // 盤中 1 分鐘快取（Yahoo 本身有 15-20 分鐘延遲）
 
-/** 原始 OHLC，不套用除權息調整（用於跨日期區間比較，避免調整基準不同） */
-function parseYahooCandlesRaw(json: unknown, symbol?: string): Candle[] {
+/**
+ * 解析 Yahoo quote 並還原為交易所原始 OHLC。
+ *
+ * Yahoo 的 `quote` 雖不是 adjclose，仍會對股票分割／股票股利回溯調整 OHLC；
+ * `events=split` 只控制事件資料，並不會關閉這項價格調整。因此必須利用回傳的
+ * split numerator/denominator，把事件日前的價格乘回去。
+ */
+export function parseYahooCandlesRaw(json: unknown, symbol?: string): Candle[] {
   const result = (json as { chart?: { result?: unknown[] } })?.chart?.result?.[0] as {
     timestamp?: number[];
     indicators?: {
       quote?: { open: number[]; high: number[]; low: number[]; close: number[]; volume: number[] }[];
+    };
+    events?: {
+      splits?: Record<string, {
+        date?: number;
+        numerator?: number;
+        denominator?: number;
+        splitRatio?: string;
+      }>;
     };
   } | undefined;
   if (!result) return [];
@@ -74,20 +89,43 @@ function parseYahooCandlesRaw(json: unknown, symbol?: string): Candle[] {
   const isTW = !!symbol && /\.(TW|TWO)$/i.test(symbol);
   const volDivisor = isTW ? 1000 : 1;
 
+  const splits = Object.values(result.events?.splits ?? {})
+    .map((split) => {
+      const eventDate = split.date != null
+        ? new Date(split.date * 1000).toISOString().split('T')[0]
+        : '';
+      let ratio = split.numerator != null && split.denominator != null && split.denominator !== 0
+        ? split.numerator / split.denominator
+        : NaN;
+      if (!Number.isFinite(ratio) && split.splitRatio) {
+        const [numerator, denominator] = split.splitRatio.split(':').map(Number);
+        ratio = denominator ? numerator / denominator : NaN;
+      }
+      return { eventDate, ratio };
+    })
+    .filter((split) => split.eventDate && Number.isFinite(split.ratio) && split.ratio > 0);
+
   return timestamps
     .map((ts, i) => {
       const o = q.open[i]; const h = q.high[i];
       const l = q.low[i];  const c = q.close[i];
       const v = q.volume[i];
       if (o == null || h == null || l == null || c == null || isNaN(o)) return null;
-      return {
-        date:   new Date(ts * 1000).toISOString().split('T')[0],
-        open:   +o.toFixed(2),
-        high:   +h.toFixed(2),
-        low:    +l.toFixed(2),
-        close:  +c.toFixed(2),
+      const date = new Date(ts * 1000).toISOString().split('T')[0];
+      // 同一曆日就是除權後交易，不能乘回；只還原事件日「之前」的 bar。
+      const splitFactor = splits.reduce(
+        (factor, split) => date < split.eventDate ? factor * split.ratio : factor,
+        1,
+      );
+      const candle: Candle = {
+        date,
+        open:   +(o * splitFactor).toFixed(2),
+        high:   +(h * splitFactor).toFixed(2),
+        low:    +(l * splitFactor).toFixed(2),
+        close:  +(c * splitFactor).toFixed(2),
         volume: v != null ? Math.round(v / volDivisor) : 0,
       };
+      return isZeroVolumeFlatBar(candle) ? null : candle;
     })
     .filter((c): c is Candle => c != null);
 }
@@ -225,9 +263,8 @@ export class YahooDataProvider implements DataProvider {
     const cached = globalCache.get<CandleWithIndicators[]>(cacheKey);
     if (cached) return cached;
 
-    // 2026-05-21：events=split only（拿掉 div）— 否則 Yahoo adjclose 會把歷史 OHLC 改成
-    // 「除息回頭調整後的假價格」，污染 L1 真實 K 棒。getCandlesRange 早已用 split-only，
-    // 這個 getHistoricalCandles 一路用 div,split 才是 3,344 檔 / 699K 根 bar 被污染的根因。
+    // 只取 split 事件，不取現金股利；parseYahooCandlesRaw 會用事件把 Yahoo 自動套用的
+    // split／股票股利回溯調整乘回原始成交價。
     let url: string;
     if (asOfDate) {
       const endUnix   = Math.floor(new Date(asOfDate).getTime() / 1000) + 2 * 86400;
@@ -287,8 +324,8 @@ export class YahooDataProvider implements DataProvider {
     const startUnix = Math.floor(new Date(startDate).getTime() / 1000);
     const endUnix   = Math.floor(new Date(endDate).getTime()   / 1000) + 86400;
 
-    // events=split only（不傳 div），避免 adjclose 因為股息而調整基準
-    // getCandlesRange 用於前向績效計算，需要原始 OHLC 避免跨窗口調整基準不一致
+    // 只取 split 事件；parser 會反向還原 Yahoo quote 的 split-adjusted OHLC。
+    // getCandlesRange 用於前向績效計算，需要原始 OHLC 避免跨窗口調整基準不一致。
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${startUnix}&period2=${endUnix}&includePrePost=false&events=split`;
 
     const res = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(timeoutMs) });

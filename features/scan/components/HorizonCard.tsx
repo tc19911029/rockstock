@@ -6,7 +6,9 @@ import { StockForwardPerformance } from '@/lib/scanner/types';
 // Inline to avoid pulling server-only ForwardAnalyzer → LocalCandleStore (fs)
 function calcBacktestSummary(perf: StockForwardPerformance[], horizon: BacktestHorizon) {
   const key = (horizon === 'open' ? 'openReturn' : `${horizon}Return`) as keyof StockForwardPerformance;
-  const returns = perf.map(p => p[key] as number | null).filter((r): r is number => r !== null);
+  const returns = perf
+    .map(p => p[key])
+    .filter((r): r is number => typeof r === 'number' && Number.isFinite(r));
   if (returns.length === 0) return null;
   const wins = returns.filter(r => r > 0).length;
   const avg = returns.reduce((a, b) => a + b, 0) / returns.length;

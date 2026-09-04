@@ -33,6 +33,7 @@ type CacheEntry = {
 
 type L1GlobalCache = {
   _l1Store: Map<string, CacheEntry>;
+  _l1EvictionTimer: ReturnType<typeof setInterval>;
 };
 
 const g = global as typeof global & Partial<L1GlobalCache>;
@@ -170,4 +171,11 @@ export function evictExpired(): number {
     }
   }
   return evicted;
+}
+
+// 沒有後續 update/hit 時，expired entries 原本會永久留在 Map。用 unref timer
+// 定期回收，避免盤後全市場工作結束後 RSS 長時間維持高水位。
+if (!IS_VERCEL && !g._l1EvictionTimer) {
+  g._l1EvictionTimer = setInterval(evictExpired, 60_000);
+  g._l1EvictionTimer.unref?.();
 }

@@ -91,6 +91,21 @@ NEXT_DEPLOY_BUILD=1 npm run build
 mv "$STAGE_DIR" "$ROOT/.next"
 SWAPPED=1
 
+# ── log rotation ───────────────────────────────────────────────────────────
+# launchd itself does not rotate StandardOutPath/StandardErrorPath. Rotate
+# immediately before kickstart so the new process opens fresh files.
+rotate_log() {
+  file="$1"
+  [ -f "$file" ] || return 0
+  size="$(stat -f %z "$file" 2>/dev/null || echo 0)"
+  [ "$size" -lt 5242880 ] && return 0
+  stamp="$(date '+%Y%m%d-%H%M%S')"
+  mv "$file" "${file}.${stamp}"
+  echo "→ 已輪替 ${file}（${size} bytes）"
+}
+rotate_log /tmp/rockstock-prod.log
+rotate_log /tmp/rockstock-prod.err.log
+
 # ── 重啟 ───────────────────────────────────────────────────────────────────
 echo "→ launchctl kickstart -k gui/$UID_/$LABEL ..."
 launchctl kickstart -k "gui/$UID_/$LABEL"

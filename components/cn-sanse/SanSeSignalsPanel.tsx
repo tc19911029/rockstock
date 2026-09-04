@@ -159,7 +159,7 @@ export function SanSeSignalsPanel({ report, market, catchTrigger }: { report: Co
         {r.combo && <div className="text-foreground/90"><span className="text-foreground font-medium">操作：</span>{comboAction(r)}</div>}
         <div>
           <span className="text-foreground font-medium">通則：</span>
-          紅(機構)在場才當前提（紫色當門票回測最弱）→ 捕撈/雙B金叉觸發進場（0軸下底部反彈金叉也可）→ 三組齊發(共振3/3)最強但很稀有，平時看「紅當前提+觸發」即可；出場守紅翻負/雙B死叉。書本進場：上漲日 13:20 看盤、13:25 掛市價。
+          紅(機構)在場才當前提（紫色單獨當門票較弱）→ 捕撈/雙B金叉觸發進場（0軸下底部反彈金叉也可）→ 三燈全亮且雙B、捕撈同日金叉才叫全共振；平時看「紅當前提+觸發」即可。出場守紅翻負/雙B死叉。書本進場：上漲日 13:20 看盤、13:25 掛市價。
         </div>
       </div>
 

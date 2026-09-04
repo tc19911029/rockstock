@@ -238,8 +238,8 @@ const SORT_FNS: Record<typeof CONFIG.sorts[number], SortKey> = {
   'MTF': e => e.mtfScore * 100 + e.changePercent / 100,
   // 成交額排名小→大（rank 1 是成交額第 1）；轉成 score = -rank 讓「大者」勝出
   '成交額排名': e => -e.turnoverRank,
-  // 面板對齊：主鍵漲幅、次鍵六條件 — 對齊 lib/selection/applyPanelFilter panelSortKey
-  '面板對齊': e => e.changePercent * 1000 + e.sixConditionsScore,
+  // 面板對齊在 runGrid 使用 lexicographic comparator；不可壓成加權分數。
+  '面板對齊': () => 0,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -277,7 +277,9 @@ function runGrid(events: Map<string, CandidateEvent>): CellRun[] {
           e.matchedMethods.has(letter) && passesProductionGate(letter, e)
         );
         if (!candidates.length) continue;
-        candidates.sort((a, b) => sortFn(b) - sortFn(a));
+        candidates.sort((a, b) => sort === '面板對齊'
+          ? (b.changePercent - a.changePercent || b.sixConditionsScore - a.sixConditionsScore)
+          : sortFn(b) - sortFn(a));
         const top = candidates[0];
         const fwd = computeForward(top.market, top.symbol, top.date, CONFIG.holdDays);
         picks.push({

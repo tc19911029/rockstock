@@ -49,6 +49,9 @@ __pycache__/
 /.next-deploy/
 /.next-dev/
 /.next-before-deploy/
+/.next-before-*/
+/.next-codex-backup-*/
+/.next-rejected-dirty-*/
 /out/
 
 # production
@@ -80,6 +83,11 @@ certs/
 *.tsbuildinfo
 next-env.d.ts
 .cache/
+
+# Local generated inspection artifacts and editor state
+/artifacts/
+/tmp/
+/docs/.obsidian/
 
 # Capacitor native build artifacts
 /ios/App/Pods/

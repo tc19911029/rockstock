@@ -24,7 +24,7 @@ import {
   computeFacetScores,
 } from '@/lib/agents/candidates/poolWeights';
 import { SPEC_STOCK_TYPE_LABEL, SPEC_DIM_LABEL, COMBO_BADGE_LABEL } from '@/lib/spec-score/weights';
-import { lastBusinessDayYmd, fmtDateLabelTw } from '@/lib/dateDefaults';
+import { lastBusinessDayYmd } from '@/lib/dateDefaults';
 import { DatePicker, type DateMeta } from '@/components/ui/DatePicker';
 import { formatLetters } from '@/lib/scanner/buyMethodTracks';
 import { navKey } from '@/lib/chartListNav';
@@ -51,6 +51,7 @@ interface PoolResponse {
   exists: boolean;
   generatedAt?: string;
   total?: number;
+  eligibleTotal?: number;
   returned?: number;
   candidates?: Candidate[];
   marketRegime?: RegimeDetectResult;
@@ -188,7 +189,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     try {
       const res = await fetch(
         // B3：先 ≥N 共識過濾，再用 totalScore 加權排序（POOL_WEIGHTS single source of truth）
-        `/api/agents/pool?date=${date}&minSourceCount=${minSourceCount}&limit=100&sort=weighted`,
+        `/api/agents/pool?date=${date}&minSourceCount=${minSourceCount}&limit=500&sort=weighted`,
         { signal: ac.signal },
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -223,13 +224,20 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
   // server 已用 POOL_WEIGHTS default 排序，沒改 weights 時不會雙排，加 score 顯示即可
   const sortedCandidates = useMemo(() => {
     if (!data?.candidates) return [];
+    const weightSum = customWeights.technical + customWeights.youtube + customWeights.chip + customWeights.fundamental;
+    const effectiveWeights = weightSum > 0 ? {
+      technical: customWeights.technical / weightSum,
+      youtube: customWeights.youtube / weightSum,
+      chip: customWeights.chip / weightSum,
+      fundamental: customWeights.fundamental / weightSum,
+    } : POOL_WEIGHTS;
     let withScores = data.candidates.map(c => {
       const base = computeFacetScores(c);
       const customTotal = Math.round(
-        base.technical * customWeights.technical +
-        base.news * customWeights.youtube +
-        base.chip * customWeights.chip +
-        base.fundamental * customWeights.fundamental,
+        base.technical * effectiveWeights.technical +
+        base.news * effectiveWeights.youtube +
+        base.chip * effectiveWeights.chip +
+        base.fundamental * effectiveWeights.fundamental,
       );
       return { ...c, scores: { ...base, total: customTotal } };
     });
@@ -244,7 +252,6 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     // 也是其他排序（前瞻報酬/YouTube 提及）同值時的 tie-break（applySort 穩定，保留基底序）
     type Scored = (typeof withScores)[number];
     const baseSorted: Scored[] = [...withScores].sort((a, b) => b.scores.total - a.scores.total);
-    if (sortBy === 'score.poolTotal') return baseSorted;
     // 排序值取法（id 走中央清單；缺值/升降序由 sortEngine 統一處理）
     const poolSortValue = (c: Scored, id: string): SortValue => {
       const fk = POOL_FWD_FIELD[id];
@@ -258,10 +265,11 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
         const rank = bestHeatRank(themeHeatMap, c.symbol);
         return rank === Infinity ? null : -rank;
       }
+      if (id === 'score.poolTotal') return c.scores.total;
       return null;
     };
     return applySort(baseSorted, sortBy, sortDir, poolSortValue);
-  }, [data?.candidates, customWeights, sortBy, sortDir, forwardMap, ytMap, ytRecentOnly, highConsensusOnly, themeHeatMap]);
+  }, [data, customWeights, sortBy, sortDir, forwardMap, ytMap, ytRecentOnly, highConsensusOnly, themeHeatMap]);
 
   // ⚡ 今日強進場 top 5 — entry_state 不是 no_chase + sourceCount ≥ 2 + score ≥ 50 + 大盤 ≠ bear
   // 排序：can_enter 優先於 watch，內部按 score
@@ -280,7 +288,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
       if (sa !== sb) return sa - sb;
       return b.scores.total - a.scores.total;
     }).slice(0, 5);
-  }, [sortedCandidates, data?.marketRegime]);
+  }, [sortedCandidates, data]);
 
   useEffect(() => { fetchPool(); }, [fetchPool]);
 
@@ -302,21 +310,37 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
     const ac = new AbortController();
     forwardAbortRef.current = ac;
     setIsFetchingForward(true);
-    fetch('/api/backtest/forward', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scanDate: date, stocks }),
-      signal: ac.signal,
-    })
-      .then(r => r.ok ? r.json() as Promise<{ performance?: StockForwardPerformance[] }> : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then(j => {
-        if (ac.signal.aborted) return;
-        const map = new Map<string, StockForwardPerformance>();
-        for (const p of j.performance ?? []) map.set(p.symbol, p);
-        setForwardMap(map);
-      })
-      .catch(() => { /* abort / network fail — 留空就好,UI 顯示 — */ })
-      .finally(() => { if (!ac.signal.aborted) setIsFetchingForward(false); });
+    const load = async () => {
+      const chunks: typeof stocks[] = [];
+      for (let i = 0; i < stocks.length; i += 50) chunks.push(stocks.slice(i, i + 50));
+      const map = new Map<string, StockForwardPerformance>();
+      try {
+        // 每波最多 3 個請求，兼顧完整排序與 API 壓力；每波完成就漸進更新畫面。
+        for (let i = 0; i < chunks.length; i += 3) {
+          const batch = await Promise.all(chunks.slice(i, i + 3).map(async (chunk) => {
+            const r = await fetch('/api/backtest/forward', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ scanDate: date, stocks: chunk }),
+              signal: ac.signal,
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json() as Promise<{ performance?: StockForwardPerformance[] }>;
+          }));
+          if (ac.signal.aborted) return;
+          for (const response of batch) {
+            for (const p of response.performance ?? []) map.set(p.symbol, p);
+          }
+          setForwardMap(new Map(map));
+        }
+      } catch {
+        // abort / network fail — 已完成的批次仍可顯示，缺值維持 —
+      } finally {
+        if (!ac.signal.aborted) setIsFetchingForward(false);
+      }
+    };
+    void load();
+    return () => ac.abort();
   }, [data, date]);
 
   const buildPool = useCallback(async () => {
@@ -405,9 +429,9 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
         {data?.marketRegime && <MarketRegimeFlag regime={data.marketRegime} size="xs" />}
         <span
           className="text-muted-foreground tabular-nums"
-          title={data?.exists ? `顯示 ${data.returned} 檔／全部 ${data.total} 檔（受「≥ N 個面向」與每頁上限影響）` : '此日尚未建立候選池'}
+          title={data?.exists ? `目前顯示 ${sortedCandidates.length} 檔／符合 ≥${minSourceCount} 面向 ${data.eligibleTotal ?? data.returned} 檔／原始池 ${data.total} 檔` : '此日尚未建立候選池'}
         >
-          {data?.exists ? `顯示 ${data.returned}／全部 ${data.total}` : '—'}
+          {data?.exists ? `篩選後 ${sortedCandidates.length}／符合 ${data.eligibleTotal ?? data.returned}／原始 ${data.total}` : '—'}
         </span>
       </div>
 
@@ -468,6 +492,12 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
         {data?.exists && (data.candidates?.length ?? 0) === 0 && (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">
             ≥{minSourceCount} 個面向無候選。試試 ≥1 個面向。
+          </div>
+        )}
+
+        {data?.exists && (data.candidates?.length ?? 0) > 0 && sortedCandidates.length === 0 && (
+          <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+            目前的 YouTube 顯示篩選沒有交集；候選池本身仍有 {data.candidates!.length} 檔。
           </div>
         )}
 
@@ -556,7 +586,7 @@ export function CandidatesPoolPanel({ onSelectStock, defaultDate, selectedSymbol
           </div>
         )}
 
-        {data?.exists && data.candidates && data.candidates.length > 0 && (
+        {data?.exists && sortedCandidates.length > 0 && (
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-card z-10 text-muted-foreground border-b border-border">
               <tr>
@@ -769,7 +799,7 @@ function WeightPopover({
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label="關閉">✕</button>
       </div>
       <p className="text-[10px] text-muted-foreground">
-        調整後即時重排候選列表。權重存本機 localStorage、不會覆蓋伺服器排序。
+        調整後即時重排候選列表。計分時會自動正規化為 100%；權重存本機、不覆蓋伺服器排序。
       </p>
       {(['technical', 'youtube', 'chip', 'fundamental'] as const).map((k) => {
         const label = k === 'technical' ? '技術' : k === 'youtube' ? '消息' : k === 'chip' ? '籌碼' : '基本';

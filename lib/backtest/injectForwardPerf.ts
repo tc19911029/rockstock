@@ -28,12 +28,13 @@ export async function injectForwardPerf(
   results: StockScanResult[],
   scanDate: string,
   tag: string,
+  direction: 'long' | 'short' = 'long',
 ): Promise<void> {
   if (results.length === 0) return;
   try {
     const { analyzeForwardBatch } = await import('@/lib/backtest/ForwardAnalyzer');
     const fwdInput = results.map(r => ({ symbol: r.symbol, name: r.name, scanPrice: r.price }));
-    const { results: fwdPerf } = await analyzeForwardBatch(fwdInput, scanDate);
+    const { results: fwdPerf } = await analyzeForwardBatch(fwdInput, scanDate, { direction });
     const fwdMap = new Map(fwdPerf.map(p => [p.symbol, p]));
     for (const r of results) {
       const p = fwdMap.get(r.symbol);

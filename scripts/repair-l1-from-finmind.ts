@@ -23,6 +23,7 @@
 
 import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync, cpSync } from 'fs';
 import path from 'path';
+import { isZeroVolumeFlatBar } from '../lib/datasource/candleSanitizers';
 
 const REPO = process.cwd();
 const L1_DIR = path.join(REPO, 'data', 'candles', 'TW');
@@ -218,6 +219,11 @@ function main() {
         }
       } else if (f.kind === 'missing-bar') {
         if (!byDate.has(f.date)) {
+          // FinMind 也會以昨收產生零量平盤占位；它不是交易 K，插入會污染 MA 的根數。
+          if (isZeroVolumeFlatBar(fixed)) {
+            skipped++;
+            continue;
+          }
           // 尺度防呆：找時間最近的一根既有 L1 bar，與 FinMind 同日比 close 倍率。
           // 若該股是還權序列（倍率明顯≠1），插入未還權 FinMind bar 會造成 splice → 略過。
           const neighborScaleOk = checkScaleConsistent(code, f.date, byDate, getFM);

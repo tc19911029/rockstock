@@ -17,7 +17,7 @@ import { computeIndicators } from '../lib/indicators';
 const SAMPLE_SYMBOLS = [
   { symbol: '2330.TW', market: 'TW' as const },
   { symbol: '2454.TW', market: 'TW' as const },
-  { symbol: '3138.TWO', market: 'TW' as const },
+  { symbol: '3138.TW', market: 'TW' as const },
   { symbol: '600519.SS', market: 'CN' as const },
 ];
 

@@ -247,5 +247,50 @@ describe('ForwardAnalyzer — 連假缺口補足', () => {
     expect(results).toHaveLength(1);
     expect(nullCount).toBe(0);
     expect(results[0].d1Return).toBeNull(); // 數據尚未產生
+    expect(results[0].maxGain).toBeNull();
+    expect(results[0].maxLoss).toBeNull();
+  });
+
+  test('dN 與最高最低以隔日開盤為進場基準，最高最低只取前 20 根交易 K', async () => {
+    const candles = Array.from({ length: 21 }, (_, i) => {
+      const date = `2026-${i < 13 ? '03' : '04'}-${String(i < 13 ? 19 + i : i - 12).padStart(2, '0')}`;
+      const close = 100 + Math.min(i, 19) * 0.2;
+      return { date, open: i === 0 ? 100 : close, high: close + 1, low: close - 2, close, volume: 1_000_000 };
+    });
+    // 第 21 根若被錯納入 max，會得到 +100%。
+    candles[20] = { ...candles[20], open: 100, high: 200, low: 99, close: 100 };
+    mockLocalCandles.mockResolvedValue(candles);
+    mockFetchRange.mockResolvedValue([]);
+
+    const { results } = await analyzeForwardBatch(
+      [{ symbol: '2330.TW', name: '台積電', scanPrice: 90 }],
+      '2026-03-18',
+    );
+
+    expect(results[0].openReturn).toBeCloseTo(11.11, 2); // 訊號收盤 → 隔日開盤缺口
+    expect(results[0].d1Return).toBeCloseTo(0, 5);       // 隔日開盤 → 當日收盤
+    expect(results[0].d1ReturnFromOpen).toBe(results[0].d1Return);
+    expect(results[0].maxGain).toBeCloseTo(4.8, 1);     // 第 20 根 high=104.8；忽略第 21 根 200
+    expect(results[0].maxLoss).toBeCloseTo(-2, 5);
+  });
+
+  test('做空方向：dN 與最高最低轉成空單損益，開盤缺口仍保留原始價格方向', async () => {
+    mockLocalCandles.mockResolvedValue([
+      { date: '2026-04-02', open: 100, high: 103, low: 95, close: 96, volume: 1_000_000 },
+      { date: '2026-04-07', open: 96, high: 98, low: 90, close: 92, volume: 1_000_000 },
+    ]);
+    mockFetchRange.mockResolvedValue([]);
+
+    const { results } = await analyzeForwardBatch(
+      [{ symbol: '2330.TW', name: '台積電', scanPrice: 98 }],
+      '2026-04-01',
+      { direction: 'short' },
+    );
+
+    expect(results[0].openReturn).toBeCloseTo(2.04, 2); // 原始市場缺口：98 → 100
+    expect(results[0].d1Return).toBeCloseTo(4, 5);      // 空單：100 → 96
+    expect(results[0].d2Return).toBeCloseTo(8, 5);      // 空單：100 → 92
+    expect(results[0].maxGain).toBeCloseTo(10, 5);      // 最低到 90
+    expect(results[0].maxLoss).toBeCloseTo(-3, 5);      // 最高到 103
   });
 });

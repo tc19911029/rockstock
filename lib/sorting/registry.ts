@@ -15,7 +15,7 @@
  * 保留的特例（這些是回測過的決議，不可在統一時被抹平）：
  *  - score.cnBuy「應買(低分在前)」defaultDir='asc' — 陸股 hard_score 是反指標（記憶 cn_agents_buy_sort_default）。
  *  - score.sanseCombo「應買」 — 三色 buyScore 評級綜合分，accessor 走既有 buyScore。
- *  - mkt.change「漲幅」 — 掃描面板的 accessor 走既有 panelSortKey（漲幅+六條件+ma20 三層單一事實）。
+ *  - mkt.change「漲幅」 — 掃描面板走 panelSortCompare 的明確三層比較器（漲幅→六條件→MA20斜率）。
  *  - fwd.maxLoss「漲跌·最低」defaultDir='asc' — 最低（最慘）排前面。
  */
 
@@ -45,7 +45,7 @@ export interface SortOptionDef {
 }
 
 export const FAMILY_LABEL: Record<SortFamily, string> = {
-  forward: '買進後賺賠',
+  forward: '訊號後／買進後',
   market: '今天盤面',
   score: '選股總分',
   sanse: '三色細項',
@@ -57,18 +57,18 @@ export const FAMILY_LABEL: Record<SortFamily, string> = {
 /** 7 大家族所有排序選項的單一事實。key = canonical id。 */
 export const SORT_OPTIONS: Record<string, SortOptionDef> = {
   // ── 1. 買進後賺賠（前瞻報酬）── 全站重複最嚴重，缺值一律排最後 ──────────────
-  'fwd.open': { id: 'fwd.open', label: '漲跌·隔開', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '掃出後隔日開盤買進的漲跌幅（缺值排最後）' },
-  'fwd.d1': { id: 'fwd.d1', label: '漲跌·1日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '掃出後 1 日漲跌幅' },
-  'fwd.d5': { id: 'fwd.d5', label: '漲跌·5日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '掃出後 5 日漲跌幅' },
-  'fwd.d10': { id: 'fwd.d10', label: '漲跌·10日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '掃出後 10 日漲跌幅' },
-  'fwd.d20': { id: 'fwd.d20', label: '漲跌·20日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '掃出後 20 日漲跌幅' },
-  'fwd.maxGain': { id: 'fwd.maxGain', label: '漲跌·最高', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '掃出後 20 日內最大累計漲幅' },
-  'fwd.maxLoss': { id: 'fwd.maxLoss', label: '漲跌·最低', family: 'forward', defaultDir: 'asc', missingLast: true, tip: '掃出後 20 日內最大累計跌幅（最慘排前面）' },
+  'fwd.open': { id: 'fwd.open', label: '漲跌·開盤缺口', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '訊號日收盤到隔日開盤的跳空幅度；這不是買進後報酬' },
+  'fwd.d1': { id: 'fwd.d1', label: '漲跌·1日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '隔日開盤可成交後，第 1 個交易日收盤報酬' },
+  'fwd.d5': { id: 'fwd.d5', label: '漲跌·5日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '隔日開盤可成交後，第 5 個交易日收盤報酬' },
+  'fwd.d10': { id: 'fwd.d10', label: '漲跌·10日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '隔日開盤可成交後，第 10 個交易日收盤報酬' },
+  'fwd.d20': { id: 'fwd.d20', label: '漲跌·20日', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '隔日開盤可成交後，第 20 個交易日收盤報酬' },
+  'fwd.maxGain': { id: 'fwd.maxGain', label: '漲跌·最高', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '隔日開盤可成交後 20 個交易日內最高報酬' },
+  'fwd.maxLoss': { id: 'fwd.maxLoss', label: '漲跌·最低', family: 'forward', defaultDir: 'asc', missingLast: true, tip: '隔日開盤可成交後 20 個交易日內最低報酬（最慘排前面）' },
   'fwd.hold': { id: 'fwd.hold', label: '漲跌·持有至今', family: 'forward', defaultDir: 'desc', missingLast: true, tip: '提及日進場、持有到今天的漲跌幅' },
 
   // ── 2. 今天盤面 ──────────────────────────────────────────────────────────
   'mkt.turnover': { id: 'mkt.turnover', label: '成交額', family: 'market', defaultDir: 'desc', missingLast: false, tip: '當日成交金額大的排前面（回測 A 級組合多靠此排序勝出）' },
-  'mkt.change': { id: 'mkt.change', label: '漲幅', family: 'market', defaultDir: 'desc', missingLast: false, tip: '當日漲跌幅 %（同分用六條件當 tie-breaker，對齊面板預設排序）' },
+  'mkt.change': { id: 'mkt.change', label: '漲幅', family: 'market', defaultDir: 'desc', missingLast: false, tip: '當日漲跌幅 %（同分再比六條件與 MA20 斜率）' },
   'mkt.price': { id: 'mkt.price', label: '股價', family: 'market', defaultDir: 'desc', missingLast: false, tip: '當前股價高低' },
   'mkt.boards': { id: 'mkt.boards', label: '連板', family: 'market', defaultDir: 'desc', missingLast: false, tip: '連續漲停板數（同板數比成交額）' },
   'mkt.turnoverRate': { id: 'mkt.turnoverRate', label: '換手率', family: 'market', defaultDir: 'desc', missingLast: false, tip: '成交量 ÷ 流通股數' },
@@ -77,13 +77,18 @@ export const SORT_OPTIONS: Record<string, SortOptionDef> = {
 
   // ── 3. 選股總分（各策略各一種，集中定義）────────────────────────────────
   'score.sixCond': { id: 'score.sixCond', label: '六條件', family: 'score', defaultDir: 'desc', missingLast: false, tip: '朱家泓五步法六條件總分（次鍵：漲幅）' },
+  'score.shortSixCond': { id: 'score.shortSixCond', label: '做空六條件', family: 'score', defaultDir: 'desc', missingLast: true, tip: '做空六條件總分，高分在前' },
+  'score.deviation': { id: 'score.deviation', label: 'MA20乖離', family: 'score', defaultDir: 'asc', missingLast: true, tip: 'R 機械軌：做多找負乖離極端（低在前），做空找正乖離極端（高在前）' },
+  'score.smartMoney': { id: 'score.smartMoney', label: '20日集中度', family: 'score', defaultDir: 'desc', missingLast: true, tip: 'W 大戶偷買：主力分點 20 日集中度高在前' },
+  'score.instDip': { id: 'score.instDip', label: '法人逆勢買', family: 'score', defaultDir: 'desc', missingLast: true, tip: 'X 法人接刀：法人 5 日淨買超張數高在前' },
+  'score.instSteal': { id: 'score.instSteal', label: '法人連買', family: 'score', defaultDir: 'desc', missingLast: true, tip: 'Y 法人偷買：先比連買天數，再比 5 日集中度' },
   'score.surge': { id: 'score.surge', label: '飆股潛力', family: 'score', defaultDir: 'desc', missingLast: false, tip: '飆股潛力分' },
   'score.composite': { id: 'score.composite', label: '綜合評分', family: 'score', defaultDir: 'desc', missingLast: false, tip: '回測綜合評分' },
   'score.netReturn': { id: 'score.netReturn', label: '淨報酬', family: 'score', defaultDir: 'desc', missingLast: false, tip: '回測淨報酬' },
   'score.histWinRate': { id: 'score.histWinRate', label: '歷史勝率', family: 'score', defaultDir: 'desc', missingLast: false, tip: '歷史回測勝率' },
-  'score.grade': { id: 'score.grade', label: '飆股等級', family: 'score', defaultDir: 'desc', missingLast: false, tip: 'S > A > B > C > D' },
+  'score.grade': { id: 'score.grade', label: '等級', family: 'score', defaultDir: 'desc', missingLast: false, tip: '依目前面板的等級順序，高等級在前' },
   'score.poolTotal': { id: 'score.poolTotal', label: '加權總分', family: 'score', defaultDir: 'desc', missingLast: false, tip: '候選池 4 面向加權總分（技術/籌碼/基本/消息）' },
-  'score.sanseCombo': { id: 'score.sanseCombo', label: '應買', family: 'score', defaultDir: 'desc', missingLast: false, tip: '三色使用順序評級綜合分（共振組數越多越前）' },
+  'score.sanseCombo': { id: 'score.sanseCombo', label: '應買', family: 'score', defaultDir: 'desc', missingLast: false, tip: '三色使用順序評級綜合分：嚴格全共振／紅當前提＋觸發優先，再比較共振與短攻' },
   'score.cnBuy': { id: 'score.cnBuy', label: '應買', family: 'score', defaultDir: 'asc', missingLast: false, tip: '陸股 hard_score 是反指標，分數低的反而較值得操作（回測驗證）→ 預設低分在前' },
   'score.cnTotal': { id: 'score.cnTotal', label: '分數', family: 'score', defaultDir: 'desc', missingLast: false, tip: '陸股 hard_score 總分（高在前；注意是反指標，僅作對照）' },
 
@@ -113,7 +118,7 @@ export const SORT_OPTIONS: Record<string, SortOptionDef> = {
   'trust.edge': { id: 'trust.edge', label: '誠實 edge', family: 'trust', defaultDir: 'desc', missingLast: true, tip: '扣成本/比大盤後的誠實淨 edge 分級' },
   'trust.achievement': { id: 'trust.achievement', label: '達成度', family: 'trust', defaultDir: 'desc', missingLast: true, tip: '與目標價的進度' },
   'trust.upside': { id: 'trust.upside', label: '上漲潛力', family: 'trust', defaultDir: 'desc', missingLast: true, tip: '距目標價的上漲空間' },
-  'trust.stage': { id: 'trust.stage', label: '型態階段', family: 'trust', defaultDir: 'desc', missingLast: false, tip: '型態階段（萌芽→成長→成熟→失效）' },
+  'trust.stage': { id: 'trust.stage', label: '型態階段', family: 'trust', defaultDir: 'asc', missingLast: false, tip: '已觸發／進場等較優先階段排前面' },
   'trust.days': { id: 'trust.days', label: '持有天數', family: 'trust', defaultDir: 'desc', missingLast: false, tip: '已持有/追蹤天數' },
   'trust.confirmed': { id: 'trust.confirmed', label: '進場確認', family: 'trust', defaultDir: 'desc', missingLast: false, tip: '✅進場 > ⏸不進 > 未知' },
 };

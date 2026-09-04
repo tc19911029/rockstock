@@ -6,6 +6,7 @@ import {
   KLINE_CONSOL_MAX_RANGE_PCT,
   TRUE_BREAKOUT_PCT,
 } from '@/lib/analysis/bookThresholds';
+import { BASE_THRESHOLDS } from '@/lib/strategy/StrategyConfig';
 import { getLegacyBookAchievementRate } from '@/lib/analysis/patternCatalog';
 import { getPatternDisplayName } from '@/lib/chart/patternDisplay';
 
@@ -49,9 +50,9 @@ const STATIC_BOOK_RULES: Record<string, string[]> = {
     `量能放大（≥ 前日 × ${BOOK_VOL_RATIO_MIN}）`,
   ],
   J: [
-    'ABC 三段結構（A 高 → B 低 → C）',
-    'C 段突破 A 高',
-    `C 段量增（≥ 前段量 × ${BOOK_VOL_RATIO_MIN}）`,
+    'ABC 修正結構（修正段頭頭低、底底低）',
+    '收盤突破 ABC 修正的下降切線，並站上 MA20',
+    `紅 K 實體 ≥ ${BOOK_BODY_PCT_MIN}%、量 ≥ 前日 × ${BOOK_VOL_RATIO_MIN}`,
   ],
   K: [
     `K 線橫盤 N 日（高低差 ≤ ${KLINE_CONSOL_MAX_RANGE_PCT}%）`,
@@ -64,27 +65,29 @@ const STATIC_BOOK_RULES: Record<string, string[]> = {
     '量能配合',
   ],
   M: [
-    '下降切線（連接 2 個確認頭部）',
-    '紅 K 突破切線',
-    '量能放大',
+    '多頭趨勢，股價站上 MA20 且 MA20 不下彎',
+    '連接 2 個上升 pivot low，經中間最高點畫平行上升軌道壓力線',
+    '收盤突破軌道線 3%，紅 K 實體 ≥ 2% 且量 ≥ 前日 × 1.3',
   ],
   P: [
-    '高位回測 MA10 / MA20 不破',
-    '收盤站回均線',
-    '紅 K 帶量',
+    '多頭先漲至少 5%，再高檔淺回 1–2 天',
+    '拉回低點不破 MA20（月線），也不破前一個 pivot low',
+    '紅 K 實體 ≥ 2%、量 ≥ 前日 × 1.3，收盤突破前 K 高',
   ],
   D: [
-    '一字 K（高低差極小）+ 量縮',
-    '後續放量紅 K 突破',
+    `狹幅盤整至少 40 天，區間寬度 < 10%`,
+    '盤整末段 MA5/10/20 至少 5 天糾結，且盤整量縮',
+    '大量紅 K 收盤突破上頸線與三條均線',
   ],
   O: [
-    'detectTrend 確認盤整 → 多頭轉換',
-    '完成打底結構',
+    '過去由空頭轉盤整，打底至少 10 天且曾有大量',
+    '今日首次翻多，站上 MA20 且 MA20 上揚',
+    '紅 K 帶量，收盤突破打底高點 3%；站上 MA60 為長多加分',
   ],
   Q: [
-    'MA3 / MA10 / MA24 三均多排',
-    '收盤 > MA3',
-    '紅 K 帶量',
+    '股價在 MA24 之上，且 MA24 上揚',
+    '今日 MA3 黃金交叉 MA10，收盤同時站上 MA3',
+    '紅 K 實體 ≥ 2%；原戰法 detector 不要求量比',
   ],
   G: [
     'ABC 三段結構（A 高 → B 低 → C）',
@@ -102,19 +105,20 @@ const STATIC_BOOK_RULES: Record<string, string[]> = {
 };
 
 function buildSixConditions(r: StockScanResult): StrategyReasonBlock {
-  const b = r.sixConditionsBreakdown;
-  const score = r.sixConditionsScore ?? 0;
+  const isShort = r.direction === 'short';
+  const b = isShort ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown;
+  const score = isShort ? (r.shortSixConditionsScore ?? 0) : (r.sixConditionsScore ?? 0);
   const rows: StrategyReasonRow[] = [
-    { pass: b?.trend, label: '①趨勢', text: '頭頭高底底高（多頭結構）' },
-    { pass: b?.ma, label: '②均線', text: 'MA5/10/20 三線多排 + MA10/20 向上' },
-    { pass: b?.position, label: '③位置', text: '收盤 > MA10 AND MA20' },
-    { pass: b?.kbar, label: '④紅K', text: '紅 K 實體 ≥ 2% + 高收盤 + 上影 ≤ 實體' },
-    { pass: b?.volume, label: '⑤量能', text: '當日量 ≥ 前日 × 1.3' },
-    { pass: b?.indicator, label: '⑥指標', text: 'MACD 綠縮 / 紅延 + KD 金叉向上' },
+    { pass: b?.trend, label: '①趨勢', text: isShort ? '頭頭低底底低（空頭結構）' : '頭頭高底底高（多頭結構）' },
+    { pass: b?.ma, label: '②均線', text: isShort ? 'MA5/10/20 三線空排 + MA10/20 向下' : 'MA5/10/20 三線多排 + MA10/20 向上' },
+    { pass: b?.position, label: '③位置', text: isShort ? '收盤 < MA10 AND MA20' : '收盤 > MA10 AND MA20' },
+    { pass: b?.kbar, label: isShort ? '④黑K' : '④紅K', text: isShort ? '黑 K 實體與低收盤符合空方條件' : '紅 K 實體 ≥ 2% + 高收盤 + 上影 ≤ 實體' },
+    { pass: b?.volume, label: '⑤量能', text: `當日量 ≥ 前日 × ${BASE_THRESHOLDS.volumeRatioMin}` },
+    { pass: b?.indicator, label: '⑥指標', text: isShort ? 'MACD / KD 空方動能確認' : 'MACD 綠縮 / 紅延 + KD 金叉向上' },
   ];
   return {
     method: 'A',
-    title: METHOD_NAMES.A,
+    title: isShort ? '空方六條件' : METHOD_NAMES.A,
     summary: `${score}/6 通過`,
     rows,
   };

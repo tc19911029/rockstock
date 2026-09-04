@@ -9,7 +9,8 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { applyPanelFilter, isDisposalVetoed } from '@/lib/selection/applyPanelFilter';
+import { applyPanelFilter, isDisposalVetoed, sortByPanelOrder } from '@/lib/selection/applyPanelFilter';
+import { deriveStep1FilterState } from '@/lib/scanner/step1Pool';
 import type { StockScanResult } from '@/lib/scanner/types';
 
 interface Session {
@@ -34,6 +35,18 @@ const SAMPLES = [
 ];
 
 describe('Scan panel parity contracts (R10)', () => {
+  describe('Step 1 池狀態', () => {
+    test('多頭軌：池檔存在但 symbols 為空仍是 applied，不可當成 missing 放行', () => {
+      expect(deriveStep1FilterState('B', true)).toBe('applied');
+    });
+
+    test('多頭軌缺池才是 missing；反轉軌不論池是否存在皆 bypassed', () => {
+      expect(deriveStep1FilterState('B', false)).toBe('missing');
+      expect(deriveStep1FilterState('D', false)).toBe('bypassed');
+      expect(deriveStep1FilterState('D', true)).toBe('bypassed');
+    });
+  });
+
   describe('applyPanelFilter 排序穩定', () => {
     test('空陣列回空陣列', () => {
       expect(applyPanelFilter([], { useMultiTimeframe: false })).toEqual([]);
@@ -60,6 +73,15 @@ describe('Scan panel parity contracts (R10)', () => {
       ];
       const sorted = applyPanelFilter(results, { useMultiTimeframe: false });
       expect(sorted.map(r => r.symbol)).toEqual(['B', 'C', 'A']);
+    });
+
+    test('極接近漲幅仍由主鍵決定，不被六條件加權反轉', () => {
+      const rows = [
+        { symbol: 'higher-change', changePercent: 1.001, sixConditionsScore: 1, trendState: '盤整' },
+        { symbol: 'higher-score', changePercent: 1, sixConditionsScore: 6, trendState: '盤整' },
+      ] as unknown as StockScanResult[];
+      expect(sortByPanelOrder(rows, 'desc').map((r) => r.symbol)).toEqual(['higher-change', 'higher-score']);
+      expect(sortByPanelOrder(rows, 'asc').map((r) => r.symbol)).toEqual(['higher-score', 'higher-change']);
     });
   });
 

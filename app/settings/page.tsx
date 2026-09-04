@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useSettingsStore } from '@/store/settingsStore';
-import { PageShell } from '@/components/shared';
+import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -45,9 +45,9 @@ function ActiveStrategyCard() {
   return (
     <div className="bg-secondary border border-border rounded-xl p-4 space-y-3">
       <div>
-        <h2 className="text-sm font-bold text-foreground/90 mb-0.5">🎯 選股策略</h2>
-        <p className="text-xs text-muted-foreground">
-          所有條件 / 戒律 / 淘汰法均依寶典 2024，不開放 UI 調整以避免偏離書本（CLAUDE.md Rule 5）
+        <h2 className="text-base font-bold text-foreground mb-1">選股策略</h2>
+        <p className="text-sm text-muted-foreground">
+          目前使用固定且經驗證的策略規則。此區僅供查看，避免不小心改變回測與選股基準。
         </p>
       </div>
       {error && <div className="text-xs text-bear">{error}</div>}
@@ -56,7 +56,7 @@ function ActiveStrategyCard() {
           <div className="text-xs text-foreground/90">
             目前生效：<span className="font-bold text-blue-400">{active.name}</span>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] font-mono">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm font-mono tabular-nums">
             <Row label="MA20 乖離上限" value={`${(active.thresholds.deviationMax * 100).toFixed(0)}%`} />
             <Row label="量比門檻" value={`${active.thresholds.volumeRatioMin.toFixed(1)}x`} />
             <Row label="KD 進場上限" value={active.thresholds.kdMaxEntry >= 100 ? '不限' : String(active.thresholds.kdMaxEntry)} />
@@ -122,30 +122,31 @@ export default function SettingsPage() {
   }
 
   return (
-    <PageShell>
+    <PageShell headerSlot={<PageHeader title="設定" subtitle="通知、交易偏好與資料管理" />}>
       <div className="p-4 max-w-xl mx-auto space-y-4">
 
         {/* Email Notification */}
         <div className="bg-secondary border border-border rounded-xl p-4 space-y-4">
           <div>
-            <h2 className="text-sm font-bold text-foreground/90 mb-0.5">📧 掃描通知 Email</h2>
-            <p className="text-xs text-muted-foreground">每日掃描完成後，將符合條件的股票自動寄到你的信箱</p>
+            <h2 className="text-base font-bold text-foreground mb-1">掃描通知 Email</h2>
+            <p className="text-sm text-muted-foreground">每日掃描完成後，將符合條件的股票寄到指定信箱。</p>
           </div>
 
           <div className="space-y-2">
-            <Input
+            <label htmlFor="notification-email" className="text-sm font-medium text-foreground">收件 Email</label>
+            <Input id="notification-email"
               type="email"
               value={emailInput}
               onChange={e => setEmailInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSave()}
               placeholder="輸入你的 Email"
-              className="h-10 bg-muted"
+              className="min-h-11 bg-muted"
             />
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">通知門檻</p>
-            <div className="flex gap-2">
+            <p id="notification-threshold-label" className="text-sm font-medium text-foreground">通知門檻</p>
+            <div role="group" aria-labelledby="notification-threshold-label" className="flex gap-2">
               {[4, 5, 6].map(n => (
                 <Button key={n} onClick={() => setNotifyMinScore(n)}
                   variant={notifyMinScore === n ? 'default' : 'secondary'}
@@ -158,10 +159,10 @@ export default function SettingsPage() {
 
           <div className="flex gap-2">
             <Button onClick={handleSave} className="flex-1 bg-blue-600 hover:bg-blue-500 font-bold">
-              儲存
+              儲存通知設定
             </Button>
             <Button onClick={handleTest} disabled={testLoading} variant="secondary">
-              {testLoading ? '發送中...' : '測試發送'}
+              {testLoading ? '正在寄送…' : `寄送測試信至 ${emailInput.trim() || '指定信箱'}`}
             </Button>
           </div>
         </div>
@@ -172,11 +173,11 @@ export default function SettingsPage() {
         {/* Stop-loss setting */}
         <div className="bg-secondary border border-border rounded-xl p-4 space-y-3">
           <div>
-            <h2 className="text-sm font-bold text-foreground/90 mb-0.5">🛡 停損設定</h2>
-            <p className="text-xs text-muted-foreground">走圖時持倉的成本停損百分比</p>
+            <h2 className="text-base font-bold text-foreground mb-1">停損設定</h2>
+            <p className="text-sm text-muted-foreground">走圖與持倉提醒使用的成本停損比例。</p>
           </div>
           <div className="space-y-1.5">
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-sm">
               <Tooltip>
                 <TooltipTrigger className="text-foreground/80 cursor-help">停損比例 <span className="text-muted-foreground/60">ⓘ</span></TooltipTrigger>
                 <TooltipContent side="bottom" align="start" className="max-w-[14rem] text-[10px]">
@@ -185,11 +186,11 @@ export default function SettingsPage() {
               </Tooltip>
               <span className="text-red-400 font-mono font-bold">-{stopLossPercent}%</span>
             </div>
-            <input type="range" min={3} max={15} step={1}
+            <input id="stop-loss-percent" aria-label="停損比例" aria-valuetext={`${stopLossPercent}%`} type="range" min={3} max={15} step={1}
               value={stopLossPercent}
               onChange={e => setStopLossPercent(+e.target.value)}
-              className="w-full h-1.5 rounded-full accent-red-500 bg-muted" />
-            <div className="flex justify-between text-[10px] text-muted-foreground">
+              className="w-full min-h-11 accent-red-500" />
+            <div className="flex justify-between text-sm text-muted-foreground">
               <span>3%（短線嚴格）</span><span>15%（波段寬鬆）</span>
             </div>
           </div>
@@ -197,8 +198,8 @@ export default function SettingsPage() {
 
         {/* Scan schedule */}
         <div className="bg-secondary/60 border border-border rounded-xl p-4 space-y-2.5">
-          <h3 className="text-xs font-bold text-foreground/80">📅 自動掃描時間</h3>
-          <div className="space-y-2 text-xs text-muted-foreground">
+          <h2 className="text-base font-bold text-foreground">自動掃描時間</h2>
+          <div className="space-y-2 text-sm text-muted-foreground">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
@@ -238,7 +239,7 @@ export default function SettingsPage() {
                   <span className="text-xs text-muted-foreground">跌</span>
                 </div>
                 <div className="text-sm font-medium text-foreground">{t.label}</div>
-                <div className="text-[10px] text-muted-foreground">{t.desc}</div>
+                <div className="text-sm text-muted-foreground">{t.desc}</div>
               </Button>
             ))}
           </div>
@@ -277,7 +278,7 @@ export default function SettingsPage() {
         {/* 清除數據 */}
         <div className="bg-card border border-red-900/30 rounded-xl p-5 space-y-3">
           <h2 className="text-sm font-semibold text-red-400">清除本機數據</h2>
-          <p className="text-[11px] text-muted-foreground">清除瀏覽器中儲存的所有設定、自選股、持倉、掃描歷史等資料。此操作不可恢復。</p>
+          <p className="text-sm text-muted-foreground">清除瀏覽器中儲存的所有設定、自選股、持倉與掃描歷史。此操作無法復原。</p>
           <Button
             variant="destructive"
             size="sm"

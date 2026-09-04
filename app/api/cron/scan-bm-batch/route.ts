@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
           // 2026-05-21：注入 forward perf（d1~d20 / open / maxGain / maxLoss），
           // 讓 client 切歷史日期直接讀內嵌欄位、不必重打 /api/backtest/forward。
           const { injectForwardPerf } = await import('@/lib/backtest/injectForwardPerf');
-          await injectForwardPerf(rResults, date, `scan-bm-batch:R-${direction}`);
+          await injectForwardPerf(rResults, date, `scan-bm-batch:R-${direction}`, direction);
           await saveScanSession({
             id: `${market}-${direction}-R-${date}-${Date.now()}`,
             strategyId: strategy.id,

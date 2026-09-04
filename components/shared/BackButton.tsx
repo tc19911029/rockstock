@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { ArrowLeft } from 'lucide-react';
 
 interface BackButtonProps {
   /** 目標路徑（default '/'）。提供 onClick 時忽略。 */
@@ -25,14 +26,14 @@ export function BackButton({
   const baseClass = cn(
     'inline-flex items-center gap-1.5 shrink-0',
     'text-muted-foreground hover:text-foreground transition-colors',
-    'text-lg leading-none select-none',
+    'min-h-11 min-w-11 justify-center rounded-md text-base leading-none select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
     variant === 'with-label' && 'text-sm',
     className,
   );
 
   const content = (
     <>
-      <span aria-hidden="true">⬅️</span>
+      <ArrowLeft className="size-5" aria-hidden="true" />
       {variant === 'with-label' && label && (
         <span className="text-sm">{label}</span>
       )}

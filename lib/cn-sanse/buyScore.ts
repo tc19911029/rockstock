@@ -3,7 +3,7 @@
  *
  * 使用者：SanSeScanCompact（掃描清單排序）、TodayTopPriorityCard（今日最優先卡）、
  * paper-trade 追蹤（每日 top pick 寫入）。回測推導的使用順序評級：
- * 三組齊發(3/3) > 紅當前提+觸發 > 紅+黃中線 > 紅待觸發 > 無紅；
+ * 嚴格全共振 > 紅當前提+觸發 > 紅+黃中線 > 紅待觸發 > 無紅；
  * 同級再比共振組數 / 短攻，有賣出警示(conflict)降級。
  */
 import type { ConditionReport } from './conditions';

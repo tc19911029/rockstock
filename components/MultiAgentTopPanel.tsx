@@ -107,7 +107,7 @@ const LIGHT_DOT: Record<ScoreLight, string> = {
 // 其餘 id 走 lib/sorting/registry 中央清單，順序＝顯示順序。
 // 此頁專屬（預設）｜共用區（fwd.*；無 mkt.* 盤面欄資料）
 const AGENT_SORT_OPTIONS: SortControlOption[] = [
-  { id: 'default', label: '預設' },
+  { id: 'default', label: '決策優先' }, 'score.grade', 'score.composite',
   '|',
   'fwd.open', 'fwd.d1', 'fwd.d5', 'fwd.d10', 'fwd.d20', 'fwd.maxGain', 'fwd.maxLoss',
 ];
@@ -188,8 +188,10 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
 
   // 拿到 runs 後 POST forward — 顯示每檔訊號日後的漲跌幅(對齊候選池/策略掃描)
   useEffect(() => {
+    forwardAbortRef.current?.abort();
     if (!data?.runs || data.runs.length === 0) {
       setForwardMap(new Map());
+      setIsFetchingForward(false);
       return;
     }
     const stocks = data.runs
@@ -197,9 +199,9 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
       .map(r => ({ symbol: r.symbol, name: stockDisplayName(r.name, r.symbol), scanPrice: r.lastClose }));
     if (stocks.length === 0) {
       setForwardMap(new Map());
+      setIsFetchingForward(false);
       return;
     }
-    forwardAbortRef.current?.abort();
     const ac = new AbortController();
     forwardAbortRef.current = ac;
     setIsFetchingForward(true);
@@ -218,6 +220,7 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
       })
       .catch(() => { /* abort / network fail — 留空,UI 顯示 — */ })
       .finally(() => { if (!ac.signal.aborted) setIsFetchingForward(false); });
+    return () => ac.abort();
   }, [data, date]);
 
   // 過濾邏輯（API 已預排）
@@ -232,7 +235,13 @@ export function MultiAgentTopPanel({ onSelectStock, defaultDate, selectedSymbol,
     if (sortBy === 'default') return runs;
     const agentSortValue = (r: RunListItem, id: string): SortValue => {
       const fk = AGENT_FWD_FIELD[id];
-      return fk ? ((forwardMap.get(r.symbol)?.[fk] as number | null | undefined) ?? null) : null;
+      if (fk) return (forwardMap.get(r.symbol)?.[fk] as number | null | undefined) ?? null;
+      if (id === 'score.composite') return r.decision?.totalScore ?? null;
+      if (id === 'score.grade') {
+        const rank: Partial<Record<StockGrade, number>> = { A: 5, B: 4, C: 3, D: 2, E: 1 };
+        return r.decision?.grade ? rank[r.decision.grade] ?? null : null;
+      }
+      return null;
     };
     return applySort(runs, sortBy, sortDir, agentSortValue);
   }, [runs, sortBy, sortDir, forwardMap]);

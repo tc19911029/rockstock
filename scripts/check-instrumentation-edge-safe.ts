@@ -46,6 +46,10 @@ async function collectDeps(file: string, visited: Set<string>): Promise<void> {
   let m: RegExpExecArray | null;
   while ((m = IMPORT_RE.exec(src))) deps.push(m[1]);
   for (const spec of deps) {
+    // Next.js' documented runtime split: instrumentation.ts may conditionally
+    // import a *.node module behind NEXT_RUNTIME === 'nodejs'. That module is
+    // intentionally absent from the Edge dependency graph.
+    if (file === ENTRY && spec.endsWith('.node')) continue;
     const resolved = await resolveImport(spec, file);
     if (resolved) await collectDeps(resolved, visited);
   }

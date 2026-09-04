@@ -16,12 +16,13 @@ import { PageShell } from '@/components/shared';
 import { MarketDataTab } from './tabs/MarketDataTab';
 import { YoutubeTab } from './tabs/YoutubeTab';
 import { PlaceholderTab } from './tabs/PlaceholderTab';
+import { TrendingUp, CirclePlay, type LucideIcon } from 'lucide-react';
 
 type TabKey = 'market' | 'youtube' | 'technical' | 'agent';
 
-const TABS: Array<{ key: TabKey; label: string; icon: string }> = [
-  { key: 'market',    label: '行情資料',     icon: '📈' },
-  { key: 'youtube',   label: 'YouTube 節目', icon: '📺' },
+const TABS: Array<{ key: TabKey; label: string; icon: LucideIcon }> = [
+  { key: 'market',    label: '行情資料',     icon: TrendingUp },
+  { key: 'youtube',   label: 'YouTube 節目', icon: CirclePlay },
   // 技術策略 / 多代理分析 tab 尚未實作（只有施工中佔位），先隱藏避免使用者撞到空頁；
   // 下方 render 區塊與 PlaceholderTab 暫留，待實作後再把這兩行加回 TABS。
   // { key: 'technical', label: '技術策略',     icon: '⚙️' },
@@ -81,26 +82,42 @@ export default function HealthPage() {
 
         {/* Tab nav */}
         <div role="tablist" aria-label="資料健康分頁" className="flex flex-wrap gap-1 border-b border-border">
-          {TABS.map(t => (
+          {TABS.map((t, index) => {
+            const Icon = t.icon;
+            return (
             <button
               key={t.key}
+              id={`health-tab-${t.key}`}
               role="tab"
               aria-selected={tab === t.key}
+              aria-controls={`health-panel-${t.key}`}
+              tabIndex={tab === t.key ? 0 : -1}
               onClick={() => setTab(t.key)}
-              className={`px-3 py-2 text-sm rounded-t-md transition-colors border-b-2 -mb-px ${
+              onKeyDown={(event) => {
+                let next = index;
+                if (event.key === 'ArrowRight') next = (index + 1) % TABS.length;
+                else if (event.key === 'ArrowLeft') next = (index - 1 + TABS.length) % TABS.length;
+                else if (event.key === 'Home') next = 0;
+                else if (event.key === 'End') next = TABS.length - 1;
+                else return;
+                event.preventDefault();
+                setTab(TABS[next].key);
+                document.getElementById(`health-tab-${TABS[next].key}`)?.focus();
+              }}
+              className={`inline-flex min-h-11 items-center px-3 py-2 text-sm rounded-t-md transition-colors border-b-2 -mb-px ${
                 tab === t.key
                   ? 'border-sky-500 text-sky-400 bg-sky-500/10'
                   : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/40'
               }`}
             >
-              <span className="mr-1.5">{t.icon}</span>
+              <Icon className="mr-1.5 size-4" aria-hidden="true" />
               {t.label}
             </button>
-          ))}
+          )})}
         </div>
 
         {/* Tab content */}
-        <div className="pt-2">
+        <div id={`health-panel-${tab}`} role="tabpanel" aria-labelledby={`health-tab-${tab}`} className="pt-2">
           {tab === 'market' && <MarketDataTab />}
           {tab === 'youtube' && <YoutubeTab />}
           {tab === 'technical' && (

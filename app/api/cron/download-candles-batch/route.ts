@@ -145,7 +145,8 @@ export async function GET(req: NextRequest) {
           const candles = await scanner.fetchCandles(symbol);
           if (candles.length > 0) {
             await saveLocalCandles(symbol, market, candles);
-            return candles.length;
+            // provider 回到歷史資料不代表今天下載成功；否則 manifest 會把「停在昨天」算成功。
+            return candles.some((c) => c.date >= lastTradingDate) ? candles.length : 0;
           }
           return 0;
         })

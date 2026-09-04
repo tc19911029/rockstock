@@ -44,7 +44,11 @@ function getMarketToday(market: 'TW' | 'CN'): string {
  * @param baselineClose 第一根的 prevClose 基準（通常是 scanPrice）
  * @returns 過濾後的 K 棒
  */
-function sanitizeCandles(candles: Candle[], baselineClose: number): Candle[] {
+function sanitizeCandles(
+  candles: Candle[],
+  baselineClose: number,
+  market: 'TW' | 'CN',
+): Candle[] {
   const out: Candle[] = [];
   let prevClose = baselineClose;
   for (const c of candles) {
@@ -52,10 +56,13 @@ function sanitizeCandles(candles: Candle[], baselineClose: number): Candle[] {
     if (!(c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0)) continue;
     // 2) OHLC 關係：low ≤ open/close ≤ high
     if (c.low > c.open || c.low > c.close || c.high < c.open || c.high < c.close) continue;
-    // 3) open vs prevClose：單日開盤跳空超過 ±15%（漲跌停 10% + 5% 緩衝）視為壞資料
+    // 3) open vs prevClose：超過市場制度可能範圍才視為壞資料。
+    //    中國創業板／科創板合法漲跌幅可到 20%，舊版固定 15% 會把真行情刪掉。
+    //    CN 用 25%（20% + 5% 緩衝）；TW 維持 15%（10% + 5% 緩衝）。
     if (prevClose > 0) {
       const gap = Math.abs(c.open - prevClose) / prevClose;
-      if (gap > 0.15) continue;
+      const maxPlausibleGap = market === 'CN' ? 0.25 : 0.15;
+      if (gap > maxPlausibleGap) continue;
     }
     out.push(c);
     prevClose = c.close;
@@ -95,6 +102,7 @@ async function analyzeOne(
   name:      string,
   scanDate:  string,
   scanPrice: number,
+  options?: { localOnly?: boolean; dataEndDate?: string; direction?: 'long' | 'short' },
 ): Promise<StockForwardPerformance | null> {
   try {
     const startMs  = Date.parse(scanDate) + 86400_000;
@@ -106,6 +114,7 @@ async function analyzeOne(
     const market = detectMarket(symbol);
     const todayStr = getMarketToday(market);
     let safeEndStr = endStr > todayStr ? todayStr : endStr;
+    if (options?.dataEndDate && safeEndStr > options.dataEndDate) safeEndStr = options.dataEndDate;
 
     // 若 forward window 起點已超過今天（例如今天掃描，還沒有隔日資料），直接返回空結果
     // 2026-05-24 fix（Stage 27）：也涵蓋「forward window 內全是週末/假日」case
@@ -118,7 +127,7 @@ async function analyzeOne(
         openReturn: null, d1Return: null, d2Return: null, d3Return: null,
         d4Return: null, d5Return: null, d6Return: null, d7Return: null,
         d8Return: null, d9Return: null, d10Return: null, d20Return: null,
-        maxGain: 0, maxLoss: 0, forwardCandles: [],
+        maxGain: null, maxLoss: null, forwardCandles: [],
         nextOpenPrice: null,
         d1ReturnFromOpen: null, d5ReturnFromOpen: null,
         d6ReturnFromOpen: null, d7ReturnFromOpen: null,
@@ -145,8 +154,7 @@ async function analyzeOne(
     const { isTradingDay, tradingDaysBetween } = await import('@/lib/utils/tradingDay');
     const todayIsTradingDay = isTradingDay(todayStr, market);
     const l1HasToday = candles.some(c => c.date === todayStr);
-    let l2InjectedToday = false;
-    if (todayIsTradingDay && !l1HasToday && todayStr <= safeEndStr) {
+    if (!options?.localOnly && todayIsTradingDay && !l1HasToday && todayStr <= safeEndStr) {
       try {
         const { readIntradaySnapshot } = await import('@/lib/datasource/IntradayCache');
         const snap = await readIntradaySnapshot(market, todayStr);
@@ -164,7 +172,6 @@ async function analyzeOne(
               close: q.close, volume: q.volume,
             });
             candles.sort((a, b) => a.date.localeCompare(b.date));
-            l2InjectedToday = true;
           }
         }
       } catch {
@@ -213,7 +220,7 @@ async function analyzeOne(
     const lastLocalDate = candles.length > 0 ? candles[candles.length - 1].date : '';
     // startStr > safeEndStr（cap 後 scanDate 之後已無已收盤交易日）→ 無窗口可補，不打 API；
     // 落到下方 candles.length===0 分支回「待定」空結果（近期掃描）或 null。
-    const needSupplement = startStr <= safeEndStr
+    const needSupplement = !options?.localOnly && startStr <= safeEndStr
       && (candles.length === 0
         || (lastLocalDate < safeEndStr && daysBetween(lastLocalDate, safeEndStr) >= 1));
 
@@ -228,12 +235,12 @@ async function analyzeOne(
         const baseline = candles.length > 0 ? candles[candles.length - 1].close : scanPrice;
         await rateLimiter.acquire(provider);
         const extraRaw = await dataProvider.getCandlesRange(symbol, fetchStart, safeEndStr);
-        const extra = sanitizeCandles(extraRaw, baseline);
+        const extra = sanitizeCandles(extraRaw, baseline, market);
         if (extra.length === 0 && candles.length === 0) {
           await new Promise(r => setTimeout(r, 2000));
           await rateLimiter.acquire(provider);
           const retryRaw = await dataProvider.getCandlesRange(symbol, fetchStart, safeEndStr);
-          const retry = sanitizeCandles(retryRaw, baseline);
+          const retry = sanitizeCandles(retryRaw, baseline, market);
           if (retry.length > 0) {
             candles = [...candles, ...retry];
             rateLimiter.reportSuccess(provider);
@@ -258,7 +265,7 @@ async function analyzeOne(
           openReturn: null, d1Return: null, d2Return: null, d3Return: null,
           d4Return: null, d5Return: null, d6Return: null, d7Return: null,
           d8Return: null, d9Return: null, d10Return: null, d20Return: null,
-          maxGain: 0, maxLoss: 0, forwardCandles: [],
+          maxGain: null, maxLoss: null, forwardCandles: [],
           nextOpenPrice: null,
           d1ReturnFromOpen: null, d5ReturnFromOpen: null,
           d6ReturnFromOpen: null, d7ReturnFromOpen: null,
@@ -293,41 +300,48 @@ async function analyzeOne(
       };
     });
 
-    // 以訊號日收盤價（scanPrice）為基準的報酬率
-    function retFromScan(idx: number): number | null {
-      if (idx >= forwardCandles.length) return null;
-      return +((forwardCandles[idx].close - scanPrice) / scanPrice * 100).toFixed(2);
-    }
-
     // 以隔日開盤價為基準的報酬率（與 BacktestEngine 進場價一致）
     // 2026-05-07：對齊 BacktestEngine.ts:284-292 加漲停鎖死偵測
     // 開盤=最高 且 振幅<0.5% → 散戶買不到，nextOpenPrice 設 null 不誤導
     const entryC = forwardCandles[0];
     const lockUp = entryC && entryC.low > 0 &&
       entryC.open === entryC.high && (entryC.high - entryC.low) / entryC.low < 0.005;
-    // nextOpenPrice = 可成交進場價：一字鎖死買不到 → null（給 retFromOpen / 回測進場對齊用，維持原樣）
-    const nextOpenPrice = forwardCandles.length > 0 && !lockUp ? entryC.open : null;
+    const lockDown = entryC && entryC.low > 0 &&
+      entryC.open === entryC.low && (entryC.high - entryC.low) / entryC.low < 0.005;
+    const direction = options?.direction ?? 'long';
+    // 多單一字漲停買不到；空單一字跌停賣不掉。另一方向的鎖板不阻擋其進場。
+    const entryLocked = direction === 'short' ? lockDown : lockUp;
+    const nextOpenPrice = forwardCandles.length > 0 && !entryLocked ? entryC.open : null;
     function retFromOpen(idx: number): number | null {
       if (nextOpenPrice == null || nextOpenPrice <= 0) return null;
       if (idx >= forwardCandles.length) return null;
-      return +((forwardCandles[idx].close - nextOpenPrice) / nextOpenPrice * 100).toFixed(2);
+      const priceReturn = (forwardCandles[idx].close - nextOpenPrice) / nextOpenPrice * 100;
+      return +(direction === 'short' ? -priceReturn : priceReturn).toFixed(2);
     }
 
     // openReturn = 隔日開盤漲跌幅（純市場事實：掃描收盤 → 隔日開盤），與「能不能進場」無關。
     // 2026-06-02：一字漲停也照實顯示「+10%」缺口，不再因 lockUp 留空「—」（用戶要求）。
     //   留空「—」會跟「無資料」混淆；開盤確實跳空 +10% 是事實，該顯示。
     //   只解耦顯示用的 openReturn；nextOpenPrice / *FromOpen 仍保留 lockUp 防呆（回測進場不能買一字板）。
-    const openReturn: number | null = entryC && entryC.open > 0
+    const openReturn: number | null = entryC && entryC.open > 0 && scanPrice > 0
       ? +((entryC.open - scanPrice) / scanPrice * 100).toFixed(2)
       : null;
 
-    let maxGain = 0;
-    let maxLoss = 0;
-    for (const c of forwardCandles) {
-      const highRet = (c.high - scanPrice) / scanPrice * 100;
-      const lowRet  = (c.low  - scanPrice) / scanPrice * 100;
-      if (highRet > maxGain) maxGain = highRet;
-      if (lowRet  < maxLoss) maxLoss = lowRet;
+    // 最高／最低只看進場後前 20 根交易 K，並以實際可成交的隔日開盤價為基準。
+    // 沒資料或一字板買不到時回 null，不能用 0 偽裝成「沒漲也沒跌」。
+    let maxGain: number | null = null;
+    let maxLoss: number | null = null;
+    if (nextOpenPrice != null && nextOpenPrice > 0) {
+      for (const c of forwardCandles.slice(0, 20)) {
+        const bestRet = direction === 'short'
+          ? (nextOpenPrice - c.low) / nextOpenPrice * 100
+          : (c.high - nextOpenPrice) / nextOpenPrice * 100;
+        const worstRet = direction === 'short'
+          ? (nextOpenPrice - c.high) / nextOpenPrice * 100
+          : (c.low - nextOpenPrice) / nextOpenPrice * 100;
+        if (maxGain == null || bestRet > maxGain) maxGain = bestRet;
+        if (maxLoss == null || worstRet < maxLoss) maxLoss = worstRet;
+      }
     }
 
     return {
@@ -336,19 +350,20 @@ async function analyzeOne(
       scanDate,
       scanPrice,
       openReturn,
-      d1Return:  retFromScan(0),
-      d2Return:  retFromScan(1),
-      d3Return:  retFromScan(2),
-      d4Return:  retFromScan(3),
-      d5Return:  retFromScan(4),
-      d6Return:  retFromScan(5),
-      d7Return:  retFromScan(6),
-      d8Return:  retFromScan(7),
-      d9Return:  retFromScan(8),
-      d10Return: retFromScan(9),
-      d20Return: retFromScan(19),
-      maxGain:   +maxGain.toFixed(2),
-      maxLoss:   +maxLoss.toFixed(2),
+      // d1/d5/... 是「買進後報酬」，與策略實際隔日開盤進場一致。
+      d1Return:  retFromOpen(0),
+      d2Return:  retFromOpen(1),
+      d3Return:  retFromOpen(2),
+      d4Return:  retFromOpen(3),
+      d5Return:  retFromOpen(4),
+      d6Return:  retFromOpen(5),
+      d7Return:  retFromOpen(6),
+      d8Return:  retFromOpen(7),
+      d9Return:  retFromOpen(8),
+      d10Return: retFromOpen(9),
+      d20Return: retFromOpen(19),
+      maxGain:   maxGain == null ? null : +maxGain.toFixed(2),
+      maxLoss:   maxLoss == null ? null : +maxLoss.toFixed(2),
       forwardCandles,
       // 以隔日開盤為基準（與 BacktestEngine 進場一致）
       nextOpenPrice,
@@ -381,6 +396,7 @@ export interface ForwardBatchResult {
 export async function analyzeForwardBatch(
   stocks:   Array<{ symbol: string; name: string; scanPrice: number }>,
   scanDate: string,
+  options?: { localOnly?: boolean; dataEndDate?: string; direction?: 'long' | 'short' },
 ): Promise<ForwardBatchResult> {
   const results: StockForwardPerformance[] = [];
   let nullCount = 0;
@@ -389,7 +405,7 @@ export async function analyzeForwardBatch(
     const batch = stocks.slice(i, i + CONCURRENCY);
     const settled = await Promise.allSettled(
       batch.map(({ symbol, name, scanPrice }) =>
-        analyzeOne(symbol, name, scanDate, scanPrice)
+        analyzeOne(symbol, name, scanDate, scanPrice, options)
       )
     );
     for (const r of settled) {
@@ -413,8 +429,8 @@ export function calcBacktestSummary(
 ) {
   const key = (horizon === 'open' ? 'openReturn' : `${horizon}Return`) as keyof StockForwardPerformance;
   const returns = perf
-    .map(p => p[key] as number | null)
-    .filter((r): r is number => r !== null);
+    .map(p => p[key])
+    .filter((r): r is number => typeof r === 'number' && Number.isFinite(r));
 
   if (returns.length === 0) return null;
 

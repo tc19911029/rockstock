@@ -4,7 +4,7 @@
  * 保證：五個策略的判定衍生自既有 ConditionReport、正確、且
  *  - 「紅+雙B金叉」只認 b_gold；「紅+雙B金叉或突破」金叉 OR 突破皆可（OR 行為）
  *  - 「紅+黃+觸發」要紅、黃同時 >0 且有一個觸發
- *  - 全共振⭐ = groupBuyCount===3；底反🔥 = 沿用 isReversalBuy（grade top/prime + 0軸下金叉 + 無賣訊）
+ *  - 全共振⭐ = 紅紫黃三燈 + 雙B金叉 + 捕撈金叉；底反🔥 = 沿用 isReversalBuy
  */
 import { NAMED_STRATEGIES, matchedStrategies, getStrategy } from '../lib/cn-sanse/namedStrategies';
 import type { Cond, GroupReport, ConditionReport, ComboGrade } from '../lib/cn-sanse/conditions';
@@ -36,7 +36,10 @@ function mkReport(o: Opts): ConditionReport {
     [sig('c_gold', !!o.cGold), st('c_gold_bear', !!o.cBear)],
     [sig('c_dead', !!o.catchSell)],
   );
-  const mainforce = grp([sig('m_stage', !!o.mainBuy)], [sig('m_weak', false)]);
+  const mainforce = grp(
+    [sig('m_stage', !!o.mainBuy), st('m_three', red > 0 && yellow > 0 && purple > 0)],
+    [sig('m_weak', false)],
+  );
   const groupBuyCount = [doubleB.buyHit, mainforce.buyHit, catchG.buyHit].filter(Boolean).length;
   const redOn = red > 0;
   return {
@@ -60,12 +63,16 @@ describe('namedStrategies', () => {
     expect(getStrategy('reversal')?.label).toContain('底反');
   });
 
-  it('全共振⭐ = 三組買訊同時（groupBuyCount===3）', () => {
+  it('全共振⭐ = 三燈全亮 + 雙B金叉 + 捕撈金叉', () => {
     const r = mkReport({ red: 2, yellow: 2, purple: 2, bGold: true, cGold: true, mainBuy: true });
     expect(ids(r)).toContain('resonance');
     // 只兩組 → 不算共振
     const r2 = mkReport({ red: 2, bGold: true, cGold: true });
     expect(ids(r2)).not.toContain('resonance');
+    // 三組都有任一買訊，但只有雙B突破、沒有雙B金叉，也不能冒充全共振
+    const notExact = mkReport({ red: 2, yellow: 2, purple: 2, bBreak: true, cGold: true, mainBuy: true });
+    expect(notExact.groupBuyCount).toBe(3);
+    expect(ids(notExact)).not.toContain('resonance');
   });
 
   it('紅+黃+觸發 = 紅且黃且有一個觸發', () => {

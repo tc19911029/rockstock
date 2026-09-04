@@ -44,7 +44,7 @@ function retColor(val: number | null | undefined): string {
 
 // 打板前瞻欄位（短線至中線，1-20 日）
 const FWD_COLS = [
-  { key: 'openReturn' as const, label: '隔日開%' },
+  { key: 'openReturn' as const, label: '開盤缺口' },
   { key: 'd1Return' as const, label: '1日' },
   { key: 'd2Return' as const, label: '2日' },
   { key: 'd3Return' as const, label: '3日' },
@@ -70,10 +70,12 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadAbortRef = useRef<AbortController | null>(null);
 
   // Forward performance state
   const [forwardPerf, setForwardPerf] = useState<StockForwardPerformance[]>([]);
   const [isFetchingForward, setIsFetchingForward] = useState(false);
+  const forwardAbortRef = useRef<AbortController | null>(null);
 
   // Chinese name mapping (fixes old sessions that saved English names)
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map());
@@ -87,45 +89,58 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
 
   useEffect(() => {
     if (!date) return;
+    loadAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadAbortRef.current = ac;
     setLoading(true);
     setError(null);
     setSession(null);
     setForwardPerf([]);
-    fetch(`/api/scanner/daban?date=${date}`)
+    fetch(`/api/scanner/daban?date=${date}`, { signal: ac.signal })
       .then(r => r.json())
       .then(data => {
-        setSession(data.session ?? null);
-        if (!data.session) setError('該日期無打板掃描資料');
+        if (!ac.signal.aborted) {
+          setSession(data.session ?? null);
+          if (!data.session) setError('該日期無打板掃描資料');
+        }
       })
-      .catch(() => setError('載入失敗'))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!ac.signal.aborted) setError('載入失敗'); })
+      .finally(() => { if (!ac.signal.aborted) setLoading(false); });
+    return () => ac.abort();
   }, [date]);
 
   // Fetch forward performance when session loads
   useEffect(() => {
+    forwardAbortRef.current?.abort();
+    setForwardPerf([]);
+    setIsFetchingForward(false);
     if (!session || session.results.length === 0) return;
-    const buyable = session.results.filter(r => !r.isYiZiBan);
-    if (buyable.length === 0) return;
+    const confirmed = session.results.filter(r => !r.isYiZiBan && r.openConfirmed === true);
+    if (confirmed.length === 0) return;
 
+    const ac = new AbortController();
+    forwardAbortRef.current = ac;
     setIsFetchingForward(true);
     fetch('/api/backtest/forward', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scanDate: session.date,
-        stocks: buyable.map(r => ({
+        stocks: confirmed.map(r => ({
           symbol: r.symbol,
           name: r.name,
           scanPrice: r.closePrice,
         })),
       }),
+      signal: ac.signal,
     })
       .then(r => r.json())
       .then(data => {
-        if (data.performance) setForwardPerf(data.performance);
+        if (!ac.signal.aborted && data.performance) setForwardPerf(data.performance);
       })
       .catch(() => { /* silently fail — forward data is supplementary */ })
-      .finally(() => setIsFetchingForward(false));
+      .finally(() => { if (!ac.signal.aborted) setIsFetchingForward(false); });
+    return () => ac.abort();
   }, [session]);
 
   // Build performance lookup map
@@ -247,6 +262,7 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
 
   const buyable = session.results.filter(r => !r.isYiZiBan);
   const locked = session.results.filter(r => r.isYiZiBan);
+  const confirmedCount = buyable.filter(r => r.openConfirmed === true).length;
 
   /** Resolve display name: prefer Chinese name from static list, fallback to session name */
   const displayName = (r: DabanScanResult) =>
@@ -287,7 +303,7 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
         <div className="flex items-center gap-2 mb-1">
           <span className="text-amber-400 font-bold text-sm">打板戰法（情緒增強版）</span>
           <span className="text-xs text-muted-foreground">
-            漲停股 {session.results.length} 檔 | 可買入 {buyable.length} 檔
+            漲停候選 {session.results.length} 檔 | 非一字板 {buyable.length} 檔 | 已確認進場 {confirmedCount} 檔
           </span>
           {isFetchingForward && (
             <span className="text-[10px] text-sky-400 animate-pulse">載入後續表現…</span>
@@ -364,10 +380,10 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
               {FWD_COLS.map(({ key, label }) => (
                 <th key={key}
                   className="text-right py-2 px-1 whitespace-nowrap text-[10px] border-l border-border/20"
-                  title={key === 'openReturn' ? '隔日開盤相對掃描日收盤的漲跌幅' :
-                    key === 'maxGain' ? '觀察期間最大漲幅' :
-                    key === 'maxLoss' ? '觀察期間最大跌幅' :
-                    `第${label}收盤相對掃描日收盤的漲跌幅`}
+                  title={key === 'openReturn' ? '隔日開盤價相對掃描日收盤價的缺口；不是買進後報酬' :
+                    key === 'maxGain' ? '確認可成交後 20 個交易日內最高報酬' :
+                    key === 'maxLoss' ? '確認可成交後 20 個交易日內最低報酬' :
+                    `隔日開盤確認可成交後，第${label}收盤相對進場開盤價的報酬`}
                 >
                   {label}
                 </th>
@@ -395,6 +411,9 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
                   <td className="py-2 px-2 text-right font-mono text-xs">{r.volumeRatio.toFixed(1)}</td>
                   <td className="py-2 px-2 text-right font-mono text-amber-400 font-bold">
                     {r.buyThresholdPrice.toFixed(2)}
+                    <span className={`block text-[8px] ${r.openConfirmed === true ? 'text-emerald-400' : r.openConfirmed === false ? 'text-rose-400' : 'text-muted-foreground'}`}>
+                      {r.openConfirmed === true ? '已確認' : r.openConfirmed === false ? '未達門檻' : '待確認'}
+                    </span>
                   </td>
                   <td className="py-2 px-2 text-right font-mono">{r.rankScore.toFixed(1)}</td>
                   {/* 隔日開盤價（即時 > 前瞻） */}
@@ -426,7 +445,9 @@ export function DabanResultsTable({ date, onSelectStock }: DabanResultsTableProp
                     const val = perf ? perf[key] : undefined;
                     return (
                       <td key={key} className={`py-2 px-1 text-right font-mono text-[10px] whitespace-nowrap border-l border-border/10 ${retColor(val as number | null | undefined)}`}>
-                        {isFetchingForward && !perf ? (
+                        {r.openConfirmed !== true ? (
+                          <span className="text-muted-foreground/40" title="尚未確認達到買入門檻，不計策略績效">—</span>
+                        ) : isFetchingForward && !perf ? (
                           <span className="text-muted-foreground/40">…</span>
                         ) : (
                           fmtRet(val as number | null | undefined)

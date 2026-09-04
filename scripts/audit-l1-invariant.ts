@@ -19,6 +19,8 @@ import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 
 import path from 'path';
 
 import { isValidTwTick, snapTwTick, isTwEtf } from '../lib/datasource/twTick';
+import { matchAnomaly } from '../lib/datasource/knownAnomalies';
+import { isZeroVolumeFlatBar } from '../lib/datasource/candleSanitizers';
 
 if (existsSync('.env.local')) config({ path: '.env.local' });
 config();
@@ -135,8 +137,12 @@ function auditMarket(market: Market): MarketAudit {
     }
 
     // ── 整根複製偵測（近 DUP_WINDOW 根已封存 bar）─────────────────────────────
-    let sealed = candles.filter(c => c.date < today);
-    if (sealedDate) sealed = sealed.filter(c => c.date <= sealedDate!);
+    // sealedDate 是寫入層已確認完成結算的權威邊界；即使它恰好是今天，也必須納入。
+    // 舊邏輯先排除 today，會錯把昨天的 adjusted close 當成「最新封存價」，造成次檔位誤報。
+    const usableCandles = candles.filter(c => !isZeroVolumeFlatBar(c));
+    const sealed = sealedDate
+      ? usableCandles.filter(c => c.date <= sealedDate)
+      : usableCandles.filter(c => c.date < today);
     const win = sealed.slice(-DUP_WINDOW);
     for (let i = 1; i < win.length; i++) {
       const p = win[i - 1], n = win[i];
@@ -147,6 +153,13 @@ function auditMarket(market: Market): MarketAudit {
         n.close === p.close && n.volume === p.volume &&
         n.volume > 0 && n.high > n.low && range >= DUP_RANGE_MIN
       ) {
+        // 低量股票確實可能連兩日 OHLCV 完全相同；已經雙源驗證的個案不應讓 cron 永久紅燈。
+        if (matchAnomaly('adjacent-identical-bar', {
+          symbol: sym,
+          date: n.date,
+          current: n,
+          prev: { close: p.close },
+        })) continue;
         out.dupBars++;
         if (out.dupSamples.length < 20) {
           out.dupSamples.push({ symbol: sym, prevDate: p.date, date: n.date, close: n.close, volume: n.volume, rangePct: range });

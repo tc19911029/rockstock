@@ -21,6 +21,7 @@ if (existsSync('.env.local')) config({ path: '.env.local' });
 config();
 
 import { getLastTradingDay } from '../lib/datasource/marketHours';
+import { BOOK_UNIVERSE_TOP_N } from '../lib/scanner/universeTopN';
 
 type Market = 'TW' | 'CN';
 
@@ -117,12 +118,28 @@ function readLastNCandles(market: Market, code: string, n: number): Array<{ date
   return [];
 }
 
-function classifyReason(market: Market, q: IntradayQuote, date: string): string {
+function loadBookUniverse(market: Market): Set<string> {
+  const file = path.join(process.cwd(), 'data', 'turnover-rank', `${market}.json`);
+  try {
+    const rank = JSON.parse(readFileSync(file, 'utf8')) as { symbols?: string[] };
+    return new Set((rank.symbols ?? []).slice(0, BOOK_UNIVERSE_TOP_N).map(symbol =>
+      symbol.replace(/\.(TW|TWO|SS|SZ)$/i, ''),
+    ));
+  } catch {
+    return new Set();
+  }
+}
+
+function classifyReason(market: Market, q: IntradayQuote, date: string, bookUniverse: Set<string>): string {
   // 用 lastTradingDay - 1 當判斷基準（今天盤中 L1 無封存正常）
   const d = new Date(date);
   d.setDate(d.getDate() - 1);
   const prevTradingDay = d.toISOString().split('T')[0];
   const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+
+  if (bookUniverse.size > 0 && !bookUniverse.has(code)) {
+    return `成交額非前 ${BOOK_UNIVERSE_TOP_N}（不在正式策略宇宙）`;
+  }
 
   if (!checkL1HasDate(market, code, prevTradingDay)) {
     return `L1 缺 ${prevTradingDay} → 精掃跳過（真漏掃 — 需 backfill）`;
@@ -190,6 +207,7 @@ async function auditMarket(market: Market, date: string): Promise<AuditResult> {
   const limitUp = quotes.filter(q => q.changePercent >= LIMIT_THRESHOLD);
   const limitDown = quotes.filter(q => q.changePercent <= -LIMIT_THRESHOLD);
   const scanSymbols = loadScanResults(market, date);
+  const bookUniverse = loadBookUniverse(market);
 
   const allLimit = [...limitUp, ...limitDown];
   const inScan: string[] = [];
@@ -203,7 +221,7 @@ async function auditMarket(market: Market, date: string): Promise<AuditResult> {
         symbol: code,
         name: q.name,
         changePercent: q.changePercent,
-        reason: classifyReason(market, q, date),
+        reason: classifyReason(market, q, date, bookUniverse),
       });
     }
   }

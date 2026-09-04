@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StockScanResult } from '@/lib/scanner/types';
 
 /** localStorage：以 market:scanDate:direction 為 key 存 digest + 追問對話 */
@@ -16,7 +16,7 @@ interface HistoryEntry {
 type HistoryMap = Record<string, HistoryEntry>;
 
 /**
- * storageKey 帶入 L4 session 版本（第一檔的 scanTime），
+ * storageKey 帶入 L4 session 版本（整批資料的穩定摘要），
  * 使用者刷新 L4 後 scanTime 變 → key 變 → 舊歷史不會被載回。
  */
 function storageKey(
@@ -29,7 +29,17 @@ function storageKey(
 }
 
 function computeSessionVersion(results: StockScanResult[]): string {
-  return results[0]?.scanTime ?? 'empty';
+  if (results.length === 0) return 'empty';
+  const parts = results
+    .map((r) => `${r.symbol}:${r.scanTime ?? ''}:${r.price}:${r.changePercent}`)
+    .sort();
+  let hash = 2166136261;
+  for (const char of parts.join('|')) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const latestScanTime = results.reduce((latest, r) => r.scanTime && r.scanTime > latest ? r.scanTime : latest, '');
+  return `${latestScanTime || 'unknown'}:${results.length}:${(hash >>> 0).toString(36)}`;
 }
 
 /** 人類可讀的「上次分析時間」。今天顯示 HH:MM，其他顯示 MM-DD HH:MM */
@@ -113,6 +123,55 @@ interface ScanCoachDigestProps {
   buyMethod?: string;
 }
 
+function numberDesc(a: number | null | undefined, b: number | null | undefined): number {
+  const av = a == null || !Number.isFinite(a) ? -Infinity : a;
+  const bv = b == null || !Number.isFinite(b) ? -Infinity : b;
+  return bv - av;
+}
+
+/** 與掃描清單的策略預設一致；一般字母策略保留後端既有優先序。 */
+function orderCoachResults(
+  results: StockScanResult[],
+  direction: ScanCoachDigestProps['direction'],
+  buyMethod?: string,
+): StockScanResult[] {
+  const rows = [...results];
+  const method = buyMethod ?? 'A';
+  if (method === 'R') {
+    return rows.sort((a, b) => direction === 'short'
+      ? (b.ma20Deviation ?? -Infinity) - (a.ma20Deviation ?? -Infinity)
+      : (a.ma20Deviation ?? Infinity) - (b.ma20Deviation ?? Infinity));
+  }
+  if (direction === 'short') {
+    return rows.sort((a, b) =>
+      numberDesc(a.shortSixConditionsScore, b.shortSixConditionsScore)
+      || numberDesc(-(a.turnoverRank ?? Infinity), -(b.turnoverRank ?? Infinity)),
+    );
+  }
+  if (method === 'W') return rows.sort((a, b) => numberDesc(a.smartMoneyConc, b.smartMoneyConc));
+  if (method === 'X') return rows.sort((a, b) => numberDesc(a.instDipInstK, b.instDipInstK));
+  if (method === 'Y') {
+    return rows.sort((a, b) =>
+      numberDesc(a.instStealConsec, b.instStealConsec)
+      || numberDesc(a.instStealConc5, b.instStealConc5),
+    );
+  }
+  if (method === 'A30') {
+    return rows.sort((a, b) =>
+      numberDesc(a.sixConditionsScore, b.sixConditionsScore)
+      || numberDesc(a.changePercent, b.changePercent),
+    );
+  }
+  if (method === 'A') {
+    return rows.sort((a, b) =>
+      (a.turnoverRank ?? Infinity) - (b.turnoverRank ?? Infinity)
+      || numberDesc(a.sixConditionsScore, b.sixConditionsScore)
+      || numberDesc(a.changePercent, b.changePercent),
+    );
+  }
+  return rows;
+}
+
 /** LLM 可能會回傳 "2345" 或 "2345.TW"，兩種都能對上 results */
 function nameOf(symbol: string, results: StockScanResult[]): string {
   const bare = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -127,6 +186,7 @@ function displaySymbol(symbol: string): string {
 }
 
 function buildRequestBody(props: ScanCoachDigestProps) {
+  const warningOnly = ['D', 'F', 'J', 'N', 'O', 'Q'].includes(props.buyMethod ?? '');
   // 只丟前 30 檔給 LLM，減少 token 成本並聚焦
   const candidates = props.results.slice(0, 30).map((r, idx) => ({
     rank: idx + 1,
@@ -135,8 +195,10 @@ function buildRequestBody(props: ScanCoachDigestProps) {
     industry: r.industry,
     price: r.price,
     changePercent: r.changePercent,
-    sixCond: r.sixConditionsScore,
-    sixCondBreakdown: r.sixConditionsBreakdown,
+    sixCond: props.direction === 'short' ? (r.shortSixConditionsScore ?? 0) : (r.sixConditionsScore ?? 0),
+    sixCondBreakdown: props.direction === 'short'
+      ? (r.shortSixConditionsBreakdown ?? { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false })
+      : (r.sixConditionsBreakdown ?? { trend: false, position: false, kbar: false, ma: false, volume: false, indicator: false }),
     trendState: r.trendState,
     trendPosition: r.trendPosition,
     mtfScore: r.mtfScore,
@@ -144,7 +206,8 @@ function buildRequestBody(props: ScanCoachDigestProps) {
     winnerBullish: r.winnerBullishPatterns,
     winnerBearish: r.winnerBearishPatterns,
     elimination: r.eliminationReasons,
-    prohibitions: r.entryProhibitionReasons,
+    prohibitions: props.direction === 'long' ? r.longProhibitionsReasons : undefined,
+    prohibitionRole: warningOnly ? 'warning' : 'veto',
     turnoverRank: r.turnoverRank,
     histWinRate: r.histWinRate,
     // v12 fields（議題 33/65/93/13/27/88）
@@ -203,13 +266,14 @@ function buildFollowupContext(
   lines.push('');
   lines.push('## 全部候選清單（供你查詢細節）：');
   for (const [idx, r] of props.results.slice(0, 30).entries()) {
-    const b = r.sixConditionsBreakdown;
+    const b = props.direction === 'short' ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown;
+    const score = props.direction === 'short' ? r.shortSixConditionsScore : r.sixConditionsScore;
     const bits = [
       `#${idx + 1}`,
       `${displaySymbol(r.symbol)} ${r.name}`,
       r.industry ? `[${r.industry}]` : '',
       `${r.price.toFixed(2)} (${r.changePercent >= 0 ? '+' : ''}${r.changePercent.toFixed(1)}%)`,
-      b ? `六條件${r.sixConditionsScore}/6[趨${b.trend ? '✓' : '✗'}位${b.position ? '✓' : '✗'}K${b.kbar ? '✓' : '✗'}均${b.ma ? '✓' : '✗'}量${b.volume ? '✓' : '✗'}指${b.indicator ? '✓' : '✗'}]` : `六條件${r.sixConditionsScore}/6`,
+      b ? `${props.direction === 'short' ? '空方' : ''}六條件${score ?? 0}/6[趨${b.trend ? '✓' : '✗'}位${b.position ? '✓' : '✗'}K${b.kbar ? '✓' : '✗'}均${b.ma ? '✓' : '✗'}量${b.volume ? '✓' : '✗'}指${b.indicator ? '✓' : '✗'}]` : `${props.direction === 'short' ? '空方' : ''}六條件${score ?? 0}/6`,
       `${r.trendState}・${r.trendPosition}`,
       r.mtfScore !== undefined ? `MTF${r.mtfScore}/4` : '',
     ].filter(Boolean);
@@ -230,6 +294,7 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
   useEffect(() => {
     let cancelled = false;
     if (!props.market || !props.scanDate) return;
+    setLiveTrend(props.marketTrend);
     fetch(`/api/scanner/market-trend?market=${props.market}&date=${props.scanDate}`)
       .then((r) => r.json())
       .then((j: { ok?: boolean; trend?: string }) => {
@@ -237,7 +302,7 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
       })
       .catch(() => { /* keep prop fallback */ });
     return () => { cancelled = true; };
-  }, [props.market, props.scanDate]);
+  }, [props.market, props.scanDate, props.marketTrend]);
   // 用 effective trend 覆寫 props.marketTrend 給下游（buildRequestBody 等）
   const effectiveProps = { ...props, marketTrend: liveTrend };
 
@@ -249,16 +314,26 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
 
   // 歷史標記
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const askSeq = useRef(0);
+  const chatSeq = useRef(0);
+  const askAbort = useRef<AbortController | null>(null);
+  const chatAbort = useRef<AbortController | null>(null);
 
-  const aborted = useRef(false);
+  const orderedResults = useMemo(
+    () => orderCoachResults(props.results, props.direction, props.buyMethod),
+    [props.results, props.direction, props.buyMethod],
+  );
 
   // Session key：帶 scanTime，刷新 L4 後 key 變 → 舊歷史不被載回
-  const sessionVersion = computeSessionVersion(props.results);
+  const sessionVersion = computeSessionVersion(orderedResults);
   const persistKey = storageKey(props.market, props.scanDate, props.direction, sessionVersion);
 
   // 切換市場/日期/方向/L4 版本時：先清狀態，再嘗試從 localStorage 載回歷史
   useEffect(() => {
-    aborted.current = false;
+    askAbort.current?.abort();
+    chatAbort.current?.abort();
+    askSeq.current += 1;
+    chatSeq.current += 1;
     setError(null);
     setLoading(false);
     setInput('');
@@ -276,7 +351,8 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
     }
 
     return () => {
-      aborted.current = true;
+      askAbort.current?.abort();
+      chatAbort.current?.abort();
     };
   }, [persistKey]);
 
@@ -290,26 +366,31 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
 
   const ask = async (opts?: { forceRefresh?: boolean }) => {
     if (loading) return;
+    askAbort.current?.abort();
+    const controller = new AbortController();
+    askAbort.current = controller;
+    const seq = ++askSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/coach/scan-digest', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...buildRequestBody(effectiveProps), forceRefresh: opts?.forceRefresh ?? false }),
+        body: JSON.stringify({ ...buildRequestBody({ ...effectiveProps, results: orderedResults }), forceRefresh: opts?.forceRefresh ?? false }),
+        signal: controller.signal,
       });
       const body = await res.json();
-      if (aborted.current) return;
+      if (seq !== askSeq.current || controller.signal.aborted) return;
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
       setData(body as DigestResponse);
       // 換一批新分析，清掉舊追問
       setChat([]);
       setChatError(null);
     } catch (err) {
-      if (aborted.current) return;
+      if (seq !== askSeq.current || controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'digest failed');
     } finally {
-      if (!aborted.current) setLoading(false);
+      if (seq === askSeq.current && !controller.signal.aborted) setLoading(false);
     }
   };
 
@@ -317,6 +398,10 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
   const sendFollowup = async (question: string) => {
     const q = question.trim();
     if (!q || chatLoading || !data) return;
+    chatAbort.current?.abort();
+    const controller = new AbortController();
+    chatAbort.current = controller;
+    const seq = ++chatSeq.current;
     const nextMessages: ChatMessage[] = [...chat, { role: 'user', content: q }];
     setChat([...nextMessages, { role: 'assistant', content: '' }]);
     setInput('');
@@ -328,8 +413,9 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           messages: nextMessages,
-          context: buildFollowupContext(data, effectiveProps),
+          context: buildFollowupContext(data, { ...effectiveProps, results: orderedResults }),
         }),
+        signal: controller.signal,
       });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
@@ -338,7 +424,7 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (aborted.current) return;
+        if (seq !== chatSeq.current || controller.signal.aborted) return;
         assistantText += decoder.decode(value, { stream: true });
         setChat(prev => {
           const copy = [...prev];
@@ -347,12 +433,12 @@ export function ScanCoachDigest(props: ScanCoachDigestProps) {
         });
       }
     } catch (err) {
-      if (aborted.current) return;
+      if (seq !== chatSeq.current || controller.signal.aborted) return;
       setChatError(err instanceof Error ? err.message : 'chat failed');
       // 拿掉空 assistant
       setChat(prev => prev[prev.length - 1]?.content === '' ? prev.slice(0, -1) : prev);
     } finally {
-      if (!aborted.current) setChatLoading(false);
+      if (seq === chatSeq.current && !controller.signal.aborted) setChatLoading(false);
     }
   };
 

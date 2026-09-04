@@ -36,7 +36,7 @@ export function BacktestSection() {
   const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
 
   const horizonLabels: { key: BacktestHorizon; label: string }[] = [
-    { key: 'open', label: '隔日開' }, { key: 'd1', label: '1日' },
+    { key: 'open', label: '開盤缺口' }, { key: 'd1', label: '1日' },
     { key: 'd2', label: '2日' },     { key: 'd3', label: '3日' },
     { key: 'd4', label: '4日' },     { key: 'd5', label: '5日' },
     { key: 'd6', label: '6日' },     { key: 'd7', label: '7日' },
@@ -48,11 +48,17 @@ export function BacktestSection() {
 
   // 排序值取法（id 走 lib/sorting/registry 中央清單；缺值/升降序由 sortEngine 統一處理）
   const tradeSortValue = (t: typeof trades[number], id: string): SortValue => {
+    const sym = t.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
+    const scanResult = scanResults.find((r) => r.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '') === sym);
     switch (id) {
       case 'score.composite':   return calcTradeComposite(t, scanResults);
       case 'score.sixCond':     return t.signalScore;
-      case 'score.surge':       return t.signalScore ?? 0; // 「等級」「潛力」兩欄都對 score.surge，accessor 照舊回 signalScore
-      case 'score.histWinRate': return t.histWinRate ?? 0;
+      case 'score.grade': {
+        const gradeOrder: Record<string, number> = { S: 5, A: 4, B: 3, C: 2, D: 1 };
+        return scanResult?.surgeGrade ? gradeOrder[scanResult.surgeGrade] ?? null : null;
+      }
+      case 'score.surge':       return scanResult?.surgeScore ?? null;
+      case 'score.histWinRate': return t.histWinRate ?? null;
       case 'trust.days':        return t.holdDays;
       case 'score.netReturn':   return t.netReturn;
       default:                  return null;
@@ -126,7 +132,7 @@ export function BacktestSection() {
                   {([
                     { key: 'score.composite', label: '綜合', tooltip: '綜合評分 (0-100)\n六條件35% + 潛力25% + 勝率20%\n+ 位置10% + 量能10%\n越高代表多維度共振越強' },
                     { key: 'score.sixCond', label: '評分', tooltip: '六大條件評分 (0-6)\n1.趨勢 2.位置 3.K棒\n4.均線 5.量能 6.指標\n≥4分才列入選股' },
-                    { key: 'score.surge', label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
+                    { key: 'score.grade', label: '等級', tooltip: '飆股潛力等級\nS(80+) A(65-79) B(50-64)\nC(35-49) D(<35)' },
                     { key: 'score.surge', label: '潛力', tooltip: '飆股潛力分 (0-100)\n9大維度加權：動能18% 量能15%\n突破15% 趨勢15% 波動12%\n長線10% 位置5% K棒5% 共振5%' },
                     { key: 'score.histWinRate', label: '勝率', tooltip: '歷史勝率\n過去120天同類信號\n隔日開盤買→持有5日賣\n有多少次是賺錢的' },
                   ]).map(({ key, label, tooltip }) => (
@@ -237,7 +243,7 @@ export function BacktestSection() {
                   <th className="text-left py-1.5 px-2 whitespace-nowrap">趨勢</th>
                   <th className="text-left py-1.5 px-2 whitespace-nowrap">位置</th>
                   <th className="text-center py-1.5 px-2 whitespace-nowrap" title="籌碼面評分 (0-100)\nS(80+)=主力強力買超\nA(65-79)=法人偏多\nB(50-64)=中性\nC(35-49)=法人偏空\nD(<35)=主力出貨\n\n依據：三大法人買賣超+融資融券+大額交易人+當沖比例">籌碼ⓘ</th>
-                  <th className="text-right py-1.5 px-1.5 whitespace-nowrap">隔日開</th>
+                  <th className="text-right py-1.5 px-1.5 whitespace-nowrap" title="訊號日收盤到隔日開盤的缺口，不是買進後報酬">開盤缺口</th>
                   <th className="text-right py-1.5 px-1.5 whitespace-nowrap">1日</th>
                   <th className="text-right py-1.5 px-1.5 whitespace-nowrap">2日</th>
                   <th className="text-right py-1.5 px-1.5 whitespace-nowrap">3日</th>
@@ -313,9 +319,9 @@ export function BacktestSection() {
                             <td key={i} className={`py-1.5 px-1 text-right font-mono ${retColor(v)}`}>{fmtRet(v)}</td>
                           ))}
                           <td className="py-1.5 px-1 text-right whitespace-nowrap">
-                            <span className="text-red-400">+{(p.maxGain ?? 0).toFixed(1)}%</span>
+                            <span className="text-red-400">{p.maxGain == null ? '—' : `${p.maxGain >= 0 ? '+' : ''}${p.maxGain.toFixed(1)}%`}</span>
                             <span className="text-muted-foreground/60">/</span>
-                            <span className="text-green-500">{(p.maxLoss ?? 0).toFixed(1)}%</span>
+                            <span className="text-green-500">{p.maxLoss == null ? '—' : `${p.maxLoss >= 0 ? '+' : ''}${p.maxLoss.toFixed(1)}%`}</span>
                           </td>
                         </>
                       ) : (

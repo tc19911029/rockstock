@@ -282,7 +282,7 @@ export async function scanSanSe(opts?: { asOfDate?: string; intraday?: SanSeIntr
       if (report.selected) {
         records.push({
           symbol: s.symbol, name: s.name, industry: s.industry ?? '',
-          price: lastClose, changePct, report,
+          price: lastClose, changePct, shortOversold: evalLatest(series, 'medium').shortOversold, report,
           zhuSix: computeZhuSix(candles), // 只對入選紀錄算（~數百檔），不對全市場算
         });
       }

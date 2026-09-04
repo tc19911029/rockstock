@@ -1,21 +1,44 @@
-# 本地 launchd 排程（補 instrumentation.ts 沒做的）
+# 本地 launchd 排程
 
-## 正式盤後策略流水線
+## 管理邊界（2026-08-03 稽核）
 
-`strategy-eod-tw/cn` 會先完成 A，再跑 B～R、SanSe、V（TW 另跑 Y），
-最後一定更新 health。A 若失敗會阻止依賴它的策略；其餘獨立策略會繼續執行，
-但任何失敗都會讓排程非零退出，避免 partial 結果被誤報為成功。
+`scripts/launchd/plists/` 目前管理 21 個啟用中 plist；此機器實際安裝 49 個
+`com.rockstock.*` 任務，其中 28 個是機器限定或選用、尚未收進啟用清單的排程。
 
-盤後正式掃描只允許 sealed L1，不得用未標記 final 的 L2 快照覆寫收盤價。
-直接執行 TypeScript 的維護任務統一使用 `~/.local/node-22` 的固定 Node 與
-全域 `tsx`，禁止引用 Desktop 專案內的 `node_modules/.bin/tsx`，避免
-macOS launchd/TCC 權限造成靜默漏跑。安裝前請執行：
+先執行只讀稽核：
 
 ```bash
-~/.local/node-22/bin/npm install -g tsx@4.23.5
+zsh scripts/launchd/audit.sh
 ```
 
-## 為什麼只有 4 個（不是 60 個）
+輸出會標示 repo/安裝/載入狀態、漂移、Desktop 依賴、`npx` 與弱密鑰。
+`install-all.sh` 與 `uninstall-all.sh` 只會異動 repo 管理的清單，不會再觸碰
+額外 28 個機器限定任務。若已安裝版與 repo 不同，安裝器預設會停止；
+只有確定要以 repo 覆蓋時才使用 `--force`。
+
+`scripts/launchd/plists-disabled/` 保留已確認由 `instrumentation.node.ts` 覆蓋的舊排程，
+不會被安裝器載入。2026-08-03 停用：`cn-daban-open`、`etf-track`、
+`portfolio-notify`。此機器的對應 plist 放在
+`~/Library/LaunchAgents/rockstock-disabled/`，可手動恢復。
+
+`strategy-eod-tw/cn` 是正式策略的依賴式盤後流水線：A 完成後才依序跑
+B～R、SanSe、V（TW 再跑 Y），最後才固化 health。它透過 localhost HTTP
+執行，不讓 launchd 直接載入 Desktop 下的 `node_modules/tsx`；任一步收到
+HTTP 4xx/5xx 就非零退出，避免 partial 結果被當成成功。
+
+仍需直接執行 TypeScript 的維護任務，統一使用固定安裝於
+`~/.local/node-22` 的 Node 與全域 `tsx` runtime；禁止引用專案內的
+`node_modules/.bin/tsx`，避免套件更新後 macOS provenance/TCC 讓背景程序失去讀取權。
+
+`youtube-status-check` 也已停用：它直接讀取 Desktop 內的 YouTube JSON，
+在 launchd 環境持續被 macOS TCC 拒絕，且其 transcript 補跑已由現行每小時
+`youtube-transcript` 排程覆蓋。
+
+`realtime-scan` 與 `scan-30m` 已由 instrumentation 的 30 秒／30 分鐘計時器覆蓋。
+`dev-server`、`instdip-track`、`agents-daily-decide`、`paper-portfolio-tick` 改為選用清單，
+安裝器不會在未明確啟用時自動載入。
+
+## 原始架構：instrumentation 與 launchd
 
 你的系統有兩層自動化：
 
@@ -54,7 +77,7 @@ macOS launchd/TCC 權限造成靜默漏跑。安裝前請執行：
 - `com.rockstock.etf-fetch.plist` — ETF 持股 18:00 / 22:00 / 隔日 09:00（補晚揭露）
 - `com.rockstock.etf-track.plist` — ETF 變化追蹤每天 23:00
 
-**總共 8 個 launchd 排程。**
+**這是 2026-05 的原始核心清單；實際數量請以 `audit.sh` 為準。**
 
 ## ⚠️ ~/Desktop 沙箱問題（0519 發現）
 
@@ -151,7 +174,7 @@ bash scripts/launchd/install-all.sh
 # 看哪些 launchd 已載入
 launchctl list | grep com.rockstock
 
-# 應該看到 8 個：
+# 下列是原始核心任務；完整清單請執行 audit.sh：
 # com.rockstock.cn-daban-close   ← 0519 新增（inline curl，無沙箱問題）
 # com.rockstock.cn-daban-open    ← 0519 新增（inline curl，無沙箱問題）
 # com.rockstock.cn-flow

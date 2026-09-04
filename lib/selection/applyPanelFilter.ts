@@ -90,9 +90,20 @@ export function panelSortCompare(a: StockScanResult, b: StockScanResult): number
 }
 
 /**
- * 面板排序 key — 數值型 key 給 backtest-run 的 sortFn 用（越大越優先）。
- * 與 panelSortCompare 等價：changePercent 為主，六條件總分為次，多頭時 ma20Slope 為第三。
- * 用 changePercent + sixCon/1000 + ma20Slope/1_000_000 把次鍵/第三鍵壓到尾數，不影響主鍵。
+ * 依面板的三層 lexicographic 規則排序，支援正反方向且保持原陣列不變。
+ * 不可把三個欄位相加成單一浮點 key：主鍵只差 0.001 時，次鍵就可能反客為主。
+ */
+export function sortByPanelOrder(
+  results: readonly StockScanResult[],
+  direction: 'asc' | 'desc' = 'desc',
+): StockScanResult[] {
+  const mult = direction === 'desc' ? 1 : -1;
+  return [...results].sort((a, b) => mult * panelSortCompare(a, b));
+}
+
+/**
+ * @deprecated 只能供舊研究腳本做近似分數，正式 UI／選股請用 panelSortCompare 或
+ * sortByPanelOrder。浮點加權無法保證與 lexicographic 排序等價。
  */
 export function panelSortKey(
   r: Pick<StockScanResult, 'changePercent' | 'sixConditionsScore'> &

@@ -4,9 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import NavigationProgress from '@/components/NavigationProgress';
 import {
-  Moon, Sun,
-  Briefcase,
-  Activity,
+  Moon, Sun, Briefcase, Activity,
 } from 'lucide-react';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
@@ -43,44 +41,37 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
       fullViewport ? 'h-screen overflow-hidden' : 'min-h-screen',
     )}>
       <NavigationProgress />
-      {/* Skip to content */}
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:bg-sky-600 focus:text-white focus:rounded-lg focus:text-sm">
-        跳到主要內容
-      </a>
 
       {/* ── Top Navigation ── */}
-      <header role="banner" className="shrink-0 border-b border-border bg-background px-3 sticky top-0 z-50">
-        <div className="h-12 flex items-center gap-2">
+      <header role="banner" className="shrink-0 border-b border-border bg-background/95 backdrop-blur px-3 sticky top-0 z-50">
+        <div className="min-h-12 w-full flex flex-wrap xl:flex-nowrap items-center gap-x-3">
 
           {/* Header slot (e.g. StockSelector) */}
           {headerSlot && (
-            <div className="shrink-0">{headerSlot}</div>
+            <div className="order-2 w-full min-w-0 py-1 xl:order-1 xl:w-auto xl:shrink-0 xl:py-0">{headerSlot}</div>
           )}
 
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* 輔助導覽（桌機 + 行動都顯示）— 2026-06-21 移除「全部頁面」側邊選單後唯一的 header 入口
-              整合進首頁原則：所有「日常看股」功能在首頁 TodayBriefing + DecisionPanel + 右側 tab
-              nav 只留「編輯持倉」和「系統健康」兩個必要管理入口
-              其餘舊頁路由保留、可手打 URL (today/growth/risk/sizer/watchlist/journal/realtime) */}
-          <nav aria-label="輔助導覽" className="flex items-center gap-0.5">
+          {/* 日常工作集中在首頁；只保留必要管理入口，避免把內部路由當產品選單。 */}
+          <nav aria-label="輔助導覽" className="order-1 ml-auto hidden xl:flex items-center gap-1">
             {([
-              { href: '/portfolio', label: '持倉',     icon: Briefcase },
-              { href: '/health',    label: '系統健康',  icon: Activity },
+              { href: '/portfolio', label: '持倉', icon: Briefcase },
+              { href: '/health', label: '系統健康', icon: Activity },
             ] as const).map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
                 href={href}
                 title={label}
+                aria-label={label}
+                aria-current={isActive(href) ? 'page' : undefined}
                 className={cn(
-                  'p-2 rounded-md transition-colors',
+                  'inline-flex min-h-11 items-center gap-1.5 px-2.5 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                   isActive(href)
                     ? 'text-sky-400 bg-sky-500/10'
                     : 'text-muted-foreground hover:text-foreground/80 hover:bg-secondary',
                 )}
               >
                 <Icon className="w-4 h-4" />
+                <span>{label}</span>
               </Link>
             ))}
 
@@ -93,17 +84,47 @@ export function PageShell({ children, headerSlot, fullViewport, className }: Pag
               size="icon"
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
               aria-label="切換主題"
-              className="text-muted-foreground hover:text-foreground/80 w-8 h-8"
+              className="text-muted-foreground hover:text-foreground/80 w-11 h-11"
             >
               <Sun className="w-4 h-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
               <Moon className="absolute w-4 h-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+            </Button>
+          </nav>
+
+          <nav aria-label="行動版輔助導覽" className="order-1 ml-auto flex xl:hidden items-center gap-1">
+            {([
+              { href: '/portfolio', label: '持倉', icon: Briefcase },
+              { href: '/health', label: '系統健康', icon: Activity },
+            ] as const).map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                aria-label={label}
+                aria-current={isActive(href) ? 'page' : undefined}
+                className={cn(
+                  'inline-flex size-11 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  isActive(href) ? 'text-sky-400 bg-sky-500/10' : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                )}
+              >
+                <Icon className="size-5" aria-hidden="true" />
+              </Link>
+            ))}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              aria-label="切換主題"
+              className="relative size-11 text-muted-foreground hover:text-foreground"
+            >
+              <Sun className="size-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute size-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             </Button>
           </nav>
         </div>
       </header>
 
       {/* ── Page Content ── */}
-      <main id="main-content" role="main" className={cn('flex-1', fullViewport && 'overflow-hidden', className)}>
+      <main id="main-content" tabIndex={-1} className={cn('flex-1 min-w-0 focus:outline-none', fullViewport && 'overflow-hidden', className)}>
         {children}
       </main>
     </div>

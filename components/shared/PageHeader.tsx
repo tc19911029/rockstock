@@ -31,14 +31,14 @@ export function PageHeader({
   const showBack = backButton === true || typeof backButton === 'string';
 
   return (
-    <div className={cn('flex items-center gap-2 text-xs min-w-0', className)}>
+    <div className={cn('flex w-full min-w-0 flex-wrap items-center gap-2 text-xs', className)}>
       {showBack && <BackButton href={backHref} />}
-      <span className="font-bold text-sm whitespace-nowrap shrink-0">{title}</span>
+      <h1 className="font-bold text-base sm:text-lg whitespace-nowrap shrink-0">{title}</h1>
       {subtitle && (
-        <span className="text-muted-foreground shrink-0 truncate">{subtitle}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{subtitle}</span>
       )}
       {actions && (
-        <div className="flex items-center gap-1.5 ml-auto shrink-0">
+        <div className="flex w-full flex-wrap items-center justify-end gap-1.5 sm:ml-auto sm:w-auto sm:shrink-0">
           {actions}
         </div>
       )}

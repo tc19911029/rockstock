@@ -19,7 +19,7 @@ import { detectStrategyE } from '@/lib/analysis/highWinRateEntry';
 import { detectStrategyD } from '@/lib/analysis/gapEntry';
 import { detectConsolidationBreakout } from '@/lib/analysis/breakoutEntry';
 import { buildPullbackBuyConditions } from '@/lib/analysis/pullbackBuyConditions';
-import { detectTrend } from '@/lib/analysis/trendAnalysis';
+import { detectTrend, findPivots } from '@/lib/analysis/trendAnalysis';
 import { detectVReversal, detectVReversalStructure } from '@/lib/analysis/vReversalDetector';
 import { detectABCBreakout } from '@/lib/analysis/abcBreakoutEntry';
 import { detectBlackKBreakout } from '@/lib/analysis/blackKBreakoutEntry';
@@ -46,6 +46,7 @@ import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { isLegacyBookObservationOnly } from '@/lib/analysis/patternCatalog';
 import type { CandleWithIndicators } from '@/types';
 import ProhibitionsBlock from './ProhibitionsBlock';
+import { isMAUp } from '@/lib/analysis/maPivot';
 
 // 2026-05-12：只留 v12 字母，v11 G/H/I 已被 normalizeLetter() 自動轉成 J/L/K
 type BuyMethod =
@@ -387,30 +388,48 @@ function evaluateMethod(
     case 'M': {
       // M=突破軌道線（v12 新訊號，寶典 p.387）
       const r = detectLetterM(candles, idx);
+      const trendPass = detectTrend(candles, idx) === '多頭';
+      const ma20Pass = c.ma20 != null && c.close > c.ma20
+        && (prev.ma20 == null || c.ma20 >= prev.ma20);
+      const pivots = findPivots(candles, idx, 10, false);
+      const lows = pivots.filter((p) => p.type === 'low').slice(0, 2);
+      const channelStructure = lows.length === 2
+        && lows[0].index - lows[1].index >= 5
+        && lows[0].price > lows[1].price;
+      const bodyPct = c.open > 0 ? (c.close - c.open) / c.open * 100 : 0;
+      const volRatio = prev.volume > 0 ? c.volume / prev.volume : 0;
       const conditions: ConditionItem[] = [
         {
           icon: '①', name: '多頭趨勢',
-          detail: detectTrend(candles, idx) === '多頭' ? '多頭' : '非多頭',
-          pass: detectTrend(candles, idx) === '多頭',
+          detail: trendPass ? '多頭' : '非多頭',
+          pass: trendPass,
         },
         {
-          icon: '②', name: '2 個 pivot low + 中間最高',
-          detail: r.triggered
-            ? `軌道值 ${r.channelValue?.toFixed(2)}（兩低點+中間最高 ${r.channelAnchorPrice?.toFixed(2)}）`
-            : '軌道線結構未成立',
-          pass: r.triggered,
+          icon: '②', name: '站上 MA20 + MA20 不下彎',
+          detail: c.ma20 != null ? `close ${c.close.toFixed(2)} / MA20 ${c.ma20.toFixed(2)}` : '無 MA20',
+          pass: ma20Pass,
         },
         {
-          icon: '③', name: 'close ≥ 軌道線 ×3% 真突破',
+          icon: '③', name: '2 個上升 pivot low + 中間最高',
+          detail: channelStructure ? '上升軌道結構成立' : '軌道線結構未成立',
+          pass: channelStructure,
+        },
+        {
+          icon: '④', name: 'close ≥ 軌道線 ×3% 真突破',
           detail: r.triggered
             ? `close ${c.close.toFixed(2)} ≥ ${r.breakoutThreshold?.toFixed(2)}`
-            : '未過 ×3% 真突破',
-          pass: r.triggered,
+            : channelStructure ? '未完成真突破或其他進場閘門' : '無有效軌道線',
+          pass: r.breakoutThreshold != null && c.close >= r.breakoutThreshold,
         },
         {
-          icon: '④', name: `紅 K + 量 ≥ ${BOOK_VOL_RATIO_MIN}`,
-          detail: r.triggered ? `紅 K ${r.bodyPct?.toFixed(2)}% / 量 ×${r.volumeRatio?.toFixed(2)}` : '前提未成立',
-          pass: r.triggered,
+          icon: '⑤', name: `紅 K 實體 ≥ ${BOOK_BODY_PCT_MIN}%` ,
+          detail: `實體 ${bodyPct.toFixed(2)}%`,
+          pass: bodyPct >= BOOK_BODY_PCT_MIN,
+        },
+        {
+          icon: '⑥', name: `量比 ≥ ${BOOK_VOL_RATIO_MIN}`,
+          detail: `量 ×${volRatio.toFixed(2)}`,
+          pass: volRatio >= BOOK_VOL_RATIO_MIN,
         },
       ];
       return { title, subTitle: '寶典 p.387 上升軌道線', conditions, allPass: r.triggered };
@@ -496,31 +515,41 @@ function evaluateMethod(
     case 'O': {
       // O=打底完成（v12 新訊號，寶典 Part 11-1 位置 1）
       const r = detectLetterO(candles, idx);
+      const trendTurn = detectTrend(candles, idx) === '多頭' && detectTrend(candles, idx - 1) !== '多頭';
+      const ma20Series = candles.slice(Math.max(0, idx - 30), idx + 1).map((k) => k.ma20).filter((v): v is number => v != null);
+      const ma20Pass = c.ma20 != null && c.close >= c.ma20 && isMAUp(ma20Series, 3);
+      const bodyPct = c.open > 0 ? (c.close - c.open) / c.open * 100 : 0;
+      const volRatio = prev.volume > 0 ? c.volume / prev.volume : 0;
       const conditions: ConditionItem[] = [
         {
-          icon: '①', name: '空頭→盤整轉換 + 大量打底',
+          icon: '①', name: '完整空→盤整＋大量打底結構',
           detail: r.hadHighVolume ? '✅ 已偵測到打底大量' : '尚未偵測',
           pass: !!r.hadHighVolume,
         },
         {
           icon: '②', name: '反轉多頭確認',
-          detail: detectTrend(candles, idx) === '多頭' ? '✅ 翻多' : '尚未翻多',
-          pass: detectTrend(candles, idx) === '多頭',
+          detail: trendTurn ? '✅ 今日首次翻多' : '尚未形成首次翻多',
+          pass: trendTurn,
         },
         {
           icon: '③', name: '站上 MA20 + MA20 上揚',
           detail: c.ma20 ? `close ${c.close.toFixed(2)} vs MA20 ${c.ma20.toFixed(2)}` : '無 MA20',
-          pass: c.ma20 != null && c.close >= c.ma20,
+          pass: ma20Pass,
         },
         {
-          icon: '④', name: '紅 K 突破打底盤整高 ×3%',
+          icon: '④', name: `紅 K 實體 ≥ ${BOOK_BODY_PCT_MIN}% + 量 ≥ ${BOOK_VOL_RATIO_MIN}`,
+          detail: `實體 ${bodyPct.toFixed(2)}% / 量 ×${volRatio.toFixed(2)}`,
+          pass: bodyPct >= BOOK_BODY_PCT_MIN && volRatio >= BOOK_VOL_RATIO_MIN,
+        },
+        {
+          icon: '⑤', name: '收盤突破打底盤整高 ×3%',
           detail: r.triggered
             ? `突破 ${r.triggerPrice?.toFixed(2)}（×3% = ${r.breakoutThreshold?.toFixed(2)}）`
             : '未突破',
-          pass: r.triggered,
+          pass: r.breakoutThreshold != null && c.close >= r.breakoutThreshold,
         },
         {
-          icon: '⑤', name: '加分項：站上 MA60（可長多）',
+          icon: '⑥', name: '加分項：站上 MA60（可長多）',
           detail: r.aboveMA60 ? '✅ 站上季線' : '— 未站上',
           pass: !!r.aboveMA60,
         },
@@ -530,6 +559,10 @@ function evaluateMethod(
     case 'P': {
       // P=高檔拉回（v12 新訊號，寶典 Part 11-1 位置 3 等拉回）
       const r = detectLetterP(candles, idx);
+      const bodyPct = c.open > 0 ? (c.close - c.open) / c.open * 100 : 0;
+      const volRatio = prev.volume > 0 ? c.volume / prev.volume : 0;
+      const abovePrevHigh = c.close > prev.high;
+      const holdsMa20 = c.ma20 != null && Math.min(c.low, prev.low) >= c.ma20;
       const conditions: ConditionItem[] = [
         {
           icon: '①', name: '多頭趨勢',
@@ -544,16 +577,19 @@ function evaluateMethod(
           pass: r.triggered,
         },
         {
-          icon: '③', name: '不破 MA10 / 不破前低',
-          detail: r.triggered ? '✅ 守 MA10 + 不破前低' : '前提未成立',
-          pass: r.triggered,
+          icon: '③', name: '不破 MA20（月線）／不破前低',
+          detail: c.ma20 != null ? `近兩日低 ${Math.min(c.low, prev.low).toFixed(2)} / MA20 ${c.ma20.toFixed(2)}` : '無 MA20',
+          pass: holdsMa20,
         },
         {
-          icon: '④', name: `紅 K + 量 ≥ ${BOOK_VOL_RATIO_MIN} + 突破前 K 高`,
-          detail: r.triggered
-            ? `紅 K ${r.bodyPct?.toFixed(2)}% / 量 ×${r.volumeRatio?.toFixed(2)} / 突破 ${r.triggerPrice?.toFixed(2)}`
-            : '前提未成立',
-          pass: r.triggered,
+          icon: '④', name: `紅 K 實體 ≥ ${BOOK_BODY_PCT_MIN}% + 量 ≥ ${BOOK_VOL_RATIO_MIN}`,
+          detail: `實體 ${bodyPct.toFixed(2)}% / 量 ×${volRatio.toFixed(2)}`,
+          pass: bodyPct >= BOOK_BODY_PCT_MIN && volRatio >= BOOK_VOL_RATIO_MIN,
+        },
+        {
+          icon: '⑤', name: '收盤突破前 K 高',
+          detail: `${c.close.toFixed(2)} vs 前高 ${prev.high.toFixed(2)}`,
+          pass: abovePrevHigh,
         },
       ];
       return { title, subTitle: '寶典位置 3 等拉回（B 的淺回版）', conditions, allPass: r.triggered };
@@ -561,6 +597,12 @@ function evaluateMethod(
     case 'Q': {
       // Q=三條均線戰法（v12 新訊號，戰法軌獨立 SOP）
       const r = detectLetterQ(candles, idx);
+      const ma24Series = candles.slice(Math.max(0, idx - 30), idx + 1).map((k) => k.ma24).filter((v): v is number => v != null);
+      const ma24Up = isMAUp(ma24Series, 3);
+      const goldenCross = c.ma3 != null && c.ma10 != null && prev.ma3 != null && prev.ma10 != null
+        && c.ma3 > c.ma10 && prev.ma3 <= prev.ma10;
+      const aboveMA3 = c.ma3 != null && c.close >= c.ma3;
+      const bodyPct = c.open > 0 ? (c.close - c.open) / c.open * 100 : 0;
       const conditions: ConditionItem[] = [
         {
           icon: '①', name: '股價 ≥ MA24',
@@ -569,23 +611,23 @@ function evaluateMethod(
         },
         {
           icon: '②', name: 'MA24 上揚（趨勢方向）',
-          detail: r.ma24Up ? '✅ 上揚' : '未上揚',
-          pass: !!r.ma24Up,
+          detail: ma24Up ? '✅ 上揚' : '未上揚',
+          pass: ma24Up,
         },
         {
           icon: '③', name: 'MA3 黃金交叉 MA10',
-          detail: r.goldenCrossToday ? '✅ 今日金叉' : '未金叉',
-          pass: !!r.goldenCrossToday,
+          detail: goldenCross ? '✅ 今日金叉' : '未金叉',
+          pass: goldenCross,
         },
         {
           icon: '④', name: '股價站上 MA3',
-          detail: r.aboveMA3 ? '✅ 站上 MA3' : '未站上',
-          pass: !!r.aboveMA3,
+          detail: aboveMA3 ? '✅ 站上 MA3' : '未站上',
+          pass: aboveMA3,
         },
         {
           icon: '⑤', name: `紅 K 實體 ≥ ${BOOK_BODY_PCT_MIN}%`,
-          detail: r.triggered ? `${r.bodyPct?.toFixed(2)}%` : '—',
-          pass: r.triggered,
+          detail: `${bodyPct.toFixed(2)}%`,
+          pass: bodyPct >= BOOK_BODY_PCT_MIN,
         },
       ];
       return {
@@ -659,7 +701,7 @@ export default function BuyMethodConditionsPanel({ method }: { method: BuyMethod
       )}
 
       {/* 進場 10 大戒律狀態（書本：硬性禁忌，任一觸發即不應進場） */}
-      <ProhibitionsBlock />
+      <ProhibitionsBlock mode={['D', 'F', 'J', 'N', 'O', 'Q'].includes(method) ? 'warning' : 'veto'} />
     </div>
   );
 }

@@ -132,7 +132,7 @@ function LeaderboardInner() {
     [rows, expandedId],
   );
 
-  const edgeMap = resp?.edgeByRowId ?? {};
+  const edgeMap = useMemo(() => resp?.edgeByRowId ?? {}, [resp]);
 
   const columns = useMemo<ColumnDef<LeaderboardRow, unknown>[]>(() => {
     const numCell = (getValue: () => unknown) => {
@@ -247,7 +247,7 @@ function LeaderboardInner() {
     <PageShell
       headerSlot={
         <PageHeader
-          title="📊 策略排行榜"
+          title="策略回測排行榜"
           subtitle={
             resp?.exists && resp.window ? (
               <span>

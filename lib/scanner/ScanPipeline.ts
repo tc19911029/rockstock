@@ -14,6 +14,7 @@ import type { ScanSession, MarketId, ScanDirection } from './types';
 import type { TaiwanScanner } from './TaiwanScanner';
 import type { ChinaScanner } from './ChinaScanner';
 import { BOOK_UNIVERSE_TOP_N, TURNOVER_INDEX_TOP_N } from './universeTopN';
+import { mergeScanBatchResults } from './batchMerge';
 import { canInjectL2ForScan, usableIntradaySnapshot } from './l2ScanPolicy';
 import { passesMtf } from './mtfPass';
 
@@ -220,10 +221,27 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
       if (direction === 'long' || activeStrategy.strategyType === 'mechanical-rank') {
         const mechanicalDirection = direction === 'short' ? 'short' : 'long';
-        const out = await scanner.scanSOP(stocks, date, activeThresholds, 'sixConditions', true, mechanicalDirection, activeStrategy.id);
+        const out = await scanner.scanSOP(stocks, date, activeThresholds, 'sixConditions', !batch, mechanicalDirection, activeStrategy.id);
         results = out.results as import('./types').StockScanResult[];
         sessionFreshness = out.sessionFreshness;
         if (!marketTrend) marketTrend = String(out.marketTrend ?? '');
+
+        if (batch && totalBatches) {
+          const { mergeStep1PoolBatch } = await import('./step1Pool');
+          await mergeStep1PoolBatch({
+            market: market as MarketId,
+            date,
+            strategyId: activeStrategy.id,
+            symbols: results.map((result) => result.symbol),
+            generatedAt: new Date().toISOString(),
+            stats: {
+              total: stocks.length,
+              passSixCond: results.length,
+              passProhib: results.length,
+              passElim: results.length,
+            },
+          }, batch === 1);
+        }
       } else {
         const out = await scanner.scanShortCandidates(stocks, date, activeThresholds);
         results = out.candidates;
@@ -245,7 +263,9 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
         try {
           const { analyzeForwardBatch } = await import('@/lib/backtest/ForwardAnalyzer');
           const fwdInput = results.map(r => ({ symbol: r.symbol, name: r.name, scanPrice: r.price }));
-          const { results: fwdPerf } = await analyzeForwardBatch(fwdInput, date);
+          const { results: fwdPerf } = await analyzeForwardBatch(fwdInput, date, {
+            direction: direction === 'short' ? 'short' : 'long',
+          });
           const fwdMap = new Map(fwdPerf.map(p => [p.symbol, p]));
           for (const r of results) {
             const p = fwdMap.get(r.symbol);
@@ -284,6 +304,13 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
       // ── Step 4a: 存 daily session（完整結果）──
       if (wantDaily) {
+        let dailyResults = results;
+        if (batch && batch > 1) {
+          const previous = await loadScanSession(market as MarketId, date, direction, 'daily', activeStrategy.id);
+          if (sessionMatchesActiveStrategy(previous)) {
+            dailyResults = mergeScanBatchResults(previous.results, results);
+          }
+        }
         const dailySession: ScanSession = {
           id: `${prefix}-${direction}-daily-${date}-${batch ? `b${batch}-` : ''}${Date.now()}`,
           strategyId: activeStrategy.id,
@@ -293,18 +320,24 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
           multiTimeframeEnabled: false,
           sessionType,
           scanTime: new Date().toISOString(),
-          resultCount: results.length,
-          results,
+          resultCount: dailyResults.length,
+          results: dailyResults,
           marketTrend,
           dataFreshness: sessionFreshness,
         };
         await saveScanSession(dailySession, { allowOverwritePostClose: allowOverwrite });
-        counts[`${direction}-daily`] = results.length;
+        counts[`${direction}-daily`] = dailyResults.length;
       }
 
       // ── Step 4b: 存 MTF session（4 項週線保護門檻 + 可選月線 strict）──
       if (wantMtf) {
-        const mtfResults = results.filter(r => passesMtf(r));
+        let mtfResults = results.filter(r => passesMtf(r));
+        if (batch && batch > 1) {
+          const previous = await loadScanSession(market as MarketId, date, direction, 'mtf', activeStrategy.id);
+          if (sessionMatchesActiveStrategy(previous)) {
+            mtfResults = mergeScanBatchResults(previous.results, mtfResults);
+          }
+        }
         const mtfSession: ScanSession = {
           id: `${prefix}-${direction}-mtf-${date}-${batch ? `b${batch}-` : ''}${Date.now() + 1}`,
           strategyId: activeStrategy.id,
@@ -358,7 +391,7 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
             }
             // 2026-05-21：跟其他 letter 一樣注入 forward perf
             const { injectForwardPerf } = await import('@/lib/backtest/injectForwardPerf');
-            await injectForwardPerf(rResults, date, `ScanPipeline:R-${direction}`);
+            await injectForwardPerf(rResults, date, `ScanPipeline:R-${direction}`, direction);
             const rSession: ScanSession = {
               id: `${market}-${direction}-R-${date}-${Date.now()}`,
               strategyId: activeStrategy.id,

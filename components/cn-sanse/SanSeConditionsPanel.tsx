@@ -66,7 +66,7 @@ export function SanSeConditionsPanel({ report }: { report: ConditionReport | nul
       </div>
       <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
         <span className="font-semibold text-fuchsia-300">🎨 三色條件</span>
-        {r.combo && <span className={cn('px-1.5 py-0.5 rounded border font-medium', COMBO_BADGE[r.combo.grade])} title="使用順序評級（回測推導：紅當前提 → 捕撈/雙B金叉觸發 → 三組齊發 共振3/3）">{COMBO_LABEL[r.combo.grade]}{r.combo.bottomReversal ? '·底部反彈' : ''}</span>}
+        {r.combo && <span className={cn('px-1.5 py-0.5 rounded border font-medium', COMBO_BADGE[r.combo.grade])} title="使用順序評級：紅當前提 → 捕撈/雙B金叉觸發 → 三燈全亮且雙金叉的全共振">{COMBO_LABEL[r.combo.grade]}{r.combo.bottomReversal ? '·底部反彈' : ''}</span>}
         {r.level && <span className={cn('px-1.5 py-0.5 rounded border font-medium', RES_BADGE[r.level].cls)}>{RES_BADGE[r.level].label} {r.groupBuyCount}/3</span>}
         {r.mainStage && <span className="px-1.5 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">主力{STAGE_LABEL[r.mainStage]}{STAGE_ICON[r.mainStage]}</span>}
         {r.conflict && <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-200 border border-amber-500/40">訊號衝突</span>}

@@ -7,14 +7,14 @@
 // 標籤一律「燈號＋白話」（🔴中線機構 / 🟣短線游資 / 🟡主力控盤 / 雙B金叉 / 捕撈金叉），
 // 不出現 M1/M2/M5 這類回測代號。
 //
-// 既有沿用（不重寫）：
-//   - 全共振⭐ = groupBuyCount===3（＝combo grade 'top'）
+// 既有名稱、收緊語意：
+//   - 全共振⭐ = 紅紫黃三燈全亮＋雙B金叉＋捕撈金叉（不能只看 groupBuyCount）
 //   - 底反🔥   = isReversalBuy()（conditions.ts；前端原本就有「底部反彈」level）
 // 新增具名（前端單一 chip 無法表達，尤其「金叉或突破」是 OR）：
 //   - 紅+黃+觸發 / 紅+雙B金叉 / 紅+雙B金叉或突破
 // ============================================================
 
-import { isReversalBuy, type ConditionReport } from './conditions';
+import { isFullResonance, isReversalBuy, type ConditionReport } from './conditions';
 
 /** 具名策略 id（含沿用既有的底反）。 */
 export type StrategyId = 'resonance' | 'red_yellow_trigger' | 'red_dualb_gold' | 'red_dualb_any' | 'reversal';
@@ -38,8 +38,8 @@ export const NAMED_STRATEGIES: NamedStrategy[] = [
   {
     id: 'resonance',
     label: '全共振⭐',
-    tip: '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同一天（三組齊發）。回測漲幅最大但稀有；台股最強、陸股牛市那段被稀釋。',
-    match: (r) => r.groupBuyCount === 3,
+    tip: '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉同一天。這是嚴格全共振，不以三組任意買訊替代；樣本稀有，需連同樣本數判讀。',
+    match: isFullResonance,
   },
   {
     id: 'red_yellow_trigger',

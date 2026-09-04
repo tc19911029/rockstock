@@ -9,7 +9,7 @@ import { POLLING } from '@/lib/config';
 import { Button } from '@/components/ui/button';
 import type { StockForwardPerformance, StockScanResult } from '@/lib/scanner/types';
 import { MTF_SCORE_STRONG, MTF_SCORE_OK } from '@/lib/analysis/bookThresholds';
-import { panelSortKey } from '@/lib/selection/applyPanelFilter';
+import { sortByPanelOrder } from '@/lib/selection/applyPanelFilter';
 import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
 import { bestHeatRank } from '@/lib/theme-sanse/heatRef';
 import { ThemeTag } from '@/components/ThemeTag';
@@ -38,7 +38,7 @@ function retColor(val: number | null | undefined): string {
 
 // Forward performance column definitions
 const FWD_COLS = [
-  { key: 'openReturn' as const, label: '隔日開' },
+  { key: 'openReturn' as const, label: '開盤缺口' },
   { key: 'd1Return' as const, label: '1日' },
   { key: 'd2Return' as const, label: '2日' },
   { key: 'd3Return' as const, label: '3日' },
@@ -57,8 +57,31 @@ const FWD_COLS = [
 const TOTAL_COLS = 22; // 代號+名稱+概念+價格+當日漲跌+趨勢+位置 + 14 fwd cols + 操作
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單；順序＝顯示順序）
-// 註：舊「面板對齊(panel)」與「漲幅(change)」邏輯完全相同（都走 panelSortKey），合併為單一 mkt.change。
+// 註：舊「面板對齊(panel)」與「漲幅(change)」合併為單一 mkt.change，採明確多欄位比較器。
 const SCAN_TABLE_SORT_OPTIONS = ['mkt.turnover', 'mkt.change', 'score.sixCond', 'heat.theme', 'mkt.price'];
+
+function defaultTableSort(method: string, direction: 'long' | 'short' | 'daban'): [string, SortDir] {
+  if (method === 'R') return ['score.deviation', direction === 'short' ? 'desc' : 'asc'];
+  if (method === 'W') return ['score.smartMoney', 'desc'];
+  if (method === 'X') return ['score.instDip', 'desc'];
+  if (method === 'Y') return ['score.instSteal', 'desc'];
+  if (direction === 'short') return ['score.shortSixCond', 'desc'];
+  if (method === 'A') return ['mkt.turnover', 'desc'];
+  if (method === 'A30') return ['score.sixCond', 'desc'];
+  return ['strategy.default', 'desc'];
+}
+
+function tableSortOptions(method: string, direction: 'long' | 'short' | 'daban') {
+  const special = method === 'R' ? 'score.deviation'
+    : method === 'W' ? 'score.smartMoney'
+    : method === 'X' ? 'score.instDip'
+    : method === 'Y' ? 'score.instSteal'
+    : direction === 'short' ? 'score.shortSixCond'
+    : null;
+  return special
+    ? [special, ...SCAN_TABLE_SORT_OPTIONS]
+    : [{ id: 'strategy.default', label: '策略原排序', defaultDir: 'desc' as const }, ...SCAN_TABLE_SORT_OPTIONS];
+}
 
 // 去市場後綴拿裸代號（今日題材熱度 map 以裸代號為 key）
 const bareCode = (s: string) => s.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -79,6 +102,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
     useMultiTimeframe,
     isLoadingCronSession,
     activeBuyMethod,
+    scanDirection,
   } = useBacktestStore();
 
   // 目前走圖載入那檔（高亮列用）— navKey 正規化後比對
@@ -89,9 +113,16 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   const [realtimePrices, setRealtimePrices] = useState<Map<string, { price: number; changePct: number; time: string }>>(new Map());
   const [conceptFilter, setConceptFilter] = useState<string>('all');
   // 排序選項：成交額排名為預設（依 0512 v12 全期間綜合回測，A 級組合幾乎都靠這個排序勝出）
-  // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
+  // 漲幅排序採明確多欄位比較器（漲幅主鍵 + 六條件 + MA20 斜率 tie-breaker）
   const [scanSort, setScanSort] = useState<string>('mkt.turnover');
   const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
+
+  useEffect(() => {
+    const [id, dir] = defaultTableSort(activeBuyMethod, scanDirection);
+    setScanSort(id);
+    setScanSortDir(dir);
+    setConceptFilter('all');
+  }, [activeBuyMethod, scanDirection, market, scanDate]);
 
   // 今日產業／題材熱度 map（裸碼 → 所屬最熱分類）— 純展示/排序，不進選股 gate
   const themeHeatMap = useThemeHeatMap(market, scanDate ?? undefined);
@@ -135,7 +166,6 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   }, [market, scanResults.length, scanOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch news on-demand
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!expandedStock) return;
     const ticker = expandedStock.replace(/\.(TW|TWO|SS|SZ)$/i, '');
@@ -158,7 +188,6 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
         setNewsCache(c => ({ ...c, [ticker]: { sentiment: 0, summary: '無法取得', hasNews: false, loading: false } }));
       });
   }, [expandedStock]); // eslint-disable-line react-hooks/exhaustive-deps
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const availableConcepts = [...new Set(scanResults.map(r => r.industry).filter(Boolean))] as string[];
 
@@ -170,9 +199,13 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
   const scanTableSortValue = (r: StockScanResult, id: string): SortValue => {
     switch (id) {
       case 'mkt.price':     return r.price ?? null;
-      case 'mkt.change':    // 漲幅/六條件/ma20Slope 三層 — 單一事實 panelSortKey（rule 10）
-        return panelSortKey(r);
+      case 'mkt.change':    return r.changePercent ?? null; // 實際三層比較器在下方套用
       case 'score.sixCond': return (r.sixConditionsScore ?? 0) * 100 + (r.changePercent ?? 0) / 100;
+      case 'score.shortSixCond': return r.shortSixConditionsScore ?? null;
+      case 'score.deviation': return r.ma20Deviation ?? null;
+      case 'score.smartMoney': return r.smartMoneyConc ?? null;
+      case 'score.instDip': return r.instDipInstK ?? null;
+      case 'score.instSteal': return (r.instStealConsec ?? 0) * 1000 + (r.instStealConc5 ?? 0);
       case 'mkt.turnover':  return -(r.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
       case 'heat.theme': {  // 所屬「今日最熱題材」名次（1=最熱）→ 同題材內再按漲幅；無題材排最後
         const rank = bestHeatRank(themeHeatMap, r.symbol);
@@ -181,7 +214,16 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
       default:              return null;
     }
   };
-  const sortedScanResults = applySort(filteredScanResults, scanSort, scanSortDir, scanTableSortValue);
+  const sortedScanResults = scanSort === 'strategy.default'
+    ? filteredScanResults
+    : scanSort === 'mkt.change'
+    ? sortByPanelOrder(filteredScanResults, scanSortDir)
+    : applySort(filteredScanResults, scanSort, scanSortDir, scanTableSortValue);
+  const prohibitionsAreVeto = scanDirection === 'long' && !['D', 'F', 'J', 'N', 'O', 'Q'].includes(activeBuyMethod);
+  const prohibitionCount = scanDirection === 'long'
+    ? sortedScanResults.filter((r) => (r.longProhibitionsReasons?.length ?? 0) > 0).length
+    : 0;
+  const vetoCount = prohibitionsAreVeto ? prohibitionCount : 0;
 
   if (!scanOnly) return null;
 
@@ -203,7 +245,12 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
       {/* Header row */}
       <div className="flex items-center gap-2 text-sm flex-wrap">
         <span className="font-bold text-foreground">掃描結果</span>
-        <span className="text-muted-foreground">{scanResults.length} 檔符合條件</span>
+        <span className="text-muted-foreground">篩選後 {sortedScanResults.length} / 原始 {scanResults.length} 檔</span>
+        {scanDirection === 'long' && (
+          <span className="text-[10px] text-muted-foreground" title="戒律命中者保留供觀察，但不是可執行進場名單">
+            可操作 {sortedScanResults.length - vetoCount} / {prohibitionsAreVeto ? '禁買' : '戒律警示'} {prohibitionCount}
+          </span>
+        )}
         <span className="text-[10px] text-muted-foreground/60" title="掃描的歷史資料日期">資料日期：{scanDate}</span>
         {marketTrend && (
           <span title={`大盤趨勢：${marketTrend}`}
@@ -218,7 +265,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
         )}
         <Button
           onClick={() => {
-            const headers = ['代號','名稱','概念','價格','漲跌%','趨勢','位置','隔日開','1日','2日','3日','4日','5日','10日','20日','最高','最低'];
+            const headers = ['代號','名稱','概念','價格','漲跌%','趨勢','位置','開盤缺口','1日','2日','3日','4日','5日','10日','20日','最高','最低'];
             const rows = sortedScanResults.map(r => {
               const perf = perfMap.get(r.symbol);
               return [
@@ -254,7 +301,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
 
       {/* Sort selector pills — 共用 SortControl + 中央排序清單 */}
       <SortControl
-        options={SCAN_TABLE_SORT_OPTIONS}
+        options={tableSortOptions(activeBuyMethod, scanDirection)}
         value={scanSort}
         dir={scanSortDir}
         onChange={(id, d) => { setScanSort(id); setScanSortDir(d); }}
@@ -279,7 +326,7 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
             className={`text-[10px] px-2 py-0.5 h-auto rounded-full ${conceptFilter === 'all' ? 'bg-sky-700 hover:bg-sky-600' : ''}`}>
             全部 ({scanResults.length})
           </Button>
-          {availableConcepts.sort().slice(0, 20).map(c => {
+          {availableConcepts.sort().map(c => {
             const count = scanResults.filter(r => r.industry === c).length;
             return (
               <Button key={c} onClick={() => setConceptFilter(c)}
@@ -332,10 +379,10 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
               <th className="text-left py-1.5 px-2 whitespace-nowrap" style={{ width: '72px' }}>位置</th>
               {FWD_COLS.map(({ key, label }) => (
                 <th key={key} className="text-right py-1.5 px-1 whitespace-nowrap text-[10px] border-l border-border/20 first:border-l-0" style={{ width: '54px' }}
-                  title={key === 'maxGain' ? '觀察區間內相對掃描日收盤價的最大漲幅' :
-                         key === 'maxLoss' ? '觀察區間內相對掃描日收盤價的最大跌幅' :
+                  title={key === 'maxGain' ? '隔日開盤可成交後 20 個交易日內的最高報酬' :
+                         key === 'maxLoss' ? '隔日開盤可成交後 20 個交易日內的最低報酬' :
                          key === 'openReturn' ? '隔日開盤價相對掃描日收盤價的漲跌幅' :
-                         `掃描後${label}收盤價相對掃描日收盤價的漲跌幅`}
+                         `隔日開盤可成交後，第${label}收盤報酬`}
                 >{label}</th>
               ))}
               <th className="text-center py-1.5 px-2 whitespace-nowrap" style={{ width: '90px' }}>操作</th>
@@ -346,8 +393,11 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
             {sortedScanResults.slice(0, 50).map((r) => {
               const perf = perfMap.get(r.symbol);
               const isCur = navCurrentKey === navKey(r.symbol);
+              const rowProhibitions = scanDirection === 'long' ? (r.longProhibitionsReasons ?? []) : [];
+              const isVetoed = prohibitionsAreVeto && rowProhibitions.length > 0;
               return (<Fragment key={r.symbol}>
-              <tr className={`group border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''} ${isCur ? 'ring-1 ring-inset ring-sky-400/60 bg-sky-500/5' : ''}`}
+              <tr className={`group border-b border-border/50 hover:bg-secondary/40 cursor-pointer ${expandedStock === r.symbol ? 'bg-secondary/60' : ''} ${isCur ? 'ring-1 ring-inset ring-sky-400/60 bg-sky-500/5' : ''} ${isVetoed ? 'opacity-55 grayscale' : rowProhibitions.length > 0 ? 'bg-amber-950/10' : ''}`}
+                title={rowProhibitions.length > 0 ? `${prohibitionsAreVeto ? '禁買' : '戒律警示'}：${rowProhibitions.join('；')}` : undefined}
                 onClick={() => setExpandedStock(expandedStock === r.symbol ? null : r.symbol)}>
                 {/* 代號 — sticky */}
                 <td className="py-1.5 px-2 font-mono text-foreground/90 sticky left-0 bg-card group-hover:bg-secondary/40 z-10 transition-colors">
@@ -360,6 +410,11 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                     {r.dataFreshness && r.dataFreshness.daysStale > 0 && (
                       <span className="text-[8px] px-1 py-0.5 rounded bg-amber-900/60 text-amber-400 whitespace-nowrap" title={`K線最後日期: ${r.dataFreshness.lastCandleDate}`}>
                         落後{r.dataFreshness.daysStale}天
+                      </span>
+                    )}
+                    {rowProhibitions.length > 0 && (
+                      <span className={`text-[8px] px-1 py-0.5 rounded whitespace-nowrap ${prohibitionsAreVeto ? 'bg-rose-900/60 text-rose-300' : 'bg-amber-900/50 text-amber-300'}`}>
+                        ⚠ {prohibitionsAreVeto ? '禁買' : '警示'} {rowProhibitions.length}
                       </span>
                     )}
                   </div>
@@ -389,14 +444,14 @@ export function ScanResultsTable({ onSelectStock }: ScanResultsTableProps = {}) 
                     ) : (
                       // A（六條件）：六個條件格子
                       [
-                        { pass: r.sixConditionsBreakdown?.trend, label: '趨' },
-                        { pass: r.sixConditionsBreakdown?.position, label: '位' },
-                        { pass: r.sixConditionsBreakdown?.kbar, label: 'K' },
-                        { pass: r.sixConditionsBreakdown?.ma, label: '均' },
-                        { pass: r.sixConditionsBreakdown?.volume, label: '量' },
-                        { pass: r.sixConditionsBreakdown?.indicator, label: '指' },
+                        { pass: (scanDirection === 'short' ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown)?.trend, label: '趨' },
+                        { pass: (scanDirection === 'short' ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown)?.position, label: '位' },
+                        { pass: (scanDirection === 'short' ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown)?.kbar, label: 'K' },
+                        { pass: (scanDirection === 'short' ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown)?.ma, label: '均' },
+                        { pass: (scanDirection === 'short' ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown)?.volume, label: '量' },
+                        { pass: (scanDirection === 'short' ? r.shortSixConditionsBreakdown : r.sixConditionsBreakdown)?.indicator, label: '指' },
                       ].map(({ pass, label }) => (
-                        <span key={label} className={`text-[8px] w-3.5 h-3.5 flex items-center justify-center rounded-sm ${pass ? 'bg-sky-800/80 text-sky-300' : 'bg-secondary/50 text-muted-foreground/60'}`}>{label}</span>
+                        <span key={label} className={`text-[8px] w-3.5 h-3.5 flex items-center justify-center rounded-sm ${pass ? (scanDirection === 'short' ? 'bg-emerald-800/80 text-emerald-200' : 'bg-sky-800/80 text-sky-300') : 'bg-secondary/50 text-muted-foreground/60'}`}>{label}</span>
                       ))
                     )}
                   </div>

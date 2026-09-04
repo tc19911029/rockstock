@@ -41,6 +41,13 @@ const PER_FETCH_TIMEOUT_MS = 25_000; // 單支 fetch 最多 25s（含所有 fall
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
+// 新上市股票可能尚未累積 30 根，但只要已有目標交易日資料就是有效 L1。
+// 舊邏輯會讓這類股票永遠留在 failedSymbols（例如上市首週）。
+function hasUsableCandles(candles: Candle[], market: MarketType): boolean {
+  if (candles.length >= MIN_CANDLE_COUNT) return true;
+  return candles.length > 0 && candles[candles.length - 1].date >= getLastTradingDay(market);
+}
+
 // ── 多來源 fallback 下載 ────────────────────────────────────────────────────
 
 type MarketType = 'TW' | 'CN';
@@ -61,11 +68,15 @@ async function fetchWithFallback(
   symbol: string,
   market: MarketType,
   scanner: TaiwanScanner | ChinaScanner,
+  requireGapFree = false,
 ): Promise<FetchResult> {
+  const acceptable = (candles: Candle[]) =>
+    hasUsableCandles(candles, market) &&
+    (!requireGapFree || detectCandleGaps(candles, 15, market).length === 0);
   // 第一層：Scanner 預設 provider
   try {
     const candles = await scanner.fetchCandles(symbol);
-    if (candles.length >= MIN_CANDLE_COUNT) {
+    if (acceptable(candles)) {
       return { candles, source: market === 'TW' ? 'FinMind' : 'EastMoney' };
     }
   } catch {
@@ -76,7 +87,7 @@ async function fetchWithFallback(
     // 第二層：Fugle 日K（官方 API、上市+上櫃、免費層 60 次/分）
     try {
       const candles = await fugleDailyProvider.getHistoricalCandles(symbol, '2y');
-      if (candles.length >= MIN_CANDLE_COUNT) {
+      if (acceptable(candles)) {
         return { candles, source: 'Fugle' };
       }
     } catch { /* continue */ }
@@ -84,7 +95,7 @@ async function fetchWithFallback(
     // 第三層：TWSE
     try {
       const candles = await twseHistProvider.getHistoricalCandles(symbol, '2y');
-      if (candles.length >= MIN_CANDLE_COUNT) {
+      if (acceptable(candles)) {
         return { candles, source: 'TWSE' };
       }
     } catch { /* continue */ }
@@ -92,7 +103,7 @@ async function fetchWithFallback(
     // 第四層：Yahoo
     try {
       const candles = await yahooProvider.getHistoricalCandles(symbol, '2y');
-      if (candles.length >= MIN_CANDLE_COUNT) {
+      if (acceptable(candles)) {
         return { candles, source: 'Yahoo' };
       }
     } catch { /* continue */ }
@@ -100,7 +111,7 @@ async function fetchWithFallback(
     // CN 第二層：Tencent
     try {
       const candles = await tencentHistProvider.getHistoricalCandles(symbol, '2y');
-      if (candles.length >= MIN_CANDLE_COUNT) {
+      if (acceptable(candles)) {
         return { candles, source: 'Tencent' };
       }
     } catch { /* continue */ }
@@ -108,7 +119,7 @@ async function fetchWithFallback(
     // CN 第三層：Yahoo（.SS/.SZ Yahoo 可抓）
     try {
       const candles = await yahooProvider.getHistoricalCandles(symbol, '2y');
-      if (candles.length >= MIN_CANDLE_COUNT) {
+      if (acceptable(candles)) {
         return { candles, source: 'Yahoo' };
       }
     } catch { /* continue */ }
@@ -122,12 +133,13 @@ async function fetchWithFallbackTimed(
   symbol: string,
   market: MarketType,
   scanner: TaiwanScanner | ChinaScanner,
+  requireGapFree = false,
 ): Promise<FetchResult> {
   const timeoutPromise = new Promise<FetchResult>((_, reject) =>
     setTimeout(() => reject(new Error('per-fetch timeout')), PER_FETCH_TIMEOUT_MS),
   );
   try {
-    return await Promise.race([fetchWithFallback(symbol, market, scanner), timeoutPromise]);
+    return await Promise.race([fetchWithFallback(symbol, market, scanner, requireGapFree), timeoutPromise]);
   } catch {
     return { candles: [], source: 'timeout' };
   }
@@ -214,7 +226,7 @@ export async function GET(req: NextRequest) {
 
     try {
       const { candles, source } = await fetchWithFallbackTimed(symbol, market, scanner);
-      if (candles.length >= MIN_CANDLE_COUNT) {
+      if (hasUsableCandles(candles, market)) {
         await saveLocalCandles(symbol, market, candles);
         phase1Succeeded++;
         phase1Sources[source] = (phase1Sources[source] || 0) + 1;
@@ -238,7 +250,11 @@ export async function GET(req: NextRequest) {
   let phase2StillGap = 0;
   const phase2Sources: Record<string, number> = {};
 
+  const recentGapCutoff = new Date(lastTradingDate + 'T12:00:00');
+  recentGapCutoff.setDate(recentGapCutoff.getDate() - 180);
+  const recentGapCutoffStr = recentGapCutoff.toISOString().slice(0, 10);
   const gapSymbols = (report.gapDetails || [])
+    .filter(g => g.gaps[g.gaps.length - 1]?.toDate >= recentGapCutoffStr)
     .map(g => g.symbol)
     .filter(s => !retrySet.has(s)) // 排除 Phase 1 已處理的
     .slice(0, MAX_GAP_REPAIR);
@@ -254,8 +270,8 @@ export async function GET(req: NextRequest) {
       }
 
       try {
-        const { candles, source } = await fetchWithFallbackTimed(symbol, market, scanner);
-        if (candles.length >= MIN_CANDLE_COUNT) {
+        const { candles, source } = await fetchWithFallbackTimed(symbol, market, scanner, true);
+        if (hasUsableCandles(candles, market)) {
           // 驗證 gap 是否消除
           const remainingGaps = detectCandleGaps(candles, 15, market);
           if (remainingGaps.length === 0) {

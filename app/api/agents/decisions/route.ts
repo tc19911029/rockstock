@@ -215,12 +215,18 @@ export async function GET(req: NextRequest) {
 
   // 已完成排前面；同 status 內依 decision action (buy→watch→skip) 再 technical verdict 再 symbol 排
   const actionRank: Record<string, number> = { buy: 0, watch: 1, skip: 2 };
+  const gradeRank: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4 };
   const verdictRank: Record<string, number> = { pass: 0, watch: 1, fail: 2 };
   runs.sort((a, b) => {
     if (a.status !== b.status) return a.status === 'completed' ? -1 : 1;
     const aa = a.decision?.action ?? 'watch';
     const ba = b.decision?.action ?? 'watch';
     if (aa !== ba) return (actionRank[aa] ?? 99) - (actionRank[ba] ?? 99);
+    const ag = a.decision?.grade;
+    const bg = b.decision?.grade;
+    if (ag !== bg) return (gradeRank[ag ?? ''] ?? 99) - (gradeRank[bg ?? ''] ?? 99);
+    const scoreDiff = (b.decision?.totalScore ?? -1) - (a.decision?.totalScore ?? -1);
+    if (scoreDiff !== 0) return scoreDiff;
     const av = a.verdicts.technical?.verdict ?? 'watch';
     const bv = b.verdicts.technical?.verdict ?? 'watch';
     if (av !== bv) return (verdictRank[av] ?? 99) - (verdictRank[bv] ?? 99);

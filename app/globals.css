@@ -14,6 +14,30 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 200;
+  transform: translateY(-150%);
+  border-radius: 0.5rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.skip-link:focus-visible { transform: translateY(0); }
+
+:where(a, button, input, select, textarea, [role="button"], [role="tab"]):focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+:where(input, select, textarea) { font-size: max(1rem, 16px); }
+
+:where(td, th, [data-financial-value]) { font-variant-numeric: tabular-nums; }
+
 /* Scrollbar — WebKit */
 ::-webkit-scrollbar {
   width: 5px;
@@ -224,4 +248,13 @@ body {
 @keyframes slideInRight {
   from { opacity: 0; transform: translateX(12px); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

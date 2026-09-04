@@ -71,10 +71,21 @@ export default function SizerPage() {
     setError(null);
     setResult(null);
     try {
+      if (!symbol.trim()) {
+        setError('請輸入股票代號。');
+        return;
+      }
+      if (!entryPrice || Number(entryPrice) <= 0) {
+        setError('請輸入大於 0 的進場價。');
+        return;
+      }
+      if (stopLoss && Number(stopLoss) >= Number(entryPrice)) {
+        setError('停損價必須低於進場價。');
+        return;
+      }
       const capUsed = capitalInput ? Number(capitalInput) : totalCapital ?? 0;
       if (!capUsed || capUsed <= 0) {
-        setError('總資產為 0；先設定（自動讀 growth-path 或手動填入）');
-        setLoading(false);
+        setError('缺少總資產，請在下方輸入本次試算使用的總資產。');
         return;
       }
       const body = {
@@ -106,57 +117,58 @@ export default function SizerPage() {
     }
   }
 
-  const header = <PageHeader title="📐 部位試算" backButton subtitle="輸入個股 + entry/stop，算出該下幾張 + 風險金額" />;
+  const header = <PageHeader title="倉位試算" backButton subtitle="依進場價、停損價與總資產計算建議股數" />;
 
   return (
     <PageShell headerSlot={header}>
       <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
 
         {/* 總資產提示 */}
-        <div className="rounded-lg border border-sky-700/40 bg-sky-900/15 p-3 text-xs text-sky-200">
-          <div className="font-semibold text-sky-300 mb-0.5">💰 試算基準</div>
+        <div className="rounded-lg border border-sky-700/40 bg-sky-900/15 p-4 text-sm text-sky-100">
+          <div className="font-semibold text-sky-300 mb-1">試算基準</div>
           <p>
             {capitalInput
               ? <>使用手動：<span className="font-mono">{formatNT(Number(capitalInput))}</span></>
               : totalCapital != null
-                ? <>讀 growth-path：<span className="font-mono">{formatNT(totalCapital)}</span></>
-                : <>無 growth-path 資料；請手動填入</>}
+                ? <>目前總資產：<span className="font-mono tabular-nums">{formatNT(totalCapital)}</span></>
+                : <>尚未設定總資產，請在表單中手動填入。</>}
           </p>
         </div>
 
         {/* Form */}
         <div className="rounded-xl ring-1 ring-foreground/10 bg-card p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="股票代號" value={symbol} onChange={setSymbol} placeholder="2330.TW" />
-            <Field label="名稱" value={name} onChange={setName} />
-            <Field label="進場價" value={entryPrice} onChange={setEntryPrice} type="number" />
-            <Field label="停損價" value={stopLoss} onChange={setStopLoss} type="number" hint="留空 = 走 sizing-config 預設" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field id="sizer-symbol" label="股票代號" value={symbol} onChange={setSymbol} placeholder="例如 2330.TW" required />
+            <Field id="sizer-name" label="股票名稱" value={name} onChange={setName} placeholder="例如 台積電" />
+            <Field id="sizer-entry" label="進場價" value={entryPrice} onChange={setEntryPrice} type="number" inputMode="decimal" required />
+            <Field id="sizer-stop" label="停損價" value={stopLoss} onChange={setStopLoss} type="number" inputMode="decimal" hint="未填寫時使用保守預設值" />
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">買法字母</label>
-              <select value={letter} onChange={e => setLetter(e.target.value)}
-                className="w-full px-3 py-1.5 bg-background border border-border rounded text-sm">
+              <label htmlFor="sizer-strategy" className="text-sm font-medium text-foreground mb-1.5 block">進場策略（選填）</label>
+              <select id="sizer-strategy" value={letter} onChange={e => setLetter(e.target.value)}
+                className="w-full min-h-11 px-3 py-2 bg-background border border-border rounded text-base">
                 {LETTERS.map(l => (
-                  <option key={l} value={l}>{l || '— 不指定（走 fixedFraction）'}</option>
+                  <option key={l} value={l}>{l || '不指定（使用固定風險比例）'}</option>
                 ))}
               </select>
             </div>
-            <Field label="產業（選填）" value={industry} onChange={setIndustry} placeholder="半導體 - 晶圓代工" />
-            <div className="col-span-2">
-              <label className="text-xs text-muted-foreground mb-1 block">總資產手動覆寫（選填）</label>
-              <Input value={capitalInput} onChange={e => setCapitalInput(e.target.value)} type="number"
+            <Field id="sizer-industry" label="產業（選填）" value={industry} onChange={setIndustry} placeholder="例如 半導體" />
+            <div className="sm:col-span-2">
+              <label htmlFor="sizer-capital" className="text-sm font-medium text-foreground mb-1.5 block">本次試算總資產（選填）</label>
+              <Input id="sizer-capital" value={capitalInput} onChange={e => setCapitalInput(e.target.value)} type="number" inputMode="decimal" min="1"
                 placeholder={totalCapital != null ? `自動 ${formatNT(totalCapital)}` : '必填'} />
+              <p className="mt-1 text-sm text-muted-foreground">留空時使用投資組合中設定的總資產。</p>
             </div>
           </div>
           <Button onClick={compute} disabled={loading}
-            className="w-full bg-sky-600 hover:bg-sky-500 font-bold">
-            {loading ? '計算中…' : '📐 試算'}
+            className="w-full min-h-11 bg-sky-600 hover:bg-sky-500 font-bold">
+            {loading ? '正在計算…' : '計算建議倉位'}
           </Button>
         </div>
 
         {/* Error */}
         {error && (
-          <div className="rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-sm text-red-300">
-            ❌ {error}
+          <div role="alert" className="rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-sm text-red-200">
+            {error}
           </div>
         )}
 
@@ -197,47 +209,41 @@ export default function SizerPage() {
 
               {s.warnings.length > 0 && (
                 <div className="rounded border border-amber-700/40 bg-amber-900/20 p-2 space-y-1">
-                  <div className="text-xs font-semibold text-amber-300">⚠ Warnings ({s.warnings.length})</div>
+                  <div className="text-sm font-semibold text-amber-300">風險提醒（{s.warnings.length}）</div>
                   {s.warnings.map((w, i) => (
-                    <div key={i} className="text-[11px] text-amber-200">· {w}</div>
+                    <div key={i} className="text-sm text-amber-100">· {w}</div>
                   ))}
                 </div>
               )}
 
-              {s.appliedGuards.length > 0 && (
-                <div className="text-[10px] text-muted-foreground italic">
-                  Risk guards 已套用：{s.appliedGuards.join(', ')}
-                </div>
-              )}
-
-              <div className="text-[10px] text-muted-foreground border-t border-emerald-700/30 pt-2">
-                mode={result.mode} · totalCapital={result.totalCapital ? formatNT(result.totalCapital) : '—'} · 既有持倉 {result.existingHoldingsCount ?? 0} 檔
+              <div className="text-sm text-muted-foreground border-t border-emerald-700/30 pt-2">
+                試算基準 {result.totalCapital ? formatNT(result.totalCapital) : '—'} · 既有持倉 {result.existingHoldingsCount ?? 0} 檔
               </div>
             </div>
           );
         })()}
 
         {/* 提示 */}
-        <div className="text-[10px] text-muted-foreground/60 italic">
-          書本基準：固定 fraction / Kelly Half / letter-aware mode 由 <code className="bg-secondary px-1 rounded">sizing-config.json</code> 控制。
-          產業上限 perIndustryMaxPct 目前設 1.0（「台灣半導體最熱」，不限制）。
+        <div className="text-sm text-muted-foreground leading-relaxed">
+          試算會依目前風險規則、既有持倉與選擇的進場策略調整部位。結果僅供資金管理參考，送出前仍需確認價格與風險承受度。
         </div>
       </div>
     </PageShell>
   );
 }
 
-function Field({ label, value, onChange, type = 'text', hint, placeholder }: {
+function Field({ id, label, value, onChange, type = 'text', hint, placeholder, inputMode, required }: {
+  id: string;
   label: string; value: string; onChange: (v: string) => void;
-  type?: string; hint?: string; placeholder?: string;
+  type?: string; hint?: string; placeholder?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']; required?: boolean;
 }) {
   return (
     <div>
-      <label className="text-xs text-muted-foreground mb-1 block">
-        {label}
-        {hint && <span className="text-muted-foreground/60 ml-1">— {hint}</span>}
+      <label htmlFor={id} className="text-sm font-medium text-foreground mb-1.5 block">
+        {label}{required && <span className="ml-1 text-red-400" aria-hidden="true">*</span>}
       </label>
-      <Input value={value} onChange={e => onChange(e.target.value)} type={type} placeholder={placeholder} />
+      <Input id={id} value={value} onChange={e => onChange(e.target.value)} type={type} inputMode={inputMode} required={required} min={type === 'number' ? '0' : undefined} step={type === 'number' ? 'any' : undefined} placeholder={placeholder} />
+      {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -245,8 +251,8 @@ function Field({ label, value, onChange, type = 'text', hint, placeholder }: {
 function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div className="rounded bg-emerald-900/30 p-2">
-      <div className="text-[10px] text-emerald-400/70">{label}</div>
-      <div className={`font-mono font-semibold ${highlight ? 'text-emerald-200' : 'text-emerald-300'}`}>{value}</div>
+      <div className="text-sm text-emerald-300">{label}</div>
+      <div className={`font-mono tabular-nums font-semibold ${highlight ? 'text-emerald-100' : 'text-emerald-200'}`}>{value}</div>
     </div>
   );
 }

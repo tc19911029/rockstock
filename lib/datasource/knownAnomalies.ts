@@ -26,7 +26,8 @@ export type AnomalyType =
   | 'l2-symbol-without-l1'
   | 'limit-up-not-in-scan'
   | 'l1-last-day-stale'
-  | 'mis-twse-locked-day';
+  | 'mis-twse-locked-day'
+  | 'adjacent-identical-bar';
 
 interface AnomalyRule {
   id: string;
@@ -100,6 +101,7 @@ export function matchAnomaly(type: AnomalyType, ctx: MatchContext): MatchResult 
   for (const c of reg.cases) {
     if (c.symbol === ctx.symbol && c.date === ctx.date) {
       const rule = reg.rules.find(r => r.id === c.type);
+      if (rule?.applies.type !== type) continue;
       return {
         ruleId: c.type,
         ruleName: rule?.name ?? c.type,

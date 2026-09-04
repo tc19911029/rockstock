@@ -26,6 +26,7 @@
 
 import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
+import { isZeroVolumeFlatBar } from '../lib/datasource/candleSanitizers';
 
 const REPO = process.cwd();
 const FM_DIR = path.join(REPO, 'data', '_finmind', 'TW');
@@ -94,13 +95,16 @@ function loadFinMind(): {
         m = new Map();
         byCode.set(b.code, m);
       }
-      m.set(d.date, {
-        open: b.open,
+      const normalized = {
+        open: b.high > 0 && b.low > 0 ? Math.min(b.high, Math.max(b.low, b.open)) : b.open,
         high: b.high,
         low: b.low,
-        close: b.close,
+        close: b.high > 0 && b.low > 0 ? Math.min(b.high, Math.max(b.low, b.close)) : b.close,
         volumeLots: b.volume / 1000,
-      });
+      };
+      // 與 L1 共用交易 K 定義：換算成整張後為零且 OHLC 平盤者是占位，不列為缺 K。
+      if (isZeroVolumeFlatBar({ date: d.date, ...normalized, volume: Math.round(normalized.volumeLots) })) continue;
+      m.set(d.date, normalized);
     }
   }
   return { byCode, minDate, maxDate, tradingDays };

@@ -30,7 +30,11 @@ function compareValues(a: SortValue, b: SortValue): number {
   if (typeof a === 'string' || typeof b === 'string') {
     return String(a ?? '').localeCompare(String(b ?? ''));
   }
-  return (a as number) - (b as number);
+  // missingLast=false 的盤面欄位允許缺值參與排序；數字缺值一律正規化成 0，
+  // 避免 undefined - number 產生 NaN，令 V8 comparator 悄悄失效。
+  const av = typeof a === 'number' && Number.isFinite(a) ? a : 0;
+  const bv = typeof b === 'number' && Number.isFinite(b) ? b : 0;
+  return av - bv;
 }
 
 export interface ApplySortOptions {

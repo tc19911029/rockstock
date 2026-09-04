@@ -161,9 +161,8 @@ export async function POST(req: NextRequest) {
     // 盤中/盤後掃描：預取全市場即時報價
     if (marketOpen || hasL2Today) {
       try {
-        let quotes: Map<string, RealtimeQuoteForScan>;
+        const quotes: Map<string, RealtimeQuoteForScan> = new Map();
         // 盤中／盤後都只讀同一份中央 L2，不在掃描 route 另打一輪行情 API。
-        quotes = new Map();
         if (todayL2Snapshot) {
           for (const q of todayL2Snapshot.quotes) {
             const code = q.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');

@@ -5,6 +5,7 @@ import { apiOk, apiError, apiValidationError } from '@/lib/api/response';
 
 const forwardSchema = z.object({
   scanDate: z.string(),
+  direction: z.enum(['long', 'short']).default('long'),
   stocks:   z.array(z.object({ symbol: z.string(), name: z.string(), scanPrice: z.number() })).default([]),
 });
 
@@ -42,8 +43,16 @@ const FORWARD_INFLIGHT = new Map<string, Promise<unknown>>();
 const FORWARD_CACHE_TTL_MS = 10 * 60 * 1000;
 const FORWARD_CACHE_MAX = 200;
 
-function getCacheKey(scanDate: string, symbols: string[]): string {
-  return `${scanDate}|${[...symbols].sort().join(',')}`;
+function getCacheKey(
+  scanDate: string,
+  direction: 'long' | 'short',
+  stocks: Array<{ symbol: string; scanPrice: number }>,
+): string {
+  const signature = stocks
+    .map((s) => `${s.symbol}:${s.scanPrice}`)
+    .sort()
+    .join(',');
+  return `${scanDate}|${direction}|${signature}`;
 }
 
 function readCache(key: string): unknown | null {
@@ -80,13 +89,13 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return apiValidationError(parsed.error);
   }
-  const { scanDate, stocks } = parsed.data;
+  const { scanDate, direction, stocks } = parsed.data;
 
   if (!scanDate || stocks.length === 0) {
     return apiOk({ performance: [] });
   }
 
-  const cacheKey = getCacheKey(scanDate, stocks.map(s => s.symbol));
+  const cacheKey = getCacheKey(scanDate, direction, stocks);
 
   // 1. Cache hit → 立即回
   const cached = readCache(cacheKey);
@@ -108,7 +117,7 @@ export async function POST(req: NextRequest) {
 
   // 3. Cold call → 跑 analyzeForwardBatch，存 cache
   const promise = (async () => {
-    const { results: performance, nullCount, totalRequested } = await analyzeForwardBatch(stocks, scanDate);
+    const { results: performance, nullCount, totalRequested } = await analyzeForwardBatch(stocks, scanDate, { direction });
     const result = { performance, nullCount, totalRequested };
     writeCache(cacheKey, result);
     return result;

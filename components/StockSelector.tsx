@@ -4,11 +4,12 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useReplayStore } from '@/store/replayStore';
 import { useSearchHistoryStore } from '@/store/searchHistoryStore';
 import { useWatchlistStore } from '@/store/watchlistStore';
+import { Search, Clock3 } from 'lucide-react';
 import { buildStockLoadHref } from '@/lib/navigation/stockUrl';
 import { isPlaceholderStockName, stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 const DEFAULT_QUICK_STOCKS = [
-  { symbol: 'mock',  name: '📊 範例資料（離線）' },
+  { symbol: 'mock',  name: '範例資料（離線）' },
   { symbol: '2330',  name: '台積電' },
   { symbol: '2317',  name: '鴻海' },
   { symbol: '2454',  name: '聯發科' },
@@ -60,13 +61,11 @@ export default function StockSelector() {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Sync input when stock is loaded externally (e.g. via ?load= URL param from scanner)
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (currentStock?.ticker) {
       setInput(rawSymbol(currentStock.ticker));
     }
   }, [currentStock?.ticker]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // 組件 unmount 時停止 polling
   useEffect(() => {
@@ -77,12 +76,17 @@ export default function StockSelector() {
   const handleLoad = useCallback(async (symbol: string) => {
     setError('');
     setShowDrop(false);
+    const normalized = symbol.trim();
+    if (!normalized) {
+      setError('請輸入股票代號或名稱，例如 2330');
+      return;
+    }
     stopPolling();
     try {
       const timeframe = currentInterval ?? '1d';
-      await loadStock(symbol, timeframe);
+      await loadStock(normalized, timeframe);
       startPolling();
-      const resolvedTicker = useReplayStore.getState().currentStock?.ticker ?? symbol;
+      const resolvedTicker = useReplayStore.getState().currentStock?.ticker ?? normalized;
       window.history.replaceState(
         null,
         '',
@@ -115,48 +119,48 @@ export default function StockSelector() {
   const showRecents = input.length === 0 && recentItems.length > 0;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 xl:flex-nowrap" onClick={closeOnOutside}>
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 xl:flex-nowrap" onClick={closeOnOutside}>
       {/* Search input + dropdown */}
-      <div ref={wrapRef} className="relative shrink-0">
-        <div className="flex items-center bg-muted rounded border border-border focus-within:border-blue-500 overflow-hidden">
+      <div ref={wrapRef} className="relative min-w-0 flex-1 sm:flex-none">
+        <div className="relative flex items-center overflow-hidden rounded-lg border border-border bg-card focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20">
+          <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" aria-hidden="true" />
           <input
             type="text"
             value={input}
             onChange={e => { setInput(e.target.value); setShowDrop(true); }}
             onFocus={() => setShowDrop(true)}
-            onKeyDown={e => { if (e.key === 'Enter' && input.trim()) handleLoad(input.trim()); }}
+            onKeyDown={e => { if (e.key === 'Enter') handleLoad(input); }}
             aria-label="搜尋股票代號或名稱"
-            placeholder="代號/名稱"
-            className="w-28 bg-transparent px-2 py-1 text-xs text-foreground font-mono focus:outline-none"
+            aria-describedby={error ? 'stock-search-error' : undefined}
+            aria-invalid={Boolean(error)}
+            placeholder="搜尋股票"
+            className="min-h-11 w-full min-w-0 bg-transparent py-2 pl-9 pr-3 text-base text-foreground font-mono focus-visible:outline-none sm:w-40"
           />
-          {currentStock?.name && !showDrop && (
-            <span className="text-[10px] text-muted-foreground pr-2 truncate max-w-[80px]">{currentStock.name}</span>
-          )}
         </div>
         {showDrop && (filtered.length > 0 || showRecents) && (
-          <div className="absolute top-full left-0 mt-1 w-64 max-w-[80vw] bg-muted border border-border rounded shadow-xl z-50 max-h-72 overflow-y-auto">
+          <div className="absolute left-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-border bg-popover shadow-2xl max-h-80">
             {showRecents && (
               <>
-                <div className="flex items-center justify-between px-2 py-1 sticky top-0 bg-muted border-b border-border">
-                  <span className="text-[10px] font-bold text-muted-foreground tracking-wide">最近搜尋</span>
+                <div className="sticky top-0 flex min-h-11 items-center justify-between border-b border-border bg-popover px-3">
+                  <span className="text-xs font-semibold text-muted-foreground">最近搜尋</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); clearHistory(); }}
-                    className="text-[10px] text-muted-foreground hover:text-red-400 transition"
+                    className="min-h-11 px-2 text-xs text-muted-foreground transition hover:text-red-400"
                   >清除</button>
                 </div>
                 {recentItems.map(s => (
                   <button key={`recent-${s.symbol}`}
                     onClick={() => { setInput(s.symbol); handleLoad(s.symbol); }}
-                    className="w-full text-left px-2 py-1.5 text-xs flex gap-2 items-center min-w-0 hover:bg-background/40"
+                    className="flex min-h-11 w-full min-w-0 items-center gap-2 px-3 text-left text-sm hover:bg-secondary"
                   >
-                    <span className="text-muted-foreground shrink-0">🕘</span>
-                    <span className="text-foreground/80 truncate flex-1">{stockDisplayName(s.name, s.symbol)}</span>
-                    <span className="font-mono text-yellow-400 shrink-0">{stockCodeOf(s.symbol)}</span>
+                    <Clock3 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate text-foreground/90">{stockDisplayName(s.name, s.symbol)}</span>
+                    <span className="shrink-0 font-mono text-xs text-yellow-400">{stockCodeOf(s.symbol)}</span>
                   </button>
                 ))}
                 {filtered.length > 0 && (
-                  <div className="px-2 py-1 bg-muted border-b border-t border-border">
-                    <span className="text-[10px] font-bold text-muted-foreground tracking-wide">常用</span>
+                  <div className="border-b border-t border-border bg-secondary/50 px-3 py-2">
+                    <span className="text-xs font-semibold text-muted-foreground">常用股票</span>
                   </div>
                 )}
               </>
@@ -164,10 +168,10 @@ export default function StockSelector() {
             {filtered.map(s => (
               <button key={s.symbol}
                 onClick={() => { setInput(s.symbol === 'mock' ? '' : s.symbol); handleLoad(s.symbol); }}
-                className="w-full text-left px-2 py-1.5 text-xs flex gap-2 items-center min-w-0 hover:bg-background/40"
+                className="flex min-h-11 w-full min-w-0 items-center gap-2 px-3 text-left text-sm hover:bg-secondary"
               >
-                <span className="text-foreground/80 truncate flex-1">{s.symbol === 'mock' ? s.name : stockDisplayName(s.name, s.symbol)}</span>
-                <span className="font-mono text-yellow-400 shrink-0">{s.symbol === 'mock' ? '---' : stockCodeOf(s.symbol)}</span>
+                <span className="min-w-0 flex-1 truncate text-foreground/90">{s.symbol === 'mock' ? s.name : stockDisplayName(s.name, s.symbol)}</span>
+                <span className="shrink-0 font-mono text-xs text-yellow-400">{s.symbol === 'mock' ? '---' : stockCodeOf(s.symbol)}</span>
               </button>
             ))}
           </div>
@@ -175,8 +179,8 @@ export default function StockSelector() {
       </div>
 
       {/* Load button */}
-      <button onClick={() => handleLoad(input.trim() || 'mock')} disabled={isLoadingStock}
-        className="shrink-0 px-2.5 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs font-bold transition">
+      <button onClick={() => handleLoad(input)} disabled={isLoadingStock}
+        className="min-h-11 shrink-0 rounded-lg bg-blue-600 px-4 text-sm font-semibold transition hover:bg-blue-500 disabled:opacity-50">
         {isLoadingStock
           ? <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 border-2 border-foreground border-t-transparent rounded-full animate-spin" />載入</span>
           : '載入'}
@@ -184,7 +188,7 @@ export default function StockSelector() {
       {/* 加入/移除自選股（沿用載入的那檔） */}
       <button onClick={toggleWatch} disabled={!currentStock}
         title={!currentStock ? '先載入一檔股票' : inWatchlist ? '從自選股移除' : '加入自選股'}
-        className={`shrink-0 px-2.5 py-1 rounded text-xs font-bold transition disabled:opacity-40 ${
+        className={`min-h-11 shrink-0 rounded-lg px-4 text-sm font-semibold transition disabled:opacity-40 ${
           inWatchlist
             ? 'bg-amber-500 hover:bg-amber-400 text-black'
             : 'bg-secondary hover:bg-secondary/70 text-foreground border border-border'
@@ -222,7 +226,7 @@ export default function StockSelector() {
       </div>
       {/* timeframe pills 已移至 ChartToolbar（緊鄰走圖區） */}
 
-      {error && <span className="text-xs text-red-400 truncate">{error}</span>}
+      {error && <span id="stock-search-error" role="alert" className="text-sm text-red-400 max-w-64">{error}</span>}
     </div>
   );
 }

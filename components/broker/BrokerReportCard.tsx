@@ -6,7 +6,7 @@
  * Row 1: 代號 + 名稱 + 評等 badge + 評等動作 + 券商 chip
  * Row 2: 🎯 目標價（報告日上漲空間）+ 現價距標 + 達標進度條
  * Row 3: 投資論點 thesis
- * Row 4: N 日漲跌（隔日開/1-10/20/最高最低）— 與 YoutubeStockCard 同格式
+ * Row 4: N 日漲跌（開盤缺口/買進後1-10/20/最高最低）— 與 YoutubeStockCard 同格式
  */
 
 import type { BrokerStockPerformance } from '@/lib/broker/brokerPerformance';
@@ -34,7 +34,7 @@ function fmtPrice(v: number | null | undefined): string {
 }
 
 const FWD_COLS = [
-  { key: 'openReturn' as const, label: '隔日開' },
+  { key: 'openReturn' as const, label: '開盤缺口' },
   { key: 'd1Return' as const, label: '1日' },
   { key: 'd2Return' as const, label: '2日' },
   { key: 'd3Return' as const, label: '3日' },

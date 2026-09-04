@@ -44,7 +44,7 @@ interface Hit {
   turnoverRank?: number;  // 當日成交額名次（1=最大；舊固化資料無此欄）
 }
 interface RecordRow {
-  symbol: string; name?: string; industry?: string; price?: number; changePct?: number; turnoverRank?: number;
+  symbol: string; name?: string; industry?: string; price?: number; changePct?: number; shortOversold?: number; turnoverRank?: number;
   report: ConditionReport;
   /** 朱六條件確認（core=前5核心全過；台股交集回測有效、陸股僅參考；舊固化無此欄）。 */
   zhuSix?: { core: boolean; total: number };
@@ -61,9 +61,10 @@ interface ScanResp {
 function recToHit(r: RecordRow): Hit {
   return {
     symbol: r.symbol, name: stockDisplayName(r.name, r.symbol), industry: r.industry ?? '',
-    price: r.price ?? 0, changePct: r.changePct ?? 0,
+    price: r.price ?? Number.NaN, changePct: r.changePct ?? Number.NaN,
     shortAttack: r.report.scores.shortAttack, midStrength: r.report.scores.midStrength,
     midControl: r.report.scores.midControl, kongPan: r.report.scores.kongPan,
+    shortOversold: r.shortOversold,
     turnoverRank: r.turnoverRank,
   };
 }
@@ -128,9 +129,9 @@ const FILTER_GROUPS: { group: FilterGroup; title: string; activeCls: string; con
 ];
 // 使用順序評級篩選（回測推導；衍生自 report.combo）。
 const COMBO_FILTERS: { id: string; label: string; tip: string }[] = [
-  { id: 'cf_top', label: '最稀有⭐', tip: '只看三組齊發（雙B＋主力＋捕撈 三組都出＝共振3/3）：台股短線期望值最高但很稀有(一天個位數)；平時看「主進場」級就夠、機會多，陸股牛市那段 3/3 反而輸大盤' },
+  { id: 'cf_top', label: '最稀有⭐', tip: '只看全共振（紅紫黃三燈全亮＋雙B金叉＋捕撈金叉同日）：台股短線期望值最高但很稀有；平時看「主進場」級即可，陸股牛市樣本需保守解讀' },
   { id: 'cf_redGate', label: '紅當前提', tip: '只看紅色(中線機構)在場的＝勝出順序的前提（過濾掉純紫/純指標的低勝率組）' },
-  { id: 'cf_prime', label: '主進場', tip: '只看「紅當前提＋觸發」與「三組齊發」（評級 prime/top）' },
+  { id: 'cf_prime', label: '主進場', tip: '只看「紅當前提＋觸發」與「全共振」（評級 prime/top）' },
   { id: 'cf_bottom', label: '底部反彈', tip: '只看捕撈 0 軸下空頭區金叉（底部反彈，回測勝率較高）' },
 ];
 function passFilters(report: ConditionReport | undefined, active: Set<string>): boolean {
@@ -191,24 +192,24 @@ function sanseSortValue(
       return rank === Infinity ? null : -rank;
     }
     case 'mkt.turnover':
-      return -(h.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
-    case 'sanse.shortAttack':  return h.shortAttack ?? 0;
-    case 'sanse.midStrength':  return h.midStrength ?? 0;
-    case 'sanse.midControl':   return h.midControl ?? 0;
-    case 'sanse.shortOversold': return h.shortOversold ?? 0;
-    case 'mkt.change':         return h.changePct ?? 0;
-    case 'mkt.price':          return h.price ?? 0;
+      return h.turnoverRank == null ? null : -h.turnoverRank; // rank 1 = 最大 → 取負，desc 時排最前
+    case 'sanse.shortAttack':  return Number.isFinite(h.shortAttack) ? h.shortAttack : null;
+    case 'sanse.midStrength':  return Number.isFinite(h.midStrength) ? h.midStrength : null;
+    case 'sanse.midControl':   return Number.isFinite(h.midControl) ? h.midControl : null;
+    case 'sanse.shortOversold': return h.shortOversold != null && Number.isFinite(h.shortOversold) ? h.shortOversold : null;
+    case 'mkt.change':         return Number.isFinite(h.changePct) ? h.changePct : null;
+    case 'mkt.price':          return Number.isFinite(h.price) ? h.price : null;
     default: return null;
   }
 }
 
 const LEVELS: { key: Level; label: string; desc: string }[] = [
-  { key: 'strict', label: '嚴格', desc: '三色資金共振 — 短攻>2.8 + 中強>3.9 + 金叉/牛熊線/控盤>80 全到位' },
+  { key: 'strict', label: '嚴格', desc: '短攻／中強／中控門檻之外，A11、A2、A3、A4、A5、A7 六道嚴格閘門也必須全過' },
   { key: 'medium', label: '中等', desc: '更新版 — 短攻 / 中強 / 中控 三個分數都 > 0' },
   { key: 'loose', label: '寬鬆', desc: '游資資金翻正 — 短線動能今天剛由負轉正' },
   { key: 'reversal', label: '底反', desc: '底反該買 — 該買(紅機構在場＋雙B/捕撈觸發) ＋ 捕撈0軸下空頭區金叉；回測兩市場 OOS 最高把握' },
   // 具名策略（從 records 衍生、全市場命中；由工具列「三色(全共振⭐)…」按鈕經 level 驅動）
-  { key: 'resonance', label: '全共振⭐', desc: '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉 同日（三組齊發，回測漲幅最大但稀有）' },
+  { key: 'resonance', label: '全共振⭐', desc: '🔴🟣🟡三燈全亮 ＋ 雙B金叉 ＋ 捕撈金叉同日；不能用三組任意買訊替代，樣本稀有' },
   { key: 'red_yellow_trigger', label: '紅+黃+觸發', desc: '🔴紅 ＋ 🟡黃 中線骨架 ＋ 一個觸發（雙B金叉/突破 或 捕撈金叉）' },
   { key: 'red_dualb_gold', label: '紅+雙B金叉', desc: '🔴紅在場 ＋ 黃線穿紅線（只認金叉、較乾淨）' },
   { key: 'red_dualb_any', label: '紅+雙B金叉/突破', desc: '🔴紅在場 ＋（黃紅金叉 或 收盤突破智能交易線）' },
@@ -258,7 +259,25 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   const [filters, setFilters] = useState<Set<string>>(new Set());
   const toggleFilter = (k: string) => setFilters((prev) => {
     const next = new Set(prev);
-    next.has(k) ? next.delete(k) : next.add(k);
+    if (next.has(k)) {
+      next.delete(k);
+      return next;
+    }
+    // 同一語意軸採單選，避免「多頭＋空頭」「多頭區金叉＋空頭區金叉」必然為空。
+    const exclusiveGroups = [
+      ['trend_bull', 'trend_bear'],
+      ['c_gold_bull', 'c_gold_bear'],
+      ['cf_top', 'cf_prime', 'cf_redGate'],
+    ];
+    for (const group of exclusiveGroups) {
+      if (group.includes(k)) group.forEach((id) => next.delete(id));
+    }
+    // 子集合／父集合選項去除冗餘，讓畫面上的 AND 真有額外意義。
+    if (k === 'b_resonance') { next.delete('b_gold'); next.delete('b_break'); }
+    if (k === 'b_gold' || k === 'b_break') next.delete('b_resonance');
+    if (k === 'm_three') { next.delete('m_short'); next.delete('m_mid'); }
+    if (k === 'm_short' || k === 'm_mid') next.delete('m_three');
+    next.add(k);
     return next;
   });
   // 近 7 天有 YouTube 提及（只台股；display-layer 篩選，切市場時重置）
@@ -345,7 +364,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 進場：盤中活躍時段預設即時，否則交給 loadAfterClose（在 effect 內判斷避免 SSR/CSR hydration 不一致）
   useEffect(() => {
     liveBaseRef.current = apiBase; // 標記目前市場 → 舊市場 in-flight fetch 自我作廢
-    setData(null); setDates([]); setPerf({}); setYtRecentOnly(false); setThemeHeatMap(new Map()); // 清掉前一市場殘留，避免短暫顯示錯市場
+    setData(null); setDates([]); setPerf({}); setFilters(new Set()); setYtRecentOnly(false);
+    setSortKey('score.sanseCombo'); setSortDir('desc'); setThemeHeatMap(new Map()); // 清掉前一市場殘留，避免短暫顯示錯市場
     loadDates();
     // 盤中/盤後窗口 → 即時；收盤後 → loadAfterClose（今天盤後沒生就顯示今天盤中，不退回昨天）
     if (isIntradayActive(market)) {
@@ -356,6 +376,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase]);
+
+  useEffect(() => {
+    setFilters(new Set());
+    setYtRecentOnly(false);
+  }, [level]);
 
   const onRefresh = useCallback(() => {
     if (session === 'intraday') loadDate(undefined, 'intraday'); // 重抓即時快照
@@ -405,15 +430,22 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
   // 「近 7 天有 YouTube 提及」篩選謂詞（display-layer；ytRecentOnly 關閉時全過）
   const passYt = (h: Hit) => !ytRecentOnly || (ytMap.get(bare(h.symbol))?.count7d ?? 0) > 0;
 
+  const filteredRows = useMemo(
+    () => levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [levelRows, filters, reportMap, zhuMap, ytMap, ytRecentOnly],
+  );
+
   // 漲幅要抓「畫面實際會顯示的那 50 檔」(濾鏡+排序後)，否則改排序/濾鏡後顯示的股票沒抓到漲幅 → 空白。
   // 排序鍵用 perf-independent 版（依 fwd 漲幅排序本身需要 perf，退回 combo 序當抓取依據，避免循環依賴）。
   const fetchTargets = useMemo(() => {
-    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
     // 依 fwd 漲幅排序本身需要 perf（尚未抓到）→ 退回 combo 序當抓取依據，避免循環依賴
     const baseKey = FWD_FIELD[sortKey] ? 'score.sanseCombo' : sortKey;
-    return applySort(rows, baseKey, sortDir, (h, id) => sanseSortValue(h, id, {}, reportMap, themeHeatMap)).slice(0, 50);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levelRows, sortKey, sortDir, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
+    const baseSorted = applySort(filteredRows, baseKey, sortDir, (h, id) => sanseSortValue(h, id, {}, reportMap, themeHeatMap));
+    // 前瞻報酬排序必須先抓完整篩選集合，才能在全體中找 Top 50；其他排序只抓可見 50 檔。
+    const targets = FWD_FIELD[sortKey] ? baseSorted : baseSorted.slice(0, 50);
+    return targets.filter((h) => Number.isFinite(h.price) && h.price > 0);
+  }, [filteredRows, sortKey, sortDir, reportMap, themeHeatMap]);
   const fetchKey = fetchTargets.map((h) => h.symbol).join(',');
 
   // 績效追蹤（複用主頁 /api/backtest/forward，支援 .SS/.SZ）— 只抓「會顯示的那 50 檔」，排序/濾鏡變動跟著重抓
@@ -421,19 +453,23 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
     if (!data || fetchTargets.length === 0) { setPerf({}); return; }
     let alive = true;
     setPerfLoading(true);
-    fetch('/api/backtest/forward', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        scanDate: data.lastDate,
-        stocks: fetchTargets.map((h) => ({ symbol: h.symbol, name: h.name, scanPrice: h.price })),
-      }),
-    })
-      .then((r) => r.json())
-      .then((j: { performance?: StockForwardPerformance[] }) => {
+    const batches = Array.from({ length: Math.ceil(fetchTargets.length / 50) }, (_, i) => fetchTargets.slice(i * 50, i * 50 + 50));
+    Promise.all(batches.map(async (batch) => {
+      const response = await fetch('/api/backtest/forward', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          scanDate: data.lastDate,
+          stocks: batch.map((h) => ({ symbol: h.symbol, name: h.name, scanPrice: h.price })),
+        }),
+      });
+      if (!response.ok) throw new Error(`forward ${response.status}`);
+      return response.json() as Promise<{ performance?: StockForwardPerformance[] }>;
+    }))
+      .then((responses) => {
         if (!alive) return;
         const m: Record<string, StockForwardPerformance> = {};
-        for (const p of j.performance ?? []) m[p.symbol] = p;
+        for (const j of responses) for (const p of j.performance ?? []) m[p.symbol] = p;
         setPerf(m);
       })
       .catch(() => { /* 績效取不到不致命 */ })
@@ -456,14 +492,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
       })
       .catch(() => { /* 熱度取不到不致命 — 排序退回無題材 */ });
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.lastDate, market]);
+  }, [data?.lastDate, market, apiBase]);
 
   const hits = useMemo(() => {
-    const rows = levelRows.filter((h) => passFilters(reportMap.get(h.symbol), filters) && passYt(h) && passZhu(h));
-    return applySort(rows, sortKey, sortDir, (h, id) => sanseSortValue(h, id, perf, reportMap, themeHeatMap)).slice(0, 50);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levelRows, sortKey, sortDir, perf, filters, reportMap, zhuMap, ytMap, ytRecentOnly, themeHeatMap]);
+    return applySort(filteredRows, sortKey, sortDir, (h, id) => sanseSortValue(h, id, perf, reportMap, themeHeatMap)).slice(0, 50);
+  }, [filteredRows, sortKey, sortDir, perf, reportMap, themeHeatMap]);
   const pureSelected = selectedSymbol?.replace(/\.(TW|TWO|SS|SZ)$/i, '');
 
   return (
@@ -565,6 +598,9 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
 
       {/* 三色買進訊號篩選：分 3 組、每組照書本順序；多個 chip = AND（同時滿足）*/}
       <div className="shrink-0 px-2 py-1.5 border-b border-border space-y-1">
+        <div className="text-[9px] text-muted-foreground">
+          篩選後 <span className="font-mono text-foreground">{filteredRows.length}</span> / 原始 <span className="font-mono">{levelRows.length}</span> 檔
+        </div>
         {FILTER_GROUPS.map(({ group, title, activeCls, conds }) => (
           <div key={group} className="flex items-center gap-1 flex-wrap">
             <span className="text-[9px] text-muted-foreground w-9 shrink-0">{title}</span>
@@ -647,7 +683,11 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
       <div className="flex-1 overflow-auto space-y-1.5 px-2 py-1.5">
         {err && <div className="p-4 text-sm text-rose-400">⚠️ {err}</div>}
         {loading && !data && <div className="p-4 text-sm text-muted-foreground">載入中…</div>}
-        {data && hits.length === 0 && !loading && <div className="p-4 text-sm text-muted-foreground">此策略該日無命中。</div>}
+        {data && hits.length === 0 && !loading && (
+          <div className="p-4 text-sm text-muted-foreground">
+            {levelRows.length > 0 ? '目前篩選條件沒有交集，請清除或放寬條件。' : '此策略該日無命中。'}
+          </div>
+        )}
         {hits.map((h) => {
           const ticker = h.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const isSel = pureSelected && ticker === pureSelected;
@@ -683,8 +723,8 @@ export function SanSeScanCompact({ onSelectStock, selectedSymbol, level: control
                   <CnBoardBadge symbol={h.symbol} />
                   <span className="font-mono text-[10px] text-muted-foreground">{ticker}</span>
                 </div>
-                <span className={cn('font-mono text-[11px] font-bold shrink-0', h.changePct >= 0 ? 'text-bull' : 'text-bear')}>
-                  {h.changePct >= 0 ? '+' : ''}{fmt(h.changePct)}%
+                <span className={cn('font-mono text-[11px] font-bold shrink-0', Number.isFinite(h.changePct) ? (h.changePct >= 0 ? 'text-bull' : 'text-bear') : 'text-muted-foreground')}>
+                  {Number.isFinite(h.changePct) ? `${h.changePct >= 0 ? '+' : ''}${fmt(h.changePct)}%` : '—'}
                 </span>
               </div>
 

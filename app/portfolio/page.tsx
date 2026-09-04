@@ -6,6 +6,7 @@ import { usePortfolioStore, PortfolioHolding } from '@/store/portfolioStore';
 import { PageShell, PageHeader } from '@/components/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Download } from 'lucide-react';
 import { fetchResolvedStockQuote } from '@/lib/stocks/fetchResolvedStockQuote';
 import { stockCodeOf, stockDisplayName } from '@/lib/stocks/stockIdentity';
 import { classifyMarket } from '@/lib/market/classify';
@@ -428,16 +429,16 @@ export default function PortfolioPage() {
 
   const portfolioHeader = (
     <PageHeader
-      title="💼 持倉"
+      title="投資組合"
       backButton
       actions={
         <>
-          <Button variant="secondary" size="sm" onClick={() => usePortfolioStore.getState().exportJSON()}
-            title="匯出備份 JSON">匯出</Button>
-          <Button variant="secondary" size="sm" onClick={exportCSV} title="匯出 CSV（含損益，可用於報稅）">CSV</Button>
-          <label className="px-2 py-1 bg-muted hover:bg-muted/80 rounded transition cursor-pointer text-xs" title="匯入備份">
+          <Button variant="secondary" size="sm" disabled={holdings.length === 0} onClick={() => usePortfolioStore.getState().exportJSON()}
+            className="min-h-11" title="匯出備份 JSON">匯出備份</Button>
+          <Button variant="secondary" size="sm" disabled={holdings.length === 0} onClick={exportCSV} className="min-h-11" title="匯出 CSV（含損益）">匯出 CSV</Button>
+          <label className="inline-flex min-h-11 items-center px-3 bg-muted hover:bg-muted/80 rounded-md transition cursor-pointer text-sm font-medium focus-within:ring-2 focus-within:ring-ring" title="匯入 JSON 備份">
             匯入
-            <input type="file" accept=".json" className="hidden" onChange={e => {
+            <input type="file" accept=".json,application/json" className="sr-only" aria-label="選擇要匯入的 JSON 備份" onChange={e => {
               const file = e.target.files?.[0];
               if (!file) return;
               const reader = new FileReader();
@@ -450,8 +451,8 @@ export default function PortfolioPage() {
             }} />
           </label>
           <Button size="sm" onClick={() => { cancelForm(); setShowForm(v => !v); }}
-            className="bg-blue-600 hover:bg-blue-500 font-bold">
-            + 新增
+            className="min-h-11 bg-blue-600 hover:bg-blue-500 font-bold">
+            新增持股
           </Button>
         </>
       }
@@ -487,7 +488,7 @@ export default function PortfolioPage() {
             {cnHoldings.length > 0 && (
               <MarketSummaryRow label="陸股" currency="CNY" summary={cnSummary} returnPct={cnReturn} />
             )}
-            <p className="text-[9px] text-muted-foreground/60 text-center">
+            <p className="text-xs text-muted-foreground text-center">
               只含目前持倉，不含已賣出；未實現損益已扣預估買賣費稅
             </p>
           </div>
@@ -497,53 +498,58 @@ export default function PortfolioPage() {
         {showForm && (
           <div className="bg-secondary border border-border rounded-xl p-4 space-y-3">
             <h3 className="text-sm font-bold text-foreground/90">{editId ? '編輯持倉' : '新增持倉'}</h3>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">股票代號</label>
+                <label htmlFor="holding-symbol" className="text-sm text-muted-foreground mb-1 block">股票代號</label>
                 <Input value={form.symbol} onChange={e => setForm(f => ({ ...f, symbol: e.target.value }))}
+                  id="holding-symbol" autoComplete="off" required
                   placeholder="2330 / AAPL"
                   disabled={!!editId || !!prefilledLockWatch}
                   className="bg-muted border-border focus:border-blue-500 disabled:opacity-60" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">加入日期</label>
-                <Input type="date" value={form.buyDate} onChange={e => setForm(f => ({ ...f, buyDate: e.target.value }))}
+                <label htmlFor="holding-date" className="text-sm text-muted-foreground mb-1 block">買進日期</label>
+                <Input id="holding-date" type="date" value={form.buyDate} onChange={e => setForm(f => ({ ...f, buyDate: e.target.value }))}
                   className="bg-muted border-border focus:border-blue-500" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">持股數</label>
-                <Input type="number" value={form.shares} onChange={e => setForm(f => ({ ...f, shares: e.target.value }))}
+                <label htmlFor="holding-shares" className="text-sm text-muted-foreground mb-1 block">持股數</label>
+                <Input id="holding-shares" type="number" inputMode="decimal" min="0" step="any" value={form.shares} onChange={e => setForm(f => ({ ...f, shares: e.target.value }))}
                   placeholder="1000"
                   className="bg-muted border-border focus:border-blue-500" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block flex items-center justify-between">
-                  <span>成本價（買進均價）</span>
+                <div className="mb-1 flex min-h-11 items-center justify-between gap-2">
+                  <label htmlFor="holding-cost" className="text-sm text-muted-foreground">成本價（買進均價）</label>
                   <button
                     type="button"
                     onClick={autoFillCostPrice}
                     disabled={!form.symbol || !form.buyDate || formLoading}
-                    className="text-[10px] text-blue-400 hover:text-blue-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="inline-flex min-h-11 items-center gap-1 text-sm text-blue-400 hover:text-blue-300 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    📥 用當日收盤
+                    <Download className="size-4" aria-hidden="true" /> 帶入收盤價
                   </button>
-                </label>
-                <Input type="number" step="0.0001" value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
+                </div>
+                <Input id="holding-cost" type="number" inputMode="decimal" min="0" step="0.0001" value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
                   placeholder="150.0000（陸股均價常為 4 位小數）"
                   className="bg-muted border-border focus:border-blue-500" />
               </div>
             </div>
 
-            {/* v12 Step 3-5 訊號計算用欄位（必填，避免舊版默認 B／短線） */}
-            <details className="bg-muted/30 border border-border rounded-lg" open>
+            {/* v12 Step 3-5 訊號計算用欄位；可稍後補，不猜 B／短線。 */}
+            <details className="bg-muted/30 border border-border rounded-lg">
               <summary className="px-3 py-2 cursor-pointer text-xs font-bold text-foreground/90 select-none">
-                <span className="text-[9px] font-bold uppercase tracking-wider opacity-70">v12</span>
-                <span className="ml-1">進場訊號設定（選填，影響 Step 3-5 停損/操作/停利建議）</span>
+                <span className="text-xs font-bold uppercase tracking-wider opacity-70">進階</span>
+                <span className="ml-1">持股策略設定（選填，可稍後補）</span>
               </summary>
-              <div className="px-3 pb-3 grid grid-cols-2 gap-2">
+              <div className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <p id="holding-strategy-help" className="sm:col-span-2 text-xs text-muted-foreground">
+                  沒有既定策略也能直接新增。未設定時系統不會猜測進場字母或長短線，只提供基本風險提醒。
+                </p>
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">進場訊號字母</label>
+                  <label htmlFor="holding-trigger" className="text-sm text-muted-foreground mb-1 block">進場策略</label>
                   <select
+                    id="holding-trigger"
                     value={form.triggerSignal}
                     disabled={!!prefilledLockWatch}
                     onChange={e => setForm(f => ({ ...f, triggerSignal: e.target.value as typeof EMPTY_FORM.triggerSignal }))}
@@ -575,8 +581,9 @@ export default function PortfolioPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">操作模式</label>
+                  <label htmlFor="holding-mode" className="text-sm text-muted-foreground mb-1 block">操作模式</label>
                   <select
+                    id="holding-mode"
                     value={form.operationMode}
                     onChange={e => setForm(f => ({ ...f, operationMode: e.target.value as typeof EMPTY_FORM.operationMode }))}
                     className="w-full bg-muted border border-border rounded-md px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
@@ -585,7 +592,7 @@ export default function PortfolioPage() {
                     <option value="short">短線（依字母對應均線）</option>
                     <option value="long">長線（統一 MA20）</option>
                   </select>
-                  <p className="text-[10px] text-muted-foreground/70 mt-1">獲利 ≥10% 後可手動切長線</p>
+                  <p className="text-xs text-muted-foreground mt-1">獲利達 10% 後，可依計畫切換為長線模式。</p>
                 </div>
                 <div className="sm:col-span-2">
                   <label htmlFor="holding-management" className="text-sm text-muted-foreground mb-1 block">唯一持股管理法</label>
@@ -613,32 +620,31 @@ export default function PortfolioPage() {
             </details>
 
             {formError && <p role="alert" className="text-sm text-red-400">{formError}</p>}
-            <div className="flex gap-2">
+            <div className="flex flex-col-reverse sm:flex-row gap-2">
               <Button onClick={handleAdd} disabled={formLoading || !form.symbol || !form.shares || form.costPrice === ''}
-                className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 font-bold">
+                className="min-h-11 flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 font-bold">
                 {formLoading ? '載入中...' : editId ? '儲存變更' : '確認新增'}
               </Button>
-              <Button variant="secondary" onClick={cancelForm}>取消</Button>
+              <Button variant="secondary" onClick={cancelForm} className="min-h-11">取消</Button>
             </div>
           </div>
         )}
 
         {holdings.length === 0 && !showForm && (
-          <div className="text-center py-12 text-muted-foreground space-y-4">
-            <p className="text-4xl">💼</p>
-            <p className="text-sm font-medium text-muted-foreground">尚未新增任何持倉</p>
-            <p className="text-xs text-muted-foreground/60">追蹤你的持股，即時查看損益、停損/停利提醒</p>
-            <div className="flex justify-center gap-3 mt-2">
-              <Button size="sm" onClick={() => setShowForm(true)}
-                className="bg-sky-600 hover:bg-sky-500 font-medium">
-                + 新增第一筆持倉
+          <div className="mx-auto max-w-lg text-center py-12 text-muted-foreground space-y-4">
+            <p className="text-lg font-semibold text-foreground">建立你的第一筆持股</p>
+            <p className="text-sm">加入持股後，就能集中查看即時損益、風險提醒與每日操作建議。</p>
+            <div className="flex flex-col sm:flex-row justify-center gap-3 mt-2">
+              <Button onClick={() => setShowForm(true)}
+                className="min-h-11 bg-sky-600 hover:bg-sky-500 font-medium">
+                新增第一筆持股
               </Button>
               <Link href="/"
-                className="text-xs px-4 py-2 bg-secondary hover:bg-muted text-foreground/80 rounded-lg transition border border-border">
-                去掃描選股
+                className="inline-flex min-h-11 items-center justify-center text-sm px-4 bg-secondary hover:bg-muted text-foreground/80 rounded-lg transition border border-border">
+                回首頁找股票
               </Link>
             </div>
-            <p className="text-[10px] text-muted-foreground/60">* 資料存於本機瀏覽器，僅供學習參考</p>
+            <p className="text-xs text-muted-foreground">持股資料會儲存在你的 Rockstock 服務端資料檔。</p>
           </div>
         )}
 
@@ -671,7 +677,7 @@ export default function PortfolioPage() {
                       <span className="font-bold text-foreground truncate" title={stockDisplayName(p?.name ?? h.name, h.symbol)}>{stockDisplayName(p?.name ?? h.name, h.symbol)}</span>
                       <span className="text-xs font-mono text-muted-foreground shrink-0">{stockCodeOf(h.symbol)}</span>
                     </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                    <div className="text-xs text-muted-foreground mt-0.5">
                       {formatHoldingQty(h.shares, h.symbol)} · 均價 <span className="text-yellow-400 font-mono">${formatPrice(h.costPrice)}</span>
                       {h.investedCost != null && <> · 投入 <span className="font-mono">${formatTruncatedDecimal(h.investedCost)}</span></>}
                       · 買進 {h.buyDate}
@@ -734,7 +740,7 @@ export default function PortfolioPage() {
           })}
         </div>
 
-        <p className="text-[10px] text-muted-foreground/60 text-center">* 僅供學習參考，停損計算為簡化版本，非投資建議</p>
+        <p className="text-xs text-muted-foreground text-center">停損為簡化試算，僅供研究參考，不構成投資建議。</p>
       </div>
     </PageShell>
   );
@@ -766,7 +772,7 @@ function MarginPressureRow({ pressure }: { pressure?: MarginPressure | null }) {
 
   return (
     <div className="px-4 pb-2">
-      <div className="flex items-center gap-3 flex-wrap text-[10px] text-muted-foreground border-t border-border pt-1.5">
+      <div className="flex items-center gap-3 flex-wrap text-xs text-muted-foreground border-t border-border pt-1.5">
         <span
           title="沒人公布融資戶真實成本，這是用「每日融資增加量 × 當日均價」加權回推的估算值"
           className="cursor-help"
@@ -851,7 +857,7 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
       <div className="flex items-center gap-1">
         {summary?.valuationConclusion && (
           <span className={
-            'px-1.5 py-0.5 rounded text-[10px] font-semibold ' +
+            'px-1.5 py-0.5 rounded text-xs font-semibold ' +
             (summary.valuationConclusion === 'undervalued' ? 'bg-emerald-900/60 text-emerald-300' :
              summary.valuationConclusion === 'overvalued' ? 'bg-rose-900/60 text-rose-300' :
              'bg-secondary text-foreground')
@@ -862,7 +868,7 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
         )}
         {summary?.fundamentalVerdict && (
           <span className={
-            'px-1.5 py-0.5 rounded text-[10px] font-semibold ' +
+            'px-1.5 py-0.5 rounded text-xs font-semibold ' +
             (summary.fundamentalVerdict === 'pass' ? 'bg-emerald-900/60 text-emerald-300' :
              summary.fundamentalVerdict === 'fail' ? 'bg-rose-900/60 text-rose-300' :
              'bg-amber-900/60 text-amber-300')
@@ -876,7 +882,7 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
           onClick={onClick}
           title="查看完整分析"
         >
-          📊 詳情
+          查看詳情
         </Button>
       </div>
     );
@@ -888,9 +894,9 @@ function AnalyzeHoldingButton({ symbol, summary }: { symbol: string; summary?: A
       size="sm"
       onClick={onClick}
       disabled={loading}
-      title="跑 multi-agent 分析（4-phase + 估值）"
+      title="執行多代理分析與估值"
     >
-      {loading ? '...' : '📊 分析'}
+      {loading ? '分析中…' : '開始分析'}
     </Button>
   );
 }
@@ -927,7 +933,7 @@ function BatchAnalyzeButton({ holdings }: { holdings: Array<{ symbol: string }> 
       alert(
         `批量準備完成：${ok}/${total} 檔。\n\n` +
         `下一步：在 Claude Code 對話內輸入 /multi-agent-decide 觸發分析。\n` +
-        `跑完後回各持股按「📊 分析」進入 /agents/[symbol] 查看結果。`,
+        `完成後回到各持股，按「開始分析」查看結果。`,
       );
     } catch (e) {
       alert(`批量準備失敗：${e instanceof Error ? e.message : String(e)}`);
@@ -940,10 +946,10 @@ function BatchAnalyzeButton({ holdings }: { holdings: Array<{ symbol: string }> 
     <button
       onClick={onClick}
       disabled={loading || holdings.length === 0}
-      className="px-3 py-1.5 rounded text-xs font-bold bg-amber-700 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
-      title="對所有持股批量寫 question.json，再去對話跑 /multi-agent-decide"
+      className="min-h-11 px-3 rounded text-sm font-bold bg-amber-700 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+      title="為所有持股準備批次分析"
     >
-      {loading ? (progress ?? '準備中…') : '📊 批量準備分析'}
+      {loading ? (progress ?? '準備中…') : '批次準備分析'}
     </button>
   );
 }
@@ -956,23 +962,23 @@ function MarketSummaryRow({ label, currency, summary, returnPct }:
     <div className="bg-secondary border border-border rounded-xl p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-bold text-foreground/80">{label}</span>
-        <span className="text-[10px] text-muted-foreground">{currency}</span>
+        <span className="text-xs text-muted-foreground">{currency}</span>
       </div>
       <div className="grid grid-cols-3 gap-2 text-center">
         <div>
-          <p className="text-[10px] text-muted-foreground mb-0.5">市值</p>
+          <p className="text-xs text-muted-foreground mb-0.5">市值</p>
           <p className="text-sm font-bold font-mono text-yellow-400">
             {symbol}{summary.totalValue.toLocaleString('zh-TW', { maximumFractionDigits: 0 })}
           </p>
         </div>
         <div>
-          <p className="text-[10px] text-muted-foreground mb-0.5">未實現損益</p>
+          <p className="text-xs text-muted-foreground mb-0.5">未實現損益</p>
           <p className={`text-sm font-bold font-mono ${pnlPos ? 'text-bull' : 'text-bear'}`}>
             {pnlPos ? '+' : '-'}{symbol}{formatTruncatedDecimal(Math.abs(summary.totalPnL))}
           </p>
         </div>
         <div>
-          <p className="text-[10px] text-muted-foreground mb-0.5">報酬率</p>
+          <p className="text-xs text-muted-foreground mb-0.5">報酬率</p>
           <p className={`text-sm font-bold font-mono ${returnPct == null ? 'text-muted-foreground' : returnPct >= 0 ? 'text-bull' : 'text-bear'}`}>
             {returnPct == null ? '—' : `${returnPct >= 0 ? '+' : ''}${formatTruncatedDecimal(returnPct)}%`}
           </p>

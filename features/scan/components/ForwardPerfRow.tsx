@@ -3,7 +3,7 @@
 import type { StockForwardPerformance } from '@/lib/scanner/types';
 
 export const COMPACT_FWD = [
-  { key: 'openReturn' as const, label: '隔日開' },
+  { key: 'openReturn' as const, label: '開盤缺口' },
   { key: 'd1Return' as const, label: '1日' },
   { key: 'd2Return' as const, label: '2日' },
   { key: 'd3Return' as const, label: '3日' },

@@ -114,6 +114,35 @@ export async function saveStep1Pool(pool: Step1Pool): Promise<void> {
   }
 }
 
+export function combineStep1Pools(previous: Step1Pool | null, batchPool: Step1Pool): Step1Pool {
+  return previous
+    ? {
+        ...batchPool,
+        symbols: [...new Set([...previous.symbols, ...batchPool.symbols])].sort(),
+        stats: {
+          total: previous.stats.total + batchPool.stats.total,
+          passSixCond: previous.stats.passSixCond + batchPool.stats.passSixCond,
+          passProhib: previous.stats.passProhib + batchPool.stats.passProhib,
+          passElim: previous.stats.passElim + batchPool.stats.passElim,
+        },
+      }
+    : { ...batchPool, symbols: [...new Set(batchPool.symbols)].sort() };
+}
+
+/**
+ * 合併分批掃描的 Step 1 池。batch 1 必須 reset，後續批次依 symbol 去重累加。
+ * 避免每個約 500 檔的 batch 互相覆蓋，導致最後只剩單一批次候選股。
+ */
+export async function mergeStep1PoolBatch(
+  batchPool: Step1Pool,
+  reset: boolean,
+): Promise<Step1Pool> {
+  const previous = reset ? null : await loadStep1Pool(batchPool.market, batchPool.date, batchPool.strategyId);
+  const merged = combineStep1Pools(previous, batchPool);
+  await saveStep1Pool(merged);
+  return merged;
+}
+
 /** 讀取指定日的 Step 1 池子 cache；不存在或過期回 null */
 export async function loadStep1Pool(
   market: MarketId,
@@ -156,7 +185,7 @@ export async function getStep1Symbols(
  * 推導 ScanSession.step1Filter 欄位
  *
  * @param method 買法字母
- * @param poolExists 該日 Step 1 池子是否存在（symbols.length > 0）
+ * @param poolExists 該日 Step 1 池子檔是否存在；空 symbols 仍是有效的已套用池
  * @returns 'applied' = 多頭軌已過池 / 'bypassed' = 反轉/戰法軌設計上不過 / 'missing' = 多頭軌但池缺漏
  */
 export function deriveStep1FilterState(

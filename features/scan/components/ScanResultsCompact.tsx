@@ -10,7 +10,7 @@ import type { LockWatchRecord } from '@/lib/scanner/lockWatchTypes';
 import { LETTER_NAMES } from '@/lib/scanner/buyMethodTracks';
 import { buildAllStrategyReasons, type StrategyReasonRow } from './strategyReasons';
 import { useLockwatchSnapshot } from '@/lib/hooks/useLockwatchSnapshot';
-import { panelSortKey } from '@/lib/selection/applyPanelFilter';
+import { sortByPanelOrder } from '@/lib/selection/applyPanelFilter';
 import { ForwardPerfRow } from './ForwardPerfRow';
 import { useYouTubeMentionMap } from '@/lib/hooks/useYouTubeMentionMap';
 import { useThemeHeatMap } from '@/lib/hooks/useThemeHeatMap';
@@ -29,7 +29,29 @@ import { useQuotePoller } from '@/lib/hooks/useQuotePoller';
 
 // 此面板提供的排序選項（id 走 lib/sorting/registry 中央清單）：
 // 該頁專屬（六條件/今日熱點/YouTube 提及）+ '|' 分隔線 + 共用區（全 UNIVERSAL_SORT_OPTIONS）。
-const SCAN_SORT_OPTIONS = ['score.sixCond', 'heat.theme', 'heat.youtube', '|', ...UNIVERSAL_SORT_OPTIONS];
+const STRATEGY_ORDER_OPTION = { id: 'strategy.default', label: '策略原排序', tip: '保留該策略後端定義的核心優先順序', defaultDir: 'desc' as const };
+
+function defaultScanSort(method: string, direction: 'long' | 'short' | 'daban'): [string, SortDir] {
+  if (method === 'R') return ['score.deviation', direction === 'short' ? 'desc' : 'asc'];
+  if (method === 'W') return ['score.smartMoney', 'desc'];
+  if (method === 'X') return ['score.instDip', 'desc'];
+  if (method === 'Y') return ['score.instSteal', 'desc'];
+  if (direction === 'short') return ['score.shortSixCond', 'desc'];
+  if (method === 'A') return ['mkt.turnover', 'desc'];
+  if (method === 'A30') return ['score.sixCond', 'desc'];
+  return ['strategy.default', 'desc'];
+}
+
+function scanSortOptions(method: string, direction: 'long' | 'short' | 'daban') {
+  const strategyOption = method === 'R' ? 'score.deviation'
+    : method === 'W' ? 'score.smartMoney'
+    : method === 'X' ? 'score.instDip'
+    : method === 'Y' ? 'score.instSteal'
+    : direction === 'short' ? 'score.shortSixCond'
+    : method === 'A' || method === 'A30' ? 'score.sixCond'
+    : STRATEGY_ORDER_OPTION;
+  return [strategyOption, 'heat.theme', 'heat.youtube', '|', ...UNIVERSAL_SORT_OPTIONS];
+}
 const SCAN_FWD_FIELD: Record<string, keyof StockForwardPerformance> = {
   'fwd.open': 'openReturn', 'fwd.d1': 'd1Return', 'fwd.d5': 'd5Return',
   'fwd.d10': 'd10Return', 'fwd.d20': 'd20Return', 'fwd.maxGain': 'maxGain', 'fwd.maxLoss': 'maxLoss',
@@ -86,7 +108,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   const {
     scanResults, scanDate, market, marketTrend: storeTrend, scanOnly,
     performance, isFetchingForward, isLoadingCronSession,
-    activeBuyMethod, activeSessionScanTime, loadCronSession, isLoadingBuyMethod,
+    activeBuyMethod, activeSessionScanTime, loadCronSession, isLoadingBuyMethod, scanDirection,
   } = useBacktestStore();
 
   // A30（六條件30分K）盤中狀態列：盤中/盤後 + 最後更新時間 + 刷新 + 盤中每分鐘自動輪詢
@@ -108,17 +130,24 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
   const [conceptFilter, setConceptFilter] = useState<string>('all');
   // 只看「近 7 天有被 YouTube 節目提及」的股票（display-layer 篩選，不改掃描資料流）
   const [ytRecentOnly, setYtRecentOnly] = useState(false);
-  // 排序選項：成交額排名為預設（依 0512 v12 全期間綜合回測，A 級組合多靠此排序勝出）
-  // 漲幅排序對齊 panelSortKey（漲幅主鍵 + 六條件次鍵 tie-breaker）
+  // 排序預設依策略而異；漲幅採明確的多欄位比較器，不把欄位壓成近似分數。
   const [scanSort, setScanSort] = useState<string>('mkt.turnover');
   const [scanSortDir, setScanSortDir] = useState<SortDir>('desc');
+
+  useEffect(() => {
+    const [id, dir] = defaultScanSort(activeBuyMethod, scanDirection);
+    setScanSort(id);
+    setScanSortDir(dir);
+    setConceptFilter('all');
+    setYtRecentOnly(false);
+  }, [activeBuyMethod, scanDirection, market, scanDate]);
 
   // YouTube 提及 map（截至掃描當日）— 純展示 join，不進掃描/選股邏輯
   // 只台股有對應；陸股代號不重疊，傳 undefined 不發請求（與三色掃描一致）
   const { map: ytMap } = useYouTubeMentionMap(market === 'TW' ? (scanDate ?? undefined) : undefined);
 
   // 今日產業／題材熱度 map（裸碼 → 所屬最熱分類；refs[0]=今日最熱）— 排序 + 卡片標籤用
-  // TW=TWSE／TPEx 官方產業；CN=概念板塊。純展示/排序，不進選股 gate。
+  // TW=可重疊市場題材；CN=概念板塊。純展示/排序，不進選股 gate。
   const themeHeatMap = useThemeHeatMap(market, scanDate ?? undefined);
 
   // 即時 raw trend（跟 banner 同源）— saved session 的 marketTrend 是舊邏輯（含降級）
@@ -182,6 +211,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     [scanResults, livePrices],
   );
 
+
   const availableConcepts = [...new Set(displayResults.map(r => r.industry).filter(Boolean))] as string[];
 
   const filtered = displayResults
@@ -194,9 +224,13 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     if (fk) return (perfMap.get(r.symbol)?.[fk] as number | null | undefined) ?? null;
     switch (id) {
       case 'mkt.price':   return r.price ?? null;
-      case 'mkt.change':  // 漲幅/六條件/ma20Slope 三層 — 單一事實 panelSortKey（rule 10）
-        return panelSortKey(r);
+      case 'mkt.change':  return r.changePercent ?? null; // 實際三層比較器在下方套用
       case 'score.sixCond': return (r.sixConditionsScore ?? 0) * 100 + (r.changePercent ?? 0) / 100;
+      case 'score.shortSixCond': return r.shortSixConditionsScore ?? null;
+      case 'score.deviation': return r.ma20Deviation ?? null;
+      case 'score.smartMoney': return r.smartMoneyConc ?? null;
+      case 'score.instDip': return r.instDipInstK ?? null;
+      case 'score.instSteal': return (r.instStealConsec ?? 0) * 1000 + (r.instStealConc5 ?? 0);
       case 'mkt.turnover':  return -(r.turnoverRank ?? 999_999); // rank 1 = 最大 → 取負，desc 時排最前
       case 'heat.youtube':  return ytMap.get(bareCode(r.symbol))?.count30d ?? null; // 未提及排最後
       case 'heat.theme': {  // 所屬「今日最熱題材」名次（1=最熱）→ 同題材內再按漲幅；無題材排最後
@@ -206,7 +240,16 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
       default: return null;
     }
   };
-  const sorted = applySort(filtered, scanSort, scanSortDir, scanSortValue);
+  const sorted = scanSort === 'strategy.default'
+    ? filtered
+    : scanSort === 'mkt.change'
+    ? sortByPanelOrder(filtered, scanSortDir)
+    : applySort(filtered, scanSort, scanSortDir, scanSortValue);
+  const prohibitionsAreVeto = scanDirection === 'long' && !['D', 'F', 'J', 'N', 'O', 'Q'].includes(activeBuyMethod);
+  const prohibitionCount = scanDirection === 'long'
+    ? sorted.filter((r) => (r.longProhibitionsReasons?.length ?? 0) > 0).length
+    : 0;
+  const vetoCount = prohibitionsAreVeto ? prohibitionCount : 0;
 
   if (!scanOnly) return null;
   if (scanResults.length === 0 && isLoadingCronSession) return null;
@@ -224,7 +267,12 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
     <div className="space-y-1.5 px-2">
       {/* Header */}
       <div className="flex items-center gap-1.5 text-xs flex-wrap">
-        <span className="font-bold text-foreground">{scanResults.length} 檔</span>
+        <span className="font-bold text-foreground">篩選後 {sorted.length} / 原始 {scanResults.length} 檔</span>
+        {scanDirection === 'long' && (
+          <span className="text-[10px] text-muted-foreground" title="戒律命中者保留供觀察，但不是可執行進場名單">
+            可操作 {sorted.length - vetoCount} / {prohibitionsAreVeto ? '禁買' : '戒律警示'} {prohibitionCount}
+          </span>
+        )}
         <span className="text-[10px] text-muted-foreground/60">{scanDate}</span>
         {quoteUpdatedAt && (
           <span className="text-[9px] text-emerald-400" title={`即時報價更新 ${new Date(quoteUpdatedAt).toLocaleString('zh-TW')}`}>
@@ -272,7 +320,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
 
       {/* Sort selector pills — 共用 SortControl + 中央排序清單 */}
       <SortControl
-        options={SCAN_SORT_OPTIONS}
+        options={scanSortOptions(activeBuyMethod, scanDirection)}
         value={scanSort}
         dir={scanSortDir}
         onChange={(id, d) => { setScanSort(id); setScanSortDir(d); }}
@@ -303,7 +351,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
             className={`text-[9px] px-1.5 py-0.5 rounded-full ${conceptFilter === 'all' ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'}`}>
             全部
           </button>
-          {availableConcepts.sort().slice(0, 10).map(c => (
+          {availableConcepts.sort().map(c => (
             <button key={c} onClick={() => setConceptFilter(c)}
               className={`text-[9px] px-1.5 py-0.5 rounded-full ${conceptFilter === c ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'}`}>
               {c}
@@ -321,8 +369,9 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
         const ytSummary = ytMap.get(ticker);
         const ytResonance = resonanceTags(ytSummary);
         // 戒律觸發 row 灰化（書本：detector 訊號可看，但戒律是硬性禁忌不該追）
-        const prohibitionsCount = r.longProhibitionsReasons?.length ?? 0;
+        const prohibitionsCount = scanDirection === 'long' ? (r.longProhibitionsReasons?.length ?? 0) : 0;
         const hasProhibition = prohibitionsCount > 0;
+        const isVetoed = hasProhibition && prohibitionsAreVeto;
 
         return (
           <Fragment key={r.symbol}>
@@ -330,13 +379,15 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
               className={`rounded-lg border px-2.5 py-2 cursor-pointer transition-colors ${
                 isExpanded
                   ? 'bg-secondary/60 border-sky-700/50'
-                  : hasProhibition
+                  : isVetoed
                     ? 'bg-zinc-900/60 border-rose-900/40 hover:bg-zinc-900/80'
+                    : hasProhibition
+                      ? 'bg-amber-950/10 border-amber-800/40 hover:bg-amber-950/20'
                     : 'bg-card border-border/60 hover:bg-secondary/40'
               }`}
-              style={hasProhibition && !isExpanded ? { filter: 'grayscale(0.6) brightness(0.65)' } : undefined}
+              style={isVetoed && !isExpanded ? { filter: 'grayscale(0.6) brightness(0.65)' } : undefined}
               onClick={() => setExpandedStock(isExpanded ? null : r.symbol)}
-              title={hasProhibition ? `⚠ 戒律觸發 ${prohibitionsCount} 條 — ${r.longProhibitionsReasons!.slice(0, 2).join('；')}（書本：硬性禁忌不該追）` : undefined}
+              title={hasProhibition ? `⚠ ${prohibitionsAreVeto ? '禁買戒律' : '戒律風險警示'} ${prohibitionsCount} 條 — ${r.longProhibitionsReasons!.slice(0, 2).join('；')}${prohibitionsAreVeto ? '（不列為可執行進場）' : '（反轉／戰法訊號保留，但需降級處理）'}` : undefined}
             >
               {/* Row 1: Symbol + Name + Change% + Actions */}
               <div className="flex items-center gap-1.5 mb-1">
@@ -349,7 +400,7 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                     className="text-[8px] px-1 h-3.5 flex items-center rounded-sm bg-rose-900/40 text-rose-300 font-bold shrink-0"
                     title={r.longProhibitionsReasons!.join('；')}
                   >
-                    ⚠ 戒律 {prohibitionsCount}
+                    ⚠ {prohibitionsAreVeto ? '禁買' : '警示'} {prohibitionsCount}
                   </span>
                 )}
                 <span className={`font-mono text-[11px] font-bold shrink-0 ${r.changePercent >= 0 ? 'text-bull' : 'text-bear'}`}>
@@ -562,6 +613,12 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                 ) : (
                   // A（六條件）：六個條件格子 + 分數 + 跨策略命中徽章
                   (() => {
+                    const conditionBreakdown = scanDirection === 'short'
+                      ? r.shortSixConditionsBreakdown
+                      : r.sixConditionsBreakdown;
+                    const conditionScore = scanDirection === 'short'
+                      ? r.shortSixConditionsScore
+                      : r.sixConditionsScore;
                     const methodColors: Record<string, string> = {
                       B: 'bg-sky-800/80 text-sky-300',
                       C: 'bg-emerald-800/80 text-emerald-300',
@@ -599,20 +656,20 @@ export function ScanResultsCompact({ onSelectStock }: ScanResultsCompactProps) {
                     return (
                       <>
                         {[
-                          { pass: r.sixConditionsBreakdown?.trend, label: '趨' },
-                          { pass: r.sixConditionsBreakdown?.position, label: '位' },
-                          { pass: r.sixConditionsBreakdown?.kbar, label: 'K' },
-                          { pass: r.sixConditionsBreakdown?.ma, label: '均' },
-                          { pass: r.sixConditionsBreakdown?.volume, label: '量' },
-                          { pass: r.sixConditionsBreakdown?.indicator, label: '指' },
+                          { pass: conditionBreakdown?.trend, label: '趨' },
+                          { pass: conditionBreakdown?.position, label: '位' },
+                          { pass: conditionBreakdown?.kbar, label: 'K' },
+                          { pass: conditionBreakdown?.ma, label: '均' },
+                          { pass: conditionBreakdown?.volume, label: '量' },
+                          { pass: conditionBreakdown?.indicator, label: '指' },
                         ].map(({ pass, label }) => (
-                          <span key={label} className={`text-[8px] w-3.5 h-3.5 flex items-center justify-center rounded-sm ${pass ? 'bg-sky-800/80 text-sky-300' : 'bg-secondary/50 text-muted-foreground/60'}`}>{label}</span>
+                          <span key={label} className={`text-[8px] w-3.5 h-3.5 flex items-center justify-center rounded-sm ${pass ? (scanDirection === 'short' ? 'bg-emerald-800/80 text-emerald-200' : 'bg-sky-800/80 text-sky-300') : 'bg-secondary/50 text-muted-foreground/60'}`}>{label}</span>
                         ))}
-                        <span className="text-[9px] text-sky-400 ml-0.5">{r.sixConditionsScore}/6</span>
+                        <span className={`text-[9px] ml-0.5 ${scanDirection === 'short' ? 'text-emerald-300' : 'text-sky-400'}`}>{conditionScore ?? 0}/6</span>
                         {/* 六條件 badge — 放在 cross-strategy badges 之間，與其他 tab 命中徽章一致 */}
                         <span className="text-[8px] px-1 h-3.5 flex items-center rounded-sm font-bold bg-amber-800/80 text-amber-200"
-                          title={`六條件 ${r.sixConditionsScore}/6`}>
-                          六條件
+                          title={`${scanDirection === 'short' ? '做空' : '做多'}六條件 ${conditionScore ?? 0}/6`}>
+                          {scanDirection === 'short' ? '做空六條件' : '六條件'}
                         </span>
                         {others.map(m => (
                           <span key={m}

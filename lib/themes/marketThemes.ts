@@ -49,7 +49,11 @@ const average = (values: Array<number | null>): number | null => {
   return present.length > 0 ? +(present.reduce((sum, value) => sum + value, 0) / present.length).toFixed(1) : null;
 };
 
-function configuredCodes(theme: string): string[] {
+/**
+ * 唯一允許把市場題材名稱轉成股票代號的入口。
+ * 消費端不得直接引用 THEME_MAP，以免把市場題材誤當交易所官方產業分類。
+ */
+export function marketThemeCodes(theme: string): string[] {
   return [...new Set((THEME_MAP[theme] ?? []).map((stock) => stock.code))];
 }
 
@@ -69,7 +73,7 @@ export function buildMarketThemeRanking(source: SectorRankingFile): MarketThemeR
   const i5 = INST_PERIODS.indexOf(5);
   const themes: MarketThemeRank[] = [];
   for (const theme of Object.keys(THEME_MAP)) {
-    const codes = configuredCodes(theme);
+    const codes = marketThemeCodes(theme);
     const members = codes.map((code) => memberByCode.get(code)).filter((member): member is ThemeStockPerf => member != null);
     if (members.length === 0) continue;
     const avgD1 = average(members.map((member) => member.d1));
@@ -145,7 +149,7 @@ export function buildMarketLiveThemeRoster(source: LiveThemeRosterFile): MarketL
   const memberByCode = new Map<string, LiveThemeMember>();
   for (const official of source.themes) for (const member of official.members) memberByCode.set(member.code, member);
   const themes: LiveTheme[] = Object.keys(THEME_MAP).flatMap((theme) => {
-    const members = configuredCodes(theme).map((code) => memberByCode.get(code)).filter((member): member is LiveThemeMember => member != null);
+    const members = marketThemeCodes(theme).map((code) => memberByCode.get(code)).filter((member): member is LiveThemeMember => member != null);
     if (members.length === 0) return [];
     const quoted = members.filter((member): member is LiveThemeMember & { changePercent: number } => member.changePercent != null);
     const top = quoted.length > 0 ? quoted.reduce((best, member) => member.changePercent > best.changePercent ? member : best) : null;
@@ -178,7 +182,7 @@ export function buildMarketHotThemeScan(source: HotThemeScanFile): MarketHotThem
   const themes: HotTheme[] = [];
   const categorized = new Set<string>();
   for (const theme of Object.keys(THEME_MAP)) {
-    const members = configuredCodes(theme)
+    const members = marketThemeCodes(theme)
       .map((code) => stockByCode.get(code))
       .filter((member): member is HotStock => member != null)
       .map((member) => ({ ...member, theme, themeSource: 'concept' as const }))

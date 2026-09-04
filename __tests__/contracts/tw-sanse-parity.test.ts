@@ -54,8 +54,8 @@ describe('tw-sanse 純不變量', () => {
     expect(combo.trigger).toBe(r.doubleB.buyHit || r.catch.buyHit); // 觸發＝雙B或捕撈買進命中
     expect(combo.midline).toBe(r.scores.midStrength > 0 && r.scores.midControl > 0); // 中線骨架＝紅＋黃
     expect(combo.rank).toBe(COMBO_RANK[combo.grade]);              // rank 必對應 grade
-    expect(combo.grade === 'top').toBe(r.groupBuyCount === 3);     // 最強 ⟺ 三組齊發(雙B+主力+捕撈=共振3/3)
-    expect(combo.grade === 'weak').toBe(r.groupBuyCount !== 3 && !combo.redGate); // 弱 ⟺ 非3/3 且無紅
+    if (combo.grade === 'top') expect(r.groupBuyCount).toBe(3);     // 全共振必然三組齊發，反向不成立
+    expect(combo.grade === 'weak').toBe(!combo.redGate);           // 弱 ⟺ 無紅
     if (combo.grade === 'prime') expect(combo.redGate && combo.trigger).toBe(true); // 主進場 ⟹ 紅在場＋觸發
   });
 

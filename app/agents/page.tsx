@@ -20,7 +20,7 @@ export default function AgentsPage() {
 
   return (
     <PageShell
-      headerSlot={<PageHeader title="🤖 多代理決策" subtitle="4 階段：分析師 → 風控 → 多空 → 決策" backButton />}
+      headerSlot={<PageHeader title="多代理決策" subtitle="分析師、風控、多空辯論與最終決策" backButton />}
     >
       <MultiAgentTopPanel onSelectStock={onSelectStock} />
     </PageShell>

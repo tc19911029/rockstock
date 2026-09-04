@@ -1,10 +1,10 @@
 import { INST_PERIODS } from '@/lib/themes/perfPeriods';
 import {
   MARKET_THEME_CLASSIFICATION,
+  marketThemeCodes,
   type MarketThemeRank,
   type MarketThemeRankingFile,
 } from '@/lib/themes/marketThemes';
-import { THEME_MAP } from '@/lib/themes/themeMap';
 import { classifyStage, type SectorRankingFile, type ThemeStockPerf } from '@/lib/themes/sectorRanking';
 import { TIDE_EXACT_THEME_CODES } from './highlights';
 import { TIDE_ORIGINAL_THEME_CODES } from './originalThemeCodes';
@@ -135,7 +135,7 @@ function codesForTheme(theme: string): string[] {
   if (original) return [...original];
   const codes = new Set<string>();
   for (const alias of SOURCE_ALIASES[theme] ?? []) {
-    for (const stock of THEME_MAP[alias] ?? []) codes.add(stock.code);
+    for (const code of marketThemeCodes(alias)) codes.add(code);
   }
   return [...codes];
 }

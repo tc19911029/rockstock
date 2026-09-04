@@ -7,7 +7,7 @@
  *   Row 1: 代號 + 名稱 + Rating + 看多/看空計數
  *   Row 2: 📺 N 個節目 + 前 3 個 source chips + +N more
  *   Row 3: best-confidence reason（截短）
- *   Row 4: 6 欄 N 日漲跌（隔日開/1/3/5/10/20）— 仿 COMPACT_FWD
+ *   Row 4: N 日漲跌（開盤缺口/1-10/20/最高/最低）— 仿 COMPACT_FWD
  */
 
 import { useState } from 'react';
@@ -57,9 +57,9 @@ function shortName(name: string): string {
   return stripped.slice(0, 4) + '…';
 }
 
-// 對齊主頁 ScanResultsCompact 的 COMPACT_FWD：隔日開 + 1~10 日（每日） + 20 日 + 最高 + 最低
+// 對齊主頁 ScanResultsCompact 的 COMPACT_FWD：開盤缺口 + 買進後 1~10 日（每日） + 20 日 + 最高 + 最低
 const FWD_COLS = [
-  { key: 'openReturn' as const, label: '隔日開' },
+  { key: 'openReturn' as const, label: '開盤缺口' },
   { key: 'd1Return' as const, label: '1日' },
   { key: 'd2Return' as const, label: '2日' },
   { key: 'd3Return' as const, label: '3日' },

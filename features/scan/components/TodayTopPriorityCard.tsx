@@ -14,25 +14,26 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { matchedStrategies } from '@/lib/cn-sanse/namedStrategies';
-import { buyScore } from '@/lib/cn-sanse/buyScore';
+import { bucketsForRecord } from '@/lib/cn-sanse/rankingScore';
 import type { ConditionReport } from '@/lib/cn-sanse/conditions';
+import type { ResonanceRecord } from '@/lib/cn-sanse/scan';
 import type { LeaderboardRow } from '@/lib/backtest/leaderboardTypes';
+import type { StockScanResult } from '@/lib/scanner/types';
 import { stockDisplayName } from '@/lib/stocks/stockIdentity';
 
 interface Props { market: 'TW' | 'CN' }
 
 interface PickView { symbol: string; name: string; price: number | null; note: string }
 
-interface SanseRecordRow {
-  symbol: string; name?: string; price?: number; report: ConditionReport;
-}
+interface SanseHitRow { symbol: string; name: string; price: number; changePct?: number; shortAttack?: number; turnoverRank?: number }
 interface SanseResp {
   ok: boolean; lastDate?: string;
-  results?: Record<string, Array<{ symbol: string; name: string; price: number }>>;
-  records?: SanseRecordRow[];
+  results?: Record<string, SanseHitRow[]>;
+  records?: ResonanceRecord[];
 }
 
 const MIN_N = 100;
+const BUY_SORTS_AVAILABLE_FROM_SESSION = new Set(['漲幅', '六條件總分', '成交額', '乖離率低']);
 
 export function TodayTopPriorityCard({ market }: Props) {
   const [rows, setRows] = useState<LeaderboardRow[] | null>(null);
@@ -60,6 +61,8 @@ export function TodayTopPriorityCard({ market }: Props) {
     if (!rows) return [];
     return rows
       .filter(r => (r.byHorizon?.d5?.top1?.n ?? 0) >= MIN_N)
+      // 目前封存 session 沒存量比／動能／換手率等回測 feature；不能假裝能重建那些排序。
+      .filter(r => r.engine === 'sanse' || BUY_SORTS_AVAILABLE_FROM_SESSION.has(r.sortKey))
       .sort((a, b) => (b.byHorizon.d5.top1.avgPct ?? -99) - (a.byHorizon.d5.top1.avgPct ?? -99))
       .slice(0, 5);
   }, [rows]);
@@ -146,31 +149,66 @@ export function TodayTopPriorityCard({ market }: Props) {
 async function resolvePicks(row: LeaderboardRow, market: 'TW' | 'CN', sanse: SanseResp | null): Promise<PickView[]> {
   if (row.engine === 'sanse') {
     if (!sanse?.ok) return [];
-    const direct = sanse.results?.[row.strategyId];
+    const tier = row.strategyId.startsWith('tier_') ? row.strategyId.slice(5) : null;
+    const direct = tier ? sanse.results?.[tier] : sanse.results?.[row.strategyId];
     if (direct && direct.length > 0) {
-      return sortByBuyScore(direct.map(h => ({ symbol: h.symbol, name: h.name, price: h.price ?? null })), sanse);
+      return sortSansePicks(direct.map(h => ({
+        symbol: h.symbol, name: h.name, price: h.price ?? null,
+        changePct: h.changePct, shortAttack: h.shortAttack, turnoverRank: h.turnoverRank,
+      })), row);
     }
-    // 具名策略 / 組合桶 → 從 records 衍生
+    const bucket = row.strategyId.startsWith('bucket_') ? row.strategyId.slice(7) : null;
+    // 具名策略 / 組合桶 → 從 records 衍生；不能把 leaderboard 的 bucket id 拿去比具名策略 id。
     const recs = (sanse.records ?? []).filter(r => {
-      try { return matchedStrategies(r.report).some(s => s.id === row.strategyId); } catch { return false; }
+      try {
+        if (bucket) return bucketsForRecord(r).includes(bucket);
+        return matchedStrategies(r.report).some(s => s.id === row.strategyId);
+      } catch { return false; }
     });
-    return sortByBuyScore(recs.map(r => ({ symbol: r.symbol, name: stockDisplayName(r.name, r.symbol), price: r.price ?? null })), sanse);
+    return sortSansePicks(recs.map(r => ({
+      symbol: r.symbol, name: stockDisplayName(r.name, r.symbol), price: r.price ?? null,
+      changePct: r.changePct, shortAttack: r.report.scores.shortAttack,
+      turnoverRank: r.turnoverRank, report: r.report,
+    })), row);
   }
-  // 買法字母：L4 現成紀錄（latest 有結果的 session）
+  // 買法字母：先取日期索引，再明確帶 date 載完整 session；無 date 的 API 只回 metadata。
   try {
     const r = await fetch(`/api/scanner/results?market=${market}&direction=long&mtf=${encodeURIComponent(row.strategyId)}`);
     const j = await r.json();
-    const sessions: Array<{ date: string; resultCount: number; results?: Array<{ symbol: string; name: string; price: number; changePercent: number }> }> = j.sessions ?? [];
-    const latest = sessions.find(s => (s.resultCount ?? 0) > 0 && (s.results?.length ?? 0) > 0);
-    if (!latest) return [];
-    const sorted = [...latest.results!].sort((a, b) => (b.changePercent ?? 0) - (a.changePercent ?? 0));
-    return sorted.map(s => ({ symbol: s.symbol, name: s.name, price: s.price ?? null, note: `${latest.date}` }));
+    const sessions: Array<{ date: string; resultCount: number }> = j.sessions ?? [];
+    for (const meta of sessions.filter(s => s.resultCount > 0).slice(0, 10)) {
+      const detailRes = await fetch(`/api/scanner/results?market=${market}&direction=long&mtf=${encodeURIComponent(row.strategyId)}&date=${meta.date}`);
+      const detail = await detailRes.json();
+      const latest = detail.sessions?.[0] as { date: string; results?: StockScanResult[] } | undefined;
+      if (!latest?.results?.length) continue;
+      const sorted = sortBuyMethodResults(latest.results, row.sortKey);
+      return sorted.map(s => ({ symbol: s.symbol, name: s.name, price: s.price ?? null, note: `${latest.date}・${row.sortLabel}` }));
+    }
+    return [];
   } catch { return []; }
 }
 
-function sortByBuyScore(items: Array<{ symbol: string; name: string; price: number | null }>, sanse: SanseResp): PickView[] {
-  const reportMap = new Map((sanse.records ?? []).map(r => [r.symbol, r.report]));
+function sortBuyMethodResults(items: StockScanResult[], sortKey: string): StockScanResult[] {
+  const score = (r: StockScanResult): number => {
+    if (sortKey === '六條件總分') return (r.sixConditionsScore ?? 0) * 10 + (r.changePercent ?? 0);
+    if (sortKey === '成交額') return (r.volume ?? 0) * (r.price ?? 0);
+    if (sortKey === '乖離率低') return -(r.ma20Deviation ?? Infinity);
+    return r.changePercent ?? 0;
+  };
+  return [...items].sort((a, b) => score(b) - score(a));
+}
+
+function sortSansePicks(
+  items: Array<Omit<PickView, 'note'> & { changePct?: number; shortAttack?: number; turnoverRank?: number; report?: ConditionReport }>,
+  row: LeaderboardRow,
+): PickView[] {
+  const score = (x: (typeof items)[number]): number => {
+    if (row.sortKey === '短攻') return x.shortAttack ?? x.report?.scores.shortAttack ?? -Infinity;
+    if (row.sortKey === '成交額名次') return -(x.turnoverRank ?? Infinity);
+    if (row.sortKey === '共振強度') return (x.report?.groupBuyCount ?? 0) * 100 + (x.report?.scores.shortAttack ?? 0);
+    return x.changePct ?? -Infinity;
+  };
   return items
-    .sort((a, b) => buyScore(reportMap.get(b.symbol)) - buyScore(reportMap.get(a.symbol)))
-    .map(x => ({ ...x, note: '應買排序' }));
+    .sort((a, b) => score(b) - score(a))
+    .map(x => ({ symbol: x.symbol, name: x.name, price: x.price, note: row.sortLabel }));
 }

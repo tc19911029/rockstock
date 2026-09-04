@@ -44,6 +44,16 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
     metrics, nextCandle, prevCandle, isPlaying, resetReplay, targetDate,
   } = useReplayStore();
 
+  // 副圖：成交量 / KD / MACD 預設開（agent 頁不需要籌碼疊圖，已有專屬區塊）。
+  // 必須在 handleIntervalChange 前宣告，避免 callback 捕捉尚未初始化的 setter。
+  const [indicators, setIndicators] = useState({
+    macd: true, kd: true, volume: true, rsi: false,
+    foreign: false, trust: false, dealer: false, retail: false,
+    h400: false, h1000: false,
+    cnMain: false, cnRetail: false,
+    mainForce: false, season: false,
+  });
+
   // 載入該股 K 線（symbol 改變或 scanDate 改變時重載；預設日線）
   useEffect(() => {
     if (!symbol) return;
@@ -116,14 +126,6 @@ export function AgentChartSection({ symbol, scanDate }: AgentChartSectionProps) 
     setMaToggles(p => ({ ...p, [key]: !p[key] }));
   }, []);
   const [showBollinger, setShowBollinger] = useState(false);
-  // 副圖：成交量 / KD / MACD 預設開（agent 頁不需要籌碼疊圖，已有專屬區塊）
-  const [indicators, setIndicators] = useState({
-    macd: true, kd: true, volume: true, rsi: false,
-    foreign: false, trust: false, dealer: false, retail: false,
-    h400: false, h1000: false,
-    cnMain: false, cnRetail: false,
-    mainForce: false, season: false,
-  });
   // 「籌碼」合併鈕：一鍵開關法人四（TW）+ CN 主力/散戶副圖
   const toggleChipGroup = (next: boolean) =>
     setIndicators(p => ({ ...p, foreign: next, trust: next, dealer: next, retail: next, cnMain: next, cnRetail: next }));

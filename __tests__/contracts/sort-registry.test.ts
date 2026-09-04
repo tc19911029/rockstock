@@ -72,6 +72,14 @@ describe('共用排序引擎行為', () => {
     expect(out).toEqual(['apple', 'banana', 'cherry']);
   });
 
+  test('missingLast=false 時數字缺值按 0 排，不產生 NaN comparator', () => {
+    const items = [{ id: 'missing', v: undefined }, { id: 'positive', v: 2 }, { id: 'negative', v: -1 }];
+    const desc = applySort(items, 'mkt.change', 'desc', (it) => it.v).map((i) => i.id);
+    const asc = applySort(items, 'mkt.change', 'asc', (it) => it.v).map((i) => i.id);
+    expect(desc).toEqual(['positive', 'missing', 'negative']);
+    expect(asc).toEqual(['negative', 'missing', 'positive']);
+  });
+
   test('不就地修改原陣列', () => {
     const items = [{ v: 1 }, { v: 2 }];
     const copy = [...items];
@@ -82,7 +90,7 @@ describe('共用排序引擎行為', () => {
 
 describe('防再度硬寫排序 label', () => {
   // 「買進後賺賠」那組的完整 label —— 統一後只能出現在 registry，面板一律走 SortControl 取
-  const FWD_LABELS = ['漲跌·隔開', '漲跌·1日', '漲跌·5日', '漲跌·10日', '漲跌·20日', '漲跌·最高', '漲跌·最低'];
+  const FWD_LABELS = ['漲跌·開盤缺口', '漲跌·1日', '漲跌·5日', '漲跌·10日', '漲跌·20日', '漲跌·最高', '漲跌·最低'];
   const ROOTS = ['components', 'features', 'app'];
 
   function walk(dir: string, out: string[] = []): string[] {

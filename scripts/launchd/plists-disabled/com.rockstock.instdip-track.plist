@@ -11,7 +11,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <string>cd /Users/tc/Desktop/rockstock &amp;&amp; /Users/tc/.local/node-22/bin/npx tsx scripts/scan-instdip-track.ts</string>
+    <string>cd /Users/tc/Desktop/rockstock &amp;&amp; /Users/tc/Desktop/rockstock/node_modules/.bin/tsx scripts/scan-instdip-track.ts</string>
   </array>
 
   <key>EnvironmentVariables</key>
@@ -22,11 +22,11 @@
 
   <key>StartCalendarInterval</key>
   <array>
-    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>8</integer></dict>
     <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>8</integer></dict>
     <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>8</integer></dict>
     <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>8</integer></dict>
     <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>8</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>8</integer></dict>
   </array>
 
   <key>StandardOutPath</key>

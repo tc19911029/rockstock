@@ -36,7 +36,7 @@ function boardBadge(type: string): string {
 }
 
 const COMPACT_FWD = [
-  { key: 'openReturn' as const, label: '隔日開' },
+  { key: 'openReturn' as const, label: '開盤缺口' },
   { key: 'd1Return' as const, label: '1日' },
   { key: 'd2Return' as const, label: '2日' },
   { key: 'd3Return' as const, label: '3日' },
@@ -67,6 +67,8 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
   const [error, setError] = useState<string | null>(null);
   const [forwardPerf, setForwardPerf] = useState<StockForwardPerformance[]>([]);
   const [isFetchingForward, setIsFetchingForward] = useState(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const forwardAbortRef = useRef<AbortController | null>(null);
   const [realtimePrices, setRealtimePrices] = useState<Map<string, RealtimePrice>>(new Map());
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -77,6 +79,8 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
 
   // 載入全市場 20 日均成交額排名（top 500）
   useEffect(() => {
+    const todayCN = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    if (date !== todayCN) { setTurnoverRankMap(new Map()); return; }
     let cancelled = false;
     fetch('/api/scanner/turnover-rank?market=CN')
       .then(r => r.ok ? r.json() : null)
@@ -88,7 +92,7 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [date]);
 
   useEffect(() => {
     import('@/lib/scanner/cnStocks').then(({ CN_STOCKS }) => {
@@ -100,45 +104,58 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
 
   useEffect(() => {
     if (!date) return;
+    loadAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadAbortRef.current = ac;
     setLoading(true); setError(null); setSession(null); setForwardPerf([]);
-    fetch(`/api/scanner/daban?date=${date}`)
+    setDabanSort('mkt.turnover'); setDabanSortDir('desc');
+    fetch(`/api/scanner/daban?date=${date}`, { signal: ac.signal })
       .then(r => r.json())
-      .then(data => { setSession(data.session ?? null); if (!data.session) setError('該日無打板掃描資料'); })
-      .catch(() => setError('載入失敗'))
-      .finally(() => setLoading(false));
+      .then(data => { if (!ac.signal.aborted) { setSession(data.session ?? null); if (!data.session) setError('該日無打板掃描資料'); } })
+      .catch(() => { if (!ac.signal.aborted) setError('載入失敗'); })
+      .finally(() => { if (!ac.signal.aborted) setLoading(false); });
+    return () => ac.abort();
   }, [date]);
 
   // CN 開盤確認視窗（CST 9:20–9:40）內每 30 秒靜默重載 session，
   // 讓後端 confirmDabanAtOpen 寫入的 openConfirmed / gapUpPct 自動刷出來。
   useEffect(() => {
     if (!date) return;
+    let cancelled = false;
     const tick = () => {
       const nowCN = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
       const hhmm = nowCN.getHours() * 100 + nowCN.getMinutes();
       if (hhmm < 920 || hhmm > 940) return; // 視窗外不動作
       fetch(`/api/scanner/daban?date=${date}`)
         .then(r => r.json())
-        .then(data => { if (data.session) setSession(data.session); })
+        .then(data => { if (!cancelled && data.session) setSession(data.session); })
         .catch(() => {});
     };
     const id = setInterval(tick, 30_000);
     tick(); // 進入頁面或換日期時先試一次（視窗外自動略過）
-    return () => clearInterval(id);
+    return () => { cancelled = true; clearInterval(id); };
   }, [date]);
 
   useEffect(() => {
+    forwardAbortRef.current?.abort();
+    setIsFetchingForward(false);
     if (!session || session.results.length === 0) return;
-    const buyable = session.results.filter(r => !r.isYiZiBan);
-    if (buyable.length === 0) return;
+    // 打板策略的實際交易樣本只有開盤確認=true；未確認／確認失敗都不能混進績效。
+    const confirmedTrades = session.results.filter(r => !r.isYiZiBan && r.openConfirmed === true);
+    if (confirmedTrades.length === 0) { setForwardPerf([]); return; }
+    const ac = new AbortController();
+    forwardAbortRef.current = ac;
     setIsFetchingForward(true);
     fetch('/api/backtest/forward', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scanDate: session.date, stocks: buyable.map(r => ({ symbol: r.symbol, name: r.name, scanPrice: r.closePrice })) }),
+      body: JSON.stringify({ scanDate: session.date, stocks: confirmedTrades.map(r => ({ symbol: r.symbol, name: r.name, scanPrice: r.closePrice })) }),
+      signal: ac.signal,
     })
       .then(r => r.json())
-      .then(data => { if (data.performance) setForwardPerf(data.performance); })
+      .then(data => { if (!ac.signal.aborted && data.performance) setForwardPerf(data.performance); })
       .catch(() => {})
-      .finally(() => setIsFetchingForward(false));
+      .finally(() => { if (!ac.signal.aborted) setIsFetchingForward(false); });
+    return () => ac.abort();
   }, [session]);
 
   const perfMap = useMemo(() => {
@@ -214,23 +231,40 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
   const buyable = session.results.filter(r => !r.isYiZiBan);
   const locked = session.results.filter(r => r.isYiZiBan);
 
-  // 排序值取法（id 走中央清單；保留打板的複合排序，升降序由 sortEngine 統一處理）
+  // 一般欄位走中央排序；複合欄位在下方用明確 lexicographic comparator，避免加權值互相越級。
   const dabanSortValue = (r: DabanScanResult, id: string): SortValue => {
     switch (id) {
       case 'mkt.turnover': return r.turnover ?? null; // 成交額數值（非 rank）
-      case 'mkt.change':   // 漲幅主鍵；同分用連板數當 tie-breaker（多數漲停股 +10%）
-        return r.limitUpPct * 1000 + (r.consecutiveBoards ?? 0);
-      case 'mkt.boards':   // 連板天數高優先；同連板用成交額 tie-breaker
-        return (r.consecutiveBoards ?? 0) * 1e12 + (r.turnover ?? 0);
+      case 'mkt.change':   return r.limitUpPct;
+      case 'mkt.boards':   return r.consecutiveBoards ?? null;
       case 'mkt.price':    return r.closePrice ?? null;
       case 'trust.confirmed': {
         const rank = (v: boolean | undefined) => (v === true ? 2 : v === false ? 1 : 0);
-        return rank(r.openConfirmed) * 1e12 + (r.turnover ?? 0);
+        return rank(r.openConfirmed);
       }
       default:             return null;
     }
   };
-  const sortedBuyable = applySort(buyable, dabanSort, dabanSortDir, dabanSortValue);
+  const compoundCompare = (a: DabanScanResult, b: DabanScanResult): number => {
+    if (dabanSort === 'mkt.change') {
+      return b.limitUpPct - a.limitUpPct
+        || (b.consecutiveBoards ?? 0) - (a.consecutiveBoards ?? 0)
+        || (b.turnover ?? 0) - (a.turnover ?? 0);
+    }
+    if (dabanSort === 'mkt.boards') {
+      return (b.consecutiveBoards ?? 0) - (a.consecutiveBoards ?? 0)
+        || (b.turnover ?? 0) - (a.turnover ?? 0);
+    }
+    if (dabanSort === 'trust.confirmed') {
+      const rank = (v: boolean | undefined) => (v === true ? 2 : v === false ? 1 : 0);
+      return rank(b.openConfirmed) - rank(a.openConfirmed)
+        || (b.turnover ?? 0) - (a.turnover ?? 0);
+    }
+    return 0;
+  };
+  const sortedBuyable = ['mkt.change', 'mkt.boards', 'trust.confirmed'].includes(dabanSort)
+    ? [...buyable].sort((a, b) => (dabanSortDir === 'desc' ? 1 : -1) * compoundCompare(a, b))
+    : applySort(buyable, dabanSort, dabanSortDir, dabanSortValue);
 
   return (
     <div className="space-y-1.5 px-2">
@@ -315,7 +349,7 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
         const perf = perfMap.get(r.symbol);
         const rt = realtimePrices.get(r.symbol);
         const ticker = r.symbol.replace(/\.(SS|SZ)$/i, '');
-        // 優先用 session 內的當日全市場排名，fallback 用 20 日均 top 500 rank
+        // 優先用 session 內的當日全市場排名；只有今天才可 fallback 今天的 20 日均 rank
         const dayRank = r.marketDayRank;
         const fallbackRank = turnoverRankMap.get(r.symbol);
 
@@ -384,7 +418,7 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
 
             {/* Row 4: Forward perf + Actions */}
             <div className="flex items-center gap-0.5">
-              {COMPACT_FWD.map(({ key, label }) => {
+              {r.openConfirmed === true ? COMPACT_FWD.map(({ key, label }) => {
                 const val = perf ? perf[key] : undefined;
                 return (
                   <div key={key} className="flex-1 text-center">
@@ -394,7 +428,11 @@ export function DabanResultsCompact({ date, onSelectStock }: DabanResultsCompact
                     </div>
                   </div>
                 );
-              })}
+              }) : (
+                <div className="flex-1 text-[9px] text-muted-foreground">
+                  {r.openConfirmed === false ? '未進場，不列入策略績效' : '待開盤確認後才計策略績效'}
+                </div>
+              )}
               <button
                 onClick={() => onSelectStock?.({ symbol: r.symbol, name: displayName(r), market: 'CN' })}
                 className="text-[9px] text-sky-400 hover:text-sky-300 px-1 py-0.5 rounded border border-sky-700/50 hover:bg-sky-900/30 ml-1 shrink-0">

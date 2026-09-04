@@ -17,7 +17,6 @@ import { checkLongProhibitions }      from '@/lib/rules/entryProhibitions';
 import { evaluateElimination }        from '@/lib/scanner/eliminationFilter';
 import type { CandleWithIndicators }  from '@/types';
 import { BASE_THRESHOLDS, ZHU_PURE_BOOK } from '@/lib/strategy/StrategyConfig';
-import { panelSortKey } from '@/lib/selection/applyPanelFilter';
 import { isDisposedOnSync } from '@/lib/market/attentionList';
 
 // ══════════════════════════════════════════════════════════════
@@ -71,7 +70,7 @@ const CONFIG = {
    * 賣出策略
    *   S1 ─ 固定止損-5% + 曾漲超10%後跌破MA5 + 附屬條件（頭頭低/大量長黑/強覆蓋/KD死叉）
    */
-  exitStrategy: 'S1' as 'S1',
+  exitStrategy: 'S1',
 } as const;
 
 // ══════════════════════════════════════════════════════════════
@@ -97,6 +96,7 @@ interface SixcondFeatures {
   volumeRatio: number; bodyPct: number; deviation: number;
   mom5: number; turnover: number;
   highWinRateScore: number; mtfScore: number;
+  ma20Slope: number;
   rankScore: number;
 }
 
@@ -145,7 +145,7 @@ const MIN_TURNOVER  = 5_000_000;
 const DABAN_MIN_GAP_UP_PCT = 2.0;
 
 // ── S1 出場參數 ───────────────────────────────────────────────
-const S1_SL_PCT          = -5;    // 固定止損
+const _S1_SL_PCT         = -5;    // 固定止損（保留作參數文件；目前由出場函式內部門檻接管）
 const S1_PROFIT_GATE_PCT = 10;    // 啟動MA5保護的獲利門檻
 const S1_MAX_HOLD        = 60;    // 最長持有天數
 
@@ -154,10 +154,8 @@ const S1_MAX_HOLD        = 60;    // 最長持有天數
 // ══════════════════════════════════════════════════════════════
 
 const SIXCOND_SORT_DEFS: Record<SixcondSort, (f: SixcondFeatures) => number> = {
-  // 面板對齊：與 lib/selection/applyPanelFilter.ts panelSortKey 完全一致
-  //   主鍵 changePercent，次鍵 sixConditionsScore（壓尾數不影響主鍵）
-  // 這個 option = UI 顯示 top N 跟回測 top N **保證同一支**
-  '面板對齊':     f => panelSortKey({ changePercent: f.changePercent, sixConditionsScore: f.totalScore }),
+  // 面板對齊在最後選股時走 lexicographic comparator；不可壓成單一浮點分數。
+  '面板對齊':     () => 0,
   // 六條件加權排序（六條件 > 高勝率 > 漲幅）— 與 panel 不同，僅供研究
   '六條件總分':   f => f.totalScore * 1000 + f.highWinRateScore * 10 + f.changePercent / 100,
   '成交額':       f => Math.log10(Math.max(f.turnover, 1)),
@@ -335,7 +333,11 @@ function buildSixcondCandidate(
     symbol, name, idx, candles, entryPrice,
     totalScore: six.totalScore, changePercent,
     volumeRatio, bodyPct, deviation, mom5, turnover,
-    highWinRateScore, mtfScore, rankScore: 0,
+    highWinRateScore, mtfScore,
+    ma20Slope: c.ma20 != null && prev.ma20 != null && prev.ma20 !== 0
+      ? (c.ma20 - prev.ma20) / prev.ma20 * 100
+      : 0,
+    rankScore: 0,
   };
   f.rankScore = sortFn(f);
   return f;
@@ -561,7 +563,16 @@ function runB1(
     }
 
     if (cands.length === 0) continue;
-    cands.sort((a, b) => b.rankScore - a.rankScore);
+    cands.sort((a, b) => {
+      if (strategy === 'SIXCOND' && sixcond.sortBy === '面板對齊') {
+        const sa = a as SixcondFeatures;
+        const sb = b as SixcondFeatures;
+        return sb.changePercent - sa.changePercent
+          || sb.totalScore - sa.totalScore
+          || sb.ma20Slope - sa.ma20Slope;
+      }
+      return b.rankScore - a.rankScore;
+    });
 
     // ── 選第1名（打板需額外過濾高開範圍）────────────────────
     let picked: Features | null = null;
@@ -626,7 +637,7 @@ function runB1(
 // ══════════════════════════════════════════════════════════════
 
 function report(trades: Trade[], initialCapital: number): void {
-  const { market, period, buyMode, capital, strategy, exitStrategy, sixcond, daban } = CONFIG;
+  const { market, period, buyMode, strategy, exitStrategy, sixcond, daban } = CONFIG;
 
   // 設定摘要
   const strategyLabel = strategy === 'SIXCOND'

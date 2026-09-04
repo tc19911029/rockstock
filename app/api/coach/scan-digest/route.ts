@@ -12,6 +12,7 @@
 import { writeFile, readFile, mkdir, access, unlink } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { triggerZhuKeystroke } from '@/lib/ai/zhuAutoTrigger';
@@ -42,6 +43,7 @@ const candidateSchema = z.object({
   winnerBearish: z.array(z.string()).optional(),
   elimination: z.array(z.string()).optional(),
   prohibitions: z.array(z.string()).optional(),
+  prohibitionRole: z.enum(['veto', 'warning']).optional(),
   turnoverRank: z.number().optional(),
   histWinRate: z.number().optional(),
   matchedMethods: z.array(z.string()).optional(),
@@ -79,7 +81,10 @@ const cache = new Map<string, { value: DigestResponse; expires: number }>();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 function cacheKey(input: DigestInput): string {
-  const sig = input.candidates.map(c => `${c.rank}:${c.symbol}:${c.sixCond}`).join('|');
+  const sig = createHash('sha256')
+    .update(JSON.stringify({ trend: input.marketTrend, candidates: input.candidates }))
+    .digest('hex')
+    .slice(0, 20);
   return `${input.market}:${input.direction}:${input.scanDate}:${sig}`;
 }
 
@@ -90,15 +95,17 @@ const ANSWER_FILE = path.join(BRIDGE_DIR, 'scan-answer.json');
 
 const POLL_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 1_500;
+let bridgeBusy = false;
 
 async function fileExists(p: string): Promise<boolean> {
   try { await access(p, fsConstants.F_OK); return true; } catch { return false; }
 }
 
-async function pollAnswer(requestTimestamp: string, timeoutMs: number): Promise<DigestResponse | null> {
+async function pollAnswer(requestTimestamp: string, timeoutMs: number, signal?: AbortSignal): Promise<DigestResponse | null> {
   const requestMs = Date.parse(requestTimestamp);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (signal?.aborted) return null;
     if (await fileExists(ANSWER_FILE)) {
       try {
         const raw = await readFile(ANSWER_FILE, 'utf-8');
@@ -139,34 +146,45 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 寫候選清單給「朱老師專用」Claude Code session 跨檔比較
-    await mkdir(BRIDGE_DIR, { recursive: true });
-    // 刪掉舊 answer 杜絕殘留
-    await unlink(ANSWER_FILE).catch(() => {});
-    const requestTimestamp = new Date().toISOString();
-    const questionPayload = { ...input, requestTimestamp, mode: 'scan' as const };
-    await writeFile(QUESTION_FILE, JSON.stringify(questionPayload, null, 2), 'utf-8');
-
-    // 自動切到朱老師 Terminal + 模擬打 /zhu Enter
-    const trigger = await triggerZhuKeystroke();
-    console.log(`[scan-digest] auto-trigger /zhu: ${trigger.ok ? 'OK' : 'fail — ' + trigger.detail}`);
-
-    const answer = await pollAnswer(requestTimestamp, POLL_TIMEOUT_MS);
-
-    if (!answer) {
-      return Response.json({
-        error: '等待朱老師回答超時。請確認你開了一個朱老師專用 Claude Code Terminal 並輸入 /zhu',
-        pending: true,
-      }, { status: 504 });
+    // 檔案橋接只有一組固定 question/answer 檔；併發寫入會讓 A 請求拿到 B 的答案。
+    // 明確拒絕第二筆，讓前端可重試，不能默默交叉污染分析。
+    if (bridgeBusy) {
+      return Response.json({ error: '朱老師正在分析另一批候選，請稍後再試' }, { status: 409 });
     }
+    bridgeBusy = true;
 
-    cache.set(key, { value: answer, expires: Date.now() + CACHE_TTL });
-    if (cache.size > 200) {
-      const firstKey = cache.keys().next().value;
-      if (firstKey) cache.delete(firstKey);
+    try {
+      // 寫候選清單給「朱老師專用」Claude Code session 跨檔比較
+      await mkdir(BRIDGE_DIR, { recursive: true });
+      // 刪掉舊 answer 杜絕殘留
+      await unlink(ANSWER_FILE).catch(() => {});
+      const requestTimestamp = new Date().toISOString();
+      const questionPayload = { ...input, requestTimestamp, mode: 'scan' as const };
+      await writeFile(QUESTION_FILE, JSON.stringify(questionPayload, null, 2), 'utf-8');
+
+      // 自動切到朱老師 Terminal + 模擬打 /zhu Enter
+      const trigger = await triggerZhuKeystroke();
+      console.log(`[scan-digest] auto-trigger /zhu: ${trigger.ok ? 'OK' : 'fail — ' + trigger.detail}`);
+
+      const answer = await pollAnswer(requestTimestamp, POLL_TIMEOUT_MS, req.signal);
+
+      if (!answer) {
+        return Response.json({
+          error: '等待朱老師回答超時。請確認你開了一個朱老師專用 Claude Code Terminal 並輸入 /zhu',
+          pending: true,
+        }, { status: 504 });
+      }
+
+      cache.set(key, { value: answer, expires: Date.now() + CACHE_TTL });
+      if (cache.size > 200) {
+        const firstKey = cache.keys().next().value;
+        if (firstKey) cache.delete(firstKey);
+      }
+
+      return Response.json(answer);
+    } finally {
+      bridgeBusy = false;
     }
-
-    return Response.json(answer);
   } catch (err) {
     console.error('coach/scan-digest error:', err);
     const message = err instanceof Error ? err.message : 'digest 失敗';

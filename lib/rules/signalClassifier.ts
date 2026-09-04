@@ -81,6 +81,8 @@ export const RULE_ID_TO_SUBTYPE: Record<string, SignalSubtype> = {
   'kline-down-gap-filled':              'entry_strong',
   'kline-trading-bull-entry':           'entry_strong',
   'kline-v-shape-reversal-buy':         'entry_strong',
+  'kline-inner-three-red':              'entry_strong', // 母子懷抱後已由長紅突破確認
+  'zhu-rebound-hold-ma20-breakout':     'entry_strong', // 月線轉揚＋帶量突破整理區，課程明確進場
   // 長線進場（《抓住長線》SOP）
   'long-term-select-monthly':           'entry_strong',
   'long-term-select-weekly':            'entry_strong',
@@ -157,6 +159,7 @@ export const RULE_ID_TO_SUBTYPE: Record<string, SignalSubtype> = {
   'zhu-dark-cloud-cover':               'exit_strong',
   'zhu-bearish-engulfing-high':         'exit_strong',
   'zhu-bearish-piercing-high':          'exit_strong',
+  'zhu-bearish-encounter-high':         'exit_strong', // SELL 分支只會在爆大量主力出貨時發出；WATCH 分支先被攔為 warn
   'zhu-bearish-double-star':            'exit_strong',
   'zhu-evening-star-high':              'exit_strong',
   // 朱進場位置反向（空頭三進場 = 多單反向出場硬訊號）

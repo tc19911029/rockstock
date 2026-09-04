@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     const targetDate = marketOpen ? today : getLastTradingDay(market);
 
     // ── 讀取或刷新盤中快照 ──
-    let snapshot = await readIntradaySnapshot(market, targetDate);
+    const snapshot = await readIntradaySnapshot(market, targetDate);
 
     let snapshotFresh = true;
     if (!isSnapshotFresh(snapshot, maxSnapshotAgeSec * 1000)) {

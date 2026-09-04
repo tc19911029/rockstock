@@ -59,7 +59,7 @@ export function SortControl({
   className = '',
 }: SortControlProps) {
   const txt = size === 'compact' ? 'text-[9px]' : 'text-xs';
-  const pad = size === 'compact' ? 'px-1.5 py-0.5' : 'px-2 py-1';
+  const pad = size === 'compact' ? 'px-2 py-1 min-h-7' : 'px-3 py-1.5 min-h-9';
 
   const handleClick = (id: string, defaultDir: SortDir) => {
     if (value === id) onChange(id, dir === 'desc' ? 'asc' : 'desc');
@@ -84,7 +84,9 @@ export function SortControl({
             type="button"
             onClick={() => handleClick(id, defaultDir)}
             title={tip}
-            className={`${txt} ${pad} rounded-full whitespace-nowrap ${
+            aria-pressed={active}
+            aria-label={`${label}排序${active ? `，目前${dir === 'desc' ? '由高到低' : '由低到高'}，點擊切換方向` : ''}`}
+            className={`${txt} ${pad} cursor-pointer rounded-full whitespace-nowrap transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
               active ? 'bg-sky-700 text-foreground' : 'bg-secondary text-muted-foreground'
             }`}
           >

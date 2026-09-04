@@ -125,9 +125,8 @@ function sma(closes: number[], end: number, period: number): number | undefined 
 /**
  * Compute average volume over last `period` bars (including current).
  *
- * 跳過 vol=0 的 K：除權息停牌日 vendor 一致都會回 vol=0（如 1101.TW 2025-08-13），
- * 這是事實不是 bug。但算進均量會把 avgVol 拉低 ~5% → 量比虛假爆量。
- * 跳過 vol=0、用實際成交日均量才是正確做法。
+ * 跳過 vol=0：儲存／Yahoo 邊界已排除零量扁平停牌假 K；此處仍防守其他來源
+ * 可能帶入的零量 bar，避免把 avgVol 拉低、製造虛假爆量。
  *
  * 若窗口內 vol>0 樣本不足（< period/2），回 undefined 避免少數天主導。
  */

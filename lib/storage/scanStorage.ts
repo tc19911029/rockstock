@@ -649,23 +649,23 @@ export async function listScanDates(
     }
   }
 
-  // 計 top500 filter 後的真實 count（和 loadScanSession 一致）
-  // 避免 UI badge 和面板對不上
+  // 只允許「市場今天」用目前的成交額索引補算 count。
+  // 歷史日期的成交額名次是當日截面；拿今天的 Top500 回頭重算會產生時點污染。
   let rankIdx: Awaited<ReturnType<typeof import('@/lib/scanner/TurnoverRank').readTurnoverRank>> = null;
-  try {
-    const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
-    rankIdx = await readTurnoverRank(market as 'TW' | 'CN');
-  } catch { /* 索引讀失敗 → 不套 filter，保持原 count */ }
+  if ([...seen.values()].some((e) => e.date === marketToday)) {
+    try {
+      const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
+      rankIdx = await readTurnoverRank(market as 'TW' | 'CN');
+    } catch { /* 索引讀失敗 → 不套 filter，保持原 count */ }
+  }
 
   const filtered = [...seen.values()].filter(e => isTradingDay(e.date, e.market as 'TW' | 'CN'));
 
   if (rankIdx) {
-    // 實際讀每個日期的最佳 session，算 filter 後 count
-    // filter 規則和 applyTurnoverFilter 一致：有 turnoverRank 保留，沒 rank 就看當前 index
-    // 注意：B/C/D/E 買法 session 不套 top500 filter（掃全市場，不限前500）
+    // 只讀今天的 A/A30 session；字母策略有自己的掃描宇宙，不可再套 A 的 Top500 顯示過濾。
     await Promise.all(filtered.map(async (e) => {
       const mode = e.mtfMode ?? 'daily';
-      if (mode === 'B' || mode === 'C' || mode === 'D' || mode === 'E' || mode === 'F' || mode === 'G' || mode === 'H' || mode === 'I') return; // 不套 filter
+      if (e.date !== marketToday || (mode !== 'daily' && mode !== 'daily30' && mode !== 'mtf')) return;
       try {
         const session = await loadScanSessionRaw(e.market, e.date, e.direction ?? 'long', mode, strategyId);
         if (session && session.results) {
@@ -951,6 +951,11 @@ async function applyStep1Filter(session: ScanSession): Promise<void> {
  */
 async function applyTurnoverFilter(session: ScanSession, market: MarketId): Promise<void> {
   if (!session.results || session.results.length === 0) return;
+  // 成交額名次是「當日截面」。沒有該日索引時，絕不能拿今天的 Top500 補歷史名次或
+  // 刪歷史股票；那會造成 look-ahead／時點污染。歷史 session 保留原樣並讓缺值顯示為 —。
+  const timeZone = market === 'CN' ? 'Asia/Shanghai' : 'Asia/Taipei';
+  const marketToday = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+  if (session.date !== marketToday) return;
   try {
     const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
     const idx = await readTurnoverRank(market as 'TW' | 'CN');

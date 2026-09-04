@@ -132,6 +132,11 @@ export function StockChartView({
 }: StockChartViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const startSplitDrag = useChartSplitDrag(containerRef, onChartSplitChange, onChartSplitCommit);
+  const setSplit = useCallback((value: number) => {
+    const next = Math.min(Math.max(value, 0.2), 0.85);
+    onChartSplitChange(next);
+    onChartSplitCommit?.(next);
+  }, [onChartSplitChange, onChartSplitCommit]);
   const lastCandleDate = chartProps.candles.at(-1)?.date ?? 'empty';
   const chartBoundaryKey = resetKey ?? `${indicatorProps?.ticker ?? 'unknown'}:${lastCandleDate}:${chartProps.candles.length}`;
   const sanseDataDate = indicatorProps?.sanseXys?.xys0.at(-1)?.time ?? 'no-sanse';
@@ -167,11 +172,22 @@ export function StockChartView({
           {showIndicators ? (
             <div
               role="separator"
+              tabIndex={0}
               aria-orientation="horizontal"
-              aria-label="拖拽調整 K 線圖與副圖比例"
-              className="flex-1 h-4 bg-border/60 hover:bg-blue-500/40 cursor-row-resize flex items-center justify-center group select-none"
+              aria-label="調整 K 線圖與副圖高度比例"
+              aria-valuemin={20}
+              aria-valuemax={85}
+              aria-valuenow={Math.round(chartSplit * 100)}
+              aria-valuetext={`K 線圖占 ${Math.round(chartSplit * 100)}%`}
+              className="flex-1 h-6 bg-border/60 hover:bg-blue-500/40 cursor-row-resize flex items-center justify-center group select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-400"
               onMouseDown={startSplitDrag}
-              title="拖拽調整 K 線 / 副圖比例（上下拖動）"
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') { event.preventDefault(); setSplit(chartSplit - 0.05); }
+                if (event.key === 'ArrowDown' || event.key === 'ArrowRight') { event.preventDefault(); setSplit(chartSplit + 0.05); }
+                if (event.key === 'Home') { event.preventDefault(); setSplit(0.2); }
+                if (event.key === 'End') { event.preventDefault(); setSplit(0.85); }
+              }}
+              title="拖曳或使用方向鍵調整 K 線與副圖比例"
             >
               <div className="w-12 h-1 bg-muted-foreground/50 group-hover:bg-blue-400 rounded-full transition-colors" />
             </div>
@@ -182,7 +198,7 @@ export function StockChartView({
             onClick={onToggleIndicators}
             aria-label={showIndicators ? '收起副圖指標' : '展開副圖指標'}
             aria-expanded={showIndicators}
-            className="shrink-0 px-2 py-0.5 text-[9px] text-muted-foreground hover:text-foreground bg-secondary/60 hover:bg-secondary rounded transition-colors"
+            className="shrink-0 min-h-11 px-3 text-sm text-muted-foreground hover:text-foreground bg-secondary/60 hover:bg-secondary rounded transition-colors"
           >
             {showIndicators ? '▼ 副圖' : '▲ 副圖'}
           </button>

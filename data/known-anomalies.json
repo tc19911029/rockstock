@@ -268,6 +268,23 @@
    }
   },
   {
+   "id": "verified-adjacent-identical-bar",
+   "name": "低量股相鄰交易日 OHLCV 完全相同",
+   "description": "相鄰兩日 OHLCV byte-identical 通常值得告警，但極低成交量股票可能真實重複；僅放行逐筆由外部行情再驗證的個案。",
+   "verifiedBy": [
+    "Yahoo Finance",
+    "L1"
+   ],
+   "verifiedAt": "2026-08-05",
+   "applies": {
+    "type": "adjacent-identical-bar",
+    "pattern": {}
+   },
+   "evidence": "1776.TW 2026-07-21/22 與 6581.TW 2026-06-24/25 經 Yahoo chart 重新抓取，兩日 OHLCV 均與 L1 一致。",
+   "remediation": "只豁免 registry 中的精確 symbol/date；其他相鄰完全相同資料仍告警。",
+   "lastConfirmed": "2026-08-05"
+  },
+  {
    "id": "cn-qfq-exdate-limit-move",
    "name": "CN qfq 還權序列除權日 >11% 報酬（數學正確）",
    "description": "qfq（前復權）序列保留真實經濟報酬：除權息日若同時漲停/跌停，相鄰日 qfq 報酬=漲跌停×除權因子，可達 11-13%（主板）。另含復牌首日無漲跌幅與新股初期。repair-cn-unadjusted-splice 偵測器（11% 門檻）會永久標記這些日子——refetch 後 still>0 且樣本日為除權/復牌日即此類，無需處理。2026-06-12 驗證：350 檔殘留全屬此類（抽驗 000404.SZ 2022 送轉季 +11~12.6% 群）。",
@@ -356,6 +373,28 @@
    ],
    "verifiedAt": "2026-05-13",
    "note": "CN 退市股、L1 停在 2024-07-24"
+  },
+  {
+   "symbol": "1776.TW",
+   "date": "2026-07-22",
+   "type": "verified-adjacent-identical-bar",
+   "verifiedBy": [
+    "Yahoo Finance",
+    "L1"
+   ],
+   "verifiedAt": "2026-08-05",
+   "note": "Yahoo 與 L1 均為連兩日 O18/H18/L17.7/C17.9/V65，確認是低量真實巧合。"
+  },
+  {
+   "symbol": "6581.TW",
+   "date": "2026-06-25",
+   "type": "verified-adjacent-identical-bar",
+   "verifiedBy": [
+    "Yahoo Finance",
+    "L1"
+   ],
+   "verifiedAt": "2026-08-05",
+   "note": "Yahoo 與 L1 均為連兩日 O108.5/H108.5/L107/C107/V7，確認是低量真實巧合。"
   }
  ]
 }
