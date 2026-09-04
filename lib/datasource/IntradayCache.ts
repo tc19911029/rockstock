@@ -19,6 +19,7 @@
 import { globalCache } from './MemoryCache';
 import { isTradingDay } from '@/lib/utils/tradingDay';
 import { resolveTwIntradayPriceState, type TwIntradayPriceKind } from './twIntradayPriceState';
+import { isMarketOpen } from './marketHours';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -1146,6 +1147,11 @@ async function crossValidateL2(
   _sources: DataSourceStatus[],
 ): Promise<void> {
   if (primaryQuotes.length < 100) return; // 數據太少不值得核驗
+  // TW 的備源 STOCK_DAY_ALL 盤中仍是昨日收盤，拿它與即時 MIS 比較只會
+  // 製造正常價差、每分鐘多打一輪外部 API，且經常耗滿 6 秒 timeout。
+  // 收盤後 OpenAPI 更新成同日資料時才恢復這項核驗；CN 的 Tencent 備源
+  // 盤中即時可比，因此維持原行為。
+  if (market === 'TW' && isMarketOpen('TW')) return;
 
   // 抽樣：隨機選 50 支
   const shuffled = [...primaryQuotes].sort(() => Math.random() - 0.5);

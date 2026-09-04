@@ -14,7 +14,8 @@ export interface QuoteEndToEndResult {
     portfolio: boolean;
     single: boolean;
     chart: boolean;
-    realtime: boolean;
+    /** Legacy /api/realtime is TW-only; null means not applicable for this market. */
+    realtime: boolean | null;
   };
 }
 
@@ -44,6 +45,7 @@ export async function runQuoteEndToEndProbe(args: {
   symbols: string[];
   expectedDate: string;
   sentinels?: string[];
+  includeRealtime?: boolean;
 }): Promise<QuoteEndToEndResult> {
   const requestedSentinels = [...new Set((args.sentinels ?? args.symbols.slice(0, 2)).filter(Boolean))].slice(0, 2);
   // Price equality needs a batch baseline for every sentinel, even when a custom
@@ -51,7 +53,13 @@ export async function runQuoteEndToEndProbe(args: {
   const symbols = [...new Set([...requestedSentinels, ...args.symbols.filter(Boolean)])].slice(0, 50);
   const sentinels = requestedSentinels.filter(symbol => symbols.includes(symbol));
   const issues: QuoteProbeIssue[] = [];
-  const surfaces = { portfolio: true, single: true, chart: true, realtime: true };
+  const includeRealtime = args.includeRealtime ?? true;
+  const surfaces: QuoteEndToEndResult['surfaces'] = {
+    portfolio: true,
+    single: true,
+    chart: true,
+    realtime: includeRealtime ? true : null,
+  };
   const origin = args.baseUrl.replace(/\/$/, '');
   const batchBySymbol = new Map<string, BatchQuote>();
 
@@ -122,6 +130,7 @@ export async function runQuoteEndToEndProbe(args: {
   });
 
   const realtimeCheck = (async () => {
+    if (!includeRealtime) return;
     if (sentinels.length === 0) return;
     try {
       const json = await fetchJson(`${origin}/api/realtime?symbols=${encodeURIComponent(sentinels.join(','))}`);
@@ -150,7 +159,7 @@ export async function runQuoteEndToEndProbe(args: {
 
   await Promise.all([...singleChecks, ...chartChecks, realtimeCheck]);
   for (const surface of Object.keys(surfaces) as Array<keyof typeof surfaces>) {
-    if (issues.some(issue => issue.surface === surface)) surfaces[surface] = false;
+    if (surfaces[surface] !== null && issues.some(issue => issue.surface === surface)) surfaces[surface] = false;
   }
 
   return {

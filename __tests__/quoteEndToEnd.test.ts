@@ -120,4 +120,29 @@ describe('端到端報價 invariant', () => {
       surfaces: { portfolio: true, single: true, chart: true, realtime: true },
     });
   });
+
+  test('CN probe 不呼叫 TW-only realtime endpoint，並明確標成不適用', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async input => {
+      const url = String(input);
+      if (url.includes('/api/portfolio/quotes')) {
+        return jsonResponse({ quotes: [{ symbol: '600519.SS', price: 1335.48, asOf: '2026-09-04', stale: false }] });
+      }
+      if (url.includes('/api/stock/quote')) {
+        return jsonResponse({ date: '2026-09-04', close: 1335.48, stale: false });
+      }
+      return jsonResponse({ candles: [{ date: '2026-09-04', close: 1335.48 }] });
+    });
+
+    await expect(runQuoteEndToEndProbe({
+      baseUrl: 'http://localhost:3000',
+      symbols: ['600519.SS'],
+      expectedDate: '2026-09-04',
+      includeRealtime: false,
+    })).resolves.toMatchObject({
+      ok: true,
+      issues: [],
+      surfaces: { portfolio: true, single: true, chart: true, realtime: null },
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/realtime'))).toBe(false);
+  });
 });

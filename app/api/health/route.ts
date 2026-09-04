@@ -31,11 +31,13 @@ export async function GET(req: NextRequest) {
   try {
     const proto = req.headers.get('x-forwarded-proto') ?? 'http';
     const host = req.headers.get('host') ?? 'localhost:3000';
-    const response = await fetch(`${proto}://${host}/api/health/quotes`, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(30_000),
-    });
-    checks.quotes = response.ok ? 'ok' : 'error';
+    const responses = await Promise.all(['TW', 'CN'].map(market =>
+      fetch(`${proto}://${host}/api/health/quotes?market=${market}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(30_000),
+      })
+    ));
+    checks.quotes = responses.every(response => response.ok) ? 'ok' : 'error';
   } catch {
     checks.quotes = 'error';
   }

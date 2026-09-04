@@ -14,7 +14,13 @@ function baseUrl(req: NextRequest): string {
 }
 
 export async function GET(req: NextRequest) {
-  const requested = (req.nextUrl.searchParams.get('symbols') ?? '3081.TWO,2330.TW')
+  const marketParam = req.nextUrl.searchParams.get('market') ?? 'TW';
+  if (marketParam !== 'TW' && marketParam !== 'CN') {
+    return apiError('market must be TW or CN', 400);
+  }
+  const market = marketParam as 'TW' | 'CN';
+  const defaults = market === 'TW' ? '3081.TWO,2330.TW' : '600519.SS,000001.SZ';
+  const requested = (req.nextUrl.searchParams.get('symbols') ?? defaults)
     .split(',').map(value => value.trim()).filter(Boolean).slice(0, 50);
   if (requested.length === 0) return apiError('symbols required', 400);
 
@@ -22,10 +28,11 @@ export async function GET(req: NextRequest) {
     const result = await runQuoteEndToEndProbe({
       baseUrl: baseUrl(req),
       symbols: requested,
-      expectedDate: getQuoteSnapshotDate('TW'),
-      sentinels: ['3081.TWO', '2330.TW'],
+      expectedDate: getQuoteSnapshotDate(market),
+      sentinels: market === 'TW' ? ['3081.TWO', '2330.TW'] : ['600519.SS', '000001.SZ'],
+      includeRealtime: market === 'TW',
     });
-    return apiOk(result, {
+    return apiOk({ market, ...result }, {
       status: result.ok ? 200 : 503,
       headers: { 'Cache-Control': 'no-store' },
     });

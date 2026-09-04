@@ -680,7 +680,10 @@ export async function register() {
   // route 內部判斷盤中時段 + 守門，盤外直接 return skip。
   // 第一次被呼叫時 lazy 跑 restoreFromDisk + startFlushLoop。
   const runRealtimeScan = () => {
-    callRoute('/api/cron/realtime-scan', 'realtime-scan', { timeoutMs: 15_000 }).catch(err =>
+    // Cold starts can spend up to 8s backfilling plus vendor/verification time.
+    // Match the route's 60s budget so the scheduler does not abort a healthy
+    // in-flight scan and emit a false timeout every ten seconds.
+    callRoute('/api/cron/realtime-scan', 'realtime-scan', { timeoutMs: 55_000 }).catch(err =>
       console.error('[local-cron] realtime-scan:', err),
     );
   };

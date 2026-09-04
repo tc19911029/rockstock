@@ -191,11 +191,11 @@ async function buildNameMap(): Promise<BuildResult> {
   // 結果歷史 candle 走 Yahoo adjusted close（除息調整），昨收偏離 1 元，漲跌幅算錯。
   const otcCodes = new Set<string>();
 
-  // 三個來源並行抓取
+  // 先並行抓兩個輕量官方 JSON；只有 TPEx 不可用時才補抓大型 ISIN HTML。
   // 2026-05-14：ISIN 也走 curl fallback — Cloudflare 連 ISIN 的 Node fetch 都會
   // timeout（dev runtime 實測 15s 收不到 byte），但 curl 1.9s 回 2.5MB 887 檔上櫃股全有。
   const { fetchJsonWithCurlFallback, fetchBufferWithCurlFallback } = await import('./curlFetch');
-  const [listedRes, otcRes, isinOtcRes] = await Promise.allSettled([
+  const [listedRes, otcRes] = await Promise.allSettled([
     fetchJsonWithCurlFallback<{ Code: string; Name: string }[]>(
       'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
       { timeoutMs: 10000 },
@@ -204,11 +204,18 @@ async function buildNameMap(): Promise<BuildResult> {
       'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes',
       { timeoutMs: 10000 },
     ),
-    fetchBufferWithCurlFallback(
+  ]);
+  // ISIN is a large, slow fallback. Do not start it speculatively when the
+  // authoritative TPEx JSON already returned a usable universe.
+  const tpexRows = otcRes.status === 'fulfilled' && Array.isArray(otcRes.value.data)
+    ? otcRes.value.data
+    : [];
+  const [isinOtcRes] = tpexRows.length > 0
+    ? [null]
+    : await Promise.allSettled([fetchBufferWithCurlFallback(
       'https://isin.twse.com.tw/isin/C_public.jsp?strMode=4',
       { timeoutMs: 30000 },
-    ),
-  ]);
+    )]);
 
   // 代號 regex：4-5 位數字，允許尾巴帶單一字母（ETF 後綴 A/B/T 等，例如 00981A、00981T）
   const CODE_RE = /^\d{4,5}[A-Z]?$/;
@@ -248,10 +255,10 @@ async function buildNameMap(): Promise<BuildResult> {
 
   // 0514 修：otcRes 即使 fulfilled 也可能空陣列（TPEx 維護中），改用「OTC 結果不足」當條件
   // 而不是「otcRes rejected」，否則 ISIN 備援永遠不會跑到
-  if (isinOtcRes.status === 'rejected') {
+  if (isinOtcRes?.status === 'rejected') {
     console.warn('[TWSENames] isinOtcRes rejected:', isinOtcRes.reason);
   }
-  if (tpexAdded === 0 && isinOtcRes.status === 'fulfilled') {
+  if (tpexAdded === 0 && isinOtcRes?.status === 'fulfilled') {
     isinUsed = true;
     // ISIN C_public.jsp Big5 HTML（fetchBufferWithCurlFallback 已處理 Node fetch
     // timeout → curl fallback；標準 dev runtime curl 1.9s 回 2.5MB 887 檔）

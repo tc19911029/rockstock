@@ -153,7 +153,11 @@ export async function GET(req: NextRequest) {
   const denied = checkCronAuth(req);
   if (denied) return denied;
 
-  const marketParam = req.nextUrl.searchParams.get('market') as 'TW' | 'CN' | null;
+  const rawMarket = req.nextUrl.searchParams.get('market');
+  if (rawMarket && rawMarket !== 'TW' && rawMarket !== 'CN') {
+    return apiError('market must be TW or CN', 400);
+  }
+  const marketParam = rawMarket as 'TW' | 'CN' | null;
   const baseUrl = getBaseUrl(req);
 
   try {
@@ -161,14 +165,29 @@ export async function GET(req: NextRequest) {
 
     const targets: ('TW' | 'CN')[] = marketParam ? [marketParam] : ['TW', 'CN'];
     const results = await Promise.all(targets.map(m => fetchMarketHealth(baseUrl, m)));
-    let quoteEndToEnd: { ok: boolean; checkedAt?: string; issues?: unknown[] } = { ok: false, issues: [{ reason: 'quote health 未執行' }] };
+    let quoteEndToEnd: {
+      ok: boolean;
+      checkedAt?: string;
+      issues?: unknown[];
+      markets?: Partial<Record<'TW' | 'CN', unknown>>;
+    } = { ok: false, issues: [{ reason: 'quote health 未執行' }] };
     try {
-      const quoteResponse = await fetch(`${baseUrl}/api/health/quotes`, {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(30_000),
-      });
-      quoteEndToEnd = await quoteResponse.json() as typeof quoteEndToEnd;
-      if (!quoteResponse.ok) quoteEndToEnd.ok = false;
+      const quoteResponses = await Promise.all((['TW', 'CN'] as const).map(async market => {
+        const response = await fetch(`${baseUrl}/api/health/quotes?market=${market}`, {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(30_000),
+        });
+        const body = await response.json() as { ok?: boolean; checkedAt?: string; issues?: unknown[] };
+        return { market, response, body };
+      }));
+      quoteEndToEnd = {
+        ok: quoteResponses.every(item => item.response.ok && item.body.ok === true),
+        checkedAt: new Date().toISOString(),
+        issues: quoteResponses.flatMap(item =>
+          (item.body.issues ?? []).map(issue => ({ market: item.market, issue })),
+        ),
+        markets: Object.fromEntries(quoteResponses.map(item => [item.market, item.body])),
+      };
     } catch (error) {
       quoteEndToEnd = { ok: false, issues: [{ reason: error instanceof Error ? error.message : String(error) }] };
     }
