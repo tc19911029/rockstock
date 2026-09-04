@@ -15,6 +15,7 @@ const freshnessMock = assessIntradayFreshness as jest.MockedFunction<typeof asse
 
 describe('大盤獨立即時報價鏈', () => {
   beforeEach(() => {
+    jest.useRealTimers();
     jest.clearAllMocks();
     snapshotMock.mockResolvedValue(null);
     freshnessMock.mockReturnValue({ stale: false, ageSeconds: 30, reason: null });
@@ -48,6 +49,9 @@ describe('大盤獨立即時報價鏈', () => {
   });
 
   test('上證指數直接使用 Tencent 完整後綴，不撞 000001.SZ 個股', async () => {
+    // 固定在 A 股上午盤；若測試剛好於真實午休執行，production 會正確跳過 Tencent。
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-25T02:00:00.000Z'));
     tencentMock.mockResolvedValue({
       date: '2026-08-25', price: 3868.92, prevClose: 3882.01, open: 3863.37,
       high: 3884.27, low: 3850.86, change: -13.09, changePct: -0.34,

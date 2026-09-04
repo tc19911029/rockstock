@@ -20,6 +20,7 @@ interface MarketHealthLite {
   stocksWithGaps: number | null;
   stocksStale: number | null;
   downloadFailed: number | null;
+  downloadAttemptsFailed: number | null;
   l2: { status: string; quoteCount: number | null; ageSeconds: number | null; updatedAt: string | null };
   l2Sources?: { alertLevel: string; consecutiveEmptyCount: number; isTradingDay: boolean };
   l4?: { status: string; lastScanDate: string | null; lastScanCount: number; lastScanTime: string | null; todayHasIntraday: boolean };
@@ -331,6 +332,9 @@ function MarketCard({ market, data }: { market: 'TW' | 'CN'; data: MarketHealthL
             <Row label="近 3 日落後" value={`${data.stocksStale ?? '?'} 支`}
               warn={(data.stocksStale ?? 0) > 50}
               hint="近 3 日該收盤但未封存的股票數；> 50 觸發黃燈，> 100 觸發紅燈並 webhook" />
+            <Row label="未解決讀取失敗" value={`${data.downloadFailed ?? 0} 支`}
+              warn={(data.downloadFailed ?? 0) > 0}
+              hint={`校驗後仍無法讀取的股票數；本輪曾失敗但已由其他來源補齊的嘗試共 ${data.downloadAttemptsFailed ?? 0} 次`} />
             <Row label="歷史 gap" value={`${data.stocksWithGaps ?? '?'} 支`}
               hint="歷史 K 線中間出現缺日（例如停牌、缺資料）的股票數；在容忍範圍內不影響「健康度」，但建議跑 audit-l1-integrity 確認" />
             <Row label="校驗時間" value={fmtTime(data.reportDate ? `${data.reportDate}T00:00:00Z` : null)} muted

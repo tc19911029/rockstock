@@ -57,6 +57,7 @@ interface HealthFetchResult {
   stocksWithGaps: number | null;
   stocksStale: number | null;
   downloadFailed: number | null;
+  downloadAttemptsFailed: number | null;
   l2Status: string;
   l2Count: number | null;
   l2AgeSec: number | null;
@@ -86,7 +87,7 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
       health: 'fetch_error',
       reportDate: null, expectedDate: getLastTradingDay(market), coverageRate: null,
       totalStocks: null, stocksCurrent: null,
-      stocksWithGaps: null, stocksStale: null, downloadFailed: null,
+      stocksWithGaps: null, stocksStale: null, downloadFailed: null, downloadAttemptsFailed: null,
       l2Status: 'unknown', l2Count: null, l2AgeSec: null, l2AlertLevel: 'unknown',
       l4Status: 'unknown', l4LastDate: null, l4ResultCount: 0,
       strategyStatus: 'unknown', strategyReadyCount: 0, strategyRequiredCount: 0,
@@ -107,6 +108,7 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     stocksWithGaps?: number | null;
     stocksStale?: number | null;
     downloadFailed?: number | null;
+    downloadAttemptsFailed?: number | null;
     l2?: { status?: string; quoteCount?: number | null; ageSeconds?: number | null };
     l2Sources?: { alertLevel?: string };
     l4?: { status?: string; lastScanDate?: string | null; lastScanCount?: number };
@@ -129,6 +131,7 @@ async function fetchMarketHealth(baseUrl: string, market: 'TW' | 'CN'): Promise<
     stocksWithGaps: data.stocksWithGaps ?? null,
     stocksStale: data.stocksStale ?? null,
     downloadFailed: data.downloadFailed ?? null,
+    downloadAttemptsFailed: data.downloadAttemptsFailed ?? null,
     l2Status: data.l2?.status ?? 'unknown',
     l2Count: data.l2?.quoteCount ?? null,
     l2AgeSec: data.l2?.ageSeconds ?? null,

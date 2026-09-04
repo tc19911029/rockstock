@@ -33,6 +33,7 @@ import { readIntradaySnapshot } from '../lib/datasource/IntradayCache';
 import { ensureServerL1Visibility, type VisibilityCandidate } from '../lib/datasource/eodSettlementVisibility';
 import { verifyDownload } from '../lib/datasource/DownloadVerifier';
 import { sendNtfy } from '../lib/notify/ntfy';
+import { consumeBackfillQueue } from '../lib/datasource/BackfillConsumer';
 
 interface Args {
   market: Market;
@@ -140,6 +141,23 @@ async function main() {
 
   const symbols = (await listSymbols(market)).slice(0, limit);
   console.log(`stocklist 共 ${symbols.length} 檔`);
+
+  // 常駐 Production 以 eod-settle 取代 download-candles；因此歷史 gap queue
+  // 必須在這條正式路徑消費，否則 queue 會永遠停在 attempts=0。
+  if (!dry) {
+    try {
+      const backfill = await consumeBackfillQueue(market, { budgetMs: 30_000 });
+      if (backfill.actionable > 0 || backfill.abandoned > 0) {
+        console.log(
+          `Backfill queue: actionable=${backfill.actionable} filled=${backfill.filled} `
+          + `failed=${backfill.failed} skipped=${backfill.skipped} abandoned=${backfill.abandoned}`,
+        );
+      }
+    } catch (error) {
+      // 歷史 gap 補拉不能阻斷當日正式收盤封存；queue 保留供下一輪重試。
+      console.warn(`Backfill queue 消費失敗，保留到下一輪：${error instanceof Error ? error.message : error}`);
+    }
+  }
 
   // 多個 calendar retry 共用完成狀態。已成功的輪次仍會清 cache＋讀回 sentinel，
   // 確認常駐 API 沒有再退回昨天；驗證通過才 cheap exit，避免重打 2000 檔 vendor。

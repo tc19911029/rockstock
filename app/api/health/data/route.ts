@@ -93,6 +93,8 @@ interface MarketHealth {
   stocksStale: number | null;
   /** 下載失敗的股票數 */
   downloadFailed: number | null;
+  /** 本輪曾失敗但可能已由其他來源補齊的下載嘗試數。 */
+  downloadAttemptsFailed: number | null;
   /** 報告生成時間 */
   generatedAt: string | null;
   /** L2 快照新鮮度 */
@@ -427,7 +429,8 @@ async function getMarketHealth(
         stocksNotTrading: report.summary.stocksNotTrading ?? 0,
         stocksWithGaps: report.summary.stocksWithGaps,
         stocksStale: report.summary.stocksStale,
-        downloadFailed: report.summary.downloadFailed,
+        downloadFailed: report.summary.stocksReadFailed,
+        downloadAttemptsFailed: report.summary.downloadAttemptsFailed ?? report.summary.downloadFailed,
         generatedAt: report.generatedAt,
         report: includeDetail ? report : undefined,
       };
@@ -473,6 +476,7 @@ async function getMarketHealth(
     stocksWithGaps: null,
     stocksStale: null,
     downloadFailed: null,
+    downloadAttemptsFailed: null,
     generatedAt: null,
     l2,
     l2Sources,

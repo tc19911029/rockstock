@@ -73,7 +73,10 @@ export interface VerifyReport {
   summary: {
     totalStocks: number;
     downloadSuccess: number;
+    /** 校驗後仍沒有可讀資料的股票數。 */
     downloadFailed: number;
+    /** 本輪下載曾失敗的嘗試數；即使最終資料已由官方／既有 L1 補齊仍保留供診斷。 */
+    downloadAttemptsFailed?: number;
     downloadSkipped: number;
     coverageRate: number;
     /** 真正含 targetDate K 棒的股票數；舊報告可能沒有此欄位 */
@@ -388,7 +391,8 @@ export async function verifyDownload(
     summary: {
       totalStocks,
       downloadSuccess: stats.succeeded,
-      downloadFailed: Math.max(0, stats.failed - stocksNonTrading),
+      downloadFailed: readFailed + failedSymbols.length,
+      downloadAttemptsFailed: Math.max(0, stats.failed - stocksNonTrading),
       downloadSkipped: stats.skipped,
       coverageRate: +coverageRate.toFixed(4),
       stocksCurrent,

@@ -19,6 +19,7 @@
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { reconcileTranscriptIndex } from '@/lib/youtube/transcriptIndexMaintenance';
 
 const ROOT = path.join(process.cwd(), 'data', 'youtube');
 const DRY = process.argv.includes('--dry-run');
@@ -117,13 +118,16 @@ async function main() {
   if (!DRY) await fs.writeFile(vIdxPath, JSON.stringify(vIdx, null, 2));
   console.log(`  video-index: ${vIdxBefore} → ${Object.keys(vIdx.byId).length}`);
 
-  const tIdxPath = path.join(ROOT, 'transcript-index.json');
-  const tIdx = JSON.parse(await fs.readFile(tIdxPath, 'utf-8')) as { byId: Record<string, unknown>; updated_at: string };
-  const tIdxBefore = Object.keys(tIdx.byId).length;
-  for (const vid of removedVideoIds) delete tIdx.byId[vid];
-  tIdx.updated_at = new Date().toISOString();
-  if (!DRY) await fs.writeFile(tIdxPath, JSON.stringify(tIdx, null, 2));
-  console.log(`  transcript-index: ${tIdxBefore} → ${Object.keys(tIdx.byId).length}`);
+  if (DRY) {
+    const tIdxPath = path.join(ROOT, 'transcript-index.json');
+    const tIdx = JSON.parse(await fs.readFile(tIdxPath, 'utf-8')) as { byId: Record<string, unknown> };
+    const before = Object.keys(tIdx.byId).length;
+    for (const vid of removedVideoIds) delete tIdx.byId[vid];
+    console.log(`  transcript-index: ${before} → ${Object.keys(tIdx.byId).length} (dry-run estimate)`);
+  } else {
+    const result = await reconcileTranscriptIndex(ROOT);
+    console.log(`  transcript-index: ${result.before} → ${result.after} (added ${result.added}, updated ${result.updated}, removed ${result.removed})`);
+  }
 
   console.log(`[cleanup] done. removed ${removedDates.length} date(s).`);
 }

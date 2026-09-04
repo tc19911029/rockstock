@@ -22,14 +22,7 @@ import { saveDownloadManifest } from '@/lib/datasource/DownloadManifest';
 import { verifyDownload, MIN_VERIFY_UNIVERSE } from '@/lib/datasource/DownloadVerifier';
 import { spotCheckL1 } from '@/lib/datasource/L1SpotCheck';
 import { checkCronAuth } from '@/lib/api/cronAuth';
-import {
-  loadBackfillQueue,
-  saveBackfillQueue,
-  markAttempt,
-  removeFromQueue,
-  MAX_ATTEMPTS,
-} from '@/lib/datasource/BackfillQueue';
-import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
+import { consumeBackfillQueue } from '@/lib/datasource/BackfillConsumer';
 import { fetchJsonWithCurlFallback } from '@/lib/datasource/curlFetch';
 import { rocDateToAd } from '@/lib/datasource/eodSettleBatch';
 
@@ -178,44 +171,17 @@ export async function GET(req: NextRequest) {
     // ── Step -1: 消費 Backfill Queue（上輪 verify 發現缺棒的股票，針對性補拉） ──
     // 在主下載之前跑，補拉也會觸發 writeCandleFile merge，讓主下載看到已補齊狀態。
     // 預算：此步驟 30 秒內結束，超過就剩餘留到下一輪。
-    const backfillStart = Date.now();
-    const BACKFILL_BUDGET_MS = 30_000;
     let backfillFilled = 0;
     let backfillFailed = 0;
     let backfillSkipped = 0;
     try {
-      const queue = await loadBackfillQueue(market);
-      const actionable = queue.items.filter((it) => it.attempts < MAX_ATTEMPTS);
-      if (actionable.length > 0) {
-        console.info(`[download-candles] ${market}: backfill queue = ${actionable.length} actionable items`);
+      const backfill = await consumeBackfillQueue(market, { budgetMs: 30_000 });
+      backfillFilled = backfill.filled;
+      backfillFailed = backfill.failed;
+      backfillSkipped = backfill.skipped;
+      if (backfill.actionable > 0) {
+        console.info(`[download-candles] ${market}: backfill queue = ${backfill.actionable} actionable items`);
       }
-      for (const item of actionable) {
-        if (Date.now() - backfillStart > BACKFILL_BUDGET_MS) {
-          backfillSkipped = actionable.length - (backfillFilled + backfillFailed);
-          console.warn(`[download-candles] ${market}: backfill budget exhausted, ${backfillSkipped} items remain`);
-          break;
-        }
-        try {
-          // 展開所有 range，一次跨所有 gap 抓（上游 provider 都支援 range）
-          const earliest = item.ranges.reduce((m, r) => r.from < m ? r.from : m, item.ranges[0].from);
-          const latest = item.ranges.reduce((m, r) => r.to > m ? r.to : m, item.ranges[0].to);
-          const filled = await dataProvider.getCandlesRange(item.symbol, earliest, latest);
-          if (filled.length > 0) {
-            await saveLocalCandles(item.symbol, market, filled);
-            // 成功補拉 → 立即從 queue 移除，避免主下載/verify 中間 crash 時下輪重跑
-            removeFromQueue(queue, item.symbol);
-            backfillFilled++;
-          } else {
-            markAttempt(queue, item.symbol, 'provider returned empty');
-            backfillFailed++;
-          }
-        } catch (err) {
-          markAttempt(queue, item.symbol, String(err instanceof Error ? err.message : err));
-          backfillFailed++;
-        }
-      }
-      // 寫回 attempts 計數（成功項已即時從 queue 移除）
-      await saveBackfillQueue(queue);
       if (backfillFilled > 0 || backfillFailed > 0) {
         console.info(
           `[download-candles] ${market}: backfill 完成 — ${backfillFilled} 補齊, ${backfillFailed} 失敗, ${backfillSkipped} 跳過`,

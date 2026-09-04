@@ -108,15 +108,23 @@ export async function saveBackfillQueue(queue: BackfillQueue): Promise<void> {
     await blobPut(blobKey(queue.market), json);
   }
 
-  // 也寫本地（開發 + Vercel warm instance）
-  try {
-    const { writeFile, mkdir } = await import('fs/promises');
+  const saveLocal = async () => {
+    const { mkdir } = await import('fs/promises');
     const { existsSync } = await import('fs');
     const path = await import('path');
+    const { atomicFsPut } = await import('@/lib/storage/atomicFsPut');
     const dir = path.join(process.cwd(), 'data', 'queues');
     if (!existsSync(dir)) await mkdir(dir, { recursive: true });
-    await writeFile(await localPath(queue.market), json, 'utf-8');
-  } catch { /* 只讀環境跳過 */ }
+    await atomicFsPut(await localPath(queue.market), json);
+  };
+
+  // 本地主機的 queue 是唯一真相，寫失敗必須讓 caller 得知；Vercel 則以 Blob
+  // 為真，本地 warm-instance mirror 在唯讀環境失敗可以略過。
+  if (IS_VERCEL) {
+    try { await saveLocal(); } catch { /* 只讀環境跳過 */ }
+  } else {
+    await saveLocal();
+  }
 }
 
 /**
