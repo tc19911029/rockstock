@@ -110,9 +110,10 @@ rotate_log /tmp/rockstock-prod.err.log
 # rotate_log above; retain the five newest files for incident review.
 prune_rotated_logs() {
   file="$1"
-  dir="$(dirname "$file")"
+  logical_dir="$(dirname "$file")"
+  dir="$(CDPATH= cd -- "$logical_dir" && pwd -P)"
   base="$(basename "$file")"
-  find "$dir" -maxdepth 1 -type f -name "${base}.20????????-??????" -print 2>/dev/null \
+  find "$dir" -maxdepth 1 -type f -name "${base}.20??????-??????" -print 2>/dev/null \
     | sort -r \
     | awk 'NR > 5' \
     | while IFS= read -r old_log; do
