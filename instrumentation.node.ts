@@ -713,7 +713,7 @@ export async function register() {
   }, 120 * 1000);
 
   // Auto-repair watchdog：主下載 cron 完成後，檢查 verify 報告，
-  // 若 stocksStale > 50 或 coverage < 97% 自動觸發 retry-failed
+  // 若有 readFailed / missingTargetDate，或 stocksStale > 50 / coverage < 97%，自動觸發 retry-failed
   // 開發本地：每 30 分鐘檢查一次（vercel 上是固定排程）
   setInterval(() => {
     callRoute('/api/cron/auto-repair-watchdog?market=TW', 'TW auto-repair watchdog')

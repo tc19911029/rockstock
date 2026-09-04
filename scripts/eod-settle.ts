@@ -36,6 +36,10 @@ import { ensureServerL1Visibility, type VisibilityCandidate } from '../lib/datas
 import { verifyDownload } from '../lib/datasource/DownloadVerifier';
 import { sendNtfy } from '../lib/notify/ntfy';
 import { consumeBackfillQueue } from '../lib/datasource/BackfillConsumer';
+import {
+  MAX_INLINE_READ_REPAIRS,
+  repairReadFailedSymbols,
+} from '../lib/datasource/eodReadFailureRepair';
 
 interface Args {
   market: Market;
@@ -364,7 +368,8 @@ async function main() {
       const Scanner = market === 'TW'
         ? (await import('../lib/scanner/TaiwanScanner')).TaiwanScanner
         : (await import('../lib/scanner/ChinaScanner')).ChinaScanner;
-      const canonicalSymbols = (await new Scanner().getStockList()).map((stock) => stock.symbol);
+      const scanner = new Scanner();
+      const canonicalSymbols = (await scanner.getStockList()).map((stock) => stock.symbol);
       const pendingTotal = stats['pending-multi-disagree'] + stats['pending-no-vendor-data'] + stats['pending-unverified'];
       const officialNoTradeSymbols = market === 'TW'
         ? findTwOfficialNoTradeSymbols({
@@ -380,13 +385,43 @@ async function main() {
           `Verify: 完整官方日線 + 近收盤零量快照確認 ${officialNoTradeSymbols.length} 檔當日無成交`,
         );
       }
-      const verify = await verifyDownload(market, date, canonicalSymbols, {
+      let verify = await verifyDownload(market, date, canonicalSymbols, {
         succeeded: written,
         failed: pendingTotal,
         skipped: stats['skipped-already-correct'],
       }, {
         confirmedNoTradeSymbols: officialNoTradeSymbols,
       });
+      if (verify.failedSymbols.length > 0) {
+        console.warn(
+          `[eod-settle] verify 發現 ${verify.failedSymbols.length} 個 readFailed，先自動重建再二次校驗：`
+          + verify.failedSymbols.slice(0, MAX_INLINE_READ_REPAIRS).join(', '),
+        );
+        const officialQuotes = new Map<string, VendorQuote>();
+        for (const result of results) {
+          if (result.officialAnchor && result.settled) officialQuotes.set(result.symbol, result.settled);
+        }
+        const repair = await repairReadFailedSymbols({
+          market,
+          date,
+          symbols: verify.failedSymbols,
+          fetchCandles: (symbol, asOfDate) => scanner.fetchCandles(symbol, asOfDate),
+          officialQuotes,
+        });
+        console.warn(
+          `[eod-settle] readFailed auto-repair: attempted=${repair.attempted} `
+          + `repaired=${repair.repaired} remaining=${repair.failed.length}`,
+        );
+        if (repair.repaired > 0) {
+          verify = await verifyDownload(market, date, canonicalSymbols, {
+            succeeded: written + repair.repaired,
+            failed: Math.max(0, pendingTotal - repair.repaired),
+            skipped: stats['skipped-already-correct'],
+          }, {
+            confirmedNoTradeSymbols: officialNoTradeSymbols,
+          });
+        }
+      }
       verifyHealth = verify.health;
       verifyCoverage = verify.summary.coverageRate;
       verifyMissingTargetDate = verify.summary.stocksMissingTargetDate ?? 0;

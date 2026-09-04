@@ -3,7 +3,7 @@
  *
  * 在主下載 cron 跑完後（約 15 分鐘）執行：
  *   1. 讀最新 verify 報告
- *   2. 如果 stocksStale > STALE_THRESHOLD 或 coverageRate < COVERAGE_THRESHOLD
+ *   2. 如果有任何 readFailed、stocksStale > STALE_THRESHOLD 或 coverageRate < COVERAGE_THRESHOLD
  *      → 自動 fire retry-failed cron（不等回應，讓它在後台跑）
  *
  * 避免大規模缺漏需要人工發現的情境（如 04-23 缺 975 支）。
@@ -81,8 +81,11 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const { stocksStale, coverageRate } = report.summary;
-  const needsRepair = stocksStale > STALE_THRESHOLD || coverageRate < COVERAGE_THRESHOLD;
+  const { stocksStale, coverageRate, stocksReadFailed, stocksMissingTargetDate } = report.summary;
+  const needsRepair = stocksReadFailed > 0
+    || (stocksMissingTargetDate ?? 0) > 0
+    || stocksStale > STALE_THRESHOLD
+    || coverageRate < COVERAGE_THRESHOLD;
 
   // ── 殭屍 L1 偵測（疑似退市/合併但 L1 沒清掉）──
   // staleDetails 裡 daysBehind > 90 = 三個月沒更新，幾乎確定不是抓取問題
@@ -102,6 +105,8 @@ export async function GET(req: NextRequest) {
       action: 'no_repair_needed',
       reportDate,
       stocksStale,
+      stocksReadFailed,
+      stocksMissingTargetDate: stocksMissingTargetDate ?? 0,
       coverageRate,
       zombies: zombies.length,
     });
@@ -109,14 +114,15 @@ export async function GET(req: NextRequest) {
 
   // ── 觸發 retry-failed（fire-and-forget） ──
   const baseUrl = getBaseUrl(req);
-  const retryUrl = `${baseUrl}/api/cron/retry-failed?market=${market}`;
+  const retryUrl = `${baseUrl}/api/cron/retry-failed?market=${market}&staleDays=1`;
   const headers: Record<string, string> = {};
   if (process.env.CRON_SECRET) {
     headers['authorization'] = `Bearer ${process.env.CRON_SECRET}`;
   }
 
   console.log(
-    `[auto-repair-watchdog] ${market} 需要修復: stale=${stocksStale} coverage=${coverageRate} → 觸發 retry-failed`
+    `[auto-repair-watchdog] ${market} 需要修復: readFailed=${stocksReadFailed} `
+    + `missing=${stocksMissingTargetDate ?? 0} stale=${stocksStale} coverage=${coverageRate} → 觸發 retry-failed`
   );
 
   // 不 await — 讓 retry-failed 自己跑，watchdog 立刻回應
@@ -130,6 +136,8 @@ export async function GET(req: NextRequest) {
     action: 'triggered_retry',
     reportDate,
     stocksStale,
+    stocksReadFailed,
+    stocksMissingTargetDate: stocksMissingTargetDate ?? 0,
     coverageRate,
     zombies: zombies.length,
     retryUrl,

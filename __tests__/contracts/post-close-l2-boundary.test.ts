@@ -68,6 +68,17 @@ describe('post-close L2 boundary', () => {
     expect(settleScript).toContain('shouldNotifySettlementFailure(previousState');
   });
 
+  test('readFailed 會先自動重建、二次校驗，watchdog 也必須觸發 retry', () => {
+    const settleScript = source('scripts/eod-settle.ts');
+    const watchdog = source('app/api/cron/auto-repair-watchdog/route.ts');
+    expect(settleScript).toContain('repairReadFailedSymbols({');
+    expect(settleScript).toContain('verify.failedSymbols');
+    expect(settleScript.match(/verifyDownload\(/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(watchdog).toContain('stocksReadFailed > 0');
+    expect(watchdog).toContain('stocksMissingTargetDate ?? 0');
+    expect(watchdog).toContain('&staleDays=1');
+  });
+
   test('官方收盤價可修正同日既有的暫時價', () => {
     const append = source('app/api/cron/append-from-snapshot/route.ts');
     expect(append).toContain("if (existing.lastDate === date)");
