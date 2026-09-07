@@ -153,6 +153,11 @@ export async function GET(req: NextRequest) {
         const snapshotFreshness = snapshot ? assessIntradayFreshness('TW', snapshot) : null;
         const l2 = snapshot?.quotes.find(item => item.symbol === pureCode);
         if (snapshot && !snapshotFreshness?.stale && l2 && l2.close > 0) {
+          // 批次刷新不代表每檔都拿到收盤成交；保留個股實際時間，與持倉報價一致。
+          const updatedAt = l2.observedAt ?? snapshot.updatedAt;
+          const quoteFreshness = assessIntradayFreshness('TW', {
+            date: snapshot.date, updatedAt, count: 1,
+          });
           return apiOk({
             symbol,
             date: snapshot.date,
@@ -162,12 +167,13 @@ export async function GET(req: NextRequest) {
             close: l2.close,
             volume: l2.volume,
             source: 'l2-provisional-close',
-            updatedAt: l2.observedAt ?? snapshot.updatedAt,
+            updatedAt,
             priceKind: l2.priceKind,
             provisional: true,
             marketSession: 'post_close_pending_official',
-            stale: false,
-            status: 'provisional-close',
+            stale: quoteFreshness.stale,
+            status: quoteFreshness.stale ? 'delayed' : 'provisional-close',
+            ...(quoteFreshness.reason ? { staleReason: quoteFreshness.reason } : {}),
           }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
         }
       } catch { /* L2 不可用時保留下方舊 L1 delayed fallback */ }

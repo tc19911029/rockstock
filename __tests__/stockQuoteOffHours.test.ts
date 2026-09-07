@@ -145,6 +145,27 @@ describe('GET /api/stock/quote 休市防護', () => {
     expect(readIntradaySnapshot).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    ['2026-08-26T05:29:58.000Z', 'indicative', true, 'delayed'],
+    ['2026-08-26T05:30:00.000Z', 'actual', false, 'provisional-close'],
+  ])('收盤批次已刷新仍依個股時間 %s 判斷延遲', async (observedAt, priceKind, stale, status) => {
+    readIntradaySnapshot.mockResolvedValue({
+      market: 'TW', date: '2026-08-26', updatedAt: '2026-08-26T05:35:00.000Z', count: 1,
+      quotes: [{
+        symbol: '3081', name: '聯亞', open: 3220, high: 3220, low: 3000,
+        close: 3070, volume: 3317, observedAt, priceKind,
+      }],
+    });
+    const response = await GET(new NextRequest('http://localhost/api/stock/quote?symbol=3081.TWO'));
+    const body = await response.json();
+    expect(body).toMatchObject({
+      ok: true, close: 3070, updatedAt: observedAt, priceKind, stale, status,
+      provisional: true, source: 'l2-provisional-close',
+    });
+    if (stale) expect(body.staleReason).toContain('13:30');
+    else expect(body.staleReason).toBeUndefined();
+  });
+
   test('正式 L1 尚未封存時，不以同日 MIS 最後成交價補盤後盲區', async () => {
     readCandleFile.mockResolvedValue({
       candles: [{ date: '2026-08-25', open: 2860, high: 2995, low: 2840, close: 2960, volume: 6075 }],
