@@ -40,6 +40,12 @@ export async function resolveStockIdentity(args: {
   const code = stockCodeOf(requestedSymbol);
   const market = inferMarket(requestedSymbol, args.marketHint);
 
+  if (market === 'TW') {
+    const { resolveEmergingCompany } = await import('@/lib/datasource/TpexEmergingProvider');
+    const emerging = await resolveEmergingCompany(requestedSymbol);
+    if (emerging) return { requestedSymbol, canonicalSymbol: `${code}.TWO`, code, market, name: emerging.name };
+  }
+
   let canonicalSymbol = requestedSymbol;
   if (market === 'TW') {
     const seeded = /\.(TW|TWO)$/i.test(requestedSymbol) ? requestedSymbol : `${code}.TW`;

@@ -275,3 +275,9 @@ export function isEmergingPollingWindow(now = new Date()): boolean {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
   return isTradingDay(day, 'TW') && hour * 60 + min >= 540 && hour * 60 + min <= 930;
 }
+
+/** 興櫃實際交易時段，不把 15:00 之後的定稿期標為盤中。 */
+export function isEmergingMarketOpen(now = new Date()): boolean {
+  const { hour, min } = getLocalTime('Asia/Taipei', now);
+  return isEmergingPollingWindow(now) && hour * 60 + min < 900;
+}

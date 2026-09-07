@@ -9,8 +9,10 @@ import { fetchEmergingChart, resolveEmergingCompany } from '@/lib/datasource/Tpe
 
 it('automatically discovers an ESB stock, fetches official history/live data and adjusts before weekly aggregation', async () => {
   jest.useFakeTimers().setSystemTime(new Date('2026-09-07T12:00:00+08:00'));
+  let failEvents = false;
   const network = jest.mocked(fetchJsonWithCurlFallback);
   network.mockImplementation(async (url: string) => {
+    if (failEvents && url.includes('finance.yahoo.com')) throw new Error('upstream offline');
     let data: unknown;
     if (url.includes('mopsfin_t187ap03_R')) data = [{ SecuritiesCompanyCode: '7777', CompanyAbbreviation: '測試興櫃' }];
     else if (url.includes('finance.yahoo.com')) data = { chart: { result: [{ meta: { symbol: '7777.TWO' }, events: { splits: {
@@ -21,7 +23,7 @@ it('automatically discovers an ESB stock, fetches official history/live data and
       data: url.includes('2026/08') ? [['115/08/19', '1000', '960', '900', '930'], ['115/08/31', '10000', '100', '90', '96']] : [],
     }] };
     else if (url.includes('emerging/latest')) data = { stat: 'ok', tables: [{ date: '115年09月07日 11:59:03',
-      fields: ['代號', '日最高', '日最低', '日均價', '成交量'], data: [['7777', '150', '110', '132', '30000']],
+      fields: ['代號', '日最高', '日最低', '日均價', '成交量', '前日均價'], data: [['7777', '150', '110', '132', '30000', '100']],
     }] };
     else throw new Error(`Unexpected data source ${url}`);
     return { data, source: 'curl' } as Awaited<ReturnType<typeof fetchJsonWithCurlFallback>>;
@@ -39,5 +41,12 @@ it('automatically discovers an ESB stock, fetches official history/live data and
     const weekly = await fetchEmergingChart(company!, '1mo', '1wk');
     expect(weekly.candles[0]).toMatchObject({ high: 96, priceBasis: 'esb-average' });
     expect(network).toHaveBeenCalledTimes(count); // 重複載圖不重打歷史/事件來源
+    jest.setSystemTime(new Date('2026-09-07T13:01:00+08:00'));
+    failEvents = true;
+    await expect(fetchEmergingChart(company!, '1mo', '1d')).rejects.toThrow('換股事件暫時無法核對');
+    expect(chart.candles[0].close).toBe(93); // 來源失敗不能把既有圖表回退成 930
+    failEvents = false;
+    const recovered = await fetchEmergingChart(company!, '1mo', '1d');
+    expect(recovered.candles[0].close).toBe(93);
   } finally { jest.useRealTimers(); }
 });

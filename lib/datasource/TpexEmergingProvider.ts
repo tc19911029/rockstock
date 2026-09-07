@@ -119,17 +119,17 @@ export function adjustEmergingCandles(raw: readonly Candle[], events: readonly S
 export function parseEmergingLive(json: TpexTable): Array<Record<string, string>> {
   const table = json.tables?.[0];
   const stamp = /^(\d{3})年(\d{2})月(\d{2})日 (\d{2}):(\d{2}):(\d{2})$/.exec(table?.date ?? '');
-  const fields = ['代號', '日最高', '日最低', '日均價', '成交量'];
+  const fields = ['代號', '日最高', '日最低', '日均價', '成交量', '前日均價'];
   const cols = fields.map(f => table?.fields?.indexOf(f) ?? -1);
   if (json.stat !== 'ok' || !stamp || !Array.isArray(table?.data) || cols.some(i => i < 0)) throw new Error('興櫃盤中行情欄位異常');
   return table.data.map(row => ({ SecuritiesCompanyCode: String(row[cols[0]]),
     Highest: String(row[cols[1]]), Lowest: String(row[cols[2]]), Average: String(row[cols[3]]),
-    TransactionVolume: String(row[cols[4]]), Date: `${stamp[1]}${stamp[2]}${stamp[3]}`,
+    TransactionVolume: String(row[cols[4]]), PreviousAveragePrice: String(row[cols[5]]), Date: `${stamp[1]}${stamp[2]}${stamp[3]}`,
     Time: `${stamp[4]}${stamp[5]}${stamp[6]}` }));
 }
 
 export async function fetchEmergingQuote(code: string) {
-  const rows = await cached('quotes-v2', 60_000, async () => {
+  const rows = await cached('quotes-v3', 60_000, async () => {
     try {
       const { data: live } = await fetchJsonWithCurlFallback<TpexTable>(
         `${BASE}/www/zh-tw/emerging/latest?response=json`, { timeoutMs: 8000 });
@@ -147,9 +147,10 @@ export async function fetchEmergingQuote(code: string) {
   if (!date || !(volume > 0 && low > 0 && low <= close && close <= high)) return null;
   const updatedAt = `${date}T${row.Time.slice(0, 2)}:${row.Time.slice(2, 4)}:${row.Time.slice(4, 6)}+08:00`;
   const age = Date.now() - Date.parse(updatedAt);
-  const stale = date < getQuoteSnapshotDate('TW') || (isEmergingPollingWindow() && (!Number.isFinite(age) || age > 5 * 60_000));
+  const stale = date !== getQuoteSnapshotDate('TW') || (isEmergingPollingWindow() && (!Number.isFinite(age) || age > 5 * 60_000 || age < -60_000));
   return { date, open: close, high, low, close, volume, priceBasis: 'esb-average' as const,
-    stale, source: 'tpex-esb', updatedAt };
+    stale, source: 'tpex-esb', updatedAt, previousClose: num(row.PreviousAveragePrice),
+    changePercent: num(row.PreviousAveragePrice) > 0 ? (close / num(row.PreviousAveragePrice) - 1) * 100 : 0 };
 }
 
 export async function fetchEmergingChart(company: EmergingCompany, period: string, interval: string, asOf?: string) {
@@ -193,6 +194,9 @@ export async function fetchEmergingChart(company: EmergingCompany, period: strin
     }
   }
   const { events, available } = await eventsPromise;
+  // 抓取失敗不覆寫已驗證事件快取，也不回傳未還原行情讓前端重算均線。
+  // 背景更新收到 502 會保留既有圖表；首次載入則明確要求稍後重試。
+  if (!available) throw new Error('換股事件暫時無法核對，已保留既有資料；請稍後重試');
   const daily = adjustEmergingCandles(raw.sort((a, b) => a.date.localeCompare(b.date)), events, end)
     .filter(c => c.date >= startDate);
   if (!daily.length) throw new Error('此期間沒有興櫃成交資料');
@@ -200,7 +204,7 @@ export async function fetchEmergingChart(company: EmergingCompany, period: strin
     .map(c => ({ ...c, priceBasis: 'esb-average' as const }));
   return { ticker: `${company.code}.TWO`, name: company.name, currency: 'TWD', interval, candles,
     totalBars: candles.length, source: 'tpex-esb', marketBoard: 'emerging' as const,
-    priceBasis: 'esb-average' as const, adjustmentStatus: available ? 'adjusted' : 'unavailable',
+    priceBasis: 'esb-average' as const, adjustmentStatus: 'adjusted' as const,
     splitEvents: events.filter(e => e.date <= end && e.date >= startDate),
     lastDate: daily.at(-1)!.date, stale: !asOf && daily.at(-1)!.date < getQuoteSnapshotDate('TW') };
 }

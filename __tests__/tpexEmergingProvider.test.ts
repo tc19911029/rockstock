@@ -45,8 +45,8 @@ describe('興櫃官方行情與換股銜接', () => {
   });
   it('reads the minute-updated official table timestamp and average, not last transaction', () => {
     const live = parseEmergingLive({ stat: 'ok', tables: [{ date: '115年09月07日 12:59:03',
-      fields: ['代號', '日最高', '日最低', '日均價', '成交量', '成交'],
-      data: [['6696', '200', '134', '175.61', '38,112,380', '178.50']] }] });
+      fields: ['代號', '日最高', '日最低', '日均價', '成交量', '成交', '前日均價'],
+      data: [['6696', '200', '134', '175.61', '38,112,380', '178.50', '132']] }] });
     expect(live[0]).toMatchObject({ Date: '1150907', Time: '125903', Average: '175.61' });
     expect(emergingDate(live[0].Date)).toBe('2026-09-07');
     expect(() => parseEmergingLive({ stat: 'ok', tables: [{ fields: [], data: [] }] })).toThrow();

@@ -342,7 +342,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           // 一律走 local=1：才會觸發 L2/即時報價注入今日 K，否則 MultiMarketProvider 只回歷史
           const bgSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const bgInterval = interval;
-          fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1`)
+          fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1${scanDateParam}`)
             .then(r => r.ok ? r.json() : null)
             .then(json => {
               // 只在用戶還停在同一股票+週期才套用，避免覆蓋已換的資料

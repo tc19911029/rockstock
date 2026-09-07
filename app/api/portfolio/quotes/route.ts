@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getEastMoneyQuote } from '@/lib/datasource/EastMoneyRealtime';
 import { readIntradaySnapshot, type IntradaySnapshot } from '@/lib/datasource/IntradayCache';
 import { assessIntradayFreshness } from '@/lib/datasource/intradayFreshness';
-import { getQuoteSnapshotDate, isAfterMarketClose, isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isAfterMarketClose, isCNMarketLunchBreak, isMarketOpen, isMarketPollingWindow, isEmergingMarketOpen } from '@/lib/datasource/marketHours';
 import { readCandleFile } from '@/lib/datasource/CandleStorageAdapter';
 import { apiOk, apiError } from '@/lib/api/response';
 import { getCNChineseName, getTWChineseName } from '@/lib/datasource/TWSENames';
@@ -417,7 +417,28 @@ export async function GET(req: NextRequest) {
 
   // 每輪都重試有效市場代號；unknown 仍 fail-fast。
   const fetchable = entries.filter(e => e.market !== 'unknown');
-  const twEntries = fetchable.filter(e => e.market === 'TW');
+  // 興櫃與載圖共用官方均價，從一般 TW L1/L2 fallback 中移除，避免同碼錯價。
+  const { resolveEmergingCompany, fetchEmergingQuote } = await import('@/lib/datasource/TpexEmergingProvider');
+  const emergingSymbols = new Set<string>();
+  const emergingQuotes: QuoteTick[] = [];
+  await Promise.all(fetchable.filter(e => e.market === 'TW').map(async entry => {
+    try {
+      const company = await resolveEmergingCompany(entry.resolved);
+      if (!company) return;
+      emergingSymbols.add(entry.original);
+      const quote = await fetchEmergingQuote(company.code);
+      if (!quote) return;
+      emergingQuotes.push({ symbol: entry.original, canonicalSymbol: `${company.code}.TWO`,
+        name: company.name, price: quote.close, changePercent: quote.changePercent,
+        asOf: quote.date, updatedAt: quote.updatedAt, source: 'tpex-esb', priceKind: 'esb-average',
+        stale: quote.stale, status: quote.stale ? 'delayed' : isEmergingMarketOpen() ? 'live' : 'final',
+        ...(quote.stale ? { staleReason: '興櫃官方行情日期或更新時間已過期' } : {}) });
+    } catch {
+      // 身分或興櫃來源無法確認，回傳 missing，不改走不相容的上市櫃來源。
+      emergingSymbols.add(entry.original);
+    }
+  }));
+  const twEntries = fetchable.filter(e => e.market === 'TW' && !emergingSymbols.has(e.original));
   const cnEntries = fetchable.filter(e => e.market === 'CN');
   const fundEntries = fetchable.filter(e => e.market === 'FUND');
   const twLive = isMarketOpen('TW');
@@ -449,7 +470,7 @@ export async function GET(req: NextRequest) {
     fetchFundQuotes(fundEntries.map(e => e.resolved)),
   ]);
 
-  const quotes = [...twQuotes, ...cnQuotes, ...fundQuotes];
+  const quotes = [...emergingQuotes, ...twQuotes, ...cnQuotes, ...fundQuotes];
 
   // L2 快照補漏（EastMoney/騰訊/Fugle 掛掉時 + 週末/假日無 live 報價時）
   // CN + TW 並行 fallback（原本順序執行延遲 2x）
@@ -500,6 +521,8 @@ export async function GET(req: NextRequest) {
       };
     }
     if (entry.market !== 'TW' && entry.market !== 'CN') return quote;
+    // 興櫃來源已依 09:00–15:00 與官方時間戳驗證，勿套用上市櫃 13:30 收盤規則。
+    if (quote.source === 'tpex-esb') return quote;
 
     // 官方完整收盤表確認今日無成交：保留最近一次真實 L1 日期與價格，不把日期改成今天，
     // 也不讓一般「日期不是今天」規則把正確的 no-trade 狀態誤標成 delayed。
