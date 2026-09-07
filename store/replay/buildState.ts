@@ -88,18 +88,19 @@ export function buildState(
   const shortConditions   = index >= 5 ? evaluateShortSixConditions(allCandles, index) : null;
   const winnerPatterns    = index >= 5 ? getWinnerPatternsAt(index)                   : null;
 
+  const isAverage = allCandles[index]?.priceBasis === 'esb-average';
   return {
     visibleCandles,
     metrics,
     stats,
-    currentSignals: signals,
-    chartMarkers,
+    currentSignals: isAverage ? [] : signals,
+    chartMarkers: isAverage ? [] : chartMarkers,
     trendState,
     trendPosition,
-    sixConditions,
-    longProhibitions,
-    shortProhibitions,
-    shortConditions,
-    winnerPatterns,
+    sixConditions: isAverage ? null : sixConditions,
+    longProhibitions: isAverage ? null : longProhibitions,
+    shortProhibitions: isAverage ? null : shortProhibitions,
+    shortConditions: isAverage ? null : shortConditions,
+    winnerPatterns: isAverage ? null : winnerPatterns,
   };
 }

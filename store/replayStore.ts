@@ -11,7 +11,7 @@ import {
 import { computeIndicators } from '@/lib/indicators';
 import { detectCandleGaps } from '@/lib/datasource/validateCandles';
 import { isTradingDay } from '@/lib/utils/tradingDay';
-import { getQuoteSnapshotDate, isMarketPollingWindow, isTaifexPollingWindow } from '@/lib/datasource/marketHours';
+import { getQuoteSnapshotDate, isMarketPollingWindow, isTaifexPollingWindow, isEmergingPollingWindow } from '@/lib/datasource/marketHours';
 import { getMonthKey, getWeekMonday } from '@/lib/datasource/aggregateCandles';
 import { isFundSymbol } from '@/lib/market/classify';
 import { isIndexSymbol } from '@/lib/utils/symbols';
@@ -214,7 +214,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     clearWinnerPatternsCache();
 
     /** 共用：把 API 回傳的 json 塞進 store（會檢查 race token） */
-    const applyData = (json: { ticker: string; name: string; candles: unknown[] }, showLoading: boolean) => {
+    const applyData = (json: StockInfo & { candles: unknown[] }, showLoading: boolean) => {
       // 已被新的 loadStock 取代 → 放棄寫入
       if (myToken !== _loadStockToken) return false;
       const allCandles = computeIndicators(json.candles as { date: string; open: number; high: number; low: number; close: number; volume: number }[]);
@@ -256,7 +256,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         index = calcStartIndex(allCandles);
       }
       // 偵測資料斷層（日K限定，週/月K不檢查因為聚合後自然有gap）
-      // 中間的洞 = 該股那段停牌/未交易（資料源本來就沒這幾根），不是漏抓。
+      // 中間缺棒只代表沒有行情；未核對官方公告前不能稱為停牌。
       const gaps: Array<{ fromDate: string; toDate: string; calendarDays: number; kind: 'halt' | 'stale' }> =
         interval === '1d'
           ? detectCandleGaps(allCandles, 15).map((g) => ({ ...g, kind: 'halt' as const }))
@@ -295,7 +295,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         targetDate: targetDate ?? null,
         account,
         dataGaps: gaps,
-        currentStock: { ticker: json.ticker, name: keptName },
+        currentStock: { ticker: json.ticker, name: keptName, marketBoard: json.marketBoard, adjustmentStatus: json.adjustmentStatus, splitEvents: json.splitEvents },
         ...(showLoading ? { isLoadingStock: false } : {}),
         ...buildState(allCandles, index, account),
       });
@@ -313,7 +313,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
      *  回傳含 candles 的 json，或 null（重試後仍無資料）。延遲只在失敗時發生。 */
     const fetchCandlesRetry = async (
       url: string, tries = 3,
-    ): Promise<{ ticker: string; name: string; candles: unknown[] } | null> => {
+    ): Promise<StockInfo & { candles: unknown[] } | null> => {
       for (let i = 0; i < tries; i++) {
         try {
           const res = await fetch(url);
@@ -439,7 +439,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     const pureTicker = ticker.replace(/\.(TW|TWO|SS|SZ)$/i, '');
     const market: 'TW' | 'CN' = hasCnSuffix || (!hasTwSuffix && /^\d{6}$/.test(pureTicker)) ? 'CN' : 'TW';
     const isTaifex = ticker.toUpperCase() === 'TXF';
-    if (isTaifex ? !isTaifexPollingWindow() : !isMarketPollingWindow(market)) {
+    const isEmerging = currentStock.marketBoard === 'emerging';
+    if (isTaifex ? !isTaifexPollingWindow() : isEmerging ? !isEmergingPollingWindow() : !isMarketPollingWindow(market)) {
       set({ isPolling: false });
       return;
     }
@@ -461,21 +462,22 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     const period = defaultPeriod[interval] ?? '2y';
 
     pollingTimer = setInterval(async () => {
+      if (isEmerging && !isEmergingPollingWindow()) { get().stopPolling(); return; }
       try {
-        if (isMinuteInterval) {
-          // 分K：重抓完整分鐘資料（Fugle intraday）
+        if (isMinuteInterval || currentStock.marketBoard === 'emerging') {
+          // 興櫃重抓完整均價序列與換股事件，避免新舊面額混接；分K：重抓完整分鐘資料（Fugle intraday）
           const res = await fetch(
             `/api/stock?symbol=${encodeURIComponent(quoteSymbol)}&interval=${interval}&period=${period}`
           );
           if (!res.ok) return;
           const json = await res.json();
           const candles = computeIndicators(json.candles);
-          if (candles.length === 0) return;
+          if (candles.length === 0 || get().currentStock?.ticker !== quoteSymbol || get().currentInterval !== interval) return;
           const { currentIndex, allCandles, account } = get();
           const wasAtEnd = currentIndex >= allCandles.length - 1;
           const newIndex = wasAtEnd ? candles.length - 1 : currentIndex;
           precomputeMarkers(candles);
-          set({ allCandles: candles, currentIndex: newIndex, ...buildState(candles, newIndex, account) });
+          set({ allCandles: candles, currentIndex: newIndex, currentStock: { ...currentStock, adjustmentStatus: json.adjustmentStatus, splitEvents: json.splitEvents }, ...(isEmerging && !json.stale ? { dataGaps: get().dataGaps.filter(g => g.kind !== 'stale') } : {}), ...buildState(candles, newIndex, account) });
         } else {
           // 日K/週K/月K：只更新今日最後一根 bar，避免重讀 2 年 L1 觸發 bulk preload
           const res = await fetch(`/api/stock/quote?symbol=${encodeURIComponent(quoteSymbol)}`);

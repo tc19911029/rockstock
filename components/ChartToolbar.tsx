@@ -272,7 +272,7 @@ export default function ChartToolbar({
         )}
         <span className={`text-xs shrink-0 ${isHover ? 'text-blue-400' : 'text-muted-foreground'}`}>{candle.date}</span>
         <span className={`text-lg font-bold tabular-nums shrink-0 ${isUp ? 'text-bull' : 'text-bear'}`}>
-          {candle.close.toFixed(2)}
+          {candle.priceBasis === 'esb-average' && <span className="text-xs mr-1">均價</span>}{candle.close.toFixed(2)}
         </span>
         <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${isUp ? 'bg-bull/20 text-bull' : 'bg-bear/20 text-bear'}`}>
           {isUp ? '▲' : '▼'}{Math.abs(chg).toFixed(2)} ({Math.abs(chgPct).toFixed(2)}%)
@@ -290,7 +290,7 @@ export default function ChartToolbar({
         )}
         {market && <MarketTrendBadge market={market} scanDate={scanDate ?? null} />}
         <div className="flex items-center gap-x-2 text-[11px] shrink-0">
-          <span className="text-muted-foreground/70">開<span className="text-foreground/90 ml-0.5 tabular-nums">{candle.open.toFixed(2)}</span></span>
+          <span className="text-muted-foreground/70">{candle.priceBasis === 'esb-average' ? '均' : '開'}<span className="text-foreground/90 ml-0.5 tabular-nums">{candle.open.toFixed(2)}</span></span>
           <span className="text-muted-foreground/70">高<span className="text-bull ml-0.5 tabular-nums">{candle.high.toFixed(2)}</span></span>
           <span className="text-muted-foreground/70">低<span className="text-bear ml-0.5 tabular-nums">{candle.low.toFixed(2)}</span></span>
           <span className="text-muted-foreground/70">量{usesTwVolumeUnit ? '(張)' : isCN ? '(手)' : ''}<span className="text-foreground/70 ml-0.5 tabular-nums">{(isCN ? Math.round(candle.volume / 100) : candle.volume).toLocaleString()}</span></span>

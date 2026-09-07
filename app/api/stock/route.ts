@@ -240,6 +240,20 @@ export async function GET(req: NextRequest) {
 
   const { candidates, isTW, isCN } = resolveSymbol(symbol);
   const pureCode = symbol.replace(/\.(SZ|SS|TW|TWO)$/i, '');
+  // 興櫃先於 L1 與上市櫃 fallback：不得把最後成交價快取接到官方均價。
+  if (isTW && /^\d{4,5}$/.test(pureCode)) {
+    try {
+      const { resolveEmergingCompany, fetchEmergingChart } = await import('@/lib/datasource/TpexEmergingProvider');
+      const company = await resolveEmergingCompany(symbol);
+      if (company) {
+        if (!['1d', '1wk', '1mo'].includes(interval)) return apiError('興櫃目前僅提供日、週、月行情', 404);
+        return apiOk(await fetchEmergingChart(company, period, interval, scanDate),
+          { headers: { 'Cache-Control': 'no-store' } });
+      }
+    } catch (error) {
+      return apiError(error instanceof Error ? error.message : '興櫃資料載入失敗，請稍後重試', 502);
+    }
+  }
   // CN 指數（000001.SS 上證 / 000300.SS 滬深300）：pureCode='000001'/'000300' 會撞到深市
   // 平安銀行(000001.SZ) 等同碼個股 → L2 快照比對必須用完整 symbol，且不可走 EastMoney 個股報價
   // （它對指數會誤回平安銀行的價，~10.83）。對齊 /api/stock/quote 的指數處理。

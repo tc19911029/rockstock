@@ -115,3 +115,6 @@ playwright/.cache/
 
 # Claude Code session-local files (settings, worktrees)
 .claude/
+
+# Official emerging-market quotes, history and split events (regenerated)
+/data/emerging-cache/

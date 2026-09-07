@@ -55,6 +55,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  if (/^\d{4,5}(?:\.TW|\.TWO)?$/i.test(symbol)) {
+    try {
+      const { resolveEmergingCompany, fetchEmergingQuote } = await import('@/lib/datasource/TpexEmergingProvider');
+      const company = await resolveEmergingCompany(symbol);
+      if (company) {
+        const quote = await fetchEmergingQuote(company.code);
+        return quote ? apiOk({ symbol: `${company.code}.TWO`, ...quote }) : apiError('興櫃目前無成交均價', 404);
+      }
+    } catch { return apiError('興櫃報價來源暫時無法取得', 502); }
+  }
   const pureCode = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   // suffix 權威：.SS/.SZ → CN；.TW/.TWO → TW；無 suffix 用位數 fallback（4-5 位 TW、6 位 CN）
   const hasCnSuffix = /\.(SS|SZ)$/i.test(symbol);

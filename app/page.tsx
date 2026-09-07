@@ -551,11 +551,13 @@ function HomePage() {
     || indicators.retail || indicators.h400 || indicators.h1000 || showHolderLine;
   const anyCnChipOn = indicators.cnMain || indicators.cnRetail;
   const ticker = currentStock?.ticker ?? '';
+  const isEmerging = currentStock?.marketBoard === 'emerging';
+  const emergingNotice = '興櫃採官方成交均價，高低價保留；圖中開收位置均為均價，六條件與 K 線型態訊號不適用。';
   const priceContinuityIssue = useMemo(
-    () => currentInterval === '1d'
+    () => currentInterval === '1d' && !isEmerging
       ? findRecentPriceDiscontinuity(allCandles.slice(0, currentIndex + 1))
       : null,
-    [allCandles, currentIndex, currentInterval],
+    [allCandles, currentIndex, currentInterval, isEmerging],
   );
   const isTwTicker = /\.(TW|TWO)$/i.test(ticker) || /^\d{4,5}$/.test(ticker);
   const isCnTicker = /\.(SS|SZ)$/i.test(ticker) || /^\d{6}$/.test(ticker);
@@ -1018,14 +1020,18 @@ function HomePage() {
     >
       {sideTab === 'conditions' && (
         <SectionBoundary section="買法條件" resetKey={`${currentStock?.ticker ?? 'none'}:${currentDate ?? 'none'}:conditions`}>
-          {priceContinuityIssue
+          {isEmerging
+            ? <div className="rounded border border-sky-500/35 bg-sky-500/10 p-3 text-[11px] leading-relaxed text-sky-100">{emergingNotice}</div>
+            : priceContinuityIssue
             ? <div role="alert" className="rounded border border-amber-500/35 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-100">近期價格序列在 {priceContinuityIssue.date} 出現 {(priceContinuityIssue.changeRatio * 100).toFixed(1)}% 斷層，可能是股票分割、面額變更或未還原公司行動。六條件暫停判讀，避免均線與型態產生假訊號。</div>
             : showSanseView ? <SanSeConditionsPanel report={sanseConditions} /> : <ConditionsPanelSwitch wConds={wConds} xConds={xConds} yConds={yConds} chipTables={chipTables} />}
         </SectionBoundary>
       )}
       {sideTab === 'signals' && (
         <SectionBoundary section="訊號分析" resetKey={`${currentStock?.ticker ?? 'none'}:${currentDate ?? 'none'}:signals`}>
-          {priceContinuityIssue
+          {isEmerging
+            ? <div className="rounded border border-sky-500/35 bg-sky-500/10 p-3 text-[11px] leading-relaxed text-sky-100">{emergingNotice}</div>
+            : priceContinuityIssue
             ? <div role="alert" className="rounded border border-amber-500/35 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-100">技術訊號已暫停：{priceContinuityIssue.date} 的價格斷層會污染 MA、K 線型態與趨勢。待資料完成還原或斷層離開近期技術視窗後再判讀。</div>
             : showSanseView ? <SanSeSignalsPanel report={sanseConditions} market={isCnTicker ? 'CN' : 'TW'} catchTrigger={sanseCatchTrigger} /> : <SignalSummaryCard />}
         </SectionBoundary>
@@ -1205,6 +1211,16 @@ function HomePage() {
             }
             topAlertSlot={
               <>
+                {isEmerging && (
+                  <div className="shrink-0 px-3 py-2 bg-sky-500/10 border-b border-sky-500/30 text-sky-200 text-xs">
+                    <strong>興櫃・成交均價</strong>：{emergingNotice}
+                    {currentStock?.adjustmentStatus === 'unavailable'
+                      ? <span className="text-amber-300"> 換股事件暫時無法取得，價格尚未還原，均線指標暫勿判讀。</span>
+                      : <> 已自動核對換股事件，歷史價格與成交量換算至最新股數基準。
+                        {currentStock?.splitEvents?.map(e => <span key={e.date}> {e.date} 每股換 {e.ratio} 股。</span>)}
+                      </>}
+                  </div>
+                )}
                 {priceContinuityIssue && (
                   <div role="alert" className="shrink-0 border-b border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-100">
                     <span className="font-semibold">價格連續性警示：</span>
@@ -1248,7 +1264,7 @@ function HomePage() {
                     <div className="shrink-0 px-3 py-1.5 bg-yellow-500/10 border-b border-yellow-500/30 text-yellow-400 text-xs flex items-center justify-between gap-2">
                       <span>
                         {halts.length > 0 && (
-                          <>停牌 {halts.map((g) => `${g.fromDate} → ${g.toDate}（${g.calendarDays}天無交易）`).join('、')}</>
+                          <>行情缺段（待核對停牌或缺資料） {halts.map((g) => `${g.fromDate} → ${g.toDate}（相隔 ${g.calendarDays} 天）`).join('、')}</>
                         )}
                         {halts.length > 0 && stale && <span className="mx-1">·</span>}
                         {stale && (
@@ -1280,7 +1296,7 @@ function HomePage() {
                 onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
-                showYangEma={showYangEma}
+                showYangEma={!isEmerging && showYangEma}
                 onYangEmaToggle={handleYangEmaToggle}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
@@ -1294,21 +1310,21 @@ function HomePage() {
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
                 onSignalStrengthChange={setSignalStrengthMin}
-                showPivots={showPivots}
+                showPivots={!isEmerging && showPivots}
                 onPivotsToggle={() => setShowPivots(v => !v)}
-                showSupportResistance={showSupportResistance}
+                showSupportResistance={!isEmerging && showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
-                showCandleSR={showCandleSR}
+                showCandleSR={!isEmerging && showCandleSR}
                 onCandleSRToggle={() => setShowCandleSR(v => !v)}
-                showNeckline={showNeckline}
+                showNeckline={!isEmerging && showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
-                showPattern={showPattern}
+                showPattern={!isEmerging && showPattern}
                 onPatternToggle={() => setShowPattern(v => !v)}
                 showAscendingLine={showAscendingTrendline || showAscendingChannel}
                 onAscendingLineToggle={toggleAscendingLine}
                 showDescendingLine={showDescendingTrendline || showDescendingChannel}
                 onDescendingLineToggle={toggleDescendingLine}
-                showConsolidationLines={showConsolidationLines}
+                showConsolidationLines={!isEmerging && showConsolidationLines}
                 onConsolidationLinesToggle={() => setShowConsolidationLines(v => !v)}
                 avgCost={metrics.avgCost}
                 shares={metrics.shares}
@@ -1328,8 +1344,8 @@ function HomePage() {
             )}
             chartProps={{
               candles: visibleCandles,
-              signals: priceContinuityIssue ? [] : currentSignals,
-              chartMarkers: priceContinuityIssue
+              signals: (isEmerging || priceContinuityIssue) ? [] : currentSignals,
+              chartMarkers: (isEmerging || priceContinuityIssue)
                 ? []
                 : [...(showMarkers ? mergedMarkers : []), ...blowoffMarkers],
               avgCost: metrics.shares > 0 ? metrics.avgCost : undefined,
@@ -1341,21 +1357,21 @@ function HomePage() {
               },
               maToggles,
               showBollinger,
-              showYangEma,
-              showPivots,
-              showSupportResistance,
-              showCandleSR,
-              showAscendingTrendline,
-              showDescendingTrendline,
-              showAscendingChannel,
-              showDescendingChannel,
-              showConsolidationLines,
-              showNeckline,
-              showPattern,
+              showYangEma: !isEmerging && showYangEma,
+              showPivots: !isEmerging && showPivots,
+              showSupportResistance: !isEmerging && showSupportResistance,
+              showCandleSR: !isEmerging && showCandleSR,
+              showAscendingTrendline: !isEmerging && showAscendingTrendline,
+              showDescendingTrendline: !isEmerging && showDescendingTrendline,
+              showAscendingChannel: !isEmerging && showAscendingChannel,
+              showDescendingChannel: !isEmerging && showDescendingChannel,
+              showConsolidationLines: !isEmerging && showConsolidationLines,
+              showNeckline: !isEmerging && showNeckline,
+              showPattern: !isEmerging && showPattern,
               highlightDate: targetDate ?? undefined,
-              lockedPattern,
-              shuangB: shuangBOverlay,
-              abcOverlay,
+              lockedPattern: isEmerging ? undefined : lockedPattern,
+              shuangB: isEmerging ? undefined : shuangBOverlay,
+              abcOverlay: isEmerging ? undefined : abcOverlay,
               holderLine: holderLineOverlay,
               holderLineLabel: holderTier.label,
             }}
@@ -1650,7 +1666,7 @@ function HomePage() {
                 onMaToggle={handleMaToggle}
                 showBollinger={showBollinger}
                 onBollingerToggle={() => setShowBollinger(v => !v)}
-                showYangEma={showYangEma}
+                showYangEma={!isEmerging && showYangEma}
                 onYangEmaToggle={handleYangEmaToggle}
                 indicators={indicators}
                 onIndicatorToggle={key => setIndicators(p => ({ ...p, [key]: !p[key] }))}
@@ -1664,21 +1680,21 @@ function HomePage() {
                 onMarkersToggle={() => setShowMarkers(v => !v)}
                 signalStrengthMin={signalStrengthMin}
                 onSignalStrengthChange={setSignalStrengthMin}
-                showPivots={showPivots}
+                showPivots={!isEmerging && showPivots}
                 onPivotsToggle={() => setShowPivots(v => !v)}
-                showSupportResistance={showSupportResistance}
+                showSupportResistance={!isEmerging && showSupportResistance}
                 onSupportResistanceToggle={() => setShowSupportResistance(v => !v)}
-                showCandleSR={showCandleSR}
+                showCandleSR={!isEmerging && showCandleSR}
                 onCandleSRToggle={() => setShowCandleSR(v => !v)}
-                showNeckline={showNeckline}
+                showNeckline={!isEmerging && showNeckline}
                 onNecklineToggle={() => setShowNeckline(v => !v)}
-                showPattern={showPattern}
+                showPattern={!isEmerging && showPattern}
                 onPatternToggle={() => setShowPattern(v => !v)}
                 showAscendingLine={showAscendingTrendline || showAscendingChannel}
                 onAscendingLineToggle={toggleAscendingLine}
                 showDescendingLine={showDescendingTrendline || showDescendingChannel}
                 onDescendingLineToggle={toggleDescendingLine}
-                showConsolidationLines={showConsolidationLines}
+                showConsolidationLines={!isEmerging && showConsolidationLines}
                 onConsolidationLinesToggle={() => setShowConsolidationLines(v => !v)}
                 avgCost={metrics.avgCost}
                 shares={metrics.shares}
@@ -1710,29 +1726,29 @@ function HomePage() {
                   <ErrorBoundary section="K線圖" resetKey={`${chartResetKey}:mobile-main`}>
                     <CandleChart
                       candles={visibleCandles}
-                      signals={priceContinuityIssue ? [] : currentSignals}
-                      chartMarkers={priceContinuityIssue ? [] : (showMarkers ? mergedMarkers : [])}
+                      signals={(isEmerging || priceContinuityIssue) ? [] : currentSignals}
+                      chartMarkers={(isEmerging || priceContinuityIssue) ? [] : (showMarkers ? mergedMarkers : [])}
                       avgCost={metrics.shares > 0 ? metrics.avgCost : undefined}
                       stopLossPrice={stopLossPrice}
                       onCrosshairMove={setHoverCandle}
                       fillContainer
                       maToggles={maToggles}
                       showBollinger={showBollinger}
-                      showYangEma={showYangEma}
-                      showPivots={showPivots}
-                      showSupportResistance={showSupportResistance}
-                      showCandleSR={showCandleSR}
-                      showAscendingTrendline={showAscendingTrendline}
-                      showDescendingTrendline={showDescendingTrendline}
-                      showAscendingChannel={showAscendingChannel}
-                      showDescendingChannel={showDescendingChannel}
-                      showConsolidationLines={showConsolidationLines}
-                      showNeckline={showNeckline}
-                      showPattern={showPattern}
+                      showYangEma={!isEmerging && showYangEma}
+                      showPivots={!isEmerging && showPivots}
+                      showSupportResistance={!isEmerging && showSupportResistance}
+                      showCandleSR={!isEmerging && showCandleSR}
+                      showAscendingTrendline={!isEmerging && showAscendingTrendline}
+                      showDescendingTrendline={!isEmerging && showDescendingTrendline}
+                      showAscendingChannel={!isEmerging && showAscendingChannel}
+                      showDescendingChannel={!isEmerging && showDescendingChannel}
+                      showConsolidationLines={!isEmerging && showConsolidationLines}
+                      showNeckline={!isEmerging && showNeckline}
+                      showPattern={!isEmerging && showPattern}
                       highlightDate={targetDate ?? undefined}
-                      lockedPattern={lockedPattern}
-                      shuangB={shuangBOverlay}
-                      abcOverlay={abcOverlay}
+                      lockedPattern={isEmerging ? undefined : lockedPattern}
+                      shuangB={isEmerging ? undefined : shuangBOverlay}
+                      abcOverlay={isEmerging ? undefined : abcOverlay}
                       holderLine={holderLineOverlay}
                       holderLineLabel={holderTier.label}
                     />

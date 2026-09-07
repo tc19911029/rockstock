@@ -268,3 +268,10 @@ export function getLastTradingDay(market: 'TW' | 'CN'): string {
 
   return result;
 }
+
+/** 興櫃 09:00–15:00，另留 30 分鐘供盤後定稿。 */
+export function isEmergingPollingWindow(now = new Date()): boolean {
+  const { hour, min } = getLocalTime('Asia/Taipei', now);
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(now);
+  return isTradingDay(day, 'TW') && hour * 60 + min >= 540 && hour * 60 + min <= 930;
+}

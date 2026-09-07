@@ -10,6 +10,8 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
+  /** 興櫃官方均價，非開收盤價；不得用於 K 線型態訊號。 */
+  priceBasis?: 'esb-average';
 }
 
 /** Candle with computed technical indicators */
@@ -65,6 +67,9 @@ export interface CandleWithIndicators extends Candle {
 
 /** Stock info returned from API */
 export interface StockInfo {
+  marketBoard?: 'emerging';
+  adjustmentStatus?: 'adjusted' | 'unavailable';
+  splitEvents?: Array<{ date: string; ratio: number }>;
   ticker: string;
   name: string;
 }
