@@ -33,7 +33,7 @@ jest.mock('@/lib/datasource/twOfficialCloseState', () => ({
   readTWOfficialCloseState: (...args: unknown[]) => readTWOfficialCloseState(...args),
 }));
 
-import { buildFreshSnapshotFallback, enrichQuoteNames, fetchFinalL1Quotes, fetchSameDayTWCloseQuotes, fetchTWDisplayQuotes, resolveQuoteEntries } from '@/app/api/portfolio/quotes/route';
+import { buildFreshSnapshotFallback, enrichQuoteNames, fetchFinalL1Quotes, fetchCNDisplayQuotes, fetchSameDayTWCloseQuotes, fetchTWDisplayQuotes, resolveQuoteEntries } from '@/app/api/portfolio/quotes/route';
 
 describe('休市持倉報價', () => {
   beforeEach(() => {
@@ -128,6 +128,71 @@ describe('休市持倉報價', () => {
       symbol: '002821.SZ', canonicalSymbol: '002821.SZ', name: '凱萊英', price: 182.4, changePercent: 6.92,
       asOf: '2026-08-20', source: 'l2', stale: false, status: 'final', updatedAt: '2026-08-20T07:47:17.256Z',
     }]);
+  });
+
+  describe('陸股收盤後日 K 與快照銜接', () => {
+    const entries = [
+      { original: '600519', resolved: '600519.SS', market: 'CN' as const },
+      { original: '000001.SZ', resolved: '000001.SZ', market: 'CN' as const },
+      { original: '300750.SZ', resolved: '300750.SZ', market: 'CN' as const },
+    ];
+    const now = new Date('2026-09-07T07:48:00Z');
+    const snapshot = {
+      market: 'CN', date: '2026-09-07', updatedAt: '2026-09-07T07:30:39Z', count: 3,
+      quotes: [
+        { symbol: '600519', close: 1316.01, changePercent: -1.05 },
+        { symbol: '000001', close: 11.71, changePercent: -1.51 },
+        { symbol: '300750', close: 348.2, changePercent: -0.8 },
+      ],
+    };
+
+    beforeEach(() => {
+      readCandleFile.mockImplementation(async (symbol: string) => {
+        if (symbol === '600519.SS') return { candles: [{ date: '2026-09-04', close: 1330 }] };
+        if (symbol === '000001.SZ') return { candles: [{ date: '2026-09-07', close: 11.7 }] };
+        return null;
+      });
+      readIntradaySnapshot.mockResolvedValue(snapshot);
+    });
+
+    test('15:48 舊 L1 與缺檔改用今日快照，同日 L1 保持優先且保留請求 key', async () => {
+      await expect(fetchCNDisplayQuotes(entries, now)).resolves.toEqual([
+        expect.objectContaining({ symbol: '600519', price: 1316.01, asOf: '2026-09-07', source: 'l2-provisional-close', status: 'provisional-close', stale: false }),
+        expect.objectContaining({ symbol: '000001.SZ', price: 11.7, source: 'l1' }),
+        expect.objectContaining({ symbol: '300750.SZ', price: 348.2, source: 'l2-provisional-close' }),
+      ]);
+    });
+
+    test.each(['frozen', 'old-date', 'missing', 'failed', 'missing-symbol'])(
+      '快照不可用（%s）時仍保留舊 L1 真實日期', async kind => {
+        if (kind === 'failed') readIntradaySnapshot.mockRejectedValue(new Error('unavailable'));
+        else readIntradaySnapshot.mockResolvedValue(
+          kind === 'missing' ? null : {
+            ...snapshot,
+            ...(kind === 'frozen' ? { updatedAt: '2026-09-07T06:58:00Z' } : {}),
+            ...(kind === 'old-date' ? { date: '2026-09-04' } : {}),
+            ...(kind === 'missing-symbol' ? { quotes: snapshot.quotes.slice(1) } : {}),
+          },
+        );
+        const quotes = await fetchCNDisplayQuotes(entries, now);
+        expect(quotes[0]).toMatchObject({ symbol: '600519', price: 1330, asOf: '2026-09-04', source: 'l1' });
+      },
+    );
+
+    test.each(['2026-09-07T01:00:00Z', '2026-09-06T07:48:00Z'])(
+      '盤前或週末（%s）不以 L2 替換 L1', async time => {
+        const quotes = await fetchCNDisplayQuotes(entries, new Date(time));
+        expect(quotes[0]).toMatchObject({ price: 1330, asOf: '2026-09-04', source: 'l1' });
+        expect(readIntradaySnapshot).not.toHaveBeenCalled();
+      },
+    );
+
+    test('日 K 到齊後不再讀快照', async () => {
+      await expect(fetchCNDisplayQuotes([entries[1]], now)).resolves.toEqual([
+        expect.objectContaining({ symbol: '000001.SZ', price: 11.7, source: 'l1' }),
+      ]);
+      expect(readIntradaySnapshot).not.toHaveBeenCalled();
+    });
   });
 
   test('陸股收盤前凍結的 L2 不得補進盤後報價', () => {

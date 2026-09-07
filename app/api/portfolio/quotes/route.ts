@@ -194,6 +194,38 @@ export async function fetchFinalL1Quotes(entries: ResolvedEntry[], market: 'TW' 
   return settled.filter((quote): quote is QuoteTick => quote !== null);
 }
 
+/** 陸股同交易日盤後：日 K 未到時，以通過收盤守門的 L2 暫時補價。 */
+export async function fetchCNDisplayQuotes(
+  entries: ResolvedEntry[],
+  now = new Date(),
+): Promise<QuoteTick[]> {
+  const l1Quotes = await fetchFinalL1Quotes(entries, 'CN');
+  if (!isAfterMarketClose('CN', now)) return l1Quotes;
+
+  const expectedDate = getQuoteSnapshotDate('CN', now);
+  const byOriginal = new Map(l1Quotes.map(quote => [quote.symbol, quote]));
+  const pending = entries.filter(entry => byOriginal.get(entry.original)?.asOf !== expectedDate);
+  if (pending.length === 0) return l1Quotes;
+
+  const snapshot = await readIntradaySnapshot('CN', expectedDate).catch(() => null);
+  if (snapshot) {
+    for (const quote of buildFreshSnapshotFallback(pending, 'CN', snapshot, now)) {
+      byOriginal.set(quote.symbol, {
+        ...quote,
+        source: 'l2-provisional-close',
+        status: 'provisional-close',
+        provisional: true,
+        marketSession: 'post_close_pending_official',
+      });
+    }
+  }
+  // 無有效快照時保留原始日期，交由出口標 delayed；不把舊價格改成今日。
+  return entries.flatMap(entry => {
+    const quote = byOriginal.get(entry.original);
+    return quote ? [quote] : [];
+  });
+}
+
 /**
  * 台股收盤後顯示採兩階段：
  * 1. 官方 L1 已有今日資料：立即以 L1 為準。
@@ -460,7 +492,7 @@ export async function GET(req: NextRequest) {
       ? readIntradaySnapshot('CN', getQuoteSnapshotDate('CN')).then(snapshot =>
           snapshot ? buildFreshSnapshotFallback(cnEntries, 'CN', snapshot) : []
         )
-      : cnLive ? fetchCNQuotes(cnEntries.map(e => e.resolved)) : fetchFinalL1Quotes(cnEntries, 'CN')
+      : cnLive ? fetchCNQuotes(cnEntries.map(e => e.resolved)) : fetchCNDisplayQuotes(cnEntries)
     ).then(qs =>
       qs.map(q => {
         const entry = cnEntries.find(e => e.resolved.replace(/\.(SS|SZ)$/i, '') === q.symbol.replace(/\.(SS|SZ)$/i, ''));
