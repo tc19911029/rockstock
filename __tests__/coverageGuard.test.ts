@@ -46,3 +46,10 @@ describe('assertL1Coverage', () => {
     });
   });
 });
+
+test('過期 verify 與 NaN 覆蓋率都必須拒絕', async () => {
+  mockedLoad.mockResolvedValue(report(1900, 0.98));
+  expect((await assertL1Coverage('TW', '2026-08-10')).ok).toBe(false);
+  mockedLoad.mockResolvedValue(report(1900, NaN));
+  expect((await assertL1Coverage('TW', '2026-08-07')).ok).toBe(false);
+});

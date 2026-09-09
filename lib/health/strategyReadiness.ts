@@ -1,4 +1,6 @@
 import type { MarketId, MtfMode, ScanDirection } from '@/lib/scanner/types';
+import { scanArtifactReason } from './strategyAudit';
+import { assertSanSeCatchupResult } from '@/lib/scanner/strategyCatchup';
 import { validateFundamentalSession } from '@/lib/strategy/fundamentalRevaluation/validation';
 
 export interface StrategyArtifactStatus {
@@ -51,7 +53,8 @@ export async function loadStrategyReadiness(
 
   const addScan = async (key: string, direction: ScanDirection, mode: MtfMode) => {
     const session = await loadPostCloseScanSession(market, date, direction, mode, strategyId);
-    artifacts.push({ key, ready: session !== null, ...(!session && { reason: 'missing' }) });
+    const reason = scanArtifactReason(session);
+    artifacts.push({ key, ready: !reason, ...(reason && { reason }) });
   };
 
   await Promise.all([
@@ -70,11 +73,13 @@ export async function loadStrategyReadiness(
   const sanse = market === 'TW'
     ? await (await import('@/lib/tw-sanse/scanStorage')).loadTwSanSeScan(date)
     : await (await import('@/lib/cn-sanse/scanStorage')).loadSanSeScan(date);
-  artifacts.push({
-    key: 'SanSe',
-    ready: !!sanse && sanse.evaluated > 0,
-    ...(!sanse ? { reason: 'missing' } : sanse.evaluated <= 0 ? { reason: 'evaluated=0' } : {}),
-  });
+  let sanseReason: string | undefined;
+  if (!sanse) sanseReason = 'missing';
+  else {
+    try { assertSanSeCatchupResult(date, sanse); }
+    catch (error) { sanseReason = error instanceof Error ? error.message : String(error); }
+  }
+  artifacts.push({ key: 'SanSe', ready: !sanseReason, ...(sanseReason && { reason: sanseReason }) });
 
   if (market === 'TW') {
     const fundamental = await (await import('@/lib/strategy/fundamentalRevaluation/storage'))

@@ -1,5 +1,7 @@
 'use client';
 
+import type { StrategyAudit } from '@/lib/health/strategyAudit';
+
 /**
  * /health → 行情 tab
  *
@@ -133,12 +135,21 @@ export function MarketDataTab() {
   const [tw, setTw] = useState<MarketHealthLite | null>(null);
   const [cn, setCn] = useState<MarketHealthLite | null>(null);
   const [dependencies, setDependencies] = useState<DependencyHealth | null>(null);
+  const [audits, setAudits] = useState<(StrategyAudit & { stale: boolean })[]>([]);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
       setFetchError(null);
+      const auditResults = await Promise.allSettled(['TW', 'CN'].map(async market => {
+        const response = await fetch(`/api/health/strategy-history?market=${market}`, { signal: AbortSignal.timeout(10_000) });
+        if (!response.ok) throw new Error(`${market} 巡檢報告未就緒`);
+        return response.json() as Promise<StrategyAudit & { stale: boolean }>;
+      }));
+      setAudits(auditResults.flatMap(r => r.status === 'fulfilled' ? [r.value] : []));
+      setAuditError(auditResults.some(r => r.status === 'rejected') ? '部分策略巡檢報告無法讀取，完整性未知' : null);
       const [twResult, cnResult, depResult] = await Promise.allSettled([
         fetch('/api/health/data?market=TW').then(r => r.json()),
         fetch('/api/health/data?market=CN').then(r => r.json()),
@@ -184,10 +195,25 @@ export function MarketDataTab() {
       tip: '今日資料不完整或邏輯異常。請依下方提示動手或聯繫維護。',
     },
   };
-  const cfg = lightConfig[overall];
+  const cfg = lightConfig[auditError || audits.some(a => a.stale || a.status !== 'ready') ? 'red' : overall];
 
   return (
     <div className="space-y-6">
+      <section className="rounded-lg border p-4 space-y-2">
+        <h3 className="font-semibold">策略歷史完整性（最近 22 個交易日）</h3>
+        {auditError && <p role="alert" className="text-red-400">{auditError}</p>}
+        {audits.map(a => <div key={a.market}>
+          <p className={a.stale || a.status !== 'ready' ? 'text-amber-400' : 'text-green-400'}>
+            {a.market === 'TW' ? '台股' : '陸股'} · 截至 {a.endDate} · {a.stale ? '巡檢已過期' : a.status === 'checking' ? '檢查／補跑中' : a.status === 'ready' ? '完整' : `尚有 ${a.gaps.length} 份未完成`} · 檢查時間 {fmtTime(a.checkedAt)}
+          </p>
+          {a.gaps.length > 0 && <details><summary className="cursor-pointer">查看缺日及原因</summary>
+            <ul className="text-sm text-muted-foreground space-y-1">{a.gaps.map(g => <li key={`${g.date}-${g.key}`}>
+              {g.date} {g.key}：{g.detail ?? g.reason}（補跑 {g.attempts} 次）
+            </li>)}</ul>
+          </details>}
+        </div>)}
+        <p className="text-xs text-muted-foreground">完整掃描但沒有符合股票屬於正常結果；缺資料、未完成與過期報告不算完整。</p>
+      </section>
       {/* 總體紅綠燈 */}
       <div className={`rounded-lg border p-6 ${cfg.bg}`}>
         <div className="flex items-center gap-4">

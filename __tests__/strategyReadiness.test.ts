@@ -1,10 +1,10 @@
 import { loadStrategyReadiness, summarizeStrategyArtifacts } from '@/lib/health/strategyReadiness';
 
 jest.mock('@/lib/storage/scanStorage', () => ({
-  loadPostCloseScanSession: jest.fn(async () => ({ resultCount: 0 })),
+  loadPostCloseScanSession: jest.fn(async () => ({ resultCount: 0, results: [] })),
 }));
 jest.mock('@/lib/cn-sanse/scanStorage', () => ({
-  loadSanSeScan: jest.fn(async () => ({ evaluated: 1 })),
+  loadSanSeScan: jest.fn(async () => ({ evaluated: 1, staleSkipped: 0, lastDate: '2026-08-17' })),
 }));
 
 describe('strategy readiness summary', () => {

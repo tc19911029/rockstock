@@ -41,6 +41,10 @@ export async function assertL1Coverage(
   const cr = report.summary.coverageRate;
   const totalStocks = report.summary.totalStocks;
   const stocksCurrent = report.summary.stocksCurrent ?? Math.round(totalStocks * cr);
+  if (report.market !== market || report.date !== date || !Number.isFinite(cr) || cr < 0 || cr > 1
+    || !Number.isInteger(totalStocks) || !Number.isInteger(stocksCurrent) || stocksCurrent < 0 || stocksCurrent > totalStocks) {
+    return { ok: false, reason: 'L1 verify 日期、市場或覆蓋率數值無效', coverageRate: cr, totalStocks, stocksCurrent };
+  }
   // Jest／隔離環境可能只 mock loadVerifyReport；保留本地 fail-safe，避免完整性守門
   // 因測試替身未匯出常數而失效。正式執行仍以寫入邊界的共用常數為準。
   const minUniverse = MIN_VERIFY_UNIVERSE?.[market] ?? (market === 'TW' ? 1500 : 2700);

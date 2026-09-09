@@ -138,7 +138,7 @@ export async function GET(req: NextRequest) {
     // ── Step 1 池子狀態（盤中：14:02 後才有；'missing' 是常見狀態） ──
     const { loadStep1Pool, deriveStep1FilterState } = await import('@/lib/scanner/step1Pool');
     const step1Pool = await loadStep1Pool(market, date, strategy.id);
-    const poolExists = !!step1Pool && step1Pool.symbols.length > 0;
+    const poolExists = !!step1Pool; // 空池代表完成掃描但無符合股票，並非缺資料。
 
     // ── Sequential per-method scan ─────────────────────────────────
     const summary: Record<string, { count: number; step1Filter: string }> = {};

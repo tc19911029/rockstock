@@ -17,10 +17,40 @@ cron_secret="$(<"$secret_file")"
 base_url="http://localhost:3000"
 lock_dir="/tmp/rockstock-strategy-eod-${market}.lock"
 if ! mkdir "$lock_dir" 2>/dev/null; then
-  echo "${market} strategy EOD already running; skip duplicate trigger"
-  exit 0
+  # Recover a lock left by a terminated previous run; never displace a live owner.
+  mkdir "${lock_dir}.recovery" 2>/dev/null || exit 1
+  owner_pid="$(cat "$lock_dir/pid" 2>/dev/null)"
+  if [[ "$owner_pid" == <-> ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+    if ! (rm "$lock_dir/pid" && rmdir "$lock_dir" && mkdir "$lock_dir"); then
+      rmdir "${lock_dir}.recovery"
+      exit 1
+    fi
+  else
+    rmdir "${lock_dir}.recovery"
+    echo "${market} strategy EOD lock active or owner unknown; not starting duplicate" >&2
+    exit 1
+  fi
+  rmdir "${lock_dir}.recovery"
 fi
-trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT INT TERM
+echo $$ > "$lock_dir/pid"
+repo_root="$HOME/Desktop/rockstock"
+tsx_cli="$HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs"
+finish_pipeline() {
+  prior_status=$?
+  trap - EXIT
+  # Even an early A/index failure must leave a durable gap report.
+  repair_args=(--repair)
+  if [[ "$prior_status" -eq 130 || "$prior_status" -eq 143 ]]; then repair_args=(); fi
+  (cd "$repo_root" && "$HOME/.local/node-22/bin/node" "$tsx_cli" scripts/audit-strategy-history.ts "$market" "${repair_args[@]}")
+  audit_status=$?
+  rm -f "$lock_dir/pid"
+  rmdir "$lock_dir" 2>/dev/null || true
+  if [[ "$prior_status" -ne 0 || "$audit_status" -ne 0 ]]; then exit 1; fi
+  exit 0
+}
+trap finish_pipeline EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 run_endpoint() {
   label="$1"
@@ -98,7 +128,9 @@ else
   failures=$((failures + 1))
 fi
 
-run_endpoint "V" "/api/cron/scan-fundamental-revaluation?market=${market}" || failures=$((failures + 1))
+if [[ "$market" == "TW" ]]; then
+  run_endpoint "V" "/api/cron/scan-fundamental-revaluation?market=${market}" || failures=$((failures + 1))
+fi
 if [[ "$market" == "TW" ]]; then
   run_endpoint "Y" "/api/cron/scan-inststeal-track" || failures=$((failures + 1))
 fi

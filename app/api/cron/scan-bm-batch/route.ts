@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
   try {
     // ── Imports ──────────────────────────────────────────────────────
     const { saveScanSession } = await import('@/lib/storage/scanStorage');
-    const { readTurnoverRank } = await import('@/lib/scanner/TurnoverRank');
+    const { computeTurnoverRankAsOfDate } = await import('@/lib/scanner/TurnoverRank');
     const { triggerPreload: triggerL1 } = await import('@/lib/datasource/L1CandleCache');
     const { appendLockWatchRecords } = await import('@/lib/storage/lockWatchStorage');
     const { createLockWatchFromF, createLockWatchFromN } = await import('@/lib/scanner/lockWatchManager');
@@ -107,19 +107,10 @@ export async function GET(req: NextRequest) {
     if (stocks.length < MIN_STOCK_COUNT) {
       throw new Error(`[scan-bm-batch] ${market} stocks=${stocks.length} < ${MIN_STOCK_COUNT}`);
     }
-    let turnoverRanks: Map<string, number> | null = null;
-    try {
-      const { BOOK_UNIVERSE_TOP_N } = await import('@/lib/scanner/universeTopN');
-      const rank = await readTurnoverRank(market);
-      if (rank && rank.symbols.size > 0) {
-        // 書本池 = 名次 ≤ BOOK_UNIVERSE_TOP_N（CN 索引收錄 800 是給三色的，不可整份當池子）
-        stocks = stocks.filter(s => {
-          const r = rank.ranks.get(s.symbol);
-          return r != null && r <= BOOK_UNIVERSE_TOP_N;
-        });
-        turnoverRanks = rank.ranks;
-      }
-    } catch { /* 不致命 */ }
+    const { BOOK_UNIVERSE_TOP_N } = await import('@/lib/scanner/universeTopN');
+    const turnoverRanks = await computeTurnoverRankAsOfDate(market, stocks, date, BOOK_UNIVERSE_TOP_N);
+    if (turnoverRanks.size === 0) throw new Error(`${market} ${date}: empty historical turnover universe`);
+    stocks = stocks.filter(s => turnoverRanks.has(s.symbol));
 
     // ── Market trend（共用一次）──────────────────────────────────
     let marketTrend: string | undefined;
@@ -131,7 +122,9 @@ export async function GET(req: NextRequest) {
     // ── Step 1 池子狀態（共用一次給整批 method 用）─────────────────────
     const { loadStep1Pool, deriveStep1FilterState } = await import('@/lib/scanner/step1Pool');
     const step1Pool = await loadStep1Pool(market, date, strategy.id);
-    const poolExists = !!step1Pool && step1Pool.symbols.length > 0;
+    const poolExists = !!step1Pool; // 空池代表完成掃描但無符合股票，並非缺資料。
+
+    if (track === 'bullish' && !poolExists) throw new Error(`${market} ${date}: Step 1 pool missing; refusing empty output`);
 
     // ── Sequential per-method scan（避免並行重複算 L1 cache 預熱）──
     const summary: Record<string, { count: number; lockWatch: number }> = {};

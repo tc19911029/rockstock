@@ -1,3 +1,4 @@
+import { scanArtifactReason } from '@/lib/health/strategyAudit';
 import type { MarketId, MtfMode, ScanDirection } from './types';
 
 export interface ScanCompletionCheck {
@@ -34,6 +35,10 @@ export async function verifyPostCloseScanCompletion(options: {
       );
       if (!session) {
         missing.push(key);
+        continue;
+      }
+      if (scanArtifactReason(session)) {
+        stale.push(key);
         continue;
       }
       if (options.startedAt != null) {

@@ -71,3 +71,9 @@ describe('post-close scan completion', () => {
     expect(result.stale).toEqual(['long-daily', 'long-mtf', 'short-daily', 'short-mtf']);
   });
 });
+
+test('HTTP 成功後仍不得把錯誤筆數的封存檔判定完成', async () => {
+  mockedLoad.mockResolvedValue({ ...session('long', false, '2026-08-06T10:00:02Z'), resultCount: 2 });
+  await expect(verifyPostCloseScanCompletion({ market: 'TW', date: '2026-08-06', directions: ['long'], mtfModes: ['daily'] }))
+    .resolves.toEqual({ completed: false, missing: [], stale: ['long-daily'] });
+});
