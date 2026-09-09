@@ -1,22 +1,19 @@
 /**
- * 用當前 cn_stocklist.json 重生 verify report（不需 download）。
+ * 用正式掃描母體（含創業板／科創板）重生 verify report（不需 download）。
  * 用於 prune-cn-delisted 後立刻看新 coverageRate。
  */
-import { promises as fs } from 'fs';
-import path from 'path';
 import { verifyDownload } from '../lib/datasource/DownloadVerifier';
 import { getLastTradingDay } from '../lib/datasource/marketHours';
+import { ChinaScanner } from '../lib/scanner/ChinaScanner';
 
 async function main() {
   const market = 'CN' as const;
   const lastTrading = getLastTradingDay(market);
-  const stocklistPath = path.join('data', 'cn_stocklist.json');
-  const data = JSON.parse(await fs.readFile(stocklistPath, 'utf-8')) as {
-    stocks: { symbol: string }[];
-  };
-  const symbols = data.stocks.map(s => s.symbol);
+  // cn_stocklist.json 只有主板；漏掉 GEM/STAR 會虛增覆蓋率，錯誤放行盤後策略。
+  const stocks = await new ChinaScanner().getStockList();
+  const symbols = stocks.map(s => s.symbol);
   console.log(`==> 重生 ${market} ${lastTrading} verify report`);
-  console.log(`    cn_stocklist.json: ${symbols.length} 支`);
+  console.log(`    ChinaScanner 完整母體: ${symbols.length} 支`);
 
   // 不傳實際 download 統計（succeeded/failed/skipped 全 0），verify 仍會掃 L1 算 coverage / gap / stale
   const report = await verifyDownload(market, lastTrading, symbols, {
