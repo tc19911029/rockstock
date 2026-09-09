@@ -20,6 +20,8 @@
  * 用於 CN 版本「淘汰 #8 主力連續淨流出」（等同 TW 三大法人連續賣超）
  */
 
+import { fetchJsonWithCurlFallback } from './curlFetch';
+
 export interface CapitalFlowDay {
   date:     string;          // YYYY-MM-DD
   mainNet:  number;          // 主力淨流入（大+超大單）
@@ -75,23 +77,24 @@ async function fetchCapitalFlowSina(
   const url = `https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_qsfx_zjlrqs`
     + `?page=1&num=${lmt}&sort=opendate&asc=0&daima=${daima}`;
 
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(10_000),
+  const { data: rows } = await fetchJsonWithCurlFallback<SinaFlowRow[]>(url, {
+    timeoutMs: 10_000,
+    proxyFirst: true,
     headers: {
       'User-Agent': 'Mozilla/5.0',
       'Referer':    'https://vip.stock.finance.sina.com.cn/',
     },
   });
-  if (!res.ok) return [];
-  const text = await res.text();
-  if (!text.trim().startsWith('[')) return [];
-  const rows = JSON.parse(text) as SinaFlowRow[];
-  return rows.map(r => ({
-    date:     (r.opendate ?? '').slice(0, 10),
-    mainNet:  parseFloat(r.r0_net ?? '0') || 0,
-    superNet: null,   // Sina 只給主力綜合，無超大單/大單拆分
-    largeNet: null,
-  })).filter(r => r.date);
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap(r => {
+    const date = (r.opendate ?? '').slice(0, 10);
+    const mainNet = Number.parseFloat(r.r0_net ?? '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(mainNet)) return [];
+    return [{ date, mainNet,
+      superNet: null,   // Sina 只給主力綜合，無超大單/大單拆分
+      largeNet: null,
+    }];
+  });
 }
 
 /**
