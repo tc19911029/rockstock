@@ -19,6 +19,7 @@
  */
 
 import type { TdccDay } from '@/lib/chips/types';
+import { fetchTextWithCurlFallback } from './curlFetch';
 
 const TDCC_URL = 'https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5';
 
@@ -34,15 +35,14 @@ interface TdccLatestWeek {
  * @param timeoutMs 預設 5 分鐘（CSV 約 2.3 MB，CN 直連特別慢）
  */
 export async function fetchTdccLatestWeek(timeoutMs = 300000): Promise<TdccLatestWeek> {
-  const res = await fetch(TDCC_URL, {
-    signal: AbortSignal.timeout(timeoutMs),
+  const { text: csv } = await fetchTextWithCurlFallback(TDCC_URL, {
+    timeoutMs,
+    proxyFirst: true,
     headers: {
       'Accept': 'text/csv,*/*',
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
     },
   });
-  if (!res.ok) throw new Error(`TDCC HTTP ${res.status}`);
-  const csv = await res.text();
   return parseTdccCsv(csv);
 }
 
