@@ -8,31 +8,23 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import { getLocalCandleDir } from '@/lib/datasource/LocalCandleStore';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { strategyCatchupDates, assertSanSeCatchupResult } from '@/lib/scanner/strategyCatchup';
 import { scanSanSe } from '@/lib/cn-sanse/scan';
 import { saveSanSeScan } from '@/lib/cn-sanse/scanStorage';
-import type { Candle } from '@/types';
-
-const INDEX_SYMBOL = '000001.SS';
 
 async function main() {
   const existingOnly = process.argv.includes('--existing');
   const daysArg = process.argv.slice(2).find((arg) => !arg.startsWith('--'));
   const days = parseInt(daysArg ?? '22', 10) || 22;
-  const dir = getLocalCandleDir('CN');
   const outputDir = path.join(process.cwd(), 'data/cn-sanse-scan');
-
-  // 交易日清單 = 上證指數本地 K 的日期
-  const raw = await fs.readFile(path.join(dir, `${INDEX_SYMBOL}.json`), 'utf8');
-  const idx = JSON.parse(raw)?.candles as Candle[] | undefined;
-  if (!Array.isArray(idx) || idx.length === 0) throw new Error(`找不到 ${INDEX_SYMBOL} 本地 K 線`);
 
   const tradingDays = existingOnly
     ? (await fs.readdir(outputDir))
       .map((name) => /^(\d{4}-\d{2}-\d{2})\.json$/.exec(name)?.[1])
       .filter((date): date is string => Boolean(date))
       .sort()
-    : idx.map((c) => c.date).slice(-days);
+    : strategyCatchupDates('CN', getLastTradingDay('CN'), days);
   if (tradingDays.length === 0) throw new Error('沒有可回補的三色資金日期');
   if (existingOnly) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -46,10 +38,12 @@ async function main() {
   }
   console.log(`[backfill] 回補最近 ${tradingDays.length} 個交易日：${tradingDays[0]} ~ ${tradingDays[tradingDays.length - 1]}`);
 
+  let failures = 0;
   for (const date of tradingDays) {
     const t0 = Date.now();
     try {
       const result = await scanSanSe({ asOfDate: date });
+      assertSanSeCatchupResult(date, result);
       await saveSanSeScan(result);
       const { strict, medium, loose } = result.counts;
       console.log(
@@ -57,10 +51,12 @@ async function main() {
         ` 嚴 ${strict} / 中 ${medium} / 寬 ${loose}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`,
       );
     } catch (e) {
+      failures++;
       console.error(`[backfill] ${date} ✗ ${e instanceof Error ? e.message : e}`);
     }
   }
   console.log('[backfill] 完成');
+  if (failures > 0) throw new Error(`CN catch-up incomplete: ${failures} dates failed`);
 }
 
 main().catch((e) => {

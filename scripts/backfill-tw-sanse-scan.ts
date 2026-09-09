@@ -2,7 +2,7 @@
 // 台股三色資金 — L4 掃描結果回補（過去 N 個交易日）
 //
 // 逐日 scanTwSanSe({asOfDate}) → saveTwSanSeScan 固化到 data/tw-sanse-scan/{date}.json。
-// 交易日來源 = ^TWII 本地 K 線日期（與 scanTwSanSe 內部一致）。
+// 交易日來源 = 獨立交易日曆；指數缺日必須回報失敗，不能用缺日的輸入當補跑日曆。
 //
 // 用法：npx tsx scripts/backfill-tw-sanse-scan.ts [天數=20]
 //       npx tsx scripts/backfill-tw-sanse-scan.ts --existing
@@ -12,21 +12,20 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { scanTwSanSe } from '@/lib/tw-sanse/scan';
 import { saveTwSanSeScan } from '@/lib/tw-sanse/scanStorage';
-import type { Candle } from '@/types';
+import { getLastTradingDay } from '@/lib/datasource/marketHours';
+import { strategyCatchupDates, assertSanSeCatchupResult } from '@/lib/scanner/strategyCatchup';
 
 (async () => {
   const existingOnly = process.argv.includes('--existing');
   const daysArg = process.argv.slice(2).find((arg) => !arg.startsWith('--'));
   const days = parseInt(daysArg ?? '20', 10) || 20;
-  const dir = path.join(process.cwd(), 'data/candles/TW');
-  const idx = JSON.parse(await fs.readFile(path.join(dir, '^TWII.json'), 'utf8')).candles as Candle[];
   const outputDir = path.join(process.cwd(), 'data/tw-sanse-scan');
   const targets = existingOnly
     ? (await fs.readdir(outputDir))
       .map((name) => /^(\d{4}-\d{2}-\d{2})\.json$/.exec(name)?.[1])
       .filter((date): date is string => Boolean(date))
       .sort()
-    : idx.map((c) => c.date).slice(-days);
+    : strategyCatchupDates('TW', getLastTradingDay('TW'), days);
 
   if (targets.length === 0) throw new Error('沒有可回補的三色資金日期');
   if (existingOnly) {
@@ -47,11 +46,7 @@ import type { Candle } from '@/types';
     const t0 = Date.now();
     try {
       const r = await scanTwSanSe({ asOfDate: date });
-      if (r.lastDate !== date) {
-        console.warn(`[backfill-tw-sanse] ${date} ⚠️ lastDate=${r.lastDate}≠asOf（指數無該日 bar，跳過存檔）`);
-        warn++;
-        continue;
-      }
+      assertSanSeCatchupResult(date, r);
       await saveTwSanSeScan(r);
       ok++;
       console.log(`[backfill-tw-sanse] ${date} ✓ 掃 ${r.evaluated} / stale ${r.staleSkipped} / 嚴${r.counts.strict} 中${r.counts.medium} 寬${r.counts.loose} / 共振 ${r.records.length}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
@@ -61,4 +56,5 @@ import type { Candle } from '@/types';
     }
   }
   console.log(`\n[backfill-tw-sanse] 完成：固化 ${ok} 天，異常/跳過 ${warn} 天 → data/tw-sanse-scan/`);
+  if (warn > 0) throw new Error(`TW catch-up incomplete: ${warn} dates failed`);
 })().catch((e) => { console.error(e); process.exit(1); });

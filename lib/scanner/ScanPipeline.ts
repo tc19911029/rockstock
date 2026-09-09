@@ -126,11 +126,16 @@ export async function runScanPipeline(options: ScanPipelineOptions): Promise<Sca
 
   let turnoverRanks: Map<string, number> | null = null;
 
-  if (options.turnoverRankOverride) {
-    // 歷史重跑路徑：caller 已用 computeTurnoverRankAsOfDate 算好當日的前 500
+  if (options.turnoverRankOverride || sessionType === 'post_close') {
+    // Every sealed replay must rank using candles available on its target date.
+    // A live rank dated after `date` otherwise silently introduces future volume.
+    const { computeTurnoverRankAsOfDate } = await import('./TurnoverRank');
+    const historicalRank = options.turnoverRankOverride
+      ?? await computeTurnoverRankAsOfDate(market, stocks, date, BOOK_UNIVERSE_TOP_N);
+    if (historicalRank.size === 0) throw new Error(`Empty point-in-time universe: ${market} ${date}`);
     const before = stocks.length;
-    stocks = stocks.filter(s => options.turnoverRankOverride!.has(s.symbol));
-    turnoverRanks = options.turnoverRankOverride;
+    stocks = stocks.filter(s => historicalRank.has(s.symbol));
+    turnoverRanks = historicalRank;
     console.info(`[ScanPipeline] ${market} 歷史 top500 override: ${stocks.length}/${before} (asOfDate=${date})`);
   } else {
     // 標準路徑：前 N 成交額過濾 + 自動重建索引（回測冠軍組合：前 500 + MTF≥3 = +238%）

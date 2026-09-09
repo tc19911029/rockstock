@@ -62,6 +62,13 @@ run_required_endpoint() {
   return 1
 }
 
+repo_root="$HOME/Desktop/rockstock"
+tsx_cli="$HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs"
+if [[ "$market" == "TW" ]]; then
+  # Stock coverage does not include indexes; verify the inputs before A uses them.
+  (cd "$repo_root" && "$HOME/.local/node-22/bin/node" "$tsx_cli" scripts/ensure-tw-strategy-indexes.ts) || exit $?
+fi
+
 # Fail closed: downstream strategies do not run until A has produced the Step 1 pool.
 run_required_endpoint "A" "/api/cron/scan-${(L)market}" || exit $?
 failures=0
@@ -74,8 +81,6 @@ run_endpoint "SanSe" "/api/cron/scan-${(L)market}-sanse" || failures=$((failures
 # 每次盤後成功後重算最近 10 個交易日，會自動補回休眠／上游故障期間漏掉的日期；
 # 再由每日快照重建具名策略（底反、紅黃觸發等）日檔與統計。
 # 這兩類產物過去沒有掛在任何每日 pipeline 上，才會出現 scan 已更新但底反只停在 08/10。
-repo_root="$HOME/Desktop/rockstock"
-tsx_cli="$HOME/.local/node-22/lib/node_modules/tsx/dist/cli.mjs"
 if [[ "$market" == "TW" ]]; then
   sanse_backfill="scripts/backfill-tw-sanse-scan.ts"
 else
