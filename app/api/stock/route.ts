@@ -272,7 +272,9 @@ export async function GET(req: NextRequest) {
 
   // ── 本地檔案快速路徑（先讀本地秒開 → 即時覆蓋今日 K） ──
   // 支援日K(1d)直接使用，以及週K(1wk)/月K(1mo)本地聚合
-  if (localParam === '1' && !isMinuteInterval && (isTW || isCN)) {
+  // CN daily bars default to the audited L1 trade prices. Explicit local=0
+  // still selects the external chart source; minute bars keep their live path.
+  if ((localParam === '1' || (isCN && localParam !== '0')) && !isMinuteInterval && (isTW || isCN)) {
     try {
       const market = isTW ? 'TW' as const : 'CN' as const;
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());

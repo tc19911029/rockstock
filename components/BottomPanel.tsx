@@ -89,7 +89,7 @@ function todayCST(): string {
 /** 抓某 symbol 指定日（或往前最近一日）的收盤價，給「用當日收盤」自動填成本價用 */
 async function fetchCloseOn(symbol: string, date: string): Promise<{ close: number; date: string } | null> {
   try {
-    const params = new URLSearchParams({ symbol: symbol.trim(), interval: '1d', period: '1y' });
+    const params = new URLSearchParams({ symbol: symbol.trim(), interval: '1d', period: '1y', local: '1' });
     const res = await fetch(`/api/stock?${params}`);
     if (!res.ok) return null;
     const json = await res.json();
