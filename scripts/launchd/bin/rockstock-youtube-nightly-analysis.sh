@@ -27,6 +27,7 @@ export PATH="/Users/tc/.local/node-22/bin:/Users/tc/.local/bin:/usr/local/bin:/u
 export TZ="Asia/Taipei"
 
 D=$(date +%F)
+REPO="/Users/tc/Desktop/rockstock"
 BASE="http://localhost:3000/api/cron"
 SECRET_FILE="${ROCKSTOCK_CRON_SECRET_FILE:-$HOME/.config/rockstock/cron-secret}"
 if [[ ! -r "$SECRET_FILE" ]]; then
@@ -134,13 +135,9 @@ if ! rockstock_codex_preflight; then
 fi
 echo "[$(ts)] Codex 預檢通過：${CODEX_BIN}（${ROCKSTOCK_CODEX_LOGIN_STATUS}）"
 
-# 成功 = 檔案存在、mtime >= 本次嘗試起點、size > 1024 bytes(macOS BSD stat)
+# 完整涵蓋影片 ID 才算成功；小檔案不代表失敗，大檔案也不代表齊全。
 analysis_ok() {
-  local start_epoch=$1 mtime size
-  [[ -f "$ANALYSIS_FILE" ]] || return 1
-  mtime=$(stat -f %m "$ANALYSIS_FILE" 2>/dev/null) || return 1
-  size=$(stat -f %z "$ANALYSIS_FILE" 2>/dev/null) || return 1
-  [[ "$mtime" -ge "$start_epoch" && "$size" -gt 1024 ]]
+  "$SCRIPT_DIR/rockstock-youtube-analysis-coverage.sh" "$D" "$REPO" "$QUESTION_FILE" "$1"
 }
 
 success=0
@@ -195,6 +192,11 @@ if npx tsx scripts/normalize-youtube-analysis.ts "$D"; then
   echo "[$(ts)] normalize OK"
 else
   echo "[$(ts)] ⚠️ normalize 回非零(可能有無法自動修的殘留,見上方明細,需人工複查)" >&2
+fi
+
+if ! "$SCRIPT_DIR/rockstock-youtube-analysis-coverage.sh" "$D" "$REPO" "$QUESTION_FILE"; then
+  echo "[$(ts)] 正規化後影片仍有缺漏，停止產生推薦事件" >&2
+  exit 1
 fi
 
 # 5) 抽老師推薦事件(analysis → recommendations/$D.json;基準價隔日 15:30 settle cron 再結)

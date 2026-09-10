@@ -11,26 +11,19 @@ export PATH="/Users/tc/.local/node-22/bin:/Users/tc/.local/bin:/usr/local/bin:/u
 LOOKBACK=${LOOKBACK:-4}   # 檢查昨天起往回幾天
 DIR="/Users/tc/Desktop/rockstock/data/youtube/analysis"
 
-# 完好 = 檔案存在 + 是合法 JSON + 有 stats 欄位。
-# 不可用檔案大小判斷：週末休播的 analysis 只有 ~700 bytes 但完全正常，
-# 用 size>1024 會被誤判成缺檔而無限重跑並發 urgent 通知。
+# 核對索引中已取得逐字稿的影片 ID；昨天新增字幕也必須補分析。
+COVERAGE="$(cd "$(dirname "$0")" && pwd)/rockstock-youtube-analysis-coverage.sh"
 is_ok() {
-  [[ -f "$1" ]] || return 1
-  node -e '
-    const fs=require("fs");
-    try{const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
-      process.exit(j && j.stats ? 0 : 1);
-    }catch(e){process.exit(1)}
-  ' "$1" 2>/dev/null
+  "$COVERAGE" "$1"
 }
 
 missing=()
 for i in $(seq 1 "$LOOKBACK"); do
   D=$(date -v-${i}d +%F)
-  if is_ok "$DIR/$D.json"; then
-    echo "[$(date '+%H:%M:%S')] $D analysis 已存在 ✔"
+  if is_ok "$D"; then
+    echo "[$(date '+%H:%M:%S')] $D analysis 涵蓋可用逐字稿 ✔"
   else
-    echo "[$(date '+%H:%M:%S')] $D analysis 缺檔 → 排入補跑"
+    echo "[$(date '+%H:%M:%S')] $D analysis 缺漏或無法驗證 → 排入補跑"
     missing+=("$D")
   fi
 done

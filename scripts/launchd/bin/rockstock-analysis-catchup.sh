@@ -35,19 +35,9 @@ QUESTION_DIR="$TMPDIR/rockstock-youtube"
 REPO="/Users/tc/Desktop/rockstock"
 ts() { date '+%m-%d %H:%M:%S'; }
 
-# 成功 = 檔案存在 + mtime >= 本次嘗試起點 + 合法 JSON 且有 stats。
-# 不可用 size 判斷：休播日的合法 analysis 只有幾百 bytes。
+# 成功須涵蓋 question 與最新逐字稿索引，且本次確實更新。
 analysis_ok() {
-  local file=$1 start_epoch=$2 mtime
-  [[ -f "$file" ]] || return 1
-  mtime=$(stat -f %m "$file" 2>/dev/null) || return 1
-  [[ "$mtime" -ge "$start_epoch" ]] || return 1
-  node -e '
-    const fs=require("fs");
-    try{const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
-      process.exit(j && j.stats ? 0 : 1);
-    }catch(e){process.exit(1)}
-  ' "$file" 2>/dev/null
+  "$SCRIPT_DIR/rockstock-youtube-analysis-coverage.sh" "$D" "$REPO" "$QUESTION_FILE" "$2"
 }
 
 for D in "$@"; do
@@ -123,6 +113,11 @@ for D in "$@"; do
   # 確定性正規化（與 nightly step 4.5 同）：異體字/screenshot_ref 絕對路徑/自創 enum。
   npx tsx scripts/normalize-youtube-analysis.ts "$D" \
     && echo "[$(ts)] $D normalize OK" || echo "[$(ts)] $D ⚠️ normalize 回非零（需人工複查，不致命）"
+
+  if ! "$SCRIPT_DIR/rockstock-youtube-analysis-coverage.sh" "$D" "$REPO" "$QUESTION_FILE"; then
+    echo "[$(ts)] $D 正規化後影片仍有缺漏，停止產生推薦事件" >&2
+    continue
+  fi
 
   npx tsx scripts/audit-keyframe-coverage.ts "$D" >/dev/null 2>&1 \
     && echo "[$(ts)] $D coverage PASS" || echo "[$(ts)] $D ⚠️ coverage 有 FAIL（備查）"
