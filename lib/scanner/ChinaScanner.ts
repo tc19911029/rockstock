@@ -1,3 +1,4 @@
+import { computeIndicators } from '@/lib/indicators';
 import { CandleWithIndicators } from '@/types';
 import { dataProvider } from '@/lib/datasource/MultiMarketProvider';
 import { MarketScanner, StockEntry } from './MarketScanner';
@@ -40,7 +41,12 @@ export class ChinaScanner extends MarketScanner {
 
   async fetchCandles(symbol: string, asOfDate?: string): Promise<CandleWithIndicators[]> {
     // 取 2 年日K（~500根）以支援多時間框架分析（月K需要 MA10 = 24 根月K）
-    return dataProvider.getHistoricalCandles(symbol, '2y', asOfDate);
+    // Scanner downloads are persisted to L1. Use unadjusted range prices so a later
+    // ex-dividend event cannot rewrite an earlier session's actual traded prices.
+    const end = asOfDate ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    const start = new Date(`${end}T00:00:00Z`);
+    start.setUTCFullYear(start.getUTCFullYear() - 2);
+    return computeIndicators(await dataProvider.getCandlesRange(symbol, start.toISOString().slice(0, 10), end));
   }
 
   /**

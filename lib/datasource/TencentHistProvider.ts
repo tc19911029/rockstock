@@ -135,11 +135,12 @@ async function fetchTencentKlines(
   endDate: string,
   isCN: boolean,
   maxRecords = 640,
+  adjusted = true,
 ): Promise<Candle[]> {
   // 統一限流
   await rateLimiter.acquire('tencent');
 
-  const query = `?param=${code},day,${startDate},${endDate},${maxRecords},qfq`;
+  const query = `?param=${code},day,${startDate},${endDate},${maxRecords},${adjusted ? 'qfq' : ''}`;
 
   try {
     // 主網域 web.ifzq 對 CN 代號被 WAF 封(501) → 鏡像優先、舊網域 fallback（見 tencentKlineHosts）。
@@ -174,7 +175,7 @@ async function fetchTencentKlines(
       return [];
     }
 
-    const entries = stockData.qfqday ?? stockData.day ?? [];
+    const entries = adjusted ? (stockData.qfqday ?? stockData.day ?? []) : (stockData.day ?? []);
     return parseEntries(entries as TencentKlineEntry[], tencentVolumeMultiplier(code, isCN));
   } catch (err) {
     // 網路/解析錯誤：必須留痕（否則盤中走圖看不到更新時無從判斷是 API 掛還是真停牌）
@@ -190,6 +191,7 @@ async function fetchAllTencentKlines(
   startDate: string,
   endDate: string,
   isCN: boolean,
+  adjusted = true,
 ): Promise<Candle[]> {
   const start = new Date(startDate).getTime();
   const end = new Date(endDate).getTime();
@@ -197,7 +199,7 @@ async function fetchAllTencentKlines(
 
   if (daysDiff <= 500) {
     // 單次可取完
-    return fetchTencentKlines(code, startDate, endDate, isCN);
+    return fetchTencentKlines(code, startDate, endDate, isCN, 640, adjusted);
   }
 
   // 分段：前半 + 後半
@@ -206,8 +208,8 @@ async function fetchAllTencentKlines(
     .split('T')[0];
 
   const [part1, part2] = await Promise.all([
-    fetchTencentKlines(code, startDate, mid, isCN),
-    fetchTencentKlines(code, mid, endDate, isCN),
+    fetchTencentKlines(code, startDate, mid, isCN, 640, adjusted),
+    fetchTencentKlines(code, mid, endDate, isCN, 640, adjusted),
   ]);
 
   // 合併去重
@@ -296,7 +298,8 @@ export class TencentHistProvider implements DataProvider {
     startDate: string,
     endDate: string,
   ): Promise<Candle[]> {
-    const cacheKey = `tencent:range:${symbol}:${startDate}:${endDate}`;
+    // Range downloads feed L1 actual traded prices; never persist forward-adjusted history.
+    const cacheKey = `tencent:raw-range:${symbol}:${startDate}:${endDate}`;
     const cached = globalCache.get<Candle[]>(cacheKey);
     if (cached) return cached;
 
@@ -316,8 +319,8 @@ export class TencentHistProvider implements DataProvider {
       // 只回到昨日，傳 4~20 才會包含今日。短區間按實際跨度給小上限；長區間仍走
       // 原本的分段邏輯，避免影響完整歷史抓取。
       result = rangeDays >= 0 && rangeDays <= 30
-        ? await fetchTencentKlines(code, startDate, endDate, true, Math.max(10, rangeDays + 7))
-        : await fetchAllTencentKlines(code, startDate, endDate, true);
+        ? await fetchTencentKlines(code, startDate, endDate, true, Math.max(10, rangeDays + 7), false)
+        : await fetchAllTencentKlines(code, startDate, endDate, true, false);
     } else {
       result = await fetchUSKlinesFromTencent(usTicker!, startDate, endDate);
     }
