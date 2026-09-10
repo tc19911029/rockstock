@@ -108,9 +108,14 @@ async function fetchWithFallback(
       }
     } catch { /* continue */ }
   } else {
+    // Retry results are persisted to L1, so every CN fallback must be raw.
+    const end = getLastTradingDay('CN');
+    const start = new Date(`${end}T00:00:00Z`);
+    start.setUTCFullYear(start.getUTCFullYear() - 2);
+    const begin = start.toISOString().slice(0, 10);
     // CN 第二層：Tencent
     try {
-      const candles = await tencentHistProvider.getHistoricalCandles(symbol, '2y');
+      const candles = await tencentHistProvider.getCandlesRange(symbol, begin, end);
       if (acceptable(candles)) {
         return { candles, source: 'Tencent' };
       }
@@ -118,7 +123,7 @@ async function fetchWithFallback(
 
     // CN 第三層：Yahoo（.SS/.SZ Yahoo 可抓）
     try {
-      const candles = await yahooProvider.getHistoricalCandles(symbol, '2y');
+      const candles = await yahooProvider.getCandlesRange(symbol, begin, end);
       if (acceptable(candles)) {
         return { candles, source: 'Yahoo' };
       }
