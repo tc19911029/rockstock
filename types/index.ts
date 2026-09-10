@@ -70,6 +70,7 @@ export interface StockInfo {
   marketBoard?: 'emerging';
   adjustmentStatus?: 'adjusted' | 'unavailable';
   splitEvents?: Array<{ date: string; ratio: number }>;
+  priceBasis?: 'corporate-action-adjusted' | 'esb-average';
   ticker: string;
   name: string;
 }

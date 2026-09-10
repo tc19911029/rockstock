@@ -1221,6 +1221,15 @@ function HomePage() {
                       </>}
                   </div>
                 )}
+                {!isEmerging && currentStock?.priceBasis === 'corporate-action-adjusted' && currentStock.splitEvents?.length ? (
+                  <div className="shrink-0 border-b border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] leading-snug text-sky-100">
+                    <span className="font-semibold">公司行動序列已還原：</span>
+                    原始成交價量仍保存在日 K；圖表與技術指標已依交易所資料換算至目前股數基準。
+                    {currentStock.splitEvents.map(event => (
+                      <span key={event.date}> {event.date} 每股換算為 {event.ratio.toFixed(4)} 股。</span>
+                    ))}
+                  </div>
+                ) : null}
                 {priceContinuityIssue && (
                   <div role="alert" className="shrink-0 border-b border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-100">
                     <span className="font-semibold">價格連續性警示：</span>

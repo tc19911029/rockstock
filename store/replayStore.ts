@@ -295,7 +295,14 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         targetDate: targetDate ?? null,
         account,
         dataGaps: gaps,
-        currentStock: { ticker: json.ticker, name: keptName, marketBoard: json.marketBoard, adjustmentStatus: json.adjustmentStatus, splitEvents: json.splitEvents },
+        currentStock: {
+          ticker: json.ticker,
+          name: keptName,
+          marketBoard: json.marketBoard,
+          adjustmentStatus: json.adjustmentStatus,
+          splitEvents: json.splitEvents,
+          priceBasis: json.priceBasis,
+        },
         ...(showLoading ? { isLoadingStock: false } : {}),
         ...buildState(allCandles, index, account),
       });
@@ -333,7 +340,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         // Step 1: 嘗試本地檔案（瞬間回應；冷啟動/編譯期暫回 0 會自動退避重試）
         const scanDateParam = targetDate ? `&scanDate=${encodeURIComponent(targetDate)}` : '';
         const localJson = await fetchCandlesRetry(
-          `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1${scanDateParam}`
+          `/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1&basis=technical${scanDateParam}`
         );
         const localLoaded = localJson ? applyData(localJson, true) : false;
 
@@ -342,7 +349,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           // 一律走 local=1：才會觸發 L2/即時報價注入今日 K，否則 MultiMarketProvider 只回歷史
           const bgSymbol = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
           const bgInterval = interval;
-          fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1${scanDateParam}`)
+          fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&interval=${interval}&period=${p}&local=1&basis=technical${scanDateParam}`)
             .then(r => r.ok ? r.json() : null)
             .then(json => {
               // 只在用戶還停在同一股票+週期才套用，避免覆蓋已換的資料

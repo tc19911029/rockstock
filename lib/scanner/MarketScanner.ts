@@ -15,6 +15,7 @@ import { evaluateMultiTimeframe, MultiTimeframeResult } from '@/lib/analysis/mul
 import { getScannerCache, setScannerCache, getScannerCacheStats } from '@/lib/datasource/ScannerCache';
 import { loadLocalCandlesWithTolerance, saveLocalCandles, batchCheckFreshness } from '@/lib/datasource/LocalCandleStore';
 import { hasRecentPriceDiscontinuity } from '@/lib/scanner/priceContinuityGuard';
+import { adjustTwCandlesForTechnicalUse } from '@/lib/datasource/twCorporateActionAdjust';
 
 // 掃描以本地檔案為主（L1 記憶體 + L2 本地），L3 API 嚴格限制
 // 降低並發避免 API 限流（歷史掃描為 pure-local，今日掃描最多 20 次 API）
@@ -290,6 +291,21 @@ export abstract class MarketScanner {
       })();
     const isHistorical = !!asOfDate && asOfDate < today && !hasL2ForDate;
     const market = this.getMarketConfig().marketId as 'TW' | 'CN';
+    const prepareTechnicalCandles = async (result: CandleFetchResult): Promise<CandleFetchResult> => {
+      if (market !== 'TW' || result.candles.length < 2) return result;
+      const raw = result.candles.map(candle => ({
+        date: candle.date,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+      }));
+      const adjusted = await adjustTwCandlesForTechnicalUse(symbol, raw);
+      if (adjusted.events.length === 0) return result;
+      const { computeIndicators } = await import('@/lib/indicators');
+      return { ...result, candles: computeIndicators(adjusted.candles) };
+    };
 
     if (isHistorical) {
       // L1: 記憶體快取
@@ -297,7 +313,7 @@ export abstract class MarketScanner {
       if (memCached) {
         if (diag) diag.memoryCacheHits++;
         const lastDate = memCached.length > 0 ? memCached[memCached.length - 1].date : '';
-        return { candles: memCached, staleDays: 0, lastCandleDate: lastDate, source: 'memory' };
+        return prepareTechnicalCandles({ candles: memCached, staleDays: 0, lastCandleDate: lastDate, source: 'memory' });
       }
 
       // L2: 本地檔案（容忍 5 個交易日差距）
@@ -310,7 +326,7 @@ export abstract class MarketScanner {
             if (local.staleDays > 0) diag.localCacheStale++;
           }
           const lastDate = local.candles[local.candles.length - 1].date;
-          return { candles: local.candles, staleDays: local.staleDays, lastCandleDate: lastDate, source: 'local' };
+          return prepareTechnicalCandles({ candles: local.candles, staleDays: local.staleDays, lastCandleDate: lastDate, source: 'local' });
         }
       } catch { /* 本地讀取失敗，fallback 到 API */ }
     } else {
@@ -376,12 +392,12 @@ export abstract class MarketScanner {
                 ? 0
                 : (isQuoteStaleForToday ? local.staleDays + 999 : local.staleDays);
 
-              return { candles: merged, staleDays: effectiveStaleDays, lastCandleDate: mergedLast.date, source: 'local' };
+              return prepareTechnicalCandles({ candles: merged, staleDays: effectiveStaleDays, lastCandleDate: mergedLast.date, source: 'local' });
             }
           }
 
           const lastDate = local.candles[local.candles.length - 1].date;
-          return { candles: local.candles, staleDays: local.staleDays, lastCandleDate: lastDate, source: 'local' };
+          return prepareTechnicalCandles({ candles: local.candles, staleDays: local.staleDays, lastCandleDate: lastDate, source: 'local' });
         }
       } catch { /* 本地讀取失敗，fallback */ }
     }
@@ -400,7 +416,7 @@ export abstract class MarketScanner {
           saveLocalCandles(symbol, market, raw).catch(() => {});
           if (diag) diag.localCacheHits++; // 算作成功取得
           const lastDate = candles[candles.length - 1].date;
-          return { candles, staleDays: 0, lastCandleDate: lastDate, source: 'api' };
+          return prepareTechnicalCandles({ candles, staleDays: 0, lastCandleDate: lastDate, source: 'api' });
         }
       } catch {
         // L3 timeout or API error — fallthrough to missing

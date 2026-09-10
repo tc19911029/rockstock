@@ -18,6 +18,7 @@ import type { Candle } from '@/types';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { readTWOfficialCloseState } from '@/lib/datasource/twOfficialCloseState';
+import { adjustTwCandlesForTechnicalUse } from '@/lib/datasource/twCorporateActionAdjust';
 
 // ── Route segment config（2026-06-08 冷啟動止血）─────────────────────────────
 // 走圖主資料路由：用 fs/Blob → 必須 Node runtime；force-dynamic 確保永遠讀即時資料、
@@ -128,6 +129,7 @@ const stockQuerySchema = z.object({
   interval: z.enum(['1m', '5m', '15m', '30m', '60m', '1d', '1wk', '1mo']).default('1d'),
   period:   z.string().default('2y'),
   local:    z.enum(['1', '0']).optional(), // '1' = 本地檔案優先（日K混合模式用）
+  basis:    z.enum(['raw', 'technical']).default('raw'),
   scanDate: z.string().optional(),         // 'YYYY-MM-DD' 掃描日期，若 L1 缺該日則從 L2 快照補入
 });
 
@@ -190,7 +192,7 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) {
     return apiValidationError(parsed.error);
   }
-  const { symbol, interval, period, local: localParam, scanDate } = parsed.data;
+  const { symbol, interval, period, local: localParam, scanDate, basis } = parsed.data;
 
   // 場外基金(.OF)：走獨立淨值資料路徑（早 return，不進股票 provider / L1 邏輯）
   if (isFundSymbol(symbol)) {
@@ -459,21 +461,24 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        let withIndicators = computeIndicators(
-          result.candles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }))
-        );
+        const rawDaily = result.candles.map(c => ({
+          date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
+        }));
+        const corporateActionAdjustment = basis === 'technical' && isTW
+          ? await adjustTwCandlesForTechnicalUse(loadedTicker, rawDaily)
+          : { candles: rawDaily, events: [] };
+        let withIndicators = computeIndicators(corporateActionAdjustment.candles);
 
         // 週K/月K：本地日K聚合（省去 API 請求）+ memory cache
         if (interval === '1wk' || interval === '1mo') {
           // cache key 包含 today close，價格變動時自動失效
           const todayClose = result.candles[result.candles.length - 1]?.close ?? 0;
-          const cacheKey = `${symbol}:${interval}:${todayClose}`;
+          const cacheKey = `${symbol}:${interval}:${basis}:${todayClose}`;
           const cached = aggregateCache.get(cacheKey);
           if (cached && cached.expires > Date.now()) {
             withIndicators = cached.data as typeof withIndicators;
           } else {
-            const rawDaily = result.candles.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }));
-            const aggregated = aggregateCandles(rawDaily, interval);
+            const aggregated = aggregateCandles(corporateActionAdjustment.candles, interval);
             withIndicators = computeIndicators(aggregated);
             aggregateCache.set(cacheKey, { data: withIndicators, expires: Date.now() + AGGREGATE_CACHE_TTL });
           }
@@ -492,6 +497,11 @@ export async function GET(req: NextRequest) {
           candles: withIndicators.map(c => ({ date: c.date, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
           totalBars: withIndicators.length,
           source: 'local',
+          ...(corporateActionAdjustment.events.length > 0 ? {
+            priceBasis: 'corporate-action-adjusted' as const,
+            adjustmentStatus: 'adjusted' as const,
+            splitEvents: corporateActionAdjustment.events.map(event => ({ date: event.date, ratio: event.shareRatio })),
+          } : {}),
           ...(injectedTWProvisionalClose ? {
             provisional: true,
             quoteStatus: 'provisional-close' as const,
