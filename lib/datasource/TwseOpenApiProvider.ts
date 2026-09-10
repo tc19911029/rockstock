@@ -91,6 +91,9 @@ function toNum(v: unknown): number | null {
 // ── Quarterly (t187ap14_L) ──────────────────────────────────────────────────
 
 interface QuarterlyRow {
+  SecuritiesCompanyCode?: string;
+  Year?: string;
+  '基本每股盈餘'?: string;
   '出表日期'?: string;
   '年度'?: string;
   '季別'?: string;
@@ -239,17 +242,17 @@ async function fetchTpexQuarterlyMap(): Promise<Map<string, TwseQuarterly>> {
       const rows = await res.json() as QuarterlyRow[];
       const map = new Map<string, TwseQuarterly>();
       for (const r of rows) {
-        const code = r['公司代號']?.trim();
+        const code = (r['公司代號'] ?? r.SecuritiesCompanyCode)?.trim();
         if (!code) continue;
         const revenue = toNum(r['營業收入']);
         const opIncome = toNum(r['營業利益']);
         const netIncome = toNum(r['稅後淨利']);
         map.set(code, {
-          rocYear: parseInt(r['年度'] ?? '0', 10),
+          rocYear: parseInt(r['年度'] ?? r.Year ?? '0', 10),
           season: parseInt(r['季別'] ?? '0', 10),
           code,
           industry: r['產業別'] ?? '',
-          eps: toNum(r['基本每股盈餘(元)']),
+          eps: toNum(r['基本每股盈餘(元)'] ?? r['基本每股盈餘']),
           revenue,
           operatingIncome: opIncome,
           netIncome,

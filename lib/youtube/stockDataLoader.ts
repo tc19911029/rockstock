@@ -7,7 +7,7 @@
  *
  * 來源：
  *   technical / chip / fundamental / news → 本地 internal API endpoint
- *   industry / governance                  → FinMind 直連
+ *   industry → TWSE／TPEx 官方名單，FinMind 備援；governance → FinMind
  *
  * 每筆都附 provenance：source URL、fetched_at、freshness_status。
  * 目的：給 questionBuilder 整合進 question payload，讓 skill 分析時有事實 vs 主持人說法的對照。
@@ -294,8 +294,31 @@ export async function loadNews(stockCode: string): Promise<DimensionResult<NewsD
   }
 }
 
+// Share one official bulk request across a batch of stock bundles.
+let officialIndustryRequest: Promise<import('@/lib/datasource/TWOfficialIndustry').TwOfficialIndustryStock[]> | null = null;
+let officialIndustryExpiresAt = 0;
+async function officialIndustries() {
+  if (!officialIndustryRequest || Date.now() >= officialIndustryExpiresAt) {
+    officialIndustryExpiresAt = Date.now() + 3600_000;
+    officialIndustryRequest = import('@/lib/datasource/TWOfficialIndustry')
+      .then(module => module.fetchTwOfficialIndustryRoster())
+      .catch(() => { officialIndustryExpiresAt = Date.now() + 60_000; return []; });
+  }
+  return officialIndustryRequest;
+}
+
 export async function loadIndustry(stockCode: string): Promise<DimensionResult<IndustryData>> {
   const fetched_at = new Date().toISOString();
+  const official = (await officialIndustries()).find(row => row.code === stockCode);
+  if (official) {
+    return {
+      data: { stock_name: official.name, industry_category: official.industry, market_type: official.market === 'TWSE' ? 'twse' : 'tpex' },
+      source: official.market === 'TWSE'
+        ? 'https://openapi.twse.com.tw/v1/opendata/t187ap03_L'
+        : 'https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O',
+      fetched_at, freshness: 'fresh', error: null,
+    };
+  }
   const source = 'finmind:TaiwanStockInfo';
   try {
     const { getStockInfo } = await import('@/lib/datasource/FinMindClient');

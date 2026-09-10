@@ -18,3 +18,19 @@ describe('TwseOpenApiProvider failure cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('TPEx quarterly schema', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; jest.resetModules(); });
+  test.each([
+    { SecuritiesCompanyCode: '1240', Year: '115', '基本每股盈餘': '2.85' },
+    { '公司代號': '1240', '年度': '115', '基本每股盈餘(元)': '2.85' },
+  ])('reads official and legacy company/year/EPS fields', async identity => {
+    jest.resetModules();
+    global.fetch = jest.fn(async (url: string) => ({ ok: true, json: async () => url.includes('t187ap14_L') ? [] : [{ ...identity, '季別': '2', '營業收入': '1440672', '營業利益': '87402', '稅後淨利': '126506' }] })) as unknown as typeof fetch;
+    const { getQuarterlyAny } = await import('@/lib/datasource/TwseOpenApiProvider');
+    expect(await getQuarterlyAny('1240')).toMatchObject({ code: '1240', rocYear: 115, season: 2, eps: 2.85, revenue: 1440672 });
+    expect(await getQuarterlyAny('9999')).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+});
