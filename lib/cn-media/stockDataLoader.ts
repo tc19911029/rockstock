@@ -1,3 +1,4 @@
+import { newsArticleTitles } from '@/lib/news/companyRss';
 import type { CnStockMasterEntry } from './types';
 
 const API_BASE = process.env.CN_MEDIA_DATA_API_BASE || 'http://localhost:3000';
@@ -101,17 +102,18 @@ async function loadFundamental(stock: CnStockMasterEntry): Promise<CnDimension<u
 }
 
 async function loadNews(stock: CnStockMasterEntry): Promise<CnDimension<unknown>> {
-  const url = `${API_BASE}/api/news/${stock.code}?name=${encodeURIComponent(stock.name)}`;
+  const url = `${API_BASE}/api/news/${stock.code}?market=CN&name=${encodeURIComponent(stock.name)}`;
   try {
     const response = await fetchJson(url);
     const articles = (response.articles ?? []) as Array<Record<string, unknown>>;
+    const titles = newsArticleTitles(articles);
     return {
       data: {
-        item_count: articles.length,
-        recent_titles: articles.slice(0, 5).map(article => String(article.title ?? '')),
+        item_count: titles.length,
+        recent_titles: titles.slice(0, 5),
         aggregate_sentiment: response.aggregateSentiment ?? null,
       },
-      source: url, fetched_at: new Date().toISOString(), freshness: 'fresh', error: null,
+      source: url, fetched_at: new Date().toISOString(), freshness: titles.length ? 'fresh' : 'unavailable', error: titles.length ? null : 'no dated news',
     };
   } catch (error) { return dimensionError(url, error); }
 }

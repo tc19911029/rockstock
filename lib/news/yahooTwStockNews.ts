@@ -1,3 +1,4 @@
+import { fetchTextWithCurlFallback } from '@/lib/datasource/curlFetch';
 import type { NewsItem } from './types';
 
 const YAHOO_TW_STOCK = 'https://tw.stock.yahoo.com';
@@ -28,7 +29,7 @@ function titleHash(title: string): string {
   // This is only a stable local dedupe key; the shared aggregator still performs
   // its normal cross-source SHA-256 deduplication afterwards.
   let hash = 2166136261;
-  for (const char of title.toLowerCase().replace(/[\s\W]+/g, '')) {
+  for (const char of title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')) {
     hash ^= char.charCodeAt(0);
     hash = Math.imul(hash, 16777619);
   }
@@ -96,23 +97,21 @@ export async function fetchYahooTwStockNews(ticker: string): Promise<NewsItem[]>
   if (!/^\d{4,6}$/.test(stockId)) return [];
   const suffixHint = ticker.match(/\.(TW|TWO)$/i)?.[1]?.toUpperCase();
   const suffixes = suffixHint ? [suffixHint] : ['TW', 'TWO'];
-  let lastStatus: number | null = null;
+  let lastError: unknown;
+  let succeeded = false;
 
   for (const suffix of suffixes) {
-    const response = await fetch(`${YAHOO_TW_STOCK}/quote/${encodeURIComponent(stockId)}.${suffix}/news`, {
-      headers: {
-        'User-Agent': UA,
-        Accept: 'text/html,application/xhtml+xml',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(12_000),
-    });
-    lastStatus = response.status;
-    if (!response.ok) continue;
-    const items = parseYahooTwStockNewsHtml(await response.text());
-    if (items.length > 0) return items;
+    try {
+      const { text } = await fetchTextWithCurlFallback(`${YAHOO_TW_STOCK}/quote/${encodeURIComponent(stockId)}.${suffix}/news`, {
+        headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml' },
+        proxyFirst: true, timeoutMs: 12_000,
+      });
+      succeeded = true;
+      const items = parseYahooTwStockNewsHtml(text);
+      if (items.length > 0) return items;
+    } catch (error) { lastError = error; }
   }
+  if (!succeeded && lastError) throw lastError;
 
-  if (lastStatus && lastStatus >= 400) throw new Error(`Yahoo TW news HTTP ${lastStatus}`);
   return [];
 }

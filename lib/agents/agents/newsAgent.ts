@@ -58,7 +58,7 @@ export async function buildNewsQuestion(args: BuildNewsQuestionArgs): Promise<Ne
       fetchErrors.push(`youtube: ${e}`);
       return null;
     }),
-    fetchRssNews(symbol).catch((e) => { fetchErrors.push(`news: ${e}`); return null; }),
+    fetchRssNews(symbol, market, name).catch((e) => { fetchErrors.push(`news: ${e}`); return null; }),
   ]);
 
   // ── 從 T-1+T YouTube 兩日聯集提取該 symbol 的 mention 摘要 ──
@@ -289,11 +289,11 @@ export function extractYouTubeMentionsInWindow(
 // RSS news 摘要
 // ────────────────────────────────────────────────────────────────────────────
 
-async function fetchRssNews(symbol: string): Promise<unknown> {
+async function fetchRssNews(symbol: string, market: MarketId, name: string): Promise<unknown> {
   // /api/news/[ticker] 接受 4-6 digit 純數字 ticker
   const ticker = bareTicker(symbol);
   if (!/^\d{4,6}$/.test(ticker)) return null;
-  return fetchJSON(internalUrl(`/api/news/${ticker}`));
+  return fetchJSON(internalUrl(`/api/news/${ticker}?${new URLSearchParams({ market, name })}`));
 }
 
 function summariseRss(raw: unknown): NewsRssSummary | null {

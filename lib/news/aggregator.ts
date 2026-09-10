@@ -4,6 +4,7 @@
  * Uses native fetch + minimal XML parser (no rss-parser dependency).
  * NEWS-01, NEWS-02, NEWS-05, NEWS-06.
  */
+import { fetchCompanyNews } from './companyRss';
 import { createHash } from 'crypto';
 import type { NewsItem } from './types';
 import { fetchYahooTwStockNews } from './yahooTwStockNews';
@@ -59,7 +60,7 @@ function cleanSnippet(raw: string, maxLen = 200): string {
 
 /** SHA-256 of normalized title for deduplication (NEWS-06) */
 function titleHash(title: string): string {
-  const normalized = title.toLowerCase().replace(/[\s\W]+/g, '');
+  const normalized = title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   return createHash('sha256').update(normalized).digest('hex').slice(0, 16);
 }
 
@@ -90,7 +91,7 @@ async function fetchFeed(url: string): Promise<RssEntry[]> {
 /** Convert RssEntry to NewsItem */
 function toNewsItem(entry: RssEntry, sourceName: string): NewsItem {
   const pubMs = entry.pubDate ? new Date(entry.pubDate).getTime() : 0;
-  const publishedAt = pubMs > 0 ? new Date(pubMs).toISOString() : new Date().toISOString();
+  const publishedAt = pubMs > 0 ? new Date(pubMs).toISOString() : '';
   return {
     title: entry.title,
     url: entry.link,
@@ -134,8 +135,10 @@ export async function aggregateNews(ticker: string, companyName?: string): Promi
   // Apply 3-day freshness filter (NEWS-02)
   const fresh = allItems.filter((item) => {
     const t = new Date(item.publishedAt).getTime();
-    return t > 0 && t >= cutoff;
+    return t > 0 && t >= cutoff && t <= Date.now();
   });
+
+  if (fresh.length === 0 && companyName) fresh.push(...await fetchCompanyNews(companyName, 'TW').catch(() => []));
 
   // Deduplicate by title hash (NEWS-06)
   const seen = new Set<string>();

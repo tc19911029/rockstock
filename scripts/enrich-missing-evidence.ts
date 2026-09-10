@@ -132,19 +132,20 @@ async function main() {
       };
       enrichedFactors.push('fundamental');
 
-      // valuation
-      if (s.factor_evidence.valuation?.data_provenance === 'missing') {
-        s.factor_evidence.valuation = {
-          data_provenance: 'internal_api',
-          values: { per: fetched.fund.per, pbr: fetched.fund.pbr, dividend_yield: fetched.fund.dividendYield },
-          sources: [{
-            url: `http://localhost:3000/api/fundamentals/${s.stock_code}`,
-            fetched_at: fetchedAt,
-            raw_quote: `PER=${fetched.fund.per} PBR=${fetched.fund.pbr} yield=${fetched.fund.dividendYield}%`,
-          }],
-        };
-        enrichedFactors.push('valuation');
-      }
+    }
+    // Valuation may be missing even when fundamental evidence already exists.
+    if (s.factor_evidence.valuation?.data_provenance === 'missing' && fetched.fund
+      && [fetched.fund.per, fetched.fund.pbr, fetched.fund.dividendYield].some(value => value != null)) {
+      s.factor_evidence.valuation = {
+        data_provenance: 'internal_api',
+        values: { per: fetched.fund.per, pbr: fetched.fund.pbr, dividend_yield: fetched.fund.dividendYield },
+        sources: [{
+          url: `http://localhost:3000/api/fundamentals/${s.stock_code}`,
+          fetched_at: fetchedAt,
+          raw_quote: `PER=${fetched.fund.per} PBR=${fetched.fund.pbr} yield=${fetched.fund.dividendYield}%`,
+        }],
+      };
+      enrichedFactors.push('valuation');
     }
 
     // 對 enriched 過的 factor，保留 score 不動（有真資料支持）

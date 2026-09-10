@@ -162,12 +162,9 @@ async function fetchMarketTrend(market: 'TW' | 'CN', date: string): Promise<ZhuM
 }
 
 async function fetchNews(market: 'TW' | 'CN', symbol: string): Promise<ZhuNewsLite | null> {
-  // News API 只支援 TW（底層走 TWSE name lookup + 台股 RSS 來源），CN 個股直接跳過
-  // 避免吃 4s timeout
-  if (market !== 'TW') return null;
   const bare = symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
   if (!/^\d{4,6}$/.test(bare)) return null;
-  const res = await fetchJSON(`${SELF_BASE}/api/news/${bare}`);
+  const res = await fetchJSON(`${SELF_BASE}/api/news/${bare}?market=${market}`);
   if (!res || typeof res !== 'object') return null;
   const r = res as {
     ok?: boolean;

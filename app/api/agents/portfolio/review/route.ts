@@ -88,8 +88,8 @@ export async function POST(req: NextRequest) {
 
       const [chip, news] = await Promise.all([
         fetchJSON(internalUrl(`/api/chip?symbol=${encodeURIComponent(h.symbol)}`)).catch(() => null),
-        market === 'TW' && /^\d{4,6}$/.test(bareTicker(h.symbol))
-          ? fetchJSON(internalUrl(`/api/news/${bareTicker(h.symbol)}`)).catch(() => null)
+        /^\d{4,6}$/.test(bareTicker(h.symbol))
+          ? fetchJSON(internalUrl(`/api/news/${bareTicker(h.symbol)}?market=${market}`)).catch(() => null)
           : null,
       ]);
 

@@ -119,6 +119,18 @@ function auditStock(s: StockScoring): Issue[] {
       continue;
     }
 
+    if (ev.data_provenance !== 'missing' && ev.values) {
+      const values = Object.values(ev.values);
+      if (values.length === 0 || values.every(value => value == null)) {
+        issues.push({ level: 'FAIL', code: s.stock_code, factor: key, msg: '標記有資料但 values 為空或全為 null' });
+      }
+      if (key === 'news' && Array.isArray(ev.values.recent_titles)
+        && Number(ev.values.item_count) > 0
+        && !ev.values.recent_titles.some(title => typeof title === 'string' && title.trim())) {
+        issues.push({ level: 'FAIL', code: s.stock_code, factor: key, msg: '新聞筆數大於零但沒有可用標題' });
+      }
+    }
+
     // web 必須有 sources[] 且每筆有 url + fetched_at + raw_quote
     if (ev.data_provenance === 'web') {
       if (!Array.isArray(ev.sources) || ev.sources.length === 0) {

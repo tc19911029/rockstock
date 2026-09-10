@@ -1,3 +1,4 @@
+import { newsArticleTitles } from '@/lib/news/companyRss';
 /**
  * 八大面向資料 loader (MVP 4 完整版)。
  *
@@ -246,6 +247,8 @@ export async function loadFundamental(stockCode: string): Promise<DimensionResul
     // wire format: { ok, data: { eps, epsYoY, ... } }
     const data = (resp.data ?? resp) as Record<string, unknown>;
     const latest = data.revenueLatest as Record<string, unknown> | null;
+    if (!['eps', 'epsYoY', 'grossMargin', 'netMargin', 'per', 'pbr', 'dividendYield'].some(key => numOrNull(data[key]) !== null)
+      && numOrNull(latest?.revenue) === null) return { data: null, source: url, fetched_at, freshness: 'unavailable', error: 'empty fundamentals' };
     return {
       data: {
         eps_recent_4q: numOrNull(data.eps),
@@ -278,16 +281,17 @@ export async function loadNews(stockCode: string): Promise<DimensionResult<NewsD
     const resp = (await fetchJson(url)) as Record<string, unknown>;
     // wire format: { ok, ticker, articles, aggregateSentiment, summary, hasNews }
     const articles = (resp.articles ?? []) as Array<Record<string, unknown>>;
+    const titles = newsArticleTitles(articles);
     const aggScore = numOrNull(resp.aggregateSentiment);
     return {
       data: {
-        item_count: articles.length,
-        recent_titles: articles.slice(0, 5).map(a => String(a.title ?? '')),
+        item_count: titles.length,
+        recent_titles: titles.slice(0, 5),
         sentiment: aggScore != null && resp.hasNews
           ? { overall_score: aggScore, bullish_count: null, bearish_count: null }
           : null,
       },
-      source: url, fetched_at, freshness: 'fresh', error: null,
+      source: url, fetched_at, freshness: titles.length ? 'fresh' : 'unavailable', error: titles.length ? null : 'no dated news',
     };
   } catch (err) {
     return { data: null, source: url, fetched_at, freshness: 'error', error: (err as Error).message };
@@ -341,6 +345,12 @@ export async function loadIndustry(stockCode: string): Promise<DimensionResult<I
 
 export async function loadGovernance(stockCode: string): Promise<DimensionResult<GovernanceData>> {
   const fetched_at = new Date().toISOString();
+  const { getOfficialOwnership } = await import('@/lib/datasource/TWOfficialOwnership');
+  const official = await getOfficialOwnership(stockCode);
+  if (official) return {
+    data: official.data, source: official.source, fetched_at,
+    freshness: official.data.data_date && isFresh(official.data.data_date, 7) ? 'fresh' : 'stale', error: null,
+  };
   const source = 'finmind:TaiwanStockShareholding';
   try {
     const { getGovernance } = await import('@/lib/datasource/FinMindClient');

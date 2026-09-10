@@ -113,7 +113,7 @@ async function main() {
     }
 
     // fundamental + valuation
-    if (s.factor_evidence.fundamental?.data_provenance === 'missing' && bundle.fundamental?.data?.per != null) {
+    if (s.factor_evidence.fundamental?.data_provenance === 'missing' && bundle.fundamental?.data && Object.values(bundle.fundamental.data).some(value => value != null)) {
       const f = bundle.fundamental.data;
       s.factor_evidence.fundamental = {
         data_provenance: 'internal_api',
@@ -126,14 +126,16 @@ async function main() {
       };
       enriched.push('fundamental');
 
-      if (s.factor_evidence.valuation?.data_provenance === 'missing') {
-        s.factor_evidence.valuation = {
-          data_provenance: 'internal_api',
-          values: { per: f.per, pbr: f.pbr, dividend_yield_pct: f.dividend_yield_pct },
-          sources: [{ url: bundle.fundamental.source, fetched_at: bundle.fundamental.fetched_at, raw_quote: `PER=${f.per} PBR=${f.pbr} yield=${f.dividend_yield_pct}%` }],
-        };
-        enriched.push('valuation');
-      }
+    }
+    if (s.factor_evidence.valuation?.data_provenance === 'missing' && bundle.fundamental?.data
+      && [bundle.fundamental.data.per, bundle.fundamental.data.pbr, bundle.fundamental.data.dividend_yield_pct].some(value => value != null)) {
+      const f = bundle.fundamental.data;
+      s.factor_evidence.valuation = {
+        data_provenance: 'internal_api',
+        values: { per: f.per, pbr: f.pbr, dividend_yield_pct: f.dividend_yield_pct },
+        sources: [{ url: bundle.fundamental.source, fetched_at: bundle.fundamental.fetched_at, raw_quote: `PER=${f.per} PBR=${f.pbr} yield=${f.dividend_yield_pct}%` }],
+      };
+      enriched.push('valuation');
     }
 
     // news
