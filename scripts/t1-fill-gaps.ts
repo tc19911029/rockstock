@@ -28,8 +28,7 @@ import { ensureServerL1Visibility, type VisibilityCandidate } from '../lib/datas
 import { getLastTradingDay } from '../lib/datasource/marketHours';
 import { sendNtfy } from '../lib/notify/ntfy';
 import { readIntradaySnapshot } from '../lib/datasource/IntradayCache';
-import { isFinalTradingSnapshot } from '../lib/health/l1l2Snapshot';
-import { isConfirmedNoTradeQuote, MIN_VERIFY_UNIVERSE } from '../lib/datasource/DownloadVerifier';
+import { classifyT1Pending } from '../lib/datasource/t1PendingPolicy';
 
 interface Args { market: Market; date: string; apply: boolean; concurrency: number; }
 function parseArgs(): Args {
@@ -95,45 +94,23 @@ async function main() {
     process.exit(1);
     return;
   }
-  // 指數由 refresh-market-index 專責，不用個股 settlement 的官方錨政策判斷。
-  const externalManaged = pending.filter(entry => entry.symbol.startsWith('^'));
-  pending = pending.filter(entry => !entry.symbol.startsWith('^'));
-
-  // 最終全市場 L2 明確標示「當日無成交」的股票不應造 K，也不該在 T+1 誤報成漏抓。
-  const confirmedNoTrade: PendingEntry[] = [];
+  let snapshot = null;
   try {
-    const snapshot = await readIntradaySnapshot(market, date);
-    if (snapshot
-      && snapshot.count >= MIN_VERIFY_UNIVERSE[market]
-      && isFinalTradingSnapshot(market, date, snapshot.updatedAt)) {
-      const quoteMap = new Map(snapshot.quotes.map(quote => [quote.symbol, quote]));
-      pending = pending.filter(entry => {
-        const code = entry.symbol.replace(/\.(TW|TWO|SS|SZ)$/i, '');
-        const quote = quoteMap.get(code);
-        if (quote && isConfirmedNoTradeQuote(market, quote)) {
-          confirmedNoTrade.push(entry);
-          return false;
-        }
-        return true;
-      });
-    }
-  } catch { /* 無最終 L2 就維持 pending，不能猜成無成交 */ }
-
+    snapshot = await readIntradaySnapshot(market, date);
+  } catch (error) {
+    console.warn('無法讀取收盤快照，保留所有個股 pending：', error);
+  }
+  const classified = classifyT1Pending(market, date, pending, snapshot);
+  pending = classified.pending;
+  const { confirmedNoTrade, notTrading, externalManaged } = classified;
   console.log(
     `T+1 fill: market=${market} date=${date} ${apply ? '★ APPLY' : '(DRY)'} `
-    + `pending=${pending.length} noTrade=${confirmedNoTrade.length} external=${externalManaged.length}`,
+    + `pending=${pending.length} noTrade=${confirmedNoTrade.length} `
+    + `notTrading=${notTrading.length} external=${externalManaged.length}`,
   );
 
-  if (pending.length === 0) {
-    console.log('沒有 pending — 無需處理');
-    return;
-  }
-
-  // 重抓 batch cache（vendor 端可能 sync 了）
-  console.log('prefetch vendor batch...');
-  const t0 = Date.now();
-  const batchCache = await prefetchVendorBatch(market, date);
-  console.log(`  done ${Date.now() - t0}ms`);
+  // 即使全部分流，仍須寫新報告清除上次失敗狀態；不必呼叫 vendor。
+  const batchCache = pending.length > 0 ? await prefetchVendorBatch(market, date) : undefined;
 
   const remaining: PendingEntry[] = [];
   const resolvedSettled: Array<{ symbol: string; vendors: string[]; close: number }> = [];
@@ -195,7 +172,7 @@ async function main() {
   remaining.slice(0, 10).forEach(r => console.log(`  ${r.symbol} ${r.status} (${r.vendors?.join(', ') ?? '無 vendor'})`));
 
   // 寫剩餘清單到報告
-  const t1Report = path.join(process.cwd(), 'data', 'settle-reports', `t1-${market}-${date}.json`);
+  const t1Report = path.join(process.cwd(), 'data', 'settle-reports', `t1-${market}-${date}${apply ? '' : '.dry'}.json`);
   mkdirSync(path.dirname(t1Report), { recursive: true });
   writeFileSync(t1Report, JSON.stringify({
     generatedAt: new Date().toISOString(),
@@ -207,6 +184,8 @@ async function main() {
     singleSource: resolvedDisagree,
     remaining,
     confirmedNoTrade: confirmedNoTrade.map(entry => entry.symbol),
+    notTrading: notTrading.map(entry => ({ symbol: entry.symbol, reason: 'absent_from_final_snapshot' })),
+    snapshotUpdatedAt: snapshot?.updatedAt ?? null,
     externalManaged: externalManaged.map(entry => entry.symbol),
   }, null, 2));
   console.log(`報告寫入 ${t1Report}`);
